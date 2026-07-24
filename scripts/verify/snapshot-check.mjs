@@ -495,6 +495,15 @@ window.__ask = function (addr) {
           options: { exclude: ['.jmvrefs', 'jmv-reference-numbers'], images: 'absolute',
                      margin: '24', docType: true } } }, '*');
 };
+window.__askNoDocType = function () {
+    // Some live jamovi menu paths carry the reliable .jmvrefs copy
+    // fingerprint without docType. They still need the delayed PNG rescue;
+    // plain Save requests carry neither signal and use the immediate path.
+    document.getElementById('f').contentWindow.postMessage(
+        { type: 'getcontent', data: { address: ['widget'],
+          options: { exclude: ['.jmvrefs', 'jmv-reference-numbers'],
+                     images: 'absolute', margin: '24' } } }, '*');
+};
 </script>`;
     writeFileSync(path.join(OUT, 'watchdog-harness.html'), harness);
     const ctx = await browser.newContext();
@@ -547,13 +556,37 @@ window.__ask = function (addr) {
         document.querySelector('[data-role="gb2-debug"]').textContent);
     expect('watchdog: overlay shows the stage trail', preTxt.includes('Copy stages:'));
 
+    // Field-observed variant: the menu Copy fingerprint is present but
+    // docType is absent. The `.jmvrefs` signal must still retain the
+    // delayed rescue so jamovi's ordinary clipboard response gets first
+    // refusal; treating it like Save made image copy regress in 2.9.21.
+    const tNoDoc = Date.now();
+    await page.evaluate(() => window.__askNoDocType());
+    await page.waitForFunction(() => window.__replies.length > 1, null, { timeout: 15000 });
+    const noDocMs = Date.now() - tNoDoc;
+    const noDocReply = await page.evaluate(() => {
+        const r = window.__replies[1];
+        return {
+            addr: JSON.stringify(r.address),
+            hasImage: !!(r.content && (r.content.image || '').startsWith('data:image/png;base64,')),
+        };
+    });
+    expect('watchdog: no-docType copy fingerprint retains PNG rescue (' + noDocMs + ' ms)',
+           noDocMs >= 1000 && noDocMs < 3500 &&
+           noDocReply.addr === '["widget"]' && noDocReply.hasImage);
+    const noDocStages = await frame.evaluate(() =>
+        (window.__gb2_copyStages || []).join('\n'));
+    expect('watchdog: no-docType copy arms 1500 ms, never Save-like 0 ms',
+           noDocStages.includes('request received ["widget"] (copy/save)') &&
+           noDocStages.includes('rescue timer armed 1500 ms'));
+
     // Analysis-level address []: truthy (empty array), passes the
     // guard, rescues, and the live overlay picks the new request up
     // WITHOUT a re-toggle.
     await page.evaluate(() => window.__ask([]));
-    await page.waitForFunction(() => window.__replies.length > 1, null, { timeout: 15000 });
+    await page.waitForFunction(() => window.__replies.length > 2, null, { timeout: 15000 });
     const reply2 = await page.evaluate(() => {
-        const r = window.__replies[1];
+        const r = window.__replies[2];
         return {
             addr: JSON.stringify(r.address),
             hasImage: !!(r.content && (r.content.image || '').startsWith('data:image/png;base64,')),
@@ -799,7 +832,11 @@ window.__gb2_snapDelay = 300;`;
     expect('swap: export request (no docType) does NOT swap',
            !exported.hostOptedOut && !exported.divShown);
     const stages2 = await page.evaluate(() => (window.__gb2_copyStages || []).join('\n'));
-    expect('swap: export logged as copy/save', stages2.includes('(copy/save)'));
+    expect('swap: fingerprinted no-docType request retains the Copy rescue window',
+           stages2.includes('(copy/save)') &&
+           stages2.includes('rescue timer armed 1500 ms'));
+    expect('swap: export never arms the five-second rescue',
+           !stages2.includes('rescue timer armed 5000 ms'));
     await ctx.close();
 }
 
@@ -825,6 +862,108 @@ window.__gb2_snapDelay = 300;`;
         return /url\("data:image\/png/.test(dv.style.cssText) && dv.style.display === 'none';
     });
     expect('fast-png: real png, hidden at rest', ok);
+    await ctx.close();
+}
+
+// ---- 13. restored identical delivery: jamovi may replace the result DOM
+//      while retaining the iframe/window and its last-rendered payload hash.
+//      The chart redraws because the new host is empty, but copy readiness
+//      must also be rebuilt even though the payload itself did not change.
+{
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    await page.goto('file://' + path.join(OUT, 'snap-inline.html'));
+    await page.waitForFunction(() =>
+        !!document.querySelector('[data-role="gb2-copy-div"]'), null, { timeout: 3500 });
+    const before = await page.evaluate(() => {
+        const host = document.querySelector('.graphbuilder2-host');
+        const oldHash = window.__gb2_lastRenderedHash;
+        const copyDiv = document.querySelector('[data-role="gb2-copy-div"]');
+        if (!host || typeof oldHash !== 'string' || !copyDiv) return null;
+        const payload = JSON.parse(oldHash);
+        copyDiv.remove();
+        host.innerHTML = '';
+        window.GraphBuilder2.render(host.id, payload);
+        return {
+            hostId: host.id,
+            hashPreserved: window.__gb2_lastRenderedHash === oldHash,
+        };
+    });
+    expect('restored-identical: test retained the prior payload hash',
+           !!before && before.hashPreserved);
+    await page.waitForFunction(() => {
+        const host = document.querySelector('.graphbuilder2-host');
+        return !!(host && host.querySelector('svg') &&
+            document.querySelector('[data-role="gb2-copy-div"]'));
+    }, null, { timeout: 3500 });
+    const restored = await page.evaluate(() => {
+        const dv = document.querySelector('[data-role="gb2-copy-div"]');
+        return {
+            hidden: !!dv && dv.style.display === 'none',
+            png: !!dv && /url\("data:image\/png/.test(dv.style.cssText),
+        };
+    });
+    expect('restored-identical: missing copy stand-in rebuilt without an option change',
+           restored.hidden && restored.png);
+    await ctx.close();
+}
+
+// ---- 14. instant edit followed by its identical R echo: the first render's
+//      delayed snapshot owns an SVG that the echo disconnects. The empty-host
+//      rebuild must rearm the timer against the replacement SVG and commit the
+//      NEW graph type, not leave the previous module-less resource in place.
+{
+    const MOCK = `window.__setOpts = [];
+window.setOption = function (k, v) { window.__setOpts.push([k, v]); };
+window.__gb2_snapDelay = 60000;`;
+    const { ctx, page } = await freshPage(MOCK);
+    await page.goto('file://' + path.join(OUT, 'snap-inline.html'));
+    await page.waitForFunction(() =>
+        !!document.querySelector('svg[data-role="gb2-chart-svg"]'),
+        null, { timeout: 30000 });
+    const setup = await page.evaluate(() => {
+        const host = document.querySelector('.graphbuilder2-host');
+        if (!host || typeof window.__gb2_lastRenderedHash !== 'string') return null;
+        const payload = JSON.parse(window.__gb2_lastRenderedHash);
+        payload.graphType = 'line';
+        window.__setOpts = [];
+        window.__gb2_snapDelay = 400;
+        window.__gb2_snapKey = null;
+
+        // Optimistic client render made by an instant graph-type control.
+        window.__gb2_lastRenderedHash = null;
+        window.GraphBuilder2.render(host.id, payload);
+        const firstSvg = host.querySelector('svg[data-role="gb2-chart-svg"]');
+        const firstIsLine = !!host.querySelector('[data-role="line-series"]');
+
+        // Matching R delivery replaces the host before the first timer fires.
+        host.innerHTML = '';
+        window.GraphBuilder2.render(host.id, payload);
+        return {
+            firstIsLine,
+            firstDisconnected: !!firstSvg && !firstSvg.isConnected,
+            hashMatchesEcho: window.__gb2_lastRenderedHash === JSON.stringify(payload),
+        };
+    });
+    expect('snapshot-echo: instant render produced the requested line graph',
+           !!setup && setup.firstIsLine);
+    expect('snapshot-echo: matching delivery disconnected the first timer SVG',
+           !!setup && setup.firstDisconnected && setup.hashMatchesEcho);
+    await page.waitForFunction(() =>
+        (window.__setOpts || []).some(o => o[0] === 'chartSnapshot'),
+        null, { timeout: 5000 });
+    const committed = await page.evaluate(() => {
+        const vals = (window.__setOpts || [])
+            .filter(o => o[0] === 'chartSnapshot').map(o => String(o[1] || ''));
+        const val = vals[vals.length - 1] || '';
+        return {
+            count: vals.length,
+            isSvg: /^\d+:-?\d+\|\s*<svg/.test(val),
+            isLine: val.indexOf('data-role="line-series"') >= 0,
+        };
+    });
+    expect('snapshot-echo: replacement SVG committed after the identical R echo',
+           committed.count === 1 && committed.isSvg && committed.isLine);
     await ctx.close();
 }
 

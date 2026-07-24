@@ -21,6 +21,13 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# The browser battery opens generated fixtures over file://, where jamovi's
+# module/<asset> route does not exist. Embed the same bundle for those visual
+# fixtures. scriptsrc-probe.R explicitly clears this switch while it verifies
+# that real analysis wrappers use script-src by default, then separately
+# verifies this rollback path.
+export GB2_INLINE_BUNDLE=1
+
 BUNDLE=source
 EXTRAS=0
 for arg in "$@"; do
@@ -100,6 +107,18 @@ else
     rc=$?
     if [ "$rc" -eq 2 ]; then
         echo "   skipped: jmvcore not available in this R library"
+    else
+        exit "$rc"
+    fi
+fi
+
+echo "== suite-wide script-src contract (all analyses payload-only; cached path parked)"
+if Rscript "$HERE/scriptsrc-probe.R"; then
+    :
+else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then
+        echo "   skipped: required R packages or graphbuilder2.min.js not available"
     else
         exit "$rc"
     fi

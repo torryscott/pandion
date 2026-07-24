@@ -233,16 +233,10 @@ plotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Class
         # INIT delivery already carries the scripts field, so the
         # resultsview element loads the JS while R computes and the
         # .run() payload arrives with the engine loaded and waiting.
-        # Path is package-relative (module_asset joins
-        # module_path/R/<ns>/<path>); the raw $scripts binding is used on
-        # purpose - jmvcore's setScripts() helper prefixes the package
-        # name, which double-prefixes under the current route (fixed
-        # upstream Jul 2026, but not in 2.7.x-in-the-wild). tryCatch:
-        # harness jmvcore versions without the binding.
+        # The shared helper owns the package-relative path and raw-binding
+        # compatibility details for all seven chart analyses.
         .init = function() {
-            if (gb2_script_src_on())
-                tryCatch(self$results$widget$scripts <- "widget/graphbuilder2.min.js",
-                         error = function(e) NULL)
+            gb2_init_script_src(self$results$widget)
         },
 
         .run = function() {
@@ -275,9 +269,10 @@ plotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Class
                 # script-src mode needs no engine-boot ship - the bundle
                 # rides the scripts field, so the placeholder is plain.
                 self$results$widget$setContent(
-                    if (gb2_script_src_on()) private$.placeholder()
-                    else gb2_engine_boot_html(
-                        private$.placeholder(), self$options$clientBundleHash))
+                    gb2_engine_placeholder_html(
+                        private$.placeholder(),
+                        self$options$clientBundleHash,
+                        script_src_ready = TRUE))
                 return()
             }
 

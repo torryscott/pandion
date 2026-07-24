@@ -290,6 +290,9 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
         # ~100 ms/group kde2d into a no-op for appearance-only edits (the
         # dominant cost behind the left-panel "1-2 s" lag).
         .d2dKdeCache = NULL,
+        .init = function() {
+            gb2_init_script_src(self$results$widget)
+        },
         # Sticky flag: set TRUE the first time the user enables 2-D
         # density this session. Once set, the (cached) kde2d keeps being
         # computed even when the overlay is toggled off, so re-showing it
@@ -347,8 +350,9 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
                 # native static copy alongside the message.
                 tryCatch(self$results$snapshotImage$setVisible(FALSE),
                          error = function(e) NULL)
-                self$results$widget$setContent(gb2_engine_boot_html(
-                    private$.placeholder(), self$options$clientBundleHash))
+                self$results$widget$setContent(gb2_engine_placeholder_html(
+                    private$.placeholder(), self$options$clientBundleHash,
+                    script_src_ready = TRUE))
                 return()
             }
 
@@ -1312,6 +1316,7 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
                 # Static-snapshot fallback: raw pass-through of the JS-committed
                 # "<sig>|<svg>"; widget.R sanitizes + embeds (never in the payload).
                 chart_snapshot = self$options$chartSnapshot,
+                script_src_ready = TRUE,
                 bars = bars,
                 xy_points = xy_points,
                 xy_has_size = has_size,

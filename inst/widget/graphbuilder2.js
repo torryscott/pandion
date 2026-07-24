@@ -3472,6 +3472,12 @@
         // stringify below throws, the flag stays false and the
         // conservative settle-hold wins.
         var _gb2ContentChangedRender = false;
+        // True when jamovi replaced the result DOM but retained this
+        // window's last-rendered payload hash. The chart must be rebuilt
+        // even though its data are identical. Lifecycle work tied to the
+        // old SVG (notably the delayed static snapshot) must be rearmed
+        // against the new, connected SVG as well.
+        var _gb2RebuiltEmptyHost = false;
         // For the a11y live region: a first render in this window (no
         // previous hash) is a page load, not an update - do not announce.
         var _gb2HadPrevHash = (typeof window.__gb2_lastRenderedHash === "string");
@@ -3490,6 +3496,7 @@
                     try { window.__gb2_log && window.__gb2_log("render:SKIP  (hash match)"); } catch (_eLg2) {}
                     return;
                 }
+                _gb2RebuiltEmptyHost = true;
             }
         } catch (_he) {}
 
@@ -7939,10 +7946,9 @@
         // element so its rendered bbox is current.
         var _AUTO_EXPAND_MAX_W = 4000;
         var _AUTO_EXPAND_MAX_H = 4000;
-        // Minimum width of the inspector panel below the chart. The
-        // panel tracks the chart's width when the chart is wider, but
-        // never shrinks below this value so the controls remain
-        // legible even when the chart is dragged narrow.
+        // Preferred minimum width of the inspector panel below the chart.
+        // It yields when the visible host is narrower, keeping the panel
+        // inside jamovi's results column and the standalone chart workspace.
         var INSPECTOR_MIN_W = 560;
         // After every redraw we sweep every interactive element to
         // re-apply the auto-grow. Without this, a drag that grew the
@@ -44004,10 +44010,8 @@
         inspectorPanel.addEventListener("change", _gb2ArmCoalesce, true);
 
         // Sync the panel's width AND left-edge to the chart wrap.
-        //   - Width: tracks chart width up to a minimum
-        //     (INSPECTOR_MIN_W) so the controls stay usable when the
-        //     chart is dragged narrow. Right edge aligns by default
-        //     and stops shrinking past the minimum.
+        //   - Width: tracks chart width up to a preferred minimum
+        //     (INSPECTOR_MIN_W), but yields when the visible host is narrower.
         //   - Left edge: aligned to wrap.offsetLeft so the panel
         //     reads as a continuous frame with the chart above. wrap
         //     is display:inline-block while the panel is block-level,
@@ -44016,6 +44020,37 @@
         // Called here (covers initial state, since applySize ran
         // BEFORE inspectorPanel existed) and from _updateBgCanvas
         // (when bgPad changes during drag).
+        function _inspectorAvailableWidth() {
+            // Intersect the viewport with every horizontally clipping or
+            // scrolling ancestor. This resolves to jamovi's results column
+            // or the standalone shell's central workspace, rather than the
+            // entire browser window including application sidebars.
+            var wrapRect;
+            try { wrapRect = wrap.getBoundingClientRect(); } catch (_eR) {}
+            var left = wrapRect && isFinite(wrapRect.left)
+                ? wrapRect.left : (wrap.offsetLeft || 0);
+            var right = (document.documentElement.clientWidth || 0);
+            if (typeof window !== "undefined" && window.innerWidth) {
+                right = right > 0 ? Math.min(right, window.innerWidth)
+                                  : window.innerWidth;
+            }
+            var node = inspectorPanel.parentElement;
+            while (node && node !== document.documentElement) {
+                try {
+                    var cs = window.getComputedStyle(node);
+                    var ox = cs.overflowX || cs.overflow || "visible";
+                    if (ox === "auto" || ox === "scroll" ||
+                        ox === "hidden" || ox === "clip") {
+                        var nr = node.getBoundingClientRect();
+                        if (nr && isFinite(nr.right)) right = Math.min(right, nr.right);
+                    }
+                } catch (_eA) {}
+                node = node.parentElement;
+            }
+            // Four pixels keeps the border clear of the visible right edge.
+            // Zero means the detached host cannot be measured yet.
+            return (right > left) ? Math.max(0, Math.floor(right - left - 4)) : 0;
+        }
         function _syncInspectorPanelGeometry() {
             if (!inspectorPanel || !wrap) return;
             try {
@@ -44030,7 +44065,11 @@
                 // a fixed-width host iframe. Keeping marginLeft:0
                 // means the panel stays put while the chart's
                 // bgDiv quietly overflows the left edge.
-                var panelW = Math.max(W, INSPECTOR_MIN_W);
+                var availW = _inspectorAvailableWidth();
+                var responsiveMinW = availW > 0
+                    ? Math.min(INSPECTOR_MIN_W, availW) : INSPECTOR_MIN_W;
+                var panelW = Math.max(W, responsiveMinW);
+                if (availW > 0) panelW = Math.min(panelW, availW);
                 // Statistics panel (Jul 2026, Torry): wide comparison
                 // tables can need more room than the chart. Grow into
                 // the width the results column offers (widening jamovi's
@@ -44041,8 +44080,6 @@
                     if (inspector && inspector.selection &&
                         inspector.selection.length === 1 &&
                         inspector.selection[0] === "stats") {
-                        var availW = (document.documentElement.clientWidth || 0) -
-                            (wrap.offsetLeft || 0) - 18;
                         var needW = 0;
                         var tbls = inspectorPanel.querySelectorAll("table");
                         for (var _ti = 0; _ti < tbls.length; _ti++) {
@@ -44071,8 +44108,8 @@
                             if (bw2 > needW) needW = bw2;
                         }
                         needW += 36;
-                        if (needW > panelW && availW > panelW) {
-                            panelW = Math.min(needW, availW);
+                        if (needW > panelW && (availW <= 0 || availW > panelW)) {
+                            panelW = availW > 0 ? Math.min(needW, availW) : needW;
                         }
                         // Remember the applied stats width so a rebuild's
                         // early pass (else-branch below) can hold it.
@@ -44083,19 +44120,19 @@
                         // setInspectorSelection re-arms "stats"): hold the
                         // remembered width instead of snapping to chart
                         // width - the tail re-measure still corrects it if
-                        // the content genuinely changed. Grow-only, capped
-                        // to the available column so a narrowed jamovi
-                        // splitter never strands an oversized panel.
-                        var _availH = (document.documentElement.clientWidth || 0) -
-                            (wrap.offsetLeft || 0) - 18;
+                        // the content genuinely changed. The remembered width
+                        // may grow or shrink with the visible host, so a
+                        // narrowed browser or jamovi splitter never strands
+                        // an oversized panel.
                         if (window.__gb2_stPanelW > panelW) {
-                            panelW = Math.min(window.__gb2_stPanelW,
-                                Math.max(_availH, panelW));
+                            panelW = window.__gb2_stPanelW;
                         }
+                        if (availW > 0) panelW = Math.min(panelW, availW);
                     }
                 } catch (_eSW) {}
                 inspectorPanel.style.width = panelW + "px";
-                inspectorPanel.style.minWidth = INSPECTOR_MIN_W + "px";
+                inspectorPanel.style.minWidth = responsiveMinW + "px";
+                inspectorPanel.style.maxWidth = availW > 0 ? availW + "px" : "";
                 inspectorPanel.style.boxSizing = "border-box";
                 inspectorPanel.style.flexShrink = "0";
                 inspectorPanel.style.marginLeft = "0";
@@ -99678,6 +99715,11 @@
             if (typeof ResizeObserver === "function" && document.documentElement) {
                 var _gb2GeomRO = new ResizeObserver(function () { _gb2ResyncChromeGeometry(); });
                 _gb2GeomRO.observe(document.documentElement);
+                // The standalone shell can resize the central workspace by
+                // showing or hiding side panels without changing the browser
+                // viewport. Watching the host covers that case; in jamovi it
+                // also responds directly to results-column splitter changes.
+                if (host) _gb2GeomRO.observe(host);
                 __disposables.push(function () { try { _gb2GeomRO.disconnect(); } catch (_e) {} });
             }
         } catch (_eRO) {}
@@ -99753,13 +99795,21 @@
         // faster?"): the png build is local-only (~50 ms, no R), so it
         // must NOT wait out the 4 s option-commit debounce it used to
         // ride. ~300 ms after a content change settles, the cache +
-        // div are fresh - a copy is clean almost immediately. Runs
-        // regardless of hasSetOption (read-only pages get clean copies
-        // too); serialize failures self-heal on the next change.
+        // div are fresh - a copy is clean almost immediately.
+        //
+        // Rebuild when the div is absent even if the payload hash is
+        // unchanged. jamovi can replace the result DOM while retaining
+        // this iframe/window and its last-rendered hash (notably when a
+        // saved .omv is reopened). The chart then redraws into a fresh
+        // host, but a content-change-only guard would leave the copy
+        // stand-in missing until the user changed a chart option.
+        // Runs regardless of hasSetOption (read-only pages get clean
+        // copies too); serialize failures self-heal on the next render.
         try {
-            if (_gb2ContentChangedRender) {
+            var _pngTk = String(elementId);
+            var _pngMissing = !document.getElementById(_pngTk + "-copydiv");
+            if (_gb2ContentChangedRender || _pngMissing) {
                 if (!window.__gb2_pngTimers) window.__gb2_pngTimers = {};
-                var _pngTk = String(elementId);
                 if (window.__gb2_pngTimers[_pngTk]) clearTimeout(window.__gb2_pngTimers[_pngTk]);
                 window.__gb2_pngTimers[_pngTk] = setTimeout(function () {
                     try { delete window.__gb2_pngTimers[_pngTk]; } catch (_ePd) {}
@@ -99783,12 +99833,18 @@
         // and ships back only the sig (data.chartSnapshotKey), which is
         // how an unchanged snapshot is never re-committed (no loops: the
         // echo of a commit is NOT content-changed, so it never re-arms).
+        //
+        // Also rearm after an identical-payload empty-host rebuild. Instant
+        // graph changes render locally first, then jamovi's matching R echo
+        // can replace that DOM before this timer fires. The old captured SVG
+        // is disconnected; without this second arm the live chart is current
+        // but the saved module-less snapshot remains at its previous type.
         // Timers are per-widget (window.__gb2_snapTimers) so two open
         // analyses never cancel each other; a stale timer self-kills on
         // svg.isConnected. Skips read-only pages (no setOption) and
         // oversized results (> 2 MB serialized).
         try {
-            if (_gb2ContentChangedRender && hasSetOption) {
+            if ((_gb2ContentChangedRender || _gb2RebuiltEmptyHost) && hasSetOption) {
                 if (!window.__gb2_snapTimers) window.__gb2_snapTimers = {};
                 var _snapTk = String(elementId);
                 if (window.__gb2_snapTimers[_snapTk]) {
@@ -101506,13 +101562,19 @@
                 // Synchronous ON PURPOSE: their walk starts in a
                 // microtask after this dispatch; the restore waits out
                 // the async _imagify hop before the html pass.
+                var wIsWidgetAddress = false;
                 var wIsWidgetCopy = false;
                 try {
-                    wIsWidgetCopy = wIsDocCopy && addr.length === 1 &&
+                    wIsWidgetAddress = addr.length === 1 &&
                         String(addr[0]) === "widget";
+                    wIsWidgetCopy = wIsDocCopy && wIsWidgetAddress;
                 } catch (_eWa) {}
-                if (wIsDocCopy && addr.length > 0 && !wIsWidgetCopy) {
+                // This helper owns only the analysis-root and live-widget
+                // addresses. Native/other items have their own jamovi
+                // serializers and must never receive our chart reply.
+                if (addr.length > 0 && !wIsWidgetAddress) {
                     _cwS("native/other item copy - no swap " + JSON.stringify(addr));
+                    return;
                 }
                 if (wIsDocCopy && (addr.length === 0 || wIsWidgetCopy)) {
                     try {
@@ -101592,12 +101654,20 @@
                     return;
                 }
                 _cwS("svg serialized " + svgStr.length + " chars");
-                // menu copies rescue FAST (the user is waiting for the
-                // toast); anything else (save/export collections) keeps
-                // the conservative window so a legitimately slow reply
-                // is never raced.
+                // Requests carrying jamovi's .jmvrefs fingerprint retain a
+                // short rescue window so the clipboard pipeline gets first
+                // refusal. Real menu Copy requests do not consistently carry
+                // docType:true, so wIsDocCopy is too narrow a discriminator
+                // for this timer even though it remains the safe discriminator
+                // for the DOM swap above. Plain Save requests lack .jmvrefs:
+                // on jamovi 2.7 the impersonated Html result's normal
+                // serializer never completes, so our raster reply is its
+                // completion path. The historical 5 s delay therefore made
+                // every .omv save take five seconds; suppressing the reply
+                // made Save wait forever. Preserve the rasterized content,
+                // but start it immediately for those plain Save requests.
                 var wMs = (typeof window.__gb2_watchdogMs === "number" ? window.__gb2_watchdogMs
-                    : (wIsCopy ? 1500 : 5000));
+                    : (wIsCopy ? 1500 : 0));
                 _cwS("rescue timer armed " + wMs + " ms");
                 setTimeout(function () {
                     try {

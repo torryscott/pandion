@@ -1,12 +1,12 @@
 ---
 title: Plot Studio
 name: plotstudio
-version: 2.9.18
+version: 2.9.28
 jms: '1.0'
 authors:
   - Torry Scott Dennis, PhD
 maintainer: Torry Scott Dennis, PhD <tsdennis@smcm.edu>
-date: '2026-07-22'
+date: '2026-07-24'
 type: R
 description: >-
   An interactive statistical graph-building module for jamovi with analyses for

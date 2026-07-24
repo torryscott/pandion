@@ -229,6 +229,9 @@ rmplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
         # + error/summary options), identical()-compared so style-only
         # commits skip the per-cell work. See .run().
         .aggCache = NULL,
+        .init = function() {
+            gb2_init_script_src(self$results$widget)
+        },
         .run = function() {
             # Wall-clock at run entry: feeds the debug overlay's "R
             # prelude" line + run-entry->paint gap (speed pass Phase 0).
@@ -298,8 +301,9 @@ rmplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
                 # native static copy alongside the message.
                 tryCatch(self$results$snapshotImage$setVisible(FALSE),
                          error = function(e) NULL)
-                self$results$widget$setContent(gb2_engine_boot_html(
-                    private$.placeholder(), self$options$clientBundleHash))
+                self$results$widget$setContent(gb2_engine_placeholder_html(
+                    private$.placeholder(), self$options$clientBundleHash,
+                    script_src_ready = TRUE))
                 return()
             }
 
@@ -335,8 +339,9 @@ rmplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
                 # native static copy alongside the message.
                 tryCatch(self$results$snapshotImage$setVisible(FALSE),
                          error = function(e) NULL)
-                self$results$widget$setContent(gb2_engine_boot_html(
-                    private$.placeholder(), self$options$clientBundleHash))
+                self$results$widget$setContent(gb2_engine_placeholder_html(
+                    private$.placeholder(), self$options$clientBundleHash,
+                    script_src_ready = TRUE))
                 return()
             }
 
@@ -623,6 +628,7 @@ rmplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
                 # Static-snapshot fallback: raw pass-through of the JS-committed
                 # "<sig>|<svg>"; widget.R sanitizes + embeds (never in the payload).
                 chart_snapshot = self$options$chartSnapshot,
+                script_src_ready = TRUE,
                 bars = bars,
                 summary_func = summary_func,
                 error_bar_type = error_type,

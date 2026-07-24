@@ -16,15 +16,40 @@
 #' @return Character scalar of HTML.
 #' @keywords internal
 
-# Script-src prototype switch. The env var works for harnesses/probes; REAL
-# jamovi strips inherited env at the Electron->server spawn (measured
-# Jul 22 2026: flag present in the Electron process, absent in python +
-# engine), so live jamovi is toggled by a flag FILE instead:
-#   touch ~/.plotstudio-scriptsrc     # enable
-#   rm ~/.plotstudio-scriptsrc       # disable
+# Script-src is the production default. Keep the former inline/localStorage
+# delivery behind an emergency rollback switch while the transition settles.
+# The env var works for harnesses/probes; real jamovi strips inherited env at
+# the Electron->server spawn, so a live installation uses the flag file:
+#   touch ~/.plotstudio-inlinebundle  # temporarily use the legacy loader
+#   rm ~/.plotstudio-inlinebundle     # return to script-src (default)
 gb2_script_src_on <- function() {
-    nzchar(Sys.getenv("GB2_SCRIPT_SRC")) ||
-        file.exists(path.expand("~/.plotstudio-scriptsrc"))
+    rollback <- tolower(trimws(Sys.getenv("GB2_INLINE_BUNDLE")))
+    rollback <- rollback %in% c("1", "true", "yes", "on")
+    !rollback && !file.exists(path.expand("~/.plotstudio-inlinebundle"))
+}
+
+# Shared script-src wiring for every chart analysis. The raw binding is
+# intentional: jmvcore's setScripts() helper double-prefixes the package name
+# on the jamovi 2.7.x versions this prototype targets.
+gb2_init_script_src <- function(html_result) {
+    if (!gb2_script_src_on())
+        return(invisible(FALSE))
+    tryCatch({
+        html_result$scripts <- c("widget/graphbuilder2.min.js")
+        invisible(TRUE)
+    }, error = function(e) invisible(FALSE))
+}
+
+# Empty analyses used to pre-warm the inline/localStorage cache by shipping
+# the engine with their placeholder. In script-src mode the Html result has
+# already requested the engine, so keep placeholders payload-only.
+gb2_engine_placeholder_html <- function(message_html,
+                                        client_bundle_hash = "",
+                                        script_src_ready = FALSE) {
+    if (gb2_script_src_on() && isTRUE(script_src_ready))
+        message_html
+    else
+        gb2_engine_boot_html(message_html, client_bundle_hash)
 }
 
 graphbuilder2_html <- function(bars,
@@ -2096,7 +2121,7 @@ graphbuilder2_html <- function(bars,
         "cached" else "inline"
     # WHY inline - surfaced on the debug overlay's Bundle line so a
     # machine stuck in inline mode is diagnosable at one glance.
-    bundle_reason <- if (bundle_mode == "scriptsrc") "script-src prototype (flag file or env)"
+    bundle_reason <- if (bundle_mode == "scriptsrc") "module script asset (default)"
         else if (bundle_mode == "cached") ""
         else if (nzchar(Sys.getenv("GB2_NO_BUNDLE_CACHE"))) "GB2_NO_BUNDLE_CACHE env"
         else if (!nzchar(js_hash)) "no bundle hash (md5 failed)"
@@ -2128,7 +2153,7 @@ graphbuilder2_html <- function(bars,
             '  else {\n',
             '    try { window.__gb2_scriptSrcLate = (window.__gb2_scriptSrcLate || 0) + 1; } catch (_eL) {}\n',
             '    var __gb2_ssHost = document.getElementById(__gb2_id);\n',
-            "    if (__gb2_ssHost) __gb2_ssHost.innerHTML = '<div data-role=\"gb2-scriptsrc-wait\" style=\"padding:24px 12px;color:#666;font:13px var(--gb2-ui-font);text-align:center;\">script-src prototype: engine not present at content-script time; waiting for the module script…</div>';\n",
+            "    if (__gb2_ssHost) __gb2_ssHost.innerHTML = '<div data-role=\"gb2-scriptsrc-wait\" style=\"padding:24px 12px;color:#666;font:13px var(--gb2-ui-font);text-align:center;\">Loading the chart engine…</div>';\n",
             '    (function __gb2_ssPoll(n) {\n',
             '      if (window.GraphBuilder2 && window.GraphBuilder2.render) {\n',
             '        try { window.GraphBuilder2.__hash = "', js_hash, '"; } catch (_eS2) {}\n',
