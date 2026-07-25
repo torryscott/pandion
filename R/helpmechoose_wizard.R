@@ -74,7 +74,7 @@ helpmechoose_html <- function(dataJson = "null") {
 </style>
 <div class="hmc-wrap" id="hmcRoot">
   <div class="hmc-h"><span class="hmc-badge">Help me choose</span></div>
-  <div class="hmc-sub">Answer a couple of quick questions, or drop the exact variables you want to plot into the box on the left, and this will point you to the right Plot Studio analysis and the chart types that fit.</div>
+  <div class="hmc-sub">Answer a couple of quick questions, or drop the exact variables you want to plot into the box on the left, and this will point you to the right Pandion Plots analysis and the chart types that fit.</div>
   <div id="hmcBody"></div>
 </div>
 <script>
@@ -217,7 +217,7 @@ helpmechoose_html <- function(dataJson = "null") {
     else h += '<div class="hmc-reclead">'+esc(L.lead)+'</div>';
     var caps = opts.caps || [];
     for (var ci=0; ci<caps.length; ci++) h += '<div class="hmc-cap">'+esc(caps[ci])+'</div>';
-    h += '<div class="hmc-open">Open <b>'+esc(L.module)+'</b> from the <b>Plot Studio</b> menu, then drop in your variables.</div>';
+    h += '<div class="hmc-open">Open <b>'+esc(L.module)+'</b> from the <b>Pandion Plots</b> menu, then drop in your variables.</div>';
     for (var g=0; g<L.graphs.length; g++) {
       var th = thumb(L.graphs[g].k);
       h += '<div class="hmc-graph">'+(th?('<div class="gt">'+th+'</div>'):'')+'<div class="gtxt"><div class="gn">'+esc(L.graphs[g].n)+'</div><div class="gw">'+esc(L.graphs[g].w)+'</div></div></div>';

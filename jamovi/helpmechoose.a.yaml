@@ -1,7 +1,7 @@
 ---
 name:  helpmechoose
 title: Help Me Choose
-menuGroup: Plot Studio
+menuGroup: Pandion Plots
 menuSubgroup: Guide
 menuTitle: Help Me Choose
 category: plots
@@ -10,11 +10,7 @@ jas: '1.2'
 
 description:
     main: >
-        A question-driven guide, not a chart, that recommends which Plot
-        Studio analysis and graph type fit your goal, with a plain-language
-        reason for each. Answer a few questions, or drop in the exact
-        variables you plan to plot and it classifies them and suggests a
-        best match plus an alternative.
+        A question-driven guide, not a chart, that recommends which Pandion Plots analysis and graph type fit your goal, with a plain-language reason for each. Answer a few questions, or drop in the exact variables you plan to plot and it classifies them and suggests a best match plus an alternative.
 
 options:
     - name: data

@@ -25,7 +25,7 @@ plotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Class
             chartSpec = "", ...) {
 
             super$initialize(
-                package="plotstudio",
+                package="pandion",
                 name="plotbuilder",
                 requiresData=TRUE,
                 ...)
@@ -240,7 +240,7 @@ plotbuilderBase <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Class(
     public = list(
         initialize = function(options, data=NULL, datasetId="", analysisId="", revision=0) {
             super$initialize(
-                package = "plotstudio",
+                package = "pandion",
                 name = "plotbuilder",
                 version = c(0,0,1),
                 options = options,

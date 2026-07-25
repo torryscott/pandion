@@ -20,15 +20,59 @@
 # local library, and reopening your own .omv never re-applies an
 # already-saved action.
 
+# Namespaces this app has shipped under, newest first. The config dir is
+# keyed by package name, so every rename orphans the previous library
+# unless it is carried across - and the loss is SILENT (the code simply
+# finds no file and seeds an empty one). That already happened once:
+# the graphbuilder -> plotstudio rename stranded a styles.json that was
+# never noticed missing. .gb_lib_migrate_legacy() below is what keeps
+# the pandion rename from repeating it.
+.GB_LEGACY_LIB_NAMESPACES <- c("plotstudio", "graphbuilder")
+
+.gb_lib_dir_for <- function(ns) {
+    tryCatch(
+        tools::R_user_dir(ns, which = "config"),
+        error = function(e) file.path(Sys.getenv("HOME", "~"), paste0(".", ns)))
+}
+
+# Copy palettes.json / styles.json across from the newest legacy
+# namespace that has them, but ONLY into a directory that has neither.
+#
+# The window this runs in is exactly one call wide: the first read of a
+# missing library seeds an empty one and writes it to disk, after which
+# this correctly does nothing forever. Copy, never move, so the legacy
+# directory stays intact as a rollback. Fail silently: a broken
+# migration must never take the app down with it.
+.gb_lib_migrate_legacy <- function(d) {
+    tryCatch({
+        files <- c("palettes.json", "styles.json")
+        if (any(file.exists(file.path(d, files))))
+            return(invisible(FALSE))
+        for (ns in .GB_LEGACY_LIB_NAMESPACES) {
+            old <- .gb_lib_dir_for(ns)
+            if (!dir.exists(old) || identical(normalizePath(old, mustWork = FALSE),
+                                              normalizePath(d, mustWork = FALSE)))
+                next
+            src <- file.path(old, files)
+            src <- src[file.exists(src)]
+            if (!length(src)) next
+            file.copy(src, d, overwrite = FALSE)
+            return(invisible(TRUE))
+        }
+        invisible(FALSE)
+    }, error = function(e) invisible(FALSE))
+}
+
 .gb_palette_lib_dir <- function() {
     d <- tryCatch(
-        tools::R_user_dir("plotstudio", which = "config"),
-        error = function(e) file.path(Sys.getenv("HOME", "~"), ".plotstudio"))
+        tools::R_user_dir("pandion", which = "config"),
+        error = function(e) file.path(Sys.getenv("HOME", "~"), ".pandion"))
     if (!dir.exists(d)) {
         tryCatch(
             dir.create(d, recursive = TRUE, showWarnings = FALSE),
             error = function(e) NULL)
     }
+    .gb_lib_migrate_legacy(d)
     d
 }
 

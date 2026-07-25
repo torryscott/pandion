@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build plotstudio's .jmo and side-load it into the local jamovi module dir.
+# Build pandion's .jmo and side-load it into the local jamovi module dir.
 #
 # Why not `jmvtools::install()`?  On this machine, jamovi 2.7.32 ships an arm64
 # server core (core.cpython-311-darwin.so) that jmvtools drives with an x86_64
@@ -58,8 +58,8 @@ if [[ "$build_rc" -ne 0 ]]; then
     exit "$build_rc"
 fi
 
-moddir="$HOME/Library/Application Support/jamovi/modules/plotstudio"
-jmo="$(ls -t plotstudio_*.jmo 2>/dev/null | head -1)"
+moddir="$HOME/Library/Application Support/jamovi/modules/pandion"
+jmo="$(ls -t pandion_*.jmo 2>/dev/null | head -1)"
 if [[ -z "$jmo" ]]; then
     echo "-- build reported success but produced no .jmo; aborting side-load --"
     exit 1
@@ -67,9 +67,9 @@ fi
 
 echo "-- side-loading $jmo --"
 tmpx="$(mktemp -d)"
-if unzip -q "$jmo" -d "$tmpx" && [[ -f "$tmpx/plotstudio/jamovi.yaml" ]]; then
+if unzip -q "$jmo" -d "$tmpx" && [[ -f "$tmpx/pandion/jamovi.yaml" ]]; then
     rm -rf "$moddir"
-    mv "$tmpx/plotstudio" "$moddir"
+    mv "$tmpx/pandion" "$moddir"
     touch "$moddir/jamovi.yaml"
     rm -rf "$tmpx"
     echo "-- side-load OK (restart jamovi to pick it up) --"

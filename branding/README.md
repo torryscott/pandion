@@ -1,6 +1,6 @@
-# Plot Studio — jamovi ribbon icon
+# Pandion Plots — jamovi ribbon icon
 
-`analysis-plotstudio.svg` is the ribbon menu-group icon for this module (display name **Plot Studio**, internal module name **`plotstudio`**), drawn to jamovi's house spec.
+`analysis-pandion.svg` is the ribbon menu-group icon for this module (display name **Pandion Plots**, internal module name **`plotstudio`**), drawn to jamovi's house spec.
 
 ## Why it lives here and not in the module
 
@@ -18,18 +18,18 @@ So this file is a **deliverable to submit to the jamovi team**, not a module ass
 
 ## How to submit
 
-It will be keyed **`analysis-plotstudio`** (jamovi derives the icon id from the *module* name `plotstudio`, not the display name). Email the SVG to **contact@jamovi.org**. No need to wait for the module to be feature-complete or library-listed — but since the icon only renders once jamovi ships a release that includes it, the natural time to send it is around when you submit Plot Studio to the jamovi library.
+It will be keyed **`analysis-pandion`** (jamovi derives the icon id from the *module* name `pandion`, not the display name). Email the SVG to **contact@jamovi.org**. No need to wait for the module to be feature-complete or library-listed — but since the icon only renders once jamovi ships a release that includes it, the natural time to send it is around when you submit Plot Studio to the jamovi library.
 
 ### Draft email
 
 > **To:** contact@jamovi.org
-> **Subject:** Module ribbon icon submission — plotstudio (Plot Studio)
+> **Subject:** Module ribbon icon submission — pandion (Pandion Plots)
 >
 > Hi jamovi team,
 >
-> I maintain a jamovi module, internal name `plotstudio` (display name **Plot Studio**), which provides a suite of plot builders under the new **Plots** ribbon tab (`category: plots`). Would you be able to bundle a ribbon icon for it in a future release?
+> I maintain a jamovi module, internal name `pandion` (display name **Pandion Plots**), which provides a suite of plot builders under the new **Plots** ribbon tab (`category: plots`). Would you be able to bundle a ribbon icon for it in a future release?
 >
-> Attached is an SVG drawn to your house spec (74×44, amber/blue, flat with a 2 px stroke), intended to be keyed `analysis-plotstudio`. It's released into the **public domain (CC0 1.0)** — free for jamovi to bundle and redistribute — and the dedication is embedded in the file's metadata.
+> Attached is an SVG drawn to your house spec (74×44, amber/blue, flat with a 2 px stroke), intended to be keyed `analysis-pandion`. It's released into the **public domain (CC0 1.0)** — free for jamovi to bundle and redistribute — and the dedication is embedded in the file's metadata.
 >
 > Thanks very much,
 > Torry Scott Dennis, PhD
@@ -37,5 +37,11 @@ It will be keyed **`analysis-plotstudio`** (jamovi derives the icon id from the 
 ## Regenerating a preview
 
 ```bash
-node /tmp/render_icon.mjs branding/analysis-plotstudio.svg   # enlarged + actual-size PNG
+node /tmp/render_icon.mjs branding/analysis-pandion.svg   # enlarged + actual-size PNG
 ```
+
+## Superseded
+
+`analysis-plotstudio-SUPERSEDED.svg` is the pre-rename (Plot Studio) ribbon
+icon, kept for reference only. jamovi keys the icon by the *module* name, so
+the live submission is `analysis-pandion.svg`.

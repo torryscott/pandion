@@ -120,7 +120,7 @@ const generated = new Date().toLocaleString('en-US', { timeZone: 'America/New_Yo
 const cards = [...glossaryCards, ...termCards].join('\n');
 const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Plot Studio definition changes</title>
+<title>Pandion Plots definition changes</title>
 <style>
 :root{--ink:#17202a;--muted:#64748b;--line:#d9e0e7;--paper:#fff;--wash:#f4f7fa;--old:#8d2430;--oldbg:#fff0f1;--new:#11643c;--newbg:#eaf8f0;--accent:#215b8f}
 *{box-sizing:border-box}body{margin:0;background:var(--wash);color:var(--ink);font:15px/1.55 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
@@ -133,12 +133,12 @@ input{flex:1;min-width:260px;border:1px solid #bcc8d3;border-radius:10px;padding
 footer{color:var(--muted);margin-top:28px;font-size:13px}@media(max-width:850px){main{padding:20px 12px 60px}.hero{padding:24px 20px}.grid{grid-template-columns:110px 1fr}.column-title.old-title{grid-column:2}.column-title.new-title{display:none}.copy.old,.copy.new{grid-column:2}.copy.old{background:var(--oldbg)}.copy.new{background:var(--newbg)}.field-label{grid-row:span 2}.change>header{align-items:flex-start;flex-direction:column}.count{white-space:normal}}
 @media print{body{background:#fff}main{max-width:none;padding:0}.hero{box-shadow:none;background:#173a5c}.toolbar{display:none}.change{break-inside:avoid;box-shadow:none}}
 </style></head><body><main>
-<section class="hero"><h1>Plot Studio definition changes</h1>
+<section class="hero"><h1>Pandion Plots definition changes</h1>
 <p>Side-by-side comparison of the repository baseline and the reviewed definitions now installed in jamovi. Red strike-through text was removed; green text was added. Unchanged definitions are omitted.</p>
 <div class="summary"><span class="pill">${glossaryCards.length} glossary entries changed</span><span class="pill">${termCards.length} linked definitions changed</span><span class="pill">${glossaryCards.length + termCards.length} total comparisons</span></div></section>
 <div class="toolbar"><input id="search" type="search" placeholder="Search terms or wording…" aria-label="Search definition changes"><button class="active" data-filter="all">All</button><button data-filter="Glossary">Glossary</button><button data-filter="Linked definition">Linked definitions</button></div>
 <section id="changes">${cards}</section><p class="none" id="none" hidden>No matching definition changes.</p>
-<footer>Generated ${esc(generated)}. Baseline: <code>HEAD:${widgetPath}</code>. Current: working-tree widget used for the installed Plot Studio 2.9.0 build.</footer>
+<footer>Generated ${esc(generated)}. Baseline: <code>HEAD:${widgetPath}</code>. Current: working-tree widget.</footer>
 </main><script>
 const search=document.querySelector('#search'),buttons=[...document.querySelectorAll('button[data-filter]')],cards=[...document.querySelectorAll('.change')];let filter='all';
 function update(){const q=search.value.trim().toLowerCase();let shown=0;for(const card of cards){const okKind=filter==='all'||card.dataset.kind===filter;const okText=!q||card.dataset.search.includes(q);card.hidden=!(okKind&&okText);if(!card.hidden)shown++}document.querySelector('#none').hidden=shown!==0}

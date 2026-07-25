@@ -1,4 +1,4 @@
-# Generate plotstudio-test-data.csv — one fake study exercising all seven modules.
+# Generate pandion-test-data.csv — one fake study exercising all seven modules.
 #
 # Fake study: 240 participants in a training intervention. Three conditions
 # (group A/B/C), two collection sites (S1/S2). Engineered so every module has
@@ -15,7 +15,7 @@
 #              polarized item (wide CI on the means plot)          -> Likert / Survey
 #   - a few NAs in rt/hours/t3/q3 (pairwise-complete + NA drops)
 #
-# Run: Rscript scripts/make-test-data.R   (writes plotstudio-test-data.csv at repo root)
+# Run: Rscript scripts/make-test-data.R   (writes pandion-test-data.csv at repo root)
 
 set.seed(2026)
 n <- 240
@@ -65,7 +65,7 @@ dat$t3[sample(n, 4)]    <- NA
 dat$q3[sample(n, 5)]    <- NA
 
 out <- file.path(dirname(dirname(normalizePath(sub("--file=", "",
-  grep("--file=", commandArgs(FALSE), value = TRUE)[1])))), "plotstudio-test-data.csv")
+  grep("--file=", commandArgs(FALSE), value = TRUE)[1])))), "pandion-test-data.csv")
 write.csv(dat, out, row.names = FALSE, na = "")
 cat("wrote", out, "-", nrow(dat), "rows x", ncol(dat), "cols\n")
 

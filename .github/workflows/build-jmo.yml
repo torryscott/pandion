@@ -149,7 +149,7 @@ jobs:
           JMO=$(find . -maxdepth 1 -name '*.jmo' -type f | head -1)
           if [ -z "$JMO" ]; then echo "ERROR: no .jmo produced"; exit 1; fi
           echo "Inspecting: $JMO"
-          unzip -p "$JMO" "plotstudio/jamovi.yaml" | grep -i rVersion || true
+          unzip -p "$JMO" "pandion/jamovi.yaml" | grep -i rVersion
           # The packaged .jmo MUST contain the minified bundle: shipping only
           # the ~5.8 MB source freezes the jamovi webview (the v2.4.1 Windows
           # regression). The Minify step above guarantees it on disk; this
@@ -162,13 +162,13 @@ jobs:
             echo "ERROR: graphbuilder2.min.js missing from the packaged .jmo"; exit 1
           fi
           echo "OK: minified bundle present in the .jmo"
-          mv "$JMO" "plotstudio-${{ matrix.platform }}.jmo"
+          mv "$JMO" "pandion-${{ matrix.platform }}.jmo"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: jmo-${{ matrix.platform }}
-          path: 'plotstudio-${{ matrix.platform }}.jmo'
+          path: 'pandion-${{ matrix.platform }}.jmo'
 
   release:
     needs: build

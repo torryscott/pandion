@@ -1389,7 +1389,7 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
                 error = function(e) {
                     paste0(
                         '<div style="font-family:sans-serif;color:#a00;padding:12px;">',
-                        '<strong>Plot Studio error:</strong> ',
+                        '<strong>Pandion Plots error:</strong> ',
                         htmltools::htmlEscape(conditionMessage(e)),
                         '</div>'
                     )

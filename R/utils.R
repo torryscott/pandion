@@ -1,4 +1,4 @@
-# Shared utility functions for plotstudio module
+# Shared utility functions for pandion module
 # Used by both bargraph (Categorical Plot Builder) and rmgraph (Repeated Measures Plot Builder)
 
 # Convert pt value to mm for ggplot2 linewidth/stroke (1pt = 0.3528mm)
