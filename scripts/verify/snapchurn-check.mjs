@@ -1,4 +1,4 @@
-// Fresh-analysis delivery regression for Plot Studio's jamovi Html wrapper.
+// Fresh-analysis delivery regression for Pandion Plots' jamovi Html wrapper.
 //
 // Unlike the earlier scratch harness, this starts with one initial delivery.
 // It then exercises the real user sequence, including empty -> first snapshot,

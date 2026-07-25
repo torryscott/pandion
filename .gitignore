@@ -72,6 +72,7 @@ inst/tools/
 
 # self-referencing symlink
 /plotstudio
+/pandion
 
 # tooling / scratch / build artifacts (machine-specific)
 .claude/
@@ -103,6 +104,7 @@ dist/
 # personal dev docs -- kept locally, not distributed publicly
 /LAUNCH-QA-CHECKLIST*.html
 /PLOT_STUDIO_BACKLOG.md
+/PANDION_BACKLOG.md
 /docs/tab-mapping-spec.md
 
 # dev-only: project instructions + prototypes/experiments (kept local, not public)

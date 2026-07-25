@@ -36,7 +36,7 @@ module.exports = {
             }
         }
         catch (e) {
-            console.error('[plotstudio] panel tip styling failed:', e);
+            console.error('[pandion] panel tip styling failed:', e);
         }
     }
 };

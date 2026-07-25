@@ -2,7 +2,7 @@
 #
 # Builds the self-contained HTML string that wraps the JS widget at
 # inst/widget/graphbuilder2.js with a JSON payload of the prepared bar
-# data and chart options. Lives inside the parent plotstudio module
+# data and chart options. Lives inside the parent pandion module
 # so the .jmo bundles everything it needs - no separate R package.
 
 #' Build a self-contained Graph Builder 2 HTML string.
@@ -2040,7 +2040,7 @@ graphbuilder2_html <- function(bars,
     # file actually being installed and carries the MODULE-RELATIVE path
     # only: the JS builds the launch URL client-side against jamovi's own
     # http server (the resultsview ModuleAssetHandler serves
-    # {instance}/{analysis}/module/<path> from the module's R/plotstudio/
+    # {instance}/{analysis}/module/<path> from the module's R/pandion/
     # dir), because the electron host FILTERS window.openUrl to http(s) -
     # a file:// URL is dropped SILENTLY (Jul 2026 field bug; an absolute
     # file:// URL was this feature's first, broken shape). Resolved here
@@ -2049,7 +2049,7 @@ graphbuilder2_html <- function(bars,
     # (e.g. the sourced-tree verify harness) the key is simply absent and
     # the JS renders no button.
     user_guide_path <- tryCatch(
-        system.file("docs", "user-guide.html", package = "plotstudio"),
+        system.file("docs", "user-guide.html", package = "pandion"),
         error = function(e) ""
     )
     if (is.character(user_guide_path) && length(user_guide_path) == 1 &&
@@ -2106,7 +2106,7 @@ graphbuilder2_html <- function(bars,
     # NOT shipped in the results content at all - the module's .b.R sets
     # the Html result's `scripts` field to 'widget/graphbuilder2.min.js'
     # and jamovi's resultsview loads it via <script src="module/...">
-    # (the module_asset route, paths relative to R/plotstudio/). The
+    # (the module_asset route, paths relative to R/pandion/). The
     # resultsview gates content insertion on the script's load promise,
     # so the engine should already be defined when the inline payload
     # script runs; engine-absent is the lifecycle diagnostic this
@@ -2233,7 +2233,7 @@ graphbuilder2_html <- function(bars,
             '        } catch (_eSv) {}\n',
             '        __mmH.style.display = "none";\n',
             '      } else {\n',
-            "        __mmH.innerHTML = '<div data-role=\"gb2-module-missing\" style=\"margin:10px;padding:12px 14px;max-width:620px;font-size:12.5px;line-height:1.55;color:#555;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;\"><b>This chart needs the Plot Studio module.</b><br>It does not appear to be installed here, so the chart cannot be drawn. The data and chart settings are saved in this file: install Plot Studio (github.com/torryscott/plotstudio, Releases) and reopen the file to see the chart. If Plot Studio is installed, re-running the analysis will restore the chart.</div>';\n",
+            "        __mmH.innerHTML = '<div data-role=\"gb2-module-missing\" style=\"margin:10px;padding:12px 14px;max-width:620px;font-size:12.5px;line-height:1.55;color:#555;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;\"><b>This chart needs the Pandion Plots module.</b><br>It does not appear to be installed here, so the chart cannot be drawn. The data and chart settings are saved in this file: install Pandion Plots (github.com/torryscott/pandion, Releases) and reopen the file to see the chart. If Pandion Plots is installed, re-running the analysis will restore the chart.</div>';\n",
             '      }\n',
             '    } catch (_eMM) {} };\n',
             '    try {\n',
@@ -2549,7 +2549,7 @@ graphbuilder2_html <- function(bars,
         '  if (__gb2_eh) {\n',
         # Static skeleton via innerHTML; every dynamic string lands via
         # textContent (exception text can quote data-derived names).
-        '    __gb2_eh.innerHTML = "<div data-role=\\"gb2-diag-error\\" style=\\"margin:10px;padding:12px 14px;max-width:660px;font-size:12.5px;line-height:1.55;color:#7a1f1f;background:#fdeeee;border:1px solid #e3b9b9;border-radius:6px;\\"><b>Plot Studio: the chart engine hit an error.</b><br>Please screenshot this box and report it along with your jamovi version (hamburger menu, then About).<span data-role=\\"gb2-diag-err-msg\\" style=\\"display:block;margin-top:6px;white-space:pre-wrap;font-family:monospace;font-size:11.5px;\\"></span><span data-role=\\"gb2-diag-err-meta\\" style=\\"display:block;margin-top:6px;color:#9c5a5a;\\"></span></div>";\n',
+        '    __gb2_eh.innerHTML = "<div data-role=\\"gb2-diag-error\\" style=\\"margin:10px;padding:12px 14px;max-width:660px;font-size:12.5px;line-height:1.55;color:#7a1f1f;background:#fdeeee;border:1px solid #e3b9b9;border-radius:6px;\\"><b>Pandion Plots: the chart engine hit an error.</b><br>Please screenshot this box and report it along with your jamovi version (hamburger menu, then About).<span data-role=\\"gb2-diag-err-msg\\" style=\\"display:block;margin-top:6px;white-space:pre-wrap;font-family:monospace;font-size:11.5px;\\"></span><span data-role=\\"gb2-diag-err-meta\\" style=\\"display:block;margin-top:6px;color:#9c5a5a;\\"></span></div>";\n',
         '    var __gb2_em = __gb2_eh.querySelector("[data-role=gb2-diag-err-msg]");\n',
         '    if (__gb2_em) __gb2_em.textContent = __gb2_renderErr;\n',
         '    var __gb2_meta = "module v', mod_ver, ' | bundle: " + __gb2_r_timing.bundle_mode + (__gb2_r_timing.bundle_reason ? " (" + __gb2_r_timing.bundle_reason + ")" : "") + " | engine: " + ((typeof window !== "undefined" && window.GraphBuilder2) ? "loaded" : "absent");\n',
@@ -2742,7 +2742,7 @@ graphbuilder2_html <- function(bars,
 .gb2_module_version <- function() {
     v <- .gb2_widget_js_cache$mod_ver
     if (!is.null(v)) return(v)
-    v <- tryCatch(as.character(utils::packageVersion("plotstudio")),
+    v <- tryCatch(as.character(utils::packageVersion("pandion")),
                   error = function(e) "dev")
     .gb2_widget_js_cache$mod_ver <- v
     v
@@ -2784,7 +2784,7 @@ graphbuilder2_html <- function(bars,
         'margin:10px;padding:12px 14px;max-width:620px;',
         'font-size:12.5px;line-height:1.55;color:#7a5c1e;',
         'background:#fdf6e3;border:1px solid #e6d5a8;border-radius:6px;">',
-        '<b>Plot Studio: the chart did not draw.</b><br>',
+        '<b>Pandion Plots: the chart did not draw.</b><br>',
         'The results arrived, but the chart engine did not paint anything ',
         'within a few seconds. Please screenshot this box and report it ',
         'along with your jamovi version (hamburger menu, then About). ',
@@ -2810,7 +2810,7 @@ graphbuilder2_html <- function(bars,
         'padding:8px 12px;max-width:640px;font-size:11.5px;line-height:1.5;',
         'color:#7a5c1e;background:#fdf6e3;border:1px solid #e6d5a8;',
         'border-radius:6px;">',
-        '<b>Plot Studio build note:</b> this copy of the module was built ',
+        '<b>Pandion Plots build note:</b> this copy of the module was built ',
         'without its minified chart bundle, so every chart ships a ~6 MB ',
         'script - rendering may be slow or fail outright. If you built the ',
         'module from source, run <code>bash scripts/minify-widget.sh</code> ',
@@ -2856,7 +2856,7 @@ graphbuilder2_html <- function(bars,
         # (never duplicated - the base64 is big).
         '<div data-role="gb2-static-fallback-caption" ',
         'style="display:none;margin-top:6px;font-size:11.5px;line-height:1.5;color:#666;">',
-        'Static snapshot. This chart was made with the Plot Studio module for ',
+        'Static snapshot. This chart was made with the Pandion Plots module for ',
         'jamovi, which is not installed here.',
         # jamovi-only sentences ride the ignore-html class (jamovi's own
         # serializer opt-out): visible INSIDE jamovi, skipped by every
@@ -2869,8 +2869,8 @@ graphbuilder2_html <- function(bars,
         'Analysis, then Export, to save this page as a PDF or HTML file. ',
         '(Export under the Image menu needs the module and does nothing ',
         'here.)</span>',
-        ' To view and edit the live chart, install Plot Studio ',
-        '(github.com/torryscott/plotstudio, Releases) and reopen this file. ',
+        ' To view and edit the live chart, install Pandion Plots ',
+        '(github.com/torryscott/pandion, Releases) and reopen this file. ',
         '<a data-role="gb2-snap-save" download="chart.svg" href="#" ',
         'style="color:#3573bd;">Save image (SVG)</a>',
         '<span class="ignore-html" data-role="gb2-snap-save-caveat">',
@@ -3137,9 +3137,9 @@ gb2_engine_boot_html <- function(message_html, client_bundle_hash = "") {
     if (!is.null(.gb2_widget_js_cache$code)) {
         return(.gb2_widget_js_cache$code)
     }
-    min_path  <- system.file("widget", "graphbuilder2.min.js",      package = "plotstudio")
-    src_path  <- system.file("widget", "graphbuilder2.js",          package = "plotstudio")
-    hash_path <- system.file("widget", "graphbuilder2.min.js.hash", package = "plotstudio")
+    min_path  <- system.file("widget", "graphbuilder2.min.js",      package = "pandion")
+    src_path  <- system.file("widget", "graphbuilder2.js",          package = "pandion")
+    hash_path <- system.file("widget", "graphbuilder2.min.js.hash", package = "pandion")
 
     # Default: prefer minified when present, but validate against
     # the sidecar hash so a stale .min.js doesn't shadow newer
@@ -3163,7 +3163,7 @@ gb2_engine_boot_html <- function(message_html, client_bundle_hash = "") {
                 js_path <- src_path
                 if (is.null(.gb2_widget_js_cache$warned_stale)) {
                     .gb2_widget_js_cache$warned_stale <- TRUE
-                    message("[plotstudio] graphbuilder2.min.js is older than ",
+                    message("[pandion] graphbuilder2.min.js is older than ",
                             "graphbuilder2.js; loading the un-minified source. ",
                             "Run `bash scripts/minify-widget.sh` to refresh.")
                 }
@@ -3181,7 +3181,7 @@ gb2_engine_boot_html <- function(message_html, client_bundle_hash = "") {
         .gb2_widget_js_cache$min_missing <- TRUE
         if (is.null(.gb2_widget_js_cache$warned_missing)) {
             .gb2_widget_js_cache$warned_missing <- TRUE
-            message("[plotstudio] graphbuilder2.min.js is missing from this ",
+            message("[pandion] graphbuilder2.min.js is missing from this ",
                     "build; serving the un-minified source (~6 MB per render). ",
                     "Run `bash scripts/minify-widget.sh` before building, or ",
                     "use scripts/jmv-build-install.sh.")

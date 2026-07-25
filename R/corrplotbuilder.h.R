@@ -19,7 +19,7 @@ corrplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6C
             chartSpec = "", ...) {
 
             super$initialize(
-                package="plotstudio",
+                package="pandion",
                 name="corrplotbuilder",
                 requiresData=TRUE,
                 ...)
@@ -171,7 +171,7 @@ corrplotbuilderBase <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Clas
     public = list(
         initialize = function(options, data=NULL, datasetId="", analysisId="", revision=0) {
             super$initialize(
-                package = "plotstudio",
+                package = "pandion",
                 name = "corrplotbuilder",
                 version = c(0,0,1),
                 options = options,

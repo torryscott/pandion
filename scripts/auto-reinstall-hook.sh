@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stop-hook helper: rebuild + reinstall the plotstudio jamovi module after
+# Stop-hook helper: rebuild + reinstall the pandion jamovi module after
 # Claude edits module source, so changes go live in jamovi without a manual
 # build. Wired into .claude/settings.local.json as a "Stop" hook.
 #

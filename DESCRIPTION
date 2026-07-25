@@ -1,7 +1,7 @@
-Package: plotstudio
+Package: pandion
 Type: Package
-Title: Plot Studio
-Version: 2.9.28
+Title: Pandion Plots
+Version: 3.0.0
 Author: Torry Scott Dennis, PhD
 Maintainer: Torry Scott Dennis, PhD <tsdennis@smcm.edu>
 Description: An interactive statistical graph-building module for jamovi with

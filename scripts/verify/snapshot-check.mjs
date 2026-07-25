@@ -7,7 +7,7 @@
 //      localStorage), snapshot embedded: after the module-missing
 //      window the fallback img is REVEALED and the host is hidden
 //   3. module-less machine, NO snapshot (pre-snapshot file): the
-//      honest "needs the Plot Studio module" message replaces
+//      honest "needs the Pandion Plots module" message replaces
 //      "Loading chart engine" instead of spinning forever
 //   4. snapshot COMMIT: a live content-changed render serializes the
 //      settled chart and commits "<sig>|<svg>" through chartSnapshot
@@ -118,7 +118,7 @@ const snapState = () => ({
     expect('module-less: Save image link wired to the data URI', st.fallback.saveWired);
     expect('module-less: host (loading note) hidden', !st.hostShown);
     expect('module-less: caption explains + points at install',
-           st.bodyText.indexOf('made with the Plot Studio module') >= 0);
+           st.bodyText.indexOf('made with the Pandion Plots module') >= 0);
     // Refined module-less instructions (Torry's Phase 4 UX log): the
     // jamovi-only how-to (Copy / Export routes) + the Save-link caveat
     // are visible here but tagged ignore-html so jamovi's serializer
@@ -193,7 +193,7 @@ const snapState = () => ({
         null, { timeout: 12000 });
     const txt = await page.evaluate(() => document.body.innerText || '');
     expect('no-snapshot: module-missing message shown',
-           txt.indexOf('needs the Plot Studio module') >= 0);
+           txt.indexOf('needs the Pandion Plots module') >= 0);
     expect('no-snapshot: stale "resolves by itself" note gone',
            txt.indexOf('resolves by itself') < 0);
     await ctx.close();

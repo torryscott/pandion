@@ -112,7 +112,7 @@ if [[ "${workflow_count:-0}" -gt 1 ]]; then
 fi
 
 # Keep the module version in sync with the release tag so the
-# built artifact is named plotstudio_<version>.jmo and jamovi
+# built artifact is named pandion_<version>.jmo and jamovi
 # treats it as a distinct (newer) version. Two sources of truth
 # carry the MODULE version:
 #   - jamovi/0000.yaml  ->  `version: <x.y.z>`  (drives the .jmo name)

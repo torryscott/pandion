@@ -1,7 +1,7 @@
 ---
-title: Plot Studio
-name: plotstudio
-version: 2.9.28
+title: Pandion Plots
+name: pandion
+version: 3.0.0
 jms: '1.0'
 authors:
   - Torry Scott Dennis, PhD
@@ -18,8 +18,8 @@ description: >-
 analyses:
   - title: Distribution
     name: distplotbuilder
-    ns: plotstudio
-    menuGroup: Plot Studio
+    ns: pandion
+    menuGroup: Pandion Plots
     menuSubgroup: Plots
     menuTitle: Distribution
     category: plots
@@ -31,8 +31,8 @@ analyses:
       or facet to compare distributions side by side.
   - title: Frequencies
     name: freqplotbuilder
-    ns: plotstudio
-    menuGroup: Plot Studio
+    ns: pandion
+    menuGroup: Pandion Plots
     menuSubgroup: Plots
     menuTitle: Frequencies
     category: plots
@@ -44,8 +44,8 @@ analyses:
       and counts. Group and facet to break the counts down further.
   - title: Compare Groups
     name: plotbuilder
-    ns: plotstudio
-    menuGroup: Plot Studio
+    ns: pandion
+    menuGroup: Pandion Plots
     menuSubgroup: Plots
     menuTitle: Compare Groups
     category: plots
@@ -57,8 +57,8 @@ analyses:
       variable for panels, then click any part of the chart to style it.
   - title: Repeated Measures
     name: rmplotbuilder
-    ns: plotstudio
-    menuGroup: Plot Studio
+    ns: pandion
+    menuGroup: Pandion Plots
     menuSubgroup: Plots
     menuTitle: Repeated Measures
     category: plots
@@ -72,8 +72,8 @@ analyses:
       panel the design.
   - title: Scatter
     name: xyplotbuilder
-    ns: plotstudio
-    menuGroup: Plot Studio
+    ns: pandion
+    menuGroup: Pandion Plots
     menuSubgroup: Plots
     menuTitle: Scatter
     category: plots
@@ -85,8 +85,8 @@ analyses:
       switch to a binned tile heatmap for dense data.
   - title: Correlation Matrix
     name: corrplotbuilder
-    ns: plotstudio
-    menuGroup: Plot Studio
+    ns: pandion
+    menuGroup: Pandion Plots
     menuSubgroup: Plots
     menuTitle: Correlation Matrix
     category: plots
@@ -98,8 +98,8 @@ analyses:
       over the triangle, diagonal, and nonsignificant cells.
   - title: Likert / Survey
     name: likertplotbuilder
-    ns: plotstudio
-    menuGroup: Plot Studio
+    ns: pandion
+    menuGroup: Pandion Plots
     menuSubgroup: Plots
     menuTitle: Likert / Survey
     category: plots
@@ -111,13 +111,13 @@ analyses:
       alpha. Drag rows to reorder the questions.
   - title: Help Me Choose
     name: helpmechoose
-    ns: plotstudio
-    menuGroup: Plot Studio
+    ns: pandion
+    menuGroup: Pandion Plots
     menuSubgroup: Guide
     menuTitle: Help Me Choose
     category: plots
     description: >
-      A question-driven guide, not a chart, that recommends which Plot Studio
+      A question-driven guide, not a chart, that recommends which Pandion Plots
       analysis and graph type fit your goal, with a plain-language reason for
       each. Answer a few questions, or drop in the exact variables you plan to
       plot and it classifies them and suggests a best match plus an alternative.

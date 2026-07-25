@@ -19,7 +19,7 @@ likertplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R
             chartSpec = "", ...) {
 
             super$initialize(
-                package="plotstudio",
+                package="pandion",
                 name="likertplotbuilder",
                 requiresData=TRUE,
                 ...)
@@ -169,7 +169,7 @@ likertplotbuilderBase <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Cl
     public = list(
         initialize = function(options, data=NULL, datasetId="", analysisId="", revision=0) {
             super$initialize(
-                package = "plotstudio",
+                package = "pandion",
                 name = "likertplotbuilder",
                 version = c(0,0,1),
                 options = options,

@@ -1,11 +1,11 @@
-# Plot Studio: a jamovi module
+# Pandion Plots: a jamovi module
 
 Customizable statistical graphics for [jamovi](https://www.jamovi.org), built
 around one idea: **drop in a variable or two and get a polished,
 publication-ready plot with zero configuration**, then click any part of the
 chart to customize it, right on the chart itself.
 
-Plot Studio provides seven main chart analyses plus the **Help Me Choose**
+Pandion Plots provides seven main chart analyses plus the **Help Me Choose**
 guide:
 
 | Analysis | For | Chart types |
@@ -64,16 +64,16 @@ customization intact.
 
 ## Installation
 
-For review or testing before Plot Studio is listed in the jamovi library:
+For review or testing before Pandion Plots is listed in the jamovi library:
 
 1. Obtain the `.jmo` file supplied for your platform.
 2. In jamovi, click **Modules**, choose **Sideload** (the sideways-arrow
    icon), and select the `.jmo` file.
 3. Open the ribbon's **Plots** tab and choose an analysis from the
-   **Plot Studio** group.
+   **Pandion Plots** group.
 
-Once Plot Studio is listed in the jamovi library, choose **Modules → jamovi
-library**, find **Plot Studio**, and click **Install**.
+Once Pandion Plots is listed in the jamovi library, choose **Modules → jamovi
+library**, find **Pandion Plots**, and click **Install**.
 
 ## Quick start
 
@@ -104,6 +104,22 @@ Then click anything on the chart you want to change.
 Rendering happens in a custom HTML/SVG widget (`inst/widget/graphbuilder2.js`),
 not in R graphics. The R side (`R/*.b.R`) aggregates the data and ships one
 JSON payload per render.
+
+### Standalone application
+
+The browser-based application in `standalone/` uses the same chart engine and
+customization model as the jamovi module. Its release-candidate shell includes
+project files, local autosave with last-known-good recovery, explicit project
+format migration, vector PDF/SVG export, a virtualized large-data grid, and a
+copyable diagnostics panel under **Help → Diagnostics**. Build the distributable
+single-file application with:
+
+```bash
+bash standalone/build-dist.sh
+```
+
+The generated file is `standalone/dist/pandion-plots.html`; it has no server
+requirement and can be opened directly in a modern browser.
 
 ### Building from source
 
@@ -149,7 +165,7 @@ bash scripts/jmv-build-install.sh
 
 Copyright © 2026 Torry Scott Dennis, PhD.
 
-Plot Studio is free, open-source software licensed under the
+Pandion Plots is free, open-source software licensed under the
 [GNU General Public License v3.0](LICENSE) (GPL-3.0): you may use, study,
 modify, and share it, but any version you distribute must also be released
 under the GPL. It can't be taken closed-source. GPL-3.0 is compatible with

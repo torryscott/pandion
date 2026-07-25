@@ -38,7 +38,7 @@ xyplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Cla
             chartSpec = "", ...) {
 
             super$initialize(
-                package="plotstudio",
+                package="pandion",
                 name="xyplotbuilder",
                 requiresData=TRUE,
                 ...)
@@ -385,7 +385,7 @@ xyplotbuilderBase <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Class(
     public = list(
         initialize = function(options, data=NULL, datasetId="", analysisId="", revision=0) {
             super$initialize(
-                package = "plotstudio",
+                package = "pandion",
                 name = "xyplotbuilder",
                 version = c(0,0,1),
                 options = options,

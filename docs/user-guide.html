@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Plot Studio - User Guide</title>
+<title>Pandion Plots - User Guide</title>
 <style>
 :root{
   --bg:#ffffff; --bg2:#f6f8fa; --bg3:#eef2f5; --ink:#22303a; --ink2:#51606c; --ink3:#7a8792;
@@ -126,7 +126,7 @@ details summary:hover{background:var(--bg2);border-radius:10px}
 <nav id="sidebar" aria-label="Guide contents">
   <div class="brand">
     <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"><path d="M3 3v18h18"/><rect x="6.5" y="11" width="3" height="7" fill="var(--accent)" stroke="none"/><rect x="11.5" y="6" width="3" height="12" fill="var(--accent)" stroke="none" opacity=".72"/><rect x="16.5" y="9" width="3" height="9" fill="var(--accent)" stroke="none" opacity=".45"/></svg>
-    <div><b>Plot Studio</b><span>User Guide · v2.9.0</span></div>
+    <div><b>Pandion Plots</b><span>User Guide · v3.0.0</span></div>
   </div>
   <input id="navsearch" type="search" placeholder="Search this guide…" autocomplete="off" aria-label="Search this guide">
   <div class="searchhits" id="searchhits"></div>
@@ -136,7 +136,7 @@ details summary:hover{background:var(--bg2);border-radius:10px}
 <main id="content">
 
 <header class="hero">
-  <h1>Plot Studio User Guide</h1>
+  <h1>Pandion Plots User Guide</h1>
   <div class="sub">Beautiful statistical graphics for jamovi. Drop in a variable or two and get a polished chart with zero setup, then click anything on the chart to make it yours.</div>
   <div class="pillrow">
     <span class="pill">7 chart analyses + a chooser wizard</span>
@@ -149,8 +149,8 @@ details summary:hover{background:var(--bg2);border-radius:10px}
 <!-- ============================================================ -->
 <h2 id="welcome">Welcome</h2>
 
-<h3 id="what-is">What is Plot Studio?</h3>
-<p>Plot Studio is a jamovi module that lives in the ribbon's <b>Plots</b> tab. It is organized around seven chart analyses and one guide.</p>
+<h3 id="what-is">What is Pandion Plots?</h3>
+<p>Pandion Plots is a jamovi module that lives in the ribbon's <b>Plots</b> tab. It is organized around seven chart analyses and one guide.</p>
 <div class="tablewrap"><table>
 <tr><th>Analysis</th><th>What it is for</th></tr>
 <tr><td><b>Distribution</b></td><td>The shape and spread of one numeric variable: histograms, density curves, box / violin / raincloud, Q-Q plots, ECDF.</td></tr>
@@ -165,7 +165,7 @@ details summary:hover{background:var(--bg2);border-radius:10px}
 
 <h3 id="philosophy">The three ideas behind it</h3>
 <ul>
-<li><b>Beautiful defaults.</b> Drop in one or two variables and the chart is already presentable: an accessible 10-color palette designed to remain distinct across Plot Studio's color-vision simulations, clean axes, sensible error bars.</li>
+<li><b>Beautiful defaults.</b> Drop in one or two variables and the chart is already presentable: an accessible 10-color palette designed to remain distinct across Pandion Plots' color-vision simulations, clean axes, sensible error bars.</li>
 <li><b>Everything is click-to-edit.</b> The left-hand jamovi panel stays tiny on purpose. Colors, fonts, axes, legends, labels, spacing, ordering: you edit them by clicking the thing itself on the chart. A style panel opens right below the chart.</li>
 <li><b>Honest statistics.</b> Significance brackets compute real tests from your raw data, disclose their corrections, and refuse politely when a test does not apply. A built-in <b>Check graph</b> tab scans your chart for the classic misleading-graph pitfalls before you export it.</li>
 </ul>
@@ -173,12 +173,12 @@ details summary:hover{background:var(--bg2);border-radius:10px}
 <h3 id="install">Installing</h3>
 <ol>
 <li>In jamovi, click the <b>Modules</b> button (the large <b>+</b> at the top-right of the ribbon).</li>
-<li>Choose <b>jamovi library</b>, find <b>Plot Studio</b>, and click <b>Install</b>. (If you were given a <code>.jmo</code> file instead, use <b>Sideload</b>, the sideways arrow icon, and pick the file.)</li>
-<li>A <b>Plot Studio</b> menu appears in the ribbon's <b>Plots</b> tab. If it does not show up right away, restart jamovi.</li>
+<li>Choose <b>jamovi library</b>, find <b>Pandion Plots</b>, and click <b>Install</b>. (If you were given a <code>.jmo</code> file instead, use <b>Sideload</b>, the sideways arrow icon, and pick the file.)</li>
+<li>A <b>Pandion Plots</b> menu appears in the ribbon's <b>Plots</b> tab. If it does not show up right away, restart jamovi.</li>
 </ol>
 <h3 id="quickstart">Your first chart in 60 seconds</h3>
 <ol>
-<li><b>Open an analysis.</b> <b>Plots</b> tab → <b>Plot Studio</b> → e.g. <b>Compare Groups</b>.</li>
+<li><b>Open an analysis.</b> <b>Plots</b> tab → <b>Pandion Plots</b> → e.g. <b>Compare Groups</b>.</li>
 <li><b>Drop in variables.</b> Drag a categorical variable into <b>X-Axis Variable</b> and a numeric one into <b>Y-Axis Variable</b>. Optionally add a second categorical variable to <b>Group By (optional)</b> for colored, side-by-side groups. The chart draws immediately.</li>
 <li><b>Switch the look if you like.</b> Use the chart-type button at the top-left of the chart (it shows the current type, e.g. "Bar") to try Line, Dot, Box, Violin, or Raincloud. Not sure which? Click the <b>?</b> button and open the <b>Which graph?</b> tab.</li>
 <li><b>Click anything to style it.</b> Click a bar to recolor it, the axis to change its range, a label to rename it. <kbd>Cmd/Ctrl+Z</kbd> undoes any edit.</li>
@@ -204,7 +204,7 @@ details summary:hover{background:var(--bg2);border-radius:10px}
 </table></div>
 
 <h3 id="help-me-choose">Help Me Choose (the wizard)</h3>
-<p><b>Help Me Choose</b> sits at the bottom of the Plot Studio menu under a small "Guide" divider. It is not a chart; it is an interactive guide with two routes:</p>
+<p><b>Help Me Choose</b> sits at the bottom of the Pandion Plots menu under a small "Guide" divider. It is not a chart; it is an interactive guide with two routes:</p>
 <ul>
 <li><b>Question route.</b> Leave its variables box empty and answer the prompts, starting with <i>"What do you want your graph to show?"</i>, with seven cards running from "Compare a measurement across groups" to "Summarize survey or rating-scale items". Each terminal answer is a card headed <b>USE THE ANALYSIS &lt;name&gt;</b> with a plain-language reason and a shortlist of fitting graph types, each with a little preview icon.</li>
 <li><b>Data route.</b> Drop the exact variables you plan to plot into the <b>"Variables to plot (optional)"</b> box. A <b>YOUR VARIABLES</b> panel classifies each one (continuous, nominal, ordinal, levels counted), then the wizard recommends a best-match analysis (<b>"Why this fits:"</b> written from <i>your</i> variables) plus an alternative (<b>"Choose this instead if:"</b>).</li>
@@ -218,7 +218,7 @@ details summary:hover{background:var(--bg2);border-radius:10px}
   <figcaption>The data route: variables classified, an analysis recommended, and a teaching tip about grouping vs. panels.</figcaption>
 </figure>
 <p>The wizard is honest about limits. If no single chart can show every variable you dropped in, an orange <b>"Heads up"</b> banner says so, and each card names which of <i>your</i> variables fit and which to leave out. It also knows survey batteries: several items sharing one response scale route to Likert / Survey (even when they are numeric 0-10 ratings), unless their names look like time points (t1, t2, week1…), in which case Repeated Measures leads. With two numeric variables and 500+ rows it suggests starting with Scatter's Heatmap type.</p>
-<div class="callout warn"><b class="tag">Good to know</b>The wizard cannot open an analysis for you; jamovi does not allow it. Its card tells you to "Open &lt;Analysis&gt; from the Plot Studio menu, then drop in your variables." The wizard also resets to its first screen whenever it re-runs; it is a one-shot guide, nothing in it needs saving.</div>
+<div class="callout warn"><b class="tag">Good to know</b>The wizard cannot open an analysis for you; jamovi does not allow it. Its card tells you to "Open &lt;Analysis&gt; from the Pandion Plots menu, then drop in your variables." The wizard also resets to its first screen whenever it re-runs; it is a one-shot guide, nothing in it needs saving.</div>
 
 <h3 id="which-graph-tab">Already in a chart? Use "Which graph?"</h3>
 <p>Every chart's <b>?</b> button has a <b>Which graph?</b> tab listing the chart types available <i>for your current analysis</i>, each with a plain-language "best for" line. The current type is highlighted and carries an honest <b>Trade-off:</b> line; every other card has a <b>Use this</b> button that switches immediately, keeping your styling. An amber <b>Suggestion for your data</b> box appears when your actual data argues for a different type (for example, "Your groups have enough data (smallest n = 20) to SHOW the distribution: a box, violin, or raincloud would reveal spread that a bar hides.").</p>
@@ -450,7 +450,7 @@ details summary:hover{background:var(--bg2);border-radius:10px}
 <div class="tablewrap"><table>
 <tr><th>Button</th><th>Name</th><th>What it does</th></tr>
 <tr><td>"Bar ▾" (current type + icon)</td><td>Chart type</td><td>Opens the chart-type flyout: a tile grid of every type this analysis offers. Click a tile to switch instantly; styling carries over.</td></tr>
-<tr><td>Swatches + "Theme ▾"</td><td>Theme</td><td>Opens two clearly separated tabs. <b>Colors</b> changes the graph's color palette and provides saved palettes plus a curated list: Plot Studio (the stock accessible default), Spectrum Dark II, Spectrum Muted IV (colorblind-safe), Okabe-Ito, Tableau 10 (qualitative), and Blues / Greens / Reds / Oranges / Purples / Greys / Cividis (sequential ramps that spread across your group count). <b>Chart style</b> applies a saved complete look, including any captured colors, fonts, axes, elements, and background. Footer links open the full palette gallery and styles manager. Hidden on Correlation and Likert charts, which use their own diverging scales.</td></tr>
+<tr><td>Swatches + "Theme ▾"</td><td>Theme</td><td>Opens two clearly separated tabs. <b>Colors</b> changes the graph's color palette and provides saved palettes plus a curated list: Pandion (the stock accessible default), Spectrum Dark II, Spectrum Muted IV (colorblind-safe), Okabe-Ito, Tableau 10 (qualitative), and Blues / Greens / Reds / Oranges / Purples / Greys / Cividis (sequential ramps that spread across your group count). <b>Chart style</b> applies a saved complete look, including any captured colors, fonts, axes, elements, and background. Footer links open the full palette gallery and styles manager. Hidden on Correlation and Likert charts, which use their own diverging scales.</td></tr>
 <tr><td>↶ ↷</td><td>Undo / Redo</td><td>Undo or redo any on-chart edit (<kbd>Cmd/Ctrl+Z</kbd>, <kbd>Cmd/Ctrl+Shift+Z</kbd>). Everything is undoable, including a whole style or palette apply.</td></tr>
 <tr><td>Σ</td><td>Statistics</td><td>The numbers behind the chart: descriptives, pairwise comparisons, ANOVAs, chi-square, normality, correlations, reliability, in per-module tabs. See <a href="#stats-panel">Statistics</a>.</td></tr>
 <tr><td>👁</td><td>Show / hide elements</td><td>The Visibility panel: hide or restore anything (axes, legend, bars, groups, slices, overlays, annotations). The icon shows a count when things are hidden.</td></tr>
@@ -503,7 +503,7 @@ details summary:hover{background:var(--bg2);border-radius:10px}
 </ul>
 <figure class="shot">
   <img src="img/shots/guide-palette.png" alt="The Theme menu's Colors tab" loading="lazy">
-  <figcaption>The Theme menu's Colors tab: the stock "Plot Studio" palette, colorblind-safe and qualitative sets, and sequential ramps.</figcaption>
+  <figcaption>The Theme menu's Colors tab: the stock "Pandion" palette, colorblind-safe and qualitative sets, and sequential ramps.</figcaption>
 </figure>
 
 <h3 id="vision-check">The Vision check (colorblind-safe charts)</h3>
@@ -518,7 +518,7 @@ details summary:hover{background:var(--bg2);border-radius:10px}
 <li><b>Adjust a color</b> opens the normal picker per series, with the pass / warn dots updating live as you drag.</li>
 <li><b>Make these my default palette</b> saves the settled colors as "My accessible palette" and starts every new chart with it.</li>
 </ul>
-<div class="callout tip"><b class="tag">Tip</b>The stock Plot Studio palette already passes every vision check by construction, so you will usually only meet the fixer after building a custom palette. Pattern fills (bar panel → Pattern) are a second cue that survives grayscale printing.</div>
+<div class="callout tip"><b class="tag">Tip</b>The stock Pandion palette already passes every vision check by construction, so you will usually only meet the fixer after building a custom palette. Pattern fills (bar panel → Pattern) are a second cue that survives grayscale printing.</div>
 
 <h3 id="styles">Chart styles: save a whole look</h3>
 <p>A <b>chart style</b> captures up to five parts of a chart's look (<b>colors</b> for the palette, <b>text</b> for font and sizes, <b>axes</b>, <b>bars</b> for corner / borders / patterns / markers, and <b>background</b>) so you can restyle any chart in two clicks and keep every figure in a paper consistent.</p>
@@ -807,20 +807,20 @@ details summary:hover{background:var(--bg2);border-radius:10px}
 <p>Items must share one small response scale. If your (all-numeric) items have more than 25 distinct values they are continuous measurements, so the module switches to the means-only chart and says so. If a many-level item is <i>text</i>, nothing sensible can be drawn and the module explains why (many-level categorical variables belong in Frequencies).</p>
 </div></details>
 <details><summary>A statistic refuses to compute</summary><div class="dbody">
-<p>That is deliberate: Plot Studio never computes a test that does not fit the data. The readout explains in plain language: for example, paired tests need matched within-subject data, rank and paired tests do not support every multiple-comparison correction, mixed ANOVA needs enough complete subjects in every design cell, and correlations need 3+ complete pairs. The wording points to the relevant requirement or alternative.</p>
+<p>That is deliberate: Pandion Plots never computes a test that does not fit the data. The readout explains in plain language: for example, paired tests need matched within-subject data, rank and paired tests do not support every multiple-comparison correction, mixed ANOVA needs enough complete subjects in every design cell, and correlations need 3+ complete pairs. The wording points to the relevant requirement or alternative.</p>
 </div></details>
 <details><summary>The chart says "Loading chart engine…"</summary><div class="dbody">
 <p>The chart engine's local cache was unavailable for one render. It self-heals on the next run of the analysis (change anything, or re-run). Your options and data are unaffected.</p>
 </div></details>
 <details><summary>Where do my saved palettes and styles live?</summary><div class="dbody">
-<p>In two small files (<code>palettes.json</code>, <code>styles.json</code>) in your personal Plot Studio configuration folder on your computer, which is why they are available in every jamovi file you open, and why they do not travel inside a shared <code>.omv</code>.</p>
+<p>In two small files (<code>palettes.json</code>, <code>styles.json</code>) in your personal Pandion Plots configuration folder on your computer, which is why they are available in every jamovi file you open, and why they do not travel inside a shared <code>.omv</code>.</p>
 </div></details>
 <details><summary>Something looks stuck after an edit</summary><div class="dbody">
 <p>jamovi recomputes in the background after each edit; heavy charts can take a beat. Panels and menus are built to survive this, but if the display ever looks wrong, any small change (or <kbd>Cmd/Ctrl+Z</kbd> then redo) forces a clean redraw. If the whole module misbehaves after installation or reinstallation, restart jamovi; modules load at startup.</p>
 </div></details>
 
 <hr style="border:none;border-top:1px solid var(--line);margin:60px 0 20px">
-<p style="color:var(--ink3);font-size:13px">Plot Studio 2.9.0 · by Torry Scott Dennis, PhD · This guide describes the 2.9.0 release. The chart and feature-panel screenshots were generated from the current module.</p>
+<p style="color:var(--ink3);font-size:13px">Pandion Plots 3.0.0 · by Torry Scott Dennis, PhD · This guide describes the 3.0.0 release. The chart and feature-panel screenshots were generated from the current module.</p>
 
 </main>
 

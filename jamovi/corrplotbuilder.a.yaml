@@ -1,7 +1,7 @@
 ---
 name:  corrplotbuilder
 title: Correlation Matrix
-menuGroup: Plot Studio
+menuGroup: Pandion Plots
 menuSubgroup: Plots
 category: plots
 version: '0.0.1'

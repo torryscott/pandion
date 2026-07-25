@@ -9,7 +9,7 @@ helpmechooseOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Clas
             vars = NULL, ...) {
 
             super$initialize(
-                package="plotstudio",
+                package="pandion",
                 name="helpmechoose",
                 requiresData=TRUE,
                 ...)
@@ -51,7 +51,7 @@ helpmechooseBase <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Class(
     public = list(
         initialize = function(options, data=NULL, datasetId="", analysisId="", revision=0) {
             super$initialize(
-                package = "plotstudio",
+                package = "pandion",
                 name = "helpmechoose",
                 version = c(0,0,1),
                 options = options,
@@ -68,7 +68,7 @@ helpmechooseBase <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Class(
 
 #' Help Me Choose
 #'
-#' A question-driven guide, not a chart, that recommends which Plot Studio 
+#' A question-driven guide, not a chart, that recommends which Pandion Plots 
 #' analysis and graph type fit your goal, with a plain-language reason for 
 #' each. Answer a few questions, or drop in the exact variables you plan to 
 #' plot and it classifies them and suggests a best match plus an alternative.

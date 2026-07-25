@@ -62,7 +62,7 @@ module.exports = {
                 try {
                     fn.call(host, ui);
                 } catch (err) {
-                    console.error('[plotstudio] setup failed:', name, err);
+                    console.error('[pandion] setup failed:', name, err);
                 }
             });
 

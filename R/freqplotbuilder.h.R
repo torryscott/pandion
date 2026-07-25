@@ -26,7 +26,7 @@ freqplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6C
             chartSpec = "", ...) {
 
             super$initialize(
-                package="plotstudio",
+                package="pandion",
                 name="freqplotbuilder",
                 requiresData=TRUE,
                 ...)
@@ -253,7 +253,7 @@ freqplotbuilderBase <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Clas
     public = list(
         initialize = function(options, data=NULL, datasetId="", analysisId="", revision=0) {
             super$initialize(
-                package = "plotstudio",
+                package = "pandion",
                 name = "freqplotbuilder",
                 version = c(0,0,1),
                 options = options,
