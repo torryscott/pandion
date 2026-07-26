@@ -6,6 +6,11 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# Default every job and third-party action to read-only repository access.
+# The release job grants contents: write only where publishing requires it.
+permissions:
+  contents: read
+
 jobs:
   build:
     strategy:

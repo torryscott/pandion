@@ -129,7 +129,9 @@ module.exports = {
         var $taggedGroups = $();
         var self = this;
         $('button, .silky-options-group-header, .silky-collapse-header, .collapse-box-header, .options-group-header').each(function() {
-            var rawText = ($(this).text() || '').trim().replace(/&amp;/g, '&').replace(/&#38;/g, '&');
+            // jQuery's text() already returns decoded text, so no HTML entity
+            // unescaping is needed here.
+            var rawText = ($(this).text() || '').trim();
             var matchedSection = allSectionNames.indexOf(rawText) !== -1 ? rawText : null;
 
             if (!matchedSection) {

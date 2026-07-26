@@ -2842,7 +2842,9 @@
                     newDensities.push(snapped);
                     const pcName = tokens[3] || 'black';
                     const pcPreset = PATTERN_COLOR_PRESETS.find(p => p.name === pcName);
-                    newPatternColors.push(pcPreset ? pcPreset.hex : (pcName.startsWith('#') ? pcName : '#000000'));
+                    newPatternColors.push(pcPreset
+                        ? pcPreset.hex
+                        : (/^#[0-9A-Fa-f]{6}$/.test(pcName) ? pcName.toUpperCase() : '#000000'));
                     const ang = parseInt(tokens[4]);
                     newAngles.push(!isNaN(ang) ? ang : 30);
                 } else {

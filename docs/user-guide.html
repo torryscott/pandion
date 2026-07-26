@@ -876,15 +876,26 @@ details summary:hover{background:var(--bg2);border-radius:10px}
   }
   box.addEventListener('input',function(){
     var q=box.value.trim().toLowerCase();
-    hits.innerHTML=''; hits.style.display='none';
+    hits.replaceChildren(); hits.style.display='none';
     if(q.length<2) return;
     var found=sections.filter(function(s){return s.body.indexOf(q)>=0;}).slice(0,12);
-    if(!found.length){ hits.innerHTML='<a>No matches</a>'; hits.style.display='block'; return; }
+    if(!found.length){
+      var empty=document.createElement('a');
+      empty.textContent='No matches';
+      hits.appendChild(empty);
+      hits.style.display='block';
+      return;
+    }
     found.forEach(function(s){
       var a=document.createElement('a'); a.href='#'+s.id;
       var i=s.raw.toLowerCase().indexOf(q), snip='';
       if(i>=0){ snip=s.raw.substr(Math.max(0,i-30),80).trim(); }
-      a.innerHTML='<b>'+s.title+'</b><span class="crumb">'+(crumbFor(s.id)||'')+(snip?' · …'+snip.replace(/</g,'&lt;')+'…':'')+'</span>';
+      var title=document.createElement('b');
+      title.textContent=s.title;
+      var crumb=document.createElement('span');
+      crumb.className='crumb';
+      crumb.textContent=(crumbFor(s.id)||'')+(snip?' · …'+snip+'…':'');
+      a.append(title,crumb);
       a.addEventListener('click',function(){ hits.style.display='none'; box.value=''; });
       hits.appendChild(a);
     });

@@ -10430,7 +10430,7 @@
                 _exportUI.showResultView(blob, filename, mime);
                 _exportUI.setResultHint(
                     "Right-click the image and choose <b>Save image as…</b> " +
-                    "to save <b>" + filename + "</b>."
+                    "to save <b>" + _nmEsc(filename) + "</b>."
                 );
                 return;
             }
@@ -10839,7 +10839,15 @@
                         if (!g) continue;
                         b.__gtTile = true;
                         var lbl = b.textContent;
-                        b.innerHTML = '<span style="display:flex;align-items:center;justify-content:center;height:27px;">' + g + '</span><span style="font-size:11.5px;color:#555;line-height:1.15;">' + lbl + '</span>';
+                        b.replaceChildren();
+                        var iconWrap = document.createElement("span");
+                        iconWrap.style.cssText = "display:flex;align-items:center;justify-content:center;height:27px;";
+                        iconWrap.innerHTML = g;
+                        var labelWrap = document.createElement("span");
+                        labelWrap.style.cssText = "font-size:11.5px;color:#555;line-height:1.15;";
+                        labelWrap.textContent = lbl;
+                        b.appendChild(iconWrap);
+                        b.appendChild(labelWrap);
                         b.style.cssText = _ADD_TILE_CSS;
                         b.addEventListener("mouseenter", (function (bb) { return function () { bb.style.borderColor = "#378ADD"; bb.style.background = "#f3f8fe"; }; })(b));
                         b.addEventListener("mouseleave", (function (bb) { return function () { bb.style.borderColor = "#e3e3e3"; bb.style.background = "#fff"; }; })(b));
@@ -11468,7 +11476,7 @@
                     iframe.setAttribute("title", filename);
                     previewEl.appendChild(iframe);
                     hintHTML = "Use the PDF toolbar's download button to save <b>" +
-                        filename + "</b>.";
+                        _nmEsc(filename) + "</b>.";
                 } else {
                     var img = document.createElement("img");
                     img.src = url;
@@ -11476,7 +11484,7 @@
                     img.style.cssText = "max-width:100%;max-height:220px;display:block;margin:0 auto;background:white;";
                     previewEl.appendChild(img);
                     hintHTML = "Right-click the image and choose " +
-                        "<b>Save image as…</b> to save <b>" + filename + "</b>.";
+                        "<b>Save image as…</b> to save <b>" + _nmEsc(filename) + "</b>.";
                 }
                 resultHintEl.innerHTML = hintHTML;
                 formatsView.style.display = "none";
@@ -36866,7 +36874,15 @@
                             // Screen->SVG scale for the follow transform.
                             var _zSy = 1;
                             try { var _zCtm = svg.getScreenCTM(); if (_zCtm && _zCtm.d) _zSy = _zCtm.d; } catch (_eZc) {}
-                            function _zEsc(s) { return (window.CSS && CSS.escape) ? CSS.escape(s) : String(s).replace(/"/g, '\\"'); }
+                            function _zEsc(s) {
+                                if (window.CSS && typeof CSS.escape === "function") return CSS.escape(String(s));
+                                return String(s)
+                                    .replace(/\\/g, "\\\\")
+                                    .replace(/"/g, '\\"')
+                                    .replace(/[\n\r\f]/g, function (ch) {
+                                        return "\\" + ch.charCodeAt(0).toString(16) + " ";
+                                    });
+                            }
                             function _zEls(grp) {
                                 var out = [];
                                 for (var r = 0; r < roles.length; r++) {
@@ -48788,7 +48804,8 @@
         // deliberately conservative (first-draft copy for Torry).
         function _stEsc(s) {
             return String(s == null ? "" : s).replace(/&/g, "&amp;")
-                .replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                .replace(/</g, "&lt;").replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
         }
         function _stNum(v, d) {
             return (typeof v === "number" && isFinite(v))
@@ -52969,7 +52986,9 @@
         }
         function _anatEsc(s) {
             return String(s == null ? "" : s)
-                .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+                .replace(/'/g, "&#39;");
         }
         // Plain-language "what is this chart?" copy, keyed off the graph type
         // (plus a couple of mode flags). Returns { title, blurb }.
@@ -61904,7 +61923,7 @@
                       var open = '<div data-tab-pane="spacing" style="">';
                       if (spacingHtml.indexOf(open) === 0) {
                           spacingHtml = spacingHtml.substring(open.length);
-                          if (spacingHtml.lastIndexOf("</div>") === spacingHtml.length - 6) {
+                          if (spacingHtml.endsWith("</div>")) {
                               spacingHtml = spacingHtml.substring(0, spacingHtml.length - 6);
                           }
                       }
@@ -61924,7 +61943,7 @@
                       var open = '<div data-tab-pane="order" style="">';
                       if (orderHtml.indexOf(open) === 0) {
                           orderHtml = orderHtml.substring(open.length);
-                          if (orderHtml.lastIndexOf("</div>") === orderHtml.length - 6) {
+                          if (orderHtml.endsWith("</div>")) {
                               orderHtml = orderHtml.substring(0, orderHtml.length - 6);
                           }
                       }
@@ -65882,7 +65901,7 @@
                       var open = '<div data-tab-pane="spacing" style="">';
                       if (spacingHtml.indexOf(open) === 0) {
                           spacingHtml = spacingHtml.substring(open.length);
-                          if (spacingHtml.lastIndexOf("</div>") === spacingHtml.length - 6) {
+                          if (spacingHtml.endsWith("</div>")) {
                               spacingHtml = spacingHtml.substring(0, spacingHtml.length - 6);
                           }
                       }
@@ -65902,7 +65921,7 @@
                       var open = '<div data-tab-pane="order" style="">';
                       if (orderHtml.indexOf(open) === 0) {
                           orderHtml = orderHtml.substring(open.length);
-                          if (orderHtml.lastIndexOf("</div>") === orderHtml.length - 6) {
+                          if (orderHtml.endsWith("</div>")) {
                               orderHtml = orderHtml.substring(0, orderHtml.length - 6);
                           }
                       }
@@ -71498,7 +71517,7 @@
                             '<span data-fo-grab="1" style="color:#888;flex-shrink:0;font-size:13px;line-height:1;cursor:grab;" title="Drag to reorder">≡</span>' +
                             '<span data-fo-label="1" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:grab;color:' + (isHidden ? '#999' : '#333') + ';' +
                               (isHidden ? 'text-decoration:line-through;' : '') + '">' +
-                              lvl + '</span>' +
+                              _nmEsc(lvl) + '</span>' +
                             '<button type="button" data-fo-up="' + idx + '"' + (canMoveUp ? '' : ' disabled aria-disabled="true"') +
                               ' style="padding:2px 6px;font-size:10px;border:1px solid #ccc;background:white;cursor:' + (canMoveUp ? 'pointer' : 'default') + ';opacity:' + (canMoveUp ? '1' : '0.4') + ';border-radius:2px;" title="Move up">▲</button>' +
                             '<button type="button" data-fo-down="' + idx + '"' + (canMoveDown ? '' : ' disabled aria-disabled="true"') +
