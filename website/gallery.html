@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gallery - Pandion Plots</title>
+<meta name="description" content="Explore unretouched charts made with Pandion Plots, including raincloud, repeated-measures, correlation, Likert, and distribution plots.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<meta name="theme-color" content="#192E49">
+<link rel="canonical" href="https://pandionplots.com/gallery.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Pandion Plots">
+<meta property="og:title" content="Gallery - Pandion Plots">
+<meta property="og:description" content="Explore unretouched charts made with Pandion Plots, including raincloud, repeated-measures, correlation, Likert, and distribution plots.">
+<meta property="og:url" content="https://pandionplots.com/gallery.html">
+<meta property="og:image" content="https://pandionplots.com/assets/share-card-copy-refresh.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Gallery - Pandion Plots">
+<meta name="twitter:description" content="Explore unretouched charts made with Pandion Plots, including raincloud, repeated-measures, correlation, Likert, and distribution plots.">
+<meta name="twitter:image" content="https://pandionplots.com/assets/share-card-copy-refresh.png">
+<style>
+  :root {
+    --navy: #192E49;
+    --cobalt: #375CA0;
+    --amber: #E3A12E;
+    --ink: #22364d;
+    --muted: #5f6f80;
+    --line: #dde5ee;
+    --wash: #f4f7fb;
+  }
+  * { box-sizing: border-box; }
+  /* Anchor targets must clear the sticky header. */
+  html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+  body {
+    margin: 0; color: var(--ink); background: #fff;
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--cobalt); }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+  header {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(255,255,255,0.92); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav { display: flex; align-items: center; gap: 10px; height: 60px; }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    color: var(--navy); text-decoration: none;
+    font-weight: 800; font-size: 18px; letter-spacing: -0.01em;
+  }
+  .brand img { width: 34px; height: 34px; }
+  .nav-links { margin-left: auto; display: flex; gap: 4px; }
+  .nav-links a {
+    color: var(--ink); text-decoration: none; font-size: 14.5px;
+    font-weight: 600; padding: 7px 12px; border-radius: 7px;
+  }
+  .nav-links a:hover { background: var(--wash); color: var(--navy); }
+  .nav-links a[aria-current="page"] { color: var(--cobalt); }
+  .nav-links a.nav-cta { color: #fff; background: var(--navy); margin-left: 6px; }
+  .nav-links a.nav-cta:hover { background: #24405f; }
+
+  .page-head { padding: 56px 0 8px; }
+  .kicker {
+    color: #8a6414; font-size: 13px; font-weight: 800;
+    letter-spacing: 0.12em; text-transform: uppercase; margin: 0 0 8px;
+  }
+  h1 {
+    margin: 0 0 12px; color: var(--navy);
+    font-size: clamp(30px, 4vw, 40px); letter-spacing: -0.015em;
+  }
+  .page-lede { margin: 0 0 12px; max-width: 46em; color: var(--muted); }
+
+  .grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 26px 26px;
+    padding: 36px 0 24px;
+  }
+  figure.g { margin: 0; }
+  .g-frame {
+    border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+    background: #fff; box-shadow: 0 6px 22px rgba(25, 46, 73, 0.07);
+    transition: transform 120ms ease, box-shadow 120ms ease;
+  }
+  figure.g:hover .g-frame {
+    transform: translateY(-2px);
+    box-shadow: 0 14px 34px rgba(25, 46, 73, 0.12);
+  }
+  .g-frame img { display: block; width: 100%; height: auto; }
+  figure.g figcaption { margin-top: 10px; font-size: 13.5px; color: var(--muted); }
+  figure.g figcaption b {
+    display: block; color: var(--navy); font-size: 14.5px; margin-bottom: 1px;
+  }
+
+  .try-band {
+    margin: 40px 0 72px; padding: 30px 34px;
+    display: flex; flex-wrap: wrap; gap: 18px; align-items: center;
+    background: var(--wash); border: 1px solid var(--line); border-radius: 12px;
+  }
+  .try-band p { margin: 0; color: var(--muted); max-width: 40em; }
+  .try-band p b { color: var(--navy); }
+  .btn {
+    display: inline-flex; align-items: center; margin-left: auto;
+    padding: 12px 22px; border-radius: 9px; text-decoration: none;
+    font-weight: 700; font-size: 15px; color: #fff; background: var(--navy);
+  }
+  .btn:hover { background: #24405f; }
+
+  footer { border-top: 1px solid var(--line); padding: 36px 0 48px; }
+  .foot {
+    display: flex; flex-wrap: wrap; gap: 18px; align-items: center;
+    color: var(--muted); font-size: 13.5px;
+  }
+  .foot .brand { font-size: 15px; }
+  .foot .brand img { width: 26px; height: 26px; }
+  .foot-links { margin-left: auto; display: flex; flex-wrap: wrap; gap: 10px 18px; }
+  .foot-links a { color: var(--muted); text-decoration: none; }
+  .foot-links a:hover { color: var(--cobalt); }
+
+  @media (max-width: 760px) {
+    .grid { grid-template-columns: 1fr; }
+    .try-band .btn { margin-left: 0; }
+    /* Do NOT hide the nav on phones: it used to leave only the
+       CTA, stranding Gallery/Docs/About. Wrap it under the brand. */
+    .nav { height: auto; flex-wrap: wrap; padding: 8px 0; row-gap: 4px; }
+    .nav-links { margin-left: 0; width: 100%; flex-wrap: wrap; gap: 2px; }
+    .nav-links a { padding: 6px 9px; font-size: 13.5px; }
+    .nav-links a.nav-cta { margin-left: auto; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="index.html">
+      <img src="assets/pandion-wing.svg" alt="">
+      Pandion Plots
+    </a>
+    <nav class="nav-links" aria-label="Site">
+      <a href="gallery.html" aria-current="page">Gallery</a>
+      <a href="docs/">Docs</a>
+      <a href="index.html#downloads">Downloads</a>
+      <a href="about.html">About</a>
+      <a href="https://github.com/torryscott/pandion">GitHub</a>
+      <a class="nav-cta" href="app/">Try it now</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap page-head">
+    <p class="kicker">Gallery</p>
+    <h1>Real charts, straight from the app.</h1>
+    <p class="page-lede">
+      Every figure below is an unretouched Pandion Plots render using
+      the default styling. This is where your first draft begins.
+    </p>
+  </div>
+
+  <div class="wrap grid">
+    <figure class="g">
+      <div class="g-frame"><img src="assets/gallery/raincloud.png"
+        alt="Raincloud chart of three dose groups: jittered raw scores, boxplots with a flagged outlier, and half-violin distributions"></div>
+      <figcaption><b>Raincloud</b>
+        Raw values, quartiles, and distribution shape in one view. The
+        red ring marks a potential outlier.</figcaption>
+    </figure>
+    <figure class="g">
+      <div class="g-frame"><img src="assets/gallery/rm-line.png"
+        alt="Repeated measures line chart of two groups across Baseline, Week 4, and Week 8 with error bars"></div>
+      <figcaption><b>Repeated measures</b>
+        Within-subject change across occasions, with
+        Cousineau-Morey-corrected error bars by default.</figcaption>
+    </figure>
+    <figure class="g">
+      <div class="g-frame"><img src="assets/gallery/scatter-marginals.png"
+        alt="Scatter chart of stress against cortisol for two age groups with marginal histograms on both axes"></div>
+      <figcaption><b>Scatter with marginals</b>
+        Two groups, 90 observations, and marginal distributions for
+        both variables.</figcaption>
+    </figure>
+    <figure class="g">
+      <div class="g-frame"><img src="assets/gallery/corr-matrix.png"
+        alt="Correlation matrix heatmap of five psychological measures with a diverging color scale"></div>
+      <figcaption><b>Correlation matrix</b>
+        Pairwise correlations on a diverging scale, with optional
+        significance markers and p-value adjustment.</figcaption>
+    </figure>
+    <figure class="g">
+      <div class="g-frame"><img src="assets/gallery/likert.png"
+        alt="Diverging stacked bar chart of five survey items on a five-point agreement scale"></div>
+      <figcaption><b>Likert battery</b>
+        Diverging stacked responses centered on neutral, following the
+        way agreement scales are usually read.</figcaption>
+    </figure>
+    <figure class="g">
+      <div class="g-frame"><img src="assets/gallery/grouped-bar.png"
+        alt="Grouped bar chart of recall by test timing and practice schedule with error bars"></div>
+      <figcaption><b>Grouped bars</b>
+        A factorial design with error bars, plus optional significance
+        brackets and an omnibus test.</figcaption>
+    </figure>
+    <figure class="g">
+      <div class="g-frame"><img src="assets/gallery/histdensity.png"
+        alt="Histogram with an overlaid density curve for a reaction time distribution"></div>
+      <figcaption><b>Histogram + density</b>
+        A histogram and density curve in one view, with an optional
+        normal curve and rug marks.</figcaption>
+    </figure>
+    <figure class="g">
+      <div class="g-frame"><img src="assets/gallery/donut.png"
+        alt="Donut chart of student majors with five categories"></div>
+      <figcaption><b>Donut</b>
+        Parts of a whole with labels that automatically choose readable
+        contrast. Drag the rim to rotate the chart; drag the hole to
+        resize it.</figcaption>
+    </figure>
+  </div>
+
+  <div class="wrap">
+    <div class="try-band">
+      <p><b>Start with a few clicks.</b> Import your data, assign your
+         variables, and let the defaults create the first draft. Then
+         click the chart to refine it.</p>
+      <a class="btn" href="app/">Open the browser app</a>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <a class="brand" href="index.html">
+      <img src="assets/pandion-wing.svg" alt="">
+      Pandion Plots
+    </a>
+    <span>Made by Torry Scott Dennis, PhD.</span>
+    <span data-role="foot-meta">Version 3.0.0 &middot;
+      <a href="https://github.com/torryscott/pandion/blob/main/LICENSE">GPL-3.0</a>
+    </span>
+    <nav class="foot-links" aria-label="Footer">
+      <a href="app/">Try it</a>
+      <a href="gallery.html">Gallery</a>
+      <a href="docs/">Docs</a>
+      <a href="about.html#cite">How to cite</a>
+      <a href="about.html">About</a>
+      <a href="https://github.com/torryscott/pandion">GitHub</a>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>

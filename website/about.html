@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>About - Pandion Plots</title>
+<meta name="description" content="Meet the developer behind Pandion Plots, learn why the app exists, and find citation, licensing, privacy, and support information.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<meta name="theme-color" content="#192E49">
+<link rel="canonical" href="https://pandionplots.com/about.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Pandion Plots">
+<meta property="og:title" content="About - Pandion Plots">
+<meta property="og:description" content="Meet the developer behind Pandion Plots and learn about the app's design, privacy, citation, license, and support.">
+<meta property="og:url" content="https://pandionplots.com/about.html">
+<meta property="og:image" content="https://pandionplots.com/assets/share-card-copy-refresh.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="About - Pandion Plots">
+<meta name="twitter:description" content="Meet the developer behind Pandion Plots and learn about the app's design, privacy, citation, license, and support.">
+<meta name="twitter:image" content="https://pandionplots.com/assets/share-card-copy-refresh.png">
+<style>
+  :root {
+    --navy: #192E49;
+    --cobalt: #375CA0;
+    --amber: #E3A12E;
+    --ink: #22364d;
+    --muted: #5f6f80;
+    --line: #dde5ee;
+    --wash: #f4f7fb;
+  }
+  * { box-sizing: border-box; }
+  /* Anchor targets must clear the sticky header. */
+  html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+  body {
+    margin: 0; color: var(--ink); background: #fff;
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--cobalt); }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+  header {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(255,255,255,0.92); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav { display: flex; align-items: center; gap: 10px; height: 60px; }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    color: var(--navy); text-decoration: none;
+    font-weight: 800; font-size: 18px; letter-spacing: -0.01em;
+  }
+  .brand img { width: 34px; height: 34px; }
+  .nav-links { margin-left: auto; display: flex; gap: 4px; }
+  .nav-links a {
+    color: var(--ink); text-decoration: none; font-size: 14.5px;
+    font-weight: 600; padding: 7px 12px; border-radius: 7px;
+  }
+  .nav-links a:hover { background: var(--wash); color: var(--navy); }
+  .nav-links a[aria-current="page"] { color: var(--cobalt); }
+  .nav-links a.nav-cta { color: #fff; background: var(--navy); margin-left: 6px; }
+  .nav-links a.nav-cta:hover { background: #24405f; }
+
+  .page { padding: 60px 0 40px; }
+  .about-grid {
+    display: grid; grid-template-columns: 1fr 300px; gap: 56px;
+    align-items: start;
+  }
+  .kicker {
+    color: #8a6414; font-size: 13px; font-weight: 800;
+    letter-spacing: 0.12em; text-transform: uppercase; margin: 0 0 8px;
+  }
+  h1 {
+    margin: 0 0 22px; color: var(--navy);
+    font-size: clamp(30px, 4vw, 40px); letter-spacing: -0.015em;
+  }
+  .prose p { margin: 0 0 18px; color: #3d4a58; }
+  .prose p.kicker { color: #8a6414; }
+  .prose p.first { font-size: 18px; color: var(--ink); }
+  h2 {
+    margin: 34px 0 10px; color: var(--navy); font-size: 21px;
+    letter-spacing: -0.01em;
+  }
+  .aside { position: sticky; top: 84px; }
+  .dev-card {
+    border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+    background: #fff; box-shadow: 0 8px 26px rgba(25, 46, 73, 0.07);
+  }
+  .dev-card .art { background: var(--wash); padding: 26px; text-align: center; }
+  .dev-card .art img.avatar {
+    width: 132px; height: 132px; border-radius: 50%;
+    object-fit: cover; border: 3px solid #fff;
+    box-shadow: 0 5px 16px rgba(25, 46, 73, 0.20);
+  }
+  .dev-card .body { padding: 18px 20px 20px; }
+  .dev-card h3 { margin: 0 0 3px; color: var(--navy); font-size: 17px; }
+  .dev-card .role { margin: 0 0 14px; color: var(--muted); font-size: 13.5px; }
+  .dev-card ul { list-style: none; margin: 0; padding: 0; }
+  .dev-card li { margin: 7px 0; font-size: 14px; }
+  .dev-card li a { text-decoration: none; font-weight: 600; }
+  .dev-card li a:hover { text-decoration: underline; }
+  /* The osprey sits beside the paragraph that explains it. */
+  .why-pandion { display: flex; align-items: center; gap: 22px; }
+  .why-pandion img { width: 142px; height: auto; flex: 0 0 auto; }
+  .why-pandion p { margin: 0; }
+  .prose p.cite-version {
+    margin: -6px 0 12px; color: var(--muted); font-size: 13.5px;
+  }
+  .cite-card {
+    margin: 0 0 14px; border: 1px solid var(--line); border-radius: 10px;
+    overflow: hidden; background: #fbfcfe;
+  }
+  .cite-toolbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px;
+    padding: 8px 10px; background: var(--wash);
+    border-bottom: 1px solid var(--line);
+  }
+  .cite-format-control {
+    display: flex; align-items: center; gap: 8px;
+  }
+  .cite-format-label {
+    color: var(--muted); font-size: 11px; font-weight: 700;
+    letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .cite-select {
+    min-width: 152px; padding: 6px 30px 6px 10px;
+    color: var(--navy); background: #fff; border: 1px solid #c3d0df;
+    border-radius: 6px; font: inherit; font-size: 13px; font-weight: 650;
+  }
+  .cite-actions {
+    display: flex; align-items: center; gap: 7px; margin-left: auto;
+  }
+  .cite-select:focus-visible, .cite-copy:focus-visible,
+  .cite-download:focus-visible {
+    outline: 3px solid rgba(55, 92, 160, 0.24); outline-offset: 2px;
+  }
+  .cite-copy, .cite-download {
+    -webkit-appearance: none; appearance: none;
+    font: inherit; font-size: 12px; font-weight: 650;
+    color: var(--navy); background: #fff; border: 1px solid #c3d0df;
+    border-radius: 6px; padding: 6px 12px; cursor: pointer;
+  }
+  .cite-copy:hover, .cite-download:hover {
+    border-color: var(--cobalt); color: var(--cobalt);
+  }
+  .cite-panel { padding: 17px 18px; }
+  .cite-panel[hidden] { display: none; }
+  .prose .cite-panel p {
+    margin: 0; color: #2c3a49; font-size: 15px; line-height: 1.65;
+  }
+  .cite-panel cite { font-style: italic; }
+  .cite-panel pre {
+    margin: 0; overflow-x: auto;
+    font: 12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: #2c3a49; white-space: pre-wrap; word-break: break-word;
+  }
+  .principles {
+    margin: 26px 0 0; padding: 20px 22px; background: var(--wash);
+    border: 1px solid var(--line); border-radius: 12px;
+  }
+  .principles h3 {
+    margin: 0 0 10px; color: var(--navy); font-size: 14px;
+    letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .principles ul { margin: 0; padding: 0 0 0 18px; color: var(--muted); }
+  .principles li { margin: 7px 0; font-size: 14px; }
+
+  footer { border-top: 1px solid var(--line); padding: 36px 0 48px; margin-top: 48px; }
+  .foot {
+    display: flex; flex-wrap: wrap; gap: 18px; align-items: center;
+    color: var(--muted); font-size: 13.5px;
+  }
+  .foot .brand { font-size: 15px; }
+  .foot .brand img { width: 26px; height: 26px; }
+  .foot-links { margin-left: auto; display: flex; flex-wrap: wrap; gap: 10px 18px; }
+  .foot-links a { color: var(--muted); text-decoration: none; }
+  .foot-links a:hover { color: var(--cobalt); }
+
+  @media (max-width: 860px) {
+    .why-pandion { flex-direction: column; align-items: flex-start; gap: 14px; }
+    .about-grid { grid-template-columns: 1fr; }
+    .aside { position: static; order: -1; max-width: 340px; }
+    /* Do NOT hide the nav on phones: it used to leave only the
+       CTA, stranding Gallery/Docs/About. Wrap it under the brand. */
+    .nav { height: auto; flex-wrap: wrap; padding: 8px 0; row-gap: 4px; }
+    .nav-links { margin-left: 0; width: 100%; flex-wrap: wrap; gap: 2px; }
+    .nav-links a { padding: 6px 9px; font-size: 13.5px; }
+    .nav-links a.nav-cta { margin-left: auto; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="index.html">
+      <img src="assets/pandion-wing.svg" alt="">
+      Pandion Plots
+    </a>
+    <nav class="nav-links" aria-label="Site">
+      <a href="gallery.html">Gallery</a>
+      <a href="docs/">Docs</a>
+      <a href="index.html#downloads">Downloads</a>
+      <a href="about.html" aria-current="page">About</a>
+      <a href="https://github.com/torryscott/pandion">GitHub</a>
+      <a class="nav-cta" href="app/">Try it now</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap page">
+    <div class="about-grid">
+      <div class="prose">
+        <p class="kicker">About</p>
+        <h1>Built for the lab and the classroom.</h1>
+        <p class="first">
+          Pandion Plots is a free, open-source app for making clear,
+          customizable statistical figures without writing code. Use it
+          as a desktop app, in a browser, as a portable HTML file, or
+          inside jamovi. Instead of working through layers of menus,
+          click the chart itself to change its labels, colors, axes,
+          annotations, and layout.
+        </p>
+        <p>
+          Pandion Plots was created by Torry Scott Dennis, PhD, an
+          associate professor of neuroscience and psychology, for two
+          parts of his work that kept asking for the same tool:
+          producing research figures and teaching students to understand
+          data visualization.
+        </p>
+        <p>
+          The project began as Plot Studio in response to a practical
+          problem. Many point-and-click tools are easy to start but
+          difficult to refine. Highly customizable tools often require
+          users to learn a programming language before making their
+          first figure. Pandion Plots is designed for the space between:
+          approachable, direct editing with enough control to produce
+          polished research figures.
+        </p>
+        <p>
+          Every new chart starts with a considered default and remains
+          open to adjustment. Statistics appear beside the figure and
+          are explained in plain language. The aim is not simply to
+          produce better-looking graphs, but to help people understand
+          what those graphs show and communicate their findings clearly.
+        </p>
+        <h2>Why "Pandion"?</h2>
+        <div class="why-pandion">
+          <img src="assets/diving-straight.svg"
+               alt="The Pandion Plots osprey diving along a straight data trend line to seize its final point">
+          <p>
+            <em>Pandion</em> is the genus of the osprey and the source
+            of the app&rsquo;s name. The osprey sees the whole
+            surface before choosing where to dive, a fitting symbol for
+            thoughtful analysis: take in the full picture, then focus on
+            what matters. The name is also a nod to Solomon the Seahawk,
+            the osprey mascot of St. Mary&rsquo;s College of Maryland,
+            where Torry teaches.
+          </p>
+        </div>
+        <h2>Free, private, open</h2>
+        <p>
+          Pandion Plots runs entirely on your device: no accounts,
+          uploads, or telemetry. Privacy is part of the design, not an
+          add-on. The project is open source and developed
+          <a href="https://github.com/torryscott/pandion">on GitHub</a>,
+          where bug reports and suggestions are welcome.
+        </p>
+        <h2 id="cite">Citing Pandion Plots</h2>
+        <p>
+          If you use Pandion Plots in a publication, presentation,
+          report, or teaching resource, please cite the software and
+          include the version.
+        </p>
+        <p class="cite-version">Current version: <b>3.0.0</b></p>
+        <div class="cite-card">
+          <div class="cite-toolbar">
+            <div class="cite-format-control">
+              <label class="cite-format-label" for="cite-format">
+                Citation format
+              </label>
+              <select class="cite-select" id="cite-format">
+                <option value="apa">APA 7</option>
+                <option value="mla">MLA 9</option>
+                <option value="chicago">Chicago (author-date)</option>
+                <option value="ieee">IEEE</option>
+                <option value="vancouver">Vancouver</option>
+                <option value="bibtex">BibTeX</option>
+                <option value="ris">RIS (reference managers)</option>
+              </select>
+            </div>
+            <div class="cite-actions">
+              <button type="button" class="cite-download"
+                      data-download="" hidden>Download</button>
+              <button type="button" class="cite-copy"
+                      data-copy="apa" aria-live="polite">Copy APA</button>
+            </div>
+          </div>
+          <div class="cite-panel" id="cite-panel-apa"
+               role="region" aria-label="APA citation">
+            <p id="cite-apa">Dennis, T. S. (2026). Pandion Plots (Version 3.0.0) [Computer software]. https://pandionplots.com</p>
+          </div>
+          <div class="cite-panel" id="cite-panel-mla"
+               role="region" aria-label="MLA citation" hidden>
+            <p id="cite-mla">Dennis, Torry Scott. <cite>Pandion Plots</cite>. Version 3.0.0, 2026, https://pandionplots.com.</p>
+          </div>
+          <div class="cite-panel" id="cite-panel-chicago"
+               role="region" aria-label="Chicago author-date citation" hidden>
+            <p id="cite-chicago">Dennis, Torry Scott. 2026. <cite>Pandion Plots</cite>. Version 3.0.0. Computer software. https://pandionplots.com.</p>
+          </div>
+          <div class="cite-panel" id="cite-panel-ieee"
+               role="region" aria-label="IEEE citation" hidden>
+            <p id="cite-ieee">T. S. Dennis, <cite>Pandion Plots</cite>, version 3.0.0, computer software, 2026. [Online]. Available: https://pandionplots.com.</p>
+          </div>
+          <div class="cite-panel" id="cite-panel-vancouver"
+               role="region" aria-label="Vancouver citation" hidden>
+            <p id="cite-vancouver">Dennis TS. Pandion Plots [computer software]. Version 3.0.0. 2026. Available from: https://pandionplots.com.</p>
+          </div>
+          <div class="cite-panel" id="cite-panel-bibtex"
+               role="region" aria-label="BibTeX citation" hidden>
+            <pre id="cite-bibtex">@software{dennis_pandion_plots,
+  author  = {Dennis, Torry Scott},
+  title   = {Pandion Plots},
+  version = {3.0.0},
+  year    = {2026},
+  url     = {https://pandionplots.com}
+}</pre>
+          </div>
+          <div class="cite-panel" id="cite-panel-ris"
+               role="region" aria-label="RIS citation" hidden>
+            <pre id="cite-ris">TY  - COMP
+AU  - Dennis, Torry Scott
+TI  - Pandion Plots
+PY  - 2026
+ET  - 3.0.0
+UR  - https://pandionplots.com
+ER  -</pre>
+          </div>
+        </div>
+
+        <h2 id="license">License</h2>
+        <p>
+          Pandion Plots is released under the
+          <a href="https://github.com/torryscott/pandion/blob/main/LICENSE">GNU
+          General Public License v3.0</a>. It is free to use, free to
+          share, and free to install on as many machines as you like,
+          including lab and classroom computers. If you modify or
+          redistribute the software, consult the license for the terms
+          that apply.
+        </p>
+
+        <h2 id="support">Help and support</h2>
+        <p>
+          The <a href="docs/">user guide</a> covers the chart editor in
+          detail, including the toolbar, styling tools, statistics panel,
+          exporting, and troubleshooting. If something looks wrong or
+          the guide does not answer your question, please
+          <a href="https://github.com/torryscott/pandion/issues">open an
+          issue on GitHub</a>. Include your Pandion version, where you
+          ran it (browser, portable file, or jamovi), and the steps
+          needed to reproduce the problem.
+        </p>
+      </div>
+      <aside class="aside">
+        <div class="dev-card">
+          <div class="art">
+            <img class="avatar" src="assets/torry-dennis.jpg"
+                 alt="Torry Scott Dennis">
+          </div>
+          <div class="body">
+            <h3>Torry Scott Dennis, PhD</h3>
+            <p class="role">Associate professor of neuroscience and
+              psychology. Developer of Pandion Plots.</p>
+            <ul>
+              <li><a href="https://github.com/torryscott/pandion">GitHub: the Pandion Plots project</a></li>
+            </ul>
+          </div>
+        </div>
+        <div class="principles">
+          <h3>Design principles</h3>
+          <ul>
+            <li>The first draft should be presentable.</li>
+            <li>The numbers behind a figure must hold up.</li>
+            <li>Never change anyone's data invisibly.</li>
+            <li>Explain everything in plain language.</li>
+            <li>Your data never leaves your machine.</li>
+          </ul>
+        </div>
+      </aside>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <a class="brand" href="index.html">
+      <img src="assets/pandion-wing.svg" alt="">
+      Pandion Plots
+    </a>
+    <span>Made by Torry Scott Dennis, PhD.</span>
+    <span data-role="foot-meta">Version 3.0.0 &middot;
+      <a href="https://github.com/torryscott/pandion/blob/main/LICENSE">GPL-3.0</a>
+    </span>
+    <nav class="foot-links" aria-label="Footer">
+      <a href="app/">Try it</a>
+      <a href="gallery.html">Gallery</a>
+      <a href="docs/">Docs</a>
+      <a href="about.html#cite">How to cite</a>
+      <a href="about.html">About</a>
+      <a href="https://github.com/torryscott/pandion">GitHub</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+var citeSelect = document.getElementById('cite-format');
+var citeCopy = document.querySelector('.cite-copy');
+var citeDownload = document.querySelector('.cite-download');
+var citePanels = Array.prototype.slice.call(
+  document.querySelectorAll('.cite-panel')
+);
+var citeLabels = {
+  apa: 'APA',
+  mla: 'MLA',
+  chicago: 'Chicago',
+  ieee: 'IEEE',
+  vancouver: 'Vancouver',
+  bibtex: 'BibTeX',
+  ris: 'RIS'
+};
+
+function citationLabel(format) {
+  return citeLabels[format] || format;
+}
+
+function selectCitation(format) {
+  citePanels.forEach(function (panel) {
+    panel.hidden = panel.id !== 'cite-panel-' + format;
+  });
+  if (citeCopy) {
+    citeCopy.setAttribute('data-copy', format);
+    citeCopy.textContent = 'Copy ' + citationLabel(format);
+  }
+  if (citeDownload) {
+    var downloadable = format === 'bibtex' || format === 'ris';
+    citeDownload.hidden = !downloadable;
+    citeDownload.setAttribute(
+      'data-download',
+      downloadable ? format : ''
+    );
+    if (downloadable) {
+      citeDownload.textContent =
+        'Download .' + (format === 'bibtex' ? 'bib' : 'ris');
+    }
+  }
+}
+
+if (citeSelect) {
+  citeSelect.addEventListener('change', function () {
+    selectCitation(citeSelect.value);
+  });
+  selectCitation(citeSelect.value);
+}
+
+document.addEventListener('click', function (e) {
+  var b = e.target.closest && e.target.closest('.cite-copy');
+  if (!b) return;
+  var format = b.getAttribute('data-copy');
+  var citation = document.getElementById('cite-' + format);
+  if (!citation) return;
+  var copyText = citation.textContent.trim();
+  var done = function () {
+    b.textContent = 'Copied ' + citationLabel(format);
+    setTimeout(function () {
+      if (b.getAttribute('data-copy') === format) {
+        b.textContent = 'Copy ' + citationLabel(format);
+      }
+    }, 1600);
+  };
+  var fallback = function () {
+    var r = document.createRange();
+    r.selectNodeContents(citation);
+    var s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    try { document.execCommand('copy'); done(); } catch (err) {}
+    s.removeAllRanges();
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(copyText).then(done, fallback);
+  } else {
+    fallback();
+  }
+});
+
+document.addEventListener('click', function (e) {
+  var b = e.target.closest && e.target.closest('.cite-download');
+  if (!b || b.hidden) return;
+  var format = b.getAttribute('data-download');
+  var citation = document.getElementById('cite-' + format);
+  if (!citation) return;
+  var downloadText = citation.textContent.trim();
+  var extension = format === 'bibtex' ? 'bib' : 'ris';
+  var lineEnding = format === 'ris' ? '\r\n' : '\n';
+  if (format === 'ris') {
+    downloadText = downloadText.replace(/\r?\n/g, lineEnding);
+  }
+  downloadText += lineEnding;
+  var mimeType = format === 'bibtex'
+    ? 'application/x-bibtex;charset=utf-8'
+    : 'application/x-research-info-systems;charset=utf-8';
+  var downloadUrl = URL.createObjectURL(
+    new Blob([downloadText], { type: mimeType })
+  );
+  var link = document.createElement('a');
+  link.href = downloadUrl;
+  link.download = 'pandion-plots-3.0.0.' + extension;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(function () {
+    URL.revokeObjectURL(downloadUrl);
+  }, 0);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /v2.html
+Disallow: /v3.html
+
+Sitemap: https://pandionplots.com/sitemap.xml

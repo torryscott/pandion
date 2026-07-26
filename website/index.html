@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pandion Plots - free statistical graphing without code</title>
+<meta name="description" content="Create clear, customizable statistical figures without code. Pandion Plots is free, open source, private, and available in your browser, as a desktop app, or inside jamovi.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<meta name="theme-color" content="#192E49">
+<link rel="canonical" href="https://pandionplots.com/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Pandion Plots">
+<meta property="og:title" content="Pandion Plots">
+<meta property="og:description" content="Create clear, customizable statistical figures without code. Free, open source, and private by design.">
+<meta property="og:url" content="https://pandionplots.com/">
+<meta property="og:image" content="https://pandionplots.com/assets/share-card-copy-refresh.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Pandion Plots">
+<meta name="twitter:description" content="Create clear, customizable statistical figures without code. Free, open source, and private by design.">
+<meta name="twitter:image" content="https://pandionplots.com/assets/share-card-copy-refresh.png">
+<style>
+  :root {
+    --navy: #192E49;
+    --cobalt: #375CA0;
+    --sky: #3E6DA9;
+    --amber: #E3A12E;
+    --ink: #22364d;
+    --muted: #5f6f80;
+    --line: #dde5ee;
+    --wash: #f4f7fb;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+  body {
+    margin: 0; color: var(--ink); background: #fff;
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--cobalt); }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+  /* ---- header ---- */
+  header {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(255,255,255,0.92); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav {
+    display: flex; align-items: center; gap: 10px; height: 60px;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    color: var(--navy); text-decoration: none;
+    font-weight: 800; font-size: 18px; letter-spacing: -0.01em;
+  }
+  .brand img { width: 34px; height: 34px; }
+  .nav-links { margin-left: auto; display: flex; gap: 4px; }
+  .nav-links a {
+    color: var(--ink); text-decoration: none; font-size: 14.5px;
+    font-weight: 600; padding: 7px 12px; border-radius: 7px;
+  }
+  .nav-links a:hover { background: var(--wash); color: var(--navy); }
+  .nav-links a.nav-cta {
+    color: #fff; background: var(--navy); margin-left: 6px;
+  }
+  .nav-links a.nav-cta:hover { background: #24405f; }
+
+  /* ---- hero ---- */
+  .hero {
+    background:
+      radial-gradient(1100px 500px at 85% -10%, #e8f0fa 0%, rgba(232,240,250,0) 60%),
+      linear-gradient(#fff, var(--wash));
+    border-bottom: 1px solid var(--line);
+  }
+  .hero-grid {
+    display: grid; grid-template-columns: 1.15fr 0.85fr;
+    gap: 40px; align-items: center; padding: 72px 0 64px;
+  }
+  .hero h1 {
+    margin: 0 0 18px; color: var(--navy);
+    font-size: clamp(34px, 5vw, 50px); line-height: 1.12;
+    letter-spacing: -0.02em; font-weight: 800;
+  }
+  .hero h1 em { font-style: normal; color: var(--cobalt); }
+  .hero p.lede {
+    margin: 0 0 30px; max-width: 34em;
+    color: var(--muted); font-size: 18.5px;
+  }
+  .cta-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 9px;
+    padding: 13px 24px; border-radius: 9px; text-decoration: none;
+    font-weight: 700; font-size: 16px; border: 1px solid transparent;
+  }
+  .btn-primary { color: #fff; background: var(--navy); }
+  .btn-primary:hover { background: #24405f; }
+  .btn-secondary {
+    color: var(--navy); background: #fff; border-color: #c3d0df;
+  }
+  .btn-secondary:hover { border-color: var(--cobalt); color: var(--cobalt); }
+  .cta-note { flex-basis: 100%; color: var(--muted); font-size: 13px; }
+  .hero-art { display: flex; justify-content: center; }
+  /* Presented as a brand card. The art is a TRANSPARENT vector, so the
+     card supplies its own white ground and inner padding (the old PNG
+     had both baked in). */
+  .hero-art img {
+    width: min(100%, 310px); height: auto;
+    padding: 22px; background: #fff;
+    border-radius: 18px; border: 1px solid var(--line);
+    box-shadow: 0 18px 40px rgba(25, 46, 73, 0.16);
+  }
+
+  /* ---- product shot ---- */
+  .shot { padding: 64px 0 8px; }
+  .shot figure { margin: 0; }
+  .shot-frame {
+    border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+    box-shadow: 0 24px 60px rgba(25, 46, 73, 0.16);
+    background: #fff;
+  }
+  .shot-bar {
+    display: flex; gap: 6px; padding: 10px 14px;
+    background: #eef2f7; border-bottom: 1px solid var(--line);
+  }
+  .shot-bar i {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #cdd7e2; display: block;
+  }
+  .shot img { display: block; width: 100%; height: auto; }
+  .shot figcaption {
+    margin-top: 14px; text-align: center;
+    color: var(--muted); font-size: 14px;
+  }
+
+  /* ---- sections ---- */
+  section { padding: 72px 0; }
+  .kicker {
+    color: #8a6414; font-size: 13px; font-weight: 800;
+    letter-spacing: 0.12em; text-transform: uppercase; margin: 0 0 8px;
+  }
+  h2 {
+    margin: 0 0 12px; color: var(--navy);
+    font-size: clamp(26px, 3.4vw, 34px); letter-spacing: -0.015em;
+  }
+  .section-lede { margin: 0 0 40px; max-width: 44em; color: var(--muted); }
+
+  .release-line {
+    margin: -26px 0 34px; color: var(--muted); font-size: 14px;
+  }
+  .release-line b { color: var(--navy); }
+  /* ---- download cards ---- */
+  .cards {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px;
+  }
+  .card {
+    display: flex; flex-direction: column;
+    border: 1px solid var(--line); border-radius: 12px;
+    padding: 24px 22px; background: #fff;
+    transition: transform 120ms ease, box-shadow 120ms ease,
+      border-color 120ms ease;
+  }
+  .card:hover {
+    transform: translateY(-3px); border-color: #b9c9db;
+    box-shadow: 0 14px 34px rgba(25, 46, 73, 0.10);
+  }
+  .card-icon {
+    width: 44px; height: 44px; border-radius: 10px;
+    display: grid; place-items: center; margin-bottom: 16px;
+    background: #e8f0fa; color: var(--cobalt);
+  }
+  .card h3 { margin: 0 0 6px; color: var(--navy); font-size: 18px; }
+  .card p { margin: 0 0 18px; color: var(--muted); font-size: 14px; flex: 1; }
+  .card .btn {
+    justify-content: center; padding: 10px 16px; white-space: nowrap;
+    font-size: 14.5px;
+  }
+  .card .fine {
+    margin-top: 10px; color: #6b7887; font-size: 12px; text-align: center;
+  }
+  /* ---- gallery teaser ---- */
+  .gallery-teaser { padding-top: 8px; }
+  .tease-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px;
+  }
+  .tease-grid a {
+    display: block; border: 1px solid var(--line); border-radius: 10px;
+    overflow: hidden; background: #fff;
+    box-shadow: 0 6px 20px rgba(25, 46, 73, 0.06);
+    transition: transform 120ms ease, box-shadow 120ms ease;
+  }
+  .tease-grid a:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 14px 32px rgba(25, 46, 73, 0.12);
+  }
+  .tease-grid img { display: block; width: 100%; height: auto; }
+  .tease-more { margin: 18px 0 0; font-size: 15px; }
+  .tease-more a { font-weight: 700; text-decoration: none; }
+  .tease-more a:hover { text-decoration: underline; }
+
+  /* ---- features: the lab / classroom pillars ---- */
+  .features { background: var(--wash); border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line); }
+  .pillars {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 26px 44px;
+  }
+  .pillar-title {
+    margin: 0 0 16px; padding-bottom: 9px; font-size: 13px;
+    font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase;
+    border-bottom: 2px solid var(--cobalt); color: var(--navy);
+  }
+  .pillar-title.classroom { border-bottom-color: var(--amber); }
+  .pillar .feature { margin-bottom: 22px; }
+  .pillar .feature:last-child { margin-bottom: 0; }
+  .pillar:nth-child(1) .feature .dot { background: var(--cobalt); }
+  .pillar:nth-child(2) .feature .dot { background: var(--amber); }
+  .both-note {
+    margin: 34px 0 0; padding-top: 20px; border-top: 1px solid var(--line);
+    color: var(--muted); font-size: 15px; max-width: 46em;
+  }
+  .feature h3 {
+    margin: 0 0 6px; color: var(--navy); font-size: 16.5px;
+    display: flex; align-items: center; gap: 9px;
+  }
+  .feature h3 .dot {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--amber); flex: 0 0 auto;
+  }
+  .feature p { margin: 0; color: var(--muted); font-size: 14.5px; }
+
+  /* ---- footer ---- */
+  footer { padding: 44px 0 56px; }
+  .foot {
+    display: flex; flex-wrap: wrap; gap: 18px; align-items: center;
+    color: var(--muted); font-size: 13.5px;
+  }
+  .foot .brand { font-size: 15px; }
+  .foot .brand img { width: 26px; height: 26px; }
+  .foot-links { margin-left: auto; display: flex; flex-wrap: wrap; gap: 10px 18px; }
+  .foot-links a { color: var(--muted); text-decoration: none; }
+  .foot-links a:hover { color: var(--cobalt); }
+
+  @media (max-width: 900px) {
+    .hero-grid { grid-template-columns: 1fr; padding: 48px 0 44px; }
+    .hero-art { order: -1; }
+    .hero-art img { width: min(52vw, 260px); }
+    .cards { grid-template-columns: repeat(2, 1fr); }
+    .feature-grid { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 560px) {
+    .cards { grid-template-columns: 1fr; }
+    .feature-grid { grid-template-columns: 1fr; }
+    /* Do NOT hide the nav on phones: it used to leave only the
+       CTA, stranding Gallery/Docs/About. Wrap it under the brand. */
+    .nav { height: auto; flex-wrap: wrap; padding: 8px 0; row-gap: 4px; }
+    .nav-links { margin-left: 0; width: 100%; flex-wrap: wrap; gap: 2px; }
+    .nav-links a { padding: 6px 9px; font-size: 13.5px; }
+    .nav-links a.nav-cta { margin-left: auto; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="#">
+      <img src="assets/pandion-wing.svg" alt="">
+      Pandion Plots
+    </a>
+    <nav class="nav-links" aria-label="Site">
+      <a href="gallery.html">Gallery</a>
+      <a href="docs/">Docs</a>
+      <a href="#downloads">Downloads</a>
+      <a href="about.html">About</a>
+      <a href="https://github.com/torryscott/pandion">GitHub</a>
+      <a class="nav-cta" href="app/">Try it now</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <h1>Clear statistical figures <em>without the struggle.</em></h1>
+        <p class="lede">
+          Pandion Plots is a free, open-source graphing app for
+          researchers, instructors, and students. Import your data,
+          assign variables, and create a polished statistical figure
+          without code. Click the chart to refine its labels, colors,
+          axes, annotations, and layout. Everything runs locally, so
+          your data stays on your computer.
+        </p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="app/">Open the browser app</a>
+          <a class="btn btn-secondary" href="#downloads">See download options</a>
+          <span class="cta-note">Free, open source, and private by design.</span>
+        </div>
+      </div>
+      <div class="hero-art">
+        <img src="assets/diving-straight.svg"
+             alt="The Pandion Plots osprey diving along a straight data trend
+                  line to seize its final point">
+      </div>
+    </div>
+  </div>
+
+  <div class="shot">
+    <div class="wrap">
+      <figure>
+        <div class="shot-frame">
+          <div class="shot-bar" aria-hidden="true"><i></i><i></i><i></i></div>
+          <img src="assets/app-scatter.png"
+               alt="The Pandion Plots app: a scatter chart with marginal distributions, a spreadsheet-style data workspace, and a plain-language chart setup panel">
+        </div>
+        <figcaption>
+          A scatterplot with marginal distributions, created from the
+          built-in sample data in a few clicks.
+        </figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <section id="downloads">
+    <div class="wrap">
+      <p class="kicker">Get Pandion Plots</p>
+      <h2>Use Pandion in the browser, on your desktop, or inside jamovi.</h2>
+      <p class="section-lede">
+        The browser, desktop, and portable versions share the same
+        charting workflow and project format, so you can move your work
+        between them. Inside jamovi, the same chart engine keeps plots
+        alongside your analyses in the .omv file.
+      </p>
+      <p class="release-line">
+        Current release <b>3.0.0</b>, GPL-3.0.
+        <a href="https://github.com/torryscott/pandion/releases">Release notes</a>
+        &middot; <a href="docs/">User guide</a>
+        &middot; <a href="about.html#cite">How to cite</a>
+      </p>
+      <div class="cards">
+        <div class="card">
+          <div class="card-icon" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="4" width="18" height="13" rx="2"/>
+              <path d="M8 21h8M12 17v4"/>
+            </svg>
+          </div>
+          <h3>Desktop app</h3>
+          <p>Install Pandion Plots on macOS or Windows for standard file
+             associations, a familiar desktop workflow, and full
+             offline access.</p>
+          <a class="btn btn-secondary"
+             href="download.html">Choose your download</a>
+          <div class="fine">Available for macOS and Windows</div>
+        </div>
+        <div class="card">
+          <div class="card-icon" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/>
+              <rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/>
+              <rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/>
+              <rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/>
+            </svg>
+          </div>
+          <h3>Inside jamovi</h3>
+          <p>Use the same chart engine beside your jamovi analyses, with
+             plots stored in the same .omv file.</p>
+          <a class="btn btn-secondary"
+             href="https://github.com/torryscott/pandion/releases/latest">Download the module</a>
+          <div class="fine">Install the .jmo file through jamovi</div>
+        </div>
+        <div class="card">
+          <div class="card-icon" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3v11M8 10l4 4 4-4"/>
+              <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
+            </svg>
+          </div>
+          <h3>Portable file</h3>
+          <p>Download the entire app as one self-contained HTML file.
+             Keep it on a USB drive, share it with students, or work
+             offline. No installation is required.</p>
+          <a class="btn btn-secondary"
+             href="pandion-plots.html" download>Download HTML app</a>
+          <div class="fine">One file, about 3.5 MB</div>
+        </div>
+        <div class="card">
+          <div class="card-icon" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+              <circle cx="12" cy="12" r="9"/>
+              <path d="M3.5 12h17M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>
+            </svg>
+          </div>
+          <h3>In your browser</h3>
+          <p>Start immediately. Import CSV, Excel, or jamovi files and
+             build charts without installing anything. Your current
+             project is saved locally in your browser.</p>
+          <a class="btn btn-primary" href="app/">Open the browser app</a>
+          <div class="fine">Works in current desktop browsers</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="gallery-teaser">
+    <div class="wrap">
+      <p class="kicker">Gallery</p>
+      <h2>Start with a polished first draft.</h2>
+      <p class="section-lede">
+        Every image in the gallery is an unretouched render made with
+        the app's default styling.
+      </p>
+      <div class="tease-grid">
+        <a href="gallery.html"><img src="assets/gallery/raincloud.png"
+          alt="Raincloud chart of three dose groups"></a>
+        <a href="gallery.html"><img src="assets/gallery/likert.png"
+          alt="Diverging stacked Likert chart of five survey items"></a>
+        <a href="gallery.html"><img src="assets/gallery/scatter-marginals.png"
+          alt="Scatter chart with marginal histograms"></a>
+      </div>
+      <p class="tease-more"><a href="gallery.html">Browse the full gallery</a></p>
+    </div>
+  </section>
+
+  <section class="features" id="features">
+    <div class="wrap">
+      <p class="kicker">Why Pandion</p>
+      <h2>Built for research. Designed to teach.</h2>
+      <p class="section-lede">
+        Pandion Plots supports the full figure-making process: explore
+        your data, check assumptions, run relevant statistics, and
+        prepare a chart for a paper or presentation. When you want
+        help, it explains results and design choices in plain language.
+        Experienced users can stay focused on the work; newer users can
+        follow the guidance.
+      </p>
+      <div class="pillars">
+        <div class="pillar">
+          <h3 class="pillar-title lab">In the lab</h3>
+          <div class="feature">
+            <h3><span class="dot"></span>Statistics you can check</h3>
+            <p>Comparisons, multiple-comparison corrections, and effect
+               sizes are verified against R, with APA-style results
+               ready to copy.</p>
+          </div>
+          <div class="feature">
+            <h3><span class="dot"></span>Figures ready to share</h3>
+            <p>Build multi-panel layouts and export SVG, PNG, JPG, or
+               vector PDF files, with captions included.</p>
+          </div>
+          <div class="feature">
+            <h3><span class="dot"></span>Private by design</h3>
+            <p>Everything runs on your computer. No accounts, uploads,
+               cloud processing, or telemetry.</p>
+          </div>
+        </div>
+        <div class="pillar">
+          <h3 class="pillar-title classroom">In the classroom</h3>
+          <div class="feature">
+            <h3><span class="dot"></span>Explanations when you need them</h3>
+            <p>Get plain-language interpretations of tests, estimates,
+               and intervals, with definitions in the built-in
+               glossary.</p>
+          </div>
+          <div class="feature">
+            <h3><span class="dot"></span>Checks for common graph problems</h3>
+            <p>Built-in checks flag truncated axes, difficult color
+               choices, and other issues before you share a figure.</p>
+          </div>
+          <div class="feature">
+            <h3><span class="dot"></span>Help Me Choose</h3>
+            <p>Select your variables and answer a few questions.
+               Pandion recommends suitable chart types and explains why
+               they fit.</p>
+          </div>
+        </div>
+      </div>
+      <p class="both-note">
+        Both experiences share the same foundation: considered
+        defaults, direct-on-chart editing, and imports from CSV, Excel,
+        and jamovi.
+      </p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <a class="brand" href="#">
+      <img src="assets/pandion-wing.svg" alt="">
+      Pandion Plots
+    </a>
+    <span>Made by Torry Scott Dennis, PhD.</span>
+    <span data-role="foot-meta">Version 3.0.0 &middot;
+      <a href="https://github.com/torryscott/pandion/blob/main/LICENSE">GPL-3.0</a>
+    </span>
+    <nav class="foot-links" aria-label="Footer">
+      <a href="app/">Try it</a>
+      <a href="gallery.html">Gallery</a>
+      <a href="#downloads">Downloads</a>
+      <a href="docs/">Docs</a>
+      <a href="about.html#cite">How to cite</a>
+      <a href="about.html">About</a>
+      <a href="https://github.com/torryscott/pandion">GitHub</a>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>
