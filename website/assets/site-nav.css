@@ -1,0 +1,127 @@
+.nav-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 44px;
+  min-height: 44px;
+  margin-left: auto;
+  padding: 8px 10px;
+  border: 1px solid #c3d0df;
+  border-radius: 8px;
+  color: var(--navy);
+  background: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.nav-toggle:hover {
+  border-color: var(--cobalt);
+  color: var(--cobalt);
+}
+
+.nav-toggle:focus-visible,
+.nav-links a:focus-visible {
+  outline: 3px solid rgba(55, 92, 160, 0.24);
+  outline-offset: 2px;
+}
+
+.nav-toggle-icon,
+.nav-toggle-icon::before,
+.nav-toggle-icon::after {
+  display: block;
+  width: 18px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.nav-toggle-icon {
+  position: relative;
+}
+
+.nav-toggle-icon::before,
+.nav-toggle-icon::after {
+  position: absolute;
+  left: 0;
+  content: "";
+}
+
+.nav-toggle-icon::before {
+  top: -6px;
+}
+
+.nav-toggle-icon::after {
+  top: 6px;
+}
+
+/* Keep the shared page gutters when a layout class also sets block padding. */
+.wrap {
+  padding-inline: 24px;
+}
+
+@media (max-width: 760px) {
+  html {
+    scroll-padding-top: 72px;
+  }
+
+  .wrap {
+    padding-inline: 18px;
+  }
+
+  .nav {
+    min-height: 60px;
+    height: auto;
+    flex-wrap: wrap;
+    padding-block: 8px;
+    row-gap: 0;
+  }
+
+  .nav-toggle {
+    display: inline-flex;
+  }
+
+  .nav-links {
+    display: none;
+    width: 100%;
+    margin: 8px 0 2px;
+    padding: 8px 0 0;
+    flex-direction: column;
+    gap: 2px;
+    border-top: 1px solid var(--line);
+  }
+
+  .nav-links.is-open {
+    display: flex;
+  }
+
+  .nav-links a {
+    width: 100%;
+    padding: 9px 10px;
+    border-radius: 7px;
+    font-size: 14.5px;
+  }
+
+  .nav-links a.nav-cta {
+    margin: 6px 0 0;
+    padding: 10px 14px;
+    text-align: center;
+  }
+
+  .page-head {
+    padding-top: 34px;
+  }
+
+  .grid {
+    gap: 30px;
+    padding-top: 24px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}

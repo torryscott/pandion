@@ -131,6 +131,8 @@
     .nav-links a.nav-cta { margin-left: auto; }
   }
 </style>
+<link rel="stylesheet" href="assets/site-nav.css">
+<script src="assets/site-nav.js" defer></script>
 </head>
 <body>
 
@@ -140,7 +142,12 @@
       <img src="assets/pandion-wing.svg" alt="">
       Pandion Plots
     </a>
-    <nav class="nav-links" aria-label="Site">
+    <button class="nav-toggle" type="button" aria-expanded="false"
+      aria-controls="site-nav">
+      <span class="nav-toggle-icon" aria-hidden="true"></span>
+      <span>Menu</span>
+    </button>
+    <nav class="nav-links" id="site-nav" aria-label="Site">
       <a href="gallery.html" aria-current="page">Gallery</a>
       <a href="docs/">Docs</a>
       <a href="index.html#downloads">Downloads</a>
