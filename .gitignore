@@ -38,6 +38,23 @@ vignettes/*.pdf
 # R Environment Variables
 .Renviron
 
+# Secrets and local deployment credentials
+.env
+.env.*
+!.env.example
+!.env.sample
+.dev.vars
+.dev.vars.*
+.wrangler/
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+credentials.json
+secrets.json
+
 # renv library
 renv/library/
 renv/staging/
