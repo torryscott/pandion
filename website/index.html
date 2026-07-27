@@ -136,6 +136,25 @@
     color: var(--muted); font-size: 14px;
   }
 
+  /* ---- the two workspaces a chart tool usually leaves out ---- */
+  .workspaces .shot-block { margin-top: 44px; }
+  .workspaces .shot-block:first-of-type { margin-top: 0; }
+  .workspaces h3 {
+    margin: 0 0 8px; color: var(--navy); font-size: 20px;
+    letter-spacing: -0.01em;
+  }
+  .workspaces .shot-block > p {
+    margin: 0 0 20px; max-width: 46em; color: var(--muted);
+    font-size: 15.5px;
+  }
+  .workspaces figure { margin: 0; }
+  /* .shot-frame clips its overflow, so without this the 3040px shots
+     render at native size and the frame shows only their top-left corner. */
+  .workspaces img { display: block; width: 100%; height: auto; }
+  .workspaces figcaption {
+    margin-top: 12px; color: var(--muted); font-size: 13.5px;
+  }
+
   /* ---- sections ---- */
   section { padding: 72px 0; }
   .kicker {
@@ -320,16 +339,80 @@
       <figure>
         <div class="shot-frame">
           <div class="shot-bar" aria-hidden="true"><i></i><i></i><i></i></div>
-          <img src="assets/app-scatter.png"
-               alt="The Pandion Plots app: a scatter chart with marginal distributions, a spreadsheet-style data workspace, and a plain-language chart setup panel">
+          <img src="assets/app-chart.png"
+               alt="The Pandion Plots chart workspace: a scatterplot with a
+                    fit line and marginal histograms, beside a chart setup
+                    panel listing the variables and their analysis roles">
         </div>
         <figcaption>
-          A scatterplot with marginal distributions, created from the
-          built-in sample data in a few clicks.
+          A scatterplot with a fit line and marginal distributions, created
+          from the built-in sample data in a few clicks.
         </figcaption>
       </figure>
     </div>
   </div>
+
+  <section class="workspaces">
+    <div class="wrap">
+      <p class="kicker">Beyond the chart</p>
+      <h2>The two parts a chart tool usually leaves out.</h2>
+      <p class="section-lede">
+        The chart is the visible half of the work. The other half is
+        getting the data into the right shape, and turning finished
+        charts into the one figure a paper or a slide actually needs.
+        Pandion includes both.
+      </p>
+
+      <div class="shot-block">
+        <h3>A data workspace that knows what your variables are</h3>
+        <p>
+          Give each variable a measure type and the rest follows: which
+          roles it can fill, which charts get suggested, and how its
+          levels are ordered. Row counts, missing values, distinct
+          values, and the roles a variable is currently used in stay
+          visible while you work. Drag to reorder categories, exclude
+          rows, filter, or add a computed column.
+        </p>
+        <figure>
+          <div class="shot-frame">
+            <div class="shot-bar" aria-hidden="true"><i></i><i></i><i></i></div>
+            <img src="assets/app-data.png" loading="lazy"
+                 alt="The Pandion Plots data workspace: a spreadsheet of the
+                      sample data beside a variable inspector showing the
+                      measure type, a summary of rows and missing values, and
+                      a draggable list of category levels">
+          </div>
+          <figcaption>
+            The data workspace, inspecting a nominal variable and its
+            category order.
+          </figcaption>
+        </figure>
+      </div>
+
+      <div class="shot-block">
+        <h3>A figure composer for multi-panel figures</h3>
+        <p>
+          Arrange several charts on one page, label the panels, and add
+          titles, notes, or images. Panels stay linked to the charts they
+          came from, so an edit to a chart updates the figure. Snapping,
+          smart guides, and page presets keep the arrangement tidy, and
+          the finished figure exports as SVG, PNG, JPG, or vector PDF.
+        </p>
+        <figure>
+          <div class="shot-frame">
+            <div class="shot-bar" aria-hidden="true"><i></i><i></i><i></i></div>
+            <img src="assets/app-layout.png" loading="lazy"
+                 alt="The Pandion Plots figure composer: a bar chart and a
+                      scatterplot placed side by side as panels A and B on a
+                      canvas page, with snapping and page controls above">
+          </div>
+          <figcaption>
+            Two charts composed as panels A and B on a canvas page.
+          </figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
 
   <section id="downloads">
     <div class="wrap">
@@ -374,7 +457,9 @@
           </div>
           <h3>Inside jamovi</h3>
           <p>Use the same chart engine beside your jamovi analyses, with
-             plots stored in the same .omv file.</p>
+             plots stored in the same .omv file. Opening an .omv in the
+             browser or desktop app brings the data across (values,
+             measure types, and category orders), not the analyses.</p>
           <a class="btn btn-secondary"
              href="https://github.com/torryscott/pandion/releases/latest">Download the module</a>
           <div class="fine">Install the .jmo file through jamovi</div>
@@ -402,9 +487,10 @@
             </svg>
           </div>
           <h3>In your browser</h3>
-          <p>Start immediately. Import CSV, Excel, or jamovi files and
-             build charts without installing anything. Your current
-             project is saved locally in your browser.</p>
+          <p>Start immediately. Bring in data from a CSV, an Excel
+             sheet, or a jamovi file and build charts without installing
+             anything. Your current project is saved locally in your
+             browser.</p>
           <a class="btn btn-primary" href="app/">Open the browser app</a>
           <div class="fine">Works in current desktop browsers</div>
         </div>
@@ -487,8 +573,8 @@
       </div>
       <p class="both-note">
         Both experiences share the same foundation: considered
-        defaults, direct-on-chart editing, and imports from CSV, Excel,
-        and jamovi.
+        defaults, direct-on-chart editing, and data imports from CSV,
+        Excel, and jamovi files.
       </p>
     </div>
   </section>
