@@ -1,0 +1,15370 @@
+// Pandion Plots standalone - the shell: project state, CSV import, module +
+// roles UI, the window.setOption sink, and the render loop (template clone
+// + data channels + stored options -> GraphBuilder2.render, with a
+// debounced authoritative re-render standing in for the jamovi R echo).
+// Keep this file ASCII (escapes only); never persist _-prefixed keys.
+
+(function () {
+  "use strict";
+
+  // ================================================================ sample
+  // Built-in demo dataset: a dose-response study. condition/score are the
+  // M0 columns (the probes pin their statistics); hours/site exercise the
+  // scatter, distribution and frequencies modules.
+  var SAMPLE = {
+    name: "sample-dose-response",
+    header: ["condition", "score", "hours", "site"],
+    rows: [
+      ["Control", "61", "3.1", "East"], ["Control", "55", "2.2", "West"],
+      ["Control", "68", "4.6", "East"], ["Control", "58", "2.9", "West"],
+      ["Control", "64", "3.8", "East"], ["Control", "52", "1.8", "West"],
+      ["Control", "59", "3.0", "East"], ["Control", "66", "4.1", "West"],
+      ["Low dose", "70", "4.4", "East"], ["Low dose", "74", "5.1", "West"],
+      ["Low dose", "66", "3.6", "East"], ["Low dose", "79", "5.8", "West"],
+      ["Low dose", "72", "4.7", "East"], ["Low dose", "68", "3.9", "West"],
+      ["Low dose", "77", "5.5", "East"], ["Low dose", "71", "4.5", "West"],
+      ["High dose", "82", "6.1", "East"], ["High dose", "88", "7.2", "West"],
+      ["High dose", "79", "5.7", "East"], ["High dose", "91", "7.8", "West"],
+      ["High dose", "84", "6.4", "East"], ["High dose", "77", "5.3", "West"],
+      ["High dose", "86", "6.8", "East"], ["High dose", "90", "7.5", "West"]
+    ]
+  };
+
+  var PS_SAVE_KEY = "psstandalone.project.v2";
+  var PS_BACKUP_KEY = "psstandalone.project.backup.v1";
+  var PS_RECENT_KEY = "psstandalone.recent.v1";
+  var PS_WELCOME_SESSION_KEY = "psstandalone.welcome.dismissed";
+  var PS_PREF_KEY = "psstandalone.preferences.v1";
+  var PS_COACH_KEY = "psstandalone.coach.clickToEdit.v1";
+  // t3-53: missingTokens is the DATASET default every import starts from. It
+  // was settable only after the fact, per project, so the same correction had
+  // to be made again for every file.
+  var APP_PREFS_DEFAULTS = { density: "comfortable", motion: "system",
+                             startup: "center", missingTokens: "NA" };
+  var APP_PREFS = { density: "comfortable", motion: "system",
+                    startup: "center", missingTokens: "NA" };
+  var APP_VERSION = "3.0.0";
+  var AUTOSAVE_HEALTH = "ok";
+  var AUTOSAVE_DETAIL = "Local recovery is current";
+  var AUTOSAVE_FAILS = 0;          // B14: evidence survives a lucky write
+  // Item 15. Up to FIVE copies of the project (autosave + backup + 3 recents,
+  // each carrying table.raw) compete for one ~5 MB origin quota alongside the
+  // engine's undo blob. Each tier had a hard byte gate and skipped in total
+  // silence when the project outgrew it, so the recovery ladder quietly
+  // switched itself off one rung at a time and the user only found out when
+  // they needed it.
+  var RECENTS_MAX_BYTES = 900000;
+  var BACKUP_MAX_BYTES = 1500000;
+  var LADDER_SKIPPED = { recents: 0, backup: 0 };
+  var LADDER_WARNED = false;
+  function ladderWarnOnce() {
+    if (LADDER_WARNED) return;
+    LADDER_WARNED = true;
+    var which = LADDER_SKIPPED.backup ? "backup copy and the recent-projects list"
+      : "recent-projects list";
+    showToast("This project is now too large for the local " + which +
+      ". It is still autosaved, but save it to a .pand file so you have a " +
+      "copy that does not depend on this browser.", true);
+  }
+  var AUTOSAVE_LAST_OK = null;     // B14: when work last actually reached storage
+  var RECOVERY_NOTE = "";
+  var LAST_PROJECT_BYTES = 0;
+  var LAST_RENDER_MS = 0;
+  var LAST_RENDER_AT = null;
+  var PROJECT_REV = 0;
+  var FILE_SAVED_REV = null;
+  var FILE_LABEL = null;
+  var BOOT_RESTORED = false;
+  var PS_FLUSH_PENDING_OPTS = null;   // B12: set by wireHeader
+  var BOOT_SAVED_AT = null;   // B14: age of the snapshot Continue would open
+  var MODULES = window.PSData.MODULES;
+  var MODULE_ORDER = ["plotbuilder", "rmplotbuilder", "xyplotbuilder",
+                      "distplotbuilder", "freqplotbuilder",
+                      "corrplotbuilder", "likertplotbuilder"];
+  var MODULE_GUIDE = {
+    plotbuilder: { icon: "\u25a5", description: "Compare a numeric outcome across categories or experimental groups." },
+    distplotbuilder: { icon: "\u223f", description: "Explore shape, spread, density, box plots, and Q-Q plots." },
+    freqplotbuilder: { icon: "\u25a4", description: "Show counts or proportions for categorical variables." },
+    rmplotbuilder: { icon: "\u21c4", description: "Compare repeated measurements recorded for the same cases." },
+    corrplotbuilder: { icon: "\u25a6", description: "Summarize relationships among two or more numeric variables." },
+    likertplotbuilder: { icon: "\u2261", description: "Visualize ordered survey responses and item summaries." },
+    xyplotbuilder: { icon: "\u2219", description: "Examine the relationship between two numeric variables." }
+  };
+  // Punch list 20. There was ONE example, and its default roles claimed things
+  // about it that were not true: rmplotbuilder got measures ["score", "hours"],
+  // so switching the Analysis dropdown plotted a test score and a study-hours
+  // count as two occasions of the same measurement, complete with
+  // Cousineau-Morey within-subject error bars. That is a textbook
+  // misconception, demonstrated by the app's own example, on the fastest path
+  // a student takes to explore. Likert got {} and an empty placeholder,
+  // because no sample variable had a shared response scale.
+  //
+  // So: three examples, and each module's default roles point at the dataset
+  // that fits it. A module a dataset genuinely cannot show gets NO roles and
+  // an offer to open the example that can, rather than a false chart.
+  var EXAMPLES = [
+    { id: "dose", name: "Dose response study", table: SAMPLE,
+      blurb: "Three groups, a test score, study hours and two sites.",
+      good: "Compare Groups, Distribution, Scatter, Frequencies, Correlation",
+      fits: ["plotbuilder", "distplotbuilder", "xyplotbuilder",
+             "freqplotbuilder", "corrplotbuilder"],
+      roles: { plotbuilder: { xvar: "condition", yvar: "score" },
+               distplotbuilder: { var: "score" },
+               xyplotbuilder: { xvar: "hours", yvar: "score" },
+               freqplotbuilder: { var: "condition" },
+               corrplotbuilder: { vars: ["score", "hours"] } } },
+    { id: "practice", name: "Reaction time practice",
+      blurb: "Sixteen people timed on four practice sessions, in two groups.",
+      good: "Repeated Measures, Correlation, Distribution",
+      fits: ["rmplotbuilder", "corrplotbuilder", "distplotbuilder"],
+      table: {
+        name: "sample-practice-sessions",
+        header: ["person", "group", "session1", "session2", "session3",
+                 "session4"],
+        rows: [
+          ["p01", "Massed", "412", "395", "381", "372"],
+          ["p02", "Massed", "455", "441", "430", "424"],
+          ["p03", "Massed", "398", "377", "369", "358"],
+          ["p04", "Massed", "471", "459", "444", "438"],
+          ["p05", "Massed", "433", "418", "402", "396"],
+          ["p06", "Massed", "409", "401", "388", "379"],
+          ["p07", "Massed", "462", "444", "437", "428"],
+          ["p08", "Massed", "425", "412", "399", "391"],
+          ["p09", "Spaced", "418", "386", "358", "334"],
+          ["p10", "Spaced", "447", "409", "377", "351"],
+          ["p11", "Spaced", "402", "371", "344", "319"],
+          ["p12", "Spaced", "466", "428", "394", "366"],
+          ["p13", "Spaced", "429", "396", "366", "341"],
+          ["p14", "Spaced", "414", "379", "351", "327"],
+          ["p15", "Spaced", "458", "421", "388", "359"],
+          ["p16", "Spaced", "436", "402", "372", "347"]
+        ]
+      },
+      types: { person: "id", group: "nominal", session1: "continuous",
+               session2: "continuous", session3: "continuous",
+               session4: "continuous" },
+      roles: { rmplotbuilder: { measures: ["session1", "session2", "session3",
+                                           "session4"],
+                                betweenVar: "group" },
+               corrplotbuilder: { vars: ["session1", "session2", "session3",
+                                         "session4"] },
+               distplotbuilder: { var: "session1", groupVar: "group" },
+               plotbuilder: { xvar: "group", yvar: "session4" } } },
+    { id: "feedback", name: "Course feedback survey",
+      blurb: "Five agreement items on one 1-5 scale, plus year of study.",
+      good: "Likert, Frequencies, Compare Groups",
+      fits: ["likertplotbuilder", "freqplotbuilder"],
+      table: {
+        name: "sample-course-feedback",
+        header: ["year", "clear", "paced", "useful", "supported",
+                 "recommend"],
+        rows: [
+          ["First", "4", "3", "5", "4", "4"], ["First", "5", "4", "5", "5", "5"],
+          ["First", "3", "2", "4", "3", "3"], ["First", "4", "4", "4", "4", "4"],
+          ["First", "2", "1", "3", "2", "2"], ["First", "5", "4", "5", "4", "5"],
+          ["First", "4", "3", "4", "4", "4"], ["First", "3", "3", "4", "3", "3"],
+          ["Second", "5", "5", "5", "5", "5"], ["Second", "4", "4", "5", "4", "4"],
+          ["Second", "4", "3", "4", "5", "4"], ["Second", "3", "4", "4", "4", "3"],
+          ["Second", "5", "4", "5", "5", "5"], ["Second", "2", "3", "1", "3", "2"],
+          ["Second", "4", "4", "4", "4", "4"], ["Second", "5", "5", "4", "5", "5"],
+          ["Third", "3", "2", "4", "3", "3"], ["Third", "4", "3", "5", "4", "4"],
+          ["Third", "5", "4", "5", "5", "5"], ["Third", "2", "1", "2", "1", "2"],
+          ["Third", "4", "4", "4", "4", "4"], ["Third", "3", "3", "4", "4", "3"],
+          ["Third", "5", "5", "5", "4", "5"], ["Third", "4", "3", "4", "4", "4"]
+        ]
+      },
+      types: { year: "nominal", clear: "ordinal", paced: "ordinal",
+               useful: "ordinal", supported: "ordinal", recommend: "ordinal" },
+      roles: { likertplotbuilder: { items: ["clear", "paced", "useful",
+                                            "supported", "recommend"] },
+               freqplotbuilder: { var: "clear", groupVar: "year" },
+               plotbuilder: { xvar: "year", yvar: "recommend" },
+               distplotbuilder: { var: "recommend" } } }
+  ];
+  function exampleById(id) {
+    for (var i = 0; i < EXAMPLES.length; i++)
+      if (EXAMPLES[i].id === id) return EXAMPLES[i];
+    return EXAMPLES[0];
+  }
+  // Which example can honestly show this analysis? Used by the placeholder to
+  // offer a door instead of leaving a dead end.
+  function exampleFor(mod) {
+    for (var i = 0; i < EXAMPLES.length; i++)
+      if (EXAMPLES[i].fits.indexOf(mod) !== -1) return EXAMPLES[i];
+    return null;
+  }
+  function loadAppPrefs() {
+    try {
+      var saved = JSON.parse(window.localStorage.getItem(PS_PREF_KEY) || "null");
+      if (saved && /^(comfortable|compact)$/.test(saved.density))
+        APP_PREFS.density = saved.density;
+      if (saved && /^(system|reduce)$/.test(saved.motion))
+        APP_PREFS.motion = saved.motion;
+      if (saved && /^(center|resume)$/.test(saved.startup))
+        APP_PREFS.startup = saved.startup;
+      if (typeof saved.missingTokens === "string")
+        APP_PREFS.missingTokens = saved.missingTokens;
+    } catch (e) {}
+  }
+  loadAppPrefs();
+
+  // ================================================================ table
+  // Raw string cells + per-column declared type; the typed view (numbers /
+  // strings with nulls for missing) is rebuilt whenever a type flips.
+  var MISSING_TOKENS = { "": 1, "NA": 1 };
+  function columnTokenList(t, col) {
+    // A column OVERRIDE wins whole, rather than adding to the dataset list:
+    // the case this exists for is "0 is real in Errors", and a list that only
+    // ever grows cannot say that.
+    var per = t && t.missingTokensByCol;
+    if (col && per && Array.isArray(per[col])) return per[col];
+    return (t && Array.isArray(t.missingTokens)) ? t.missingTokens : ["NA"];
+  }
+  function hasColumnTokens(t, col) {
+    return !!(col && t && t.missingTokensByCol &&
+              Array.isArray(t.missingTokensByCol[col]));
+  }
+  // t3-53. Parsed from the preference each time rather than cached, so a
+  // change applies to the very next import with no reload.
+  function prefMissingTokens() {
+    var raw = String(APP_PREFS.missingTokens == null ? "NA"
+                                                     : APP_PREFS.missingTokens);
+    var list = raw.split(",").map(function (v) { return v.trim(); })
+      .filter(function (v, i, arr) { return v !== "" && arr.indexOf(v) === i; });
+    return list.length ? list : ["NA"];
+  }
+  function tableMissingTokens(t, col) {
+    // Null prototype: a declared token of "__proto__" on a plain object would
+    // set the prototype rather than create a key, and every cell test would
+    // then read a truthy inherited value. These keys come from a text field.
+    var out = Object.create(null);
+    out[""] = 1;
+    var list = columnTokenList(t, col);
+    for (var i = 0; i < list.length; i++) out[String(list[i]).trim()] = 1;
+    return out;
+  }
+  function isMissingRaw(t, value, col) {
+    return !!tableMissingTokens(t, col)[
+      String(value == null ? "" : value).trim()];
+  }
+  // jamovi measure types. Legacy "numeric"/"factor" (older saved projects
+  // and the parity harness) normalize on the way in.
+  // Punch list 19. These four words are the app's core gate - every role slot
+  // accepts some of them and refuses the rest - and they appeared nowhere as
+  // anything but a bare label. A student whose 1-5 rating column will not drop
+  // on a value axis had to already understand three terms the app never
+  // explained. One definition each, in the reader's language, used by the type
+  // menu, the chip tooltip, the variable inspector and the role refusals, so
+  // the four surfaces cannot drift into four different explanations.
+  var VAR_TYPES = [
+    { key: "id", label: "ID",
+      gloss: "Names or numbers a case, and is never measured.",
+      example: "participant number, ZIP code, student ID",
+      note: "Kept out of every chart role on purpose, so an ID cannot be " +
+            "averaged or counted by mistake." },
+    { key: "nominal", label: "Nominal",
+      gloss: "Named groups with no order.",
+      example: "condition, sex, site, brand",
+      note: "Use it to split or colour a chart. There is no first or last, " +
+            "so a mean of these would mean nothing." },
+    { key: "ordinal", label: "Ordinal",
+      gloss: "Ordered categories, where the gaps may not be equal.",
+      example: "1-5 agreement, low / medium / high, school year",
+      note: "Ordinal does double duty: it groups like Nominal, and when its " +
+            "values are numbers it can also go on a value axis." },
+    { key: "continuous", label: "Continuous",
+      gloss: "Numbers you can measure and average.",
+      example: "score, reaction time, height, count of errors",
+      note: "This is what value axes expect." }
+  ];
+  function typeInfo(x) {
+    for (var i = 0; i < VAR_TYPES.length; i++)
+      if (VAR_TYPES[i].key === x) return VAR_TYPES[i];
+    return null;
+  }
+  // One sentence naming the type and saying what it is for. The tooltip, the
+  // inspector hint and the menu all build from this.
+  function typeSentence(key) {
+    var info = typeInfo(key);
+    if (!info) return "";
+    return info.label + ": " + info.gloss + " For example " +
+      info.example + ".";
+  }
+  var LEGACY_TYPES = { numeric: "continuous", factor: "nominal" };
+  function normType(x) {
+    x = LEGACY_TYPES[x] || x;
+    for (var i = 0; i < VAR_TYPES.length; i++)
+      if (VAR_TYPES[i].key === x) return x;
+    return null;
+  }
+  function typeLabel(x) {
+    for (var i = 0; i < VAR_TYPES.length; i++)
+      if (VAR_TYPES[i].key === x) return VAR_TYPES[i].label;
+    return x;
+  }
+  function psTypeIcon(type) {
+    if (type === "id")
+      return '<svg class="ps-ticon" width="15" height="12" viewBox="0 0 15 12">' +
+        '<rect x="0.75" y="1.25" width="13.5" height="9.5" rx="2" fill="none" ' +
+        'stroke="#8a8f98" stroke-width="1.3"/>' +
+        '<text x="7.5" y="8.6" text-anchor="middle" font-size="6.5" ' +
+        'font-weight="700" fill="#8a8f98" font-family="inherit">ID</text></svg>';
+    if (type === "ordinal")
+      return '<svg class="ps-ticon" width="13" height="12" viewBox="0 0 13 12">' +
+        '<rect x="0.5" y="7.5" width="3" height="4" rx="0.5" fill="#9ec2e8"/>' +
+        '<rect x="5" y="4.5" width="3" height="7" rx="0.5" fill="#5b93cc"/>' +
+        '<rect x="9.5" y="1" width="3" height="10.5" rx="0.5" fill="#2c62a3"/></svg>';
+    if (type === "continuous")
+      return '<svg class="ps-ticon" width="14" height="12" viewBox="0 0 14 12">' +
+        '<rect x="0.75" y="3.25" width="12.5" height="5.5" rx="1" fill="#fff" ' +
+        'stroke="#976d76" stroke-width="1.3"/>' +
+        '<line x1="4" y1="3.5" x2="4" y2="6" stroke="#976d76" stroke-width="1.1"/>' +
+        '<line x1="7" y1="3.5" x2="7" y2="7.2" stroke="#976d76" stroke-width="1.1"/>' +
+        '<line x1="10" y1="3.5" x2="10" y2="6" stroke="#976d76" stroke-width="1.1"/></svg>';
+    return '<svg class="ps-ticon" width="13" height="12" viewBox="0 0 13 12">' +
+      '<circle cx="4" cy="4" r="3.1" fill="#dd7e2b"/>' +
+      '<circle cx="9.2" cy="4.6" r="3.1" fill="#4478ad" fill-opacity="0.88"/>' +
+      '<circle cx="6.4" cy="8.6" r="3.1" fill="#6fb3ad" fill-opacity="0.88"/></svg>';
+  }
+  // Punch list 18a/18b/18c. All three findings are one decision, so they
+  // share one audit rather than three separate tests:
+  //   18a  the tokens tested were the MODULE constant, so declaring "." or
+  //        "-99" missing did nothing for typing - and numericish comes from
+  //        the same call, so the variable stayed permanently undroppable on
+  //        a value axis with no explanation.
+  //   18b  the first unparseable value returned "nominal" and stopped: no
+  //        count, no offender named, and the preview shows six rows, so a
+  //        typo in row 40,000 demoted a whole column invisibly.
+  //   18c  "007" and "0x10" parse as 7 and 16, so participant ids, ZIP codes
+  //        and student numbers were rewritten on screen and in every chart
+  //        label. A value that numeric conversion would REWRITE is a code,
+  //        not a quantity, so it does not count as numeric here at all.
+  // The audit reports; it never guesses past the data. A column with any
+  // offender still types nominal, because typing it continuous would DROP
+  // those cases, and losing data silently is the worse failure. What changes
+  // is that the app can now say WHICH values did it and offer a way through.
+  var AUDIT_MAX_OFFENDERS = 12;
+  function isIdCoded(s) {
+    // Leading zeros ("007", "-0012") and hex forms ("0x1f") - the shapes
+    // where Number() changes the text. Deliberately NOT "0", "0.5" or "0e5".
+    return /^[+-]?0\d/.test(s) || /^0[xX][0-9a-fA-F]+$/.test(s);
+  }
+  function numericAudit(rawVals, tokens) {
+    tokens = tokens || MISSING_TOKENS;
+    var seen = 0, bad = 0, idCoded = 0, offenders = [], oSeen = {};
+    var firstBadRow = -1, firstIdValue = "", allBadNamed = true, i;
+    for (i = 0; i < rawVals.length; i++) {
+      var v = rawVals[i] == null ? "" : String(rawVals[i]).trim();
+      if (tokens[v]) continue;
+      seen++;
+      if (isIdCoded(v)) {
+        idCoded++;
+        if (!firstIdValue) firstIdValue = v;
+        continue;
+      }
+      if (isFinite(Number(v))) continue;
+      bad++;
+      if (firstBadRow < 0) firstBadRow = i;
+      if (!oSeen[v]) {
+        if (offenders.length < AUDIT_MAX_OFFENDERS) {
+          oSeen[v] = 1;
+          offenders.push({ value: v, row: i });
+        } else allBadNamed = false;   // more distinct values than we list
+      }
+    }
+    return { seen: seen, bad: bad, idCoded: idCoded, offenders: offenders,
+             firstBadRow: firstBadRow, firstIdValue: firstIdValue,
+             allBadNamed: allBadNamed,
+             numeric: seen > 0 && bad === 0 && idCoded === 0 };
+  }
+  function inferType(rawVals, tokens) {
+    return numericAudit(rawVals, tokens).numeric ? "continuous" : "nominal";
+  }
+  // A column "stores numbers" when its typed view is numeric: continuous,
+  // or ordinal whose raw values all parse (usable as values AND as
+  // ordered categories - the jamovi dual role).
+  function colStoresNumbers(t, col) {
+    return t.types[col] === "continuous" ||
+           (t.types[col] === "ordinal" && !!(t.numericish && t.numericish[col]));
+  }
+  function roleAccepts(def, t, col) {
+    if (!t || t.types[col] === "id") return false;
+    var acc = def && def.accepts;
+    if (!acc) return true;
+    var ty = t.types[col];
+    if (acc.indexOf(ty) === -1) return false;
+    // A VALUES slot (accepts continuous but not nominal) takes an
+    // ordinal only when its values are numeric - the jamovi dual role.
+    if (ty === "ordinal" && acc.indexOf("nominal") === -1 &&
+        !(t.numericish && t.numericish[col])) return false;
+    return true;
+  }
+  // Punch list 19. A refused drop did nothing at all: the dragover simply
+  // returned, so the variable would not land and the app never said why. This
+  // is the exact moment the item describes - a 1-5 rating column that will not
+  // drop on a value axis - so it is where the three words have to be
+  // explained, with the one change that would make it work offered outright.
+  function roleRefusalReason(def, t, col) {
+    if (!t || !def || t.types[col] === undefined) return null;
+    var ty = t.types[col], acc = def.accepts || null;
+    var num = !!(t.numericish && t.numericish[col]);
+    if (ty === "id")
+      return { why: col + ' is typed as an ID, and IDs are deliberately kept ' +
+                    "out of every chart role so they cannot be averaged or " +
+                    "counted by mistake.",
+               fix: num ? "continuous" : "nominal" };
+    if (!acc) return null;
+    var wantsValues = acc.indexOf("continuous") !== -1 &&
+                      acc.indexOf("nominal") === -1;
+    if (acc.indexOf(ty) === -1) {
+      // The commonest case by far: a numeric column typed Nominal, refused by
+      // a value axis. The fix is one click and it is exactly what the student
+      // wanted, so offer it rather than describing it.
+      var fix = null;
+      if (wantsValues && num) fix = "continuous";
+      else if (!wantsValues && acc.indexOf("nominal") !== -1) fix = "nominal";
+      return { why: col + " is " + typeLabel(ty) + ". " + def.label + " " +
+                    acceptsTooltip(def).replace(/^Accepts /, "accepts ") + ".",
+               fix: fix };
+    }
+    if (ty === "ordinal" && wantsValues && !num)
+      return { why: col + " is Ordinal, but its values are words rather than " +
+                    "numbers, and " + def.label + " needs numbers to measure.",
+               fix: null };
+    return null;
+  }
+  function explainRoleRefusal(def, col) {
+    var t = PROJECT.table;
+    var r = roleRefusalReason(def, t, col);
+    if (!r) return;
+    if (r.fix) {
+      var info = typeInfo(r.fix);
+      showActionToast(r.why + " Set it to " + info.label + " to use it here.",
+                      "Set to " + info.label,
+                      function () { setColType(col, r.fix); });
+    } else showToast(r.why);
+  }
+  function acceptsTooltip(def) {
+    var acc = def.accepts || [];
+    var names = acc.map(typeLabel);
+    var txt = names.length > 1
+      ? names.slice(0, -1).join(", ") + " or " + names[names.length - 1]
+      : (names[0] || "any");
+    var tail = (acc.indexOf("continuous") !== -1 && acc.indexOf("nominal") === -1)
+      ? " (ordinal needs numeric values)" : "";
+    return "Accepts " + txt.toLowerCase() + " variables" + tail;
+  }
+  var CASE_ID_SEQ = 0;
+  function newCaseId() {
+    CASE_ID_SEQ++;
+    return "case-" + Date.now().toString(36) + "-" + CASE_ID_SEQ.toString(36);
+  }
+  // B19. Blank headers became V1..Vn and duplicates got _2 with no record
+  // anywhere, and the import preview rendered the PRE-rename names so it
+  // could not show the outcome. Both callers now share this resolver, so the
+  // preview shows exactly what the table will be called, and the renames are
+  // reported rather than performed in silence.
+  function resolveHeader(header) {
+    var names = [], renamed = [], supplied = [];
+    for (var j = 0; j < header.length; j++) {
+      var raw = String(header[j] == null ? "" : header[j]).trim();
+      var nm = raw || ("V" + (j + 1));
+      var base = nm, k = 2;
+      while (names.indexOf(nm) !== -1) nm = base + "_" + (k++);
+      if (nm !== raw) renamed.push({ from: raw, to: nm, blank: !raw });
+      supplied.push(raw);
+      names.push(nm);
+    }
+    return { names: names, supplied: supplied, renamed: renamed };
+  }
+  function renameNoteText(renamed) {
+    if (!renamed || !renamed.length) return "";
+    var blanks = renamed.filter(function (r) { return r.blank; });
+    var dups = renamed.filter(function (r) { return !r.blank; });
+    var parts = [];
+    if (blanks.length)
+      parts.push(blanks.length + (blanks.length === 1
+        ? " column had no name" : " columns had no name") + " (" +
+        blanks.map(function (r) { return r.to; }).join(", ") + ")");
+    if (dups.length)
+      parts.push(dups.length + (dups.length === 1
+        ? " duplicate name was" : " duplicate names were") + " made unique (" +
+        dups.map(function (r) { return r.from + " \u2192 " + r.to; }).join(", ") + ")");
+    return parts.join("; ");
+  }
+  function buildTable(name, header, rows, types, declaredLevels, excluded,
+                      missingTokens, caseIds, excludedRows,
+                      levelOrderDefaults) {
+    var raw = {}, i, j;
+    var resolved = resolveHeader(header);
+    var order = resolved.names;
+    for (j = 0; j < order.length; j++) {
+      var nm = order[j];
+      raw[nm] = [];
+      for (i = 0; i < rows.length; i++) {
+        var cell = rows[i][j];
+        raw[nm].push(cell == null ? "" : String(cell));
+      }
+    }
+    var t = { name: name, order: order, raw: raw, types: {}, columns: {},
+              levels: {}, declaredLevels: declaredLevels || null,
+              levelOrderDefaults: levelOrderDefaults || {},
+              excluded: excluded || {},
+              caseIds: [],
+              excludedRows: excludedRows || {},
+              missingTokens: Array.isArray(missingTokens)
+                ? missingTokens.slice() : prefMissingTokens() };
+    var seenCaseIds = {};
+    for (i = 0; i < rows.length; i++) {
+      var suppliedId = Array.isArray(caseIds) ? String(caseIds[i] || "") : "";
+      var caseId = suppliedId && !seenCaseIds[suppliedId]
+        ? suppliedId : newCaseId();
+      seenCaseIds[caseId] = 1;
+      t.caseIds.push(caseId);
+    }
+    if (declaredLevels && typeof declaredLevels === "object") {
+      var mappedLevels = {};
+      for (j = 0; j < order.length; j++) {
+        var lc = order[j], ls = resolved.supplied[j];
+        var lv = Object.prototype.hasOwnProperty.call(declaredLevels, lc)
+          ? declaredLevels[lc]
+          : (ls && Object.prototype.hasOwnProperty.call(declaredLevels, ls)
+             ? declaredLevels[ls] : undefined);
+        if (lv !== undefined) mappedLevels[lc] = lv;
+      }
+      t.declaredLevels = mappedLevels;
+    }
+    for (j = 0; j < order.length; j++) {
+      var col = order[j], src = resolved.supplied[j];
+      var supplied = types && (types[col] !== undefined ? types[col]
+        : (src ? types[src] : undefined));
+      t.types[col] = normType(supplied) ||
+        inferType(raw[col], tableMissingTokens(t, col));
+    }
+    t.renamedColumns = resolved.renamed;
+    retype(t);
+    return t;
+  }
+  function isRowExcluded(t, i) {
+    var caseId = t && t.caseIds && t.caseIds[i];
+    return !!(caseId && t.excludedRows && t.excludedRows[caseId]);
+  }
+  function isExcluded(t, col, i) {
+    return isRowExcluded(t, i) ||
+      !!(t.excluded && t.excluded[col] && t.excluded[col][i]);
+  }
+  function rowExclCount(t) {
+    return t && t.excludedRows ? Object.keys(t.excludedRows).length : 0;
+  }
+  // ---- ROW FILTERS (Tier 1). Dataset-wide conditions, AND-combined;
+  // a row failing any condition (or missing its value) stays VISIBLE
+  // in the grid (dimmed) but leaves every chart and statistic. The
+  // analysis side consumes a derived table with the failing rows
+  // REMOVED (t.filteredView, rebuilt by retype), so every builder
+  // count, level list, and missing note stays truthful over the kept
+  // rows - no per-module note surgery.
+  var FILTER_OPS = {
+    eq: { label: "=", num: true, cat: true },
+    ne: { label: "\u2260", num: true, cat: true },
+    gt: { label: ">", num: true, cat: false },
+    ge: { label: "\u2265", num: true, cat: false },
+    lt: { label: "<", num: true, cat: false },
+    le: { label: "\u2264", num: true, cat: false }
+  };
+  function validFilters(t) {
+    if (!t || !Array.isArray(t.filters)) return [];
+    return t.filters.filter(function (f) {
+      return f && f.col && t.raw && t.raw[f.col] && FILTER_OPS[f.op] &&
+        String(f.value == null ? "" : f.value) !== "";
+    });
+  }
+  function filterSummaryText(t) {
+    return validFilters(t).map(function (f) {
+      var num = colStoresNumbers(t, f.col);
+      return f.col + " " + FILTER_OPS[f.op].label + " " +
+        (num ? String(f.value) : '"' + String(f.value) + '"');
+    }).join(" and ");
+  }
+  function isRowFiltered(t, i) {
+    return !!(t && t.filterMask && t.filterMask[i]);
+  }
+  function filteredRowCount(t) {
+    var mask = t && t.filterMask, k = 0;
+    if (!mask) return 0;
+    for (var i = 0; i < mask.length; i++) if (mask[i]) k++;
+    return k;
+  }
+  function computeFilterState(t) {
+    var fs = validFilters(t);
+    if (!fs.length) {
+      t.filterMask = null; t.filteredView = null;
+      t.filterMissingDrops = 0; t.filterInapplicable = [];
+      return;
+    }
+    var n = nRows(t), mask = new Array(n), i;
+    var missingDrops = 0, inapplicable = {};
+    for (i = 0; i < n; i++) {
+      var out = false, droppedForMissing = false;
+      for (var f = 0; f < fs.length && !out; f++) {
+        var flt = fs[f];
+        var v = t.columns[flt.col] ? t.columns[flt.col][i] : null;
+        // B6. A row whose filter column is MISSING is dropped, and the note
+        // named only the conditions and counts, so a reader attributed every
+        // dropped row to the stated threshold. The rule is unchanged (a row
+        // with no value cannot be shown to satisfy the condition), but the
+        // count is now carried out and disclosed separately.
+        if (v == null) { out = true; droppedForMissing = true; break; }
+        var num = typeof v === "number";
+        var pass;
+        if (num) {
+          var target = Number(flt.value);
+          if (!isFinite(target)) { out = true; break; }
+          pass = flt.op === "eq" ? v === target
+            : flt.op === "ne" ? v !== target
+            : flt.op === "gt" ? v > target
+            : flt.op === "ge" ? v >= target
+            : flt.op === "lt" ? v < target
+            : flt.op === "le" ? v <= target : true;
+        } else {
+          var ts = String(flt.value);
+          if (flt.op === "eq") pass = String(v) === ts;
+          else if (flt.op === "ne") pass = String(v) !== ts;
+          else {
+            // B5. An order comparison has no meaning on text, and returning
+            // false here failed EVERY row: build "score > 60", switch Score
+            // to Nominal (two clicks), and every chart in the project went
+            // empty, explained only by a "showing 0 of 24 rows" chip. The
+            // same happened on load when a saved .pand carried a filter whose
+            // column had since been retyped. An inapplicable condition is now
+            // pass-through and says so.
+            inapplicable[flt.col + " " + FILTER_OPS[flt.op].label] = 1;
+            pass = true;
+          }
+        }
+        if (!pass) out = true;
+      }
+      mask[i] = out;
+      if (out && droppedForMissing) missingDrops++;
+    }
+    t.filterMask = mask;
+    t.filterMissingDrops = missingDrops;
+    t.filterInapplicable = Object.keys(inapplicable);
+    var keep = [];
+    for (i = 0; i < n; i++) if (!mask[i]) keep.push(i);
+    var view = {};
+    for (var k in t)
+      if (Object.prototype.hasOwnProperty.call(t, k)) view[k] = t[k];
+    view.filters = [];                    // never recurses
+    view.filterMask = null;
+    view.filteredView = null;
+    // Computed values are DATA, defined over the FULL table (a z-score
+    // must not shift when a filter hides rows): the view keeps the
+    // already-computed subsetted raw values instead of re-evaluating.
+    view.computed = null;
+    view.computedErrors = null;
+    view.raw = {};
+    for (var c = 0; c < t.order.length; c++) {
+      var col = t.order[c], src = t.raw[col], outv = new Array(keep.length);
+      for (i = 0; i < keep.length; i++) outv[i] = src[keep[i]];
+      view.raw[col] = outv;
+    }
+    view.caseIds = keep.map(function (r) { return t.caseIds[r]; });
+    view.excluded = {};
+    if (t.excluded) {
+      var pos = {};
+      for (i = 0; i < keep.length; i++) pos[keep[i]] = i;
+      for (var ec in t.excluded) {
+        if (!Object.prototype.hasOwnProperty.call(t.excluded, ec)) continue;
+        var m = t.excluded[ec], nm = {};
+        for (var rk in m) {
+          if (!Object.prototype.hasOwnProperty.call(m, rk)) continue;
+          if (pos[Number(rk)] != null) nm[pos[Number(rk)]] = 1;
+        }
+        if (Object.keys(nm).length) view.excluded[ec] = nm;
+      }
+    }
+    retype(view);
+    t.filteredView = view;
+  }
+  // What the ANALYSIS side reads: the filtered row-subset when filters
+  // are active, the real table otherwise. Grid code keeps reading
+  // PROJECT.table (the full spreadsheet is always visible).
+  function activeDataTable() {
+    var t = PROJECT.table;
+    return t && t.filteredView ? t.filteredView : t;
+  }
+  // ---- computed-variable mutations (Tier 1). One data-history step
+  // each; the column recomputes on every later data change.
+  function saveComputedColumn(name, formula, editingCol, afterCol) {
+    var t = PROJECT.table;
+    name = String(name || "").trim();
+    if (!name) return { error: "Give the new variable a name." };
+    if (editingCol && name !== editingCol)
+      return { error: "The formula dialog edits only the formula - " +
+               "rename the variable from its column menu." };
+    if (!editingCol && t.order.indexOf(name) !== -1)
+      return { error: "A variable named " + name + " already exists." };
+    var known = t.order.filter(function (c) { return c !== name; });
+    var compiled = window.PSFormula.compile(formula, known);
+    if (!compiled.ok) return { error: compiled.error };
+    dataMark("the computed variable");
+    if (!t.computed) t.computed = {};
+    t.computed[name] = String(formula);
+    if (t.order.indexOf(name) === -1) {
+      var at = afterCol ? t.order.indexOf(afterCol) : -1;
+      if (at === -1) t.order.push(name);
+      else t.order.splice(at + 1, 0, name);
+      var blank = new Array(nRows(t));
+      for (var r = 0; r < blank.length; r++) blank[r] = "";
+      t.raw[name] = blank;
+    }
+    // Type from the RESULTS (re-inferred on every formula change so a
+    // numeric formula lands continuous, a recode lands nominal).
+    var values = compiled.run(t.columns, nRows(t));
+    var rawPreview = values.map(function (v) {
+      return v == null ? "" : String(v);
+    });
+    t.types[name] = inferType(rawPreview, tableMissingTokens(t));
+    t.edited = true;
+    retype(t);
+    CHART_SNAPS = {};
+    validateRoles();
+    persist();
+    syncAll();
+    render();
+    return { ok: true, name: name };
+  }
+  // ---- RESHAPE long-to-wide (Tier 1, Torry's rulings). Wide is the
+  // HOME format; this is a one-way import-repair door for trial-level
+  // (one-row-per-measurement) data. Both data problems REFUSE AND
+  // EXPLAIN by default, each with an explicit one-click remedy the
+  // user must choose: duplicates -> average per cell (disclosed);
+  // inconsistent carried columns -> carry each person's first value.
+  // Applying replaces the table in ONE undoable data-history step.
+  function computeReshape(t, idCol, occCol, valCol, opts) {
+    var n = nRows(t), i;
+    if (!idCol || !occCol || !valCol)
+      return { problem: { kind: "pick", text: "Choose all three columns." } };
+    if (idCol === occCol || idCol === valCol || occCol === valCol)
+      return { problem: { kind: "pick",
+        text: "The three columns must be different." } };
+    var occLevels = (t.levels[occCol] || []).slice();
+    if (!occLevels.length)
+      return { problem: { kind: "pick",
+        text: occCol + " has no category levels to become columns. Pick a " +
+          "nominal or ordinal occasions column." } };
+    if (occLevels.length > 40)
+      return { problem: { kind: "pick",
+        text: occCol + " has " + occLevels.length + " levels - that would " +
+          "create " + occLevels.length + " columns. Pick the occasions " +
+          "column (sessions, timepoints), not a measurement." } };
+    var ids = [], idIndex = {}, skipped = 0;
+    var cells = {};   // id  occ -> [typed values]
+    var idOf = t.columns[idCol], occOf = t.columns[occCol],
+        valOf = t.columns[valCol];
+    for (i = 0; i < n; i++) {
+      var idv = idOf[i], occv = occOf[i];
+      if (idv == null || occv == null) { skipped++; continue; }
+      var idKey = String(idv), occKey = String(occv);
+      if (idIndex[idKey] == null) {
+        idIndex[idKey] = ids.length; ids.push(idKey);
+      }
+      var cellKey = idKey + "" + occKey;
+      if (!cells[cellKey]) cells[cellKey] = [];
+      cells[cellKey].push(valOf[i]);
+    }
+    if (!ids.length)
+      return { problem: { kind: "pick",
+        text: "No rows carry both an ID and an occasion value." } };
+    // Duplicates: refuse with a concrete example unless the user chose
+    // the averaging remedy.
+    var dupCells = 0, dupExample = null;
+    for (var ck in cells) {
+      if (!Object.prototype.hasOwnProperty.call(cells, ck)) continue;
+      if (cells[ck].length > 1) {
+        dupCells++;
+        if (!dupExample) {
+          var parts = ck.split("");
+          dupExample = { id: parts[0], occ: parts[1],
+                         count: cells[ck].length };
+        }
+      }
+    }
+    if (dupCells && !opts.aggregateMean) {
+      return { problem: { kind: "duplicates",
+        text: dupExample.id + " has " + dupExample.count + " rows for " +
+          dupExample.occ + (dupCells > 1
+            ? " (and " + (dupCells - 1) + " more cell" +
+              (dupCells > 2 ? "s" : "") + " like it)" : "") +
+          ". Reshaping needs ONE measurement per person per occasion.",
+        remedy: "Average them into one value per cell",
+        remedyKey: "aggregateMean" } };
+    }
+    // Carried columns: everything else, constant within each person.
+    var carried = t.order.filter(function (c) {
+      return c !== idCol && c !== occCol && c !== valCol;
+    });
+    var carriedValues = {}, conflict = null;
+    for (var c0 = 0; c0 < carried.length && !conflict; c0++) {
+      var col = carried[c0], perId = {};
+      for (i = 0; i < n; i++) {
+        var idv2 = idOf[i];
+        if (idv2 == null) continue;
+        var v = t.columns[col][i];
+        if (v == null) continue;
+        var key = String(idv2), sv = String(v);
+        if (perId[key] == null) perId[key] = sv;
+        else if (perId[key] !== sv && !opts.carryFirst) {
+          conflict = { col: col, id: key, a: perId[key], b: sv };
+        }
+      }
+      carriedValues[col] = perId;
+    }
+    if (conflict) {
+      return { problem: { kind: "inconsistent",
+        text: conflict.col + " is not constant within each person: " +
+          conflict.id + " has both \"" + conflict.a + "\" and \"" +
+          conflict.b + "\". A wide row can hold only one value per person.",
+        remedy: "Carry each person's first value",
+        remedyKey: "carryFirst" } };
+    }
+    // Build the wide table.
+    var header = [idCol];
+    for (var cc = 0; cc < carried.length; cc++) header.push(carried[cc]);
+    var wideNames = occLevels.map(function (lvl) {
+      return valCol + "_" + lvl;
+    });
+    for (var w = 0; w < wideNames.length; w++) header.push(wideNames[w]);
+    var rows = [];
+    for (i = 0; i < ids.length; i++) {
+      var row = [ids[i]];
+      for (cc = 0; cc < carried.length; cc++) {
+        var got = carriedValues[carried[cc]][ids[i]];
+        row.push(got == null ? "" : got);
+      }
+      for (var L = 0; L < occLevels.length; L++) {
+        var vs = cells[ids[i] + "" + occLevels[L]] || [];
+        var nums = vs.filter(function (x) {
+          return typeof x === "number" && isFinite(x);
+        });
+        var out;
+        if (!vs.length) out = "";
+        else if (vs.length === 1)
+          out = vs[0] == null ? "" : String(vs[0]);
+        else if (nums.length) {
+          var sum = 0;
+          for (var q = 0; q < nums.length; q++) sum += nums[q];
+          out = String(Number((sum / nums.length).toPrecision(10)));
+        } else out = vs[0] == null ? "" : String(vs[0]);
+        row.push(out);
+      }
+      rows.push(row);
+    }
+    var notes = [];
+    if (opts.aggregateMean && dupCells)
+      notes.push(dupCells + " cell" + (dupCells === 1 ? "" : "s") +
+        " averaged across repeated measurements (mean)");
+    if (opts.carryFirst)
+      notes.push("carried columns use each person's first value");
+    if (skipped)
+      notes.push(skipped + " row" + (skipped === 1 ? "" : "s") +
+        " without an ID or occasion left out");
+    return { header: header, rows: rows, notes: notes,
+             people: ids.length, occasions: occLevels.length };
+  }
+  var RESHAPE_OPTS = { aggregateMean: false, carryFirst: false };
+  function reshapePickerDefaults(t) {
+    var id = null, occ = null, val = null;
+    for (var i = 0; i < t.order.length; i++) {
+      var c = t.order[i], kind = t.types[c];
+      if (!id && kind === "id") id = c;
+      if (!val && kind === "continuous") val = c;
+    }
+    if (!id) id = t.order[0];
+    for (i = 0; i < t.order.length; i++) {
+      var c2 = t.order[i], lv = t.levels[c2];
+      if (c2 === id || c2 === val) continue;
+      if ((t.types[c2] === "nominal" || t.types[c2] === "ordinal") &&
+          lv && lv.length >= 2 && lv.length <= 12) { occ = c2; break; }
+    }
+    return { id: id, occ: occ, val: val };
+  }
+  function openReshapeDialog() {
+    var t = PROJECT.table;
+    if (!t || t.order.length < 3) {
+      showToast("Reshaping needs at least an ID, an occasions column, " +
+        "and a measurement column.");
+      return;
+    }
+    RESHAPE_OPTS = { aggregateMean: false, carryFirst: false };
+    var defaults = reshapePickerDefaults(t);
+    var fill = function (selId, chosen) {
+      var sel = el(selId);
+      sel.innerHTML = "";
+      for (var i = 0; i < t.order.length; i++) {
+        var o = document.createElement("option");
+        o.value = t.order[i]; o.textContent = t.order[i];
+        if (t.order[i] === chosen) o.selected = true;
+        sel.appendChild(o);
+      }
+    };
+    fill("ps-reshape-id", defaults.id);
+    fill("ps-reshape-occ", defaults.occ);
+    fill("ps-reshape-value", defaults.val);
+    refreshReshapePreview();
+    openShellDialog("ps-reshape-dialog");
+  }
+  function refreshReshapePreview() {
+    var t = PROJECT.table;
+    var res = computeReshape(t, el("ps-reshape-id").value,
+      el("ps-reshape-occ").value, el("ps-reshape-value").value,
+      RESHAPE_OPTS);
+    var problem = el("ps-reshape-problem");
+    var note = el("ps-reshape-note");
+    var preview = el("ps-reshape-preview");
+    var apply = el("ps-reshape-apply");
+    if (res.problem) {
+      problem.setAttribute("data-open", "1");
+      problem.innerHTML = "";
+      problem.appendChild(document.createTextNode(res.problem.text));
+      if (res.problem.remedy) {
+        var b = mkEl("button", "ps-btn", res.problem.remedy);
+        b.type = "button";
+        b.setAttribute("data-reshape-remedy", res.problem.remedyKey);
+        b.addEventListener("click", function () {
+          RESHAPE_OPTS[res.problem.remedyKey] = true;
+          refreshReshapePreview();
+        });
+        problem.appendChild(document.createElement("br"));
+        problem.appendChild(b);
+      }
+      note.removeAttribute("data-open");
+      preview.innerHTML = "";
+      apply.disabled = true;
+      return;
+    }
+    problem.removeAttribute("data-open");
+    if (res.notes.length) {
+      note.setAttribute("data-open", "1");
+      note.textContent = res.notes.join(" \u00b7 ");
+    } else note.removeAttribute("data-open");
+    var h = ["<table><thead><tr>"];
+    var maxCols = Math.min(res.header.length, 8);
+    for (var c = 0; c < maxCols; c++)
+      h.push("<th>" + escHtml(res.header[c]) + "</th>");
+    if (res.header.length > maxCols) h.push("<th>\u2026</th>");
+    h.push("</tr></thead><tbody>");
+    for (var r = 0; r < Math.min(res.rows.length, 6); r++) {
+      h.push("<tr>");
+      for (c = 0; c < maxCols; c++)
+        h.push("<td>" + escHtml(res.rows[r][c] === "" ? "\u2014"
+          : res.rows[r][c]) + "</td>");
+      if (res.header.length > maxCols) h.push("<td>\u2026</td>");
+      h.push("</tr>");
+    }
+    h.push("</tbody></table>");
+    preview.innerHTML = h.join("");
+    apply.disabled = false;
+  }
+  function applyReshape() {
+    var t = PROJECT.table;
+    var res = computeReshape(t, el("ps-reshape-id").value,
+      el("ps-reshape-occ").value, el("ps-reshape-value").value,
+      RESHAPE_OPTS);
+    if (res.problem) return;
+    dataMark("the reshape");
+    var name = t.name;
+    PROJECT.table = buildTable(name, res.header, res.rows, null);
+    PROJECT.table.edited = true;
+    GRID_NATURAL_WIDTHS = {};
+    gridResetColumnView();
+    gridClearSelection(false);
+    validateRoles();
+    CHART_SNAPS = {};
+    persist();
+    syncAll();
+    render();
+    closeShellDialog("ps-reshape-dialog");
+    showToast("Reshaped to wide: " + res.people + " people \u00d7 " +
+      res.occasions + " occasions" +
+      (res.notes.length ? " \u00b7 " + res.notes.join(" \u00b7 ") : "") +
+      " \u00b7 one undo restores the long table");
+  }
+  // ---- the formula dialog (guided transforms + free formulas in ONE
+  // surface: every quick-transform button just writes a visible,
+  // editable formula).
+  var FORMULA_EDIT = null;   // { col: editing column or null, source }
+  function formulaBacktick(name) {
+    return /^[A-Za-z_][A-Za-z0-9_.]*$/.test(name) &&
+      ["AND", "OR", "NOT"].indexOf(name.toUpperCase()) === -1
+      ? name : "`" + name + "`";
+  }
+  function formulaTemplatesFor(source, t) {
+    if (!source || !t.raw[source]) return [];
+    var ref = formulaBacktick(source);
+    var out = [];
+    if (colStoresNumbers(t, source)) {
+      out.push({ label: "log10", name: source + "_log10",
+                 formula: "LOG10(" + ref + ")" });
+      out.push({ label: "ln", name: source + "_ln",
+                 formula: "LN(" + ref + ")" });
+      out.push({ label: "z-score", name: source + "_z",
+                 formula: "(" + ref + " - MEAN(" + ref + ")) / SD(" + ref + ")" });
+      out.push({ label: "center", name: source + "_centered",
+                 formula: ref + " - MEAN(" + ref + ")" });
+      out.push({ label: "bin into 4", name: source + "_bin",
+                 formula: "BIN(" + ref + ", 4)" });
+    }
+    var lv = t.levels[source];
+    if (lv && lv.length && t.types[source] !== "id") {
+      var f = "", close = "";
+      for (var i = 0; i < lv.length; i++) {
+        f += "IF(" + ref + ' == "' + lv[i] + '", "' + lv[i] + '", ';
+        close += ")";
+      }
+      out.push({ label: "recode", name: source + "_recoded",
+                 formula: f + ref + close });
+    }
+    return out;
+  }
+  function uniqueColumnName(base) {
+    var t = PROJECT.table, name = base, k = 2;
+    while (t.order.indexOf(name) !== -1 &&
+           name !== (FORMULA_EDIT && FORMULA_EDIT.col))
+      name = base + "_" + (k++);
+    return name;
+  }
+  function openFormulaDialog(source, editingCol) {
+    var t = PROJECT.table;
+    if (!t) return;
+    FORMULA_EDIT = { col: editingCol || null, source: source || null };
+    el("ps-formula-title").textContent = editingCol
+      ? "Edit formula: " + editingCol : "Computed variable";
+    el("ps-formula-name").value = editingCol ||
+      uniqueColumnName(source ? source + "_2" : "computed");
+    el("ps-formula-name").disabled = !!editingCol;
+    el("ps-formula-input").value = editingCol
+      ? (t.computed[editingCol] || "") : "";
+    var tpl = el("ps-formula-templates");
+    tpl.innerHTML =
+      '<span class="ps-formula-templates-label">Quick transforms</span>';
+    var templates = formulaTemplatesFor(source, t);
+    for (var i = 0; i < templates.length; i++) {
+      (function (tp) {
+        var b = mkEl("button", "", tp.label);
+        b.type = "button";
+        b.setAttribute("data-formula-template", tp.label);
+        setTip(b, tp.formula);
+        b.addEventListener("click", function () {
+          el("ps-formula-input").value = tp.formula;
+          if (!FORMULA_EDIT.col)
+            el("ps-formula-name").value = uniqueColumnName(tp.name);
+          refreshFormulaPreview();
+        });
+        tpl.appendChild(b);
+      })(templates[i]);
+    }
+    tpl.style.display = templates.length ? "flex" : "none";
+    refreshFormulaPreview();
+    openShellDialog("ps-formula-dialog");
+  }
+  function refreshFormulaPreview() {
+    var t = PROJECT.table;
+    var formula = el("ps-formula-input").value;
+    var msg = el("ps-formula-msg"), prev = el("ps-formula-preview");
+    if (!String(formula).trim()) {
+      msg.textContent = "";
+      prev.textContent = "Type a formula (or pick a quick transform) " +
+        "to preview its first values.";
+      return;
+    }
+    var editing = FORMULA_EDIT && FORMULA_EDIT.col;
+    var known = t.order.filter(function (c) { return c !== editing; });
+    var compiled = window.PSFormula.compile(formula, known);
+    if (!compiled.ok) {
+      msg.textContent = compiled.error;
+      prev.textContent = "";
+      return;
+    }
+    msg.textContent = "";
+    var n = Math.min(6, nRows(t));
+    var values = compiled.run(t.columns, nRows(t)).slice(0, n);
+    prev.textContent = "First values: " + values.map(function (v) {
+      return v == null ? "\u2014"
+        : typeof v === "number" ? String(Number(v.toPrecision(6))) : String(v);
+    }).join(", ");
+  }
+  function submitFormulaDialog() {
+    var res = saveComputedColumn(
+      el("ps-formula-name").value,
+      el("ps-formula-input").value,
+      FORMULA_EDIT && FORMULA_EDIT.col,
+      FORMULA_EDIT && FORMULA_EDIT.source);
+    if (res.error) { el("ps-formula-msg").textContent = res.error; return; }
+    closeShellDialog("ps-formula-dialog");
+    // A formula can compile and STILL not compute: a cycle is only visible
+    // once every column is evaluated together. Report what actually happened
+    // rather than the happy path, because this toast is the only feedback at
+    // this moment and the error was otherwise reachable only by hovering the
+    // fx badge.
+    var savedErr = PROJECT.table && PROJECT.table.computedErrors
+      ? PROJECT.table.computedErrors[res.name] : null;
+    if (savedErr)
+      showToast(res.name + " was saved but cannot compute: " + savedErr, true);
+    else
+      showToast((FORMULA_EDIT && FORMULA_EDIT.col ? "Updated " : "Added ") +
+        res.name + " - it recalculates whenever the data changes.");
+    FORMULA_EDIT = null;
+  }
+  // Shared column-rename bookkeeping used by renameVariable AND the
+  // formula dialog's rename-through-edit (filters + formulas follow).
+  function sweepRenamedColumn(oldName, next) {
+    var t = PROJECT.table;
+    if (Array.isArray(t.filters))
+      for (var fi = 0; fi < t.filters.length; fi++)
+        if (t.filters[fi] && t.filters[fi].col === oldName)
+          t.filters[fi].col = next;
+    if (t.computed && window.PSFormula) {
+      for (var cc in t.computed) {
+        if (!Object.prototype.hasOwnProperty.call(t.computed, cc)) continue;
+        t.computed[cc] = window.PSFormula.renameRef(t.computed[cc], oldName, next);
+      }
+      if (t.computed[oldName] != null) {
+        t.computed[next] = t.computed[oldName];
+        delete t.computed[oldName];
+      }
+    }
+  }
+  function valueExclCount(t) {
+    var k = 0;
+    if (!t || !t.excluded) return 0;
+    for (var c in t.excluded)
+      if (Object.prototype.hasOwnProperty.call(t.excluded, c))
+        k += Object.keys(t.excluded[c]).length;
+    return k;
+  }
+  function exclCount(t) {
+    return rowExclCount(t) + valueExclCount(t);
+  }
+  function retype(t) {
+    bumpSnapEpoch();   // every data mutation and every load path lands here
+    retypeColumns(t);
+    // Computed columns (Tier 1): every stored formula re-evaluates from
+    // the freshly typed source values (chains work left-to-right), then
+    // ONE more typing pass derives levels/types for the results.
+    if (recomputeFormulas(t)) retypeColumns(t);
+    computeFilterState(t);
+  }
+  function isComputedColumn(t, col) {
+    return !!(t && t.computed && t.computed[col] != null);
+  }
+  function recomputeFormulas(t) {
+    if (!t.computed || !window.PSFormula) return false;
+    var names = t.order.filter(function (c) { return t.computed[c] != null; });
+    if (!names.length) { t.computedErrors = null; return false; }
+    var n = nRows(t), wrote = false;
+    t.computedErrors = {};
+    // B10. knownColumns includes every OTHER computed column, including ones
+    // defined later, and this loop used to evaluate in t.order order writing
+    // as it went. So "A = B + 1" and "B = A + 1" both compiled clean and
+    // drifted on every subsequent edit with no signal, and any forward
+    // reference silently used the PREVIOUS value - a computed column reading
+    // one edit behind. Compile everything first (compile() already returns
+    // refs), then evaluate in dependency order and refuse the cycles.
+    var byName = {}, isComputed = {}, i;
+    for (i = 0; i < names.length; i++) isComputed[names[i]] = true;
+    for (i = 0; i < names.length; i++) {
+      var cn = names[i];
+      byName[cn] = window.PSFormula.compile(t.computed[cn],
+        t.order.filter(function (c) { return c !== cn; }));
+    }
+    var mark = {}, evalOrder = [], cyclic = {};
+    function visit(cn, stack) {
+      if (mark[cn] === 2) return;
+      if (mark[cn] === 1) {                       // back edge: a cycle
+        for (var z = Math.max(0, stack.indexOf(cn)); z < stack.length; z++)
+          cyclic[stack[z]] = 1;
+        cyclic[cn] = 1;
+        return;
+      }
+      mark[cn] = 1;
+      stack.push(cn);
+      var cc = byName[cn];
+      if (cc && cc.ok && cc.refs)
+        for (var r = 0; r < cc.refs.length; r++)
+          if (isComputed[cc.refs[r]] && cc.refs[r] !== cn)
+            visit(cc.refs[r], stack);
+      stack.pop();
+      mark[cn] = 2;
+      evalOrder.push(cn);                          // dependencies first
+    }
+    for (i = 0; i < names.length; i++) visit(names[i], []);
+    var cyclicNames = Object.keys(cyclic);
+    names = evalOrder;
+    for (i = 0; i < names.length; i++) {
+      var col = names[i], r;
+      var compiled = cyclic[col]
+        ? { ok: false, error: "circular reference (" +
+            cyclicNames.join(" and ") + " depend on each other)" }
+        : byName[col];
+      if (!compiled.ok) {
+        t.computedErrors[col] = compiled.error;
+        var blankRaw = new Array(n), blankTyped = new Array(n);
+        for (r = 0; r < n; r++) { blankRaw[r] = ""; blankTyped[r] = null; }
+        t.raw[col] = blankRaw;
+        t.columns[col] = blankTyped;
+        wrote = true;
+        continue;
+      }
+      var values = compiled.run(t.columns, n);
+      var raw = new Array(n), typed = new Array(n);
+      for (r = 0; r < n; r++) {
+        var v = values[r];
+        if (v == null) { raw[r] = ""; typed[r] = null; }
+        else if (typeof v === "number") {
+          var num = Number(v.toPrecision(10));
+          raw[r] = String(num); typed[r] = num;
+        } else { raw[r] = String(v); typed[r] = String(v); }
+      }
+      t.raw[col] = raw;
+      t.columns[col] = typed;   // later formulas in the chain see these
+      wrote = true;
+    }
+    return wrote;
+  }
+  function retypeColumns(t) {
+    t.columns = {}; t.levels = {}; t.numericish = {};
+    // t.typeAudit is what the variable inspector reads to name the values
+    // that decided each type (18b/18c). It is derived state: rebuilt on
+    // every retype and deliberately absent from every serialization list.
+    t.typeAudit = {};
+    // The token map was rebuilt per CELL by isMissingRaw, which is 720k
+    // object allocations on a 120k x 6 import. Built once per COLUMN now
+    // (t3-58a gave columns their own token lists), which is still O(columns)
+    // rather than O(cells) and keeps that fix intact.
+    for (var j = 0; j < t.order.length; j++) {
+      var col = t.order[j], rv = t.raw[col], out = [], lv = [], i;
+      var tokens = tableMissingTokens(t, col);
+      var audit = numericAudit(rv, tokens);
+      t.typeAudit[col] = audit;
+      t.numericish[col] = audit.numeric;
+      var dl = t.declaredLevels && t.declaredLevels[col];
+      if (colStoresNumbers(t, col)) {
+        for (i = 0; i < rv.length; i++) {
+          // Excluded cells read as missing everywhere downstream; the
+          // grid alone shows the underlying value (struck through).
+          if (isExcluded(t, col, i)) { out.push(null); continue; }
+          var s = String(rv[i]).trim();
+          out.push(tokens[s] ? null : (isFinite(Number(s)) ? Number(s) : null));
+        }
+        if (t.types[col] === "ordinal") {
+          // Numeric ordinal: levels ascend numerically (jamovi), unless
+          // an explicit order was declared. Level strings come from the
+          // TYPED values so they match String(value) at aggregation.
+          if (dl) for (var d1 = 0; d1 < dl.length; d1++) lv.push(String(dl[d1]));
+          else {
+            var seenN = {};
+            for (i = 0; i < out.length; i++)
+              if (out[i] != null && !seenN[out[i]]) { seenN[out[i]] = 1; lv.push(out[i]); }
+            lv.sort(function (a, b) { return a - b; });
+            lv = lv.map(String);
+          }
+          t.levels[col] = lv;
+        }
+      } else {
+        // Declared level order wins (the jamovi factor-level semantics;
+        // parity probes pass R's exact level order through here); unseen
+        // values append in first-seen order. Excluded cells contribute
+        // neither a value nor a level.
+        //
+        // P2. Two fixes here, both from the item. The membership test was
+        // lv.indexOf INSIDE the row loop, so building the list cost
+        // rows x distinct: 965 ms for 20,000 distinct values. And the ID
+        // guard sat AFTER the loop, so an ID column - where every value is
+        // distinct, the worst possible case - built the whole list and threw
+        // it away. A null-prototype map because these keys are DATA: a value
+        // of "__proto__" on a plain object sets the prototype instead of
+        // creating a key, and the level would silently vanish.
+        var wantLevels = t.types[col] !== "id";
+        var seenS = Object.create(null);
+        if (dl && wantLevels)
+          for (var d0 = 0; d0 < dl.length; d0++) {
+            var dv = String(dl[d0]);
+            if (seenS[dv] === undefined) { seenS[dv] = 1; lv.push(dv); }
+          }
+        for (i = 0; i < rv.length; i++) {
+          if (isExcluded(t, col, i)) { out.push(null); continue; }
+          var s2 = String(rv[i]).trim();
+          if (tokens[s2]) { out.push(null); continue; }
+          out.push(s2);
+          if (wantLevels && seenS[s2] === undefined) {
+            seenS[s2] = 1;
+            lv.push(s2);
+          }
+        }
+        if (wantLevels) t.levels[col] = lv;
+      }
+      t.columns[col] = out;
+    }
+  }
+  function nRows(t) { return t.order.length ? t.raw[t.order[0]].length : 0; }
+
+  // ================================================================ csv
+  function sniffDelimiter(text) {
+    var firstLine = "", lines = String(text || "").split(/\r?\n/);
+    for (var li = 0; li < lines.length; li++)
+      if (lines[li].trim() !== "") { firstLine = lines[li]; break; }
+    var best = ",", bestN = -1, cands = [",", ";", "\t"];
+    for (var c = 0; c < cands.length; c++) {
+      var cnt = 0, inQ = false;
+      for (var p = 0; p < firstLine.length; p++) {
+        var ch = firstLine[p];
+        if (ch === '"') inQ = !inQ;
+        else if (!inQ && ch === cands[c]) cnt++;
+      }
+      if (cnt > bestN) { bestN = cnt; best = cands[c]; }
+    }
+    return best;
+  }
+  function parseDelimitedRows(text, delimiter, keepEmptyRows) {
+    if (text == null || text === "") return [];
+    text = String(text);
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+    text = text.replace(/\r\n?/g, "\n");
+    var delim = !delimiter || delimiter === "auto"
+      ? sniffDelimiter(text) : delimiter;
+    // Field parse with quote handling ("" escapes a quote).
+    var rows = [], row = [], field = "", q = false, i;
+    for (i = 0; i < text.length; i++) {
+      var chr = text[i];
+      if (q) {
+        if (chr === '"') {
+          if (text[i + 1] === '"') { field += '"'; i++; }
+          else q = false;
+        } else field += chr;
+      } else if (chr === '"') q = true;
+      else if (chr === delim) { row.push(field); field = ""; }
+      else if (chr === "\n") { row.push(field); field = ""; rows.push(row); row = []; }
+      else field += chr;
+    }
+    if (field !== "" || row.length) { row.push(field); rows.push(row); }
+    var before = rows.length;
+    if (!keepEmptyRows) rows = rows.filter(function (r) {
+      return r.some(function (cell) { return String(cell).trim() !== ""; });
+    });
+    while (rows.length && rows[rows.length - 1].length === 1 &&
+           rows[rows.length - 1][0] === "") rows.pop();
+    // B20. Spacer rows and blank observations change the row count and
+    // therefore alignment with any external key, so the number dropped is
+    // reported rather than quietly absorbed.
+    BLANK_ROWS_DROPPED = before - rows.length;
+    return rows;
+  }
+  // parseTableText returns a bare null for several genuinely different
+  // failures, and the import dialog surfaced all of them as one sentence
+  // about the delimiter and first-row settings - which is wrong advice for
+  // most of them (punch list item 10). The reason is published on a side
+  // channel so no caller's return contract changes.
+  var PARSE_ISSUE = "";
+  var BLANK_ROWS_DROPPED = 0;
+  function parseIssue() { return PARSE_ISSUE; }
+  // P5. Flipping "First row" between Variable names and Data re-split the
+  // ENTIRE file, which is 71 ms of the 101 ms parse at 8.2 MB for a change
+  // that only moves one row. The delimited split depends on the text and the
+  // delimiter and nothing else, so it is cached on exactly those two - one
+  // entry, since the loader only ever has one file open.
+  var SPLIT_CACHE = null;
+  function splitDelimited(text, delimiter) {
+    if (SPLIT_CACHE && SPLIT_CACHE.text === text &&
+        SPLIT_CACHE.delimiter === delimiter) {
+      BLANK_ROWS_DROPPED = SPLIT_CACHE.blankDropped;
+      return SPLIT_CACHE.rows.slice();
+    }
+    var rows = parseDelimitedRows(text, delimiter, false);
+    SPLIT_CACHE = { text: text, delimiter: delimiter, rows: rows,
+                    blankDropped: BLANK_ROWS_DROPPED };
+    return rows.slice();
+  }
+  function parseTableText(text, delimiter, hasHeader) {
+    PARSE_ISSUE = "";
+    var rows = splitDelimited(text, delimiter);
+    // Captured immediately: BLANK_ROWS_DROPPED is a side channel, and any
+    // later parseDelimitedRows call would overwrite it.
+    var blankDropped = BLANK_ROWS_DROPPED;
+    if (!rows.length) {
+      PARSE_ISSUE = "There is nothing to read in that file: it is empty, or " +
+        "every line in it is blank.";
+      return null;
+    }
+    var width = 0;
+    for (var i = 0; i < rows.length; i++) width = Math.max(width, rows[i].length);
+    if (!width) {
+      PARSE_ISSUE = "No columns were found. Check the delimiter setting below.";
+      return null;
+    }
+    var ragged = rows.some(function (r) { return r.length !== width; });
+    var header;
+    if (hasHeader !== false) {
+      if (rows.length < 2) {
+        PARSE_ISSUE = width > 1
+          ? "That file has one line, which is being read as the variable " +
+            "names, so there is no data underneath it. If that line is " +
+            "already data, set First row to \u201cData\u201d below."
+          : "That file has one line and one column, so there is nothing to " +
+            "read as a table. Check the delimiter setting below.";
+        return null;
+      }
+      header = rows.shift().slice();   // padded below; must not touch the cache
+    } else {
+      header = [];
+      for (i = 0; i < width; i++) header.push("V" + (i + 1));
+    }
+    while (header.length < width) header.push("V" + (header.length + 1));
+    // Only a RAGGED file needs padding, and only the short rows need copying.
+    // Copying every row defensively cost 38 ms of a 101 ms parse at 8.2 MB.
+    for (i = 0; i < rows.length; i++)
+      if (rows[i].length < width) {
+        var padded = rows[i].slice();
+        while (padded.length < width) padded.push("");
+        rows[i] = padded;
+      }
+    // Resolve blanks and duplicates HERE, with the same function buildTable
+    // uses, so the preview shows the names the table will actually carry.
+    var head = resolveHeader(header.slice(0, width));
+    return { header: head.names, rows: rows,
+             renamed: head.renamed,
+             blankRowsDropped: blankDropped,
+             delimiter: !delimiter || delimiter === "auto"
+               ? sniffDelimiter(text) : delimiter,
+             ragged: ragged };
+  }
+  function parseCSV(text) {
+    var parsed = parseTableText(text, "auto", true);
+    if (!parsed || !parsed.rows.length) return null;
+    return { header: parsed.header, rows: parsed.rows };
+  }
+
+  // ================================================================ project
+  // A project = ONE shared table + MANY charts (tabs). Each chart keeps
+  // its own analysis module plus per-module roles/options maps, so
+  // switching analysis type within a tab keeps that tab's memory - the
+  // same semantics the single-chart shell had.
+  var PROJECT = {
+    version: 3,
+    id: null,
+    name: "Untitled project",
+    table: null,
+    charts: [],
+    activeChart: null,
+    ui: { dataOpen: false, workspace: "chart",
+          lastChart: null, lastLayout: null, columnWidths: {} }
+  };
+  function newProjectId() {
+    return "p" + Date.now().toString(36) +
+      Math.random().toString(36).slice(2, 8);
+  }
+  function isLayoutTab(c) { return !!c && c.type === "layout"; }
+  function chartById(id) {
+    for (var i = 0; i < PROJECT.charts.length; i++)
+      if (PROJECT.charts[i].id === id) return PROJECT.charts[i];
+    return null;
+  }
+  var LAST_CHART_ID = null;   // last CHART tab the engine rendered
+  var SNAPSHOT_PASS = false;  // B24: true while rendering offscreen for snapshots
+  function rememberDocument(c) {
+    if (!c) return;
+    if (!PROJECT.ui) PROJECT.ui = {};
+    PROJECT.ui[isLayoutTab(c) ? "lastLayout" : "lastChart"] = c.id;
+  }
+  function newChart(name) {
+    var maxId = 0;
+    for (var i = 0; i < PROJECT.charts.length; i++) {
+      var m = /^c(\d+)$/.exec(PROJECT.charts[i].id || "");
+      if (m) maxId = Math.max(maxId, Number(m[1]));
+    }
+    return { id: "c" + (maxId + 1),
+             name: name || ("Chart " + (maxId + 1)),
+             module: "plotbuilder", roles: {}, options: {},
+             // Never auto-restyled until the engine's one-shot
+             // default-style application stamps it (library bridge).
+             styleStamp: false };
+  }
+  function newLayout() {
+    var maxId = 0, nL = 0;
+    for (var i = 0; i < PROJECT.charts.length; i++) {
+      var m = /^c(\d+)$/.exec(PROJECT.charts[i].id || "");
+      if (m) maxId = Math.max(maxId, Number(m[1]));
+      if (isLayoutTab(PROJECT.charts[i])) nL++;
+    }
+    return { id: "c" + (maxId + 1), name: "Layout " + (nL + 1),
+             type: "layout", items: [], nextLabel: 0,
+             page: { preset: "canvas", w: 1024, h: 680, margin: 32 },
+             view: { zoom: "fit", grid: 8, showGrid: true, snap: true,
+                     guides: true, margins: true } };
+  }
+  function activeChart() {
+    if (!PROJECT.charts.length) {
+      PROJECT.charts.push(newChart("Chart 1"));
+      PROJECT.activeChart = PROJECT.charts[0].id;
+    }
+    for (var i = 0; i < PROJECT.charts.length; i++)
+      if (PROJECT.charts[i].id === PROJECT.activeChart) return PROJECT.charts[i];
+    PROJECT.activeChart = PROJECT.charts[0].id;
+    return PROJECT.charts[0];
+  }
+  // For LAYOUT tabs these fall back to the last-rendered CHART tab, so
+  // late engine commits (debounce flushes after a tab switch) land on
+  // the chart that produced them, never on a layout.
+  function activeChartTab() {
+    var c = activeChart();
+    if (!isLayoutTab(c)) return c;
+    var last = chartById(LAST_CHART_ID);
+    if (last && !isLayoutTab(last)) return last;
+    for (var i = 0; i < PROJECT.charts.length; i++)
+      if (!isLayoutTab(PROJECT.charts[i])) return PROJECT.charts[i];
+    return null;
+  }
+  function curModule() {
+    var c = activeChartTab();
+    return c ? c.module : "plotbuilder";
+  }
+  function rolesFor(mod) {
+    var c = activeChartTab();
+    if (!c) return {};
+    if (!c.roles[mod]) c.roles[mod] = {};
+    return c.roles[mod];
+  }
+  function optionsFor(mod) {
+    var c = activeChartTab();
+    if (!c) return {};
+    if (!c.options[mod]) c.options[mod] = {};
+    return c.options[mod];
+  }
+  function projectSnapshot() {
+    var t = PROJECT.table;
+    return {
+      version: 3,
+      savedAt: new Date().toISOString(),
+      id: PROJECT.id,
+      name: PROJECT.name,
+      charts: PROJECT.charts,
+      activeChart: PROJECT.activeChart,
+      ui: PROJECT.ui,
+      table: { name: t.name, order: t.order, raw: t.raw, types: t.types,
+               declaredLevels: t.declaredLevels, edited: !!t.edited,
+               levelOrderDefaults: t.levelOrderDefaults || {},
+               excluded: t.excluded || {},
+               caseIds: t.caseIds || [],
+               excludedRows: t.excludedRows || {},
+               filters: t.filters || [],
+               computed: t.computed || {},
+               missingTokens: t.missingTokens || ["NA"],
+               missingTokensByCol: t.missingTokensByCol || {} }
+    };
+  }
+  function recentProjects() {
+    try {
+      var list = JSON.parse(window.localStorage.getItem(PS_RECENT_KEY) || "[]");
+      // t3-54: an entry no longer has to CARRY a snapshot to be listed. It
+      // must still be a real entry (an id), and a snapshot, when present,
+      // must be a usable one: a half-written entry is worse than no entry,
+      // because it fails at the moment of opening.
+      return Array.isArray(list) ? list.filter(function (item) {
+        if (!item || !item.id) return false;
+        if (item.snapshot) return !!item.snapshot.table;
+        return true;
+      }).slice(0, 3) : [];
+    } catch (e) { return []; }
+  }
+  // "Work" means a second document, an edited table, a computed column, a
+  // filter, or a row exclusion: anything whose loss would matter. Item 13 uses
+  // it to decide whether replacing a project is worth offering back, and
+  // rememberRecent uses it to decide whether a project is worth listing.
+  // A project the user CHOSE - an example, a dropped file, an import, a
+  // restored .pand - is worth listing the moment it opens, even before it has
+  // any work in it. The pristine boot default is not, and that is the only
+  // thing this flag distinguishes.
+  var PROJECT_CHOSEN = false;
+  function projectHasWork() {
+    var t = PROJECT.table;
+    if (!t) return false;
+    return PROJECT.charts.length > 1 || !!t.edited ||
+      (t.computed && Object.keys(t.computed).length > 0) ||
+      (Array.isArray(t.filters) && t.filters.length > 0) ||
+      (t.excludedRows && Object.keys(t.excludedRows).length > 0);
+  }
+  function rememberRecent(snap, fullJson) {
+    if (!snap || !snap.table || !snap.id) return;
+    // A project the user never chose and never touched does not belong in
+    // Recents. This became reachable when punch list 27's fit-to-pane started
+    // persisting on the FIRST render: the pristine boot project was recorded
+    // before the user had done anything at all, and then again the moment they
+    // opened an example, so the list opened with a stranger at the top. A
+    // project that is already IN the list keeps its place, because it earned
+    // it once and re-listing is how its timestamp stays honest.
+    if (!projectHasWork() && !PROJECT_CHOSEN) {
+      var known = recentProjects().some(function (item) {
+        return item.id === snap.id;
+      });
+      if (!known) return;
+    }
+    // t3-54. Too big to CARRY is not too big to LIST. The metadata is a few
+    // hundred bytes whatever the project weighs, so the entry is always
+    // recorded; only the inline snapshot is dropped, and the entry says so.
+    var carries = fullJson.length <= RECENTS_MAX_BYTES;
+    LADDER_SKIPPED.recents = carries ? 0 : fullJson.length;
+    if (!carries) ladderWarnOnce();
+    try {
+      var list = recentProjects().filter(function (item) {
+        return item.id !== snap.id;
+      });
+      list.unshift({
+        id: snap.id,
+        name: snap.name || snap.table.name || "Untitled project",
+        updatedAt: new Date().toISOString(),
+        rows: snap.table.order.length ? snap.table.raw[snap.table.order[0]].length : 0,
+        documents: snap.charts.length,
+        bytes: fullJson.length,
+        // The file it came from, when there is one, so the entry can say what
+        // reopening it will do rather than silently doing something else.
+        fileLabel: FILE_LABEL || "",
+        hasFile: !!FILE_HANDLE,
+        snapshot: carries ? snap : null
+      });
+      window.localStorage.setItem(PS_RECENT_KEY, JSON.stringify(list.slice(0, 3)));
+      if (FILE_HANDLE) rememberRecentHandle(snap.id, FILE_HANDLE);
+    } catch (e) {}
+  }
+  // t3-54. A FileSystemFileHandle cannot go in localStorage (it is not JSON)
+  // but IS structured-cloneable, so IndexedDB can hold it. That is what lets a
+  // reopened project reconnect to the file on disk instead of arriving
+  // detached, which is the half of this item that made every reopen a
+  // silent Save As.
+  var RECENT_DB = "ps-recent-handles";
+  function withHandleStore(mode, fn) {
+    return new Promise(function (resolve) {
+      var req;
+      try { req = window.indexedDB.open(RECENT_DB, 1); }
+      catch (e) { resolve(null); return; }
+      req.onupgradeneeded = function () {
+        try { req.result.createObjectStore("handles"); } catch (e) {}
+      };
+      req.onerror = function () { resolve(null); };
+      req.onsuccess = function () {
+        var db = req.result;
+        try {
+          var tx = db.transaction("handles", mode);
+          var out = fn(tx.objectStore("handles"));
+          tx.oncomplete = function () { db.close(); resolve(out ? out.result : null); };
+          tx.onerror = function () { db.close(); resolve(null); };
+        } catch (e) { try { db.close(); } catch (e2) {} resolve(null); }
+      };
+    });
+  }
+  function rememberRecentHandle(id, handle) {
+    if (!id || !handle || !window.indexedDB) return;
+    withHandleStore("readwrite", function (store) { store.put(handle, id); });
+  }
+  function recentHandle(id) {
+    if (!id || !window.indexedDB) return Promise.resolve(null);
+    return withHandleStore("readonly", function (store) { return store.get(id); });
+  }
+  // t4-21. Everything the app autosaves lives in localStorage, which the
+  // browser may evict under pressure - while the save chip says "Autosaved
+  // locally". Asking for persistent storage is the one call that makes that
+  // claim true where the browser allows it. Chrome grants it silently on an
+  // installed or engaged site; Firefox prompts; Safari ignores it. The
+  // result is recorded so Diagnostics can report it rather than guess.
+  var STORAGE_PERSISTED = null;   // null = not yet answered
+  function requestPersistentStorage() {
+    try {
+      if (!navigator.storage || !navigator.storage.persist) return;
+      if (navigator.storage.persisted)
+        navigator.storage.persisted().then(function (already) {
+          if (already) { STORAGE_PERSISTED = true; return; }
+          navigator.storage.persist().then(function (granted) {
+            STORAGE_PERSISTED = !!granted;
+          }, function () { STORAGE_PERSISTED = false; });
+        }, function () {});
+      else
+        navigator.storage.persist().then(function (granted) {
+          STORAGE_PERSISTED = !!granted;
+        }, function () { STORAGE_PERSISTED = false; });
+    } catch (e) { STORAGE_PERSISTED = false; }
+  }
+  // P3. persist() is called from 88 sites including the engine's setOption
+  // sink, so a slider drag ran the whole thing per commit. MEASURED at 20,000
+  // rows: 30 rapid style commits cost 197 ms, of which 72 ms was 60
+  // localStorage writes on a 1.1 MB snapshot - two writes per commit, right
+  // while the user is dragging. (The item's other numbers did NOT reproduce:
+  // stringify is 1.7 ms at 5,000 rows and the write 0.5 ms, so a single edit
+  // was never the problem. The burst was.)
+  //
+  // Shape: LEADING plus trailing. A lone edit writes synchronously exactly as
+  // before, which keeps the contract that anything can read the autosave key
+  // straight after an action; a burst collapses to one write at the start and
+  // one at the end. The two genuinely expensive extras - re-parsing the
+  // PREVIOUS full snapshot to validate the backup, and the recents bookkeeping
+  // - the backup validation, which re-parses the PREVIOUS full snapshot - is
+  // pure housekeeping that nothing reads synchronously, so it runs on the
+  // trailing edge only.
+  var PERSIST_WINDOW_MS = 220;
+  var PERSIST_TIMER = null;
+  var PERSIST_PENDING = false;
+  var PERSIST_LAST_AT = 0;
+  function persistFlush() {
+    if (PERSIST_TIMER) { window.clearTimeout(PERSIST_TIMER); PERSIST_TIMER = null; }
+    if (!PERSIST_PENDING) return;
+    PERSIST_PENDING = false;
+    persistWrite(true);
+  }
+  function persistSchedule() {
+    PERSIST_PENDING = true;
+    if (PERSIST_TIMER) return;
+    PERSIST_TIMER = window.setTimeout(function () {
+      PERSIST_TIMER = null;
+      if (!PERSIST_PENDING) return;
+      PERSIST_PENDING = false;
+      persistWrite(true);
+    }, PERSIST_WINDOW_MS);
+  }
+  function persist(markDirty) {
+    if (markDirty !== false) PROJECT_REV++;
+    persistWrite(true);
+    updateDocumentState();
+  }
+  // Coalescing is deliberately narrow: only the engine's style sink, which is
+  // the ONLY caller that fires tens of times a second, and which is where the
+  // 197 ms / 60-write drag was measured. Every other call site keeps writing
+  // synchronously, because a structural operation - loading a table, adopting
+  // an import, applying a reshape - is materially different from one slider
+  // tick and its autosave failure has to be reported the moment it happens.
+  // (That distinction was not free: the first version coalesced EVERYTHING,
+  // and hardening-dom-check caught that a forced write failure went
+  // unreported for 220 ms.)
+  function persistStyleEdit() {
+    PROJECT_REV++;
+    var now = Date.now();
+    if (now - PERSIST_LAST_AT >= PERSIST_WINDOW_MS) {
+      PERSIST_LAST_AT = now;
+      persistWrite(false);          // leading edge: cheap half, synchronous
+      persistSchedule();            // and the housekeeping on the way out
+    } else persistSchedule();
+    updateDocumentState();
+  }
+  function persistWrite(housekeeping) {
+    var snap, json;
+    try {
+      snap = projectSnapshot();
+      json = JSON.stringify(snap);
+      LAST_PROJECT_BYTES = json.length;
+      var previous = window.localStorage.getItem(PS_SAVE_KEY);
+      var recoveredSession = AUTOSAVE_HEALTH === "recovered";
+      window.localStorage.setItem(PS_SAVE_KEY, json);
+      if (previous && previous.length >= BACKUP_MAX_BYTES) {
+        LADDER_SKIPPED.backup = previous.length;   // item 15
+        ladderWarnOnce();
+      } else if (previous) LADDER_SKIPPED.backup = 0;
+      if (housekeeping && !recoveredSession && previous && previous !== json &&
+          previous.length < BACKUP_MAX_BYTES) {
+        try {
+          var priorSnapshot = migrateSnapshot(JSON.parse(previous));
+          if (priorSnapshot && priorSnapshot.table &&
+              Array.isArray(priorSnapshot.table.order) &&
+              priorSnapshot.table.raw && Array.isArray(priorSnapshot.charts))
+            window.localStorage.setItem(PS_BACKUP_KEY, previous);
+        }
+        catch (backupError) {}
+      }
+      AUTOSAVE_HEALTH = "ok";
+      AUTOSAVE_LAST_OK = Date.now();
+      AUTOSAVE_DETAIL = "Local recovery is current";
+      // Recents stay on BOTH edges. They are observable immediately (the
+      // start centre lists them, and anything can ask for them straight after
+      // an action), and unlike the backup they do not re-parse the previous
+      // multi-megabyte snapshot. Once per coalescing window is cheap enough:
+      // during a 30-commit drag this is 2 writes rather than 30.
+      rememberRecent(snap, json);
+      updateDocumentState();
+    } catch (e) {
+      AUTOSAVE_HEALTH = "error";
+      AUTOSAVE_FAILS++;
+      AUTOSAVE_DETAIL = /quota/i.test(String(e && (e.name || e.message)))
+        ? "Browser storage is full; recent changes remain in memory"
+        : "Local recovery could not be updated";
+      updateDocumentState();
+      showToast(AUTOSAVE_DETAIL, true);
+    }
+  }
+  function migrateSnapshot(input) {
+    if (!input || typeof input !== "object") return null;
+    if (input.version === 3) return input;
+    if (input.version === 2) {
+      return {
+        version: 3,
+        id: input.id || newProjectId(),
+        name: input.name || (input.table && input.table.name) || "Untitled project",
+        table: input.table,
+        charts: [{ id: "c1", name: "Chart 1",
+          module: (input.module && MODULES[input.module])
+            ? input.module : "plotbuilder",
+          roles: input.roles || {}, options: input.options || {} }],
+        activeChart: "c1",
+        ui: input.ui || { dataOpen: false, workspace: "chart" }
+      };
+    }
+    return null;
+  }
+  function applySnapshot(s) {
+    s = migrateSnapshot(s);
+    if (!s) return false;
+    GRID_NATURAL_WIDTHS = {};
+    gridResetColumnView();
+    GRID_FIND_QUERY = ""; GRID_FIND_RESULTS = []; GRID_FIND_INDEX = -1;
+    if (s.table && s.table.order && s.table.raw) {
+      var rows = [];
+      var n = s.table.order.length ? s.table.raw[s.table.order[0]].length : 0;
+      for (var i = 0; i < n; i++)
+        rows.push(s.table.order.map(function (col) { return s.table.raw[col][i]; }));
+      PROJECT.table = buildTable(s.table.name, s.table.order, rows, s.table.types,
+                                 s.table.declaredLevels || null,
+                                 s.table.excluded || null,
+                                 s.table.missingTokens || null,
+                                 s.table.caseIds || null,
+                                 s.table.excludedRows || null,
+                                 s.table.levelOrderDefaults || null);
+      // Restored BEFORE the retype below, or the first pass reads the
+      // dataset list for a column that has its own.
+      PROJECT.table.missingTokensByCol =
+        (s.table.missingTokensByCol &&
+         typeof s.table.missingTokensByCol === "object")
+          ? s.table.missingTokensByCol : {};
+      PROJECT.table.edited = !!s.table.edited;
+      PROJECT.table.filters = Array.isArray(s.table.filters)
+        ? s.table.filters : [];
+      PROJECT.table.computed = (s.table.computed &&
+        typeof s.table.computed === "object") ? s.table.computed : {};
+      retype(PROJECT.table);
+    }
+    PROJECT.id = s.id || newProjectId();
+    PROJECT.name = s.name || (PROJECT.table && PROJECT.table.name) ||
+      "Untitled project";
+    var charts = Array.isArray(s.charts) ? s.charts.filter(function (c) {
+      return c && c.id && (isLayoutTab(c) ? Array.isArray(c.items)
+                                          : MODULES[c.module]);
+    }) : [];
+    PROJECT.charts = charts.length ? charts : [newChart("Chart 1")];
+    layHistoryClear();
+    clearAllEngineDocState();
+    for (var ci = 0; ci < PROJECT.charts.length; ci++)
+      if (isLayoutTab(PROJECT.charts[ci])) layNormalizeLayout(PROJECT.charts[ci]);
+    PROJECT.activeChart = s.activeChart;
+    activeChart();   // normalizes a stale active id
+    if (s.ui && typeof s.ui === "object") {
+      var ws = ["data", "chart", "layout"].indexOf(s.ui.workspace) !== -1
+        ? s.ui.workspace : (s.ui.dataOpen ? "data" :
+          (isLayoutTab(activeChart()) ? "layout" : "chart"));
+      PROJECT.ui = {
+        dataOpen: ws === "data",
+        workspace: ws,
+        lastChart: chartById(s.ui.lastChart) &&
+          !isLayoutTab(chartById(s.ui.lastChart)) ? s.ui.lastChart : null,
+        lastLayout: chartById(s.ui.lastLayout) &&
+          isLayoutTab(chartById(s.ui.lastLayout)) ? s.ui.lastLayout : null,
+        columnWidths: {},
+        paneWidths: splitSanitizeWidths(s.ui.paneWidths)
+      };
+      if (s.ui.columnWidths && typeof s.ui.columnWidths === "object") {
+        for (var widthCol in s.ui.columnWidths) {
+          if (!Object.prototype.hasOwnProperty.call(s.ui.columnWidths, widthCol) ||
+              !PROJECT.table.raw[widthCol]) continue;
+          var savedWidth = Number(s.ui.columnWidths[widthCol]);
+          if (isFinite(savedWidth))
+            PROJECT.ui.columnWidths[widthCol] =
+              Math.max(72, Math.min(600, Math.round(savedWidth)));
+        }
+      }
+    } else PROJECT.ui = {
+      dataOpen: false,
+      workspace: isLayoutTab(activeChart()) ? "layout" : "chart",
+      lastChart: null,
+      lastLayout: null,
+      columnWidths: {},
+      paneWidths: {}
+    };
+    rememberDocument(activeChart());
+    try { splitApply(); } catch (e) {}   // punch list 27: loaded pane widths
+    return true;
+  }
+  function restore() {
+    var raw = null;
+    try {
+      raw = window.localStorage.getItem(PS_SAVE_KEY);
+      var s = JSON.parse(raw || "null");
+      var ok = applySnapshot(s);
+      if (ok) {
+        BOOT_RESTORED = true;
+        BOOT_SAVED_AT = s && s.savedAt ? s.savedAt : null;
+        LAST_PROJECT_BYTES = raw ? raw.length : 0;
+        return true;
+      }
+      if (raw) throw new Error("Invalid autosave snapshot");
+      return false;
+    } catch (e) {
+      try {
+        var backupRaw = window.localStorage.getItem(PS_BACKUP_KEY);
+        var backup = JSON.parse(backupRaw || "null");
+        if (applySnapshot(backup)) {
+          BOOT_RESTORED = true;
+          BOOT_SAVED_AT = backup && backup.savedAt ? backup.savedAt : null;
+          RECOVERY_NOTE = "The newest autosave was unreadable. Pandion Plots recovered the previous local backup.";
+          AUTOSAVE_HEALTH = "recovered";
+          AUTOSAVE_DETAIL = "Recovered from the previous autosave";
+          LAST_PROJECT_BYTES = backupRaw.length;
+          return true;
+        }
+      } catch (backupError) {}
+      RECOVERY_NOTE = raw
+        ? "The local autosave could not be read. A fresh sample project was opened."
+        : "";
+      AUTOSAVE_HEALTH = raw ? "error" : "ok";
+      AUTOSAVE_DETAIL = raw ? "Local recovery is unreadable" :
+        "Local recovery is current";
+      return false;
+    }
+  }
+  // ---- portable project files (.pand) ----
+  // A saved project is the SAME versioned snapshot the autosave keeps,
+  // wrapped with an identity header so any session (or another machine)
+  // can reload it. Plain JSON on purpose: transparent and future-proof.
+  // The identity carries the product's real name (Pandion Plots); the
+  // loader sniffs CONTENT, so .pand / .pnd / .pandion / .json all open.
+  function projectFileText() {
+    var body = projectSnapshot();
+    return JSON.stringify({
+      kind: "pandion-plots-project",
+      formatVersion: 2,
+      savedAt: new Date().toISOString(),
+      app: "pandion-plots-standalone",
+      // Machine-library snapshot so saved styles/palettes travel with
+      // the project; on open, names missing from the recipient's
+      // library import (existing names are never clobbered).
+      libraries: {
+        palettes: PS_LIBS.palette.palettes,
+        styles: PS_LIBS.style.styles
+      },
+      project: body
+    }, null, 1);
+  }
+  function projectFileName() {
+    var base = PROJECT.name || (PROJECT.table && PROJECT.table.name) || "project";
+    return base.replace(/\.pand$/i, "").replace(/[^\w.-]+/g, "_") + ".pand";
+  }
+  var FILE_HANDLE = null;   // File System Access handle (session-scoped)
+  function updateDocumentState() {
+    var saveState = document.getElementById("ps-save-state");
+    var statusDoc = document.getElementById("ps-status-document");
+    var detail = document.getElementById("ps-doc-detail");
+    var dirty = FILE_SAVED_REV != null && PROJECT_REV !== FILE_SAVED_REV;
+    // B13. The honest branch was gated on FILE_SAVED_REV == null, so once a
+    // user had saved a .pand even once, a later quota failure left the most
+    // prominent persistence indicator in the app reading "Modified -
+    // autosaved" while autosave was in fact dead. The truth was one line
+    // lower in a small grey status bar. The chip now tells it. When the file
+    // copy is current a broken autosave is not alarming, so that case reads
+    // "Saved to file" rather than shouting.
+    var autosaveFailing = AUTOSAVE_HEALTH === "error";
+    var state = autosaveFailing
+      ? (FILE_SAVED_REV == null ? "Autosave unavailable"
+         : (dirty ? "Modified \u00b7 not autosaved" : "Saved to file"))
+      : (FILE_SAVED_REV == null ? "Autosaved locally"
+         : (dirty ? "Modified \u00b7 autosaved" : "Saved"));
+    if (saveState) saveState.textContent = state;
+    if (statusDoc) {
+      // Punch list 37. This slot said the same thing as the app bar's chip in
+      // slightly different words ("Autosaved locally" / "Local autosave on"),
+      // which is duplication rather than status. It reports WHEN instead: the
+      // chip says whether the work is safe, this says how recently.
+      var line = autosaveFailing ? AUTOSAVE_DETAIL
+        : (dirty ? "Unsaved file changes" : savedAgoText());
+      // B14. One lucky small write used to erase every trace that saves had
+      // been failing, including the honest status line. A recovered autosave
+      // IS working again, so the chip goes quiet - but the session remembers
+      // and says so here until the tab is closed, because "it worked this
+      // time" is not the same as "your work is safe".
+      if (!autosaveFailing && AUTOSAVE_FAILS)
+        line += " \u00b7 autosave failed " + AUTOSAVE_FAILS +
+          (AUTOSAVE_FAILS === 1 ? " time" : " times") +
+          " this session; keep a .pand copy";
+      statusDoc.textContent = line;
+    }
+    if (detail) detail.textContent = FILE_LABEL ||
+      (PROJECT.charts.length + (PROJECT.charts.length === 1
+       ? " document \u00b7 local project" : " documents \u00b7 local project"));
+  }
+  function flashSaved() {
+    var b = el("ps-save");
+    if (!b || b.__psFlashing) return;
+    FILE_SAVED_REV = PROJECT_REV;
+    FILE_LABEL = FILE_HANDLE && FILE_HANDLE.name
+      ? FILE_HANDLE.name : projectFileName();
+    b.__psFlashing = true;
+    var was = b.textContent;
+    b.textContent = "Saved";
+    updateDocumentState();
+    window.setTimeout(function () {
+      b.textContent = was;
+      b.__psFlashing = false;
+      updateDocumentState();
+    }, 1200);
+  }
+  function saveProjectFile() {
+    var text = projectFileText();
+    var framed = false;
+    try { framed = window.top !== window; } catch (e) { framed = true; }
+    // Save-in-place where the File System Access API exists (Chrome /
+    // Edge): the FIRST save picks the .pand file, every later save
+    // writes to it silently - desktop-style Cmd+S. A stale handle (file
+    // moved / permission lost) falls back to a download this once and
+    // re-picks next time.
+    if (!framed && window.showSaveFilePicker) {
+      var reuse = !!FILE_HANDLE;
+      var handleP = FILE_HANDLE
+        ? Promise.resolve(FILE_HANDLE)
+        : window.showSaveFilePicker({
+            suggestedName: projectFileName(),
+            types: [{ description: "Pandion Plots project",
+                      accept: { "application/json": [".pand"] } }]
+          });
+      handleP.then(function (h) {
+        FILE_HANDLE = h;
+        return h.createWritable().then(function (w) {
+          return w.write(text).then(function () { return w.close(); });
+        });
+      }).then(flashSaved, function (e) {
+        if (e && e.name === "AbortError") return;   // picker cancelled
+        FILE_HANDLE = null;
+        if (reuse) saveProjectDownload(text);       // stale handle
+      });
+      return;
+    }
+    if (!framed) { saveProjectDownload(text); return; }
+    // Sandboxed frames silently block programmatic downloads (the quiz
+    // fork lesson) - fall back to copy-the-text.
+    var msg = el("ps-loader-msg");
+    openLoader();
+    el("ps-paste").value = text;
+    msg.textContent = "Downloads are blocked in this embedded view - the " +
+      "project JSON is in the paste box: copy it into a file named " +
+      projectFileName() + ".";
+  }
+  function saveProjectDownload(text) {
+    try {
+      var blob = new Blob([text], { type: "application/json" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = projectFileName();
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+      flashSaved();
+    } catch (e) {
+      // B15. This whole sequence, flashSaved() included, used to be wrapped
+      // in an empty catch, so a blocked or failed download was
+      // indistinguishable from a save. This is the path Safari and Firefox
+      // take, and the .pand is the only durable copy of the work. The
+      // sandboxed-iframe branch just above already gives an honest fallback,
+      // so the silence here was an inconsistency, not a house style.
+      showToast("Could not save the project file. Your work is still here " +
+                "and still autosaved locally; try Save again, or use " +
+                "File > Save project as.", true);
+    }
+  }
+
+  // ================================================================ export
+  // The engine exposes a fresh, chrome-stripped SVG serializer on the
+  // live host at every render. Chart export uses that exact serializer.
+  // Layout export composes the same prefixed snapshot SVGs used by the
+  // on-screen layout canvas into one portable 1024 x 680 SVG.
+  var PS_EXPORT_PREF_KEY = "psstandalone.export.v1";
+  var EXPORT_BUSY = false;
+  var EXPORT_LAST_FOCUS = null;
+  var EXPORT_MAX_PIXELS = 16000000;
+
+  function exportPrefs() {
+    var out = { format: "svg", dpi: 300, background: "shown" };
+    try {
+      var p = JSON.parse(window.localStorage.getItem(PS_EXPORT_PREF_KEY) || "null");
+      if (p && /^(svg|pdf|png|jpg)$/.test(p.format)) out.format = p.format;
+      if (p && [96, 150, 300, 600].indexOf(Number(p.dpi)) !== -1)
+        out.dpi = Number(p.dpi);
+      if (p && /^(shown|transparent|white)$/.test(p.background))
+        out.background = p.background;
+    } catch (e) {}
+    return out;
+  }
+  function saveExportPrefs() {
+    try {
+      var bgEl = el("ps-export-bg");
+      window.localStorage.setItem(PS_EXPORT_PREF_KEY, JSON.stringify({
+        format: selectedExportFormat(),
+        dpi: Number(el("ps-export-dpi").value) || 300,
+        background: bgEl.__psBeforeForced || bgEl.value || "shown"
+      }));
+    } catch (e) {}
+  }
+  function selectedExportFormat() {
+    var q = document.querySelector('input[name="ps-export-format"]:checked');
+    return q ? q.value : "svg";
+  }
+  function exportMime(ext) {
+    if (ext === "svg") return "image/svg+xml";
+    if (ext === "png") return "image/png";
+    if (ext === "jpg") return "image/jpeg";
+    if (ext === "pdf") return "application/pdf";
+    if (ext === "csv") return "text/csv";
+    return "application/octet-stream";
+  }
+  function exportDescription(ext) {
+    if (ext === "svg") return "SVG image";
+    if (ext === "png") return "PNG image";
+    if (ext === "jpg") return "JPEG image";
+    if (ext === "pdf") return "PDF document";
+    if (ext === "csv") return "CSV spreadsheet";
+    return "Export";
+  }
+  function cleanExportBase(name) {
+    name = String(name || "").trim()
+      .replace(/\.(svg|pdf|png|jpe?g)$/i, "")
+      .replace(/[\/\\:*?"<>|\u0000-\u001f]+/g, "_")
+      .replace(/[. ]+$/g, "")
+      .substring(0, 100);
+    return name || "plot";
+  }
+  function defaultExportBase() {
+    var c = activeChart();
+    return cleanExportBase(c && c.name ? c.name : "plot");
+  }
+  function currentExportSize() {
+    if (isLayoutTab(activeChart())) {
+      var lp = layPage();
+      return { w: lp.w, h: lp.h };
+    }
+    var host = hostEl();
+    try {
+      if (host && typeof host.__gb2_chartSize === "function") {
+        var s = host.__gb2_chartSize();
+        if (s && s.w > 0 && s.h > 0) return { w: s.w, h: s.h };
+      }
+    } catch (e) {}
+    var svgs = host ? host.querySelectorAll("svg") : [];
+    var best = null, area = 0;
+    for (var i = 0; i < svgs.length; i++) {
+      var a = svgs[i].clientWidth * svgs[i].clientHeight;
+      if (a > area) { area = a; best = svgs[i]; }
+    }
+    return best
+      ? { w: Math.max(1, Math.round(best.clientWidth)),
+          h: Math.max(1, Math.round(best.clientHeight)) }
+      : { w: 700, h: 450 };
+  }
+  function setExportStatus(msg, isError) {
+    var s = el("ps-export-status");
+    s.textContent = msg || "";
+    s.className = isError ? "ps-export-error" : "";
+  }
+  // B17. One node, one timer, and both writers cleared it - so an ordinary
+  // announcement landing inside a pending Undo's six seconds removed the
+  // button and the offered restore simply never happened. Undo offers are
+  // the ONLY recovery path for closing a document, the three named data
+  // deletions, Reset styling, replacing the project from Recents, and every
+  // layout change. They are now independent pills with independent timers:
+  // an announcement can share the screen with an offer but can never eat it.
+  var TOASTS = [];
+  var TOAST_SEQ = 0;
+  var TOAST_MAX = 3;
+  function renderToasts() {
+    var host = document.getElementById("ps-toast");
+    if (!host) return;   // a boot-time failure can toast before the DOM is up
+    // t4-22: an error is announced assertively, a confirmation politely. One
+    // region cannot be both, so the region's own politeness follows what is
+    // in it. Screen readers read the attribute at announce time.
+    var anyError = false;
+    for (var ei = 0; ei < TOASTS.length; ei++)
+      if (TOASTS[ei].error) { anyError = true; break; }
+    host.setAttribute("aria-live", anyError ? "assertive" : "polite");
+    host.setAttribute("role", anyError ? "alert" : "status");
+    host.innerHTML = "";
+    var hasAction = false;
+    for (var i = 0; i < TOASTS.length; i++) {
+      (function (entry) {
+        var row = mkEl("div", "ps-toast-item" +
+          (entry.error ? " ps-toast-error" : "") +
+          (entry.undo ? " ps-toast-action" : ""));
+        row.appendChild(document.createTextNode(entry.text));
+        if (entry.undo) {
+          hasAction = true;
+          var b = mkEl("button", "", entry.actionLabel || "Undo");
+          b.type = "button";
+          b.addEventListener("click", function () {
+            var run = entry.undo;
+            dismissToast(entry.id);
+            run();
+          });
+          row.appendChild(b);
+        }
+        host.appendChild(row);
+      })(TOASTS[i]);
+    }
+    host.className = TOASTS.length
+      ? ("ps-toast-show" + (hasAction ? " ps-toast-action" : "")) : "";
+  }
+  function dismissToast(id) {
+    for (var i = 0; i < TOASTS.length; i++)
+      if (TOASTS[i].id === id) {
+        if (TOASTS[i].timer) window.clearTimeout(TOASTS[i].timer);
+        TOASTS.splice(i, 1);
+        break;
+      }
+    renderToasts();
+  }
+  function pushToast(text, opts) {
+    opts = opts || {};
+    var entry = { id: ++TOAST_SEQ, text: String(text),
+                  error: !!opts.error, undo: opts.undo || null,
+                  actionLabel: opts.actionLabel || null, timer: null };
+    TOASTS.push(entry);
+    // Over the cap, drop the oldest ANNOUNCEMENT; an offer is only dropped
+    // when the pile is nothing but offers, which is the same bug in
+    // miniature and should not be possible in practice.
+    while (TOASTS.length > TOAST_MAX) {
+      var drop = 0;
+      for (var i = 0; i < TOASTS.length - 1; i++)
+        if (!TOASTS[i].undo) { drop = i; break; }
+      if (TOASTS[drop].timer) window.clearTimeout(TOASTS[drop].timer);
+      TOASTS.splice(drop, 1);
+    }
+    // An error gets longer than a confirmation and longer than an offer,
+    // because reading it is the whole point; an offer gets its six seconds;
+    // a confirmation is the only one that should be quick.
+    entry.timer = window.setTimeout(function () { dismissToast(entry.id); },
+      entry.error ? 8000 : (opts.undo ? 6000 : 2800));
+    renderToasts();
+    return entry.id;
+  }
+  // ---- item 9: saying so when the app is busy ----
+  // Torry's constraint: NEVER flash on work that is already instant. Measured
+  // on this machine, a render is 6-10 ms and a 20k x 20 import is 132 ms, so
+  // nothing ordinary comes near the threshold - which is exactly why this is
+  // delay-gated rather than shown eagerly. Two cases survive that filter:
+  //
+  //   * cold boot, which cannot be gated at all (the frame paints inert while
+  //     3.4 MB of blocking script loads), so it is markup, present at first
+  //     paint and removed here;
+  //   * a large import, which is a SYNCHRONOUS char loop - a timer cannot
+  //     fire mid-loop, so the size is checked up front and the overlay is
+  //     painted before the work starts.
+  //
+  // Everything else uses withBusy(), which shows nothing unless the work is
+  // still running after BUSY_DELAY_MS.
+  var BUSY_DELAY_MS = 400;
+  var BUSY_BIG_BYTES = 2 * 1024 * 1024;   // measured: ~950 ms for 13 MB
+  var BUSY_TIMER = null, BUSY_DEPTH = 0;
+  function busyShow(note) {
+    var el0 = document.getElementById("ps-busy");
+    if (!el0) return;
+    var n = document.getElementById("ps-busy-note");
+    if (n) n.textContent = note || "Working";
+    el0.classList.add("ps-busy-on");
+    document.body.style.cursor = "progress";
+  }
+  function busyHide() {
+    var el0 = document.getElementById("ps-busy");
+    if (BUSY_TIMER) { window.clearTimeout(BUSY_TIMER); BUSY_TIMER = null; }
+    if (el0) el0.classList.remove("ps-busy-on");
+    document.body.style.cursor = "";
+  }
+  // Delay-gated: nothing appears unless the work outlives the threshold.
+  function busyArm(note) {
+    BUSY_DEPTH++;
+    if (BUSY_TIMER) return;
+    BUSY_TIMER = window.setTimeout(function () {
+      BUSY_TIMER = null;
+      if (BUSY_DEPTH > 0) busyShow(note);
+    }, BUSY_DELAY_MS);
+  }
+  function busyDisarm() {
+    BUSY_DEPTH = Math.max(0, BUSY_DEPTH - 1);
+    if (!BUSY_DEPTH) busyHide();
+  }
+  // Paint FIRST, then run the synchronous work on the next frame. Without the
+  // double rAF the overlay never reaches the screen, because the work blocks
+  // the same frame that was going to paint it.
+  function withBusyPainted(note, work) {
+    busyShow(note);
+    return new Promise(function (resolve) {
+      window.requestAnimationFrame(function () {
+        window.requestAnimationFrame(function () {
+          var out, err = null;
+          try { out = work(); } catch (e) { err = e; }
+          busyHide();
+          if (err) throw err;
+          resolve(out);
+        });
+      });
+    });
+  }
+  function bootDone() {
+    var b = document.getElementById("ps-boot");
+    if (!b || b.__psGone) return;
+    b.__psGone = true;
+    b.classList.add("ps-boot-gone");
+    window.setTimeout(function () {
+      if (b.parentNode) b.parentNode.removeChild(b);
+    }, 260);
+  }
+  function showToast(msg, isError) { return pushToast(msg, { error: !!isError }); }
+  function showUndoToast(msg, undo) { return pushToast(msg, { undo: undo }); }
+  // Same pill, a named button. Used where the offer is not "undo that" but
+  // "here is the one change that would let this work" (punch list 19).
+  function showActionToast(msg, label, run) {
+    return pushToast(msg, { undo: run, actionLabel: label });
+  }
+  function offerDataUndo(message, actionSeq) {
+    showUndoToast(message, function () {
+      if (DATA_ACTION_SEQ !== actionSeq) {
+        showToast("A newer data change has already been made", true);
+        return;
+      }
+      dataUndo();
+    });
+  }
+  function updateExportUI() {
+    var fmt = selectedExportFormat();
+    var dpi = Number(el("ps-export-dpi").value) || 300;
+    var base = currentExportSize();
+    var raster = fmt === "png" || fmt === "jpg";
+    var scale = raster ? dpi / 96 : 1;
+    var pxW = Math.max(1, Math.round(base.w * scale));
+    var pxH = Math.max(1, Math.round(base.h * scale));
+    var forcedWhite = fmt === "jpg";
+    el("ps-export-dpi").disabled = !raster;
+    el("ps-export-dpi-field").style.opacity = raster ? "1" : "0.52";
+    var bgEl = el("ps-export-bg");
+    if (forcedWhite) {
+      if (!bgEl.disabled) bgEl.__psBeforeForced = bgEl.value;
+      bgEl.value = "white";
+      bgEl.disabled = true;
+    } else {
+      bgEl.disabled = false;
+      if (bgEl.__psBeforeForced) {
+        bgEl.value = bgEl.__psBeforeForced;
+        bgEl.__psBeforeForced = null;
+      }
+    }
+    var note;
+    if (fmt === "svg") {
+      note = base.w + " x " + base.h +
+        " coordinate canvas - vector output stays sharp at any size.";
+    } else if (fmt === "pdf") {
+      note = (base.w / 96).toFixed(2) + " x " + (base.h / 96).toFixed(2) +
+        " inches - one-page vector PDF stays sharp at any size.";
+    } else {
+      note = pxW + " x " + pxH + " pixels at " + dpi + " DPI.";
+      if (fmt === "jpg") note += " JPG uses a white background.";
+    }
+    var tooLarge = raster && pxW * pxH > EXPORT_MAX_PIXELS;
+    if (tooLarge)
+      note = pxW + " x " + pxH + " pixels is too large for reliable browser " +
+        "export. Choose a lower resolution or SVG.";
+    el("ps-export-dims").textContent = note;
+    el("ps-export-go").disabled = EXPORT_BUSY || tooLarge;
+    saveExportPrefs();
+  }
+  function openExporter() {
+    if (EXPORT_BUSY) return;
+    var p = exportPrefs();
+    var radios = document.querySelectorAll('input[name="ps-export-format"]');
+    for (var i = 0; i < radios.length; i++)
+      radios[i].checked = radios[i].value === p.format;
+    el("ps-export-dpi").value = String(p.dpi);
+    el("ps-export-bg").disabled = false;
+    el("ps-export-bg").__psBeforeForced = null;
+    el("ps-export-bg").value = p.background;
+    var c = activeChart();
+    el("ps-export-title").textContent =
+      isLayoutTab(c) ? "Export layout" : "Export chart";
+    el("ps-export-sub").textContent = isLayoutTab(c)
+      ? "Save the complete figure canvas as one file."
+      : "Save a clean copy without editing controls.";
+    el("ps-export-name").value = defaultExportBase();
+    // Captions belong to CHART exports (layouts caption with text items).
+    var capField = el("ps-export-caption-field");
+    capField.style.display = isLayoutTab(c) ? "none" : "block";
+    el("ps-export-caption").value = isLayoutTab(c) ? ""
+      : String((activeChartTab() || {}).caption || "");
+    setExportStatus("", false);
+    EXPORT_LAST_FOCUS = document.activeElement;
+    el("ps-exporter").style.display = "flex";
+    updateExportUI();
+    window.setTimeout(function () {
+      try { el("ps-export-name").focus(); el("ps-export-name").select(); }
+      catch (e) {}
+    }, 0);
+  }
+  function closeExporter() {
+    if (EXPORT_BUSY) return;
+    el("ps-exporter").style.display = "none";
+    setExportStatus("", false);
+    var f = EXPORT_LAST_FOCUS;
+    EXPORT_LAST_FOCUS = null;
+    try { if (f && f.focus) f.focus(); } catch (e) {}
+  }
+  function svgNumber(v) {
+    var n = parseFloat(String(v || "").replace(/px$/i, ""));
+    return isFinite(n) && n > 0 ? n : 0;
+  }
+  function parseExportSvg(svgText) {
+    var doc = new DOMParser().parseFromString(svgText, "image/svg+xml");
+    if (!doc || !doc.documentElement ||
+        doc.documentElement.nodeName.toLowerCase() !== "svg" ||
+        doc.querySelector("parsererror"))
+      throw new Error("The chart SVG could not be prepared.");
+    return doc;
+  }
+  function svgRootSize(root, fallback) {
+    var w = svgNumber(root.getAttribute("width"));
+    var h = svgNumber(root.getAttribute("height"));
+    var vb = String(root.getAttribute("viewBox") || "").trim().split(/\s+/);
+    if ((!w || !h) && vb.length === 4) {
+      if (!w) w = Number(vb[2]);
+      if (!h) h = Number(vb[3]);
+    }
+    return {
+      w: isFinite(w) && w > 0 ? w : fallback.w,
+      h: isFinite(h) && h > 0 ? h : fallback.h
+    };
+  }
+  function effectiveExportBackground(mode, layoutMode) {
+    if (mode === "white") return "#ffffff";
+    if (mode === "transparent") return "";
+    if (layoutMode) return "#ffffff";
+    try {
+      var b = buildPayload();
+      var color = b && b.payload && b.payload.chartBackground;
+      return typeof color === "string" ? color : "";
+    } catch (e) { return ""; }
+  }
+  function addSvgBackground(doc, color, w, h) {
+    if (!color) return;
+    var root = doc.documentElement;
+    var vb = String(root.getAttribute("viewBox") || "").trim().split(/\s+/);
+    var x = vb.length === 4 && isFinite(Number(vb[0])) ? Number(vb[0]) : 0;
+    var y = vb.length === 4 && isFinite(Number(vb[1])) ? Number(vb[1]) : 0;
+    var r = doc.createElementNS("http://www.w3.org/2000/svg", "rect");
+    r.setAttribute("x", String(x)); r.setAttribute("y", String(y));
+    r.setAttribute("width", String(w)); r.setAttribute("height", String(h));
+    r.setAttribute("fill", color);
+    r.setAttribute("data-ps-export-background", "1");
+    root.insertBefore(r, root.firstChild);
+  }
+  function chartExportSource(mode) {
+    var host = hostEl();
+    if (!host || typeof host.__gb2_serializeSvg !== "function")
+      throw new Error("Assign the required variables and draw the chart before exporting.");
+    var text = host.__gb2_serializeSvg();
+    var doc = parseExportSvg(text);
+    var size = svgRootSize(doc.documentElement, currentExportSize());
+    var bg = effectiveExportBackground(mode, false);
+    addSvgBackground(doc, bg, size.w, size.h);
+    var caption = String((activeChartTab() || {}).caption || "").trim();
+    if (!caption) {
+      return {
+        svg: new XMLSerializer().serializeToString(doc.documentElement),
+        w: size.w, h: size.h
+      };
+    }
+    // Caption rides EXPORTS only (Tier 2): the figure grows downward
+    // and a wrapped text block typesets under the chart. The editing
+    // view never shows it.
+    var lines = wrapCaptionLines(caption, size.w - 28, 13);
+    var lineH = 18, pad = 12;
+    var capH = pad + lines.length * lineH + pad;
+    var ns = "http://www.w3.org/2000/svg";
+    var outer = document.implementation.createDocument(ns, "svg", null);
+    var root = outer.documentElement;
+    root.setAttribute("xmlns", ns);
+    root.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
+    root.setAttribute("width", String(size.w));
+    root.setAttribute("height", String(size.h + capH));
+    root.setAttribute("viewBox", "0 0 " + size.w + " " + (size.h + capH));
+    // The caption strip matches the export background (white when the
+    // chart itself supplies none, so text never lands on transparency
+    // in a white-background export).
+    addSvgBackground(outer, bg || "#ffffff", size.w, size.h + capH);
+    var nested = outer.importNode(doc.documentElement, true);
+    nested.setAttribute("x", "0"); nested.setAttribute("y", "0");
+    nested.setAttribute("width", String(size.w));
+    nested.setAttribute("height", String(size.h));
+    root.appendChild(nested);
+    var t = outer.createElementNS(ns, "text");
+    t.setAttribute("x", "14");
+    t.setAttribute("y", String(size.h + pad + 13));
+    t.setAttribute("fill", "#222222");
+    t.setAttribute("font-size", "13");
+    t.setAttribute("font-family",
+      "-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif");
+    t.setAttribute("data-role", "export-caption");
+    for (var li = 0; li < lines.length; li++) {
+      var sp = outer.createElementNS(ns, "tspan");
+      sp.setAttribute("x", "14");
+      if (li > 0) sp.setAttribute("dy", String(lineH));
+      sp.textContent = lines[li] || " ";
+      t.appendChild(sp);
+    }
+    root.appendChild(t);
+    return {
+      svg: new XMLSerializer().serializeToString(root),
+      w: size.w, h: size.h + capH
+    };
+  }
+  function wrapCaptionLines(textStr, maxW, fontSize) {
+    var cv = document.createElement("canvas");
+    var ctx = cv.getContext("2d");
+    ctx.font = fontSize + "px -apple-system, 'Segoe UI', Roboto, " +
+      "Helvetica, Arial, sans-serif";
+    var out = [];
+    var paragraphs = String(textStr).split(/\r?\n/);
+    for (var pI = 0; pI < paragraphs.length; pI++) {
+      var words = paragraphs[pI].split(/\s+/).filter(function (w) {
+        return w.length;
+      });
+      if (!words.length) { out.push(""); continue; }
+      var line = "";
+      for (var wI = 0; wI < words.length; wI++) {
+        var probe = line ? line + " " + words[wI] : words[wI];
+        if (line && ctx.measureText(probe).width > maxW) {
+          out.push(line);
+          line = words[wI];
+        } else line = probe;
+      }
+      if (line) out.push(line);
+    }
+    return out.length ? out : [String(textStr)];
+  }
+  function layoutTextNode(doc, item) {
+    var ns = "http://www.w3.org/2000/svg";
+    var t = doc.createElementNS(ns, "text");
+    var fs = Math.max(8, Math.min(72, Number(item.fontSize) || 14));
+    var x = (Number(item.x) || 0) + 4;
+    var y = (Number(item.y) || 0) + fs;
+    t.setAttribute("x", String(x)); t.setAttribute("y", String(y));
+    t.setAttribute("fill", "#222222");
+    t.setAttribute("font-size", String(fs));
+    t.setAttribute("font-family", "sans-serif");
+    t.setAttribute("font-weight", item.bold ? "700" : "400");
+    var lines = String(item.text || "Text").split(/\r?\n/);
+    for (var i = 0; i < lines.length; i++) {
+      var sp = doc.createElementNS(ns, "tspan");
+      sp.setAttribute("x", String(x));
+      if (i > 0) sp.setAttribute("dy", "1.25em");
+      sp.textContent = lines[i] || " ";
+      t.appendChild(sp);
+    }
+    return t;
+  }
+  function layoutExportSource(mode) {
+    var ns = "http://www.w3.org/2000/svg";
+    var doc = document.implementation.createDocument(ns, "svg", null);
+    var root = doc.documentElement;
+    root.setAttribute("xmlns", ns);
+    root.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
+    var page = layPage();
+    root.setAttribute("width", String(page.w));
+    root.setAttribute("height", String(page.h));
+    root.setAttribute("viewBox", "0 0 " + page.w + " " + page.h);
+    var bg = effectiveExportBackground(mode, true);
+    addSvgBackground(doc, bg, page.w, page.h);
+    var items = layItems();
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i];
+      if (item.kind === "text") {
+        root.appendChild(layoutTextNode(doc, item));
+        continue;
+      }
+      if (item.kind === "image" && item.src) {
+        var pic = doc.createElementNS(ns, "image");
+        pic.setAttribute("x", String(Number(item.x) || 0));
+        pic.setAttribute("y", String(Number(item.y) || 0));
+        pic.setAttribute("width", String(Math.max(24, Number(item.w) || 240)));
+        pic.setAttribute("height", String(Math.max(24, Number(item.h) || 180)));
+        pic.setAttribute("preserveAspectRatio", "xMidYMid meet");
+        pic.setAttribute("href", item.src);
+        pic.setAttributeNS("http://www.w3.org/1999/xlink",
+          "xlink:href", item.src);
+        root.appendChild(pic);
+        continue;
+      }
+      if (item.kind !== "chart") continue;
+      var snap = validSnap(item.chartId);
+      if (!snap || !snap.svg) continue;
+      var sd = parseExportSvg(snap.svg);
+      var nested = doc.importNode(sd.documentElement, true);
+      nested.setAttribute("x", String(Number(item.x) || 0));
+      nested.setAttribute("y", String(Number(item.y) || 0));
+      nested.setAttribute("width", String(Math.max(120, Number(item.w) || 460)));
+      nested.setAttribute("height", String(Math.max(80, Number(item.h) || 310)));
+      nested.setAttribute("preserveAspectRatio", "xMidYMid meet");
+      nested.setAttribute("overflow", "hidden");
+      nested.removeAttribute("style");
+      root.appendChild(nested);
+    }
+    return {
+      svg: new XMLSerializer().serializeToString(root),
+      w: page.w, h: page.h
+    };
+  }
+  // Punch list B2. The on-screen canvas is honest about a panel it cannot
+  // draw (it paints a ps-lmissing placeholder); the export path used to hit
+  // "if (!snap || !snap.svg) continue;" and silently leave the panel OUT, so a
+  // four-panel figure could export as three with no error and no warning.
+  // That is strictly worse than a stale panel, which at least looks like a
+  // chart. Refuse and explain, per the house rule from the reshape work:
+  // never drop something invisibly.
+  function layUndrawablePanels() {
+    var lay = activeChart(), out = [];
+    if (!lay || !isLayoutTab(lay)) return out;
+    var items = lay.items || [], seen = {};
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      if (it.kind !== "chart" || validSnap(it.chartId) || seen[it.chartId]) continue;
+      seen[it.chartId] = 1;
+      var c = chartById(it.chartId);
+      if (!c) { out.push({ name: "A deleted chart", why: "is still placed here; remove the panel" }); continue; }
+      var defs = MODULES[c.module] ? MODULES[c.module].roles : [], rr = (c.roles && c.roles[c.module]) || {}, needsVars = false;
+      for (var d = 0; d < defs.length; d++) {
+        var def = defs[d];
+        if (!def.required) continue;
+        var have = Array.isArray(rr[def.key]) ? rr[def.key].length : (rr[def.key] ? 1 : 0);
+        if (have < (def.multi ? (def.min || 1) : 1)) { needsVars = true; break; }
+      }
+      // B22. "open its tab once, then export again" is a DEAD END when the
+      // ensure pass already rendered this chart and still could not capture
+      // it - doing it again changes nothing. Say which case this is.
+      out.push({ name: c.name || "A chart",
+                 why: needsVars
+                   ? "needs variables assigned in the Charts workspace"
+                   : UNCAPTURABLE[it.chartId]
+                     ? "was drawn but could not be captured as an image; " +
+                       "open its tab and check it renders, or remove the panel"
+                     : "could not be captured; open its tab once, then export again" });
+    }
+    return out;
+  }
+  function collectExportSource(mode) {
+    return new Promise(function (resolve, reject) {
+      try {
+        if (!isLayoutTab(activeChart())) {
+          resolve(chartExportSource(mode));
+          return;
+        }
+        ensureSnapshotsThen(function () {
+          try {
+            var bad = layUndrawablePanels();
+            if (bad.length) {
+              reject(new Error(
+                "Export stopped: " + bad.length +
+                (bad.length === 1 ? " panel has no chart to draw. " : " panels have no chart to draw. ") +
+                bad.map(function (b) { return b.name + " " + b.why + "."; }).join(" ") +
+                " Exporting now would leave " +
+                (bad.length === 1 ? "it" : "them") + " out of the figure silently."));
+              return;
+            }
+            resolve(layoutExportSource(mode));
+          } catch (e) { reject(e); }
+        });
+      } catch (e) { reject(e); }
+    });
+  }
+  function rasterizeExport(source, mime, dpi) {
+    return new Promise(function (resolve, reject) {
+      var scale = (Number(dpi) || 96) / 96;
+      var w = Math.max(1, Math.round(source.w * scale));
+      var h = Math.max(1, Math.round(source.h * scale));
+      if (w * h > EXPORT_MAX_PIXELS) {
+        reject(new Error("The requested image is too large. Choose a lower resolution or SVG."));
+        return;
+      }
+      var canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      var ctx = canvas.getContext("2d");
+      if (!ctx) { reject(new Error("This browser cannot create an export canvas.")); return; }
+      if (mime === "image/jpeg") {
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, w, h);
+      }
+      var svgBlob = new Blob([source.svg], { type: "image/svg+xml;charset=utf-8" });
+      var url = URL.createObjectURL(svgBlob);
+      var img = new Image();
+      img.onload = function () {
+        URL.revokeObjectURL(url);
+        try { ctx.drawImage(img, 0, 0, w, h); }
+        catch (e) { reject(new Error("The browser could not render the exported SVG.")); return; }
+        canvas.toBlob(function (blob) {
+          if (!blob) { reject(new Error("The browser could not encode the exported image.")); return; }
+          resolve({ blob: blob, width: w, height: h });
+        }, mime, mime === "image/jpeg" ? 0.96 : undefined);
+      };
+      img.onerror = function () {
+        URL.revokeObjectURL(url);
+        reject(new Error("The browser could not rasterize this figure."));
+      };
+      img.src = url;
+    });
+  }
+  function pdfCoreFont(family) {
+    family = String(family || "").toLowerCase();
+    if (family.indexOf("mono") !== -1 || family.indexOf("courier") !== -1)
+      return "courier";
+    if ((family.indexOf("serif") !== -1 &&
+         family.indexOf("sans-serif") === -1) ||
+        family.indexOf("times") !== -1 ||
+        family.indexOf("georgia") !== -1)
+      return "times";
+    return "helvetica";
+  }
+  function normalizePdfFonts(root) {
+    var text = root.querySelectorAll("text");
+    for (var i = 0; i < text.length; i++) {
+      var node = text[i];
+      var family = node.getAttribute("font-family") || "sans-serif";
+      node.setAttribute("font-family", pdfCoreFont(family));
+      var inline = node.getAttribute("style");
+      if (inline && /font-family\s*:/i.test(inline)) {
+        node.setAttribute("style", inline.replace(
+          /font-family\s*:\s*([^;}]+)/ig,
+          function (_, value) { return "font-family:" + pdfCoreFont(value); }
+        ));
+      }
+    }
+    var styles = root.querySelectorAll("style");
+    for (var j = 0; j < styles.length; j++) {
+      styles[j].textContent = String(styles[j].textContent || "").replace(
+        /font-family\s*:\s*([^;}]+)/ig,
+        function (_, value) { return "font-family:" + pdfCoreFont(value); }
+      );
+    }
+  }
+  function vectorPdfBlob(source) {
+    return new Promise(function (resolve, reject) {
+      var JsPDF = window.jspdf && window.jspdf.jsPDF;
+      if (!JsPDF || !JsPDF.API || typeof JsPDF.API.svg !== "function") {
+        reject(new Error("The vector PDF exporter did not load. Reload Pandion Plots and try again."));
+        return;
+      }
+      var svgDoc;
+      try {
+        svgDoc = parseExportSvg(source.svg);
+        normalizePdfFonts(svgDoc.documentElement);
+      } catch (e) {
+        reject(e);
+        return;
+      }
+      var pageW = Math.max(1, source.w * 72 / 96);
+      var pageH = Math.max(1, source.h * 72 / 96);
+      var pdf;
+      try {
+        pdf = new JsPDF({
+          orientation: pageW >= pageH ? "landscape" : "portrait",
+          unit: "pt",
+          format: [pageW, pageH],
+          compress: true,
+          putOnlyUsedFonts: true
+        });
+        pdf.setProperties({
+          title: "Pandion Plots figure",
+          subject: "Vector chart export",
+          creator: "Pandion Plots"
+        });
+      } catch (e) {
+        reject(new Error("The vector PDF document could not be created."));
+        return;
+      }
+      pdf.svg(svgDoc.documentElement, {
+        x: 0, y: 0, width: pageW, height: pageH,
+        loadExternalStyleSheets: false
+      }).then(function () {
+        try {
+          resolve(pdf.output("blob"));
+        } catch (e) {
+          reject(new Error("The vector PDF could not be encoded."));
+        }
+      }).catch(function (e) {
+        try { console.warn("Pandion Plots vector PDF conversion failed", e); }
+        catch (ignore) {}
+        reject(new Error(
+          "This figure contains SVG content the vector PDF exporter could not convert. " +
+          "SVG export will preserve it exactly."
+        ));
+      });
+    });
+  }
+  function exportBlobFor(format, source, dpi) {
+    if (format === "svg") {
+      return Promise.resolve(new Blob([
+        '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n',
+        source.svg
+      ], { type: "image/svg+xml;charset=utf-8" }));
+    }
+    if (format === "png")
+      return rasterizeExport(source, "image/png", dpi).then(function (x) { return x.blob; });
+    if (format === "jpg")
+      return rasterizeExport(source, "image/jpeg", dpi).then(function (x) { return x.blob; });
+    if (format === "pdf")
+      return vectorPdfBlob(source);
+    return Promise.reject(new Error("Unsupported export format."));
+  }
+  // Copy the active chart or layout to the clipboard as a crisp PNG
+  // (Tier 1 feature: the everyday paste-into-slides motion). Reuses the
+  // export pipeline; 192 DPI = 2x. The ClipboardItem takes the PROMISE
+  // where supported so Safari's stay-inside-the-user-gesture rule holds.
+  var COPY_IMAGE_DPI = 192;
+  function copyActiveAsImage() {
+    var ws = appWorkspace();
+    if (ws === "data" || !workspaceDocument(ws))
+      return Promise.resolve("unavailable");
+    if (!navigator.clipboard || !navigator.clipboard.write ||
+        typeof window.ClipboardItem === "undefined") {
+      showToast("This browser does not allow image copying - use Export instead.", true);
+      return Promise.resolve("unsupported");
+    }
+    var blobPromise = collectExportSource("shown").then(function (source) {
+      return exportBlobFor("png", source, COPY_IMAGE_DPI);
+    });
+    function done() {
+      showToast((isLayoutTab(activeChart()) ? "Layout" : "Chart") +
+        " copied as an image - paste it into slides or a document.");
+      return "copied";
+    }
+    function failed(e) {
+      showToast("Could not copy the image (" +
+        String(e && e.message || e) + ") - use Export instead.", true);
+      return "failed";
+    }
+    try {
+      var item = new window.ClipboardItem({ "image/png": blobPromise });
+      return navigator.clipboard.write([item]).then(done, failed);
+    } catch (e) {
+      // Engines without promise-valued ClipboardItems: await, then write.
+      return blobPromise.then(function (blob) {
+        return navigator.clipboard.write([
+          new window.ClipboardItem({ "image/png": blob })]);
+      }).then(done, failed);
+    }
+  }
+  // Punch list item 6. The app could read CSV, TSV, xlsx, .omv and .pand and
+  // write only .pand and images, so a student could clean a table, retype
+  // columns, add computed variables and reshape long-to-wide, then not be able
+  // to hand the result to a partner, take it into jamovi, or submit it.
+  //
+  // Writes t.raw, the ORIGINAL strings, not the typed view. That is what keeps
+  // zero-padded ids and codes intact ("007" stays "007"), which the grid
+  // itself does not manage to show.
+  function csvCell(v) {
+    var s = v == null ? "" : String(v);
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+  function tableToCsv(t) {
+    var cols = t.order, lines = [cols.map(csvCell).join(",")];
+    var n = cols.length ? t.raw[cols[0]].length : 0;
+    for (var i = 0; i < n; i++) {
+      var row = [];
+      for (var c = 0; c < cols.length; c++) row.push(csvCell(t.raw[cols[c]][i]));
+      lines.push(row.join(","));
+    }
+    return lines.join("\r\n") + "\r\n";
+  }
+  function exportDataCsv() {
+    var t = PROJECT.table;
+    if (!t || !t.order.length) { showToast("There is no data to export", true); return; }
+    var base = String(t.name || "data").replace(/\.[^.]+$/, "").replace(/[\\/:*?"<>|]+/g, "-") || "data";
+    var blob = new Blob([tableToCsv(t)], { type: "text/csv;charset=utf-8" });
+    saveExportBlob(blob, base + ".csv", "csv").then(function () {
+      // say what the file contains, so nothing is silently included or left out
+      var notes = [];
+      if (validFilters(t).length)
+        notes.push("row filters are not applied - every row is included");
+      var exCols = t.excluded ? Object.keys(t.excluded).length : 0;
+      if (exCols || rowExclCount(t))
+        notes.push("excluded values are included as they appear in the grid");
+      showToast("Exported " + base + ".csv" + (notes.length ? " (" + notes.join("; ") + ")" : ""));
+    }, function (e) {
+      if (e && e.name === "AbortError") return;
+      showToast("Could not export the data: " + String(e && e.message || e), true);
+    });
+  }
+  function saveExportBlob(blob, filename, ext) {
+    var framed = false;
+    try { framed = window.top !== window; } catch (e) { framed = true; }
+    if (!framed && window.showSaveFilePicker) {
+      return window.showSaveFilePicker({
+        suggestedName: filename,
+        types: [{ description: exportDescription(ext),
+                  accept: (function () {
+                    var o = {}; o[exportMime(ext)] = ["." + ext]; return o;
+                  })() }]
+      }).then(function (h) {
+        return h.createWritable().then(function (w) {
+          return w.write(blob).then(function () { return w.close(); });
+        });
+      }).then(function () { return "saved"; });
+    }
+    return new Promise(function (resolve, reject) {
+      try {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        window.setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+        resolve("downloaded");
+      } catch (e) { reject(e); }
+    });
+  }
+  function runExport() {
+    if (EXPORT_BUSY) return;
+    var format = selectedExportFormat();
+    var dpi = Number(el("ps-export-dpi").value) || 300;
+    var bgMode = el("ps-export-bg").value || "shown";
+    if (format === "jpg") bgMode = "white";
+    var base = cleanExportBase(el("ps-export-name").value);
+    var filename = base + "." + format;
+    el("ps-export-name").value = base;
+    saveExportPrefs();
+    EXPORT_BUSY = true;
+    el("ps-export-go").disabled = true;
+    el("ps-export-go").textContent = "Preparing...";
+    setExportStatus("Preparing " + filename + "...", false);
+    collectExportSource(bgMode)
+      .then(function (source) {
+        setExportStatus(format === "svg"
+          ? "Preparing file..."
+          : "Rendering " + filename + "...", false);
+        return exportBlobFor(format, source, dpi);
+      })
+      .then(function (blob) {
+        setExportStatus("Choose where to save " + filename + "...", false);
+        return saveExportBlob(blob, filename, format);
+      })
+      .then(function () {
+        EXPORT_BUSY = false;
+        el("ps-export-go").textContent = "Export";
+        closeExporter();
+        showToast("Exported " + filename, false);
+      })
+      .catch(function (e) {
+        EXPORT_BUSY = false;
+        el("ps-export-go").textContent = "Export";
+        updateExportUI();
+        if (e && e.name === "AbortError") {
+          setExportStatus("Export cancelled.", false);
+          return;
+        }
+        var msg = String(e && e.message || e || "Export failed.");
+        setExportStatus(msg, true);
+        showToast(msg, true);
+        try { console.warn("Pandion Plots export failed", e); } catch (ignore) {}
+      });
+  }
+  function wireExporter() {
+    el("ps-export").addEventListener("click", openExporter);
+    el("ps-export-close").addEventListener("click", closeExporter);
+    el("ps-export-caption").addEventListener("input", function () {
+      var doc = activeChartTab();
+      if (doc && !isLayoutTab(doc)) {
+        doc.caption = this.value;
+        persist();
+      }
+    });
+    // t3-59. Appends rather than replaces: the caption is the user's sentence
+    // and the provenance is a note under it. Idempotent, so a second click
+    // cannot stack two copies.
+    el("ps-export-provenance").addEventListener("click", function () {
+      var box = el("ps-export-caption");
+      var line = provenanceSentence();
+      if (!line) { showToast("Open a chart first"); return; }
+      var cur = String(box.value || "").trim();
+      if (cur.indexOf(line) !== -1) {
+        showToast("The caption already says this");
+        return;
+      }
+      box.value = cur ? cur + "\n" + line : line;
+      var doc = activeChartTab();
+      if (doc && !isLayoutTab(doc)) { doc.caption = box.value; persist(); }
+      box.focus();
+      showToast("Added to the caption, so it rides every export format");
+    });
+    el("ps-export-cancel").addEventListener("click", closeExporter);
+    el("ps-export-go").addEventListener("click", runExport);
+    el("ps-exporter").addEventListener("click", function (e) {
+      if (e.target === el("ps-exporter")) closeExporter();
+    });
+    var radios = document.querySelectorAll('input[name="ps-export-format"]');
+    for (var i = 0; i < radios.length; i++)
+      radios[i].addEventListener("change", updateExportUI);
+    el("ps-export-dpi").addEventListener("change", updateExportUI);
+    el("ps-export-bg").addEventListener("change", saveExportPrefs);
+    el("ps-exporter").addEventListener("keydown", function (e) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeExporter();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      var all = el("ps-exporter").querySelectorAll(
+        'button:not([disabled]),input:not([disabled]),select:not([disabled])');
+      if (!all.length) return;
+      var first = all[0], last = all[all.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault(); last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault(); first.focus();
+      }
+    });
+  }
+
+  function parseProjectFile(text) {
+    var o;
+    try { o = JSON.parse(text); } catch (e) { return null; }
+    if (!o || !o.project ||
+        o.kind !== "pandion-plots-project")
+      return null;
+    if (o.formatVersion > 2)
+      return { error: "This project was saved by a newer version - " +
+                      "update this page to open it." };
+    return { snapshot: o.project, libraries: o.libraries };
+  }
+  function adoptProject(parsed, fileName) {
+    PROJECT_CHOSEN = true;
+    var replaced = captureReplacedProject();      // item 13
+    dataHistoryClear();
+    importLibraries(parsed.libraries);
+    if (!applySnapshot(parsed.snapshot)) {
+      showLoaderMessage(
+        "Could not read that project file (unrecognized contents).");
+      return;
+    }
+    PROJECT_REV = 0;
+    FILE_SAVED_REV = fileName ? 0 : null;
+    FILE_LABEL = fileName || null;
+    FILE_HANDLE = null;
+    validateRoles();
+    persist(false);
+    syncAll();
+    render();
+    updateDocumentState();
+    hideWelcome();
+    closeLoader();
+    offerReplacedProjectBack(replaced, fileName || "that project");
+  }
+  // Punch list 20. Offered ONLY while the user is still on one of our own
+  // examples: once they have imported their own data, telling them to open a
+  // sample instead of assigning their variables would be worse than silence.
+  function sampleSuggestionFor(mod) {
+    var t = PROJECT.table;
+    if (!t) return null;
+    var here = null, i;
+    for (i = 0; i < EXAMPLES.length; i++)
+      if (EXAMPLES[i].table.name === t.name) here = EXAMPLES[i];
+    if (!here || here.fits.indexOf(mod) !== -1) return null;
+    var ex = exampleFor(mod);
+    if (!ex || ex.id === here.id) return null;
+    return { kind: "example", to: ex.id, exName: ex.name, exBlurb: ex.blurb };
+  }
+  function loadSample(id) {
+    var ex = exampleById(id || "dose");
+    PROJECT_CHOSEN = true;
+    PROJECT.id = newProjectId();
+    layHistoryClear();
+    PROJECT.name = ex.name;
+    PROJECT_REV = 0;
+    FILE_SAVED_REV = null;
+    FILE_LABEL = null;
+    FILE_HANDLE = null;
+    PROJECT.table = buildTable(ex.table.name, ex.table.header, ex.table.rows,
+                               ex.types || null);
+    GRID_NATURAL_WIDTHS = {};
+    gridResetColumnView();
+    GRID_FIND_QUERY = ""; GRID_FIND_RESULTS = []; GRID_FIND_INDEX = -1;
+    // Only the modules this dataset can honestly show get roles. An analysis
+    // it cannot demonstrate is left EMPTY on purpose: its placeholder then
+    // offers the example that can, which is the truthful answer and one click.
+    var roles = {};
+    for (var k in ex.roles)
+      if (Object.prototype.hasOwnProperty.call(ex.roles, k))
+        roles[k] = ex.roles[k];
+    PROJECT.charts = [{ id: "c1", name: "Chart 1",
+      module: ex.fits[0] || "plotbuilder",
+      roles: roles, options: {} }];
+    PROJECT.activeChart = "c1";
+    PROJECT.ui = { dataOpen: false, workspace: "chart",
+                   lastChart: "c1", lastLayout: null, columnWidths: {} };
+  }
+  // Drop role assignments that no longer match the table.
+  function validateRoles() {
+    for (var ci = 0; ci < PROJECT.charts.length; ci++) {
+    var chRoles = PROJECT.charts[ci].roles || {};
+    for (var mod in chRoles) {
+      if (!Object.prototype.hasOwnProperty.call(chRoles, mod)) continue;
+      var defs = MODULES[mod] ? MODULES[mod].roles : [];
+      var rr = chRoles[mod];
+      for (var k in rr) {
+        if (!Object.prototype.hasOwnProperty.call(rr, k)) continue;
+        var def = null;
+        for (var d = 0; d < defs.length; d++) if (defs[d].key === k) def = defs[d];
+        function colOK(col) {
+          return PROJECT.table && PROJECT.table.order.indexOf(col) !== -1 &&
+                 roleAccepts(def, PROJECT.table, col);
+        }
+        if (Array.isArray(rr[k])) {
+          rr[k] = rr[k].filter(colOK);
+        } else if (rr[k]) {
+          if (!colOK(rr[k])) rr[k] = null;
+        }
+      }
+    }
+    }
+  }
+
+  // ================================================================ payload
+  function parseSpec(str) {
+    if (!str || typeof str !== "string") return {};
+    try { var o = JSON.parse(str); return (o && typeof o === "object") ? o : {}; }
+    catch (e) { return {}; }
+  }
+  function parseAnnotations(str) {
+    if (!str || typeof str !== "string") return [];
+    try { var a = JSON.parse(str); return Array.isArray(a) ? a : []; }
+    catch (e) { return []; }
+  }
+  // Does any column this chart READS carry a hand exclusion? Role-scoped on
+  // purpose: an exclusion in a column the chart never touches has nothing to
+  // do with what its note says.
+  function chartConsumesExclusions(mod, rr) {
+    var t = activeDataTable();
+    if (!t || !t.excluded) return false;
+    var defs = (MODULES[mod] && MODULES[mod].roles) || [];
+    for (var i = 0; i < defs.length; i++) {
+      var v = rr[defs[i].key];
+      var cols = Array.isArray(v) ? v : (v ? [v] : []);
+      for (var c = 0; c < cols.length; c++) {
+        var ex = t.excluded[cols[c]];
+        if (ex && Object.keys(ex).length) return true;
+      }
+    }
+    if (t.excludedRows && Object.keys(t.excludedRows).length) return true;
+    return false;
+  }
+  function pointSourceColumns(mod, rr) {
+    if (mod === "plotbuilder") return rr.yvar ? [rr.yvar] : [];
+    if (mod === "distplotbuilder") return rr.var ? [rr.var] : [];
+    if (mod === "rmplotbuilder")
+      return Array.isArray(rr.measures) ? rr.measures.slice() : [];
+    return [];
+  }
+  function rawTypedValue(t, col, row) {
+    var s = String(t.raw[col][row]).trim();
+    if (isMissingRaw(t, s, col)) return null;
+    return colStoresNumbers(t, col)
+      ? (isFinite(Number(s)) ? Number(s) : null) : s;
+  }
+  // Point-capable charts need the original numeric value in their payload so
+  // the engine can paint a slashed ghost at the right coordinate. Restore
+  // only the chart's measure columns in this ephemeral view; the canonical
+  // table remains excluded and every other analysis still sees null.
+  function tableForPointVisibility(mod, rr) {
+    var t = activeDataTable(), cols = pointSourceColumns(mod, rr);
+    if (!t || !cols.length) return t;
+    var view = null;
+    for (var c = 0; c < cols.length; c++) {
+      var col = cols[c], excluded = t.excluded && t.excluded[col];
+      if (!excluded || !Object.keys(excluded).length || !t.raw[col]) continue;
+      if (!view) {
+        view = {};
+        for (var tk in t)
+          if (Object.prototype.hasOwnProperty.call(t, tk)) view[tk] = t[tk];
+        view.columns = {};
+        for (var ck in t.columns)
+          if (Object.prototype.hasOwnProperty.call(t.columns, ck))
+            view.columns[ck] = t.columns[ck];
+      }
+      view.columns[col] = t.columns[col].slice();
+      for (var rowKey in excluded) {
+        if (!Object.prototype.hasOwnProperty.call(excluded, rowKey)) continue;
+        var row = Number(rowKey);
+        if (!isFinite(row) || row < 0 || row >= nRows(t) ||
+            isRowExcluded(t, row)) continue;
+        view.columns[col][row] = rawTypedValue(t, col, row);
+      }
+    }
+    return view || t;
+  }
+  // P1. This was O(n squared): t.caseIds.indexOf per PLOTTED VALUE, so a
+  // linear scan of the whole table per point. Measured at 174 ms for 5,000
+  // rows and 2,624 ms for 20,000, paid on the initial draw, on every 120 ms
+  // style echo, on every data edit and on every tab switch. Three fixes, all
+  // from the item: an index built once per retype instead of a scan per
+  // point, an early return when nothing is excluded (which is the normal
+  // case, and used to pay full price), and the call moved inside the gate
+  // that decides whether the answer is wanted at all.
+  function caseRowIndex(t) {
+    if (!t) return null;
+    // Cached per retype. bumpSnapEpoch/retype is the single choke point every
+    // mutation and every load path already goes through, so keying on the
+    // caseIds ARRAY IDENTITY is enough: buildTable makes a fresh one, and the
+    // in-place edits that keep it (sortRowsByVariable, row insert/delete) all
+    // reassign t.caseIds.
+    if (t.__caseRowIdx && t.__caseRowIdxFor === t.caseIds) return t.__caseRowIdx;
+    // Null prototype: case ids are DATA, and "__proto__" on a plain object
+    // would set the prototype rather than create a key.
+    var map = Object.create(null);
+    for (var i = 0; i < t.caseIds.length; i++) map[String(t.caseIds[i])] = i;
+    t.__caseRowIdx = map;
+    t.__caseRowIdxFor = t.caseIds;
+    return map;
+  }
+  function tableHasExclusions(t) {
+    if (!t || !t.excluded) return false;
+    for (var k in t.excluded)
+      if (Object.prototype.hasOwnProperty.call(t.excluded, k)) {
+        var cells = t.excluded[k];
+        for (var r in cells)
+          if (Object.prototype.hasOwnProperty.call(cells, r)) return true;
+      }
+    return false;
+  }
+  function dataHiddenPoints(payload) {
+    var t = activeDataTable(), out = [];
+    if (!t || !payload || !Array.isArray(payload.bars)) return out;
+    // Nothing is excluded, so nothing can be hidden. This is the common case
+    // and it used to walk every plotted value to discover it.
+    if (!tableHasExclusions(t)) return out;
+    var rowOf = caseRowIndex(t);
+    for (var bi = 0; bi < payload.bars.length; bi++) {
+      var bar = payload.bars[bi];
+      if (!bar || !Array.isArray(bar.caseIds) ||
+          !Array.isArray(bar.sourceColumns)) continue;
+      for (var vi = 0; vi < bar.caseIds.length; vi++) {
+        var key = String(bar.caseIds[vi]);
+        var row = rowOf[key] === undefined ? -1 : rowOf[key];
+        var col = bar.sourceColumns[vi];
+        if (row < 0 || !col || !(t.excluded && t.excluded[col] &&
+                                  t.excluded[col][row])) continue;
+        out.push({ cat: bar.x == null ? "" : String(bar.x),
+                   group: bar.group == null ? "" : String(bar.group),
+                   idx: vi });
+      }
+    }
+    return out;
+  }
+  function buildPayload() {
+    var mod = curModule();
+    var tpl = window.PS_TEMPLATES && window.PS_TEMPLATES[mod];
+    if (!tpl) return { placeholder: "No payload template for module \"" + mod +
+                                    "\" (run standalone/build-templates.R)." };
+    var defs = MODULES[mod].roles, rr = rolesFor(mod);
+    for (var d = 0; d < defs.length; d++) {
+      var def = defs[d];
+      if (!def.required) continue;
+      var have = Array.isArray(rr[def.key]) ? rr[def.key].length
+                 : (rr[def.key] ? 1 : 0);
+      var need = def.multi ? (def.min || 1) : 1;
+      if (have < need)
+        return { placeholder: "Assign " + (need > 1 ? "at least " + need +
+                              " variables to " : "") + "<strong>" +
+                              def.label + "</strong> to draw a chart.",
+                 fix: sampleSuggestionFor(mod) };
+    }
+    var st = optionsFor(mod);
+    var payload = JSON.parse(JSON.stringify(tpl.payload));
+    for (var k in st) {
+      if (!Object.prototype.hasOwnProperty.call(st, k)) continue;
+      if (k === "annotationsJson") { payload.annotations = parseAnnotations(st[k]); continue; }
+      payload[k] = st[k];
+    }
+    var opts = MODULES[mod].optsFrom(st, tpl.payload);
+    opts.spec = parseSpec(typeof st.chartSpec === "string" ? st.chartSpec : tpl.payload.chartSpec);
+    var res = MODULES[mod].build(tableForPointVisibility(mod, rr), rr, opts);
+    if (res.error) return { placeholder: res.error, fix: res.fix || null };
+    // t3-60: what the BUILDER wrote, kept for the channel audit. Auditing the
+    // merged payload instead proves nothing - the template is cloned first, so
+    // every declared key is present there whether or not anything filled it,
+    // which is precisely how manifest.json came to declare a live channel the
+    // shell hard-coded empty.
+    LAST_CHANNELS = res.channels || {};
+    for (var c in res.channels) {
+      if (Object.prototype.hasOwnProperty.call(res.channels, c))
+        payload[c] = res.channels[c];
+    }
+    // Inside the gate: computed only when the module actually plots raw
+    // points, which is what decides whether the answer is used.
+    if (pointSourceColumns(mod, rr).length) {
+      var derivedHidden = dataHiddenPoints(payload);
+      payload.hiddenPoints = derivedHidden;
+      // hiddenPoints is a migrated style key. Supply the derived list in the
+      // render-only blob as well, or the engine's chartSpec explode would
+      // overwrite the top-level projection with the stored empty list.
+      var renderSpec = parseSpec(payload.chartSpec);
+      renderSpec.hiddenPoints = derivedHidden;
+      payload.chartSpec = JSON.stringify(renderSpec);
+    }
+    // t4-19. An excluded cell reads as null everywhere downstream, which is
+    // the whole point of the feature - but it means the builders count it into
+    // "N of M cases not shown (missing values)", and THAT wording is the one
+    // thing a reader takes as reassurance: it says the data was incomplete
+    // when in fact the author removed something. Compare Groups, Repeated
+    // Measures and Distribution paint slashed ghost markers, so the removal is
+    // visible there; on Frequencies, Scatter, Correlation and Likert it is not
+    // visible at all. The note names the author's hand wherever a consumed
+    // column carries an exclusion.
+    // ...and ONLY where the exclusion is genuinely folded into that count.
+    // Compare Groups, Repeated Measures and Distribution restore the excluded
+    // value through tableForPointVisibility so the engine can paint a slashed
+    // ghost at the right coordinate: the removal is VISIBLE there and the
+    // count still means what it says (the M4l semantics m1-shell case 9
+    // pins). pointSourceColumns is non-empty for exactly those three, so its
+    // emptiness is the test for "this module turns an exclusion into a
+    // missing value silently" - which is the case the item is about.
+    if (payload.missingNote && !pointSourceColumns(mod, rr).length &&
+        chartConsumesExclusions(mod, rr))
+      payload.missingNote = payload.missingNote.replace(
+        "(missing values)", "(missing or excluded values)");
+    // Scatter-overlay re-ship: harvested engine-computed arrays return
+    // to the payload while the data fingerprint still matches (R
+    // parity - jamovi recomputes and ships them every run). A stale
+    // fingerprint omits them: no overlay beats a wrong overlay.
+    if (mod === "xyplotbuilder") {
+      var ovDoc = activeChartTab();
+      var ovCache = ovDoc && ovDoc.overlayCache;
+      if (ovCache && ovCache.values &&
+          ovCache.fp === overlayFingerprint()) {
+        for (var ovk in ovCache.values)
+          if (Object.prototype.hasOwnProperty.call(ovCache.values, ovk))
+            payload[ovk] = ovCache.values[ovk];
+      } else {
+        // Stale (data changed) or never-harvested arrays: the overlays
+        // present cleanly OFF, so the engine's + menu offers them again
+        // and ONE click recomputes against the CURRENT data - instead
+        // of phantom overlay chrome with nothing to draw. The heatmap
+        // keeps its type (that is a chart type, not an overlay); its
+        // arrays simply wait for the next interaction.
+        if (payload.xyMarginal && payload.xyMarginal !== "none" &&
+            !(Array.isArray(payload.xyMarginalXHist) &&
+              payload.xyMarginalXHist.length))
+          payload.xyMarginal = "none";
+        if (payload.xyShowDensity2D === true &&
+            !(Array.isArray(payload.xyDensity2D) && payload.xyDensity2D.length))
+          payload.xyShowDensity2D = false;
+      }
+    }
+    // Row-filter disclosure: builders already computed every count over
+    // the KEPT rows (the filtered view), so the chart carries an honest
+    // one-line statement of the active filter.
+    if (PROJECT.table && PROJECT.table.filteredView) {
+      var ft = PROJECT.table;
+      var fNote = "Filter: " + filterSummaryText(ft) +
+        " \u00b7 showing " + nRows(ft.filteredView) + " of " +
+        nRows(ft) + " rows";
+      if (ft.filterMissingDrops)
+        fNote += " (" + ft.filterMissingDrops +
+          (ft.filterMissingDrops === 1
+            ? " row left out because its value is missing"
+            : " rows left out because their values are missing") + ")";
+      if (ft.filterInapplicable && ft.filterInapplicable.length)
+        fNote += " \u00b7 not applied: " + ft.filterInapplicable.join(", ") +
+          (ft.filterInapplicable.length === 1
+            ? " (that comparison needs numbers)"
+            : " (those comparisons need numbers)");
+      // B7. This sentence used to be prepended to payload.missingNote, which
+      // the engine renders as a DISMISSIBLE HTML pill appended to the wrap,
+      // not to the SVG - so every SVG/PNG/JPG/PDF export, every layout
+      // snapshot and the copy-as-image showed a filtered subset with zero
+      // indication that anything had been left out. It now goes into
+      // chartNote, a real spec key that lives INSIDE the svg, so it rides
+      // every one of those paths. Written into the RENDER spec only (the
+      // hiddenPoints idiom just above), never into the stored options: it is
+      // derived state, and a user who clears their filter must not be left
+      // with our sentence in their note. A note the user wrote themselves is
+      // appended to, never replaced.
+      var noteSpec = parseSpec(payload.chartSpec);
+      var userNote = String(noteSpec.chartNote || "").trim();
+      noteSpec.chartNote = userNote ? userNote + " " + fNote : fNote;
+      payload.chartSpec = JSON.stringify(noteSpec);
+      payload.chartNote = noteSpec.chartNote;
+    }
+    // Library bridge: ship the CURRENT machine libraries and defaults
+    // on every render (R parity - widget.R does the same), resolve an
+    // unpinned chartPalette against the default palette, and let a
+    // brand-new chart auto-apply the default style exactly once.
+    // Cloned so the engine's window-side copies never alias the store.
+    payload.paletteLibrary = JSON.parse(JSON.stringify(PS_LIBS.palette.palettes));
+    payload.paletteLibraryMachineId = PS_LIBS.machineId;
+    payload.paletteDefaultId = paletteDefaultIdResolved();
+    payload.styleLibrary = JSON.parse(JSON.stringify(PS_LIBS.style.styles));
+    payload.styleDefaultId = styleDefaultIdResolved();
+    var libDoc = activeChartTab();
+    // Only a chart created AFTER this bridge existed carries an
+    // explicit styleStamp:false; older documents (undefined) are never
+    // silently restyled - the clientBundleHash guard's analog.
+    payload.styleAutoApply = !!payload.styleDefaultId &&
+      !!libDoc && libDoc.styleStamp === false;
+    var specPalette = opts.spec && typeof opts.spec.chartPalette === "string"
+      ? opts.spec.chartPalette : "";
+    if (!specPalette)
+      payload.chartPalette = payload.paletteDefaultId || "default";
+    return { payload: payload };
+  }
+
+  // ================================================================ render
+  function hostEl() { return document.getElementById("psroot"); }
+  function syncWorkspaceEmpty() {
+    var ws = appWorkspace(), empty = el("ps-workspace-empty");
+    var missing = ws !== "data" && !workspaceDocument(ws);
+    empty.style.display = missing ? "flex" : "none";
+    if (!missing) return;
+    var layout = ws === "layout";
+    el("ps-workspace-empty-icon").textContent = layout ? "\u229e" : "\u25a5";
+    el("ps-workspace-empty-title").textContent =
+      layout ? "No layouts yet" : "No charts yet";
+    el("ps-workspace-empty-copy").textContent = layout
+      ? "Create a layout to combine charts, panel labels, and text into a publication-ready figure."
+      : "Create a chart by choosing the analysis that matches your variables and research question.";
+    el("ps-workspace-empty-create").textContent =
+      layout ? "Create layout" : "Create chart";
+  }
+  // Punch list 23. Action buttons were built only when the message started
+  // with "Assign ", so every module BUILD error - the HARDER failures - fell
+  // into a branch with no button and one fixed sentence of generic advice,
+  // while the error itself was specific. The Likert many-levels refusal even
+  // names the right destination ("belong in the Frequencies analysis")
+  // without offering a way there.
+  //
+  // The classification is DECLARED by the builder (res.fix), not sniffed
+  // from the prose here: matching on wording is how the "Assign " test came
+  // to decide whether a user got a button at all.
+  function messageActions(fix) {
+    var acts = [];
+    if (fix && fix.kind === "example") {
+      acts.push({ id: "ps-empty-example", primary: true,
+                  label: "Open the " + fix.exName + " example",
+                  run: function () { openExampleFromEmptyState(fix.to); } });
+    }
+    if (fix && fix.kind === "module" && MODULES[fix.to]) {
+      acts.push({ id: "ps-empty-module", primary: true,
+                  label: "Switch to " + MODULES[fix.to].label,
+                  run: function () { setModuleFromEmptyState(fix.to); } });
+    }
+    if (fix && fix.col && PROJECT.table &&
+        PROJECT.table.order.indexOf(fix.col) !== -1) {
+      acts.push({ id: "ps-empty-data", primary: !acts.length,
+                  label: "Look at " + fix.col + " in the data",
+                  run: function () { inspectColumnFromEmptyState(fix.col); } });
+    }
+    acts.push({ id: "ps-empty-choose", primary: !acts.length,
+                label: fix ? "Choose different variables" : "Choose variables",
+                run: flashChartSetup });
+    acts.push({ id: "ps-empty-hmc", link: true,
+                label: "Not sure? Help me choose",
+                run: function () { showHelpMeChoose(); } });
+    return acts;
+  }
+  function inspectColumnFromEmptyState(col) {
+    setAppWorkspace("data");
+    selectInspectorVariable(col);
+    // Land on the first missing cell: "inspect the data for missing values"
+    // was the old advice, and this is that sentence carried out.
+    var t = PROJECT.table, values = (t && t.columns[col]) || [];
+    for (var i = 0; i < values.length; i++)
+      if (values[i] == null) { gridRevealFound({ col: col, row: i }); return; }
+    gridRevealFound({ col: col, row: 0 });
+  }
+  // Replacing the project is destructive, so it rides item 13's pattern:
+  // capture what is being replaced and offer it straight back.
+  function openExampleFromEmptyState(id) {
+    var prev = captureReplacedProject();
+    dataHistoryClear();
+    loadSample(id);
+    persist(); syncAll(); render();
+    offerReplacedProjectBack(prev, "the " + exampleById(id).name + " example");
+  }
+  function setModuleFromEmptyState(mod) {
+    activeChart().module = mod;
+    bumpSnapEpoch();
+    validateRoles();
+    persist(); syncAll(); render();
+  }
+  function showMessage(html, fix) {
+    var host = hostEl();
+    // Do not leave the previous live chart's export hooks attached when
+    // the active tab is an assignment/error placeholder.
+    host.__gb2_serializeSvg = null;
+    host.__gb2_chartSize = null;
+    var assignment = /^Assign /.test(String(html).replace(/<[^>]+>/g, ""));
+    var acts = assignment
+      ? (fix && fix.kind === "example"
+         ? messageActions(fix).filter(function (a) {
+             return a.id !== "ps-empty-data";
+           })
+         : [{ id: "ps-empty-choose", primary: true, label: "Choose variables",
+              run: flashChartSetup },
+            { id: "ps-empty-hmc", link: true,
+              label: "Not sure? Help me choose",
+              run: function () { showHelpMeChoose(); } }])
+      : messageActions(fix);
+    var tail = assignment
+      ? (fix && fix.kind === "example"
+         ? " This example dataset has nothing that would suit it. " +
+           fix.exName + " does: " + fix.exBlurb
+         : " Use the Chart setup inspector to choose compatible variables.")
+      : (fix && fix.kind === "nodata"
+         ? " Every value it would have plotted is missing or excluded."
+         : fix && fix.kind === "module" ? ""
+         : " Review the selected variables or inspect the data for missing values.");
+    var buttons = "";
+    for (var i = 0; i < acts.length; i++)
+      buttons += '<button type="button" class="' +
+        (acts[i].link ? "ps-linklike" : acts[i].primary ? "ps-primary" : "") +
+        '" id="' + acts[i].id + '">' + escHtml(acts[i].label) + "</button>";
+    host.innerHTML =
+      '<div class="ps-guided-empty">' +
+      '<div class="ps-guided-empty-icon" aria-hidden="true">' +
+      (assignment ? "\u2192" : "!") + "</div>" +
+      "<h3>" + (assignment ? "This chart needs variables" :
+        "This chart needs attention") + "</h3>" +
+      "<p>" + html + tail + "</p>" +
+      '<div class="ps-guided-empty-actions">' + buttons + "</div>" +
+      "</div>";
+    for (i = 0; i < acts.length; i++) {
+      var b = document.getElementById(acts[i].id);
+      if (b) b.addEventListener("click", acts[i].run);
+    }
+  }
+  // Pull the eye to the Chart setup inspector: scroll the role slots
+  // into view and pulse their card so a novice knows where "choose
+  // variables" happens without hunting the right-hand panel.
+  function flashChartSetup() {
+    var slots = el("ps-slots");
+    if (!slots) return;
+    try { slots.scrollIntoView({ behavior: "smooth", block: "center" }); }
+    catch (e) { slots.scrollIntoView(); }
+    var card = slots.closest(".ps-card") || slots.closest(".ps-inspector") ||
+      slots;
+    card.classList.remove("ps-attention-pulse");
+    // Restart the CSS animation even on a rapid second click.
+    void card.offsetWidth;
+    card.classList.add("ps-attention-pulse");
+    window.setTimeout(function () {
+      card.classList.remove("ps-attention-pulse");
+    }, 1900);
+  }
+  function render() {
+    echoTimer = null;
+    var host = hostEl();
+    var lay = el("ps-layout");
+    var ws = appWorkspace();
+    syncWorkspaceEmpty();
+    if (ws !== "data" && !workspaceDocument(ws)) {
+      host.style.display = "none";
+      host.classList.remove("ps-offscreen");
+      lay.style.display = "none";
+      return;
+    }
+    host.style.display = "";
+    if (isLayoutTab(activeChart())) {
+      // Layout tab: park the engine host OFFSCREEN (visibility-hidden,
+      // never display:none - the engine's text measurement needs layout)
+      // and show the canvas. Missing chart snapshots render offscreen
+      // first, one by one, through the normal engine path.
+      host.classList.add("ps-offscreen");
+      lay.style.display = "block";
+      try { ensureSnapshotsThen(renderLayout); }
+      catch (e) {
+        SNAPSHOT_PASS = false;      // never let an aborted pass strand it
+        busyHide();
+        host.classList.remove("ps-offscreen");
+        lay.style.display = "none";
+        showRenderFailure(e);
+      }
+      return;
+    }
+    host.classList.remove("ps-offscreen");
+    lay.style.display = "none";
+    // B8. Only the engine's own render() call was wrapped; buildPayload and
+    // the whole aggregation path in front of it were not. render() is the
+    // last statement in nearly every mutation path, so a throw left the state
+    // committed AND persisted with nothing on screen - and because reloading
+    // replays the same stored options, a payload that reliably throws was a
+    // permanent wedge with no in-app way out. The boundary now covers the
+    // whole path and, crucially, offers the escape.
+    try { renderChartIntoHost(); }
+    catch (e) { showRenderFailure(e); }
+  }
+  // Deliberately built with DOM calls rather than innerHTML: this runs when
+  // something has already gone wrong, so it must not depend on string
+  // escaping being right, and the message can contain anything.
+  function showRenderFailure(err) {
+    var host = hostEl();
+    try {
+      host.__gb2_serializeSvg = null;
+      host.__gb2_chartSize = null;
+      host.classList.remove("ps-offscreen");
+      host.style.display = "";
+      host.innerHTML = "";
+      var box = mkEl("div", "ps-guided-empty");
+      box.appendChild(mkEl("div", "ps-guided-empty-icon", "!"));
+      box.appendChild(mkEl("h3", "", "This chart could not be drawn"));
+      box.appendChild(mkEl("p", "",
+        "Something in this chart's settings or data made the drawing step " +
+        "fail. Your data and your other documents are unaffected."));
+      var detail = mkEl("p", "ps-render-failure-detail",
+        String((err && err.message) || err || "unknown error"));
+      box.appendChild(detail);
+      var row = mkEl("div", "ps-guided-empty-actions");
+      var reset = mkEl("button", "ps-btn ps-primary", "Reset this chart's styling");
+      reset.type = "button";
+      setTip(reset, "Clears the style settings for this chart only. " +
+        "Undo is offered afterwards.");
+      reset.addEventListener("click", function () {
+        try { el("ps-reset").click(); } catch (e2) {}
+      });
+      row.appendChild(reset);
+      var again = mkEl("button", "ps-btn", "Try again");
+      again.type = "button";
+      setTip(again, "Draws the chart again with the same settings. Worth one " +
+        "try before resetting anything.");
+      again.addEventListener("click", function () { render(); });
+      row.appendChild(again);
+      var copy = mkEl("button", "ps-btn", "Copy details");
+      copy.type = "button";
+      copy.addEventListener("click", function () {
+        var text = "Pandion Plots " + APP_VERSION + "\n" +
+          String((err && err.stack) || (err && err.message) || err) + "\n" +
+          "module: " + curModule();
+        try {
+          navigator.clipboard.writeText(text);
+          showToast("Details copied");
+        } catch (e3) { showToast("Could not copy the details", true); }
+      });
+      row.appendChild(copy);
+      box.appendChild(row);
+      host.appendChild(box);
+      var status = document.getElementById("ps-status-context");
+      if (status) status.textContent = "Chart could not be drawn";
+    } catch (fatal) {
+      // Last resort: never let the boundary itself blank the app.
+      try { host.textContent = "This chart could not be drawn."; }
+      catch (e4) {}
+    }
+    try { RECON_BIN_PIN = null; } catch (e5) {}
+  }
+  // B3. The engine keeps ONE undo stack under ONE fixed localStorage key,
+  // and switchChart never partitioned it: style chart A, switch to B, press
+  // Cmd+Z, and A's old value lands on B and persists (the engine's own
+  // foreign-key guard does not bound it, because both charts clone the same
+  // ~554-key template). The engine documents this as a known trade-off
+  // because "a proper per-analysis id would need a stable identifier jamovi
+  // does not currently expose" - but the standalone HAS one, so the shell
+  // supplies it here without touching the engine: the canonical keys are
+  // swapped to the document being rendered, per-document copies parked
+  // beside them.
+  //
+  // Writing the EMPTY payload rather than REMOVING the key is load-bearing:
+  // _undoRestore early-returns on a missing value, which would leave the
+  // previous document's in-memory stack live and reintroduce the bug for any
+  // chart that has no history of its own yet.
+  var ENGINE_LS_DOC = null;
+  var ENGINE_LS_EMPTY = {
+    "graphbuilder2.undo.v2": '{"stack":[],"redo":[],"keys":[]}',
+    "graphbuilder2.inspector.v1": "[]"
+  };
+  var ENGINE_LS_KEYS = Object.keys(ENGINE_LS_EMPTY);
+  function engineDocKey(docId, key) {
+    return "psstandalone.engine." + key + "." + docId;
+  }
+  function syncEngineDocState() {
+    var doc = activeChartTab();
+    var id = doc ? doc.id : null;
+    if (!id || id === ENGINE_LS_DOC) return;
+    var ls = null;
+    try { ls = window.localStorage; } catch (e) { ls = null; }
+    if (!ls) { ENGINE_LS_DOC = id; return; }
+    try {
+      for (var i = 0; i < ENGINE_LS_KEYS.length; i++) {
+        var k = ENGINE_LS_KEYS[i];
+        var live = ls.getItem(k);
+        if (ENGINE_LS_DOC) {
+          // park the outgoing document's state
+          if (live == null) ls.removeItem(engineDocKey(ENGINE_LS_DOC, k));
+          else ls.setItem(engineDocKey(ENGINE_LS_DOC, k), live);
+        }
+        var mine = ls.getItem(engineDocKey(id, k));
+        if (mine == null && !ENGINE_LS_DOC && live != null) {
+          // First sync of the session: a stack left by an earlier build (or
+          // an earlier session) is unattributed, so it is adopted by the
+          // first document rendered rather than thrown away.
+          mine = live;
+        }
+        ls.setItem(k, mine == null ? ENGINE_LS_EMPTY[k] : mine);
+      }
+    } catch (e) {}
+    ENGINE_LS_DOC = id;
+  }
+  function clearAllEngineDocState() {
+    try {
+      var ls = window.localStorage, doomed = [];
+      for (var i = 0; i < ls.length; i++) {
+        var k = ls.key(i);
+        if (k && k.indexOf("psstandalone.engine.") === 0) doomed.push(k);
+      }
+      for (i = 0; i < doomed.length; i++) ls.removeItem(doomed[i]);
+      for (i = 0; i < ENGINE_LS_KEYS.length; i++)
+        ls.setItem(ENGINE_LS_KEYS[i], ENGINE_LS_EMPTY[ENGINE_LS_KEYS[i]]);
+    } catch (e) {}
+    ENGINE_LS_DOC = null;
+  }
+  function forgetEngineDocState(docId) {
+    try {
+      for (var i = 0; i < ENGINE_LS_KEYS.length; i++)
+        window.localStorage.removeItem(engineDocKey(docId, ENGINE_LS_KEYS[i]));
+    } catch (e) {}
+    if (ENGINE_LS_DOC === docId) ENGINE_LS_DOC = null;
+  }
+  // Punch list 22. One card served two completely different readers. A
+  // developer running the dev page from a moved folder needs the build
+  // command; a student opening the shipped single file needs a reload and a
+  // fresh download, and telling them to "run bash standalone/build-dist.sh"
+  // is nonsense they cannot act on. The dev page is the one that loads the
+  // engine from OUTSIDE the folder, so the script tag itself is the test -
+  // no build-time flag to set, and the dist cannot mislabel itself.
+  function isDevPageEngine() {
+    try {
+      return !!document.querySelector('script[src*="graphbuilder2"]');
+    } catch (e) { return false; }
+  }
+  function showEngineLoadFailure(host) {
+    host.innerHTML = "";
+    var box = mkEl("div", "ps-guided-empty");
+    box.appendChild(mkEl("div", "ps-guided-empty-icon", "!"));
+    box.appendChild(mkEl("h3", "", "The chart engine did not start"));
+    if (isDevPageEngine()) {
+      box.appendChild(mkEl("p", "",
+        "This development page loads the engine from outside the standalone " +
+        "folder (../inst/widget/graphbuilder2.min.js), so it only runs from " +
+        "inside the pandion repository."));
+      var p = mkEl("p", "");
+      p.innerHTML = "If the folder was copied or moved, build the " +
+        "self-contained file instead: <code>bash standalone/build-dist.sh</code>" +
+        ", then open <code>standalone/dist/pandion-plots.html</code>.";
+      box.appendChild(p);
+    } else {
+      box.appendChild(mkEl("p", "",
+        "Your data is safe and nothing has been lost. This usually means the " +
+        "file did not finish downloading, or the browser stopped the page " +
+        "part way through."));
+      box.appendChild(mkEl("p", "",
+        "Reload the page to try again. If it keeps happening, download a " +
+        "fresh copy of Pandion Plots and open that instead."));
+    }
+    var row = mkEl("div", "ps-guided-empty-actions");
+    var again = mkEl("button", "ps-btn ps-primary", "Reload the page");
+    again.type = "button";
+    again.addEventListener("click", function () {
+      try { window.location.reload(); } catch (e) {}
+    });
+    row.appendChild(again);
+    box.appendChild(row);
+    host.appendChild(box);
+    var status = document.getElementById("ps-status-context");
+    if (status) status.textContent = "Chart engine did not start";
+  }
+  // ---- punch list 2: saying that the chart is clickable ----
+  // The engine's own first-run hint is dead behind an early return and the
+  // shell added no replacement, so the product's defining capability was
+  // announced nowhere passively. Help > Show me how covers it, but that is a
+  // path a student has to already think to open.
+  //
+  // One shot, ever: shown after a chart has actually DRAWN (a placeholder has
+  // nothing to point at), never over the start centre, and remembered in
+  // localStorage so it cannot become nagging. Anchored under the chart's own
+  // toolbar, which is where the eye already is.
+  var COACH_SHOWN = false;
+  function coachSeen() {
+    try { return window.localStorage.getItem(PS_COACH_KEY) === "1"; }
+    catch (e) { return true; }   // no storage: never nag rather than always
+  }
+  function coachDismiss() {
+    var c = document.getElementById("ps-coach");
+    if (c) c.hidden = true;
+    try { window.localStorage.setItem(PS_COACH_KEY, "1"); } catch (e) {}
+  }
+  function coachPlace() {
+    var c = document.getElementById("ps-coach");
+    var host = hostEl();
+    if (!c || c.hidden || !host) return;
+    var svg = host.querySelector("svg");
+    var box = (svg || host).getBoundingClientRect();
+    var w = c.offsetWidth || 300;
+    var left = Math.max(10, Math.min(box.left + 26,
+      window.innerWidth - w - 12));
+    c.style.left = left + "px";
+    c.style.top = Math.min(box.top + 44, window.innerHeight - 150) + "px";
+  }
+  function maybeShowCoach() {
+    if (COACH_SHOWN || coachSeen()) return;
+    var welcome = document.getElementById("ps-welcome");
+    // window.getComputedStyle rather than the bare global, and guarded: the
+    // shell is also evaluated in the hardening harness's minimal DOM, where
+    // the global is absent and a deferred call threw a ReferenceError that
+    // nothing on screen would ever have shown.
+    var cs = (window.getComputedStyle && welcome)
+      ? window.getComputedStyle(welcome) : null;
+    if (welcome && welcome.style.display !== "none" &&
+        (!cs || cs.display !== "none")) return;
+    var host = hostEl();
+    if (!host || !host.querySelector("svg")) return;   // nothing to point at
+    if (appWorkspace() !== "chart") return;
+    COACH_SHOWN = true;
+    var c = document.getElementById("ps-coach");
+    if (!c) return;
+    c.hidden = false;
+    coachPlace();
+  }
+  function wireCoach() {
+    var ok = document.getElementById("ps-coach-ok");
+    if (ok) ok.addEventListener("click", coachDismiss);
+    var tour = document.getElementById("ps-coach-tour");
+    if (tour) tour.addEventListener("click", function () {
+      coachDismiss();
+      showTours();
+    });
+    // Any click ON the chart proves the point better than the note does.
+    var host = hostEl();
+    if (host) host.addEventListener("pointerdown", function () {
+      var c = document.getElementById("ps-coach");
+      if (c && !c.hidden) coachDismiss();
+    }, true);
+    window.addEventListener("resize", coachPlace);
+  }
+  function renderChartIntoHost() {
+    var host = hostEl();
+    syncEngineDocState();
+    var renderStarted = (window.performance && window.performance.now)
+      ? window.performance.now() : Date.now();
+    if (!window.GraphBuilder2 || !window.GraphBuilder2.render) {
+      host.__gb2_serializeSvg = null;
+      host.__gb2_chartSize = null;
+      showEngineLoadFailure(host);
+      return;
+    }
+    reconcileOverlayState();
+    var built = buildPayload();
+    if (built.placeholder) {
+      try {
+        if (RECON_BIN_PIN != null && window.__gb2_pendingOpts &&
+            window.__gb2_pendingOpts.xyBinCount === RECON_BIN_PIN)
+          delete window.__gb2_pendingOpts.xyBinCount;
+      } catch (e) {}
+      RECON_BIN_PIN = null;
+      showMessage(built.placeholder, built.fix);
+      return;
+    }
+    LAST_RENDER_PAYLOAD = built.payload;
+    LAST_DATA_HIDDEN_POINTS = Array.isArray(built.payload.hiddenPoints)
+      ? built.payload.hiddenPoints.map(function (point) {
+          return { cat: point.cat, group: point.group, idx: point.idx };
+        }) : [];
+    applyLinkedPointSelection(built.payload);
+    try { window.__gb2_authoritativeRender = true; } catch (e) {}
+    try { window.setTimeout(maybeShowCoach, 260); } catch (e) {}
+    // Punch list 27: the ResizeObserver only fires when the PANE changes, and
+    // on a cold load the pane reaches its size before there is a chart to fit,
+    // so the first render would keep the template's 6x4. Debounced and
+    // idempotent, so a settled chart costs nothing.
+    try { fitSchedule(); } catch (e) {}
+    try { buildDebugOverlay(); } catch (e) {}   // t4-16, if it is switched on
+    try { window.GraphBuilder2.render("psroot", built.payload); }
+    catch (e) {
+      // B8. This used to print a bare red "Engine render error: ..." string
+      // with nothing to do about it, which is precisely the wedge: the same
+      // stored options replay on every reload. It now shares the one recovery
+      // surface, which offers the reset that clears them.
+      // A failed render never harvested; just drop the synthetic pin.
+      try {
+        if (RECON_BIN_PIN != null && window.__gb2_pendingOpts &&
+            window.__gb2_pendingOpts.xyBinCount === RECON_BIN_PIN)
+          delete window.__gb2_pendingOpts.xyBinCount;
+      } catch (e2) {}
+      RECON_BIN_PIN = null;
+      showRenderFailure(e);
+      return;
+    }
+    settleReconciledHeatmap();
+    // The former source-cell banner incidentally caused a resize redraw that
+    // painted the engine's linked-point ring. With that persistent banner
+    // removed, apply the same non-interactive ring immediately and silently.
+    ensureLinkedPointRing();
+    var renderEnded = (window.performance && window.performance.now)
+      ? window.performance.now() : Date.now();
+    LAST_RENDER_MS = Math.max(0, renderEnded - renderStarted);
+    LAST_RENDER_AT = new Date().toISOString();
+    // Punch list 37. The render time was overwriting the chart's own
+    // description a beat after every draw, so the slot spent most of its life
+    // reporting how fast the last render was - which matters to whoever built
+    // this and to nobody else. It lives in the tooltip and in Diagnostics; the
+    // slot says what the chart IS.
+    var status = document.getElementById("ps-status-context");
+    if (status && appWorkspace() === "chart") {
+      var ready = activeChartTab();
+      status.textContent = ready && !isLayoutTab(ready)
+        ? chartStatusText(ready) : status.textContent;
+      setTip(status, "Last render " +
+        (LAST_RENDER_MS < 10 ? LAST_RENDER_MS.toFixed(1) :
+          Math.round(LAST_RENDER_MS)) + " ms");
+    }
+    var c = activeChartTab();
+    // B24. activeChartTab() deliberately falls back to LAST_CHART_ID so a
+    // late debounced commit lands on the chart that PRODUCED it rather than
+    // on whatever layout is now on screen. But the snapshot ensure pass
+    // renders other charts offscreen through this same function, so it used
+    // to repoint LAST_CHART_ID at the last chart it happened to visit - and
+    // a late engine commit then landed on THAT chart instead of the one the
+    // user edited. Reproduced on the third attempt: edit chart A, open a
+    // layout holding B and C, and the late commit wrote to C.
+    //
+    // An offscreen render taken for a snapshot is not the user working on
+    // that chart, so it must not claim ownership of pending edits.
+    if (c) {
+      if (!SNAPSHOT_PASS) LAST_CHART_ID = c.id;
+      captureChartSnapshot(c.id);
+    }
+  }
+
+  // ---- chart snapshots for layouts (session cache, chrome-stripped) ----
+  var LAST_RENDER_PAYLOAD = null;
+  var CHART_SNAPS = {};   // chartId -> { svg, w, h, rev }
+  // Punch list B1. Layout panels other than the active chart are drawn from
+  // these cached SVGs, and invalidation used to be a hand-maintained list of
+  // resets at mutation sites. Eight sites had one and eight did not, so a cell
+  // edit left every OTHER panel in a layout drawing - and exporting - pre-edit
+  // data with no visible cue.
+  //
+  // Keying each snapshot with the project revision makes that class of bug
+  // structural rather than remembered: any mutation that persists bumps
+  // PROJECT_REV, so a snapshot taken before it simply stops matching. Nothing
+  // has to remember to invalidate, and a future mutation site gets this for
+  // free. Capture always happens after persist() in every edit path, so a
+  // settled app does not churn.
+  // The revision must track only what changes what a CHART DRAWS. PROJECT_REV
+  // was the first attempt and was too coarse: it bumps on ANY persist,
+  // including layout-only state like zoom and grid, and renderLayout() has no
+  // ensure pass - so changing the zoom blanked every panel to the "open its
+  // tab once" placeholder until some unrelated action forced a full render.
+  // (Caught by the snapshot audit and reproduced before this fix.)
+  //
+  // SNAP_EPOCH instead bumps at the two choke points that actually matter:
+  // retype() for data (buildTable calls it, so every mutation AND every load
+  // path funnels through), and window.setOption for chart options. Layout
+  // geometry, zoom and grid do not touch either, so arranging a figure no
+  // longer invalidates anything.
+  //
+  // It is also monotonic, which closes a second hole: PROJECT_REV resets to 0
+  // on every project load, so snapshots from a PREVIOUS project (chart ids are
+  // not project-unique) passed validation in the new one and were drawn and
+  // exported under it.
+  var SNAP_EPOCH = 0;
+  function bumpSnapEpoch() { SNAP_EPOCH++; }
+  function snapRev() { return SNAP_EPOCH; }
+  function validSnap(chartId) {
+    var s = CHART_SNAPS[chartId];
+    return (s && s.svg && s.rev === snapRev()) ? s : null;
+  }
+  var SNAP_STRIP = '[data-ov],[data-role^="sel-halo"],' +
+    '[data-role="stats-link-halo"],[data-role="anatomy-overlay"],' +
+    '[data-role="anatomy-capture"],[data-role="draw-capture"],.gb2-halo-union';
+  function captureChartSnapshot(chartId) {
+    try {
+      var svgs = hostEl().querySelectorAll("svg");
+      var best = null, bestA = 0;
+      for (var i = 0; i < svgs.length; i++) {
+        var a = svgs[i].clientWidth * svgs[i].clientHeight;
+        if (a > bestA) { bestA = a; best = svgs[i]; }
+      }
+      if (!best || best.clientWidth < 200) return;
+      var w = best.clientWidth, hgt = best.clientHeight;
+      var clone = best.cloneNode(true);
+      var kill = clone.querySelectorAll(SNAP_STRIP);
+      for (var k = 0; k < kill.length; k++)
+        kill[k].parentNode.removeChild(kill[k]);
+      clone.removeAttribute("tabindex");
+      clone.removeAttribute("aria-label");
+      if (!clone.getAttribute("viewBox"))
+        clone.setAttribute("viewBox", "0 0 " + w + " " + hgt);
+      clone.setAttribute("width", "100%");
+      clone.setAttribute("height", "100%");
+      clone.setAttribute("preserveAspectRatio", "xMidYMid meet");
+      // The engine svg carries inline position:relative + z-index:1;
+      // neutralize it or a snapshot panel stacks ABOVE later-placed
+      // layout items (text labels) regardless of DOM order.
+      clone.style.position = "static";
+      clone.style.zIndex = "auto";
+      // Self-contained defs: the engine stamps the SAME ids on every
+      // render (gb2-cat-data-clip-psroot, gb2-violin-clip, ...), and
+      // url(#id) resolves DOCUMENT-wide to the first match - so a
+      // clone's data clip resolved into the parked host svg and painted
+      // NOTHING (empty snapshot panels). Prefix every id inside the
+      // clone and rewrite the fully-delimited reference tokens; the
+      // delimiters (closing quote / paren) make prefix ids collision-
+      // safe without length sorting.
+      var html = clone.outerHTML;
+      var idEls = clone.querySelectorAll("[id]");
+      var pre = "snap-" + chartId + "-";
+      for (var j = 0; j < idEls.length; j++) {
+        var oid = idEls[j].getAttribute("id");
+        if (!oid) continue;
+        html = html.split('id="' + oid + '"').join('id="' + pre + oid + '"');
+        html = html.split("url(#" + oid + ")").join("url(#" + pre + oid + ")");
+        html = html.split('url("#' + oid + '")').join('url("#' + pre + oid + '")');
+        html = html.split('href="#' + oid + '"').join('href="#' + pre + oid + '"');
+      }
+      CHART_SNAPS[chartId] = { svg: html, w: w, h: hgt, rev: snapRev() };
+    } catch (e) {}
+  }
+  // Render any placed-but-unsnapshotted charts through the offscreen
+  // host, one per tick, then draw the layout.
+  function ensureSnapshotsThen(done) {
+    var layTab = activeChart();
+    var need = [];
+    var items = (layTab.items || []);
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      if (it.kind !== "chart" || validSnap(it.chartId)) continue;
+      var c = chartById(it.chartId);
+      if (c && !isLayoutTab(c) && need.indexOf(it.chartId) === -1)
+        need.push(it.chartId);
+    }
+    if (!need.length) { UNCAPTURABLE = {}; done(); return; }
+    var layId = PROJECT.activeChart;
+    SNAPSHOT_PASS = true;            // B24: these renders are not the user
+    // Item 9: this pass renders one chart per tick, so a figure with several
+    // panels genuinely takes time. It IS async, so the delay gate works here
+    // as intended: a one- or two-panel layout finishes well inside the
+    // threshold and shows nothing at all.
+    busyArm("Drawing the panels\u2026");
+    // B22. step() used to shift the next id, render, and schedule the next
+    // one UNCONDITIONALLY: no post-check, no retry cap, no error surface.
+    // renderChartIntoHost has silent early returns before the capture line
+    // (engine missing, placeholder for unassigned roles, thrown render) and
+    // captureChartSnapshot itself returns silently when the largest svg is
+    // missing or under 200px - so a chart that renders but never captures was
+    // indistinguishable from one never visited, and every pass re-rendered it
+    // forever. Worse, B2's export refusal then said "open its tab once, then
+    // export again", which is a dead end when the ensure pass just did that.
+    var tried = {};
+    function step() {
+      var id = need.shift();
+      if (!id) {
+        PROJECT.activeChart = layId;
+        SNAPSHOT_PASS = false;
+        busyDisarm();
+        done();
+        return;
+      }
+      PROJECT.activeChart = id;
+      renderChartIntoHost();
+      PROJECT.activeChart = layId;
+      if (validSnap(id)) delete UNCAPTURABLE[id];
+      else if (!tried[id]) {
+        // One retry: the commonest miss is a chart whose host had not laid
+        // out yet, which a second pass on the next tick fixes.
+        tried[id] = 1;
+        need.push(id);
+      } else {
+        UNCAPTURABLE[id] = true;
+      }
+      window.setTimeout(step, 0);
+    }
+    step();
+  }
+  // Charts the ensure pass rendered and still could not capture. Read by the
+  // export refusal so it can name the real cause instead of telling the user
+  // to do the thing that just failed.
+  var UNCAPTURABLE = {};
+  function uncapturableIds() { return Object.keys(UNCAPTURABLE); }
+
+  // ================================================================ sink
+  var LAST_DATA_HIDDEN_POINTS = [];
+  var LINKED_CELL = null; // { caseId, col }; session-only cross-view selection
+  var LINKED_REVEAL_EMPHASIS = false;
+  function pointForCaseCell(payload, caseId, col) {
+    if (!payload || !Array.isArray(payload.bars)) return null;
+    for (var bi = 0; bi < payload.bars.length; bi++) {
+      var bar = payload.bars[bi];
+      if (!bar || !Array.isArray(bar.caseIds) ||
+          !Array.isArray(bar.sourceColumns)) continue;
+      for (var vi = 0; vi < bar.caseIds.length; vi++)
+        if (String(bar.caseIds[vi]) === String(caseId) &&
+            String(bar.sourceColumns[vi]) === String(col))
+          return { cat: bar.x == null ? "" : String(bar.x),
+                   group: bar.group == null ? "" : String(bar.group),
+                   idx: vi };
+    }
+    return null;
+  }
+  function linkedCellRow() {
+    return LINKED_CELL && PROJECT.table
+      ? PROJECT.table.caseIds.indexOf(LINKED_CELL.caseId) : -1;
+  }
+  function applyLinkedPointSelection(payload) {
+    if (!LINKED_CELL) return;
+    var host = hostEl();
+    var priorRings = host
+      ? host.querySelectorAll('[data-role="data-point-selected"]') : [];
+    for (var ri = 0; ri < priorRings.length; ri++)
+      if (priorRings[ri].parentNode)
+        priorRings[ri].parentNode.removeChild(priorRings[ri]);
+    var point = pointForCaseCell(payload, LINKED_CELL.caseId, LINKED_CELL.col);
+    window.__gb2_selectedPointKey = point
+      ? point.cat + "::" + point.group + "::" + point.idx : null;
+  }
+  function ensureLinkedPointRing() {
+    var key = window.__gb2_selectedPointKey;
+    var host = hostEl();
+    if (!key || !host ||
+        host.querySelector('[data-role="data-point-selected"]')) return;
+    var points = host.querySelectorAll('[data-role="data-point"]');
+    for (var i = 0; i < points.length; i++) {
+      var point = points[i];
+      var pointKey = (point.getAttribute("data-point-cat") || "") + "::" +
+        (point.getAttribute("data-point-group") || "") + "::" +
+        (point.getAttribute("data-point-idx") || "");
+      if (pointKey !== key || !point.parentNode) continue;
+      var size = Number(point.getAttribute("r")) || 4;
+      var ring = document.createElementNS("http://www.w3.org/2000/svg",
+                                          "circle");
+      ring.setAttribute("cx", point.getAttribute("cx"));
+      ring.setAttribute("cy", point.getAttribute("cy"));
+      ring.setAttribute("r", String(Math.max(size + 4, 8)));
+      ring.setAttribute("fill", "none");
+      ring.setAttribute("stroke", "#1a5fb4");
+      ring.setAttribute("stroke-width", "1.5");
+      ring.setAttribute("stroke-dasharray", "4,2");
+      ring.setAttribute("pointer-events", "none");
+      ring.setAttribute("data-role", "data-point-selected");
+      point.parentNode.insertBefore(ring, point.nextSibling);
+      return;
+    }
+  }
+  function setLinkedCell(caseId, col) {
+    if (!caseId || !col || !PROJECT.table.raw[col]) return false;
+    var row = PROJECT.table.caseIds.indexOf(String(caseId));
+    if (row < 0) return false;
+    LINKED_CELL = { caseId: String(caseId), col: String(col) };
+    LINKED_REVEAL_EMPHASIS = true;
+    gridApplySelection();
+    return true;
+  }
+  function revealLinkedCell() {
+    var row = linkedCellRow();
+    if (!LINKED_CELL || row < 0) return;
+    setAppWorkspace("data");
+    var grid = el("ps-datagrid");
+    if (grid) {
+      var targetTop = Math.max(0, row * GRID_ROW_HEIGHT -
+        Math.max(0, grid.clientHeight / 2 - GRID_ROW_HEIGHT));
+      grid.scrollTop = targetTop;
+      GRID_WINDOW_START = Math.max(0,
+        Math.min(row - Math.floor(GRID_WINDOW_ROWS / 2),
+                 Math.max(0, nRows(PROJECT.table) - GRID_WINDOW_ROWS)));
+      syncDataGrid();
+    }
+    gridSetSelection(LINKED_CELL.col, row, LINKED_CELL.col, row);
+    // gridSetSelection treats calls as ordinary Data selections. Restore the
+    // one-shot source emphasis only for this explicit Reveal action.
+    LINKED_REVEAL_EMPHASIS = true;
+    gridApplySelection();
+    var td = gridFindTd(LINKED_CELL.col, row);
+    if (td && td.scrollIntoView)
+      try { td.scrollIntoView({ block: "center", inline: "nearest" }); }
+      catch (e) { td.scrollIntoView(); }
+    if (grid) try { grid.focus({ preventScroll: true }); } catch (ignore) {}
+  }
+  function pointNodeFromTarget(target) {
+    if (!target || !target.closest) return null;
+    var hidden = target.closest('[data-role="data-point-hidden"]');
+    if (hidden) return hidden;
+    var point = target.closest('[data-role="data-point"]');
+    if (point) return point;
+    // Painted point shapes sit immediately before the transparent interaction
+    // halo (or before a selected-ring + halo pair).
+    var prev = target, tries = 0;
+    while (prev && tries++ < 3) {
+      prev = prev.previousElementSibling;
+      if (prev && prev.getAttribute &&
+          prev.getAttribute("data-role") === "data-point") return prev;
+    }
+    return null;
+  }
+  function linkChartPointTarget(target) {
+    var node = pointNodeFromTarget(target);
+    if (!node) return false;
+    var point = {
+      cat: node.getAttribute("data-point-cat") || "",
+      group: node.getAttribute("data-point-group") || "",
+      idx: Number(node.getAttribute("data-point-idx"))
+    };
+    var sourceCell = caseCellForHiddenPoint(point);
+    return !!(sourceCell && setLinkedCell(sourceCell.caseId, sourceCell.col));
+  }
+  function caseCellForHiddenPoint(point, payload) {
+    var source = payload || LAST_RENDER_PAYLOAD;
+    if (!point || !source || !Array.isArray(source.bars)) return null;
+    var wantedCat = String(point.cat == null ? "" : point.cat);
+    var wantedGroup = String(point.group == null ? "" : point.group);
+    var idx = Number(point.idx);
+    if (!isFinite(idx) || idx < 0 || Math.floor(idx) !== idx) return null;
+    for (var i = 0; i < source.bars.length; i++) {
+      var bar = source.bars[i];
+      if (!bar || String(bar.x == null ? "" : bar.x) !== wantedCat ||
+          String(bar.group == null ? "" : bar.group) !== wantedGroup ||
+          !Array.isArray(bar.caseIds) || idx >= bar.caseIds.length) continue;
+      var col = Array.isArray(bar.sourceColumns)
+        ? bar.sourceColumns[idx] : null;
+      // Compatibility fallback for older standalone payloads/projects.
+      if (!col) {
+        var mod = curModule(), rr = rolesFor(mod);
+        if (mod === "plotbuilder") col = rr.yvar;
+        else if (mod === "distplotbuilder") col = rr.var;
+        else if (mod === "rmplotbuilder") col = bar.x;
+      }
+      if (!col || !PROJECT.table.raw[col]) return null;
+      return { caseId: String(bar.caseIds[idx]), col: String(col) };
+    }
+    return null;
+  }
+  function migrateLegacyChartPointExclusions() {
+    if (!PROJECT.table || !Array.isArray(PROJECT.charts)) return;
+    var activeId = PROJECT.activeChart, cells = {}, changedOptions = false;
+    for (var ci = 0; ci < PROJECT.charts.length; ci++) {
+      var chart = PROJECT.charts[ci];
+      if (!chart || isLayoutTab(chart)) continue;
+      var store = chart.options && chart.options[chart.module];
+      var legacySpec = store && typeof store.chartSpec === "string"
+        ? parseSpec(store.chartSpec) : null;
+      var points = store && Array.isArray(store.hiddenPoints) &&
+        store.hiddenPoints.length ? store.hiddenPoints :
+        (legacySpec && Array.isArray(legacySpec.hiddenPoints)
+          ? legacySpec.hiddenPoints : []);
+      if (!Array.isArray(points) || !points.length) continue;
+      PROJECT.activeChart = chart.id;
+      var built = buildPayload();
+      if (!built || !built.payload) continue;
+      var mapped = 0;
+      for (var pi = 0; pi < points.length; pi++) {
+        var sourceCell = caseCellForHiddenPoint(points[pi], built.payload);
+        var row = sourceCell
+          ? PROJECT.table.caseIds.indexOf(sourceCell.caseId) : -1;
+        if (row < 0) continue;
+        cells[sourceCell.col + "\u0000" + sourceCell.caseId] =
+          { col: sourceCell.col, row: row };
+        mapped++;
+      }
+      if (mapped === points.length) {
+        store.hiddenPoints = [];
+        if (legacySpec) {
+          legacySpec.hiddenPoints = [];
+          store.chartSpec = JSON.stringify(legacySpec);
+        }
+        changedOptions = true;
+      }
+    }
+    PROJECT.activeChart = activeId;
+    var cellKeys = Object.keys(cells);
+    if (!cellKeys.length && !changedOptions) return;
+    if (!PROJECT.table.excluded) PROJECT.table.excluded = {};
+    for (var ri = 0; ri < cellKeys.length; ri++) {
+      var cellAt = cells[cellKeys[ri]];
+      if (!PROJECT.table.excluded[cellAt.col])
+        PROJECT.table.excluded[cellAt.col] = {};
+      PROJECT.table.excluded[cellAt.col][cellAt.row] = 1;
+    }
+    retype(PROJECT.table);
+    CHART_SNAPS = {};
+    persist(false);
+  }
+  function clearStandalonePointPositions(nextSpec) {
+    var store = optionsFor(curModule());
+    store.hiddenPoints = [];
+    var spec = nextSpec;
+    if (!spec && typeof store.chartSpec === "string")
+      spec = parseSpec(store.chartSpec);
+    if (spec && typeof spec === "object") {
+      spec.hiddenPoints = [];
+      store.chartSpec = JSON.stringify(spec);
+    }
+  }
+  function bridgeChartPointExclusions(points, nextSpec) {
+    if (!Array.isArray(points) || !PROJECT.table) return false;
+    function pointKey(point) {
+      var cat = point && point.cat != null ? point.cat : "";
+      var group = point && point.group != null ? point.group : "";
+      return String(cat) + "\u0000" + String(group) + "\u0000" +
+        String(point && point.idx);
+    }
+    function cellFor(point) {
+      var sourceCell = caseCellForHiddenPoint(point);
+      if (!sourceCell) return null;
+      var row = PROJECT.table.caseIds.indexOf(sourceCell.caseId);
+      return row < 0 ? null : { col: sourceCell.col, row: row };
+    }
+    var before = {}, after = {}, added = [], removed = [], i, key, cell;
+    for (i = 0; i < LAST_DATA_HIDDEN_POINTS.length; i++)
+      before[pointKey(LAST_DATA_HIDDEN_POINTS[i])] = LAST_DATA_HIDDEN_POINTS[i];
+    for (i = 0; i < points.length; i++)
+      after[pointKey(points[i])] = points[i];
+    for (key in after) {
+      if (!Object.prototype.hasOwnProperty.call(after, key) || before[key]) continue;
+      cell = cellFor(after[key]);
+      if (cell) added.push(cell);
+    }
+    for (key in before) {
+      if (!Object.prototype.hasOwnProperty.call(before, key) || after[key]) continue;
+      cell = cellFor(before[key]);
+      if (cell) removed.push(cell);
+    }
+    if (!added.length && !removed.length) return false;
+    // The persisted chart style never owns point visibility in standalone.
+    // It emits user intent; Data stores the stable cell exclusion; every chart
+    // receives a fresh positional projection on its next render.
+    clearStandalonePointPositions(nextSpec);
+    var changed = added.length
+      ? gridSetExcludedCells(added, true, "chart")
+      : gridSetExcludedCells(removed, false, "chart");
+    if (!changed) {
+      persist();
+      render();
+    }
+    return true;
+  }
+  function wireStandaloneEngineExclusionLabels() {
+    var host = hostEl();
+    if (!host || typeof MutationObserver !== "function") return;
+    function relabel(root) {
+      var menu = root && root.matches &&
+        root.matches('[data-role="gb2-point-menu"]') ? root :
+        (root && root.querySelector
+          ? root.querySelector('[data-role="gb2-point-menu"]') : null);
+      if (!menu) return;
+      var button = menu.querySelector("button");
+      if (!button) return;
+      button.textContent = "Exclude this value from dataset";
+      setTip(button, "Excludes this source cell in Data and every standalone chart");
+      if (!menu.querySelector('[data-ps-action="reveal-point"]')) {
+        var reveal = document.createElement("button");
+        reveal.type = "button";
+        reveal.setAttribute("data-ps-action", "reveal-point");
+        reveal.textContent = "Reveal in Data";
+        setTip(reveal, "Selects the source cell in the Data workspace");
+        reveal.style.cssText = button.style.cssText;
+        reveal.style.borderTop = "1px solid #e5e8ec";
+        reveal.addEventListener("click", function (e) {
+          e.preventDefault(); e.stopPropagation();
+          if (menu.parentNode) menu.parentNode.removeChild(menu);
+          revealLinkedCell();
+        });
+        menu.appendChild(reveal);
+      }
+    }
+    var observer = new MutationObserver(function (records) {
+      for (var i = 0; i < records.length; i++)
+        for (var j = 0; j < records[i].addedNodes.length; j++)
+          relabel(records[i].addedNodes[j]);
+    });
+    observer.observe(host, { childList: true, subtree: true });
+    host.addEventListener("click", function (e) {
+      linkChartPointTarget(e.target);
+    }, true);
+    host.addEventListener("contextmenu", function (e) {
+      linkChartPointTarget(e.target);
+    }, true);
+  }
+  // ============================================================ libraries
+  // Style + palette LIBRARY BRIDGE (audit fix 2, Option A). In jamovi,
+  // R interprets the one-shot styleLibrary / paletteLibrary ACTION
+  // options (style_library.R / palette_library.R) into styles.json /
+  // palettes.json and ships the library objects back on every render.
+  // The standalone mirrors those interpreters here, verb for verb, so
+  // the engine's save / rename / delete / set-default surfaces persist
+  // instead of silently losing work on reload: libraries live in
+  // localStorage (the machine library, jamovi's config-dir analog),
+  // ride .pand files as a snapshot (missing names import on open), and
+  // feed back through the same payload keys. Actions carry the same
+  // guards as R: machineId equality + a strictly increasing per-library
+  // timestamp. The shared engine and the jamovi module are untouched.
+  var PS_LIB_KEY = "psstandalone.libraries.v1";
+  function newMachineId() {
+    return "m_" + Date.now().toString(36) + "_" +
+      Math.random().toString(36).slice(2, 12);
+  }
+  function normalizeLibraries(raw) {
+    var libs = raw && typeof raw === "object" ? raw : {};
+    if (typeof libs.machineId !== "string" || !libs.machineId)
+      libs.machineId = newMachineId();
+    if (!libs.palette || typeof libs.palette !== "object") libs.palette = {};
+    if (!libs.style || typeof libs.style !== "object") libs.style = {};
+    if (typeof libs.palette.lastAppliedTs !== "number") libs.palette.lastAppliedTs = 0;
+    if (typeof libs.palette.defaultPalette !== "string") libs.palette.defaultPalette = "";
+    if (!libs.palette.palettes || typeof libs.palette.palettes !== "object" ||
+        Array.isArray(libs.palette.palettes)) libs.palette.palettes = {};
+    if (typeof libs.style.lastAppliedTs !== "number") libs.style.lastAppliedTs = 0;
+    if (typeof libs.style.defaultStyle !== "string") libs.style.defaultStyle = "";
+    if (!libs.style.styles || typeof libs.style.styles !== "object" ||
+        Array.isArray(libs.style.styles)) libs.style.styles = {};
+    return libs;
+  }
+  var LIB_SAVE_FAILED = false;
+  function saveLibrariesNow() {
+    try {
+      window.localStorage.setItem(PS_LIB_KEY, JSON.stringify(PS_LIBS));
+      LIB_SAVE_FAILED = false;
+    } catch (e) {
+      // B16. The catch was empty and PS_LIBS is read once at boot, so a
+      // quota-full write left the style card sitting in the UI and lost it
+      // on reload with nothing able to heal it. The library is also the one
+      // thing a .pand round trip does not recover. Warned once per failing
+      // run so a burst of saves does not become a burst of toasts.
+      if (!LIB_SAVE_FAILED) {
+        LIB_SAVE_FAILED = true;
+        showToast("Saved styles and palettes could not be written to this " +
+                  "browser" + (/quota/i.test(String(e && (e.name || e.message)))
+                    ? " (its storage is full)" : "") +
+                  ". They will work now but will not be here after a reload. " +
+                  "Save the project to a .pand file to keep them.", true);
+      }
+    }
+  }
+  var PS_LIBS = (function () {
+    var raw = null;
+    try { raw = JSON.parse(window.localStorage.getItem(PS_LIB_KEY)); }
+    catch (e) {}
+    var libs = normalizeLibraries(raw);
+    return libs;
+  })();
+  function libActionParse(json, lib) {
+    if (typeof json !== "string" || !json) return null;
+    var action = null;
+    try { action = JSON.parse(json); } catch (e) { return null; }
+    if (!action || typeof action !== "object") return null;
+    // Cross-machine guard (R parity): a shared .pand must never
+    // silently rewrite the recipient's library.
+    if (String(action.machineId) !== String(PS_LIBS.machineId)) return null;
+    var ts = Number(action.timestamp);
+    if (!isFinite(ts) || ts <= lib.lastAppliedTs) return null;
+    return action;
+  }
+  function libColorList(cols) {
+    if (!Array.isArray(cols)) return [];
+    var out = [];
+    for (var i = 0; i < cols.length; i++) {
+      var c = cols[i];
+      if (c != null && typeof c !== "string") c = String(c);
+      if (c) out.push(c);
+    }
+    return out;
+  }
+  function applyPaletteAction(json) {
+    var lib = PS_LIBS.palette;
+    var action = libActionParse(json, lib);
+    if (!action) return;
+    var kind = String(action.kind || ""), name = String(action.name || "");
+    if (kind === "save" || kind === "savedefault") {
+      var cols = libColorList(action.colors);
+      if (!name || !cols.length) return;
+      lib.palettes[name] = cols;
+      if (kind === "savedefault") lib.defaultPalette = "saved:" + name;
+    } else if (kind === "delete") {
+      if (!name) return;
+      delete lib.palettes[name];
+      if (lib.defaultPalette === "saved:" + name) lib.defaultPalette = "";
+    } else if (kind === "rename") {
+      var from = String(action.from || ""), to = String(action.to || "");
+      if (!from || !to || from === to) return;
+      if (!lib.palettes[from] || lib.palettes[to]) return;
+      lib.palettes[to] = lib.palettes[from];
+      delete lib.palettes[from];
+      if (lib.defaultPalette === "saved:" + from)
+        lib.defaultPalette = "saved:" + to;
+    } else if (kind === "setdefault") {
+      var id = String(action.id || "");
+      if (id.indexOf("saved:") === 0 && !lib.palettes[id.slice(6)]) return;
+      lib.defaultPalette = id;
+    } else if (kind === "replace") {
+      var repl = action.palettes;
+      if (!repl || typeof repl !== "object" || Array.isArray(repl)) return;
+      var next = {};
+      for (var nm in repl) {
+        if (!Object.prototype.hasOwnProperty.call(repl, nm) || !nm) continue;
+        var rc = libColorList(repl[nm]);
+        if (rc.length) next[nm] = rc;
+      }
+      lib.palettes = next;
+      if (lib.defaultPalette.indexOf("saved:") === 0 &&
+          !lib.palettes[lib.defaultPalette.slice(6)])
+        lib.defaultPalette = "";
+    } else return;
+    lib.lastAppliedTs = Number(action.timestamp);
+    saveLibrariesNow();
+  }
+  function applyStyleAction(json) {
+    var lib = PS_LIBS.style;
+    var action = libActionParse(json, lib);
+    if (!action) return;
+    var kind = String(action.kind || ""), name = String(action.name || "");
+    if (kind === "save" || kind === "savedefault") {
+      if (!name) return;
+      var groups = Array.isArray(action.groups)
+        ? action.groups.filter(function (g) { return typeof g === "string" && g; })
+        : [];
+      var opts = action.opts;
+      if (!groups.length || !opts || typeof opts !== "object" ||
+          Array.isArray(opts)) return;
+      var kept = {}, any = false;
+      for (var k in opts) {
+        if (!Object.prototype.hasOwnProperty.call(opts, k) || !k) continue;
+        kept[k] = opts[k]; any = true;
+      }
+      if (!any) return;
+      lib.styles[name] = { groups: groups, opts: kept };
+      if (kind === "savedefault") lib.defaultStyle = name;
+    } else if (kind === "delete") {
+      if (!name) return;
+      delete lib.styles[name];
+      if (lib.defaultStyle === name) lib.defaultStyle = "";
+    } else if (kind === "rename") {
+      var from = String(action.from || ""), to = String(action.to || "");
+      if (!from || !to || from === to) return;
+      if (!lib.styles[from] || lib.styles[to]) return;
+      lib.styles[to] = lib.styles[from];
+      delete lib.styles[from];
+      if (lib.defaultStyle === from) lib.defaultStyle = to;
+    } else if (kind === "setdefault") {
+      // "" clears; a named default must exist (no dangling defaults).
+      if (name && !lib.styles[name]) return;
+      lib.defaultStyle = name;
+    } else return;
+    lib.lastAppliedTs = Number(action.timestamp);
+    saveLibrariesNow();
+  }
+  function paletteDefaultIdResolved() {
+    var id = PS_LIBS.palette.defaultPalette || "";
+    if (id.indexOf("saved:") === 0 && !PS_LIBS.palette.palettes[id.slice(6)])
+      return "";
+    return id;
+  }
+  function styleDefaultIdResolved() {
+    var id = PS_LIBS.style.defaultStyle || "";
+    return PS_LIBS.style.styles[id] ? id : "";
+  }
+  // .pand carry-along: missing names import, existing names are never
+  // clobbered (the local library wins).
+  function importLibraries(bundle) {
+    if (!bundle || typeof bundle !== "object") return;
+    var changed = false;
+    var pals = bundle.palettes, sts = bundle.styles;
+    if (pals && typeof pals === "object" && !Array.isArray(pals)) {
+      for (var nm in pals) {
+        if (!Object.prototype.hasOwnProperty.call(pals, nm) || !nm) continue;
+        if (PS_LIBS.palette.palettes[nm]) continue;
+        var cols = libColorList(pals[nm]);
+        if (cols.length) { PS_LIBS.palette.palettes[nm] = cols; changed = true; }
+      }
+    }
+    if (sts && typeof sts === "object" && !Array.isArray(sts)) {
+      for (var sn in sts) {
+        if (!Object.prototype.hasOwnProperty.call(sts, sn) || !sn) continue;
+        if (PS_LIBS.style.styles[sn]) continue;
+        var st = sts[sn];
+        if (st && typeof st === "object" && st.opts &&
+            typeof st.opts === "object" && !Array.isArray(st.opts)) {
+          PS_LIBS.style.styles[sn] = st; changed = true;
+        }
+      }
+    }
+    if (changed) saveLibrariesNow();
+  }
+
+  // jamovi-only option traffic is dropped. Sticky client-computed overlay
+  // options (scatter marginals / heatmap bins / 2-D density) are STORED
+  // but never echo-rendered: the engine computed their geometry client-
+  // side and a payload rebuild would wipe it (the arrays are R-computed
+  // in jamovi; porting that trio is the documented M2 item - until then
+  // these overlays need re-enabling after a reload).
+  var DROP_KEYS = { clientBundleHash: 1, exportRequest: 1, exportPath: 1,
+                    chartSnapshot: 1 };
+  var NO_ECHO_KEYS = { xyMarginal: 1, xyMarginalBins: 1, xyBin: 1,
+                       xyBinCount: 1, xyShowDensity2D: 1, xyDensity2DLevels: 1 };
+  // ---- scatter-overlay persistence (Tier 2, the reload/echo gap).
+  // The ENGINE computes marginal / heatmap-bin / 2D-density arrays
+  // client-side when the user enables them, but the shell's payload
+  // rebuilds never carried the arrays - so ANY echoed edit (even a
+  // title change) or a reload wiped the overlays until re-enabled.
+  // Fix: when an overlay option commits, HARVEST the engine-filled
+  // arrays from its live data (window.gb2_undo.getData(), the engine's
+  // exposed diagnostic surface) onto the chart document, stamped with
+  // a data fingerprint; buildPayload re-ships them while the
+  // fingerprint still matches - exactly what jamovi's R side does by
+  // recomputing each run. Stale data OMITS the arrays (the overlay
+  // waits for a re-enable) so a wrong overlay can never draw.
+  var OVERLAY_ARRAY_KEYS = ["xyMarginalXHist", "xyMarginalYHist",
+    "xyMarginalXDens", "xyMarginalYDens", "xyMarginalXHistGroups",
+    "xyMarginalYHistGroups", "xyMarginalXDensGroups",
+    "xyMarginalYDensGroups", "xyBins", "xyDensity2D"];
+  function overlayFingerprint() {
+    var t = activeDataTable(), rr = rolesFor("xyplotbuilder");
+    if (!t) return "";
+    // B11. This used to be a column SUM, which is blind to exactly the edit
+    // a student makes fixing a typo: change 5 to 3 and 7 to 9 in the same
+    // column and the sum, the row count and the roles are all identical, so
+    // cached marginals, heatmap tiles and contours kept drawing against data
+    // that no longer existed - contradicting this cache's own stated
+    // guarantee that a wrong overlay can never draw. An order-sensitive
+    // rolling hash over the same single pass costs the same and sees moves,
+    // swaps and compensating edits.
+    function colHash(col) {
+      var v = t.columns[col] || [], h1 = 0x811c9dc5, h2 = 0x01000193;
+      for (var i = 0; i < v.length; i++) {
+        var x = typeof v[i] === "number" ? v[i]
+          : (v[i] == null ? NaN : String(v[i]).length);
+        // Position-weighted so a swap of two values changes the result.
+        var bits = isFinite(x) ? x : -1;
+        h1 = (h1 ^ (bits * 2654435761 + i * 40503)) >>> 0;
+        h1 = (h1 * 16777619) >>> 0;
+        h2 = (h2 + (h1 ^ (i + 1))) >>> 0;
+      }
+      return h1.toString(36) + ":" + h2.toString(36) + ":" + v.length;
+    }
+    return JSON.stringify([rr.xvar || "", rr.yvar || "", rr.groupVar || "",
+      rr.facetVar || "", nRows(t),
+      rr.xvar ? colHash(rr.xvar) : "", rr.yvar ? colHash(rr.yvar) : "",
+      rr.groupVar ? colHash(rr.groupVar) : "",
+      rr.facetVar ? colHash(rr.facetVar) : ""]);
+  }
+  function harvestOverlayArrays() {
+    var doc = activeChartTab();
+    if (!doc || isLayoutTab(doc) || doc.module !== "xyplotbuilder") return;
+    var live = null;
+    try {
+      live = window.gb2_undo && window.gb2_undo.getData
+        ? window.gb2_undo.getData() : null;
+    } catch (e) {}
+    if (!live) return;
+    var values = {}, any = false;
+    for (var i = 0; i < OVERLAY_ARRAY_KEYS.length; i++) {
+      var k = OVERLAY_ARRAY_KEYS[i];
+      if (Array.isArray(live[k]) && live[k].length) {
+        try { values[k] = JSON.parse(JSON.stringify(live[k])); any = true; }
+        catch (e) {}
+      }
+    }
+    if (typeof live.xyBinsMax === "number" && live.xyBinsMax)
+      values.xyBinsMax = live.xyBinsMax;
+    if (!any) return;
+    doc.overlayCache = { fp: overlayFingerprint(), values: values };
+    // P3. This ran a SECOND full persist immediately after the commit that
+    // triggered it. With the coalescing window in place the two collapse into
+    // one write, and marking it non-dirty keeps the harvest - which records
+    // what the engine computed, not anything the user did - from inflating
+    // the revision every scatter interaction.
+    persist(false);
+  }
+  // When the DATA changes under an enabled scatter overlay, the honest
+  // state is OFF: the harvested arrays describe rows that no longer
+  // exist, and the engine only recomputes them on an explicit
+  // interaction. Clearing the STORED option (not just the payload
+  // presentation) is required because the engine pins every committed
+  // option in window.__gb2_recentCommits until an authoritative render
+  // echoes the SAME value back - a payload-only "none" rewrite loses to
+  // that pin forever. The pins are host-visible window state (the same
+  // surface the shell already drives via __gb2_authoritativeRender), so
+  // releasing them here touches no engine code. Runs at every engine
+  // render entry; the engine's "+" menu then offers Distributions /
+  // Contours again and ONE click recomputes against the current data.
+  var RECON_BIN_PIN = null;
+  // t3-49. Re-adds an overlay through the ENGINE's own affordance rather than
+  // by committing the option: the geometry is computed client-side by the
+  // engine, and only its add gesture rebuilds it. Setting the option alone
+  // would turn the overlay on with nothing to draw. Driving engine chrome by
+  // a stable selector is the pattern the shell already uses for the help
+  // tabs (openEngineHelp) and undo/redo (engineHistoryBtn).
+  //
+  // KNOWN LIMIT, and the reason this is an offer rather than an automatic
+  // recompute: the engine rebuilds heatmap tiles at RENDER ENTRY when an
+  // xyBinCount commit is held, which is what lets the shell self-heal the
+  // heatmap with a synthetic pin. There is no equivalent render-entry hook
+  // for marginals or contours - their client computers are wired only to
+  // gestures - so the shell cannot rebuild them without either an engine
+  // change or a second copy of the maths.
+  function engineAddOverlay(kind) {
+    var host = hostEl();
+    if (!host) return false;
+    var plus = host.querySelector('button[aria-label="Add to chart"]');
+    if (!plus) return false;
+    plus.click();
+    var item = host.querySelector('[data-kind="' + kind + '"]') ||
+      document.querySelector('[data-kind="' + kind + '"]');
+    if (!item) { plus.click(); return false; }
+    item.click();
+    return true;
+  }
+  function offerOverlayRestore(dropped) {
+    var names = dropped.map(function (d) { return d.label; });
+    var what = names.length === 1 ? names[0]
+      : names.slice(0, -1).join(", ") + " and " + names[names.length - 1];
+    showActionToast(
+      "The data changed, so the " + what + " were switched off rather than " +
+      "drawn from the old rows",
+      names.length === 1 ? "Put it back" : "Put them back",
+      function () {
+        var failed = [];
+        for (var i = 0; i < dropped.length; i++)
+          if (!engineAddOverlay(dropped[i].kind)) failed.push(dropped[i].label);
+        if (failed.length)
+          showToast("Could not re-add the " + failed.join(" or ") +
+                    "; use the + button on the chart", true);
+      });
+  }
+  function reconcileOverlayState() {
+    var doc = activeChartTab();
+    if (!doc || isLayoutTab(doc) || doc.module !== "xyplotbuilder") return;
+    var cache = doc.overlayCache;
+    var fresh = !!(cache && cache.values && cache.fp === overlayFingerprint());
+    if (fresh) return;
+    var opts = optionsFor("xyplotbuilder");
+    var touched = false;
+    function releasePin(key) {
+      try {
+        if (window.__gb2_recentCommits) delete window.__gb2_recentCommits[key];
+        if (window.__gb2_pendingOpts) delete window.__gb2_pendingOpts[key];
+      } catch (e) {}
+    }
+    // t3-49. Switching the overlay off is the honest state (see above), but it
+    // used to happen in SILENCE: a student fixed a typo in one cell and their
+    // marginal strips vanished with no message and nothing to click. What is
+    // lost is only the engine-computed geometry, and the engine will rebuild
+    // it from the current points the moment the overlay is added again - so
+    // the app can say what happened and offer that one click.
+    var dropped = [];
+    if (opts.xyMarginal && opts.xyMarginal !== "none") {
+      opts.xyMarginal = "none";
+      releasePin("xyMarginal");
+      dropped.push({ label: "marginal distributions", kind: "ovl_marginal" });
+      touched = true;
+    }
+    if (opts.xyShowDensity2D === true) {
+      opts.xyShowDensity2D = false;
+      releasePin("xyShowDensity2D");
+      dropped.push({ label: "density contours", kind: "ovl_contour" });
+      touched = true;
+    }
+    if (dropped.length) offerOverlayRestore(dropped);
+    if (cache) { doc.overlayCache = null; touched = true; }
+    // The HEATMAP is a chart type, not an overlay - the user's type
+    // choice is honored across data edits. But its tiles are an
+    // engine-computed array like the marginals, so a stale cache would
+    // leave a BLANK plot (the heatmap suppresses the point layer). The
+    // engine's render entry rebuilds tiles client-side from the
+    // CURRENT points whenever an xyBinCount commit is "held", so pin
+    // one synthetically for this render; the render tail removes the
+    // pin and harvests the freshly computed tiles, after which the
+    // ordinary cache path takes over. Never clobbers a real in-flight
+    // user edit of the bin count.
+    if (opts.xyBin && opts.xyBin !== "none") {
+      var binN = (typeof opts.xyBinCount === "number" && opts.xyBinCount >= 2)
+        ? Math.round(opts.xyBinCount) : 30;
+      try {
+        if (!window.__gb2_pendingOpts) window.__gb2_pendingOpts = {};
+        if (!Object.prototype.hasOwnProperty.call(
+              window.__gb2_pendingOpts, "xyBinCount")) {
+          window.__gb2_pendingOpts.xyBinCount = binN;
+          RECON_BIN_PIN = binN;
+        }
+      } catch (e) {}
+    }
+    if (touched) persist();
+  }
+  // Runs right after a GraphBuilder2.render that reconciled a stale
+  // heatmap: the engine has just client-computed fresh tiles, so
+  // harvest them (re-stamping the fingerprint at the current data) and
+  // drop the synthetic pin - the stale state lasts exactly one render.
+  function settleReconciledHeatmap() {
+    if (RECON_BIN_PIN == null) return;
+    try {
+      if (window.__gb2_pendingOpts &&
+          window.__gb2_pendingOpts.xyBinCount === RECON_BIN_PIN)
+        delete window.__gb2_pendingOpts.xyBinCount;
+    } catch (e) {}
+    RECON_BIN_PIN = null;
+    harvestOverlayArrays();
+  }
+  var echoTimer = null;
+  // Echo delay: this debounce stands in for jamovi's R round trip.
+  //
+  // Punch list item 28 proposed raising this past the engine's 250ms
+  // stat-morph / 260ms FLIP, on the theory that the echo tore the chart DOM
+  // out mid-animation. MEASURED Jul 25 2026 and it does not: on a Compare
+  // Groups Summary change, bars still carry mid-animation transforms at
+  // 90/170/250ms with this at 120ms, identical to 320ms. The teardown that
+  // does happen lands at ~60ms and is the ENGINE's own local re-render, which
+  // then runs the morph on the fresh nodes. Raising this bought nothing and
+  // cost 200ms of latency on every echo, so it was reverted.
+  //
+  // If this is revisited, measure a path where the payload genuinely differs
+  // (a category reorder / FLIP) rather than a style commit the engine has
+  // already folded client-side, and check render call timing rather than
+  // whether transforms are present.
+  //
+  // The OTHER half of item 28 is unsafe and must not be done: do not stop
+  // setting __gb2_authoritativeRender for style commits. That flag also gates
+  // release of the engine's __gb2_recentCommits pins (graphbuilder2.js:3085),
+  // and suppressing it strands them - the M6b pin lesson.
+  var ECHO_MS = 120;
+  window.setOption = function (key, value) {
+    if (DROP_KEYS[key]) return;
+    CHART_LAST_AT = Date.now();
+    // Library actions are ONE-SHOT (never stored as options): interpret
+    // the verb into the machine library, then let the ordinary echo
+    // ship the updated library object back to the engine.
+    if (key === "paletteLibrary" || key === "styleLibrary") {
+      if (key === "paletteLibrary") applyPaletteAction(value);
+      else applyStyleAction(value);
+      if (echoTimer) window.clearTimeout(echoTimer);
+      echoTimer = window.setTimeout(render, ECHO_MS);
+      return;
+    }
+    // The engine stamps styleStamp TRUE in the same batch that
+    // auto-applies the default style, so it fires at most once per
+    // chart document (R gates the same way via styleStamp +
+    // clientBundleHash).
+    if (key === "styleStamp") {
+      var stampDoc = activeChartTab();
+      if (stampDoc && !isLayoutTab(stampDoc)) {
+        stampDoc.styleStamp = true;
+        persist();
+      }
+      return;
+    }
+    if (key === "hiddenPoints" && Array.isArray(value) &&
+        bridgeChartPointExclusions(value)) return;
+    if (key === "chartSpec" && typeof value === "string") {
+      var incomingSpec = parseSpec(value);
+      if (Array.isArray(incomingSpec.hiddenPoints) &&
+          bridgeChartPointExclusions(incomingSpec.hiddenPoints, incomingSpec)) return;
+    }
+    fitNoticeSizeCommit(key, value);   // punch list 27
+    optionsFor(curModule())[key] = value;
+    bumpSnapEpoch();   // a style edit changes what this chart draws
+    persistStyleEdit();
+    if (NO_ECHO_KEYS[key]) harvestOverlayArrays();
+    if (NO_ECHO_KEYS[key] && !echoTimer) return;
+    if (echoTimer) window.clearTimeout(echoTimer);
+    echoTimer = window.setTimeout(render, ECHO_MS);
+  };
+
+  // ================================================================ UI
+  function el(id) { return document.getElementById(id); }
+  // ---- punch list 27, second half: the pane splitters ----
+  // The three-pane grid was fixed at 205px / 1fr / 330px with no resizer, so a
+  // student on a 1366px Chromebook could not give the chart more room, and the
+  // .ps-no-inspector rule that would have hidden the rail entirely had its
+  // class only ever REMOVED, never added. Widths persist with the project's UI
+  // state, because a working width is a preference, not a per-session accident.
+  var SPLIT_BOUNDS = { rail: [150, 380], inspector: [240, 560] };
+  var SPLIT_DEFAULT = { rail: 205, inspector: 330 };
+  var SPLIT_VAR = { rail: "--ps-rail-w", inspector: "--ps-insp-w" };
+  var SPLIT_DRAG = null;
+  function splitSanitizeWidths(input) {
+    var out = {};
+    if (!input || typeof input !== "object") return out;
+    for (var key in SPLIT_BOUNDS) {
+      if (!Object.prototype.hasOwnProperty.call(SPLIT_BOUNDS, key)) continue;
+      var px = Number(input[key]);
+      if (!isFinite(px)) continue;
+      var b = SPLIT_BOUNDS[key];
+      out[key] = Math.round(Math.max(b[0], Math.min(b[1], px)));
+    }
+    return out;
+  }
+  function splitWidths() {
+    var ui = PROJECT.ui || (PROJECT.ui = {});
+    if (!ui.paneWidths || typeof ui.paneWidths !== "object")
+      ui.paneWidths = {};
+    return ui.paneWidths;
+  }
+  function splitApply() {
+    var body = document.querySelector(".ps-app-body");
+    if (!body) return;
+    var w = splitWidths();
+    for (var key in SPLIT_VAR) {
+      if (!Object.prototype.hasOwnProperty.call(SPLIT_VAR, key)) continue;
+      var px = Number(w[key]);
+      if (isFinite(px) && px > 0) body.style.setProperty(SPLIT_VAR[key], px + "px");
+      else body.style.removeProperty(SPLIT_VAR[key]);
+    }
+  }
+  function splitSet(key, px, persistIt) {
+    var b = SPLIT_BOUNDS[key];
+    if (!b) return;
+    // Never let a drag take the chart pane below something usable: the point of
+    // the splitter is to give the CHART room, so it cannot be used to erase it.
+    var body = document.querySelector(".ps-app-body");
+    var total = body ? body.clientWidth : 1200;
+    var other = Number(splitWidths()[key === "rail" ? "inspector" : "rail"]) ||
+      SPLIT_DEFAULT[key === "rail" ? "inspector" : "rail"];
+    var maxForKey = Math.max(b[0], total - other - 320);
+    px = Math.round(Math.max(b[0], Math.min(Math.min(b[1], maxForKey), px)));
+    splitWidths()[key] = px;
+    splitApply();
+    if (persistIt) { persist(false); fitSchedule(); }
+  }
+  function splitReset(key) {
+    delete splitWidths()[key];
+    splitApply();
+    persist(false);
+    fitSchedule();
+  }
+  function wireSplitters() {
+    var bars = document.querySelectorAll("[data-splitter]");
+    for (var i = 0; i < bars.length; i++) {
+      (function (bar) {
+        var key = bar.getAttribute("data-splitter");
+        bar.addEventListener("pointerdown", function (e) {
+          if (e.button !== 0) return;
+          var body = document.querySelector(".ps-app-body");
+          var start = Number(splitWidths()[key]) || SPLIT_DEFAULT[key];
+          SPLIT_DRAG = { key: key, x: e.clientX, start: start };
+          document.body.classList.add("ps-splitting");
+          try { bar.setPointerCapture(e.pointerId); } catch (err) {}
+          e.preventDefault();
+        });
+        bar.addEventListener("pointermove", function (e) {
+          if (!SPLIT_DRAG || SPLIT_DRAG.key !== key) return;
+          var dx = e.clientX - SPLIT_DRAG.x;
+          // The inspector is on the RIGHT, so dragging left widens it.
+          splitSet(key, SPLIT_DRAG.start + (key === "rail" ? dx : -dx), false);
+        });
+        function end() {
+          if (!SPLIT_DRAG || SPLIT_DRAG.key !== key) return;
+          SPLIT_DRAG = null;
+          document.body.classList.remove("ps-splitting");
+          persist(false);
+          fitSchedule();
+        }
+        bar.addEventListener("pointerup", end);
+        bar.addEventListener("pointercancel", end);
+        bar.addEventListener("dblclick", function () { splitReset(key); });
+        bar.addEventListener("keydown", function (e) {
+          var step = e.shiftKey ? 32 : 8;
+          if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+            e.preventDefault();
+            var cur = Number(splitWidths()[key]) || SPLIT_DEFAULT[key];
+            var dir = e.key === "ArrowRight" ? 1 : -1;
+            splitSet(key, cur + dir * step * (key === "rail" ? 1 : -1), true);
+          } else if (e.key === "Home") {
+            e.preventDefault();
+            splitReset(key);
+          }
+        });
+        bar.setAttribute("role", "separator");
+        bar.setAttribute("aria-orientation", "vertical");
+      })(bars[i]);
+    }
+    splitApply();
+  }
+
+  // ---- punch list 27: fit the chart to the pane ----
+  // The templates ship plotWidth 6 / plotHeight 4 - a fixed 576x384 - and
+  // nothing in the shell ever read or wrote them: no ResizeObserver, no Fit
+  // control. At 1440x900 that left about 137px of white either side of the
+  // chart inside an 851px pane whose toolbar spanned the full width, and below
+  // about 1240px the fixed svg made the pane scroll SIDEWAYS.
+  //
+  // Width drives it and the aspect ratio is preserved, because a chart that
+  // also grows to fill the vertical space gets absurdly tall; the height is
+  // clamped to the pane so a short window shrinks it instead. The engine's own
+  // manual sizing still wins: a size the USER commits turns fitting off for
+  // that document, which is what FIT_LAST is for.
+  var FIT_MIN_W = 3, FIT_MAX_W = 14, FIT_MIN_H = 2, FIT_MAX_H = 10;
+  var FIT_OBSERVER = null, FIT_TIMER = null, FIT_LAST = null, FIT_APPLYING = false;
+  function fitEnabled() {
+    var doc = activeChartTab();
+    return !!doc && !isLayoutTab(doc) && doc.fitPane !== false;
+  }
+  function fitSetEnabled(on) {
+    var doc = activeChartTab();
+    if (!doc || isLayoutTab(doc)) return;
+    doc.fitPane = !!on;
+    persist();
+    syncAll();
+    if (on) fitNow(true);
+  }
+  // Called by the setOption sink: a plotWidth/plotHeight that is not the one
+  // auto-fit just wrote is the user resizing, so stop fighting them.
+  function fitNoticeSizeCommit(key, value) {
+    if (key !== "plotWidth" && key !== "plotHeight") return;
+    if (FIT_APPLYING) return;
+    var want = FIT_LAST && FIT_LAST[key === "plotWidth" ? "w" : "h"];
+    if (want != null && Math.abs(Number(value) - want) < 0.02) return;
+    var doc = activeChartTab();
+    if (doc && !isLayoutTab(doc) && doc.fitPane !== false) {
+      doc.fitPane = false;
+      syncAll();
+    }
+  }
+  function fitTargetSize() {
+    var host = hostEl();
+    var pane = document.querySelector(".ps-main-workspace");
+    if (!host || !pane) return null;
+    var availW = host.clientWidth || pane.clientWidth;
+    var availH = pane.clientHeight;
+    if (!availW || availW < 60) return null;
+    var store = optionsFor(curModule());
+    var curW = Number(store.plotWidth) || 6;
+    var curH = Number(store.plotHeight) || 4;
+    var aspect = curH > 0 && curW > 0 ? curH / curW : 4 / 6;
+    var chromeH = 96;   // the toolbar band and the tab strip above the chart
+    var w = availW / 96;
+    w = Math.max(FIT_MIN_W, Math.min(FIT_MAX_W, w));
+    var h = w * aspect;
+    var maxH = Math.max(FIT_MIN_H, (availH - chromeH) / 96);
+    if (h > maxH) {
+      h = Math.max(FIT_MIN_H, maxH);
+      w = Math.max(FIT_MIN_W, Math.min(FIT_MAX_W, aspect > 0 ? h / aspect : w));
+    }
+    h = Math.max(FIT_MIN_H, Math.min(FIT_MAX_H, h));
+    return { w: Math.round(w * 100) / 100, h: Math.round(h * 100) / 100 };
+  }
+  function fitNow(force) {
+    if (!fitEnabled()) return;
+    var want = fitTargetSize();
+    if (!want) return;
+    var store = optionsFor(curModule());
+    var curW = Number(store.plotWidth) || 6, curH = Number(store.plotHeight) || 4;
+    // 0.05in is half a millimetre on screen: below that a resize is noise, and
+    // committing it would re-render and re-persist for nothing.
+    if (!force && Math.abs(curW - want.w) < 0.05 &&
+        Math.abs(curH - want.h) < 0.05) return;
+    FIT_LAST = want;
+    FIT_APPLYING = true;
+    try {
+      if (typeof window.setOption === "function") {
+        window.setOption("plotWidth", want.w);
+        window.setOption("plotHeight", want.h);
+      }
+    } finally { FIT_APPLYING = false; }
+  }
+  function fitSchedule() {
+    if (FIT_TIMER) window.clearTimeout(FIT_TIMER);
+    FIT_TIMER = window.setTimeout(function () {
+      FIT_TIMER = null;
+      fitNow(false);
+    }, 140);
+  }
+  function wireFitToPane() {
+    var pane = document.querySelector(".ps-main-workspace");
+    if (!pane) return;
+    if (typeof window.ResizeObserver === "function") {
+      FIT_OBSERVER = new window.ResizeObserver(fitSchedule);
+      FIT_OBSERVER.observe(pane);
+    } else window.addEventListener("resize", fitSchedule);
+    var box = el("ps-fit-pane");
+    if (box) box.addEventListener("change", function () {
+      fitSetEnabled(this.checked);
+    });
+  }
+
+  // Punch list 45: the workspace heading is gone (it named the active document
+  // a third time). Its writers are left calling this, which returns a detached
+  // node rather than throwing, so the shape of syncWorkspaceHeading can stay
+  // readable and a future heading has somewhere to land.
+  var HEADING_SINK = null;
+  function headingSink() {
+    if (!HEADING_SINK) HEADING_SINK = document.createElement("span");
+    return HEADING_SINK;
+  }
+  function elOrSink(id) { return document.getElementById(id) || headingSink(); }
+  // Punch list 36. Both places where a student picks a chart were text only:
+  // "New chart" gave each MODULE one character (Distribution a sine wave,
+  // Scatter a dot, Correlation a box glyph), and Help Me Choose listed its
+  // recommended graph types as bare chips. Students choose graphs by picture.
+  //
+  // These are real miniature charts, drawn the way the engine draws its own
+  // chooser thumbnails, so the two surfaces teach the same shapes. Inline SVG
+  // rather than the gallery PNGs: it scales, it costs nothing, it themes with
+  // the tokens, and it cannot 404 in the single-file build.
+  var THUMB_W = 44, THUMB_H = 30;
+  function thumbWrap(inner, cls) {
+    return '<svg class="ps-thumb' + (cls ? " " + cls : "") + '" width="' +
+      THUMB_W + '" height="' + THUMB_H + '" viewBox="0 0 44 30" ' +
+      'aria-hidden="true">' +
+      '<g stroke="currentColor" fill="none" stroke-width="1.1" ' +
+      'stroke-linecap="round">' + inner + "</g></svg>";
+  }
+  function axes() {
+    return '<path d="M6 3v22h34" stroke-opacity="0.45"/>';
+  }
+  function bar(x, y, w, h, op) {
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' +
+      h + '" rx="1" fill="currentColor" fill-opacity="' + (op || 0.85) +
+      '" stroke="none"/>';
+  }
+  var MODULE_THUMBS = {
+    // three bars of different heights, with error bars: a group comparison
+    plotbuilder: axes() + bar(10, 14, 6, 11) + bar(20, 9, 6, 16) +
+      bar(30, 5, 6, 20) +
+      '<path d="M13 11v6M23 6v6M33 2v6" stroke-opacity="0.75"/>',
+    // two connected series climbing: the same measure at several occasions
+    rmplotbuilder: axes() +
+      '<path d="M11 20l8-3 8-4 8-5"/>' +
+      '<path d="M11 24l8-4 8-2 8-4" stroke-opacity="0.45"/>' +
+      '<circle cx="11" cy="20" r="1.6" fill="currentColor" stroke="none"/>' +
+      '<circle cx="19" cy="17" r="1.6" fill="currentColor" stroke="none"/>' +
+      '<circle cx="27" cy="13" r="1.6" fill="currentColor" stroke="none"/>' +
+      '<circle cx="35" cy="8" r="1.6" fill="currentColor" stroke="none"/>',
+    // a point cloud with a fit line
+    xyplotbuilder: axes() +
+      '<path d="M9 23l28-15" stroke-opacity="0.6"/>' +
+      '<circle cx="12" cy="21" r="1.5" fill="currentColor" stroke="none"/>' +
+      '<circle cx="17" cy="20" r="1.5" fill="currentColor" stroke="none"/>' +
+      '<circle cx="21" cy="15" r="1.5" fill="currentColor" stroke="none"/>' +
+      '<circle cx="26" cy="14" r="1.5" fill="currentColor" stroke="none"/>' +
+      '<circle cx="31" cy="9" r="1.5" fill="currentColor" stroke="none"/>' +
+      '<circle cx="36" cy="10" r="1.5" fill="currentColor" stroke="none"/>',
+    // a histogram under a density curve
+    distplotbuilder: axes() + bar(9, 19, 5, 6, 0.7) + bar(15, 13, 5, 12, 0.7) +
+      bar(21, 8, 5, 17, 0.7) + bar(27, 14, 5, 11, 0.7) +
+      bar(33, 20, 5, 5, 0.7) +
+      '<path d="M8 22c4 0 6-13 12-14s9 13 15 14"/>',
+    // counts, tallest first
+    freqplotbuilder: axes() + bar(9, 5, 6, 20) + bar(17, 10, 6, 15) +
+      bar(25, 15, 6, 10) + bar(33, 19, 6, 6),
+    // a correlation matrix
+    corrplotbuilder:
+      bar(7, 4, 9, 7, 0.9) + bar(18, 4, 9, 7, 0.35) + bar(29, 4, 9, 7, 0.6) +
+      bar(7, 12, 9, 7, 0.35) + bar(18, 12, 9, 7, 0.9) + bar(29, 12, 9, 7, 0.5) +
+      bar(7, 20, 9, 7, 0.6) + bar(18, 20, 9, 7, 0.5) + bar(29, 20, 9, 7, 0.9),
+    // diverging stacked rows, split about a centre line
+    likertplotbuilder:
+      bar(8, 4, 12, 5, 0.45) + bar(20, 4, 14, 5, 0.85) +
+      bar(11, 12, 9, 5, 0.45) + bar(20, 12, 17, 5, 0.85) +
+      bar(6, 20, 14, 5, 0.45) + bar(20, 20, 11, 5, 0.85) +
+      '<path d="M20 2v25" stroke-opacity="0.5"/>'
+  };
+  function moduleThumb(key, cls) {
+    var inner = MODULE_THUMBS[key];
+    return inner ? thumbWrap(inner, cls) : "";
+  }
+  // The graph types Help Me Choose recommends, so a chip shows the shape it
+  // names. Keys are the engine's own graphType values.
+  var GRAPH_THUMBS = {
+    bar: axes() + bar(10, 14, 6, 11) + bar(20, 9, 6, 16) + bar(30, 5, 6, 20),
+    line: MODULE_THUMBS.rmplotbuilder,
+    dot: axes() +
+      '<circle cx="12" cy="20" r="2" fill="currentColor" stroke="none"/>' +
+      '<circle cx="22" cy="14" r="2" fill="currentColor" stroke="none"/>' +
+      '<circle cx="32" cy="8" r="2" fill="currentColor" stroke="none"/>' +
+      '<path d="M12 16v8M22 10v8M32 4v8" stroke-opacity="0.7"/>',
+    box: axes() +
+      '<rect x="9" y="11" width="8" height="9" rx="1"/>' +
+      '<path d="M13 6v5M13 20v4M9 15h8"/>' +
+      '<rect x="24" y="8" width="8" height="10" rx="1"/>' +
+      '<path d="M28 4v4M28 18v5M24 13h8"/>',
+    violin: axes() +
+      '<path d="M13 5c4 3 4 7 0 9s-4 6 0 9c-4-3-4-7 0-9s-4-6 0-9z"/>' +
+      '<path d="M29 5c5 4 5 8 0 11s-5 5 0 9c-5-4-5-8 0-11s-5-5 0-9z"/>',
+    raincloud: axes() +
+      '<path d="M9 12c4-6 12-6 16 0" />' +
+      '<circle cx="12" cy="21" r="1.4" fill="currentColor" stroke="none"/>' +
+      '<circle cx="18" cy="22" r="1.4" fill="currentColor" stroke="none"/>' +
+      '<circle cx="24" cy="20" r="1.4" fill="currentColor" stroke="none"/>' +
+      '<circle cx="30" cy="22" r="1.4" fill="currentColor" stroke="none"/>',
+    histogram: MODULE_THUMBS.distplotbuilder,
+    histdensity: MODULE_THUMBS.distplotbuilder,
+    density: axes() + '<path d="M8 23c4 0 6-15 12-16s9 15 15 16"/>',
+    qq: axes() +
+      '<path d="M9 23l26-16" stroke-opacity="0.55"/>' +
+      '<circle cx="12" cy="22" r="1.4" fill="currentColor" stroke="none"/>' +
+      '<circle cx="18" cy="18" r="1.4" fill="currentColor" stroke="none"/>' +
+      '<circle cx="24" cy="14" r="1.4" fill="currentColor" stroke="none"/>' +
+      '<circle cx="30" cy="11" r="1.4" fill="currentColor" stroke="none"/>',
+    ecdf: axes() + '<path d="M8 24h6v-5h6v-6h6v-5h8"/>',
+    scatter: MODULE_THUMBS.xyplotbuilder,
+    heatmap: bar(8, 4, 9, 7, 0.3) + bar(19, 4, 9, 7, 0.6) +
+      bar(30, 4, 9, 7, 0.85) + bar(8, 12, 9, 7, 0.6) +
+      bar(19, 12, 9, 7, 0.85) + bar(30, 12, 9, 7, 0.45) +
+      bar(8, 20, 9, 7, 0.85) + bar(19, 20, 9, 7, 0.4) +
+      bar(30, 20, 9, 7, 0.25),
+    pie: '<circle cx="22" cy="15" r="11"/>' +
+      '<path d="M22 15V4a11 11 0 0 1 9.5 5.5z" fill="currentColor" stroke="none" fill-opacity="0.85"/>' +
+      '<path d="M22 15l9.5-5.5A11 11 0 0 1 27 25.4z" fill="currentColor" stroke="none" fill-opacity="0.45"/>',
+    donut: '<circle cx="22" cy="15" r="11"/><circle cx="22" cy="15" r="5"/>' +
+      '<path d="M22 4a11 11 0 0 1 9.5 5.5l-4.4 2.5A6 6 0 0 0 22 10z" fill="currentColor" stroke="none" fill-opacity="0.8"/>',
+    pareto: axes() + bar(9, 5, 6, 20) + bar(17, 12, 6, 13) +
+      bar(25, 17, 6, 8) + bar(33, 21, 6, 4) +
+      '<path d="M12 20l8-6 8-3 8-2"/>',
+    corrheatmap: MODULE_THUMBS.corrplotbuilder,
+    corrnumbers:
+      '<text x="11" y="11" font-size="7" fill="currentColor" stroke="none" ' +
+      'text-anchor="middle" font-family="sans-serif">.8</text>' +
+      '<text x="24" y="11" font-size="7" fill="currentColor" stroke="none" ' +
+      'fill-opacity="0.55" text-anchor="middle" font-family="sans-serif">.2</text>' +
+      '<text x="11" y="23" font-size="7" fill="currentColor" stroke="none" ' +
+      'fill-opacity="0.55" text-anchor="middle" font-family="sans-serif">.2</text>' +
+      '<text x="24" y="23" font-size="7" fill="currentColor" stroke="none" ' +
+      'text-anchor="middle" font-family="sans-serif">.9</text>',
+    corrmixed:
+      '<circle cx="26" cy="9" r="4" fill="currentColor" stroke="none" fill-opacity="0.8"/>' +
+      '<circle cx="34" cy="9" r="2.4" fill="currentColor" stroke="none" fill-opacity="0.45"/>' +
+      '<text x="12" y="24" font-size="7" fill="currentColor" stroke="none" ' +
+      'text-anchor="middle" font-family="sans-serif">.8</text>' +
+      '<text x="22" y="24" font-size="7" fill="currentColor" stroke="none" ' +
+      'fill-opacity="0.55" text-anchor="middle" font-family="sans-serif">.3</text>' +
+      '<path d="M6 4h32v22H6z" stroke-opacity="0.35"/>',
+    corrcircles: '<circle cx="12" cy="8" r="4" fill="currentColor" stroke="none" fill-opacity="0.85"/>' +
+      '<circle cx="24" cy="8" r="2" fill="currentColor" stroke="none" fill-opacity="0.5"/>' +
+      '<circle cx="12" cy="20" r="2.5" fill="currentColor" stroke="none" fill-opacity="0.6"/>' +
+      '<circle cx="24" cy="20" r="4" fill="currentColor" stroke="none" fill-opacity="0.85"/>',
+    likertdiverging: MODULE_THUMBS.likertplotbuilder,
+    likertstacked: bar(7, 5, 30, 5, 0.85) + bar(7, 13, 22, 5, 0.6) +
+      bar(7, 21, 27, 5, 0.45),
+    likertmeans: axes() +
+      '<circle cx="16" cy="10" r="2" fill="currentColor" stroke="none"/>' +
+      '<circle cx="28" cy="18" r="2" fill="currentColor" stroke="none"/>' +
+      '<path d="M10 10h12M22 18h12" stroke-opacity="0.7"/>'
+  };
+  var START_THUMBS = [
+    [/^diverging/i, "likertdiverging"], [/^100%/i, "likertstacked"],
+    [/^item means/i, "likertmeans"],
+    [/^q-?q/i, "qq"], [/^ecdf/i, "ecdf"], [/^histogram/i, "histogram"],
+    [/^density/i, "density"], [/^box/i, "box"], [/^violin/i, "violin"],
+    [/^raincloud/i, "raincloud"], [/^scatter/i, "scatter"],
+    [/^pie|donut/i, "pie"], [/^pareto/i, "pareto"], [/^circles/i, "corrcircles"],
+    [/^numbers/i, "corrnumbers"], [/^mixed/i, "corrmixed"],
+    [/^line/i, "line"], [/^dot/i, "dot"], [/^bar/i, "bar"]
+  ];
+  // The wizard names its chart types in prose ("Line for naturally ordered
+  // groups", "Box / Violin", "Q-Q plot"), so the thumbnail is resolved from the
+  // LABEL rather than an id, and the module disambiguates the overlap:
+  // "Heatmap" means a dense scatter in Scatter and a matrix in Correlation.
+  function startThumb(label, mod) {
+    var text = String(label || "");
+    if (/^heatmap/i.test(text))
+      return graphThumb(mod === "corrplotbuilder" ? "corrheatmap" : "heatmap");
+    for (var i = 0; i < START_THUMBS.length; i++)
+      if (START_THUMBS[i][0].test(text)) return graphThumb(START_THUMBS[i][1]);
+    return "";
+  }
+  function startChip(label, mod) {
+    var chip = mkEl("span", "");
+    var art = startThumb(label, mod);
+    if (art) {
+      var box = mkEl("span", "ps-hmc-chip-art");
+      box.innerHTML = art;
+      chip.appendChild(box);
+    }
+    chip.appendChild(mkEl("span", "", label));
+    return chip;
+  }
+  function graphThumb(name, cls) {
+    var inner = GRAPH_THUMBS[name];
+    return inner ? thumbWrap(inner, cls) : "";
+  }
+
+  // ---- punch list 42c: the shell's own tooltip ----
+  // Native title= gave an OS delay, an OS font, no styling and nothing at all
+  // on keyboard focus, which made the app's most frequent transient surface the
+  // one thing it did not draw. data-tip is the source; setTip is how runtime
+  // code writes one, and it clears any title so the browser's cannot double up.
+  var TIP_DELAY_MS = 420;
+  var TIP_TIMER = null, TIP_FOR = null;
+  function setTip(node, text) {
+    if (!node) return;
+    if (text == null || text === "") {
+      node.removeAttribute("data-tip");
+      node.removeAttribute("title");
+      if (TIP_FOR === node) hideTip();
+      return;
+    }
+    node.setAttribute("data-tip", String(text));
+    if (node.hasAttribute("title")) node.removeAttribute("title");
+    if (TIP_FOR === node) showTipFor(node);
+  }
+  function hideTip() {
+    if (TIP_TIMER) { window.clearTimeout(TIP_TIMER); TIP_TIMER = null; }
+    var t = document.getElementById("ps-tip");
+    if (t) { t.removeAttribute("data-open"); t.textContent = ""; }
+    if (TIP_FOR && TIP_FOR.getAttribute &&
+        TIP_FOR.getAttribute("aria-describedby") === "ps-tip")
+      TIP_FOR.removeAttribute("aria-describedby");
+    TIP_FOR = null;
+  }
+  function showTipFor(node) {
+    var t = document.getElementById("ps-tip");
+    var text = node && node.getAttribute && node.getAttribute("data-tip");
+    if (!t || !text) return;
+    TIP_FOR = node;
+    t.textContent = text;
+    t.setAttribute("data-open", "1");
+    // Announced to assistive tech as well, which the native tooltip only did
+    // for a pointer.
+    node.setAttribute("aria-describedby", "ps-tip");
+    var r = node.getBoundingClientRect();
+    var w = t.offsetWidth, h = t.offsetHeight;
+    var left = Math.max(6, Math.min(r.left + r.width / 2 - w / 2,
+      window.innerWidth - w - 6));
+    var top = r.bottom + 7;
+    if (top + h > window.innerHeight - 6) top = Math.max(6, r.top - h - 7);
+    t.style.left = Math.round(left) + "px";
+    t.style.top = Math.round(top) + "px";
+  }
+  function tipTarget(node) {
+    return node && node.closest ? node.closest("[data-tip]") : null;
+  }
+  function wireTooltips() {
+    document.addEventListener("pointerover", function (e) {
+      var target = tipTarget(e.target);
+      if (!target) return;
+      if (TIP_TIMER) window.clearTimeout(TIP_TIMER);
+      TIP_TIMER = window.setTimeout(function () {
+        TIP_TIMER = null;
+        showTipFor(target);
+      }, TIP_DELAY_MS);
+    });
+    document.addEventListener("pointerout", function (e) {
+      var target = tipTarget(e.target);
+      if (!target) return;
+      var to = tipTarget(e.relatedTarget);
+      if (to === target) return;     // moving within the same target
+      hideTip();
+    });
+    // Keyboard focus shows it AT ONCE: a delay on focus is a delay on the only
+    // way a keyboard user can see it at all.
+    document.addEventListener("focusin", function (e) {
+      var target = tipTarget(e.target);
+      if (target) showTipFor(target);
+      else hideTip();
+    });
+    document.addEventListener("focusout", function (e) {
+      if (tipTarget(e.target)) hideTip();
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") hideTip();
+    }, true);
+    // A tooltip must never outlive what it describes, or survive a scroll.
+    document.addEventListener("pointerdown", hideTip, true);
+    window.addEventListener("scroll", hideTip, true);
+    window.addEventListener("blur", hideTip);
+  }
+  function mkEl(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  function syncModuleSelect() {
+    var sel = el("ps-module");
+    sel.innerHTML = "";
+    for (var i = 0; i < MODULE_ORDER.length; i++) {
+      var o = document.createElement("option");
+      o.value = MODULE_ORDER[i];
+      o.textContent = MODULES[MODULE_ORDER[i]].label;
+      sel.appendChild(o);
+    }
+    sel.value = curModule();
+  }
+  var ANALYSIS_GUIDANCE = {
+    plotbuilder: "Compare a numeric outcome across categories. The category " +
+      "axis defines groups; the value axis supplies the measurements.",
+    distplotbuilder: "Show the shape, spread, and individual values of one " +
+      "numeric variable.",
+    freqplotbuilder: "Show counts or proportions across the categories of " +
+      "one variable.",
+    rmplotbuilder: "Compare repeated measurements collected from the same cases.",
+    corrplotbuilder: "Compare relationships among two or more numeric variables.",
+    likertplotbuilder: "Summarize response patterns across a set of survey items.",
+    xyplotbuilder: "Show the relationship between two numeric variables. " +
+      "X controls horizontal position; Y controls vertical position."
+  };
+  function rolePresentation(def) {
+    var mod = curModule(), key = def.key;
+    if (key === "xvar") return mod === "xyplotbuilder"
+      ? { label: "X axis", description: "Controls horizontal position.",
+          empty: "Choose a numeric variable for the horizontal axis" }
+      : { label: "Category axis", description: "Defines the categories shown across the chart.",
+          empty: "Choose a categorical variable" };
+    if (key === "yvar") return mod === "xyplotbuilder"
+      ? { label: "Y axis", description: "Controls vertical position.",
+          empty: "Choose a numeric variable for the vertical axis" }
+      : { label: "Value axis", description: "Supplies the values summarized in each category.",
+          empty: "Choose a numeric outcome variable" };
+    if (key === "groupVar")
+      return { label: "Color / group",
+        description: "Draws a separate color or series for each category.",
+        empty: "Choose a categorical grouping variable" };
+    if (key === "facetVar")
+      return { label: "Panels",
+        description: "Creates a separate small chart for each category.",
+        empty: "Choose a categorical panel variable" };
+    if (key === "var") return mod === "freqplotbuilder"
+      ? { label: "Category variable",
+          description: "Its categories determine the bars or frequency groups.",
+          empty: "Choose a categorical variable" }
+      : { label: "Measure",
+          description: "The numeric variable whose distribution will be shown.",
+          empty: "Choose a numeric variable" };
+    if (key === "measures")
+      return { label: "Repeated measures",
+        description: "Add the measurements in the order they were collected.",
+        empty: "Choose two or more measurement variables" };
+    if (key === "betweenVar")
+      return { label: "Between-groups variable",
+        description: "Compares the repeated pattern across independent groups.",
+        empty: "Choose an optional grouping variable" };
+    if (key === "vars")
+      return { label: "Matrix variables",
+        description: "Each variable becomes a row and column in the matrix.",
+        empty: "Choose at least two numeric variables" };
+    if (key === "items")
+      return { label: "Survey items",
+        description: "Each selected variable contributes one survey item.",
+        empty: "Choose the survey item variables" };
+    return { label: def.label, description: "",
+             empty: def.multi ? "Choose variables" : "Choose a variable" };
+  }
+  function requiredRoleSection(defs) {
+    for (var i = 0; i < defs.length; i++)
+      if (defs[i].key === "xvar" || defs[i].key === "yvar") return "Axes";
+    return "Chart variables";
+  }
+  function syncAnalysisGuidance() {
+    var help = el("ps-analysis-help");
+    if (help) help.textContent = ANALYSIS_GUIDANCE[curModule()] || "";
+  }
+  // Everything a role mutation must refresh, in one place.
+  function roleChanged() {
+    persist();
+    syncRolesRow();
+    syncDataRow();
+    syncDataGrid();
+    render();
+  }
+  function roleTagsFor(moduleKey) {
+    var out = {};
+    if (!MODULES[moduleKey]) return out;
+    var rr = rolesFor(moduleKey);
+    var defs = MODULES[moduleKey].roles;
+    for (var d = 0; d < defs.length; d++) {
+      var k = defs[d].key;
+      var tag = ROLE_TAGS[k] || defs[d].label.toUpperCase();
+      var members = Array.isArray(rr[k]) ? rr[k] : (rr[k] ? [rr[k]] : []);
+      for (var m = 0; m < members.length; m++)
+        out[members[m]] = out[members[m]]
+          ? out[members[m]] + " + " + tag : tag;
+    }
+    return out;
+  }
+  // ---- inline role picker + eligibility hints (Jul 2026 redesign) ----
+  // The empty slot IS the picker: clicking it expands the card in place
+  // into a list of ONLY the variables that fit that role (the teaching
+  // sentence moves in here, where the user is actually deciding).
+  // Hovering or dragging a variable highlights the roles it fits;
+  // an open picker dims the list variables that do not fit.
+  var ROLE_PICKER_OPEN = null;   // role key, or null
+  function roleDefByKey(key) {
+    var defs = MODULES[curModule()].roles;
+    for (var i = 0; i < defs.length; i++)
+      if (defs[i].key === key) return defs[i];
+    return null;
+  }
+  function roleEligibleCols(def) {
+    var t = PROJECT.table, out = [];
+    if (!t) return out;
+    for (var i = 0; i < t.order.length; i++)
+      if (roleAccepts(def, t, t.order[i])) out.push(t.order[i]);
+    return out;
+  }
+  function closeRolePicker() {
+    if (ROLE_PICKER_OPEN == null) return;
+    ROLE_PICKER_OPEN = null;
+    syncRolesRow();
+    syncEligibilityHints();
+  }
+  function toggleRolePicker(def) {
+    ROLE_PICKER_OPEN = ROLE_PICKER_OPEN === def.key ? null : def.key;
+    syncRolesRow();
+    syncEligibilityHints();
+  }
+  // Dim variables-list chips that cannot go into the OPEN picker's role.
+  function syncEligibilityHints() {
+    var def = ROLE_PICKER_OPEN != null ? roleDefByKey(ROLE_PICKER_OPEN) : null;
+    var t = PROJECT.table;
+    var chips = document.querySelectorAll("#ps-columns .ps-chip");
+    for (var i = 0; i < chips.length; i++) {
+      var col = chips[i].getAttribute("data-col");
+      chips[i].classList.toggle("ps-chip-dim",
+        !!def && !roleAccepts(def, t, col));
+    }
+  }
+  // Glow the role cards a hovered/dragged variable fits; dim the rest.
+  function highlightEligibleRoles(col) {
+    var t = PROJECT.table;
+    var cards = document.querySelectorAll("#ps-slots .ps-role-card");
+    for (var i = 0; i < cards.length; i++) {
+      var def = roleDefByKey(cards[i].getAttribute("data-role-key"));
+      var ok = col != null && !!def && roleAccepts(def, t, col);
+      cards[i].classList.toggle("ps-role-eligible", col != null && ok);
+      cards[i].classList.toggle("ps-role-dimmed", col != null && !ok);
+    }
+  }
+  function buildRolePicker(def, presentation) {
+    var t = PROJECT.table, rr = rolesFor(curModule());
+    var members = Array.isArray(rr[def.key]) ? rr[def.key]
+                  : (rr[def.key] ? [rr[def.key]] : []);
+    var eligible = roleEligibleCols(def);
+    var pick = mkEl("div", "ps-role-picker");
+    var blurb = (presentation.description ? presentation.description + " " : "") +
+      acceptsTooltip(def) + ".";
+    pick.appendChild(mkEl("div", "ps-role-picker-blurb", blurb));
+    if (!eligible.length) {
+      pick.appendChild(mkEl("div", "ps-role-picker-none",
+        "No variables fit this role yet. Change a variable's type from " +
+        "the list above, or import different data."));
+    }
+    for (var i = 0; i < eligible.length; i++) {
+      (function (col) {
+        var cur = members.indexOf(col) !== -1;
+        var row = mkEl("button", "ps-role-pick" + (cur ? " ps-role-pick-cur" : ""));
+        row.type = "button";
+        row.setAttribute("data-col", col);
+        row.innerHTML = psTypeIcon(t.types[col]) +
+          '<span class="ps-role-pick-name">' + escHtml(col) + "</span>" +
+          '<span class="ps-role-pick-kind">' +
+          escHtml(typeLabel(t.types[col])) + "</span>" +
+          (cur ? '<span class="ps-role-pick-check">\u2713</span>' : "");
+        row.addEventListener("click", function (e) {
+          e.stopPropagation();
+          if (def.multi) {
+            var arr = Array.isArray(rr[def.key]) ? rr[def.key] : [];
+            var at = arr.indexOf(col);
+            if (at === -1) arr.push(col); else arr.splice(at, 1);
+            rr[def.key] = arr;
+            // Stays open: adding several measures is the common case.
+          } else {
+            rr[def.key] = col;
+            ROLE_PICKER_OPEN = null;
+          }
+          roleChanged();
+        });
+        pick.appendChild(row);
+      })(eligible[i]);
+    }
+    if (members.length || def.multi) {
+      var foot = mkEl("div", "ps-role-picker-foot");
+      if (members.length) {
+        var clr = mkEl("button", "ps-role-picker-clear", "Clear");
+        clr.type = "button";
+        clr.addEventListener("click", function (e) {
+          e.stopPropagation();
+          rr[def.key] = def.multi ? [] : null;
+          if (!def.multi) ROLE_PICKER_OPEN = null;
+          roleChanged();
+        });
+        foot.appendChild(clr);
+      }
+      if (def.multi) {
+        var done = mkEl("button", "ps-role-picker-done", "Done");
+        done.type = "button";
+        done.addEventListener("click", function (e) {
+          e.stopPropagation();
+          closeRolePicker();
+        });
+        foot.appendChild(done);
+      }
+      pick.appendChild(foot);
+    }
+    return pick;
+  }
+  function syncRolesRow() {
+    var wrap = el("ps-slots");
+    wrap.innerHTML = "";
+    var defs = MODULES[curModule()].roles, rr = rolesFor(curModule());
+    syncAnalysisGuidance();
+    var section = null;
+    for (var i = 0; i < defs.length; i++) {
+      (function (def) {
+        var nextSection = def.required ? "required" : "optional";
+        if (section !== nextSection) {
+          section = nextSection;
+          wrap.appendChild(mkEl("div", "ps-role-section-heading",
+            def.required ? requiredRoleSection(defs) : "Split the chart"));
+        }
+        var presentation = rolePresentation(def);
+        var members = Array.isArray(rr[def.key]) ? rr[def.key]
+                      : (rr[def.key] ? [rr[def.key]] : []);
+        var eligible = roleEligibleCols(def);
+        var slot = mkEl("div", "ps-slot ps-role-card" +
+          (def.required && !members.length ? " ps-role-card-needed" : ""));
+        slot.setAttribute("data-role-key", def.key);
+        var head = mkEl("div", "ps-role-card-head");
+        head.appendChild(mkEl("span", "ps-slot-label", presentation.label));
+        head.appendChild(mkEl("span", "ps-role-badge " +
+          (def.required ? "ps-role-badge-required" : ""),
+          def.required ? "Required" : "Optional"));
+        slot.appendChild(head);
+        // The teaching sentence lives in the EXPANDED picker (where the
+        // user is deciding), not on every card - the card keeps one line.
+        var drop = mkEl("div", "ps-slot-drop");
+        drop.tabIndex = 0;
+        drop.setAttribute("role", "button");
+        drop.setAttribute("aria-label", presentation.label +
+          (def.required ? ", required" : ", optional") +
+          ". Click to choose a compatible variable.");
+        drop.setAttribute("aria-expanded",
+          ROLE_PICKER_OPEN === def.key ? "true" : "false");
+        drop.setAttribute("data-role-multi", def.multi ? "1" : "0");
+        if (def.multi) drop.style.flexWrap = "wrap";
+        setTip(drop, (def.multi
+          ? "Drop variables here, or click to choose them"
+          : "Drop a variable here, or click to choose one") +
+          ". " + acceptsTooltip(def) + ".");
+        function slotRemove(col) {
+          if (def.multi) {
+            rr[def.key] = (Array.isArray(rr[def.key]) ? rr[def.key] : [])
+              .filter(function (c) { return c !== col; });
+          } else rr[def.key] = null;
+        }
+        for (var mi = 0; mi < members.length; mi++) {
+          (function (col) {
+            var chip = mkEl("span", "ps-slot-chip");
+            chip.innerHTML = psTypeIcon(PROJECT.table.types[col]) +
+              '<span class="ps-slot-chip-name">' + escHtml(col) + "</span>" +
+              '<span class="ps-slot-chip-kind">' +
+              escHtml(typeLabel(PROJECT.table.types[col])) + "</span>";
+            chip.setAttribute("draggable", "true");
+            chip.setAttribute("data-col", col);
+            chip.addEventListener("dragstart", function (e) {
+              PS_DRAG = col;
+              PS_DRAG_FROM = def.key;
+              hideTypeMenu();
+              highlightEligibleRoles(col);
+              try {
+                e.dataTransfer.setData("text/plain", col);
+                e.dataTransfer.effectAllowed = "move";
+              } catch (err) {}
+            });
+            chip.addEventListener("dragend", clearDragState);
+            var x = mkEl("button", "ps-slot-x", "\u00d7");
+            x.type = "button";
+            setTip(x, "Remove " + col + " from " + def.label);
+            x.addEventListener("click", function (e) {
+              e.stopPropagation();
+              slotRemove(col);
+              roleChanged();
+            });
+            chip.appendChild(x);
+            drop.appendChild(chip);
+          })(members[mi]);
+        }
+        if (!members.length) {
+          var empty = mkEl("span", "ps-slot-empty");
+          empty.appendChild(mkEl("span", "ps-slot-add", "+"));
+          empty.appendChild(mkEl("span", "",
+            def.multi ? "Choose variables" : "Choose a variable"));
+          drop.appendChild(empty);
+          drop.appendChild(mkEl("span", "ps-slot-count",
+            eligible.length
+              ? eligible.length + " eligible"
+              : "none eligible"));
+        }
+        drop.addEventListener("click", function (e) {
+          if (e.target.closest && e.target.closest(".ps-slot-x")) return;
+          toggleRolePicker(def);
+          e.stopPropagation();
+        });
+        drop.addEventListener("keydown", function (e) {
+          if (e.key !== "Enter" && e.key !== " ") return;
+          e.preventDefault();
+          toggleRolePicker(def);
+        });
+        drop.addEventListener("dragover", function (e) {
+          if (PS_DRAG == null) return;
+          // A refused column used to fall through here WITHOUT
+          // preventDefault, which means the browser never fires a drop on
+          // this slot at all - the drag just died in the user's hand with no
+          // explanation available anywhere. Accept the drop either way and
+          // let the drop handler either assign it or say why it cannot, and
+          // mark the two states differently so the cursor is still honest.
+          var fits = roleAccepts(def, PROJECT.table, PS_DRAG);
+          e.preventDefault();
+          e.dataTransfer.dropEffect = fits
+            ? (PS_DRAG_FROM ? "move" : "copy") : "copy";
+          drop.classList.toggle("ps-droptarget", fits);
+          drop.classList.toggle("ps-dropreject", !fits);
+        });
+        drop.addEventListener("dragleave", function () {
+          drop.classList.remove("ps-droptarget");
+          drop.classList.remove("ps-dropreject");
+        });
+        drop.addEventListener("drop", function (e) {
+          e.preventDefault();
+          drop.classList.remove("ps-droptarget");
+          drop.classList.remove("ps-dropreject");
+          if (PS_DRAG == null) return;
+          if (!roleAccepts(def, PROJECT.table, PS_DRAG)) {
+            explainRoleRefusal(def, PS_DRAG);
+            clearDragState();
+            return;
+          }
+          if (PS_DRAG_FROM && PS_DRAG_FROM !== def.key)
+            roleRemoveMember(PS_DRAG_FROM, PS_DRAG);
+          if (def.multi) {
+            var arr = Array.isArray(rr[def.key]) ? rr[def.key] : [];
+            if (arr.indexOf(PS_DRAG) === -1) arr.push(PS_DRAG);
+            rr[def.key] = arr;
+          } else rr[def.key] = PS_DRAG;
+          clearDragState();
+          roleChanged();
+        });
+        slot.appendChild(drop);
+        // One-candidate suggestion: when a required single role is empty
+        // and exactly one UNASSIGNED variable qualifies, offer it as an
+        // explicit one-click accept - never assign silently.
+        if (def.required && !def.multi && !members.length) {
+          var assigned = roleTagsFor(curModule());
+          var cands = [];
+          for (var ci = 0; ci < eligible.length; ci++)
+            if (!assigned[eligible[ci]]) cands.push(eligible[ci]);
+          if (cands.length === 1) {
+            (function (col) {
+              var sug = mkEl("button", "ps-role-suggest");
+              sug.type = "button";
+              sug.innerHTML = '<span class="ps-role-suggest-lead">Use</span>' +
+                psTypeIcon(PROJECT.table.types[col]) +
+                '<span class="ps-role-suggest-name">' + escHtml(col) +
+                "</span>";
+              setTip(sug, col + " is the only unassigned variable that " +
+                "fits this role. Click to use it.");
+              sug.addEventListener("click", function (e) {
+                e.stopPropagation();
+                rr[def.key] = col;
+                ROLE_PICKER_OPEN = null;
+                roleChanged();
+              });
+              slot.appendChild(sug);
+            })(cands[0]);
+          }
+        }
+        if (ROLE_PICKER_OPEN === def.key)
+          slot.appendChild(buildRolePicker(def, presentation));
+        wrap.appendChild(slot);
+      })(defs[i]);
+    }
+    syncEligibilityHints();
+  }
+  function roleRemoveMember(key, col) {
+    var rr = rolesFor(curModule());
+    if (Array.isArray(rr[key]))
+      rr[key] = rr[key].filter(function (c) { return c !== col; });
+    else rr[key] = null;
+  }
+  // (The floating slot-picker menu is RETIRED - the role card itself
+  // expands into an inline picker; see buildRolePicker above.)
+  function clearDragState() {
+    PS_DRAG = null;
+    PS_DRAG_FROM = null;
+    var hot = document.querySelectorAll(".ps-droptarget");
+    for (var q = 0; q < hot.length; q++) hot[q].classList.remove("ps-droptarget");
+    highlightEligibleRoles(null);
+  }
+  function syncDataRow() {
+    var info = el("ps-datainfo");
+    var t = PROJECT.table;
+    var rowK = rowExclCount(t), valueK = valueExclCount(t);
+    var excludedLabel = [];
+    if (rowK) excludedLabel.push(rowK + (rowK === 1 ? " row" : " rows"));
+    if (valueK) excludedLabel.push(valueK + (valueK === 1 ? " value" : " values"));
+    info.textContent = t
+      ? t.name + (t.edited ? " (edited)" : "") + " - " + nRows(t) +
+        " rows x " + t.order.length + " columns" +
+        (excludedLabel.length ? " - " + excludedLabel.join(" + ") + " excluded" : "")
+      : "no data";
+    var chips = el("ps-columns");
+    chips.innerHTML = "";
+    if (!t) return;
+    var roleOf = roleTagsFor(curModule());
+    var filt = el("ps-varfilter");
+    filt.style.display = t.order.length > 8 ? "" : "none";
+    var needle = VAR_FILTER.toLowerCase();
+    for (var i = 0; i < t.order.length; i++) {
+      (function (col) {
+        if (needle && col.toLowerCase().indexOf(needle) === -1) return;
+        var kind = t.types[col];
+        var chip = mkEl("button", "ps-chip");
+        chip.type = "button";
+        setTip(chip, typeSentence(kind) +
+                     "\nClick to change the type, or drag onto a role slot " +
+                     "to assign it.");
+        chip.setAttribute("data-kind", kind);
+        chip.setAttribute("data-col", col);
+        if (roleOf[col]) chip.setAttribute("data-assigned", "1");
+        chip.innerHTML = psTypeIcon(kind) +
+          '<span class="ps-chip-name">' + escHtml(col) + "</span>" +
+          (roleOf[col]
+           ? '<span class="ps-chip-role">' + escHtml(roleOf[col]) + "</span>"
+           : "");
+        chip.setAttribute("draggable", "true");
+        chip.addEventListener("click", function (e) {
+          var r = chip.getBoundingClientRect();
+          showTypeMenu(r.left, r.bottom + 4, col);
+          e.stopPropagation();
+        });
+        chip.addEventListener("dragstart", function (e) {
+          PS_DRAG = col;
+          PS_DRAG_FROM = null;
+          hideTypeMenu();
+          highlightEligibleRoles(col);
+          try {
+            e.dataTransfer.setData("text/plain", col);
+            e.dataTransfer.effectAllowed = "copy";
+          } catch (err) {}
+        });
+        chip.addEventListener("dragend", clearDragState);
+        // Hovering a variable previews where it can go: eligible role
+        // cards glow, incompatible ones dim (drag keeps the same cue).
+        chip.addEventListener("mouseenter", function () {
+          if (PS_DRAG == null) highlightEligibleRoles(col);
+        });
+        chip.addEventListener("mouseleave", function () {
+          if (PS_DRAG == null) highlightEligibleRoles(null);
+        });
+        chips.appendChild(chip);
+      })(t.order[i]);
+    }
+    syncEligibilityHints();
+  }
+  // ---- variable type menu (chips + grid headers) ----
+  var PS_DRAG = null;
+  var PS_DRAG_FROM = null;   // role key when the drag started in a slot
+  var VAR_FILTER = "";
+  var TYPE_MENU = null;   // column name
+  function showTypeMenu(x, y, col) {
+    closeRolePicker();
+    TYPE_MENU = col;
+    var m = el("ps-typemenu"), cur = PROJECT.table.types[col];
+    var h = ['<div class="ps-tm-head">' + escHtml(col) + "</div>"];
+    for (var i = 0; i < VAR_TYPES.length; i++) {
+      var ty = VAR_TYPES[i];
+      h.push('<button type="button" data-type="' + ty.key + '"' +
+             (ty.key === cur ? ' class="ps-tm-cur"' : "") +
+             ' data-tip="' + escHtml(ty.note) + '">' +
+             psTypeIcon(ty.key) + '<span class="ps-tm-text">' +
+             '<span class="ps-tm-label">' + escHtml(ty.label) + "</span>" +
+             '<span class="ps-tm-gloss">' + escHtml(ty.gloss) + "</span>" +
+             '<span class="ps-tm-eg">e.g. ' + escHtml(ty.example) +
+             "</span></span></button>");
+    }
+    m.innerHTML = h.join("");
+    m.style.display = "block";
+    // The menu is a good deal taller now that each type carries a definition
+    // (punch list 19), so the old fixed 160/150 clamps would push the last
+    // choice off screen. Measure what was actually rendered.
+    m.style.left = "0px";
+    m.style.top = "0px";
+    var box = m.getBoundingClientRect();
+    m.style.left = Math.max(4,
+      Math.min(x, window.innerWidth - box.width - 8)) + "px";
+    m.style.top = Math.max(4,
+      Math.min(y, window.innerHeight - box.height - 8)) + "px";
+  }
+  function hideTypeMenu() {
+    el("ps-typemenu").style.display = "none";
+    TYPE_MENU = null;
+  }
+  function setColType(col, type) {
+    var t = PROJECT.table;
+    type = normType(type);
+    if (!type || !t || !t.types || !(col in t.types)) return;
+    if (t.types[col] === type) return;
+    dataMark("the type change");
+    t.types[col] = type;
+    retype(t);
+    validateRoles();
+    persist();
+    syncAll();
+    render();
+  }
+  // ---- editable data grid ----
+  // Column names and factor values are DATA - always escaped before
+  // innerHTML (the suite-wide XSS invariant).
+  function escHtml(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  var ROLE_TAGS = { xvar: "X AXIS", yvar: "Y AXIS", var: "VARIABLE",
+                    groupVar: "COLOR / GROUP", facetVar: "PANELS",
+                    measures: "MEASURES", betweenVar: "BETWEEN GROUPS",
+                    vars: "MATRIX", items: "ITEMS" };
+  var GRID_WINDOW_ROWS = 140;
+  var GRID_WINDOW_OVERSCAN = 24;
+  var GRID_VIRTUAL_ROW_LIMIT = 1000;
+  var GRID_VIRTUAL_CELL_LIMIT = 20000;
+  var GRID_ROW_HEIGHT = 25;
+  var GRID_WINDOW_START = 0;
+  var GRID_WINDOW_END = 0;
+  var GRID_SCROLL_FRAME = null;
+  var GRID_EDIT = null;   // {col, row, td, input, canceling}
+  var GRID_SELECTION = null; // {anchorCol, anchorRow, focusCol, focusRow}
+  var GRID_SELECTION_KIND = null; // cells | row | column | all
+  var INSPECTOR_VAR = null;
+  var GRID_DRAG = null;      // pointer gesture armed on a data cell
+  var GRID_COLUMN_DRAG = null; // active header-divider resize gesture
+  var GRID_NATURAL_WIDTHS = {};
+  // Data-workspace presentation state only. These values are deliberately
+  // excluded from PROJECT, snapshots, autosave, export, and chart payloads.
+  var GRID_HIDDEN_COLUMNS = {};
+  var GRID_FOCUS_CHART_COLUMNS = false;
+  var COLUMN_MENU = null;
+  var ROW_MENU = null;
+  var DATA_MENU_OPEN = false;
+  var COLUMN_VIEW_MENU_OPEN = false;
+  var GRID_FIND_QUERY = "";
+  var GRID_FIND_RESULTS = [];
+  var GRID_FIND_INDEX = -1;
+  var GRID_IGNORE_CLICK = false;
+  var GRID_SELECTION_CLASSES = [
+    "ps-grid-selected", "ps-grid-sel-top", "ps-grid-sel-right",
+    "ps-grid-sel-bottom", "ps-grid-sel-left", "ps-grid-sel-focus"
+  ];
+  function gridShouldVirtualize(t) {
+    if (!t) return false;
+    var rows = nRows(t), cols = t.order ? t.order.length : 0;
+    return rows > GRID_WINDOW_ROWS &&
+      (rows > GRID_VIRTUAL_ROW_LIMIT ||
+       rows * Math.max(1, cols) > GRID_VIRTUAL_CELL_LIMIT);
+  }
+  function gridResetColumnView() {
+    GRID_HIDDEN_COLUMNS = {};
+    GRID_FOCUS_CHART_COLUMNS = false;
+    COLUMN_VIEW_MENU_OPEN = false;
+  }
+  function gridChartColumns(t) {
+    var used = {};
+    if (!t) return used;
+    var chart = workspaceDocument("chart");
+    if (!chart || isLayoutTab(chart)) return used;
+    var rr = chart.roles && chart.roles[chart.module]
+      ? chart.roles[chart.module] : {};
+    for (var key in rr) {
+      if (!Object.prototype.hasOwnProperty.call(rr, key)) continue;
+      var values = Array.isArray(rr[key]) ? rr[key] : [rr[key]];
+      for (var i = 0; i < values.length; i++)
+        if (typeof values[i] === "string" &&
+            t.order.indexOf(values[i]) !== -1)
+          used[values[i]] = true;
+    }
+    return used;
+  }
+  function gridVisibleColumns(t) {
+    if (!t) return [];
+    var used = GRID_FOCUS_CHART_COLUMNS ? gridChartColumns(t) : {};
+    var focusNames = Object.keys(used);
+    return t.order.filter(function (col) {
+      return !GRID_HIDDEN_COLUMNS[col] &&
+        (!GRID_FOCUS_CHART_COLUMNS || !focusNames.length || used[col]);
+    });
+  }
+  function gridHiddenColumnCount(t) {
+    return t ? t.order.length - gridVisibleColumns(t).length : 0;
+  }
+  function gridCanFocusColumns(t) {
+    return Object.keys(gridChartColumns(t)).length > 0;
+  }
+  function gridSyncInspectorToVisible(t) {
+    var visible = gridVisibleColumns(t);
+    if (INSPECTOR_VAR && visible.indexOf(INSPECTOR_VAR) === -1)
+      INSPECTOR_VAR = visible.length ? visible[0] : null;
+  }
+  function gridHideColumn(col) {
+    var t = PROJECT.table;
+    if (!t || t.order.indexOf(col) === -1 ||
+        gridVisibleColumns(t).length <= 1) return false;
+    GRID_HIDDEN_COLUMNS[col] = true;
+    gridClearSelection(false);
+    gridSyncInspectorToVisible(t);
+    syncDataGrid();
+    syncContextInspector();
+    showToast("Hidden " + col + " \u00b7 data and charts unchanged");
+    return true;
+  }
+  function gridShowColumn(col) {
+    var t = PROJECT.table;
+    if (!t || !GRID_HIDDEN_COLUMNS[col]) return false;
+    delete GRID_HIDDEN_COLUMNS[col];
+    gridClearSelection(false);
+    syncDataGrid();
+    showToast("Showing " + col);
+    return true;
+  }
+  function gridSetChartFocus(on) {
+    var t = PROJECT.table;
+    on = !!on;
+    if (on && !gridCanFocusColumns(t)) {
+      showToast("Assign variables to the current chart first");
+      return false;
+    }
+    GRID_FOCUS_CHART_COLUMNS = on;
+    gridClearSelection(false);
+    gridSyncInspectorToVisible(t);
+    syncDataGrid();
+    syncContextInspector();
+    showToast(on
+      ? "Showing variables used by the current chart"
+      : "Chart-variable focus turned off");
+    return true;
+  }
+  function gridShowAllColumns() {
+    var changed = gridHiddenColumnCount(PROJECT.table) > 0 ||
+      GRID_FOCUS_CHART_COLUMNS;
+    GRID_HIDDEN_COLUMNS = {};
+    GRID_FOCUS_CHART_COLUMNS = false;
+    gridClearSelection(false);
+    syncDataGrid();
+    if (changed) showToast("All columns are visible");
+  }
+  function selectInspectorVariable(col) {
+    var t = PROJECT.table;
+    INSPECTOR_VAR = t && t.order.indexOf(col) !== -1 ? col : null;
+    syncContextInspector();
+    if (appWorkspace() === "data")
+      el("ps-inspector-subtitle").textContent = INSPECTOR_VAR
+        ? "Inspecting " + INSPECTOR_VAR : "Select a variable";
+    var heads = document.querySelectorAll("th[data-grid-col]");
+    for (var i = 0; i < heads.length; i++)
+      heads[i].classList.toggle("ps-grid-col-active",
+        heads[i].getAttribute("data-grid-col") === INSPECTOR_VAR);
+  }
+  function variableExcludedCount(col) {
+    var t = PROJECT.table;
+    if (!t || !t.raw[col]) return 0;
+    var count = 0;
+    for (var i = 0; i < nRows(t); i++)
+      if (isExcluded(t, col, i)) count++;
+    return count;
+  }
+  function renameVariable(oldName, requested) {
+    var t = PROJECT.table;
+    var next = String(requested || "").trim();
+    if (!t || !t.raw[oldName] || !next || next === oldName) {
+      syncContextInspector(); return false;
+    }
+    if (t.order.indexOf(next) !== -1) {
+      showToast("A variable named " + next + " already exists");
+      syncContextInspector(); return false;
+    }
+    dataMark("the rename");
+    var idx = t.order.indexOf(oldName);
+    t.order[idx] = next;
+    t.raw[next] = t.raw[oldName]; delete t.raw[oldName];
+    t.types[next] = t.types[oldName]; delete t.types[oldName];
+    sweepRenamedColumn(oldName, next);
+    var viewWidths = gridColumnWidths(false);
+    if (isFinite(Number(viewWidths[oldName]))) {
+      viewWidths[next] = viewWidths[oldName];
+      delete viewWidths[oldName];
+    }
+    if (isFinite(Number(GRID_NATURAL_WIDTHS[oldName]))) {
+      GRID_NATURAL_WIDTHS[next] = GRID_NATURAL_WIDTHS[oldName];
+      delete GRID_NATURAL_WIDTHS[oldName];
+    }
+    if (GRID_HIDDEN_COLUMNS[oldName]) {
+      GRID_HIDDEN_COLUMNS[next] = true;
+      delete GRID_HIDDEN_COLUMNS[oldName];
+    }
+    if (t.declaredLevels && t.declaredLevels[oldName]) {
+      t.declaredLevels[next] = t.declaredLevels[oldName];
+      delete t.declaredLevels[oldName];
+    }
+    if (t.levelOrderDefaults && t.levelOrderDefaults[oldName]) {
+      t.levelOrderDefaults[next] = t.levelOrderDefaults[oldName];
+      delete t.levelOrderDefaults[oldName];
+    }
+    if (t.excluded && t.excluded[oldName]) {
+      t.excluded[next] = t.excluded[oldName];
+      delete t.excluded[oldName];
+    }
+    for (var ci = 0; ci < PROJECT.charts.length; ci++) {
+      var roleSets = PROJECT.charts[ci].roles || {};
+      for (var mod in roleSets) {
+        if (!Object.prototype.hasOwnProperty.call(roleSets, mod)) continue;
+        var rr = roleSets[mod] || {};
+        for (var key in rr) {
+          if (!Object.prototype.hasOwnProperty.call(rr, key)) continue;
+          if (rr[key] === oldName) rr[key] = next;
+          else if (Array.isArray(rr[key]))
+            rr[key] = rr[key].map(function (v) { return v === oldName ? next : v; });
+        }
+      }
+    }
+    INSPECTOR_VAR = next;
+    t.edited = true;
+    retype(t);
+    validateRoles();
+    persist(); syncAll(); render();
+    return true;
+  }
+  function restoreVariableExclusions(col) {
+    var t = PROJECT.table;
+    if (!t || !t.excluded || !t.excluded[col]) return;
+    dataMark("restoring the excluded values");
+    delete t.excluded[col];
+    retype(t);
+    persist(); syncAll(); render();
+  }
+  function insertVariable(afterCol, duplicate) {
+    var t = PROJECT.table;
+    if (!t) return;
+    dataMark("adding the variable");
+    var name = addColumnInternal(afterCol, duplicate ? afterCol : null);
+    t.edited = true;
+    retype(t);
+    INSPECTOR_VAR = name;
+    persist(); syncAll(); render();
+  }
+  function deleteVariable(col) {
+    var t = PROJECT.table, at = t ? t.order.indexOf(col) : -1;
+    if (!t || at === -1 || t.order.length <= 1) {
+      showToast("A dataset must keep at least one variable"); return;
+    }
+    dataMark("deleting the variable");
+    var undoDepth = DATA_ACTION_SEQ;
+    t.order.splice(at, 1);
+    delete t.raw[col]; delete t.types[col];
+    delete gridColumnWidths(false)[col];
+    delete GRID_NATURAL_WIDTHS[col];
+    delete GRID_HIDDEN_COLUMNS[col];
+    if (t.declaredLevels) delete t.declaredLevels[col];
+    if (t.levelOrderDefaults) delete t.levelOrderDefaults[col];
+    if (t.excluded) delete t.excluded[col];
+    if (Array.isArray(t.filters))
+      t.filters = t.filters.filter(function (f) {
+        return f && f.col !== col;
+      });
+    if (t.computed) delete t.computed[col];
+    t.edited = true;
+    INSPECTOR_VAR = t.order[Math.min(at, t.order.length - 1)];
+    gridClearSelection(false);
+    retype(t); validateRoles();
+    persist(); syncAll(); render();
+    offerDataUndo("Deleted variable " + col, undoDepth);
+  }
+  function applyVariableLevelOrder(col, levels) {
+    var t = PROJECT.table;
+    if (!t || !Array.isArray(levels) || levels.length < 2) return;
+    var current = t.levels[col] || [];
+    if (JSON.stringify(levels) === JSON.stringify(current)) return;
+    dataMark("the level order");
+    if (!t.declaredLevels) t.declaredLevels = {};
+    if (!t.levelOrderDefaults) t.levelOrderDefaults = {};
+    if (!t.levelOrderDefaults[col])
+      t.levelOrderDefaults[col] = current.slice();
+    t.declaredLevels[col] = levels;
+    t.edited = true;
+    retype(t);
+    persist(); syncAll(); render();
+  }
+  function moveVariableLevel(col, level, direction) {
+    var t = PROJECT.table;
+    if (!t || !t.levels[col] || t.levels[col].length < 2) return;
+    var levels = t.levels[col].slice(), at = levels.indexOf(String(level));
+    var to = at + direction;
+    if (at < 0 || to < 0 || to >= levels.length) return;
+    var moved = levels.splice(at, 1)[0];
+    levels.splice(to, 0, moved);
+    applyVariableLevelOrder(col, levels);
+  }
+  function sortVariableLevels(col) {
+    var t = PROJECT.table;
+    if (!t || !t.levels[col] || t.levels[col].length < 2) return;
+    var levels = t.levels[col].slice();
+    // Numeric-looking levels sort NUMERICALLY, which is the same rule the
+    // engine's own scale-signature matching uses: "10" after "9", not before
+    // it. Anything else compares as text, case-insensitively, so Apple and
+    // apple do not land in an order that depends on the file.
+    var allNum = levels.every(function (v) {
+      return v !== "" && isFinite(Number(v));
+    });
+    levels.sort(allNum
+      ? function (a, b) { return Number(a) - Number(b); }
+      : function (a, b) {
+          var x = String(a).toLocaleLowerCase(), y = String(b).toLocaleLowerCase();
+          return x < y ? -1 : x > y ? 1 : 0;
+        });
+    if (JSON.stringify(levels) === JSON.stringify(t.levels[col])) {
+      showToast(col + " is already in order");
+      return;
+    }
+    applyVariableLevelOrder(col, levels);
+    showToast(col + " levels sorted " +
+      (allNum ? "low to high" : "A to Z") +
+      " \u00b7 this is the order R would use");
+  }
+  function resetVariableLevelOrder(col) {
+    var t = PROJECT.table;
+    var original = t && t.levelOrderDefaults &&
+      t.levelOrderDefaults[col];
+    if (!t || !original) return;
+    dataMark("resetting the level order");
+    if (!t.declaredLevels) t.declaredLevels = {};
+    t.declaredLevels[col] = original.slice();
+    delete t.levelOrderDefaults[col];
+    t.edited = true;
+    retype(t);
+    persist(); syncAll(); render();
+  }
+  function setMissingTokens(text) {
+    var t = PROJECT.table;
+    if (!t) return;
+    var list = String(text || "").split(",").map(function (v) {
+      return v.trim();
+    }).filter(function (v, i, arr) {
+      return v !== "" && arr.indexOf(v) === i;
+    });
+    if (JSON.stringify(list) === JSON.stringify(t.missingTokens || [])) return;
+    dataMark("the missing-value labels");
+    var prevTokens = tableMissingTokens(t);
+    t.missingTokens = list;
+    t.edited = true;
+    // 18a's escape hatch never worked: retype re-read the CELLS but never
+    // re-decided the TYPE, so declaring "-99" missing left the column
+    // nominal and the user had to also change the type by hand, with
+    // nothing saying so. Re-infer - but only where the current type is
+    // still exactly what inference last said. Anything else was chosen by
+    // hand (or restored from a saved project) and is not ours to overwrite.
+    // Testing the old inference is what makes that stateless: no "was this
+    // user-set" flag to persist, migrate, or forget to set.
+    var promoted = [], demoted = [];
+    for (var mi = 0; mi < t.order.length; mi++) {
+      var mc = t.order[mi];
+      if (isComputedColumn(t, mc)) continue;
+      // A column with its own list is not affected by a change to the dataset
+      // default, so it must not be re-typed by one either.
+      if (hasColumnTokens(t, mc)) continue;
+      var nextTokens = tableMissingTokens(t, mc);
+      var was = inferType(t.raw[mc], prevTokens);
+      if (t.types[mc] !== was) continue;
+      // No evidence is not a reason to change a type. Declaring a column's
+      // only value missing leaves nothing to infer FROM, and inferType's
+      // no-data answer is "nominal", so without this guard blanking a
+      // column would quietly drop it off every value axis.
+      var nextAudit = numericAudit(t.raw[mc], nextTokens);
+      if (!nextAudit.seen) continue;
+      var now = nextAudit.numeric ? "continuous" : "nominal";
+      if (now === was) continue;
+      t.types[mc] = now;
+      (now === "continuous" ? promoted : demoted).push(mc);
+    }
+    retype(t); validateRoles();
+    persist(); syncAll(); render();
+    var changed = promoted.concat(demoted);
+    if (changed.length)
+      showToast(changed.slice(0, 3).join(", ") +
+        (changed.length > 3 ? " and " + (changed.length - 3) + " more" : "") +
+        (changed.length === 1 ? " is now " : " are now ") +
+        (promoted.length && !demoted.length ? "Continuous"
+         : demoted.length && !promoted.length ? "Nominal" : "re-typed") +
+        " \u00b7 the missing labels changed what parses");
+  }
+  // t3-58a. Empty text CLEARS the override (back to the dataset list) rather
+  // than declaring "no tokens at all": a blank field reads as "I have not set
+  // one here", and a column that genuinely wants no tokens still has its blank
+  // cells treated as missing, which no list can change.
+  function setColumnMissingTokens(col, text) {
+    var t = PROJECT.table;
+    if (!t || !t.raw || !t.raw[col]) return;
+    var raw = String(text == null ? "" : text).trim();
+    var list = raw === "" ? null : raw.split(",").map(function (v) {
+      return v.trim();
+    }).filter(function (v, i, arr) {
+      return v !== "" && arr.indexOf(v) === i;
+    });
+    if (list && !list.length) list = null;
+    var had = hasColumnTokens(t, col);
+    var before = had ? t.missingTokensByCol[col] : null;
+    if (!had && list === null) return;
+    if (had && list && JSON.stringify(before) === JSON.stringify(list)) return;
+    dataMark("the missing-value labels for " + col);
+    var prevTokens = tableMissingTokens(t, col);
+    if (!t.missingTokensByCol) t.missingTokensByCol = {};
+    if (list === null) delete t.missingTokensByCol[col];
+    else t.missingTokensByCol[col] = list;
+    t.edited = true;
+    // The same stateless re-inference the dataset setter uses: re-decide the
+    // type only where the current one is still exactly what inference last
+    // said, so a hand-chosen type is never overwritten.
+    var retyped = null;
+    if (!isComputedColumn(t, col)) {
+      var was = inferType(t.raw[col], prevTokens);
+      if (t.types[col] === was) {
+        var audit = numericAudit(t.raw[col], tableMissingTokens(t, col));
+        if (audit.seen) {
+          var now = audit.numeric ? "continuous" : "nominal";
+          if (now !== was) { t.types[col] = now; retyped = now; }
+        }
+      }
+    }
+    retype(t); validateRoles();
+    persist(); syncAll(); render();
+    showToast(list === null
+      ? col + " is back to the dataset labels"
+      : col + " now treats " + list.join(", ") + " as missing" +
+        (retyped ? " \u00b7 it is now " +
+          (retyped === "continuous" ? "Continuous" : "Nominal") : ""));
+  }
+  function sortRowsByVariable(col, direction) {
+    var t = PROJECT.table;
+    if (!t || !t.raw[col]) return;
+    var order = [], values = t.columns[col] || [];
+    for (var i = 0; i < nRows(t); i++) order.push(i);
+    order.sort(function (a, b) {
+      var av = values[a], bv = values[b];
+      if (av == null && bv == null) return a - b;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      var cmp = typeof av === "number" && typeof bv === "number"
+        ? av - bv : String(av).localeCompare(String(bv), undefined,
+          { numeric: true, sensitivity: "base" });
+      return cmp === 0 ? a - b : direction * cmp;
+    });
+    dataMark("the row sort");
+    for (var c = 0; c < t.order.length; c++) {
+      var name = t.order[c], old = t.raw[name];
+      t.raw[name] = order.map(function (row) { return old[row]; });
+      if (t.excluded && t.excluded[name]) {
+        var oldEx = t.excluded[name], nextEx = {};
+        for (i = 0; i < order.length; i++) if (oldEx[order[i]]) nextEx[i] = 1;
+        if (Object.keys(nextEx).length) t.excluded[name] = nextEx;
+        else delete t.excluded[name];
+      }
+    }
+    t.caseIds = order.map(function (row) { return t.caseIds[row]; });
+    t.edited = true;
+    gridClearSelection(false);
+    retype(t);
+    persist(); syncAll(); render();
+    showToast("Rows sorted by " + col + " \u00b7 Undo restores the prior order");
+  }
+  function gridSelectionRect() {
+    var t = PROJECT.table, s = GRID_SELECTION;
+    if (!t || !s) return null;
+    var a = t.order.indexOf(s.anchorCol), b = t.order.indexOf(s.focusCol);
+    if (a < 0 || b < 0) return null;
+    var maxRow = nRows(t) - 1;
+    if (maxRow < 0) return null;
+    var ar = Math.round(Number(s.anchorRow)), fr = Math.round(Number(s.focusRow));
+    if (!isFinite(ar) || !isFinite(fr)) return null;
+    ar = Math.max(0, Math.min(maxRow, ar));
+    fr = Math.max(0, Math.min(maxRow, fr));
+    return { c0: Math.min(a, b), c1: Math.max(a, b),
+             r0: Math.min(ar, fr), r1: Math.max(ar, fr),
+             focusCol: s.focusCol, focusRow: fr };
+  }
+  function gridSelectionCells() {
+    var t = PROJECT.table, r = gridSelectionRect(), out = [];
+    if (!t || !r) return out;
+    for (var row = r.r0; row <= r.r1; row++)
+      for (var col = r.c0; col <= r.c1; col++)
+        out.push({ col: t.order[col], row: row });
+    return out;
+  }
+  function gridSelectionContains(col, row) {
+    var t = PROJECT.table, r = gridSelectionRect();
+    if (!t || !r) return false;
+    var ci = t.order.indexOf(col);
+    return ci >= r.c0 && ci <= r.c1 && row >= r.r0 && row <= r.r1;
+  }
+  function gridSelectionSummary(count, r) {
+    if (!count || !r) return "";
+    var rows = r.r1 - r.r0 + 1, cols = r.c1 - r.c0 + 1;
+    if (count === 1) return "1 cell selected";
+    return rows + (rows === 1 ? " row" : " rows") + " \u00d7 " +
+      cols + (cols === 1 ? " column" : " columns") + " \u00b7 " +
+      count + " cells selected \u00b7 Cmd/Ctrl+C to copy";
+  }
+  function gridApplySelection() {
+    var grid = el("ps-datagrid");
+    var tds = grid.querySelectorAll("td[data-gc]");
+    for (var i = 0; i < tds.length; i++) {
+      for (var k = 0; k < GRID_SELECTION_CLASSES.length; k++)
+        tds[i].classList.remove(GRID_SELECTION_CLASSES[k]);
+      tds[i].classList.remove("ps-grid-linked");
+      tds[i].removeAttribute("aria-selected");
+    }
+    var r = gridSelectionRect();
+    if (!r) GRID_SELECTION = null;
+    var count = r ? (r.r1 - r.r0 + 1) * (r.c1 - r.c0 + 1) : 0;
+    var t = PROJECT.table;
+    if (r && t) {
+      for (i = 0; i < tds.length; i++) {
+        var row = Number(tds[i].getAttribute("data-gr"));
+        var ci = t.order.indexOf(tds[i].getAttribute("data-gc"));
+        if (ci < r.c0 || ci > r.c1 || row < r.r0 || row > r.r1) continue;
+        tds[i].classList.add("ps-grid-selected");
+        tds[i].setAttribute("aria-selected", "true");
+        if (row === r.r0) tds[i].classList.add("ps-grid-sel-top");
+        if (row === r.r1) tds[i].classList.add("ps-grid-sel-bottom");
+        if (ci === r.c0) tds[i].classList.add("ps-grid-sel-left");
+        if (ci === r.c1) tds[i].classList.add("ps-grid-sel-right");
+        if (tds[i].getAttribute("data-gc") === r.focusCol &&
+            row === r.focusRow) tds[i].classList.add("ps-grid-sel-focus");
+      }
+    }
+    var status = el("ps-grid-selection-status");
+    if (status) status.textContent = gridSelectionSummary(count, r);
+    var statBox = el("ps-grid-stats");
+    if (statBox) statBox.innerHTML = count ? gridStatsHtml() : "";
+    var appStatus = document.getElementById("ps-status-selection");
+    if (appStatus && appWorkspace() === "data")
+      appStatus.textContent = count ? gridSelectionSummary(count, r) : "No range selected";
+    var heads = grid.querySelectorAll("th[data-grid-col], .ps-grid-rownum");
+    for (i = 0; i < heads.length; i++)
+      heads[i].classList.remove("ps-grid-axis-selected");
+    if (r && t && (GRID_SELECTION_KIND === "column" || GRID_SELECTION_KIND === "all")) {
+      var colHeads = grid.querySelectorAll("th[data-grid-col]");
+      for (i = 0; i < colHeads.length; i++) {
+        var hi = t.order.indexOf(colHeads[i].getAttribute("data-grid-col"));
+        if (hi >= r.c0 && hi <= r.c1) colHeads[i].classList.add("ps-grid-axis-selected");
+      }
+    }
+    if (r && (GRID_SELECTION_KIND === "row" || GRID_SELECTION_KIND === "all")) {
+      var rowHeads = grid.querySelectorAll("td[data-grid-row]");
+      for (i = 0; i < rowHeads.length; i++) {
+        var hr = Number(rowHeads[i].getAttribute("data-grid-row"));
+        if (hr >= r.r0 && hr <= r.r1) rowHeads[i].classList.add("ps-grid-axis-selected");
+      }
+    }
+    var corner = grid.querySelector("th[data-grid-all]");
+    if (corner && GRID_SELECTION_KIND === "all")
+      corner.classList.add("ps-grid-axis-selected");
+    var linkedRow = linkedCellRow();
+    if (LINKED_CELL && LINKED_REVEAL_EMPHASIS && linkedRow >= 0) {
+      var linkedTd = gridFindTd(LINKED_CELL.col, linkedRow);
+      if (linkedTd) linkedTd.classList.add("ps-grid-linked");
+    }
+  }
+  function gridSetSelection(anchorCol, anchorRow, focusCol, focusRow, kind) {
+    GRID_SELECTION = { anchorCol: anchorCol, anchorRow: anchorRow,
+                       focusCol: focusCol, focusRow: focusRow };
+    GRID_SELECTION_KIND = kind || "cells";
+    gridApplySelection();
+    if (focusCol !== INSPECTOR_VAR) selectInspectorVariable(focusCol);
+    if (GRID_SELECTION_KIND === "cells" &&
+        anchorCol === focusCol && Number(anchorRow) === Number(focusRow) &&
+        PROJECT.table.caseIds[Number(focusRow)]) {
+      LINKED_CELL = {
+        caseId: String(PROJECT.table.caseIds[Number(focusRow)]),
+        col: String(focusCol)
+      };
+      // The spreadsheet already has its own active-cell border. A normal Data
+      // click updates chart linking but releases the extra Reveal emphasis.
+      LINKED_REVEAL_EMPHASIS = false;
+      gridApplySelection();
+    } else if (appWorkspace() === "data") {
+      LINKED_CELL = null;
+      LINKED_REVEAL_EMPHASIS = false;
+      try { window.__gb2_selectedPointKey = null; } catch (e) {}
+    }
+  }
+  function gridClearSelection(repaint) {
+    GRID_SELECTION = null;
+    GRID_SELECTION_KIND = null;
+    if (repaint !== false) gridApplySelection();
+  }
+  function gridSelectionText() {
+    var t = PROJECT.table, r = gridSelectionRect();
+    if (!t || !r) return "";
+    function tsvCell(value) {
+      var s = String(value == null ? "" : value);
+      return /[\t\r\n"]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    }
+    var lines = [];
+    // Whole columns (or the whole table) carry their names; a rectangle of
+    // cells inside the data does not, because there a header row would be
+    // pasted INTO someone's numbers.
+    if (GRID_SELECTION_KIND === "column" || GRID_SELECTION_KIND === "all") {
+      var head = [];
+      for (var hi = r.c0; hi <= r.c1; hi++) head.push(tsvCell(t.order[hi]));
+      lines.push(head.join("\t"));
+    }
+    for (var row = r.r0; row <= r.r1; row++) {
+      var cells = [];
+      for (var ci = r.c0; ci <= r.c1; ci++)
+        cells.push(tsvCell(t.raw[t.order[ci]][row]));
+      lines.push(cells.join("\t"));
+    }
+    return lines.join("\n");
+  }
+  function uniqueColumnName(base) {
+    var t = PROJECT.table, name = String(base || "Variable").trim() || "Variable";
+    if (t.order.indexOf(name) === -1) return name;
+    var n = 2;
+    while (t.order.indexOf(name + " " + n) !== -1) n++;
+    return name + " " + n;
+  }
+  function addColumnInternal(afterCol, sourceCol) {
+    var t = PROJECT.table;
+    if (!t) return null;
+    var name = uniqueColumnName(sourceCol ? sourceCol + " copy" : "Variable");
+    var at = afterCol ? t.order.indexOf(afterCol) + 1 : t.order.length;
+    if (at < 0) at = t.order.length;
+    t.order.splice(at, 0, name);
+    t.raw[name] = sourceCol && t.raw[sourceCol]
+      ? t.raw[sourceCol].slice() : Array(nRows(t)).fill("");
+    t.types[name] = sourceCol && t.types[sourceCol] ? t.types[sourceCol] : "nominal";
+    if (sourceCol && t.declaredLevels && t.declaredLevels[sourceCol]) {
+      if (!t.declaredLevels) t.declaredLevels = {};
+      t.declaredLevels[name] = t.declaredLevels[sourceCol].slice();
+    }
+    if (sourceCol && t.levelOrderDefaults &&
+        t.levelOrderDefaults[sourceCol]) {
+      t.levelOrderDefaults[name] =
+        t.levelOrderDefaults[sourceCol].slice();
+    }
+    if (sourceCol && t.excluded && t.excluded[sourceCol])
+      t.excluded[name] = Object.assign({}, t.excluded[sourceCol]);
+    return name;
+  }
+  function gridApplyMatrix(matrix) {
+    var t = PROJECT.table, r = gridSelectionRect();
+    if (!t || !r || !matrix || !matrix.length) return;
+    var width = 0;
+    for (var i = 0; i < matrix.length; i++) width = Math.max(width, matrix[i].length);
+    if (!width) return;
+    dataMark("the paste");
+    var targetRows = matrix.length, targetCols = width;
+    var fillSelection = matrix.length === 1 && width === 1 &&
+      ((r.r1 > r.r0) || (r.c1 > r.c0));
+    if (fillSelection) {
+      targetRows = r.r1 - r.r0 + 1;
+      targetCols = r.c1 - r.c0 + 1;
+    }
+    var needRows = r.r0 + targetRows;
+    while (nRows(t) < needRows) {
+      for (var ac = 0; ac < t.order.length; ac++) t.raw[t.order[ac]].push("");
+      t.caseIds.push(newCaseId());
+    }
+    while (t.order.length < r.c0 + targetCols)
+      addColumnInternal(t.order[t.order.length - 1], null);
+    for (var y = 0; y < targetRows; y++) {
+      for (var x = 0; x < targetCols; x++) {
+        var srcRow = fillSelection ? 0 : y;
+        var srcCol = fillSelection ? 0 : x;
+        var value = matrix[srcRow] && matrix[srcRow][srcCol] != null
+          ? matrix[srcRow][srcCol] : "";
+        t.raw[t.order[r.c0 + x]][r.r0 + y] = String(value);
+      }
+    }
+    t.edited = true;
+    retype(t); validateRoles();
+    persist(); syncAll(); render();
+    gridSetSelection(t.order[r.c0], r.r0,
+      t.order[Math.min(t.order.length - 1, r.c0 + targetCols - 1)],
+      r.r0 + targetRows - 1, "cells");
+    showToast("Pasted " + targetRows + " \u00d7 " + targetCols + " cells");
+  }
+  function gridClearSelected() {
+    var cells = gridSelectionCells(), t = PROJECT.table;
+    if (!t || !cells.length) return;
+    dataMark("clearing the cells");
+    var undoDepth = DATA_ACTION_SEQ;
+    for (var i = 0; i < cells.length; i++) t.raw[cells[i].col][cells[i].row] = "";
+    t.edited = true;
+    retype(t); validateRoles();
+    persist(); syncAll(); render();
+    offerDataUndo("Cleared " + cells.length +
+      (cells.length === 1 ? " cell" : " cells"), undoDepth);
+  }
+  function gridFillSelected() {
+    var t = PROJECT.table, r = gridSelectionRect();
+    if (!t || !r) return;
+    var value = t.raw[r.focusCol][r.focusRow];
+    gridApplyMatrix([[value]]);
+  }
+  function gridColumnWidths(create) {
+    if (!PROJECT.ui) PROJECT.ui = {};
+    var widths = PROJECT.ui.columnWidths;
+    if ((!widths || typeof widths !== "object") && create)
+      widths = PROJECT.ui.columnWidths = {};
+    return widths && typeof widths === "object" ? widths : {};
+  }
+  function gridClampColumnWidth(width) {
+    return Math.max(72, Math.min(600, Math.round(Number(width) || 160)));
+  }
+  function gridHasColumnWidths() {
+    var widths = gridColumnWidths(false), t = PROJECT.table;
+    if (!t) return false;
+    for (var i = 0; i < t.order.length; i++)
+      if (isFinite(Number(widths[t.order[i]]))) return true;
+    return false;
+  }
+  function gridRememberNaturalWidths() {
+    if (gridHasColumnWidths()) return;
+    var heads = el("ps-datagrid").querySelectorAll("th[data-grid-col]");
+    for (var i = 0; i < heads.length; i++) {
+      var col = heads[i].getAttribute("data-grid-col");
+      GRID_NATURAL_WIDTHS[col] = gridClampColumnWidth(
+        heads[i].getBoundingClientRect().width || heads[i].offsetWidth || 160);
+    }
+  }
+  function gridCaptureCurrentWidths() {
+    var widths = gridColumnWidths(true);
+    var heads = el("ps-datagrid").querySelectorAll("th[data-grid-col]");
+    for (var i = 0; i < heads.length; i++) {
+      var col = heads[i].getAttribute("data-grid-col");
+      var measured = gridClampColumnWidth(
+        heads[i].getBoundingClientRect().width || heads[i].offsetWidth ||
+        GRID_NATURAL_WIDTHS[col] || 160);
+      widths[col] = measured;
+      if (!GRID_NATURAL_WIDTHS[col]) GRID_NATURAL_WIDTHS[col] = measured;
+    }
+    return widths;
+  }
+  function gridApproxTextWidth(value) {
+    var s = String(value == null ? "" : value), width = 0;
+    for (var i = 0; i < s.length; i++) {
+      var ch = s.charAt(i);
+      if (/[MW@#%&]/.test(ch)) width += 10;
+      else if (/[ilI1|.,:'`]/.test(ch)) width += 3.6;
+      else if (/[A-Z0-9]/.test(ch)) width += 7.4;
+      else width += 6.7;
+    }
+    return width;
+  }
+  function gridNaturalColumnWidth(col) {
+    var t = PROJECT.table;
+    if (!t || !t.raw[col]) return 160;
+    var widest = gridApproxTextWidth(col) + 56;
+    var rr = rolesFor(curModule()), defs = MODULES[curModule()].roles;
+    for (var d = 0; d < defs.length; d++) {
+      var assigned = rr[defs[d].key];
+      if (assigned === col || (Array.isArray(assigned) &&
+          assigned.indexOf(col) !== -1))
+        widest = Math.max(widest,
+          gridApproxTextWidth(ROLE_TAGS[defs[d].key] ||
+                              defs[d].key.toUpperCase()) + 28);
+    }
+    for (var i = 0; i < t.raw[col].length; i++)
+      widest = Math.max(widest, gridApproxTextWidth(t.raw[col][i]) + 28);
+    return gridClampColumnWidth(widest);
+  }
+  function gridWidthTotal(widths, columns) {
+    var t = PROJECT.table, total = 46;
+    if (!t) return total;
+    columns = columns || gridVisibleColumns(t);
+    for (var i = 0; i < columns.length; i++)
+      total += gridClampColumnWidth(widths[columns[i]] ||
+        GRID_NATURAL_WIDTHS[columns[i]] || gridNaturalColumnWidth(columns[i]));
+    return total;
+  }
+  function gridEnsureSizedTable(widths) {
+    var table = el("ps-datagrid").querySelector(".ps-grid-table");
+    if (!table || !PROJECT.table) return;
+    if (!table.querySelector("colgroup")) {
+      var group = document.createElement("colgroup");
+      var rowCol = document.createElement("col");
+      rowCol.style.width = "46px";
+      group.appendChild(rowCol);
+      var visible = gridVisibleColumns(PROJECT.table);
+      for (var i = 0; i < visible.length; i++) {
+        var name = visible[i];
+        var dataCol = document.createElement("col");
+        dataCol.setAttribute("data-grid-width-col", name);
+        dataCol.style.width = gridClampColumnWidth(widths[name]) + "px";
+        group.appendChild(dataCol);
+      }
+      table.insertBefore(group, table.firstChild);
+    }
+    table.classList.add("ps-grid-sized");
+    gridApplyColumnWidthsLive();
+  }
+  function gridApplyColumnWidthsLive() {
+    var table = el("ps-datagrid").querySelector(".ps-grid-table");
+    if (!table || !PROJECT.table) return;
+    var widths = gridColumnWidths(false);
+    var cols = table.querySelectorAll("col[data-grid-width-col]");
+    for (var i = 0; i < cols.length; i++) {
+      var name = cols[i].getAttribute("data-grid-width-col");
+      cols[i].style.width = gridClampColumnWidth(widths[name]) + "px";
+    }
+    table.style.width = gridWidthTotal(widths) + "px";
+  }
+  function gridAutoFitColumn(col, quiet) {
+    var t = PROJECT.table;
+    if (!t || !t.raw[col]) return;
+    var widths = gridCaptureCurrentWidths();
+    widths[col] = gridNaturalColumnWidth(col);
+    persist(false);
+    syncDataGrid();
+    if (!quiet) showToast("Auto-fit " + col);
+  }
+  function gridAutoFitAll() {
+    var t = PROJECT.table;
+    if (!t) return;
+    var widths = gridColumnWidths(true);
+    for (var i = 0; i < t.order.length; i++)
+      widths[t.order[i]] = gridNaturalColumnWidth(t.order[i]);
+    persist(false);
+    syncDataGrid();
+    showToast("Auto-fit all columns");
+  }
+  function gridResetColumnWidth(col) {
+    var widths = gridCaptureCurrentWidths();
+    widths[col] = GRID_NATURAL_WIDTHS[col] || gridNaturalColumnWidth(col);
+    persist(false);
+    syncDataGrid();
+    showToast("Reset " + col + " width");
+  }
+  function gridResetAllWidths() {
+    if (!PROJECT.ui) PROJECT.ui = {};
+    PROJECT.ui.columnWidths = {};
+    persist(false);
+    syncDataGrid();
+    showToast("Reset all column widths");
+  }
+  function showColumnMenu(x, y, col) {
+    COLUMN_MENU = col;
+    var menu = el("ps-columnmenu");
+    el("ps-columnmenu-reset").disabled = !isFinite(
+      Number(gridColumnWidths(false)[col]));
+    el("ps-columnmenu-resetall").disabled = !gridHasColumnWidths();
+    el("ps-columnmenu-delete").disabled =
+      !PROJECT.table || PROJECT.table.order.length <= 1;
+    el("ps-columnmenu-hide").disabled =
+      !PROJECT.table || gridVisibleColumns(PROJECT.table).length <= 1;
+    el("ps-columnmenu-editformula").style.display =
+      isComputedColumn(PROJECT.table, col) ? "" : "none";
+    menu.style.display = "block";
+    menu.style.left = Math.min(x, window.innerWidth - 190) + "px";
+    menu.style.top = Math.max(6, Math.min(y,
+      window.innerHeight - menu.offsetHeight - 6)) + "px";
+  }
+  function hideColumnMenu() {
+    el("ps-columnmenu").style.display = "none";
+    COLUMN_MENU = null;
+  }
+  function showRowMenu(x, y, row) {
+    var t = PROJECT.table;
+    if (!t || row < 0 || row >= nRows(t)) return;
+    ROW_MENU = { row: row, rowOn: !isRowExcluded(t, row) };
+    el("ps-rowmenu-toggle").textContent =
+      (isRowExcluded(t, row) ? "Include" : "Exclude") + " row " + (row + 1);
+    var menu = el("ps-rowmenu");
+    el("ps-rowmenu-delete").disabled = nRows(t) <= 1;
+    menu.style.display = "block";
+    menu.style.left = Math.min(x, window.innerWidth - 180) + "px";
+    menu.style.top = Math.max(6, Math.min(y,
+      window.innerHeight - menu.offsetHeight - 6)) + "px";
+  }
+  function hideRowMenu() {
+    el("ps-rowmenu").style.display = "none";
+    ROW_MENU = null;
+  }
+  function gridApplyClippedTitles() {
+    var cells = el("ps-datagrid").querySelectorAll("td[data-gc]");
+    for (var i = 0; i < cells.length; i++) {
+      if (cells[i].scrollWidth <= cells[i].clientWidth + 1 ||
+          cells[i].hasAttribute("title")) continue;
+      var col = cells[i].getAttribute("data-gc");
+      var row = Number(cells[i].getAttribute("data-gr"));
+      if (PROJECT.table.raw[col] && PROJECT.table.raw[col][row] != null)
+        cells[i].setAttribute("title", String(PROJECT.table.raw[col][row]));
+    }
+  }
+  function gridFindResultKey(result) {
+    if (!result || !PROJECT.table || !PROJECT.table.caseIds[result.row])
+      return "";
+    return result.col + "\u0000" + PROJECT.table.caseIds[result.row];
+  }
+  function gridRefreshFindResults() {
+    var prior = GRID_FIND_RESULTS[GRID_FIND_INDEX];
+    var priorKey = gridFindResultKey(prior);
+    GRID_FIND_RESULTS = [];
+    var t = PROJECT.table, needle = GRID_FIND_QUERY.toLocaleLowerCase();
+    if (t && needle) {
+      var visible = gridVisibleColumns(t);
+      for (var row = 0; row < nRows(t); row++)
+        for (var ci = 0; ci < visible.length; ci++) {
+          var col = visible[ci];
+          if (String(t.raw[col][row] == null ? "" : t.raw[col][row])
+              .toLocaleLowerCase().indexOf(needle) !== -1)
+            GRID_FIND_RESULTS.push({ col: col, row: row });
+        }
+    }
+    GRID_FIND_INDEX = GRID_FIND_RESULTS.length ? 0 : -1;
+    if (priorKey)
+      for (var i = 0; i < GRID_FIND_RESULTS.length; i++)
+        if (gridFindResultKey(GRID_FIND_RESULTS[i]) === priorKey) {
+          GRID_FIND_INDEX = i; break;
+        }
+  }
+  function syncDataCommandBar() {
+    var t = PROJECT.table;
+    if (el("ps-data-find").value !== GRID_FIND_QUERY)
+      el("ps-data-find").value = GRID_FIND_QUERY;
+    el("ps-data-undo").disabled = !DATA_UNDO.length;
+    el("ps-data-redo").disabled = !DATA_REDO.length;
+    el("ps-data-find-prev").disabled = !GRID_FIND_RESULTS.length;
+    el("ps-data-find-next").disabled = !GRID_FIND_RESULTS.length;
+    el("ps-data-find-count").textContent = !GRID_FIND_QUERY ? "" :
+      (GRID_FIND_RESULTS.length
+       ? (GRID_FIND_INDEX + 1) + " of " + GRID_FIND_RESULTS.length
+       : "No matches");
+    var fBtn = el("ps-data-filter-btn");
+    var fActive = validFilters(t).length > 0;
+    fBtn.classList.toggle("ps-data-filter-active", fActive);
+    fBtn.textContent = fActive
+      ? "Filter \u00b7 " + (nRows(t) - filteredRowCount(t)) +
+        " of " + nRows(t)
+      : "Filter";
+    var fExtra = "";
+    if (fActive && t.filterMissingDrops)
+      fExtra += ". " + t.filterMissingDrops +
+        (t.filterMissingDrops === 1 ? " row is" : " rows are") +
+        " left out because the filtered value is missing";
+    if (fActive && t.filterInapplicable && t.filterInapplicable.length)
+      fExtra += ". Not applied: " + t.filterInapplicable.join(", ") +
+        " (that comparison needs numbers)";
+    setTip(fBtn, fActive
+      ? "Active: " + filterSummaryText(t) + fExtra + " - click to edit"
+      : "Filter rows without changing the dataset");
+    var rowK = rowExclCount(t), valueK = valueExclCount(t);
+    var total = rowK + valueK;
+    var exclusion = el("ps-data-exclusions");
+    exclusion.classList.toggle("ps-data-exclusions-visible", total > 0);
+    var parts = [];
+    if (rowK) parts.push(rowK + (rowK === 1 ? " row" : " rows"));
+    if (valueK) parts.push(valueK + (valueK === 1 ? " value" : " values"));
+    el("ps-data-exclusions-count").textContent =
+      parts.length ? parts.join(" + ") + " excluded" : "";
+    el("ps-data-restore").disabled = !total;
+    el("ps-datamenu-restore").disabled = !total;
+    el("ps-datamenu-resetwidths").disabled = !gridHasColumnWidths();
+    var hiddenCount = gridHiddenColumnCount(t);
+    var hiddenButton = el("ps-data-hidden-columns");
+    hiddenButton.classList.toggle("ps-data-hidden-columns-visible",
+      hiddenCount > 0 || GRID_FOCUS_CHART_COLUMNS);
+    hiddenButton.textContent = GRID_FOCUS_CHART_COLUMNS
+      ? "Chart focus \u00b7 " + hiddenCount + " hidden"
+      : hiddenCount + (hiddenCount === 1 ? " column hidden" : " columns hidden");
+    setTip(hiddenButton, GRID_FOCUS_CHART_COLUMNS
+      ? "Showing current chart variables; manage column visibility"
+      : "Manage temporarily hidden columns");
+    var focusEnabled = gridCanFocusColumns(t);
+    el("ps-datamenu-focus-columns").disabled = !focusEnabled;
+    el("ps-datamenu-focus-columns").textContent =
+      (GRID_FOCUS_CHART_COLUMNS ? "\u2713 " : "") +
+      "Focus on current chart variables";
+    el("ps-datamenu-resetview").disabled = !hiddenCount &&
+      !GRID_FOCUS_CHART_COLUMNS;
+    syncColumnViewMenu();
+  }
+  function syncColumnViewMenu() {
+    var t = PROJECT.table;
+    if (!t) return;
+    var focus = el("ps-columnview-focus");
+    focus.disabled = !gridCanFocusColumns(t);
+    focus.textContent = (GRID_FOCUS_CHART_COLUMNS ? "\u2713 " : "") +
+      "Focus on current chart variables";
+    setTip(focus, focus.disabled
+      ? "Assign variables to the current chart first"
+      : "Temporarily show only variables assigned to the current chart");
+    var list = el("ps-columnview-hidden-list");
+    var html = [];
+    for (var i = 0; i < t.order.length; i++)
+      if (GRID_HIDDEN_COLUMNS[t.order[i]])
+        html.push('<button type="button" role="menuitem" data-show-column="' +
+          escHtml(t.order[i]) + '">Show ' + escHtml(t.order[i]) + "</button>");
+    list.innerHTML = html.join("");
+    el("ps-columnview-showall").disabled =
+      !gridHiddenColumnCount(t) && !GRID_FOCUS_CHART_COLUMNS;
+  }
+  function gridRevealFound(result) {
+    var t = PROJECT.table;
+    if (!t || !result || !t.raw[result.col] ||
+        result.row < 0 || result.row >= nRows(t)) return;
+    if (GRID_EDIT) gridCommitEdit(null);
+    var grid = el("ps-datagrid");
+    grid.scrollTop = Math.max(0, result.row * GRID_ROW_HEIGHT -
+      Math.max(0, grid.clientHeight - GRID_ROW_HEIGHT) / 2);
+    syncDataGrid();
+    gridSetSelection(result.col, result.row,
+                     result.col, result.row, "cells");
+  }
+  function gridFindStep(direction) {
+    if (!GRID_FIND_RESULTS.length) return;
+    GRID_FIND_INDEX = (GRID_FIND_INDEX + direction +
+      GRID_FIND_RESULTS.length) % GRID_FIND_RESULTS.length;
+    syncDataCommandBar();
+    gridRevealFound(GRID_FIND_RESULTS[GRID_FIND_INDEX]);
+  }
+  function gridSetFindQuery(query) {
+    GRID_FIND_QUERY = String(query || "").trim();
+    GRID_FIND_INDEX = -1;
+    gridRefreshFindResults();
+    syncDataCommandBar();
+    if (GRID_FIND_RESULTS.length)
+      gridRevealFound(GRID_FIND_RESULTS[GRID_FIND_INDEX]);
+  }
+  function showDataMenu() {
+    var button = el("ps-data-more"), box = button.getBoundingClientRect();
+    var menu = el("ps-datamenu");
+    DATA_MENU_OPEN = true;
+    syncDataCommandBar();
+    menu.style.display = "block";
+    menu.style.left = Math.max(6, Math.min(box.right - 190,
+      window.innerWidth - 196)) + "px";
+    menu.style.top = Math.max(6, Math.min(box.bottom + 3,
+      window.innerHeight - menu.offsetHeight - 6)) + "px";
+    button.setAttribute("aria-expanded", "true");
+  }
+  function hideDataMenu() {
+    el("ps-datamenu").style.display = "none";
+    el("ps-data-more").setAttribute("aria-expanded", "false");
+    DATA_MENU_OPEN = false;
+  }
+  function showColumnViewMenu() {
+    var button = el("ps-data-hidden-columns");
+    var box = button.getBoundingClientRect();
+    var menu = el("ps-columnview-menu");
+    COLUMN_VIEW_MENU_OPEN = true;
+    syncColumnViewMenu();
+    menu.style.display = "block";
+    menu.style.left = Math.max(6, Math.min(box.right - 242,
+      window.innerWidth - 248)) + "px";
+    menu.style.top = Math.max(6, Math.min(box.bottom + 3,
+      window.innerHeight - menu.offsetHeight - 6)) + "px";
+    button.setAttribute("aria-expanded", "true");
+  }
+  function hideColumnViewMenu() {
+    el("ps-columnview-menu").style.display = "none";
+    el("ps-data-hidden-columns").setAttribute("aria-expanded", "false");
+    COLUMN_VIEW_MENU_OPEN = false;
+  }
+  function syncDataGrid() {
+    if (GRID_EDIT) gridCommitEdit(null);
+    var card = el("ps-datacard"), grid = el("ps-datagrid");
+    var priorScrollTop = Number(grid.scrollTop) || 0;
+    var priorScrollLeft = Number(grid.scrollLeft) || 0;
+    var open = !!(PROJECT.ui && PROJECT.ui.dataOpen);
+    card.style.display = open ? "block" : "none";
+    if (!open) { grid.innerHTML = ""; el("ps-gridfoot").innerHTML = ""; return; }
+    var t = PROJECT.table;
+    if (!t) { grid.innerHTML = ""; return; }
+    var visibleCols = gridVisibleColumns(t);
+    if (!visibleCols.length) {
+      GRID_FOCUS_CHART_COLUMNS = false;
+      visibleCols = gridVisibleColumns(t);
+    }
+    // Role tags for the ACTIVE analysis: which column feeds which slot.
+    var rr = rolesFor(curModule()), roleOf = {}, k;
+    var defs = MODULES[curModule()].roles;
+    for (var di = 0; di < defs.length; di++) {
+      k = defs[di].key;
+      if (!rr[k]) continue;
+      var tag = ROLE_TAGS[k] || k.toUpperCase();
+      roleOf[rr[k]] = roleOf[rr[k]] ? roleOf[rr[k]] + " + " + tag : tag;
+    }
+    var n = nRows(t);
+    var virtualized = gridShouldVirtualize(t);
+    var start = virtualized && n ? Math.max(0, Math.min(n - 1,
+      Math.floor(priorScrollTop / GRID_ROW_HEIGHT) -
+        GRID_WINDOW_OVERSCAN)) : 0;
+    var end = virtualized ? Math.min(n, start + GRID_WINDOW_ROWS) : n;
+    GRID_WINDOW_START = start;
+    GRID_WINDOW_END = end;
+    var sized = gridHasColumnWidths(), widths = gridColumnWidths(false);
+    var tableClass = "ps-grid-table" + (sized ? " ps-grid-sized" : "");
+    var tableStyle = sized
+      ? ' style="width:' + gridWidthTotal(widths, visibleCols) + 'px;"' : "";
+    var h = ['<table class="' + tableClass +
+             '" role="grid" aria-multiselectable="true"' + tableStyle + ">"];
+    if (sized) {
+      h.push('<colgroup><col style="width:46px;">');
+      for (var cw = 0; cw < visibleCols.length; cw++) {
+        var widthName = visibleCols[cw];
+        var widthValue = gridClampColumnWidth(widths[widthName] ||
+          GRID_NATURAL_WIDTHS[widthName] || gridNaturalColumnWidth(widthName));
+        widths[widthName] = widthValue;
+        h.push('<col data-grid-width-col="' + escHtml(widthName) +
+               '" style="width:' + widthValue + 'px;">');
+      }
+      h.push("</colgroup>");
+    }
+    h.push('<thead><tr><th class="ps-grid-rownum" data-grid-all data-tip="Select all cells"></th>');
+    var j, col;
+    for (j = 0; j < visibleCols.length; j++) {
+      col = visibleCols[j];
+      var kind = t.types[col];
+      h.push('<th data-grid-col="' + escHtml(col) + '"' +
+             (col === INSPECTOR_VAR ? ' class="ps-grid-col-active"' : "") +
+             ' data-tip="' + escHtml(typeLabel(kind)) + ' variable">' +
+             escHtml(col) +
+             '<span class="ps-grid-badge" data-grid-type data-tip="Change measure type">' +
+             psTypeIcon(kind) + "</span>" +
+             (isComputedColumn(t, col)
+              ? '<span class="ps-grid-fx" data-tip="' +
+                escHtml(t.computedErrors && t.computedErrors[col]
+                  ? "Formula error: " + t.computedErrors[col]
+                  : "Computed: " + t.computed[col]) + '"' +
+                (t.computedErrors && t.computedErrors[col]
+                  ? ' data-fx-error="1"' : "") + ">fx</span>"
+              : "") +
+             (roleOf[col]
+              ? '<span class="ps-grid-role">' + escHtml(roleOf[col]) + "</span>"
+              : "") +
+             '<span class="ps-grid-col-resizer" role="separator" tabindex="0"' +
+             ' aria-orientation="vertical" aria-label="Resize ' + escHtml(col) +
+             ' column" data-tip="Drag to resize; double-click to auto-fit"></span>' +
+             "</th>");
+    }
+    h.push("</tr></thead><tbody>");
+    if (start > 0)
+      h.push('<tr class="ps-grid-spacer" aria-hidden="true"><td colspan="' +
+        (visibleCols.length + 1) + '" style="height:' +
+        (start * GRID_ROW_HEIGHT) + 'px"></td></tr>');
+    for (var i = start; i < end; i++) {
+      var rowExcluded = isRowExcluded(t, i);
+      h.push('<tr' + (rowExcluded ? ' class="ps-grid-row-excluded"' : "") +
+             '><td class="ps-grid-rownum" data-grid-row="' + i +
+             '" data-tip="' + (rowExcluded
+               ? "Observation excluded from every chart"
+               : "Select row " + (i + 1)) + '">' + (i + 1) + "</td>");
+      for (j = 0; j < visibleCols.length; j++) {
+        col = visibleCols[j];
+        var view = gridCellView(t, col, i);
+        h.push('<td class="' + view.cls + '" data-gc="' + escHtml(col) +
+               '" data-gr="' + i + '"' +
+               (view.title ? ' data-tip="' + escHtml(view.title) + '"' : "") +
+               ">" + escHtml(view.text) + "</td>");
+      }
+      h.push("</tr>");
+    }
+    if (end < n)
+      h.push('<tr class="ps-grid-spacer" aria-hidden="true"><td colspan="' +
+        (visibleCols.length + 1) + '" style="height:' +
+        ((n - end) * GRID_ROW_HEIGHT) + 'px"></td></tr>');
+    h.push("</tbody></table>");
+    grid.innerHTML = h.join("");
+    // Replacing a virtual table can momentarily reduce its scroll height,
+    // causing browsers to clamp the scrolling element back to zero. Restore
+    // both axes synchronously after the new spacer geometry is present.
+    grid.scrollTop = priorScrollTop;
+    grid.scrollLeft = priorScrollLeft;
+    el("ps-gridfoot").innerHTML = gridFootHtml(t);
+    gridRefreshFindResults();
+    syncDataCommandBar();
+    gridRememberNaturalWidths();
+    if (sized) gridApplyClippedTitles();
+    gridApplySelection();
+  }
+  // Punch list 37. The numbers a spreadsheet puts here, computed from the
+  // selected cells: Count, Sum, Average, Min, Max over the NUMERIC ones, with
+  // the non-numeric count stated rather than silently dropped. The four-line
+  // how-to it replaces is not lost - it is the grid's own aria-label and the
+  // "Edit the data" walkthrough - because a permanent instruction is the one
+  // thing a status bar should not be.
+  function gridSelectionStats() {
+    var t = PROJECT.table, r = gridSelectionRect();
+    if (!t || !r) return null;
+    var nums = [], cells = 0, nonNum = 0, blank = 0;
+    for (var row = r.r0; row <= r.r1; row++)
+      for (var c = r.c0; c <= r.c1; c++) {
+        var col = t.order[c];
+        if (!col) continue;
+        cells++;
+        var v = (t.columns[col] || [])[row];
+        if (v == null || v === "") { blank++; continue; }
+        if (typeof v === "number" && isFinite(v)) nums.push(v);
+        else nonNum++;
+      }
+    if (!cells) return null;
+    var out = { cells: cells, n: nums.length, nonNum: nonNum, blank: blank };
+    if (nums.length) {
+      var sum = 0, min = Infinity, max = -Infinity;
+      for (var i = 0; i < nums.length; i++) {
+        sum += nums[i];
+        if (nums[i] < min) min = nums[i];
+        if (nums[i] > max) max = nums[i];
+      }
+      out.sum = sum;
+      out.mean = sum / nums.length;
+      out.min = min;
+      out.max = max;
+    }
+    return out;
+  }
+  function gridStatNum(v) {
+    if (!isFinite(v)) return "\u2014";
+    var a = Math.abs(v);
+    if (a >= 1e6 || (a > 0 && a < 1e-3)) return v.toPrecision(4);
+    return String(Math.round(v * 1e4) / 1e4);
+  }
+  function gridStatsHtml() {
+    var st = gridSelectionStats();
+    if (!st) return "";
+    var parts = ["Count " + st.cells];
+    if (st.n) {
+      parts.push("Sum " + gridStatNum(st.sum));
+      parts.push("Average " + gridStatNum(st.mean));
+      parts.push("Min " + gridStatNum(st.min));
+      parts.push("Max " + gridStatNum(st.max));
+    }
+    // Say what was left out rather than quietly averaging over fewer cells
+    // than the count implies.
+    var skipped = [];
+    if (st.nonNum) skipped.push(st.nonNum + " text");
+    if (st.blank) skipped.push(st.blank + " empty");
+    var html = parts.map(function (p) {
+      var bits = p.split(" ");
+      return '<span class="ps-gridstat"><b>' + escHtml(bits[0]) + "</b>" +
+        escHtml(bits.slice(1).join(" ")) + "</span>";
+    }).join("");
+    if (skipped.length && st.n)
+      html += '<span class="ps-gridstat ps-gridstat-skip">' +
+        escHtml(skipped.join(", ") + " not counted") + "</span>";
+    else if (skipped.length)
+      html += '<span class="ps-gridstat ps-gridstat-skip">' +
+        escHtml("nothing numeric selected") + "</span>";
+    return html;
+  }
+  function gridFootHtml(t) {
+    var n = nRows(t);
+    return '<span id="ps-grid-stats" class="ps-gridstats"></span>' +
+      '<span id="ps-grid-selection-status" role="status" aria-live="polite"></span>' +
+      '<span class="ps-grid-shape">' + n.toLocaleString() + " rows \u00d7 " +
+      t.order.length + " variables" +
+      (gridShouldVirtualize(t)
+       ? " \u00b7 windowed view; the chart uses all of them" : "") + "</span>";
+  }
+
+  // ---- data undo/redo (Cmd/Ctrl+Z, Cmd/Ctrl+Y or Shift+Z) ----
+  // Snapshots cover the DATA state (raw cells, types, exclusions); chart
+  // styling has the engine's own undo. The keys act only outside text
+  // inputs and outside the chart host.
+  // P4. The cap was 50 whole-table snapshots BY COUNT, which is about 250 MB
+  // of retained strings at 20,000 rows and reachable in 50 cell edits - on the
+  // Chromebook target. The engine derives a byte budget at runtime and the
+  // shell did not, so it now does the same thing: keep every step while the
+  // history is small, and drop the OLDEST steps once the total exceeds the
+  // budget, always keeping at least a few so undo never becomes useless on a
+  // big table. The count cap stays as a second ceiling.
+  //
+  // Deliberately NOT persisted across a reload. It would be the third claimant
+  // on a ~5 MB localStorage quota that item 15 already found too tight for the
+  // project plus its backup plus five recents, and a recovery ladder that
+  // works matters more than an undo stack that survives a refresh. Worth
+  // revisiting if the quota picture changes.
+  var DATA_UNDO = [], DATA_REDO = [], DATA_HIST_CAP = 50;
+  var DATA_HIST_BYTES = 24 * 1024 * 1024;   // retained strings, not storage
+  var DATA_HIST_MIN = 3;
+  var DATA_ACTION_SEQ = 0;
+  var DATA_LAST_AT = 0, CHART_LAST_AT = 0;
+  function dataSnapshot() {
+    var t = PROJECT.table;
+    return JSON.stringify({ order: t.order, raw: t.raw, types: t.types,
+                            declaredLevels: t.declaredLevels,
+                            levelOrderDefaults: t.levelOrderDefaults || {},
+                            missingTokens: t.missingTokens,
+                            missingTokensByCol: t.missingTokensByCol || {},
+                            excluded: t.excluded || {}, edited: !!t.edited,
+                            caseIds: t.caseIds || [],
+                            excludedRows: t.excludedRows || {},
+                            filters: t.filters || [],
+                            computed: t.computed || {},
+                            chartRoles: PROJECT.charts.map(function (c) {
+                              return { id: c.id, roles: c.roles || {} };
+                            }) });
+  }
+  function dataHistTrim(stack) {
+    while (stack.length > DATA_HIST_CAP) stack.shift();
+    var bytes = 0, i;
+    for (i = 0; i < stack.length; i++) bytes += stack[i].snap.length;
+    while (stack.length > DATA_HIST_MIN && bytes > DATA_HIST_BYTES)
+      bytes -= stack.shift().snap.length;
+  }
+  // The label is what the menu and the toast say instead of a fixed "data
+  // change" and a generic "Previous data state restored". Three destructive
+  // paths already named their step; every path can now.
+  function dataMark(label) {
+    try {
+      DATA_UNDO.push({ snap: dataSnapshot(), label: label || "" });
+      dataHistTrim(DATA_UNDO);
+      DATA_REDO.length = 0;
+      DATA_LAST_AT = Date.now();
+      DATA_ACTION_SEQ++;
+    } catch (e) {}
+    // Some spreadsheet edits repaint only their cell and chart instead of
+    // rebuilding the whole Data grid. Keep visible history controls live at
+    // the moment the history step is created, independent of that render path.
+    if (document.getElementById("ps-data-undo")) syncDataCommandBar();
+  }
+  function dataHistoryClear() {
+    DATA_UNDO.length = 0; DATA_REDO.length = 0; DATA_ACTION_SEQ++;
+    if (document.getElementById("ps-data-undo")) syncDataCommandBar();
+  }
+  function dataApply(snapStr) {
+    var t = PROJECT.table, s = JSON.parse(snapStr);
+    if (Array.isArray(s.order)) t.order = s.order;
+    t.raw = s.raw; t.types = s.types; t.excluded = s.excluded;
+    t.caseIds = Array.isArray(s.caseIds) ? s.caseIds : [];
+    while (t.caseIds.length < nRows(t)) t.caseIds.push(newCaseId());
+    t.caseIds.length = nRows(t);
+    t.excludedRows = s.excludedRows || {};
+    t.filters = Array.isArray(s.filters) ? s.filters : [];
+    t.computed = (s.computed && typeof s.computed === "object")
+      ? s.computed : {};
+    if (Object.prototype.hasOwnProperty.call(s, "declaredLevels"))
+      t.declaredLevels = s.declaredLevels;
+    t.levelOrderDefaults = s.levelOrderDefaults || {};
+    if (Array.isArray(s.missingTokens)) t.missingTokens = s.missingTokens;
+    t.missingTokensByCol = (s.missingTokensByCol &&
+      typeof s.missingTokensByCol === "object") ? s.missingTokensByCol : {};
+    t.edited = s.edited;
+    if (Array.isArray(s.chartRoles)) {
+      for (var ri = 0; ri < s.chartRoles.length; ri++) {
+        var roleChart = chartById(s.chartRoles[ri].id);
+        if (roleChart) roleChart.roles = s.chartRoles[ri].roles || {};
+      }
+    }
+    retype(t);
+    validateRoles();
+    persist();
+    syncAll();
+    render();
+  }
+  function dataStepLabel(stack) {
+    var top = stack.length ? stack[stack.length - 1] : null;
+    return (top && top.label) || "";
+  }
+  function dataUndo() {
+    if (!DATA_UNDO.length) return false;
+    if (GRID_EDIT) gridCancelEdit();
+    var entry = DATA_UNDO[DATA_UNDO.length - 1];
+    // The step being undone keeps its name on the way to the redo stack, so
+    // Redo can say what it will reapply.
+    DATA_REDO.push({ snap: dataSnapshot(), label: entry.label });
+    dataHistTrim(DATA_REDO);
+    DATA_ACTION_SEQ++;
+    DATA_UNDO.pop();
+    dataApply(entry.snap);
+    showToast(entry.label
+      ? "Undid " + entry.label
+      : "Previous data state restored");
+    return true;
+  }
+  function dataRedo() {
+    if (!DATA_REDO.length) return false;
+    if (GRID_EDIT) gridCancelEdit();
+    var entry = DATA_REDO[DATA_REDO.length - 1];
+    DATA_UNDO.push({ snap: dataSnapshot(), label: entry.label });
+    dataHistTrim(DATA_UNDO);
+    DATA_ACTION_SEQ++;
+    DATA_REDO.pop();
+    dataApply(entry.snap);
+    showToast(entry.label
+      ? "Redid " + entry.label
+      : "Data change reapplied");
+    return true;
+  }
+
+  // ---- cell editing ----
+  // One cell edits at a time; commits write the RAW string, the column
+  // TYPE stays declared (a non-parsing value in a numeric column becomes
+  // missing, the jamovi NA convention), and the chart re-renders live.
+  function gridCellView(t, col, i) {
+    var rowExcl = isRowExcluded(t, i);
+    var excl = isExcluded(t, col, i), v;
+    if (excl) {
+      var s = String(t.raw[col][i]).trim();
+      if (isMissingRaw(t, s, col)) v = null;
+      else if (colStoresNumbers(t, col)) v = isFinite(Number(s)) ? Number(s) : null;
+      else v = s;
+    } else v = t.columns[col][i];
+    var cls = "ps-grid-editable";
+    if (v != null && typeof v === "number") cls = "ps-grid-num " + cls;
+    if (v == null) cls = "ps-grid-miss " + cls;
+    var rowFiltered = !rowExcl && isRowFiltered(t, i);
+    if (excl) cls += " ps-grid-excl";
+    if (rowExcl) cls += " ps-grid-row-excl";
+    if (rowFiltered) cls += " ps-grid-row-filtered";
+    return { cls: cls, text: v == null ? "\u2014" : String(v),
+             title: rowFiltered
+               ? "Hidden by the active row filter - the row stays in the dataset but leaves every chart"
+               : rowExcl
+               ? "Observation excluded from every chart - right-click to include the row"
+               : (excl ? "Value excluded from charts - right-click to include it" : "") };
+  }
+  function gridPaintCell(td, col, row) {
+    var view = gridCellView(PROJECT.table, col, row);
+    td.className = view.cls;
+    td.textContent = view.text;
+    setTip(td, view.title || "");
+  }
+  function gridFindTd(col, row) {
+    // Column names are DATA: match via getAttribute equality, never by
+    // interpolating them into a selector (the suite-wide law).
+    var tds = el("ps-datagrid").querySelectorAll('td[data-gr="' + row + '"]');
+    for (var i = 0; i < tds.length; i++)
+      if (tds[i].getAttribute("data-gc") === col) return tds[i];
+    return null;
+  }
+  function gridCommitEdit(next) {
+    var ge = GRID_EDIT;
+    if (!ge) { if (next) gridOpenEditor(next.col, next.row); return; }
+    GRID_EDIT = null;
+    var t = PROJECT.table;
+    var newRaw = String(ge.input.value);
+    if (newRaw === String(t.raw[ge.col][ge.row])) {
+      gridPaintCell(ge.td, ge.col, ge.row);
+      if (next) gridOpenEditor(next.col, next.row);
+      else {
+        gridSetSelection(ge.col, ge.row, ge.col, ge.row);      // item 11
+        gridFocusSelf();
+      }
+      return;
+    }
+    dataMark("the cell edit");
+    t.raw[ge.col][ge.row] = newRaw;
+    t.edited = true;
+    retype(t);
+    gridPaintCell(ge.td, ge.col, ge.row);
+    gridApplySelection();
+    persist();
+    syncDataRow();
+    render();
+    if (next) gridOpenEditor(next.col, next.row);
+    else {
+      gridSetSelection(ge.col, ge.row, ge.col, ge.row);        // item 11
+      gridFocusSelf();
+    }
+  }
+  function gridCancelEdit() {
+    var ge = GRID_EDIT;
+    if (!ge) return;
+    GRID_EDIT = null;
+    ge.canceling = true;
+    gridPaintCell(ge.td, ge.col, ge.row);
+    // Item 11. Leaving an editor used to leave NOTHING selected, which is why
+    // arrow navigation had no way in: a plain cell click opens the editor
+    // (this app's deliberate choice), Enter and Tab open the NEXT editor, and
+    // there was no state in which a cell was merely current. Escape now lands
+    // on the cell as a cursor, so the keyboard model below is reachable from
+    // an ordinary click without changing what a click itself does. Focus has
+    // to follow: the input is gone, so without this the keys land on <body>.
+    gridSetSelection(ge.col, ge.row, ge.col, ge.row);
+    gridFocusSelf();
+  }
+  function gridFocusSelf() {
+    var g = document.getElementById("ps-datagrid");
+    if (!g) return;
+    try { g.focus({ preventScroll: true }); }
+    catch (e) { try { g.focus(); } catch (e2) {} }
+  }
+  function gridEditorDisplayWidth(td, col, value) {
+    // Inputs have a browser-defined intrinsic width. In an auto-layout table
+    // that intrinsic width can resize the entire column merely by entering
+    // edit mode. Measure before inserting the editor, then let the editor
+    // overlay adjacent cells only when its actual content is clipped.
+    var base = Math.max(1, td.getBoundingClientRect().width || td.offsetWidth || 1);
+    var style = window.getComputedStyle ? window.getComputedStyle(td) : null;
+    var probe = document.createElement("span");
+    probe.textContent = String(value || " ");
+    probe.style.cssText =
+      "position:fixed;left:-10000px;top:-10000px;visibility:hidden;" +
+      "white-space:pre;pointer-events:none;";
+    if (style) probe.style.font = style.font;
+    document.body.appendChild(probe);
+    var textWidth = probe.getBoundingClientRect().width || probe.offsetWidth || 0;
+    document.body.removeChild(probe);
+    if (!textWidth) {
+      var fontSize = style ? parseFloat(style.fontSize) : 12;
+      textWidth = String(value || " ").length * (isFinite(fontSize) ? fontSize : 12) * 0.62;
+    }
+    var needed = textWidth + 28;
+    var heads = el("ps-datagrid").querySelectorAll("th[data-grid-col]");
+    for (var i = 0; i < heads.length; i++) {
+      if (heads[i].getAttribute("data-grid-col") === col) {
+        needed = Math.max(needed, heads[i].scrollWidth || 0);
+        break;
+      }
+    }
+    var gridWidth = el("ps-datagrid").clientWidth || 520;
+    var cap = Math.max(base, Math.min(520, Math.max(180, gridWidth - 24)));
+    return {
+      base: base,
+      width: Math.min(cap, Math.max(base, Math.ceil(needed)))
+    };
+  }
+  function gridOpenEditor(col, row) {
+    if (GRID_EDIT) gridCommitEdit(null);
+    var t = PROJECT.table;
+    if (!t || !t.raw[col] || row < 0 || row >= nRows(t)) return;
+    if (isComputedColumn(t, col)) {
+      showToast(col + " is computed from a formula - edit the formula " +
+        "from its column menu instead.");
+      return;
+    }
+    // Opening an editor is itself a deliberate single-cell selection. Move
+    // cross-view identity to this cell and release any one-shot Reveal
+    // emphasis before repainting, so the old source cell cannot remain
+    // outlined while a different cell is being edited.
+    LINKED_CELL = {
+      caseId: String(t.caseIds[row]),
+      col: String(col)
+    };
+    LINKED_REVEAL_EMPHASIS = false;
+    selectInspectorVariable(col);
+    var td = gridFindTd(col, row);
+    if (!td) {
+      var grid = el("ps-datagrid");
+      grid.scrollTop = Math.max(0, row * GRID_ROW_HEIGHT);
+      syncDataGrid();
+      td = gridFindTd(col, row);
+    }
+    if (!td) return;
+    gridClearSelection();
+    var rawVal = String(t.raw[col][row]).trim();
+    if (isMissingRaw(t, rawVal, col)) rawVal = "";
+    var editorSize = gridEditorDisplayWidth(td, col, rawVal);
+    var input = document.createElement("input");
+    input.type = "text";
+    input.className = "ps-grid-cellinput";
+    input.value = rawVal;
+    td.textContent = "";
+    td.classList.remove("ps-grid-miss");
+    td.classList.add("ps-grid-editing");
+    input.style.width = Math.ceil(editorSize.width) + "px";
+    if (editorSize.width > editorSize.base + 1)
+      input.classList.add("ps-grid-cellinput-wide");
+    td.appendChild(input);
+    var ge = { col: col, row: row, td: td, input: input, canceling: false };
+    GRID_EDIT = ge;
+    input.addEventListener("keydown", function (e) {
+      // The editor owns the keys it handles. Without this, Escape bubbled to
+      // the grid handler, which read GRID_EDIT as already null (cancel clears
+      // it synchronously) and cleared the cursor the cancel had just seated.
+      if (e.key === "Enter" || e.key === "Tab" || e.key === "Escape")
+        e.stopPropagation();
+      if (e.key === "Enter") {
+        e.preventDefault();
+        gridCommitEdit(row + 1 < nRows(t)
+                       ? { col: col, row: row + 1 } : null);
+      } else if (e.key === "Tab") {
+        e.preventDefault();
+        var visible = gridVisibleColumns(t);
+        var ci = visible.indexOf(col) + (e.shiftKey ? -1 : 1);
+        gridCommitEdit(ci >= 0 && ci < visible.length
+                       ? { col: visible[ci], row: row } : null);
+      } else if (e.key === "Escape") {
+        gridCancelEdit();
+      }
+    });
+    input.addEventListener("blur", function () {
+      // Cancel/commit paths clear GRID_EDIT before the input leaves the
+      // DOM; a genuine focus-away commits in place.
+      if (GRID_EDIT && GRID_EDIT.input === input) gridCommitEdit(null);
+    });
+    input.focus();
+    // A spreadsheet click should show an active cell and a normal caret,
+    // not mimic browser text selection by highlighting the entire value.
+    try {
+      var caret = input.value.length;
+      input.setSelectionRange(caret, caret);
+    } catch (ignore) {}
+  }
+  function gridAddRow() {
+    if (GRID_EDIT) gridCommitEdit(null);
+    var t = PROJECT.table;
+    if (!t) return;
+    dataMark("adding the row");
+    for (var j = 0; j < t.order.length; j++) t.raw[t.order[j]].push("");
+    t.caseIds.push(newCaseId());
+    t.edited = true;
+    retype(t);
+    persist();
+    syncDataRow();
+    syncDataGrid();
+    render();
+    var grid = el("ps-datagrid");
+    grid.scrollTop = grid.scrollHeight;
+    var newRow = nRows(t) - 1;
+    gridOpenEditor(gridVisibleColumns(t)[0], newRow);
+  }
+  function gridRemapValueExclusions(t, row, mode) {
+    if (!t.excluded) return;
+    for (var c in t.excluded) {
+      if (!Object.prototype.hasOwnProperty.call(t.excluded, c)) continue;
+      var remapped = {};
+      for (var oldRow in t.excluded[c]) {
+        if (!Object.prototype.hasOwnProperty.call(t.excluded[c], oldRow)) continue;
+        var oldIndex = Number(oldRow);
+        if (mode === "delete" && oldIndex === row) continue;
+        var nextIndex = mode === "insert"
+          ? (oldIndex >= row ? oldIndex + 1 : oldIndex)
+          : (oldIndex > row ? oldIndex - 1 : oldIndex);
+        remapped[nextIndex] = 1;
+      }
+      if (Object.keys(remapped).length) t.excluded[c] = remapped;
+      else delete t.excluded[c];
+    }
+  }
+  function gridInsertRowAt(row) {
+    var t = PROJECT.table;
+    if (!t) return;
+    var at = Math.max(0, Math.min(nRows(t), Math.round(Number(row) || 0)));
+    dataMark("inserting the row");
+    gridRemapValueExclusions(t, at, "insert");
+    for (var j = 0; j < t.order.length; j++)
+      t.raw[t.order[j]].splice(at, 0, "");
+    t.caseIds.splice(at, 0, newCaseId());
+    t.edited = true;
+    retype(t);
+    persist();
+    syncAll();
+    render();
+    var grid = el("ps-datagrid");
+    grid.scrollTop = Math.max(0, at * GRID_ROW_HEIGHT -
+      Math.max(0, grid.clientHeight - GRID_ROW_HEIGHT) / 2);
+    syncDataGrid();
+    gridOpenEditor(gridVisibleColumns(t)[0], at);
+  }
+  function gridDuplicateRow(row) {
+    var t = PROJECT.table;
+    if (!t || row < 0 || row >= nRows(t)) return;
+    var at = row + 1;
+    dataMark("duplicating the row");
+    gridRemapValueExclusions(t, at, "insert");
+    for (var j = 0; j < t.order.length; j++) {
+      var col = t.order[j];
+      t.raw[col].splice(at, 0, t.raw[col][row]);
+    }
+    t.caseIds.splice(at, 0, newCaseId());
+    t.edited = true;
+    retype(t);
+    persist();
+    syncAll();
+    render();
+    var visible = gridVisibleColumns(t);
+    gridSetSelection(visible[0], at,
+      visible[visible.length - 1], at, "row");
+    showToast("Duplicated row " + (row + 1));
+  }
+  function gridDeleteRow(row) {
+    var t = PROJECT.table;
+    if (!t || row < 0 || row >= nRows(t)) return;
+    if (nRows(t) <= 1) {
+      showToast("A dataset must keep at least one row", true);
+      return;
+    }
+    dataMark("deleting the row");
+    var undoDepth = DATA_ACTION_SEQ;
+    var removedId = t.caseIds[row];
+    for (var j = 0; j < t.order.length; j++)
+      t.raw[t.order[j]].splice(row, 1);
+    t.caseIds.splice(row, 1);
+    if (t.excludedRows && removedId) delete t.excludedRows[removedId];
+    gridRemapValueExclusions(t, row, "delete");
+    t.edited = true;
+    retype(t);
+    validateRoles();
+    persist();
+    syncAll();
+    render();
+    var nextRow = Math.min(row, nRows(t) - 1);
+    var visible = gridVisibleColumns(t);
+    gridSetSelection(visible[0], nextRow,
+      visible[visible.length - 1], nextRow, "row");
+    offerDataUndo("Deleted row " + (row + 1), undoDepth);
+  }
+  function gridInsertColumnAt(reference, toRight) {
+    var t = PROJECT.table;
+    if (!t) return;
+    var referenceAt = t.order.indexOf(reference);
+    if (referenceAt < 0) return;
+    dataMark("inserting the variable");
+    var name = uniqueColumnName("Variable");
+    var at = referenceAt + (toRight ? 1 : 0);
+    t.order.splice(at, 0, name);
+    t.raw[name] = Array(nRows(t)).fill("");
+    t.types[name] = "nominal";
+    t.edited = true;
+    INSPECTOR_VAR = name;
+    retype(t);
+    validateRoles();
+    persist();
+    syncAll();
+    render();
+    selectInspectorVariable(name);
+    if (nRows(t))
+      gridSetSelection(name, 0, name, nRows(t) - 1, "column");
+  }
+  function gridSetExcludedCells(cells, on, origin) {
+    var t = PROJECT.table;
+    if (!t || !cells || !cells.length) return false;
+    var changedCells = [], seen = {};
+    for (var ci = 0; ci < cells.length; ci++) {
+      var candidate = cells[ci];
+      if (!candidate || !t.raw[candidate.col] ||
+          candidate.row < 0 || candidate.row >= nRows(t)) continue;
+      var cellKey = candidate.col + "\u0000" + candidate.row;
+      if (seen[cellKey]) continue;
+      seen[cellKey] = 1;
+      var current = !!(t.excluded && t.excluded[candidate.col] &&
+                        t.excluded[candidate.col][candidate.row]);
+      if (current !== !!on)
+        changedCells.push({ col: candidate.col, row: candidate.row });
+    }
+    if (!changedCells.length) return false;
+    dataMark("the exclusion");
+    if (!t.excluded) t.excluded = {};
+    for (var i = 0; i < changedCells.length; i++) {
+      var col = changedCells[i].col, row = changedCells[i].row;
+      if (on) {
+        if (!t.excluded[col]) t.excluded[col] = {};
+        t.excluded[col][row] = 1;
+      } else if (t.excluded[col]) {
+        delete t.excluded[col][row];
+        if (!Object.keys(t.excluded[col]).length) delete t.excluded[col];
+      }
+    }
+    t.edited = true;
+    retype(t);
+    CHART_SNAPS = {};
+    for (i = 0; i < changedCells.length; i++) {
+      var td = gridFindTd(changedCells[i].col, changedCells[i].row);
+      if (td) gridPaintCell(td, changedCells[i].col, changedCells[i].row);
+    }
+    el("ps-gridfoot").innerHTML = gridFootHtml(t);
+    syncDataCommandBar();
+    gridApplySelection();
+    persist();
+    syncDataRow();
+    render();
+    if (origin === "chart") {
+      var first = changedCells[0];
+      showToast((on ? "Excluded " : "Included ") + first.col +
+        " value in row " + (first.row + 1) + " in Data and every chart");
+    }
+    return true;
+  }
+  function gridSetExcluded(col, row, on) {
+    gridSetExcludedCells([{ col: col, row: row }], on);
+  }
+  function gridSetExcludedRows(rows, on, origin) {
+    var t = PROJECT.table;
+    if (!t || !Array.isArray(rows) || !rows.length) return false;
+    var unique = {}, changed = 0, validRows = [];
+    for (var i = 0; i < rows.length; i++) {
+      var row = Number(rows[i]);
+      if (!isFinite(row) || row < 0 || row >= nRows(t) || unique[row]) continue;
+      unique[row] = 1;
+      var caseId = t.caseIds[row];
+      var current = !!(t.excludedRows && t.excludedRows[caseId]);
+      if (current !== !!on) { changed++; validRows.push(row); }
+    }
+    if (!changed) return false;
+    dataMark("the row exclusion");
+    if (!t.excludedRows) t.excludedRows = {};
+    for (i = 0; i < validRows.length; i++) {
+      var id = t.caseIds[validRows[i]];
+      if (on) t.excludedRows[id] = 1;
+      else delete t.excludedRows[id];
+    }
+    t.edited = true;
+    retype(t);
+    CHART_SNAPS = {};
+    persist();
+    syncDataRow();
+    syncDataGrid();
+    render();
+    var action = on ? "Excluded " : "Included ";
+    var noun = validRows.length === 1
+      ? "row " + (validRows[0] + 1) : validRows.length + " rows";
+    showToast(action + noun +
+      (origin === "chart" ? " in Data and every chart" : " in every chart"));
+    return true;
+  }
+  function gridRestoreExclusions() {
+    var t = PROJECT.table;
+    if (!t || !exclCount(t)) return;
+    dataMark("restoring the exclusions");
+    t.excluded = {};
+    t.excludedRows = {};
+    for (var ci = 0; ci < PROJECT.charts.length; ci++) {
+      var chartOptions = PROJECT.charts[ci].options || {};
+      for (var mod in chartOptions) {
+        if (!Object.prototype.hasOwnProperty.call(chartOptions, mod) ||
+            !chartOptions[mod]) continue;
+        chartOptions[mod].hiddenPoints = [];
+        if (typeof chartOptions[mod].chartSpec === "string") {
+          var spec = parseSpec(chartOptions[mod].chartSpec);
+          if (spec && typeof spec === "object") {
+            spec.hiddenPoints = [];
+            chartOptions[mod].chartSpec = JSON.stringify(spec);
+          }
+        }
+      }
+    }
+    retype(t);
+    CHART_SNAPS = {};
+    persist();
+    syncDataRow();
+    syncDataGrid();
+    render();
+  }
+  // ---- row-filter popover (Tier 1). A draft of condition rows edited
+  // in place; Apply commits ONE data-history step; Clear all removes
+  // every condition. Filtered rows dim in the grid and leave charts.
+  var FILTER_DRAFT = null;
+  function filterableColumns(t) {
+    return t.order.filter(function (c) { return t.types[c] !== "id"; });
+  }
+  function showFilterMenu() {
+    var t = PROJECT.table;
+    if (!t) return;
+    FILTER_DRAFT = validFilters(t).map(function (f) {
+      return { col: f.col, op: f.op, value: String(f.value) };
+    });
+    if (!FILTER_DRAFT.length) filterDraftAdd();
+    renderFilterMenu();
+    var m = el("ps-filtermenu");
+    var r = el("ps-data-filter-btn").getBoundingClientRect();
+    m.style.display = "block";
+    m.style.left = Math.max(8, Math.min(r.left,
+      window.innerWidth - m.offsetWidth - 8)) + "px";
+    m.style.top = Math.min(r.bottom + 4,
+      window.innerHeight - m.offsetHeight - 8) + "px";
+    el("ps-data-filter-btn").setAttribute("aria-expanded", "true");
+    var first = m.querySelector("select, input, button");
+    if (first) first.focus();
+  }
+  function hideFilterMenu() {
+    el("ps-filtermenu").style.display = "none";
+    el("ps-data-filter-btn").setAttribute("aria-expanded", "false");
+    FILTER_DRAFT = null;
+  }
+  function filterDraftAdd() {
+    var t = PROJECT.table;
+    var cols = filterableColumns(t);
+    var col = cols[0] || t.order[0];
+    FILTER_DRAFT.push({ col: col,
+      op: "eq", value: "" });
+  }
+  function filterDraftPreviewCount() {
+    // Evaluate the draft against typed values without touching the table.
+    var t = PROJECT.table, n = nRows(t), kept = 0;
+    var fs = FILTER_DRAFT.filter(function (f) {
+      return f.col && t.raw[f.col] && FILTER_OPS[f.op] &&
+        String(f.value) !== "";
+    });
+    if (!fs.length) return n;
+    var saved = t.filters;
+    t.filters = fs;
+    var mask = null;
+    try {
+      // Reuse the real evaluator on a scratch copy of the mask fields.
+      var scratch = { filters: fs };
+      for (var k in t)
+        if (Object.prototype.hasOwnProperty.call(t, k) && k !== "filters" &&
+            k !== "filterMask" && k !== "filteredView")
+          scratch[k] = t[k];
+      computeFilterState(scratch);
+      mask = scratch.filterMask;
+    } catch (e) { mask = null; }
+    t.filters = saved;
+    if (!mask) return n;
+    for (var i = 0; i < n; i++) if (!mask[i]) kept++;
+    return kept;
+  }
+  function renderFilterMenu() {
+    var t = PROJECT.table, m = el("ps-filtermenu");
+    m.innerHTML = "";
+    m.appendChild(mkEl("h3", "", "Row filters"));
+    m.appendChild(mkEl("p", "ps-filter-hint",
+      "Rows failing any condition stay visible in the grid (dimmed) " +
+      "but leave every chart and statistic. Nothing is deleted."));
+    for (var i = 0; i < FILTER_DRAFT.length; i++) {
+      (function (idx) {
+        var f = FILTER_DRAFT[idx];
+        var row = mkEl("div", "ps-filter-row");
+        var colSel = document.createElement("select");
+        colSel.setAttribute("data-filter-col", String(idx));
+        var cols = filterableColumns(t);
+        for (var c = 0; c < cols.length; c++) {
+          var o = document.createElement("option");
+          o.value = cols[c]; o.textContent = cols[c];
+          if (cols[c] === f.col) o.selected = true;
+          colSel.appendChild(o);
+        }
+        colSel.addEventListener("change", function () {
+          f.col = this.value;
+          var numNow = colStoresNumbers(t, f.col);
+          if (!numNow && f.op !== "eq" && f.op !== "ne") f.op = "eq";
+          f.value = "";
+          renderFilterMenu();
+        });
+        row.appendChild(colSel);
+        var num = colStoresNumbers(t, f.col);
+        var opSel = document.createElement("select");
+        opSel.setAttribute("data-filter-op", String(idx));
+        // The stored operator is kept even when this column's type cannot use
+        // it, MARKED rather than dropped. Dropping it left the select showing
+        // the first option while f.op still said something else, so the one
+        // place a user can edit the filter showed a different condition from
+        // the one the chart note and the button tooltip were disclosing.
+        var opStranded = !num && FILTER_OPS[f.op] && !FILTER_OPS[f.op].cat;
+        for (var op in FILTER_OPS) {
+          if (!Object.prototype.hasOwnProperty.call(FILTER_OPS, op)) continue;
+          if (!num && !FILTER_OPS[op].cat && op !== f.op) continue;
+          var oo = document.createElement("option");
+          oo.value = op;
+          oo.textContent = FILTER_OPS[op].label +
+            (op === f.op && opStranded ? "  (needs numbers)" : "");
+          if (op === f.op) oo.selected = true;
+          opSel.appendChild(oo);
+        }
+        opSel.addEventListener("change", function () {
+          f.op = this.value; refreshFilterCount();
+        });
+        row.appendChild(opSel);
+        var valueEl;
+        var lv = t.levels[f.col];
+        if (!num && lv && lv.length) {
+          valueEl = document.createElement("select");
+          valueEl.setAttribute("data-filter-value", String(idx));
+          var blank = document.createElement("option");
+          blank.value = ""; blank.textContent = "(choose a level)";
+          valueEl.appendChild(blank);
+          for (var L = 0; L < lv.length; L++) {
+            var lo = document.createElement("option");
+            lo.value = lv[L]; lo.textContent = lv[L];
+            if (lv[L] === String(f.value)) lo.selected = true;
+            valueEl.appendChild(lo);
+          }
+          // Same rule as the operator above: a stored value that is not one of
+          // this column's levels is SHOWN and marked, not silently replaced by
+          // "(choose a level)". Otherwise the popover reads as an unfinished
+          // condition while a complete one is stored and being disclosed
+          // elsewhere.
+          if (String(f.value) !== "" && lv.indexOf(String(f.value)) === -1) {
+            var stray = document.createElement("option");
+            stray.value = String(f.value);
+            stray.textContent = String(f.value) + "  (not a level here)";
+            stray.selected = true;
+            valueEl.appendChild(stray);
+          }
+          valueEl.addEventListener("change", function () {
+            f.value = this.value; refreshFilterCount();
+          });
+        } else {
+          valueEl = document.createElement("input");
+          valueEl.type = "text";
+          valueEl.setAttribute("data-filter-value", String(idx));
+          valueEl.placeholder = num ? "number" : "value";
+          valueEl.value = f.value;
+          valueEl.addEventListener("input", function () {
+            f.value = this.value; refreshFilterCount();
+          });
+        }
+        row.appendChild(valueEl);
+        var strayVal = String(f.value) !== "" && !num && lv && lv.length &&
+          lv.indexOf(String(f.value)) === -1;
+        if (opStranded || strayVal) {
+          var why = mkEl("div", "ps-filter-stranded",
+            opStranded
+              ? "This comparison needs numbers, and " + f.col +
+                " is not numeric, so this condition is not being applied."
+              : "\"" + f.value + "\" is not one of " + f.col +
+                "'s levels, so this condition is not being applied.");
+          row.appendChild(why);
+        }
+        var rm = mkEl("button", "ps-filter-remove", "\u00d7");
+        rm.type = "button";
+        setTip(rm, "Remove this condition");
+        rm.addEventListener("click", function () {
+          FILTER_DRAFT.splice(idx, 1);
+          if (!FILTER_DRAFT.length) filterDraftAdd();
+          renderFilterMenu();
+        });
+        row.appendChild(rm);
+        m.appendChild(row);
+      })(i);
+    }
+    var add = mkEl("button", "ps-btn", "+ Add condition");
+    add.type = "button";
+    add.addEventListener("click", function () {
+      filterDraftAdd(); renderFilterMenu();
+    });
+    m.appendChild(add);
+    var actions = mkEl("div", "ps-filter-actions");
+    var apply = mkEl("button", "ps-btn ps-primary", "Apply filters");
+    apply.type = "button";
+    apply.setAttribute("data-filter-apply", "");
+    apply.addEventListener("click", function () { applyFilters(false); });
+    actions.appendChild(apply);
+    var clear = mkEl("button", "ps-btn", "Clear all");
+    clear.type = "button";
+    clear.setAttribute("data-filter-clear", "");
+    clear.disabled = !validFilters(t).length &&
+      !FILTER_DRAFT.some(function (f) { return String(f.value) !== ""; });
+    clear.addEventListener("click", function () { applyFilters(true); });
+    actions.appendChild(clear);
+    var count = mkEl("span", "ps-filter-count", "");
+    count.setAttribute("data-filter-count", "");
+    actions.appendChild(count);
+    m.appendChild(actions);
+    refreshFilterCount();
+  }
+  function refreshFilterCount() {
+    var count = el("ps-filtermenu").querySelector("[data-filter-count]");
+    if (!count) return;
+    var t = PROJECT.table;
+    count.textContent = "showing " + filterDraftPreviewCount() +
+      " of " + nRows(t) + " rows";
+  }
+  function applyFilters(clearAll) {
+    var t = PROJECT.table;
+    var next = clearAll ? [] : FILTER_DRAFT.filter(function (f) {
+      return f.col && t.raw[f.col] && FILTER_OPS[f.op] &&
+        String(f.value) !== "";
+    }).map(function (f) {
+      return { col: f.col, op: f.op,
+               value: colStoresNumbers(t, f.col) ? Number(f.value)
+                                                 : String(f.value) };
+    });
+    var cur = validFilters(t);
+    var current = JSON.stringify(cur);
+    function sameFilters(a, b) {
+      if (a.length !== b.length) return false;
+      for (var i = 0; i < a.length; i++)
+        if (a[i].col !== b[i].col || a[i].op !== b[i].op ||
+            String(a[i].value) !== String(b[i].value)) return false;
+      return true;
+    }
+    if (sameFilters(next, cur) && !(clearAll && current !== "[]")) {
+      hideFilterMenu(); return;
+    }
+    dataMark("the filter change");
+    t.filters = next;
+    retype(t);
+    CHART_SNAPS = {};
+    persist();
+    syncDataGrid();
+    syncDataCommandBar();
+    render();
+    hideFilterMenu();
+    showToast(next.length
+      ? "Filter applied \u00b7 showing " +
+        (nRows(t) - filteredRowCount(t)) + " of " + nRows(t) + " rows"
+      : "Filters cleared \u00b7 all rows are back in the charts");
+  }
+  var CELL_MENU = null;   // {col, row, cells, on}
+  function showCellMenu(x, y, col, row) {
+    if (!gridSelectionContains(col, row))
+      gridSetSelection(col, row, col, row);
+    var cells = gridSelectionCells();
+    if (!cells.length) cells = [{ col: col, row: row }];
+    var allExcluded = true;
+    for (var i = 0; i < cells.length; i++)
+      if (!(PROJECT.table.excluded && PROJECT.table.excluded[cells[i].col] &&
+            PROJECT.table.excluded[cells[i].col][cells[i].row])) {
+        allExcluded = false; break;
+      }
+    var on = !allExcluded;
+    var rowExcluded = isRowExcluded(PROJECT.table, row);
+    CELL_MENU = { col: col, row: row, cells: cells, on: on,
+                  rowOn: !rowExcluded };
+    var m = el("ps-cellmenu");
+    var valueToggle = el("ps-cellmenu-toggle");
+    valueToggle.disabled = rowExcluded;
+    valueToggle.textContent = rowExcluded
+      ? "Value excluded with row"
+      : (on ? "Exclude " : "Include ") +
+        (cells.length === 1 ? "value" : cells.length + " values");
+    el("ps-cellmenu-row").textContent =
+      (rowExcluded ? "Include" : "Exclude") + " row " + (row + 1);
+    el("ps-cellmenu-fill").disabled = cells.length < 2;
+    m.style.display = "block";
+    m.style.left = Math.min(x, window.innerWidth - 170) + "px";
+    m.style.top = Math.min(y, window.innerHeight - 142) + "px";
+  }
+  function hideCellMenu() {
+    el("ps-cellmenu").style.display = "none";
+    CELL_MENU = null;
+  }
+  function gridCellFromTarget(target) {
+    return target && target.closest ? target.closest("td[data-gc]") : null;
+  }
+  function gridPointerCell(e) {
+    var target = null;
+    if (document.elementFromPoint)
+      target = document.elementFromPoint(e.clientX, e.clientY);
+    return gridCellFromTarget(target || e.target);
+  }
+  function gridFinishDrag(e, canceled) {
+    var drag = GRID_DRAG;
+    if (!drag) return;
+    GRID_DRAG = null;
+    var grid = el("ps-datagrid");
+    grid.classList.remove("ps-grid-selecting");
+    if (!drag.started || canceled) return;
+    GRID_IGNORE_CLICK = true;
+    window.setTimeout(function () { GRID_IGNORE_CLICK = false; }, 0);
+    try { grid.focus({ preventScroll: true }); }
+    catch (ignore) { try { grid.focus(); } catch (ignore2) {} }
+    if (e && e.preventDefault) e.preventDefault();
+  }
+  function wireGrid() {
+    var grid = el("ps-datagrid");
+    el("ps-data-undo").addEventListener("click", dataUndo);
+    el("ps-data-addrow").addEventListener("click", gridAddRow);
+    el("ps-data-redo").addEventListener("click", dataRedo);
+    el("ps-data-find").addEventListener("input", function () {
+      gridSetFindQuery(this.value);
+    });
+    el("ps-data-find").addEventListener("keydown", function (e) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        gridFindStep(e.shiftKey ? -1 : 1);
+      } else if (e.key === "Escape" && this.value) {
+        e.preventDefault();
+        this.value = "";
+        gridSetFindQuery("");
+      }
+    });
+    el("ps-data-find-prev").addEventListener("click", function () {
+      gridFindStep(-1);
+    });
+    el("ps-data-find-next").addEventListener("click", function () {
+      gridFindStep(1);
+    });
+    el("ps-data-restore").addEventListener("click", gridRestoreExclusions);
+    el("ps-data-filter-btn").addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (el("ps-filtermenu").style.display === "block") hideFilterMenu();
+      else showFilterMenu();
+    });
+    document.addEventListener("pointerdown", function (e) {
+      var fm = el("ps-filtermenu");
+      if (fm.style.display !== "block") return;
+      if (e.target.closest && (e.target.closest("#ps-filtermenu") ||
+          e.target.closest("#ps-data-filter-btn"))) return;
+      hideFilterMenu();
+    }, true);
+    el("ps-filtermenu").addEventListener("keydown", function (e) {
+      if (e.key === "Escape") {
+        e.preventDefault(); e.stopPropagation();
+        hideFilterMenu();
+        el("ps-data-filter-btn").focus();
+      }
+    });
+    el("ps-data-hidden-columns").addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (COLUMN_VIEW_MENU_OPEN) hideColumnViewMenu();
+      else showColumnViewMenu();
+    });
+    el("ps-data-more").addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (DATA_MENU_OPEN) hideDataMenu(); else showDataMenu();
+    });
+    el("ps-columnview-focus").addEventListener("click", function () {
+      var next = !GRID_FOCUS_CHART_COLUMNS;
+      hideColumnViewMenu();
+      gridSetChartFocus(next);
+    });
+    el("ps-columnview-hidden-list").addEventListener("click", function (e) {
+      var button = e.target.closest
+        ? e.target.closest("button[data-show-column]") : null;
+      if (!button) return;
+      var col = button.getAttribute("data-show-column");
+      gridShowColumn(col);
+      if (gridHiddenColumnCount(PROJECT.table)) showColumnViewMenu();
+      else hideColumnViewMenu();
+    });
+    el("ps-columnview-showall").addEventListener("click", function () {
+      hideColumnViewMenu();
+      gridShowAllColumns();
+    });
+    el("ps-datamenu-focus-columns").addEventListener("click", function () {
+      var next = !GRID_FOCUS_CHART_COLUMNS;
+      hideDataMenu();
+      gridSetChartFocus(next);
+    });
+    el("ps-datamenu-resetview").addEventListener("click", function () {
+      hideDataMenu();
+      gridShowAllColumns();
+    });
+    el("ps-datamenu-fitall").addEventListener("click", function () {
+      hideDataMenu(); gridAutoFitAll();
+    });
+    el("ps-datamenu-resetwidths").addEventListener("click", function () {
+      hideDataMenu(); gridResetAllWidths();
+    });
+    el("ps-datamenu-reshape").addEventListener("click", function () {
+      hideDataMenu();
+      openReshapeDialog();
+    });
+    el("ps-reshape-close").addEventListener("click", function () {
+      closeShellDialog("ps-reshape-dialog");
+    });
+    el("ps-reshape-cancel").addEventListener("click", function () {
+      closeShellDialog("ps-reshape-dialog");
+    });
+    el("ps-reshape-apply").addEventListener("click", applyReshape);
+    var reshapePickers = ["ps-reshape-id", "ps-reshape-occ", "ps-reshape-value"];
+    for (var rp = 0; rp < reshapePickers.length; rp++) {
+      el(reshapePickers[rp]).addEventListener("change", function () {
+        // A new column choice is a new situation: accepted remedies
+        // reset so each refusal is confronted for THIS configuration.
+        RESHAPE_OPTS = { aggregateMean: false, carryFirst: false };
+        refreshReshapePreview();
+      });
+    }
+    el("ps-datamenu-restore").addEventListener("click", function () {
+      hideDataMenu(); gridRestoreExclusions();
+    });
+    window.addEventListener("keydown", function (e) {
+      if (appWorkspace() !== "data" || !(e.metaKey || e.ctrlKey) ||
+          e.altKey || String(e.key || "").toLowerCase() !== "f") return;
+      e.preventDefault();
+      e.stopPropagation();
+      el("ps-data-find").focus();
+      el("ps-data-find").select();
+    }, true);
+    grid.addEventListener("scroll", function () {
+      if (GRID_EDIT || GRID_SCROLL_FRAME) return;
+      GRID_SCROLL_FRAME = window.requestAnimationFrame(function () {
+        GRID_SCROLL_FRAME = null;
+        if (appWorkspace() !== "data" || !PROJECT.table ||
+            !gridShouldVirtualize(PROJECT.table)) return;
+        var wanted = Math.max(0, Math.floor((Number(grid.scrollTop) || 0) /
+          GRID_ROW_HEIGHT) -
+          GRID_WINDOW_OVERSCAN);
+        if (Math.abs(wanted - GRID_WINDOW_START) >= GRID_WINDOW_OVERSCAN / 2)
+          syncDataGrid();
+      });
+    });
+    grid.addEventListener("pointerdown", function (e) {
+      if (e.button !== 0 ||
+          (e.pointerType && e.pointerType !== "mouse" && e.pointerType !== "pen"))
+        return;
+      var resizer = e.target.closest ? e.target.closest(".ps-grid-col-resizer") : null;
+      if (resizer) {
+        var resizeHead = resizer.closest("th[data-grid-col]");
+        if (!resizeHead) return;
+        if (GRID_EDIT) gridCommitEdit(null);
+        var resizeCol = resizeHead.getAttribute("data-grid-col");
+        var currentWidths = gridCaptureCurrentWidths();
+        GRID_COLUMN_DRAG = {
+          col: resizeCol,
+          startX: e.clientX,
+          startWidth: gridClampColumnWidth(currentWidths[resizeCol])
+        };
+        gridEnsureSizedTable(currentWidths);
+        document.body.classList.add("ps-grid-column-resizing");
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      if (e.target.closest && e.target.closest(".ps-grid-cellinput")) return;
+      var td = gridCellFromTarget(e.target);
+      if (!td) return;
+      try {
+        var nativeSelection = window.getSelection && window.getSelection();
+        if (nativeSelection) nativeSelection.removeAllRanges();
+      } catch (ignore) {}
+      var useAnchor = e.shiftKey && GRID_SELECTION;
+      GRID_DRAG = {
+        sx: e.clientX, sy: e.clientY, started: false,
+        anchorCol: useAnchor ? GRID_SELECTION.anchorCol : td.getAttribute("data-gc"),
+        anchorRow: useAnchor ? GRID_SELECTION.anchorRow :
+                   Number(td.getAttribute("data-gr")),
+        focusCol: td.getAttribute("data-gc"),
+        focusRow: Number(td.getAttribute("data-gr"))
+      };
+    });
+    document.addEventListener("pointermove", function (e) {
+      if (GRID_COLUMN_DRAG) {
+        var resize = GRID_COLUMN_DRAG;
+        gridColumnWidths(true)[resize.col] = gridClampColumnWidth(
+          resize.startWidth + e.clientX - resize.startX);
+        gridApplyColumnWidthsLive();
+        e.preventDefault();
+        return;
+      }
+      var drag = GRID_DRAG;
+      if (!drag) return;
+      var dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+      if (!drag.started && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+      if (!drag.started) {
+        drag.started = true;
+        if (GRID_EDIT) gridCommitEdit(null);
+        grid.classList.add("ps-grid-selecting");
+        try {
+          var nativeSelection = window.getSelection && window.getSelection();
+          if (nativeSelection) nativeSelection.removeAllRanges();
+        } catch (ignore) {}
+      }
+      var box = grid.getBoundingClientRect();
+      if (e.clientY < box.top + 20) grid.scrollTop -= 14;
+      else if (e.clientY > box.bottom - 20) grid.scrollTop += 14;
+      if (e.clientX < box.left + 20) grid.scrollLeft -= 14;
+      else if (e.clientX > box.right - 20) grid.scrollLeft += 14;
+      var td = gridPointerCell(e);
+      if (td) {
+        drag.focusCol = td.getAttribute("data-gc");
+        drag.focusRow = Number(td.getAttribute("data-gr"));
+      }
+      gridSetSelection(drag.anchorCol, drag.anchorRow,
+                       drag.focusCol, drag.focusRow);
+      e.preventDefault();
+    });
+    document.addEventListener("pointerup", function (e) {
+      if (GRID_COLUMN_DRAG) {
+        GRID_COLUMN_DRAG = null;
+        document.body.classList.remove("ps-grid-column-resizing");
+        persist(false);
+        gridApplyClippedTitles();
+        e.preventDefault();
+        return;
+      }
+      gridFinishDrag(e, false);
+    });
+    document.addEventListener("pointercancel", function (e) {
+      if (GRID_COLUMN_DRAG) {
+        GRID_COLUMN_DRAG = null;
+        document.body.classList.remove("ps-grid-column-resizing");
+        persist(false);
+        gridApplyClippedTitles();
+      }
+      gridFinishDrag(e, true);
+    });
+    grid.addEventListener("dblclick", function (e) {
+      var resizer = e.target.closest ? e.target.closest(".ps-grid-col-resizer") : null;
+      if (resizer) {
+        var th = resizer.closest("th[data-grid-col]");
+        if (th) gridAutoFitColumn(th.getAttribute("data-grid-col"));
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      // Now that a single click selects, double-click is the mouse route into
+      // editing - matching Enter, F2 and type-over on the keyboard side.
+      var cell = e.target.closest ? e.target.closest("td[data-gc]") : null;
+      if (!cell) return;
+      e.preventDefault();
+      gridOpenEditor(cell.getAttribute("data-gc"),
+                     Number(cell.getAttribute("data-gr")));
+    });
+    grid.addEventListener("copy", function (e) {
+      var cells = gridSelectionCells();
+      if (GRID_EDIT || !cells.length || !e.clipboardData) return;
+      e.clipboardData.setData("text/plain", gridSelectionText());
+      e.preventDefault();
+      showToast("Copied " + cells.length + (cells.length === 1 ? " cell" : " cells"));
+    });
+    grid.addEventListener("paste", function (e) {
+      if (GRID_EDIT || !GRID_SELECTION || !e.clipboardData) return;
+      var text = e.clipboardData.getData("text/plain");
+      if (!text) return;
+      var delimiter = text.indexOf("\t") !== -1 ? "\t" : sniffDelimiter(text);
+      var matrix = parseDelimitedRows(text, delimiter, true);
+      if (!matrix.length) return;
+      e.preventDefault();
+      gridApplyMatrix(matrix);
+    });
+    // Item 11. This handler used to cover Escape and Delete only: arrows did
+    // nothing with a range selected, and the only motion in the whole grid
+    // was Enter/Tab from inside an open editor. Every spreadsheet a student
+    // has used makes arrows the primary motion, and GRID_SELECTION already
+    // carried anchorCol/anchorRow/focusCol/focusRow, so the model was there
+    // and only the keys were missing.
+    function gridMoveFocus(dCol, dRow, extend, jump) {
+      var t = PROJECT.table;
+      if (!t || !t.order.length || !nRows(t)) return false;
+      var cols = gridVisibleColumns(t);
+      if (!cols.length) return false;
+      var sel = GRID_SELECTION;
+      var ci = sel ? cols.indexOf(sel.focusCol) : -1;
+      var ri = sel ? Number(sel.focusRow) : -1;
+      if (ci < 0) ci = 0;
+      if (!(ri >= 0)) ri = 0;
+      if (jump) {
+        // Cmd/Ctrl+arrow jumps to the edge, the spreadsheet convention.
+        if (dCol) ci = dCol > 0 ? cols.length - 1 : 0;
+        if (dRow) ri = dRow > 0 ? nRows(t) - 1 : 0;
+      } else {
+        ci = Math.max(0, Math.min(cols.length - 1, ci + dCol));
+        ri = Math.max(0, Math.min(nRows(t) - 1, ri + dRow));
+      }
+      var anchorCol = extend && sel ? sel.anchorCol : cols[ci];
+      var anchorRow = extend && sel ? sel.anchorRow : ri;
+      gridSetSelection(anchorCol, anchorRow, cols[ci], ri,
+                       extend ? "cells" : "cells");
+      var td = gridFindTd(cols[ci], ri);
+      if (!td) {
+        // The grid is windowed, so the target row may not be built yet.
+        el("ps-datagrid").scrollTop =
+          Math.max(0, ri * GRID_ROW_HEIGHT - GRID_ROW_HEIGHT * 3);
+        syncDataGrid();
+        gridApplySelection();
+        td = gridFindTd(cols[ci], ri);
+      }
+      if (td && td.scrollIntoView)
+        try { td.scrollIntoView({ block: "nearest", inline: "nearest" }); }
+        catch (err) { /* older engines: the windowing above is enough */ }
+      return true;
+    }
+    var GRID_ARROWS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0],
+                        ArrowUp: [0, -1], ArrowDown: [0, 1] };
+    grid.addEventListener("keydown", function (e) {
+      if (GRID_EDIT) return;            // the editor owns its own keys
+      var mod = e.metaKey || e.ctrlKey;
+      if (e.key === "Escape" && GRID_SELECTION) {
+        e.preventDefault();
+        gridClearSelection();
+        return;
+      }
+      if ((e.key === "Delete" || e.key === "Backspace") && GRID_SELECTION) {
+        e.preventDefault();
+        gridClearSelected();
+        return;
+      }
+      if (mod && !e.altKey && String(e.key).toLowerCase() === "a") {
+        var t = PROJECT.table;
+        if (!t || !t.order.length || !nRows(t)) return;
+        e.preventDefault();
+        var all = gridVisibleColumns(t);
+        gridSetSelection(all[0], 0, all[all.length - 1], nRows(t) - 1, "all");
+        return;
+      }
+      if (GRID_ARROWS[e.key]) {
+        var d = GRID_ARROWS[e.key];
+        if (gridMoveFocus(d[0], d[1], e.shiftKey, mod)) e.preventDefault();
+        return;
+      }
+      if (e.key === "Home" || e.key === "End") {
+        if (gridMoveFocus(e.key === "Home" ? -1 : 1, 0, e.shiftKey, true))
+          e.preventDefault();
+        return;
+      }
+      if (e.key === "PageUp" || e.key === "PageDown") {
+        if (gridMoveFocus(0, (e.key === "PageDown" ? 1 : -1) * 12,
+                          e.shiftKey, false)) e.preventDefault();
+        return;
+      }
+      if (!GRID_SELECTION) return;
+      if (e.key === "Enter" || e.key === "F2") {
+        e.preventDefault();
+        gridOpenEditor(GRID_SELECTION.focusCol, Number(GRID_SELECTION.focusRow));
+        return;
+      }
+      // Typing over a selected cell starts an edit with that character, which
+      // is what every spreadsheet does and what makes arrow navigation
+      // actually useful rather than merely possible.
+      if (!mod && !e.altKey && e.key && e.key.length === 1) {
+        var col = GRID_SELECTION.focusCol, row = Number(GRID_SELECTION.focusRow);
+        e.preventDefault();
+        gridOpenEditor(col, row);
+        if (GRID_EDIT && GRID_EDIT.input) {
+          GRID_EDIT.input.value = e.key;
+          try {
+            GRID_EDIT.input.setSelectionRange(e.key.length, e.key.length);
+          } catch (err2) {}
+        }
+      }
+    });
+    el("ps-datacard").addEventListener("click", function (e) {
+      if (e.target.closest && e.target.closest('[data-role="ps-addrow"]')) {
+        gridAddRow(); return;
+      }
+      if (e.target.closest && e.target.closest('[data-role="ps-exclrestore"]')) {
+        gridRestoreExclusions(); return;
+      }
+      var corner = e.target.closest ? e.target.closest("th[data-grid-all]") : null;
+      if (corner && PROJECT.table && PROJECT.table.order.length && nRows(PROJECT.table)) {
+        var allVisible = gridVisibleColumns(PROJECT.table);
+        gridSetSelection(allVisible[0], 0,
+          allVisible[allVisible.length - 1],
+          nRows(PROJECT.table) - 1, "all");
+        grid.focus(); return;
+      }
+      var rowHead = e.target.closest ? e.target.closest("td[data-grid-row]") : null;
+      if (rowHead && PROJECT.table && PROJECT.table.order.length) {
+        var rowAt = Number(rowHead.getAttribute("data-grid-row"));
+        var rowAnchor = e.shiftKey && GRID_SELECTION
+          ? GRID_SELECTION.anchorRow : rowAt;
+        var rowVisible = gridVisibleColumns(PROJECT.table);
+        gridSetSelection(rowVisible[0], rowAnchor,
+          rowVisible[rowVisible.length - 1], rowAt, "row");
+        grid.focus(); return;
+      }
+      var th = e.target.closest ? e.target.closest("th[data-grid-col]") : null;
+      if (th) {
+        if (e.target.closest && e.target.closest(".ps-grid-col-resizer")) return;
+        var selectedCol = th.getAttribute("data-grid-col");
+        selectInspectorVariable(selectedCol);
+        if (e.target.closest && e.target.closest("[data-grid-type]")) {
+          var r = th.getBoundingClientRect();
+          showTypeMenu(r.left, r.bottom + 2, selectedCol);
+        } else if (nRows(PROJECT.table)) {
+          var colAnchor = e.shiftKey && GRID_SELECTION
+            ? GRID_SELECTION.anchorCol : selectedCol;
+          gridSetSelection(colAnchor, 0, selectedCol,
+            nRows(PROJECT.table) - 1, "column");
+          grid.focus();
+        }
+        e.stopPropagation();
+        return;
+      }
+      var td = e.target.closest ? e.target.closest("td[data-gc]") : null;
+      if (!td || (GRID_EDIT && GRID_EDIT.td === td)) return;
+      if (GRID_IGNORE_CLICK) {
+        GRID_IGNORE_CLICK = false;
+        e.preventDefault();
+        return;
+      }
+      if (e.shiftKey && GRID_SELECTION) {
+        gridSetSelection(GRID_SELECTION.anchorCol, GRID_SELECTION.anchorRow,
+                         td.getAttribute("data-gc"),
+                         Number(td.getAttribute("data-gr")));
+        try { grid.focus({ preventScroll: true }); }
+        catch (ignore) { grid.focus(); }
+        e.preventDefault();
+        return;
+      }
+      // Torry's decision, Jul 26 2026 (the question item 11 parked): a single
+      // click SELECTS. It used to open the editor, which meant the grid had no
+      // ready mode at all and arrow navigation had nothing to move from. Edit
+      // is now the deliberate second act: double-click, Enter, F2, or just
+      // start typing - the spreadsheet model every student already knows.
+      gridSetSelection(td.getAttribute("data-gc"),
+                       Number(td.getAttribute("data-gr")),
+                       td.getAttribute("data-gc"),
+                       Number(td.getAttribute("data-gr")));
+      gridFocusSelf();
+      e.preventDefault();
+    });
+    grid.addEventListener("keydown", function (e) {
+      var resizer = e.target.closest ? e.target.closest(".ps-grid-col-resizer") : null;
+      if (!resizer) return;
+      var th = resizer.closest("th[data-grid-col]");
+      if (!th) return;
+      var col = th.getAttribute("data-grid-col");
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        gridAutoFitColumn(col);
+        return;
+      }
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      e.preventDefault();
+      var widths = gridCaptureCurrentWidths();
+      widths[col] = gridClampColumnWidth(widths[col] +
+        (e.key === "ArrowRight" ? 1 : -1) * (e.shiftKey ? 24 : 8));
+      persist(false);
+      syncDataGrid();
+      var nextHeads = grid.querySelectorAll("th[data-grid-col]");
+      for (var ri = 0; ri < nextHeads.length; ri++)
+        if (nextHeads[ri].getAttribute("data-grid-col") === col) {
+          var nextHandle = nextHeads[ri].querySelector(".ps-grid-col-resizer");
+          if (nextHandle) nextHandle.focus();
+          break;
+        }
+    });
+    el("ps-typemenu").addEventListener("click", function (e) {
+      var btn = e.target.closest ? e.target.closest("button[data-type]") : null;
+      if (!btn || TYPE_MENU == null) return;
+      var col = TYPE_MENU;
+      hideTypeMenu();
+      setColType(col, btn.getAttribute("data-type"));
+    });
+    grid.addEventListener("contextmenu", function (e) {
+      var rowHead = e.target.closest ? e.target.closest("td[data-grid-row]") : null;
+      if (rowHead && PROJECT.table && PROJECT.table.order.length) {
+        e.preventDefault();
+        hideCellMenu();
+        hideColumnMenu();
+        var row = Number(rowHead.getAttribute("data-grid-row"));
+        gridSetSelection(PROJECT.table.order[0], row,
+          PROJECT.table.order[PROJECT.table.order.length - 1], row, "row");
+        showRowMenu(e.clientX, e.clientY, row);
+        return;
+      }
+      var th = e.target.closest ? e.target.closest("th[data-grid-col]") : null;
+      if (th) {
+        e.preventDefault();
+        hideCellMenu();
+        hideRowMenu();
+        // The inspector follows the right-clicked column, so the menu
+        // and the "Inspecting <name>" panel always agree on which
+        // variable is being acted on.
+        selectInspectorVariable(th.getAttribute("data-grid-col"));
+        showColumnMenu(e.clientX, e.clientY,
+                       th.getAttribute("data-grid-col"));
+        return;
+      }
+      var td = e.target.closest ? e.target.closest("td[data-gc]") : null;
+      if (!td) return;
+      e.preventDefault();
+      if (GRID_EDIT) gridCommitEdit(null);
+      hideColumnMenu();
+      hideRowMenu();
+      showCellMenu(e.clientX, e.clientY,
+                   td.getAttribute("data-gc"), Number(td.getAttribute("data-gr")));
+    });
+    el("ps-cellmenu-toggle").addEventListener("click", function () {
+      if (!CELL_MENU) return;
+      var cm = CELL_MENU;
+      hideCellMenu();
+      gridSetExcludedCells(cm.cells, cm.on);
+    });
+    el("ps-cellmenu-row").addEventListener("click", function () {
+      if (!CELL_MENU) return;
+      var cm = CELL_MENU;
+      hideCellMenu();
+      gridSetExcludedRows([cm.row], cm.rowOn, "data");
+    });
+    el("ps-cellmenu-fill").addEventListener("click", function () {
+      hideCellMenu(); gridFillSelected();
+    });
+    el("ps-cellmenu-clear").addEventListener("click", function () {
+      hideCellMenu(); gridClearSelected();
+    });
+    el("ps-columnmenu-insert-left").addEventListener("click", function () {
+      if (!COLUMN_MENU) return;
+      var col = COLUMN_MENU; hideColumnMenu(); gridInsertColumnAt(col, false);
+    });
+    el("ps-columnmenu-insert-right").addEventListener("click", function () {
+      if (!COLUMN_MENU) return;
+      var col = COLUMN_MENU; hideColumnMenu(); gridInsertColumnAt(col, true);
+    });
+    el("ps-columnmenu-compute").addEventListener("click", function () {
+      if (!COLUMN_MENU) return;
+      var srcCol = COLUMN_MENU;
+      hideColumnMenu();
+      openFormulaDialog(srcCol, null);
+    });
+    el("ps-columnmenu-editformula").addEventListener("click", function () {
+      if (!COLUMN_MENU) return;
+      var fxCol = COLUMN_MENU;
+      hideColumnMenu();
+      openFormulaDialog(null, fxCol);
+    });
+    el("ps-formula-close").addEventListener("click", function () {
+      closeShellDialog("ps-formula-dialog");
+    });
+    el("ps-formula-cancel").addEventListener("click", function () {
+      closeShellDialog("ps-formula-dialog");
+    });
+    el("ps-formula-save").addEventListener("click", submitFormulaDialog);
+    el("ps-formula-input").addEventListener("input", refreshFormulaPreview);
+    el("ps-formula-input").addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault(); submitFormulaDialog();
+      }
+    });
+    el("ps-columnmenu-rename").addEventListener("click", function () {
+      if (!COLUMN_MENU) return;
+      var col = COLUMN_MENU;
+      hideColumnMenu();
+      selectInspectorVariable(col);
+      var input = el("ps-variable-name");
+      input.focus();
+      input.select();
+    });
+    el("ps-columnmenu-duplicate").addEventListener("click", function () {
+      if (!COLUMN_MENU) return;
+      var col = COLUMN_MENU; hideColumnMenu(); insertVariable(col, true);
+    });
+    el("ps-columnmenu-type").addEventListener("click", function () {
+      if (!COLUMN_MENU) return;
+      var col = COLUMN_MENU, heads = grid.querySelectorAll("th[data-grid-col]");
+      var box = null;
+      for (var i = 0; i < heads.length; i++)
+        if (heads[i].getAttribute("data-grid-col") === col) {
+          box = heads[i].getBoundingClientRect(); break;
+        }
+      hideColumnMenu();
+      selectInspectorVariable(col);
+      showTypeMenu(box ? box.left : 12, box ? box.bottom + 2 : 80, col);
+    });
+    el("ps-columnmenu-sort-asc").addEventListener("click", function () {
+      if (!COLUMN_MENU) return;
+      var col = COLUMN_MENU; hideColumnMenu(); sortRowsByVariable(col, 1);
+    });
+    el("ps-columnmenu-sort-desc").addEventListener("click", function () {
+      if (!COLUMN_MENU) return;
+      var col = COLUMN_MENU; hideColumnMenu(); sortRowsByVariable(col, -1);
+    });
+    el("ps-columnmenu-fit").addEventListener("click", function () {
+      if (!COLUMN_MENU) return;
+      var col = COLUMN_MENU; hideColumnMenu(); gridAutoFitColumn(col);
+    });
+    el("ps-columnmenu-fitall").addEventListener("click", function () {
+      hideColumnMenu(); gridAutoFitAll();
+    });
+    el("ps-columnmenu-reset").addEventListener("click", function () {
+      if (!COLUMN_MENU) return;
+      var col = COLUMN_MENU; hideColumnMenu(); gridResetColumnWidth(col);
+    });
+    el("ps-columnmenu-resetall").addEventListener("click", function () {
+      hideColumnMenu(); gridResetAllWidths();
+    });
+    el("ps-columnmenu-hide").addEventListener("click", function () {
+      if (!COLUMN_MENU) return;
+      var col = COLUMN_MENU; hideColumnMenu(); gridHideColumn(col);
+    });
+    el("ps-columnmenu-delete").addEventListener("click", function () {
+      if (!COLUMN_MENU) return;
+      var col = COLUMN_MENU; hideColumnMenu(); deleteVariable(col);
+    });
+    el("ps-rowmenu-insert-above").addEventListener("click", function () {
+      if (!ROW_MENU) return;
+      var row = ROW_MENU.row; hideRowMenu(); gridInsertRowAt(row);
+    });
+    el("ps-rowmenu-insert-below").addEventListener("click", function () {
+      if (!ROW_MENU) return;
+      var row = ROW_MENU.row; hideRowMenu(); gridInsertRowAt(row + 1);
+    });
+    el("ps-rowmenu-duplicate").addEventListener("click", function () {
+      if (!ROW_MENU) return;
+      var row = ROW_MENU.row; hideRowMenu(); gridDuplicateRow(row);
+    });
+    el("ps-rowmenu-toggle").addEventListener("click", function () {
+      if (!ROW_MENU) return;
+      var menu = ROW_MENU; hideRowMenu();
+      gridSetExcludedRows([menu.row], menu.rowOn, "data");
+    });
+    el("ps-rowmenu-delete").addEventListener("click", function () {
+      if (!ROW_MENU) return;
+      var row = ROW_MENU.row; hideRowMenu(); gridDeleteRow(row);
+    });
+    // Dragging a slot chip back to the variables box unassigns it.
+    el("ps-columns").addEventListener("dragover", function (e) {
+      if (!PS_DRAG_FROM) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      el("ps-columns").classList.add("ps-droptarget");
+    });
+    el("ps-columns").addEventListener("dragleave", function () {
+      el("ps-columns").classList.remove("ps-droptarget");
+    });
+    el("ps-columns").addEventListener("drop", function (e) {
+      e.preventDefault();
+      el("ps-columns").classList.remove("ps-droptarget");
+      if (!PS_DRAG_FROM) return;
+      roleRemoveMember(PS_DRAG_FROM, PS_DRAG);
+      clearDragState();
+      roleChanged();
+    });
+    el("ps-varfilter").addEventListener("input", function () {
+      VAR_FILTER = el("ps-varfilter").value.trim();
+      syncDataRow();
+    });
+    el("ps-addmenu").addEventListener("click", function (e) {
+      var btn = e.target.closest ? e.target.closest("button[data-add]") : null;
+      if (!btn) return;
+      el("ps-addmenu").style.display = "none";
+      if (btn.getAttribute("data-add") === "layout") showLayoutGallery();
+      else showAnalysisGallery();
+    });
+    el("ps-laddchart").addEventListener("click", function (e) {
+      e.stopPropagation();
+      layAddChartMenu();
+    });
+    el("ps-lchartmenu").addEventListener("click", function (e) {
+      var btn = e.target.closest ? e.target.closest("button[data-chart]") : null;
+      if (!btn) return;
+      el("ps-lchartmenu").style.display = "none";
+      layAddChart(btn.getAttribute("data-chart"));
+    });
+    el("ps-laddimage").addEventListener("click", function () {
+      el("ps-laddimage-file").click();
+    });
+    el("ps-laddimage-file").addEventListener("change", function () {
+      var f = this.files && this.files[0];
+      this.value = "";
+      if (f) layAddImageFromFile(f);
+    });
+    el("ps-imgsize-close").addEventListener("click", function () {
+      closeShellDialog("ps-imgsize-dialog");
+      IMG_SIZE_PENDING = null;
+    });
+    el("ps-imgsize-keep").addEventListener("click", function () {
+      var pend = IMG_SIZE_PENDING;
+      IMG_SIZE_PENDING = null;
+      closeShellDialog("ps-imgsize-dialog");
+      if (pend) layPlaceImage(pend.src, pend.natW, pend.natH,
+        "original kept (" + pend.mb + " MB) - local autosave may stop " +
+        "keeping snapshots; Save to a .pand file keeps everything");
+    });
+    el("ps-imgsize-smaller").addEventListener("click", function () {
+      var pend = IMG_SIZE_PENDING;
+      IMG_SIZE_PENDING = null;
+      closeShellDialog("ps-imgsize-dialog");
+      if (!pend) return;
+      downscaleImage(pend.src, pend.type, function (smallSrc, w, h) {
+        layPlaceImage(smallSrc, w, h,
+          "smaller copy placed (long edge capped at 2000px)");
+      }, function () {
+        layPlaceImage(pend.src, pend.natW, pend.natH,
+          "could not downscale - original kept");
+      });
+    });
+    el("ps-laddtext").addEventListener("click", function () {
+      layAddText("Text", 14, false);
+    });
+    el("ps-laddlabel").addEventListener("click", function () {
+      var c = activeChart();
+      if (!isLayoutTab(c)) return;
+      var n = c.nextLabel || 0;
+      layAddText(String.fromCharCode(65 + (n % 26)), 20, true);
+      c.nextLabel = n + 1;
+      persist();
+    });
+    document.addEventListener("pointerdown", function (e) {
+      if (GRID_SELECTION &&
+          !(e.target.closest && (e.target.closest("#ps-datagrid") ||
+                                 e.target.closest("#ps-cellmenu") ||
+                                 e.target.closest("#ps-columnmenu") ||
+                                 e.target.closest("#ps-columnview-menu") ||
+                                 e.target.closest("#ps-rowmenu"))))
+        gridClearSelection();
+      if (el("ps-addmenu").style.display === "block" &&
+          !(e.target.closest && e.target.closest("#ps-addmenu")))
+        el("ps-addmenu").style.display = "none";
+      if (el("ps-lchartmenu").style.display === "block" &&
+          !(e.target.closest && e.target.closest("#ps-lchartmenu")))
+        el("ps-lchartmenu").style.display = "none";
+      if (CELL_MENU && !(e.target.closest && e.target.closest("#ps-cellmenu")))
+        hideCellMenu();
+      if (COLUMN_MENU &&
+          !(e.target.closest && e.target.closest("#ps-columnmenu")))
+        hideColumnMenu();
+      if (ROW_MENU && !(e.target.closest && e.target.closest("#ps-rowmenu")))
+        hideRowMenu();
+      if (DATA_MENU_OPEN &&
+          !(e.target.closest && (e.target.closest("#ps-datamenu") ||
+                                 e.target.closest("#ps-data-more"))))
+        hideDataMenu();
+      if (COLUMN_VIEW_MENU_OPEN &&
+          !(e.target.closest && (e.target.closest("#ps-columnview-menu") ||
+                                 e.target.closest("#ps-data-hidden-columns"))))
+        hideColumnViewMenu();
+      if (TYPE_MENU != null &&
+          !(e.target.closest && e.target.closest("#ps-typemenu")) &&
+          !(e.target.closest && e.target.closest(".ps-chip")))
+        hideTypeMenu();
+      if (ROLE_PICKER_OPEN != null &&
+          !(e.target.closest && e.target.closest(".ps-role-card")))
+        closeRolePicker();
+    }, true);
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") {
+        if (CELL_MENU) hideCellMenu();
+        if (COLUMN_MENU) hideColumnMenu();
+        if (ROW_MENU) hideRowMenu();
+        if (DATA_MENU_OPEN) hideDataMenu();
+        if (COLUMN_VIEW_MENU_OPEN) hideColumnViewMenu();
+        if (TYPE_MENU != null) hideTypeMenu();
+        if (ROLE_PICKER_OPEN != null) closeRolePicker();
+      }
+    });
+    // Undo-key ROUTER. The engine already binds Cmd/Ctrl+Z (+Shift for
+    // redo) at DOCUMENT capture for chart styling; this WINDOW-capture
+    // handler runs first. The visible workspace owns the shortcut: Data
+    // always uses the persistent dataset history, while Charts keeps the
+    // engine's styling history. Outside Data, recency remains a fallback
+    // for commands invoked from application chrome. This avoids a Data
+    // change's required chart rerender stealing Cmd/Ctrl+Z back from Data.
+    window.addEventListener("keydown", function (e) {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      var k = (e.key || "").toLowerCase();
+      var isUndo = k === "z" && !e.shiftKey;
+      var isRedo = k === "y" || (k === "z" && e.shiftKey);
+      if (!isUndo && !isRedo) return;
+      var tgt = e.target;
+      if (tgt && tgt.closest &&
+          tgt.closest("input, textarea, select, [contenteditable]")) return;
+      // Layout owns the shortcut while a figure is on screen (punch list item
+      // 7). Without this the press fell through to the engine's handler and
+      // undid a style edit on a chart in another tab, invisibly.
+      if (appWorkspace() === "layout" && isLayoutTab(activeChart())) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (isUndo) {
+          if (!layUndo()) showToast("Nothing to undo in this layout");
+        } else {
+          if (!layRedo()) showToast("Nothing to redo in this layout");
+        }
+        return;
+      }
+      var dataWorkspace = appWorkspace() === "data";
+      if (dataWorkspace) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (isUndo) {
+          if (!dataUndo()) showToast("No earlier data state is available");
+        } else {
+          if (!dataRedo()) showToast("No later data state is available");
+        }
+        return;
+      }
+      var dataActedLast = DATA_LAST_AT > CHART_LAST_AT;
+      if (isUndo) {
+        if (DATA_UNDO.length && dataActedLast) {
+          e.preventDefault();
+          e.stopPropagation();
+          dataUndo();
+        }
+        return;   // else the engine's document-capture handler takes it
+      }
+      if (DATA_REDO.length && dataActedLast) {
+        e.preventDefault();
+        e.stopPropagation();
+        dataRedo();
+        return;
+      }
+      if (k === "y") {
+        e.preventDefault();
+        var rb = document.querySelector(
+          '.graphbuilder2-host button[aria-label="Redo"]');
+        if (rb) rb.click();
+      }
+    }, true);
+  }
+
+  // ---- chart tabs ----
+  function switchChart(id) {
+    var next = chartById(id);
+    if (!next) return;
+    PROJECT.ui.workspace = isLayoutTab(next) ? "layout" : "chart";
+    PROJECT.ui.dataOpen = false;
+    rememberDocument(next);
+    if (PROJECT.activeChart === id) {
+      if (PS_FLUSH_PENDING_OPTS) PS_FLUSH_PENDING_OPTS();   // B12
+      persist(false); syncAll(); render(); return;
+    }
+    var cur = activeChart();
+    // B23. ORDER IS LOAD-BEARING. captureChartSnapshot reads whatever DOM is
+    // in the host right now and stamps the CURRENT revision on it. The B12
+    // flush commits pending engine edits, and every commit bumps the snapshot
+    // epoch - so flushing FIRST stamped a freshly-valid revision onto a
+    // picture that predates the edit, and no later ensure pass would ever
+    // refresh it: the layout drew, and exported, a figure that disagreed with
+    // the chart's own settings, permanently. (Reproduced: the snapshot came
+    // back valid:true with the new title absent, and stayed that way.)
+    // Capturing FIRST stamps the OLD revision, the flush then bumps past it,
+    // validSnap goes false, and the ensure pass redraws. Self-healing by
+    // construction rather than by luck.
+    if (!isLayoutTab(cur)) captureChartSnapshot(cur.id);
+    if (PS_FLUSH_PENDING_OPTS) PS_FLUSH_PENDING_OPTS();   // B12
+    PROJECT.activeChart = id;
+    LAYOUT_SEL = [];
+    persist(false);
+    syncAll();
+    render();
+  }
+  function addChart(moduleKey) {
+    var c = newChart();
+    if (moduleKey && MODULES[moduleKey]) c.module = moduleKey;
+    PROJECT.charts.push(c);
+    PROJECT.activeChart = c.id;
+    PROJECT.ui.workspace = "chart";
+    PROJECT.ui.dataOpen = false;
+    rememberDocument(c);
+    persist();
+    syncAll();
+    render();
+  }
+  function moduleRequirementText(moduleKey) {
+    var defs = MODULES[moduleKey].roles, required = [];
+    for (var i = 0; i < defs.length; i++) if (defs[i].required) {
+      var need = defs[i].multi && defs[i].min > 1 ? defs[i].min + " " : "";
+      required.push(need + defs[i].label);
+    }
+    return "Requires " + required.join(" and ");
+  }
+  function renderAnalysisGallery() {
+    var root = el("ps-analysis-grid");
+    root.innerHTML = "";
+    for (var i = 0; i < MODULE_ORDER.length; i++) {
+      (function (key) {
+        var guide = MODULE_GUIDE[key], button = mkEl("button", "ps-analysis-card");
+        button.type = "button";
+        button.setAttribute("data-analysis-module", key);
+        var gIcon = mkEl("span", "ps-analysis-icon");
+        gIcon.innerHTML = moduleThumb(key) || escHtml(guide.icon);
+        button.appendChild(gIcon);
+        var copy = mkEl("span", "ps-analysis-copy");
+        copy.appendChild(mkEl("strong", "", MODULES[key].label));
+        copy.appendChild(mkEl("span", "", guide.description));
+        copy.appendChild(mkEl("small", "", moduleRequirementText(key)));
+        button.appendChild(copy);
+        button.addEventListener("click", function () {
+          hideAnalysisGallery();
+          addChart(key);
+          window.setTimeout(function () {
+            var first = el("ps-slots").querySelector(".ps-slot-drop");
+            if (first) first.focus();
+          }, 0);
+        });
+        root.appendChild(button);
+      })(MODULE_ORDER[i]);
+    }
+    var help = mkEl("button", "ps-analysis-card ps-analysis-guide-card");
+    help.type = "button";
+    help.setAttribute("data-analysis-help", "true");
+    help.appendChild(mkEl("span", "ps-analysis-icon", "?"));
+    var helpCopy = mkEl("span", "ps-analysis-copy");
+    // t4-11: sentence case, like every other string in the app. This is the
+    // one Title Case label, and it is the feature instructors name in course
+    // materials, so the two ought to agree.
+    helpCopy.appendChild(mkEl("strong", "", "Help me choose"));
+    helpCopy.appendChild(mkEl("span", "",
+      "Answer a few plain-language questions and get a chart recommendation."));
+    helpCopy.appendChild(mkEl("small", "",
+      "Guides you to one of the seven analyses"));
+    help.appendChild(helpCopy);
+    help.addEventListener("click", function () {
+      hideAnalysisGallery();
+      showHelpMeChoose();
+    });
+    root.appendChild(help);
+  }
+  function showAnalysisGallery() {
+    renderAnalysisGallery();
+    openShellDialog("ps-analysis-gallery");
+  }
+  function hideAnalysisGallery() { closeShellDialog("ps-analysis-gallery"); }
+
+  // Help Me Choose is a standalone guidance flow, not an eighth chart
+  // engine. It mirrors the jamovi module's question route and creates one of
+  // the same seven chart documents only after the user accepts the result.
+  var HMC_PATH = ["root"];
+  var HMC_MODE = "questions";
+  var HMC_SELECTED = [];
+  var HMC_FILTER = "";
+  var HMC_NODES = {
+    root: {
+      label: "Start",
+      question: "What do you want your graph to show?",
+      copy: "Pick the option closest to the question you are trying to answer.",
+      options: [
+        { title: "Compare a measurement across groups",
+          detail: "Different cases in each group, such as scores across conditions.",
+          go: "compare" },
+        { title: "Compare the same cases across time or conditions",
+          detail: "Each person or case was measured more than once.",
+          go: "rm" },
+        { title: "Show the shape or spread of one numeric variable",
+          detail: "See how values are distributed and identify unusual observations.",
+          go: "dist" },
+        { title: "Show the relationship between two numeric variables",
+          detail: "See whether one measurement changes as another changes.",
+          go: "scatter" },
+        { title: "Show counts or percentages of categories",
+          detail: "Compare how often each response or category occurs.",
+          go: "freq" },
+        { title: "Show how several numeric variables relate",
+          detail: "Scan a matrix of pairwise correlations among measures.",
+          go: "corr" },
+        { title: "Summarize survey or rating-scale items",
+          detail: "Compare responses across several Likert-style questions.",
+          go: "likert" }
+      ]
+    },
+    compare: {
+      label: "Compare groups",
+      question: "How much of each group do you want to show?",
+      copy: "Both routes use Compare Groups; this choice suggests a useful starting graph.",
+      options: [
+        { title: "A clean summary",
+          detail: "Show a mean or median for each group, optionally with uncertainty.",
+          go: "compare-summary" },
+        { title: "The full spread",
+          detail: "Show the distribution, variation, and individual observations.",
+          go: "compare-spread" },
+        { title: "Show me the options",
+          detail: "See the full set of suitable Compare Groups chart styles.",
+          go: "compare-all" }
+      ]
+    }
+  };
+  var HMC_RESULTS = {
+    "compare-summary": {
+      label: "Compare Groups", module: "plotbuilder",
+      why: "You have a numeric outcome measured in separate categories or experimental groups, and want a concise comparison.",
+      starts: ["Bar", "Dot", "Line for naturally ordered groups"]
+    },
+    "compare-spread": {
+      label: "Compare Groups", module: "plotbuilder",
+      why: "You have a numeric outcome measured in separate groups and want readers to see more than a single summary.",
+      starts: ["Box", "Violin", "Raincloud"]
+    },
+    "compare-all": {
+      label: "Compare Groups", module: "plotbuilder",
+      why: "You are comparing one numeric outcome across categories but have not decided how much of the distribution to display.",
+      starts: ["Bar", "Dot", "Line", "Box", "Violin", "Raincloud"]
+    },
+    rm: {
+      label: "Repeated Measures", module: "rmplotbuilder",
+      why: "The same cases were measured at multiple times or under multiple conditions, so the measurements are related.",
+      starts: ["Line", "Dot", "Bar", "Box", "Violin", "Raincloud"]
+    },
+    dist: {
+      label: "Distribution", module: "distplotbuilder",
+      why: "Your main question concerns the shape, spread, or normality of one numeric variable.",
+      starts: ["Histogram", "Density", "Box / Violin", "Q-Q plot", "ECDF"]
+    },
+    scatter: {
+      label: "Scatter", module: "xyplotbuilder",
+      why: "You want to see the relationship between two numeric variables, one point per observation.",
+      starts: ["Scatter plot", "Heatmap for dense data"]
+    },
+    freq: {
+      label: "Frequencies", module: "freqplotbuilder",
+      why: "Your outcome is categorical and the question is about counts, proportions, or parts of a whole.",
+      starts: ["Bar", "Pie / Donut", "Pareto"]
+    },
+    corr: {
+      label: "Correlation Matrix", module: "corrplotbuilder",
+      why: "You have several numeric measures and want to compare every pairwise relationship at once.",
+      starts: ["Heatmap", "Circles", "Numbers", "Mixed"]
+    },
+    likert: {
+      label: "Likert / Survey", module: "likertplotbuilder",
+      why: "Several items share an ordered response scale and should be summarized as a survey battery.",
+      starts: ["Diverging stacked bar", "100% stacked bar", "Item means"]
+    }
+  };
+  function hmcModeBar(body) {
+    var bar = mkEl("div", "ps-hmc-modebar");
+    [
+      { key: "questions", label: "Answer questions" },
+      { key: "variables", label: "Use my variables" }
+    ].forEach(function (mode) {
+      var button = mkEl("button", "", mode.label);
+      button.type = "button";
+      button.setAttribute("data-hmc-mode", mode.key);
+      button.setAttribute("aria-pressed", String(HMC_MODE === mode.key));
+      button.addEventListener("click", function () {
+        HMC_MODE = mode.key;
+        if (mode.key === "questions") HMC_PATH = ["root"];
+        renderHelpMeChoose();
+      });
+      bar.appendChild(button);
+    });
+    body.appendChild(bar);
+  }
+  function hmcUniqueValues(t, col) {
+    var values = [], seen = {};
+    var source = t.columns && t.columns[col] ? t.columns[col] : t.raw[col] || [];
+    for (var i = 0; i < source.length; i++) {
+      var value = source[i];
+      if (value == null || value === "") continue;
+      var key = typeof value + "\u0000" + String(value);
+      if (!seen[key]) { seen[key] = true; values.push(value); }
+    }
+    return values;
+  }
+  function hmcLevelSignature(values) {
+    var copy = values.map(String);
+    var numeric = copy.map(Number);
+    if (copy.length && numeric.every(function (value) { return isFinite(value); }))
+      copy.sort(function (a, b) { return Number(a) - Number(b); });
+    else copy.sort();
+    return copy.join("\u001f");
+  }
+  function hmcSelectionSummary() {
+    var t = PROJECT.table;
+    var summary = {
+      n: t ? nRows(t) : 0, vars: [], counts: {
+        nominal: 0, ordinal: 0, continuous: 0, manyLevel: 0, id: 0
+      },
+      likertLikely: false, likertNumBattery: false, likertK: 0,
+      likertNames: [], repeatedLikely: false, repeatedTimeNames: false
+    };
+    if (!t) return summary;
+    var signatures = {}, continuousNames = [];
+    for (var i = 0; i < HMC_SELECTED.length; i++) {
+      var name = HMC_SELECTED[i];
+      if (t.order.indexOf(name) === -1) continue;
+      var declared = t.types[name] || "nominal";
+      var values = hmcUniqueValues(t, name);
+      var kind = declared, levels = 0, signature = null, signatureNumeric = false;
+      if (declared === "id") {
+        kind = "id"; summary.counts.id++;
+      } else if (declared === "nominal" || declared === "ordinal") {
+        levels = (t.levels[name] || values.map(String)).length;
+        if (declared === "nominal" && levels > 20) {
+          kind = "manylevel"; summary.counts.manyLevel++;
+        } else {
+          summary.counts[declared]++;
+          signature = hmcLevelSignature(t.levels[name] || values);
+        }
+      } else if (declared === "continuous") {
+        summary.counts.continuous++;
+        continuousNames.push(name);
+        var nums = values.map(Number).filter(function (value) {
+          return isFinite(value);
+        });
+        var allIntegers = nums.length && nums.every(function (value) {
+          return value === Math.round(value);
+        });
+        var unique = Array.from(new Set(nums)).sort(function (a, b) {
+          return a - b;
+        });
+        if (allIntegers && unique.length >= 2 && unique.length <= 11) {
+          levels = unique.length;
+          signature = hmcLevelSignature(unique);
+          signatureNumeric = true;
+        }
+      }
+      var record = { name: name, type: kind, declared: declared,
+                     levels: levels, signature: signature,
+                     signatureNumeric: signatureNumeric };
+      summary.vars.push(record);
+      if (signature) {
+        if (!signatures[signature]) signatures[signature] = [];
+        signatures[signature].push(record);
+      }
+    }
+    var signatureKeys = Object.keys(signatures).sort(function (a, b) {
+      return signatures[b].length - signatures[a].length;
+    });
+    for (var si = 0; si < signatureKeys.length; si++) {
+      var members = signatures[signatureKeys[si]];
+      var k = members[0].levels;
+      if ((members.length >= 3 && k >= 2 && k <= 11) ||
+          (members.length === 2 && k >= 4 && k <= 7)) {
+        summary.likertLikely = true;
+        summary.likertNumBattery = members.some(function (record) {
+          return record.signatureNumeric;
+        });
+        summary.likertK = k;
+        summary.likertNames = members.map(function (record) {
+          return record.name;
+        });
+        break;
+      }
+    }
+    var prefixes = {};
+    continuousNames.forEach(function (name) {
+      var match = /^(.*?)([0-9]+)$/.exec(name);
+      if (!match || !/[A-Za-z]/.test(match[1])) return;
+      var prefix = match[1];
+      if (!prefixes[prefix]) prefixes[prefix] = [];
+      prefixes[prefix].push(name);
+    });
+    var repeatedPrefixes = Object.keys(prefixes).filter(function (prefix) {
+      return prefixes[prefix].length >= 2;
+    });
+    summary.repeatedLikely = repeatedPrefixes.length > 0;
+    var timeWords = {
+      t: 1, time: 1, day: 1, wk: 1, week: 1, month: 1, yr: 1, year: 1,
+      session: 1, sess: 1, wave: 1, visit: 1, trial: 1, occasion: 1,
+      phase: 1, period: 1
+    };
+    summary.repeatedTimeNames = repeatedPrefixes.some(function (prefix) {
+      var normalized = prefix.toLowerCase().replace(/[._ \-]+$/, "");
+      var names = prefixes[prefix];
+      if (summary.likertNumBattery && summary.likertNames.length)
+        names = names.filter(function (name) {
+          return summary.likertNames.indexOf(name) !== -1;
+        });
+      return names.length >= 2 && !!timeWords[normalized];
+    });
+    return summary;
+  }
+  function hmcDataRecommendation(summary) {
+    var cat = summary.counts.nominal + summary.counts.ordinal;
+    var num = summary.counts.continuous;
+    var warning = summary.counts.manyLevel || summary.counts.id
+      ? "ID variables and categorical variables with more than 20 levels are ignored when matching chart roles."
+      : "";
+    function choice(id, note) { return { id: id, note: note }; }
+    if (!summary.vars.length)
+      return { primary: null, alternative: null, warning: warning };
+    if (summary.likertLikely) {
+      var battery = summary.likertNames.join(", ");
+      var primaryLikert = choice("likert",
+        battery + " share the same " + summary.likertK +
+        "-point response scale, which is the pattern expected for a survey battery.");
+      var altLikert = null;
+      if (summary.repeatedTimeNames)
+        altLikert = choice("rm",
+          "Choose this instead if those columns are the same rating recorded at different times or sessions.");
+      else if (num === 2)
+        altLikert = choice("scatter",
+          "Choose this instead if the two numeric columns are different measurements whose relationship matters.");
+      else if (num >= 3)
+        altLikert = choice("corr",
+          "Choose this instead if these are different measurements and you want their pairwise relationships.");
+      return { primary: primaryLikert, alternative: altLikert, warning: warning,
+               batteryNames: summary.likertNames.slice() };
+    }
+    if (num === 0 && cat >= 1)
+      return { primary: choice("freq",
+        cat === 1
+          ? "A categorical variable is best summarized by its counts or percentages."
+          : "These variables are categorical, so a frequency chart can place them in category, grouping, and panel roles."),
+        alternative: null, warning: warning };
+    if (num === 1 && cat === 0)
+      return { primary: choice("dist",
+        "One numeric variable is a distribution question: shape, spread, and unusual values."),
+        alternative: null, warning: warning };
+    if (num === 1 && cat >= 1)
+      return { primary: choice("compare-all",
+        "One numeric outcome plus categorical variables is a group-comparison design."),
+        alternative: choice("dist",
+          "Choose this instead if the grouping variables are not part of the question and you only want the outcome's distribution."),
+        warning: warning };
+    if (num === 2) {
+      if (summary.repeatedLikely)
+        return { primary: choice("rm",
+          "The two numeric columns have sequential names, suggesting the same measure at two occasions."),
+          alternative: choice("scatter",
+            "Choose this instead if they are different measurements and the relationship between them is the question."),
+          warning: warning };
+      return { primary: choice("scatter",
+        "Exactly two numeric variables naturally form the X and Y axes of a scatter plot."),
+        alternative: choice("rm",
+          "Choose this instead if they are the same measure recorded at two times or conditions."),
+        warning: warning };
+    }
+    if (num >= 3) {
+      if (summary.repeatedLikely || cat >= 1)
+        return { primary: choice("rm",
+          "Several numeric columns appear to be repeated occasions" +
+          (cat ? ", with a categorical variable available for between-group comparison." : ".")),
+          alternative: choice("corr",
+            "Choose this instead if the numeric columns are different measurements whose pairwise relationships matter."),
+          warning: warning };
+      return { primary: choice("corr",
+        "Several numeric variables with no grouping variable are naturally summarized in a correlation matrix."),
+        alternative: choice("rm",
+          "Choose this instead if the columns are one measure recorded at different times or conditions."),
+        warning: warning };
+    }
+    return { primary: null, alternative: null,
+      warning: warning || "These variables do not fit one chart cleanly. Check their measure types or answer the goal questions instead." };
+  }
+  function hmcRecordsByKind(summary, kind) {
+    return summary.vars.filter(function (record) {
+      if (kind === "cat")
+        return record.type === "nominal" || record.type === "ordinal";
+      if (kind === "num") return record.type === "continuous";
+      return false;
+    });
+  }
+  // ---- punch list t3-50: the two teaching pieces the wizard shipped without.
+  //
+  // The jamovi wizard carries a "Color grouping or panels?" tip under any leaf
+  // that has room for a second categorical variable, because that is the
+  // single most common confusion it was extended to address: a grouping
+  // variable puts the levels in ONE panel sharing one pair of axes, which is
+  // what makes a comparison exact; a panels variable draws a mini chart each,
+  // which compares patterns rather than values.
+  var HMC_CAPS = {
+    plotbuilder: { cat: 3, num: 1 },
+    distplotbuilder: { cat: 2, num: 1 },
+    freqplotbuilder: { cat: 3, num: 0 },
+    xyplotbuilder: { cat: 2, num: 2 },
+    corrplotbuilder: { cat: 0, num: Infinity },
+    rmplotbuilder: { cat: 1, num: Infinity },
+    likertplotbuilder: { cat: Infinity, num: Infinity }
+  };
+  function hmcGroupingTip(mod, lead) {
+    var cap = HMC_CAPS[mod];
+    if (!cap || cap.cat === Infinity || cap.cat < 2) return null;
+    var box = mkEl("div", "ps-hmc-tip");
+    box.appendChild(mkEl("strong", "", "Color grouping or panels?"));
+    var p = mkEl("p", "", lead +
+      "putting it in Group By draws its levels in ONE chart, sharing the same " +
+      "axes, which is what makes a comparison exact. Putting it in Panels " +
+      "draws a small chart for each level, which compares patterns rather " +
+      "than values. Put the comparison you care about most in Group By.");
+    box.appendChild(p);
+    return box;
+  }
+  // The wizard used to end on a recommendation with nowhere further to go. The
+  // chart's own teaching panels are the next step, and unlike the jamovi
+  // wizard (which cannot launch anything from a sandboxed results iframe) the
+  // shell can simply open them.
+  function hmcNextSteps() {
+    var box = mkEl("div", "ps-hmc-next");
+    box.appendChild(mkEl("span", "", "Once the chart is drawn:"));
+    [["Which graph?", "graphChooser",
+      "compare the chart types for this analysis"],
+     ["Check my chart", "graphLint",
+      "run the pitfall checks against what you drew"]].forEach(function (row) {
+      var b = mkEl("button", "ps-hmc-nextlink", row[0]);
+      b.type = "button";
+      setTip(b, row[2]);
+      b.addEventListener("click", function () {
+        hideHelpMeChoose();
+        openEngineHelp(row[1]);
+      });
+      box.appendChild(b);
+    });
+    return box;
+  }
+  function hmcCapacityWarning(resultId, summary, recommendation) {
+    var result = HMC_RESULTS[resultId];
+    if (!result) return "";
+    var caps = {
+      plotbuilder: { cat: 3, num: 1 },
+      distplotbuilder: { cat: 2, num: 1 },
+      freqplotbuilder: { cat: 3, num: 0 },
+      xyplotbuilder: { cat: 2, num: 2 },
+      corrplotbuilder: { cat: 0, num: Infinity },
+      rmplotbuilder: { cat: 1, num: Infinity },
+      likertplotbuilder: { cat: Infinity, num: Infinity }
+    };
+    var cap = caps[result.module], cats = hmcRecordsByKind(summary, "cat");
+    var nums = hmcRecordsByKind(summary, "num"), omitted = [];
+    if (cap.cat !== Infinity && cats.length > cap.cat)
+      omitted = omitted.concat(cats.slice(cap.cat).map(function (r) { return r.name; }));
+    if (cap.num !== Infinity && nums.length > cap.num)
+      omitted = omitted.concat(nums.slice(cap.num).map(function (r) { return r.name; }));
+    if (cap.cat === 0 && cats.length)
+      omitted = omitted.concat(cats.map(function (r) { return r.name; }));
+    if (cap.num === 0 && nums.length)
+      omitted = omitted.concat(nums.map(function (r) { return r.name; }));
+    if (result.module === "likertplotbuilder" &&
+        recommendation && recommendation.batteryNames) {
+      omitted = summary.vars.filter(function (r) {
+        return recommendation.batteryNames.indexOf(r.name) === -1;
+      }).map(function (r) { return r.name; });
+    }
+    omitted = Array.from(new Set(omitted));
+    return omitted.length
+      ? result.label + " cannot place every selected variable in one chart. " +
+        omitted.join(", ") + " would remain unassigned."
+      : "";
+  }
+  function hmcProgress(body) {
+    var progress = mkEl("div", "ps-hmc-progress");
+    for (var i = 0; i < HMC_PATH.length; i++) {
+      if (i) progress.appendChild(document.createTextNode("\u203a"));
+      var id = HMC_PATH[i], label = HMC_NODES[id]
+        ? HMC_NODES[id].label : (HMC_RESULTS[id] ? HMC_RESULTS[id].label : id);
+      if (i < HMC_PATH.length - 1) {
+        (function (at) {
+          var back = mkEl("button", "", label);
+          back.type = "button";
+          back.addEventListener("click", function () {
+            HMC_PATH = HMC_PATH.slice(0, at + 1);
+            renderHelpMeChoose();
+          });
+          progress.appendChild(back);
+        })(i);
+      } else progress.appendChild(mkEl("span", "", label));
+    }
+    body.appendChild(progress);
+  }
+  function hmcRolesForRecommendation(moduleKey, summary, recommendation) {
+    var cats = hmcRecordsByKind(summary, "cat").map(function (r) {
+      return r.name;
+    });
+    var nums = hmcRecordsByKind(summary, "num").map(function (r) {
+      return r.name;
+    });
+    if (moduleKey === "plotbuilder")
+      return { xvar: cats[0] || "", yvar: nums[0] || "",
+        groupVar: cats[1] || "", facetVar: cats[2] || "" };
+    if (moduleKey === "distplotbuilder")
+      return { var: nums[0] || "", groupVar: cats[0] || "",
+        facetVar: cats[1] || "" };
+    if (moduleKey === "freqplotbuilder")
+      return { var: cats[0] || "", groupVar: cats[1] || "",
+        facetVar: cats[2] || "" };
+    if (moduleKey === "xyplotbuilder")
+      return { xvar: nums[0] || "", yvar: nums[1] || "",
+        groupVar: cats[0] || "", facetVar: cats[1] || "" };
+    if (moduleKey === "corrplotbuilder") return { vars: nums.slice() };
+    if (moduleKey === "rmplotbuilder")
+      return { measures: nums.slice(), betweenVar: cats[0] || "" };
+    if (moduleKey === "likertplotbuilder") {
+      var items = recommendation && recommendation.batteryNames &&
+        recommendation.batteryNames.length
+        ? recommendation.batteryNames.slice()
+        : summary.vars.filter(function (record) {
+            return record.type !== "id" && record.type !== "manylevel";
+          }).map(function (record) { return record.name; });
+      return { items: items };
+    }
+    return {};
+  }
+  function hmcOpenRecommendation(result, summary, recommendation) {
+    hideHelpMeChoose();
+    addChart(result.module);
+    if (summary && summary.vars && summary.vars.length) {
+      var chart = activeChart();
+      chart.roles[result.module] =
+        hmcRolesForRecommendation(result.module, summary, recommendation);
+      validateRoles();
+      persist();
+      syncAll();
+      render();
+    }
+    window.setTimeout(function () {
+      var first = el("ps-slots").querySelector(".ps-slot-drop");
+      if (first) first.focus();
+    }, 0);
+  }
+  function hmcVariableTypeText(record) {
+    if (record.type === "manylevel") return "many-level categorical";
+    if (record.type === "id") return "ID";
+    return typeLabel(record.declared || record.type).toLowerCase();
+  }
+  function hmcToggleVariable(name, on) {
+    var index = HMC_SELECTED.indexOf(name);
+    if (on !== false && index === -1) HMC_SELECTED.push(name);
+    if (on === false && index !== -1) HMC_SELECTED.splice(index, 1);
+    renderHelpMeChoose();
+  }
+  function hmcRenderVariableList(root, filter) {
+    var t = PROJECT.table, query = String(filter || "").toLocaleLowerCase();
+    root.innerHTML = "";
+    if (!t) return;
+    for (var i = 0; i < t.order.length; i++) {
+      var name = t.order[i];
+      if (query && name.toLocaleLowerCase().indexOf(query) === -1) continue;
+      var button = mkEl("button", "ps-hmc-variable");
+      button.type = "button";
+      button.draggable = HMC_SELECTED.indexOf(name) === -1;
+      button.disabled = HMC_SELECTED.indexOf(name) !== -1;
+      button.setAttribute("data-hmc-variable", name);
+      var icon = mkEl("span", "ps-hmc-type-icon");
+      icon.innerHTML = psTypeIcon(t.types[name]);
+      button.appendChild(icon);
+      button.appendChild(mkEl("span", "", name));
+      button.appendChild(mkEl("span", "ps-hmc-variable-type",
+        typeLabel(t.types[name])));
+      button.addEventListener("click", function () {
+        hmcToggleVariable(this.getAttribute("data-hmc-variable"), true);
+      });
+      button.addEventListener("dragstart", function (event) {
+        event.dataTransfer.setData("text/plain",
+          this.getAttribute("data-hmc-variable"));
+        event.dataTransfer.effectAllowed = "copy";
+      });
+      root.appendChild(button);
+    }
+  }
+  function hmcRenderDataResult(root, resultId, note, alternative,
+                               summary, recommendation) {
+    var result = HMC_RESULTS[resultId];
+    if (!result) return;
+    var wrapper = mkEl("div", "ps-hmc-data-result");
+    var card = mkEl("section", "ps-hmc-result" +
+      (alternative ? " ps-hmc-alternative" : ""));
+    var head = mkEl("div", "ps-hmc-result-head");
+    var rIcon = mkEl("span", "ps-hmc-result-icon");
+    rIcon.innerHTML = moduleThumb(result.module) ||
+      escHtml(MODULE_GUIDE[result.module].icon);
+    head.appendChild(rIcon);
+    var title = mkEl("div", "");
+    title.appendChild(mkEl("div", "ps-hmc-result-label",
+      alternative ? "Another interpretation" : "Recommended analysis"));
+    title.appendChild(mkEl("h3", "", result.label));
+    head.appendChild(title);
+    card.appendChild(head);
+    var content = mkEl("div", "ps-hmc-result-body");
+    var why = mkEl("p", "ps-hmc-why");
+    why.appendChild(mkEl("strong", "",
+      alternative ? "Choose this instead if: " : "Why this fits: "));
+    why.appendChild(document.createTextNode(note || result.why));
+    content.appendChild(why);
+    var capacity = hmcCapacityWarning(resultId, summary, recommendation);
+    if (capacity) content.appendChild(mkEl("div", "ps-hmc-warning", capacity));
+    content.appendChild(mkEl("div", "ps-hmc-start-label",
+      "Good starting chart types"));
+    var types = mkEl("div", "ps-hmc-chart-types");
+    result.starts.forEach(function (start) {
+      types.appendChild(startChip(start, result.module));
+    });
+    content.appendChild(types);
+    if (hmcRecordsByKind(summary, "cat").length >= 2) {
+      var gp = hmcGroupingTip(result.module,
+        "You dropped in more than one categorical variable, so ");
+      if (gp) content.appendChild(gp);
+    }
+    var create = mkEl("button", "ps-btn ps-primary",
+      "Create " + result.label + " chart");
+    create.type = "button";
+    create.setAttribute("data-hmc-data-create", result.module);
+    create.addEventListener("click", function () {
+      hmcOpenRecommendation(result, summary, recommendation);
+    });
+    content.appendChild(create);
+    content.appendChild(hmcNextSteps());
+    card.appendChild(content);
+    wrapper.appendChild(card);
+    root.appendChild(wrapper);
+  }
+  function renderHmcVariables(body) {
+    var t = PROJECT.table;
+    var layout = mkEl("div", "ps-hmc-variable-layout");
+    var supplier = mkEl("section", "ps-hmc-variable-panel");
+    supplier.appendChild(mkEl("h3", "ps-hmc-panel-title",
+      "Variables in this project"));
+    supplier.appendChild(mkEl("p", "ps-hmc-panel-copy",
+      "Click or drag the exact variables you are considering."));
+    var search = document.createElement("input");
+    search.type = "search"; search.className = "ps-hmc-variable-search";
+    search.placeholder = "Filter variables"; search.value = HMC_FILTER;
+    search.setAttribute("aria-label", "Filter project variables");
+    supplier.appendChild(search);
+    var variableList = mkEl("div", "ps-hmc-variable-list");
+    supplier.appendChild(variableList);
+    hmcRenderVariableList(variableList, HMC_FILTER);
+    search.addEventListener("input", function () {
+      HMC_FILTER = this.value;
+      hmcRenderVariableList(variableList, HMC_FILTER);
+    });
+    var drop = mkEl("div", "ps-hmc-dropzone");
+    drop.setAttribute("data-hmc-dropzone", "true");
+    drop.setAttribute("aria-label", "Variables to plot");
+    if (!HMC_SELECTED.length)
+      drop.appendChild(mkEl("div", "ps-hmc-drop-empty",
+        "Drag variables here, or click them in the list."));
+    for (var i = 0; i < HMC_SELECTED.length; i++) {
+      (function (name) {
+        var chip = mkEl("span", "ps-hmc-selected");
+        var selectedIcon = mkEl("span", "ps-hmc-selected-icon");
+        selectedIcon.innerHTML = psTypeIcon(t.types[name]);
+        chip.appendChild(selectedIcon);
+        chip.appendChild(mkEl("span", "", name));
+        chip.appendChild(mkEl("span", "ps-hmc-selected-type",
+          typeLabel(t.types[name])));
+        var remove = mkEl("button", "", "\u00d7");
+        remove.type = "button";
+        remove.setAttribute("aria-label", "Remove " + name);
+        remove.setAttribute("data-hmc-remove", name);
+        remove.addEventListener("click", function () {
+          hmcToggleVariable(name, false);
+        });
+        chip.appendChild(remove);
+        drop.appendChild(chip);
+      })(HMC_SELECTED[i]);
+    }
+    drop.addEventListener("dragover", function (event) {
+      event.preventDefault(); this.classList.add("ps-hmc-droptarget");
+    });
+    drop.addEventListener("dragleave", function () {
+      this.classList.remove("ps-hmc-droptarget");
+    });
+    drop.addEventListener("drop", function (event) {
+      event.preventDefault();
+      this.classList.remove("ps-hmc-droptarget");
+      var name = event.dataTransfer.getData("text/plain");
+      if (t && t.order.indexOf(name) !== -1) hmcToggleVariable(name, true);
+    });
+    supplier.appendChild(drop);
+    layout.appendChild(supplier);
+
+    var recommendationPanel = mkEl("section", "ps-hmc-recommend-panel");
+    recommendationPanel.appendChild(mkEl("h3", "ps-hmc-panel-title",
+      "Recommendation"));
+    recommendationPanel.appendChild(mkEl("p", "ps-hmc-panel-copy",
+      "The guide matches measure types, variable counts, shared scales, and repeated-measure naming patterns."));
+    if (!HMC_SELECTED.length) {
+      recommendationPanel.appendChild(mkEl("div", "ps-hmc-empty-result",
+        "Add the variables you want to show. Nothing is changed in your dataset, and no chart is created until you confirm a recommendation."));
+    } else {
+      var summary = hmcSelectionSummary();
+      var recommendation = hmcDataRecommendation(summary);
+      var detected = mkEl("div", "ps-hmc-detected");
+      detected.appendChild(mkEl("strong", "",
+        summary.vars.length + (summary.vars.length === 1
+          ? " selected variable" : " selected variables") +
+        " \u00b7 " + summary.n + " rows"));
+      summary.vars.forEach(function (record) {
+        detected.appendChild(mkEl("div", "ps-hmc-detected-row",
+          record.name + " \u00b7 " + hmcVariableTypeText(record) +
+          (record.levels ? ", " + record.levels + " levels" : "")));
+      });
+      recommendationPanel.appendChild(detected);
+      if (recommendation.warning)
+        recommendationPanel.appendChild(mkEl("div", "ps-hmc-warning",
+          recommendation.warning));
+      if (recommendation.primary) {
+        hmcRenderDataResult(recommendationPanel,
+          recommendation.primary.id, recommendation.primary.note, false,
+          summary, recommendation);
+        if (recommendation.alternative)
+          hmcRenderDataResult(recommendationPanel,
+            recommendation.alternative.id, recommendation.alternative.note,
+            true, summary, recommendation);
+      } else recommendationPanel.appendChild(mkEl("div", "ps-hmc-empty-result",
+        "These variables do not fit one chart cleanly. Check their measure types, remove ID-like columns, or use the question route."));
+    }
+    layout.appendChild(recommendationPanel);
+    body.appendChild(layout);
+  }
+  // Every step render replaces the dialog body WHOLESALE, destroying
+  // the button that held focus; focus then fell to <body> and the
+  // overlay's Escape/Tab handlers went silent - past the first screen
+  // the keyboard could no longer leave the dialog (the M4 audit's
+  // confirmed trap). Re-anchor focus inside the open dialog after
+  // every render.
+  function hmcRestoreFocus() {
+    var dialog = el("ps-help-choose");
+    if (!dialog || dialog.style.display !== "flex") return;
+    var active = document.activeElement;
+    if (active && active !== document.body &&
+        active !== document.documentElement && dialog.contains(active)) return;
+    var first = dialog.querySelector(
+      "input, select, button:not([disabled]), [tabindex]");
+    if (first) first.focus();
+  }
+  function renderHelpMeChoose() {
+    var body = el("ps-help-choose-body");
+    body.innerHTML = "";
+    hmcModeBar(body);
+    if (HMC_MODE === "variables") {
+      renderHmcVariables(body);
+      hmcRestoreFocus();
+      return;
+    }
+    hmcProgress(body);
+    var id = HMC_PATH[HMC_PATH.length - 1];
+    var node = HMC_NODES[id], result = HMC_RESULTS[id];
+    if (node) {
+      body.appendChild(mkEl("h3", "ps-hmc-question", node.question));
+      body.appendChild(mkEl("p", "ps-hmc-question-copy", node.copy));
+      var options = mkEl("div", "ps-hmc-options");
+      for (var i = 0; i < node.options.length; i++) {
+        (function (choice) {
+          var option = mkEl("button", "ps-hmc-option");
+          option.type = "button";
+          option.setAttribute("data-hmc-go", choice.go);
+          var copy = mkEl("span", "");
+          copy.appendChild(mkEl("strong", "", choice.title));
+          copy.appendChild(mkEl("span", "", choice.detail));
+          option.appendChild(copy);
+          option.appendChild(mkEl("b", "", "\u203a"));
+          option.addEventListener("click", function () {
+            HMC_PATH.push(choice.go);
+            renderHelpMeChoose();
+          });
+          options.appendChild(option);
+        })(node.options[i]);
+      }
+      body.appendChild(options);
+      var tip = mkEl("div", "ps-hmc-tip");
+      tip.appendChild(document.createTextNode(
+        "Tip: if you already know which columns matter, "));
+      var variableRoute = mkEl("button", "", "use the exact variables");
+      variableRoute.type = "button";
+      variableRoute.addEventListener("click", function () {
+        HMC_MODE = "variables";
+        renderHelpMeChoose();
+      });
+      tip.appendChild(variableRoute);
+      tip.appendChild(document.createTextNode(
+        " and the guide will recommend the analysis that fits them."));
+      body.appendChild(tip);
+      var browseActions = mkEl("div", "ps-hmc-actions");
+      if (HMC_PATH.length > 1) {
+        var nodeBack = mkEl("button", "ps-btn", "Back");
+        nodeBack.type = "button";
+        nodeBack.addEventListener("click", function () {
+          HMC_PATH.pop(); renderHelpMeChoose();
+        });
+        browseActions.appendChild(nodeBack);
+      } else {
+        var browse = mkEl("button", "ps-btn", "Browse all chart types");
+        browse.type = "button";
+        browse.addEventListener("click", function () {
+          hideHelpMeChoose(); showAnalysisGallery();
+        });
+        browseActions.appendChild(browse);
+      }
+      body.appendChild(browseActions);
+      hmcRestoreFocus();
+      return;
+    }
+    if (!result) {
+      HMC_PATH = ["root"]; renderHelpMeChoose(); return;
+    }
+    var card = mkEl("section", "ps-hmc-result");
+    var head = mkEl("div", "ps-hmc-result-head");
+    var rIcon = mkEl("span", "ps-hmc-result-icon");
+    rIcon.innerHTML = moduleThumb(result.module) ||
+      escHtml(MODULE_GUIDE[result.module].icon);
+    head.appendChild(rIcon);
+    var title = mkEl("div", "");
+    title.appendChild(mkEl("div", "ps-hmc-result-label",
+      "Recommended analysis"));
+    title.appendChild(mkEl("h3", "", result.label));
+    head.appendChild(title);
+    card.appendChild(head);
+    var resultBody = mkEl("div", "ps-hmc-result-body");
+    var why = mkEl("p", "ps-hmc-why");
+    why.appendChild(mkEl("strong", "", "Why this fits: "));
+    why.appendChild(document.createTextNode(result.why));
+    resultBody.appendChild(why);
+    resultBody.appendChild(mkEl("div", "ps-hmc-start-label",
+      "Good starting chart types"));
+    var types = mkEl("div", "ps-hmc-chart-types");
+    for (var si = 0; si < result.starts.length; si++)
+      types.appendChild(startChip(result.starts[si], result.module));
+    resultBody.appendChild(types);
+    resultBody.appendChild(mkEl("p", "ps-hmc-requirement",
+      moduleRequirementText(result.module) +
+      ". You can switch chart styles after assigning variables."));
+    var qgp = hmcGroupingTip(result.module,
+      "If you also have a second categorical variable, ");
+    if (qgp) resultBody.appendChild(qgp);
+    resultBody.appendChild(hmcNextSteps());
+    card.appendChild(resultBody);
+    body.appendChild(card);
+    var actions = mkEl("div", "ps-hmc-actions");
+    var backButton = mkEl("button", "ps-btn", "Back");
+    backButton.type = "button";
+    backButton.addEventListener("click", function () {
+      HMC_PATH.pop(); renderHelpMeChoose();
+    });
+    actions.appendChild(backButton);
+    var restart = mkEl("button", "ps-btn", "Start over");
+    restart.type = "button";
+    restart.addEventListener("click", function () {
+      HMC_PATH = ["root"]; renderHelpMeChoose();
+    });
+    actions.appendChild(restart);
+    var create = mkEl("button", "ps-btn ps-primary",
+      "Create " + result.label + " chart");
+    create.type = "button";
+    create.setAttribute("data-hmc-create", result.module);
+    create.addEventListener("click", function () {
+      hmcOpenRecommendation(result);
+    });
+    actions.appendChild(create);
+    body.appendChild(actions);
+    hmcRestoreFocus();
+  }
+  function showHelpMeChoose() {
+    HMC_PATH = ["root"];
+    HMC_MODE = "questions";
+    HMC_SELECTED = [];
+    HMC_FILTER = "";
+    renderHelpMeChoose();
+    openShellDialog("ps-help-choose");
+  }
+  function hideHelpMeChoose() { closeShellDialog("ps-help-choose"); }
+
+  var LAYOUT_TEMPLATE_KEY = "blank";
+  var LAYOUT_TEMPLATE_ORIENTATION = "landscape";
+  var LAYOUT_TEMPLATES = [
+    { key: "blank", name: "Blank canvas", slots: 0,
+      description: "Start with an unrestricted page and add items manually.",
+      note: "No charts required.", preview: [] },
+    { key: "single", name: "Single panel", slots: 1,
+      description: "One chart centered within the page margins.",
+      note: "Best for a standalone figure.",
+      preview: [[8, 10, 84, 80]] },
+    { key: "two-columns", name: "Two columns", slots: 2,
+      description: "Two equally sized charts arranged side by side.",
+      note: "Useful for direct comparisons.",
+      preview: [[7, 10, 40, 80], [53, 10, 40, 80]] },
+    { key: "two-rows", name: "Two rows", slots: 2,
+      description: "Two wide charts stacked vertically.",
+      note: "Works well when axes or labels are long.",
+      preview: [[7, 8, 86, 38], [7, 54, 86, 38]] },
+    { key: "main-side", name: "Main + supporting", slots: 2,
+      description: "A large primary chart with a narrower supporting panel.",
+      portraitDescription:
+        "A large primary chart above a shorter supporting panel.",
+      note: "Creates a clear visual hierarchy.",
+      preview: [[7, 10, 57, 80], [69, 10, 24, 80]],
+      portraitPreview: [[8, 7, 84, 57], [8, 69, 84, 24]] },
+    { key: "three", name: "Three panels", slots: 3,
+      description: "One wide chart above two supporting charts.",
+      note: "A common results-figure structure.",
+      preview: [[7, 7, 86, 40], [7, 54, 40, 39], [53, 54, 40, 39]] },
+    { key: "four", name: "Four-panel grid", slots: 4,
+      description: "A balanced 2 by 2 figure for related results.",
+      note: "Designed for multi-part publication figures.",
+      preview: [[7, 7, 40, 40], [53, 7, 40, 40],
+                [7, 53, 40, 40], [53, 53, 40, 40]] },
+    { key: "presentation", name: "Presentation figure", slots: 1,
+      description: "A 16:9 page with a title area and a large chart.",
+      portraitDescription:
+        "A portrait report page with a title area and a large chart.",
+      note: "Uses the Presentation page preset.",
+      preview: [[7, 24, 86, 68]],
+      portraitPreview: [[8, 18, 84, 74]], presentation: true }
+  ];
+  function layoutTemplateByKey(key) {
+    for (var i = 0; i < LAYOUT_TEMPLATES.length; i++)
+      if (LAYOUT_TEMPLATES[i].key === key) return LAYOUT_TEMPLATES[i];
+    return LAYOUT_TEMPLATES[0];
+  }
+  function layoutProjectCharts() {
+    return PROJECT.charts.filter(function (doc) { return !isLayoutTab(doc); });
+  }
+  function layoutTemplatePreview(def) {
+    var portrait = LAYOUT_TEMPLATE_ORIENTATION === "portrait";
+    var box = mkEl("span", "ps-layout-template-preview" +
+      (portrait ? " ps-layout-template-portrait" : ""));
+    var preview = portrait && def.portraitPreview
+      ? def.portraitPreview : def.preview;
+    for (var i = 0; i < preview.length; i++) {
+      var r = preview[i], panel = document.createElement("span");
+      panel.style.left = r[0] + "%"; panel.style.top = r[1] + "%";
+      panel.style.width = r[2] + "%"; panel.style.height = r[3] + "%";
+      box.appendChild(panel);
+    }
+    return box;
+  }
+  function renderLayoutTemplateSetup() {
+    var def = layoutTemplateByKey(LAYOUT_TEMPLATE_KEY);
+    var charts = layoutProjectCharts(), root = el("ps-layout-template-assignments");
+    el("ps-layout-template-name").textContent = def.name;
+    root.innerHTML = "";
+    for (var i = 0; i < def.slots; i++) {
+      var label = document.createElement("label");
+      label.appendChild(mkEl("span", "", "Panel " +
+        String.fromCharCode(65 + i)));
+      var select = document.createElement("select");
+      select.setAttribute("data-layout-slot", String(i));
+      select.setAttribute("aria-label", "Chart for panel " +
+        String.fromCharCode(65 + i));
+      for (var j = 0; j < charts.length; j++) {
+        var option = document.createElement("option");
+        option.value = charts[j].id;
+        option.textContent = charts[j].name;
+        if (j === i) option.selected = true;
+        select.appendChild(option);
+      }
+      label.appendChild(select);
+      root.appendChild(label);
+    }
+    if (!def.slots)
+      root.appendChild(mkEl("span", "ps-slot-empty",
+        "Items can be added from the layout toolbar."));
+    var labels = el("ps-layout-template-labels");
+    labels.disabled = def.slots < 2;
+    if (def.slots < 2) labels.checked = false;
+    else if (!labels.__psChosen) labels.checked = true;
+    el("ps-layout-template-note").textContent = def.note +
+      (def.slots ? " Select which chart belongs in each panel." : "");
+  }
+  function renderLayoutGallery() {
+    var charts = layoutProjectCharts();
+    if (layoutTemplateByKey(LAYOUT_TEMPLATE_KEY).slots > charts.length)
+      LAYOUT_TEMPLATE_KEY = charts.length ? "single" : "blank";
+    var root = el("ps-layout-template-grid");
+    root.innerHTML = "";
+    var orientationButtons = document.querySelectorAll(
+      "[data-layout-orientation]");
+    for (var oi = 0; oi < orientationButtons.length; oi++)
+      orientationButtons[oi].setAttribute("aria-pressed",
+        orientationButtons[oi].getAttribute("data-layout-orientation") ===
+        LAYOUT_TEMPLATE_ORIENTATION ? "true" : "false");
+    for (var i = 0; i < LAYOUT_TEMPLATES.length; i++) {
+      (function (def) {
+        var button = mkEl("button", "ps-layout-template-card");
+        button.type = "button";
+        button.setAttribute("data-layout-template", def.key);
+        button.setAttribute("aria-pressed",
+          def.key === LAYOUT_TEMPLATE_KEY ? "true" : "false");
+        button.disabled = def.slots > charts.length;
+        setTip(button, button.disabled
+          ? "Create " + def.slots + " charts before using this template" : def.name);
+        button.appendChild(layoutTemplatePreview(def));
+        var copy = mkEl("span", "ps-layout-template-copy");
+        copy.appendChild(mkEl("strong", "", def.name));
+        copy.appendChild(mkEl("span", "",
+          LAYOUT_TEMPLATE_ORIENTATION === "portrait" &&
+          def.portraitDescription
+            ? def.portraitDescription : def.description));
+        copy.appendChild(mkEl("small", "",
+          def.slots ? def.slots + (def.slots === 1 ? " chart" : " charts") :
+          "No charts required"));
+        button.appendChild(copy);
+        button.addEventListener("click", function () {
+          LAYOUT_TEMPLATE_KEY = def.key;
+          var cards = root.querySelectorAll("[data-layout-template]");
+          for (var ci = 0; ci < cards.length; ci++)
+            cards[ci].setAttribute("aria-pressed",
+              cards[ci].getAttribute("data-layout-template") === def.key
+                ? "true" : "false");
+          renderLayoutTemplateSetup();
+        });
+        root.appendChild(button);
+      })(LAYOUT_TEMPLATES[i]);
+    }
+    renderLayoutTemplateSetup();
+  }
+  function showLayoutGallery() {
+    var charts = layoutProjectCharts();
+    LAYOUT_TEMPLATE_KEY = charts.length ? "single" : "blank";
+    el("ps-layout-template-labels").__psChosen = false;
+    renderLayoutGallery();
+    openShellDialog("ps-layout-gallery");
+  }
+  function hideLayoutGallery() { closeShellDialog("ps-layout-gallery"); }
+  function closeChart(id) {
+    if (PROJECT.charts.length <= 1) return;
+    // B3 hygiene: the parked engine state for a closed document would
+    // otherwise sit in localStorage forever. closeChart offers an undo, so
+    // this is deferred past the toast rather than done immediately.
+    window.setTimeout(function () {
+      if (!chartById(id)) forgetEngineDocState(id);
+    }, 8000);
+    var idx = -1;
+    for (var i = 0; i < PROJECT.charts.length; i++)
+      if (PROJECT.charts[i].id === id) idx = i;
+    if (idx === -1) return;
+    var removed = PROJECT.charts[idx];
+    var wasActive = PROJECT.activeChart;
+    var priorWorkspace = appWorkspace();
+    var memoryKey = isLayoutTab(removed) ? "lastLayout" : "lastChart";
+    PROJECT.charts.splice(idx, 1);
+    if (PROJECT.activeChart === id) {
+      var replacement = null;
+      for (var ri = Math.min(idx - 1, PROJECT.charts.length - 1); ri >= 0; ri--)
+        if (isLayoutTab(PROJECT.charts[ri]) === isLayoutTab(removed)) {
+          replacement = PROJECT.charts[ri]; break;
+        }
+      if (!replacement)
+        for (ri = 0; ri < PROJECT.charts.length; ri++)
+          if (isLayoutTab(PROJECT.charts[ri]) === isLayoutTab(removed)) {
+            replacement = PROJECT.charts[ri]; break;
+          }
+      PROJECT.activeChart = (replacement || PROJECT.charts[0]).id;
+      if (replacement) rememberDocument(replacement);
+      else PROJECT.ui[memoryKey] = null;
+    }
+    if (PROJECT.ui[memoryKey] === removed.id) {
+      var rememberedReplacement = appFirstDocument(isLayoutTab(removed));
+      PROJECT.ui[memoryKey] = rememberedReplacement
+        ? rememberedReplacement.id : null;
+    }
+    PROJECT.ui.workspace = priorWorkspace;
+    PROJECT.ui.dataOpen = priorWorkspace === "data";
+    persist();
+    syncAll();
+    render();
+    showUndoToast("Deleted " + removed.name, function () {
+      if (chartById(removed.id)) return;
+      PROJECT.charts.splice(Math.min(idx, PROJECT.charts.length), 0, removed);
+      PROJECT.activeChart = wasActive === removed.id ? removed.id : PROJECT.activeChart;
+      PROJECT.ui.workspace = priorWorkspace;
+      PROJECT.ui.dataOpen = priorWorkspace === "data";
+      if (wasActive === removed.id) rememberDocument(removed);
+      persist(); syncAll(); render();
+    });
+  }
+  function renameDocument(id, requested) {
+    var doc = chartById(id), next = String(requested || "").trim();
+    if (!doc || !next || next === doc.name) { syncContextInspector(); return; }
+    doc.name = next;
+    persist(); syncAll(); render();
+  }
+  function duplicateDocument(id) {
+    var source = chartById(id);
+    if (!source) return;
+    var copy = JSON.parse(JSON.stringify(source));
+    copy.id = (isLayoutTab(source) ? newLayout() : newChart()).id;
+    copy.name = source.name + " copy";
+    PROJECT.charts.splice(PROJECT.charts.indexOf(source) + 1, 0, copy);
+    PROJECT.activeChart = copy.id;
+    PROJECT.ui.workspace = isLayoutTab(copy) ? "layout" : "chart";
+    PROJECT.ui.dataOpen = false;
+    rememberDocument(copy);
+    LAYOUT_SEL = [];
+    persist(); syncAll(); render();
+  }
+  function beginDocumentRename(id) {
+    if (!chartById(id)) return;
+    if (PROJECT.activeChart !== id) switchChart(id);
+    window.setTimeout(function () {
+      var input = el("ps-inspector-docname");
+      try { input.focus(); input.select(); } catch (ignore) {}
+    }, 0);
+  }
+  // Tab drag-reorder, POINTER-based (the engine's histogram-drag idiom;
+  // replaced HTML5 dnd after field flicker): geometry is cached ONCE at
+  // arm time, so the slot math never reads mid-transition boxes (the
+  // feedback loop behind rapid back-and-forth at slot boundaries), and
+  // the dragged tab itself slides INLINE - X follows the pointer, Y is
+  // locked to its row, snapping between rows only when the strip wraps.
+  // Neighbors part via cached-position FLIP mapping; release commits,
+  // Esc abandons.
+  var TAB_PDRAG = null;
+  function tabPointerDown(e, tab, chartId) {
+    if (e.button !== 0 || TAB_PDRAG) return;
+    if (tab.querySelector(".ps-tab-rename")) return;
+    if (e.target.closest && e.target.closest(".ps-tab-x")) return;
+    TAB_PDRAG = { id: chartId, el: tab, startX: e.clientX, startY: e.clientY,
+                  armed: false };
+    document.addEventListener("pointermove", tabPointerMove);
+    document.addEventListener("pointerup", tabPointerUp);
+    document.addEventListener("keydown", tabDragEsc, true);
+  }
+  function tabArm() {
+    var d = TAB_PDRAG;
+    var all = el("ps-tabs").querySelectorAll(".ps-tab");
+    d.els = []; d.boxes = []; d.origIdx = -1;
+    for (var i = 0; i < all.length; i++) {
+      var r = all[i].getBoundingClientRect();
+      d.els.push(all[i]);
+      d.boxes.push({ l: r.left, t: r.top, cx: r.left + r.width / 2,
+                     cy: r.top + r.height / 2 });
+      if (all[i] === d.el) d.origIdx = i;
+    }
+    if (d.origIdx === -1) { tabDragCleanup(); return; }
+    // Row bands (the strip can wrap): unique center-Y values.
+    d.rows = [];
+    for (var b = 0; b < d.boxes.length; b++) {
+      var cy = d.boxes[b].cy, found = false;
+      for (var q = 0; q < d.rows.length; q++)
+        if (Math.abs(d.rows[q] - cy) < 6) { found = true; break; }
+      if (!found) d.rows.push(cy);
+    }
+    d.rows.sort(function (a, b2) { return a - b2; });
+    d.origRow = 0;
+    for (var q2 = 0; q2 < d.rows.length; q2++)
+      if (Math.abs(d.rows[q2] - d.boxes[d.origIdx].cy) < 6) d.origRow = q2;
+    d.slot = d.origIdx;   // reduced-list slot; starts at its own spot
+    d.el.classList.add("ps-tab-dragging");
+    d.armed = true;
+  }
+  function tabRowFor(d, y) {
+    var best = 0, bestDist = Infinity;
+    for (var i = 0; i < d.rows.length; i++) {
+      var dist = Math.abs(d.rows[i] - y);
+      if (dist < bestDist) { bestDist = dist; best = i; }
+    }
+    return best;
+  }
+  function tabPointerMove(e) {
+    var d = TAB_PDRAG;
+    if (!d) return;
+    if (!d.armed) {
+      if (Math.abs(e.clientX - d.startX) < 4 &&
+          Math.abs(e.clientY - d.startY) < 4) return;
+      tabArm();
+      if (!d.armed) return;
+    }
+    e.preventDefault();
+    var targetRow = tabRowFor(d, e.clientY);
+    // Slot among the NON-dragged tabs, row-major, from CACHED centers.
+    var slot = 0, i, j;
+    for (i = 0; i < d.boxes.length; i++) {
+      if (i === d.origIdx) continue;
+      var rowI = tabRowFor(d, d.boxes[i].cy);
+      if (rowI < targetRow ||
+          (rowI === targetRow && d.boxes[i].cx < e.clientX)) slot++;
+    }
+    d.slot = slot;
+    // Dragged: X free, Y snapped to the target row band.
+    var dx = e.clientX - d.startX;
+    var dy = d.rows[targetRow] - d.rows[d.origRow];
+    d.el.style.transform = "translate(" + dx + "px," + dy + "px)";
+    // Neighbors: FLIP against cached layout positions (handles wrap).
+    for (i = 0; i < d.els.length; i++) {
+      if (i === d.origIdx) continue;
+      j = i - (i > d.origIdx ? 1 : 0);          // reduced index
+      var f = j + (j >= slot ? 1 : 0);          // final full index
+      d.els[i].style.transform = (f === i) ? "" :
+        "translate(" + (d.boxes[f].l - d.boxes[i].l) + "px," +
+                       (d.boxes[f].t - d.boxes[i].t) + "px)";
+    }
+  }
+  function tabSwallowNextClick() {
+    // A real drag's release also fires a click on the tab, which would
+    // switch charts - swallow exactly one trusted click, self-disarming
+    // (the engine's post-drag idiom).
+    var used = false;
+    function h(e) {
+      if (used) return;
+      used = true;
+      document.removeEventListener("click", h, true);
+      if (e.isTrusted) { e.stopPropagation(); e.preventDefault(); }
+    }
+    document.addEventListener("click", h, true);
+    window.setTimeout(function () {
+      if (!used) { used = true; document.removeEventListener("click", h, true); }
+    }, 250);
+  }
+  function tabPointerUp() {
+    var d = TAB_PDRAG;
+    tabDragCleanup();
+    if (!d || !d.armed) return;
+    tabSwallowNextClick();
+    moveChartToIndex(d.id, d.slot);
+  }
+  function tabDragEsc(e) {
+    if (e.key !== "Escape" || !TAB_PDRAG) return;
+    var armed = TAB_PDRAG.armed;
+    tabDragCleanup();
+    if (armed) { e.stopPropagation(); tabSwallowNextClick(); syncTabs(); }
+  }
+  function tabDragCleanup() {
+    var d = TAB_PDRAG;
+    TAB_PDRAG = null;
+    document.removeEventListener("pointermove", tabPointerMove);
+    document.removeEventListener("pointerup", tabPointerUp);
+    document.removeEventListener("keydown", tabDragEsc, true);
+    if (d && d.els)
+      for (var i = 0; i < d.els.length; i++) d.els[i].style.transform = "";
+    if (d && d.el) d.el.classList.remove("ps-tab-dragging");
+  }
+  function moveChartToIndex(dragId, slot) {
+    var dragged = chartById(dragId), i;
+    if (!dragged) return;
+    var wantLayout = isLayoutTab(dragged), same = [];
+    for (i = 0; i < PROJECT.charts.length; i++)
+      if (isLayoutTab(PROJECT.charts[i]) === wantLayout)
+        same.push(PROJECT.charts[i]);
+    var at = same.indexOf(dragged);
+    if (at === -1) return;
+    same.splice(at, 1);
+    if (slot < 0) slot = 0;
+    if (slot > same.length) slot = same.length;
+    same.splice(slot, 0, dragged);
+    var next = 0;
+    for (i = 0; i < PROJECT.charts.length; i++)
+      if (isLayoutTab(PROJECT.charts[i]) === wantLayout)
+        PROJECT.charts[i] = same[next++];
+    persist();
+    syncTabs();
+  }
+  var TAB_LAST_CLICK = { id: null, at: 0 };
+  function renameChartInline(tab, chartObj) {
+    if (tab.querySelector(".ps-tab-rename")) return;
+    var input = document.createElement("input");
+    input.type = "text";
+    input.className = "ps-tab-rename";
+    input.value = chartObj.name;
+    var nameEl = tab.querySelector(".ps-tab-name");
+    nameEl.replaceWith(input);
+    input.focus();
+    input.select();
+    var done = false;
+    function commit(cancel) {
+      if (done) return;
+      done = true;
+      if (!cancel) {
+        var v = input.value.trim();
+        if (v) chartObj.name = v;
+        persist();
+      }
+      syncTabs();
+    }
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); commit(false); }
+      else if (e.key === "Escape") commit(true);
+      e.stopPropagation();
+    });
+    input.addEventListener("blur", function () { commit(false); });
+    input.addEventListener("click", function (e) { e.stopPropagation(); });
+  }
+  function showAddMenu(anchor) {
+    var m = el("ps-addmenu");
+    m.innerHTML =
+      '<button type="button" data-add="chart">New chart</button>' +
+      '<button type="button" data-add="layout">New layout</button>';
+    var r = anchor.getBoundingClientRect();
+    m.style.display = "block";
+    m.style.left = Math.min(r.left, window.innerWidth - 150) + "px";
+    m.style.top = Math.min(r.bottom + 3, window.innerHeight - 84) + "px";
+  }
+  function syncTabs() {
+    var bar = el("ps-tabs");
+    bar.innerHTML = "";
+    activeChart();   // ensures at least one chart + a valid active id
+    var ws = appWorkspace(), wantLayout = ws === "layout";
+    for (var i = 0; i < PROJECT.charts.length; i++) {
+      if (ws === "data" || isLayoutTab(PROJECT.charts[i]) !== wantLayout) continue;
+      (function (c) {
+        var tab = mkEl("div", "ps-tab" +
+          (c.id === PROJECT.activeChart ? " ps-tab-active" : ""));
+        tab.setAttribute("data-chart-id", c.id);
+        setTip(tab, c.name + " - " +
+          (isLayoutTab(c) ? "Layout"
+           : (MODULES[c.module] ? MODULES[c.module].label : c.module)) +
+          " (double-click to rename)");
+        if (isLayoutTab(c)) {
+          var lg = mkEl("span", "");
+          lg.innerHTML = '<svg class="ps-ticon" width="12" height="12" viewBox="0 0 12 12">' +
+            '<rect x="0.5" y="0.5" width="4.6" height="4.6" rx="1" fill="#5b93cc"/>' +
+            '<rect x="6.9" y="0.5" width="4.6" height="4.6" rx="1" fill="#9ec2e8"/>' +
+            '<rect x="0.5" y="6.9" width="4.6" height="4.6" rx="1" fill="#9ec2e8"/>' +
+            '<rect x="6.9" y="6.9" width="4.6" height="4.6" rx="1" fill="#5b93cc"/></svg>';
+          tab.appendChild(lg);
+        }
+        tab.appendChild(mkEl("span", "ps-tab-name", c.name));
+        if (PROJECT.charts.length > 1) {
+          var x = mkEl("button", "ps-tab-x", "\u00d7");
+          x.type = "button";
+          setTip(x, "Close " + c.name);
+          x.addEventListener("click", function (e) {
+            e.stopPropagation();
+            closeChart(c.id);
+          });
+          tab.appendChild(x);
+        }
+        tab.addEventListener("click", function () {
+          if (tab.querySelector(".ps-tab-rename")) return;
+          // Manual double-click detection: the first click's
+          // switchChart REBUILDS the tab strip, so the second click
+          // lands on a fresh node and the native dblclick event never
+          // fires (the audit's dead double-click rename). Two clicks
+          // on the same document within the double-click window open
+          // the inline rename instead of re-switching.
+          var now = Date.now();
+          if (TAB_LAST_CLICK.id === c.id && now - TAB_LAST_CLICK.at < 450) {
+            TAB_LAST_CLICK = { id: null, at: 0 };
+            renameChartInline(tab, c);
+            return;
+          }
+          TAB_LAST_CLICK = { id: c.id, at: now };
+          switchChart(c.id);
+        });
+        tab.addEventListener("dblclick", function (e) {
+          // Belt and suspenders for the no-rebuild case; renameChartInline
+          // is a no-op while its input is already open.
+          e.preventDefault();
+          if (!tab.querySelector(".ps-tab-rename"))
+            renameChartInline(tab, c);
+        });
+        tab.addEventListener("contextmenu", function (e) {
+          e.preventDefault();
+          showDocumentContextMenu(e.clientX, e.clientY, c.id);
+        });
+        // Drag to reorder: pointer-based inline sliding (see tabPointerDown).
+        tab.addEventListener("pointerdown", function (e) {
+          tabPointerDown(e, tab, c.id);
+        });
+        bar.appendChild(tab);
+      })(PROJECT.charts[i]);
+    }
+    var add = mkEl("button", "ps-tab-add", "+");
+    add.type = "button";
+    var addLabel = wantLayout ? "New layout" : "New chart";
+    setTip(add, addLabel);
+    add.setAttribute("aria-label", addLabel);
+    add.addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (wantLayout) showLayoutGallery();
+      else showAnalysisGallery();
+    });
+    if (ws !== "data") bar.appendChild(add);
+    // t3-51: the strip scrolls now rather than wrapping, so the active tab has
+    // to be brought back into view - otherwise switching by keyboard (or by
+    // closing a document) can leave the selected tab off the left or right end
+    // with nothing on screen changing.
+    var live = bar.querySelector(".ps-tab-active");
+    if (live && bar.scrollWidth > bar.clientWidth) {
+      var lb = live.offsetLeft, lw = live.offsetWidth;
+      if (lb < bar.scrollLeft) bar.scrollLeft = Math.max(0, lb - 8);
+      else if (lb + lw > bar.scrollLeft + bar.clientWidth)
+        bar.scrollLeft = lb + lw - bar.clientWidth + 8;
+    }
+  }
+  function activateNewLayout(c) {
+    PROJECT.charts.push(c);
+    PROJECT.activeChart = c.id;
+    PROJECT.ui.workspace = "layout";
+    PROJECT.ui.dataOpen = false;
+    rememberDocument(c);
+    LAYOUT_SEL = [];
+    persist();
+    syncAll();
+    render();
+  }
+  function addLayout() { activateNewLayout(newLayout()); }
+  function layoutTemplateRects(key, page) {
+    var m = page.margin, gap = 18;
+    var x = m, y = m, w = page.w - m * 2, h = page.h - m * 2;
+    var halfW = (w - gap) / 2, halfH = (h - gap) / 2;
+    if (key === "single" || key === "presentation")
+      return [{ x: x, y: y, w: w, h: h }];
+    if (key === "two-columns")
+      return [{ x: x, y: y, w: halfW, h: h },
+              { x: x + halfW + gap, y: y, w: halfW, h: h }];
+    if (key === "two-rows")
+      return [{ x: x, y: y, w: w, h: halfH },
+              { x: x, y: y + halfH + gap, w: w, h: halfH }];
+    if (key === "main-side") {
+      if (page.h > page.w) {
+        var mainH = Math.round((h - gap) * 0.68);
+        return [{ x: x, y: y, w: w, h: mainH },
+                { x: x, y: y + mainH + gap, w: w,
+                  h: h - mainH - gap }];
+      }
+      var mainW = Math.round((w - gap) * 0.68);
+      return [{ x: x, y: y, w: mainW, h: h },
+              { x: x + mainW + gap, y: y,
+                w: w - mainW - gap, h: h }];
+    }
+    if (key === "three")
+      return [{ x: x, y: y, w: w, h: halfH },
+              { x: x, y: y + halfH + gap, w: halfW, h: halfH },
+              { x: x + halfW + gap, y: y + halfH + gap,
+                w: halfW, h: halfH }];
+    if (key === "four")
+      return [{ x: x, y: y, w: halfW, h: halfH },
+              { x: x + halfW + gap, y: y, w: halfW, h: halfH },
+              { x: x, y: y + halfH + gap, w: halfW, h: halfH },
+              { x: x + halfW + gap, y: y + halfH + gap,
+                w: halfW, h: halfH }];
+    return [];
+  }
+  function createLayoutFromTemplate() {
+    var def = layoutTemplateByKey(LAYOUT_TEMPLATE_KEY);
+    var c = newLayout(), selects = el("ps-layout-template-assignments")
+      .querySelectorAll("select[data-layout-slot]");
+    var portrait = LAYOUT_TEMPLATE_ORIENTATION === "portrait";
+    if (def.presentation && portrait) {
+      c.page = { preset: "letterp", w: 816, h: 1056, margin: 40 };
+    } else if (def.presentation) {
+      c.page = { preset: "wide", w: 1200, h: 675, margin: 40 };
+    } else if (portrait) {
+      c.page = { preset: "canvasp", w: 680, h: 1024, margin: 32 };
+    }
+    var rects = layoutTemplateRects(def.key, c.page);
+    var labels = !!el("ps-layout-template-labels").checked && def.slots > 1;
+    var itemNumber = 0, labelBand = labels ? 28 : 0;
+    if (def.presentation) {
+      c.items.push({ id: "i" + (++itemNumber), kind: "text",
+                     text: "Figure title", fontSize: 24, bold: true,
+                     x: c.page.margin, y: 22 });
+      rects[0].y += 48; rects[0].h -= 48;
+    }
+    for (var i = 0; i < rects.length; i++) {
+      var chartId = selects[i] && selects[i].value;
+      if (!chartById(chartId) || isLayoutTab(chartById(chartId))) continue;
+      var r = rects[i];
+      c.items.push({ id: "i" + (++itemNumber), kind: "chart",
+                     chartId: chartId, x: Math.round(r.x),
+                     y: Math.round(r.y + labelBand),
+                     w: Math.round(r.w),
+                     h: Math.round(Math.max(80, r.h - labelBand)) });
+    }
+    if (labels) {
+      for (i = 0; i < rects.length; i++) {
+        c.items.push({ id: "i" + (++itemNumber), kind: "text",
+                       text: String.fromCharCode(65 + i),
+                       fontSize: 20, bold: true,
+                       x: Math.round(rects[i].x),
+                       y: Math.round(rects[i].y) });
+      }
+      c.nextLabel = rects.length;
+    }
+    hideLayoutGallery();
+    activateNewLayout(c);
+  }
+
+  // ================================================================ layout
+  // Publication-figure composer. Canvas coordinates are always stored at
+  // full page size; zoom affects only the view, never project geometry or
+  // export. Selection is an ordered id array; the final id is primary.
+  var LAYOUT_SEL = [];
+  var LAY_DRAG = null;
+  var LAY_RESIZE_TIMER = null;
+  var LAY_PRESETS = {
+    canvas: { w: 1024, h: 680 },
+    canvasp: { w: 680, h: 1024 },
+    wide: { w: 1200, h: 675 },
+    tall: { w: 675, h: 1200 },
+    square: { w: 800, h: 800 },
+    a4l: { w: 1123, h: 794 },
+    a4p: { w: 794, h: 1123 },
+    letterl: { w: 1056, h: 816 },
+    letterp: { w: 816, h: 1056 }
+  };
+  function layClamp(n, lo, hi) {
+    n = Number(n);
+    if (!isFinite(n)) n = lo;
+    return Math.max(lo, Math.min(hi, n));
+  }
+  function layNormalizeLayout(c) {
+    if (!c || !isLayoutTab(c)) return c;
+    if (!Array.isArray(c.items)) c.items = [];
+    if (!c.page || typeof c.page !== "object") c.page = {};
+    if (!c.view || typeof c.view !== "object") c.view = {};
+    c.page.preset = LAY_PRESETS[c.page.preset] ? c.page.preset :
+      (c.page.preset === "custom" ? "custom" : "canvas");
+    c.page.w = Math.round(layClamp(c.page.w || 1024, 320, 4000));
+    c.page.h = Math.round(layClamp(c.page.h || 680, 240, 4000));
+    c.page.margin = Math.round(layClamp(c.page.margin == null ? 32 : c.page.margin,
+                                       0, Math.min(c.page.w, c.page.h) / 3));
+    var z = c.view.zoom;
+    c.view.zoom = z === "fit" ? "fit" :
+      String(layClamp(Number(z) || 1, 0.25, 1.5));
+    c.view.grid = [4, 8, 12, 16, 24].indexOf(Number(c.view.grid)) !== -1
+      ? Number(c.view.grid) : 8;
+    if (typeof c.view.showGrid !== "boolean") c.view.showGrid = true;
+    if (typeof c.view.snap !== "boolean") c.view.snap = true;
+    if (typeof c.view.guides !== "boolean") c.view.guides = true;
+    if (typeof c.view.margins !== "boolean") c.view.margins = true;
+    return c;
+  }
+  function layPage() {
+    var c = activeChart();
+    if (!isLayoutTab(c)) return { preset: "canvas", w: 1024, h: 680, margin: 32 };
+    layNormalizeLayout(c);
+    return c.page;
+  }
+  function layView() {
+    var c = activeChart();
+    if (!isLayoutTab(c)) return { zoom: "fit", grid: 8, showGrid: true,
+                                  snap: true, guides: true, margins: true };
+    layNormalizeLayout(c);
+    return c.view;
+  }
+  function layItems() {
+    var c = activeChart();
+    if (!isLayoutTab(c)) return [];
+    layNormalizeLayout(c);
+    return c.items;
+  }
+  function layItemById(id) {
+    var items = layItems();
+    for (var i = 0; i < items.length; i++)
+      if (items[i].id === id) return items[i];
+    return null;
+  }
+  function laySelectedIds() {
+    var out = [];
+    if (!Array.isArray(LAYOUT_SEL)) LAYOUT_SEL = LAYOUT_SEL ? [LAYOUT_SEL] : [];
+    for (var i = 0; i < LAYOUT_SEL.length; i++)
+      if (layItemById(LAYOUT_SEL[i]) && out.indexOf(LAYOUT_SEL[i]) === -1)
+        out.push(LAYOUT_SEL[i]);
+    LAYOUT_SEL = out;
+    return out.slice();
+  }
+  function layPrimaryId() {
+    var ids = laySelectedIds();
+    return ids.length ? ids[ids.length - 1] : null;
+  }
+  function layIsSelected(id) { return laySelectedIds().indexOf(id) !== -1; }
+  function laySetSelection(ids) {
+    LAYOUT_SEL = Array.isArray(ids) ? ids.slice() : (ids ? [ids] : []);
+    laySelectedIds();
+  }
+  function layNewItemId() {
+    var mx = 0, items = layItems();
+    for (var i = 0; i < items.length; i++) {
+      var m = /^i(\d+)$/.exec(items[i].id || "");
+      if (m) mx = Math.max(mx, Number(m[1]));
+    }
+    return "i" + (mx + 1);
+  }
+  function layAddItem(item) {
+    laySnapshot("add");
+    layItems().push(item);
+    laySetSelection([item.id]);
+    layClampAllItems();
+    persist();
+    renderLayout();
+  }
+  function layStagger() {
+    var n = layItems().length, p = layPage();
+    return {
+      x: Math.min(Math.max(12, p.w - 140), 24 + (n % 6) * 26),
+      y: Math.min(Math.max(12, p.h - 90), 24 + (n % 6) * 22)
+    };
+  }
+  function layZoom() {
+    var v = layView();
+    if (v.zoom !== "fit") return layClamp(Number(v.zoom), 0.25, 1.5);
+    var vp = el("ps-lviewport"), p = layPage();
+    if (!vp || !vp.clientWidth || !vp.clientHeight) return 1;
+    var zw = Math.max(180, vp.clientWidth - 46) / p.w;
+    var zh = Math.max(180, vp.clientHeight - 46) / p.h;
+    return layClamp(Math.min(zw, zh, 1), 0.25, 1);
+  }
+  function layApproxTextRect(item) {
+    var fs = Math.max(8, Number(item.fontSize) || 14);
+    var lines = String(item.text || "Text").split(/\r?\n/);
+    var max = 1;
+    for (var i = 0; i < lines.length; i++) max = Math.max(max, lines[i].length);
+    return { w: Math.min(480, Math.max(18, max * fs * 0.61 + 8)),
+             h: Math.max(fs * 1.25 + 4, lines.length * fs * 1.25 + 4) };
+  }
+  // Chart panels and images are both SIZED items (explicit w/h, corner
+  // resize, proportional default); text items self-size.
+  function laySizedKind(item) {
+    return item && (item.kind === "chart" || item.kind === "image");
+  }
+  function layMinSize(item) {
+    return item.kind === "image" ? { w: 24, h: 24 } : { w: 120, h: 80 };
+  }
+  function layItemRect(item) {
+    var w, h;
+    if (laySizedKind(item)) {
+      var mins = layMinSize(item);
+      w = Math.max(mins.w, Number(item.w) || 480);
+      h = Math.max(mins.h, Number(item.h) || 320);
+    } else {
+      var node = el("ps-lcanvas");
+      node = node && node.querySelector(
+        '.ps-litem[data-item-id="' + item.id + '"]');
+      if (node && node.offsetWidth && node.offsetHeight) {
+        w = node.offsetWidth; h = node.offsetHeight;
+      } else {
+        var approx = layApproxTextRect(item);
+        w = approx.w; h = approx.h;
+      }
+    }
+    return { x: Number(item.x) || 0, y: Number(item.y) || 0,
+             w: w, h: h, right: (Number(item.x) || 0) + w,
+             bottom: (Number(item.y) || 0) + h };
+  }
+  function laySelectionBounds(ids) {
+    ids = ids || laySelectedIds();
+    if (!ids.length) return null;
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (var i = 0; i < ids.length; i++) {
+      var item = layItemById(ids[i]);
+      if (!item) continue;
+      var r = layItemRect(item);
+      minX = Math.min(minX, r.x); minY = Math.min(minY, r.y);
+      maxX = Math.max(maxX, r.right); maxY = Math.max(maxY, r.bottom);
+    }
+    if (!isFinite(minX)) return null;
+    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY,
+             right: maxX, bottom: maxY };
+  }
+  function layClampAllItems() {
+    var p = layPage(), items = layItems();
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i];
+      if (laySizedKind(item)) {
+        var mins2 = layMinSize(item);
+        item.w = layClamp(item.w || 480, mins2.w, p.w);
+        item.h = layClamp(item.h || 320, mins2.h, p.h);
+      }
+      var r = layItemRect(item);
+      item.x = layClamp(item.x || 0, 0, Math.max(0, p.w - r.w));
+      item.y = layClamp(item.y || 0, 0, Math.max(0, p.h - r.h));
+    }
+  }
+  function laySyncToolbar() {
+    if (!isLayoutTab(activeChart())) return;
+    var p = layPage(), v = layView();
+    el("ps-lpage").value = p.preset;
+    el("ps-lpage-w").value = String(Math.round(p.w));
+    el("ps-lpage-h").value = String(Math.round(p.h));
+    el("ps-lmargin").value = String(Math.round(p.margin));
+    el("ps-lzoom").value = v.zoom;
+    el("ps-lgrid").value = String(v.grid);
+    var toggles = [
+      ["ps-lgrid-toggle", "showGrid"], ["ps-lsnap", "snap"],
+      ["ps-lguides", "guides"], ["ps-lmargins", "margins"]
+    ];
+    for (var i = 0; i < toggles.length; i++)
+      el(toggles[i][0]).setAttribute("aria-pressed",
+        v[toggles[i][1]] ? "true" : "false");
+    var h = layHist();
+    el("ps-lundo").disabled = !(h && h.undo.length);
+    el("ps-lredo").disabled = !(h && h.redo.length);
+  }
+  function laySyncMarginGuide() {
+    var margin = el("ps-lcanvas").querySelector(".ps-lmargin-guide");
+    if (!margin) return;
+    var p = layPage(), v = layView();
+    margin.style.left = p.margin + "px";
+    margin.style.top = p.margin + "px";
+    margin.style.right = p.margin + "px";
+    margin.style.bottom = p.margin + "px";
+    margin.style.display = v.margins ? "block" : "none";
+  }
+  function laySyncInspector() {
+    var box = el("ps-linspect"), ids = laySelectedIds();
+    var appStatus = document.getElementById("ps-status-selection");
+    if (appStatus && appWorkspace() === "layout")
+      appStatus.textContent = ids.length
+        ? ids.length + (ids.length === 1 ? " layout item selected" :
+                        " layout items selected")
+        : "No layout selection";
+    if (!ids.length) {
+      box.className = "";
+      return;
+    }
+    box.className = "ps-linspect-show";
+    el("ps-lsel-label").textContent =
+      ids.length === 1 ? (layItemById(ids[0]).kind === "chart" ? "Chart panel"
+        : layItemById(ids[0]).kind === "image" ? "Image" : "Text")
+                       : ids.length + " items";
+    var b = laySelectionBounds(ids);
+    el("ps-lx").value = String(Math.round(b.x));
+    el("ps-ly").value = String(Math.round(b.y));
+    var one = ids.length === 1 ? layItemById(ids[0]) : null;
+    var sizeEditable = !!one && laySizedKind(one);
+    el("ps-lw").value = String(Math.round(b.w));
+    el("ps-lh").value = String(Math.round(b.h));
+    el("ps-lw").disabled = !sizeEditable;
+    el("ps-lh").disabled = !sizeEditable;
+    var align = box.querySelectorAll("[data-lalign]");
+    for (var i = 0; i < align.length; i++) align[i].disabled = ids.length < 2;
+    var dist = box.querySelectorAll("[data-ldistribute]");
+    for (var j = 0; j < dist.length; j++) dist[j].disabled = ids.length < 3;
+  }
+  function renderLayout() {
+    if (!isLayoutTab(activeChart())) return;
+    layNormalizeLayout(activeChart());
+    laySelectedIds();
+    var canvas = el("ps-lcanvas"), stage = el("ps-lstage");
+    var p = layPage(), v = layView(), z = layZoom();
+    canvas.innerHTML = "";
+    canvas.style.width = p.w + "px";
+    canvas.style.height = p.h + "px";
+    canvas.style.transform = "scale(" + z + ")";
+    canvas.style.setProperty("--ps-lgrid-size", v.grid + "px");
+    canvas.classList.toggle("ps-lgrid-on", !!v.showGrid);
+    stage.style.width = Math.ceil(p.w * z) + "px";
+    stage.style.height = Math.ceil(p.h * z) + "px";
+    var margin = mkEl("div", "ps-lmargin-guide");
+    canvas.appendChild(margin);
+    laySyncMarginGuide();
+    var items = layItems();
+    for (var i = 0; i < items.length; i++) canvas.appendChild(layBuildItem(items[i]));
+    var gv = mkEl("div", "ps-lguide ps-lguide-v"); gv.id = "ps-lguide-v";
+    var gh = mkEl("div", "ps-lguide ps-lguide-h"); gh.id = "ps-lguide-h";
+    canvas.appendChild(gv); canvas.appendChild(gh);
+    if (!items.length) {
+      var hint = mkEl("div", "ps-layout-canvas-empty");
+      hint.appendChild(mkEl("strong", "", "Blank layout"));
+      hint.appendChild(mkEl("span", "",
+        "Add a chart, text, or panel label, then use the precision controls " +
+        "to size and arrange the figure."));
+      var addChartButton = mkEl("button", "ps-btn ps-primary", "Add chart");
+      addChartButton.type = "button";
+      addChartButton.addEventListener("click", function (e) {
+        e.stopPropagation();
+        el("ps-laddchart").click();
+      });
+      hint.appendChild(addChartButton);
+      canvas.appendChild(hint);
+    }
+    laySyncToolbar();
+    laySyncInspector();
+    syncContextInspector();
+  }
+  // Why is a chart panel empty? The old copy always said "open the tab
+  // once to capture it", which misled when the REAL cause was an
+  // unfinished chart: opening the tab shows the setup state and never
+  // produces a snapshot (the M4 audit's fix 3).
+  function layMissingCopy(c) {
+    if (!c) return "(this chart was closed)";
+    var defs = MODULES[c.module] ? MODULES[c.module].roles : [];
+    var rr = (c.roles && c.roles[c.module]) || {};
+    for (var i = 0; i < defs.length; i++) {
+      var def = defs[i];
+      if (!def.required) continue;
+      var have = Array.isArray(rr[def.key]) ? rr[def.key].length
+                 : (rr[def.key] ? 1 : 0);
+      if (have < (def.multi ? (def.min || 1) : 1))
+        return escHtml(c.name) + " needs variables before it can appear " +
+          "here - assign them in the Charts workspace";
+    }
+    return "Open the " + escHtml(c.name) + " tab once to capture it";
+  }
+  function layBuildItem(item) {
+    var selected = layIsSelected(item.id), primary = item.id === layPrimaryId();
+    var cls = "ps-litem" + (selected ? " ps-litem-sel" : "") +
+      (primary ? " ps-litem-primary" : "");
+    var elI = mkEl("div", cls);
+    elI.setAttribute("data-item-id", item.id);
+    elI.setAttribute("data-kind", item.kind);
+    elI.style.left = (Number(item.x) || 0) + "px";
+    elI.style.top = (Number(item.y) || 0) + "px";
+    if (item.kind === "chart") {
+      elI.style.width = (Number(item.w) || 480) + "px";
+      elI.style.height = (Number(item.h) || 320) + "px";
+      var snap = validSnap(item.chartId);
+      var c = chartById(item.chartId);
+      if (snap && c) elI.innerHTML = snap.svg;
+      else elI.innerHTML = '<div class="ps-lmissing">' +
+        layMissingCopy(c) + "</div>";
+      setTip(elI, c ? c.name : "");
+    } else if (item.kind === "image") {
+      elI.style.width = (Number(item.w) || 240) + "px";
+      elI.style.height = (Number(item.h) || 180) + "px";
+      var pic = document.createElement("img");
+      pic.src = item.src || "";
+      pic.alt = ""; pic.draggable = false;
+      pic.style.cssText = "width:100%;height:100%;object-fit:contain;" +
+        "pointer-events:none;display:block;";
+      elI.appendChild(pic);
+      setTip(elI, "Image");
+    } else {
+      var txt = mkEl("div", "ps-ltext", item.text || "Text");
+      txt.style.fontSize = (item.fontSize || 14) + "px";
+      txt.style.fontWeight = item.bold ? "700" : "400";
+      elI.appendChild(txt);
+    }
+    if (primary && laySelectedIds().length === 1) {
+      if (laySizedKind(item)) {
+        var hnd = mkEl("div", "ps-lhandle");
+        hnd.setAttribute("data-role", "lay-resize");
+        setTip(hnd, "Resize proportionally. Hold Shift for free resize.");
+        hnd.setAttribute("aria-label",
+          "Resize proportionally; hold Shift for free resize");
+        elI.appendChild(hnd);
+      }
+      elI.appendChild(layMiniBar(item));
+    }
+    return elI;
+  }
+  // ---- image items (Tier 2, Torry's ruling: ORIGINALS ARE HONORED.
+  // No silent downscaling; a genuinely large file gets a disclosure
+  // with an explicit choice, and only crash-scale files are refused).
+  var IMG_SIZE_PENDING = null;
+  var IMG_WARN_BYTES = 2.5 * 1024 * 1024;    // encoded data-URI length
+  var IMG_REFUSE_BYTES = 50 * 1024 * 1024;   // raw file size
+  function layAddImageFromFile(f) {
+    if (!isLayoutTab(activeChart())) return;
+    if (f.size > IMG_REFUSE_BYTES) {
+      showToast("That image is " + (f.size / 1048576).toFixed(0) +
+        " MB - too large to embed in a project without crashing the " +
+        "browser. Resize it below 50 MB first.", true);
+      return;
+    }
+    var rd = new FileReader();
+    rd.onload = function () {
+      var src = String(rd.result);
+      var probeImg = new Image();
+      probeImg.onload = function () {
+        var natW = probeImg.naturalWidth || 300;
+        var natH = probeImg.naturalHeight || 200;
+        var warnAt = Number(window.PS_IMG_WARN_BYTES) || IMG_WARN_BYTES;
+        if (src.length > warnAt) {
+          var mb = (src.length / 1048576).toFixed(1);
+          IMG_SIZE_PENDING = { src: src, natW: natW, natH: natH,
+                               mb: mb, type: f.type };
+          el("ps-imgsize-copy").textContent =
+            "This image embeds at about " + mb + " MB (" + natW +
+            "\u00d7" + natH + " px). Keeping the original is fine - it " +
+            "stays full quality in the layout, exports, and .pand saves " +
+            "- but the browser's local autosave may stop keeping " +
+            "snapshots for this project. A smaller copy (long edge " +
+            "capped at 2000 px) avoids that.";
+          openShellDialog("ps-imgsize-dialog");
+          return;
+        }
+        layPlaceImage(src, natW, natH, null);
+      };
+      probeImg.onerror = function () {
+        showToast("Could not read that file as an image.", true);
+      };
+      probeImg.src = src;
+    };
+    rd.readAsDataURL(f);
+  }
+  function downscaleImage(src, mime, done, fail) {
+    var img = new Image();
+    img.onload = function () {
+      try {
+        var natW = img.naturalWidth, natH = img.naturalHeight;
+        var scale = 2000 / Math.max(natW, natH);
+        if (scale >= 1) { done(src, natW, natH); return; }
+        var w = Math.round(natW * scale), h = Math.round(natH * scale);
+        var cv = document.createElement("canvas");
+        cv.width = w; cv.height = h;
+        cv.getContext("2d").drawImage(img, 0, 0, w, h);
+        var keepPng = /png|gif|svg/.test(String(mime));
+        done(cv.toDataURL(keepPng ? "image/png" : "image/jpeg", 0.92), w, h);
+      } catch (e) { fail(); }
+    };
+    img.onerror = fail;
+    img.src = src;
+  }
+  function layPlaceImage(src, natW, natH, note) {
+    var page = layPage();
+    var maxW = page.w * 0.45, maxH = page.h * 0.6;
+    var scale = Math.min(1, maxW / natW, maxH / natH);
+    // Tiny images (icons, small logos) scale UP to a graspable size
+    // with their aspect ratio intact rather than hitting the raw
+    // minimum clamp square.
+    if (natW * scale < 48 && natH * scale < 48)
+      scale = Math.max(48 / natW, 48 / natH);
+    var w = Math.max(1, Math.round(natW * scale));
+    var h = Math.max(1, Math.round(natH * scale));
+    var pos = layStagger();
+    layAddItem({ id: layNewItemId(), kind: "image", src: src,
+                 natW: natW, natH: natH,
+                 x: Math.min(pos.x, Math.max(0, page.w - w)),
+                 y: Math.min(pos.y, Math.max(0, page.h - h)),
+                 w: w, h: h });
+    showToast("Image added" + (note ? " \u00b7 " + note : "") +
+      " \u00b7 drag to place, corner to resize");
+  }
+  function layMiniBar(item) {
+    var bar = mkEl("div", "ps-lbar");
+    bar.style.left = "0"; bar.style.top = "-34px";
+    if (item.kind === "text") {
+      var minus = mkEl("button", "", "A-");
+      minus.type = "button"; setTip(minus, "Smaller text");
+      minus.addEventListener("click", function (e) {
+        e.stopPropagation();
+        laySnapshot("text size", "fontsize");
+        item.fontSize = Math.max(8, (item.fontSize || 14) - 2);
+        layClampAllItems();
+        persist(); renderLayout();
+      });
+      var plus = mkEl("button", "", "A+");
+      plus.type = "button"; setTip(plus, "Bigger text");
+      plus.addEventListener("click", function (e) {
+        e.stopPropagation();
+        laySnapshot("text size", "fontsize");
+        item.fontSize = Math.min(72, (item.fontSize || 14) + 2);
+        layClampAllItems();
+        persist(); renderLayout();
+      });
+      var bold = mkEl("button", (item.bold ? "ps-lbar-on" : ""), "B");
+      bold.type = "button"; setTip(bold, "Bold");
+      bold.addEventListener("click", function (e) {
+        e.stopPropagation();
+        laySnapshot("bold");
+        item.bold = !item.bold;
+        persist(); renderLayout();
+      });
+      bar.appendChild(minus); bar.appendChild(plus); bar.appendChild(bold);
+    }
+    var del = mkEl("button", "ps-lbar-del", "\u00d7");
+    del.type = "button"; setTip(del, "Remove from the layout");
+    del.addEventListener("click", function (e) {
+      e.stopPropagation();
+      layDeleteSelected();
+    });
+    bar.appendChild(del);
+    return bar;
+  }
+  // ---- layout history (punch list item 7) ----
+  // Every layout mutator used to persist() straight away with nothing kept,
+  // so deleting a panel from a figure was permanent. Worse, the undo-key
+  // ROUTER only claimed Cmd/Ctrl+Z for the Data workspace, so the reflex
+  // press in Layout fell through to the engine's document-capture handler
+  // and silently undid a STYLE EDIT on some chart the user was not looking
+  // at. History is per layout document (several figures can be open, and a
+  // stack shared between them would undo into the wrong one) and covers the
+  // page and view too, because changing the page size moves every item.
+  var LAYOUT_HIST = {};
+  var LAYOUT_HIST_LIMIT = 40;
+  var LAY_COALESCE = null;
+  function layHist(doc) {
+    var c = doc || activeChart();
+    if (!isLayoutTab(c)) return null;
+    if (!LAYOUT_HIST[c.id]) LAYOUT_HIST[c.id] = { undo: [], redo: [] };
+    return LAYOUT_HIST[c.id];
+  }
+  // Layout doc ids are not project-unique, so history from a previous project
+  // would otherwise pass as this one's (the same collision the snapshot cache
+  // had before SNAP_EPOCH was made monotonic).
+  function layHistoryClear() { LAYOUT_HIST = {}; LAY_COALESCE = null; }
+  // view (zoom, grid, snap, guides) is deliberately NOT in the snapshot: it is
+  // a display preference, not content, and folding it in would make undoing a
+  // delete also silently switch the grid back on.
+  function laySnapState(c) {
+    return JSON.stringify({
+      items: c.items || [], page: c.page || {},
+      sel: Array.isArray(LAYOUT_SEL) ? LAYOUT_SEL : []
+    });
+  }
+  // Call BEFORE the mutation. A coalesceKey folds a burst of the same small
+  // action (arrow-key nudges, a run of clicks on the font-size stepper) into
+  // ONE undo step, which is what a user means by "undo that nudge".
+  function laySnapshot(label, coalesceKey) {
+    var c = activeChart(), h = layHist();
+    if (!h) return;
+    layNormalizeLayout(c);
+    var now = Date.now();
+    if (coalesceKey && h.undo.length && LAY_COALESCE &&
+        LAY_COALESCE.key === coalesceKey && LAY_COALESCE.doc === c.id &&
+        now - LAY_COALESCE.at < 1200) {
+      LAY_COALESCE.at = now;
+      return;
+    }
+    h.undo.push({ label: label || "change", state: laySnapState(c) });
+    if (h.undo.length > LAYOUT_HIST_LIMIT) h.undo.shift();
+    h.redo.length = 0;
+    LAY_COALESCE = coalesceKey ? { key: coalesceKey, doc: c.id, at: now } : null;
+  }
+  function layRestoreState(json) {
+    var c = activeChart();
+    if (!isLayoutTab(c)) return false;
+    var s;
+    try { s = JSON.parse(json); } catch (err) { return false; }
+    c.items = Array.isArray(s.items) ? s.items : [];
+    c.page = s.page && typeof s.page === "object" ? s.page : {};
+    layNormalizeLayout(c);
+    laySetSelection(Array.isArray(s.sel) ? s.sel : []);
+    persist();
+    // Restoring can bring back a panel for a chart that has never been
+    // snapshotted (deleted, then its source chart retyped). renderLayout()
+    // has no ensure pass of its own, so route through the one that does or
+    // the panel comes back as the "open its tab once" placeholder.
+    ensureSnapshotsThen(renderLayout);   // renderLayout re-syncs the toolbar
+    return true;
+  }
+  function layUndo() {
+    var h = layHist(), c = activeChart();
+    if (!h || !h.undo.length) return false;
+    var entry = h.undo.pop();
+    h.redo.push({ label: entry.label, state: laySnapState(c) });
+    LAY_COALESCE = null;
+    return layRestoreState(entry.state);
+  }
+  function layRedo() {
+    var h = layHist(), c = activeChart();
+    if (!h || !h.redo.length) return false;
+    var entry = h.redo.pop();
+    h.undo.push({ label: entry.label, state: laySnapState(c) });
+    LAY_COALESCE = null;
+    return layRestoreState(entry.state);
+  }
+  function layDeleteSelected() {
+    var ids = laySelectedIds();
+    if (!ids.length) return;
+    laySnapshot("delete");
+    var items = layItems();
+    var removed = 0;
+    for (var i = items.length - 1; i >= 0; i--)
+      if (ids.indexOf(items[i].id) !== -1) { items.splice(i, 1); removed++; }
+    laySetSelection([]);
+    persist(); renderLayout();
+    showUndoToast(removed === 1 ? "Removed from the layout"
+                                : "Removed " + removed + " items", layUndo);
+  }
+  function layDeleteItem(id) {
+    laySetSelection([id]);
+    layDeleteSelected();
+  }
+  function layDuplicateSelected() {
+    var ids = laySelectedIds();
+    if (!ids.length) return;
+    laySnapshot("duplicate");
+    var made = [], p = layPage();
+    for (var i = 0; i < ids.length; i++) {
+      var src = layItemById(ids[i]);
+      if (!src) continue;
+      var copy = JSON.parse(JSON.stringify(src));
+      copy.id = layNewItemId();
+      var r = layItemRect(copy);
+      copy.x = Math.min(Math.max(0, p.w - r.w), (Number(src.x) || 0) + 12);
+      copy.y = Math.min(Math.max(0, p.h - r.h), (Number(src.y) || 0) + 12);
+      layItems().push(copy);
+      made.push(copy.id);
+    }
+    laySetSelection(made);
+    persist(); renderLayout();
+  }
+  // The clipboard for layout items is a session variable, not the system
+  // clipboard: an item is a JSON object with an image possibly inlined as a
+  // multi-megabyte data URI, and writing that as text would be both enormous
+  // and meaningless to every other application. It crosses layouts, which is
+  // the whole point, and it does not need to cross tabs.
+  var LAY_CLIP = null;
+  function layCopySelected(cut) {
+    var ids = laySelectedIds();
+    if (!ids.length) return false;
+    var items = [];
+    for (var i = 0; i < ids.length; i++) {
+      var src = layItemById(ids[i]);
+      if (src) items.push(JSON.parse(JSON.stringify(src)));
+    }
+    if (!items.length) return false;
+    LAY_CLIP = items;
+    if (cut) {
+      layDeleteSelected();
+      showToast(items.length === 1 ? "Item cut" : items.length + " items cut");
+    } else {
+      showToast(items.length === 1 ? "Item copied"
+                                   : items.length + " items copied");
+    }
+    return true;
+  }
+  function layPasteClipboard() {
+    if (!LAY_CLIP || !LAY_CLIP.length) return false;
+    if (!isLayoutTab(activeChart())) return false;
+    laySnapshot("paste");
+    var made = [], p = layPage();
+    for (var i = 0; i < LAY_CLIP.length; i++) {
+      var copy = JSON.parse(JSON.stringify(LAY_CLIP[i]));
+      copy.id = layNewItemId();
+      // Offset like a duplicate, and clamp, so a paste into a SMALLER page
+      // cannot drop an item off the canvas where it is unreachable.
+      var r = layItemRect(copy);
+      copy.x = Math.min(Math.max(0, p.w - r.w), (Number(copy.x) || 0) + 12);
+      copy.y = Math.min(Math.max(0, p.h - r.h), (Number(copy.y) || 0) + 12);
+      layItems().push(copy);
+      made.push(copy.id);
+    }
+    laySetSelection(made);
+    persist(); renderLayout();
+    showToast(made.length === 1 ? "Item pasted"
+                                : made.length + " items pasted");
+    return true;
+  }
+  function layHasClipboard() { return !!(LAY_CLIP && LAY_CLIP.length); }
+  // Wired at DOCUMENT level rather than on the canvas: a layout is edited by
+  // clicking items, so focus is rarely on any one element, and a paste that
+  // only works when you have first clicked the right thing is not a paste.
+  // The grid keeps its own handler; this one declines unless a layout is on
+  // screen and the clipboard is carrying an image.
+  function wireLayoutImagePaste() {
+    document.addEventListener("paste", function (e) {
+      if (!isLayoutTab(activeChart())) return;
+      var t = e.target;
+      if (t && t.closest &&
+          t.closest("input, textarea, select, [contenteditable]")) return;
+      var items = (e.clipboardData && e.clipboardData.items) || [];
+      var file = null;
+      for (var i = 0; i < items.length; i++)
+        if (items[i].kind === "file" && /^image\//.test(items[i].type)) {
+          file = items[i].getAsFile();
+          break;
+        }
+      if (!file) return;
+      e.preventDefault();
+      // Straight into the SAME path the file input uses, so the oversize
+      // dialog, the placement and the autosave warning are the ones that
+      // already exist rather than a second copy of them.
+      layAddImageFromFile(file);
+    });
+  }
+  function layMoveLayer(dir) {
+    var ids = laySelectedIds(), items = layItems();
+    if (!ids.length) return;
+    laySnapshot("reorder", "layer");
+    var i, tmp;
+    if (dir > 0) {
+      for (i = items.length - 2; i >= 0; i--)
+        if (ids.indexOf(items[i].id) !== -1 &&
+            ids.indexOf(items[i + 1].id) === -1) {
+          tmp = items[i]; items[i] = items[i + 1]; items[i + 1] = tmp;
+        }
+    } else {
+      for (i = 1; i < items.length; i++)
+        if (ids.indexOf(items[i].id) !== -1 &&
+            ids.indexOf(items[i - 1].id) === -1) {
+          tmp = items[i]; items[i] = items[i - 1]; items[i - 1] = tmp;
+        }
+    }
+    persist(); renderLayout();
+  }
+  function layMoveSelected(dx, dy, renderNow) {
+    var ids = laySelectedIds(), b = laySelectionBounds(ids), p = layPage();
+    if (!ids.length || !b) return;
+    // The pointer drag snapshots itself at pointer-down (it knows whether the
+    // gesture actually moved anything); everything else that lands here is a
+    // nudge or an inspector edit, coalesced into one step per burst.
+    if (!LAY_DRAG) laySnapshot("move", "move");
+    dx = layClamp(dx, -b.x, p.w - b.right);
+    dy = layClamp(dy, -b.y, p.h - b.bottom);
+    for (var i = 0; i < ids.length; i++) {
+      var item = layItemById(ids[i]);
+      item.x = (Number(item.x) || 0) + dx;
+      item.y = (Number(item.y) || 0) + dy;
+    }
+    persist();
+    if (renderNow !== false) renderLayout();
+  }
+  function layAlign(kind) {
+    var ids = laySelectedIds(), b = laySelectionBounds(ids);
+    if (ids.length < 2 || !b) return;
+    laySnapshot("align");
+    for (var i = 0; i < ids.length; i++) {
+      var item = layItemById(ids[i]), r = layItemRect(item);
+      if (kind === "left") item.x = b.x;
+      else if (kind === "hcenter") item.x = b.x + (b.w - r.w) / 2;
+      else if (kind === "right") item.x = b.right - r.w;
+      else if (kind === "top") item.y = b.y;
+      else if (kind === "vcenter") item.y = b.y + (b.h - r.h) / 2;
+      else if (kind === "bottom") item.y = b.bottom - r.h;
+    }
+    persist(); renderLayout();
+  }
+  function layDistribute(axis) {
+    var ids = laySelectedIds();
+    if (ids.length < 3) return;
+    laySnapshot("distribute");
+    var entries = ids.map(function (id) {
+      var item = layItemById(id);
+      return { item: item, r: layItemRect(item) };
+    });
+    if (axis === "horizontal") {
+      entries.sort(function (a, b) { return a.r.x - b.r.x; });
+      var left = entries[0].r.x;
+      var right = entries[entries.length - 1].r.right;
+      var totalW = entries.reduce(function (s, e) { return s + e.r.w; }, 0);
+      var gapX = (right - left - totalW) / (entries.length - 1);
+      var x = left;
+      for (var i = 0; i < entries.length; i++) {
+        entries[i].item.x = x; x += entries[i].r.w + gapX;
+      }
+    } else {
+      entries.sort(function (a, b) { return a.r.y - b.r.y; });
+      var top = entries[0].r.y;
+      var bottom = entries[entries.length - 1].r.bottom;
+      var totalH = entries.reduce(function (s, e) { return s + e.r.h; }, 0);
+      var gapY = (bottom - top - totalH) / (entries.length - 1);
+      var y = top;
+      for (var j = 0; j < entries.length; j++) {
+        entries[j].item.y = y; y += entries[j].r.h + gapY;
+      }
+    }
+    persist(); renderLayout();
+  }
+  function layApplyInspector(prop, value) {
+    value = Number(value);
+    if (!isFinite(value)) { renderLayout(); return; }
+    var ids = laySelectedIds(), b = laySelectionBounds(ids);
+    if (!ids.length || !b) return;
+    if (prop === "x") layMoveSelected(value - b.x, 0);
+    else if (prop === "y") layMoveSelected(0, value - b.y);
+    else if (ids.length === 1) {
+      var item = layItemById(ids[0]), p = layPage();
+      if (item.kind !== "chart") return;
+      laySnapshot("resize", "resize");
+      if (prop === "w") item.w = layClamp(value, 120, p.w - item.x);
+      if (prop === "h") item.h = layClamp(value, 80, p.h - item.y);
+      persist(); renderLayout();
+    }
+  }
+  function layApplyPage(preset, w, h) {
+    var p = layPage();
+    laySnapshot("page size", "page");
+    if (LAY_PRESETS[preset]) {
+      p.preset = preset; p.w = LAY_PRESETS[preset].w; p.h = LAY_PRESETS[preset].h;
+    } else {
+      p.preset = "custom";
+      p.w = Math.round(layClamp(w || p.w, 320, 4000));
+      p.h = Math.round(layClamp(h || p.h, 240, 4000));
+    }
+    p.margin = Math.round(layClamp(p.margin, 0, Math.min(p.w, p.h) / 3));
+    layClampAllItems();
+    persist(); renderLayout();
+  }
+  function layPageOrientation() {
+    var p = layPage();
+    return p.h > p.w ? "portrait" : "landscape";
+  }
+  function layApplyOrientation(orientation) {
+    orientation = orientation === "portrait" ? "portrait" : "landscape";
+    var p = layPage();
+    if (layPageOrientation() === orientation) return;
+    laySnapshot("orientation");
+    var oldW = p.w, oldH = p.h;
+    var newW = oldH, newH = oldW;
+    var sx = newW / oldW, sy = newH / oldH;
+    var items = layItems();
+    for (var i = 0; i < items.length; i++) {
+      items[i].x = Math.round((Number(items[i].x) || 0) * sx);
+      items[i].y = Math.round((Number(items[i].y) || 0) * sy);
+      if (items[i].kind === "chart") {
+        items[i].w = Math.round((Number(items[i].w) || 480) * sx);
+        items[i].h = Math.round((Number(items[i].h) || 320) * sy);
+      }
+    }
+    var pairs = {
+      canvas: "canvasp", canvasp: "canvas",
+      wide: "tall", tall: "wide",
+      a4l: "a4p", a4p: "a4l",
+      letterl: "letterp", letterp: "letterl"
+    };
+    p.preset = pairs[p.preset] || "custom";
+    p.w = newW; p.h = newH;
+    p.margin = Math.round(layClamp(p.margin * Math.min(sx, sy), 0,
+                                   Math.min(p.w, p.h) / 3));
+    layClampAllItems();
+    persist(); renderLayout();
+  }
+  function layToggleView(key) {
+    var v = layView();
+    v[key] = !v[key];
+    persist(); renderLayout();
+  }
+  function layGuideCandidates(axis, excludeIds) {
+    var p = layPage(), out;
+    if (axis === "x")
+      out = [0, p.margin, p.w / 2, p.w - p.margin, p.w];
+    else out = [0, p.margin, p.h / 2, p.h - p.margin, p.h];
+    var items = layItems();
+    for (var i = 0; i < items.length; i++) {
+      if (excludeIds.indexOf(items[i].id) !== -1) continue;
+      var r = layItemRect(items[i]);
+      if (axis === "x") out.push(r.x, r.x + r.w / 2, r.right);
+      else out.push(r.y, r.y + r.h / 2, r.bottom);
+    }
+    return out;
+  }
+  function laySmartAdjust(bounds, dx, dy, ids) {
+    var v = layView();
+    var out = { dx: dx, dy: dy, gx: null, gy: null };
+    if (!v.guides) return out;
+    var z = layZoom(), threshold = 5 / z;
+    var moved = { x: bounds.x + dx, y: bounds.y + dy, w: bounds.w, h: bounds.h };
+    moved.right = moved.x + moved.w; moved.bottom = moved.y + moved.h;
+    var xp = [moved.x, moved.x + moved.w / 2, moved.right];
+    var yp = [moved.y, moved.y + moved.h / 2, moved.bottom];
+    var xc = layGuideCandidates("x", ids), yc = layGuideCandidates("y", ids);
+    var bestX = threshold + 1, bestY = threshold + 1, i, j, d;
+    for (i = 0; i < xp.length; i++) for (j = 0; j < xc.length; j++) {
+      d = xc[j] - xp[i];
+      if (Math.abs(d) < Math.abs(bestX)) { bestX = d; out.gx = xc[j]; }
+    }
+    for (i = 0; i < yp.length; i++) for (j = 0; j < yc.length; j++) {
+      d = yc[j] - yp[i];
+      if (Math.abs(d) < Math.abs(bestY)) { bestY = d; out.gy = yc[j]; }
+    }
+    if (Math.abs(bestX) <= threshold) out.dx += bestX; else out.gx = null;
+    if (Math.abs(bestY) <= threshold) out.dy += bestY; else out.gy = null;
+    return out;
+  }
+  function layShowGuides(x, y) {
+    var gv = el("ps-lguide-v"), gh = el("ps-lguide-h");
+    if (gv) {
+      gv.style.display = x == null ? "none" : "block";
+      if (x != null) gv.style.left = x + "px";
+    }
+    if (gh) {
+      gh.style.display = y == null ? "none" : "block";
+      if (y != null) gh.style.top = y + "px";
+    }
+  }
+  function layHideGuides() { layShowGuides(null, null); }
+  function layResizeDimensions(origin, dx, dy, page, view, freeform) {
+    var mins = origin.item ? layMinSize(origin.item) : { w: 120, h: 80 };
+    var maxW = Math.max(mins.w, page.w - origin.x);
+    var maxH = Math.max(mins.h, page.h - origin.y);
+    var w, h;
+    if (freeform) {
+      w = Math.max(mins.w, origin.w + dx);
+      h = Math.max(mins.h, origin.h + dy);
+      if (view.snap) {
+        w = Math.round((origin.x + w) / view.grid) * view.grid - origin.x;
+        h = Math.round((origin.y + h) / view.grid) * view.grid - origin.y;
+      }
+      return {
+        w: layClamp(w, mins.w, maxW),
+        h: layClamp(h, mins.h, maxH)
+      };
+    }
+    // Resize by one scale factor so the panel keeps the exact proportions
+    // it had at pointer-down. The dominant pointer axis drives the scale.
+    var horizontal = Math.abs(dx) >= Math.abs(dy);
+    var scale = horizontal
+      ? (origin.w + dx) / origin.w
+      : (origin.h + dy) / origin.h;
+    if (view.snap) {
+      if (horizontal) {
+        var snappedW = Math.round((origin.x + origin.w * scale) /
+          view.grid) * view.grid - origin.x;
+        scale = snappedW / origin.w;
+      } else {
+        var snappedH = Math.round((origin.y + origin.h * scale) /
+          view.grid) * view.grid - origin.y;
+        scale = snappedH / origin.h;
+      }
+    }
+    var minScale = Math.max(120 / origin.w, 80 / origin.h);
+    var maxScale = Math.min(maxW / origin.w, maxH / origin.h);
+    if (maxScale < minScale) minScale = maxScale;
+    scale = layClamp(scale, minScale, maxScale);
+    return { w: origin.w * scale, h: origin.h * scale };
+  }
+  function wireLayout() {
+    var canvas = el("ps-lcanvas");
+    canvas.addEventListener("pointerdown", function (e) {
+      if (e.button !== 0) return;
+      if (e.target.closest &&
+          (e.target.closest(".ps-lbar") || e.target.closest(".ps-ltext-edit"))) return;
+      var openEd = canvas.querySelector(".ps-ltext-edit");
+      if (openEd) openEd.blur();
+      var itemEl = e.target.closest ? e.target.closest(".ps-litem") : null;
+      if (!itemEl) {
+        if (laySelectedIds().length) { laySetSelection([]); renderLayout(); }
+        return;
+      }
+      var id = itemEl.getAttribute("data-item-id");
+      var item = layItemById(id);
+      if (!item) return;
+      var multi = e.shiftKey || e.metaKey || e.ctrlKey;
+      if (multi && layIsSelected(id)) {
+        var keep = laySelectedIds().filter(function (x) { return x !== id; });
+        laySetSelection(keep); renderLayout(); e.preventDefault(); return;
+      }
+      if (multi) {
+        var add = laySelectedIds(); add.push(id); laySetSelection(add); renderLayout();
+      } else if (!layIsSelected(id) || laySelectedIds().length > 1) {
+        laySetSelection([id]); renderLayout();
+      }
+      var resizing = !!(e.target.closest && e.target.closest('[data-role="lay-resize"]'));
+      var ids = laySelectedIds(), origins = [], bounds = laySelectionBounds(ids);
+      for (var i = 0; i < ids.length; i++) {
+        var it = layItemById(ids[i]);
+        origins.push({ item: it, x: Number(it.x) || 0, y: Number(it.y) || 0,
+                       w: Number(it.w) || 480, h: Number(it.h) || 320 });
+      }
+      LAY_DRAG = { ids: ids, primary: item, origins: origins, bounds: bounds,
+                   resizing: resizing, sx: e.clientX, sy: e.clientY,
+                   zoom: layZoom(), moved: false,
+                   // Captured here rather than on first movement because the
+                   // move handler mutates items in place; pushed at pointer-up
+                   // only if the gesture actually moved something, so a plain
+                   // click-to-select never lands an empty undo step.
+                   before: laySnapState(activeChart()) };
+      document.addEventListener("pointermove", layPointerMove);
+      document.addEventListener("pointerup", layPointerUp);
+      e.preventDefault();
+    });
+    canvas.addEventListener("dblclick", function (e) {
+      var itemEl = e.target.closest
+        ? e.target.closest('.ps-litem[data-kind="text"]') : null;
+      if (!itemEl) return;
+      layEditText(itemEl.getAttribute("data-item-id"));
+    });
+    canvas.addEventListener("contextmenu", function (e) {
+      var itemEl = e.target.closest ? e.target.closest(".ps-litem") : null;
+      if (!itemEl) return;
+      e.preventDefault();
+      var id = itemEl.getAttribute("data-item-id");
+      if (!layIsSelected(id)) {
+        laySetSelection([id]);
+        renderLayout();
+      }
+      showContextMenu(e.clientX, e.clientY, [
+        { label: "Duplicate", command: "duplicate-selection" },
+        { label: "Delete", command: "delete-selection" },
+        "separator",
+        { label: "Move backward", command: "layer-back" },
+        { label: "Move forward", command: "layer-forward" }
+      ]);
+    });
+    document.addEventListener("keydown", function (e) {
+      if (!isLayoutTab(activeChart())) return;
+      var t = e.target;
+      if (t && t.closest &&
+          t.closest("input, textarea, select, [contenteditable]")) return;
+      var ids = laySelectedIds();
+      if ((e.key === "Delete" || e.key === "Backspace") && ids.length) {
+        e.preventDefault(); layDeleteSelected(); return;
+      }
+      if (e.key === "Escape") {
+        // A live drag outranks the selection: cancel it and keep the
+        // selection, which is what every other cancel in the app does.
+        if (layCancelDrag()) { e.preventDefault(); return; }
+        if (ids.length) {
+          e.preventDefault(); laySetSelection([]); renderLayout();
+        }
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && String(e.key).toLowerCase() === "d" &&
+          ids.length) {
+        e.preventDefault(); layDuplicateSelected(); return;
+      }
+      if (!ids.length || ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]
+          .indexOf(e.key) === -1) return;
+      e.preventDefault();
+      var step = e.shiftKey ? 10 : 1;
+      layMoveSelected(e.key === "ArrowLeft" ? -step :
+                      e.key === "ArrowRight" ? step : 0,
+                      e.key === "ArrowUp" ? -step :
+                      e.key === "ArrowDown" ? step : 0);
+    });
+    el("ps-lpage").addEventListener("change", function () {
+      var val = this.value;
+      layApplyPage(val, Number(el("ps-lpage-w").value),
+                         Number(el("ps-lpage-h").value));
+    });
+    function customPageChange() {
+      layApplyPage("custom", Number(el("ps-lpage-w").value),
+                             Number(el("ps-lpage-h").value));
+    }
+    el("ps-lpage-w").addEventListener("change", customPageChange);
+    el("ps-lpage-h").addEventListener("change", customPageChange);
+    el("ps-lmargin").addEventListener("change", function () {
+      var p = layPage();
+      p.margin = Math.round(layClamp(this.value, 0, Math.min(p.w, p.h) / 3));
+      this.value = String(p.margin);
+      persist(); laySyncMarginGuide();
+    });
+    el("ps-lzoom").addEventListener("change", function () {
+      layView().zoom = this.value; persist(); renderLayout();
+    });
+    el("ps-lgrid").addEventListener("change", function () {
+      layView().grid = Number(this.value) || 8; persist(); renderLayout();
+    });
+    el("ps-lgrid-toggle").addEventListener("click", function () {
+      layToggleView("showGrid");
+    });
+    el("ps-lsnap").addEventListener("click", function () { layToggleView("snap"); });
+    el("ps-lguides").addEventListener("click", function () { layToggleView("guides"); });
+    el("ps-lmargins").addEventListener("click", function () { layToggleView("margins"); });
+    el("ps-lundo").addEventListener("click", function () {
+      if (!layUndo()) showToast("Nothing to undo in this layout");
+    });
+    el("ps-lredo").addEventListener("click", function () {
+      if (!layRedo()) showToast("Nothing to redo in this layout");
+    });
+    el("ps-lduplicate").addEventListener("click", layDuplicateSelected);
+    el("ps-lback").addEventListener("click", function () { layMoveLayer(-1); });
+    el("ps-lforward").addEventListener("click", function () { layMoveLayer(1); });
+    ["x", "y", "w", "h"].forEach(function (prop) {
+      el("ps-l" + prop).addEventListener("change", function () {
+        layApplyInspector(prop, this.value);
+      });
+    });
+    var align = document.querySelectorAll("[data-lalign]");
+    for (var ai = 0; ai < align.length; ai++)
+      align[ai].addEventListener("click", function () {
+        layAlign(this.getAttribute("data-lalign"));
+      });
+    var dist = document.querySelectorAll("[data-ldistribute]");
+    for (var di = 0; di < dist.length; di++)
+      dist[di].addEventListener("click", function () {
+        layDistribute(this.getAttribute("data-ldistribute"));
+      });
+    window.addEventListener("resize", function () {
+      if (LAY_RESIZE_TIMER) window.clearTimeout(LAY_RESIZE_TIMER);
+      LAY_RESIZE_TIMER = window.setTimeout(function () {
+        LAY_RESIZE_TIMER = null;
+        if (isLayoutTab(activeChart()) && layView().zoom === "fit") renderLayout();
+      }, 100);
+    });
+  }
+  function layPointerMove(e) {
+    var d = LAY_DRAG;
+    if (!d) return;
+    var dx = (e.clientX - d.sx) / d.zoom;
+    var dy = (e.clientY - d.sy) / d.zoom;
+    if (!d.moved && Math.abs(dx) < 3 / d.zoom && Math.abs(dy) < 3 / d.zoom) return;
+    d.moved = true;
+    var p = layPage(), v = layView();
+    if (d.resizing && d.ids.length === 1 && laySizedKind(d.primary)) {
+      var o = d.origins[0];
+      var resized = layResizeDimensions(o, dx, dy, p, v, !!e.shiftKey);
+      var w = resized.w, h = resized.h;
+      d.primary.w = w; d.primary.h = h;
+      var elR = el("ps-lcanvas").querySelector(
+        '.ps-litem[data-item-id="' + d.primary.id + '"]');
+      if (elR) { elR.style.width = w + "px"; elR.style.height = h + "px"; }
+      layHideGuides();
+    } else {
+      if (v.snap) {
+        dx = Math.round((d.bounds.x + dx) / v.grid) * v.grid - d.bounds.x;
+        dy = Math.round((d.bounds.y + dy) / v.grid) * v.grid - d.bounds.y;
+      }
+      var adj = laySmartAdjust(d.bounds, dx, dy, d.ids);
+      dx = layClamp(adj.dx, -d.bounds.x, p.w - d.bounds.right);
+      dy = layClamp(adj.dy, -d.bounds.y, p.h - d.bounds.bottom);
+      layShowGuides(adj.gx, adj.gy);
+      for (var i = 0; i < d.origins.length; i++) {
+        var it = d.origins[i].item;
+        it.x = d.origins[i].x + dx; it.y = d.origins[i].y + dy;
+        var live = el("ps-lcanvas").querySelector(
+          '.ps-litem[data-item-id="' + it.id + '"]');
+        if (live) { live.style.left = it.x + "px"; live.style.top = it.y + "px"; }
+      }
+    }
+    laySyncInspector();
+    e.preventDefault();
+  }
+  // B4. Escape during a layout drag must put every dragged item back where
+  // it was at pointer-down and tear the gesture down, not merely drop the
+  // selection while the drag stays live.
+  function layCancelDrag() {
+    var d = LAY_DRAG;
+    if (!d) return false;
+    LAY_DRAG = null;
+    document.removeEventListener("pointermove", layPointerMove);
+    document.removeEventListener("pointerup", layPointerUp);
+    layHideGuides();
+    for (var i = 0; i < d.origins.length; i++) {
+      var o = d.origins[i];
+      o.item.x = o.x; o.item.y = o.y;
+      if (laySizedKind(o.item)) { o.item.w = o.w; o.item.h = o.h; }
+    }
+    renderLayout();
+    return true;
+  }
+  function layPointerUp() {
+    var d = LAY_DRAG;
+    LAY_DRAG = null;
+    document.removeEventListener("pointermove", layPointerMove);
+    document.removeEventListener("pointerup", layPointerUp);
+    layHideGuides();
+    if (d && d.moved) {
+      var h = layHist();
+      if (h && d.before) {
+        h.undo.push({ label: d.resizing ? "resize" : "move", state: d.before });
+        if (h.undo.length > LAYOUT_HIST_LIMIT) h.undo.shift();
+        h.redo.length = 0;
+        LAY_COALESCE = null;
+      }
+      persist(); renderLayout();
+    }
+  }
+  function layEditText(id) {
+    var item = layItemById(id);
+    if (!item || item.kind !== "text") return;
+    laySetSelection([id]);
+    var canvas = el("ps-lcanvas");
+    var itemEl = canvas.querySelector('.ps-litem[data-item-id="' + id + '"]');
+    if (!itemEl) return;
+    var ta = document.createElement("textarea");
+    ta.className = "ps-ltext-edit";
+    ta.value = item.text || "";
+    ta.style.fontSize = (item.fontSize || 14) + "px";
+    ta.style.fontWeight = item.bold ? "700" : "400";
+    itemEl.innerHTML = "";
+    itemEl.appendChild(ta);
+    ta.focus(); ta.select();
+    var done = false;
+    function commit(cancel) {
+      if (done) return;
+      done = true;
+      if (!cancel) {
+        var value = ta.value;
+        if (value.trim() && value !== item.text) {
+          laySnapshot("edit text");
+          item.text = value;
+        }
+        layClampAllItems();
+        persist();
+      }
+      renderLayout();
+    }
+    ta.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") commit(true);
+      e.stopPropagation();
+    });
+    ta.addEventListener("blur", function () { commit(false); });
+  }
+  function layAddChartMenu() {
+    var m = el("ps-lchartmenu");
+    var chartTabs = PROJECT.charts.filter(function (c) { return !isLayoutTab(c); });
+    var h = ['<div class="ps-tm-head">Add a chart</div>'];
+    for (var i = 0; i < chartTabs.length; i++) {
+      var c = chartTabs[i];
+      h.push('<button type="button" data-chart="' + escHtml(c.id) + '">' +
+        "<span>" + escHtml(c.name) + "</span>" +
+        '<span style="margin-left:auto;color:#98a0a8;font-size:11px;">' +
+        escHtml(MODULES[c.module] ? MODULES[c.module].label : "") + "</span></button>");
+    }
+    if (!chartTabs.length)
+      h.push('<div class="ps-slot-empty" style="padding:5px 12px;">no chart tabs yet</div>');
+    m.innerHTML = h.join("");
+    var r = el("ps-laddchart").getBoundingClientRect();
+    m.style.display = "block";
+    m.style.left = Math.min(r.left, window.innerWidth - 200) + "px";
+    m.style.top = Math.min(r.bottom + 3, window.innerHeight - 220) + "px";
+  }
+  function layAddChart(chartId) {
+    var pos = layStagger(), p = layPage();
+    layAddItem({ id: layNewItemId(), kind: "chart", chartId: chartId,
+                 x: pos.x, y: pos.y,
+                 w: Math.min(460, p.w - 48), h: Math.min(310, p.h - 48) });
+    render();
+  }
+  function layAddText(text, fontSize, bold) {
+    var pos = layStagger();
+    layAddItem({ id: layNewItemId(), kind: "text",
+                 text: text, fontSize: fontSize, bold: !!bold,
+                 x: pos.x, y: pos.y });
+  }
+
+  // ======================================================== application frame
+  function appWorkspace() {
+    var ws = PROJECT.ui && PROJECT.ui.workspace;
+    if (["data", "chart", "layout"].indexOf(ws) !== -1) return ws;
+    return PROJECT.ui && PROJECT.ui.dataOpen ? "data" :
+      (isLayoutTab(activeChart()) ? "layout" : "chart");
+  }
+  function appFirstDocument(wantLayout) {
+    for (var i = 0; i < PROJECT.charts.length; i++)
+      if (isLayoutTab(PROJECT.charts[i]) === wantLayout) return PROJECT.charts[i];
+    return null;
+  }
+  function appRememberedDocument(wantLayout) {
+    var id = PROJECT.ui &&
+      PROJECT.ui[wantLayout ? "lastLayout" : "lastChart"];
+    var doc = chartById(id);
+    return doc && isLayoutTab(doc) === wantLayout ? doc : null;
+  }
+  function workspaceDocument(mode) {
+    mode = mode || appWorkspace();
+    if (mode === "data") return null;
+    var doc = chartById(PROJECT.activeChart);
+    return doc && isLayoutTab(doc) === (mode === "layout") ? doc : null;
+  }
+  function setAppWorkspace(mode) {
+    if (["data", "chart", "layout"].indexOf(mode) === -1) return;
+    narrowCloseAfterNavigation();   // punch list 17
+    if (mode === "data") {
+      PROJECT.ui.workspace = "data";
+      PROJECT.ui.dataOpen = true;
+      persist(false); syncAll();
+      return;
+    }
+    var wantLayout = mode === "layout";
+    var current = activeChart();
+    var target = isLayoutTab(current) === wantLayout
+      ? current : (appRememberedDocument(wantLayout) ||
+                   appFirstDocument(wantLayout));
+    if (!target) {
+      PROJECT.ui.workspace = mode;
+      PROJECT.ui.dataOpen = false;
+      persist(false); syncAll(); render();
+      return;
+    }
+    PROJECT.ui.workspace = mode;
+    PROJECT.ui.dataOpen = false;
+    if (PROJECT.activeChart !== target.id) switchChart(target.id);
+    else { persist(false); syncAll(); render(); }
+  }
+  function syncProjectNavigator() {
+    var root = el("ps-project-nav");
+    root.innerHTML = "";
+    function group(label, wantLayout, icon) {
+      var wrap = mkEl("div", "ps-project-group");
+      wrap.appendChild(mkEl("div", "ps-project-group-label", label));
+      var found = 0;
+      for (var i = 0; i < PROJECT.charts.length; i++) {
+        var c = PROJECT.charts[i];
+        if (isLayoutTab(c) !== wantLayout) continue;
+        found++;
+        (function (doc) {
+          var b = mkEl("button", "ps-project-item" +
+            (doc.id === PROJECT.activeChart && appWorkspace() !== "data"
+             ? " ps-project-active" : ""));
+          b.type = "button";
+          b.setAttribute("data-project-chart-id", doc.id);
+          setTip(b, doc.name);
+          b.appendChild(mkEl("span", "ps-nav-icon", icon));
+          b.appendChild(mkEl("span", "", doc.name));
+          b.addEventListener("click", function () {
+            narrowCloseAfterNavigation();   // punch list 17
+            switchChart(doc.id);
+          });
+          b.addEventListener("contextmenu", function (e) {
+            e.preventDefault();
+            showDocumentContextMenu(e.clientX, e.clientY, doc.id);
+          });
+          wrap.appendChild(b);
+        })(c);
+      }
+      if (!found) {
+        var empty = mkEl("div", "ps-slot-empty",
+          wantLayout ? "No layouts yet" : "No charts yet");
+        empty.style.padding = "5px 12px";
+        wrap.appendChild(empty);
+      }
+      root.appendChild(wrap);
+    }
+    group("Charts", false, "\u25a5");
+    group("Layouts", true, "\u229e");
+  }
+  function inspectorStat(label, value) {
+    return '<div class="ps-inspector-stat"><span>' + escHtml(label) +
+      '</span><strong>' + escHtml(value) + "</strong></div>";
+  }
+  // Punch list 18b and 18c. Both findings are the same complaint - the app
+  // made a typing decision the user did not ask for and said nothing - so
+  // they share one surface. It names the deciding values (18b's "silently
+  // and unidentifiably"), and every claim comes from the audit rather than
+  // from re-guessing here, so the advice and the type can never disagree.
+  function variableAdvice(t, col) {
+    var a = t.typeAudit && t.typeAudit[col];
+    if (!a || !a.seen) return null;
+    var type = t.types[col];
+    // 18b: nearly-numeric column held back by a handful of values. Above a
+    // fifth of the column this is simply a text variable, and saying so
+    // would be noise.
+    if (a.bad > 0 && type !== "continuous" && type !== "id" &&
+        a.bad / a.seen <= 0.2) {
+      var names = a.offenders.map(function (o) {
+        return "<code>" + escHtml(o.value) + "</code>";
+      }).join(" ");
+      return {
+        kind: "offenders",
+        html: "<strong>" + escHtml(col) + " is " + escHtml(typeLabel(type)) +
+          " because " + a.bad + " of " + a.seen + " values " +
+          (a.bad === 1 ? "is not a number" : "are not numbers") +
+          ".</strong> " + names +
+          (a.allBadNamed ? "" : " and others") +
+          ". Typing it Continuous would drop those cases, so it stays " +
+          escHtml(typeLabel(type)) + " until you say what they mean.",
+        actions: [
+          { label: "Go to the first one", act: "advice-goto" }
+        ].concat(a.allBadNamed
+          ? [{ label: a.offenders.length === 1
+                 ? "Treat it as missing" : "Treat these as missing",
+              act: "advice-missing" }]
+          : [])
+      };
+    }
+    // 18c: values numeric conversion would rewrite. The rewrite is already
+    // prevented by the audit; what is left is routing the user to the type
+    // that exists for exactly this case and is never inferred.
+    if (a.idCoded > 0 && a.bad === 0 && type !== "id") {
+      return {
+        kind: "idcoded",
+        html: "<strong>Values like <code>" + escHtml(a.firstIdValue) +
+          "</code> are kept exactly as typed.</strong> Read as a number it " +
+          "would become " + escHtml(String(Number(a.firstIdValue))) +
+          ", so this variable is not offered as a measurement. If it " +
+          "identifies cases rather than measuring them, set its type to ID.",
+        actions: [{ label: "Set type to ID", act: "advice-id" }]
+      };
+    }
+    return null;
+  }
+  function syncVariableAdvice(t, col) {
+    var section = el("ps-variable-advice-section");
+    var body = el("ps-variable-advice");
+    var advice = variableAdvice(t, col);
+    if (!advice) {
+      section.style.display = "none";
+      body.innerHTML = "";
+      return;
+    }
+    section.style.display = "block";
+    var h = advice.html;
+    if (advice.actions && advice.actions.length) {
+      h += '<div class="ps-var-advice-actions">';
+      for (var i = 0; i < advice.actions.length; i++)
+        h += '<button type="button" data-advice="' +
+          escHtml(advice.actions[i].act) + '">' +
+          escHtml(advice.actions[i].label) + "</button>";
+      h += "</div>";
+    }
+    body.innerHTML = h;
+  }
+  function runVariableAdvice(act) {
+    var t = PROJECT.table, col = INSPECTOR_VAR;
+    if (!t || !col) return;
+    var a = t.typeAudit && t.typeAudit[col];
+    if (act === "advice-id") { setColType(col, "id"); return; }
+    if (!a) return;
+    if (act === "advice-goto") {
+      if (a.firstBadRow < 0) return;
+      gridRevealFound({ col: col, row: a.firstBadRow });
+      return;
+    }
+    if (act === "advice-missing") {
+      // Route through setMissingTokens so the re-inference, the disclosure
+      // and the undo step are the same ones the text field gets.
+      var list = (t.missingTokens || ["NA"]).slice();
+      for (var i = 0; i < a.offenders.length; i++)
+        if (list.indexOf(a.offenders[i].value) === -1)
+          list.push(a.offenders[i].value);
+      setMissingTokens(list.join(", "));
+    }
+  }
+  function syncVariableInspector() {
+    var t = PROJECT.table, col = INSPECTOR_VAR;
+    if (!t || t.order.indexOf(col) === -1) col = INSPECTOR_VAR = null;
+    el("ps-variable-empty").style.display = col ? "none" : "block";
+    el("ps-variable-properties").style.display = col ? "block" : "none";
+    if (!col) return;
+    el("ps-variable-name").value = col;
+    var typeSelect = el("ps-variable-type");
+    typeSelect.innerHTML = "";
+    for (var i = 0; i < VAR_TYPES.length; i++) {
+      var opt = document.createElement("option");
+      opt.value = VAR_TYPES[i].key;
+      opt.textContent = VAR_TYPES[i].label;
+      typeSelect.appendChild(opt);
+    }
+    typeSelect.value = t.types[col];
+    // 19: say what the chosen type MEANS, right where it is chosen. The note
+    // is the part that answers "why will this not drop on the value axis".
+    var tinfo = typeInfo(t.types[col]);
+    el("ps-variable-type-hint").textContent = tinfo
+      ? tinfo.gloss + " " + tinfo.note : "";
+    var values = t.columns[col] || [], nonmissing = 0, seen = {};
+    for (i = 0; i < values.length; i++) if (values[i] != null) {
+      nonmissing++;
+      seen[String(values[i])] = 1;
+    }
+    var excluded = variableExcludedCount(col);
+    var uses = variableRoleUseCount(col);
+    el("ps-variable-stats").innerHTML =
+      inspectorStat("Rows", String(values.length)) +
+      inspectorStat("Valid", String(nonmissing)) +
+      inspectorStat("Missing", String(values.length - nonmissing)) +
+      inspectorStat("Distinct", String(Object.keys(seen).length)) +
+      inspectorStat("Excluded", String(excluded)) +
+      inspectorStat("Used in", String(uses) +
+        (uses === 1 ? " role" : " roles"));
+    syncVariableAdvice(t, col);
+    var levels = t.levels[col] || [], levelRoot = el("ps-variable-levels");
+    var categorical = t.types[col] === "nominal" ||
+      t.types[col] === "ordinal";
+    var levelSection = el("ps-variable-level-section");
+    levelSection.style.display = categorical ? "block" : "none";
+    levelRoot.innerHTML = "";
+    if (categorical) {
+      el("ps-variable-level-title").textContent =
+        t.types[col] === "ordinal" ? "Ordered levels" : "Category order";
+      el("ps-variable-level-hint").textContent =
+        t.types[col] === "ordinal"
+          ? "Drag to set analytical and display order."
+          : "Drag to set display order.";
+      if (!levels.length)
+        levelRoot.appendChild(mkEl("span", "ps-inspector-empty",
+          "No levels"));
+      for (i = 0; i < Math.min(levels.length, 40); i++) {
+        var order = mkEl("div", "ps-level-order");
+        var value = String(levels[i]);
+        order.setAttribute("data-level", value);
+        order.setAttribute("role", "listitem");
+        order.tabIndex = 0;
+        order.setAttribute("aria-label", value + ", position " + (i + 1) +
+          " of " + levels.length +
+          ". Drag vertically or press Alt plus Up or Down Arrow to reorder.");
+        var grip = mkEl("span", "ps-level-grip", "\u28ff");
+        grip.setAttribute("aria-hidden", "true");
+        order.appendChild(grip);
+        var label = mkEl("span", "ps-level-label", value);
+        setTip(label, value);
+        order.appendChild(label);
+        levelRoot.appendChild(order);
+      }
+      if (levels.length > 40)
+        levelRoot.appendChild(mkEl("span", "ps-level-chip",
+          "+" + (levels.length - 40) + " more"));
+    }
+    el("ps-variable-level-reset").style.display =
+      categorical && t.levelOrderDefaults &&
+      t.levelOrderDefaults[col] ? "inline-block" : "none";
+    el("ps-variable-missing").value = (t.missingTokens || ["NA"]).join(", ");
+    var mcLabel = el("ps-variable-missing-col-label");
+    var mcInput = el("ps-variable-missing-col");
+    var mcHint = el("ps-variable-missing-col-hint");
+    if (mcLabel && mcInput && mcHint) {
+      var own = hasColumnTokens(t, INSPECTOR_VAR);
+      var dataset = (t.missingTokens || ["NA"]).join(", ");
+      mcLabel.textContent = "Missing labels for " + INSPECTOR_VAR;
+      mcInput.value = own ? t.missingTokensByCol[INSPECTOR_VAR].join(", ") : "";
+      mcInput.placeholder = dataset
+        ? "using the dataset labels: " + dataset
+        : "using the dataset labels";
+      mcHint.textContent = own
+        ? "Only this variable uses these. Clear the box to go back to the "
+          + "dataset labels."
+        : "Set a list here when a code means missing in THIS variable only, "
+          + "such as -99 for an age or 9 for a rating.";
+    }
+  }
+  function variableRoleUseCount(col) {
+    var count = 0;
+    for (var ci = 0; ci < PROJECT.charts.length; ci++) {
+      var sets = PROJECT.charts[ci].roles || {};
+      for (var mod in sets) {
+        if (!Object.prototype.hasOwnProperty.call(sets, mod)) continue;
+        var rr = sets[mod] || {};
+        for (var key in rr) {
+          if (!Object.prototype.hasOwnProperty.call(rr, key)) continue;
+          if (rr[key] === col ||
+              (Array.isArray(rr[key]) && rr[key].indexOf(col) !== -1)) count++;
+        }
+      }
+    }
+    return count;
+  }
+  function syncLayoutContextInspector() {
+    var ids = laySelectedIds(), has = ids.length > 0;
+    el("ps-layout-orientation").value = layPageOrientation();
+    el("ps-layout-selection-empty").style.display = has ? "none" : "block";
+    el("ps-layout-selection-properties").style.display = has ? "block" : "none";
+    if (!has) return;
+    var bounds = laySelectionBounds(ids);
+    var one = ids.length === 1 ? layItemById(ids[0]) : null;
+    el("ps-layout-selection-title").textContent = one
+      ? (one.kind === "chart" ? "Chart panel"
+         : one.kind === "image" ? "Image item" : "Text item")
+      : ids.length + " selected items";
+    el("ps-ctx-lx").value = String(Math.round(bounds.x));
+    el("ps-ctx-ly").value = String(Math.round(bounds.y));
+    el("ps-ctx-lw").value = String(Math.round(bounds.w));
+    el("ps-ctx-lh").value = String(Math.round(bounds.h));
+    el("ps-ctx-lw").disabled = !one || one.kind !== "chart";
+    el("ps-ctx-lh").disabled = !one || one.kind !== "chart";
+    var align = document.querySelectorAll("[data-ctx-align]");
+    for (var i = 0; i < align.length; i++) align[i].disabled = ids.length < 2;
+    var dist = document.querySelectorAll("[data-ctx-distribute]");
+    for (i = 0; i < dist.length; i++) dist[i].disabled = ids.length < 3;
+  }
+  function syncContextInspector() {
+    var ws = appWorkspace(), chartPane = el("ps-inspector-chart");
+    var dataPane = el("ps-inspector-data"), layoutPane = el("ps-inspector-layout");
+    var doc = workspaceDocument(ws);
+    chartPane.classList.toggle("ps-inspector-active", ws === "chart" && !!doc);
+    dataPane.classList.toggle("ps-inspector-active", ws === "data");
+    layoutPane.classList.toggle("ps-inspector-active", ws === "layout" && !!doc);
+    el("ps-inspector-document").style.display =
+      ws === "data" || !doc ? "none" : "block";
+    if (ws !== "data" && doc) {
+      el("ps-inspector-docname").value = doc.name;
+      el("ps-inspector-delete").disabled = PROJECT.charts.length <= 1;
+    }
+    var fitBox = el("ps-fit-pane");
+    if (fitBox) {
+      var fitDoc = workspaceDocument(ws);
+      var fitOK = ws === "chart" && !!fitDoc && !isLayoutTab(fitDoc);
+      var fitField = fitBox.closest(".ps-inspector-field");
+      if (fitField) fitField.style.display = fitOK ? "" : "none";
+      fitBox.checked = fitOK && fitDoc.fitPane !== false;
+    }
+    if (ws === "data") syncVariableInspector();
+    else if (ws === "layout" && doc) syncLayoutContextInspector();
+  }
+  function syncAppShell() {
+    var ws = appWorkspace(), c = workspaceDocument(ws), t = PROJECT.table;
+    var body = document.querySelector(".ps-app-body");
+    body.classList.remove("ps-no-inspector");
+    el("ps-workcard").classList.toggle("ps-pane-parked", ws === "data");
+    var buttons = document.querySelectorAll("[data-ps-workspace]");
+    for (var i = 0; i < buttons.length; i++) {
+      var active = buttons[i].getAttribute("data-ps-workspace") === ws;
+      if (active) buttons[i].setAttribute("aria-current", "page");
+      else buttons[i].removeAttribute("aria-current");
+    }
+    el("ps-reset").disabled = !c || isLayoutTab(c);
+    el("ps-export").disabled = !c && ws !== "data";
+    var docName = PROJECT.name || (t && t.name) || "Untitled project";
+    el("ps-doc-name").textContent = docName;
+    document.title = docName + " \u00b7 Pandion Plots";
+    if (ws === "data") {
+      elOrSink("ps-workspace-title").textContent = "Data";
+      elOrSink("ps-workspace-subtitle").textContent = t
+        ? nRows(t) + " rows \u00d7 " + t.order.length + " variables"
+        : "No dataset loaded";
+      el("ps-inspector-title").textContent = "Variables & analysis";
+      el("ps-inspector-subtitle").textContent = INSPECTOR_VAR
+        ? "Inspecting " + INSPECTOR_VAR : "Select a variable";
+      // What the data IS, not which workspace you are looking at: the
+      // navigator highlight already says that.
+      el("ps-status-context").textContent = t
+        ? nRows(t).toLocaleString() + " rows \u00b7 " + t.order.length +
+          " variables" + (dataExclusionCount(t) ? " \u00b7 " +
+            dataExclusionCount(t) + " excluded" : "")
+        : "No dataset";
+      var rangeStatus = document.getElementById("ps-grid-selection-status");
+      el("ps-status-selection").textContent =
+        rangeStatus && rangeStatus.textContent ? rangeStatus.textContent : "No range selected";
+    } else if (!c) {
+      var emptyLayout = ws === "layout";
+      elOrSink("ps-workspace-title").textContent =
+        emptyLayout ? "Layouts" : "Charts";
+      elOrSink("ps-workspace-subtitle").textContent =
+        emptyLayout ? "Compose multi-panel figures" : "Build and refine analyses";
+      el("ps-status-context").textContent =
+        emptyLayout ? "No layouts yet" : "No charts yet";
+      el("ps-inspector-title").textContent =
+        emptyLayout ? "Layout properties" : "Chart setup";
+      el("ps-inspector-subtitle").textContent =
+        emptyLayout ? "Create a layout to begin" : "Create a chart to begin";
+      el("ps-status-selection").textContent = "No document selected";
+    } else if (ws === "layout") {
+      var page = layPage();
+      elOrSink("ps-workspace-title").textContent = c.name;
+      elOrSink("ps-workspace-subtitle").textContent =
+        "Figure layout \u00b7 " + page.w + " \u00d7 " + page.h;
+      el("ps-status-context").textContent =
+        (c.items ? c.items.length : 0) + " panel" +
+        ((c.items ? c.items.length : 0) === 1 ? "" : "s") +
+        " \u00b7 " + page.w + " \u00d7 " + page.h;
+      el("ps-inspector-title").textContent = "Layout properties";
+      el("ps-inspector-subtitle").textContent = laySelectedIds().length
+        ? "Position, size, and arrangement" : "Select a layout item";
+      el("ps-status-selection").textContent =
+        laySelectedIds().length ? laySelectedIds().length + " layout items selected" :
+        "No layout selection";
+    } else {
+      elOrSink("ps-workspace-title").textContent = c.name;
+      elOrSink("ps-workspace-subtitle").textContent =
+        MODULES[c.module] ? MODULES[c.module].label : "Chart";
+      el("ps-inspector-title").textContent = "Chart setup";
+      el("ps-inspector-subtitle").textContent = "Variables and analysis roles";
+      // The chart's own shape, from the payload the shell already builds:
+      // what is plotted and how much of it. An instruction is not a status.
+      el("ps-status-context").textContent = chartStatusText(c);
+      el("ps-status-selection").textContent = chartCaseText(c);
+    }
+    syncContextInspector();
+    syncProjectNavigator();
+    updateDocumentState();
+  }
+
+  // Punch list 37: real instrumentation for the chart workspace, read from the
+  // payload rather than restated from the navigator.
+  // "Saved 40 seconds ago" is a different fact from "Autosaved locally", and
+  // it is the one a student checks when they are about to close the tab.
+  function savedAgoText() {
+    if (!AUTOSAVE_LAST_OK) return "Autosave pending";
+    var secs = Math.max(0, Math.round((Date.now() - AUTOSAVE_LAST_OK) / 1000));
+    var when = secs < 5 ? "just now"
+      : secs < 60 ? secs + " seconds ago"
+      : secs < 3600 ? Math.round(secs / 60) + " min ago"
+      : Math.round(secs / 3600) + " h ago";
+    return (FILE_SAVED_REV == null ? "Autosaved " : "Saved ") + when;
+  }
+  function dataExclusionCount(t) {
+    var n = rowExclCount(t);
+    if (t && t.excluded)
+      for (var col in t.excluded)
+        if (Object.prototype.hasOwnProperty.call(t.excluded, col))
+          n += Object.keys(t.excluded[col]).length;
+    return n;
+  }
+  // ---- punch list t3-59: provenance ----
+  // jamovi analyses appear in syntax mode as reproducible R calls. Here the
+  // project file was opaque JSON, an exported figure carried no statement of
+  // what produced it, and Diagnostics described the APPLICATION (version,
+  // snapshot size, render milliseconds) rather than the chart. Every fact
+  // needed already existed somewhere: the roles, the summary function and
+  // error-bar type, the filter disclosure string, the exclusion count, the
+  // per-module missing note. This is assembly.
+  //
+  // Returns an ordered list of [label, value] so one description drives all
+  // three surfaces (Diagnostics, the copy, the export caption) and they can
+  // never disagree about what drew the chart.
+  function chartProvenance(c) {
+    c = c || activeChartTab();
+    if (!c || isLayoutTab(c)) return [];
+    var mod = c.module, rr = rolesFor(mod) || {}, out = [];
+    var t = PROJECT.table;
+    out.push(["Analysis", MODULES[mod] ? MODULES[mod].label : mod]);
+    var defs = (MODULES[mod] || {}).roles || [];
+    for (var i = 0; i < defs.length; i++) {
+      var v = rr[defs[i].key];
+      if (Array.isArray(v)) { if (v.length) out.push([defs[i].label, v.join(", ")]); }
+      else if (v) out.push([defs[i].label, String(v)]);
+    }
+    // Only where the module HAS them: a Frequencies chart has no summary
+    // function, and claiming "Mean" there would be a fabrication.
+    var st = optionsFor(mod), tpl = (window.PS_TEMPLATES || {})[mod];
+    var tplp = (tpl && tpl.payload) || {};
+    function setting(key) {
+      var v = typeof st[key] === "string" ? st[key] : tplp[key];
+      return typeof v === "string" ? v : null;
+    }
+    var SUMMARY = { mean: "Mean", median: "Median" };
+    var ERRBAR = { se: "Standard error", sd: "Standard deviation",
+                   ci95: "95% confidence interval",
+                   ci99: "99% confidence interval", none: "None" };
+    if (mod === "plotbuilder" || mod === "rmplotbuilder") {
+      var sf = setting("summaryFunc");
+      if (sf) out.push(["Summary", SUMMARY[sf] || sf]);
+      var eb = setting("errorBarType");
+      if (eb) out.push(["Error bars", ERRBAR[eb] || eb]);
+      // The correction is only meaningful when error bars are drawn, and
+      // only Repeated Measures has one.
+      if (mod === "rmplotbuilder" && eb && eb !== "none") {
+        var em = setting("errorBarMethod");
+        if (em) out.push(["Error-bar method", em === "within"
+          ? "Within-subject (Cousineau-Morey)" : "Between-subjects"]);
+      }
+    }
+    if (mod === "corrplotbuilder") {
+      var cm = setting("corrMethod");
+      if (cm) out.push(["Correlation", cm.charAt(0).toUpperCase() + cm.slice(1)]);
+    }
+    if (mod === "freqplotbuilder") {
+      var fs2 = setting("freqStat");
+      if (fs2) out.push(["Statistic", fs2.charAt(0).toUpperCase() + fs2.slice(1)]);
+    }
+    var rows = t ? nRows(t) : 0;
+    var kept = (t && t.filterMask) ? rows - filteredRowCount(t) : rows;
+    out.push(["Rows", t && t.filterMask
+      ? kept + " of " + rows + " (the rest filtered out)" : String(rows)]);
+    var filt = t ? filterSummaryText(t) : "";
+    if (filt) out.push(["Filter", filt]);
+    var excl = t ? dataExclusionCount(t) : 0;
+    if (excl) out.push(["Excluded by hand",
+      excl + " cell" + (excl === 1 ? "" : "s")]);
+    try {
+      var built = buildPayload();
+      if (built && built.payload && built.payload.missingNote)
+        out.push(["Missing data", built.payload.missingNote]);
+    } catch (e) {}
+    out.push(["Drawn with", "Pandion Plots " + APP_VERSION]);
+    return out;
+  }
+  // One sentence for a figure caption. The same facts, joined, because a
+  // caption is read as prose and a table of them is not.
+  function provenanceSentence(c) {
+    var p = chartProvenance(c);
+    if (!p.length) return "";
+    var bits = [];
+    for (var i = 0; i < p.length; i++) {
+      // The missing-data note is already a sentence of its own and reads
+      // badly folded into a list.
+      if (p[i][0] === "Missing data") continue;
+      bits.push(p[i][0] + ": " + p[i][1]);
+    }
+    var miss = p.filter(function (r) { return r[0] === "Missing data"; })[0];
+    return bits.join(". ") + "." + (miss ? " " + miss[1] + "." : "");
+  }
+  function chartStatusText(c) {
+    var label = MODULES[c.module] ? MODULES[c.module].label : "Chart";
+    var rr = rolesFor(c.module) || {};
+    var named = [];
+    var defs = MODULES[c.module] ? MODULES[c.module].roles : [];
+    for (var i = 0; i < defs.length && named.length < 3; i++) {
+      var v = rr[defs[i].key];
+      if (Array.isArray(v)) { if (v.length) named.push(v.length + " " +
+        defs[i].label.toLowerCase()); }
+      else if (v) named.push(v);
+    }
+    return named.length ? label + " \u00b7 " + named.join(" \u00d7 ") : label;
+  }
+  function chartCaseText(c) {
+    try {
+      var built = buildPayload();
+      var p = built && built.payload;
+      if (!p) return "Not drawn yet";
+      var cells = Array.isArray(p.bars) ? p.bars.length : 0;
+      var n = 0;
+      if (cells) for (var i = 0; i < p.bars.length; i++)
+        n += Number(p.bars[i].n) || 0;
+      else if (Array.isArray(p.xyPoints)) { cells = 0; n = p.xyPoints.length; }
+      var bits = [];
+      if (n) bits.push(n.toLocaleString() + " case" + (n === 1 ? "" : "s"));
+      if (cells) bits.push(cells + " cell" + (cells === 1 ? "" : "s"));
+      if (p.missingNote) bits.push(p.missingNote);
+      return bits.length ? bits.join(" \u00b7 ") : "Ready";
+    } catch (e) { return "Ready"; }
+  }
+  function syncAll() {
+    var ws = appWorkspace(), doc = workspaceDocument(ws);
+    var setupHidden = ws !== "data" && (!doc || isLayoutTab(doc));
+    syncTabs();
+    if (!setupHidden) { syncModuleSelect(); syncRolesRow(); }
+    syncDataRow(); syncDataGrid();
+    syncWorkspaceEmpty();
+    syncAppShell();
+  }
+
+  function wireContextInspector() {
+    function commitDocumentName() {
+      renameDocument(PROJECT.activeChart, el("ps-inspector-docname").value);
+    }
+    el("ps-inspector-docname").addEventListener("change", commitDocumentName);
+    el("ps-inspector-docname").addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); this.blur(); }
+      else if (e.key === "Escape") { this.value = activeChart().name; this.blur(); }
+    });
+    el("ps-inspector-duplicate").addEventListener("click", function () {
+      duplicateDocument(PROJECT.activeChart);
+    });
+    el("ps-inspector-delete").addEventListener("click", function () {
+      closeChart(PROJECT.activeChart);
+    });
+    el("ps-variable-name").addEventListener("change", function () {
+      if (INSPECTOR_VAR) renameVariable(INSPECTOR_VAR, this.value);
+    });
+    el("ps-variable-name").addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); this.blur(); }
+      else if (e.key === "Escape") { this.value = INSPECTOR_VAR || ""; this.blur(); }
+    });
+    el("ps-variable-type").addEventListener("change", function () {
+      if (INSPECTOR_VAR) setColType(INSPECTOR_VAR, this.value);
+    });
+    el("ps-variable-missing").addEventListener("change", function () {
+      setMissingTokens(this.value);
+    });
+    el("ps-variable-missing-col").addEventListener("change", function () {
+      if (INSPECTOR_VAR) setColumnMissingTokens(INSPECTOR_VAR, this.value);
+    });
+    el("ps-variable-missing-col").addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); this.blur(); }
+    });
+    el("ps-variable-missing").addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); this.blur(); }
+    });
+    // Delegated: the advisory body is rebuilt by innerHTML on every sync, so
+    // per-button listeners would be attached to elements already discarded.
+    el("ps-variable-advice").addEventListener("click", function (e) {
+      var b = e.target.closest && e.target.closest("[data-advice]");
+      if (b) runVariableAdvice(b.getAttribute("data-advice"));
+    });
+    var levelDrag = null;
+    var levelList = el("ps-variable-levels");
+    function levelDragCleanup() {
+      var d = levelDrag;
+      levelDrag = null;
+      document.removeEventListener("pointermove", levelPointerMove);
+      document.removeEventListener("pointerup", levelPointerUp);
+      document.removeEventListener("pointercancel", levelPointerCancel);
+      document.removeEventListener("keydown", levelPointerEscape, true);
+      if (!d) return;
+      if (d.rows)
+        for (var li = 0; li < d.rows.length; li++)
+          d.rows[li].style.transform = "";
+      if (d.row) d.row.classList.remove("ps-level-dragging");
+    }
+    function levelDragArm() {
+      var d = levelDrag;
+      if (!d) return;
+      d.rows = Array.prototype.slice.call(
+        levelList.querySelectorAll(".ps-level-order"));
+      d.boxes = []; d.origIdx = d.rows.indexOf(d.row);
+      for (var li = 0; li < d.rows.length; li++) {
+        var r = d.rows[li].getBoundingClientRect();
+        d.boxes.push({ top: r.top, center: r.top + r.height / 2,
+                       height: r.height });
+      }
+      if (d.origIdx < 0) { levelDragCleanup(); return; }
+      d.values = d.rows.map(function (row) {
+        return row.getAttribute("data-level");
+      });
+      d.slot = d.origIdx;
+      d.scrollStart = levelList.scrollTop;
+      d.row.classList.add("ps-level-dragging");
+      d.armed = true;
+    }
+    function levelPointerMove(e) {
+      var d = levelDrag;
+      if (!d) return;
+      if (!d.armed) {
+        if (Math.abs(e.clientX - d.startX) < 4 &&
+            Math.abs(e.clientY - d.startY) < 4) return;
+        levelDragArm();
+        if (!d.armed) return;
+      }
+      e.preventDefault();
+      var listBox = levelList.getBoundingClientRect();
+      if (e.clientY < listBox.top + 22) levelList.scrollTop -= 8;
+      else if (e.clientY > listBox.bottom - 22) levelList.scrollTop += 8;
+      var scrollDelta = levelList.scrollTop - d.scrollStart;
+      var slot = 0;
+      for (var li = 0; li < d.boxes.length; li++) {
+        if (li === d.origIdx) continue;
+        if (e.clientY >= d.boxes[li].center - scrollDelta) slot++;
+      }
+      d.slot = slot;
+      var minDy = listBox.top - d.boxes[d.origIdx].top + scrollDelta;
+      var maxDy = listBox.bottom -
+        (d.boxes[d.origIdx].top + d.boxes[d.origIdx].height) + scrollDelta;
+      var dy = Math.max(minDy, Math.min(maxDy,
+        e.clientY - d.startY + scrollDelta));
+      // Vertical-only: horizontal pointer drift never moves the row.
+      d.row.style.transform = "translateY(" + dy + "px)";
+      // FLIP the other rows into the provisional order so the destination
+      // opens continuously instead of appearing only at release.
+      for (li = 0; li < d.rows.length; li++) {
+        if (li === d.origIdx) continue;
+        var reduced = li - (li > d.origIdx ? 1 : 0);
+        var finalIndex = reduced + (reduced >= slot ? 1 : 0);
+        d.rows[li].style.transform = finalIndex === li ? "" :
+          "translateY(" +
+          (d.boxes[finalIndex].top - d.boxes[li].top) + "px)";
+      }
+    }
+    function levelPointerUp() {
+      var d = levelDrag;
+      levelDragCleanup();
+      if (!d || !d.armed || !INSPECTOR_VAR) return;
+      var next = d.values.slice();
+      var moved = next.splice(d.origIdx, 1)[0];
+      next.splice(d.slot, 0, moved);
+      applyVariableLevelOrder(INSPECTOR_VAR, next);
+    }
+    function levelPointerCancel() {
+      levelDragCleanup();
+    }
+    function levelPointerEscape(e) {
+      if (e.key !== "Escape" || !levelDrag) return;
+      e.preventDefault();
+      levelDragCleanup();
+    }
+    levelList.addEventListener("pointerdown", function (e) {
+      var row = e.target.closest ? e.target.closest("[data-level]") : null;
+      if (e.button !== 0 || !row || !INSPECTOR_VAR || levelDrag) return;
+      levelDrag = { row: row, startX: e.clientX, startY: e.clientY,
+                    armed: false };
+      document.addEventListener("pointermove", levelPointerMove,
+        { passive: false });
+      document.addEventListener("pointerup", levelPointerUp);
+      document.addEventListener("pointercancel", levelPointerCancel);
+      document.addEventListener("keydown", levelPointerEscape, true);
+    });
+    levelList.addEventListener("keydown", function (e) {
+      var row = e.target.closest ? e.target.closest("[data-level]") : null;
+      if (!row || !INSPECTOR_VAR || !e.altKey ||
+          (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+      e.preventDefault();
+      var value = row.getAttribute("data-level");
+      moveVariableLevel(INSPECTOR_VAR, value,
+        e.key === "ArrowUp" ? -1 : 1);
+      window.setTimeout(function () {
+        var nextRows = levelList.querySelectorAll("[data-level]");
+        for (var ni = 0; ni < nextRows.length; ni++)
+          if (nextRows[ni].getAttribute("data-level") === value) {
+            nextRows[ni].focus(); break;
+          }
+      }, 0);
+    });
+    el("ps-variable-level-sort").addEventListener("click", function () {
+      if (INSPECTOR_VAR) sortVariableLevels(INSPECTOR_VAR);
+    });
+    el("ps-variable-level-reset").addEventListener("click", function () {
+      if (INSPECTOR_VAR) resetVariableLevelOrder(INSPECTOR_VAR);
+    });
+    el("ps-layout-orientation").addEventListener("change", function () {
+      layApplyOrientation(this.value);
+    });
+    ["x", "y", "w", "h"].forEach(function (prop) {
+      el("ps-ctx-l" + prop).addEventListener("change", function () {
+        layApplyInspector(prop, this.value);
+      });
+    });
+    el("ps-ctx-duplicate").addEventListener("click", layDuplicateSelected);
+    el("ps-ctx-delete").addEventListener("click", layDeleteSelected);
+    el("ps-ctx-back").addEventListener("click", function () { layMoveLayer(-1); });
+    el("ps-ctx-forward").addEventListener("click", function () { layMoveLayer(1); });
+    var align = document.querySelectorAll("[data-ctx-align]");
+    for (var i = 0; i < align.length; i++)
+      align[i].addEventListener("click", function () {
+        layAlign(this.getAttribute("data-ctx-align"));
+      });
+    var dist = document.querySelectorAll("[data-ctx-distribute]");
+    for (i = 0; i < dist.length; i++)
+      dist[i].addEventListener("click", function () {
+        layDistribute(this.getAttribute("data-ctx-distribute"));
+      });
+  }
+
+  function adoptCSV(name, parsed) {
+    PROJECT_CHOSEN = true;
+    var replaced = captureReplacedProject();    // item 13
+    dataHistoryClear();
+    PROJECT.id = newProjectId();
+    PROJECT.name = name || "Untitled project";
+    PROJECT_REV = 0;
+    FILE_SAVED_REV = null;
+    FILE_LABEL = null;
+    FILE_HANDLE = null;
+    PROJECT.table = buildTable(name, parsed.header, parsed.rows, null);
+    PROJECT.ui.columnWidths = {};
+    GRID_NATURAL_WIDTHS = {};
+    gridResetColumnView();
+    GRID_FIND_QUERY = ""; GRID_FIND_RESULTS = []; GRID_FIND_INDEX = -1;
+    if (Array.isArray(parsed.typeList)) {
+      for (var ti = 0; ti < PROJECT.table.order.length; ti++)
+        PROJECT.table.types[PROJECT.table.order[ti]] =
+          normType(parsed.typeList[ti]) || PROJECT.table.types[PROJECT.table.order[ti]];
+      retype(PROJECT.table);
+    }
+    validateRoles();
+    persist();
+    syncAll();
+    render();
+    hideWelcome();
+    closeLoader();
+    offerReplacedProjectBack(replaced, name || "that file");
+  }
+  function adoptOMV(parsed) {
+    PROJECT_CHOSEN = true;
+    var replaced = captureReplacedProject();    // item 13
+    dataHistoryClear();
+    PROJECT.id = newProjectId();
+    PROJECT.name = parsed.name || "Untitled project";
+    PROJECT_REV = 0;
+    FILE_SAVED_REV = null;
+    FILE_LABEL = null;
+    FILE_HANDLE = null;
+    PROJECT.table = buildTable(parsed.name, parsed.header, parsed.rows,
+                               parsed.types, parsed.levels);
+    PROJECT.ui.columnWidths = {};
+    GRID_NATURAL_WIDTHS = {};
+    gridResetColumnView();
+    GRID_FIND_QUERY = ""; GRID_FIND_RESULTS = []; GRID_FIND_INDEX = -1;
+    validateRoles();
+    persist();
+    syncAll();
+    render();
+    hideWelcome();
+    closeLoader();
+    offerReplacedProjectBack(replaced, parsed.name || "that jamovi file");
+    // B9. adoptOMV bypasses the import preview entirely, so there is no
+    // per-column type select and no correction surface. When a measure type
+    // could not be mapped, say which columns were guessed and where to change
+    // them, rather than reporting a clean success.
+    if (parsed.unmapped && parsed.unmapped.length)
+      showToast("Imported. " + parsed.unmapped.length +
+        (parsed.unmapped.length === 1 ? " column had" : " columns had") +
+        " a measure type Pandion does not recognise and was read as: " +
+        parsed.unmapped.join(", ") +
+        ". Change it in the Data workspace if that is wrong.", true);
+  }
+  function isOmvFile(f) {
+    return /\.omv$/i.test(f && f.name ? f.name : "");
+  }
+  function isXlsxFile(f) {
+    return /\.(xlsx|xlsm)$/i.test(f && f.name ? f.name : "");
+  }
+  // Excel workbooks route through the SAME typed import preview as
+  // CSV/TSV: each sheet converts to quoted TSV; a multi-sheet workbook
+  // gets a sheet bar above the preview.
+  var XLSX_SHEETS = null;     // [{name, tsv}] while an .xlsx is previewed
+  var XLSX_ACTIVE = 0;
+  var XLSX_BASENAME = "";
+  function showXlsxSheet(idx) {
+    if (!XLSX_SHEETS || !XLSX_SHEETS[idx]) return;
+    XLSX_ACTIVE = idx;
+    renderImportPreview(
+      XLSX_BASENAME + (XLSX_SHEETS.length > 1
+        ? " - " + XLSX_SHEETS[idx].name : ""),
+      XLSX_SHEETS[idx].tsv);
+  }
+  function renderXlsxSheetBar(root) {
+    if (!XLSX_SHEETS || XLSX_SHEETS.length < 2) return;
+    var bar = mkEl("div", "ps-import-sheets");
+    bar.appendChild(mkEl("span", "ps-import-sheets-label", "Worksheet"));
+    for (var i = 0; i < XLSX_SHEETS.length; i++) {
+      (function (idx) {
+        var b = mkEl("button",
+          "ps-import-sheet" + (idx === XLSX_ACTIVE ? " ps-import-sheet-active" : ""),
+          XLSX_SHEETS[idx].name);
+        b.type = "button";
+        b.setAttribute("aria-pressed", String(idx === XLSX_ACTIVE));
+        b.addEventListener("click", function () { showXlsxSheet(idx); });
+        bar.appendChild(b);
+      })(i);
+    }
+    root.insertBefore(bar, root.firstChild);
+  }
+  function readXlsxFile(f) {
+    var rd = new FileReader();
+    rd.onerror = function () { reportReadFailure(f, rd.error); };
+    rd.onload = function () {
+      window.PSXlsx.parse(rd.result, f.name).then(function (wb) {
+        XLSX_SHEETS = wb.sheets.map(function (s) {
+          return { name: s.name, tsv: window.PSXlsx.sheetToTsv(s) };
+        });
+        XLSX_BASENAME = wb.name;
+        XLSX_ACTIVE = 0;
+        IMPORT_SOURCE_FILE = null;   // control changes re-parse the TSV
+        openLoader();
+        showXlsxSheet(0);
+      }, function (e) {
+        showLoaderMessage(
+          "Could not read that Excel file: " + String(e && e.message || e));
+      });
+    };
+    rd.readAsArrayBuffer(f);
+  }
+  // readPickedFile only ever sniffed .xlsx and .omv, so a dropped PNG or PDF
+  // was read as text and shown as an import preview of binary noise with type
+  // dropdowns over it (punch list item 10). Extension first, because it names
+  // the format the student actually dropped; content as the backstop for an
+  // unknown or missing extension.
+  var NON_DATA_KINDS = {
+    png: "PNG image", jpg: "JPEG image", jpeg: "JPEG image",
+    gif: "GIF image", bmp: "bitmap image", webp: "WebP image",
+    heic: "HEIC image", tif: "TIFF image", tiff: "TIFF image",
+    pdf: "PDF document", doc: "Word document", docx: "Word document",
+    ppt: "PowerPoint file", pptx: "PowerPoint file",
+    key: "Keynote file", pages: "Pages document", numbers: "Numbers spreadsheet",
+    zip: "zip archive", gz: "compressed archive", rar: "archive",
+    mp3: "audio file", wav: "audio file", mp4: "video file",
+    mov: "video file", avi: "video file",
+    sav: "SPSS data file", rdata: "R workspace", rds: "R data file",
+    dta: "Stata data file", sas7bdat: "SAS data file", parquet: "Parquet file"
+  };
+  function nonDataFileKind(name) {
+    var m = /\.([a-z0-9]+)$/i.exec(String(name || ""));
+    return m ? (NON_DATA_KINDS[m[1].toLowerCase()] || null) : null;
+  }
+  // readAsText replaces every byte it cannot decode with U+FFFD, so a binary
+  // arrives as a dense field of them plus stray C0 controls. Real delimited
+  // text has effectively none of either.
+  function looksBinary(text) {
+    var s = String(text || "").slice(0, 4096);
+    if (!s) return false;
+    if (s.indexOf("\u0000") !== -1) return true;
+    var bad = 0;
+    for (var i = 0; i < s.length; i++) {
+      var c = s.charCodeAt(i);
+      if (c === 0xFFFD || (c < 32 && c !== 9 && c !== 10 && c !== 13)) bad++;
+    }
+    return bad / s.length > 0.02;
+  }
+  function refuseNonDataFile(name, kind) {
+    showLoaderMessage(kind
+      ? escFileName(name) + " is a " + kind + ", not a data file. " +
+        "Pandion reads CSV, TSV, Excel, jamovi .omv and Pandion project files."
+      : escFileName(name) + " does not look like text data. " +
+        "Pandion reads CSV, TSV, Excel, jamovi .omv and Pandion project files.");
+  }
+  function escFileName(name) {
+    var s = String(name || "that file");
+    return s.length > 48 ? s.slice(0, 45) + "\u2026" : s;
+  }
+  function reportReadFailure(f, err) {
+    showLoaderMessage(
+      "Could not read " + escFileName(f && f.name) + ". " +
+      (err && err.name === "NotReadableError"
+        ? "The file may have been moved, renamed or deleted since you picked it."
+        : "Your browser was not able to open it. Try choosing it again with " +
+          "the Browse button."));
+  }
+  var IMPORT_PENDING = null;
+  var IMPORT_SOURCE_FILE = null;
+  var IMPORT_SOURCE_TEXT = "";
+  var IMPORT_SOURCE_NAME = "pasted-data";
+  function importDelimiterValue() {
+    var value = el("ps-import-delimiter").value;
+    return value === "tab" ? "\t" : value;
+  }
+  function renderImportPreview(name, text) {
+    IMPORT_SOURCE_TEXT = String(text || "");
+    IMPORT_SOURCE_NAME = name || "pasted-data";
+    var parsed = parseTableText(IMPORT_SOURCE_TEXT, importDelimiterValue(),
+      el("ps-import-header").value !== "no");
+    var root = el("ps-import-preview");
+    if (!parsed || !parsed.rows.length) {
+      IMPORT_PENDING = null;
+      root.style.display = "none";
+      el("ps-import-use").style.display = "none";
+      el("ps-loader-msg").textContent = parseIssue() ||
+        "Could not preview the data. Check the delimiter and first-row settings.";
+      return;
+    }
+    parsed.typeList = [];
+    parsed.auditList = [];
+    for (var c = 0; c < parsed.header.length; c++) {
+      var values = parsed.rows.map(function (row) { return row[c] || ""; });
+      var au = numericAudit(values);
+      parsed.auditList.push(au);
+      parsed.typeList.push(au.numeric ? "continuous" : "nominal");
+    }
+    IMPORT_PENDING = { name: IMPORT_SOURCE_NAME, parsed: parsed };
+    var notes = "";
+    if (parsed.ragged)
+      notes += ' <span class="ps-import-warning">\u00b7 uneven row lengths ' +
+        'padded with blanks</span>';
+    if (parsed.blankRowsDropped)
+      notes += ' <span class="ps-import-warning">\u00b7 ' +
+        parsed.blankRowsDropped + (parsed.blankRowsDropped === 1
+          ? " blank row skipped" : " blank rows skipped") + "</span>";
+    var renameNote = renameNoteText(parsed.renamed);
+    if (renameNote)
+      notes += ' <span class="ps-import-warning">\u00b7 ' +
+        escHtml(renameNote) + "</span>";
+    // 18b at the point it matters most: the preview shows six rows, so a
+    // stray value in row 40,000 is what decided the type and is nowhere on
+    // screen. Name the column and the value BEFORE the table is adopted.
+    var demoted = [];
+    for (c = 0; c < parsed.header.length; c++) {
+      var da = parsed.auditList[c];
+      if (da && da.bad > 0 && da.seen && da.bad / da.seen <= 0.2)
+        demoted.push(escHtml(parsed.header[c]) + " (" + da.bad + " of " +
+          da.seen + ", e.g. " + escHtml(da.offenders[0].value) +
+          " in row " + (da.offenders[0].row + 1) + ")");
+    }
+    if (demoted.length)
+      notes += ' <span class="ps-import-warning">\u00b7 ' +
+        (demoted.length === 1 ? "text in an otherwise numeric variable: "
+         : demoted.length + " variables hold text in otherwise numeric " +
+           "columns: ") + demoted.slice(0, 3).join("; ") +
+        (demoted.length > 3 ? "; and " + (demoted.length - 3) + " more" : "") +
+        "</span>";
+    var h = '<div class="ps-import-summary">' +
+      parsed.rows.length + " rows \u00d7 " + parsed.header.length + " variables" +
+      notes + "</div><div class=\"ps-import-table-wrap\">" +
+      '<table class="ps-import-table"><thead><tr>';
+    for (c = 0; c < parsed.header.length; c++) {
+      h += "<th>" + escHtml(parsed.header[c]) +
+        '<select data-import-type="' + c + '" aria-label="Type for ' +
+        escHtml(parsed.header[c]) + '">';
+      for (var vt = 0; vt < VAR_TYPES.length; vt++)
+        h += '<option value="' + VAR_TYPES[vt].key + '"' +
+          (VAR_TYPES[vt].key === parsed.typeList[c] ? " selected" : "") +
+          ">" + VAR_TYPES[vt].label + "</option>";
+      h += "</select></th>";
+    }
+    h += "</tr></thead><tbody>";
+    for (var r = 0; r < Math.min(6, parsed.rows.length); r++) {
+      h += "<tr>";
+      for (c = 0; c < parsed.header.length; c++)
+        h += "<td>" + escHtml(parsed.rows[r][c] || "") + "</td>";
+      h += "</tr>";
+    }
+    h += "</tbody></table></div>";
+    root.innerHTML = h;
+    renderXlsxSheetBar(root);
+    root.style.display = "block";
+    el("ps-import-use").style.display = "";
+    el("ps-loader-msg").textContent = "";
+  }
+  // Item 9: the commit path re-parses and then builds/retypes the whole
+  // table, which is the slowest synchronous step in the app for a big file.
+  function importIsBig() {
+    return (IMPORT_SOURCE_FILE && IMPORT_SOURCE_FILE.size > BUSY_BIG_BYTES) ||
+      String(IMPORT_SOURCE_TEXT || "").length > BUSY_BIG_BYTES;
+  }
+  function rereadImportFile() {
+    if (!IMPORT_SOURCE_FILE || isOmvFile(IMPORT_SOURCE_FILE)) return;
+    var reader = new FileReader();
+    var f = IMPORT_SOURCE_FILE;
+    reader.onerror = function () { reportReadFailure(f, reader.error); };
+    reader.onload = function () {
+      renderImportPreview(f.name.replace(/\.[^.]+$/, ""), String(reader.result));
+    };
+    reader.readAsText(IMPORT_SOURCE_FILE, el("ps-import-encoding").value);
+  }
+  // P5. The only byte guard anywhere in the app was for layout images, so a
+  // data file of any size was read into memory and parsed with nothing said.
+  // Measured on this machine, 8.2 MB / 200,000 rows parses in 101 ms, which is
+  // fine and is already covered by item 9's busy overlay - the problem is the
+  // top end, where a file the browser cannot hold produces a hang or a tab
+  // crash rather than a sentence. Same shape as the image guard: a disclosure
+  // with a choice at the size where it starts to hurt, a refusal only where
+  // continuing would take the tab down.
+  var DATA_WARN_BYTES = 25 * 1024 * 1024;
+  var DATA_REFUSE_BYTES = 250 * 1024 * 1024;
+  function dataFileSizeGate(f, proceed) {
+    var size = f && f.size || 0;
+    if (size > DATA_REFUSE_BYTES) {
+      showLoaderMessage(escFileName(f.name) + " is " +
+        (size / 1048576).toFixed(0) + " MB. A file that size cannot be read " +
+        "in a browser tab without running out of memory. Open it in a " +
+        "spreadsheet or a statistics package first and save a smaller " +
+        "extract, or filter it down to the variables you need.");
+      return false;
+    }
+    if (size > DATA_WARN_BYTES) {
+      showActionToast(escFileName(f.name) + " is " +
+        (size / 1048576).toFixed(0) + " MB. Reading it will lock the window " +
+        "up for a while, and a table that size is slow to edit.",
+        "Read it anyway", function () { proceed(true); });
+      return false;
+    }
+    return true;
+  }
+  function readPickedFile(f, forced) {
+    if (!forced && !dataFileSizeGate(f, function () { readPickedFile(f, true); }))
+      return;
+    if (isXlsxFile(f)) { XLSX_SHEETS = null; readXlsxFile(f); return; }
+    XLSX_SHEETS = null;
+    if (isOmvFile(f)) {
+      var rd = new FileReader();
+      rd.onerror = function () { reportReadFailure(f, rd.error); };
+      rd.onload = function () {
+        window.PSOmv.parse(rd.result, f.name).then(adoptOMV, function (e) {
+          showLoaderMessage(
+            "Could not read that .omv file: " + String(e && e.message || e));
+        });
+      };
+      rd.readAsArrayBuffer(f);
+      return;
+    }
+    var kind = nonDataFileKind(f && f.name);
+    if (kind) { refuseNonDataFile(f.name, kind); return; }
+    IMPORT_SOURCE_FILE = f;
+    var reader = new FileReader();
+    reader.onerror = function () { reportReadFailure(f, reader.error); };
+    reader.onload = function () {
+      var text = String(reader.result);
+      if (looksBinary(text)) { refuseNonDataFile(f.name, null); return; }
+      // Project files identify themselves by content, whatever the
+      // extension (.pand recommended; .pnd / .pandion / .json load too).
+      var claimsProject = /\.(pand|pnd|pandion)$/i.test(f.name || "");
+      if (/^\s*\{/.test(text) || claimsProject) {
+        var proj = parseProjectFile(text);
+        if (proj && proj.error) {
+          showLoaderMessage(proj.error);
+          return;
+        }
+        if (proj) { adoptProject(proj, f.name); return; }
+        // A file that NAMES itself a project and is not one must say that.
+        // Falling through handed it to the delimited-text importer, which
+        // then blamed the delimiter and first-row settings for a damaged
+        // project file (found by the item 1 drop probe).
+        if (claimsProject) {
+          showLoaderMessage(
+            escFileName(f.name) + " is named as a Pandion project but its " +
+            "contents could not be read. It may be damaged or incomplete. " +
+            "If it is really a data table, rename it to .csv and open it again.");
+          return;
+        }
+      }
+      openLoader(true);
+      // Item 9. renderImportPreview runs a synchronous char loop over the
+      // whole file (measured ~950 ms for 13 MB) plus type inference, so a
+      // delay-gated timer can never fire: the main thread is already blocked.
+      // Size is known up front, so a big file paints the overlay first.
+      if (f.size > BUSY_BIG_BYTES)
+        withBusyPainted("Reading " + escFileName(f.name) + "\u2026", function () {
+          renderImportPreview(f.name.replace(/\.[^.]+$/, ""), text);
+        });
+      else
+        renderImportPreview(f.name.replace(/\.[^.]+$/, ""), text);
+    };
+    reader.readAsText(f, el("ps-import-encoding").value);
+  }
+  function resetImportPreview() {
+    IMPORT_PENDING = null;
+    IMPORT_SOURCE_FILE = null;
+    IMPORT_SOURCE_TEXT = "";
+    IMPORT_SOURCE_NAME = "pasted-data";
+    el("ps-import-preview").innerHTML = "";
+    el("ps-import-preview").style.display = "none";
+    el("ps-import-use").style.display = "none";
+    el("ps-loader-msg").textContent = "";
+  }
+  function openLoader(keepImport) {
+    // Punch list item 1. The loader sits at z-index 9999 and the start centre
+    // at 13000, so on a cold load EVERY path through here used to render
+    // underneath it: the CSV and xlsx import previews, and - worse - the
+    // "unsupported file", "could not read that project file" and blocked-
+    // download messages. Dropping a CSV on the start screen, the most natural
+    // first action there is, looked like the app was broken.
+    //
+    // Showing the loader means the user is importing, so the start centre has
+    // no business covering it. Dismissing here fixes all seven entry points at
+    // once rather than the one branch the bug was reported against.
+    // hideWelcome() is idempotent; the two callers that already dismiss first
+    // are unaffected.
+    hideWelcome();
+    if (!keepImport) resetImportPreview();
+    el("ps-loader").style.display = "flex";
+  }
+  function closeLoader() { el("ps-loader").style.display = "none"; }
+  // openLoader() resets the import preview, and resetting CLEARS the message
+  // line - so the long-standing "set the message, then open the loader" order
+  // wiped every one of them on the way in. The blocked-download path had it
+  // the right way round; the .omv, Excel and unreadable-project failures did
+  // not, and were opening a blank loader with nothing said (punch list item
+  // 10). Every failure now goes through here so the order cannot drift again.
+  function showLoaderMessage(msg) {
+    openLoader();
+    el("ps-loader-msg").textContent = msg;
+  }
+  function wireLoader() {
+    el("ps-load").addEventListener("click", openLoader);
+    el("ps-loader-close").addEventListener("click", closeLoader);
+    el("ps-loader").addEventListener("click", function (e) {
+      if (e.target === el("ps-loader")) closeLoader();
+    });
+    el("ps-file").addEventListener("change", function () {
+      var f = el("ps-file").files && el("ps-file").files[0];
+      if (!f) return;
+      readPickedFile(f);
+    });
+    el("ps-paste-use").addEventListener("click", function () {
+      IMPORT_SOURCE_FILE = null;
+      XLSX_SHEETS = null;
+      renderImportPreview("pasted-data", el("ps-paste").value);
+    });
+    el("ps-import-use").addEventListener("click", function () {
+      if (!IMPORT_PENDING) return;
+      var pending = IMPORT_PENDING;
+      IMPORT_PENDING = null;
+      // Item 9: buildTable + retype + persist + the first render, all
+      // synchronous. Painted first for a big file, untouched for a small one.
+      if (importIsBig())
+        withBusyPainted("Building the table\u2026", function () {
+          adoptCSV(pending.name, pending.parsed);
+        });
+      else adoptCSV(pending.name, pending.parsed);
+    });
+    el("ps-import-preview").addEventListener("change", function (e) {
+      var select = e.target.closest ? e.target.closest("[data-import-type]") : null;
+      if (!select || !IMPORT_PENDING) return;
+      IMPORT_PENDING.parsed.typeList[Number(select.getAttribute("data-import-type"))] =
+        select.value;
+    });
+    function reparsePreview() {
+      if (!IMPORT_SOURCE_TEXT) return;
+      if (importIsBig())
+        withBusyPainted("Re-reading\u2026", function () {
+          renderImportPreview(IMPORT_SOURCE_NAME, IMPORT_SOURCE_TEXT);
+        });
+      else renderImportPreview(IMPORT_SOURCE_NAME, IMPORT_SOURCE_TEXT);
+    }
+    el("ps-import-delimiter").addEventListener("change", reparsePreview);
+    el("ps-import-header").addEventListener("change", reparsePreview);
+    el("ps-import-encoding").addEventListener("change", rereadImportFile);
+    el("ps-sample").addEventListener("click", function () {
+      dataHistoryClear();
+      loadSample();
+      persist();
+      syncAll();
+      render();
+      closeLoader();
+    });
+    // Whole-page drag-drop.
+    // Punch list 21. The loader advertises "or drop one anywhere on the page"
+    // and the page itself did nothing to show it: a bare dragover
+    // preventDefault, no dragenter, no dragleave, no target. Role slots, the
+    // variable list and the wizard all light up on dragover, so the page was
+    // the one surface that took a drop while looking inert.
+    //
+    // The counter is because dragenter/dragleave fire for every element the
+    // pointer crosses, so a boolean flickers the overlay off the moment the
+    // cursor passes from one child to the next. dragleave with relatedTarget
+    // null (or outside the document) is the real exit.
+    var pageDragDepth = 0;
+    function pageDropShow(on) {
+      var z = document.getElementById("ps-pagedrop");
+      if (!z) return;
+      z.classList.toggle("ps-pagedrop-on", !!on);
+    }
+    function isFileDrag(e) {
+      var dt = e.dataTransfer;
+      if (!dt) return false;
+      // A variable chip being dragged onto a role slot is NOT a file, and
+      // lighting the whole page for it would be nonsense. Files announce
+      // themselves in types.
+      if (dt.types) for (var i = 0; i < dt.types.length; i++)
+        if (String(dt.types[i]) === "Files") return true;
+      return false;
+    }
+    document.addEventListener("dragenter", function (e) {
+      if (!isFileDrag(e)) return;
+      pageDragDepth++;
+      pageDropShow(true);
+    });
+    document.addEventListener("dragover", function (e) {
+      e.preventDefault();
+      if (isFileDrag(e)) {
+        e.dataTransfer.dropEffect = "copy";
+        if (!pageDragDepth) { pageDragDepth = 1; pageDropShow(true); }
+      }
+    });
+    document.addEventListener("dragleave", function (e) {
+      if (!isFileDrag(e)) return;
+      pageDragDepth = Math.max(0, pageDragDepth - 1);
+      if (!pageDragDepth || !e.relatedTarget) {
+        pageDragDepth = 0;
+        pageDropShow(false);
+      }
+    });
+    document.addEventListener("drop", function (e) {
+      e.preventDefault();
+      pageDragDepth = 0;
+      pageDropShow(false);
+      var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (!f) return;
+      readPickedFile(f);
+    });
+  }
+
+  function hideWelcome() {
+    var welcome = document.getElementById("ps-welcome");
+    if (!welcome) return;
+    welcome.style.display = "none";
+    document.querySelector(".ps-page").removeAttribute("aria-hidden");
+    BOOT_RESTORED = true;
+    try { window.sessionStorage.setItem(PS_WELCOME_SESSION_KEY, "1"); }
+    catch (e) {}
+  }
+  function recentTimeLabel(iso) {
+    var d = new Date(iso), now = new Date();
+    if (!isFinite(d.getTime())) return "";
+    var diff = Math.max(0, now.getTime() - d.getTime());
+    if (diff < 60000) return "just now";
+    if (diff < 3600000) return Math.floor(diff / 60000) + " min ago";
+    if (diff < 86400000) return Math.floor(diff / 3600000) + " hr ago";
+    return d.toLocaleDateString();
+  }
+  // Item 13. THREE paths replaced the whole project with no prompt: the start
+  // centre's sample button, a whole-page file drop, and adoptProject/adoptOMV.
+  // Click "try the sample" out of curiosity with six charts open and they
+  // were gone, and PS_BACKUP_KEY is only reachable when the PRIMARY snapshot
+  // fails to parse, so it was no help. The app deliberately has no confirm()
+  // anywhere, so this is the same answer B18 gave for Recents: capture the
+  // outgoing project first, then offer it back. Only fires when the project
+  // being replaced has real work in it and no file copy to fall back on.
+  function captureReplacedProject() {
+    if (FILE_SAVED_REV != null) return null;      // there IS a file copy
+    if (!PROJECT.table || !PROJECT.table.order || !PROJECT.table.order.length)
+      return null;
+    // Offering back a project the user never touched is noise, and it fires
+    // on the very first thing they do: opening the app and clicking the
+    // sample replaces the pristine default. "Work" means a second document,
+    // an edited table, a computed column, or a filter - anything that would
+    // actually be a loss.
+    if (!projectHasWork()) return null;
+    try {
+      return { json: JSON.stringify(projectSnapshot()),
+               name: PROJECT.name || "the previous project",
+               charts: PROJECT.charts.length };
+    } catch (e) { return null; }
+  }
+  function offerReplacedProjectBack(prev, whatOpened) {
+    if (!prev) return;
+    var noun = prev.charts === 1 ? " document" : " documents";
+    showUndoToast("Opened " + whatOpened + ". " + prev.name + " (" +
+                  prev.charts + noun + ") was not saved to a file.",
+      function () {
+        var snap = null;
+        try { snap = JSON.parse(prev.json); } catch (e) { snap = null; }
+        if (!snap || !applySnapshot(snap)) {
+          showToast("That project could not be brought back", true);
+          return;
+        }
+        dataHistoryClear();
+        PROJECT_REV = 0;
+        FILE_SAVED_REV = null;
+        FILE_LABEL = null;
+        FILE_HANDLE = null;
+        validateRoles();
+        persist(false);
+        syncAll(); render();
+        showToast("Back in " + prev.name);
+      });
+  }
+  function openRecentProject(id) {
+    var list = recentProjects(), item = null;
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) item = list[i];
+    if (!item) return;
+    // B18. This replaced live work immediately, cleared the history, nulled
+    // the file association and persisted - which also overwrote the autosave
+    // key with the newly opened project. If the current project had never
+    // been saved to a .pand, it was simply gone. The app deliberately has no
+    // confirm() anywhere, so the house answer is the same as everywhere else
+    // that destroys work: do it, and offer it back. The outgoing project is
+    // captured whole BEFORE the swap and restored verbatim on Undo.
+    var replacingUnsaved = FILE_SAVED_REV == null && !!PROJECT.table;
+    var outgoing = null, outgoingName = "";
+    if (replacingUnsaved) {
+      try {
+        outgoing = JSON.stringify(projectSnapshot());
+        outgoingName = PROJECT.name || "the previous project";
+      } catch (e) { outgoing = null; }
+    }
+    // t3-54. An entry with no inline snapshot is not broken, it is just too
+    // big to have been carried; say so and offer the file it came from.
+    if (!item.snapshot) {
+      reopenRecentFromFile(item);
+      return;
+    }
+    if (!applySnapshot(item.snapshot)) return;
+    dataHistoryClear();
+    PROJECT_REV = 0;
+    FILE_SAVED_REV = null;
+    FILE_LABEL = null;
+    FILE_HANDLE = null;
+    validateRoles();
+    persist(false);
+    syncAll(); render(); hideWelcome();
+    // t3-54. Reconnect to the file on disk when we still hold its handle, so
+    // the next Save writes back to the same file. Before this, every reopen
+    // silently became a Save As.
+    reconnectRecentFile(item);
+    if (outgoing) {
+      showUndoToast("Opened " + (item.name || "project") + ". " +
+                    outgoingName + " was not saved to a file.", function () {
+        var snap = null;
+        try { snap = JSON.parse(outgoing); } catch (e) { snap = null; }
+        if (!snap || !applySnapshot(snap)) {
+          showToast("That project could not be brought back", true);
+          return;
+        }
+        dataHistoryClear();
+        PROJECT_REV = 0;
+        FILE_SAVED_REV = null;
+        FILE_LABEL = null;
+        FILE_HANDLE = null;
+        validateRoles();
+        persist(false);
+        syncAll(); render();
+        showToast("Back in " + outgoingName);
+      });
+    }
+  }
+  // t3-54. Restores the file association after a reopen. Permission may have
+  // lapsed (the browser scopes it to a session), so this ASKS, and a refusal
+  // leaves the project usable and merely unattached rather than erroring.
+  function reconnectRecentFile(item) {
+    if (!item || !item.hasFile) return;
+    recentHandle(item.id).then(function (handle) {
+      if (!handle || !handle.queryPermission) return;
+      handle.queryPermission({ mode: "readwrite" }).then(function (state) {
+        if (state === "granted") { adoptRecentHandle(handle, item); return; }
+        if (state !== "prompt") return;
+        showActionToast(
+          "Reconnect " + (item.fileLabel || "this project") +
+          " so Save writes back to it?", "Reconnect", function () {
+            handle.requestPermission({ mode: "readwrite" }).then(function (st) {
+              if (st === "granted") adoptRecentHandle(handle, item);
+              else showToast("Left unattached; Save will ask where to put it");
+            }, function () {});
+          });
+      }, function () {});
+    });
+  }
+  function adoptRecentHandle(handle, item) {
+    FILE_HANDLE = handle;
+    FILE_LABEL = item.fileLabel || (handle.name || "");
+    FILE_SAVED_REV = PROJECT_REV;
+    syncAll();
+    showToast("Connected to " + (FILE_LABEL || "the file on disk"));
+  }
+  // t3-54. The entry exists, the bytes do not. This is the honest form of what
+  // used to be an entry that never appeared at all.
+  function reopenRecentFromFile(item) {
+    var size = item.bytes ? formatBytes(item.bytes) : "";
+    if (!item.hasFile) {
+      showToast((item.name || "That project") + " was too large to keep a copy" +
+        (size ? " (" + size + ")" : "") +
+        "; open its file to get it back", true);
+      openLoader();
+      return;
+    }
+    recentHandle(item.id).then(function (handle) {
+      if (!handle || !handle.getFile) {
+        showToast((item.name || "That project") +
+          " is on disk; open its file to get it back", true);
+        openLoader();
+        return;
+      }
+      function load() {
+        handle.getFile().then(function (file) {
+          readPickedFile(file);
+          FILE_HANDLE = handle;
+          FILE_LABEL = item.fileLabel || file.name;
+        }, function () {
+          showToast("That file could not be read; it may have moved", true);
+          openLoader();
+        });
+      }
+      if (!handle.requestPermission) { load(); return; }
+      handle.queryPermission({ mode: "readwrite" }).then(function (state) {
+        if (state === "granted") { load(); return; }
+        handle.requestPermission({ mode: "readwrite" }).then(function (st) {
+          if (st === "granted") load();
+          else {
+            showToast("Permission was declined; open the file yourself", true);
+            openLoader();
+          }
+        }, function () { openLoader(); });
+      }, function () { load(); });
+    });
+  }
+  function renderWelcome() {
+    var recovery = el("ps-recovery-note");
+    recovery.textContent = RECOVERY_NOTE;
+    recovery.style.display = RECOVERY_NOTE ? "block" : "none";
+    var continueBtn = el("ps-welcome-continue");
+    continueBtn.style.display = BOOT_RESTORED ? "flex" : "none";
+    if (BOOT_RESTORED) {
+      var age = BOOT_SAVED_AT ? recentTimeLabel(BOOT_SAVED_AT) : "";
+      el("ps-welcome-continue-meta").textContent =
+        (PROJECT.name || "Untitled project") + " \u00b7 " +
+        (PROJECT.table ? nRows(PROJECT.table) + " rows" : "local recovery") +
+        (age ? " \u00b7 saved " + age : "");
+    }
+    var root = el("ps-recent-list"), list = recentProjects();
+    root.innerHTML = "";
+    if (!list.length) {
+      root.appendChild(mkEl("div", "ps-recent-empty",
+        "Recent local projects will appear here as you work."));
+      return;
+    }
+    for (var i = 0; i < list.length; i++) {
+      (function (item) {
+        var b = mkEl("button", "ps-recent-item");
+        b.type = "button";
+        b.setAttribute("data-recent-id", item.id);
+        b.appendChild(mkEl("span", "ps-recent-dot", "\u25a5"));
+        b.appendChild(mkEl("span", "ps-recent-name", item.name));
+        var meta = item.rows + " rows \u00b7 " + recentTimeLabel(item.updatedAt);
+        if (!item.snapshot)
+          meta += " \u00b7 " + (item.hasFile ? "opens from its file"
+                                            : "too large to keep a copy");
+        b.appendChild(mkEl("span", "ps-recent-meta", meta));
+        if (!item.snapshot)
+          setTip(b, item.hasFile
+            ? "This project was too large to keep a copy of, so opening it " +
+              "reads " + (item.fileLabel || "its file") + " from disk."
+            : "This project was too large to keep a copy of and was never " +
+              "saved to a file, so only its name is here.");
+        b.addEventListener("click", function () { openRecentProject(item.id); });
+        root.appendChild(b);
+      })(list[i]);
+    }
+  }
+  function showWelcome(force) {
+    // Recovery must never be silent, even if this tab previously dismissed
+    // the start center or the preference normally resumes immediately.
+    if (!force && !RECOVERY_NOTE) {
+      if (BOOT_RESTORED && APP_PREFS.startup === "resume") {
+        try { window.sessionStorage.setItem(PS_WELCOME_SESSION_KEY, "1"); }
+        catch (ignore0) {}
+        return;
+      }
+      try {
+        if (window.sessionStorage.getItem(PS_WELCOME_SESSION_KEY) === "1") return;
+      } catch (e) {}
+    }
+    renderWelcome();
+    el("ps-welcome").style.display = "flex";
+    document.querySelector(".ps-page").setAttribute("aria-hidden", "true");
+    window.setTimeout(function () {
+      var first = BOOT_RESTORED ? el("ps-welcome-continue") : el("ps-welcome-open");
+      try { first.focus(); } catch (ignore) {}
+    }, 0);
+  }
+  function renameProjectInline() {
+    var title = el("ps-doc-name");
+    if (!title || document.getElementById("ps-doc-rename")) return;
+    var input = document.createElement("input");
+    input.id = "ps-doc-rename";
+    input.className = "ps-doc-rename";
+    input.type = "text";
+    input.value = PROJECT.name || "Untitled project";
+    input.maxLength = 100;
+    title.style.display = "none";
+    title.parentNode.insertBefore(input, title.nextSibling);
+    var done = false;
+    function commit(cancel) {
+      if (done) return;
+      done = true;
+      if (!cancel && input.value.trim()) {
+        PROJECT.name = input.value.trim();
+        persist();
+      }
+      input.parentNode.removeChild(input);
+      title.style.display = "";
+      syncAppShell();
+    }
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); commit(false); }
+      else if (e.key === "Escape") { e.preventDefault(); commit(true); }
+    });
+    input.addEventListener("blur", function () { commit(false); });
+    input.focus(); input.select();
+  }
+  function wireWelcome() {
+    el("ps-welcome-continue").addEventListener("click", function () {
+      persist(false); hideWelcome();
+    });
+    el("ps-welcome-open").addEventListener("click", function () {
+      hideWelcome(); openLoader();
+      try { el("ps-file").click(); } catch (ignore) {}
+    });
+    el("ps-welcome-new").addEventListener("click", function () {
+      hideWelcome(); openLoader();
+    });
+    // Punch list 20: three cards, one handler. The first still carries
+    // #ps-welcome-sample, so every existing path (and probe) that clicks it
+    // keeps loading the dose-response study.
+    // Punch list 36: fill each template preview with the drawing of the
+    // analysis its dataset suits, so the start centre shows charts.
+    var thumbSlots = document.querySelectorAll("[data-template-thumb]");
+    for (var ti = 0; ti < thumbSlots.length; ti++)
+      thumbSlots[ti].innerHTML =
+        moduleThumb(thumbSlots[ti].getAttribute("data-template-thumb"));
+    var exCards = document.querySelectorAll("[data-example]");
+    for (var xi = 0; xi < exCards.length; xi++) {
+      (function (card) {
+        card.addEventListener("click", function () {
+          var id = card.getAttribute("data-example");
+          var prev = captureReplacedProject();        // item 13
+          dataHistoryClear();
+          loadSample(id); persist(); syncAll(); render(); hideWelcome();
+          offerReplacedProjectBack(prev,
+            "the " + exampleById(id).name + " example");
+        });
+      })(exCards[xi]);
+    }
+    // t4-08. There was no way out of this modal on a cold load: no X, no
+    // Close, no backdrop click, and Escape was gated on BOOT_RESTORED, which
+    // is false on a first visit. A student who just wants to look around had
+    // no path. hideWelcome() is safe from here because a project is always
+    // loaded behind the dialog.
+    el("ps-welcome-close").addEventListener("click", function () {
+      persist(false); hideWelcome();
+    });
+    el("ps-welcome").addEventListener("pointerdown", function (e) {
+      if (e.target === this) { persist(false); hideWelcome(); }
+    });
+    el("ps-welcome").addEventListener("keydown", function (e) {
+      if (e.key === "Escape") {
+        e.preventDefault(); persist(false); hideWelcome(); return;
+      }
+      if (e.key !== "Tab") return;
+      var controls = Array.prototype.slice.call(el("ps-welcome").querySelectorAll(
+        "button:not([disabled])")).filter(function (b) {
+          return b.style.display !== "none";
+        });
+      if (!controls.length) return;
+      var first = controls[0], last = controls[controls.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault(); last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault(); first.focus();
+      }
+    });
+    setTip(el("ps-doc-name"), "Double-click to rename project");
+    el("ps-doc-name").addEventListener("dblclick", renameProjectInline);
+    showWelcome(false);
+  }
+
+  var SHELL_DIALOG_FOCUS = {};
+  function openShellDialog(id) {
+    var dialog = el(id);
+    if (!dialog) return;
+    SHELL_DIALOG_FOCUS[id] = document.activeElement;
+    dialog.style.display = "flex";
+    document.querySelector(".ps-page").setAttribute("aria-hidden", "true");
+    window.setTimeout(function () {
+      var first = dialog.querySelector(
+        "input, select, button:not([disabled]), [tabindex]");
+      if (first) first.focus();
+    }, 0);
+  }
+  function closeShellDialog(id) {
+    var dialog = el(id);
+    if (!dialog) return;
+    dialog.style.display = "none";
+    if (el("ps-welcome").style.display !== "flex" &&
+        el("ps-command-palette").style.display !== "flex")
+      document.querySelector(".ps-page").removeAttribute("aria-hidden");
+    var prior = SHELL_DIALOG_FOCUS[id];
+    delete SHELL_DIALOG_FOCUS[id];
+    try { if (prior) prior.focus(); } catch (ignore) {}
+  }
+  function applyAppPrefs() {
+    document.body.classList.toggle("ps-density-compact",
+      APP_PREFS.density === "compact");
+    document.body.classList.toggle("ps-reduce-motion",
+      APP_PREFS.motion === "reduce");
+  }
+  function showPreferences() {
+    var exp = exportPrefs();
+    el("ps-pref-density").value = APP_PREFS.density;
+    el("ps-pref-motion").value = APP_PREFS.motion;
+    el("ps-pref-startup").value = APP_PREFS.startup;
+    el("ps-pref-export-format").value = exp.format;
+    el("ps-pref-export-dpi").value = String(exp.dpi);
+    el("ps-pref-missing").value = APP_PREFS.missingTokens;
+    refreshPrefStorage();
+    openShellDialog("ps-preferences");
+  }
+  // t3-53. Diagnostics already computed the estimate and this dialog is where
+  // a person would look for it, so it is stated here in the same words as the
+  // action beside it.
+  function refreshPrefStorage() {
+    var line = el("ps-pref-storage");
+    if (!line) return;
+    var own = 0, keys = 0;
+    try {
+      for (var i = 0; i < window.localStorage.length; i++) {
+        var k = window.localStorage.key(i);
+        if (k && k.indexOf("psstandalone.") !== 0 &&
+            k.indexOf("graphbuilder2.") !== 0) continue;
+        keys++;
+        own += (window.localStorage.getItem(k) || "").length;
+      }
+    } catch (e) {}
+    line.textContent = "This app is using about " + formatBytes(own) +
+      " across " + keys + " item" + (keys === 1 ? "" : "s") +
+      " of browser storage: your autosaved project, its backup, recent " +
+      "projects, and your saved palettes and styles.";
+    try {
+      if (window.navigator.storage && window.navigator.storage.estimate)
+        window.navigator.storage.estimate().then(function (est) {
+          if (!est || !est.quota) return;
+          line.textContent += " The browser allows about " +
+            formatBytes(est.quota) + " in total.";
+        });
+    } catch (e) {}
+  }
+  // t3-53. Destructive and NOT undoable, which is exactly why it does not use
+  // the app's usual do-it-and-offer-it-back pattern: there would be nothing to
+  // offer back. It is a two-step instead, and it deliberately leaves the OPEN
+  // project alone so nobody loses what is on screen - that copy can still be
+  // saved to a file afterwards.
+  var PREF_CLEAR_ARMED = 0;
+  function clearLocalData() {
+    var btn = el("ps-pref-clear");
+    if (Date.now() - PREF_CLEAR_ARMED > 6000) {
+      PREF_CLEAR_ARMED = Date.now();
+      btn.textContent = "Clear it? This cannot be undone";
+      btn.classList.add("ps-danger");
+      window.setTimeout(function () {
+        if (Date.now() - PREF_CLEAR_ARMED >= 6000) {
+          btn.textContent = "Clear local data\u2026";
+          btn.classList.remove("ps-danger");
+        }
+      }, 6200);
+      return;
+    }
+    PREF_CLEAR_ARMED = 0;
+    var removed = 0;
+    try {
+      var doomed = [];
+      for (var i = 0; i < window.localStorage.length; i++) {
+        var k = window.localStorage.key(i);
+        if (k && (k.indexOf("psstandalone.") === 0 ||
+                  k.indexOf("graphbuilder2.") === 0)) doomed.push(k);
+      }
+      for (var d = 0; d < doomed.length; d++) {
+        window.localStorage.removeItem(doomed[d]);
+        removed++;
+      }
+    } catch (e) {}
+    btn.textContent = "Clear local data\u2026";
+    btn.classList.remove("ps-danger");
+    refreshPrefStorage();
+    showToast("Cleared " + removed + " stored item" + (removed === 1 ? "" : "s") +
+      " \u00b7 the project on screen is untouched, so save it to a file if " +
+      "you want to keep it");
+  }
+  function restorePrefDefaults() {
+    el("ps-pref-density").value = APP_PREFS_DEFAULTS.density;
+    el("ps-pref-motion").value = APP_PREFS_DEFAULTS.motion;
+    el("ps-pref-startup").value = APP_PREFS_DEFAULTS.startup;
+    el("ps-pref-missing").value = APP_PREFS_DEFAULTS.missingTokens;
+    el("ps-pref-export-format").value = "svg";
+    el("ps-pref-export-dpi").value = "300";
+    showToast("Defaults restored - press Apply to keep them");
+  }
+  function savePreferences() {
+    APP_PREFS.density = el("ps-pref-density").value;
+    APP_PREFS.motion = el("ps-pref-motion").value;
+    APP_PREFS.startup = el("ps-pref-startup").value;
+    APP_PREFS.missingTokens = String(el("ps-pref-missing").value || "NA").trim()
+      || "NA";
+    try {
+      window.localStorage.setItem(PS_PREF_KEY, JSON.stringify(APP_PREFS));
+      var oldExport = exportPrefs();
+      window.localStorage.setItem(PS_EXPORT_PREF_KEY, JSON.stringify({
+        format: el("ps-pref-export-format").value,
+        dpi: Number(el("ps-pref-export-dpi").value) || 300,
+        background: oldExport.background
+      }));
+    } catch (e) {}
+    applyAppPrefs();
+    closeShellDialog("ps-preferences");
+    showToast("Preferences applied");
+  }
+  // ---- punch list t3-55: the shortcuts sheet ----
+  // Thirteen hand-written rows that had already drifted: no Cmd+N, no
+  // Cmd+comma, no Cmd+F, none of the level-reordering or formula keys, one row
+  // conflating the grid's TSV copy with copy-as-image, and "Undo / redo" as a
+  // single line for what is deliberately two arbitrated stacks.
+  //
+  // The MENU half is now read out of APP_MENU_DEFS, which is what the menu bar
+  // itself renders, so a shortcut cannot appear in one and be missing from the
+  // other. The rest is authored, because those keys are bound in a dozen
+  // listeners with no single declaration to read - but they are grouped by
+  // where they apply, which is the part that makes a sheet usable.
+  function shortcutMenuRows() {
+    var order = ["file", "edit", "view", "insert", "help"], rows = [], seen = {};
+    for (var g = 0; g < order.length; g++) {
+      var defs = APP_MENU_DEFS[order[g]] || [];
+      for (var i = 0; i < defs.length; i++) {
+        var item = defs[i];
+        if (item === "separator" || !item.shortcut || seen[item.command]) continue;
+        seen[item.command] = 1;
+        rows.push([commandLabel(item).replace(/\u2026/g, ""),
+                   item.shortcut.replace(/\+/g, " + ").replace(/ {2,}/g, " ")]);
+      }
+    }
+    return rows;
+  }
+  function shortcutGroups() {
+    return [
+      { title: "Commands", rows: shortcutMenuRows() },
+      { title: "Undo and redo",
+        // The app keeps three histories on purpose and arbitrates the key by
+        // workspace. One row saying "Undo / redo" hid that, and the first time
+        // it surprises someone is the first time they need it.
+        note: "The key follows the workspace: in Data it walks the dataset " +
+              "history, in Layouts the layout history, and on a chart the " +
+              "engine's own styling history. The Edit menu names whichever " +
+              "one it would act on.",
+        rows: [["Undo", "Cmd/Ctrl + Z"], ["Redo", "Cmd/Ctrl + Shift + Z"]] },
+      { title: "The data grid",
+        rows: [
+          ["Move between cells", "Arrow keys"],
+          ["Extend the selection", "Shift + arrows"],
+          ["Jump to the edge of the data", "Cmd/Ctrl + arrows"],
+          ["First or last variable", "Home / End"],
+          ["Up or down a screen", "Page Up / Page Down"],
+          ["Start editing the selected cell", "Enter, F2, or just type"],
+          ["Commit an edit and move down", "Enter"],
+          ["Abandon an edit", "Escape"],
+          ["Clear the selected cells", "Delete"],
+          ["Select the whole table", "Cmd/Ctrl + A"],
+          ["Copy the selection as tab-separated text", "Cmd/Ctrl + C"],
+          ["Paste tab-separated text into the grid", "Cmd/Ctrl + V"],
+          ["Find in the data", "Cmd/Ctrl + F"],
+          ["Clear the selection", "Escape"]
+        ] },
+      { title: "Variables and formulas",
+        rows: [
+          ["Reorder a level (in the variable panel)", "Alt + Up / Down"],
+          ["Save a computed variable's formula", "Cmd/Ctrl + Enter"],
+          ["Rename the selected document", "F2"]
+        ] },
+      { title: "Documents",
+        // Saying what is NOT available, and why, is the honest half here: a
+        // user who tries Cmd+W and loses the whole tab should have been told.
+        note: "Cmd/Ctrl+W, Ctrl+Tab and Cmd/Ctrl+number belong to the " +
+              "browser's own tabs and never reach this page, which is why " +
+              "the keys here differ from a desktop application's.",
+        rows: [
+          ["Go to document 1 to 9", "Alt + 1 to 9"],
+          ["Rename the active document", "F2"],
+          ["Duplicate it", "Cmd/Ctrl + D"]
+        ] },
+      { title: "Layouts",
+        rows: [
+          ["Nudge the selection", "Arrow keys"],
+          ["Nudge by 10", "Shift + arrows"],
+          ["Duplicate the selection", "Cmd/Ctrl + D"],
+          ["Delete the selection", "Delete"],
+          ["Resize a chart panel freely", "Shift + corner drag"],
+          ["Cancel a drag, then clear the selection", "Escape"]
+        ] },
+      { title: "Menus and dialogs",
+        rows: [
+          ["Focus the menu bar", "F10"],
+          ["Move between menus", "Left / Right"],
+          ["First or last menu", "Home / End"],
+          ["Jump to a menu by name", "Type its first letter"],
+          ["Close a menu or dialog", "Escape"],
+          ["This sheet", "F1"]
+        ] },
+      { title: "Editing a chart",
+        // These are the ENGINE's keys, and it already documents them properly.
+        // Copying that table here would be a second copy to keep in step, so
+        // the sheet names the way IN and points at the real one.
+        rows: [["Open the chart's own help panel", "?"]],
+        note: "The rest of the chart editing keys - hiding a part, copying a " +
+              "style, stepping between chart elements - belong to the chart " +
+              "itself and are listed in that panel.",
+        action: { label: "Open it now", key: "help" } }
+    ];
+  }
+  function renderShortcuts() {
+    var body = el("ps-shortcuts-body");
+    if (!body) return;
+    body.innerHTML = "";
+    var groups = shortcutGroups();
+    for (var g = 0; g < groups.length; g++) {
+      var grp = groups[g];
+      body.appendChild(mkEl("div", "ps-shortcut-head", grp.title));
+      if (grp.rows.length) {
+        var list = mkEl("div", "ps-shortcut-list");
+        for (var i = 0; i < grp.rows.length; i++) {
+          list.appendChild(mkEl("span", "", grp.rows[i][0]));
+          var k = mkEl("kbd", "", grp.rows[i][1]);
+          list.appendChild(k);
+        }
+        body.appendChild(list);
+      }
+      if (grp.note) {
+        var note = mkEl("p", "ps-shortcut-note", grp.note);
+        if (grp.action) {
+          note.appendChild(document.createTextNode(" "));
+          var btn = mkEl("button", "", grp.action.label);
+          btn.type = "button";
+          (function (key) {
+            btn.addEventListener("click", function () {
+              closeShellDialog("ps-shortcuts-dialog");
+              openEngineHelp(key);
+            });
+          })(grp.action.key);
+          note.appendChild(btn);
+        }
+        body.appendChild(note);
+      }
+    }
+  }
+  function showShortcuts() {
+    renderShortcuts();
+    openShellDialog("ps-shortcuts-dialog");
+  }
+  // Punch list t4-03. The app carried no licence, copyright or citation
+  // surface at all - grepping the shell for cite / GPL / licence / copyright
+  // returned nothing - while about.html tells a citing researcher to use the
+  // number under Help IN THE APP. The portable HTML is the form most likely to
+  // travel without the site attached, so it has to carry its own.
+  var CITE_AUTHOR = "Dennis, T. S.";
+  var CITE_YEAR = "2026";
+  var CITE_URL = "https://pandionplots.com";
+  function citationAPA() {
+    return CITE_AUTHOR + " (" + CITE_YEAR + "). Pandion Plots (Version " +
+      APP_VERSION + ") [Computer software]. " + CITE_URL;
+  }
+  function citationBibTeX() {
+    return "@software{pandionplots,\n" +
+      "  author  = {Dennis, Torry Scott},\n" +
+      "  title   = {Pandion Plots},\n" +
+      "  version = {" + APP_VERSION + "},\n" +
+      "  year    = {" + CITE_YEAR + "},\n" +
+      "  url     = {" + CITE_URL + "}\n}";
+  }
+  function showAbout() {
+    var v = el("ps-about-version");
+    if (v) v.textContent = APP_VERSION;
+    var apa = el("ps-about-apa");
+    if (apa) apa.textContent = citationAPA();
+    openShellDialog("ps-about-dialog");
+  }
+  // Punch list t4-16. Chart settings > Appearance > Diagnostics wrote
+  // gb2_debug_timing and called window.__gb2_buildDbgOverlay, which is defined
+  // only in the jamovi module's R/widget.R - so in the standalone the checkbox
+  // was live, persisted, and did nothing at all. The engine already CALLS the
+  // hook on every delivery and on toggle, so the shell only has to define it,
+  // with lines that mean something here.
+  var DBG_ID = "ps-dbg-overlay";
+  function dbgEnabled() {
+    try { return window.localStorage.getItem("gb2_debug_timing") === "1"; }
+    catch (e) { return false; }
+  }
+  function buildDebugOverlay() {
+    var host = hostEl();
+    var old = document.getElementById(DBG_ID);
+    if (old && old.parentNode) old.parentNode.removeChild(old);
+    if (!dbgEnabled() || !host) return;
+    var t = PROJECT.table;
+    var doc = activeChartTab();
+    var store = doc && !isLayoutTab(doc) ? optionsFor(curModule()) : {};
+    var rows = [
+      ["Pandion Plots", APP_VERSION + " (standalone)"],
+      ["Render", (LAST_RENDER_MS < 10 ? LAST_RENDER_MS.toFixed(1)
+        : Math.round(LAST_RENDER_MS)) + " ms"],
+      ["Payload build", measurePayloadMs() + " ms"],
+      ["Data", t ? nRows(t).toLocaleString() + " rows x " + t.order.length +
+        " variables" : "none"],
+      ["Analysis", doc && !isLayoutTab(doc) && MODULES[doc.module]
+        ? MODULES[doc.module].label : "-"],
+      ["Plot size", (Number(store.plotWidth) || 6) + " x " +
+        (Number(store.plotHeight) || 4) + " in" +
+        (doc && doc.fitPane !== false ? " (fit)" : " (manual)")],
+      ["Documents", PROJECT.charts.length],
+      ["Project bytes", LAST_PROJECT_BYTES.toLocaleString()],
+      ["Autosave", AUTOSAVE_HEALTH + (AUTOSAVE_FAILS
+        ? " (" + AUTOSAVE_FAILS + " failures)" : "")],
+      ["Engine", window.GraphBuilder2 ? "loaded" : "MISSING"]
+    ];
+    var box = mkEl("div", "ps-dbg");
+    box.id = DBG_ID;
+    // Same opt-out the engine's own overlay uses, so it can never ride into a
+    // copy or an export.
+    box.className += " ignore-html";
+    for (var i = 0; i < rows.length; i++) {
+      var line = mkEl("div", "ps-dbg-row");
+      line.appendChild(mkEl("span", "", rows[i][0]));
+      line.appendChild(mkEl("b", "", String(rows[i][1])));
+      box.appendChild(line);
+    }
+    host.appendChild(box);
+  }
+  function measurePayloadMs() {
+    try {
+      var a = (window.performance && window.performance.now)
+        ? window.performance.now() : Date.now();
+      buildPayload();
+      var b = (window.performance && window.performance.now)
+        ? window.performance.now() : Date.now();
+      var ms = b - a;
+      return ms < 10 ? ms.toFixed(1) : Math.round(ms);
+    } catch (e) { return "-"; }
+  }
+  try { window.__gb2_buildDbgOverlay = buildDebugOverlay; } catch (e) {}
+  function wireAbout() {
+    var close = el("ps-about-close");
+    if (close) close.addEventListener("click", function () {
+      closeShellDialog("ps-about-dialog");
+    });
+    var apa = el("ps-about-copy-apa");
+    if (apa) apa.addEventListener("click", function () {
+      copyPlainText(citationAPA(), "APA citation copied");
+    });
+    var bib = el("ps-about-copy-bibtex");
+    if (bib) bib.addEventListener("click", function () {
+      copyPlainText(citationBibTeX(), "BibTeX entry copied");
+    });
+    var site = el("ps-about-site");
+    if (site) site.addEventListener("click", function () {
+      closeShellDialog("ps-about-dialog");
+      openSiteLink("site");
+    });
+  }
+  function copyPlainText(text, okMsg) {
+    try {
+      navigator.clipboard.writeText(text).then(function () {
+        showToast(okMsg);
+      }, function () { showToast("Could not copy", true); });
+    } catch (e) { showToast("Could not copy", true); }
+  }
+  // "Show me how": the walkthrough picker. ps-tour.js owns the list and the
+  // playback; the shell owns the dialog, so the walkthroughs inherit the
+  // standard backdrop-click, Escape and focus-trap behaviour for free.
+  function showTours() {
+    if (!window.PS_TOUR) return;
+    el("ps-tour-search").value = "";
+    window.PS_TOUR.renderList("");
+    openShellDialog("ps-tour-dialog");
+  }
+  function formatBytes(bytes) {
+    bytes = Number(bytes) || 0;
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / 1048576).toFixed(2) + " MB";
+  }
+  // ---- punch list t3-60: the templates could not say what they were ----
+  // build-templates.R now stamps the R marshalling it was generated from and
+  // the engine bundle it was generated beside. Neither is asserted HERE - a
+  // browser cannot hash the files - but both belong in a bug report, and
+  // verify/engine-stamp-check.mjs asserts the marshalling one against the
+  // real files so a stale template set fails the suite rather than rendering
+  // last month's look in silence.
+  function templateStamp() {
+    var s = window.PS_TEMPLATES && window.PS_TEMPLATES.__stamp;
+    return (s && typeof s === "object") ? s : null;
+  }
+  var LAST_CHANNELS = null;
+  var SHELL_WRITTEN_CHANNELS = { hiddenPoints: 1, chartSpec: 1 };
+  // The other half of t3-60: manifest.json DECLARED channels that nothing ever
+  // checked, so it declared distNormality as live on Distribution while the
+  // shell hard-coded it empty - the one mechanism that could have caught that
+  // mechanically was itself inert. Every declared channel is now compared
+  // against what the builder actually wrote.
+  function channelAudit() {
+    var out = { checked: 0, missing: [] };
+    var built = buildPayload();
+    var mod = curModule();
+    var tpl = window.PS_TEMPLATES && window.PS_TEMPLATES[mod];
+    if (!built || !built.payload || !tpl || !tpl.channels) return null;
+    var written = LAST_CHANNELS || {};
+    for (var i = 0; i < tpl.channels.length; i++) {
+      var key = tpl.channels[i];
+      // Two declared channels are the SHELL's to write, not the builder's, and
+      // buildPayload writes them after the merge. Auditing them against the
+      // builder would report a hole that is not one.
+      if (SHELL_WRITTEN_CHANNELS[key]) continue;
+      out.checked++;
+      // Present, not truthy: an empty bars array and a false hasGroups are
+      // both legitimate answers. A channel nothing WROTE is not.
+      if (!Object.prototype.hasOwnProperty.call(written, key))
+        out.missing.push(key);
+    }
+    out.module = mod;
+    return out;
+  }
+  function channelAuditText() {
+    var a = null;
+    try { a = channelAudit(); } catch (e) { return "Could not build a payload"; }
+    if (!a) return "No chart is open";
+    return a.missing.length
+      ? a.checked + " declared, MISSING: " + a.missing.join(", ")
+      : "all " + a.checked + " declared channels written (" + a.module + ")";
+  }
+  function diagnosticRows(storageInfo) {
+    var t = PROJECT.table;
+    var stamp = templateStamp();
+    return [
+      ["Pandion Plots", APP_VERSION],
+      ["Chart templates", stamp
+        ? "generated " + stamp.generated + " \u00b7 marshalling " +
+          String(stamp.marshalMd5).slice(0, 12)
+        : "unstamped (rebuild with build-templates.R)"],
+      ["Chart engine", stamp
+        ? String(stamp.engineMd5).slice(0, 12) +
+          (window.GraphBuilder2 ? "" : " \u00b7 NOT LOADED")
+        : window.GraphBuilder2 ? "loaded, unstamped" : "NOT LOADED"],
+      ["Payload channels", channelAuditText()],
+      ["Project", PROJECT.name || "Untitled project"],
+      ["Dataset", (t ? nRows(t) : 0) + " rows \u00d7 " +
+        (t ? t.order.length : 0) + " variables"],
+      ["Documents", String(PROJECT.charts.length)],
+      ["Snapshot size", formatBytes(LAST_PROJECT_BYTES ||
+        JSON.stringify(projectSnapshot()).length)],
+      ["Autosave", AUTOSAVE_HEALTH + " \u00b7 " + AUTOSAVE_DETAIL +
+        (AUTOSAVE_FAILS ? " \u00b7 " + AUTOSAVE_FAILS + " failure" +
+          (AUTOSAVE_FAILS === 1 ? "" : "s") + " this session" : "")],
+      ["Last successful autosave", AUTOSAVE_LAST_OK
+        ? new Date(AUTOSAVE_LAST_OK).toLocaleTimeString() : "Not yet"],
+      ["Recovery ladder", (function () {
+        var bits = [];
+        bits.push(LADDER_SKIPPED.backup
+          ? "backup SKIPPED (" + formatBytes(LADDER_SKIPPED.backup) + ")"
+          : "backup on");
+        bits.push(LADDER_SKIPPED.recents
+          ? "recents SKIPPED (" + formatBytes(LADDER_SKIPPED.recents) + ")"
+          : "recents on");
+        bits.push(recentProjects().length + " recent");
+        return bits.join(" \u00b7 ");
+      })()],
+      ["Storage persistence", STORAGE_PERSISTED === true
+        ? "Granted \u00b7 this browser will not evict your work"
+        : STORAGE_PERSISTED === false
+        ? "Not granted \u00b7 the browser may clear local storage under pressure"
+        : "Not answered by this browser"],
+      ["Recovery note", RECOVERY_NOTE || "None"],
+      ["Last chart render", LAST_RENDER_AT
+        ? (LAST_RENDER_MS < 10 ? LAST_RENDER_MS.toFixed(1) :
+           Math.round(LAST_RENDER_MS)) + " ms" : "Not measured"],
+      ["Vector PDF", window.jspdf && window.svg2pdf ? "Available" : "Unavailable"],
+      ["Native Save As", window.showSaveFilePicker ? "Available" : "Download fallback"],
+      ["OMV decompression", window.DecompressionStream ? "Available" : "Unavailable"],
+      ["Browser storage", storageInfo || "Estimate unavailable"],
+      ["Browser", (window.navigator && window.navigator.userAgent) || "Unknown"]
+    ].concat(
+      // t3-59: Diagnostics described the APPLICATION and said nothing about
+      // the chart, which is the half a reader or a marker actually needs.
+      // Prefixed so the two halves stay legible in one grid and in the
+      // pasted copy.
+      chartProvenance().map(function (r) { return ["This chart: " + r[0], r[1]]; })
+    );
+  }
+  function renderDiagnostics(storageInfo) {
+    var rows = diagnosticRows(storageInfo), root = el("ps-diagnostics-grid");
+    root.innerHTML = "";
+    for (var i = 0; i < rows.length; i++) {
+      root.appendChild(mkEl("span", "", rows[i][0]));
+      root.appendChild(mkEl("span", "", rows[i][1]));
+    }
+  }
+  function diagnosticsText() {
+    return diagnosticRows().map(function (row) {
+      return row[0] + ": " + row[1];
+    }).join("\n");
+  }
+  function showDiagnostics() {
+    renderDiagnostics();
+    openShellDialog("ps-diagnostics");
+    try {
+      if (window.navigator.storage && window.navigator.storage.estimate)
+        window.navigator.storage.estimate().then(function (estimate) {
+          var used = formatBytes(estimate.usage || 0);
+          var quota = formatBytes(estimate.quota || 0);
+          renderDiagnostics(used + " used of " + quota);
+        });
+    } catch (e) {}
+  }
+  function copyDiagnostics() {
+    var text = diagnosticsText();
+    if (window.navigator.clipboard && window.navigator.clipboard.writeText) {
+      window.navigator.clipboard.writeText(text).then(function () {
+        showToast("Diagnostics copied");
+      }, function () { showToast("Could not copy diagnostics", true); });
+      return;
+    }
+    var area = document.createElement("textarea");
+    area.value = text; area.style.position = "fixed"; area.style.left = "-9999px";
+    document.body.appendChild(area); area.select();
+    try {
+      document.execCommand("copy");
+      showToast("Diagnostics copied");
+    } catch (e) { showToast("Could not copy diagnostics", true); }
+    document.body.removeChild(area);
+  }
+  function wireGuidedDialogs() {
+    el("ps-analysis-close").addEventListener("click", hideAnalysisGallery);
+    el("ps-help-choose-close").addEventListener("click", hideHelpMeChoose);
+    // Escape steps BACK through the question route (matching the
+    // breadcrumb) and closes only from the start screen or the
+    // variables route; the generic overlay handler below would close
+    // the whole dialog on the first press. Capture phase so this runs
+    // before that handler; a handled press never reaches it.
+    el("ps-help-choose").addEventListener("keydown", function (e) {
+      if (e.key !== "Escape") return;
+      if (HMC_MODE === "questions" && HMC_PATH.length > 1) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        HMC_PATH.pop();
+        renderHelpMeChoose();
+      }
+    }, true);
+    el("ps-layout-gallery-close").addEventListener("click", hideLayoutGallery);
+    el("ps-layout-gallery-cancel").addEventListener("click", hideLayoutGallery);
+    el("ps-layout-gallery-create").addEventListener("click",
+      createLayoutFromTemplate);
+    var orientationButtons = document.querySelectorAll(
+      "[data-layout-orientation]");
+    for (var oi = 0; oi < orientationButtons.length; oi++)
+      orientationButtons[oi].addEventListener("click", function () {
+        LAYOUT_TEMPLATE_ORIENTATION =
+          this.getAttribute("data-layout-orientation") === "portrait"
+            ? "portrait" : "landscape";
+        renderLayoutGallery();
+      });
+    el("ps-layout-template-labels").addEventListener("change", function () {
+      this.__psChosen = true;
+    });
+    el("ps-preferences-close").addEventListener("click", function () {
+      closeShellDialog("ps-preferences");
+    });
+    el("ps-preferences-cancel").addEventListener("click", function () {
+      closeShellDialog("ps-preferences");
+    });
+    el("ps-preferences-save").addEventListener("click", savePreferences);
+    el("ps-pref-clear").addEventListener("click", clearLocalData);
+    el("ps-pref-reset").addEventListener("click", restorePrefDefaults);
+    el("ps-shortcuts-close").addEventListener("click", function () {
+      closeShellDialog("ps-shortcuts-dialog");
+    });
+    el("ps-whatsnew-close").addEventListener("click", function () {
+      closeShellDialog("ps-whatsnew-dialog");
+    });
+    el("ps-diagnostics-close").addEventListener("click", function () {
+      closeShellDialog("ps-diagnostics");
+    });
+    el("ps-diagnostics-done").addEventListener("click", function () {
+      closeShellDialog("ps-diagnostics");
+    });
+    el("ps-diagnostics-copy").addEventListener("click", copyDiagnostics);
+    el("ps-tour-close").addEventListener("click", function () {
+      closeShellDialog("ps-tour-dialog");
+    });
+    el("ps-tour-search").addEventListener("input", function () {
+      if (window.PS_TOUR) window.PS_TOUR.renderList(this.value);
+    });
+    el("ps-tour-search").addEventListener("keydown", function (e) {
+      if (e.key !== "Enter") return;
+      var first = el("ps-tour-list").querySelector("[data-tour]");
+      if (first) first.click();
+    });
+    el("ps-tour-list").addEventListener("click", function (e) {
+      var row = e.target.closest ? e.target.closest("[data-tour]") : null;
+      if (!row) return;
+      closeShellDialog("ps-tour-dialog");
+      if (window.PS_TOUR) window.PS_TOUR.play(row.getAttribute("data-tour"));
+    });
+    var dialogs = document.querySelectorAll(".ps-dialog-overlay");
+    for (var i = 0; i < dialogs.length; i++) {
+      dialogs[i].addEventListener("pointerdown", function (e) {
+        if (e.target === this) closeShellDialog(this.id);
+      });
+      dialogs[i].addEventListener("keydown", function (e) {
+        if (e.key === "Escape") {
+          e.preventDefault(); closeShellDialog(this.id); return;
+        }
+        if (e.key !== "Tab") return;
+        var focusable = Array.prototype.slice.call(this.querySelectorAll(
+          "button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]"));
+        if (!focusable.length) return;
+        var first = focusable[0], last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault(); last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault(); first.focus();
+        }
+      });
+    }
+    applyAppPrefs();
+  }
+
+  var APP_MENU_OWNER = null;
+  var CONTEXT_DOC_ID = null;
+  var APP_MENU_DEFS = {
+    file: [
+      { label: "New project\u2026", shortcut: "Cmd/Ctrl+N", command: "new-project" },
+      { label: "Open data or project\u2026", shortcut: "Cmd/Ctrl+O", command: "open" },
+      { label: "Start center\u2026", command: "welcome" },
+      { label: "Open recent", command: "open-recent", submenu: "recent" },
+      "separator",
+      { label: "Rename project\u2026", command: "rename-project" },
+      { label: "Save project", shortcut: "Cmd/Ctrl+S", command: "save" },
+      { label: "Save project as\u2026", shortcut: "Cmd/Ctrl+Shift+S", command: "save-as" },
+      "separator",
+      { label: "Export\u2026", shortcut: "Cmd/Ctrl+E", command: "export" },
+      { label: "Export data as CSV\u2026", command: "export-data" }
+    ],
+    edit: [
+      { label: "Undo data change", shortcut: "Cmd/Ctrl+Z", command: "undo" },
+      { label: "Redo data change", shortcut: "Cmd/Ctrl+Shift+Z", command: "redo" },
+      "separator",
+      { label: "Cut", shortcut: "Cmd/Ctrl+X", command: "cut-cells" },
+      { label: "Copy", shortcut: "Cmd/Ctrl+C", command: "copy-cells" },
+      { label: "Paste", shortcut: "Cmd/Ctrl+V", command: "paste-cells" },
+      { label: "Select all", shortcut: "Cmd/Ctrl+A", command: "select-all-cells" },
+      "separator",
+      { label: "Find in data\u2026", shortcut: "Cmd/Ctrl+F", command: "find-data" },
+      "separator",
+      { label: "Copy as image", command: "copy-image" },
+      "separator",
+      { label: "Rename document\u2026", shortcut: "F2", command: "rename-document" },
+      { label: "Duplicate document", shortcut: "Cmd/Ctrl+D", command: "duplicate-document" },
+      { label: "Delete document", command: "delete-document" },
+      "separator",
+      { label: "Reset chart styling", command: "reset" },
+      "separator",
+      { label: "Preferences\u2026", shortcut: "Cmd/Ctrl+,", command: "preferences" }
+    ],
+    view: [
+      // t3-51: the View menu listed all three workspaces with no accelerator
+      // between them. Cmd/Ctrl+Shift+number, not Cmd/Ctrl+number, because the
+      // plain one belongs to the BROWSER's tab strip and a page cannot have
+      // it - see shortcutGroups' note.
+      { label: "Data workspace", shortcut: "Cmd/Ctrl+Shift+1",
+        command: "view-data", workspace: "data" },
+      { label: "Charts workspace", shortcut: "Cmd/Ctrl+Shift+2",
+        command: "view-chart", workspace: "chart" },
+      { label: "Layouts workspace", shortcut: "Cmd/Ctrl+Shift+3",
+        command: "view-layout", workspace: "layout" },
+      "separator",
+      { label: "Command palette\u2026", shortcut: "Cmd/Ctrl+Shift+P", command: "command-palette" }
+    ],
+    insert: [
+      { label: "New chart", command: "new-chart" },
+      { label: "New layout", command: "new-layout" },
+      "separator",
+      { label: "Text", command: "insert-text", layoutOnly: true },
+      { label: "Panel label", command: "insert-label", layoutOnly: true },
+      { label: "Image\u2026", command: "insert-image", layoutOnly: true }
+    ],
+    // Punch list 3 and 4. Which graph?, Check graph, Glossary and Label parts
+    // were reachable only through one unlabelled 29px "?" inside the engine
+    // toolbar, and commandCatalog excluded the Help group outright, so the
+    // palette could not find them either. They are ordinary engine selection
+    // keys and the shell can open them by driving the engine's own help nav -
+    // no engine change, and no second copy of the teaching content.
+    help: [
+      { label: "Show me how\u2026", command: "show-me-how" },
+      { label: "User guide", command: "user-guide" },
+      "separator",
+      { label: "Which graph should I use?", command: "help-chooser" },
+      { label: "Check my chart", command: "help-lint" },
+      { label: "Label the chart parts", command: "help-anatomy" },
+      { label: "Glossary of terms", command: "help-glossary" },
+      "separator",
+      { label: "Keyboard shortcuts", shortcut: "F1", command: "shortcuts" },
+      { label: "Diagnostics\u2026", command: "diagnostics" },
+      "separator",
+      // t3-56: the two external destinations. Named with their host so the
+      // click is informed, like the user guide entry above.
+      { label: "Chart gallery (online)", command: "site-gallery" },
+      { label: "Pandion Plots on the web (online)", command: "site-home" },
+      "separator",
+      { label: "What's new", command: "whats-new" },
+      { label: "About Pandion Plots", command: "about" }
+    ]
+  };
+  function hideAppMenu(returnFocus) {
+    var m = el("ps-appmenu");
+    m.style.display = "none";
+    var owner = APP_MENU_OWNER;
+    APP_MENU_OWNER = null;
+    var buttons = document.querySelectorAll("[data-ps-menu]");
+    for (var i = 0; i < buttons.length; i++)
+      buttons[i].setAttribute("aria-expanded", "false");
+    if (returnFocus && owner) {
+      try { owner.focus(); } catch (ignore) {}
+    }
+  }
+  // The Edit menu's Undo/Redo used to be hardwired to the DATASET history no
+  // matter what was on screen, while Cmd/Ctrl+Z was routed by workspace - so
+  // in a chart the menu and the key did different things, and once Layout got
+  // its own history (punch list item 7) that was three behaviours behind one
+  // label. Both now resolve through the same scope the key router uses.
+  function undoScope() {
+    if (appWorkspace() === "data") return "data";
+    if (appWorkspace() === "layout" && isLayoutTab(activeChart())) return "layout";
+    return "chart";
+  }
+  function engineHistoryBtn(which) {
+    var b = document.querySelector('.graphbuilder2-host button[aria-label="' +
+      (which === "redo" ? "Redo" : "Undo") + '"]');
+    return b && !b.disabled ? b : null;
+  }
+  function commandLabel(item) {
+    // Punch list 4: an online destination is named in the label, so the click
+    // is informed rather than surprising.
+    if (item && item.command === "user-guide" && userGuideTarget().online)
+      return "User guide (online)";
+    // t3-46 put a plain "Copy" two rows above this one, so "Copy as image"
+    // became ambiguous. It names what it will copy, which also stops the label
+    // lying in the Layouts workspace, where the same command copies the
+    // composed page rather than a chart.
+    if (item && item.command === "copy-image")
+      return appWorkspace() === "layout"
+        ? "Copy layout as image" : "Copy chart as image";
+    if (item.command !== "undo" && item.command !== "redo") return item.label;
+    var s = undoScope();
+    var back = item.command === "undo";
+    // P4. The menu said a fixed "Undo data change" whatever the step was.
+    // Named steps now reach it, so it reads "Undo the cell edit".
+    if (s === "data") {
+      var named = dataStepLabel(back ? DATA_UNDO : DATA_REDO);
+      return (back ? "Undo " : "Redo ") + (named || "data change");
+    }
+    return (back ? "Undo " : "Redo ") +
+      (s === "layout" ? "layout change" : "chart styling");
+  }
+  // ---- punch list 3: opening the engine's own teaching panels ----
+  // Driven through the engine's PUBLIC surface: its toolbar "?" button and the
+  // [data-helpnav] tabs it renders. No engine change, and no second copy of
+  // Which graph? / Check graph / Glossary / Label parts to drift.
+  function engineHelpBtn() {
+    var host = hostEl();
+    if (!host) return null;
+    return host.querySelector('button[aria-label="Help & shortcuts"]');
+  }
+  function engineHelpTab(key) {
+    var host = hostEl();
+    if (!host) return null;
+    return host.querySelector('[data-helpnav="' + key + '"]');
+  }
+  function openEngineHelp(key) {
+    // These panels live on the chart, so a data or layout workspace has to
+    // come back to it first. Doing that silently would be worse than saying
+    // nothing: the user asked for a chart tool.
+    if (appWorkspace() !== "chart") setAppWorkspace("chart");
+    var tries = 0;
+    (function step() {
+      tries++;
+      if (engineHelpTab(key)) { engineHelpTab(key).click(); return; }
+      var btn = engineHelpBtn();
+      if (btn && !engineHelpTab("help")) btn.click();
+      if (tries < 30) window.setTimeout(step, 60);
+      else showToast("Open a chart first to use the chart help panels.");
+    })();
+  }
+  // ---- punch list 4: the user guide ----
+  // docs/user-guide.html is 2.46 MB with 15 screenshots, and was orphaned:
+  // userGuidePath is in no template, so the engine's own "Open the user guide"
+  // button never rendered, and the Help menu had no entry.
+  //
+  // The engine's button cannot be reused here even with the payload key, since
+  // it builds an http module-asset URL against a jamovi route and then calls
+  // window.openUrl, which does not exist in a browser. So the shell owns the
+  // link. Which COPY depends on where the page is: the repo layout has the
+  // guide one directory up, and the shipped single file has no local copy at
+  // all, so it goes to the published one - and says so, because an app that
+  // promises nothing leaves the machine must not quietly contact a server.
+  function userGuideTarget() {
+    return isDevPageEngine()
+      ? { url: "../docs/user-guide.html", online: false }
+      : { url: "https://pandionplots.com/docs/", online: true };
+  }
+  function openUserGuide() {
+    var t = userGuideTarget();
+    if (t.online)
+      showToast("Opening the user guide at pandionplots.com in a new tab");
+    try { window.open(t.url, "_blank", "noopener"); }
+    catch (e) { showToast("Could not open the user guide", true); }
+  }
+  // ---- punch list t3-56: somewhere to go ----
+  // The app contained ZERO external links, so a stuck student's only escape
+  // hatch was their instructor. These are the two destinations worth naming.
+  // Both say where they go before they go there, like the user guide does: an
+  // app whose whole promise is that nothing leaves the machine cannot open a
+  // connection without saying so first.
+  var SITE_LINKS = {
+    site: { url: "https://pandionplots.com",
+            label: "Pandion Plots on the web" },
+    gallery: { url: "https://pandionplots.com/gallery.html",
+               label: "Chart gallery" }
+  };
+  function openSiteLink(which) {
+    var link = SITE_LINKS[which];
+    if (!link) return;
+    showToast("Opening " + link.url.replace(/^https:\/\//, "") +
+              " in a new tab");
+    try { window.open(link.url, "_blank", "noopener"); }
+    catch (e) { showToast("Could not open " + link.url, true); }
+  }
+  // ---- punch list t3-56: release notes ----
+  // Authored, because there is no machine-readable changelog to read from. The
+  // staleness risk that comes with that is answered by a probe rather than by
+  // discipline: the newest entry's version must equal APP_VERSION, so shipping
+  // a release without a note here fails the suite.
+  var RELEASE_NOTES = [
+    { version: "3.0.0", date: "July 2026", notes: [
+      "First browser-only release. The whole chart editor runs on this page " +
+        "with no jamovi and no R: same engine, same charts, no install.",
+      "Seven analyses with worked examples, a spreadsheet with filters, " +
+        "computed variables and level editing, and multi-panel layouts.",
+      "Projects save to a single file you keep, and autosave locally between " +
+        "saves. Nothing is uploaded and there are no accounts.",
+      "Export to PNG, SVG, PDF, JPG or TIFF, and copy a chart straight into " +
+        "a document as an image."
+    ] }
+  ];
+  function renderWhatsNew() {
+    var body = el("ps-whatsnew-body");
+    if (!body) return;
+    body.innerHTML = "";
+    for (var i = 0; i < RELEASE_NOTES.length; i++) {
+      var rel = RELEASE_NOTES[i];
+      var box = mkEl("div", "ps-rel");
+      var head = mkEl("div", "ps-rel-head");
+      head.appendChild(mkEl("strong", "", "Version " + rel.version));
+      head.appendChild(mkEl("span", "", rel.date));
+      if (rel.version === APP_VERSION)
+        head.appendChild(mkEl("span", "ps-rel-current", "You have this"));
+      box.appendChild(head);
+      var ul = mkEl("ul", "");
+      for (var n = 0; n < rel.notes.length; n++)
+        ul.appendChild(mkEl("li", "", rel.notes[n]));
+      box.appendChild(ul);
+      body.appendChild(box);
+    }
+  }
+  function showWhatsNew() {
+    renderWhatsNew();
+    openShellDialog("ps-whatsnew-dialog");
+  }
+  function gridMenuCopy(alsoClear) {
+    var text = gridSelectionText();
+    if (!text) { showToast("Select cells in the Data workspace first."); return; }
+    copyPlainText(text, alsoClear ? "Cut to the clipboard" : "Copied");
+    if (alsoClear) gridClearSelected();
+  }
+  function gridMenuPaste() {
+    if (appWorkspace() !== "data" || !gridSelectionRect()) {
+      showToast("Select the cell to paste into first.");
+      return;
+    }
+    if (!navigator.clipboard || !navigator.clipboard.readText) {
+      showToast("This browser only allows pasting with Cmd/Ctrl+V.");
+      return;
+    }
+    navigator.clipboard.readText().then(function (text) {
+      if (!text) return;
+      var rows = String(text).replace(/\r\n?/g, "\n").split("\n")
+        .filter(function (line, i, arr) {
+          return line !== "" || i < arr.length - 1;
+        }).map(function (line) { return line.split("\t"); });
+      if (rows.length) gridApplyMatrix(rows);
+    }, function () {
+      showToast("The browser refused clipboard access. Use Cmd/Ctrl+V.", true);
+    });
+  }
+  function gridMenuSelectAll() {
+    var t = PROJECT.table;
+    if (appWorkspace() !== "data" || !t || !t.order.length) return;
+    gridSetSelection(t.order[0], 0, t.order[t.order.length - 1],
+                     Math.max(0, nRows(t) - 1), "all");
+    gridFocusSelf();
+  }
+  function gridMenuFind() {
+    if (appWorkspace() !== "data") setAppWorkspace("data");
+    var box = el("ps-data-find");
+    if (box) { box.focus(); box.select(); }
+    else showToast("Open the Data workspace to search the table.");
+  }
+  function commandEnabled(command) {
+    var doc = CONTEXT_DOC_ID ? chartById(CONTEXT_DOC_ID) :
+      (appWorkspace() === "data" ? activeChart() :
+       workspaceDocument(appWorkspace()));
+    if (command === "undo" || command === "redo") {
+      var back = command === "undo";
+      var scope = undoScope();
+      if (scope === "data") return (back ? DATA_UNDO : DATA_REDO).length > 0;
+      if (scope === "layout") {
+        var h = layHist();
+        return !!h && (back ? h.undo : h.redo).length > 0;
+      }
+      return !!engineHistoryBtn(back ? "undo" : "redo");
+    }
+    if (command === "open-recent") return recentProjects().length > 0;
+    if (command === "reset") return !!doc && !isLayoutTab(doc);
+    if (command === "export") return !!doc;
+    if (command === "export-data")
+      return !!(PROJECT.table && PROJECT.table.order && PROJECT.table.order.length);
+    // t3-46: the grid runs a real TSV clipboard, so these are enabled exactly
+    // where it works - which is the Data workspace, the one place the menu's
+    // only clipboard entry used to be greyed out.
+    if (command === "copy-cells" || command === "cut-cells")
+      return (appWorkspace() === "data" && !!gridSelectionRect()) ||
+        (isLayoutTab(activeChart()) && laySelectedIds().length > 0);
+    if (command === "paste-cells")
+      return (appWorkspace() === "data" && !!gridSelectionRect()) ||
+        (isLayoutTab(activeChart()) && layHasClipboard());
+    if (command === "select-all-cells" || command === "find-data")
+      return !!(PROJECT.table && PROJECT.table.order.length);
+    if (command === "copy-image")
+      return appWorkspace() !== "data" && !!workspaceDocument(appWorkspace()) &&
+        !!(navigator.clipboard && navigator.clipboard.write &&
+           typeof window.ClipboardItem !== "undefined");
+    if (command === "rename-document" || command === "duplicate-document")
+      return !!doc;
+    if (command === "delete-document")
+      return !!doc && PROJECT.charts.length > 1;
+    if (command === "duplicate-selection" || command === "delete-selection" ||
+        command === "layer-back" || command === "layer-forward")
+      return isLayoutTab(activeChart()) && laySelectedIds().length > 0;
+    if (command === "layout-add-chart" || command === "layout-add-text")
+      return isLayoutTab(activeChart());
+    return true;
+  }
+  function commandDisabledReason(command) {
+    if (command === "undo" || command === "redo") {
+      var scope = undoScope();
+      var what = scope === "data" ? "data changes" :
+        scope === "layout" ? "layout changes" : "chart style changes";
+      return "No " + what + " to " + command;
+    }
+    if (command === "reset") return "Chart styling is unavailable for layouts";
+    if (command === "export") return "Create a document before exporting";
+    if (command === "copy-image")
+      return appWorkspace() === "data"
+        ? "Open a chart or layout to copy it as an image"
+        : "This browser does not allow image copying - use Export instead";
+    if (command === "rename-document" || command === "duplicate-document")
+      return "No document is selected";
+    if (command === "delete-document") return "A project must keep at least one document";
+    if (command === "duplicate-selection" || command === "delete-selection" ||
+        command === "layer-back" || command === "layer-forward")
+      return "Select a layout item first";
+    if (command === "layout-add-chart" || command === "layout-add-text")
+      return "Open a layout to add to it";
+    return "";
+  }
+  function runAppCommand(command) {
+    hideAppMenu(false);
+    var targetDoc = CONTEXT_DOC_ID ? chartById(CONTEXT_DOC_ID) :
+      (appWorkspace() === "data" ? activeChart() :
+       workspaceDocument(appWorkspace()));
+    if (command === "new-project") {
+      showWelcome(true);
+      window.setTimeout(function () { el("ps-welcome-new").focus(); }, 0);
+    }
+    else if (command === "open") openLoader();
+    else if (command === "welcome") showWelcome(true);
+    else if (command === "rename-project") renameProjectInline();
+    else if (command === "save") saveProjectFile();
+    else if (command === "save-as") {
+      FILE_HANDLE = null;
+      saveProjectFile();
+    }
+    else if (command === "export") openExporter();
+    else if (command === "export-data") exportDataCsv();
+    else if (command === "copy-image") copyActiveAsImage();
+    else if (command === "undo" || command === "redo") {
+      var back = command === "undo", scope = undoScope();
+      if (scope === "data") { if (back) dataUndo(); else dataRedo(); }
+      else if (scope === "layout") { if (back) layUndo(); else layRedo(); }
+      else {
+        var eb = engineHistoryBtn(back ? "undo" : "redo");
+        if (eb) eb.click();
+      }
+    }
+    else if (command === "rename-document")
+      beginDocumentRename(targetDoc && targetDoc.id);
+    else if (command === "duplicate-document")
+      duplicateDocument(targetDoc && targetDoc.id);
+    else if (command === "delete-document")
+      closeChart(targetDoc && targetDoc.id);
+    else if (command === "activate-document" && CONTEXT_DOC_ID)
+      switchChart(CONTEXT_DOC_ID);
+    else if (command === "duplicate-selection") layDuplicateSelected();
+    else if (command === "delete-selection") layDeleteSelected();
+    else if (command === "layer-back") layMoveLayer(-1);
+    else if (command === "layer-forward") layMoveLayer(1);
+    else if (command === "reset") el("ps-reset").click();
+    else if (command === "view-data") setAppWorkspace("data");
+    else if (command === "view-chart") setAppWorkspace("chart");
+    else if (command === "view-layout") setAppWorkspace("layout");
+    else if (command === "new-chart") showAnalysisGallery();
+    else if (command === "new-layout") showLayoutGallery();
+    else if (command === "insert-text") el("ps-laddtext").click();
+    else if (command === "insert-label") el("ps-laddlabel").click();
+    else if (command === "insert-image") el("ps-laddimage").click();
+    else if (command === "command-palette") showCommandPalette();
+    else if (command === "layout-add-chart") el("ps-laddchart").click();
+    else if (command === "layout-add-text") el("ps-laddtext").click();
+    else if (command === "preferences") showPreferences();
+    else if (command === "show-me-how")
+      showTours();
+    else if (command === "user-guide") openUserGuide();
+    else if (command === "copy-cells") {
+      if (isLayoutTab(activeChart()) && laySelectedIds().length)
+        layCopySelected(false);
+      else gridMenuCopy(false);
+    }
+    else if (command === "cut-cells") {
+      if (isLayoutTab(activeChart()) && laySelectedIds().length)
+        layCopySelected(true);
+      else gridMenuCopy(true);
+    }
+    else if (command === "paste-cells") {
+      if (isLayoutTab(activeChart()) && layHasClipboard()) layPasteClipboard();
+      else gridMenuPaste();
+    }
+    else if (command === "select-all-cells") gridMenuSelectAll();
+    else if (command === "find-data") gridMenuFind();
+    else if (command === "help-chooser") openEngineHelp("graphChooser");
+    else if (command === "help-lint") openEngineHelp("graphLint");
+    else if (command === "help-anatomy") openEngineHelp("anatomy");
+    else if (command === "help-glossary") openEngineHelp("glossary");
+    else if (command === "shortcuts")
+      showShortcuts();
+    else if (command === "diagnostics")
+      showDiagnostics();
+    else if (command === "site-home") openSiteLink("site");
+    else if (command === "site-gallery") openSiteLink("gallery");
+    else if (command === "whats-new") showWhatsNew();
+    else if (command === "about") showAbout();
+  }
+  function showAppMenu(owner, name, focusFirst) {
+    var defs = APP_MENU_DEFS[name] || [], m = el("ps-appmenu");
+    m.innerHTML = "";
+    APP_MENU_OWNER = owner;
+    var menuButtons = document.querySelectorAll("[data-ps-menu]");
+    for (var i = 0; i < menuButtons.length; i++)
+      menuButtons[i].setAttribute("aria-expanded",
+        menuButtons[i] === owner ? "true" : "false");
+    for (i = 0; i < defs.length; i++) {
+      if (defs[i] === "separator") {
+        m.appendChild(mkEl("div", "ps-menu-separator"));
+        continue;
+      }
+      // t3-54: the recents list lived only on the start centre, so once you
+      // were working there was no route back to it. Expanded here rather than
+      // hidden behind a submenu, which for three items would be more chrome
+      // than content.
+      if (defs[i].submenu === "recent") {
+        var recents = recentProjects();
+        if (!recents.length) continue;
+        m.appendChild(mkEl("div", "ps-menu-heading", "Open recent"));
+        for (var ri = 0; ri < recents.length; ri++) {
+          (function (rec) {
+            var rb = mkEl("button", "");
+            rb.type = "button";
+            rb.setAttribute("role", "menuitem");
+            rb.setAttribute("data-recent-menu", rec.id);
+            rb.appendChild(mkEl("span", "", rec.name));
+            rb.appendChild(mkEl("span", "ps-menu-shortcut",
+              rec.snapshot ? recentTimeLabel(rec.updatedAt)
+                           : (rec.hasFile ? "from file" : "name only")));
+            rb.addEventListener("click", function () {
+              hideAppMenu(false);
+              openRecentProject(rec.id);
+            });
+            m.appendChild(rb);
+          })(recents[ri]);
+        }
+        continue;
+      }
+      (function (item) {
+        var b = mkEl("button", "");
+        b.type = "button"; b.setAttribute("role", "menuitem");
+        b.setAttribute("data-app-command", item.command);
+        var label = item.workspace === appWorkspace()
+          ? "\u2713  " + commandLabel(item) : commandLabel(item);
+        b.appendChild(mkEl("span", "", label));
+        b.appendChild(mkEl("span", "ps-menu-shortcut", item.shortcut || ""));
+        b.disabled = !commandEnabled(item.command) ||
+          (item.layoutOnly && !isLayoutTab(activeChart()));
+        if (b.disabled) setTip(b, commandDisabledReason(item.command) ||
+          "This command is unavailable in the current workspace");
+        b.addEventListener("click", function () { runAppCommand(item.command); });
+        m.appendChild(b);
+      })(defs[i]);
+    }
+    var r = owner.getBoundingClientRect();
+    m.style.display = "block";
+    m.style.left = Math.min(r.left, window.innerWidth - 230) + "px";
+    m.style.top = r.bottom + "px";
+    if (focusFirst) {
+      var first = m.querySelector("button:not([disabled])");
+      if (first) first.focus();
+    }
+  }
+  function hideContextMenu() {
+    el("ps-contextmenu").style.display = "none";
+    CONTEXT_DOC_ID = null;
+  }
+  function showContextMenu(x, y, items, docId) {
+    hideAppMenu(false);
+    CONTEXT_DOC_ID = docId || null;
+    var menu = el("ps-contextmenu");
+    menu.innerHTML = "";
+    for (var i = 0; i < items.length; i++) {
+      if (items[i] === "separator") {
+        menu.appendChild(mkEl("div", "ps-menu-separator"));
+        continue;
+      }
+      (function (item) {
+        var b = mkEl("button", "", item.label);
+        b.type = "button";
+        b.setAttribute("data-context-command", item.command);
+        b.disabled = !commandEnabled(item.command);
+        if (b.disabled) setTip(b, commandDisabledReason(item.command));
+        b.addEventListener("click", function () {
+          var cmd = item.command;
+          var target = CONTEXT_DOC_ID;
+          hideContextMenu();
+          CONTEXT_DOC_ID = target;
+          runAppCommand(cmd);
+          CONTEXT_DOC_ID = null;
+        });
+        menu.appendChild(b);
+      })(items[i]);
+    }
+    menu.style.display = "block";
+    menu.style.left = Math.min(x, window.innerWidth - 200) + "px";
+    menu.style.top = Math.min(y, window.innerHeight - menu.offsetHeight - 8) + "px";
+    var first = menu.querySelector("button:not([disabled])");
+    if (first) first.focus();
+  }
+  function showDocumentContextMenu(x, y, id) {
+    showContextMenu(x, y, [
+      { label: "Open", command: "activate-document" },
+      "separator",
+      { label: "Rename\u2026", command: "rename-document" },
+      { label: "Duplicate", command: "duplicate-document" },
+      { label: "Delete", command: "delete-document" }
+    ], id);
+  }
+
+  var COMMAND_PALETTE_LAST_FOCUS = null;
+  var COMMAND_PALETTE_INDEX = 0;
+  function commandCatalog() {
+    var groups = [
+      ["File", APP_MENU_DEFS.file], ["Edit", APP_MENU_DEFS.edit],
+      ["View", APP_MENU_DEFS.view], ["Insert", APP_MENU_DEFS.insert],
+      ["Help", APP_MENU_DEFS.help]
+    ], out = [], seen = {};
+    for (var gi = 0; gi < groups.length; gi++) {
+      var defs = groups[gi][1];
+      for (var i = 0; i < defs.length; i++) {
+        var item = defs[i];
+        // t3-55/t3-56: only the palette itself is excluded, because opening it
+        // from inside itself is the one command that cannot mean anything.
+        // Shortcuts and About were excluded too, so the palette - the place a
+        // user goes when they cannot remember where something is - could not
+        // find the sheet that answers exactly that.
+        if (item === "separator" || seen[item.command] ||
+            item.command === "command-palette") continue;
+        seen[item.command] = 1;
+        out.push({ label: commandLabel(item).replace(/\u2026/g, ""),
+                   group: groups[gi][0], shortcut: item.shortcut || "",
+                   command: item.command, layoutOnly: item.layoutOnly });
+      }
+    }
+    return out;
+  }
+  function renderCommandPalette() {
+    var query = el("ps-command-search").value.trim().toLowerCase();
+    var list = commandCatalog().filter(function (item) {
+      return !query || (item.label + " " + item.group).toLowerCase().indexOf(query) !== -1;
+    });
+    var root = el("ps-command-results");
+    root.innerHTML = "";
+    if (!list.length) {
+      root.appendChild(mkEl("div", "ps-command-empty", "No matching commands"));
+      return;
+    }
+    COMMAND_PALETTE_INDEX = Math.max(0, Math.min(COMMAND_PALETTE_INDEX, list.length - 1));
+    for (var i = 0; i < list.length; i++) {
+      (function (item, index) {
+        var b = mkEl("button", "ps-command-result" +
+          (index === COMMAND_PALETTE_INDEX ? " ps-command-current" : ""));
+        b.type = "button";
+        b.setAttribute("data-palette-command", item.command);
+        b.appendChild(mkEl("span", "", item.group + ": " + item.label));
+        b.appendChild(mkEl("span", "", item.shortcut));
+        b.disabled = !commandEnabled(item.command) ||
+          (item.layoutOnly && !isLayoutTab(activeChart()));
+        if (b.disabled) setTip(b, commandDisabledReason(item.command) ||
+          "This command is unavailable in the current workspace");
+        b.addEventListener("click", function () {
+          hideCommandPalette(); runAppCommand(item.command);
+        });
+        root.appendChild(b);
+      })(list[i], i);
+    }
+  }
+  function showCommandPalette() {
+    if (el("ps-welcome").style.display === "flex") return;
+    COMMAND_PALETTE_LAST_FOCUS = document.activeElement;
+    COMMAND_PALETTE_INDEX = 0;
+    el("ps-command-search").value = "";
+    el("ps-command-palette").style.display = "flex";
+    document.querySelector(".ps-page").setAttribute("aria-hidden", "true");
+    renderCommandPalette();
+    window.setTimeout(function () { el("ps-command-search").focus(); }, 0);
+  }
+  function hideCommandPalette() {
+    el("ps-command-palette").style.display = "none";
+    if (el("ps-welcome").style.display !== "flex")
+      document.querySelector(".ps-page").removeAttribute("aria-hidden");
+    try { if (COMMAND_PALETTE_LAST_FOCUS) COMMAND_PALETTE_LAST_FOCUS.focus(); }
+    catch (ignore) {}
+    COMMAND_PALETTE_LAST_FOCUS = null;
+  }
+  function wireCommandPalette() {
+    var search = el("ps-command-search");
+    search.addEventListener("input", function () {
+      COMMAND_PALETTE_INDEX = 0; renderCommandPalette();
+    });
+    search.addEventListener("keydown", function (e) {
+      var buttons = el("ps-command-results").querySelectorAll(
+        "button.ps-command-result");
+      if (e.key === "Escape") { e.preventDefault(); hideCommandPalette(); return; }
+      if (e.key === "Tab") { e.preventDefault(); return; }
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        COMMAND_PALETTE_INDEX += e.key === "ArrowDown" ? 1 : -1;
+        if (COMMAND_PALETTE_INDEX < 0) COMMAND_PALETTE_INDEX = Math.max(0, buttons.length - 1);
+        if (COMMAND_PALETTE_INDEX >= buttons.length) COMMAND_PALETTE_INDEX = 0;
+        renderCommandPalette();
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        var current = el("ps-command-results").querySelector(
+          ".ps-command-current:not([disabled])");
+        if (current) {
+          var cmd = current.getAttribute("data-palette-command");
+          hideCommandPalette(); runAppCommand(cmd);
+        }
+      }
+    });
+    el("ps-command-palette").addEventListener("pointerdown", function (e) {
+      if (e.target === this) hideCommandPalette();
+    });
+  }
+  // ---- punch list 17: the narrow-window drawers ----
+  // The two panels are the SAME elements the wide layout uses, moved over the
+  // main area by a class. Nothing is duplicated, so there is no second copy
+  // of the navigator or the inspector to fall out of step.
+  var NARROW_OPEN = null;   // "nav" | "inspector" | "menu" | null
+  function narrowSet(which) {
+    var body = document.querySelector(".ps-app-body");
+    var bar = document.querySelector(".ps-appbar");
+    var scrim = document.getElementById("ps-narrow-scrim");
+    if (!body || !bar) return;
+    NARROW_OPEN = which || null;
+    body.classList.toggle("ps-narrow-nav-open", which === "nav");
+    body.classList.toggle("ps-narrow-inspector-open", which === "inspector");
+    bar.classList.toggle("ps-narrow-menu-open", which === "menu");
+    if (scrim) scrim.hidden = !which;
+    var pairs = [["ps-narrow-nav", "nav"], ["ps-narrow-inspector", "inspector"],
+                 ["ps-narrow-menu", "menu"]];
+    for (var i = 0; i < pairs.length; i++) {
+      var b = document.getElementById(pairs[i][0]);
+      if (b) b.setAttribute("aria-expanded", which === pairs[i][1] ? "true" : "false");
+    }
+    if (which !== "menu") hideAppMenu(false);
+  }
+  function narrowToggle(which) {
+    narrowSet(NARROW_OPEN === which ? null : which);
+  }
+  // A narrow user who picks a workspace or a document is done with the
+  // drawer; leaving it over their chart would be the drawer's own fault.
+  function narrowCloseAfterNavigation() {
+    if (NARROW_OPEN === "nav" || NARROW_OPEN === "menu") narrowSet(null);
+  }
+  function wireNarrowChrome() {
+    var ids = [["ps-narrow-nav", "nav"], ["ps-narrow-inspector", "inspector"],
+               ["ps-narrow-menu", "menu"]];
+    for (var i = 0; i < ids.length; i++) {
+      (function (id, which) {
+        var b = document.getElementById(id);
+        if (!b) return;
+        b.addEventListener("click", function (e) {
+          e.stopPropagation();
+          narrowToggle(which);
+        });
+      })(ids[i][0], ids[i][1]);
+    }
+    var scrim = document.getElementById("ps-narrow-scrim");
+    if (scrim) scrim.addEventListener("click", function () { narrowSet(null); });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && NARROW_OPEN) narrowSet(null);
+    });
+    // Widening the window puts everything back in the grid, so a drawer left
+    // open would sit on top of the panel it IS.
+    window.addEventListener("resize", function () {
+      if (NARROW_OPEN && window.innerWidth > 760) narrowSet(null);
+    });
+  }
+  // Shared by the bar and by the open menu, so Left/Right walks the menus
+  // whether the focus is on a button or inside a dropdown - which is how the
+  // mouse already behaved.
+  function menubarButtons() {
+    return Array.prototype.slice.call(
+      document.querySelectorAll("[data-ps-menu]")).filter(function (b) {
+        return b.getBoundingClientRect().width > 0;
+      });
+  }
+  function menubarStep(from, delta, open) {
+    var bar = menubarButtons();
+    if (!bar.length) return false;
+    var at = bar.indexOf(from);
+    var next = bar[((at < 0 ? 0 : at + delta) + bar.length) % bar.length];
+    if (!next) return false;
+    if (open) showAppMenu(next, next.getAttribute("data-ps-menu"), true);
+    else { hideAppMenu(false); next.focus(); }
+    return true;
+  }
+  function menubarNavKey(e, owner) {
+    var open = el("ps-appmenu").style.display === "block";
+    if (e.key === "ArrowRight") return menubarStep(owner, 1, open);
+    if (e.key === "ArrowLeft") return menubarStep(owner, -1, open);
+    var bar = menubarButtons();
+    if (e.key === "Home" && bar.length) {
+      if (open) showAppMenu(bar[0], bar[0].getAttribute("data-ps-menu"), true);
+      else bar[0].focus();
+      return true;
+    }
+    if (e.key === "End" && bar.length) {
+      var last = bar[bar.length - 1];
+      if (open) showAppMenu(last, last.getAttribute("data-ps-menu"), true);
+      else last.focus();
+      return true;
+    }
+    // Typeahead: a single printable character jumps to the menu that starts
+    // with it, which is what every desktop menu bar does.
+    if (e.key && e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      var ch = e.key.toLowerCase();
+      for (var i = 0; i < bar.length; i++)
+        if ((bar[i].textContent || "").trim().toLowerCase().charAt(0) === ch) {
+          if (open) showAppMenu(bar[i], bar[i].getAttribute("data-ps-menu"), true);
+          else bar[i].focus();
+          return true;
+        }
+    }
+    return false;
+  }
+  function wireMenubarEntry() {
+    // F10 is the standard entry point, and Alt is the Windows one. Both put
+    // focus on the bar without opening anything, which is the convention.
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "F10" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+        var bar = menubarButtons();
+        if (!bar.length) return;
+        e.preventDefault();
+        hideAppMenu(false);
+        bar[0].focus();
+        return;
+      }
+      // t3-55: the shortcuts sheet had no keyboard route of its own, which is
+      // a particular kind of joke. F1, and only F1: bare ? is the obvious
+      // second choice but the ENGINE already binds it, at capture phase, to
+      // open the chart's own help panel - which is the better answer when a
+      // chart is what you are looking at. So the sheet documents that key
+      // rather than stealing it. Not while typing, obviously.
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key !== "F1") return;
+      var t = e.target;
+      if (t && t.closest &&
+          t.closest("input, textarea, select, [contenteditable]")) return;
+      // A dialog is already modal; a second one over it helps nobody.
+      var open = document.querySelectorAll(".ps-dialog-overlay");
+      for (var oi = 0; oi < open.length; oi++)
+        if (open[oi].style.display && open[oi].style.display !== "none") return;
+      e.preventDefault();
+      showShortcuts();
+    });
+  }
+  function wireAppFrame() {
+    wireMenubarEntry();
+    wireLayoutImagePaste();
+    wireNarrowChrome();
+    wireCoach();
+    wireTooltips();
+    wireFitToPane();
+    wireSplitters();
+    wireAbout();
+    var menuButtons = document.querySelectorAll("[data-ps-menu]");
+    for (var i = 0; i < menuButtons.length; i++) {
+      menuButtons[i].setAttribute("aria-haspopup", "menu");
+      menuButtons[i].setAttribute("aria-expanded", "false");
+      menuButtons[i].addEventListener("click", function (e) {
+        e.stopPropagation();
+        var name = this.getAttribute("data-ps-menu");
+        if (APP_MENU_OWNER === this && el("ps-appmenu").style.display === "block")
+          hideAppMenu(false);
+        else showAppMenu(this, name, false);
+      });
+      menuButtons[i].addEventListener("mouseenter", function () {
+        if (el("ps-appmenu").style.display === "block")
+          showAppMenu(this, this.getAttribute("data-ps-menu"), false);
+      });
+      menuButtons[i].addEventListener("keydown", function (e) {
+        if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          showAppMenu(this, this.getAttribute("data-ps-menu"), true);
+          return;
+        }
+        if (menubarNavKey(e, this)) e.preventDefault();
+      });
+    }
+    el("ps-appmenu").addEventListener("keydown", function (e) {
+      if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && APP_MENU_OWNER) {
+        if (menubarStep(APP_MENU_OWNER, e.key === "ArrowRight" ? 1 : -1, true)) {
+          e.preventDefault();
+          return;
+        }
+      }
+      var items = Array.prototype.slice.call(
+        this.querySelectorAll("button:not([disabled])"));
+      var at = items.indexOf(document.activeElement);
+      if (e.key === "Escape") { e.preventDefault(); hideAppMenu(true); return; }
+      if (!items.length || (e.key !== "ArrowDown" && e.key !== "ArrowUp")) return;
+      e.preventDefault();
+      var next = (at + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+      items[next].focus();
+    });
+    var workspaceButtons = document.querySelectorAll("[data-ps-workspace]");
+    for (i = 0; i < workspaceButtons.length; i++)
+      workspaceButtons[i].addEventListener("click", function () {
+        setAppWorkspace(this.getAttribute("data-ps-workspace"));
+      });
+    el("ps-workspace-empty-create").addEventListener("click", function () {
+      if (appWorkspace() === "layout") showLayoutGallery();
+      else showAnalysisGallery();
+    });
+    el("ps-project-add").addEventListener("click", function (e) {
+      e.stopPropagation(); showAddMenu(this);
+    });
+    document.addEventListener("pointerdown", function (e) {
+      if (el("ps-appmenu").style.display === "block" &&
+          !(e.target.closest && (e.target.closest("#ps-appmenu") ||
+                                 e.target.closest("[data-ps-menu]"))))
+        hideAppMenu(false);
+      if (el("ps-contextmenu").style.display === "block" &&
+          !(e.target.closest && e.target.closest("#ps-contextmenu")))
+        hideContextMenu();
+    }, true);
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") {
+        if (el("ps-appmenu").style.display === "block") hideAppMenu(true);
+        if (el("ps-contextmenu").style.display === "block") hideContextMenu();
+      }
+      if (el("ps-command-palette").style.display === "flex") return;
+      var target = e.target;
+      var editing = target && target.closest &&
+        target.closest("input, textarea, select, [contenteditable]");
+      if (!editing && e.key === "F2") {
+        var renameDoc = appWorkspace() === "data" ? activeChart() :
+          workspaceDocument(appWorkspace());
+        if (renameDoc) {
+          e.preventDefault(); beginDocumentRename(renameDoc.id);
+        }
+        return;
+      }
+      // Cmd/Ctrl+C on a chart or layout copies it as an image. Data
+      // keeps its TSV range copy; a real text selection anywhere keeps
+      // the native copy; anything the engine already handled is left
+      // alone (defaultPrevented).
+      if (!editing && !e.defaultPrevented &&
+          (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey &&
+          (e.key || "").toLowerCase() === "c" &&
+          appWorkspace() !== "data" &&
+          workspaceDocument(appWorkspace()) &&
+          !String((window.getSelection && window.getSelection()) || "")) {
+        e.preventDefault();
+        // t3-52. With something SELECTED in a layout, Cmd+C means those
+        // items. It used to mean the whole page as an image even with a
+        // single caption picked, which is never what the selection implies.
+        if (isLayoutTab(activeChart()) && laySelectedIds().length) {
+          layCopySelected(false);
+          return;
+        }
+        copyActiveAsImage();
+        return;
+      }
+      // t3-52. Cut and paste for layout items, including ACROSS layouts,
+      // which is what made Cmd+D duplicating in place look like an oversight.
+      if (!editing && !e.defaultPrevented &&
+          (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey &&
+          (e.key || "").toLowerCase() === "x" &&
+          isLayoutTab(activeChart()) && laySelectedIds().length) {
+        e.preventDefault();
+        layCopySelected(true);
+        return;
+      }
+      if (!editing && !e.defaultPrevented &&
+          (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey &&
+          (e.key || "").toLowerCase() === "v" &&
+          isLayoutTab(activeChart()) && layHasClipboard()) {
+        e.preventDefault();
+        layPasteClipboard();
+        return;
+      }
+      if (e.defaultPrevented || editing || !(e.metaKey || e.ctrlKey) || e.altKey) return;
+      var key = String(e.key || "").toLowerCase();
+      if (key === "p" && e.shiftKey) {
+        e.preventDefault(); showCommandPalette(); return;
+      }
+      if (key === "," && !e.shiftKey) {
+        e.preventDefault(); showPreferences(); return;
+      }
+      // t3-51. Export is the terminal action of most sessions and had no
+      // accelerator at all, while Preferences had one.
+      if (key === "e" && !e.shiftKey) {
+        if (!workspaceDocument(appWorkspace())) return;
+        e.preventDefault(); openExporter(); return;
+      }
+      // The three workspaces the View menu lists. e.code, not e.key: with a
+      // modifier held, several keyboard layouts report a symbol here.
+      if (e.shiftKey && /^Digit[123]$/.test(e.code || "")) {
+        e.preventDefault();
+        setAppWorkspace({ Digit1: "data", Digit2: "chart",
+                          Digit3: "layout" }[e.code]);
+        return;
+      }
+      // t1-14. Printing the DOM gives one clipped viewport of application
+      // chrome (html, body are overflow:hidden on a full-height grid), which
+      // is the most embarrassing possible output for a graphics application.
+      // The vector PDF path is what the user actually wants, so Cmd/Ctrl+P
+      // opens the exporter with PDF selected.
+      if (key === "p" && !e.shiftKey) {
+        if (!workspaceDocument(appWorkspace())) return;
+        e.preventDefault();
+        openExporter();
+        var pdfChoice = document.querySelector(
+          'input[name="ps-export-format"][value="pdf"]');
+        if (pdfChoice && !pdfChoice.disabled) {
+          pdfChoice.checked = true;
+          updateExportUI();
+        }
+        return;
+      }
+      if (key === "d" && !e.shiftKey) {
+        var duplicateDoc = appWorkspace() === "data" ? activeChart() :
+          workspaceDocument(appWorkspace());
+        if (!duplicateDoc) return;
+        if (isLayoutTab(duplicateDoc) && laySelectedIds().length) return;
+        e.preventDefault(); duplicateDocument(duplicateDoc.id);
+      }
+    });
+    // t3-51: pick a document directly. Alt+number rather than the
+    // Cmd/Ctrl+number every desktop application uses, because in a browser
+    // that combination switches BROWSER tabs and never reaches the page.
+    document.addEventListener("keydown", function (e) {
+      if (!e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return;
+      var m = /^Digit([1-9])$/.exec(e.code || "");
+      if (!m) return;
+      var t = e.target;
+      if (t && t.closest &&
+          t.closest("input, textarea, select, [contenteditable]")) return;
+      // The tab strip's own order, not PROJECT.charts': the Data workspace
+      // shows none and the other two each show half, so "the third tab" has
+      // to mean the third tab a user can see.
+      var tabs = Array.prototype.slice.call(
+        el("ps-tabs").querySelectorAll("[data-chart-id]"));
+      var pick = tabs[Number(m[1]) - 1];
+      if (!pick) return;
+      e.preventDefault();
+      switchChart(pick.getAttribute("data-chart-id"));
+    });
+    el("ps-contextmenu").addEventListener("keydown", function (e) {
+      var items = Array.prototype.slice.call(
+        this.querySelectorAll("button:not([disabled])"));
+      var at = items.indexOf(document.activeElement);
+      if (e.key === "Escape") { e.preventDefault(); hideContextMenu(); return; }
+      if (!items.length || (e.key !== "ArrowDown" && e.key !== "ArrowUp")) return;
+      e.preventDefault();
+      items[(at + (e.key === "ArrowDown" ? 1 : -1) + items.length) %
+        items.length].focus();
+    });
+  }
+
+  function wireHeader() {
+    el("ps-module").addEventListener("change", function () {
+      activeChart().module = el("ps-module").value;
+      bumpSnapEpoch();
+      persist();
+      syncTabs();
+      syncRolesRow();
+      syncDataRow();
+      syncDataGrid();
+      render();
+    });
+    el("ps-save").addEventListener("click", saveProjectFile);
+    // Cmd/Ctrl+S saves the project (window CAPTURE so it beats the
+    // browser's own save-page dialog everywhere, including inputs).
+    window.addEventListener("keydown", function (e) {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      var k = (e.key || "").toLowerCase();
+      if (k !== "s" && k !== "o" && k !== "n") return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (k === "s" && e.shiftKey) {
+        FILE_HANDLE = null;
+        saveProjectFile();
+      } else if (k === "s" && !e.shiftKey) saveProjectFile();
+      else if (k === "o" && !e.shiftKey) openLoader();
+      else if (k === "n" && !e.shiftKey) showWelcome(true);
+    }, true);
+    // t1-14 (second half). Cmd/Ctrl+W is unbound and, with no beforeunload,
+    // ended the session silently. Work normally survives in the autosave and
+    // comes back through Continue, so a blanket prompt would be pure noise -
+    // this fires only when autosave is actually FAILING, which is the case
+    // where closing the tab really does lose the work.
+    window.addEventListener("beforeunload", function (e) {
+      if (AUTOSAVE_HEALTH !== "error") return;
+      if (FILE_SAVED_REV != null && PROJECT_REV === FILE_SAVED_REV) return;
+      e.preventDefault();
+      e.returnValue = "";
+      return "";
+    });
+    // B12. The engine's _flushOpts defers through setTimeout inside its
+    // 700 ms interaction guard, and a setTimeout scheduled during unload
+    // never runs - so dragging a slider, releasing, and closing the tab
+    // within 700 ms lost the edit silently. pagehide is the last reliable
+    // callback in every browser (Safari's bfcache never fires unload), so
+    // any options the engine has queued but not yet flushed are folded in
+    // here through the ordinary sink and persisted synchronously.
+    function flushPendingEngineOpts() {
+      var pending = window.__gb2_pendingOpts;
+      if (!pending || typeof pending !== "object") return false;
+      var keys = Object.keys(pending), any = false;
+      for (var i = 0; i < keys.length; i++) {
+        var k = keys[i];
+        if (DROP_KEYS[k]) continue;
+        try { window.setOption(k, pending[k]); any = true; }
+        catch (e) { /* one bad key must not block the rest */ }
+        delete pending[k];
+      }
+      if (any) persist(false);
+      // P3. persist() now coalesces its write, so a queued trailing write has
+      // to be forced here: a setTimeout scheduled during unload never runs,
+      // which is the same trap B12 exists for one layer down.
+      persistFlush();
+      return any;
+    }
+    window.addEventListener("pagehide", flushPendingEngineOpts);
+    window.addEventListener("beforeunload", persistFlush);
+    // Switching documents tears down the engine host, so the same queue has
+    // to be drained there too or the edit lands on the WRONG chart.
+    PS_FLUSH_PENDING_OPTS = flushPendingEngineOpts;
+    // B8 (second half). There was no window.onerror and no
+    // unhandledrejection anywhere, so anything thrown outside the render path
+    // - an async import, a library write, a drag handler - failed in total
+    // silence while the app looked fine. These do not try to recover; they
+    // make the failure VISIBLE, throttled so one broken loop cannot become a
+    // wall of toasts.
+    var LAST_GLOBAL_ERROR_AT = 0;
+    function reportGlobalError(what, detail) {
+      var now = Date.now();
+      if (now - LAST_GLOBAL_ERROR_AT < 4000) return;
+      LAST_GLOBAL_ERROR_AT = now;
+      try {
+        showToast("Something went wrong: " + String(detail || what) +
+          ". If the app stops responding, save your project and reload.", true);
+      } catch (e) {}
+    }
+    window.addEventListener("error", function (e) {
+      // Resource load failures (img, script) also land here and carry no
+      // message; they are not what this is for.
+      if (!e || !e.message) return;
+      reportGlobalError("error", e.message);
+    });
+    window.addEventListener("unhandledrejection", function (e) {
+      var r = e && e.reason;
+      reportGlobalError("unhandled rejection",
+        (r && r.message) || (r == null ? "no reason given" : String(r)));
+    });
+    // B21. The engine's toolbar export button drives the jamovi R export
+    // pipeline, which does not exist here - so the shell used to hide it.
+    // But the engine's Basics help says, unconditionally, "The export button
+    // in the toolbar saves the chart as SVG, PDF, PNG or JPG", and hiding the
+    // button left that sentence pointing at nothing. Capture phase, so the
+    // engine's own handler never runs.
+    document.addEventListener("click", function (e) {
+      var t = e.target;
+      var btn = t && t.closest
+        // The ENGINE owns this button and still uses a native title, which is
+        // correct: punch list 42c is about the shell's own tooltips, and the
+        // engine is not ours to change. The blanket title= migration rewrote
+        // this SELECTOR too and silently unhooked the button.
+        ? t.closest('.graphbuilder2-host button[title="Export plot"]') : null;
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      openExporter();
+    }, true);
+    // Item 16. Two tabs write the same fixed keys with no storage listener,
+    // no BroadcastChannel and no lock: last write wins on the project, and
+    // PS_BACKUP_KEY can end up holding the OTHER project, so "recovered the
+    // previous backup" could restore a different dataset entirely. The dist
+    // is usually opened from file://, where Chrome shares ONE localStorage
+    // across every file:// page, so two downloaded copies collide the same
+    // way. A real lock is the wrong size for this app; the honest minimum is
+    // to NOTICE and SAY SO, once, rather than let the loser find out later.
+    var OTHER_TAB_WARNED = false;
+    window.addEventListener("storage", function (e) {
+      if (!e || e.key !== PS_SAVE_KEY || e.newValue == null) return;
+      var mine = null, theirs = null;
+      try { mine = PROJECT.id; theirs = JSON.parse(e.newValue).id; }
+      catch (err) { return; }
+      // The same project id means the same document open twice, which is the
+      // dangerous case. A different id is another project in another tab,
+      // which merely means the autosave slot is now theirs.
+      if (OTHER_TAB_WARNED) return;
+      OTHER_TAB_WARNED = true;
+      showToast(mine && theirs && mine === theirs
+        ? "This project is open in another tab, and that tab just saved over " +
+          "this one's autosave. Use File > Save project here to keep your copy."
+        : "Another tab just took over the local autosave slot with a " +
+          "different project. Your work here is still on screen, but save it " +
+          "to a file to keep it.", true);
+    });
+    // Item 12. Five contextmenu listeners existed - engine host (which does
+    // not even preventDefault), grid, tabs, layout ITEMS, navigator - so
+    // right-click worked on some of the app and produced "View page source"
+    // on the rest. The layout case was the sharpest: right-click an item and
+    // get a proper menu, right-click 10px away and get the browser's. This is
+    // the fallback for everything without its own menu, and it is deliberately
+    // CONTEXTUAL rather than one generic list.
+    //
+    // Text inputs and real text selections are left ALONE on purpose: the
+    // browser's menu genuinely is the better menu there (spelling, copy,
+    // paste, look up), and replacing it would be a downgrade.
+    document.addEventListener("contextmenu", function (e) {
+      if (e.defaultPrevented) return;                 // an owner handled it
+      var t = e.target;
+      if (!t || !t.closest) return;
+      // defaultPrevented alone is too fragile a coordination signal: it holds
+      // only if every owning handler both runs first AND the event is
+      // cancelable. Name the regions that own a menu instead, so this
+      // fallback cannot appear on top of a more specific one.
+      if (t.closest("#ps-datacard, #ps-datagrid, .ps-litem, .ps-project-panel," +
+                    " #ps-tabs, .ps-tabs, [data-chart-tab]")) return;
+      if (el("ps-cellmenu") && el("ps-cellmenu").style.display === "block") return;
+      if (t.closest("input, textarea, select, [contenteditable]")) return;
+      if (String(window.getSelection && window.getSelection() || "")) return;
+      if (t.closest("#ps-contextmenu, #ps-appmenu")) return;
+      // Anything inside a dialog keeps the browser menu: those are forms.
+      if (t.closest(".ps-shell-dialog, #ps-loader, #ps-welcome, #ps-exporter"))
+        return;
+
+      var items = null;
+      var ws = appWorkspace();
+      var doc = workspaceDocument(ws);
+      if (t.closest("#ps-lcanvas, #ps-lstage, #ps-lviewport")) {
+        // The empty layout canvas, which is where the inconsistency was most
+        // obvious. Selection-dependent entries are enabled by commandEnabled.
+        items = [
+          { label: "Add chart\u2026", command: "layout-add-chart" },
+          { label: "Add text", command: "layout-add-text" },
+          "separator",
+          { label: "Duplicate", command: "duplicate-selection" },
+          { label: "Delete", command: "delete-selection" },
+          "separator",
+          { label: "Export\u2026", command: "export" }
+        ];
+      } else if (t.closest(".graphbuilder2-host, #ps-workcard")) {
+        items = [
+          { label: "Copy as image", command: "copy-image" },
+          { label: "Export\u2026", command: "export" },
+          "separator",
+          { label: "Reset chart styling", command: "reset" }
+        ];
+      } else if (t.closest(".ps-controls, .ps-project-panel")) {
+        items = [
+          { label: "Rename document\u2026", command: "rename-document" },
+          { label: "Duplicate document", command: "duplicate-document" },
+          { label: "Delete document", command: "delete-document" }
+        ];
+      } else if (t.closest(".ps-page")) {
+        items = [
+          { label: "Open data or project\u2026", command: "open" },
+          { label: "Save project", command: "save" },
+          "separator",
+          { label: "Export\u2026", command: "export" },
+          { label: "All commands\u2026", command: "command-palette" }
+        ];
+      }
+      if (!items) return;
+      e.preventDefault();
+      showContextMenu(e.clientX, e.clientY, items,
+                      doc && !items.layoutOnly ? doc.id : null);
+    });
+    el("ps-reset").addEventListener("click", function () {
+      // Punch list item 8. This sits in the always-visible command bar one
+      // button from Export and used to discard every style edit, annotation,
+      // palette and axis title on the chart with no confirmation and nothing
+      // to recover it. Because it wipes the option store DIRECTLY instead of
+      // going through window.setOption, the engine's own undo stack never sees
+      // it, so Cmd+Z could not bring it back either.
+      //
+      // An undo toast rather than a confirm dialog: that is the pattern this
+      // app already uses for destructive actions (closeChart, the three named
+      // data deletions), and the app deliberately has no confirm() anywhere.
+      var chart = activeChartTab();
+      if (!chart) return;
+      var mod = curModule();
+      var prev = chart.options[mod];
+      if (!prev || !Object.keys(prev).length) {
+        showToast("This chart has no styling to reset");
+        return;
+      }
+      chart.options[mod] = {};
+      bumpSnapEpoch();
+      persist();
+      render();
+      showUndoToast("Chart styling reset", function () {
+        chart.options[mod] = prev;
+        bumpSnapEpoch();
+        persist();
+        render();
+      });
+    });
+  }
+
+  // ================================================================ boot
+  if (!restore() || !PROJECT.table) {
+    loadSample();
+    // The boot fallback is not a CHOICE: nobody asked for it, so it does not
+    // belong in Recents until the user does something with it. Everything
+    // else that calls loadSample - the start centre cards, the loader's
+    // sample button - is a choice and keeps the flag.
+    PROJECT_CHOSEN = false;
+  }
+  validateRoles();
+
+  // Debug/probe surface (session-only, never persisted).
+  window.PS_SHELL = {
+    project: PROJECT,
+    optionStore: function () { return optionsFor(curModule()); },
+    rolesStore: function () { return rolesFor(curModule()); },
+    chart: activeChart,
+    addChart: addChart,
+    addLayout: addLayout,
+    closeDocument: closeChart,
+    snapshots: function () { return Object.keys(CHART_SNAPS); },
+    snapshotOf: function (id) {
+      var s = CHART_SNAPS[id];
+      return s ? { svg: s.svg, rev: s.rev, valid: !!validSnap(id) } : null;
+    },
+    switchChart: switchChart,
+    setWorkspace: setAppWorkspace,
+    workspace: appWorkspace,
+    workspaceDocument: function () {
+      var doc = workspaceDocument(appWorkspace());
+      return doc ? doc.id : null;
+    },
+    charts: function () { return PROJECT.charts; },
+    exportSize: currentExportSize,
+    buildPayload: function () {
+      var b = buildPayload();
+      return b.payload || null;
+    },
+    buildRaw: buildPayload,
+    loadTable: function (name, header, rows, types, levels) {
+      dataHistoryClear();
+      PROJECT.table = buildTable(name, header, rows, types || null, levels || null);
+      PROJECT.ui.columnWidths = {};
+      GRID_NATURAL_WIDTHS = {};
+      gridResetColumnView();
+      GRID_FIND_QUERY = ""; GRID_FIND_RESULTS = []; GRID_FIND_INDEX = -1;
+      validateRoles(); persist(); syncAll(); render();
+    },
+    setModule: function (mod) {
+      activeChart().module = mod; bumpSnapEpoch(); persist(); syncAll(); render();
+    },
+    setRoles: function (mod, rr) {
+      activeChart().roles[mod] = rr; validateRoles(); persist(); syncAll(); render();
+    },
+    parseCSV: parseCSV,
+    parseTableText: parseTableText,
+    libraries: function () { return PS_LIBS; },
+    saveComputedColumn: saveComputedColumn,
+    openFormulaDialog: openFormulaDialog,
+    setFilters: function (list) {
+      var t = PROJECT.table;
+      dataMark("the filter change");
+      t.filters = Array.isArray(list) ? list : [];
+      retype(t); CHART_SNAPS = {}; persist(); syncAll(); render();
+    },
+    selectVariable: selectInspectorVariable,
+    setGridSelection: gridSetSelection,
+    setExcluded: function (col, row, on) {
+      return gridSetExcludedCells(
+        [{ col: col, row: row }], on !== false, "data");
+    },
+    setExcludedRows: function (rows, on) {
+      return gridSetExcludedRows(rows, on !== false, "data");
+    },
+    pasteMatrix: gridApplyMatrix,
+    clearSelection: gridClearSelected,
+    insertVariable: insertVariable,
+    deleteVariable: deleteVariable,
+    hideColumn: gridHideColumn,
+    showColumn: gridShowColumn,
+    showAllColumns: gridShowAllColumns,
+    setColumnFocus: gridSetChartFocus,
+    visibleColumns: function () {
+      return gridVisibleColumns(PROJECT.table).slice();
+    },
+    columnView: function () {
+      return {
+        focus: GRID_FOCUS_CHART_COLUMNS,
+        hidden: Object.keys(GRID_HIDDEN_COLUMNS).filter(function (col) {
+          return !!GRID_HIDDEN_COLUMNS[col];
+        }),
+        visible: gridVisibleColumns(PROJECT.table).slice()
+      };
+    },
+    moveVariableLevel: moveVariableLevel,
+    setMissingTokens: setMissingTokens,
+    setColumnMissingTokens: setColumnMissingTokens,
+    layCopySelected: layCopySelected,
+    laySetSelection: laySetSelection,
+    laySelectedIds: laySelectedIds,
+    layPasteClipboard: layPasteClipboard,
+    appPrefs: function () { return APP_PREFS; },
+    sortVariableLevels: sortVariableLevels,
+    projectFileText: projectFileText,
+    projectFileName: projectFileName,
+    recentProjects: recentProjects,
+    openRecentProject: openRecentProject,
+    showWelcome: function () { showWelcome(true); },
+    showCommandPalette: showCommandPalette,
+    showAnalysisGallery: showAnalysisGallery,
+    showHelpMeChoose: showHelpMeChoose,
+    showLayoutGallery: showLayoutGallery,
+    createLayoutFromTemplate: createLayoutFromTemplate,
+    resizeLayoutPanel: layResizeDimensions,
+    selectLayoutItems: function (ids) { laySetSelection(ids); renderLayout(); },
+    layoutSelection: laySelectedIds,
+    layoutHistoryDepth: function () {
+      var n = 0;
+      for (var k in LAYOUT_HIST)
+        if (Object.prototype.hasOwnProperty.call(LAYOUT_HIST, k))
+          n += LAYOUT_HIST[k].undo.length + LAYOUT_HIST[k].redo.length;
+      return n;
+    },
+    loadSample: function (id) {
+      // Every real caller follows loadSample with persist/syncAll/render;
+      // handing out the bare function was a trap that left the app showing
+      // the previous project.
+      dataHistoryClear();
+      loadSample(id);
+      persist(); syncAll(); render();
+    },
+    examples: function () {
+      return EXAMPLES.map(function (e) {
+        return { id: e.id, name: e.name, fits: e.fits.slice() };
+      });
+    },
+    showPreferences: showPreferences,
+    showShortcuts: showShortcuts,
+    showDiagnostics: showDiagnostics,
+    markSavedForTest: function () { FILE_SAVED_REV = PROJECT_REV; },
+    gridSelection: function () {
+      return GRID_SELECTION
+        ? { anchorCol: GRID_SELECTION.anchorCol,
+            anchorRow: Number(GRID_SELECTION.anchorRow),
+            focusCol: GRID_SELECTION.focusCol,
+            focusRow: Number(GRID_SELECTION.focusRow),
+            kind: GRID_SELECTION_KIND } : null;
+    },
+    uncapturable: uncapturableIds,
+    undrawablePanels: layUndrawablePanels,
+    dropSnapshots: function () { CHART_SNAPS = {}; },
+    setColType: setColType,
+    openTypeMenu: showTypeMenu,
+    readPickedFile: readPickedFile,
+    runCommandCatalog: commandCatalog,
+    chartProvenance: chartProvenance,
+    provenanceSentence: provenanceSentence,
+    templateStamp: templateStamp,
+    channelAudit: channelAudit,
+    userGuideTarget: userGuideTarget,
+    coachReset: function () {
+      try { window.localStorage.removeItem(PS_COACH_KEY); } catch (e) {}
+      COACH_SHOWN = false;
+    },
+    refuseReasonFor: function (roleKey, col) {
+      var defs = MODULES[curModule()].roles;
+      for (var i = 0; i < defs.length; i++)
+        if (defs[i].key === roleKey)
+          return roleRefusalReason(defs[i], PROJECT.table, col);
+      return null;
+    },
+    retypeTable: function () { retype(PROJECT.table); persist(); syncAll(); render(); },
+    overlayFingerprint: overlayFingerprint,
+    openLoader: function () { openLoader(); },
+    runCommand: runAppCommand,
+    gridSelectionTextForTest: gridSelectionText,
+    commandEnabledForTest: commandEnabled,
+    toastForTest: function (m, isErr) { return showToast(m, isErr); },
+    diagnosticsText: diagnosticsText,
+    migrateSnapshot: migrateSnapshot,
+    gridWindow: function () {
+      return { start: GRID_WINDOW_START, end: GRID_WINDOW_END,
+               total: PROJECT.table ? nRows(PROJECT.table) : 0 };
+    },
+    renameProject: renameProjectInline,
+    dataUndo: dataUndo,
+    dataRedo: dataRedo,
+    dataHistory: function () {
+      var bytes = 0;
+      for (var i = 0; i < DATA_UNDO.length; i++) bytes += DATA_UNDO[i].snap.length;
+      return { undo: DATA_UNDO.length, redo: DATA_REDO.length,
+               bytes: bytes, budget: DATA_HIST_BYTES,
+               undoLabel: dataStepLabel(DATA_UNDO),
+               redoLabel: dataStepLabel(DATA_REDO) };
+    },
+    exportSource: function (background) {
+      return collectExportSource(background || "shown");
+    },
+    exportBlob: function (format, dpi, background) {
+      return collectExportSource(background || "shown").then(function (source) {
+        return exportBlobFor(format || "svg", source, dpi || 300);
+      });
+    },
+    render: render
+  };
+
+  document.addEventListener("DOMContentLoaded", function () {
+    wireHeader(); wireLoader(); wireGrid(); wireLayout(); wireExporter();
+    wireAppFrame(); wireContextInspector(); wireCommandPalette();
+    wireGuidedDialogs(); wireStandaloneEngineExclusionLabels();
+    migrateLegacyChartPointExclusions();
+    syncAll(); render();
+    wireWelcome();
+    requestPersistentStorage();
+    // Item 15. The engine sizes its undo blob as (4.6MB - bundleBytes)/2 per
+    // side, and measures bundleBytes by looking for a graphbuilder2.bundle.*
+    // key in localStorage. In jamovi that key exists; in the standalone the
+    // engine is a <script src> (or inlined in the dist) and is NEVER stored,
+    // so the measurement always misses and falls back to 1.9 MB - reserving
+    // 2.7 MB of a ~5 MB origin quota for undo while up to five copies of the
+    // project compete for the rest. Declaring a larger figure makes the undo
+    // packer frugal (500 KB per side) and hands about 1.7 MB back to the
+    // recovery ladder. Counter-intuitive direction, deliberately: the number
+    // is a budget knob, not a measurement.
+    try { window.__gb2_bundleBytes = 3600000; } catch (e) {}
+    bootDone();          // item 9: the frame is live now, not merely painted
+  });
+})();

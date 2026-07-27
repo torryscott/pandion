@@ -6,6 +6,21 @@
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), geolocation=(), microphone=()
 
+# The web app's scripts carry a content hash in the filename (see
+# build.sh), so a given URL's bytes can never change. Cache them for a
+# year and skip the revalidation round trip entirely: a repeat visitor,
+# and anyone arriving after a release that only touched the shell,
+# re-downloads nothing of the 2.1 MB chart engine.
+/app/lib/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# The shell must never be cached hard, or a visitor keeps an old page
+# pointing at script names that a later deploy has already pruned.
+/app/
+  Cache-Control: public, max-age=0, must-revalidate
+/app/index.html
+  Cache-Control: public, max-age=0, must-revalidate
+
 # Cloudflare Pages: keep review-only artifacts out of search results.
 # They are still reachable by URL; they simply should not be indexed.
 /v2.html
