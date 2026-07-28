@@ -154,6 +154,10 @@ website/pandion-site-preview.html
 /standalone/dist/
 /standalone/scratchpad/
 
+# Prepared release bundles are reproducible local/CI outputs. The committed
+# sources and generated website artifacts remain the release source of truth.
+/.release/
+
 # Local review and handoff artifacts. Keep the maintained standalone brief,
 # sweep, and regression punch list in source control because the code and
 # standalone README reference them.

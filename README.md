@@ -156,8 +156,8 @@ live chart is about 0.011%, so anything at or under that is identical.
 > the results HTML on every render — which can freeze jamovi's results view
 > so the chart never draws, while everything else looks fine. (A module built
 > that way shows a "built without its minified chart bundle" note under the
-> chart area.) `scripts/jmv-build-install.sh` and the CI release workflow run
-> the minify step automatically; the `.jmo` files on the
+> chart area.) Release preparation and CI verify the committed source hash and
+> refuse a stale minified bundle; the `.jmo` files on the
 > [releases page](../../releases) always include the bundle.
 
 ```r
@@ -172,12 +172,40 @@ bash scripts/jmv-build-install.sh
 ```
 
 - `scripts/minify-widget.sh`: refresh the minified widget bundle (+ its
-  committed hash) after editing the widget source.
+  committed hash) after editing the widget source; `--check` performs the
+  offline release/CI freshness check without rewriting it.
 - `scripts/verify/run.sh [--min]`: headless verification battery that renders
   the chart families and edge cases, then checks them in Playwright/Chromium
   for page errors, missing geometry, NaN coordinates, and expected messages.
-- `scripts/release.sh <version>`: sync version numbers, minify, install,
-  commit, tag, and push (CI then builds the `.jmo`).
+
+### Preparing and publishing a release
+
+Release preparation and publication are deliberately separate. Preparation
+never commits, tags, pushes, publishes, or side-loads a module into jamovi.
+Publication never edits, builds, stages, or commits files.
+
+```bash
+# 1. Synchronize every maintained public version reference.
+node scripts/release-version.mjs set 3.0.1
+
+# 2. Review the version/release-note changes and commit them.
+# 3. Build and verify the portable app, website, shared engine, and local JMO.
+scripts/prepare-release.sh 3.0.1
+
+# 4. Inspect .release/v3.0.1/release.json and SHA256SUMS.
+#    The default publication command is a read-only preflight.
+scripts/release.sh 3.0.1
+
+# 5. Only after explicit approval:
+scripts/release.sh 3.0.1 --publish
+```
+
+If a deterministic build changes a committed generated file, preparation
+stops and asks for that diff to be reviewed and committed before it will issue
+a release receipt. The receipt binds the artifact checksums and required test
+gates to the exact commit being published. GitHub Actions independently checks
+the source version, release-tooling contract, generated website parity, and
+the contents of each platform `.jmo`.
 
 ## Author & license
 

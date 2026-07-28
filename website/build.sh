@@ -137,4 +137,9 @@ grep -rq "APP_VERSION = \"$VERSION\"" website/app/lib || {
     echo "WARN: the web app does not declare APP_VERSION = $VERSION" >&2; DRIFT=1; }
 grep -q "APP_VERSION = \"$VERSION\"" website/pandion-plots.html || {
     echo "WARN: the portable download does not declare APP_VERSION = $VERSION" >&2; DRIFT=1; }
-[ "$DRIFT" = "0" ] && echo "version $VERSION consistent across the site + CITATION.cff"
+if [ "$DRIFT" = "0" ]; then
+    echo "version $VERSION consistent across the site + CITATION.cff"
+else
+    echo "ERROR: public version references are inconsistent" >&2
+    exit 1
+fi

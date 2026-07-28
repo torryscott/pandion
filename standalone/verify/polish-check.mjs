@@ -36,6 +36,9 @@ function ok(cond, msg) {
 
 const here = new URL('.', import.meta.url).pathname;
 const src = fs.readFileSync(path.resolve(here, '..', 'index.html'), 'utf8');
+const shippedVersion = fs.readFileSync(
+    path.resolve(here, '..', 'js/ps-shell.js'), 'utf8')
+    .match(/APP_VERSION = "([^"]+)"/)[1];
 
 console.log('case 1: nothing dead ships in the download (t4-12)');
 ok(!/<symbol id="ps-pandion-logo"/.test(src),
@@ -93,7 +96,7 @@ ok(about.buttons.some(b => /APA/.test(b)) &&
    `(${JSON.stringify(about.buttons)})`);
 // The version has to be ONE number: about.html tells a citing researcher to
 // read it here, so a second, different number is worse than none.
-ok(about.version === '3.0.0',
+ok(about.version === shippedVersion,
    `the app version matches the site's (${about.version})`);
 await page.keyboard.press('Escape');
 await page.waitForTimeout(300);

@@ -21,6 +21,9 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+echo "== release pipeline contract"
+node "$HERE/release-pipeline-check.mjs"
+
 # The browser battery opens generated fixtures over file://, where jamovi's
 # module/<asset> route does not exist. Embed the same bundle for those visual
 # fixtures. scriptsrc-probe.R explicitly clears this switch while it verifies

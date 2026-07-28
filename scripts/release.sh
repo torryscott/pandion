@@ -2,170 +2,118 @@
 set -euo pipefail
 
 usage() {
-  cat <<'EOF'
+    cat <<'EOF'
 Usage:
-  scripts/release.sh <version> [commit-message] [--dry-run] [--skip-build]
+  scripts/release.sh <x.y.z> [--output DIR] [--message TEXT] [--publish]
 
-Examples:
-  scripts/release.sh 1.0.10
-  scripts/release.sh v1.0.10 "release: v1.0.10"
-  scripts/release.sh 1.0.10 --dry-run
-  scripts/release.sh 1.0.10 --skip-build
+Without --publish, this command performs a read-only publication preflight.
+With --publish, it creates an annotated tag and atomically pushes the current
+branch plus tag. It never edits versions, builds, stages, or commits files.
 
-Behavior:
-  1) Optionally runs module build/install (scripts/jmv-build-install.sh: jamovi-compiler --build + side-load)
-  2) Commits all current changes (if any)
-  3) Creates annotated git tag (v<version>)
-  4) Pushes current branch and tag to origin
-
-Notes:
-  - Requires git auth already configured for origin.
-  - Tag push triggers GitHub Actions release workflows configured on v* tags.
+Required preparation:
+  node scripts/release-version.mjs set <x.y.z>
+  # review and commit the version/generated-file changes
+  scripts/prepare-release.sh <x.y.z>
+  scripts/release.sh <x.y.z>             # read-only preflight
+  scripts/release.sh <x.y.z> --publish   # explicit publication
 EOF
 }
 
-if [[ $# -lt 1 ]]; then
-  usage
-  exit 1
-fi
-
-version=""
-commit_msg=""
-dry_run="false"
-skip_build="false"
-
-for arg in "$@"; do
-  case "$arg" in
-    --dry-run)
-      dry_run="true"
-      ;;
-    --skip-build)
-      skip_build="true"
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      if [[ -z "$version" ]]; then
-        version="$arg"
-      elif [[ -z "$commit_msg" ]]; then
-        commit_msg="$arg"
-      else
-        echo "Unexpected argument: $arg" >&2
-        usage
-        exit 1
-      fi
-      ;;
-  esac
-done
-
-if [[ -z "$version" ]]; then
-  echo "Version is required." >&2
-  usage
-  exit 1
-fi
-
-if [[ "$version" == v* ]]; then
-  tag="$version"
-  bare_version="${version#v}"
-else
-  tag="v$version"
-  bare_version="$version"
-fi
-
-if [[ -z "$commit_msg" ]]; then
-  commit_msg="release: $tag"
-fi
-
-run() {
-  if [[ "$dry_run" == "true" ]]; then
-    printf '[dry-run] %s\n' "$*"
-  else
-    eval "$@"
-  fi
+[[ $# -ge 1 ]] || { usage; exit 2; }
+version="${1#v}"
+shift
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+    echo "Release version must be numeric x.y.z: $version" >&2
+    exit 2
 }
+
+output=".release/v${version}"
+message="release: v${version}"
+publish="false"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --output)
+            shift
+            [[ $# -gt 0 ]] || { echo "--output requires a directory" >&2; exit 2; }
+            output="$1"
+            ;;
+        --message)
+            shift
+            [[ $# -gt 0 ]] || { echo "--message requires text" >&2; exit 2; }
+            message="$1"
+            ;;
+        --publish) publish="true" ;;
+        --dry-run) publish="false" ;; # Backward-compatible safe behavior.
+        -h|--help) usage; exit 0 ;;
+        *) echo "Unexpected argument: $1" >&2; usage; exit 2 ;;
+    esac
+    shift
+done
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
-
-echo "Repository: $repo_root"
-echo "Tag: $tag"
-echo "Commit message: $commit_msg"
-echo "Dry run: $dry_run"
-echo "Skip build: $skip_build"
-
-if ! git remote get-url origin >/dev/null 2>&1; then
-  echo "Error: origin remote is not configured." >&2
-  exit 1
-fi
-
-if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
-  echo "Error: tag '$tag' already exists locally." >&2
-  exit 1
-fi
-
-# Warn if multiple tag-trigger workflows exist.
-workflow_count="$( (rg -l "v\\*" .github/workflows 2>/dev/null || true) | wc -l | tr -d ' ' )"
-if [[ "${workflow_count:-0}" -gt 1 ]]; then
-  echo "Warning: multiple v* tag workflows detected in .github/workflows."
-fi
-
-# Keep the module version in sync with the release tag so the
-# built artifact is named pandion_<version>.jmo and jamovi
-# treats it as a distinct (newer) version. Two sources of truth
-# carry the MODULE version:
-#   - jamovi/0000.yaml  ->  `version: <x.y.z>`  (drives the .jmo name)
-#   - DESCRIPTION       ->  `Version: <x.y.z>`  (R package version)
-# Both are hand-maintained (jmvtools preserves 0000.yaml's version
-# across builds), so without this step they silently drift behind
-# the git tags. The per-analysis `version:` fields in the .a.yaml
-# files are schema versions and intentionally left untouched.
-# Run BEFORE the build so install() packages the correct version,
-# and unconditionally (even with --skip-build) so the commit below
-# carries the bump.
-sync_version() {
-  local f="$1" key="$2"
-  [[ -f "$f" ]] || { echo "  (skip version sync: $f not found)"; return 0; }
-  # Portable in-place edit (perl is present on macOS + Linux).
-  run "perl -i -pe 's/^${key}:[[:space:]].*/${key}: ${bare_version}/' \"$f\""
+branch="$(git branch --show-current)"
+[[ -n "$branch" ]] || {
+    echo "Publishing requires a branch, not detached HEAD." >&2
+    exit 1
 }
-echo "Syncing module version to $bare_version (jamovi/0000.yaml + DESCRIPTION)"
-sync_version "jamovi/0000.yaml" "version"
-sync_version "DESCRIPTION" "Version"
+dirty="$(git status --porcelain --untracked-files=normal)"
+[[ -z "$dirty" ]] || {
+    echo "Publishing requires a clean working tree:" >&2
+    printf '%s\n' "$dirty" >&2
+    exit 1
+}
+git remote get-url origin >/dev/null 2>&1 || {
+    echo "The origin remote is not configured." >&2
+    exit 1
+}
 
-# Stamp today's date into jamovi/0000.yaml so the manifest date tracks the
-# release instead of drifting stale (jmvtools preserves whatever is there).
-release_date="$(date +%Y-%m-%d)"
-echo "Stamping release date $release_date (jamovi/0000.yaml)"
-run "perl -i -pe \"s/^date:[[:space:]].*/date: '${release_date}'/\" \"jamovi/0000.yaml\""
+echo "== publication source contract"
+node scripts/release-version.mjs check "$version"
 
-if [[ "$skip_build" != "true" ]]; then
-  # Minify the widget JS first so the smaller bundle is what
-  # gets packaged. Falls back gracefully if node/npx isn't
-  # available — install() still works on the original .js.
-  if command -v npx >/dev/null 2>&1 && [[ -x "scripts/minify-widget.sh" ]]; then
-    run "bash scripts/minify-widget.sh"
-  else
-    echo "npx not on PATH or minify script missing; skipping widget minify"
-  fi
-  # Build via the jamovi-compiler's --build mode + side-load (NOT
-  # jmvtools::install(), whose server handoff hangs under jamovi 2.7.32 —
-  # see scripts/jmv-build-install.sh). A non-zero exit aborts before tagging.
-  run "bash scripts/jmv-build-install.sh"
+echo "== verified preparation receipt"
+node scripts/release-state.mjs check --version "$version" --output "$output" \
+    --require-gate version-contract \
+    --require-gate artifact-parity \
+    --require-gate clean-generated-tree \
+    --require-gate templates-regenerated \
+    --require-gate shared-engine-min \
+    --require-gate standalone-source-and-dist \
+    --require-gate jmo-build \
+    --require-gate jmo-contents
+
+tag="v${version}"
+head="$(git rev-parse HEAD)"
+if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+    tag_head="$(git rev-list -n 1 "$tag")"
+    [[ "$tag_head" == "$head" ]] || {
+        echo "Local tag $tag points to $tag_head, not HEAD $head." >&2
+        exit 1
+    }
+fi
+if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+    echo "Remote tag $tag already exists; refusing to republish." >&2
+    exit 1
 fi
 
-# Commit only when there is something to commit.
-if ! git diff --quiet || ! git diff --cached --quiet; then
-  run "git add -A"
-  run "git commit -m \"$commit_msg\""
-else
-  echo "No changes to commit. Proceeding with tag push."
+echo
+echo "PUBLICATION PREFLIGHT PASS"
+echo "branch:   $branch"
+echo "commit:   $head"
+echo "tag:      $tag"
+echo "artifacts: $output"
+
+if [[ "$publish" != "true" ]]; then
+    echo
+    echo "No tag or push performed."
+    echo "After reviewing the receipt and checksums, rerun with --publish."
+    exit 0
 fi
 
-run "git tag -a \"$tag\" -m \"$commit_msg\""
-run "git push origin HEAD"
-run "git push origin \"$tag\""
+if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+    git tag -a "$tag" -m "$message"
+fi
+git push --atomic origin HEAD "refs/tags/$tag"
 
-echo "Release flow completed."
-echo "If push succeeded, GitHub Actions should now build and publish the release for $tag."
+echo "PUBLISHED $tag"
+echo "GitHub Actions will build and attach the platform release artifacts."

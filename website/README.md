@@ -99,9 +99,10 @@ digits of the file's MD5. Consequences worth knowing:
 - Rebuilds are idempotent (unchanged sources keep their filenames) and
   the build prunes hashed files it no longer references, so `app/lib`
   cannot accumulate dead copies.
-- The version-drift guard now greps `app/lib` for the `APP_VERSION`
+- The version-drift gate now greps `app/lib` for the `APP_VERSION`
   declaration rather than `app/index.html`, since the declaration moved
   into the hashed shell script. It also checks the portable download.
+  Any mismatch fails the build rather than shipping with a warning.
 - The two targets are built from the same `standalone/index.html`, so
   they cannot drift, but they are no longer byte-identical: only
   `pandion-plots.html` is the single-file build.

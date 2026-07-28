@@ -17,6 +17,8 @@ const { parseHTML } = loadLinkedom();
 const root = path.resolve(new URL('.', import.meta.url).pathname, '..');
 const source = name => fs.readFileSync(path.join(root, name), 'utf8');
 const html = source('index.html').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+const shippedVersion = source('js/ps-shell.js')
+    .match(/APP_VERSION = "([^"]+)"/)[1];
 const { window } = parseHTML(html);
 const { document } = window;
 
@@ -234,7 +236,8 @@ window.PS_SHELL.showDiagnostics();
 await new Promise(resolve => setTimeout(resolve, 5));
 ok(document.getElementById('ps-diagnostics').style.display === 'flex',
     'opens from the application command surface');
-ok(document.getElementById('ps-diagnostics-grid').textContent.includes('3.0.0'),
+ok(document.getElementById('ps-diagnostics-grid').textContent
+    .includes(shippedVersion),
     'reports the release version');
 ok(window.PS_SHELL.diagnosticsText().includes('240 rows'),
     'reports the active dataset dimensions');

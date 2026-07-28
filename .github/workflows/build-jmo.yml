@@ -35,6 +35,17 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Verify release source contract
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="$(awk '/^Version:/ { print $2 }' DESCRIPTION)"
+          fi
+          node scripts/release-version.mjs check "$VERSION"
+          node scripts/verify/release-pipeline-check.mjs
+
       - name: Install jamovi-compiler
         run: npm install -g jamovi/jamovi-compiler
 
@@ -103,18 +114,17 @@ jobs:
           & (Join-Path $jhome "Frameworks\R\bin\x64\R.exe") --version 2>&1 | Select-Object -First 1
           "JAMOVI_HOME=$($jhome -replace '\\','/')" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
 
-      # Minify the widget bundle so the packaged .jmo ships the ~1.4 MB
-      # minified file the widget is DESIGNED around — not the ~4.7 MB source.
+      # Verify the committed minified bundle so the packaged .jmo ships the
+      # ~1.4 MB file the widget is DESIGNED around — not the ~4.7 MB source.
       # R/widget.R inlines the bundle into the results HTML once per session;
       # with no .min.js present it falls back to the full source, and a 4.7 MB
       # inline script can freeze jamovi's webview (notably on Windows). Locally
-      # scripts/jmv-build-install.sh / release.sh already minify; CI did not,
-      # so GitHub .jmo's shipped the un-minified bundle. node/npx are set up
-      # above and minify-widget.sh (npx terser) runs on both runners.
-      - name: Minify widget bundle
+      # The source-hash sidecar makes this offline and deterministic: CI fails
+      # if a source edit was not followed by an intentional, reviewed minify.
+      - name: Verify minified widget bundle
         shell: bash
         run: |
-          bash scripts/minify-widget.sh
+          bash scripts/minify-widget.sh --check
           echo "--- bundle files that will be packaged ---"
           ls -la inst/widget/graphbuilder2.min.js inst/widget/graphbuilder2.min.js.hash
 
@@ -155,9 +165,11 @@ jobs:
           if [ -z "$JMO" ]; then echo "ERROR: no .jmo produced"; exit 1; fi
           echo "Inspecting: $JMO"
           unzip -p "$JMO" "pandion/jamovi.yaml" | grep -i rVersion
+          VERSION="$(awk '/^Version:/ { print $2 }' DESCRIPTION)"
+          bash scripts/verify-jmo.sh "$JMO" "$VERSION"
           # The packaged .jmo MUST contain the minified bundle: shipping only
           # the ~5.8 MB source freezes the jamovi webview (the v2.4.1 Windows
-          # regression). The Minify step above guarantees it on disk; this
+          # regression). The freshness step above guarantees it on disk; this
           # asserts jmc actually packaged it, so a future compiler / ignore-file
           # change can never publish a broken artifact silently. Anchored to
           # end-of-line (filenames are unzip -l's last column): the committed
@@ -190,13 +202,19 @@ jobs:
 
       # The portable single-file app is one of the advertised downloads.
       # It was never attached, so releases/latest/download/pandion-plots.html
-      # 404'd. Build it here so every tag carries it. Minify first, so the
-      # portable build embeds the same fresh bundle the .jmo modules get.
+      # 404'd. Build it here so every tag carries it. Verify the committed
+      # bundle first, so the portable build embeds the same fresh bytes as the
+      # .jmo modules.
       - uses: actions/checkout@v4
       - name: Build the portable single-file app
         run: |
-          bash scripts/minify-widget.sh
+          VERSION="${GITHUB_REF_NAME#v}"
+          node scripts/release-version.mjs check "$VERSION"
+          bash scripts/minify-widget.sh --check
           bash standalone/build-dist.sh
+          bash website/build.sh
+          node standalone/verify/artifact-parity-check.mjs
+          git diff --exit-code
 
       - name: Create Release
         uses: softprops/action-gh-release@v2

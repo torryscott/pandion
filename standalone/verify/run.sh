@@ -64,6 +64,10 @@ if Rscript standalone/verify/m1-parity.R; then
     echo "== m1-parity-check (JS vs R channels)"
     node standalone/verify/m1-parity-check.mjs
 else
+    if [ "${PS_REQUIRE_R_PARITY:-0}" = "1" ]; then
+        echo "ERROR: m1-parity.R is required for a release" >&2
+        exit 1
+    fi
     echo "WARN: m1-parity.R failed or R/jmvcore unavailable - parity skipped"
 fi
 
@@ -79,6 +83,10 @@ if Rscript standalone/verify/level-order-render.R; then
     PS_PAGE=standalone/dist/pandion-plots.html \
         node standalone/verify/level-order-check.mjs
 else
+    if [ "${PS_REQUIRE_R_PARITY:-0}" = "1" ]; then
+        echo "ERROR: level-order-render.R is required for a release" >&2
+        exit 1
+    fi
     echo "WARN: level-order-render.R failed or R/jmvcore unavailable - skipped"
 fi
 
@@ -89,6 +97,10 @@ if Rscript standalone/verify/rm-panels-render.R; then
     PS_PAGE=standalone/dist/pandion-plots.html \
         node standalone/verify/rm-panels-check.mjs
 else
+    if [ "${PS_REQUIRE_R_PARITY:-0}" = "1" ]; then
+        echo "ERROR: rm-panels-render.R is required for a release" >&2
+        exit 1
+    fi
     echo "WARN: rm-panels-render.R failed or R/jmvcore unavailable - skipped"
 fi
 
