@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use Pandion Plots in your work, please cite it as below."
+title: "Pandion Plots"
+abstract: >-
+  A free graphing app for creating clear, customizable statistical
+  figures without writing code. Runs in the browser, as a portable
+  download, or as a jamovi module.
+type: software
+authors:
+  - family-names: "Dennis"
+    given-names: "Torry Scott"
+    name-suffix: "PhD"
+version: "3.0.0"
+license: GPL-3.0
+repository-code: "https://github.com/torryscott/pandion"
+url: "https://pandionplots.com"
+keywords:
+  - data visualization
+  - statistics
+  - jamovi
+  - teaching
+  - research software

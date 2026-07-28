@@ -111,8 +111,18 @@ The browser-based application in `standalone/` uses the same chart engine and
 customization model as the jamovi module. Its release-candidate shell includes
 project files, local autosave with last-known-good recovery, explicit project
 format migration, vector PDF/SVG export, a virtualized large-data grid, and a
-copyable diagnostics panel under **Help → Diagnostics**. Build the distributable
-single-file application with:
+copyable diagnostics panel under **Help → Diagnostics**.
+
+The teaching layer is reachable from the application rather than only from the
+chart toolbar: **Help** carries the user guide, Which graph should I use?, Check
+my chart, Label the chart parts and the glossary, and the command palette finds
+all of them. Three example datasets ship, each pointed at the analyses it can
+honestly demonstrate. Measure types are defined wherever they are chosen, and a
+role slot that refuses a variable says why and offers the one change that would
+work. Presentation runs on a token layer (`:root` in `standalone/index.html`);
+add a token when a role is missing rather than a hex literal.
+
+Build the distributable single-file application with:
 
 ```bash
 bash standalone/build-dist.sh
@@ -120,6 +130,14 @@ bash standalone/build-dist.sh
 
 The generated file is `standalone/dist/pandion-plots.html`; it has no server
 requirement and can be opened directly in a modern browser.
+
+Verify with `bash standalone/verify/run.sh`, which runs every probe against the
+dev page and then the built single file, followed by an R parity battery. For
+presentation changes there is also `standalone/verify/shot.mjs`
+(`before` / `after` / `diff`), which captures eleven surfaces and reports
+per-surface pixel differences. It is a development tool rather than part of the
+suite, because it needs a before/after pair; the run-to-run noise floor on the
+live chart is about 0.011%, so anything at or under that is identical.
 
 ### Building from source
 

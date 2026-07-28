@@ -42,6 +42,7 @@ nav#sidebar .brand{display:flex;align-items:center;gap:9px;padding:4px 8px 12px;
 nav#sidebar .brand svg{flex:none}
 nav#sidebar .brand b{font-size:15px;line-height:1.2;display:block}
 nav#sidebar .brand span{font-size:11.5px;color:var(--ink3)}
+.brand .homelink{display:block;font-size:11.5px;margin-top:1px}
 #navsearch{width:100%;padding:7px 10px;margin:2px 0 10px;border:1px solid var(--line);border-radius:7px;background:var(--card);color:var(--ink);font-size:13.5px}
 #navsearch:focus{outline:2px solid var(--accent);outline-offset:1px}
 nav#sidebar a.nav1,nav#sidebar a.nav2{display:block;border-radius:6px;padding:4px 9px;color:var(--ink2);font-size:13.5px}
@@ -126,7 +127,7 @@ details summary:hover{background:var(--bg2);border-radius:10px}
 <nav id="sidebar" aria-label="Guide contents">
   <div class="brand">
     <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"><path d="M3 3v18h18"/><rect x="6.5" y="11" width="3" height="7" fill="var(--accent)" stroke="none"/><rect x="11.5" y="6" width="3" height="12" fill="var(--accent)" stroke="none" opacity=".72"/><rect x="16.5" y="9" width="3" height="9" fill="var(--accent)" stroke="none" opacity=".45"/></svg>
-    <div><b>Pandion Plots</b><span>User Guide · v3.0.0</span></div>
+    <div><b>Pandion Plots</b><span>User Guide · v3.0.0</span><a class="homelink" href="https://pandionplots.com/">pandionplots.com</a></div>
   </div>
   <input id="navsearch" type="search" placeholder="Search this guide…" autocomplete="off" aria-label="Search this guide">
   <div class="searchhits" id="searchhits"></div>
@@ -137,7 +138,7 @@ details summary:hover{background:var(--bg2);border-radius:10px}
 
 <header class="hero">
   <h1>Pandion Plots User Guide</h1>
-  <div class="sub">Beautiful statistical graphics for jamovi. Drop in a variable or two and get a polished chart with zero setup, then click anything on the chart to make it yours.</div>
+  <div class="sub">Beautiful statistical graphics for research and teaching. Drop in a variable or two and get a polished chart with zero setup, then click anything on the chart to make it yours.</div>
   <div class="pillrow">
     <span class="pill">7 chart analyses + a chooser wizard</span>
     <span class="pill">Click-to-edit everything</span>
@@ -150,7 +151,7 @@ details summary:hover{background:var(--bg2);border-radius:10px}
 <h2 id="welcome">Welcome</h2>
 
 <h3 id="what-is">What is Pandion Plots?</h3>
-<p>Pandion Plots is a jamovi module that lives in the ribbon's <b>Plots</b> tab. It is organized around seven chart analyses and one guide.</p>
+<p>Pandion Plots is a graphing app for clear, customizable statistical figures. It runs in your browser, as a portable download, or as a jamovi module in the ribbon's <b>Plots</b> tab. The chart editor is identical in all of them, so everything in this guide applies wherever you are working. It is organized around seven chart analyses and one guide.</p>
 <div class="tablewrap"><table>
 <tr><th>Analysis</th><th>What it is for</th></tr>
 <tr><td><b>Distribution</b></td><td>The shape and spread of one numeric variable: histograms, density curves, box / violin / raincloud, Q-Q plots, ECDF.</td></tr>
@@ -171,14 +172,23 @@ details summary:hover{background:var(--bg2);border-radius:10px}
 </ul>
 
 <h3 id="install">Installing</h3>
+<p>Pandion Plots runs three ways, and the chart editor is the same in each.
+Projects saved in one open in the others.</p>
+<p><b>In your browser.</b> Go to
+<a href="https://pandionplots.com/app/">pandionplots.com/app</a>. There is
+nothing to install, and your data never leaves your machine.</p>
+<p><b>As a portable file.</b> Download the single-file version from
+<a href="https://pandionplots.com/">pandionplots.com</a>. It runs offline in
+any browser, and you can copy it to a USB stick or email it to students.</p>
+<p><b>As a jamovi module.</b></p>
 <ol>
 <li>In jamovi, click the <b>Modules</b> button (the large <b>+</b> at the top-right of the ribbon).</li>
-<li>Choose <b>jamovi library</b>, find <b>Pandion Plots</b>, and click <b>Install</b>. (If you were given a <code>.jmo</code> file instead, use <b>Sideload</b>, the sideways arrow icon, and pick the file.)</li>
+<li>Choose <b>Sideload</b> (the sideways arrow icon) and pick the <code>.jmo</code> file you downloaded from <a href="https://github.com/torryscott/pandion/releases">the releases page</a>. (Once Pandion Plots is listed in the <b>jamovi library</b>, you will be able to install it from there instead.)</li>
 <li>A <b>Pandion Plots</b> menu appears in the ribbon's <b>Plots</b> tab. If it does not show up right away, restart jamovi.</li>
 </ol>
 <h3 id="quickstart">Your first chart in 60 seconds</h3>
 <ol>
-<li><b>Open an analysis.</b> <b>Plots</b> tab → <b>Pandion Plots</b> → e.g. <b>Compare Groups</b>.</li>
+<li><b>Open an analysis.</b> In the browser or portable app, pick one from the <b>Analysis</b> menu (or <b>+ New chart</b>); in jamovi, use the <b>Plots</b> tab → <b>Pandion Plots</b>. For example, <b>Compare Groups</b>.</li>
 <li><b>Drop in variables.</b> Drag a categorical variable into <b>X-Axis Variable</b> and a numeric one into <b>Y-Axis Variable</b>. Optionally add a second categorical variable to <b>Group By (optional)</b> for colored, side-by-side groups. The chart draws immediately.</li>
 <li><b>Switch the look if you like.</b> Use the chart-type button at the top-left of the chart (it shows the current type, e.g. "Bar") to try Line, Dot, Box, Violin, or Raincloud. Not sure which? Click the <b>?</b> button and open the <b>Which graph?</b> tab.</li>
 <li><b>Click anything to style it.</b> Click a bar to recolor it, the axis to change its range, a label to rename it. <kbd>Cmd/Ctrl+Z</kbd> undoes any edit.</li>

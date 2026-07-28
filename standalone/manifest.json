@@ -1,0 +1,23 @@
+{
+  "name": "Pandion Plots",
+  "short_name": "Pandion",
+  "description": "Create clear, customizable statistical figures without code. Free, open source, and private by design: your data never leaves your machine.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#eef1f5",
+  "theme_color": "#192E49",
+  "icons": [
+    {
+      "src": "icons/pandion-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/pandion-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

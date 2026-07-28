@@ -133,3 +133,33 @@ dist/
 # release.sh stages with `git add -A`, so this guard is load-bearing)
 /Jamovi Source Files/
 /Jamovi Source Code/
+
+# Local review artifact: regenerate with website/build-preview.py
+website/pandion-site-preview.html
+
+# Superseded brand art parked by the t4-13 tidy-up (11 MB of PNGs that were
+# never committed; release.sh stages with `git add -A`, so without this guard
+# they would ride into git history permanently). rm -rf the folder itself to
+# make the removal permanent; website/assets/ is the source of truth.
+/branding/superseded/
+
+# Local design explorations. This tree includes an independent nested Git
+# repository, generated deployment state, and node_modules; it is not part of
+# the Pandion source or release.
+/mockups/
+
+# Standalone build output is reproduced by standalone/build-dist.sh and is
+# attached by the release workflow. Scratch probes are local investigations;
+# the maintained verification suite lives in standalone/verify/.
+/standalone/dist/
+/standalone/scratchpad/
+
+# Local review and handoff artifacts. Keep the maintained standalone brief,
+# sweep, and regression punch list in source control because the code and
+# standalone README reference them.
+/COPY-FIX-HANDOFF-v*.md
+/PANDION-RENAME-PLAN.md
+/PANDION-RENAME-QA.html
+/PANDION-STANDALONE-LAUNCH-CHECKLIST.html
+/RELEASE-QA-v*.html
+/RESULTS-ROLL-DIAGNOSIS.md

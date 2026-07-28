@@ -36,16 +36,18 @@ const syntax = spawnSync(process.execPath, ['--check', widgetPath], { encoding: 
 check('Widget JavaScript parses', syntax.status === 0,
     (syntax.stderr || syntax.stdout || '').trim());
 
-// Field diagnostics must be REACHABLE (v2.9.9, Torry): the overlay is
-// the no-devtools diagnostics surface, so the Appearance toggle is
-// always present - the old __gb2DeveloperMode gate was dead code that
-// nothing ever set, hiding the toggle in every build.
+// Field diagnostics must be REACHABLE in embedded hosts (v2.9.9, Torry):
+// the overlay is the no-devtools diagnostics surface, so the Appearance
+// toggle is present by default. Standalone may suppress this duplicate
+// because its shell exposes the same setting in Help > Diagnostics.
 const globalInspector = section('function renderInspectorGlobal(body)',
     'function renderInspectorFacet(body, level)');
-check('Render-timing diagnostics toggle is always reachable (no dead gate)',
-    !globalInspector.includes('window.__gb2DeveloperMode === true') &&
-    count('var _gsShowDeveloperDiagnostics = true;') === 1 &&
-    globalInspector.includes('data-field="dbg-timing"'));
+check('Render-timing diagnostics is default-on for hosts and relocated in standalone',
+    globalInspector.includes(
+        'window.__gb2ShowDeveloperDiagnosticsInChartSettings !== false') &&
+    globalInspector.includes('data-field="dbg-timing"') &&
+    readFileSync(path.join(ROOT, 'standalone/js/ps-shell.js'), 'utf8')
+        .includes('window.__gb2ShowDeveloperDiagnosticsInChartSettings = false;'));
 check('Facet color actions accurately say they restore the default',
     source.includes('title="Restore the default divider color">Use default color</a>') &&
     source.includes('title="Restore the default accent-line color">Use default color</a>'));

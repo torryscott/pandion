@@ -1,6 +1,28 @@
 # Pandion Plots — jamovi ribbon icon
 
-`analysis-pandion.svg` is the ribbon menu-group icon for this module (display name **Pandion Plots**, internal module name **`plotstudio`**), drawn to jamovi's house spec.
+`analysis-pandion.svg` is the ribbon menu-group icon for this module (display
+name **Pandion Plots**, internal module name **`pandion`**), drawn to jamovi's
+house spec.
+
+The internal name matters here and nowhere else in this folder: jamovi derives
+the ribbon icon key from the MODULE name, so this file is correctly named only
+while the namespace is literally `pandion`. (Corrected Jul 26 2026: this line
+still said `plotstudio` after the rename.)
+
+## Where the brand marks actually live
+
+Not here. The canonical wing and diving marks are `website/assets/`:
+`pandion-wing.svg`, `pandion-wing-light.svg`, `diving.svg` and
+`diving-straight.svg`, plus `favicon.svg` and `icon-180.png`. Those are the
+files the site and the browser app reference directly, so they are the ones
+that stay true; a copy kept here would be a second source that drifts, which
+is the failure this project has already hit with a stale screenshot, a stale
+minified bundle and stale templates.
+
+`superseded/` holds the icon iterations and data-dive renders that were not
+the final mark (Torry, Jul 26 2026). They are ARCHIVED rather than deleted
+because they were never committed, so a delete would not have been
+recoverable. `rm -rf branding/superseded/` when you are sure.
 
 ## Why it lives here and not in the module
 

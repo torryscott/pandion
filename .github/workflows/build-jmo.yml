@@ -188,8 +188,20 @@ jobs:
         with:
           merge-multiple: true
 
+      # The portable single-file app is one of the advertised downloads.
+      # It was never attached, so releases/latest/download/pandion-plots.html
+      # 404'd. Build it here so every tag carries it. Minify first, so the
+      # portable build embeds the same fresh bundle the .jmo modules get.
+      - uses: actions/checkout@v4
+      - name: Build the portable single-file app
+        run: |
+          bash scripts/minify-widget.sh
+          bash standalone/build-dist.sh
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: '*.jmo'
+          files: |
+            *.jmo
+            standalone/dist/pandion-plots.html
           generate_release_notes: true

@@ -19174,6 +19174,10 @@
             return parts.join(";");
         }
         function redrawInspectorIndicator() {
+            // The standalone shell can invalidate the previous chart-part
+            // selection while a new analysis is still constructing this
+            // inspector. In that short window there is nothing to redraw.
+            if (!inspector || !Array.isArray(inspector.selection)) return;
             var sels = inspector.selection;
             try { _syncAnatomyOverlay(); } catch (_eAo) {}
             // Compute a signature of state that affects how the axis
@@ -44768,6 +44772,10 @@
         }
 
         function clearInspectorSelection() { setInspectorSelection(null); }
+        // Narrow shell bridge: analysis selection belongs to the standalone
+        // shell, while chart-part selection belongs to this engine.
+        try { window.__gb2_clearInspectorSelection = clearInspectorSelection; }
+        catch (_ePublicClear) {}
 
         // -----------------------------------------------------------------
         // Inline text editor: an HTML <input> overlaid on top of the SVG
@@ -48348,13 +48356,12 @@
                     addCol(rows[r].getAttribute("data-legend-row"), _gb2SwatchColor(sw));
                 }
                 if (Object.keys(col).length < 2) {
-                    // No legend: color only "means" something when the user gave
-                    // the bars DISTINCT colors. An all-one-color bar chart is
-                    // read by position, not color, so identical fills are fine
-                    // and must not be flagged - only adopt these if >= 2 distinct.
+                    // No legend: only an actual grouping channel makes colors
+                    // separate series. Ungrouped category bars are already
+                    // distinguished by position and direct axis labels.
                     var marks = q('[data-bar-cat]'), mi, tmp = {}, seen = {};
                     for (mi = 0; mi < marks.length; mi++) {
-                        var k = marks[mi].getAttribute("data-bar-group") || marks[mi].getAttribute("data-bar-cat");
+                        var k = marks[mi].getAttribute("data-bar-group");
                         var f = marks[mi].getAttribute("fill") || (marks[mi].style && marks[mi].style.fill);
                         if (k && hexish(f) && !Object.prototype.hasOwnProperty.call(tmp, k)) { tmp[k] = String(f).trim(); seen[String(f).trim().toLowerCase()] = 1; }
                     }
@@ -67623,15 +67630,12 @@
         function renderInspectorGlobal(body) {
             var _row = 'display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;';
             var _lbl = 'color:#555;font-size:11px;width:84px;text-align:right;flex-shrink:0;';
-            // The render-timing overlay doubles as the field-diagnostics
-            // surface (bundle delivery state, copy-request log) - the whole
-            // point is that a user on a machine WITHOUT devtools can turn it
-            // on and read it. An earlier launch build hid this row behind
-            // window.__gb2DeveloperMode, which nothing ever set, so the
-            // toggle was unreachable in every build (Jul 2026 field bug).
-            // It stays visible: one small checkbox at the bottom of
-            // Appearance, client-only state, harmless when ignored.
-            var _gsShowDeveloperDiagnostics = true;
+            // Timing is an application diagnostic, not a chart appearance
+            // choice. Preserve the established control for embedders such as
+            // jamovi; the standalone shell explicitly disables this duplicate
+            // because it exposes the same setting in Help > Diagnostics.
+            var _gsShowDeveloperDiagnostics =
+                window.__gb2ShowDeveloperDiagnosticsInChartSettings !== false;
             // Inline input swap. Replaces an anchor button with a
             // text input + commit/cancel buttons until the user
             // commits (Enter or commit-button) or cancels (Escape /
@@ -67940,23 +67944,23 @@
                     }
                 } catch (_eG) {}
                 if (names.length >= 2) return { names: names, cols: cols, store: "group" };
-                // No legend: color only "means" something when the user
-                // gave the marks DISTINCT colors (the lint's rule), so an
-                // all-one-color chart is never flagged or "fixed".
+                // No legend: compare only marks with an actual group key.
+                // Category labels on an ungrouped axis are not color series.
                 names = []; cols = []; seen = {};
-                var isGrp = false;
                 try {
                     var marks = svg.querySelectorAll('[data-bar-cat]'), distinct = {};
                     for (var mi = 0; mi < marks.length; mi++) {
                         var kg = marks[mi].getAttribute("data-bar-group");
-                        var k = kg || marks[mi].getAttribute("data-bar-cat");
                         var f = marks[mi].getAttribute("fill") || (marks[mi].style && marks[mi].style.fill);
-                        if (kg) isGrp = true;
-                        if (k && f && hexish(String(f))) { add(k, String(f)); distinct[String(f).trim().toLowerCase()] = 1; }
+                        if (kg && f && hexish(String(f))) {
+                            add(kg, String(f));
+                            distinct[String(f).trim().toLowerCase()] = 1;
+                        }
                     }
                     if (Object.keys(distinct).length < 2) { names = []; cols = []; }
                 } catch (_eM) {}
-                if (names.length >= 2) return { names: names, cols: cols, store: (isGrp ? "group" : "cat") };
+                if (names.length >= 2)
+                    return { names: names, cols: cols, store: "group" };
                 return { names: [], cols: [], store: null };
             }
             // Vision types the flags judge + the label the status line

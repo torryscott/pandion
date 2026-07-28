@@ -7,6 +7,11 @@
 (function () {
   "use strict";
 
+  // Standalone owns application diagnostics in Help > Diagnostics. Keep the
+  // shared engine's duplicate Chart settings row available by default for
+  // other hosts (notably jamovi), and suppress it only in this shell.
+  window.__gb2ShowDeveloperDiagnosticsInChartSettings = false;
+
   // ================================================================ sample
   // Built-in demo dataset: a dose-response study. condition/score are the
   // M0 columns (the probes pin their statistics); hours/site exercise the
@@ -40,9 +45,55 @@
   // was settable only after the fact, per project, so the same correction had
   // to be made again for every file.
   var APP_PREFS_DEFAULTS = { density: "comfortable", motion: "system",
-                             startup: "center", missingTokens: "NA" };
+                             startup: "center", missingTokens: "NA",
+                             units: "in" };
   var APP_PREFS = { density: "comfortable", motion: "system",
-                    startup: "center", missingTokens: "NA" };
+                    startup: "center", missingTokens: "NA",
+                    units: "in" };
+  // MEASUREMENT UNITS (Torry, Jul 27 2026: "I see these really large
+  // numbers... I think it might be more useful to have these in inches,
+  // and maybe an option for metric"). 816 x 1056 is Letter in CSS pixels,
+  // which is the wrong unit to show someone composing a figure.
+  //
+  // The MODEL stays in pixels - every layout coordinate, the page, the
+  // items, the saved project - and only the DISPLAY converts. That keeps
+  // old projects readable, keeps the arithmetic exact where it matters,
+  // and means the preference can change at any moment without touching a
+  // single stored number.
+  var PX_PER_IN = 96;                 // the CSS definition, and what the
+                                      // chart side already uses for inches
+  var UNITS = {
+    in: { label: "in", per: PX_PER_IN, dp: 2, step: 0.25 },
+    cm: { label: "cm", per: PX_PER_IN / 2.54, dp: 1, step: 0.5 },
+    px: { label: "px", per: 1, dp: 0, step: 1 }
+  };
+  function unitDef() { return UNITS[APP_PREFS.units] || UNITS.in; }
+  function unitLabel() { return unitDef().label; }
+  function unitStep() { return unitDef().step; }
+  // px -> display number, trimmed so 8.50 reads as 8.5 and 11.00 as 11.
+  function pxToUnit(px) {
+    var u = unitDef();
+    var v = (Number(px) || 0) / u.per;
+    return String(Number(v.toFixed(u.dp)));
+  }
+  // display number -> px. Rounded, because the model is integer pixels;
+  // a value the user did not touch is never re-derived, so display
+  // rounding can never accumulate into the stored geometry.
+  function unitToPx(v) {
+    var n = Number(v);
+    if (!isFinite(n)) return NaN;
+    return Math.round(n * unitDef().per);
+  }
+  // Every field that shows a length says which unit it is in, so a number
+  // on screen is never ambiguous (the complaint that started this: "I
+  // don't know if those are pixels or millimetres"). Grid step is
+  // deliberately NOT converted - it is a screen grid, and 0.04 in helps
+  // nobody - so its own label keeps saying px.
+  function syncUnitLabels() {
+    var u = unitLabel();
+    var marks = document.querySelectorAll("[data-unit-label]");
+    for (var i = 0; i < marks.length; i++) marks[i].textContent = u;
+  }
   var APP_VERSION = "3.0.0";
   var AUTOSAVE_HEALTH = "ok";
   var AUTOSAVE_DETAIL = "Local recovery is current";
@@ -204,6 +255,8 @@
         APP_PREFS.startup = saved.startup;
       if (typeof saved.missingTokens === "string")
         APP_PREFS.missingTokens = saved.missingTokens;
+      if (saved && /^(in|cm|px)$/.test(saved.units))
+        APP_PREFS.units = saved.units;
     } catch (e) {}
   }
   loadAppPrefs();
@@ -232,6 +285,47 @@
     var list = raw.split(",").map(function (v) { return v.trim(); })
       .filter(function (v, i, arr) { return v !== "" && arr.indexOf(v) === i; });
     return list.length ? list : ["NA"];
+  }
+  // ISO-ish only, deliberately. This has to be CONSERVATIVE: Date.parse
+  // accepts far too much ("5" is a valid date to it), and mistyping a
+  // category column as dates would reorder someone's chart for no reason.
+  // YYYY-MM-DD with optional time is exactly what ps-xlsx emits and what a
+  // CSV exported from anywhere sensible carries.
+  var ISO_DATE_RE =
+    /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?$/;
+  function isoDateKey(value) {
+    var m = ISO_DATE_RE.exec(String(value == null ? "" : value).trim());
+    if (!m) return null;
+    var y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+    // Real calendar bounds: 2024-13-45 matches the shape and is not a date.
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+    var hh = Number(m[4] || 0), mi = Number(m[5] || 0), ss = Number(m[6] || 0);
+    if (hh > 23 || mi > 59 || ss > 59) return null;
+    // A sortable key rather than a Date: string comparison on zero-padded
+    // ISO is chronological by construction, and it cannot drift with the
+    // local timezone the way a parsed Date can.
+    return m[1] + m[2] + m[3] +
+      (m[4] ? m[4] + (m[5] || "00") + (m[6] || "00") : "000000");
+  }
+  // EVERY non-missing value must parse, and there must be enough of them to
+  // be evidence. One stray date in a text column is not a date column, and a
+  // column of real dates MIXED with labels is not one either: reordering it
+  // would move the labels too. The early return and the dated === seen test
+  // are redundant with each other (either alone is sufficient); a control
+  // that removes BOTH reorders a mixed column and is what proves what they
+  // are for.
+  function columnLooksLikeDates(values, tokens) {
+    if (!values || values.length < 2) return false;
+    var seen = 0, dated = 0;
+    for (var i = 0; i < values.length; i++) {
+      var raw = String(values[i] == null ? "" : values[i]).trim();
+      if (tokens[raw]) continue;
+      seen++;
+      if (isoDateKey(raw)) dated++;
+      else return false;
+      if (seen > 400 && dated === seen) break;   // enough evidence
+    }
+    return seen >= 2 && dated === seen;
   }
   function tableMissingTokens(t, col) {
     // Null prototype: a declared token of "__proto__" on a plain object would
@@ -1287,6 +1381,33 @@
         // creating a key, and the level would silently vanish.
         var wantLevels = t.types[col] !== "id";
         var seenS = Object.create(null);
+        // t3-48. A date column keeps its Nominal type (the value is still a
+        // label, and every role that accepts Nominal still accepts it), but
+        // its levels are ordered CHRONOLOGICALLY instead of by the order the
+        // rows happened to arrive in. Skipped when an explicit order was
+        // declared, because that was either the user's choice or a saved
+        // one and is not ours to overwrite.
+        if (wantLevels && !dl && t.types[col] === "nominal" &&
+            columnLooksLikeDates(rv, tokens)) {
+          var uniq = Object.create(null), dates = [];
+          for (var dq = 0; dq < rv.length; dq++) {
+            if (isExcluded(t, col, dq)) continue;
+            var dvs = String(rv[dq]).trim();
+            if (tokens[dvs] || uniq[dvs] !== undefined) continue;
+            uniq[dvs] = 1;
+            dates.push(dvs);
+          }
+          dates.sort(function (a, b) {
+            var ka = isoDateKey(a), kb = isoDateKey(b);
+            return ka < kb ? -1 : ka > kb ? 1 : 0;
+          });
+          for (var dz = 0; dz < dates.length; dz++) {
+            seenS[dates[dz]] = 1;
+            lv.push(dates[dz]);
+          }
+          t.dateColumns = t.dateColumns || {};
+          t.dateColumns[col] = 1;
+        } else if (t.dateColumns) delete t.dateColumns[col];
         if (dl && wantLevels)
           for (var d0 = 0; d0 < dl.length; d0++) {
             var dv = String(dl[d0]);
@@ -1872,7 +1993,8 @@
         lastLayout: chartById(s.ui.lastLayout) &&
           isLayoutTab(chartById(s.ui.lastLayout)) ? s.ui.lastLayout : null,
         columnWidths: {},
-        paneWidths: splitSanitizeWidths(s.ui.paneWidths)
+        paneWidths: splitSanitizeWidths(s.ui.paneWidths),
+        varboxOpen: s.ui.varboxOpen === true
       };
       if (s.ui.columnWidths && typeof s.ui.columnWidths === "object") {
         for (var widthCol in s.ui.columnWidths) {
@@ -2151,6 +2273,9 @@
       var lp = layPage();
       return { w: lp.w, h: lp.h };
     }
+    // Under the view-zoom model the live svg is ALWAYS at the chart's
+    // authoritative logical size (zoom scales the view, not the figure), so
+    // the engine's measured size is the export size, padding included.
     var host = hostEl();
     try {
       if (host && typeof host.__gb2_chartSize === "function") {
@@ -2413,6 +2538,19 @@
       catch (e) {}
     }, 0);
   }
+  function exportCurrentWorkspace() {
+    var ws = appWorkspace();
+    if (ws === "data") {
+      if (!PROJECT.table) { showToast("Import data first"); return; }
+      exportDataCsv();
+      return;
+    }
+    if (!workspaceDocument(ws)) {
+      showToast(ws === "layout" ? "Create a layout first" : "Create a chart first");
+      return;
+    }
+    openExporter();
+  }
   function closeExporter() {
     if (EXPORT_BUSY) return;
     el("ps-exporter").style.display = "none";
@@ -2469,7 +2607,109 @@
     r.setAttribute("data-ps-export-background", "1");
     root.insertBefore(r, root.firstChild);
   }
+  // Torry's ruling (Jul 27 2026, the two-PDF report): AN EXPORT MUST NOT
+  // DEPEND ON THE WINDOW. The engine draws text and strokes at fixed point
+  // sizes while geometry fills the logical canvas, so the canvas size IS the
+  // figure - and the live svg is whatever canvas the window allowed, because
+  // fit shrinks it to rescue small windows. Every export therefore renders
+  // at the chart's AUTHORITATIVE size first: the 7.5 x 5 standard while fit
+  // manages the document, the user's own stored size once they have set one
+  // (that choice travels with the project, so it reproduces too). The
+  // re-render, the serialize and the restore all run inside ONE task, so the
+  // browser never paints the intermediate frame.
+  // WHERE THE USER'S SIZE ACTUALLY LIVES (Torry's report, Jul 27 2026).
+  // plotWidth/plotHeight are NOT real options in this payload: the module's
+  // specRealKeys list omits them, so the engine's own size controls route
+  // them into the chartSpec BLOB and commit under the key "chartSpec".
+  // Reading store.plotWidth therefore missed every size the user ever set,
+  // and the blob's value out-ranked the standard because the engine
+  // EXPLODES chartSpec over data.* at render entry. Every size read goes
+  // through here; the top-level key stays as a fallback for older stores.
+  // The size the user has chosen but the engine has not flushed yet. Its
+  // commits are debounced 1500ms, so the store lags a resize by seconds;
+  // this is the same value, available in the first frame.
+  function pendingPlotSize() {
+    var pend = window.__gb2_pendingOpts;
+    if (!pend || typeof pend.chartSpec !== "string") return { w: 0, h: 0 };
+    var s = parseSpec(pend.chartSpec);
+    return { w: Number(s.plotWidth) || 0, h: Number(s.plotHeight) || 0 };
+  }
+  function storedPlotSize() {
+    var store = optionsFor(curModule());
+    var spec = parseSpec(typeof store.chartSpec === "string"
+      ? store.chartSpec : "");
+    var pend = pendingPlotSize();
+    var w = pend.w || Number(spec.plotWidth) || Number(store.plotWidth) || 0;
+    var h = pend.h || Number(spec.plotHeight) || Number(store.plotHeight) || 0;
+    return { w: w, h: h, has: !!(w || h) };
+  }
+  // Torry, Jul 27 2026: "it takes roughly three seconds for the standard
+  // chart size button to unclick". The notice fired on the COMMIT, and the
+  // engine holds commits for 1500ms (plus the shell echo and a re-render).
+  // The chart itself resizes live, so for three seconds the box contradicted
+  // the chart on screen - the exact dishonesty this feature exists to end.
+  // Read the pending value instead: the flush then finds nothing to do.
+  // Auto-grow (the engine widening its own canvas for a dragged element)
+  // never writes plotWidth, so it cannot trip this.
+  function fitWatchPendingSize() {
+    var doc = activeChartTab();
+    if (!doc || isLayoutTab(doc) || doc.fitPane === false) return;
+    var p = pendingPlotSize();
+    var owns = (p.w > 0 && Math.abs(p.w - FIT_MAX_W) > 0.005) ||
+               (p.h > 0 && Math.abs(p.h - FIT_MAX_H) > 0.005);
+    if (!owns) return;
+    doc.fitPane = false;
+    persist();
+    syncAll();   // UI only: the engine has already drawn the new size
+  }
+  function authoritativePlotSize() {
+    var doc = activeChartTab();
+    if (doc && !isLayoutTab(doc) && doc.fitPane !== false)
+      return { w: FIT_MAX_W, h: FIT_MAX_H };
+    var stored = storedPlotSize();
+    return { w: stored.w || 6, h: stored.h || 4 };
+  }
+  function withAuthoritativeSize(fn) {
+    var doc = activeChartTab();
+    if (!doc || isLayoutTab(doc)) return fn();
+    var store = optionsFor(curModule());
+    var auth = authoritativePlotSize();
+    // Under the view-zoom model the live render is already authoritative
+    // (buildPayload forces the standard for fit-managed docs), so this is
+    // belt and braces around the export contract: only a live svg that
+    // genuinely disagrees triggers the re-render. The svg runs ~8px past
+    // plotWidth x 96 (engine padding), hence the tolerance.
+    var liveW = chartLogicalWidthPx();
+    if (liveW > 0 && Math.abs(liveW - auth.w * 96) <= 12) return fn();
+    var hadW = Object.prototype.hasOwnProperty.call(store, "plotWidth");
+    var hadH = Object.prototype.hasOwnProperty.call(store, "plotHeight");
+    var prevW = store.plotWidth, prevH = store.plotHeight;
+    // The size the engine actually honours lives in the chartSpec blob
+    // (it out-ranks the top-level keys through the render-entry explode),
+    // so poking only the top-level keys re-rendered at the WRONG size and
+    // the export followed the live figure. Poke both, restore both.
+    var prevSpec = store.chartSpec;
+    var hadSpec = Object.prototype.hasOwnProperty.call(store, "chartSpec");
+    var authSpec = parseSpec(typeof prevSpec === "string" ? prevSpec : "");
+    authSpec.plotWidth = auth.w; authSpec.plotHeight = auth.h;
+    store.plotWidth = auth.w; store.plotHeight = auth.h;
+    store.chartSpec = JSON.stringify(authSpec);
+    try {
+      renderChartIntoHost();
+      return fn();
+    } finally {
+      if (hadW) store.plotWidth = prevW; else delete store.plotWidth;
+      if (hadH) store.plotHeight = prevH; else delete store.plotHeight;
+      if (hadSpec) store.chartSpec = prevSpec; else delete store.chartSpec;
+      renderChartIntoHost();
+    }
+  }
   function chartExportSource(mode) {
+    return withAuthoritativeSize(function () {
+      return chartExportSourceLive(mode);
+    });
+  }
+  function chartExportSourceLive(mode) {
     var host = hostEl();
     if (!host || typeof host.__gb2_serializeSvg !== "function")
       throw new Error("Assign the required variables and draw the chart before exporting.");
@@ -2977,7 +3217,7 @@
       });
   }
   function wireExporter() {
-    el("ps-export").addEventListener("click", openExporter);
+    el("ps-export").addEventListener("click", exportCurrentWorkspace);
     el("ps-export-close").addEventListener("click", closeExporter);
     el("ps-export-caption").addEventListener("input", function () {
       var doc = activeChartTab();
@@ -3014,6 +3254,16 @@
       radios[i].addEventListener("change", updateExportUI);
     el("ps-export-dpi").addEventListener("change", updateExportUI);
     el("ps-export-bg").addEventListener("change", saveExportPrefs);
+    // WebKit reserves Escape on a focused native select and may never bubble
+    // the event to the dialog. Catch it on the way down so the modal keeps the
+    // same keyboard contract in Safari as it does in Chromium and Firefox.
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape" ||
+          el("ps-exporter").style.display !== "flex") return;
+      e.preventDefault();
+      e.stopPropagation();
+      closeExporter();
+    }, true);
     el("ps-exporter").addEventListener("keydown", function (e) {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -3367,40 +3617,97 @@
           payload.xyShowDensity2D = false;
       }
     }
+    // View-zoom model (Jul 27 2026): a fit-managed document renders at the
+    // STANDARD size in every context - live view, snapshot pass, export -
+    // and the window scales the VIEW via CSS zoom, never the figure. The
+    // store may hold stale window-derived sizes from the committed-fit era;
+    // they are deliberately ignored while the app owns the geometry.
+    var zoomDoc = activeChartTab();
+    if (zoomDoc && !isLayoutTab(zoomDoc) && zoomDoc.fitPane !== false) {
+      payload.plotWidth = FIT_MAX_W;
+      payload.plotHeight = FIT_MAX_H;
+      // The top-level keys are not enough: plotWidth/plotHeight are
+      // chartSpec-routed style keys, and the engine EXPLODES that blob
+      // over data.* at render entry - so a size the user set once would
+      // out-rank the standard for ever after, on screen AND in exports
+      // (Torry's report: box checked, export came out at the dragged
+      // size). Force the render blob too, the hiddenPoints idiom above.
+      var sizeSpec = parseSpec(payload.chartSpec);
+      sizeSpec.plotWidth = FIT_MAX_W;
+      sizeSpec.plotHeight = FIT_MAX_H;
+      payload.chartSpec = JSON.stringify(sizeSpec);
+    } else if (zoomDoc && !isLayoutTab(zoomDoc)) {
+      // The user owns the size, and it lives in the blob. Mirror it onto
+      // the top-level keys so the payload never contradicts itself: the
+      // blob is what the engine honours, but the flat keys are what the
+      // channel audit and any future reader see.
+      var mine = storedPlotSize();
+      if (mine.w) payload.plotWidth = mine.w;
+      if (mine.h) payload.plotHeight = mine.h;
+    }
     // Row-filter disclosure: builders already computed every count over
     // the KEPT rows (the filtered view), so the chart carries an honest
     // one-line statement of the active filter.
-    if (PROJECT.table && PROJECT.table.filteredView) {
+    //
+    // B7. This sentence used to be prepended to payload.missingNote, which
+    // the engine renders as a DISMISSIBLE HTML pill appended to the wrap,
+    // not to the SVG - so every SVG/PNG/JPG/PDF export, every layout
+    // snapshot and the copy-as-image showed a filtered subset with zero
+    // indication that anything had been left out. It now goes into
+    // chartNote, a real spec key that lives INSIDE the svg, so it rides
+    // every one of those paths. Written into the RENDER spec only (the
+    // hiddenPoints idiom just above), never into the stored options: it is
+    // derived state, and a user who clears their filter must not be left
+    // with our sentence in their note. A note the user wrote themselves is
+    // appended to, never replaced.
+    //
+    // B7 FOLLOW-UP (review, Jul 27 2026): the injection must be IDEMPOTENT,
+    // because the user can EDIT the on-chart note while a filter is live -
+    // the engine's editor holds the COMPOSED text, so committing any edit
+    // bakes the sentence into the stored note. Left alone, the next render
+    // drew the sentence twice, and clearing the filter left a stale
+    // "showing 20 of 24 rows" claim drawn on the chart and riding every
+    // export: a false disclosure, the exact class this feature exists to
+    // prevent. So every render first strips anything matching the injected
+    // shape from the stored note, then appends a fresh sentence only while
+    // a filter is live. The strip patterns are WORDING-SPECIFIC (they must
+    // track the fNote composition below) so a parenthetical the user typed
+    // after our sentence is never eaten, and the space-collapse is spaces
+    // only so a newline the user typed survives. The unfiltered, never-baked
+    // path writes nothing, keeping the common case byte-identical.
+    if (PROJECT.table) {
       var ft = PROJECT.table;
-      var fNote = "Filter: " + filterSummaryText(ft) +
-        " \u00b7 showing " + nRows(ft.filteredView) + " of " +
-        nRows(ft) + " rows";
-      if (ft.filterMissingDrops)
-        fNote += " (" + ft.filterMissingDrops +
-          (ft.filterMissingDrops === 1
-            ? " row left out because its value is missing"
-            : " rows left out because their values are missing") + ")";
-      if (ft.filterInapplicable && ft.filterInapplicable.length)
-        fNote += " \u00b7 not applied: " + ft.filterInapplicable.join(", ") +
-          (ft.filterInapplicable.length === 1
-            ? " (that comparison needs numbers)"
-            : " (those comparisons need numbers)");
-      // B7. This sentence used to be prepended to payload.missingNote, which
-      // the engine renders as a DISMISSIBLE HTML pill appended to the wrap,
-      // not to the SVG - so every SVG/PNG/JPG/PDF export, every layout
-      // snapshot and the copy-as-image showed a filtered subset with zero
-      // indication that anything had been left out. It now goes into
-      // chartNote, a real spec key that lives INSIDE the svg, so it rides
-      // every one of those paths. Written into the RENDER spec only (the
-      // hiddenPoints idiom just above), never into the stored options: it is
-      // derived state, and a user who clears their filter must not be left
-      // with our sentence in their note. A note the user wrote themselves is
-      // appended to, never replaced.
+      var FILTER_NOTE_RE = /\s*Filter: .*? \u00b7 showing \d+ of \d+ rows(?: \(\d+ rows? left out because (?:its value is|their values are) missing\))?(?: \u00b7 not applied: .*? \((?:that comparison needs|those comparisons need) numbers\))?/g;
       var noteSpec = parseSpec(payload.chartSpec);
-      var userNote = String(noteSpec.chartNote || "").trim();
-      noteSpec.chartNote = userNote ? userNote + " " + fNote : fNote;
-      payload.chartSpec = JSON.stringify(noteSpec);
-      payload.chartNote = noteSpec.chartNote;
+      var rawNote = String(noteSpec.chartNote || "");
+      FILTER_NOTE_RE.lastIndex = 0;
+      var hadBaked = FILTER_NOTE_RE.test(rawNote);
+      if (ft.filteredView || hadBaked) {
+        FILTER_NOTE_RE.lastIndex = 0;
+        var userNote = rawNote.replace(FILTER_NOTE_RE, " ")
+          .replace(/ {2,}/g, " ").trim();
+        var fNote = null;
+        if (ft.filteredView) {
+          fNote = "Filter: " + filterSummaryText(ft) +
+            " \u00b7 showing " + nRows(ft.filteredView) + " of " +
+            nRows(ft) + " rows";
+          if (ft.filterMissingDrops)
+            fNote += " (" + ft.filterMissingDrops +
+              (ft.filterMissingDrops === 1
+                ? " row left out because its value is missing"
+                : " rows left out because their values are missing") + ")";
+          if (ft.filterInapplicable && ft.filterInapplicable.length)
+            fNote += " \u00b7 not applied: " + ft.filterInapplicable.join(", ") +
+              (ft.filterInapplicable.length === 1
+                ? " (that comparison needs numbers)"
+                : " (those comparisons need numbers)");
+        }
+        noteSpec.chartNote = fNote
+          ? (userNote ? userNote + " " + fNote : fNote)
+          : userNote;
+        payload.chartSpec = JSON.stringify(noteSpec);
+        payload.chartNote = noteSpec.chartNote;
+      }
     }
     // Library bridge: ship the CURRENT machine libraries and defaults
     // on every render (R parity - widget.R does the same), resolve an
@@ -3717,6 +4024,22 @@
         ls.setItem(k, mine == null ? ENGINE_LS_EMPTY[k] : mine);
       }
     } catch (e) {}
+    // The LS swap above is HALF of the per-document boundary; these
+    // WINDOW-side transients are the other half. In jamovi every analysis
+    // renders in its own iframe, so the engine's echo-absorbing pins
+    // (pendingOpts / recentCommits / localOptCommits), its render hash and
+    // its inline-typing buffer are per-document by construction; here every
+    // document shares one window. A pin from doc A's edit - chartSpec
+    // carries the WHOLE style blob - overlaid A's annotations, labels and
+    // colors onto a fresh doc B rendered inside the pin window (Torry's
+    // report, Jul 27 2026, reproduced end to end). Pending edits were
+    // drained to their own document at the switch sites; whatever remains
+    // here belongs to a document this window no longer hosts.
+    try { window.__gb2_pendingOpts = {}; } catch (e) {}
+    try { window.__gb2_recentCommits = {}; } catch (e) {}
+    try { window.__gb2_localOptCommits = {}; } catch (e) {}
+    try { window.__gb2_lastRenderedHash = null; } catch (e) {}
+    try { window.__gb2_textData = null; } catch (e) {}
     ENGINE_LS_DOC = id;
   }
   function clearAllEngineDocState() {
@@ -3855,8 +4178,49 @@
     }, true);
     window.addEventListener("resize", coachPlace);
   }
+  // The engine must NEVER render under an ancestor CSS zoom: some of its
+  // layout measurements read visual pixels, and a render at 150 percent
+  // view zoom produced a chart whose LOGICAL canvas grew ~1.3x and stuck
+  // (Torry's gap-and-left-shift report; the control render at 100 percent
+  // drew the same 720px chart). Neutralizing only in renderChartIntoHost
+  // proved INSUFFICIENT: the engine schedules its own deferred internal
+  // re-renders (setTimeout re-entries into GraphBuilder2.render) that run
+  // after the tail restored the zoom. So the shell wraps the render entry
+  // itself, once: every call into the engine executes unzoomed, and the
+  // view zoom is restored in the same task, so no unzoomed frame paints.
+  function wrapEngineRenderForZoom() {
+    var gb = window.GraphBuilder2;
+    if (!gb || !gb.render || gb.render.__psZoomWrapped) return;
+    var orig = gb.render;
+    var wrapped = function (id, payload) {
+      var host = document.getElementById("psroot");
+      var had = host && (host.style.zoom ||
+        host.style.getPropertyValue("--ps-chrome-zoom"));
+      if (had) {
+        host.style.zoom = "";
+        host.style.removeProperty("--ps-chrome-zoom");
+      }
+      try {
+        return orig.apply(this, arguments);
+      } finally {
+        if (had) {
+          // Synchronous restore: at or below 100 percent the engine's
+          // _ensureChartRoomFor auto-grow cannot misfire (elements
+          // under-measure under reduction), and magnification is withdrawn
+          // from the View select pending the engine-side fix. A deferred
+          // restore was tried against the magnified case and did not hold:
+          // the grow pass runs from arbitrarily late engine redraws, which
+          // is exactly why the real fix belongs in the engine's own math.
+          try { applyViewZoom(); } catch (e) {}
+        }
+      }
+    };
+    wrapped.__psZoomWrapped = true;
+    gb.render = wrapped;
+  }
   function renderChartIntoHost() {
     var host = hostEl();
+    wrapEngineRenderForZoom();
     syncEngineDocState();
     var renderStarted = (window.performance && window.performance.now)
       ? window.performance.now() : Date.now();
@@ -3876,6 +4240,10 @@
       } catch (e) {}
       RECON_BIN_PIN = null;
       showMessage(built.placeholder, built.fix);
+      if (appWorkspace() === "chart") {
+        el("ps-status-context").textContent = chartStatusText(activeChartTab());
+        el("ps-status-selection").textContent = "Needs chart setup";
+      }
       return;
     }
     LAST_RENDER_PAYLOAD = built.payload;
@@ -3930,6 +4298,7 @@
       setTip(status, "Last render " +
         (LAST_RENDER_MS < 10 ? LAST_RENDER_MS.toFixed(1) :
           Math.round(LAST_RENDER_MS)) + " ms");
+      el("ps-status-selection").textContent = chartCaseText(ready);
     }
     var c = activeChartTab();
     // B24. activeChartTab() deliberately falls back to LAST_CHART_ID so a
@@ -3947,6 +4316,7 @@
       if (!SNAPSHOT_PASS) LAST_CHART_ID = c.id;
       captureChartSnapshot(c.id);
     }
+    applyViewZoom();
   }
 
   // ---- chart snapshots for layouts (session cache, chrome-stripped) ----
@@ -3991,6 +4361,38 @@
   var SNAP_STRIP = '[data-ov],[data-role^="sel-halo"],' +
     '[data-role="stats-link-halo"],[data-role="anatomy-overlay"],' +
     '[data-role="anatomy-capture"],[data-role="draw-capture"],.gb2-halo-union';
+  // Shared by snapshots and the t4-33 card previews: a chrome-stripped,
+  // SELF-CONTAINED svg clone. The id prefixing is load-bearing - the engine
+  // stamps the SAME ids on every render, and url(#id) resolves
+  // document-wide to the first match, so an unprefixed clone's clip paths
+  // resolve into some other svg and paint nothing.
+  function svgSelfContainedClone(best, pre) {
+    var w = best.clientWidth, hgt = best.clientHeight;
+    var clone = best.cloneNode(true);
+    var kill = clone.querySelectorAll(SNAP_STRIP);
+    for (var k = 0; k < kill.length; k++)
+      kill[k].parentNode.removeChild(kill[k]);
+    clone.removeAttribute("tabindex");
+    clone.removeAttribute("aria-label");
+    if (!clone.getAttribute("viewBox"))
+      clone.setAttribute("viewBox", "0 0 " + w + " " + hgt);
+    clone.setAttribute("width", "100%");
+    clone.setAttribute("height", "100%");
+    clone.setAttribute("preserveAspectRatio", "xMidYMid meet");
+    clone.style.position = "static";
+    clone.style.zIndex = "auto";
+    var html = clone.outerHTML;
+    var idEls = clone.querySelectorAll("[id]");
+    for (var j = 0; j < idEls.length; j++) {
+      var oid = idEls[j].getAttribute("id");
+      if (!oid) continue;
+      html = html.split('id="' + oid + '"').join('id="' + pre + oid + '"');
+      html = html.split("url(#" + oid + ")").join("url(#" + pre + oid + ")");
+      html = html.split('url("#' + oid + '")').join('url("#' + pre + oid + '")');
+      html = html.split('href="#' + oid + '"').join('href="#' + pre + oid + '"');
+    }
+    return { html: html, w: w, h: hgt };
+  }
   function captureChartSnapshot(chartId) {
     try {
       var svgs = hostEl().querySelectorAll("svg");
@@ -4000,43 +4402,22 @@
         if (a > bestA) { bestA = a; best = svgs[i]; }
       }
       if (!best || best.clientWidth < 200) return;
-      var w = best.clientWidth, hgt = best.clientHeight;
-      var clone = best.cloneNode(true);
-      var kill = clone.querySelectorAll(SNAP_STRIP);
-      for (var k = 0; k < kill.length; k++)
-        kill[k].parentNode.removeChild(kill[k]);
-      clone.removeAttribute("tabindex");
-      clone.removeAttribute("aria-label");
-      if (!clone.getAttribute("viewBox"))
-        clone.setAttribute("viewBox", "0 0 " + w + " " + hgt);
-      clone.setAttribute("width", "100%");
-      clone.setAttribute("height", "100%");
-      clone.setAttribute("preserveAspectRatio", "xMidYMid meet");
-      // The engine svg carries inline position:relative + z-index:1;
-      // neutralize it or a snapshot panel stacks ABOVE later-placed
-      // layout items (text labels) regardless of DOM order.
-      clone.style.position = "static";
-      clone.style.zIndex = "auto";
-      // Self-contained defs: the engine stamps the SAME ids on every
-      // render (gb2-cat-data-clip-psroot, gb2-violin-clip, ...), and
-      // url(#id) resolves DOCUMENT-wide to the first match - so a
-      // clone's data clip resolved into the parked host svg and painted
-      // NOTHING (empty snapshot panels). Prefix every id inside the
-      // clone and rewrite the fully-delimited reference tokens; the
-      // delimiters (closing quote / paren) make prefix ids collision-
-      // safe without length sorting.
-      var html = clone.outerHTML;
-      var idEls = clone.querySelectorAll("[id]");
-      var pre = "snap-" + chartId + "-";
-      for (var j = 0; j < idEls.length; j++) {
-        var oid = idEls[j].getAttribute("id");
-        if (!oid) continue;
-        html = html.split('id="' + oid + '"').join('id="' + pre + oid + '"');
-        html = html.split("url(#" + oid + ")").join("url(#" + pre + oid + ")");
-        html = html.split('url("#' + oid + '")').join('url("#' + pre + oid + '")');
-        html = html.split('href="#' + oid + '"').join('href="#' + pre + oid + '"');
+      // A live capture while fit has shrunken the canvas below the chart's
+      // authoritative size would bake a window-dependent figure into the
+      // layout pool. Skip it: the snapshot stays invalid and the ensure
+      // pass re-renders at the authoritative size offscreen. Renders made
+      // BY that pass are already forced-authoritative, so they always pass.
+      if (!SNAPSHOT_PASS) {
+        // clientWidth is LOGICAL under ancestor CSS zoom (measured in the
+        // zoom spike), so this guard is zoom-immune. Tolerance 12: the
+        // engine pads the svg ~8px past plotWidth x 96, and the first cut
+        // (2px) silently refused every live capture because of it.
+        var authSz = authoritativePlotSize();
+        if (Math.abs(best.clientWidth - authSz.w * 96) > 12) return;
       }
-      CHART_SNAPS[chartId] = { svg: html, w: w, h: hgt, rev: snapRev() };
+      var snap = svgSelfContainedClone(best, "snap-" + chartId + "-");
+      CHART_SNAPS[chartId] = { svg: snap.html, w: snap.w, h: snap.h,
+                               rev: snapRev() };
     } catch (e) {}
   }
   // Render any placed-but-unsnapshotted charts through the offscreen
@@ -4869,8 +5250,14 @@
       if (Array.isArray(incomingSpec.hiddenPoints) &&
           bridgeChartPointExclusions(incomingSpec.hiddenPoints, incomingSpec)) return;
     }
-    fitNoticeSizeCommit(key, value);   // punch list 27
+    // AFTER the store write, not before: the notice re-syncs the inspector,
+    // and the size row now reports the size in force - which it reads back
+    // out of this very store. Called first, it rendered the label from the
+    // pre-edit state (it said 6 x 4 while the chart was 5 in). The notice
+    // compares the incoming size against the standard, never against the
+    // stored one, so the order is safe.
     optionsFor(curModule())[key] = value;
+    fitNoticeSizeCommit(key, value);   // punch list 27
     bumpSnapEpoch();   // a style edit changes what this chart draws
     persistStyleEdit();
     if (NO_ECHO_KEYS[key]) harvestOverlayArrays();
@@ -4991,19 +5378,30 @@
   }
 
   // ---- punch list 27: fit the chart to the pane ----
-  // The templates ship plotWidth 6 / plotHeight 4 - a fixed 576x384 - and
-  // nothing in the shell ever read or wrote them: no ResizeObserver, no Fit
-  // control. At 1440x900 that left about 137px of white either side of the
-  // chart inside an 851px pane whose toolbar spanned the full width, and below
-  // about 1240px the fixed svg made the pane scroll SIDEWAYS.
+  // The templates ship plotWidth 6 / plotHeight 4 and nothing in the shell
+  // ever read or wrote them; then t2-27 grew a ResizeObserver that COMMITTED
+  // window-derived sizes into the store, and Torry's Jul 27 two-PDF report
+  // showed where that leads: the logical canvas IS the figure (the engine
+  // draws text and strokes at fixed point sizes while geometry fills the
+  // canvas), so a window-sized canvas is a window-sized figure.
   //
-  // Width drives it and the aspect ratio is preserved, because a chart that
-  // also grows to fill the vertical space gets absurdly tall; the height is
-  // clamped to the pane so a short window shrinks it instead. The engine's own
-  // manual sizing still wins: a size the USER commits turns fitting off for
-  // that document, which is what FIT_LAST is for.
-  var FIT_MIN_W = 3, FIT_MAX_W = 14, FIT_MIN_H = 2, FIT_MAX_H = 10;
-  var FIT_OBSERVER = null, FIT_TIMER = null, FIT_LAST = null, FIT_APPLYING = false;
+  // THE VIEW-ZOOM MODEL (Torry's ruling, Jul 27 2026, second revision): the
+  // chart RENDERS at its authoritative size always - the 7.5 x 5 in
+  // standard while the app manages the size (doc.fitPane !== false), the
+  // user's own stored size once they commit one - and the WINDOW is a
+  // viewport onto it: CSS zoom on the host scales the VIEW, never the
+  // figure. 13pt stays 13pt in the document; a small window shows it
+  // smaller with proportions intact, which is exactly what exports produce.
+  // MEASURED BEFORE BUILDING (the zoom-spike probes): under CSS zoom the
+  // engine's click-to-edit opens the right panels, a Shift-drag category
+  // reorder commits the identical order at 75% and 100%, dragged bars track
+  // the cursor visually, and svg clientWidth stays LOGICAL, so
+  // snapshot-guard math is zoom-immune. Nothing is committed on window
+  // resize any more: a resize is a pure style update. Stale window-derived
+  // plotWidths from the committed-fit era may survive in stores;
+  // buildPayload deliberately ignores them for fit-managed docs.
+  var FIT_MAX_W = 7.5, FIT_MAX_H = 5;   // the standard: 720 x 480 px
+  var FIT_OBSERVER = null, FIT_TIMER = null;
   function fitEnabled() {
     var doc = activeChartTab();
     return !!doc && !isLayoutTab(doc) && doc.fitPane !== false;
@@ -5011,72 +5409,199 @@
   function fitSetEnabled(on) {
     var doc = activeChartTab();
     if (!doc || isLayoutTab(doc)) return;
+    // Unchecking by hand is an ownership transfer, not a resize: seed the
+    // size in force so nothing jumps. Without this the chart fell to the
+    // 6 x 4 template default the moment the box came off, with no size
+    // control anywhere near it to explain the jump (Torry, Jul 27 2026:
+    // "if I have it unchecked, is there something wrong with that?").
+    if (!on && doc.fitPane !== false && !storedPlotSize().has) {
+      var store = optionsFor(curModule());
+      var seed = parseSpec(typeof store.chartSpec === "string"
+        ? store.chartSpec : "");
+      seed.plotWidth = FIT_MAX_W;
+      seed.plotHeight = FIT_MAX_H;
+      store.chartSpec = JSON.stringify(seed);
+      store.plotWidth = FIT_MAX_W;
+      store.plotHeight = FIT_MAX_H;
+    }
     doc.fitPane = !!on;
     persist();
     syncAll();
-    if (on) fitNow(true);
+    render();   // the payload size follows the authority flag
   }
-  // Called by the setOption sink: a plotWidth/plotHeight that is not the one
-  // auto-fit just wrote is the user resizing, so stop fighting them.
+  // Called by the setOption sink. The zoom model itself never commits
+  // sizes, so ANY real plotWidth/plotHeight commit is the user taking
+  // ownership of the geometry through the engine's own size controls.
   function fitNoticeSizeCommit(key, value) {
-    if (key !== "plotWidth" && key !== "plotHeight") return;
-    if (FIT_APPLYING) return;
-    var want = FIT_LAST && FIT_LAST[key === "plotWidth" ? "w" : "h"];
-    if (want != null && Math.abs(Number(value) - want) < 0.02) return;
     var doc = activeChartTab();
-    if (doc && !isLayoutTab(doc) && doc.fitPane !== false) {
-      doc.fitPane = false;
-      syncAll();
+    if (!doc || isLayoutTab(doc) || doc.fitPane === false) return;
+    var owns = false;
+    if (key === "plotWidth" || key === "plotHeight") {
+      owns = true;                       // legacy path: a real option key
+    } else if (key === "chartSpec" && typeof value === "string") {
+      // The real path (Torry's report): the engine's size controls are
+      // chartSpec-routed, so a resize arrives as a blob commit and the
+      // old literal-key test never fired - the box went on claiming
+      // "standard" while the figure and its exports followed the drag.
+      // Ignore a size EQUAL to the standard: that is our own forced
+      // value echoing back through the engine's spec state, not a user
+      // choice (and setting exactly the standard changes nothing anyway).
+      var inW = Number(parseSpec(value).plotWidth) || 0;
+      var inH = Number(parseSpec(value).plotHeight) || 0;
+      owns = (inW > 0 && Math.abs(inW - FIT_MAX_W) > 0.005) ||
+             (inH > 0 && Math.abs(inH - FIT_MAX_H) > 0.005);
     }
+    if (!owns) return;
+    doc.fitPane = false;
+    syncAll();
   }
-  function fitTargetSize() {
+  function chartLogicalWidthPx() {
     var host = hostEl();
-    var pane = document.querySelector(".ps-main-workspace");
-    if (!host || !pane) return null;
-    var availW = host.clientWidth || pane.clientWidth;
-    var availH = pane.clientHeight;
-    if (!availW || availW < 60) return null;
-    var store = optionsFor(curModule());
-    var curW = Number(store.plotWidth) || 6;
-    var curH = Number(store.plotHeight) || 4;
-    var aspect = curH > 0 && curW > 0 ? curH / curW : 4 / 6;
-    var chromeH = 96;   // the toolbar band and the tab strip above the chart
-    var w = availW / 96;
-    w = Math.max(FIT_MIN_W, Math.min(FIT_MAX_W, w));
-    var h = w * aspect;
-    var maxH = Math.max(FIT_MIN_H, (availH - chromeH) / 96);
-    if (h > maxH) {
-      h = Math.max(FIT_MIN_H, maxH);
-      w = Math.max(FIT_MIN_W, Math.min(FIT_MAX_W, aspect > 0 ? h / aspect : w));
+    if (!host) return 0;
+    var svgs = host.querySelectorAll("svg");
+    var best = null, bestA = 0;
+    for (var i = 0; i < svgs.length; i++) {
+      var a = (Number(svgs[i].getAttribute("width")) || 0) *
+              (Number(svgs[i].getAttribute("height")) || 0);
+      if (a > bestA) { bestA = a; best = svgs[i]; }
     }
-    h = Math.max(FIT_MIN_H, Math.min(FIT_MAX_H, h));
-    return { w: Math.round(w * 100) / 100, h: Math.round(h * 100) / 100 };
+    return best ? Number(best.getAttribute("width")) || 0 : 0;
   }
-  function fitNow(force) {
-    if (!fitEnabled()) return;
-    var want = fitTargetSize();
-    if (!want) return;
-    var store = optionsFor(curModule());
-    var curW = Number(store.plotWidth) || 6, curH = Number(store.plotHeight) || 4;
-    // 0.05in is half a millimetre on screen: below that a resize is noise, and
-    // committing it would re-render and re-persist for nothing.
-    if (!force && Math.abs(curW - want.w) < 0.05 &&
-        Math.abs(curH - want.h) < 0.05) return;
-    FIT_LAST = want;
-    FIT_APPLYING = true;
-    try {
-      if (typeof window.setOption === "function") {
-        window.setOption("plotWidth", want.w);
-        window.setOption("plotHeight", want.h);
+  // TOOLBAR ALIGNMENT (Torry's report, Jul 27 2026: the graph-type and
+  // palette dropdowns open far to the right of the buttons that summon
+  // them). Both flyouts are absolutely positioned inside the CHART WRAP,
+  // and the engine centres that wrap when its card is wider than the
+  // figure - which is always true here, where the workspace pane is much
+  // wider than a 7.5in chart but the toolbar spans the full card. So the
+  // buttons sat ~150px LEFT of the flyouts' coordinate origin: the palette
+  // flyout's own button-relative maths (max(6, trigger.left - origin.left))
+  // went negative and clamped to the 6px corner, and the graph-type flyout
+  // is pinned at that corner by design. Inside jamovi the wrap and the
+  // toolbar share a left edge, so neither shows the fault.
+  // The fix is alignment, not arithmetic: constrain the toolbar to the
+  // figure's width and centre it the same way, and the engine's existing
+  // positioning lands under the right button. Declarative CSS reading this
+  // variable, because the engine rebuilds the toolbar on every render and
+  // an inline style would be wiped (the chrome-counter-zoom lesson).
+  // Put each dropdown under the button that opened it. The engine anchors
+  // both flyouts inside the CHART WRAP, which it centres whenever the card
+  // is wider than the figure - always true here - so a button in the
+  // full-width toolbar sits ~150px LEFT of the flyout's origin. The engine
+  // already computes the right offset for the palette flyout, but floors it
+  // at 6 (max(6, trigger.left - origin.left)), and a negative value is
+  // exactly what this layout produces; the graph-type flyout is pinned at
+  // that 6px corner outright. Nothing upstream is wrong for jamovi, where
+  // the wrap and the toolbar share a left edge.
+  // So the shell re-seats them after the engine has shown them. Negative
+  // offsets are safe: every ancestor up to the workspace pane is
+  // overflow:visible. The rects are visual pixels and the flyouts carry the
+  // chrome counter-zoom, so their own px are visual px too - the arithmetic
+  // holds at every view zoom.
+  // (The first shape of this fix shrank the TOOLBAR to the chart's width
+  // instead. It worked, and Torry rejected it: he wants the bar all the way
+  // across. Move the menu, never the bar.)
+  function syncFlyoutPositions() {
+    var host = hostEl();
+    if (!host) return;
+    var pane = document.querySelector(".ps-main-workspace");
+    var paneR = pane ? pane.getBoundingClientRect() : null;
+    ["graphtype", "palette"].forEach(function (kind) {
+      var fly = host.querySelector('[data-role="' + kind + '-flyout"]');
+      if (!fly || fly.style.display === "none") return;
+      var op = fly.offsetParent;
+      var trig = host.querySelector('[data-role="' + kind + '-trigger"]');
+      if (!op || !trig) return;
+      var opR = op.getBoundingClientRect();
+      var tR = trig.getBoundingClientRect();
+      var left = tR.left - opR.left;
+      // Keep it on screen: if aligning would push the menu past the right
+      // edge of the workspace, slide it back just far enough.
+      if (paneR) {
+        var over = (opR.left + left + fly.offsetWidth) - (paneR.right - 8);
+        if (over > 0) left -= over;
       }
-    } finally { FIT_APPLYING = false; }
+      fly.style.left = Math.round(left) + "px";
+    });
+  }
+  function applyViewZoom() {
+    var host = hostEl();
+    if (!host) return;
+    var doc = activeChartTab();
+    if (!doc || isLayoutTab(doc) || appWorkspace() !== "chart" ||
+        host.classList.contains("ps-offscreen")) {
+      host.style.zoom = "";
+      return;
+    }
+    var mode = doc.viewZoom == null ? "fit" : doc.viewZoom;
+    // Magnification is withdrawn pending the engine _ensureChartRoomFor
+    // fix (see the zoom select in index.html). Normalize a persisted
+    // magnified mode at READ time so the select, the readout, and the
+    // rendered zoom all agree (setting a select to a value with no option
+    // blanks it); the stored preference itself is left alone, so it
+    // resurrects when the engine fix restores the 125/150 options.
+    if (mode !== "fit" && Number(mode) > 1) mode = 1;
+    var S = 1;
+    if (mode === "fit") {
+      var pane = document.querySelector(".ps-main-workspace");
+      var availW = pane ? pane.clientWidth - 4 : 0;
+      var logical = chartLogicalWidthPx();
+      // Fit means "make it visible", never "make it bigger": auto-scaling
+      // up would re-create the huge-monitor problem the standard size
+      // exists to prevent.
+      S = (availW > 40 && logical > 0) ? Math.min(1, availW / logical) : 1;
+    } else {
+      S = Number(mode) || 1;
+    }
+    // Backstop for the same rule: nothing above 100 percent may render
+    // while the engine bug stands (any magnified redraw inflates the svg).
+    S = Math.max(0.35, Math.min(1, S));
+    host.style.zoom = Math.abs(S - 1) < 0.005
+      ? "" : String(Math.round(S * 1000) / 1000);
+    if (mode === "fit" && S < 1) {
+      // The engine wrap carries chrome (margins, padding) the width math
+      // cannot see from the svg alone. Rather than model it, measure it:
+      // one synchronous feedback step reads the real overflow the applied
+      // zoom produced and corrects for it, which absorbs any chrome the
+      // engine ever grows. Layout reads after a style write are synchronous.
+      var paneEl = document.querySelector(".ps-main-workspace");
+      if (paneEl) {
+        var over = paneEl.scrollWidth - paneEl.clientWidth;
+        if (over > 1) {
+          S = Math.max(0.35, S * (paneEl.clientWidth /
+            (paneEl.clientWidth + over)) - 0.004);
+          host.style.zoom = String(Math.round(S * 1000) / 1000);
+        }
+      }
+    }
+    // Chrome isolation (Torry, Jul 27 2026): the engine toolbar and panels
+    // counter-zoom back to true size via the CSS rule reading this
+    // variable, so 50 percent never makes the controls tiny and 150
+    // percent never makes them comic. Set AFTER the overflow correction:
+    // that step refines S, and the inverse must match the FINAL zoom.
+    if (Math.abs(S - 1) < 0.005) host.style.removeProperty("--ps-chrome-zoom");
+    else host.style.setProperty("--ps-chrome-zoom",
+      String(Math.round((1 / S) * 1000) / 1000));
+    var ro = el("ps-zoom-readout");
+    if (ro) ro.textContent = mode === "fit" && Math.abs(S - 1) >= 0.005
+      ? Math.round(S * 100) + "%" : "";
+    var sel = el("ps-chart-zoom");
+    if (sel && String(sel.value) !== String(mode)) sel.value = String(mode);
+    // Last: an open dropdown must follow the zoom it just settled on.
+    syncFlyoutPositions();
+  }
+  function setViewZoom(value) {
+    var doc = activeChartTab();
+    if (!doc || isLayoutTab(doc)) return;
+    doc.viewZoom = value === "fit" ? "fit" : (Number(value) || 1);
+    persist(false);
+    applyViewZoom();
   }
   function fitSchedule() {
     if (FIT_TIMER) window.clearTimeout(FIT_TIMER);
     FIT_TIMER = window.setTimeout(function () {
       FIT_TIMER = null;
-      fitNow(false);
-    }, 140);
+      applyViewZoom();
+    }, 60);
   }
   function wireFitToPane() {
     var pane = document.querySelector(".ps-main-workspace");
@@ -5088,6 +5613,10 @@
     var box = el("ps-fit-pane");
     if (box) box.addEventListener("change", function () {
       fitSetEnabled(this.checked);
+    });
+    var zoomSel = el("ps-chart-zoom");
+    if (zoomSel) zoomSel.addEventListener("change", function () {
+      setViewZoom(this.value);
     });
   }
 
@@ -5457,7 +5986,14 @@
   }
   function syncAnalysisGuidance() {
     var help = el("ps-analysis-help");
-    if (help) help.textContent = ANALYSIS_GUIDANCE[curModule()] || "";
+    if (!help) return;
+    // De-busy pass (Torry, Jul 27 2026): read-once prose should not hold
+    // three lines of the pane forever. The first sentence stays visible;
+    // the full guidance is one hover away.
+    var full = ANALYSIS_GUIDANCE[curModule()] || "";
+    var cut = full.indexOf(". ");
+    help.textContent = cut === -1 ? full : full.slice(0, cut + 1);
+    setTip(help, full);
   }
   // Everything a role mutation must refresh, in one place.
   function roleChanged() {
@@ -5546,8 +6082,9 @@
     pick.appendChild(mkEl("div", "ps-role-picker-blurb", blurb));
     if (!eligible.length) {
       pick.appendChild(mkEl("div", "ps-role-picker-none",
-        "No variables fit this role yet. Change a variable's type from " +
-        "the list above, or import different data."));
+        "No variables fit this role yet. Check the variable types in the " +
+        "Data workspace, or open Available variables below to review " +
+        "what you have."));
     }
     for (var i = 0; i < eligible.length; i++) {
       (function (col) {
@@ -5626,13 +6163,20 @@
         slot.setAttribute("data-role-key", def.key);
         var head = mkEl("div", "ps-role-card-head");
         head.appendChild(mkEl("span", "ps-slot-label", presentation.label));
-        head.appendChild(mkEl("span", "ps-role-badge " +
-          (def.required ? "ps-role-badge-required" : ""),
-          def.required ? "Required" : "Optional"));
+        // De-busy pass (Torry, Jul 27 2026): the badge renders only while
+        // the zone is EMPTY - a met requirement is not news, and with the
+        // badges gone from settled zones the only loud thing left is the
+        // one that still needs a decision. Screen readers keep the state
+        // either way via the drop's aria-label.
+        if (!members.length)
+          head.appendChild(mkEl("span", "ps-role-badge " +
+            (def.required ? "ps-role-badge-required" : ""),
+            def.required ? "Required" : "Optional"));
         slot.appendChild(head);
         // The teaching sentence lives in the EXPANDED picker (where the
         // user is deciding), not on every card - the card keeps one line.
-        var drop = mkEl("div", "ps-slot-drop");
+        var drop = mkEl("div", "ps-slot-drop" +
+          (members.length ? " ps-slot-filled" : ""));
         drop.tabIndex = 0;
         drop.setAttribute("role", "button");
         drop.setAttribute("aria-label", presentation.label +
@@ -5655,10 +6199,14 @@
         for (var mi = 0; mi < members.length; mi++) {
           (function (col) {
             var chip = mkEl("span", "ps-slot-chip");
+            // The type ICON carries the kind; the word (NOMINAL etc.)
+            // repeated it louder and is retired (de-busy pass). The
+            // picker rows keep the word: that is a choosing surface.
             chip.innerHTML = psTypeIcon(PROJECT.table.types[col]) +
-              '<span class="ps-slot-chip-name">' + escHtml(col) + "</span>" +
-              '<span class="ps-slot-chip-kind">' +
-              escHtml(typeLabel(PROJECT.table.types[col])) + "</span>";
+              '<span class="ps-slot-chip-name">' + escHtml(col) + "</span>";
+            setTip(chip, col + ": " +
+              typeLabel(PROJECT.table.types[col]).toLowerCase() +
+              ". Drag to another role to move it.");
             chip.setAttribute("draggable", "true");
             chip.setAttribute("data-col", col);
             chip.addEventListener("dragstart", function (e) {
@@ -5690,10 +6238,12 @@
           empty.appendChild(mkEl("span", "",
             def.multi ? "Choose variables" : "Choose a variable"));
           drop.appendChild(empty);
-          drop.appendChild(mkEl("span", "ps-slot-count",
-            eligible.length
-              ? eligible.length + " eligible"
-              : "none eligible"));
+          // The count earns its place only as a WARNING: "none eligible"
+          // says clicking is futile before the user tries. A positive
+          // count is noise at rest - the picker shows the candidates
+          // themselves the moment the zone is clicked (de-busy pass).
+          if (!eligible.length)
+            drop.appendChild(mkEl("span", "ps-slot-count", "none eligible"));
         }
         drop.addEventListener("click", function (e) {
           if (e.target.closest && e.target.closest(".ps-slot-x")) return;
@@ -5795,6 +6345,29 @@
     for (var q = 0; q < hot.length; q++) hot[q].classList.remove("ps-droptarget");
     highlightEligibleRoles(null);
   }
+  // Roles-first disclosure (Torry's ruling, Jul 27 2026): the variables
+  // list is a reference inventory below the slots, collapsed by default.
+  // State lives in PROJECT.ui.varboxOpen (rides the project's UI prefs,
+  // like column widths), changes only on an explicit toggle click, and
+  // never auto-opens - the predictability rule.
+  function varboxOpen() {
+    return !!(PROJECT.ui && PROJECT.ui.varboxOpen);
+  }
+  function setVarboxOpen(on) {
+    if (!PROJECT.ui) PROJECT.ui = {};
+    PROJECT.ui.varboxOpen = !!on;
+    persist(false);
+    syncVarboxDisclosure();
+  }
+  function syncVarboxDisclosure() {
+    var body = el("ps-varbox-body"), tog = el("ps-varbox-toggle");
+    if (!body || !tog) return;
+    var open = varboxOpen();
+    body.hidden = !open;
+    tog.setAttribute("aria-expanded", open ? "true" : "false");
+    var chev = tog.querySelector(".ps-varbox-chev");
+    if (chev) chev.textContent = open ? "\u25be" : "\u25b8";
+  }
   function syncDataRow() {
     var info = el("ps-datainfo");
     var t = PROJECT.table;
@@ -5809,14 +6382,30 @@
       : "no data";
     var chips = el("ps-columns");
     chips.innerHTML = "";
-    if (!t) return;
+    syncVarboxDisclosure();
+    var vbLabel = el("ps-varbox-label");
+    if (!t) {
+      if (vbLabel) vbLabel.textContent = "Available variables";
+      return;
+    }
+    // De-busy pass (Torry, Jul 27 2026): an ASSIGNED variable leaves the
+    // list and lives in its role zone above (jamovi's supplier behavior).
+    // The mapping is stated once, the list shrinks as the work completes,
+    // and a configured chart shows only what is still available.
     var roleOf = roleTagsFor(curModule());
     var filt = el("ps-varfilter");
-    filt.style.display = t.order.length > 8 ? "" : "none";
+    var unassigned = t.order.filter(function (c) { return !roleOf[c]; });
+    // The collapsed header still answers "what is left" at a glance.
+    if (vbLabel) vbLabel.textContent =
+      "Available variables (" + unassigned.length + ")";
+    filt.style.display = unassigned.length > 8 ? "" : "none";
     var needle = VAR_FILTER.toLowerCase();
+    var shown = 0;
     for (var i = 0; i < t.order.length; i++) {
       (function (col) {
+        if (roleOf[col]) return;
         if (needle && col.toLowerCase().indexOf(needle) === -1) return;
+        shown++;
         var kind = t.types[col];
         var chip = mkEl("button", "ps-chip");
         chip.type = "button";
@@ -5825,12 +6414,8 @@
                      "to assign it.");
         chip.setAttribute("data-kind", kind);
         chip.setAttribute("data-col", col);
-        if (roleOf[col]) chip.setAttribute("data-assigned", "1");
         chip.innerHTML = psTypeIcon(kind) +
-          '<span class="ps-chip-name">' + escHtml(col) + "</span>" +
-          (roleOf[col]
-           ? '<span class="ps-chip-role">' + escHtml(roleOf[col]) + "</span>"
-           : "");
+          '<span class="ps-chip-name">' + escHtml(col) + "</span>";
         chip.setAttribute("draggable", "true");
         chip.addEventListener("click", function (e) {
           var r = chip.getBoundingClientRect();
@@ -5858,6 +6443,13 @@
         });
         chips.appendChild(chip);
       })(t.order[i]);
+    }
+    if (!shown && t.order.length) {
+      chips.appendChild(mkEl("div", "ps-chip-empty-note",
+        needle && unassigned.length
+          ? "No variables match the filter."
+          : "Every variable is assigned to a role above. Remove one from " +
+            "its role to bring it back here."));
     }
     syncEligibilityHints();
   }
@@ -5934,6 +6526,41 @@
   var GRID_EDIT = null;   // {col, row, td, input, canceling}
   var GRID_SELECTION = null; // {anchorCol, anchorRow, focusCol, focusRow}
   var GRID_SELECTION_KIND = null; // cells | row | column | all
+  // t4-34 (Torry's ask): Cmd/Ctrl+click builds a DISCONTIGUOUS column
+  // selection. Non-null only then, and only under kind "column"; it is an
+  // ordered list of column names. The rect (anchor/focus) degrades to the
+  // FOCUSED column while this is active, so any consumer not yet taught
+  // about the set UNDER-selects rather than silently spanning the gap.
+  var GRID_SELECTION_COLS = null;
+  function gridSelectedColumns() {
+    var t = PROJECT.table;
+    if (!t || GRID_SELECTION_KIND !== "column") return [];
+    if (GRID_SELECTION_COLS) {
+      return GRID_SELECTION_COLS.filter(function (c) {
+        return t.order.indexOf(c) !== -1 && !GRID_HIDDEN_COLUMNS[c];
+      });
+    }
+    var r = gridSelectionRect(), out = [];
+    if (r) for (var i = r.c0; i <= r.c1; i++)
+      if (!GRID_HIDDEN_COLUMNS[t.order[i]]) out.push(t.order[i]);
+    return out;
+  }
+  function gridToggleColumnSelection(col) {
+    var t = PROJECT.table;
+    if (!t || t.order.indexOf(col) === -1) return;
+    var cur = GRID_SELECTION_KIND === "column" ? gridSelectedColumns() : [];
+    var at = cur.indexOf(col);
+    if (at === -1) cur.push(col);
+    else if (cur.length > 1) cur.splice(at, 1);
+    // Unselecting the last remaining column keeps it: never empty.
+    cur.sort(function (a, b) {
+      return t.order.indexOf(a) - t.order.indexOf(b);
+    });
+    var focus = at === -1 ? col : cur[cur.length - 1];
+    gridSetSelection(focus, 0, focus, nRows(t) - 1, "column");
+    GRID_SELECTION_COLS = cur.length > 1 ? cur : null;
+    gridApplySelection();
+  }
   var INSPECTOR_VAR = null;
   var GRID_DRAG = null;      // pointer gesture armed on a data cell
   var GRID_COLUMN_DRAG = null; // active header-divider resize gesture
@@ -6003,16 +6630,71 @@
     if (INSPECTOR_VAR && visible.indexOf(INSPECTOR_VAR) === -1)
       INSPECTOR_VAR = visible.length ? visible[0] : null;
   }
-  function gridHideColumn(col) {
+  // The desktop convention (Torry's report, Jul 27 2026): a right-click on
+  // a column or row that sits INSIDE a multi-selection acts on the WHOLE
+  // selection - hiding one column out of five selected reads as a bug - and
+  // a right-click OUTSIDE the selection acts on the clicked target alone.
+  // Hidden columns inside a selected range are skipped: the user selected
+  // what they could see.
+  function columnMenuTargets(col) {
     var t = PROJECT.table;
-    if (!t || t.order.indexOf(col) === -1 ||
-        gridVisibleColumns(t).length <= 1) return false;
-    GRID_HIDDEN_COLUMNS[col] = true;
+    if (!t || GRID_SELECTION_KIND !== "column" || !GRID_SELECTION)
+      return [col];
+    if (GRID_SELECTION_COLS) {
+      // Discontiguous set: inside acts on the set, outside on the clicked.
+      var set = gridSelectedColumns();
+      return set.indexOf(col) !== -1 && set.length ? set : [col];
+    }
+    var a = t.order.indexOf(GRID_SELECTION.anchorCol);
+    var b = t.order.indexOf(GRID_SELECTION.focusCol);
+    var c = t.order.indexOf(col);
+    if (a < 0 || b < 0 || c < 0) return [col];
+    var lo = Math.min(a, b), hi = Math.max(a, b);
+    if (c < lo || c > hi) return [col];
+    var out = [];
+    for (var i = lo; i <= hi; i++)
+      if (!GRID_HIDDEN_COLUMNS[t.order[i]]) out.push(t.order[i]);
+    return out.length ? out : [col];
+  }
+  function rowMenuTargets(row) {
+    var t = PROJECT.table;
+    if (!t || GRID_SELECTION_KIND !== "row" || !GRID_SELECTION) return [row];
+    var a = Math.round(Number(GRID_SELECTION.anchorRow));
+    var b = Math.round(Number(GRID_SELECTION.focusRow));
+    if (!isFinite(a) || !isFinite(b)) return [row];
+    var lo = Math.min(a, b), hi = Math.max(a, b);
+    if (row < lo || row > hi) return [row];
+    var out = [];
+    for (var r = lo; r <= hi && r < nRows(t); r++) if (r >= 0) out.push(r);
+    return out.length ? out : [row];
+  }
+  function gridHideColumn(col) { return gridHideColumns([col]); }
+  function gridHideColumns(cols) {
+    var t = PROJECT.table;
+    if (!t) return false;
+    var visible = gridVisibleColumns(t).length;
+    var hidden = [], floored = 0;
+    for (var i = 0; i < cols.length; i++) {
+      var col = cols[i];
+      if (t.order.indexOf(col) === -1 || GRID_HIDDEN_COLUMNS[col]) continue;
+      // Never hide the last visible column: the grid must keep a surface.
+      if (visible <= 1) { floored++; continue; }
+      GRID_HIDDEN_COLUMNS[col] = true;
+      visible--;
+      hidden.push(col);
+    }
+    if (!hidden.length) {
+      showToast("At least one column stays visible");
+      return false;
+    }
     gridClearSelection(false);
     gridSyncInspectorToVisible(t);
     syncDataGrid();
     syncContextInspector();
-    showToast("Hidden " + col + " \u00b7 data and charts unchanged");
+    showToast("Hidden " +
+      (hidden.length === 1 ? hidden[0] : hidden.length + " columns") +
+      (floored ? " \u00b7 kept the last visible column" : "") +
+      " \u00b7 data and charts unchanged");
     return true;
   }
   function gridShowColumn(col) {
@@ -6149,32 +6831,44 @@
     INSPECTOR_VAR = name;
     persist(); syncAll(); render();
   }
-  function deleteVariable(col) {
-    var t = PROJECT.table, at = t ? t.order.indexOf(col) : -1;
-    if (!t || at === -1 || t.order.length <= 1) {
+  function deleteVariable(col) { deleteVariables([col]); }
+  function deleteVariables(cols) {
+    var t = PROJECT.table;
+    if (!t) return;
+    var kill = [];
+    for (var k = 0; k < cols.length; k++)
+      if (t.order.indexOf(cols[k]) !== -1 && kill.indexOf(cols[k]) === -1)
+        kill.push(cols[k]);
+    if (!kill.length || t.order.length - kill.length < 1) {
       showToast("A dataset must keep at least one variable"); return;
     }
-    dataMark("deleting the variable");
+    dataMark(kill.length === 1 ? "deleting the variable"
+      : "deleting " + kill.length + " variables");
     var undoDepth = DATA_ACTION_SEQ;
-    t.order.splice(at, 1);
-    delete t.raw[col]; delete t.types[col];
-    delete gridColumnWidths(false)[col];
-    delete GRID_NATURAL_WIDTHS[col];
-    delete GRID_HIDDEN_COLUMNS[col];
-    if (t.declaredLevels) delete t.declaredLevels[col];
-    if (t.levelOrderDefaults) delete t.levelOrderDefaults[col];
-    if (t.excluded) delete t.excluded[col];
+    var firstAt = t.order.indexOf(kill[0]);
+    for (var d = 0; d < kill.length; d++) {
+      var col = kill[d];
+      t.order.splice(t.order.indexOf(col), 1);
+      delete t.raw[col]; delete t.types[col];
+      delete gridColumnWidths(false)[col];
+      delete GRID_NATURAL_WIDTHS[col];
+      delete GRID_HIDDEN_COLUMNS[col];
+      if (t.declaredLevels) delete t.declaredLevels[col];
+      if (t.levelOrderDefaults) delete t.levelOrderDefaults[col];
+      if (t.excluded) delete t.excluded[col];
+      if (t.computed) delete t.computed[col];
+    }
     if (Array.isArray(t.filters))
       t.filters = t.filters.filter(function (f) {
-        return f && f.col !== col;
+        return f && kill.indexOf(f.col) === -1;
       });
-    if (t.computed) delete t.computed[col];
     t.edited = true;
-    INSPECTOR_VAR = t.order[Math.min(at, t.order.length - 1)];
+    INSPECTOR_VAR = t.order[Math.min(firstAt, t.order.length - 1)];
     gridClearSelection(false);
     retype(t); validateRoles();
     persist(); syncAll(); render();
-    offerDataUndo("Deleted variable " + col, undoDepth);
+    offerDataUndo(kill.length === 1 ? "Deleted variable " + kill[0]
+      : "Deleted " + kill.length + " variables", undoDepth);
   }
   function applyVariableLevelOrder(col, levels) {
     var t = PROJECT.table;
@@ -6339,6 +7033,48 @@
         (retyped ? " \u00b7 it is now " +
           (retyped === "continuous" ? "Continuous" : "Nominal") : ""));
   }
+  // t3-47. Moves within t.order, which is the ONLY thing that decides column
+  // position, so nothing else has to know this happened.
+  function moveColumnBy(col, dir) {
+    var t = PROJECT.table;
+    if (!t) return;
+    var at = t.order.indexOf(col), to = at + dir;
+    if (at < 0 || to < 0 || to >= t.order.length) {
+      showToast(col + " is already at the " + (dir < 0 ? "start" : "end"));
+      return;
+    }
+    dataMark("moving " + col);
+    t.order.splice(at, 1);
+    t.order.splice(to, 0, col);
+    t.edited = true;
+    persist(); syncAll(); render();
+    showToast(col + " moved " + (dir < 0 ? "left" : "right"));
+  }
+  // t3-47. Fill was "Fill with focused value", which fills the SELECTION from
+  // its focused cell. Fill DOWN is the other half every spreadsheet has: take
+  // the selected cell and carry it to the bottom of its column.
+  function gridFillDown() {
+    var t = PROJECT.table, sel = gridSelectionRect();
+    if (!t || !sel) { showToast("Select a cell to fill from"); return; }
+    var col = t.order[sel.c0];
+    if (!col || !t.raw[col]) return;
+    var from = sel.r0, value = t.raw[col][from];
+    var last = nRows(t) - 1;
+    if (from >= last) { showToast("Nothing below to fill"); return; }
+    dataMark("filling down");
+    var n = 0;
+    for (var r = from + 1; r <= last; r++) {
+      if (String(t.raw[col][r]) === String(value)) continue;
+      t.raw[col][r] = value;
+      n++;
+    }
+    if (!n) { showToast("Those cells already hold that value"); return; }
+    t.edited = true;
+    retype(t); validateRoles();
+    persist(); syncAll(); render();
+    showToast("Filled " + n + " cell" + (n === 1 ? "" : "s") + " down " + col +
+      " \u00b7 Cmd/Ctrl+Z puts them back");
+  }
   function sortRowsByVariable(col, direction) {
     var t = PROJECT.table;
     if (!t || !t.raw[col]) return;
@@ -6390,6 +7126,13 @@
   function gridSelectionCells() {
     var t = PROJECT.table, r = gridSelectionRect(), out = [];
     if (!t || !r) return out;
+    if (GRID_SELECTION_COLS) {
+      var setCols = gridSelectedColumns();
+      for (var sr = r.r0; sr <= r.r1; sr++)
+        for (var sc = 0; sc < setCols.length; sc++)
+          out.push({ col: setCols[sc], row: sr });
+      return out;
+    }
     for (var row = r.r0; row <= r.r1; row++)
       for (var col = r.c0; col <= r.c1; col++)
         out.push({ col: t.order[col], row: row });
@@ -6398,6 +7141,9 @@
   function gridSelectionContains(col, row) {
     var t = PROJECT.table, r = gridSelectionRect();
     if (!t || !r) return false;
+    if (GRID_SELECTION_COLS)
+      return GRID_SELECTION_COLS.indexOf(col) !== -1 &&
+        row >= r.r0 && row <= r.r1;
     var ci = t.order.indexOf(col);
     return ci >= r.c0 && ci <= r.c1 && row >= r.r0 && row <= r.r1;
   }
@@ -6425,14 +7171,25 @@
     if (r && t) {
       for (i = 0; i < tds.length; i++) {
         var row = Number(tds[i].getAttribute("data-gr"));
-        var ci = t.order.indexOf(tds[i].getAttribute("data-gc"));
-        if (ci < r.c0 || ci > r.c1 || row < r.r0 || row > r.r1) continue;
+        var gcName = tds[i].getAttribute("data-gc");
+        var ci = t.order.indexOf(gcName);
+        var inCols = GRID_SELECTION_COLS
+          ? GRID_SELECTION_COLS.indexOf(gcName) !== -1
+          : (ci >= r.c0 && ci <= r.c1);
+        if (!inCols || row < r.r0 || row > r.r1) continue;
         tds[i].classList.add("ps-grid-selected");
         tds[i].setAttribute("aria-selected", "true");
         if (row === r.r0) tds[i].classList.add("ps-grid-sel-top");
         if (row === r.r1) tds[i].classList.add("ps-grid-sel-bottom");
-        if (ci === r.c0) tds[i].classList.add("ps-grid-sel-left");
-        if (ci === r.c1) tds[i].classList.add("ps-grid-sel-right");
+        if (GRID_SELECTION_COLS) {
+          // Discontiguous columns draw as separate bands: each carries its
+          // own left and right edge.
+          tds[i].classList.add("ps-grid-sel-left");
+          tds[i].classList.add("ps-grid-sel-right");
+        } else {
+          if (ci === r.c0) tds[i].classList.add("ps-grid-sel-left");
+          if (ci === r.c1) tds[i].classList.add("ps-grid-sel-right");
+        }
         if (tds[i].getAttribute("data-gc") === r.focusCol &&
             row === r.focusRow) tds[i].classList.add("ps-grid-sel-focus");
       }
@@ -6450,8 +7207,12 @@
     if (r && t && (GRID_SELECTION_KIND === "column" || GRID_SELECTION_KIND === "all")) {
       var colHeads = grid.querySelectorAll("th[data-grid-col]");
       for (i = 0; i < colHeads.length; i++) {
-        var hi = t.order.indexOf(colHeads[i].getAttribute("data-grid-col"));
-        if (hi >= r.c0 && hi <= r.c1) colHeads[i].classList.add("ps-grid-axis-selected");
+        var headName = colHeads[i].getAttribute("data-grid-col");
+        var hi = t.order.indexOf(headName);
+        var headIn = GRID_SELECTION_COLS
+          ? GRID_SELECTION_COLS.indexOf(headName) !== -1
+          : (hi >= r.c0 && hi <= r.c1);
+        if (headIn) colHeads[i].classList.add("ps-grid-axis-selected");
       }
     }
     if (r && (GRID_SELECTION_KIND === "row" || GRID_SELECTION_KIND === "all")) {
@@ -6471,6 +7232,7 @@
     }
   }
   function gridSetSelection(anchorCol, anchorRow, focusCol, focusRow, kind) {
+    GRID_SELECTION_COLS = null;   // any ordinary change dissolves the set
     GRID_SELECTION = { anchorCol: anchorCol, anchorRow: anchorRow,
                        focusCol: focusCol, focusRow: focusRow };
     GRID_SELECTION_KIND = kind || "cells";
@@ -6495,6 +7257,7 @@
   }
   function gridClearSelection(repaint) {
     GRID_SELECTION = null;
+    GRID_SELECTION_COLS = null;
     GRID_SELECTION_KIND = null;
     if (repaint !== false) gridApplySelection();
   }
@@ -6509,15 +7272,24 @@
     // Whole columns (or the whole table) carry their names; a rectangle of
     // cells inside the data does not, because there a header row would be
     // pasted INTO someone's numbers.
+    // Discontiguous columns copy side by side in table order, exactly as
+    // Excel pastes a Ctrl-selection of columns.
+    var copyCols = null;
+    if (GRID_SELECTION_COLS) copyCols = gridSelectedColumns();
+    else {
+      copyCols = [];
+      for (var cc = r.c0; cc <= r.c1; cc++) copyCols.push(t.order[cc]);
+    }
     if (GRID_SELECTION_KIND === "column" || GRID_SELECTION_KIND === "all") {
       var head = [];
-      for (var hi = r.c0; hi <= r.c1; hi++) head.push(tsvCell(t.order[hi]));
+      for (var hi = 0; hi < copyCols.length; hi++)
+        head.push(tsvCell(copyCols[hi]));
       lines.push(head.join("\t"));
     }
     for (var row = r.r0; row <= r.r1; row++) {
       var cells = [];
-      for (var ci = r.c0; ci <= r.c1; ci++)
-        cells.push(tsvCell(t.raw[t.order[ci]][row]));
+      for (var ci = 0; ci < copyCols.length; ci++)
+        cells.push(tsvCell(t.raw[copyCols[ci]][row]));
       lines.push(cells.join("\t"));
     }
     return lines.join("\n");
@@ -6803,6 +7575,78 @@
       return "";
     return result.col + "\u0000" + PROJECT.table.caseIds[result.row];
   }
+  // t3-47. Replace runs over GRID_FIND_RESULTS, so it acts on exactly the
+  // matches the count beside the Find box is reporting: no second search with
+  // its own rules to disagree with what the user was shown.
+  //
+  // WHOLE CELL BY DEFAULT, and this was changed because a probe caught the
+  // harm before it shipped: replacing "male" with "Male" across the item's own
+  // recode example turned Female into FeMale. Substring replace corrupts the
+  // exact dataset this feature exists to fix, so it is the opt-in and not the
+  // default. Excel and Sheets carry the same switch for the same reason.
+  //
+  // FIND stays substring either way, because finding is harmless and a search
+  // that only matched whole cells would be far less useful.
+  function gridReplace(all) {
+    var t = PROJECT.table;
+    if (!t || !GRID_FIND_QUERY) {
+      showToast("Type something to find first");
+      return;
+    }
+    var repl = String(el("ps-data-replace").value == null
+      ? "" : el("ps-data-replace").value);
+    var targets = all ? GRID_FIND_RESULTS.slice()
+      : (GRID_FIND_INDEX >= 0 && GRID_FIND_RESULTS[GRID_FIND_INDEX]
+         ? [GRID_FIND_RESULTS[GRID_FIND_INDEX]] : []);
+    if (!targets.length) { showToast("No matches to replace"); return; }
+    var needle = GRID_FIND_QUERY, lower = needle.toLocaleLowerCase();
+    var wholeBox = el("ps-data-replace-whole");
+    var whole = !wholeBox || wholeBox.checked;
+    var cols = Object.create(null), edits = [];
+    // Worked out BEFORE anything is marked or written: dataMark snapshots the
+    // state to undo TO, so marking first and then finding nothing to do would
+    // leave an undo step that undoes nothing.
+    for (var i = 0; i < targets.length; i++) {
+      var tgt = targets[i];
+      if (!t.raw[tgt.col]) continue;
+      var was = String(t.raw[tgt.col][tgt.row] == null
+        ? "" : t.raw[tgt.col][tgt.row]);
+      var out;
+      if (whole) {
+        // Case-insensitive, like the search, so Male / male / M all match a
+        // search for one of them; but the WHOLE cell must be that value.
+        if (was.trim().toLocaleLowerCase() !== lower) continue;
+        out = repl;
+      } else {
+        // Every occurrence in the cell: a cell reading "male male" is one
+        // match to Find and would be half-done otherwise.
+        out = ""; var at = 0;
+        for (;;) {
+          var hit = was.toLocaleLowerCase().indexOf(lower, at);
+          if (hit === -1) { out += was.slice(at); break; }
+          out += was.slice(at, hit) + repl;
+          at = hit + needle.length;
+        }
+      }
+      if (out === was) continue;
+      edits.push({ col: tgt.col, row: tgt.row, value: out });
+      cols[tgt.col] = 1;
+    }
+    if (!edits.length) { showToast("Nothing changed"); return; }
+    dataMark(all ? "replacing every match" : "the replacement");
+    for (var e = 0; e < edits.length; e++)
+      t.raw[edits[e].col][edits[e].row] = edits[e].value;
+    var changed = edits.length;
+    t.edited = true;
+    retype(t); validateRoles();
+    gridRefreshFindResults();
+    persist(); syncAll(); render();
+    var nCols = Object.keys(cols).length;
+    showToast("Replaced " + changed + " value" + (changed === 1 ? "" : "s") +
+      " in " + nCols + " column" + (nCols === 1 ? "" : "s") +
+      (whole ? "" : " \u00b7 matched inside cells") +
+      " \u00b7 Cmd/Ctrl+Z puts them back");
+  }
   function gridRefreshFindResults() {
     var prior = GRID_FIND_RESULTS[GRID_FIND_INDEX];
     var priorKey = gridFindResultKey(prior);
@@ -6873,17 +7717,12 @@
       hiddenCount > 0 || GRID_FOCUS_CHART_COLUMNS);
     hiddenButton.textContent = GRID_FOCUS_CHART_COLUMNS
       ? "Chart focus \u00b7 " + hiddenCount + " hidden"
-      : hiddenCount + (hiddenCount === 1 ? " column hidden" : " columns hidden");
+      : hiddenCount
+      ? hiddenCount + (hiddenCount === 1 ? " column hidden" : " columns hidden")
+      : "Columns";
     setTip(hiddenButton, GRID_FOCUS_CHART_COLUMNS
       ? "Showing current chart variables; manage column visibility"
       : "Manage temporarily hidden columns");
-    var focusEnabled = gridCanFocusColumns(t);
-    el("ps-datamenu-focus-columns").disabled = !focusEnabled;
-    el("ps-datamenu-focus-columns").textContent =
-      (GRID_FOCUS_CHART_COLUMNS ? "\u2713 " : "") +
-      "Focus on current chart variables";
-    el("ps-datamenu-resetview").disabled = !hiddenCount &&
-      !GRID_FOCUS_CHART_COLUMNS;
     syncColumnViewMenu();
   }
   function syncColumnViewMenu() {
@@ -6912,9 +7751,29 @@
         result.row < 0 || result.row >= nRows(t)) return;
     if (GRID_EDIT) gridCommitEdit(null);
     var grid = el("ps-datagrid");
-    grid.scrollTop = Math.max(0, result.row * GRID_ROW_HEIGHT -
+    var want = Math.max(0, result.row * GRID_ROW_HEIGHT -
       Math.max(0, grid.clientHeight - GRID_ROW_HEIGHT) / 2);
+    // t2-30. This used to jump: set scrollTop, rebuild, select. A smooth
+    // scroll is what says the row was ALREADY there rather than that the
+    // grid was replaced, which is the same reason the engine scrolls its own
+    // stats rows rather than snapping them. Only for a move worth animating,
+    // and never under the motion preference, where the jump IS the answer.
+    var far = Math.abs(want - (grid.scrollTop || 0)) > GRID_ROW_HEIGHT;
+    var smooth = far && APP_PREFS.motion !== "reduce" &&
+      !(window.matchMedia &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    // The window is rendered FROM the scroll position, so the rows have to
+    // exist before an animated scroll can travel across them: set the
+    // position, let syncDataGrid build that window, then animate the last
+    // part. Animating first and syncing after cancels the scroll outright,
+    // which is worse than the jump it was meant to replace.
+    grid.scrollTop = want;
     syncDataGrid();
+    if (smooth && grid.scrollTo) {
+      grid.scrollTop = Math.max(0, want - GRID_ROW_HEIGHT * 6);
+      try { grid.scrollTo({ top: want, behavior: "smooth" }); }
+      catch (e) { grid.scrollTop = want; }
+    }
     gridSetSelection(result.col, result.row,
                      result.col, result.row, "cells");
   }
@@ -7577,32 +8436,49 @@
       visible[visible.length - 1], at, "row");
     showToast("Duplicated row " + (row + 1));
   }
-  function gridDeleteRow(row) {
+  function gridDeleteRow(row) { gridDeleteRows([row]); }
+  function gridDeleteRows(rows) {
     var t = PROJECT.table;
-    if (!t || row < 0 || row >= nRows(t)) return;
-    if (nRows(t) <= 1) {
+    if (!t) return;
+    var seen = {}, kill = [];
+    for (var i = 0; i < rows.length; i++) {
+      var r = Math.round(Number(rows[i]));
+      if (!isFinite(r) || r < 0 || r >= nRows(t) || seen[r]) continue;
+      seen[r] = 1; kill.push(r);
+    }
+    if (!kill.length) return;
+    if (nRows(t) - kill.length < 1) {
       showToast("A dataset must keep at least one row", true);
       return;
     }
-    dataMark("deleting the row");
+    // Descending order, so each splice leaves the remaining indices valid
+    // (and gridRemapValueExclusions sees the index that is true at its
+    // moment of deletion).
+    kill.sort(function (a, b) { return b - a; });
+    dataMark(kill.length === 1 ? "deleting the row"
+      : "deleting " + kill.length + " rows");
     var undoDepth = DATA_ACTION_SEQ;
-    var removedId = t.caseIds[row];
-    for (var j = 0; j < t.order.length; j++)
-      t.raw[t.order[j]].splice(row, 1);
-    t.caseIds.splice(row, 1);
-    if (t.excludedRows && removedId) delete t.excludedRows[removedId];
-    gridRemapValueExclusions(t, row, "delete");
+    for (var d = 0; d < kill.length; d++) {
+      var row = kill[d];
+      var removedId = t.caseIds[row];
+      for (var j = 0; j < t.order.length; j++)
+        t.raw[t.order[j]].splice(row, 1);
+      t.caseIds.splice(row, 1);
+      if (t.excludedRows && removedId) delete t.excludedRows[removedId];
+      gridRemapValueExclusions(t, row, "delete");
+    }
     t.edited = true;
     retype(t);
     validateRoles();
     persist();
     syncAll();
     render();
-    var nextRow = Math.min(row, nRows(t) - 1);
+    var nextRow = Math.min(kill[kill.length - 1], nRows(t) - 1);
     var visible = gridVisibleColumns(t);
     gridSetSelection(visible[0], nextRow,
       visible[visible.length - 1], nextRow, "row");
-    offerDataUndo("Deleted row " + (row + 1), undoDepth);
+    offerDataUndo(kill.length === 1 ? "Deleted row " + (kill[0] + 1)
+      : "Deleted " + kill.length + " rows", undoDepth);
   }
   function gridInsertColumnAt(reference, toRight) {
     var t = PROJECT.table;
@@ -7986,6 +8862,25 @@
         (nRows(t) - filteredRowCount(t)) + " of " + nRows(t) + " rows"
       : "Filters cleared \u00b7 all rows are back in the charts");
   }
+  // Cmd/Ctrl+E. Reuses the cell menu's exact semantics: acts on the
+  // selection, all-excluded means include everything back, anything not
+  // yet excluded means exclude the lot.
+  function gridToggleExcludeSelection() {
+    var t = PROJECT.table;
+    if (!t || appWorkspace() !== "data") return;
+    var cells = gridSelectionCells();
+    if (!cells.length) {
+      showToast("Select cells to exclude first");
+      return;
+    }
+    var allExcluded = true;
+    for (var i = 0; i < cells.length; i++)
+      if (!(t.excluded && t.excluded[cells[i].col] &&
+            t.excluded[cells[i].col][cells[i].row])) {
+        allExcluded = false; break;
+      }
+    gridSetExcludedCells(cells, !allExcluded);
+  }
   var CELL_MENU = null;   // {col, row, cells, on}
   function showCellMenu(x, y, col, row) {
     if (!gridSelectionContains(col, row))
@@ -8050,6 +8945,27 @@
     el("ps-data-find").addEventListener("input", function () {
       gridSetFindQuery(this.value);
     });
+    el("ps-data-replace-toggle").addEventListener("click", function () {
+      var open = el("ps-data-replace-wrap").hasAttribute("hidden");
+      setReplaceOpen(open);
+      if (open) el("ps-data-replace").focus();
+    });
+    el("ps-data-replace-one").addEventListener("click", function () {
+      gridReplace(false);
+    });
+    el("ps-data-replace-all").addEventListener("click", function () {
+      gridReplace(true);
+    });
+    el("ps-data-replace").addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); gridReplace(false); }
+      else if (e.key === "Escape") {
+        // Own the key: the grid-level Escape handler must not also clear
+        // the selection on the press that merely closes this row.
+        e.stopPropagation();
+        setReplaceOpen(false);
+        el("ps-data-find").focus();
+      }
+    });
     el("ps-data-find").addEventListener("keydown", function (e) {
       if (e.key === "Enter") {
         e.preventDefault();
@@ -8113,15 +9029,6 @@
       hideColumnViewMenu();
       gridShowAllColumns();
     });
-    el("ps-datamenu-focus-columns").addEventListener("click", function () {
-      var next = !GRID_FOCUS_CHART_COLUMNS;
-      hideDataMenu();
-      gridSetChartFocus(next);
-    });
-    el("ps-datamenu-resetview").addEventListener("click", function () {
-      hideDataMenu();
-      gridShowAllColumns();
-    });
     el("ps-datamenu-fitall").addEventListener("click", function () {
       hideDataMenu(); gridAutoFitAll();
     });
@@ -8172,6 +9079,69 @@
           syncDataGrid();
       });
     });
+    // t4-35 (Torry's ask): drag a column HEADER to a new position, and the
+    // other columns part to show where it will land - the dist stacked-drag
+    // idiom applied to the grid. Slots are computed STATELESSLY from the
+    // header centers captured at arm time, the dragged column's cells follow
+    // the pointer with no transition while parted columns glide, Escape
+    // cancels (the b4 rule: a cancel restores geometry AND kills the
+    // gesture), and the commit is one dataMark so one undo takes it back.
+    var COL_MOVE = null;
+    var COL_MOVE_DONE_AT = 0;
+    function colMoveCells(name) {
+      return grid.querySelectorAll(
+        'th[data-grid-col="' + (window.CSS && CSS.escape
+          ? CSS.escape(name) : name) + '"], td[data-gc="' +
+        (window.CSS && CSS.escape ? CSS.escape(name) : name) + '"]');
+    }
+    function colMoveSetShift(name, px, glide) {
+      var cells = colMoveCells(name);
+      for (var i = 0; i < cells.length; i++) {
+        cells[i].style.transition = glide ? "transform 120ms ease" : "";
+        cells[i].style.transform = px ? "translateX(" + px + "px)" : "";
+      }
+    }
+    function colMoveClear(commitRebuild) {
+      if (!COL_MOVE) return;
+      var st = COL_MOVE;
+      COL_MOVE = null;
+      document.body.classList.remove("ps-col-moving");
+      if (!commitRebuild) {
+        for (var i = 0; i < st.names.length; i++)
+          colMoveSetShift(st.names[i], 0, false);
+      }
+      // commitRebuild: the reorder re-renders the grid, which rebuilds
+      // every cell without transforms - nothing to restore.
+    }
+    function colMoveSlotFor(st, dx) {
+      // Insertion slot = how many OTHER columns' static centers sit left of
+      // the dragged column's moved center. Stateless, so wide drags never
+      // mis-walk (the pie-drag lesson).
+      var center = st.centers[st.from] + dx;
+      var slot = 0;
+      for (var i = 0; i < st.names.length; i++) {
+        if (i === st.from) continue;
+        if (st.centers[i] < center) slot++;
+      }
+      return slot;
+    }
+    function gridMoveColumnTo(col, beforeCol) {
+      var t = PROJECT.table;
+      if (!t) return;
+      var from = t.order.indexOf(col);
+      if (from < 0) return;
+      var to = beforeCol == null ? t.order.length - 1
+        : t.order.indexOf(beforeCol);
+      if (to < 0) return;
+      if (beforeCol != null && from < to) to--;
+      if (to === from) return;
+      dataMark("moving " + col);
+      t.order.splice(from, 1);
+      t.order.splice(to, 0, col);
+      t.edited = true;
+      persist(); syncAll(); render();
+      showToast(col + " moved");
+    }
     grid.addEventListener("pointerdown", function (e) {
       if (e.button !== 0 ||
           (e.pointerType && e.pointerType !== "mouse" && e.pointerType !== "pen"))
@@ -8192,6 +9162,105 @@
         document.body.classList.add("ps-grid-column-resizing");
         e.preventDefault();
         e.stopPropagation();
+        return;
+      }
+      var moveTh = e.target.closest ? e.target.closest("th[data-grid-col]") : null;
+      if (moveTh && (e.metaKey || e.ctrlKey) && !e.shiftKey &&
+          !(e.target.closest && e.target.closest("[data-grid-type]"))) {
+        // t4-34, handled at POINTERDOWN: Chromium does not reliably deliver
+        // a `click` for modified presses (a Cmd+click's click event simply
+        // never arrived in measurement), the lesson the engine's
+        // click-to-edit learned years ago. The click handler's modified
+        // branch is a SWALLOW, so a platform that does deliver it cannot
+        // toggle twice.
+        if (PROJECT.table && nRows(PROJECT.table)) {
+          gridToggleColumnSelection(moveTh.getAttribute("data-grid-col"));
+          grid.focus();
+        }
+        e.preventDefault();
+        return;
+      }
+      if (moveTh && !e.shiftKey && !e.metaKey && !e.ctrlKey &&
+          !(e.target.closest && e.target.closest("[data-grid-type]"))) {
+        // Candidate header drag. A sub-threshold press stays a click
+        // (select the column); real horizontal movement arms the move.
+        var mvCol = moveTh.getAttribute("data-grid-col");
+        var cand = { col: mvCol, sx: e.clientX, sy: e.clientY, armed: false,
+                     names: [], centers: [], widths: [], from: -1 };
+        cand.detach = function () {
+          document.removeEventListener("pointermove", cand.onMove);
+          document.removeEventListener("pointerup", cand.onUp);
+          document.removeEventListener("keydown", cand.onKey, true);
+        };
+        cand.onMove = function (ev) {
+          // A candidate whose button is no longer down is a leak, not a
+          // gesture: the pointerup can be missed entirely (released outside
+          // the window), and an un-detached candidate once armed a PHANTOM
+          // drag from the hover path between two clicks, committing a
+          // column move nobody made (caught by the t4-34 probe's first run).
+          if (!(ev.buttons & 1)) { cand.detach(); colMoveClear(false); return; }
+          if (!cand.armed) {
+            var dx0 = ev.clientX - cand.sx, dy0 = ev.clientY - cand.sy;
+            if (Math.abs(dx0) < 6 || Math.abs(dx0) <= Math.abs(dy0)) return;
+            // Arm: capture the STATIC geometry of every visible header.
+            var heads = grid.querySelectorAll("th[data-grid-col]");
+            for (var i = 0; i < heads.length; i++) {
+              var r = heads[i].getBoundingClientRect();
+              var nm = heads[i].getAttribute("data-grid-col");
+              cand.names.push(nm);
+              cand.centers.push(r.left + r.width / 2);
+              cand.widths.push(r.width);
+              if (nm === cand.col) cand.from = cand.names.length - 1;
+            }
+            if (cand.from < 0) return;
+            cand.armed = true;
+            cand.slot = cand.from;
+            COL_MOVE = cand;
+            document.body.classList.add("ps-col-moving");
+          }
+          var dx = ev.clientX - cand.sx;
+          colMoveSetShift(cand.col, dx, false);
+          var slot = colMoveSlotFor(cand, dx);
+          if (slot !== cand.slot) cand.slot = slot;
+          var w = cand.widths[cand.from];
+          for (var j = 0; j < cand.names.length; j++) {
+            if (j === cand.from) continue;
+            // Visible index of column j once the dragged one is removed.
+            var jj = j < cand.from ? j : j - 1;
+            var shift = 0;
+            if (jj >= cand.slot) shift = w;          // parted rightward
+            if (j < cand.from && jj >= cand.slot) shift = w;
+            if (j > cand.from && jj < cand.slot) shift = -w;
+            if (j < cand.from && jj < cand.slot) shift = 0;
+            if (j > cand.from && jj >= cand.slot) shift = 0;
+            colMoveSetShift(cand.names[j], shift, true);
+          }
+        };
+        cand.onUp = function (ev) {
+          cand.detach();   // ALWAYS: a sub-threshold click must leak nothing
+          var wasArmed = cand.armed;
+          var finalSlot = cand.slot;
+          colMoveClear(wasArmed);
+          if (!wasArmed) return;
+          COL_MOVE_DONE_AT = Date.now();
+          // The column that will sit immediately AFTER the drop, in the
+          // visible order with the dragged column removed.
+          var others = [];
+          for (var i = 0; i < cand.names.length; i++)
+            if (i !== cand.from) others.push(cand.names[i]);
+          var beforeCol = finalSlot >= others.length
+            ? null : others[finalSlot];
+          gridMoveColumnTo(cand.col, beforeCol);
+        };
+        cand.onKey = function (ev) {
+          if (ev.key !== "Escape" || !cand.armed) return;
+          ev.stopPropagation();
+          cand.detach();
+          colMoveClear(false);   // geometry restored, gesture dead, no commit
+        };
+        document.addEventListener("pointermove", cand.onMove);
+        document.addEventListener("pointerup", cand.onUp);
+        document.addEventListener("keydown", cand.onKey, true);
         return;
       }
       if (e.target.closest && e.target.closest(".ps-grid-cellinput")) return;
@@ -8430,11 +9499,14 @@
       var th = e.target.closest ? e.target.closest("th[data-grid-col]") : null;
       if (th) {
         if (e.target.closest && e.target.closest(".ps-grid-col-resizer")) return;
+        if (Date.now() - COL_MOVE_DONE_AT < 250) return;   // a drag, not a click
         var selectedCol = th.getAttribute("data-grid-col");
         selectInspectorVariable(selectedCol);
         if (e.target.closest && e.target.closest("[data-grid-type]")) {
           var r = th.getBoundingClientRect();
           showTypeMenu(r.left, r.bottom + 2, selectedCol);
+        } else if (e.metaKey || e.ctrlKey) {
+          // t4-34: already handled at pointerdown - swallow, never re-seat.
         } else if (nRows(PROJECT.table)) {
           var colAnchor = e.shiftKey && GRID_SELECTION
             ? GRID_SELECTION.anchorCol : selectedCol;
@@ -8513,8 +9585,13 @@
         hideCellMenu();
         hideColumnMenu();
         var row = Number(rowHead.getAttribute("data-grid-row"));
-        gridSetSelection(PROJECT.table.order[0], row,
-          PROJECT.table.order[PROJECT.table.order.length - 1], row, "row");
+        // A right-click INSIDE the current row selection keeps it, so the
+        // menu can act on the whole selection; outside it, the clicked row
+        // is seated (the desktop convention). This unconditional reseat was
+        // what collapsed a multi-row selection before its menu could act.
+        if (rowMenuTargets(row).length <= 1)
+          gridSetSelection(PROJECT.table.order[0], row,
+            PROJECT.table.order[PROJECT.table.order.length - 1], row, "row");
         showRowMenu(e.clientX, e.clientY, row);
         return;
       }
@@ -8539,6 +9616,10 @@
       hideRowMenu();
       showCellMenu(e.clientX, e.clientY,
                    td.getAttribute("data-gc"), Number(td.getAttribute("data-gr")));
+    });
+    el("ps-cellmenu-chart").addEventListener("click", function () {
+      hideCellMenu();
+      armChartFromSelection(selectionChartColumns());
     });
     el("ps-cellmenu-toggle").addEventListener("click", function () {
       if (!CELL_MENU) return;
@@ -8638,13 +9719,21 @@
     el("ps-columnmenu-resetall").addEventListener("click", function () {
       hideColumnMenu(); gridResetAllWidths();
     });
+    el("ps-columnmenu-chart").addEventListener("click", function () {
+      if (!COLUMN_MENU) return;
+      var cols = columnMenuTargets(COLUMN_MENU);
+      hideColumnMenu();
+      armChartFromSelection(cols);
+    });
     el("ps-columnmenu-hide").addEventListener("click", function () {
       if (!COLUMN_MENU) return;
-      var col = COLUMN_MENU; hideColumnMenu(); gridHideColumn(col);
+      var cols = columnMenuTargets(COLUMN_MENU);
+      hideColumnMenu(); gridHideColumns(cols);
     });
     el("ps-columnmenu-delete").addEventListener("click", function () {
       if (!COLUMN_MENU) return;
-      var col = COLUMN_MENU; hideColumnMenu(); deleteVariable(col);
+      var cols = columnMenuTargets(COLUMN_MENU);
+      hideColumnMenu(); deleteVariables(cols);
     });
     el("ps-rowmenu-insert-above").addEventListener("click", function () {
       if (!ROW_MENU) return;
@@ -8661,30 +9750,68 @@
     el("ps-rowmenu-toggle").addEventListener("click", function () {
       if (!ROW_MENU) return;
       var menu = ROW_MENU; hideRowMenu();
-      gridSetExcludedRows([menu.row], menu.rowOn, "data");
+      // Every selected row takes the CLICKED row's target state, so a mixed
+      // selection resolves one way instead of toggling each row separately.
+      gridSetExcludedRows(rowMenuTargets(menu.row), menu.rowOn, "data");
     });
     el("ps-rowmenu-delete").addEventListener("click", function () {
       if (!ROW_MENU) return;
-      var row = ROW_MENU.row; hideRowMenu(); gridDeleteRow(row);
+      var rows = rowMenuTargets(ROW_MENU.row);
+      hideRowMenu(); gridDeleteRows(rows);
     });
-    // Dragging a slot chip back to the variables box unassigns it.
-    el("ps-columns").addEventListener("dragover", function (e) {
+    // Dragging a slot chip back to the variables box unassigns it. The
+    // listeners live on the whole BOX (roles-first pass, Jul 27 2026), so
+    // the gesture works with the list collapsed - the header is a target.
+    el("ps-varbox").addEventListener("dragover", function (e) {
       if (!PS_DRAG_FROM) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
-      el("ps-columns").classList.add("ps-droptarget");
+      el("ps-varbox").classList.add("ps-droptarget");
     });
-    el("ps-columns").addEventListener("dragleave", function () {
-      el("ps-columns").classList.remove("ps-droptarget");
+    el("ps-varbox").addEventListener("dragleave", function () {
+      el("ps-varbox").classList.remove("ps-droptarget");
     });
-    el("ps-columns").addEventListener("drop", function (e) {
+    el("ps-varbox").addEventListener("drop", function (e) {
       e.preventDefault();
-      el("ps-columns").classList.remove("ps-droptarget");
+      el("ps-varbox").classList.remove("ps-droptarget");
       if (!PS_DRAG_FROM) return;
       roleRemoveMember(PS_DRAG_FROM, PS_DRAG);
       clearDragState();
       roleChanged();
     });
+    el("ps-varbox-toggle").addEventListener("click", function () {
+      setVarboxOpen(!varboxOpen());
+    });
+    // Size-ownership watch (Torry's 3-second lag). Capture phase on the
+    // engine host, covering every way a size is set: releasing the drag
+    // handle (pointerup), typing in the size fields or dragging their
+    // sliders (input), committing them (change), and the keyboard path
+    // (keyup). The check is one parse of a small blob, and it no-ops
+    // unless a pending size differs from the standard.
+    var sizeHost = hostEl();
+    if (sizeHost) {
+      ["pointerup", "input", "change", "keyup"].forEach(function (ev) {
+        sizeHost.addEventListener(ev, function () {
+          // After the handler that queued the commit, not before it.
+          window.setTimeout(fitWatchPendingSize, 0);
+        }, true);
+      });
+      // Re-seat a dropdown under its button. CAPTURE phase, because the
+      // engine's own trigger handler calls stopPropagation() and a bubble
+      // listener never hears the click at all (the trap this codebase
+      // documents for chart clicks; it cost a measurement to rediscover).
+      // The work is still deferred a task, so it lands AFTER that handler
+      // has shown the flyout and set its floored left. A second pass on
+      // the next frame covers the rebuild the engine performs when it
+      // re-arms an open dropdown across a render.
+      sizeHost.addEventListener("click", function (e) {
+        if (!e.target || !e.target.closest) return;
+        if (!e.target.closest('[data-role="graphtype-trigger"], ' +
+                              '[data-role="palette-trigger"]')) return;
+        window.setTimeout(syncFlyoutPositions, 0);
+        window.requestAnimationFrame(syncFlyoutPositions);
+      }, true);
+    }
     el("ps-varfilter").addEventListener("input", function () {
       VAR_FILTER = el("ps-varfilter").value.trim();
       syncDataRow();
@@ -8894,6 +10021,12 @@
     render();
   }
   function addChart(moduleKey) {
+    // B12's rule, which switchChart already followed and this path did not:
+    // in-flight engine edits must land on the document that PRODUCED them,
+    // before the active document flips. Without the drain, an edit made
+    // within the engine's 1500ms debounce flushed onto the NEW chart
+    // (Torry's intermittent annotations-appear report, the persistent half).
+    if (PS_FLUSH_PENDING_OPTS) PS_FLUSH_PENDING_OPTS();
     var c = newChart();
     if (moduleKey && MODULES[moduleKey]) c.module = moduleKey;
     PROJECT.charts.push(c);
@@ -8913,7 +10046,263 @@
     }
     return "Requires " + required.join(" and ");
   }
+  // ---- t4-32: New chart from selection (Torry-approved, Jul 27 2026) ----
+  // THE RULE, settled in design review: context may shape OFFERS, only an
+  // explicit gesture may produce an outcome. The command never picks the
+  // analysis. It opens the New chart dialog ARMED with the selected
+  // variables, and every card shows ITS OWN reading of that selection - a
+  // concrete role mapping, or a stated refusal - BEFORE anything exists.
+  // One nominal plus two continuous is at least four defensible questions
+  // (RM grouped, scatter colored, correlation, panels); the difference is
+  // statistical intent, so the user picks the question and the variables
+  // ride along. Readings consume hmcSummaryFor, the wizard's classifier.
+  var CHART_ARM = null;      // { cols, summary } - ONE-SHOT, cleared on close
+  var CHART_ARM_MAX = 12;
+  function armReadingFor(moduleKey, summary) {
+    var cats = [], nums = [], skipped = [];
+    for (var i = 0; i < summary.vars.length; i++) {
+      var v = summary.vars[i];
+      if (v.type === "nominal" || v.type === "ordinal") cats.push(v.name);
+      else if (v.type === "continuous") nums.push(v.name);
+      else skipped.push(v.name +
+        (v.type === "id" ? " (identifier)" : " (too many levels)"));
+    }
+    function list(a) { return a.join(", "); }
+    function no(text) { return { fits: false, roles: null,
+      text: text + " Opens empty." }; }
+    var out = null;
+    if (moduleKey === "plotbuilder") {
+      if (!nums.length) out = no("Your selection has no numeric value variable.");
+      else if (nums.length > 1) out = no("Needs exactly one value variable; " +
+        "your selection has " + nums.length + ".");
+      else if (!cats.length) out = no("Needs a categorical variable for the groups.");
+      else {
+        var roles = { xvar: cats[0], yvar: nums[0] };
+        if (cats[1]) roles.groupVar = cats[1];
+        if (cats[2]) roles.facetVar = cats[2];
+        out = { fits: true, roles: roles,
+          text: "With your selection: " + nums[0] + " on values; " + cats[0] +
+            " on the category axis" +
+            (cats[1] ? "; " + cats[1] + " as color groups" : "") +
+            (cats[2] ? "; " + cats[2] + " as panels" : "") +
+            (cats.length > 3 ? "; " + list(cats.slice(3)) + " left out" : "") +
+            "." };
+      }
+    } else if (moduleKey === "rmplotbuilder") {
+      if (nums.length < 2) out = no("Needs two or more numeric variables " +
+        "measured on the same cases; your selection has " +
+        (nums.length === 1 ? "one" : "none") + ".");
+      else {
+        var rr = { measures: nums.slice() };
+        if (cats[0]) rr.betweenVar = cats[0];
+        if (cats[1]) rr.facetVar = cats[1];
+        out = { fits: true, roles: rr,
+          text: "With your selection: " + list(nums) + " as occasions" +
+            (cats[0] ? "; " + cats[0] + " as between-subject groups" : "") +
+            (cats[1] ? "; " + cats[1] + " as panels" : "") +
+            (cats.length > 2 ? "; " + list(cats.slice(2)) + " left out" : "") +
+            "." };
+      }
+    } else if (moduleKey === "xyplotbuilder") {
+      if (nums.length !== 2) out = no("Needs exactly two numeric variables; " +
+        "your selection has " + nums.length + ".");
+      else {
+        var xr = { xvar: nums[0], yvar: nums[1] };
+        if (cats[0]) xr.groupVar = cats[0];
+        if (cats[1]) xr.facetVar = cats[1];
+        out = { fits: true, roles: xr,
+          text: "With your selection: " + nums[0] + " vs " + nums[1] +
+            (cats[0] ? "; " + cats[0] + " as color groups" : "") +
+            (cats[1] ? "; " + cats[1] + " as panels" : "") +
+            (cats.length > 2 ? "; " + list(cats.slice(2)) + " left out" : "") +
+            "." };
+      }
+    } else if (moduleKey === "distplotbuilder") {
+      if (!nums.length) out = no("Needs one numeric variable.");
+      else if (nums.length > 1) out = no("Looks at one variable at a time; " +
+        "your selection has " + nums.length + " numeric variables.");
+      else {
+        var dr = { "var": nums[0] };
+        if (cats[0]) dr.groupVar = cats[0];
+        if (cats[1]) dr.facetVar = cats[1];
+        out = { fits: true, roles: dr,
+          text: "With your selection: the distribution of " + nums[0] +
+            (cats[0] ? "; " + cats[0] + " as color groups" : "") +
+            (cats[1] ? "; " + cats[1] + " as panels" : "") +
+            (cats.length > 2 ? "; " + list(cats.slice(2)) + " left out" : "") +
+            "." };
+      }
+    } else if (moduleKey === "freqplotbuilder") {
+      if (!cats.length) out = no("Counts categories; your selection has none.");
+      else {
+        var fr = { "var": cats[0] };
+        if (cats[1]) fr.groupVar = cats[1];
+        if (cats[2]) fr.facetVar = cats[2];
+        out = { fits: true, roles: fr,
+          text: "With your selection: counts of " + cats[0] +
+            (cats[1] ? "; " + cats[1] + " as color groups" : "") +
+            (cats[2] ? "; " + cats[2] + " as panels" : "") +
+            (cats.length > 3 ? "; " + list(cats.slice(3)) + " left out" : "") +
+            (nums.length ? "; counts categories, so " + list(nums) +
+              " stays out" : "") + "." };
+      }
+    } else if (moduleKey === "corrplotbuilder") {
+      if (nums.length < 2) out = no("Needs two or more numeric variables; " +
+        "your selection has " + nums.length + ".");
+      else out = { fits: true, roles: { vars: nums.slice() },
+        text: "With your selection: " + list(nums) +
+          (cats.length ? "; numeric variables only, so " + list(cats) +
+            " stays out" : "") + "." };
+    } else if (moduleKey === "likertplotbuilder") {
+      if (summary.likertLikely && summary.likertNames.length >= 2) {
+        var items = summary.likertNames.slice();
+        var left = [];
+        for (var L = 0; L < summary.vars.length; L++)
+          if (items.indexOf(summary.vars[L].name) === -1 &&
+              summary.vars[L].type !== "id" &&
+              summary.vars[L].type !== "manylevel")
+            left.push(summary.vars[L].name);
+        out = { fits: true, roles: { items: items },
+          text: "With your selection: " + list(items) + " as items on one " +
+            summary.likertK + "-point scale" +
+            (left.length ? "; there is no grouping slot, so " + list(left) +
+              " stays out" : "") + "." };
+      } else out = no("Needs a set of items sharing one response scale; " +
+        "your selection does not form one.");
+    }
+    if (out && out.fits && skipped.length)
+      out.text += " " + list(skipped) + " stays out.";
+    return out;
+  }
+  // ---- t4-33: live previews on the armed cards (Torry-approved). ----
+  // Each fitting card renders the user's ACTUAL data as that analysis, at
+  // stock look, into the offscreen preview host; the svg is cloned
+  // self-contained and dropped into the card. Everything runs in ONE task
+  // and ends by re-rendering the real chart, so the engine's window-side
+  // context (listeners, undo baselines, render hash) can never be left
+  // pointing at a preview - the t4-31 lesson applied in advance.
+  function armPreviewPayload(moduleKey, roles) {
+    var tpl = window.PS_TEMPLATES && window.PS_TEMPLATES[moduleKey];
+    if (!tpl || !PROJECT.table) return null;
+    var payload = JSON.parse(JSON.stringify(tpl.payload));
+    var opts = MODULES[moduleKey].optsFrom({}, tpl.payload);
+    opts.spec = parseSpec(tpl.payload.chartSpec);
+    var res = MODULES[moduleKey].build(PROJECT.table, roles, opts);
+    if (!res || res.error) return null;
+    for (var c in res.channels)
+      if (Object.prototype.hasOwnProperty.call(res.channels, c))
+        payload[c] = res.channels[c];
+    // A small real canvas: text stays at its true point size, so the mini
+    // render is honestly a shrunken figure, not a redesigned one.
+    payload.plotWidth = 4.2;
+    payload.plotHeight = 2.8;
+    return payload;
+  }
+  function armRenderPreviews(token) {
+    if (CHART_ARM !== token || !token) return;
+    if (!window.GraphBuilder2 || !window.GraphBuilder2.render) return;
+    var t = PROJECT.table;
+    if (!t || nRows(t) > 50000) return;   // keep dialog-open cost bounded
+    var host = el("ps-preview-host");
+    var gallery = el("ps-analysis-gallery");
+    if (!host || !gallery || gallery.style.display === "none") return;
+    var made = {};
+    for (var i = 0; i < MODULE_ORDER.length; i++) {
+      var key = MODULE_ORDER[i];
+      try {
+        var reading = armReadingFor(key, token.summary);
+        if (!reading || !reading.fits) continue;
+        var payload = armPreviewPayload(key, reading.roles);
+        if (!payload) continue;
+        window.GraphBuilder2.render("ps-preview-host", payload);
+        var svgs = host.querySelectorAll("svg");
+        var best = null, bestA = 0;
+        for (var v = 0; v < svgs.length; v++) {
+          var a = svgs[v].clientWidth * svgs[v].clientHeight;
+          if (a > bestA) { bestA = a; best = svgs[v]; }
+        }
+        if (!best || best.clientWidth < 60) continue;
+        made[key] = svgSelfContainedClone(best, "prev-" + key + "-").html;
+      } catch (e) { /* a failed preview keeps the glyph, never breaks the dialog */ }
+    }
+    host.innerHTML = "";
+    // Restore the engine's context to the REAL document in the same task:
+    // no paint, no user event, can interleave with the preview renders.
+    try { renderChartIntoHost(); } catch (e) {}
+    if (CHART_ARM !== token) return;   // closed while we worked
+    for (var m = 0; m < MODULE_ORDER.length; m++) {
+      var mk = MODULE_ORDER[m];
+      if (!made[mk]) continue;
+      var card = document.querySelector(
+        '#ps-analysis-grid [data-analysis-module="' + mk + '"]');
+      if (!card || card.querySelector(".ps-analysis-preview")) continue;
+      var box = mkEl("span", "ps-analysis-preview");
+      box.innerHTML = made[mk];
+      card.insertBefore(box, card.firstChild);
+      window.requestAnimationFrame(function (el2) {
+        return function () { el2.classList.add("ps-preview-in"); };
+      }(box));
+    }
+  }
+  function selectionChartColumns() {
+    var t = PROJECT.table, r = gridSelectionRect();
+    if (!t || !r) return [];
+    if (GRID_SELECTION_COLS) return gridSelectedColumns();
+    var out = [];
+    for (var c = r.c0; c <= r.c1; c++) {
+      var col = t.order[c];
+      if (col && !GRID_HIDDEN_COLUMNS[col]) out.push(col);
+    }
+    return out;
+  }
+  function armChartFromSelection(cols) {
+    var t = PROJECT.table;
+    var seen = {}, use = [];
+    (cols || []).forEach(function (c) {
+      if (t && t.order.indexOf(c) !== -1 && !seen[c]) { seen[c] = 1; use.push(c); }
+    });
+    if (!use.length) {
+      showToast("Select columns in the data grid first");
+      return;
+    }
+    if (use.length > CHART_ARM_MAX) {
+      // A refusal, not a trim: silently charting a subset of 200 columns
+      // is the meaningless-chart problem this design exists to avoid.
+      showToast("Charting works best from a few columns: select up to " +
+        CHART_ARM_MAX + " (you selected " + use.length + ")", true);
+      return;
+    }
+    CHART_ARM = { cols: use, summary: hmcSummaryFor(use) };
+    showAnalysisGallery();
+  }
   function renderAnalysisGallery() {
+    var armBox = el("ps-analysis-arm");
+    if (armBox) {
+      armBox.innerHTML = "";
+      if (CHART_ARM) {
+        armBox.hidden = false;
+        armBox.appendChild(mkEl("span", "", "Starting from:"));
+        for (var ai = 0; ai < CHART_ARM.cols.length; ai++)
+          armBox.appendChild(mkEl("span", "ps-arm-chip", CHART_ARM.cols[ai]));
+        var clearBtn = mkEl("button", "ps-btn", "Choose without them");
+        clearBtn.type = "button";
+        clearBtn.setAttribute("data-arm-clear", "1");
+        clearBtn.addEventListener("click", function () {
+          CHART_ARM = null;
+          renderAnalysisGallery();
+        });
+        armBox.appendChild(clearBtn);
+      } else armBox.hidden = true;
+    }
+    renderAnalysisGalleryCards();
+    if (CHART_ARM) {
+      // The dialog paints text-first, instantly; the previews land a beat
+      // later in one atomic batch. The token guards a close-in-between.
+      var token = CHART_ARM;
+      window.setTimeout(function () { armRenderPreviews(token); }, 30);
+    }
+  }
+  function renderAnalysisGalleryCards() {
     var root = el("ps-analysis-grid");
     root.innerHTML = "";
     for (var i = 0; i < MODULE_ORDER.length; i++) {
@@ -8927,11 +10316,30 @@
         var copy = mkEl("span", "ps-analysis-copy");
         copy.appendChild(mkEl("strong", "", MODULES[key].label));
         copy.appendChild(mkEl("span", "", guide.description));
-        copy.appendChild(mkEl("small", "", moduleRequirementText(key)));
+        // Armed, the card shows ITS OWN reading of the selection - the
+        // mapping it would use, or a stated refusal - instead of the
+        // generic requirement line. The disclosure happens BEFORE the
+        // outcome, which is the whole design.
+        var reading = CHART_ARM ? armReadingFor(key, CHART_ARM.summary) : null;
+        copy.appendChild(mkEl("small", "",
+          reading ? reading.text : moduleRequirementText(key)));
+        if (reading && !reading.fits) button.classList.add("ps-analysis-nofit");
         button.appendChild(copy);
         button.addEventListener("click", function () {
+          var arm = CHART_ARM;   // captured: hide clears it (one-shot)
           hideAnalysisGallery();
           addChart(key);
+          var rd = arm ? armReadingFor(key, arm.summary) : null;
+          if (rd && rd.fits) {
+            activeChart().roles[key] = rd.roles;
+            validateRoles();
+            persist();
+            syncAll();
+            render();
+            showToast("Started " + MODULES[key].label +
+              " from your selection");
+            return;
+          }
           window.setTimeout(function () {
             var first = el("ps-slots").querySelector(".ps-slot-drop");
             if (first) first.focus();
@@ -8955,8 +10363,9 @@
       "Guides you to one of the seven analyses"));
     help.appendChild(helpCopy);
     help.addEventListener("click", function () {
+      var arm = CHART_ARM;
       hideAnalysisGallery();
-      showHelpMeChoose();
+      showHelpMeChoose(arm ? arm.cols : null);
     });
     root.appendChild(help);
   }
@@ -8964,7 +10373,10 @@
     renderAnalysisGallery();
     openShellDialog("ps-analysis-gallery");
   }
-  function hideAnalysisGallery() { closeShellDialog("ps-analysis-gallery"); }
+  function hideAnalysisGallery() {
+    CHART_ARM = null;   // one-shot: the next plain New chart is unarmed
+    closeShellDialog("ps-analysis-gallery");
+  }
 
   // Help Me Choose is a standalone guidance flow, not an eighth chart
   // engine. It mirrors the jamovi module's question route and creates one of
@@ -9104,7 +10516,10 @@
     else copy.sort();
     return copy.join("\u001f");
   }
-  function hmcSelectionSummary() {
+  function hmcSelectionSummary() { return hmcSummaryFor(HMC_SELECTED); }
+  // Generalized for t4-32: the armed New chart dialog reads the SAME
+  // classifier as the wizard, so the two surfaces cannot disagree.
+  function hmcSummaryFor(selectedNames) {
     var t = PROJECT.table;
     var summary = {
       n: t ? nRows(t) : 0, vars: [], counts: {
@@ -9115,8 +10530,8 @@
     };
     if (!t) return summary;
     var signatures = {}, continuousNames = [];
-    for (var i = 0; i < HMC_SELECTED.length; i++) {
-      var name = HMC_SELECTED[i];
+    for (var i = 0; i < selectedNames.length; i++) {
+      var name = selectedNames[i];
       if (t.order.indexOf(name) === -1) continue;
       var declared = t.types[name] || "nominal";
       var values = hmcUniqueValues(t, name);
@@ -9775,11 +11190,20 @@
     body.appendChild(actions);
     hmcRestoreFocus();
   }
-  function showHelpMeChoose() {
+  function showHelpMeChoose(seedCols) {
     HMC_PATH = ["root"];
-    HMC_MODE = "questions";
-    HMC_SELECTED = [];
     HMC_FILTER = "";
+    if (seedCols && seedCols.length) {
+      // t4-32 handoff: an ARMED New chart's Help-me-choose card carries the
+      // selection into the wizard's own variables box, so the wizard
+      // reasons about the same set the analysis cards just did. Explicit
+      // argument, not ambient state: a plain open still starts clean.
+      HMC_MODE = "variables";
+      HMC_SELECTED = seedCols.slice();
+    } else {
+      HMC_MODE = "questions";
+      HMC_SELECTED = [];
+    }
     renderHelpMeChoose();
     openShellDialog("ps-help-choose");
   }
@@ -9939,6 +11363,10 @@
   function hideLayoutGallery() { closeShellDialog("ps-layout-gallery"); }
   function closeChart(id) {
     if (PROJECT.charts.length <= 1) return;
+    // The B12/t4-31 drain: an in-flight edit lands on the document that
+    // produced it (still restorable through this close's own undo toast)
+    // rather than flushing onto whichever neighbor becomes active.
+    if (PS_FLUSH_PENDING_OPTS) PS_FLUSH_PENDING_OPTS();
     // B3 hygiene: the parked engine state for a closed document would
     // otherwise sit in localStorage forever. closeChart offers an undo, so
     // this is deferred past the toast rather than done immediately.
@@ -10582,9 +12010,14 @@
     if (!isLayoutTab(activeChart())) return;
     var p = layPage(), v = layView();
     el("ps-lpage").value = p.preset;
-    el("ps-lpage-w").value = String(Math.round(p.w));
-    el("ps-lpage-h").value = String(Math.round(p.h));
-    el("ps-lmargin").value = String(Math.round(p.margin));
+    // Shown in the user's unit; the model underneath stays in pixels.
+    el("ps-lpage-w").value = pxToUnit(p.w);
+    el("ps-lpage-h").value = pxToUnit(p.h);
+    el("ps-lmargin").value = pxToUnit(p.margin);
+    ["ps-lpage-w", "ps-lpage-h", "ps-lmargin"].forEach(function (id) {
+      el(id).step = String(unitStep());
+    });
+    syncUnitLabels();
     el("ps-lzoom").value = v.zoom;
     el("ps-lgrid").value = String(v.grid);
     var toggles = [
@@ -10609,38 +12042,37 @@
     margin.style.display = v.margins ? "block" : "none";
   }
   function laySyncInspector() {
-    var box = el("ps-linspect"), ids = laySelectedIds();
-    var appStatus = document.getElementById("ps-status-selection");
-    if (appStatus && appWorkspace() === "layout")
-      appStatus.textContent = ids.length
-        ? ids.length + (ids.length === 1 ? " layout item selected" :
-                        " layout items selected")
-        : "No layout selection";
-    if (!ids.length) {
-      box.className = "";
-      return;
+    // Torry's cohesion ruling (Jul 27 2026): properties of the selected
+    // thing live in the RIGHT RAIL, as they do in Data and Charts. The old
+    // #ps-linspect band between the toolbar and the canvas was a DUPLICATE
+    // of the rail's selection panel (the second-source pattern this repo
+    // has been bitten by), and it is gone; this now feeds the one surface.
+    syncLayoutShellStatus();
+    syncLayoutContextInspector();
+  }
+  function syncLayoutShellStatus() {
+    if (appWorkspace() !== "layout") return;
+    var ids = laySelectedIds();
+    el("ps-inspector-subtitle").textContent = ids.length
+      ? (ids.length === 1 ? "Position and size for 1 selected item"
+                         : "Arrange " + ids.length + " selected items")
+      : "Select a layout item";
+    el("ps-status-selection").textContent = ids.length
+      ? ids.length + (ids.length === 1 ? " layout item selected"
+                                      : " layout items selected")
+      : "No layout selection";
+    var doc = workspaceDocument("layout");
+    if (doc) {
+      var count = doc.items ? doc.items.length : 0;
+      var page = layPage();
+      el("ps-status-context").textContent =
+        count + " layout item" + (count === 1 ? "" : "s") +
+        " \u00b7 " + page.w + " \u00d7 " + page.h;
     }
-    box.className = "ps-linspect-show";
-    el("ps-lsel-label").textContent =
-      ids.length === 1 ? (layItemById(ids[0]).kind === "chart" ? "Chart panel"
-        : layItemById(ids[0]).kind === "image" ? "Image" : "Text")
-                       : ids.length + " items";
-    var b = laySelectionBounds(ids);
-    el("ps-lx").value = String(Math.round(b.x));
-    el("ps-ly").value = String(Math.round(b.y));
-    var one = ids.length === 1 ? layItemById(ids[0]) : null;
-    var sizeEditable = !!one && laySizedKind(one);
-    el("ps-lw").value = String(Math.round(b.w));
-    el("ps-lh").value = String(Math.round(b.h));
-    el("ps-lw").disabled = !sizeEditable;
-    el("ps-lh").disabled = !sizeEditable;
-    var align = box.querySelectorAll("[data-lalign]");
-    for (var i = 0; i < align.length; i++) align[i].disabled = ids.length < 2;
-    var dist = box.querySelectorAll("[data-ldistribute]");
-    for (var j = 0; j < dist.length; j++) dist[j].disabled = ids.length < 3;
   }
   function renderLayout() {
     if (!isLayoutTab(activeChart())) return;
+    if (LAY_NODE_POOL.docId !== activeChart().id) layPoolReset(activeChart().id);
     layNormalizeLayout(activeChart());
     laySelectedIds();
     var canvas = el("ps-lcanvas"), stage = el("ps-lstage");
@@ -10699,10 +12131,41 @@
     }
     return "Open the " + escHtml(c.name) + " tab once to capture it";
   }
+  // Keyed by LAYOUT id then item id, so switching figures cannot hand one
+  // layout's node to another. Cleared wholesale when the document changes.
+  var LAY_NODE_POOL = { docId: null, nodes: {} };
+  function layPoolReset(docId) {
+    LAY_NODE_POOL = { docId: docId || null, nodes: {} };
+  }
+  // What must match for a reused node to be correct. The chart's snapshot
+  // REVISION is in here: restyle a chart and its panel re-parses once, as it
+  // should, rather than showing the old picture.
+  function layPoolKey(item) {
+    if (item.kind !== "chart") return null;
+    var snap = validSnap(item.chartId);
+    if (!snap) return null;
+    return item.kind + "|" + item.chartId + "|" + snap.rev;
+  }
   function layBuildItem(item) {
     var selected = layIsSelected(item.id), primary = item.id === layPrimaryId();
     var cls = "ps-litem" + (selected ? " ps-litem-sel" : "") +
       (primary ? " ps-litem-primary" : "");
+    // t2-38. A chart panel is the expensive one: its innerHTML is a whole
+    // chart SVG, hundreds of KB on a real figure. If nothing about it has
+    // changed, move the node we already have.
+    var poolKey = layPoolKey(item);
+    if (poolKey) {
+      var held = LAY_NODE_POOL.nodes[item.id];
+      if (held && held.key === poolKey && held.el) {
+        var re = held.el;
+        re.className = cls;
+        re.style.left = (Number(item.x) || 0) + "px";
+        re.style.top = (Number(item.y) || 0) + "px";
+        re.style.width = (Number(item.w) || 480) + "px";
+        re.style.height = (Number(item.h) || 320) + "px";
+        return re;
+      }
+    }
     var elI = mkEl("div", cls);
     elI.setAttribute("data-item-id", item.id);
     elI.setAttribute("data-kind", item.kind);
@@ -10717,6 +12180,7 @@
       else elI.innerHTML = '<div class="ps-lmissing">' +
         layMissingCopy(c) + "</div>";
       setTip(elI, c ? c.name : "");
+      if (poolKey) LAY_NODE_POOL.nodes[item.id] = { key: poolKey, el: elI };
     } else if (item.kind === "image") {
       elI.style.width = (Number(item.w) || 240) + "px";
       elI.style.height = (Number(item.h) || 180) + "px";
@@ -11147,7 +12611,8 @@
     persist(); renderLayout();
   }
   function layApplyInspector(prop, value) {
-    value = Number(value);
+    // Typed in the user's unit, applied in pixels.
+    value = unitToPx(value);
     if (!isFinite(value)) { renderLayout(); return; }
     var ids = laySelectedIds(), b = laySelectionBounds(ids);
     if (!ids.length || !b) return;
@@ -11390,6 +12855,25 @@
         }
         return;
       }
+      // Select all (Torry's ask, Jul 27 2026): in a layout, Cmd/Ctrl+A
+      // meant the browser's select-all and highlighted the page text like
+      // a web page. Here it means what it means in every design tool -
+      // every item on the page. Scoped to the layout WORKSPACE, not just
+      // to a layout being the active document, so the chord keeps its
+      // native meaning anywhere else; text fields are already exempt via
+      // the guard at the top of this handler. The press is swallowed even
+      // when the page is empty: "select all of nothing" is still not an
+      // instruction to highlight the application's own furniture.
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey &&
+          String(e.key).toLowerCase() === "a" &&
+          appWorkspace() === "layout") {
+        e.preventDefault();
+        var every = layItems().map(function (it) { return it.id; });
+        if (!every.length) return;
+        laySetSelection(every);
+        renderLayout();   // the selection panel reports the count itself
+        return;
+      }
       if ((e.metaKey || e.ctrlKey) && String(e.key).toLowerCase() === "d" &&
           ids.length) {
         e.preventDefault(); layDuplicateSelected(); return;
@@ -11409,15 +12893,17 @@
                          Number(el("ps-lpage-h").value));
     });
     function customPageChange() {
-      layApplyPage("custom", Number(el("ps-lpage-w").value),
-                             Number(el("ps-lpage-h").value));
+      // Typed in the user's unit; the page model is pixels.
+      layApplyPage("custom", unitToPx(el("ps-lpage-w").value),
+                             unitToPx(el("ps-lpage-h").value));
     }
     el("ps-lpage-w").addEventListener("change", customPageChange);
     el("ps-lpage-h").addEventListener("change", customPageChange);
     el("ps-lmargin").addEventListener("change", function () {
       var p = layPage();
-      p.margin = Math.round(layClamp(this.value, 0, Math.min(p.w, p.h) / 3));
-      this.value = String(p.margin);
+      p.margin = Math.round(layClamp(unitToPx(this.value), 0,
+                                     Math.min(p.w, p.h) / 3));
+      this.value = pxToUnit(p.margin);
       persist(); laySyncMarginGuide();
     });
     el("ps-lzoom").addEventListener("change", function () {
@@ -11438,24 +12924,6 @@
     el("ps-lredo").addEventListener("click", function () {
       if (!layRedo()) showToast("Nothing to redo in this layout");
     });
-    el("ps-lduplicate").addEventListener("click", layDuplicateSelected);
-    el("ps-lback").addEventListener("click", function () { layMoveLayer(-1); });
-    el("ps-lforward").addEventListener("click", function () { layMoveLayer(1); });
-    ["x", "y", "w", "h"].forEach(function (prop) {
-      el("ps-l" + prop).addEventListener("change", function () {
-        layApplyInspector(prop, this.value);
-      });
-    });
-    var align = document.querySelectorAll("[data-lalign]");
-    for (var ai = 0; ai < align.length; ai++)
-      align[ai].addEventListener("click", function () {
-        layAlign(this.getAttribute("data-lalign"));
-      });
-    var dist = document.querySelectorAll("[data-ldistribute]");
-    for (var di = 0; di < dist.length; di++)
-      dist[di].addEventListener("click", function () {
-        layDistribute(this.getAttribute("data-ldistribute"));
-      });
     window.addEventListener("resize", function () {
       if (LAY_RESIZE_TIMER) window.clearTimeout(LAY_RESIZE_TIMER);
       LAY_RESIZE_TIMER = window.setTimeout(function () {
@@ -11470,6 +12938,19 @@
     var dx = (e.clientX - d.sx) / d.zoom;
     var dy = (e.clientY - d.sy) / d.zoom;
     if (!d.moved && Math.abs(dx) < 3 / d.zoom && Math.abs(dy) < 3 / d.zoom) return;
+    // t2-39. On the first real movement, not on pointerdown: a press that
+    // never travels is a SELECTION, and lifting it would flash on every
+    // ordinary click.
+    if (!d.moved) {
+      var cv = el("ps-lcanvas");
+      if (cv) cv.classList.add(d.resizing ? "ps-lcanvas-resizing"
+                                          : "ps-lcanvas-dragging");
+      for (var li = 0; li < d.ids.length; li++) {
+        var lel = cv && cv.querySelector(
+          '.ps-litem[data-item-id="' + d.ids[li] + '"]');
+        if (lel) lel.classList.add("ps-litem-dragging");
+      }
+    }
     d.moved = true;
     var p = layPage(), v = layView();
     if (d.resizing && d.ids.length === 1 && laySizedKind(d.primary)) {
@@ -11510,6 +12991,11 @@
     LAY_DRAG = null;
     document.removeEventListener("pointermove", layPointerMove);
     document.removeEventListener("pointerup", layPointerUp);
+    // t2-39. Escape is a SEPARATE path from layPointerUp, so it has to clear
+    // the lift itself. The per-item class survives the renderLayout below
+    // (the reuse path rewrites className), but the canvas cursor would not.
+    var cvC = el("ps-lcanvas");
+    if (cvC) cvC.classList.remove("ps-lcanvas-dragging", "ps-lcanvas-resizing");
     layHideGuides();
     for (var i = 0; i < d.origins.length; i++) {
       var o = d.origins[i];
@@ -11522,6 +13008,19 @@
   function layPointerUp() {
     var d = LAY_DRAG;
     LAY_DRAG = null;
+    // Cleared unconditionally, including on a never-moved drag, so a lifted
+    // look can never outlive the gesture that caused it. The CANVAS class is
+    // the load-bearing half: a control proves removing it leaves the grabbing
+    // cursor stuck after release. The per-item loop below is belt and braces,
+    // because renderLayout rewrites className anyway; it is kept so the clear
+    // does not depend on a rebuild happening.
+    var cvUp = el("ps-lcanvas");
+    if (cvUp) {
+      cvUp.classList.remove("ps-lcanvas-dragging", "ps-lcanvas-resizing");
+      var lifted = cvUp.querySelectorAll(".ps-litem-dragging");
+      for (var lu = 0; lu < lifted.length; lu++)
+        lifted[lu].classList.remove("ps-litem-dragging");
+    }
     document.removeEventListener("pointermove", layPointerMove);
     document.removeEventListener("pointerup", layPointerUp);
     layHideGuides();
@@ -11654,6 +13153,29 @@
     if (PROJECT.activeChart !== target.id) switchChart(target.id);
     else { persist(false); syncAll(); render(); }
   }
+  // Rail icons (Torry, Jul 27 2026: "we updated the icons under Workspaces
+  // but not under Project - was that on purpose?"). It was not: the
+  // cohesion pass moved the WORKSPACES rows to inline SVG and left the
+  // project list on the old Unicode glyphs (a striped square for charts, a
+  // boxed plus for layouts). The layouts pair happened to look alike, so
+  // only the charts one read as wrong. One list, one icon per kind: these
+  // must stay identical to the markup in the workspace switcher, which
+  // rail-icons-check asserts by comparing the rendered geometry.
+  var RAIL_ICON_CHART =
+    '<svg class="ps-icn" width="15" height="15" viewBox="0 0 24 24" ' +
+    'fill="none" stroke="currentColor" stroke-width="1.8" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M4 20V4"/><path d="M4 20h16"/>' +
+    '<rect x="7" y="11" width="3.2" height="6" rx="0.6" ' +
+    'fill="currentColor" stroke="none"/>' +
+    '<rect x="13" y="7" width="3.2" height="10" rx="0.6" ' +
+    'fill="currentColor" stroke="none"/></svg>';
+  var RAIL_ICON_LAYOUT =
+    '<svg class="ps-icn" width="15" height="15" viewBox="0 0 24 24" ' +
+    'fill="none" stroke="currentColor" stroke-width="1.8" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<rect x="3" y="4" width="18" height="16" rx="2"/>' +
+    '<path d="M12 4v16M3 12h9"/></svg>';
   function syncProjectNavigator() {
     var root = el("ps-project-nav");
     root.innerHTML = "";
@@ -11672,7 +13194,11 @@
           b.type = "button";
           b.setAttribute("data-project-chart-id", doc.id);
           setTip(b, doc.name);
-          b.appendChild(mkEl("span", "ps-nav-icon", icon));
+          // innerHTML, not mkEl's textContent: the icon is markup now, and
+          // it is a static constant above - never data.
+          var ico = mkEl("span", "ps-nav-icon");
+          ico.innerHTML = icon;
+          b.appendChild(ico);
           b.appendChild(mkEl("span", "", doc.name));
           b.addEventListener("click", function () {
             narrowCloseAfterNavigation();   // punch list 17
@@ -11693,8 +13219,8 @@
       }
       root.appendChild(wrap);
     }
-    group("Charts", false, "\u25a5");
-    group("Layouts", true, "\u229e");
+    group("Charts", false, RAIL_ICON_CHART);
+    group("Layouts", true, RAIL_ICON_LAYOUT);
   }
   function inspectorStat(label, value) {
     return '<div class="ps-inspector-stat"><span>' + escHtml(label) +
@@ -11735,6 +13261,27 @@
           : [])
       };
     }
+    // t3-48. Dates land Nominal because there is no date measure type, and
+    // that is not changing here. What the app CAN say is what it just did
+    // about the order, and offer the two derived columns that turn 400 daily
+    // levels into something a chart can actually compare.
+    if (t.dateColumns && t.dateColumns[col] && type === "nominal") {
+      var nLev = (t.levels[col] || []).length;
+      return {
+        kind: "dates",
+        html: "<strong>" + escHtml(col) + " looks like dates, so its " +
+          "levels are in date order rather than the order the rows " +
+          "arrived in.</strong> It is still a Nominal variable, so a chart " +
+          "draws one bar per distinct date" +
+          (nLev > 25 ? " and there are " + nLev + " of them" : "") +
+          ". Extracting the year or the month usually gives a comparison " +
+          "worth looking at.",
+        actions: [
+          { label: "Extract year", act: "advice-year" },
+          { label: "Extract month", act: "advice-month" }
+        ]
+      };
+    }
     // 18c: values numeric conversion would rewrite. The rewrite is already
     // prevented by the audit; what is left is routing the user to the type
     // that exists for exactly this case and is never inferred.
@@ -11750,6 +13297,72 @@
       };
     }
     return null;
+  }
+  // t3-48. A plain derived column, not a formula: the formula engine is
+  // numeric (ABS, SQRT, MEAN and friends) and has no string functions, so
+  // "the first four characters of a date" is not expressible there. That
+  // makes this a SNAPSHOT, and the toast says so rather than leaving someone
+  // to discover it when the dates change underneath.
+  var MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  function extractDatePart(col, part) {
+    var t = PROJECT.table;
+    if (!t || !t.raw[col]) return;
+    var src = t.raw[col], made = [], any = 0;
+    for (var i = 0; i < src.length; i++) {
+      var key = isoDateKey(src[i]);
+      if (!key) { made.push(""); continue; }
+      any++;
+      if (part === "year") made.push(key.slice(0, 4));
+      else made.push(MONTH_NAMES[Number(key.slice(4, 6)) - 1] || "");
+    }
+    if (!any) { showToast("No dates could be read from " + col, true); return; }
+    var name = uniqueColumnName(col + " " + part);
+    dataMark("extracting the " + part);
+    t.order.push(name);
+    t.raw[name] = made;
+    // Year is a NUMBER a chart can put on an axis; month is a name, and its
+    // level order is calendar order, which is exactly the ordering problem
+    // this item is about repeated one level up.
+    t.types[name] = part === "year" ? "continuous" : "nominal";
+    if (part === "month") {
+      if (!t.declaredLevels) t.declaredLevels = {};
+      t.declaredLevels[name] = MONTH_NAMES.slice();
+    }
+    t.edited = true;
+    retype(t); validateRoles();
+    persist(); syncAll(); render();
+    selectInspectorVariable(name);
+    showToast(name + " added from " + col +
+      " \u00b7 a snapshot, so re-extract it if the dates change");
+  }
+  // t3-47. Numeric summary for the inspector. Uses ps-stat.js, which is the
+  // same code the charts and the parity harness use, rather than a second
+  // arithmetic that could disagree with the chart beside it.
+  function variableNumericStats(t, col) {
+    // Belt and braces: a nominal column stores STRINGS, so the numeric filter
+    // below already excludes it and a control that removes this line changes
+    // nothing. Kept as a statement of intent, and because it stops the loop
+    // running at all on a large text column.
+    if (!colStoresNumbers(t, col)) return "";
+    var vals = [], src = t.columns[col] || [];
+    for (var i = 0; i < src.length; i++)
+      if (typeof src[i] === "number" && isFinite(src[i])) vals.push(src[i]);
+    if (vals.length < 2) return "";
+    function fmt(x) {
+      if (!isFinite(x)) return "-";
+      // Three significant figures, but never scientific for ordinary data
+      // and never a long tail of decimals on integers.
+      var a = Math.abs(x);
+      if (a >= 1000 || x === Math.round(x)) return String(Math.round(x * 100) / 100);
+      return String(Number(x.toPrecision(3)));
+    }
+    var S = window.PSStat;
+    return inspectorStat("Mean", fmt(S.mean(vals))) +
+      inspectorStat("SD", fmt(S.sdSample(vals))) +
+      inspectorStat("Median", fmt(S.median(vals))) +
+      inspectorStat("Min", fmt(Math.min.apply(null, vals))) +
+      inspectorStat("Max", fmt(Math.max.apply(null, vals)));
   }
   function syncVariableAdvice(t, col) {
     var section = el("ps-variable-advice-section");
@@ -11777,6 +13390,10 @@
     if (!t || !col) return;
     var a = t.typeAudit && t.typeAudit[col];
     if (act === "advice-id") { setColType(col, "id"); return; }
+    if (act === "advice-year" || act === "advice-month") {
+      extractDatePart(col, act === "advice-year" ? "year" : "month");
+      return;
+    }
     if (!a) return;
     if (act === "advice-goto") {
       if (a.firstBadRow < 0) return;
@@ -11828,7 +13445,11 @@
       inspectorStat("Distinct", String(Object.keys(seen).length)) +
       inspectorStat("Excluded", String(excluded)) +
       inspectorStat("Used in", String(uses) +
-        (uses === 1 ? " role" : " roles"));
+        (uses === 1 ? " role" : " roles")) +
+      // t3-47. Only for columns where they MEAN something: a mean of a
+      // nominal variable's codes is the classic way to mislead yourself, and
+      // the app refuses to compute one rather than printing it small.
+      variableNumericStats(t, col);
     syncVariableAdvice(t, col);
     var levels = t.levels[col] || [], levelRoot = el("ps-variable-levels");
     var categorical = t.types[col] === "nominal" ||
@@ -11917,16 +13538,66 @@
       ? (one.kind === "chart" ? "Chart panel"
          : one.kind === "image" ? "Image item" : "Text item")
       : ids.length + " selected items";
-    el("ps-ctx-lx").value = String(Math.round(bounds.x));
-    el("ps-ctx-ly").value = String(Math.round(bounds.y));
-    el("ps-ctx-lw").value = String(Math.round(bounds.w));
-    el("ps-ctx-lh").value = String(Math.round(bounds.h));
-    el("ps-ctx-lw").disabled = !one || one.kind !== "chart";
-    el("ps-ctx-lh").disabled = !one || one.kind !== "chart";
+    el("ps-ctx-lx").value = pxToUnit(bounds.x);
+    el("ps-ctx-ly").value = pxToUnit(bounds.y);
+    el("ps-ctx-lw").value = pxToUnit(bounds.w);
+    el("ps-ctx-lh").value = pxToUnit(bounds.h);
+    ["x", "y", "w", "h"].forEach(function (prop) {
+      el("ps-ctx-l" + prop).step = String(unitStep());
+    });
+    var ctxSized = !!one && laySizedKind(one);
+    el("ps-ctx-lw").disabled = !ctxSized;
+    el("ps-ctx-lh").disabled = !ctxSized;
     var align = document.querySelectorAll("[data-ctx-align]");
-    for (var i = 0; i < align.length; i++) align[i].disabled = ids.length < 2;
+    for (var i = 0; i < align.length; i++) {
+      align[i].disabled = ids.length < 2;
+      // Say WHY, or an inert control is indistinguishable from a broken
+      // one (Torry, Jul 27 2026). Aligning one item against itself is not
+      // a thing; the tooltip states the requirement rather than leaving
+      // the user to guess it.
+      setTip(align[i], align[i].disabled
+        ? "Select two or more items to align them"
+        : "Align the selected items");
+    }
     var dist = document.querySelectorAll("[data-ctx-distribute]");
-    for (i = 0; i < dist.length; i++) dist[i].disabled = ids.length < 3;
+    for (i = 0; i < dist.length; i++) {
+      dist[i].disabled = ids.length < 3;
+      setTip(dist[i], dist[i].disabled
+        ? "Select three or more items to space them evenly"
+        : "Space the selected items evenly");
+    }
+    // The layer buttons go inert at the ends of the stack, and say so.
+    // They were always live, so "Move backward" on the bottom item was a
+    // silent no-op that read as a broken button - Torry's second report,
+    // where backward only appeared to start working after a forward.
+    var backEnd = layAtLayerEnd(-1), fwdEnd = layAtLayerEnd(1);
+    el("ps-ctx-back").disabled = backEnd;
+    el("ps-ctx-forward").disabled = fwdEnd;
+    setTip(el("ps-ctx-back"), backEnd
+      ? "Already at the back of the stack"
+      : "Move behind the item below it");
+    setTip(el("ps-ctx-forward"), fwdEnd
+      ? "Already at the front of the stack"
+      : "Move in front of the item above it");
+  }
+  // True when moving the selection this direction would change nothing:
+  // every selected item is already jammed against that end of the stack.
+  // Mirrors layMoveLayer's own swap rule, so the button and the action can
+  // never disagree.
+  function layAtLayerEnd(dir) {
+    var ids = laySelectedIds(), items = layItems();
+    if (!ids.length) return true;
+    var i;
+    if (dir > 0) {
+      for (i = items.length - 2; i >= 0; i--)
+        if (ids.indexOf(items[i].id) !== -1 &&
+            ids.indexOf(items[i + 1].id) === -1) return false;
+    } else {
+      for (i = 1; i < items.length; i++)
+        if (ids.indexOf(items[i].id) !== -1 &&
+            ids.indexOf(items[i - 1].id) === -1) return false;
+    }
+    return true;
   }
   function syncContextInspector() {
     var ws = appWorkspace(), chartPane = el("ps-inspector-chart");
@@ -11940,6 +13611,9 @@
     if (ws !== "data" && doc) {
       el("ps-inspector-docname").value = doc.name;
       el("ps-inspector-delete").disabled = PROJECT.charts.length <= 1;
+      var docKind = ws === "layout" ? "layout" : "chart";
+      el("ps-inspector-duplicate").textContent = "Duplicate " + docKind;
+      el("ps-inspector-delete").textContent = "Delete " + docKind;
     }
     var fitBox = el("ps-fit-pane");
     if (fitBox) {
@@ -11948,12 +13622,46 @@
       var fitField = fitBox.closest(".ps-inspector-field");
       if (fitField) fitField.style.display = fitOK ? "" : "none";
       fitBox.checked = fitOK && fitDoc.fitPane !== false;
+      // The OFF state used to be a mystery: the label kept advertising
+      // 7.5 x 5 while the figure was whatever size the user had set
+      // (Torry: "I don't know about unchecked"). Unchecked, the row now
+      // STATES the size in force, so the two states read as one fact.
+      var fitLabel = fitField ? fitField.querySelector("span") : null;
+      if (fitLabel && fitOK) {
+        if (fitDoc.fitPane !== false) {
+          fitLabel.textContent = "Standard chart size (" +
+            FIT_MAX_W + " x " + FIT_MAX_H + " in)";
+        } else {
+          var mine = authoritativePlotSize();
+          fitLabel.textContent = "Standard chart size (your size: " +
+            (Math.round(mine.w * 100) / 100) + " x " +
+            (Math.round(mine.h * 100) / 100) + " in)";
+        }
+      }
+      var zoomSel = el("ps-chart-zoom");
+      if (zoomSel) {
+        var zoomField = zoomSel.closest(".ps-inspector-field");
+        if (zoomField) zoomField.style.display = fitOK ? "" : "none";
+        if (fitOK) {
+          var zMode = fitDoc.viewZoom == null ? "fit" : fitDoc.viewZoom;
+          if (String(zoomSel.value) !== String(zMode))
+            zoomSel.value = String(zMode);
+        }
+      }
     }
     if (ws === "data") syncVariableInspector();
     else if (ws === "layout" && doc) syncLayoutContextInspector();
   }
   function syncAppShell() {
     var ws = appWorkspace(), c = workspaceDocument(ws), t = PROJECT.table;
+    // The coach mark teaches "click the chart"; when the chart leaves the
+    // screen, the note goes with it (it lingered over the Layouts toolbar,
+    // intercepting clicks at a spot whose chart was parked offscreen).
+    // Hidden, not dismissed: a fresh session may still get its one showing.
+    if (ws !== "chart") {
+      var coachEl = document.getElementById("ps-coach");
+      if (coachEl && !coachEl.hidden) coachEl.hidden = true;
+    }
     var body = document.querySelector(".ps-app-body");
     body.classList.remove("ps-no-inspector");
     el("ps-workcard").classList.toggle("ps-pane-parked", ws === "data");
@@ -11964,7 +13672,12 @@
       else buttons[i].removeAttribute("aria-current");
     }
     el("ps-reset").disabled = !c || isLayoutTab(c);
-    el("ps-export").disabled = !c && ws !== "data";
+    // Charts already have the chart toolbar's Export button. Keep one
+    // obvious export action per workspace: Data and Layout use the app bar,
+    // while File > Export and the keyboard shortcut adapt in all three.
+    el("ps-export").style.display = ws === "chart" ? "none" : "";
+    el("ps-export").textContent = ws === "data" ? "Export data" : "Export layout";
+    el("ps-export").disabled = ws === "data" ? !t : !c;
     var docName = PROJECT.name || (t && t.name) || "Untitled project";
     el("ps-doc-name").textContent = docName;
     document.title = docName + " \u00b7 Pandion Plots";
@@ -11973,7 +13686,7 @@
       elOrSink("ps-workspace-subtitle").textContent = t
         ? nRows(t) + " rows \u00d7 " + t.order.length + " variables"
         : "No dataset loaded";
-      el("ps-inspector-title").textContent = "Variables & analysis";
+      el("ps-inspector-title").textContent = "Variable properties";
       el("ps-inspector-subtitle").textContent = INSPECTOR_VAR
         ? "Inspecting " + INSPECTOR_VAR : "Select a variable";
       // What the data IS, not which workspace you are looking at: the
@@ -12004,22 +13717,19 @@
       elOrSink("ps-workspace-title").textContent = c.name;
       elOrSink("ps-workspace-subtitle").textContent =
         "Figure layout \u00b7 " + page.w + " \u00d7 " + page.h;
+      var itemCount = c.items ? c.items.length : 0;
       el("ps-status-context").textContent =
-        (c.items ? c.items.length : 0) + " panel" +
-        ((c.items ? c.items.length : 0) === 1 ? "" : "s") +
+        itemCount + " layout item" + (itemCount === 1 ? "" : "s") +
         " \u00b7 " + page.w + " \u00d7 " + page.h;
       el("ps-inspector-title").textContent = "Layout properties";
-      el("ps-inspector-subtitle").textContent = laySelectedIds().length
-        ? "Position, size, and arrangement" : "Select a layout item";
-      el("ps-status-selection").textContent =
-        laySelectedIds().length ? laySelectedIds().length + " layout items selected" :
-        "No layout selection";
+      syncLayoutShellStatus();
     } else {
       elOrSink("ps-workspace-title").textContent = c.name;
       elOrSink("ps-workspace-subtitle").textContent =
         MODULES[c.module] ? MODULES[c.module].label : "Chart";
       el("ps-inspector-title").textContent = "Chart setup";
-      el("ps-inspector-subtitle").textContent = "Variables and analysis roles";
+      el("ps-inspector-subtitle").textContent =
+        "Data roles; select chart parts to style below";
       // The chart's own shape, from the payload the shell already builds:
       // what is plotted and how much of it. An instruction is not a status.
       el("ps-status-context").textContent = chartStatusText(c);
@@ -12165,7 +13875,17 @@
       else if (Array.isArray(p.xyPoints)) { cells = 0; n = p.xyPoints.length; }
       var bits = [];
       if (n) bits.push(n.toLocaleString() + " case" + (n === 1 ? "" : "s"));
-      if (cells) bits.push(cells + " cell" + (cells === 1 ? "" : "s"));
+      if (cells) {
+        var noun = "plotted value";
+        if (c.module === "plotbuilder") noun = "group";
+        else if (c.module === "rmplotbuilder") noun = "condition";
+        else if (c.module === "freqplotbuilder") noun = "category";
+        else if (c.module === "distplotbuilder")
+          noun = /hist/.test(String(p.graphType || ""))
+            ? "bin" : "distribution group";
+        else if (c.module === "likertplotbuilder") noun = "response category";
+        bits.push(cells + " " + noun + (cells === 1 ? "" : "s"));
+      }
       if (p.missingNote) bits.push(p.missingNote);
       return bits.length ? bits.join(" \u00b7 ") : "Ready";
     } catch (e) { return "Ready"; }
@@ -12348,6 +14068,11 @@
     });
     el("ps-layout-orientation").addEventListener("change", function () {
       layApplyOrientation(this.value);
+    });
+    ["x", "y", "w", "h"].forEach(function (prop) {
+      el("ps-ctx-l" + prop).addEventListener("change", function () {
+        layApplyInspector(prop, this.value);
+      });
     });
     ["x", "y", "w", "h"].forEach(function (prop) {
       el("ps-ctx-l" + prop).addEventListener("change", function () {
@@ -13270,12 +14995,22 @@
       APP_PREFS.density === "compact");
     document.body.classList.toggle("ps-reduce-motion",
       APP_PREFS.motion === "reduce");
+    // A unit change has to reach the fields that are already on screen.
+    // Nothing stored changes - only how the same pixels are written out.
+    syncUnitLabels();
+    try {
+      if (isLayoutTab(activeChart())) {
+        laySyncToolbar();
+        syncLayoutContextInspector();
+      }
+    } catch (e) {}
   }
   function showPreferences() {
     var exp = exportPrefs();
     el("ps-pref-density").value = APP_PREFS.density;
     el("ps-pref-motion").value = APP_PREFS.motion;
     el("ps-pref-startup").value = APP_PREFS.startup;
+    el("ps-pref-units").value = APP_PREFS.units;
     el("ps-pref-export-format").value = exp.format;
     el("ps-pref-export-dpi").value = String(exp.dpi);
     el("ps-pref-missing").value = APP_PREFS.missingTokens;
@@ -13356,6 +15091,7 @@
     el("ps-pref-density").value = APP_PREFS_DEFAULTS.density;
     el("ps-pref-motion").value = APP_PREFS_DEFAULTS.motion;
     el("ps-pref-startup").value = APP_PREFS_DEFAULTS.startup;
+    el("ps-pref-units").value = APP_PREFS_DEFAULTS.units;
     el("ps-pref-missing").value = APP_PREFS_DEFAULTS.missingTokens;
     el("ps-pref-export-format").value = "svg";
     el("ps-pref-export-dpi").value = "300";
@@ -13365,6 +15101,7 @@
     APP_PREFS.density = el("ps-pref-density").value;
     APP_PREFS.motion = el("ps-pref-motion").value;
     APP_PREFS.startup = el("ps-pref-startup").value;
+    APP_PREFS.units = el("ps-pref-units").value;
     APP_PREFS.missingTokens = String(el("ps-pref-missing").value || "NA").trim()
       || "NA";
     try {
@@ -13574,9 +15311,11 @@
         " variables" : "none"],
       ["Analysis", doc && !isLayoutTab(doc) && MODULES[doc.module]
         ? MODULES[doc.module].label : "-"],
-      ["Plot size", (Number(store.plotWidth) || 6) + " x " +
-        (Number(store.plotHeight) || 4) + " in" +
-        (doc && doc.fitPane !== false ? " (fit)" : " (manual)")],
+      ["Plot size", (function () {
+        var a = authoritativePlotSize();
+        return a.w + " x " + a.h + " in" +
+          (doc && doc.fitPane !== false ? " (standard)" : " (manual)");
+      })()],
       ["Documents", PROJECT.charts.length],
       ["Project bytes", LAST_PROJECT_BYTES.toLocaleString()],
       ["Autosave", AUTOSAVE_HEALTH + (AUTOSAVE_FAILS
@@ -13770,6 +15509,8 @@
   }
   function showDiagnostics() {
     renderDiagnostics();
+    var timing = el("ps-diagnostics-timing");
+    if (timing) timing.checked = dbgEnabled();
     openShellDialog("ps-diagnostics");
     try {
       if (window.navigator.storage && window.navigator.storage.estimate)
@@ -13852,6 +15593,13 @@
       closeShellDialog("ps-diagnostics");
     });
     el("ps-diagnostics-copy").addEventListener("click", copyDiagnostics);
+    el("ps-diagnostics-timing").addEventListener("change", function () {
+      try {
+        if (this.checked) window.localStorage.setItem("gb2_debug_timing", "1");
+        else window.localStorage.removeItem("gb2_debug_timing");
+      } catch (e) {}
+      buildDebugOverlay();
+    });
     el("ps-tour-close").addEventListener("click", function () {
       closeShellDialog("ps-tour-dialog");
     });
@@ -13906,7 +15654,7 @@
       { label: "Save project", shortcut: "Cmd/Ctrl+S", command: "save" },
       { label: "Save project as\u2026", shortcut: "Cmd/Ctrl+Shift+S", command: "save-as" },
       "separator",
-      { label: "Export\u2026", shortcut: "Cmd/Ctrl+E", command: "export" },
+      { label: "Export\u2026", shortcut: "Cmd/Ctrl+Shift+E", command: "export" },
       { label: "Export data as CSV\u2026", command: "export-data" }
     ],
     edit: [
@@ -13919,6 +15667,7 @@
       { label: "Select all", shortcut: "Cmd/Ctrl+A", command: "select-all-cells" },
       "separator",
       { label: "Find in data\u2026", shortcut: "Cmd/Ctrl+F", command: "find-data" },
+      { label: "Replace in data\u2026", command: "replace-data" },
       "separator",
       { label: "Copy as image", command: "copy-image" },
       "separator",
@@ -13929,6 +15678,35 @@
       { label: "Reset chart styling", command: "reset" },
       "separator",
       { label: "Preferences\u2026", shortcut: "Cmd/Ctrl+,", command: "preferences" }
+    ],
+    data: [
+      { label: "Add computed column\u2026", command: "data-compute" },
+      { label: "Reshape to wide\u2026", command: "data-reshape" },
+      "separator",
+      { label: "Insert column to the left", command: "data-insert-left" },
+      { label: "Insert column to the right", command: "data-insert-right" },
+      { label: "Duplicate column", command: "data-duplicate-col" },
+      { label: "Delete column", command: "data-delete-col" },
+      "separator",
+      { label: "Sort rows ascending", command: "data-sort-asc" },
+      { label: "Sort rows descending", command: "data-sort-desc" },
+      "separator",
+      { label: "Move column left", command: "data-move-left" },
+      { label: "Move column right", command: "data-move-right" },
+      "separator",
+      { label: "Fill down from the selected cell", command: "data-fill-down" },
+      { label: "Exclude or include selected values",
+        shortcut: "Cmd/Ctrl+E", command: "data-exclude" },
+      { label: "New chart from selection\u2026", command: "data-chart-sel" },
+      "separator",
+      { label: "Hide column", command: "data-hide-col" },
+      { label: "Show all columns", command: "data-show-all" },
+      { label: "Show only chart variables", command: "data-focus" },
+      "separator",
+      { label: "Auto-fit all columns", command: "data-fitall" },
+      { label: "Reset all column widths", command: "data-resetwidths" },
+      "separator",
+      { label: "Restore all exclusions", command: "data-restore-excl" }
     ],
     view: [
       // t3-51: the View menu listed all three workspaces with no accelerator
@@ -13948,6 +15726,8 @@
       { label: "New chart", command: "new-chart" },
       { label: "New layout", command: "new-layout" },
       "separator",
+      // t3-45: the layout toolbar had this and the menu did not.
+      { label: "Chart panel", command: "layout-add-chart", layoutOnly: true },
       { label: "Text", command: "insert-text", layoutOnly: true },
       { label: "Panel label", command: "insert-label", layoutOnly: true },
       { label: "Image\u2026", command: "insert-image", layoutOnly: true }
@@ -14018,6 +15798,11 @@
     if (item && item.command === "copy-image")
       return appWorkspace() === "layout"
         ? "Copy layout as image" : "Copy chart as image";
+    if (item && item.command === "export") {
+      var ws = appWorkspace();
+      return ws === "data" ? "Export data as CSV\u2026"
+        : ws === "layout" ? "Export layout\u2026" : "Export chart\u2026";
+    }
     if (item.command !== "undo" && item.command !== "redo") return item.label;
     var s = undoScope();
     var back = item.command === "undo";
@@ -14116,7 +15901,7 @@
         "computed variables and level editing, and multi-panel layouts.",
       "Projects save to a single file you keep, and autosave locally between " +
         "saves. Nothing is uploaded and there are no accounts.",
-      "Export to PNG, SVG, PDF, JPG or TIFF, and copy a chart straight into " +
+      "Export to PNG, SVG, PDF or JPG, and copy a chart straight into " +
         "a document as an image."
     ] }
   ];
@@ -14183,6 +15968,27 @@
     if (box) { box.focus(); box.select(); }
     else showToast("Open the Data workspace to search the table.");
   }
+  // t3-47 follow-up (Torry's ruling, Jul 27 2026): Find is sticky, Replace
+  // is a mode. These controls reveal on demand and hide again on Escape,
+  // so the command bar spends no standing width on them.
+  function setReplaceOpen(on) {
+    var wrap = el("ps-data-replace-wrap"), tog = el("ps-data-replace-toggle");
+    if (!wrap || !tog) return;
+    if (on) wrap.removeAttribute("hidden");
+    else wrap.setAttribute("hidden", "");
+    tog.setAttribute("aria-expanded", on ? "true" : "false");
+  }
+  function gridMenuReplace() {
+    if (appWorkspace() !== "data") setAppWorkspace("data");
+    var box = el("ps-data-replace");
+    if (!box) { showToast("Open the Data workspace to search the table."); return; }
+    setReplaceOpen(true);
+    // A replace needs a find first: an empty Find box gets the focus so the
+    // user starts where the work starts.
+    var find = el("ps-data-find");
+    if (find && !find.value) { find.focus(); find.select(); }
+    else { box.focus(); box.select(); }
+  }
   function commandEnabled(command) {
     var doc = CONTEXT_DOC_ID ? chartById(CONTEXT_DOC_ID) :
       (appWorkspace() === "data" ? activeChart() :
@@ -14197,7 +16003,25 @@
       }
       return !!engineHistoryBtn(back ? "undo" : "redo");
     }
+    if (command.indexOf("goto-document:") === 0)
+      return !!chartById(command.slice(14));
     if (command === "open-recent") return recentProjects().length > 0;
+    // t3-45. The column-scoped commands act on the INSPECTOR selection,
+    // because a menu-bar command has no right-clicked target. Without one
+    // they are disabled and commandDisabledReason says why, rather than
+    // acting on whichever column happens to be first.
+    if (command.indexOf("data-") === 0) {
+      var haveTable = !!(PROJECT.table && PROJECT.table.order.length);
+      if (!haveTable) return false;
+      if (command === "data-reshape" || command === "data-show-all" ||
+          command === "data-focus" || command === "data-fitall" ||
+          command === "data-resetwidths" || command === "data-restore-excl" ||
+          command === "data-compute")
+        return true;
+      if (command === "data-exclude" || command === "data-chart-sel")
+        return appWorkspace() === "data" && !!gridSelectionRect();
+      return !!INSPECTOR_VAR && PROJECT.table.order.indexOf(INSPECTOR_VAR) !== -1;
+    }
     if (command === "reset") return !!doc && !isLayoutTab(doc);
     if (command === "export") return !!doc;
     if (command === "export-data")
@@ -14211,7 +16035,8 @@
     if (command === "paste-cells")
       return (appWorkspace() === "data" && !!gridSelectionRect()) ||
         (isLayoutTab(activeChart()) && layHasClipboard());
-    if (command === "select-all-cells" || command === "find-data")
+    if (command === "select-all-cells" || command === "find-data" ||
+        command === "replace-data")
       return !!(PROJECT.table && PROJECT.table.order.length);
     if (command === "copy-image")
       return appWorkspace() !== "data" && !!workspaceDocument(appWorkspace()) &&
@@ -14221,9 +16046,14 @@
       return !!doc;
     if (command === "delete-document")
       return !!doc && PROJECT.charts.length > 1;
-    if (command === "duplicate-selection" || command === "delete-selection" ||
-        command === "layer-back" || command === "layer-forward")
+    if (command === "duplicate-selection" || command === "delete-selection")
       return isLayoutTab(activeChart()) && laySelectedIds().length > 0;
+    // Layer moves also need somewhere to go. Without this the menu offered
+    // "Move backward" on an item already at the back and simply did
+    // nothing when picked (Torry, Jul 27 2026).
+    if (command === "layer-back" || command === "layer-forward")
+      return isLayoutTab(activeChart()) && laySelectedIds().length > 0 &&
+             !layAtLayerEnd(command === "layer-back" ? -1 : 1);
     if (command === "layout-add-chart" || command === "layout-add-text")
       return isLayoutTab(activeChart());
     return true;
@@ -14235,6 +16065,12 @@
         scope === "layout" ? "layout changes" : "chart style changes";
       return "No " + what + " to " + command;
     }
+    if (command === "data-exclude" || command === "data-chart-sel")
+      return "Select cells in the Data workspace first";
+    if (command.indexOf("data-") === 0)
+      return (PROJECT.table && PROJECT.table.order.length)
+        ? "Select a column in the Data workspace first"
+        : "Load some data first";
     if (command === "reset") return "Chart styling is unavailable for layouts";
     if (command === "export") return "Create a document before exporting";
     if (command === "copy-image")
@@ -14244,9 +16080,15 @@
     if (command === "rename-document" || command === "duplicate-document")
       return "No document is selected";
     if (command === "delete-document") return "A project must keep at least one document";
-    if (command === "duplicate-selection" || command === "delete-selection" ||
-        command === "layer-back" || command === "layer-forward")
+    if (command === "duplicate-selection" || command === "delete-selection")
       return "Select a layout item first";
+    if (command === "layer-back" || command === "layer-forward") {
+      if (!isLayoutTab(activeChart()) || !laySelectedIds().length)
+        return "Select a layout item first";
+      return command === "layer-back"
+        ? "Already at the back of the stack"
+        : "Already at the front of the stack";
+    }
     if (command === "layout-add-chart" || command === "layout-add-text")
       return "Open a layout to add to it";
     return "";
@@ -14268,7 +16110,7 @@
       FILE_HANDLE = null;
       saveProjectFile();
     }
-    else if (command === "export") openExporter();
+    else if (command === "export") exportCurrentWorkspace();
     else if (command === "export-data") exportDataCsv();
     else if (command === "copy-image") copyActiveAsImage();
     else if (command === "undo" || command === "redo") {
@@ -14324,6 +16166,7 @@
     }
     else if (command === "select-all-cells") gridMenuSelectAll();
     else if (command === "find-data") gridMenuFind();
+    else if (command === "replace-data") gridMenuReplace();
     else if (command === "help-chooser") openEngineHelp("graphChooser");
     else if (command === "help-lint") openEngineHelp("graphLint");
     else if (command === "help-anatomy") openEngineHelp("anatomy");
@@ -14332,10 +16175,50 @@
       showShortcuts();
     else if (command === "diagnostics")
       showDiagnostics();
+    else if (command.indexOf("goto-document:") === 0) {
+      var gid = command.slice(14);
+      if (chartById(gid)) {
+        setAppWorkspace(isLayoutTab(chartById(gid)) ? "layout" : "chart");
+        switchChart(gid);
+      }
+    }
+    else if (command.indexOf("data-") === 0) runDataCommand(command);
     else if (command === "site-home") openSiteLink("site");
     else if (command === "site-gallery") openSiteLink("gallery");
     else if (command === "whats-new") showWhatsNew();
     else if (command === "about") showAbout();
+  }
+  // t3-45. Every one of these is the SAME call the context menu makes, so
+  // the two routes cannot drift into doing different things.
+  function runDataCommand(command) {
+    var col = INSPECTOR_VAR;
+    if (appWorkspace() !== "data") setAppWorkspace("data");
+    if (command === "data-compute") { openFormulaDialog(col || null); return; }
+    if (command === "data-reshape") { openReshapeDialog(); return; }
+    if (command === "data-show-all") { gridResetColumnView(); syncAll(); return; }
+    if (command === "data-focus") { gridSetChartFocus(true); return; }
+    if (command === "data-fitall") { gridAutoFitAll(); return; }
+    if (command === "data-resetwidths") {
+      PROJECT.ui.columnWidths = {};
+      GRID_NATURAL_WIDTHS = {};
+      persist(); syncDataGrid();
+      return;
+    }
+    if (command === "data-restore-excl") { gridRestoreExclusions(); return; }
+    if (!col) return;
+    if (command === "data-insert-left") gridInsertColumnAt(col, false);
+    else if (command === "data-insert-right") gridInsertColumnAt(col, true);
+    else if (command === "data-duplicate-col") insertVariable(col, true);
+    else if (command === "data-delete-col") deleteVariable(col);
+    else if (command === "data-sort-asc") sortRowsByVariable(col, 1);
+    else if (command === "data-sort-desc") sortRowsByVariable(col, -1);
+    else if (command === "data-hide-col") gridHideColumn(col);
+    else if (command === "data-move-left") moveColumnBy(col, -1);
+    else if (command === "data-move-right") moveColumnBy(col, 1);
+    else if (command === "data-fill-down") gridFillDown();
+    else if (command === "data-exclude") gridToggleExcludeSelection();
+    else if (command === "data-chart-sel")
+      armChartFromSelection(selectionChartColumns());
   }
   function showAppMenu(owner, name, focusFirst) {
     var defs = APP_MENU_DEFS[name] || [], m = el("ps-appmenu");
@@ -14454,6 +16337,11 @@
   function commandCatalog() {
     var groups = [
       ["File", APP_MENU_DEFS.file], ["Edit", APP_MENU_DEFS.edit],
+      // t3-45: Data joins the catalogue, so the ~35 commands that lived only
+      // behind a right-click are findable in the palette too. This is the
+      // whole reason the fix is a MENU rather than a second dispatch: the
+      // palette already renders from these definitions.
+      ["Data", APP_MENU_DEFS.data],
       ["View", APP_MENU_DEFS.view], ["Insert", APP_MENU_DEFS.insert],
       ["Help", APP_MENU_DEFS.help]
     ], out = [], seen = {};
@@ -14476,9 +16364,28 @@
     }
     return out;
   }
+  function paletteDocumentEntries() {
+    var out = [];
+    for (var i = 0; i < PROJECT.charts.length; i++) {
+      var c = PROJECT.charts[i];
+      if (!c || !c.id) continue;
+      out.push({
+        label: c.name || "Untitled",
+        group: isLayoutTab(c) ? "Layout" : "Chart",
+        shortcut: c.id === PROJECT.activeChart ? "open" : "",
+        command: "goto-document:" + c.id
+      });
+    }
+    return out;
+  }
   function renderCommandPalette() {
     var query = el("ps-command-search").value.trim().toLowerCase();
-    var list = commandCatalog().filter(function (item) {
+    // Documents FIRST when the user has typed something: a palette is most
+    // often opened to go somewhere, and with a dozen documents the command
+    // list would otherwise bury the one thing being searched for.
+    var all = query ? paletteDocumentEntries().concat(commandCatalog())
+                    : commandCatalog().concat(paletteDocumentEntries());
+    var list = all.filter(function (item) {
       return !query || (item.label + " " + item.group).toLowerCase().indexOf(query) !== -1;
     });
     var root = el("ps-command-results");
@@ -14825,11 +16732,19 @@
       if (key === "," && !e.shiftKey) {
         e.preventDefault(); showPreferences(); return;
       }
-      // t3-51. Export is the terminal action of most sessions and had no
-      // accelerator at all, while Preferences had one.
-      if (key === "e" && !e.shiftKey) {
-        if (!workspaceDocument(appWorkspace())) return;
-        e.preventDefault(); openExporter(); return;
+      // Torry's ask (Jul 27 2026): exclusion is the high-frequency,
+      // in-flow action, so it gets the prime chord. Export, a
+      // once-per-session action with a button and a menu entry, moved to
+      // Shift+E the same day it first gained Cmd/Ctrl+E (t3-51), before
+      // any muscle memory could exist.
+      if (key === "e" && !e.shiftKey && appWorkspace() === "data") {
+        e.preventDefault(); gridToggleExcludeSelection(); return;
+      }
+      if (key === "e" && e.shiftKey) {
+        var exportable = appWorkspace() === "data"
+          ? PROJECT.table : workspaceDocument(appWorkspace());
+        if (!exportable) return;
+        e.preventDefault(); exportCurrentWorkspace(); return;
       }
       // The three workspaces the View menu lists. e.code, not e.key: with a
       // modifier held, several keyboard layouts report a symbol here.
@@ -14896,8 +16811,19 @@
     });
   }
 
+  function clearEnginePartSelection() {
+    try {
+      if (typeof window.__gb2_clearInspectorSelection === "function")
+        window.__gb2_clearInspectorSelection();
+      else window.localStorage.removeItem("graphbuilder2.inspector.v1");
+    } catch (e) {}
+  }
   function wireHeader() {
     el("ps-module").addEventListener("change", function () {
+      // A chart-part editor belongs to the analysis that created its target.
+      // Clear it before the engine is rebuilt so Marker/Bars controls cannot
+      // survive into an analysis where that part does not exist.
+      clearEnginePartSelection();
       activeChart().module = el("ps-module").value;
       bumpSnapEpoch();
       persist();
@@ -14905,6 +16831,7 @@
       syncRolesRow();
       syncDataRow();
       syncDataGrid();
+      syncAppShell();
       render();
     });
     el("ps-save").addEventListener("click", saveProjectFile);
@@ -15189,6 +17116,7 @@
       validateRoles(); persist(); syncAll(); render();
     },
     setModule: function (mod) {
+      clearEnginePartSelection();
       activeChart().module = mod; bumpSnapEpoch(); persist(); syncAll(); render();
     },
     setRoles: function (mod, rr) {
@@ -15207,6 +17135,9 @@
     },
     selectVariable: selectInspectorVariable,
     setGridSelection: gridSetSelection,
+    selectedColumns: gridSelectedColumns,
+    selectionText: gridSelectionText,
+    toggleColumnSelection: gridToggleColumnSelection,
     setExcluded: function (col, row, on) {
       return gridSetExcludedCells(
         [{ col: col, row: row }], on !== false, "data");
@@ -15237,12 +17168,17 @@
     moveVariableLevel: moveVariableLevel,
     setMissingTokens: setMissingTokens,
     setColumnMissingTokens: setColumnMissingTokens,
+    gridReplace: gridReplace,
+    moveColumnBy: moveColumnBy,
+    gridFillDown: gridFillDown,
     layCopySelected: layCopySelected,
+    gridRevealFound: gridRevealFound,
     laySetSelection: laySetSelection,
     laySelectedIds: laySelectedIds,
     layPasteClipboard: layPasteClipboard,
     appPrefs: function () { return APP_PREFS; },
     sortVariableLevels: sortVariableLevels,
+    extractDatePart: extractDatePart,
     projectFileText: projectFileText,
     projectFileName: projectFileName,
     recentProjects: recentProjects,

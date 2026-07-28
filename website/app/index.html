@@ -231,6 +231,18 @@
     border-radius: var(--ps-r-md); padding: 5px 12px; cursor: pointer;
   }
   .ps-btn:hover { background: var(--ps-s3); }
+  /* A disabled button must LOOK disabled (Torry, Jul 27 2026: "none of
+     those buttons do anything for me at all"). The layout Arrange cluster
+     correctly disables Align below 2 selected items and Distribute below
+     3, but .ps-btn had no disabled rule at all, so eight of the twelve
+     rendered exactly like live controls: same colour, full opacity,
+     ordinary cursor. Clicking them did nothing and said nothing. The
+     tooltips that explain WHY are set alongside the disabled state. */
+  .ps-btn:disabled, .ps-btn[disabled] {
+    color: var(--ps-muted); background: var(--ps-s2);
+    border-color: var(--ps-l3); cursor: default;
+  }
+  .ps-btn:disabled:hover, .ps-btn[disabled]:hover { background: var(--ps-s2); }
   .ps-btn.ps-primary { background: var(--ps-accent); border-color: var(--ps-accent); color: var(--ps-s0); }
   .ps-btn.ps-primary:hover { background: var(--ps-accent-hover); }
   .ps-card {
@@ -262,12 +274,30 @@
     border: 1px solid var(--ps-l2); border-radius: var(--ps-r-md); background: var(--ps-s1);
     display: flex; flex-direction: column; align-self: flex-start;
   }
-  .ps-varbox-head {
-    display: flex; align-items: center; gap: 8px; padding: 7px 10px 5px;
+  /* The disclosure header doubles as the section label: same caps voice
+     as AXES / SPLIT THE CHART, arrow cursor per the desktop cursor
+     policy. */
+  #ps-varbox-toggle {
+    -webkit-appearance: none; appearance: none; width: 100%;
+    display: flex; align-items: center; gap: 7px; padding: 8px 10px;
+    font-family: inherit; font-size: 10px; font-weight: 700;
+    color: var(--ps-muted); letter-spacing: 0.45px; text-transform: uppercase;
+    background: none; border: none; cursor: default; text-align: left;
   }
+  #ps-varbox-toggle:hover { color: var(--ps-ink-3); }
+  /* No font-size of its own: it inherits the header's 10px. The app
+     enforces a 10px legibility floor suite-wide (tokens-check case 3),
+     and a 9px chevron broke it. */
+  .ps-varbox-chev { flex: 0 0 auto; color: var(--ps-muted); }
+  #ps-varbox-body[hidden] { display: none; }
   #ps-varfilter {
-    flex: 1; min-width: 50px; font-family: inherit; font-size: 11.5px;
+    box-sizing: border-box; width: calc(100% - 16px); margin: 0 8px 4px;
+    font-family: inherit; font-size: 11.5px;
     border: 1px solid var(--ps-l3); border-radius: var(--ps-r-md); padding: 2px 7px;
+  }
+  /* The whole box accepts a dragged-back slot chip, collapsed included. */
+  #ps-varbox.ps-droptarget {
+    outline: 2px dashed var(--ps-accent); outline-offset: -2px;
   }
   #ps-columns {
     overflow-y: auto; max-height: 168px; padding: 3px 6px 6px;
@@ -286,13 +316,11 @@
   }
   .ps-chip:hover { background: var(--ps-s3); }
   .ps-chip[data-kind="id"] { opacity: 0.55; cursor: pointer; }
-  .ps-chip[data-assigned="1"] { opacity: 0.62; }
+  /* (data-assigned + .ps-chip-role styling retired with the de-busy pass:
+     an assigned variable now LEAVES the list and lives in its role zone,
+     so the mapping is stated once, not twice.) */
   .ps-chip .ps-chip-name {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  }
-  .ps-chip .ps-chip-role {
-    margin-left: auto; flex-shrink: 0; font-size: 10px; font-weight: 700;
-    color: var(--ps-accent); letter-spacing: 0.4px;
   }
   .ps-chip svg, .ps-ticon { display: block; flex-shrink: 0; }
   #ps-slots {
@@ -337,18 +365,112 @@
     cursor: pointer; padding: 0 4px; border-radius: var(--ps-r-sm);
   }
   .ps-slot-x:hover { color: var(--ps-danger); background: var(--ps-s3); }
-  .ps-fit-field {
+  /* Two-class selectors on purpose (the .ps-command-icon cascade lesson):
+     these rows also carry .ps-inspector-field, whose later single-class
+     rule (flex-direction: column) and input sizing (width 100 percent,
+     height 29px, which inflates a checkbox to comic size) would win a
+     same-specificity fight on source order. Torry's screenshot, Jul 27
+     2026: giant checkbox, labels stacked and centered. */
+  .ps-inspector-field.ps-fit-field {
     display: flex; flex-direction: row; align-items: center; gap: 7px;
     margin: 9px 12px 4px; color: var(--ps-muted); font-size: 10.5px;
+    font-weight: 500;
   }
-  .ps-fit-field input { margin: 0; }
+  .ps-inspector-field.ps-fit-field input {
+    margin: 0; width: auto; height: auto;
+  }
+  #ps-preview-host {
+    position: absolute; left: -20000px; top: 0; width: 640px;
+    visibility: hidden; pointer-events: none;
+  }
+  .ps-analysis-preview {
+    grid-column: 1 / -1; height: 128px; margin-bottom: 4px;
+    background: var(--ps-s0); border: 1px solid var(--ps-l2);
+    border-radius: var(--ps-r-sm); overflow: hidden;
+    opacity: 0; transition: opacity 240ms ease;
+  }
+  .ps-analysis-preview.ps-preview-in { opacity: 1; }
+  .ps-analysis-preview svg { display: block; width: 100%; height: 100%; }
+  /* View-zoom isolation (Torry, Jul 27 2026): the zoom scales the CHART;
+     the engine's own chrome renders at true size. CSS zoom composes
+     multiplicatively, so the toolbar strip (the wrap's first child) and
+     the click-to-edit panel (.gb2-panel) carry the INVERSE zoom and land
+     back at effective 1. The chart block's overlay divs (axis hit strips,
+     pills, grips) are deliberately NOT counter-zoomed: they are positioned
+     against chart geometry and must scale with it. Declarative on purpose:
+     the engine rebuilds these nodes on every render, and a CSS rule
+     re-applies where an inline style would be wiped.
+     The two toolbar FLYOUTS join the counter-zoom (Jul 27 2026): they are
+     chrome, not figure, and left scaling with the chart they rendered
+     half-size at 50% (a 126px dropdown) with their offsets halved too -
+     the palette flyout landed 48px left of its button. Counter-zooming
+     restores both the size and the offset, because the same factor that
+     scales the element scales its position inside the zoomed wrap.
+     Measured: 249px wide and 0px offset at every zoom. */
+  #psroot > div > div.ignore-html:first-child,
+  #psroot .gb2-panel,
+  #psroot [data-role="graphtype-flyout"],
+  #psroot [data-role="palette-flyout"] {
+    zoom: var(--ps-chrome-zoom, 1);
+  }
+  /* Toolbar alignment (Torry, Jul 27 2026): the engine's dropdowns are
+     positioned inside the CHART WRAP, which the engine centres when its
+     card is wider than the figure - always true here. Constraining the
+     toolbar to the figure's width and centring it the same way puts the
+     buttons back over their own dropdowns, and reads as deliberate: the
+     toolbar belongs to the chart, not to the pane. --ps-chart-w is set
+     per render by syncToolbarAlignment(); with no value the toolbar is
+     full width exactly as before.
+     The engine already sizes the strip to the figure (inline width:720px)
+     and sets inline margin-left/right:0 - it simply never centres it. An
+     inline declaration beats a stylesheet one, so the centring carries
+     !important, the same idiom the focus-visible rule uses to beat inline
+     outline:none. max-width is a guard for builds that set no width. */
+  /* (The toolbar deliberately spans the full width: Torry likes the bar
+     all the way across. It is the DROPDOWN that moves to meet its button,
+     in syncFlyoutPositions(), rather than the bar shrinking to meet the
+     dropdown - the first shape of this fix, which he rejected on sight.) */
+  /* t4-35: header drag-to-reorder. grab is sanctioned by the cursor
+     policy for gestures that really are drags. */
+  #ps-datagrid th[data-grid-col] { cursor: grab; }
+  body.ps-col-moving, body.ps-col-moving * { cursor: grabbing !important; }
+  body.ps-col-moving #ps-datagrid th[data-grid-col],
+  body.ps-col-moving #ps-datagrid td { user-select: none; }
+  .ps-analysis-arm {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+    margin-top: 8px; padding: 7px 9px;
+    background: var(--ps-tint-1); border: 1px solid var(--ps-tint-line-2);
+    border-radius: var(--ps-r-sm); font-size: 11px; color: var(--ps-ink-2);
+  }
+  .ps-analysis-arm .ps-arm-chip {
+    padding: 2px 8px; background: var(--ps-s0);
+    border: 1px solid var(--ps-l3); border-radius: var(--ps-r-sm);
+    font-size: 10.5px; font-weight: 650; color: var(--ps-ink-2);
+  }
+  .ps-analysis-arm button {
+    margin-left: auto; font-size: 10.5px;
+  }
+  .ps-analysis-nofit .ps-analysis-copy small { color: var(--ps-muted); }
+  /* Same two-class discipline as .ps-fit-field above. */
+  .ps-inspector-field.ps-zoom-field {
+    display: flex; flex-direction: row; align-items: center; gap: 7px;
+    margin: 4px 12px 9px; color: var(--ps-muted); font-size: 10.5px;
+    font-weight: 500;
+  }
+  .ps-inspector-field.ps-zoom-field select {
+    flex: 0 0 auto; width: auto; min-width: 108px;
+  }
+  #ps-zoom-readout { color: var(--ps-muted); font-size: 10.5px; }
   .ps-analysis-help {
     margin: 6px 12px 0; padding: 6px 8px; color: var(--ps-muted);
     background: var(--ps-s2); border: 1px solid var(--ps-l2); border-radius: var(--ps-r-md);
     font-size: 10.5px; line-height: 1.35;
   }
-  .ps-varbox-hint {
-    padding: 0 9px 7px; color: var(--ps-muted); font-size: 10px; line-height: 1.35;
+  /* Shown when the variables list has nothing to offer: every variable
+     is assigned (it now lives in its role zone), or the filter hid all. */
+  .ps-chip-empty-note {
+    padding: 3px 4px 5px; color: var(--ps-muted); font-size: 10.5px;
+    line-height: 1.35;
   }
   .ps-role-section-heading {
     display: flex; align-items: center; gap: 7px; margin: 3px 0 0;
@@ -369,10 +491,13 @@
     color: var(--ps-ink-3); font-size: 11px; font-weight: 700;
     letter-spacing: 0; text-transform: none;
   }
+  /* De-busy pass (Torry, Jul 27 2026): badges render only on EMPTY zones
+     (a met requirement is not news), and in sentence case - caps stay
+     reserved for section headers so the caps voice keeps meaning. */
   .ps-role-badge {
     margin-left: auto; padding: 2px 5px; border-radius: var(--ps-r-md);
     color: var(--ps-muted); background: var(--ps-s3); font-size: 10px;
-    font-weight: 700; letter-spacing: 0.25px; text-transform: uppercase;
+    font-weight: 650; letter-spacing: 0; text-transform: none;
   }
   .ps-role-badge-required { color: #315f8c; background: var(--ps-s3); }
   .ps-role-card .ps-slot-drop {
@@ -381,6 +506,24 @@
   }
   .ps-role-card .ps-slot-drop:hover {
     color: var(--ps-accent-ink); background: var(--ps-s2); border-color: #7fa5cd;
+  }
+  /* A FILLED zone is a settled fact, not a drop target: solid quiet
+     border. Dashed is the "drop here" affordance, and keeping it after
+     the zone is satisfied means nothing ever reads as done (the de-busy
+     pass, Torry, Jul 27 2026). Drag/reject states still override. */
+  .ps-role-card .ps-slot-drop.ps-slot-filled {
+    border-style: solid; border-color: var(--ps-l2); background: var(--ps-s0);
+  }
+  /* Re-stated at matching specificity AFTER the filled rule, or the
+     3-class filled selector would beat the 2-class drag states on a
+     filled zone and the drag would lose its live highlight. */
+  .ps-role-card .ps-slot-drop.ps-droptarget {
+    border-color: var(--ps-accent); border-style: solid;
+    box-shadow: 0 0 0 2px rgba(53, 115, 189, 0.25);
+  }
+  .ps-role-card .ps-slot-drop.ps-dropreject {
+    border-color: var(--ps-warn); border-style: dashed;
+    background: var(--ps-warn-wash);
   }
   .ps-role-card .ps-slot-empty {
     display: inline-flex; align-items: center; gap: 6px; min-width: 0;
@@ -460,7 +603,7 @@
   .ps-slot-count {
     margin-left: auto; flex-shrink: 0; padding-left: 8px;
     color: var(--ps-muted); font-size: 10px; font-weight: 650;
-    text-transform: uppercase; letter-spacing: 0.25px; white-space: nowrap;
+    text-transform: none; letter-spacing: 0; white-space: nowrap;
   }
   .ps-role-suggest {
     -webkit-appearance: none; appearance: none;
@@ -571,8 +714,14 @@
     border-radius: var(--ps-r-md);
   }
   /* Layout canvas */
+  /* One command idiom across the workspaces (Torry's cohesion ruling,
+     Jul 27 2026): the layout toolbar is the same quiet bar as the Data
+     workspace's, same components, same tokens. */
   #ps-ltoolbar {
-    display: flex; flex-direction: column; gap: 7px; margin-bottom: 9px;
+    display: flex; flex-direction: column; gap: 2px; margin-bottom: 9px;
+    padding: 5px 8px; background: var(--ps-s2);
+    border: 1px solid var(--ps-l2b); border-radius: var(--ps-r-md);
+    box-shadow: 0 1px 2px rgba(25,38,54,0.04);
   }
   .ps-ltoolbar-row {
     display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
@@ -595,28 +744,29 @@
   .ps-lselect { padding-right: 24px; }
   .ps-lnum { width: 62px; text-align: right; font-variant-numeric: tabular-nums; }
   .ps-lnum:disabled { color: var(--ps-muted); background: var(--ps-s2); }
-  .ps-ltoggle[aria-pressed="true"] {
-    color: var(--ps-accent-bright); background: var(--ps-tint-2); border-color: #7ea7d4;
-    box-shadow: inset 0 0 0 1px rgba(53,115,189,0.15);
+  /* The canvas aids, now that they live in the rail (Jul 27 2026, Torry).
+     Toggles keep their pill shape and their aria-pressed styling so the
+     on/off state reads the same as it did in the bar; the paired value
+     sits on the same row as the toggle it belongs to, which is how the
+     rail's other rows read. */
+  .ps-linsp-toggles {
+    display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 9px;
   }
-  .ps-lhint { font-size: 11.5px; color: var(--ps-muted); }
-  #ps-linspect {
-    display: none; align-items: center; gap: 7px; flex-wrap: wrap;
-    min-height: 34px; margin-bottom: 9px; padding: 6px 8px;
-    border: 1px solid var(--ps-l2); border-radius: var(--ps-r-md); background: var(--ps-s1);
+  .ps-linsp-row {
+    display: flex; align-items: center; gap: 9px; margin-bottom: 9px;
   }
-  #ps-linspect.ps-linspect-show { display: flex; }
-  #ps-lsel-label {
-    min-width: 72px; color: var(--ps-ink-3); font-size: 11.5px; font-weight: 700;
+  .ps-inspector-field.ps-linsp-inline {
+    flex-direction: row; align-items: center; justify-content: space-between;
+    gap: 8px; margin-bottom: 0;
   }
-  .ps-linspect-actions {
-    display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap;
+  .ps-inspector-field.ps-linsp-inline > span {
+    flex: 0 0 auto; text-transform: none; letter-spacing: 0;
+    font-size: 11px; font-weight: 600; color: var(--ps-ink-3);
   }
-  .ps-linspect-actions .ps-btn { padding: 4px 8px; font-size: 11px; }
-  .ps-linspect-actions .ps-btn:disabled {
-    color: var(--ps-muted); background: var(--ps-s3); border-color: var(--ps-l2b);
-    cursor: default;
-  }
+  .ps-inspector-field.ps-linsp-inline .ps-lnum { width: 74px; }
+  .ps-inspector-field.ps-linsp-inline .ps-lselect { width: auto; min-width: 96px; }
+  .ps-linsp-row .ps-linsp-inline { flex: 1; }
+
   #ps-lviewport {
     position: relative; height: clamp(360px, 72vh, 780px);
     overflow: auto; border: 1px solid var(--ps-l2b); border-radius: var(--ps-r-md);
@@ -650,6 +800,23 @@
     outline-color: #165b9f;
     box-shadow: 0 0 0 3px rgba(53,115,189,0.11);
   }
+  /* t2-39. Matches .ps-tab-dragging deliberately: the same verb should feel
+     the same everywhere, and the tab strip was the one that had already got
+     it right. The class goes on the CANVAS as well, so the cursor holds while
+     the pointer travels off the item it is carrying.
+
+     PLACED AFTER .ps-litem-primary on purpose: both selectors are two
+     classes, so specificity is equal and source order decides. Written
+     before it, the primary selection's box-shadow won and the lift had no
+     shadow at all, which a probe caught by comparing the shadow at rest
+     with the shadow during the drag rather than merely checking one
+     existed. */
+  .ps-litem.ps-litem-dragging {
+    cursor: grabbing; opacity: 0.92; z-index: 5;
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.20);
+  }
+  .ps-lcanvas-dragging, .ps-lcanvas-dragging .ps-litem { cursor: grabbing; }
+  .ps-lcanvas-resizing, .ps-lcanvas-resizing .ps-litem { cursor: nwse-resize; }
   .ps-litem:hover:not(.ps-litem-sel) { outline: 1px dashed var(--ps-l4); outline-offset: 1px; }
   .ps-lmargin-guide {
     position: absolute; pointer-events: none; z-index: 1000;
@@ -740,21 +907,29 @@
   .ps-data-commandbar .ps-command {
     height: 30px; padding: 0 8px;
   }
-  .ps-data-commandbar .ps-command-icon {
+  /* The icon command button is a SHARED component (t4-36 follow-up: it was
+     scoped to the Data bar, so the Layouts toolbar's Undo/Redo rendered
+     invisibly - Torry's screenshot). One component, one spec, wherever it
+     appears - and the selector is DELIBERATELY .ps-command.ps-command-icon:
+     the base .ps-command rule sits LATER in the file, so at single-class
+     specificity its padding wins and crushes the svg to 7px (the first
+     de-scope attempt measured exactly that). The old data-bar scoping was
+     accidental specificity doing this job; now it is explicit. */
+  .ps-command.ps-command-icon {
     width: 29px; min-width: 29px; height: 29px; justify-content: center;
     padding: 4px; color: var(--ps-ink-4); background: transparent;
     border: 1px solid transparent; border-radius: var(--ps-r-md);
   }
-  .ps-data-commandbar .ps-command-icon:hover:not(:disabled) {
+  .ps-command.ps-command-icon:hover:not(:disabled) {
     color: var(--ps-accent-bright); background: var(--ps-s3); border-color: var(--ps-tint-line-2);
   }
-  .ps-data-commandbar .ps-command-icon:active:not(:disabled) {
+  .ps-command.ps-command-icon:active:not(:disabled) {
     background: var(--ps-tint-4);
   }
-  .ps-data-commandbar .ps-command-icon:disabled {
+  .ps-command.ps-command-icon:disabled {
     color: #aab1ba; opacity: 0.58;
   }
-  .ps-data-commandbar .ps-command-icon svg {
+  .ps-command.ps-command-icon svg {
     display: block; width: 14px; height: 14px;
   }
   .ps-data-search {
@@ -783,19 +958,38 @@
     color: var(--ps-accent-ink); background: var(--ps-s3);
   }
   .ps-data-search button:disabled { color: var(--ps-muted); cursor: default; }
+  /* t3-47 follow-up: the replace row's WORD buttons must not inherit the
+     22px square sizing written for Find's single-glyph prev/next, and the
+     whole-cell label needs real styling rather than the 16px default it
+     inherited (both halves of the overlap in Torry's Jul 27 screenshot).
+     The wrap hides at rest: .ps-data-search sets display:flex, which beats
+     the UA rule for [hidden], so the state needs its own rule. */
+  #ps-data-replace-wrap[hidden] { display: none; }
+  #ps-data-replace-wrap button {
+    width: auto; padding: 0 8px; font-size: 10.5px;
+  }
+  #ps-data-replace-whole-wrap {
+    display: flex; align-items: center; gap: 4px; flex-shrink: 0;
+    font-size: 10px; color: var(--ps-ink-4); white-space: nowrap;
+    cursor: pointer;
+  }
+  #ps-data-replace-whole-wrap input { margin: 0; }
+  #ps-data-replace-toggle[aria-expanded="true"] {
+    color: var(--ps-accent-ink); background: var(--ps-tint-1);
+  }
   #ps-data-exclusions {
     display: none; align-items: center; gap: 4px; color: var(--ps-danger-2);
     font-size: 10.5px; font-weight: 650; white-space: nowrap;
   }
   #ps-data-exclusions.ps-data-exclusions-visible { display: flex; }
   #ps-data-hidden-columns {
-    display: none; align-items: center; gap: 5px; max-width: 210px;
-    color: var(--ps-accent-press); background: var(--ps-s2); border-color: var(--ps-tint-line-2);
+    display: inline-flex; align-items: center; gap: 5px; max-width: 210px;
     font-size: 10.5px; font-weight: 650; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis;
   }
   #ps-data-hidden-columns.ps-data-hidden-columns-visible {
-    display: inline-flex;
+    color: var(--ps-accent-press); background: var(--ps-s2);
+    border-color: var(--ps-tint-line-2);
   }
   #ps-data-hidden-columns::before {
     content: "\25A5"; flex: 0 0 auto; font-size: 12px; line-height: 1;
@@ -807,7 +1001,7 @@
   .ps-grid-row-filtered { opacity: 0.38; }
   .ps-grid-fx {
     display: inline-block; margin-left: 4px; padding: 0 4px;
-    font-size: 10px; font-weight: 700; 
+    font-size: 10px; font-weight: 700;
     color: var(--ps-accent-press); background: var(--ps-s2); border: 1px solid var(--ps-tint-line-2);
     border-radius: var(--ps-r-md); line-height: 1.5; vertical-align: 1px;
   }
@@ -1097,7 +1291,7 @@
   #ps-columnview-hidden-list:empty::after {
     content: "No individually hidden columns";
     display: block; padding: 5px 12px 8px; color: var(--ps-muted);
-    font-size: 11.5px; 
+    font-size: 11.5px;
   }
   #ps-columnview-menu button[data-show-column]::before {
     content: "\2713"; display: inline-block; width: 18px;
@@ -1765,6 +1959,13 @@
     display: grid; grid-template-columns: 1fr 1fr; gap: 7px;
   }
   .ps-inspector-grid .ps-inspector-field { margin: 0; }
+  .ps-layout-position-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ps-layout-position-grid .ps-layout-field-label {
+    white-space: nowrap;
+  }
+  .ps-layout-position-grid input { min-width: 0; }
   .ps-inspector-align { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
   .ps-inspector-align .ps-btn { padding: 4px 3px; font-size: 10px; }
   .ps-grid-table th.ps-grid-col-active {
@@ -1899,7 +2100,11 @@
     display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px;
   }
   .ps-analysis-card {
-    display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 10px;
+    /* The icon column must match .ps-analysis-icon's width: t2-36 widened
+       the icon 42 -> 52px for real chart drawings and this column was left
+       behind, so the icon overflowed into the gap and the text sat flush
+       against it (Torry's screenshot, Jul 27 2026). */
+    display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 10px;
     min-height: 92px; padding: 11px; color: var(--ps-ink-2); background: var(--ps-s0);
     border: 1px solid var(--ps-l2b); border-radius: var(--ps-r-md); text-align: left;
   }
@@ -2018,7 +2223,7 @@
   }
   .ps-hmc-drop-empty {
     padding: 12px 5px; color: var(--ps-muted); font-size: 10px;
-    text-align: center; 
+    text-align: center;
   }
   .ps-hmc-selected {
     display: flex; align-items: center; gap: 7px; width: 100%;
@@ -2534,6 +2739,31 @@
   }
   /* the generic light-blue press would flash white on the navy app bar */
   .ps-menubar button:active { background: rgba(255, 255, 255, 0.20); }
+  /* t2-30. Dialogs, menus and the eligibility hint were raw display toggles:
+     a 2px backdrop blur and a 65px shadow materialising in one frame reads as
+     a glitch rather than as something opening. These are entry animations
+     only, because a leave animation on a display:none toggle needs the node
+     kept alive and none of these surfaces is worth that. */
+  @keyframes ps-pop-in {
+    from { opacity: 0; transform: translateY(-4px) scale(0.985); }
+    to   { opacity: 1; transform: none; }
+  }
+  @keyframes ps-fade-in { from { opacity: 0; } to { opacity: 1; } }
+  #ps-appmenu[style*="block"], #ps-contextmenu[style*="block"] {
+    animation: ps-pop-in 90ms ease-out;
+  }
+  .ps-dialog-overlay { animation: ps-fade-in 120ms ease-out; }
+  .ps-dialog-overlay .ps-dialog-card { animation: ps-pop-in 140ms ease-out; }
+  /* The eligibility hint strobed: a 45% opacity swing with no transition,
+     firing on every chip hover while a person is deciding where to drop. */
+  .ps-role-card, .ps-chip {
+    /* background-color is repeated on purpose: `transition` is a shorthand
+       and this rule sits AFTER the press-states block, so omitting it would
+       silently drop the 90ms press feedback those elements already had. */
+    transition: opacity 120ms ease, border-color 90ms ease,
+                box-shadow 120ms ease, background-color 90ms ease,
+                color 90ms ease;
+  }
   body.ps-reduce-motion *, body.ps-reduce-motion *::before,
   body.ps-reduce-motion *::after {
     scroll-behavior: auto !important; animation-duration: 0.001ms !important;
@@ -2977,6 +3207,7 @@
     <nav class="ps-menubar" aria-label="Application menu">
       <button type="button" data-ps-menu="file">File</button>
       <button type="button" data-ps-menu="edit">Edit</button>
+      <button type="button" data-ps-menu="data">Data</button>
       <button type="button" data-ps-menu="view">View</button>
       <button type="button" data-ps-menu="insert">Insert</button>
       <button type="button" data-ps-menu="help">Help</button>
@@ -3054,21 +3285,54 @@
       </div>
       <div id="ps-analysis-help" class="ps-analysis-help"></div>
       <div class="ps-assign">
-        <div id="ps-varbox">
-          <div class="ps-varbox-head">
-            <span class="ps-role-label">Variables</span>
-            <input id="ps-varfilter" type="text" placeholder="Filter" spellcheck="false" style="display:none;">
-          </div>
-          <div class="ps-varbox-hint">
-            Drag a variable to a role below, or click a role to choose.
-          </div>
-          <div id="ps-columns"></div>
-        </div>
+        <!-- Roles-first (Torry's ruling, Jul 27 2026): the slots are the
+             primary surface and ask one question at a time; the picker is
+             the default assignment path. The variables list is a reference
+             inventory behind the disclosure below, collapsed by default
+             (state persists in PROJECT.ui.varboxOpen, opens only on an
+             explicit click - the predictability rule). Drag still works
+             from the expanded list and between slot chips, and dropping a
+             slot chip anywhere on the box (collapsed included) unassigns.
+             The de-busy drag-hint retirement note also lives here: zones
+             teach the click path, chip tooltips teach the drag. -->
         <div id="ps-slots"></div>
+        <div id="ps-varbox">
+          <button type="button" id="ps-varbox-toggle" aria-expanded="false"
+                  aria-controls="ps-varbox-body">
+            <span class="ps-varbox-chev" aria-hidden="true">&#9656;</span>
+            <span id="ps-varbox-label">Available variables</span>
+          </button>
+          <div id="ps-varbox-body" hidden>
+            <input id="ps-varfilter" type="text" placeholder="Filter" spellcheck="false" style="display:none;">
+            <div id="ps-columns"></div>
+          </div>
+        </div>
       </div>
-      <label class="ps-inspector-field ps-fit-field">
+      <!-- View-zoom model (Jul 27 2026): the checkbox owns the LOGICAL
+           size (standard vs a size the user committed), the select owns the
+           VIEW. Zoom scales the display only; exports always leave at the
+           logical size, so what you see is the figure, scaled. -->
+      <label class="ps-inspector-field ps-fit-field"
+             data-tip="On: the chart renders at the standard 7.5 x 5 inches, identical on every machine. It switches off by itself when you set a size of your own on the chart.">
         <input type="checkbox" id="ps-fit-pane" checked>
-        <span>Fit chart to the pane</span>
+        <span>Standard chart size (7.5 x 5 in)</span>
+      </label>
+      <label class="ps-inspector-field ps-zoom-field"
+             data-tip="How large the chart appears on YOUR screen. Purely a view setting: the figure itself, and every export, keeps its true size and proportions.">
+        <span>View</span>
+        <select id="ps-chart-zoom" aria-label="Chart view zoom">
+          <option value="fit" selected>Fit window</option>
+          <option value="0.5">50%</option>
+          <option value="0.75">75%</option>
+          <option value="1">100%</option>
+          <!-- 125/150 percent are WITHDRAWN pending the engine fix for
+               _ensureChartRoomFor: its auto-grow mixes visual rects with
+               logical svg attrs, so any redraw at magnification inflates
+               the canvas (the gap-and-left-shift bug). Below 100 percent
+               is provably safe: elements under-measure and the grow can
+               never fire. Restore these two options with the engine fix. -->
+        </select>
+        <span id="ps-zoom-readout" aria-live="polite"></span>
       </label>
     </div>
     <div id="ps-inspector-data" class="ps-inspector-pane">
@@ -3142,27 +3406,65 @@
         <div class="ps-loader-hint">
           Changing orientation scales the current arrangement to fit.
         </div>
+        <div class="ps-linsp-row">
+          <button type="button" class="ps-command ps-ltoggle" id="ps-lmargins"
+                  aria-pressed="true"
+                  data-tip="Show the margin guide on the page">Margins</button>
+          <label class="ps-inspector-field ps-linsp-inline">
+            <span>Inset (<span data-unit-label>in</span>)</span>
+            <input class="ps-lnum" id="ps-lmargin" type="number"
+                   step="1" aria-label="Page margin inset">
+          </label>
+        </div>
+      </div>
+      <!-- Aids for placing things, kept together and away from the page's
+           own properties above: these change how the canvas BEHAVES while
+           you work, and never what the figure is. -->
+      <div class="ps-inspector-section">
+        <span class="ps-inspector-section-title">Guides and snapping</span>
+        <div class="ps-linsp-toggles">
+          <button type="button" class="ps-command ps-ltoggle" id="ps-lgrid-toggle"
+                  aria-pressed="true"
+                  data-tip="Show the alignment grid">Grid</button>
+          <button type="button" class="ps-command ps-ltoggle" id="ps-lsnap"
+                  aria-pressed="true"
+                  data-tip="Snap items to the grid as you drag">Snap</button>
+          <button type="button" class="ps-command ps-ltoggle" id="ps-lguides"
+                  aria-pressed="true"
+                  data-tip="Show alignment hints against other items">Smart guides</button>
+        </div>
+        <label class="ps-inspector-field ps-linsp-inline">
+          <span>Grid step (px)</span>
+          <select class="ps-lselect" id="ps-lgrid">
+            <option value="4">4 px</option>
+            <option value="8">8 px</option>
+            <option value="12">12 px</option>
+            <option value="16">16 px</option>
+            <option value="24">24 px</option>
+          </select>
+        </label>
       </div>
       <div id="ps-layout-selection-empty" class="ps-inspector-empty">
         Select an item on the layout to edit its position and arrangement.
       </div>
       <div id="ps-layout-selection-properties" style="display:none;">
         <div class="ps-inspector-section">
-          <span class="ps-inspector-section-title" id="ps-layout-selection-title">Selection</span>
-          <div class="ps-inspector-grid">
-            <label class="ps-inspector-field">X<input id="ps-ctx-lx" type="number" step="1"></label>
-            <label class="ps-inspector-field">Y<input id="ps-ctx-ly" type="number" step="1"></label>
-            <label class="ps-inspector-field">Width<input id="ps-ctx-lw" type="number" min="1" step="1"></label>
-            <label class="ps-inspector-field">Height<input id="ps-ctx-lh" type="number" min="1" step="1"></label>
+          <span class="ps-inspector-section-title" id="ps-layout-selection-title"
+                data-tip="Drag to move; corner resize keeps proportions, hold Shift for free resize. Arrows nudge; Shift+arrow moves 10 px.">Selection</span>
+          <div class="ps-inspector-grid ps-layout-position-grid">
+            <label class="ps-inspector-field"><span class="ps-layout-field-label">X (<span data-unit-label>in</span>)</span><input id="ps-ctx-lx" type="number" step="1"></label>
+            <label class="ps-inspector-field"><span class="ps-layout-field-label">Y (<span data-unit-label>in</span>)</span><input id="ps-ctx-ly" type="number" step="1"></label>
+            <label class="ps-inspector-field"><span class="ps-layout-field-label">Width (<span data-unit-label>in</span>)</span><input id="ps-ctx-lw" type="number" step="1"></label>
+            <label class="ps-inspector-field"><span class="ps-layout-field-label">Height (<span data-unit-label>in</span>)</span><input id="ps-ctx-lh" type="number" step="1"></label>
           </div>
         </div>
         <div class="ps-inspector-section">
           <span class="ps-inspector-section-title">Arrange</span>
           <div class="ps-inspector-actions" style="margin-bottom:7px;">
-            <button type="button" class="ps-btn" id="ps-ctx-duplicate">Duplicate</button>
+            <button type="button" class="ps-btn" id="ps-ctx-duplicate">Duplicate item</button>
             <button type="button" class="ps-btn" id="ps-ctx-back">Back</button>
             <button type="button" class="ps-btn" id="ps-ctx-forward">Forward</button>
-            <button type="button" class="ps-btn ps-danger" id="ps-ctx-delete">Delete</button>
+            <button type="button" class="ps-btn ps-danger" id="ps-ctx-delete">Delete item</button>
           </div>
           <div class="ps-inspector-align" aria-label="Align selected items">
             <button type="button" class="ps-btn" data-ctx-align="left">Left</button>
@@ -3191,8 +3493,8 @@
         <input id="ps-inspector-docname" type="text" maxlength="100">
       </label>
       <div class="ps-inspector-actions">
-        <button type="button" class="ps-btn" id="ps-inspector-duplicate">Duplicate</button>
-        <button type="button" class="ps-btn ps-danger" id="ps-inspector-delete">Delete</button>
+        <button type="button" class="ps-btn" id="ps-inspector-duplicate">Duplicate document</button>
+        <button type="button" class="ps-btn ps-danger" id="ps-inspector-delete">Delete document</button>
       </div>
     </div>
 
@@ -3238,6 +3540,27 @@
         <button type="button" id="ps-data-find-next" aria-label="Next match"
                 data-tip="Next match">&#8250;</button>
       </label>
+      <!-- t3-47: replace, on the same matches the Find count reports.
+           Follow-up (Torry, Jul 27 2026): Find stays sticky, Replace reveals
+           on demand from this toggle (or Edit > Replace in data), so the bar
+           spends no standing width on a mode. The wrap is a DIV because its
+           first shape nested a label inside a label, which is invalid HTML. -->
+      <button type="button" class="ps-command" id="ps-data-replace-toggle"
+              aria-expanded="false" aria-controls="ps-data-replace-wrap"
+              data-tip="Find and replace values in the table">Replace</button>
+      <div class="ps-data-search" id="ps-data-replace-wrap" hidden>
+        <input id="ps-data-replace" type="text" autocomplete="off"
+               placeholder="Replace with" aria-label="Replace matches with">
+        <button type="button" id="ps-data-replace-one"
+                data-tip="Replace the current match">Replace</button>
+        <button type="button" id="ps-data-replace-all"
+                data-tip="Replace every match">All</button>
+        <label id="ps-data-replace-whole-wrap"
+               data-tip="On: only cells that are exactly the search text change. Off: the text is replaced wherever it appears inside a cell, which can turn Female into FeMale.">
+          <input type="checkbox" id="ps-data-replace-whole" checked>
+          <span>Whole cell only</span>
+        </label>
+      </div>
       <span class="ps-command-spacer"></span>
       <button type="button" class="ps-command" id="ps-data-filter-btn"
               aria-haspopup="menu" aria-expanded="false"
@@ -3274,17 +3597,29 @@
       <div id="ps-ltoolbar">
         <div class="ps-ltoolbar-row">
           <div class="ps-ltool-group" aria-label="Layout history">
-            <button type="button" class="ps-btn" id="ps-lundo"
-                    data-tip="Undo the last layout change (Cmd/Ctrl+Z)">Undo</button>
-            <button type="button" class="ps-btn" id="ps-lredo"
-                    data-tip="Redo the last undone layout change (Cmd/Ctrl+Shift+Z)">Redo</button>
+            <button type="button" class="ps-command ps-command-icon" id="ps-lundo"
+                    aria-label="Undo" data-tip="Undo the last layout change (Cmd/Ctrl+Z)">
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M3 7 L6 4 M3 7 L6 10 M3 7 L11 7 A3 3 0 0 1 11 13"
+                      stroke="currentColor" fill="none" stroke-width="1.5"
+                      stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <button type="button" class="ps-command ps-command-icon" id="ps-lredo"
+                    aria-label="Redo" data-tip="Redo the last undone layout change (Cmd/Ctrl+Shift+Z)">
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M13 7 L10 4 M13 7 L10 10 M13 7 L5 7 A3 3 0 0 0 5 13"
+                      stroke="currentColor" fill="none" stroke-width="1.5"
+                      stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
           </div>
           <span class="ps-ltool-sep"></span>
           <div class="ps-ltool-group">
-            <button type="button" class="ps-btn" id="ps-laddchart">Add chart</button>
-            <button type="button" class="ps-btn" id="ps-laddtext">Add text</button>
-            <button type="button" class="ps-btn" id="ps-laddlabel">Panel label</button>
-            <button type="button" class="ps-btn" id="ps-laddimage">Add image</button>
+            <button type="button" class="ps-command" id="ps-laddchart">Add chart</button>
+            <button type="button" class="ps-command" id="ps-laddtext">Add text</button>
+            <button type="button" class="ps-command" id="ps-laddlabel">Panel label</button>
+            <button type="button" class="ps-command" id="ps-laddimage">Add image</button>
             <input type="file" id="ps-laddimage-file" accept="image/*,.svg"
                    style="display:none;" aria-hidden="true">
           </div>
@@ -3307,12 +3642,14 @@
           <label class="ps-ltool-group">
             <span class="ps-ltool-label">W</span>
             <input class="ps-lnum" id="ps-lpage-w" type="number"
-                   min="320" max="4000" step="1" aria-label="Page width">
+                   step="1" aria-label="Page width">
+            <span class="ps-ltool-label" data-unit-label>in</span>
           </label>
           <label class="ps-ltool-group">
             <span class="ps-ltool-label">H</span>
             <input class="ps-lnum" id="ps-lpage-h" type="number"
-                   min="240" max="4000" step="1" aria-label="Page height">
+                   step="1" aria-label="Page height">
+            <span class="ps-ltool-label" data-unit-label>in</span>
           </label>
           <span class="ps-ltool-sep"></span>
           <label class="ps-ltool-group">
@@ -3328,74 +3665,12 @@
             </select>
           </label>
         </div>
-        <div class="ps-ltoolbar-row">
-          <button type="button" class="ps-btn ps-ltoggle" id="ps-lgrid-toggle"
-                  aria-pressed="true">Grid</button>
-          <label class="ps-ltool-group">
-            <span class="ps-ltool-label">Step</span>
-            <select class="ps-lselect" id="ps-lgrid">
-              <option value="4">4 px</option>
-              <option value="8">8 px</option>
-              <option value="12">12 px</option>
-              <option value="16">16 px</option>
-              <option value="24">24 px</option>
-            </select>
-          </label>
-          <button type="button" class="ps-btn ps-ltoggle" id="ps-lsnap"
-                  aria-pressed="true">Snap</button>
-          <button type="button" class="ps-btn ps-ltoggle" id="ps-lguides"
-                  aria-pressed="true">Smart guides</button>
-          <button type="button" class="ps-btn ps-ltoggle" id="ps-lmargins"
-                  aria-pressed="true">Margins</button>
-          <label class="ps-ltool-group">
-            <span class="ps-ltool-label">Inset</span>
-            <input class="ps-lnum" id="ps-lmargin" type="number"
-                   min="0" max="500" step="1" aria-label="Page margin inset">
-          </label>
-          <span class="ps-lhint">Corner resize keeps proportions -
-            hold Shift for free resize - arrows nudge -
-            Shift+arrow moves 10 px</span>
-        </div>
-      </div>
-      <div id="ps-linspect" aria-live="polite">
-        <span id="ps-lsel-label"></span>
-        <label class="ps-ltool-group">
-          <span class="ps-ltool-label">X</span>
-          <input class="ps-lnum" id="ps-lx" type="number" step="1">
-        </label>
-        <label class="ps-ltool-group">
-          <span class="ps-ltool-label">Y</span>
-          <input class="ps-lnum" id="ps-ly" type="number" step="1">
-        </label>
-        <label class="ps-ltool-group">
-          <span class="ps-ltool-label">W</span>
-          <input class="ps-lnum" id="ps-lw" type="number" min="1" step="1">
-        </label>
-        <label class="ps-ltool-group">
-          <span class="ps-ltool-label">H</span>
-          <input class="ps-lnum" id="ps-lh" type="number" min="1" step="1">
-        </label>
-        <span class="ps-ltool-sep"></span>
-        <div class="ps-linspect-actions">
-          <button type="button" class="ps-btn" id="ps-lduplicate">Duplicate</button>
-          <button type="button" class="ps-btn" id="ps-lback">Back</button>
-          <button type="button" class="ps-btn" id="ps-lforward">Forward</button>
-        </div>
-        <span class="ps-ltool-sep"></span>
-        <div class="ps-linspect-actions" aria-label="Align selected items">
-          <span class="ps-ltool-label">Align</span>
-          <button type="button" class="ps-btn" data-lalign="left">Left</button>
-          <button type="button" class="ps-btn" data-lalign="hcenter">Center</button>
-          <button type="button" class="ps-btn" data-lalign="right">Right</button>
-          <button type="button" class="ps-btn" data-lalign="top">Top</button>
-          <button type="button" class="ps-btn" data-lalign="vcenter">Middle</button>
-          <button type="button" class="ps-btn" data-lalign="bottom">Bottom</button>
-        </div>
-        <div class="ps-linspect-actions" aria-label="Distribute selected items">
-          <span class="ps-ltool-label">Distribute</span>
-          <button type="button" class="ps-btn" data-ldistribute="horizontal">Across</button>
-          <button type="button" class="ps-btn" data-ldistribute="vertical">Down</button>
-        </div>
+        <!-- The second toolbar row (grid, snap, smart guides, margins) moved
+             into the right-hand rail, Jul 27 2026 per Torry. Those are
+             standing preferences for how the canvas behaves, not the
+             per-figure ACTIONS the bar is for, and the rail is where the
+             app keeps settings. Every control kept its id, so all of the
+             existing wiring and sync applies unchanged. -->
       </div>
       <div id="ps-lviewport" tabindex="0"
            aria-label="Figure layout canvas. Shift-click to select multiple items.">
@@ -3531,6 +3806,10 @@
       <div>
         <h2 id="ps-analysis-title">New chart</h2>
         <p>Choose the analytical question you want the chart to answer.</p>
+        <!-- t4-32: filled only when the dialog is opened by "New chart from
+             selection". Context shapes OFFERS, never outcomes: the chips say
+             which variables every card below is reading. -->
+        <div id="ps-analysis-arm" hidden></div>
       </div>
       <button type="button" class="ps-btn ps-dialog-close"
               id="ps-analysis-close">Close</button>
@@ -3730,6 +4009,15 @@
           <option value="jpg">JPG</option>
         </select>
       </label>
+      <label class="ps-inspector-field"
+             data-tip="How lengths are shown in the Layouts workspace: page size, item position and size, and the margin inset. The grid step stays in pixels, being a screen grid.">
+        Measurement units
+        <select id="ps-pref-units">
+          <option value="in">Inches</option>
+          <option value="cm">Centimetres</option>
+          <option value="px">Pixels</option>
+        </select>
+      </label>
       <label class="ps-inspector-field">Default raster DPI
         <select id="ps-pref-export-dpi">
           <option value="96">96</option>
@@ -3851,6 +4139,14 @@
     </div>
     <div class="ps-dialog-body">
       <div id="ps-diagnostics-grid" class="ps-diagnostics-grid"></div>
+      <label class="ps-inspector-field" style="margin-top:16px;">
+        <span>On-chart diagnostics</span>
+        <span style="display:flex;align-items:center;gap:7px;">
+          <input type="checkbox" id="ps-diagnostics-timing">
+          Show render timing overlay
+        </span>
+        <small style="color:var(--ps-muted);font-weight:400;line-height:1.4;">Useful when reporting a performance problem. The overlay is excluded from copies and exports.</small>
+      </label>
     </div>
     <div class="ps-dialog-actions">
       <button type="button" class="ps-btn" id="ps-diagnostics-copy">Copy diagnostics</button>
@@ -3877,13 +4173,21 @@
     </div>
   </div>
 </div>
+<!-- t4-33: offscreen host for armed-card previews. The engine renders each
+     candidate mapping here, the svg is cloned self-contained, and the REAL
+     chart re-renders in the same task, so engine context never dangles. -->
+<div id="ps-preview-host" aria-hidden="true"></div>
 <div id="ps-cellmenu">
   <button type="button" id="ps-cellmenu-toggle"></button>
   <button type="button" id="ps-cellmenu-row"></button>
   <button type="button" id="ps-cellmenu-fill">Fill with focused value</button>
   <button type="button" id="ps-cellmenu-clear">Clear selected values</button>
+  <div class="ps-menu-separator" aria-hidden="true"></div>
+  <button type="button" id="ps-cellmenu-chart">New chart from selection&#8230;</button>
 </div>
 <div id="ps-columnmenu">
+  <button type="button" id="ps-columnmenu-chart">New chart from selection&#8230;</button>
+  <div class="ps-menu-separator" aria-hidden="true"></div>
   <button type="button" id="ps-columnmenu-insert-left">Insert column to left</button>
   <button type="button" id="ps-columnmenu-insert-right">Insert column to right</button>
   <div class="ps-menu-separator" aria-hidden="true"></div>
@@ -3919,9 +4223,6 @@
 </div>
 <div id="ps-datamenu">
   <button type="button" id="ps-datamenu-reshape">Reshape to wide&#8230;</button>
-  <div class="ps-menu-separator" aria-hidden="true"></div>
-  <button type="button" id="ps-datamenu-focus-columns">Focus on current chart variables</button>
-  <button type="button" id="ps-datamenu-resetview">Show all columns</button>
   <div class="ps-menu-separator" aria-hidden="true"></div>
   <button type="button" id="ps-datamenu-fitall">Auto-fit all columns</button>
   <button type="button" id="ps-datamenu-resetwidths">Reset all column widths</button>
@@ -4103,10 +4404,10 @@
 <script src="lib/ps-xlsx.58774dfc8d.js"></script>
 <script src="lib/ps-formula.7eca0c4cda.js"></script>
 <script src="lib/ps-data.b73a661916.js"></script>
-<script src="lib/jspdf.umd.min.41597d0294.js"></script>
+<script src="lib/jspdf.umd.min.979a2ef514.js"></script>
 <script src="lib/svg2pdf.umd.min.4ada250f50.js"></script>
-<script src="lib/graphbuilder2.min.a0c668ed5c.js"></script>
-<script src="lib/ps-shell.01929454b9.js"></script>
+<script src="lib/graphbuilder2.min.23cf55e942.js"></script>
+<script src="lib/ps-shell.3eabd4f7b5.js"></script>
 <script src="lib/ps-tour.1c461650b0.js"></script>
 </body>
 </html>
