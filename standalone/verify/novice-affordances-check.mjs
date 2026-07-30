@@ -42,12 +42,17 @@ const empty = await page.evaluate(() => {
         heading: (document.querySelector('.ps-guided-empty h3') || {})
             .textContent || '',
         choose: choose ? choose.textContent.trim() : null,
+        // Button vocabulary (Torry, Jul 28 2026): surfaces get ps-btn.
+        // This button once carried a bespoke bare ps-primary; a drift
+        // back means a fourth source of primary styling.
+        chooseCls: choose ? choose.className : '',
         hmc: hmc ? hmc.textContent.trim() : null,
         visible: !!(choose && choose.offsetParent)
     };
 });
 if (!/needs variables/.test(empty.heading) || !empty.visible ||
     empty.choose !== 'Choose variables' ||
+    empty.chooseCls !== 'ps-btn ps-primary' ||
     empty.hmc !== 'Not sure? Help me choose')
     throw new Error('empty state lacks the action buttons: ' +
                     JSON.stringify(empty));
@@ -66,16 +71,160 @@ if (await page.locator('#ps-help-choose').isVisible())
 console.log('  ok  Help me choose opens the wizard from the empty state ' +
             '(Escape closes)');
 
-// ---- "Choose variables" pulses the Chart setup card
+// ---- "Choose variables" STARTS choosing (Torry, Jul 29 2026: "nothing
+// happens because the Choose Variables option is already up on the
+// right-hand side"). The old assertion here required a pulse class on the
+// whole inspector card - which passed while the button was, to the user,
+// dead: the ring was imperceptible at panel size and the scroll had nothing
+// left to scroll after the roles-first redesign. These assertions are about
+// OUTCOMES instead, so they cannot pass on a button that does nothing.
 await page.click('#ps-empty-choose');
-await page.waitForTimeout(150);
-const pulsed = await page.evaluate(() => {
-    const slots = document.getElementById('ps-slots');
-    const card = slots && (slots.closest('.ps-card') || slots);
-    return !!(card && card.classList.contains('ps-attention-pulse'));
+await page.waitForTimeout(250);
+const opened = await page.evaluate(() => {
+    const card = document.querySelector('#ps-slots .ps-role-card:has(' +
+        '.ps-role-picker)') ||
+        (document.querySelector('#ps-slots .ps-role-picker') || {}).closest
+            ? document.querySelector('#ps-slots .ps-role-picker')
+                .closest('.ps-role-card')
+            : null;
+    const picker = document.querySelector('#ps-slots .ps-role-picker');
+    const active = document.activeElement;
+    const sentence = document.querySelector('.ps-guided-empty p strong');
+    const rect = picker ? picker.getBoundingClientRect() : null;
+    return {
+        pickerOpen: !!picker,
+        onScreen: !!rect && rect.width > 0 && rect.height > 0,
+        roleKey: card ? card.getAttribute('data-role-key') : null,
+        cardLabel: card
+            ? (card.querySelector('.ps-role-card-head') || {}).textContent || ''
+            : '',
+        sentenceRole: sentence ? sentence.textContent.trim() : '',
+        focusIsDrop: !!active && active.classList &&
+            active.classList.contains('ps-slot-drop'),
+        focusRole: active && active.closest
+            ? (active.closest('.ps-role-card') || {}).getAttribute
+                ? active.closest('.ps-role-card').getAttribute('data-role-key')
+                : null
+            : null,
+        expanded: !!active && active.getAttribute
+            ? active.getAttribute('aria-expanded') : null,
+        pulseGone: !document.querySelector('.ps-attention-pulse'),
+    };
 });
-if (!pulsed) throw new Error('Choose variables did not pulse the setup card');
-console.log('  ok  Choose variables points at the Chart setup inspector');
+if (!opened.pickerOpen || !opened.onScreen)
+    throw new Error('Choose variables did not open a visible role picker :: ' +
+        JSON.stringify(opened));
+if (!opened.focusIsDrop || opened.focusRole !== opened.roleKey)
+    throw new Error('Choose variables did not move focus to that role :: ' +
+        JSON.stringify(opened));
+if (opened.expanded !== 'true')
+    throw new Error('the focused role does not report itself expanded :: ' +
+        JSON.stringify(opened));
+// The sentence and the card must name the SAME role: the button now puts
+// them one glance apart, and they used to disagree (the sentence read the
+// raw role key's label, the card its presentation label).
+if (!opened.cardLabel.toLowerCase()
+        .includes(opened.sentenceRole.toLowerCase()))
+    throw new Error('the empty-state sentence names a different role than ' +
+        'the card that opened :: ' + JSON.stringify(opened));
+if (!opened.pulseGone)
+    throw new Error('the retired attention-pulse primitive is still applied');
+console.log('  ok  Choose variables opens the picker for the role the ' +
+            'sentence names, with focus on it (' + opened.roleKey + ')');
+
+// ---- and on a narrow window, where the inspector is a closed drawer.
+// This is the case the old code could not possibly serve: it decorated an
+// element measuring 0x0. The button has to open the drawer first.
+{
+    await page.setViewportSize({ width: 720, height: 1000 });
+    await page.waitForTimeout(400);
+    await page.evaluate(() => {
+        // Back to the empty state: clear the role the click above filled in.
+        window.PS_SHELL.setRoles('plotbuilder', { xvar: null, yvar: null });
+    });
+    await page.waitForTimeout(900);
+    const before = await page.evaluate(() => ({
+        panel: (() => {
+            const r = document.getElementById('ps-settings-panel')
+                .getBoundingClientRect();
+            return { w: Math.round(r.width), h: Math.round(r.height) };
+        })(),
+        drawerOpen: document.querySelector('.ps-app-body').className,
+    }));
+    await page.click('#ps-empty-choose');
+    await page.waitForTimeout(400);
+    const narrow = await page.evaluate(() => {
+        const picker = document.querySelector('#ps-slots .ps-role-picker');
+        const r = picker ? picker.getBoundingClientRect() : null;
+        return {
+            drawer: /ps-narrow-inspector-open/
+                .test(document.querySelector('.ps-app-body').className),
+            pickerOnScreen: !!r && r.width > 0 && r.height > 0 &&
+                r.bottom <= window.innerHeight + 1,
+        };
+    });
+    if (before.panel.w !== 0 && before.panel.h !== 0)
+        throw new Error('setup: the narrow inspector was expected closed :: ' +
+            JSON.stringify(before));
+    if (!narrow.drawer)
+        throw new Error('Choose variables did not open the narrow inspector ' +
+            'drawer :: ' + JSON.stringify(narrow));
+    if (!narrow.pickerOnScreen)
+        throw new Error('the picker is not visible on a narrow window :: ' +
+            JSON.stringify(narrow));
+    console.log('  ok  and on a narrow window it opens the inspector drawer ' +
+                'so the picker is actually reachable');
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.waitForTimeout(400);
+}
+
+// ---- keyboard focus survives the role-card rebuild (Jul 29 2026).
+// Opening or closing a picker rebuilds #ps-slots wholesale, which used to
+// destroy the focused element and dump a keyboard user onto <body>.
+{
+    const journey = await page.evaluate(async () => {
+        const s = ms => new Promise(r => setTimeout(r, ms));
+        // Start from a CLOSED picker: the narrow case above left xvar's
+        // open, and Enter is a toggle - opening from open closes.
+        document.dispatchEvent(new KeyboardEvent('keydown',
+            { key: 'Escape', bubbles: true }));
+        await s(250);
+        const drop = document.querySelector(
+            '#ps-slots .ps-role-card[data-role-key="xvar"] .ps-slot-drop');
+        drop.focus();
+        drop.dispatchEvent(new KeyboardEvent('keydown',
+            { key: 'Enter', bubbles: true }));
+        await s(250);
+        const read = () => {
+            const a = document.activeElement;
+            const card = a && a.closest ? a.closest('.ps-role-card') : null;
+            return {
+                tag: a ? a.tagName : null,
+                onDrop: !!(a && a.classList &&
+                    a.classList.contains('ps-slot-drop')),
+                role: card ? card.getAttribute('data-role-key') : null,
+                pickerOpen: !!document.querySelector(
+                    '#ps-slots .ps-role-picker'),
+            };
+        };
+        const afterOpen = read();
+        document.dispatchEvent(new KeyboardEvent('keydown',
+            { key: 'Escape', bubbles: true }));
+        await s(250);
+        return { afterOpen, afterClose: read() };
+    });
+    if (!journey.afterOpen.pickerOpen ||
+        !journey.afterOpen.onDrop || journey.afterOpen.role !== 'xvar')
+        throw new Error('opening the picker by keyboard lost focus :: ' +
+            JSON.stringify(journey.afterOpen));
+    if (journey.afterClose.pickerOpen ||
+        !journey.afterClose.onDrop || journey.afterClose.role !== 'xvar')
+        throw new Error('closing the picker by keyboard lost focus :: ' +
+            JSON.stringify(journey.afterClose));
+    console.log('  ok  keyboard focus rides the role-card rebuild: Enter ' +
+                'opens the picker and Escape closes it with focus still on ' +
+                'the role');
+}
 
 // ---- visible Add-row button appends a row and opens its editor
 await page.evaluate(() => window.PS_SHELL.setWorkspace('data'));

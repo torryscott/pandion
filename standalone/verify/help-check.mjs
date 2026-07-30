@@ -208,6 +208,63 @@ ok(news.current,
 await page.keyboard.press('Escape');
 await page.waitForTimeout(300);
 
+console.log('case 7: chart help is honest on an undrawn chart');
+// Torry's ruling, Jul 29 2026. The four chart-help entries open panels
+// that live in a drawn chart's toolbar. On a chart with no variables the
+// old behavior was the worst of both: the commands looked available,
+// polled for a toolbar that could not exist, then toasted "Open a chart
+// first" - false, a chart tab was open. Now: "Which graph should I use?"
+// stays enabled and opens Help me choose (the pre-chart form of exactly
+// that question); the three that operate ON a drawn chart are disabled
+// and say what is missing.
+{
+    await page.evaluate(() => window.PS_SHELL.addChart('plotbuilder'));
+    await page.waitForTimeout(700);
+    const readHelp = () => page.evaluate(async () => {
+        const s = ms => new Promise(r => setTimeout(r, ms));
+        document.querySelector('[data-ps-menu="help"]').click();
+        await s(350);
+        const m = document.getElementById('ps-appmenu');
+        const grab = (cmd) => {
+            const b = m.querySelector('[data-app-command="' + cmd + '"]');
+            return b ? { off: b.disabled,
+                         tip: b.getAttribute('data-tip') || '' } : null;
+        };
+        const out = {
+            chooser: grab('help-chooser'),
+            lint: grab('help-lint'),
+            anatomy: grab('help-anatomy'),
+            glossary: grab('help-glossary'),
+        };
+        document.querySelector('[data-ps-menu="help"]').click();
+        await s(150);
+        return out;
+    });
+    const empty = await readHelp();
+    ok(!empty.chooser.off,
+       'on an empty chart, "Which graph should I use?" stays available');
+    ok(empty.lint.off && /Assign variables/.test(empty.lint.tip),
+       `while "Check my chart" is off and says what is missing ` +
+       `("${empty.lint.tip}")`);
+    ok(empty.anatomy.off && empty.glossary.off,
+       'and so are Label the chart parts and the Glossary');
+    // The reroute: the enabled entry opens Help me choose, not a dead end.
+    await page.evaluate(() => window.PS_SHELL.runCommand('help-chooser'));
+    await page.waitForTimeout(400);
+    ok(await page.locator('#ps-help-choose').isVisible(),
+       'and picking it opens Help me choose instead of a dead end');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    // Drawn chart: everything comes alive.
+    await page.evaluate(() => window.PS_SHELL.setRoles('plotbuilder',
+        { xvar: 'condition', yvar: 'score' }));
+    await page.waitForTimeout(2600);
+    const drawn = await readHelp();
+    ok(!drawn.chooser.off && !drawn.lint.off && !drawn.anatomy.off &&
+       !drawn.glossary.off,
+       'once the chart draws, all four help entries are live');
+}
+
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('HELP CHECK PASS');
 await browser.close();

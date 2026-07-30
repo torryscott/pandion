@@ -133,8 +133,10 @@ const afterDel = await page.evaluate(() => ({
     toast: document.getElementById('ps-toast').innerText
 }));
 ok(afterDel.order === JSON.stringify(['p', 's']),
-   `both selected variables are deleted (${afterDel.order})`);
-ok(/Deleted 2 variables/.test(afterDel.toast),
+   `both selected columns are deleted (${afterDel.order})`);
+// The toast speaks the same word as the menu item that did it
+// ("Delete column"), per the terminology ruling.
+ok(/Deleted 2 columns/.test(afterDel.toast),
    `and the offer names the count ("${afterDel.toast.replace(/\n/g, ' ')
        .slice(0, 60)}")`);
 await page.evaluate(() => window.PS_SHELL.dataUndo());

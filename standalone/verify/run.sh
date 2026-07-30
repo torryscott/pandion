@@ -13,26 +13,30 @@ cd "$(dirname "$0")/../.."
 # Feature probes added by the M4 application-frame work. Each is
 # self-contained and honors PS_PAGE (except hardening-dom-check, which
 # reads index.html source directly and runs once).
-FEATURE_PROBES="branding-check busy-check column-sizing-check \
-computed-variables-check coverage-gaps-check \
+FEATURE_PROBES="branding-check axe-state-check bypass-accessibility-check busy-check column-sizing-check \
+computed-variables-check coverage-gaps-check chart-accessibility-check export-accessibility-check \
 chart-from-selection-check chart-size-check column-gestures-check chrome-check clipboard-check copy-image-check correctness-check \
-data-commandbar-check data-menu-check \
-data-undo-check dates-check doclifecycle-check drag-feel-check \
+data-commandbar-check data-menu-check separator-accessibility-check \
+data-undo-check dates-check doclifecycle-check tab-accessibility-check drag-feel-check \
+drag-selection-check outside-canvas-check hmc-list-check hidden-vars-check sigma-freshness-check \
 empty-states-check engine-stamp-check flyout-align-check filter-honesty-check examples-check exclusion-bridge-check \
 fitpanes-check \
 grid-keys-check help-check hierarchy-check \
-help-me-choose-check import-errors-check layout-image-check \
+grid-accessibility-check \
+help-me-choose-check import-errors-check layout-image-check modal-accessibility-check \
 layout-arrange-check layout-clipboard-check layout-orientation-check layout-rail-check layout-selectall-check layout-reuse-check layout-undo-check library-bridge-check \
+layout-accessibility-check \
 linked-selection-check motion-check narrow-check novice-affordances-check \
 overlay-reload-check overlay-restore-check pane-debusy-check percol-missing-check \
 perf-check polish-check preferences-check \
 probed-bugs-check provenance-check rail-icons-check punchlist-check reachability-check recents-check reshape-check \
+reflow-accessibility-check \
 row-filters-check \
 statusbar-check \
 safety-check \
 silent-failure-check selection-menus-check spreadsheet-gaps-check teaching-check \
 tokens-check tour-check typing-check units-check wizard-parity-check variable-levels-check visuals-check \
-xlsx-import-check launch-contract-check"
+xlsx-import-check launch-eval-fixes-check launch-contract-check"
 
 echo "== m0-check (render + edit round-trip)"
 node standalone/verify/m0-check.mjs
@@ -41,7 +45,25 @@ echo "== m1-shell-check (import / roles / grid / tabs / layouts / export)"
 node standalone/verify/m1-shell-check.mjs
 
 echo "== hardening-dom-check (migration / recovery / quota)"
-node standalone/verify/hardening-dom-check.mjs
+# Needs linkedom from a shared location outside the repo, which a /tmp
+# cleanup can empty (it did, Jul 29 2026, mid-run: the package directory
+# survived with its files gone). Exit 2 means the dependency is missing,
+# and under `set -e` that aborted the WHOLE suite as if a contract had
+# broken. Skip with a warning like every other optional-dependency step -
+# but never on a release run, where a silent skip would be the dangerous
+# outcome.
+if node standalone/verify/hardening-dom-check.mjs; then :; else
+    st=$?
+    if [ "$st" = "2" ] && [ "${PS_REQUIRE_R_PARITY:-0}" != "1" ]; then
+        echo "WARN: linkedom unavailable - hardening-dom-check skipped"
+        echo "      (cd /private/tmp/pandion-dom-smoke && npm install linkedom)"
+    else
+        exit "$st"
+    fi
+fi
+
+echo "== accessibility-source-check (bypass routes / instructions)"
+node standalone/verify/accessibility-source-check.mjs
 
 for p in $FEATURE_PROBES; do
     echo "== $p"
@@ -52,6 +74,17 @@ echo "== dist build + probes (single-file pandion-plots.html)"
 bash standalone/build-dist.sh
 echo "== artifact-parity-check (dist / hosted app / portable download)"
 node standalone/verify/artifact-parity-check.mjs
+echo "== electron-check (desktop wrapper around the dist artifact)"
+# Opt-in per machine (cd standalone/electron && npm install); shows a real
+# window for a few seconds. Exit 2 = electron not installed, skipped.
+if node standalone/verify/electron-check.mjs; then :; else
+    st=$?
+    if [ "$st" = "2" ]; then
+        echo "WARN: electron not installed - skipped"
+    else
+        exit "$st"
+    fi
+fi
 PS_PAGE=standalone/dist/pandion-plots.html node standalone/verify/m0-check.mjs
 PS_PAGE=standalone/dist/pandion-plots.html node standalone/verify/m1-shell-check.mjs
 for p in $FEATURE_PROBES; do

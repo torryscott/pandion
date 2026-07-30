@@ -53,7 +53,7 @@ console.log('case 1: the strip scrolls sideways instead of pushing the canvas do
 const strip = await page.evaluate(() => {
     const bar = document.getElementById('ps-tabs');
     const cs = getComputedStyle(bar);
-    const tabs = Array.from(bar.querySelectorAll('[data-chart-id]'));
+    const tabs = Array.from(bar.querySelectorAll('.ps-tab[data-chart-id]'));
     const tops = new Set(tabs.map(t => Math.round(t.getBoundingClientRect().top)));
     return { wrap: cs.flexWrap, overflowX: cs.overflowX,
              rows: tops.size, tabs: tabs.length,
@@ -73,7 +73,8 @@ ok(strip.height < 60,
 
 console.log('case 2: Alt+number picks a document, and it is brought into view');
 const jump = await page.evaluate(() => ({
-    ids: Array.from(document.querySelectorAll('#ps-tabs [data-chart-id]'))
+    ids: Array.from(document.querySelectorAll(
+        '#ps-tabs .ps-tab[data-chart-id]'))
         .map(t => t.getAttribute('data-chart-id')),
     active: window.PS_SHELL.chart().id
 }));

@@ -1,0 +1,78 @@
+{
+  "name": "pandion-plots-desktop",
+  "productName": "Pandion Plots",
+  "version": "3.0.0",
+  "description": "Customizable statistical visualizations for teaching and research",
+  "author": "Torry Dennis",
+  "homepage": "https://pandionplots.com",
+  "license": "AGPL-3.0",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.pandionplots.app",
+    "productName": "Pandion Plots",
+    "directories": {
+      "buildResources": "buildres",
+      "output": "out"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "torryscott",
+      "repo": "pandion"
+    },
+    "files": [
+      "main.js",
+      "preload.js"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist/pandion-plots.html",
+        "to": "app/pandion-plots.html"
+      }
+    ],
+    "fileAssociations": [
+      {
+        "ext": "pand",
+        "name": "Pandion Plots Project",
+        "description": "Pandion Plots project",
+        "role": "Editor"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.education",
+      "target": [
+        { "target": "dmg", "arch": ["universal"] },
+        { "target": "zip", "arch": ["universal"] }
+      ],
+      "artifactName": "Pandion-Plots-macOS.${ext}",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "entitlements.mac.plist",
+      "entitlementsInherit": "entitlements.mac.plist",
+      "notarize": true
+    },
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "artifactName": "Pandion-Plots-Windows-x64.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}

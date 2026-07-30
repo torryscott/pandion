@@ -69,6 +69,13 @@ jamovi/ui/*.options.js
 build/
 build*/
 
+# ...but buildres/ holds the Electron packaging icon, which is a source
+# asset: without it a fresh clone cannot package the desktop app. Git
+# cannot re-include a file whose parent directory is excluded, so the
+# directory itself has to be un-excluded first.
+!standalone/electron/buildres/
+!standalone/electron/buildres/**
+
 # other files / folders
 temp/
 man/

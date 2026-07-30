@@ -139,12 +139,25 @@
   .ps-menubar, #ps-appmenu, #ps-contextmenu, .ps-role-card, .ps-slot,
   .ps-chip, .ps-btn, .ps-command, .ps-ltoolbar, .ps-workspace-switcher,
   .ps-toast-item, #ps-coach, .ps-guided-empty, .ps-dialog-head,
-  .ps-welcome-head, .ps-launch-action, .ps-recent-item, .ps-template-card {
+  .ps-welcome-head, .ps-launch-action, .ps-recent-item, .ps-template-card,
+  /* Torry, Jul 29 2026: the two surfaces that are nothing BUT dragging were
+     the two 42a missed. Dragging a legend, a bar or a layout item painted a
+     browser text selection across the chart card - and it is not merely
+     ugly: copy-as-image bails on a non-empty getSelection(), so a stray
+     highlight silently disabled that gesture. The engine already uses
+     user-select:none on its OWN drag handles (tick strips, panel titles,
+     reorder rows); this finishes the same idiom from the shell side, over
+     the engine's DOM, with no engine edit. */
+  .graphbuilder2-host, #ps-lviewport {
     -webkit-user-select: none; user-select: none;
   }
-  /* and where text is genuinely the content, it stays selectable */
+  /* and where text is genuinely the content, it stays selectable. The
+     statistics panel's tables live INSIDE the chart host: Copy buttons are
+     the supported path, but hand-selecting a value must not become
+     impossible, so they are exempted back. */
   .ps-grid-table td, input, textarea, .ps-import-table, .ps-diagnostics-grid,
-  .ps-render-failure-detail, .ps-var-advice, .ps-analysis-help {
+  .ps-render-failure-detail, .ps-var-advice, .ps-analysis-help,
+  .graphbuilder2-host table {
     -webkit-user-select: text; user-select: text;
   }
   ::selection { background: var(--ps-tint-4); color: var(--ps-ink); }
@@ -223,6 +236,29 @@
      the app frame and referenced by no markup at all: the literal evidence of a
      web page that grew an application frame with the page still in the file.
      Deleted. The .ps-page rule that survives is the app-frame grid below. */
+  /* THE BUTTON VOCABULARY (written down at Torry's request, Jul 28 2026,
+     so future work cannot drift it):
+
+       BARS GET COMMANDS, SURFACES GET BUTTONS.
+
+     .ps-command  - flat, quiet, compact. Lives in bars: the app header,
+                    the data command bar, the layout toolbar. Variants:
+                    .ps-command-icon (icon-only, geometry pinned by m1
+                    case 20), .ps-command-primary, and the pressed-pill
+                    toggle via aria-pressed (.ps-ltoggle).
+     .ps-btn      - bordered, freestanding. Lives on surfaces: rails,
+                    dialogs, pickers, empty states - anywhere a control
+                    must read against white without a bar for context.
+                    Variants: .ps-primary, .ps-danger.
+
+     One accent, three states, shared by BOTH families: --ps-accent fill,
+     --ps-accent-hover, --ps-accent-press (filled buttons press one step
+     below their own hover so the fill never inverts). Never restyle a
+     primary locally - the empty-state and wizard buttons each grew a
+     bespoke primary once, and the wizard's kept a TEAL press state long
+     after the teal palette left the app. m1-shell case 20 enforces the
+     bar half of the rule (no ps-btn inside #ps-ltoolbar, every toolbar
+     button on the command component). */
   .ps-btn {
     -webkit-appearance: none; appearance: none;
     font-family: inherit; font-size: 12.5px; font-weight: 600;
@@ -231,12 +267,13 @@
   }
   .ps-btn:hover { background: var(--ps-s3); }
   /* A disabled button must LOOK disabled (Torry, Jul 27 2026: "none of
-     those buttons do anything for me at all"). The layout Arrange cluster
-     correctly disables Align below 2 selected items and Distribute below
-     3, but .ps-btn had no disabled rule at all, so eight of the twelve
-     rendered exactly like live controls: same colour, full opacity,
-     ordinary cursor. Clicking them did nothing and said nothing. The
-     tooltips that explain WHY are set alongside the disabled state. */
+     those buttons do anything for me at all"). .ps-btn had no disabled
+     rule at all, so inert controls rendered exactly like live ones: same
+     colour, full opacity, ordinary cursor. Clicking them did nothing and
+     said nothing. The tooltips that explain WHY are set alongside the
+     disabled state. (The Arrange cluster that prompted this no longer
+     greys its align row at all - Jul 29 2026 it became show-when-useful,
+     and Distribute was removed - but Back / Forward still rely on this.) */
   .ps-btn:disabled, .ps-btn[disabled] {
     color: var(--ps-muted); background: var(--ps-s2);
     border-color: var(--ps-l3); cursor: default;
@@ -471,6 +508,18 @@
     padding: 3px 4px 5px; color: var(--ps-muted); font-size: 10.5px;
     line-height: 1.35;
   }
+  /* Hidden-in-Data disclosure (Torry, Jul 29 2026): hiding a column also
+     removes it from the chart pickers, and this footer is what keeps that
+     removal from reading as a lost variable. */
+  .ps-varbox-hiddennote {
+    padding: 3px 4px 5px; color: var(--ps-muted); font-size: 10.5px;
+    line-height: 1.35;
+  }
+  .ps-varbox-hiddennote button {
+    padding: 0; color: #3e719f; background: none; border: none;
+    font-size: 10.5px; text-decoration: underline; cursor: pointer;
+  }
+  .ps-varbox-hiddennote button:hover { color: var(--ps-accent-hover); }
   .ps-role-section-heading {
     display: flex; align-items: center; gap: 7px; margin: 3px 0 0;
     color: var(--ps-muted); font-size: 10px; font-weight: 700;
@@ -513,6 +562,13 @@
   .ps-role-card .ps-slot-drop.ps-slot-filled {
     border-style: solid; border-color: var(--ps-l2); background: var(--ps-s0);
   }
+  .ps-slot-change {
+    min-width: 48px; min-height: 24px; margin-left: auto; padding: 2px 7px;
+    color: var(--ps-accent-ink); background: var(--ps-s2);
+    border: 1px solid var(--ps-l3); border-radius: var(--ps-r-sm);
+    font-size: 10.5px; font-weight: 650;
+  }
+  .ps-slot-change:hover { background: var(--ps-tint-2); }
   /* Re-stated at matching specificity AFTER the filled rule, or the
      3-class filled selector would beat the 2-class drag states on a
      filled zone and the drag would lose its live highlight. */
@@ -665,11 +721,25 @@
   }
   #ps-tabs::-webkit-scrollbar { display: none; }
   #ps-tabs > * { flex: 0 0 auto; }
+  #ps-tabs .ps-tablist-inner {
+    display: flex; align-items: center; gap: 2px; flex: 0 0 auto;
+  }
+  #ps-tabs .ps-tablist-inner > * { flex: 0 0 auto; }
   .ps-tab {
     display: inline-flex; align-items: center; gap: 7px;
     padding: 6px 12px; cursor: pointer; border-radius: var(--ps-r-md) var(--ps-r-md) 0 0;
     font-size: 12.5px; font-weight: 600; color: #667; user-select: none;
     max-width: 220px;
+  }
+  .ps-tab-select {
+    -webkit-appearance: none; appearance: none; display: inline-flex;
+    align-items: center; gap: 7px; min-width: 0; max-width: 180px;
+    padding: 0; color: inherit; background: none; border: 0;
+    font: inherit; text-align: left; cursor: pointer;
+  }
+  .ps-tab-select:focus-visible {
+    outline: 2px solid var(--ps-accent); outline-offset: 3px;
+    border-radius: var(--ps-r-sm);
   }
   .ps-tab:hover { background: var(--ps-s2); color: var(--ps-ink-2); }
   .ps-tab.ps-tab-active {
@@ -681,13 +751,31 @@
   .ps-tab-x {
     -webkit-appearance: none; appearance: none; border: none;
     background: none; color: var(--ps-muted); font-weight: 700; font-size: 12px;
-    cursor: pointer; padding: 0 2px; border-radius: var(--ps-r-sm); line-height: 1;
+    display: inline-grid; place-items: center; min-width: 24px; min-height: 24px;
+    cursor: pointer; padding: 0; border-radius: var(--ps-r-sm); line-height: 1;
   }
   .ps-tab-x:hover { color: var(--ps-danger); background: var(--ps-s3); }
+  /* Per-tab close (Torry, Jul 29 2026): the X lives inside the tab it
+     closes. Space is always reserved (visibility, not display) so hover
+     reveal never shifts the strip; the active tab shows its X constantly,
+     the rest on hover or keyboard focus within the tab. */
+  .ps-tab .ps-tab-x {
+    visibility: hidden; min-width: 20px; min-height: 20px;
+    margin-left: 2px; margin-right: -4px;
+  }
+  .ps-tab:hover .ps-tab-x, .ps-tab:focus-within .ps-tab-x,
+  .ps-tab.ps-tab-active .ps-tab-x { visibility: visible; }
+  /* The keyboard/screen-reader close lives OUTSIDE the tablist (a real
+     button among tablist children is an axe aria-required-children
+     violation) and appears only when keyboard focus reaches it - the
+     bypass-link idiom. At rest it takes no layout space. */
+  .ps-tab-x-kbd { position: absolute; transform: translateY(-300%); }
+  .ps-tab-x-kbd:focus { position: static; transform: none; }
   .ps-tab-add {
     -webkit-appearance: none; appearance: none; border: none;
     background: none; color: var(--ps-accent); font-weight: 700; font-size: 15px;
-    cursor: pointer; padding: 3px 10px; border-radius: var(--ps-r-md); line-height: 1;
+    min-width: 30px; min-height: 24px; cursor: pointer; padding: 3px 10px;
+    border-radius: var(--ps-r-md); line-height: 1;
   }
   .ps-tab-add:hover { background: var(--ps-tint-2); }
   .ps-workspace-empty {
@@ -731,6 +819,9 @@
   .ps-ltool-sep {
     width: 1px; height: 24px; background: var(--ps-l2); margin: 0 2px;
   }
+  /* The zoom group holds the row's right edge so the single-row bar
+     reads finished rather than trailing off (launch-eval, Jul 28 2026). */
+  .ps-ltool-push { margin-left: auto; }
   .ps-ltool-label {
     font-size: 10px; font-weight: 700; color: var(--ps-muted);
     letter-spacing: 0.35px; text-transform: uppercase;
@@ -741,7 +832,7 @@
     border: 1px solid var(--ps-l4); border-radius: var(--ps-r-md); padding: 4px 7px;
   }
   .ps-lselect { padding-right: 24px; }
-  .ps-lnum { width: 62px; text-align: right; font-variant-numeric: tabular-nums; }
+  .ps-lnum { width: 72px; text-align: right; font-variant-numeric: tabular-nums; }
   .ps-lnum:disabled { color: var(--ps-muted); background: var(--ps-s2); }
   /* The canvas aids, now that they live in the rail (Jul 27 2026, Torry).
      Toggles keep their pill shape and their aria-pressed styling so the
@@ -790,6 +881,7 @@
     background-size: var(--ps-lgrid-size, 8px) var(--ps-lgrid-size, 8px);
   }
   .ps-litem { position: absolute; box-sizing: border-box; }
+  .ps-litem[role="option"] { border-radius: 2px; }
   .ps-litem[data-kind="chart"] {
     background: var(--ps-s0); cursor: grab;
   }
@@ -904,7 +996,7 @@
     box-shadow: 0 1px 2px rgba(25,38,54,0.04);
   }
   .ps-data-commandbar .ps-command {
-    height: 30px; padding: 0 8px;
+    flex: 0 0 auto; height: 30px; padding: 0 8px;
   }
   /* The icon command button is a SHARED component (t4-36 follow-up: it was
      scoped to the Data bar, so the Layouts toolbar's Undo/Redo rendered
@@ -1071,7 +1163,9 @@
     position: fixed; display: none; z-index: 10000;
     background: var(--ps-s0); border: 1px solid #bbb; border-radius: var(--ps-r-md);
     box-shadow: 0 6px 18px rgba(0,0,0,0.18); padding: 12px;
-    font-size: 12.5px; width: 430px; max-width: calc(100vw - 24px);
+    box-sizing: border-box; font-size: 12.5px;
+    width: 430px; max-width: calc(100vw - 24px);
+    max-height: calc(100vh - 16px); overflow: auto;
   }
   #ps-filtermenu h3 {
     margin: 0 0 4px; font-size: 13px;
@@ -1477,8 +1571,10 @@
   }
   .ps-loader-card {
     background: var(--ps-s0); border-radius: var(--ps-r-lg); padding: 18px; width: 100%;
-    max-width: 560px; box-shadow: var(--ps-e-3);
+    max-width: 560px; max-height: calc(100vh - 60px); overflow: auto;
+    box-sizing: border-box; box-shadow: var(--ps-e-3);
   }
+  #ps-file { display: block; width: 100%; max-width: 100%; box-sizing: border-box; }
   .ps-loader-card h2 { font-size: 16px; margin: 0 0 10px; }
   .ps-loader-row { margin: 10px 0; }
   /* Punch list 21. The loader promised "drop one anywhere on the page" and
@@ -1597,7 +1693,9 @@
   }
   .ps-export-card {
     background: var(--ps-s0); border-radius: var(--ps-r-lg); width: 100%; max-width: 590px;
-    box-shadow: var(--ps-e-3); overflow: hidden;
+    max-height: calc(100vh - 48px); box-shadow: var(--ps-e-3);
+    overflow: hidden; display: flex; flex-direction: column;
+    box-sizing: border-box;
   }
   .ps-export-head {
     display: flex; align-items: center; gap: 12px; padding: 17px 20px 13px;
@@ -1605,7 +1703,7 @@
   }
   .ps-export-head h2 { margin: 0; font-size: 17px; }
   .ps-export-sub { color: var(--ps-muted); font-size: 12px; margin-top: 2px; }
-  .ps-export-body { padding: 17px 20px 5px; }
+  .ps-export-body { padding: 17px 20px 5px; overflow: auto; min-height: 0; }
   .ps-export-field { margin-bottom: 15px; }
   .ps-export-label {
     display: block; color: #4e5865; font-size: 11px; font-weight: 700;
@@ -1646,10 +1744,18 @@
   .ps-export-format input:checked + span strong { color: var(--ps-accent-bright); }
   .ps-export-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .ps-export-note {
-    display: flex; align-items: center; min-height: 32px; color: #6f7782;
+    display: flex; align-items: center; min-height: 32px; color: var(--ps-ink-4);
     background: var(--ps-s2); border: 1px solid var(--ps-l1); border-radius: var(--ps-r-md);
     padding: 7px 9px; font-size: 11.5px; line-height: 1.35;
   }
+  .ps-export-a11y-note {
+    margin: -6px 0 8px; color: var(--ps-ink-4);
+    font-size: 11.5px; line-height: 1.45;
+  }
+  .ps-export-a11y-actions {
+    display: flex; align-items: center; gap: 8px; margin-top: 7px;
+  }
+  .ps-export-a11y-actions .ps-btn { min-height: 32px; }
   #ps-export-status {
     min-height: 18px; color: var(--ps-muted); font-size: 12px; line-height: 1.4;
     margin: 1px 20px 0;
@@ -1741,6 +1847,8 @@
     padding: 5px 10px; background: var(--ps-s0); border-bottom: 1px solid var(--ps-l2b);
     box-shadow: 0 1px 2px rgba(25,38,54,0.04); z-index: 2;
   }
+  /* Bars get commands, surfaces get buttons - the full vocabulary rule
+     lives at the .ps-btn definition above. */
   .ps-command {
     -webkit-appearance: none; appearance: none; display: inline-flex;
     align-items: center; gap: 5px; height: 30px; padding: 0 10px;
@@ -2028,7 +2136,7 @@
   }
   #ps-appmenu button:hover { color: var(--ps-accent-ink); background: var(--ps-s3); }
   #ps-appmenu button:disabled { color: var(--ps-muted); background: transparent; }
-  #ps-appmenu .ps-menu-shortcut { margin-left: 25px; color: var(--ps-muted); font-size: 10.5px; }
+  #ps-appmenu .ps-menu-shortcut { margin-left: 25px; color: var(--ps-ink); font-size: 10.5px; }
   #ps-appmenu .ps-menu-separator { height: 1px; margin: 4px 5px; background: var(--ps-l2); }
   #ps-contextmenu {
     position: fixed; display: none; z-index: 12500; min-width: 185px;
@@ -2054,10 +2162,24 @@
     background: var(--ps-s0); border: 1px solid var(--ps-l4); border-radius: var(--ps-r-lg);
     box-shadow: var(--ps-e-3);
   }
+  .ps-command-palette-head {
+    display: flex; align-items: center; border-bottom: 1px solid var(--ps-l2);
+  }
   #ps-command-search {
-    box-sizing: border-box; width: 100%; height: 46px; padding: 9px 13px;
-    color: #26313e; background: var(--ps-s0); border: 0;
-    border-bottom: 1px solid var(--ps-l2); outline: 0; font-size: 14px;
+    box-sizing: border-box; flex: 1 1 auto; min-width: 0; height: 46px;
+    padding: 9px 13px; color: #26313e; background: var(--ps-s0);
+    border: 0; outline: 0; font-size: 14px;
+  }
+  #ps-command-close {
+    flex: 0 0 44px; width: 44px; height: 44px; margin-right: 1px;
+    color: var(--ps-muted); background: transparent; border: 0;
+    border-radius: var(--ps-r-md); font-size: 20px; line-height: 1;
+  }
+  #ps-command-close:hover { color: var(--ps-ink); background: var(--ps-s2); }
+  .ps-command-help {
+    margin: 0; padding: 7px 12px 6px; color: var(--ps-muted);
+    background: var(--ps-s1); border-bottom: 1px solid var(--ps-l1);
+    font-size: 10.5px;
   }
   #ps-command-results { max-height: 330px; overflow: auto; padding: 5px; }
   .ps-command-result {
@@ -2065,7 +2187,8 @@
     width: 100%; min-height: 35px; padding: 6px 9px; color: var(--ps-ink-2);
     background: transparent; border: 0; border-radius: var(--ps-r-md); text-align: left;
   }
-  .ps-command-result:hover, .ps-command-result.ps-command-current {
+  .ps-command-result:hover, .ps-command-result.ps-command-current,
+  .ps-command-result[aria-selected="true"] {
     color: var(--ps-accent-ink); background: var(--ps-s3);
   }
   .ps-command-result:disabled { color: var(--ps-muted); background: transparent; }
@@ -2205,7 +2328,23 @@
   .ps-hmc-variable:hover, .ps-hmc-variable:focus {
     color: var(--ps-accent-ink); background: var(--ps-s2); outline: 0;
   }
-  .ps-hmc-variable[disabled] { color: var(--ps-muted); cursor: default; }
+  /* A chosen variable must READ as chosen (Torry, Jul 29 2026: "that
+     variable is still available in the full list. It's not grayed out or
+     removed"). It was already disabled, but the only styling was a slightly
+     lighter ink AND it still lit up on hover, so it looked live. It stays
+     IN PLACE rather than leaving the list: removing it would reflow every
+     row beneath, and the neighbour someone was about to pick would move -
+     which is the same complaint one step later. */
+  .ps-hmc-variable[disabled] {
+    color: var(--ps-muted); cursor: default; opacity: 0.6;
+  }
+  .ps-hmc-variable[disabled]:hover, .ps-hmc-variable[disabled]:focus {
+    color: var(--ps-muted); background: transparent;
+  }
+  .ps-hmc-variable .ps-hmc-variable-added {
+    margin-left: auto; color: var(--ps-accent-ink); font-size: 10px;
+    font-weight: 600;
+  }
   .ps-hmc-variable .ps-hmc-type-icon {
     display: inline-flex; width: 18px; justify-content: center; flex: 0 0 auto;
   }
@@ -2389,6 +2528,11 @@
     .ps-hmc-variable-layout { grid-template-columns: 1fr; }
     .ps-hmc-variable-list { max-height: 145px; }
   }
+  @media (max-width: 430px) {
+    .ps-layout-gallery-orientation {
+      align-items: flex-start; flex-direction: column;
+    }
+  }
   .ps-layout-template-grid {
     display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px;
   }
@@ -2491,13 +2635,16 @@
   .ps-dbg-row { display: flex; justify-content: space-between; gap: 14px; }
   .ps-dbg-row span { color: #93a9c0; }
   .ps-about-grid {
-    display: grid; grid-template-columns: auto 1fr; gap: 5px 14px;
+    display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px 14px;
     align-items: baseline; margin-bottom: 14px;
   }
   .ps-about-grid span { color: var(--ps-muted); font-size: var(--ps-fs-xs); }
-  .ps-about-grid strong { font-size: var(--ps-fs-sm); }
+  .ps-about-grid strong {
+    min-width: 0; overflow-wrap: anywhere; font-size: var(--ps-fs-sm);
+  }
   .ps-about-link {
     padding: 0; color: var(--ps-accent-ink); background: none; border: 0;
+    max-width: 100%; overflow-wrap: anywhere;
     font: inherit; text-decoration: underline; cursor: pointer;
   }
   .ps-about-privacy {
@@ -2578,6 +2725,7 @@
     border-radius: 999px; font-size: 10px; font-weight: 700;
     letter-spacing: 0.04em; text-transform: uppercase;
   }
+  .ps-rel-head .ps-rel-current { color: #fff; }
   .ps-rel ul { margin: 0; padding-left: 18px; }
   .ps-rel li {
     margin-bottom: 4px; color: var(--ps-ink-2); font-size: var(--ps-fs-xs);
@@ -2605,7 +2753,7 @@
     color: var(--ps-muted); background: var(--ps-s2); font-weight: 650;
   }
   .ps-tour-label {
-    display: block; margin: 0 0 6px; color: #6b7b8f; font-size: 10.5px;
+    display: block; margin: 0 0 6px; color: var(--ps-muted); font-size: 10.5px;
     font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
   }
   .ps-tour-search {
@@ -2623,9 +2771,9 @@
   .ps-tour-item:hover, .ps-tour-item:focus-visible { background: var(--ps-tint-2); }
   .ps-tour-item-name { display: block; font-size: 13.5px; font-weight: 600; }
   .ps-tour-item-meta {
-    display: block; margin-top: 2px; color: #78849a; font-size: 11px;
+    display: block; margin-top: 2px; color: var(--ps-muted); font-size: 11px;
   }
-  .ps-tour-empty { margin: 14px 4px; color: #7b8798; font-size: 12.5px; }
+  .ps-tour-empty { margin: 14px 4px; color: var(--ps-muted); font-size: 12.5px; }
   .ps-guided-empty {
     display: flex; flex-direction: column; align-items: center;
     max-width: 520px; margin: 55px auto; padding: 32px 28px;
@@ -2642,26 +2790,13 @@
   .ps-guided-empty-actions {
     display: flex; align-items: center; gap: 14px; margin-top: 16px;
   }
-  .ps-guided-empty-actions .ps-primary {
-    padding: 6px 16px; color: var(--ps-s0); background: var(--ps-accent);
-    border: 1px solid var(--ps-accent); border-radius: var(--ps-r-md);
-    font-size: 12px; font-weight: 650; cursor: pointer;
-  }
-  .ps-guided-empty-actions .ps-primary:hover { background: var(--ps-accent-hover); }
+  /* (The empty-state primary once defined its own styling here; it now
+     uses ps-btn ps-primary like every other surface - Torry, Jul 28 2026.) */
   .ps-guided-empty-actions .ps-linklike {
     padding: 0; color: #3e719f; background: none; border: none;
     font-size: 11.5px; text-decoration: underline; cursor: pointer;
   }
   .ps-guided-empty-actions .ps-linklike:hover { color: var(--ps-accent-hover); }
-  @keyframes ps-attention-pulse {
-    0% { box-shadow: 0 0 0 0 rgba(53, 115, 189, 0.55); }
-    70% { box-shadow: 0 0 0 9px rgba(53, 115, 189, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(53, 115, 189, 0); }
-  }
-  .ps-attention-pulse {
-    animation: ps-attention-pulse 0.85s ease-out 2;
-    border-radius: var(--ps-r-md);
-  }
   #ps-toast.ps-toast-action { pointer-events: auto; }
   .ps-toast-item.ps-toast-action { display: flex; align-items: center; gap: 12px; }
   #ps-toast button {
@@ -2729,13 +2864,11 @@
   /* Filled buttons press one step below their own hover, not into the
      light blue, so the fill never inverts. */
   .ps-btn.ps-primary:active:not(:disabled),
-  .ps-command-primary:active:not(:disabled),
-  .ps-guided-empty-actions .ps-primary:active {
+  .ps-command-primary:active:not(:disabled) {
     background: var(--ps-accent-press); border-color: var(--ps-accent-press);
   }
-  .ps-hmc-card .ps-primary:active {
-    background: #0c665e; border-color: #0c665e;
-  }
+  /* (A teal press state lingered here from the wizard's pre-cohesion
+     palette - the standard accent press applies now.) */
   /* the generic light-blue press would flash white on the navy app bar */
   .ps-menubar button:active { background: rgba(255, 255, 255, 0.20); }
   /* t2-30. Dialogs, menus and the eligibility hint were raw display toggles:
@@ -2888,7 +3021,8 @@
     .ps-import-options { grid-template-columns: 1fr; }
     .ps-export-formats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .ps-export-row { grid-template-columns: 1fr; gap: 0; }
-    #ps-exporter { padding: 12px; }
+    #ps-loader, #ps-exporter { padding: 12px; }
+    .ps-loader-card, .ps-export-card { max-height: calc(100vh - 24px); }
     #ps-lviewport { padding: 12px; height: clamp(300px, 68vh, 620px); }
     .ps-ltool-sep { display: none; }
   }
@@ -2974,6 +3108,31 @@
       grid-template-columns: 1fr;
     }
     .ps-layout-template-setup { grid-template-columns: 1fr; }
+    /* With user text spacing applied, a variable chip and its action no
+       longer fit reliably on one 320px drawer row. Keep both controls
+       inside the settings drawer instead of creating a hidden x-axis. */
+    .ps-controls .ps-role-card .ps-slot-drop.ps-slot-filled {
+      flex-wrap: wrap;
+    }
+    .ps-controls .ps-slot-change {
+      flex: 1 0 100%; margin-left: 0;
+    }
+    /* The shared chart editor is composed as a desktop flex row. In the
+       standalone's 320px viewport (especially with WCAG text spacing), the
+       left palette can otherwise wrap underneath the adjacent color picker.
+       Stack those sections and make the editor itself the scroll container;
+       this is presentation-only and does not alter the shared engine. */
+    #psroot .gb2-panel {
+      overflow: auto !important; overscroll-behavior: contain;
+    }
+    #psroot .gb2-panel > div:has(> [data-role="color-picker"]) {
+      flex-wrap: wrap !important;
+    }
+    #psroot .gb2-panel [data-role="color-picker"] {
+      box-sizing: border-box; width: 100% !important;
+      flex: 1 0 100% !important; border-left: 0 !important;
+      border-top: 1px solid var(--ps-l2) !important;
+    }
   }
   @keyframes ps-drawer-left {
     from { transform: translateX(-100%); } to { transform: translateX(0); }
@@ -3147,7 +3306,8 @@
     }
     /* selected and current states are colour-only otherwise */
     .ps-workspace-switcher button[aria-current="page"],
-    .ps-project-item[aria-current="page"], .ps-tab[aria-selected="true"] {
+    .ps-project-item[aria-current="page"],
+    .ps-tab-select[aria-selected="true"] {
       border: 2px solid Highlight; forced-color-adjust: none;
       background: Highlight; color: HighlightText;
     }
@@ -3160,9 +3320,37 @@
     }
   }
 
+  .ps-bypass {
+    position: fixed;
+    z-index: 10050;
+    top: 8px;
+    left: 12px;
+    display: flex;
+    gap: 8px;
+    pointer-events: none;
+  }
+  .ps-bypass a {
+    padding: 9px 13px;
+    border: 2px solid var(--ps-navy);
+    border-radius: 8px;
+    color: #fff;
+    background: var(--ps-navy);
+    font-weight: 700;
+    text-decoration: none;
+    transform: translateY(-180%);
+  }
+  .ps-bypass a:focus {
+    transform: none;
+    pointer-events: auto;
+  }
+
 </style>
 </head>
 <body>
+<nav class="ps-bypass" aria-label="Bypass application chrome">
+  <a id="ps-skip-workspace" href="#ps-main-workspace">Skip to active workspace</a>
+  <a id="ps-skip-settings" href="#ps-settings-panel">Skip to settings panel</a>
+</nav>
 <svg aria-hidden="true" focusable="false"
      style="position:absolute;width:0;height:0;overflow:hidden;">
   <defs>
@@ -3199,11 +3387,12 @@
     </div>
     <button type="button" class="ps-narrow-btn" id="ps-narrow-menu"
             aria-haspopup="true" aria-expanded="false"
+            aria-controls="ps-menubar"
             data-tip="Application menu">
       <span aria-hidden="true">&#9776;</span>
       <span class="ps-visually-hidden">Application menu</span>
     </button>
-    <nav class="ps-menubar" aria-label="Application menu">
+    <nav class="ps-menubar" id="ps-menubar" aria-label="Application menu">
       <button type="button" data-ps-menu="file">File</button>
       <button type="button" data-ps-menu="edit">Edit</button>
       <button type="button" data-ps-menu="data">Data</button>
@@ -3216,12 +3405,14 @@
       <span id="ps-doc-detail">Local project</span>
     </div>
     <button type="button" class="ps-narrow-btn" id="ps-narrow-nav"
-            aria-expanded="false" data-tip="Workspaces and documents">
+            aria-expanded="false" aria-controls="ps-project-panel"
+            data-tip="Workspaces and documents">
       <span aria-hidden="true">&#9636;</span>
       <span class="ps-visually-hidden">Workspaces and documents</span>
     </button>
     <button type="button" class="ps-narrow-btn" id="ps-narrow-inspector"
-            aria-expanded="false" data-tip="Settings panel">
+            aria-expanded="false" aria-controls="ps-settings-panel"
+            data-tip="Settings panel">
       <span aria-hidden="true">&#9707;</span>
       <span class="ps-visually-hidden">Settings panel</span>
     </button>
@@ -3243,7 +3434,8 @@
   </div>
 
   <div class="ps-app-body">
-    <aside class="ps-project-panel" aria-label="Project navigator">
+    <aside class="ps-project-panel" id="ps-project-panel"
+           aria-label="Project navigator">
       <div class="ps-panel-title">Workspaces</div>
       <div class="ps-workspace-switcher">
         <button type="button" data-ps-workspace="data">
@@ -3270,7 +3462,8 @@
   <button type="button" class="ps-splitter ps-splitter-b"
           data-splitter="inspector" aria-label="Resize the settings panel"
           data-tip="Drag to resize. Double-click to reset."></button>
-  <div class="ps-card ps-controls">
+  <div class="ps-card ps-controls" id="ps-settings-panel" role="region"
+       aria-labelledby="ps-inspector-title" tabindex="-1">
     <div class="ps-inspector-head">
       <strong id="ps-inspector-title">Chart setup</strong>
       <span id="ps-inspector-subtitle">Variables and roles</span>
@@ -3324,12 +3517,14 @@
           <option value="0.5">50%</option>
           <option value="0.75">75%</option>
           <option value="1">100%</option>
-          <!-- 125/150 percent are WITHDRAWN pending the engine fix for
-               _ensureChartRoomFor: its auto-grow mixes visual rects with
-               logical svg attrs, so any redraw at magnification inflates
-               the canvas (the gap-and-left-shift bug). Below 100 percent
-               is provably safe: elements under-measure and the grow can
-               never fire. Restore these two options with the engine fix. -->
+          <!-- Magnification RESTORED (Torry's approval, Jul 28 2026): the
+               engine's _ensureChartRoomFor now expresses its rect deltas
+               in the svg's own logical units (identity in jamovi), so a
+               magnified redraw can no longer inflate the canvas. The
+               fitpanes magnification case pins 720 through type cycling
+               at both of these levels. -->
+          <option value="1.25">125%</option>
+          <option value="1.5">150%</option>
         </select>
         <span id="ps-zoom-readout" aria-live="polite"></span>
       </label>
@@ -3395,6 +3590,36 @@
     <div id="ps-inspector-layout" class="ps-inspector-pane">
       <div class="ps-inspector-section">
         <span class="ps-inspector-section-title">Page</span>
+        <!-- Size lives with the page's other properties (moved from the
+             toolbar, Jul 28 2026 - see the note there). Same ids, so all
+             existing wiring and sync apply unchanged. -->
+        <label class="ps-inspector-field ps-linsp-inline">
+          <span>Size</span>
+          <select class="ps-lselect" id="ps-lpage">
+            <option value="canvas">Canvas</option>
+            <option value="canvasp">Canvas portrait</option>
+            <option value="wide">Presentation 16:9</option>
+            <option value="tall">Presentation 9:16</option>
+            <option value="square">Square</option>
+            <option value="a4l">A4 landscape</option>
+            <option value="a4p">A4 portrait</option>
+            <option value="letterl">Letter landscape</option>
+            <option value="letterp">Letter portrait</option>
+            <option value="custom">Custom</option>
+          </select>
+        </label>
+        <div class="ps-linsp-row">
+          <label class="ps-inspector-field ps-linsp-inline">
+            <span>W (<span data-unit-label>in</span>)</span>
+            <input class="ps-lnum" id="ps-lpage-w" type="number"
+                   step="1" aria-label="Page width">
+          </label>
+          <label class="ps-inspector-field ps-linsp-inline">
+            <span>H (<span data-unit-label>in</span>)</span>
+            <input class="ps-lnum" id="ps-lpage-h" type="number"
+                   step="1" aria-label="Page height">
+          </label>
+        </div>
         <label class="ps-inspector-field">
           Orientation
           <select id="ps-layout-orientation">
@@ -3465,17 +3690,24 @@
             <button type="button" class="ps-btn" id="ps-ctx-forward">Forward</button>
             <button type="button" class="ps-btn ps-danger" id="ps-ctx-delete">Delete item</button>
           </div>
-          <div class="ps-inspector-align" aria-label="Align selected items">
+          <!-- Progressive disclosure (Torry, Jul 29 2026): aligning is
+               meaningless with one item selected, so rather than showing six
+               greyed buttons at every selection, the row APPEARS when a
+               second item is selected. The disabled-with-a-reason idiom is
+               still right for a control the user can reach in its own
+               state (Back/Forward at the ends of the stack); it is the
+               wrong idiom for a whole capability that does not apply yet.
+               Distribute across / Distribute down were removed the same
+               day: "I've used this in a lot of different scenarios, and I
+               just don't quite see the utility in it." -->
+          <div class="ps-inspector-align" aria-label="Align selected items"
+               style="display:none;">
             <button type="button" class="ps-btn" data-ctx-align="left">Left</button>
             <button type="button" class="ps-btn" data-ctx-align="hcenter">Center</button>
             <button type="button" class="ps-btn" data-ctx-align="right">Right</button>
             <button type="button" class="ps-btn" data-ctx-align="top">Top</button>
             <button type="button" class="ps-btn" data-ctx-align="vcenter">Middle</button>
             <button type="button" class="ps-btn" data-ctx-align="bottom">Bottom</button>
-          </div>
-          <div class="ps-inspector-actions" style="margin-top:7px;">
-            <button type="button" class="ps-btn" data-ctx-distribute="horizontal">Distribute across</button>
-            <button type="button" class="ps-btn" data-ctx-distribute="vertical">Distribute down</button>
           </div>
         </div>
       </div>
@@ -3499,7 +3731,7 @@
 
   </div>
 
-  <main class="ps-main-workspace">
+  <main class="ps-main-workspace" id="ps-main-workspace" tabindex="-1">
 
   <div class="ps-card ps-datagrid-card" id="ps-datacard" style="display:none;">
     <div class="ps-data-commandbar" role="toolbar" aria-label="Data commands">
@@ -3575,13 +3807,25 @@
               aria-label="More data commands" aria-expanded="false"
               data-tip="More data commands">&#8943;</button>
     </div>
+    <p class="ps-visually-hidden" id="ps-grid-instructions">
+      Use the arrow keys to move between cells. Press Enter or F2 to edit.
+      Hold Shift with the arrow keys to extend the selection. Press F1 for
+      the complete keyboard shortcut list.
+    </p>
+    <p class="ps-visually-hidden" id="ps-grid-editor-instructions">
+      Press Enter to save and move down, Tab to save and move across, or
+      Escape to cancel.
+    </p>
+    <span class="ps-visually-hidden" id="ps-grid-edit-status"
+          role="status" aria-live="polite" aria-atomic="true"></span>
     <div id="ps-datagrid" class="ps-datagrid" tabindex="0"
-         role="region" aria-label="Project data. Click a cell to edit or drag to select a range."></div>
+         role="grid" aria-label="Project data grid" aria-multiselectable="true"
+         aria-describedby="ps-grid-instructions"></div>
     <div id="ps-gridfoot" class="ps-grid-note"></div>
   </div>
 
   <div class="ps-card" id="ps-workcard">
-    <div id="ps-tabs"></div>
+    <div id="ps-tabs" role="group" aria-label="Documents and actions"></div>
     <div id="ps-workspace-empty" class="ps-workspace-empty">
       <div id="ps-workspace-empty-icon" class="ps-workspace-empty-icon"
            aria-hidden="true"></div>
@@ -3590,9 +3834,9 @@
       <button type="button" class="ps-btn ps-primary"
               id="ps-workspace-empty-create"></button>
     </div>
-    <div id="psroot" class="graphbuilder2-host"
+    <div id="psroot" class="graphbuilder2-host" role="tabpanel"
          style="width:100%;position:relative;--gb2-ui-font:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-family:var(--gb2-ui-font);"></div>
-    <div id="ps-layout" style="display:none;">
+    <div id="ps-layout" role="tabpanel" style="display:none;">
       <div id="ps-ltoolbar">
         <div class="ps-ltoolbar-row">
           <div class="ps-ltool-group" aria-label="Layout history">
@@ -3622,36 +3866,13 @@
             <input type="file" id="ps-laddimage-file" accept="image/*,.svg"
                    style="display:none;" aria-hidden="true">
           </div>
-          <span class="ps-ltool-sep"></span>
-          <label class="ps-ltool-group">
-            <span class="ps-ltool-label">Page</span>
-            <select class="ps-lselect" id="ps-lpage">
-              <option value="canvas">Canvas</option>
-              <option value="canvasp">Canvas portrait</option>
-              <option value="wide">Presentation 16:9</option>
-              <option value="tall">Presentation 9:16</option>
-              <option value="square">Square</option>
-              <option value="a4l">A4 landscape</option>
-              <option value="a4p">A4 portrait</option>
-              <option value="letterl">Letter landscape</option>
-              <option value="letterp">Letter portrait</option>
-              <option value="custom">Custom</option>
-            </select>
-          </label>
-          <label class="ps-ltool-group">
-            <span class="ps-ltool-label">W</span>
-            <input class="ps-lnum" id="ps-lpage-w" type="number"
-                   step="1" aria-label="Page width">
-            <span class="ps-ltool-label" data-unit-label>in</span>
-          </label>
-          <label class="ps-ltool-group">
-            <span class="ps-ltool-label">H</span>
-            <input class="ps-lnum" id="ps-lpage-h" type="number"
-                   step="1" aria-label="Page height">
-            <span class="ps-ltool-label" data-unit-label>in</span>
-          </label>
-          <span class="ps-ltool-sep"></span>
-          <label class="ps-ltool-group">
+          <!-- Page size moved to the rail's PAGE section (launch-eval bug,
+               Jul 28 2026: the row overflowed and wrapped ZOOM onto its own
+               line even at 1500px - 976px needed, 909 available). Page
+               preset and dimensions are PROPERTIES of the page, like the
+               Orientation already in that section; the bar keeps actions
+               plus the zoom, right-aligned so the row reads finished. -->
+          <label class="ps-ltool-group ps-ltool-push">
             <span class="ps-ltool-label">Zoom</span>
             <select class="ps-lselect" id="ps-lzoom">
               <option value="fit">Fit page</option>
@@ -3671,8 +3892,19 @@
              app keeps settings. Every control kept its id, so all of the
              existing wiring and sync applies unchanged. -->
       </div>
-      <div id="ps-lviewport" tabindex="0"
-           aria-label="Figure layout canvas. Shift-click to select multiple items.">
+      <p class="ps-visually-hidden" id="ps-layout-instructions">
+        Up and Down Arrow move through layout items; Shift with an arrow
+        extends the selection. Alt with an arrow moves selected items.
+        Control plus Alt with an arrow resizes a selected chart or image.
+        Enter opens exact position and size fields. F2 edits selected text.
+        Shift F10 opens item commands. Press F1 for the complete shortcuts.
+      </p>
+      <span class="ps-visually-hidden" id="ps-layout-live"
+            role="status" aria-live="polite" aria-atomic="true"></span>
+      <div id="ps-lviewport" tabindex="0" role="listbox"
+           aria-label="Figure layout items" aria-multiselectable="true"
+           aria-describedby="ps-layout-instructions">
+        <div class="ps-visually-hidden" id="ps-layout-options"></div>
         <div id="ps-lstage">
           <div id="ps-lcanvas"></div>
         </div>
@@ -3730,14 +3962,14 @@
             <span class="ps-launch-icon"><svg class="ps-icn" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19h16"/><path d="M12 4v10"/><path d="M8 10l4 4 4-4"/></svg></span>
             <span class="ps-launch-copy">
               <strong>Open project or data</strong>
-              <span>.pand, .omv, CSV, TSV, or pasted data</span>
+              <span>A .pand project, .omv, CSV, TSV, or Excel file</span>
             </span>
           </button>
           <button type="button" class="ps-launch-action" id="ps-welcome-new">
             <span class="ps-launch-icon"><svg class="ps-icn" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/><path d="M12 11v6M9 14h6"/></svg></span>
             <span class="ps-launch-copy">
               <strong>New project</strong>
-              <span>Choose a file, paste data, or use the sample</span>
+              <span>Start clean: paste data straight from a spreadsheet</span>
             </span>
           </button>
         </div>
@@ -3792,10 +4024,21 @@
 <div id="ps-command-palette" role="dialog" aria-modal="true"
      aria-label="Command palette">
   <div class="ps-command-palette-card">
-    <input id="ps-command-search" type="text" autocomplete="off"
-           placeholder="Type a command…"
-           aria-label="Search commands">
-    <div id="ps-command-results" role="listbox"></div>
+    <div class="ps-command-palette-head">
+      <input id="ps-command-search" type="text" autocomplete="off"
+             placeholder="Type a command…"
+             role="combobox" aria-autocomplete="list"
+             aria-controls="ps-command-results" aria-expanded="false"
+             aria-describedby="ps-command-help"
+             aria-label="Search commands">
+      <button type="button" id="ps-command-close"
+              aria-label="Close command palette">&#215;</button>
+    </div>
+    <p id="ps-command-help" class="ps-command-help">
+      Up and Down Arrow choose a command. Enter runs it. Escape closes.
+    </p>
+    <div id="ps-command-results" role="listbox"
+         aria-label="Matching commands"></div>
   </div>
 </div>
 <div id="ps-analysis-gallery" class="ps-dialog-overlay" role="dialog"
@@ -4025,7 +4268,6 @@
           <option value="600">600</option>
         </select>
       </label>
-    </div>
       <!-- t3-53: the dataset default every import starts from. It was
            settable only AFTER an import, per project, so the same correction
            had to be made again for every file. -->
@@ -4072,6 +4314,8 @@
              which is the one row a stuck student would actually try to use. -->
         <span>Home</span><strong><button type="button" id="ps-about-site"
           class="ps-about-link">pandionplots.com</button></strong>
+        <span>Accessibility</span><strong><a class="ps-about-link"
+          href="mailto:contact@pandionplots.com">contact@pandionplots.com</a></strong>
       </div>
       <p class="ps-about-privacy">No accounts and no uploads. Your data stays
          on this machine: everything here runs in the browser, and nothing is
@@ -4240,16 +4484,18 @@
 <div id="ps-lchartmenu"></div>
 <div id="ps-filtermenu" role="dialog" aria-label="Row filters"></div>
 
-<div id="ps-loader">
+<div id="ps-loader" role="dialog" aria-modal="true"
+     aria-labelledby="ps-loader-title" aria-describedby="ps-loader-description">
   <div class="ps-loader-card">
     <div style="display:flex;align-items:center;gap:10px;">
-      <h2 style="margin:0;">Load data</h2>
+      <h2 id="ps-loader-title" style="margin:0;">Load data</h2>
       <button type="button" class="ps-btn" id="ps-loader-close" style="margin-left:auto;">Close</button>
     </div>
     <div class="ps-loader-row">
-      <div class="ps-loader-hint">Pick a CSV, Excel .xlsx, jamovi .omv, or saved .pand project (or drop one anywhere on the page):</div>
+      <div class="ps-loader-hint" id="ps-loader-description">Pick a CSV, Excel .xlsx, jamovi .omv, or saved .pand project (or drop one anywhere on the page):</div>
       <div class="ps-loader-hint ps-privacy-line">Nothing is uploaded. The file
         is read in this browser and stays on this machine.</div>
+      <label class="ps-loader-hint" for="ps-file">Choose a data or project file</label>
       <input type="file" id="ps-file" accept=".csv,.tsv,.txt,.xlsx,.xlsm,.omv,.pand,.pnd,.pandion,.json,text/csv">
     </div>
     <div class="ps-loader-row">
@@ -4340,6 +4586,25 @@
         <button type="button" class="ps-btn ps-caption-prov"
                 id="ps-export-provenance">Add what produced this chart</button>
       </label>
+      <div class="ps-export-field" id="ps-export-description-field">
+        <label class="ps-export-label" for="ps-export-description">
+          Image description for accessibility
+        </label>
+        <textarea class="ps-export-input" id="ps-export-description" rows="3"
+                  maxlength="2000" spellcheck="true"
+                  aria-describedby="ps-export-description-help"></textarea>
+        <p class="ps-export-a11y-note" id="ps-export-description-help">
+          SVG embeds this description. PDF receives document metadata, but is
+          not a tagged data table. For PNG or JPG, copy this text and attach it
+          as alt text or a long description wherever you publish the image.
+        </p>
+        <div class="ps-export-a11y-actions">
+          <button type="button" class="ps-btn"
+                  id="ps-export-copy-description">Copy description</button>
+          <span id="ps-export-copy-status" role="status"
+                aria-live="polite"></span>
+        </div>
+      </div>
       <div class="ps-export-row">
         <label class="ps-export-field" id="ps-export-dpi-field">
           <span class="ps-export-label">Resolution</span>

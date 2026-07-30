@@ -134,5 +134,79 @@ ok(find.focused === 'ps-data-find' && find.workspace === 'data',
    `Find in data puts the cursor in the search box (${find.focused})`);
 
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
+console.log('case 5: both paste routes share one quote-aware parser (t4-64)');
+// Torry's wall-of-IDs chart, Jul 29 2026: the MENU paste route split on
+// tabs only, so comma-separated or quoted clipboard text pasted as one
+// mangled column with the quote marks kept, while direct Cmd/Ctrl+V
+// parsed properly. Same stub idiom as copy-image-check: headless file://
+// has no real clipboard, so readText is stubbed and everything downstream
+// of it - the shared parser, the apply, the toast - is real.
+{
+    await page.evaluate(() => {
+        navigator.clipboard.readText = async () =>
+            '"TSD-AM-1",5\n"TSD-AM-2",7';
+    });
+    await page.click('#ps-datagrid td[data-gc="hours"][data-gr="0"]');
+    await page.waitForTimeout(250);
+    await page.evaluate(() => window.PS_SHELL.runCommand('paste-cells'));
+    await page.waitForTimeout(600);
+    const pasted = await page.evaluate(() => {
+        const t = window.PS_SHELL.project.table;
+        const at = t.order.indexOf('hours');
+        return {
+            a0: t.raw.hours[0], a1: t.raw.hours[1],
+            b0: t.raw[t.order[at + 1]][0],
+        };
+    });
+    ok(pasted.a0 === 'TSD-AM-1' && pasted.a1 === 'TSD-AM-2',
+       'menu paste strips CSV quotes like the direct path ' +
+       `("${pasted.a0}", "${pasted.a1}")`);
+    ok(String(pasted.b0) === '5',
+       'and splits on the sniffed comma into the next column ' +
+       `(${JSON.stringify(pasted.b0)})`);
+}
+
+console.log('case 6: a level-exploding paste warns and names the column');
+// The guard that would have caught the accident the moment it happened:
+// a paste that turns a small factor into a many-level column is almost
+// always a misaligned block.
+{
+    await page.evaluate(() => {
+        navigator.clipboard.readText = async () =>
+            Array.from({ length: 12 }, (_, i) => 'TSD-AM-' + (i + 1))
+                .join('\n');
+    });
+    await page.click('#ps-datagrid td[data-gc="condition"][data-gr="0"]');
+    await page.waitForTimeout(250);
+    await page.evaluate(() => window.PS_SHELL.runCommand('paste-cells'));
+    await page.waitForTimeout(400);
+    const warned = await page.evaluate(() =>
+        (document.getElementById('ps-toast') || {}).textContent || '');
+    ok(/condition gained \d+ new values/.test(warned) &&
+       /Cmd\/Ctrl\+Z/.test(warned),
+       'the toast names the exploded column and points at undo',
+       warned);
+    // And the counter-case: many new values in an already-many-valued
+    // column is ordinary data entry, never an alarm.
+    await page.evaluate(() => {
+        navigator.clipboard.readText = async () =>
+            Array.from({ length: 12 }, (_, i) => String(500 + i)).join('\n');
+    });
+    await page.click('#ps-datagrid td[data-gc="score"][data-gr="0"]');
+    await page.waitForTimeout(250);
+    await page.evaluate(() => window.PS_SHELL.runCommand('paste-cells'));
+    await page.waitForTimeout(400);
+    const calm = await page.evaluate(() => {
+        // The toast container STACKS items; earlier toasts (including the
+        // warning this case must not re-match) are still on screen.
+        const items = document.querySelectorAll('#ps-toast .ps-toast-item');
+        return items.length
+            ? items[items.length - 1].textContent : '';
+    });
+    ok(/Pasted 12/.test(calm) && !/gained/.test(calm),
+       'while fresh measurements into a many-valued column stay quiet :: ' +
+       calm);
+}
+
 console.log('CLIPBOARD CHECK PASS');
 await browser.close();

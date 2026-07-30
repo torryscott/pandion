@@ -79,14 +79,35 @@ ok(shape.projChart && shape.projChart.svg,
 ok(shape.projLayout && shape.projLayout.svg,
    'so does a project LAYOUT row');
 
-console.log('case 2: one kind of thing, one icon');
+console.log('case 2: chart rows carry their OWN analysis glyph');
+// Torry, Jul 28 2026: with generic "Chart 2" names, the rail saying WHAT
+// each chart is earns the glyphs. A Compare Groups row still matches the
+// switcher's shared bar icon; other analyses draw their own; layouts keep
+// the one layout icon everywhere.
 ok(shape.projChart.svg === shape.wsChart.svg,
-   'the chart icon is identical in the Workspaces switcher and the ' +
-   'project list');
+   'a Compare Groups row uses the shared bar glyph, same as the switcher');
 ok(shape.projLayout.svg === shape.wsLayout.svg,
-   'and so is the layout icon');
+   'layout rows match the switcher layout icon');
 ok(shape.wsChart.svg !== shape.wsLayout.svg,
    'while charts and layouts still read as different things');
+await page.evaluate(async () => {
+    const s = ms => new Promise(r => setTimeout(r, ms));
+    window.PS_SHELL.addChart('xyplotbuilder'); await s(300);
+    window.PS_SHELL.addChart('corrplotbuilder'); await s(500);
+});
+const perModule = await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll(
+        '#ps-project-nav .ps-project-item'));
+    const sig = b => {
+        const svg = b.querySelector('.ps-nav-icon svg');
+        return svg ? svg.innerHTML : '';
+    };
+    return rows.map(sig);
+});
+const unique = new Set(perModule.filter(Boolean));
+ok(unique.size >= 3,
+   `different analyses draw different glyphs ` +
+   `(${unique.size} distinct icons across ${perModule.length} rows)`);
 
 console.log('case 3: the icons inherit the row colour like the rest');
 const inherits = await page.evaluate(() => {

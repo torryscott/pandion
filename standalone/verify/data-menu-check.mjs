@@ -181,6 +181,71 @@ const ins = await page.evaluate(async () => {
 });
 ok(ins, 'Insert lists Chart panel');
 
+console.log('case 8: whole-table commands need something to act on');
+// The Torry "dead buttons" class, Jul 29 2026: Restore all exclusions,
+// Show all columns, and Reset all column widths were always enabled and,
+// with nothing to restore/show/reset, silently returned. Their grid-popover
+// twins gate correctly; the menu now applies the same tests and says why.
+const readTrio = () => page.evaluate(async () => {
+    const s = ms => new Promise(r => setTimeout(r, ms));
+    document.querySelector('[data-ps-menu="data"]').click();
+    await s(350);
+    const m = document.getElementById('ps-appmenu');
+    const grab = (cmd) => {
+        const b = m.querySelector('[data-app-command="' + cmd + '"]');
+        return { off: b.disabled, tip: b.getAttribute('data-tip') || '' };
+    };
+    const out = {
+        excl: grab('data-restore-excl'),
+        show: grab('data-show-all'),
+        widths: grab('data-resetwidths'),
+    };
+    document.querySelector('[data-ps-menu="data"]').click();
+    await s(150);
+    return out;
+});
+{
+    const clean = await readTrio();
+    ok(clean.excl.off && /Nothing is excluded/.test(clean.excl.tip),
+       `pristine data: Restore all exclusions is off and says why ` +
+       `("${clean.excl.tip}")`);
+    ok(clean.show.off && /No columns are hidden/.test(clean.show.tip),
+       `Show all columns is off and says why ("${clean.show.tip}")`);
+    ok(clean.widths.off && /default widths/.test(clean.widths.tip),
+       `Reset all column widths is off and says why ("${clean.widths.tip}")`);
+
+    // Give each one something to act on, watch it come alive, run it
+    // through the MENU route, and watch it go quiet again - proving both
+    // the gate and that the menu action genuinely acts.
+    await page.evaluate(() => {
+        const t = window.PS_SHELL.project.table;
+        t.excluded[t.order[0]] = { 0: true };
+        // A hidden column, not focus mode: focus depends on the ACTIVE
+        // chart having variables (an earlier case navigated away from
+        // one), while hiding is unconditional - and it is the common
+        // real-world reason Show all columns matters.
+        window.PS_SHELL.selectVariable(t.order[1]);
+        window.PS_SHELL.runCommand('data-hide-col');
+        window.PS_SHELL.project.ui.columnWidths =
+            { [t.order[0]]: 140 };
+    });
+    await page.waitForTimeout(500);
+    const armed = await readTrio();
+    ok(!armed.excl.off && !armed.show.off && !armed.widths.off,
+       'an exclusion, a hidden column, and a set width bring all three ' +
+       'alive :: ' + JSON.stringify(armed));
+    await page.evaluate(async () => {
+        const s = ms => new Promise(r => setTimeout(r, ms));
+        window.PS_SHELL.runCommand('data-restore-excl'); await s(250);
+        window.PS_SHELL.runCommand('data-show-all'); await s(250);
+        window.PS_SHELL.runCommand('data-resetwidths'); await s(250);
+    });
+    await page.waitForTimeout(400);
+    const spent = await readTrio();
+    ok(spent.excl.off && spent.show.off && spent.widths.off,
+       'and running each one leaves it honestly disabled again');
+}
+
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('DATA MENU CHECK PASS');
 await browser.close();

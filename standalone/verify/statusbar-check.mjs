@@ -68,7 +68,10 @@ console.log('case 2: the data workspace reports the data');
 await page.evaluate(() => window.PS_SHELL.setWorkspace('data'));
 await page.waitForTimeout(800);
 const data = await bar();
-ok(/24 rows/.test(data.ctx) && /4 variables/.test(data.ctx),
+// Torry's terminology ruling (Jul 28 2026): "variable" speaks about data
+// MEANING (chart roles, types); "column" is grid mechanics. A status line
+// describing the grid's shape is mechanics.
+ok(/24 rows/.test(data.ctx) && /4 columns/.test(data.ctx),
    `the context slot reports the dataset, not the workspace name ` +
    `("${data.ctx}")`);
 

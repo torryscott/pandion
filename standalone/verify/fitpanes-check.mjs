@@ -409,30 +409,58 @@ ok(await page.evaluate(() =>
 await page.selectOption('#ps-chart-zoom', 'fit');
 await page.waitForTimeout(400);
 
-console.log('case 8: magnification is withdrawn until the engine fix');
-// The engine's _ensureChartRoomFor compares getBoundingClientRect deltas
-// (VISUAL px) against the svg's width/height attributes (LOGICAL px), so
-// any redraw at zoom > 1 inflates the canvas (720 -> 938.78 measured):
-// Torry's gap-and-left-shift corruption. Below 100% the same mismatch
-// only under-measures, so the grow can never fire; the view therefore
-// offers nothing above 100% until the engine fix lands (Torry's call:
-// the engine is shared with jamovi). A zoom persisted during the brief
-// magnified era must normalize at read time, not blank the select.
+console.log('case 8: magnification works, and cannot corrupt the canvas');
+// HISTORY: 125/150% shipped, were WITHDRAWN Jul 27 2026 (the engine's
+// _ensureChartRoomFor compared VISUAL rect deltas against LOGICAL svg
+// attributes, so any magnified redraw inflated the canvas: 720 -> 938.78
+// measured, Torry's gap-and-left-shift report), and RETURNED Jul 28 with
+// his approval of the engine fix: the deltas are expressed in the svg's
+// own logical units before comparing (identity in jamovi, where nothing
+// zooms). This pins the whole contract: the options exist, magnification
+// scales the VIEW while the figure stays logical, a type switch at 150%
+// holds the canvas at 720, and the export still leaves at the standard.
 const zoomOpts = await page.evaluate(() =>
     Array.from(document.getElementById('ps-chart-zoom').options)
         .map(o => o.value));
-ok(zoomOpts.every(v => v === 'fit' || Number(v) <= 1),
-   `the view select offers nothing above 100% (${zoomOpts.join(', ')})`);
-await page.evaluate(() => { window.PS_SHELL.chart().viewZoom = 1.5; });
-await page.setViewportSize({ width: 1430, height: 900 });
-await page.waitForTimeout(600);
-const magi = await page.evaluate(() => ({
-    zoom: document.getElementById('psroot').style.zoom || '',
-    sel: document.getElementById('ps-chart-zoom').value
-}));
-ok(magi.zoom === '' && magi.sel === '1',
-   `a persisted 1.5 renders at 100% and the select says so, not blank ` +
-   `(zoom "${magi.zoom || 'none'}", select "${magi.sel}")`);
+ok(zoomOpts.indexOf('1.25') !== -1 && zoomOpts.indexOf('1.5') !== -1,
+   `125% and 150% are offered again (${zoomOpts.join(', ')})`);
+await page.selectOption('#ps-chart-zoom', '1.5');
+await page.waitForTimeout(500);
+const mag = await geo();
+ok(Math.abs(mag.zoom - 1.5) < 0.01 && mag.logicalW === 720,
+   `150% magnifies the view while the figure stays 720px logical ` +
+   `(shown ${mag.chartW}px)`);
+// The corruption pin: cycle a graph type THROUGH THE REAL FLYOUT at 150%
+// and the canvas attribute must hold - this exact gesture inflated it.
+for (const label of ['Line', 'Bar']) {
+    const t = await page.evaluate(() => {
+        const b = document.querySelector(
+            '#psroot [data-role="graphtype-trigger"]');
+        const r = b.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    });
+    await page.mouse.click(t.x, t.y);
+    await page.waitForTimeout(400);
+    const tile = await page.evaluate((lbl) => {
+        const fly = document.querySelector(
+            '#psroot [data-role="graphtype-flyout"]');
+        const el = Array.from(fly.querySelectorAll('div,button'))
+            .find(n => (n.textContent || '').trim() === lbl &&
+                       n.getBoundingClientRect().width > 30);
+        const r = el.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    }, label);
+    await page.mouse.click(tile.x, tile.y);
+    await page.waitForTimeout(1400);
+}
+await page.waitForTimeout(2000);   // let deferred grow sweeps run
+const after = await geo();
+ok(after.logicalW === 720,
+   `type switches at 150% leave the canvas at 720px, not 938 ` +
+   `(${after.logicalW}px)`);
+const magFacts = svgFacts(await exportSvgText());
+ok(Math.round(magFacts.w) === 728,
+   `and the export still leaves at the standard size (${magFacts.w}px)`);
 await page.selectOption('#ps-chart-zoom', 'fit');
 await page.waitForTimeout(400);
 

@@ -1353,7 +1353,9 @@ await page.waitForTimeout(400);
     const fs2 = await import('node:fs');
     fs2.writeFileSync('/tmp/ps-two-charts.pand', twoChartFile);
     // Close chart 2.
-    await page.click('.ps-tab[data-chart-id="c2"] .ps-tab-x');
+    await page.click('.ps-tab[data-chart-id="c2"] .ps-tab-select');
+    await page.waitForTimeout(200);
+    await page.click('.ps-tab-x[data-chart-id="c2"]');
     await page.waitForTimeout(300);
     const t6 = await page.evaluate(() => ({
         n: window.PS_SHELL.charts().length,
@@ -1741,7 +1743,7 @@ await page.waitForTimeout(400);
             marginGuide: getComputedStyle(document.querySelector('.ps-lmargin-guide')).display
         };
     });
-    ok(lPrecision.page.w === 1024 && lPrecision.page.h === 680 &&
+    ok(lPrecision.page.w === 1008 && lPrecision.page.h === 672 &&
        lPrecision.pageChoice === 'canvas' && lPrecision.zoomChoice === 'fit',
        'new layouts start with a named page preset and fit-page zoom');
     ok(lPrecision.view.snap && lPrecision.view.guides && lPrecision.grid &&
@@ -1792,8 +1794,8 @@ await page.waitForTimeout(400);
         cw: document.getElementById('ps-lcanvas').style.width,
         ch: document.getElementById('ps-lcanvas').style.height
     }));
-    ok(lPageSquare.w === 800 && lPageSquare.h === 800 &&
-       lPageSquare.cw === '800px' && lPageSquare.ch === '800px',
+    ok(lPageSquare.w === 768 && lPageSquare.h === 768 &&
+       lPageSquare.cw === '768px' && lPageSquare.ch === '768px',
        'page presets update stored and visible canvas geometry');
     await page.selectOption('#ps-lpage', 'canvas');
     await page.waitForTimeout(150);
@@ -1915,7 +1917,7 @@ await page.waitForTimeout(400);
     await page.waitForTimeout(120);
     ok(await page.evaluate(() => window.PS_SHELL.chart().items.length === 4),
        'Delete removes an entire multi-selection');
-    // Exact inspector positioning + keyboard nudge.
+    // Exact inspector positioning + documented ten-pixel keyboard nudge.
     rp1 = await itemRect('i1');
     await page.mouse.click(rp1.x + 20, rp1.y + 10);
     await page.fill('#ps-ctx-lx', '80');
@@ -1923,14 +1925,14 @@ await page.waitForTimeout(400);
     await page.waitForTimeout(100);
     await page.evaluate(() =>
         document.getElementById('ps-lviewport').focus());
-    await page.keyboard.press('Shift+ArrowRight');
+    await page.keyboard.press('Alt+Shift+ArrowRight');
     await page.waitForTimeout(100);
     const lExact = await page.evaluate(() => {
         const it = window.PS_SHELL.chart().items.find(i => i.id === 'i1');
         return { x: it.x, shown: document.getElementById('ps-ctx-lx').value };
     });
     ok(lExact.x === 90 && lExact.shown === '90',
-       'exact coordinates and Shift+arrow nudging stay synchronized');
+       'exact coordinates and Alt+Shift+arrow nudging stay synchronized');
     // Drag chart 2's panel to a clear spot (pointer path, item follows).
     async function itemRect(id) {
         return await page.evaluate((id) => {
@@ -2047,11 +2049,23 @@ await page.waitForTimeout(400);
     await page.waitForTimeout(150);
     await page.keyboard.type('Figure 1. Dose response.');
     // Commit path = a background click (the editor-flush guard).
+    // PROBE GEOMETRY LAW (Jul 28 2026, found by a focus spy): the canvas
+    // rect is UNCLIPPED child geometry - when the canvas overflows its
+    // scrolling viewport, its bottom-right corner extends under the RIGHT
+    // RAIL, so a "background" click aimed there lands on whatever rail
+    // control happens to sit at that y. It hit inert padding for months
+    // (focus fell to body, harmlessly), then the rail grew a Page-size
+    // section and the SAME coordinate landed on the document-name INPUT,
+    // whose input guard swallowed the very next Delete keypress. Clamp
+    // background clicks to the VIEWPORT'S OWN visible box.
     const canvasRect = await page.evaluate(() => {
         const r = document.getElementById('ps-lcanvas').getBoundingClientRect();
-        return { x: r.x, y: r.y, w: r.width, h: r.height };
+        const v = document.getElementById('ps-lviewport').getBoundingClientRect();
+        return { x: r.x, y: r.y,
+                 right: Math.min(r.x + r.width, v.x + v.width),
+                 bottom: Math.min(r.y + r.height, v.y + v.height) };
     });
-    await page.mouse.click(canvasRect.x + canvasRect.w - 20, canvasRect.y + canvasRect.h - 12);
+    await page.mouse.click(canvasRect.right - 20, canvasRect.bottom - 12);
     await page.waitForTimeout(200);
     const l6 = await page.evaluate((id) => {
         const it = window.PS_SHELL.chart().items.find(i => i.id === id);
@@ -2269,7 +2283,7 @@ await page.waitForTimeout(400);
     const e4 = await waitForExport();
     const nestedCount = (e4.text.match(/<svg/g) || []).length;
     ok(e4.name === 'Complete figure.svg' &&
-       e4.text.includes('viewBox="0 0 1200 675"'),
+       e4.text.includes('viewBox="0 0 1152 648"'),
        'layout SVG uses the selected presentation page geometry');
     ok(nestedCount >= 3 && e4.text.includes('>A<') && e4.text.includes('>B<'),
        'layout SVG combines both chart panels and panel labels');

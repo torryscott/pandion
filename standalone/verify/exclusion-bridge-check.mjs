@@ -167,6 +167,124 @@ const restoredFromChart = await page.evaluate(() => ({
 }));
 if (restoredFromChart.hours !== 1.5 || restoredFromChart.hidden !== 0)
     throw new Error('Visibility-panel restore did not include the Data value');
+// ---- the Jul 29 2026 interaction round (Torry): symmetric menus, ghost
+// hover, and the Data workspace's Cmd/Ctrl+E working on the chart.
+console.log('  round: ghost menu, hover affordance, Cmd/Ctrl+E');
+
+// Let the restore's echo chain settle completely first: a re-render lands
+// ~ECHO_MS after the last commit and would destroy a just-opened menu
+// (point menus are deliberately not re-armed across renders).
+await page.waitForTimeout(2600);
+
+// Exclude a point again so a ghost exists (via the point menu, the
+// already-proven path).
+{
+    const pt = page.locator(
+        '[data-role="data-point"][data-point-cat="A"][data-point-idx="0"]');
+    await pt.waitFor({ state: 'visible' });
+    await pt.evaluate(point => {
+        // NOT nextElementSibling: the earlier flows SELECTED this point,
+        // and a selected point carries a pointer-events:none selection
+        // ring between itself and its interaction halo. Scan forward for
+        // the element that owns interaction.
+        let halo = point.nextElementSibling;
+        while (halo && halo.getAttribute('pointer-events') !== 'all')
+            halo = halo.nextElementSibling;
+        if (!halo) throw new Error('round setup: no interaction halo found');
+        const rect = halo.getBoundingClientRect();
+        halo.dispatchEvent(new MouseEvent('contextmenu', {
+            bubbles: true, cancelable: true, button: 2,
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2,
+        }));
+    });
+    const menu2 = page.locator('[data-role="gb2-point-menu"]');
+    await menu2.waitFor({ state: 'visible', timeout: 5000 })
+        .catch(() => { throw new Error('round setup: point menu never opened'); });
+    const menu2Text = (await menu2.textContent()).trim();
+    if (!menu2Text.includes('Exclude this value from dataset'))
+        throw new Error('round setup: unexpected menu text :: ' + menu2Text);
+    await menu2.getByText('Exclude this value from dataset').click();
+    await page.waitForTimeout(1800);
+}
+const ghost2 = page.locator('[data-role="data-point-hidden"]');
+if (await ghost2.count() !== 1)
+    throw new Error('setup: expected one ghost for the interaction round');
+
+// (1) Hover affordance: the ghost solidifies under the pointer - it had
+// NO hover feedback before, which made a small dashed ring genuinely hard
+// to target (the report's words: "really hard to actually select").
+const ghostBox = await ghost2.boundingBox();
+await page.mouse.move(ghostBox.x + ghostBox.width / 2,
+                      ghostBox.y + ghostBox.height / 2);
+await page.waitForTimeout(200);
+const hovered = await ghost2.evaluate(g => {
+    const ring = g.querySelector('circle');
+    return { dash: ring.getAttribute('stroke-dasharray'),
+             w: ring.getAttribute('stroke-width') };
+});
+if (hovered.dash !== 'none' || Number(hovered.w) < 1.5)
+    throw new Error('ghost has no hover affordance: ' +
+        JSON.stringify(hovered));
+
+// (2) A plain CLICK opens the menu instead of instantly restoring - one
+// stray click must not undo an explicit exclusion - and the menu names
+// the INCLUDE side truthfully (the relabel observer is hidden-aware; an
+// unaware relabel said "Exclude" on a button that includes).
+await page.mouse.click(ghostBox.x + ghostBox.width / 2,
+                       ghostBox.y + ghostBox.height / 2);
+await page.waitForTimeout(300);
+if (await ghost2.count() !== 1)
+    throw new Error('a plain ghost click still instantly restores');
+const includeAction = page.locator('[data-role="gb2-point-menu"]')
+    .getByText('Include this value in dataset', { exact: true });
+if (!(await includeAction.isVisible()))
+    throw new Error('the ghost menu does not offer inclusion by name');
+await includeAction.click();
+await page.waitForTimeout(1800);
+const included = await page.evaluate(() => ({
+    ghosts: document.querySelectorAll('[data-role="data-point-hidden"]').length,
+    hoursCell: !!(window.PS_SHELL.project.table.excluded.hours || {})[0],
+    n: window.PS_SHELL.buildPayload().bars.find(b => b.x === 'A').n,
+}));
+if (included.ghosts !== 0 || included.hoursCell || included.n !== 2)
+    throw new Error('menu inclusion did not round-trip to the dataset: ' +
+        JSON.stringify(included));
+
+// (3) Cmd/Ctrl+E on the HOVERED point: the Data workspace's exclusion
+// shortcut, now speaking on the chart surface. Exclude by shortcut...
+const pt0 = page.locator(
+    '[data-role="data-point"][data-point-cat="A"][data-point-idx="0"]');
+const ptBox = await pt0.boundingBox();
+await page.mouse.move(ptBox.x + ptBox.width / 2, ptBox.y + ptBox.height / 2);
+await page.waitForTimeout(200);
+await page.keyboard.press('Control+e');
+await page.waitForTimeout(1800);
+const afterKey = await page.evaluate(() => ({
+    ghosts: document.querySelectorAll('[data-role="data-point-hidden"]').length,
+    hoursCell: !!(window.PS_SHELL.project.table.excluded.hours || {})[0],
+}));
+if (afterKey.ghosts !== 1 || !afterKey.hoursCell)
+    throw new Error('Cmd/Ctrl+E on a hovered point did not exclude: ' +
+        JSON.stringify(afterKey));
+// ...and include by the same shortcut on the ghost.
+const ghost3 = page.locator('[data-role="data-point-hidden"]');
+const gBox = await ghost3.boundingBox();
+await page.mouse.move(gBox.x + gBox.width / 2, gBox.y + gBox.height / 2);
+await page.waitForTimeout(200);
+await page.keyboard.press('Control+e');
+await page.waitForTimeout(1800);
+const afterKey2 = await page.evaluate(() => ({
+    ghosts: document.querySelectorAll('[data-role="data-point-hidden"]').length,
+    hoursCell: !!(window.PS_SHELL.project.table.excluded.hours || {})[0],
+    hours: window.PS_SHELL.project.table.columns.hours[0],
+}));
+if (afterKey2.ghosts !== 0 || afterKey2.hoursCell || afterKey2.hours !== 1.5)
+    throw new Error('Cmd/Ctrl+E on a hovered ghost did not include: ' +
+        JSON.stringify(afterKey2));
+console.log('  ok  ghost hover, symmetric include menu, and Cmd/Ctrl+E ' +
+            'toggle all round-trip to the dataset');
+
 if (errors.length) throw new Error(errors[0]);
 
 await browser.close();

@@ -56,6 +56,14 @@ const teals = [...hmc.matchAll(/#[0-9a-fA-F]{6}/g)].map(m => m[0].toLowerCase())
     });
 ok(teals.length === 0,
    `the teal family is gone from the wizard (${JSON.stringify(teals)})`);
+// The scoped scan above is why one survivor escaped for weeks: a teal
+// PRESS state for the wizard's primary lived OUTSIDE the sliced wizard
+// region, in the shared active-state block (found in the button-vocabulary
+// fold, Jul 28 2026). The whole stylesheet is teal-press-free now, and a
+// primary may never define its own colors: the accent tokens are the only
+// source (the vocabulary rule at the .ps-btn definition).
+ok(src.indexOf('#0c665e') === -1,
+   'no teal press state anywhere in the stylesheet, scoped scans included');
 ok(!/font-size: 2[0-9]px/.test(hmc),
    'and its type sits in the app\'s range rather than at 23px');
 

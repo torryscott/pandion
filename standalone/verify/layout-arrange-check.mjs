@@ -65,29 +65,41 @@ const look = (sel) => page.evaluate((s) => {
              tip: b.getAttribute('data-tip') || '' };
 }, sel);
 
-console.log('case 1: a disabled button looks disabled and says why');
+console.log('case 1: align is HIDDEN until it can do anything');
+// Torry, Jul 29 2026: "I'm a big fan of progressive disclosure... I don't
+// think that's really necessary to see unless you select multiple charts."
+// Six greyed buttons under Arrange at every selection became a row that
+// appears when a second item is selected. Distribute across / Distribute
+// down were removed entirely the same day ("I just don't quite see the
+// utility in it").
+const alignRowShown = () => page.evaluate(() => {
+    const row = document.querySelector('.ps-inspector-align');
+    if (!row) return null;
+    const r = row.getBoundingClientRect();
+    return { display: getComputedStyle(row).display,
+             onScreen: r.width > 0 && r.height > 0 };
+});
 await select(1);
 await page.waitForTimeout(350);
-const align1 = await look('[data-ctx-align="left"]');
+const one = await alignRowShown();
+ok(one && one.display === 'none' && !one.onScreen,
+   'with one item selected the align row is not shown at all',
+   JSON.stringify(one));
 const dup1 = await look('#ps-ctx-duplicate');
-ok(align1.disabled && !dup1.disabled,
-   'with one item selected, Align is inert while Duplicate is live');
-ok(align1.color !== dup1.color || align1.bg !== dup1.bg,
-   `and it READS as inert rather than looking identical to a live button ` +
-   `(${align1.color} on ${align1.bg} vs ${dup1.color} on ${dup1.bg})`);
-ok(/two or more/i.test(align1.tip),
-   `its tooltip states the requirement ("${align1.tip}")`);
-const dist1 = await look('[data-ctx-distribute="horizontal"]');
-ok(dist1.disabled && /three or more/i.test(dist1.tip),
-   `Distribute says what IT needs, which is different ("${dist1.tip}")`);
+ok(!dup1.disabled, 'while the single-item actions stay live');
+ok(await page.evaluate(() =>
+       document.querySelectorAll('[data-ctx-distribute]').length === 0),
+   'and Distribute across / Distribute down are gone from the app');
 
-console.log('case 2: they come alive at the counts they need, and act');
+console.log('case 2: it appears on a second selection, live, and acts');
 await select(2);
 await page.waitForTimeout(350);
+const two = await alignRowShown();
+ok(two && two.display !== 'none' && two.onScreen,
+   'selecting a second item reveals the align row', JSON.stringify(two));
 const align2 = await look('[data-ctx-align="left"]');
-ok(!align2.disabled, 'two selected: Align is live');
-ok((await look('[data-ctx-distribute="horizontal"]')).disabled,
-   'while Distribute still waits for a third');
+ok(!align2.disabled,
+   'and every button in it is live - nothing visible here is inert');
 const xsBefore = await page.evaluate(() =>
     (window.PS_SHELL.chart().items || []).slice(0, 2).map(i => Math.round(i.x)));
 await page.click('[data-ctx-align="left"]');
@@ -95,12 +107,12 @@ await page.waitForTimeout(500);
 const xsAfter = await page.evaluate(() =>
     (window.PS_SHELL.chart().items || []).slice(0, 2).map(i => Math.round(i.x)));
 ok(xsAfter[0] === xsAfter[1],
-   `and clicking it really aligns them (${JSON.stringify(xsBefore)} -> ` +
+   `clicking it really aligns them (${JSON.stringify(xsBefore)} -> ` +
    `${JSON.stringify(xsAfter)})`);
-await select(3);
+await select(1);
 await page.waitForTimeout(350);
-ok(!(await look('[data-ctx-distribute="horizontal"]')).disabled,
-   'three selected: Distribute is live too');
+ok((await alignRowShown()).display === 'none',
+   'and dropping back to one selection hides it again');
 
 console.log('case 3: the layer buttons gate at the ends of the stack');
 const ids = await itemIds();

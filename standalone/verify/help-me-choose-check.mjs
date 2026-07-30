@@ -31,8 +31,30 @@ await page.evaluate(() => window.PS_SHELL.showAnalysisGallery());
 if ((await page.locator('[data-analysis-module]').count()) !== 7 ||
     (await page.locator('[data-analysis-help]').count()) !== 1)
     throw new Error('New chart gallery does not contain seven analyses plus Help Me Choose');
-const regularBox = await page.locator('[data-analysis-module]').first().boundingBox();
-const guideBox = await page.locator('[data-analysis-help]').boundingBox();
+// Wait for layout to SETTLE before measuring (Jul 29 2026): this compared
+// card boxes with a 1px tolerance right after opening the gallery, so on a
+// cold browser - fonts not yet applied, first paint not yet reflowed - the
+// first analysis card measured ~2.5px narrower than the guide card and the
+// check failed roughly one run in three. The contract (the guide card is an
+// equal-sized eighth position) is real and the tolerance is right for
+// fractional grid tracks; the measurement was simply taken too early.
+await page.evaluate(() => document.fonts && document.fonts.ready);
+await page.evaluate(() => new Promise(r => requestAnimationFrame(
+    () => requestAnimationFrame(r))));
+const boxOf = async sel => {
+    // Two agreeing reads: a box still moving means layout is not done.
+    let prev = null;
+    for (let i = 0; i < 12; i++) {
+        const b = await page.locator(sel).first().boundingBox();
+        if (prev && b && Math.abs(prev.width - b.width) < 0.01 &&
+            Math.abs(prev.height - b.height) < 0.01) return b;
+        prev = b;
+        await page.waitForTimeout(60);
+    }
+    return prev;
+};
+const regularBox = await boxOf('[data-analysis-module]');
+const guideBox = await boxOf('[data-analysis-help]');
 if (!regularBox || !guideBox ||
     Math.abs(regularBox.width - guideBox.width) > 1 ||
     Math.abs(regularBox.height - guideBox.height) > 1)
