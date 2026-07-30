@@ -135,11 +135,13 @@
 <script src="assets/site-nav.js" defer></script>
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to main content</a>
 
 <header>
   <div class="wrap nav">
     <a class="brand" href="index.html">
-      <img src="assets/pandion-wing.svg" alt="">
+      <img src="assets/pandion-wing.svg" alt=""
+           data-image-kind="decorative">
       Pandion Plots
     </a>
     <button class="nav-toggle" type="button" aria-expanded="false"
@@ -158,7 +160,7 @@
   </div>
 </header>
 
-<main>
+<main id="main-content" tabindex="-1">
   <div class="wrap page-head">
     <p class="kicker">Gallery</p>
     <h1>Real charts, straight from the app.</h1>
@@ -171,60 +173,102 @@
   <div class="wrap grid">
     <figure class="g">
       <div class="g-frame"><img src="assets/gallery/raincloud.png"
-        alt="Raincloud chart of three dose groups: jittered raw scores, boxplots with a flagged outlier, and half-violin distributions"></div>
-      <figcaption><b>Raincloud</b>
-        Raw values, quartiles, and distribution shape in one view. The
-        red ring marks a potential outlier.</figcaption>
+        data-image-kind="data-bearing"
+        aria-describedby="gallery-raincloud-desc"
+        alt="Raincloud plot of score for control, low-dose, and high-dose conditions"></div>
+      <figcaption id="gallery-raincloud-desc"><b>Raincloud</b>
+        Scores rise across the three conditions: the medians are about
+        56 for control, 68 for low dose, and 80 for high dose. The
+        high-dose group also spans the highest values, and a red ring
+        identifies a low-dose score near 53 as a potential outlier.
+        Raw points, box plots, and half-density shapes show the
+        observations and distributions together.</figcaption>
     </figure>
     <figure class="g">
       <div class="g-frame"><img src="assets/gallery/rm-line.png"
-        alt="Repeated measures line chart of two groups across Baseline, Week 4, and Week 8 with error bars"></div>
-      <figcaption><b>Repeated measures</b>
-        Within-subject change across occasions, with
-        Cousineau-Morey-corrected error bars by default.</figcaption>
+        data-image-kind="data-bearing"
+        aria-describedby="gallery-rm-desc"
+        alt="Repeated-measures chart for placebo and treatment groups across baseline, week four, and week eight"></div>
+      <figcaption id="gallery-rm-desc"><b>Repeated measures</b>
+        Both groups improve over time, but treatment rises more: from
+        about 58 at baseline to 74 at week eight, compared with roughly
+        61 to 67 for placebo. Treatment begins below placebo, crosses
+        it by week four, and finishes about seven points higher.
+        Points are means with Cousineau-Morey-corrected error bars.</figcaption>
     </figure>
     <figure class="g">
       <div class="g-frame"><img src="assets/gallery/scatter-marginals.png"
-        alt="Scatter chart of stress against cortisol for two age groups with marginal histograms on both axes"></div>
-      <figcaption><b>Scatter with marginals</b>
-        Two groups, 90 observations, and marginal distributions for
-        both variables.</figcaption>
+        data-image-kind="data-bearing"
+        aria-describedby="gallery-scatter-desc"
+        alt="Scatterplot of stress and cortisol for adolescent and adult age groups"></div>
+      <figcaption id="gallery-scatter-desc"><b>Scatter with marginals</b>
+        Cortisol generally increases as stress increases. Adult
+        observations tend to occupy the higher cortisol range, while
+        adolescent observations cluster more heavily around cortisol
+        values from the mid-30s to mid-60s. The grouped points are
+        accompanied by marginal distributions for both variables.</figcaption>
     </figure>
     <figure class="g">
       <div class="g-frame"><img src="assets/gallery/corr-matrix.png"
-        alt="Correlation matrix heatmap of five psychological measures with a diverging color scale"></div>
-      <figcaption><b>Correlation matrix</b>
-        Pairwise correlations on a diverging scale, with optional
-        significance markers and p-value adjustment.</figcaption>
+        data-image-kind="data-bearing"
+        aria-describedby="gallery-corr-desc"
+        alt="Correlation matrix for anxiety, stress, sleep, openness, and rumination"></div>
+      <figcaption id="gallery-corr-desc"><b>Correlation matrix</b>
+        The strongest positive relationship is anxiety with stress
+        (r = .64); the strongest negative is sleep with rumination
+        (r = -.55). Anxiety is also negatively related to sleep
+        (r = -.48), while openness has only weak relationships with
+        the other variables (absolute r values from .08 to .21).
+        Cell values and a diverging scale communicate direction and
+        strength without relying on color alone.</figcaption>
     </figure>
     <figure class="g">
       <div class="g-frame"><img src="assets/gallery/likert.png"
-        alt="Diverging stacked bar chart of five survey items on a five-point agreement scale"></div>
-      <figcaption><b>Likert battery</b>
-        Diverging stacked responses centered on neutral, following the
-        way agreement scales are usually read.</figcaption>
+        data-image-kind="data-bearing"
+        aria-describedby="gallery-likert-desc"
+        alt="Diverging Likert chart for five survey items"></div>
+      <figcaption id="gallery-likert-desc"><b>Likert battery</b>
+        “Would recommend” has the strongest favorable response:
+        26% agree and 48% strongly agree. “Too fast paced” leans in
+        the opposite direction, with 18% strongly disagreeing and 35%
+        disagreeing. The five response categories are centered on
+        neutral, with negative responses to the left and positive
+        responses to the right.</figcaption>
     </figure>
     <figure class="g">
       <div class="g-frame"><img src="assets/gallery/grouped-bar.png"
-        alt="Grouped bar chart of recall by test timing and practice schedule with error bars"></div>
-      <figcaption><b>Grouped bars</b>
-        A factorial design with error bars, plus optional significance
-        brackets and an omnibus test.</figcaption>
+        data-image-kind="data-bearing"
+        aria-describedby="gallery-bars-desc"
+        alt="Grouped bar chart of recall by test time and practice condition"></div>
+      <figcaption id="gallery-bars-desc"><b>Grouped bars</b>
+        Spaced practice produces higher recall than massed practice
+        both immediately (about 69 versus 59) and after one week
+        (about 65 versus 48). Recall declines for both conditions, but
+        the decline is much larger after massed practice. Bars show
+        condition means with standard-error bars.</figcaption>
     </figure>
     <figure class="g">
       <div class="g-frame"><img src="assets/gallery/histdensity.png"
-        alt="Histogram with an overlaid density curve for a reaction time distribution"></div>
-      <figcaption><b>Histogram + density</b>
-        A histogram and density curve in one view, with an optional
-        normal curve and rug marks.</figcaption>
+        data-image-kind="data-bearing"
+        aria-describedby="gallery-hist-desc"
+        alt="Histogram and density curve of reaction time"></div>
+      <figcaption id="gallery-hist-desc"><b>Histogram + density</b>
+        Most reaction times fall between about 60 and 90, with the
+        highest concentration in the low-to-mid 70s. A sparse lower
+        tail reaches into the 20s and 30s, while the upper tail extends
+        just past 100. Bars show counts and the overlaid curve shows
+        the estimated distribution shape.</figcaption>
     </figure>
     <figure class="g">
       <div class="g-frame"><img src="assets/gallery/donut.png"
-        alt="Donut chart of student majors with five categories"></div>
-      <figcaption><b>Donut</b>
-        Parts of a whole with labels that automatically choose readable
-        contrast. Drag the rim to rotate the chart; drag the hole to
-        resize it.</figcaption>
+        data-image-kind="data-bearing"
+        aria-describedby="gallery-donut-desc"
+        alt="Donut chart of student majors"></div>
+      <figcaption id="gallery-donut-desc"><b>Donut</b>
+        Psychology is the largest major at 34%, followed by biology at
+        26%, nursing at 18%, education at 12%, and other majors at 10%.
+        Direct percentage labels and a coordinated legend provide both
+        values and category names.</figcaption>
     </figure>
   </div>
 
@@ -241,7 +285,8 @@
 <footer>
   <div class="wrap foot">
     <a class="brand" href="index.html">
-      <img src="assets/pandion-wing.svg" alt="">
+      <img src="assets/pandion-wing.svg" alt=""
+           data-image-kind="decorative">
       Pandion Plots
     </a>
     <span>Made by Torry Scott Dennis, PhD.</span>
@@ -255,6 +300,7 @@
       <a href="about.html#cite">How to cite</a>
       <a href="about.html">About</a>
       <a href="support.html">Support</a>
+      <a href="accessibility.html">Accessibility</a>
       <a href="https://github.com/torryscott/pandion">GitHub</a>
     </nav>
   </div>

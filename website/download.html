@@ -291,11 +291,13 @@
 <script src="assets/site-nav.js" defer></script>
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to main content</a>
 
 <header>
   <div class="wrap nav">
     <a class="brand" href="index.html">
-      <img src="assets/pandion-wing.svg" alt="">
+      <img src="assets/pandion-wing.svg" alt=""
+           data-image-kind="decorative">
       Pandion Plots
     </a>
     <button class="nav-toggle" type="button" aria-expanded="false"
@@ -314,7 +316,7 @@
   </div>
 </header>
 
-<main>
+<main id="main-content" tabindex="-1">
   <section class="download-hero">
     <div class="wrap">
       <p class="kicker">Desktop app</p>
@@ -348,23 +350,14 @@
           </div>
           <h2>Download for macOS</h2>
           <p>
-            Choose the installer that matches your Mac&rsquo;s
-            processor.
+            One installer for every Mac, Apple silicon and Intel alike.
           </p>
           <div class="download-list">
             <a class="download-option primary"
-               href="https://github.com/torryscott/pandion/releases/latest/download/Pandion-Plots-macOS-arm64.dmg">
+               href="https://github.com/torryscott/pandion/releases/latest/download/Pandion-Plots-macOS.dmg">
               <span>
-                <strong>Apple silicon</strong>
-                <small>For Macs with an M-series chip</small>
-              </span>
-              <span class="download-arrow" aria-hidden="true">&darr;</span>
-            </a>
-            <a class="download-option"
-               href="https://github.com/torryscott/pandion/releases/latest/download/Pandion-Plots-macOS-x64.dmg">
-              <span>
-                <strong>Intel</strong>
-                <small>For Intel-based Macs</small>
+                <strong>macOS installer</strong>
+                <small>Universal: M-series and Intel Macs</small>
               </span>
               <span class="download-arrow" aria-hidden="true">&darr;</span>
             </a>
@@ -457,7 +450,8 @@
 <footer>
   <div class="wrap foot">
     <a class="brand" href="index.html">
-      <img src="assets/pandion-wing.svg" alt="">
+      <img src="assets/pandion-wing.svg" alt=""
+           data-image-kind="decorative">
       Pandion Plots
     </a>
     <span>Made by Torry Scott Dennis, PhD.</span>
@@ -471,6 +465,7 @@
       <a href="about.html#cite">How to cite</a>
       <a href="about.html">About</a>
       <a href="support.html">Support</a>
+      <a href="accessibility.html">Accessibility</a>
       <a href="https://github.com/torryscott/pandion">GitHub</a>
     </nav>
   </div>

@@ -29,13 +29,18 @@
     color: var(--navy); background: #fff; border: 1px solid #c3d0df;
   }
   .links a:hover { border-color: var(--cobalt); color: var(--cobalt); }
+  .links a:focus-visible {
+    outline: 3px solid var(--cobalt);
+    outline-offset: 3px;
+  }
   .links a.primary { color: #fff; background: var(--navy); border-color: var(--navy); }
   .links a.primary:hover { background: #24405f; color: #fff; }
 </style>
 </head>
 <body>
-  <div class="box">
-    <img src="/assets/diving-straight.svg" alt="">
+  <main class="box">
+    <img src="/assets/diving-straight.svg" alt=""
+         data-image-kind="decorative">
     <h1>That page is not here.</h1>
     <p>The link may be out of date, or the page may have moved. The osprey
        usually hits what it aims at; this time it missed.</p>
@@ -45,6 +50,6 @@
       <a href="/docs/">User guide</a>
       <a href="/gallery.html">Gallery</a>
     </div>
-  </div>
+  </main>
 </body>
 </html>

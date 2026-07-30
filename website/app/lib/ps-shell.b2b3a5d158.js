@@ -94,6 +94,12 @@
     var marks = document.querySelectorAll("[data-unit-label]");
     for (var i = 0; i < marks.length; i++) marks[i].textContent = u;
   }
+  // One formatter for every prose surface that states the page size (status
+  // bar, workspace subtitle). The launch evaluation caught these still
+  // printing raw pixels with no unit after the t4-45 conversion.
+  function pageSizeText(page) {
+    return pxToUnit(page.w) + " \u00d7 " + pxToUnit(page.h) + " " + unitLabel();
+  }
   var APP_VERSION = "3.0.0";
   var AUTOSAVE_HEALTH = "ok";
   var AUTOSAVE_DETAIL = "Local recovery is current";
@@ -1597,6 +1603,23 @@
     if (!PROJECT.ui) PROJECT.ui = {};
     PROJECT.ui[isLayoutTab(c) ? "lastLayout" : "lastChart"] = c.id;
   }
+  // Sequential names count PER KIND, off the highest NUMBER IN USE for
+  // that kind (launch-eval finding, Jul 28 2026: chart names rode the
+  // shared ID counter, so a project with a layout had Chart 1 then Chart
+  // 3 and "Chart 2" never existed - users go looking for it). Max-suffix,
+  // not doc count: after deleting Layout 1 of 2, a count would mint a
+  // SECOND "Layout 2". Internal ids stay on the shared counter; only the
+  // visible names change, so existing projects load untouched.
+  function nextDocName(word, wantLayout) {
+    var mx = 0;
+    for (var i = 0; i < PROJECT.charts.length; i++) {
+      var c = PROJECT.charts[i];
+      if (isLayoutTab(c) !== wantLayout) continue;
+      var m = new RegExp("^" + word + " (\\d+)$").exec(c.name || "");
+      if (m) mx = Math.max(mx, Number(m[1]));
+    }
+    return word + " " + (mx + 1);
+  }
   function newChart(name) {
     var maxId = 0;
     for (var i = 0; i < PROJECT.charts.length; i++) {
@@ -1604,22 +1627,21 @@
       if (m) maxId = Math.max(maxId, Number(m[1]));
     }
     return { id: "c" + (maxId + 1),
-             name: name || ("Chart " + (maxId + 1)),
+             name: name || nextDocName("Chart", false),
              module: "plotbuilder", roles: {}, options: {},
              // Never auto-restyled until the engine's one-shot
              // default-style application stamps it (library bridge).
              styleStamp: false };
   }
   function newLayout() {
-    var maxId = 0, nL = 0;
+    var maxId = 0;
     for (var i = 0; i < PROJECT.charts.length; i++) {
       var m = /^c(\d+)$/.exec(PROJECT.charts[i].id || "");
       if (m) maxId = Math.max(maxId, Number(m[1]));
-      if (isLayoutTab(PROJECT.charts[i])) nL++;
     }
-    return { id: "c" + (maxId + 1), name: "Layout " + (nL + 1),
+    return { id: "c" + (maxId + 1), name: nextDocName("Layout", true),
              type: "layout", items: [], nextLabel: 0,
-             page: { preset: "canvas", w: 1024, h: 680, margin: 32 },
+             page: { preset: "canvas", w: 1008, h: 672, margin: 32 },
              view: { zoom: "fit", grid: 8, showGrid: true, snap: true,
                      guides: true, margins: true } };
   }
@@ -2268,6 +2290,102 @@
     var c = activeChart();
     return cleanExportBase(c && c.name ? c.name : "plot");
   }
+  function exportAccessibleTitle() {
+    var c = activeChart();
+    var name = c && c.name ? String(c.name).trim() : "";
+    if (!name) name = isLayoutTab(c) ? "Pandion Plots figure" : "Pandion Plots chart";
+    return name;
+  }
+  function layoutAccessibleDescription() {
+    var c = activeChart();
+    if (!c || !isLayoutTab(c)) return "";
+    var items = c.items || [];
+    if (!items.length) return "Figure canvas with no placed items.";
+    var charts = [], text = [], images = 0;
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i] || {};
+      if (item.kind === "chart") {
+        var linked = chartById(item.chartId);
+        charts.push(linked && linked.name ? linked.name : "chart panel");
+      } else if (item.kind === "text") {
+        var words = String(item.text || "").replace(/\s+/g, " ").trim();
+        if (words) text.push(words.substring(0, 120));
+      } else if (item.kind === "image") images++;
+    }
+    var parts = ["Multi-panel figure with " + items.length +
+      (items.length === 1 ? " item" : " items")];
+    if (charts.length)
+      parts.push(charts.length + (charts.length === 1 ? " chart: " : " charts: ") +
+        charts.slice(0, 8).join(", ") + (charts.length > 8 ? ", and more" : ""));
+    if (text.length)
+      parts.push("Visible text includes: " + text.slice(0, 5).join("; ") +
+        (text.length > 5 ? "; and more" : ""));
+    if (images)
+      parts.push(images + (images === 1 ? " added image" : " added images"));
+    return parts.join(". ") + ".";
+  }
+  function generatedExportDescription() {
+    var c = activeChart();
+    if (isLayoutTab(c)) return layoutAccessibleDescription();
+    var host = hostEl();
+    try {
+      if (host && typeof host.__gb2_accessibleDescription === "function") {
+        var shared = String(host.__gb2_accessibleDescription() || "").trim();
+        if (shared) return shared;
+      }
+    } catch (e) {}
+    try {
+      var chart = host && host.querySelector(
+        'svg[data-role="gb2-chart-svg"][aria-label]');
+      var label = chart ? String(chart.getAttribute("aria-label") || "") : "";
+      label = label
+        .replace(/\s+Open the Statistics panel[^.]*\./i, "")
+        .replace(/\s+Use the arrow keys[^.]*\./i, "")
+        .trim();
+      if (label) return label;
+    } catch (e2) {}
+    return isLayoutTab(c)
+      ? "Multi-panel figure created with Pandion Plots."
+      : "Statistical chart created with Pandion Plots.";
+  }
+  function exportAccessibleDescription() {
+    var box = el("ps-export-description");
+    var entered = box ? String(box.value || "").trim() : "";
+    if (entered) return entered;
+    var c = activeChart();
+    var saved = c && typeof c.exportDescription === "string"
+      ? c.exportDescription.trim() : "";
+    return saved || generatedExportDescription();
+  }
+  function applySvgAccessibility(doc, titleText, descriptionText) {
+    var root = doc && doc.documentElement;
+    if (!root) return;
+    var direct = [];
+    for (var i = 0; i < root.childNodes.length; i++) {
+      var node = root.childNodes[i];
+      if (node.nodeType === 1 &&
+          (String(node.localName).toLowerCase() === "title" ||
+           String(node.localName).toLowerCase() === "desc"))
+        direct.push(node);
+    }
+    for (var j = 0; j < direct.length; j++)
+      root.removeChild(direct[j]);
+    var ns = "http://www.w3.org/2000/svg";
+    var title = doc.createElementNS(ns, "title");
+    var desc = doc.createElementNS(ns, "desc");
+    title.setAttribute("id", "pandion-export-title");
+    desc.setAttribute("id", "pandion-export-description");
+    title.textContent = String(titleText || "Pandion Plots figure");
+    desc.textContent = String(descriptionText ||
+      "Statistical figure created with Pandion Plots.");
+    root.insertBefore(desc, root.firstChild);
+    root.insertBefore(title, root.firstChild);
+    root.setAttribute("role", "img");
+    root.setAttribute("aria-labelledby",
+      "pandion-export-title pandion-export-description");
+    root.removeAttribute("tabindex");
+    root.removeAttribute("aria-label");
+  }
   function currentExportSize() {
     if (isLayoutTab(activeChart())) {
       var lp = layPage();
@@ -2529,9 +2647,15 @@
     capField.style.display = isLayoutTab(c) ? "none" : "block";
     el("ps-export-caption").value = isLayoutTab(c) ? ""
       : String((activeChartTab() || {}).caption || "");
+    var savedDescription = c && typeof c.exportDescription === "string"
+      ? c.exportDescription.trim() : "";
+    el("ps-export-description").value =
+      savedDescription || generatedExportDescription();
+    el("ps-export-copy-status").textContent = "";
     setExportStatus("", false);
     EXPORT_LAST_FOCUS = document.activeElement;
     el("ps-exporter").style.display = "flex";
+    shellSetPageModal(true);
     updateExportUI();
     window.setTimeout(function () {
       try { el("ps-export-name").focus(); el("ps-export-name").select(); }
@@ -2554,10 +2678,11 @@
   function closeExporter() {
     if (EXPORT_BUSY) return;
     el("ps-exporter").style.display = "none";
+    shellRefreshPageModal();
     setExportStatus("", false);
     var f = EXPORT_LAST_FOCUS;
     EXPORT_LAST_FOCUS = null;
-    try { if (f && f.focus) f.focus(); } catch (e) {}
+    shellRestoreFocus(f, el("ps-export"));
   }
   function svgNumber(v) {
     var n = parseFloat(String(v || "").replace(/px$/i, ""));
@@ -2570,6 +2695,72 @@
         doc.querySelector("parsererror"))
       throw new Error("The chart SVG could not be prepared.");
     return doc;
+  }
+  // ---- content that sits OUTSIDE the canvas -------------------------
+  // Torry, Jul 29 2026, with a heatmap whose Count legend he had dragged
+  // to the right: it was on screen but missing from the PDF, the PNG, and
+  // from the layout's export even though the layout SHOWED it. The chart
+  // svg overflows visibly (no clip), so a part dragged past the canvas
+  // edge still paints - but every serialization cropped at the declared
+  // canvas and dropped it, with nothing on screen marking where that edge
+  // was. His ruling: grow the export to include it, and change the size
+  // numbers so the figure never claims a size no exported file will have.
+  // getBBox on the root svg unions its children INCLUDING their drag
+  // transforms, which is exactly the drawn extent.
+  function svgContentBox(svgEl) {
+    try {
+      if (!svgEl || typeof svgEl.getBBox !== "function") return null;
+      var bb = svgEl.getBBox();
+      if (!bb || !isFinite(bb.width) || !isFinite(bb.height) ||
+          bb.width <= 0 || bb.height <= 0) return null;
+      return { x: bb.x, y: bb.y, w: bb.width, h: bb.height };
+    } catch (e) { return null; }
+  }
+  function liveChartSvg() {
+    var host = hostEl();
+    var svgs = host ? host.querySelectorAll("svg") : [];
+    var best = null, area = 0;
+    for (var i = 0; i < svgs.length; i++) {
+      var a = svgs[i].clientWidth * svgs[i].clientHeight;
+      if (a > area) { area = a; best = svgs[i]; }
+    }
+    return best;
+  }
+  // The box that actually contains everything drawn, shared by both
+  // serialization paths (chart export, layout snapshot) so they cannot
+  // disagree about what the figure is. `grown` stays false whenever
+  // everything is inside - the overwhelmingly common case - and both
+  // callers then behave exactly as they did before.
+  function exportContentBox(svgEl, vbAttr, fallbackW, fallbackH) {
+    var vb = String(vbAttr || "").trim().split(/\s+/);
+    var ok4 = vb.length === 4;
+    for (var i = 0; ok4 && i < 4; i++)
+      if (!isFinite(Number(vb[i]))) ok4 = false;
+    var x0 = ok4 ? Number(vb[0]) : 0, y0 = ok4 ? Number(vb[1]) : 0;
+    var w0 = ok4 ? Number(vb[2]) : fallbackW;
+    var h0 = ok4 ? Number(vb[3]) : fallbackH;
+    var out = { x: x0, y: y0, w: w0, h: h0, grown: false };
+    var box = svgContentBox(svgEl);
+    if (!box || !(w0 > 0) || !(h0 > 0)) return out;
+    var pad = 2;   // a hair of margin so an outermost stroke is not shaved
+    var left = Math.min(x0, box.x - pad), top = Math.min(y0, box.y - pad);
+    var right = Math.max(x0 + w0, box.x + box.w + pad);
+    var bottom = Math.max(y0 + h0, box.y + box.h + pad);
+    // Sub-pixel differences are rounding noise, not a part left outside.
+    if (right - left <= w0 + 0.5 && bottom - top <= h0 + 0.5) return out;
+    return { x: left, y: top, w: right - left, h: bottom - top, grown: true };
+  }
+  // The size an exported file will really have, in inches, when a part sits
+  // outside the canvas. Null when nothing does, so the size row keeps its
+  // ordinary wording.
+  function exportSizeInches(baseW, baseH) {
+    var svg = liveChartSvg();
+    if (!svg) return null;
+    var w = svg.clientWidth, h = svg.clientHeight;
+    if (!(w > 0 && h > 0) || !(baseW > 0 && baseH > 0)) return null;
+    var box = exportContentBox(svg, svg.getAttribute("viewBox"), w, h);
+    if (!box.grown) return null;
+    return { w: baseW * (box.w / w), h: baseH * (box.h / h) };
   }
   function svgRootSize(root, fallback) {
     var w = svgNumber(root.getAttribute("width"));
@@ -2716,8 +2907,31 @@
     var text = host.__gb2_serializeSvg();
     var doc = parseExportSvg(text);
     var size = svgRootSize(doc.documentElement, currentExportSize());
+    // Grow the figure to whatever is actually drawn. Measured on the LIVE
+    // svg (the parsed export doc has no layout, so getBBox is unavailable
+    // there) and unioned with the serialized root's own viewBox - the two
+    // share the engine's user space. Runs BEFORE the background is added so
+    // the paper covers the whole grown figure, not just the old canvas.
+    var grown = exportContentBox(liveChartSvg(),
+        doc.documentElement.getAttribute("viewBox"), size.w, size.h);
+    if (grown.grown) {
+      var vb0 = String(doc.documentElement.getAttribute("viewBox") || "")
+          .trim().split(/\s+/);
+      var sx = (vb0.length === 4 && Number(vb0[2]) > 0)
+          ? size.w / Number(vb0[2]) : 1;
+      var sy = (vb0.length === 4 && Number(vb0[3]) > 0)
+          ? size.h / Number(vb0[3]) : 1;
+      doc.documentElement.setAttribute("viewBox",
+          grown.x + " " + grown.y + " " + grown.w + " " + grown.h);
+      size = { w: Math.round(grown.w * sx), h: Math.round(grown.h * sy) };
+      doc.documentElement.setAttribute("width", String(size.w));
+      doc.documentElement.setAttribute("height", String(size.h));
+    }
     var bg = effectiveExportBackground(mode, false);
     addSvgBackground(doc, bg, size.w, size.h);
+    var accessibleTitle = exportAccessibleTitle();
+    var accessibleDescription = exportAccessibleDescription();
+    applySvgAccessibility(doc, accessibleTitle, accessibleDescription);
     var caption = String((activeChartTab() || {}).caption || "").trim();
     if (!caption) {
       return {
@@ -2747,6 +2961,9 @@
     nested.setAttribute("x", "0"); nested.setAttribute("y", "0");
     nested.setAttribute("width", String(size.w));
     nested.setAttribute("height", String(size.h));
+    nested.setAttribute("aria-hidden", "true");
+    nested.removeAttribute("role");
+    nested.removeAttribute("aria-labelledby");
     root.appendChild(nested);
     var t = outer.createElementNS(ns, "text");
     t.setAttribute("x", "14");
@@ -2764,6 +2981,7 @@
       t.appendChild(sp);
     }
     root.appendChild(t);
+    applySvgAccessibility(outer, accessibleTitle, accessibleDescription);
     return {
       svg: new XMLSerializer().serializeToString(root),
       w: size.w, h: size.h + capH
@@ -2857,9 +3075,14 @@
       nested.setAttribute("height", String(Math.max(80, Number(item.h) || 310)));
       nested.setAttribute("preserveAspectRatio", "xMidYMid meet");
       nested.setAttribute("overflow", "hidden");
+      nested.setAttribute("aria-hidden", "true");
+      nested.removeAttribute("role");
+      nested.removeAttribute("aria-labelledby");
       nested.removeAttribute("style");
       root.appendChild(nested);
     }
+    applySvgAccessibility(doc, exportAccessibleTitle(),
+      exportAccessibleDescription());
     return {
       svg: new XMLSerializer().serializeToString(root),
       w: page.w, h: page.h
@@ -3004,8 +3227,16 @@
         return;
       }
       var svgDoc;
+      var pdfTitle = "Pandion Plots figure";
+      var pdfDescription = "Statistical figure created with Pandion Plots.";
       try {
         svgDoc = parseExportSvg(source.svg);
+        var svgTitle = svgDoc.documentElement.querySelector(":scope > title");
+        var svgDesc = svgDoc.documentElement.querySelector(":scope > desc");
+        if (svgTitle && String(svgTitle.textContent || "").trim())
+          pdfTitle = String(svgTitle.textContent).trim();
+        if (svgDesc && String(svgDesc.textContent || "").trim())
+          pdfDescription = String(svgDesc.textContent).trim();
         normalizePdfFonts(svgDoc.documentElement);
       } catch (e) {
         reject(e);
@@ -3023,8 +3254,8 @@
           putOnlyUsedFonts: true
         });
         pdf.setProperties({
-          title: "Pandion Plots figure",
-          subject: "Vector chart export",
+          title: pdfTitle,
+          subject: pdfDescription.substring(0, 2000),
           creator: "Pandion Plots"
         });
       } catch (e) {
@@ -3226,6 +3457,42 @@
         persist();
       }
     });
+    el("ps-export-description").addEventListener("input", function () {
+      var doc = activeChart();
+      if (!doc) return;
+      doc.exportDescription = this.value;
+      persist();
+      el("ps-export-copy-status").textContent = "";
+    });
+    el("ps-export-copy-description").addEventListener("click", function () {
+      var box = el("ps-export-description");
+      var text = String(box.value || "").trim();
+      if (!text) {
+        el("ps-export-copy-status").textContent =
+          "Add a description before copying.";
+        box.focus();
+        return;
+      }
+      function copied() {
+        el("ps-export-copy-status").textContent = "Description copied.";
+      }
+      function fallback() {
+        try {
+          box.focus();
+          box.select();
+          if (document.execCommand("copy")) { copied(); return; }
+        } catch (e) {}
+        el("ps-export-copy-status").textContent =
+          "Copy was blocked. Select the text and copy it manually.";
+      }
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(copied, fallback);
+          return;
+        }
+      } catch (e2) {}
+      fallback();
+    });
     // t3-59. Appends rather than replaces: the caption is the user's sentence
     // and the provenance is a note under it. Idempotent, so a second click
     // cannot stack two copies.
@@ -3270,16 +3537,7 @@
         closeExporter();
         return;
       }
-      if (e.key !== "Tab") return;
-      var all = el("ps-exporter").querySelectorAll(
-        'button:not([disabled]),input:not([disabled]),select:not([disabled])');
-      if (!all.length) return;
-      var first = all[0], last = all[all.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault(); last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault(); first.focus();
-      }
+      shellTrapTab(this, e);
     });
   }
 
@@ -3532,7 +3790,8 @@
       if (have < need)
         return { placeholder: "Assign " + (need > 1 ? "at least " + need +
                               " variables to " : "") + "<strong>" +
-                              def.label + "</strong> to draw a chart.",
+                              rolePresentation(def).label +
+                              "</strong> to draw a chart.",
                  fix: sampleSuggestionFor(mod) };
     }
     var st = optionsFor(mod);
@@ -3589,6 +3848,11 @@
         chartConsumesExclusions(mod, rr))
       payload.missingNote = payload.missingNote.replace(
         "(missing values)", "(missing or excluded values)");
+    // The engine's point menu says "Hide" by default (jamovi semantics:
+    // hiding is a display choice there). Here the bridge writes REAL
+    // exclusions into the dataset, so the menu tells this host's truth:
+    // Exclude / Include (Torry, Jul 29 2026).
+    payload.pointMenuVerb = "exclude";
     // Scatter-overlay re-ship: harvested engine-computed arrays return
     // to the payload while the data fingerprint still matches (R
     // parity - jamovi recomputes and ships them every run). A stale
@@ -3779,7 +4043,7 @@
     }
     acts.push({ id: "ps-empty-choose", primary: !acts.length,
                 label: fix ? "Choose different variables" : "Choose variables",
-                run: flashChartSetup });
+                run: openChartSetup });
     acts.push({ id: "ps-empty-hmc", link: true,
                 label: "Not sure? Help me choose",
                 run: function () { showHelpMeChoose(); } });
@@ -3815,6 +4079,7 @@
     // Do not leave the previous live chart's export hooks attached when
     // the active tab is an assignment/error placeholder.
     host.__gb2_serializeSvg = null;
+    host.__gb2_accessibleDescription = null;
     host.__gb2_chartSize = null;
     var assignment = /^Assign /.test(String(html).replace(/<[^>]+>/g, ""));
     var acts = assignment
@@ -3823,7 +4088,7 @@
              return a.id !== "ps-empty-data";
            })
          : [{ id: "ps-empty-choose", primary: true, label: "Choose variables",
-              run: flashChartSetup },
+              run: openChartSetup },
             { id: "ps-empty-hmc", link: true,
               label: "Not sure? Help me choose",
               run: function () { showHelpMeChoose(); } }])
@@ -3839,8 +4104,13 @@
          : " Review the selected variables or inspect the data for missing values.");
     var buttons = "";
     for (var i = 0; i < acts.length; i++)
+      // System classes, not bespoke ones (Torry, Jul 28 2026): primary
+      // actions are ps-btn ps-primary like every other surface, and the
+      // formerly class-less secondary actions rendered as NATIVE buttons -
+      // the only unstyled controls in the app. The link stays a link.
       buttons += '<button type="button" class="' +
-        (acts[i].link ? "ps-linklike" : acts[i].primary ? "ps-primary" : "") +
+        (acts[i].link ? "ps-linklike"
+         : acts[i].primary ? "ps-btn ps-primary" : "ps-btn") +
         '" id="' + acts[i].id + '">' + escHtml(acts[i].label) + "</button>";
     host.innerHTML =
       '<div class="ps-guided-empty">' +
@@ -3856,23 +4126,56 @@
       if (b) b.addEventListener("click", acts[i].run);
     }
   }
-  // Pull the eye to the Chart setup inspector: scroll the role slots
-  // into view and pulse their card so a novice knows where "choose
-  // variables" happens without hunting the right-hand panel.
-  function flashChartSetup() {
+  // "Choose variables" from the empty state. Torry, Jul 29 2026: "nothing
+  // happens because the Choose Variables option is already up on the
+  // right-hand side". It was pulsing a ring around the WHOLE inspector
+  // panel - imperceptible at that size - and scrolling slots that the
+  // roles-first redesign had already moved to the top of the panel, so
+  // there was nothing left to scroll. Rather than point at the work, the
+  // button now STARTS it: the picker for the role the sentence above it
+  // names opens, and the keyboard lands there.
+  function openChartSetup() {
     var slots = el("ps-slots");
     if (!slots) return;
-    try { slots.scrollIntoView({ behavior: "smooth", block: "center" }); }
-    catch (e) { slots.scrollIntoView(); }
-    var card = slots.closest(".ps-card") || slots.closest(".ps-inspector") ||
-      slots;
-    card.classList.remove("ps-attention-pulse");
-    // Restart the CSS animation even on a rapid second click.
-    void card.offsetWidth;
-    card.classList.add("ps-attention-pulse");
+    // Narrow layout first: the inspector is display:none behind a drawer
+    // there, so the old code decorated a 0x0 element. skipFocus, because
+    // the focus target below is ours, not the drawer's first tabbable.
+    if (window.innerWidth <= 760) narrowSet("inspector", true);
+    var miss = firstUnsatisfiedRole();
+    var def = miss && miss.def;
+    if (!def) {
+      // The "Choose different variables" branch: everything required is
+      // filled and the chart failed for another reason, so open the first
+      // required role - its picker shows the current pick with a way to
+      // change it, which is what that label promises.
+      var defs = (MODULES[curModule()] || {}).roles || [];
+      for (var d = 0; d < defs.length && !def; d++)
+        if (defs[d].required) def = defs[d];
+    }
+    if (!def) return;
+    openRolePicker(def);
+    // syncRolesRow rebuilt #ps-slots wholesale, so any node captured before
+    // this point is detached. Re-query.
+    var cards = slots.querySelectorAll(".ps-role-card"), card = null;
+    for (var i = 0; i < cards.length && !card; i++)
+      if (cards[i].getAttribute("data-role-key") === def.key) card = cards[i];
+    if (!card) return;
+    var drop = card.querySelector(".ps-slot-drop");
+    var smooth = APP_PREFS.motion !== "reduce" &&
+      !(window.matchMedia &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    // "nearest": a card already in view must not move at all.
+    try {
+      card.scrollIntoView({ block: "nearest",
+                            behavior: smooth ? "smooth" : "auto" });
+    } catch (e) { /* linkedom, and older engines, have no scrollIntoView */ }
+    // The focus move IS the announcement: landing on the drop speaks its
+    // role name, required state, and expanded picker. Deferred a tick like
+    // every other "take me there" in this shell (the gallery and Help me
+    // choose both do exactly this).
     window.setTimeout(function () {
-      card.classList.remove("ps-attention-pulse");
-    }, 1900);
+      try { if (drop) drop.focus({ preventScroll: true }); } catch (e) {}
+    }, 0);
   }
   function render() {
     echoTimer = null;
@@ -3915,6 +4218,13 @@
     // whole path and, crucially, offers the escape.
     try { renderChartIntoHost(); }
     catch (e) { showRenderFailure(e); }
+    // The size row reports whether anything is drawn OUTSIDE the canvas, and
+    // only the finished chart can answer that. A deferred tick, because the
+    // measurement is a getBBox on geometry this call just built - and only
+    // the row, not a full syncAll: nothing else here depends on the drag
+    // that moved a part out, and re-running the whole sync on every render
+    // would be a much bigger promise to keep.
+    window.setTimeout(syncFitSizeRow, 0);
   }
   // Deliberately built with DOM calls rather than innerHTML: this runs when
   // something has already gone wrong, so it must not depend on string
@@ -3923,6 +4233,7 @@
     var host = hostEl();
     try {
       host.__gb2_serializeSvg = null;
+      host.__gb2_accessibleDescription = null;
       host.__gb2_chartSize = null;
       host.classList.remove("ps-offscreen");
       host.style.display = "";
@@ -4226,6 +4537,7 @@
       ? window.performance.now() : Date.now();
     if (!window.GraphBuilder2 || !window.GraphBuilder2.render) {
       host.__gb2_serializeSvg = null;
+      host.__gb2_accessibleDescription = null;
       host.__gb2_chartSize = null;
       showEngineLoadFailure(host);
       return;
@@ -4374,8 +4686,16 @@
       kill[k].parentNode.removeChild(kill[k]);
     clone.removeAttribute("tabindex");
     clone.removeAttribute("aria-label");
-    if (!clone.getAttribute("viewBox"))
-      clone.setAttribute("viewBox", "0 0 " + w + " " + hgt);
+    // Same growth rule as the chart export: a part dragged outside the
+    // canvas belongs to the figure, so the layout panel carries it too.
+    // Measured on the LIVE element (`best`) - the clone is detached and has
+    // no layout. Identical to the old "0 0 w h" whenever nothing is
+    // outside, which keeps every ordinary snapshot byte-for-byte the same.
+    var snapBox = exportContentBox(best, best.getAttribute("viewBox"),
+                                   w, hgt);
+    clone.setAttribute("viewBox", snapBox.x + " " + snapBox.y + " " +
+                       snapBox.w + " " + snapBox.h);
+    w = snapBox.w; hgt = snapBox.h;
     clone.setAttribute("width", "100%");
     clone.setAttribute("height", "100%");
     clone.setAttribute("preserveAspectRatio", "xMidYMid meet");
@@ -4747,8 +5067,16 @@
       if (!menu) return;
       var button = menu.querySelector("button");
       if (!button) return;
-      button.textContent = "Exclude this value from dataset";
-      setTip(button, "Excludes this source cell in Data and every standalone chart");
+      // Hidden-aware (Torry, Jul 29 2026): ghosts open this same menu now,
+      // and the engine marks which side of the toggle it is on. Without
+      // the check this relabel said "Exclude" on a button that INCLUDES.
+      var hiddenPt = menu.hasAttribute("data-point-hidden");
+      button.textContent = hiddenPt
+        ? "Include this value in dataset"
+        : "Exclude this value from dataset";
+      setTip(button, hiddenPt
+        ? "Restores this source cell in Data and every standalone chart"
+        : "Excludes this source cell in Data and every standalone chart");
       if (!menu.querySelector('[data-ps-action="reveal-point"]')) {
         var reveal = document.createElement("button");
         reveal.type = "button";
@@ -5296,15 +5624,39 @@
       ui.paneWidths = {};
     return ui.paneWidths;
   }
+  function splitMetrics(key) {
+    var b = SPLIT_BOUNDS[key];
+    var body = document.querySelector(".ps-app-body");
+    var total = body ? body.clientWidth : 1200;
+    var otherKey = key === "rail" ? "inspector" : "rail";
+    var other = Number(splitWidths()[otherKey]) || SPLIT_DEFAULT[otherKey];
+    var max = Math.max(b[0], Math.min(b[1], total - other - 320));
+    var preferred = Number(splitWidths()[key]) || SPLIT_DEFAULT[key];
+    return {
+      min: b[0],
+      max: Math.round(max),
+      now: Math.round(Math.max(b[0], Math.min(max, preferred)))
+    };
+  }
+  function splitSyncA11y(key) {
+    var bar = document.querySelector('[data-splitter="' + key + '"]');
+    if (!bar) return;
+    var m = splitMetrics(key);
+    bar.setAttribute("aria-valuemin", String(m.min));
+    bar.setAttribute("aria-valuemax", String(m.max));
+    bar.setAttribute("aria-valuenow", String(m.now));
+    bar.setAttribute("aria-valuetext",
+      (key === "rail" ? "Project rail" : "Settings panel") +
+      " width, " + m.now + " pixels");
+  }
   function splitApply() {
     var body = document.querySelector(".ps-app-body");
     if (!body) return;
-    var w = splitWidths();
     for (var key in SPLIT_VAR) {
       if (!Object.prototype.hasOwnProperty.call(SPLIT_VAR, key)) continue;
-      var px = Number(w[key]);
-      if (isFinite(px) && px > 0) body.style.setProperty(SPLIT_VAR[key], px + "px");
-      else body.style.removeProperty(SPLIT_VAR[key]);
+      var metrics = splitMetrics(key);
+      body.style.setProperty(SPLIT_VAR[key], metrics.now + "px");
+      splitSyncA11y(key);
     }
   }
   function splitSet(key, px, persistIt) {
@@ -5372,8 +5724,10 @@
         });
         bar.setAttribute("role", "separator");
         bar.setAttribute("aria-orientation", "vertical");
+        splitSyncA11y(key);
       })(bars[i]);
     }
+    window.addEventListener("resize", splitApply);
     splitApply();
   }
 
@@ -5533,13 +5887,6 @@
       return;
     }
     var mode = doc.viewZoom == null ? "fit" : doc.viewZoom;
-    // Magnification is withdrawn pending the engine _ensureChartRoomFor
-    // fix (see the zoom select in index.html). Normalize a persisted
-    // magnified mode at READ time so the select, the readout, and the
-    // rendered zoom all agree (setting a select to a value with no option
-    // blanks it); the stored preference itself is left alone, so it
-    // resurrects when the engine fix restores the 125/150 options.
-    if (mode !== "fit" && Number(mode) > 1) mode = 1;
     var S = 1;
     if (mode === "fit") {
       var pane = document.querySelector(".ps-main-workspace");
@@ -5552,9 +5899,10 @@
     } else {
       S = Number(mode) || 1;
     }
-    // Backstop for the same rule: nothing above 100 percent may render
-    // while the engine bug stands (any magnified redraw inflates the svg).
-    S = Math.max(0.35, Math.min(1, S));
+    // Fit never magnifies (the huge-monitor rule); the explicit 125/150
+    // choices may (engine fix approved Jul 28 2026 - _ensureChartRoomFor
+    // measures in logical units now, so magnified redraws hold the canvas).
+    S = Math.max(0.35, Math.min(1.5, S));
     host.style.zoom = Math.abs(S - 1) < 0.005
       ? "" : String(Math.round(S * 1000) / 1000);
     if (mode === "fit" && S < 1) {
@@ -5716,9 +6064,18 @@
       '<path d="M13 6v5M13 20v4M9 15h8"/>' +
       '<rect x="24" y="8" width="8" height="10" rx="1"/>' +
       '<path d="M28 4v4M28 18v5M24 13h8"/>',
+    // Torry, Jul 29 2026: "the violin icon doesn't actually look at all
+    // like a violin chart". It was two S-curves - closer to a treble clef
+    // than a density. A violin is a distribution MIRRORED about its centre
+    // line: narrow at the extremes, widest through the middle, with the
+    // median marked. Drawn symmetric about x=14 and x=30 so the mirroring
+    // is the first thing the eye reads.
     violin: axes() +
-      '<path d="M13 5c4 3 4 7 0 9s-4 6 0 9c-4-3-4-7 0-9s-4-6 0-9z"/>' +
-      '<path d="M29 5c5 4 5 8 0 11s-5 5 0 9c-5-4-5-8 0-11s-5-5 0-9z"/>',
+      '<path d="M13 5L15 5C16.5 8 19 11 19 15C19 19 17 21.5 15.5 24' +
+      'L12.5 24C11 21.5 9 19 9 15C9 11 11.5 8 13 5Z"/>' +
+      '<path d="M29 7L31 7C32.5 9.5 34 11.5 34 14.5C34 18 32.5 20.5 31 23' +
+      'L29 23C27.5 20.5 26 18 26 14.5C26 11.5 27.5 9.5 29 7Z"/>' +
+      '<path d="M11.4 15h5.2M27.6 14.5h4.8" stroke-opacity="0.7"/>',
     raincloud: axes() +
       '<path d="M9 12c4-6 12-6 16 0" />' +
       '<circle cx="12" cy="21" r="1.4" fill="currentColor" stroke="none"/>' +
@@ -5823,7 +6180,7 @@
   // one thing it did not draw. data-tip is the source; setTip is how runtime
   // code writes one, and it clears any title so the browser's cannot double up.
   var TIP_DELAY_MS = 420;
-  var TIP_TIMER = null, TIP_FOR = null;
+  var TIP_TIMER = null, TIP_FOR = null, TIP_WATCH = null;
   function setTip(node, text) {
     if (!node) return;
     if (text == null || text === "") {
@@ -5838,6 +6195,7 @@
   }
   function hideTip() {
     if (TIP_TIMER) { window.clearTimeout(TIP_TIMER); TIP_TIMER = null; }
+    if (TIP_WATCH) { window.clearInterval(TIP_WATCH); TIP_WATCH = null; }
     var t = document.getElementById("ps-tip");
     if (t) { t.removeAttribute("data-open"); t.textContent = ""; }
     if (TIP_FOR && TIP_FOR.getAttribute &&
@@ -5852,6 +6210,16 @@
     TIP_FOR = node;
     t.textContent = text;
     t.setAttribute("data-open", "1");
+    // A tooltip must never outlive what it describes - and re-renders
+    // REMOVE anchors without any pointerout ever firing (launch-eval
+    // finding, Jul 28 2026: a data-grid type tip stayed on screen over the
+    // LAYOUT toolbar after a workspace switch). While a tip is open, a
+    // cheap watch hides it the moment its anchor leaves the document; the
+    // interval only exists while a tip is showing.
+    if (TIP_WATCH) window.clearInterval(TIP_WATCH);
+    TIP_WATCH = window.setInterval(function () {
+      if (!TIP_FOR || !TIP_FOR.isConnected) hideTip();
+    }, 250);
     // Announced to assistive tech as well, which the native tooltip only did
     // for a pointer.
     node.setAttribute("aria-describedby", "ps-tip");
@@ -6031,12 +6399,27 @@
       if (defs[i].key === key) return defs[i];
     return null;
   }
+  // Columns hidden in the Data workspace leave the chart-side pickers too
+  // (Torry, Jul 29 2026): one hide, one truth, both workspaces. ASSIGNED
+  // columns are deliberately unaffected - validateRoles keeps its own
+  // membership test, so hiding a variable never silently changes a chart -
+  // and the picker/varbox disclose what hiding removed rather than letting
+  // "where did my variable go?" happen.
   function roleEligibleCols(def) {
     var t = PROJECT.table, out = [];
     if (!t) return out;
     for (var i = 0; i < t.order.length; i++)
-      if (roleAccepts(def, t, t.order[i])) out.push(t.order[i]);
+      if (!GRID_HIDDEN_COLUMNS[t.order[i]] &&
+          roleAccepts(def, t, t.order[i])) out.push(t.order[i]);
     return out;
+  }
+  function roleHiddenEligibleCount(def) {
+    var t = PROJECT.table, n = 0;
+    if (!t) return 0;
+    for (var i = 0; i < t.order.length; i++)
+      if (GRID_HIDDEN_COLUMNS[t.order[i]] &&
+          roleAccepts(def, t, t.order[i])) n++;
+    return n;
   }
   function closeRolePicker() {
     if (ROLE_PICKER_OPEN == null) return;
@@ -6044,10 +6427,38 @@
     syncRolesRow();
     syncEligibilityHints();
   }
-  function toggleRolePicker(def) {
-    ROLE_PICKER_OPEN = ROLE_PICKER_OPEN === def.key ? null : def.key;
+  function openRolePicker(def) {
+    if (!def) return;
+    ROLE_PICKER_OPEN = def.key;
     syncRolesRow();
     syncEligibilityHints();
+  }
+  // One open path, so a caller that means "open" can never get "close"
+  // because the picker happened to be open already on that role.
+  function toggleRolePicker(def) {
+    if (ROLE_PICKER_OPEN === def.key) {
+      ROLE_PICKER_OPEN = null;
+      syncRolesRow();
+      syncEligibilityHints();
+      return;
+    }
+    openRolePicker(def);
+  }
+  // The single place that decides which required role is still unsatisfied.
+  // The empty state writes its sentence from this and the Choose-variables
+  // button opens this exact role, so the two can never point apart.
+  function firstUnsatisfiedRole(mod) {
+    mod = mod || curModule();
+    var defs = (MODULES[mod] && MODULES[mod].roles) || [], rr = rolesFor(mod);
+    for (var d = 0; d < defs.length; d++) {
+      var def = defs[d];
+      if (!def.required) continue;
+      var have = Array.isArray(rr[def.key]) ? rr[def.key].length
+                 : (rr[def.key] ? 1 : 0);
+      var need = def.multi ? (def.min || 1) : 1;
+      if (have < need) return { def: def, have: have, need: need };
+    }
+    return null;
   }
   // Dim variables-list chips that cannot go into the OPEN picker's role.
   function syncEligibilityHints() {
@@ -6080,11 +6491,24 @@
     var blurb = (presentation.description ? presentation.description + " " : "") +
       acceptsTooltip(def) + ".";
     pick.appendChild(mkEl("div", "ps-role-picker-blurb", blurb));
+    var hiddenFit = roleHiddenEligibleCount(def);
     if (!eligible.length) {
       pick.appendChild(mkEl("div", "ps-role-picker-none",
-        "No variables fit this role yet. Check the variable types in the " +
-        "Data workspace, or open Available variables below to review " +
-        "what you have."));
+        hiddenFit
+          ? (hiddenFit === 1
+              ? "The one variable that fits this role is hidden in the " +
+                "Data workspace. Show all columns there to bring it back."
+              : "The " + hiddenFit + " variables that fit this role are " +
+                "hidden in the Data workspace. Show all columns there to " +
+                "bring them back.")
+          : "No variables fit this role yet. Check the variable types in " +
+            "the Data workspace, or open Available variables below to " +
+            "review what you have."));
+    } else if (hiddenFit) {
+      pick.appendChild(mkEl("div", "ps-role-picker-none",
+        hiddenFit + " more " + (hiddenFit === 1 ? "fits" : "fit") +
+        " but " + (hiddenFit === 1 ? "is" : "are") +
+        " hidden in the Data workspace."));
     }
     for (var i = 0; i < eligible.length; i++) {
       (function (col) {
@@ -6142,6 +6566,19 @@
   }
   function syncRolesRow() {
     var wrap = el("ps-slots");
+    // The rebuild destroys whatever is focused inside it, so opening or
+    // closing a picker from the keyboard used to dump focus onto the page
+    // body, stranding a keyboard user mid-flow. Capture the focused
+    // card's role key before the wipe; the restore at the tail lands on
+    // that card's drop, the stable keyboard anchor (a picker row that was
+    // focused may legitimately no longer exist).
+    var keepFocusKey = null;
+    var focusedNow = document.activeElement;
+    if (focusedNow && wrap.contains(focusedNow) && focusedNow.closest) {
+      var focusedCard = focusedNow.closest(".ps-role-card");
+      if (focusedCard)
+        keepFocusKey = focusedCard.getAttribute("data-role-key");
+    }
     wrap.innerHTML = "";
     var defs = MODULES[curModule()].roles, rr = rolesFor(curModule());
     syncAnalysisGuidance();
@@ -6177,13 +6614,23 @@
         // user is deciding), not on every card - the card keeps one line.
         var drop = mkEl("div", "ps-slot-drop" +
           (members.length ? " ps-slot-filled" : ""));
-        drop.tabIndex = 0;
-        drop.setAttribute("role", "button");
-        drop.setAttribute("aria-label", presentation.label +
-          (def.required ? ", required" : ", optional") +
-          ". Click to choose a compatible variable.");
-        drop.setAttribute("aria-expanded",
-          ROLE_PICKER_OPEN === def.key ? "true" : "false");
+        if (members.length) {
+          drop.tabIndex = -1;
+          drop.setAttribute("role", "group");
+          drop.setAttribute("aria-label", presentation.label +
+            (def.required ? ", required" : ", optional") +
+            ". Assigned: " + members.join(", ") +
+            ". Use the remove controls or the " +
+            (def.multi ? "Add" : "Change") + " button.");
+        } else {
+          drop.tabIndex = 0;
+          drop.setAttribute("role", "button");
+          drop.setAttribute("aria-label", presentation.label +
+            (def.required ? ", required" : ", optional") +
+            ". Click to choose a compatible variable.");
+          drop.setAttribute("aria-expanded",
+            ROLE_PICKER_OPEN === def.key ? "true" : "false");
+        }
         drop.setAttribute("data-role-multi", def.multi ? "1" : "0");
         if (def.multi) drop.style.flexWrap = "wrap";
         setTip(drop, (def.multi
@@ -6222,7 +6669,9 @@
             chip.addEventListener("dragend", clearDragState);
             var x = mkEl("button", "ps-slot-x", "\u00d7");
             x.type = "button";
-            setTip(x, "Remove " + col + " from " + def.label);
+            var removeLabel = "Remove " + col + " from " + presentation.label;
+            x.setAttribute("aria-label", removeLabel);
+            setTip(x, removeLabel);
             x.addEventListener("click", function (e) {
               e.stopPropagation();
               slotRemove(col);
@@ -6231,6 +6680,21 @@
             chip.appendChild(x);
             drop.appendChild(chip);
           })(members[mi]);
+        }
+        if (members.length) {
+          var change = mkEl("button", "ps-slot-change",
+            def.multi ? "Add" : "Change");
+          change.type = "button";
+          change.setAttribute("aria-label",
+            (def.multi ? "Add another variable to " : "Change variable for ") +
+            presentation.label);
+          change.setAttribute("aria-expanded",
+            ROLE_PICKER_OPEN === def.key ? "true" : "false");
+          change.addEventListener("click", function (e) {
+            e.stopPropagation();
+            toggleRolePicker(def);
+          });
+          drop.appendChild(change);
         }
         if (!members.length) {
           var empty = mkEl("span", "ps-slot-empty");
@@ -6251,6 +6715,7 @@
           e.stopPropagation();
         });
         drop.addEventListener("keydown", function (e) {
+          if (members.length) return;
           if (e.key !== "Enter" && e.key !== " ") return;
           e.preventDefault();
           toggleRolePicker(def);
@@ -6329,6 +6794,14 @@
       })(defs[i]);
     }
     syncEligibilityHints();
+    if (keepFocusKey) {
+      // Role keys are internal identifiers (xvar, groupVar...), never
+      // data, so the selector interpolation is safe.
+      var backCard = wrap.querySelector(
+        '.ps-role-card[data-role-key="' + keepFocusKey + '"]');
+      var back = backCard && backCard.querySelector(".ps-slot-drop");
+      try { if (back) back.focus({ preventScroll: true }); } catch (e) {}
+    }
   }
   function roleRemoveMember(key, col) {
     var rr = rolesFor(curModule());
@@ -6394,7 +6867,14 @@
     // and a configured chart shows only what is still available.
     var roleOf = roleTagsFor(curModule());
     var filt = el("ps-varfilter");
-    var unassigned = t.order.filter(function (c) { return !roleOf[c]; });
+    // Hidden-in-Data columns leave this list too (Torry, Jul 29 2026);
+    // the footer note below keeps the removal honest.
+    var unassigned = t.order.filter(function (c) {
+      return !roleOf[c] && !GRID_HIDDEN_COLUMNS[c];
+    });
+    var hiddenUnassigned = t.order.filter(function (c) {
+      return !roleOf[c] && GRID_HIDDEN_COLUMNS[c];
+    }).length;
     // The collapsed header still answers "what is left" at a glance.
     if (vbLabel) vbLabel.textContent =
       "Available variables (" + unassigned.length + ")";
@@ -6403,7 +6883,7 @@
     var shown = 0;
     for (var i = 0; i < t.order.length; i++) {
       (function (col) {
-        if (roleOf[col]) return;
+        if (roleOf[col] || GRID_HIDDEN_COLUMNS[col]) return;
         if (needle && col.toLowerCase().indexOf(needle) === -1) return;
         shown++;
         var kind = t.types[col];
@@ -6444,12 +6924,27 @@
         chips.appendChild(chip);
       })(t.order[i]);
     }
-    if (!shown && t.order.length) {
+    if (!shown && t.order.length && !hiddenUnassigned) {
       chips.appendChild(mkEl("div", "ps-chip-empty-note",
         needle && unassigned.length
           ? "No variables match the filter."
           : "Every variable is assigned to a role above. Remove one from " +
             "its role to bring it back here."));
+    }
+    if (hiddenUnassigned) {
+      var hidNote = mkEl("div", "ps-varbox-hiddennote",
+        hiddenUnassigned + (hiddenUnassigned === 1
+          ? " variable is" : " variables are") +
+        " hidden in the Data workspace. ");
+      var hidShow = mkEl("button", "", "Show all columns");
+      hidShow.type = "button";
+      hidShow.addEventListener("click", function (e) {
+        e.stopPropagation();
+        gridShowAllColumns();
+        syncAll();
+      });
+      hidNote.appendChild(hidShow);
+      chips.appendChild(hidNote);
     }
     syncEligibilityHints();
   }
@@ -6524,6 +7019,7 @@
   var GRID_WINDOW_END = 0;
   var GRID_SCROLL_FRAME = null;
   var GRID_EDIT = null;   // {col, row, td, input, canceling}
+  var GRID_EDIT_STATUS_TIMER = null;
   var GRID_SELECTION = null; // {anchorCol, anchorRow, focusCol, focusRow}
   var GRID_SELECTION_KIND = null; // cells | row | column | all
   // t4-34 (Torry's ask): Cmd/Ctrl+click builds a DISCONTIGUOUS column
@@ -6694,7 +7190,7 @@
     showToast("Hidden " +
       (hidden.length === 1 ? hidden[0] : hidden.length + " columns") +
       (floored ? " \u00b7 kept the last visible column" : "") +
-      " \u00b7 data and charts unchanged");
+      " \u00b7 chart pickers follow \u00b7 data and charts unchanged");
     return true;
   }
   function gridShowColumn(col) {
@@ -6840,10 +7336,10 @@
       if (t.order.indexOf(cols[k]) !== -1 && kill.indexOf(cols[k]) === -1)
         kill.push(cols[k]);
     if (!kill.length || t.order.length - kill.length < 1) {
-      showToast("A dataset must keep at least one variable"); return;
+      showToast("A dataset must keep at least one column"); return;
     }
-    dataMark(kill.length === 1 ? "deleting the variable"
-      : "deleting " + kill.length + " variables");
+    dataMark(kill.length === 1 ? "deleting the column"
+      : "deleting " + kill.length + " columns");
     var undoDepth = DATA_ACTION_SEQ;
     var firstAt = t.order.indexOf(kill[0]);
     for (var d = 0; d < kill.length; d++) {
@@ -6867,8 +7363,8 @@
     gridClearSelection(false);
     retype(t); validateRoles();
     persist(); syncAll(); render();
-    offerDataUndo(kill.length === 1 ? "Deleted variable " + kill[0]
-      : "Deleted " + kill.length + " variables", undoDepth);
+    offerDataUndo(kill.length === 1 ? "Deleted column " + kill[0]
+      : "Deleted " + kill.length + " columns", undoDepth);
   }
   function applyVariableLevelOrder(col, levels) {
     var t = PROJECT.table;
@@ -7158,6 +7654,7 @@
   function gridApplySelection() {
     var grid = el("ps-datagrid");
     var tds = grid.querySelectorAll("td[data-gc]");
+    var activeCell = null;
     for (var i = 0; i < tds.length; i++) {
       for (var k = 0; k < GRID_SELECTION_CLASSES.length; k++)
         tds[i].classList.remove(GRID_SELECTION_CLASSES[k]);
@@ -7191,9 +7688,15 @@
           if (ci === r.c1) tds[i].classList.add("ps-grid-sel-right");
         }
         if (tds[i].getAttribute("data-gc") === r.focusCol &&
-            row === r.focusRow) tds[i].classList.add("ps-grid-sel-focus");
+            row === r.focusRow) {
+          tds[i].classList.add("ps-grid-sel-focus");
+          activeCell = tds[i];
+        }
       }
     }
+    if (activeCell && activeCell.id && !GRID_EDIT)
+      grid.setAttribute("aria-activedescendant", activeCell.id);
+    else grid.removeAttribute("aria-activedescendant");
     var status = el("ps-grid-selection-status");
     if (status) status.textContent = gridSelectionSummary(count, r);
     var statBox = el("ps-grid-stats");
@@ -7345,6 +7848,31 @@
     }
     while (t.order.length < r.c0 + targetCols)
       addColumnInternal(t.order[t.order.length - 1], null);
+    // Level census of the PRE-EXISTING pasted-into columns, taken before
+    // the writes: a paste that explodes a factor-like column's distinct
+    // values is almost always a misaligned block (Torry's wall-of-IDs
+    // chart, Jul 29 2026 - an ID column landed in a 2-level Intervention),
+    // and the moment to say so is now, not after the chart draws it.
+    // Columns this paste CREATED are exempt: filling a fresh column with
+    // new values is the normal case, not the accident.
+    var distinctIn = function (col) {
+      var seen = {}, k = 0, vals = t.raw[col] || [];
+      for (var di = 0; di < vals.length; di++) {
+        var dv = String(vals[di] == null ? "" : vals[di]).trim();
+        if (dv !== "" && !seen[dv]) { seen[dv] = 1; k++; }
+      }
+      return k;
+    };
+    var levelWatch = [];
+    for (var lw = 0; lw < targetCols && r.c0 + lw < t.order.length; lw++) {
+      var lwCol = t.order[r.c0 + lw];
+      var lwBefore = distinctIn(lwCol);
+      // Only factor-like columns (few distinct values) can "explode";
+      // pasting fresh measurements into a numeric column legitimately
+      // adds many distinct values and must never alarm.
+      if (lwBefore > 0 && lwBefore <= 8)
+        levelWatch.push({ col: lwCol, before: lwBefore });
+    }
     for (var y = 0; y < targetRows; y++) {
       for (var x = 0; x < targetCols; x++) {
         var srcRow = fillSelection ? 0 : y;
@@ -7360,7 +7888,17 @@
     gridSetSelection(t.order[r.c0], r.r0,
       t.order[Math.min(t.order.length - 1, r.c0 + targetCols - 1)],
       r.r0 + targetRows - 1, "cells");
-    showToast("Pasted " + targetRows + " \u00d7 " + targetCols + " cells");
+    var worst = null;
+    for (var lw2 = 0; lw2 < levelWatch.length; lw2++) {
+      var gained = distinctIn(levelWatch[lw2].col) - levelWatch[lw2].before;
+      if (gained >= 5 && (!worst || gained > worst.gained))
+        worst = { col: levelWatch[lw2].col, gained: gained };
+    }
+    showToast("Pasted " + targetRows + " \u00d7 " + targetCols + " cells" +
+      (worst
+        ? " \u00b7 " + worst.col + " gained " + worst.gained + " new values" +
+          " - press Cmd/Ctrl+Z if this paste was misaligned"
+        : ""), !!worst);
   }
   function gridClearSelected() {
     var cells = gridSelectionCells(), t = PROJECT.table;
@@ -7389,6 +7927,27 @@
   }
   function gridClampColumnWidth(width) {
     return Math.max(72, Math.min(600, Math.round(Number(width) || 160)));
+  }
+  function gridSyncColumnResizer(head) {
+    if (!head) return;
+    var col = head.getAttribute("data-grid-col");
+    var handle = head.querySelector(".ps-grid-col-resizer");
+    if (!col || !handle) return;
+    var explicit = Number(gridColumnWidths(false)[col]);
+    var width = isFinite(explicit)
+      ? gridClampColumnWidth(explicit)
+      : gridClampColumnWidth(head.getBoundingClientRect().width ||
+          head.offsetWidth || GRID_NATURAL_WIDTHS[col] ||
+          gridNaturalColumnWidth(col));
+    handle.setAttribute("aria-valuemin", "72");
+    handle.setAttribute("aria-valuemax", "600");
+    handle.setAttribute("aria-valuenow", String(width));
+    handle.setAttribute("aria-valuetext",
+      col + " column width, " + width + " pixels");
+  }
+  function gridSyncColumnResizers() {
+    var heads = el("ps-datagrid").querySelectorAll("th[data-grid-col]");
+    for (var i = 0; i < heads.length; i++) gridSyncColumnResizer(heads[i]);
   }
   function gridHasColumnWidths() {
     var widths = gridColumnWidths(false), t = PROJECT.table;
@@ -7487,6 +8046,7 @@
       cols[i].style.width = gridClampColumnWidth(widths[name]) + "px";
     }
     table.style.width = gridWidthTotal(widths) + "px";
+    gridSyncColumnResizers();
   }
   function gridAutoFitColumn(col, quiet) {
     var t = PROJECT.table;
@@ -7834,9 +8394,22 @@
     var priorScrollLeft = Number(grid.scrollLeft) || 0;
     var open = !!(PROJECT.ui && PROJECT.ui.dataOpen);
     card.style.display = open ? "block" : "none";
-    if (!open) { grid.innerHTML = ""; el("ps-gridfoot").innerHTML = ""; return; }
+    if (!open) {
+      grid.innerHTML = "";
+      grid.removeAttribute("aria-rowcount");
+      grid.removeAttribute("aria-colcount");
+      grid.removeAttribute("aria-activedescendant");
+      el("ps-gridfoot").innerHTML = "";
+      return;
+    }
     var t = PROJECT.table;
-    if (!t) { grid.innerHTML = ""; return; }
+    if (!t) {
+      grid.innerHTML = "";
+      grid.removeAttribute("aria-rowcount");
+      grid.removeAttribute("aria-colcount");
+      grid.removeAttribute("aria-activedescendant");
+      return;
+    }
     var visibleCols = gridVisibleColumns(t);
     if (!visibleCols.length) {
       GRID_FOCUS_CHART_COLUMNS = false;
@@ -7863,8 +8436,10 @@
     var tableClass = "ps-grid-table" + (sized ? " ps-grid-sized" : "");
     var tableStyle = sized
       ? ' style="width:' + gridWidthTotal(widths, visibleCols) + 'px;"' : "";
+    grid.setAttribute("aria-rowcount", String(n + 1));
+    grid.setAttribute("aria-colcount", String(visibleCols.length + 1));
     var h = ['<table class="' + tableClass +
-             '" role="grid" aria-multiselectable="true"' + tableStyle + ">"];
+             '" role="presentation"' + tableStyle + ">"];
     if (sized) {
       h.push('<colgroup><col style="width:46px;">');
       for (var cw = 0; cw < visibleCols.length; cw++) {
@@ -7877,12 +8452,17 @@
       }
       h.push("</colgroup>");
     }
-    h.push('<thead><tr><th class="ps-grid-rownum" data-grid-all data-tip="Select all cells"></th>');
+    h.push('<thead><tr role="row" aria-rowindex="1"><th class="ps-grid-rownum"' +
+           ' role="columnheader" aria-colindex="1" aria-label="Select all cells"' +
+           ' data-grid-all data-tip="Select all cells"></th>');
     var j, col;
     for (j = 0; j < visibleCols.length; j++) {
       col = visibleCols[j];
       var kind = t.types[col];
-      h.push('<th data-grid-col="' + escHtml(col) + '"' +
+      h.push('<th id="' + gridColumnHeaderId(j) + '" role="columnheader"' +
+             ' aria-colindex="' + (j + 2) + '" aria-label="' +
+             escHtml(col + ", " + typeLabel(kind) + " variable") + '"' +
+             ' data-grid-col="' + escHtml(col) + '"' +
              (col === INSPECTOR_VAR ? ' class="ps-grid-col-active"' : "") +
              ' data-tip="' + escHtml(typeLabel(kind)) + ' variable">' +
              escHtml(col) +
@@ -7900,7 +8480,8 @@
               ? '<span class="ps-grid-role">' + escHtml(roleOf[col]) + "</span>"
               : "") +
              '<span class="ps-grid-col-resizer" role="separator" tabindex="0"' +
-             ' aria-orientation="vertical" aria-label="Resize ' + escHtml(col) +
+             ' aria-orientation="vertical" aria-valuemin="72" aria-valuemax="600"' +
+             ' aria-label="Resize ' + escHtml(col) +
              ' column" data-tip="Drag to resize; double-click to auto-fit"></span>' +
              "</th>");
     }
@@ -7912,15 +8493,21 @@
     for (var i = start; i < end; i++) {
       var rowExcluded = isRowExcluded(t, i);
       h.push('<tr' + (rowExcluded ? ' class="ps-grid-row-excluded"' : "") +
-             '><td class="ps-grid-rownum" data-grid-row="' + i +
+             ' role="row" aria-rowindex="' + (i + 2) + '">' +
+             '<td id="' + gridRowHeaderId(i) + '" class="ps-grid-rownum"' +
+             ' role="rowheader" aria-rowindex="' + (i + 2) + '"' +
+             ' aria-colindex="1" aria-label="Row ' + (i + 1) + '"' +
+             ' data-grid-row="' + i +
              '" data-tip="' + (rowExcluded
                ? "Observation excluded from every chart"
                : "Select row " + (i + 1)) + '">' + (i + 1) + "</td>");
       for (j = 0; j < visibleCols.length; j++) {
         col = visibleCols[j];
         var view = gridCellView(t, col, i);
-        h.push('<td class="' + view.cls + '" data-gc="' + escHtml(col) +
-               '" data-gr="' + i + '"' +
+        h.push('<td id="' + gridCellId(j, i) + '" class="' + view.cls +
+               '" role="gridcell" aria-rowindex="' + (i + 2) +
+               '" aria-colindex="' + (j + 2) + '" data-gc="' + escHtml(col) +
+               '" data-gr="' + i + '" data-grid-visible-col="' + j + '"' +
                (view.title ? ' data-tip="' + escHtml(view.title) + '"' : "") +
                ">" + escHtml(view.text) + "</td>");
       }
@@ -7932,6 +8519,16 @@
         ((n - end) * GRID_ROW_HEIGHT) + 'px"></td></tr>');
     h.push("</tbody></table>");
     grid.innerHTML = h.join("");
+    var statePool = document.createElement("div");
+    statePool.id = "ps-grid-cell-descriptions";
+    statePool.className = "ps-visually-hidden";
+    statePool.setAttribute("role", "none");
+    grid.appendChild(statePool);
+    var renderedCells = grid.querySelectorAll("td[data-gc]");
+    for (var rc = 0; rc < renderedCells.length; rc++)
+      gridPaintCell(renderedCells[rc],
+        renderedCells[rc].getAttribute("data-gc"),
+        Number(renderedCells[rc].getAttribute("data-gr")));
     // Replacing a virtual table can momentarily reduce its scroll height,
     // causing browsers to clamp the scrolling element back to zero. Restore
     // both axes synchronously after the new spacer geometry is present.
@@ -7941,6 +8538,7 @@
     gridRefreshFindResults();
     syncDataCommandBar();
     gridRememberNaturalWidths();
+    gridSyncColumnResizers();
     if (sized) gridApplyClippedTitles();
     gridApplySelection();
   }
@@ -8019,7 +8617,7 @@
     return '<span id="ps-grid-stats" class="ps-gridstats"></span>' +
       '<span id="ps-grid-selection-status" role="status" aria-live="polite"></span>' +
       '<span class="ps-grid-shape">' + n.toLocaleString() + " rows \u00d7 " +
-      t.order.length + " variables" +
+      t.order.length + " columns" +
       (gridShouldVirtualize(t)
        ? " \u00b7 windowed view; the chart uses all of them" : "") + "</span>";
   }
@@ -8181,10 +8779,61 @@
                ? "Observation excluded from every chart - right-click to include the row"
                : (excl ? "Value excluded from charts - right-click to include it" : "") };
   }
+  function gridColumnHeaderId(visibleCol) {
+    return "ps-grid-col-" + visibleCol;
+  }
+  function gridRowHeaderId(row) {
+    return "ps-grid-row-" + row;
+  }
+  function gridCellId(visibleCol, row) {
+    return "ps-grid-cell-" + row + "-" + visibleCol;
+  }
+  function gridCellState(t, col, view) {
+    var parts = [];
+    if (view.cls.indexOf("ps-grid-miss") !== -1) parts.push("Missing value");
+    if (isComputedColumn(t, col))
+      parts.push("Computed value; edit the formula from the column menu");
+    if (view.title) parts.push(view.title);
+    return parts.join(". ");
+  }
   function gridPaintCell(td, col, row) {
-    var view = gridCellView(PROJECT.table, col, row);
+    var t = PROJECT.table;
+    var view = gridCellView(t, col, row);
+    var visibleCol = Number(td.getAttribute("data-grid-visible-col"));
+    if (!isFinite(visibleCol))
+      visibleCol = Math.max(0, gridVisibleColumns(t).indexOf(col));
+    var cellId = gridCellId(visibleCol, row);
+    var valueId = cellId + "-value";
+    var stateId = cellId + "-state";
+    var state = gridCellState(t, col, view);
     td.className = view.cls;
-    td.textContent = view.text;
+    td.id = cellId;
+    td.setAttribute("role", "gridcell");
+    td.setAttribute("aria-rowindex", String(row + 2));
+    td.setAttribute("aria-colindex", String(visibleCol + 2));
+    td.setAttribute("aria-labelledby",
+      gridColumnHeaderId(visibleCol) + " " + gridRowHeaderId(row) + " " + valueId);
+    td.removeAttribute("aria-label");
+    td.removeAttribute("aria-describedby");
+    if (isComputedColumn(t, col)) td.setAttribute("aria-readonly", "true");
+    else td.removeAttribute("aria-readonly");
+    td.textContent = "";
+    var value = document.createElement("span");
+    value.id = valueId;
+    value.textContent = view.text;
+    td.appendChild(value);
+    var oldStateNode = document.getElementById(stateId);
+    if (state) {
+      var stateNode = oldStateNode || document.createElement("span");
+      stateNode.id = stateId;
+      stateNode.textContent = state;
+      if (!oldStateNode) {
+        var pool = document.getElementById("ps-grid-cell-descriptions");
+        if (pool) pool.appendChild(stateNode);
+      }
+      td.setAttribute("aria-describedby", stateId);
+    } else if (oldStateNode && oldStateNode.parentNode)
+      oldStateNode.parentNode.removeChild(oldStateNode);
     setTip(td, view.title || "");
   }
   function gridFindTd(col, row) {
@@ -8194,6 +8843,31 @@
     for (var i = 0; i < tds.length; i++)
       if (tds[i].getAttribute("data-gc") === col) return tds[i];
     return null;
+  }
+  function gridEditTarget(col, row) {
+    return col + ", row " + (row + 1);
+  }
+  function gridEditValue(t, col, raw) {
+    var text = String(raw == null ? "" : raw);
+    if (isMissingRaw(t, text.trim(), col)) return "missing";
+    if (!text) return "blank";
+    if (text.length > 80) text = text.slice(0, 77) + "\u2026";
+    return text;
+  }
+  function gridNextEditAnnouncement(next) {
+    if (!next || !GRID_EDIT || GRID_EDIT.col !== next.col ||
+        GRID_EDIT.row !== next.row) return "";
+    return " Editing " + gridEditTarget(next.col, next.row) + ".";
+  }
+  function gridAnnounceEdit(message) {
+    var status = el("ps-grid-edit-status");
+    if (!status) return;
+    if (GRID_EDIT_STATUS_TIMER) window.clearTimeout(GRID_EDIT_STATUS_TIMER);
+    status.textContent = "";
+    GRID_EDIT_STATUS_TIMER = window.setTimeout(function () {
+      status.textContent = message;
+      GRID_EDIT_STATUS_TIMER = null;
+    }, 20);
   }
   function gridCommitEdit(next) {
     var ge = GRID_EDIT;
@@ -8208,6 +8882,8 @@
         gridSetSelection(ge.col, ge.row, ge.col, ge.row);      // item 11
         gridFocusSelf();
       }
+      gridAnnounceEdit("No change to " + gridEditTarget(ge.col, ge.row) + "." +
+        gridNextEditAnnouncement(next));
       return;
     }
     dataMark("the cell edit");
@@ -8224,6 +8900,9 @@
       gridSetSelection(ge.col, ge.row, ge.col, ge.row);        // item 11
       gridFocusSelf();
     }
+    gridAnnounceEdit("Saved " + gridEditTarget(ge.col, ge.row) +
+      " as " + gridEditValue(t, ge.col, newRaw) + "." +
+      gridNextEditAnnouncement(next));
   }
   function gridCancelEdit() {
     var ge = GRID_EDIT;
@@ -8240,6 +8919,7 @@
     // to follow: the input is gone, so without this the keys land on <body>.
     gridSetSelection(ge.col, ge.row, ge.col, ge.row);
     gridFocusSelf();
+    gridAnnounceEdit("Edit canceled. " + gridEditTarget(ge.col, ge.row) + ".");
   }
   function gridFocusSelf() {
     var g = document.getElementById("ps-datagrid");
@@ -8310,14 +8990,24 @@
     }
     if (!td) return;
     gridClearSelection();
-    var rawVal = String(t.raw[col][row]).trim();
-    if (isMissingRaw(t, rawVal, col)) rawVal = "";
+    var sourceRaw = String(t.raw[col][row]);
+    var rawVal = sourceRaw.trim();
+    var missing = isMissingRaw(t, rawVal, col);
+    var view = gridCellView(t, col, row);
+    if (missing) rawVal = "";
     var editorSize = gridEditorDisplayWidth(td, col, rawVal);
     var input = document.createElement("input");
     input.type = "text";
     input.className = "ps-grid-cellinput";
     input.value = rawVal;
+    input.setAttribute("aria-label", "Edit " + gridEditTarget(col, row) +
+      ". Current value: " + gridEditValue(t, col, sourceRaw) +
+      (view.title ? ". " + view.title : ""));
+    input.setAttribute("aria-describedby", "ps-grid-editor-instructions");
     td.textContent = "";
+    td.removeAttribute("aria-labelledby");
+    td.removeAttribute("aria-describedby");
+    td.setAttribute("aria-label", "Editing " + gridEditTarget(col, row));
     td.classList.remove("ps-grid-miss");
     td.classList.add("ps-grid-editing");
     input.style.width = Math.ceil(editorSize.width) + "px";
@@ -8636,8 +9326,8 @@
     m.style.display = "block";
     m.style.left = Math.max(8, Math.min(r.left,
       window.innerWidth - m.offsetWidth - 8)) + "px";
-    m.style.top = Math.min(r.bottom + 4,
-      window.innerHeight - m.offsetHeight - 8) + "px";
+    m.style.top = Math.max(8, Math.min(r.bottom + 4,
+      window.innerHeight - m.offsetHeight - 8)) + "px";
     el("ps-data-filter-btn").setAttribute("aria-expanded", "true");
     var first = m.querySelector("select, input, button");
     if (first) first.focus();
@@ -8693,6 +9383,8 @@
         var row = mkEl("div", "ps-filter-row");
         var colSel = document.createElement("select");
         colSel.setAttribute("data-filter-col", String(idx));
+        colSel.setAttribute("aria-label",
+          "Filter " + (idx + 1) + " variable");
         var cols = filterableColumns(t);
         for (var c = 0; c < cols.length; c++) {
           var o = document.createElement("option");
@@ -8711,6 +9403,8 @@
         var num = colStoresNumbers(t, f.col);
         var opSel = document.createElement("select");
         opSel.setAttribute("data-filter-op", String(idx));
+        opSel.setAttribute("aria-label",
+          "Filter " + (idx + 1) + " comparison");
         // The stored operator is kept even when this column's type cannot use
         // it, MARKED rather than dropped. Dropping it left the select showing
         // the first option while f.op still said something else, so the one
@@ -8770,6 +9464,8 @@
             f.value = this.value; refreshFilterCount();
           });
         }
+        valueEl.setAttribute("aria-label",
+          "Filter " + (idx + 1) + " value");
         row.appendChild(valueEl);
         var strayVal = String(f.value) !== "" && !num && lv && lv.length &&
           lv.indexOf(String(f.value)) === -1;
@@ -8784,6 +9480,7 @@
         }
         var rm = mkEl("button", "ps-filter-remove", "\u00d7");
         rm.type = "button";
+        rm.setAttribute("aria-label", "Remove filter " + (idx + 1));
         setTip(rm, "Remove this condition");
         rm.addEventListener("click", function () {
           FILTER_DRAFT.splice(idx, 1);
@@ -8815,6 +9512,9 @@
     actions.appendChild(clear);
     var count = mkEl("span", "ps-filter-count", "");
     count.setAttribute("data-filter-count", "");
+    count.setAttribute("role", "status");
+    count.setAttribute("aria-live", "polite");
+    count.setAttribute("aria-atomic", "true");
     actions.appendChild(count);
     m.appendChild(actions);
     refreshFilterCount();
@@ -9078,6 +9778,9 @@
         if (Math.abs(wanted - GRID_WINDOW_START) >= GRID_WINDOW_OVERSCAN / 2)
           syncDataGrid();
       });
+    });
+    window.addEventListener("resize", function () {
+      window.requestAnimationFrame(gridSyncColumnResizers);
     });
     // t4-35 (Torry's ask): drag a column HEADER to a new position, and the
     // other columns part to show where it will land - the dist stacked-drag
@@ -9384,9 +10087,13 @@
       var sel = GRID_SELECTION;
       var ci = sel ? cols.indexOf(sel.focusCol) : -1;
       var ri = sel ? Number(sel.focusRow) : -1;
-      if (ci < 0) ci = 0;
-      if (!(ri >= 0)) ri = 0;
-      if (jump) {
+      if (!sel || ci < 0 || !(ri >= 0)) {
+        // A grid reached by Tab needs a real active cell before directional
+        // movement has a starting point. Seat the first visible cell on the
+        // first navigation command instead of making ArrowDown skip row 1.
+        ci = 0;
+        ri = 0;
+      } else if (jump) {
         // Cmd/Ctrl+arrow jumps to the edge, the spreadsheet convention.
         if (dCol) ci = dCol > 0 ? cols.length - 1 : 0;
         if (dRow) ri = dRow > 0 ? nRows(t) - 1 : 0;
@@ -9414,6 +10121,12 @@
     }
     var GRID_ARROWS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0],
                         ArrowUp: [0, -1], ArrowDown: [0, 1] };
+    grid.addEventListener("focus", function (e) {
+      if (e.target !== grid || GRID_EDIT || GRID_SELECTION ||
+          !PROJECT.table || !nRows(PROJECT.table)) return;
+      var cols = gridVisibleColumns(PROJECT.table);
+      if (cols.length) gridSetSelection(cols[0], 0, cols[0], 0);
+    });
     grid.addEventListener("keydown", function (e) {
       if (GRID_EDIT) return;            // the editor owns its own keys
       var mod = e.metaKey || e.ctrlKey;
@@ -10016,6 +10729,7 @@
     if (PS_FLUSH_PENDING_OPTS) PS_FLUSH_PENDING_OPTS();   // B12
     PROJECT.activeChart = id;
     LAYOUT_SEL = [];
+    LAYOUT_ACTIVE_ID = null;
     persist(false);
     syncAll();
     render();
@@ -10866,7 +11580,45 @@
     var index = HMC_SELECTED.indexOf(name);
     if (on !== false && index === -1) HMC_SELECTED.push(name);
     if (on === false && index !== -1) HMC_SELECTED.splice(index, 1);
+    // Keep the reader's place. renderHelpMeChoose rebuilds the whole
+    // wizard, so the list jumped back to the top on every pick: with fifty
+    // variables, choosing two that sit next to each other meant hunting for
+    // the second one again (Torry, Jul 29 2026). Scroll position, and the
+    // keyboard's position in the list, both survive the rebuild.
+    var list = document.querySelector(".ps-hmc-variable-list");
+    var top = list ? list.scrollTop : 0;
+    var active = document.activeElement;
+    var focusAt = -1;
+    if (list && active && active.classList &&
+        active.classList.contains("ps-hmc-variable")) {
+      var all = list.querySelectorAll(".ps-hmc-variable");
+      for (var f = 0; f < all.length; f++)
+        if (all[f] === active) { focusAt = f; break; }
+    }
     renderHelpMeChoose();
+    var fresh = document.querySelector(".ps-hmc-variable-list");
+    if (fresh && top) fresh.scrollTop = top;
+    // The button just clicked is now disabled, so focus would fall to the
+    // page body. Land on the nearest variable still available instead.
+    if (fresh && focusAt >= 0) {
+      var rows = fresh.querySelectorAll(".ps-hmc-variable"), target = null;
+      for (var i = focusAt; i < rows.length && !target; i++)
+        if (!rows[i].disabled) target = rows[i];
+      for (var j = focusAt - 1; j >= 0 && !target; j--)
+        if (!rows[j].disabled) target = rows[j];
+      try {
+        if (target) target.focus({ preventScroll: true });
+        else {
+          var box = document.querySelector(".ps-hmc-variable-search");
+          if (box) box.focus();
+        }
+      } catch (e) {}
+      // Twice on purpose: preventScroll is honored by Chromium but is not
+      // universal, so a browser that scrolls on focus would undo the
+      // restore above. (A control run must disable BOTH to see this fail -
+      // disabling one alone still passes, which is how this line was found.)
+      if (fresh && top) fresh.scrollTop = top;
+    }
   }
   function hmcRenderVariableList(root, filter) {
     var t = PROJECT.table, query = String(filter || "").toLocaleLowerCase();
@@ -10875,17 +11627,22 @@
     for (var i = 0; i < t.order.length; i++) {
       var name = t.order[i];
       if (query && name.toLocaleLowerCase().indexOf(query) === -1) continue;
+      var chosen = HMC_SELECTED.indexOf(name) !== -1;
       var button = mkEl("button", "ps-hmc-variable");
       button.type = "button";
-      button.draggable = HMC_SELECTED.indexOf(name) === -1;
-      button.disabled = HMC_SELECTED.indexOf(name) !== -1;
+      button.draggable = !chosen;
+      button.disabled = chosen;
       button.setAttribute("data-hmc-variable", name);
       var icon = mkEl("span", "ps-hmc-type-icon");
       icon.innerHTML = psTypeIcon(t.types[name]);
       button.appendChild(icon);
       button.appendChild(mkEl("span", "", name));
-      button.appendChild(mkEl("span", "ps-hmc-variable-type",
-        typeLabel(t.types[name])));
+      // Say ADDED rather than just going quiet: absence of a type label
+      // would read as a rendering gap, and the chip below carries the type
+      // for anything already chosen.
+      button.appendChild(chosen
+        ? mkEl("span", "ps-hmc-variable-added", "\u2713 Added")
+        : mkEl("span", "ps-hmc-variable-type", typeLabel(t.types[name])));
       button.addEventListener("click", function () {
         hmcToggleVariable(this.getAttribute("data-hmc-variable"), true);
       });
@@ -11435,6 +12192,7 @@
     PROJECT.ui.dataOpen = false;
     rememberDocument(copy);
     LAYOUT_SEL = [];
+    LAYOUT_ACTIVE_ID = null;
     persist(); syncAll(); render();
   }
   function beginDocumentRename(id) {
@@ -11594,14 +12352,17 @@
     syncTabs();
   }
   var TAB_LAST_CLICK = { id: null, at: 0 };
+  var TAB_PENDING_FOCUS_ID = null;
   function renameChartInline(tab, chartObj) {
     if (tab.querySelector(".ps-tab-rename")) return;
     var input = document.createElement("input");
     input.type = "text";
     input.className = "ps-tab-rename";
     input.value = chartObj.name;
-    var nameEl = tab.querySelector(".ps-tab-name");
-    nameEl.replaceWith(input);
+    input.setAttribute("aria-label", "Rename document " + chartObj.name);
+    var select = tab.querySelector(".ps-tab-select");
+    if (!select) return;
+    select.replaceWith(input);
     input.focus();
     input.select();
     var done = false;
@@ -11635,40 +12396,60 @@
   }
   function syncTabs() {
     var bar = el("ps-tabs");
+    var focusedTab = document.activeElement && document.activeElement.closest
+      ? document.activeElement.closest(".ps-tab") : null;
+    var focusedId = focusedTab
+      ? focusedTab.getAttribute("data-chart-id") : null;
+    var focusedClose = !!(document.activeElement &&
+      document.activeElement.classList &&
+      document.activeElement.classList.contains("ps-tab-x"));
+    if (focusedClose && document.activeElement.getAttribute)
+      focusedId = document.activeElement.getAttribute("data-chart-id");
     bar.innerHTML = "";
     activeChart();   // ensures at least one chart + a valid active id
     var ws = appWorkspace(), wantLayout = ws === "layout";
+    var panelId = wantLayout ? "ps-layout" : "psroot";
+    bar.setAttribute("role", "group");
+    bar.setAttribute("aria-label",
+      wantLayout ? "Layout documents and actions" :
+                   "Chart documents and actions");
+    var tablist = mkEl("div", "ps-tablist-inner");
+    tablist.setAttribute("role", "tablist");
+    tablist.setAttribute("aria-label",
+      wantLayout ? "Layout documents" : "Chart documents");
+    bar.appendChild(tablist);
     for (var i = 0; i < PROJECT.charts.length; i++) {
       if (ws === "data" || isLayoutTab(PROJECT.charts[i]) !== wantLayout) continue;
       (function (c) {
         var tab = mkEl("div", "ps-tab" +
           (c.id === PROJECT.activeChart ? " ps-tab-active" : ""));
         tab.setAttribute("data-chart-id", c.id);
+        tab.setAttribute("role", "presentation");
         setTip(tab, c.name + " - " +
           (isLayoutTab(c) ? "Layout"
            : (MODULES[c.module] ? MODULES[c.module].label : c.module)) +
           " (double-click to rename)");
+        var select = mkEl("button", "ps-tab-select");
+        select.type = "button";
+        select.id = "ps-document-tab-" + c.id;
+        select.setAttribute("role", "tab");
+        select.setAttribute("aria-controls", panelId);
+        select.setAttribute("aria-selected",
+          c.id === PROJECT.activeChart ? "true" : "false");
+        select.tabIndex = c.id === PROJECT.activeChart ? 0 : -1;
         if (isLayoutTab(c)) {
           var lg = mkEl("span", "");
+          lg.setAttribute("aria-hidden", "true");
           lg.innerHTML = '<svg class="ps-ticon" width="12" height="12" viewBox="0 0 12 12">' +
             '<rect x="0.5" y="0.5" width="4.6" height="4.6" rx="1" fill="#5b93cc"/>' +
             '<rect x="6.9" y="0.5" width="4.6" height="4.6" rx="1" fill="#9ec2e8"/>' +
             '<rect x="0.5" y="6.9" width="4.6" height="4.6" rx="1" fill="#9ec2e8"/>' +
             '<rect x="6.9" y="6.9" width="4.6" height="4.6" rx="1" fill="#5b93cc"/></svg>';
-          tab.appendChild(lg);
+          select.appendChild(lg);
         }
-        tab.appendChild(mkEl("span", "ps-tab-name", c.name));
-        if (PROJECT.charts.length > 1) {
-          var x = mkEl("button", "ps-tab-x", "\u00d7");
-          x.type = "button";
-          setTip(x, "Close " + c.name);
-          x.addEventListener("click", function (e) {
-            e.stopPropagation();
-            closeChart(c.id);
-          });
-          tab.appendChild(x);
-        }
-        tab.addEventListener("click", function () {
+        select.appendChild(mkEl("span", "ps-tab-name", c.name));
+        tab.appendChild(select);
+        select.addEventListener("click", function () {
           if (tab.querySelector(".ps-tab-rename")) return;
           // Manual double-click detection: the first click's
           // switchChart REBUILDS the tab strip, so the second click
@@ -11683,14 +12464,40 @@
             return;
           }
           TAB_LAST_CLICK = { id: c.id, at: now };
+          TAB_PENDING_FOCUS_ID = c.id;
           switchChart(c.id);
         });
-        tab.addEventListener("dblclick", function (e) {
+        select.addEventListener("dblclick", function (e) {
           // Belt and suspenders for the no-rebuild case; renameChartInline
           // is a no-op while its input is already open.
           e.preventDefault();
           if (!tab.querySelector(".ps-tab-rename"))
             renameChartInline(tab, c);
+        });
+        select.addEventListener("keydown", function (e) {
+          var controls = bar.querySelectorAll(".ps-tab-select");
+          var at = -1;
+          for (var ti = 0; ti < controls.length; ti++)
+            if (controls[ti] === select) { at = ti; break; }
+          var next = at;
+          if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+            next = (at + (e.key === "ArrowRight" ? 1 : -1) +
+              controls.length) % controls.length;
+          } else if (e.key === "Home") next = 0;
+          else if (e.key === "End") next = controls.length - 1;
+          else if (e.key === "F2") {
+            e.preventDefault();
+            e.stopPropagation();
+            renameChartInline(tab, c);
+            return;
+          } else return;
+          if (next < 0 || next >= controls.length || next === at) return;
+          e.preventDefault();
+          var nextTab = controls[next].closest(".ps-tab");
+          var nextId = nextTab && nextTab.getAttribute("data-chart-id");
+          if (!nextId) return;
+          TAB_PENDING_FOCUS_ID = nextId;
+          switchChart(nextId);
         });
         tab.addEventListener("contextmenu", function (e) {
           e.preventDefault();
@@ -11700,8 +12507,52 @@
         tab.addEventListener("pointerdown", function (e) {
           tabPointerDown(e, tab, c.id);
         });
-        bar.appendChild(tab);
+        // Per-tab close (Torry, Jul 29 2026: one X at the end of the strip
+        // did not read as closing the HIGHLIGHTED tab). Each tab carries
+        // its own X, visually bound to what it closes: always shown on the
+        // active tab, hover-revealed on the rest. These are MOUSE-ONLY
+        // affordances - aria-hidden and out of the keyboard order - because
+        // a real button among a tablist's children is an axe
+        // aria-required-children violation (the first cut tried tabbable
+        // siblings inside the wrappers and axe failed 8 states; this is
+        // WHY the close always lived outside the strip). The accessible
+        // close is the labelled keyboard button after the tablist below.
+        if (PROJECT.charts.length > 1) {
+          var tx = mkEl("button", "ps-tab-x", "\u00d7");
+          tx.type = "button";
+          tx.setAttribute("data-chart-id", c.id);
+          tx.setAttribute("aria-hidden", "true");
+          tx.tabIndex = -1;
+          setTip(tx, "Close " + c.name);
+          tx.addEventListener("pointerdown", function (e) {
+            // Never arm the tab drag from the close button.
+            e.stopPropagation();
+          });
+          tx.addEventListener("click", function (e) {
+            e.stopPropagation();
+            closeChart(c.id);
+          });
+          tab.appendChild(tx);
+        }
+        tablist.appendChild(tab);
       })(PROJECT.charts[i]);
+    }
+    // The keyboard and screen-reader close: one labelled, tabbable button
+    // OUTSIDE the tablist (its content model allows only tabs), hidden
+    // until keyboard focus reaches it - the bypass-link idiom. Tab from
+    // the selected tab lands here, exactly the pre-Jul-29 keyboard model.
+    var currentDocument = chartById(PROJECT.activeChart);
+    if (currentDocument && PROJECT.charts.length > 1) {
+      var x = mkEl("button", "ps-tab-x ps-tab-x-kbd", "\u00d7");
+      x.type = "button";
+      x.setAttribute("data-chart-id", currentDocument.id);
+      x.setAttribute("aria-label", "Close document " + currentDocument.name);
+      setTip(x, "Close " + currentDocument.name);
+      x.addEventListener("click", function (e) {
+        e.stopPropagation();
+        closeChart(currentDocument.id);
+      });
+      bar.appendChild(x);
     }
     var add = mkEl("button", "ps-tab-add", "+");
     add.type = "button";
@@ -11714,6 +12565,11 @@
       else showAnalysisGallery();
     });
     if (ws !== "data") bar.appendChild(add);
+    var activeControl = bar.querySelector(
+      '.ps-tab[data-chart-id="' + PROJECT.activeChart + '"] .ps-tab-select');
+    var panel = el(panelId);
+    if (panel && activeControl)
+      panel.setAttribute("aria-labelledby", activeControl.id);
     // t3-51: the strip scrolls now rather than wrapping, so the active tab has
     // to be brought back into view - otherwise switching by keyboard (or by
     // closing a document) can leave the selected tab off the left or right end
@@ -11725,6 +12581,30 @@
       else if (lb + lw > bar.scrollLeft + bar.clientWidth)
         bar.scrollLeft = lb + lw - bar.clientWidth + 8;
     }
+    var pendingFocus = !!TAB_PENDING_FOCUS_ID;
+    var requestedFocus = TAB_PENDING_FOCUS_ID || focusedId;
+    TAB_PENDING_FOCUS_ID = null;
+    if (requestedFocus) {
+      var focusWrap = null;
+      var focusMatched = false;
+      var candidates = bar.querySelectorAll(".ps-tab");
+      for (var fi = 0; fi < candidates.length; fi++)
+        if (candidates[fi].getAttribute("data-chart-id") === requestedFocus) {
+          focusWrap = candidates[fi];
+          focusMatched = true;
+          break;
+        }
+      if (!focusWrap && focusedId) focusWrap = live;
+      var focusTarget = !pendingFocus && focusedClose && focusMatched
+        ? bar.querySelector('.ps-tab-x[data-chart-id="' +
+            requestedFocus + '"]') : null;
+      if (!focusTarget && focusWrap)
+        focusTarget = focusWrap.querySelector(".ps-tab-select");
+      if (focusTarget) {
+        try { focusTarget.focus({ preventScroll: true }); }
+        catch (ignore) { try { focusTarget.focus(); } catch (ignore2) {} }
+      }
+    }
   }
   function activateNewLayout(c) {
     PROJECT.charts.push(c);
@@ -11733,6 +12613,7 @@
     PROJECT.ui.dataOpen = false;
     rememberDocument(c);
     LAYOUT_SEL = [];
+    LAYOUT_ACTIVE_ID = null;
     persist();
     syncAll();
     render();
@@ -11783,9 +12664,9 @@
     if (def.presentation && portrait) {
       c.page = { preset: "letterp", w: 816, h: 1056, margin: 40 };
     } else if (def.presentation) {
-      c.page = { preset: "wide", w: 1200, h: 675, margin: 40 };
+      c.page = { preset: "wide", w: 1152, h: 648, margin: 40 };
     } else if (portrait) {
-      c.page = { preset: "canvasp", w: 680, h: 1024, margin: 32 };
+      c.page = { preset: "canvasp", w: 672, h: 1008, margin: 32 };
     }
     var rects = layoutTemplateRects(def.key, c.page);
     var labels = !!el("ps-layout-template-labels").checked && def.slots > 1;
@@ -11825,14 +12706,22 @@
   // full page size; zoom affects only the view, never project geometry or
   // export. Selection is an ordered id array; the final id is primary.
   var LAYOUT_SEL = [];
+  var LAYOUT_ACTIVE_ID = null;
   var LAY_DRAG = null;
   var LAY_RESIZE_TIMER = null;
   var LAY_PRESETS = {
-    canvas: { w: 1024, h: 680 },
-    canvasp: { w: 680, h: 1024 },
-    wide: { w: 1200, h: 675 },
-    tall: { w: 675, h: 1200 },
-    square: { w: 800, h: 800 },
+    // Screen-ish presets are defined on ROUND INCHES (Torry's ruling,
+    // Jul 28 2026: "make the canvas whole numbers, or at least more
+    // intuitive"): with inches the default display, 1024x680px read as
+    // 10.67 x 7.08 in. Canvas is 10.5 x 7 (3:2 exactly), wide is 12 x
+    // 6.75 (16:9 exactly), square is 8 x 8. A4 and Letter stay put:
+    // real paper is the size it is. Saved projects keep their stored
+    // dimensions; re-picking a preset adopts the new definition.
+    canvas: { w: 1008, h: 672 },
+    canvasp: { w: 672, h: 1008 },
+    wide: { w: 1152, h: 648 },
+    tall: { w: 648, h: 1152 },
+    square: { w: 768, h: 768 },
     a4l: { w: 1123, h: 794 },
     a4p: { w: 794, h: 1123 },
     letterl: { w: 1056, h: 816 },
@@ -11867,7 +12756,7 @@
   }
   function layPage() {
     var c = activeChart();
-    if (!isLayoutTab(c)) return { preset: "canvas", w: 1024, h: 680, margin: 32 };
+    if (!isLayoutTab(c)) return { preset: "canvas", w: 1008, h: 672, margin: 32 };
     layNormalizeLayout(c);
     return c.page;
   }
@@ -11906,7 +12795,102 @@
   function layIsSelected(id) { return laySelectedIds().indexOf(id) !== -1; }
   function laySetSelection(ids) {
     LAYOUT_SEL = Array.isArray(ids) ? ids.slice() : (ids ? [ids] : []);
-    laySelectedIds();
+    var valid = laySelectedIds();
+    if (valid.length) LAYOUT_ACTIVE_ID = valid[valid.length - 1];
+    else if (LAYOUT_ACTIVE_ID && !layItemById(LAYOUT_ACTIVE_ID))
+      LAYOUT_ACTIVE_ID = null;
+  }
+  function layActiveId() {
+    if (LAYOUT_ACTIVE_ID && layItemById(LAYOUT_ACTIVE_ID))
+      return LAYOUT_ACTIVE_ID;
+    var ids = laySelectedIds();
+    if (ids.length) LAYOUT_ACTIVE_ID = ids[ids.length - 1];
+    else if (layItems().length) LAYOUT_ACTIVE_ID = layItems()[0].id;
+    else LAYOUT_ACTIVE_ID = null;
+    return LAYOUT_ACTIVE_ID;
+  }
+  function layItemDomId(id) {
+    var doc = activeChart();
+    return "ps-layout-item-" +
+      String(doc && doc.id || "layout").replace(/[^A-Za-z0-9_-]/g, "-") + "-" +
+      String(id || "item").replace(/[^A-Za-z0-9_-]/g, "-");
+  }
+  function layItemAccessibleLabel(item) {
+    var items = layItems(), index = items.indexOf(item);
+    var r = layItemRect(item), kind, name = "";
+    if (item.kind === "chart") {
+      kind = "Chart panel";
+      var chart = chartById(item.chartId);
+      name = chart ? ", " + (chart.name || "Untitled chart") : ", missing chart";
+    } else if (item.kind === "image") {
+      kind = "Image item";
+    } else {
+      kind = "Text item";
+      var copy = String(item.text || "Text").replace(/\s+/g, " ").trim();
+      if (copy.length > 60) copy = copy.slice(0, 57) + "\u2026";
+      name = ', "' + copy + '"';
+    }
+    var size = laySizedKind(item)
+      ? ", width " + Math.round(r.w) + " pixels, height " +
+        Math.round(r.h) + " pixels"
+      : "";
+    return kind + name + ", item " + (index + 1) + " of " + items.length +
+      ", layer " + (index + 1) + ", x " + Math.round(r.x) +
+      " pixels, y " + Math.round(r.y) + " pixels" + size;
+  }
+  function layAnnounce(message) {
+    var live = el("ps-layout-live");
+    if (!live) return;
+    live.textContent = "";
+    window.setTimeout(function () { live.textContent = message || ""; }, 0);
+  }
+  function layFocusViewport() {
+    var viewport = el("ps-lviewport");
+    window.setTimeout(function () {
+      try { if (viewport) viewport.focus({ preventScroll: true }); }
+      catch (ignore) { try { if (viewport) viewport.focus(); } catch (ignore2) {} }
+    }, 0);
+  }
+  function laySyncComposite() {
+    var viewport = el("ps-lviewport");
+    if (!viewport) return;
+    var active = layActiveId();
+    if (active) viewport.setAttribute("aria-activedescendant",
+      layItemDomId(active));
+    else viewport.removeAttribute("aria-activedescendant");
+  }
+  function layNavigateItem(delta, edge, extend) {
+    var items = layItems();
+    if (!items.length) return;
+    var active = layActiveId(), at = 0;
+    for (var i = 0; i < items.length; i++)
+      if (items[i].id === active) { at = i; break; }
+    var next = edge === "first" ? 0 :
+      edge === "last" ? items.length - 1 :
+      layClamp(at + delta, 0, items.length - 1);
+    LAYOUT_ACTIVE_ID = items[next].id;
+    if (extend) {
+      var ids = laySelectedIds();
+      if (ids.indexOf(LAYOUT_ACTIVE_ID) === -1) ids.push(LAYOUT_ACTIVE_ID);
+      laySetSelection(ids);
+      LAYOUT_ACTIVE_ID = items[next].id;
+    } else laySetSelection([LAYOUT_ACTIVE_ID]);
+    renderLayout();
+    layFocusViewport();
+    layAnnounce(layItemAccessibleLabel(items[next]) +
+      (extend ? ", added to selection; " + laySelectedIds().length +
+        " items selected" : ", selected"));
+  }
+  function layToggleActiveSelection() {
+    var active = layActiveId();
+    if (!active) return;
+    var ids = laySelectedIds(), at = ids.indexOf(active);
+    if (at === -1) ids.push(active); else ids.splice(at, 1);
+    LAYOUT_SEL = ids;
+    renderLayout();
+    layFocusViewport();
+    layAnnounce(layItemAccessibleLabel(layItemById(active)) +
+      (at === -1 ? ", added to selection" : ", removed from selection"));
   }
   function layNewItemId() {
     var mx = 0, items = layItems();
@@ -12067,7 +13051,7 @@
       var page = layPage();
       el("ps-status-context").textContent =
         count + " layout item" + (count === 1 ? "" : "s") +
-        " \u00b7 " + page.w + " \u00d7 " + page.h;
+        " \u00b7 " + pageSizeText(page);
     }
   }
   function renderLayout() {
@@ -12090,6 +13074,22 @@
     laySyncMarginGuide();
     var items = layItems();
     for (var i = 0; i < items.length; i++) canvas.appendChild(layBuildItem(items[i]));
+    var semanticItems = el("ps-layout-options");
+    semanticItems.innerHTML = "";
+    for (var oi = 0; oi < items.length; oi++) {
+      var option = mkEl("div", "");
+      option.id = layItemDomId(items[oi].id);
+      option.setAttribute("data-kind", items[oi].kind);
+      option.setAttribute("role", "option");
+      option.setAttribute("aria-selected",
+        layIsSelected(items[oi].id) ? "true" : "false");
+      option.setAttribute("aria-label", layItemAccessibleLabel(items[oi]));
+      option.setAttribute("aria-posinset", String(oi + 1));
+      option.setAttribute("aria-setsize", String(items.length));
+      option.tabIndex = -1;
+      semanticItems.appendChild(option);
+    }
+    laySyncComposite();
     var gv = mkEl("div", "ps-lguide ps-lguide-v"); gv.id = "ps-lguide-v";
     var gh = mkEl("div", "ps-lguide ps-lguide-h"); gh.id = "ps-lguide-h";
     canvas.appendChild(gv); canvas.appendChild(gh);
@@ -12146,6 +13146,49 @@
     if (!snap) return null;
     return item.kind + "|" + item.chartId + "|" + snap.rev;
   }
+  function layDecorateItemElement(node, item, selected, primary) {
+    node.className = "ps-litem" + (selected ? " ps-litem-sel" : "") +
+      (primary ? " ps-litem-primary" : "");
+    node.removeAttribute("id");
+    node.removeAttribute("role");
+    node.removeAttribute("aria-selected");
+    node.removeAttribute("aria-label");
+    node.removeAttribute("aria-posinset");
+    node.removeAttribute("aria-setsize");
+    // The keyboard/AT representation is rendered separately as plain
+    // listbox options. Keeping the pointer canvas hidden prevents captured
+    // chart markup and its pointer-only mini toolbar from becoming nested
+    // interactive descendants of an ARIA option.
+    node.setAttribute("aria-hidden", "true");
+    node.tabIndex = -1;
+    var stale = node.querySelectorAll(".ps-lhandle,.ps-lbar");
+    for (var si = 0; si < stale.length; si++)
+      if (stale[si].parentNode === node) node.removeChild(stale[si]);
+    var svgs = node.querySelectorAll("svg");
+    for (var vi = 0; vi < svgs.length; vi++) {
+      svgs[vi].setAttribute("aria-hidden", "true");
+      svgs[vi].setAttribute("focusable", "false");
+    }
+    // A captured chart may contain SVG nodes with their own tab stops.
+    // The layout is a single composite widget, so descendants must never
+    // compete with its active-descendant keyboard model.
+    var nestedTabStops = node.querySelectorAll("[tabindex]");
+    for (var ti = 0; ti < nestedTabStops.length; ti++)
+      nestedTabStops[ti].tabIndex = -1;
+    if (primary && laySelectedIds().length === 1) {
+      if (laySizedKind(item)) {
+        var hnd = mkEl("div", "ps-lhandle");
+        hnd.setAttribute("data-role", "lay-resize");
+        setTip(hnd, "Resize proportionally. Hold Shift for free resize.");
+        // This is a pointer affordance. The canvas instructions expose the
+        // keyboard resize route, so the decorative handle stays out of the
+        // option's accessibility subtree.
+        hnd.setAttribute("aria-hidden", "true");
+        node.appendChild(hnd);
+      }
+      node.appendChild(layMiniBar(item));
+    }
+  }
   function layBuildItem(item) {
     var selected = layIsSelected(item.id), primary = item.id === layPrimaryId();
     var cls = "ps-litem" + (selected ? " ps-litem-sel" : "") +
@@ -12158,11 +13201,11 @@
       var held = LAY_NODE_POOL.nodes[item.id];
       if (held && held.key === poolKey && held.el) {
         var re = held.el;
-        re.className = cls;
         re.style.left = (Number(item.x) || 0) + "px";
         re.style.top = (Number(item.y) || 0) + "px";
         re.style.width = (Number(item.w) || 480) + "px";
         re.style.height = (Number(item.h) || 320) + "px";
+        layDecorateItemElement(re, item, selected, primary);
         return re;
       }
     }
@@ -12197,17 +13240,7 @@
       txt.style.fontWeight = item.bold ? "700" : "400";
       elI.appendChild(txt);
     }
-    if (primary && laySelectedIds().length === 1) {
-      if (laySizedKind(item)) {
-        var hnd = mkEl("div", "ps-lhandle");
-        hnd.setAttribute("data-role", "lay-resize");
-        setTip(hnd, "Resize proportionally. Hold Shift for free resize.");
-        hnd.setAttribute("aria-label",
-          "Resize proportionally; hold Shift for free resize");
-        elI.appendChild(hnd);
-      }
-      elI.appendChild(layMiniBar(item));
-    }
+    layDecorateItemElement(elI, item, selected, primary);
     return elI;
   }
   // ---- image items (Tier 2, Torry's ruling: ORIGINALS ARE HONORED.
@@ -12296,9 +13329,10 @@
   function layMiniBar(item) {
     var bar = mkEl("div", "ps-lbar");
     bar.style.left = "0"; bar.style.top = "-34px";
+    bar.setAttribute("aria-hidden", "true");
     if (item.kind === "text") {
       var minus = mkEl("button", "", "A-");
-      minus.type = "button"; setTip(minus, "Smaller text");
+      minus.type = "button"; minus.tabIndex = -1; setTip(minus, "Smaller text");
       minus.addEventListener("click", function (e) {
         e.stopPropagation();
         laySnapshot("text size", "fontsize");
@@ -12307,7 +13341,7 @@
         persist(); renderLayout();
       });
       var plus = mkEl("button", "", "A+");
-      plus.type = "button"; setTip(plus, "Bigger text");
+      plus.type = "button"; plus.tabIndex = -1; setTip(plus, "Bigger text");
       plus.addEventListener("click", function (e) {
         e.stopPropagation();
         laySnapshot("text size", "fontsize");
@@ -12316,7 +13350,7 @@
         persist(); renderLayout();
       });
       var bold = mkEl("button", (item.bold ? "ps-lbar-on" : ""), "B");
-      bold.type = "button"; setTip(bold, "Bold");
+      bold.type = "button"; bold.tabIndex = -1; setTip(bold, "Bold");
       bold.addEventListener("click", function (e) {
         e.stopPropagation();
         laySnapshot("bold");
@@ -12326,7 +13360,8 @@
       bar.appendChild(minus); bar.appendChild(plus); bar.appendChild(bold);
     }
     var del = mkEl("button", "ps-lbar-del", "\u00d7");
-    del.type = "button"; setTip(del, "Remove from the layout");
+    del.type = "button"; del.tabIndex = -1;
+    setTip(del, "Remove from the layout");
     del.addEventListener("click", function (e) {
       e.stopPropagation();
       layDeleteSelected();
@@ -12420,6 +13455,7 @@
   function layDeleteSelected() {
     var ids = laySelectedIds();
     if (!ids.length) return;
+    var returnFocus = document.activeElement === el("ps-lviewport");
     laySnapshot("delete");
     var items = layItems();
     var removed = 0;
@@ -12427,6 +13463,10 @@
       if (ids.indexOf(items[i].id) !== -1) { items.splice(i, 1); removed++; }
     laySetSelection([]);
     persist(); renderLayout();
+    if (returnFocus) layFocusViewport();
+    layAnnounce((removed === 1 ? "Removed 1 layout item. "
+                               : "Removed " + removed + " layout items. ") +
+      layItems().length + " items remain.");
     showUndoToast(removed === 1 ? "Removed from the layout"
                                 : "Removed " + removed + " items", layUndo);
   }
@@ -12437,6 +13477,7 @@
   function layDuplicateSelected() {
     var ids = laySelectedIds();
     if (!ids.length) return;
+    var returnFocus = document.activeElement === el("ps-lviewport");
     laySnapshot("duplicate");
     var made = [], p = layPage();
     for (var i = 0; i < ids.length; i++) {
@@ -12452,6 +13493,10 @@
     }
     laySetSelection(made);
     persist(); renderLayout();
+    if (returnFocus) layFocusViewport();
+    layAnnounce("Duplicated " + made.length + " layout item" +
+      (made.length === 1 ? "" : "s") + ". " +
+      made.length + (made.length === 1 ? " copy selected." : " copies selected."));
   }
   // The clipboard for layout items is a session variable, not the system
   // clipboard: an item is a JSON object with an image possibly inlined as a
@@ -12530,6 +13575,7 @@
   function layMoveLayer(dir) {
     var ids = laySelectedIds(), items = layItems();
     if (!ids.length) return;
+    var returnFocus = document.activeElement === el("ps-lviewport");
     laySnapshot("reorder", "layer");
     var i, tmp;
     if (dir > 0) {
@@ -12546,6 +13592,11 @@
         }
     }
     persist(); renderLayout();
+    if (returnFocus) layFocusViewport();
+    layAnnounce((dir > 0 ? "Moved selection forward. " :
+                           "Moved selection backward. ") +
+      (layItemById(layPrimaryId())
+        ? layItemAccessibleLabel(layItemById(layPrimaryId())) : ""));
   }
   function layMoveSelected(dx, dy, renderNow) {
     var ids = laySelectedIds(), b = laySelectionBounds(ids), p = layPage();
@@ -12562,7 +13613,86 @@
       item.y = (Number(item.y) || 0) + dy;
     }
     persist();
-    if (renderNow !== false) renderLayout();
+    if (renderNow !== false) {
+      renderLayout();
+      var moved = laySelectionBounds(ids);
+      if (moved) layAnnounce("Moved selection to x " + Math.round(moved.x) +
+        " pixels, y " + Math.round(moved.y) + " pixels.");
+    }
+  }
+  function layResizeSelectedFree(dw, dh) {
+    var ids = laySelectedIds();
+    if (ids.length !== 1) return false;
+    var item = layItemById(ids[0]);
+    if (!laySizedKind(item)) return false;
+    var p = layPage(), mins = layMinSize(item);
+    laySnapshot("resize", "resize");
+    item.w = layClamp((Number(item.w) || 480) + dw, mins.w, p.w - item.x);
+    item.h = layClamp((Number(item.h) || 320) + dh, mins.h, p.h - item.y);
+    persist(); renderLayout(); layFocusViewport();
+    layAnnounce("Resized " + layItemAccessibleLabel(item));
+    return true;
+  }
+  function layResizeSelectedProportionally(delta) {
+    var ids = laySelectedIds();
+    if (ids.length !== 1) return false;
+    var item = layItemById(ids[0]);
+    if (!laySizedKind(item)) return false;
+    var p = layPage();
+    var origin = { item: item, x: Number(item.x) || 0,
+      y: Number(item.y) || 0, w: Number(item.w) || 480,
+      h: Number(item.h) || 320 };
+    laySnapshot("resize", "resize");
+    var resized = layResizeDimensions(origin, delta, 0, p,
+      { snap: false, grid: 1 }, false);
+    item.w = resized.w; item.h = resized.h;
+    persist(); renderLayout(); layFocusViewport();
+    layAnnounce("Resized proportionally. " + layItemAccessibleLabel(item));
+    return true;
+  }
+  function layFocusSelectionInspector() {
+    if (!laySelectedIds().length) return;
+    if (window.innerWidth <= 760) narrowSet("inspector");
+    window.setTimeout(function () {
+      var input = el("ps-ctx-lx");
+      try { input.focus(); input.select(); } catch (ignore) {}
+    }, 0);
+    layAnnounce("Exact position and size fields opened in the settings panel.");
+  }
+  function layChangeSelectedTextStyle(kind, amount) {
+    var ids = laySelectedIds();
+    if (ids.length !== 1) return false;
+    var item = layItemById(ids[0]);
+    if (!item || item.kind !== "text") return false;
+    laySnapshot(kind === "bold" ? "bold" : "text size",
+      kind === "size" ? "fontsize" : null);
+    if (kind === "bold") item.bold = !item.bold;
+    else item.fontSize = layClamp((Number(item.fontSize) || 14) + amount, 8, 72);
+    layClampAllItems(); persist(); renderLayout(); layFocusViewport();
+    layAnnounce((kind === "bold"
+      ? (item.bold ? "Bold on. " : "Bold off. ")
+      : "Text size " + item.fontSize + " pixels. ") +
+      layItemAccessibleLabel(item));
+    return true;
+  }
+  function layOpenKeyboardContext() {
+    var active = layActiveId();
+    if (!active) return false;
+    if (!layIsSelected(active)) laySetSelection([active]);
+    renderLayout();
+    var item = el("ps-lcanvas").querySelector(
+      '.ps-litem[data-item-id="' + active + '"]');
+    if (!item) return false;
+    var r = item.getBoundingClientRect();
+    showContextMenu(Math.max(8, Math.min(window.innerWidth - 220, r.left + 12)),
+      Math.max(8, Math.min(window.innerHeight - 160, r.top + 12)), [
+        { label: "Duplicate", command: "duplicate-selection" },
+        { label: "Delete", command: "delete-selection" },
+        "separator",
+        { label: "Move backward", command: "layer-back" },
+        { label: "Move forward", command: "layer-forward" }
+      ]);
+    return true;
   }
   function layAlign(kind) {
     var ids = laySelectedIds(), b = laySelectionBounds(ids);
@@ -12579,37 +13709,6 @@
     }
     persist(); renderLayout();
   }
-  function layDistribute(axis) {
-    var ids = laySelectedIds();
-    if (ids.length < 3) return;
-    laySnapshot("distribute");
-    var entries = ids.map(function (id) {
-      var item = layItemById(id);
-      return { item: item, r: layItemRect(item) };
-    });
-    if (axis === "horizontal") {
-      entries.sort(function (a, b) { return a.r.x - b.r.x; });
-      var left = entries[0].r.x;
-      var right = entries[entries.length - 1].r.right;
-      var totalW = entries.reduce(function (s, e) { return s + e.r.w; }, 0);
-      var gapX = (right - left - totalW) / (entries.length - 1);
-      var x = left;
-      for (var i = 0; i < entries.length; i++) {
-        entries[i].item.x = x; x += entries[i].r.w + gapX;
-      }
-    } else {
-      entries.sort(function (a, b) { return a.r.y - b.r.y; });
-      var top = entries[0].r.y;
-      var bottom = entries[entries.length - 1].r.bottom;
-      var totalH = entries.reduce(function (s, e) { return s + e.r.h; }, 0);
-      var gapY = (bottom - top - totalH) / (entries.length - 1);
-      var y = top;
-      for (var j = 0; j < entries.length; j++) {
-        entries[j].item.y = y; y += entries[j].r.h + gapY;
-      }
-    }
-    persist(); renderLayout();
-  }
   function layApplyInspector(prop, value) {
     // Typed in the user's unit, applied in pixels.
     value = unitToPx(value);
@@ -12620,11 +13719,13 @@
     else if (prop === "y") layMoveSelected(0, value - b.y);
     else if (ids.length === 1) {
       var item = layItemById(ids[0]), p = layPage();
-      if (item.kind !== "chart") return;
+      if (!laySizedKind(item)) return;
+      var mins = layMinSize(item);
       laySnapshot("resize", "resize");
-      if (prop === "w") item.w = layClamp(value, 120, p.w - item.x);
-      if (prop === "h") item.h = layClamp(value, 80, p.h - item.y);
+      if (prop === "w") item.w = layClamp(value, mins.w, p.w - item.x);
+      if (prop === "h") item.h = layClamp(value, mins.h, p.h - item.y);
       persist(); renderLayout();
+      layAnnounce("Resized " + layItemAccessibleLabel(item));
     }
   }
   function layApplyPage(preset, w, h) {
@@ -12771,6 +13872,22 @@
   }
   function wireLayout() {
     var canvas = el("ps-lcanvas");
+    var viewport = el("ps-lviewport");
+    viewport.addEventListener("focus", function (e) {
+      if (e.target !== viewport) return;
+      if (!layItems().length) {
+        laySyncComposite();
+        layAnnounce("Blank layout. Add a chart, text item, label, or image.");
+        return;
+      }
+      var active = layActiveId();
+      if (!laySelectedIds().length && active) {
+        laySetSelection([active]);
+        renderLayout();
+      } else laySyncComposite();
+      var item = layItemById(layActiveId());
+      if (item) layAnnounce(layItemAccessibleLabel(item) + ", selected.");
+    });
     canvas.addEventListener("pointerdown", function (e) {
       if (e.button !== 0) return;
       if (e.target.closest &&
@@ -12843,6 +13960,84 @@
       if (t && t.closest &&
           t.closest("input, textarea, select, [contenteditable]")) return;
       var ids = laySelectedIds();
+      var canvasFocused = t === viewport;
+      if (canvasFocused && (e.key === "ContextMenu" ||
+          (e.key === "F10" && e.shiftKey))) {
+        e.preventDefault();
+        if (layOpenKeyboardContext()) e.stopImmediatePropagation();
+        return;
+      }
+      if (canvasFocused && e.key === "F2") {
+        var editItem = layItemById(layActiveId());
+        e.preventDefault(); e.stopImmediatePropagation();
+        if (editItem && editItem.kind === "text") layEditText(editItem.id);
+        else layAnnounce("F2 edits text items. The active item is not text.");
+        return;
+      }
+      if (canvasFocused && e.key === "Enter") {
+        e.preventDefault(); layFocusSelectionInspector(); return;
+      }
+      if (canvasFocused && (e.key === " " || e.code === "Space")) {
+        e.preventDefault(); layToggleActiveSelection(); return;
+      }
+      if (canvasFocused && (e.ctrlKey || e.metaKey) &&
+          String(e.key).toLowerCase() === "b") {
+        e.preventDefault(); e.stopImmediatePropagation();
+        if (!layChangeSelectedTextStyle("bold", 0))
+          layAnnounce("Bold is available when one text item is selected.");
+        return;
+      }
+      if (canvasFocused && (e.ctrlKey || e.metaKey) &&
+          (e.key === "+" || e.key === "=" || e.key === "-")) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        if (!layChangeSelectedTextStyle("size", e.key === "-" ? -2 : 2))
+          layAnnounce("Text size is available when one text item is selected.");
+        return;
+      }
+      if (canvasFocused && e.altKey &&
+          (e.key === "PageUp" || e.key === "PageDown")) {
+        e.preventDefault();
+        layMoveLayer(e.key === "PageUp" ? 1 : -1);
+        return;
+      }
+      if (canvasFocused && e.altKey &&
+          (e.key === "+" || e.key === "=" || e.key === "-")) {
+        e.preventDefault();
+        if (!layResizeSelectedProportionally(e.key === "-" ? -10 : 10))
+          layAnnounce("Proportional resize requires one chart or image.");
+        return;
+      }
+      if (canvasFocused &&
+          (e.key === "Home" || e.key === "End")) {
+        e.preventDefault();
+        layNavigateItem(0, e.key === "Home" ? "first" : "last", e.shiftKey);
+        return;
+      }
+      if (canvasFocused &&
+          ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]
+            .indexOf(e.key) !== -1) {
+        e.preventDefault();
+        if (e.altKey) {
+          var keyStep = e.shiftKey ? 10 : 1;
+          if (e.ctrlKey || e.metaKey) {
+            if (!layResizeSelectedFree(
+                e.key === "ArrowLeft" ? -keyStep :
+                e.key === "ArrowRight" ? keyStep : 0,
+                e.key === "ArrowUp" ? -keyStep :
+                e.key === "ArrowDown" ? keyStep : 0))
+              layAnnounce("Free resize requires one chart or image.");
+          } else {
+            layMoveSelected(e.key === "ArrowLeft" ? -keyStep :
+                            e.key === "ArrowRight" ? keyStep : 0,
+                            e.key === "ArrowUp" ? -keyStep :
+                            e.key === "ArrowDown" ? keyStep : 0);
+          }
+        } else {
+          var direction = (e.key === "ArrowLeft" || e.key === "ArrowUp") ? -1 : 1;
+          layNavigateItem(direction, null, e.shiftKey);
+        }
+        return;
+      }
       if ((e.key === "Delete" || e.key === "Backspace") && ids.length) {
         e.preventDefault(); layDeleteSelected(); return;
       }
@@ -13040,13 +14235,17 @@
     if (!item || item.kind !== "text") return;
     laySetSelection([id]);
     var canvas = el("ps-lcanvas");
+    var returnFocus = document.activeElement === el("ps-lviewport");
     var itemEl = canvas.querySelector('.ps-litem[data-item-id="' + id + '"]');
     if (!itemEl) return;
     var ta = document.createElement("textarea");
     ta.className = "ps-ltext-edit";
+    ta.setAttribute("aria-label", "Edit layout text");
+    ta.setAttribute("aria-describedby", "ps-layout-instructions");
     ta.value = item.text || "";
     ta.style.fontSize = (item.fontSize || 14) + "px";
     ta.style.fontWeight = item.bold ? "700" : "400";
+    itemEl.removeAttribute("aria-hidden");
     itemEl.innerHTML = "";
     itemEl.appendChild(ta);
     ta.focus(); ta.select();
@@ -13064,6 +14263,15 @@
         persist();
       }
       renderLayout();
+      var resultMessage = cancel ? "Text edit canceled." : "Text saved.";
+      if (returnFocus) {
+        layFocusViewport();
+        // Returning focus causes the composite's focus handler to announce
+        // the active item. Follow that announcement with the edit result so
+        // "saved" or "canceled" is not erased before assistive technology
+        // can present it.
+        window.setTimeout(function () { layAnnounce(resultMessage); }, 25);
+      } else layAnnounce(resultMessage);
     }
     ta.addEventListener("keydown", function (e) {
       if (e.key === "Escape") commit(true);
@@ -13130,6 +14338,7 @@
   }
   function setAppWorkspace(mode) {
     if (["data", "chart", "layout"].indexOf(mode) === -1) return;
+    hideTip();   // the whole surface changes; no tip may ride across
     narrowCloseAfterNavigation();   // punch list 17
     if (mode === "data") {
       PROJECT.ui.workspace = "data";
@@ -13170,12 +14379,59 @@
     'fill="currentColor" stroke="none"/>' +
     '<rect x="13" y="7" width="3.2" height="10" rx="0.6" ' +
     'fill="currentColor" stroke="none"/></svg>';
+  // Per-analysis rail icons (Torry approved, Jul 28 2026: with generic
+  // "Chart 2" names, the rail saying WHAT each chart is earns its glyphs).
+  // Same 24-grid, stroke 1.8, currentColor as every other rail icon; each
+  // echoes its module's geometry at 15px. Compare Groups keeps the shared
+  // bar glyph, which is also the workspace switcher's "Charts" icon.
+  function _railIcon(inner) {
+    return '<svg class="ps-icn" width="15" height="15" viewBox="0 0 24 24" ' +
+      'fill="none" stroke="currentColor" stroke-width="1.8" ' +
+      'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      inner + '</svg>';
+  }
+  var MODULE_RAIL_ICONS = {
+    plotbuilder: null,   // filled below: the shared bar glyph
+    rmplotbuilder: _railIcon(
+      '<path d="M4 20V4"/><path d="M4 20h16"/>' +
+      '<path d="M7 15.5l4-4.5 3.5 2 4.5-6"/>' +
+      '<circle cx="7" cy="15.5" r="1.5" fill="currentColor" stroke="none"/>' +
+      '<circle cx="14.5" cy="13" r="1.5" fill="currentColor" stroke="none"/>' +
+      '<circle cx="19" cy="7" r="1.5" fill="currentColor" stroke="none"/>'),
+    xyplotbuilder: _railIcon(
+      '<path d="M4 20V4"/><path d="M4 20h16"/>' +
+      '<circle cx="9" cy="15" r="1.6" fill="currentColor" stroke="none"/>' +
+      '<circle cx="13" cy="10" r="1.6" fill="currentColor" stroke="none"/>' +
+      '<circle cx="17.5" cy="13" r="1.6" fill="currentColor" stroke="none"/>' +
+      '<circle cx="18.5" cy="6.5" r="1.6" fill="currentColor" stroke="none"/>'),
+    distplotbuilder: _railIcon(
+      '<path d="M4 20V4"/><path d="M4 20h16"/>' +
+      '<rect x="6.5" y="13" width="3.6" height="7" fill="currentColor" stroke="none"/>' +
+      '<rect x="10.1" y="7" width="3.6" height="13" fill="currentColor" stroke="none"/>' +
+      '<rect x="13.7" y="11" width="3.6" height="9" fill="currentColor" stroke="none"/>'),
+    freqplotbuilder: _railIcon(
+      '<path d="M5 4v16"/>' +
+      '<rect x="5" y="5.5" width="13" height="3.2" rx="0.6" fill="currentColor" stroke="none"/>' +
+      '<rect x="5" y="10.5" width="9" height="3.2" rx="0.6" fill="currentColor" stroke="none"/>' +
+      '<rect x="5" y="15.5" width="15" height="3.2" rx="0.6" fill="currentColor" stroke="none"/>'),
+    corrplotbuilder: _railIcon(
+      '<rect x="4.5" y="4.5" width="6.2" height="6.2" rx="1" fill="currentColor" stroke="none"/>' +
+      '<rect x="13.3" y="4.5" width="6.2" height="6.2" rx="1"/>' +
+      '<rect x="4.5" y="13.3" width="6.2" height="6.2" rx="1"/>' +
+      '<rect x="13.3" y="13.3" width="6.2" height="6.2" rx="1" fill="currentColor" stroke="none"/>'),
+    likertplotbuilder: _railIcon(
+      '<path d="M12 3.5v17"/>' +
+      '<rect x="7" y="5.5" width="10" height="3.2" rx="0.6" fill="currentColor" stroke="none"/>' +
+      '<rect x="9" y="10.5" width="6" height="3.2" rx="0.6" fill="currentColor" stroke="none"/>' +
+      '<rect x="5" y="15.5" width="14" height="3.2" rx="0.6" fill="currentColor" stroke="none"/>')
+  };
   var RAIL_ICON_LAYOUT =
     '<svg class="ps-icn" width="15" height="15" viewBox="0 0 24 24" ' +
     'fill="none" stroke="currentColor" stroke-width="1.8" ' +
     'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
     '<rect x="3" y="4" width="18" height="16" rx="2"/>' +
     '<path d="M12 4v16M3 12h9"/></svg>';
+  MODULE_RAIL_ICONS.plotbuilder = RAIL_ICON_CHART;
   function syncProjectNavigator() {
     var root = el("ps-project-nav");
     root.innerHTML = "";
@@ -13195,9 +14451,12 @@
           b.setAttribute("data-project-chart-id", doc.id);
           setTip(b, doc.name);
           // innerHTML, not mkEl's textContent: the icon is markup now, and
-          // it is a static constant above - never data.
+          // it is a static constant above - never data. Chart rows draw
+          // their ANALYSIS's own glyph (Torry, Jul 28 2026), so the rail
+          // says what each chart is; layouts keep the shared layout icon.
           var ico = mkEl("span", "ps-nav-icon");
-          ico.innerHTML = icon;
+          ico.innerHTML = wantLayout ? icon
+            : (MODULE_RAIL_ICONS[doc.module] || icon);
           b.appendChild(ico);
           b.appendChild(mkEl("span", "", doc.name));
           b.addEventListener("click", function () {
@@ -13548,23 +14807,20 @@
     var ctxSized = !!one && laySizedKind(one);
     el("ps-ctx-lw").disabled = !ctxSized;
     el("ps-ctx-lh").disabled = !ctxSized;
+    // Progressive disclosure (Torry, Jul 29 2026): the align row is SHOWN
+    // only once a second item is selected, instead of six greyed buttons
+    // sitting under Arrange at every selection. They stay enabled whenever
+    // they are visible, so nothing here is inert. (Back / Forward keep the
+    // disabled-with-a-reason idiom: those are single-item controls that
+    // genuinely have an inapplicable state at the ends of the stack, which
+    // is a different thing from a capability that does not apply yet.)
+    var alignRow = document.querySelector(".ps-inspector-align");
+    var canAlign = ids.length >= 2;
+    if (alignRow) alignRow.style.display = canAlign ? "" : "none";
     var align = document.querySelectorAll("[data-ctx-align]");
     for (var i = 0; i < align.length; i++) {
-      align[i].disabled = ids.length < 2;
-      // Say WHY, or an inert control is indistinguishable from a broken
-      // one (Torry, Jul 27 2026). Aligning one item against itself is not
-      // a thing; the tooltip states the requirement rather than leaving
-      // the user to guess it.
-      setTip(align[i], align[i].disabled
-        ? "Select two or more items to align them"
-        : "Align the selected items");
-    }
-    var dist = document.querySelectorAll("[data-ctx-distribute]");
-    for (i = 0; i < dist.length; i++) {
-      dist[i].disabled = ids.length < 3;
-      setTip(dist[i], dist[i].disabled
-        ? "Select three or more items to space them evenly"
-        : "Space the selected items evenly");
+      align[i].disabled = false;
+      setTip(align[i], "Align the selected items");
     }
     // The layer buttons go inert at the ends of the stack, and say so.
     // They were always live, so "Move backward" on the bottom item was a
@@ -13626,18 +14882,7 @@
       // 7.5 x 5 while the figure was whatever size the user had set
       // (Torry: "I don't know about unchecked"). Unchecked, the row now
       // STATES the size in force, so the two states read as one fact.
-      var fitLabel = fitField ? fitField.querySelector("span") : null;
-      if (fitLabel && fitOK) {
-        if (fitDoc.fitPane !== false) {
-          fitLabel.textContent = "Standard chart size (" +
-            FIT_MAX_W + " x " + FIT_MAX_H + " in)";
-        } else {
-          var mine = authoritativePlotSize();
-          fitLabel.textContent = "Standard chart size (your size: " +
-            (Math.round(mine.w * 100) / 100) + " x " +
-            (Math.round(mine.h * 100) / 100) + " in)";
-        }
-      }
+      syncFitSizeRow();
       var zoomSel = el("ps-chart-zoom");
       if (zoomSel) {
         var zoomField = zoomSel.closest(".ps-inspector-field");
@@ -13684,7 +14929,7 @@
     if (ws === "data") {
       elOrSink("ps-workspace-title").textContent = "Data";
       elOrSink("ps-workspace-subtitle").textContent = t
-        ? nRows(t) + " rows \u00d7 " + t.order.length + " variables"
+        ? nRows(t) + " rows \u00d7 " + t.order.length + " columns"
         : "No dataset loaded";
       el("ps-inspector-title").textContent = "Variable properties";
       el("ps-inspector-subtitle").textContent = INSPECTOR_VAR
@@ -13693,7 +14938,7 @@
       // navigator highlight already says that.
       el("ps-status-context").textContent = t
         ? nRows(t).toLocaleString() + " rows \u00b7 " + t.order.length +
-          " variables" + (dataExclusionCount(t) ? " \u00b7 " +
+          " columns" + (dataExclusionCount(t) ? " \u00b7 " +
             dataExclusionCount(t) + " excluded" : "")
         : "No dataset";
       var rangeStatus = document.getElementById("ps-grid-selection-status");
@@ -13716,11 +14961,11 @@
       var page = layPage();
       elOrSink("ps-workspace-title").textContent = c.name;
       elOrSink("ps-workspace-subtitle").textContent =
-        "Figure layout \u00b7 " + page.w + " \u00d7 " + page.h;
+        "Figure layout \u00b7 " + pageSizeText(page);
       var itemCount = c.items ? c.items.length : 0;
       el("ps-status-context").textContent =
         itemCount + " layout item" + (itemCount === 1 ? "" : "s") +
-        " \u00b7 " + page.w + " \u00d7 " + page.h;
+        " \u00b7 " + pageSizeText(page);
       el("ps-inspector-title").textContent = "Layout properties";
       syncLayoutShellStatus();
     } else {
@@ -13890,6 +15135,54 @@
       return bits.length ? bits.join(" \u00b7 ") : "Ready";
     } catch (e) { return "Ready"; }
   }
+  // The size row, on its own, because render() re-runs it once the chart
+  // has actually drawn: only a finished chart can say whether a part sits
+  // outside the canvas, and a legend drag commits no size option, so
+  // nothing else in the sync path would ever refresh it.
+  function syncFitSizeRow() {
+    var fitBox = el("ps-fit-pane");
+    if (!fitBox) return;
+    var ws = appWorkspace();
+    var fitDoc = workspaceDocument(ws);
+    var fitOK = ws === "chart" && !!fitDoc && !isLayoutTab(fitDoc);
+    var fitField = fitBox.closest(".ps-inspector-field");
+    var fitLabel = fitField ? fitField.querySelector("span") : null;
+    if (!fitLabel || !fitOK) return;
+    var baseW = FIT_MAX_W, baseH = FIT_MAX_H;
+    if (fitDoc.fitPane !== false) {
+      fitLabel.textContent = "Standard chart size (" +
+        FIT_MAX_W + " x " + FIT_MAX_H + " in)";
+    } else {
+      var mine = authoritativePlotSize();
+      baseW = mine.w; baseH = mine.h;
+      fitLabel.textContent = "Standard chart size (your size: " +
+        (Math.round(mine.w * 100) / 100) + " x " +
+        (Math.round(mine.h * 100) / 100) + " in)";
+    }
+    // Torry, Jul 29 2026: when a part has been dragged outside the
+    // canvas the exported file is bigger than the canvas, so the row
+    // states the size the file will really have instead of advertising
+    // one no export will match. Nothing is committed - the chart keeps
+    // its canvas, and re-laying it out here would move the very part
+    // that grew it.
+    var outside = exportSizeInches(baseW, baseH);
+    if (fitField && fitField.__psBaseTip == null)
+      fitField.__psBaseTip = fitField.getAttribute("data-tip") || "";
+    if (outside) {
+      fitLabel.textContent += "; exports " +
+        (Math.round(outside.w * 100) / 100) + " x " +
+        (Math.round(outside.h * 100) / 100) + " in";
+      // APPEND to the row's own explanation rather than replacing it:
+      // the static sentence about the standard size is still true, and
+      // clobbering it would trade one honest tooltip for another.
+      setTip(fitField, fitField.__psBaseTip + " Part of this chart is " +
+        "outside the canvas, so exports grow to include it. Drag it back " +
+        "inside to export at the canvas size.");
+    } else if (fitField) {
+      setTip(fitField, fitField.__psBaseTip);
+    }
+  }
+
   function syncAll() {
     var ws = appWorkspace(), doc = workspaceDocument(ws);
     var setupHidden = ws !== "data" && (!doc || isLayoutTab(doc));
@@ -14087,11 +15380,6 @@
     for (var i = 0; i < align.length; i++)
       align[i].addEventListener("click", function () {
         layAlign(this.getAttribute("data-ctx-align"));
-      });
-    var dist = document.querySelectorAll("[data-ctx-distribute]");
-    for (i = 0; i < dist.length; i++)
-      dist[i].addEventListener("click", function () {
-        layDistribute(this.getAttribute("data-ctx-distribute"));
       });
   }
 
@@ -14332,7 +15620,7 @@
         (demoted.length > 3 ? "; and " + (demoted.length - 3) + " more" : "") +
         "</span>";
     var h = '<div class="ps-import-summary">' +
-      parsed.rows.length + " rows \u00d7 " + parsed.header.length + " variables" +
+      parsed.rows.length + " rows \u00d7 " + parsed.header.length + " columns" +
       notes + "</div><div class=\"ps-import-table-wrap\">" +
       '<table class="ps-import-table"><thead><tr>';
     for (c = 0; c < parsed.header.length; c++) {
@@ -14475,6 +15763,7 @@
     el("ps-import-use").style.display = "none";
     el("ps-loader-msg").textContent = "";
   }
+  var LOADER_LAST_FOCUS = null;
   function openLoader(keepImport) {
     // Punch list item 1. The loader sits at z-index 9999 and the start centre
     // at 13000, so on a cold load EVERY path through here used to render
@@ -14488,11 +15777,24 @@
     // once rather than the one branch the bug was reported against.
     // hideWelcome() is idempotent; the two callers that already dismiss first
     // are unaffected.
+    if (el("ps-loader").style.display !== "flex")
+      LOADER_LAST_FOCUS = document.activeElement;
     hideWelcome();
     if (!keepImport) resetImportPreview();
     el("ps-loader").style.display = "flex";
+    shellSetPageModal(true);
+    window.setTimeout(function () {
+      var first = shellDialogTabbables(el("ps-loader"))[0];
+      try { if (first) first.focus(); } catch (ignore) {}
+    }, 0);
   }
-  function closeLoader() { el("ps-loader").style.display = "none"; }
+  function closeLoader() {
+    el("ps-loader").style.display = "none";
+    shellRefreshPageModal();
+    var prior = LOADER_LAST_FOCUS;
+    LOADER_LAST_FOCUS = null;
+    shellRestoreFocus(prior, el("ps-load"));
+  }
   // openLoader() resets the import preview, and resetting CLEARS the message
   // line - so the long-standing "set the message, then open the loader" order
   // wiped every one of them on the way in. The blocked-download path had it
@@ -14508,6 +15810,12 @@
     el("ps-loader-close").addEventListener("click", closeLoader);
     el("ps-loader").addEventListener("click", function (e) {
       if (e.target === el("ps-loader")) closeLoader();
+    });
+    el("ps-loader").addEventListener("keydown", function (e) {
+      if (e.key === "Escape") {
+        e.preventDefault(); closeLoader(); return;
+      }
+      shellTrapTab(this, e);
     });
     el("ps-file").addEventListener("change", function () {
       var f = el("ps-file").files && el("ps-file").files[0];
@@ -14611,13 +15919,50 @@
       if (!f) return;
       readPickedFile(f);
     });
+    // Desktop app: a .pand double-clicked in the OS arrives through the
+    // PS_DESKTOP preload bridge as {name, bytes}. Wrap it in a File and
+    // hand it to the SAME front door every other arrival uses (picker,
+    // drop), so routing, validation, and error copy cannot drift by
+    // channel. The bridge buffers files sent before this line runs, so
+    // launch-by-double-click cannot lose the file to the boot race.
+    if (window.PS_DESKTOP && typeof window.PS_DESKTOP.onOpenFile === "function") {
+      window.PS_DESKTOP.onOpenFile(function (msg) {
+        if (!msg || !msg.name) return;
+        try {
+          readPickedFile(new File([msg.bytes || new Uint8Array(0)],
+                                  String(msg.name)));
+        } catch (err) {
+          // A malformed bridge message must not take down the loader.
+        }
+      });
+    }
+    // Desktop app: the Electron Edit menu owns Cmd/Ctrl+V (macOS text
+    // fields need the role), and its native paste serves only EDITABLE
+    // elements - so grid paste was structurally dead in the desktop app
+    // (Torry, Jul 29 2026: "I actually have to double-click on it before
+    // I can paste"). The menu's custom Paste item relays here after its
+    // native paste; text fields were already served, so this covers
+    // exactly the non-editable grid case, through the SAME parser as
+    // every other paste route.
+    if (window.PS_DESKTOP && typeof window.PS_DESKTOP.onMenuPaste === "function") {
+      window.PS_DESKTOP.onMenuPaste(function () {
+        var a = document.activeElement;
+        if (a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" ||
+                  a.isContentEditable)) return;
+        if (appWorkspace() !== "data" || !gridSelectionRect()) return;
+        gridMenuPaste();
+      });
+    }
   }
 
   function hideWelcome() {
     var welcome = document.getElementById("ps-welcome");
     if (!welcome) return;
     welcome.style.display = "none";
-    document.querySelector(".ps-page").removeAttribute("aria-hidden");
+    shellRefreshPageModal();
+    var prior = WELCOME_LAST_FOCUS;
+    WELCOME_LAST_FOCUS = null;
+    shellRestoreFocus(prior);
     BOOT_RESTORED = true;
     try { window.sessionStorage.setItem(PS_WELCOME_SESSION_KEY, "1"); }
     catch (e) {}
@@ -14849,6 +16194,7 @@
       })(list[i]);
     }
   }
+  var WELCOME_LAST_FOCUS = null;
   function showWelcome(force) {
     // Recovery must never be silent, even if this tab previously dismissed
     // the start center or the preference normally resumes immediately.
@@ -14862,9 +16208,11 @@
         if (window.sessionStorage.getItem(PS_WELCOME_SESSION_KEY) === "1") return;
       } catch (e) {}
     }
+    if (el("ps-welcome").style.display !== "flex")
+      WELCOME_LAST_FOCUS = document.activeElement;
     renderWelcome();
     el("ps-welcome").style.display = "flex";
-    document.querySelector(".ps-page").setAttribute("aria-hidden", "true");
+    shellSetPageModal(true);
     window.setTimeout(function () {
       var first = BOOT_RESTORED ? el("ps-welcome-continue") : el("ps-welcome-open");
       try { first.focus(); } catch (ignore) {}
@@ -14948,18 +16296,7 @@
       if (e.key === "Escape") {
         e.preventDefault(); persist(false); hideWelcome(); return;
       }
-      if (e.key !== "Tab") return;
-      var controls = Array.prototype.slice.call(el("ps-welcome").querySelectorAll(
-        "button:not([disabled])")).filter(function (b) {
-          return b.style.display !== "none";
-        });
-      if (!controls.length) return;
-      var first = controls[0], last = controls[controls.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault(); last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault(); first.focus();
-      }
+      shellTrapTab(this, e);
     });
     setTip(el("ps-doc-name"), "Double-click to rename project");
     el("ps-doc-name").addEventListener("dblclick", renameProjectInline);
@@ -14967,15 +16304,80 @@
   }
 
   var SHELL_DIALOG_FOCUS = {};
+  var SHELL_TABBABLE_SELECTOR =
+    'a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),' +
+    'select:not([disabled]),textarea:not([disabled]),' +
+    '[contenteditable="true"],[tabindex]';
+  function shellElementTabbable(node) {
+    if (!node || node.tabIndex < 0 || node.hidden ||
+        node.getAttribute("aria-hidden") === "true" ||
+        (node.closest && node.closest(
+          '[hidden],[inert],[aria-hidden="true"]'))) return false;
+    var style = window.getComputedStyle(node);
+    return style.display !== "none" && style.visibility !== "hidden" &&
+      node.getClientRects().length > 0;
+  }
+  function shellDialogTabbables(root) {
+    if (!root) return [];
+    var list = Array.prototype.slice.call(
+      root.querySelectorAll(SHELL_TABBABLE_SELECTOR)).filter(shellElementTabbable);
+    return list.filter(function (node, index) {
+      if (node.type !== "radio" || !node.name) return true;
+      var same = list.filter(function (candidate) {
+        return candidate.type === "radio" && candidate.name === node.name;
+      });
+      var checked = same.filter(function (candidate) { return candidate.checked; });
+      return checked.length ? node.checked : node === same[0];
+    });
+  }
+  function shellTrapTab(root, e) {
+    if (!e || e.key !== "Tab") return false;
+    var list = shellDialogTabbables(root);
+    if (!list.length) { e.preventDefault(); return true; }
+    var at = list.indexOf(document.activeElement);
+    if (at < 0 || (e.shiftKey && at === 0) ||
+        (!e.shiftKey && at === list.length - 1)) {
+      e.preventDefault();
+      list[e.shiftKey ? list.length - 1 : 0].focus();
+      return true;
+    }
+    return false;
+  }
+  function shellSetPageModal(on) {
+    var page = document.querySelector(".ps-page");
+    if (!page) return;
+    if (on) {
+      page.setAttribute("aria-hidden", "true");
+      page.setAttribute("inert", "");
+    } else {
+      page.removeAttribute("aria-hidden");
+      page.removeAttribute("inert");
+    }
+  }
+  function shellRefreshPageModal() {
+    var roots = document.querySelectorAll(
+      "#ps-welcome,#ps-command-palette,#ps-loader,#ps-exporter,.ps-dialog-overlay");
+    var open = false;
+    for (var i = 0; i < roots.length; i++) {
+      if (roots[i].style.display === "flex") { open = true; break; }
+    }
+    shellSetPageModal(open);
+  }
+  function shellRestoreFocus(prior, fallback) {
+    window.setTimeout(function () {
+      var target = shellElementTabbable(prior) ? prior :
+        (shellElementTabbable(fallback) ? fallback : null);
+      try { if (target) target.focus(); } catch (ignore) {}
+    }, 0);
+  }
   function openShellDialog(id) {
     var dialog = el(id);
     if (!dialog) return;
     SHELL_DIALOG_FOCUS[id] = document.activeElement;
     dialog.style.display = "flex";
-    document.querySelector(".ps-page").setAttribute("aria-hidden", "true");
+    shellSetPageModal(true);
     window.setTimeout(function () {
-      var first = dialog.querySelector(
-        "input, select, button:not([disabled]), [tabindex]");
+      var first = shellDialogTabbables(dialog)[0];
       if (first) first.focus();
     }, 0);
   }
@@ -14983,12 +16385,10 @@
     var dialog = el(id);
     if (!dialog) return;
     dialog.style.display = "none";
-    if (el("ps-welcome").style.display !== "flex" &&
-        el("ps-command-palette").style.display !== "flex")
-      document.querySelector(".ps-page").removeAttribute("aria-hidden");
+    shellRefreshPageModal();
     var prior = SHELL_DIALOG_FOCUS[id];
     delete SHELL_DIALOG_FOCUS[id];
-    try { if (prior) prior.focus(); } catch (ignore) {}
+    shellRestoreFocus(prior);
   }
   function applyAppPrefs() {
     document.body.classList.toggle("ps-density-compact",
@@ -15001,7 +16401,7 @@
     try {
       if (isLayoutTab(activeChart())) {
         laySyncToolbar();
-        syncLayoutContextInspector();
+        laySyncInspector();   // context fields AND the status-bar page size
       }
     } catch (e) {}
   }
@@ -15145,6 +16545,13 @@
   function shortcutGroups() {
     return [
       { title: "Commands", rows: shortcutMenuRows() },
+      { title: "Application navigation",
+        rows: [
+          ["Skip to the active workspace", "First Tab stop"],
+          ["Skip to the settings panel", "Second Tab stop"]
+        ],
+        note: "These links appear when focused and bypass the application " +
+              "menus, document navigator, and setup chrome." },
       { title: "Undo and redo",
         // The app keeps three histories on purpose and arbitrates the key by
         // workspace. One row saying "Undo / redo" hid that, and the first time
@@ -15189,12 +16596,23 @@
           ["Duplicate it", "Cmd/Ctrl + D"]
         ] },
       { title: "Layouts",
+        note: "Tab to the figure layout items first. Arrow navigation follows " +
+              "the item stack; movement and resizing use Alt so selection " +
+              "never changes accidentally while an item is being positioned.",
         rows: [
-          ["Nudge the selection", "Arrow keys"],
-          ["Nudge by 10", "Shift + arrows"],
+          ["Move through items", "Arrow keys / Home / End"],
+          ["Extend or reduce the selection", "Shift + arrows / Space"],
+          ["Nudge the selection", "Alt + arrows"],
+          ["Nudge by 10", "Alt + Shift + arrows"],
+          ["Free resize a chart or image", "Ctrl/Cmd + Alt + arrows"],
+          ["Proportional resize", "Alt + Plus / Minus"],
+          ["Open exact position and size", "Enter"],
+          ["Edit selected text", "F2"],
+          ["Bold or resize selected text", "Cmd/Ctrl + B / Plus / Minus"],
+          ["Move forward or backward", "Alt + Page Up / Page Down"],
+          ["Open item commands", "Shift + F10"],
           ["Duplicate the selection", "Cmd/Ctrl + D"],
           ["Delete the selection", "Delete"],
-          ["Resize a chart panel freely", "Shift + corner drag"],
           ["Cancel a drag, then clear the selection", "Escape"]
         ] },
       { title: "Menus and dialogs",
@@ -15308,7 +16726,7 @@
         : Math.round(LAST_RENDER_MS)) + " ms"],
       ["Payload build", measurePayloadMs() + " ms"],
       ["Data", t ? nRows(t).toLocaleString() + " rows x " + t.order.length +
-        " variables" : "none"],
+        " columns" : "none"],
       ["Analysis", doc && !isLayoutTab(doc) && MODULES[doc.module]
         ? MODULES[doc.module].label : "-"],
       ["Plot size", (function () {
@@ -15384,9 +16802,17 @@
   }
   function formatBytes(bytes) {
     bytes = Number(bytes) || 0;
+    // Trimmed, human numbers: "7.2 KB", "1.5 MB", "3 GB" - never
+    // "3072.00 MB" (launch-eval finding, Jul 28 2026). One decimal at
+    // most, and a whole number sheds it.
+    function trim(v) {
+      var s = v.toFixed(v >= 100 ? 0 : 1);
+      return s.replace(/\.0$/, "");
+    }
     if (bytes < 1024) return bytes + " B";
-    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " KB";
-    return (bytes / 1048576).toFixed(2) + " MB";
+    if (bytes < 1048576) return trim(bytes / 1024) + " KB";
+    if (bytes < 1073741824) return trim(bytes / 1048576) + " MB";
+    return trim(bytes / 1073741824) + " GB";
   }
   // ---- punch list t3-60: the templates could not say what they were ----
   // build-templates.R now stamps the R marshalling it was generated from and
@@ -15452,7 +16878,7 @@
       ["Payload channels", channelAuditText()],
       ["Project", PROJECT.name || "Untitled project"],
       ["Dataset", (t ? nRows(t) : 0) + " rows \u00d7 " +
-        (t ? t.order.length : 0) + " variables"],
+        (t ? t.order.length : 0) + " columns"],
       ["Documents", String(PROJECT.charts.length)],
       ["Snapshot size", formatBytes(LAST_PROJECT_BYTES ||
         JSON.stringify(projectSnapshot()).length)],
@@ -15626,16 +17052,7 @@
         if (e.key === "Escape") {
           e.preventDefault(); closeShellDialog(this.id); return;
         }
-        if (e.key !== "Tab") return;
-        var focusable = Array.prototype.slice.call(this.querySelectorAll(
-          "button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]"));
-        if (!focusable.length) return;
-        var first = focusable[0], last = focusable[focusable.length - 1];
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault(); last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault(); first.focus();
-        }
+        shellTrapTab(this, e);
       });
     }
     applyAppPrefs();
@@ -15829,6 +17246,18 @@
     if (!host) return null;
     return host.querySelector('[data-helpnav="' + key + '"]');
   }
+  // Which of the chart-help panels can open right now. "ready" = the
+  // active chart tab is drawn, so the engine toolbar exists to host them;
+  // "empty" = a chart tab exists but has no variables yet (the guided
+  // empty state replaces the host wholesale, so it contains no svg at
+  // all, while a drawn chart always does); "none" = the project has no
+  // chart document, only layouts.
+  function chartHelpState() {
+    var doc = workspaceDocument("chart");
+    if (!doc || isLayoutTab(doc)) return "none";
+    var host = hostEl();
+    return host && host.querySelector("svg") ? "ready" : "empty";
+  }
   function openEngineHelp(key) {
     // These panels live on the chart, so a data or layout workspace has to
     // come back to it first. Doing that silently would be worse than saying
@@ -15841,7 +17270,13 @@
       var btn = engineHelpBtn();
       if (btn && !engineHelpTab("help")) btn.click();
       if (tries < 30) window.setTimeout(step, 60);
-      else showToast("Open a chart first to use the chart help panels.");
+      // The backstop for callers the menu gating does not cover (the
+      // wizard's next-step links). It used to say "Open a chart first" -
+      // false, a chart tab was open; it just had no variables.
+      else showToast(chartHelpState() === "none"
+        ? "Create a chart first to use the chart help panels."
+        : "Assign variables to this chart first to use the chart help " +
+          "panels.");
     })();
   }
   // ---- punch list 4: the user guide ----
@@ -15946,10 +17381,13 @@
     }
     navigator.clipboard.readText().then(function (text) {
       if (!text) return;
-      var rows = String(text).replace(/\r\n?/g, "\n").split("\n")
-        .filter(function (line, i, arr) {
-          return line !== "" || i < arr.length - 1;
-        }).map(function (line) { return line.split("\t"); });
+      // The SAME parser as the direct Cmd/Ctrl+V path - quote handling,
+      // delimiter sniffing, the lot. This route used to split on tabs
+      // only, so comma-separated or quoted clipboard text pasted as ONE
+      // mangled column with the quote marks kept: Torry's wall-of-IDs
+      // chart, Jul 29 2026. Two paste routes, one parser, forever.
+      var delimiter = text.indexOf("\t") !== -1 ? "\t" : sniffDelimiter(text);
+      var rows = parseDelimitedRows(text, delimiter, true);
       if (rows.length) gridApplyMatrix(rows);
     }, function () {
       showToast("The browser refused clipboard access. Use Cmd/Ctrl+V.", true);
@@ -16013,9 +17451,18 @@
     if (command.indexOf("data-") === 0) {
       var haveTable = !!(PROJECT.table && PROJECT.table.order.length);
       if (!haveTable) return false;
-      if (command === "data-reshape" || command === "data-show-all" ||
+      // The whole-table commands need something to act on, or they are the
+      // silent no-op the layer buttons used to be (Torry's "none of those
+      // buttons do anything" class): their grid-popover twins already gate
+      // on exactly these tests, and the two routes must tell one truth.
+      if (command === "data-restore-excl")
+        return exclCount(PROJECT.table) > 0;
+      if (command === "data-show-all")
+        return gridHiddenColumnCount(PROJECT.table) > 0 ||
+               GRID_FOCUS_CHART_COLUMNS;
+      if (command === "data-resetwidths") return gridHasColumnWidths();
+      if (command === "data-reshape" ||
           command === "data-focus" || command === "data-fitall" ||
-          command === "data-resetwidths" || command === "data-restore-excl" ||
           command === "data-compute")
         return true;
       if (command === "data-exclude" || command === "data-chart-sel")
@@ -16056,6 +17503,15 @@
              !layAtLayerEnd(command === "layer-back" ? -1 : 1);
     if (command === "layout-add-chart" || command === "layout-add-text")
       return isLayoutTab(activeChart());
+    // The chart-help panels live in a drawn chart's toolbar. "Which graph
+    // should I use?" (help-chooser) stays enabled everywhere: on an undrawn
+    // chart it opens Help me choose instead, Torry's ruling, Jul 29 2026.
+    // The other three operate ON a drawn chart, so without one they are
+    // disabled and say so - the old behavior polled for a toolbar that
+    // could not exist, then toasted "Open a chart first", which was false.
+    if (command === "help-lint" || command === "help-anatomy" ||
+        command === "help-glossary")
+      return chartHelpState() === "ready";
     return true;
   }
   function commandDisabledReason(command) {
@@ -16067,6 +17523,17 @@
     }
     if (command === "data-exclude" || command === "data-chart-sel")
       return "Select cells in the Data workspace first";
+    if (PROJECT.table && PROJECT.table.order.length) {
+      if (command === "data-restore-excl") return "Nothing is excluded";
+      if (command === "data-show-all") return "No columns are hidden";
+      if (command === "data-resetwidths")
+        return "All columns are at their default widths";
+    }
+    if (command === "help-lint" || command === "help-anatomy" ||
+        command === "help-glossary")
+      return chartHelpState() === "none"
+        ? "Create a chart first"
+        : "Assign variables to this chart first";
     if (command.indexOf("data-") === 0)
       return (PROJECT.table && PROJECT.table.order.length)
         ? "Select a column in the Data workspace first"
@@ -16167,7 +17634,14 @@
     else if (command === "select-all-cells") gridMenuSelectAll();
     else if (command === "find-data") gridMenuFind();
     else if (command === "replace-data") gridMenuReplace();
-    else if (command === "help-chooser") openEngineHelp("graphChooser");
+    else if (command === "help-chooser") {
+      // On an undrawn chart the engine panel cannot exist, and "which
+      // graph should I use?" is exactly the question Help me choose
+      // answers before a chart exists: reroute rather than dead-end
+      // (Torry's ruling, Jul 29 2026).
+      if (chartHelpState() === "ready") openEngineHelp("graphChooser");
+      else showHelpMeChoose();
+    }
     else if (command === "help-lint") openEngineHelp("graphLint");
     else if (command === "help-anatomy") openEngineHelp("anatomy");
     else if (command === "help-glossary") openEngineHelp("glossary");
@@ -16195,15 +17669,14 @@
     if (appWorkspace() !== "data") setAppWorkspace("data");
     if (command === "data-compute") { openFormulaDialog(col || null); return; }
     if (command === "data-reshape") { openReshapeDialog(); return; }
-    if (command === "data-show-all") { gridResetColumnView(); syncAll(); return; }
+    // Route through the SAME functions the grid popover uses (the comment
+    // above promises exactly that, and these two had drifted): show-all
+    // was calling the bare state reset with no toast and no selection
+    // clear, and reset-widths hand-rolled what gridResetAllWidths does.
+    if (command === "data-show-all") { gridShowAllColumns(); syncAll(); return; }
     if (command === "data-focus") { gridSetChartFocus(true); return; }
     if (command === "data-fitall") { gridAutoFitAll(); return; }
-    if (command === "data-resetwidths") {
-      PROJECT.ui.columnWidths = {};
-      GRID_NATURAL_WIDTHS = {};
-      persist(); syncDataGrid();
-      return;
-    }
+    if (command === "data-resetwidths") { gridResetAllWidths(); return; }
     if (command === "data-restore-excl") { gridRestoreExclusions(); return; }
     if (!col) return;
     if (command === "data-insert-left") gridInsertColumnAt(col, false);
@@ -16334,6 +17807,41 @@
 
   var COMMAND_PALETTE_LAST_FOCUS = null;
   var COMMAND_PALETTE_INDEX = 0;
+  function setCommandPaletteCurrent(wanted, direction) {
+    var root = el("ps-command-results");
+    var options = Array.prototype.slice.call(
+      root.querySelectorAll(".ps-command-result"));
+    var search = el("ps-command-search");
+    for (var oi = 0; oi < options.length; oi++) {
+      options[oi].classList.remove("ps-command-current");
+      options[oi].setAttribute("aria-selected", "false");
+    }
+    if (!options.length) {
+      COMMAND_PALETTE_INDEX = -1;
+      search.removeAttribute("aria-activedescendant");
+      return;
+    }
+    var step = direction < 0 ? -1 : 1;
+    var index = Number(wanted);
+    if (!isFinite(index)) index = step < 0 ? options.length - 1 : 0;
+    index = ((index % options.length) + options.length) % options.length;
+    var found = -1;
+    for (var tries = 0; tries < options.length; tries++) {
+      if (!options[index].disabled) { found = index; break; }
+      index = (index + step + options.length) % options.length;
+    }
+    if (found < 0) {
+      COMMAND_PALETTE_INDEX = -1;
+      search.removeAttribute("aria-activedescendant");
+      return;
+    }
+    COMMAND_PALETTE_INDEX = found;
+    var current = options[found];
+    current.classList.add("ps-command-current");
+    current.setAttribute("aria-selected", "true");
+    search.setAttribute("aria-activedescendant", current.id);
+    try { current.scrollIntoView({ block: "nearest" }); } catch (ignore) {}
+  }
   function commandCatalog() {
     var groups = [
       ["File", APP_MENU_DEFS.file], ["Edit", APP_MENU_DEFS.edit],
@@ -16392,19 +17900,27 @@
     root.innerHTML = "";
     if (!list.length) {
       root.appendChild(mkEl("div", "ps-command-empty", "No matching commands"));
+      COMMAND_PALETTE_INDEX = -1;
+      el("ps-command-search").removeAttribute("aria-activedescendant");
       return;
     }
     COMMAND_PALETTE_INDEX = Math.max(0, Math.min(COMMAND_PALETTE_INDEX, list.length - 1));
     for (var i = 0; i < list.length; i++) {
       (function (item, index) {
-        var b = mkEl("button", "ps-command-result" +
-          (index === COMMAND_PALETTE_INDEX ? " ps-command-current" : ""));
+        var b = mkEl("button", "ps-command-result");
         b.type = "button";
+        b.id = "ps-command-option-" + index;
+        b.setAttribute("role", "option");
+        b.setAttribute("aria-selected", "false");
+        b.setAttribute("aria-posinset", String(index + 1));
+        b.setAttribute("aria-setsize", String(list.length));
+        b.tabIndex = -1;
         b.setAttribute("data-palette-command", item.command);
         b.appendChild(mkEl("span", "", item.group + ": " + item.label));
         b.appendChild(mkEl("span", "", item.shortcut));
         b.disabled = !commandEnabled(item.command) ||
           (item.layoutOnly && !isLayoutTab(activeChart()));
+        b.setAttribute("aria-disabled", b.disabled ? "true" : "false");
         if (b.disabled) setTip(b, commandDisabledReason(item.command) ||
           "This command is unavailable in the current workspace");
         b.addEventListener("click", function () {
@@ -16413,6 +17929,7 @@
         root.appendChild(b);
       })(list[i], i);
     }
+    setCommandPaletteCurrent(COMMAND_PALETTE_INDEX, 1);
   }
   function showCommandPalette() {
     if (el("ps-welcome").style.display === "flex") return;
@@ -16420,16 +17937,17 @@
     COMMAND_PALETTE_INDEX = 0;
     el("ps-command-search").value = "";
     el("ps-command-palette").style.display = "flex";
-    document.querySelector(".ps-page").setAttribute("aria-hidden", "true");
+    el("ps-command-search").setAttribute("aria-expanded", "true");
+    shellSetPageModal(true);
     renderCommandPalette();
     window.setTimeout(function () { el("ps-command-search").focus(); }, 0);
   }
   function hideCommandPalette() {
     el("ps-command-palette").style.display = "none";
-    if (el("ps-welcome").style.display !== "flex")
-      document.querySelector(".ps-page").removeAttribute("aria-hidden");
-    try { if (COMMAND_PALETTE_LAST_FOCUS) COMMAND_PALETTE_LAST_FOCUS.focus(); }
-    catch (ignore) {}
+    el("ps-command-search").setAttribute("aria-expanded", "false");
+    el("ps-command-search").removeAttribute("aria-activedescendant");
+    shellRefreshPageModal();
+    shellRestoreFocus(COMMAND_PALETTE_LAST_FOCUS);
     COMMAND_PALETTE_LAST_FOCUS = null;
   }
   function wireCommandPalette() {
@@ -16438,16 +17956,10 @@
       COMMAND_PALETTE_INDEX = 0; renderCommandPalette();
     });
     search.addEventListener("keydown", function (e) {
-      var buttons = el("ps-command-results").querySelectorAll(
-        "button.ps-command-result");
-      if (e.key === "Escape") { e.preventDefault(); hideCommandPalette(); return; }
-      if (e.key === "Tab") { e.preventDefault(); return; }
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
-        COMMAND_PALETTE_INDEX += e.key === "ArrowDown" ? 1 : -1;
-        if (COMMAND_PALETTE_INDEX < 0) COMMAND_PALETTE_INDEX = Math.max(0, buttons.length - 1);
-        if (COMMAND_PALETTE_INDEX >= buttons.length) COMMAND_PALETTE_INDEX = 0;
-        renderCommandPalette();
+        var direction = e.key === "ArrowDown" ? 1 : -1;
+        setCommandPaletteCurrent(COMMAND_PALETTE_INDEX + direction, direction);
         return;
       }
       if (e.key === "Enter") {
@@ -16463,17 +17975,103 @@
     el("ps-command-palette").addEventListener("pointerdown", function (e) {
       if (e.target === this) hideCommandPalette();
     });
+    el("ps-command-palette").addEventListener("keydown", function (e) {
+      if (e.key === "Escape") {
+        e.preventDefault(); hideCommandPalette(); return;
+      }
+      shellTrapTab(this, e);
+    });
+    el("ps-command-close").addEventListener("click", hideCommandPalette);
   }
   // ---- punch list 17: the narrow-window drawers ----
   // The two panels are the SAME elements the wide layout uses, moved over the
   // main area by a class. Nothing is duplicated, so there is no second copy
   // of the navigator or the inspector to fall out of step.
   var NARROW_OPEN = null;   // "nav" | "inspector" | "menu" | null
-  function narrowSet(which) {
+  var NARROW_LAST_FOCUS = null;
+  var NARROW_ISOLATED = [];
+  function narrowRoot(which) {
+    if (which === "nav") return document.getElementById("ps-project-panel");
+    if (which === "inspector") return document.getElementById("ps-settings-panel");
+    if (which === "menu") return document.getElementById("ps-menubar");
+    return null;
+  }
+  function narrowReleaseIsolation() {
+    for (var i = 0; i < NARROW_ISOLATED.length; i++) {
+      var saved = NARROW_ISOLATED[i];
+      if (saved.inert) saved.node.setAttribute("inert", "");
+      else saved.node.removeAttribute("inert");
+      if (saved.ariaHidden === null) saved.node.removeAttribute("aria-hidden");
+      else saved.node.setAttribute("aria-hidden", saved.ariaHidden);
+    }
+    NARROW_ISOLATED = [];
+  }
+  function narrowIsolate(which) {
+    narrowReleaseIsolation();
+    var nodes = [];
+    function add(node) {
+      if (node && nodes.indexOf(node) < 0) nodes.push(node);
+    }
+    add(document.querySelector(".ps-bypass"));
+    add(document.querySelector(".ps-commandbar"));
+    add(document.querySelector(".ps-statusbar"));
+    if (which === "menu") {
+      add(document.querySelector(".ps-app-body"));
+      var appbar = document.querySelector(".ps-appbar");
+      if (appbar) {
+        for (var i = 0; i < appbar.children.length; i++)
+          if (!appbar.children[i].classList.contains("ps-menubar"))
+            add(appbar.children[i]);
+      }
+    } else {
+      add(document.querySelector(".ps-appbar"));
+      add(document.querySelector(".ps-main-workspace"));
+      var splitters = document.querySelectorAll(".ps-splitter");
+      for (var j = 0; j < splitters.length; j++) add(splitters[j]);
+      add(document.querySelector(which === "nav" ?
+        ".ps-controls" : ".ps-project-panel"));
+    }
+    for (var k = 0; k < nodes.length; k++) {
+      NARROW_ISOLATED.push({
+        node: nodes[k],
+        inert: nodes[k].hasAttribute("inert"),
+        ariaHidden: nodes[k].getAttribute("aria-hidden")
+      });
+      nodes[k].setAttribute("inert", "");
+      nodes[k].setAttribute("aria-hidden", "true");
+    }
+  }
+  function narrowTabbables() {
+    var list = shellDialogTabbables(narrowRoot(NARROW_OPEN));
+    var appMenu = document.getElementById("ps-appmenu");
+    if (NARROW_OPEN === "menu" && appMenu &&
+        appMenu.style.display === "block")
+      list = list.concat(shellDialogTabbables(appMenu));
+    return list;
+  }
+  function narrowTrapTab(e) {
+    if (!e || e.key !== "Tab") return false;
+    var list = narrowTabbables();
+    if (!list.length) { e.preventDefault(); return true; }
+    var at = list.indexOf(document.activeElement);
+    if (at < 0 || (e.shiftKey && at === 0) ||
+        (!e.shiftKey && at === list.length - 1)) {
+      e.preventDefault();
+      list[e.shiftKey ? list.length - 1 : 0].focus();
+      return true;
+    }
+    return false;
+  }
+  // skipFocus is used only when another action owns the destination (for
+  // example, a workspace choice or a bypass link). Ordinary open/close
+  // operations move focus into the drawer and return it to the trigger.
+  function narrowSet(which, skipFocus) {
     var body = document.querySelector(".ps-app-body");
     var bar = document.querySelector(".ps-appbar");
     var scrim = document.getElementById("ps-narrow-scrim");
     if (!body || !bar) return;
+    var priorOpen = NARROW_OPEN;
+    if (which && !priorOpen) NARROW_LAST_FOCUS = document.activeElement;
     NARROW_OPEN = which || null;
     body.classList.toggle("ps-narrow-nav-open", which === "nav");
     body.classList.toggle("ps-narrow-inspector-open", which === "inspector");
@@ -16486,6 +18084,17 @@
       if (b) b.setAttribute("aria-expanded", which === pairs[i][1] ? "true" : "false");
     }
     if (which !== "menu") hideAppMenu(false);
+    if (which) {
+      narrowIsolate(which);
+      if (!skipFocus) window.setTimeout(function () {
+        var first = narrowTabbables()[0];
+        if (first) first.focus();
+      }, 0);
+    } else {
+      narrowReleaseIsolation();
+      if (priorOpen && !skipFocus) shellRestoreFocus(NARROW_LAST_FOCUS);
+      NARROW_LAST_FOCUS = null;
+    }
   }
   function narrowToggle(which) {
     narrowSet(NARROW_OPEN === which ? null : which);
@@ -16493,7 +18102,7 @@
   // A narrow user who picks a workspace or a document is done with the
   // drawer; leaving it over their chart would be the drawer's own fault.
   function narrowCloseAfterNavigation() {
-    if (NARROW_OPEN === "nav" || NARROW_OPEN === "menu") narrowSet(null);
+    if (NARROW_OPEN === "nav" || NARROW_OPEN === "menu") narrowSet(null, true);
   }
   function wireNarrowChrome() {
     var ids = [["ps-narrow-nav", "nav"], ["ps-narrow-inspector", "inspector"],
@@ -16511,13 +18120,38 @@
     var scrim = document.getElementById("ps-narrow-scrim");
     if (scrim) scrim.addEventListener("click", function () { narrowSet(null); });
     document.addEventListener("keydown", function (e) {
-      if (e.key === "Escape" && NARROW_OPEN) narrowSet(null);
+      if (!NARROW_OPEN ||
+          document.querySelector(".ps-page").hasAttribute("inert")) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        narrowSet(null);
+        return;
+      }
+      narrowTrapTab(e);
     });
     // Widening the window puts everything back in the grid, so a drawer left
     // open would sit on top of the panel it IS.
     window.addEventListener("resize", function () {
-      if (NARROW_OPEN && window.innerWidth > 760) narrowSet(null);
+      if (NARROW_OPEN && window.innerWidth > 760) narrowSet(null, true);
     });
+  }
+  function wireBypassLinks() {
+    var workspace = el("ps-main-workspace");
+    var settings = el("ps-settings-panel");
+    var workspaceLink = el("ps-skip-workspace");
+    var settingsLink = el("ps-skip-settings");
+    if (workspaceLink && workspace)
+      workspaceLink.addEventListener("click", function (e) {
+        e.preventDefault();
+        narrowSet(null, true);
+        window.requestAnimationFrame(function () { workspace.focus(); });
+      });
+    if (settingsLink && settings)
+      settingsLink.addEventListener("click", function (e) {
+        e.preventDefault();
+        if (window.innerWidth <= 760) narrowSet("inspector", true);
+        window.requestAnimationFrame(function () { settings.focus(); });
+      });
   }
   // Shared by the bar and by the open menu, so Left/Right walks the menus
   // whether the focus is on a button or inside a dropdown - which is how the
@@ -16602,6 +18236,7 @@
     wireMenubarEntry();
     wireLayoutImagePaste();
     wireNarrowChrome();
+    wireBypassLinks();
     wireCoach();
     wireTooltips();
     wireFitToPane();
@@ -16793,7 +18428,7 @@
       // shows none and the other two each show half, so "the third tab" has
       // to mean the third tab a user can see.
       var tabs = Array.prototype.slice.call(
-        el("ps-tabs").querySelectorAll("[data-chart-id]"));
+        el("ps-tabs").querySelectorAll(".ps-tab[data-chart-id]"));
       var pick = tabs[Number(m[1]) - 1];
       if (!pick) return;
       e.preventDefault();
@@ -17090,7 +18725,11 @@
     snapshots: function () { return Object.keys(CHART_SNAPS); },
     snapshotOf: function (id) {
       var s = CHART_SNAPS[id];
-      return s ? { svg: s.svg, rev: s.rev, valid: !!validSnap(id) } : null;
+      // w/h ride along so a probe can pin the snapshot's BOX, which is
+      // what decides a layout panel's aspect (and whether a part
+      // dragged outside the canvas survives into the layout export).
+      return s ? { svg: s.svg, w: s.w, h: s.h, rev: s.rev,
+                   valid: !!validSnap(id) } : null;
     },
     switchChart: switchChart,
     setWorkspace: setAppWorkspace,

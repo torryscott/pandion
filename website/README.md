@@ -205,10 +205,12 @@ binaries:
   by platform, so users pick theirs).
 - Desktop card: links to `download.html`. Its installer buttons use
   stable `/releases/latest/download/` URLs so GitHub serves the files
-  without requiring users to browse the GitHub website. Publish release
-  assets with these exact names:
-  `Pandion-Plots-macOS-arm64.dmg`,
-  `Pandion-Plots-macOS-x64.dmg`, and
+  without requiring users to browse the GitHub website. The release
+  workflow's desktop job publishes assets with these exact names (set by
+  `artifactName` in standalone/electron/package.json - the two must stay
+  in lockstep, and electron-updater's latest*.yml metadata references
+  them, so never rename a published asset by hand):
+  `Pandion-Plots-macOS.dmg` (universal: Apple silicon + Intel) and
   `Pandion-Plots-Windows-x64.exe`.
 
 ## Updating

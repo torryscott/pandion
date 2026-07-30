@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Accessibility - Pandion Plots</title>
+<meta name="description" content="Pandion Plots accessibility goals, known limitations, support options, and barrier-reporting contact.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<meta name="theme-color" content="#192E49">
+<link rel="canonical" href="https://pandionplots.com/accessibility.html">
+<style>
+  :root {
+    --navy:#192e49; --cobalt:#375ca0; --ink:#22364d; --muted:#536579;
+    --line:#d8e2ed; --wash:#f4f7fb; --amber:#8a6414;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+  body {
+    margin: 0; color: var(--ink); background: #fff;
+    font: 16px/1.68 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      Helvetica, Arial, sans-serif;
+  }
+  a { color: var(--cobalt); }
+  .wrap { max-width: 1000px; margin: 0 auto; padding-inline: 24px; }
+  header {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(255,255,255,.94); border-bottom: 1px solid var(--line);
+  }
+  .nav { display: flex; align-items: center; gap: 10px; min-height: 60px; }
+  .brand {
+    display: flex; align-items: center; gap: 10px; color: var(--navy);
+    font-size: 18px; font-weight: 800; text-decoration: none;
+  }
+  .brand img { width: 34px; height: 34px; }
+  .nav-links { display: flex; gap: 4px; margin-left: auto; }
+  .nav-links a {
+    padding: 7px 12px; border-radius: 7px; color: var(--ink);
+    font-size: 14.5px; font-weight: 600; text-decoration: none;
+  }
+  .nav-links a:hover, .nav-links a[aria-current="page"] {
+    color: var(--cobalt); background: var(--wash);
+  }
+  .nav-links .nav-cta { margin-left: 6px; color: #fff; background: var(--navy); }
+  main { padding-block: 58px 34px; }
+  .kicker {
+    margin: 0 0 8px; color: var(--amber); font-size: 13px; font-weight: 800;
+    letter-spacing: .12em; text-transform: uppercase;
+  }
+  h1 {
+    margin: 0 0 16px; color: var(--navy);
+    font-size: clamp(32px, 5vw, 48px); line-height: 1.12;
+  }
+  .lede { max-width: 760px; margin: 0 0 34px; color: #3d4a58; font-size: 18px; }
+  .statement { max-width: 780px; }
+  h2 { margin: 36px 0 10px; color: var(--navy); font-size: 23px; }
+  p, li { max-width: 760px; }
+  ul { padding-left: 22px; }
+  li { margin: 8px 0; }
+  .contact {
+    margin: 30px 0; padding: 22px 24px; border: 1px solid var(--line);
+    border-left: 5px solid var(--cobalt); border-radius: 10px;
+    background: var(--wash);
+  }
+  .contact h2 { margin-top: 0; }
+  .contact p:last-child { margin-bottom: 0; }
+  .updated { color: var(--muted); font-size: 13.5px; }
+  footer { margin-top: 46px; padding: 34px 0 44px; border-top: 1px solid var(--line); }
+  .foot { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; color: var(--muted); font-size: 13.5px; }
+  .foot .brand { font-size: 15px; }
+  .foot .brand img { width: 26px; height: 26px; }
+  .foot-links { display: flex; flex-wrap: wrap; gap: 10px 18px; margin-left: auto; }
+  .foot-links a { color: var(--muted); text-decoration: none; }
+  .foot-links a:hover, .foot-links a[aria-current="page"] { color: var(--cobalt); }
+  @media (max-width:760px) {
+    .nav { flex-wrap: wrap; padding-block: 8px; }
+    .nav-toggle { display: inline-flex; }
+    .nav-links { display: none; width: 100%; margin: 6px 0 2px; flex-direction: column; }
+    .nav-links.is-open { display: flex; }
+    .nav-links a { width: 100%; }
+    main { padding-top: 38px; }
+  }
+  @media (prefers-reduced-motion:reduce) { html { scroll-behavior: auto; } }
+</style>
+<link rel="stylesheet" href="assets/site-nav.css">
+<script src="assets/site-nav.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="index.html">
+      <img src="assets/pandion-wing.svg" alt=""
+           data-image-kind="decorative">
+      Pandion Plots
+    </a>
+    <button class="nav-toggle" type="button" aria-expanded="false"
+      aria-controls="site-nav">
+      <span class="nav-toggle-icon" aria-hidden="true"></span>
+      <span>Menu</span>
+    </button>
+    <nav class="nav-links" id="site-nav" aria-label="Site">
+      <a href="gallery.html">Gallery</a>
+      <a href="docs/">Docs</a>
+      <a href="index.html#downloads">Downloads</a>
+      <a href="about.html">About</a>
+      <a class="nav-cta" href="app/">Try it now</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main-content" tabindex="-1">
+  <div class="wrap statement">
+    <p class="kicker">Accessibility</p>
+    <h1>Making Pandion usable by more people.</h1>
+    <p class="lede">Pandion Plots is an open-source product. Accessibility is a core product-quality commitment.</p>
+
+    <h2>Our target</h2>
+    <p>Pandion is being developed toward WCAG 2.2 Level A and AA across the public website and documentation, portable and Electron applications, exports, and jamovi integration. Work is still in progress, so this page is not a claim or certification of full conformance.</p>
+
+    <h2>Current strengths</h2>
+    <ul>
+      <li>The chart itself is keyboard navigable, exposes a screen-reader summary, and directs users to semantic statistical results.</li>
+      <li>The interface respects reduced-motion preferences and includes visible keyboard focus.</li>
+      <li>The public website and guide provide bypass links, responsive layouts, descriptive image alternatives, and keyboard-accessible navigation.</li>
+    </ul>
+
+    <h2>Known limitations</h2>
+    <ul>
+      <li>Screen-reader navigation in the standalone Data grid is being improved, particularly for virtualized rows and active-cell announcements.</li>
+      <li>Some Layouts workspace selection, resizing, and editing workflows still require additional keyboard support.</li>
+      <li>Exported charts may require a companion caption, long description, or data table; raster images cannot carry reliable web alternative text by themselves.</li>
+      <li>Testing with NVDA, JAWS, VoiceOver, magnification, voice control, and disabled users is ongoing.</li>
+    </ul>
+
+    <div class="contact">
+      <h2>Report an accessibility barrier</h2>
+      <p>Email <a href="mailto:contact@pandionplots.com">contact@pandionplots.com</a>. Please include what you were trying to do, the page or application version, your browser and assistive technology if applicable, and any error message you encountered.</p>
+      <p>You may also request an accessible description, data table, documentation format, or help identifying an accessible route through a Pandion workflow. We will reply with the available workaround or remediation status.</p>
+    </div>
+
+    <p class="updated">Last updated July 28, 2026.</p>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <a class="brand" href="index.html">
+      <img src="assets/pandion-wing.svg" alt=""
+           data-image-kind="decorative">
+      Pandion Plots
+    </a>
+    <span>Made by Torry Scott Dennis, PhD.</span>
+    <nav class="foot-links" aria-label="Footer">
+      <a href="app/">Try it</a>
+      <a href="docs/">Docs</a>
+      <a href="about.html">About</a>
+      <a href="support.html">Support</a>
+      <a href="accessibility.html" aria-current="page">Accessibility</a>
+      <a href="https://github.com/torryscott/pandion">GitHub</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

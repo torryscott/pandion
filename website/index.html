@@ -284,11 +284,13 @@
 <script src="assets/site-nav.js" defer></script>
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to main content</a>
 
 <header>
   <div class="wrap nav">
-    <a class="brand" href="#">
-      <img src="assets/pandion-wing.svg" alt="">
+    <a class="brand" href="index.html">
+      <img src="assets/pandion-wing.svg" alt=""
+           data-image-kind="decorative">
       Pandion Plots
     </a>
     <button class="nav-toggle" type="button" aria-expanded="false"
@@ -307,7 +309,7 @@
   </div>
 </header>
 
-<main>
+<main id="main-content" tabindex="-1">
   <div class="hero">
     <div class="wrap hero-grid">
       <div>
@@ -328,6 +330,7 @@
       </div>
       <div class="hero-art">
         <img src="assets/diving-straight.svg"
+             data-image-kind="illustrative"
              alt="The Pandion Plots osprey diving along a straight data trend
                   line to seize its final point">
       </div>
@@ -340,6 +343,7 @@
         <div class="shot-frame">
           <div class="shot-bar" aria-hidden="true"><i></i><i></i><i></i></div>
           <img src="assets/app-chart.png"
+               data-image-kind="illustrative"
                alt="The Pandion Plots chart workspace: a scatterplot with a
                     fit line and marginal histograms, beside a chart setup
                     panel listing the variables and their analysis roles">
@@ -362,10 +366,13 @@
       </p>
       <div class="tease-grid">
         <a href="gallery.html"><img src="assets/gallery/raincloud.png"
+          data-image-kind="illustrative"
           alt="Raincloud chart of three dose groups"></a>
         <a href="gallery.html"><img src="assets/gallery/likert.png"
+          data-image-kind="illustrative"
           alt="Diverging stacked Likert chart of five survey items"></a>
         <a href="gallery.html"><img src="assets/gallery/scatter-marginals.png"
+          data-image-kind="illustrative"
           alt="Scatter chart with marginal histograms"></a>
       </div>
       <p class="tease-more"><a href="gallery.html">Browse the full gallery</a></p>
@@ -397,6 +404,7 @@
           <div class="shot-frame">
             <div class="shot-bar" aria-hidden="true"><i></i><i></i><i></i></div>
             <img src="assets/app-data.png" loading="lazy"
+                 data-image-kind="illustrative"
                  alt="The Pandion Plots data workspace: a spreadsheet of the
                       sample data beside a variable inspector showing the
                       measure type, a summary of rows and missing values, and
@@ -422,6 +430,7 @@
           <div class="shot-frame">
             <div class="shot-bar" aria-hidden="true"><i></i><i></i><i></i></div>
             <img src="assets/app-layout.png" loading="lazy"
+                 data-image-kind="illustrative"
                  alt="The Pandion Plots figure composer: a bar chart and a
                       scatterplot placed side by side as panels A and B on a
                       canvas page, with snapping and page controls above">
@@ -582,8 +591,9 @@
 
 <footer>
   <div class="wrap foot">
-    <a class="brand" href="#">
-      <img src="assets/pandion-wing.svg" alt="">
+    <a class="brand" href="index.html">
+      <img src="assets/pandion-wing.svg" alt=""
+           data-image-kind="decorative">
       Pandion Plots
     </a>
     <span>Made by Torry Scott Dennis, PhD.</span>
@@ -598,6 +608,7 @@
       <a href="about.html#cite">How to cite</a>
       <a href="about.html">About</a>
       <a href="support.html">Support</a>
+      <a href="accessibility.html">Accessibility</a>
       <a href="https://github.com/torryscott/pandion">GitHub</a>
     </nav>
   </div>

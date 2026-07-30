@@ -69,6 +69,7 @@
     display: grid; grid-template-columns: 1fr 300px; gap: 56px;
     align-items: start;
   }
+  .about-grid > *, .prose { min-width: 0; }
   .kicker {
     color: #8a6414; font-size: 13px; font-weight: 800;
     letter-spacing: 0.12em; text-transform: uppercase; margin: 0 0 8px;
@@ -190,16 +191,24 @@
     .nav-links a { padding: 6px 9px; font-size: 13.5px; }
     .nav-links a.nav-cta { margin-left: auto; }
   }
+  @media (max-width: 520px) {
+    .cite-format-control, .cite-actions {
+      width: 100%; flex-wrap: wrap; margin-left: 0;
+    }
+    .cite-select { min-width: 0; max-width: 100%; }
+  }
 </style>
 <link rel="stylesheet" href="assets/site-nav.css">
 <script src="assets/site-nav.js" defer></script>
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to main content</a>
 
 <header>
   <div class="wrap nav">
     <a class="brand" href="index.html">
-      <img src="assets/pandion-wing.svg" alt="">
+      <img src="assets/pandion-wing.svg" alt=""
+           data-image-kind="decorative">
       Pandion Plots
     </a>
     <button class="nav-toggle" type="button" aria-expanded="false"
@@ -218,7 +227,7 @@
   </div>
 </header>
 
-<main>
+<main id="main-content" tabindex="-1">
   <div class="wrap page">
     <div class="about-grid">
       <div class="prose">
@@ -258,6 +267,7 @@
         <h2>Why "Pandion"?</h2>
         <div class="why-pandion">
           <img src="assets/diving-straight.svg"
+               data-image-kind="illustrative"
                alt="The Pandion Plots osprey diving along a straight data trend line to seize its final point">
           <p>
             <em>Pandion</em> is the genus of the osprey and the source
@@ -384,6 +394,7 @@ ER  -</pre>
         <div class="dev-card">
           <div class="art">
             <img class="avatar" src="assets/torry-dennis.jpg"
+                 data-image-kind="illustrative"
                  alt="Torry Scott Dennis">
           </div>
           <div class="body">
@@ -413,7 +424,8 @@ ER  -</pre>
 <footer>
   <div class="wrap foot">
     <a class="brand" href="index.html">
-      <img src="assets/pandion-wing.svg" alt="">
+      <img src="assets/pandion-wing.svg" alt=""
+           data-image-kind="decorative">
       Pandion Plots
     </a>
     <span>Made by Torry Scott Dennis, PhD.</span>
@@ -427,6 +439,7 @@ ER  -</pre>
       <a href="about.html#cite">How to cite</a>
       <a href="about.html">About</a>
       <a href="support.html">Support</a>
+      <a href="accessibility.html">Accessibility</a>
       <a href="https://github.com/torryscott/pandion">GitHub</a>
     </nav>
   </div>

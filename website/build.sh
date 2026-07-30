@@ -143,3 +143,5 @@ else
     echo "ERROR: public version references are inconsistent" >&2
     exit 1
 fi
+
+node website/verify-accessibility.mjs

@@ -1,3 +1,22 @@
+.skip-link {
+  position: fixed;
+  z-index: 1000;
+  top: 8px;
+  left: 12px;
+  padding: 9px 13px;
+  border: 2px solid var(--navy);
+  border-radius: 8px;
+  color: #fff;
+  background: var(--navy);
+  font-weight: 700;
+  text-decoration: none;
+  transform: translateY(-160%);
+}
+
+.skip-link:focus {
+  transform: none;
+}
+
 .nav-toggle {
   display: none;
   align-items: center;
