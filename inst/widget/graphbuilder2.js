@@ -4812,7 +4812,7 @@
         // handler — pairs with click-to-select + Delete-to-hide
         // as the two-step alternative to the prior "right-click
         // = instant hide" gesture.
-        function _showPointContextMenu(clientX, clientY, cat, group, idx) {
+        function _showPointContextMenu(clientX, clientY, cat, group, idx, isHidden) {
             // Clean up any prior instance.
             var existing = document.querySelector('[data-role="gb2-point-menu"]');
             if (existing && existing.parentNode) {
@@ -4820,6 +4820,9 @@
             }
             var menu = document.createElement("div");
             menu.setAttribute("data-role", "gb2-point-menu");
+            // Hosts that relabel this menu (the standalone's exclusion
+            // bridge) need to know which side of the toggle it is on.
+            if (isHidden) menu.setAttribute("data-point-hidden", "1");
             // Position in wrap-relative coords so the menu rides
             // with the chart when the host scrolls. clientX/Y is
             // viewport-relative; subtract wrap's bounding rect.
@@ -4844,7 +4847,15 @@
             ].join(";");
             var btn = document.createElement("button");
             btn.type = "button";
-            btn.textContent = "Hide this point";
+            // The HOST names the semantics (Torry, Jul 29 2026): jamovi
+            // hides (a display choice), the standalone excludes (its
+            // bridge writes REAL exclusions into the dataset). The
+            // additive payload key pointMenuVerb is absent in jamovi
+            // payloads, so jamovi keeps its wording untouched.
+            var _pmExcl = !!(data && data.pointMenuVerb === "exclude");
+            btn.textContent = isHidden
+                ? (_pmExcl ? "Include this point" : "Restore this point")
+                : (_pmExcl ? "Exclude this point" : "Hide this point");
             btn.style.cssText = [
                 "display:block","width:100%","text-align:left",
                 "padding:7px 14px","border:0","background:transparent",
@@ -4893,6 +4904,33 @@
                 document.addEventListener("keydown", _escHandler, true);
             }, 0);
         }
+        // Cmd/Ctrl+E toggles the point under the cursor - the same
+        // shortcut the standalone's Data workspace uses for exclusion,
+        // one gesture across both surfaces (Torry, Jul 29 2026). The
+        // listener wires once per window; the toggle it calls is
+        // re-exposed EVERY render so it always closes over the current
+        // chart's stores (the __gb2_valAxis idiom - in jamovi each
+        // analysis lives in its own iframe, so the window global is
+        // per-analysis by construction). Typing fields are exempt.
+        if (!window.__gb2_dpKeyWired) {
+            window.__gb2_dpKeyWired = true;
+            document.addEventListener("keydown", function (e) {
+                if (String(e.key).toLowerCase() !== "e" ||
+                    !(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+                var hp = window.__gb2_dpHoverPoint;
+                if (!hp) return;
+                var t = e.target;
+                if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" ||
+                          t.isContentEditable)) return;
+                if (typeof window.__gb2_dpTogglePoint !== "function") return;
+                e.preventDefault();
+                e.stopPropagation();
+                window.__gb2_dpTogglePoint(hp.cat, hp.group, hp.idx);
+            }, true);
+        }
+        window.__gb2_dpTogglePoint = function (cat, group, idx) {
+            _togglePointHidden(cat, group, idx);
+        };
         // t-critical for CI recomputation. Uses bisection on the
         // existing _tCDF — small cost, runs at most a handful of
         // times per redraw (once per bar with hidden points).
@@ -7993,6 +8031,22 @@
             var elBottom = bb.bottom - svgBb.top;
             var W = parseFloat(svg.getAttribute("width")) || svgBb.width;
             var H = parseFloat(svg.getAttribute("height")) || svgBb.height;
+            // Zoom-aware (Jul 2026, standalone shell finding): the rect
+            // deltas above are VISUAL pixels, while the width/height
+            // ATTRIBUTES are the svg's own logical units. Under an
+            // ancestor CSS zoom (the standalone shell's view zoom) the two
+            // differ by exactly that factor, so every element
+            // over-measures at magnification and the auto-grow inflates
+            // the canvas on ordinary redraws (720 -> 938.78 measured).
+            // Express the deltas in logical units before comparing. In
+            // jamovi nothing zooms: svgBb.width equals W, _zScale snaps to
+            // 1, and the arithmetic below is byte-identical.
+            var _zScale = (W > 0 && svgBb.width > 0) ? (svgBb.width / W) : 1;
+            if (Math.abs(_zScale - 1) < 0.001) _zScale = 1;
+            if (_zScale !== 1) {
+                elLeft /= _zScale; elTop /= _zScale;
+                elRight /= _zScale; elBottom /= _zScale;
+            }
             var BUFFER = 12;
             // Right / bottom: grow the SVG itself - this also enlarges
             // the wrap's layout box, so jamovi reserves room.
@@ -9948,6 +10002,33 @@
                         (d.corrVars.length > 8 ? " and more" : ""));
                 if (d.likertLevels && d.likertLevels.length > 0)
                     parts.push("Response scale: " + d.likertLevels.slice(0, 8).join(", "));
+                var _ebName = {
+                    se: "standard errors",
+                    sd: "standard deviations",
+                    ci95: "95 percent confidence intervals",
+                    ci: "confidence intervals"
+                }[String(d.errorBarType || "").toLowerCase()];
+                if (_ebName)
+                    parts.push("Error bars show " + _ebName);
+                var _hiddenDataCount =
+                    (Array.isArray(d.hiddenBars) ? d.hiddenBars.length : 0) +
+                    (Array.isArray(d.hiddenPoints) ? d.hiddenPoints.length : 0) +
+                    (Array.isArray(d.xyHiddenGroups)
+                        ? d.xyHiddenGroups.length : 0);
+                if (Array.isArray(d.hiddenElements)) {
+                    for (var _ahi = 0; _ahi < d.hiddenElements.length; _ahi++) {
+                        var _ah = String(d.hiddenElements[_ahi] || "");
+                        if (_ah.indexOf("distGroup:") === 0 ||
+                            _ah.indexOf("likertItem:") === 0 ||
+                            _ah.indexOf("corrVar:") === 0)
+                            _hiddenDataCount++;
+                    }
+                }
+                if (_hiddenDataCount > 0)
+                    parts.push(_hiddenDataCount +
+                        (_hiddenDataCount === 1
+                            ? " observation or data part is excluded from the chart"
+                            : " observations or data parts are excluded from the chart"));
                 if (!noTail)
                     parts.push("Open the Statistics panel from the toolbar for the numbers behind this chart");
                 return parts.join(". ") + ".";
@@ -10254,15 +10335,40 @@
             var styleEl = document.createElementNS("http://www.w3.org/2000/svg", "style");
             styleEl.textContent = 'text { font-family: ' + _exportFont + '; }';
             copy.insertBefore(styleEl, copy.firstChild);
-            // The exported-SVG <title>/<desc> alt-text embed is REMOVED
-            // (Jul 10 2026, Torry: SVG-only alt text was inconsistent with
-            // every other export format and unreliable in his target
-            // context; re-addable later - the chartAltText plumbing stays
-            // dormant so old files load). The live chart keeps its auto
-            // aria-label; the export clone just sheds the focus stop.
+            // A portable SVG remains a meaningful image after it leaves
+            // Pandion. The root has an explicit image role and references a
+            // short title plus the same generated structural description as
+            // the live chart (without application-only keyboard/Statistics
+            // instructions). Raster formats cannot retain this metadata, so
+            // their companion-text workflow lives in the standalone shell.
             try {
                 copy.removeAttribute("tabindex");
                 copy.removeAttribute("aria-label");
+                var _exportTitleText =
+                    (typeof data.chartTitle === "string" &&
+                     data.chartTitle.trim().length > 0)
+                        ? data.chartTitle.trim()
+                        : _gb2ChartAriaLabel(data, true).split(". ")[0];
+                var _exportDescText = _gb2ChartAriaLabel(data, true);
+                var _oldMeta = copy.querySelectorAll(
+                    ':scope > title, :scope > desc');
+                for (var _emi = 0; _emi < _oldMeta.length; _emi++) {
+                    if (_oldMeta[_emi].parentNode)
+                        _oldMeta[_emi].parentNode.removeChild(_oldMeta[_emi]);
+                }
+                var _exportTitle = document.createElementNS(
+                    "http://www.w3.org/2000/svg", "title");
+                var _exportDesc = document.createElementNS(
+                    "http://www.w3.org/2000/svg", "desc");
+                _exportTitle.setAttribute("id", "gb2-export-title");
+                _exportDesc.setAttribute("id", "gb2-export-description");
+                _exportTitle.textContent = _exportTitleText;
+                _exportDesc.textContent = _exportDescText;
+                copy.insertBefore(_exportDesc, copy.firstChild);
+                copy.insertBefore(_exportTitle, copy.firstChild);
+                copy.setAttribute("role", "img");
+                copy.setAttribute("aria-labelledby",
+                    "gb2-export-title gb2-export-description");
             } catch (_eAltMeta) {}
             // Normalize font attributes so svg2pdf maps bold/italic
             // correctly. svg2pdf classifies font-weight >= 700 as bold;
@@ -10289,7 +10395,19 @@
                     t.setAttribute("font-style", "normal");
                 }
             }
-            return new XMLSerializer().serializeToString(copy);
+            var _serialized = new XMLSerializer().serializeToString(copy);
+            // Normalize the per-render random widget id out of the
+            // serialization (it rides the categorical data-clip id,
+            // gb2-cat-data-clip-<elementId>). Without this, the same chart
+            // serializes DIFFERENTLY every render, so the chartSnapshot
+            // signature never matches its own echo and the snapshot sweep
+            // re-commits on every rebuild - one wasted R rerun per reopen
+            // in production, an unbounded 4-second commit/rerun loop under
+            // a results element that rebuilds on every delivery.
+            try {
+                _serialized = _serialized.split(String(elementId)).join("gb2-static");
+            } catch (_eNorm) {}
+            return _serialized;
         }
 
         // The copy patch below runs at window scope (installed once per
@@ -10297,6 +10415,9 @@
         // both on the host, refreshed every render.
         try {
             host.__gb2_serializeSvg = serializeSvgForExport;
+            host.__gb2_accessibleDescription = function () {
+                return _gb2ChartAriaLabel(data, true);
+            };
             host.__gb2_chartSize = function () {
                 try {
                     var _r = svg.getBoundingClientRect();
@@ -24850,13 +24971,12 @@
             // outset so the highlight ring doesn't collide with the
             // adjacent swatch.
             var outOff = Math.max(2, Math.round(sz * 0.15));
-            // Gap scales with swatch size too: 20 px → 3 px, smaller
-            // swatches → 2 px. The compact text-panel variant (14 px)
-            // gets 2 px gap so all 12 swatches + chip fit one line.
-            // nowrap ensures the row never breaks — callers pass a
-            // size small enough to fit; we don't want flex-wrap
-            // pushing the palette below the chip half-rendered.
-            var gap = (sz >= 18) ? 3 : 2;
+            // WCAG 2.2 permits a compact target when an unobstructed
+            // 24px-diameter circle around its center does not intersect a
+            // neighbouring target. Keep the deliberately compact swatches,
+            // but space their centers at least 24px apart: 20px -> 4px gap,
+            // 18px -> 6px, and the 14px text-panel variant -> 10px.
+            var gap = Math.max(4, 24 - sz);
             var cur = (currentHex || "").toLowerCase();
             var html = '<span style="display:inline-flex;align-items:center;gap:' + gap + 'px;flex-shrink:0;flex-wrap:' + (allowTransparent ? "wrap" : "nowrap") + ';">';
             // Optional leftmost "transparent" swatch — fill strips only.
@@ -31499,10 +31619,75 @@
             // styling (yAxisColor / yTickColor / yTickLength /
             // yTickDirection / yAxisThickness) follows the LEFT-axis
             // ("Y") panel as in vertical mode. Category set, relabels
+            // ---- crowded-category label thinning (Jul 2026, Torry) ----
+            // Rotation (M.xCatAutoRotate, decided in the margin block) buys
+            // room down to roughly 23px of tick pitch at the default 14px
+            // face. Past that even ROTATED labels overlap and the axis
+            // becomes a smear of ink: the shape a mis-pasted ID column
+            // produces. Thin the LABELS (draw every kth) and leave every
+            // TICK in place, so positions stay honest and a reader can see
+            // that categories exist between the printed names. Nothing about
+            // the data changes, and no geometry changes - the bottom margin
+            // is still sized for the longest label, which may still be drawn.
+            //
+            // The Check-graph panel says it out loud (rule xcatthin); the
+            // drawn labels stamp data-cat-stride so that note, the probes,
+            // and the axis can never disagree about the number.
+            //
+            // Deliberately NOT an option: it engages only where the labels
+            // would be illegible either way, and a switch to turn legibility
+            // back off is not a feature.
+            function _gb2CatLabelStride(nCats, pitchPx, fontPx, angleDeg) {
+                if (!(nCats > 2) || !(pitchPx > 0)) return 1;
+                var fs = (isFinite(fontPx) && fontPx > 0) ? fontPx : 14;
+                var need = fs * 1.15;      // one line of text plus a hair of air
+                var ang = Math.abs(angleDeg || 0);
+                if (ang > 0.5) {
+                    // Adjacent ROTATED baselines are parallel lines offset
+                    // along the axis by the pitch; their PERPENDICULAR
+                    // separation is pitch * sin(angle), and that is what has
+                    // to clear a line of text.
+                    var sn = Math.abs(Math.sin(ang * Math.PI / 180));
+                    if (!(sn > 0.05)) return 1;
+                    need = need / sn;
+                } else if (!(angleDeg === 0)) {
+                    return 1;
+                }
+                // NOTE the angle-0 branch measures a line HEIGHT against the
+                // pitch, which is right only where labels stack PERPENDICULAR
+                // to the axis - i.e. horizontal mode's left-hand category
+                // axis. An unrotated VERTICAL axis is unrotated precisely
+                // because the margin block proved the widest label fits, so
+                // its caller passes no stride request at all rather than
+                // asking this function a width question it cannot answer.
+                if (!(need > pitchPx)) return 1;
+                var k = Math.ceil(need / pitchPx);
+                // Never thin below two names: an axis carrying a single
+                // label is worse than a crowded one.
+                var cap = Math.max(1, Math.floor(nCats / 2));
+                if (k > cap) k = cap;
+                return (k > 1) ? k : 1;
+            }
             // (xCategoryRelabels), hide flags (xCatLabel:*) and
             // click-to-rename handlers come from the X side because
             // those follow category identity, not screen position.
             if (horizontal) {
+                // Left-hand category axis: labels are unrotated and stack
+                // vertically, so the pitch is the category slot's height and
+                // one line of text is the clearance needed.
+                var _xCatMaxFsH = 14, _xCatStrideH = 1;
+                try {
+                    var _hfMax = 0;
+                    for (var _hf = 0; _hf < visibleXCats.length; _hf++) {
+                        var _hfS = getEffectiveTextStyle("xCat:" + visibleXCats[_hf]);
+                        if (_hfS && _hfS.fontSize > _hfMax) _hfMax = _hfS.fontSize;
+                    }
+                    if (_hfMax > 0) _xCatMaxFsH = _hfMax;
+                    if (innerW > 0)
+                        _xCatStrideH = _gb2CatLabelStride(
+                            visibleXCats.length,
+                            (catWidth / innerW) * innerH, _xCatMaxFsH, 0);
+                } catch (_eHf) { _xCatStrideH = 1; }
                 for (var ch = 0; ch < visibleXCats.length; ch++) {
                     var cxH = chartLeft + (cumExtraGap[ch] || 0) + (ch + 0.5) * catWidth;
                     var origCatH = visibleXCats[ch];
@@ -31545,6 +31730,11 @@
                     // mode is set on facet wrap, only the matching
                     // rows render X tick labels.
                     if (!_panel.drawXTickLabels) continue;
+                    // Thinned axis: skip this name, keep its tick. Hidden
+                    // categories are EXEMPT - their ghost is the only
+                    // on-chart way back, and there are few of them.
+                    if (_xCatStrideH > 1 && (ch % _xCatStrideH) !== 0
+                        && !isCategoryHidden(origCatH)) continue;
 
                     // Same axis-thickness-aware offset the vertical
                     // path uses, so a thick category axis (horizontal
@@ -31571,12 +31761,14 @@
                             }));
                         })(origCatH, yLabelXH, catYH);
                     } else {
-                        var clblH = svgEl("text", {
+                        var clblAttrsH = {
                             x: yLabelXH, y: catYH + _catDyH,
                             "text-anchor": "end",
                             "data-bar-cat": origCatH,
                             "data-role": "x-cat-label"
-                        });
+                        };
+                        if (_xCatStrideH > 1) clblAttrsH["data-cat-stride"] = _xCatStrideH;
+                        var clblH = svgEl("text", clblAttrsH);
                         setSvgText(clblH, _wrapTickLabel(displayCategory(origCatH)));
                         var catIdH = "xCat:" + origCatH;
                         applyTextStyleToElement(clblH, catIdH);
@@ -31676,6 +31868,18 @@
             // at any font size (a fixed +12 only fit the 14px default -
             // larger fonts grew upward into the ticks/axis).
             var xLabelY = _xAxisOuterY + _xTickOutLen + 0.8 + _xCatMaxFs * 0.8;
+            // Thinning for the bottom category axis. Only asked for when
+            // the labels are ROTATED: unrotated ones are unrotated because
+            // the margin block proved the widest of them fits inside the
+            // pitch, so there is nothing to thin (and a font-height estimate
+            // would wrongly thin labels that fit).
+            var _xCatStride = 1;
+            try {
+                var _csAng = (M && typeof M.xCatAutoRotate === "number") ? M.xCatAutoRotate : 0;
+                if (Math.abs(_csAng) > 0.5)
+                    _xCatStride = _gb2CatLabelStride(
+                        visibleXCats.length, catWidth, _xCatMaxFs, _csAng);
+            } catch (_eCs) { _xCatStride = 1; }
             // In horizontal mode the BOTTOM axis represents the
             // value axis, so the category-tick loop below is skipped
             // entirely - a value-tick block runs after the X title.
@@ -31737,6 +31941,11 @@
                 // X tick labels on panels that aren't in the bottom
                 // row. See _facetXTLMode in the panel setup.
                 if (!_panel.drawXTickLabels) continue;
+                // Thinned axis: skip this name, keep its tick (hidden
+                // categories keep their restore ghost - see the horizontal
+                // twin above).
+                if (_xCatStride > 1 && (c % _xCatStride) !== 0
+                    && !isCategoryHidden(origCat)) continue;
                 if (isCategoryHidden(origCat)) {
                     (function (cxL, origL, ly) {
                         axisGroup.appendChild(makeHiddenLabelGhost({
@@ -31781,6 +31990,7 @@
                         clblAttrs.transform =
                             "rotate(" + _catRot + " " + cx + " " + lblY + ")";
                     }
+                    if (_xCatStride > 1) clblAttrs["data-cat-stride"] = _xCatStride;
                     var clbl = svgEl("text", clblAttrs);
                     setSvgText(clbl, _wrapTickLabel(displayCategory(origCat)));
                     applyTextStyleToElement(clbl, catId);
@@ -32435,14 +32645,63 @@
                             "stroke-opacity": 0.9
                         }));
                         var _ghTip = document.createElementNS("http://www.w3.org/2000/svg", "title");
-                        _ghTip.textContent = "Hidden point (excluded from the summary, error bars and tests). Click to restore.";
+                        _ghTip.textContent = (data && data.pointMenuVerb === "exclude")
+                            ? "Excluded point (left out of the summary, error bars and tests). Click for the include menu, or press Cmd/Ctrl+E while hovering."
+                            : "Hidden point (excluded from the summary, error bars and tests). Click for the restore menu, or press Cmd/Ctrl+E while hovering.";
                         _gh.appendChild(_ghTip);
-                        (function (cat2, grp2, idx2) {
-                            _gh.addEventListener("click", function (e) {
-                                e.preventDefault(); e.stopPropagation();
-                                _togglePointHidden(cat2, grp2, idx2);
+                        // A transparent hit disc: the dashed ring alone is a
+                        // needle-thin target (Torry, Jul 29 2026: "really
+                        // hard to actually select").
+                        _gh.appendChild(svgEl("circle", {
+                            cx: px, cy: py, r: _ghR + 5,
+                            fill: "transparent", stroke: "none"
+                        }));
+                        (function (g2, cat2, grp2, idx2) {
+                            var _ghRing = g2.querySelector("circle");
+                            var _ghSlash = g2.querySelector("line");
+                            g2.addEventListener("mouseenter", function () {
+                                // Hover reads like every other point's: the
+                                // ghost solidifies so it is plainly the
+                                // thing under the cursor (it had NO hover
+                                // affordance before - Torry's report).
+                                if (_ghRing) {
+                                    _ghRing.setAttribute("stroke-dasharray", "none");
+                                    _ghRing.setAttribute("stroke", "#555555");
+                                    _ghRing.setAttribute("stroke-width", "1.8");
+                                    _ghRing.setAttribute("stroke-opacity", "1");
+                                }
+                                if (_ghSlash) _ghSlash.setAttribute("stroke-width", "2");
+                                try { window.__gb2_dpHoverPoint = { cat: cat2, group: grp2, idx: idx2 }; } catch (_eHp) {}
                             });
-                        })(bar.x || "", bar.group || "", idx);
+                            g2.addEventListener("mouseleave", function () {
+                                if (_ghRing) {
+                                    _ghRing.setAttribute("stroke-dasharray", "2 2");
+                                    _ghRing.setAttribute("stroke", "#999999");
+                                    _ghRing.setAttribute("stroke-width", "1.2");
+                                    _ghRing.setAttribute("stroke-opacity", "0.85");
+                                }
+                                if (_ghSlash) _ghSlash.setAttribute("stroke-width", "1.4");
+                                try {
+                                    var hp = window.__gb2_dpHoverPoint;
+                                    if (hp && hp.idx === idx2 && hp.cat === cat2 && hp.group === grp2)
+                                        window.__gb2_dpHoverPoint = null;
+                                } catch (_eHp2) {}
+                            });
+                            // A plain click used to restore INSTANTLY -
+                            // asymmetric with the deliberate menu it took to
+                            // hide, so one stray click undid an explicit
+                            // decision (Torry, Jul 29 2026). Click and
+                            // right-click now both open the same one-item
+                            // menu; Cmd/Ctrl+E on the hovered point is the
+                            // fast path.
+                            function _ghMenu(e) {
+                                e.preventDefault(); e.stopPropagation();
+                                _showPointContextMenu(e.clientX, e.clientY,
+                                                      cat2, grp2, idx2, true);
+                            }
+                            g2.addEventListener("click", _ghMenu);
+                            g2.addEventListener("contextmenu", _ghMenu);
+                        })(_gh, bar.x || "", bar.group || "", idx);
                         dataGroup.appendChild(_gh);
                         continue;
                     }
@@ -32501,6 +32760,7 @@
                     halo.style.cursor = "pointer";
                     (function (el, haloFill, ptCat, ptGroup, ptIdx, ptKey) {
                         el.addEventListener("mouseenter", function () {
+                            try { window.__gb2_dpHoverPoint = { cat: ptCat, group: ptGroup, idx: ptIdx }; } catch (_eHp) {}
                             // Don't paint the hover halo over the
                             // selection ring (it overlaps visually
                             // and reads as muddy).
@@ -32512,6 +32772,11 @@
                             el.setAttribute("stroke-width", "2");
                         });
                         el.addEventListener("mouseleave", function () {
+                            try {
+                                var _hp = window.__gb2_dpHoverPoint;
+                                if (_hp && _hp.idx === ptIdx && _hp.cat === ptCat && _hp.group === ptGroup)
+                                    window.__gb2_dpHoverPoint = null;
+                            } catch (_eHp3) {}
                             el.setAttribute("fill", "transparent");
                             el.removeAttribute("fill-opacity");
                             el.setAttribute("stroke", "none");
@@ -32559,7 +32824,8 @@
                             // dot.
                             window.__gb2_selectedPointKey = ptKey;
                             _showPointContextMenu(e.clientX, e.clientY,
-                                                  ptCat, ptGroup, ptIdx);
+                                                  ptCat, ptGroup, ptIdx,
+                                                  false);
                             redraw();
                         });
                     })(halo, fill, bar.x || "", bar.group || "", idx, _selKey);
@@ -47802,6 +48068,129 @@
             // Commit VALUE for a choice name (scatter/heatmap ride xyBin, whose
             // values are "none"/"square"; every other family value === name).
             function choiceVal(name) { var ch = (data.graphTypeChoices) || []; for (var k = 0; k < ch.length; k++) if (ch[k] && ch[k].name === name) return (ch[k].value !== undefined && ch[k].value !== null) ? ch[k].value : ch[k].name; return null; }
+            // ---- an identifier column in a category slot (Jul 2026, Torry) ----
+            // The accident this catches: a misaligned paste, or a row-ID
+            // column dragged into the category (or color-grouping) slot,
+            // produces a variable whose levels are almost all SINGLE
+            // observations. The chart still draws - one bar per row, an
+            // axis of IDs - and nothing tells the student the variable is
+            // not a grouping variable at all. Torry hit exactly this on
+            // Jul 29 2026 and had to reverse-engineer it from the picture.
+            //
+            // TWO gates, because "most levels hold one observation" is
+            // ALSO the shape of legitimate long-tail count data (rare
+            // countries, rare diagnoses, one-off free-text answers):
+            //   1. most levels are singletons, AND
+            //   2. the LEVEL COUNT is essentially the OBSERVATION COUNT,
+            //      which is the signature of an identifier. A long tail
+            //      with a few well-populated levels fails gate 2 and stays
+            //      quiet (20 levels over 216 observations is real data;
+            //      137 levels over 137 observations is a row label).
+            // Thresholds are a deliberate first draft to tune against real
+            // course datasets.
+            var _csApp = false;
+            (function () {
+                if (_mk === "corr" || _mk === "likert" || _mk === "scatter") return;
+                var _csSep = (typeof data.facetSeparator === "string" && data.facetSeparator.length > 0)
+                    ? data.facetSeparator : null;
+                function _csCat(x) {
+                    var s = (typeof x === "string") ? x : "";
+                    if (_csSep && s.indexOf(_csSep) >= 0) return s.slice(s.indexOf(_csSep) + _csSep.length);
+                    return s;
+                }
+                // Which roles are checkable per module. RM's categories are
+                // the measure columns the user picked BY HAND (an ID cannot
+                // land there), and a single-subject design legitimately
+                // holds n = 1 per occasion - so RM is checked on its
+                // BETWEEN variable only. Distribution's box family rides
+                // one empty category slot, likewise group-only.
+                var _csRoles = [];
+                if (_mk === "cg" || _mk === "freq")
+                    _csRoles.push({ k: "cat", nm: data.xLabelDefault,
+                        of: function (b) { return _csCat(b.x); } });
+                if (data.hasGroups === true)
+                    _csRoles.push({ k: "grp", nm: data.groupLabelDefault,
+                        of: function (b) { return (b.group === undefined || b.group === null) ? "" : String(b.group); } });
+                // Frequencies ships pie/donut categories in the GROUP field
+                // (x = ""), so on those types the "group" role IS the
+                // category variable and must be named as one.
+                var _csPieCat = (_mk === "freq" && (gt === "pie" || gt === "donut"));
+                for (var _cr = 0; _cr < _csRoles.length; _cr++) {
+                    var _R = _csRoles[_cr], _csTot = {}, _csLv = 0, _csN = 0;
+                    for (var _cb = 0; _cb < bars.length; _cb++) {
+                        var _cbb = bars[_cb]; if (!_cbb) continue;
+                        // Frequencies cells carry COUNTS in n (mean = n),
+                        // so one number serves both families.
+                        var _cbn = (typeof _cbb.n === "number" && isFinite(_cbb.n)) ? _cbb.n : 0;
+                        if (_cbn <= 0) continue;
+                        var _cbk = _R.of(_cbb);
+                        if (_cbk === "") continue;
+                        if (!Object.prototype.hasOwnProperty.call(_csTot, _cbk)) { _csTot[_cbk] = 0; _csLv++; }
+                        _csTot[_cbk] += _cbn;
+                        _csN += _cbn;
+                    }
+                    if (_csLv >= 2) _csApp = true;
+                    if (_csLv < 12 || _csN <= 0) continue;
+                    var _csOne = 0;
+                    for (var _ck in _csTot) {
+                        if (!Object.prototype.hasOwnProperty.call(_csTot, _ck)) continue;
+                        if (_csTot[_ck] === 1) _csOne++;
+                    }
+                    if (_csOne < _csLv * 0.8) continue;   // gate 1
+                    if (_csLv < _csN * 0.8) continue;     // gate 2
+                    var _csIsCat = (_R.k === "cat") || _csPieCat;
+                    var _csWhat = _csIsCat ? "category variable" : "color grouping variable";
+                    var _csUnit = _csIsCat ? "category" : "group";
+                    var _csSlot = _csIsCat
+                        ? ((_mk === "freq") ? "the variable being counted" : "the X-axis variable slot")
+                        : "the Group By slot";
+                    var _csNm = (typeof _R.nm === "string" && _R.nm.length) ? " (" + _R.nm + ")" : "";
+                    out.push({ id: "catsingle", sev: "warn",
+                        title: "Almost every " + _csUnit + " holds a single observation",
+                        why: "Your " + _csWhat + _csNm + " has " + _csLv +
+                            " levels, and " + _csOne + " of them contain exactly one " +
+                            "observation. That is the shape of an identifier column (a " +
+                            "participant ID, a case number, a row label) rather than a " +
+                            "grouping variable. The usual causes are the wrong column in " +
+                            _csSlot + ", or a pasted block of data that landed one column " +
+                            "off. " +
+                            ((_mk === "freq")
+                                ? "Frequencies counts how often each level occurs, so one " +
+                                  "observation per level just draws one bar per row and the " +
+                                  "counts carry no information."
+                                : "This chart summarizes each " + _csUnit + ", and a " +
+                                  _csUnit + " of one has nothing to summarize: no spread, no " +
+                                  "error bar, and nothing to compare it against.") +
+                            " Check the column in " + _csSlot + ", and check the data for a " +
+                            "paste that shifted columns.",
+                        fixGt: null });
+                    break;   // one card names the problem; two would nag
+                }
+            })();
+            // Informational companion to the crowded-axis label thinning in
+            // the render (search _xCatStride): thinning is a DISPLAY
+            // decision, so say it out loud instead of letting a student
+            // wonder where the names went. Read from the DOM - the stride is
+            // decided per panel at draw time - and stamped applies:false
+            // (the corrmany idiom), since an uncrowded axis is not an
+            // achievement to report as passed.
+            (function () {
+                var _thEls = q('[data-role="x-cat-label"][data-cat-stride]'), _thK = 0;
+                for (var _t = 0; _t < _thEls.length; _t++) {
+                    var _tv = parseInt(_thEls[_t].getAttribute("data-cat-stride"), 10);
+                    if (isFinite(_tv) && _tv > _thK) _thK = _tv;
+                }
+                if (!(_thK > 1)) return;
+                out.push({ id: "xcatthin", sev: "tip",
+                    title: "The category axis is showing 1 name in every " + _thK,
+                    why: "There are more categories than there is room for names, so the " +
+                        "axis prints one name in every " + _thK + " and keeps a tick mark " +
+                        "for every category: the NAMES are thinned, never the data. If the " +
+                        "individual names matter, make the chart wider, move the variable " +
+                        "to Panels, or combine its rarer levels. If you did not expect this " +
+                        "many categories, check the variable in the X-axis slot.",
+                    fixGt: null });
+            })();
             if ((gt === "bar" || gt === "histogram" || gt === "histdensity" || gt === "pareto") && data.yMinOverride === true && typeof data.yMin === "number" && isFinite(data.yMin) && data.yMin > 0)
                 out.push({ id: "zerobase", sev: "warn", title: "The value axis doesn't start at zero", why: "Your value axis starts at " + data.yMin + ", not 0. Bars and histogram columns are read by their height, so cutting off the bottom makes some look much taller than others relative to one another. Set the Y-axis minimum back to 0.", fixGt: null });
             // Truncation disclosure (breakoff): on position-encoded types
@@ -48433,6 +48822,7 @@
             var _colApp = (nGroups >= 2) || q('[data-legend-row]').length >= 2;
             var _hmOn = (gt === "scatter" && typeof data.xyBin === "string" && data.xyBin !== "" && data.xyBin !== "none");
             var checks = [
+                { id: "catsingle", name: "Categories hold real groups", tip: "A variable whose levels are almost all single observations is usually an identifier column in the wrong slot, not a grouping variable.", applies: _csApp },
                 { id: "cliprange", name: "Axis range shows all data", tip: "Axis limits should not push bars, boxes, or points outside the plot window.", applies: _crApp },
                 { id: "zerobase", name: "Zero baseline", tip: "Bars and histogram columns are read by height, so the value axis should start at 0.", applies: (gt === "bar" || gt === "histogram" || gt === "histdensity" || gt === "pareto") },
                 { id: "breakoff", name: "Axis cut is marked", tip: "If the value axis starts above zero, the axis break mark (//) should stay on so readers can see the scale is cut.", applies: _bkTruncTypes[gt] === 1 },
@@ -48473,6 +48863,9 @@
                 { id: "xtitle", name: "X-axis title", tip: "The X axis should say what the categories or values represent.", applies: _axApp && !_axDistCat },
                 { id: "yticklab", name: "Value-axis numbers", tip: "Tick numbers let readers convert positions back into quantities.", applies: _axApp },
                 { id: "xticklab", name: "X-axis labels", tip: "Category names or tick numbers along the X axis must be visible.", applies: _axApp && (_axContX || !_axDistCat) },
+                // Display note only (the corrmany idiom): a thinned axis is
+                // reported when it happens, never as a passed check.
+                { id: "xcatthin", name: "Crowded axis labels thinned", tip: "When there are more categories than room for names, the axis prints a subset and keeps every tick.", applies: false },
                 { id: "legendkey", name: "Colors have a key", tip: "When color carries meaning, a legend or direct labels must decode it.", applies: _legApp },
                 { id: "hiddendata", name: "No hidden data", tip: "Parts hidden with the eye tool should be shown, or disclosed in the figure note.", applies: true },
                 { id: "coldist", name: "Distinguishable colors", tip: "Series colors should be easy to tell apart.", applies: _colApp },
@@ -49180,7 +49573,9 @@
             window.__gb2_stTermWired = true;
             var css = document.createElement("style");
             css.setAttribute("data-role", "gb2-stterm-css");
-            css.textContent = ".gb2-stterm{text-decoration:underline;text-decoration-style:dotted;" +
+            css.textContent = ".gb2-stterm{display:inline-flex;align-items:center;justify-content:center;" +
+                "min-width:24px;min-height:24px;box-sizing:border-box;" +
+                "text-decoration:underline;text-decoration-style:dotted;" +
                 "text-decoration-color:transparent;text-underline-offset:2px;" +
                 "text-decoration-thickness:1px;cursor:pointer;}" +
                 ".gb2-stterm:hover,.gb2-stterm:focus-visible{text-decoration-color:#1a5fb4;" +
@@ -50412,7 +50807,7 @@
             var stAlphaLbl = stAlpha.toFixed(stAlpha < 0.01 ? 3 : 2).replace(/^0/, "");
             function _stAlphaBand() {
                 var o = [["0.1", ".10"], ["0.05", ".05"], ["0.01", ".01"], ["0.001", ".001"]];
-                var s = '<select data-cmp-alpha style="font-size:10.5px;padding:2px 4px;border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);">';
+                var s = '<select data-cmp-alpha aria-label="Significance level" style="font-size:10.5px;padding:2px 4px;border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);">';
                 for (var i = 0; i < o.length; i++)
                     s += '<option value="' + o[i][0] + '"' + (parseFloat(o[i][0]) === stAlpha ? ' selected' : '') + '>' + o[i][1] + '</option>';
                 s += '</select>';
@@ -50465,7 +50860,20 @@
                     // every pairwise test. The result is read-only downstream
                     // (adjP is set inside _cmpEnumerate, and correction is in
                     // the key), so sharing the cached objects is safe.
-                    var _cmpEn, _cmpH = window.__gb2_lastRenderedHash;
+                    // _renderHash, NEVER window.__gb2_lastRenderedHash:
+                    // the global is stamped at render END, so during a
+                    // content-changed render's panel restore it still
+                    // names the PREVIOUS payload - and a duplicate
+                    // document's payload hashes identical to its
+                    // original, so the cache served the ORIGINAL chart's
+                    // statistics over a different variable (Torry's
+                    // field report, Jul 29 2026: two documents with
+                    // different y variables showing byte-identical
+                    // Compare-pairs stats; the chart drew correctly,
+                    // only this panel lied). _renderHash is the hash of
+                    // the payload THESE closures hold, so the key can
+                    // never point across renders.
+                    var _cmpEn, _cmpH = _renderHash;
                     var _cmpK = _cmpH ? (cmpTest + "::" + cmpCorr + "::" + cmpScope + "::" + _cmpH) : null;
                     if (_cmpK && window.__gb2_cmpEnumCache && window.__gb2_cmpEnumCache.key === _cmpK) {
                         _cmpEn = window.__gb2_cmpEnumCache.val;
@@ -50683,6 +51091,8 @@
                                 cmpRowsHtml += '<tr><td colspan="8" data-cmp-fold="' +
                                     secAttr(lastSec) + '" title="Click to ' +
                                     (secFolded ? 'expand' : 'fold') + ' this section"' +
+                                    ' role="button" tabindex="0" aria-expanded="' +
+                                    (secFolded ? 'false' : 'true') + '"' +
                                     ' style="padding:8px 6px 3px;' +
                                     'font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;' +
                                     'color:#666;font-weight:600;background:#f7f8fa;' +
@@ -50691,7 +51101,7 @@
                                     '<span data-cmp-chev style="display:inline-block;width:11px;' +
                                     'color:#8aa0bd;">' + (secFolded ? '&#9656;' : '&#9662;') + '</span>' +
                                     secHdr[lastSec] +
-                                    '<span style="font-weight:400;color:#b3bfce;' +
+                                    '<span style="font-weight:400;color:#5b6872;' +
                                     'text-transform:none;letter-spacing:0;"> &middot; ' +
                                     (secSig[lastSec] || 0) + ' of ' + secN[lastSec] +
                                     ' significant</span></td></tr>';
@@ -50756,6 +51166,8 @@
                             '<td style="padding:4px 6px;border-bottom:1px solid #eee;">' +
                             '<input type="checkbox" data-cmp-cb data-key="' +
                             _stEsc(cp2.key).replace(/"/g, "&quot;") + '"' +
+                            ' aria-label="Select comparison: ' +
+                            rowLbl.replace(/<[^>]+>/g, "") + '"' +
                             (checked ? ' checked' : '') + '/></td>' +
                             '<td style="padding:4px 7px;border-bottom:1px solid #eee;white-space:' +
                             (rowLbl.replace(/<[^>]+>/g, "").length > 34 ? 'normal' : 'nowrap') +
@@ -50779,7 +51191,15 @@
                     }
                     var cmpIsRM = (mk === "rm");
                     var cmpSel = function (name, opts2) {
-                        var h2 = '<select data-cmp-' + name + ' style="font-size:10.5px;padding:2px 4px;' +
+                        var selectNames = {
+                            scope: "Comparisons to show",
+                            test: "Statistical test",
+                            corr: "Multiple-comparison correction",
+                            alpha: "Significance level"
+                        };
+                        var h2 = '<select data-cmp-' + name +
+                            ' aria-label="' + selectNames[name] +
+                            '" style="font-size:10.5px;padding:2px 4px;' +
                             'border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);">';
                         for (var so = 0; so < opts2.length; so++) {
                             h2 += '<option value="' + opts2[so][0] + '"' +
@@ -50843,9 +51263,11 @@
                     // the active one is filled.
                     var cmpSortBtn = function (key, title) {
                         var on = cmpSort === key;
-                        return '<button data-cmp-sorthdr="' + key + '" title="' + title + '"' +
+                        return '<button type="button" data-cmp-sorthdr="' + key +
+                            '" title="' + title + '" aria-label="' + title + '"' +
                             ' aria-pressed="' + (on ? "true" : "false") + '"' +
-                            ' style="margin-left:5px;padding:0 4px;font-size:8.5px;line-height:13px;' +
+                            ' style="margin-left:9px;padding:0;width:24px;height:24px;' +
+                            'font-size:10px;line-height:22px;' +
                             'vertical-align:1px;border-radius:3px;cursor:pointer;' +
                             (on ? 'border:1px solid #3573bd;background:#3573bd;color:#fff;'
                                 : 'border:1px solid #ccc;background:#fff;color:#888;') +
@@ -50982,7 +51404,7 @@
                         var foldHdrs = body.querySelectorAll("[data-cmp-fold]");
                         for (var fb2 = 0; fb2 < foldHdrs.length; fb2++) {
                             (function (fh) {
-                                fh.addEventListener("click", function () {
+                                function toggleFold() {
                                     var k4 = fh.getAttribute("data-cmp-fold");
                                     window.__gb2_cmpFolds = window.__gb2_cmpFolds || {};
                                     if (window.__gb2_cmpFolds[k4]) {
@@ -50991,6 +51413,13 @@
                                         window.__gb2_cmpFolds[k4] = true;
                                     }
                                     renderInspectorStats(body);
+                                }
+                                fh.addEventListener("click", toggleFold);
+                                fh.addEventListener("keydown", function (event) {
+                                    if (event.key !== "Enter" &&
+                                        event.key !== " ") return;
+                                    event.preventDefault();
+                                    toggleFold();
                                 });
                             })(foldHdrs[fb2]);
                         }
@@ -52065,7 +52494,7 @@
                         'padding:6px 9px;margin:0 0 7px;">' +
                           '<span style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap;">' +
                             '<span style="font-size:9.5px;letter-spacing:.06em;color:#667;font-weight:700;">METHOD</span>' +
-                            '<select data-st-act="xymethod" style="font-size:11px;padding:2px 4px;font-family:var(--gb2-ui-font);">' +
+                            '<select data-st-act="xymethod" aria-label="Correlation method" style="font-size:11px;padding:2px 4px;font-family:var(--gb2-ui-font);">' +
                               '<option value="pearson"' + (_xmCur === "pearson" ? " selected" : "") + '>Pearson r</option>' +
                               '<option value="spearman"' + (_xmCur === "spearman" ? " selected" : "") + '>Spearman \u03C1</option>' +
                               '<option value="kendall"' + (_xmCur === "kendall" ? " selected" : "") + '>Kendall \u03C4-b</option>' +
@@ -52258,15 +52687,15 @@
                 var corrBand =
                     '<div data-cmp-band style="display:flex;align-items:center;column-gap:12px;row-gap:6px;flex-wrap:wrap;margin:0 0 8px;padding:5px 8px;background:#f7f8fa;border:1px solid #eee;border-radius:4px;">' +
                     '<span style="' + _cbSp + '"><span style="' + _cbLbl + '">Method</span>' +
-                    '<select data-st-act="corrmethod" style="' + _cbSel + '">' +
+                    '<select data-st-act="corrmethod" aria-label="Correlation method" style="' + _cbSel + '">' +
                     _cbOpt("pearson", "Pearson", mCur3) + _cbOpt("spearman", "Spearman", mCur3) +
                     _cbOpt("kendall", "Kendall \u03c4-b", mCur3) + '</select></span>' +
                     '<span style="' + _cbSp + '"><span style="' + _cbLbl + '">Alpha</span>' +
-                    '<select data-st-act="corralpha" style="' + _cbSel + '">' +
+                    '<select data-st-act="corralpha" aria-label="Significance level" style="' + _cbSel + '">' +
                     _cbOpt("0.1", ".10", alpha) + _cbOpt("0.05", ".05", alpha) +
                     _cbOpt("0.01", ".01", alpha) + _cbOpt("0.001", ".001", alpha) + '</select></span>' +
                     '<span style="' + _cbSp + '"><span style="' + _cbLbl + '">Adjust p</span>' +
-                    '<select data-st-act="corrpadj" style="' + _cbSel + '">' +
+                    '<select data-st-act="corrpadj" aria-label="Multiple-comparison correction" style="' + _cbSel + '">' +
                     _cbOpt("none", "None", padjCur3) + _cbOpt("bonferroni", "Bonferroni", padjCur3) +
                     _cbOpt("holm", "Holm", padjCur3) + _cbOpt("fdrBH", "FDR", padjCur3) + '</select></span>' +
                     '</div>';
@@ -54958,7 +55387,7 @@
                 lbl.setAttribute("data-role", "gb2-scope-microlabel");
                 lbl.textContent = "Applies to";
                 lbl.style.cssText = "font:700 9px var(--gb2-ui-font);letter-spacing:.1em;" +
-                    "text-transform:uppercase;color:#8a97a8;margin-right:7px;flex:none;" +
+                    "text-transform:uppercase;color:#5b6872;margin-right:7px;flex:none;" +
                     "white-space:nowrap;align-self:center;";
                 sc.insertBefore(lbl, sc.firstChild);
             }
@@ -60717,7 +61146,9 @@
             // its slot. `target` distinguishes fill vs pat-color
             // swatches so the click handler routes correctly.
             function _bsPaletteRow(currentHex, target, allowTransparent) {
-                var html = '<span style="display:inline-flex;align-items:center;gap:3px;flex-shrink:0;flex-wrap:wrap;">';
+                // 20px swatches plus a 4px gap place adjacent target centers
+                // 24px apart (the WCAG 2.2 target-spacing exception).
+                var html = '<span style="display:inline-flex;align-items:center;gap:4px;flex-shrink:0;flex-wrap:wrap;">';
                 var cur = (currentHex || "").toLowerCase();
                 if (allowTransparent) {
                     var _tbOn = (cur === "transparent");
@@ -72431,7 +72862,9 @@
             // / "p-outline") routes click handlers below.
             var _psBigSwatchStyle = "width:28px;height:28px;padding:0;border:1px solid #888;border-radius:4px;cursor:pointer;flex-shrink:0;";
             function _psPaletteRow(currentHex, target) {
-                var html = '<span style="display:inline-flex;align-items:center;gap:3px;flex-shrink:0;flex-wrap:wrap;">';
+                // 20px swatches plus a 4px gap place adjacent target centers
+                // 24px apart (the WCAG 2.2 target-spacing exception).
+                var html = '<span style="display:inline-flex;align-items:center;gap:4px;flex-shrink:0;flex-wrap:wrap;">';
                 var cur = (currentHex || "").toLowerCase();
                 // Leftmost "transparent" swatch — fill row only. A
                 // transparent fill = a hollow marker. Shown as white with

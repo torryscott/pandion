@@ -6,14 +6,14 @@
 <title>Pandion Plots - User Guide</title>
 <style>
 :root{
-  --bg:#ffffff; --bg2:#f6f8fa; --bg3:#eef2f5; --ink:#22303a; --ink2:#51606c; --ink3:#7a8792;
-  --accent:#0f766e; --accent2:#0d5f59; --accent-soft:#e6f2f1; --blue:#3573bd; --blue-soft:#e8f0fb;
+  --bg:#ffffff; --bg2:#f6f8fa; --bg3:#eef2f5; --ink:#22303a; --ink2:#51606c; --ink3:#5b6872;
+  --accent:#0f766e; --accent2:#0d5f59; --accent-soft:#e6f2f1; --blue:#245f9f; --blue-soft:#e8f0fb;
   --amber:#b45309; --amber-soft:#fdf3e3; --red:#b3261e; --red-soft:#fbeaea; --green:#2f6b2f; --green-soft:#e9f4df;
   --line:#dde3e8; --card:#ffffff; --code:#f0f3f6; --shadow:0 1px 3px rgba(20,30,40,.08),0 4px 14px rgba(20,30,40,.06);
   --sidebar-w:264px;
 }
 [data-theme="dark"]{
-  --bg:#14181c; --bg2:#1b2127; --bg3:#222a31; --ink:#e6ebef; --ink2:#aeb9c2; --ink3:#84919b;
+  --bg:#14181c; --bg2:#1b2127; --bg3:#222a31; --ink:#e6ebef; --ink2:#aeb9c2; --ink3:#a4b0ba;
   --accent:#3fbdb2; --accent2:#5accc2; --accent-soft:#12312e; --blue:#6ea8e8; --blue-soft:#1d2c40;
   --amber:#e8a75a; --amber-soft:#32271a; --red:#e8837c; --red-soft:#361d1c; --green:#8cc98c; --green-soft:#1e2c1a;
   --line:#323c44; --card:#1b2127; --code:#242d34; --shadow:0 1px 3px rgba(0,0,0,.4),0 4px 14px rgba(0,0,0,.3);
@@ -22,6 +22,10 @@
 html{scroll-behavior:smooth}
 body{margin:0;font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:var(--bg)}
 a{color:var(--blue);text-decoration:none} a:hover{text-decoration:underline}
+main a{text-decoration:underline;text-underline-offset:2px}
+.skip-link{position:fixed;z-index:120;top:8px;left:12px;padding:8px 12px;border:2px solid var(--accent2);border-radius:8px;color:var(--bg);background:var(--ink);font-weight:700;transform:translateY(-160%)}
+.skip-link:focus{transform:none}
+.sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
 code{background:var(--code);border-radius:4px;padding:1px 5px;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 kbd{background:var(--bg3);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;font:12px/1.7 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:nowrap}
 h1,h2,h3,h4{line-height:1.25;scroll-margin-top:16px}
@@ -66,6 +70,8 @@ header.hero .sub{color:var(--ink2);font-size:17px;max-width:640px}
 .callout b.tag{display:inline-block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;margin-right:6px;color:var(--ink2)}
 figure{margin:18px 0}
 figure img{max-width:100%;height:auto;border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);cursor:zoom-in;background:#fff}
+.enlarge-button{display:block;max-width:100%;padding:0;border:0;border-radius:10px;background:transparent;cursor:zoom-in}
+.enlarge-button:focus-visible{outline:3px solid var(--accent);outline-offset:4px}
 figcaption{font-size:13px;color:var(--ink3);margin-top:7px}
 .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(285px,1fr));gap:16px;margin:18px 0}
 .gcard{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--card);box-shadow:var(--shadow);display:flex;flex-direction:column}
@@ -90,22 +96,26 @@ details summary:hover{background:var(--bg2);border-radius:10px}
 .datashape table{margin:0;font-size:12.5px}
 .datashape caption{background:var(--bg3);font-size:12px;padding:4px 8px;font-weight:600;caption-side:top;text-align:left}
 .datashape td,.datashape th{padding:2.5px 9px;border-color:var(--line)}
-#lightbox{position:fixed;inset:0;background:rgba(10,14,18,.86);display:none;align-items:center;justify-content:center;z-index:100;cursor:zoom-out;padding:30px}
+#lightbox{position:fixed;inset:0;background:rgba(10,14,18,.86);display:none;align-items:center;justify-content:center;z-index:100;padding:64px 30px 30px}
 #lightbox img{max-width:96%;max-height:94%;border-radius:8px;background:#fff}
 #lightbox.open{display:flex}
+#lightbox-close{position:absolute;top:16px;right:18px;min-width:44px;min-height:44px;border:2px solid #fff;border-radius:999px;color:#fff;background:#18232d;font-size:25px;line-height:1;cursor:pointer}
+#lightbox-close:focus-visible{outline:3px solid #fff;outline-offset:3px}
 #totop{position:fixed;bottom:22px;right:22px;border:1px solid var(--line);background:var(--card);color:var(--ink2);border-radius:999px;width:42px;height:42px;font-size:19px;cursor:pointer;box-shadow:var(--shadow);opacity:0;pointer-events:none;transition:opacity .2s;z-index:45}
 #totop.show{opacity:1;pointer-events:auto}
 .searchhits{position:absolute;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);max-height:300px;overflow-y:auto;width:calc(var(--sidebar-w) - 20px);z-index:60;display:none}
 .searchhits a{display:block;padding:7px 11px;font-size:13px;color:var(--ink2);border-bottom:1px solid var(--line)}
 .searchhits a:last-child{border-bottom:none}
 .searchhits a:hover{background:var(--bg3);text-decoration:none}
+.searchhits .search-empty{margin:0;padding:9px 11px;color:var(--ink2);font-size:13px}
 .searchhits .crumb{display:block;font-size:11px;color:var(--ink3)}
 .searchhits mark{background:var(--amber-soft);color:inherit;border-radius:2px}
 .hamb{display:none}
 @media (max-width:900px){
   nav#sidebar{transform:translateX(-100%);transition:transform .2s}
   nav#sidebar.open{transform:none;box-shadow:0 0 40px rgba(0,0,0,.3)}
-  main{margin-left:0;padding:22px 18px 80px}
+  main{min-width:0;margin-left:0;padding:22px 18px 80px;overflow-wrap:anywhere}
+  main code,main kbd{white-space:normal;overflow-wrap:anywhere}
   .hamb{display:block;position:fixed;top:12px;left:12px;z-index:55;border:1px solid var(--line);background:var(--card);border-radius:8px;padding:6px 11px;font-size:16px;cursor:pointer;box-shadow:var(--shadow)}
   .btnrow{top:12px;right:12px}
 }
@@ -118,7 +128,8 @@ details summary:hover{background:var(--bg2);border-radius:10px}
 </style>
 </head>
 <body>
-<button class="hamb" id="hamb" aria-label="Menu">☰</button>
+<a class="skip-link" href="#content">Skip to guide content</a>
+<button class="hamb" id="hamb" aria-label="Guide contents" aria-controls="sidebar" aria-expanded="false">☰</button>
 <div class="btnrow">
   <button id="themeBtn" title="Switch light / dark">◐ Light / dark</button>
   <button onclick="window.print()" title="Print or save as PDF">⎙ Print</button>
@@ -129,12 +140,15 @@ details summary:hover{background:var(--bg2);border-radius:10px}
     <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"><path d="M3 3v18h18"/><rect x="6.5" y="11" width="3" height="7" fill="var(--accent)" stroke="none"/><rect x="11.5" y="6" width="3" height="12" fill="var(--accent)" stroke="none" opacity=".72"/><rect x="16.5" y="9" width="3" height="9" fill="var(--accent)" stroke="none" opacity=".45"/></svg>
     <div><b>Pandion Plots</b><span>User Guide · v3.0.0</span><a class="homelink" href="https://pandionplots.com/">pandionplots.com</a></div>
   </div>
-  <input id="navsearch" type="search" placeholder="Search this guide…" autocomplete="off" aria-label="Search this guide">
-  <div class="searchhits" id="searchhits"></div>
+  <input id="navsearch" type="search" placeholder="Search this guide…" autocomplete="off"
+    aria-label="Search this guide" aria-controls="searchhits"
+    aria-describedby="search-status">
+  <p class="sr-only" id="search-status" role="status" aria-live="polite"></p>
+  <div class="searchhits" id="searchhits" role="region" aria-label="Guide search results"></div>
   <div id="navlinks"></div>
 </nav>
 
-<main id="content">
+<main id="content" tabindex="-1">
 
 <header class="hero">
   <h1>Pandion Plots User Guide</h1>
@@ -834,7 +848,11 @@ any browser, and you can copy it to a USB stick or email it to students.</p>
 
 </main>
 
-<div id="lightbox" role="dialog" aria-label="Enlarged image"><img alt=""></div>
+<div id="lightbox" role="dialog" aria-modal="true" aria-labelledby="lightbox-title">
+  <h2 class="sr-only" id="lightbox-title">Enlarged guide image</h2>
+  <button id="lightbox-close" type="button" aria-label="Close enlarged image">×</button>
+  <img alt="">
+</div>
 <button id="totop" title="Back to top" aria-label="Back to top">↑</button>
 
 <script>
@@ -871,6 +889,7 @@ any browser, and you can copy it to a USB stick or email it to students.</p>
 
   // ---- search ------------------------------------------------------
   var box=document.getElementById('navsearch'), hits=document.getElementById('searchhits');
+  var searchStatus=document.getElementById('search-status');
   var sections=[];
   document.querySelectorAll('main h2, main h3').forEach(function(h){
     var text='', el=h.nextElementSibling;
@@ -884,16 +903,23 @@ any browser, and you can copy it to a USB stick or email it to students.</p>
     while(el && el.tagName!=='H2'){ el=el.previousElementSibling; }
     return el?el.textContent:'';
   }
+  function setSearchOpen(open,message){
+    hits.style.display=open?'block':'none';
+    searchStatus.textContent=message||'';
+  }
+  function searchIsOpen(){return hits.style.display==='block';}
   box.addEventListener('input',function(){
     var q=box.value.trim().toLowerCase();
-    hits.replaceChildren(); hits.style.display='none';
+    hits.replaceChildren();
+    setSearchOpen(false,q.length===1?'Enter one more character to search.':'');
     if(q.length<2) return;
     var found=sections.filter(function(s){return s.body.indexOf(q)>=0;}).slice(0,12);
     if(!found.length){
-      var empty=document.createElement('a');
+      var empty=document.createElement('p');
+      empty.className='search-empty';
       empty.textContent='No matches';
       hits.appendChild(empty);
-      hits.style.display='block';
+      setSearchOpen(true,'No guide sections match '+box.value.trim()+'.');
       return;
     }
     found.forEach(function(s){
@@ -906,29 +932,158 @@ any browser, and you can copy it to a USB stick or email it to students.</p>
       crumb.className='crumb';
       crumb.textContent=(crumbFor(s.id)||'')+(snip?' · …'+snip+'…':'');
       a.append(title,crumb);
-      a.addEventListener('click',function(){ hits.style.display='none'; box.value=''; });
+      a.addEventListener('click',function(){
+        box.value='';
+        setSearchOpen(false,'');
+      });
       hits.appendChild(a);
     });
-    hits.style.display='block';
+    setSearchOpen(true,found.length+' guide result'+(found.length===1?'':'s')+
+      ' available. Press Tab to move through the results.');
   });
-  document.addEventListener('click',function(e){ if(!hits.contains(e.target)&&e.target!==box) hits.style.display='none'; });
-  box.addEventListener('keydown',function(e){ if(e.key==='Escape'){box.value='';hits.style.display='none';} });
+  document.addEventListener('click',function(e){
+    if(!hits.contains(e.target)&&e.target!==box) setSearchOpen(false,'');
+  });
+  box.addEventListener('keydown',function(e){
+    if(e.key==='Escape'){
+      var hasSearch=box.value!==''||searchIsOpen();
+      if(hasSearch){
+        e.preventDefault();
+        e.stopPropagation();
+        box.value='';
+        hits.replaceChildren();
+        setSearchOpen(false,'Search results closed.');
+      }
+    }else if(e.key==='ArrowDown'&&searchIsOpen()){
+      var firstResult=hits.querySelector('a');
+      if(firstResult){e.preventDefault();firstResult.focus();}
+    }
+  });
+  hits.addEventListener('keydown',function(e){
+    if(e.key==='Escape'){
+      e.preventDefault();
+      e.stopPropagation();
+      box.value='';
+      hits.replaceChildren();
+      setSearchOpen(false,'Search results closed.');
+      box.focus();
+    }
+  });
 
   // ---- lightbox ----------------------------------------------------
   var lb=document.getElementById('lightbox'), lbimg=lb.querySelector('img');
+  var lbClose=document.getElementById('lightbox-close');
+  var lbOpener=null, lbBackgroundState=[];
+  function setLightboxBackgroundInactive(inactive){
+    var background=[
+      document.querySelector('main'),document.getElementById('sidebar'),
+      document.querySelector('.btnrow'),document.getElementById('hamb'),
+      document.getElementById('totop'),document.querySelector('.skip-link')
+    ].filter(Boolean);
+    if(inactive){
+      lbBackgroundState=background.map(function(node){
+        return {node:node,inert:node.hasAttribute('inert'),
+          hidden:node.getAttribute('aria-hidden')};
+      });
+      background.forEach(function(node){
+        node.setAttribute('inert','');
+        node.setAttribute('aria-hidden','true');
+      });
+    }else{
+      lbBackgroundState.forEach(function(item){
+        if(!item.inert)item.node.removeAttribute('inert');
+        if(item.hidden===null)item.node.removeAttribute('aria-hidden');
+        else item.node.setAttribute('aria-hidden',item.hidden);
+      });
+      lbBackgroundState=[];
+    }
+  }
+  function openLightbox(button,img){
+    lbOpener=button;
+    lbimg.src=img.src;
+    lbimg.alt=img.alt;
+    lb.classList.add('open');
+    setLightboxBackgroundInactive(true);
+    lbClose.focus();
+  }
+  function closeLightbox(){
+    if(!lb.classList.contains('open'))return;
+    lb.classList.remove('open');
+    lbimg.removeAttribute('src');
+    setLightboxBackgroundInactive(false);
+    if(lbOpener&&lbOpener.isConnected)lbOpener.focus();
+    lbOpener=null;
+  }
   document.querySelectorAll('main img').forEach(function(img){
-    img.addEventListener('click',function(){ lbimg.src=img.src; lbimg.alt=img.alt; lb.classList.add('open'); });
+    if(img.closest('button, a'))return;
+    var button=document.createElement('button');
+    button.type='button';
+    button.className='enlarge-button';
+    button.setAttribute('aria-label','Enlarge image: '+(img.alt||'guide screenshot'));
+    img.parentNode.insertBefore(button,img);
+    button.appendChild(img);
+    button.addEventListener('click',function(){openLightbox(button,img);});
   });
-  lb.addEventListener('click',function(){ lb.classList.remove('open'); lbimg.removeAttribute('src'); });
-  document.addEventListener('keydown',function(e){ if(e.key==='Escape') lb.classList.remove('open'); });
+  lbClose.addEventListener('click',closeLightbox);
+  lb.addEventListener('click',function(e){if(e.target===lb)closeLightbox();});
+  document.addEventListener('keydown',function(e){
+    if(!lb.classList.contains('open'))return;
+    if(e.key==='Escape'){
+      e.preventDefault();
+      closeLightbox();
+    }else if(e.key==='Tab'){
+      e.preventDefault();
+      lbClose.focus();
+    }
+  });
 
   // ---- back to top + mobile nav -------------------------------------
   var tt=document.getElementById('totop');
   window.addEventListener('scroll',function(){ tt.classList.toggle('show',window.scrollY>600); },{passive:true});
   tt.addEventListener('click',function(){ window.scrollTo({top:0,behavior:'smooth'}); });
-  var sb=document.getElementById('sidebar');
-  document.getElementById('hamb').addEventListener('click',function(){ sb.classList.toggle('open'); });
-  sb.addEventListener('click',function(e){ if(e.target.tagName==='A'&&window.innerWidth<=900) sb.classList.remove('open'); });
+  var sb=document.getElementById('sidebar'), hamb=document.getElementById('hamb');
+  var mobileGuide=window.matchMedia('(max-width:900px)');
+  function closeSidebar(returnFocus){
+    sb.classList.remove('open');
+    hamb.setAttribute('aria-expanded','false');
+    if(mobileGuide.matches){
+      sb.setAttribute('inert','');
+      sb.setAttribute('aria-hidden','true');
+    }else{
+      sb.removeAttribute('inert');
+      sb.removeAttribute('aria-hidden');
+    }
+    if(returnFocus)hamb.focus();
+  }
+  function openSidebar(){
+    sb.classList.add('open');
+    sb.removeAttribute('inert');
+    sb.removeAttribute('aria-hidden');
+    hamb.setAttribute('aria-expanded','true');
+    box.focus();
+  }
+  function syncSidebar(){
+    if(mobileGuide.matches){
+      if(!sb.classList.contains('open'))closeSidebar(false);
+    }else{
+      closeSidebar(false);
+    }
+  }
+  hamb.addEventListener('click',function(){
+    if(sb.classList.contains('open'))closeSidebar(true);
+    else openSidebar();
+  });
+  sb.addEventListener('click',function(e){
+    if(e.target.tagName==='A'&&mobileGuide.matches)closeSidebar(false);
+  });
+  document.addEventListener('keydown',function(e){
+    if(e.key==='Escape'&&sb.classList.contains('open')&&!lb.classList.contains('open')){
+      closeSidebar(true);
+    }
+  });
+  if(mobileGuide.addEventListener)mobileGuide.addEventListener('change',syncSidebar);
+  else mobileGuide.addListener(syncSidebar);
+  syncSidebar();
 })();
 </script>
 </body>
