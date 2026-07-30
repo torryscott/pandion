@@ -126,8 +126,13 @@ if [[ "$skip_tests" == "false" ]]; then
 
     echo "== verify standalone source and packaged single file"
     PS_REQUIRE_R_PARITY=1 bash standalone/verify/run.sh
+    echo "== verify rendered website and user-guide interactions"
+    node website/verify-interactions.mjs
+    node website/verify-image-alternatives.mjs
+    node website/verify-reflow.mjs
+    node website/verify-axe.mjs
     node standalone/verify/artifact-parity-check.mjs
-    gates+=(shared-engine-min standalone-source-and-dist)
+    gates+=(shared-engine-min standalone-source-and-dist website-images-interactions-reflow-and-axe)
 else
     echo "WARN: browser/R verification suites skipped"
     gates+=(tests-skipped)

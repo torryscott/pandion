@@ -91,6 +91,12 @@ function setVersion() {
     replaceExactly('standalone/index.html',
         /(<strong id="ps-about-version">)[^<]+(<\/strong>)/,
         `$1${version}$2`, 1, 'standalone About version');
+    // The desktop app reports this version to the OS and to the updater;
+    // out of sync, an installed app would compare its frozen version
+    // against every release and mis-decide whether to update.
+    replaceExactly('standalone/electron/package.json',
+        /("version":\s*")[^"]+(")/,
+        `$1${version}$2`, 1, 'desktop app version');
 
     let shell = read('standalone/js/ps-shell.js');
     const appMatches = [...shell.matchAll(/var APP_VERSION = "[^"]+";/g)];
@@ -158,6 +164,10 @@ function checkVersion() {
         captured('standalone/js/ps-shell.js',
             /var APP_VERSION = "([^"]+)";/g, 'APP_VERSION'),
         'APP_VERSION');
+    expectAll('standalone/electron/package.json',
+        captured('standalone/electron/package.json',
+            /"version":\s*"([^"]+)"/g, 'desktop app version'),
+        'desktop app version');
     expectAll('standalone/js/ps-shell.js',
         captured('standalone/js/ps-shell.js',
             /var RELEASE_NOTES = \[\s*\{ version: "([^"]+)"/g,

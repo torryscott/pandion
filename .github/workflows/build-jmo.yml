@@ -187,25 +187,122 @@ jobs:
           name: jmo-${{ matrix.platform }}
           path: 'pandion-${{ matrix.platform }}.jmo'
 
+  # ---- Desktop (Electron) installers ----
+  # The desktop app embeds the SAME single-file build every other channel
+  # ships. Build that artifact ONCE (deterministic from the tag; the release
+  # job rebuilds and parity-checks it independently) and hand the bytes to
+  # both installer builds, so the mac and windows apps cannot diverge.
+  standalone-dist:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Build the portable single-file app
+        run: |
+          bash scripts/minify-widget.sh --check
+          bash standalone/build-dist.sh
+          git diff --exit-code
+      - uses: actions/upload-artifact@v4
+        with:
+          name: standalone-dist
+          path: standalone/dist/pandion-plots.html
+
+  desktop:
+    needs: standalone-dist
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    name: Desktop (${{ matrix.os }})
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Verify release source contract
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="$(awk '/^Version:/ { print $2 }' DESCRIPTION)"
+          fi
+          node scripts/release-version.mjs check "$VERSION"
+      - name: Fetch the built single-file app
+        uses: actions/download-artifact@v4
+        with:
+          name: standalone-dist
+          path: standalone/dist
+      - name: Install desktop dependencies
+        shell: bash
+        run: cd standalone/electron && npm ci
+      # macOS: signed with the Developer ID certificate from the repo
+      # secrets, then notarized - electron-builder submits the build to
+      # Apple's notary service and staples the ticket (adds ~5-15 min).
+      # Unsigned/unnotarized mac apps are blocked by Gatekeeper and cannot
+      # self-update, so this job is only as useful as those secrets.
+      - name: Build installer (macOS, signed + notarized)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: cd standalone/electron && npx electron-builder --mac --publish never
+      # Windows: unsigned until a signing route is set up (SmartScreen will
+      # warn on first run; the download page says so honestly).
+      - name: Build installer (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: cd standalone/electron && npx electron-builder --win --publish never
+      - name: Collect installers + update metadata
+        shell: bash
+        run: |
+          mkdir desktop-out
+          cd standalone/electron/out
+          # Installers, the update feed (latest-mac.yml / latest.yml - the
+          # files installed apps poll via electron-updater), and the
+          # differential-update blockmaps.
+          for f in Pandion-Plots-* latest*.yml; do
+            if [ -f "$f" ]; then cp "$f" ../../../desktop-out/; fi
+          done
+          ls -la ../../../desktop-out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}
+          path: desktop-out/*
+
   release:
-    needs: build
+    needs: [build, desktop]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
 
     steps:
+      # Checkout FIRST: actions/checkout cleans untracked files out of the
+      # workspace, so artifacts downloaded before it are silently deleted
+      # and the release would publish without them.
+      - uses: actions/checkout@v4
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           merge-multiple: true
+          path: release-assets
 
       # The portable single-file app is one of the advertised downloads.
       # It was never attached, so releases/latest/download/pandion-plots.html
       # 404'd. Build it here so every tag carries it. Verify the committed
       # bundle first, so the portable build embeds the same fresh bytes as the
       # .jmo modules.
-      - uses: actions/checkout@v4
       - name: Build the portable single-file app
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -220,6 +317,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            *.jmo
+            release-assets/*
             standalone/dist/pandion-plots.html
           generate_release_notes: true
