@@ -103,6 +103,9 @@ GB2_VERIFY_OUT="$OUT" node "$HERE/sigma-parity-check.mjs"
 echo "== undo/redo completeness (generic tracking: edit->undo->redo per module + denylist)"
 GB2_VERIFY_OUT="$OUT" node "$HERE/undo-check.mjs"
 
+echo "== crowded-category label thinning: the stride decision (pure unit)"
+node "$HERE/catstride-unit.mjs"
+
 echo "== chartSpec migration (route style commits -> one blob; explode; per-key undo)"
 if GB2_CHARTSPEC_OUT="$OUT-chartspec" GB2_BUNDLE="$BUNDLE" Rscript "$HERE/chartspec-render.R"; then
     GB2_CHARTSPEC_OUT="$OUT-chartspec" node "$HERE/chartspec-check.mjs"
@@ -217,7 +220,7 @@ if [ "$EXTRAS" = "1" ]; then
         fi
     done
     echo "== extras: pedagogy panel probe"
-    if GB2_PEDAGOGY_OUT="$OUT-pedagogy" Rscript "$HERE/pedagogy-render.R"; then
+    if GB2_PEDAGOGY_OUT="$OUT-pedagogy" GB2_BUNDLE="$BUNDLE" Rscript "$HERE/pedagogy-render.R"; then
         GB2_PEDAGOGY_OUT="$OUT-pedagogy" node "$HERE/pedagogy-check.mjs"
     else
         rc=$?

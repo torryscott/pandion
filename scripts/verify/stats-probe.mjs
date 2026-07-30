@@ -1786,8 +1786,18 @@ async function sbClick(page, act) {
 }
 
 // ==== Clip note fires in a narrow results column =======================
+// Viewport was 560px until Jul 29 2026, which sat exactly ON the note's
+// threshold: the note fires at scrollWidth > clientWidth + 2 (the +2 keeps a
+// 1-2px rounding artifact from nagging the user about a table that is not
+// visibly clipped), and at 560px this fixture overflowed by EXACTLY 2, so the
+// case failed reproducibly while the product was behaving correctly. Measured
+// on this fixture: 560px -> 2px overflow, 500px -> 62px, 460px -> 102px.
+// 460px is used so the premise is unambiguous - the column genuinely cannot
+// fit the table - rather than loosening a product tolerance that exists for a
+// good reason. Verified against a bundle with the Jul 2026 category-axis work
+// disarmed: the 2px measurement is identical, so this was never about that.
 {
-    const ctx = await browser.newContext({ viewport: { width: 560, height: 1100 } });
+    const ctx = await browser.newContext({ viewport: { width: 460, height: 1100 } });
     const page = await ctx.newPage();
     const errs = [];
     page.on('pageerror', e => errs.push(String(e)));

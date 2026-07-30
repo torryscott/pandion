@@ -4,14 +4,12 @@
 // tabindex, the injected :focus-visible stylesheet, the live region).
 // Baselined fully CLEAN on 2026-07-03 - any new violation fails.
 //
-// Deliberately ignored rules:
+// Deliberately ignored wrapper-only rules:
 //   document-title, html-has-lang - the battery writes raw widget
 //   fragments with no <html> wrapper; in production that document
 //   belongs to jamovi's results iframe (upstream), not the module.
-//   target-size - the WCAG 2.5.8 swatch spacing (24px pitch on the
-//   palette chip rows) was REVERTED 2026-07-04 per Torry: compact
-//   3px/2px gaps restored, accessibility bridge to be crossed later
-//   if needed. Drop this ignore if/when the pitch fix returns.
+// WCAG 2.2 target-size is release blocking; compact controls must satisfy
+// either the 24px minimum or the rule's spacing exception.
 //
 // Usage:  node scripts/verify/a11y-check.mjs
 // Env:    GB2_VERIFY_OUT  dir holding the *.html files (default /tmp/gb2-verify)
@@ -50,7 +48,7 @@ const { chromium } = createRequire(pwPath)('playwright');
 const axeSource = readFileSync(path.join(path.dirname(axePath), 'axe.min.js'), 'utf8');
 
 const OUT = process.env.GB2_VERIFY_OUT || '/tmp/gb2-verify';
-const IGNORE = new Set(['document-title', 'html-has-lang', 'target-size']);
+const IGNORE = new Set(['document-title', 'html-has-lang']);
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
 
 // Pages: one rich chart per interaction family + the wizard when the

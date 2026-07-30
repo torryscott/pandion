@@ -34,8 +34,16 @@ suppressWarnings(suppressMessages({
     source("R/helpmechoose.h.R");    source("R/helpmechoose.b.R")
 }))
 
+# GB2_BUNDLE "source" (default) or "min", mirroring render.R, so the
+# pedagogy surfaces (lint copy, chooser blurbs, anatomy chips, wizard) can
+# be verified on BOTH bundles. Added Jul 2026 with the crowded-axis label
+# thinning: the minifier prop-mangles /^_/ properties, so any rule that
+# reads or stamps one has to be proven on the shipped bundle too.
+BUNDLE <- Sys.getenv("GB2_BUNDLE", "source")
 .gb2_widget_js <- function() {
-    paste(readLines("inst/widget/graphbuilder2.js", warn = FALSE, encoding = "UTF-8"), collapse = "\n")
+    f <- if (identical(BUNDLE, "min")) "inst/widget/graphbuilder2.min.js"
+         else "inst/widget/graphbuilder2.js"
+    paste(readLines(f, warn = FALSE, encoding = "UTF-8"), collapse = "\n")
 }
 environment(graphbuilder2_html) <- globalenv()
 cspec <- function(...) { a <- list(...); if (length(a) == 0) "" else as.character(jsonlite::toJSON(a, auto_unbox = TRUE)) }
@@ -205,5 +213,65 @@ cg2 <- data.frame(y = rnorm(40, 10, 2),
                   g1 = factor(rep(c("M", "F"), 20)),
                   g2 = factor(rep(c("S1", "S2"), each = 20)))
 wr(helpmechoose(data = cg2, vars = c("y", "g1", "g2")), "w_cg2cat")
+
+# 16. Identifier-in-a-category-slot (Jul 2026, Torry's wall-of-IDs chart)
+# plus its false-positive guard, and the crowded-axis label thinning that
+# rides the same shape. See the catsingle / xcatthin rules in the bundle.
+
+# 16a. The accident itself: a per-row ID column in the X slot. 40 levels,
+# 40 observations, every level a singleton. Fires catsingle AND (40 long
+# names on one axis) the label thinning.
+idc <- data.frame(subject_id = factor(sprintf("TSD-AM-%02d", 1:40)),
+                  score = rnorm(40, 10, 2))
+wr(plotbuilder(data = idc, xvar = "subject_id", yvar = "score", groupVar = NULL,
+               facetVar = NULL, graphType = "bar"), "p_cg_idcat")
+
+# 16b. MANY categories, each with real data (30 levels / 240 observations):
+# the axis is crowded so the labels thin, but catsingle must stay silent -
+# a lot of categories is not the same defect as a column of row labels.
+mnc <- data.frame(cat = factor(rep(sprintf("Condition %02d", 1:30), each = 8)),
+                  y = rnorm(240, 10, 2))
+wr(plotbuilder(data = mnc, xvar = "cat", yvar = "y", groupVar = NULL,
+               facetVar = NULL, graphType = "bar"), "p_cg_manycat")
+
+# 16c. THE false-positive guard: legitimate long-tail count data. 20 levels,
+# 16 of them singletons (gate 1 passes), but 216 observations, so the level
+# count is nowhere near the observation count (gate 2 fails) and the rule
+# must stay quiet. Rare countries are real data, not a mis-paste.
+ltc <- data.frame(country = factor(c(sprintf("Rare%02d", 1:16),
+                                     rep(c("USA", "UK", "CAN", "AUS"), each = 50))))
+wr(freqplotbuilder(data = ltc, var = "country", groupVar = NULL, facetVar = NULL,
+                   graphType = "bar"), "p_freq_longtail")
+
+# 16d. The same accident on Frequencies: counting a row-label column.
+fid <- data.frame(row_label = factor(sprintf("R-%03d", 1:36)))
+wr(freqplotbuilder(data = fid, var = "row_label", groupVar = NULL, facetVar = NULL,
+                   graphType = "bar"), "p_freq_idcat")
+
+# 16e. The ID in the COLOR GROUPING slot instead: two honest categories, but
+# 40 single-observation groups. The category role passes, the group role
+# fires, and the copy must name the Group By slot.
+idg <- data.frame(cond = factor(rep(c("A", "B"), 20)),
+                  y = rnorm(40, 10, 2),
+                  pid = factor(sprintf("S%02d", 1:40)))
+wr(plotbuilder(data = idg, xvar = "cond", yvar = "y", groupVar = "pid",
+               facetVar = NULL, graphType = "bar"), "p_cg_idgroup")
+
+# 16f. The legitimate n = 1 design the rule must never scold: a single-subject
+# repeated-measures series. 20 occasions, one observation each. RM categories
+# are measure columns the user picked by hand, so RM is exempt on that role.
+rs1 <- as.data.frame(as.list(stats::setNames(
+    as.numeric(c(4, 5, 6, 6, 7, 8, 8, 9, 9, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15)),
+    sprintf("t%02d", 1:20))))
+wr(rmplotbuilder(data = rs1, measures = sprintf("t%02d", 1:20), bs = NULL,
+                 betweenVar = NULL, graphType = "line"), "p_rm_single")
+
+# 16g. Horizontal mode: the category axis runs down the LEFT, so crowding is
+# vertical and the labels stack rather than rotate. Its own stride path.
+hmc <- data.frame(cat = factor(rep(sprintf("Group %02d", 1:40), each = 3)),
+                  y = rnorm(120, 10, 2))
+wr(plotbuilder(data = hmc, xvar = "cat", yvar = "y", groupVar = NULL,
+               facetVar = NULL, graphType = "bar",
+               chartSpec = cspec(chartOrientation = "horizontal")), "p_cg_horizmany")
 
 cat("probe render done\n")

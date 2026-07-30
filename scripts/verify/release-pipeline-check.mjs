@@ -43,6 +43,9 @@ try {
     const versionFiles = [
         'DESCRIPTION', 'jamovi/0000.yaml', 'CITATION.cff',
         'standalone/index.html', 'standalone/js/ps-shell.js',
+        // The desktop app reports its version to the OS and the updater,
+        // so release-version syncs it too (Jul 29 2026).
+        'standalone/electron/package.json',
         'docs/user-guide.html', 'website/index.html', 'website/about.html',
         'website/download.html', 'website/gallery.html', 'website/support.html',
         'website/v2.html', 'website/v3.html'
@@ -82,8 +85,12 @@ ok(read('.gitignore').includes('/.release/'),
     'prepared bundles are excluded from source control');
 
 const standaloneRun = read('standalone/verify/run.sh');
-ok((standaloneRun.match(/PS_REQUIRE_R_PARITY/g) || []).length === 3,
-    'all three optional standalone R checks become mandatory for a release');
+// Four since Jul 29 2026: the three optional R-parity checks, plus the
+// linkedom guard on hardening-dom-check - a missing helper library skips
+// that probe with a warning on a dev run but must FAIL a release run,
+// where a silent skip is the dangerous outcome.
+ok((standaloneRun.match(/PS_REQUIRE_R_PARITY/g) || []).length === 4,
+    'all optional standalone checks become mandatory for a release');
 ok(!read('standalone/verify/polish-check.mjs')
         .includes("about.version === '3.0.0'") &&
    !read('standalone/verify/hardening-dom-check.mjs')

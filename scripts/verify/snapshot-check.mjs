@@ -241,6 +241,44 @@ window.__gb2_snapDelay = 400;`;
     }, commit[0]);
     expect('no-loop: matching chartSnapshotKey suppresses the re-commit',
            again.after === again.before);
+
+    // 5b. render-stability: the SAME payload rendered under a DIFFERENT
+    // widget id must serialize byte-identical. Case 5 above re-renders
+    // into the same host, so it never varies elementId - but a .omv
+    // reopen mints a fresh random id every time. The id rides the
+    // categorical data-clip id (gb2-cat-data-clip-<elementId>), so
+    // before the gb2-static normalization the signature changed on
+    // every reopen and the sweep re-keyed + re-committed the snapshot:
+    // one wasted R rerun per open, masked by the snapshot-echo patcher.
+    const stable = await page.evaluate(async (val) => {
+        const key = val.slice(0, val.indexOf('|'));
+        const hostA = document.querySelector('.graphbuilder2-host');
+        const marker = 'var __gb2_payload = ';
+        const script = [...document.querySelectorAll('script')]
+            .map(el => el.textContent || '').find(t => t.includes(marker)) || '';
+        const start = script.indexOf(marker) + marker.length;
+        const end = script.indexOf(';\nvar __gb2_id =', start);
+        const payload = JSON.parse(script.slice(start, end));
+        payload.chartSnapshotKey = key;           // same payload hostA holds
+        const hostB = document.createElement('div');
+        hostB.id = 'gb2-reopen-probe';
+        hostB.className = hostA.className;
+        document.body.appendChild(hostB);
+        window.__gb2_lastRenderedHash = null;     // defeat the hash-skip
+        window.GraphBuilder2.render(hostB.id, payload);
+        await new Promise(r => setTimeout(r, 600));
+        const a = hostA.__gb2_serializeSvg();
+        const b = hostB.__gb2_serializeSvg();
+        return {
+            aLen: a.length, bLen: b.length,
+            identical: a === b,
+            idLeak: b.indexOf('gb2-reopen-probe') >= 0,
+        };
+    }, commit[0]);
+    expect('render-stable: same chart under a new widget id serializes byte-identical (' +
+           stable.aLen + ' vs ' + stable.bLen + ' chars)', stable.identical);
+    expect('render-stable: the widget id never leaks into the serialization',
+           !stable.idLeak);
     await ctx.close();
 }
 

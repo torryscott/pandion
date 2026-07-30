@@ -45,6 +45,9 @@ const CASES = [
       // Jul 2026: drawn shapes are labeled by their REAL kind (the
       // fixture's shape is a rect -> "Rectangle", not "Annotation").
       anatomy: ['Significance bracket', 'Reference line', 'Rectangle', 'Panel heading'],
+      // Negative control for the crowded-axis thinning: an ordinary chart
+      // must stamp no stride and print every name.
+      axisThin: { minStride: 0 },
       chipClick: { chip: 'Error bar', expect: 'one standard deviation' } },
     { file: 'p_xy_anat',
       chooser: ['Splits the plot into cells', 'Trade-off:', 'overlap hides'],
@@ -109,7 +112,62 @@ const CASES = [
     { file: 'p_cg_freey', lint: ['Each panel has its own Y scale'],
       chipClick: { chip: 'Panel heading', expect: 'OWN axis range' } },
     { file: 'w_cg2cat', wizard: ['Color grouping or panels?', 'mini chart', 'two categorical variables to place'] },
+    // ---- an identifier column in a category slot, and the crowded-axis
+    // label thinning that rides the same shape (Jul 2026, Torry's
+    // wall-of-IDs chart). Rules: catsingle + xcatthin.
+    //
+    // The accident itself: a per-row ID in the X slot. 40 levels over 40
+    // observations, every level a singleton. The rule must NAME the column,
+    // and the same chart is crowded enough to thin its labels.
+    { file: 'p_cg_idcat',
+      lint: ['Almost every category holds a single observation', 'subject_id',
+             'has 40 levels', 'identifier column', 'landed one column off',
+             'nothing to summarize', 'showing 1 name in every 2'],
+      axisThin: { minStride: 2, cats: 40 } },
+    // MANY honest categories (30 levels / 240 observations): the axis thins,
+    // but the ID rule must stay quiet. This is gate 2 doing its job - a lot
+    // of categories is not the same defect as a column of row labels.
+    { file: 'p_cg_manycat',
+      lint: ['showing 1 name in every 2', 'never the data'],
+      lintAbsent: ['holds a single observation'],
+      axisThin: { minStride: 2, cats: 30 } },
+    // THE false-positive guard, and the reason gate 2 exists: legitimate
+    // long-tail count data. 16 of 20 levels are singletons (gate 1 passes)
+    // but 216 observations back them (gate 2 fails). Rare countries are real
+    // data. The check must RUN and PASS here, not sit out as inapplicable.
+    { file: 'p_freq_longtail',
+      lint: ['Categories hold real groups'],
+      lintAbsent: ['holds a single observation', '1 name in every'] },
+    // The same accident on Frequencies, which needs its own sentence: a
+    // count of row labels draws one bar per row and says nothing.
+    { file: 'p_freq_idcat',
+      lint: ['Almost every category holds a single observation', 'row_label',
+             'Frequencies counts how often each level occurs',
+             'the variable being counted'] },
+    // The ID in the COLOR GROUPING slot instead: two honest categories, 40
+    // single-observation groups. The copy must name the Group By slot.
+    { file: 'p_cg_idgroup',
+      lint: ['Almost every group holds a single observation',
+             'color grouping variable', '(pid)', 'the Group By slot'] },
+    // The legitimate n = 1 design the rule must never scold: a single-subject
+    // repeated-measures series, 20 occasions with one observation each. RM
+    // categories are hand-picked measure columns, so RM is exempt there.
+    { file: 'p_rm_single', lintAbsent: ['holds a single observation'] },
+    // Horizontal mode: the category axis runs down the LEFT and its labels
+    // stack rather than rotate, so it has its own stride path (and lands on
+    // a different number - 1 in 3 at this height).
+    { file: 'p_cg_horizmany',
+      lint: ['showing 1 name in every 3', 'keeps a tick mark'],
+      lintAbsent: ['holds a single observation'],
+      axisThin: { minStride: 2, cats: 40 } },
 ];
+
+// GB2_PEDAGOGY_ONLY=p_cg_idcat,p_freq_idcat restricts the run to named
+// fixtures. Added Jul 2026 so a reverted-code CONTROL can re-run the REAL
+// probe on just the cases under test instead of a parallel copy of this
+// logic (a control that runs different code proves nothing).
+const ONLY = (process.env.GB2_PEDAGOGY_ONLY || '').split(',')
+    .map(s => s.trim()).filter(Boolean);
 
 const browser = await chromium.launch();
 let failures = 0;
@@ -128,6 +186,7 @@ function checkAbsent(name, body, needles) {
 }
 
 for (const c of CASES) {
+    if (ONLY.length && !ONLY.includes(c.file)) continue;
     const ctx = await browser.newContext();
     const page = await ctx.newPage();
     const pageErrors = [];
@@ -160,6 +219,49 @@ for (const c of CASES) {
             return svgs.some(s => s.querySelectorAll('*').length > 30);
         }, { timeout: 30000 });
         await page.waitForTimeout(800);
+
+        if (c.axisThin) {
+            // Crowded-category label thinning (Jul 2026, Torry). Runs before
+            // any panel is opened, so it is order-independent. The contract:
+            // every category keeps a TICK, only the NAMES thin, and the
+            // stride the axis stamps is the number the Check-graph note
+            // quotes. minStride 0 is the negative control - a normal chart
+            // must stamp nothing and print every name.
+            const g = await page.evaluate(() => {
+                const svgs = [...document.querySelectorAll('svg')];
+                let best = null, area = 0;
+                for (const s of svgs) {
+                    const b = s.getBoundingClientRect();
+                    if (b.width * b.height > area) { area = b.width * b.height; best = s; }
+                }
+                if (!best) return null;
+                const labs = [...best.querySelectorAll('[data-role="x-cat-label"]')];
+                const ticks = [...best.querySelectorAll('[data-role="x-tick"],[data-role="y-tick"]')]
+                    .filter(t => t.getAttribute('data-bar-cat') !== null);
+                return {
+                    labels: labs.length, ticks: ticks.length,
+                    strides: [...new Set(labs.map(l => l.getAttribute('data-cat-stride')))],
+                };
+            });
+            const want = c.axisThin;
+            if (!g) { console.log('  FAIL axisThin: no chart svg'); failures++; }
+            else if (!want.minStride) {
+                if (g.strides.length === 1 && g.strides[0] === null && g.labels === g.ticks)
+                    console.log(`  ok   axisThin: uncrowded axis unthinned (${g.labels} names, ${g.ticks} ticks)`);
+                else { console.log('  FAIL axisThin: normal chart was thinned :: ' + JSON.stringify(g)); failures++; }
+            } else {
+                const k = parseInt(g.strides[0], 10);
+                const oneK = g.strides.length === 1 && isFinite(k) && k >= want.minStride;
+                const ticksKept = want.cats ? (g.ticks === want.cats) : (g.ticks > g.labels);
+                const thinned = g.labels < g.ticks &&
+                    g.labels === Math.ceil(g.ticks / k);
+                if (oneK && ticksKept && thinned)
+                    console.log(`  ok   axisThin: 1 name in every ${k}, all ${g.ticks} ticks kept (${g.labels} names)`);
+                else { console.log(`  FAIL axisThin (want stride >= ${want.minStride}` +
+                    (want.cats ? `, ${want.cats} ticks` : '') + ') :: ' + JSON.stringify(g)); failures++; }
+            }
+        }
+
         await page.click('button[title="Help & shortcuts"]');
         await page.waitForTimeout(500);
 
