@@ -4249,7 +4249,16 @@
         // moves) from a stuck "pointer down" flag whose pointerup was
         // lost (released outside the web view, etc.). Only writes during
         // a drag — negligible cost.
-        onDoc("pointermove", function () {
+        onDoc("pointermove", function (e) {
+            // Remember where the pointer is so the export harvest can ask the
+            // DOM what sits under it. Two number writes, no allocation, and no
+            // extra listener: :hover cannot be used for that job because
+            // headless Chromium never reports it, which makes any hover fix
+            // built on it impossible to regression-test.
+            try {
+                window.__gb2_ptrX = e.clientX;
+                window.__gb2_ptrY = e.clientY;
+            } catch (_ePt) {}
             if (window.__gb2_widgetPointerDown) {
                 window.__gb2_widgetPointerActivityAt = Date.now();
             }
@@ -4307,6 +4316,76 @@
         // free). Items not containing our chart are never deferred. Patched
         // once per window; wrapped defensively so any failure falls back to
         // jamovi's original behavior.
+        // jamovi's Svg results element harvests the chart by CLONING THE LIVE
+        // DOM of the first svg it finds (formatio.ts _svgify ->
+        // el.querySelector('svg')), on right-click export image AND on every
+        // plain .omv save (instance.ts:584, `path.endsWith('.omv') &&
+        // !options.export`). So a selection halo, a hover brighten or an armed
+        // anatomy overlay is baked into the exported image and into the SAVED
+        // FILE - and the saved svg is exactly what a machine without Pandion
+        // renders, because svg.ts falls back to it when content is empty.
+        // jamovi's own exclude list cannot help: _svgify takes no options, and
+        // removing nodes could not undo the attribute mutations anyway.
+        //
+        // Hand it the same sanitized clone our Export button uses. Shadow
+        // querySelector on the custom element's prototype, and act ONLY on the
+        // exact 'svg' selector for an element containing OUR host - every other
+        // selector (svg.ts itself calls querySelector('.content')) and every
+        // other module's Svg element delegate untouched. Fails open: any throw
+        // returns the real svg, i.e. the behaviour we have today.
+        try {
+            if (!window.__gb2_svgViewPatched &&
+                typeof customElements !== "undefined" &&
+                customElements.get("jmv-results-svg")) {
+                var _gb2SvgCE = customElements.get("jmv-results-svg");
+                if (_gb2SvgCE && _gb2SvgCE.prototype) {
+                    var _gb2SvgQS = _gb2SvgCE.prototype.querySelector ||
+                        Element.prototype.querySelector;
+                    _gb2SvgCE.prototype.querySelector = function (sel) {
+                        try {
+                            if (sel === "svg" ||
+                                sel === "svg.jmv-results-svg-content") {
+                                var _h = _gb2SvgQS.call(this, ".graphbuilder2-host");
+                                if (_h && typeof _h.__gb2_harvestClone === "function") {
+                                    var _cl = _h.__gb2_harvestClone();
+                                    if (_cl) {
+                                        // _svgMarkup reads getBoundingClientRect and
+                                        // getComputedStyle off the node, both empty
+                                        // while detached. It is fully synchronous, so
+                                        // park the clone off-screen in the BODY (not
+                                        // in .content, which the PNG copy path
+                                        // rasterizes) and drop it next task.
+                                        // The offsets go on a WRAPPER, never on the
+                                        // svg itself. _svgMarkup clones the node it is
+                                        // handed, so any inline style set here would be
+                                        // serialized into the saved .omv and the stored
+                                        // chart would render 99999px off-screen. Same
+                                        // for aria-hidden, which would ship a chart that
+                                        // screen readers ignore.
+                                        var _pk = document.createElement("div");
+                                        _pk.setAttribute("aria-hidden", "true");
+                                        _pk.style.cssText =
+                                            "position:absolute;left:-99999px;top:0";
+                                        _pk.appendChild(_cl);
+                                        document.body.appendChild(_pk);
+                                        setTimeout(function () {
+                                            try {
+                                                if (_pk.parentNode)
+                                                    _pk.parentNode.removeChild(_pk);
+                                            } catch (_eRm) {}
+                                        }, 0);
+                                        return _cl;
+                                    }
+                                }
+                            }
+                        } catch (_eQS) {}
+                        return _gb2SvgQS.call(this, sel);
+                    };
+                    window.__gb2_svgViewPatched = true;
+                }
+            }
+        } catch (_eSvgPatch) {}
+
         try {
             if (!window.__gb2_htmlViewPatched &&
                 typeof customElements !== "undefined" &&
@@ -9926,6 +10005,14 @@
 
         var svg = svgEl("svg", {
             "data-role": "gb2-chart-svg",
+            // jamovi's Svg results element prefers
+            // querySelector("svg.jmv-results-svg-content") and only falls back
+            // to the first svg in the DOM, so wearing this marks the chart as
+            // THE harvest target explicitly rather than relying on DOM order.
+            // The querySelector shadow below matches this selector too, or
+            // adding the class would route jamovi straight to the live chart
+            // and quietly reintroduce the chrome it is there to strip.
+            "class": "jmv-results-svg-content",
             // EXPLICIT namespace attributes (Jul 2026, the PowerPoint-copy
             // root cause): the HTML serializer does NOT emit xmlns for a
             // namespace-created svg, and jamovi's copy rasterizer embeds
@@ -10254,7 +10341,13 @@
         // sets xmlns, width/height/viewBox, inlines a sans-serif font hint,
         // and strips interactive chrome (selection outlines) that should
         // not appear in saved files. Used by all four export paths.
-        function serializeSvgForExport() {
+        // Build the sanitized export clone: editing chrome stripped, hover
+        // mutations reverted, negative-origin viewBox so dragged content is
+        // not cropped, title/desc for standalone accessibility.
+        // serializeSvgForExport() below serializes it; jamovi's Svg-results
+        // harvest takes the NODE (see the jmv-results-svg patch), so an
+        // exported file and a saved .omv come from ONE tested code path.
+        function _gb2HarvestClone() {
             // Use the *current* SVG dimensions (which the auto-grow
             // logic has extended to fit any right/bottom drag spill)
             // and the bgDiv's left/top padding (which captures any
@@ -10269,7 +10362,126 @@
             var topPad  = (typeof _bgPad === "object" && _bgPad && typeof _bgPad.top  === "number") ? _bgPad.top  : 0;
             var totalW = leftPad + liveW;
             var totalH = topPad + liveH;
+            // Hover chrome is applied IN PLACE by mouseenter handlers, and each
+            // one already has a mouseleave twin that is the authoritative undo
+            // (several recompute from data rather than restoring a stash). So
+            // instead of maintaining a parallel list of what to revert, ask the
+            // hovered elements to un-hover themselves, clone, then hand the
+            // hover straight back. Both dispatches and the clone happen in ONE
+            // synchronous task, so the browser never paints in between and
+            // nothing flickers on screen. The stash-based revert below stays as
+            // a backstop for anything whose leave handler is incomplete.
+            //
+            // The hovered set comes from the DOM's own hit test at the last
+            // pointer position, unioned with :hover. :hover alone is not
+            // dependable: headless Chromium never reports it, so a fix built on
+            // it can never be regression-tested, and it would silently rot.
+            var _hovEls = [];
+            try {
+                var _hAdd = function (el) {
+                    if (!el || _hovEls.indexOf(el) >= 0) return;
+                    try { if (!svg.contains(el)) return; } catch (_eC) { return; }
+                    _hovEls.push(el);
+                };
+                // The topmost element plus its ancestors IS the hover chain,
+                // innermost first, which is the order a real pointer exit
+                // produces. Do NOT use the plural elementsFromPoint: it returns
+                // the whole STACK under the point, including marks behind the
+                // top one that the browser never hovered. Those get no leave
+                // from the browser either, so re-arming them leaves them
+                // switched on for good (overlapping histograms, raincloud
+                // points, stacked bars).
+                if (typeof window.__gb2_ptrX === "number" &&
+                    typeof window.__gb2_ptrY === "number" &&
+                    document.elementFromPoint) {
+                    var _ec = document.elementFromPoint(window.__gb2_ptrX, window.__gb2_ptrY);
+                    if (_ec && svg.contains(_ec)) {
+                        while (_ec && _ec !== svg) { _hAdd(_ec); _ec = _ec.parentNode; }
+                    }
+                }
+                // querySelectorAll is document order (ancestors first), so walk
+                // it backwards to keep the innermost-first ordering.
+                var _hv0 = svg.querySelectorAll(":hover");
+                for (var _hi2 = _hv0.length - 1; _hi2 >= 0; _hi2--) _hAdd(_hv0[_hi2]);
+            } catch (_eHov) {}
+            // Carry the real pointer coordinates. Three enter handlers position
+            // a tooltip from the event, and a synthetic event defaulting to
+            // (0, 0) would fling it into the top-left corner.
+            var _hInit = {
+                bubbles: false,
+                cancelable: true,
+                clientX: (typeof window.__gb2_ptrX === "number") ? window.__gb2_ptrX : 0,
+                clientY: (typeof window.__gb2_ptrY === "number") ? window.__gb2_ptrY : 0
+            };
+            var _hFire = function (el, type, bubbles) {
+                try {
+                    var init = {
+                        bubbles: bubbles,
+                        cancelable: true,
+                        clientX: _hInit.clientX,
+                        clientY: _hInit.clientY
+                    };
+                    el.dispatchEvent(new PointerEvent("pointer" + type, init));
+                    el.dispatchEvent(new MouseEvent("mouse" + type, init));
+                } catch (_eF) {}
+            };
+            // Snapshot every attribute in the chart (plus the tooltip, which
+            // lives beside it) so the live view can be put back EXACTLY as it
+            // was. Replaying "enter" was tried and is not good enough: a leave
+            // handler may normalise an attribute rather than restore it, and
+            // any replay then has to GUESS whether the pointer is still there.
+            // Guess wrong and a mark is left switched on that nothing can
+            // clear, because the browser has no leave to send it. Restoring a
+            // snapshot needs no guess and cannot arm anything.
+            var _hEls = [], _hWas = [];
+            var _hCapture = function () {
+                try {
+                    var all = svg.getElementsByTagName("*"), i, j;
+                    for (i = 0; i < all.length; i++) {
+                        var at = all[i].attributes, m = {};
+                        for (j = 0; j < at.length; j++) m[at[j].name] = at[j].value;
+                        _hEls.push(all[i]); _hWas.push(m);
+                    }
+                    // the tooltip is an HTML sibling of the chart, and a leave
+                    // handler hides it
+                    var _hHost = svg.closest ? svg.closest(".graphbuilder2-host") : null;
+                    var _tip = _hHost && _hHost.querySelector('[data-role="xy-tooltip"]');
+                    if (_tip) {
+                        var ta = _tip.attributes, tm = {};
+                        for (j = 0; j < ta.length; j++) tm[ta[j].name] = ta[j].value;
+                        _hEls.push(_tip); _hWas.push(tm);
+                    }
+                } catch (_eCap) {}
+            };
+            var _hRestore = function () {
+                try {
+                    for (var i = 0; i < _hEls.length; i++) {
+                        var el = _hEls[i], want = _hWas[i], k;
+                        if (!el || !el.parentNode) continue;
+                        var at = el.attributes;
+                        for (var j = at.length - 1; j >= 0; j--) {
+                            k = at[j].name;
+                            if (!Object.prototype.hasOwnProperty.call(want, k)) el.removeAttribute(k);
+                        }
+                        for (k in want) {
+                            if (!Object.prototype.hasOwnProperty.call(want, k)) continue;
+                            if (el.getAttribute(k) !== want[k]) el.setAttribute(k, want[k]);
+                        }
+                    }
+                } catch (_eRes) {}
+            };
+            if (_hovEls.length) _hCapture();
+            try {
+                // enter/leave do not bubble, so a delegated handler on an
+                // ancestor never hears them. The scatter points use exactly
+                // that, and a real pointer exit fires bubbling out as well, so
+                // send it from the innermost element too.
+                if (_hovEls.length) _hFire(_hovEls[0], "out", true);
+                for (var _hj = 0; _hj < _hovEls.length; _hj++) _hFire(_hovEls[_hj], "leave", false);
+            } catch (_eHov1) {}
             var copy = svg.cloneNode(true);
+            // put the live chart back before anything can paint
+            if (_hovEls.length) _hRestore();
             copy.setAttribute("xmlns", "http://www.w3.org/2000/svg");
             copy.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
             copy.setAttribute("width", totalW);
@@ -10292,11 +10504,83 @@
             if (iuG) iuG.parentNode.removeChild(iuG);
             // Selection halos are editing chrome - strip them.
             var halos = copy.querySelectorAll(
-                '[data-role="bracket-halo"], [data-role="refline-halo"]'
+                '[data-role="bracket-halo"], [data-role="refline-halo"],' +
+                '[data-role="inspector-indicator-back"],' +
+                '[data-role="hover-highlight"], [data-role="marquee"],' +
+                '[data-role="rotate-handle"], [data-role="draw-capture"],' +
+                '[data-role="anatomy-overlay"], [data-role="anatomy-capture"],' +
+                '[data-role="stats-link-halo"], [data-role="alignment-guides"],' +
+                '[data-role="refline-handle"], [data-role="ann-rot-line"],' +
+                '[data-role="ann-rot-handle"],' +
+                '[data-role="freq-pie-seam-glow"], [data-role="freq-donut-hole-glow"]'
             );
             for (var hi = 0; hi < halos.length; hi++) {
                 if (halos[hi].parentNode) halos[hi].parentNode.removeChild(halos[hi]);
             }
+            // Hover does not add nodes - it MUTATES the chart's own elements
+            // (a brightness filter, a thicker stroke, a raised opacity), so
+            // node removal cannot undo it. A save taken with the pointer
+            // parked on a bar would otherwise bake the hover state in.
+            // Every mutation site stashes the pre-hover value; restore from
+            // the stash and drop it.
+            try {
+                var _hv = copy.querySelectorAll(
+                    '[data-hover-base-width], [data-hover-base-op],' +
+                    '[data-hover-base-x2], [data-hover-base-y2],' +
+                    '[data-hover-fill0], [data-base-fill-opacity]');
+                for (var _hj = 0; _hj < _hv.length; _hj++) {
+                    var _he = _hv[_hj];
+                    // EVERY entry must name a real writer and the attribute
+                    // it actually stashes. Audited against the hover sites on
+                    // Jul 30 2026 and three were wrong: -op stashes
+                    // stroke-opacity (this restored "opacity", so the mutation
+                    // stayed baked AND a bogus attribute was added), the rug
+                    // tick's x2/y2 growth was missed, and so was the fill-less
+                    // hover tint. -x/-y were listed but have no writer at all.
+                    // If you add a hover stash, add it here in the same commit.
+                    var _pairs = [
+                        ["data-hover-base-width", "stroke-width"],
+                        ["data-hover-base-op", "stroke-opacity"],
+                        ["data-hover-base-x2", "x2"],
+                        ["data-hover-base-y2", "y2"],
+                        ["data-hover-fill0", "fill"],
+                        ["data-base-fill-opacity", "fill-opacity"]
+                    ];
+                    for (var _hp = 0; _hp < _pairs.length; _hp++) {
+                        var _stash = _pairs[_hp][0], _attr = _pairs[_hp][1];
+                        if (!_he.hasAttribute(_stash)) continue;
+                        var _was = _he.getAttribute(_stash);
+                        // empty stash means the attribute was absent before
+                        if (_was === "" || _was === null) _he.removeAttribute(_attr);
+                        else _he.setAttribute(_attr, _was);
+                        _he.removeAttribute(_stash);
+                    }
+                }
+                // Hover and lift chrome rides an inline style filter, in more
+                // flavours than one: brightness(1.15) to lift a dark mark,
+                // brightness(0.85) to darken a light one, and drop-shadow()
+                // when a group is picked up. Matching only "brightness" left
+                // the darkened and shadowed variants baked into copies. The
+                // chart's own rendering never sets an inline filter (there is
+                // not a single setAttribute("filter") in the bundle), so clear
+                // every one rather than pattern-match and miss the next.
+                var _fl = copy.querySelectorAll('[style*="filter"]');
+                for (var _fk = 0; _fk < _fl.length; _fk++) {
+                    try { _fl[_fk].style.filter = ""; } catch (_ef) {}
+                }
+            } catch (_eHoverRevert) {}
+            // Reverting an inline style leaves style="" behind. It paints
+            // nothing, but it is noise in a file a user may open or hand on, so
+            // drop any style attribute that ended up empty.
+            try {
+                var _es = copy.querySelectorAll("[style]");
+                for (var _ek = 0; _ek < _es.length; _ek++) {
+                    try {
+                        if (!(_es[_ek].getAttribute("style") || "").trim())
+                            _es[_ek].removeAttribute("style");
+                    } catch (_ee) {}
+                }
+            } catch (_eEmptyStyle) {}
             // The large-N scatter fast layer is a canvas in a
             // foreignObject: canvas pixels survive neither cloneNode
             // nor XMLSerializer, so swap it for a high-res raster
@@ -10395,6 +10679,11 @@
                     t.setAttribute("font-style", "normal");
                 }
             }
+            return copy;
+        }
+
+        function serializeSvgForExport() {
+            var copy = _gb2HarvestClone();
             var _serialized = new XMLSerializer().serializeToString(copy);
             // Normalize the per-render random widget id out of the
             // serialization (it rides the categorical data-clip id,
@@ -10415,6 +10704,7 @@
         // both on the host, refreshed every render.
         try {
             host.__gb2_serializeSvg = serializeSvgForExport;
+            host.__gb2_harvestClone = _gb2HarvestClone;
             host.__gb2_accessibleDescription = function () {
                 return _gb2ChartAriaLabel(data, true);
             };
@@ -35557,6 +35847,8 @@
                         // near-white fills so the pop always reads).
                         var _mgOp0 = el.getAttribute("fill-opacity");
                         el.addEventListener("mouseenter", function () {
+                            // stash the pre-hover value so the harvest clone can put it back; without this the raised opacity bakes into copies and saves
+                            if (el.getAttribute("data-base-fill-opacity") == null) el.setAttribute("data-base-fill-opacity", el.getAttribute("fill-opacity") || "");
                             el.setAttribute("fill-opacity", "1");
                             var _mf = el.getAttribute("fill") || "";
                             var _light = false;
@@ -37282,6 +37574,8 @@
                                     // bump opacity to 1 and brighten the fill/stroke (or
                                     // darken near-white fills) so the element pops.
                                     _hoverEnter = function () {
+                                        // stash the pre-hover value so the harvest clone can put it back; without this the raised opacity bakes into copies and saves
+                                        if (el.getAttribute("data-base-fill-opacity") == null) el.setAttribute("data-base-fill-opacity", el.getAttribute("fill-opacity") || "");
                                         el.setAttribute("fill-opacity", "1");
                                         var _vf = el.getAttribute("fill") || "";
                                         if (_vf && _vf !== "none" && _vf !== "transparent") {
@@ -38258,6 +38552,8 @@
                     // a no-op there).
                     barRect.addEventListener("mouseenter", function () {
                         for (var i = 0; i < visuals.length; i++) {
+                            // stash the pre-hover value so the harvest clone can put it back; without this the raised opacity bakes into copies and saves
+                            if (visuals[i].getAttribute("data-base-fill-opacity") == null) visuals[i].setAttribute("data-base-fill-opacity", visuals[i].getAttribute("fill-opacity") || "");
                             visuals[i].setAttribute("fill-opacity", "1");
                             var _vf = visuals[i].getAttribute("fill") || "";
                             if (_vf === "transparent" || _vf === "none") {
@@ -39396,6 +39692,8 @@
                     (function (catName, count, frac, el) {
                         el.addEventListener("mouseenter", function () {
                             if (window.__gb2_fqPieDragging) return;
+                            // stash the pre-hover value so the harvest clone can put it back; without this the raised opacity bakes into copies and saves
+                            if (el.getAttribute("data-base-fill-opacity") == null) el.setAttribute("data-base-fill-opacity", el.getAttribute("fill-opacity") || "");
                             el.setAttribute("fill-opacity", "1");
                             el.style.filter = "brightness(1.12)";
                         });
@@ -42930,6 +43228,8 @@
                         // label) so the user sees what a click/drag
                         // would target before they press.
                         rect.addEventListener("mouseenter", function () {
+                            // stash the pre-hover value so the harvest clone can put it back; without this the raised opacity bakes into copies and saves
+                            if (rect.getAttribute("data-base-fill-opacity") == null) rect.setAttribute("data-base-fill-opacity", rect.getAttribute("fill-opacity") || "");
                             rect.setAttribute("fill-opacity", "1");
                             try { showTextHighlight(rowGroup); } catch (_e) {}
                         });
@@ -94418,9 +94718,15 @@
             // Insert before wrap inside the chart card (flex column
             // wrapper), so toolbar / chart / panel are flex siblings
             // and naturally share the same left edge.
+            // NOTE: appended AFTER wrap, then pulled back above it with
+            // flex order. jamovi's Svg results element harvests the chart
+            // via el.querySelector("svg") -- the FIRST svg in the DOM -- so
+            // the chart wrap must precede every piece of chrome that carries
+            // an icon svg. Layout is identical; only document order changes.
+            bar.style.order = "-6";
             var parent = wrap.parentNode;
             if (parent) {
-                parent.insertBefore(bar, wrap);
+                parent.appendChild(bar);
             } else {
                 host.appendChild(bar);
             }
@@ -94658,8 +94964,11 @@
                 tray.appendChild(cell);
             });
 
+            // after wrap in the DOM, above it visually (see the toolbar
+            // note above -- the chart svg has to come first)
+            tray.style.order = "-5";
             var parent = wrap.parentNode;
-            if (parent) parent.insertBefore(tray, wrap);
+            if (parent) parent.appendChild(tray);
             _pivotTray = tray;
             try { window.__gb2_rmRepivot = function (m) { return _gb2RmRepivotAny(data, m); }; } catch (_ehk) {}
             try { window.__gb2_rerenderCurrent = function () { window.__gb2_lastRenderedHash = null; window.GraphBuilder2.render(elementId, JSON.parse(JSON.stringify(data))); }; } catch (_ehk2) {}
@@ -94817,7 +95126,10 @@
                     strip.setAttribute("data-role", "graphtype-strip");
                     strip.style.cssText = "display:flex;flex-wrap:wrap;align-items:stretch;gap:6px;padding:6px;background:#fafafa;border:1px solid #ddd;border-top:none;box-sizing:border-box;";
                     _buildTiles(strip, null);
-                    wrap.parentNode.insertBefore(strip, wrap);
+                    // after wrap in the DOM, above it visually; this strip
+                    // is full of icon svgs and would otherwise be harvested
+                    strip.style.order = "-4";
+                    wrap.parentNode.appendChild(strip);
                     return;
                 }
                 // --- Flyout mode (default) ---
@@ -94908,7 +95220,10 @@
                     var chip = document.createElement("div");
                     chip.style.cssText = "padding:4px 6px;background:#fafafa;border:1px solid #ddd;border-top:none;box-sizing:border-box;";
                     chip.appendChild(trig);
-                    wrap.parentNode.insertBefore(chip, wrap);
+                    // after wrap in the DOM, above it visually -- the chart
+                    // svg must be the first svg (see _externalizeToolbar)
+                    chip.style.order = "-6";
+                    wrap.parentNode.appendChild(chip);
                 }
                 // Same survive-the-echo re-arm as the palette flyout: a
                 // content render rebuilds the toolbar and destroys an open
@@ -95504,11 +95819,14 @@
             // Insert below the existing _externalToolbar but above
             // the chart wrap. Both share the same parent (the chart
             // card flex column).
+            // Explicit order, because the anchor (_externalToolbar) now
+            // sits after wrap in the DOM so the chart svg comes first.
+            bar.style.order = "-2";
             if (_externalToolbar && _externalToolbar.parentNode) {
                 _externalToolbar.parentNode.insertBefore(
                     bar, _externalToolbar.nextSibling);
             } else if (wrap.parentNode) {
-                wrap.parentNode.insertBefore(bar, wrap);
+                wrap.parentNode.appendChild(bar);
             }
             _quickEditToolbar = bar;
             _syncQuickToolbarGeometry();
@@ -95596,11 +95914,12 @@
             ].join(";");
             // Insert just after the quick-edit toolbar (which itself
             // sits between the button toolbar and the wrap).
+            bar.style.order = "-1";
             if (_quickEditToolbar && _quickEditToolbar.parentNode) {
                 _quickEditToolbar.parentNode.insertBefore(
                     bar, _quickEditToolbar.nextSibling);
             } else if (wrap.parentNode) {
-                wrap.parentNode.insertBefore(bar, wrap);
+                wrap.parentNode.appendChild(bar);
             }
             _compactColorPicker = bar;
             // Outside-click closes the picker and commits.
@@ -102032,7 +102351,27 @@
                     _cwS("native/other item copy - no swap " + JSON.stringify(addr));
                     return;
                 }
-                if (wIsDocCopy && (addr.length === 0 || wIsWidgetCopy)) {
+                // Under jamovi's Svg results element this whole helper is
+                // obsolete: the text-soup paste it exists to prevent was
+                // fixed at source (resultspanel.ts now sends an <img> for
+                // the html flavour), and substituting our cached png for
+                // the live chart while jamovi is trying to rasterize it can
+                // only confuse matters. Stand down and let jamovi own the
+                // clipboard. Detected off the results item we are inside,
+                // so the legacy Html path is completely unaffected.
+                var wUnderSvgItem = false;
+                try {
+                    var _wH0 = document.querySelector(".graphbuilder2-host");
+                    wUnderSvgItem = !!(_wH0 && _wH0.closest &&
+                        _wH0.closest("jmv-results-svg"));
+                } catch (_eUs) {}
+                if (wUnderSvgItem) _cwS("Svg results element - DOM swap stood down");
+                // NOTE: only the DOM swap stands down. The watchdog reply
+                // further below still runs, and must: it hands jamovi a raster
+                // of our SANITIZED clone, and that is the only thing keeping
+                // editing chrome out of Copy and PNG export, because jamovi's
+                // own _imagify rasterizes the LIVE dom, halos and all.
+                if (!wUnderSvgItem && wIsDocCopy && (addr.length === 0 || wIsWidgetCopy)) {
                     try {
                         var wHostSw = document.querySelector(".graphbuilder2-host");
                         var wPg = (wHostSw && window.__gb2_copyPng) ? window.__gb2_copyPng[wHostSw.id] : null;
@@ -102122,8 +102461,13 @@
                 // every .omv save take five seconds; suppressing the reply
                 // made Save wait forever. Preserve the rasterized content,
                 // but start it immediately for those plain Save requests.
+                // The 1500 ms grace let jamovi's clipboard pipeline go first on
+                // the Html path, where its reply was the good one. Under the Svg
+                // element its reply is a raster of the live dom (chrome included),
+                // so deferring is precisely what puts halos in a paste. Reply
+                // immediately there and let ours win the race.
                 var wMs = (typeof window.__gb2_watchdogMs === "number" ? window.__gb2_watchdogMs
-                    : (wIsCopy ? 1500 : 0));
+                    : ((wIsCopy && !wUnderSvgItem) ? 1500 : 0));
                 _cwS("rescue timer armed " + wMs + " ms");
                 setTimeout(function () {
                     try {
