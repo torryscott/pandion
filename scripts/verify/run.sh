@@ -103,6 +103,9 @@ GB2_VERIFY_OUT="$OUT" node "$HERE/sigma-parity-check.mjs"
 echo "== undo/redo completeness (generic tracking: edit->undo->redo per module + denylist)"
 GB2_VERIFY_OUT="$OUT" node "$HERE/undo-check.mjs"
 
+echo "== hover must not bake into an export (harvest fires each hovered element's leave twin)"
+GB2_VERIFY_OUT="$OUT" node "$HERE/hover-export-check.mjs"
+
 echo "== crowded-category label thinning: the stride decision (pure unit)"
 node "$HERE/catstride-unit.mjs"
 
