@@ -10250,8 +10250,8 @@
         // ONE corner resize handle (Aug 2026, Torry's ask): the jamovi-image
         // convention replaces the two per-axis grips. Bottom-right corner,
         // drags BOTH dimensions; Shift (or the Sizing panel's aspect lock)
-        // preserves the grab-time ratio; release snaps to 10 px steps like
-        // jamovi's own plots unless Ctrl/Cmd asks for the exact size.
+        // preserves the grab-time ratio; release keeps the exact dropped
+        // size (no jamovi-style 10 px snap - Torry's call, Aug 2026).
         // Single-axis fine-tuning lives in Chart settings -> Sizing.
         var gripXY = makeGrip("nwse-resize");
         // The corner box overlaps the tail of the x-axis click strip (a
@@ -98783,10 +98783,10 @@
 
         // --- Corner drag (width + height) --------------------------------
         // One handle, both dimensions, the jamovi-image feel: free drag
-        // with a live "W x H px" readout, Shift (or the Sizing panel's
-        // persistent chartAspectLock) preserving the grab-time ratio, and
-        // a 10 px snap applied at release (Ctrl/Cmd bypasses the snap,
-        // exactly like jamovi's own plot resizing).
+        // with a live readout and Shift (or the Sizing panel's persistent
+        // chartAspectLock) preserving the grab-time ratio. Release keeps
+        // the EXACT dropped size - deliberately unlike jamovi's 10 px
+        // snap, per Torry (Aug 2026).
         var startMouseX = 0, startMouseY = 0;
         var startInchesW = inchesW, startInchesH = inchesH;
         var startRatioXY = 0; // inchesH / inchesW captured at drag start
@@ -98851,16 +98851,10 @@
             draggingXY = false;
             showGripXY(hoveringXY);
             updateHint();
-            // Release snap: nearest 10 px per dimension (the jamovi plot
-            // convention), unless Ctrl/Cmd asks for the exact size.
-            var noSnap = !!(e && (e.ctrlKey || e.metaKey));
-            if (!noSnap) {
-                inchesW = clamp(Math.round((inchesW * PX_PER_INCH) / 10) * 10 / PX_PER_INCH, MIN_W_IN, MAX_W_IN);
-                inchesH = clamp(Math.round((inchesH * PX_PER_INCH) / 10) * 10 / PX_PER_INCH, MIN_H_IN, MAX_H_IN);
-                data.plotWidth = inchesW; data.plotHeight = inchesH;
-                applySize();
-                _gbResizeSyncInputs();
-            }
+            // NO release snap - a deliberate deviation from jamovi's own
+            // plots (which snap to 10 px): Torry wants the chart to stay
+            // exactly where it was dropped (Aug 2026). The only rounding
+            // left is the 2 dp inch commit below, under half a pixel.
             _sizeTagShow();
             _sizeTagFade();
             // Keep the just-opened Sizing panel from closing on the click
