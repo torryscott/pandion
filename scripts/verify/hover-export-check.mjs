@@ -104,12 +104,19 @@ const SNAP = `(root => { const out = {};
     out[e.getAttribute('data-hl-i')] = a; });
   return out; })`;
 
-// clone the chart the way jamovi's _svgMarkup does
+// clone the chart the way jamovi's harvest does. The querySelector shadow
+// is gone (Aug 2026): production parks a hidden sanitized TWIN wearing the
+// jmv-results-svg-content class, rebuilt on render/redraw settle, and
+// jamovi's class-first selector takes it. This fixture page has no
+// jmv-results-svg wrapper at render time (the twin gate saw none and built
+// nothing), so wrap the host now and ask the widget to build the twin,
+// exactly as the first settle inside real jamovi would have.
 const HARVEST = `(() => {
   const host = document.querySelector('.graphbuilder2-host');
   let item = document.querySelector('jmv-results-svg');
   if (!item) { item = document.createElement('jmv-results-svg');
                host.parentNode.insertBefore(item, host); item.appendChild(host); }
+  if (host.__gb2_buildHarvestTwin) host.__gb2_buildHarvestTwin();
   return item.querySelector('svg.jmv-results-svg-content') ?? item.querySelector('svg'); })`;
 
 const browser = await chromium.launch();

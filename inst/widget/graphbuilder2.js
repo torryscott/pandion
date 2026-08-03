@@ -4316,75 +4316,14 @@
         // free). Items not containing our chart are never deferred. Patched
         // once per window; wrapped defensively so any failure falls back to
         // jamovi's original behavior.
-        // jamovi's Svg results element harvests the chart by CLONING THE LIVE
-        // DOM of the first svg it finds (formatio.ts _svgify ->
-        // el.querySelector('svg')), on right-click export image AND on every
-        // plain .omv save (instance.ts:584, `path.endsWith('.omv') &&
-        // !options.export`). So a selection halo, a hover brighten or an armed
-        // anatomy overlay is baked into the exported image and into the SAVED
-        // FILE - and the saved svg is exactly what a machine without Pandion
-        // renders, because svg.ts falls back to it when content is empty.
-        // jamovi's own exclude list cannot help: _svgify takes no options, and
-        // removing nodes could not undo the attribute mutations anyway.
-        //
-        // Hand it the same sanitized clone our Export button uses. Shadow
-        // querySelector on the custom element's prototype, and act ONLY on the
-        // exact 'svg' selector for an element containing OUR host - every other
-        // selector (svg.ts itself calls querySelector('.content')) and every
-        // other module's Svg element delegate untouched. Fails open: any throw
-        // returns the real svg, i.e. the behaviour we have today.
-        try {
-            if (!window.__gb2_svgViewPatched &&
-                typeof customElements !== "undefined" &&
-                customElements.get("jmv-results-svg")) {
-                var _gb2SvgCE = customElements.get("jmv-results-svg");
-                if (_gb2SvgCE && _gb2SvgCE.prototype) {
-                    var _gb2SvgQS = _gb2SvgCE.prototype.querySelector ||
-                        Element.prototype.querySelector;
-                    _gb2SvgCE.prototype.querySelector = function (sel) {
-                        try {
-                            if (sel === "svg" ||
-                                sel === "svg.jmv-results-svg-content") {
-                                var _h = _gb2SvgQS.call(this, ".graphbuilder2-host");
-                                if (_h && typeof _h.__gb2_harvestClone === "function") {
-                                    var _cl = _h.__gb2_harvestClone();
-                                    if (_cl) {
-                                        // _svgMarkup reads getBoundingClientRect and
-                                        // getComputedStyle off the node, both empty
-                                        // while detached. It is fully synchronous, so
-                                        // park the clone off-screen in the BODY (not
-                                        // in .content, which the PNG copy path
-                                        // rasterizes) and drop it next task.
-                                        // The offsets go on a WRAPPER, never on the
-                                        // svg itself. _svgMarkup clones the node it is
-                                        // handed, so any inline style set here would be
-                                        // serialized into the saved .omv and the stored
-                                        // chart would render 99999px off-screen. Same
-                                        // for aria-hidden, which would ship a chart that
-                                        // screen readers ignore.
-                                        var _pk = document.createElement("div");
-                                        _pk.setAttribute("aria-hidden", "true");
-                                        _pk.style.cssText =
-                                            "position:absolute;left:-99999px;top:0";
-                                        _pk.appendChild(_cl);
-                                        document.body.appendChild(_pk);
-                                        setTimeout(function () {
-                                            try {
-                                                if (_pk.parentNode)
-                                                    _pk.parentNode.removeChild(_pk);
-                                            } catch (_eRm) {}
-                                        }, 0);
-                                        return _cl;
-                                    }
-                                }
-                            }
-                        } catch (_eQS) {}
-                        return _gb2SvgQS.call(this, sel);
-                    };
-                    window.__gb2_svgViewPatched = true;
-                }
-            }
-        } catch (_eSvgPatch) {}
+        // The jmv-results-svg querySelector shadow that used to live here is
+        // GONE (Aug 2026). jamovi's harvest is class-driven now
+        // (el.querySelector("svg.jmv-results-svg-content") in formatio.ts,
+        // commit 6047bda), and the module parks a hidden sanitized twin
+        // wearing that class inside the results element
+        // (_gb2BuildHarvestTwin, render scope), so intercepting the
+        // selector is no longer needed - the clone jamovi takes is the
+        // same one the shadow used to serve, minus the monkey-patch.
 
         try {
             if (!window.__gb2_htmlViewPatched &&
@@ -4993,14 +4932,53 @@
         // per-analysis by construction). Typing fields are exempt.
         if (!window.__gb2_dpKeyWired) {
             window.__gb2_dpKeyWired = true;
+            // The tracked hover comes from enter/leave on the marks, so it is
+            // null whenever the element under a STATIONARY cursor was swapped
+            // out from under it. Two ways that happens, both real:
+            //   1. Excluding a point rebuilds the chart and draws the ghost at
+            //      the same position. The pointer never crosses a boundary, so
+            //      no mouseenter fires and the toggle went dead until the user
+            //      jiggled the mouse (Torry, Jul 31 2026).
+            //   2. The export harvest deliberately dispatches leave down the
+            //      hover chain and then restores its ATTRIBUTE snapshot, which
+            //      never covered this JS global - so the shortcut was also dead
+            //      after any copy or export.
+            // Asking what is under the cursor right now fixes both at once and
+            // needs no new state: __gb2_ptrX/Y are already maintained by the
+            // capture-phase pointermove the harvest itself relies on (:hover
+            // cannot do this job - headless Chromium never reports it, so a
+            // fix built on it could not be regression-tested).
+            function _dpPointUnderCursor() {
+                try {
+                    if (typeof window.__gb2_ptrX !== "number" ||
+                        typeof window.__gb2_ptrY !== "number" ||
+                        !document.elementFromPoint) return null;
+                    var el = document.elementFromPoint(window.__gb2_ptrX,
+                                                       window.__gb2_ptrY);
+                    if (!el || !el.closest) return null;
+                    // Ghost: the <g data-role="data-point-hidden"> carries the
+                    // identity, so any child resolves. Live point: the hit halo
+                    // carries it too (see the halo below) because the painted
+                    // dot is its SIBLING, not its ancestor.
+                    var owner = el.closest("[data-point-idx]");
+                    if (!owner) return null;
+                    var idx = parseInt(owner.getAttribute("data-point-idx"), 10);
+                    if (!isFinite(idx)) return null;
+                    return {
+                        cat: owner.getAttribute("data-point-cat") || "",
+                        group: owner.getAttribute("data-point-group") || "",
+                        idx: idx
+                    };
+                } catch (_eUc) { return null; }
+            }
             document.addEventListener("keydown", function (e) {
                 if (String(e.key).toLowerCase() !== "e" ||
                     !(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
-                var hp = window.__gb2_dpHoverPoint;
-                if (!hp) return;
                 var t = e.target;
                 if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" ||
                           t.isContentEditable)) return;
+                var hp = window.__gb2_dpHoverPoint || _dpPointUnderCursor();
+                if (!hp) return;
                 if (typeof window.__gb2_dpTogglePoint !== "function") return;
                 e.preventDefault();
                 e.stopPropagation();
@@ -6121,7 +6099,28 @@
                 }
             }
         }
+        // Host-declared default-text scaling (Jul 31 2026, Torry's ask for
+        // the standalone). data.textScale multiplies the DEFAULT font sizes
+        // only: it is applied here, below every explicit user size in the
+        // resolution order, so a size the user set renders exactly as set.
+        // jamovi never ships the key - absent means scale 1 and the raw
+        // defaults pass through UNTOUCHED, object identity included - so
+        // jamovi rendering is byte-identical by construction. The pattern
+        // is pointMenuVerb's: an additive payload key the host opts into.
         function getTextDefaults(id) {
+            var d = _gb2TextDefaultsBase(id);
+            var s = (data && typeof data.textScale === "number" &&
+                     isFinite(data.textScale) &&
+                     data.textScale >= 0.5 && data.textScale <= 3)
+                ? data.textScale : 1;
+            if (s === 1 || !d || typeof d.fontSize !== "number") return d;
+            var out = {};
+            for (var k in d)
+                if (Object.prototype.hasOwnProperty.call(d, k)) out[k] = d[k];
+            out.fontSize = Math.round(d.fontSize * s * 10) / 10;
+            return out;
+        }
+        function _gb2TextDefaultsBase(id) {
             // All chart text defaults to black. Per-element overrides
             // (textStyles) and the global chartTextColor still apply
             // on top via getEffectiveTextStyle.
@@ -10005,13 +10004,16 @@
 
         var svg = svgEl("svg", {
             "data-role": "gb2-chart-svg",
-            // jamovi's Svg results element prefers
-            // querySelector("svg.jmv-results-svg-content") and only falls back
-            // to the first svg in the DOM, so wearing this marks the chart as
-            // THE harvest target explicitly rather than relying on DOM order.
-            // The querySelector shadow below matches this selector too, or
-            // adding the class would route jamovi straight to the live chart
-            // and quietly reintroduce the chrome it is there to strip.
+            // jamovi's Svg results element harvests
+            // querySelector("svg.jmv-results-svg-content"). The REAL harvest
+            // target is the hidden sanitized twin (_gb2BuildHarvestTwin),
+            // appended LAST in the host; the live chart wears the class only
+            // as a boot fallback, and sheds it the moment a twin stands.
+            // Document order makes the handoff safe: while both carry the
+            // class, querySelector returns the live chart (first in DOM), so
+            // a harvest during the twin-less window after a rebuild gets a
+            // chrome-y chart rather than jamovi's first-svg fallback (which
+            // would grab a toolbar icon).
             "class": "jmv-results-svg-content",
             // EXPLICIT namespace attributes (Jul 2026, the PowerPoint-copy
             // root cause): the HTML serializer does NOT emit xmlns for a
@@ -10305,20 +10307,34 @@
             return l;
         }
 
-        var gripX = makeGrip("ew-resize");
-        var gripXLine = makeGripLine("v");
-        gripX.appendChild(gripXLine);
-        var gripY = makeGrip("ns-resize");
-        var gripYLine = makeGripLine("h");
-        gripY.appendChild(gripYLine);
+        // ONE corner resize handle (Aug 2026, Torry's ask): the jamovi-image
+        // convention replaces the two per-axis grips. Bottom-right corner,
+        // drags BOTH dimensions; Shift (or the Sizing panel's aspect lock)
+        // preserves the grab-time ratio; release snaps to 10 px steps like
+        // jamovi's own plots unless Ctrl/Cmd asks for the exact size.
+        // Single-axis fine-tuning lives in Chart settings -> Sizing.
+        var gripXY = makeGrip("nwse-resize");
+        var gripXYLineV = makeGripLine("v");
+        var gripXYLineH = makeGripLine("h");
+        gripXY.appendChild(gripXYLineV);
+        gripXY.appendChild(gripXYLineH);
+        // Transient "W x H px" readout while resizing (the jamovi-image
+        // size display). Hidden at rest; fades out after release.
+        var sizeTag = document.createElement("div");
+        sizeTag.className = "ignore-html";
+        sizeTag.style.cssText = "position:absolute;z-index:3;pointer-events:none;" +
+            "font:11px/1.7 monospace;color:#333;background:rgba(255,255,255,0.92);" +
+            "border:1px solid #c9d4e0;border-radius:3px;padding:0 6px;" +
+            "opacity:0;transition:opacity 150ms ease;white-space:nowrap;";
+        wrap.appendChild(sizeTag);
+        var sizeTagHide = null;
 
-        var draggingX = false, draggingY = false;
-        var hoveringX = false, hoveringY = false;
+        var draggingXY = false;
+        var hoveringXY = false;
         function showGrip(line, on) { line.style.opacity = on ? GRIP_HOT_OP : GRIP_REST_OP; }
-        gripX.addEventListener("mouseenter", function () { hoveringX = true; showGrip(gripXLine, true); });
-        gripX.addEventListener("mouseleave", function () { hoveringX = false; if (!draggingX) showGrip(gripXLine, false); });
-        gripY.addEventListener("mouseenter", function () { hoveringY = true; showGrip(gripYLine, true); });
-        gripY.addEventListener("mouseleave", function () { hoveringY = false; if (!draggingY) showGrip(gripYLine, false); });
+        function showGripXY(on) { showGrip(gripXYLineV, on); showGrip(gripXYLineH, on); }
+        gripXY.addEventListener("mouseenter", function () { hoveringXY = true; showGripXY(true); });
+        gripXY.addEventListener("mouseleave", function () { hoveringXY = false; if (!draggingXY) showGripXY(false); });
 
         // --- Tick interval drag column ----------------------------------
         var tickDragHit = document.createElement("div");
@@ -10345,9 +10361,17 @@
         // mutations reverted, negative-origin viewBox so dragged content is
         // not cropped, title/desc for standalone accessibility.
         // serializeSvgForExport() below serializes it; jamovi's Svg-results
-        // harvest takes the NODE (see the jmv-results-svg patch), so an
-        // exported file and a saved .omv come from ONE tested code path.
+        // harvest takes the hidden twin built from that same string
+        // (_gb2BuildHarvestTwin), so an exported file and a saved .omv
+        // come from ONE tested code path.
         function _gb2HarvestClone() {
+            // True-colors guard (the _cvdSeriesCols precedent): while a
+            // Vision-check preview is armed, the live fills are SIMULATED.
+            // redraw() synchronously restores truth and _scheduleCvdPass
+            // re-simulates in a microtask, so a same-task clone captures
+            // true colors with no visible flash. Without this, a save or
+            // copy taken mid-preview ships the simulated palette.
+            try { if (window.__gb2_cvdMode && window.__gb2_cvdMode !== "none") redraw(); } catch (_eRwTc) {}
             // Use the *current* SVG dimensions (which the auto-grow
             // logic has extended to fit any right/bottom drag spill)
             // and the bgDiv's left/top padding (which captures any
@@ -10512,7 +10536,8 @@
                 '[data-role="stats-link-halo"], [data-role="alignment-guides"],' +
                 '[data-role="refline-handle"], [data-role="ann-rot-line"],' +
                 '[data-role="ann-rot-handle"],' +
-                '[data-role="freq-pie-seam-glow"], [data-role="freq-donut-hole-glow"]'
+                '[data-role="freq-pie-seam-glow"], [data-role="freq-donut-hole-glow"],' +
+                '[data-role="data-point-selected"], [data-role="freq-pie-rotate-handle"]'
             );
             for (var hi = 0; hi < halos.length; hi++) {
                 if (halos[hi].parentNode) halos[hi].parentNode.removeChild(halos[hi]);
@@ -10715,6 +10740,87 @@
                 } catch (_e) { return { w: 700, h: 450 }; }
             };
         } catch (_eXp) {}
+
+        // ---- jamovi Svg-results harvest twin -------------------------------
+        // jamovi's harvest (right-click Copy, per-item SVG/PNG export, and
+        // EVERY .omv save) takes el.querySelector("svg.jmv-results-svg-content").
+        // Park a STANDING sanitized twin inside the results element so that
+        // selector always finds a clean picture: built from
+        // serializeSvgForExport(), the exact string the Export button ships
+        // (chrome stripped, hover un-armed, fast-layer rasterized, fonts
+        // normalized, ids normalized to gb2-static), so an exported file,
+        // a copied image, and a saved .omv all come from ONE tested path.
+        // display:none keeps it out of paint, hit testing, and jamovi's
+        // document HTML export (_htmlify skips display:none subtrees); the
+        // twin sits LAST in the host so the live chart's url(#) references
+        // always resolve to its own defs (first match wins in document
+        // order). Gated on living inside a jmv-results-svg element, so
+        // production jamovi (Html results) and the standalone shell never
+        // build one.
+        var _gb2TwinTimer = null;
+        var _gb2TwinBuilding = false;
+        function _gb2BuildHarvestTwin() {
+            _gb2TwinTimer = null;
+            if (_gb2TwinBuilding) return;
+            var _twEl = null;
+            try { _twEl = host.closest ? host.closest("jmv-results-svg") : null; } catch (_eTw0) {}
+            if (!_twEl) return;
+            // a timer armed by a superseded render must not resurrect a
+            // twin of a chart that is no longer on screen
+            try { if (!svg || !svg.isConnected) return; } catch (_eTw1) { return; }
+            _gb2TwinBuilding = true;
+            try {
+                var _twStr = serializeSvgForExport();
+                var _twWrap = host.querySelector('[data-role="gb2-harvest-twin-wrap"]');
+                if (!_twWrap) {
+                    _twWrap = document.createElement("div");
+                    _twWrap.setAttribute("data-role", "gb2-harvest-twin-wrap");
+                    _twWrap.setAttribute("aria-hidden", "true");
+                    // .ignore-html keeps it out of jamovi's html/text copy
+                    // serializations as well (the svg harvest itself never
+                    // consults exclude lists, so this cannot hide the twin
+                    // from _svgify).
+                    _twWrap.className = "ignore-html";
+                    _twWrap.style.display = "none";
+                    host.appendChild(_twWrap);
+                }
+                _twWrap.innerHTML = _twStr;
+                var _twRoot = _twWrap.firstElementChild;
+                if (!_twRoot) throw new Error("twin parse produced no element");
+                _twRoot.setAttribute("class", "jmv-results-svg-content");
+                _twRoot.setAttribute("data-role", "gb2-harvest-twin");
+                // twin stands: the live chart must stop wearing the harvest
+                // class or document order would route jamovi to the chrome
+                try { svg.classList.remove("jmv-results-svg-content"); } catch (_eTw2) {}
+            } catch (_eTwB) {
+                // Fail toward a CORRECT node, never a wrong one: if no twin
+                // survived, re-pin the class on the live chart so jamovi's
+                // fallback cannot land on the first svg in the element (a
+                // toolbar icon). A chart with editing chrome still beats a
+                // wrong picture in the saved file.
+                try {
+                    if (!host.querySelector('[data-role="gb2-harvest-twin-wrap"] svg'))
+                        svg.classList.add("jmv-results-svg-content");
+                } catch (_eTw3) {}
+                try { console.warn("gb2: harvest twin build failed", _eTwB); } catch (_eTw4) {}
+            }
+            _gb2TwinBuilding = false;
+        }
+        function _gb2ScheduleHarvestTwin(ms) {
+            try {
+                if (_gb2TwinBuilding) return;
+                if (!host.closest || !host.closest("jmv-results-svg")) return;
+                if (_gb2TwinTimer) clearTimeout(_gb2TwinTimer);
+                _gb2TwinTimer = setTimeout(_gb2BuildHarvestTwin, ms);
+            } catch (_eTwS) {}
+        }
+        // Exposed for harnesses: hover-export-check simulates jamovi's
+        // harvest on a page whose jmv-results-svg wrapper appears only at
+        // harvest time, after render already gated the twin off. Real
+        // jamovi never needs this hook (the wrapper exists before render).
+        try { host.__gb2_buildHarvestTwin = _gb2BuildHarvestTwin; } catch (_eTwX) {}
+        // first build lands right after this render's synchronous body
+        _gb2ScheduleHarvestTwin(30);
 
         function sanitizeFilename(name) {
             name = (name || "").trim();
@@ -11423,7 +11529,14 @@
                     var _btR = addAnnBtn.getBoundingClientRect();
                     var _gtFly = wrap.querySelector('[data-role="graphtype-flyout"]');
                     addAnnMenu.style.top = (_gtFly && _gtFly.style && _gtFly.style.top) ? _gtFly.style.top : "6px";
-                    addAnnMenu.style.right = Math.max(0, Math.round(_opR.right - _btR.right)) + "px";
+                    // No clamp: in the standalone the externalized
+                    // toolbar is WIDER than the wrap, so the + button can
+                    // sit past the offsetParent's right edge and the menu
+                    // must go NEGATIVE to align under it (it stopped 277px
+                    // short at a 2000px window, Torry's screenshot). In
+                    // jamovi toolbar and wrap share a width, so the value
+                    // is never negative and the clamp was inert.
+                    addAnnMenu.style.right = Math.round(_opR.right - _btR.right) + "px";
                 }
             } catch (_ePos) {}
             _snugAddMenuColumns();
@@ -15456,6 +15569,43 @@
                     ann.x2 = _meHi;
                 }
             }
+            // RELATIVE HEIGHT (Torry, Aug 2 2026): the X ends are
+            // anchored to cells, but the height was ABSOLUTE, so a type
+            // switch (bar -> violin) stranded the spine inside the taller
+            // geometry. The spine now lives ann.yRel px ABOVE the spanned
+            // cells' per-type ceiling - the same ceiling the auto-placer
+            // uses (mean+se; data max for the box family / shown points) -
+            // so every type redraws the bracket just above its own data,
+            // and an axis rescale moves it with the data. A legacy bracket
+            // (absolute y, no yRel) captures its CURRENT offset on first
+            // draw, so nothing moves on load. Horizontal mode keeps
+            // absolute coords (ann.y is the spine X there); main-effect
+            // brackets join via their full-factor span.
+            if ((data && data.chartOrientation) !== "horizontal" &&
+                ((ann.anchorLeftCat && ann.anchorRightCat) ||
+                 _isMainEffectAnn(ann)) &&
+                typeof window.__gb2_valAxis === "function") {
+                try {
+                    var _vaRel = window.__gb2_valAxis();
+                    var _ceilRel = _cmpCeilPx(_cmpVisibleCells(),
+                        Math.min(ann.x, ann.x2), Math.max(ann.x, ann.x2),
+                        _vaRel);
+                    if (isFinite(_ceilRel)) {
+                        if (typeof ann.yRel === "number" &&
+                            isFinite(ann.yRel)) {
+                            ann.y = _ceilRel - ann.yRel;
+                        } else if (typeof ann.y === "number" &&
+                                   isFinite(ann.y)) {
+                            ann.yRel = _ceilRel - ann.y;
+                            // first capture on a LEGACY bracket: flag for
+                            // the one-shot persist below, or the very next
+                            // authoritative rebuild re-bases it at
+                            // whatever type is then current
+                            window.__gb2_bracketYRelCaptured = true;
+                        }
+                    }
+                } catch (_eRel) {}
+            }
             var capL = (typeof ann.capLeft === "number") ? ann.capLeft : 6;
             var capR = (typeof ann.capRight === "number") ? ann.capRight : 6;
             var lineColor = ann.lineColor || "#222";
@@ -16043,6 +16193,9 @@
                     document.removeEventListener("pointercancel", onUp, true);
                     clearAlignmentGuides();
                     if (moved) {
+                        // the gesture chose a new height (or span): what
+                        // persists is the OFFSET above the data
+                        _bracketSyncYRel(ann);
                         redraw();
                         persistAnnotations();
                     } else {
@@ -25261,12 +25414,13 @@
             // outset so the highlight ring doesn't collide with the
             // adjacent swatch.
             var outOff = Math.max(2, Math.round(sz * 0.15));
-            // WCAG 2.2 permits a compact target when an unobstructed
-            // 24px-diameter circle around its center does not intersect a
-            // neighbouring target. Keep the deliberately compact swatches,
-            // but space their centers at least 24px apart: 20px -> 4px gap,
-            // 18px -> 6px, and the 14px text-panel variant -> 10px.
-            var gap = Math.max(4, 24 - sz);
+            // Compact spacing per Torry's Jul 4 2026 ruling, RE-restored
+            // Aug 2 2026: an a11y pass had re-pitched this shared builder
+            // to a 24px center pitch (the 14px text-panel chips got 10px
+            // gaps - "smaller and spaced out", his report). Swatch rows
+            // are deliberately dense; 'target-size' stays in the audit
+            // ignore set while this holds.
+            var gap = (sz >= 18) ? 3 : 2;
             var cur = (currentHex || "").toLowerCase();
             var html = '<span style="display:inline-flex;align-items:center;gap:' + gap + 'px;flex-shrink:0;flex-wrap:' + (allowTransparent ? "wrap" : "nowrap") + ';">';
             // Optional leftmost "transparent" swatch — fill strips only.
@@ -27814,35 +27968,29 @@
                 _syncInspectorPanelGeometry();
             }
 
-            // Resize grips: small hit zones at the chart corners
-            // where each axis ends. X-axis runs along the bottom, so
-            // its grip lives at the bottom-right corner; Y-axis runs
-            // up the left side, so its grip lives at the top-left.
-            // Confining the hit area to the corner keeps the rest of
-            // the chart edge available for annotation drags.
+            // Corner resize handle: one grip at the bottom-right corner
+            // of the OUTER chart bounds, dragging BOTH dimensions (the
+            // jamovi-image convention). The visible affordance is an L of
+            // two stubs hugging the corner; the hit zone extends past the
+            // corner for grab tolerance. Faceted charts keep this single
+            // outer-corner handle: resize is chart-wide either way.
             var GRIP_LINE_LEN = 20;
-            var GRIP_HIT_LEN = GRIP_LINE_LEN + EDGE_HIT_PX;
-            // X-axis: bottom-right corner. Grip extends a few px
-            // above chartBottom (with the visible stub) and a few px
-            // below for grab tolerance.
-            gripX.style.left = (chartRight - EDGE_HIT_PX) + "px";
-            gripX.style.top = (chartBottom - GRIP_LINE_LEN) + "px";
-            gripX.style.width = (EDGE_HIT_PX * 2) + "px";
-            gripX.style.height = GRIP_HIT_LEN + "px";
-            // Line aligned to the top of the grip so it sits right
-            // along the chart's right edge ending at the X-axis line.
-            gripXLine.style.top = "0px";
-            gripXLine.style.left = (EDGE_HIT_PX - 1) + "px";
-            gripXLine.style.height = (GRIP_LINE_LEN - GRIP_GAP) + "px";
-
-            // Y-axis: top-left corner.
-            gripY.style.left = (chartLeft - EDGE_HIT_PX) + "px";
-            gripY.style.top = (chartTop - EDGE_HIT_PX) + "px";
-            gripY.style.width = GRIP_HIT_LEN + "px";
-            gripY.style.height = (EDGE_HIT_PX * 2) + "px";
-            gripYLine.style.left = (EDGE_HIT_PX + GRIP_GAP) + "px";
-            gripYLine.style.top = (EDGE_HIT_PX - 1) + "px";
-            gripYLine.style.width = (GRIP_LINE_LEN - GRIP_GAP) + "px";
+            var GRIP_BOX = GRIP_LINE_LEN + EDGE_HIT_PX;
+            gripXY.style.left = (chartRight - GRIP_LINE_LEN) + "px";
+            gripXY.style.top = (chartBottom - GRIP_LINE_LEN) + "px";
+            gripXY.style.width = GRIP_BOX + "px";
+            gripXY.style.height = GRIP_BOX + "px";
+            // Vertical stub along the right edge, ending at the corner.
+            gripXYLineV.style.left = (GRIP_LINE_LEN - 1) + "px";
+            gripXYLineV.style.top = "0px";
+            gripXYLineV.style.height = (GRIP_LINE_LEN - GRIP_GAP) + "px";
+            // Horizontal stub along the bottom edge, ending at the corner.
+            gripXYLineH.style.top = (GRIP_LINE_LEN - 1) + "px";
+            gripXYLineH.style.left = "0px";
+            gripXYLineH.style.width = (GRIP_LINE_LEN - GRIP_GAP) + "px";
+            // Size readout tucks just inside the corner during a drag.
+            sizeTag.style.left = Math.max(0, chartRight - 112) + "px";
+            sizeTag.style.top = Math.max(0, chartBottom - 30) + "px";
 
             // Tick interval drag hit column - lives just left of the Y axis,
             // covering the tick marks. Stops short of chartTop and chartBottom
@@ -29318,6 +29466,11 @@
             // button commits, and R renders run synchronously as before.
             if (window.__gb2_coalesceRedraws) { _previewRedraw(); return; }
             _scheduleCvdPass();
+            // keep the jamovi harvest twin fresh: every state-mutating user
+            // action funnels through redraw, so a debounced rebuild here
+            // guarantees a background save can never harvest stale colors
+            // or geometry (the R echo often hash-skips and re-runs nothing)
+            _gb2ScheduleHarvestTwin(200);
             _syncCvdBadge();
             // Re-sync the fit polylines from data each redraw so the
             // client-side fit recompute (_xyComputeFitsClient, an
@@ -33045,7 +33198,15 @@
                         stroke: "none",
                         // The halo, not the painted dot, owns interaction.
                         // This preserves editing when point opacity is 0.
-                        "pointer-events": "all"
+                        "pointer-events": "all",
+                        // Identity too, so anything hit-testing the cursor can
+                        // name this point without knowing the sibling layout.
+                        // Deliberately NO data-role: every consumer queries
+                        // [data-role="data-point"] first and would otherwise
+                        // start counting halos as points.
+                        "data-point-cat": bar.x || "",
+                        "data-point-group": bar.group || "",
+                        "data-point-idx": idx
                     });
                     halo.style.cursor = "pointer";
                     (function (el, haloFill, ptCat, ptGroup, ptIdx, ptKey) {
@@ -43804,6 +43965,15 @@
             // Render user-added annotations after the chart but before
             // selection chrome.
             renderAnnotations();
+            if (window.__gb2_bracketYRelCaptured) {
+                window.__gb2_bracketYRelCaptured = false;
+                // One-shot: make the first-draw yRel capture DURABLE.
+                // Deferred out of the draw; terminates because the next
+                // render finds yRel present and never re-flags.
+                setTimeout(function () {
+                    try { persistAnnotations(); } catch (_eYP) {}
+                }, 0);
+            }
             // Hover affordance for shape annotations (rect / ellipse
             // / line / arrow / curve / polygon / star / ...): a light
             // brightness lift on the whole shape group, mirroring the
@@ -49368,6 +49538,25 @@
             }
             return isFinite(top) ? top : va.toPxY(va.yMax);
         }
+        // Re-capture a bracket's RELATIVE height from its current absolute
+        // y (Torry, Aug 2 2026). Called wherever a gesture finishes moving
+        // ann.y, so the user's chosen offset above the data is what
+        // persists - the renderer then derives y from yRel per graph type.
+        function _bracketSyncYRel(ann) {
+            try {
+                if (!ann || ann.kind !== "bracket") return;
+                if (data && data.chartOrientation === "horizontal") return;
+                var anchored = (ann.anchorLeftCat && ann.anchorRightCat) ||
+                    _isMainEffectAnn(ann);
+                if (!anchored) return;
+                if (typeof window.__gb2_valAxis !== "function") return;
+                var va = window.__gb2_valAxis();
+                var c = _cmpCeilPx(_cmpVisibleCells(),
+                    Math.min(ann.x, ann.x2), Math.max(ann.x, ann.x2), va);
+                if (isFinite(c) && typeof ann.y === "number" &&
+                    isFinite(ann.y)) ann.yRel = c - ann.y;
+            } catch (_eSyr) {}
+        }
         // Remove placed (autoGen) brackets. restoreAxis = the USER
         // clear path: put back the pre-expansion axis snapshot; the
         // replace-before-place path passes false.
@@ -49460,6 +49649,7 @@
                 def.x = items[a2].x1;
                 def.x2 = items[a2].x2;
                 def.y = layout.placed[a2].y;
+                def.yRel = items[a2].ceilY - layout.placed[a2].y;
                 def.autoPValue = true;
                 def.autoPTest = rows[a2].ann.autoPTest || "auto";
                 def.autoPFormat = window.__gb2_cmpLabelStyle || "asterisks";
@@ -50466,7 +50656,7 @@
         // secs: [[id, label, html], ...]; empty-html sections drop out,
         // a single survivor renders bare. Active tab sticky per module
         // in window.__gb2_statsTab (session only).
-        function _stTabs(mkKey, secs) {
+        function _stTabs(mkKey, secs, prefDefault) {
             var live = [];
             for (var i = 0; i < secs.length; i++) {
                 if (secs[i] && secs[i][2]) live.push(secs[i]);
@@ -50479,7 +50669,16 @@
             for (var a = 0; a < live.length; a++) {
                 if (live[a][0] === act) ok = true;
             }
-            if (!ok) act = live[0][0];
+            if (!ok) {
+                // No sticky visit yet: land on the caller's preference
+                // when it names a live section, else the first tab.
+                act = live[0][0];
+                if (prefDefault) {
+                    for (var pd = 0; pd < live.length; pd++) {
+                        if (live[pd][0] === prefDefault) act = prefDefault;
+                    }
+                }
+            }
             var h = '<div style="display:flex;gap:4px;border-bottom:1px solid #ddd;margin:0 0 11px;flex-wrap:wrap;">';
             for (var b2 = 0; b2 < live.length; b2++) {
                 var on = live[b2][0] === act;
@@ -51669,11 +51868,18 @@
                         (((data.graphType === "box" || data.graphType === "violin" ||
                            data.graphType === "raincloud" || data.summaryFunc === "median") &&
                           cmpTest !== "mannWhitneyU" && cmpTest !== "wilcoxonSignedRank")
+                            // The rank-test sentence is ANTICIPATORY - it
+                            // preempts "switch to Mann-Whitney for a median
+                            // test" - and must READ that way: stated flat, it
+                            // sounded like MW was already queued up (Torry,
+                            // Aug 2 2026, Student's t selected on a box plot).
                             ? _stFoot("These t tests compare MEANS, while the chart emphasizes " +
                                 (data.summaryFunc === "median" ? "medians" : "the distribution") +
-                                ". Mann-Whitney U" +
-                                (cmpIsRM ? " and Wilcoxon signed-rank are" : " is") +
-                                " rank-based, not a median test. Choose the test for the question and state the estimand in the caption.")
+                                ". Switching to Mann-Whitney U" +
+                                (cmpIsRM ? " or Wilcoxon signed-rank" : "") +
+                                " would not test medians either - " +
+                                (cmpIsRM ? "they are" : "it is") +
+                                " rank-based. Choose the test for the question and state the estimand in the caption.")
                             : ""));
                     wire.push(["cmpwire", function () {
                         var cbs = body.querySelectorAll('[data-cmp-cb]');
@@ -52067,7 +52273,15 @@
                 html += _stTabs(mk, [
                     ["pairs", "Compare pairs", cmpCardHtml],
                     ["omnibus", "Omnibus", omniCardHtml],
-                    ["desc", "Descriptives", descCardHtml]]);
+                    ["desc", "Descriptives", descCardHtml]],
+                    // Distribution-first charts LAND on what the chart
+                    // shows (Torry, Aug 2 2026: mean tests front and
+                    // center on a box plot read as a mismatch; removal
+                    // was considered and rejected - the tests stay one
+                    // visible tab away with their honesty warning, and
+                    // a sticky visit still wins).
+                    (data.graphType === "box" || data.graphType === "violin" ||
+                     data.graphType === "raincloud") ? "desc" : null);
                 html += _stHiddenNote(mk);
                 wire.push(["cmpcopy", function (btn) {
                     _stWireTableCopy(btn, body, '[data-st-pane="pairs"]');
@@ -98614,7 +98828,7 @@
         // useful while the widget was new but reads as visual noise now
         // that drag affordances are obvious. The element is left as a
         // detached div so existing updateHint() call sites
-        // (onPointerMoveX / endDragX / onPointerMoveY / endDragY)
+        // (onPointerMoveXY / endDragXY)
         // continue to work without changes — they mutate textContent
         // on an orphan node, which is harmless.
         var hint = document.createElement("div");
@@ -98660,117 +98874,98 @@
             } catch (_e) {}
         }
 
-        // --- X drag (width) ---------------------------------------------
-        // Aspect-lock: when data.chartAspectLock is true, the ratio at
-        // pointerdown is preserved during drag - dragging width also
-        // adjusts height proportionally (and vice-versa for Y drag).
-        var startMouseX = 0, startInchesW = inchesW;
-        var startRatio_x = 0; // inchesH / inchesW captured at drag start
-        var _shiftLockedX = false; // any Shift-locked move happened this drag
-        function onPointerDownX(e) {
-            e.preventDefault(); e.stopPropagation();
-            draggingX = true;
-            startMouseX = e.clientX; startInchesW = inchesW;
-            startRatio_x = (inchesW > 0) ? (inchesH / inchesW) : 1;
-            _shiftLockedX = false;
-            showGrip(gripXLine, true);
-            try { gripX.setPointerCapture(e.pointerId); } catch (err) {}
-            _gbResizePopSizing();
+        // --- Corner drag (width + height) --------------------------------
+        // One handle, both dimensions, the jamovi-image feel: free drag
+        // with a live "W x H px" readout, Shift (or the Sizing panel's
+        // persistent chartAspectLock) preserving the grab-time ratio, and
+        // a 10 px snap applied at release (Ctrl/Cmd bypasses the snap,
+        // exactly like jamovi's own plot resizing).
+        var startMouseX = 0, startMouseY = 0;
+        var startInchesW = inchesW, startInchesH = inchesH;
+        var startRatioXY = 0; // inchesH / inchesW captured at drag start
+        function _sizeTagShow() {
+            if (sizeTagHide) { clearTimeout(sizeTagHide); sizeTagHide = null; }
+            sizeTag.textContent = Math.round(inchesW * PX_PER_INCH) + " x " +
+                Math.round(inchesH * PX_PER_INCH) + " px";
+            sizeTag.style.opacity = "1";
         }
-        function onPointerMoveX(e) {
-            if (!draggingX) return;
+        function _sizeTagFade() {
+            if (sizeTagHide) clearTimeout(sizeTagHide);
+            sizeTagHide = setTimeout(function () {
+                sizeTag.style.opacity = "0";
+                sizeTagHide = null;
+            }, 1000);
+        }
+        function onPointerDownXY(e) {
+            e.preventDefault(); e.stopPropagation();
+            draggingXY = true;
+            startMouseX = e.clientX; startMouseY = e.clientY;
+            startInchesW = inchesW; startInchesH = inchesH;
+            startRatioXY = (inchesW > 0) ? (inchesH / inchesW) : 1;
+            showGripXY(true);
+            try { gripXY.setPointerCapture(e.pointerId); } catch (err) {}
+            _gbResizePopSizing();
+            _sizeTagShow();
+        }
+        function onPointerMoveXY(e) {
+            if (!draggingXY) return;
             var dx = e.clientX - startMouseX;
-            var newIn = clamp(startInchesW + dx / PX_PER_INCH, MIN_W_IN, MAX_W_IN);
-            if (newIn === inchesW) return;
-            inchesW = newIn;
+            var dy = e.clientY - startMouseY;
+            var newW = clamp(startInchesW + dx / PX_PER_INCH, MIN_W_IN, MAX_W_IN);
+            var newH = clamp(startInchesH + dy / PX_PER_INCH, MIN_H_IN, MAX_H_IN);
             // Shift = momentary aspect lock (same math as the Sizing
-            // panel's persistent chartAspectLock checkbox).
+            // panel's persistent chartAspectLock checkbox): the dominant
+            // pointer axis drives, the other follows the grab-time ratio.
             if (data.chartAspectLock === true || e.shiftKey) {
-                inchesH = clamp(newIn * startRatio_x, MIN_H_IN, MAX_H_IN);
-                if (e.shiftKey) _shiftLockedX = true;
+                if (Math.abs(dx) >= Math.abs(dy)) {
+                    newH = clamp(newW * startRatioXY, MIN_H_IN, MAX_H_IN);
+                } else {
+                    newW = clamp((startRatioXY > 0) ? (newH / startRatioXY) : newH, MIN_W_IN, MAX_W_IN);
+                }
             }
+            if (newW === inchesW && newH === inchesH) return;
+            inchesW = newW; inchesH = newH;
             // Keep data authoritative so any re-render (and the drag-end
             // commit's hash stamp) reflects the live size, not the stale one.
             data.plotWidth = inchesW; data.plotHeight = inchesH;
             applySize();
             _gbResizeSyncInputs();
-            updateHint("(dragging width)");
+            _sizeTagShow();
+            updateHint("(resizing)");
         }
-        function endDragX() {
-            if (!draggingX) return;
-            draggingX = false;
-            showGrip(gripXLine, hoveringX);
+        function endDragXY(e) {
+            if (!draggingXY) return;
+            draggingXY = false;
+            showGripXY(hoveringXY);
             updateHint();
+            // Release snap: nearest 10 px per dimension (the jamovi plot
+            // convention), unless Ctrl/Cmd asks for the exact size.
+            var noSnap = !!(e && (e.ctrlKey || e.metaKey));
+            if (!noSnap) {
+                inchesW = clamp(Math.round((inchesW * PX_PER_INCH) / 10) * 10 / PX_PER_INCH, MIN_W_IN, MAX_W_IN);
+                inchesH = clamp(Math.round((inchesH * PX_PER_INCH) / 10) * 10 / PX_PER_INCH, MIN_H_IN, MAX_H_IN);
+                data.plotWidth = inchesW; data.plotHeight = inchesH;
+                applySize();
+                _gbResizeSyncInputs();
+            }
+            _sizeTagShow();
+            _sizeTagFade();
             // Keep the just-opened Sizing panel from closing on the click
             // that fires right after the release: the document close-handler
             // swallows outside-clicks that land inside this window.
             try { window.__gb2_suppressOutsideClickUntil = Date.now() + 800; } catch (_e) {}
             if (hasSetOption) {
                 data.plotWidth = Math.round(inchesW * 100) / 100;
-                try { _setOption("plotWidth", data.plotWidth); } catch (e) {}
-                if (data.chartAspectLock === true || _shiftLockedX) {
-                    data.plotHeight = Math.round(inchesH * 100) / 100;
-                    try { _setOption("plotHeight", data.plotHeight); } catch (e) {}
-                }
-            }
-        }
-        gripX.addEventListener("pointerdown", onPointerDownX);
-        gripX.addEventListener("pointermove", onPointerMoveX);
-        gripX.addEventListener("pointerup", endDragX);
-        gripX.addEventListener("pointercancel", endDragX);
-        gripX.addEventListener("lostpointercapture", endDragX);
-
-        // --- Y drag (height) --------------------------------------------
-        var startMouseY = 0, startInchesH = inchesH;
-        var startRatio_y = 0; // inchesW / inchesH captured at drag start
-        var _shiftLockedY = false; // any Shift-locked move happened this drag
-        function onPointerDownY(e) {
-            e.preventDefault(); e.stopPropagation();
-            draggingY = true;
-            startMouseY = e.clientY; startInchesH = inchesH;
-            startRatio_y = (inchesH > 0) ? (inchesW / inchesH) : 1;
-            _shiftLockedY = false;
-            showGrip(gripYLine, true);
-            try { gripY.setPointerCapture(e.pointerId); } catch (err) {}
-            _gbResizePopSizing();
-        }
-        function onPointerMoveY(e) {
-            if (!draggingY) return;
-            var dy = e.clientY - startMouseY;
-            var newIn = clamp(startInchesH - dy / PX_PER_INCH, MIN_H_IN, MAX_H_IN);
-            if (newIn === inchesH) return;
-            inchesH = newIn;
-            if (data.chartAspectLock === true || e.shiftKey) {
-                inchesW = clamp(newIn * startRatio_y, MIN_W_IN, MAX_W_IN);
-                if (e.shiftKey) _shiftLockedY = true;
-            }
-            // Keep data authoritative so any re-render (and the drag-end
-            // commit's hash stamp) reflects the live size, not the stale one.
-            data.plotWidth = inchesW; data.plotHeight = inchesH;
-            applySize();
-            _gbResizeSyncInputs();
-            updateHint("(dragging height)");
-        }
-        function endDragY() {
-            if (!draggingY) return;
-            draggingY = false;
-            showGrip(gripYLine, hoveringY);
-            updateHint();
-            try { window.__gb2_suppressOutsideClickUntil = Date.now() + 800; } catch (_e) {}
-            if (hasSetOption) {
                 data.plotHeight = Math.round(inchesH * 100) / 100;
-                try { _setOption("plotHeight", data.plotHeight); } catch (e) {}
-                if (data.chartAspectLock === true || _shiftLockedY) {
-                    data.plotWidth = Math.round(inchesW * 100) / 100;
-                    try { _setOption("plotWidth", data.plotWidth); } catch (e) {}
-                }
+                try { _setOption("plotWidth", data.plotWidth); } catch (e2) {}
+                try { _setOption("plotHeight", data.plotHeight); } catch (e2) {}
             }
         }
-        gripY.addEventListener("pointerdown", onPointerDownY);
-        gripY.addEventListener("pointermove", onPointerMoveY);
-        gripY.addEventListener("pointerup", endDragY);
-        gripY.addEventListener("pointercancel", endDragY);
-        gripY.addEventListener("lostpointercapture", endDragY);
+        gripXY.addEventListener("pointerdown", onPointerDownXY);
+        gripXY.addEventListener("pointermove", onPointerMoveXY);
+        gripXY.addEventListener("pointerup", endDragXY);
+        gripXY.addEventListener("pointercancel", endDragXY);
+        gripXY.addEventListener("lostpointercapture", endDragXY);
 
         // ===== Per-panel axis affordances (faceted mode) =====
         // The single grips/hit-zones above are positioned over the
@@ -98821,32 +99016,10 @@
         // handlers (resize is chart-wide regardless of which panel's
         // handle is grabbed); only the pointerdown capture + the
         // per-set blue line differ from the singles.
-        function _poolDownX(e) {
-            e.preventDefault(); e.stopPropagation();
-            draggingX = true; startMouseX = e.clientX; startInchesW = inchesW;
-            startRatio_x = (inchesW > 0) ? (inchesH / inchesW) : 1;
-            _shiftLockedX = false;
-            if (e.currentTarget.__line) e.currentTarget.__line.style.opacity = GRIP_HOT_OP;
-            try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_e) {}
-            _gbResizePopSizing();
-        }
-        function _poolUpX(e) {
-            if (e.currentTarget.__line) e.currentTarget.__line.style.opacity = GRIP_REST_OP;
-            endDragX();
-        }
-        function _poolDownY(e) {
-            e.preventDefault(); e.stopPropagation();
-            draggingY = true; startMouseY = e.clientY; startInchesH = inchesH;
-            startRatio_y = (inchesH > 0) ? (inchesW / inchesH) : 1;
-            _shiftLockedY = false;
-            if (e.currentTarget.__line) e.currentTarget.__line.style.opacity = GRIP_HOT_OP;
-            try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_e) {}
-            _gbResizePopSizing();
-        }
-        function _poolUpY(e) {
-            if (e.currentTarget.__line) e.currentTarget.__line.style.opacity = GRIP_REST_OP;
-            endDragY();
-        }
+        // The per-panel pool used to carry its own width/height grips;
+        // they are gone with the per-axis grips (the single outer-corner
+        // handle resizes the whole chart in faceted mode too). The pool
+        // keeps its per-panel tick/axis hover + click affordances.
         function _makeAffordSet() {
             function mkGrip(cursor) {
                 var g = document.createElement("div");
@@ -98860,24 +99033,8 @@
                 l.style.cssText = b.join(";"); _gripAddChevrons(l, orient); return l;
             }
             var set = {};
-            set.gripX = mkGrip("ew-resize"); set.gripXLine = mkLine("v"); set.gripX.appendChild(set.gripXLine); set.gripX.__line = set.gripXLine;
-            set.gripY = mkGrip("ns-resize"); set.gripYLine = mkLine("h"); set.gripY.appendChild(set.gripYLine); set.gripY.__line = set.gripYLine;
             set.tickHit = document.createElement("div"); set.tickHit.style.cssText = "position:absolute;cursor:pointer;user-select:none;z-index:2;"; set.tickHit.title = "Click to open Y-axis settings"; wrap.appendChild(set.tickHit);
             set.xHit = document.createElement("div"); set.xHit.style.cssText = "position:absolute;cursor:pointer;user-select:none;z-index:2;"; set.xHit.title = "Click to open X-axis settings"; wrap.appendChild(set.xHit);
-            set.gripX.addEventListener("mouseenter", function () { if (!draggingX) set.gripXLine.style.opacity = GRIP_HOT_OP; });
-            set.gripX.addEventListener("mouseleave", function () { if (!draggingX) set.gripXLine.style.opacity = GRIP_REST_OP; });
-            set.gripY.addEventListener("mouseenter", function () { if (!draggingY) set.gripYLine.style.opacity = GRIP_HOT_OP; });
-            set.gripY.addEventListener("mouseleave", function () { if (!draggingY) set.gripYLine.style.opacity = GRIP_REST_OP; });
-            set.gripX.addEventListener("pointerdown", _poolDownX);
-            set.gripX.addEventListener("pointermove", onPointerMoveX);
-            set.gripX.addEventListener("pointerup", _poolUpX);
-            set.gripX.addEventListener("pointercancel", _poolUpX);
-            set.gripX.addEventListener("lostpointercapture", _poolUpX);
-            set.gripY.addEventListener("pointerdown", _poolDownY);
-            set.gripY.addEventListener("pointermove", onPointerMoveY);
-            set.gripY.addEventListener("pointerup", _poolUpY);
-            set.gripY.addEventListener("pointercancel", _poolUpY);
-            set.gripY.addEventListener("lostpointercapture", _poolUpY);
             var yTick = null, yLine = false;
             set.tickHit.addEventListener("mousemove", function (e) {
                 if (typeof e.offsetY !== "number" || !set.panel || !set.yLineEl) return;
@@ -98930,30 +99087,26 @@
         }
         function _hideAffordSet(set) {
             if (!set) return;
-            ["gripX", "gripY", "tickHit", "xHit"].forEach(function (k) { if (set[k]) set[k].style.display = "none"; });
+            ["tickHit", "xHit"].forEach(function (k) { if (set[k]) set[k].style.display = "none"; });
         }
         function _layoutPanelAffordances(panels) {
             var faceted = panels && panels.length > 1;
             var pool = wrap.__gb2afford || (wrap.__gb2afford = []);
             if (!faceted) {
                 for (var h = 0; h < pool.length; h++) _hideAffordSet(pool[h]);
-                try { gripX.style.display = ""; gripY.style.display = ""; tickDragHit.style.display = ""; xLayoutHit.style.display = ""; } catch (_e) {}
+                try { tickDragHit.style.display = ""; xLayoutHit.style.display = ""; } catch (_e) {}
                 return;
             }
             // Faceted: retire the single chart-level affordances and
             // drive everything off the per-panel pool.
-            try { gripX.style.display = "none"; gripY.style.display = "none"; tickDragHit.style.display = "none"; xLayoutHit.style.display = "none"; } catch (_e) {}
+            // The corner resize handle stays: resize is chart-wide, so the
+            // single outer-corner grip serves faceted charts too.
+            try { tickDragHit.style.display = "none"; xLayoutHit.style.display = "none"; } catch (_e) {}
             var GLL = 20, GHL = GLL + EDGE_HIT_PX, safe = 12;
             for (var i = 0; i < panels.length; i++) {
                 var p = panels[i];
                 var set = pool[i] || (pool[i] = _makeAffordSet());
                 set.panel = p; set.yLineEl = p.yAxisLineEl || null; set.xLineEl = p.xAxisLineEl || null;
-                // Width grip — bottom-right corner of the panel.
-                set.gripX.style.display = ""; set.gripX.style.left = (p.chartRight - EDGE_HIT_PX) + "px"; set.gripX.style.top = (p.chartBottom - GLL) + "px"; set.gripX.style.width = (EDGE_HIT_PX * 2) + "px"; set.gripX.style.height = GHL + "px";
-                set.gripXLine.style.top = "0px"; set.gripXLine.style.left = (EDGE_HIT_PX - 1) + "px"; set.gripXLine.style.height = (GLL - GRIP_GAP) + "px";
-                // Height grip — top-left corner of the panel.
-                set.gripY.style.display = ""; set.gripY.style.left = (p.chartLeft - EDGE_HIT_PX) + "px"; set.gripY.style.top = (p.chartTop - EDGE_HIT_PX) + "px"; set.gripY.style.width = GHL + "px"; set.gripY.style.height = (EDGE_HIT_PX * 2) + "px";
-                set.gripYLine.style.left = (EDGE_HIT_PX + GRIP_GAP) + "px"; set.gripYLine.style.top = (EDGE_HIT_PX - 1) + "px"; set.gripYLine.style.width = (GLL - GRIP_GAP) + "px";
                 // Y tick/hover column — horizontal charts draw their left
                 // category axis in every panel; vertical shared-Y facets only
                 // draw it in the left column.
