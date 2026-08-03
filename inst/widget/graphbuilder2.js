@@ -27995,12 +27995,12 @@
             var GRIP_BOX = GRIP_LINE_LEN + EDGE_HIT_PX;
             gripXY.style.left = (chartRight - GRIP_LINE_LEN) + "px";
             gripXY.style.top = (chartBottom - GRIP_LINE_LEN) + "px";
-            gripXY.style.width = (GRIP_BOX + 10) + "px";
-            gripXY.style.height = (GRIP_BOX + 16) + "px";
+            gripXY.style.width = (GRIP_BOX + 16) + "px";
+            gripXY.style.height = (GRIP_BOX + 26) + "px";
             // Glyph sits just outside the corner, like jamovi's own
             // scrubber: below the axis line, right of the axis end.
-            gripXYGlyph.style.left = (GRIP_LINE_LEN + 10) + "px";
-            gripXYGlyph.style.top = (GRIP_LINE_LEN + 18) + "px";
+            gripXYGlyph.style.left = (GRIP_LINE_LEN + 16) + "px";
+            gripXYGlyph.style.top = (GRIP_LINE_LEN + 26) + "px";
             // Size readout tucks just inside the corner during a drag.
             sizeTag.style.left = Math.max(0, chartRight - 112) + "px";
             sizeTag.style.top = Math.max(0, chartBottom - 50) + "px";
