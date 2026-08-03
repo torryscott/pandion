@@ -26419,7 +26419,7 @@
                         e.preventDefault();
                         var ratio = parseFloat(btn.getAttribute("data-aspect-ratio"));
                         if (!isFinite(ratio) || ratio <= 0) return;
-                        var w = parseFloat(wIn.value); if (!isFinite(w) || w <= 0) w = inchesW;
+                        var w = _gbUToIn(parseFloat(wIn.value)); if (!isFinite(w) || w <= 0) w = inchesW;
                         w = clamp(w, MIN_W_IN, MAX_W_IN);
                         var h = w / ratio;
                         if (h < MIN_H_IN) { h = MIN_H_IN; w = clamp(h * ratio, MIN_W_IN, MAX_W_IN); }
@@ -26428,8 +26428,8 @@
                         // A preset defines a NEW ratio, so set both dimensions
                         // explicitly (overriding the lock for this action).
                         inchesW = w; inchesH = h;
-                        wIn.value = (+w).toFixed(2).replace(/\.?0+$/, "");
-                        hIn.value = (+h).toFixed(2).replace(/\.?0+$/, "");
+                        wIn.value = _gbFmtU(w);
+                        hIn.value = _gbFmtU(h);
                         data.plotWidth = w; data.plotHeight = h;
                         try { applySize(); } catch (_e) {}
                         if (hasSetOption) {
@@ -69681,11 +69681,14 @@
                     '<div style="' + _row + '">' +
                       '<label style="' + _lbl + '">Plot size</label>' +
                       '<span style="display:inline-flex;align-items:center;gap:3px;flex-shrink:0;">' +
-                        '<input type="number" data-field="plot-w" min="' + MIN_W_IN + '" max="' + MAX_W_IN + '" step="0.25" style="width:54px;padding:2px 4px;font-size:11px;border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);outline:none;text-align:right;" title="Plot width (inches)" />' +
+                        '<input type="number" data-field="plot-w" min="' + (_gbSizeUnitIsCm() ? (MIN_W_IN * 2.54).toFixed(1) : MIN_W_IN) + '" max="' + (_gbSizeUnitIsCm() ? (MAX_W_IN * 2.54).toFixed(1) : MAX_W_IN) + '" step="' + (_gbSizeUnitIsCm() ? "0.5" : "0.25") + '" style="width:54px;padding:2px 4px;font-size:11px;border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);outline:none;text-align:right;" title="Plot width (' + (_gbSizeUnitIsCm() ? "centimeters" : "inches") + ')" />' +
                         '<span style="color:#666;font-size:11px;">w</span>' +
                         '<span style="width:6px;"></span>' +
-                        '<input type="number" data-field="plot-h" min="' + MIN_H_IN + '" max="' + MAX_H_IN + '" step="0.25" style="width:54px;padding:2px 4px;font-size:11px;border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);outline:none;text-align:right;" title="Plot height (inches)" />' +
+                        '<input type="number" data-field="plot-h" min="' + (_gbSizeUnitIsCm() ? (MIN_H_IN * 2.54).toFixed(1) : MIN_H_IN) + '" max="' + (_gbSizeUnitIsCm() ? (MAX_H_IN * 2.54).toFixed(1) : MAX_H_IN) + '" step="' + (_gbSizeUnitIsCm() ? "0.5" : "0.25") + '" style="width:54px;padding:2px 4px;font-size:11px;border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);outline:none;text-align:right;" title="Plot height (' + (_gbSizeUnitIsCm() ? "centimeters" : "inches") + ')" />' +
                         '<span style="color:#666;font-size:11px;">h</span>' +
+                        '<span style="width:10px;"></span>' +
+                        '<button type="button" data-size-unit="in" title="Show sizes in inches" style="' + _gbUnitSegCss(!_gbSizeUnitIsCm()) + '">in</button>' +
+                        '<button type="button" data-size-unit="cm" title="Show sizes in centimeters" style="' + _gbUnitSegCss(_gbSizeUnitIsCm()) + '">cm</button>' +
                       '</span>' +
                     '</div>' +
                     // Pixel equivalence (Aug 2026, Torry): inches stay the
@@ -71673,10 +71676,10 @@
             var iPlotW = body.querySelector('[data-field="plot-w"]');
             var iPlotH = body.querySelector('[data-field="plot-h"]');
             if (iPlotW && iPlotH) {
-                iPlotW.value = (+inchesW).toFixed(2).replace(/\.?0+$/, "");
-                iPlotH.value = (+inchesH).toFixed(2).replace(/\.?0+$/, "");
+                iPlotW.value = _gbFmtU(inchesW);
+                iPlotH.value = _gbFmtU(inchesH);
                 iPlotW.addEventListener("input", function () {
-                    var v = parseFloat(iPlotW.value);
+                    var v = _gbUToIn(parseFloat(iPlotW.value));
                     if (!isFinite(v) || v <= 0) return;
                     inchesW = clamp(v, MIN_W_IN, MAX_W_IN);
                     if (data.chartAspectLock === true) {
@@ -71684,30 +71687,30 @@
                         var ratio = (data.plotHeight && data.plotWidth)
                             ? (data.plotHeight / data.plotWidth) : (inchesH / inchesW);
                         inchesH = clamp(inchesW * ratio, MIN_H_IN, MAX_H_IN);
-                        iPlotH.value = (+inchesH).toFixed(2).replace(/\.?0+$/, "");
+                        iPlotH.value = _gbFmtU(inchesH);
                     }
                     applySize();
                 });
                 iPlotH.addEventListener("input", function () {
-                    var v = parseFloat(iPlotH.value);
+                    var v = _gbUToIn(parseFloat(iPlotH.value));
                     if (!isFinite(v) || v <= 0) return;
                     inchesH = clamp(v, MIN_H_IN, MAX_H_IN);
                     if (data.chartAspectLock === true) {
                         var ratio = (data.plotWidth && data.plotHeight)
                             ? (data.plotWidth / data.plotHeight) : (inchesW / inchesH);
                         inchesW = clamp(inchesH * ratio, MIN_W_IN, MAX_W_IN);
-                        iPlotW.value = (+inchesW).toFixed(2).replace(/\.?0+$/, "");
+                        iPlotW.value = _gbFmtU(inchesW);
                     }
                     applySize();
                 });
                 iPlotW.addEventListener("change", function () {
-                    var v = parseFloat(iPlotW.value);
+                    var v = _gbUToIn(parseFloat(iPlotW.value));
                     if (!isFinite(v) || v <= 0) {
-                        iPlotW.value = (+inchesW).toFixed(2).replace(/\.?0+$/, "");
+                        iPlotW.value = _gbFmtU(inchesW);
                         return;
                     }
                     inchesW = clamp(v, MIN_W_IN, MAX_W_IN);
-                    iPlotW.value = (+inchesW).toFixed(2).replace(/\.?0+$/, "");
+                    iPlotW.value = _gbFmtU(inchesW);
                     data.plotWidth = inchesW;
                     if (hasSetOption) {
                         try { _setOption("plotWidth", Math.round(inchesW * 100) / 100); } catch (_e) {}
@@ -71717,13 +71720,13 @@
                     }
                 });
                 iPlotH.addEventListener("change", function () {
-                    var v = parseFloat(iPlotH.value);
+                    var v = _gbUToIn(parseFloat(iPlotH.value));
                     if (!isFinite(v) || v <= 0) {
-                        iPlotH.value = (+inchesH).toFixed(2).replace(/\.?0+$/, "");
+                        iPlotH.value = _gbFmtU(inchesH);
                         return;
                     }
                     inchesH = clamp(v, MIN_H_IN, MAX_H_IN);
-                    iPlotH.value = (+inchesH).toFixed(2).replace(/\.?0+$/, "");
+                    iPlotH.value = _gbFmtU(inchesH);
                     data.plotHeight = inchesH;
                     if (hasSetOption) {
                         try { _setOption("plotHeight", Math.round(inchesH * 100) / 100); } catch (_e) {}
@@ -71734,6 +71737,21 @@
                 });
             }
             try { _wireAspectPresets(body); } catch (_eAp) {}
+            // in/cm unit seg: a client preference (localStorage); the
+            // re-render re-seeds the inputs, min/max/step, titles, seg
+            // highlights and the drag readout in the new unit. Committed
+            // options are untouched - always inches.
+            (function () {
+                var segs = body.querySelectorAll("[data-size-unit]");
+                for (var si = 0; si < segs.length; si++) {
+                    segs[si].addEventListener("click", function (e) {
+                        e.preventDefault();
+                        var u = e.currentTarget.getAttribute("data-size-unit");
+                        try { localStorage.setItem("graphbuilder2.sizeUnit", u === "cm" ? "cm" : "in"); } catch (_e) {}
+                        try { renderInspectorPanel(); } catch (_e) {}
+                    });
+                }
+            })();
 
             // Title-bar Reset: every chart-settings option this panel
             // exposes a control for - background, text color, border,
@@ -98895,14 +98913,34 @@
                 if (!inspectorPanel) return;
                 var pw = inspectorPanel.querySelector('[data-field="plot-w"]');
                 var ph = inspectorPanel.querySelector('[data-field="plot-h"]');
-                if (pw) pw.value = (+inchesW).toFixed(2).replace(/\.?0+$/, "");
-                if (ph) ph.value = (+inchesH).toFixed(2).replace(/\.?0+$/, "");
+                if (pw) pw.value = _gbFmtU(inchesW);
+                if (ph) ph.value = _gbFmtU(inchesH);
             } catch (_e) {}
             _gbSyncPlotPxNote();
         }
         // Display-only pixel equivalence for the Sizing tab (CSS px at
         // 96/in - what "on screen" means and what jamovi reports; export
         // DPI is the export panel's business). No option, no persistence.
+        // Size display unit: a PERSON's preference, not a chart property.
+        // plotWidth/plotHeight stay INCHES everywhere (the stored option,
+        // the R side, saved files); "cm" only changes what the Sizing
+        // inputs and the drag readout display and what typed values mean.
+        // Persisted client-side (localStorage), so a metric user sets it
+        // once per machine and every chart follows.
+        function _gbSizeUnitIsCm() {
+            try { return !!window.localStorage && localStorage.getItem("graphbuilder2.sizeUnit") === "cm"; } catch (_e) { return false; }
+        }
+        function _gbUToIn(v) { return _gbSizeUnitIsCm() ? v / 2.54 : v; }
+        function _gbFmtU(vIn) {
+            var v = _gbSizeUnitIsCm() ? vIn * 2.54 : vIn;
+            return (+v).toFixed(2).replace(/\.?0+$/, "");
+        }
+        function _gbUnitSegCss(on) {
+            return "padding:3px 8px;font:11px sans-serif;cursor:pointer;border-radius:4px;flex-shrink:0;" +
+                "border:1px solid " + (on ? "#1a5fb4" : "#ccc") + ";" +
+                "background:" + (on ? "#e8f0fb" : "white") + ";" +
+                "color:" + (on ? "#1a5fb4" : "#333") + ";";
+        }
         function _gbSyncPlotPxNote() {
             try {
                 if (!inspectorPanel) return;
@@ -98927,8 +98965,8 @@
             // inch inputs are the headline and px ride below), at the same
             // 2 dp the release commits, so readout, panel and saved option
             // can never disagree; the px line matches jamovi and the snap
-            var _fin = function (v) { return (+v).toFixed(2).replace(/\.?0+$/, ""); };
-            sizeTag.textContent = _fin(inchesW) + " x " + _fin(inchesH) + " in\n" +
+            sizeTag.textContent = _gbFmtU(inchesW) + " x " + _gbFmtU(inchesH) +
+                (_gbSizeUnitIsCm() ? " cm" : " in") + "\n" +
                 Math.round(inchesW * PX_PER_INCH) + " x " +
                 Math.round(inchesH * PX_PER_INCH) + " px";
             sizeTag.style.opacity = "1";
