@@ -61732,7 +61732,7 @@
             var _bsColorCtrl =
                 '<button type="button" data-field="fill-chip" data-role="primary-color" style="' + _bsSwatchStyle + 'background:' + _bsInitFill + ';" aria-label="Fill color" title="Fill color"></button>' +
                 _bsPaletteRow(_bsInitFill, "fill-chip", true) +
-                '<button type="button" data-field="fill-use-palette" title="Delete this color override and keep following the selected palette" style="padding:3px 8px;border:1px solid #aaa;border-radius:3px;background:white;color:#1a5fb4;cursor:pointer;font-size:11px;">Use palette</button>';
+                '<span style="flex-basis:100%;height:0;"></span><button type="button" data-field="fill-use-palette" title="Delete this color override and keep following the selected palette" style="padding:3px 8px;border:1px solid #aaa;border-radius:3px;background:white;color:#1a5fb4;cursor:pointer;font-size:11px;">Use palette</button>';
             // Pattern presets: each rendered as a button with a
             // small SVG preview + label. The underlying <select>
             // stays as display:none so the existing change handler
@@ -66698,7 +66698,7 @@
                 '<div data-field="line-color-custom-row" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;flex-basis:100%;order:-1;margin-bottom:6px;' + (_lmmDim ? "opacity:0.5;" : "") + '">' +
                     '<button type="button" data-field="line-color-btn" style="width:26px;height:26px;padding:0;border:1px solid #888;border-radius:3px;cursor:pointer;background:' + (swatchColor || "#888888") + ';flex-shrink:0;" aria-label="Line color" title="Line color"></button>' +
                     _renderPaletteRowHtml(swatchColor, "line-color-btn", "ls", 20, false, true) +
-                    '<button type="button" data-field="line-use-palette" title="Delete this line color override and keep following the selected palette" style="padding:3px 8px;border:1px solid #aaa;border-radius:3px;background:white;color:#1a5fb4;cursor:pointer;font-size:11px;">Use palette</button>' +
+                    '<span style="flex-basis:100%;height:0;"></span><button type="button" data-field="line-use-palette" title="Delete this line color override and keep following the selected palette" style="padding:3px 8px;border:1px solid #aaa;border-radius:3px;background:white;color:#1a5fb4;cursor:pointer;font-size:11px;">Use palette</button>' +
                 '</div>';
             // Marker FILL color control (Markers tab). On a line chart a
             // custom pick can be cleared with Match line. Dot plots have no
@@ -73506,7 +73506,7 @@
                   'aria-label="Point color" title="Point color"></button>' +
                 _psPaletteRow(resolvedColor, "p-color") +
                 (_psScopeable && !_psScopeAllNow()
-                    ? '<button type="button" data-field="p-color-use-palette" style="' + _psFollowActionCss + '" title="Remove this group\'s custom color and follow the chart palette">Use palette</button>'
+                    ? '<span style="flex-basis:100%;height:0;"></span><button type="button" data-field="p-color-use-palette" style="' + _psFollowActionCss + '" title="Remove this group\'s custom color and follow the chart palette">Use palette</button>'
                     : '') +
                 '<span style="color:#666;font-size:11px;margin-left:8px;">or use the HSV picker on the right.</span>';
             // Shape picker: one button per shape, each showing that
@@ -78221,7 +78221,7 @@
                 _distStripHtml("color",
                     '<button type="button" data-field="dh-color" data-role="primary-color" style="' + _DIST_swatchCss + _distSwatchBg(curFill) + '" aria-label="Fill color"></button>' +
                     _renderPaletteRowHtml(curFill, "color", "dh", 18, true, true) +
-                    '<button type="button" data-field="dh-use-palette" title="Delete this color override and keep following the selected palette" style="padding:3px 8px;border:1px solid #aaa;border-radius:3px;background:white;color:#1a5fb4;cursor:pointer;font-size:11px;">Use palette</button>') +
+                    '<span style="flex-basis:100%;height:0;"></span><button type="button" data-field="dh-use-palette" title="Delete this color override and keep following the selected palette" style="padding:3px 8px;border:1px solid #aaa;border-radius:3px;background:white;color:#1a5fb4;cursor:pointer;font-size:11px;">Use palette</button>') +
                 _distStripHtml("pattern", _patCtrl) +
                 _distStripHtml("opacity", _distRangeHtml("dh-op", 0, 1, 0.05, op) + '<span style="color:#666;">opacity</span>') +
                 _distStripHtml("corner", _distRangeHtml("dh-corner", 0, 50, 1, corner, "% of bar thickness"));
@@ -79053,7 +79053,7 @@
                 _distStripHtml("color",
                     '<button type="button" data-field="dd-color" data-role="primary-color" style="' + _DIST_swatchCss + _distSwatchBg(_ddfShown) + '" aria-label="Fill color"></button>' +
                     _renderPaletteRowHtml(_ddfShown, "color", "ddf", 18, true, true) +
-                    '<button type="button" data-field="dd-use-palette" title="Delete this color override and keep following the selected palette" style="padding:3px 8px;border:1px solid #aaa;border-radius:3px;background:white;color:#1a5fb4;cursor:pointer;font-size:11px;">Use palette</button>') +
+                    '<span style="flex-basis:100%;height:0;"></span><button type="button" data-field="dd-use-palette" title="Delete this color override and keep following the selected palette" style="padding:3px 8px;border:1px solid #aaa;border-radius:3px;background:white;color:#1a5fb4;cursor:pointer;font-size:11px;">Use palette</button>') +
                 _distStripHtml("opacity", '<span data-field="dd-op-wrap" style="display:inline-flex;align-items:center;gap:6px;' + (filled ? "" : "opacity:0.45;pointer-events:none;") + '">' + _distRangeHtml("dd-op", 0, 1, 0.05, op) + '<span style="color:#666;">opacity</span></span>');
             _distWireStrips(pane, "color");
             function _ddfSetOpacityEnabled(on) {
@@ -79347,7 +79347,7 @@
                 _distStripHtml("color",
                     '<button type="button" data-field="qq-color" data-role="primary-color" style="' + _DIST_swatchCss + _distSwatchBg(curCol) + '" aria-label="Point color"></button>' +
                     _renderPaletteRowHtml(curCol, "color", "qqp", 18, false, true) +
-                    '<button type="button" data-field="qq-use-palette" title="Delete this color override and keep following the selected palette" style="padding:3px 8px;border:1px solid #aaa;border-radius:3px;background:white;color:#1a5fb4;cursor:pointer;font-size:11px;">Use palette</button>') +
+                    '<span style="flex-basis:100%;height:0;"></span><button type="button" data-field="qq-use-palette" title="Delete this color override and keep following the selected palette" style="padding:3px 8px;border:1px solid #aaa;border-radius:3px;background:white;color:#1a5fb4;cursor:pointer;font-size:11px;">Use palette</button>') +
                 _distStripHtml("shape", '<div style="' + _GB2_COMPACT_SHAPE_GRID_CSS + '">' + _shapeSeg + '</div>') +
                 _distStripHtml("size", _distRangeHtml("qq-size", 1, 20, 0.5, sz, "px")) +
                 _distStripHtml("opacity", _distRangeHtml("qq-op", 0, 1, 0.05, op) + '<span style="color:#666;">opacity</span>');
@@ -79762,7 +79762,7 @@
                 _distStripHtml("ecdfcolor",
                     '<button type="button" data-field="ec-color" data-role="primary-color" style="' + _DIST_swatchCss + _distSwatchBg(curCol) + '" aria-label="Line color"></button>' +
                     _renderPaletteRowHtml(curCol, "color", "ecl", 18, false, true) +
-                    '<button type="button" data-field="ec-use-palette" title="Delete this color override and keep following the selected palette" style="padding:3px 8px;border:1px solid #aaa;border-radius:3px;background:white;color:#1a5fb4;cursor:pointer;font-size:11px;">Use palette</button>') +
+                    '<span style="flex-basis:100%;height:0;"></span><button type="button" data-field="ec-use-palette" title="Delete this color override and keep following the selected palette" style="padding:3px 8px;border:1px solid #aaa;border-radius:3px;background:white;color:#1a5fb4;cursor:pointer;font-size:11px;">Use palette</button>') +
                 _distStripHtml("ecdfwidth", _distRangeHtml("ec-lw", 0.25, 6, 0.25, lw, "px")) +
                 _distStripHtml("ecdfstyle", _distStyleSegHtml("ec-lst", "solid", "Solid", lst) + _distStyleSegHtml("ec-lst", "dashed", "Dashed", lst) + _distStyleSegHtml("ec-lst", "longdash", "Long dash", lst) + _distStyleSegHtml("ec-lst", "dotted", "Dotted", lst)) +
                 _distStripHtml("ecdfopacity", _distRangeHtml("ec-lop", 0, 1, 0.05, lop) + '<span style="color:#666;">opacity</span>');
@@ -80097,7 +80097,7 @@
                 _distStripHtml("fqslicecolor",
                     '<button type="button" data-field="fqs-color" data-role="primary-color" style="' + _DIST_swatchCss + _distSwatchBg(_cur) + '" aria-label="Slice color"></button>' +
                     _renderPaletteRowHtml(_cur, "color", "fqs", 18, false, true) +
-                    '<button type="button" data-field="fqs-use-palette" title="Delete this color override and keep following the selected palette" style="padding:3px 8px;border:1px solid #aaa;border-radius:3px;background:white;color:#1a5fb4;cursor:pointer;font-size:11px;">Use palette</button>') +
+                    '<span style="flex-basis:100%;height:0;"></span><button type="button" data-field="fqs-use-palette" title="Delete this color override and keep following the selected palette" style="padding:3px 8px;border:1px solid #aaa;border-radius:3px;background:white;color:#1a5fb4;cursor:pointer;font-size:11px;">Use palette</button>') +
                 _distStripHtml("pattern", _fqPatCtrl) +
                 _distStripHtml("fqsliceopacity", _distRangeHtml("fqs-op", 0, 1, 0.05, _op) + '<span style="color:#666;">opacity</span>');
             _distWireStrips(pane, "fqslicecolor");
@@ -81944,7 +81944,7 @@
                 _distStripHtml("lklvlcolor",
                     '<button type="button" data-field="lkl-color" data-role="primary-color" style="' + _DIST_swatchCss + _distSwatchBg(cur) + '" aria-label="Level color"></button>' +
                     _renderPaletteRowHtml(cur, "color", "lkl", 18, false) +
-                    '<button type="button" data-field="lklvl-use-palette" title="Delete this level color override and keep following the response palette" style="padding:3px 8px;border:1px solid #aaa;border-radius:3px;background:white;color:#1a5fb4;cursor:pointer;font-size:11px;">Use palette</button>') +
+                    '<span style="flex-basis:100%;height:0;"></span><button type="button" data-field="lklvl-use-palette" title="Delete this level color override and keep following the response palette" style="padding:3px 8px;border:1px solid #aaa;border-radius:3px;background:white;color:#1a5fb4;cursor:pointer;font-size:11px;">Use palette</button>') +
                 _distStripHtml("lklvlopacity", _distRangeHtml("lkl-op", 0, 1, 0.05, op) + '<span style="color:#666;">opacity</span>');
             _distWireStrips(pane, "lklvlcolor");
             _distWireColor(pane, "lkl-color",
