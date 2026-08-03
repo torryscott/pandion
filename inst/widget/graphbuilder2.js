@@ -25422,21 +25422,28 @@
         // querySelectors from picking up each other's swatches.
         function _renderPaletteRowHtml(currentHex, target, ns, size, allowTransparent, useActivePalette) {
             ns = ns || "ya";
-            var sz = (typeof size === "number" && size > 0) ? size : 20;
+            var sz = (typeof size === "number" && size > 0) ? size : 22;
+            if (sz < 22) sz = 22;
             // Insets scale to swatch size: at 20 px we use a 3 px
             // outset; smaller swatches use a proportionally tighter
             // outset so the highlight ring doesn't collide with the
             // adjacent swatch.
             var outOff = Math.max(2, Math.round(sz * 0.15));
-            // Compact spacing per Torry's Jul 4 2026 ruling, RE-restored
-            // Aug 2 2026: an a11y pass had re-pitched this shared builder
-            // to a 24px center pitch (the 14px text-panel chips got 10px
-            // gaps - "smaller and spaced out", his report). Swatch rows
-            // are deliberately dense; 'target-size' stays in the audit
-            // ignore set while this holds.
-            var gap = (sz >= 18) ? 3 : 2;
+            // Swatch rows stay DENSE with LARGE chips (Aug 3 2026
+            // ruling: "closer together but actually larger" - supersedes
+            // both the Jul 4 compact-small look and the wide-gap a11y
+            // re-pitch). 22px chips at a 3px gap put adjacent target
+            // centers 25px apart, so WCAG 2.2 target-size passes via the
+            // spacing exception with margin - no audit ignore needed.
+            // The row SHRINKS beside the big current-color chip
+            // (flex 1 1 0 + min-width 0 + wrap; a wrapping flex parent
+            // never shrinks an auto-basis item onto a line, so the basis
+            // must be 0 for the row to JOIN the chip's line): quick picks
+            // always start to the chip's right and wrap in place, not
+            // as a whole row dropped under the chip in narrow panels.
+            var gap = 3;
             var cur = (currentHex || "").toLowerCase();
-            var html = '<span style="display:inline-flex;align-items:center;gap:' + gap + 'px;flex-shrink:0;flex-wrap:' + (allowTransparent ? "wrap" : "nowrap") + ';">';
+            var html = '<span style="display:inline-flex;align-items:center;gap:' + gap + 'px;flex:1 1 0;min-width:0;flex-wrap:wrap;">';
             // Optional leftmost "transparent" swatch — fill strips only.
             // A transparent fill = a hollow / outline-only element. The
             // gray/white checkerboard is the universal transparency mark.
@@ -61673,16 +61680,17 @@
             // its slot. `target` distinguishes fill vs pat-color
             // swatches so the click handler routes correctly.
             function _bsPaletteRow(currentHex, target, allowTransparent) {
-                // 20px swatches plus a 4px gap place adjacent target centers
-                // 24px apart (the WCAG 2.2 target-spacing exception).
-                var html = '<span style="display:inline-flex;align-items:center;gap:4px;flex-shrink:0;flex-wrap:wrap;">';
+                // 22px swatches plus a 3px gap place adjacent target centers
+                // 25px apart (the WCAG 2.2 target-spacing exception,
+                // with margin). Dense-but-large, Aug 3 2026 ruling.
+                var html = '<span style="display:inline-flex;align-items:center;gap:3px;flex:1 1 0;min-width:0;flex-wrap:wrap;">';
                 var cur = (currentHex || "").toLowerCase();
                 if (allowTransparent) {
                     var _tbOn = (cur === "transparent");
                     html += '<button type="button" data-bs-palette="transparent" ' +
                         'data-bs-palette-target="' + target + '" ' +
                         'title="Transparent (hollow bar – no fill)" aria-label="Transparent" ' +
-                        'style="width:20px;height:20px;padding:0;border:' +
+                        'style="width:22px;height:22px;padding:0;border:' +
                         (_tbOn ? "2px solid #1a5fb4" : "1px solid #888") + ';' +
                         'border-radius:3px;cursor:pointer;flex-shrink:0;background-color:#fff;' +
                         'background-image:linear-gradient(45deg,#cfcfcf 25%,transparent 25%),linear-gradient(-45deg,#cfcfcf 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#cfcfcf 75%),linear-gradient(-45deg,transparent 75%,#cfcfcf 75%);' +
@@ -61707,7 +61715,7 @@
                         'data-bs-palette="' + c + '" ' +
                         'data-bs-palette-target="' + target + '" ' +
                         'title="' + c + '" ' +
-                        'style="width:20px;height:20px;padding:0;border:' + border + ';' +
+                        'style="width:22px;height:22px;padding:0;border:' + border + ';' +
                         'border-radius:3px;cursor:pointer;background:' + c + ';flex-shrink:0;' +
                         (isActive ? "outline:1px solid white;outline-offset:-3px;" : "") +
                         '"></button>';
@@ -73420,9 +73428,10 @@
             // / "p-outline") routes click handlers below.
             var _psBigSwatchStyle = "width:28px;height:28px;padding:0;border:1px solid #888;border-radius:4px;cursor:pointer;flex-shrink:0;";
             function _psPaletteRow(currentHex, target) {
-                // 20px swatches plus a 4px gap place adjacent target centers
-                // 24px apart (the WCAG 2.2 target-spacing exception).
-                var html = '<span style="display:inline-flex;align-items:center;gap:4px;flex-shrink:0;flex-wrap:wrap;">';
+                // 22px swatches plus a 3px gap place adjacent target centers
+                // 25px apart (the WCAG 2.2 target-spacing exception,
+                // with margin). Dense-but-large, Aug 3 2026 ruling.
+                var html = '<span style="display:inline-flex;align-items:center;gap:3px;flex:1 1 0;min-width:0;flex-wrap:wrap;">';
                 var cur = (currentHex || "").toLowerCase();
                 // Leftmost "transparent" swatch — fill row only. A
                 // transparent fill = a hollow marker. Shown as white with
@@ -73432,7 +73441,7 @@
                     html += '<button type="button" data-ps-palette="transparent" ' +
                         'data-ps-palette-target="' + target + '" ' +
                         'title="Transparent (hollow marker – no fill)" aria-label="Transparent" ' +
-                        'style="width:20px;height:20px;padding:0;border:' +
+                        'style="width:22px;height:22px;padding:0;border:' +
                         (_tOn ? "2px solid #1a5fb4" : "1px solid #888") + ';' +
                         'border-radius:3px;cursor:pointer;flex-shrink:0;background-color:#fff;' +
                         // Universal "transparent" checkerboard (gray/white),
@@ -73458,7 +73467,7 @@
                         'data-ps-palette="' + c + '" ' +
                         'data-ps-palette-target="' + target + '" ' +
                         'title="' + c + '" ' +
-                        'style="width:20px;height:20px;padding:0;border:' + border + ';' +
+                        'style="width:22px;height:22px;padding:0;border:' + border + ';' +
                         'border-radius:3px;cursor:pointer;background:' + c + ';flex-shrink:0;' +
                         (isActive ? "outline:1px solid white;outline-offset:-3px;" : "") +
                         '"></button>';
@@ -74526,7 +74535,7 @@
             // thicker blue border + inset outline ring.
             var _flBigSwatchStyle = "width:28px;height:28px;padding:0;border:1px solid #888;border-radius:4px;cursor:pointer;flex-shrink:0;";
             function _flPaletteRow(currentHex) {
-                var html = '<span style="display:inline-flex;align-items:center;gap:3px;flex-shrink:0;flex-wrap:wrap;">';
+                var html = '<span style="display:inline-flex;align-items:center;gap:3px;flex:1 1 0;min-width:0;flex-wrap:wrap;">';
                 var cur = (currentHex || "").toLowerCase();
                 var _rowCols = _hybridPaletteCols();
                 for (var i = 0; i < _rowCols.length; i++) {
@@ -74538,7 +74547,7 @@
                     html += '<button type="button" ' +
                         'data-fl-palette="' + c + '" ' +
                         'title="' + c + '" ' +
-                        'style="width:20px;height:20px;padding:0;border:' + border + ';' +
+                        'style="width:22px;height:22px;padding:0;border:' + border + ';' +
                         'border-radius:3px;cursor:pointer;background:' + c + ';flex-shrink:0;' +
                         (isActive ? "outline:1px solid white;outline-offset:-3px;" : "") +
                         '"></button>';
