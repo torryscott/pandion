@@ -69695,9 +69695,9 @@
                     // drag readout report) rides along as a live,
                     // display-only line. Export DPI is the export panel's
                     // business, hence "on screen".
-                    '<div style="' + _row + '">' +
+                    '<div style="' + _row + 'margin-bottom:14px;">' +
                       '<label style="' + _lbl + '"></label>' +
-                      '<span data-field="plot-px-note" style="color:#888;font-size:11px;">= ' +
+                      '<span data-field="plot-px-note" style="color:#888;font-size:11px;">' +
                         Math.round(inchesW * PX_PER_INCH) + ' x ' +
                         Math.round(inchesH * PX_PER_INCH) + ' px on screen</span>' +
                     '</div>' +
@@ -98907,7 +98907,7 @@
             try {
                 if (!inspectorPanel) return;
                 var n = inspectorPanel.querySelector('[data-field="plot-px-note"]');
-                if (n) n.textContent = "= " + Math.round(inchesW * PX_PER_INCH) + " x " +
+                if (n) n.textContent = Math.round(inchesW * PX_PER_INCH) + " x " +
                     Math.round(inchesH * PX_PER_INCH) + " px on screen";
             } catch (_e) {}
         }
@@ -98923,13 +98923,14 @@
         var startRatioXY = 0; // inchesH / inchesW captured at drag start
         function _sizeTagShow() {
             if (sizeTagHide) { clearTimeout(sizeTagHide); sizeTagHide = null; }
-            // px first (matches jamovi and the 10 px snap), inches second
-            // at the same 2 dp the release commits, so readout, panel and
-            // saved option can never disagree
+            // inches on top (continuity with the Sizing panel, where the
+            // inch inputs are the headline and px ride below), at the same
+            // 2 dp the release commits, so readout, panel and saved option
+            // can never disagree; the px line matches jamovi and the snap
             var _fin = function (v) { return (+v).toFixed(2).replace(/\.?0+$/, ""); };
-            sizeTag.textContent = Math.round(inchesW * PX_PER_INCH) + " x " +
-                Math.round(inchesH * PX_PER_INCH) + " px\n" +
-                _fin(inchesW) + " x " + _fin(inchesH) + " in";
+            sizeTag.textContent = _fin(inchesW) + " x " + _fin(inchesH) + " in\n" +
+                Math.round(inchesW * PX_PER_INCH) + " x " +
+                Math.round(inchesH * PX_PER_INCH) + " px";
             sizeTag.style.opacity = "1";
         }
         function _sizeTagFade() {
