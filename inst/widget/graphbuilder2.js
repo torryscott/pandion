@@ -10247,20 +10247,34 @@
             return l;
         }
 
-        var gripX = makeGrip("ew-resize");
-        var gripXLine = makeGripLine("v");
-        gripX.appendChild(gripXLine);
-        var gripY = makeGrip("ns-resize");
-        var gripYLine = makeGripLine("h");
-        gripY.appendChild(gripYLine);
+        // ONE corner resize handle (Aug 2026, Torry's ask): the jamovi-image
+        // convention replaces the two per-axis grips. Bottom-right corner,
+        // drags BOTH dimensions; Shift (or the Sizing panel's aspect lock)
+        // preserves the grab-time ratio; release snaps to 10 px steps like
+        // jamovi's own plots unless Ctrl/Cmd asks for the exact size.
+        // Single-axis fine-tuning lives in Chart settings -> Sizing.
+        var gripXY = makeGrip("nwse-resize");
+        var gripXYLineV = makeGripLine("v");
+        var gripXYLineH = makeGripLine("h");
+        gripXY.appendChild(gripXYLineV);
+        gripXY.appendChild(gripXYLineH);
+        // Transient "W x H px" readout while resizing (the jamovi-image
+        // size display). Hidden at rest; fades out after release.
+        var sizeTag = document.createElement("div");
+        sizeTag.className = "ignore-html";
+        sizeTag.style.cssText = "position:absolute;z-index:3;pointer-events:none;" +
+            "font:11px/1.7 monospace;color:#333;background:rgba(255,255,255,0.92);" +
+            "border:1px solid #c9d4e0;border-radius:3px;padding:0 6px;" +
+            "opacity:0;transition:opacity 150ms ease;white-space:nowrap;";
+        wrap.appendChild(sizeTag);
+        var sizeTagHide = null;
 
-        var draggingX = false, draggingY = false;
-        var hoveringX = false, hoveringY = false;
+        var draggingXY = false;
+        var hoveringXY = false;
         function showGrip(line, on) { line.style.opacity = on ? GRIP_HOT_OP : GRIP_REST_OP; }
-        gripX.addEventListener("mouseenter", function () { hoveringX = true; showGrip(gripXLine, true); });
-        gripX.addEventListener("mouseleave", function () { hoveringX = false; if (!draggingX) showGrip(gripXLine, false); });
-        gripY.addEventListener("mouseenter", function () { hoveringY = true; showGrip(gripYLine, true); });
-        gripY.addEventListener("mouseleave", function () { hoveringY = false; if (!draggingY) showGrip(gripYLine, false); });
+        function showGripXY(on) { showGrip(gripXYLineV, on); showGrip(gripXYLineH, on); }
+        gripXY.addEventListener("mouseenter", function () { hoveringXY = true; showGripXY(true); });
+        gripXY.addEventListener("mouseleave", function () { hoveringXY = false; if (!draggingXY) showGripXY(false); });
 
         // --- Tick interval drag column ----------------------------------
         var tickDragHit = document.createElement("div");
@@ -10740,6 +10754,11 @@
                 _gb2TwinTimer = setTimeout(_gb2BuildHarvestTwin, ms);
             } catch (_eTwS) {}
         }
+        // Exposed for harnesses: hover-export-check simulates jamovi's
+        // harvest on a page whose jmv-results-svg wrapper appears only at
+        // harvest time, after render already gated the twin off. Real
+        // jamovi never needs this hook (the wrapper exists before render).
+        try { host.__gb2_buildHarvestTwin = _gb2BuildHarvestTwin; } catch (_eTwX) {}
         // first build lands right after this render's synchronous body
         _gb2ScheduleHarvestTwin(30);
 
@@ -27841,35 +27860,29 @@
                 _syncInspectorPanelGeometry();
             }
 
-            // Resize grips: small hit zones at the chart corners
-            // where each axis ends. X-axis runs along the bottom, so
-            // its grip lives at the bottom-right corner; Y-axis runs
-            // up the left side, so its grip lives at the top-left.
-            // Confining the hit area to the corner keeps the rest of
-            // the chart edge available for annotation drags.
+            // Corner resize handle: one grip at the bottom-right corner
+            // of the OUTER chart bounds, dragging BOTH dimensions (the
+            // jamovi-image convention). The visible affordance is an L of
+            // two stubs hugging the corner; the hit zone extends past the
+            // corner for grab tolerance. Faceted charts keep this single
+            // outer-corner handle: resize is chart-wide either way.
             var GRIP_LINE_LEN = 20;
-            var GRIP_HIT_LEN = GRIP_LINE_LEN + EDGE_HIT_PX;
-            // X-axis: bottom-right corner. Grip extends a few px
-            // above chartBottom (with the visible stub) and a few px
-            // below for grab tolerance.
-            gripX.style.left = (chartRight - EDGE_HIT_PX) + "px";
-            gripX.style.top = (chartBottom - GRIP_LINE_LEN) + "px";
-            gripX.style.width = (EDGE_HIT_PX * 2) + "px";
-            gripX.style.height = GRIP_HIT_LEN + "px";
-            // Line aligned to the top of the grip so it sits right
-            // along the chart's right edge ending at the X-axis line.
-            gripXLine.style.top = "0px";
-            gripXLine.style.left = (EDGE_HIT_PX - 1) + "px";
-            gripXLine.style.height = (GRIP_LINE_LEN - GRIP_GAP) + "px";
-
-            // Y-axis: top-left corner.
-            gripY.style.left = (chartLeft - EDGE_HIT_PX) + "px";
-            gripY.style.top = (chartTop - EDGE_HIT_PX) + "px";
-            gripY.style.width = GRIP_HIT_LEN + "px";
-            gripY.style.height = (EDGE_HIT_PX * 2) + "px";
-            gripYLine.style.left = (EDGE_HIT_PX + GRIP_GAP) + "px";
-            gripYLine.style.top = (EDGE_HIT_PX - 1) + "px";
-            gripYLine.style.width = (GRIP_LINE_LEN - GRIP_GAP) + "px";
+            var GRIP_BOX = GRIP_LINE_LEN + EDGE_HIT_PX;
+            gripXY.style.left = (chartRight - GRIP_LINE_LEN) + "px";
+            gripXY.style.top = (chartBottom - GRIP_LINE_LEN) + "px";
+            gripXY.style.width = GRIP_BOX + "px";
+            gripXY.style.height = GRIP_BOX + "px";
+            // Vertical stub along the right edge, ending at the corner.
+            gripXYLineV.style.left = (GRIP_LINE_LEN - 1) + "px";
+            gripXYLineV.style.top = "0px";
+            gripXYLineV.style.height = (GRIP_LINE_LEN - GRIP_GAP) + "px";
+            // Horizontal stub along the bottom edge, ending at the corner.
+            gripXYLineH.style.top = (GRIP_LINE_LEN - 1) + "px";
+            gripXYLineH.style.left = "0px";
+            gripXYLineH.style.width = (GRIP_LINE_LEN - GRIP_GAP) + "px";
+            // Size readout tucks just inside the corner during a drag.
+            sizeTag.style.left = Math.max(0, chartRight - 112) + "px";
+            sizeTag.style.top = Math.max(0, chartBottom - 30) + "px";
 
             // Tick interval drag hit column - lives just left of the Y axis,
             // covering the tick marks. Stops short of chartTop and chartBottom
@@ -98646,7 +98659,7 @@
         // useful while the widget was new but reads as visual noise now
         // that drag affordances are obvious. The element is left as a
         // detached div so existing updateHint() call sites
-        // (onPointerMoveX / endDragX / onPointerMoveY / endDragY)
+        // (onPointerMoveXY / endDragXY)
         // continue to work without changes — they mutate textContent
         // on an orphan node, which is harmless.
         var hint = document.createElement("div");
@@ -98692,117 +98705,98 @@
             } catch (_e) {}
         }
 
-        // --- X drag (width) ---------------------------------------------
-        // Aspect-lock: when data.chartAspectLock is true, the ratio at
-        // pointerdown is preserved during drag - dragging width also
-        // adjusts height proportionally (and vice-versa for Y drag).
-        var startMouseX = 0, startInchesW = inchesW;
-        var startRatio_x = 0; // inchesH / inchesW captured at drag start
-        var _shiftLockedX = false; // any Shift-locked move happened this drag
-        function onPointerDownX(e) {
-            e.preventDefault(); e.stopPropagation();
-            draggingX = true;
-            startMouseX = e.clientX; startInchesW = inchesW;
-            startRatio_x = (inchesW > 0) ? (inchesH / inchesW) : 1;
-            _shiftLockedX = false;
-            showGrip(gripXLine, true);
-            try { gripX.setPointerCapture(e.pointerId); } catch (err) {}
-            _gbResizePopSizing();
+        // --- Corner drag (width + height) --------------------------------
+        // One handle, both dimensions, the jamovi-image feel: free drag
+        // with a live "W x H px" readout, Shift (or the Sizing panel's
+        // persistent chartAspectLock) preserving the grab-time ratio, and
+        // a 10 px snap applied at release (Ctrl/Cmd bypasses the snap,
+        // exactly like jamovi's own plot resizing).
+        var startMouseX = 0, startMouseY = 0;
+        var startInchesW = inchesW, startInchesH = inchesH;
+        var startRatioXY = 0; // inchesH / inchesW captured at drag start
+        function _sizeTagShow() {
+            if (sizeTagHide) { clearTimeout(sizeTagHide); sizeTagHide = null; }
+            sizeTag.textContent = Math.round(inchesW * PX_PER_INCH) + " x " +
+                Math.round(inchesH * PX_PER_INCH) + " px";
+            sizeTag.style.opacity = "1";
         }
-        function onPointerMoveX(e) {
-            if (!draggingX) return;
+        function _sizeTagFade() {
+            if (sizeTagHide) clearTimeout(sizeTagHide);
+            sizeTagHide = setTimeout(function () {
+                sizeTag.style.opacity = "0";
+                sizeTagHide = null;
+            }, 1000);
+        }
+        function onPointerDownXY(e) {
+            e.preventDefault(); e.stopPropagation();
+            draggingXY = true;
+            startMouseX = e.clientX; startMouseY = e.clientY;
+            startInchesW = inchesW; startInchesH = inchesH;
+            startRatioXY = (inchesW > 0) ? (inchesH / inchesW) : 1;
+            showGripXY(true);
+            try { gripXY.setPointerCapture(e.pointerId); } catch (err) {}
+            _gbResizePopSizing();
+            _sizeTagShow();
+        }
+        function onPointerMoveXY(e) {
+            if (!draggingXY) return;
             var dx = e.clientX - startMouseX;
-            var newIn = clamp(startInchesW + dx / PX_PER_INCH, MIN_W_IN, MAX_W_IN);
-            if (newIn === inchesW) return;
-            inchesW = newIn;
+            var dy = e.clientY - startMouseY;
+            var newW = clamp(startInchesW + dx / PX_PER_INCH, MIN_W_IN, MAX_W_IN);
+            var newH = clamp(startInchesH + dy / PX_PER_INCH, MIN_H_IN, MAX_H_IN);
             // Shift = momentary aspect lock (same math as the Sizing
-            // panel's persistent chartAspectLock checkbox).
+            // panel's persistent chartAspectLock checkbox): the dominant
+            // pointer axis drives, the other follows the grab-time ratio.
             if (data.chartAspectLock === true || e.shiftKey) {
-                inchesH = clamp(newIn * startRatio_x, MIN_H_IN, MAX_H_IN);
-                if (e.shiftKey) _shiftLockedX = true;
+                if (Math.abs(dx) >= Math.abs(dy)) {
+                    newH = clamp(newW * startRatioXY, MIN_H_IN, MAX_H_IN);
+                } else {
+                    newW = clamp((startRatioXY > 0) ? (newH / startRatioXY) : newH, MIN_W_IN, MAX_W_IN);
+                }
             }
+            if (newW === inchesW && newH === inchesH) return;
+            inchesW = newW; inchesH = newH;
             // Keep data authoritative so any re-render (and the drag-end
             // commit's hash stamp) reflects the live size, not the stale one.
             data.plotWidth = inchesW; data.plotHeight = inchesH;
             applySize();
             _gbResizeSyncInputs();
-            updateHint("(dragging width)");
+            _sizeTagShow();
+            updateHint("(resizing)");
         }
-        function endDragX() {
-            if (!draggingX) return;
-            draggingX = false;
-            showGrip(gripXLine, hoveringX);
+        function endDragXY(e) {
+            if (!draggingXY) return;
+            draggingXY = false;
+            showGripXY(hoveringXY);
             updateHint();
+            // Release snap: nearest 10 px per dimension (the jamovi plot
+            // convention), unless Ctrl/Cmd asks for the exact size.
+            var noSnap = !!(e && (e.ctrlKey || e.metaKey));
+            if (!noSnap) {
+                inchesW = clamp(Math.round((inchesW * PX_PER_INCH) / 10) * 10 / PX_PER_INCH, MIN_W_IN, MAX_W_IN);
+                inchesH = clamp(Math.round((inchesH * PX_PER_INCH) / 10) * 10 / PX_PER_INCH, MIN_H_IN, MAX_H_IN);
+                data.plotWidth = inchesW; data.plotHeight = inchesH;
+                applySize();
+                _gbResizeSyncInputs();
+            }
+            _sizeTagShow();
+            _sizeTagFade();
             // Keep the just-opened Sizing panel from closing on the click
             // that fires right after the release: the document close-handler
             // swallows outside-clicks that land inside this window.
             try { window.__gb2_suppressOutsideClickUntil = Date.now() + 800; } catch (_e) {}
             if (hasSetOption) {
                 data.plotWidth = Math.round(inchesW * 100) / 100;
-                try { _setOption("plotWidth", data.plotWidth); } catch (e) {}
-                if (data.chartAspectLock === true || _shiftLockedX) {
-                    data.plotHeight = Math.round(inchesH * 100) / 100;
-                    try { _setOption("plotHeight", data.plotHeight); } catch (e) {}
-                }
-            }
-        }
-        gripX.addEventListener("pointerdown", onPointerDownX);
-        gripX.addEventListener("pointermove", onPointerMoveX);
-        gripX.addEventListener("pointerup", endDragX);
-        gripX.addEventListener("pointercancel", endDragX);
-        gripX.addEventListener("lostpointercapture", endDragX);
-
-        // --- Y drag (height) --------------------------------------------
-        var startMouseY = 0, startInchesH = inchesH;
-        var startRatio_y = 0; // inchesW / inchesH captured at drag start
-        var _shiftLockedY = false; // any Shift-locked move happened this drag
-        function onPointerDownY(e) {
-            e.preventDefault(); e.stopPropagation();
-            draggingY = true;
-            startMouseY = e.clientY; startInchesH = inchesH;
-            startRatio_y = (inchesH > 0) ? (inchesW / inchesH) : 1;
-            _shiftLockedY = false;
-            showGrip(gripYLine, true);
-            try { gripY.setPointerCapture(e.pointerId); } catch (err) {}
-            _gbResizePopSizing();
-        }
-        function onPointerMoveY(e) {
-            if (!draggingY) return;
-            var dy = e.clientY - startMouseY;
-            var newIn = clamp(startInchesH - dy / PX_PER_INCH, MIN_H_IN, MAX_H_IN);
-            if (newIn === inchesH) return;
-            inchesH = newIn;
-            if (data.chartAspectLock === true || e.shiftKey) {
-                inchesW = clamp(newIn * startRatio_y, MIN_W_IN, MAX_W_IN);
-                if (e.shiftKey) _shiftLockedY = true;
-            }
-            // Keep data authoritative so any re-render (and the drag-end
-            // commit's hash stamp) reflects the live size, not the stale one.
-            data.plotWidth = inchesW; data.plotHeight = inchesH;
-            applySize();
-            _gbResizeSyncInputs();
-            updateHint("(dragging height)");
-        }
-        function endDragY() {
-            if (!draggingY) return;
-            draggingY = false;
-            showGrip(gripYLine, hoveringY);
-            updateHint();
-            try { window.__gb2_suppressOutsideClickUntil = Date.now() + 800; } catch (_e) {}
-            if (hasSetOption) {
                 data.plotHeight = Math.round(inchesH * 100) / 100;
-                try { _setOption("plotHeight", data.plotHeight); } catch (e) {}
-                if (data.chartAspectLock === true || _shiftLockedY) {
-                    data.plotWidth = Math.round(inchesW * 100) / 100;
-                    try { _setOption("plotWidth", data.plotWidth); } catch (e) {}
-                }
+                try { _setOption("plotWidth", data.plotWidth); } catch (e2) {}
+                try { _setOption("plotHeight", data.plotHeight); } catch (e2) {}
             }
         }
-        gripY.addEventListener("pointerdown", onPointerDownY);
-        gripY.addEventListener("pointermove", onPointerMoveY);
-        gripY.addEventListener("pointerup", endDragY);
-        gripY.addEventListener("pointercancel", endDragY);
-        gripY.addEventListener("lostpointercapture", endDragY);
+        gripXY.addEventListener("pointerdown", onPointerDownXY);
+        gripXY.addEventListener("pointermove", onPointerMoveXY);
+        gripXY.addEventListener("pointerup", endDragXY);
+        gripXY.addEventListener("pointercancel", endDragXY);
+        gripXY.addEventListener("lostpointercapture", endDragXY);
 
         // ===== Per-panel axis affordances (faceted mode) =====
         // The single grips/hit-zones above are positioned over the
@@ -98853,32 +98847,10 @@
         // handlers (resize is chart-wide regardless of which panel's
         // handle is grabbed); only the pointerdown capture + the
         // per-set blue line differ from the singles.
-        function _poolDownX(e) {
-            e.preventDefault(); e.stopPropagation();
-            draggingX = true; startMouseX = e.clientX; startInchesW = inchesW;
-            startRatio_x = (inchesW > 0) ? (inchesH / inchesW) : 1;
-            _shiftLockedX = false;
-            if (e.currentTarget.__line) e.currentTarget.__line.style.opacity = GRIP_HOT_OP;
-            try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_e) {}
-            _gbResizePopSizing();
-        }
-        function _poolUpX(e) {
-            if (e.currentTarget.__line) e.currentTarget.__line.style.opacity = GRIP_REST_OP;
-            endDragX();
-        }
-        function _poolDownY(e) {
-            e.preventDefault(); e.stopPropagation();
-            draggingY = true; startMouseY = e.clientY; startInchesH = inchesH;
-            startRatio_y = (inchesH > 0) ? (inchesW / inchesH) : 1;
-            _shiftLockedY = false;
-            if (e.currentTarget.__line) e.currentTarget.__line.style.opacity = GRIP_HOT_OP;
-            try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_e) {}
-            _gbResizePopSizing();
-        }
-        function _poolUpY(e) {
-            if (e.currentTarget.__line) e.currentTarget.__line.style.opacity = GRIP_REST_OP;
-            endDragY();
-        }
+        // The per-panel pool used to carry its own width/height grips;
+        // they are gone with the per-axis grips (the single outer-corner
+        // handle resizes the whole chart in faceted mode too). The pool
+        // keeps its per-panel tick/axis hover + click affordances.
         function _makeAffordSet() {
             function mkGrip(cursor) {
                 var g = document.createElement("div");
@@ -98892,24 +98864,8 @@
                 l.style.cssText = b.join(";"); _gripAddChevrons(l, orient); return l;
             }
             var set = {};
-            set.gripX = mkGrip("ew-resize"); set.gripXLine = mkLine("v"); set.gripX.appendChild(set.gripXLine); set.gripX.__line = set.gripXLine;
-            set.gripY = mkGrip("ns-resize"); set.gripYLine = mkLine("h"); set.gripY.appendChild(set.gripYLine); set.gripY.__line = set.gripYLine;
             set.tickHit = document.createElement("div"); set.tickHit.style.cssText = "position:absolute;cursor:pointer;user-select:none;z-index:2;"; set.tickHit.title = "Click to open Y-axis settings"; wrap.appendChild(set.tickHit);
             set.xHit = document.createElement("div"); set.xHit.style.cssText = "position:absolute;cursor:pointer;user-select:none;z-index:2;"; set.xHit.title = "Click to open X-axis settings"; wrap.appendChild(set.xHit);
-            set.gripX.addEventListener("mouseenter", function () { if (!draggingX) set.gripXLine.style.opacity = GRIP_HOT_OP; });
-            set.gripX.addEventListener("mouseleave", function () { if (!draggingX) set.gripXLine.style.opacity = GRIP_REST_OP; });
-            set.gripY.addEventListener("mouseenter", function () { if (!draggingY) set.gripYLine.style.opacity = GRIP_HOT_OP; });
-            set.gripY.addEventListener("mouseleave", function () { if (!draggingY) set.gripYLine.style.opacity = GRIP_REST_OP; });
-            set.gripX.addEventListener("pointerdown", _poolDownX);
-            set.gripX.addEventListener("pointermove", onPointerMoveX);
-            set.gripX.addEventListener("pointerup", _poolUpX);
-            set.gripX.addEventListener("pointercancel", _poolUpX);
-            set.gripX.addEventListener("lostpointercapture", _poolUpX);
-            set.gripY.addEventListener("pointerdown", _poolDownY);
-            set.gripY.addEventListener("pointermove", onPointerMoveY);
-            set.gripY.addEventListener("pointerup", _poolUpY);
-            set.gripY.addEventListener("pointercancel", _poolUpY);
-            set.gripY.addEventListener("lostpointercapture", _poolUpY);
             var yTick = null, yLine = false;
             set.tickHit.addEventListener("mousemove", function (e) {
                 if (typeof e.offsetY !== "number" || !set.panel || !set.yLineEl) return;
@@ -98962,30 +98918,26 @@
         }
         function _hideAffordSet(set) {
             if (!set) return;
-            ["gripX", "gripY", "tickHit", "xHit"].forEach(function (k) { if (set[k]) set[k].style.display = "none"; });
+            ["tickHit", "xHit"].forEach(function (k) { if (set[k]) set[k].style.display = "none"; });
         }
         function _layoutPanelAffordances(panels) {
             var faceted = panels && panels.length > 1;
             var pool = wrap.__gb2afford || (wrap.__gb2afford = []);
             if (!faceted) {
                 for (var h = 0; h < pool.length; h++) _hideAffordSet(pool[h]);
-                try { gripX.style.display = ""; gripY.style.display = ""; tickDragHit.style.display = ""; xLayoutHit.style.display = ""; } catch (_e) {}
+                try { tickDragHit.style.display = ""; xLayoutHit.style.display = ""; } catch (_e) {}
                 return;
             }
             // Faceted: retire the single chart-level affordances and
             // drive everything off the per-panel pool.
-            try { gripX.style.display = "none"; gripY.style.display = "none"; tickDragHit.style.display = "none"; xLayoutHit.style.display = "none"; } catch (_e) {}
+            // The corner resize handle stays: resize is chart-wide, so the
+            // single outer-corner grip serves faceted charts too.
+            try { tickDragHit.style.display = "none"; xLayoutHit.style.display = "none"; } catch (_e) {}
             var GLL = 20, GHL = GLL + EDGE_HIT_PX, safe = 12;
             for (var i = 0; i < panels.length; i++) {
                 var p = panels[i];
                 var set = pool[i] || (pool[i] = _makeAffordSet());
                 set.panel = p; set.yLineEl = p.yAxisLineEl || null; set.xLineEl = p.xAxisLineEl || null;
-                // Width grip — bottom-right corner of the panel.
-                set.gripX.style.display = ""; set.gripX.style.left = (p.chartRight - EDGE_HIT_PX) + "px"; set.gripX.style.top = (p.chartBottom - GLL) + "px"; set.gripX.style.width = (EDGE_HIT_PX * 2) + "px"; set.gripX.style.height = GHL + "px";
-                set.gripXLine.style.top = "0px"; set.gripXLine.style.left = (EDGE_HIT_PX - 1) + "px"; set.gripXLine.style.height = (GLL - GRIP_GAP) + "px";
-                // Height grip — top-left corner of the panel.
-                set.gripY.style.display = ""; set.gripY.style.left = (p.chartLeft - EDGE_HIT_PX) + "px"; set.gripY.style.top = (p.chartTop - EDGE_HIT_PX) + "px"; set.gripY.style.width = GHL + "px"; set.gripY.style.height = (EDGE_HIT_PX * 2) + "px";
-                set.gripYLine.style.left = (EDGE_HIT_PX + GRIP_GAP) + "px"; set.gripYLine.style.top = (EDGE_HIT_PX - 1) + "px"; set.gripYLine.style.width = (GLL - GRIP_GAP) + "px";
                 // Y tick/hover column — horizontal charts draw their left
                 // category axis in every panel; vertical shared-Y facets only
                 // draw it in the left column.
