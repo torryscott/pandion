@@ -46,6 +46,14 @@ gb2_init_script_src <- function(html_result) {
 gb2_engine_placeholder_html <- function(message_html,
                                         client_bundle_hash = "",
                                         script_src_ready = FALSE) {
+    # Cap the message width so the text wraps under ANY results container.
+    # jamovi's Html element imposes width:500px, which quietly did the
+    # wrapping for us; the experimental Svg element imposes no width, so
+    # an uncapped placeholder stretched the whole results page sideways
+    # (Torry's field report, Aug 2026). Own the wrapping instead of
+    # relying on the host. 560px has no visible effect inside the Html
+    # element's 500px, so production renders byte-for-byte the same.
+    message_html <- paste0('<div style="max-width:560px;">', message_html, '</div>')
     if (gb2_script_src_on() && isTRUE(script_src_ready))
         message_html
     else
@@ -1004,6 +1012,10 @@ graphbuilder2_html <- function(bars,
                 startFrac = if (!is.null(r$startFrac)) as.numeric(r$startFrac) else 0,
                 endFrac = if (!is.null(r$endFrac)) as.numeric(r$endFrac) else 1
             )
+            # Relative bracket height (Aug 2026): px above the spanned
+            # cells' per-type ceiling. Only-when-present, so payloads
+            # without it stay byte-identical.
+            if (!is.null(r$yRel)) entry$yRel <- as.numeric(r$yRel)
             out[[length(out) + 1L]] <- entry
         }
         out
