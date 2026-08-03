@@ -10314,10 +10314,20 @@
         // jamovi's own plots unless Ctrl/Cmd asks for the exact size.
         // Single-axis fine-tuning lives in Chart settings -> Sizing.
         var gripXY = makeGrip("nwse-resize");
-        var gripXYLineV = makeGripLine("v");
-        var gripXYLineH = makeGripLine("h");
-        gripXY.appendChild(gripXYLineV);
-        gripXY.appendChild(gripXYLineH);
+        // Persistent corner glyph (Aug 2026, Torry): jamovi's native plots
+        // show a small, always-visible diagonal scrubber at the corner
+        // rather than hover-revealed chrome. Match it: two light diagonal
+        // strokes, a touch darker on hover/drag, never hidden. Static
+        // markup only - never interpolate data into this innerHTML.
+        var gripXYGlyph = document.createElement("div");
+        gripXYGlyph.style.cssText = "position:absolute;pointer-events:none;" +
+            "width:11px;height:11px;line-height:0;opacity:0.55;" +
+            "transition:opacity 120ms ease;";
+        gripXYGlyph.innerHTML =
+            '<svg width="11" height="11" viewBox="0 0 11 11" ' +
+            'xmlns="http://www.w3.org/2000/svg"><path d="M10 3 L3 10 M10 7 L7 10" ' +
+            'stroke="#8a8a8a" stroke-width="1.4" stroke-linecap="round" fill="none"/></svg>';
+        gripXY.appendChild(gripXYGlyph);
         // Transient "W x H px" readout while resizing (the jamovi-image
         // size display). Hidden at rest; fades out after release.
         var sizeTag = document.createElement("div");
@@ -10331,8 +10341,7 @@
 
         var draggingXY = false;
         var hoveringXY = false;
-        function showGrip(line, on) { line.style.opacity = on ? GRIP_HOT_OP : GRIP_REST_OP; }
-        function showGripXY(on) { showGrip(gripXYLineV, on); showGrip(gripXYLineH, on); }
+        function showGripXY(on) { gripXYGlyph.style.opacity = on ? "0.95" : "0.55"; }
         gripXY.addEventListener("mouseenter", function () { hoveringXY = true; showGripXY(true); });
         gripXY.addEventListener("mouseleave", function () { hoveringXY = false; if (!draggingXY) showGripXY(false); });
 
@@ -27980,14 +27989,10 @@
             gripXY.style.top = (chartBottom - GRIP_LINE_LEN) + "px";
             gripXY.style.width = GRIP_BOX + "px";
             gripXY.style.height = GRIP_BOX + "px";
-            // Vertical stub along the right edge, ending at the corner.
-            gripXYLineV.style.left = (GRIP_LINE_LEN - 1) + "px";
-            gripXYLineV.style.top = "0px";
-            gripXYLineV.style.height = (GRIP_LINE_LEN - GRIP_GAP) + "px";
-            // Horizontal stub along the bottom edge, ending at the corner.
-            gripXYLineH.style.top = (GRIP_LINE_LEN - 1) + "px";
-            gripXYLineH.style.left = "0px";
-            gripXYLineH.style.width = (GRIP_LINE_LEN - GRIP_GAP) + "px";
+            // Glyph sits just outside the corner, like jamovi's own
+            // scrubber: below the axis line, right of the axis end.
+            gripXYGlyph.style.left = (GRIP_LINE_LEN + 3) + "px";
+            gripXYGlyph.style.top = (GRIP_LINE_LEN + 3) + "px";
             // Size readout tucks just inside the corner during a drag.
             sizeTag.style.left = Math.max(0, chartRight - 112) + "px";
             sizeTag.style.top = Math.max(0, chartBottom - 30) + "px";
