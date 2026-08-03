@@ -10314,6 +10314,11 @@
         // jamovi's own plots unless Ctrl/Cmd asks for the exact size.
         // Single-axis fine-tuning lives in Chart settings -> Sizing.
         var gripXY = makeGrip("nwse-resize");
+        // The corner box overlaps the tail of the x-axis click strip (a
+        // later sibling at the same z-index, which would steal the
+        // pointer). The corner means resize, so it wins the stack; the
+        // axis strip stays clickable along its whole remaining length.
+        gripXY.style.zIndex = "3";
         // Persistent corner glyph (Aug 2026, Torry): jamovi's native plots
         // show a small, always-visible diagonal scrubber at the corner
         // rather than hover-revealed chrome. Match it: two light diagonal
@@ -27988,11 +27993,11 @@
             gripXY.style.left = (chartRight - GRIP_LINE_LEN) + "px";
             gripXY.style.top = (chartBottom - GRIP_LINE_LEN) + "px";
             gripXY.style.width = GRIP_BOX + "px";
-            gripXY.style.height = GRIP_BOX + "px";
+            gripXY.style.height = (GRIP_BOX + 6) + "px";
             // Glyph sits just outside the corner, like jamovi's own
             // scrubber: below the axis line, right of the axis end.
             gripXYGlyph.style.left = (GRIP_LINE_LEN + 3) + "px";
-            gripXYGlyph.style.top = (GRIP_LINE_LEN + 3) + "px";
+            gripXYGlyph.style.top = (GRIP_LINE_LEN + 9) + "px";
             // Size readout tucks just inside the corner during a drag.
             sizeTag.style.left = Math.max(0, chartRight - 112) + "px";
             sizeTag.style.top = Math.max(0, chartBottom - 30) + "px";
