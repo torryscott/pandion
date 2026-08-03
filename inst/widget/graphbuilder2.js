@@ -10338,9 +10338,9 @@
         var sizeTag = document.createElement("div");
         sizeTag.className = "ignore-html";
         sizeTag.style.cssText = "position:absolute;z-index:3;pointer-events:none;" +
-            "font:11px/1.7 monospace;color:#333;background:rgba(255,255,255,0.92);" +
-            "border:1px solid #c9d4e0;border-radius:3px;padding:0 6px;" +
-            "opacity:0;transition:opacity 150ms ease;white-space:nowrap;";
+            "font:11px/1.5 monospace;color:#333;background:rgba(255,255,255,0.92);" +
+            "border:1px solid #c9d4e0;border-radius:3px;padding:2px 7px;" +
+            "opacity:0;transition:opacity 150ms ease;white-space:pre;text-align:center;";
         wrap.appendChild(sizeTag);
         var sizeTagHide = null;
 
@@ -28003,7 +28003,7 @@
             gripXYGlyph.style.top = (GRIP_LINE_LEN + 9) + "px";
             // Size readout tucks just inside the corner during a drag.
             sizeTag.style.left = Math.max(0, chartRight - 112) + "px";
-            sizeTag.style.top = Math.max(0, chartBottom - 30) + "px";
+            sizeTag.style.top = Math.max(0, chartBottom - 50) + "px";
 
             // Tick interval drag hit column - lives just left of the Y axis,
             // covering the tick marks. Stops short of chartTop and chartBottom
@@ -98928,7 +98928,7 @@
             // saved option can never disagree
             var _fin = function (v) { return (+v).toFixed(2).replace(/\.?0+$/, ""); };
             sizeTag.textContent = Math.round(inchesW * PX_PER_INCH) + " x " +
-                Math.round(inchesH * PX_PER_INCH) + " px \u00b7 " +
+                Math.round(inchesH * PX_PER_INCH) + " px\n" +
                 _fin(inchesW) + " x " + _fin(inchesH) + " in";
             sizeTag.style.opacity = "1";
         }
