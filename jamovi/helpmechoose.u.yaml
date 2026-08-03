@@ -1,0 +1,28 @@
+title: Help Me Choose
+name: helpmechoose
+jus: '3.0'
+stage: 0
+children:
+  # jamovi Labels are single-line (hardcoded white-space:nowrap and the text is
+  # HTML-escaped, so a <br> shows literally). Split the instruction across three
+  # Label controls so each renders on its own line; margin:small keeps them tight.
+  - type: Label
+    margin: small
+    label: 'Optional: drop the exact variables you want to plot into the box below'
+  - type: Label
+    margin: small
+    label: and the guide on the right will recommend the analysis that fits them.
+  - type: Label
+    margin: small
+    label: Or just answer the prompts on the right.
+  - type: VariableSupplier
+    persistentItems: false
+    stretchFactor: 1
+    children:
+      - type: TargetLayoutBox
+        label: Variables to plot (optional)
+        children:
+          - type: VariablesListBox
+            name: vars
+            isTarget: true
+compilerMode: tame

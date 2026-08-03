@@ -1,0 +1,102 @@
+---
+name:  likertplotbuilder
+title: Likert / Survey
+menuGroup: Pandion Plots
+menuSubgroup: Plots
+category: plots
+version: '0.0.1'
+jas: '1.2'
+
+description:
+    main: >
+        Visualize a battery of rating-scale (Likert) items that share one
+        response scale. Draws diverging stacked bars centered on the neutral
+        category, 100% stacked bars, or item means with confidence
+        intervals, with net-agreement sorting, reverse-scoring for
+        negatively worded items, and Cronbach's alpha. Drag rows to reorder
+        the questions.
+
+options:
+
+    - name: annotationsJson
+      title: Annotations (JSON)
+      type: String
+      default: ''
+      hidden: true
+
+    - name: chartSnapshot
+      title: Static chart snapshot (internal)
+      type: String
+      default: ''
+      hidden: true
+
+    - name: clientBundleHash
+      title: Client bundle hash (internal)
+      type: String
+      default: ''
+      hidden: true
+
+    - name: data
+      type: Data
+
+    - name: exportPath
+      title: Save Path
+      type: String
+      default: ""
+      hidden: true
+
+    - name: exportRequest
+      title: Pending Export Request
+      type: String
+      default: ""
+      hidden: true
+
+    - name: graphType
+      title: Graph Type
+      type: List
+      hidden: true
+      options:
+        - name: likertdiverging
+          title: Diverging Stacked
+        - name: likertstacked
+          title: Stacked 100%
+        - name: likertmeans
+          title: Item Means
+      default: likertdiverging
+
+    - name: items
+      title: Items
+      type: Variables
+      suggested:
+        - ordinal
+        - continuous
+      permitted:
+        - factor
+        - numeric
+
+    - name: likertCiLevel
+      title: Confidence Level
+      type: Number
+      default: 0.95
+      min: 0.5
+      max: 0.999
+      hidden: true
+
+    - name: styleLibrary
+      title: Saved Chart Style Library Action
+      type: String
+      default: ''
+      hidden: true
+
+    - name: styleStamp
+      title: Default Style Applied Stamp
+      type: Bool
+      default: false
+      hidden: true
+
+    - name: chartSpec
+      title: Chart spec (internal)
+      type: String
+      default: ''
+      hidden: true
+...

@@ -1,0 +1,194 @@
+---
+name:  distplotbuilder
+title: Distribution
+menuGroup: Pandion Plots
+menuSubgroup: Plots
+category: plots
+version: '0.0.1'
+jas: '1.2'
+
+description:
+    main: >
+        Examine the distribution of a single numeric variable. Draws
+        histograms, density curves, histogram plus density, box, violin, or
+        raincloud plots, Q-Q plots with confidence bands, and ECDF curves,
+        with optional normal-curve overlays, rug marks, and Shapiro-Wilk
+        normality tests. Group or facet to compare distributions side by
+        side.
+
+options:
+
+    - name: annotationsJson
+      title: Annotations (JSON)
+      type: String
+      default: ''
+      hidden: true
+
+    - name: chartSnapshot
+      title: Static chart snapshot (internal)
+      type: String
+      default: ''
+      hidden: true
+
+    - name: clientBundleHash
+      title: Client bundle hash (internal)
+      type: String
+      default: ''
+      hidden: true
+
+    - name: data
+      type: Data
+
+    - name: errorBarType
+      title: Error Bars
+      type: List
+      options:
+        - name: se
+          title: Standard Error
+        - name: sd
+          title: Standard Deviation
+        - name: ci95
+          title: 95% Confidence Interval
+        - name: ci99
+          title: 99% Confidence Interval
+        - name: none
+          title: None
+      default: se
+      hidden: true
+
+    - name: exportPath
+      title: Save Path
+      type: String
+      default: ""
+      hidden: true
+
+    - name: exportRequest
+      title: Pending Export Request
+      type: String
+      default: ""
+      hidden: true
+
+    - name: facetVar
+      title: Panels (optional)
+      type: Variable
+      suggested:
+        - nominal
+        - ordinal
+      permitted:
+        - factor
+
+    - name: graphType
+      title: Graph Type
+      type: List
+      hidden: true
+      options:
+        - name: histogram
+          title: Histogram
+        - name: density
+          title: Density Plot
+        - name: histdensity
+          title: Histogram + Density
+        - name: box
+          title: Box Plot
+        - name: violin
+          title: Violin Plot
+        - name: raincloud
+          title: Raincloud Plot
+        - name: qq
+          title: Q-Q Plot
+        - name: ecdf
+          title: ECDF Plot
+      default: histogram
+
+    - name: groupVar
+      title: Group By (optional)
+      type: Variable
+      suggested:
+        - nominal
+        - ordinal
+      permitted:
+        - factor
+
+    - name: histBins
+      title: Bins
+      type: Integer
+      default: 30
+      min: 1
+      max: 500
+      hidden: true
+
+    - name: histPosition
+      title: Grouped Histogram Position
+      type: List
+      options:
+        - name: overlay
+          title: Overlay
+        - name: stack
+          title: Stack
+        - name: dodge
+          title: Dodge
+      default: overlay
+      hidden: true
+
+    - name: histStat
+      title: Histogram Statistic
+      type: List
+      options:
+        - name: count
+          title: Count
+        - name: density
+          title: Density
+        - name: proportion
+          title: Proportion
+      default: count
+      hidden: true
+
+    - name: paletteLibrary
+      title: Saved Palette Library Action
+      type: String
+      default: ''
+      hidden: true
+
+    - name: showDataPoints
+      title: Show Individual Data Points
+      type: Bool
+      default: false
+      hidden: true
+
+    - name: styleLibrary
+      title: Saved Chart Style Library Action
+      type: String
+      default: ''
+      hidden: true
+
+    - name: styleStamp
+      title: Default Style Applied Stamp
+      type: Bool
+      default: false
+      hidden: true
+
+    - name: summaryFunc
+      title: Summary
+      type: List
+      options:
+        - name: mean
+          title: Mean
+        - name: median
+          title: Median
+      default: mean
+      hidden: true
+
+    - name: var
+      title: Variable
+      type: Variable
+      suggested:
+        - continuous
+      permitted:
+        - numeric
+
+    - name: chartSpec
+      title: Chart spec (internal)
+      type: String
+      default: ''
+      hidden: true
+...

@@ -1,0 +1,27 @@
+---
+name:  freqplotbuilder
+title: Frequencies
+jrs:   '1.1'
+
+items:
+    - name: widget
+      title: Frequencies
+      type: Svg
+      visible: true
+
+    - name: snapshotImage
+      title: Chart (static copy)
+      type: Image
+      width: 700
+      height: 450
+      renderFun: .renderSnapshot
+      clearWith:
+        - chartSnapshot
+      visible: false
+
+    - name: exportStatus
+      title: Export Status
+      type: Html
+      visible: true
+
+...

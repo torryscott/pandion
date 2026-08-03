@@ -1,0 +1,10 @@
+---
+name:  helpmechoose
+title: Help Me Choose
+jrs:   '1.1'
+
+items:
+    - name: widget
+      title: Help Me Choose
+      type: Html
+      visible: true

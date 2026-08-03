@@ -1,0 +1,127 @@
+---
+title: Pandion Plots
+name: pandion
+version: 3.0.0
+jms: '1.0'
+authors:
+  - Torry Scott Dennis, PhD
+maintainer: Torry Scott Dennis, PhD <tsdennis@smcm.edu>
+date: '2026-07-24'
+type: R
+description: >-
+  An interactive statistical graph-building module for jamovi with analyses for
+  distributions, categorical frequencies, between-subjects comparisons, repeated
+  measures, scatterplots, correlation matrices, and Likert survey items, plus a
+  chart-selection guide. Provides click-to-edit styling, module-aware
+  statistics, fuzzy setting search, accessibility checks, annotations, reusable
+  palettes and styles, and SVG, PDF, PNG, and JPG export.
+analyses:
+  - title: Distribution
+    name: distplotbuilder
+    ns: pandion
+    menuGroup: Pandion Plots
+    menuSubgroup: Plots
+    menuTitle: Distribution
+    category: plots
+    description: >
+      Examine the distribution of a single numeric variable. Draws histograms,
+      density curves, histogram plus density, box, violin, or raincloud plots,
+      Q-Q plots with confidence bands, and ECDF curves, with optional
+      normal-curve overlays, rug marks, and Shapiro-Wilk normality tests. Group
+      or facet to compare distributions side by side.
+  - title: Frequencies
+    name: freqplotbuilder
+    ns: pandion
+    menuGroup: Pandion Plots
+    menuSubgroup: Plots
+    menuTitle: Frequencies
+    category: plots
+    description: >
+      Summarize the counts or proportions of a categorical variable. Draws
+      side-by-side, stacked, or 100% stacked bar charts, pie or donut charts,
+      and Pareto charts, with percentage or count labels. The Statistics panel
+      reports chi-square tests, standardized residuals, proportion comparisons,
+      and counts. Group and facet to break the counts down further.
+  - title: Compare Groups
+    name: plotbuilder
+    ns: pandion
+    menuGroup: Pandion Plots
+    menuSubgroup: Plots
+    menuTitle: Compare Groups
+    category: plots
+    description: >
+      Compare a numeric outcome across the levels of a categorical variable.
+      Draws bar, line, dot, box, violin, or raincloud charts with mean or median
+      summaries and SE, SD, or confidence-interval error bars, plus optional
+      significance brackets. Add a second factor for grouped colors and a facet
+      variable for panels, then click any part of the chart to style it.
+  - title: Repeated Measures
+    name: rmplotbuilder
+    ns: pandion
+    menuGroup: Pandion Plots
+    menuSubgroup: Plots
+    menuTitle: Repeated Measures
+    category: plots
+    description: >
+      Plot a within-subjects (repeated measures) outcome recorded on the same
+      people across two or more occasions, supplied as separate columns in wide
+      format. Draws line, bar, dot, box, violin, or raincloud charts with
+      Cousineau-Morey within-subject error bars, optional per-subject lines and
+      points, paired comparisons, and supported repeated-measures or mixed
+      (split-plot) omnibus tests. Optional between-subject factors can group or
+      panel the design.
+  - title: Scatter
+    name: xyplotbuilder
+    ns: pandion
+    menuGroup: Pandion Plots
+    menuSubgroup: Plots
+    menuTitle: Scatter
+    category: plots
+    description: >
+      Show the relationship between two continuous variables as a scatter plot,
+      with optional linear, polynomial, or LOESS fit lines and confidence bands,
+      data ellipses, marginal distributions, and Pearson, Spearman, or Kendall
+      correlation statistics. Color by a grouping variable, add panels, or
+      switch to a binned tile heatmap for dense data.
+  - title: Correlation Matrix
+    name: corrplotbuilder
+    ns: pandion
+    menuGroup: Pandion Plots
+    menuSubgroup: Plots
+    menuTitle: Correlation Matrix
+    category: plots
+    description: >
+      Display the correlations among two or more numeric variables as a matrix,
+      using a heatmap, circles, numbers, or a mixed layout on a diverging color
+      scale. Reports r, p, and n for each pair (pairwise complete), with
+      significance stars, optional matrix-wide p-value adjustment, and control
+      over the triangle, diagonal, and nonsignificant cells.
+  - title: Likert / Survey
+    name: likertplotbuilder
+    ns: pandion
+    menuGroup: Pandion Plots
+    menuSubgroup: Plots
+    menuTitle: Likert / Survey
+    category: plots
+    description: >
+      Visualize a battery of rating-scale (Likert) items that share one response
+      scale. Draws diverging stacked bars centered on the neutral category, 100%
+      stacked bars, or item means with confidence intervals, with net-agreement
+      sorting, reverse-scoring for negatively worded items, and Cronbach's
+      alpha. Drag rows to reorder the questions.
+  - title: Help Me Choose
+    name: helpmechoose
+    ns: pandion
+    menuGroup: Pandion Plots
+    menuSubgroup: Guide
+    menuTitle: Help Me Choose
+    category: plots
+    description: >
+      A question-driven guide, not a chart, that recommends which Pandion Plots
+      analysis and graph type fit your goal, with a plain-language reason for
+      each. Answer a few questions, or drop in the exact variables you plan to
+      plot and it classifies them and suggests a best match plus an alternative.
+usesNative: true
+minApp: 2.7.32
+
+...

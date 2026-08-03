@@ -1,0 +1,18 @@
+Package: pandion
+Type: Package
+Title: Pandion Plots
+Version: 3.0.0
+Author: Torry Scott Dennis, PhD
+Maintainer: Torry Scott Dennis, PhD <tsdennis@smcm.edu>
+Description: An interactive statistical graph-building module for jamovi with
+    analyses for distributions, categorical frequencies, between-subjects
+    comparisons, repeated measures, scatterplots, correlation matrices, and
+    Likert survey items, plus a chart-selection guide. Provides click-to-edit
+    styling, module-aware statistics, fuzzy setting search, accessibility
+    checks, annotations, reusable palettes and styles, and SVG, PDF, PNG, and
+    JPG export.
+License: GPL-3
+Encoding: UTF-8
+LazyData: true
+Imports: jmvcore (>= 0.8.5), R6, htmltools, jsonlite
+Suggests: rsvg, MASS

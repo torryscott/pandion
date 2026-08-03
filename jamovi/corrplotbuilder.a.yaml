@@ -1,0 +1,112 @@
+---
+name:  corrplotbuilder
+title: Correlation Matrix
+menuGroup: Pandion Plots
+menuSubgroup: Plots
+category: plots
+version: '0.0.1'
+jas: '1.2'
+
+description:
+    main: >
+        Display the correlations among two or more numeric variables as a
+        matrix, using a heatmap, circles, numbers, or a mixed layout on a
+        diverging color scale. Reports r, p, and n for each pair (pairwise
+        complete), with significance stars, optional matrix-wide p-value
+        adjustment, and control over the triangle, diagonal, and
+        nonsignificant cells.
+
+options:
+
+    - name: annotationsJson
+      title: Annotations (JSON)
+      type: String
+      default: ''
+      hidden: true
+
+    - name: chartSnapshot
+      title: Static chart snapshot (internal)
+      type: String
+      default: ''
+      hidden: true
+
+    - name: clientBundleHash
+      title: Client bundle hash (internal)
+      type: String
+      default: ''
+      hidden: true
+
+    # Correlation method moved from the native left panel into the on-chart
+    # Matrix-cells panel's Values tab (Jul 10 2026, Torry) - hidden so tame
+    # compilerMode does not auto-surface it. Still a REAL (non-chartSpec)
+    # option: it is data-shaping (feeds the aggCache signature / cor.test).
+    - name: corrMethod
+      title: Correlation
+      type: List
+      hidden: true
+      options:
+        - name: pearson
+          title: Pearson
+        - name: spearman
+          title: Spearman
+        - name: kendall
+          title: Kendall
+      default: pearson
+
+    - name: data
+      type: Data
+
+    - name: exportPath
+      title: Save Path
+      type: String
+      default: ""
+      hidden: true
+
+    - name: exportRequest
+      title: Pending Export Request
+      type: String
+      default: ""
+      hidden: true
+
+    - name: graphType
+      title: Graph Type
+      type: List
+      hidden: true
+      options:
+        - name: corrheatmap
+          title: Heatmap
+        - name: corrcircles
+          title: Circles
+        - name: corrnumbers
+          title: Numbers
+        - name: corrmixed
+          title: Mixed
+      default: corrheatmap
+
+    - name: styleLibrary
+      title: Saved Chart Style Library Action
+      type: String
+      default: ''
+      hidden: true
+
+    - name: styleStamp
+      title: Default Style Applied Stamp
+      type: Bool
+      default: false
+      hidden: true
+
+    - name: vars
+      title: Variables
+      type: Variables
+      suggested:
+        - continuous
+        - ordinal
+      permitted:
+        - numeric
+
+    - name: chartSpec
+      title: Chart spec (internal)
+      type: String
+      default: ''
+      hidden: true
+...

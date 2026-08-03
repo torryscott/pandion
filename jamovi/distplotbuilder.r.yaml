@@ -1,0 +1,40 @@
+---
+name:  distplotbuilder
+title: Distribution
+jrs:   '1.1'
+
+items:
+    - name: widget
+      title: Distribution
+      type: Svg
+      visible: true
+
+    # Native static copy of the chart (Jul 2026 PROTOTYPE, Distribution
+    # first): the JS-committed chartSnapshot SVG rasterized through
+    # jamovi's own Image machinery, so jamovi's NATIVE export paths
+    # (HTML/PDF, right-click save/copy) and module-less display of a
+    # saved .omv carry the picture - the exporter reduces Html results
+    # to text + links, so no embedded markup can ever reach an export.
+    # Runtime-revealed only when a snapshot exists; the live widget
+    # hides it on screen (the visible-by-default fallback's inverse).
+    - name: snapshotImage
+      title: Chart (static copy)
+      type: Image
+      width: 700
+      height: 450
+      renderFun: .renderSnapshot
+      clearWith:
+        - chartSnapshot
+      visible: false
+
+    # The numbers behind the chart: one row per plotted cell (group x
+    # facet; ungrouped and unfaceted charts get a single row), populated
+    # from the same per-cell raw values the widget renders. Group/facet
+    # columns are revealed at runtime when those roles are assigned.
+
+    - name: exportStatus
+      title: Export Status
+      type: Html
+      visible: true
+
+...

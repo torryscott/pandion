@@ -1,0 +1,165 @@
+---
+name:  plotbuilder
+title: Compare Groups
+menuGroup: Pandion Plots
+menuSubgroup: Plots
+category: plots
+version: '0.0.1'
+jas: '1.2'
+
+description:
+    main: >
+        Compare a numeric outcome across the levels of a categorical
+        variable. Draws bar, line, dot, box, violin, or raincloud charts
+        with mean or median summaries and SE, SD, or confidence-interval
+        error bars, plus optional significance brackets. Add a second factor
+        for grouped colors and a facet variable for panels, then click any
+        part of the chart to style it.
+
+options:
+
+    - name: data
+      type: Data
+
+    - name: xvar
+      title: X-Axis Variable
+      type: Variable
+      suggested:
+        - nominal
+        - ordinal
+      permitted:
+        - factor
+
+    - name: yvar
+      title: Y-Axis Variable
+      type: Variable
+      suggested:
+        - continuous
+      permitted:
+        - numeric
+
+    - name: groupVar
+      title: Group By (optional)
+      type: Variable
+      suggested:
+        - nominal
+        - ordinal
+      permitted:
+        - factor
+
+    - name: facetVar
+      title: Panels (optional)
+      type: Variable
+      suggested:
+        - nominal
+        - ordinal
+      permitted:
+        - factor
+
+    - name: graphType
+      title: Graph Type
+      type: List
+      hidden: true
+      options:
+        - name: bar
+          title: Bar Graph
+        - name: line
+          title: Line Plot
+        - name: dot
+          title: Dot Plot
+        - name: box
+          title: Box Plot
+        - name: violin
+          title: Violin Plot
+        - name: raincloud
+          title: Raincloud Plot
+      default: bar
+
+    - name: summaryFunc
+      title: Summary
+      type: List
+      hidden: true
+      options:
+        - name: mean
+          title: Mean
+        - name: median
+          title: Median
+      default: mean
+
+    - name: errorBarType
+      title: Error Bars
+      type: List
+      hidden: true
+      options:
+        - name: se
+          title: Standard Error
+        - name: sd
+          title: Standard Deviation
+        - name: ci95
+          title: 95% Confidence Interval
+        - name: ci99
+          title: 99% Confidence Interval
+        - name: none
+          title: None
+      default: se
+
+    - name: showDataPoints
+      title: Show Individual Data Points
+      type: Bool
+      default: false
+      hidden: true
+
+    - name: exportRequest
+      title: Pending Export Request
+      type: String
+      default: ""
+      hidden: true
+
+    - name: exportPath
+      title: Save Path
+      type: String
+      default: ""
+      hidden: true
+
+    - name: chartSnapshot
+      title: Static chart snapshot (internal)
+      type: String
+      default: ''
+      hidden: true
+
+    - name: clientBundleHash
+      title: Client bundle hash (internal)
+      type: String
+      default: ''
+      hidden: true
+
+    - name: paletteLibrary
+      title: Saved Palette Library Action
+      type: String
+      default: ''
+      hidden: true
+
+    - name: styleLibrary
+      title: Saved Chart Style Library Action
+      type: String
+      default: ''
+      hidden: true
+
+    - name: styleStamp
+      title: Default Style Applied Stamp
+      type: Bool
+      default: false
+      hidden: true
+
+    - name: annotationsJson
+      title: Annotations (JSON)
+      type: String
+      default: ''
+      hidden: true
+
+    - name: chartSpec
+      title: Chart spec (internal)
+      type: String
+      default: ''
+      hidden: true
+...

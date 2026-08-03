@@ -1,0 +1,179 @@
+---
+name:  freqplotbuilder
+title: Frequencies
+menuGroup: Pandion Plots
+menuSubgroup: Plots
+category: plots
+version: '0.0.1'
+jas: '1.2'
+
+description:
+    main: >
+        Summarize the counts or proportions of a categorical variable. Draws
+        side-by-side, stacked, or 100% stacked bar charts, pie or donut
+        charts, and Pareto charts, with percentage or count labels. The
+        Statistics panel reports chi-square tests, standardized residuals,
+        proportion comparisons, and counts. Group and facet to break the
+        counts down further.
+
+options:
+
+    - name: annotationsJson
+      title: Annotations (JSON)
+      type: String
+      default: ''
+      hidden: true
+
+    - name: chartSnapshot
+      title: Static chart snapshot (internal)
+      type: String
+      default: ''
+      hidden: true
+
+    - name: clientBundleHash
+      title: Client bundle hash (internal)
+      type: String
+      default: ''
+      hidden: true
+
+    - name: data
+      type: Data
+
+    - name: errorBarType
+      title: Error Bars
+      type: List
+      options:
+        - name: se
+          title: Standard Error
+        - name: sd
+          title: Standard Deviation
+        - name: ci95
+          title: 95% Confidence Interval
+        - name: ci99
+          title: 99% Confidence Interval
+        - name: none
+          title: None
+      default: se
+      hidden: true
+
+    - name: exportPath
+      title: Save Path
+      type: String
+      default: ""
+      hidden: true
+
+    - name: exportRequest
+      title: Pending Export Request
+      type: String
+      default: ""
+      hidden: true
+
+    - name: facetVar
+      title: Panels (optional)
+      type: Variable
+      suggested:
+        - nominal
+        - ordinal
+      permitted:
+        - factor
+
+    - name: freqPosition
+      title: Bar Arrangement
+      type: List
+      hidden: true
+      options:
+        - name: dodge
+          title: Side by Side
+        - name: stack
+          title: Stacked
+        - name: fill
+          title: Stacked 100%
+      default: dodge
+
+    - name: freqStat
+      title: Statistic
+      type: List
+      hidden: true
+      options:
+        - name: count
+          title: Count
+        - name: percent
+          title: Percent
+        - name: proportion
+          title: Proportion
+      default: count
+
+    - name: graphType
+      title: Graph Type
+      type: List
+      hidden: true
+      options:
+        - name: bar
+          title: Bar Graph
+        - name: pie
+          title: Pie Chart
+        - name: donut
+          title: Donut Chart
+        - name: pareto
+          title: Pareto Chart
+      default: bar
+
+    - name: groupVar
+      title: Group By (optional)
+      type: Variable
+      suggested:
+        - nominal
+        - ordinal
+      permitted:
+        - factor
+
+    - name: paletteLibrary
+      title: Saved Palette Library Action
+      type: String
+      default: ''
+      hidden: true
+
+    - name: showDataPoints
+      title: Show Individual Data Points
+      type: Bool
+      default: false
+      hidden: true
+
+    - name: styleLibrary
+      title: Saved Chart Style Library Action
+      type: String
+      default: ''
+      hidden: true
+
+    - name: styleStamp
+      title: Default Style Applied Stamp
+      type: Bool
+      default: false
+      hidden: true
+
+    - name: summaryFunc
+      title: Summary
+      type: List
+      options:
+        - name: mean
+          title: Mean
+        - name: median
+          title: Median
+      default: mean
+      hidden: true
+
+    - name: var
+      title: Variable
+      type: Variable
+      suggested:
+        - nominal
+        - ordinal
+      permitted:
+        - factor
+
+    - name: chartSpec
+      title: Chart spec (internal)
+      type: String
+      default: ''
+      hidden: true
+...

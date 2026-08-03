@@ -1,0 +1,210 @@
+---
+name:  rmplotbuilder
+title: Repeated Measures
+menuGroup: Pandion Plots
+menuSubgroup: Plots
+category: plots
+version: '0.0.1'
+jas: '1.2'
+
+description:
+    main: >
+        Plot a within-subjects (repeated measures) outcome recorded on the
+        same people across two or more occasions, supplied as separate
+        columns in wide format. Draws line, bar, dot, box, violin, or
+        raincloud charts with Cousineau-Morey within-subject error bars,
+        optional per-subject lines and points, paired comparisons, and
+        supported repeated-measures or mixed (split-plot) omnibus tests.
+        Optional between-subject factors can group or panel the design.
+
+options:
+
+    - name: annotationsJson
+      title: Annotations (JSON)
+      type: String
+      default: ''
+      hidden: true
+
+    - name: betweenVar
+      title: Between-Subjects Factor (optional)
+      type: Variable
+      hidden: true
+      suggested:
+        - nominal
+        - ordinal
+      permitted:
+        - factor
+
+    - name: bs
+      title: Between Subject Factors
+      type: Variables
+      suggested:
+        - nominal
+        - ordinal
+      permitted:
+        - factor
+
+    - name: chartSnapshot
+      title: Static chart snapshot (internal)
+      type: String
+      default: ''
+      hidden: true
+
+    - name: clientBundleHash
+      title: Client bundle hash (internal)
+      type: String
+      default: ''
+      hidden: true
+
+    - name: connectSubjects
+      title: Connect Subjects (Spaghetti Plot)
+      type: Bool
+      default: false
+      hidden: true
+
+    - name: data
+      type: Data
+
+    - name: displayRoles
+      title: Display Roles (JSON)
+      type: String
+      default: ''
+      hidden: true
+
+    - name: errorBarMethod
+      title: Error Bar Method
+      type: List
+      hidden: true
+      options:
+        - name: within
+          title: Within-Subjects (Cousineau-Morey)
+        - name: between
+          title: Between-Subjects (uncorrected)
+      default: within
+
+    - name: errorBarType
+      title: Error Bars
+      type: List
+      hidden: true
+      options:
+        - name: se
+          title: Standard Error
+        - name: sd
+          title: Standard Deviation
+        - name: ci95
+          title: 95% Confidence Interval
+        - name: ci99
+          title: 99% Confidence Interval
+        - name: none
+          title: None
+      default: se
+
+    - name: exportPath
+      title: Save Path
+      type: String
+      default: ""
+      hidden: true
+
+    - name: exportRequest
+      title: Pending Export Request
+      type: String
+      default: ""
+      hidden: true
+
+    - name: graphType
+      title: Graph Type
+      type: List
+      hidden: true
+      options:
+        - name: bar
+          title: Bar Graph
+        - name: line
+          title: Line Plot
+        - name: dot
+          title: Dot Plot
+        - name: box
+          title: Box Plot
+        - name: violin
+          title: Violin Plot
+        - name: raincloud
+          title: Raincloud Plot
+      default: line
+
+    - name: measures
+      title: Repeated Measures
+      type: Variables
+      hidden: true
+      suggested:
+        - continuous
+      permitted:
+        - numeric
+
+    - name: paletteLibrary
+      title: Saved Palette Library Action
+      type: String
+      default: ''
+      hidden: true
+
+    - name: rm
+      title: Repeated Measures Factors
+      type: Array
+      default:
+      template:
+        type: Group
+        elements:
+          - name: label
+            type: String
+          - name: levels
+            type: Array
+            template:
+              type: String
+
+    - name: rmCells
+      title: Repeated Measures Cells
+      type: Array
+      default:
+      template:
+        type: Group
+        elements:
+          - name: measure
+            type: Variable
+          - name: cell
+            type: Array
+            template:
+              type: String
+
+    - name: showDataPoints
+      title: Show Individual Data Points
+      type: Bool
+      default: false
+      hidden: true
+
+    - name: styleLibrary
+      title: Saved Chart Style Library Action
+      type: String
+      default: ''
+      hidden: true
+
+    - name: styleStamp
+      title: Default Style Applied Stamp
+      type: Bool
+      default: false
+      hidden: true
+
+    - name: summaryFunc
+      title: Summary
+      type: List
+      hidden: true
+      options:
+        - name: mean
+          title: Mean
+        - name: median
+          title: Median
+      default: mean
+
+    - name: chartSpec
+      title: Chart spec (internal)
+      type: String
+      default: ''
+      hidden: true
+...

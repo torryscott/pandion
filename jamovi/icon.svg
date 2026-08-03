@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Background -->
+  <rect width="32" height="32" rx="4" fill="#376095"/>
+
+  <!-- Bars -->
+  <rect x="5" y="18" width="5" height="9" rx="0.5" fill="#A8C4E0"/>
+  <rect x="13" y="12" width="5" height="15" rx="0.5" fill="#7BACD4"/>
+  <rect x="21" y="8" width="5" height="19" rx="0.5" fill="#5692C4"/>
+
+  <!-- Line overlay -->
+  <polyline points="7.5,15 15.5,9 23.5,11"
+            fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Data points on line -->
+  <circle cx="7.5" cy="15" r="2" fill="#FFFFFF"/>
+  <circle cx="15.5" cy="9" r="2" fill="#FFFFFF"/>
+  <circle cx="23.5" cy="11" r="2" fill="#FFFFFF"/>
+</svg>

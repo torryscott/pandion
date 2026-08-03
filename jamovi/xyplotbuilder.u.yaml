@@ -1,0 +1,46 @@
+title: Scatter
+name: xyplotbuilder
+jus: '3.0'
+stage: 0
+children:
+  - type: VariableSupplier
+    persistentItems: false
+    stretchFactor: 1
+    children:
+      - type: TargetLayoutBox
+        label: X Variable
+        children:
+          - type: VariablesListBox
+            name: xvar
+            maxItemCount: 1
+            isTarget: true
+      - type: TargetLayoutBox
+        label: Y Variable
+        children:
+          - type: VariablesListBox
+            name: yvar
+            maxItemCount: 1
+            isTarget: true
+      - type: TargetLayoutBox
+        label: Group By (optional)
+        children:
+          - type: VariablesListBox
+            name: groupVar
+            maxItemCount: 1
+            isTarget: true
+      - type: TargetLayoutBox
+        label: Panels (optional)
+        children:
+          - type: VariablesListBox
+            name: facetVar
+            maxItemCount: 1
+            isTarget: true
+  # The variables are the panel's only job: everything else lives on the
+  # chart (the guidance box was removed suite-wide Jul 2026 per Torry -
+  # an empty panel says "look right" on its own). The data-tip Label
+  # below is restyled muted italic by jamovi/js/xyplotbuilder.js (shared
+  # gbPanelTip helper); its TIP_TEXT must match this string exactly.
+  - type: Label
+    margin: small
+    label: 'Both variables numeric. Every row of your data becomes one point.'
+compilerMode: tame

@@ -1,0 +1,26 @@
+title: Correlation Matrix
+name: corrplotbuilder
+jus: '3.0'
+stage: 0
+children:
+  - type: VariableSupplier
+    persistentItems: false
+    stretchFactor: 1
+    children:
+      - type: TargetLayoutBox
+        label: Variables
+        children:
+          - type: VariablesListBox
+            name: vars
+            isTarget: true
+  # The variables are the panel's only job: everything else lives on the
+  # chart (the guidance box was removed suite-wide Jul 2026 per Torry -
+  # an empty panel says "look right" on its own). corrMethod stays
+  # ON-CHART (Matrix-cells panel > Values tab); hidden in a.yaml. The
+  # data-tip Label below is restyled muted italic by
+  # jamovi/js/corrplotbuilder.js (shared gbPanelTip helper); its
+  # TIP_TEXT must match this string exactly.
+  - type: Label
+    margin: small
+    label: 'Two or more numeric variables: different measures, not conditions.'
+compilerMode: tame

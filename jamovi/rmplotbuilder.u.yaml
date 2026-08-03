@@ -1,0 +1,62 @@
+title: Repeated Measures
+name: rmplotbuilder
+jus: '3.0'
+stage: 0
+children:
+  - type: VariableSupplier
+    persistentItems: false
+    stretchFactor: 1
+    children:
+      # Define named within-subjects factors + their levels; the cells grid
+      # below auto-generates one drop target per factorial cell (wired by
+      # jamovi/js/rmplotbuilder.js). A single within factor = one factor
+      # with N levels. (The old single-box `measures` input was retired
+      # here so there is exactly one way to declare a design; it survives
+      # hidden in the a.yaml only so old saved files still open.)
+      - type: RMAnovaFactorsBox
+        name: rm
+        label: Repeated Measures Factors
+      - type: TargetLayoutBox
+        label: Repeated Measures Cells
+        children:
+          - type: ListBox
+            name: rmCells
+            height: large
+            templateName: rmcell-template
+            template:
+              type: LayoutBox
+              targetArea: true
+              children:
+                - type: VariablesListBox
+                  fullRowSelect: true
+                  maxItemCount: 1
+                  isTarget: true
+                  valueKey:
+                    - measure
+                  ghostText: drag variable here
+                - type: Label
+                  format: ./rmacell
+                  valueKey:
+                    - cell
+                  margin: normal
+                  stretchFactor: 1
+                  horizontalAlignment: right
+      - type: TargetLayoutBox
+        label: Between Subject Factors
+        children:
+          - type: VariablesListBox
+            name: bs
+            height: small
+            itemDropBehaviour: insert
+            isTarget: true
+  # The variables are the panel's only job: everything else lives on the
+  # chart (the guidance box was removed suite-wide Jul 2026 per Torry -
+  # an empty panel says "look right" on its own). Summary + Error Bars +
+  # Error Method stay ON-CHART; their options are hidden in a.yaml (tame
+  # mode would auto-surface them). The data-tip Label below is restyled
+  # muted italic by jamovi/js/rmplotbuilder.js (shared gbPanelTip
+  # helper); its TIP_TEXT must match this string exactly.
+  - type: Label
+    margin: small
+    label: 'Wide format: one column per measurement occasion, one row per subject.'
+compilerMode: tame

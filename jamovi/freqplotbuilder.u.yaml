@@ -1,0 +1,41 @@
+title: Frequencies
+name: freqplotbuilder
+jus: '3.0'
+stage: 0
+children:
+  - type: VariableSupplier
+    persistentItems: false
+    stretchFactor: 1
+    children:
+      - type: TargetLayoutBox
+        label: Variable
+        children:
+          - type: VariablesListBox
+            name: var
+            maxItemCount: 1
+            isTarget: true
+      - type: TargetLayoutBox
+        label: Group By (optional)
+        children:
+          - type: VariablesListBox
+            name: groupVar
+            maxItemCount: 1
+            isTarget: true
+      - type: TargetLayoutBox
+        label: Panels (optional)
+        children:
+          - type: VariablesListBox
+            name: facetVar
+            maxItemCount: 1
+            isTarget: true
+  # The variables are the panel's only job: everything else lives on the
+  # chart (the guidance box was removed suite-wide Jul 2026 per Torry -
+  # an empty panel says "look right" on its own). Statistic + Bar
+  # Arrangement stay ON-CHART; their options are hidden in a.yaml (tame
+  # mode would auto-surface them). The data-tip Label below is restyled
+  # muted italic by jamovi/js/freqplotbuilder.js (shared gbPanelTip
+  # helper); its TIP_TEXT must match this string exactly.
+  - type: Label
+    margin: small
+    label: 'One row per observation, not pre-tabulated counts.'
+compilerMode: tame
