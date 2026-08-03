@@ -10340,7 +10340,7 @@
         sizeTag.style.cssText = "position:absolute;z-index:3;pointer-events:none;" +
             "font:11px/1.5 monospace;color:#333;background:rgba(255,255,255,0.92);" +
             "border:1px solid #c9d4e0;border-radius:3px;padding:2px 7px;" +
-            "opacity:0;transition:opacity 150ms ease;white-space:pre;text-align:center;";
+            "opacity:0;transition:opacity 150ms ease;white-space:pre;text-align:left;";
         wrap.appendChild(sizeTag);
         var sizeTagHide = null;
 
