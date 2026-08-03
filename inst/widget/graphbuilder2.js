@@ -26400,6 +26400,9 @@
                 b.style.background  = on ? "#e8f0fb" : "white";
                 b.style.color       = on ? "#1a5fb4" : "#333";
             }
+            // every size-changing path in this panel refreshes the preset
+            // highlights, so the px-equivalence line rides the same train
+            _gbSyncPlotPxNote();
         }
         function _wireAspectPresets(scope) {
             if (!scope) return;
@@ -69685,6 +69688,19 @@
                         '<span style="color:#666;font-size:11px;">h</span>' +
                       '</span>' +
                     '</div>' +
+                    // Pixel equivalence (Aug 2026, Torry): inches stay the
+                    // canonical unit (what plotWidth/plotHeight store and
+                    // what journals ask for); the on-screen pixel size (CSS
+                    // px at 96/in, the same figure jamovi's plots and the
+                    // drag readout report) rides along as a live,
+                    // display-only line. Export DPI is the export panel's
+                    // business, hence "on screen".
+                    '<div style="' + _row + '">' +
+                      '<label style="' + _lbl + '"></label>' +
+                      '<span data-field="plot-px-note" style="color:#888;font-size:11px;">= ' +
+                        Math.round(inchesW * PX_PER_INCH) + ' x ' +
+                        Math.round(inchesH * PX_PER_INCH) + ' px on screen</span>' +
+                    '</div>' +
                     // Aspect-ratio presets: one click sets a common figure
                     // ratio (keeps the current width, derives the height).
                     '<div style="' + _row + '">' +
@@ -98882,6 +98898,18 @@
                 if (pw) pw.value = (+inchesW).toFixed(2).replace(/\.?0+$/, "");
                 if (ph) ph.value = (+inchesH).toFixed(2).replace(/\.?0+$/, "");
             } catch (_e) {}
+            _gbSyncPlotPxNote();
+        }
+        // Display-only pixel equivalence for the Sizing tab (CSS px at
+        // 96/in - what "on screen" means and what jamovi reports; export
+        // DPI is the export panel's business). No option, no persistence.
+        function _gbSyncPlotPxNote() {
+            try {
+                if (!inspectorPanel) return;
+                var n = inspectorPanel.querySelector('[data-field="plot-px-note"]');
+                if (n) n.textContent = "= " + Math.round(inchesW * PX_PER_INCH) + " x " +
+                    Math.round(inchesH * PX_PER_INCH) + " px on screen";
+            } catch (_e) {}
         }
 
         // --- Corner drag (width + height) --------------------------------
@@ -98895,8 +98923,13 @@
         var startRatioXY = 0; // inchesH / inchesW captured at drag start
         function _sizeTagShow() {
             if (sizeTagHide) { clearTimeout(sizeTagHide); sizeTagHide = null; }
+            // px first (matches jamovi and the 10 px snap), inches second
+            // at the same 2 dp the release commits, so readout, panel and
+            // saved option can never disagree
+            var _fin = function (v) { return (+v).toFixed(2).replace(/\.?0+$/, ""); };
             sizeTag.textContent = Math.round(inchesW * PX_PER_INCH) + " x " +
-                Math.round(inchesH * PX_PER_INCH) + " px";
+                Math.round(inchesH * PX_PER_INCH) + " px \u00b7 " +
+                _fin(inchesW) + " x " + _fin(inchesH) + " in";
             sizeTag.style.opacity = "1";
         }
         function _sizeTagFade() {
