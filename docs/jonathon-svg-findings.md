@@ -1,47 +1,43 @@
-# Reply 2 to Jonathon, after his three fixes
+# Reply 3 to Jonathon, closing the svg element loop
 
-Final version, ready to send. Incorporates Torry's edits (his voice: "Thanks for doing
-that", "3 works too", "right away") plus two fixes from the review pass: the doubled
-"export ... exported files" wording, and the "bug or a feature" line, which invited
-Jonathon to weigh in on a call that is Torry's to make. The exported file carries no
-indication the colors are simulated (the "previewing" badge deliberately does not
-export), which is why the heads-up stays but the framing is "mine to sort out".
+Sent Aug 3 2026. Confirms the interface is settled on his class-first selector, with
+a hidden sanitized copy wearing jmv-results-svg-content so the live chart keeps its
+editing chrome. Points him at the svg-element-prototype branch, and hands Damo two
+notes for a future jamovi-side resize handle (keying on the class would grab the
+hidden copy rather than the visible chart, and svg width/height ownership needs
+settling first since the engine rewrites both during drags). The corner resize
+handle shipped module-side, so nothing here waits on jamovi.
 
-All claims verified against the code Jul 31 2026: the 36-target hover probe backs the
-"all clean" sentence, the CVD bake was reproduced directly (deuteranopia hexes in the
-clone), the under-data chrome group is real and populated by default, and the shadow
-patches querySelector only, matching exactly `svg` and `svg.jmv-results-svg-content`.
+All claims checked against the pushed branch before sending. The container probe
+(20/20) covers fresh create, harvest through the real getcontent channel landing on
+the chrome-free twin, and save/reopen; the gesture probe (26/26) covers the corner
+handle; the placeholder wrap probe passed against the live container the same day.
 
 ---
 
 Hi Jonathon,
 
-Thanks, that was fast. Pulled all three and rebuilt.
+Yeah, I think that's it. Everything is working end to end on your
+branch now. Copy/paste works, and svg and png exports come out
+beautifully.
 
-1 and 4 both work. Reopening a saved file gives me a live clickable chart right away, with
-the stored svg sitting there as the module-less fallback. 4 is better than what I
-suggested. Thanks for doing that.
+Since your selector is class-first, I ended up parking a hidden
+sanitized copy wearing jmv-results-svg-content rather than literally
+stacking three svgs, so the live chart keeps its editing chrome and
+your svg harvest gets the clean copy. If you want to poke
+at it, the adapted module is on the svg-element-prototype branch of
+my repo.
 
-3 works too. Saving, SVG export, PNG export and Copy are all clean now, even with a bar
-selected or hovered. Nothing left for you there. One related case is still open on my
-side, in case you trip over it while testing: switch on my color-blindness preview and the
-exported file carries the simulated colors. Mine to sort out.
+As for the resize handle, no rush on my account. I went ahead and
+built a corner handle into the chart itself, so nothing on my side is
+waiting (I already had separate drag handles for width and height, so
+it was easy to swap them for the corner handle). If Damo does pick it
+up, two small things worth knowing. Keying it on
+svg.jmv-results-svg-content would grab my hidden copy rather than the
+visible chart, and it would be good to sort out who owns the svg's
+width and height before he starts, since my engine rewrites those
+during drags. Happy to work on whatever makes the most sense to you.
 
-2 is the one I need from you. Two stacked svgs is the better call, go with that rather
-than a hook. On my side that looks like re-parenting my chrome groups rather than a
-rewrite, so I don't think I'd be the bottleneck. Two questions before you settle the
-design:
+Thanks again for the quick turnarounds on this.
 
-* Can it be two overlays, one under the chart and one over? Some of my selection chrome is
-  ordered behind the data, so halos for scatter points and fit lines draw underneath them.
-  If it's class-driven I'd stack three svgs and mark only the middle one.
-
-* What selector does the harvest key on, and does it ever use querySelectorAll? I'm
-  shadowing querySelector on jmv-results-svg to hand it a sanitized clone, and anything my
-  shadow doesn't match falls through to the live chart with the editing chrome still on
-  it. Happy to keep the shadow until I ship a clean bottom svg, if that suits you.
-
-viewBox: mine, ignore it. I shouldn't have raised it.
-
-Thanks again,
 Torry
