@@ -8134,7 +8134,7 @@
             if (elBottom + BUFFER > H) newH = Math.min(_AUTO_EXPAND_MAX_H, elBottom + BUFFER);
             if (newW !== W) {
                 svg.setAttribute("width", newW);
-                try { svg.__gb2_expectedW = newW; } catch (_eXw) {}
+                try { svg.__gb2_expectedW = newW; svg.__gb2_sizeWriteAt = Date.now(); } catch (_eXw) {}
                 if (typeof inspectorPanel !== "undefined" && inspectorPanel &&
                     typeof _syncInspectorPanelGeometry === "function") {
                     _syncInspectorPanelGeometry();
@@ -8142,7 +8142,7 @@
             }
             if (newH !== H) {
                 svg.setAttribute("height", newH);
-                try { svg.__gb2_expectedH = newH; } catch (_eXh) {}
+                try { svg.__gb2_expectedH = newH; svg.__gb2_sizeWriteAt = Date.now(); } catch (_eXh) {}
             }
             // Left: extend bgDiv leftward. (Same approach as before -
             // the SVG's coord origin can't shift without rewiring
@@ -8186,7 +8186,7 @@
                     // bars/axes don't get clipped at the bottom.
                     var grownH = (newH !== H ? newH : H) + deltaGrow;
                     svg.setAttribute("height", grownH);
-                    try { svg.__gb2_expectedH = grownH; } catch (_eXg) {}
+                    try { svg.__gb2_expectedH = grownH; svg.__gb2_sizeWriteAt = Date.now(); } catch (_eXg) {}
                     grew = true;
                 }
             }
@@ -10864,6 +10864,7 @@
                     window.__gb2_extResizeRO = null;
                 }
                 var _xrPend = null;
+                var _xrActive = false;
                 var _xrRaf = false;
                 var _xrTimer = null;
                 function _xrFollow() {
@@ -10872,6 +10873,7 @@
                     // this through redraw() - redraw does not re-apply
                     // size, and its canvas auto-grow tail turned every
                     // follow into an ever-growing-height feedback loop.
+                    if (!svg || !svg.isConnected) { _xrPend = null; _xrActive = false; return; }
                     if (!_xrPend) return;
                     var _exb = svg.__gb2_extraBottomPx || 0;
                     inchesW = Math.min(40, Math.max(1, _xrPend.w / PX_PER_INCH));
@@ -10882,13 +10884,24 @@
                     try { _gbResizeSyncInputs(); } catch (_eXr1) {}
                 }
                 function _xrCommit() {
-                    // endDragXY's release body: round to the 2 dp inch
-                    // commit and persist through the normal pipeline
+                    // endDragXY's release body, but rounded from the HOST's
+                    // dragged size (_xrPend), never from ambient inchesW: an
+                    // engine settle write (the column-width derivation on a
+                    // fresh unset-size chart) can land between follow and
+                    // commit and replace inches with its own number - the
+                    // container probe caught the observer persisting that.
+                    if (!svg || !svg.isConnected) { _xrPend = null; _xrActive = false; return; }
                     if (!_xrPend) return;
+                    var _exb2 = svg.__gb2_extraBottomPx || 0;
+                    var _wIn = Math.min(40, Math.max(1, _xrPend.w / PX_PER_INCH));
+                    var _hIn = Math.min(40, Math.max(1, (_xrPend.h - _exb2) / PX_PER_INCH));
                     _xrFollow();
                     _xrPend = null;
-                    data.plotWidth = Math.round(inchesW * 100) / 100;
-                    data.plotHeight = Math.round(inchesH * 100) / 100;
+                    _xrActive = false;
+                    data.plotWidth = Math.round(_wIn * 100) / 100;
+                    data.plotHeight = Math.round(_hIn * 100) / 100;
+                    inchesW = data.plotWidth;
+                    inchesH = data.plotHeight;
                     if (hasSetOption) {
                         try { _setOption("plotWidth", data.plotWidth); } catch (_eXr2) {}
                         try { _setOption("plotHeight", data.plotHeight); } catch (_eXr3) {}
@@ -10899,13 +10912,35 @@
                         if (!svg || !svg.isConnected) return;
                         if (window.__gb2_widgetPointerDown) return;
                         if (typeof draggingXY !== "undefined" && draggingXY) return;
-                        var en = entries[entries.length - 1];
-                        var rw = en && en.contentRect ? en.contentRect.width : 0;
-                        var rh = en && en.contentRect ? en.contentRect.height : 0;
+                        // Measure ATTRIBUTES at CALLBACK time, never the
+                        // event snapshot and never layout rects: observer
+                        // events arrive async (a stale one used to read as
+                        // external and commit the engine's own transient
+                        // size), and the results column CSS can CLAMP the
+                        // layout rect below the attribute (container probe:
+                        // rect 584 on a 696 attr, so a rect-based follow
+                        // "followed" the column clamp instead of the drag).
+                        // The handle contract is attribute writes on the
+                        // marked svg; current attrs vs current expectation
+                        // is self-consistent by construction.
+                        var rw = parseFloat(svg.getAttribute("width"));
+                        var rh = parseFloat(svg.getAttribute("height"));
+                        if (!isFinite(rw) || !isFinite(rh)) return;
                         if (!(rw > 0 && rh > 0)) return;
                         var ew = svg.__gb2_expectedW, eh = svg.__gb2_expectedH;
                         if (typeof ew !== "number" || typeof eh !== "number") return;
                         if (Math.abs(rw - ew) < 1 && Math.abs(rh - eh) < 1) return;
+                        // A NEW external session only arms after the engine
+                        // has been size-quiet for 350ms (internal writes
+                        // cluster around renders/redraws; a real host drag
+                        // happens in calm water). An armed session streams
+                        // follow events freely - its own applySize writes
+                        // would otherwise re-close the window per move.
+                        if (!_xrActive) {
+                            var _lw = svg.__gb2_sizeWriteAt || 0;
+                            if (Date.now() - _lw < 350) return;
+                            _xrActive = true;
+                        }
                         _xrPend = { w: rw, h: rh };
                         if (!_xrRaf) {
                             _xrRaf = true;
@@ -28062,6 +28097,7 @@
                 svg.__gb2_expectedW = W;
                 svg.__gb2_expectedH = H;
                 svg.__gb2_extraBottomPx = (M.extraBottomPx || 0);
+                svg.__gb2_sizeWriteAt = Date.now();
             } catch (_eXsz) {}
             // wrap is display:block now (was inline-block), so its
             // width has to be set explicitly to match the SVG -
@@ -29649,6 +29685,7 @@
                             svg.__gb2_expectedH =
                                 inchesH * PX_PER_INCH + (M.extraBottomPx || 0);
                             svg.__gb2_extraBottomPx = (M.extraBottomPx || 0);
+                            svg.__gb2_sizeWriteAt = Date.now();
                         } catch (_eXn) {}
                         if (typeof _updateBgCanvas === "function") _updateBgCanvas();
                     } catch (_eCnSz) {}
