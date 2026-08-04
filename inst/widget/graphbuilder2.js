@@ -10805,7 +10805,6 @@
                 }
                 var _xrPend = null;
                 var _xrActive = false;
-                var _xrRaf = false;
                 var _xrTimer = null;
                 function _xrFollow() {
                     // The corner grip's per-move body: set inches, keep
@@ -10882,13 +10881,14 @@
                             _xrActive = true;
                         }
                         _xrPend = { w: rw, h: rh };
-                        if (!_xrRaf) {
-                            _xrRaf = true;
-                            requestAnimationFrame(function () {
-                                _xrRaf = false;
-                                _xrFollow();
-                            });
-                        }
+                        // Follow SYNCHRONOUSLY inside the observer callback.
+                        // RO delivers before paint, so the resized box and
+                        // the redrawn content land in the SAME frame; the
+                        // first draft deferred to requestAnimationFrame,
+                        // which painted one frame of new box with old
+                        // content - visible stutter on slow drags next to
+                        // the corner grip's synchronous applySize.
+                        _xrFollow();
                         if (_xrTimer) clearTimeout(_xrTimer);
                         _xrTimer = setTimeout(function () {
                             _xrTimer = null;
