@@ -182,7 +182,7 @@ jobs:
           mv "$JMO" "pandion-${{ matrix.platform }}.jmo"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: jmo-${{ matrix.platform }}
           path: 'pandion-${{ matrix.platform }}.jmo'
@@ -205,7 +205,7 @@ jobs:
           bash scripts/minify-widget.sh --check
           bash standalone/build-dist.sh
           git diff --exit-code
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: standalone-dist
           path: standalone/dist/pandion-plots.html
@@ -274,7 +274,7 @@ jobs:
             if [ -f "$f" ]; then cp "$f" ../../../desktop-out/; fi
           done
           ls -la ../../../desktop-out
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: desktop-${{ matrix.os }}
           path: desktop-out/*
