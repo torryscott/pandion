@@ -158,6 +158,36 @@ ok(await page.evaluate(() =>
    JSON.stringify(['p', 'q', 'r', 's']),
    'and one undo puts the column back');
 
+console.log('case 5b: a dead-zone drop restores geometry instead of sticking');
+// Torry's screenshot, Jul 31 2026: drop a column just short of where the
+// neighbor parts - the order does not change, so the commit path never
+// re-renders, and the old handler skipped the restore on the promise that
+// the re-render would wipe the transforms. The column stuck overlapping
+// its neighbor with a gap where it belonged. The contract: after ANY
+// release, either the order changed or every transform is gone.
+{
+    const from2 = await headRect('q');
+    await page.mouse.move(from2.x, from2.y);
+    await page.mouse.down();
+    // Arm (>6px horizontal) but stay inside q's own slot.
+    await page.mouse.move(from2.x + 12, from2.y, { steps: 4 });
+    await page.waitForTimeout(120);
+    await page.mouse.up();
+    await page.waitForTimeout(500);
+    const after = await page.evaluate(() => ({
+        order: JSON.stringify(window.PS_SHELL.project.table.order),
+        stuck: [...document.querySelectorAll(
+            '#ps-datagrid th[data-grid-col], #ps-datagrid td[data-gc]')]
+            .filter(c => c.style.transform).length,
+    }));
+    ok(after.stuck === 0,
+       `a no-op drop leaves ZERO cells carrying a transform (${after.stuck})`);
+    // Case 5 committed a move and then UNDID it, so the standing order
+    // here is the original p,q,r,s.
+    ok(after.order === JSON.stringify(['p', 'q', 'r', 's']),
+       `and the order is untouched (${after.order})`);
+}
+
 console.log('case 6: Escape cancels the drag outright (the b4 rule)');
 const fr2 = await headRect('p'), to2 = await headRect('r');
 await page.mouse.move(fr2.x, fr2.y);

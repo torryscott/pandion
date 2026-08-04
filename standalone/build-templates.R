@@ -1,6 +1,6 @@
 # Generate committed payload TEMPLATES for the standalone Pandion Plots shell.
 #
-# Strategy (STANDALONE-BRIEF.md): do NOT reimplement widget.R's ~370 defaults
+# Strategy (planning/STANDALONE-BRIEF.md): do NOT reimplement widget.R's ~370 defaults
 # in JS. Generate, once per module, a fully-defaulted payload via the REAL R
 # marshalling, plus a mechanically-diffed list of the DATA-DEPENDENT keys
 # (the "channels"). At runtime the JS data layer clones the template and

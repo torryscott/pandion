@@ -107,10 +107,10 @@ const CHART_SVG_JS = `(() => {
             xLabel: payload.xLabel, yLabel: payload.yLabel,
             missingNote: payload.missingNote,
             // B21. This button used to be HIDDEN, and this probe pinned that.
-            // It is visible again on purpose: the engine's Basics help says
-            // unconditionally that it exports the chart, so hiding it left
-            // that sentence pointing at nothing. The shell intercepts the
-            // click and opens its own exporter instead.
+            // Hidden AGAIN on purpose (Torry, Jul 31 2026): the command
+            // bar's "Export chart" is the one export, and the Basics help
+            // sentence is retargeted by the shell this time - the dangling
+            // sentence is why the first hide was reverted.
             exportBtnLive: (() => {
                 const b = document.querySelector('button[title="Export plot"]');
                 return !!b && b.offsetParent !== null;
@@ -125,8 +125,8 @@ const CHART_SVG_JS = `(() => {
     ok(info.barFills.every(f => f === '#4478ad'), 'stock default fill on every bar');
     for (const t of ['Control', 'Low dose', 'High dose', 'condition', 'score'])
         ok(info.texts.some(s => (s || '').indexOf(t) !== -1), 'svg text: ' + t);
-    ok(info.exportBtnLive,
-       'engine export button is visible and routed to the shell exporter');
+    ok(!info.exportBtnLive,
+       'engine export icon is hidden; the command bar owns chart export');
 
     ok(Array.isArray(info.bars) && info.bars.length === 3, 'payload has 3 cells');
     ok(JSON.stringify(info.xCategories) === JSON.stringify(['Control', 'Low dose', 'High dose']),

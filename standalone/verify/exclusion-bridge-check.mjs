@@ -285,6 +285,35 @@ if (afterKey2.ghosts !== 0 || afterKey2.hoursCell || afterKey2.hours !== 1.5)
 console.log('  ok  ghost hover, symmetric include menu, and Cmd/Ctrl+E ' +
             'toggle all round-trip to the dataset');
 
+// (4) The stationary-cursor contract (Torry, Jul 31 2026). Excluding redraws
+// the ghost at the point's EXACT position, under a cursor that never moved,
+// so no mouseenter fires and the tracked hover is null. The shortcut has to
+// work anyway, by hit-testing whatever is under the pointer. Note there is
+// deliberately NO mouse movement between these presses: the movement is what
+// used to paper over the gap, and step (3) above only passed because it
+// happened to cross a boundary.
+await page.keyboard.press('Control+e');
+await page.waitForTimeout(1800);
+const still1 = await page.evaluate(() => ({
+    ghosts: document.querySelectorAll('[data-role="data-point-hidden"]').length,
+    excluded: !!(window.PS_SHELL.project.table.excluded.hours || {})[0],
+}));
+if (still1.ghosts !== 1 || !still1.excluded)
+    throw new Error('a still cursor could not EXCLUDE by shortcut: ' +
+        JSON.stringify(still1));
+await page.keyboard.press('Control+e');
+await page.waitForTimeout(1800);
+const still2 = await page.evaluate(() => ({
+    ghosts: document.querySelectorAll('[data-role="data-point-hidden"]').length,
+    excluded: !!(window.PS_SHELL.project.table.excluded.hours || {})[0],
+    hours: window.PS_SHELL.project.table.columns.hours[0],
+}));
+if (still2.ghosts !== 0 || still2.excluded || still2.hours !== 1.5)
+    throw new Error('a still cursor could not INCLUDE by shortcut: ' +
+        JSON.stringify(still2));
+console.log('  ok  the toggle survives the mark being replaced under a ' +
+            'stationary cursor, in both directions');
+
 if (errors.length) throw new Error(errors[0]);
 
 await browser.close();

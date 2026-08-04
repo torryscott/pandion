@@ -131,7 +131,7 @@ const sel = await page.evaluate(() => {
     };
     return { appbar: g('.ps-appbar'), inspector: g('.ps-controls'),
              nav: g('.ps-project-panel'), roleCard: g('.ps-role-card'),
-             cell: g('#ps-datagrid td'), input: g('#ps-inspector-docname') };
+             cell: g('#ps-datagrid td'), input: g('#ps-variable-name') };
 });
 for (const k of ['appbar', 'inspector', 'nav', 'roleCard'])
     ok(sel[k] === 'none', `${k} is not selectable text (${sel[k]})`);

@@ -130,8 +130,12 @@ const find = await page.evaluate(async () => {
     return { focused: document.activeElement.id,
              workspace: window.PS_SHELL.workspace() };
 });
+// find-data opens the POPUP now (Jul 31 2026); close it after asserting,
+// or the paste cases below click grid cells underneath its overlay.
 ok(find.focused === 'ps-data-find' && find.workspace === 'data',
    `Find in data puts the cursor in the search box (${find.focused})`);
+await page.click('#ps-findpop-close');
+await page.waitForTimeout(150);
 
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('case 5: both paste routes share one quote-aware parser (t4-64)');

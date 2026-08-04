@@ -8,9 +8,10 @@
 //
 //   assets/app-chart.png    the chart workspace  (the hero product shot)
 //   assets/app-data.png     the data workspace   (typing, levels, exclusions)
-//   assets/app-layout.png   the figure composer  (multi-panel figures)
+//   assets/app-notebook.png the Notebook         (kept moments, one per page)
+//   assets/app-layout.png   the Layouts workspace (multi-panel figures)
 //
-// The last two exist because the site otherwise showed only a chart, and
+// The other three exist because the site otherwise showed only a chart, and
 // a chart is the part of this app that a dozen other tools also have.
 //
 // Framing is 1520x950 CSS at deviceScaleFactor 2, i.e. 3040x1900 PNGs, the
@@ -112,7 +113,52 @@ async function shot(page, name) {
     await ctx.close();
 }
 
-// --------------------------------------------------------------- 3. layout
+// ------------------------------------------------------------- 3. notebook
+{
+    const { ctx, page } = await session();
+    // A kept page has to be made, not staged: Keep records what is on the
+    // chart at that moment, so the chart must have finished drawing first.
+    await page.waitForFunction(() => {
+        const svg = document.querySelector('.graphbuilder2-host svg');
+        return !!svg && svg.querySelectorAll('*').length > 30;
+    }, null, { timeout: 20000 });
+    await page.waitForTimeout(600);
+    // The Statistics button lives in the chart's own toolbar, which reads
+    // dispatched clicks rather than the page-level one.
+    await page.evaluate(() => {
+        const b = document.querySelector(
+            '.graphbuilder2-host button[aria-label="Statistics"]');
+        b.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await page.waitForTimeout(1200);
+    // Pinning a comparison is what puts Keep on the focus card, and the
+    // rings it draws around the two bars ride into the kept page.
+    await page.evaluate(() => {
+        document.querySelector('[data-st-pane="pairs"] tr[data-link]').click();
+    });
+    await page.waitForTimeout(900);
+    await page.click('[data-ps-moment-keep]');
+    await page.waitForFunction(() => (window.PS_SHELL.project.pinboards || [])
+        .some(b => b.pins.length), null, { timeout: 15000 });
+    // Keep confirms with a toast offering to open the Notebook. Wait it out
+    // rather than photograph the app mid-announcement.
+    await page.waitForFunction(
+        () => !document.querySelectorAll('#ps-toast .ps-toast-item').length,
+        null, { timeout: 15000 });
+    // The workspace id is still "pinboard" although the UI says Notebook.
+    await page.evaluate(() => window.PS_SHELL.setWorkspace('pinboard'));
+    await page.waitForSelector('.ps-pinpage', { timeout: 10000 });
+    await page.waitForTimeout(700);
+    // Selecting the page opens its rail: when it was kept, the comparison it
+    // holds, and whether the source chart has changed since. Same reason the
+    // data shot selects a variable.
+    await page.click('.ps-pinpage');
+    await page.waitForTimeout(500);
+    await shot(page, 'app-notebook.png');
+    await ctx.close();
+}
+
+// --------------------------------------------------------------- 4. layout
 {
     const { ctx, page } = await session();
     // A composed figure needs something to compose, so give the project a
@@ -153,4 +199,4 @@ if (problems.length) {
     console.error([...new Set(problems)].slice(0, 12).join('\n'));
     process.exit(1);
 }
-console.log('\nall three shots clean: no console errors, no failed requests');
+console.log('\nall four shots clean: no console errors, no failed requests');

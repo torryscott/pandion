@@ -1591,6 +1591,116 @@
       Math.random().toString(36).slice(2, 8);
   }
   function isLayoutTab(c) { return !!c && c.type === "layout"; }
+  // ---- chart groups (planning/CHART-GROUPS-SPEC.md, Torry-approved) ----
+  // Grouping is a RAIL concept only: tabs, Alt+number, and every keyboard
+  // path stay flat. One level deep. The group IS its name; charts carry an
+  // optional `group` string and PROJECT.ui.collapsedGroups remembers folds.
+  // Both fields are additive, so version-3 files round-trip untouched.
+  var GROUP_RENAME = null;   // group name whose rail header is an input
+  // Auto-expand is a ONE-SHOT, not a standing override (Torry's field
+  // report, Jul 31 2026): while the active chart lived in a group, the
+  // standing "expanded because active" rule swallowed every header click -
+  // the fold toggled invisibly and the group read as uncollapsible. Now
+  // ACTIVATING a chart inside a folded group force-opens it once, and an
+  // explicit header click always wins: it clears the force and toggles
+  // the real fold, so every click visibly does something.
+  var GROUP_FORCE_OPEN = {};
+  var GROUP_LAST_ACTIVE = null;
+  function chartGroupOf(c) {
+    return (c && !isLayoutTab(c) && typeof c.group === "string")
+      ? c.group.trim() : "";
+  }
+  function chartGroups() {
+    var seen = {}, out = [];
+    for (var i = 0; i < PROJECT.charts.length; i++) {
+      var g = chartGroupOf(PROJECT.charts[i]);
+      if (g && !seen[g.toLowerCase()]) { seen[g.toLowerCase()] = 1; out.push(g); }
+    }
+    return out;
+  }
+  function collapsedGroups() {
+    if (!PROJECT.ui.collapsedGroups) PROJECT.ui.collapsedGroups = {};
+    return PROJECT.ui.collapsedGroups;
+  }
+  function canonicalGroupName(name) {
+    // Names compare case-insensitively for collision, display as typed:
+    // an existing group's casing wins so "extinction" merges into
+    // "Extinction" rather than forking it.
+    var g = String(name || "").trim();
+    if (!g) return "";
+    var have = chartGroups();
+    for (var i = 0; i < have.length; i++)
+      if (have[i].toLowerCase() === g.toLowerCase()) return have[i];
+    return g;
+  }
+  function setChartGroup(id, name) {
+    var c = chartById(id);
+    if (!c || isLayoutTab(c)) return;
+    var g = canonicalGroupName(name);
+    if (g) c.group = g; else delete c.group;
+    persist(); syncAll();
+  }
+  function renameChartGroup(oldName, newName) {
+    var next = String(newName || "").trim();
+    if (!next || next === oldName) return;
+    // A rename INTO an existing group is a merge, said out loud.
+    var existing = null, have = chartGroups();
+    for (var i = 0; i < have.length; i++)
+      if (have[i] !== oldName && have[i].toLowerCase() === next.toLowerCase())
+        existing = have[i];
+    var target = existing || next;
+    for (var j = 0; j < PROJECT.charts.length; j++)
+      if (chartGroupOf(PROJECT.charts[j]) === oldName)
+        PROJECT.charts[j].group = target;
+    var folds = collapsedGroups();
+    if (folds[oldName]) { delete folds[oldName]; folds[target] = 1; }
+    persist(); syncAll();
+    if (existing) showToast("Merged into " + target);
+  }
+  function ungroupChartGroup(name) {
+    for (var i = 0; i < PROJECT.charts.length; i++)
+      if (chartGroupOf(PROJECT.charts[i]) === name)
+        delete PROJECT.charts[i].group;
+    delete collapsedGroups()[name];
+    persist(); syncAll();
+  }
+  function deleteChartGroup(name) {
+    // Destructive, so the closeChart pattern: one snapshot, one undo toast,
+    // never a confirm dialog.
+    var members = PROJECT.charts.filter(function (c) {
+      return chartGroupOf(c) === name;
+    });
+    if (!members.length) return;
+    if (members.length >= PROJECT.charts.filter(function (c) {
+          return !isLayoutTab(c); }).length) {
+      showToast("A project needs at least one chart; ungroup instead");
+      return;
+    }
+    var snapCharts = PROJECT.charts.slice();
+    var snapActive = PROJECT.activeChart;
+    PROJECT.charts = PROJECT.charts.filter(function (c) {
+      return chartGroupOf(c) !== name;
+    });
+    if (!chartById(PROJECT.activeChart))
+      PROJECT.activeChart = PROJECT.charts.filter(function (c) {
+        return !isLayoutTab(c); })[0].id;
+    delete collapsedGroups()[name];
+    persist(); syncAll(); render();
+    showUndoToast("Deleted group " + name + " and its " + members.length +
+      (members.length === 1 ? " chart" : " charts"), function () {
+      PROJECT.charts = snapCharts;
+      PROJECT.activeChart = snapActive;
+      persist(); syncAll(); render();
+    });
+  }
+  function startGroupRename(name) {
+    GROUP_RENAME = name;
+    syncProjectNavigator();
+    window.setTimeout(function () {
+      var input = document.querySelector("#ps-project-nav input[data-group-rename]");
+      try { input.focus(); input.select(); } catch (ignore) {}
+    }, 0);
+  }
   function chartById(id) {
     for (var i = 0; i < PROJECT.charts.length; i++)
       if (PROJECT.charts[i].id === id) return PROJECT.charts[i];
@@ -1691,6 +1801,7 @@
       id: PROJECT.id,
       name: PROJECT.name,
       charts: PROJECT.charts,
+      pinboards: PROJECT.pinboards || [],
       activeChart: PROJECT.activeChart,
       ui: PROJECT.ui,
       table: { name: t.name, order: t.order, raw: t.raw, types: t.types,
@@ -1961,6 +2072,7 @@
   function applySnapshot(s) {
     s = migrateSnapshot(s);
     if (!s) return false;
+    PIN_MIGRATE_PENDING = true;   // run after charts land (below)
     GRID_NATURAL_WIDTHS = {};
     gridResetColumnView();
     GRID_FIND_QUERY = ""; GRID_FIND_RESULTS = []; GRID_FIND_INDEX = -1;
@@ -2002,6 +2114,21 @@
     for (var ci = 0; ci < PROJECT.charts.length; ci++)
       if (isLayoutTab(PROJECT.charts[ci])) layNormalizeLayout(PROJECT.charts[ci]);
     PROJECT.activeChart = s.activeChart;
+    if (PIN_MIGRATE_PENDING) {
+      PIN_MIGRATE_PENDING = false;
+      // UNCONDITIONAL (Torry's leak report, Aug 1 2026): a file saved
+      // before pins existed has no pins field, and the conditional kept
+      // the PREVIOUS project's array - his pin followed him into a new
+      // file. The Pinboard is project evidence; absent means empty.
+      PROJECT.pinboards = Array.isArray(s.pinboards) ? s.pinboards : [];
+      PROJECT.pins = Array.isArray(s.pins) ? s.pins : [];   // legacy flat
+      if (PROJECT.ui) PROJECT.ui.activeBoard =
+        (s.ui && s.ui.activeBoard) || null;
+      if (PROJECT.ui) PROJECT.ui.pinZoom =
+        (s.ui && s.ui.pinZoom != null) ? s.ui.pinZoom : "fit";
+      try { migrateNotebookToPins(); } catch (eMig) {}
+      try { repairPinFonts(); } catch (eRep) {}
+    }
     activeChart();   // normalizes a stale active id
     if (s.ui && typeof s.ui === "object") {
       var ws = ["data", "chart", "layout"].indexOf(s.ui.workspace) !== -1
@@ -2016,7 +2143,12 @@
           isLayoutTab(chartById(s.ui.lastLayout)) ? s.ui.lastLayout : null,
         columnWidths: {},
         paneWidths: splitSanitizeWidths(s.ui.paneWidths),
-        varboxOpen: s.ui.varboxOpen === true
+        varboxOpen: s.ui.varboxOpen === true,
+        sizeviewOpen: s.ui.sizeviewOpen === true,
+        // the ui REBUILD used to wipe these two - they were restored
+        // above, before this literal replaced the object (Aug 2 2026)
+        activeBoard: (s.ui.activeBoard || null),
+        pinZoom: s.ui.pinZoom != null ? s.ui.pinZoom : "fit"
       };
       if (s.ui.columnWidths && typeof s.ui.columnWidths === "object") {
         for (var widthCol in s.ui.columnWidths) {
@@ -2669,6 +2801,27 @@
       exportDataCsv();
       return;
     }
+    if (ws === "pinboard") {
+      var pbs = pinBoards().filter(function (b) { return b.pins.length; });
+      if (pbs.length < 2) { exportPinboardPdf(); return; }
+      // Two or more boards WITH pages: say which record you mean. Anchored
+      // under the Export button - the accelerator and File menu land here
+      // too, so every route gets the same choice.
+      var eb = el("ps-export").getBoundingClientRect();
+      var act = activePinBoard();
+      var total = allPins().length;
+      showContextMenu(eb.left, eb.bottom + 4, [
+        { label: "Export " + act.name + " (" + act.pins.length +
+            (act.pins.length === 1 ? " page" : " pages") + ")",
+          key: "pin-export-active",
+          action: function () { exportPinboardPdf("active"); } },
+        { label: "Export all sections (" + total +
+            (total === 1 ? " page" : " pages") + ")",
+          key: "pin-export-all",
+          action: function () { exportPinboardPdf("all"); } }
+      ], null);
+      return;
+    }
     if (!workspaceDocument(ws)) {
       showToast(ws === "layout" ? "Create a layout first" : "Create a chart first");
       return;
@@ -3052,6 +3205,30 @@
         continue;
       }
       if (item.kind === "image" && item.src) {
+        // An SVG-sourced item (a Pinboard pin) is inlined as REAL nodes,
+        // not referenced as an <image>: svg2pdf converts nodes to vector
+        // PDF but treats <image href="data:image/svg..."> as an opaque
+        // raster (Torry's resolution ask, Aug 1 2026). Parse failure falls
+        // through to the raster path - degraded, never broken.
+        if (String(item.src).indexOf("data:image/svg+xml") === 0) {
+          try {
+            var inlineSvg = decodeURIComponent(
+              String(item.src).slice(String(item.src).indexOf(",") + 1));
+            var inlineDoc = new DOMParser().parseFromString(
+              inlineSvg, "image/svg+xml");
+            if (inlineDoc.querySelector("parsererror")) throw new Error("parse");
+            var nested = doc.importNode(inlineDoc.documentElement, true);
+            nested.setAttribute("x", String(Number(item.x) || 0));
+            nested.setAttribute("y", String(Number(item.y) || 0));
+            nested.setAttribute("width",
+              String(Math.max(24, Number(item.w) || 240)));
+            nested.setAttribute("height",
+              String(Math.max(24, Number(item.h) || 180)));
+            nested.setAttribute("preserveAspectRatio", "xMidYMid meet");
+            root.appendChild(nested);
+            continue;
+          } catch (eInl) { /* fall through to the <image> path */ }
+        }
         var pic = doc.createElementNS(ns, "image");
         pic.setAttribute("x", String(Number(item.x) || 0));
         pic.setAttribute("y", String(Number(item.y) || 0));
@@ -3203,6 +3380,18 @@
       var node = text[i];
       var family = node.getAttribute("font-family") || "sans-serif";
       node.setAttribute("font-family", pdfCoreFont(family));
+      // Numeric weights break svg2pdf's font lookup outright: a 600 (the
+      // engine's on-screen semi-bold) does not just lose its boldness, it
+      // misses helvetica entirely and falls back to Times-Roman - Torry's
+      // serif axis titles in the Pinboard PDF (Aug 1 2026). The engine's
+      // own export clone forces the same >= 600 -> bold rule; pins and
+      // layout panels clone the LIVE svg, so the seam must do it here.
+      var wgt = node.getAttribute("font-weight");
+      if (wgt) {
+        var wn = parseInt(wgt, 10);
+        if (isFinite(wn))
+          node.setAttribute("font-weight", wn >= 600 ? "bold" : "normal");
+      }
       var inline = node.getAttribute("style");
       if (inline && /font-family\s*:/i.test(inline)) {
         node.setAttribute("style", inline.replace(
@@ -3301,6 +3490,584 @@
   // export pipeline; 192 DPI = 2x. The ClipboardItem takes the PROMISE
   // where supported so Safari's stay-inside-the-user-gesture rule holds.
   var COPY_IMAGE_DPI = 192;
+  // ---- "Copy the moment" (Torry, Jul 31 2026: shape one of the findings
+  // brainstorm). He was screenshotting the chart with two bars ringed plus
+  // the Sigma panel's focus card so future-him knew which comparison the
+  // stats belonged to. One click now copies exactly that as ONE composed
+  // image: the LIVE chart svg - selection rings deliberately included, the
+  // opposite of every export path, because here the rings ARE the
+  // annotation - with the focus card re-set beneath it in PURE SVG text.
+  // Pure svg, not a foreignObject: html-in-svg TAINTS the canvas on
+  // file:// (measured - "Tainted canvases may not be exported"), and
+  // file:// is the portable app's whole life. Shell-only; the button is
+  // injected into the engine's card by the observer below (the help-copy
+  // retarget pattern) and the engine is untouched.
+  function composeComparisonMoment() {
+    var card = document.querySelector('[data-role="st-focus-card"]');
+    var host = document.querySelector(".graphbuilder2-host");
+    if (!card || !host) { showToast("Pin a comparison first"); return "unavailable"; }
+    var svgs = host.querySelectorAll("svg");
+    var chart = null, area = 0;
+    for (var i = 0; i < svgs.length; i++) {
+      var r = svgs[i].getBoundingClientRect();
+      if (r.width * r.height > area) { area = r.width * r.height; chart = svgs[i]; }
+    }
+    if (!chart) { showToast("No chart to copy"); return "unavailable"; }
+    var w = Math.round(parseFloat(chart.getAttribute("width")) ||
+                       chart.getBoundingClientRect().width);
+    var h = Math.round(parseFloat(chart.getAttribute("height")) ||
+                       chart.getBoundingClientRect().height);
+    var rings = chart.querySelectorAll(
+      '[data-role="stats-link-halo"] rect, [data-role="stats-link-halo"] circle').length;
+    // Mine the card's three pieces; the buttons are controls, not finding.
+    function textOf(node) {
+      return node ? String(node.textContent || "").replace(/\s+/g, " ").trim() : "";
+    }
+    var title = textOf(card.querySelector("[data-st-ftitle]"));
+    var eyebrow = "", body = "";
+    (function mine() {
+      // Card anatomy (the engine's two-row header): row 1 = eyebrow +
+      // stepper cluster + position readout, row 2 = the title on its own
+      // [data-st-ftitle] line, then the body. Buttons and the "2 of 28"
+      // readout are controls, not finding.
+      var clone = card.cloneNode(true);
+      var kill = clone.querySelectorAll("button, [data-st-fpos]");
+      for (var k = kill.length - 1; k >= 0; k--)
+        if (kill[k].parentNode) kill[k].parentNode.removeChild(kill[k]);
+      var tc = clone.querySelector("[data-st-ftitle]");
+      if (tc) {
+        var row1 = tc.previousElementSibling;
+        if (row1) {
+          eyebrow = textOf(row1);
+          if (row1.parentNode) row1.parentNode.removeChild(row1);
+        }
+        if (tc.parentNode) tc.parentNode.removeChild(tc);
+      }
+      body = textOf(clone);
+    })();
+    var pad = 12, cardW = Math.max(160, w - pad * 2), innerW = cardW - 26;
+    var mctx = document.createElement("canvas").getContext("2d");
+    var FONT = "-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+    function wrapText(text, font, maxW) {
+      if (!text) return [];
+      mctx.font = font;
+      var words = text.split(" "), lines = [], cur = "";
+      for (var wi = 0; wi < words.length; wi++) {
+        var probe = cur ? cur + " " + words[wi] : words[wi];
+        if (mctx.measureText(probe).width > maxW && cur) { lines.push(cur); cur = words[wi]; }
+        else cur = probe;
+      }
+      if (cur) lines.push(cur);
+      return lines;
+    }
+    function esc(s) {
+      return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+    var eyeLines = wrapText(eyebrow.toUpperCase(), "10px " + FONT, innerW);
+    var titleLines = wrapText(title, "600 13px " + FONT, innerW);
+    var bodyLines = wrapText(body, "12px " + FONT, innerW);
+    var parts = [], ty = 18;
+    for (var e1 = 0; e1 < eyeLines.length; e1++, ty += 14)
+      parts.push('<text x="14" y="' + ty + '" font-size="10" fill="#5b6b7c" letter-spacing="0.4">' + esc(eyeLines[e1]) + "</text>");
+    ty += 3;
+    for (var t1 = 0; t1 < titleLines.length; t1++, ty += 17)
+      parts.push('<text x="14" y="' + ty + '" font-size="13" font-weight="600" fill="#1c2b3a">' + esc(titleLines[t1]) + "</text>");
+    ty += 4;
+    for (var b1 = 0; b1 < bodyLines.length; b1++, ty += 16)
+      parts.push('<text x="14" y="' + ty + '" font-size="12" fill="#22364d">' + esc(bodyLines[b1]) + "</text>");
+    var cardH = ty + 2;
+    var xml = new XMLSerializer();
+    var chartClone = chart.cloneNode(true);
+    chartClone.removeAttribute("tabindex");
+    chartClone.removeAttribute("aria-label");
+    chartClone.setAttribute("x", "0");
+    chartClone.setAttribute("y", "0");
+    stampPinFonts(chartClone, chart);
+    var totalH = h + pad + cardH + pad;
+    var composed =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + totalH +
+      '" viewBox="0 0 ' + w + " " + totalH + '">' +
+      '<rect x="0" y="0" width="' + w + '" height="' + totalH + '" fill="#ffffff"/>' +
+      xml.serializeToString(chartClone) +
+      '<g transform="translate(' + pad + "," + (h + pad) + ')" font-family="' +
+      FONT.replace(/"/g, "&quot;") + '">' +
+      '<rect x="0" y="0" width="' + cardW + '" height="' + cardH +
+      '" rx="6" fill="#eef4fc" stroke="#cfe0f5"/>' +
+      '<rect x="0" y="0" width="3" height="' + cardH + '" fill="#3573bd"/>' +
+      parts.join("") + "</g></svg>";
+    return { svg: composed, w: w, h: totalH, rings: rings,
+             prov: pinProvenance(chart),
+             // the mined card text rides as DATA so the rail can show the
+             // statistics READABLE, not just baked into the image
+             text: { eyebrow: eyebrow, title: title, body: body } };
+  }
+  function copyComparisonMoment() {
+    var made = composeComparisonMoment();
+    if (typeof made === "string") return Promise.resolve(made);
+    if (!navigator.clipboard || !navigator.clipboard.write ||
+        typeof window.ClipboardItem === "undefined") {
+      showToast("This browser does not allow image copying - use Export instead.", true);
+      return Promise.resolve("unsupported");
+    }
+    var blobPromise = rasterizeExport(
+      { svg: made.svg, w: made.w, h: made.h }, "image/png", COPY_IMAGE_DPI
+    ).then(function (out) {
+      // Diagnostic for probes and field reports; never read by the app.
+      window.__psMomentLast = { w: out.width, h: out.height,
+                               rings: made.rings, blobSize: out.blob.size };
+      return out.blob;
+    });
+    function done() {
+      showToast("Comparison copied with its chart - the rings and the stats travel together.");
+      return "copied";
+    }
+    function failed(e) {
+      showToast("Could not copy the comparison (" +
+        String(e && e.message || e) + ") - use Export instead.", true);
+      return "failed";
+    }
+    try {
+      var item = new window.ClipboardItem({ "image/png": blobPromise });
+      return navigator.clipboard.write([item]).then(done, failed);
+    } catch (e) {
+      return blobPromise.then(function (blob) {
+        return navigator.clipboard.write([
+          new window.ClipboardItem({ "image/png": blob })]);
+      }).then(done, failed);
+    }
+  }
+  // ---- "Keep" (Torry, Jul 31 2026, after the mental-space discussion):
+  // deliberately NOT a new surface. Layouts are already the place; what was
+  // missing was a zero-decision VERB. Keep appends the composed moment into
+  // an ordinary layout - found by the `notebook` MARKER, not by name, so
+  // renaming it never orphans the button; deleted means quietly recreated -
+  // flowing top to bottom on its own so nothing is ever placed by hand.
+  // Everything else (notes via Add text, captions, the cross-layout
+  // clipboard, export) is just layouts, inherited whole.
+  // The Pinboard model (Torry, Jul 31 2026, superseding the marker-layout
+  // v1 within hours of shipping it - his call after using it: each capture
+  // is its own PAGE on a dedicated workspace, not an item on a growing
+  // canvas). PROJECT.pins is an ordered list of {id, src, natW, natH, w, h};
+  // additive, so version-3 files round-trip untouched.
+  var PIN_MIGRATE_PENDING = false;
+  // Multiple boards (Torry, Aug 1 2026): PROJECT.pinboards is a list of
+  // {id, name, pins}; ui.activeBoard names the one on screen. ONE level -
+  // boards hold pins, nothing holds boards (the chart-groups rule). The
+  // projectPins() SHIM returns the active board's array, so Keep, send,
+  // copy, delete, export and the probes all kept working unchanged when
+  // boards arrived. Legacy flat PROJECT.pins migrates into board one.
+  function pinBoards() {
+    if (!Array.isArray(PROJECT.pinboards)) PROJECT.pinboards = [];
+    if (Array.isArray(PROJECT.pins) && PROJECT.pins.length) {
+      // A pre-boards project: its flat pins become the first board.
+      PROJECT.pinboards.push({ id: "b1", name: "Section 1",
+                               pins: PROJECT.pins });
+      PROJECT.pins = [];
+    }
+    if (!PROJECT.pinboards.length)
+      PROJECT.pinboards.push({ id: "b1", name: "Section 1", pins: [] });
+    return PROJECT.pinboards;
+  }
+  function activePinBoard() {
+    var boards = pinBoards();
+    var id = PROJECT.ui && PROJECT.ui.activeBoard;
+    for (var i = 0; i < boards.length; i++)
+      if (boards[i].id === id) return boards[i];
+    return boards[0];
+  }
+  function newBoardId() {
+    var mx = 0, boards = pinBoards();
+    for (var i = 0; i < boards.length; i++) {
+      var m = /^b(\d+)$/.exec(boards[i].id || "");
+      if (m) mx = Math.max(mx, Number(m[1]));
+    }
+    return "b" + (mx + 1);
+  }
+  function projectPins() {
+    return activePinBoard().pins;
+  }
+  function allPins() {
+    var out = [], boards = pinBoards();
+    for (var i = 0; i < boards.length; i++)
+      for (var j = 0; j < boards[i].pins.length; j++)
+        out.push({ board: boards[i], pin: boards[i].pins[j] });
+    return out;
+  }
+  function pinNewId() {
+    // Scan EVERY board: cross-board lookups (the layout picker,
+    // addPinToLayout) resolve by id over allPins(), so ids must be
+    // project-unique, not board-unique.
+    var mx = 0, entries = allPins();
+    for (var i = 0; i < entries.length; i++) {
+      var m = /^p(\d+)$/.exec(entries[i].pin.id || "");
+      if (m) mx = Math.max(mx, Number(m[1]));
+    }
+    return "p" + (mx + 1);
+  }
+  // v1 shipped for a few hours as a marker layout ("Notebook") holding the
+  // captures as image items. Adopt those into pins on load: images move,
+  // the layout keeps any OTHER content (notes) as an ordinary layout, and
+  // an emptied one is removed. Runs at every project-adoption seam;
+  // idempotent by construction (a migrated project has no marker).
+  function migrateNotebookToPins() {
+    for (var i = PROJECT.charts.length - 1; i >= 0; i--) {
+      var c = PROJECT.charts[i];
+      if (!c.notebook || !isLayoutTab(c)) continue;
+      var rest = [];
+      var moved = 0;
+      var items = (c.items || []).slice().sort(function (a, b) {
+        return (a.y || 0) - (b.y || 0);
+      });
+      for (var j = 0; j < items.length; j++) {
+        var it = items[j];
+        if (it.kind === "image" && it.src &&
+            String(it.src).indexOf("data:image/") === 0) {
+          projectPins().push({ id: pinNewId(), src: it.src,
+            natW: it.natW, natH: it.natH, w: it.w, h: it.h });
+          moved++;
+        } else rest.push(it);
+      }
+      delete c.notebook;
+      if (rest.length) c.items = rest;
+      else if (PROJECT.charts.length > 1) PROJECT.charts.splice(i, 1);
+      if (moved && chartById(PROJECT.activeChart) == null)
+        PROJECT.activeChart = PROJECT.charts[0].id;
+    }
+  }
+  // The chart's on-screen font comes from the HOST div (the engine sets
+  // host.style.fontFamily and the svg text inherits through CSS), so a
+  // serialized pin shown inside an <img> - an isolated context with no
+  // page CSS - fell back to the browser serif (Torry's screenshot, Aug 1
+  // 2026: Times on the pin, sans on the live chart). Stamp the live
+  // computed font onto the clone: the root attribute covers inheritance,
+  // and the per-text pass mirrors the engine's own export path so svg2pdf
+  // gets unambiguous directives too. Never a <style> element: inside the
+  // composed moment the clone is a NESTED svg, and CSS from a nested
+  // <style> is document-scoped - it would restyle the stats card's text.
+  function stampPinFonts(clone, live) {
+    var fam = "";
+    try { fam = String(getComputedStyle(live).fontFamily || ""); } catch (e) {}
+    if (!fam) fam = "sans-serif";
+    clone.setAttribute("font-family", fam);
+    var texts = clone.querySelectorAll("text");
+    for (var i = 0; i < texts.length; i++)
+      if (!texts[i].getAttribute("font-family"))
+        texts[i].setAttribute("font-family", fam);
+    return fam;
+  }
+  // A pin's src is an SVG data URL, not a PNG (Torry, Aug 1 2026: "does
+  // it lose its vector-based resolution?"): the composed moment IS pure
+  // vector, the PDF pipeline is svg2pdf (genuinely vector), and the layout
+  // exporter below INLINES svg pins as real nodes - so a pin placed in a
+  // layout stays sharp in SVG and PDF alike. Legacy PNG pins from the
+  // first hours keep working everywhere (render, copy, export) - they are
+  // just raster, as they were born.
+  function pinSvgSrc(svgText) {
+    return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgText);
+  }
+  function pinSvgText(pin) {
+    if (!pin || typeof pin.src !== "string" ||
+        pin.src.indexOf("data:image/svg+xml") !== 0) return null;
+    try {
+      return decodeURIComponent(pin.src.slice(pin.src.indexOf(",") + 1));
+    } catch (e) { return null; }
+  }
+  // One-shot repair for pins kept before the font stamp existed: their
+  // stored svg names no font anywhere, so every consumer (the board, a
+  // layout placement, the PDF) rendered them in the viewer serif.
+  // Idempotent - a root font-family means the pin is already sound - and
+  // "sans-serif" is the app default the live chart resolves to.
+  function repairPinFonts() {
+    var entries = allPins(), changed = false;
+    for (var i = 0; i < entries.length; i++) {
+      var pin = entries[i].pin, txt = pinSvgText(pin);
+      if (!txt) continue;
+      try {
+        var doc = new DOMParser().parseFromString(txt, "image/svg+xml");
+        var root = doc.documentElement;
+        if (!root || root.nodeName.toLowerCase() !== "svg" ||
+            root.getAttribute("font-family")) continue;
+        root.setAttribute("font-family", "sans-serif");
+        var texts = root.querySelectorAll("text");
+        for (var t = 0; t < texts.length; t++)
+          if (!texts[t].getAttribute("font-family"))
+            texts[t].setAttribute("font-family", "sans-serif");
+        pin.src = pinSvgSrc(new XMLSerializer().serializeToString(root));
+        changed = true;
+      } catch (e) {}
+    }
+    if (changed) persist(false);
+  }
+  // ---- page selection + provenance (Torry, Aug 1 2026: the empty rail,
+  // "notes about the current page", the kept time, and "whether the chart
+  // it was pulled from has changed") ----
+  var PIN_SEL = null;        // selected page id, session-only
+  var PIN_NOTE_T = null;
+  function pinKeptFmt(at) {
+    try {
+      return new Date(at).toLocaleString(undefined,
+        { month: "short", day: "numeric", hour: "numeric",
+          minute: "2-digit" });
+    } catch (e) { return ""; }
+  }
+  // djb2 over the id-normalized snapshot html: the serializer re-keys ids
+  // deterministically, so an UNCHANGED chart re-serializes byte-identical
+  // and the hash is a stable content signature. (The snapshot cloner also
+  // strips selection halos, so kept rings never read as a change.)
+  function pinSig(s) {
+    var h = 5381;
+    for (var i = 0; i < s.length; i++)
+      h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+    return h.toString(16);
+  }
+  function pinProvenance(chartEl) {
+    try {
+      var id = PROJECT.activeChart, c = chartById(id);
+      if (!c || isLayoutTab(c)) return null;
+      // Prefer the authoritative snapshot (captured at render,
+      // size-guarded) so the signature is byte-comparable with later
+      // captures; fall back to a snapshot-style clone of the live svg.
+      var s = validSnap(id);
+      var html = s ? s.svg : chartEl
+        ? svgSelfContainedClone(chartEl, "snap-" + id + "-").html : null;
+      if (!html) return null;
+      // Analysis + variables at pin time, so a page stays self-describing
+      // even after its source chart is deleted (Torry's rail round).
+      var desc = "";
+      try {
+        var modDef = MODULES[c.module];
+        var rr = (c.roles && c.roles[c.module]) || {};
+        var defs = (modDef && modDef.roles) || [], vals = [];
+        for (var di = 0; di < defs.length; di++) {
+          var v = rr[defs[di].key];
+          if (Array.isArray(v)) {
+            for (var vi = 0; vi < v.length; vi++)
+              if (v[vi]) vals.push(v[vi]);
+          } else if (v) vals.push(v);
+        }
+        desc = (modDef ? modDef.label : c.module) +
+          (vals.length ? ": " + vals.join(", ") : "");
+      } catch (eD) {}
+      return { srcChart: id, srcName: c.name, srcSig: pinSig(html),
+               srcDesc: desc };
+    } catch (e) { return null; }
+  }
+  // The verdict never CLAIMS what it has not verified: the snapshot epoch
+  // bumps on every data or option edit anywhere, so a stale snapshot says
+  // "not checked" and heals into a true verdict the next time the source
+  // chart renders.
+  function pinSourceStatus(pin) {
+    if (!pin.srcChart)
+      return { text: "Not recorded (kept before source tracking).",
+               state: "na" };
+    var c = chartById(pin.srcChart);
+    var name = (c && c.name) || pin.srcName || "The source chart";
+    if (!c || isLayoutTab(c))
+      return { text: name + " is no longer in the project.", state: "gone" };
+    var s = validSnap(pin.srcChart);
+    if (!s)
+      return { text: name + " - not checked since the last edit. Open " +
+               "the chart once to refresh.", state: "stale" };
+    if (!pin.srcSig) return { text: name, state: "na" };
+    return pinSig(s.svg) === pin.srcSig
+      ? { text: name + " - unchanged since it was kept.", state: "same" }
+      : { text: name + " - has changed since it was kept.",
+          state: "changed" };
+  }
+  function pinDayFmt(at) {
+    try {
+      return new Date(at).toLocaleDateString(undefined,
+        { month: "short", day: "numeric" });
+    } catch (e) { return ""; }
+  }
+  // The one-glance freshness audit of the board's evidence: how much,
+  // when, and whether any of it has drifted from its source.
+  function pinBoardSummary(pins) {
+    var lo = Infinity, hi = -Infinity, changed = 0, gone = 0, i;
+    for (i = 0; i < pins.length; i++) {
+      if (pins[i].at) {
+        lo = Math.min(lo, pins[i].at);
+        hi = Math.max(hi, pins[i].at);
+      }
+      var st = pinSourceStatus(pins[i]).state;
+      if (st === "changed") changed++;
+      else if (st === "gone") gone++;
+    }
+    var s = pins.length + (pins.length === 1 ? " page" : " pages");
+    if (isFinite(lo)) {
+      var a = pinDayFmt(lo), b = pinDayFmt(hi);
+      s += a === b ? ", kept " + a : ", kept " + a + " to " + b;
+    }
+    s += ".";
+    if (changed) s += " " + changed + (changed === 1
+      ? " page's source chart has changed since it was kept."
+      : " pages' source charts have changed since they were kept.");
+    if (gone) s += " " + gone + (gone === 1
+      ? " source chart is no longer in the project."
+      : " source charts are no longer in the project.");
+    return s;
+  }
+  function syncPinInspector() {
+    var pane = el("ps-inspector-pinboard");
+    if (!pane) return;
+    var pins = projectPins(), sel = null;
+    for (var i = 0; i < pins.length; i++)
+      if (pins[i].id === PIN_SEL) sel = pins[i];
+    el("ps-pininsp-title").textContent = sel ? "Page" : "Section";
+    el("ps-pininsp-board").style.display =
+      sel || !pins.length ? "none" : "";
+    el("ps-pininsp-empty").style.display = sel ? "none" : "";
+    el("ps-pininsp-sel").style.display = sel ? "" : "none";
+    if (!sel) {
+      if (pins.length) {
+        el("ps-pininsp-bsum").textContent = pinBoardSummary(pins);
+        var bta = el("ps-pininsp-bnote");
+        if (document.activeElement !== bta)
+          bta.value = activePinBoard().note || "";
+      }
+      return;
+    }
+    el("ps-pininsp-kept").textContent = sel.at ? pinKeptFmt(sel.at)
+      : "Before timestamps (an early pin)";
+    // the kept comparison, READABLE (Keep pins only; chart pins have none)
+    var statRow = el("ps-pininsp-statrow");
+    if (sel.momTitle || sel.momText) {
+      statRow.style.display = "";
+      el("ps-pininsp-stat").textContent =
+        (sel.momEyebrow ? sel.momEyebrow + " \u00b7 " : "") +
+        (sel.momTitle || "") +
+        (sel.momText ? "\n" + sel.momText : "");
+    } else statRow.style.display = "none";
+    var descRow = el("ps-pininsp-descrow");
+    if (sel.srcDesc) {
+      descRow.style.display = "";
+      el("ps-pininsp-desc").textContent = sel.srcDesc;
+    } else descRow.style.display = "none";
+    var st = pinSourceStatus(sel);
+    var srcEl = el("ps-pininsp-src");
+    srcEl.textContent = st.text;
+    srcEl.setAttribute("data-state", st.state);
+    // navigation, not resurrection: the live chart is one click away
+    el("ps-pininsp-open").style.display =
+      sel.srcChart && chartById(sel.srcChart) &&
+      !isLayoutTab(chartById(sel.srcChart)) ? "" : "none";
+    var ta = el("ps-pininsp-note");
+    if (document.activeElement !== ta) ta.value = sel.note || "";
+  }
+  function pushPin(svgText, w, h, what, boardId, prov, extra) {
+    var board = null, boards = pinBoards();
+    if (boardId) for (var bi = 0; bi < boards.length; bi++)
+      if (boards[bi].id === boardId) board = boards[bi];
+    if (board) PROJECT.ui.activeBoard = board.id;  // explicit choice wins
+    else board = activePinBoard();
+    var pins = board.pins;
+    var entry = { id: pinNewId(), src: pinSvgSrc(svgText),
+                  natW: w, natH: h, w: w, h: h, at: Date.now() };
+    if (prov) {
+      entry.srcChart = prov.srcChart;
+      entry.srcName = prov.srcName;
+      entry.srcSig = prov.srcSig;
+      if (prov.srcDesc) entry.srcDesc = prov.srcDesc;
+    }
+    if (extra)
+      for (var xk in extra)
+        if (extra[xk] != null && extra[xk] !== "") entry[xk] = extra[xk];
+    pins.push(entry);
+    persist();
+    syncAll();
+    if (appWorkspace() === "pinboard") renderPinboard();
+    window.__psKeepLast = { pins: pins.length, board: board.name };
+    showActionToast("Kept " + what + " to " + board.name, "Open",
+      function () { setAppWorkspace("pinboard"); });
+  }
+  function keepComparisonMoment() {
+    var made = composeComparisonMoment();
+    if (typeof made === "string") return Promise.resolve(made);
+    pushPin(made.svg, made.w, made.h, "the comparison", null, made.prov,
+      { momEyebrow: made.text.eyebrow, momTitle: made.text.title,
+        momText: made.text.body });
+    return Promise.resolve("kept");
+  }
+  // "Pin to Pinboard" on the chart's own right-click (Torry, Aug 1 2026):
+  // just the graph, no stats card - whatever is on it, rings included.
+  function pinChartToPinboard(boardId) {
+    var host = document.querySelector(".graphbuilder2-host");
+    var svgs = host ? host.querySelectorAll("svg") : [];
+    var chart = null, area = 0;
+    for (var i = 0; i < svgs.length; i++) {
+      var r = svgs[i].getBoundingClientRect();
+      if (r.width * r.height > area) { area = r.width * r.height; chart = svgs[i]; }
+    }
+    if (!chart) { showToast("No chart to pin"); return; }
+    var w = Math.round(parseFloat(chart.getAttribute("width")) ||
+                       chart.getBoundingClientRect().width);
+    var h = Math.round(parseFloat(chart.getAttribute("height")) ||
+                       chart.getBoundingClientRect().height);
+    var clone = chart.cloneNode(true);
+    clone.removeAttribute("tabindex");
+    clone.removeAttribute("aria-label");
+    if (!clone.getAttribute("viewBox"))
+      clone.setAttribute("viewBox", "0 0 " + w + " " + h);
+    stampPinFonts(clone, chart);
+    pushPin(new XMLSerializer().serializeToString(clone), w, h, "the chart",
+            boardId, pinProvenance(chart));
+  }
+  // Inject the button whenever a focus card exists without one: the card
+  // rebuilds on every pin move, so a one-shot injection would not survive.
+  // Debounced to one pass per macrotask (the help-retarget lesson).
+  (function wireMomentButton() {
+    if (typeof MutationObserver !== "function") return;
+    function inject() {
+      var card = document.querySelector(
+        '[data-role="st-focus-card"]:not([data-ps-moment])');
+      if (!card) return;
+      card.setAttribute("data-ps-moment", "1");
+      var row = document.createElement("div");
+      row.style.cssText = "margin-top:6px;";
+      var keep = document.createElement("button");
+      keep.type = "button";
+      keep.setAttribute("data-ps-moment-keep", "1");
+      keep.textContent = "Keep";
+      // One verb everywhere - and since the workspace is the NOTEBOOK
+      // (Torry, Aug 2 2026: "pinboard" implied the freeform arranging
+      // that is Layout's job), the verb is Keep again, his original.
+      setTip(keep, "Keep this comparison in the Notebook - the chart, " +
+        "rings and statistics as one page");
+      keep.style.cssText = "-webkit-appearance:none;appearance:none;" +
+        "font:inherit;font-size:10.5px;color:#fff;background:#3573bd;" +
+        "border:1px solid #3573bd;border-radius:10px;padding:1px 11px;" +
+        "cursor:pointer;margin-right:6px;";
+      keep.addEventListener("click", function (e) {
+        e.stopPropagation();
+        keepComparisonMoment();
+      });
+      row.appendChild(keep);
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.setAttribute("data-ps-moment-copy", "1");
+      btn.textContent = "Copy with chart";
+      // setTip, never .title: the app's tooltip policy (42c) bans native
+      // tooltips, and chrome-check enforces the ban at the source level.
+      setTip(btn, "Copy this comparison and the chart, rings included, " +
+        "as one image");
+      btn.style.cssText = "-webkit-appearance:none;appearance:none;" +
+        "font:inherit;font-size:10.5px;color:#3573bd;background:#fff;" +
+        "border:1px solid #cfe0f5;border-radius:10px;padding:1px 9px;cursor:pointer;";
+      btn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        copyComparisonMoment();
+      });
+      row.appendChild(btn);
+      card.appendChild(row);
+    }
+    var pending = false;
+    var mo = new MutationObserver(function () {
+      if (pending) return;
+      pending = true;
+      window.setTimeout(function () { pending = false; inject(); }, 0);
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+  })();
   function copyActiveAsImage() {
     var ws = appWorkspace();
     if (ws === "data" || !workspaceDocument(ws))
@@ -3593,6 +4360,9 @@
     var ex = exampleById(id || "dose");
     PROJECT_CHOSEN = true;
     PROJECT.id = newProjectId();
+    PROJECT.pins = [];   // new project identity, new evidence record
+    PROJECT.pinboards = [];
+    PROJECT.ui.activeBoard = null;
     layHistoryClear();
     PROJECT.name = ex.name;
     PROJECT_REV = 0;
@@ -3853,6 +4623,12 @@
     // exclusions into the dataset, so the menu tells this host's truth:
     // Exclude / Include (Torry, Jul 29 2026).
     payload.pointMenuVerb = "exclude";
+    // Default text sizes scale up 15% here (Torry, Jul 31 2026): the
+    // standalone's larger default plot area left the engine's stock sizes
+    // reading small. Applied by the engine to DEFAULTS only - any size the
+    // user sets renders exactly as set - and jamovi, which never ships
+    // this key, is untouched. One constant, tuned by eye.
+    payload.textScale = 1.15;
     // Scatter-overlay re-ship: harvested engine-computed arrays return
     // to the payload while the data fingerprint still matches (R
     // parity - jamovi recomputes and ships them every run). A stale
@@ -4000,7 +4776,10 @@
   function hostEl() { return document.getElementById("psroot"); }
   function syncWorkspaceEmpty() {
     var ws = appWorkspace(), empty = el("ps-workspace-empty");
-    var missing = ws !== "data" && !workspaceDocument(ws);
+    // The Pinboard is document-less BY DESIGN and carries its own empty
+    // copy; "No charts yet / Create chart" over it was a category error
+    // (Torry's screenshot, Aug 1 2026).
+    var missing = ws !== "data" && ws !== "pinboard" && !workspaceDocument(ws);
     empty.style.display = missing ? "flex" : "none";
     if (!missing) return;
     var layout = ws === "layout";
@@ -4177,12 +4956,493 @@
       try { if (drop) drop.focus({ preventScroll: true }); } catch (e) {}
     }, 0);
   }
+  var BOARD_RENAME = null;   // board id whose strip tab is an input
+  // Board tabs render in the REAL tab strip - see renderBoardTabs beside
+  // syncTabs (Torry, Aug 1 2026: the in-pane bar read as "floating"; the
+  // boards now wear the exact chart/layout tab clothes).
+  function deletePinBoard(id) {
+    var boards = pinBoards();
+    for (var i = 0; i < boards.length; i++) {
+      if (boards[i].id !== id) continue;
+      var removed = boards.splice(i, 1)[0], at = i;
+      if (PROJECT.ui.activeBoard === id) PROJECT.ui.activeBoard = null;
+      persist(); syncAll();
+      if (appWorkspace() === "pinboard") renderPinboard();
+      showUndoToast("Deleted " + removed.name +
+        (removed.pins.length ? " and its " + removed.pins.length +
+          (removed.pins.length === 1 ? " page" : " pages") : ""),
+        function () {
+          var bs = pinBoards();
+          bs.splice(Math.min(at, bs.length), 0, removed);
+          PROJECT.ui.activeBoard = removed.id;
+          persist(); syncAll();
+          if (appWorkspace() === "pinboard") renderPinboard();
+        });
+      return;
+    }
+  }
+  function renderPinboard() {
+    syncTabs();
+    repairPinFonts();
+    var scroll = el("ps-pinscroll");
+    if (!scroll) return;
+    scroll.innerHTML = "";
+    // Zoom (Torry, Aug 1 2026, the Layout parity ask): "fit" keeps the
+    // curated reading width (the CSS 820px cap); a percentage sizes each
+    // page from its pin's NATURAL width, so 100% shows the chart at the
+    // exact size it renders in the Charts workspace.
+    var pz = PROJECT.ui && PROJECT.ui.pinZoom != null
+      ? PROJECT.ui.pinZoom : "fit";
+    // 50% is the floor (Torry, Aug 1 2026: at 25% the page-bar buttons no
+    // longer fit the card); a stored smaller value - the option existed
+    // for a few hours - normalizes up so the select never shows blank.
+    if (pz !== "fit" && Number(pz) && Number(pz) < 0.5) {
+      pz = 0.5;
+      if (PROJECT.ui) PROJECT.ui.pinZoom = 0.5;
+    }
+    var zsel = el("ps-pzoom");
+    if (zsel) zsel.value = String(pz);
+    var zNum = pz === "fit" ? 0 : Number(pz) || 0;
+    var pins = projectPins();
+    var selOK = false;
+    for (var si = 0; si < pins.length; si++)
+      if (pins[si].id === PIN_SEL) selOK = true;
+    if (!selOK) PIN_SEL = null;
+    if (!pins.length) {
+      scroll.removeAttribute("role");
+      scroll.removeAttribute("aria-label");
+      var empty = mkEl("div", "ps-pinboard-empty",
+        "Nothing kept yet. Right-click a chart, or press Keep on a " +
+        "comparison in the \u03a3 Statistics panel. Each lands here " +
+        "as a page.");
+      scroll.appendChild(empty);
+      syncPinInspector();
+      return;
+    }
+    for (var i = 0; i < pins.length; i++) (function (pin, idx) {
+      var page = mkEl("div", "ps-pinpage");
+      page.setAttribute("data-pin-id", pin.id);
+      if (PIN_SEL === pin.id) {
+        page.classList.add("ps-pinpage-sel");
+        page.setAttribute("aria-current", "true");
+      }
+      // Keyboard citizens (Aug 2 2026 audit): focusable, Enter/Space
+      // selects, Escape releases, Alt+Arrows move the page - the keyboard
+      // mirror of click-select and drag-reorder.
+      page.tabIndex = 0;
+      page.setAttribute("role", "listitem");
+      page.setAttribute("aria-label", "Page " + (idx + 1) + " of " +
+        pins.length + (pin.at ? ", kept " + pinKeptFmt(pin.at) : "") +
+        (PIN_SEL === pin.id ? ", selected" : ""));
+      page.addEventListener("keydown", function (e) {
+        if ((e.key === "Enter" || e.key === " ") && e.target === page) {
+          e.preventDefault();
+          page.click();
+        } else if (e.key === "Escape" && PIN_SEL) {
+          e.stopPropagation();
+          pinClearSelection();
+        } else if (e.altKey &&
+                   (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+          e.preventDefault();
+          var ps2 = projectPins(), at2 = -1;
+          for (var q = 0; q < ps2.length; q++)
+            if (ps2[q].id === pin.id) at2 = q;
+          if (at2 === -1) return;
+          var to = at2 + (e.key === "ArrowDown" ? 1 : -1);
+          if (to < 0 || to >= ps2.length) return;
+          movePinToIndex(pin.id, to, true);
+        }
+      });
+      page.addEventListener("pointerdown", function (e) {
+        pinPageDragStart(e, page, pin.id);
+      });
+      // Click selects the page; the rail shows its facts and notes. The
+      // card buttons stopPropagation, so they never toggle selection.
+      page.addEventListener("click", function () {
+        PIN_SEL = PIN_SEL === pin.id ? null : pin.id;
+        var pages = scroll.querySelectorAll(".ps-pinpage");
+        for (var pi = 0; pi < pages.length; pi++)
+          pages[pi].classList.toggle("ps-pinpage-sel",
+            pages[pi].getAttribute("data-pin-id") === PIN_SEL);
+        syncPinInspector();
+      });
+      if (zNum) {
+        // content-box: the width IS the img area; padding + border ride
+        // outside it, so 100% shows the chart at its exact natural size.
+        page.style.width =
+          Math.round((pin.natW || pin.w || 792) * zNum) + "px";
+        page.style.maxWidth = "none";
+      }
+      var img = document.createElement("img");
+      img.src = pin.src;
+      img.alt = "Kept page " + (idx + 1);
+      // Not a draggable object: Chromium's native image drag ADVERTISES
+      // "Files" in dataTransfer.types (the drag materializes as a virtual
+      // file), so grabbing a pin armed the whole-page "Drop to open" and
+      // dropping it opened the data loader (Torry's screenshot, Aug 1
+      // 2026). No legitimate gesture drags FROM a page today.
+      img.draggable = false;
+      page.appendChild(img);
+      var bar = mkEl("div", "ps-pinpage-bar");
+      bar.appendChild(mkEl("span", "ps-pinpage-num",
+        "Page " + (idx + 1) + " of " + pins.length +
+        (pin.at ? " \u00b7 kept " + pinKeptFmt(pin.at) : "")));
+      var send = document.createElement("button");
+      send.type = "button";
+      send.setAttribute("data-pin-send", pin.id);
+      send.textContent = "Send to layout\u2026";
+      setTip(send, "Place a copy of this page in a layout");
+      send.addEventListener("click", function (e) {
+        e.stopPropagation();
+        showPinSendMenu(e.clientX, e.clientY, pin.id);
+      });
+      bar.appendChild(send);
+      var copy = document.createElement("button");
+      copy.type = "button";
+      copy.setAttribute("data-pin-copy", pin.id);
+      copy.textContent = "Copy image";
+      copy.addEventListener("click", function (e) {
+        e.stopPropagation();
+        copyPinToClipboard(pin);
+      });
+      bar.appendChild(copy);
+      var del = document.createElement("button");
+      del.type = "button";
+      del.setAttribute("data-pin-delete", pin.id);
+      del.textContent = "Delete";
+      del.addEventListener("click", function (e) {
+        e.stopPropagation();
+        deletePin(pin.id);
+      });
+      bar.appendChild(del);
+      page.appendChild(bar);
+      scroll.appendChild(page);
+    })(pins[i], i);
+    scroll.setAttribute("role", "list");
+    scroll.setAttribute("aria-label", "Notebook pages");
+    // Clicking the board background releases the selection.
+    scroll.onclick = function (ev) {
+      if (ev.target !== scroll) return;
+      pinClearSelection();
+    };
+    syncPinInspector();
+  }
+  // ---- drag to reorder pages (Aug 2 2026 audit: every other surface
+  // in the app drag-reorders, and the PDF's page order follows this
+  // order, so a fixed keep-order read as breakage) ----
+  var PIN_PDRAG = null;
+  function pinPageDragStart(e, page, pinId) {
+    if (e.button !== 0 || PIN_PDRAG) return;
+    if (e.target.closest &&
+        e.target.closest("button, a, input, textarea, select")) return;
+    PIN_PDRAG = { id: pinId, el: page, startX: e.clientX,
+                  startY: e.clientY, armed: false };
+    document.addEventListener("pointermove", pinPageDragMove);
+    document.addEventListener("pointerup", pinPageDragUp);
+    document.addEventListener("keydown", pinPageDragEsc, true);
+  }
+  function pinPageDragMove(e) {
+    var d = PIN_PDRAG;
+    if (!d) return;
+    if (!d.armed) {
+      if (Math.abs(e.clientX - d.startX) < 4 &&
+          Math.abs(e.clientY - d.startY) < 4) return;
+      var scroll = el("ps-pinscroll");
+      var all = scroll ? scroll.querySelectorAll(".ps-pinpage") : [];
+      d.els = []; d.boxes = []; d.origIdx = -1;
+      for (var i = 0; i < all.length; i++) {
+        var r = all[i].getBoundingClientRect();
+        d.els.push(all[i]);
+        d.boxes.push({ t: r.top, cy: r.top + r.height / 2 });
+        if (all[i] === d.el) d.origIdx = i;
+      }
+      if (d.origIdx === -1 || d.els.length < 2) {
+        pinPageDragCleanup();
+        return;
+      }
+      d.slot = d.origIdx;
+      d.el.classList.add("ps-pinpage-dragging");
+      d.armed = true;
+    }
+    e.preventDefault();
+    // Stateless slot from CACHED centres, re-derived every frame (the
+    // pie-drag lesson: incremental swap walks mis-fire).
+    var slot = 0, k;
+    for (k = 0; k < d.boxes.length; k++) {
+      if (k === d.origIdx) continue;
+      if (d.boxes[k].cy < e.clientY) slot++;
+    }
+    d.slot = slot;
+    d.el.style.transform =
+      "translateY(" + (e.clientY - d.startY) + "px)";
+    for (k = 0; k < d.els.length; k++) {
+      if (k === d.origIdx) continue;
+      var j = k - (k > d.origIdx ? 1 : 0);
+      var f = j + (j >= slot ? 1 : 0);
+      d.els[k].style.transform = (f === k) ? "" :
+        "translateY(" + (d.boxes[f].t - d.boxes[k].t) + "px)";
+    }
+  }
+  function pinPageDragUp() {
+    var d = PIN_PDRAG;
+    pinPageDragCleanup();
+    if (!d || !d.armed) return;
+    tabSwallowNextClick();   // a drag's release also fires a click, which
+                             // would toggle the page SELECTION
+    movePinToIndex(d.id, d.slot, false);
+  }
+  function pinPageDragEsc(e) {
+    if (e.key !== "Escape" || !PIN_PDRAG) return;
+    var armed = PIN_PDRAG.armed;
+    pinPageDragCleanup();
+    if (armed) { e.stopPropagation(); tabSwallowNextClick(); }
+  }
+  function pinPageDragCleanup() {
+    var d = PIN_PDRAG;
+    PIN_PDRAG = null;
+    document.removeEventListener("pointermove", pinPageDragMove);
+    document.removeEventListener("pointerup", pinPageDragUp);
+    document.removeEventListener("keydown", pinPageDragEsc, true);
+    if (d && d.els)
+      for (var i = 0; i < d.els.length; i++)
+        d.els[i].style.transform = "";
+    if (d && d.el) d.el.classList.remove("ps-pinpage-dragging");
+  }
+  // Shared by the drag release and Alt+Arrow keyboard moves. slot is the
+  // insertion index AFTER removal (the reduced-list convention the strip
+  // drag uses too). FLIP: pages glide from their old spots via the
+  // stylesheet transition.
+  function movePinToIndex(pinId, slot, focusAfter) {
+    var pins = projectPins(), at = -1, i;
+    for (i = 0; i < pins.length; i++) if (pins[i].id === pinId) at = i;
+    if (at === -1) return;
+    var scroll = el("ps-pinscroll"), before = {};
+    var pages = scroll ? scroll.querySelectorAll(".ps-pinpage") : [];
+    for (i = 0; i < pages.length; i++)
+      before[pages[i].getAttribute("data-pin-id")] =
+        pages[i].getBoundingClientRect().top;
+    var moved = pins.splice(at, 1)[0];
+    if (slot < 0) slot = 0;
+    if (slot > pins.length) slot = pins.length;
+    pins.splice(slot, 0, moved);
+    persist();
+    renderPinboard();
+    var after = scroll ? scroll.querySelectorAll(".ps-pinpage") : [];
+    for (i = 0; i < after.length; i++) (function (pg) {
+      var id = pg.getAttribute("data-pin-id");
+      if (!(id in before)) return;
+      var dy = before[id] - pg.getBoundingClientRect().top;
+      if (Math.abs(dy) < 2) return;
+      pg.style.transition = "none";
+      pg.style.transform = "translateY(" + dy + "px)";
+      pg.getBoundingClientRect();   // reflow so the glide starts here
+      pg.style.transition = "";
+      pg.style.transform = "";
+    })(after[i]);
+    if (focusAfter && scroll) {
+      var fp = scroll.querySelector(
+        '.ps-pinpage[data-pin-id="' + pinId + '"]');
+      if (fp) fp.focus();
+    }
+  }
+  function pinClearSelection() {
+    PIN_SEL = null;
+    var scroll = el("ps-pinscroll");
+    var pages = scroll ? scroll.querySelectorAll(".ps-pinpage-sel") : [];
+    for (var i = 0; i < pages.length; i++)
+      pages[i].classList.remove("ps-pinpage-sel");
+    syncPinInspector();
+  }
+  function deletePin(id) {
+    var pins = projectPins();
+    for (var i = 0; i < pins.length; i++) {
+      if (pins[i].id !== id) continue;
+      var removed = pins.splice(i, 1)[0], at = i;
+      persist(); syncAll();
+      if (appWorkspace() === "pinboard") renderPinboard();
+      showUndoToast("Page removed from the Notebook", function () {
+        projectPins().splice(Math.min(at, projectPins().length), 0, removed);
+        persist(); syncAll();
+        if (appWorkspace() === "pinboard") renderPinboard();
+      });
+      return;
+    }
+  }
+  function copyPinToClipboard(pin) {
+    if (!navigator.clipboard || !navigator.clipboard.write ||
+        typeof window.ClipboardItem === "undefined") {
+      showToast("This browser does not allow image copying.", true);
+      return;
+    }
+    var svgText = pinSvgText(pin);
+    var blobP = svgText
+      ? rasterizeExport({ svg: svgText, w: pin.w, h: pin.h },
+                        "image/png", COPY_IMAGE_DPI)
+          .then(function (out) { return out.blob; })
+      : fetch(pin.src).then(function (r) { return r.blob(); });
+    blobP.then(function (blob) {
+      return navigator.clipboard.write([
+        new window.ClipboardItem({ "image/png": blob })]);
+    }).then(function () {
+      showToast("Page copied - paste it into slides or a document.");
+    }, function (e) {
+      showToast("Could not copy the page (" +
+        String(e && e.message || e) + ").", true);
+    });
+  }
+  function addPinToLayout(pinId, layoutId) {
+    // Across ALL boards: the layout picker may point anywhere.
+    var pin = null, everything = allPins();
+    for (var i = 0; i < everything.length; i++)
+      if (everything[i].pin.id === pinId) pin = everything[i].pin;
+    var doc = chartById(layoutId);
+    if (!pin || !doc || !isLayoutTab(doc)) return;
+    var margin = (doc.page && doc.page.margin) || 32;
+    var contentW = Math.max(160, (doc.page.w || 1008) - margin * 2);
+    var w = Math.min(pin.w || contentW, contentW);
+    var h = Math.round((pin.h || w) * (w / (pin.w || w)));
+    var items = doc.items || (doc.items = []);
+    var mx = 0, y = margin;
+    for (var j = 0; j < items.length; j++) {
+      var m2 = /^i(\d+)$/.exec(items[j].id || "");
+      if (m2) mx = Math.max(mx, Number(m2[1]));
+      var bot = (Number(items[j].y) || 0) + (Number(items[j].h) || 0);
+      if (bot + 14 > y) y = bot + 14;
+    }
+    items.push({ id: "i" + (mx + 1), kind: "image", src: pin.src,
+                 natW: pin.natW, natH: pin.natH,
+                 srcChart: pin.srcChart || undefined,
+                 x: margin, y: y, w: w, h: h });
+    if (y + h + margin > doc.page.h) {
+      doc.page.h = y + h + margin;
+      doc.page.preset = "custom";
+    }
+    persist(); syncAll();
+    if (activeChart().id === doc.id && appWorkspace() === "layout")
+      renderLayout();
+    showActionToast("Sent to " + doc.name, "Open", function () {
+      switchChart(doc.id);
+    });
+  }
+  // Export the Pinboard as a PDF, ONE PAGE PER PIN (Torry, Aug 1 2026:
+  // "export the pages of the Pinboard in a format that best allows for
+  // that. Maybe that's a PDF" - it is: the pages metaphor maps to PDF
+  // pages exactly, and svg pins convert VECTOR via the same svg2pdf that
+  // serves every other PDF here; legacy PNG pins embed as images).
+  function exportPinboardPdf(scope) {
+    // scope "active" (default) = the board on screen; "all" = every board's
+    // pages concatenated in board order; {pinId} = just that page (the
+    // right-click on a specific page, Torry Aug 1 2026).
+    var all = scope === "all";
+    var onlyPin = scope && typeof scope === "object" && scope.pinId
+      ? scope.pinId : null;
+    var pins = onlyPin
+      ? allPins().filter(function (e) { return e.pin.id === onlyPin; })
+          .map(function (e) { return e.pin; })
+      : all
+      ? allPins().map(function (e) { return e.pin; })
+      : projectPins();
+    if (!pins.length) {
+      showToast("Nothing in the Notebook to export yet.");
+      return Promise.resolve("empty");
+    }
+    var JsPDF = window.jspdf && window.jspdf.jsPDF;
+    if (!JsPDF || !JsPDF.API || typeof JsPDF.API.svg !== "function") {
+      showToast("The PDF exporter did not load. Reload and try again.", true);
+      return Promise.resolve("failed");
+    }
+    var pdf = null;
+    function pageDims(pin) {
+      return { w: Math.max(36, (pin.w || 720) * 72 / 96),
+               h: Math.max(36, (pin.h || 480) * 72 / 96) };
+    }
+    var chain = Promise.resolve();
+    pins.forEach(function (pin, idx) {
+      chain = chain.then(function () {
+        var d = pageDims(pin);
+        if (!pdf) {
+          pdf = new JsPDF({
+            orientation: d.w >= d.h ? "landscape" : "portrait",
+            unit: "pt", format: [d.w, d.h],
+            compress: true, putOnlyUsedFonts: true });
+          pdf.setProperties({
+            title: (PROJECT.name || "Pandion Plots") + " - Notebook",
+            creator: "Pandion Plots" });
+        } else {
+          pdf.addPage([d.w, d.h], d.w >= d.h ? "landscape" : "portrait");
+        }
+        var svgText = pinSvgText(pin);
+        if (svgText) {
+          var sdoc = parseExportSvg(svgText);
+          normalizePdfFonts(sdoc.documentElement);
+          return pdf.svg(sdoc.documentElement,
+            { x: 0, y: 0, width: d.w, height: d.h,
+              loadExternalStyleSheets: false });
+        }
+        pdf.addImage(pin.src, "PNG", 0, 0, d.w, d.h);
+        return null;
+      });
+    });
+    return chain.then(function () {
+      var blob = pdf.output("blob");
+      window.__psPinExportLast = { pages: pins.length, bytes: blob.size,
+                                   scope: onlyPin ? "page"
+                                     : all ? "all" : "active" };
+      var base = (PROJECT.name || "pandion")
+        .replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "-") || "pandion";
+      // The scoped file names its board; the whole record keeps the old
+      // name, so the single-board experience is byte-for-byte what it was.
+      var slug = onlyPin ? "page"
+        : all || pinBoards().length < 2 ? "notebook"
+        : (activePinBoard().name.replace(/[^\w\- ]+/g, "").trim()
+            .replace(/\s+/g, "-").toLowerCase() || "board");
+      return saveExportBlob(blob, base + "-" + slug + ".pdf", "pdf");
+    }).then(function () {
+      var boards = all ? pinBoards().filter(function (b) {
+        return b.pins.length; }).length : 1;
+      showToast("Notebook exported - " + pins.length +
+        (pins.length === 1 ? " page" : " pages") +
+        (all && boards > 1 ? " across " + boards + " sections" : "") +
+        ", vector where possible.");
+      return "exported";
+    }, function (e) {
+      if (e && e.name === "AbortError") return "cancelled";
+      showToast("Could not export the Notebook (" +
+        String(e && e.message || e) + ").", true);
+      return "failed";
+    });
+  }
+  function showPinSendMenu(x, y, pinId) {
+    var items = [];
+    for (var i = 0; i < PROJECT.charts.length; i++) (function (c) {
+      if (!isLayoutTab(c)) return;
+      items.push({ label: c.name, key: "pin-to-" + c.id,
+        action: function () { addPinToLayout(pinId, c.id); } });
+    })(PROJECT.charts[i]);
+    if (items.length) items.push("separator");
+    items.push({ label: "New layout", key: "pin-to-new",
+      action: function () {
+        var nl = newLayout();
+        PROJECT.charts.push(nl);
+        addPinToLayout(pinId, nl.id);
+      } });
+    showContextMenu(x, y, items, null);
+  }
   function render() {
     echoTimer = null;
     var host = hostEl();
     var lay = el("ps-layout");
     var ws = appWorkspace();
     syncWorkspaceEmpty();
+    var pinPane = el("ps-pinpane");
+    if (pinPane) pinPane.style.display = ws === "pinboard" ? "" : "none";
+    if (ws === "pinboard") {
+      host.style.display = "none";
+      host.classList.remove("ps-offscreen");
+      lay.style.display = "none";
+      renderPinboard();
+      return;
+    }
     if (ws !== "data" && !workspaceDocument(ws)) {
       host.style.display = "none";
       host.classList.remove("ps-offscreen");
@@ -6365,6 +7625,11 @@
   }
   // Everything a role mutation must refresh, in one place.
   function roleChanged() {
+    // A role change changes what this chart draws, exactly like a style
+    // edit (the 6585 bump) - without this, a role edit made anywhere but
+    // the chart workspace left the old snapshot marked VALID, and layouts
+    // plus the Pinboard's source-change verdict would trust it.
+    bumpSnapEpoch();
     persist();
     syncRolesRow();
     syncDataRow();
@@ -6841,6 +8106,15 @@
     var chev = tog.querySelector(".ps-varbox-chev");
     if (chev) chev.textContent = open ? "\u25be" : "\u25b8";
   }
+  function syncSizeviewDisclosure() {
+    var body = el("ps-sizeview-body"), tog = el("ps-sizeview-toggle");
+    if (!body || !tog) return;
+    var open = !!(PROJECT.ui && PROJECT.ui.sizeviewOpen);
+    body.hidden = !open;
+    tog.setAttribute("aria-expanded", open ? "true" : "false");
+    var chev = tog.querySelector(".ps-varbox-chev");
+    if (chev) chev.textContent = open ? "\u25be" : "\u25b8";
+  }
   function syncDataRow() {
     var info = el("ps-datainfo");
     var t = PROJECT.table;
@@ -7014,7 +8288,8 @@
   var GRID_WINDOW_OVERSCAN = 24;
   var GRID_VIRTUAL_ROW_LIMIT = 1000;
   var GRID_VIRTUAL_CELL_LIMIT = 20000;
-  var GRID_ROW_HEIGHT = 25;
+  var GRID_ROW_HEIGHT = 25;   // corrected from the RENDERED pitch per sync
+  var GRID_PITCH_RESYNCING = false;
   var GRID_WINDOW_START = 0;
   var GRID_WINDOW_END = 0;
   var GRID_SCROLL_FRAME = null;
@@ -8237,10 +9512,22 @@
     el("ps-data-redo").disabled = !DATA_REDO.length;
     el("ps-data-find-prev").disabled = !GRID_FIND_RESULTS.length;
     el("ps-data-find-next").disabled = !GRID_FIND_RESULTS.length;
-    el("ps-data-find-count").textContent = !GRID_FIND_QUERY ? "" :
+    var findCountTxt = !GRID_FIND_QUERY ? "" :
       (GRID_FIND_RESULTS.length
        ? (GRID_FIND_INDEX + 1) + " of " + GRID_FIND_RESULTS.length
        : "No matches");
+    el("ps-data-find-count").textContent = findCountTxt;
+    // The trigger carries the live state so a sticky query is never
+    // invisible while the popup is closed (the Filter button's idiom).
+    var findBtn = el("ps-data-find-btn");
+    if (findBtn) {
+      var findLabel = findBtn.querySelector("svg");
+      findBtn.classList.toggle("ps-data-filter-active", !!GRID_FIND_QUERY);
+      while (findLabel && findLabel.nextSibling)
+        findBtn.removeChild(findLabel.nextSibling);
+      findBtn.appendChild(document.createTextNode(
+        findCountTxt ? " Find \u00b7 " + findCountTxt : " Find"));
+    }
     var fBtn = el("ps-data-filter-btn");
     var fActive = validFilters(t).length > 0;
     fBtn.classList.toggle("ps-data-filter-active", fActive);
@@ -8266,6 +9553,20 @@
     var parts = [];
     if (rowK) parts.push(rowK + (rowK === 1 ? " row" : " rows"));
     if (valueK) parts.push(valueK + (valueK === 1 ? " value" : " values"));
+    // The dropdown trigger (Torry, Jul 31 2026): same shape as the Filter
+    // button one seat over - "Excluded \u00b7 N" - with the breakdown in
+    // the tooltip and the review list in its menu. The count span and the
+    // Restore-all button both LIVE IN THE MENU now, so their ids (and
+    // every consumer of them) survive unchanged.
+    var exBtn = el("ps-data-excl-btn");
+    if (exBtn) {
+      exBtn.textContent = "Excluded \u00b7 " + total;
+      setTip(exBtn, parts.length
+        ? parts.join(" + ") + " excluded - click to review or restore"
+        : "Review or restore excluded rows and values");
+    }
+    if (!total) hideExclMenu();
+    else if (el("ps-exclmenu").style.display === "block") renderExclMenu();
     el("ps-data-exclusions-count").textContent =
       parts.length ? parts.join(" + ") + " excluded" : "";
     el("ps-data-restore").disabled = !total;
@@ -8351,6 +9652,132 @@
     syncDataCommandBar();
     if (GRID_FIND_RESULTS.length)
       gridRevealFound(GRID_FIND_RESULTS[GRID_FIND_INDEX]);
+  }
+  // The exclusion review menu (Torry, Jul 31 2026): breakdown, restore-all,
+  // and every excluded row/value as a line the user can JUMP to (the find
+  // reveal) or restore ONE AT A TIME - "go through and look at all those
+  // that are excluded". Mirrors the filter menu: fixed-position dialog
+  // under its button, Escape and outside-pointerdown dismiss, focus into
+  // the first control on open.
+  var EXCL_MENU_CAP = 200;
+  function exclItems(t) {
+    var items = [], col, row, i;
+    var rowIds = t.excludedRows ? Object.keys(t.excludedRows) : [];
+    for (i = 0; i < rowIds.length; i++) {
+      row = t.caseIds.indexOf(rowIds[i]);
+      if (row >= 0) items.push({ kind: "row", row: row });
+    }
+    items.sort(function (a, b) { return a.row - b.row; });
+    var vals = [];
+    if (t.excluded) for (col in t.excluded) {
+      if (!Object.prototype.hasOwnProperty.call(t.excluded, col)) continue;
+      for (row in t.excluded[col]) {
+        if (!Object.prototype.hasOwnProperty.call(t.excluded[col], row)) continue;
+        vals.push({ kind: "value", col: col, row: Number(row) });
+      }
+    }
+    vals.sort(function (a, b) {
+      return a.row - b.row || t.order.indexOf(a.col) - t.order.indexOf(b.col);
+    });
+    return items.concat(vals);
+  }
+  function renderExclMenu() {
+    var t = PROJECT.table;
+    if (!t) return;
+    var items = exclItems(t);
+    var list = el("ps-excl-list");
+    while (list.firstChild) list.removeChild(list.firstChild);
+    var shown = Math.min(items.length, EXCL_MENU_CAP);
+    for (var i = 0; i < shown; i++) (function (it) {
+      var rowEl = document.createElement("div");
+      rowEl.className = "ps-excl-item";
+      var jump = document.createElement("button");
+      jump.type = "button";
+      jump.className = "ps-excl-jump";
+      jump.setAttribute("data-tip", "Show this cell in the grid");
+      if (it.kind === "row") {
+        jump.textContent = "Row " + (it.row + 1) + " (whole row)";
+      } else {
+        var raw = t.raw[it.col] ? t.raw[it.col][it.row] : "";
+        jump.textContent = it.col + " \u00b7 row " + (it.row + 1) + " \u00b7 ";
+        var v = document.createElement("span");
+        v.className = "ps-excl-val";
+        v.textContent = (raw === null || raw === undefined || raw === "")
+          ? "(empty)" : String(raw);
+        jump.appendChild(v);
+      }
+      jump.addEventListener("click", function () {
+        var col = it.kind === "value" ? it.col
+          : (gridVisibleColumns(t)[0] || t.order[0]);
+        // Jumping is a LOOK-AT action: close the menu so it cannot sit on
+        // top of the very cell it just revealed. Restoring, by contrast,
+        // keeps the menu open - that is the review flow.
+        hideExclMenu();
+        gridRevealFound({ col: col, row: it.row });
+      });
+      var restore = document.createElement("button");
+      restore.type = "button";
+      restore.className = "ps-excl-restore";
+      restore.textContent = "Restore";
+      restore.addEventListener("click", function () {
+        if (it.kind === "row") gridSetExcludedRows([it.row], false, "data");
+        else gridSetExcludedCells([{ col: it.col, row: it.row }], false, "data");
+        // syncDataCommandBar re-renders this list (or closes the menu at
+        // zero), so the review flow continues from the same open panel.
+      });
+      rowEl.appendChild(jump);
+      rowEl.appendChild(restore);
+      list.appendChild(rowEl);
+    })(items[i]);
+    if (items.length > shown) {
+      var more = document.createElement("div");
+      more.className = "ps-excl-more";
+      more.textContent = "\u2026and " + (items.length - shown) +
+        " more. Restore all above, or restore some of these first.";
+      list.appendChild(more);
+    }
+  }
+  // The Find popup deliberately has NO outside-pointerdown dismiss, unlike
+  // Filter and Excluded: find is a WORKING mode - the user clicks matches
+  // in the grid while it is open - so a stray grid click must never close
+  // it. Escape and the X are the exits (the Chrome find-bar contract).
+  function showFindPop() {
+    var m = el("ps-findpop");
+    if (m.style.display === "block") return;
+    m.style.display = "block";
+    var r = el("ps-data-find-btn").getBoundingClientRect();
+    m.style.left = Math.max(8, Math.min(r.left,
+      window.innerWidth - m.offsetWidth - 8)) + "px";
+    m.style.top = Math.max(8, Math.min(r.bottom + 4,
+      window.innerHeight - m.offsetHeight - 8)) + "px";
+    el("ps-data-find-btn").setAttribute("aria-expanded", "true");
+  }
+  function hideFindPop() {
+    var m = el("ps-findpop");
+    if (!m || m.style.display !== "block") return;
+    m.style.display = "none";
+    var b = el("ps-data-find-btn");
+    if (b) b.setAttribute("aria-expanded", "false");
+  }
+  function showExclMenu() {
+    var m = el("ps-exclmenu");
+    renderExclMenu();
+    var r = el("ps-data-excl-btn").getBoundingClientRect();
+    m.style.display = "block";
+    m.style.left = Math.max(8, Math.min(r.left,
+      window.innerWidth - m.offsetWidth - 8)) + "px";
+    m.style.top = Math.max(8, Math.min(r.bottom + 4,
+      window.innerHeight - m.offsetHeight - 8)) + "px";
+    el("ps-data-excl-btn").setAttribute("aria-expanded", "true");
+    var first = m.querySelector("button");
+    if (first) first.focus();
+  }
+  function hideExclMenu() {
+    var m = el("ps-exclmenu");
+    if (!m || m.style.display !== "block") return;
+    m.style.display = "none";
+    var b = el("ps-data-excl-btn");
+    if (b) b.setAttribute("aria-expanded", "false");
   }
   function showDataMenu() {
     var button = el("ps-data-more"), box = button.getBoundingClientRect();
@@ -8534,6 +9961,38 @@
     // both axes synchronously after the new spacer geometry is present.
     grid.scrollTop = priorScrollTop;
     grid.scrollLeft = priorScrollLeft;
+    // Row-pitch self-measurement (Torry, Jul 31 2026). GRID_ROW_HEIGHT said
+    // 25 while the rows actually rendered at 22, so everything that maps a
+    // row number to a scroll position - Find's reveal, jump-to-row, the
+    // virtual-window spacers - was off by 3px PER ROW. The error compounds
+    // with depth: each Find "next" left the highlight 21px higher than the
+    // last (measured), until it sat above the visible data, which is
+    // exactly the report. Rendered geometry is the only truth (cell padding
+    // and line-height move with fonts and future CSS), so read the pitch
+    // off two adjacent real rows and let every consumer pick it up from
+    // the variable. One guarded re-sync rebuilds the spacer geometry the
+    // moment the value first corrects; headless DOMs (linkedom) measure 0
+    // and keep the default.
+    if (!GRID_PITCH_RESYNCING) {
+      var pTrs = grid.querySelectorAll("tbody tr");
+      var pA = null, pB = null;
+      for (var pi = 0; pi < pTrs.length && !pB; pi++) {
+        if (!pTrs[pi].querySelector("td[data-gc]")) continue;   // spacers
+        if (!pA) pA = pTrs[pi];
+        else pB = pTrs[pi];
+      }
+      if (pA && pB && pA.getBoundingClientRect) {
+        var pitch = pB.getBoundingClientRect().top -
+                    pA.getBoundingClientRect().top;
+        if (isFinite(pitch) && pitch > 14 && pitch < 60 &&
+            Math.abs(pitch - GRID_ROW_HEIGHT) > 0.5) {
+          GRID_ROW_HEIGHT = pitch;
+          GRID_PITCH_RESYNCING = true;
+          try { syncDataGrid(); } finally { GRID_PITCH_RESYNCING = false; }
+          return;
+        }
+      }
+    }
     el("ps-gridfoot").innerHTML = gridFootHtml(t);
     gridRefreshFindResults();
     syncDataCommandBar();
@@ -9618,6 +11077,47 @@
   function gridCellFromTarget(target) {
     return target && target.closest ? target.closest("td[data-gc]") : null;
   }
+  // The drag-selection edge auto-scroll loop. Parks itself the moment the
+  // pointer is back inside the edges or the drag ends; each pointermove
+  // re-kicks it. Selection is extended toward a CLAMPED point just inside
+  // the grid (below the sticky header) so elementFromPoint lands on a data
+  // cell rather than on whatever chrome the pointer is actually over.
+  var GRID_DRAG_SCROLL_RAF = 0;
+  function gridDragKickAutoScroll() {
+    if (!GRID_DRAG_SCROLL_RAF && typeof requestAnimationFrame === "function")
+      GRID_DRAG_SCROLL_RAF = requestAnimationFrame(gridDragAutoScrollTick);
+  }
+  function gridDragAutoScrollTick() {
+    GRID_DRAG_SCROLL_RAF = 0;
+    var drag = GRID_DRAG;
+    if (!drag || !drag.started ||
+        typeof drag.px !== "number" || typeof drag.py !== "number") return;
+    var grid = el("ps-datagrid");
+    var box = grid.getBoundingClientRect();
+    var EDGE = 24, MAXV = 32;
+    var vx = 0, vy = 0;
+    if (drag.py < box.top + EDGE)
+      vy = -Math.min(MAXV, (box.top + EDGE - drag.py) * 0.3 + 2);
+    else if (drag.py > box.bottom - EDGE)
+      vy = Math.min(MAXV, (drag.py - (box.bottom - EDGE)) * 0.3 + 2);
+    if (drag.px < box.left + EDGE)
+      vx = -Math.min(MAXV, (box.left + EDGE - drag.px) * 0.3 + 2);
+    else if (drag.px > box.right - EDGE)
+      vx = Math.min(MAXV, (drag.px - (box.right - EDGE)) * 0.3 + 2);
+    if (!vx && !vy) return;                    // parked; a move re-kicks
+    if (vy) grid.scrollTop += vy;
+    if (vx) grid.scrollLeft += vx;
+    var cx = Math.max(box.left + 4, Math.min(drag.px, box.right - 4));
+    var cy = Math.max(box.top + 32, Math.min(drag.py, box.bottom - 6));
+    var td = gridPointerCell({ clientX: cx, clientY: cy });
+    if (td) {
+      drag.focusCol = td.getAttribute("data-gc");
+      drag.focusRow = Number(td.getAttribute("data-gr"));
+      gridSetSelection(drag.anchorCol, drag.anchorRow,
+                       drag.focusCol, drag.focusRow);
+    }
+    GRID_DRAG_SCROLL_RAF = requestAnimationFrame(gridDragAutoScrollTick);
+  }
   function gridPointerCell(e) {
     var target = null;
     if (document.elementFromPoint)
@@ -9644,6 +11144,19 @@
     el("ps-data-redo").addEventListener("click", dataRedo);
     el("ps-data-find").addEventListener("input", function () {
       gridSetFindQuery(this.value);
+    });
+    el("ps-data-find-btn").addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (el("ps-findpop").style.display === "block") hideFindPop();
+      else {
+        showFindPop();
+        el("ps-data-find").focus();
+        el("ps-data-find").select();
+      }
+    });
+    el("ps-findpop-close").addEventListener("click", function () {
+      hideFindPop();
+      el("ps-datagrid").focus();
     });
     el("ps-data-replace-toggle").addEventListener("click", function () {
       var open = el("ps-data-replace-wrap").hasAttribute("hidden");
@@ -9672,8 +11185,16 @@
         gridFindStep(e.shiftKey ? -1 : 1);
       } else if (e.key === "Escape" && this.value) {
         e.preventDefault();
+        e.stopPropagation();   // this press clears; it must not also close
         this.value = "";
         gridSetFindQuery("");
+      } else if (e.key === "Escape") {
+        // Empty box: this press closes the popup and hands focus back to
+        // the grid - the two-step Escape every find bar teaches.
+        e.preventDefault();
+        e.stopPropagation();
+        hideFindPop();
+        el("ps-datagrid").focus();
       }
     });
     el("ps-data-find-prev").addEventListener("click", function () {
@@ -9687,6 +11208,27 @@
       e.stopPropagation();
       if (el("ps-filtermenu").style.display === "block") hideFilterMenu();
       else showFilterMenu();
+    });
+    // The exclusion dropdown mirrors the Filter wiring above verbatim:
+    // toggle on the button, outside-pointerdown and Escape dismiss.
+    el("ps-data-excl-btn").addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (el("ps-exclmenu").style.display === "block") hideExclMenu();
+      else showExclMenu();
+    });
+    document.addEventListener("pointerdown", function (e) {
+      var xm = el("ps-exclmenu");
+      if (xm.style.display !== "block") return;
+      if (e.target.closest && (e.target.closest("#ps-exclmenu") ||
+          e.target.closest("#ps-data-excl-btn"))) return;
+      hideExclMenu();
+    }, true);
+    el("ps-exclmenu").addEventListener("keydown", function (e) {
+      if (e.key === "Escape") {
+        e.preventDefault(); e.stopPropagation();
+        hideExclMenu();
+        el("ps-data-excl-btn").focus();
+      }
     });
     document.addEventListener("pointerdown", function (e) {
       var fm = el("ps-filtermenu");
@@ -9797,8 +11339,26 @@
           ? CSS.escape(name) : name) + '"], td[data-gc="' +
         (window.CSS && CSS.escape ? CSS.escape(name) : name) + '"]');
     }
-    function colMoveSetShift(name, px, glide) {
-      var cells = colMoveCells(name);
+    function colMoveSetShift(name, px, glide, st) {
+      // Cell lists are CACHED on the gesture (st.cells) and writes are
+      // skipped when the shift is unchanged (st.lastShift). The first shape
+      // of this re-queried every column and rewrote style on EVERY cell of
+      // EVERY column per pointermove - roughly 4,300 writes per mouse event
+      // on an 18x240 table - which is exactly the lag and jitter Torry
+      // reported when the mouse outran the event stream (Jul 31 2026).
+      // Nothing rebuilds the grid mid-gesture, so the cache cannot go
+      // stale before commit or cancel.
+      var cells;
+      if (st) {
+        if (!st.cells) st.cells = {};
+        if (!st.lastShift) st.lastShift = {};
+        if (st.lastShift[name] === px) return;
+        st.lastShift[name] = px;
+        cells = st.cells[name] ||
+          (st.cells[name] = Array.prototype.slice.call(colMoveCells(name)));
+      } else {
+        cells = colMoveCells(name);
+      }
       for (var i = 0; i < cells.length; i++) {
         cells[i].style.transition = glide ? "transform 120ms ease" : "";
         cells[i].style.transform = px ? "translateX(" + px + "px)" : "";
@@ -9811,7 +11371,7 @@
       document.body.classList.remove("ps-col-moving");
       if (!commitRebuild) {
         for (var i = 0; i < st.names.length; i++)
-          colMoveSetShift(st.names[i], 0, false);
+          colMoveSetShift(st.names[i], 0, false, st);
       }
       // commitRebuild: the reorder re-renders the grid, which rebuilds
       // every cell without transforms - nothing to restore.
@@ -9828,22 +11388,30 @@
       }
       return slot;
     }
+    // Returns TRUE only when the order actually changed (and the grid was
+    // rebuilt). The no-op paths MUST say so: the drop handler used to skip
+    // restoring the drag transforms on the promise that this re-render
+    // would wipe them, but a drop in the dead zone around the column's own
+    // position hits the to === from return, nothing re-renders, and the
+    // dragged column STUCK overlapping its neighbor with a gap where it
+    // belonged (Torry's screenshot, Jul 31 2026).
     function gridMoveColumnTo(col, beforeCol) {
       var t = PROJECT.table;
-      if (!t) return;
+      if (!t) return false;
       var from = t.order.indexOf(col);
-      if (from < 0) return;
+      if (from < 0) return false;
       var to = beforeCol == null ? t.order.length - 1
         : t.order.indexOf(beforeCol);
-      if (to < 0) return;
+      if (to < 0) return false;
       if (beforeCol != null && from < to) to--;
-      if (to === from) return;
+      if (to === from) return false;
       dataMark("moving " + col);
       t.order.splice(from, 1);
       t.order.splice(to, 0, col);
       t.edited = true;
       persist(); syncAll(); render();
       showToast(col + " moved");
+      return true;
     }
     grid.addEventListener("pointerdown", function (e) {
       if (e.button !== 0 ||
@@ -9921,30 +11489,42 @@
             COL_MOVE = cand;
             document.body.classList.add("ps-col-moving");
           }
-          var dx = ev.clientX - cand.sx;
-          colMoveSetShift(cand.col, dx, false);
-          var slot = colMoveSlotFor(cand, dx);
-          if (slot !== cand.slot) cand.slot = slot;
-          var w = cand.widths[cand.from];
-          for (var j = 0; j < cand.names.length; j++) {
-            if (j === cand.from) continue;
-            // Visible index of column j once the dragged one is removed.
-            var jj = j < cand.from ? j : j - 1;
-            var shift = 0;
-            if (jj >= cand.slot) shift = w;          // parted rightward
-            if (j < cand.from && jj >= cand.slot) shift = w;
-            if (j > cand.from && jj < cand.slot) shift = -w;
-            if (j < cand.from && jj < cand.slot) shift = 0;
-            if (j > cand.from && jj >= cand.slot) shift = 0;
-            colMoveSetShift(cand.names[j], shift, true);
-          }
+          // Coalesce to one paint per frame: pointermove can outrun the
+          // display, and the work should happen once per drawn frame, not
+          // once per event.
+          cand.pendingDx = ev.clientX - cand.sx;
+          if (cand.raf) return;
+          cand.raf = requestAnimationFrame(function () {
+            cand.raf = 0;
+            if (COL_MOVE !== cand) return;   // gesture ended before the frame
+            var dx = cand.pendingDx;
+            colMoveSetShift(cand.col, dx, false, cand);
+            var slot = colMoveSlotFor(cand, dx);
+            if (slot !== cand.slot) cand.slot = slot;
+            var w = cand.widths[cand.from];
+            for (var j = 0; j < cand.names.length; j++) {
+              if (j === cand.from) continue;
+              // Visible index of column j once the dragged one is removed.
+              var jj = j < cand.from ? j : j - 1;
+              var shift = 0;
+              if (jj >= cand.slot) shift = w;          // parted rightward
+              if (j < cand.from && jj >= cand.slot) shift = w;
+              if (j > cand.from && jj < cand.slot) shift = -w;
+              if (j < cand.from && jj < cand.slot) shift = 0;
+              if (j > cand.from && jj >= cand.slot) shift = 0;
+              colMoveSetShift(cand.names[j], shift, true, cand);
+            }
+          });
         };
         cand.onUp = function (ev) {
           cand.detach();   // ALWAYS: a sub-threshold click must leak nothing
+          if (cand.raf) { cancelAnimationFrame(cand.raf); cand.raf = 0; }
           var wasArmed = cand.armed;
-          var finalSlot = cand.slot;
-          colMoveClear(wasArmed);
-          if (!wasArmed) return;
+          if (!wasArmed) { colMoveClear(false); return; }
+          // Slot from the RELEASE coordinates, not the last painted frame:
+          // with the rAF coalescing above, the final pointermove may not
+          // have been drawn yet when the button comes up.
+          var finalSlot = colMoveSlotFor(cand, ev.clientX - cand.sx);
           COL_MOVE_DONE_AT = Date.now();
           // The column that will sit immediately AFTER the drop, in the
           // visible order with the dragged column removed.
@@ -9953,12 +11533,17 @@
             if (i !== cand.from) others.push(cand.names[i]);
           var beforeCol = finalSlot >= others.length
             ? null : others[finalSlot];
-          gridMoveColumnTo(cand.col, beforeCol);
+          var moved = gridMoveColumnTo(cand.col, beforeCol);
+          // moved: the rebuild wiped every transform, nothing to restore.
+          // NOT moved (the dead zone around the column's own slot): restore
+          // the geometry, or the dragged column sticks where it was dropped.
+          colMoveClear(moved);
         };
         cand.onKey = function (ev) {
           if (ev.key !== "Escape" || !cand.armed) return;
           ev.stopPropagation();
           cand.detach();
+          if (cand.raf) { cancelAnimationFrame(cand.raf); cand.raf = 0; }
           colMoveClear(false);   // geometry restored, gesture dead, no commit
         };
         document.addEventListener("pointermove", cand.onMove);
@@ -10005,11 +11590,15 @@
           if (nativeSelection) nativeSelection.removeAllRanges();
         } catch (ignore) {}
       }
-      var box = grid.getBoundingClientRect();
-      if (e.clientY < box.top + 20) grid.scrollTop -= 14;
-      else if (e.clientY > box.bottom - 20) grid.scrollTop += 14;
-      if (e.clientX < box.left + 20) grid.scrollLeft -= 14;
-      else if (e.clientX > box.right - 20) grid.scrollLeft += 14;
+      // Edge auto-scroll rides a frame loop, not the event stream (Torry,
+      // Jul 31 2026: "in Excel it keeps scrolling"). The old fixed 14px per
+      // pointermove meant a pointer held STILL past the edge stopped
+      // scrolling entirely - no movement, no events, no scroll - which is
+      // most of what made drag-selection feel choppy next to Excel and
+      // Sheets. The loop below reads the remembered pointer position every
+      // frame, with speed proportional to how far past the edge it sits.
+      drag.px = e.clientX; drag.py = e.clientY;
+      gridDragKickAutoScroll();
       var td = gridPointerCell(e);
       if (td) {
         drag.focusCol = td.getAttribute("data-gc");
@@ -10578,6 +12167,105 @@
         layPlaceImage(pend.src, pend.natW, pend.natH,
           "could not downscale - original kept");
       });
+    });
+    // Paste INTO a layout (Torry, Jul 31 2026): the paste EVENT, not the
+    // async clipboard API - the event carries data without a permission
+    // prompt, works on file://, and fires exactly when the user presses
+    // Cmd/Ctrl+V. Breadth ruling: IMAGES (a copied chart, a kept page, a
+    // screenshot) and PLAIN TEXT become items; anything else is refused
+    // with a toast naming what works. The internal layout clipboard keeps
+    // priority - the keydown handler that serves it runs first and this
+    // handler stands down while it has content.
+    document.addEventListener("paste", function (e) {
+      if (appWorkspace() !== "layout") return;
+      var doc = workspaceDocument("layout");
+      if (!doc) return;
+      var t = e.target;
+      if (t && t.closest &&
+          t.closest("input, textarea, [contenteditable]")) return;
+      if (layHasClipboard()) return;   // internal cut/paste wins
+      var cd = e.clipboardData;
+      if (!cd) return;
+      var img = null;
+      for (var i = 0; i < cd.items.length; i++)
+        if (cd.items[i].kind === "file" &&
+            /^image\//.test(cd.items[i].type)) img = cd.items[i];
+      if (img) {
+        e.preventDefault();
+        var f = img.getAsFile();
+        var rd = new FileReader();
+        rd.onload = function () {
+          var probe = new Image();
+          probe.onload = function () {
+            layPlaceImage(String(rd.result),
+              probe.naturalWidth || 300, probe.naturalHeight || 200,
+              "pasted");
+          };
+          probe.src = String(rd.result);
+        };
+        rd.readAsDataURL(f);
+        return;
+      }
+      var txt = cd.getData("text/plain");
+      if (txt && txt.trim()) {
+        e.preventDefault();
+        var pos = layStagger();
+        layAddItem({ id: layNewItemId(), kind: "text",
+          text: txt.trim().slice(0, 2000), x: pos.x, y: pos.y,
+          w: 260, h: 60, size: 14 });
+        showToast("Text pasted \u00b7 drag to place");
+        return;
+      }
+      showToast("Paste an image or text - other clipboard content is not " +
+        "supported in layouts.", true);
+    });
+    el("ps-pininsp-bnote").addEventListener("input", function () {
+      activePinBoard().note = this.value;
+      if (PIN_NOTE_T) clearTimeout(PIN_NOTE_T);
+      PIN_NOTE_T = setTimeout(function () { persist(false); }, 600);
+    });
+    el("ps-pininsp-open").addEventListener("click", function () {
+      var pins = projectPins();
+      for (var i = 0; i < pins.length; i++) {
+        if (pins[i].id !== PIN_SEL || !pins[i].srcChart) continue;
+        if (!chartById(pins[i].srcChart)) return;
+        switchChart(pins[i].srcChart);
+        setAppWorkspace("chart");
+        return;
+      }
+    });
+    el("ps-pininsp-note").addEventListener("input", function () {
+      var pins = projectPins();
+      for (var i = 0; i < pins.length; i++)
+        if (pins[i].id === PIN_SEL) pins[i].note = this.value;
+      if (PIN_NOTE_T) clearTimeout(PIN_NOTE_T);
+      PIN_NOTE_T = setTimeout(function () { persist(false); }, 600);
+    });
+    el("ps-pzoom").addEventListener("change", function () {
+      PROJECT.ui.pinZoom = this.value === "fit" ? "fit" : Number(this.value);
+      persist(false);
+      if (appWorkspace() === "pinboard") renderPinboard();
+    });
+    el("ps-laddpin").addEventListener("click", function (e) {
+      var doc = workspaceDocument("layout");
+      if (!doc) return;
+      var everything = allPins();
+      if (!everything.length) {
+        showActionToast("Nothing in the Notebook yet", "Open Notebook",
+          function () { setAppWorkspace("pinboard"); });
+        return;
+      }
+      var manyBoards = pinBoards().length > 1;
+      var items = [], lastBoard = null, pageNo = 0;
+      for (var i = 0; i < everything.length; i++) (function (entry) {
+        if (entry.board !== lastBoard) { lastBoard = entry.board; pageNo = 0; }
+        pageNo++;
+        items.push({ label: (manyBoards ? entry.board.name + " \u00b7 " : "") +
+            "Page " + pageNo, key: "pin-add-" + entry.pin.id,
+          action: function () { addPinToLayout(entry.pin.id, doc.id); } });
+      })(everything[i]);
+      var r = e.target.getBoundingClientRect();
+      showContextMenu(r.left, r.bottom + 4, items, null);
     });
     el("ps-laddtext").addEventListener("click", function () {
       layAddText("Text", 14, false);
@@ -12066,7 +13754,7 @@
   function renderLayoutGallery() {
     var charts = layoutProjectCharts();
     if (layoutTemplateByKey(LAYOUT_TEMPLATE_KEY).slots > charts.length)
-      LAYOUT_TEMPLATE_KEY = charts.length ? "single" : "blank";
+      LAYOUT_TEMPLATE_KEY = "blank";
     var root = el("ps-layout-template-grid");
     root.innerHTML = "";
     var orientationButtons = document.querySelectorAll(
@@ -12112,7 +13800,11 @@
   }
   function showLayoutGallery() {
     var charts = layoutProjectCharts();
-    LAYOUT_TEMPLATE_KEY = charts.length ? "single" : "blank";
+    // BLANK by default (Torry, Aug 1 2026: "the layout shouldn't, by
+    // default, have a chart in it if you didn't place a chart in it").
+    // The gallery used to preselect "single" whenever charts existed,
+    // which auto-placed one - the templates stay one click away.
+    LAYOUT_TEMPLATE_KEY = "blank";
     el("ps-layout-template-labels").__psChosen = false;
     renderLayoutGallery();
     openShellDialog("ps-layout-gallery");
@@ -12196,11 +13888,15 @@
     persist(); syncAll(); render();
   }
   function beginDocumentRename(id) {
-    if (!chartById(id)) return;
+    var doc = chartById(id);
+    if (!doc) return;
     if (PROJECT.activeChart !== id) switchChart(id);
+    // The rail's This-document section is retired (Torry, Aug 2 2026):
+    // renaming happens where the name lives, the tab's inline input.
     window.setTimeout(function () {
-      var input = el("ps-inspector-docname");
-      try { input.focus(); input.select(); } catch (ignore) {}
+      var tab = el("ps-tabs").querySelector(
+        '.ps-tab[data-chart-id="' + id + '"]');
+      if (tab) renameChartInline(tab, doc);
     }, 0);
   }
   // Tab drag-reorder, POINTER-based (the engine's histogram-drag idiom;
@@ -12313,7 +14009,22 @@
     tabDragCleanup();
     if (!d || !d.armed) return;
     tabSwallowNextClick();
-    moveChartToIndex(d.id, d.slot);
+    // Board tabs ride the SAME drag machinery (they are .ps-tab elements
+    // in the same strip); only the commit differs, dispatched by id.
+    if (chartById(d.id)) moveChartToIndex(d.id, d.slot);
+    else moveBoardToIndex(d.id, d.slot);
+  }
+  function moveBoardToIndex(boardId, slot) {
+    var boards = pinBoards(), at = -1, i;
+    for (i = 0; i < boards.length; i++)
+      if (boards[i].id === boardId) at = i;
+    if (at === -1) return;
+    var moved = boards.splice(at, 1)[0];
+    if (slot < 0) slot = 0;
+    if (slot > boards.length) slot = boards.length;
+    boards.splice(slot, 0, moved);
+    persist();      // the all-boards PDF follows board order
+    syncTabs();
   }
   function tabDragEsc(e) {
     if (e.key !== "Escape" || !TAB_PDRAG) return;
@@ -12394,6 +14105,169 @@
     m.style.left = Math.min(r.left, window.innerWidth - 150) + "px";
     m.style.top = Math.min(r.bottom + 3, window.innerHeight - 84) + "px";
   }
+  // Board tabs in the REAL strip (Torry, Aug 1 2026): same classes, same
+  // active treatment, same double-click rename and per-tab close as the
+  // chart/layout tabs - plus a pin icon before the name, the layout-tab
+  // convention. The strip "+" makes a BOARD here.
+  var BOARD_TAB_CLICK = { id: null, at: 0 };
+  function renderBoardTabs(tablist, bar) {
+    var boards = pinBoards(), active = activePinBoard();
+    for (var i = 0; i < boards.length; i++) (function (b) {
+      if (BOARD_RENAME === b.id) {
+        var input = document.createElement("input");
+        input.type = "text";
+        input.value = b.name;
+        input.maxLength = 60;
+        input.className = "ps-tab-rename";
+        input.setAttribute("data-board-rename", b.id);
+        input.setAttribute("aria-label", "Section name");
+        function commit() {
+          var v = String(input.value || "").trim();
+          BOARD_RENAME = null;
+          if (v) b.name = v;
+          persist(); syncAll();
+          if (appWorkspace() === "pinboard") renderPinboard();
+        }
+        input.addEventListener("keydown", function (e) {
+          if (e.key === "Enter") { e.preventDefault(); commit(); }
+          else if (e.key === "Escape") {
+            e.preventDefault(); e.stopPropagation();
+            BOARD_RENAME = null; syncTabs();
+          }
+        });
+        input.addEventListener("blur", function () {
+          if (BOARD_RENAME === b.id) commit();
+        });
+        tablist.appendChild(input);
+        window.setTimeout(function () {
+          try { input.focus(); input.select(); } catch (ignore) {}
+        }, 0);
+        return;
+      }
+      var isActive = b.id === active.id;
+      var tab = mkEl("div", "ps-tab" + (isActive ? " ps-tab-active" : ""));
+      tab.setAttribute("data-board-id", b.id);
+      tab.setAttribute("role", "presentation");
+      setTip(tab, b.name + " \u00b7 " + b.pins.length +
+        (b.pins.length === 1 ? " page" : " pages") +
+        " (double-click to rename)");
+      var select = mkEl("button", "ps-tab-select");
+      select.type = "button";
+      select.id = "ps-board-tab-" + b.id;
+      select.setAttribute("role", "tab");
+      select.setAttribute("aria-controls", "ps-pinpane");
+      select.setAttribute("aria-selected", isActive ? "true" : "false");
+      select.tabIndex = isActive ? 0 : -1;
+      var ic = mkEl("span", "");
+      ic.setAttribute("aria-hidden", "true");
+      ic.innerHTML = '<svg class="ps-ticon" width="12" height="12"' +
+        ' viewBox="0 0 12 12">' +
+        '<rect x="1" y="0.5" width="8.5" height="11" rx="1.2"' +
+        ' fill="#9ec2e8"/>' +
+        '<rect x="8" y="2.5" width="3" height="3.5" rx="1"' +
+        ' fill="#5b93cc"/></svg>';
+      select.appendChild(ic);
+      select.appendChild(mkEl("span", "ps-tab-name", b.name));
+      tab.appendChild(select);
+      select.addEventListener("click", function () {
+        // Manual double-click: the first click's board switch rebuilds the
+        // strip, so a native dblclick never fires (the chart-tab lesson).
+        var now = Date.now();
+        if (BOARD_TAB_CLICK.id === b.id && now - BOARD_TAB_CLICK.at < 450) {
+          BOARD_TAB_CLICK = { id: null, at: 0 };
+          BOARD_RENAME = b.id; syncTabs();
+          return;
+        }
+        BOARD_TAB_CLICK = { id: b.id, at: now };
+        PROJECT.ui.activeBoard = b.id;
+        persist(false); syncAll();
+        if (appWorkspace() === "pinboard") renderPinboard();
+      });
+      select.addEventListener("keydown", function (e) {
+        if (e.key === "F2") {
+          e.preventDefault(); e.stopPropagation();
+          BOARD_RENAME = b.id; syncTabs();
+          return;
+        }
+        if (e.key !== "ArrowLeft" && e.key !== "ArrowRight" &&
+            e.key !== "Home" && e.key !== "End") return;
+        var bs = pinBoards(), at = -1;
+        for (var k = 0; k < bs.length; k++) if (bs[k].id === b.id) at = k;
+        var next = e.key === "Home" ? 0 : e.key === "End" ? bs.length - 1 :
+          (at + (e.key === "ArrowRight" ? 1 : -1) + bs.length) % bs.length;
+        if (next === at) return;
+        e.preventDefault();
+        PROJECT.ui.activeBoard = bs[next].id;
+        persist(false); syncAll();
+        if (appWorkspace() === "pinboard") renderPinboard();
+        var moved = document.getElementById("ps-board-tab-" + bs[next].id);
+        if (moved) moved.focus();
+      });
+      tab.addEventListener("contextmenu", function (e) {
+        e.preventDefault();
+        showContextMenu(e.clientX, e.clientY, [
+          { label: "Rename section\u2026", key: "board-rename",
+            action: function () { BOARD_RENAME = b.id; syncTabs(); } },
+          { label: "Delete section", key: "board-delete",
+            action: function () { deletePinBoard(b.id); } }
+        ], null);
+      });
+      // Drag to reorder, exactly like the chart tabs (Aug 2 2026 audit:
+      // the "same as document tabs" promise was missing this half).
+      tab.addEventListener("pointerdown", function (e) {
+        tabPointerDown(e, tab, b.id);
+      });
+      if (boards.length > 1) {
+        var tx = mkEl("button", "ps-tab-x", "\u00d7");
+        tx.type = "button";
+        tx.setAttribute("data-board-id", b.id);
+        tx.setAttribute("aria-hidden", "true");
+        tx.tabIndex = -1;
+        setTip(tx, "Delete " + b.name);
+        tx.addEventListener("pointerdown", function (e) {
+          e.stopPropagation();
+        });
+        tx.addEventListener("click", function (e) {
+          e.stopPropagation();
+          deletePinBoard(b.id);
+        });
+        tab.appendChild(tx);
+      }
+      tablist.appendChild(tab);
+    })(boards[i]);
+    // The labelled keyboard delete, OUTSIDE the tablist - the chart strip's
+    // bypass-link idiom (a real button among tablist children is an axe
+    // aria-required-children violation).
+    if (boards.length > 1) {
+      var kbd = mkEl("button", "ps-tab-x ps-tab-x-kbd", "\u00d7");
+      kbd.type = "button";
+      kbd.setAttribute("aria-label", "Delete section " + active.name);
+      setTip(kbd, "Delete " + active.name);
+      kbd.addEventListener("click", function (e) {
+        e.stopPropagation();
+        deletePinBoard(active.id);
+      });
+      bar.appendChild(kbd);
+    }
+    var add = mkEl("button", "ps-tab-add", "+");
+    add.type = "button";
+    add.setAttribute("aria-label", "New section");
+    setTip(add, "New section");
+    add.addEventListener("click", function (e) {
+      e.stopPropagation();
+      var b = { id: newBoardId(), name: "Section " + (pinBoards().length + 1),
+                pins: [] };
+      pinBoards().push(b);
+      PROJECT.ui.activeBoard = b.id;
+      BOARD_RENAME = b.id;   // name it where it will live, like groups
+      persist(); syncAll();
+      if (appWorkspace() === "pinboard") renderPinboard();
+    });
+    bar.appendChild(add);
+    var pane = el("ps-pinpane");
+    var ac = tablist.querySelector(".ps-tab-active .ps-tab-select");
+    if (pane && ac) pane.setAttribute("aria-labelledby", ac.id);
+  }
   function syncTabs() {
     var bar = el("ps-tabs");
     var focusedTab = document.activeElement && document.activeElement.closest
@@ -12408,18 +14282,23 @@
     bar.innerHTML = "";
     activeChart();   // ensures at least one chart + a valid active id
     var ws = appWorkspace(), wantLayout = ws === "layout";
-    var panelId = wantLayout ? "ps-layout" : "psroot";
+    var panelId = ws === "pinboard" ? "ps-pinpane"
+      : wantLayout ? "ps-layout" : "psroot";
     bar.setAttribute("role", "group");
     bar.setAttribute("aria-label",
+      ws === "pinboard" ? "Notebook sections and actions" :
       wantLayout ? "Layout documents and actions" :
                    "Chart documents and actions");
     var tablist = mkEl("div", "ps-tablist-inner");
     tablist.setAttribute("role", "tablist");
     tablist.setAttribute("aria-label",
+      ws === "pinboard" ? "Notebook sections" :
       wantLayout ? "Layout documents" : "Chart documents");
     bar.appendChild(tablist);
+    if (ws === "pinboard") { renderBoardTabs(tablist, bar); return; }
     for (var i = 0; i < PROJECT.charts.length; i++) {
-      if (ws === "data" || isLayoutTab(PROJECT.charts[i]) !== wantLayout) continue;
+      if (ws === "data" || ws === "pinboard" ||
+          isLayoutTab(PROJECT.charts[i]) !== wantLayout) continue;
       (function (c) {
         var tab = mkEl("div", "ps-tab" +
           (c.id === PROJECT.activeChart ? " ps-tab-active" : ""));
@@ -12564,7 +14443,10 @@
       if (wantLayout) showLayoutGallery();
       else showAnalysisGallery();
     });
-    if (ws !== "data") bar.appendChild(add);
+    // The Pinboard pane owns its own "+" (new BOARD); the strip's add
+    // button on that workspace created a CHART, which is how Torry found
+    // it (Aug 1 2026 screenshot).
+    if (ws !== "data" && ws !== "pinboard") bar.appendChild(add);
     var activeControl = bar.querySelector(
       '.ps-tab[data-chart-id="' + PROJECT.activeChart + '"] .ps-tab-select');
     var panel = el(panelId);
@@ -13675,6 +15557,31 @@
       layItemAccessibleLabel(item));
     return true;
   }
+  // "Open source chart" (Torry, Aug 2 2026, promoted from the Pinboard
+  // rail): chart panels know their chart, and pin placements carry
+  // srcChart since the same day. Navigation, not resurrection - the menu
+  // entry appears only while the source chart lives.
+  function layItemMenuItems(id) {
+    var out = [
+      { label: "Duplicate", command: "duplicate-selection" },
+      { label: "Delete", command: "delete-selection" },
+      "separator",
+      { label: "Move backward", command: "layer-back" },
+      { label: "Move forward", command: "layer-forward" }
+    ];
+    var item = layItemById(id);
+    var srcId = item && (item.kind === "chart" ? item.chartId
+      : item.srcChart || null);
+    var src = srcId ? chartById(srcId) : null;
+    if (src && !isLayoutTab(src)) out.unshift(
+      { label: "Open source chart", key: "lay-open-src",
+        action: function () {
+          switchChart(srcId);
+          setAppWorkspace("chart");
+        } },
+      "separator");
+    return out;
+  }
   function layOpenKeyboardContext() {
     var active = layActiveId();
     if (!active) return false;
@@ -13685,13 +15592,8 @@
     if (!item) return false;
     var r = item.getBoundingClientRect();
     showContextMenu(Math.max(8, Math.min(window.innerWidth - 220, r.left + 12)),
-      Math.max(8, Math.min(window.innerHeight - 160, r.top + 12)), [
-        { label: "Duplicate", command: "duplicate-selection" },
-        { label: "Delete", command: "delete-selection" },
-        "separator",
-        { label: "Move backward", command: "layer-back" },
-        { label: "Move forward", command: "layer-forward" }
-      ]);
+      Math.max(8, Math.min(window.innerHeight - 160, r.top + 12)),
+      layItemMenuItems(active));
     return true;
   }
   function layAlign(kind) {
@@ -13946,13 +15848,7 @@
         laySetSelection([id]);
         renderLayout();
       }
-      showContextMenu(e.clientX, e.clientY, [
-        { label: "Duplicate", command: "duplicate-selection" },
-        { label: "Delete", command: "delete-selection" },
-        "separator",
-        { label: "Move backward", command: "layer-back" },
-        { label: "Move forward", command: "layer-forward" }
-      ]);
+      showContextMenu(e.clientX, e.clientY, layItemMenuItems(id));
     });
     document.addEventListener("keydown", function (e) {
       if (!isLayoutTab(activeChart())) return;
@@ -14315,7 +16211,7 @@
   // ======================================================== application frame
   function appWorkspace() {
     var ws = PROJECT.ui && PROJECT.ui.workspace;
-    if (["data", "chart", "layout"].indexOf(ws) !== -1) return ws;
+    if (["data", "chart", "pinboard", "layout"].indexOf(ws) !== -1) return ws;
     return PROJECT.ui && PROJECT.ui.dataOpen ? "data" :
       (isLayoutTab(activeChart()) ? "layout" : "chart");
   }
@@ -14332,18 +16228,26 @@
   }
   function workspaceDocument(mode) {
     mode = mode || appWorkspace();
-    if (mode === "data") return null;
+    if (mode === "data" || mode === "pinboard") return null;
     var doc = chartById(PROJECT.activeChart);
     return doc && isLayoutTab(doc) === (mode === "layout") ? doc : null;
   }
   function setAppWorkspace(mode) {
-    if (["data", "chart", "layout"].indexOf(mode) === -1) return;
+    if (["data", "chart", "pinboard", "layout"].indexOf(mode) === -1) return;
     hideTip();   // the whole surface changes; no tip may ride across
     narrowCloseAfterNavigation();   // punch list 17
     if (mode === "data") {
       PROJECT.ui.workspace = "data";
       PROJECT.ui.dataOpen = true;
       persist(false); syncAll();
+      return;
+    }
+    if (mode === "pinboard") {
+      // Document-less like Data: no active-chart negotiation, the surface
+      // IS the content.
+      PROJECT.ui.workspace = "pinboard";
+      PROJECT.ui.dataOpen = false;
+      persist(false); syncAll(); render();
       return;
     }
     var wantLayout = mode === "layout";
@@ -14435,51 +16339,152 @@
   function syncProjectNavigator() {
     var root = el("ps-project-nav");
     root.innerHTML = "";
-    function group(label, wantLayout, icon) {
+    function docRow(doc, wantLayout, icon, indent) {
+      var b = mkEl("button", "ps-project-item" +
+        (doc.id === PROJECT.activeChart && appWorkspace() !== "data"
+         ? " ps-project-active" : "") +
+        (indent ? " ps-project-item-grouped" : ""));
+      b.type = "button";
+      b.setAttribute("data-project-chart-id", doc.id);
+      setTip(b, doc.name);
+      // innerHTML, not mkEl's textContent: the icon is markup now, and
+      // it is a static constant above - never data. Chart rows draw
+      // their ANALYSIS's own glyph (Torry, Jul 28 2026), so the rail
+      // says what each chart is; layouts keep the shared layout icon.
+      var ico = mkEl("span", "ps-nav-icon");
+      ico.innerHTML = wantLayout ? icon
+        : (MODULE_RAIL_ICONS[doc.module] || icon);
+      b.appendChild(ico);
+      b.appendChild(mkEl("span", "", doc.name));
+      b.addEventListener("click", function () {
+        narrowCloseAfterNavigation();   // punch list 17
+        switchChart(doc.id);
+      });
+      b.addEventListener("contextmenu", function (e) {
+        e.preventDefault();
+        showDocumentContextMenu(e.clientX, e.clientY, doc.id);
+      });
+      return b;
+    }
+    function groupHeader(name, memberCount, collapsed) {
+      // Rename-in-place: the header becomes an input while GROUP_RENAME
+      // names it (the grid cell editor's idiom - commit on Enter or blur,
+      // cancel on Escape; never a dialog).
+      if (GROUP_RENAME === name) {
+        var wrap = mkEl("div", "ps-project-ghead ps-project-ghead-editing");
+        var input = document.createElement("input");
+        input.type = "text";
+        input.value = name;
+        input.maxLength = 60;
+        input.setAttribute("data-group-rename", name);
+        input.setAttribute("aria-label", "Group name");
+        function commit() {
+          var v = input.value;
+          GROUP_RENAME = null;
+          renameChartGroup(name, v);
+          syncProjectNavigator();
+        }
+        input.addEventListener("keydown", function (e) {
+          if (e.key === "Enter") { e.preventDefault(); commit(); }
+          else if (e.key === "Escape") {
+            e.preventDefault(); e.stopPropagation();
+            GROUP_RENAME = null;
+            syncProjectNavigator();
+          }
+        });
+        input.addEventListener("blur", function () {
+          if (GROUP_RENAME === name) commit();
+        });
+        wrap.appendChild(input);
+        return wrap;
+      }
+      var h = mkEl("button", "ps-project-ghead");
+      h.type = "button";
+      h.setAttribute("data-group-name", name);
+      h.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      h.appendChild(mkEl("span", "ps-project-gchev",
+        collapsed ? "\u25b8" : "\u25be"));
+      h.appendChild(mkEl("span", "ps-project-gname", name));
+      if (collapsed)
+        h.appendChild(mkEl("span", "ps-project-gcount", String(memberCount)));
+      h.addEventListener("click", function () {
+        var folds = collapsedGroups();
+        var showing = !folds[name] || !!GROUP_FORCE_OPEN[name];
+        delete GROUP_FORCE_OPEN[name];   // an explicit click always wins
+        if (showing) folds[name] = 1; else delete folds[name];
+        persist(); syncProjectNavigator();
+      });
+      h.addEventListener("contextmenu", function (e) {
+        e.preventDefault();
+        showGroupContextMenu(e.clientX, e.clientY, name);
+      });
+      return h;
+    }
+    function chartsSection() {
       var wrap = mkEl("div", "ps-project-group");
-      wrap.appendChild(mkEl("div", "ps-project-group-label", label));
-      var found = 0;
-      for (var i = 0; i < PROJECT.charts.length; i++) {
-        var c = PROJECT.charts[i];
-        if (isLayoutTab(c) !== wantLayout) continue;
+      wrap.appendChild(mkEl("div", "ps-project-group-label", "Charts"));
+      var found = 0, i, c;
+      // Ungrouped first, exactly the flat rail: a project with no groups
+      // renders identically to the pre-groups build (the spec's
+      // byte-identical guarantee, pinned by chart-groups-check case 1).
+      for (i = 0; i < PROJECT.charts.length; i++) {
+        c = PROJECT.charts[i];
+        if (isLayoutTab(c) || chartGroupOf(c)) continue;
         found++;
-        (function (doc) {
-          var b = mkEl("button", "ps-project-item" +
-            (doc.id === PROJECT.activeChart && appWorkspace() !== "data"
-             ? " ps-project-active" : ""));
-          b.type = "button";
-          b.setAttribute("data-project-chart-id", doc.id);
-          setTip(b, doc.name);
-          // innerHTML, not mkEl's textContent: the icon is markup now, and
-          // it is a static constant above - never data. Chart rows draw
-          // their ANALYSIS's own glyph (Torry, Jul 28 2026), so the rail
-          // says what each chart is; layouts keep the shared layout icon.
-          var ico = mkEl("span", "ps-nav-icon");
-          ico.innerHTML = wantLayout ? icon
-            : (MODULE_RAIL_ICONS[doc.module] || icon);
-          b.appendChild(ico);
-          b.appendChild(mkEl("span", "", doc.name));
-          b.addEventListener("click", function () {
-            narrowCloseAfterNavigation();   // punch list 17
-            switchChart(doc.id);
-          });
-          b.addEventListener("contextmenu", function (e) {
-            e.preventDefault();
-            showDocumentContextMenu(e.clientX, e.clientY, doc.id);
-          });
-          wrap.appendChild(b);
-        })(c);
+        wrap.appendChild(docRow(c, false, RAIL_ICON_CHART, false));
+      }
+      // Activation CHANGE arms the one-shot force-open for the newly
+      // active chart's folded group; anything else leaves the user's
+      // explicit fold state alone.
+      var activeNow = appWorkspace() !== "data" ? PROJECT.activeChart : null;
+      if (activeNow !== GROUP_LAST_ACTIVE) {
+        GROUP_LAST_ACTIVE = activeNow;
+        var activeDoc = activeNow ? chartById(activeNow) : null;
+        var ag = activeDoc ? chartGroupOf(activeDoc) : "";
+        GROUP_FORCE_OPEN = {};
+        if (ag && collapsedGroups()[ag]) GROUP_FORCE_OPEN[ag] = 1;
+      }
+      var names = chartGroups();
+      for (var g = 0; g < names.length; g++) {
+        var name = names[g];
+        var members = [];
+        for (i = 0; i < PROJECT.charts.length; i++)
+          if (chartGroupOf(PROJECT.charts[i]) === name)
+            members.push(PROJECT.charts[i]);
+        found += members.length;
+        var collapsed = !!collapsedGroups()[name];
+        var showMembers = !collapsed || !!GROUP_FORCE_OPEN[name];
+        wrap.appendChild(groupHeader(name, members.length, !showMembers));
+        if (showMembers)
+          for (i = 0; i < members.length; i++)
+            wrap.appendChild(docRow(members[i], false, RAIL_ICON_CHART, true));
       }
       if (!found) {
-        var empty = mkEl("div", "ps-slot-empty",
-          wantLayout ? "No layouts yet" : "No charts yet");
+        var empty = mkEl("div", "ps-slot-empty", "No charts yet");
         empty.style.padding = "5px 12px";
         wrap.appendChild(empty);
       }
       root.appendChild(wrap);
     }
-    group("Charts", false, RAIL_ICON_CHART);
-    group("Layouts", true, RAIL_ICON_LAYOUT);
+    function layoutsSection() {
+      var wrap = mkEl("div", "ps-project-group");
+      wrap.appendChild(mkEl("div", "ps-project-group-label", "Layouts"));
+      var found = 0;
+      for (var i = 0; i < PROJECT.charts.length; i++) {
+        var c = PROJECT.charts[i];
+        if (!isLayoutTab(c)) continue;
+        found++;
+        wrap.appendChild(docRow(c, true, RAIL_ICON_LAYOUT, false));
+      }
+      if (!found) {
+        var empty = mkEl("div", "ps-slot-empty", "No layouts yet");
+        empty.style.padding = "5px 12px";
+        wrap.appendChild(empty);
+      }
+      root.appendChild(wrap);
+    }
+    chartsSection();
+    layoutsSection();
   }
   function inspectorStat(label, value) {
     return '<div class="ps-inspector-stat"><span>' + escHtml(label) +
@@ -14862,15 +16867,9 @@
     chartPane.classList.toggle("ps-inspector-active", ws === "chart" && !!doc);
     dataPane.classList.toggle("ps-inspector-active", ws === "data");
     layoutPane.classList.toggle("ps-inspector-active", ws === "layout" && !!doc);
-    el("ps-inspector-document").style.display =
-      ws === "data" || !doc ? "none" : "block";
-    if (ws !== "data" && doc) {
-      el("ps-inspector-docname").value = doc.name;
-      el("ps-inspector-delete").disabled = PROJECT.charts.length <= 1;
-      var docKind = ws === "layout" ? "layout" : "chart";
-      el("ps-inspector-duplicate").textContent = "Duplicate " + docKind;
-      el("ps-inspector-delete").textContent = "Delete " + docKind;
-    }
+    el("ps-inspector-pinboard").classList.toggle("ps-inspector-active",
+      ws === "pinboard");
+    syncSizeviewDisclosure();
     var fitBox = el("ps-fit-pane");
     if (fitBox) {
       var fitDoc = workspaceDocument(ws);
@@ -14896,6 +16895,7 @@
     }
     if (ws === "data") syncVariableInspector();
     else if (ws === "layout" && doc) syncLayoutContextInspector();
+    else if (ws === "pinboard") syncPinInspector();
   }
   function syncAppShell() {
     var ws = appWorkspace(), c = workspaceDocument(ws), t = PROJECT.table;
@@ -14917,16 +16917,45 @@
       else buttons[i].removeAttribute("aria-current");
     }
     el("ps-reset").disabled = !c || isLayoutTab(c);
-    // Charts already have the chart toolbar's Export button. Keep one
-    // obvious export action per workspace: Data and Layout use the app bar,
-    // while File > Export and the keyboard shortcut adapt in all three.
-    el("ps-export").style.display = ws === "chart" ? "none" : "";
-    el("ps-export").textContent = ws === "data" ? "Export data" : "Export layout";
-    el("ps-export").disabled = ws === "data" ? !t : !c;
+    // Reset styling acts on the ACTIVE CHART, so it only shows where that
+    // chart is on screen (Torry, Jul 31 2026: in the Data workspace it sat
+    // enabled and silently wiped the styling of a chart he was not looking
+    // at - Export one button over was already workspace-gated, Reset never
+    // was).
+    el("ps-reset").style.display = ws === "chart" ? "" : "none";
+    // One blue Export per workspace, all in the same corner (Torry, Jul 31
+    // 2026): Charts joined Data and Layout in the app bar, and the engine
+    // toolbar's download icon is hidden by the stylesheet - the app bar is
+    // where every other export lives, so the chart's should not be the one
+    // exception living in chart chrome.
+    el("ps-export").style.display = "";
+    el("ps-export").textContent = ws === "data" ? "Export data"
+      : ws === "chart" ? "Export chart"
+      : ws === "pinboard" ? "Export Notebook" : "Export layout";
+    el("ps-export").disabled = ws === "data" ? !t
+      : ws === "pinboard" ? !projectPins().length : !c;
+    if (ws === "pinboard")
+      setTip(el("ps-export"), projectPins().length
+        ? "Save every page as one PDF, vector where possible"
+        : "Keep something first - the Notebook exports as a PDF, one " +
+          "page per kept moment");
     var docName = PROJECT.name || (t && t.name) || "Untitled project";
     el("ps-doc-name").textContent = docName;
     document.title = docName + " \u00b7 Pandion Plots";
-    if (ws === "data") {
+    if (ws === "pinboard") {
+      var pinsN = projectPins().length;
+      elOrSink("ps-workspace-title").textContent = "Notebook";
+      elOrSink("ps-workspace-subtitle").textContent = pinsN
+        ? pinsN + " kept " + (pinsN === 1 ? "page" : "pages")
+        : "Keep charts and comparisons here";
+      el("ps-inspector-title").textContent = "Notebook";
+      el("ps-inspector-subtitle").textContent =
+        "Each kept moment is a page";
+      el("ps-status-context").textContent = pinsN
+        ? pinsN + " page" + (pinsN === 1 ? "" : "s")
+        : "Nothing kept yet";
+      el("ps-status-selection").textContent = "";
+    } else if (ws === "data") {
       elOrSink("ps-workspace-title").textContent = "Data";
       elOrSink("ps-workspace-subtitle").textContent = t
         ? nRows(t) + " rows \u00d7 " + t.order.length + " columns"
@@ -15194,19 +17223,10 @@
   }
 
   function wireContextInspector() {
-    function commitDocumentName() {
-      renameDocument(PROJECT.activeChart, el("ps-inspector-docname").value);
-    }
-    el("ps-inspector-docname").addEventListener("change", commitDocumentName);
-    el("ps-inspector-docname").addEventListener("keydown", function (e) {
-      if (e.key === "Enter") { e.preventDefault(); this.blur(); }
-      else if (e.key === "Escape") { this.value = activeChart().name; this.blur(); }
-    });
-    el("ps-inspector-duplicate").addEventListener("click", function () {
-      duplicateDocument(PROJECT.activeChart);
-    });
-    el("ps-inspector-delete").addEventListener("click", function () {
-      closeChart(PROJECT.activeChart);
+    el("ps-sizeview-toggle").addEventListener("click", function () {
+      PROJECT.ui.sizeviewOpen = !(PROJECT.ui && PROJECT.ui.sizeviewOpen);
+      persist(false);
+      syncSizeviewDisclosure();
     });
     el("ps-variable-name").addEventListener("change", function () {
       if (INSPECTOR_VAR) renameVariable(INSPECTOR_VAR, this.value);
@@ -15383,6 +17403,27 @@
       });
   }
 
+  // Opening a DATA file replaces the project (captureReplacedProject already
+  // treats it that way, and offers the old one back). Until Jul 31 2026 the
+  // two data-adopt paths below reset the id, name, table, grid and file
+  // link but never touched PROJECT.charts - so a new dataset arrived with
+  // the OLD project's 15 chart tabs still in the rail, every one of them
+  // now pointing at variables that no longer exist, and the fresh file read
+  // "(edited)" the moment it opened (Torry's field report). One fresh empty
+  // chart is what a new project starts with, so that is what a replaced
+  // project starts with too; the replaced project - charts included - stays
+  // one click away via offerReplacedProjectBack.
+  function resetDocumentsForNewData() {
+    PROJECT.pins = [];   // the Pinboard is project evidence; new data, new record
+    PROJECT.pinboards = [];
+    if (PROJECT.ui) PROJECT.ui.activeBoard = null;
+    PROJECT.charts = [{ id: "c1", name: "Chart 1",
+      module: "plotbuilder", roles: {}, options: {} }];
+    PROJECT.activeChart = "c1";
+    PROJECT.ui.lastChart = "c1";
+    PROJECT.ui.lastLayout = null;
+    layHistoryClear();
+  }
   function adoptCSV(name, parsed) {
     PROJECT_CHOSEN = true;
     var replaced = captureReplacedProject();    // item 13
@@ -15394,6 +17435,7 @@
     FILE_LABEL = null;
     FILE_HANDLE = null;
     PROJECT.table = buildTable(name, parsed.header, parsed.rows, null);
+    resetDocumentsForNewData();
     PROJECT.ui.columnWidths = {};
     GRID_NATURAL_WIDTHS = {};
     gridResetColumnView();
@@ -15424,6 +17466,7 @@
     FILE_HANDLE = null;
     PROJECT.table = buildTable(parsed.name, parsed.header, parsed.rows,
                                parsed.types, parsed.levels);
+    resetDocumentsForNewData();
     PROJECT.ui.columnWidths = {};
     GRID_NATURAL_WIDTHS = {};
     gridResetColumnView();
@@ -15881,7 +17924,33 @@
       if (!z) return;
       z.classList.toggle("ps-pagedrop-on", !!on);
     }
+    var INTERNAL_DRAG = false;
+    document.addEventListener("dragstart", function () {
+      // A drag that STARTS in the app is never an incoming file, whatever
+      // its dataTransfer claims (Chromium stamps "Files" onto native image
+      // drags). Guards every current and future in-app draggable at once.
+      INTERNAL_DRAG = true;
+    }, true);
+    document.addEventListener("dragend", function () {
+      INTERNAL_DRAG = false;
+    }, true);
+    document.addEventListener("drop", function () {
+      // A drop anywhere means the drag session is over - but the clear must
+      // wait a tick: the synchronous drop handlers below still need to see
+      // "internal" or an in-app image dropped on the page would read as an
+      // incoming file (the exact bug this flag exists to stop).
+      setTimeout(function () { INTERNAL_DRAG = false; }, 0);
+    }, true);
+    document.addEventListener("pointermove", function () {
+      // No pointer events fire during a native drag, so the first move after
+      // arming proves the drag ended - however it ended. This is the
+      // backstop for a dragend that never arrives (source node removed
+      // mid-drag, or a synthetic drag): without it a stuck flag would
+      // refuse every real file drop for the rest of the session.
+      if (INTERNAL_DRAG) INTERNAL_DRAG = false;
+    }, true);
     function isFileDrag(e) {
+      if (INTERNAL_DRAG) return false;
       var dt = e.dataTransfer;
       if (!dt) return false;
       // A variable chip being dragged onto a role slot is NOT a file, and
@@ -17058,6 +19127,17 @@
     applyAppPrefs();
   }
 
+  // macOS owns Cmd+Shift+3/4/5 at the SYSTEM level (screenshots), so the
+  // Shift chord physically cannot reach the page there for two of the four
+  // workspaces (Torry, Aug 2 2026). On Mac the workspaces answer plain
+  // Ctrl+1..4 - free of system, browser, and Mission Control defaults -
+  // and every label advertises that chord there. The Shift chord stays
+  // accepted everywhere it works, so muscle memory and existing probes
+  // keep functioning.
+  var IS_MAC = /Mac|iP(hone|ad|od)/.test(navigator.platform || "");
+  function wsChord(n) {
+    return (IS_MAC ? "Ctrl+" : "Cmd/Ctrl+Shift+") + n;
+  }
   var APP_MENU_OWNER = null;
   var CONTEXT_DOC_ID = null;
   var APP_MENU_DEFS = {
@@ -17130,11 +19210,13 @@
       // between them. Cmd/Ctrl+Shift+number, not Cmd/Ctrl+number, because the
       // plain one belongs to the BROWSER's tab strip and a page cannot have
       // it - see shortcutGroups' note.
-      { label: "Data workspace", shortcut: "Cmd/Ctrl+Shift+1",
+      { label: "Data workspace", shortcut: wsChord(1),
         command: "view-data", workspace: "data" },
-      { label: "Charts workspace", shortcut: "Cmd/Ctrl+Shift+2",
+      { label: "Charts workspace", shortcut: wsChord(2),
         command: "view-chart", workspace: "chart" },
-      { label: "Layouts workspace", shortcut: "Cmd/Ctrl+Shift+3",
+      { label: "Notebook workspace", shortcut: wsChord(3),
+        command: "view-pinboard", workspace: "pinboard" },
+      { label: "Layouts workspace", shortcut: wsChord(4),
         command: "view-layout", workspace: "layout" },
       "separator",
       { label: "Command palette\u2026", shortcut: "Cmd/Ctrl+Shift+P", command: "command-palette" }
@@ -17177,6 +19259,7 @@
     ]
   };
   function hideAppMenu(returnFocus) {
+    hideRecentSubmenu();
     var m = el("ps-appmenu");
     m.style.display = "none";
     var owner = APP_MENU_OWNER;
@@ -17218,7 +19301,9 @@
     if (item && item.command === "export") {
       var ws = appWorkspace();
       return ws === "data" ? "Export data as CSV\u2026"
-        : ws === "layout" ? "Export layout\u2026" : "Export chart\u2026";
+        : ws === "layout" ? "Export layout\u2026"
+        : ws === "pinboard" ? "Export Notebook as PDF\u2026"
+        : "Export chart\u2026";
     }
     if (item.command !== "undo" && item.command !== "redo") return item.label;
     var s = undoScope();
@@ -17403,8 +19488,9 @@
   function gridMenuFind() {
     if (appWorkspace() !== "data") setAppWorkspace("data");
     var box = el("ps-data-find");
-    if (box) { box.focus(); box.select(); }
-    else showToast("Open the Data workspace to search the table.");
+    if (!box) { showToast("Open the Data workspace to search the table."); return; }
+    showFindPop();
+    box.focus(); box.select();
   }
   // t3-47 follow-up (Torry's ruling, Jul 27 2026): Find is sticky, Replace
   // is a mode. These controls reveal on demand and hide again on Escape,
@@ -17420,6 +19506,7 @@
     if (appWorkspace() !== "data") setAppWorkspace("data");
     var box = el("ps-data-replace");
     if (!box) { showToast("Open the Data workspace to search the table."); return; }
+    showFindPop();
     setReplaceOpen(true);
     // A replace needs a find first: an empty Find box gets the focus so the
     // user starts where the work starts.
@@ -17470,7 +19557,8 @@
       return !!INSPECTOR_VAR && PROJECT.table.order.indexOf(INSPECTOR_VAR) !== -1;
     }
     if (command === "reset") return !!doc && !isLayoutTab(doc);
-    if (command === "export") return !!doc;
+    if (command === "export")
+      return appWorkspace() === "pinboard" ? projectPins().length > 0 : !!doc;
     if (command === "export-data")
       return !!(PROJECT.table && PROJECT.table.order && PROJECT.table.order.length);
     // t3-46: the grid runs a real TSV clipboard, so these are enabled exactly
@@ -17539,7 +19627,10 @@
         ? "Select a column in the Data workspace first"
         : "Load some data first";
     if (command === "reset") return "Chart styling is unavailable for layouts";
-    if (command === "export") return "Create a document before exporting";
+    if (command === "export")
+      return appWorkspace() === "pinboard"
+        ? "Keep something in the Notebook before exporting"
+        : "Create a document before exporting";
     if (command === "copy-image")
       return appWorkspace() === "data"
         ? "Open a chart or layout to copy it as an image"
@@ -17604,6 +19695,7 @@
     else if (command === "reset") el("ps-reset").click();
     else if (command === "view-data") setAppWorkspace("data");
     else if (command === "view-chart") setAppWorkspace("chart");
+    else if (command === "view-pinboard") setAppWorkspace("pinboard");
     else if (command === "view-layout") setAppWorkspace("layout");
     else if (command === "new-chart") showAnalysisGallery();
     else if (command === "new-layout") showLayoutGallery();
@@ -17693,6 +19785,75 @@
     else if (command === "data-chart-sel")
       armChartFromSelection(selectionChartColumns());
   }
+  // Open-recent flyout (Torry, Aug 2 2026, overruling t3-54's inline
+  // expansion with field experience: the list "clutters up the file
+  // menu"). Hover with a grace delay, click/Enter/ArrowRight for
+  // keyboard and touch, ArrowLeft/Escape steps back to the trigger.
+  var SUBMENU_TRIGGER = null;
+  var SUBMENU_HIDE_T = null;
+  function hideRecentSubmenu() {
+    if (SUBMENU_HIDE_T) { clearTimeout(SUBMENU_HIDE_T); SUBMENU_HIDE_T = null; }
+    var s = el("ps-appsubmenu");
+    if (s) s.style.display = "none";
+    if (SUBMENU_TRIGGER) SUBMENU_TRIGGER.setAttribute("aria-expanded", "false");
+  }
+  function scheduleHideSubmenu() {
+    if (SUBMENU_HIDE_T) clearTimeout(SUBMENU_HIDE_T);
+    SUBMENU_HIDE_T = setTimeout(hideRecentSubmenu, 260);
+  }
+  function cancelHideSubmenu() {
+    if (SUBMENU_HIDE_T) { clearTimeout(SUBMENU_HIDE_T); SUBMENU_HIDE_T = null; }
+  }
+  function showRecentSubmenu(trigger, focusFirst) {
+    cancelHideSubmenu();
+    SUBMENU_TRIGGER = trigger;
+    var s = el("ps-appsubmenu");
+    s.innerHTML = "";
+    var recents = recentProjects();
+    for (var ri = 0; ri < recents.length; ri++) {
+      (function (rec) {
+        var rb = mkEl("button", "");
+        rb.type = "button";
+        rb.setAttribute("role", "menuitem");
+        rb.setAttribute("data-recent-menu", rec.id);
+        rb.appendChild(mkEl("span", "", rec.name));
+        rb.appendChild(mkEl("span", "ps-menu-shortcut",
+          rec.snapshot ? recentTimeLabel(rec.updatedAt)
+                       : (rec.hasFile ? "from file" : "name only")));
+        rb.addEventListener("click", function () {
+          hideRecentSubmenu();
+          hideAppMenu(false);
+          openRecentProject(rec.id);
+        });
+        s.appendChild(rb);
+      })(recents[ri]);
+    }
+    if (!s.__psWired) {
+      s.__psWired = true;
+      s.addEventListener("mouseenter", cancelHideSubmenu);
+      s.addEventListener("mouseleave", scheduleHideSubmenu);
+      s.addEventListener("keydown", function (e) {
+        if (e.key === "ArrowLeft" || e.key === "Escape") {
+          e.preventDefault(); e.stopPropagation();
+          hideRecentSubmenu();
+          if (SUBMENU_TRIGGER) SUBMENU_TRIGGER.focus();
+        }
+      });
+    }
+    var r = trigger.getBoundingClientRect();
+    s.style.display = "block";
+    var w = s.offsetWidth || 230;
+    var left = r.right + 2;
+    if (left + w > window.innerWidth - 8) left = Math.max(8, r.left - w - 2);
+    s.style.left = left + "px";
+    s.style.top = Math.max(8, Math.min(r.top,
+      window.innerHeight - s.offsetHeight - 8)) + "px";
+    trigger.setAttribute("aria-expanded", "true");
+    if (focusFirst) {
+      var first = s.querySelector("button:not([disabled])");
+      if (first) first.focus();
+    }
+  }
   function showAppMenu(owner, name, focusFirst) {
     var defs = APP_MENU_DEFS[name] || [], m = el("ps-appmenu");
     m.innerHTML = "";
@@ -17706,33 +19867,52 @@
         m.appendChild(mkEl("div", "ps-menu-separator"));
         continue;
       }
-      // t3-54: the recents list lived only on the start centre, so once you
-      // were working there was no route back to it. Expanded here rather than
-      // hidden behind a submenu, which for three items would be more chrome
-      // than content.
+      // t3-54 put the recents INLINE (three items, more chrome than
+      // content behind a submenu). Field experience overruled it once the
+      // list grew (Torry, Aug 2 2026: "it does kind of clutter up the file
+      // menu"): one trigger row, flyout on hover / click / ArrowRight.
       if (defs[i].submenu === "recent") {
-        var recents = recentProjects();
-        if (!recents.length) continue;
-        m.appendChild(mkEl("div", "ps-menu-heading", "Open recent"));
-        for (var ri = 0; ri < recents.length; ri++) {
-          (function (rec) {
-            var rb = mkEl("button", "");
-            rb.type = "button";
-            rb.setAttribute("role", "menuitem");
-            rb.setAttribute("data-recent-menu", rec.id);
-            rb.appendChild(mkEl("span", "", rec.name));
-            rb.appendChild(mkEl("span", "ps-menu-shortcut",
-              rec.snapshot ? recentTimeLabel(rec.updatedAt)
-                           : (rec.hasFile ? "from file" : "name only")));
-            rb.addEventListener("click", function () {
-              hideAppMenu(false);
-              openRecentProject(rec.id);
+        (function () {
+          var recents = recentProjects();
+          var tr = mkEl("button", "");
+          tr.type = "button";
+          tr.setAttribute("role", "menuitem");
+          tr.setAttribute("aria-haspopup", "menu");
+          tr.setAttribute("aria-expanded", "false");
+          tr.setAttribute("data-app-submenu", "recent");
+          tr.appendChild(mkEl("span", "", "Open recent"));
+          tr.appendChild(mkEl("span", "ps-menu-shortcut", "\u25b8"));
+          if (!recents.length) {
+            tr.disabled = true;
+            setTip(tr, "Projects you open or save appear here");
+          } else {
+            tr.addEventListener("mouseenter", function () {
+              showRecentSubmenu(tr, false);
             });
-            m.appendChild(rb);
-          })(recents[ri]);
-        }
+            tr.addEventListener("click", function (e) {
+              e.stopPropagation();
+              var s = el("ps-appsubmenu");
+              if (s && s.style.display === "block") hideRecentSubmenu();
+              else showRecentSubmenu(tr, true);
+            });
+            tr.addEventListener("keydown", function (e) {
+              if (e.key === "ArrowRight" || e.key === "Enter" ||
+                  e.key === " ") {
+                e.preventDefault(); e.stopPropagation();
+                showRecentSubmenu(tr, true);
+              }
+            });
+          }
+          m.appendChild(tr);
+        })();
         continue;
       }
+      // On the Data workspace the adaptive "Export..." entry ALREADY reads
+      // "Export data as CSV...", so the fixed data-export row would print
+      // the identical label twice in a row (Torry, Jul 31 2026). It earns
+      // its seat on Charts and Layouts, where it is the only data export.
+      if (defs[i].command === "export-data" && appWorkspace() === "data")
+        continue;
       (function (item) {
         var b = mkEl("button", "");
         b.type = "button"; b.setAttribute("role", "menuitem");
@@ -17749,6 +19929,15 @@
         m.appendChild(b);
       })(defs[i]);
     }
+    if (!m.__psSubWired) {
+      m.__psSubWired = true;
+      m.addEventListener("mouseover", function (e) {
+        if (e.target.closest && e.target.closest('[data-app-submenu]'))
+          cancelHideSubmenu();
+        else scheduleHideSubmenu();
+      });
+    }
+    hideRecentSubmenu();   // a rebuilt menu never inherits an open flyout
     var r = owner.getBoundingClientRect();
     m.style.display = "block";
     m.style.left = Math.min(r.left, window.innerWidth - 230) + "px";
@@ -17775,17 +19964,29 @@
       (function (item) {
         var b = mkEl("button", "", item.label);
         b.type = "button";
-        b.setAttribute("data-context-command", item.command);
-        b.disabled = !commandEnabled(item.command);
-        if (b.disabled) setTip(b, commandDisabledReason(item.command));
-        b.addEventListener("click", function () {
-          var cmd = item.command;
-          var target = CONTEXT_DOC_ID;
-          hideContextMenu();
-          CONTEXT_DOC_ID = target;
-          runAppCommand(cmd);
-          CONTEXT_DOC_ID = null;
-        });
+        // item.action: a direct callback for dynamic targets (the group
+        // menus), where a registered command name would be ceremony.
+        // Additive - command items behave exactly as before.
+        if (item.action) {
+          b.setAttribute("data-context-action", item.key || "");
+          b.addEventListener("click", function () {
+            var target = CONTEXT_DOC_ID;
+            hideContextMenu();
+            item.action(target);
+          });
+        } else {
+          b.setAttribute("data-context-command", item.command);
+          b.disabled = !commandEnabled(item.command);
+          if (b.disabled) setTip(b, commandDisabledReason(item.command));
+          b.addEventListener("click", function () {
+            var cmd = item.command;
+            var target = CONTEXT_DOC_ID;
+            hideContextMenu();
+            CONTEXT_DOC_ID = target;
+            runAppCommand(cmd);
+            CONTEXT_DOC_ID = null;
+          });
+        }
         menu.appendChild(b);
       })(items[i]);
     }
@@ -17796,13 +19997,63 @@
     if (first) first.focus();
   }
   function showDocumentContextMenu(x, y, id) {
-    showContextMenu(x, y, [
+    var doc = chartById(id);
+    var items = [
       { label: "Open", command: "activate-document" },
       "separator",
       { label: "Rename\u2026", command: "rename-document" },
       { label: "Duplicate", command: "duplicate-document" },
       { label: "Delete", command: "delete-document" }
-    ], id);
+    ];
+    // Charts (never layouts) can join a group; the picker is a SECOND
+    // plain context menu at the same spot - one level of menu for one
+    // level of grouping.
+    if (doc && !isLayoutTab(doc)) {
+      items.push("separator");
+      items.push({ label: "Move to group\u2026", key: "move-to-group",
+        action: function (target) { showMoveToGroupMenu(x, y, target); } });
+    }
+    showContextMenu(x, y, items, id);
+  }
+  function showMoveToGroupMenu(x, y, id) {
+    var doc = chartById(id);
+    if (!doc) return;
+    var current = chartGroupOf(doc);
+    var items = [{ label: "New group\u2026", key: "group-new",
+      action: function () {
+        // A unique placeholder, then rename-in-place on the header: the
+        // name is typed exactly once, in the rail where it will live.
+        var base = "New group", name = base, n = 2;
+        while (chartGroups().some(function (g) {
+          return g.toLowerCase() === name.toLowerCase(); }))
+          name = base + " " + (n++);
+        setChartGroup(id, name);
+        startGroupRename(name);
+      } }];
+    var names = chartGroups();
+    if (names.length) items.push("separator");
+    for (var i = 0; i < names.length; i++) (function (g) {
+      items.push({ label: (g === current ? "\u2713 " : "") + g,
+        key: "group-" + g,
+        action: function () { setChartGroup(id, g); } });
+    })(names[i]);
+    if (current) {
+      items.push("separator");
+      items.push({ label: "Remove from group", key: "group-remove",
+        action: function () { setChartGroup(id, ""); } });
+    }
+    showContextMenu(x, y, items, id);
+  }
+  function showGroupContextMenu(x, y, name) {
+    showContextMenu(x, y, [
+      { label: "Rename group\u2026", key: "group-rename",
+        action: function () { startGroupRename(name); } },
+      { label: "Ungroup (keep the charts)", key: "group-ungroup",
+        action: function () { ungroupChartGroup(name); } },
+      "separator",
+      { label: "Delete group and its charts", key: "group-delete",
+        action: function () { deleteChartGroup(name); } }
+    ], null);
   }
 
   var COMMAND_PALETTE_LAST_FOCUS = null;
@@ -18297,6 +20548,7 @@
     document.addEventListener("pointerdown", function (e) {
       if (el("ps-appmenu").style.display === "block" &&
           !(e.target.closest && (e.target.closest("#ps-appmenu") ||
+                                 e.target.closest("#ps-appsubmenu") ||
                                  e.target.closest("[data-ps-menu]"))))
         hideAppMenu(false);
       if (el("ps-contextmenu").style.display === "block" &&
@@ -18377,16 +20629,33 @@
       }
       if (key === "e" && e.shiftKey) {
         var exportable = appWorkspace() === "data"
-          ? PROJECT.table : workspaceDocument(appWorkspace());
+          ? PROJECT.table
+          : appWorkspace() === "pinboard"
+            ? projectPins().length : workspaceDocument(appWorkspace());
         if (!exportable) return;
         e.preventDefault(); exportCurrentWorkspace(); return;
       }
       // The three workspaces the View menu lists. e.code, not e.key: with a
       // modifier held, several keyboard layouts report a symbol here.
-      if (e.shiftKey && /^Digit[123]$/.test(e.code || "")) {
+      if (e.shiftKey && /^Digit[1234]$/.test(e.code || "")) {
+        e.preventDefault();
+        // Switcher order IS shortcut order: the Notebook sits between
+        // Charts and Layouts (Torry's placement), so it takes 3 and
+        // Layouts takes 4. On macOS the system eats Shift+3/4
+        // (screenshots) before we ever see them - the Ctrl+digit chord
+        // below is the advertised Mac route; this one still works for
+        // 1 and 2 and on every other platform.
+        setAppWorkspace({ Digit1: "data", Digit2: "chart",
+                          Digit3: "pinboard", Digit4: "layout" }[e.code]);
+        return;
+      }
+      // The Mac chord: plain Ctrl+1..4 (see the wsChord note). Mac only,
+      // because Windows/Linux browsers own Ctrl+digit for tab switching.
+      if (IS_MAC && e.ctrlKey && !e.metaKey && !e.shiftKey &&
+          /^Digit[1234]$/.test(e.code || "")) {
         e.preventDefault();
         setAppWorkspace({ Digit1: "data", Digit2: "chart",
-                          Digit3: "layout" }[e.code]);
+                          Digit3: "pinboard", Digit4: "layout" }[e.code]);
         return;
       }
       // t1-14. Printing the DOM gives one clipped viewport of application
@@ -18475,7 +20744,7 @@
     window.addEventListener("keydown", function (e) {
       if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
       var k = (e.key || "").toLowerCase();
-      if (k !== "s" && k !== "o" && k !== "n") return;
+      if (k !== "s" && k !== "o" && k !== "n" && k !== "f") return;
       e.preventDefault();
       e.stopPropagation();
       if (k === "s" && e.shiftKey) {
@@ -18484,6 +20753,12 @@
       } else if (k === "s" && !e.shiftKey) saveProjectFile();
       else if (k === "o" && !e.shiftKey) openLoader();
       else if (k === "n" && !e.shiftKey) showWelcome(true);
+      // Cmd/Ctrl+F: the Edit menu has ADVERTISED this shortcut since
+      // t3-46, but nothing ever bound the key - the browser's own find
+      // opened instead, uselessly searching the page chrome. Bound with
+      // the find popup (Torry, Jul 31 2026); gridMenuFind hops to the
+      // Data workspace itself, so it is safe app-wide.
+      else if (k === "f" && !e.shiftKey) gridMenuFind();
     }, true);
     // t1-14 (second half). Cmd/Ctrl+W is unbound and, with no beforeunload,
     // ended the session silently. Work normally survives in the autosave and
@@ -18554,12 +20829,59 @@
       reportGlobalError("unhandled rejection",
         (r && r.message) || (r == null ? "no reason given" : String(r)));
     });
-    // B21. The engine's toolbar export button drives the jamovi R export
-    // pipeline, which does not exist here - so the shell used to hide it.
-    // But the engine's Basics help says, unconditionally, "The export button
-    // in the toolbar saves the chart as SVG, PDF, PNG or JPG", and hiding the
-    // button left that sentence pointing at nothing. Capture phase, so the
-    // engine's own handler never runs.
+    // B21, reversed again with the missing half supplied (Torry, Jul 31
+    // 2026): the engine's toolbar download icon is hidden once more - the
+    // command bar's blue "Export chart" is the one export, mirroring Data
+    // and Layout - and this time the Basics help sentence that sank the
+    // FIRST hide ("The export button in the toolbar saves the chart as
+    // SVG...") is retargeted at the button that exists, instead of being
+    // left pointing at nothing. The observer watches the chart host: the
+    // help panel re-renders its rows on every tab click, so a one-shot
+    // patch would not survive; TEXT is matched (not markup) so an engine
+    // copy tweak degrades to "sentence unpatched", never to a crash.
+    (function retargetEngineExportHelp() {
+      // linkedom (the headless DOM smoke) has no MutationObserver; the
+      // guard is the same one the exclusion-note observer carries.
+      if (typeof MutationObserver !== "function") return;
+      var PAT = /export<\/strong> button in the toolbar saves/;
+      function patchOnce() {
+        var rows = document.querySelectorAll("#psroot .gb2-panel div");
+        for (var i = 0; i < rows.length; i++) {
+          var r = rows[i];
+          // INNERMOST match only. PAT tests innerHTML, so every ANCESTOR
+          // container of the sentence matches too - and rewriting a
+          // container's innerHTML resurrects its markup with every wired
+          // listener dead (the first shape of this stranded the help-nav
+          // tabs on Basics; reachability-check caught it). A div with no
+          // div inside it is the sentence row itself, whose own subtree
+          // holds nothing wired.
+          if (r.querySelector("div")) continue;
+          if (!PAT.test(r.innerHTML || "")) continue;
+          r.innerHTML = (r.innerHTML || "").replace(
+            /The <strong>export<\/strong> button in the toolbar saves/,
+            'The <strong>Export chart<\/strong> button (top right of the ' +
+            'window) saves');
+        }
+      }
+      // Debounced to ONE query per macrotask. The first shape of this ran
+      // patch() against EVERY added node's subtree, and that per-node work
+      // inside the engine's render bursts was enough to break the help-tab
+      // switch (reachability-check caught it: help-chooser stranded on the
+      // Basics tab). The rewrite itself mutates the DOM, which schedules
+      // one more pass; that pass matches nothing and the cycle ends.
+      var pending = false;
+      var mo = new MutationObserver(function () {
+        if (pending) return;
+        pending = true;
+        window.setTimeout(function () { pending = false; patchOnce(); }, 0);
+      });
+      mo.observe(document.body, { childList: true, subtree: true });
+    })();
+    // The click interception below survives as a belt: the button is
+    // display:none, but anything that still reaches it (a stale saved
+    // focus, a synthetic click) gets the shell exporter, never the dead
+    // jamovi R pipeline. Capture phase, so the engine's own handler never
+    // runs.
     document.addEventListener("click", function (e) {
       var t = e.target;
       var btn = t && t.closest
@@ -18643,13 +20965,60 @@
           "separator",
           { label: "Export\u2026", command: "export" }
         ];
+      } else if (t.closest("#ps-pinpane")) {
+        var pinPageEl = t.closest(".ps-pinpage");
+        var ctxPinId = pinPageEl && pinPageEl.getAttribute("data-pin-id");
+        if (ctxPinId) {
+          // Mirror the page card's own buttons, plus the page-scoped
+          // export Torry asked after ("the specific chart that you're on").
+          items = [
+            { label: "Copy image", key: "pin-copy",
+              action: function () {
+                var hit = allPins().filter(function (en) {
+                  return en.pin.id === ctxPinId; })[0];
+                if (hit) copyPinToClipboard(hit.pin);
+              } },
+            { label: "Send to layout\u2026", key: "pin-send",
+              action: function () {
+                showPinSendMenu(e.clientX, e.clientY, ctxPinId);
+              } },
+            "separator",
+            { label: "Export this page as PDF", key: "pin-export-page",
+              action: function () {
+                exportPinboardPdf({ pinId: ctxPinId });
+              } },
+            { label: "Delete page", key: "pin-delete",
+              action: function () { deletePin(ctxPinId); } }
+          ];
+        } else {
+          items = [
+            { label: "Export Notebook\u2026", command: "export" }
+          ];
+        }
       } else if (t.closest(".graphbuilder2-host, #ps-workcard")) {
+        // With several boards, say WHICH record this evidence joins -
+        // one entry per board, the export-scope idiom (Torry, Aug 1
+        // 2026). One board keeps the plain single item.
+        var pinItems = (function () {
+          var boards = pinBoards();
+          if (boards.length < 2)
+            return [{ label: "Keep to Notebook", key: "pin-chart",
+              action: function () { pinChartToPinboard(); } }];
+          var out = [];
+          for (var bi = 0; bi < boards.length; bi++) (function (b) {
+            out.push({ label: "Keep to " + b.name,
+              key: "pin-chart:" + b.id,
+              action: function () { pinChartToPinboard(b.id); } });
+          })(boards[bi]);
+          return out;
+        })();
         items = [
-          { label: "Copy as image", command: "copy-image" },
+          { label: "Copy as image", command: "copy-image" }
+        ].concat(pinItems, [
           { label: "Export\u2026", command: "export" },
           "separator",
           { label: "Reset chart styling", command: "reset" }
-        ];
+        ]);
       } else if (t.closest(".ps-controls, .ps-project-panel")) {
         items = [
           { label: "Rename document\u2026", command: "rename-document" },
@@ -18759,7 +21128,8 @@
       activeChart().module = mod; bumpSnapEpoch(); persist(); syncAll(); render();
     },
     setRoles: function (mod, rr) {
-      activeChart().roles[mod] = rr; validateRoles(); persist(); syncAll(); render();
+      activeChart().roles[mod] = rr; bumpSnapEpoch();
+      validateRoles(); persist(); syncAll(); render();
     },
     parseCSV: parseCSV,
     parseTableText: parseTableText,

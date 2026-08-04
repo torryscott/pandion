@@ -136,7 +136,7 @@
     color: var(--muted); font-size: 14px;
   }
 
-  /* ---- the two workspaces a chart tool usually leaves out ---- */
+  /* ---- the three workspaces a chart tool usually leaves out ---- */
   .workspaces .shot-block { margin-top: 44px; }
   .workspaces .shot-block:first-of-type { margin-top: 0; }
   .workspaces h3 {
@@ -350,7 +350,9 @@
         </div>
         <figcaption>
           A scatterplot with a fit line and marginal distributions, created
-          from the built-in sample data in a few clicks.
+          from the built-in sample data in a few clicks. Each chart is its
+          own document, and related charts collect into named groups in the
+          left rail.
         </figcaption>
       </figure>
     </div>
@@ -385,9 +387,9 @@
       <h2>A chart is only part of the work.</h2>
       <p class="section-lede">
         Pandion supports what comes before and after it. Organize and
-        understand your data before you plot, then arrange finished
-        charts into a polished figure for a paper, poster, or
-        presentation.
+        understand your data before you plot, keep a record of what you
+        find as you go, then arrange finished charts into a polished
+        figure for a paper, poster, or presentation.
       </p>
 
       <div class="shot-block">
@@ -398,7 +400,10 @@
           levels are ordered. Row counts, missing values, distinct
           values, and the roles a variable is currently used in stay
           visible while you work. Drag to reorder categories, exclude
-          rows, filter, or add a computed column.
+          rows, or filter. A computed variable adds a formula column that
+          recalculates whenever the data changes, and the quick-transform
+          chips write the common ones for you: log10, ln, z-score,
+          center, bin into 4, and recode.
         </p>
         <figure>
           <div class="shot-frame">
@@ -418,7 +423,37 @@
       </div>
 
       <div class="shot-block">
-        <h3>A figure composer for multi-panel figures</h3>
+        <h3>A Notebook that keeps what you found</h3>
+        <p>
+          Right-click a chart and choose Keep to Notebook, or press Keep
+          on a pinned comparison in the Statistics panel, and the moment
+          lands as a page: the chart, its selection rings, and the
+          statistics as one image. Each page carries when it was kept,
+          your notes, and an honest verdict on whether its source chart
+          has changed since. Kept pages never update themselves, which is
+          the point. Organize them into sections, place one in a layout,
+          or export the Notebook as a PDF, one page per kept
+          moment.
+        </p>
+        <figure>
+          <div class="shot-frame">
+            <div class="shot-bar" aria-hidden="true"><i></i><i></i><i></i></div>
+            <img src="assets/app-notebook.png" loading="lazy"
+                 data-image-kind="illustrative"
+                 alt="The Pandion Plots Notebook workspace: a kept page
+                      holding a chart with its selection rings and the
+                      statistics that went with it, beside the date it was
+                      kept and the note written on it">
+          </div>
+          <figcaption>
+            A kept page: the chart, the statistics that went with it, and
+            the note you wrote at the time.
+          </figcaption>
+        </figure>
+      </div>
+
+      <div class="shot-block">
+        <h3>Layouts for multi-panel figures</h3>
         <p>
           Arrange several charts on one page, label the panels, and add
           titles, notes, or images. Panels stay linked to the charts they
@@ -431,7 +466,7 @@
             <div class="shot-bar" aria-hidden="true"><i></i><i></i><i></i></div>
             <img src="assets/app-layout.png" loading="lazy"
                  data-image-kind="illustrative"
-                 alt="The Pandion Plots figure composer: a bar chart and a
+                 alt="The Pandion Plots Layouts workspace: a bar chart and a
                       scatterplot placed side by side as panels A and B on a
                       canvas page, with snapping and page controls above">
           </div>
@@ -468,12 +503,12 @@
             </svg>
           </div>
           <h3>Desktop app</h3>
-          <p>Install Pandion Plots on macOS or Windows for standard file
+          <p>Run Pandion Plots on macOS or Windows for standard file
              associations, a familiar desktop workflow, and full
              offline access.</p>
           <a class="btn btn-secondary"
              href="download.html">Choose your download</a>
-          <div class="fine">Available for macOS and Windows</div>
+          <div class="fine">Installers in preparation</div>
         </div>
         <div class="card">
           <div class="card-icon" aria-hidden="true">
@@ -506,7 +541,7 @@
              offline. No installation is required.</p>
           <a class="btn btn-secondary"
              href="pandion-plots.html" download>Download HTML app</a>
-          <div class="fine">One file, about 3.5 MB</div>
+          <div class="fine">One file, about 3.9 MB</div>
         </div>
         <div class="card">
           <div class="card-icon" aria-hidden="true">

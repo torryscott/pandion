@@ -305,7 +305,7 @@
   #ps-datainfo { font-size: 12px; color: #666; }
   /* Variable supplier (left box) + role slots (right column) */
   .ps-assign { display: flex; gap: 16px; margin-top: 10px; flex-wrap: wrap; }
-  #ps-varbox {
+  #ps-varbox, #ps-sizeview {
     width: 260px; min-width: 220px; flex-shrink: 0;
     border: 1px solid var(--ps-l2); border-radius: var(--ps-r-md); background: var(--ps-s1);
     display: flex; flex-direction: column; align-self: flex-start;
@@ -313,19 +313,23 @@
   /* The disclosure header doubles as the section label: same caps voice
      as AXES / SPLIT THE CHART, arrow cursor per the desktop cursor
      policy. */
-  #ps-varbox-toggle {
+  #ps-varbox-toggle, #ps-sizeview-toggle {
     -webkit-appearance: none; appearance: none; width: 100%;
     display: flex; align-items: center; gap: 7px; padding: 8px 10px;
     font-family: inherit; font-size: 10px; font-weight: 700;
     color: var(--ps-muted); letter-spacing: 0.45px; text-transform: uppercase;
     background: none; border: none; cursor: default; text-align: left;
   }
-  #ps-varbox-toggle:hover { color: var(--ps-ink-3); }
+  #ps-varbox-toggle:hover, #ps-sizeview-toggle:hover { color: var(--ps-ink-3); }
   /* No font-size of its own: it inherits the header's 10px. The app
      enforces a 10px legibility floor suite-wide (tokens-check case 3),
      and a 9px chevron broke it. */
   .ps-varbox-chev { flex: 0 0 auto; color: var(--ps-muted); }
   #ps-varbox-body[hidden] { display: none; }
+  /* Size & view: the varbox card, verbatim (shared selectors above);
+     only the inner field padding is its own. */
+  #ps-sizeview-body { padding: 0 10px 8px; }
+  #ps-sizeview-body[hidden] { display: none; }
   #ps-varfilter {
     box-sizing: border-box; width: calc(100% - 16px); margin: 0 8px 4px;
     font-family: inherit; font-size: 11.5px;
@@ -443,7 +447,23 @@
      restores both the size and the offset, because the same factor that
      scales the element scales its position inside the zoomed wrap.
      Measured: 249px wide and 0px offset at every zoom. */
-  #psroot > div > div.ignore-html:first-child,
+  /* The toolbar is matched by its data-role, not by position (Jul 31 2026):
+     the original ">div>div.ignore-html:first-child" selector broke silently
+     when the svg-results round added siblings before the toolbar inside the
+     chart card - at 75% zoom the toolbar shrank with the chart (fitpanes
+     case 7 caught it). The engine has stamped data-role="chart-toolbar" on
+     the strip since _externalizeToolbar, so match that: it survives DOM
+     reshuffles the way the two flyout selectors below always have. */
+  /* One Export per workspace (Torry, Jul 31 2026): the chart's export is
+     the command bar's blue "Export chart", mirroring Data and Layout, so
+     the engine toolbar's download icon hides here. jamovi keeps its button
+     (this stylesheet never ships there). The Basics help sentence naming
+     the toolbar button is retargeted by retargetEngineExportHelp() in the
+     shell - the reason the FIRST hide of this button was reverted. */
+  /* !important because the engine writes display:flex INLINE via
+     style.cssText - the same reason the focus-visible rule carries it. */
+  #psroot [data-role="chart-toolbar"] button[title="Export plot"] { display: none !important; }
+  #psroot [data-role="chart-toolbar"],
   #psroot .gb2-panel,
   #psroot [data-role="graphtype-flyout"],
   #psroot [data-role="palette-flyout"] {
@@ -846,16 +866,28 @@
     display: flex; align-items: center; gap: 9px; margin-bottom: 9px;
   }
   .ps-inspector-field.ps-linsp-inline {
-    flex-direction: row; align-items: center; justify-content: space-between;
+    /* Label column + control column (Torry, Jul 31 2026). space-between
+       right-PINNED every control, and since the controls are different
+       widths nothing could share a left edge: the Size dropdown floated
+       mid-panel, W's input crowded H's label, and the Grid-step select
+       sat a gutter away from its own label. A fixed label column with
+       the control filling the rest gives every control one shared left
+       edge and one shared right edge. */
+    display: grid; grid-template-columns: 76px minmax(0, 1fr);
+    align-items: center; justify-content: normal;
     gap: 8px; margin-bottom: 0;
   }
   .ps-inspector-field.ps-linsp-inline > span {
     flex: 0 0 auto; text-transform: none; letter-spacing: 0;
     font-size: 11px; font-weight: 600; color: var(--ps-ink-3);
   }
-  .ps-inspector-field.ps-linsp-inline .ps-lnum { width: 74px; }
-  .ps-inspector-field.ps-linsp-inline .ps-lselect { width: auto; min-width: 96px; }
+  .ps-inspector-field.ps-linsp-inline .ps-lnum,
+  .ps-inspector-field.ps-linsp-inline .ps-lselect { width: 100%; min-width: 0; }
   .ps-linsp-row .ps-linsp-inline { flex: 1; }
+  /* Two fields sharing one row (W+H, the Margins pair): a full 76px label
+     column inside a half-width slot would starve the inputs, so paired
+     rows size the label to its text instead. */
+  .ps-linsp-row .ps-linsp-inline { grid-template-columns: auto minmax(0, 1fr); }
 
   #ps-lviewport {
     position: relative; height: clamp(360px, 72vh, 780px);
@@ -1085,6 +1117,62 @@
   #ps-data-hidden-columns::before {
     content: "\25A5"; flex: 0 0 auto; font-size: 12px; line-height: 1;
   }
+  /* The exclusion dropdown wears the Filter button's active look (it only
+     renders while exclusions exist), in the danger ink its old count text
+     used - same shape as its neighbor, its own meaning. */
+  #ps-data-excl-btn {
+    color: var(--ps-danger-2); background: var(--ps-s2);
+    border-color: var(--ps-tint-line-2); font-weight: 650;
+  }
+  /* Find popup: the exclusion menu's shell, WITHOUT outside-dismiss (see
+     the shell wiring) - find is a working mode, the user clicks matches in
+     the grid while it is open, so only Escape and the X close it. */
+  #ps-findpop {
+    position: fixed; display: none; z-index: 10000;
+    background: var(--ps-s0); border: 1px solid #bbb; border-radius: var(--ps-r-md);
+    box-shadow: 0 6px 18px rgba(0,0,0,0.18); padding: 10px;
+    box-sizing: border-box; font-size: 12.5px;
+    width: 380px; max-width: calc(100vw - 24px);
+  }
+  .ps-findpop-head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .ps-findpop-head .ps-data-search { flex: 1; min-width: 0; }
+  #ps-findpop .ps-data-search input { min-width: 0; }
+  #ps-findpop #ps-data-replace-wrap { margin-top: 8px; }
+  #ps-data-find-btn.ps-data-filter-active {
+    color: var(--ps-accent-press); background: var(--ps-s2);
+    border-color: var(--ps-tint-line-2); font-weight: 650;
+  }
+  #ps-exclmenu {
+    position: fixed; display: none; z-index: 10000;
+    background: var(--ps-s0); border: 1px solid #bbb; border-radius: var(--ps-r-md);
+    box-shadow: 0 6px 18px rgba(0,0,0,0.18); padding: 12px;
+    box-sizing: border-box; font-size: 12.5px;
+    width: 340px; max-width: calc(100vw - 24px);
+    max-height: min(480px, calc(100vh - 16px)); overflow: auto;
+  }
+  #ps-exclmenu h3 { margin: 0 0 4px; font-size: 13px; }
+  .ps-excl-list { margin: 8px 0 0; display: flex; flex-direction: column; gap: 2px; }
+  .ps-excl-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 3px 4px; border-radius: var(--ps-r-sm);
+  }
+  .ps-excl-item:hover { background: var(--ps-s2); }
+  .ps-excl-jump {
+    -webkit-appearance: none; appearance: none; border: 0; background: none;
+    font: inherit; color: var(--ps-ink-2); cursor: pointer; text-align: left;
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; padding: 2px 0;
+  }
+  .ps-excl-jump:hover { color: var(--ps-accent-ink); }
+  .ps-excl-jump .ps-excl-val { color: var(--ps-danger-2); font-weight: 600; }
+  .ps-excl-restore {
+    -webkit-appearance: none; appearance: none; font-family: inherit;
+    font-size: 10.5px; color: var(--ps-accent-press); background: var(--ps-s2);
+    border: 1px solid var(--ps-tint-line-2); border-radius: var(--ps-r-lg);
+    padding: 1px 9px; cursor: pointer; flex-shrink: 0;
+  }
+  .ps-excl-restore:hover { background: #dfeafc; }
+  .ps-excl-more { font-size: 11px; color: var(--ps-muted); padding: 4px; }
   #ps-data-filter-btn.ps-data-filter-active {
     color: var(--ps-accent-press); background: var(--ps-s2); border-color: var(--ps-tint-line-2);
     font-weight: 650;
@@ -1844,6 +1932,13 @@
   .ps-appbar-state { color: #9db1cc; font-size: 10.5px; white-space: nowrap; }
   .ps-commandbar {
     display: flex; align-items: center; gap: 4px; min-width: 0;
+    /* wrap: Export chart joined the chart workspace (Jul 31 2026), and at a
+       320px reflow viewport the bar no longer fits on one line. A control
+       poking past the right edge is not just cosmetic: FOCUSING it scrolls
+       the whole document sideways, which shifted the app frame 4px off
+       screen (reflow-accessibility caught it). WCAG reflow allows vertical
+       growth; a second row is the correct shape at that width. */
+    flex-wrap: wrap;
     padding: 5px 10px; background: var(--ps-s0); border-bottom: 1px solid var(--ps-l2b);
     box-shadow: 0 1px 2px rgba(25,38,54,0.04); z-index: 2;
   }
@@ -1953,6 +2048,117 @@
     padding: 4px 8px 2px; color: var(--ps-muted); font-size: 10px;
     font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase;
   }
+
+  /* Chart groups (Jul 31 2026, spec in planning/): headers are buttons the
+     full row wide, members indent one icon width, a collapsed header shows
+     its member count. A flat project renders NONE of this chrome. */
+  /* Pinboard (Jul 31 2026): each pinned capture is its OWN PAGE in a
+     vertical scroll - click the workspace, read your evidence like a
+     document. Cards are literal white pages with the capture fitted. */
+  /* Visibility rides the INLINE style the shell toggles (markup starts
+     display:none); a CSS display:none base would win the moment the shell
+     clears the inline value - the classic "" trap. */
+  #ps-pinpane { min-height: 0; flex: 1; overflow: hidden;
+    display: flex; flex-direction: column; }
+  /* Board tabs live in the REAL tab strip (.ps-tab family) since Aug 1
+     2026; this row holds the pane tools - just Zoom for now, right-aligned
+     like the Layout bar's. */
+  #ps-pintools {
+    display: flex; align-items: center; padding: 10px 24px 8px;
+    background: var(--ps-s2);
+  }
+  /* Pinboard rail (Torry, Aug 1 2026): facts read as content under the
+     10px micro-labels; the source verdict tints - dark amber for changed
+     (readable on white where --ps-warn is not), danger for a gone chart. */
+  .ps-pininsp-hint {
+    font-size: 11.5px; font-weight: 400; color: #666; line-height: 1.5;
+  }
+  .ps-pininsp-fact {
+    font-size: 11.5px; font-weight: 400; color: var(--ps-ink-2);
+    line-height: 1.45;
+  }
+  .ps-pininsp-fact[data-state="changed"] { color: #8a5a00; }
+  .ps-pininsp-fact[data-state="gone"] { color: var(--ps-danger-2); }
+  #ps-pininsp-note, #ps-pininsp-bnote {
+    box-sizing: border-box; width: 100%; min-height: 96px; padding: 6px 8px;
+    color: var(--ps-ink-2); background: var(--ps-s0);
+    border: 1px solid var(--ps-l3); border-radius: var(--ps-r-sm);
+    font-size: 11.5px; font-weight: 400; line-height: 1.45; resize: vertical;
+  }
+  #ps-pininsp-bnote { min-height: 72px; }
+  #ps-pininsp-note:focus, #ps-pininsp-bnote:focus {
+    border-color: #4f83bd; outline: 2px solid rgba(79,131,189,0.16);
+  }
+  /* the kept comparison's title and its statistics sentence, on their
+     own lines */
+  #ps-pininsp-stat { white-space: pre-line; }
+  .ps-pinpage { cursor: pointer; transition: transform 0.17s ease; }
+  .ps-pinpage-sel { outline: 2px solid var(--ps-accent); outline-offset: 2px; }
+  /* Drag-to-reorder chrome (Aug 2 2026): the grabbed page floats over the
+     others, and keyboard focus draws its own ring at a wider offset so
+     focus and selection stay distinguishable on one card. */
+  .ps-pinpage-dragging {
+    transition: none; position: relative; z-index: 3;
+    box-shadow: var(--ps-e-3); cursor: grabbing;
+  }
+  .ps-pinpage:focus-visible {
+    outline: 2px solid #4f83bd; outline-offset: 4px;
+  }
+  #ps-pinscroll {
+    height: 100%; overflow-y: auto; padding: 18px 24px 40px;
+    box-sizing: border-box; background: var(--ps-s2);
+  }
+  .ps-pinpage {
+    background: var(--ps-s0); border: 1px solid var(--ps-l3);
+    border-radius: var(--ps-r-md); box-shadow: 0 2px 8px rgba(25,38,54,0.08);
+    margin: 0 auto 22px; max-width: 820px; padding: 14px 14px 10px;
+  }
+  .ps-pinpage img { display: block; width: 100%; height: auto;
+    border-radius: var(--ps-r-sm);
+    -webkit-user-drag: none; user-select: none; }
+  .ps-pinpage-bar {
+    display: flex; align-items: center; gap: 8px; margin-top: 8px;
+  }
+  .ps-pinpage-num { font-size: 11px; color: var(--ps-muted); flex: 1; }
+  .ps-pinpage-bar button {
+    -webkit-appearance: none; appearance: none; font: inherit;
+    font-size: 10.5px; color: var(--ps-accent-press); background: var(--ps-s2);
+    border: 1px solid var(--ps-tint-line-2); border-radius: var(--ps-r-lg);
+    padding: 1px 9px; cursor: pointer;
+  }
+  .ps-pinpage-bar button:hover { background: #dfeafc; }
+  .ps-pinboard-empty {
+    text-align: center; color: var(--ps-muted); font-size: 12.5px;
+    padding: 60px 20px; max-width: 420px; margin: 0 auto; line-height: 1.6;
+  }
+  .ps-project-ghead {
+    -webkit-appearance: none; appearance: none; display: flex;
+    align-items: center; gap: 6px; width: 100%; border: 0;
+    background: none; font: inherit; font-size: 11px; font-weight: 650;
+    color: var(--ps-ink-3); padding: 5px 12px 3px; cursor: pointer;
+    text-align: left; letter-spacing: 0.02em;
+  }
+  .ps-project-ghead:hover { color: var(--ps-accent-ink); }
+  /* 10px, not smaller: tokens-check holds the app's type floor there. */
+  .ps-project-gchev { flex: 0 0 auto; font-size: 10px; color: var(--ps-muted); }
+  .ps-project-gname {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ps-project-gcount {
+    flex: 0 0 auto; font-weight: 400; color: var(--ps-muted);
+    background: var(--ps-s2); border-radius: 8px; padding: 0 6px;
+    font-size: 10px;
+  }
+  .ps-project-ghead-editing { padding: 3px 12px 2px; }
+  .ps-project-ghead-editing input {
+    width: 100%; box-sizing: border-box; font: inherit; font-size: 11px;
+    font-weight: 650; padding: 2px 5px; border: 1px solid var(--ps-accent-press);
+    border-radius: var(--ps-r-sm);
+  }
+  /* Both classes, or the later .ps-project-item padding rule outranks the
+     indent by source order. */
+  .ps-project-item.ps-project-item-grouped { padding-left: 26px; }
   .ps-project-item { min-height: 28px; padding-left: 12px; font-size: 11.5px; }
   .ps-project-item.ps-project-active {
     color: var(--ps-accent-ink); background: var(--ps-l1); font-weight: 650;
@@ -1975,7 +2181,7 @@
   .ps-controls .ps-assign {
     flex-direction: column; flex-wrap: nowrap; gap: 12px; margin: 0; padding: 9px 12px 16px;
   }
-  .ps-controls #ps-varbox { width: 100%; min-width: 0; box-sizing: border-box; }
+  .ps-controls #ps-varbox, .ps-controls #ps-sizeview { width: 100%; min-width: 0; box-sizing: border-box; }
   .ps-controls #ps-columns { max-height: 185px; }
   .ps-controls #ps-slots { width: 100%; min-width: 0; }
   .ps-controls .ps-slot { align-items: flex-start; flex-direction: column; gap: 4px; }
@@ -2117,7 +2323,7 @@
   .ps-statusbar > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #ps-status-context { color: var(--ps-ink-3); }
   #ps-status-document { color: #4f718f; }
-  #ps-appmenu {
+  #ps-appmenu, #ps-appsubmenu {
     position: fixed; display: none; z-index: 12000; min-width: 215px;
     padding: 5px; color: var(--ps-ink-2); background: var(--ps-s0);
     border: 1px solid var(--ps-l4); border-radius: var(--ps-r-md);
@@ -3444,6 +3650,15 @@
         <button type="button" data-ps-workspace="chart">
           <span class="ps-nav-icon"><svg class="ps-icn" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V4"/><path d="M4 20h16"/><rect x="7" y="11" width="3.2" height="6" rx="0.6" fill="currentColor" stroke="none"/><rect x="13" y="7" width="3.2" height="10" rx="0.6" fill="currentColor" stroke="none"/></svg></span><span>Charts</span>
         </button>
+        <button type="button" data-ps-workspace="pinboard">
+          <svg class="ps-icn" width="15" height="15" viewBox="0 0 24 24"
+               fill="none" stroke="currentColor" stroke-width="1.8"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="6" y="3.5" width="13.5" height="17" rx="2"/>
+            <path d="M4 8h4M4 12h4M4 16h4"/>
+          </svg>
+          Notebook
+        </button>
         <button type="button" data-ps-workspace="layout">
           <span class="ps-nav-icon"><svg class="ps-icn" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16M3 12h9"/></svg></span><span>Layouts</span>
         </button>
@@ -3499,12 +3714,19 @@
             <div id="ps-columns"></div>
           </div>
         </div>
-      </div>
-      <!-- View-zoom model (Jul 27 2026): the checkbox owns the LOGICAL
-           size (standard vs a size the user committed), the select owns the
-           VIEW. Zoom scales the display only; exports always leave at the
-           logical size, so what you see is the figure, scaled. -->
-      <label class="ps-inspector-field ps-fit-field"
+        <!-- Size & view rides the varbox idiom EXACTLY and sits
+             right under it (Torry, Aug 2 2026, round 3: the heading
+             treatment sat flush-left and read as a stray; "make it just
+             like Available variables"). Shared CSS selectors, so the two
+             cards can never drift apart. -->
+        <div id="ps-sizeview">
+          <button type="button" id="ps-sizeview-toggle" aria-expanded="false"
+                  aria-controls="ps-sizeview-body">
+            <span class="ps-varbox-chev" aria-hidden="true">&#9656;</span>
+            <span>Size &amp; view</span>
+          </button>
+          <div id="ps-sizeview-body" hidden>
+<label class="ps-inspector-field ps-fit-field"
              data-tip="On: the chart renders at the standard 7.5 x 5 inches, identical on every machine. It switches off by itself when you set a size of your own on the chart.">
         <input type="checkbox" id="ps-fit-pane" checked>
         <span>Standard chart size (7.5 x 5 in)</span>
@@ -3528,6 +3750,13 @@
         </select>
         <span id="ps-zoom-readout" aria-live="polite"></span>
       </label>
+          </div>
+        </div>
+      </div>
+      <!-- View-zoom model (Jul 27 2026): the checkbox owns the LOGICAL
+           size (standard vs a size the user committed), the select owns the
+           VIEW. Zoom scales the display only; exports always leave at the
+           logical size, so what you see is the figure, scaled. -->
     </div>
     <div id="ps-inspector-data" class="ps-inspector-pane">
       <div id="ps-variable-empty" class="ps-inspector-empty">
@@ -3584,6 +3813,54 @@
                    placeholder="NA, N/A, .">
           </label>
           <div class="ps-loader-hint">Used by every variable that has no list of its own. Blank cells are always missing.</div>
+        </div>
+      </div>
+    </div>
+    <div id="ps-inspector-pinboard" class="ps-inspector-pane">
+      <div class="ps-inspector-section">
+        <span class="ps-inspector-section-title" id="ps-pininsp-title">Page</span>
+        <div id="ps-pininsp-board" style="display:none;">
+          <div class="ps-inspector-field">
+            <span>This section</span>
+            <div id="ps-pininsp-bsum" class="ps-pininsp-fact"></div>
+          </div>
+          <label class="ps-inspector-field">
+            <span>Section notes</span>
+            <textarea id="ps-pininsp-bnote" rows="5" maxlength="4000"
+                      placeholder="Notes about this section - saved with the project"></textarea>
+          </label>
+        </div>
+        <div id="ps-pininsp-empty" class="ps-pininsp-hint">Click a page to
+          see when it was kept, where it came from, and your notes on
+          it.</div>
+        <div id="ps-pininsp-sel" style="display:none;">
+          <div class="ps-inspector-field">
+            <span>Kept</span>
+            <div id="ps-pininsp-kept" class="ps-pininsp-fact"></div>
+          </div>
+          <div class="ps-inspector-field" id="ps-pininsp-statrow"
+               style="display:none;">
+            <span>Comparison</span>
+            <div id="ps-pininsp-stat" class="ps-pininsp-fact"></div>
+          </div>
+          <div class="ps-inspector-field" id="ps-pininsp-descrow"
+               style="display:none;">
+            <span>Analysis</span>
+            <div id="ps-pininsp-desc" class="ps-pininsp-fact"></div>
+          </div>
+          <div class="ps-inspector-field">
+            <span>Source chart</span>
+            <div id="ps-pininsp-src" class="ps-pininsp-fact"></div>
+            <div class="ps-inspector-actions">
+              <button id="ps-pininsp-open" class="ps-btn" type="button"
+                      style="display:none;">Open source chart</button>
+            </div>
+          </div>
+          <label class="ps-inspector-field">
+            <span>Notes</span>
+            <textarea id="ps-pininsp-note" rows="7" maxlength="4000"
+                      placeholder="Notes about this page - saved with the project"></textarea>
+          </label>
         </div>
       </div>
     </div>
@@ -3717,17 +3994,10 @@
          seconds - below a 185px scrolling list and, on a 1366x768 Chromebook,
          the Panels role below the fold on a fresh chart. It lives at the
          bottom now, and the document context menu still reaches it. -->
-    <div id="ps-inspector-document" class="ps-inspector-section">
-      <span class="ps-inspector-section-title">This document</span>
-      <label class="ps-inspector-field">
-        Document name
-        <input id="ps-inspector-docname" type="text" maxlength="100">
-      </label>
-      <div class="ps-inspector-actions">
-        <button type="button" class="ps-btn" id="ps-inspector-duplicate">Duplicate document</button>
-        <button type="button" class="ps-btn ps-danger" id="ps-inspector-delete">Delete document</button>
-      </div>
-    </div>
+    <!-- The This-document section is RETIRED (Torry, Aug 2 2026):
+         rename, duplicate and delete live on the tab and rail context
+         menus (double-click / F2 renames in place), so the rail keeps
+         only what has no other home. -->
 
   </div>
 
@@ -3755,43 +4025,14 @@
       <button type="button" class="ps-command" id="ps-data-addrow"
               data-tip="Add a row at the bottom and start editing it">+ Add row</button>
       <span class="ps-command-sep" aria-hidden="true"></span>
-      <label class="ps-data-search">
-        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-          <circle cx="6.7" cy="6.7" r="4.2" fill="none"
-                  stroke="currentColor" stroke-width="1.5"/>
-          <path d="M9.8 9.8 L13.5 13.5" fill="none"
-                stroke="currentColor" stroke-width="1.5"
-                stroke-linecap="round"/>
-        </svg>
-        <input id="ps-data-find" type="search" autocomplete="off"
-               placeholder="Find data" aria-label="Find in dataset">
-        <span id="ps-data-find-count" aria-live="polite"></span>
-        <button type="button" id="ps-data-find-prev" aria-label="Previous match"
-                data-tip="Previous match">&#8249;</button>
-        <button type="button" id="ps-data-find-next" aria-label="Next match"
-                data-tip="Next match">&#8250;</button>
-      </label>
-      <!-- t3-47: replace, on the same matches the Find count reports.
-           Follow-up (Torry, Jul 27 2026): Find stays sticky, Replace reveals
-           on demand from this toggle (or Edit > Replace in data), so the bar
-           spends no standing width on a mode. The wrap is a DIV because its
-           first shape nested a label inside a label, which is invalid HTML. -->
-      <button type="button" class="ps-command" id="ps-data-replace-toggle"
-              aria-expanded="false" aria-controls="ps-data-replace-wrap"
-              data-tip="Find and replace values in the table">Replace</button>
-      <div class="ps-data-search" id="ps-data-replace-wrap" hidden>
-        <input id="ps-data-replace" type="text" autocomplete="off"
-               placeholder="Replace with" aria-label="Replace matches with">
-        <button type="button" id="ps-data-replace-one"
-                data-tip="Replace the current match">Replace</button>
-        <button type="button" id="ps-data-replace-all"
-                data-tip="Replace every match">All</button>
-        <label id="ps-data-replace-whole-wrap"
-               data-tip="On: only cells that are exactly the search text change. Off: the text is replaced wherever it appears inside a cell, which can turn Female into FeMale.">
-          <input type="checkbox" id="ps-data-replace-whole" checked>
-          <span>Whole cell only</span>
-        </label>
-      </div>
+      <!-- Find became a POPUP (Torry, Jul 31 2026: the inline bar "just
+           takes up a whole lot of room"). The bar spends one compact button;
+           the working surface lives in #ps-findpop below, opened from here,
+           the Edit menu, or Cmd/Ctrl+F. The button reports the live match
+           state (Find - 12 of 63) so a sticky query is never invisible. -->
+      <button type="button" class="ps-command" id="ps-data-find-btn"
+              aria-haspopup="dialog" aria-expanded="false"
+              data-tip="Find and replace in the table (Cmd/Ctrl+F)"><svg class="ps-icn" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="6.7" cy="6.7" r="4.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M9.8 9.8 L13.5 13.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg> Find</button>
       <span class="ps-command-spacer"></span>
       <button type="button" class="ps-command" id="ps-data-filter-btn"
               aria-haspopup="menu" aria-expanded="false"
@@ -3800,8 +4041,13 @@
               aria-haspopup="menu" aria-expanded="false"
               data-tip="Manage temporarily hidden columns"></button>
       <span id="ps-data-exclusions">
-        <span id="ps-data-exclusions-count"></span>
-        <button type="button" class="ps-command" id="ps-data-restore">Restore</button>
+        <!-- Torry, Jul 31 2026: the loose "27 values excluded" text plus a
+             bare Restore button became ONE dropdown that looks and works
+             like Filter one seat over - the menu holds the breakdown,
+             restore-all, and a reviewable list of every exclusion. -->
+        <button type="button" class="ps-command" id="ps-data-excl-btn"
+                aria-haspopup="menu" aria-expanded="false"
+                data-tip="Review or restore excluded rows and values"></button>
       </span>
       <button type="button" class="ps-command ps-command-icon" id="ps-data-more"
               aria-label="More data commands" aria-expanded="false"
@@ -3836,6 +4082,23 @@
     </div>
     <div id="psroot" class="graphbuilder2-host" role="tabpanel"
          style="width:100%;position:relative;--gb2-ui-font:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-family:var(--gb2-ui-font);"></div>
+    <div id="ps-pinpane" role="tabpanel" aria-label="Notebook"
+         style="display:none;">
+      <div id="ps-pintools">
+        <label class="ps-ltool-group ps-ltool-push">
+          <span class="ps-ltool-label">Zoom</span>
+          <select class="ps-lselect" id="ps-pzoom">
+            <option value="fit">Fit page</option>
+            <option value="0.5">50%</option>
+            <option value="0.75">75%</option>
+            <option value="1">100%</option>
+            <option value="1.25">125%</option>
+            <option value="1.5">150%</option>
+          </select>
+        </label>
+      </div>
+      <div id="ps-pinscroll"></div>
+    </div>
     <div id="ps-layout" role="tabpanel" style="display:none;">
       <div id="ps-ltoolbar">
         <div class="ps-ltoolbar-row">
@@ -3861,6 +4124,9 @@
           <div class="ps-ltool-group">
             <button type="button" class="ps-command" id="ps-laddchart">Add chart</button>
             <button type="button" class="ps-command" id="ps-laddtext">Add text</button>
+            <button type="button" class="ps-command" id="ps-laddpin"
+                    aria-haspopup="menu"
+                    data-tip="Place a kept Notebook page in this layout">From Notebook</button>
             <button type="button" class="ps-command" id="ps-laddlabel">Panel label</button>
             <button type="button" class="ps-command" id="ps-laddimage">Add image</button>
             <input type="file" id="ps-laddimage-file" accept="image/*,.svg"
@@ -4020,6 +4286,8 @@
 </div>
 
 <div id="ps-appmenu" role="menu"></div>
+  <div id="ps-appsubmenu" role="menu" aria-label="Open recent"
+       style="display:none;"></div>
 <div id="ps-contextmenu" role="menu"></div>
 <div id="ps-command-palette" role="dialog" aria-modal="true"
      aria-label="Command palette">
@@ -4483,6 +4751,56 @@
 <div id="ps-addmenu"></div>
 <div id="ps-lchartmenu"></div>
 <div id="ps-filtermenu" role="dialog" aria-label="Row filters"></div>
+
+<div id="ps-findpop" role="dialog" aria-label="Find and replace in the table">
+  <div class="ps-findpop-head">
+    <label class="ps-data-search">
+      <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+        <circle cx="6.7" cy="6.7" r="4.2" fill="none"
+                stroke="currentColor" stroke-width="1.5"/>
+        <path d="M9.8 9.8 L13.5 13.5" fill="none"
+              stroke="currentColor" stroke-width="1.5"
+              stroke-linecap="round"/>
+      </svg>
+      <input id="ps-data-find" type="search" autocomplete="off"
+             placeholder="Find data" aria-label="Find in dataset">
+      <span id="ps-data-find-count" aria-live="polite"></span>
+      <button type="button" id="ps-data-find-prev" aria-label="Previous match"
+              data-tip="Previous match">&#8249;</button>
+      <button type="button" id="ps-data-find-next" aria-label="Next match"
+              data-tip="Next match">&#8250;</button>
+    </label>
+    <button type="button" class="ps-btn" id="ps-findpop-close"
+            aria-label="Close find" data-tip="Close (Esc)">&#10005;</button>
+  </div>
+  <!-- t3-47's ruling survives the move: Find is sticky, Replace is a MODE
+       revealed on demand - now for focus economy rather than bar width. -->
+  <button type="button" class="ps-command" id="ps-data-replace-toggle"
+          aria-expanded="false" aria-controls="ps-data-replace-wrap"
+          data-tip="Find and replace values in the table">Replace</button>
+  <div class="ps-data-search" id="ps-data-replace-wrap" hidden>
+    <input id="ps-data-replace" type="text" autocomplete="off"
+           placeholder="Replace with" aria-label="Replace matches with">
+    <button type="button" id="ps-data-replace-one"
+            data-tip="Replace the current match">Replace</button>
+    <button type="button" id="ps-data-replace-all"
+            data-tip="Replace every match">All</button>
+    <label id="ps-data-replace-whole-wrap"
+           data-tip="On: only cells that are exactly the search text change. Off: the text is replaced wherever it appears inside a cell, which can turn Female into FeMale.">
+      <input type="checkbox" id="ps-data-replace-whole" checked>
+      <span>Whole cell only</span>
+    </label>
+  </div>
+</div>
+
+<div id="ps-exclmenu" role="dialog" aria-label="Excluded rows and values">
+  <h3>Excluded from every chart</h3>
+  <div class="ps-filter-hint"><span id="ps-data-exclusions-count"></span>.
+    The values stay in the dataset; every chart and statistic leaves them
+    out.</div>
+  <button type="button" class="ps-command" id="ps-data-restore">Restore all</button>
+  <div class="ps-excl-list" id="ps-excl-list"></div>
+</div>
 
 <div id="ps-loader" role="dialog" aria-modal="true"
      aria-labelledby="ps-loader-title" aria-describedby="ps-loader-description">

@@ -105,8 +105,7 @@ await page.waitForTimeout(2600);
 await page.locator('#psroot button[aria-label="Statistics"]').first().click();
 await page.waitForTimeout(900);
 await check('score', 'original (score)');
-await page.evaluate(() => document.getElementById('ps-inspector-duplicate')
-    .click());
+await page.evaluate(() => window.PS_SHELL.runCommand('duplicate-document'));
 await page.waitForTimeout(1500);
 await page.evaluate(() => window.PS_SHELL.setRoles('plotbuilder',
     { xvar: 'condition', yvar: 'hours', groupVar: 'site' }));

@@ -57,6 +57,9 @@ const recode = await page.evaluate(async () => {
     // inputs and would exercise a UI the user cannot see.
     const wrap = document.getElementById('ps-data-replace-wrap');
     const hiddenAtRest = wrap.hasAttribute('hidden') && wrap.offsetParent === null;
+    // The toggle lives inside the find POPUP since Jul 31 2026.
+    document.getElementById('ps-data-find-btn').click();
+    await s(250);
     document.getElementById('ps-data-replace-toggle').click();
     await s(250);
     // The layout assertion the first shape lacked, and the one that would

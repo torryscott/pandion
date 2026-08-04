@@ -3,7 +3,7 @@
 // buildRM was the only builder with no facet block, so the engine's RM pivot
 // chips were dark and its mixed three-way ANOVA, its across-panels compare
 // scope and its per-panel simple-effect brackets were all unreachable. The
-// approved brief lists facetVar on Repeated Measures (STANDALONE-BRIEF.md:93);
+// approved brief lists facetVar on Repeated Measures (planning/STANDALONE-BRIEF.md:93);
 // the omission was an implementation cut, twice.
 //
 // The claim under test is precise: a panel variable on RM is BETWEEN subjects,

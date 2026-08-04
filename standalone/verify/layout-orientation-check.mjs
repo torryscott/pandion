@@ -35,6 +35,13 @@ await page.waitForTimeout(120);
 if (await page.locator('[data-layout-orientation]').count() !== 2 ||
     await page.locator('[data-layout-template]').count() !== 8)
     throw new Error('orientation duplicated or replaced the template gallery');
+// Aug 1 2026 (Torry): the gallery preselected "single" whenever charts
+// existed, so a fresh layout arrived with a chart nobody placed. BLANK is
+// the default now; templates are an explicit choice.
+if (await page.locator('[data-layout-template="blank"]')
+        .getAttribute('aria-pressed') !== 'true')
+    throw new Error('the gallery must preselect Blank, not auto-place a chart');
+console.log('  ok  the gallery defaults to Blank: no chart appears unplaced');
 const landscapePreview = await page.locator(
     '[data-layout-template="single"] .ps-layout-template-preview').boundingBox();
 if (landscapePreview.width <= landscapePreview.height)

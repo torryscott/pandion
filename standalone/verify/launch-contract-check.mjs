@@ -139,14 +139,17 @@ await page.evaluate(() => PS_SHELL.setWorkspace('chart'));
 await page.waitForTimeout(450);
 const chartExports = await page.evaluate(() => ({
     globalVisible: document.getElementById('ps-export').offsetParent !== null,
+    globalLabel: document.getElementById('ps-export').textContent,
     engineVisible: (() => {
         const b = document.querySelector(
             '.graphbuilder2-host button[title="Export plot"]');
         return !!b && b.offsetParent !== null;
     })()
 }));
-ok(!chartExports.globalVisible && chartExports.engineVisible,
-   'Charts show one Export action, in the chart toolbar');
+ok(chartExports.globalVisible && !chartExports.engineVisible &&
+   chartExports.globalLabel === 'Export chart',
+   'Charts show one Export action, in the command bar (Torry, Jul 31 2026: ' +
+   'the engine toolbar icon is hidden; "' + chartExports.globalLabel + '")');
 await page.evaluate(() => PS_SHELL.runCommand('whats-new'));
 await page.waitForTimeout(250);
 const releaseFormats = await page.evaluate(() => ({
@@ -173,7 +176,6 @@ const layoutState = await page.evaluate(() => ({
     sel: document.getElementById('ps-status-selection').textContent.trim(),
     sub: document.getElementById('ps-inspector-subtitle').textContent.trim(),
     itemDup: document.getElementById('ps-ctx-duplicate').textContent.trim(),
-    docDup: document.getElementById('ps-inspector-duplicate').textContent.trim(),
     labels: Array.from(document.querySelectorAll(
         '.ps-layout-position-grid .ps-layout-field-label')).map(n => ({
             text: n.textContent.trim(),
@@ -188,9 +190,9 @@ ok(layoutState.sel === '1 layout item selected' &&
    /1 selected item/.test(layoutState.sub),
    `selection status and inspector subtitle agree ` +
    `("${layoutState.sel}" / "${layoutState.sub}")`);
-ok(layoutState.itemDup === 'Duplicate item' &&
-   layoutState.docDup === 'Duplicate layout',
-   'item actions and document actions name different targets');
+ok(layoutState.itemDup === 'Duplicate item',
+   'the item action names its target (document duplicate moved to the ' +
+   'tab menu, Aug 2 2026)');
 ok(layoutState.labels.length === 4 &&
    layoutState.labels.every(x => x.whiteSpace === 'nowrap' && x.height < 20),
    `position labels stay on one line at 1366 px ` +
@@ -264,7 +266,7 @@ for (const size of [
     { width: 1366, height: 768 }
 ]) {
     await page.setViewportSize(size);
-    for (const workspace of ['data', 'chart', 'layout']) {
+    for (const workspace of ['data', 'chart', 'pinboard', 'layout']) {
         await page.evaluate(w => PS_SHELL.setWorkspace(w), workspace);
         await page.waitForTimeout(240);
         const fit = await page.evaluate(({ w, workspace: active }) => {
@@ -283,7 +285,9 @@ for (const size of [
                 ? document.getElementById('ps-datacard')
                 : active === 'layout'
                   ? document.getElementById('ps-layout')
-                  : document.querySelector('.graphbuilder2-host');
+                  : active === 'pinboard'
+                    ? document.getElementById('ps-pinpane')
+                    : document.querySelector('.graphbuilder2-host');
             const narrowControls = [
                 'ps-narrow-menu', 'ps-narrow-nav', 'ps-narrow-inspector'
             ].map(id => visible(document.getElementById(id)));

@@ -528,22 +528,42 @@ ok(!/Filter:/.test(await page.evaluate(() =>
 await page.evaluate(() => window.PS_SHELL.setFilters([]));
 await page.waitForTimeout(800);
 
-// ---- B21: the engine's Basics help points at a real button again ----
+// ---- B21, third state (Torry, Jul 31 2026): the engine's download icon is
+// hidden AGAIN - one blue Export per workspace, in the command bar - and the
+// Basics sentence that sank the FIRST hide is retargeted, not left dangling.
 const expBtn = await page.evaluate(() => {
     const b = document.querySelector(
         '.graphbuilder2-host button[title="Export plot"]');
-    if (!b) return { present: false };
-    const cs = getComputedStyle(b);
-    return { present: true, visible: cs.display !== 'none' &&
-             cs.visibility !== 'hidden' };
+    return { present: !!b,
+             hidden: !b || getComputedStyle(b).display === 'none' };
 });
-ok(expBtn.present && expBtn.visible,
-   `the engine's export button is visible, so its help sentence is true ` +
+ok(expBtn.hidden,
+   `the engine's toolbar export icon is hidden in the standalone ` +
    `(${JSON.stringify(expBtn)})`);
-await page.click('.graphbuilder2-host button[title="Export plot"]');
+const cmdExport = await page.evaluate(() => {
+    const b = document.getElementById('ps-export');
+    return { visible: b.offsetParent !== null, label: b.textContent };
+});
+ok(cmdExport.visible && cmdExport.label === 'Export chart',
+   `the command bar carries the one chart export ("${cmdExport.label}")`);
+await page.click('#ps-export');
 await page.waitForTimeout(400);
 ok(await page.locator('#ps-exporter').isVisible(),
-   "and clicking it opens the shell's export dialog, not the dead jamovi path");
+   "and clicking it opens the shell's export dialog");
+await page.keyboard.press('Escape');
+await page.waitForTimeout(200);
+// The help sentence names the button that exists now.
+await page.click('.graphbuilder2-host button[title="Help & shortcuts"]');
+await page.waitForTimeout(500);
+const helpTxt = await page.evaluate(() => {
+    const p = document.querySelector('.gb2-panel');
+    return p ? p.textContent : '';
+});
+ok(/Export chart.*button.*saves the chart as SVG/.test(helpTxt) &&
+   !/export button in the toolbar saves/.test(helpTxt),
+   'the Basics help names the Export chart button, not the hidden icon');
+await page.keyboard.press('Escape');
+await page.waitForTimeout(200);
 await page.keyboard.press('Escape');
 await page.waitForTimeout(250);
 

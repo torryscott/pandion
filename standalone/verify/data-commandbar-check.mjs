@@ -107,6 +107,10 @@ await page.click('#ps-data-undo');
 await page.waitForTimeout(120);
 console.log('  ok  the first cell edit immediately activates visible Undo/Redo');
 
+// The find controls live in the popup now (Jul 31 2026): open it first,
+// through the real trigger, the way a user reaches them.
+await page.click('#ps-data-find-btn');
+await page.waitForTimeout(200);
 await page.fill('#ps-data-find', 'West');
 await page.waitForTimeout(120);
 let findState = await page.evaluate(() => ({
@@ -128,11 +132,21 @@ findState = await page.evaluate(() => ({
 }));
 if (findState.count !== '2 of 12' || findState.row !== 3)
     throw new Error(`Find next did not advance: ${JSON.stringify(findState)}`);
+await page.click('#ps-findpop-close');
+await page.waitForTimeout(150);
 await page.keyboard.press('Control+f');
+await page.waitForTimeout(250);
 if (!(await page.locator('#ps-data-find').evaluate(node =>
         document.activeElement === node)))
     throw new Error('Cmd/Ctrl+F did not focus Data search');
+if (!(await page.evaluate(() =>
+        document.getElementById('ps-findpop').style.display === 'block')))
+    throw new Error('Cmd/Ctrl+F did not open the find popup');
 console.log('  ok  Find navigates matches and owns Cmd/Ctrl+F');
+// Close the popup: it floats over the grid's first columns, and the rest
+// of this file clicks cells that would otherwise sit underneath it.
+await page.click('#ps-findpop-close');
+await page.waitForTimeout(150);
 
 await page.locator('#ps-datagrid td[data-grid-row="9"]')
     .click({ button: 'right' });
@@ -339,8 +353,8 @@ await page.click('#ps-cellmenu-toggle');
 await page.waitForTimeout(120);
 if (!(await page.locator('#ps-data-exclusions').evaluate(node =>
         node.classList.contains('ps-data-exclusions-visible'))) ||
-    !(await page.locator('#ps-data-exclusions-count').textContent())
-        .includes('1 value'))
+    !(await page.locator('#ps-data-excl-btn').textContent())
+        .includes('Excluded \u00b7 1'))
     throw new Error('exclusion status did not appear in the command bar');
 await page.locator('#ps-datagrid td[data-grid-row="0"]')
     .click({ button: 'right' });
@@ -359,6 +373,8 @@ if (!shiftedExclusion.moved || shiftedExclusion.value !== '61')
 await page.locator('input.ps-grid-cellinput').press('Escape');
 await page.click('#ps-data-undo');
 await page.waitForTimeout(120);
+await page.click('#ps-data-excl-btn');
+await page.waitForTimeout(200);
 await page.click('#ps-data-restore');
 await page.waitForTimeout(120);
 if (await page.evaluate(() =>

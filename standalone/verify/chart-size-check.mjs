@@ -71,8 +71,12 @@ console.log('case 1: checked means the standard, on screen and in exports');
 const base = await read();
 ok(base.checked && base.svgW === 720,
    `a fit-managed chart renders at the 7.5 in standard (${base.svgW}px)`);
-ok(await exportW() === 728,
-   'and exports at that size (728 = 720 + the engine\'s 8px pad)');
+// 730 = 720 logical + the ink overhang of the textScale (1.15) defaults;
+// was 728 before Jul 31 2026. Exports follow CONTENT by ruling, so this
+// constant moves exactly when text defaults or the canvas move: keep it
+// EXACT so any accidental drift still fails loudly.
+ok(await exportW() === 730,
+   'and exports at that size (730 = 720 + the scaled-text ink overhang)');
 
 console.log('case 2: a resize hands ownership over, and SAYS so');
 // The engine's size field and its drag handle both funnel through its
@@ -86,7 +90,8 @@ ok(sized.specW === 5,
 ok(!sized.checked,
    'the box UNCHECKS itself: it must never claim a size the chart is not');
 ok(sized.svgW === 480, `the chart is the user's size (${sized.svgW}px)`);
-ok(await exportW() === 488,
+// 490 = 480 + the scaled-text ink overhang (was 488 pre-textScale).
+ok(await exportW() === 490,
    'and the export follows the user, not the standard');
 ok(/your size: 5 x/.test(sized.label),
    `the row states the size in force rather than leaving it a mystery ` +
@@ -95,13 +100,15 @@ ok(/your size: 5 x/.test(sized.label),
 console.log('case 3: re-checking takes the standard back');
 // The user's 5 in is STILL in the blob here. This is the assertion that
 // fails without the forced render-spec size: the explode would win.
+// the Size & view disclosure must be open for a real click (Aug 2 2026)
+await page.evaluate(() => { const t = document.getElementById('ps-sizeview-toggle'); if (t && t.getAttribute('aria-expanded') !== 'true') t.click(); });
 await page.click('#ps-fit-pane');
 await page.waitForTimeout(2000);
 const restored = await read();
 ok(restored.checked && restored.specW === 5 && restored.svgW === 720,
    `the standard out-ranks the stored size (blob still ${restored.specW} in, ` +
    `chart back to ${restored.svgW}px)`);
-ok(await exportW() === 728,
+ok(await exportW() === 730,
    'and the export is the standard again: the guarantee holds');
 ok(/7.5 x 5 in/.test(restored.label),
    `and the label returns to the standard ("${restored.label}")`);
@@ -122,6 +129,8 @@ const freshOn = await read();
 ok(freshOn.checked && freshOn.svgW === 720,
    `setup: a brand-new chart is standard with nothing stored ` +
    `(${freshOn.svgW}px)`);
+// the Size & view disclosure must be open for a real click (Aug 2 2026)
+await page.evaluate(() => { const t = document.getElementById('ps-sizeview-toggle'); if (t && t.getAttribute('aria-expanded') !== 'true') t.click(); });
 await page.click('#ps-fit-pane');
 await page.waitForTimeout(1600);
 const freshOff = await read();
@@ -131,6 +140,8 @@ ok(!freshOff.checked && freshOff.svgW === 720,
 ok(/your size: 7.5 x 5/.test(freshOff.label),
    `and the row names the size now under the user's control ` +
    `("${freshOff.label}")`);
+// the Size & view disclosure must be open for a real click (Aug 2 2026)
+await page.evaluate(() => { const t = document.getElementById('ps-sizeview-toggle'); if (t && t.getAttribute('aria-expanded') !== 'true') t.click(); });
 await page.click('#ps-fit-pane');
 await page.waitForTimeout(1400);
 
@@ -138,9 +149,9 @@ console.log('case 5: the standard is the same figure in any window');
 await page.setViewportSize({ width: 900, height: 700 });
 await page.waitForTimeout(900);
 const small = await read();
-ok(small.svgW === 720 && await exportW() === 728,
+ok(small.svgW === 720 && await exportW() === 730,
    `a smaller window scales the VIEW, never the figure (${small.svgW}px ` +
-   `logical, 728px exported)`);
+   `logical, 730px exported)`);
 await page.setViewportSize({ width: 1500, height: 1000 });
 await page.waitForTimeout(600);
 

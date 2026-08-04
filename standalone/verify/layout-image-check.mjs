@@ -149,7 +149,7 @@ await page.evaluate(() => {
 await page.waitForTimeout(700);
 const plainSize = await page.evaluate(() =>
     window.PS_SHELL.exportSource('white'));
-await page.click('.graphbuilder2-host button[title="Export plot"]');
+await page.click('#ps-export');
 await page.waitForTimeout(500);
 const capVisible = await page.evaluate(() => ({
     shown: document.getElementById('ps-export-caption-field')
@@ -193,7 +193,7 @@ const persisted = await page.evaluate(async () => ({
 }));
 if (!/Figure 1\./.test(persisted.caption) || persisted.h <= plainSize.h)
     throw new Error('caption lost on reload: ' + JSON.stringify(persisted));
-await page.click('.graphbuilder2-host button[title="Export plot"]');
+await page.click('#ps-export');
 await page.waitForTimeout(400);
 await page.fill('#ps-export-caption', '');
 await page.waitForTimeout(250);

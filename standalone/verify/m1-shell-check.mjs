@@ -744,7 +744,9 @@ await page.waitForTimeout(400);
     }));
     ok(ex4.struckCells === 1 && ex4.typedTag === null &&
        ex4.info.indexOf('1 value excluded') !== -1, 'exclusion survives reload');
-    // Restore (command bar) clears everything.
+    // Restore all (inside the exclusion dropdown, Jul 31 2026).
+    await page.click('#ps-data-excl-btn');
+    await page.waitForTimeout(200);
     await page.click('#ps-data-restore');
     await page.waitForTimeout(300);
     const ex5 = await page.evaluate(() => ({
@@ -2198,7 +2200,7 @@ await page.waitForTimeout(400);
             'label.ps-export-format:has(input[value="' + format + '"]) span');
     }
     async function openChartExporter() {
-        await page.click('.graphbuilder2-host button[title="Export plot"]');
+        await page.click('#ps-export');
     }
 
     await page.click('.ps-tab[data-chart-id="c1"]');

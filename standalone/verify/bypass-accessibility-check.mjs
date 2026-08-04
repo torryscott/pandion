@@ -84,7 +84,7 @@ ok(await page.evaluate(() => document.activeElement.id) === 'ps-settings-panel',
    'the second bypass route moves focus to the settings region');
 
 console.log('case 2: the workspace target remains stable across all workspaces');
-for (const workspace of ['data', 'chart', 'layout']) {
+for (const workspace of ['data', 'chart', 'pinboard', 'layout']) {
     await page.evaluate(value => window.PS_SHELL.setWorkspace(value), workspace);
     await page.waitForTimeout(180);
     await page.focus('#ps-skip-workspace');

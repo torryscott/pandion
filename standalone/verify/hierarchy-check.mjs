@@ -68,22 +68,45 @@ ok(names.project && names.project !== names.tabText,
    `and the app bar names the PROJECT, which is a different thing ` +
    `("${names.project}")`);
 
-console.log('case 2: the roles lead, administration follows (46)');
+console.log('case 2: the roles lead; administration lives on the tab menu');
 const order = await page.evaluate(() => {
     const slots = document.getElementById('ps-slots');
-    const doc = document.getElementById('ps-inspector-document');
     const analysis = document.getElementById('ps-module');
+    const sv = document.getElementById('ps-sizeview-toggle');
     return { rolesTop: Math.round(slots.getBoundingClientRect().top),
-             docTop: Math.round(doc.getBoundingClientRect().top),
              analysisTop: Math.round(analysis.getBoundingClientRect().top),
-             docPresent: !!doc, deleteStill: !!document.getElementById(
-                 'ps-inspector-delete') };
+             docGone: !document.getElementById('ps-inspector-document'),
+             svCollapsed: !!sv &&
+                 sv.getAttribute('aria-expanded') === 'false' };
 });
-ok(order.analysisTop < order.rolesTop && order.rolesTop < order.docTop,
-   `the rail reads analysis, then roles, then document administration ` +
-   `(${order.analysisTop} / ${order.rolesTop} / ${order.docTop})`);
-ok(order.docPresent && order.deleteStill,
-   'nothing was removed, only reordered: Duplicate and Delete are still there');
+ok(order.analysisTop < order.rolesTop,
+   `the rail reads analysis, then roles ` +
+   `(${order.analysisTop} / ${order.rolesTop})`);
+ok(order.docGone,
+   'the This-document section is GONE (Torry, Aug 2 2026): rename, ' +
+   'duplicate and delete live on the tab and rail menus');
+ok(order.svCollapsed,
+   'and Size & view folds behind a collapsed disclosure, so the roles ' +
+   'own the rail');
+// the tab menu really covers what the section used to do
+await page.evaluate(() => {
+    const tab = document.querySelector('#ps-tabs .ps-tab[data-chart-id]');
+    const r = tab.getBoundingClientRect();
+    tab.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true,
+        cancelable: true, clientX: r.left + 10, clientY: r.top + 10 }));
+});
+await page.waitForTimeout(250);
+const tabMenu = await page.evaluate(() => {
+    const cmds = [...document.querySelectorAll(
+        '#ps-contextmenu [data-context-command]')]
+        .map(b => b.getAttribute('data-context-command'));
+    return cmds;
+});
+ok(['rename-document', 'duplicate-document', 'delete-document']
+       .every(c => tabMenu.includes(c)),
+   `the tab menu owns rename, duplicate and delete (${tabMenu.join(', ')})`);
+await page.keyboard.press('Escape');
+await page.waitForTimeout(200);
 
 const fold = await page.evaluate(() => {
     const cards = Array.from(document.querySelectorAll('#ps-slots .ps-role-card'));

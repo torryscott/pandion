@@ -125,6 +125,15 @@ details summary:hover{background:var(--bg2);border-radius:10px}
   details{page-break-inside:avoid}
   details:not([open]) .dbody{display:block}
 }
+/* ---- channel switch (jamovi module vs the app) ------------------- */
+.chswitch{display:flex;gap:6px;margin:18px 0 2px;flex-wrap:wrap}
+.chswitch button{font:inherit;font-size:13px;font-weight:600;padding:7px 16px;
+ border:1px solid var(--line);border-radius:999px;background:none;
+ color:inherit;cursor:pointer}
+.chswitch button[aria-selected="true"]{background:var(--accent);
+ border-color:var(--accent);color:#fff}
+body[data-channel="jamovi"] [data-channel="app"]{display:none !important}
+body[data-channel="app"] [data-channel="jamovi"]{display:none !important}
 </style>
 </head>
 <body>
@@ -159,6 +168,15 @@ details summary:hover{background:var(--bg2);border-radius:10px}
     <span class="pill">Honest statistics built in</span>
     <span class="pill">Colorblind-safe by default</span>
   </div>
+  <div class="chswitch" role="tablist" aria-label="Show instructions for">
+    <button type="button" role="tab" data-ch="jamovi"
+            aria-selected="false">In jamovi</button>
+    <button type="button" role="tab" data-ch="app"
+            aria-selected="false">In the app (browser or portable)</button>
+  </div>
+  <div class="sub" style="font-size:13px;margin-top:6px">The chart editor is
+  identical everywhere. This switch only filters the setup, data, and export
+  instructions to where you are working; everything else applies to both.</div>
 </header>
 
 <!-- ============================================================ -->
@@ -209,6 +227,97 @@ any browser, and you can copy it to a USB stick or email it to students.</p>
 <li><b>Export.</b> Click the export button (the tray icon) and save as SVG, PDF, PNG, or JPG.</li>
 </ol>
 <div class="callout tip"><b class="tag">Tip</b>The native options panel is deliberately minimal: variable boxes plus one short data tip. Everything else lives on the chart itself. Click the part of the chart you want to change, or use the toolbar's magnifying-glass <b>Find a setting</b> button (<kbd>Cmd/Ctrl+F</kbd>) when you know the idea but not where it lives.</div>
+
+<!-- ============================================================ -->
+<section data-channel="app">
+<h2 id="app-tour">The app's four workspaces</h2>
+<p>The app wraps the chart editor in four workspaces, switched from the left
+rail (or <kbd>Ctrl+1</kbd> through <kbd>4</kbd> on a Mac,
+<kbd>Ctrl+Shift+1</kbd> through <kbd>4</kbd> elsewhere - macOS keeps
+<kbd>Cmd+Shift+3</kbd> and <kbd>4</kbd> for its own screenshots).</p>
+<h3 id="app-data">Data</h3>
+<p>A spreadsheet for your data: import CSV, Excel, or a jamovi
+<code>.omv</code> (drop the file anywhere, or paste cells straight in), type
+and edit values, set each variable's measure type, exclude individual values
+or whole rows without deleting them, filter, and search with
+<kbd>Cmd/Ctrl+F</kbd>. Computed variables live here too - see
+<a href="#computed">Computed variables</a> below.</p>
+<h3 id="app-charts">Charts</h3>
+<p>Each chart is its own document in the tab strip: rename by double-clicking
+the tab, reorder by dragging, duplicate or delete from the right-click menu,
+and collect related charts into groups in the left rail. The chart itself is
+the full editor this guide describes.</p>
+<h3 id="app-notebook">Notebook</h3>
+<p>Your lab notebook of frozen moments. Right-click a chart and choose
+<b>Keep to Notebook</b>, or press <b>Keep</b> on a pinned comparison in the
+&Sigma; Statistics panel, and the capture lands as a page: the chart, its
+selection rings, and the statistics as one image. Pages are organized into
+<b>sections</b> (tabs at the top), carry when they were kept, your notes, and
+an honest verdict on whether the source chart has changed since. Kept pages
+are records: they never update themselves, which is the point.</p>
+<h3 id="app-layouts">Layouts</h3>
+<p>Multi-panel figure assembly: place live chart panels (they follow their
+source chart), kept Notebook pages, images, and text on a page sized for
+slides or paper, then export the whole page. Right-click any placed panel for
+<b>Open source chart</b>.</p>
+<h3 id="app-saving">Saving and opening</h3>
+<p><b>Save</b> writes a <code>.pand</code> project: the data, every chart and
+its styling, layouts, and the Notebook, all in one file. The app also keeps a
+local autosave as you work, so a closed tab or crash recovers your session on
+the next visit. Your saved palettes and chart styles live in your own library
+on this machine and never travel inside a shared project.</p>
+
+<h2 id="computed">Computed variables</h2>
+<p>In the Data workspace, a computed variable is a formula that recalculates
+whenever the data changes: open it from the column menu (or the
+<b>fx</b> button), name the variable, and type a formula. Use column names
+directly; backtick-quote names with spaces. The <b>quick transform</b> chips
+(log10, ln, z-score, center, bin into 4, recode) write these same formulas
+for you.</p>
+<p>Recipes worth stealing - every formula below is verified against the app
+by an automated check, so they run as written:</p>
+<div class="tablewrap"><table>
+<tr><th>Goal</th><th>Formula</th><th>Notes</th></tr>
+<tr><td>Reverse-score a 1-5 item</td>
+<td><code data-guide-formula>6 - supported</code></td>
+<td>For a 1-7 scale use <code>8 - item</code>: max + 1 minus the item.</td></tr>
+<tr><td>Scale mean across items</td>
+<td><code data-guide-formula>(paced + clear + useful + supported) / 4</code></td>
+<td>Reverse-score first, then average the corrected columns.</td></tr>
+<tr><td>z-scores</td>
+<td><code data-guide-formula>(score - MEAN(score)) / SD(score)</code></td>
+<td>The same thing the <b>z-score</b> chip writes.</td></tr>
+<tr><td>Center a variable</td>
+<td><code data-guide-formula>score - MEAN(score)</code></td>
+<td>Handy before interactions; the <b>center</b> chip.</td></tr>
+<tr><td>Tame a skewed variable</td>
+<td><code data-guide-formula>LOG10(rt)</code></td>
+<td><code>LN</code> and <code>SQRT</code> work the same way.</td></tr>
+<tr><td>Difference score</td>
+<td><code data-guide-formula>post - pre</code></td>
+<td>Positive = improvement when higher is better.</td></tr>
+<tr><td>Split at the mean</td>
+<td><code data-guide-formula>IF(score >= MEAN(score), "high", "low")</code></td>
+<td>Text results make a nominal variable, ready for Group By.</td></tr>
+<tr><td>Equal-count bins</td>
+<td><code data-guide-formula>BIN(score, 4)</code></td>
+<td>Labels the rows "bin 1" through "bin 4" (quartile groups).</td></tr>
+<tr><td>Flag extreme values</td>
+<td><code data-guide-formula>IF(ABS(score - MEAN(score)) / SD(score) > 3, 1, 0)</code></td>
+<td>1 = more than 3 SDs from the mean. Investigate before excluding.</td></tr>
+<tr><td>Round for display</td>
+<td><code data-guide-formula>ROUND(score / 10)</code></td>
+<td><code>FLOOR</code> and <code>CEILING</code> round down / up.</td></tr>
+<tr><td>Names with spaces</td>
+<td><code data-guide-formula>`first quiz` * 2</code></td>
+<td>Backticks around the name, exactly as typed in the header.</td></tr>
+</table></div>
+<div class="callout tip"><b class="tag">Tip</b>Formulas recompute whenever
+the data changes, so a computed column is always current - unlike pasting
+values in. A formula that refers to itself (directly or through another
+computed column) is refused with an error naming both columns, and a broken
+formula flags its column's <b>fx</b> badge with the reason.</div>
+</section>
 
 <!-- ============================================================ -->
 <h2 id="choosing">Picking the right chart</h2>
@@ -793,6 +902,7 @@ any browser, and you can copy it to a USB stick or email it to students.</p>
 <!-- ============================================================ -->
 <h2 id="export">Exporting &amp; sharing</h2>
 
+<div data-channel="jamovi">
 <h3 id="export-panel">The Export panel</h3>
 <figure class="shot">
   <img src="img/shots/guide-export.png" alt="The Export plot panel" loading="lazy">
@@ -811,6 +921,21 @@ any browser, and you can copy it to a USB stick or email it to students.</p>
 <li><b>Your library does not.</b> Saved palettes, saved chart styles, and your defaults live on <i>your</i> machine (they follow you across all your files). Opening someone else's file can never add to or overwrite your library. To hand a look to a colleague, have them save the received chart's style on their machine ("Update from this chart" / save under a name).</li>
 <li>Re-opening a shared file never silently writes exports to disk or re-saves palettes; those actions only fire when you click them.</li>
 </ul>
+</div>
+<div data-channel="app">
+<h3 id="export-app">Exporting from the app</h3>
+<ul>
+<li><b>One blue Export button</b>, top right, exports whatever workspace you
+are in: the chart (SVG, PDF, PNG, JPG), the layout page, or the Notebook (a
+PDF, one page per kept moment; with several sections it asks which).</li>
+<li><b>Vector by default.</b> SVG and PDF stay sharp at any size, and kept
+Notebook pages stay vector all the way into the PDF.</li>
+<li><b>What travels in a .pand project:</b> everything - the data, every
+chart and its styling, layouts, and the Notebook. Your saved palettes and
+chart styles stay in your own library on your machine, so opening someone
+else's project can never rewrite your defaults.</li>
+</ul>
+</div>
 
 <!-- ============================================================ -->
 <h2 id="troubleshooting">Troubleshooting &amp; FAQ</h2>
@@ -833,14 +958,23 @@ any browser, and you can copy it to a USB stick or email it to students.</p>
 <details><summary>A statistic refuses to compute</summary><div class="dbody">
 <p>That is deliberate: Pandion Plots never computes a test that does not fit the data. The readout explains in plain language: for example, paired tests need matched within-subject data, rank and paired tests do not support every multiple-comparison correction, mixed ANOVA needs enough complete subjects in every design cell, and correlations need 3+ complete pairs. The wording points to the relevant requirement or alternative.</p>
 </div></details>
-<details><summary>The chart says "Loading chart engine…"</summary><div class="dbody">
+<details data-channel="jamovi"><summary>The chart says "Loading chart engine…"</summary><div class="dbody">
 <p>The chart engine's local cache was unavailable for one render. It self-heals on the next run of the analysis (change anything, or re-run). Your options and data are unaffected.</p>
 </div></details>
-<details><summary>Where do my saved palettes and styles live?</summary><div class="dbody">
+<details data-channel="jamovi"><summary>Where do my saved palettes and styles live?</summary><div class="dbody">
 <p>In two small files (<code>palettes.json</code>, <code>styles.json</code>) in your personal Pandion Plots configuration folder on your computer, which is why they are available in every jamovi file you open, and why they do not travel inside a shared <code>.omv</code>.</p>
 </div></details>
-<details><summary>Something looks stuck after an edit</summary><div class="dbody">
+<details data-channel="jamovi"><summary>Something looks stuck after an edit</summary><div class="dbody">
 <p>jamovi recomputes in the background after each edit; heavy charts can take a beat. Panels and menus are built to survive this, but if the display ever looks wrong, any small change (or <kbd>Cmd/Ctrl+Z</kbd> then redo) forces a clean redraw. If the whole module misbehaves after installation or reinstallation, restart jamovi; modules load at startup.</p>
+</div></details>
+
+<details data-channel="app"><summary>Where do my projects, library, and autosave live?</summary><div class="dbody">
+<p>A saved project is the <code>.pand</code> file you chose - it carries the
+data, charts, layouts, and Notebook. Between saves the app keeps a local
+autosave (plus a one-step backup and a recents list) in the browser's own
+storage on this machine, which is what the start screen restores from. Saved
+palettes and chart styles also live in that local storage: they follow you
+across projects on this machine, and never travel inside a shared file.</p>
 </div></details>
 
 <hr style="border:none;border-top:1px solid var(--line);margin:60px 0 20px">
@@ -876,6 +1010,8 @@ any browser, and you can copy it to a USB stick or email it to students.</p>
     var a=document.createElement('a');
     a.href='#'+h.id; a.textContent=h.textContent;
     a.className=(h.tagName==='H2')?'nav1':'nav2';
+    var chSec=h.closest('[data-channel]');
+    if(chSec) a.setAttribute('data-channel',chSec.getAttribute('data-channel'));
     nav.appendChild(a); items.push({h:h,a:a});
   });
 
@@ -886,6 +1022,34 @@ any browser, and you can copy it to a USB stick or email it to students.</p>
     items.forEach(function(it){ it.a.classList.toggle('active',it===best); });
   }
   window.addEventListener('scroll',spy,{passive:true}); spy();
+
+  // ---- channel: jamovi module vs the app --------------------------
+  // Default by HOW the guide was opened: the copy the jamovi module
+  // serves lives under a /module/ route; everywhere else (the website,
+  // a local file) defaults to the app. ?channel= overrides, and a
+  // clicked choice sticks per browser.
+  var chBtns=document.querySelectorAll('.chswitch button');
+  function setCh(ch,store){
+    document.body.setAttribute('data-channel',ch);
+    chBtns.forEach(function(b){
+      b.setAttribute('aria-selected',
+        b.getAttribute('data-ch')===ch?'true':'false');
+    });
+    if(store){try{localStorage.setItem('psguide.channel',ch);}catch(e){}}
+    spy();
+  }
+  var chParam=null;
+  try{chParam=new URLSearchParams(location.search).get('channel');}catch(e){}
+  var chStored=null;
+  try{chStored=localStorage.getItem('psguide.channel');}catch(e){}
+  var chDefault=location.pathname.indexOf('/module/')!==-1?'jamovi':'app';
+  setCh((chParam==='jamovi'||chParam==='app')?chParam:
+        ((chStored==='jamovi'||chStored==='app')?chStored:chDefault),false);
+  chBtns.forEach(function(b){
+    b.addEventListener('click',function(){
+      setCh(b.getAttribute('data-ch'),true);
+    });
+  });
 
   // ---- search ------------------------------------------------------
   var box=document.getElementById('navsearch'), hits=document.getElementById('searchhits');

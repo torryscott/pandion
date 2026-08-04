@@ -107,9 +107,12 @@ await page.waitForTimeout(400);
 ok(await page.evaluate(() => window.PS_SHELL.chart().id) === before,
    'Alt+0 is not bound to anything and does not wrap round');
 
-console.log('case 3: the three workspaces the View menu lists');
+console.log('case 3: the four workspaces the View menu lists');
+// Switcher order IS shortcut order: the Pinboard took Shift+3 when it
+// landed between Charts and Layouts (Jul 31 2026), pushing Layouts to 4.
 for (const [combo, want] of [['Control+Shift+Digit1', 'data'],
-                             ['Control+Shift+Digit3', 'layout'],
+                             ['Control+Shift+Digit4', 'layout'],
+                             ['Control+Shift+Digit3', 'pinboard'],
                              ['Control+Shift+Digit2', 'chart']]) {
     await page.keyboard.press(combo);
     await page.waitForTimeout(600);
@@ -126,8 +129,13 @@ const menu = await page.evaluate(async () => {
     return rows;
 });
 // The menu prints the raw shortcut string; only the sheet spaces it out.
-ok(menu.filter(r => /Cmd\/Ctrl\+Shift\+[123]$/.test(r)).length === 3,
-   `and the View menu prints them, so they are discoverable ` +
+// PLATFORM-TRUE since Aug 2 2026: macOS advertises plain Ctrl+N (the
+// Shift chord collides with the system screenshots there); everywhere
+// else keeps Cmd/Ctrl+Shift+N.
+const chordRe = /Mac/.test(process.platform === 'darwin' ? 'Mac' : '')
+    ? /Ctrl\+[1234]$/ : /Cmd\/Ctrl\+Shift\+[1234]$/;
+ok(menu.filter(r => chordRe.test(r)).length === 4,
+   `and the View menu prints the chord that works on this platform ` +
    `(${JSON.stringify(menu.slice(0, 3))})`);
 
 console.log('case 4: Export has an accelerator, like Preferences already did');
@@ -222,6 +230,62 @@ ok(bleed.bFill !== '#ff0000' && !bleed.bBarColor && !bleed.bHasAnn,
 ok(bleed.aBarColor === '#ff0000' && bleed.aHasAnn,
    'while A keeps the edit it produced: drained to its own document, ' +
    'not discarded');
+
+console.log('case: opening a DATA file replaces the documents, not just the table');
+// Torry, Jul 31 2026: he opened a CSV over a project holding 15 charts and
+// got the new data with the OLD chart tabs - every one now pointing at
+// variables that no longer exist, and the fresh file read "(edited)" on
+// arrival. Opening data means a NEW project (captureReplacedProject already
+// says so); the charts must reset with everything else, and the replaced
+// project - charts included - comes back through the offer toast.
+{
+    const staleSetup = await page.evaluate(async () => {
+        const s = ms => new Promise(r => setTimeout(r, ms));
+        window.PS_SHELL.addChart('plotbuilder');
+        window.PS_SHELL.addChart('xyplotbuilder');
+        await s(300);
+        return { docs: window.PS_SHELL.project.charts.length,
+                 name: window.PS_SHELL.project.name };
+    });
+    ok(staleSetup.docs >= 3,
+       `setup: the outgoing project holds ${staleSetup.docs} documents`);
+    // The REAL open path: a File through readPickedFile -> import preview ->
+    // the Use button - exactly what the Open dialog produces.
+    await page.evaluate(() => {
+        window.PS_SHELL.readPickedFile(new File(
+            ['animal,weight\ncat,4.1\ndog,9.8\nrat,0.3\n'],
+            'fresh-data.csv', { type: 'text/csv' }));
+    });
+    await page.waitForSelector('#ps-import-use', { state: 'visible',
+                                                   timeout: 8000 });
+    await page.click('#ps-import-use');
+    await page.waitForTimeout(800);
+    const fresh = await page.evaluate(() => ({
+        docs: window.PS_SHELL.project.charts.length,
+        active: window.PS_SHELL.project.activeChart,
+        cols: window.PS_SHELL.project.table.order.join(','),
+        // The shell seeds an empty per-module bucket ({"plotbuilder":{}});
+        // the contract is that no VARIABLE survives, not that the bucket
+        // object is absent.
+        assignedRoles: (() => {
+            const r = window.PS_SHELL.project.charts[0].roles || {};
+            const hit = [];
+            for (const mod in r) for (const k in r[mod]) {
+                const v = r[mod][k];
+                if (Array.isArray(v) ? v.length : v) hit.push(mod + '.' + k);
+            }
+            return hit.join(',');
+        })(),
+        lastLayout: window.PS_SHELL.project.ui.lastLayout,
+    }));
+    ok(fresh.cols === 'animal,weight',
+       `the new table arrived (${fresh.cols})`);
+    ok(fresh.docs === 1 && fresh.active === 'c1',
+       `and the documents reset to one fresh chart ` +
+       `(${fresh.docs} doc, active ${fresh.active})`);
+    ok(fresh.assignedRoles === '' && fresh.lastLayout === null,
+       'which carries no assigned variables and points at no stale layout');
+}
 
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('DOC LIFECYCLE CHECK PASS');

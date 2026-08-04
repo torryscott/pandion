@@ -61,7 +61,7 @@ ok(shared.title.length > 3 && shared.description.length > 40 &&
    'shared SVG title and description use the live generated chart summary');
 
 console.log('case 2: the standalone export dialog supplies companion text');
-await page.click('.graphbuilder2-host button[title="Export plot"]');
+await page.click('#ps-export');
 await page.waitForTimeout(80);
 const dialog = await page.evaluate(() => ({
     description: document.getElementById('ps-export-description').value,
@@ -126,7 +126,7 @@ ok(pdf.binary.includes(custom) ||
 
 await page.keyboard.press('Escape');
 await page.waitForTimeout(50);
-await page.click('.graphbuilder2-host button[title="Export plot"]');
+await page.click('#ps-export');
 await page.waitForTimeout(50);
 ok(await page.inputValue('#ps-export-description') === custom,
    'the edited description persists with the chart document');

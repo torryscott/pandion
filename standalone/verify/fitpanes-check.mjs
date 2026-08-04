@@ -134,6 +134,8 @@ await page.setViewportSize({ width: 1100, height: 900 });
 await page.waitForTimeout(900);
 ok(await page.evaluate(() => Number(window.PS_SHELL.optionStore().plotWidth)) === 5,
    'and a window resize does not stomp it');
+// the Size & view disclosure must be open for a real click (Aug 2 2026)
+await page.evaluate(() => { const t = document.getElementById('ps-sizeview-toggle'); if (t && t.getAttribute('aria-expanded') !== 'true') t.click(); });
 await page.click('#ps-fit-pane');
 await page.waitForTimeout(900);
 const refit = await geo();
@@ -283,7 +285,7 @@ async function armExportMock() {
 }
 async function exportSvgText() {
     await armExportMock();
-    await page.click('.graphbuilder2-host button[title="Export plot"]');
+    await page.click('#ps-export');
     await page.waitForTimeout(200);
     await page.click('label.ps-export-format:has(input[value="svg"]) span');
     await page.click('#ps-export-go');
@@ -328,6 +330,8 @@ console.log('case 7: the view zoom is a working surface, not a picture');
 // and the engine's rect-based slot math both live in visual space.
 await page.setViewportSize({ width: 1440, height: 900 });
 await page.waitForTimeout(700);
+// the Size & view disclosure must be open for a real click (Aug 2 2026)
+await page.evaluate(() => { const t = document.getElementById('ps-sizeview-toggle'); if (t && t.getAttribute('aria-expanded') !== 'true') t.click(); });
 await page.selectOption('#ps-chart-zoom', '0.75');
 await page.waitForTimeout(400);
 const z75 = await geo();
@@ -338,15 +342,23 @@ ok(Math.abs(z75.zoom - 0.75) < 0.01 && z75.logicalW === wide.logicalW,
 // the panel comic): the engine's toolbar and panels counter-zoom to true
 // size while ONLY the chart scales.
 const chrome75 = await page.evaluate(() => {
-    const b = document.querySelector('#psroot button[title="Export plot"]');
+    // The export icon is display:none since Jul 31 2026 (command-bar export);
+    // the Help button is the same chrome under the same counter-zoom.
+    const b = document.querySelector('#psroot button[title="Help & shortcuts"]');
     return b ? Math.round(b.getBoundingClientRect().height) : 0;
 });
+// the Size & view disclosure must be open for a real click (Aug 2 2026)
+await page.evaluate(() => { const t = document.getElementById('ps-sizeview-toggle'); if (t && t.getAttribute('aria-expanded') !== 'true') t.click(); });
 await page.selectOption('#ps-chart-zoom', '1');
 await page.waitForTimeout(300);
 const chrome100 = await page.evaluate(() => {
-    const b = document.querySelector('#psroot button[title="Export plot"]');
+    // The export icon is display:none since Jul 31 2026 (command-bar export);
+    // the Help button is the same chrome under the same counter-zoom.
+    const b = document.querySelector('#psroot button[title="Help & shortcuts"]');
     return b ? Math.round(b.getBoundingClientRect().height) : 0;
 });
+// the Size & view disclosure must be open for a real click (Aug 2 2026)
+await page.evaluate(() => { const t = document.getElementById('ps-sizeview-toggle'); if (t && t.getAttribute('aria-expanded') !== 'true') t.click(); });
 await page.selectOption('#ps-chart-zoom', '0.75');
 await page.waitForTimeout(300);
 ok(chrome100 > 10 && Math.abs(chrome75 - chrome100) <= 1,
@@ -406,6 +418,8 @@ if (await page.locator('#ps-welcome').isVisible()) {
 ok(await page.evaluate(() =>
        document.getElementById('ps-chart-zoom').value) === '0.75',
    'the chosen zoom is a per-document preference that survives a reload');
+// the Size & view disclosure must be open for a real click (Aug 2 2026)
+await page.evaluate(() => { const t = document.getElementById('ps-sizeview-toggle'); if (t && t.getAttribute('aria-expanded') !== 'true') t.click(); });
 await page.selectOption('#ps-chart-zoom', 'fit');
 await page.waitForTimeout(400);
 
@@ -424,6 +438,8 @@ const zoomOpts = await page.evaluate(() =>
         .map(o => o.value));
 ok(zoomOpts.indexOf('1.25') !== -1 && zoomOpts.indexOf('1.5') !== -1,
    `125% and 150% are offered again (${zoomOpts.join(', ')})`);
+// the Size & view disclosure must be open for a real click (Aug 2 2026)
+await page.evaluate(() => { const t = document.getElementById('ps-sizeview-toggle'); if (t && t.getAttribute('aria-expanded') !== 'true') t.click(); });
 await page.selectOption('#ps-chart-zoom', '1.5');
 await page.waitForTimeout(500);
 const mag = await geo();
@@ -459,8 +475,13 @@ ok(after.logicalW === 720,
    `type switches at 150% leave the canvas at 720px, not 938 ` +
    `(${after.logicalW}px)`);
 const magFacts = svgFacts(await exportSvgText());
-ok(Math.round(magFacts.w) === 728,
+// 730 +- 1: the 150% zoom harvest measures the ink overhang with a
+// half-pixel of rounding slack (730.66 here, 730.00 at 100% - the exact
+// pin lives in chart-size-check, which runs unzoomed).
+ok(Math.abs(magFacts.w - 730) <= 1,
    `and the export still leaves at the standard size (${magFacts.w}px)`);
+// the Size & view disclosure must be open for a real click (Aug 2 2026)
+await page.evaluate(() => { const t = document.getElementById('ps-sizeview-toggle'); if (t && t.getAttribute('aria-expanded') !== 'true') t.click(); });
 await page.selectOption('#ps-chart-zoom', 'fit');
 await page.waitForTimeout(400);
 

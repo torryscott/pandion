@@ -98,23 +98,37 @@ ok(/too large to keep a copy|opens from its file/.test(bigRow.meta),
 ok(/too large/.test(bigRow.tip),
    `with the fuller explanation on hover ("${bigRow.tip.slice(0, 80)}")`);
 
-console.log('case 3: File > Open recent exists, and marks the kinds');
+console.log('case 3: File > Open recent is a FLYOUT submenu');
+// Torry, Aug 2 2026, overruling t3-54's inline list with field
+// experience: one trigger row; the recents pop out beside it on hover,
+// click, or ArrowRight.
 const menu = await page.evaluate(async () => {
     const s = ms => new Promise(r => setTimeout(r, ms));
     document.querySelector('[data-ps-menu="file"]').click();
     await s(400);
     const m = document.getElementById('ps-appmenu');
+    const trigger = m.querySelector('[data-app-submenu="recent"]');
+    const inlineEntries = m.querySelectorAll('[data-recent-menu]').length;
+    trigger.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+    await s(150);
+    const sm = document.getElementById('ps-appsubmenu');
     const out = {
-        heading: !!Array.from(m.querySelectorAll('.ps-menu-heading'))
-            .filter(h => /open recent/i.test(h.textContent)).length,
-        entries: Array.from(m.querySelectorAll('[data-recent-menu]'))
+        trigger: !!trigger,
+        triggerExpanded: trigger.getAttribute('aria-expanded'),
+        haspopup: trigger.getAttribute('aria-haspopup'),
+        inlineEntries,
+        flyoutShown: sm.style.display === 'block',
+        flankRight: sm.getBoundingClientRect().left >
+            trigger.getBoundingClientRect().left + 40,
+        entries: Array.from(sm.querySelectorAll('[data-recent-menu]'))
             .map(b => b.textContent.trim()) };
     document.querySelector('[data-ps-menu="file"]').click();
     return out;
 });
-ok(menu.heading,
-   'the File menu carries an Open recent section, which only existed on the ' +
-   'start centre before');
+ok(menu.trigger && menu.haspopup === 'menu' && menu.inlineEntries === 0,
+   'one trigger row replaces the inline list (aria-haspopup declared)');
+ok(menu.flyoutShown && menu.triggerExpanded === 'true' && menu.flankRight,
+   'hovering it opens the flyout BESIDE the menu, aria-expanded tracking');
 // One entry, not three: loadTable edits the SAME project, so Recents
 // correctly holds one. Asserting "at least two" here would have been
 // asserting a bug in the probe's own setup.
@@ -123,6 +137,46 @@ ok(menu.entries.length >= 1,
 ok(menu.entries.some(e => /from file|name only/.test(e)),
    `and marking an entry that cannot reopen in place, same wording as the ` +
    `start centre (${JSON.stringify(menu.entries)})`);
+
+console.log('case 3b: dismissal closes both; the Mac chord switches workspaces');
+const closed = await page.evaluate(async () => {
+    const s = ms => new Promise(r => setTimeout(r, ms));
+    // menu was toggled shut above; both panels must be gone
+    const gone = document.getElementById('ps-appsubmenu').style.display !==
+        'block' && document.getElementById('ps-appmenu').style.display !==
+        'block';
+    // the macOS chord: plain Ctrl+3 lands on the Notebook (Cmd+Shift+3 is
+    // the SYSTEM screenshot there and never reaches the page)
+    const isMac = /Mac/.test(navigator.platform || '');
+    let chord = 'skipped';
+    if (isMac) {
+        document.dispatchEvent(new KeyboardEvent('keydown', {
+            code: 'Digit3', key: '3', ctrlKey: true, bubbles: true,
+            cancelable: true }));
+        await s(300);
+        chord = window.PS_SHELL.workspace();
+        window.PS_SHELL.setWorkspace('data');
+        await s(200);
+    }
+    return { gone, isMac, chord };
+});
+ok(closed.gone, 'closing the File menu retires the flyout with it');
+ok(!closed.isMac || closed.chord === 'pinboard',
+   `on a Mac, plain Ctrl+3 reaches the Notebook (${closed.chord}) - ` +
+   `Cmd+Shift+3 is the system screenshot there`);
+const chordLabel = await page.evaluate(async () => {
+    const s = ms => new Promise(r => setTimeout(r, ms));
+    document.querySelector('[data-ps-menu="view"]').click();
+    await s(300);
+    const rows = [...document.querySelectorAll(
+        '#ps-appmenu .ps-menu-shortcut')].map(n => n.textContent);
+    document.querySelector('[data-ps-menu="view"]').click();
+    return { isMac: /Mac/.test(navigator.platform || ''), rows };
+});
+ok(!chordLabel.isMac ? chordLabel.rows.some(r => r === 'Cmd/Ctrl+Shift+3')
+                     : chordLabel.rows.some(r => r === 'Ctrl+3'),
+   `the View menu advertises the chord that actually works here ` +
+   `(${chordLabel.rows.filter(r => /3/.test(r)).join(', ')})`);
 
 console.log('case 4: opening it explains rather than doing nothing');
 const opened = await page.evaluate(async () => {

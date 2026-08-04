@@ -125,6 +125,8 @@ ok(align.wrapX - align.tbX > 40,
    `the menus have to overcome (${align.wrapX - align.tbX}px)`);
 
 console.log('case 3: it holds at a reduced view, where chrome counter-zooms');
+// the Size & view disclosure must be open for a real interaction (Aug 2 2026)
+await page.evaluate(() => { const t = document.getElementById('ps-sizeview-toggle'); if (t && t.getAttribute('aria-expanded') !== 'true') t.click(); });
 await page.selectOption('#ps-chart-zoom', '0.5');
 await page.waitForTimeout(700);
 const gt50 = await measure('graphtype');
@@ -135,6 +137,8 @@ ok(Math.abs(gt50.delta) <= 24 && Math.abs(pal50.delta) <= 24,
 ok(gt50.width === gt.width && pal50.width === pal.width,
    `and they render at TRUE size rather than shrinking with the chart ` +
    `(${gt50.width}px vs ${gt.width}px)`);
+// the Size & view disclosure must be open for a real interaction (Aug 2 2026)
+await page.evaluate(() => { const t = document.getElementById('ps-sizeview-toggle'); if (t && t.getAttribute('aria-expanded') !== 'true') t.click(); });
 await page.selectOption('#ps-chart-zoom', 'fit');
 await page.waitForTimeout(500);
 

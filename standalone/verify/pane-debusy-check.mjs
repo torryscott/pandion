@@ -200,8 +200,9 @@ const disc = await page.evaluate(() => {
         bodyVisible: body.offsetParent !== null
     };
 });
-ok(disc.order === 'ps-slots>ps-varbox',
-   `the slots come first; the list sits below (${disc.order})`);
+ok(disc.order === 'ps-slots>ps-varbox>ps-sizeview',
+   `the slots come first; the list below; Size & view last, in the same ` +
+   `card idiom (Aug 2 2026) (${disc.order})`);
 ok(disc.collapsed && !disc.bodyVisible,
    'the list is collapsed by default: the slots ask, the picker answers');
 ok(disc.label === 'Available variables (1)',

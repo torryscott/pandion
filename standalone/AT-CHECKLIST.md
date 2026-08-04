@@ -115,7 +115,7 @@ shortcuts:
 
 ## Recording findings
 
-Add each failure to PANDION-TITLE-II-ACCESSIBILITY-PUNCHLIST.html against
+Add each failure to planning/PANDION-TITLE-II-ACCESSIBILITY-PUNCHLIST.html against
 its item (the step numbers above name their items), with the exact spoken
 text where relevant. When a configuration passes a section, note it in the
 item's log with the date, AT, browser and OS - those notes are the evidence

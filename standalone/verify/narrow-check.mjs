@@ -74,8 +74,8 @@ const switcher = await page.evaluate(() =>
     Array.from(document.querySelectorAll('[data-ps-workspace]'))
         .filter(b => b.getBoundingClientRect().width > 0)
         .map(b => b.getAttribute('data-ps-workspace')));
-ok(switcher.length === 3,
-   `with all three workspaces clickable (${JSON.stringify(switcher)})`);
+ok(switcher.length === 4,
+   `with all four workspaces clickable (${JSON.stringify(switcher)})`);
 ok(await page.evaluate(() => {
        const b = document.getElementById('ps-project-add');
        return !!b && b.getBoundingClientRect().width > 0;

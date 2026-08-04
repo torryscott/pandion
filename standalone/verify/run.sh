@@ -15,12 +15,12 @@ cd "$(dirname "$0")/../.."
 # reads index.html source directly and runs once).
 FEATURE_PROBES="branding-check axe-state-check bypass-accessibility-check busy-check column-sizing-check \
 computed-variables-check coverage-gaps-check chart-accessibility-check export-accessibility-check \
-chart-from-selection-check chart-size-check column-gestures-check chrome-check clipboard-check copy-image-check correctness-check \
+chart-from-selection-check chart-groups-check chart-size-check column-gestures-check chrome-check clipboard-check copy-image-check copy-moment-check correctness-check \
 data-commandbar-check data-menu-check separator-accessibility-check \
 data-undo-check dates-check doclifecycle-check tab-accessibility-check drag-feel-check \
 drag-selection-check outside-canvas-check hmc-list-check hidden-vars-check sigma-freshness-check \
 empty-states-check engine-stamp-check flyout-align-check filter-honesty-check examples-check exclusion-bridge-check \
-fitpanes-check \
+findpop-check fitpanes-check \
 grid-keys-check help-check hierarchy-check \
 grid-accessibility-check \
 help-me-choose-check import-errors-check layout-image-check modal-accessibility-check \
@@ -28,11 +28,13 @@ layout-arrange-check layout-clipboard-check layout-orientation-check layout-rail
 layout-accessibility-check \
 linked-selection-check motion-check narrow-check novice-affordances-check \
 overlay-reload-check overlay-restore-check pane-debusy-check percol-missing-check \
-perf-check polish-check preferences-check \
+perf-check pinboard-check polish-check preferences-check \
+  guide-formulas-check \
 probed-bugs-check provenance-check rail-icons-check punchlist-check reachability-check recents-check reshape-check \
 reflow-accessibility-check \
 row-filters-check \
 statusbar-check \
+textscale-check \
 safety-check \
 silent-failure-check selection-menus-check spreadsheet-gaps-check teaching-check \
 tokens-check tour-check typing-check units-check wizard-parity-check variable-levels-check visuals-check \

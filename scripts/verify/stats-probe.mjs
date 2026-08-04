@@ -2394,13 +2394,26 @@ async function copyFlips(page, actKey) {
     console.log('case II (box pairs mean-note):');
     check('no page errors', errs.length === 0, errs.join(' | '));
     await openStats(page);
+    // The box family LANDS on Descriptives (Aug 2 2026): the panel opens
+    // on what the chart shows; the mean tests stay one tab away.
+    const landing = await page.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll('[data-st-tab]'));
+        const on = btns.find(b => (b.getAttribute('style') || '')
+            .includes('font-weight:600') || b.getAttribute('aria-selected')
+            === 'true');
+        const pane = document.querySelector('[data-st-pane="desc"]');
+        return { paneShown: !!pane && pane.style.display !== 'none' };
+    });
+    check('the box plot lands on Descriptives, not the mean tests',
+          landing.paneShown, JSON.stringify(landing));
     const txt = await page.evaluate(() => {
         const p = document.querySelector('[data-st-pane="pairs"]');
         return p ? p.textContent : '';
     });
     check('pairs note distinguishes mean tests from Mann-Whitney ranks',
           /these t tests compare MEANS/i.test(txt) &&
-          /Mann-Whitney U is rank-based, not a median test/i.test(txt), txt.slice(-240));
+          /Switching to Mann-Whitney U would not test medians either/i.test(txt),
+          txt.slice(-240));
     await ctx.close();
 }
 
