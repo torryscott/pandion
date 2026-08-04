@@ -83,6 +83,34 @@ ok(Math.abs(after.w - expW * 96) < 1.2, `chart re-rendered at the committed widt
 ok(after.sel === true, 'selection class survives the follow re-render');
 ok(after.bars > 0, 'chart content intact after follow');
 
+// stop-and-go: a SECOND resize right after the first commit must follow
+// immediately (the re-arm grace; a cold 350ms quiet-gate froze resumed
+// drags and released them in one jump)
+const grew2 = { w: grew.w + 60, h: grew.h + 40 };
+await page.evaluate((g) => {
+  const live = document.querySelector('jmv-results-svg [data-role="gb2-chart-svg"]');
+  live.setAttribute('width', g.w);
+  live.setAttribute('height', g.h);
+}, grew2);
+const quick = await page.evaluate(() => {
+  const live = document.querySelector('jmv-results-svg [data-role="gb2-chart-svg"]');
+  return parseFloat(live.getAttribute('width'));
+});
+ok(Math.abs(quick - grew2.w) < 1.2, `second drag followed in the same task (${quick})`);
+await page.waitForTimeout(700);
+const after2 = await page.evaluate(() => {
+  const dig = (blob) => { try { const s = typeof blob === 'string' ? JSON.parse(blob) : blob; return s.plotWidth; } catch (e) { return undefined; } };
+  const po = window.__gb2_pendingOpts || {};
+  if (po.chartSpec) { const v = dig(po.chartSpec); if (v !== undefined) return v; }
+  if (po.plotWidth !== undefined) return po.plotWidth;
+  const cs = (window.__probeCommits || []).filter((c) => c[0] === 'chartSpec').pop();
+  if (cs) { const v = dig(cs[1]); if (v !== undefined) return v; }
+  const pwc = (window.__probeCommits || []).filter((c) => c[0] === 'plotWidth').pop();
+  return pwc ? parseFloat(pwc[1]) : undefined;
+});
+const expW2 = Math.round((grew2.w / 96) * 100) / 100;
+ok(typeof after2 === 'number' && Math.abs(after2 - expW2) < 0.011, `second commit landed (${after2} vs ${expW2})`);
+
 // negative control: NO wrapper -> observer never wired, resize commits nothing
 const page2 = await ctx.newPage();
 await page2.addInitScript(() => { window.__probeCommits = []; window.setOption = function (k, v) { window.__probeCommits.push([k, String(v)]); }; });
