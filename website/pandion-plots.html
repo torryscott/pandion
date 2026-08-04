@@ -11736,6 +11736,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     var cardH = ty + 2;
     var xml = new XMLSerializer();
     var chartClone = chart.cloneNode(true);
+    stripHoverFromClone(chartClone);
     chartClone.removeAttribute("tabindex");
     chartClone.removeAttribute("aria-label");
     chartClone.setAttribute("x", "0");
@@ -11920,6 +11921,24 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   // layout stays sharp in SVG and PDF alike. Legacy PNG pins from the
   // first hours keep working everywhere (render, copy, export) - they are
   // just raster, as they were born.
+  // A kept page is a RECORD, so it must not bake in transient view state.
+  // The engine strips hover from its own export harvest, but these two Keep
+  // paths take a plain cloneNode of the LIVE svg, so a pointer resting on a
+  // mark baked its hover highlight into the page (found on the live site,
+  // Aug 4 2026). Hover is expressed as an inline brightness() filter
+  // throughout the engine; persistent styling uses the SVG filter ATTRIBUTE
+  // instead, so removing inline brightness is exact and touches nothing
+  // else. Done on the CLONE, so the live chart is never disturbed.
+  function stripHoverFromClone(clone) {
+    try {
+      var hot = clone.querySelectorAll('[style*="brightness"]');
+      for (var i = 0; i < hot.length; i++) {
+        var st = hot[i].style;
+        if (st && /brightness\(/.test(st.filter || "")) st.removeProperty("filter");
+      }
+      return hot.length;
+    } catch (e) { return 0; }
+  }
   function pinSvgSrc(svgText) {
     return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgText);
   }
@@ -12162,6 +12181,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     var h = Math.round(parseFloat(chart.getAttribute("height")) ||
                        chart.getBoundingClientRect().height);
     var clone = chart.cloneNode(true);
+    stripHoverFromClone(clone);
     clone.removeAttribute("tabindex");
     clone.removeAttribute("aria-label");
     if (!clone.getAttribute("viewBox"))

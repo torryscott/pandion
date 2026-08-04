@@ -29,7 +29,7 @@ layout-accessibility-check \
 linked-selection-check motion-check narrow-check novice-affordances-check \
 overlay-reload-check overlay-restore-check pane-debusy-check percol-missing-check \
 perf-check pinboard-check polish-check preferences-check \
-  guide-formulas-check \
+  guide-formulas-check keep-fidelity-check \
 probed-bugs-check provenance-check rail-icons-check punchlist-check reachability-check recents-check reshape-check \
 reflow-accessibility-check \
 row-filters-check \
