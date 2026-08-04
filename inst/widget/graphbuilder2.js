@@ -10805,6 +10805,7 @@
                 }
                 var _xrPend = null;
                 var _xrActive = false;
+                var _xrLastExt = 0;
                 var _xrTimer = null;
                 function _xrFollow() {
                     // The corner grip's per-move body: set inches, keep
@@ -10846,14 +10847,14 @@
                         try { _setOption("plotHeight", data.plotHeight); } catch (_eXr3) {}
                     }
                 }
-                var ro = new ResizeObserver(function (entries) {
+                function _xrCheck() {
                     try {
                         if (!svg || !svg.isConnected) return;
                         if (window.__gb2_widgetPointerDown) return;
                         if (typeof draggingXY !== "undefined" && draggingXY) return;
-                        // Measure ATTRIBUTES at CALLBACK time, never the
-                        // event snapshot and never layout rects: observer
-                        // events arrive async (a stale one used to read as
+                        // Measure ATTRIBUTES at CHECK time, never an event
+                        // snapshot and never layout rects: observer events
+                        // arrive async (a stale one used to read as
                         // external and commit the engine's own transient
                         // size), and the results column CSS can CLAMP the
                         // layout rect below the attribute (container probe:
@@ -10869,25 +10870,29 @@
                         var ew = svg.__gb2_expectedW, eh = svg.__gb2_expectedH;
                         if (typeof ew !== "number" || typeof eh !== "number") return;
                         if (Math.abs(rw - ew) < 1 && Math.abs(rh - eh) < 1) return;
-                        // A NEW external session only arms after the engine
-                        // has been size-quiet for 350ms (internal writes
+                        // A COLD session only arms after the engine has
+                        // been size-quiet for 350ms (internal writes
                         // cluster around renders/redraws; a real host drag
-                        // happens in calm water). An armed session streams
-                        // follow events freely - its own applySize writes
-                        // would otherwise re-close the window per move.
+                        // happens in calm water). Recent genuine drag
+                        // activity keeps the gate OPEN across the 250ms
+                        // commit, whose own applySize stamp would otherwise
+                        // freeze stop-and-go drags for 350ms and release
+                        // them in one jump (Torry's demo report).
+                        var _now = Date.now();
                         if (!_xrActive) {
                             var _lw = svg.__gb2_sizeWriteAt || 0;
-                            if (Date.now() - _lw < 350) return;
+                            if (_now - _lw < 350 &&
+                                !(_xrLastExt && _now - _xrLastExt < 1200)) return;
                             _xrActive = true;
                         }
+                        _xrLastExt = _now;
                         _xrPend = { w: rw, h: rh };
-                        // Follow SYNCHRONOUSLY inside the observer callback.
-                        // RO delivers before paint, so the resized box and
-                        // the redrawn content land in the SAME frame; the
-                        // first draft deferred to requestAnimationFrame,
-                        // which painted one frame of new box with old
-                        // content - visible stutter on slow drags next to
-                        // the corner grip's synchronous applySize.
+                        // Follow SYNCHRONOUSLY in the same task: via the
+                        // MutationObserver microtask this runs right after
+                        // the host's own setAttribute handler, the exact
+                        // timing of the corner grip's per-move applySize,
+                        // so box and content land in the same painted
+                        // frame with no rendering-pipeline detour.
                         _xrFollow();
                         if (_xrTimer) clearTimeout(_xrTimer);
                         _xrTimer = setTimeout(function () {
@@ -10895,7 +10900,22 @@
                             _xrCommit();
                         }, 250);
                     } catch (_eXr7) {}
-                });
+                }
+                // Fast path: attribute writes (the handle contract) land
+                // as a microtask in the SAME task as the writer. The
+                // ResizeObserver stays as the backstop for any host that
+                // resizes through CSS instead of attributes.
+                if (window.__gb2_extResizeMO) {
+                    try { window.__gb2_extResizeMO.disconnect(); } catch (_eXm0) {}
+                    window.__gb2_extResizeMO = null;
+                }
+                if (typeof MutationObserver !== "undefined") {
+                    var mo = new MutationObserver(function () { _xrCheck(); });
+                    mo.observe(svg, { attributes: true,
+                                      attributeFilter: ["width", "height"] });
+                    window.__gb2_extResizeMO = mo;
+                }
+                var ro = new ResizeObserver(function () { _xrCheck(); });
                 ro.observe(svg);
                 window.__gb2_extResizeRO = ro;
             } catch (_eXrW) {}
