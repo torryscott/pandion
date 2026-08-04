@@ -8134,6 +8134,7 @@
             if (elBottom + BUFFER > H) newH = Math.min(_AUTO_EXPAND_MAX_H, elBottom + BUFFER);
             if (newW !== W) {
                 svg.setAttribute("width", newW);
+                try { svg.__gb2_expectedW = newW; } catch (_eXw) {}
                 if (typeof inspectorPanel !== "undefined" && inspectorPanel &&
                     typeof _syncInspectorPanelGeometry === "function") {
                     _syncInspectorPanelGeometry();
@@ -8141,6 +8142,7 @@
             }
             if (newH !== H) {
                 svg.setAttribute("height", newH);
+                try { svg.__gb2_expectedH = newH; } catch (_eXh) {}
             }
             // Left: extend bgDiv leftward. (Same approach as before -
             // the SVG's coord origin can't shift without rewiring
@@ -8184,6 +8186,7 @@
                     // bars/axes don't get clipped at the bottom.
                     var grownH = (newH !== H ? newH : H) + deltaGrow;
                     svg.setAttribute("height", grownH);
+                    try { svg.__gb2_expectedH = grownH; } catch (_eXg) {}
                     grew = true;
                 }
             }
@@ -10014,7 +10017,13 @@
             // a harvest during the twin-less window after a rebuild gets a
             // chrome-y chart rather than jamovi's first-svg fallback (which
             // would grab a toolbar icon).
-            "class": "jmv-results-svg-content",
+            // jmv-results-svg-selection (Aug 2026, agreed with
+            // Jonathon): the marker jamovi's element-level resize handle
+            // keys on. It stays on the LIVE chart permanently - the twin
+            // build overwrites its own class attribute wholesale, so the
+            // marker can never leak onto the hidden copy and the handle
+            // can never land on it.
+            "class": "jmv-results-svg-content jmv-results-svg-selection",
             // EXPLICIT namespace attributes (Jul 2026, the PowerPoint-copy
             // root cause): the HTML serializer does NOT emit xmlns for a
             // namespace-created svg, and jamovi's copy rasterizer embeds
@@ -10835,6 +10844,88 @@
         try { host.__gb2_buildHarvestTwin = _gb2BuildHarvestTwin; } catch (_eTwX) {}
         // first build lands right after this render's synchronous body
         _gb2ScheduleHarvestTwin(30);
+
+        // ===== jamovi-side resize follow (Aug 2026, Jonathon's design):
+        // the host places a resize handle on svg.jmv-results-svg-selection
+        // and resizes that svg; this observer folds the new size back into
+        // plotWidth/plotHeight so the change redraws at the new geometry
+        // instead of stretching, persists, and round-trips. Engine writes
+        // are recognized by the __gb2_expectedW/H stamps at every internal
+        // size-write site; anything else is host-driven. Gated to the
+        // jmv-results-svg element like the twin, so production jamovi and
+        // the standalone shell never run it. Live-follow cadence may need
+        // tuning once the real handle exists.
+        function _gb2WireExtResize() {
+            try {
+                if (!host.closest || !host.closest("jmv-results-svg")) return;
+                if (typeof ResizeObserver === "undefined") return;
+                if (window.__gb2_extResizeRO) {
+                    try { window.__gb2_extResizeRO.disconnect(); } catch (_eXr0) {}
+                    window.__gb2_extResizeRO = null;
+                }
+                var _xrPend = null;
+                var _xrRaf = false;
+                var _xrTimer = null;
+                function _xrFollow() {
+                    // The corner grip's per-move body: set inches, keep
+                    // data authoritative, re-APPLY the size. Never route
+                    // this through redraw() - redraw does not re-apply
+                    // size, and its canvas auto-grow tail turned every
+                    // follow into an ever-growing-height feedback loop.
+                    if (!_xrPend) return;
+                    var _exb = svg.__gb2_extraBottomPx || 0;
+                    inchesW = Math.min(40, Math.max(1, _xrPend.w / PX_PER_INCH));
+                    inchesH = Math.min(40, Math.max(1, (_xrPend.h - _exb) / PX_PER_INCH));
+                    data.plotWidth = inchesW;
+                    data.plotHeight = inchesH;
+                    applySize();
+                    try { _gbResizeSyncInputs(); } catch (_eXr1) {}
+                }
+                function _xrCommit() {
+                    // endDragXY's release body: round to the 2 dp inch
+                    // commit and persist through the normal pipeline
+                    if (!_xrPend) return;
+                    _xrFollow();
+                    _xrPend = null;
+                    data.plotWidth = Math.round(inchesW * 100) / 100;
+                    data.plotHeight = Math.round(inchesH * 100) / 100;
+                    if (hasSetOption) {
+                        try { _setOption("plotWidth", data.plotWidth); } catch (_eXr2) {}
+                        try { _setOption("plotHeight", data.plotHeight); } catch (_eXr3) {}
+                    }
+                }
+                var ro = new ResizeObserver(function (entries) {
+                    try {
+                        if (!svg || !svg.isConnected) return;
+                        if (window.__gb2_widgetPointerDown) return;
+                        if (typeof draggingXY !== "undefined" && draggingXY) return;
+                        var en = entries[entries.length - 1];
+                        var rw = en && en.contentRect ? en.contentRect.width : 0;
+                        var rh = en && en.contentRect ? en.contentRect.height : 0;
+                        if (!(rw > 0 && rh > 0)) return;
+                        var ew = svg.__gb2_expectedW, eh = svg.__gb2_expectedH;
+                        if (typeof ew !== "number" || typeof eh !== "number") return;
+                        if (Math.abs(rw - ew) < 1 && Math.abs(rh - eh) < 1) return;
+                        _xrPend = { w: rw, h: rh };
+                        if (!_xrRaf) {
+                            _xrRaf = true;
+                            requestAnimationFrame(function () {
+                                _xrRaf = false;
+                                _xrFollow();
+                            });
+                        }
+                        if (_xrTimer) clearTimeout(_xrTimer);
+                        _xrTimer = setTimeout(function () {
+                            _xrTimer = null;
+                            _xrCommit();
+                        }, 250);
+                    } catch (_eXr7) {}
+                });
+                ro.observe(svg);
+                window.__gb2_extResizeRO = ro;
+            } catch (_eXrW) {}
+        }
+        _gb2WireExtResize();
 
         function sanitizeFilename(name) {
             name = (name || "").trim();
@@ -27965,6 +28056,13 @@
 
             svg.setAttribute("width", W);
             svg.setAttribute("height", H);
+            // The external-resize observer treats any svg size the
+            // engine did not stamp as host-driven (jamovi's handle).
+            try {
+                svg.__gb2_expectedW = W;
+                svg.__gb2_expectedH = H;
+                svg.__gb2_extraBottomPx = (M.extraBottomPx || 0);
+            } catch (_eXsz) {}
             // wrap is display:block now (was inline-block), so its
             // width has to be set explicitly to match the SVG -
             // otherwise it would expand to 100% of host. _bgPad.left
@@ -29547,6 +29645,11 @@
                     try {
                         svg.setAttribute("height",
                             inchesH * PX_PER_INCH + (M.extraBottomPx || 0));
+                        try {
+                            svg.__gb2_expectedH =
+                                inchesH * PX_PER_INCH + (M.extraBottomPx || 0);
+                            svg.__gb2_extraBottomPx = (M.extraBottomPx || 0);
+                        } catch (_eXn) {}
                         if (typeof _updateBgCanvas === "function") _updateBgCanvas();
                     } catch (_eCnSz) {}
                 }
