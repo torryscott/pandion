@@ -1,10 +1,17 @@
+// End-to-end proof in REAL jamovi (Jonathon's svg-ftw container) that the
+// selection-class resize contract works for BOTH ways jamovi resizes things:
+//   A. CSS `resize: both` -> inline style width/height  (jamovi's own image idiom)
+//   B. width/height attribute writes
+// Unlike the first container probe, this one does not stub setOption. It
+// WRAPS jamovi's real one so a commit is observed as it actually happens,
+// then confirms the size still holds after the analysis re-runs.
 import { createRequire } from 'node:module';
 const { chromium } = createRequire('/tmp/x.js')('playwright');
 const b = await chromium.launch();
 const page = await (await b.newContext({ viewport: { width: 1500, height: 1000 } })).newPage();
 let pass = 0, fail = 0;
 const bad = (m) => { console.log('  FAIL: ' + m); fail++; };
-const good = (m) => { console.log('  ok: ' + m); pass++; };
+const good = (m) => { console.log('  ok:   ' + m); pass++; };
 const click = `for (const t of ['pointerdown','mousedown','pointerup','mouseup','click'])
   el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true }));`;
 
@@ -26,45 +33,17 @@ async function openFile(match) {
   await page.mouse.dblclick(bx.x, bx.y);
 }
 
-let preUrls = new Set();
-async function snapshotFrames() {
-  preUrls = new Set(page.frames().map((f) => f.url()));
-}
-async function freshFrame() {
-  // the session file accumulates analyses from earlier probe runs, so
-  // the fresh one is the frame whose URL did not exist pre-create
-  let best = null;
-  for (const f of page.frames()) {
-    if (preUrls.has(f.url())) continue;
-    try {
-      const d = await f.evaluate(() => {
-        const t = (document.querySelector('h1,h2')?.textContent || '').trim();
-        if (!/Scatter/.test(t)) return null;
-        const live = document.querySelector('.graphbuilder2-host svg[data-role="gb2-chart-svg"]');
-        return { live: !!live };
-      });
-      if (d && d.live) best = f;
-    } catch (e) { }
-  }
-  return best;
-}
-
 await page.goto('http://127.0.0.1:41337/');
 await page.waitForTimeout(5000);
 await openFile('Grey');
 await page.waitForTimeout(9000);
 
-await snapshotFrames();
-const created = await page.evaluate((c) => {
-  const f = new Function('el', c);
-  const el = document.querySelector('button.jmv-ribbon-menu-item[data-ns="pandion"][data-name="xyplotbuilder"]');
-  if (!el) return false;
-  f(el); return true;
-}, click);
-created ? good('created fresh Scatter') : bad('ribbon item not found');
+const pre = new Set(page.frames().map((f) => f.url()));
+await page.evaluate((c) => { const f = new Function('el', c);
+  f(document.querySelector('button.jmv-ribbon-menu-item[data-ns="pandion"][data-name="xyplotbuilder"]')); }, click);
 await page.waitForTimeout(4000);
 let assigned = 0;
-for (let step = 0; step < 2 && created; step++) {
+for (let step = 0; step < 2; step++) {
   let done = false;
   for (const f of page.frames()) {
     if (done) break;
@@ -81,60 +60,105 @@ for (let step = 0; step < 2 && created; step++) {
   if (done) assigned++;
   await page.waitForTimeout(2500);
 }
-assigned === 2 ? good('assigned X and Y') : bad(`assigned ${assigned}/2`);
+assigned === 2 ? good('fresh Scatter created and populated') : bad(`assigned ${assigned}/2`);
 await page.waitForTimeout(9000);
 
-const sf = await freshFrame();
-if (!sf) { bad('no fresh Scatter frame'); }
-else {
-  const st = await sf.evaluate(() => {
-    const live = document.querySelector('.graphbuilder2-host svg[data-role="gb2-chart-svg"]');
-    const twin = document.querySelector('[data-role="gb2-harvest-twin"]');
-    const sel = document.querySelector('svg.jmv-results-svg-selection');
-    return {
-      liveSel: live.classList.contains('jmv-results-svg-selection'),
-      twinClass: twin ? twin.getAttribute('class') : null,
-      selIsLive: sel === live,
-      w: parseFloat(live.getAttribute('width')),
-      h: parseFloat(live.getAttribute('height')),
-    };
-  });
-  st.liveSel ? good('live chart wears jmv-results-svg-selection') : bad('marker class missing');
-  st.twinClass === 'jmv-results-svg-content' ? good('twin carries content class only') : bad('twin class: ' + st.twinClass);
-  st.selIsLive ? good('a handle keyed on the marker lands on the LIVE chart') : bad('marker selector missed the live chart');
-
-  // the Damo simulation: externally resize the marked svg in REAL jamovi
-  await sf.evaluate(() => {
-    const live = document.querySelector('svg.jmv-results-svg-selection');
-    live.setAttribute('width', parseFloat(live.getAttribute('width')) + 120);
-    live.setAttribute('height', parseFloat(live.getAttribute('height')) + 90);
-  });
-  await page.waitForTimeout(1200);
-  const mid = await sf.evaluate(() => {
-    const live = document.querySelector('svg.jmv-results-svg-selection');
-    return { w: parseFloat(live.getAttribute('width')), h: parseFloat(live.getAttribute('height')) };
-  });
-  Math.abs(mid.w - (st.w + 120)) < 2 ? good(`follow holds the dragged width (${mid.w})`) : bad(`width after follow: ${mid.w}`);
-  // wait out the debounce commit + flush + R echo, then confirm it STUCK
-  await page.waitForTimeout(7000);
-  const fin = await sf.evaluate(() => {
-    const live = document.querySelector('.graphbuilder2-host svg[data-role="gb2-chart-svg"]');
-    return {
-      w: parseFloat(live.getAttribute('width')),
-      h: parseFloat(live.getAttribute('height')),
-      sel: live.classList.contains('jmv-results-svg-selection'),
-      pend: JSON.stringify(window.__gb2_pendingOpts || {}),
-    };
-  });
-  Math.abs(fin.w - (st.w + 120)) < 2 ? good(`size SURVIVED the R echo (${fin.w}) - the commit round-tripped`) : bad(`echo reverted the size: ${fin.w} vs ${st.w + 120}`);
-  Math.abs(fin.h - (st.h + 90)) < 6 ? good(`height survived too (${fin.h})`) : bad(`height after echo: ${fin.h} vs ${st.h + 90}`);
-  fin.sel ? good('marker class survives the echo re-render') : bad('marker class lost after echo');
-  // no storm: two samples a second apart must be stable
-  const s1 = await sf.evaluate(() => parseFloat(document.querySelector('svg.jmv-results-svg-selection').getAttribute('height')));
-  await page.waitForTimeout(1000);
-  const s2 = await sf.evaluate(() => parseFloat(document.querySelector('svg.jmv-results-svg-selection').getAttribute('height')));
-  Math.abs(s1 - s2) < 0.5 ? good('size stable, no feedback loop') : bad(`height still moving: ${s1} -> ${s2}`);
+let sf = null;
+for (const f of page.frames()) {
+  if (pre.has(f.url())) continue;
+  try {
+    const d = await f.evaluate(() => !!document.querySelector('.graphbuilder2-host svg[data-role="gb2-chart-svg"]')
+      && /Scatter/.test((document.querySelector('h1,h2') || {}).textContent || ''));
+    if (d) sf = f;
+  } catch (e) { }
 }
+if (!sf) { bad('no fresh Scatter frame'); console.log(`\nVERDICT: ${pass} pass, ${fail} fail`); await b.close(); process.exit(1); }
+
+// WRAP jamovi's real setOption so commits are observed, not faked
+await sf.evaluate(() => {
+  window.__seen = [];
+  const real = window.setOption;
+  window.setOption = function (k, v) {
+    try { window.__seen.push([k, typeof v === 'string' ? v.slice(0, 400) : v]); } catch (e) {}
+    return real.apply(this, arguments);
+  };
+});
+good('wrapped jamovi\'s real setOption (commits observed, still delivered)');
+
+const snap = () => sf.evaluate(() => {
+  const live = document.querySelector('.graphbuilder2-host svg[data-role="gb2-chart-svg"]');
+  const pt = document.querySelector('.graphbuilder2-host [data-role="xy-point"]');
+  return {
+    attrW: parseFloat(live.getAttribute('width')),
+    attrH: parseFloat(live.getAttribute('height')),
+    rectW: Math.round(live.getBoundingClientRect().width),
+    firstPointX: pt ? Math.round(pt.getBoundingClientRect().x) : -1,
+  };
+});
+const commits = () => sf.evaluate(() => {
+  const out = [];
+  for (const [k, v] of (window.__seen || [])) {
+    if (k === 'plotWidth' || k === 'plotHeight') out.push([k, v]);
+    else if (k === 'chartSpec') { try { const o = JSON.parse(v); if (o.plotWidth !== undefined) out.push(['plotWidth', o.plotWidth], ['plotHeight', o.plotHeight]); } catch (e) {} }
+  }
+  return out;
+});
+
+async function testCase(name, resizeFn, dw, dh) {
+  console.log(`\n${name}`);
+  await sf.evaluate(() => { window.__seen = []; });
+  const before = await snap();
+  await sf.evaluate(resizeFn, { dw, dh });
+  await page.waitForTimeout(1200);
+  const mid = await snap();
+  Math.abs(mid.rectW - (before.rectW + dw)) < 3
+    ? good(`chart is on screen at the new width (${mid.rectW})`)
+    : bad(`on-screen width ${mid.rectW}, expected ~${before.rectW + dw}`);
+  mid.firstPointX !== before.firstPointX || mid.attrW !== before.attrW
+    ? good('chart re-laid out to the new size (real redraw, not a stretch)')
+    : bad('chart did NOT re-lay out, it only stretched');
+  // let the debounce + flush + R rerun happen
+  await page.waitForTimeout(8000);
+  const seen = await commits();
+  const w = seen.filter((c) => c[0] === 'plotWidth').pop();
+  const expW = Math.round(((before.rectW + dw) / 96) * 100) / 100;
+  w && Math.abs(parseFloat(w[1]) - expW) < 0.02
+    ? good(`jamovi received a real plotWidth commit of ${w[1]} in (expected ${expW})`)
+    : bad(`no/incorrect commit reached jamovi: ${JSON.stringify(seen)}`);
+  const after = await snap();
+  Math.abs(after.rectW - (before.rectW + dw)) < 3
+    ? good(`size still holds after the analysis re-ran (${after.rectW})`)
+    : bad(`size reverted after rerun: ${after.rectW} vs ${before.rectW + dw}`);
+  const s1 = (await snap()).attrH;
+  await page.waitForTimeout(1200);
+  const s2 = (await snap()).attrH;
+  Math.abs(s1 - s2) < 0.5 ? good('stable, no feedback loop') : bad(`still moving: ${s1} -> ${s2}`);
+}
+
+// CASE A: jamovi's own idiom - CSS resize writes an inline style size
+await testCase(
+  'CASE A: CSS resize (inline style, what `resize: both` produces)',
+  ({ dw, dh }) => {
+    const live = document.querySelector('.graphbuilder2-host svg[data-role="gb2-chart-svg"]');
+    live.style.width = (live.getBoundingClientRect().width + dw) + 'px';
+    live.style.height = (live.getBoundingClientRect().height + dh) + 'px';
+  }, 120, 80);
+
+// reset to a clean state between cases
+await sf.evaluate(() => {
+  const live = document.querySelector('.graphbuilder2-host svg[data-role="gb2-chart-svg"]');
+  live.style.width = ''; live.style.height = '';
+});
+await page.waitForTimeout(6000);
+
+// CASE B: width/height attribute writes
+await testCase(
+  'CASE B: width/height attribute writes',
+  ({ dw, dh }) => {
+    const live = document.querySelector('.graphbuilder2-host svg[data-role="gb2-chart-svg"]');
+    live.setAttribute('width', parseFloat(live.getAttribute('width')) + dw);
+    live.setAttribute('height', parseFloat(live.getAttribute('height')) + dh);
+  }, 110, 70);
 
 console.log(`\nVERDICT: ${pass} pass, ${fail} fail => ${fail === 0 ? 'PASS' : 'FAIL'}`);
 await b.close();

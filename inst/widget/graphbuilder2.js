@@ -3700,6 +3700,20 @@
                     }
                 } catch (_eMc) {}
                 clone.removeAttribute("id");
+                // This mask is a throwaway copy parked in document.body,
+                // OUTSIDE the results element. Strip the host-facing marker
+                // classes from it so the only element in the whole document
+                // ever wearing them is the real one: a document-wide query
+                // for the resize marker or the harvest target must never
+                // match a mask clone, even for the few hundred ms it lives.
+                try {
+                    var _mkSel = clone.querySelectorAll(
+                        "svg.jmv-results-svg-selection, svg.jmv-results-svg-content");
+                    for (var _mk = 0; _mk < _mkSel.length; _mk++) {
+                        _mkSel[_mk].classList.remove("jmv-results-svg-selection");
+                        _mkSel[_mk].classList.remove("jmv-results-svg-content");
+                    }
+                } catch (_eMkC) {}
                 clone.style.width = "100%";
                 clone.style.height = "100%";
                 clone.style.margin = "0";
@@ -4149,6 +4163,39 @@
         // through the normal flush. Re-assigned every render so it
         // closes over the live data / flush state.
         window.__gb2_setOption = _setOption;
+        // Copy/Paste formatting seam (Aug 2026, Torry): host-facing
+        // accessors for the standalone shell's chart context menu, thin
+        // wrappers over the Chart styles machinery (_styleCaptureCurrent
+        // and _styleApplyToChart, render-scope declarations hoisted to
+        // this whole scope). Reassigned every render, beside the
+        // _setOption re-expose above, so they always close over the
+        // CURRENT chart's closures. jamovi ships them but nothing there
+        // calls them: additive, zero behavior change by construction.
+        window.__gb2_styleClipboardCapture = function () {
+            var groups = ["colors", "text", "axes", "bars", "background"];
+            var opts = _styleCaptureCurrent(groups);
+            return opts ? { groups: groups.slice(), opts: opts } : null;
+        };
+        window.__gb2_styleClipboardApply = function (st) {
+            if (!st || typeof st !== "object" || !st.opts) return 0;
+            var lib = window.__gb2_styleLib || (window.__gb2_styleLib = {});
+            // Applied through a transient lib slot because apply resolves
+            // styles by NAME; the slot exists only inside this synchronous
+            // call, so no save action can capture it and the render-entry
+            // seeding never sees it. No leading underscore on the key
+            // (the min-build property-mangle rule).
+            var TMP = "gb2ClipboardTmp";
+            var had = Object.prototype.hasOwnProperty.call(lib, TMP);
+            var prev = had ? lib[TMP] : undefined;
+            lib[TMP] = st;
+            var n = 0;
+            try { n = _styleApplyToChart(TMP, null); }
+            finally {
+                if (had) lib[TMP] = prev;
+                else { try { delete lib[TMP]; } catch (_eTmp) {} }
+            }
+            return n;
+        };
         // Live half of the native-panel preview: re-enter render()
         // with a clone of the current payload. The entry overlays
         // (pending/recent/text + the panel preview) re-apply every
@@ -10866,6 +10913,7 @@
                 var _xrPend = null;
                 var _xrActive = false;
                 var _xrLastExt = 0;
+                var _xrActedW = -1, _xrActedH = -1;
                 var _xrTimer = null;
                 function _xrFollow() {
                     // The corner grip's per-move body: set inches, keep
@@ -10876,11 +10924,36 @@
                     if (!svg || !svg.isConnected) { _xrPend = null; _xrActive = false; return; }
                     if (!_xrPend) return;
                     var _exb = svg.__gb2_extraBottomPx || 0;
-                    inchesW = Math.min(40, Math.max(1, _xrPend.w / PX_PER_INCH));
-                    inchesH = Math.min(40, Math.max(1, (_xrPend.h - _exb) / PX_PER_INCH));
+                    // Clamp to the SAME supported range every other size
+                    // path uses (render entry clamps data.plotWidth the
+                    // same way). A looser clamp here let an over-drag
+                    // follow past the limit and then snap back on the next
+                    // render, which reads as the chart fighting the user.
+                    inchesW = clamp(_xrPend.w / PX_PER_INCH, MIN_W_IN, MAX_W_IN);
+                    inchesH = clamp((_xrPend.h - _exb) / PX_PER_INCH, MIN_H_IN, MAX_H_IN);
                     data.plotWidth = inchesW;
                     data.plotHeight = inchesH;
                     applySize();
+                    // If the host sized us through an inline style (a CSS
+                    // resize gripper) and we clamped that request to our
+                    // supported range, write the clamp back so the element
+                    // visually stops where the chart stops. It also keeps
+                    // style and attribute in agreement, without which the
+                    // next check sees a permanent mismatch and spins.
+                    try {
+                        if (svg.style && typeof svg.style.width === "string" &&
+                            svg.style.width.slice(-2) === "px") {
+                            var _aw = svg.__gb2_expectedW, _ah = svg.__gb2_expectedH;
+                            if (typeof _aw === "number" &&
+                                Math.abs(parseFloat(svg.style.width) - _aw) >= 1)
+                                svg.style.width = _aw + "px";
+                            if (typeof _ah === "number" &&
+                                typeof svg.style.height === "string" &&
+                                svg.style.height.slice(-2) === "px" &&
+                                Math.abs(parseFloat(svg.style.height) - _ah) >= 1)
+                                svg.style.height = _ah + "px";
+                        }
+                    } catch (_eXrS) {}
                     try { _gbResizeSyncInputs(); } catch (_eXr1) {}
                 }
                 function _xrCommit() {
@@ -10893,8 +10966,8 @@
                     if (!svg || !svg.isConnected) { _xrPend = null; _xrActive = false; return; }
                     if (!_xrPend) return;
                     var _exb2 = svg.__gb2_extraBottomPx || 0;
-                    var _wIn = Math.min(40, Math.max(1, _xrPend.w / PX_PER_INCH));
-                    var _hIn = Math.min(40, Math.max(1, (_xrPend.h - _exb2) / PX_PER_INCH));
+                    var _wIn = clamp(_xrPend.w / PX_PER_INCH, MIN_W_IN, MAX_W_IN);
+                    var _hIn = clamp((_xrPend.h - _exb2) / PX_PER_INCH, MIN_H_IN, MAX_H_IN);
                     _xrFollow();
                     _xrPend = null;
                     _xrActive = false;
@@ -10910,21 +10983,41 @@
                 function _xrCheck() {
                     try {
                         if (!svg || !svg.isConnected) return;
-                        if (window.__gb2_widgetPointerDown) return;
+                        // Only OUR OWN corner grip suppresses the follow.
+                        // A blanket __gb2_widgetPointerDown bail used to
+                        // sit here, but a host resize gripper drawn ON the
+                        // svg (which is what CSS `resize: both` does, and
+                        // what jamovi already uses for images) puts the
+                        // press inside our host div, so the flag was set
+                        // for the whole drag and every external size
+                        // change was refused. Internal size writes are
+                        // already covered by the expected-size stamps
+                        // below, which is the real protection.
                         if (typeof draggingXY !== "undefined" && draggingXY) return;
-                        // Measure ATTRIBUTES at CHECK time, never an event
-                        // snapshot and never layout rects: observer events
-                        // arrive async (a stale one used to read as
-                        // external and commit the engine's own transient
-                        // size), and the results column CSS can CLAMP the
-                        // layout rect below the attribute (container probe:
-                        // rect 584 on a 696 attr, so a rect-based follow
-                        // "followed" the column clamp instead of the drag).
-                        // The handle contract is attribute writes on the
-                        // marked svg; current attrs vs current expectation
-                        // is self-consistent by construction.
-                        var rw = parseFloat(svg.getAttribute("width"));
-                        var rh = parseFloat(svg.getAttribute("height"));
+                        // Read the host's EXPLICIT size at check time -
+                        // an inline style px size if one is set, else the
+                        // width/height attributes. Both are deliberate
+                        // assignments by whoever resized us, which is what
+                        // makes them safe to trust; a CSS `resize: both`
+                        // gripper writes the inline style, an attribute
+                        // handle writes the attributes, and we follow
+                        // either. Deliberately NOT layout rects: the
+                        // results column CSS can clamp the rect below the
+                        // real size (container probe: rect 584 on a 696
+                        // attr), so a rect-based follow tracks the clamp
+                        // instead of the drag. A resize driven purely by
+                        // an ancestor's width therefore does not register;
+                        // that is a known limit, not an oversight.
+                        var _pxOf = function (v) {
+                            if (typeof v !== "string") return NaN;
+                            if (v.slice(-2) !== "px") return NaN;
+                            var n = parseFloat(v);
+                            return isFinite(n) && n > 0 ? n : NaN;
+                        };
+                        var _stW = _pxOf(svg.style && svg.style.width);
+                        var _stH = _pxOf(svg.style && svg.style.height);
+                        var rw = isFinite(_stW) ? _stW : parseFloat(svg.getAttribute("width"));
+                        var rh = isFinite(_stH) ? _stH : parseFloat(svg.getAttribute("height"));
                         if (!isFinite(rw) || !isFinite(rh)) return;
                         if (!(rw > 0 && rh > 0)) return;
                         var ew = svg.__gb2_expectedW, eh = svg.__gb2_expectedH;
@@ -10945,6 +11038,14 @@
                                 !(_xrLastExt && _now - _xrLastExt < 1200)) return;
                             _xrActive = true;
                         }
+                        // Hard loop breaker: never act twice on the exact
+                        // same external size. A real drag delivers a new
+                        // size every move, so this only ever suppresses a
+                        // repeat, which is the shape every feedback loop
+                        // here would take.
+                        if (Math.abs(rw - _xrActedW) < 0.5 &&
+                            Math.abs(rh - _xrActedH) < 0.5) return;
+                        _xrActedW = rw; _xrActedH = rh;
                         _xrLastExt = _now;
                         _xrPend = { w: rw, h: rh };
                         // Follow SYNCHRONOUSLY in the same task: via the
@@ -10961,10 +11062,11 @@
                         }, 250);
                     } catch (_eXr7) {}
                 }
-                // Fast path: attribute writes (the handle contract) land
-                // as a microtask in the SAME task as the writer. The
-                // ResizeObserver stays as the backstop for any host that
-                // resizes through CSS instead of attributes.
+                // Fast path: the host's size write - width/height
+                // attributes, or an inline style size from a CSS
+                // `resize: both` gripper - lands as a microtask in the
+                // SAME task as the writer, which is the timing of our own
+                // corner grip. The ResizeObserver stays as a backstop.
                 if (window.__gb2_extResizeMO) {
                     try { window.__gb2_extResizeMO.disconnect(); } catch (_eXm0) {}
                     window.__gb2_extResizeMO = null;
@@ -10972,7 +11074,7 @@
                 if (typeof MutationObserver !== "undefined") {
                     var mo = new MutationObserver(function () { _xrCheck(); });
                     mo.observe(svg, { attributes: true,
-                                      attributeFilter: ["width", "height"] });
+                                      attributeFilter: ["width", "height", "style"] });
                     window.__gb2_extResizeMO = mo;
                 }
                 var ro = new ResizeObserver(function () { _xrCheck(); });
@@ -47476,6 +47578,7 @@
                         : ((typeof groupCats !== "undefined" && Array.isArray(groupCats)) ? groupCats : []);
                     _pv = _styleRekeyEntries(_pv, _kd.key, _snap ? _snap[_kd.list] : null, _curL);
                 }
+                try { _undoTrackKey(pairs[i].k); } catch (_eU0) {}
                 data[pairs[i].k] = _pv;
                 try { _setOption(pairs[i].k, _pv); } catch (_e1) {}
             }
@@ -47491,12 +47594,14 @@
                 try {
                     if (!Object.prototype.hasOwnProperty.call(st.opts, "groupColors")
                         && Array.isArray(data.groupColors) && data.groupColors.length > 0) {
+                        try { _undoTrackKey("groupColors"); } catch (_eUg) {}
                         data.groupColors = [];
                         try { groupColorLookup = {}; } catch (_e2) {}
                         try { _setOption("groupColors", []); } catch (_e3) {}
                     }
                     if (!Object.prototype.hasOwnProperty.call(st.opts, "barColor")
                         && typeof data.barColor === "string" && data.barColor.length > 0) {
+                        try { _undoTrackKey("barColor"); } catch (_eUb) {}
                         data.barColor = "";
                         try { singleBarColor = null; } catch (_e4) {}
                         try { _setOption("barColor", ""); } catch (_e5) {}
@@ -47530,6 +47635,7 @@
                         // per-series map rows existed.
                         if (Object.prototype.hasOwnProperty.call(st.opts, _pk)) continue;
                         if (Array.isArray(data[_pk]) && data[_pk].length > 0) {
+                            try { _undoTrackKey(_pk); } catch (_eUp) {}
                             data[_pk] = [];
                             try { _setOption(_pk, []); } catch (_ePs) {}
                         }
@@ -47539,6 +47645,13 @@
             // Full local re-render (deep-clones the poked data): fonts,
             // background, grid and palette all repaint immediately
             // instead of waiting on the R echo.
+            // One undo step for the WHOLE apply (the edit-time undo
+            // law): the RerenderSoon below re-seeds the baseline from
+            // the poked data, so flush-time tracking alone never pushed
+            // a step - style applies were silently un-undoable on the
+            // chartSpec modules until the paste-formatting probe caught
+            // it (Aug 2026). Track-before-poke above, take here.
+            try { _undoTake(); } catch (_eU1) {}
             try { _gb2RerenderSoon(); } catch (_e7) {}
             return pairs.length;
         }
