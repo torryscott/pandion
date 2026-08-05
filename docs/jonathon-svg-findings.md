@@ -1,43 +1,45 @@
-# Reply 3 to Jonathon, closing the svg element loop
+# Reply 4 to Jonathon, the resize contract is delivered
 
-Sent Aug 3 2026. Confirms the interface is settled on his class-first selector, with
-a hidden sanitized copy wearing jmv-results-svg-content so the live chart keeps its
-editing chrome. Points him at the svg-element-prototype branch, and hands Damo two
-notes for a future jamovi-side resize handle (keying on the class would grab the
-hidden copy rather than the visible chart, and svg width/height ownership needs
-settling first since the engine rewrites both during drags). The corner resize
-handle shipped module-side, so nothing here waits on jamovi.
+Sent Aug 5 2026. Answers his request to add jmv-results-svg-selection so the
+jamovi side can own image resizing. Confirms the class is live on the
+svg-element-prototype branch (link included for the secondhand reader), that
+the hidden harvest copy can never carry it, and that the engine follows an
+external resize made either way jamovi might make one, width and height
+attributes or an inline style size (what a CSS resize handle writes), with
+the chart redrawn at the new size and the size persisted. Flags the three
+things that would cost the implementer time unsaid (the svg is rebuilt on
+every render so look it up rather than cache it, plot size clamps to 3 to 14
+by 2 to 10 inches with over-drags pulled back, and it must be the svg itself
+that is sized rather than a wrapper), and notes the module's own corner grip
+will be hidden once the jamovi handle exists.
 
-All claims checked against the pushed branch before sending. The container probe
-(20/20) covers fresh create, harvest through the real getcontent channel landing on
-the chrome-free twin, and save/reopen; the gesture probe (26/26) covers the corner
-handle; the placeholder wrap probe passed against the live container the same day.
+Every claim was verified against the pushed branch before sending, on both
+bundles and end to end in the container (both sizing idioms committing
+through jamovi's real option pipeline and surviving the analysis re-running).
+An independent review pass on the draft was adjudicated first; its branch
+correction was refuted with a blob-hash comparison against GitHub, its
+CSS-wording tightening was accepted.
 
 ---
 
 Hi Jonathon,
 
-Yeah, I think that's it. Everything is working end to end on your
-branch now. Copy/paste works, and svg and png exports come out
-beautifully.
+Done. The class is on the svg-element-prototype branch of my repo
+(github.com/torryscott/pandion/tree/svg-element-prototype). The live chart
+svg always wears jmv-results-svg-selection and the hidden harvest copy never
+does, so a handle keyed on it will always land on the visible chart.
 
-Since your selector is class-first, I ended up parking a hidden
-sanitized copy wearing jmv-results-svg-content rather than literally
-stacking three svgs, so the live chart keeps its editing chrome and
-your svg harvest gets the clean copy. If you want to poke
-at it, the adapted module is on the svg-element-prototype branch of
-my repo.
+Damo can size that svg with its width and height attributes or with an
+inline style size, which is what a CSS resize handle writes. Either way my
+side follows, redraws at the new size, and persists it. Both paths are
+tested end to end in your container. Two things worth knowing on his side.
+I rebuild that svg on every render, so it is better looked up than cached,
+and I clamp plot size to 3 to 14 inches wide by 2 to 10 tall, pulling an
+over-drag back to the limit. It does need to be the svg itself he sizes
+rather than a wrapper around it.
 
-As for the resize handle, no rush on my account. I went ahead and
-built a corner handle into the chart itself, so nothing on my side is
-waiting (I already had separate drag handles for width and height, so
-it was easy to swap them for the corner handle). If Damo does pick it
-up, two small things worth knowing. Keying it on
-svg.jmv-results-svg-content would grab my hidden copy rather than the
-visible chart, and it would be good to sort out who owns the svg's
-width and height before he starts, since my engine rewrites those
-during drags. Happy to work on whatever makes the most sense to you.
+My own corner grip is still there for now, and I will hide it once his
+handle is in.
 
-Thanks again for the quick turnarounds on this.
-
+Thanks!
 Torry
