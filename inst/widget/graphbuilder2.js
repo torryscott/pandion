@@ -8088,7 +8088,7 @@
             if (elBottom + BUFFER > H) newH = Math.min(_AUTO_EXPAND_MAX_H, elBottom + BUFFER);
             if (newW !== W) {
                 svg.setAttribute("width", newW);
-                try { svg.__gb2_expectedW = newW; svg.__gb2_sizeWriteAt = Date.now(); } catch (_eXw) {}
+                try { svg.__gb2_expectedW = newW; svg.__gb2_sizeWriteAt = Date.now(); _gb2SyncSizeStyle(newW, undefined); } catch (_eXw) {}
                 if (typeof inspectorPanel !== "undefined" && inspectorPanel &&
                     typeof _syncInspectorPanelGeometry === "function") {
                     _syncInspectorPanelGeometry();
@@ -8096,7 +8096,7 @@
             }
             if (newH !== H) {
                 svg.setAttribute("height", newH);
-                try { svg.__gb2_expectedH = newH; svg.__gb2_sizeWriteAt = Date.now(); } catch (_eXh) {}
+                try { svg.__gb2_expectedH = newH; svg.__gb2_sizeWriteAt = Date.now(); _gb2SyncSizeStyle(undefined, newH); } catch (_eXh) {}
             }
             // Left: extend bgDiv leftward. (Same approach as before -
             // the SVG's coord origin can't shift without rewiring
@@ -8140,7 +8140,7 @@
                     // bars/axes don't get clipped at the bottom.
                     var grownH = (newH !== H ? newH : H) + deltaGrow;
                     svg.setAttribute("height", grownH);
-                    try { svg.__gb2_expectedH = grownH; svg.__gb2_sizeWriteAt = Date.now(); } catch (_eXg) {}
+                    try { svg.__gb2_expectedH = grownH; svg.__gb2_sizeWriteAt = Date.now(); _gb2SyncSizeStyle(undefined, grownH); } catch (_eXg) {}
                     grew = true;
                 }
             }
@@ -28053,6 +28053,34 @@
             hideStylePopover();
         }, true);
 
+        // Keep a host-written inline style glued to the engine's own
+        // size writes. A CSS `resize: both` gripper leaves inline
+        // width/height on the svg until the next R rerun rebuilds the
+        // node; an engine attribute write inside that window (corner
+        // grip, Sizing panel, canvas auto-grow) was overridden by the
+        // stale style, so the chart froze visually while its attributes
+        // moved, and client-rect measurements ran at the wrong scale
+        // (review probe, Aug 2026). Called at every internal size-write
+        // site, beside the expected-size stamps. A no-op when no inline
+        // px size is present, so nothing changes outside the
+        // host-resize world. Style writes here re-enter the external-
+        // resize check via its MutationObserver, where they match the
+        // just-stamped expectation and return.
+        function _gb2SyncSizeStyle(w, h) {
+            try {
+                if (!svg || !svg.style) return;
+                if (typeof w === "number" &&
+                    typeof svg.style.width === "string" &&
+                    svg.style.width.slice(-2) === "px" &&
+                    Math.abs(parseFloat(svg.style.width) - w) >= 1)
+                    svg.style.width = w + "px";
+                if (typeof h === "number" &&
+                    typeof svg.style.height === "string" &&
+                    svg.style.height.slice(-2) === "px" &&
+                    Math.abs(parseFloat(svg.style.height) - h) >= 1)
+                    svg.style.height = h + "px";
+            } catch (_eSss) {}
+        }
         function applySize() {
             var W = inchesW * PX_PER_INCH;
             var H = inchesH * PX_PER_INCH + (M.extraBottomPx || 0);
@@ -28072,6 +28100,7 @@
                 svg.__gb2_expectedH = H;
                 svg.__gb2_extraBottomPx = (M.extraBottomPx || 0);
                 svg.__gb2_sizeWriteAt = Date.now();
+                _gb2SyncSizeStyle(W, H);
             } catch (_eXsz) {}
             // wrap is display:block now (was inline-block), so its
             // width has to be set explicitly to match the SVG -
@@ -29660,6 +29689,8 @@
                                 inchesH * PX_PER_INCH + (M.extraBottomPx || 0);
                             svg.__gb2_extraBottomPx = (M.extraBottomPx || 0);
                             svg.__gb2_sizeWriteAt = Date.now();
+                            _gb2SyncSizeStyle(undefined,
+                                inchesH * PX_PER_INCH + (M.extraBottomPx || 0));
                         } catch (_eXn) {}
                         if (typeof _updateBgCanvas === "function") _updateBgCanvas();
                     } catch (_eCnSz) {}
