@@ -95369,6 +95369,31 @@
             if (exportBtn) _gb2TbActions.appendChild(exportBtn);
             _gb2TbActions.appendChild(_gb2TbDivider());
             if (helpBtn) _gb2TbActions.appendChild(helpBtn);
+            // Host-declared LABELED toolbar (Aug 6 2026, Torry's
+            // standalone ask): data.toolbarLabels === true appends a
+            // word beside the five panel-opener icons - same icons as
+            // jamovi for cross-version familiarity, more descriptive
+            // where the host has room. jamovi never ships the key, so
+            // its toolbar is byte-identical BY CONSTRUCTION (the
+            // textScale / pointMenuVerb seam convention).
+            if (data && data.toolbarLabels === true) {
+                [[statsBtn, "Stats"], [visBtn, "Show/hide"],
+                 [settingsBtn, "Settings"], [findBtn, "Find"],
+                 [addAnnBtn, "Add"]].forEach(function (pair) {
+                    var b = pair[0];
+                    if (!b) return;
+                    var lb = document.createElement("span");
+                    lb.setAttribute("data-role", "toolbar-btn-label");
+                    lb.setAttribute("aria-hidden", "true");
+                    lb.textContent = pair[1];
+                    lb.style.cssText = "margin-left:5px;" +
+                        "font:500 12px/1 var(--gb2-ui-font, sans-serif);" +
+                        "letter-spacing:0.2px;";
+                    b.appendChild(lb);
+                    b.style.width = "auto";
+                    b.style.padding = "3px 9px";
+                });
+            }
             // Match the chart wrap's top-corner styling to look like a
             // continuous container with the new toolbar header.
             wrap.style.borderRadius = "0 0 4px 4px";
