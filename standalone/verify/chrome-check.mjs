@@ -172,6 +172,11 @@ const italics = await page.evaluate(() => {
         // The chart is the ENGINE's, and its placeholder prompts ("Click to
         // add title") are deliberately italic there. This is about the shell.
         if (el.closest('.graphbuilder2-host')) continue;
+        // The ONE principled exception (Aug 6 2026): the layout text
+        // panel's Italic toggle renders its I glyph in real italics - the
+        // universal B/I editor convention, a glyph DEPICTING the style it
+        // applies, not italic prose.
+        if (el.closest('#ps-ltx-italic')) continue;
         if (getComputedStyle(el).fontStyle !== 'italic') continue;
         const t = (el.textContent || '').trim();
         if (t) out.push(t.slice(0, 30));

@@ -3249,10 +3249,18 @@
     var x = (Number(item.x) || 0) + 4;
     var y = (Number(item.y) || 0) + fs;
     t.setAttribute("x", String(x)); t.setAttribute("y", String(y));
-    t.setAttribute("fill", "#222222");
+    t.setAttribute("fill", layTextColor(item));
     t.setAttribute("font-size", String(fs));
     t.setAttribute("font-family", "sans-serif");
     t.setAttribute("font-weight", item.bold ? "700" : "400");
+    if (item.italic) t.setAttribute("font-style", "italic");
+    var texRot = layTextRotate(item);
+    if (texRot) {
+      var texRect = layItemRect(item);
+      t.setAttribute("transform", "rotate(" + texRot + " " +
+        ((Number(item.x) || 0) + texRect.w / 2) + " " +
+        ((Number(item.y) || 0) + texRect.h / 2) + ")");
+    }
     var lines = String(item.text || "Text").split(/\r?\n/);
     for (var i = 0; i < lines.length; i++) {
       var sp = doc.createElementNS(ns, "tspan");
@@ -15565,6 +15573,223 @@
     var zh = Math.max(180, vp.clientHeight - 46) / p.h;
     return layClamp(Math.min(zw, zh, 1), 0.25, 1);
   }
+  function layTextColor(item) {
+    return /^#[0-9a-fA-F]{3,8}$/.test(String(item.color || ""))
+      ? item.color : "#222222";
+  }
+  function layTextRotate(item) {
+    var r = Number(item.rotate);
+    if (!isFinite(r)) return 0;
+    return Math.max(-180, Math.min(180, Math.round(r)));
+  }
+  var LAY_TEXT_SWATCHES = ["#222222", "#5f6f80", "#94a3b1", "#ffffff",
+    "#4478ad", "#c2242c", "#266741", "#eed254"];
+  function ltxHexToHsv(hex) {
+    var m = /^#([0-9a-fA-F]{6})$/.exec(String(hex || ""));
+    if (!m) return null;
+    var n = parseInt(m[1], 16);
+    var r = (n >> 16 & 255) / 255, g = (n >> 8 & 255) / 255,
+        b = (n & 255) / 255;
+    var mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+    var h = 0;
+    if (d) {
+      if (mx === r) h = ((g - b) / d) % 6;
+      else if (mx === g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+      h *= 60;
+      if (h < 0) h += 360;
+    }
+    return { h: h, s: mx ? d / mx : 0, v: mx };
+  }
+  function ltxHsvToHex(h, sat, v) {
+    var c = v * sat, hp = (h % 360) / 60,
+        x = c * (1 - Math.abs(hp % 2 - 1)), r = 0, g = 0, b = 0;
+    if (hp < 1) { r = c; g = x; }
+    else if (hp < 2) { r = x; g = c; }
+    else if (hp < 3) { g = c; b = x; }
+    else if (hp < 4) { g = x; b = c; }
+    else if (hp < 5) { r = x; b = c; }
+    else { r = c; b = x; }
+    var m = v - c;
+    function u(q) {
+      var t = Math.round((q + m) * 255);
+      return (t < 16 ? "0" : "") + t.toString(16);
+    }
+    return "#" + u(r) + u(g) + u(b);
+  }
+  var LTX_HSV = { h: 0, s: 0, v: 0.13 };
+  var LTX_PICKING = false;
+  function ltxPickerPaint() {
+    var sv = el("ps-ltx-sv");
+    if (!sv) return;
+    sv.style.background =
+      "linear-gradient(to top, #000, rgba(0,0,0,0)), " +
+      "linear-gradient(to right, #fff, hsl(" +
+      Math.round(LTX_HSV.h) + " 100% 50%))";
+    var dot = sv.querySelector(".ps-ltx-sv-dot");
+    if (dot) {
+      dot.style.left = (LTX_HSV.s * 100) + "%";
+      dot.style.top = ((1 - LTX_HSV.v) * 100) + "%";
+    }
+    sv.setAttribute("aria-valuenow", String(Math.round(LTX_HSV.v * 100)));
+    sv.setAttribute("aria-valuetext", "saturation " +
+      Math.round(LTX_HSV.s * 100) + " percent, brightness " +
+      Math.round(LTX_HSV.v * 100) + " percent");
+    var hue = el("ps-ltx-hue");
+    if (hue && document.activeElement !== hue)
+      hue.value = String(Math.round(LTX_HSV.h));
+    var hex = ltxHsvToHex(LTX_HSV.h, LTX_HSV.s, LTX_HSV.v);
+    var hx = el("ps-ltx-hex");
+    if (hx && document.activeElement !== hx) hx.value = hex;
+    var cur = el("ps-ltx-cur");
+    if (cur) cur.style.background = hex;
+  }
+  function ltxApplyHsv(live) {
+    var hex = ltxHsvToHex(LTX_HSV.h, LTX_HSV.s, LTX_HSV.v);
+    layTextApply("text color", "ltx-color",
+      function (it) { it.color = hex; }, live);
+  }
+  function layTextSelected() {
+    var ids = laySelectedIds();
+    if (ids.length !== 1) return null;
+    var item = layItemById(ids[0]);
+    return item && item.kind === "text" ? item : null;
+  }
+  function layTextApply(label, key, fn, live) {
+    var item = layTextSelected();
+    if (!item) return;
+    laySnapshot(label, key);
+    fn(item);
+    layClampAllItems();
+    persist(!live);
+    renderLayout();
+    layTextSyncControls(item);
+  }
+  function layTextSyncControls(item) {
+    function setVal(id, v) {
+      var n = el(id);
+      if (n && document.activeElement !== n) n.value = String(v);
+    }
+    var fs = Math.max(8, Math.min(72, Number(item.fontSize) || 14));
+    setVal("ps-ltx-size", fs);
+    setVal("ps-ltx-size-num", fs);
+    var rot = layTextRotate(item);
+    setVal("ps-ltx-rot", rot);
+    setVal("ps-ltx-rot-num", rot);
+    el("ps-ltx-bold").setAttribute("aria-pressed",
+      item.bold ? "true" : "false");
+    el("ps-ltx-italic").setAttribute("aria-pressed",
+      item.italic ? "true" : "false");
+    var cur = layTextColor(item).toLowerCase();
+    var chips = el("ps-ltx-swatches").querySelectorAll("button[data-color]");
+    for (var i = 0; i < chips.length; i++)
+      chips[i].setAttribute("aria-pressed",
+        chips[i].getAttribute("data-color") === cur ? "true" : "false");
+    if (!LTX_PICKING) {
+      var hsv = ltxHexToHsv(cur);
+      if (hsv) LTX_HSV = hsv;
+    }
+    ltxPickerPaint();
+  }
+  function wireLayoutTextControls() {
+    var host = el("ps-ltx-swatches");
+    if (!host) return;
+    var names = { "#222222": "Ink", "#5f6f80": "Muted", "#94a3b1": "Faint",
+      "#ffffff": "White", "#4478ad": "Blue", "#c2242c": "Red",
+      "#266741": "Green", "#eed254": "Yellow" };
+    for (var i = 0; i < LAY_TEXT_SWATCHES.length; i++) (function (c) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("data-color", c);
+      b.setAttribute("aria-label", (names[c] || c) + " text");
+      b.setAttribute("aria-pressed", "false");
+      b.style.background = c;
+      setTip(b, names[c] || c);
+      b.addEventListener("click", function () {
+        layTextApply("text color", null, function (it) { it.color = c; });
+      });
+      host.appendChild(b);
+    })(LAY_TEXT_SWATCHES[i]);
+    var sv = el("ps-ltx-sv");
+    function svPick(ev, live) {
+      var r = sv.getBoundingClientRect();
+      LTX_HSV.s = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
+      LTX_HSV.v = Math.max(0, Math.min(1,
+        1 - (ev.clientY - r.top) / r.height));
+      ltxApplyHsv(live);
+    }
+    sv.addEventListener("pointerdown", function (ev) {
+      ev.preventDefault();
+      LTX_PICKING = true;
+      svPick(ev, true);
+      function mv(e2) { svPick(e2, true); }
+      function up() {
+        document.removeEventListener("pointermove", mv);
+        document.removeEventListener("pointerup", up);
+        LTX_PICKING = false;
+        persist();
+      }
+      document.addEventListener("pointermove", mv);
+      document.addEventListener("pointerup", up);
+    });
+    sv.addEventListener("keydown", function (ev) {
+      var ds = ev.key === "ArrowLeft" ? -0.02
+        : ev.key === "ArrowRight" ? 0.02 : 0;
+      var dv = ev.key === "ArrowDown" ? -0.02
+        : ev.key === "ArrowUp" ? 0.02 : 0;
+      if (!ds && !dv) return;
+      ev.preventDefault();
+      LTX_HSV.s = Math.max(0, Math.min(1, LTX_HSV.s + ds));
+      LTX_HSV.v = Math.max(0, Math.min(1, LTX_HSV.v + dv));
+      ltxApplyHsv(false);
+    });
+    var hue = el("ps-ltx-hue");
+    hue.addEventListener("input", function () {
+      LTX_PICKING = true;
+      LTX_HSV.h = Number(hue.value) || 0;
+      ltxApplyHsv(true);
+    });
+    hue.addEventListener("change", function () {
+      LTX_PICKING = false;
+      persist();
+    });
+    var hx = el("ps-ltx-hex");
+    hx.addEventListener("change", function () {
+      var v = String(hx.value || "").trim();
+      if (/^[0-9a-fA-F]{6}$/.test(v)) v = "#" + v;
+      var hsv = ltxHexToHsv(v);
+      if (!hsv) { ltxPickerPaint(); return; }
+      LTX_HSV = hsv;
+      layTextApply("text color", null, function (it) { it.color = v; });
+    });
+    function wirePair(rangeId, numId, key, setter) {
+      var r = el(rangeId), n = el(numId);
+      r.addEventListener("input", function () {
+        var v = Number(r.value);
+        layTextApply("text " + key, "ltx-" + key,
+          function (it) { setter(it, v); }, true);
+      });
+      r.addEventListener("change", function () { persist(); });
+      n.addEventListener("change", function () {
+        var v = Number(n.value);
+        if (!isFinite(v)) return;
+        layTextApply("text " + key, null, function (it) { setter(it, v); });
+      });
+    }
+    wirePair("ps-ltx-size", "ps-ltx-size-num", "size", function (it, v) {
+      it.fontSize = Math.max(8, Math.min(72, Math.round(v)));
+    });
+    wirePair("ps-ltx-rot", "ps-ltx-rot-num", "rotate", function (it, v) {
+      it.rotate = Math.max(-90, Math.min(90, Math.round(v)));
+    });
+    el("ps-ltx-bold").addEventListener("click", function () {
+      layTextApply("text bold", null, function (it) { it.bold = !it.bold; });
+    });
+    el("ps-ltx-italic").addEventListener("click", function () {
+      layTextApply("text italic", null,
+        function (it) { it.italic = !it.italic; });
+    });
+  }
   function layApproxTextRect(item) {
     var fs = Math.max(8, Number(item.fontSize) || 14);
     var lines = String(item.text || "Text").split(/\r?\n/);
@@ -15787,6 +16012,47 @@
     if (!snap) return null;
     return item.kind + "|" + item.chartId + "|" + snap.rev;
   }
+  function layAttachRotateHandle(node, item) {
+    var grip = mkEl("div", "ps-lrotate");
+    grip.setAttribute("data-role", "ltx-rotate-handle");
+    setTip(grip, "Drag to rotate; hold Shift for 15 degree steps");
+    grip.addEventListener("pointerdown", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      var r = node.getBoundingClientRect();
+      var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      laySnapshot("text rotate", "ltx-rotate");
+      var txt = node.querySelector(".ps-ltext");
+      function ang(ev) {
+        var a = Math.atan2(ev.clientY - cy, ev.clientX - cx) *
+          180 / Math.PI + 90;
+        if (a > 180) a -= 360;
+        if (a < -180) a += 360;
+        if (ev.shiftKey) a = Math.round(a / 15) * 15;
+        return Math.max(-90, Math.min(90, Math.round(a)));
+      }
+      function mv(ev) {
+        var a = ang(ev);
+        item.rotate = a;
+        if (txt) {
+          txt.style.transform = a ? "rotate(" + a + "deg)" : "";
+          txt.style.transformOrigin = "center center";
+        }
+        var s1 = el("ps-ltx-rot"), s2 = el("ps-ltx-rot-num");
+        if (s1 && document.activeElement !== s1) s1.value = String(a);
+        if (s2 && document.activeElement !== s2) s2.value = String(a);
+      }
+      function up() {
+        document.removeEventListener("pointermove", mv);
+        document.removeEventListener("pointerup", up);
+        persist();
+        renderLayout();
+      }
+      document.addEventListener("pointermove", mv);
+      document.addEventListener("pointerup", up);
+    });
+    node.appendChild(grip);
+  }
   function layDecorateItemElement(node, item, selected, primary) {
     node.className = "ps-litem" + (selected ? " ps-litem-sel" : "") +
       (primary ? " ps-litem-primary" : "");
@@ -15847,6 +16113,8 @@
         hnd.setAttribute("aria-hidden", "true");
         node.appendChild(hnd);
       }
+      // Text items grow the chart-style rotate grip (Torry, Aug 6 2026).
+      if (item.kind === "text") layAttachRotateHandle(node, item);
       node.appendChild(layMiniBar(item));
     }
   }
@@ -15899,6 +16167,17 @@
       var txt = mkEl("div", "ps-ltext", item.text || "Text");
       txt.style.fontSize = (item.fontSize || 14) + "px";
       txt.style.fontWeight = item.bold ? "700" : "400";
+      txt.style.fontStyle = item.italic ? "italic" : "normal";
+      txt.style.color = layTextColor(item);
+      var ltRot = layTextRotate(item);
+      if (ltRot) {
+        // Rotation lives on the INNER text node, never the item box: the
+        // drag, selection and align machinery all reason about the
+        // unrotated box, and a standing transform there would fight the
+        // drag previews.
+        txt.style.transform = "rotate(" + ltRot + "deg)";
+        txt.style.transformOrigin = "center center";
+      }
       elI.appendChild(txt);
     }
     layDecorateItemElement(elI, item, selected, primary);
@@ -16990,6 +17269,8 @@
     ta.value = item.text || "";
     ta.style.fontSize = (item.fontSize || 14) + "px";
     ta.style.fontWeight = item.bold ? "700" : "400";
+    ta.style.fontStyle = item.italic ? "italic" : "normal";
+    ta.style.color = layTextColor(item);
     itemEl.removeAttribute("aria-hidden");
     itemEl.innerHTML = "";
     itemEl.appendChild(ta);
@@ -17648,6 +17929,12 @@
     var bounds = laySelectionBounds(ids);
     var one = ids.length === 1 ? layItemById(ids[0]) : null;
     var srcInfo = one ? layItemSourceInfo(one) : null;
+    var txtSec = el("ps-layout-text-section");
+    if (txtSec) {
+      var oneText = one && one.kind === "text" ? one : null;
+      txtSec.style.display = oneText ? "" : "none";
+      if (oneText) layTextSyncControls(oneText);
+    }
     el("ps-layout-selection-title").textContent = one
       ? (one.kind === "chart"
          ? (srcInfo && srcInfo.name ? "Chart panel - live" : "Chart panel")
@@ -22228,6 +22515,7 @@
 
   document.addEventListener("DOMContentLoaded", function () {
     wireHeader(); wireLoader(); wireGrid(); wireLayout(); wireExporter();
+    wireLayoutTextControls();
     wireAppFrame(); wireContextInspector(); wireCommandPalette();
     wireGuidedDialogs(); wireStandaloneEngineExclusionLabels();
     migrateLegacyChartPointExclusions();
