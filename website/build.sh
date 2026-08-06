@@ -250,7 +250,7 @@ HEADER = M0 + """
       <a href="./" aria-current="page">Docs</a>
       <a href="../index.html#downloads">Downloads</a>
       <a href="../about.html">About</a>
-      <a href="https://github.com/torryscott/pandion">GitHub</a>
+      <a href="../support.html">Support</a>
       <a class="nav-cta" href="../app/">Try it now</a>
     </nav>
   </div>
