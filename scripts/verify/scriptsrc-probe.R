@@ -150,10 +150,15 @@ expect("enabled output carries no bundle localStorage key",
        !grepl(paste0("graphbuilder2.bundle.", js_hash), ss, fixed = TRUE))
 expect("enabled output reports scriptsrc mode",
        grepl('\\"bundle_mode\\":\\"scriptsrc\\"', ss))
+# "Plain" means engine-free and byte-deterministic, not byte-identical to
+# the input: since Aug 2026 every placeholder deliberately wraps in a
+# max-width cap (the Svg element imposes no width, so an uncapped
+# placeholder stretched the results page - see gb2_engine_placeholder_html).
+# Still asserted byte-exact so any NEW addition to the enabled path fails.
 expect("enabled placeholder stays plain",
        identical(gb2_engine_placeholder_html(
            "<div>placeholder</div>", js_hash, script_src_ready = TRUE),
-           "<div>placeholder</div>"))
+           '<div style="max-width:560px;"><div>placeholder</div></div>'))
 
 # Guard and rollback switch. A module not declaring readiness must not emit an
 # engine-less script-src payload, and the explicit rollback must preserve the
