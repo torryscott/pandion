@@ -2410,6 +2410,81 @@
     white-space: nowrap;
   }
   .ps-layout-position-grid input { min-width: 0; }
+  /* Layout text styling rows (Aug 6 2026): label + slider + number on
+     one line; swatch chips follow the 22px/3px-gap target-size ruling. */
+  /* Two classes on purpose: the base .ps-inspector-field rule declares a
+     COLUMN later in the sheet, and at equal specificity source order made
+     these rows stack (label centered over slider over number - the first
+     screenshot). */
+  .ps-inspector-field.ps-ltx-row, .ps-ltx-row {
+    display: flex; flex-direction: row; align-items: center; gap: 7px;
+  }
+  .ps-ltx-row .ps-layout-field-label { flex: 0 0 auto; }
+  .ps-ltx-row input[type="range"] { flex: 1 1 auto; min-width: 0; }
+  .ps-ltx-row input[type="number"] { width: 52px; flex: 0 0 auto; }
+  .ps-ltx-stylerow { margin: 6px 0; }
+  .ps-ltx-stylerow .ps-btn[aria-pressed="true"] {
+    color: #ffffff; background: var(--ps-accent); border-color: var(--ps-accent);
+  }
+  .ps-ltx-swatches {
+    display: flex; flex-wrap: wrap; gap: 3px; align-items: center;
+    flex: 1 1 0; min-width: 0;
+  }
+  .ps-ltx-swatches button {
+    width: 22px; height: 22px; padding: 0; border-radius: var(--ps-r-sm);
+    border: 1px solid var(--ps-l3); cursor: pointer;
+  }
+  .ps-ltx-swatches button[aria-pressed="true"] {
+    outline: 2px solid var(--ps-accent); outline-offset: 1px;
+  }
+  .ps-ltx-style { min-width: 30px; }
+  #ps-ltx-picker { display: grid; gap: 6px; margin: 6px 0 2px; }
+  #ps-ltx-sv {
+    position: relative; height: 110px; border: 1px solid var(--ps-l3);
+    border-radius: var(--ps-r-sm); cursor: crosshair; touch-action: none;
+  }
+  .ps-ltx-sv-dot {
+    position: absolute; width: 12px; height: 12px; border: 2px solid #fff;
+    border-radius: 50%; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55);
+    transform: translate(-50%, -50%); pointer-events: none;
+  }
+  #ps-ltx-hue {
+    -webkit-appearance: none; appearance: none; height: 12px;
+    border-radius: 6px; outline-offset: 3px;
+    background: linear-gradient(to right, #f00 0%, #ff0 17%, #0f0 33%,
+      #0ff 50%, #00f 67%, #f0f 83%, #f00 100%);
+  }
+  #ps-ltx-hue::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%;
+    background: #ffffff; border: 1px solid #888888;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  }
+  .ps-ltx-hexrow { display: flex; align-items: center; gap: 7px; }
+  #ps-ltx-hex { width: 88px; }
+  #ps-ltx-cur {
+    display: inline-block; width: 22px; height: 22px;
+    border: 1px solid var(--ps-l3); border-radius: var(--ps-r-sm);
+  }
+  /* Selected TEXT reads like the chart workspace's text halo (Torry,
+     Aug 6 2026): dashed, not solid. Sized items keep the solid outline. */
+  .ps-litem.ps-litem-sel[data-kind="text"] {
+    outline-style: dashed;
+  }
+  /* The rotate handle, modeled on the chart's drawn-shape grip: a stem
+     up from the box's top centre to a round knob. */
+  .ps-lrotate {
+    position: absolute; left: 50%; top: -26px; width: 14px; height: 26px;
+    transform: translateX(-50%); cursor: grab; z-index: 5;
+  }
+  .ps-lrotate::before {
+    content: ""; position: absolute; left: 50%; top: 12px; bottom: 0;
+    width: 1.5px; background: var(--ps-accent); transform: translateX(-50%);
+  }
+  .ps-lrotate::after {
+    content: ""; position: absolute; left: 50%; top: 0; width: 11px;
+    height: 11px; border: 1.5px solid var(--ps-accent); background: #ffffff;
+    border-radius: 50%; transform: translateX(-50%);
+  }
   .ps-inspector-align { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
   .ps-inspector-align .ps-btn { padding: 4px 3px; font-size: 10px; }
   .ps-grid-table th.ps-grid-col-active {
@@ -4078,6 +4153,61 @@
             <label class="ps-inspector-field"><span class="ps-layout-field-label">Height (<span data-unit-label>in</span>)</span><input id="ps-ctx-lh" type="number" step="1"></label>
           </div>
         </div>
+        <!-- Text styling in the RAIL (Torry, Aug 6 2026): capability
+             parity with the chart workspace's text panel - size, bold,
+             italic, color, rotation - but placed where Layout already
+             edits everything (select on canvas, edit on the right). The
+             chart's pop-down panel exists because the engine must live
+             inside jamovi, which has no rail; nothing here touches the
+             jamovi module. -->
+        <div class="ps-inspector-section" id="ps-layout-text-section"
+             style="display:none;">
+          <span class="ps-inspector-section-title">Text</span>
+          <div class="ps-inspector-field ps-ltx-row">
+            <span class="ps-layout-field-label" id="ps-ltx-size-label">Size</span>
+            <input id="ps-ltx-size" type="range" min="8" max="72" step="1"
+                   aria-labelledby="ps-ltx-size-label">
+            <input id="ps-ltx-size-num" type="number" min="8" max="72"
+                   step="1" aria-label="Text size in pixels">
+            <button type="button" class="ps-btn ps-ltx-style" id="ps-ltx-bold"
+                    aria-pressed="false" aria-label="Bold"
+                    style="font-weight:700;">B</button>
+            <button type="button" class="ps-btn ps-ltx-style" id="ps-ltx-italic"
+                    aria-pressed="false" aria-label="Italic"
+                    style="font-style:italic;">I</button>
+          </div>
+          <div class="ps-inspector-field ps-ltx-row">
+            <span class="ps-layout-field-label">Color</span>
+            <div id="ps-ltx-swatches" class="ps-ltx-swatches"></div>
+          </div>
+          <!-- The chart panel's color stack (Torry, Aug 6 2026): quick
+               swatches above, then the same SV square + hue + hex the
+               engine's picker offers - built shell-side, the engine's
+               picker is engine chrome. -->
+          <div id="ps-ltx-picker">
+            <div id="ps-ltx-sv" role="slider" tabindex="0"
+                 aria-label="Saturation and brightness"
+                 aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div class="ps-ltx-sv-dot"></div>
+            </div>
+            <input id="ps-ltx-hue" type="range" min="0" max="360" step="1"
+                   aria-label="Hue">
+            <div class="ps-ltx-hexrow">
+              <span class="ps-layout-field-label" id="ps-ltx-hex-label">Hex</span>
+              <input id="ps-ltx-hex" type="text" maxlength="7"
+                     spellcheck="false" autocomplete="off"
+                     aria-labelledby="ps-ltx-hex-label">
+              <span id="ps-ltx-cur" aria-hidden="true"></span>
+            </div>
+          </div>
+          <div class="ps-inspector-field ps-ltx-row">
+            <span class="ps-layout-field-label" id="ps-ltx-rot-label">Rotate</span>
+            <input id="ps-ltx-rot" type="range" min="-90" max="90" step="1"
+                   aria-labelledby="ps-ltx-rot-label">
+            <input id="ps-ltx-rot-num" type="number" min="-90" max="90"
+                   step="1" aria-label="Rotation in degrees">
+          </div>
+        </div>
         <!-- The Arrange button cluster (Duplicate / Back / Forward /
              Delete) is GONE (Torry, Aug 5 2026): every one of them
              duplicated the item right-click, which also carries Move to
@@ -5145,7 +5275,7 @@
 <script src="lib/jspdf.umd.min.979a2ef514.js"></script>
 <script src="lib/svg2pdf.umd.min.4ada250f50.js"></script>
 <script src="lib/graphbuilder2.min.2ccf47e5e0.js"></script>
-<script src="lib/ps-shell.6df9ee4d9b.js"></script>
+<script src="lib/ps-shell.2a1778ef3a.js"></script>
 <script src="lib/ps-tour.90419676ff.js"></script>
 </body>
 </html>
