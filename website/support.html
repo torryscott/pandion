@@ -141,6 +141,54 @@
     margin: 0 0 9px; color: var(--navy); font-size: 20px;
   }
   .other-support p { margin: 0; color: var(--muted); }
+  .ways-lede { margin: 0 0 22px !important; max-width: 46em; }
+  /* Numbered on purpose: the order is the point, money first. */
+  .ways {
+    list-style: none; counter-reset: way; margin: 0; padding: 0;
+    display: grid; gap: 18px;
+  }
+  .way {
+    counter-increment: way; position: relative;
+    padding: 20px 22px 18px 62px;
+    border: 1px solid var(--line); border-radius: 12px; background: #fff;
+  }
+  .way::before {
+    content: counter(way);
+    position: absolute; left: 20px; top: 20px;
+    width: 26px; height: 26px; border-radius: 50%;
+    display: grid; place-items: center;
+    background: #e8f0fa; color: var(--cobalt);
+    font-size: 13.5px; font-weight: 800;
+  }
+  .way h3 {
+    margin: 0 0 6px; color: var(--navy); font-size: 17.5px;
+    letter-spacing: -0.01em;
+  }
+  .way p { margin: 0 0 12px; color: var(--muted); font-size: 15px; }
+  .way-do {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+    margin: 0 !important;
+  }
+  .way-link {
+    display: inline-flex; align-items: center;
+    padding: 8px 15px; border-radius: 8px;
+    border: 1px solid #c3d0df; background: #fff; color: var(--navy);
+    font: inherit; font-size: 14.5px; font-weight: 700;
+    text-decoration: none; cursor: pointer;
+  }
+  .way-link:hover { border-color: var(--cobalt); color: var(--cobalt); }
+  .way-link:focus-visible {
+    outline: 3px solid rgba(55, 92, 160, 0.24); outline-offset: 3px;
+  }
+  .way-alt { font-size: 14px; color: var(--muted); }
+  .way-status {
+    margin: 10px 0 0 !important; min-height: 1.2em;
+    font-size: 14px; color: #2f6b2f; font-weight: 650;
+  }
+  @media (max-width: 560px) {
+    .way { padding: 18px 16px 16px 52px; }
+    .way::before { left: 14px; top: 18px; }
+  }
 
   footer { border-top: 1px solid var(--line); padding: 36px 0 48px; }
   .foot {
@@ -192,13 +240,12 @@
   <div class="wrap">
     <div class="page-head">
       <p class="kicker">Support the project</p>
-      <h1>Help keep Pandion Plots free.</h1>
+      <h1>If you would like to help.</h1>
       <p class="page-lede">
-        Pandion Plots is free and open source, and I intend to keep it
-        that way. If the app saves you time and you would like to help
-        support its continued development and maintenance, you can
-        contribute to the project. Contributions are entirely optional
-        and do not unlock additional features.
+        Pandion Plots is free and open source, and it will stay that way.
+        It does take time and money to keep going, so if it saves you some
+        of both, please feel free to chip in. Everything else below costs
+        nothing.
       </p>
     </div>
 
@@ -239,7 +286,10 @@
           <p>
             Pandion Plots will remain free and open source.
             Contributions will never unlock hidden features, priority
-            access, or a different edition of the app.
+            access, or a different edition of the app, and nothing here
+            is a condition of using it. If money is tight, and for a lot
+            of students it is, use it and think nothing of it. Telling a
+            colleague about it is worth as much to me.
           </p>
         </section>
       </div>
@@ -248,9 +298,10 @@
         <span class="kofi-mark" aria-hidden="true">P</span>
         <h2>Support on Ko-fi</h2>
         <p>
-          Ko-fi provides a simple way to contribute directly to the
-          project. Choose any amount that feels right, or simply keep
-          using and sharing Pandion Plots.
+          Ko-fi is a simple way to send something if you want to. Any
+          amount reads the same from my side: someone got enough out of
+          this to say so. If you would rather not, sharing Pandion with a
+          colleague says the same thing.
         </p>
         <a class="support-btn" href="https://ko-fi.com/pandionplots">
           Support Pandion Plots
@@ -264,20 +315,85 @@
     </div>
 
     <section class="other-support">
-      <h2>Other ways to help</h2>
-      <p>
-        Using Pandion, reporting problems, sharing it with colleagues,
-        and contributing ideas are all meaningful forms of support too.
+      <h2>Ways to support Pandion Plots</h2>
+      <p class="ways-lede">
+        In rough order of how directly they help, though the last four
+        matter more than the ordering suggests.
       </p>
-      <p>
-        If there is something you wish Pandion did, or something that got
-        in your way, say so on
-        <a href="https://github.com/torryscott/pandion/issues">the issue
-        tracker</a>. Feature requests and rough ideas are as welcome as bug
-        reports, and you do not need to know how the software works to file
-        one. If you would rather not use GitHub, email works too:
-        <a href="mailto:torryscott@gmail.com">torryscott@gmail.com</a>.
-      </p>
+
+      <ol class="ways">
+        <li class="way">
+          <h3>Contribute financially</h3>
+          <p>
+            The most direct way to say the time is worth spending. Any
+            amount reads the same from my side. There is a Ko-fi link on
+            this page, and nothing in the app sits behind it.
+          </p>
+          <p class="way-do">
+            <a class="way-link" href="https://ko-fi.com/pandionplots">Support on Ko-fi</a>
+          </p>
+        </li>
+
+        <li class="way">
+          <h3>Report a bug</h3>
+          <p>
+            Genuinely valuable, and often more useful than money. A clear
+            report is the difference between a problem I can fix in an
+            evening and one I never see. Say what you did, what happened,
+            and where you were running Pandion.
+          </p>
+          <p class="way-do">
+            <a class="way-link" href="https://github.com/torryscott/pandion/issues/new">Report a bug</a>
+            <span class="way-alt">or email
+            <a href="mailto:contact@pandionplots.com?subject=Pandion%20Plots%20bug%20report">contact@pandionplots.com</a></span>
+          </p>
+        </li>
+
+        <li class="way">
+          <h3>Tell a colleague</h3>
+          <p>
+            Pandion has no marketing budget and no telemetry, so word of
+            mouth is how anyone finds it. If it would help someone in your
+            lab, your department, or your class, pass the link along.
+          </p>
+          <p class="way-do">
+            <button type="button" class="way-link" id="copy-link"
+              data-copy-url="https://pandionplots.com/">Copy the link</button>
+            <span class="way-alt">or
+            <a href="mailto:?subject=Pandion%20Plots&amp;body=I%20have%20been%20using%20this%20for%20making%20figures%2C%20and%20thought%20it%20might%20be%20useful%20to%20you%3A%20https%3A%2F%2Fpandionplots.com%2F">share it by email</a></span>
+          </p>
+          <p class="way-status" id="copy-link-status" role="status" aria-live="polite"></p>
+        </li>
+
+        <li class="way">
+          <h3>Ask for a feature</h3>
+          <p>
+            If there is something you wish Pandion did, or something that
+            got in your way, say so. Rough ideas are as welcome as precise
+            ones, and you do not need to know how the software works to
+            suggest something. A lot of what is in the app now started as
+            somebody saying it was missing.
+          </p>
+          <p class="way-do">
+            <a class="way-link" href="https://github.com/torryscott/pandion/issues">Suggest a feature</a>
+            <span class="way-alt">or email
+            <a href="mailto:contact@pandionplots.com?subject=Pandion%20Plots%20feature%20idea">contact@pandionplots.com</a></span>
+          </p>
+        </li>
+
+        <li class="way">
+          <h3>Try things before they ship</h3>
+          <p>
+            If you are willing to run a new build now and then and tell me
+            what feels wrong, that is a real help. There is no commitment
+            and no schedule. Email me and I will let you know when
+            something is worth a look.
+          </p>
+          <p class="way-do">
+            <a class="way-link" href="mailto:contact@pandionplots.com?subject=Pandion%20Plots%20beta%20testing">Volunteer to test</a>
+          </p>
+        </li>
+      </ol>
     </section>
   </div>
 </main>
@@ -306,5 +422,44 @@
   </div>
 </footer>
 
+<script>
+// Copy-the-link button. Same shape as the citation copy buttons on the
+// About page: try the async clipboard, fall back to a selection + execCommand
+// for browsers that refuse it, and report the outcome through a live region
+// rather than only by swapping the button label.
+(function () {
+  var btn = document.getElementById('copy-link');
+  var status = document.getElementById('copy-link-status');
+  if (!btn || !status) return;
+  var url = btn.getAttribute('data-copy-url');
+  var reset;
+  function say(msg) {
+    status.textContent = msg;
+    clearTimeout(reset);
+    reset = setTimeout(function () { status.textContent = ''; }, 4000);
+  }
+  function done() { say('Link copied: ' + url); }
+  function fallback() {
+    var t = document.createElement('textarea');
+    t.value = url;
+    t.setAttribute('readonly', '');
+    t.style.position = 'fixed';
+    t.style.top = '-1000px';
+    document.body.appendChild(t);
+    t.select();
+    try { document.execCommand('copy'); done(); }
+    catch (err) { say('Could not copy automatically. The link is ' + url); }
+    document.body.removeChild(t);
+    btn.focus();
+  }
+  btn.addEventListener('click', function () {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(done, fallback);
+    } else {
+      fallback();
+    }
+  });
+})();
+</script>
 </body>
 </html>
