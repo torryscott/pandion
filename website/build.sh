@@ -112,9 +112,196 @@ cp standalone/dist/pandion-plots.html website/pandion-plots.html
 echo "website/pandion-plots.html refreshed (portable download, $(du -h website/pandion-plots.html | cut -f1))"
 
 # Docs: the canonical guide is docs/user-guide.html; the site serves a copy
-# at /docs/ so the two can never drift.
+# at /docs/ so the two can never drift. The site copy then gets the site's
+# header/footer chrome INJECTED (marker-wrapped, byte-reversible) so the
+# guide nests inside the website: same content, site nav on top. The
+# canonical file stays chrome-free because it also ships inside the jamovi
+# module, where site links would be broken. verify-accessibility.mjs strips
+# the SITE-CHROME blocks and asserts what remains is byte-identical to the
+# canonical, so content drift is still impossible.
 mkdir -p website/docs
 cp docs/user-guide.html website/docs/index.html
+python3 - <<'EOF'
+import pathlib, re
+
+p = pathlib.Path("website/docs/index.html")
+html = p.read_text(encoding="utf-8")
+assert "SITE-CHROME" not in html, "canonical guide must not carry site chrome"
+
+M0, M1 = "<!-- SITE-CHROME START -->", "<!-- SITE-CHROME END -->"
+
+# ---- head: favicon + canonical + chrome styles + shared nav toggle JS ----
+HEAD = M0 + """
+<link rel="icon" type="image/svg+xml" href="../assets/favicon.svg">
+<link rel="apple-touch-icon" href="../assets/icon-180.png">
+<link rel="canonical" href="https://pandionplots.com/docs/">
+<style>
+/* Re-hue the guide from its old teal to the site's cobalt. Only the
+   hue-carrying variables move; grays and semantic colors stay the
+   guide's own, so no contrast pairing regresses. Scoped :not() so the
+   guide's dark theme keeps its own (separately overridden) values. */
+:root:not([data-theme="dark"]){
+  --accent:#375CA0; --accent2:#2c4a80; --accent-soft:#e8f0fb;
+  --blue:#375CA0;
+}
+[data-theme="dark"]{
+  --accent:#7fb0ea; --accent2:#9cc3f0; --accent-soft:#1d2c40;
+}
+/* The site header (same markup + behavior as gallery.html; styles scoped
+   under .site-header so nothing leaks into the guide's classes). */
+.site-header{position:sticky;top:0;z-index:60;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border-bottom:1px solid #dde5ee}
+.site-header .sw{max-width:1080px;margin:0 auto;padding:0 24px;display:flex;align-items:center;gap:10px;height:60px}
+.site-header .brand{display:flex;align-items:center;gap:10px;color:#192E49;text-decoration:none;font-weight:800;font-size:18px;letter-spacing:-.01em}
+.site-header .brand:hover,.site-header a:hover{text-decoration:none}
+.site-header .brand img{width:34px;height:34px}
+.site-header .wing-dark{display:none}
+.site-header .nav-links{margin-left:auto;display:flex;gap:4px}
+.site-header .nav-links a{color:#22364d;text-decoration:none;font-size:14.5px;font-weight:600;padding:7px 12px;border-radius:7px}
+.site-header .nav-links a:hover{background:#f4f7fb;color:#192E49}
+.site-header .nav-links a[aria-current="page"]{color:#375CA0}
+.site-header .nav-links a.nav-cta{color:#fff;background:#192E49;margin-left:6px}
+.site-header .nav-links a.nav-cta:hover{background:#24405f}
+.site-header .nav-toggle{display:none;align-items:center;justify-content:center;gap:8px;min-width:44px;min-height:44px;margin-left:auto;padding:8px 10px;border:1px solid #c3d0df;border-radius:8px;color:#192E49;background:#fff;font:inherit;font-size:14px;font-weight:700;cursor:pointer}
+.site-header .nav-toggle:hover{border-color:#375CA0;color:#375CA0}
+.site-header .nav-toggle:focus-visible,.site-header .nav-links a:focus-visible{outline:3px solid rgba(55,92,160,.24);outline-offset:2px}
+.site-header .nav-toggle-icon,.site-header .nav-toggle-icon::before,.site-header .nav-toggle-icon::after{display:block;width:18px;height:2px;border-radius:999px;background:currentColor}
+.site-header .nav-toggle-icon{position:relative}
+.site-header .nav-toggle-icon::before,.site-header .nav-toggle-icon::after{position:absolute;left:0;content:""}
+.site-header .nav-toggle-icon::before{top:-6px}
+.site-header .nav-toggle-icon::after{top:6px}
+/* The site footer, offset past the fixed guide sidebar on desktop. */
+.site-footer{border-top:1px solid #dde5ee;padding:36px 0 48px;margin-left:var(--sidebar-w);background:var(--bg)}
+/* right padding clears the guide's fixed back-to-top button (42px @ right:22px) */
+.site-footer .sw{max-width:1080px;margin:0 auto;padding:0 84px 0 24px;display:flex;flex-wrap:wrap;gap:18px;align-items:center;color:#5f6f80;font-size:13.5px}
+.site-footer .brand{display:flex;align-items:center;gap:8px;color:#192E49;text-decoration:none;font-weight:800;font-size:15px}
+.site-footer .brand img{width:26px;height:26px}
+.site-footer .wing-dark{display:none}
+.site-footer a{color:#375CA0}
+.site-footer a:hover{text-decoration:none}
+.site-footer .foot-links{margin-left:auto;display:flex;flex-wrap:wrap;gap:10px 18px}
+.site-footer .foot-links a{color:#5f6f80;text-decoration:none}
+.site-footer .foot-links a:hover{color:#375CA0}
+/* Make room: the guide's fixed sidebar and floating buttons start below
+   the sticky header, and anchor jumps clear it. */
+nav#sidebar{top:60px}
+.btnrow{top:72px}
+h1,h2,h3,h4{scroll-margin-top:76px}
+html{scroll-padding-top:76px}
+/* Two hamburgers would be ambiguous on mobile: the site one says Menu,
+   so the guide drawer trigger gets a visible Contents label. */
+#hamb::after{content:" Contents";font-size:13px;font-weight:600}
+@media (max-width:900px){
+  .hamb{top:72px}
+  .btnrow{top:72px}
+  /* the sidebar is a drawer here, so the footer reclaims its offset */
+  .site-footer{margin-left:0}
+}
+@media (max-width:760px){
+  html{scroll-padding-top:72px}
+  .site-header .sw,.site-footer .sw{padding-inline:18px}
+  .site-header .sw{min-height:60px;height:auto;flex-wrap:wrap;padding-block:8px}
+  .site-header .nav-toggle{display:inline-flex}
+  .site-header .nav-links{display:none;width:100%;margin:8px 0 2px;padding:8px 0 0;flex-direction:column;gap:2px;border-top:1px solid #dde5ee}
+  .site-header .nav-links.is-open{display:flex}
+  .site-header .nav-links a{width:100%;padding:9px 10px;border-radius:7px;font-size:14.5px}
+  .site-header .nav-links a.nav-cta{margin:6px 0 0;padding:10px 14px;text-align:center}
+  /* the open menu grows over the guide's floating buttons; hide them
+     behind it rather than letting them ghost through the blur */
+  .site-header:has(.nav-links.is-open)~.hamb,
+  .site-header:has(.nav-links.is-open)~.btnrow{visibility:hidden}
+}
+/* The chrome follows the guide's own dark theme. */
+[data-theme="dark"] .site-header{background:rgba(20,24,28,.92);border-color:var(--line)}
+[data-theme="dark"] .site-header .brand{color:var(--ink)}
+[data-theme="dark"] .site-header .wing-light,[data-theme="dark"] .site-footer .wing-light{display:none}
+[data-theme="dark"] .site-header .wing-dark,[data-theme="dark"] .site-footer .wing-dark{display:inline}
+[data-theme="dark"] .site-header .nav-links a{color:var(--ink)}
+[data-theme="dark"] .site-header .nav-links a:hover{background:var(--bg3);color:var(--ink)}
+[data-theme="dark"] .site-header .nav-links a[aria-current="page"]{color:var(--accent)}
+[data-theme="dark"] .site-header .nav-links a.nav-cta{background:#375CA0;color:#fff}
+[data-theme="dark"] .site-header .nav-toggle{background:var(--bg2);color:var(--ink);border-color:var(--line)}
+[data-theme="dark"] .site-header .nav-links{border-color:var(--line)}
+[data-theme="dark"] .site-footer{border-color:var(--line)}
+[data-theme="dark"] .site-footer .brand{color:var(--ink)}
+[data-theme="dark"] .site-footer .sw{color:var(--ink3)}
+[data-theme="dark"] .site-footer .foot-links a{color:var(--ink3)}
+@media print{.site-header,.site-footer{display:none}}
+</style>
+<script src="../assets/site-nav.js" defer></script>
+""" + M1
+
+# ---- the site header, injected AFTER the skip link so it stays the
+# first focus stop (verify-interactions asserts this) ----
+HEADER = M0 + """
+<header class="site-header">
+  <div class="sw">
+    <a class="brand" href="../index.html">
+      <img class="wing-light" src="../assets/pandion-wing.svg" alt="">
+      <img class="wing-dark" src="../assets/pandion-wing-light.svg" alt="">
+      Pandion Plots
+    </a>
+    <button class="nav-toggle" type="button" aria-expanded="false"
+      aria-controls="site-nav">
+      <span class="nav-toggle-icon" aria-hidden="true"></span>
+      <span>Menu</span>
+    </button>
+    <nav class="nav-links" id="site-nav" aria-label="Site">
+      <a href="../gallery.html">Gallery</a>
+      <a href="./" aria-current="page">Docs</a>
+      <a href="../index.html#downloads">Downloads</a>
+      <a href="../about.html">About</a>
+      <a href="https://github.com/torryscott/pandion">GitHub</a>
+      <a class="nav-cta" href="../app/">Try it now</a>
+    </nav>
+  </div>
+</header>
+""" + M1
+
+FOOTER = M0 + """
+<footer class="site-footer">
+  <div class="sw">
+    <a class="brand" href="../index.html">
+      <img class="wing-light" src="../assets/pandion-wing.svg" alt="">
+      <img class="wing-dark" src="../assets/pandion-wing-light.svg" alt="">
+      Pandion Plots
+    </a>
+    <span>Made by Torry Scott Dennis, PhD.</span>
+    <nav class="foot-links" aria-label="Footer">
+      <a href="../app/">Try it</a>
+      <a href="../gallery.html">Gallery</a>
+      <a href="../about.html#cite">How to cite</a>
+      <a href="../about.html">About</a>
+      <a href="../support.html">Support</a>
+      <a href="../accessibility.html">Accessibility</a>
+      <a href="https://github.com/torryscott/pandion">GitHub</a>
+    </nav>
+  </div>
+</footer>
+""" + M1
+
+SKIP = '<a class="skip-link" href="#content">Skip to guide content</a>'
+for anchor, block, where in [
+    ("\n</head>", HEAD, "before"),
+    (SKIP, HEADER, "after"),
+    ("\n</body>", FOOTER, "before"),
+]:
+    assert html.count(anchor) == 1, anchor[:40]
+    if where == "after":
+        html = html.replace(anchor, anchor + "\n" + block)
+    else:  # before a "\n</tag>" anchor: keep the block on its own lines
+        html = html.replace(anchor, "\n" + block + anchor)
+
+# The strip in verify-accessibility.mjs must restore the canonical
+# byte-for-byte; prove it here too so the build can never ship otherwise.
+stripped = re.sub(r"\n<!-- SITE-CHROME START -->.*?<!-- SITE-CHROME END -->",
+                  "", html, flags=re.S)
+canonical = pathlib.Path("docs/user-guide.html").read_text(encoding="utf-8")
+assert stripped == canonical, "chrome injection is not byte-reversible"
+
+p.write_text(html, encoding="utf-8")
+print("website/docs/index.html: site chrome injected (reversible, %d marker blocks)"
+      % html.count("<!-- SITE-CHROME START -->"))
+EOF
 rsync -a --exclude '.DS_Store' --exclude 'README.md' docs/img/ website/docs/img/
 echo "website/docs refreshed ($(du -sh website/docs | cut -f1))"
 

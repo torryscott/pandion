@@ -2367,6 +2367,11 @@
   var EXPORT_BUSY = false;
   var EXPORT_LAST_FOCUS = null;
   var EXPORT_MAX_PIXELS = 16000000;
+  // Notebook export scope (Torry, Aug 5 2026): null = the exporter is in
+  // its ordinary chart/layout mode; else {kind: "page"|"active"|"all",
+  // pinId} and the SAME dialog exports Notebook pages instead - PDF keeps
+  // a multi-page scope in one file, SVG/PNG/JPG zip one file per page.
+  var EXPORT_PIN_SCOPE = null;
 
   function exportPrefs() {
     var out = { format: "svg", dpi: 300, background: "shown" };
@@ -2400,6 +2405,7 @@
     if (ext === "jpg") return "image/jpeg";
     if (ext === "pdf") return "application/pdf";
     if (ext === "csv") return "text/csv";
+    if (ext === "zip") return "application/zip";
     return "application/octet-stream";
   }
   function exportDescription(ext) {
@@ -2408,6 +2414,7 @@
     if (ext === "jpg") return "JPEG image";
     if (ext === "pdf") return "PDF document";
     if (ext === "csv") return "CSV spreadsheet";
+    if (ext === "zip") return "ZIP archive";
     return "Export";
   }
   function cleanExportBase(name) {
@@ -2718,7 +2725,17 @@
   function updateExportUI() {
     var fmt = selectedExportFormat();
     var dpi = Number(el("ps-export-dpi").value) || 300;
-    var base = currentExportSize();
+    var pinPins = EXPORT_PIN_SCOPE ? pinsForScope(EXPORT_PIN_SCOPE) : null;
+    var base;
+    if (pinPins) {
+      // The size line (and the too-large guard) follow the LARGEST page.
+      var mw = 0, mh = 0;
+      for (var pi = 0; pi < pinPins.length; pi++) {
+        mw = Math.max(mw, pinPins[pi].w || 720);
+        mh = Math.max(mh, pinPins[pi].h || 480);
+      }
+      base = { w: mw || 720, h: mh || 480 };
+    } else base = currentExportSize();
     var raster = fmt === "png" || fmt === "jpg";
     var scale = raster ? dpi / 96 : 1;
     var pxW = Math.max(1, Math.round(base.w * scale));
@@ -2739,15 +2756,33 @@
       }
     }
     var note;
+    var pinN = pinPins ? pinPins.length : 0;
     if (fmt === "svg") {
       note = base.w + " x " + base.h +
         " coordinate canvas - vector output stays sharp at any size.";
+      if (pinN > 1)
+        note = pinN + " pages, one SVG file per page, zipped. Vector " +
+          "output stays sharp at any size.";
     } else if (fmt === "pdf") {
-      note = (base.w / 96).toFixed(2) + " x " + (base.h / 96).toFixed(2) +
-        " inches - one-page vector PDF stays sharp at any size.";
+      note = pinN > 1
+        ? pinN + " pages in one PDF, one page per kept moment, vector " +
+          "where possible."
+        : (base.w / 96).toFixed(2) + " x " + (base.h / 96).toFixed(2) +
+          " inches - one-page vector PDF stays sharp at any size.";
     } else {
-      note = pxW + " x " + pxH + " pixels at " + dpi + " DPI.";
+      note = pinN > 1
+        ? pinN + " pages, one " + fmt.toUpperCase() + " file per page " +
+          "at " + dpi + " DPI, zipped (largest page " + pxW + " x " +
+          pxH + " pixels)."
+        : pxW + " x " + pxH + " pixels at " + dpi + " DPI.";
       if (fmt === "jpg") note += " JPG uses a white background.";
+    }
+    if (pinPins && fmt === "svg") {
+      var bm = 0;
+      for (var bi = 0; bi < pinPins.length; bi++)
+        if (!pinSvgText(pinPins[bi])) bm++;
+      if (bm) note += " " + bm + (bm === 1 ? " page" : " pages") +
+        " kept as bitmap will ride along as PNG.";
     }
     var tooLarge = raster && pxW * pxH > EXPORT_MAX_PIXELS;
     if (tooLarge)
@@ -2767,22 +2802,44 @@
     el("ps-export-bg").disabled = false;
     el("ps-export-bg").__psBeforeForced = null;
     el("ps-export-bg").value = p.background;
-    var c = activeChart();
-    el("ps-export-title").textContent =
-      isLayoutTab(c) ? "Export layout" : "Export chart";
-    el("ps-export-sub").textContent = isLayoutTab(c)
-      ? "Save the complete figure canvas as one file."
-      : "Save a clean copy without editing controls.";
-    el("ps-export-name").value = defaultExportBase();
-    // Captions belong to CHART exports (layouts caption with text items).
     var capField = el("ps-export-caption-field");
-    capField.style.display = isLayoutTab(c) ? "none" : "block";
-    el("ps-export-caption").value = isLayoutTab(c) ? ""
-      : String((activeChartTab() || {}).caption || "");
-    var savedDescription = c && typeof c.exportDescription === "string"
-      ? c.exportDescription.trim() : "";
-    el("ps-export-description").value =
-      savedDescription || generatedExportDescription();
+    var descField = el("ps-export-description-field");
+    var bgField = el("ps-export-bg").closest(".ps-export-field");
+    if (EXPORT_PIN_SCOPE) {
+      // Notebook mode: a page is a finished capture - its caption,
+      // description and background were settled when it was kept, so
+      // those fields step aside and the dialog is scope + format + name.
+      var sk = EXPORT_PIN_SCOPE.kind;
+      var spins = pinsForScope(EXPORT_PIN_SCOPE);
+      el("ps-export-title").textContent = sk === "page" ? "Export page"
+        : sk === "active" ? "Export section" : "Export Notebook";
+      el("ps-export-sub").textContent = spins.length === 1
+        ? "Save this Notebook page as one file."
+        : "PDF keeps all " + spins.length + " pages in one file; SVG, " +
+          "PNG and JPG save one file per page in a zip.";
+      el("ps-export-name").value = pinExportBase(EXPORT_PIN_SCOPE);
+      capField.style.display = "none";
+      descField.style.display = "none";
+      if (bgField) bgField.style.display = "none";
+    } else {
+      var c = activeChart();
+      el("ps-export-title").textContent =
+        isLayoutTab(c) ? "Export layout" : "Export chart";
+      el("ps-export-sub").textContent = isLayoutTab(c)
+        ? "Save the complete figure canvas as one file."
+        : "Save a clean copy without editing controls.";
+      el("ps-export-name").value = defaultExportBase();
+      // Captions belong to CHART exports (layouts caption with text items).
+      capField.style.display = isLayoutTab(c) ? "none" : "block";
+      el("ps-export-caption").value = isLayoutTab(c) ? ""
+        : String((activeChartTab() || {}).caption || "");
+      var savedDescription = c && typeof c.exportDescription === "string"
+        ? c.exportDescription.trim() : "";
+      el("ps-export-description").value =
+        savedDescription || generatedExportDescription();
+      descField.style.display = "";
+      if (bgField) bgField.style.display = "";
+    }
     el("ps-export-copy-status").textContent = "";
     setExportStatus("", false);
     EXPORT_LAST_FOCUS = document.activeElement;
@@ -2802,24 +2859,44 @@
       return;
     }
     if (ws === "pinboard") {
-      var pbs = pinBoards().filter(function (b) { return b.pins.length; });
-      if (pbs.length < 2) { exportPinboardPdf(); return; }
-      // Two or more boards WITH pages: say which record you mean. Anchored
-      // under the Export button - the accelerator and File menu land here
-      // too, so every route gets the same choice.
+      if (!allPins().length) {
+        showToast("Nothing in the Notebook to export yet.");
+        return;
+      }
+      // Scope first, format second (Torry, Aug 5 2026): the button opens
+      // a small menu - this page, this section (with several), or the
+      // whole record - and every choice lands in the SAME export dialog
+      // charts use. Anchored under the Export button - the accelerator
+      // and File menu land here too, so every route gets the same choice.
       var eb = el("ps-export").getBoundingClientRect();
       var act = activePinBoard();
+      var pbs = pinBoards().filter(function (b) { return b.pins.length; });
       var total = allPins().length;
-      showContextMenu(eb.left, eb.bottom + 4, [
-        { label: "Export " + act.name + " (" + act.pins.length +
-            (act.pins.length === 1 ? " page" : " pages") + ")",
+      var cur = pinInView();
+      var items = [];
+      if (cur) {
+        var curAt = -1;
+        for (var ci = 0; ci < act.pins.length; ci++)
+          if (act.pins[ci].id === cur.id) curAt = ci;
+        items.push({ label: "This page" + (curAt !== -1
+            ? " (page " + (curAt + 1) + " of " + act.pins.length + ")"
+            : "") + "\u2026",
+          key: "pin-export-page",
+          action: function () {
+            openPinExporter({ kind: "page", pinId: cur.id });
+          } });
+      }
+      if (pbs.length >= 2 && act.pins.length)
+        items.push({ label: "This section - " + act.name + " (" +
+            act.pins.length +
+            (act.pins.length === 1 ? " page" : " pages") + ")\u2026",
           key: "pin-export-active",
-          action: function () { exportPinboardPdf("active"); } },
-        { label: "Export all sections (" + total +
-            (total === 1 ? " page" : " pages") + ")",
-          key: "pin-export-all",
-          action: function () { exportPinboardPdf("all"); } }
-      ], null);
+          action: function () { openPinExporter({ kind: "active" }); } });
+      items.push({ label: "Entire notebook (" + total +
+          (total === 1 ? " page" : " pages") + ")\u2026",
+        key: "pin-export-all",
+        action: function () { openPinExporter({ kind: "all" }); } });
+      showContextMenu(eb.left, eb.bottom + 4, items, null);
       return;
     }
     if (!workspaceDocument(ws)) {
@@ -2830,6 +2907,7 @@
   }
   function closeExporter() {
     if (EXPORT_BUSY) return;
+    EXPORT_PIN_SCOPE = null;
     el("ps-exporter").style.display = "none";
     shellRefreshPageModal();
     setExportStatus("", false);
@@ -4199,6 +4277,7 @@
     var filename = base + "." + format;
     el("ps-export-name").value = base;
     saveExportPrefs();
+    if (EXPORT_PIN_SCOPE) { runPinExport(format, dpi, base); return; }
     EXPORT_BUSY = true;
     el("ps-export-go").disabled = true;
     el("ps-export-go").textContent = "Preparing...";
@@ -5021,7 +5100,7 @@
       if (PROJECT.ui) PROJECT.ui.pinZoom = 0.5;
     }
     var zsel = el("ps-pzoom");
-    if (zsel) zsel.value = String(pz);
+    if (zsel) zoomSelectShowValue(zsel, pz);
     var zNum = pz === "fit" ? 0 : Number(pz) || 0;
     var pins = projectPins();
     var selOK = false;
@@ -5107,6 +5186,10 @@
       bar.appendChild(mkEl("span", "ps-pinpage-num",
         "Page " + (idx + 1) + " of " + pins.length +
         (pin.at ? " \u00b7 kept " + pinKeptFmt(pin.at) : "")));
+      // The four verbs live in ONE wrapping group, so a narrow card drops
+      // them below the info line together instead of stranding whichever
+      // fit beside the text (Torry's low-zoom report, Aug 5 2026).
+      var acts = mkEl("span", "ps-pinpage-actions");
       var send = document.createElement("button");
       send.type = "button";
       send.setAttribute("data-pin-send", pin.id);
@@ -5116,7 +5199,7 @@
         e.stopPropagation();
         showPinSendMenu(e.clientX, e.clientY, pin.id);
       });
-      bar.appendChild(send);
+      acts.appendChild(send);
       var copy = document.createElement("button");
       copy.type = "button";
       copy.setAttribute("data-pin-copy", pin.id);
@@ -5125,7 +5208,21 @@
         e.stopPropagation();
         copyPinToClipboard(pin);
       });
-      bar.appendChild(copy);
+      acts.appendChild(copy);
+      // Export joined the bar Aug 5 2026 (Torry): the footer buttons are
+      // the page's VISIBLE verbs and the right-click mirrors them - the
+      // menu had Export this page while the bar did not, the set's one
+      // gap. Same dialog scope as the menu entry.
+      var exp = document.createElement("button");
+      exp.type = "button";
+      exp.setAttribute("data-pin-export", pin.id);
+      exp.textContent = "Export\u2026";
+      setTip(exp, "Export this page as SVG, PDF, PNG or JPG");
+      exp.addEventListener("click", function (e) {
+        e.stopPropagation();
+        openPinExporter({ kind: "page", pinId: pin.id });
+      });
+      acts.appendChild(exp);
       var del = document.createElement("button");
       del.type = "button";
       del.setAttribute("data-pin-delete", pin.id);
@@ -5134,7 +5231,8 @@
         e.stopPropagation();
         deletePin(pin.id);
       });
-      bar.appendChild(del);
+      acts.appendChild(del);
+      bar.appendChild(acts);
       page.appendChild(bar);
       scroll.appendChild(page);
     })(pins[i], i);
@@ -5332,6 +5430,15 @@
     items.push({ id: "i" + (mx + 1), kind: "image", src: pin.src,
                  natW: pin.natW, natH: pin.natH,
                  srcChart: pin.srcChart || undefined,
+                 // Live-vs-snapshot provenance (Torry, Aug 5 2026): the
+                 // placement remembers WHICH page it came from and the
+                 // source fingerprint, so the layout can say "snapshot",
+                 // offer the jump back to the page, and reuse the
+                 // Notebook's has-the-source-changed verdict.
+                 srcPin: pin.id,
+                 srcName: pin.srcName || undefined,
+                 srcSig: pin.srcSig || undefined,
+                 keptAt: pin.at || undefined,
                  x: margin, y: y, w: w, h: h });
     if (y + h + margin > doc.page.h) {
       doc.page.h = y + h + margin;
@@ -5344,40 +5451,209 @@
       switchChart(doc.id);
     });
   }
-  // Export the Pinboard as a PDF, ONE PAGE PER PIN (Torry, Aug 1 2026:
-  // "export the pages of the Pinboard in a format that best allows for
-  // that. Maybe that's a PDF" - it is: the pages metaphor maps to PDF
-  // pages exactly, and svg pins convert VECTOR via the same svg2pdf that
-  // serves every other PDF here; legacy PNG pins embed as images).
-  function exportPinboardPdf(scope) {
-    // scope "active" (default) = the board on screen; "all" = every board's
-    // pages concatenated in board order; {pinId} = just that page (the
-    // right-click on a specific page, Torry Aug 1 2026).
-    var all = scope === "all";
-    var onlyPin = scope && typeof scope === "object" && scope.pinId
-      ? scope.pinId : null;
-    var pins = onlyPin
-      ? allPins().filter(function (e) { return e.pin.id === onlyPin; })
-          .map(function (e) { return e.pin; })
-      : all
-      ? allPins().map(function (e) { return e.pin; })
-      : projectPins();
-    if (!pins.length) {
-      showToast("Nothing in the Notebook to export yet.");
-      return Promise.resolve("empty");
+  // ---- Notebook export: scope -> format (Torry, Aug 5 2026) ----------
+  // The Export button (and a page right-click) picks a SCOPE - one page,
+  // the active section, or every section - and the shared export dialog
+  // picks the FORMAT. PDF keeps a multi-page scope in one file, one page
+  // per kept moment (the pages metaphor maps to PDF pages exactly, and
+  // svg pins convert VECTOR via the same svg2pdf that serves every other
+  // PDF here); SVG/PNG/JPG save one file per page, zipped, because a
+  // browser cannot save fourteen files from one click and the numbered
+  // names keep page order after unzipping.
+  function pinsForScope(scope) {
+    if (!scope) return [];
+    if (scope.kind === "page")
+      return allPins().filter(function (e) {
+        return e.pin.id === scope.pinId;
+      }).map(function (e) { return e.pin; });
+    if (scope.kind === "all")
+      return allPins().map(function (e) { return e.pin; });
+    return projectPins();
+  }
+  // The page the Export button's "This page" means: the selected page,
+  // else the one nearest the middle of the scroll (what the user is
+  // looking at), else the first.
+  function pinInView() {
+    var pins = projectPins();
+    if (!pins.length) return null;
+    if (PIN_SEL)
+      for (var i = 0; i < pins.length; i++)
+        if (pins[i].id === PIN_SEL) return pins[i];
+    var scroll = el("ps-pinscroll");
+    if (scroll) {
+      // The VISIBLE middle, not the element middle: the board's own div is
+      // unclipped (an ancestor scrolls it), so its half-height points at
+      // the content's middle - with two pages that named page 2 while
+      // page 1 filled the screen. Intersect with the window first.
+      var sr = scroll.getBoundingClientRect();
+      var vTop = Math.max(sr.top, 0);
+      var vBot = Math.min(sr.bottom, window.innerHeight || sr.bottom);
+      var mid = (vTop + vBot) / 2;
+      var pages = scroll.querySelectorAll(".ps-pinpage");
+      var best = null, dist = Infinity;
+      for (var j = 0; j < pages.length; j++) {
+        var r = pages[j].getBoundingClientRect();
+        var d = Math.abs((r.top + r.bottom) / 2 - mid);
+        if (d < dist) { dist = d; best = pages[j].getAttribute("data-pin-id"); }
+      }
+      for (var k = 0; k < pins.length; k++)
+        if (pins[k].id === best) return pins[k];
     }
+    return pins[0];
+  }
+  function openPinExporter(scope) {
+    if (EXPORT_BUSY) return;
+    EXPORT_PIN_SCOPE = scope;
+    openExporter();
+  }
+  function pinSlugify(name) {
+    return String(name || "").replace(/[^\w\- ]+/g, "").trim()
+      .replace(/\s+/g, "-").toLowerCase();
+  }
+  // Default filename base per scope; the scoped file names its board, the
+  // whole record keeps the plain notebook name (the Aug 1 convention).
+  function pinExportBase(scope) {
+    var base = (PROJECT.name || "pandion")
+      .replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "-") || "pandion";
+    var slug = scope.kind === "page" ? "page"
+      : scope.kind === "all" || pinBoards().length < 2 ? "notebook"
+      : (pinSlugify(activePinBoard().name) || "board");
+    return cleanExportBase(base + "-" + slug);
+  }
+  function dataUriBytes(uri) {
+    return fetch(uri).then(function (r) { return r.arrayBuffer(); })
+      .then(function (buf) { return new Uint8Array(buf); });
+  }
+  // Minimal STORED (method 0) zip writer: PNG/JPG entries are already
+  // compressed and SVG text is small, so store-only keeps this tiny and
+  // dependency-free. entries: [{name, data (Uint8Array or string)}].
+  var PS_ZIP_CRC = null;
+  function zipStoreBytes(entries) {
+    function crc32(bytes) {
+      if (!PS_ZIP_CRC) {
+        PS_ZIP_CRC = new Uint32Array(256);
+        for (var n = 0; n < 256; n++) {
+          var c = n;
+          for (var k = 0; k < 8; k++)
+            c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+          PS_ZIP_CRC[n] = c >>> 0;
+        }
+      }
+      var crc = 0xffffffff;
+      for (var i = 0; i < bytes.length; i++)
+        crc = PS_ZIP_CRC[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
+      return (crc ^ 0xffffffff) >>> 0;
+    }
+    var enc = new TextEncoder();
+    var parts = [], central = [], offset = 0, count = 0;
+    var d = new Date();
+    var dosTime = (d.getHours() << 11) | (d.getMinutes() << 5) |
+      (d.getSeconds() >> 1);
+    var dosDate = (Math.max(0, d.getFullYear() - 1980) << 9) |
+      ((d.getMonth() + 1) << 5) | d.getDate();
+    function u16(v) { return [v & 0xff, (v >>> 8) & 0xff]; }
+    function u32(v) {
+      return [v & 0xff, (v >>> 8) & 0xff,
+              (v >>> 16) & 0xff, (v >>> 24) & 0xff];
+    }
+    for (var i = 0; i < entries.length; i++) {
+      var data = entries[i].data;
+      if (typeof data === "string") data = enc.encode(data);
+      var name = enc.encode(entries[i].name);
+      var crc = crc32(data);
+      var local = new Uint8Array(30 + name.length);
+      local.set([].concat(
+        u32(0x04034b50), u16(20), u16(0x0800), u16(0),
+        u16(dosTime), u16(dosDate), u32(crc),
+        u32(data.length), u32(data.length), u16(name.length), u16(0)), 0);
+      local.set(name, 30);
+      parts.push(local, data);
+      var cd = new Uint8Array(46 + name.length);
+      cd.set([].concat(
+        u32(0x02014b50), u16(20), u16(20), u16(0x0800), u16(0),
+        u16(dosTime), u16(dosDate), u32(crc),
+        u32(data.length), u32(data.length), u16(name.length),
+        u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset)), 0);
+      cd.set(name, 46);
+      central.push(cd);
+      offset += local.length + data.length;
+      count++;
+    }
+    var cdSize = 0, c2;
+    for (c2 = 0; c2 < central.length; c2++) cdSize += central[c2].length;
+    var eocd = new Uint8Array(22);
+    eocd.set([].concat(
+      u32(0x06054b50), u16(0), u16(0), u16(count), u16(count),
+      u32(cdSize), u32(offset), u16(0)), 0);
+    var out = new Uint8Array(offset + cdSize + 22), at = 0;
+    for (var p2 = 0; p2 < parts.length; p2++) {
+      out.set(parts[p2], at); at += parts[p2].length;
+    }
+    for (c2 = 0; c2 < central.length; c2++) {
+      out.set(central[c2], at); at += central[c2].length;
+    }
+    out.set(eocd, at);
+    return out;
+  }
+  // One page -> one file's bytes. A v1 bitmap page has no vector to give:
+  // whatever the format asked, its stored PNG bytes are the honest payload
+  // (the dialog and the toast both say so).
+  function pinFileBytes(pin, format, dpi) {
+    var svgText = pinSvgText(pin);
+    if (!svgText)
+      return dataUriBytes(pin.src).then(function (bytes) {
+        return { ext: "png", bytes: bytes };
+      });
+    if (format === "svg")
+      return Promise.resolve({ ext: "svg",
+        bytes: new TextEncoder().encode(
+          '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n' +
+          svgText) });
+    var mime = format === "jpg" ? "image/jpeg" : "image/png";
+    return rasterizeExport({ svg: svgText, w: pin.w || 720,
+        h: pin.h || 480 }, mime, dpi)
+      .then(function (out) { return out.blob.arrayBuffer(); })
+      .then(function (buf) {
+        return { ext: format === "jpg" ? "jpg" : "png",
+                 bytes: new Uint8Array(buf) };
+      });
+  }
+  // Zip entry names: page order IS the numbering, zero-padded so a file
+  // browser's sort keeps it; entire-notebook exports across several
+  // sections prefix each page with its section.
+  function pinEntryNames(scope, pins) {
+    var multi = scope.kind === "all" && pinBoards().filter(function (b) {
+      return b.pins.length; }).length > 1;
+    var owners = null;
+    if (multi) {
+      owners = {};
+      var everything = allPins();
+      for (var j = 0; j < everything.length; j++)
+        owners[everything[j].pin.id] = everything[j].board.name;
+    }
+    var pad = pins.length >= 100 ? 3 : 2, names = [];
+    for (var i = 0; i < pins.length; i++) {
+      var n = String(i + 1);
+      while (n.length < pad) n = "0" + n;
+      var prefix = multi
+        ? (pinSlugify(owners[pins[i].id]) || "section") + "-" : "";
+      names.push(prefix + "page-" + n);
+    }
+    return names;
+  }
+  // The PDF core: one page per pin, vector where the pin holds svg.
+  function pinboardPdfBlob(pins) {
     var JsPDF = window.jspdf && window.jspdf.jsPDF;
-    if (!JsPDF || !JsPDF.API || typeof JsPDF.API.svg !== "function") {
-      showToast("The PDF exporter did not load. Reload and try again.", true);
-      return Promise.resolve("failed");
-    }
+    if (!JsPDF || !JsPDF.API || typeof JsPDF.API.svg !== "function")
+      return Promise.reject(new Error(
+        "The PDF exporter did not load. Reload and try again."));
     var pdf = null;
     function pageDims(pin) {
       return { w: Math.max(36, (pin.w || 720) * 72 / 96),
                h: Math.max(36, (pin.h || 480) * 72 / 96) };
     }
     var chain = Promise.resolve();
-    pins.forEach(function (pin, idx) {
+    pins.forEach(function (pin) {
       chain = chain.then(function () {
         var d = pageDims(pin);
         if (!pdf) {
@@ -5403,50 +5679,186 @@
         return null;
       });
     });
-    return chain.then(function () {
-      var blob = pdf.output("blob");
-      window.__psPinExportLast = { pages: pins.length, bytes: blob.size,
-                                   scope: onlyPin ? "page"
-                                     : all ? "all" : "active" };
-      var base = (PROJECT.name || "pandion")
-        .replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "-") || "pandion";
-      // The scoped file names its board; the whole record keeps the old
-      // name, so the single-board experience is byte-for-byte what it was.
-      var slug = onlyPin ? "page"
-        : all || pinBoards().length < 2 ? "notebook"
-        : (activePinBoard().name.replace(/[^\w\- ]+/g, "").trim()
-            .replace(/\s+/g, "-").toLowerCase() || "board");
-      return saveExportBlob(blob, base + "-" + slug + ".pdf", "pdf");
-    }).then(function () {
-      var boards = all ? pinBoards().filter(function (b) {
-        return b.pins.length; }).length : 1;
-      showToast("Notebook exported - " + pins.length +
-        (pins.length === 1 ? " page" : " pages") +
-        (all && boards > 1 ? " across " + boards + " sections" : "") +
-        ", vector where possible.");
-      return "exported";
-    }, function (e) {
-      if (e && e.name === "AbortError") return "cancelled";
-      showToast("Could not export the Notebook (" +
-        String(e && e.message || e) + ").", true);
-      return "failed";
-    });
+    return chain.then(function () { return pdf.output("blob"); });
   }
-  function showPinSendMenu(x, y, pinId) {
+  // The dialog's Export button, notebook mode. Stamps __psPinExportLast
+  // BEFORE the save picker (probes and diagnostics read it; the picker
+  // may sit open for minutes).
+  function runPinExport(format, dpi, base) {
+    var scope = EXPORT_PIN_SCOPE;
+    var pins = pinsForScope(scope);
+    if (!pins.length) {
+      setExportStatus("Nothing in the Notebook to export yet.", true);
+      return;
+    }
+    EXPORT_BUSY = true;
+    el("ps-export-go").disabled = true;
+    el("ps-export-go").textContent = "Preparing...";
+    function stamp(extra) {
+      var out = { pages: pins.length, scope: scope.kind, format: format };
+      for (var k in extra) out[k] = extra[k];
+      window.__psPinExportLast = out;
+    }
+    function done(filename, tail) {
+      EXPORT_BUSY = false;
+      el("ps-export-go").textContent = "Export";
+      closeExporter();
+      showToast("Exported " + filename + (tail || ""));
+    }
+    function fail(e) {
+      EXPORT_BUSY = false;
+      el("ps-export-go").textContent = "Export";
+      updateExportUI();
+      if (e && e.name === "AbortError") {
+        setExportStatus("Export cancelled.", false);
+        return;
+      }
+      var msg = String(e && e.message || e || "Export failed.");
+      setExportStatus(msg, true);
+      showToast(msg, true);
+      try { console.warn("Pandion Plots notebook export failed", e); }
+      catch (ignore) {}
+    }
+    if (format === "pdf") {
+      var pdfName = base + ".pdf";
+      setExportStatus("Rendering " + pdfName + "...", false);
+      pinboardPdfBlob(pins).then(function (blob) {
+        stamp({ bytes: blob.size, container: "pdf" });
+        setExportStatus("Choose where to save " + pdfName + "...", false);
+        return saveExportBlob(blob, pdfName, "pdf");
+      }).then(function () {
+        done(pdfName, pins.length > 1
+          ? " - " + pins.length + " pages, vector where possible." : "");
+      }, fail);
+      return;
+    }
+    if (pins.length === 1) {
+      pinFileBytes(pins[0], format, dpi).then(function (f) {
+        var oneName = base + "." + f.ext;
+        var blob = new Blob([f.bytes], { type: exportMime(f.ext) });
+        stamp({ bytes: blob.size, container: "file", files: [oneName] });
+        setExportStatus("Choose where to save " + oneName + "...", false);
+        return saveExportBlob(blob, oneName, f.ext).then(function () {
+          done(oneName, f.ext !== format && format === "svg"
+            ? " - this page was kept as a bitmap, so it saves as PNG."
+            : "");
+        });
+      }).catch(fail);
+      return;
+    }
+    // Multi-page SVG/PNG/JPG: one file per page, zipped.
+    var names = pinEntryNames(scope, pins);
+    var entries = [], bitmapN = 0;
+    var chain = Promise.resolve();
+    pins.forEach(function (pin, idx) {
+      chain = chain.then(function () {
+        setExportStatus("Rendering page " + (idx + 1) + " of " +
+          pins.length + "...", false);
+        return pinFileBytes(pin, format, dpi).then(function (f) {
+          if (f.ext === "png" && format !== "png") bitmapN++;
+          entries.push({ name: names[idx] + "." + f.ext, data: f.bytes });
+        });
+      });
+    });
+    chain.then(function () {
+      var bytes = zipStoreBytes(entries);
+      var blob = new Blob([bytes], { type: "application/zip" });
+      var zipName = base + ".zip";
+      // Diagnostic stash (the __psPinExportLast idiom): the last zip's
+      // raw bytes, replaced per export, so probes can verify the archive
+      // without intercepting the save picker.
+      window.__psPinExportZip = bytes;
+      stamp({ bytes: blob.size, container: "zip",
+              files: entries.map(function (en) { return en.name; }) });
+      setExportStatus("Choose where to save " + zipName + "...", false);
+      return saveExportBlob(blob, zipName, "zip").then(function () {
+        done(zipName, " - " + pins.length + " pages" +
+          (bitmapN ? ", " + bitmapN + " kept as bitmap ride as PNG" : "") +
+          ".");
+      });
+    }).catch(fail);
+  }
+  // ONE send-menu builder for both sources (Torry, Aug 5 2026: "I just
+  // want the behavior to be consistent") - each layout by name, then New
+  // layout; only the placing function differs, so the two surfaces can
+  // never drift apart.
+  function showSendToLayoutMenu(x, y, keyPrefix, place) {
     var items = [];
     for (var i = 0; i < PROJECT.charts.length; i++) (function (c) {
       if (!isLayoutTab(c)) return;
-      items.push({ label: c.name, key: "pin-to-" + c.id,
-        action: function () { addPinToLayout(pinId, c.id); } });
+      items.push({ label: c.name, key: keyPrefix + c.id,
+        action: function () { place(c.id); } });
     })(PROJECT.charts[i]);
     if (items.length) items.push("separator");
-    items.push({ label: "New layout", key: "pin-to-new",
+    items.push({ label: "New layout", key: keyPrefix + "new",
       action: function () {
         var nl = newLayout();
         PROJECT.charts.push(nl);
-        addPinToLayout(pinId, nl.id);
+        place(nl.id);
       } });
     showContextMenu(x, y, items, null);
+  }
+  function showPinSendMenu(x, y, pinId) {
+    showSendToLayoutMenu(x, y, "pin-to-", function (layoutId) {
+      addPinToLayout(pinId, layoutId);
+    });
+  }
+  // The Keep counterpart (Torry, Aug 5 2026): sections listed by name
+  // plus New section - the send-menu shape, so Keep and Send read as one
+  // gesture family. New section mirrors the Pinboard tab-bar "+" (same
+  // naming, becomes the active board) minus its inline rename, which is
+  // a pinboard-surface behavior.
+  function showKeepToNotebookMenu(x, y) {
+    var boards = pinBoards();
+    var items = [];
+    for (var i = 0; i < boards.length; i++) (function (b) {
+      items.push({ label: b.name, key: "keep-to-" + b.id,
+        action: function () { pinChartToPinboard(b.id); } });
+    })(boards[i]);
+    items.push("separator");
+    items.push({ label: "New section", key: "keep-to-new",
+      action: function () {
+        var b = { id: newBoardId(),
+                  name: "Section " + (pinBoards().length + 1), pins: [] };
+        pinBoards().push(b);
+        (PROJECT.ui = PROJECT.ui || {}).activeBoard = b.id;
+        persist(); syncAll();
+        pinChartToPinboard(b.id);
+      } });
+    showContextMenu(x, y, items, null);
+  }
+  // "Send to layout" from a CHART places the LIVE panel - the same thing
+  // the layout's Add chart button creates, never a snapshot (frozen
+  // pictures are the Notebook's send; the Live/Snapshot badges make the
+  // difference visible). Same flow-below placement and toast as
+  // addPinToLayout so the two sends read as one behavior.
+  function addChartToLayout(chartId, layoutId) {
+    var c = chartById(chartId), doc = chartById(layoutId);
+    if (!c || isLayoutTab(c) || !doc || !isLayoutTab(doc)) return;
+    var margin = (doc.page && doc.page.margin) || 32;
+    var contentW = Math.max(160, (doc.page.w || 1008) - margin * 2);
+    var w = Math.min(460, contentW);
+    var h = 310;
+    var items = doc.items || (doc.items = []);
+    var mx = 0, y = margin;
+    for (var j = 0; j < items.length; j++) {
+      var m2 = /^i(\d+)$/.exec(items[j].id || "");
+      if (m2) mx = Math.max(mx, Number(m2[1]));
+      var bot = (Number(items[j].y) || 0) + (Number(items[j].h) || 0);
+      if (bot + 14 > y) y = bot + 14;
+    }
+    items.push({ id: "i" + (mx + 1), kind: "chart", chartId: chartId,
+                 x: margin, y: y, w: w, h: h });
+    if (y + h + margin > doc.page.h) {
+      doc.page.h = y + h + margin;
+      doc.page.preset = "custom";
+    }
+    persist(); syncAll();
+    if (activeChart().id === doc.id && appWorkspace() === "layout")
+      renderLayout();
+    showActionToast("Sent to " + doc.name, "Open", function () {
+      switchChart(doc.id);
+    });
   }
   function render() {
     echoTimer = null;
@@ -7166,6 +7578,17 @@
       host.style.zoom = "";
       return;
     }
+    // Tight-pane stamp for the tab-row zoom (Aug 5 2026): below ~360px
+    // of pane the full ZOOM label + select cannot share the row with the
+    // strip's 148px minimum, so the label goes first. Lives here because
+    // every resize and workspace change already flows through this
+    // function (fitSchedule).
+    var ctools = el("ps-charttools");
+    if (ctools) {
+      var ctPane = document.querySelector(".ps-main-workspace");
+      ctools.classList.toggle("ps-ct-tight",
+        !!ctPane && ctPane.clientWidth < 360);
+    }
     var mode = doc.viewZoom == null ? "fit" : doc.viewZoom;
     var S = 1;
     if (mode === "fit") {
@@ -7182,7 +7605,7 @@
     // Fit never magnifies (the huge-monitor rule); the explicit 125/150
     // choices may (engine fix approved Jul 28 2026 - _ensureChartRoomFor
     // measures in logical units now, so magnified redraws hold the canvas).
-    S = Math.max(0.35, Math.min(1.5, S));
+    S = Math.max(0.35, Math.min(2, S));
     host.style.zoom = Math.abs(S - 1) < 0.005
       ? "" : String(Math.round(S * 1000) / 1000);
     if (mode === "fit" && S < 1) {
@@ -7213,9 +7636,32 @@
     if (ro) ro.textContent = mode === "fit" && Math.abs(S - 1) >= 0.005
       ? Math.round(S * 100) + "%" : "";
     var sel = el("ps-chart-zoom");
-    if (sel && String(sel.value) !== String(mode)) sel.value = String(mode);
+    if (sel) zoomSelectShowValue(sel, mode);
     // Last: an open dropdown must follow the zoom it just settled on.
     syncFlyoutPositions();
+  }
+  // A zoom select that can DISPLAY any value (Aug 5 2026): custom zooms
+  // from Cmd/Ctrl+scroll land between the presets, and a single dynamic
+  // option shows the live value so the select never goes blank (the
+  // zoom-floor lesson). It leaves the moment a preset or Fit is chosen.
+  // Shared by the chart, Notebook and Layout zoom selects.
+  function zoomSelectShowValue(sel, mode) {
+    var want = String(mode);
+    var isPreset = false;
+    for (var i = 0; i < sel.options.length; i++)
+      if (!sel.options[i].hasAttribute("data-ps-custom") &&
+          sel.options[i].value === want) isPreset = true;
+    var dyn = sel.querySelector("option[data-ps-custom]");
+    if (!isPreset) {
+      if (!dyn) {
+        dyn = document.createElement("option");
+        dyn.setAttribute("data-ps-custom", "1");
+        sel.appendChild(dyn);
+      }
+      dyn.value = want;
+      dyn.textContent = Math.round(Number(mode) * 100) + "%";
+    } else if (dyn) dyn.remove();
+    if (String(sel.value) !== want) sel.value = want;
   }
   function setViewZoom(value) {
     var doc = activeChartTab();
@@ -7224,6 +7670,161 @@
     persist(false);
     applyViewZoom();
   }
+  // Cmd/Ctrl+scroll zooms the chart view continuously (Torry, Aug 5
+  // 2026: the 25 percent steps are pretty big). A Mac trackpad PINCH
+  // arrives as a ctrl-wheel, so the pinch gesture works for free.
+  // preventDefault keeps the browser's own page zoom out of it; the
+  // pane's scroll follows the cursor so the point under the pointer
+  // holds still while the chart grows around it. Multiplicative steps,
+  // clamped to the select's own 35-150 percent range; the dynamic
+  // select option displays whatever value this lands on.
+  var WHEEL_ZOOM_PERSIST = null;
+  function wheelPersistSoon() {
+    if (WHEEL_ZOOM_PERSIST) window.clearTimeout(WHEEL_ZOOM_PERSIST);
+    WHEEL_ZOOM_PERSIST = window.setTimeout(function () {
+      WHEEL_ZOOM_PERSIST = null;
+      persist(false);
+    }, 400);
+  }
+  function wheelFactor(deltaY) {
+    return Math.exp(-deltaY * 0.0012);
+  }
+  // EASED zoom (Torry, Aug 6 2026: a mouse notch jumped between sizes
+  // instead of smoothly arriving). The wheel only moves a TARGET; a rAF
+  // animator glides the real value toward it (0.4 approach per frame,
+  // ~100ms to settle), applying through each workspace's own path and
+  // keeping the point under the cursor still per frame. A trackpad's
+  // many small deltas ride the same animator and feel as direct as
+  // before; a notched mouse now glides instead of stepping.
+  var WHEEL_ANIM = null;   // {key, target, lo, hi, get, apply, raf}
+  function wheelAnimStep() {
+    var a = WHEEL_ANIM;
+    if (!a) return;
+    a.raf = null;
+    if (a.live && !a.live()) { WHEEL_ANIM = null; return; }
+    var cur = a.get();
+    var next = cur + (a.target - cur) * 0.4;
+    if (Math.abs(a.target - cur) < 0.004) next = a.target;
+    next = Math.round(next * 1000) / 1000;
+    if (next !== cur) a.apply(cur, next);
+    if (next !== a.target) {
+      a.raf = window.requestAnimationFrame(wheelAnimStep);
+    } else {
+      WHEEL_ANIM = null;
+      wheelPersistSoon();
+    }
+  }
+  function wheelZoomTo(spec, deltaY) {
+    if (!WHEEL_ANIM || WHEEL_ANIM.key !== spec.key) {
+      spec.target = spec.get();
+      if (WHEEL_ANIM && WHEEL_ANIM.raf)
+        window.cancelAnimationFrame(WHEEL_ANIM.raf);
+      spec.raf = null;
+      WHEEL_ANIM = spec;
+    } else {
+      // Refresh the cursor + closures; the target carries over so rapid
+      // notches accumulate smoothly.
+      spec.target = WHEEL_ANIM.target;
+      spec.raf = WHEEL_ANIM.raf;
+      WHEEL_ANIM = spec;
+    }
+    WHEEL_ANIM.target = Math.round(Math.max(spec.lo, Math.min(spec.hi,
+      WHEEL_ANIM.target * wheelFactor(deltaY))) * 1000) / 1000;
+    if (!WHEEL_ANIM.raf)
+      WHEEL_ANIM.raf = window.requestAnimationFrame(wheelAnimStep);
+  }
+  document.addEventListener("wheel", function (e) {
+    if (!e.ctrlKey && !e.metaKey) return;
+    var ws = appWorkspace();
+    if (ws === "chart") {
+      var host = e.target && e.target.closest &&
+        e.target.closest(".graphbuilder2-host");
+      if (!host) return;
+      var doc = activeChartTab();
+      if (!doc || isLayoutTab(doc)) return;
+      e.preventDefault();
+      var chX = e.clientX, chY = e.clientY;
+      wheelZoomTo({
+        key: "chart:" + doc.id, lo: 0.35, hi: 2,
+        live: function () { return appWorkspace() === "chart"; },
+        get: function () { return parseFloat(host.style.zoom) || 1; },
+        apply: function (cur, next) {
+          var rect = host.getBoundingClientRect();
+          var cx = (chX - rect.left) / cur;
+          var cy = (chY - rect.top) / cur;
+          doc.viewZoom = next;
+          applyViewZoom();
+          var pane = document.querySelector(".ps-main-workspace");
+          if (pane) {
+            pane.scrollLeft += cx * (next - cur);
+            pane.scrollTop += cy * (next - cur);
+          }
+        }
+      }, e.deltaY);
+      return;
+    }
+    if (ws === "pinboard") {
+      if (!(e.target && e.target.closest &&
+            e.target.closest("#ps-pinpane"))) return;
+      e.preventDefault();
+      var pCy = 0;
+      var pScroller = el("ps-main-workspace");
+      if (pScroller)
+        pCy = e.clientY - pScroller.getBoundingClientRect().top;
+      wheelZoomTo({
+        key: "pinboard", lo: 0.5, hi: 2,
+        live: function () { return appWorkspace() === "pinboard"; },
+        get: function () {
+          var pz = PROJECT.ui && PROJECT.ui.pinZoom != null
+            ? PROJECT.ui.pinZoom : "fit";
+          if (pz !== "fit") return Number(pz) || 1;
+          // From Fit, adopt the page's ACTUAL rendered ratio so the
+          // first tick continues from what is on screen.
+          var img = document.querySelector(".ps-pinpage img");
+          var pin0 = projectPins()[0];
+          if (img && pin0 && pin0.natW)
+            return img.getBoundingClientRect().width / pin0.natW || 1;
+          return 1;
+        },
+        apply: function (cur, next) {
+          PROJECT.ui.pinZoom = next;
+          var st = pScroller ? pScroller.scrollTop : 0;
+          renderPinboard();
+          if (pScroller && cur > 0)
+            pScroller.scrollTop = (st + pCy) * (next / cur) - pCy;
+        }
+      }, e.deltaY);
+      return;
+    }
+    if (ws === "layout") {
+      if (!(e.target && e.target.closest &&
+            e.target.closest("#ps-lviewport"))) return;
+      var ldoc = activeChart();
+      if (!isLayoutTab(ldoc)) return;
+      e.preventDefault();
+      var vp = el("ps-lviewport");
+      var lCx = 0, lCy = 0;
+      if (vp) {
+        var vr = vp.getBoundingClientRect();
+        lCx = e.clientX - vr.left;
+        lCy = e.clientY - vr.top;
+      }
+      wheelZoomTo({
+        key: "layout:" + ldoc.id, lo: 0.25, hi: 2,
+        live: function () { return appWorkspace() === "layout"; },
+        get: function () { return layZoom(); },
+        apply: function (cur, next) {
+          layView().zoom = next;
+          var sl = vp ? vp.scrollLeft : 0, st = vp ? vp.scrollTop : 0;
+          renderLayout();
+          if (vp && cur > 0) {
+            vp.scrollLeft = (sl + lCx) * (next / cur) - lCx;
+            vp.scrollTop = (st + lCy) * (next / cur) - lCy;
+          }
+        }
+      }, e.deltaY);
+    }
+  }, { passive: false, capture: true });
   function fitSchedule() {
     if (FIT_TIMER) window.clearTimeout(FIT_TIMER);
     FIT_TIMER = window.setTimeout(function () {
@@ -7247,6 +7848,81 @@
       setViewZoom(this.value);
     });
   }
+
+  // ---- panel reveal (Torry, Aug 5 2026): colleagues on low-res screens
+  // clicked a chart part and never saw the editor - it opened below the
+  // fold. After a REAL click on the chart host, once the engine panel
+  // settles, scroll the workspace the MINIMUM that shows the panel,
+  // capped so the CLICKED PART never leaves the screen: short panels
+  // reveal fully, tall ones partially (the person sees the panel exists
+  // and wheels for the rest). Trusted pointer input only, so echoes,
+  // re-renders and synthetic clicks (tours) can never move the view.
+  var PANEL_REVEAL_STAMP = null;
+  function revealPanelAfterClick(panel, clickY) {
+    var scroller = el("ps-main-workspace");
+    if (!scroller || !panel) return 0;
+    var sr = scroller.getBoundingClientRect();
+    var pr = panel.getBoundingClientRect();
+    if (pr.height < 40) return 0;
+    var viewBottom = Math.min(sr.bottom, window.innerHeight || sr.bottom);
+    var needed = Math.ceil(pr.bottom - viewBottom) + 10;
+    if (needed <= 0) return 0;
+    // Anchor bound: the clicked part keeps 44px of breathing room. The
+    // anchor floors at the PLOT area: a toolbar click (the Sigma button
+    // sits above the chart) should still reveal the panel it opened -
+    // what must stay visible is the data the panel talks about, not the
+    // button that summoned it.
+    var svgs = panel.closest(".graphbuilder2-host")
+      ? panel.closest(".graphbuilder2-host").querySelectorAll("svg") : [];
+    var chartTop = null, area = 0;
+    for (var si = 0; si < svgs.length; si++) {
+      var rr = svgs[si].getBoundingClientRect();
+      if (rr.width * rr.height > area) {
+        area = rr.width * rr.height;
+        chartTop = rr.top;
+      }
+    }
+    var anchorY = chartTop == null ? clickY
+      : Math.max(clickY, chartTop + 80);
+    var cap = Math.floor(anchorY - (Math.max(sr.top, 0) + 44));
+    var by = Math.min(needed, Math.max(0, cap));
+    if (by < 4) return 0;
+    var reduce = false;
+    try {
+      reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    } catch (e) {}
+    try {
+      scroller.scrollBy({ top: by, behavior: reduce ? "auto" : "smooth" });
+    } catch (e2) { scroller.scrollTop += by; }
+    return by;
+  }
+  document.addEventListener("pointerup", function (e) {
+    if (!e.isTrusted) return;
+    if (appWorkspace() !== "chart") return;
+    var host = e.target && e.target.closest &&
+      e.target.closest(".graphbuilder2-host");
+    if (!host) return;
+    var stamp = { at: Date.now(), y: e.clientY };
+    PANEL_REVEAL_STAMP = stamp;
+    // Settle-watch: the panel slides open over ~150ms and its content can
+    // rebuild once more after that; act when the height holds still.
+    var frames = 0, lastH = -1, still = 0;
+    (function watch() {
+      if (PANEL_REVEAL_STAMP !== stamp || Date.now() - stamp.at > 1400)
+        return;
+      var panel = host.querySelector(".gb2-panel");
+      var h = panel ? panel.getBoundingClientRect().height : 0;
+      if (panel && h > 40 && Math.abs(h - lastH) < 1) {
+        still++;
+        if (still >= 3) {
+          revealPanelAfterClick(panel, stamp.y);
+          return;
+        }
+      } else still = 0;
+      lastH = h;
+      if (++frames < 90) window.requestAnimationFrame(watch);
+    })();
+  }, true);
 
   // Punch list 45: the workspace heading is gone (it named the active document
   // a third time). Its writers are left calling this, which returns a detached
@@ -7880,26 +8556,70 @@
         var members = Array.isArray(rr[def.key]) ? rr[def.key]
                       : (rr[def.key] ? [rr[def.key]] : []);
         var eligible = roleEligibleCols(def);
-        var slot = mkEl("div", "ps-slot ps-role-card" +
+        // An EMPTY optional slot renders as a quiet one-line "+ label"
+        // row, not a full card with a dashed ghost (Torry, Aug 2026:
+        // four equally loud boxes made nothing loud; the only elements
+        // with card weight should be the ones holding or demanding a
+        // decision). It expands to the full card when used, or while
+        // its picker is open. Still a real drop target and still a
+        // ps-role-card, so drag eligibility glow and the focus-restore
+        // anchor keep working.
+        if (!def.required && !members.length && ROLE_PICKER_OPEN !== def.key) {
+          var addRow = mkEl("button", "ps-role-card ps-role-add-row");
+          addRow.type = "button";
+          addRow.setAttribute("data-role-key", def.key);
+          addRow.setAttribute("aria-label", presentation.label +
+            ", optional. Click to choose a compatible variable.");
+          addRow.setAttribute("aria-expanded", "false");
+          addRow.innerHTML = '<span class="ps-role-add-plus">+</span>' +
+            '<span class="ps-role-add-label">' +
+            escHtml(presentation.label) + "</span>";
+          addRow.addEventListener("click", function () {
+            toggleRolePicker(def);
+          });
+          addRow.addEventListener("dragover", function (e) {
+            if (PS_DRAG != null && roleAccepts(def, PROJECT.table, PS_DRAG)) {
+              e.preventDefault();
+              addRow.classList.add("ps-role-add-over");
+            }
+          });
+          addRow.addEventListener("dragleave", function () {
+            addRow.classList.remove("ps-role-add-over");
+          });
+          addRow.addEventListener("drop", function (e) {
+            e.preventDefault();
+            addRow.classList.remove("ps-role-add-over");
+            if (PS_DRAG == null || !roleAccepts(def, PROJECT.table, PS_DRAG)) return;
+            // A drag FROM another slot is a MOVE, exactly as on the full
+            // drop zone - without this the variable lived in both roles.
+            if (PS_DRAG_FROM && PS_DRAG_FROM !== def.key)
+              roleRemoveMember(PS_DRAG_FROM, PS_DRAG);
+            rr[def.key] = PS_DRAG;
+            clearDragState();
+            roleChanged();
+          });
+          wrap.appendChild(addRow);
+          return;
+        }
+        // FLATTENED (Torry, Aug 2026): one border per slot - the card IS
+        // the drop target, the label lives inside the row, and the state
+        // reads from the card itself: dashed while a decision is needed,
+        // solid and quiet once settled.
+        var slot = mkEl("div", "ps-slot ps-role-card ps-role-flat" +
+          (!members.length ? " ps-role-flat-empty" : "") +
           (def.required && !members.length ? " ps-role-card-needed" : ""));
         slot.setAttribute("data-role-key", def.key);
-        var head = mkEl("div", "ps-role-card-head");
-        head.appendChild(mkEl("span", "ps-slot-label", presentation.label));
-        // De-busy pass (Torry, Jul 27 2026): the badge renders only while
-        // the zone is EMPTY - a met requirement is not news, and with the
-        // badges gone from settled zones the only loud thing left is the
-        // one that still needs a decision. Screen readers keep the state
-        // either way via the drop's aria-label.
-        if (!members.length)
-          head.appendChild(mkEl("span", "ps-role-badge " +
-            (def.required ? "ps-role-badge-required" : ""),
-            def.required ? "Required" : "Optional"));
-        slot.appendChild(head);
         // The teaching sentence lives in the EXPANDED picker (where the
         // user is deciding), not on every card - the card keeps one line.
         var drop = mkEl("div", "ps-slot-drop" +
           (members.length ? " ps-slot-filled" : ""));
         if (members.length) {
+          // A filled row stays a NAMED GROUP, never a button: it contains
+          // the chips' remove buttons, and interactive controls nested in
+          // a role=button are unreachable in some screen readers (the
+          // axe-state contract forbids exactly this). Pointer users can
+          // click anywhere on the row; the keyboard path is the compact
+          // Change control below.
           drop.tabIndex = -1;
           drop.setAttribute("role", "group");
           drop.setAttribute("aria-label", presentation.label +
@@ -7918,10 +8638,19 @@
         }
         drop.setAttribute("data-role-multi", def.multi ? "1" : "0");
         if (def.multi) drop.style.flexWrap = "wrap";
-        setTip(drop, (def.multi
-          ? "Drop variables here, or click to choose them"
-          : "Drop a variable here, or click to choose one") +
-          ". " + acceptsTooltip(def) + ".");
+        drop.appendChild(mkEl("span", "ps-slot-label", presentation.label));
+        // The badge renders only while the zone is EMPTY (de-busy pass,
+        // Jul 27 2026): a met requirement is not news.
+        if (!members.length)
+          drop.appendChild(mkEl("span", "ps-role-badge " +
+            (def.required ? "ps-role-badge-required" : ""),
+            def.required ? "Required" : "Optional"));
+        drop.appendChild(mkEl("span", "ps-role-flat-sp"));
+        // No hover pop-up on the drop zones (Torry, Aug 2026): it sat on
+        // top of the picker list, and everything it said lives elsewhere
+        // permanently - the label is self-evident, the accepted types
+        // show in the picker rows' badges, and the aria-label keeps the
+        // screen-reader path.
         function slotRemove(col) {
           if (def.multi) {
             rr[def.key] = (Array.isArray(rr[def.key]) ? rr[def.key] : [])
@@ -7966,6 +8695,10 @@
             drop.appendChild(chip);
           })(members[mi]);
         }
+        // The flattening keeps a Change/Add control, restyled to a
+        // compact text affordance: clicking anywhere on the row opens
+        // the picker for pointer users, but keyboard and screen-reader
+        // users need a discrete focusable control (the row is a group).
         if (members.length) {
           var change = mkEl("button", "ps-slot-change",
             def.multi ? "Add" : "Change");
@@ -8044,7 +8777,13 @@
           clearDragState();
           roleChanged();
         });
-        slot.appendChild(drop);
+        // The drop zone rides inside a positioned anchor so the picker
+        // can OVERLAY the rail instead of pushing everything below it
+        // down (Torry, Aug 2026: opening slot one moved slot two, the
+        // very next target, ~230px - each choice displaced the next).
+        var anchor = mkEl("div", "ps-role-anchor");
+        anchor.appendChild(drop);
+        slot.appendChild(anchor);
         // One-candidate suggestion: when a required single role is empty
         // and exactly one UNASSIGNED variable qualifies, offer it as an
         // explicit one-click accept - never assign silently.
@@ -8074,7 +8813,7 @@
           }
         }
         if (ROLE_PICKER_OPEN === def.key)
-          slot.appendChild(buildRolePicker(def, presentation));
+          anchor.appendChild(buildRolePicker(def, presentation));
         wrap.appendChild(slot);
       })(defs[i]);
     }
@@ -14647,7 +15386,7 @@
                                        0, Math.min(c.page.w, c.page.h) / 3));
     var z = c.view.zoom;
     c.view.zoom = z === "fit" ? "fit" :
-      String(layClamp(Number(z) || 1, 0.25, 1.5));
+      String(layClamp(Number(z) || 1, 0.25, 2));
     c.view.grid = [4, 8, 12, 16, 24].indexOf(Number(c.view.grid)) !== -1
       ? Number(c.view.grid) : 8;
     if (typeof c.view.showGrid !== "boolean") c.view.showGrid = true;
@@ -14721,11 +15460,11 @@
     var items = layItems(), index = items.indexOf(item);
     var r = layItemRect(item), kind, name = "";
     if (item.kind === "chart") {
-      kind = "Chart panel";
+      kind = "Live chart panel";
       var chart = chartById(item.chartId);
       name = chart ? ", " + (chart.name || "Untitled chart") : ", missing chart";
     } else if (item.kind === "image") {
-      kind = "Image item";
+      kind = item.srcChart ? "Notebook snapshot" : "Image item";
     } else {
       kind = "Text item";
       var copy = String(item.text || "Text").replace(/\s+/g, " ").trim();
@@ -14819,7 +15558,7 @@
   }
   function layZoom() {
     var v = layView();
-    if (v.zoom !== "fit") return layClamp(Number(v.zoom), 0.25, 1.5);
+    if (v.zoom !== "fit") return layClamp(Number(v.zoom), 0.25, 2);
     var vp = el("ps-lviewport"), p = layPage();
     if (!vp || !vp.clientWidth || !vp.clientHeight) return 1;
     var zw = Math.max(180, vp.clientWidth - 46) / p.w;
@@ -14904,7 +15643,7 @@
       el(id).step = String(unitStep());
     });
     syncUnitLabels();
-    el("ps-lzoom").value = v.zoom;
+    zoomSelectShowValue(el("ps-lzoom"), v.zoom);
     el("ps-lgrid").value = String(v.grid);
     var toggles = [
       ["ps-lgrid-toggle", "showGrid"], ["ps-lsnap", "snap"],
@@ -15063,9 +15802,29 @@
     // interactive descendants of an ARIA option.
     node.setAttribute("aria-hidden", "true");
     node.tabIndex = -1;
-    var stale = node.querySelectorAll(".ps-lhandle,.ps-lbar");
+    var stale = node.querySelectorAll(
+      ".ps-lhandle,.ps-lbar,.ps-litem-srcbadge");
     for (var si = 0; si < stale.length; si++)
       if (stale[si].parentNode === node) node.removeChild(stale[si]);
+    // Live / Snapshot badge (Torry, Aug 5 2026): selection-only chrome
+    // answering "will this update" at a glance. Exports rebuild from the
+    // item model, never this DOM, so the badge can never ride into a
+    // file. Pasted images with no source get none - the ambiguity the
+    // badge resolves only exists for things that look like charts.
+    if (selected) {
+      var srcInfo = layItemSourceInfo(item);
+      if (srcInfo) {
+        var changed = srcInfo.kind === "snap" &&
+          srcInfo.status.state === "changed";
+        var badge = mkEl("div", "ps-litem-srcbadge" +
+          (srcInfo.kind === "live" ? " ps-litem-srcbadge-live"
+           : changed ? " ps-litem-srcbadge-changed" : ""),
+          srcInfo.kind === "live" ? "Live"
+            : changed ? "Snapshot - source changed" : "Snapshot");
+        badge.setAttribute("aria-hidden", "true");
+        node.appendChild(badge);
+      }
+    }
     var svgs = node.querySelectorAll("svg");
     for (var vi = 0; vi < svgs.length; vi++) {
       svgs[vi].setAttribute("aria-hidden", "true");
@@ -15500,6 +16259,28 @@
       (layItemById(layPrimaryId())
         ? layItemAccessibleLabel(layItemById(layPrimaryId())) : ""));
   }
+  // To the very front / very back (Torry, Aug 5 2026): the whole
+  // selection moves to that end of the stack, keeping its own relative
+  // order. Same snapshot label as the one-step moves, so undo treats all
+  // four as "reorder".
+  function layMoveLayerEnd(dir) {
+    var ids = laySelectedIds(), items = layItems();
+    if (!ids.length || layAtLayerEnd(dir)) return;
+    var returnFocus = document.activeElement === el("ps-lviewport");
+    laySnapshot("reorder", "layer");
+    var sel = [], rest = [], i;
+    for (i = 0; i < items.length; i++)
+      (ids.indexOf(items[i].id) !== -1 ? sel : rest).push(items[i]);
+    var merged = dir > 0 ? rest.concat(sel) : sel.concat(rest);
+    items.length = 0;
+    Array.prototype.push.apply(items, merged);
+    persist(); renderLayout();
+    if (returnFocus) layFocusViewport();
+    layAnnounce((dir > 0 ? "Moved selection to the front. " :
+                           "Moved selection to the back. ") +
+      (layItemById(layPrimaryId())
+        ? layItemAccessibleLabel(layItemById(layPrimaryId())) : ""));
+  }
   function layMoveSelected(dx, dy, renderNow) {
     var ids = laySelectedIds(), b = laySelectionBounds(ids), p = layPage();
     if (!ids.length || !b) return;
@@ -15581,25 +16362,73 @@
   // rail): chart panels know their chart, and pin placements carry
   // srcChart since the same day. Navigation, not resurrection - the menu
   // entry appears only while the source chart lives.
+  // Live vs snapshot (Torry, Aug 5 2026): a chart PANEL follows its
+  // source chart (its drawing is invalidated by any chart edit); a
+  // Notebook placement is a frozen picture from the moment it was kept.
+  // The layout states that difference wherever the item is in hand - the
+  // selection badge, the rail card, the accessible label, and the
+  // right-click - reusing the Notebook's source-status verdict for the
+  // has-it-changed reading. Pasted images with no source stay plain.
+  function layItemSourceInfo(item) {
+    if (!item) return null;
+    if (item.kind === "chart") {
+      var c = chartById(item.chartId);
+      var live = c && !isLayoutTab(c);
+      return { kind: "live", chartId: item.chartId,
+               name: live ? (c.name || "Untitled chart") : null };
+    }
+    if (item.kind === "image" && item.srcChart)
+      return { kind: "snap", chartId: item.srcChart,
+               status: pinSourceStatus(item),
+               pinId: item.srcPin || null, keptAt: item.keptAt || null };
+    return null;
+  }
   function layItemMenuItems(id) {
     var out = [
       { label: "Duplicate", command: "duplicate-selection" },
       { label: "Delete", command: "delete-selection" },
       "separator",
       { label: "Move backward", command: "layer-back" },
-      { label: "Move forward", command: "layer-forward" }
+      { label: "Move forward", command: "layer-forward" },
+      { label: "Move to back", command: "layer-backmost" },
+      { label: "Move to front", command: "layer-front" }
     ];
     var item = layItemById(id);
-    var srcId = item && (item.kind === "chart" ? item.chartId
-      : item.srcChart || null);
-    var src = srcId ? chartById(srcId) : null;
-    if (src && !isLayoutTab(src)) out.unshift(
-      { label: "Open source chart", key: "lay-open-src",
+    var info = layItemSourceInfo(item);
+    var src = info && info.chartId ? chartById(info.chartId) : null;
+    var head = [];
+    if (src && !isLayoutTab(src))
+      head.push({ label: info.kind === "live"
+          ? "Show live chart in Charts" : "Open source chart",
+        key: "lay-open-src",
         action: function () {
-          switchChart(srcId);
+          switchChart(info.chartId);
           setAppWorkspace("chart");
-        } },
-      "separator");
+        } });
+    if (info && info.kind === "snap" && info.pinId) {
+      // Offered only while the page still exists in the Notebook.
+      var entry = null, everything = allPins();
+      for (var ei = 0; ei < everything.length; ei++)
+        if (everything[ei].pin.id === info.pinId) entry = everything[ei];
+      if (entry) (function (en) {
+        head.push({ label: "Show this page in Notebook",
+          key: "lay-open-pin",
+          action: function () {
+            (PROJECT.ui = PROJECT.ui || {}).activeBoard = en.board.id;
+            PIN_SEL = en.pin.id;
+            setAppWorkspace("pinboard");
+            window.setTimeout(function () {
+              var pg = document.querySelector(
+                '.ps-pinpage[data-pin-id="' + en.pin.id + '"]');
+              if (pg) {
+                pg.scrollIntoView({ block: "center" });
+                pg.focus();
+              }
+            }, 350);
+          } });
+      })(entry);
+    }
+    if (head.length) out.unshift.apply(out, head.concat(["separator"]));
     return out;
   }
   function layOpenKeyboardContext() {
@@ -16818,10 +17647,33 @@
     if (!has) return;
     var bounds = laySelectionBounds(ids);
     var one = ids.length === 1 ? layItemById(ids[0]) : null;
+    var srcInfo = one ? layItemSourceInfo(one) : null;
     el("ps-layout-selection-title").textContent = one
-      ? (one.kind === "chart" ? "Chart panel"
-         : one.kind === "image" ? "Image item" : "Text item")
+      ? (one.kind === "chart"
+         ? (srcInfo && srcInfo.name ? "Chart panel - live" : "Chart panel")
+         : one.kind === "image"
+         ? (srcInfo ? "Notebook snapshot" : "Image item") : "Text item")
       : ids.length + " selected items";
+    // The behavioral line (Torry, Aug 5 2026): will this update, or not.
+    var srcLine = el("ps-layout-source-line");
+    if (srcLine) {
+      if (srcInfo && srcInfo.kind === "live") {
+        srcLine.style.display = "block";
+        srcLine.textContent = srcInfo.name
+          ? "Follows " + srcInfo.name + ". Edits made in Charts update " +
+            "this panel."
+          : "The source chart is no longer in the project, so this " +
+            "panel cannot draw.";
+      } else if (srcInfo && srcInfo.kind === "snap") {
+        srcLine.style.display = "block";
+        srcLine.textContent = "Kept" +
+          (srcInfo.keptAt ? " " + pinDayFmt(srcInfo.keptAt) : "") +
+          " from the Notebook. It will not change. " + srcInfo.status.text;
+      } else {
+        srcLine.style.display = "none";
+        srcLine.textContent = "";
+      }
+    }
     el("ps-ctx-lx").value = pxToUnit(bounds.x);
     el("ps-ctx-ly").value = pxToUnit(bounds.y);
     el("ps-ctx-lw").value = pxToUnit(bounds.w);
@@ -16842,24 +17694,17 @@
     var alignRow = document.querySelector(".ps-inspector-align");
     var canAlign = ids.length >= 2;
     if (alignRow) alignRow.style.display = canAlign ? "" : "none";
+    // The whole section follows: with the Arrange buttons gone (Aug 5
+    // 2026, Torry - they duplicated the right-click, which also gained
+    // Move to front / Move to back) the align row is the section's only
+    // content, so a lone "Align" heading must not sit over nothing.
+    var alignSection = el("ps-layout-align-section");
+    if (alignSection) alignSection.style.display = canAlign ? "" : "none";
     var align = document.querySelectorAll("[data-ctx-align]");
     for (var i = 0; i < align.length; i++) {
       align[i].disabled = false;
       setTip(align[i], "Align the selected items");
     }
-    // The layer buttons go inert at the ends of the stack, and say so.
-    // They were always live, so "Move backward" on the bottom item was a
-    // silent no-op that read as a broken button - Torry's second report,
-    // where backward only appeared to start working after a forward.
-    var backEnd = layAtLayerEnd(-1), fwdEnd = layAtLayerEnd(1);
-    el("ps-ctx-back").disabled = backEnd;
-    el("ps-ctx-forward").disabled = fwdEnd;
-    setTip(el("ps-ctx-back"), backEnd
-      ? "Already at the back of the stack"
-      : "Move behind the item below it");
-    setTip(el("ps-ctx-forward"), fwdEnd
-      ? "Already at the front of the stack"
-      : "Move in front of the item above it");
   }
   // True when moving the selection this direction would change nothing:
   // every selected item is already jammed against that end of the stack.
@@ -16930,6 +17775,16 @@
     var body = document.querySelector(".ps-app-body");
     body.classList.remove("ps-no-inspector");
     el("ps-workcard").classList.toggle("ps-pane-parked", ws === "data");
+    // The chart header Zoom row (Torry, Aug 5 2026): visible exactly when
+    // a chart is on screen - the same placement Notebook and Layouts use.
+    // Lives HERE, not in render(): entering Data skips render(), and the
+    // row must leave with every workspace switch.
+    var chartTools = el("ps-charttools");
+    if (chartTools) {
+      var ctDoc = activeChartTab();
+      chartTools.style.display =
+        ws === "chart" && ctDoc && !isLayoutTab(ctDoc) ? "" : "none";
+    }
     var buttons = document.querySelectorAll("[data-ps-workspace]");
     for (var i = 0; i < buttons.length; i++) {
       var active = buttons[i].getAttribute("data-ps-workspace") === ws;
@@ -16956,9 +17811,9 @@
       : ws === "pinboard" ? !projectPins().length : !c;
     if (ws === "pinboard")
       setTip(el("ps-export"), projectPins().length
-        ? "Save every page as one PDF, vector where possible"
-        : "Keep something first - the Notebook exports as a PDF, one " +
-          "page per kept moment");
+        ? "Export a page, a section, or the whole Notebook - as PDF, " +
+          "SVG, PNG or JPG"
+        : "Keep something first - pages export as PDF, SVG, PNG or JPG");
     var docName = PROJECT.name || (t && t.name) || "Untitled project";
     el("ps-doc-name").textContent = docName;
     document.title = docName + " \u00b7 Pandion Plots";
@@ -17412,10 +18267,6 @@
         layApplyInspector(prop, this.value);
       });
     });
-    el("ps-ctx-duplicate").addEventListener("click", layDuplicateSelected);
-    el("ps-ctx-delete").addEventListener("click", layDeleteSelected);
-    el("ps-ctx-back").addEventListener("click", function () { layMoveLayer(-1); });
-    el("ps-ctx-forward").addEventListener("click", function () { layMoveLayer(1); });
     var align = document.querySelectorAll("[data-ctx-align]");
     for (var i = 0; i < align.length; i++)
       align[i].addEventListener("click", function () {
@@ -19322,7 +20173,7 @@
       var ws = appWorkspace();
       return ws === "data" ? "Export data as CSV\u2026"
         : ws === "layout" ? "Export layout\u2026"
-        : ws === "pinboard" ? "Export Notebook as PDF\u2026"
+        : ws === "pinboard" ? "Export Notebook\u2026"
         : "Export chart\u2026";
     }
     if (item.command !== "undo" && item.command !== "redo") return item.label;
@@ -19606,9 +20457,11 @@
     // Layer moves also need somewhere to go. Without this the menu offered
     // "Move backward" on an item already at the back and simply did
     // nothing when picked (Torry, Jul 27 2026).
-    if (command === "layer-back" || command === "layer-forward")
+    if (command === "layer-back" || command === "layer-forward" ||
+        command === "layer-backmost" || command === "layer-front")
       return isLayoutTab(activeChart()) && laySelectedIds().length > 0 &&
-             !layAtLayerEnd(command === "layer-back" ? -1 : 1);
+             !layAtLayerEnd(command === "layer-back" ||
+                            command === "layer-backmost" ? -1 : 1);
     if (command === "layout-add-chart" || command === "layout-add-text")
       return isLayoutTab(activeChart());
     // The chart-help panels live in a drawn chart's toolbar. "Which graph
@@ -19660,10 +20513,11 @@
     if (command === "delete-document") return "A project must keep at least one document";
     if (command === "duplicate-selection" || command === "delete-selection")
       return "Select a layout item first";
-    if (command === "layer-back" || command === "layer-forward") {
+    if (command === "layer-back" || command === "layer-forward" ||
+        command === "layer-backmost" || command === "layer-front") {
       if (!isLayoutTab(activeChart()) || !laySelectedIds().length)
         return "Select a layout item first";
-      return command === "layer-back"
+      return command === "layer-back" || command === "layer-backmost"
         ? "Already at the back of the stack"
         : "Already at the front of the stack";
     }
@@ -19712,6 +20566,8 @@
     else if (command === "delete-selection") layDeleteSelected();
     else if (command === "layer-back") layMoveLayer(-1);
     else if (command === "layer-forward") layMoveLayer(1);
+    else if (command === "layer-backmost") layMoveLayerEnd(-1);
+    else if (command === "layer-front") layMoveLayerEnd(1);
     else if (command === "reset") el("ps-reset").click();
     else if (command === "view-data") setAppWorkspace("data");
     else if (command === "view-chart") setAppWorkspace("chart");
@@ -19967,6 +20823,43 @@
       if (first) first.focus();
     }
   }
+  // Copy/Paste formatting (Aug 2026, Torry): capture the active chart's
+  // whole look and replay it onto another chart, without naming a saved
+  // style. Rides the engine's Chart styles machinery through the
+  // __gb2_styleClipboard* seam, so module gating (a bar look pasted onto
+  // a scatter applies what applies), positional series re-keying across
+  // different group names, and the one-Undo revert all come along.
+  // Session-level on purpose: a look worth keeping across sessions is
+  // what a saved style is for.
+  var STYLE_CLIPBOARD = null;
+  function copyChartFormatting() {
+    var cap = null;
+    try {
+      cap = window.__gb2_styleClipboardCapture
+        ? window.__gb2_styleClipboardCapture() : null;
+    } catch (e) {}
+    if (!cap) { showToast("Nothing to copy from this chart yet.", true); return; }
+    STYLE_CLIPBOARD = cap;
+    showToast("Formatting copied. Right-click another chart and choose Paste formatting.");
+  }
+  function pasteChartFormatting() {
+    if (!STYLE_CLIPBOARD) return;
+    // The seam accessor is reassigned by every render, so on any RENDERED
+    // chart it is current. A chart still on its empty placeholder has not
+    // rendered, and a stale accessor would close over the PREVIOUS
+    // chart's option pipeline: refuse rather than misapply.
+    if (!document.querySelector(".graphbuilder2-host svg")) {
+      showToast("Add variables to this chart first, then paste.", true);
+      return;
+    }
+    var n = 0;
+    try {
+      n = window.__gb2_styleClipboardApply
+        ? window.__gb2_styleClipboardApply(STYLE_CLIPBOARD) : 0;
+    } catch (e) {}
+    if (n > 0) showToast("Formatting applied. Undo reverts it.");
+    else showToast("Nothing in the copied formatting applies to this chart type.", true);
+  }
   function hideContextMenu() {
     el("ps-contextmenu").style.display = "none";
     CONTEXT_DOC_ID = null;
@@ -19989,6 +20882,13 @@
         // Additive - command items behave exactly as before.
         if (item.action) {
           b.setAttribute("data-context-action", item.key || "");
+          // Additive disabled state for action items (command items get
+          // theirs from commandEnabled below): the item stays visible so
+          // the feature is discoverable, with the tip saying why.
+          if (item.disabled) {
+            b.disabled = true;
+            if (item.tip) setTip(b, item.tip);
+          }
           b.addEventListener("click", function () {
             var target = CONTEXT_DOC_ID;
             hideContextMenu();
@@ -21003,9 +21903,9 @@
                 showPinSendMenu(e.clientX, e.clientY, ctxPinId);
               } },
             "separator",
-            { label: "Export this page as PDF", key: "pin-export-page",
+            { label: "Export this page\u2026", key: "pin-export-page",
               action: function () {
-                exportPinboardPdf({ pinId: ctxPinId });
+                openPinExporter({ kind: "page", pinId: ctxPinId });
               } },
             { label: "Delete page", key: "pin-delete",
               action: function () { deletePin(ctxPinId); } }
@@ -21016,27 +21916,42 @@
           ];
         }
       } else if (t.closest(".graphbuilder2-host, #ps-workcard")) {
-        // With several boards, say WHICH record this evidence joins -
-        // one entry per board, the export-scope idiom (Torry, Aug 1
-        // 2026). One board keeps the plain single item.
-        var pinItems = (function () {
-          var boards = pinBoards();
-          if (boards.length < 2)
-            return [{ label: "Keep to Notebook", key: "pin-chart",
-              action: function () { pinChartToPinboard(); } }];
-          var out = [];
-          for (var bi = 0; bi < boards.length; bi++) (function (b) {
-            out.push({ label: "Keep to " + b.name,
-              key: "pin-chart:" + b.id,
-              action: function () { pinChartToPinboard(b.id); } });
-          })(boards[bi]);
-          return out;
-        })();
+        // ONE entry, always a submenu (Torry, Aug 5 2026: "I think that
+        // just makes it consistent") - the sections listed by name plus
+        // New section, the exact shape Send to layout uses. Replaces the
+        // Aug 1 form (immediate keep with one board, per-board entries
+        // inlined in the MAIN menu with several).
+        var pinItems = [
+          { label: "Keep to Notebook\u2026", key: "pin-chart",
+            action: function () {
+              showKeepToNotebookMenu(e.clientX, e.clientY);
+            } }
+        ];
+        // "Send to layout" beside Keep (Torry, Aug 5 2026): the same
+        // gesture the Notebook pages have, placing the LIVE panel.
+        var sendChartId = (activeChart() || {}).id;
         items = [
           { label: "Copy as image", command: "copy-image" }
         ].concat(pinItems, [
+          { label: "Send to layout\u2026", key: "chart-send",
+            action: function () {
+              showSendToLayoutMenu(e.clientX, e.clientY, "chart-to-",
+                function (layoutId) {
+                  addChartToLayout(sendChartId, layoutId);
+                });
+            } },
           { label: "Export\u2026", command: "export" },
           "separator",
+          // The styling group: copy a finished chart's whole look, walk
+          // to the next chart, paste. Paste stays visible-but-disabled
+          // until something has been copied, so the pairing is
+          // discoverable from either end.
+          { label: "Copy formatting", key: "copy-format",
+            action: function () { copyChartFormatting(); } },
+          { label: "Paste formatting", key: "paste-format",
+            disabled: !STYLE_CLIPBOARD,
+            tip: "Choose Copy formatting on another chart first.",
+            action: function () { pasteChartFormatting(); } },
           { label: "Reset chart styling", command: "reset" }
         ]);
       } else if (t.closest(".ps-controls, .ps-project-panel")) {

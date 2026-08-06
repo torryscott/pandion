@@ -518,9 +518,11 @@
     flex: 0 0 auto; width: auto; min-width: 108px;
   }
   #ps-zoom-readout { color: var(--ps-muted); font-size: 10.5px; }
+  /* Demoted to an unboxed caption (Torry, Aug 2026): read-once prose
+     should not hold card weight in the pane's prime position. */
   .ps-analysis-help {
-    margin: 6px 12px 0; padding: 6px 8px; color: var(--ps-muted);
-    background: var(--ps-s2); border: 1px solid var(--ps-l2); border-radius: var(--ps-r-md);
+    margin: 4px 14px 0; padding: 0; color: var(--ps-muted);
+    background: transparent; border: none;
     font-size: 10.5px; line-height: 1.35;
   }
   /* Shown when the variables list has nothing to offer: every variable
@@ -549,45 +551,63 @@
   .ps-role-section-heading::after {
     content: ""; flex: 1; height: 1px; background: var(--ps-l2);
   }
+  /* FLATTENED (Torry, Aug 2026): one border per slot. The card IS the
+     drop target; dashed while empty (the decision cue lives on the card
+     itself), solid and quiet once settled. */
   .ps-role-card {
-    width: 100%; box-sizing: border-box; padding: 7px 8px;
+    width: 100%; box-sizing: border-box; padding: 6px 10px;
+    position: relative;
     background: var(--ps-s0); border: 1px solid var(--ps-l2); border-radius: var(--ps-r-md);
   }
-  .ps-role-card-head {
-    display: flex; align-items: center; width: 100%; gap: 7px;
+  .ps-role-flat-empty {
+    border: 1.5px dashed var(--ps-l4); background: var(--ps-s1);
   }
+  .ps-role-flat-empty:hover { border-color: #7fa5cd; background: var(--ps-s2); }
+  .ps-role-flat-sp { flex: 1 1 auto; min-width: 8px; }
+  .ps-role-card .ps-slot-empty { white-space: nowrap; }
+  /* (.ps-role-card-head retired by the flattening: the label lives in
+     the row now.) */
   .ps-role-card .ps-slot-label {
-    color: var(--ps-ink-3); font-size: 11px; font-weight: 700;
-    letter-spacing: 0; text-transform: none;
+    color: var(--ps-ink-3); font-size: 12px; font-weight: 700;
+    letter-spacing: 0; text-transform: none; flex: 0 0 auto;
   }
   /* De-busy pass (Torry, Jul 27 2026): badges render only on EMPTY zones
      (a met requirement is not news), and in sentence case - caps stay
      reserved for section headers so the caps voice keeps meaning. */
   .ps-role-badge {
-    margin-left: auto; padding: 2px 5px; border-radius: var(--ps-r-md);
+    padding: 2px 6px; border-radius: var(--ps-r-md);
     color: var(--ps-muted); background: var(--ps-s3); font-size: 10px;
-    font-weight: 650; letter-spacing: 0; text-transform: none;
+    font-weight: 650; letter-spacing: 0; text-transform: none; flex: 0 0 auto;
   }
   .ps-role-badge-required { color: #315f8c; background: var(--ps-s3); }
   .ps-role-card .ps-slot-drop {
-    width: 100%; min-height: 38px; flex: 0 0 auto; padding: 5px 7px;
-    border-color: var(--ps-l4); background: var(--ps-s1);
+    width: 100%; min-height: 30px; flex: 0 0 auto; padding: 2px 0;
+    border: none; background: transparent;
+    display: flex; align-items: center; gap: 8px;
+    /* Narrow rails WRAP rather than overlap: without this the chip name
+       ran over its own remove button at reflow widths (caught by the
+       reflow suite - the truncation rule the flattening owed). */
+    flex-wrap: wrap;
   }
-  .ps-role-card .ps-slot-drop:hover {
-    color: var(--ps-accent-ink); background: var(--ps-s2); border-color: #7fa5cd;
+  .ps-role-card .ps-slot-chip { min-width: 0; max-width: 100%; }
+  .ps-role-card .ps-slot-chip .ps-slot-chip-name {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    min-width: 0;
   }
+  .ps-role-card .ps-slot-drop:hover { color: var(--ps-accent-ink); }
   /* A FILLED zone is a settled fact, not a drop target: solid quiet
      border. Dashed is the "drop here" affordance, and keeping it after
      the zone is satisfied means nothing ever reads as done (the de-busy
      pass, Torry, Jul 27 2026). Drag/reject states still override. */
-  .ps-role-card .ps-slot-drop.ps-slot-filled {
-    border-style: solid; border-color: var(--ps-l2); background: var(--ps-s0);
-  }
+  .ps-role-card .ps-slot-drop.ps-slot-filled { background: transparent; }
+  /* Flattened Change/Add: a compact text affordance, not a boxed
+     button - the keyboard and screen-reader path onto a row whose
+     pointer affordance is the whole card. */
   .ps-slot-change {
-    min-width: 48px; min-height: 24px; margin-left: auto; padding: 2px 7px;
-    color: var(--ps-accent-ink); background: var(--ps-s2);
-    border: 1px solid var(--ps-l3); border-radius: var(--ps-r-sm);
-    font-size: 10.5px; font-weight: 650;
+    min-height: 22px; padding: 2px 6px; flex: 0 0 auto;
+    color: var(--ps-accent-ink); background: transparent;
+    border: none; border-radius: var(--ps-r-sm);
+    font-size: 10.5px; font-weight: 650; cursor: pointer;
   }
   .ps-slot-change:hover { background: var(--ps-tint-2); }
   /* Re-stated at matching specificity AFTER the filled rule, or the
@@ -604,6 +624,11 @@
   .ps-role-card .ps-slot-empty {
     display: inline-flex; align-items: center; gap: 6px; min-width: 0;
     color: var(--ps-muted); font-style: normal;
+    /* Always its own row (Torry, Aug 2026): the wrapping flex row put
+       "Choose a variable" beside a short label and under a long one, so
+       sibling cards disagreed. Full-basis makes every empty card read
+       label + badge first, the affordance on the line below. */
+    flex: 0 0 100%;
   }
   .ps-slot-add {
     display: inline-grid; place-items: center; width: 17px; height: 17px;
@@ -619,10 +644,43 @@
   }
   /* Inline role picker (replaces the floating slot menu): the card
      expands in place and lists ONLY eligible variables. */
+  .ps-role-anchor { position: relative; display: block; width: 100%; min-width: 0; }
+  /* The picker OVERLAYS the rail (Torry, Aug 2026): an inline expansion
+     pushed the next slot away just as the user needed it. Solid ground,
+     a real shadow, and a border make it read as a transient menu rather
+     than one more resting card. */
   .ps-role-picker {
-    width: 100%; box-sizing: border-box; margin-top: 7px; padding: 6px;
-    background: var(--ps-s1); border: 1px solid var(--ps-l2b); border-radius: var(--ps-r-md);
+    position: absolute; left: 0; right: 0; top: calc(100% + 6px);
+    z-index: 60; box-sizing: border-box; padding: 6px;
+    background: var(--ps-s0); border: 1px solid var(--ps-l2b);
+    border-radius: var(--ps-r-md);
+    box-shadow: var(--ps-e-3);
+    max-height: 320px; overflow-y: auto;
   }
+  .ps-role-add-row {
+    -webkit-appearance: none; appearance: none;
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    box-sizing: border-box; font-family: inherit; font-size: 12px;
+    text-align: left; color: var(--ps-muted); background: transparent;
+    border: 1px solid transparent; border-radius: var(--ps-r-md);
+    padding: 7px 10px; margin: 2px 0 0; cursor: pointer;
+  }
+  .ps-role-add-row:hover, .ps-role-add-row:focus-visible {
+    color: var(--ps-ink-2); background: var(--ps-tint-2);
+    border-color: var(--ps-l2);
+  }
+  .ps-role-add-row.ps-role-add-over,
+  .ps-role-add-row.ps-role-eligible {
+    color: var(--ps-accent-bright); background: var(--ps-tint-2);
+    border-color: #9fb9d8;
+  }
+  .ps-role-add-plus {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--ps-tint-2); color: var(--ps-accent-bright);
+    font-weight: 700; font-size: 13px; flex: 0 0 auto;
+  }
+  .ps-role-add-label { font-weight: 600; }
   .ps-role-picker-blurb {
     color: var(--ps-muted); font-size: 10px; line-height: 1.4;
     padding: 1px 4px 6px;
@@ -675,7 +733,10 @@
   .ps-chip.ps-chip-dim { opacity: 0.35; }
   /* The one unfilled REQUIRED card carries a quiet accent so "what is
      blocking my chart" is answerable at a glance. */
-  .ps-role-card-needed { border-left: 3px solid var(--ps-accent); padding-left: 7px; }
+  .ps-role-card-needed {
+    border: 1.5px dashed #6f97c9; background: #f7fafd;
+  }
+  .ps-role-card-needed:hover { border-color: var(--ps-accent); }
   .ps-slot-count {
     margin-left: auto; flex-shrink: 0; padding-left: 8px;
     color: var(--ps-muted); font-size: 10px; font-weight: 650;
@@ -734,11 +795,22 @@
   /* t3-51: was flex-wrap: wrap, so a dozen documents pushed the canvas down
      a row at a time. Tabs scroll sideways now, like every tabbed application,
      and syncTabs scrolls the active one into view. */
+  #ps-tabrow {
+    display: flex; align-items: center; min-width: 0;
+    border-bottom: 1px solid var(--ps-l1); margin: -2px 0 10px;
+  }
   #ps-tabs {
     display: flex; align-items: center; gap: 2px; flex-wrap: nowrap;
+    /* The strip keeps a WORKING minimum (one tab plus its controls) and
+       scrolls inside it; the zoom group is the one that yields. With
+       min-width 0 here, a 320px viewport could shrink the strip to
+       nothing and the zoom sat over the close and add buttons (caught by
+       the reflow focus sweep - intermittently, which is exactly what a
+       layout at the mercy of rendered select width does). */
+    flex: 1 1 auto; min-width: 148px;
     overflow-x: auto; overflow-y: hidden; scroll-behavior: smooth;
     scrollbar-width: none;
-    border-bottom: 1px solid var(--ps-l1); margin: -2px 0 10px; padding: 0 2px;
+    padding: 0 2px;
   }
   #ps-tabs::-webkit-scrollbar { display: none; }
   #ps-tabs > * { flex: 0 0 auto; }
@@ -920,6 +992,33 @@
   }
   .ps-litem[data-kind="chart"] svg { display: block; width: 100%; height: 100%; }
   .ps-litem.ps-litem-sel { outline: 2px solid var(--ps-accent); outline-offset: 1px; }
+  /* Live / Snapshot badge (Torry, Aug 2026): selection-only chrome
+     answering "will this update" at a glance. Exports rebuild from the
+     item model, so this can never ride into a file. */
+  .ps-litem-srcbadge {
+    /* Far RIGHT (Torry, Aug 5 2026): the top-left corner belongs to the
+       mini toolbar's remove control, which the badge sat on top of. */
+    position: absolute; top: -24px; right: -2px; z-index: 30;
+    padding: 2px 7px; border-radius: var(--ps-r-sm);
+    color: var(--ps-muted); background: var(--ps-s3);
+    border: 1px solid var(--ps-l2);
+    font-size: 10px; font-weight: 650; letter-spacing: 0.2px;
+    pointer-events: none; white-space: nowrap;
+  }
+  .ps-litem-srcbadge-live {
+    color: var(--ps-accent-ink); background: var(--ps-tint-2);
+    border-color: #9fb9d8;
+  }
+  .ps-litem-srcbadge-changed {
+    color: var(--ps-warn-ink); background: var(--ps-warn-wash);
+    border-color: var(--ps-warn-line);
+  }
+  /* The rail's behavioral line under the selection title: follows-the-
+     chart vs frozen-snapshot, with the Notebook's source verdict. */
+  .ps-layout-source-line {
+    margin: 4px 0 6px; color: var(--ps-muted);
+    font-size: 10.5px; line-height: 1.4;
+  }
   .ps-litem.ps-litem-primary {
     outline-color: #165b9f;
     box-shadow: 0 0 0 3px rgba(53,115,189,0.11);
@@ -2068,6 +2167,25 @@
     display: flex; align-items: center; padding: 10px 24px 8px;
     background: var(--ps-s2);
   }
+  /* The chart zoom, docked at the tab row's right edge (Aug 5 2026):
+     no band, no new row - one compact group on the line the app already
+     spends. */
+  #ps-charttools {
+    display: flex; align-items: center; flex: 0 1 auto; min-width: 0;
+    padding: 2px 6px 4px 10px;
+  }
+  #ps-charttools .ps-lselect { min-width: 0; }
+  /* Tight PANES (not viewports: the rails eat most of the window long
+     before phone widths - fitpanes caught a 46px sideways scroll at an
+     860px window whose pane was 315px): the shell stamps ps-ct-tight
+     from the pane's own width, and the micro-label is the first thing
+     to go, never the tabs' controls. */
+  #ps-charttools.ps-ct-tight .ps-ltool-label { display: none; }
+  #ps-charttools.ps-ct-tight { padding-left: 2px; padding-right: 2px; }
+  #ps-charttools.ps-ct-tight .ps-lselect { max-width: 112px; }
+  #ps-charttools #ps-zoom-readout {
+    margin-left: 6px; color: var(--ps-muted); font-size: 11px;
+  }
   /* Pinboard rail (Torry, Aug 1 2026): facts read as content under the
      10px micro-labels; the source verdict tints - dark amber for changed
      (readable on white where --ps-warn is not), danger for a gone chart. */
@@ -2118,9 +2236,21 @@
     border-radius: var(--ps-r-sm);
     -webkit-user-drag: none; user-select: none; }
   .ps-pinpage-bar {
-    display: flex; align-items: center; gap: 8px; margin-top: 8px;
+    display: flex; align-items: center; gap: 6px 8px; margin-top: 8px;
+    /* Narrow cards WRAP the buttons below the info line (Torry, Aug 5
+       2026: at low zoom the buttons kept their row and crushed "Page 1
+       of 7 · kept..." into a one-word-wide column, making the card
+       needlessly tall - the rail chip lesson again). */
+    flex-wrap: wrap;
   }
-  .ps-pinpage-num { font-size: 11px; color: var(--ps-muted); flex: 1; }
+  .ps-pinpage-num {
+    font-size: 11px; color: var(--ps-muted); flex: 1 1 auto;
+    white-space: nowrap;
+  }
+  .ps-pinpage-actions {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    margin-left: auto;
+  }
   .ps-pinpage-bar button {
     -webkit-appearance: none; appearance: none; font: inherit;
     font-size: 10.5px; color: var(--ps-accent-press); background: var(--ps-s2);
@@ -3732,25 +3862,11 @@
         <input type="checkbox" id="ps-fit-pane" checked>
         <span>Standard chart size (7.5 x 5 in)</span>
       </label>
-      <label class="ps-inspector-field ps-zoom-field"
-             data-tip="How large the chart appears on YOUR screen. Purely a view setting: the figure itself, and every export, keeps its true size and proportions.">
-        <span>View</span>
-        <select id="ps-chart-zoom" aria-label="Chart view zoom">
-          <option value="fit" selected>Fit window</option>
-          <option value="0.5">50%</option>
-          <option value="0.75">75%</option>
-          <option value="1">100%</option>
-          <!-- Magnification RESTORED (Torry's approval, Jul 28 2026): the
-               engine's _ensureChartRoomFor now expresses its rect deltas
-               in the svg's own logical units (identity in jamovi), so a
-               magnified redraw can no longer inflate the canvas. The
-               fitpanes magnification case pins 720 through type cycling
-               at both of these levels. -->
-          <option value="1.25">125%</option>
-          <option value="1.5">150%</option>
-        </select>
-        <span id="ps-zoom-readout" aria-live="polite"></span>
-      </label>
+      <!-- The View zoom moved to the chart workspace header (Torry,
+           Aug 5 2026): Notebook and Layouts show Zoom where you work, and
+           this card's copy was invisible to the low-res colleagues who
+           needed it. Size & view keeps the LOGICAL size; #ps-charttools
+           owns the view. -->
           </div>
         </div>
       </div>
@@ -3953,6 +4069,8 @@
         <div class="ps-inspector-section">
           <span class="ps-inspector-section-title" id="ps-layout-selection-title"
                 data-tip="Drag to move; corner resize keeps proportions, hold Shift for free resize. Arrows nudge; Shift+arrow moves 10 px.">Selection</span>
+          <div id="ps-layout-source-line" class="ps-layout-source-line"
+               style="display:none;"></div>
           <div class="ps-inspector-grid ps-layout-position-grid">
             <label class="ps-inspector-field"><span class="ps-layout-field-label">X (<span data-unit-label>in</span>)</span><input id="ps-ctx-lx" type="number" step="1"></label>
             <label class="ps-inspector-field"><span class="ps-layout-field-label">Y (<span data-unit-label>in</span>)</span><input id="ps-ctx-ly" type="number" step="1"></label>
@@ -3960,14 +4078,15 @@
             <label class="ps-inspector-field"><span class="ps-layout-field-label">Height (<span data-unit-label>in</span>)</span><input id="ps-ctx-lh" type="number" step="1"></label>
           </div>
         </div>
-        <div class="ps-inspector-section">
-          <span class="ps-inspector-section-title">Arrange</span>
-          <div class="ps-inspector-actions" style="margin-bottom:7px;">
-            <button type="button" class="ps-btn" id="ps-ctx-duplicate">Duplicate item</button>
-            <button type="button" class="ps-btn" id="ps-ctx-back">Back</button>
-            <button type="button" class="ps-btn" id="ps-ctx-forward">Forward</button>
-            <button type="button" class="ps-btn ps-danger" id="ps-ctx-delete">Delete item</button>
-          </div>
+        <!-- The Arrange button cluster (Duplicate / Back / Forward /
+             Delete) is GONE (Torry, Aug 5 2026): every one of them
+             duplicated the item right-click, which also carries Move to
+             front / Move to back now, and the keyboard keeps Delete and
+             Cmd/Ctrl+D. Only Align remains - it is multi-select-only and
+             lives nowhere else. -->
+        <div class="ps-inspector-section" id="ps-layout-align-section"
+             style="display:none;">
+          <span class="ps-inspector-section-title">Align</span>
           <!-- Progressive disclosure (Torry, Jul 29 2026): aligning is
                meaningless with one item selected, so rather than showing six
                greyed buttons at every selection, the row APPEARS when a
@@ -4072,7 +4191,37 @@
   </div>
 
   <div class="ps-card" id="ps-workcard">
-    <div id="ps-tabs" role="group" aria-label="Documents and actions"></div>
+    <!-- The Zoom control rides the TAB ROW (Torry, Aug 5 2026: a whole
+         band for one select wastes exactly the vertical space low-res
+         screens lack; the strip's right half was empty). A sibling, not a
+         child: the strip is JS-rebuilt and scrolls horizontally, and the
+         zoom must survive both. -->
+    <div id="ps-tabrow">
+      <div id="ps-tabs" role="group" aria-label="Documents and actions"></div>
+    <div id="ps-charttools" style="display:none;">
+      <label class="ps-ltool-group ps-ltool-push"
+             data-tip="How large the chart appears on YOUR screen. Cmd/Ctrl + scroll on the chart zooms smoothly between these steps. Purely a view setting: the figure itself, and every export, keeps its true size and proportions.">
+        <span class="ps-ltool-label">Zoom</span>
+        <select class="ps-lselect" id="ps-chart-zoom" aria-label="Chart view zoom">
+          <option value="fit" selected>Fit window</option>
+          <option value="0.5">50%</option>
+          <option value="0.75">75%</option>
+          <option value="1">100%</option>
+          <!-- Magnification RESTORED (Torry's approval, Jul 28 2026): the
+               engine's _ensureChartRoomFor now expresses its rect deltas
+               in the svg's own logical units (identity in jamovi), so a
+               magnified redraw can no longer inflate the canvas. The
+               fitpanes magnification case pins 720 through type cycling
+               at both of these levels. -->
+          <option value="1.25">125%</option>
+          <option value="1.5">150%</option>
+          <option value="1.75">175%</option>
+          <option value="2">200%</option>
+        </select>
+        <span id="ps-zoom-readout" aria-live="polite"></span>
+      </label>
+    </div>
+    </div>
     <div id="ps-workspace-empty" class="ps-workspace-empty">
       <div id="ps-workspace-empty-icon" class="ps-workspace-empty-icon"
            aria-hidden="true"></div>
@@ -4086,7 +4235,8 @@
     <div id="ps-pinpane" role="tabpanel" aria-label="Notebook"
          style="display:none;">
       <div id="ps-pintools">
-        <label class="ps-ltool-group ps-ltool-push">
+        <label class="ps-ltool-group ps-ltool-push"
+               data-tip="Cmd/Ctrl + scroll on the board zooms smoothly between these steps.">
           <span class="ps-ltool-label">Zoom</span>
           <select class="ps-lselect" id="ps-pzoom">
             <option value="fit">Fit page</option>
@@ -4095,6 +4245,8 @@
             <option value="1">100%</option>
             <option value="1.25">125%</option>
             <option value="1.5">150%</option>
+            <option value="1.75">175%</option>
+            <option value="2">200%</option>
           </select>
         </label>
       </div>
@@ -4139,7 +4291,8 @@
                preset and dimensions are PROPERTIES of the page, like the
                Orientation already in that section; the bar keeps actions
                plus the zoom, right-aligned so the row reads finished. -->
-          <label class="ps-ltool-group ps-ltool-push">
+          <label class="ps-ltool-group ps-ltool-push"
+               data-tip="Cmd/Ctrl + scroll on the page zooms smoothly between these steps.">
             <span class="ps-ltool-label">Zoom</span>
             <select class="ps-lselect" id="ps-lzoom">
               <option value="fit">Fit page</option>
@@ -4149,6 +4302,8 @@
               <option value="1">100%</option>
               <option value="1.25">125%</option>
               <option value="1.5">150%</option>
+              <option value="1.75">175%</option>
+              <option value="2">200%</option>
             </select>
           </label>
         </div>
@@ -4989,8 +5144,8 @@
 <script src="lib/ps-data.b73a661916.js"></script>
 <script src="lib/jspdf.umd.min.979a2ef514.js"></script>
 <script src="lib/svg2pdf.umd.min.4ada250f50.js"></script>
-<script src="lib/graphbuilder2.min.6364be3d5d.js"></script>
-<script src="lib/ps-shell.4f9d75d58e.js"></script>
-<script src="lib/ps-tour.1c461650b0.js"></script>
+<script src="lib/graphbuilder2.min.2ccf47e5e0.js"></script>
+<script src="lib/ps-shell.6df9ee4d9b.js"></script>
+<script src="lib/ps-tour.90419676ff.js"></script>
 </body>
 </html>

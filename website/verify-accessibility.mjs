@@ -91,7 +91,19 @@ check(
 
 const guide = read('docs/user-guide.html');
 const deployedGuide = read('website/docs/index.html');
-check(guide === deployedGuide, 'the deployed guide matches its canonical source');
+// The deployed copy carries injected site chrome (header/footer/nav, see
+// build.sh); stripping the marker-wrapped blocks must restore the
+// canonical byte-for-byte, so guide CONTENT still cannot drift.
+const strippedGuide = deployedGuide.replace(
+    /\n<!-- SITE-CHROME START -->[\s\S]*?<!-- SITE-CHROME END -->/g, '');
+check(strippedGuide === guide,
+    'the deployed guide matches its canonical source once site chrome is stripped');
+check(
+    /<header class="site-header">/.test(deployedGuide) &&
+    /<footer class="site-footer">/.test(deployedGuide) &&
+    deployedGuide.indexOf('class="site-header"') >
+        deployedGuide.indexOf('class="skip-link"'),
+    'the deployed guide carries the site header and footer, after the skip link');
 check(
     /<a class="skip-link" href="#content">Skip to guide content<\/a>/.test(guide) &&
     /<main id="content" tabindex="-1">/.test(guide),

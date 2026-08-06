@@ -32,10 +32,15 @@ framework, no build step. The `website/` folder IS the deployable site.
   gallery/about pages are styled to match `index.html`. To adopt a
   variant, rename it to `index.html` and restyle the two subpages.
 - `assets/` - brand marks, hero art, product screenshot, gallery.
-- `docs/index.html` - the user guide, copied verbatim from the canonical
-  `docs/user-guide.html` (plus `docs/img/`). Served at
-  `pandionplots.com/docs/`. Refresh it with `build.sh`; never hand-edit
-  the copy.
+- `docs/index.html` - the user guide, built from the canonical
+  `docs/user-guide.html` (plus `docs/img/`) by `build.sh`, which INJECTS
+  the site's header/footer/nav chrome and re-hues the guide's teal
+  accent to the site cobalt (marker-wrapped `SITE-CHROME` blocks;
+  stripping them restores the canonical byte-for-byte, and
+  verify-accessibility.mjs asserts exactly that, so guide CONTENT can
+  never drift). The canonical stays chrome-free because it also ships
+  inside the jamovi module, where site links would be broken. Served at
+  `pandionplots.com/docs/`. Never hand-edit the copy.
 - `build.sh` - rebuilds `app/`, refreshes `docs/` and the portable
   download, and warns if the version stated on the site has drifted
   from `DESCRIPTION`.
@@ -166,6 +171,32 @@ per release; once it exists, add it to the APA line, the BibTeX entry
 (`doi = {...}`), `CITATION.cff` (`doi:`), and the release line. A DOI is
 what makes the software properly citable in a reference list.
 
+## `main` IS the live site - push to it only on purpose (Aug 5 2026)
+
+Torry's standing rule: the deployed site changes ONLY when he asks for
+a specific change, and then only that one thing changes.
+
+Mechanism: nothing but git discipline. Cloudflare Pages auto-deploys
+`main` (production branch `main`, unchanged), so whatever `main`'s
+`website/` folder holds IS pandionplots.com, usually within a minute of
+a push. ALL development - app, engine, docs, website drafts, and the
+rebuilt `website/` artifacts that ride app commits - happens on other
+branches, where it deploys nothing.
+
+Releasing ("reconciling" a branch into main) has two flavors:
+
+- **Small site-only change** ("fix this sentence"): apply that ONE edit
+  directly to `main` and push. Do NOT merge the dev branch for this -
+  a merge drags every accumulated app change along with the sentence.
+- **Full refresh** (put the current app/site on the web): run
+  `build-dist.sh` + `build.sh` on the dev branch, then merge it into
+  `main` (or copy `website/` over) and push. Everything goes live at
+  once, on purpose.
+
+Either way: before ANY push to `main`, diff `main`'s `website/` against
+what is currently live and state exactly what will change. Never push
+`main` as a side effect of other work.
+
 ## Deploying to Cloudflare Pages (free tier is plenty)
 
 Two options; the first is simplest and keeps deploys tied to git.
@@ -175,7 +206,9 @@ Two options; the first is simplest and keeps deploys tied to git.
    Connect to Git -> pick `torryscott/pandion`.
 2. Build settings: Framework preset "None", Build command EMPTY,
    Build output directory `website`.
-3. Deploy. Every push to main redeploys automatically.
+3. Production branch: `main`. Pushes to it redeploy automatically
+   (which is why `main` only ever moves on purpose - see the section
+   above); pushes elsewhere only make preview deployments.
 
 **Option B - direct upload:**
 1. Workers & Pages -> Create -> Pages -> Upload assets.
@@ -217,4 +250,6 @@ binaries:
 
 1. `bash standalone/build-dist.sh` (if the app changed)
 2. `bash website/build.sh`
-3. Commit + push (Option A auto-deploys) or re-upload (Option B).
+3. Commit on the dev branch as usual. Pushing to `main` is the release
+   act itself (see the section above) - do it deliberately, after
+   stating what will change on the live site.
