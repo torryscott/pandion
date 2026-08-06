@@ -227,13 +227,16 @@ const afterHue = await page.evaluate((id) =>
     window.PS_SHELL.chart().items.find(i => i.id === id).color, textId);
 ok(afterHue !== afterSv && /^#[0-9a-f]{6}$/i.test(afterHue),
    `the hue slider shifts it again (${afterHue})`);
-// The selection halo on TEXT is dashed, the chart workspace's look.
+// The selection halo on TEXT is dashed, the chart workspace's look -
+// carried by the rotating frame (round 4), not the item outline.
 ok(await page.evaluate((id) => {
     const node = document.querySelector(
         '.ps-litem[data-item-id="' + id + '"]');
-    return getComputedStyle(node).outlineStyle;
-}, textId) === 'dashed',
-   'selected text wears the dashed halo, like text in Charts');
+    const fr = node.querySelector('.ps-ltx-frame');
+    return !!fr && getComputedStyle(fr).borderTopStyle === 'dashed' &&
+        getComputedStyle(node).outlineStyle === 'none';
+}, textId),
+   'selected text wears the dashed frame, like text in Charts');
 // The rotate grip: drag it and the item rotates, slider following.
 await page.evaluate((id) => {
     const it = window.PS_SHELL.chart().items.find(i => i.id === id);
@@ -252,6 +255,24 @@ const grip = await page.evaluate((id) => {
              cx: box.left + box.width / 2, cy: box.top + box.height / 2 };
 }, textId);
 ok(!!grip, 'the selected text box grows a rotate grip above it');
+// Torry's screenshot (Aug 6 2026): on a NARROW box the grip's knob sat
+// on the mini toolbar's first button. The bar parks BELOW text items;
+// at rest the grip owns the top - they must never intersect.
+const chrome = await page.evaluate((id) => {
+    const box = document.querySelector(
+        '.ps-litem[data-item-id="' + id + '"]');
+    const g = box.querySelector('[data-role="ltx-rotate-handle"]')
+        .getBoundingClientRect();
+    const b = box.querySelector('.ps-lbar').getBoundingClientRect();
+    const r = box.getBoundingClientRect();
+    return { overlap: !(g.right < b.left || g.left > b.right ||
+                        g.bottom < b.top || g.top > b.bottom),
+             barBelow: b.top >= r.bottom,
+             gripAbove: g.bottom <= r.top + 2 };
+}, textId);
+ok(!chrome.overlap && chrome.barBelow && chrome.gripAbove,
+   'the grip owns the top and the mini toolbar parks below: no collision ' +
+   'at any box width');
 await page.mouse.move(grip.x, grip.y);
 await page.mouse.down();
 // Sweep to the right of the centre: roughly +40 degrees.
@@ -266,6 +287,21 @@ ok(typeof spun.rotate === 'number' && spun.rotate > 15 &&
    spun.rotate <= 90 && String(spun.rotate) === spun.slider,
    `dragging the grip rotates the text and the rail follows ` +
    `(${spun.rotate} degrees)`);
+// Round 4 (Torry: the text angled but the box stayed flat): the dashed
+// frame - grip riding it - rotates WITH the text, the chart look.
+const followed = await page.evaluate((id) => {
+    const box = document.querySelector(
+        '.ps-litem[data-item-id="' + id + '"]');
+    const fr = box.querySelector('.ps-ltx-frame');
+    const tx = box.querySelector('.ps-ltext');
+    return { frame: getComputedStyle(fr).transform,
+             text: getComputedStyle(tx).transform,
+             gripInFrame: !!fr.querySelector(
+                 '[data-role="ltx-rotate-handle"]') };
+}, textId);
+ok(followed.frame !== 'none' && followed.frame === followed.text &&
+   followed.gripInFrame,
+   'the dashed frame rotates WITH the text, and the grip orbits on it');
 
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('LAYOUT TEXT CHECK PASS');

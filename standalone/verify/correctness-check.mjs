@@ -561,8 +561,11 @@ ok(await page.locator('#ps-exporter').isVisible(),
    "and clicking it opens the shell's export dialog");
 await page.keyboard.press('Escape');
 await page.waitForTimeout(200);
-// The help sentence names the button that exists now.
-await page.click('.graphbuilder2-host button[title="Help & shortcuts"]');
+// The help sentence names the button that exists now. The "?" is HIDDEN
+// in the standalone toolbar (Aug 6 2026) - the Help menu drives it
+// programmatically, and so does this probe.
+await page.evaluate(() => document.querySelector(
+    '.graphbuilder2-host button[title="Help & shortcuts"]').click());
 await page.waitForTimeout(500);
 const helpTxt = await page.evaluate(() => {
     const p = document.querySelector('.gb2-panel');

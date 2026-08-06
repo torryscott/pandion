@@ -37,7 +37,7 @@ statusbar-check \
 textscale-check \
 safety-check \
 silent-failure-check selection-menus-check spreadsheet-gaps-check teaching-check \
-tokens-check tour-check typing-check units-check wizard-parity-check variable-levels-check visuals-check \
+tokens-check toolbar-labels-check tour-check typing-check units-check wizard-parity-check variable-levels-check visuals-check \
 xlsx-import-check launch-eval-fixes-check launch-contract-check"
 
 echo "== m0-check (render + edit round-trip)"

@@ -463,6 +463,36 @@
   /* !important because the engine writes display:flex INLINE via
      style.cssText - the same reason the focus-visible rule carries it. */
   #psroot [data-role="chart-toolbar"] button[title="Export plot"] { display: none !important; }
+  /* The "?" leaves the standalone toolbar (Torry, Aug 6 2026): the Help
+     menu up top reaches every panel it opened - including the new Chart
+     basics entry - and the menu drives the engine by clicking this very
+     button, which works while hidden (the Export precedent above). */
+  #psroot [data-role="chart-toolbar"] button[aria-label="Help & shortcuts"] { display: none !important; }
+  /* With Export and the "?" both hidden here, the two zone dividers that
+     flanked them stand next to nothing (Torry's screenshot, Aug 6 2026).
+     jamovi keeps its dividers - this sheet never ships there. */
+  #psroot [data-role="chart-toolbar"] [data-role="toolbar-divider"] { display: none !important; }
+  /* The zoom group docked in the bar (Torry, Aug 6 2026): far right,
+     like the Notebook and Layout tools bars. */
+  #psroot [data-role="chart-toolbar"] #ps-charttools {
+    padding: 0 2px 0 8px; flex: 0 0 auto;
+  }
+  /* In the bar the select speaks for itself ("Fit window"); the Zoom
+     micro-label spent ~45px the labeled buttons need. */
+  #psroot [data-role="chart-toolbar"] #ps-charttools .ps-ltool-label {
+    display: none;
+  }
+  /* Narrow bars compress the words back to icons (self-measured by
+     syncToolbarTight): button labels and the Zoom micro-label go first;
+     the icons and the select itself stay. */
+  #psroot [data-role="chart-toolbar"].ps-tb-tight [data-role="toolbar-btn-label"],
+  #psroot [data-role="chart-toolbar"].ps-tb-tight .ps-ltool-label {
+    display: none !important;
+  }
+  #psroot [data-role="chart-toolbar"].ps-tb-tight [data-role="toolbar-actions"] > button {
+    width: 29px !important; min-width: 29px !important;
+    padding: 4px !important;
+  }
   #psroot [data-role="chart-toolbar"],
   #psroot .gb2-panel,
   #psroot [data-role="graphtype-flyout"],
@@ -1675,6 +1705,15 @@
     opacity: 1 !important;
     box-sizing: border-box !important;
   }
+  /* Labeled buttons (Torry, Aug 6 2026) outgrow the 29px icon square:
+     the engine appends the word when the standalone ships toolbarLabels,
+     and this sheet - which pinned the square - is what must yield. */
+  .graphbuilder2-host [data-role="toolbar-actions"] >
+      button:has([data-role="toolbar-btn-label"]) {
+    width: auto !important;
+    min-width: 0 !important;
+    padding: 4px 10px !important;
+  }
   .graphbuilder2-host [data-role="toolbar-actions"] > button:hover:not(:disabled) {
     color: var(--ps-accent-bright) !important;
     background: var(--ps-s3) !important;
@@ -2465,15 +2504,26 @@
     border: 1px solid var(--ps-l3); border-radius: var(--ps-r-sm);
   }
   /* Selected TEXT reads like the chart workspace's text halo (Torry,
-     Aug 6 2026): dashed, not solid. Sized items keep the solid outline. */
+     Aug 6 2026): dashed, not solid - and since round 4 the frame ROTATES
+     WITH the text (his drag report: the text angled, the box stayed
+     flat). The default outline is suppressed; a dedicated frame child
+     carries the dash and the same rotation as the text node, while the
+     unrotated item box keeps owning hit, drag and align geometry. */
   .ps-litem.ps-litem-sel[data-kind="text"] {
-    outline-style: dashed;
+    outline: none;
+  }
+  .ps-ltx-frame {
+    position: absolute; inset: -3px; border: 2px dashed var(--ps-accent);
+    border-radius: 2px; pointer-events: none;
   }
   /* The rotate handle, modeled on the chart's drawn-shape grip: a stem
      up from the box's top centre to a round knob. */
   .ps-lrotate {
     position: absolute; left: 50%; top: -26px; width: 14px; height: 26px;
     transform: translateX(-50%); cursor: grab; z-index: 5;
+    /* The grip rides the pointer-inert rotated frame: it must re-enable
+       its own pointer events or the knob is unclickable. */
+    pointer-events: auto;
   }
   .ps-lrotate::before {
     content: ""; position: absolute; left: 50%; top: 12px; bottom: 0;

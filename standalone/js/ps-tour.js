@@ -1126,10 +1126,10 @@
              "review my graph", "colorblind safe", "is this ok"],
       steps: [
         { say: "Pandion Plots can read your chart back to you and flag the things that mislead people." },
-        { click: { title: "Help & shortcuts" }, hold: 800,
-          say: "Open the question-mark button on the toolbar." },
-        { click: '[data-helpnav="graphLint"]', hold: 1800,
-          say: "Choose Check graph. It runs a rubric against this chart: truncated axes, unlabelled axes, colors that merge for colorblind readers, and more." },
+        { click: '[data-ps-menu="help"]', hold: 800,
+          say: "Open the Help menu at the top of the window." },
+        { click: { text: "Check my chart" }, hold: 1800,
+          say: "Choose Check my chart. It runs a rubric against this chart: truncated axes, unlabelled axes, colors that merge for colorblind readers, and more." },
         { say: "Warnings come first, then the checks it passed. Hover any of them to see what it looked for." }
       ],
       done: "This is the fastest way to catch a chart that is technically correct but reads wrong."

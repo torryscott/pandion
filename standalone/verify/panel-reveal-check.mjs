@@ -44,28 +44,28 @@ await page.waitForFunction(() => {
     return !!svg && svg.querySelectorAll('*').length > 30;
 }, null, { timeout: 20000 });
 
-console.log('case 1: the Zoom select lives in the chart header now');
+console.log('case 1: the Zoom select lives in the chart toolbar now');
+// Round 3 (Torry, Aug 6 2026): the zoom docks IN the chart toolbar at
+// the far right - the same bar as the other options, like the Notebook
+// and Layout tools bars. (It rode the tab row for a day between homes.)
 const header = await page.evaluate(() => {
+    const bar = document.querySelector('[data-role="chart-toolbar"]');
     const row = document.getElementById('ps-charttools');
     const sel = document.getElementById('ps-chart-zoom');
+    const add = [...(bar ? bar.querySelectorAll('button') : [])]
+        .find(b => b.getAttribute('aria-label') === 'Add to chart');
     return {
         shown: !!row && getComputedStyle(row).display !== 'none',
-        inRow: !!row && !!sel && row.contains(sel),
+        inBar: !!bar && !!sel && bar.contains(sel),
         inRail: !!document.querySelector('#ps-sizeview #ps-chart-zoom'),
+        farRight: !!add && !!sel &&
+            sel.getBoundingClientRect().left >
+            add.getBoundingClientRect().right,
     };
 });
-ok(header.shown && header.inRow && !header.inRail,
-   'the View zoom sits in the workspace header (Notebook/Layout placement), ' +
+ok(header.shown && header.inBar && !header.inRail && header.farRight,
+   'the View zoom sits in the chart toolbar, far right of the actions, ' +
    'no longer buried in Size & view');
-// Round 2 (Torry, Aug 5 2026): a whole band for one select wasted the
-// vertical space low-res screens lack - the zoom rides the TAB ROW.
-ok(await page.evaluate(() => {
-    const sel = document.getElementById('ps-chart-zoom');
-    const tab = document.querySelector('#ps-tabs .ps-tab');
-    if (!sel || !tab) return false;
-    const sr = sel.getBoundingClientRect(), tr = tab.getBoundingClientRect();
-    return sr.top < tr.bottom && sr.bottom > tr.top;
-}), 'on the SAME line as the document tabs - no row of its own');
 await page.evaluate(() => window.PS_SHELL.setWorkspace('data'));
 await page.waitForTimeout(300);
 ok(await page.evaluate(() =>

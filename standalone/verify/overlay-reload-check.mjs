@@ -48,7 +48,7 @@ async function marginalBars() {
 // ---- enable marginals through the engine's real "+" menu
 const plusBtn = await page.evaluate(() => {
     const b = Array.from(document.querySelectorAll('#psroot button'))
-        .find(x => (x.textContent || '').trim() === '+');
+        .find(x => x.getAttribute('aria-label') === 'Add to chart');
     const r = b.getBoundingClientRect();
     return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
 });
@@ -151,7 +151,7 @@ await page.evaluate(() => window.PS_SHELL.setWorkspace('chart'));
 await page.waitForTimeout(900);
 const plus2 = await page.evaluate(() => {
     const b = Array.from(document.querySelectorAll('#psroot button'))
-        .find(x => (x.textContent || '').trim() === '+');
+        .find(x => x.getAttribute('aria-label') === 'Add to chart');
     const r = b.getBoundingClientRect();
     return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
 });

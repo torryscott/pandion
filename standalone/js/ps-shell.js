@@ -4736,6 +4736,10 @@
     // user sets renders exactly as set - and jamovi, which never ships
     // this key, is untouched. One constant, tuned by eye.
     payload.textScale = 1.15;
+    // Labeled toolbar (Torry, Aug 6 2026): the engine appends a word
+    // beside the five panel-opener icons when the host asks. jamovi
+    // never ships this key.
+    payload.toolbarLabels = true;
     // Scatter-overlay re-ship: harvested engine-computed arrays return
     // to the payload while the data fingerprint still matches (R
     // parity - jamovi recomputes and ships them every run). A stale
@@ -6272,7 +6276,10 @@
     // idempotent, so a settled chart costs nothing.
     try { fitSchedule(); } catch (e) {}
     try { buildDebugOverlay(); } catch (e) {}   // t4-16, if it is switched on
-    try { window.GraphBuilder2.render("psroot", built.payload); }
+    try {
+      window.GraphBuilder2.render("psroot", built.payload);
+      window.setTimeout(dockChartZoomInToolbar, 0);
+    }
     catch (e) {
       // B8. This used to print a bare red "Engine render error: ..." string
       // with nothing to do about it, which is precisely the wedge: the same
@@ -15691,6 +15698,60 @@
     }
     ltxPickerPaint();
   }
+  // The chart zoom rides the CHART TOOLBAR, far right (Torry, Aug 6
+  // 2026: "put the zoom in the same bar as the other options, like all
+  // the other sections" - Notebook and Layouts keep zoom in their tools
+  // bar). The engine rebuilds its bar per render, so the shell-owned
+  // #ps-charttools node is RE-APPENDED after every render (the timeout
+  // hook at the render call) and by the observer below for engine-internal
+  // re-renders. The tab row remains the node's fallback home when no
+  // toolbar exists (chartless workspace), where the chrome sync hides it.
+  var CT_ZOOM_NODE = null;
+  function chartZoomNode() {
+    // A captured REFERENCE, not a lookup: once docked inside the engine
+    // bar, the next render discards that bar's subtree and
+    // getElementById goes null - but the node itself survives while we
+    // hold it (listeners intact), ready to re-adopt into the new bar.
+    if (!CT_ZOOM_NODE) CT_ZOOM_NODE = document.getElementById("ps-charttools");
+    return CT_ZOOM_NODE;
+  }
+  function dockChartZoomInToolbar() {
+    var ct = chartZoomNode();
+    var host = document.getElementById("psroot");
+    if (!ct || !host) return;
+    var bar = host.querySelector('[data-role="chart-toolbar"]');
+    if (bar && !bar.contains(ct)) bar.appendChild(ct);
+    syncToolbarTight();
+  }
+  // Narrow bars COMPRESS the labels back to icons (Torry, Aug 6 2026):
+  // self-measuring - show everything, and if the bar overflows, the
+  // word labels go first (button words + the Zoom micro-label). Re-runs
+  // on every resize and render; settles hidden while narrow, returns
+  // when room does.
+  function syncToolbarTight() {
+    var host = document.getElementById("psroot");
+    var bar = host && host.querySelector('[data-role="chart-toolbar"]');
+    if (!bar) return;
+    bar.classList.remove("ps-tb-tight");
+    if (bar.scrollWidth > bar.clientWidth + 2)
+      bar.classList.add("ps-tb-tight");
+  }
+  window.addEventListener("resize", function () {
+    window.setTimeout(syncToolbarTight, 60);
+  });
+  (function watchChartToolbar() {
+    var host = document.getElementById("psroot");
+    if (!host) return;
+    var pending = false;
+    new MutationObserver(function () {
+      if (pending) return;
+      pending = true;
+      window.setTimeout(function () {
+        pending = false;
+        dockChartZoomInToolbar();
+      }, 0);
+    }).observe(host, { childList: true, subtree: true });
+  })();
   function wireLayoutTextControls() {
     var host = el("ps-ltx-swatches");
     if (!host) return;
@@ -16012,7 +16073,7 @@
     if (!snap) return null;
     return item.kind + "|" + item.chartId + "|" + snap.rev;
   }
-  function layAttachRotateHandle(node, item) {
+  function layAttachRotateHandle(node, item, frame) {
     var grip = mkEl("div", "ps-lrotate");
     grip.setAttribute("data-role", "ltx-rotate-handle");
     setTip(grip, "Drag to rotate; hold Shift for 15 degree steps");
@@ -16038,6 +16099,9 @@
           txt.style.transform = a ? "rotate(" + a + "deg)" : "";
           txt.style.transformOrigin = "center center";
         }
+        // The dashed frame (and this grip, riding it) follows live.
+        var fr = node.querySelector(".ps-ltx-frame");
+        if (fr) fr.style.transform = a ? "rotate(" + a + "deg)" : "";
         var s1 = el("ps-ltx-rot"), s2 = el("ps-ltx-rot-num");
         if (s1 && document.activeElement !== s1) s1.value = String(a);
         if (s2 && document.activeElement !== s2) s2.value = String(a);
@@ -16051,7 +16115,7 @@
       document.addEventListener("pointermove", mv);
       document.addEventListener("pointerup", up);
     });
-    node.appendChild(grip);
+    (frame || node).appendChild(grip);
   }
   function layDecorateItemElement(node, item, selected, primary) {
     node.className = "ps-litem" + (selected ? " ps-litem-sel" : "") +
@@ -16102,6 +16166,16 @@
     var nestedTabStops = node.querySelectorAll("[tabindex]");
     for (var ti = 0; ti < nestedTabStops.length; ti++)
       nestedTabStops[ti].tabIndex = -1;
+    if (selected && item.kind === "text") {
+      // The rotated selection frame (round 4): dash + rotation on a
+      // dedicated child, so the visible box hugs the angled text while
+      // the item box itself stays upright for hit, drag and align.
+      var ltxFrame = mkEl("div", "ps-ltx-frame");
+      var ltxRot = layTextRotate(item);
+      if (ltxRot) ltxFrame.style.transform = "rotate(" + ltxRot + "deg)";
+      node.appendChild(ltxFrame);
+      node.__ltxFrame = ltxFrame;
+    }
     if (primary && laySelectedIds().length === 1) {
       if (laySizedKind(item)) {
         var hnd = mkEl("div", "ps-lhandle");
@@ -16114,7 +16188,8 @@
         node.appendChild(hnd);
       }
       // Text items grow the chart-style rotate grip (Torry, Aug 6 2026).
-      if (item.kind === "text") layAttachRotateHandle(node, item);
+      if (item.kind === "text")
+        layAttachRotateHandle(node, item, node.__ltxFrame || null);
       node.appendChild(layMiniBar(item));
     }
   }
@@ -16268,7 +16343,13 @@
   }
   function layMiniBar(item) {
     var bar = mkEl("div", "ps-lbar");
-    bar.style.left = "0"; bar.style.top = "-34px";
+    bar.style.left = "0";
+    // TEXT items park the bar BELOW the box (Torry's screenshot, Aug 6
+    // 2026): the rotate grip owns the top-centre, and on a narrow box
+    // the bar's first button sat exactly under the knob. Below, the two
+    // can never meet at any width or rotation; sized items keep the bar
+    // above (they have no grip, and the resize handle owns the bottom).
+    bar.style.top = item.kind === "text" ? "calc(100% + 6px)" : "-34px";
     bar.setAttribute("aria-hidden", "true");
     if (item.kind === "text") {
       var minus = mkEl("button", "", "A-");
@@ -18066,7 +18147,8 @@
     // a chart is on screen - the same placement Notebook and Layouts use.
     // Lives HERE, not in render(): entering Data skips render(), and the
     // row must leave with every workspace switch.
-    var chartTools = el("ps-charttools");
+    var chartTools = typeof chartZoomNode === "function"
+      ? chartZoomNode() : el("ps-charttools");
     if (chartTools) {
       var ctDoc = activeChartTab();
       chartTools.style.display =
@@ -20399,6 +20481,7 @@
       { label: "Show me how\u2026", command: "show-me-how" },
       { label: "User guide", command: "user-guide" },
       "separator",
+      { label: "Chart basics", command: "help-basics" },
       { label: "Which graph should I use?", command: "help-chooser" },
       { label: "Check my chart", command: "help-lint" },
       { label: "Label the chart parts", command: "help-anatomy" },
@@ -20757,8 +20840,8 @@
     // The other three operate ON a drawn chart, so without one they are
     // disabled and say so - the old behavior polled for a toolbar that
     // could not exist, then toasted "Open a chart first", which was false.
-    if (command === "help-lint" || command === "help-anatomy" ||
-        command === "help-glossary")
+    if (command === "help-basics" || command === "help-lint" ||
+        command === "help-anatomy" || command === "help-glossary")
       return chartHelpState() === "ready";
     return true;
   }
@@ -20777,8 +20860,8 @@
       if (command === "data-resetwidths")
         return "All columns are at their default widths";
     }
-    if (command === "help-lint" || command === "help-anatomy" ||
-        command === "help-glossary")
+    if (command === "help-basics" || command === "help-lint" ||
+        command === "help-anatomy" || command === "help-glossary")
       return chartHelpState() === "none"
         ? "Create a chart first"
         : "Assign variables to this chart first";
@@ -20897,6 +20980,7 @@
       if (chartHelpState() === "ready") openEngineHelp("graphChooser");
       else showHelpMeChoose();
     }
+    else if (command === "help-basics") openEngineHelp("help");
     else if (command === "help-lint") openEngineHelp("graphLint");
     else if (command === "help-anatomy") openEngineHelp("anatomy");
     else if (command === "help-glossary") openEngineHelp("glossary");

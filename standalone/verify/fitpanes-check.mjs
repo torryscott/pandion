@@ -342,9 +342,11 @@ ok(Math.abs(z75.zoom - 0.75) < 0.01 && z75.logicalW === wide.logicalW,
 // the panel comic): the engine's toolbar and panels counter-zoom to true
 // size while ONLY the chart scales.
 const chrome75 = await page.evaluate(() => {
-    // The export icon is display:none since Jul 31 2026 (command-bar export);
-    // the Help button is the same chrome under the same counter-zoom.
-    const b = document.querySelector('#psroot button[title="Help & shortcuts"]');
+    // The Help button hides too since Aug 6 2026 (labeled toolbar round) -
+    // the Statistics button is the same chrome under the same counter-zoom.
+    const b = [...document.querySelectorAll(
+        '#psroot [data-role="chart-toolbar"] button')]
+        .find(x => x.getAttribute('aria-label') === 'Statistics');
     return b ? Math.round(b.getBoundingClientRect().height) : 0;
 });
 // the Size & view disclosure must be open for a real click (Aug 2 2026)
@@ -352,9 +354,11 @@ await page.evaluate(() => { const t = document.getElementById('ps-sizeview-toggl
 await page.selectOption('#ps-chart-zoom', '1');
 await page.waitForTimeout(300);
 const chrome100 = await page.evaluate(() => {
-    // The export icon is display:none since Jul 31 2026 (command-bar export);
-    // the Help button is the same chrome under the same counter-zoom.
-    const b = document.querySelector('#psroot button[title="Help & shortcuts"]');
+    // The Help button hides too since Aug 6 2026 (labeled toolbar round) -
+    // the Statistics button is the same chrome under the same counter-zoom.
+    const b = [...document.querySelectorAll(
+        '#psroot [data-role="chart-toolbar"] button')]
+        .find(x => x.getAttribute('aria-label') === 'Statistics');
     return b ? Math.round(b.getBoundingClientRect().height) : 0;
 });
 // the Size & view disclosure must be open for a real click (Aug 2 2026)
@@ -504,16 +508,22 @@ const rows = await page.evaluate(() => {
     const span = document.querySelector('.ps-fit-field span');
     const sel = document.getElementById('ps-chart-zoom');
     const zlab = document.querySelector('#ps-charttools .ps-ltool-label');
+    const bar = document.querySelector('[data-role="chart-toolbar"]');
     return { boxW: Math.round(r(box).width),
              fitRow: Math.abs(mid(box) - mid(span)) < 4,
              selW: Math.round(r(sel).width),
-             zoomRow: Math.abs(mid(sel) - mid(zlab)) < 4 };
+             inBar: !!bar && bar.contains(sel),
+             labelHidden: !zlab || zlab.offsetParent === null };
 });
 ok(rows.boxW <= 20 && rows.fitRow,
    `the Standard-size checkbox is checkbox-sized, on one row with its ` +
    `label (${rows.boxW}px wide)`);
-ok(rows.selW <= 200 && rows.zoomRow,
-   `the View select is compact, on one row with its label (${rows.selW}px)`);
+// Aug 6 2026 round 3: the select rides the chart toolbar, where its
+// "Fit window" text speaks for itself and the Zoom micro-label hides
+// by design.
+ok(rows.selW <= 200 && rows.inBar && rows.labelHidden,
+   `the View select is compact, in the toolbar, micro-label retired ` +
+   `(${rows.selW}px)`);
 
 console.log('case 10: Cmd/Ctrl+scroll zooms smoothly between the steps');
 // Torry, Aug 5 2026: the 25 percent steps are pretty big. Ctrl+wheel
