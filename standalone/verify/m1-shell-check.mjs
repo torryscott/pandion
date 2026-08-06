@@ -50,6 +50,14 @@ const page = await ctx.newPage();
 // expanded (a second drop click would toggle it closed).
 async function assignRole(roleKey, col) {
     const cardSel = '#ps-slots .ps-slot[data-role-key="' + roleKey + '"]';
+    // An EMPTY optional slot is a collapsed "+ row" (Torry, Aug 2026):
+    // clicking it opens the picker AND expands the full card, after
+    // which the normal path applies.
+    const addSel = '#ps-slots .ps-role-add-row[data-role-key="' + roleKey + '"]';
+    if (await page.evaluate(sel => !!document.querySelector(sel), addSel)) {
+        await page.click(addSel);
+        await page.waitForTimeout(150);
+    }
     const open = await page.evaluate(sel =>
         !!document.querySelector(sel + ' .ps-role-picker'), cardSel);
     if (!open) {
@@ -250,9 +258,11 @@ await page.waitForTimeout(400);
 {
     console.log('case 3: roles via the real selects');
     // CG roles reset by the new table; assign via the slot picker.
+    // Empty optional roles render as collapsed "+ rows" (Torry, Aug
+    // 2026): count role ENTRIES, whichever form each takes.
     const slots = await page.evaluate(() =>
-        document.querySelectorAll('#ps-slots .ps-slot').length);
-    ok(slots === 4, 'four role slots for CG');
+        document.querySelectorAll('#ps-slots [data-role-key]').length);
+    ok(slots === 4, 'four role entries for CG (cards + collapsed rows)');
     await assignRole('xvar', 'treat');
     await assignRole('yvar', 'value');
     const drew = await page.evaluate(() => {
@@ -890,12 +900,15 @@ await page.waitForTimeout(400);
     // the cards shift under the pressed pointer (the drag then starts
     // on a NEIGHBORING chip - a probe artifact, not an app bug).
     await assignRole('xvar', 'a');
+    // An EMPTY optional slot is a collapsed "+ row" now (Torry, Aug
+    // 2026) - still a real drop target, addressed by role key alone so
+    // the selector matches either form.
     await page.evaluate(() => document.querySelector(
-        '#ps-slots .ps-slot[data-role-key="groupVar"]')
+        '#ps-slots [data-role-key="groupVar"]')
         .scrollIntoView({ block: 'center' }));
     await page.waitForTimeout(150);
     await page.dragAndDrop('#ps-slots .ps-slot[data-role-key="xvar"] .ps-slot-chip',
-                           '#ps-slots .ps-slot[data-role-key="groupVar"] .ps-slot-drop');
+                           '#ps-slots [data-role-key="groupVar"]');
     await page.waitForTimeout(250);
     const s3 = await page.evaluate(() => ({
         x: window.PS_SHELL.rolesStore().xvar || null,
@@ -1061,12 +1074,13 @@ await page.waitForTimeout(400);
     await page.keyboard.press('Escape');
     await page.waitForTimeout(150);
     await page.evaluate(() => document.querySelector(
-        '#ps-slots .ps-slot[data-role-key="betweenVar"]')
+        '#ps-slots [data-role-key="betweenVar"]')
         .scrollIntoView({ block: 'center' }));
     await page.waitForTimeout(150);
     await expandVars();
+    // Empty optional slot = collapsed "+ row", itself the drop target.
     await page.dragAndDrop('#ps-columns .ps-chip[data-col="grp"]',
-        '#ps-slots .ps-slot[data-role-key="betweenVar"] .ps-slot-drop');
+        '#ps-slots [data-role-key="betweenVar"]');
     await page.waitForTimeout(350);
     const rm = await page.evaluate(() => {
         const p = window.PS_SHELL.buildPayload();
@@ -1557,10 +1571,12 @@ await page.waitForTimeout(400);
     });
     ok(g4.every(s => s.count === null),
        'no count chrome while candidates exist (the count is a warning only)');
-    ok(g4.every(s => s.tip && s.tip.indexOf('Accepts') !== -1) &&
-       g4.find(s => s.key === 'xvar').tip.indexOf('nominal') !== -1 &&
-       g4.find(s => s.key === 'yvar').tip.indexOf('continuous') !== -1,
-       'accepts tooltips still name the right types');
+    // Ruling flipped (Torry, Aug 2026): the drop zones carry NO hover
+    // pop-up - it covered the picker list, and the accepted types live
+    // permanently in the picker rows' badges. The aria-label remains the
+    // screen-reader path.
+    ok(g4.every(s => !s.tip),
+       'drop zones carry no hover pop-up (the picker badges carry the types)');
     // Flipping num to ordinal makes it eligible BOTH ways (dual role).
     await page.evaluate(() => {
         const chips = Array.from(document.querySelectorAll('#ps-columns .ps-chip'));
@@ -1907,7 +1923,9 @@ await page.waitForTimeout(400);
     });
     ok(Math.abs(lMulti1.ys[0] - lMulti1.ys[1]) < 0.01,
        'alignment commands operate on the multi-selection');
-    await page.click('#ps-ctx-duplicate');
+    // The rail Duplicate button is gone (Aug 5 2026): the keyboard
+    // shortcut is the multi-select duplicate path now.
+    await page.keyboard.press('ControlOrMeta+d');
     await page.waitForTimeout(120);
     const lMulti2 = await page.evaluate(() => ({
         n: window.PS_SHELL.chart().items.length,

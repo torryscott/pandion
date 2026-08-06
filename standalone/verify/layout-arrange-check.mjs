@@ -85,8 +85,19 @@ const one = await alignRowShown();
 ok(one && one.display === 'none' && !one.onScreen,
    'with one item selected the align row is not shown at all',
    JSON.stringify(one));
-const dup1 = await look('#ps-ctx-duplicate');
-ok(!dup1.disabled, 'while the single-item actions stay live');
+// Aug 5 2026 (Torry): the Arrange button cluster is GONE from the rail -
+// every one of its four actions duplicated the item right-click, which is
+// now the single home for arrangement (plus Delete and Cmd/Ctrl+D on the
+// keyboard).
+ok(await page.evaluate(() =>
+       ['ps-ctx-duplicate', 'ps-ctx-back', 'ps-ctx-forward', 'ps-ctx-delete']
+           .every(id => !document.getElementById(id))),
+   'the rail carries NO arrange buttons any more (menu-only, Aug 5 2026)');
+ok(await page.evaluate(() =>
+       document.getElementById('ps-layout-align-section')
+           .style.display === 'none'),
+   'and with one item selected the whole Align section stays away, not ' +
+   'just its row');
 ok(await page.evaluate(() =>
        document.querySelectorAll('[data-ctx-distribute]').length === 0),
    'and Distribute across / Distribute down are gone from the app');
@@ -114,34 +125,63 @@ await page.waitForTimeout(350);
 ok((await alignRowShown()).display === 'none',
    'and dropping back to one selection hides it again');
 
-console.log('case 3: the layer buttons gate at the ends of the stack');
+console.log('case 3: layer moves gate at the ends, from the menu');
 const ids = await itemIds();
-await page.evaluate((id) => window.PS_SHELL.selectLayoutItems([id]), ids[0]);
-await page.waitForTimeout(350);
-const backAtBottom = await look('#ps-ctx-back');
-ok(backAtBottom.disabled && /back of the stack/i.test(backAtBottom.tip),
-   `the bottom item cannot go further back, and the button says so ` +
-   `("${backAtBottom.tip}")`);
-ok(!(await look('#ps-ctx-forward')).disabled,
-   'while forward is available to it');
-await page.evaluate((id) => window.PS_SHELL.selectLayoutItems([id]),
-                    ids[ids.length - 1]);
-await page.waitForTimeout(350);
-const fwdAtTop = await look('#ps-ctx-forward');
-ok(fwdAtTop.disabled && /front of the stack/i.test(fwdAtTop.tip),
-   `and the top item cannot go further forward ("${fwdAtTop.tip}")`);
+const menuFor = async (id) => {
+    await page.evaluate((x) => window.PS_SHELL.selectLayoutItems([x]), id);
+    await page.waitForTimeout(250);
+    const box = await page.evaluate((x) => {
+        const el = document.querySelector(
+            '#ps-lcanvas .ps-litem[data-item-id="' + x + '"]');
+        const r = el.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    }, id);
+    await page.mouse.click(box.x, box.y, { button: 'right' });
+    await page.waitForTimeout(350);
+    return page.evaluate(() => {
+        const rows = Array.from(document.querySelectorAll(
+            '#ps-contextmenu button[data-context-command]'));
+        const get = c => {
+            const b = rows.find(r =>
+                r.getAttribute('data-context-command') === c);
+            return b ? { disabled: b.disabled,
+                         tip: b.getAttribute('data-tip') || '',
+                         label: b.textContent } : null;
+        };
+        return { back: get('layer-back'), forward: get('layer-forward'),
+                 backmost: get('layer-backmost'), front: get('layer-front') };
+    });
+};
+const bottomMenu = await menuFor(ids[0]);
+ok(bottomMenu.back.disabled && bottomMenu.backmost.disabled &&
+   /back of the stack/i.test(bottomMenu.back.tip) &&
+   /back of the stack/i.test(bottomMenu.backmost.tip),
+   'the bottom item cannot go further back - one step OR to the back - ' +
+   'and both entries say so');
+ok(!bottomMenu.forward.disabled && !bottomMenu.front.disabled &&
+   bottomMenu.front.label === 'Move to front' &&
+   bottomMenu.backmost.label === 'Move to back',
+   'while Move forward and Move to front are live, with the Aug 5 labels');
+// Move to front really jumps the whole way, not one step.
 const orderBefore = await itemIds();
-await page.click('#ps-ctx-back');
+await page.click('#ps-contextmenu [data-context-command="layer-front"]');
 await page.waitForTimeout(500);
 const orderAfter = await itemIds();
-ok(orderAfter.join() !== orderBefore.join() &&
-   orderAfter.indexOf(ids[ids.length - 1]) === orderBefore.length - 2,
-   `Back moves it down one when it HAS somewhere to go ` +
+ok(orderAfter[orderAfter.length - 1] === ids[0] &&
+   orderAfter.length === orderBefore.length,
+   `Move to front sends the bottom item to the very top in one step ` +
    `(${orderBefore.join()} -> ${orderAfter.join()})`);
+// And undo brings the stack back in ONE step (same history label as the
+// one-step moves).
+await page.keyboard.press('ControlOrMeta+z');
+await page.waitForTimeout(500);
+ok((await itemIds()).join() === orderBefore.join(),
+   'one undo restores the stacking order');
 
 console.log('case 4: the right-click menu tells the same truth');
 await page.evaluate((id) => window.PS_SHELL.selectLayoutItems([id]),
                     (await itemIds())[0]);
+
 await page.waitForTimeout(300);
 const box = await page.evaluate(() => {
     const el = document.querySelector('#ps-lcanvas .ps-litem');
@@ -167,6 +207,62 @@ ok(menu.forward && !menu.forward.disabled,
    'while "Move forward" stays available');
 await page.keyboard.press('Escape');
 await page.waitForTimeout(200);
+
+console.log('case 5: Cmd/Ctrl+scroll zooms the layout canvas smoothly');
+// Aug 6 2026: the chart gesture, on the Layouts workspace, with the
+// layout's own 25-150% clamps.
+await page.evaluate(() => {
+    const sel = document.getElementById('ps-lzoom');
+    sel.value = '1';
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+});
+await page.waitForTimeout(400);
+const layWheel = async (deltaY, ctrl) => page.evaluate(([dy, c]) => {
+    const vp = document.getElementById('ps-lviewport');
+    const r = vp.getBoundingClientRect();
+    vp.dispatchEvent(new WheelEvent('wheel', { bubbles: true,
+        cancelable: true, clientX: r.left + 120, clientY: r.top + 120,
+        deltaY: dy, ctrlKey: c }));
+    return window.PS_SHELL.chart().view.zoom;
+}, [deltaY, ctrl]);
+ok(String(await layWheel(-240, false)) === '1',
+   'a plain wheel scrolls; only the modifier zooms');
+const lAtDispatch = await layWheel(-240, true);
+ok(String(lAtDispatch) === '1',
+   'the notch does not jump: the canvas is unchanged at dispatch (easing)');
+await page.waitForFunction(() =>
+    Number(window.PS_SHELL.chart().view.zoom) > 1.3, null,
+    { timeout: 4000 });
+await page.waitForTimeout(200);
+const lz = await page.evaluate(() =>
+    Number(window.PS_SHELL.chart().view.zoom));
+const lState = await page.evaluate(() => {
+    const sel = document.getElementById('ps-lzoom');
+    const dyn = sel.querySelector('option[data-ps-custom]');
+    return { dyn: dyn ? dyn.textContent : null,
+             selected: dyn ? sel.value === dyn.value : false };
+});
+ok(lz > 1.3 && lz < 1.5 && lState.selected && /^\d+%$/.test(lState.dyn),
+   `Ctrl+wheel settles between steps and the select shows it ` +
+   `(${Math.round(lz * 100)}%, "${lState.dyn}")`);
+for (let i = 0; i < 40; i++) await layWheel(300, true);
+await page.waitForFunction(() =>
+    Number(window.PS_SHELL.chart().view.zoom) === 0.25, null,
+    { timeout: 4000 });
+ok(await page.evaluate(() => Number(window.PS_SHELL.chart().view.zoom))
+   === 0.25,
+   "and it clamps at the layout's own 25% floor");
+await page.evaluate(() => {
+    const sel = document.getElementById('ps-lzoom');
+    sel.value = 'fit';
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+});
+await page.waitForTimeout(300);
+ok(await page.evaluate(() => {
+    const sel = document.getElementById('ps-lzoom');
+    return !sel.querySelector('option[data-ps-custom]') &&
+        sel.value === 'fit';
+}), 'picking Fit removes the dynamic option');
 
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('LAYOUT ARRANGE CHECK PASS');

@@ -175,7 +175,7 @@ const layoutState = await page.evaluate(() => ({
     ctx: document.getElementById('ps-status-context').textContent.trim(),
     sel: document.getElementById('ps-status-selection').textContent.trim(),
     sub: document.getElementById('ps-inspector-subtitle').textContent.trim(),
-    itemDup: document.getElementById('ps-ctx-duplicate').textContent.trim(),
+
     labels: Array.from(document.querySelectorAll(
         '.ps-layout-position-grid .ps-layout-field-label')).map(n => ({
             text: n.textContent.trim(),
@@ -190,9 +190,25 @@ ok(layoutState.sel === '1 layout item selected' &&
    /1 selected item/.test(layoutState.sub),
    `selection status and inspector subtitle agree ` +
    `("${layoutState.sel}" / "${layoutState.sub}")`);
-ok(layoutState.itemDup === 'Duplicate item',
-   'the item action names its target (document duplicate moved to the ' +
-   'tab menu, Aug 2 2026)');
+// The rail Arrange cluster is gone (Aug 5 2026); the naming contract -
+// item duplicate says "Duplicate", the tab menu says "Duplicate
+// document" - now lives on the right-click.
+await page.evaluate(() => {
+    const it = document.querySelector('#ps-lcanvas .ps-litem-sel') ||
+        document.querySelector('#ps-lcanvas .ps-litem');
+    const r = it.getBoundingClientRect();
+    it.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true,
+        cancelable: true, clientX: r.left + 10, clientY: r.top + 10 }));
+});
+await page.waitForTimeout(300);
+ok(await page.evaluate(() => {
+    const b = document.querySelector(
+        '#ps-contextmenu [data-context-command="duplicate-selection"]');
+    return !!b && b.textContent === 'Duplicate';
+}), 'the item action names its target from the right-click (the rail ' +
+    'cluster is gone, Aug 5 2026)');
+await page.keyboard.press('Escape');
+await page.waitForTimeout(200);
 ok(layoutState.labels.length === 4 &&
    layoutState.labels.every(x => x.whiteSpace === 'nowrap' && x.height < 20),
    `position labels stay on one line at 1366 px ` +

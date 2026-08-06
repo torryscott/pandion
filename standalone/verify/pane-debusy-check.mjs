@@ -81,18 +81,22 @@ await page.evaluate(() =>
 await page.waitForTimeout(600);
 
 console.log('case 2: badges and borders quiet down as zones fill');
+// The flattened rail (Torry, Aug 2026) moved the de-busy contract's
+// homes: the single border lives on the CARD (the drop is a borderless
+// row inside it), and an empty OPTIONAL zone is quieter still - a
+// collapsed one-line "+ label" add-row instead of a dashed card. The
+// dashed invitation survives where a decision is actually demanded:
+// the empty REQUIRED card (asserted in case 4).
 const zones = await page.evaluate(() => {
     const out = [];
-    document.querySelectorAll('#ps-slots .ps-slot').forEach(s => {
+    document.querySelectorAll('#ps-slots [data-role-key]').forEach(s => {
         const drop = s.querySelector('.ps-slot-drop');
         out.push({
             key: s.getAttribute('data-role-key'),
-            filled: drop.classList.contains('ps-slot-filled'),
-            border: getComputedStyle(drop).borderTopStyle,
+            addRow: s.classList.contains('ps-role-add-row'),
+            filled: !!(drop && drop.classList.contains('ps-slot-filled')),
+            border: getComputedStyle(s).borderTopStyle,
             badge: (s.querySelector('.ps-role-badge') || {}).textContent || null,
-            badgeCaps: s.querySelector('.ps-role-badge')
-                ? getComputedStyle(s.querySelector('.ps-role-badge'))
-                    .textTransform : null,
             kindWord: !!s.querySelector('.ps-slot-chip-kind'),
             count: (s.querySelector('.ps-slot-count') || {}).textContent || null
         });
@@ -102,20 +106,19 @@ const zones = await page.evaluate(() => {
 const by = k => zones.find(z => z.key === k);
 ok(by('xvar').filled && by('xvar').border === 'solid' &&
    by('yvar').filled && by('yvar').border === 'solid',
-   'filled zones read settled: solid border, no drop-here dashes');
+   'filled zones read settled: one solid card border, no drop-here dashes');
 ok(by('xvar').badge === null && by('yvar').badge === null,
    'a met requirement is not news: filled zones carry no badge');
-ok(by('groupVar').badge === 'Optional' && by('facetVar').badge === 'Optional' &&
-   by('groupVar').border === 'dashed' &&
-   by('groupVar').badgeCaps === 'none',
-   'empty zones keep the dashed invitation and a sentence-case badge');
+ok(by('groupVar').addRow && by('facetVar').addRow &&
+   by('groupVar').badge === null && by('facetVar').badge === null,
+   'empty optional zones collapse to quiet one-line add-rows, no badge');
 ok(zones.every(z => !z.kindWord),
    'zone chips carry the type ICON, not the word beside it');
 ok(zones.every(z => z.count === null),
    'no eligible-count chrome while candidates exist');
 
 console.log('case 3: the type word survives in the picker, a choosing surface');
-await page.click('#ps-slots [data-role-key="groupVar"] .ps-slot-drop');
+await page.click('#ps-slots .ps-role-add-row[data-role-key="groupVar"]');
 await page.waitForTimeout(300);
 const picker = await page.evaluate(() => ({
     rows: document.querySelectorAll('#ps-slots .ps-role-picker .ps-role-pick')
@@ -144,10 +147,21 @@ await page.evaluate(async () => {
 });
 const warn = await page.evaluate(() => {
     const xv = document.querySelector('#ps-slots [data-role-key="xvar"]');
-    return (xv.querySelector('.ps-slot-count') || {}).textContent || null;
+    const badge = xv.querySelector('.ps-role-badge');
+    return {
+        count: (xv.querySelector('.ps-slot-count') || {}).textContent || null,
+        needed: xv.classList.contains('ps-role-card-needed'),
+        border: getComputedStyle(xv).borderTopStyle,
+        badge: badge ? badge.textContent : null,
+        badgeCaps: badge ? getComputedStyle(badge).textTransform : null
+    };
 });
-ok(warn === 'none eligible',
+ok(warn.count === 'none eligible',
    'a zone NOTHING fits still warns before the user clicks into a dead end');
+ok(warn.needed && warn.border === 'dashed' &&
+   warn.badge === 'Required' && warn.badgeCaps === 'none',
+   'the empty REQUIRED card keeps the dashed invitation and a ' +
+   'sentence-case badge');
 // Assign both numerics (Scatter takes two): the list has nothing left,
 // and it says so instead of sitting silently empty.
 await page.evaluate(async () => {

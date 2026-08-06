@@ -96,7 +96,7 @@ const opened = await page.evaluate(() => {
         onScreen: !!rect && rect.width > 0 && rect.height > 0,
         roleKey: card ? card.getAttribute('data-role-key') : null,
         cardLabel: card
-            ? (card.querySelector('.ps-role-card-head') || {}).textContent || ''
+            ? (card.querySelector('.ps-slot-label') || {}).textContent || ''
             : '',
         sentenceRole: sentence ? sentence.textContent.trim() : '',
         focusIsDrop: !!active && active.classList &&
@@ -380,7 +380,9 @@ console.log('  ok  hovering a variable glows the roles it fits and dims ' +
             'the rest (clears on leave)');
 
 // ---- Escape closes an open picker
-await page.click('#ps-slots [data-role-key="groupVar"] .ps-slot-drop');
+// An empty optional slot is a collapsed "+ row" (Aug 2026): clicking
+// it opens the picker directly.
+await page.click('#ps-slots [data-role-key="groupVar"]');
 await page.waitForTimeout(200);
 await page.keyboard.press('Escape');
 await page.waitForTimeout(200);

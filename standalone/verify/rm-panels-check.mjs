@@ -70,9 +70,12 @@ const roles = await page.evaluate(async () => {
     const sleep = ms => new Promise(r => setTimeout(r, ms));
     window.PS_SHELL.setModule('rmplotbuilder');
     await sleep(500);
+    // An empty OPTIONAL role renders as a collapsed add-row (flattened
+    // rail, Aug 2026), so its label lives in .ps-role-add-label.
     return Array.from(document.querySelectorAll('#ps-slots .ps-role-card'))
         .map(c => ({ key: c.getAttribute('data-role-key'),
-                     label: (c.querySelector('.ps-slot-label') || {})
+                     label: (c.querySelector(
+                         '.ps-slot-label, .ps-role-add-label') || {})
                          .textContent || '' }));
 });
 const panels = roles.find(r => r.key === 'facetVar');

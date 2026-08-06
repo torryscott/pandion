@@ -88,7 +88,9 @@ ok(state.role === 'listbox' && state.multiselect === 'true' &&
 ok(state.activeId && state.activeSelected === 'true' &&
    state.selectedCount === 1 && state.focused === 'ps-lviewport',
    'focus entry selects and exposes one active descendant while focus stays on the composite');
-ok(/Chart panel.+item 1 of 3.+layer 1.+x \d+ pixels.+width \d+ pixels/.test(
+// "Live chart panel" since Aug 5 2026: the accessible label carries the
+// same live-vs-snapshot disclosure the sighted badge does.
+ok(/Live chart panel.+item 1 of 3.+layer 1.+x \d+ pixels.+width \d+ pixels/.test(
        state.labels[0]) &&
    state.labels.every(label =>
        /item \d of 3.+layer \d.+x \d+ pixels/.test(label)) &&

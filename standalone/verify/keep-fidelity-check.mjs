@@ -98,6 +98,13 @@ await page.evaluate(() => {
     const it = document.querySelector('[data-context-action^="pin-chart"]');
     if (it) it.click();
 });
+await page.waitForTimeout(350);
+// The Aug 5 2026 shape: Keep opens the section submenu first.
+await page.evaluate(() => {
+    const row = document.querySelector(
+        '#ps-contextmenu [data-context-action^="keep-to-"]');
+    if (row) row.click();
+});
 await page.waitForTimeout(1100);
 ok(await page.evaluate(() => {
     const pins = (window.PS_SHELL.project.pinboards || []).flatMap(b => b.pins);

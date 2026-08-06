@@ -48,6 +48,21 @@ if (await page.locator('#ps-welcome').isVisible()) {
     await page.waitForTimeout(1600);
 }
 
+// The Aug 5 2026 redesign routes every Notebook export through the shared
+// export dialog: scope menu (or page right-click) -> format -> Export.
+// This drives the dialog half of that flow and returns the export stamp.
+async function exportViaDialog(format) {
+    await page.waitForFunction(() =>
+        document.getElementById('ps-exporter').style.display === 'flex',
+        null, { timeout: 8000 });
+    await page.click('.ps-export-format:has(input[value="' + format + '"])');
+    await page.evaluate(() => { window.__psPinExportLast = null; });
+    await page.click('#ps-export-go');
+    await page.waitForFunction(() => window.__psPinExportLast, null,
+                               { timeout: 20000 });
+    return page.evaluate(() => window.__psPinExportLast);
+}
+
 console.log('case 1: the fourth workspace, placed and gated');
 const order = await page.evaluate(() =>
     [...document.querySelectorAll('[data-ps-workspace]')]
@@ -256,6 +271,10 @@ await page.evaluate(() => {
 });
 await page.waitForTimeout(300);
 await page.click('[data-context-action="pin-chart"]');
+await page.waitForTimeout(300);
+// The Aug 5 2026 shape: Keep always opens the section submenu.
+await page.click('#ps-contextmenu [data-context-action^="keep-to-"]' +
+    ':not([data-context-action="keep-to-new"])');
 await page.waitForTimeout(900);
 ok(await page.evaluate(() => {
     const pins = ((window.PS_SHELL.project.pinboards || [])
@@ -273,10 +292,32 @@ await page.evaluate(() => {
 });
 await page.waitForTimeout(500);
 await page.click('#ps-export');
-await page.waitForFunction(() => window.__psPinExportLast, null,
-                           { timeout: 20000 });
-const pdf = await page.evaluate(() => window.__psPinExportLast);
-ok(pdf.pages >= 1 && pdf.bytes > 1500,
+await page.waitForTimeout(300);
+const scopeMenu = await page.evaluate(() => ({
+    page: !!document.querySelector('[data-context-action="pin-export-page"]'),
+    active: !!document.querySelector(
+        '[data-context-action="pin-export-active"]'),
+    all: !!document.querySelector('[data-context-action="pin-export-all"]'),
+}));
+ok(scopeMenu.page && scopeMenu.all && !scopeMenu.active,
+   'one board: the Export menu offers This page and Entire notebook ' +
+   '(no redundant section entry)');
+await page.click('[data-context-action="pin-export-all"]');
+await page.waitForFunction(() =>
+    document.getElementById('ps-exporter').style.display === 'flex',
+    null, { timeout: 8000 });
+const dlg = await page.evaluate(() => ({
+    title: document.getElementById('ps-export-title').textContent,
+    cap: document.getElementById('ps-export-caption-field').style.display,
+    desc: document.getElementById('ps-export-description-field')
+        .style.display,
+}));
+ok(dlg.title === 'Export Notebook' && dlg.cap === 'none' &&
+   dlg.desc === 'none',
+   'the scope choice opens the shared export dialog in Notebook mode - ' +
+   'caption and description step aside (pages are finished captures)');
+const pdf = await exportViaDialog('pdf');
+ok(pdf.pages >= 1 && pdf.bytes > 1500 && pdf.container === 'pdf',
    `Export writes a real one-page-per-pin PDF (${pdf.pages} page(s), ` +
    `${pdf.bytes} bytes - the svg2pdf ballpark measured against the chart ` +
    `exporter's 2350)`);
@@ -418,8 +459,10 @@ await page.evaluate(() => {
         clientY: r.top + 40 }));
 });
 await page.waitForTimeout(300);
-// two boards exist here, so the menu names them (the per-board entries)
-await page.locator('#ps-contextmenu button', { hasText: 'Keep to Section 1' })
+// Keep opens the section submenu; rows carry bare section names
+await page.click('#ps-contextmenu [data-context-action="pin-chart"]');
+await page.waitForTimeout(300);
+await page.locator('#ps-contextmenu button', { hasText: 'Section 1' })
     .click();
 await page.waitForTimeout(900);
 await page.evaluate(() => {
@@ -433,14 +476,16 @@ await page.evaluate(() => {
 await page.waitForTimeout(400);
 await page.click('#ps-export');
 await page.waitForTimeout(400);
-ok(await page.locator('[data-context-action="pin-export-all"]').count() === 1,
-   'with two populated boards, Export opens the scope menu');
+ok(await page.locator('[data-context-action="pin-export-all"]').count() === 1 &&
+   await page.locator('[data-context-action="pin-export-active"]')
+       .count() === 1 &&
+   await page.locator('[data-context-action="pin-export-page"]')
+       .count() === 1,
+   'with two populated boards, Export offers page, section AND notebook');
 await page.click('[data-context-action="pin-export-all"]');
-await page.waitForFunction(() => window.__psPinExportLast, null,
-                           { timeout: 20000 });
-const allPdf = await page.evaluate(() => window.__psPinExportLast);
+const allPdf = await exportViaDialog('pdf');
 ok(allPdf.scope === 'all' && allPdf.pages === 2 && allPdf.bytes > 1500,
-   `"Export all boards" concatenates every board's pages ` +
+   `"Entire notebook" concatenates every board's pages ` +
    `(${allPdf.pages} pages, ${allPdf.bytes} bytes)`);
 
 console.log('case 14: dragging a pin never arms the file-drop overlay');
@@ -586,6 +631,22 @@ ok(await page.evaluate(() => ({
        ui: window.PS_SHELL.project.ui.pinZoom,
    })).then(z => z.sel === '0.5' && z.ui === 0.5),
    'a stored 25% normalizes up to 50%, never a blank select');
+// Aug 5 2026 (Torry): with FOUR buttons the 50% card crushed "Page 1 of
+// 7 · kept..." into a one-word-wide column and grew the card tall. The
+// bar wraps its BUTTONS below the one-line info text instead.
+await setZoom('0.5');
+await page.waitForTimeout(300);
+const barGeom = await page.evaluate(() => {
+    const card = document.querySelector('.ps-pinpage');
+    const bar = card.querySelector('.ps-pinpage-bar');
+    const num = bar.querySelector('.ps-pinpage-num');
+    return { numH: num.getBoundingClientRect().height,
+             overflow: bar.scrollWidth > bar.clientWidth + 1,
+             buttons: bar.querySelectorAll('button').length };
+});
+ok(barGeom.numH < 22 && !barGeom.overflow && barGeom.buttons === 4,
+   `at 50% zoom the page info stays ONE line and nothing overflows ` +
+   `(info ${Math.round(barGeom.numH)}px tall, ${barGeom.buttons} buttons)`);
 await setZoom('fit');
 // The focus ring must have room BELOW the select: the scroll area starts
 // flush under the tools row and its background painted over the ring's
@@ -687,16 +748,25 @@ await page.evaluate(() => {
         clientY: r.top + 40 }));
 });
 await page.waitForTimeout(300);
+ok(await page.evaluate(() =>
+       !!document.querySelector(
+           '#ps-contextmenu [data-context-action="pin-chart"]') &&
+       !document.querySelector(
+           '#ps-contextmenu [data-context-action^="pin-chart:"]')),
+   'the main menu carries ONE Keep to Notebook entry (Aug 5 2026 shape)');
+await page.click('#ps-contextmenu [data-context-action="pin-chart"]');
+await page.waitForTimeout(300);
 const pinMenu = await page.evaluate(() => ({
     perBoard: [...document.querySelectorAll(
-        '#ps-contextmenu [data-context-action^="pin-chart:"]')]
+        '#ps-contextmenu [data-context-action^="keep-to-"]')]
+        .filter(b => b.getAttribute('data-context-action') !== 'keep-to-new')
         .map(b => b.textContent),
-    plain: !!document.querySelector(
-        '#ps-contextmenu [data-context-action="pin-chart"]'),
+    newSection: !!document.querySelector(
+        '#ps-contextmenu [data-context-action="keep-to-new"]'),
 }));
-ok(pinMenu.perBoard.length === 2 && !pinMenu.plain,
-   `the menu lists one "Pin to" entry per board, no generic item ` +
-   `(${pinMenu.perBoard.join(' | ')})`);
+ok(pinMenu.perBoard.length === 2 && pinMenu.newSection,
+   `the submenu names each section plus New section, the send-menu ` +
+   `shape (${pinMenu.perBoard.join(' | ')})`);
 const target = await page.evaluate(() => {
     // pick the NON-active board so the retarget is observable
     const boards = window.PS_SHELL.project.pinboards;
@@ -705,7 +775,7 @@ const target = await page.evaluate(() => {
     return { id: other.id, name: other.name, count: other.pins.length };
 });
 await page.click(
-    '#ps-contextmenu [data-context-action="pin-chart:' + target.id + '"]');
+    '#ps-contextmenu [data-context-action="keep-to-' + target.id + '"]');
 await page.waitForTimeout(900);
 const landed = await page.evaluate(id => {
     const boards = window.PS_SHELL.project.pinboards;
@@ -719,6 +789,41 @@ ok(landed.count === target.count + 1,
 ok(landed.active, 'and that board became active, so Open shows it');
 ok((landed.toast || '').indexOf(target.name) >= 0,
    'the toast names the destination board');
+// And the third option (Torry, Aug 5 2026): New section creates a board
+// and keeps there in one gesture.
+const beforeNew = await page.evaluate(() =>
+    window.PS_SHELL.project.pinboards.length);
+await page.evaluate(() => {
+    const svg = document.querySelector('.graphbuilder2-host svg');
+    const r = svg.getBoundingClientRect();
+    svg.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true,
+        cancelable: true, clientX: r.left + r.width / 2,
+        clientY: r.top + 40 }));
+});
+await page.waitForTimeout(300);
+await page.click('#ps-contextmenu [data-context-action="pin-chart"]');
+await page.waitForTimeout(300);
+await page.click('#ps-contextmenu [data-context-action="keep-to-new"]');
+await page.waitForTimeout(900);
+const newSec = await page.evaluate(() => {
+    const boards = window.PS_SHELL.project.pinboards;
+    const b = boards[boards.length - 1];
+    return { boards: boards.length, name: b.name, pins: b.pins.length,
+             active: window.PS_SHELL.project.ui.activeBoard === b.id };
+});
+ok(newSec.boards === beforeNew + 1 && newSec.pins === 1 &&
+   /^Section \d+$/.test(newSec.name) && newSec.active,
+   `New section creates a board and keeps there in one gesture ` +
+   `("${newSec.name}", 1 page, active)`);
+// Clean up the scratch section and hand the baton back: later cases
+// build on the pre-existing boards and read pins in board order.
+await page.evaluate((id) => {
+    const P = window.PS_SHELL.project;
+    const bi = P.pinboards.findIndex(b =>
+        b.id === P.ui.activeBoard && b.pins.length === 1);
+    if (bi >= 0 && P.pinboards.length > 1) P.pinboards.splice(bi, 1);
+    P.ui.activeBoard = id;
+}, target.id);
 
 console.log('case 19: the Pinboard owns its right-click');
 // Torry, Aug 1 2026: right-click on the Pinboard showed the CHART menu -
@@ -754,9 +859,14 @@ ok(!pageMenu.keys.some(k => k.indexOf('pin-chart') === 0) &&
    'and none of the chart menu leaks in');
 await page.evaluate(() => { window.__psPinExportLast = null; });
 await page.click('#ps-contextmenu [data-context-action="pin-export-page"]');
-await page.waitForFunction(() => window.__psPinExportLast, null,
-                           { timeout: 20000 });
-const onePage = await page.evaluate(() => window.__psPinExportLast);
+await page.waitForFunction(() =>
+    document.getElementById('ps-exporter').style.display === 'flex',
+    null, { timeout: 8000 });
+ok(await page.evaluate(() =>
+       document.getElementById('ps-export-title').textContent) ===
+   'Export page',
+   'the page right-click opens the shared dialog scoped to that page');
+const onePage = await exportViaDialog('pdf');
 ok(onePage.scope === 'page' && onePage.pages === 1 && onePage.bytes > 700,
    `"Export this page" writes a one-page PDF (${onePage.bytes} bytes)`);
 await page.evaluate(() => {
@@ -804,6 +914,13 @@ await page.waitForTimeout(400);
 // several populated boards: the scope menu appears; take the active board
 if (await page.locator('[data-context-action="pin-export-active"]').count())
     await page.click('[data-context-action="pin-export-active"]');
+else
+    await page.click('[data-context-action="pin-export-all"]');
+await page.waitForFunction(() =>
+    document.getElementById('ps-exporter').style.display === 'flex',
+    null, { timeout: 8000 });
+await page.click('.ps-export-format:has(input[value="pdf"])');
+await page.click('#ps-export-go');
 await page.waitForFunction(() => window.__psPdfText, null, { timeout: 20000 });
 const pdfFonts = await page.evaluate(() =>
     [...new Set([...window.__psPdfText.matchAll(
@@ -830,7 +947,12 @@ await page.evaluate(() => {
         clientY: r.top + 40 }));
 });
 await page.waitForTimeout(300);
-await page.click('#ps-contextmenu [data-context-action^="pin-chart:"]');
+await page.click('#ps-contextmenu [data-context-action="pin-chart"]');
+await page.waitForTimeout(300);
+await page.evaluate(() => {
+    document.querySelector('#ps-contextmenu [data-context-action="keep-to-' +
+        window.PS_SHELL.project.ui.activeBoard + '"]').click();
+});
 await page.waitForTimeout(700);
 const freshPin = await page.evaluate(() => {
     const boards = window.PS_SHELL.project.pinboards;
@@ -1259,6 +1381,387 @@ ok(await page.evaluate(() => window.PS_SHELL.workspace()) === 'chart' &&
    await page.evaluate(() => window.PS_SHELL.project.activeChart) ===
        richPin.srcChart,
    'the jump lands on the live source chart');
+
+console.log('case 28: a multi-page SVG scope becomes a real zip, one file ' +
+            'per page');
+// The Aug 5 2026 format redesign: PDF keeps multi-page scopes in one
+// file; SVG/PNG/JPG zip one file per page, numbered in page order and
+// section-prefixed across boards. Deterministic record, then verify the
+// ACTUAL ARCHIVE BYTES with the platform's unzip, not just the stamp.
+await page.evaluate(() => {
+    const mk = n => 'data:image/svg+xml,' + encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="120"' +
+        ' font-family="sans-serif"><rect width="200" height="120"' +
+        ' fill="#eef"/><text x="12" y="60">zip page ' + n +
+        '</text></svg>');
+    const pin = (id, n) =>
+        ({ id, src: mk(n), natW: 200, natH: 120, w: 200, h: 120 });
+    const P = window.PS_SHELL.project;
+    P.pinboards = [
+        { id: 'b1', name: 'Results A', pins: [pin('p101', 1), pin('p102', 2)] },
+        { id: 'b2', name: 'Results B', pins: [pin('p103', 3)] },
+    ];
+    P.ui.activeBoard = 'b1';
+    window.showSaveFilePicker = () => Promise.resolve({
+        createWritable: () => Promise.resolve({
+            write: () => Promise.resolve(),
+            close: () => Promise.resolve() }) });
+    window.PS_SHELL.setWorkspace('pinboard');
+});
+await page.waitForTimeout(600);
+await page.click('#ps-export');
+await page.waitForTimeout(300);
+await page.click('[data-context-action="pin-export-all"]');
+const zipRes = await exportViaDialog('svg');
+ok(zipRes.container === 'zip' && zipRes.pages === 3 &&
+   JSON.stringify(zipRes.files) === JSON.stringify([
+       'results-a-page-01.svg', 'results-a-page-02.svg',
+       'results-b-page-03.svg']),
+   `entire notebook as SVG = one zip, numbered per page and ` +
+   `section-prefixed (${(zipRes.files || []).join(', ')})`);
+const zipBytes = Buffer.from(await page.evaluate(() =>
+    Array.from(window.__psPinExportZip)));
+const zfs = await import('node:fs');
+const { execFileSync } = await import('node:child_process');
+const zPath = '/tmp/ps-notebook-export-test.zip';
+zfs.writeFileSync(zPath, zipBytes);
+const ztest = execFileSync('unzip', ['-t', zPath], { encoding: 'utf8' });
+ok(/No errors detected/.test(ztest),
+   'the archive is a REAL zip: unzip validates every header and CRC');
+const zEntry = execFileSync('unzip', ['-p', zPath, 'results-a-page-02.svg'],
+    { encoding: 'utf8' });
+ok(zEntry.indexOf('zip page 2') !== -1 && zEntry.indexOf('<svg') !== -1,
+   'and an unzipped entry is the true vector svg of exactly that page');
+
+console.log('case 29: a single page exports as ONE file in the chosen ' +
+            'format');
+// With NOTHING selected, "This page" means the page on screen. The board
+// div is unclipped (an ancestor scrolls), so a naive element-middle
+// pointed at the CONTENT middle and named page 2 while page 1 filled the
+// window - caught in the feature's own screenshot pass.
+await page.evaluate(() => {
+    let anc = document.querySelector('.ps-pinpage');
+    while (anc) { if (anc.scrollTop) anc.scrollTop = 0; anc = anc.parentElement; }
+    window.scrollTo(0, 0);
+});
+await page.waitForTimeout(200);
+await page.click('#ps-export');
+await page.waitForTimeout(300);
+ok(await page.evaluate(() => {
+    const b = document.querySelector(
+        '[data-context-action="pin-export-page"]');
+    return !!b && /This page \(page 1 of 2\)/.test(b.textContent);
+}), 'unselected, "This page" names the page actually ON SCREEN (page 1)');
+await page.keyboard.press('Escape');
+await page.waitForTimeout(200);
+await page.click('.ps-pinpage[data-pin-id="p101"]');
+await page.waitForTimeout(200);
+await page.click('#ps-export');
+await page.waitForTimeout(300);
+ok(await page.evaluate(() => {
+    const b = document.querySelector(
+        '[data-context-action="pin-export-page"]');
+    return !!b && /This page \(page 1 of 2\)/.test(b.textContent);
+}), 'the menu names the selected page ("This page (page 1 of 2)")');
+await page.click('[data-context-action="pin-export-page"]');
+const onePng = await exportViaDialog('png');
+ok(onePng.container === 'file' && onePng.pages === 1 &&
+   onePng.format === 'png' && onePng.bytes > 500 &&
+   (onePng.files || []).length === 1 && /\.png$/.test(onePng.files[0]),
+   `a single page in PNG is one plain .png, no zip wrapper ` +
+   `(${(onePng.files || [])[0]}, ${onePng.bytes} bytes)`);
+// The footer bar mirrors the right-click (Aug 5 2026): its Export button
+// opens the same page-scoped dialog, closing the set's one gap.
+ok(await page.evaluate(() => {
+    const bar = document.querySelector(
+        '.ps-pinpage[data-pin-id="p101"] .ps-pinpage-bar');
+    return !!bar && !!bar.querySelector('[data-pin-send]') &&
+        !!bar.querySelector('[data-pin-copy]') &&
+        !!bar.querySelector('[data-pin-export]') &&
+        !!bar.querySelector('[data-pin-delete]');
+}), 'the page card carries all four verbs the right-click mirrors');
+await page.click('.ps-pinpage[data-pin-id="p101"] [data-pin-export]');
+await page.waitForFunction(() =>
+    document.getElementById('ps-exporter').style.display === 'flex',
+    null, { timeout: 8000 });
+ok(await page.evaluate(() =>
+       document.getElementById('ps-export-title').textContent) ===
+   'Export page',
+   "the card's Export button opens the dialog scoped to that page");
+await page.click('#ps-export-close');
+await page.waitForTimeout(300);
+
+console.log('case 30: the layout says LIVE vs SNAPSHOT, and jumps both ways');
+// Torry, Aug 5 2026: a chart panel follows its source; a Notebook
+// placement is frozen - but nothing on the layout said which was which.
+// Now: selection badge, rail card in behavioral terms, differentiated
+// right-click (with a jump back to the Notebook page), and the stale
+// "source changed" verdict reused from the Notebook's fingerprints.
+const liveChartId = await page.evaluate(() => {
+    // Give p101 real provenance (case 28 built it bare), then send it to
+    // a fresh layout through the app's own path.
+    const P = window.PS_SHELL.project;
+    const chart = P.charts.find(c => !c.page);
+    const b1 = P.pinboards.find(b => b.id === 'b1');
+    const pin = b1.pins.find(p => p.id === 'p101');
+    pin.srcChart = chart.id;
+    pin.srcName = chart.name;
+    pin.at = Date.now() - 3600000;
+    window.PS_SHELL.setWorkspace('pinboard');
+    return chart.id;
+});
+await page.waitForTimeout(500);
+await page.evaluate(() => {
+    const pg = document.querySelector('.ps-pinpage[data-pin-id="p101"]');
+    const r = pg.getBoundingClientRect();
+    pg.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true,
+        cancelable: true, clientX: r.left + 30, clientY: r.top + 30 }));
+});
+await page.waitForTimeout(300);
+await page.click('#ps-contextmenu [data-context-action="pin-send"]');
+await page.waitForTimeout(300);
+await page.click('#ps-contextmenu [data-context-action="pin-to-new"]');
+await page.waitForTimeout(700);
+// Add a LIVE chart panel beside the snapshot, then open the layout.
+await page.evaluate((chartId) => {
+    const P = window.PS_SHELL.project;
+    const doc = P.charts[P.charts.length - 1];
+    doc.items.push({ id: 'iLive30', kind: 'chart', chartId: chartId,
+                     x: 60, y: 420, w: 420, h: 280 });
+    window.PS_SHELL.switchChart(doc.id);
+    window.PS_SHELL.setWorkspace('layout');
+}, liveChartId);
+await page.waitForTimeout(900);
+await page.click('.ps-litem[data-kind="image"]');
+await page.waitForTimeout(400);
+const snapSel = await page.evaluate(() => ({
+    badge: (document.querySelector(
+        '.ps-litem[data-kind="image"] .ps-litem-srcbadge') || {})
+        .textContent || null,
+    title: document.getElementById('ps-layout-selection-title').textContent,
+    line: document.getElementById('ps-layout-source-line').textContent,
+    geom: (() => {
+        const it = document.querySelector('.ps-litem[data-kind="image"]');
+        const b = it && it.querySelector('.ps-litem-srcbadge');
+        if (!it || !b) return null;
+        const ir = it.getBoundingClientRect(), br = b.getBoundingClientRect();
+        const bar = it.querySelector('.ps-lbar');
+        let overlap = false;
+        if (bar) {
+            const r2 = bar.getBoundingClientRect();
+            overlap = !(br.right < r2.left || br.left > r2.right ||
+                        br.bottom < r2.top || br.top > r2.bottom);
+        }
+        return { atRight: Math.abs(br.right - ir.right) < 10,
+                 overlap, hasBar: !!bar };
+    })(),
+}));
+ok(snapSel.badge === 'Snapshot' && snapSel.title === 'Notebook snapshot' &&
+   /It will not change\./.test(snapSel.line) && /Kept /.test(snapSel.line),
+   `selecting a placed page says SNAPSHOT everywhere ` +
+   `("${snapSel.title}" / "${snapSel.line.slice(0, 52)}...")`);
+ok(!!snapSel.geom && snapSel.geom.atRight && !snapSel.geom.overlap,
+   'the badge docks far RIGHT, clear of the remove control it used to ' +
+   'sit on (Torry, Aug 5 2026)');
+await page.evaluate(() => {
+    const it = document.querySelector('.ps-litem[data-kind="image"]');
+    const r = it.getBoundingClientRect();
+    it.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true,
+        cancelable: true, clientX: r.left + 12, clientY: r.top + 12 }));
+});
+await page.waitForTimeout(300);
+const snapMenu = await page.evaluate(() =>
+    [...document.querySelectorAll('#ps-contextmenu button')]
+        .map(b => b.textContent));
+ok(snapMenu.includes('Open source chart') &&
+   snapMenu.includes('Show this page in Notebook'),
+   `a snapshot's right-click offers both jumps (${snapMenu[0]}, ` +
+   `${snapMenu[1]})`);
+await page.click('#ps-contextmenu [data-context-action="lay-open-pin"]');
+await page.waitForTimeout(800);
+const backAtPage = await page.evaluate(() => ({
+    ws: window.PS_SHELL.workspace(),
+    board: window.PS_SHELL.project.ui.activeBoard,
+    sel: (document.querySelector('.ps-pinpage-sel') || {})
+        .getAttribute ? document.querySelector('.ps-pinpage-sel')
+        .getAttribute('data-pin-id') : null,
+}));
+ok(backAtPage.ws === 'pinboard' && backAtPage.board === 'b1' &&
+   backAtPage.sel === 'p101',
+   '"Show this page in Notebook" lands on the exact page, selected');
+// Back to the layout: the chart panel reads LIVE.
+await page.evaluate(() => {
+    const P = window.PS_SHELL.project;
+    const doc = P.charts[P.charts.length - 1];
+    window.PS_SHELL.switchChart(doc.id);
+    window.PS_SHELL.setWorkspace('layout');
+});
+await page.waitForTimeout(700);
+await page.click('.ps-litem[data-kind="chart"]');
+await page.waitForTimeout(400);
+const liveSel = await page.evaluate(() => ({
+    badge: (document.querySelector(
+        '.ps-litem[data-kind="chart"] .ps-litem-srcbadge') || {})
+        .textContent || null,
+    title: document.getElementById('ps-layout-selection-title').textContent,
+    line: document.getElementById('ps-layout-source-line').textContent,
+    menuLabelProbe: null,
+}));
+ok(liveSel.badge === 'Live' && liveSel.title === 'Chart panel - live' &&
+   /^Follows /.test(liveSel.line) && /update this panel/.test(liveSel.line),
+   `selecting a chart panel says LIVE everywhere ("${liveSel.title}" / ` +
+   `"${liveSel.line.slice(0, 40)}...")`);
+await page.evaluate(() => {
+    const it = document.querySelector('.ps-litem[data-kind="chart"]');
+    const r = it.getBoundingClientRect();
+    it.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true,
+        cancelable: true, clientX: r.left + 12, clientY: r.top + 12 }));
+});
+await page.waitForTimeout(300);
+ok(await page.evaluate(() => {
+    const b = document.querySelector(
+        '#ps-contextmenu [data-context-action="lay-open-src"]');
+    return !!b && b.textContent === 'Show live chart in Charts';
+}), 'the live panel\'s jump names its nature ("Show live chart in Charts")');
+await page.keyboard.press('Escape');
+await page.waitForTimeout(200);
+// The stale verdict: fingerprint mismatch -> the badge and the rail say
+// the source has moved on since the picture was taken.
+await page.evaluate(() => {
+    const P = window.PS_SHELL.project;
+    const doc = P.charts[P.charts.length - 1];
+    doc.items.find(i => i.kind === 'image').srcSig = 'bogus-sig';
+});
+await page.click('.ps-litem[data-kind="image"]');
+await page.waitForTimeout(400);
+const staleSel = await page.evaluate(() => ({
+    badge: (document.querySelector(
+        '.ps-litem[data-kind="image"] .ps-litem-srcbadge') || {})
+        .textContent || null,
+    line: document.getElementById('ps-layout-source-line').textContent,
+}));
+ok(staleSel.badge === 'Snapshot - source changed' &&
+   /has changed since it was kept/.test(staleSel.line),
+   `a drifted snapshot discloses it ("${staleSel.badge}")`);
+
+console.log('case 31: the chart right-click sends the LIVE chart to a ' +
+            'layout');
+// Torry, Aug 5 2026: the same Send-to-layout gesture the Notebook pages
+// have, beside Keep. From Charts it places the live panel (what the
+// layout's Add chart creates), never a snapshot; one shared menu builder
+// keeps the two sends identical in shape.
+const sendCtx = await page.evaluate(() => {
+    const P = window.PS_SHELL.project;
+    const chart = P.charts.find(c => !c.page);
+    const doc = P.charts.find(c => c.page &&
+        (c.items || []).some(i => i.id === 'iLive30'));
+    window.PS_SHELL.switchChart(chart.id);
+    window.PS_SHELL.setWorkspace('chart');
+    return { chartId: chart.id, docId: doc.id, count: doc.items.length,
+             bottom: Math.max.apply(null,
+                 doc.items.map(i => (i.y || 0) + (i.h || 0))) };
+});
+await page.waitForFunction(() => {
+    const svg = document.querySelector('.graphbuilder2-host svg');
+    return !!svg && svg.querySelectorAll('*').length > 30;
+}, null, { timeout: 15000 });
+await page.waitForTimeout(300);
+await page.evaluate(() => {
+    const svg = document.querySelector('.graphbuilder2-host svg');
+    const r = svg.getBoundingClientRect();
+    svg.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true,
+        cancelable: true, clientX: r.left + r.width / 2,
+        clientY: r.top + 40 }));
+});
+await page.waitForTimeout(300);
+ok(await page.evaluate(() => {
+    const b = document.querySelector(
+        '#ps-contextmenu [data-context-action="chart-send"]');
+    return !!b && /^Send to layout/.test(b.textContent);
+}), 'the chart right-click offers "Send to layout" beside Keep');
+await page.click('#ps-contextmenu [data-context-action="chart-send"]');
+await page.waitForTimeout(300);
+const sendSub = await page.evaluate(() =>
+    [...document.querySelectorAll('#ps-contextmenu button')]
+        .map(b => b.getAttribute('data-context-action')));
+ok(sendSub.includes('chart-to-new') &&
+   sendSub.some(k => k && k.indexOf('chart-to-') === 0 &&
+       k !== 'chart-to-new'),
+   `the submenu lists each layout by name plus New layout, the pin ` +
+   `send's exact shape (${sendSub.join(', ')})`);
+await page.click('#ps-contextmenu [data-context-action="chart-to-' +
+    sendCtx.docId + '"]');
+await page.waitForTimeout(500);
+const sentLive = await page.evaluate((ctx) => {
+    const doc = window.PS_SHELL.project.charts.find(c => c.id === ctx.docId);
+    const added = doc.items[doc.items.length - 1];
+    return { count: doc.items.length, kind: added.kind,
+             chartId: added.chartId, y: added.y,
+             toast: (document.getElementById('ps-toast') || {})
+                 .textContent || '' };
+}, sendCtx);
+ok(sentLive.count === sendCtx.count + 1 && sentLive.kind === 'chart' &&
+   sentLive.chartId === sendCtx.chartId && sentLive.y >= sendCtx.bottom + 14 &&
+   /Sent to /.test(sentLive.toast),
+   `it lands as a LIVE panel, flowing below existing content, with the ` +
+   `pin send's toast (y ${sentLive.y} under ${sendCtx.bottom})`);
+
+console.log('case 32: Cmd/Ctrl+scroll zooms the board smoothly');
+// Aug 6 2026 (Torry, the day after the chart gesture: add the same to
+// the Notebook). Same math, the Notebook's own 50% floor, and the
+// select shows the custom value via the shared helper.
+await page.evaluate(() => {
+    const sel = document.getElementById('ps-pzoom');
+    sel.value = '1';
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    window.PS_SHELL.setWorkspace('pinboard');
+});
+await page.waitForTimeout(500);
+const boardWheel = async (deltaY, ctrl) => page.evaluate(([dy, c]) => {
+    const pane = document.getElementById('ps-pinpane');
+    const r = document.querySelector('.ps-pinpage').getBoundingClientRect();
+    pane.dispatchEvent(new WheelEvent('wheel', { bubbles: true,
+        cancelable: true, clientX: r.left + 40, clientY: r.top + 40,
+        deltaY: dy, ctrlKey: c }));
+    return window.PS_SHELL.project.ui.pinZoom;
+}, [deltaY, ctrl]);
+ok(await boardWheel(-240, false) === 1,
+   'a plain wheel scrolls the board; only the modifier zooms');
+const bAtDispatch = await boardWheel(-240, true);
+ok(bAtDispatch === 1,
+   'the notch does not jump: the board is unchanged at dispatch (easing)');
+await page.waitForFunction(() =>
+    Number(window.PS_SHELL.project.ui.pinZoom) > 1.3, null,
+    { timeout: 4000 });
+await page.waitForTimeout(200);
+const bz = await page.evaluate(() =>
+    Number(window.PS_SHELL.project.ui.pinZoom));
+const bState = await page.evaluate(() => {
+    const sel = document.getElementById('ps-pzoom');
+    const dyn = sel.querySelector('option[data-ps-custom]');
+    return { dyn: dyn ? dyn.textContent : null,
+             selected: dyn ? sel.value === dyn.value : false };
+});
+ok(bz > 1.3 && bz < 1.5 && bState.selected && /^\d+%$/.test(bState.dyn),
+   `Ctrl+wheel settles between steps and the select shows it ` +
+   `(${Math.round(bz * 100)}%, "${bState.dyn}")`);
+for (let i = 0; i < 30; i++) await boardWheel(300, true);
+await page.waitForFunction(() =>
+    Number(window.PS_SHELL.project.ui.pinZoom) === 0.5, null,
+    { timeout: 4000 });
+ok(await page.evaluate(() => window.PS_SHELL.project.ui.pinZoom) === 0.5,
+   'and it clamps at the Notebook\'s own 50% floor (the page-bar rule)');
+await page.evaluate(() => {
+    const sel = document.getElementById('ps-pzoom');
+    sel.value = 'fit';
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+});
+await page.waitForTimeout(300);
+ok(await page.evaluate(() => {
+    const sel = document.getElementById('ps-pzoom');
+    return !sel.querySelector('option[data-ps-custom]') &&
+        sel.value === 'fit';
+}), 'picking Fit removes the dynamic option');
 
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('PINBOARD CHECK PASS');

@@ -97,7 +97,7 @@ async function frameGeometry(label) {
 }
 
 async function focusVisibility(label, rootSelector = 'body') {
-    const report = await page.evaluate(rootSel => {
+    const report = await page.evaluate(async rootSel => {
         const root = document.querySelector(rootSel);
         const selectors = [
             'button:not([disabled])', 'a[href]', 'input:not([disabled])',
@@ -114,6 +114,22 @@ async function focusVisibility(label, rootSelector = 'body') {
                   !node.closest('[inert], [aria-hidden="true"]');
           }).slice(0, 180);
         const obscured = [];
+        // Judge RESTING visibility only: focusing can legitimately animate
+        // chrome (the narrow drawers close on focus-out and re-open with a
+        // slide when focus returns), and a rect captured mid-animation
+        // reports a control off-screen that lands on-screen a few frames
+        // later. Wait for the element's position to hold still.
+        const settle = el => new Promise(resolve => {
+            let last = el.getBoundingClientRect().left;
+            let tries = 0;
+            const tick = () => {
+                const now = el.getBoundingClientRect().left;
+                if (Math.abs(now - last) < 0.5 || ++tries > 30) return resolve();
+                last = now;
+                requestAnimationFrame(() => requestAnimationFrame(tick));
+            };
+            requestAnimationFrame(() => requestAnimationFrame(tick));
+        });
         for (const node of nodes) {
             node.focus({ preventScroll: true });
             // Export format radios are visually represented by their adjacent
@@ -122,6 +138,7 @@ async function focusVisibility(label, rootSelector = 'body') {
             const visual = node.matches('.ps-export-format input') &&
                 node.nextElementSibling ? node.nextElementSibling : node;
             visual.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+            await settle(visual);
             const rect = visual.getBoundingClientRect();
             const left = Math.max(0, rect.left);
             const right = Math.min(innerWidth, rect.right);
@@ -310,7 +327,26 @@ for (const [button, root, label] of [
 ]) {
     await page.focus(button);
     await page.keyboard.press('Enter');
-    await page.waitForTimeout(80);
+    // The drawers SLIDE in (a transform transition): hit-testing before
+    // the slide settles photographs controls mid-flight and reports
+    // them off-screen - the failure x drifted run to run (358, 328,
+    // 395...), the classic mid-animation signature. Wait for the
+    // drawer's position to hold still across frames.
+    await page.waitForFunction(sel => new Promise(resolve => {
+        const el = document.querySelector(sel);
+        if (!el) return resolve(false);
+        const r0 = el.getBoundingClientRect();
+        // OPEN (real size) and STILL (same spot two frames later, and no
+        // live transform): a first poll that lands before the drawer even
+        // starts opening must not read hidden-at-zero as settled.
+        if (r0.width < 50) return resolve(false);
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+            const r1 = el.getBoundingClientRect();
+            resolve(Math.abs(r1.left - r0.left) < 0.5 &&
+                    getComputedStyle(el).transform === 'none');
+        }));
+    }), root, { timeout: 3000 });
+    await page.waitForTimeout(60);
     await focusVisibility(label + ' open');
     await focusVisibility(label + ' contents', root);
     await page.keyboard.press('Escape');

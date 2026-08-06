@@ -459,26 +459,29 @@ window.PS_SHELL.setModule('xyplotbuilder');
 window.PS_SHELL.setRoles('xyplotbuilder',
     { xvar: 'score', yvar: 'score', groupVar: null, facetVar: null });
 const roleCards = document.querySelectorAll('#ps-slots .ps-role-card');
+// Flattened rail (Aug 2026): empty OPTIONAL roles collapse to add-rows,
+// whose label lives in .ps-role-add-label; filled roles keep .ps-slot-label.
 const roleLabels = Array.from(document.querySelectorAll(
-    '#ps-slots .ps-slot-label')).map(node => node.textContent);
+    '#ps-slots .ps-slot-label, #ps-slots .ps-role-add-label'))
+    .map(node => node.textContent);
 ok(roleCards.length === 4 &&
     roleLabels.includes('X axis') && roleLabels.includes('Y axis') &&
     roleLabels.includes('Color / group') && roleLabels.includes('Panels'),
     'uses uniform plain-language cards for every scatter role');
-// De-busy pass (Torry, Jul 27 2026): the blurb shows one sentence with the
-// full guidance in its tooltip; badges mark only EMPTY zones (here xvar and
-// yvar hold score, so only the two optional zones carry one) and filled
-// zones read settled via ps-slot-filled.
+// De-busy pass (Torry, Jul 27 2026) + the flattening (Aug 2026): the blurb
+// shows one sentence with the full guidance in its tooltip; filled zones
+// read settled via ps-slot-filled, and the empty optional zones are
+// collapsed add-rows carrying NO badge at all (quieter than the badge the
+// de-busy pass allowed them).
 ok(document.getElementById('ps-analysis-help').textContent.trim() ===
     'Show the relationship between two numeric variables.' &&
     (document.getElementById('ps-analysis-help').getAttribute('data-tip') || '')
         .includes('X controls horizontal position') &&
-    document.querySelectorAll('.ps-role-badge').length === 2 &&
-    document.querySelectorAll('.ps-role-badge-required').length === 0 &&
+    document.querySelectorAll('.ps-role-badge').length === 0 &&
     document.querySelectorAll('#ps-slots .ps-slot-filled').length === 2,
-    'one-sentence blurb with tooltip; badges only on empty zones');
+    'one-sentence blurb with tooltip; no badge chrome on this settled rail');
 const groupRole = document.querySelector(
-    '#ps-slots [data-role-key="groupVar"] .ps-slot-drop');
+    '#ps-slots .ps-role-add-row[data-role-key="groupVar"]');
 groupRole.click();
 ok(!!document.querySelector(
         '#ps-slots [data-role-key="groupVar"] .ps-role-picker') &&

@@ -436,17 +436,18 @@ console.log('case 8: magnification works, and cannot corrupt the canvas');
 const zoomOpts = await page.evaluate(() =>
     Array.from(document.getElementById('ps-chart-zoom').options)
         .map(o => o.value));
-ok(zoomOpts.indexOf('1.25') !== -1 && zoomOpts.indexOf('1.5') !== -1,
-   `125% and 150% are offered again (${zoomOpts.join(', ')})`);
+ok(zoomOpts.indexOf('1.25') !== -1 && zoomOpts.indexOf('1.5') !== -1 &&
+   zoomOpts.indexOf('2') !== -1,
+   `125-200% are offered (${zoomOpts.join(', ')})`);
 // the Size & view disclosure must be open for a real click (Aug 2 2026)
 await page.evaluate(() => { const t = document.getElementById('ps-sizeview-toggle'); if (t && t.getAttribute('aria-expanded') !== 'true') t.click(); });
-await page.selectOption('#ps-chart-zoom', '1.5');
+await page.selectOption('#ps-chart-zoom', '2');
 await page.waitForTimeout(500);
 const mag = await geo();
-ok(Math.abs(mag.zoom - 1.5) < 0.01 && mag.logicalW === 720,
-   `150% magnifies the view while the figure stays 720px logical ` +
-   `(shown ${mag.chartW}px)`);
-// The corruption pin: cycle a graph type THROUGH THE REAL FLYOUT at 150%
+ok(Math.abs(mag.zoom - 2) < 0.01 && mag.logicalW === 720,
+   `200% (the Aug 6 ceiling) magnifies the view while the figure stays ` +
+   `720px logical (shown ${mag.chartW}px)`);
+// The corruption pin: cycle a graph type THROUGH THE REAL FLYOUT at 200%
 // and the canvas attribute must hold - this exact gesture inflated it.
 for (const label of ['Line', 'Bar']) {
     const t = await page.evaluate(() => {
@@ -472,12 +473,12 @@ for (const label of ['Line', 'Bar']) {
 await page.waitForTimeout(2000);   // let deferred grow sweeps run
 const after = await geo();
 ok(after.logicalW === 720,
-   `type switches at 150% leave the canvas at 720px, not 938 ` +
+   `type switches at 200% leave the canvas at 720px, not 938 ` +
    `(${after.logicalW}px)`);
 const magFacts = svgFacts(await exportSvgText());
-// 730 +- 1: the 150% zoom harvest measures the ink overhang with a
-// half-pixel of rounding slack (730.66 here, 730.00 at 100% - the exact
-// pin lives in chart-size-check, which runs unzoomed).
+// 730 +- 1: the zoomed harvest measures the ink overhang with a
+// half-pixel of rounding slack (730.66 at 150%, 730.00 at 100% - the
+// exact pin lives in chart-size-check, which runs unzoomed).
 ok(Math.abs(magFacts.w - 730) <= 1,
    `and the export still leaves at the standard size (${magFacts.w}px)`);
 // the Size & view disclosure must be open for a real click (Aug 2 2026)
@@ -493,13 +494,16 @@ console.log('case 9: the size and view controls lay out as rows');
 // label and the select went full width. The two-class selectors fix it;
 // this pins the RENDERED geometry, because existence checks pass on broken
 // layouts (the icon-button lesson, re-learned).
+// Aug 5 2026: the View zoom moved to the chart header row
+// (#ps-charttools, the Notebook/Layout placement), so its row geometry
+// is judged THERE; Size & view keeps only the Standard-size checkbox.
 const rows = await page.evaluate(() => {
     const r = el => el.getBoundingClientRect();
     const mid = el => r(el).top + r(el).height / 2;
     const box = document.getElementById('ps-fit-pane');
     const span = document.querySelector('.ps-fit-field span');
     const sel = document.getElementById('ps-chart-zoom');
-    const zlab = document.querySelector('.ps-zoom-field span');
+    const zlab = document.querySelector('#ps-charttools .ps-ltool-label');
     return { boxW: Math.round(r(box).width),
              fitRow: Math.abs(mid(box) - mid(span)) < 4,
              selW: Math.round(r(sel).width),
@@ -510,6 +514,80 @@ ok(rows.boxW <= 20 && rows.fitRow,
    `label (${rows.boxW}px wide)`);
 ok(rows.selW <= 200 && rows.zoomRow,
    `the View select is compact, on one row with its label (${rows.selW}px)`);
+
+console.log('case 10: Cmd/Ctrl+scroll zooms smoothly between the steps');
+// Torry, Aug 5 2026: the 25 percent steps are pretty big. Ctrl+wheel
+// (also the Mac trackpad pinch, which arrives as a ctrl-wheel) zooms
+// continuously; the select grows a dynamic option showing the custom
+// value, and it leaves when a preset is picked.
+await page.selectOption('#ps-chart-zoom', '1');
+await page.waitForTimeout(300);
+const wheelAt = async (deltaY, ctrl) => page.evaluate(([dy, c]) => {
+    const host = document.querySelector('.graphbuilder2-host');
+    const svg = host.querySelector('svg');
+    const r = svg.getBoundingClientRect();
+    host.dispatchEvent(new WheelEvent('wheel', { bubbles: true,
+        cancelable: true, clientX: r.left + 60, clientY: r.top + 60,
+        deltaY: dy, ctrlKey: c }));
+    return { zoom: parseFloat(host.style.zoom) || 1,
+             view: window.PS_SHELL.chart().viewZoom };
+}, [deltaY, ctrl]);
+const plainWheel = await wheelAt(-240, false);
+ok(plainWheel.zoom === 1 && plainWheel.view === 1,
+   'a plain wheel scrolls; only the modifier zooms');
+const atDispatch = await wheelAt(-240, true);
+// Eased zoom (Aug 6 2026): the wheel moves a TARGET and the view glides
+// there over ~100ms - so the same-task read is UNCHANGED (a mouse notch
+// no longer jumps between sizes), and the settled value is the target.
+ok(atDispatch.zoom === 1,
+   'the notch does not jump: the view is unchanged at dispatch (easing)');
+await page.waitForFunction(() => {
+    const host = document.querySelector('.graphbuilder2-host');
+    const z = parseFloat(host.style.zoom) || 1;
+    return z > 1.3 && Math.abs(z - window.PS_SHELL.chart().viewZoom) < 0.005;
+}, null, { timeout: 4000 });
+const zoomIn = await page.evaluate(() => {
+    const host = document.querySelector('.graphbuilder2-host');
+    return { zoom: parseFloat(host.style.zoom) || 1,
+             view: window.PS_SHELL.chart().viewZoom };
+});
+ok(zoomIn.zoom > 1.3 && zoomIn.zoom < 1.5 &&
+   Math.abs(zoomIn.view - zoomIn.zoom) < 0.01,
+   `and it settles smoothly at the between-step target ` +
+   `(${Math.round(zoomIn.zoom * 100)}%)`);
+const dynOpt = await page.evaluate(() => {
+    const sel = document.getElementById('ps-chart-zoom');
+    const dyn = sel.querySelector('option[data-ps-custom]');
+    return { label: dyn ? dyn.textContent : null,
+             selected: dyn ? sel.value === dyn.value : false };
+});
+ok(dynOpt.selected && /^\d+%$/.test(dynOpt.label),
+   `the select DISPLAYS the custom value instead of going blank ` +
+   `("${dynOpt.label}")`);
+for (let i = 0; i < 12; i++) await wheelAt(-300, true);
+await page.waitForFunction(() => (parseFloat(document.querySelector(
+    '.graphbuilder2-host').style.zoom) || 1) >= 1.99, null,
+    { timeout: 4000 });
+const ceiling = await page.evaluate(() => ({
+    zoom: parseFloat(document.querySelector('.graphbuilder2-host')
+        .style.zoom) || 1 }));
+ok(ceiling.zoom <= 2 + 0.001,
+   `the gesture clamps at the select's own 200% ceiling ` +
+   `(${Math.round(ceiling.zoom * 100)}%)`);
+for (let i = 0; i < 30; i++) await wheelAt(300, true);
+await page.waitForFunction(() => (parseFloat(document.querySelector(
+    '.graphbuilder2-host').style.zoom) || 1) <= 0.351, null,
+    { timeout: 4000 });
+ok(await page.evaluate(() => parseFloat(document.querySelector(
+       '.graphbuilder2-host').style.zoom) || 1) >= 0.35 - 0.001,
+   'and at the 35% floor going down');
+await page.selectOption('#ps-chart-zoom', '1');
+await page.waitForTimeout(300);
+ok(await page.evaluate(() => {
+    const sel = document.getElementById('ps-chart-zoom');
+    return !sel.querySelector('option[data-ps-custom]') &&
+        sel.value === '1';
+}), 'picking a preset removes the dynamic option again');
 
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('FIT PANES CHECK PASS');
