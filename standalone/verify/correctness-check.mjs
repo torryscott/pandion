@@ -399,12 +399,21 @@ ok(Number(fwd.early) === Number(fwd.late) * 2,
 // earlier version of this test had no history to leak and passed vacuously.
 // The shell's own walkthrough driver performs a real recolour.
 const MOD = process.platform === 'darwin' ? 'Meta' : 'Control';
-async function playTour(key, timeoutMs = 45000) {
+async function playTour(key, timeoutMs = 60000) {
+    // Tour cards hold until the reader advances (no reading timer), so
+    // this driver plays the reader: press Next until the tour finishes.
+    // A press during a card's action only pre-arms the advance - the
+    // action (the real recolour this test depends on) always runs.
     await page.evaluate(k => { window.PS_TOUR.play(k); }, key);
     const t0 = Date.now();
     while (Date.now() - t0 < timeoutMs) {
-        await page.waitForTimeout(400);
+        await page.waitForTimeout(700);
         if (!await page.evaluate(() => window.PS_TOUR.isRunning())) break;
+        await page.evaluate(() => {
+            const b = [...document.querySelectorAll('[data-role="ps-tour-layer"] button')]
+                .find(x => x.textContent.indexOf('Next') >= 0);
+            if (b) b.click();
+        });
     }
     if (await page.evaluate(() => window.PS_TOUR.isRunning()))
         throw new Error(`walkthrough "${key}" did not finish`);
@@ -423,7 +432,7 @@ const ids = await page.evaluate(() => {
 await page.waitForTimeout(900);
 await playTour('one-bar-color');                 // a REAL engine-side edit on A
 await page.waitForTimeout(900);
-const aRecoloured = (await barFills()).filter(f => /dd7e2b/i.test(f)).length;
+const aRecoloured = (await barFills()).filter(f => /c2242c/i.test(f)).length;
 ok(aRecoloured >= 1, `chart A really was recoloured through the engine ` +
    `(${aRecoloured} bars)`);
 const undoArmed = await page.evaluate(() => {
@@ -458,16 +467,16 @@ await page.waitForTimeout(900);
 const bAfter = await barFills();
 ok(JSON.stringify(bAfter) === JSON.stringify(bBefore),
    "undo on chart B changes nothing on chart B");
-ok(!bAfter.some(f => /dd7e2b/i.test(f)),
+ok(!bAfter.some(f => /c2242c/i.test(f)),
    "chart A's colour never leaked onto chart B");
 
 await page.evaluate(id => window.PS_SHELL.switchChart(id), ids.a);
 await page.waitForTimeout(1200);
-ok((await barFills()).filter(f => /dd7e2b/i.test(f)).length >= 1,
+ok((await barFills()).filter(f => /c2242c/i.test(f)).length >= 1,
    'chart A kept its own edit across the round trip');
 await page.keyboard.press(`${MOD}+z`);
 await page.waitForTimeout(1500);
-ok((await barFills()).filter(f => /dd7e2b/i.test(f)).length === 0,
+ok((await barFills()).filter(f => /c2242c/i.test(f)).length === 0,
    "and undo on chart A still reverts chart A's own edit");
 
 // ---- B7: the filter disclosure must ride the exported FIGURE ----
