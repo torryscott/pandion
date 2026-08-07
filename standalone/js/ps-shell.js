@@ -13081,12 +13081,23 @@
       persist();
     });
     document.addEventListener("pointerdown", function (e) {
+      // The menus ACT ON the selection, so pressing one is not clicking away.
+      // Without the menu bar and the grid's own command bar on this list the
+      // press that OPENED a menu threw the selection away before any item was
+      // clicked, which left Edit > Paste, Data > Exclude or include, Data >
+      // New chart from selection and Fill down unreachable by mouse, each of
+      // them telling the user to select something they had already selected.
+      // The keyboard route always worked, because F10 fires no pointerdown.
       if (GRID_SELECTION &&
           !(e.target.closest && (e.target.closest("#ps-datagrid") ||
                                  e.target.closest("#ps-cellmenu") ||
                                  e.target.closest("#ps-columnmenu") ||
                                  e.target.closest("#ps-columnview-menu") ||
-                                 e.target.closest("#ps-rowmenu"))))
+                                 e.target.closest("#ps-rowmenu") ||
+                                 e.target.closest("#ps-menubar") ||
+                                 e.target.closest("#ps-appmenu") ||
+                                 e.target.closest("#ps-datamenu") ||
+                                 e.target.closest("#ps-data-more"))))
         gridClearSelection();
       if (el("ps-addmenu").style.display === "block" &&
           !(e.target.closest && e.target.closest("#ps-addmenu")))
