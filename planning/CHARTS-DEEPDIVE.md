@@ -21,6 +21,12 @@ it is dominated by one theme, because that is where the gap actually is.
 
 ## 1. The app knows the chart is misleading and does not say so
 
+> **STATUS, Aug 7 2026.** The `brackclaim` rule is **LANDED** (`1acd41b`) and
+> verified on both bundles. The `__gb2_graphLint` host hook and the shell's
+> status-bar receipt are **not landed**; they stay in `standalone/proto` and
+> the rest of this item still describes them as proposed. See "What landed"
+> at the end of this section.
+
 **What a user feels.** I truncated the bars, and nothing anywhere told me
 the picture now lies. Then I added a significance star that no test
 produced, and the app's own chart checker told me my chart looked good.
@@ -102,20 +108,39 @@ lines across two files. Probe: `standalone/verify/chart-check-check.mjs`,
 chrome, narrow, polish, reflow-accessibility, axe-state all green; see
 Verification). Half a day, plus the jamovi verification below.
 
-**Not done, and it is the real price.** I did not run
-`scripts/verify/run.sh` on both bundles, because editing
-`inst/widget/graphbuilder2.js` in this repo makes the Stop hook re-minify
-and side-load a build straight into your live jamovi module, which is not
-something a probe branch should do to your machine. The patch is therefore
-against a copy. Landing it means: apply the patch, re-minify, run the
-jamovi battery on both bundles, confirm the module still builds. Budget
-another half day for that and treat the estimate as untested.
+**What landed, and what it cost.** The rule went into
+`inst/widget/graphbuilder2.js` in one atomic pass: 47 lines added, none
+changed, pure ASCII (`\uXXXX` escapes only), `node --check` clean, then
+`scripts/minify-widget.sh` (6349 KB source to 2082 KB, hash
+`667821c73dd8458299d2d0e2c007a117` matching the committed `.hash`).
+
+* `scripts/verify/run.sh` - 396 assertions, exit 0.
+* `scripts/verify/run.sh --min` - 396 assertions, exit 0.
+* `scripts/verify/pedagogy-check.mjs` - all 122 checks pass, with two new
+  assertions on the EXISTING `p_cg_anat` fixture, whose bracket already
+  carries `"text":"*"` with no `autoPValue` and no anchors. That fixture has
+  been shipping this exact chart in the jamovi probe corpus all along, and
+  the panel called it fine.
+* Controls, both ways. Reverting the rule and re-rendering the pedagogy
+  fixtures fails both new assertions; the standalone probe's case 2 fails on
+  the pre-rule engine at the line that used to read "Looks good".
+
+Both batteries ran in my worktree, so the Stop hook (which watches the
+shared repo) never fired and nothing was side-loaded into your live jamovi
+module. Landing on `main` will trigger it, which is the intended behaviour
+there.
+
+Total: about two hours including both battery runs.
+
+**Still outstanding from this item.** The host hook and the receipt. The
+hook is nine lines; the shell side is already written and committed
+(`20ebb63`) and is currently dormant, hiding itself because the hook is
+absent. Cases 5 and 6 of the probe skip rather than fail, and say so.
 
 **The smallest version.** The `brackclaim` rule alone, no host hook, no
-receipt. That converts "Looks good" into a warning on the one case that is
-actively dishonest, for about 30 engine lines. It leaves the lint mute
-until asked, so I would not stop there, but it is the piece I would land
-first if only one could go.
+receipt. This is what was approved and what shipped. It converts "Looks
+good" into a warning on the one case that is actively dishonest, and it
+leaves the lint mute until asked, which is the half still worth doing.
 
 **What it risks.** The rule is a heuristic over user-typed text. A user who
 deliberately types `*` meaning a footnote marker gets a warning they did
