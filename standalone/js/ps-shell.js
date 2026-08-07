@@ -3457,8 +3457,8 @@
   // the default 72 or 96 dpi and reported it as a 33 to 44 inch figure that
   // had to be resampled by hand. The pixels were always right; only the
   // declared size was missing. Canvas cannot write this, so the encoded
-  // bytes are patched after toBlob: a pHYs chunk for PNG, the JFIF density
-  // fields for JPEG. Both are single, well-defined edits on a file the
+  // bytes are patched after toBlob, a pHYs chunk for PNG and the JFIF
+  // density fields for JPEG. Both are single, well-defined edits on a file the
   // browser just produced, and both no-op safely on anything unexpected.
   var PS_CRC_TABLE = null;
   function psCrc32(bytes, from, to) {
@@ -17352,7 +17352,7 @@
     persist(); renderLayout();
   }
   // ---- Plot-area alignment. A multi-panel figure reads as aligned when
-  // the PLOT AREAS line up, not the panel boxes: a panel's box includes its
+  // the PLOT AREAS line up, not the panel boxes. A panel's box includes its
   // tick labels, and an axis reading 100000 is wider than one reading 0.10,
   // so two identically sized panels draw their axes at different places.
   // Measured on the four-panel template with score / cost / hours / rate,
@@ -17363,7 +17363,7 @@
   // solve the same problem by reserving one common gutter; here the panels
   // are already drawn, so the panels move instead of the gutters.)
   //
-  // Fractions of the item box, never absolute pixels: the item box and the
+  // Fractions of the item box, never absolute pixels. The item box and the
   // axis line go through the same zoom transform and the same drag
   // transform, so a ratio between them is invariant to both.
   function layPlotFrac(item) {
@@ -17520,9 +17520,9 @@
     for (var i = 0; i < items.length; i++) {
       items[i].x = Math.round((Number(items[i].x) || 0) * sx);
       items[i].y = Math.round((Number(items[i].y) || 0) * sy);
-      // laySizedKind, not kind === "chart": an image is a sized item
-      // everywhere else, and leaving its box alone made a flipped figure
-      // carry one item at its old size across the shrunken panels.
+      // laySizedKind rather than kind === "chart", because an image is a
+      // sized item everywhere else, and leaving its box alone made a flipped
+      // figure carry one item at its old size across the shrunken panels.
       if (laySizedKind(items[i])) {
         items[i].w = Math.round((Number(items[i].w) || 480) * sx);
         items[i].h = Math.round((Number(items[i].h) || 320) * sy);
@@ -18868,8 +18868,8 @@
       setTip(align[i], "Align the selected items");
     }
     // Plot-area alignment follows the same progressive-disclosure rule as
-    // the row above, but tested per button: "Left axes" needs two panels in
-    // one column, "Baselines" two in one row, so a side-by-side pair offers
+    // the row above, but tested per button. "Left axes" needs two panels in
+    // one column and "Baselines" two in one row, so a side-by-side pair offers
     // baselines and a stacked pair offers left axes.
     var plotRow = document.querySelector(".ps-inspector-plotalign");
     var plotBtns = document.querySelectorAll("[data-ctx-plotalign]");
