@@ -390,6 +390,29 @@ Branch `probe/notebook-deepdive`. Three probes added, all wired into
 | `notebook-pages-check.mjs` | 6 cases, 17 assertions | Yes, at case 1, because no page rows exist in the rail. Case 6, the undo-scope defect, was also demonstrated independently in the running app before the fix (the b1 and b2 trace in item 5). |
 | `notebook-undo-check.mjs` | 5 cases, 21 assertions | Yes, at case 1, with exactly the symptom. The Edit menu reads "Undo chart styling" with the Notebook on screen. |
 
+### What run.sh does on this branch
+
+Run from an isolated worktree at this branch's HEAD, so no other session's
+in-flight edits are in the measurement.
+
+109 steps ran. 107 green, including all three new probes. One step fails,
+`artifact-parity-check`, and it is not a behaviour regression. It is the
+release gate that requires the committed public artifacts
+(`website/pandion-plots.html` and the hashed files under `website/app/lib`)
+to be byte-identical to a fresh build of `standalone/`. Any change to the
+shell makes them stale by definition. Running `bash website/build.sh`, which
+is the release step, turns it green, and I confirmed that. I have not
+committed the regenerated artifacts, because 4 MB of generated files would
+bury a proposal diff that is otherwise reviewable. Regenerate them at
+whatever point this work lands.
+
+`set -e` aborts the suite there, so the dist half never ran inside `run.sh`.
+I ran it by hand against the built single-file artifact instead, which is the
+coverage that matters for a shell change. `m0-check`, `m1-shell-check`, the
+three notebook probes, `pinboard-check`, `keep-fidelity-check`,
+`copy-moment-check`, `provenance-check` and `doclifecycle-check` all pass on
+`standalone/dist/pandion-plots.html`.
+
 Two probe laws worth recording, because both cost time and will cost it
 again.
 
