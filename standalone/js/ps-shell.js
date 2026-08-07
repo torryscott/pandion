@@ -317,6 +317,60 @@
     return !!(col && t && t.missingTokensByCol &&
               Array.isArray(t.missingTokensByCol[col]));
   }
+  // ---- what a jamovi file derived, and this app does not -------------------
+  // Two silences in the .omv reader, one rule for both. A jamovi FILTER hides
+  // rows and was dropped outright, so a sender who charted 120 of 240 cases
+  // got a recipient charting 240 with nothing said. A jamovi COMPUTED column
+  // arrived as ordinary data, so it went stale the moment a source value was
+  // edited, again with nothing said. Neither formula is translated, because
+  // both languages differ from this app's and a wrong translation is worse
+  // than an honest gap. What is offered instead is the plain statement of
+  // what the file carries and what is not being done with it.
+  //
+  // The wording lives here, in one place, so the toast at import and the
+  // surfaces that outlive it cannot end up telling different stories.
+  function importedFilterPhrases(list) {
+    return (list || []).map(function (f) {
+      var s = f.name || "an unnamed filter";
+      if (f.formula)
+        s += " (" + f.formula + (f.active ? "" : ", switched off in jamovi") + ")";
+      else if (!f.active) s += " (switched off in jamovi)";
+      return s;
+    });
+  }
+  function importedFilterNote(t) {
+    var list = t && t.importedFilters;
+    if (!list || !list.length) return "";
+    var one = list.length === 1;
+    // Phrased as what the jamovi filters do NOT hide, rather than as "all N
+    // rows are shown". The second claim is false the moment the reader adds
+    // a filter of their own, and this sentence sits on the very control they
+    // would use to do it.
+    return "This jamovi file carries " + (one ? "a filter" : list.length +
+      " filters") + ", which " + (one ? "is" : "are") + " not applied here, " +
+      "so " + (one ? "it hides" : "they hide") + " none of the " + nRows(t) +
+      " rows. " + importedFilterPhrases(list).join("; ") + ".";
+  }
+  function importedFormulaOf(t, col) {
+    var m = t && t.importedFormulas;
+    return (m && col && m[col]) ? m[col] : null;
+  }
+  function importedFormulaHeading(rec) {
+    if (!rec) return "";
+    if (rec.kind === "Recoded") return "Recoded in jamovi";
+    if (rec.kind === "Output") return "Made by a jamovi analysis";
+    return "Computed in jamovi";
+  }
+  // The one-line form, for a tooltip. "Snapshot" is the word the extracted
+  // date columns already use for exactly this, so it is the word used here.
+  function importedFormulaNote(rec) {
+    if (!rec) return "";
+    var made = importedFormulaHeading(rec);
+    if (rec.kind === "Recoded" && rec.transform) made += " by " + rec.transform;
+    if (rec.formula) made += " as " + rec.formula;
+    return made +
+      ". A snapshot of its values, so it does not follow its sources here.";
+  }
   // t3-53. Parsed from the preference each time rather than cached, so a
   // change applies to the very next import with no reload.
   function prefMissingTokens() {
@@ -1429,6 +1483,14 @@
         delete t.computed[oldName];
       }
     }
+    // The record follows its column, and the formula TEXT is left alone. It
+    // is a quotation of what jamovi did, in jamovi's own vocabulary, and
+    // rewriting the names inside it would make it a paraphrase presented as
+    // a quotation.
+    if (t.importedFormulas && t.importedFormulas[oldName] != null) {
+      t.importedFormulas[next] = t.importedFormulas[oldName];
+      delete t.importedFormulas[oldName];
+    }
   }
   function valueExclCount(t) {
     var k = 0;
@@ -2069,6 +2131,10 @@
                excludedRows: t.excludedRows || {},
                filters: t.filters || [],
                computed: t.computed || {},
+               // Provenance, not data. A saved project that forgot which
+               // columns jamovi derived would put the silence straight back.
+               importedFormulas: t.importedFormulas || {},
+               importedFilters: t.importedFilters || [],
                missingTokens: t.missingTokens || ["NA"],
                missingTokensByCol: t.missingTokensByCol || {} }
     };
@@ -2366,6 +2432,11 @@
         ? s.table.filters : [];
       PROJECT.table.computed = (s.table.computed &&
         typeof s.table.computed === "object") ? s.table.computed : {};
+      PROJECT.table.importedFormulas = (s.table.importedFormulas &&
+        typeof s.table.importedFormulas === "object")
+          ? s.table.importedFormulas : {};
+      PROJECT.table.importedFilters = Array.isArray(s.table.importedFilters)
+        ? s.table.importedFilters : [];
       retype(PROJECT.table);
     }
     PROJECT.id = s.id || newProjectId();
@@ -9725,6 +9796,7 @@
       if (t.levelOrderDefaults) delete t.levelOrderDefaults[col];
       if (t.excluded) delete t.excluded[col];
       if (t.computed) delete t.computed[col];
+      if (t.importedFormulas) delete t.importedFormulas[col];
     }
     if (Array.isArray(t.filters))
       t.filters = t.filters.filter(function (f) {
@@ -10724,9 +10796,14 @@
     if (fActive && t.filterInapplicable && t.filterInapplicable.length)
       fExtra += ". Not applied: " + t.filterInapplicable.join(", ") +
         " (that comparison needs numbers)";
-    setTip(fBtn, fActive
+    // The imported-filter fact belongs HERE and not only in a toast. This is
+    // the control a reader uses to ask "is anything filtered", and on a file
+    // that arrived with jamovi filters the honest answer is longer than "no".
+    var fImported = importedFilterNote(t);
+    setTip(fBtn, (fActive
       ? "Active: " + filterSummaryText(t) + fExtra + " - click to edit"
-      : "Filter rows without changing the dataset");
+      : "Filter rows without changing the dataset") +
+      (fImported ? " " + fImported : ""));
     var rowK = rowExclCount(t), valueK = valueExclCount(t);
     var total = rowK + valueK;
     var exclusion = el("ps-data-exclusions");
@@ -11116,6 +11193,13 @@
                   : "Computed: " + t.computed[col]) + '"' +
                 (t.computedErrors && t.computedErrors[col]
                   ? ' data-fx-error="1"' : "") + ">fx</span>"
+              // A column jamovi derived is a computed column too, so it wears
+              // the same badge. The muted variant and the tip carry the one
+              // difference that matters, which is that this one is frozen.
+              : importedFormulaOf(t, col)
+              ? '<span class="ps-grid-fx" data-fx-frozen="1" data-tip="' +
+                escHtml(importedFormulaNote(importedFormulaOf(t, col))) +
+                '">fx</span>'
               : "") +
              (roleOf[col]
               ? '<span class="ps-grid-role">' + escHtml(roleOf[col]) + "</span>"
@@ -11333,6 +11417,8 @@
                             excludedRows: t.excludedRows || {},
                             filters: t.filters || [],
                             computed: t.computed || {},
+                            importedFormulas: t.importedFormulas || {},
+                            importedFilters: t.importedFilters || [],
                             chartRoles: PROJECT.charts.map(function (c) {
                               return { id: c.id, roles: c.roles || {} };
                             }) });
@@ -11375,6 +11461,13 @@
     t.filters = Array.isArray(s.filters) ? s.filters : [];
     t.computed = (s.computed && typeof s.computed === "object")
       ? s.computed : {};
+    // Undo restores the columns, so it has to restore what was known about
+    // them. Deleting a derived column and undoing it must bring back the
+    // label as well as the values.
+    t.importedFormulas = (s.importedFormulas &&
+      typeof s.importedFormulas === "object") ? s.importedFormulas : {};
+    t.importedFilters = Array.isArray(s.importedFilters)
+      ? s.importedFilters : [];
     if (Object.prototype.hasOwnProperty.call(s, "declaredLevels"))
       t.declaredLevels = s.declaredLevels;
     t.levelOrderDefaults = s.levelOrderDefaults || {};
@@ -18569,6 +18662,28 @@
       inspectorStat("Min", fmt(Math.min.apply(null, vals))) +
       inspectorStat("Max", fmt(Math.max.apply(null, vals)));
   }
+  // A column jamovi derived showed a name, a measure type and summary
+  // statistics, and nothing at all about where the numbers came from. The
+  // formula is printed EXACTLY as jamovi wrote it and never rewritten, even
+  // when a source column has since been renamed here, because rewriting it
+  // would make it claim something the sender did not write.
+  function syncVariableDerived(t, col) {
+    var section = el("ps-variable-derived-section");
+    if (!section) return;
+    var rec = importedFormulaOf(t, col);
+    if (!rec) { section.style.display = "none"; return; }
+    section.style.display = "block";
+    el("ps-variable-derived-title").textContent = importedFormulaHeading(rec);
+    var h = "";
+    if (rec.kind === "Recoded" && rec.transform)
+      h += "<strong>Recoded by " + escHtml(rec.transform) + ".</strong> ";
+    if (rec.formula) h += "<code>" + escHtml(rec.formula) + "</code><br>";
+    h += "The values arrived as a snapshot. Pandion does not recompute them, " +
+      "so they will not follow the variables they came from, and editing " +
+      "those changes nothing here. To make it live, add a computed column " +
+      "from the Data menu using this app's own formulas.";
+    el("ps-variable-derived").innerHTML = h;
+  }
   function syncVariableAdvice(t, col) {
     var section = el("ps-variable-advice-section");
     var body = el("ps-variable-advice");
@@ -18735,6 +18850,7 @@
       basis.style.display = filterOn ? "block" : "none";
     }
     syncVariableAdvice(t, col);
+    syncVariableDerived(t, col);
     var levels = t.levels[col] || [], levelRoot = el("ps-variable-levels");
     var categorical = t.types[col] === "nominal" ||
       t.types[col] === "ordinal";
@@ -19556,6 +19672,17 @@
       PROJECT.table.missingTokensByCol = parsed.missingByCol;
       retype(PROJECT.table);
     }
+    // What the file derived. The values were always arriving intact; what was
+    // missing was any way to tell that they are DERIVED, so a filtered
+    // dataset opened at full size and a computed column went stale in
+    // silence. Kept on the table rather than announced once, because the
+    // grid badge, the variable panel and the Filter control all read it and
+    // a toast is gone in eight seconds.
+    PROJECT.table.importedFormulas =
+      (parsed.derivedByCol && typeof parsed.derivedByCol === "object")
+        ? parsed.derivedByCol : {};
+    PROJECT.table.importedFilters =
+      Array.isArray(parsed.filterColumns) ? parsed.filterColumns : [];
     resetDocumentsForNewData();
     PROJECT.ui.columnWidths = {};
     GRID_NATURAL_WIDTHS = {};
@@ -19596,6 +19723,34 @@
         " a measure type Pandion does not recognise and was read as: " +
         parsed.unmapped.join(", ") +
         ". Change it in the Data workspace if that is wrong.", true);
+    // Said LAST on purpose. The stack keeps three and drops the oldest
+    // announcement, and of everything reported here these two are the ones
+    // whose loss leaves a reader believing something FALSE rather than
+    // merely uninformed, namely a row count that is not the sender's, and a
+    // column that looks measured and is not. Both have a durable home too,
+    // so the toast is the opening, not the whole disclosure.
+    var dbc = PROJECT.table.importedFormulas || {};
+    var dcols = Object.keys(dbc);
+    if (dcols.length) {
+      var one = dcols.length === 1;
+      showToast("Imported. " + dcols.length +
+        (one ? " variable was derived in jamovi and arrives as a snapshot of "
+             + "its values, so it does not follow its sources here. "
+             : " variables were derived in jamovi and arrive as a snapshot of "
+             + "their values, so they do not follow their sources here. ") +
+        dcols.map(function (c) {
+          var r = dbc[c];
+          // A recoded column is known by the transform's NAME in jamovi, so
+          // that is what a reader will recognise; the formula is the proof.
+          var what = (r.kind === "Recoded" && r.transform)
+            ? r.transform + (r.formula ? ", " + r.formula : "")
+            : (r.formula || r.transform || "");
+          return c + (what ? " (" + what + ")" : "");
+        }).join("; ") +
+        ". Each one is marked fx in the grid.", true);
+    }
+    var fnote = importedFilterNote(PROJECT.table);
+    if (fnote) showToast("Imported. " + fnote, true);
   }
   function isOmvFile(f) {
     return /\.omv$/i.test(f && f.name ? f.name : "");

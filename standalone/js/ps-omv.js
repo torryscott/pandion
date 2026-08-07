@@ -10,7 +10,9 @@
 // inflates with the browser-native DecompressionStream("deflate-raw").
 // Analyses inside the file (protobuf option blobs) are NOT imported -
 // this brings in the DATASET: values, measure types, and level orders.
-// Filter columns are skipped; computed columns arrive as their values.
+// Filter columns are not applied, and computed columns arrive as their
+// values, so both are reported out for disclosure rather than dropped in
+// silence (filterColumns, derivedByCol).
 // Keep this file ASCII (escapes only).
 
 window.PSOmv = (function () {
@@ -91,6 +93,23 @@ window.PSOmv = (function () {
 
     var header = [], types = {}, levels = {}, colVals = [];
     var missingByCol = {}, missingSkipped = [];
+    var filterColumns = [], derivedByCol = {};
+    // A Recoded column points at a transform by id and the formula lives
+    // over there, so the table is built once up front.
+    var transforms = {};
+    var tfList = Array.isArray(ds.transforms) ? ds.transforms : [];
+    for (var tfi = 0; tfi < tfList.length; tfi++) {
+      var tf = tfList[tfi];
+      if (!tf || tf.id == null) continue;
+      // A transform's formula is an ARRAY, one entry per condition. A single
+      // entry is the ordinary case and can be quoted as THE formula; a
+      // multi-condition transform is a small program, and picking one line
+      // out of it would misdescribe it, so those travel by name alone.
+      var tfF = Array.isArray(tf.formula) ? tf.formula : [tf.formula];
+      transforms[tf.id] = { name: String(tf.name || ""),
+                            formula: tfF.length === 1
+                              ? String(tfF[0] == null ? "" : tfF[0]).trim() : "" };
+    }
     var off = 0;
     for (var fi = 0; fi < fields.length; fi++) {
       var f = fields[fi];
@@ -98,7 +117,33 @@ window.PSOmv = (function () {
       var size = isNum ? 8 : 4;
       if (off + size * n > bin.byteLength)
         throw new Error("data.bin is shorter than the metadata describes");
-      if (f.columnType === "Filter") { off += size * n; continue; }
+      // A jamovi filter HIDES rows. Dropping it in silence means a sender who
+      // filtered 240 cases down to 120 and charted that gets a recipient
+      // charting 240, with the word "Filter" appearing nowhere. The filter is
+      // still not applied here, because these formulas are a full expression
+      // language and a mistranslation would change N in a second, different
+      // way. What travels out is the DISCLOSURE, which is a strict subset of
+      // any fuller answer and so upgrades later without rework.
+      //
+      // UNCONFIRMED INFERENCE, deliberately NOT acted on. The offset advance
+      // below says a filter column occupies a full column of data, and
+      // jamovi's own writer (server/jamovi/server/formatio/omv.py) writes
+      // every non-virtual column's cells through column.raw(i), which would
+      // make these bytes the EVALUATED per-row result, an exact answer with
+      // no formula parser at all. Reading a writer is not the same as reading
+      // a file, and guessing about a row count is precisely the mistake this
+      // disclosure exists to stop. One thing settles it. Open a real
+      // jamovi-authored .omv that has an ACTIVE filter, and confirm this
+      // int32 column reads 1 on the rows jamovi keeps and 0 on the rows it
+      // hides. If it does, this skip becomes a read and the rows arrive
+      // already marked.
+      if (f.columnType === "Filter") {
+        filterColumns.push({ name: String(f.name || ""),
+                             formula: String(f.formula || "").trim(),
+                             active: f.active !== false });
+        off += size * n;
+        continue;
+      }
       var x = xdata[f.name];
       var labelOf = {};
       if (x && Array.isArray(x.labels))
@@ -140,6 +185,26 @@ window.PSOmv = (function () {
                       " \u2192 " + mt + ")");
       }
       types[f.name] = mt;
+      // jamovi's derived columns, which arrive as values and looked exactly
+      // like typed data. Computed carries its own formula; Recoded points at
+      // a transform; Output came out of an analysis. All three go stale the
+      // moment a source value is edited here, and nothing said so.
+      //
+      // The formula is carried out to be LABELLED and never to be re-run.
+      // This app's formula language is a different vocabulary, so translating
+      // one into the other would produce numbers that are wrong without
+      // looking wrong, which is the same trap the filter formulas set.
+      var ctype = String(f.columnType || "Data");
+      if (ctype !== "Data" && ctype !== "None") {
+        // 0 is jamovi's "no transform", so it must never reach the lookup.
+        var tfRef = f.transform ? transforms[f.transform] : null;
+        derivedByCol[f.name] = {
+          kind: ctype,
+          formula: String(f.formula || "").trim() ||
+                   (tfRef ? tfRef.formula : ""),
+          transform: tfRef ? tfRef.name : ""
+        };
+      }
       // jamovi's per-column missing rules. The app has exactly the right
       // field for these and was leaving it empty, so a value the sender had
       // declared missing arrived as ordinary data and was counted in the
@@ -177,7 +242,8 @@ window.PSOmv = (function () {
     var name = String(fileName || "jamovi-data").replace(/\.[^.]+$/, "");
     return { name: name, header: header, rows: rows,
              types: types, levels: levels, unmapped: unmapped,
-             missingByCol: missingByCol, missingSkipped: missingSkipped };
+             missingByCol: missingByCol, missingSkipped: missingSkipped,
+             filterColumns: filterColumns, derivedByCol: derivedByCol };
   }
 
   return { parse: parse, unzip: unzip };

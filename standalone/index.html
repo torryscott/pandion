@@ -1339,6 +1339,11 @@
   .ps-grid-fx[data-fx-error] {
     color: var(--ps-danger-2); background: var(--ps-s3); border-color: #e4bcbc;
   }
+  /* Imported from jamovi and frozen. Same badge, because it IS a computed
+     column, muted because this one does not recompute. */
+  .ps-grid-fx[data-fx-frozen] {
+    color: var(--ps-ink-4); background: var(--ps-s3); border-color: var(--ps-l2b);
+  }
   .ps-litem[data-kind="image"] { cursor: grab; }
   .ps-litem[data-kind="image"] img { user-select: none; }
   .ps-reshape-pickers {
@@ -1875,6 +1880,15 @@
     background: var(--ps-s0); color: var(--ps-warn-ink); cursor: pointer; }
   .ps-var-advice-actions button:hover { background: var(--ps-s2); }
   .ps-var-advice-actions button:active { background: #f5e9cf; }
+  /* Not a warning. A column jamovi derived is not broken and nothing needs
+     fixing, so this takes the same neutral wash the export note uses rather
+     than the amber one the typing advice earns. */
+  .ps-var-derived { font-size: 11.5px; line-height: 1.45; color: var(--ps-ink-4);
+    background: var(--ps-s2); border: 1px solid var(--ps-l1);
+    border-radius: var(--ps-r-md); padding: 7px 9px; }
+  .ps-var-derived code { font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px; background: var(--ps-s0); border: 1px solid var(--ps-l1);
+    border-radius: var(--ps-r-sm); padding: 0 3px; }
   #ps-paste {
     width: 100%; height: 110px; box-sizing: border-box;
     font: 11.5px ui-monospace, Menlo, monospace;
@@ -4067,6 +4081,15 @@
         <div class="ps-inspector-section" id="ps-variable-advice-section"
              style="display:none;">
           <div id="ps-variable-advice" class="ps-var-advice"></div>
+        </div>
+        <!-- A column jamovi computed arrived looking exactly like a typed
+             one. This says who made it, out of what, and that the values are
+             a snapshot rather than something that follows its sources. -->
+        <div class="ps-inspector-section" id="ps-variable-derived-section"
+             style="display:none;">
+          <span class="ps-inspector-section-title"
+                id="ps-variable-derived-title">Computed in jamovi</span>
+          <div id="ps-variable-derived" class="ps-var-derived"></div>
         </div>
         <div class="ps-inspector-section">
           <span class="ps-inspector-section-title">Summary</span>
