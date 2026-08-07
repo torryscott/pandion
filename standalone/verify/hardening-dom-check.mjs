@@ -72,6 +72,14 @@ Object.assign(window, {
     alert: () => {},
     requestAnimationFrame: callback => setTimeout(() => callback(Date.now()), 0),
     cancelAnimationFrame: clearTimeout,
+    // linkedom has no MutationObserver. One shell observer is installed by
+    // an IIFE at boot (the chart toolbar's zoom re-dock), so without a stub
+    // ps-shell.js throws while it is still loading and this probe dies at
+    // exit 1 - which run.sh treats as a real failure, so the WHOLE suite
+    // stops here and nothing after it runs. A no-op is honest: the observer
+    // is a backstop for renders the shell does not drive, and this harness
+    // drives every one of them.
+    MutationObserver: class { observe() {} disconnect() {} takeRecords() { return []; } },
     GraphBuilder2: {
         render(id) {
             const host = document.getElementById(id);
@@ -106,7 +114,8 @@ function evaluate(code) {
         'window', 'document', 'navigator', 'localStorage', 'sessionStorage',
         'Blob', 'FileReader', 'URL', 'DOMParser', 'XMLSerializer',
         'performance', 'requestAnimationFrame', 'cancelAnimationFrame',
-        'setTimeout', 'clearTimeout', 'confirm', 'prompt', 'alert'
+        'setTimeout', 'clearTimeout', 'confirm', 'prompt', 'alert',
+        'MutationObserver'
     ];
     const values = names.map(name => name === 'window' ? window :
         name === 'document' ? document :
