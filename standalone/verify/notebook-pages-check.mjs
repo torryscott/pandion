@@ -126,7 +126,7 @@ await page.click('#ps-pininsp-name');
 await page.type('#ps-pininsp-name', 'The bimodal one', { delay: 2 });
 await page.waitForTimeout(400);
 const named = await page.evaluate(() => ({
-    stored: window.PS_SHELL.project.pinboards.flatMap(b => b.pins)[2].title,
+    stored: window.PS_SHELL.project.pinboards.flatMap(b => b.pins)[2].pageTitle,
     rail: [...document.querySelectorAll('[data-project-pin-id]')]
         .map(r => r.querySelector('.ps-pinrow-name').textContent),
     card: [...document.querySelectorAll('.ps-pinpage-num')].map(n => n.textContent),
@@ -163,7 +163,7 @@ const afterMove = await page.evaluate((id) => {
     const at = bs.findIndex(b => b.pins.some(p => p.id === id));
     const pin = bs[at].pins.find(p => p.id === id);
     return { at: at, active: window.PS_SHELL.project.ui.activeBoard,
-             title: pin.title, note: pin.note || '', kept: !!pin.at,
+             title: pin.pageTitle, note: pin.note || '', kept: !!pin.at,
              counts: bs.map(b => b.pins.length) };
 }, movedId);
 ok(afterMove.at === 1 && afterMove.counts[0] === 2 && afterMove.counts[1] === 2,

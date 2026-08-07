@@ -13342,6 +13342,17 @@
       showToast("Paste an image or text - other clipboard content is not " +
         "supported in layouts.", true);
     });
+    // Notes and titles write on a 600ms debounce, so a reload inside that
+    // window used to lose what had just been typed. Blur flushes it: the
+    // caret leaving the box is the moment the user considers it written.
+    (function flushOnBlur() {
+      var boxes = ["ps-pininsp-bnote", "ps-pininsp-note", "ps-pininsp-name"];
+      for (var i = 0; i < boxes.length; i++)
+        el(boxes[i]).addEventListener("blur", function () {
+          if (PIN_NOTE_T) { clearTimeout(PIN_NOTE_T); PIN_NOTE_T = null; }
+          persist(false);
+        });
+    })();
     el("ps-pininsp-bnote").addEventListener("input", function () {
       activePinBoard().note = this.value;
       if (PIN_NOTE_T) clearTimeout(PIN_NOTE_T);

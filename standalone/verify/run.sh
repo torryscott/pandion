@@ -29,6 +29,7 @@ layout-accessibility-check layout-text-check \
 linked-selection-check motion-check narrow-check novice-affordances-check \
 overlay-reload-check overlay-restore-check pane-debusy-check panel-reveal-check percol-missing-check \
 perf-check pinboard-check polish-check preferences-check \
+notebook-record-check notebook-pages-check notebook-undo-check \
   guide-formulas-check keep-fidelity-check copyformat-check \
 probed-bugs-check provenance-check rail-icons-check punchlist-check reachability-check recents-check reshape-check \
 reflow-accessibility-check \
