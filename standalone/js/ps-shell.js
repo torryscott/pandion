@@ -9269,6 +9269,14 @@
     type = normType(type);
     if (!type || !t || !t.types || !(col in t.types)) return;
     if (t.types[col] === type) return;
+    // A type change can empty a column. "$12.50" and "1,234" parse as nothing,
+    // so a currency or thousands-separated variable flipped to Continuous
+    // loses every value at once, and the only report was Valid 0 in a panel
+    // the user has no reason to be reading. The raw text is kept and one undo
+    // restores the type, so the house answer applies: do it, then say what it
+    // did and carry the way back. Counted BEFORE the change so the comparison
+    // is against what was actually on screen.
+    var wasValid = countValid(t, col);
     dataMark("the type change");
     t.types[col] = type;
     retype(t);
@@ -9276,6 +9284,22 @@
     persist();
     syncAll();
     render();
+    var nowValid = countValid(t, col);
+    var lost = wasValid - nowValid;
+    // A handful is ordinary and saying so every time would be noise. Losing
+    // most of a column is the case worth interrupting for.
+    if (lost > 0 && wasValid > 0 && lost >= Math.max(3, wasValid * 0.5))
+      showToast(col + " is now " + typeLabel(type) + " · " +
+        (lost === wasValid
+          ? "no value could be read that way, so the column is empty"
+          : lost + " of " + wasValid + " values could not be read that way, " +
+            "so " + (lost === 1 ? "it is" : "they are") + " missing now") +
+        " · Cmd/Ctrl+Z puts it back");
+  }
+  function countValid(t, col) {
+    var v = t.columns[col] || [], n = 0;
+    for (var i = 0; i < v.length; i++) if (v[i] != null) n++;
+    return n;
   }
   // ---- editable data grid ----
   // Column names and factor values are DATA - always escaped before
