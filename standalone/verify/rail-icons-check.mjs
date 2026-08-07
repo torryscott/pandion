@@ -148,6 +148,96 @@ ok(tools.chartMatches && tools.notebookMatches,
    'Add chart and From Notebook REUSE the workspace switcher glyphs, ' +
    'stroke for stroke - one icon per idea');
 
+console.log('case 5: notebook sections join the rail between Charts and ' +
+            'Layouts (Torry, Aug 6 2026)');
+await page.evaluate(async () => {
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    window.PS_SHELL.project.pinboards = [
+        { id: 'b1', name: 'Results', pins: [] },
+        { id: 'b2', name: 'Methods', pins: [] },
+    ];
+    window.PS_SHELL.project.ui.activeBoard = 'b1';
+    window.PS_SHELL.setWorkspace('chart');
+    await sleep(400);
+});
+const nav = await page.evaluate(() => {
+    const sig = el => [...el.querySelectorAll('path,rect,circle')]
+        .map(n => n.getAttribute('d') || n.getAttribute('x') ||
+                  n.getAttribute('cx') || '').join('|');
+    return {
+        labels: [...document.querySelectorAll(
+            '#ps-project-nav .ps-project-group-label')]
+            .map(n => n.textContent),
+        boards: [...document.querySelectorAll(
+            '#ps-project-nav [data-project-board-id]')]
+            .map(n => n.textContent.trim()),
+        iconMatches: sig(document.querySelector(
+            '#ps-project-nav [data-project-board-id] svg')) ===
+            sig(document.querySelector(
+                '[data-ps-workspace="pinboard"] svg')),
+    };
+});
+ok(JSON.stringify(nav.labels) ===
+   JSON.stringify(['Charts', 'Notebook', 'Layouts']),
+   `the table of contents reads Charts / Notebook / Layouts ` +
+   `(${nav.labels.join(' / ')})`);
+ok(JSON.stringify(nav.boards) === JSON.stringify(['Results', 'Methods']) &&
+   nav.iconMatches,
+   'the sections list by name with the workspace switcher notebook glyph');
+await page.click('#ps-project-nav [data-project-board-id="b2"]');
+await page.waitForTimeout(500);
+const jumped = await page.evaluate(() => ({
+    ws: window.PS_SHELL.workspace(),
+    board: window.PS_SHELL.project.ui.activeBoard,
+    active: !!document.querySelector(
+        '#ps-project-nav [data-project-board-id="b2"].ps-project-active'),
+}));
+ok(jumped.ws === 'pinboard' && jumped.board === 'b2' && jumped.active,
+   'clicking a section jumps to the Notebook with THAT section open, ' +
+   'row marked active');
+// Parity (Torry, Aug 7 2026): the section rows carry the board TAB's
+// own context menu - rename lands in the Notebook with the inline
+// rename armed; delete works from anywhere.
+await page.evaluate(() => window.PS_SHELL.setWorkspace('chart'));
+await page.waitForTimeout(400);
+await page.evaluate(() => {
+    const row = document.querySelector(
+        '#ps-project-nav [data-project-board-id="b2"]');
+    const r = row.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true,
+        cancelable: true, clientX: r.left + 20, clientY: r.top + 8 }));
+});
+await page.waitForTimeout(300);
+const menu = await page.evaluate(() =>
+    [...document.querySelectorAll('#ps-contextmenu [data-context-action]')]
+        .map(b => b.getAttribute('data-context-action')));
+ok(menu.includes('board-rename') && menu.includes('board-delete'),
+   `the row offers the board tab's own menu (${menu.join(', ')})`);
+await page.click('#ps-contextmenu [data-context-action="board-rename"]');
+await page.waitForTimeout(500);
+ok(await page.evaluate(() => ({
+    ws: window.PS_SHELL.workspace(),
+    input: !!document.querySelector('input[data-board-rename="b2"]'),
+})).then(r => r.ws === 'pinboard' && r.input),
+   'Rename jumps to the Notebook with the inline rename armed on that tab');
+await page.keyboard.press('Escape');
+await page.waitForTimeout(300);
+await page.evaluate(() => window.PS_SHELL.setWorkspace('chart'));
+await page.waitForTimeout(300);
+await page.evaluate(() => {
+    const row = document.querySelector(
+        '#ps-project-nav [data-project-board-id="b2"]');
+    const r = row.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true,
+        cancelable: true, clientX: r.left + 20, clientY: r.top + 8 }));
+});
+await page.waitForTimeout(250);
+await page.click('#ps-contextmenu [data-context-action="board-delete"]');
+await page.waitForTimeout(500);
+ok(await page.evaluate(() =>
+       window.PS_SHELL.project.pinboards.length) === 1,
+   'Delete section works from the rail, from any workspace');
+
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('RAIL ICONS CHECK PASS');
 await browser.close();

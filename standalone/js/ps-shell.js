@@ -17540,6 +17540,11 @@
       '<rect x="9" y="10.5" width="6" height="3.2" rx="0.6" fill="currentColor" stroke="none"/>' +
       '<rect x="5" y="15.5" width="14" height="3.2" rx="0.6" fill="currentColor" stroke="none"/>')
   };
+  // The workspace switcher's notebook glyph, stroke for stroke (the
+  // one-icon-per-idea rule; rail-icons-check compares them).
+  var RAIL_ICON_NOTEBOOK = _railIcon(
+    '<rect x="6" y="3.5" width="13.5" height="17" rx="2"/>' +
+    '<path d="M4 8h4M4 12h4M4 16h4"/>');
   var RAIL_ICON_LAYOUT =
     '<svg class="ps-icn" width="15" height="15" viewBox="0 0 24 24" ' +
     'fill="none" stroke="currentColor" stroke-width="1.8" ' +
@@ -17694,7 +17699,56 @@
       }
       root.appendChild(wrap);
     }
+    function notebookSection() {
+      // The rail is the project's table of contents (Torry, Aug 6 2026):
+      // notebook SECTIONS join it between Charts and Layouts, mirroring
+      // the workspace order, with the cross-workspace jump every other
+      // document row has.
+      var wrap = mkEl("div", "ps-project-group");
+      wrap.appendChild(mkEl("div", "ps-project-group-label", "Notebook"));
+      var boards = pinBoards();
+      for (var i = 0; i < boards.length; i++) (function (b) {
+        var row = mkEl("button", "ps-project-item" +
+          (appWorkspace() === "pinboard" && activePinBoard().id === b.id
+           ? " ps-project-active" : ""));
+        row.type = "button";
+        row.setAttribute("data-project-board-id", b.id);
+        setTip(row, b.name + " - " + b.pins.length +
+          (b.pins.length === 1 ? " page" : " pages"));
+        var ico = mkEl("span", "ps-nav-icon");
+        ico.innerHTML = RAIL_ICON_NOTEBOOK;
+        row.appendChild(ico);
+        row.appendChild(mkEl("span", "", b.name));
+        row.addEventListener("click", function () {
+          narrowCloseAfterNavigation();
+          (PROJECT.ui = PROJECT.ui || {}).activeBoard = b.id;
+          persist(false);
+          setAppWorkspace("pinboard");
+        });
+        // The same menu the board TAB offers (Torry, Aug 7 2026: the
+        // rail rows for charts and layouts have their document menus;
+        // sections deserve parity, mirrored - never invented). Rename
+        // jumps to the Notebook first: the inline rename input lives in
+        // that workspace's tab strip.
+        row.addEventListener("contextmenu", function (e) {
+          e.preventDefault();
+          showContextMenu(e.clientX, e.clientY, [
+            { label: "Rename section\u2026", key: "board-rename",
+              action: function () {
+                BOARD_RENAME = b.id;
+                (PROJECT.ui = PROJECT.ui || {}).activeBoard = b.id;
+                setAppWorkspace("pinboard");
+              } },
+            { label: "Delete section", key: "board-delete",
+              action: function () { deletePinBoard(b.id); } }
+          ], null);
+        });
+        wrap.appendChild(row);
+      })(boards[i]);
+      root.appendChild(wrap);
+    }
     chartsSection();
+    notebookSection();
     layoutsSection();
   }
   function inspectorStat(label, value) {

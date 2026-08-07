@@ -104,13 +104,18 @@ await page.waitForTimeout(400);
         statusbar: !!document.querySelector('.ps-statusbar'),
         workspace: window.PS_SHELL.workspace(),
         title: document.getElementById('ps-doc-name').textContent,
-        projectItems: document.querySelectorAll('#ps-project-nav .ps-project-item').length
+        chartItems: document.querySelectorAll(
+            '#ps-project-nav [data-project-chart-id]').length,
+        boardItems: document.querySelectorAll(
+            '#ps-project-nav [data-project-board-id]').length
     }));
     ok(shell.appbar && shell.toolbar && shell.projectPanel &&
        shell.inspector && shell.statusbar,
        'persistent application chrome is present');
+    // Aug 6 2026: the navigator is the full table of contents - the chart
+    // AND the notebook's default section.
     ok(shell.workspace === 'chart' && shell.title === 'Dose response study' &&
-       shell.projectItems === 1,
+       shell.chartItems === 1 && shell.boardItems === 1,
        'project identity and navigator reflect the active sample project');
     ok(await page.evaluate(() =>
         document.getElementById('ps-welcome').style.display === 'none' &&
