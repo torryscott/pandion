@@ -96,9 +96,16 @@ of the eleven scripts it loads, where `<hash>` is the first 10 hex
 digits of the file's MD5. Consequences worth knowing:
 
 - A URL under `app/lib/` can never change its bytes, so `_headers`
-  serves it `max-age=31536000, immutable`. A repeat visitor, or anyone
-  arriving after a release that only touched the shell, re-downloads
-  none of the engine.
+  caches it and a repeat visitor, or anyone arriving after a release
+  that only touched the shell, re-downloads none of the engine. The TTL
+  is one day and deliberately NOT `immutable`, which is a deliberate
+  step down from the year it used to be: `_headers` applies to whatever
+  the edge returns, a deploy race can make an edge 404 a hashed script
+  the new shell already references, and in Aug 2026 such a 404 was
+  observed cached with `cf-cache-status: HIT` and a one-year immutable
+  TTL. A day bounds that, and without `immutable` an affected visitor
+  can recover with a reload. If `/app/` ever looks broken right after a
+  deploy, purge the Cloudflare cache before assuming the build is bad.
 - `app/index.html` is served `must-revalidate`. It must be, since a
   cached shell would point at hashed names a later deploy has pruned.
 - Rebuilds are idempotent (unchanged sources keep their filenames) and

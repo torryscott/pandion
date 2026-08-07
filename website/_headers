@@ -7,12 +7,21 @@
   Permissions-Policy: camera=(), geolocation=(), microphone=()
 
 # The web app's scripts carry a content hash in the filename (see
-# build.sh), so a given URL's bytes can never change. Cache them for a
-# year and skip the revalidation round trip entirely: a repeat visitor,
-# and anyone arriving after a release that only touched the shell,
+# build.sh), so a given URL's bytes can never change, and a repeat visitor
 # re-downloads nothing of the 2.1 MB chart engine.
+#
+# A day rather than a year, and deliberately NOT immutable. These headers
+# apply to whatever the edge returns, including a 404, and during a deploy
+# an edge can briefly hold the new shell HTML while the hashed script it
+# asks for has not landed yet. That 404 was observed being cached with
+# `cf-cache-status: HIT` and a one-year immutable TTL (Aug 2026), which
+# means some visitors get a broken app and it cannot heal on its own.
+# One day bounds that to a day, and dropping `immutable` lets a reload
+# revalidate, so an affected visitor can recover by refreshing. The cost
+# is one conditional request per file per day, which is nothing next to
+# shipping a dead app to a share of users for a year.
 /app/lib/*
-  Cache-Control: public, max-age=31536000, immutable
+  Cache-Control: public, max-age=86400
 
 # The shell must never be cached hard, or a visitor keeps an old page
 # pointing at script names that a later deploy has already pruned.
