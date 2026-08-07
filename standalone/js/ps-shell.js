@@ -837,18 +837,32 @@
     gt: { label: ">", num: true, cat: false },
     ge: { label: "\u2265", num: true, cat: false },
     lt: { label: "<", num: true, cat: false },
-    le: { label: "\u2264", num: true, cat: false }
+    le: { label: "\u2264", num: true, cat: false },
+    // "Which rows are incomplete" had no answer anywhere. Find matches no
+    // blanks, the Missing count in the panel is not a link, and the only
+    // working route was sorting a column ascending, which is one column at a
+    // time and permanently reorders the dataset to answer a read-only
+    // question. These two take no value, which is why every value test below
+    // has to exempt them.
+    nul: { label: "is missing", num: true, cat: true, noValue: true },
+    nnul: { label: "is not missing", num: true, cat: true, noValue: true }
   };
+  function filterNeedsValue(op) {
+    return !(FILTER_OPS[op] && FILTER_OPS[op].noValue);
+  }
   function validFilters(t) {
     if (!t || !Array.isArray(t.filters)) return [];
     return t.filters.filter(function (f) {
       return f && f.col && t.raw && t.raw[f.col] && FILTER_OPS[f.op] &&
-        String(f.value == null ? "" : f.value) !== "";
+        (!filterNeedsValue(f.op) ||
+         String(f.value == null ? "" : f.value) !== "");
     });
   }
   function filterSummaryText(t) {
     return validFilters(t).map(function (f) {
       var num = colStoresNumbers(t, f.col);
+      if (!filterNeedsValue(f.op))
+        return f.col + " " + FILTER_OPS[f.op].label;
       return f.col + " " + FILTER_OPS[f.op].label + " " +
         (num ? String(f.value) : '"' + String(f.value) + '"');
     }).join(" and ");
@@ -876,6 +890,13 @@
       for (var f = 0; f < fs.length && !out; f++) {
         var flt = fs[f];
         var v = t.columns[flt.col] ? t.columns[flt.col][i] : null;
+        // Asked BEFORE the rule below, because these two operators exist to
+        // talk about exactly the case it discards. A row kept by "is missing"
+        // was not dropped for missingness and must not be counted as such.
+        if (!filterNeedsValue(flt.op)) {
+          if ((flt.op === "nul") !== (v == null)) out = true;
+          continue;
+        }
         // B6. A row whose filter column is MISSING is dropped, and the note
         // named only the conditions and counts, so a reader attributed every
         // dropped row to the stated threshold. The rule is unchanged (a row
@@ -11858,7 +11879,7 @@
     var t = PROJECT.table, n = nRows(t), kept = 0;
     var fs = FILTER_DRAFT.filter(function (f) {
       return f.col && t.raw[f.col] && FILTER_OPS[f.op] &&
-        String(f.value) !== "";
+        (!filterNeedsValue(f.op) || String(f.value) !== "");
     });
     if (!fs.length) return n;
     var saved = t.filters;
@@ -11931,7 +11952,11 @@
           opSel.appendChild(oo);
         }
         opSel.addEventListener("change", function () {
-          f.op = this.value; refreshFilterCount();
+          f.op = this.value;
+          // Rebuilt, not just recounted, because the value box appears and
+          // disappears with the operator.
+          renderFilterMenu();
+          refreshFilterCount();
         });
         row.appendChild(opSel);
         var valueEl;
@@ -11975,6 +12000,8 @@
         }
         valueEl.setAttribute("aria-label",
           "Filter " + (idx + 1) + " value");
+        // An operator that takes no value must not show a box inviting one.
+        if (!filterNeedsValue(f.op)) valueEl.style.display = "none";
         row.appendChild(valueEl);
         var strayVal = String(f.value) !== "" && !num && lv && lv.length &&
           lv.indexOf(String(f.value)) === -1;
@@ -12016,7 +12043,9 @@
     clear.type = "button";
     clear.setAttribute("data-filter-clear", "");
     clear.disabled = !validFilters(t).length &&
-      !FILTER_DRAFT.some(function (f) { return String(f.value) !== ""; });
+      !FILTER_DRAFT.some(function (f) {
+        return !filterNeedsValue(f.op) || String(f.value) !== "";
+      });
     clear.addEventListener("click", function () { applyFilters(true); });
     actions.appendChild(clear);
     var count = mkEl("span", "ps-filter-count", "");
@@ -12039,8 +12068,9 @@
     var t = PROJECT.table;
     var next = clearAll ? [] : FILTER_DRAFT.filter(function (f) {
       return f.col && t.raw[f.col] && FILTER_OPS[f.op] &&
-        String(f.value) !== "";
+        (!filterNeedsValue(f.op) || String(f.value) !== "");
     }).map(function (f) {
+      if (!filterNeedsValue(f.op)) return { col: f.col, op: f.op, value: "" };
       return { col: f.col, op: f.op,
                value: colStoresNumbers(t, f.col) ? Number(f.value)
                                                  : String(f.value) };

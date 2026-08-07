@@ -23,7 +23,8 @@ empty-states-check engine-stamp-check flyout-align-check filter-honesty-check ex
 findpop-check fitpanes-check \
 grid-keys-check help-check hierarchy-check hidden-selection-check \
 identifier-advice-check inspector-freshness-check menu-selection-check \
-missing-codes-check header-row-check level-variants-check typechange-cost-check \
+missing-codes-check header-row-check level-variants-check typechange-cost-check  \
+missing-filter-check \
 grid-accessibility-check \
 help-me-choose-check import-errors-check layout-image-check modal-accessibility-check \
 layout-arrange-check layout-clipboard-check layout-orientation-check layout-rail-check layout-selectall-check layout-reuse-check layout-undo-check library-bridge-check \
