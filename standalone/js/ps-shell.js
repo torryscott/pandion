@@ -6778,6 +6778,7 @@
       captureChartSnapshot(c.id);
     }
     applyViewZoom();
+    scheduleChartCheck();
   }
 
   // ---- chart snapshots for layouts (session cache, chrome-stripped) ----
@@ -19376,6 +19377,7 @@
     syncContextInspector();
     syncProjectNavigator();
     updateDocumentState();
+    syncChartCheck();
   }
 
   // Punch list 37: real instrumentation for the chart workspace, read from the
@@ -19532,6 +19534,66 @@
   // has actually drawn: only a finished chart can say whether a part sits
   // outside the canvas, and a legend drag commits no size option, so
   // nothing else in the sync path would ever refresh it.
+  // ---- the chart-check receipt -----------------------------------------
+  // The engine already judges a chart against its graph type's rubric
+  // (Help > Check my chart). It only ever spoke when asked, so a chart
+  // could carry a truncated bar baseline, or a significance star with no
+  // test behind it, and every surface in the app stayed silent - while
+  // the export carried the claim.
+  //
+  // This asks the engine the same question after each render and puts the
+  // answer where the user is already looking. ONE judgment, in the engine,
+  // read through the host hook __gb2_graphLint - never a second copy in the
+  // shell, which would drift. Clean charts get a muted receipt rather than
+  // nothing, so the feature is discoverable before it has bad news; a
+  // finding turns it amber, which is the colour the panel itself uses.
+  var CHECK_TIMER = null;
+  function scheduleChartCheck() {
+    if (CHECK_TIMER) clearTimeout(CHECK_TIMER);
+    // After the render settles. The lint reads rendered geometry (colours
+    // off legend swatches, tick labels off the axes), so it must run on a
+    // painted chart, and a burst of style commits should cost one pass.
+    CHECK_TIMER = setTimeout(syncChartCheck, 260);
+  }
+  function chartCheckReport() {
+    if (appWorkspace() !== "chart") return null;
+    var doc = workspaceDocument("chart");
+    if (!doc || isLayoutTab(doc)) return null;
+    var host = hostEl();
+    if (!host || typeof host.__gb2_graphLint !== "function") return null;
+    if (!host.querySelector("svg")) return null;   // guided empty state
+    try { return host.__gb2_graphLint(); } catch (e) { return null; }
+  }
+  function syncChartCheck() {
+    CHECK_TIMER = null;
+    var btn = el("ps-status-check");
+    if (!btn) return;
+    var rep = chartCheckReport();
+    var found = rep && Array.isArray(rep.findings) ? rep.findings : null;
+    if (!rep || !found) { btn.hidden = true; return; }
+    var i;
+    btn.hidden = false;
+    if (!found.length) {
+      btn.setAttribute("data-state", "ok");
+      btn.textContent = "Checks passed";
+      setTip(btn, "This chart was run against " + rep.total +
+        " checks for its graph type and passed them all. Click to read them.");
+      return;
+    }
+    btn.setAttribute("data-state", "warn");
+    btn.textContent = found.length === 1
+      ? "1 thing to check"
+      : found.length + " things to check";
+    // Name the worst one in the tooltip: a bare count makes the user click
+    // to find out whether it matters.
+    var lead = null;
+    for (i = 0; i < found.length; i++)
+      if (found[i].sev === "warn") { lead = found[i]; break; }
+    if (!lead) lead = found[0];
+    setTip(btn, lead.title + (found.length > 1
+      ? " (and " + (found.length - 1) + " more)" : "") +
+      ". Click to open Check my chart.");
+  }
   function syncFitSizeRow() {
     var fitBox = el("ps-fit-pane");
     if (!fitBox) return;
@@ -23328,6 +23390,12 @@
       render();
     });
     el("ps-save").addEventListener("click", saveProjectFile);
+    // The receipt IS the way in: it names what it found and opens the
+    // panel that explains it. Same route the Help menu takes, so there is
+    // one path to the panel, not two.
+    el("ps-status-check").addEventListener("click", function () {
+      openEngineHelp("graphLint");
+    });
     // Cmd/Ctrl+S saves the project (window CAPTURE so it beats the
     // browser's own save-page dialog everywhere, including inputs).
     window.addEventListener("keydown", function (e) {

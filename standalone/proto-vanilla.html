@@ -1339,11 +1339,6 @@
   .ps-grid-fx[data-fx-error] {
     color: var(--ps-danger-2); background: var(--ps-s3); border-color: #e4bcbc;
   }
-  /* Imported from jamovi and frozen. Same badge, because it IS a computed
-     column, muted because this one does not recompute. */
-  .ps-grid-fx[data-fx-frozen] {
-    color: var(--ps-ink-4); background: var(--ps-s3); border-color: var(--ps-l2b);
-  }
   .ps-litem[data-kind="image"] { cursor: grab; }
   .ps-litem[data-kind="image"] img { user-select: none; }
   .ps-reshape-pickers {
@@ -1390,15 +1385,6 @@
     cursor: pointer;
   }
   .ps-formula-templates button:hover { background: #dfeafc; }
-  /* The picker that says WHICH column the transforms beside it apply to. It
-     is the same chip as its sibling buttons, minus the appearance reset, so
-     the browser keeps drawing an arrow and it still reads as a choice. */
-  #ps-formula-source {
-    font-family: inherit; font-size: 11.5px; color: var(--ps-accent-press);
-    background: var(--ps-s2); border: 1px solid var(--ps-tint-line-2);
-    border-radius: var(--ps-r-md); padding: 2px 4px; margin-right: 4px;
-    max-width: 190px; cursor: pointer;
-  }
   #ps-formula-input {
     font-family: ui-monospace, Menlo, monospace; font-size: 12.5px;
     width: 100%; box-sizing: border-box; border: 1px solid var(--ps-l3);
@@ -1889,15 +1875,6 @@
     background: var(--ps-s0); color: var(--ps-warn-ink); cursor: pointer; }
   .ps-var-advice-actions button:hover { background: var(--ps-s2); }
   .ps-var-advice-actions button:active { background: #f5e9cf; }
-  /* Not a warning. A column jamovi derived is not broken and nothing needs
-     fixing, so this takes the same neutral wash the export note uses rather
-     than the amber one the typing advice earns. */
-  .ps-var-derived { font-size: 11.5px; line-height: 1.45; color: var(--ps-ink-4);
-    background: var(--ps-s2); border: 1px solid var(--ps-l1);
-    border-radius: var(--ps-r-md); padding: 7px 9px; }
-  .ps-var-derived code { font-family: ui-monospace, "SF Mono", Menlo, monospace;
-    font-size: 11px; background: var(--ps-s0); border: 1px solid var(--ps-l1);
-    border-radius: var(--ps-r-sm); padding: 0 3px; }
   #ps-paste {
     width: 100%; height: 110px; box-sizing: border-box;
     font: 11.5px ui-monospace, Menlo, monospace;
@@ -1937,25 +1914,6 @@
     border-radius: var(--ps-r-sm); font-size: 10px;
   }
   .ps-import-warning { color: #a14d30; }
-  /* The same amber the variable advice card uses, for the same reason: the
-     app has made a call worth checking and is offering a way through, and a
-     second colour for the same idea would teach two things where there is
-     one. Tokens only, no new values. */
-  .ps-import-guess {
-    display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
-    font-size: 11.5px; line-height: 1.5; color: var(--ps-warn-ink);
-    background: var(--ps-warn-wash); border-bottom: 1px solid var(--ps-warn-line);
-    border-left: 3px solid var(--ps-warn); padding: 8px 10px;
-  }
-  .ps-import-guess > div { flex: 1 1 220px; min-width: 0; }
-  .ps-import-guess strong { font-weight: 650; }
-  .ps-import-guess button {
-    font: inherit; font-size: 11.5px; padding: 3px 9px; flex: 0 0 auto;
-    border-radius: var(--ps-r-sm); border: 1px solid #c9a961;
-    background: var(--ps-s0); color: var(--ps-warn-ink); cursor: pointer;
-  }
-  .ps-import-guess button:hover { background: var(--ps-s2); }
-  .ps-import-guess button:active { background: #f5e9cf; }
   .ps-import-sheets {
     display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
     margin: 0 0 8px;
@@ -2496,13 +2454,6 @@
     flex: 1 1 auto;
     min-width: 0; overflow: hidden; text-overflow: ellipsis;
     padding: 5px 8px; font-size: 10.5px; white-space: nowrap;
-  }
-  /* How many rows each category holds. Quiet, right-aligned and tabular so
-     the numbers line up as a readable column down the list. */
-  .ps-level-order .ps-level-count {
-    flex: 0 0 auto; padding: 5px 8px 5px 4px;
-    font-size: 10.5px; color: var(--ps-muted);
-    font-variant-numeric: tabular-nums;
   }
   .ps-level-reset {
     display: none; margin-top: 7px; padding: 0; color: #557391;
@@ -4105,23 +4056,9 @@
              style="display:none;">
           <div id="ps-variable-advice" class="ps-var-advice"></div>
         </div>
-        <!-- A column jamovi computed arrived looking exactly like a typed
-             one. This says who made it, out of what, and that the values are
-             a snapshot rather than something that follows its sources. -->
-        <div class="ps-inspector-section" id="ps-variable-derived-section"
-             style="display:none;">
-          <span class="ps-inspector-section-title"
-                id="ps-variable-derived-title">Computed in jamovi</span>
-          <div id="ps-variable-derived" class="ps-var-derived"></div>
-        </div>
         <div class="ps-inspector-section">
           <span class="ps-inspector-section-title">Summary</span>
           <div id="ps-variable-stats" class="ps-inspector-stats"></div>
-          <!-- Which table these numbers describe. Only ever shown while a row
-               filter is on, because with no filter there is only one answer
-               and saying it would be noise. -->
-          <div id="ps-variable-basis" class="ps-loader-hint"
-               style="display:none;"></div>
         </div>
         <div class="ps-inspector-section" id="ps-variable-level-section">
           <span class="ps-inspector-section-title" id="ps-variable-level-title">Levels</span>
@@ -4916,19 +4853,13 @@
       </label>
       <div class="ps-formula-help">Functions: LOG10, LN, SQRT, ABS, EXP, ROUND,
         FLOOR, CEILING, IF(test, then, else), BIN(column, k) &#183;
-        Missing values: ISMISSING(x), COALESCE(x, fallback) &#183;
-        Text: TRIM, UPPER, LOWER, LEN, CONTAINS(text, part) &#183;
         Aggregates: MEAN, SD, MEDIAN, MIN, MAX, SUM, N &#183;
         Operators: + - * / ^ == != &lt; &lt;= &gt; &gt;= AND OR NOT</div>
       <div id="ps-formula-msg" aria-live="polite"></div>
       <div id="ps-formula-preview"></div>
     </div>
     <div class="ps-dialog-actions">
-      <!-- One way out, not two. The header Close is the app's universal
-           dismiss (every dialog carries it, and the image-size and
-           diagnostics dialogs carry ONLY it), so the footer Cancel beside it
-           was a second control doing the identical job. The footer now holds
-           the decision alone. -->
+      <button type="button" class="ps-btn" id="ps-formula-cancel">Cancel</button>
       <button type="button" class="ps-btn ps-primary"
               id="ps-formula-save">Save variable</button>
     </div>
@@ -5443,7 +5374,7 @@
 <script src="js/ps-data.js"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
 <script src="vendor/svg2pdf.umd.min.js"></script>
-<script src="../inst/widget/graphbuilder2.min.js"></script>
+<script src="scratchpad/engine-vanilla.js"></script>
 <script src="js/ps-shell.js"></script>
 <script src="js/ps-tour.js"></script>
 </body>

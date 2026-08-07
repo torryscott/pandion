@@ -1,0 +1,85 @@
+--- inst/widget/graphbuilder2.js	2026-08-06 22:50:22
++++ /private/tmp/claude-503/-Users-tsdennis-Desktop-plotstudio/c063bf30-d7d6-44b9-aefc-b06178ec780d/scratchpad/proto/engine-patched.js	2026-08-07 14:03:15
+@@ -10800,6 +10800,15 @@
+         try {
+             host.__gb2_serializeSvg = serializeSvgForExport;
+             host.__gb2_harvestClone = _gb2HarvestClone;
++            // Host hook (Aug 2026): let a host shell ASK what the Check
++            // graph panel would say, without opening it. Returns the same
++            // {findings, passed, total} report renderInspectorGraphLint
++            // draws, so there is exactly one judgment and no second copy to
++            // drift. jamovi never calls this; the standalone uses it to put
++            // a quiet count where the user is already looking.
++            host.__gb2_graphLint = function () {
++                try { return _graphLintFindings(); } catch (_eGl) { return null; }
++            };
+             host.__gb2_accessibleDescription = function () {
+                 return _gb2ChartAriaLabel(data, true);
+             };
+@@ -49304,8 +49313,14 @@
+                     out.push({ id: "ebnote", sev: "tip", title: "The note does not say what the error bars show", why: "Your figure note does not mention whether the bars are standard errors, standard deviations, or confidence intervals - and each means something different. A line like 'Error bars show " + _ebW + ".' completes it.", fixGt: null });
+                 }
+             }
+-            var _abCount = 0;
++            var _abCount = 0, _bkAnyBracket = false;
+             (function () {
++                var _bs = Array.isArray(data.annotations) ? data.annotations : [];
++                for (var _bi = 0; _bi < _bs.length; _bi++)
++                    if (_bs[_bi] && (_bs[_bi].kind === "bracket" || _bs[_bi].type === "bracket"))
++                        _bkAnyBracket = true;
++            })();
++            (function () {
+                 var anns = Array.isArray(data.annotations) ? data.annotations : [];
+                 for (var ai3 = 0; ai3 < anns.length; ai3++) {
+                     var a3 = anns[ai3]; if (!a3) continue;
+@@ -49315,6 +49330,42 @@
+                     var _corr3 = (typeof data.autoPCorrection === "string") ? data.autoPCorrection : "none";
+                     if (_corr3 === "" || _corr3 === "none")
+                         out.push({ id: "bracketcorr", sev: "tip", title: _abCount + " significance tests without a correction", why: "Each bracket runs its own test, so with " + _abCount + " tests the chance of at least one false positive grows well past 5%. Pick a correction in the bracket panel's p-value settings, or say in the caption that the p values are uncorrected.", fixGt: null });
++                }
++            })();
++            // A bracket whose LABEL claims significance that nothing
++            // computed. "+ Add > Sig. bracket" drops a bracket reading "*"
++            // with autoPValue off and no anchors, so the asterisk is a
++            // placeholder glyph - but it exports, and every reader takes an
++            // asterisk over a bracket to mean a test came out below .05.
++            // A test is behind the label only when auto-p is on AND both
++            // legs are anchored to cells (or it is a main-effect bracket,
++            // which spans a whole factor). A label the user typed that does
++            // not read as a significance claim ("Delta = 4.2") is their
++            // business and is left alone.
++            (function () {
++                var anns = Array.isArray(data.annotations) ? data.annotations : [];
++                var claimed = 0, sample = "";
++                for (var ac = 0; ac < anns.length; ac++) {
++                    var an = anns[ac]; if (!an) continue;
++                    if (an.kind !== "bracket" && an.type !== "bracket") continue;
++                    var anchored = !!(an.anchorLeftCat && an.anchorRightCat) ||
++                        _isMainEffectAnn(an);
++                    if (an.autoPValue === true && anchored) continue;
++                    var lab = (typeof an.text === "string") ? an.text.trim() : "";
++                    if (!lab) continue;
++                    var isClaim = /^[*\u2020\u2021]{1,4}$/.test(lab) ||
++                        /\bp\s*[<>=]/i.test(lab) ||
++                        /^n\.?\s*s\.?$/i.test(lab);
++                    if (!isClaim) continue;
++                    claimed++; if (!sample) sample = lab;
++                }
++                if (claimed > 0) {
++                    out.push({ id: "brackclaim", sev: "warn",
++                        title: claimed === 1
++                            ? "A bracket says \"" + sample + "\" but no test was run"
++                            : claimed + " brackets show significance marks that no test produced",
++                        why: "A bracket labelled \"" + sample + "\" reads as a test result, and it will look like one in the exported figure, but nothing on this chart computed it. Open the bracket, turn on \"Auto-compute p-value from raw data\" and drag each leg onto a bar, or use the Statistics panel's Compare pairs tab, which runs every test and places the brackets for you. If the label is meant as a plain annotation, give it wording that does not read as a p-value.",
++                        fixGt: null });
+                 }
+             })();
+             // --- The complement of bracketcorr: a correction IS applied
+@@ -49650,6 +49701,7 @@
+                 { id: "chisqexp", name: "Chi-square expected counts", tip: "The chi-square approximation needs expected counts of about 5 or more per cell.", applies: _mk === "freq" && Array.isArray(data.freqTests) && data.freqTests.length > 0 },
+                 { id: "corrn", name: "Pairs behind each correlation", tip: "Correlations built on very few complete pairs swing wildly from sample to sample.", applies: gt.indexOf("corr") === 0 && Array.isArray(data.corrCells) && data.corrCells.length > 0 },
+                 { id: "corrmany", name: "Many-tests caveat", tip: "Testing many correlations at once produces some false alarms by chance.", applies: false },
++                { id: "brackclaim", name: "Significance marks are earned", tip: "Every bracket showing a star or a p value should have a computed test behind it, not a typed placeholder.", applies: _bkAnyBracket },
+                 { id: "bracketcorr", name: "Multiple-comparisons handling", tip: "Several significance brackets call for a correction, or a stated caveat.", applies: _abCount >= 1 },
+                 { id: "likertn", name: "Responses per item", tip: "Items answered by very few people have unstable percentages.", applies: gt.indexOf("likert") === 0 },
+                 { id: "likshort", name: "Means on a short scale", tip: "Averaging a very short rating scale hides the response mix behind one number.", applies: gt === "likertmeans" && Array.isArray(data.likertLevels) && data.likertLevels.length >= 2 },
