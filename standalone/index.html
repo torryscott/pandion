@@ -2609,6 +2609,22 @@
   }
   .ps-inspector-align { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
   .ps-inspector-align .ps-btn { padding: 4px 3px; font-size: 10px; }
+  /* A disabled geometry field must not look like a live one. */
+  .ps-inspector-field input:disabled {
+    color: var(--ps-muted); background: var(--ps-s2); cursor: default;
+  }
+  .ps-inspector-plotalign { margin-top: 7px; }
+  .ps-inspector-plotalign-row {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px;
+  }
+  .ps-inspector-plotalign-row .ps-btn { padding: 4px 3px; font-size: 10px; }
+  /* The section title's own vocabulary, one notch quieter: this labels a
+     row inside a section rather than the section itself. */
+  .ps-inspector-sublabel {
+    display: block; margin: 0 0 4px; color: var(--ps-muted);
+    font-size: 10px; font-weight: 700; letter-spacing: 0.45px;
+    text-transform: uppercase;
+  }
   .ps-grid-table th.ps-grid-col-active {
     color: var(--ps-accent-ink); background: var(--ps-s3); box-shadow: inset 0 -2px var(--ps-accent);
   }
@@ -4385,6 +4401,23 @@
             <button type="button" class="ps-btn" data-ctx-align="top">Top</button>
             <button type="button" class="ps-btn" data-ctx-align="vcenter">Middle</button>
             <button type="button" class="ps-btn" data-ctx-align="bottom">Bottom</button>
+          </div>
+          <!-- Plot areas. Aligning panel BOXES lines up rectangles; a reader
+               sees the axes. A panel box carries its tick labels, so two
+               equally sized panels put their axes in different places and a
+               grid that is exactly aligned still looks crooked. These two
+               move panels so the drawn plots line up instead. Shown only
+               when the selection actually holds two chart panels that share
+               a column (or a row), which is when the action can do
+               something. -->
+          <div class="ps-inspector-plotalign" style="display:none;">
+            <span class="ps-inspector-sublabel">Plot areas</span>
+            <div class="ps-inspector-plotalign-row">
+              <button type="button" class="ps-btn"
+                      data-ctx-plotalign="left">Left axes</button>
+              <button type="button" class="ps-btn"
+                      data-ctx-plotalign="bottom">Baselines</button>
+            </div>
           </div>
         </div>
       </div>

@@ -3451,6 +3451,91 @@
       } catch (e) { reject(e); }
     });
   }
+  // ---- Physical resolution in the file, not just in the dialog.
+  // "Print - 300 DPI" produced a 3150x2100 canvas with NO density metadata,
+  // so Word, Photoshop and every journal submission checker read the file at
+  // the default 72 or 96 dpi and reported it as a 33 to 44 inch figure that
+  // had to be resampled by hand. The pixels were always right; only the
+  // declared size was missing. Canvas cannot write this, so the encoded
+  // bytes are patched after toBlob: a pHYs chunk for PNG, the JFIF density
+  // fields for JPEG. Both are single, well-defined edits on a file the
+  // browser just produced, and both no-op safely on anything unexpected.
+  var PS_CRC_TABLE = null;
+  function psCrc32(bytes, from, to) {
+    var i, j, c;
+    if (!PS_CRC_TABLE) {
+      PS_CRC_TABLE = new Int32Array(256);
+      for (i = 0; i < 256; i++) {
+        c = i;
+        for (j = 0; j < 8; j++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+        PS_CRC_TABLE[i] = c;
+      }
+    }
+    c = -1;
+    for (i = from; i < to; i++)
+      c = PS_CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ -1) >>> 0;
+  }
+  function psPngWithDpi(bytes, dpi) {
+    var sig = [137, 80, 78, 71, 13, 10, 26, 10], i;
+    for (i = 0; i < 8; i++) if (bytes[i] !== sig[i]) return null;
+    // Walk to the first chunk that pHYs must precede, and bail if the file
+    // already declares a density (nothing to correct, and never two).
+    var at = 8, insertAt = -1;
+    while (at + 8 <= bytes.length) {
+      var len = (bytes[at] << 24 | bytes[at + 1] << 16 |
+                 bytes[at + 2] << 8 | bytes[at + 3]) >>> 0;
+      var type = String.fromCharCode(bytes[at + 4], bytes[at + 5],
+                                     bytes[at + 6], bytes[at + 7]);
+      if (type === "pHYs") return null;
+      if (type === "IDAT" || type === "IEND") { insertAt = at; break; }
+      at += 12 + len;
+    }
+    if (insertAt < 0) return null;
+    var ppu = Math.round((Number(dpi) || 96) / 0.0254);
+    var chunk = new Uint8Array(21);
+    chunk[0] = 0; chunk[1] = 0; chunk[2] = 0; chunk[3] = 9;
+    chunk[4] = 112; chunk[5] = 72; chunk[6] = 89; chunk[7] = 115;   // pHYs
+    chunk[8] = ppu >>> 24 & 255; chunk[9] = ppu >>> 16 & 255;
+    chunk[10] = ppu >>> 8 & 255; chunk[11] = ppu & 255;
+    chunk[12] = ppu >>> 24 & 255; chunk[13] = ppu >>> 16 & 255;
+    chunk[14] = ppu >>> 8 & 255; chunk[15] = ppu & 255;
+    chunk[16] = 1;                                                   // metres
+    var crc = psCrc32(chunk, 4, 17);
+    chunk[17] = crc >>> 24 & 255; chunk[18] = crc >>> 16 & 255;
+    chunk[19] = crc >>> 8 & 255; chunk[20] = crc & 255;
+    var out = new Uint8Array(bytes.length + 21);
+    out.set(bytes.subarray(0, insertAt), 0);
+    out.set(chunk, insertAt);
+    out.set(bytes.subarray(insertAt), insertAt + 21);
+    return out;
+  }
+  function psJpegWithDpi(bytes, dpi) {
+    // Canvas writes a standard JFIF APP0 straight after SOI, carrying
+    // units 0 (pixel aspect only) and 1x1. Rewrite those five bytes.
+    if (bytes[0] !== 0xFF || bytes[1] !== 0xD8) return null;
+    if (bytes[2] !== 0xFF || bytes[3] !== 0xE0) return null;
+    if (!(bytes[4] << 8 | bytes[5]) || bytes[6] !== 0x4A ||
+        bytes[7] !== 0x46 || bytes[8] !== 0x49 || bytes[9] !== 0x46 ||
+        bytes[10] !== 0) return null;
+    var d = Math.max(1, Math.min(65535, Math.round(Number(dpi) || 96)));
+    var out = new Uint8Array(bytes);
+    out[13] = 1;                                       // units: dots per inch
+    out[14] = d >>> 8 & 255; out[15] = d & 255;        // Xdensity
+    out[16] = d >>> 8 & 255; out[17] = d & 255;        // Ydensity
+    return out;
+  }
+  function psStampBlobDpi(blob, mime, dpi) {
+    if (!blob || !blob.arrayBuffer) return Promise.resolve(blob);
+    return blob.arrayBuffer().then(function (buf) {
+      var bytes = new Uint8Array(buf), out = null;
+      try {
+        out = mime === "image/png" ? psPngWithDpi(bytes, dpi)
+            : mime === "image/jpeg" ? psJpegWithDpi(bytes, dpi) : null;
+      } catch (e) { out = null; }
+      return out ? new Blob([out], { type: mime }) : blob;
+    }, function () { return blob; });
+  }
   function rasterizeExport(source, mime, dpi) {
     return new Promise(function (resolve, reject) {
       var scale = (Number(dpi) || 96) / 96;
@@ -3477,7 +3562,9 @@
         catch (e) { reject(new Error("The browser could not render the exported SVG.")); return; }
         canvas.toBlob(function (blob) {
           if (!blob) { reject(new Error("The browser could not encode the exported image.")); return; }
-          resolve({ blob: blob, width: w, height: h });
+          psStampBlobDpi(blob, mime, Number(dpi) || 96).then(function (stamped) {
+            resolve({ blob: stamped, width: w, height: h });
+          });
         }, mime, mime === "image/jpeg" ? 0.96 : undefined);
       };
       img.onerror = function () {
@@ -13256,7 +13343,10 @@
       var btn = e.target.closest ? e.target.closest("button[data-chart]") : null;
       if (!btn) return;
       el("ps-lchartmenu").style.display = "none";
-      layAddChart(btn.getAttribute("data-chart"));
+      var target = LAY_CHARTMENU_REPLACE;
+      LAY_CHARTMENU_REPLACE = null;
+      if (target) layReplaceChart(target, btn.getAttribute("data-chart"));
+      else layAddChart(btn.getAttribute("data-chart"));
     });
     el("ps-laddimage").addEventListener("click", function () {
       el("ps-laddimage-file").click();
@@ -13482,6 +13572,41 @@
     // engine's styling history. Outside Data, recency remains a fallback
     // for commands invoked from application chrome. This avoids a Data
     // change's required chart rerender stealing Cmd/Ctrl+Z back from Data.
+    // Canvas zoom shortcuts. Cmd/Ctrl+wheel already zoomed, but the three
+    // keys every canvas application binds did nothing, so the only way to
+    // step the zoom was the select in the toolbar.
+    window.addEventListener("keydown", function (e) {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+      if (!(appWorkspace() === "layout" && isLayoutTab(activeChart()))) return;
+      var zk = e.key;
+      var step = zk === "=" || zk === "+" ? 1 : (zk === "-" || zk === "_") ? -1 : 0;
+      if (zk !== "0" && !step) return;
+      var tgt = e.target;
+      if (tgt && tgt.closest &&
+          tgt.closest("input, textarea, select, [contenteditable]")) return;
+      e.preventDefault();
+      var view = layView();
+      if (zk === "0") {
+        // Cmd+0 toggles between fitting the page and actual size, which is
+        // the pair a figure author flips between.
+        view.zoom = view.zoom === "fit" ? "1" : "fit";
+      } else {
+        var ladder = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+        var now = layZoom(), at = 0, i;
+        for (i = 0; i < ladder.length; i++)
+          if (Math.abs(ladder[i] - now) < Math.abs(ladder[at] - now)) at = i;
+        if (step > 0 && ladder[at] <= now + 0.001) at++;
+        if (step < 0 && ladder[at] >= now - 0.001) at--;
+        view.zoom = String(ladder[Math.max(0, Math.min(ladder.length - 1, at))]);
+      }
+      persist(); renderLayout();
+      layAnnounce(view.zoom === "fit" ? "Zoom fit to page."
+        : "Zoom " + Math.round(Number(view.zoom) * 100) + " percent.");
+    // CAPTURE. Something on the way down already stops propagation for
+    // plain Cmd/Ctrl chords, so a bubble-phase window listener never sees
+    // "=" or "-" at all (Cmd+0 arrived, which is what made the first
+    // attempt look half-working).
+    }, true);
     window.addEventListener("keydown", function (e) {
       if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
       var k = (e.key || "").toLowerCase();
@@ -15005,7 +15130,23 @@
     persist();
     syncAll();
     render();
-    showUndoToast("Deleted " + removed.name, function () {
+    // Say it while the Undo is still on screen. A layout keeps drawing a
+    // deleted chart's captured picture for the rest of the session, so
+    // nothing looked wrong until the next launch, by which point the offer
+    // to put it back was long gone.
+    var usedBy = [];
+    if (!isLayoutTab(removed))
+      for (var ui = 0; ui < PROJECT.charts.length; ui++) {
+        var lay = PROJECT.charts[ui];
+        if (!isLayoutTab(lay) || !Array.isArray(lay.items)) continue;
+        for (var uj = 0; uj < lay.items.length; uj++)
+          if (lay.items[uj].kind === "chart" &&
+              lay.items[uj].chartId === removed.id) {
+            usedBy.push(lay.name || "a layout"); break;
+          }
+      }
+    showUndoToast("Deleted " + removed.name + (usedBy.length
+      ? " (used by " + usedBy.join(", ") + ")" : ""), function () {
       if (chartById(removed.id)) return;
       PROJECT.charts.splice(Math.min(idx, PROJECT.charts.length), 0, removed);
       PROJECT.activeChart = wasActive === removed.id ? removed.id : PROJECT.activeChart;
@@ -17025,7 +17166,10 @@
     // The pointer drag snapshots itself at pointer-down (it knows whether the
     // gesture actually moved anything); everything else that lands here is a
     // nudge or an inspector edit, coalesced into one step per burst.
-    if (!LAY_DRAG) laySnapshot("move", "move");
+    // The coalesce key carries the SELECTION. Without it a nudge on one
+    // panel folded into a nudge on another whenever the two happened within
+    // 1.2 s, and one undo pulled both back.
+    if (!LAY_DRAG) laySnapshot("move", "move:" + ids.join(","));
     dx = layClamp(dx, -b.x, p.w - b.right);
     dy = layClamp(dy, -b.y, p.h - b.bottom);
     for (var i = 0; i < ids.length; i++) {
@@ -17135,6 +17279,15 @@
     var info = layItemSourceInfo(item);
     var src = info && info.chartId ? chartById(info.chartId) : null;
     var head = [];
+    if (item && item.kind === "chart" &&
+        PROJECT.charts.filter(function (c) { return !isLayoutTab(c); }).length > 1)
+      head.push({ label: "Show a different chart here",
+        key: "lay-replace-chart",
+        action: function () {
+          var node = el("ps-lcanvas").querySelector(
+            '.ps-litem[data-item-id="' + id + '"]');
+          layAddChartMenu(id, node);
+        } });
     if (src && !isLayoutTab(src))
       head.push({ label: info.kind === "live"
           ? "Show live chart in Charts" : "Open source chart",
@@ -17198,6 +17351,126 @@
     }
     persist(); renderLayout();
   }
+  // ---- Plot-area alignment. A multi-panel figure reads as aligned when
+  // the PLOT AREAS line up, not the panel boxes: a panel's box includes its
+  // tick labels, and an axis reading 100000 is wider than one reading 0.10,
+  // so two identically sized panels draw their axes at different places.
+  // Measured on the four-panel template with score / cost / hours / rate,
+  // the left column's axes sat 6 px apart and the right column's 11 px,
+  // which is about 3 mm on a printed 7-inch figure. This is the one thing a
+  // figure tool can do that a page-layout tool cannot, because it knows the
+  // rectangles are charts. (patchwork and matplotlib's constrained layout
+  // solve the same problem by reserving one common gutter; here the panels
+  // are already drawn, so the panels move instead of the gutters.)
+  //
+  // Fractions of the item box, never absolute pixels: the item box and the
+  // axis line go through the same zoom transform and the same drag
+  // transform, so a ratio between them is invariant to both.
+  function layPlotFrac(item) {
+    if (!item || item.kind !== "chart") return null;
+    var canvas = el("ps-lcanvas");
+    var node = canvas && canvas.querySelector(
+      '.ps-litem[data-item-id="' + item.id + '"]');
+    if (!node) return null;
+    var ya = node.querySelector('[data-role="y-axis-line"]');
+    var xa = node.querySelector('[data-role="x-axis-line"]');
+    if (!ya || !xa) return null;
+    var nb = node.getBoundingClientRect();
+    if (!nb.width || !nb.height) return null;
+    var yb = ya.getBoundingClientRect(), xb = xa.getBoundingClientRect();
+    if (!yb.height || !xb.width) return null;
+    // Axis strokes have width; the plot edge is the stroke's centre line.
+    return { l: (yb.left + yb.width / 2 - nb.left) / nb.width,
+             r: (xb.right - nb.left) / nb.width,
+             t: (yb.top - nb.top) / nb.height,
+             b: (xb.top + xb.height / 2 - nb.top) / nb.height };
+  }
+  function layPlotRect(item) {
+    var f = layPlotFrac(item);
+    if (!f) return null;
+    var r = layItemRect(item);
+    return { l: r.x + f.l * r.w, r: r.x + f.r * r.w,
+             t: r.y + f.t * r.h, b: r.y + f.b * r.h };
+  }
+  // Panels that already sit in the same column (or row) are the ones the
+  // user means, so select-all then one click fixes a whole grid. Grouping
+  // is plain box overlap on the cross axis, which is what "same column"
+  // looks like on screen and needs no explaining.
+  function layOverlapGroups(pool, axis) {
+    var sorted = pool.slice().sort(function (a, b) {
+      return axis === "x" ? a.rect.x - b.rect.x : a.rect.y - b.rect.y;
+    });
+    var out = [], cur = null, i;
+    for (i = 0; i < sorted.length; i++) {
+      var lo = axis === "x" ? sorted[i].rect.x : sorted[i].rect.y;
+      var hi = lo + (axis === "x" ? sorted[i].rect.w : sorted[i].rect.h);
+      if (cur && lo < cur.hi - 1) {
+        cur.list.push(sorted[i]);
+        cur.hi = Math.max(cur.hi, hi);
+      } else {
+        cur = { hi: hi, list: [sorted[i]] };
+        out.push(cur);
+      }
+    }
+    return out;
+  }
+  // Which panels can take part, and can any group actually act. Drives both
+  // the action and the button's own visibility, so they can never disagree.
+  function layPlotAlignPool() {
+    var ids = laySelectedIds(), pool = [], i;
+    for (i = 0; i < ids.length; i++) {
+      var item = layItemById(ids[i]);
+      var plot = layPlotRect(item);
+      if (plot) pool.push({ item: item, rect: layItemRect(item), plot: plot });
+    }
+    return pool;
+  }
+  function layCanAlignPlots(edge) {
+    var pool = layPlotAlignPool();
+    if (pool.length < 2) return false;
+    var groups = layOverlapGroups(pool, edge === "left" ? "x" : "y");
+    for (var g = 0; g < groups.length; g++)
+      if (groups[g].list.length > 1) return true;
+    return false;
+  }
+  function layAlignPlots(edge) {
+    var pool = layPlotAlignPool();
+    if (pool.length < 2) return false;
+    var axis = edge === "left" ? "x" : "y";
+    var groups = layOverlapGroups(pool, axis), moved = 0, used = 0, lanes = 0;
+    var snapped = false, g, k, list, target, d;
+    for (g = 0; g < groups.length; g++) {
+      list = groups[g].list;
+      if (list.length < 2) continue;
+      lanes++;
+      used += list.length;
+      target = list[0].plot[edge === "left" ? "l" : "b"];
+      for (k = 1; k < list.length; k++) {
+        d = list[k].plot[edge === "left" ? "l" : "b"];
+        // Left axes line up on the leftmost plot edge, baselines on the
+        // lowest one, so the panel that needs the most room keeps its place
+        // and the others come to it.
+        if (edge === "left" ? d < target : d > target) target = d;
+      }
+      for (k = 0; k < list.length; k++) {
+        d = target - list[k].plot[edge === "left" ? "l" : "b"];
+        if (Math.abs(d) < 0.02) continue;
+        if (!snapped) { laySnapshot("align plot areas"); snapped = true; }
+        if (edge === "left") list[k].item.x = (Number(list[k].item.x) || 0) + d;
+        else list[k].item.y = (Number(list[k].item.y) || 0) + d;
+        moved++;
+      }
+    }
+    if (!used) return false;
+    if (moved) { persist(); renderLayout(); }
+    layAnnounce(moved
+      ? "Lined up " + (edge === "left" ? "left axes" : "baselines") +
+        " for " + used + " panels in " + lanes +
+        (edge === "left" ? (lanes === 1 ? " column." : " columns.")
+                         : (lanes === 1 ? " row." : " rows."))
+      : "Those panels are already lined up.");
+    return true;
+  }
   function layApplyInspector(prop, value) {
     // Typed in the user's unit, applied in pixels.
     value = unitToPx(value);
@@ -17247,7 +17520,10 @@
     for (var i = 0; i < items.length; i++) {
       items[i].x = Math.round((Number(items[i].x) || 0) * sx);
       items[i].y = Math.round((Number(items[i].y) || 0) * sy);
-      if (items[i].kind === "chart") {
+      // laySizedKind, not kind === "chart": an image is a sized item
+      // everywhere else, and leaving its box alone made a flipped figure
+      // carry one item at its old size across the shrunken panels.
+      if (laySizedKind(items[i])) {
         items[i].w = Math.round((Number(items[i].w) || 480) * sx);
         items[i].h = Math.round((Number(items[i].h) || 320) * sy);
       }
@@ -17764,13 +18040,38 @@
     });
     ta.addEventListener("blur", function () { commit(false); });
   }
-  function layAddChartMenu() {
+  // The same flyout serves "Add chart" and "Show a different chart here".
+  // Non-null while the next pick REPLACES the panel it names.
+  var LAY_CHARTMENU_REPLACE = null;
+  // Point an existing panel at another chart, keeping its exact box. Without
+  // this, correcting a panel meant deleting it and placing a new one, which
+  // threw away the position and size that were the whole point of the
+  // figure - and reusing a finished layout for a second set of results was
+  // a rebuild rather than four picks.
+  function layReplaceChart(itemId, chartId) {
+    var item = layItemById(itemId), c = chartById(chartId);
+    if (!item || item.kind !== "chart" || !c || isLayoutTab(c)) return false;
+    if (item.chartId === chartId) return false;
+    laySnapshot("replace chart");
+    item.chartId = chartId;
+    laySetSelection([itemId]);
+    persist();
+    ensureSnapshotsThen(renderLayout);
+    layAnnounce("Panel now shows " + (c.name || "the chart") + ".");
+    return true;
+  }
+  function layAddChartMenu(replaceItemId, anchorEl) {
     var m = el("ps-lchartmenu");
+    LAY_CHARTMENU_REPLACE = replaceItemId || null;
     var chartTabs = PROJECT.charts.filter(function (c) { return !isLayoutTab(c); });
-    var h = ['<div class="ps-tm-head">Add a chart</div>'];
+    var h = ['<div class="ps-tm-head">' +
+      (replaceItemId ? "Show a different chart here" : "Add a chart") +
+      '</div>'];
     for (var i = 0; i < chartTabs.length; i++) {
       var c = chartTabs[i];
-      h.push('<button type="button" data-chart="' + escHtml(c.id) + '">' +
+      var shown = layItemById(replaceItemId || "");
+      h.push('<button type="button" data-chart="' + escHtml(c.id) + '"' +
+        (shown && shown.chartId === c.id ? " disabled" : "") + ">" +
         "<span>" + escHtml(c.name) + "</span>" +
         '<span style="margin-left:auto;color:#98a0a8;font-size:11px;">' +
         escHtml(MODULES[c.module] ? MODULES[c.module].label : "") + "</span></button>");
@@ -17778,7 +18079,7 @@
     if (!chartTabs.length)
       h.push('<div class="ps-slot-empty" style="padding:5px 12px;">no chart tabs yet</div>');
     m.innerHTML = h.join("");
-    var r = el("ps-laddchart").getBoundingClientRect();
+    var r = (anchorEl || el("ps-laddchart")).getBoundingClientRect();
     m.style.display = "block";
     m.style.left = Math.min(r.left, window.innerWidth - 200) + "px";
     m.style.top = Math.min(r.bottom + 3, window.innerHeight - 220) + "px";
@@ -18533,8 +18834,18 @@
       el("ps-ctx-l" + prop).step = String(unitStep());
     });
     var ctxSized = !!one && laySizedKind(one);
-    el("ps-ctx-lw").disabled = !ctxSized;
-    el("ps-ctx-lh").disabled = !ctxSized;
+    // A field that cannot be typed into must not look like one that can.
+    // These carry the union width and height of a multi-selection, which is
+    // read-only, and used to render identically to the live X and Y beside
+    // them with no tooltip - the same defect the align buttons had.
+    ["w", "h"].forEach(function (prop) {
+      var field = el("ps-ctx-l" + prop);
+      field.disabled = !ctxSized;
+      setTip(field, ctxSized ? ""
+        : ids.length > 1
+          ? "Size applies to one item at a time. Select a single panel to change it."
+          : "Text items size themselves to their content.");
+    });
     // Progressive disclosure (Torry, Jul 29 2026): the align row is SHOWN
     // only once a second item is selected, instead of six greyed buttons
     // sitting under Arrange at every selection. They stay enabled whenever
@@ -18555,6 +18866,30 @@
     for (var i = 0; i < align.length; i++) {
       align[i].disabled = false;
       setTip(align[i], "Align the selected items");
+    }
+    // Plot-area alignment follows the same progressive-disclosure rule as
+    // the row above, but tested per button: "Left axes" needs two panels in
+    // one column, "Baselines" two in one row, so a side-by-side pair offers
+    // baselines and a stacked pair offers left axes.
+    var plotRow = document.querySelector(".ps-inspector-plotalign");
+    var plotBtns = document.querySelectorAll("[data-ctx-plotalign]");
+    var anyPlot = false;
+    for (i = 0; i < plotBtns.length; i++) {
+      var edge = plotBtns[i].getAttribute("data-ctx-plotalign");
+      var live = canAlign && layCanAlignPlots(edge);
+      plotBtns[i].style.display = live ? "" : "none";
+      setTip(plotBtns[i], edge === "left"
+        ? "Move these panels so their y axes sit on one line"
+        : "Move these panels so their x axes sit on one line");
+      if (live) anyPlot = true;
+    }
+    if (plotRow) {
+      plotRow.style.display = anyPlot ? "" : "none";
+      var visible = 0;
+      for (i = 0; i < plotBtns.length; i++)
+        if (plotBtns[i].style.display !== "none") visible++;
+      plotRow.querySelector(".ps-inspector-plotalign-row").style
+        .gridTemplateColumns = "repeat(" + Math.max(1, visible) + ", 1fr)";
     }
   }
   // True when moving the selection this direction would change nothing:
@@ -19171,11 +19506,9 @@
     el("ps-layout-orientation").addEventListener("change", function () {
       layApplyOrientation(this.value);
     });
-    ["x", "y", "w", "h"].forEach(function (prop) {
-      el("ps-ctx-l" + prop).addEventListener("change", function () {
-        layApplyInspector(prop, this.value);
-      });
-    });
+    // One registration per field. This block used to appear twice in
+    // immediate succession, so every typed X/Y/W/H ran layApplyInspector
+    // twice and pushed two history entries for one edit.
     ["x", "y", "w", "h"].forEach(function (prop) {
       el("ps-ctx-l" + prop).addEventListener("change", function () {
         layApplyInspector(prop, this.value);
@@ -19185,6 +19518,11 @@
     for (var i = 0; i < align.length; i++)
       align[i].addEventListener("click", function () {
         layAlign(this.getAttribute("data-ctx-align"));
+      });
+    var plotAlign = document.querySelectorAll("[data-ctx-plotalign]");
+    for (var pi = 0; pi < plotAlign.length; pi++)
+      plotAlign[pi].addEventListener("click", function () {
+        layAlignPlots(this.getAttribute("data-ctx-plotalign"));
       });
   }
 
