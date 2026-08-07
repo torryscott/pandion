@@ -990,18 +990,37 @@
      column inside a half-width slot would starve the inputs, so paired
      rows size the label to its text instead. */
   .ps-linsp-row .ps-linsp-inline { grid-template-columns: auto minmax(0, 1fr); }
-  /* The Size select shares the W input's LEFT EDGE (Torry, Aug 7 2026:
-     the 76px column put it mid-panel, crowding the row below): Size and
-     the page W/H pair share one 48px label column, and the Size row gets
-     its breathing room back. */
-  #ps-inspector-layout .ps-linsp-size {
-    grid-template-columns: 48px minmax(0, 1fr); margin-bottom: 8px;
+  /* The page section is one label column (Torry, Aug 7 2026, two notes).
+     First: the Size select floated mid-panel because it used the 76px
+     column while the W and H pair sized their labels to the text, so no
+     two controls could share a left edge. Second: each label sat 23px
+     from its own input and 6px from the neighbouring one, so proximity
+     bound H's label to W's box - "it might look like you're saying it's
+     26.7 cm high, but really it's 26.7 cm wide".
+     Both are fixed by one arrangement: Size, W and H share a 44px label
+     column, every label ENDS at that column edge, and its own control
+     starts 6px later. Ending the ink at the edge is what makes the bond
+     hold - the visible gap IS the grid gap, whatever width the text
+     renders at, so no font metric can reopen it - while the W and H
+     groups sit a clear step apart. 44px is set against a widest measured
+     label of 39.7px ("W (cm)"; the metric tags are the wide ones), so a
+     font a tenth wider still fits, and past that the ink outdents rather
+     than colliding with the box. */
+  #ps-inspector-layout .ps-linsp-size,
+  .ps-lpage-pair .ps-linsp-inline {
+    grid-template-columns: 44px minmax(0, 1fr); gap: 6px;
   }
-  .ps-lpage-pair .ps-linsp-inline { grid-template-columns: 48px minmax(0, 1fr); }
+  #ps-inspector-layout .ps-linsp-size { margin-bottom: 8px; }
+  #ps-inspector-layout .ps-linsp-size > span,
+  .ps-lpage-pair .ps-linsp-inline > span {
+    justify-self: end; text-align: right;
+  }
+  .ps-lpage-pair .ps-linsp-inline + .ps-linsp-inline { margin-left: 8px; }
   .ps-lunit-seg { display: flex; gap: 3px; flex: 0 0 auto; }
   /* The pair row carries three tenants now; tighter gaps keep the H
      input wide enough for its own digits. */
   .ps-lpage-pair { gap: 6px; }
+  .ps-lpage-pair .ps-lunit-seg { margin-left: 6px; }
   .ps-lpage-pair .ps-lunit-seg button { min-width: 26px; padding: 3px 5px; }
   .ps-lunit-seg button {
     min-width: 30px; padding: 3px 7px; font-size: 11px; font-weight: 600;

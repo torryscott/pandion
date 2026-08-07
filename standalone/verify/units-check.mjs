@@ -200,6 +200,58 @@ ok(align.dx <= 2 && align.rowGap >= 5,
    `the Size select shares the W input's left edge with breathing room ` +
    `(dx ${align.dx.toFixed(1)}px, gap ${Math.round(align.rowGap)}px)`);
 
+// Torry, Aug 7 2026: "the height is right after the box for width, and if
+// you're not paying close attention, it might look like you're saying it's
+// 26.7 cm high, but really it's 26.7 cm wide."
+//
+// Proximity decides what a label names. Measured, each label sat 23px from
+// its own input and 6px from the neighbouring one, so the row read
+// backwards. The assertion is the RATIO, not a pixel count: whatever the
+// panel width or the font, a label must be nearer the box it names than
+// the box beside it.
+console.log('case 8: each page dimension label binds to its OWN box');
+await page.click('#ps-lunit-cm');   // the widest digits, the tightest fit
+await page.waitForTimeout(500);
+const prox = await page.evaluate(() => {
+    // Where the label's INK is, not the grid cell it sits in - a label
+    // stranded at the far side of a wide cell is the whole bug.
+    const ink = (input) => {
+        const r = document.createRange();
+        r.selectNodeContents(document.getElementById(input)
+            .closest('label').querySelector('span'));
+        return r.getBoundingClientRect();
+    };
+    const box = (id) => document.getElementById(id).getBoundingClientRect();
+    const fits = (id) => {
+        const e = document.getElementById(id);
+        return e.scrollWidth <= e.clientWidth;
+    };
+    const wL = ink('ps-lpage-w'), hL = ink('ps-lpage-h');
+    const wI = box('ps-lpage-w'), hI = box('ps-lpage-h');
+    return {
+        wOwn: wI.left - wL.right,        // W label -> the box it names
+        hOwn: hI.left - hL.right,        // H label -> the box it names
+        across: hL.left - wI.right,      // W's box -> H's label
+        wFits: fits('ps-lpage-w'), hFits: fits('ps-lpage-h'),
+        equal: Math.abs(wI.width - hI.width),
+    };
+});
+ok(prox.hOwn > 0 && prox.across >= prox.hOwn * 2,
+   `the H label sits ${(prox.across / prox.hOwn).toFixed(1)}x closer to its ` +
+   `own box than to the width box (${Math.round(prox.hOwn)}px vs ` +
+   `${Math.round(prox.across)}px)`);
+ok(prox.wOwn > 0 && prox.wOwn <= prox.hOwn + 2,
+   'and W is bound just as tightly, so the two read as one pattern');
+// The separation must not be bought from the boxes: cm carries the widest
+// digits, and an input too narrow to show its own value is a worse bug
+// than the one being fixed.
+ok(prox.wFits && prox.hFits,
+   'both boxes still show their value whole in centimetres');
+ok(prox.equal <= 1,
+   `and the two boxes stayed the same size (${prox.equal.toFixed(1)}px apart)`);
+await page.click('#ps-lunit-in');
+await page.waitForTimeout(400);
+
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('UNITS CHECK PASS');
 await browser.close();
