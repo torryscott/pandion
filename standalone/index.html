@@ -4071,6 +4071,11 @@
         <div class="ps-inspector-section">
           <span class="ps-inspector-section-title">Summary</span>
           <div id="ps-variable-stats" class="ps-inspector-stats"></div>
+          <!-- Which table these numbers describe. Only ever shown while a row
+               filter is on, because with no filter there is only one answer
+               and saying it would be noise. -->
+          <div id="ps-variable-basis" class="ps-loader-hint"
+               style="display:none;"></div>
         </div>
         <div class="ps-inspector-section" id="ps-variable-level-section">
           <span class="ps-inspector-section-title" id="ps-variable-level-title">Levels</span>

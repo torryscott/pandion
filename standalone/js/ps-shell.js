@@ -10743,6 +10743,16 @@
       if (GRID_HIDDEN_COLUMNS[t.order[i]])
         html.push('<button type="button" role="menuitem" data-show-column="' +
           escHtml(t.order[i]) + '">Show ' + escHtml(t.order[i]) + "</button>");
+    // Decision D. Hiding a column is view state, deliberately kept out of the
+    // project file, snapshots, autosave, export and every chart payload. That
+    // decision stands, and it was undisclosed either way, so a saved project
+    // came back with every column visible and nothing had said it would. Said
+    // here, where the arrangement is being made, rather than as a surprise on
+    // reopen. Only while something is actually hidden.
+    if (html.length)
+      html.push('<div class="ps-loader-hint" style="padding:6px 10px 2px;">' +
+        "Hiding is for looking, so it is not saved with the project. " +
+        "Reopening shows every column again.</div>");
     list.innerHTML = html.join("");
     el("ps-columnview-showall").disabled =
       !gridHiddenColumnCount(t) && !GRID_FOCUS_CHART_COLUMNS;
@@ -18604,6 +18614,7 @@
     }
     var excluded = variableExcludedCount(col);
     var uses = variableRoleUseCount(col);
+    var filterOn = validFilters(t).length > 0;
     el("ps-variable-stats").innerHTML =
       inspectorStat("Rows", String(values.length)) +
       inspectorStat("Valid", String(nonmissing)) +
@@ -18621,6 +18632,16 @@
       // nominal variable's codes is the classic way to mislead yourself, and
       // the app refuses to compute one rather than printing it small.
       variableNumericStats(t, col);
+    // Said once, under the numbers, rather than on every tile.
+    var basis = el("ps-variable-basis");
+    if (basis) {
+      basis.textContent = filterOn
+        ? "These describe every row. The chart is showing " +
+          (nRows(t) - filteredRowCount(t)) + " of " + nRows(t) +
+          ", because a row filter is on."
+        : "";
+      basis.style.display = filterOn ? "block" : "none";
+    }
     syncVariableAdvice(t, col);
     var levels = t.levels[col] || [], levelRoot = el("ps-variable-levels");
     var categorical = t.types[col] === "nominal" ||
@@ -20092,7 +20113,9 @@
     // actually be a loss.
     if (!projectHasWork()) return null;
     try {
-      return { json: JSON.stringify(projectSnapshot()),
+      var snap = projectSnapshot();
+      return { json: JSON.stringify(snap),
+               id: snap && snap.id,
                name: PROJECT.name || "the previous project",
                charts: PROJECT.charts.length };
     } catch (e) { return null; }
@@ -20100,8 +20123,24 @@
   function offerReplacedProjectBack(prev, whatOpened) {
     if (!prev) return;
     var noun = prev.charts === 1 ? " document" : " documents";
+    // The toast expires and the toolbar Undo does not cover this, so it read
+    // as the only way back. There usually IS a second one, because the
+    // replaced project was autosaved before it was replaced and is sitting in
+    // Recent projects, and saying so turns a six second window into a durable
+    // route. Claimed only when it is actually true, since a project the
+    // recents ladder could not carry has no entry to go back to.
+    var inRecents = false;
+    try {
+      inRecents = recentProjects().some(function (r) {
+        return r.id === prev.id && !!r.snapshot;
+      });
+    } catch (e) {}
     showUndoToast("Opened " + whatOpened + ". " + prev.name + " (" +
-                  prev.charts + noun + ") was not saved to a file.",
+                  prev.charts + noun + ") was not saved to a file." +
+                  (inRecents
+                    ? " It is in Recent projects on the start screen if you " +
+                      "want it later."
+                    : ""),
       function () {
         var snap = null;
         try { snap = JSON.parse(prev.json); } catch (e) { snap = null; }
