@@ -18457,6 +18457,14 @@
         levelRoot.appendChild(mkEl("span", "ps-level-chip",
           "+" + (levels.length - 40) + " more"));
     }
+    // Sort A-Z shares the .ps-level-reset class, which is display:none, and
+    // only its SIBLING ever had its display restored. So the button existed,
+    // carried a tooltip and a working handler, and could never appear. It is
+    // the escape hatch for the deliberate first-seen level order, which is
+    // exactly the divergence from R that the README leaves open, so it should
+    // be reachable on any variable with an order to change.
+    el("ps-variable-level-sort").style.display =
+      categorical && levels.length > 1 ? "inline-block" : "none";
     el("ps-variable-level-reset").style.display =
       categorical && t.levelOrderDefaults &&
       t.levelOrderDefaults[col] ? "inline-block" : "none";

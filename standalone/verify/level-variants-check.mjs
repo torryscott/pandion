@@ -114,6 +114,40 @@ const lbl = await page.evaluate(() => {
 ok(/2 rows/.test(lbl) && /position 1 of 9/.test(lbl),
    'the count is announced without losing the position, got ' + JSON.stringify(lbl));
 
+console.log('case 1c: the Sort A-Z escape hatch is reachable');
+// It shares the .ps-level-reset class, which is display:none, and only its
+// SIBLING ever had its display restored, so a built and wired button could
+// never appear. It is the one-click answer to the deliberate first-seen level
+// order, which is the divergence from R the README leaves open.
+const sortBtn = await page.evaluate(() => {
+    const b = document.getElementById('ps-variable-level-sort');
+    return b ? { shown: b.offsetParent !== null, tip: b.getAttribute('data-tip'),
+                 text: b.textContent.trim() } : null;
+});
+ok(sortBtn && sortBtn.shown,
+   'the button is on screen for a categorical variable, got ' +
+   JSON.stringify(sortBtn));
+await page.evaluate(() =>
+    document.getElementById('ps-variable-level-sort').click());
+await page.waitForTimeout(700);
+const sorted = await levelsOf('group');
+ok(sorted[0] === 'CONTROL' || sorted[0] === 'Control',
+   'clicking it sorts the levels, got ' + JSON.stringify(sorted));
+await page.keyboard.press(MOD + '+z');
+await page.waitForTimeout(700);
+ok((await levelsOf('group'))[0] === 'Control',
+   'and one undo puts the order back, got ' +
+   JSON.stringify(await levelsOf('group')));
+// A continuous variable has no order to sort.
+await page.evaluate(() => window.PS_SHELL.selectVariable('score'));
+await page.waitForTimeout(300);
+ok(!(await page.evaluate(() => {
+       const b = document.getElementById('ps-variable-level-sort');
+       return b && b.offsetParent !== null;
+   })), 'and it stays away from a continuous variable');
+await page.evaluate(() => window.PS_SHELL.selectVariable('group'));
+await page.waitForTimeout(300);
+
 console.log('case 2: merging keeps the commonest spelling');
 await page.evaluate(() =>
     document.querySelector('#ps-variable-advice [data-advice="advice-merge-variants"]').click());
