@@ -110,14 +110,14 @@
     border: 1px solid var(--line); border-radius: 12px;
     background: #fff; box-shadow: 0 10px 30px rgba(25, 46, 73, 0.08);
   }
-  .kofi-mark {
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 42px; height: 42px; margin-bottom: 18px;
-    border-radius: 10px; color: #fff; background: var(--cobalt);
-    font-size: 21px; font-weight: 800;
-  }
+  /* Ko-fi's own symbol, used unmodified per their brand guidance: not
+     recoloured, not distorted. Sits beside the heading it belongs to.
+     Self-hosted so the page still makes no third-party requests. */
+  .kofi-mark { display: inline-flex; flex: 0 0 auto; }
+  .kofi-mark img { display: block; width: 30px; height: auto; }
   .kofi-card h2 {
     margin: 0 0 9px; color: var(--navy); font-size: 21px;
+    display: flex; align-items: center; gap: 10px;
   }
   .kofi-card p { margin: 0 0 18px; color: var(--muted); font-size: 14px; }
   .support-btn {
@@ -288,8 +288,7 @@
       </div>
 
       <aside class="kofi-card">
-        <span class="kofi-mark" aria-hidden="true">P</span>
-        <h2>Support on Ko-fi</h2>
+        <h2>Support on Ko-fi<span class="kofi-mark" aria-hidden="true"><img src="assets/kofi-symbol.svg" alt="" width="30" height="24"></span></h2>
         <p>
           Ko-fi is a simple way to send something if you want to. If you
           cannot, or would rather not, sharing Pandion with a friend or
