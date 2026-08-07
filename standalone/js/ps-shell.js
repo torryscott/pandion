@@ -2402,7 +2402,8 @@
   var EXPORT_PIN_SCOPE = null;
 
   function exportPrefs() {
-    var out = { format: "svg", dpi: 300, background: "shown" };
+    var out = { format: "svg", dpi: 300, background: "shown",
+                pinRecord: true };
     try {
       var p = JSON.parse(window.localStorage.getItem(PS_EXPORT_PREF_KEY) || "null");
       if (p && /^(svg|pdf|png|jpg)$/.test(p.format)) out.format = p.format;
@@ -2410,6 +2411,7 @@
         out.dpi = Number(p.dpi);
       if (p && /^(shown|transparent|white)$/.test(p.background))
         out.background = p.background;
+      if (p && p.pinRecord === false) out.pinRecord = false;
     } catch (e) {}
     return out;
   }
@@ -2419,7 +2421,8 @@
       window.localStorage.setItem(PS_EXPORT_PREF_KEY, JSON.stringify({
         format: selectedExportFormat(),
         dpi: Number(el("ps-export-dpi").value) || 300,
-        background: bgEl.__psBeforeForced || bgEl.value || "shown"
+        background: bgEl.__psBeforeForced || bgEl.value || "shown",
+        pinRecord: !!el("ps-export-record").checked
       }));
     } catch (e) {}
   }
@@ -2832,6 +2835,7 @@
     el("ps-export-bg").value = p.background;
     var capField = el("ps-export-caption-field");
     var descField = el("ps-export-description-field");
+    var recField = el("ps-export-record-field");
     var bgField = el("ps-export-bg").closest(".ps-export-field");
     if (EXPORT_PIN_SCOPE) {
       // Notebook mode: a page is a finished capture - its caption,
@@ -2849,6 +2853,11 @@
       capField.style.display = "none";
       descField.style.display = "none";
       if (bgField) bgField.style.display = "none";
+      // The page's OWN record replaces the caption box here: nothing to
+      // type, because the page already knows when it was kept, what it
+      // came from, and what the user wrote about it.
+      recField.style.display = "";
+      el("ps-export-record").checked = exportPrefs().pinRecord;
     } else {
       var c = activeChart();
       el("ps-export-title").textContent =
@@ -2866,6 +2875,7 @@
       el("ps-export-description").value =
         savedDescription || generatedExportDescription();
       descField.style.display = "";
+      recField.style.display = "none";
       if (bgField) bgField.style.display = "";
     }
     el("ps-export-copy-status").textContent = "";
@@ -3981,8 +3991,20 @@
         desc = (modDef ? modDef.label : c.module) +
           (vals.length ? ": " + vals.join(", ") : "");
       } catch (eD) {}
+      // What KIND of chart this was, and the variables alone. A page list
+      // built from srcDesc reads the same on every page kept from one
+      // chart tab (Compare Groups: condition, score, four times over) -
+      // the graph type is what actually tells four explorations apart.
+      var kind = "", vars = "";
+      try {
+        var opts = (c.options && c.options[c.module]) || {};
+        kind = pinTypeLabel(String(opts.graphType || ""));
+        vars = desc.indexOf(": ") !== -1
+          ? desc.slice(desc.indexOf(": ") + 2) : "";
+      } catch (eK) {}
       return { srcChart: id, srcName: c.name, srcSig: pinSig(html),
-               srcDesc: desc };
+               srcDesc: desc, srcType: kind || undefined,
+               srcVars: vars || undefined };
     } catch (e) { return null; }
   }
   // The verdict never CLAIMS what it has not verified: the snapshot epoch
@@ -4006,6 +4028,81 @@
       ? { text: name + " - unchanged since it was kept.", state: "same" }
       : { text: name + " - has changed since it was kept.",
           state: "changed" };
+  }
+  // The engine's graphType values in the app's own words. Only the ones a
+  // page can be kept from; anything unlisted falls back to the raw value
+  // rather than inventing a name for it.
+  var PIN_TYPE_LABELS = {
+    bar: "Bar", line: "Line", dot: "Dot", box: "Box", violin: "Violin",
+    raincloud: "Raincloud", scatter: "Scatter", heatmap: "Heatmap",
+    histogram: "Histogram", density: "Density",
+    histdensity: "Histogram + density", qq: "Q-Q", ecdf: "ECDF",
+    pie: "Pie", donut: "Donut", pareto: "Pareto",
+    corrheatmap: "Correlation heatmap", corrcircles: "Correlation circles",
+    corrnumbers: "Correlation numbers", corrmixed: "Correlation matrix",
+    likertdiverging: "Diverging", likertstacked: "100% stacked",
+    likertmeans: "Item means"
+  };
+  function pinTypeLabel(gt) {
+    if (!gt) return "";
+    return PIN_TYPE_LABELS[gt] ||
+      gt.charAt(0).toUpperCase() + gt.slice(1);
+  }
+  // A page needs a NAME before it can appear in a list, and every page
+  // already carries one: a kept comparison knows its own title, a kept
+  // chart knows what it was and which variables it was drawn from. The
+  // user's own title wins over all of it.
+  function pinPageLabel(pin, idx) {
+    var t = String(pin.title || "").trim();
+    if (t) return t;
+    t = String(pin.momTitle || "").trim();
+    if (t) return t;
+    if (pin.srcType)
+      return pin.srcType + (pin.srcVars ? " \u00b7 " + pin.srcVars : "");
+    t = String(pin.srcDesc || "").trim();
+    if (t) return t;
+    t = String(pin.srcName || "").trim();
+    if (t) return t;
+    return "Page " + (idx + 1);
+  }
+  // The one page footer that names this page, refreshed without touching
+  // the rest of the board.
+  function pinSyncCardLabel(pinId) {
+    var scroll = el("ps-pinscroll");
+    var pg = scroll && scroll.querySelector(
+      '.ps-pinpage[data-pin-id="' + pinId + '"]');
+    var num = pg && pg.querySelector(".ps-pinpage-num");
+    if (!num) return;
+    var pins = projectPins(), at = -1, pin = null;
+    for (var i = 0; i < pins.length; i++)
+      if (pins[i].id === pinId) { at = i; pin = pins[i]; }
+    if (!pin) return;
+    var ttl = String(pin.title || "").trim();
+    num.textContent = "Page " + (at + 1) + " of " + pins.length +
+      (ttl ? " \u00b7 " + ttl : "") +
+      (pin.at ? " \u00b7 kept " + pinKeptFmt(pin.at) : "");
+  }
+  // Go to a page: the Notebook, its section, selected, and on screen.
+  function pinReveal(pinId) {
+    var boards = pinBoards(), owner = null;
+    for (var i = 0; i < boards.length; i++)
+      for (var j = 0; j < boards[i].pins.length; j++)
+        if (boards[i].pins[j].id === pinId) owner = boards[i];
+    if (!owner) return;
+    (PROJECT.ui = PROJECT.ui || {}).activeBoard = owner.id;
+    PIN_SEL = pinId;
+    persist(false);
+    setAppWorkspace("pinboard");
+    renderPinboard();
+    var scroll = el("ps-pinscroll");
+    var pg = scroll && scroll.querySelector(
+      '.ps-pinpage[data-pin-id="' + pinId + '"]');
+    if (!pg) return;
+    // "nearest" rather than "center": a page taller than the viewport
+    // should arrive at its TOP, which is where the chart is.
+    try { pg.scrollIntoView({ block: "nearest", behavior: "smooth" }); }
+    catch (e) { pg.scrollIntoView(); }
+    pg.focus();
   }
   function pinDayFmt(at) {
     try {
@@ -4084,6 +4181,14 @@
     el("ps-pininsp-open").style.display =
       sel.srcChart && chartById(sel.srcChart) &&
       !isLayoutTab(chartById(sel.srcChart)) ? "" : "none";
+    var nm = el("ps-pininsp-name");
+    if (nm && document.activeElement !== nm) {
+      nm.value = sel.title || "";
+      // The placeholder shows the name the page carries when untitled, so
+      // an empty box reads as "this is what it is called" rather than as a
+      // blank the user has to fill in.
+      nm.placeholder = pinPageLabel(sel, 0);
+    }
     var ta = el("ps-pininsp-note");
     if (document.activeElement !== ta) ta.value = sel.note || "";
   }
@@ -4096,12 +4201,13 @@
     var pins = board.pins;
     var entry = { id: pinNewId(), src: pinSvgSrc(svgText),
                   natW: w, natH: h, w: w, h: h, at: Date.now() };
-    if (prov) {
-      entry.srcChart = prov.srcChart;
-      entry.srcName = prov.srcName;
-      entry.srcSig = prov.srcSig;
-      if (prov.srcDesc) entry.srcDesc = prov.srcDesc;
-    }
+    // Everything pinProvenance recorded, not a hand-listed subset: the
+    // field-by-field copy silently dropped each new provenance field the
+    // moment one was added.
+    if (prov)
+      for (var pk in prov)
+        if (Object.prototype.hasOwnProperty.call(prov, pk) &&
+            prov[pk] != null && prov[pk] !== "") entry[pk] = prov[pk];
     if (extra)
       for (var xk in extra)
         if (extra[xk] != null && extra[xk] !== "") entry[xk] = extra[xk];
@@ -5223,8 +5329,10 @@
       img.draggable = false;
       page.appendChild(img);
       var bar = mkEl("div", "ps-pinpage-bar");
+      var ttl = String(pin.title || "").trim();
       bar.appendChild(mkEl("span", "ps-pinpage-num",
         "Page " + (idx + 1) + " of " + pins.length +
+        (ttl ? " \u00b7 " + ttl : "") +
         (pin.at ? " \u00b7 kept " + pinKeptFmt(pin.at) : "")));
       // The four verbs live in ONE wrapping group, so a narrow card drops
       // them below the info line together instead of stranding whichever
@@ -5412,19 +5520,90 @@
     syncPinInspector();
   }
   function deletePin(id) {
-    var pins = projectPins();
+    // Undo restores into the section the page was deleted FROM, captured
+    // here rather than resolved at undo time: the toast outlives a section
+    // switch, and projectPins() would have handed the page to whichever
+    // section happened to be on screen when Undo was pressed. A record must
+    // never end up somewhere the user did not put it. (deletePinBoard
+    // already captured its index this way; this is the same rule.)
+    var board = activePinBoard(), pins = board.pins;
     for (var i = 0; i < pins.length; i++) {
       if (pins[i].id !== id) continue;
       var removed = pins.splice(i, 1)[0], at = i;
       persist(); syncAll();
       if (appWorkspace() === "pinboard") renderPinboard();
-      showUndoToast("Page removed from the Notebook", function () {
-        projectPins().splice(Math.min(at, projectPins().length), 0, removed);
+      showUndoToast("Page removed from " + board.name, function () {
+        // The section itself may have been deleted meanwhile, and its own
+        // undo is a separate toast. Restoring into a detached section would
+        // drop the page silently, so fall back to the one on screen.
+        var live = pinBoards().indexOf(board) !== -1 ? board : activePinBoard();
+        live.pins.splice(Math.min(at, live.pins.length), 0, removed);
+        // Show the restored page: putting it back out of sight would be an
+        // undo the user cannot see.
+        (PROJECT.ui = PROJECT.ui || {}).activeBoard = live.id;
+        PIN_SEL = removed.id;
         persist(); syncAll();
         if (appWorkspace() === "pinboard") renderPinboard();
       });
       return;
     }
+  }
+  // ---- moving a page between sections ---------------------------------
+  // Keeping into the wrong section was a one-way mistake: nothing in the
+  // page menu, the page bar or the rail moved a page, so the only remedy
+  // was to delete it and keep it again from the source chart, which threw
+  // away the note and the kept time - the two things that make it a record.
+  // Shaped like Send to layout: the sections by name, then New section.
+  function movePinToBoard(pinId, boardId) {
+    var boards = pinBoards(), from = null, at = -1, pin = null, target = null;
+    for (var i = 0; i < boards.length; i++) {
+      for (var j = 0; j < boards[i].pins.length; j++)
+        if (boards[i].pins[j].id === pinId) {
+          from = boards[i]; at = j; pin = boards[i].pins[j];
+        }
+      if (boards[i].id === boardId) target = boards[i];
+    }
+    if (!pin || !target || target === from) return;
+    from.pins.splice(at, 1);
+    target.pins.push(pin);
+    (PROJECT.ui = PROJECT.ui || {}).activeBoard = target.id;
+    PIN_SEL = pin.id;
+    persist(); syncAll();
+    if (appWorkspace() === "pinboard") renderPinboard();
+    showUndoToast("Moved to " + target.name, function () {
+      var back = pinBoards().indexOf(target) !== -1 ? target : null;
+      if (back) {
+        var k = back.pins.indexOf(pin);
+        if (k !== -1) back.pins.splice(k, 1);
+      }
+      var home = pinBoards().indexOf(from) !== -1 ? from : activePinBoard();
+      home.pins.splice(Math.min(at, home.pins.length), 0, pin);
+      PROJECT.ui.activeBoard = home.id;
+      PIN_SEL = pin.id;
+      persist(); syncAll();
+      if (appWorkspace() === "pinboard") renderPinboard();
+    });
+  }
+  function showPinMoveMenu(x, y, pinId) {
+    var boards = pinBoards(), owner = null, items = [];
+    for (var i = 0; i < boards.length; i++)
+      for (var j = 0; j < boards[i].pins.length; j++)
+        if (boards[i].pins[j].id === pinId) owner = boards[i];
+    for (i = 0; i < boards.length; i++) (function (b) {
+      items.push({ label: b.name, key: "pin-move-" + b.id,
+        disabled: b === owner,
+        tip: b === owner ? "This page is already in " + b.name : "",
+        action: function () { movePinToBoard(pinId, b.id); } });
+    })(boards[i]);
+    if (items.length) items.push("separator");
+    items.push({ label: "New section", key: "pin-move-new",
+      action: function () {
+        var b = { id: newBoardId(),
+                  name: "Section " + (pinBoards().length + 1), pins: [] };
+        pinBoards().push(b);
+        movePinToBoard(pinId, b.id);
+      } });
+    showContextMenu(x, y, items, null);
   }
   function copyPinToClipboard(pin) {
     if (!navigator.clipboard || !navigator.clipboard.write ||
@@ -5635,23 +5814,126 @@
     out.set(eocd, at);
     return out;
   }
+  // ---- the record band -------------------------------------------------
+  // A kept page is evidence, and evidence that leaves the app without its
+  // note, its date and its source is only a picture. The chart exporter has
+  // typeset a caption under a figure since t3-59; this composes the same
+  // band from the page's OWN record instead of a typed sentence, so the two
+  // paths share wrapCaptionLines and the geometry cannot drift apart.
+  // rec = {idx, total, board, manyBoards} - idx and total are per SECTION,
+  // matching the numbers the page card shows on screen.
+  function pinRecordBlocks(pin, rec) {
+    var out0 = [], head = [];
+    var title = String(pin.title || "").trim();
+    if (title) out0.push({ size: 13, fill: "#222222", text: title });
+    if (rec.manyBoards && rec.board) head.push(rec.board);
+    head.push("Page " + (rec.idx + 1) + " of " + rec.total);
+    if (pin.at) head.push("kept " + pinKeptFmt(pin.at));
+    var out = out0.concat(
+      [{ size: 11, fill: "#5b6470", text: head.join(" \u00b7 ") }]);
+    var st = pinSourceStatus(pin);
+    var src = [], drift = st.state === "changed" || st.state === "gone";
+    if (pin.srcDesc) src.push(pin.srcDesc);
+    if (st.state === "changed")
+      src.push("the source chart has changed since this page was kept");
+    else if (st.state === "gone")
+      src.push("the source chart is no longer in the project");
+    if (src.length)
+      out.push({ size: 11, fill: drift ? "#8a5512" : "#5b6470",
+                 text: src.join(" \u00b7 ") });
+    var note = String(pin.note || "").trim();
+    if (note) out.push({ size: 13, fill: "#222222", text: note, gap: 7 });
+    return out;
+  }
+  var PIN_REC_PAD = 13, PIN_REC_X = 14;
+  // Measure first, so the PDF page and the raster canvas are sized from the
+  // same numbers that draw the text.
+  function pinRecordLayout(pin, rec, w) {
+    var blocks = pinRecordBlocks(pin, rec), rows = [], y = PIN_REC_PAD;
+    for (var i = 0; i < blocks.length; i++) {
+      var b = blocks[i], lh = Math.round(b.size * 1.38);
+      y += b.gap || 0;
+      var lines = wrapCaptionLines(b.text, w - PIN_REC_X * 2, b.size);
+      for (var j = 0; j < lines.length; j++) {
+        y += lh;
+        rows.push({ text: lines[j], size: b.size, fill: b.fill, y: y - 3 });
+      }
+    }
+    return { rows: rows, h: y + PIN_REC_PAD };
+  }
+  // The page's svg nested inside a taller one, with the record typeset
+  // under it. Mirrors composeExportSvg's caption branch exactly.
+  function pinComposeWithRecord(pin, rec) {
+    var svgText = pinSvgText(pin);
+    if (!svgText || !rec) return null;
+    var w = pin.w || 720, h = pin.h || 480;
+    var lay = pinRecordLayout(pin, rec, w);
+    if (!lay.rows.length) return null;
+    var ns = "http://www.w3.org/2000/svg";
+    var inner = parseExportSvg(svgText);
+    var outer = document.implementation.createDocument(ns, "svg", null);
+    var root = outer.documentElement;
+    root.setAttribute("xmlns", ns);
+    root.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
+    root.setAttribute("width", String(w));
+    root.setAttribute("height", String(h + lay.h));
+    root.setAttribute("viewBox", "0 0 " + w + " " + (h + lay.h));
+    // White under the whole thing: a kept page may itself be transparent,
+    // and record text must never land on transparency.
+    addSvgBackground(outer, "#ffffff", w, h + lay.h);
+    var nested = outer.importNode(inner.documentElement, true);
+    nested.setAttribute("x", "0"); nested.setAttribute("y", "0");
+    nested.setAttribute("width", String(w));
+    nested.setAttribute("height", String(h));
+    nested.removeAttribute("role");
+    nested.removeAttribute("aria-labelledby");
+    root.appendChild(nested);
+    var rule = outer.createElementNS(ns, "line");
+    rule.setAttribute("x1", String(PIN_REC_X));
+    rule.setAttribute("x2", String(w - PIN_REC_X));
+    rule.setAttribute("y1", String(h + 0.5));
+    rule.setAttribute("y2", String(h + 0.5));
+    rule.setAttribute("stroke", "#dfe4ea");
+    root.appendChild(rule);
+    for (var i = 0; i < lay.rows.length; i++) {
+      var r = lay.rows[i];
+      var t = outer.createElementNS(ns, "text");
+      t.setAttribute("x", String(PIN_REC_X));
+      t.setAttribute("y", String(h + r.y));
+      t.setAttribute("fill", r.fill);
+      t.setAttribute("font-size", String(r.size));
+      t.setAttribute("font-family",
+        "-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif");
+      t.setAttribute("data-role", "pin-record");
+      t.textContent = r.text;
+      root.appendChild(t);
+    }
+    return { svg: new XMLSerializer().serializeToString(root),
+             w: w, h: h + lay.h };
+  }
+  // The page as it should export: with its record when the dialog asks for
+  // one and the page has vector to nest, otherwise exactly as before.
+  function pinExportSvg(pin, rec) {
+    var made = rec ? pinComposeWithRecord(pin, rec) : null;
+    return made || { svg: pinSvgText(pin), w: pin.w || 720, h: pin.h || 480 };
+  }
   // One page -> one file's bytes. A v1 bitmap page has no vector to give:
   // whatever the format asked, its stored PNG bytes are the honest payload
   // (the dialog and the toast both say so).
-  function pinFileBytes(pin, format, dpi) {
+  function pinFileBytes(pin, format, dpi, rec) {
     var svgText = pinSvgText(pin);
     if (!svgText)
       return dataUriBytes(pin.src).then(function (bytes) {
         return { ext: "png", bytes: bytes };
       });
+    var made = pinExportSvg(pin, rec);
     if (format === "svg")
       return Promise.resolve({ ext: "svg",
         bytes: new TextEncoder().encode(
           '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n' +
-          svgText) });
+          made.svg) });
     var mime = format === "jpg" ? "image/jpeg" : "image/png";
-    return rasterizeExport({ svg: svgText, w: pin.w || 720,
-        h: pin.h || 480 }, mime, dpi)
+    return rasterizeExport({ svg: made.svg, w: made.w, h: made.h }, mime, dpi)
       .then(function (out) { return out.blob.arrayBuffer(); })
       .then(function (buf) {
         return { ext: format === "jpg" ? "jpg" : "png",
@@ -5682,20 +5964,23 @@
     return names;
   }
   // The PDF core: one page per pin, vector where the pin holds svg.
-  function pinboardPdfBlob(pins) {
+  // recs is index-aligned with pins (null when the record band is off), so
+  // a page grows downward by exactly its own band.
+  function pinboardPdfBlob(pins, recs) {
     var JsPDF = window.jspdf && window.jspdf.jsPDF;
     if (!JsPDF || !JsPDF.API || typeof JsPDF.API.svg !== "function")
       return Promise.reject(new Error(
         "The PDF exporter did not load. Reload and try again."));
     var pdf = null;
-    function pageDims(pin) {
-      return { w: Math.max(36, (pin.w || 720) * 72 / 96),
-               h: Math.max(36, (pin.h || 480) * 72 / 96) };
-    }
     var chain = Promise.resolve();
-    pins.forEach(function (pin) {
+    pins.forEach(function (pin, i) {
       chain = chain.then(function () {
-        var d = pageDims(pin);
+        var rec = recs ? recs[i] : null;
+        var made = pinSvgText(pin) ? pinExportSvg(pin, rec) : null;
+        var pw = made ? made.w : (pin.w || 720);
+        var ph = made ? made.h : (pin.h || 480);
+        var d = { w: Math.max(36, pw * 72 / 96),
+                  h: Math.max(36, ph * 72 / 96) };
         if (!pdf) {
           pdf = new JsPDF({
             orientation: d.w >= d.h ? "landscape" : "portrait",
@@ -5707,9 +5992,8 @@
         } else {
           pdf.addPage([d.w, d.h], d.w >= d.h ? "landscape" : "portrait");
         }
-        var svgText = pinSvgText(pin);
-        if (svgText) {
-          var sdoc = parseExportSvg(svgText);
+        if (made) {
+          var sdoc = parseExportSvg(made.svg);
           normalizePdfFonts(sdoc.documentElement);
           return pdf.svg(sdoc.documentElement,
             { x: 0, y: 0, width: d.w, height: d.h,
@@ -5720,6 +6004,35 @@
       });
     });
     return chain.then(function () { return pdf.output("blob"); });
+  }
+  // The dialog's answer, read at export time.
+  function pinRecordWanted() {
+    var box = el("ps-export-record");
+    return box ? !!box.checked : true;
+  }
+  // Per-page record descriptors for an export scope. Page numbers are
+  // per SECTION so the exported page agrees with the card on screen, and
+  // the section is named only when more than one is in the file.
+  function pinRecordsFor(scope, pins) {
+    if (!pinRecordWanted()) return null;
+    var owners = {}, everything = allPins(), seen = {}, i;
+    for (i = 0; i < everything.length; i++)
+      owners[everything[i].pin.id] = everything[i].board;
+    var totals = {};
+    for (i = 0; i < pins.length; i++) {
+      var bd = owners[pins[i].id];
+      var k = bd ? bd.id : "-";
+      totals[k] = (totals[k] || 0) + 1;
+    }
+    var many = Object.keys(totals).length > 1;
+    var out = [];
+    for (i = 0; i < pins.length; i++) {
+      var b = owners[pins[i].id], key = b ? b.id : "-";
+      seen[key] = (seen[key] || 0) + 1;
+      out.push({ idx: seen[key] - 1, total: totals[key],
+                 board: b ? b.name : "", manyBoards: many });
+    }
+    return out;
   }
   // The dialog's Export button, notebook mode. Stamps __psPinExportLast
   // BEFORE the save picker (probes and diagnostics read it; the picker
@@ -5759,10 +6072,11 @@
       try { console.warn("Pandion Plots notebook export failed", e); }
       catch (ignore) {}
     }
+    var recs = pinRecordsFor(scope, pins);
     if (format === "pdf") {
       var pdfName = base + ".pdf";
       setExportStatus("Rendering " + pdfName + "...", false);
-      pinboardPdfBlob(pins).then(function (blob) {
+      pinboardPdfBlob(pins, recs).then(function (blob) {
         stamp({ bytes: blob.size, container: "pdf" });
         setExportStatus("Choose where to save " + pdfName + "...", false);
         return saveExportBlob(blob, pdfName, "pdf");
@@ -5773,7 +6087,7 @@
       return;
     }
     if (pins.length === 1) {
-      pinFileBytes(pins[0], format, dpi).then(function (f) {
+      pinFileBytes(pins[0], format, dpi, recs && recs[0]).then(function (f) {
         var oneName = base + "." + f.ext;
         var blob = new Blob([f.bytes], { type: exportMime(f.ext) });
         stamp({ bytes: blob.size, container: "file", files: [oneName] });
@@ -5794,7 +6108,8 @@
       chain = chain.then(function () {
         setExportStatus("Rendering page " + (idx + 1) + " of " +
           pins.length + "...", false);
-        return pinFileBytes(pin, format, dpi).then(function (f) {
+        return pinFileBytes(pin, format, dpi, recs && recs[idx])
+          .then(function (f) {
           if (f.ext === "png" && format !== "png") bitmapN++;
           entries.push({ name: names[idx] + "." + f.ext, data: f.bytes });
         });
@@ -6364,6 +6679,7 @@
       captureChartSnapshot(c.id);
     }
     applyViewZoom();
+    scheduleChartCheck();
     // Re-adopt the zoom control into the bar the engine just rebuilt.
     // The observer below is the BACKSTOP for renders the shell does not
     // drive; doing it here as well means the control is never missing for
@@ -13041,6 +13357,21 @@
         return;
       }
     });
+    el("ps-pininsp-name").addEventListener("input", function () {
+      var pins = projectPins(), v = String(this.value || "").trim();
+      for (var i = 0; i < pins.length; i++)
+        if (pins[i].id === PIN_SEL) {
+          if (v) pins[i].title = v; else delete pins[i].title;
+        }
+      // The rail's page list and the page's own footer both read this
+      // label, so both follow every keystroke. The footer is patched in
+      // place rather than through renderPinboard, which would rebuild
+      // every page image on the board once per character.
+      syncProjectNavigator();
+      pinSyncCardLabel(PIN_SEL);
+      if (PIN_NOTE_T) clearTimeout(PIN_NOTE_T);
+      PIN_NOTE_T = setTimeout(function () { persist(false); }, 600);
+    });
     el("ps-pininsp-note").addEventListener("input", function () {
       var pins = projectPins();
       for (var i = 0; i < pins.length; i++)
@@ -17780,6 +18111,57 @@
           ], null);
         });
         wrap.appendChild(row);
+        // The pages of the section you are looking at (Torry's rail is the
+        // project's table of contents, and it stopped one level short of
+        // the thing you actually go looking for). Forty pages is forty
+        // screens of scrolling; this is one list. Only the ACTIVE section
+        // expands, which is how a notebook with sections and pages reads
+        // everywhere else.
+        if (b.id !== activePinBoard().id) return;
+        for (var pI = 0; pI < b.pins.length; pI++) (function (pin, idx) {
+          var prow = mkEl("button",
+            "ps-project-item ps-project-item-grouped ps-pinrow" +
+            (PIN_SEL === pin.id && appWorkspace() === "pinboard"
+             ? " ps-project-active" : ""));
+          prow.type = "button";
+          prow.setAttribute("data-project-pin-id", pin.id);
+          var st = pinSourceStatus(pin);
+          var num = mkEl("span", "ps-pinrow-num", String(idx + 1));
+          prow.appendChild(num);
+          prow.appendChild(mkEl("span", "ps-pinrow-name",
+            pinPageLabel(pin, idx)));
+          if (st.state === "changed" || st.state === "gone") {
+            var dot = mkEl("span", "ps-pinrow-dot");
+            dot.setAttribute("aria-hidden", "true");
+            prow.appendChild(dot);
+          }
+          setTip(prow, pinPageLabel(pin, idx) + " \u00b7 " +
+            (pin.at ? "kept " + pinKeptFmt(pin.at) + " \u00b7 " : "") + st.text +
+            (pin.note ? " \u00b7 Your note: " + pin.note : ""));
+          // A page with a drift or a note says so to a screen reader too,
+          // where the dot and the tip cannot reach.
+          prow.setAttribute("aria-label", "Page " + (idx + 1) + ", " +
+            pinPageLabel(pin, idx) +
+            (st.state === "changed" ? ", source chart has changed" :
+             st.state === "gone" ? ", source chart is gone" : "") +
+            (pin.note ? ", has a note" : ""));
+          prow.addEventListener("click", function () {
+            narrowCloseAfterNavigation();
+            pinReveal(pin.id);
+          });
+          prow.addEventListener("contextmenu", function (e) {
+            e.preventDefault();
+            showContextMenu(e.clientX, e.clientY, [
+              { label: "Move to section\u2026", key: "pin-move",
+                action: function () {
+                  showPinMoveMenu(e.clientX, e.clientY, pin.id);
+                } },
+              { label: "Delete page", key: "pin-delete",
+                action: function () { deletePin(pin.id); } }
+            ], null);
+          });
+          wrap.appendChild(prow);
+        })(b.pins[pI], pI);
       })(boards[i]);
       root.appendChild(wrap);
     }
@@ -18346,6 +18728,7 @@
     syncContextInspector();
     syncProjectNavigator();
     updateDocumentState();
+    syncChartCheck();
   }
 
   // Punch list 37: real instrumentation for the chart workspace, read from the
@@ -18502,6 +18885,67 @@
   // has actually drawn: only a finished chart can say whether a part sits
   // outside the canvas, and a legend drag commits no size option, so
   // nothing else in the sync path would ever refresh it.
+  // ---- the chart-check receipt -----------------------------------------
+  // The engine already judges a chart against its graph type's rubric
+  // (Help > Check my chart). It only ever spoke when asked, so a chart
+  // could carry a truncated bar baseline, or a significance star with no
+  // test behind it, and every surface in the app stayed silent - while
+  // the export carried the claim.
+  //
+  // This asks the engine the same question after each render and puts the
+  // answer where the user is already looking. ONE judgment, in the engine,
+  // read through the host hook __gb2_graphLint - never a second copy in the
+  // shell, which would drift. Clean charts get a muted receipt rather than
+  // nothing, so the feature is discoverable before it has bad news; a
+  // finding turns it amber, which is the colour the panel itself uses.
+  var CHECK_TIMER = null;
+  function scheduleChartCheck() {
+    if (CHECK_TIMER) clearTimeout(CHECK_TIMER);
+    // After the render settles. The lint reads rendered geometry (colours
+    // off legend swatches, tick labels off the axes), so it must run on a
+    // painted chart, and a burst of style commits should cost one pass.
+    CHECK_TIMER = setTimeout(syncChartCheck, 260);
+  }
+  function chartCheckReport() {
+    if (appWorkspace() !== "chart") return null;
+    var doc = workspaceDocument("chart");
+    if (!doc || isLayoutTab(doc)) return null;
+    var host = hostEl();
+    if (!host || typeof host.__gb2_graphLint !== "function") return null;
+    if (!host.querySelector("svg")) return null;   // guided empty state
+    try { return host.__gb2_graphLint(); } catch (e) { return null; }
+  }
+  function syncChartCheck() {
+    CHECK_TIMER = null;
+    var btn = el("ps-status-check");
+    if (!btn) return;
+    var rep = chartCheckReport();
+    var found = rep && Array.isArray(rep.findings) ? rep.findings : null;
+    if (!rep || !found) { btn.hidden = true; return; }
+    var warns = 0, i;
+    for (i = 0; i < found.length; i++) if (found[i].sev === "warn") warns++;
+    btn.hidden = false;
+    if (!found.length) {
+      btn.setAttribute("data-state", "ok");
+      btn.textContent = "Checks passed";
+      setTip(btn, "This chart was run against " + rep.total +
+        " checks for its graph type and passed them all. Click to read them.");
+      return;
+    }
+    btn.setAttribute("data-state", "warn");
+    btn.textContent = found.length === 1
+      ? "1 thing to check"
+      : found.length + " things to check";
+    // Name the worst one in the tooltip: a bare count makes the user click
+    // to find out whether it matters.
+    var lead = null;
+    for (i = 0; i < found.length; i++)
+      if (found[i].sev === "warn") { lead = found[i]; break; }
+    if (!lead) lead = found[0];
+    setTip(btn, lead.title + (found.length > 1
+      ? " (and " + (found.length - 1) + " more)" : "") +
+      ". Click to open Check my chart.");
+  }
   function syncFitSizeRow() {
     var fitBox = el("ps-fit-pane");
     if (!fitBox) return;
@@ -22120,6 +22564,12 @@
       render();
     });
     el("ps-save").addEventListener("click", saveProjectFile);
+    // The receipt IS the way in: it names what it found and opens the
+    // panel that explains it. Same route the Help menu takes, so there is
+    // one path to the panel, not two.
+    el("ps-status-check").addEventListener("click", function () {
+      openEngineHelp("graphLint");
+    });
     // Cmd/Ctrl+S saves the project (window CAPTURE so it beats the
     // browser's own save-page dialog everywhere, including inputs).
     window.addEventListener("keydown", function (e) {
@@ -22362,6 +22812,10 @@
             { label: "Send to layout\u2026", key: "pin-send",
               action: function () {
                 showPinSendMenu(e.clientX, e.clientY, ctxPinId);
+              } },
+            { label: "Move to section\u2026", key: "pin-move",
+              action: function () {
+                showPinMoveMenu(e.clientX, e.clientY, ctxPinId);
               } },
             "separator",
             { label: "Export this page\u2026", key: "pin-export-page",
