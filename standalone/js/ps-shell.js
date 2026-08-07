@@ -18182,7 +18182,69 @@
         actions: [{ label: "Set type to ID", act: "advice-id" }]
       };
     }
+    // The identifier signature the branch above MISSES. Its trigger is a
+    // leading zero, which is a formatting accident, so 001..040 got a card
+    // while the same column written 1..40 or P001..P040 got nothing, and the
+    // plain-integer one types Continuous and is then averaged. The real
+    // signature is that every value is different, which the panel already
+    // computes and prints as Distinct beside Rows two lines above this slot,
+    // and which the catsingle lint already reasons from on the CATEGORY axis.
+    var idn = identifierShape(t, col);
+    if (idn && type !== "id") {
+      return {
+        kind: "allunique",
+        html: "<strong>Every one of the " + idn.n + " values in " +
+          escHtml(col) + " is different.</strong> That is the shape of a case " +
+          "number rather than something measured" +
+          (idn.numeric
+            ? ", and because it reads as a number a chart will happily average it"
+            : "") + ". If it names cases rather than measuring them, set its " +
+          "type to ID and it is kept out of every chart role.",
+        actions: [{ label: "Set type to ID", act: "advice-id" }]
+      };
+    }
     return null;
+  }
+  // Deliberately narrow, because the cost of being wrong is a card on a real
+  // measurement. Every value distinct is necessary and nowhere near
+  // sufficient, since reaction times are all distinct too. For a NUMERIC
+  // column the values must also be whole numbers packed into a
+  // near-consecutive range, which is what a case number looks like and what a
+  // measurement does not. Text needs no such test: an all-unique text column
+  // is either an identifier or free text, and neither belongs on an axis.
+  var ID_SHAPE_MIN_N = 12;
+  var ID_SHAPE_DENSITY = 0.9;
+  function identifierShape(t, col) {
+    var type = t.types[col];
+    if (type !== "continuous" && type !== "nominal" && type !== "ordinal")
+      return null;
+    var vals = t.columns[col] || [], seen = Object.create(null);
+    var n = 0, distinct = 0, i, v;
+    var numeric = true, lo = Infinity, hi = -Infinity;
+    for (i = 0; i < vals.length; i++) {
+      v = vals[i];
+      if (v == null) continue;
+      n++;
+      var k = String(v);
+      if (seen[k] === undefined) { seen[k] = 1; distinct++; }
+      if (numeric) {
+        var num = typeof v === "number" ? v : Number(k);
+        if (!isFinite(num) || num !== Math.round(num)) numeric = false;
+        else { if (num < lo) lo = num; if (num > hi) hi = num; }
+      }
+    }
+    if (n < ID_SHAPE_MIN_N || distinct !== n) return null;
+    // A declared ORDINAL with a hand-set level order is a deliberate choice
+    // about a scale, not an accident, so it is left alone.
+    if (type === "ordinal" && t.declaredLevels && t.declaredLevels[col])
+      return null;
+    if (colStoresNumbers(t, col)) {
+      if (!numeric) return null;
+      var span = hi - lo + 1;
+      if (!(span > 0) || n / span < ID_SHAPE_DENSITY) return null;
+      return { n: n, numeric: true };
+    }
+    return { n: n, numeric: false };
   }
   // t3-48. A plain derived column, not a formula: the formula engine is
   // numeric (ABS, SQRT, MEAN and friends) and has no string functions, so
