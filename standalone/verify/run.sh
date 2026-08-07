@@ -25,7 +25,7 @@ grid-keys-check help-check hierarchy-check \
 grid-accessibility-check \
 help-me-choose-check import-errors-check layout-image-check modal-accessibility-check \
 layout-arrange-check layout-clipboard-check layout-orientation-check layout-rail-check layout-selectall-check layout-reuse-check layout-undo-check library-bridge-check \
-layout-accessibility-check layout-text-check \
+layout-accessibility-check layout-text-check layout-figure-check \
 linked-selection-check motion-check narrow-check novice-affordances-check \
 overlay-reload-check overlay-restore-check pane-debusy-check panel-reveal-check percol-missing-check \
 perf-check pinboard-check polish-check preferences-check \
