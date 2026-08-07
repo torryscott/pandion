@@ -38,6 +38,12 @@
   var PS_SAVE_KEY = "psstandalone.project.v2";
   var PS_BACKUP_KEY = "psstandalone.project.backup.v1";
   var PS_RECENT_KEY = "psstandalone.recent.v1";
+  // Written when an autosave fails and cleared when one succeeds, so a RELOAD
+  // can tell that the snapshot it is about to offer predates the work that was
+  // on screen. Deliberately tiny, and its write is best-effort: if the store
+  // is so full that twenty bytes will not fit, the app is no worse off than
+  // before.
+  var PS_STALE_KEY = "psstandalone.autosaveStale.v1";
   var PS_WELCOME_SESSION_KEY = "psstandalone.welcome.dismissed";
   var PS_PREF_KEY = "psstandalone.preferences.v1";
   var PS_COACH_KEY = "psstandalone.coach.clickToEdit.v1";
@@ -2284,6 +2290,7 @@
       AUTOSAVE_HEALTH = "ok";
       AUTOSAVE_LAST_OK = Date.now();
       AUTOSAVE_DETAIL = "Local recovery is current";
+      try { window.localStorage.removeItem(PS_STALE_KEY); } catch (e0) {}
       // Recents stay on BOTH edges. They are observable immediately (the
       // start centre lists them, and anything can ask for them straight after
       // an action), and unlike the backup they do not re-parse the previous
@@ -2294,9 +2301,18 @@
     } catch (e) {
       AUTOSAVE_HEALTH = "error";
       AUTOSAVE_FAILS++;
-      AUTOSAVE_DETAIL = /quota/i.test(String(e && (e.name || e.message)))
-        ? "Browser storage is full; recent changes remain in memory"
+      // The 5k to 12k case already says the useful thing, naming .pand as the
+      // copy that does not depend on this browser. At the size where the data
+      // is ACTUALLY lost the message degraded to one that named no fix and
+      // read as reassurance, so the sentence that would have saved the work
+      // only appeared when it was not needed.
+      var quota = /quota/i.test(String(e && (e.name || e.message)));
+      AUTOSAVE_DETAIL = quota
+        ? "Browser storage is full, so this project is no longer being " +
+          "autosaved. Your work is safe in this tab, and a reload would lose " +
+          "it. Save it to a .pand file now."
         : "Local recovery could not be updated";
+      try { window.localStorage.setItem(PS_STALE_KEY, "1"); } catch (e1) {}
       updateDocumentState();
       showToast(AUTOSAVE_DETAIL, true);
     }
@@ -20121,10 +20137,20 @@
     continueBtn.style.display = BOOT_RESTORED ? "flex" : "none";
     if (BOOT_RESTORED) {
       var age = BOOT_SAVED_AT ? recentTimeLabel(BOOT_SAVED_AT) : "";
+      // A snapshot whose own timestamp is recent can still be BEHIND the work
+      // that was on screen, because the autosave that would have replaced it
+      // failed. Then "saved just now" was true of the snapshot and false of
+      // everything the user had done since, which is the reading that matters.
+      var stale = false;
+      try { stale = window.localStorage.getItem(PS_STALE_KEY) === "1"; }
+      catch (e2) {}
       el("ps-welcome-continue-meta").textContent =
         (PROJECT.name || "Untitled project") + " \u00b7 " +
         (PROJECT.table ? nRows(PROJECT.table) + " rows" : "local recovery") +
-        (age ? " \u00b7 saved " + age : "");
+        (stale
+          ? " \u00b7 from before the browser ran out of room, so later " +
+            "changes are not in it"
+          : (age ? " \u00b7 saved " + age : ""));
     }
     var root = el("ps-recent-list"), list = recentProjects();
     root.innerHTML = "";
