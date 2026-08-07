@@ -334,6 +334,22 @@ by an automated check, so they run as written:</p>
 <tr><td>Round for display</td>
 <td><code data-guide-formula>ROUND(score / 10)</code></td>
 <td><code>FLOOR</code> and <code>CEILING</code> round down / up.</td></tr>
+<tr><td>Fill a gap from another column</td>
+<td><code data-guide-formula>COALESCE(post, pre)</code></td>
+<td>The first value that is there. Add more fallbacks as you like, and a
+number last for a value that can never itself be missing.</td></tr>
+<tr><td>Flag the rows with no value</td>
+<td><code data-guide-formula>ISMISSING(post)</code></td>
+<td>1 where the cell is empty, 0 where it is not. Everything else in the
+language goes missing when its input does, so this is the way to ask.</td></tr>
+<tr><td>Substitute for a missing value</td>
+<td><code data-guide-formula>IF(ISMISSING(post), 0, post)</code></td>
+<td>Say why in your write-up. Treating an absence as a zero is a claim.</td></tr>
+<tr><td>Tidy up messy category labels</td>
+<td><code data-guide-formula>IF(CONTAINS(LOWER(TRIM(arm)), "control"), "Control", "Treatment")</code></td>
+<td>Folds "Control", "control" and "CONTROL" into one level, ready for
+Group By. <code>LOWER</code> and <code>UPPER</code> fold the case,
+<code>TRIM</code> tidies the spaces, <code>LEN</code> counts characters.</td></tr>
 <tr><td>Names with spaces</td>
 <td><code data-guide-formula>`first quiz` * 2</code></td>
 <td>Backticks around the name, exactly as typed in the header.</td></tr>

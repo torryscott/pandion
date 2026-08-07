@@ -5,28 +5,141 @@
 //   LOG10(rt)
 //   IF(condition == "Control", "baseline", "dosed")
 //   BIN(score, 4)
+//   COALESCE(post, pre)
+//   IF(CONTAINS(LOWER(arm), "control"), "Control", "Treatment")
 //
 // Column references are bare identifiers (backtick-quote names with
 // spaces: `reaction time`). Row-wise functions: ABS SQRT LN LOG10 EXP
 // ROUND(x[,digits]) FLOOR CEILING IF(test, then, else) BIN(col, k).
+// Text functions: TRIM UPPER LOWER LEN CONTAINS(text, part).
+// Missing-value functions: ISMISSING(x) COALESCE(a, b, ...).
 // Column aggregates (computed once over a column's valid values):
 // MEAN SD MEDIAN MIN MAX SUM N - their argument must be a plain column
 // reference. Operators: + - * / ^, comparisons == != (or =) < <= > >=,
 // logic AND OR NOT (also && || !), parentheses, unary minus, string
-// literals in double quotes. MISSING PROPAGATES: any missing input
-// makes the result missing; IF evaluates only the taken branch.
+// literals in double quotes.
+//
+// MISSING PROPAGATES: any missing input makes the result missing. The
+// two exceptions are the functions that exist to break that chain.
+// ISMISSING always answers 1 or 0, and COALESCE returns the first
+// argument that is there (stopping at it, so the rest is never
+// evaluated); IF likewise evaluates only the taken branch. The text
+// functions do still propagate, they simply read their input as text
+// instead of coercing it to a number.
+//
+// Missing is the single sentinel null. There is no separate error
+// value, so a formula that cannot compute a row and a row with no data
+// deliberately look the same.
+//
+// Text notes. CONTAINS is case sensitive, so fold with LOWER rather
+// than have it guess for you. TRIM removes the spaces at each end and
+// collapses the runs inside, the spreadsheet meaning of the name; the
+// app already trims each end as it reads a value into a column, so the
+// run inside is the part TRIM is really for here. LEN reads a number
+// as the text the grid shows.
+//
 // Function and aggregate names are case-insensitive; column names are
 // exact. Keep this file ASCII (escapes only).
 
 window.PSFormula = (function () {
   "use strict";
 
+  // "raw" marks a function that is dispatched BEFORE evalFn's numeric
+  // prologue, so it sees its arguments exactly as they arrive. Two
+  // things need that. ISMISSING and COALESCE must survive a missing
+  // input, because breaking the propagation chain is their whole job.
+  // The text functions must see a string, where the prologue's toNum
+  // would read every label as missing and bail.
   var ROW_FN = {
     ABS: { n: 1 }, SQRT: { n: 1 }, LN: { n: 1 }, LOG10: { n: 1 },
     EXP: { n: 1 }, ROUND: { n: 1, max: 2 }, FLOOR: { n: 1 },
-    CEILING: { n: 1 }, IF: { n: 3 }, BIN: { n: 2 }
+    CEILING: { n: 1 }, IF: { n: 3 }, BIN: { n: 2 },
+    ISMISSING: { n: 1, raw: 1 }, COALESCE: { n: 1, max: Infinity, raw: 1 },
+    TRIM: { n: 1, raw: 1 }, UPPER: { n: 1, raw: 1 }, LOWER: { n: 1, raw: 1 },
+    LEN: { n: 1, raw: 1 }, CONTAINS: { n: 2, raw: 1 }
   };
   var AGG_FN = { MEAN: 1, SD: 1, MEDIAN: 1, MIN: 1, MAX: 1, SUM: 1, N: 1 };
+
+  // ---- did-you-mean. An error that names the fix is the difference
+  // between a user carrying on and a user giving up, and this engine
+  // has a small closed vocabulary, so the suggestions can be exact
+  // rather than fuzzy guesses.
+  //
+  // Names from other tools that mean something this language has. A
+  // user who types the name they already know should be pointed at
+  // ours instead of being told the idea is unavailable. Only mappings
+  // that give the SAME answer are listed; TRUNC is not FLOOR for
+  // negatives and STARTSWITH is not CONTAINS, so neither is here.
+  var FN_ALIAS = {
+    LOG: "LOG10 for base 10, or LN for natural log",
+    AVERAGE: "MEAN", AVG: "MEAN",
+    STDEV: "SD", "STDEV.S": "SD", STDDEV: "SD",
+    COUNT: "N", COUNTA: "N", TOTAL: "SUM",
+    LENGTH: "LEN", NCHAR: "LEN",
+    ISBLANK: "ISMISSING", ISNULL: "ISMISSING", ISNA: "ISMISSING",
+    ISEMPTY: "ISMISSING",
+    IFNA: "COALESCE", IFERROR: "COALESCE", IFNULL: "COALESCE",
+    NVL: "COALESCE",
+    POWER: "the ^ operator, as in score ^ 2",
+    CEIL: "CEILING", STRIP: "TRIM",
+    SEARCH: "CONTAINS", FIND: "CONTAINS", INSTR: "CONTAINS",
+    GREPL: "CONTAINS",
+    UPPERCASE: "UPPER", TOUPPER: "UPPER",
+    LOWERCASE: "LOWER", TOLOWER: "LOWER"
+  };
+  // Optimal string alignment distance, which is Levenshtein plus the
+  // adjacent transposition ("MAEN" for "MEAN") that is the commonest
+  // typo there is. Names are short, so the full matrix costs nothing.
+  function editDistance(a, b) {
+    var m = a.length, n = b.length, i, j;
+    if (!m) return n;
+    if (!n) return m;
+    var d = [];
+    for (i = 0; i <= m; i++) { d.push(new Array(n + 1)); d[i][0] = i; }
+    for (j = 0; j <= n; j++) d[0][j] = j;
+    for (i = 1; i <= m; i++)
+      for (j = 1; j <= n; j++) {
+        var cost = a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1;
+        var v = Math.min(d[i][j - 1] + 1, d[i - 1][j] + 1,
+                         d[i - 1][j - 1] + cost);
+        if (i > 1 && j > 1 && a.charAt(i - 1) === b.charAt(j - 2) &&
+            a.charAt(i - 2) === b.charAt(j - 1))
+          v = Math.min(v, d[i - 2][j - 2] + 1);
+        d[i][j] = v;
+      }
+    return d[m][n];
+  }
+  // The nearest name worth naming, or null. Deliberately tight. A
+  // wrong suggestion is worse than none, because the user then chases
+  // it. One edit buys a short name, two a longer one; ties keep the
+  // first candidate, which is table order.
+  function nearestName(query, candidates) {
+    var q = String(query || ""), best = null, bestD = Infinity;
+    var cap = q.length <= 3 ? 1 : 2;
+    for (var i = 0; i < candidates.length; i++) {
+      var d = editDistance(q, String(candidates[i]));
+      if (d < bestD) { bestD = d; best = candidates[i]; }
+    }
+    return bestD <= cap ? best : null;
+  }
+  function didYouMeanFn(fname) {
+    var hint = FN_ALIAS[fname] ||
+      nearestName(fname, Object.keys(ROW_FN).concat(Object.keys(AGG_FN)));
+    return hint ? ". Did you mean " + hint + "?" : "";
+  }
+  function didYouMeanVar(name, knownColumns) {
+    var cols = knownColumns || [], i;
+    var lower = String(name).toLowerCase();
+    for (i = 0; i < cols.length; i++)
+      if (String(cols[i]).toLowerCase() === lower && cols[i] !== name)
+        return ". Did you mean " + cols[i] +
+               "? Variable names are case sensitive.";
+    var up = String(name).toUpperCase();
+    if (ROW_FN[up] || AGG_FN[up])
+      return ". " + up + " is a function name, so it needs brackets after it.";
+    var near = nearestName(name, cols);
+    return near ? ". Did you mean " + near + "?" : "";
+  }
 
   function tokenize(src) {
     var toks = [], i = 0, s = String(src || "");
@@ -119,13 +232,15 @@ window.PSFormula = (function () {
             var lo = spec.n, hi = spec.max || spec.n;
             if (args.length < lo || args.length > hi)
               throw new Error(fname + "() takes " +
-                (lo === hi ? lo : lo + "-" + hi) + " argument" +
+                (hi === Infinity ? lo + " or more"
+                  : lo === hi ? String(lo) : lo + "-" + hi) + " argument" +
                 (hi === 1 ? "" : "s"));
             if (fname === "BIN" && args[0].k !== "col")
               throw new Error("BIN() takes a column name first");
             left = { k: "fn", fn: fname, args: args };
           } else {
-            throw new Error("unknown function " + fname + "()");
+            throw new Error("unknown function " + fname + "()" +
+              didYouMeanFn(fname));
           }
         } else {
           left = { k: "col", name: tk.v };
@@ -202,6 +317,20 @@ window.PSFormula = (function () {
 
   function toNum(v) {
     return (typeof v === "number" && isFinite(v)) ? v : null;
+  }
+  // Text form of a value, for the string functions. A number uses the
+  // same 10-significant-digit rounding the shell writes into a cell, so
+  // LEN and UPPER read the number the grid is showing rather than a
+  // longer float that only ever existed inside the engine.
+  function toStr(v) {
+    if (v == null) return null;
+    if (typeof v === "number")
+      return isFinite(v) ? String(Number(v.toPrecision(10))) : null;
+    return String(v);
+  }
+  // TRIM in the spreadsheet sense, both ends and the runs inside.
+  function trimText(s) {
+    return String(s).trim().replace(/\s+/g, " ");
   }
   function evalNode(ast, row, env) {
     switch (ast.k) {
@@ -291,6 +420,9 @@ window.PSFormula = (function () {
       if (idx < 0) idx = 0;
       return "bin " + (idx + 1);
     }
+    // Everything from here down null-propagates by construction, so the
+    // functions that must not go through toNum are dispatched first.
+    if (ROW_FN[fn] && ROW_FN[fn].raw) return evalRawFn(ast, row, env);
     var a = toNum(evalNode(ast.args[0], row, env));
     if (a == null) return null;
     if (fn === "ABS") return Math.abs(a);
@@ -305,6 +437,34 @@ window.PSFormula = (function () {
       if (d == null) return null;
       var p = Math.pow(10, Math.round(d));
       return Math.round(a * p) / p;
+    }
+    return null;
+  }
+  // The "raw" functions (see ROW_FN). ISMISSING and COALESCE are the
+  // only two things in the language that survive a missing input. The
+  // text functions still go missing when their input does; they just
+  // read it as text on the way.
+  function evalRawFn(ast, row, env) {
+    var fn = ast.fn, i, v;
+    if (fn === "ISMISSING")
+      return evalNode(ast.args[0], row, env) == null ? 1 : 0;
+    if (fn === "COALESCE") {
+      for (i = 0; i < ast.args.length; i++) {
+        v = evalNode(ast.args[i], row, env);
+        if (v != null) return v;   // stops here, the rest is not evaluated
+      }
+      return null;
+    }
+    var s = toStr(evalNode(ast.args[0], row, env));
+    if (s == null) return null;
+    if (fn === "TRIM") return trimText(s);
+    if (fn === "UPPER") return s.toUpperCase();
+    if (fn === "LOWER") return s.toLowerCase();
+    if (fn === "LEN") return s.length;
+    if (fn === "CONTAINS") {
+      var part = toStr(evalNode(ast.args[1], row, env));
+      if (part == null) return null;
+      return s.indexOf(part) === -1 ? 0 : 1;
     }
     return null;
   }
@@ -328,13 +488,23 @@ window.PSFormula = (function () {
   // -> { ok:true, refs:[names], run(columns, n) -> values[] }
   // or { ok:false, error }
   function compile(formula, knownColumns) {
+    var src = String(formula == null ? "" : formula);
+    // The spreadsheet habit, and the one mistake the parser could only
+    // report as a stray character. Say what this box actually wants.
+    if (/^\s*=/.test(src)) {
+      var rest = src.replace(/^\s*=+\s*/, "").replace(/\s+/g, " ").trim();
+      if (rest.length > 40) rest = rest.slice(0, 40) + "...";
+      return { ok: false, error: "formulas here are just the expression, " +
+        "so remove the leading \"=\"" + (rest ? " (try " + rest + ")" : "") };
+    }
     var ast;
-    try { ast = parseTokens(tokenize(formula)); }
+    try { ast = parseTokens(tokenize(src)); }
     catch (e) { return { ok: false, error: String(e && e.message || e) }; }
     var refs = Object.keys(collectRefs(ast, {}));
     for (var i = 0; i < refs.length; i++) {
       if (knownColumns.indexOf(refs[i]) === -1)
-        return { ok: false, error: "unknown variable \"" + refs[i] + "\"" };
+        return { ok: false, error: "unknown variable \"" + refs[i] + "\"" +
+          didYouMeanVar(refs[i], knownColumns) };
     }
     var aggNeeds = collectAggNeeds(ast, {});
     return {

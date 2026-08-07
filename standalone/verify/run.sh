@@ -20,11 +20,12 @@ data-commandbar-check data-menu-check separator-accessibility-check \
 data-undo-check dates-check doclifecycle-check tab-accessibility-check drag-feel-check \
 drag-selection-check outside-canvas-check hmc-list-check hidden-vars-check sigma-freshness-check \
 empty-states-check engine-stamp-check flyout-align-check filter-honesty-check examples-check exclusion-bridge-check \
-findpop-check fitpanes-check \
+findpop-check fitpanes-check formula-unit-check formula-vocab-check \
 grid-keys-check help-check hierarchy-check hidden-selection-check \
 identifier-advice-check inspector-freshness-check menu-selection-check \
-missing-codes-check header-row-check level-variants-check typechange-cost-check  \
-missing-filter-check omv-missing-rules-check autosave-honesty-check data-papercuts-check identifier-advice-check \
+missing-codes-check header-row-check level-variants-check typechange-cost-check \
+missing-filter-check omv-missing-rules-check autosave-honesty-check \
+data-papercuts-check \
 grid-accessibility-check \
 help-me-choose-check import-errors-check layout-image-check modal-accessibility-check \
 layout-arrange-check layout-clipboard-check layout-orientation-check layout-rail-check layout-selectall-check layout-reuse-check layout-undo-check library-bridge-check \

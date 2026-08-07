@@ -47,15 +47,15 @@ if (await page.locator('#ps-welcome').isVisible()) {
 const run = await page.evaluate(fl => {
     window.PS_SHELL.loadTable('guidecheck',
         ['paced', 'clear', 'useful', 'supported', 'score', 'pre', 'post',
-         'rt', 'first quiz'],
-        [['3', '4', '5', '4', '61', '10', '14', '420', '7'],
-         ['4', '5', '5', '5', '75', '12', '11', '380', '8'],
-         ['2', '3', '4', '3', '58', '9', '16', '1250', '5'],
-         ['4', '4', '4', '4', '90', '11', '15', '510', '9']],
+         'rt', 'first quiz', 'arm'],
+        [['3', '4', '5', '4', '61', '10', '14', '420', '7', 'Control'],
+         ['4', '5', '5', '5', '75', '12', '11', '380', '8', 'control'],
+         ['2', '3', '4', '3', '58', '9', '16', '1250', '5', 'CONTROL'],
+         ['4', '4', '4', '4', '90', '11', '15', '510', '9', 'Treatment']],
         { paced: 'continuous', clear: 'continuous', useful: 'continuous',
           supported: 'continuous', score: 'continuous', pre: 'continuous',
           post: 'continuous', rt: 'continuous',
-          'first quiz': 'continuous' });
+          'first quiz': 'continuous', arm: 'nominal' });
     const out = [];
     for (let i = 0; i < fl.length; i++) {
         const r = window.PS_SHELL.saveComputedColumn('gf' + i, fl[i]);
@@ -91,6 +91,12 @@ ok(String(vals('IF(score >= MEAN(score), "high", "low")')) ===
    'the mean split labels the right rows (low,high,low,high)');
 ok(String(vals('`first quiz` * 2')) === '14,16,10,18',
    'backtick-quoted names work exactly as documented');
+ok(String(vals(
+       'IF(CONTAINS(LOWER(TRIM(arm)), "control"), "Control", "Treatment")')) ===
+   'Control,Control,Control,Treatment',
+   'the label-tidying recipe folds three spellings into one level');
+ok(String(vals('ISMISSING(post)')) === '0,0,0,0',
+   'ISMISSING reports 0 across a column with nothing missing in it');
 
 console.log('case 2: the channel switch filters the guide honestly');
 const gpage = await browser.newPage();
