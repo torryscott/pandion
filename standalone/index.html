@@ -4454,13 +4454,17 @@
           </div>
           <span class="ps-ltool-sep"></span>
           <div class="ps-ltool-group">
-            <button type="button" class="ps-command" id="ps-laddchart">Add chart</button>
-            <button type="button" class="ps-command" id="ps-laddtext">Add text</button>
+            <!-- Icons beside the words (Torry, Aug 6 2026): Add chart
+                 and From Notebook REUSE the workspace switcher's exact
+                 glyphs (one icon per idea, the rail-icons rule); the
+                 other three get glyphs in the same 24-box stroke voice. -->
+            <button type="button" class="ps-command" id="ps-laddchart"><svg class="ps-icn" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V4"/><path d="M4 20h16"/><rect x="7" y="11" width="3.2" height="6" rx="0.6" fill="currentColor" stroke="none"/><rect x="13" y="7" width="3.2" height="10" rx="0.6" fill="currentColor" stroke="none"/></svg> Add chart</button>
+            <button type="button" class="ps-command" id="ps-laddtext"><svg class="ps-icn" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 6V4h14v2"/><path d="M12 4v16"/><path d="M9 20h6"/></svg> Add text</button>
             <button type="button" class="ps-command" id="ps-laddpin"
                     aria-haspopup="menu"
-                    data-tip="Place a kept Notebook page in this layout">From Notebook</button>
-            <button type="button" class="ps-command" id="ps-laddlabel">Panel label</button>
-            <button type="button" class="ps-command" id="ps-laddimage">Add image</button>
+                    data-tip="Place a kept Notebook page in this layout"><svg class="ps-icn" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="3.5" width="13.5" height="17" rx="2"/><path d="M4 8h4M4 12h4M4 16h4"/></svg> From Notebook</button>
+            <button type="button" class="ps-command" id="ps-laddlabel"><svg class="ps-icn" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9.2 16l2.8-8 2.8 8M10.3 13.4h4.6" stroke-width="1.6"/></svg> Panel label</button>
+            <button type="button" class="ps-command" id="ps-laddimage"><svg class="ps-icn" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.6" fill="currentColor" stroke="none"/><path d="M4.5 17.5l4.5-4 3 2.5 4-4.5 3.5 4"/></svg> Add image</button>
             <input type="file" id="ps-laddimage-file" accept="image/*,.svg"
                    style="display:none;" aria-hidden="true">
           </div>

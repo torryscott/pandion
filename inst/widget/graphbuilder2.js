@@ -95003,6 +95003,20 @@
                 ? n + " hidden - show / hide elements"
                 : "Show / hide elements";
             visBtn.setAttribute("aria-label", visBtn.title);
+            // The labeled-toolbar word must SURVIVE this rewrite: the
+            // eye is the one toolbar icon that changes with state, and
+            // the innerHTML swap above destroyed the label the moment
+            // anything was hidden (Torry's report, Aug 6 2026).
+            if (data && data.toolbarLabels === true) {
+                var lb = document.createElement("span");
+                lb.setAttribute("data-role", "toolbar-btn-label");
+                lb.setAttribute("aria-hidden", "true");
+                lb.textContent = "Show/hide";
+                lb.style.cssText = "margin-left:5px;" +
+                    "font:500 12px/1 var(--gb2-ui-font, sans-serif);" +
+                    "letter-spacing:0.2px;";
+                visBtn.appendChild(lb);
+            }
         }
         _updateVisBtnIcon();
 
@@ -95382,6 +95396,11 @@
                  [addAnnBtn, "Add"]].forEach(function (pair) {
                     var b = pair[0];
                     if (!b) return;
+                    // The vis button labels itself in _updateVisBtnIcon
+                    // (its icon rewrite would destroy this one) - never
+                    // double up.
+                    if (b.querySelector('[data-role="toolbar-btn-label"]'))
+                        return;
                     var lb = document.createElement("span");
                     lb.setAttribute("data-role", "toolbar-btn-label");
                     lb.setAttribute("aria-hidden", "true");

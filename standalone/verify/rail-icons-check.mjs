@@ -121,6 +121,33 @@ ok(inherits.stroke === 'currentColor' && inherits.w >= 12 &&
    `it takes the row's own colour and sits at icon size ` +
    `(${inherits.stroke}, ${inherits.w}px)`);
 
+console.log('case 4: the Layout tools carry icons, reusing the workspace ' +
+            'glyphs (Torry, Aug 6 2026)');
+await page.evaluate(async () => {
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    window.PS_SHELL.addLayout(); await sleep(800);
+    window.PS_SHELL.setWorkspace('layout'); await sleep(500);
+});
+const tools = await page.evaluate(() => {
+    const sig = el => [...el.querySelectorAll('path,rect,circle')]
+        .map(n => n.getAttribute('d') || n.getAttribute('x') ||
+                  n.getAttribute('cx') || '').join('|');
+    const btnSvg = id => document.querySelector('#' + id + ' svg');
+    const wsSvg = ws => document.querySelector(
+        '[data-ps-workspace="' + ws + '"] svg');
+    return {
+        all: ['ps-laddchart', 'ps-laddtext', 'ps-laddpin', 'ps-laddlabel',
+              'ps-laddimage'].map(id => !!btnSvg(id)),
+        chartMatches: sig(btnSvg('ps-laddchart')) === sig(wsSvg('chart')),
+        notebookMatches: sig(btnSvg('ps-laddpin')) === sig(wsSvg('pinboard')),
+    };
+});
+ok(tools.all.every(Boolean),
+   'all five Layout tool buttons carry an icon beside their word');
+ok(tools.chartMatches && tools.notebookMatches,
+   'Add chart and From Notebook REUSE the workspace switcher glyphs, ' +
+   'stroke for stroke - one icon per idea');
+
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('RAIL ICONS CHECK PASS');
 await browser.close();

@@ -80,6 +80,41 @@ ok(await page.evaluate(() =>
 await page.keyboard.press('Escape');
 await page.waitForTimeout(400);
 
+console.log('case 2b: the Show/hide word survives a hide (the eye is the ' +
+            'one icon that rewrites itself)');
+// Torry's screenshot bug: the Visibility panel's eye toggles update the
+// icon IN PLACE (window.__gb2_updateVisBtnIcon - their exact call), no
+// re-render heals anything, and the innerHTML rewrite ate the label.
+// Drive that call directly, then the full hide for the steady state.
+await page.evaluate(() => window.__gb2_updateVisBtnIcon());
+await page.waitForTimeout(200);
+ok(await page.evaluate(() => {
+    const lbs = [...document.querySelectorAll(
+        '[data-role="chart-toolbar"] [data-role="toolbar-btn-label"]')]
+        .map(n => n.textContent);
+    return lbs.filter(t => t === 'Show/hide').length === 1;
+}), 'an in-place icon rewrite keeps exactly one Show/hide word');
+await page.evaluate(() => window.setOption('hiddenElements', ['yTitle']));
+await page.waitForTimeout(1100);
+const hidState = await page.evaluate(() => {
+    const b = [...document.querySelectorAll(
+        '[data-role="chart-toolbar"] button')]
+        .find(x => (x.getAttribute('aria-label') || '').indexOf('hidden') >= 0
+            || (x.getAttribute('aria-label') || '')
+                .indexOf('Show / hide') === 0);
+    const lb = b && b.querySelector('[data-role="toolbar-btn-label"]');
+    return { title: b ? b.getAttribute('aria-label') : null,
+             label: lb ? lb.textContent : null,
+             labels: [...b.querySelectorAll(
+                 '[data-role="toolbar-btn-label"]')].length };
+});
+ok(/hidden/.test(hidState.title || '') && hidState.label === 'Show/hide' &&
+   hidState.labels === 1,
+   `the slashed eye keeps its word, exactly one of it ` +
+   `("${hidState.title}")`);
+await page.evaluate(() => window.setOption('hiddenElements', []));
+await page.waitForTimeout(900);
+
 console.log('case 3: the "?" leaves the toolbar; the Help menu covers it');
 ok(await page.evaluate(() => {
     const b = document.querySelector(
