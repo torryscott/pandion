@@ -3941,6 +3941,60 @@
     }
     if (changed) persist(false);
   }
+  // ---- Notebook history ------------------------------------------------
+  // Cmd/Ctrl+Z is the app's promise everywhere else, and in this workspace
+  // it fell through to the chart engine: the Edit menu read "Undo chart
+  // styling" while the Notebook was on screen, and the key silently edited
+  // a chart the user was not looking at. Keeping, deleting, moving between
+  // sections and reordering are the structural acts on the record, and they
+  // are what this covers. Notes and titles are text fields, where the
+  // browser's own undo already works while the caret is in them.
+  var NB_UNDO = [], NB_REDO = [], NB_SEQ = 0;
+  function nbStep(label, undo, redo) {
+    NB_SEQ++;
+    var step = { seq: NB_SEQ, label: label, undo: undo, redo: redo };
+    NB_UNDO.push(step);
+    // Same ceiling as the layout history: deep enough to cover a working
+    // session, bounded so a long one cannot grow without limit.
+    if (NB_UNDO.length > 60) NB_UNDO.shift();
+    NB_REDO.length = 0;
+    return step;
+  }
+  function nbApply(fn) {
+    fn();
+    persist();
+    syncAll();
+    if (appWorkspace() === "pinboard") renderPinboard();
+  }
+  function nbUndo() {
+    var step = NB_UNDO.pop();
+    if (!step) return;
+    nbApply(step.undo);
+    NB_REDO.push(step);
+  }
+  function nbRedo() {
+    var step = NB_REDO.pop();
+    if (!step) return;
+    nbApply(step.redo);
+    NB_UNDO.push(step);
+  }
+  // The toast's Undo button and the keyboard must not both undo the same
+  // act: the toast outlives later changes, so it undoes its own step only
+  // while that step is still the one Cmd+Z would reach (the offerDataUndo
+  // rule, applied here).
+  function nbOfferUndo(message, step) {
+    showUndoToast(message, function () {
+      if (!NB_UNDO.length || NB_UNDO[NB_UNDO.length - 1] !== step) {
+        showToast("A newer Notebook change has already been made", true);
+        return;
+      }
+      nbUndo();
+    });
+  }
+  function nbHistoryLabel(back) {
+    var stack = back ? NB_UNDO : NB_REDO;
+    return stack.length ? stack[stack.length - 1].label : "";
+  }
   // ---- page selection + provenance (Torry, Aug 1 2026: the empty rail,
   // "notes about the current page", the kept time, and "whether the chart
   // it was pulled from has changed") ----
@@ -4053,7 +4107,7 @@
   // chart knows what it was and which variables it was drawn from. The
   // user's own title wins over all of it.
   function pinPageLabel(pin, idx) {
-    var t = String(pin.title || "").trim();
+    var t = String(pin.pageTitle || "").trim();
     if (t) return t;
     t = String(pin.momTitle || "").trim();
     if (t) return t;
@@ -4077,7 +4131,7 @@
     for (var i = 0; i < pins.length; i++)
       if (pins[i].id === pinId) { at = i; pin = pins[i]; }
     if (!pin) return;
-    var ttl = String(pin.title || "").trim();
+    var ttl = String(pin.pageTitle || "").trim();
     num.textContent = "Page " + (at + 1) + " of " + pins.length +
       (ttl ? " \u00b7 " + ttl : "") +
       (pin.at ? " \u00b7 kept " + pinKeptFmt(pin.at) : "");
@@ -4183,7 +4237,7 @@
       !isLayoutTab(chartById(sel.srcChart)) ? "" : "none";
     var nm = el("ps-pininsp-name");
     if (nm && document.activeElement !== nm) {
-      nm.value = sel.title || "";
+      nm.value = sel.pageTitle || "";
       // The placeholder shows the name the page carries when untitled, so
       // an empty box reads as "this is what it is called" rather than as a
       // blank the user has to fill in.
@@ -4212,6 +4266,15 @@
       for (var xk in extra)
         if (extra[xk] != null && extra[xk] !== "") entry[xk] = extra[xk];
     pins.push(entry);
+    nbStep("the keep", function () {
+      var k = pins.indexOf(entry);
+      if (k !== -1) pins.splice(k, 1);
+      (PROJECT.ui = PROJECT.ui || {}).activeBoard = board.id;
+    }, function () {
+      pins.push(entry);
+      (PROJECT.ui = PROJECT.ui || {}).activeBoard = board.id;
+      PIN_SEL = entry.id;
+    });
     persist();
     syncAll();
     if (appWorkspace() === "pinboard") renderPinboard();
@@ -5213,16 +5276,19 @@
       if (PROJECT.ui.activeBoard === id) PROJECT.ui.activeBoard = null;
       persist(); syncAll();
       if (appWorkspace() === "pinboard") renderPinboard();
-      showUndoToast("Deleted " + removed.name +
+      var step = nbStep("the deleted section", function () {
+        var bs = pinBoards();
+        bs.splice(Math.min(at, bs.length), 0, removed);
+        PROJECT.ui.activeBoard = removed.id;
+      }, function () {
+        var bs = pinBoards(), k = bs.indexOf(removed);
+        if (k !== -1) bs.splice(k, 1);
+        if (PROJECT.ui.activeBoard === removed.id)
+          PROJECT.ui.activeBoard = null;
+      });
+      nbOfferUndo("Deleted " + removed.name +
         (removed.pins.length ? " and its " + removed.pins.length +
-          (removed.pins.length === 1 ? " page" : " pages") : ""),
-        function () {
-          var bs = pinBoards();
-          bs.splice(Math.min(at, bs.length), 0, removed);
-          PROJECT.ui.activeBoard = removed.id;
-          persist(); syncAll();
-          if (appWorkspace() === "pinboard") renderPinboard();
-        });
+          (removed.pins.length === 1 ? " page" : " pages") : ""), step);
       return;
     }
   }
@@ -5329,7 +5395,7 @@
       img.draggable = false;
       page.appendChild(img);
       var bar = mkEl("div", "ps-pinpage-bar");
-      var ttl = String(pin.title || "").trim();
+      var ttl = String(pin.pageTitle || "").trim();
       bar.appendChild(mkEl("span", "ps-pinpage-num",
         "Page " + (idx + 1) + " of " + pins.length +
         (ttl ? " \u00b7 " + ttl : "") +
@@ -5491,6 +5557,15 @@
     if (slot < 0) slot = 0;
     if (slot > pins.length) slot = pins.length;
     pins.splice(slot, 0, moved);
+    if (slot !== at) (function (from, to, list, item) {
+      function put(k) {
+        var cur = list.indexOf(item);
+        if (cur !== -1) list.splice(cur, 1);
+        list.splice(Math.min(k, list.length), 0, item);
+      }
+      nbStep("the page order", function () { put(from); },
+             function () { put(to); });
+    })(at, slot, pins, moved);
     persist();
     renderPinboard();
     var after = scroll ? scroll.querySelectorAll(".ps-pinpage") : [];
@@ -5530,11 +5605,9 @@
     for (var i = 0; i < pins.length; i++) {
       if (pins[i].id !== id) continue;
       var removed = pins.splice(i, 1)[0], at = i;
-      persist(); syncAll();
-      if (appWorkspace() === "pinboard") renderPinboard();
-      showUndoToast("Page removed from " + board.name, function () {
+      var step = nbStep("the deleted page", function () {
         // The section itself may have been deleted meanwhile, and its own
-        // undo is a separate toast. Restoring into a detached section would
+        // undo is a separate step. Restoring into a detached section would
         // drop the page silently, so fall back to the one on screen.
         var live = pinBoards().indexOf(board) !== -1 ? board : activePinBoard();
         live.pins.splice(Math.min(at, live.pins.length), 0, removed);
@@ -5542,9 +5615,14 @@
         // undo the user cannot see.
         (PROJECT.ui = PROJECT.ui || {}).activeBoard = live.id;
         PIN_SEL = removed.id;
-        persist(); syncAll();
-        if (appWorkspace() === "pinboard") renderPinboard();
+      }, function () {
+        var k = board.pins.indexOf(removed);
+        if (k !== -1) board.pins.splice(k, 1);
+        (PROJECT.ui = PROJECT.ui || {}).activeBoard = board.id;
       });
+      persist(); syncAll();
+      if (appWorkspace() === "pinboard") renderPinboard();
+      nbOfferUndo("Page removed from " + board.name, step);
       return;
     }
   }
@@ -5570,7 +5648,7 @@
     PIN_SEL = pin.id;
     persist(); syncAll();
     if (appWorkspace() === "pinboard") renderPinboard();
-    showUndoToast("Moved to " + target.name, function () {
+    var step = nbStep("the move", function () {
       var back = pinBoards().indexOf(target) !== -1 ? target : null;
       if (back) {
         var k = back.pins.indexOf(pin);
@@ -5580,9 +5658,14 @@
       home.pins.splice(Math.min(at, home.pins.length), 0, pin);
       PROJECT.ui.activeBoard = home.id;
       PIN_SEL = pin.id;
-      persist(); syncAll();
-      if (appWorkspace() === "pinboard") renderPinboard();
+    }, function () {
+      var k = from.pins.indexOf(pin);
+      if (k !== -1) from.pins.splice(k, 1);
+      target.pins.push(pin);
+      PROJECT.ui.activeBoard = target.id;
+      PIN_SEL = pin.id;
     });
+    nbOfferUndo("Moved to " + target.name, step);
   }
   function showPinMoveMenu(x, y, pinId) {
     var boards = pinBoards(), owner = null, items = [];
@@ -5824,8 +5907,8 @@
   // matching the numbers the page card shows on screen.
   function pinRecordBlocks(pin, rec) {
     var out0 = [], head = [];
-    var title = String(pin.title || "").trim();
-    if (title) out0.push({ size: 13, fill: "#222222", text: title });
+    var ttl = String(pin.pageTitle || "").trim();
+    if (ttl) out0.push({ size: 13, fill: "#222222", text: ttl });
     if (rec.manyBoards && rec.board) head.push(rec.board);
     head.push("Page " + (rec.idx + 1) + " of " + rec.total);
     if (pin.at) head.push("kept " + pinKeptFmt(pin.at));
@@ -6010,26 +6093,28 @@
     var box = el("ps-export-record");
     return box ? !!box.checked : true;
   }
-  // Per-page record descriptors for an export scope. Page numbers are
-  // per SECTION so the exported page agrees with the card on screen, and
-  // the section is named only when more than one is in the file.
-  function pinRecordsFor(scope, pins) {
+  // Per-page record descriptors for an export scope. The page number is the
+  // page's position in its own SECTION, not in the exported selection, so
+  // exporting page 3 on its own still says "Page 3 of 12" and agrees with
+  // the card on screen. The section is named only when the file holds more
+  // than one.
+  function pinRecordsFor(pins) {
     if (!pinRecordWanted()) return null;
-    var owners = {}, everything = allPins(), seen = {}, i;
+    var owners = {}, everything = allPins(), i;
     for (i = 0; i < everything.length; i++)
       owners[everything[i].pin.id] = everything[i].board;
-    var totals = {};
+    var boardsInFile = {};
     for (i = 0; i < pins.length; i++) {
       var bd = owners[pins[i].id];
-      var k = bd ? bd.id : "-";
-      totals[k] = (totals[k] || 0) + 1;
+      if (bd) boardsInFile[bd.id] = 1;
     }
-    var many = Object.keys(totals).length > 1;
+    var many = Object.keys(boardsInFile).length > 1;
     var out = [];
     for (i = 0; i < pins.length; i++) {
-      var b = owners[pins[i].id], key = b ? b.id : "-";
-      seen[key] = (seen[key] || 0) + 1;
-      out.push({ idx: seen[key] - 1, total: totals[key],
+      var b = owners[pins[i].id];
+      var list = b ? b.pins : pins;
+      var at = list.indexOf(pins[i]);
+      out.push({ idx: at === -1 ? i : at, total: list.length,
                  board: b ? b.name : "", manyBoards: many });
     }
     return out;
@@ -6072,7 +6157,7 @@
       try { console.warn("Pandion Plots notebook export failed", e); }
       catch (ignore) {}
     }
-    var recs = pinRecordsFor(scope, pins);
+    var recs = pinRecordsFor(pins);
     if (format === "pdf") {
       var pdfName = base + ".pdf";
       setExportStatus("Rendering " + pdfName + "...", false);
@@ -6679,7 +6764,6 @@
       captureChartSnapshot(c.id);
     }
     applyViewZoom();
-    scheduleChartCheck();
     // Re-adopt the zoom control into the bar the engine just rebuilt.
     // The observer below is the BACKSTOP for renders the shell does not
     // drive; doing it here as well means the control is never missing for
@@ -13372,7 +13456,7 @@
       var pins = projectPins(), v = String(this.value || "").trim();
       for (var i = 0; i < pins.length; i++)
         if (pins[i].id === PIN_SEL) {
-          if (v) pins[i].title = v; else delete pins[i].title;
+          if (v) pins[i].pageTitle = v; else delete pins[i].pageTitle;
         }
       // The rail's page list and the page's own footer both read this
       // label, so both follow every keystroke. The footer is patched in
@@ -13501,6 +13585,22 @@
           if (!layUndo()) showToast("Nothing to undo in this layout");
         } else {
           if (!layRedo()) showToast("Nothing to redo in this layout");
+        }
+        return;
+      }
+      // The Notebook owns it the same way, and for the same reason the
+      // layout branch above exists: without this the press reached the
+      // engine and undid a style edit on a chart in another workspace,
+      // invisibly, while the user was looking at their record.
+      if (appWorkspace() === "pinboard") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (isUndo) {
+          if (NB_UNDO.length) nbUndo();
+          else showToast("Nothing to undo in the Notebook");
+        } else {
+          if (NB_REDO.length) nbRedo();
+          else showToast("Nothing to redo in the Notebook");
         }
         return;
       }
@@ -18739,7 +18839,6 @@
     syncContextInspector();
     syncProjectNavigator();
     updateDocumentState();
-    syncChartCheck();
   }
 
   // Punch list 37: real instrumentation for the chart workspace, read from the
@@ -18891,71 +18990,6 @@
       if (p.missingNote) bits.push(p.missingNote);
       return bits.length ? bits.join(" \u00b7 ") : "Ready";
     } catch (e) { return "Ready"; }
-  }
-  // The size row, on its own, because render() re-runs it once the chart
-  // has actually drawn: only a finished chart can say whether a part sits
-  // outside the canvas, and a legend drag commits no size option, so
-  // nothing else in the sync path would ever refresh it.
-  // ---- the chart-check receipt -----------------------------------------
-  // The engine already judges a chart against its graph type's rubric
-  // (Help > Check my chart). It only ever spoke when asked, so a chart
-  // could carry a truncated bar baseline, or a significance star with no
-  // test behind it, and every surface in the app stayed silent - while
-  // the export carried the claim.
-  //
-  // This asks the engine the same question after each render and puts the
-  // answer where the user is already looking. ONE judgment, in the engine,
-  // read through the host hook __gb2_graphLint - never a second copy in the
-  // shell, which would drift. Clean charts get a muted receipt rather than
-  // nothing, so the feature is discoverable before it has bad news; a
-  // finding turns it amber, which is the colour the panel itself uses.
-  var CHECK_TIMER = null;
-  function scheduleChartCheck() {
-    if (CHECK_TIMER) clearTimeout(CHECK_TIMER);
-    // After the render settles. The lint reads rendered geometry (colours
-    // off legend swatches, tick labels off the axes), so it must run on a
-    // painted chart, and a burst of style commits should cost one pass.
-    CHECK_TIMER = setTimeout(syncChartCheck, 260);
-  }
-  function chartCheckReport() {
-    if (appWorkspace() !== "chart") return null;
-    var doc = workspaceDocument("chart");
-    if (!doc || isLayoutTab(doc)) return null;
-    var host = hostEl();
-    if (!host || typeof host.__gb2_graphLint !== "function") return null;
-    if (!host.querySelector("svg")) return null;   // guided empty state
-    try { return host.__gb2_graphLint(); } catch (e) { return null; }
-  }
-  function syncChartCheck() {
-    CHECK_TIMER = null;
-    var btn = el("ps-status-check");
-    if (!btn) return;
-    var rep = chartCheckReport();
-    var found = rep && Array.isArray(rep.findings) ? rep.findings : null;
-    if (!rep || !found) { btn.hidden = true; return; }
-    var warns = 0, i;
-    for (i = 0; i < found.length; i++) if (found[i].sev === "warn") warns++;
-    btn.hidden = false;
-    if (!found.length) {
-      btn.setAttribute("data-state", "ok");
-      btn.textContent = "Checks passed";
-      setTip(btn, "This chart was run against " + rep.total +
-        " checks for its graph type and passed them all. Click to read them.");
-      return;
-    }
-    btn.setAttribute("data-state", "warn");
-    btn.textContent = found.length === 1
-      ? "1 thing to check"
-      : found.length + " things to check";
-    // Name the worst one in the tooltip: a bare count makes the user click
-    // to find out whether it matters.
-    var lead = null;
-    for (i = 0; i < found.length; i++)
-      if (found[i].sev === "warn") { lead = found[i]; break; }
-    if (!lead) lead = found[0];
-    setTip(btn, lead.title + (found.length > 1
-      ? " (and " + (found.length - 1) + " more)" : "") +
-      ". Click to open Check my chart.");
   }
   function syncFitSizeRow() {
     var fitBox = el("ps-fit-pane");
@@ -21065,6 +21099,7 @@
   function undoScope() {
     if (appWorkspace() === "data") return "data";
     if (appWorkspace() === "layout" && isLayoutTab(activeChart())) return "layout";
+    if (appWorkspace() === "pinboard") return "notebook";
     return "chart";
   }
   function engineHistoryBtn(which) {
@@ -21100,6 +21135,11 @@
       var named = dataStepLabel(back ? DATA_UNDO : DATA_REDO);
       return (back ? "Undo " : "Redo ") + (named || "data change");
     }
+    // The Notebook names the step, like the data workspace does: "Undo the
+    // deleted page" says what the key will do, where a fixed noun does not.
+    if (s === "notebook")
+      return (back ? "Undo " : "Redo ") +
+        (nbHistoryLabel(back) || "Notebook change");
     return (back ? "Undo " : "Redo ") +
       (s === "layout" ? "layout change" : "chart styling");
   }
@@ -21312,6 +21352,7 @@
         var h = layHist();
         return !!h && (back ? h.undo : h.redo).length > 0;
       }
+      if (scope === "notebook") return (back ? NB_UNDO : NB_REDO).length > 0;
       return !!engineHistoryBtn(back ? "undo" : "redo");
     }
     if (command.indexOf("goto-document:") === 0)
@@ -21394,7 +21435,8 @@
     if (command === "undo" || command === "redo") {
       var scope = undoScope();
       var what = scope === "data" ? "data changes" :
-        scope === "layout" ? "layout changes" : "chart style changes";
+        scope === "layout" ? "layout changes" :
+        scope === "notebook" ? "Notebook changes" : "chart style changes";
       return "No " + what + " to " + command;
     }
     if (command === "data-exclude" || command === "data-chart-sel")
@@ -21464,6 +21506,7 @@
       var back = command === "undo", scope = undoScope();
       if (scope === "data") { if (back) dataUndo(); else dataRedo(); }
       else if (scope === "layout") { if (back) layUndo(); else layRedo(); }
+      else if (scope === "notebook") { if (back) nbUndo(); else nbRedo(); }
       else {
         var eb = engineHistoryBtn(back ? "undo" : "redo");
         if (eb) eb.click();
@@ -22575,12 +22618,6 @@
       render();
     });
     el("ps-save").addEventListener("click", saveProjectFile);
-    // The receipt IS the way in: it names what it found and opens the
-    // panel that explains it. Same route the Help menu takes, so there is
-    // one path to the panel, not two.
-    el("ps-status-check").addEventListener("click", function () {
-      openEngineHelp("graphLint");
-    });
     // Cmd/Ctrl+S saves the project (window CAPTURE so it beats the
     // browser's own save-page dialog everywhere, including inputs).
     window.addEventListener("keydown", function (e) {
@@ -23062,6 +23099,11 @@
     resizeLayoutPanel: layResizeDimensions,
     selectLayoutItems: function (ids) { laySetSelection(ids); renderLayout(); },
     layoutSelection: laySelectedIds,
+    // The layoutHistoryDepth idiom: what the Notebook's Cmd+Z would do.
+    notebookHistory: function () {
+      return { undo: NB_UNDO.map(function (s) { return s.label; }),
+               redo: NB_REDO.map(function (s) { return s.label; }) };
+    },
     layoutHistoryDepth: function () {
       var n = 0;
       for (var k in LAYOUT_HIST)

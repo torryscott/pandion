@@ -229,6 +229,19 @@ const oneSection = await exportAndRead('pdf', 'This section');
 ok(/Page 1 of 2/.test(oneSection.text) && !/Section 2 · Page/.test(oneSection.text),
    'a single-section file drops the redundant section name');
 
+console.log('case 4b: one page exported alone still knows where it sits');
+// Section 2 holds two pages. Export only the second.
+await page.evaluate(() => {
+    const p = [...document.querySelectorAll('.ps-pinpage')][1];
+    p.scrollIntoView({ block: 'center' });
+    p.click();
+});
+await page.waitForTimeout(300);
+const one = await exportAndRead('pdf', 'This page');
+ok(/Page 2 of 2/.test(one.text) && !/Page 1 of 1/.test(one.text),
+   "the number is the page's place in its SECTION, not in the export, so " +
+   'exporting page 2 alone does not relabel it page 1 of 1');
+
 console.log('case 5: SVG carries it too, and unchecking the box removes it');
 const svgOn = await exportAndRead('svg', 'This section');
 ok(/data-role="pin-record"/.test(svgOn.text),

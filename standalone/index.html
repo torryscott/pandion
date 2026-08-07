@@ -2651,20 +2651,6 @@
   .ps-statusbar > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #ps-status-context { color: var(--ps-ink-3); }
   #ps-status-document { color: #4f718f; }
-  /* The chart-check receipt. Two states, both quiet: a muted "all
-     passed" that teaches the feature exists, and an amber count that
-     asks to be clicked. Amber is already the Check-graph panel's
-     warning colour, so this introduces no new vocabulary. */
-  #ps-status-check {
-    flex: 0 0 auto; padding: 1px 7px; font: inherit; line-height: 1.5;
-    color: var(--ps-muted); background: transparent; cursor: pointer;
-    border: 1px solid transparent; border-radius: var(--ps-r-sm);
-  }
-  #ps-status-check:hover { background: var(--ps-s3); border-color: var(--ps-l3); }
-  #ps-status-check[data-state="warn"] {
-    color: #7a4a05; background: #fdf3e2; border-color: #e6c893;
-  }
-  #ps-status-check[data-state="warn"]:hover { background: #fbe9cd; }
   #ps-appmenu, #ps-appsubmenu {
     position: fixed; display: none; z-index: 12000; min-width: 215px;
     padding: 5px; color: var(--ps-ink-2); background: var(--ps-s0);
@@ -4624,7 +4610,6 @@
     <span id="ps-status-context">Ready</span>
     <span class="ps-status-spacer"></span>
     <span id="ps-status-selection"></span>
-    <button type="button" id="ps-status-check" hidden></button>
     <span id="ps-status-document">Local autosave on</span>
   </div>
 </div>
