@@ -21,7 +21,8 @@ data-undo-check dates-check doclifecycle-check tab-accessibility-check drag-feel
 drag-selection-check outside-canvas-check hmc-list-check hidden-vars-check sigma-freshness-check \
 empty-states-check engine-stamp-check flyout-align-check filter-honesty-check examples-check exclusion-bridge-check \
 findpop-check fitpanes-check \
-grid-keys-check help-check hierarchy-check \
+grid-keys-check help-check hierarchy-check hidden-selection-check \
+inspector-freshness-check menu-selection-check \
 grid-accessibility-check \
 help-me-choose-check import-errors-check layout-image-check modal-accessibility-check \
 layout-arrange-check layout-clipboard-check layout-orientation-check layout-rail-check layout-selectall-check layout-reuse-check layout-undo-check library-bridge-check \
