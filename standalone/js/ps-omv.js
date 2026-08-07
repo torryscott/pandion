@@ -90,6 +90,7 @@ window.PSOmv = (function () {
     var dv = new DataView(bin.buffer, bin.byteOffset, bin.byteLength);
 
     var header = [], types = {}, levels = {}, colVals = [];
+    var missingByCol = {}, missingSkipped = [];
     var off = 0;
     for (var fi = 0; fi < fields.length; fi++) {
       var f = fields[fi];
@@ -139,6 +140,28 @@ window.PSOmv = (function () {
                       " \u2192 " + mt + ")");
       }
       types[f.name] = mt;
+      // jamovi's per-column missing rules. The app has exactly the right
+      // field for these and was leaving it empty, so a value the sender had
+      // declared missing arrived as ordinary data and was counted in the
+      // mean. The rules are EXPRESSIONS ("== 1151"), while this app's
+      // per-column list holds literal values, so only the equality form
+      // translates. Everything else is carried out to be disclosed rather
+      // than dropped in silence, which is the same answer the unmapped
+      // measure types get above.
+      if (Array.isArray(f.missingValues) && f.missingValues.length) {
+        var lits = [];
+        for (var mvi = 0; mvi < f.missingValues.length; mvi++) {
+          var rule = String(f.missingValues[mvi]).trim();
+          var eqm = /^==\s*(.+)$/.exec(rule);
+          if (eqm) {
+            var lit = eqm[1].trim().replace(/^(["'])(.*)\1$/, "$2");
+            if (lit !== "" && lits.indexOf(lit) === -1) lits.push(lit);
+          } else {
+            missingSkipped.push(f.name + " (" + rule + ")");
+          }
+        }
+        if (lits.length) missingByCol[f.name] = lits;
+      }
       if (x && Array.isArray(x.labels) &&
           (types[f.name] === "nominal" || types[f.name] === "ordinal"))
         levels[f.name] = x.labels.map(function (L) { return String(L[1]); });
@@ -153,7 +176,8 @@ window.PSOmv = (function () {
     }
     var name = String(fileName || "jamovi-data").replace(/\.[^.]+$/, "");
     return { name: name, header: header, rows: rows,
-             types: types, levels: levels, unmapped: unmapped };
+             types: types, levels: levels, unmapped: unmapped,
+             missingByCol: missingByCol, missingSkipped: missingSkipped };
   }
 
   return { parse: parse, unzip: unzip };

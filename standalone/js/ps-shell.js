@@ -19300,6 +19300,14 @@
     FILE_HANDLE = null;
     PROJECT.table = buildTable(parsed.name, parsed.header, parsed.rows,
                                parsed.types, parsed.levels);
+    // The sender's own per-column missing rules, which were being dropped, so
+    // a value they had declared missing arrived as ordinary data and was
+    // counted in the mean. Applied after the build and retyped once, because
+    // the typing pass is what turns a token into a null.
+    if (parsed.missingByCol && Object.keys(parsed.missingByCol).length) {
+      PROJECT.table.missingTokensByCol = parsed.missingByCol;
+      retype(PROJECT.table);
+    }
     resetDocumentsForNewData();
     PROJECT.ui.columnWidths = {};
     GRID_NATURAL_WIDTHS = {};
@@ -19316,6 +19324,24 @@
     // per-column type select and no correction surface. When a measure type
     // could not be mapped, say which columns were guessed and where to change
     // them, rather than reporting a clean success.
+    // Two separate things to disclose, and they are about different columns,
+    // so they are two sentences rather than one merged apology.
+    var mbc = parsed.missingByCol ? Object.keys(parsed.missingByCol) : [];
+    if (mbc.length)
+      showToast("Imported. " + mbc.length +
+        (mbc.length === 1 ? " variable brought its own missing-value label"
+                          : " variables brought their own missing-value labels") +
+        " from jamovi: " + mbc.map(function (c) {
+          return c + " (" + parsed.missingByCol[c].join(", ") + ")";
+        }).join("; ") + ".", true);
+    if (parsed.missingSkipped && parsed.missingSkipped.length)
+      showToast("Imported. " + parsed.missingSkipped.length +
+        (parsed.missingSkipped.length === 1 ? " missing-value rule was"
+                                            : " missing-value rules were") +
+        " a comparison rather than a single value, which this app cannot " +
+        "hold, so " + (parsed.missingSkipped.length === 1 ? "it is" : "they are") +
+        " NOT applied: " + parsed.missingSkipped.join(", ") +
+        ". Those values are being read as ordinary data.", true);
     if (parsed.unmapped && parsed.unmapped.length)
       showToast("Imported. " + parsed.unmapped.length +
         (parsed.unmapped.length === 1 ? " column had" : " columns had") +
