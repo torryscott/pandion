@@ -990,6 +990,29 @@
      column inside a half-width slot would starve the inputs, so paired
      rows size the label to its text instead. */
   .ps-linsp-row .ps-linsp-inline { grid-template-columns: auto minmax(0, 1fr); }
+  /* The Size select shares the W input's LEFT EDGE (Torry, Aug 7 2026:
+     the 76px column put it mid-panel, crowding the row below): Size and
+     the page W/H pair share one 48px label column, and the Size row gets
+     its breathing room back. */
+  #ps-inspector-layout .ps-linsp-size {
+    grid-template-columns: 48px minmax(0, 1fr); margin-bottom: 8px;
+  }
+  .ps-lpage-pair .ps-linsp-inline { grid-template-columns: 48px minmax(0, 1fr); }
+  .ps-lunit-seg { display: flex; gap: 3px; flex: 0 0 auto; }
+  /* The pair row carries three tenants now; tighter gaps keep the H
+     input wide enough for its own digits. */
+  .ps-lpage-pair { gap: 6px; }
+  .ps-lpage-pair .ps-lunit-seg button { min-width: 26px; padding: 3px 5px; }
+  .ps-lunit-seg button {
+    min-width: 30px; padding: 3px 7px; font-size: 11px; font-weight: 600;
+    color: var(--ps-ink-3); background: var(--ps-s0);
+    border: 1px solid var(--ps-l3); border-radius: var(--ps-r-md);
+    cursor: pointer;
+  }
+  .ps-lunit-seg button[aria-pressed="true"] {
+    color: var(--ps-accent-ink); border-color: var(--ps-accent);
+    background: var(--ps-tint-2);
+  }
 
   #ps-lviewport {
     position: relative; height: clamp(360px, 72vh, 780px);
@@ -4111,7 +4134,7 @@
         <!-- Size lives with the page's other properties (moved from the
              toolbar, Jul 28 2026 - see the note there). Same ids, so all
              existing wiring and sync apply unchanged. -->
-        <label class="ps-inspector-field ps-linsp-inline">
+        <label class="ps-inspector-field ps-linsp-inline ps-linsp-size">
           <span>Size</span>
           <select class="ps-lselect" id="ps-lpage">
             <option value="canvas">Canvas</option>
@@ -4126,7 +4149,7 @@
             <option value="custom">Custom</option>
           </select>
         </label>
-        <div class="ps-linsp-row">
+        <div class="ps-linsp-row ps-lpage-pair">
           <label class="ps-inspector-field ps-linsp-inline">
             <span>W (<span data-unit-label>in</span>)</span>
             <input class="ps-lnum" id="ps-lpage-w" type="number"
@@ -4137,6 +4160,15 @@
             <input class="ps-lnum" id="ps-lpage-h" type="number"
                    step="1" aria-label="Page height">
           </label>
+          <!-- The chart Sizing tab's in/cm pair, surfaced here (Torry,
+               Aug 7 2026). It reads and writes the ONE app-wide units
+               preference - every unit label and field follows. -->
+          <div class="ps-lunit-seg" role="group" aria-label="Measurement units">
+            <button type="button" id="ps-lunit-in"
+                    aria-pressed="false">in</button>
+            <button type="button" id="ps-lunit-cm"
+                    aria-pressed="false">cm</button>
+          </div>
         </div>
         <label class="ps-inspector-field">
           Orientation

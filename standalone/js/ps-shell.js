@@ -93,6 +93,34 @@
     var u = unitLabel();
     var marks = document.querySelectorAll("[data-unit-label]");
     for (var i = 0; i < marks.length; i++) marks[i].textContent = u;
+    // The layout rail's in/cm pair mirrors the same preference (Torry,
+    // Aug 7 2026). Under the px preference neither is pressed - honest.
+    var segIn = document.getElementById("ps-lunit-in");
+    var segCm = document.getElementById("ps-lunit-cm");
+    if (segIn) segIn.setAttribute("aria-pressed",
+      APP_PREFS.units === "in" || !UNITS[APP_PREFS.units]
+        ? "true" : "false");
+    if (segCm) segCm.setAttribute("aria-pressed",
+      APP_PREFS.units === "cm" ? "true" : "false");
+  }
+  // The rail toggle and the Preferences dialog write the SAME stored
+  // preference: inches-or-metric is a property of the person, and one
+  // switch flipping every unit surface is the whole point.
+  function setUnitsPreference(u) {
+    if (!UNITS[u]) return;
+    APP_PREFS.units = u;
+    try {
+      window.localStorage.setItem(PS_PREF_KEY, JSON.stringify(APP_PREFS));
+    } catch (e) {}
+    syncUnitLabels();
+    syncAll();
+    // The page W/H fields repopulate on the layout toolbar sync, which
+    // syncAll does not reach - without this the labels flipped while the
+    // numbers stayed (the probe's first catch).
+    if (appWorkspace() === "layout") {
+      try { laySyncToolbar(); } catch (e) {}
+      try { syncLayoutContextInspector(); } catch (e2) {}
+    }
   }
   // One formatter for every prose surface that states the page size (status
   // bar, workspace subtitle). The launch evaluation caught these still
@@ -22653,6 +22681,16 @@
 
   document.addEventListener("DOMContentLoaded", function () {
     wireHeader(); wireLoader(); wireGrid(); wireLayout(); wireExporter();
+    (function wireUnitSeg() {
+      var bIn = document.getElementById("ps-lunit-in");
+      var bCm = document.getElementById("ps-lunit-cm");
+      if (bIn) bIn.addEventListener("click", function () {
+        setUnitsPreference("in");
+      });
+      if (bCm) bCm.addEventListener("click", function () {
+        setUnitsPreference("cm");
+      });
+    })();
     wireLayoutTextControls();
     wireAppFrame(); wireContextInspector(); wireCommandPalette();
     wireGuidedDialogs(); wireStandaloneEngineExclusionLabels();

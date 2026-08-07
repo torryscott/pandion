@@ -143,6 +143,63 @@ ok((await read()).unitTags[0] === 'cm',
    'the unit survives a reload, like the other preferences');
 await setUnits('in');
 
+console.log('case 7: the layout rail carries the chart-style in/cm pair ' +
+            '(Torry, Aug 7 2026)');
+const seg = await page.evaluate(() => {
+    const bIn = document.getElementById('ps-lunit-in');
+    const bCm = document.getElementById('ps-lunit-cm');
+    const h = document.getElementById('ps-lpage-h');
+    return {
+        there: !!bIn && !!bCm,
+        rightOfH: bIn.getBoundingClientRect().left >
+            h.getBoundingClientRect().right,
+        inPressed: bIn.getAttribute('aria-pressed') === 'true',
+        wBefore: document.getElementById('ps-lpage-w').value,
+    };
+});
+ok(seg.there && seg.rightOfH && seg.inPressed,
+   'the in/cm pair sits right of the H box with inches pressed');
+await page.click('#ps-lunit-cm');
+await page.waitForTimeout(500);
+const flipped = await page.evaluate(() => ({
+    cmPressed: document.getElementById('ps-lunit-cm')
+        .getAttribute('aria-pressed') === 'true',
+    tag: document.querySelector('#ps-inspector-layout [data-unit-label]')
+        .textContent,
+    w: document.getElementById('ps-lpage-w').value,
+    stored: (() => {
+        try {
+            return JSON.parse(window.localStorage.getItem(
+                'psstandalone.preferences.v1') || '{}').units;
+        } catch (e) { return null; }
+    })(),
+}));
+ok(flipped.cmPressed && flipped.tag === 'cm' && flipped.stored === 'cm',
+   'one click flips every unit label to cm and persists the preference');
+ok(Math.abs(Number(flipped.w) - Number(seg.wBefore) * 2.54) < 0.06,
+   `and the width converts, not just relabels ` +
+   `(${seg.wBefore}in -> ${flipped.w}cm)`);
+await page.click('#ps-lunit-in');
+await page.waitForTimeout(400);
+ok(await page.evaluate(() =>
+       document.getElementById('ps-lunit-in')
+           .getAttribute('aria-pressed') === 'true' &&
+       document.querySelector('#ps-inspector-layout [data-unit-label]')
+           .textContent === 'in'),
+   'and back again - the same person-level preference Preferences edits');
+// The Size select shares the W input's left edge (the alignment note).
+const align = await page.evaluate(() => {
+    const sel = document.getElementById('ps-lpage');
+    const w = document.getElementById('ps-lpage-w');
+    const selR = sel.getBoundingClientRect();
+    const rowGap = w.getBoundingClientRect().top - selR.bottom;
+    return { dx: Math.abs(selR.left - w.getBoundingClientRect().left),
+             rowGap };
+});
+ok(align.dx <= 2 && align.rowGap >= 5,
+   `the Size select shares the W input's left edge with breathing room ` +
+   `(dx ${align.dx.toFixed(1)}px, gap ${Math.round(align.rowGap)}px)`);
+
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('UNITS CHECK PASS');
 await browser.close();
