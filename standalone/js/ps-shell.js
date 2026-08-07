@@ -9422,6 +9422,33 @@
     "ps-grid-selected", "ps-grid-sel-top", "ps-grid-sel-right",
     "ps-grid-sel-bottom", "ps-grid-sel-left", "ps-grid-sel-focus"
   ];
+  var GRID_PAINT_CLEAR_CLASSES =
+    GRID_SELECTION_CLASSES.concat(["ps-grid-linked"]);
+  // The selection painter used to scrub every rendered cell on every change.
+  // At 40 columns the 140-row window is 5,600 cells, and a plain cursor move
+  // repaints twice, so one arrow key cost 78,702 DOM writes to move a
+  // highlight by one cell. These two lists are what the LAST paint touched,
+  // and they are the only things the next paint clears. Selection classes
+  // are added in gridApplySelection and nowhere else, so the bookkeeping is
+  // complete by construction. A grid re-render detaches the remembered
+  // nodes, where clearing is a harmless no-op, and the freshly built cells
+  // start clean, so the two states can never disagree.
+  var GRID_PAINTED_CELLS = [];
+  var GRID_PAINTED_HEADS = [];
+  function gridClearPainted() {
+    var cells = GRID_PAINTED_CELLS, heads = GRID_PAINTED_HEADS, i;
+    GRID_PAINTED_CELLS = [];
+    GRID_PAINTED_HEADS = [];
+    for (i = 0; i < cells.length; i++) {
+      // One variadic remove is one attribute write. Seven calls were seven,
+      // whether or not the class was there to begin with.
+      cells[i].classList.remove.apply(cells[i].classList,
+                                      GRID_PAINT_CLEAR_CLASSES);
+      cells[i].removeAttribute("aria-selected");
+    }
+    for (i = 0; i < heads.length; i++)
+      heads[i].classList.remove("ps-grid-axis-selected");
+  }
   function gridShouldVirtualize(t) {
     if (!t) return false;
     var rows = nRows(t), cols = t.order ? t.order.length : 0;
@@ -10009,45 +10036,64 @@
   }
   function gridApplySelection() {
     var grid = el("ps-datagrid");
-    var tds = grid.querySelectorAll("td[data-gc]");
-    var activeCell = null;
-    for (var i = 0; i < tds.length; i++) {
-      for (var k = 0; k < GRID_SELECTION_CLASSES.length; k++)
-        tds[i].classList.remove(GRID_SELECTION_CLASSES[k]);
-      tds[i].classList.remove("ps-grid-linked");
-      tds[i].removeAttribute("aria-selected");
-    }
+    var activeCell = null, i;
+    gridClearPainted();
     var r = gridSelectionRect();
     if (!r) GRID_SELECTION = null;
     var count = r ? (r.r1 - r.r0 + 1) * r.cols.length : 0;
     var t = PROJECT.table;
+    // Column names are DATA, so membership rides a null-prototype map. A
+    // column called "constructor" must not answer yes to every question.
+    var colIx = null, setIx = null;
     if (r && t) {
-      for (i = 0; i < tds.length; i++) {
-        var row = Number(tds[i].getAttribute("data-gr"));
-        var gcName = tds[i].getAttribute("data-gc");
-        var ci = r.cols.indexOf(gcName);
-        var inCols = GRID_SELECTION_COLS
-          ? GRID_SELECTION_COLS.indexOf(gcName) !== -1
-          : ci !== -1;
-        if (!inCols || row < r.r0 || row > r.r1) continue;
-        tds[i].classList.add("ps-grid-selected");
-        tds[i].setAttribute("aria-selected", "true");
-        if (row === r.r0) tds[i].classList.add("ps-grid-sel-top");
-        if (row === r.r1) tds[i].classList.add("ps-grid-sel-bottom");
-        if (GRID_SELECTION_COLS) {
-          // Discontiguous columns draw as separate bands: each carries its
-          // own left and right edge.
-          tds[i].classList.add("ps-grid-sel-left");
-          tds[i].classList.add("ps-grid-sel-right");
-        } else {
-          if (ci === 0) tds[i].classList.add("ps-grid-sel-left");
-          if (ci === r.cols.length - 1)
-            tds[i].classList.add("ps-grid-sel-right");
-        }
-        if (tds[i].getAttribute("data-gc") === r.focusCol &&
-            row === r.focusRow) {
-          tds[i].classList.add("ps-grid-sel-focus");
-          activeCell = tds[i];
+      colIx = Object.create(null);
+      for (i = 0; i < r.cols.length; i++) colIx[r.cols[i]] = i;
+      if (GRID_SELECTION_COLS) {
+        setIx = Object.create(null);
+        for (i = 0; i < GRID_SELECTION_COLS.length; i++)
+          setIx[GRID_SELECTION_COLS[i]] = true;
+      }
+      // Walk the rows in range, not every cell in the window. The window is
+      // 140 rows deep while a cursor move touches one of them, so reading a
+      // row index off each tr and descending only when it is inside the
+      // selection is the whole difference between 5,600 cells of work and
+      // the handful the user actually selected.
+      var body = grid.querySelector("tbody");
+      var trs = body ? body.children : [];
+      var lastCol = r.cols.length - 1;
+      for (var ti = 0; ti < trs.length; ti++) {
+        var tr = trs[ti];
+        var rowIndex = tr.getAttribute("aria-rowindex");
+        if (rowIndex == null) continue;          // the window spacer rows
+        var row = Number(rowIndex) - 2;
+        if (row < r.r0 || row > r.r1) continue;
+        var cells = tr.children;
+        for (var ci2 = 0; ci2 < cells.length; ci2++) {
+          var td = cells[ci2];
+          var gcName = td.getAttribute("data-gc");
+          if (gcName == null) continue;          // the row-number header
+          var ci = colIx[gcName];
+          if (ci === undefined) ci = -1;
+          if (setIx ? setIx[gcName] !== true : ci === -1) continue;
+          var add = ["ps-grid-selected"];
+          if (row === r.r0) add.push("ps-grid-sel-top");
+          if (row === r.r1) add.push("ps-grid-sel-bottom");
+          if (setIx) {
+            // Discontiguous columns draw as separate bands: each carries its
+            // own left and right edge.
+            add.push("ps-grid-sel-left");
+            add.push("ps-grid-sel-right");
+          } else {
+            if (ci === 0) add.push("ps-grid-sel-left");
+            if (ci === lastCol) add.push("ps-grid-sel-right");
+          }
+          if (gcName === r.focusCol && row === r.focusRow) {
+            add.push("ps-grid-sel-focus");
+            activeCell = td;
+          }
+          td.classList.add.apply(td.classList, add);
+          td.setAttribute("aria-selected", "true");
+          GRID_PAINTED_CELLS.push(td);
         }
       }
     }
@@ -10061,33 +10107,44 @@
     var appStatus = document.getElementById("ps-status-selection");
     if (appStatus && appWorkspace() === "data")
       appStatus.textContent = count ? gridSelectionSummary(count, r) : "No range selected";
-    var heads = grid.querySelectorAll("th[data-grid-col], .ps-grid-rownum");
-    for (i = 0; i < heads.length; i++)
-      heads[i].classList.remove("ps-grid-axis-selected");
     if (r && t && (GRID_SELECTION_KIND === "column" || GRID_SELECTION_KIND === "all")) {
       var colHeads = grid.querySelectorAll("th[data-grid-col]");
       for (i = 0; i < colHeads.length; i++) {
         var headName = colHeads[i].getAttribute("data-grid-col");
-        var headIn = GRID_SELECTION_COLS
-          ? GRID_SELECTION_COLS.indexOf(headName) !== -1
-          : r.cols.indexOf(headName) !== -1;
-        if (headIn) colHeads[i].classList.add("ps-grid-axis-selected");
+        // r.cols is the authority, per the note on gridSelectionRect. This
+        // used to ask t.order where the header sat and compare that against
+        // c0 and c1, which are indices into the VISIBLE list, so a hidden
+        // column slid the lit headers off the selected columns.
+        var headIn = setIx ? setIx[headName] === true
+                           : colIx[headName] !== undefined;
+        if (headIn) {
+          colHeads[i].classList.add("ps-grid-axis-selected");
+          GRID_PAINTED_HEADS.push(colHeads[i]);
+        }
       }
     }
     if (r && (GRID_SELECTION_KIND === "row" || GRID_SELECTION_KIND === "all")) {
       var rowHeads = grid.querySelectorAll("td[data-grid-row]");
       for (i = 0; i < rowHeads.length; i++) {
         var hr = Number(rowHeads[i].getAttribute("data-grid-row"));
-        if (hr >= r.r0 && hr <= r.r1) rowHeads[i].classList.add("ps-grid-axis-selected");
+        if (hr >= r.r0 && hr <= r.r1) {
+          rowHeads[i].classList.add("ps-grid-axis-selected");
+          GRID_PAINTED_HEADS.push(rowHeads[i]);
+        }
       }
     }
     var corner = grid.querySelector("th[data-grid-all]");
-    if (corner && GRID_SELECTION_KIND === "all")
+    if (corner && GRID_SELECTION_KIND === "all") {
       corner.classList.add("ps-grid-axis-selected");
+      GRID_PAINTED_HEADS.push(corner);
+    }
     var linkedRow = linkedCellRow();
     if (LINKED_CELL && LINKED_REVEAL_EMPHASIS && linkedRow >= 0) {
       var linkedTd = gridFindTd(LINKED_CELL.col, linkedRow);
-      if (linkedTd) linkedTd.classList.add("ps-grid-linked");
+      if (linkedTd) {
+        linkedTd.classList.add("ps-grid-linked");
+        GRID_PAINTED_CELLS.push(linkedTd);
+      }
     }
   }
   function gridSetSelection(anchorCol, anchorRow, focusCol, focusRow, kind) {
@@ -11118,6 +11175,10 @@
     var t = PROJECT.table, r = gridSelectionRect();
     if (!t || !r) return null;
     var nums = [], cells = 0, nonNum = 0, blank = 0;
+    // r.cols, not t.order between c0 and c1, per the note on
+    // gridSelectionRect. Those two index the VISIBLE columns, so with a
+    // column hidden this counted and averaged a different set of columns
+    // than the one under the highlight.
     for (var row = r.r0; row <= r.r1; row++)
       for (var c = 0; c < r.cols.length; c++) {
         var col = r.cols[c];
@@ -12247,6 +12308,7 @@
     if (td) {
       drag.focusCol = td.getAttribute("data-gc");
       drag.focusRow = Number(td.getAttribute("data-gr"));
+      drag.paintedTd = td;
       gridSetSelection(drag.anchorCol, drag.anchorRow,
                        drag.focusCol, drag.focusRow);
     }
@@ -12738,6 +12800,13 @@
         drag.focusCol = td.getAttribute("data-gc");
         drag.focusRow = Number(td.getAttribute("data-gr"));
       }
+      // A pointer crossing one cell fires dozens of moves inside it, and the
+      // selection changes on none of them. Node identity is the test rather
+      // than the column name and row number, because a grid rebuilt under an
+      // auto-scroll hands back a different element for the same cell, and
+      // that one really does have to repaint.
+      if (td && td === drag.paintedTd) { e.preventDefault(); return; }
+      drag.paintedTd = td || null;
       gridSetSelection(drag.anchorCol, drag.anchorRow,
                        drag.focusCol, drag.focusRow);
       e.preventDefault();
