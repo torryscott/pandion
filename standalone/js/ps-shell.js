@@ -11507,6 +11507,13 @@
     el("ps-gridfoot").innerHTML = gridFootHtml(t);
     syncDataCommandBar();
     gridApplySelection();
+    // The panel a foot to the right carries Excluded, Valid, Missing and the
+    // Mean, and it was never told. Excluding an outlier left it reading
+    // "Excluded 0" and the OLD mean beside a toolbar chip already saying
+    // "Excluded 1", and it only healed if you clicked a DIFFERENT column and
+    // came back. Someone chasing an outlier excludes two more values watching
+    // a number that never moves.
+    syncVariableInspector();
     persist();
     syncDataRow();
     render();
@@ -11831,6 +11838,7 @@
     persist();
     syncDataGrid();
     syncDataCommandBar();
+    syncVariableInspector();
     render();
     hideFilterMenu();
     showToast(next.length
