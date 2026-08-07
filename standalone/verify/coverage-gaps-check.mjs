@@ -312,7 +312,9 @@ ok(d.open && d.msg === 'unknown variable "alpha"',
    'reason rather than accepting it (open ' + d.open + ', msg "' + d.msg + '")');
 ok(kept === 'score + 1',
    'the stored formula is untouched by the refused save, still: "' + kept + '"');
-await page.click('#ps-formula-cancel');
+// The footer Cancel and the header Close were two controls doing one job;
+// the header Close is the app's universal dismiss and is the one that stayed.
+await page.click('#ps-formula-close');
 await page.waitForTimeout(300);
 
 // ---- B10, the mutual-cycle half. This is the case that shipped unnoticed:

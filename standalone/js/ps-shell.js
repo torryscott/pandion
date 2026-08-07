@@ -1376,6 +1376,87 @@
     }
     return out;
   }
+  // Every column that has a quick transform to offer. The row used to render
+  // for ONE column, the one that happened to be selected before the dialog
+  // opened, and nothing on screen said so - while the empty preview promised
+  // "or pick a quick transform" whether or not any were there. A student can
+  // hand-write (score - MEAN(score)) / SD(score) with a one-click z-score
+  // sitting behind an invisible precondition, which is what happened.
+  function formulaSourceChoices(t) {
+    var out = [];
+    if (!t) return out;
+    for (var i = 0; i < t.order.length; i++)
+      if (formulaTemplatesFor(t.order[i], t).length) out.push(t.order[i]);
+    return out;
+  }
+  // With no column named, land on the one the user is most likely to want.
+  // The inspected variable first, because that is what the app already thinks
+  // they are looking at, then the first numeric column, because five of the
+  // six transforms are numeric and a factor's only offer is a long recode.
+  function formulaDefaultSource(t, choices) {
+    if (!choices.length) return null;
+    if (INSPECTOR_VAR && choices.indexOf(INSPECTOR_VAR) !== -1)
+      return INSPECTOR_VAR;
+    for (var i = 0; i < choices.length; i++)
+      if (colStoresNumbers(t, choices[i])) return choices[i];
+    return choices[0];
+  }
+  function formulaTemplatesShown() {
+    var tpl = el("ps-formula-templates");
+    return !!tpl && tpl.style.display !== "none" &&
+      !!tpl.querySelector("[data-formula-template]");
+  }
+  // The source is now a control rather than hidden state, so the dialog can
+  // always show the transforms AND say which column they read - and the user
+  // can point them somewhere else without closing and starting again.
+  function renderFormulaTemplates(source) {
+    var t = PROJECT.table;
+    var tpl = el("ps-formula-templates");
+    if (!tpl) return;
+    var choices = formulaSourceChoices(t);
+    tpl.innerHTML = "";
+    if (!choices.length) {
+      tpl.style.display = "none";
+      if (FORMULA_EDIT) FORMULA_EDIT.source = null;
+      return;
+    }
+    tpl.style.display = "flex";
+    tpl.appendChild(mkEl("span", "ps-formula-templates-label",
+      "Quick transforms for"));
+    var pick = mkEl("select");
+    pick.id = "ps-formula-source";
+    pick.setAttribute("aria-label", "Column the quick transforms read");
+    for (var c = 0; c < choices.length; c++) {
+      var opt = mkEl("option", "", choices[c]);
+      opt.value = choices[c];
+      pick.appendChild(opt);
+    }
+    pick.value = source && choices.indexOf(source) !== -1
+      ? source : formulaDefaultSource(t, choices);
+    pick.addEventListener("change", function () {
+      renderFormulaTemplates(this.value);
+    });
+    tpl.appendChild(pick);
+    // The chosen source is also where a saved column LANDS (saveComputedColumn
+    // places it after afterCol), so the picker has to write it back.
+    if (FORMULA_EDIT) FORMULA_EDIT.source = pick.value;
+    var templates = formulaTemplatesFor(pick.value, t);
+    for (var i = 0; i < templates.length; i++) {
+      (function (tp) {
+        var b = mkEl("button", "", tp.label);
+        b.type = "button";
+        b.setAttribute("data-formula-template", tp.label);
+        setTip(b, tp.formula);
+        b.addEventListener("click", function () {
+          el("ps-formula-input").value = tp.formula;
+          if (!FORMULA_EDIT.col)
+            el("ps-formula-name").value = uniqueColumnName(tp.name);
+          refreshFormulaPreview();
+        });
+        tpl.appendChild(b);
+      })(templates[i]);
+    }
+  }
   function uniqueColumnName(base) {
     var t = PROJECT.table, name = base, k = 2;
     while (t.order.indexOf(name) !== -1 &&
@@ -1394,26 +1475,7 @@
     el("ps-formula-name").disabled = !!editingCol;
     el("ps-formula-input").value = editingCol
       ? (t.computed[editingCol] || "") : "";
-    var tpl = el("ps-formula-templates");
-    tpl.innerHTML =
-      '<span class="ps-formula-templates-label">Quick transforms</span>';
-    var templates = formulaTemplatesFor(source, t);
-    for (var i = 0; i < templates.length; i++) {
-      (function (tp) {
-        var b = mkEl("button", "", tp.label);
-        b.type = "button";
-        b.setAttribute("data-formula-template", tp.label);
-        setTip(b, tp.formula);
-        b.addEventListener("click", function () {
-          el("ps-formula-input").value = tp.formula;
-          if (!FORMULA_EDIT.col)
-            el("ps-formula-name").value = uniqueColumnName(tp.name);
-          refreshFormulaPreview();
-        });
-        tpl.appendChild(b);
-      })(templates[i]);
-    }
-    tpl.style.display = templates.length ? "flex" : "none";
+    renderFormulaTemplates(source);
     refreshFormulaPreview();
     openShellDialog("ps-formula-dialog");
   }
@@ -1423,8 +1485,12 @@
     var msg = el("ps-formula-msg"), prev = el("ps-formula-preview");
     if (!String(formula).trim()) {
       msg.textContent = "";
-      prev.textContent = "Type a formula (or pick a quick transform) " +
-        "to preview its first values.";
+      // Only promise the shortcut when the shortcut is on screen. A table with
+      // nothing to transform gets the shorter sentence rather than a pointer
+      // to a row that is not there.
+      prev.textContent = formulaTemplatesShown()
+        ? "Type a formula (or pick a quick transform) to preview its first values."
+        : "Type a formula to preview its first values.";
       return;
     }
     var editing = FORMULA_EDIT && FORMULA_EDIT.col;
@@ -10102,9 +10168,13 @@
     var rows = r.r1 - r.r0 + 1;
     var cols = r.cols ? r.cols.length : r.c1 - r.c0 + 1;
     if (count === 1) return "1 cell selected";
-    return rows + (rows === 1 ? " row" : " rows") + " \u00d7 " +
-      cols + (cols === 1 ? " column" : " columns") + " \u00b7 " +
-      count + " cells selected \u00b7 Cmd/Ctrl+C to copy";
+    // Separators, because the shape line sharing this footer and the status
+    // bar below it both use them. "20000 rows x 40 columns, 800000 cells" sat
+    // forty pixels above "20,000 rows, 40 columns", two formats for one fact.
+    // The same toLocaleString call as its neighbours, so they cannot disagree.
+    return rows.toLocaleString() + (rows === 1 ? " row" : " rows") + " \u00d7 " +
+      cols.toLocaleString() + (cols === 1 ? " column" : " columns") + " \u00b7 " +
+      count.toLocaleString() + " cells selected \u00b7 Cmd/Ctrl+C to copy";
   }
   function gridApplySelection() {
     var grid = el("ps-datagrid");
@@ -10225,7 +10295,13 @@
                        focusCol: focusCol, focusRow: focusRow };
     GRID_SELECTION_KIND = kind || "cells";
     gridApplySelection();
-    if (focusCol !== INSPECTOR_VAR) selectInspectorVariable(focusCol);
+    // A row is not a variable, and neither is the whole table. Both are
+    // selected by spanning every visible column, so following focusCol seated
+    // the inspector on the LAST column of the table - "Inspecting site" after
+    // a click on row 1, a variable the user never touched. Cells and columns
+    // still lead it, because there the focus genuinely IS a variable.
+    if (GRID_SELECTION_KIND !== "row" && GRID_SELECTION_KIND !== "all" &&
+        focusCol !== INSPECTOR_VAR) selectInspectorVariable(focusCol);
     if (GRID_SELECTION_KIND === "cells" &&
         anchorCol === focusCol && Number(anchorRow) === Number(focusRow) &&
         PROJECT.table.caseIds[Number(focusRow)]) {
@@ -13360,9 +13436,6 @@
       openFormulaDialog(null, fxCol);
     });
     el("ps-formula-close").addEventListener("click", function () {
-      closeShellDialog("ps-formula-dialog");
-    });
-    el("ps-formula-cancel").addEventListener("click", function () {
       closeShellDialog("ps-formula-dialog");
     });
     el("ps-formula-save").addEventListener("click", submitFormulaDialog);
@@ -20922,7 +20995,11 @@
   // listeners with no single declaration to read - but they are grouped by
   // where they apply, which is the part that makes a sheet usable.
   function shortcutMenuRows() {
-    var order = ["file", "edit", "view", "insert", "help"], rows = [], seen = {};
+    // "data" belongs here as much as any other menu. Leaving it out is what
+    // kept Cmd/Ctrl+E, the app's own high-frequency exclusion chord, out of
+    // the sheet while the Data menu had been declaring it all along.
+    var order = ["file", "edit", "data", "view", "insert", "help"],
+      rows = [], seen = {};
     for (var g = 0; g < order.length; g++) {
       var defs = APP_MENU_DEFS[order[g]] || [];
       for (var i = 0; i < defs.length; i++) {
@@ -20970,6 +21047,24 @@
           ["Paste tab-separated text into the grid", "Cmd/Ctrl + V"],
           ["Find in the data", "Cmd/Ctrl + F"],
           ["Clear the selection", "Escape"]
+        ] },
+      { title: "Rows, columns and variables",
+        // The four holes the sheet carried while documenting thirteen grid
+        // keys. None of these has an accelerator of its own, and saying so is
+        // the honest half - each is either a Data menu command or a control in
+        // the variable properties panel, and both have keyboard routes worth
+        // writing down. Every key here was driven before it was written.
+        note: "Inserting, duplicating, deleting, sorting and hiding a column " +
+              "are all Data menu commands, so the first two keys reach every " +
+              "one of them. Measure type, levels and missing codes live in " +
+              "the variable properties panel. Inserting or deleting a row in " +
+              "the middle of the data is on the row number's own menu, and " +
+              "Cmd/Ctrl+E is listed under Commands above.",
+        rows: [
+          ["Open the Data menu", "F10, then D, then Enter"],
+          ["Find a Data command by name", "Cmd/Ctrl + Shift + P"],
+          ["Open the variable properties panel", "Second Tab stop"],
+          ["Add a row at the bottom", "Tab to Add row in the data toolbar"]
         ] },
       { title: "Variables and formulas",
         rows: [

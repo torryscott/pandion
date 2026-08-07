@@ -1390,6 +1390,15 @@
     cursor: pointer;
   }
   .ps-formula-templates button:hover { background: #dfeafc; }
+  /* The picker that says WHICH column the transforms beside it apply to. It
+     is the same chip as its sibling buttons, minus the appearance reset, so
+     the browser keeps drawing an arrow and it still reads as a choice. */
+  #ps-formula-source {
+    font-family: inherit; font-size: 11.5px; color: var(--ps-accent-press);
+    background: var(--ps-s2); border: 1px solid var(--ps-tint-line-2);
+    border-radius: var(--ps-r-md); padding: 2px 4px; margin-right: 4px;
+    max-width: 190px; cursor: pointer;
+  }
   #ps-formula-input {
     font-family: ui-monospace, Menlo, monospace; font-size: 12.5px;
     width: 100%; box-sizing: border-box; border: 1px solid var(--ps-l3);
@@ -4900,7 +4909,11 @@
       <div id="ps-formula-preview"></div>
     </div>
     <div class="ps-dialog-actions">
-      <button type="button" class="ps-btn" id="ps-formula-cancel">Cancel</button>
+      <!-- One way out, not two. The header Close is the app's universal
+           dismiss (every dialog carries it, and the image-size and
+           diagnostics dialogs carry ONLY it), so the footer Cancel beside it
+           was a second control doing the identical job. The footer now holds
+           the decision alone. -->
       <button type="button" class="ps-btn ps-primary"
               id="ps-formula-save">Save variable</button>
     </div>
