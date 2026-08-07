@@ -146,9 +146,6 @@
   .download-list {
     display: grid; gap: 10px; margin-top: 0;
   }
-  .platform-card[data-platform="mac"] .download-list {
-    grid-template-columns: 1fr 1fr;
-  }
   .download-option {
     display: flex; align-items: center; justify-content: space-between;
     gap: 14px; padding: 12px 14px; border: 1px solid #c3d0df;
@@ -272,11 +269,6 @@
     }
     .alt-actions { min-width: 0; }
     .download-hero { padding-top: 48px; }
-  }
-  @media (max-width: 640px) {
-    .platform-card[data-platform="mac"] .download-list {
-      grid-template-columns: 1fr;
-    }
   }
   @media (max-width: 560px) {
     .nav { height: auto; flex-wrap: wrap; padding: 8px 0; row-gap: 4px; }
