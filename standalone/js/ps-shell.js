@@ -9800,10 +9800,9 @@
       var colHeads = grid.querySelectorAll("th[data-grid-col]");
       for (i = 0; i < colHeads.length; i++) {
         var headName = colHeads[i].getAttribute("data-grid-col");
-        var hi = t.order.indexOf(headName);
         var headIn = GRID_SELECTION_COLS
           ? GRID_SELECTION_COLS.indexOf(headName) !== -1
-          : (hi >= r.c0 && hi <= r.c1);
+          : r.cols.indexOf(headName) !== -1;
         if (headIn) colHeads[i].classList.add("ps-grid-axis-selected");
       }
     }
@@ -10829,8 +10828,8 @@
     if (!t || !r) return null;
     var nums = [], cells = 0, nonNum = 0, blank = 0;
     for (var row = r.r0; row <= r.r1; row++)
-      for (var c = r.c0; c <= r.c1; c++) {
-        var col = t.order[c];
+      for (var c = 0; c < r.cols.length; c++) {
+        var col = r.cols[c];
         if (!col) continue;
         cells++;
         var v = (t.columns[col] || [])[row];

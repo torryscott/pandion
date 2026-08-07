@@ -138,6 +138,45 @@ ok(/2 columns/.test(summary2),
 ok((await page.evaluate(() => window.PS_SHELL.selectionText())).trim() === 'B2\tE2',
    'copy holds the two it painted');
 
+console.log('case 6b: the header lighting and the stats strip agree with it');
+// Two consumers the first pass MISSED. Both still asked t.order where a column
+// sat and compared that against c0 and c1, which index the VISIBLE columns
+// now, so with a column hidden the lit headers and the Count, Sum and Average
+// described a different set of columns than the highlight did. The stats one
+// put numbers from an invisible column into a total the user was reading.
+await fixture(['C']);
+await page.evaluate(() => {
+    const cols = ['A', 'B', 'C', 'D', 'E', 'F'];
+    const rows = [];
+    // C carries values a thousand times larger, so if it leaks into a total
+    // the total says so out loud.
+    for (let r = 1; r <= 6; r++)
+        rows.push(cols.map(c => c === 'C' ? String(r * 1000) : String(r)));
+    window.PS_SHELL.loadTable('tiny', cols, rows);
+    window.PS_SHELL.showAllColumns();
+    window.PS_SHELL.hideColumn('C');
+});
+await page.waitForTimeout(700);
+await page.evaluate(() => window.PS_SHELL.setWorkspace('data'));
+await page.waitForTimeout(250);
+await page.evaluate(() =>
+    window.PS_SHELL.setGridSelection('B', 0, 'E', 5, 'column'));
+await page.waitForTimeout(400);
+const lit = await page.evaluate(() => Array.from(
+    document.querySelectorAll('#ps-datagrid th.ps-grid-axis-selected'))
+    .map(t => t.getAttribute('data-grid-col')));
+ok(JSON.stringify(lit) === JSON.stringify(['B', 'D', 'E']),
+   'the lit headers are the visible columns in the selection, got ' +
+   JSON.stringify(lit));
+const stats = await page.evaluate(() =>
+    (document.getElementById('ps-grid-stats') || {}).innerText || '');
+ok(/SUM\s*63\b/.test(stats.replace(/\n+/g, ' ')),
+   'the total is B plus D plus E and not the hidden column, got ' +
+   JSON.stringify(stats.replace(/\n+/g, ' ')));
+ok(!/6000/.test(stats),
+   'and no value from the hidden column reaches the strip, got ' +
+   JSON.stringify(stats.replace(/\n+/g, ' ')));
+
 console.log('case 7: with nothing hidden everything is exactly as before');
 await fixture([]);
 await selectB2toE2();
