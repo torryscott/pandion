@@ -106,12 +106,15 @@ const perCol = await page.evaluate(() => {
     const t = window.PS_SHELL.project.table;
     return JSON.stringify((t.missingTokensByCol || {}).minutes || null);
 });
-ok(perCol === '["-99"]',
-   'the code is written to the PER-COLUMN list, not the dataset one, got ' + perCol);
+// A per-column list wins WHOLE over the dataset one rather than merging
+// (t3-58a), so a list seeded with only the code would quietly stop NA
+// counting as missing in this column. It has to start from what is in force.
+ok(perCol === '["NA","-99"]',
+   'the code joins the tokens already in force for the column, got ' + perCol);
 const dsList = await page.evaluate(() =>
     JSON.stringify(window.PS_SHELL.project.table.missingTokens));
 ok(!/-99/.test(dsList),
-   'the dataset-wide list is left alone, got ' + dsList);
+   'and the dataset-wide list is left alone, got ' + dsList);
 ok((await adviceText()) === '' || !/-99/.test(await adviceText()),
    'the advice stands down once the code is handled');
 

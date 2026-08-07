@@ -18277,8 +18277,11 @@
       // undo step, the re-inference and the disclosure identical to typing
       // the value in by hand.
       if (!a.codes || !a.codes.length) return;
-      var have = hasColumnTokens(t, col)
-        ? (t.missingTokensByCol[col] || []).slice() : [];
+      // A per-column list WINS WHOLE over the dataset one rather than merging
+      // (t3-58a), so seeding an empty list with only the code would quietly
+      // stop NA counting as missing in this column. Start from whatever is
+      // in force for it today.
+      var have = columnTokenList(t, col).slice();
       for (var c0 = 0; c0 < a.codes.length; c0++) {
         var s0 = String(a.codes[c0].value);
         if (have.indexOf(s0) === -1) have.push(s0);
