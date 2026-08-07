@@ -9629,7 +9629,7 @@
   function gridFillDown() {
     var t = PROJECT.table, sel = gridSelectionRect();
     if (!t || !sel) { showToast("Select a cell to fill from"); return; }
-    var col = t.order[sel.c0];
+    var col = sel.cols[0];
     if (!col || !t.raw[col]) return;
     var from = sel.r0, value = t.raw[col][from];
     var last = nRows(t) - 1;
@@ -9681,10 +9681,20 @@
     persist(); syncAll(); render();
     showToast("Rows sorted by " + col + " \u00b7 Undo restores the prior order");
   }
+  // The rectangle is over the columns the user can SEE. It used to index
+  // t.order, the full column list, while the grid renders only the visible
+  // ones, so a hidden column between the anchor and the focus was inside
+  // every range operation and outside every pixel of the highlight. Copy
+  // carried it, fill and clear and Delete overwrote it, exclude excluded it,
+  // and a paste landed its values one column to the left of where they
+  // appeared to land. All of it silent, in a column by definition not on
+  // screen. r.cols is the authority; nothing downstream should walk t.order
+  // between c0 and c1 again.
   function gridSelectionRect() {
     var t = PROJECT.table, s = GRID_SELECTION;
     if (!t || !s) return null;
-    var a = t.order.indexOf(s.anchorCol), b = t.order.indexOf(s.focusCol);
+    var vis = gridVisibleColumns(t);
+    var a = vis.indexOf(s.anchorCol), b = vis.indexOf(s.focusCol);
     if (a < 0 || b < 0) return null;
     var maxRow = nRows(t) - 1;
     if (maxRow < 0) return null;
@@ -9692,7 +9702,8 @@
     if (!isFinite(ar) || !isFinite(fr)) return null;
     ar = Math.max(0, Math.min(maxRow, ar));
     fr = Math.max(0, Math.min(maxRow, fr));
-    return { c0: Math.min(a, b), c1: Math.max(a, b),
+    var c0 = Math.min(a, b), c1 = Math.max(a, b);
+    return { c0: c0, c1: c1, cols: vis.slice(c0, c1 + 1),
              r0: Math.min(ar, fr), r1: Math.max(ar, fr),
              focusCol: s.focusCol, focusRow: fr };
   }
@@ -9707,8 +9718,8 @@
       return out;
     }
     for (var row = r.r0; row <= r.r1; row++)
-      for (var col = r.c0; col <= r.c1; col++)
-        out.push({ col: t.order[col], row: row });
+      for (var col = 0; col < r.cols.length; col++)
+        out.push({ col: r.cols[col], row: row });
     return out;
   }
   function gridSelectionContains(col, row) {
@@ -9717,12 +9728,12 @@
     if (GRID_SELECTION_COLS)
       return GRID_SELECTION_COLS.indexOf(col) !== -1 &&
         row >= r.r0 && row <= r.r1;
-    var ci = t.order.indexOf(col);
-    return ci >= r.c0 && ci <= r.c1 && row >= r.r0 && row <= r.r1;
+    return r.cols.indexOf(col) !== -1 && row >= r.r0 && row <= r.r1;
   }
   function gridSelectionSummary(count, r) {
     if (!count || !r) return "";
-    var rows = r.r1 - r.r0 + 1, cols = r.c1 - r.c0 + 1;
+    var rows = r.r1 - r.r0 + 1;
+    var cols = r.cols ? r.cols.length : r.c1 - r.c0 + 1;
     if (count === 1) return "1 cell selected";
     return rows + (rows === 1 ? " row" : " rows") + " \u00d7 " +
       cols + (cols === 1 ? " column" : " columns") + " \u00b7 " +
@@ -9740,16 +9751,16 @@
     }
     var r = gridSelectionRect();
     if (!r) GRID_SELECTION = null;
-    var count = r ? (r.r1 - r.r0 + 1) * (r.c1 - r.c0 + 1) : 0;
+    var count = r ? (r.r1 - r.r0 + 1) * r.cols.length : 0;
     var t = PROJECT.table;
     if (r && t) {
       for (i = 0; i < tds.length; i++) {
         var row = Number(tds[i].getAttribute("data-gr"));
         var gcName = tds[i].getAttribute("data-gc");
-        var ci = t.order.indexOf(gcName);
+        var ci = r.cols.indexOf(gcName);
         var inCols = GRID_SELECTION_COLS
           ? GRID_SELECTION_COLS.indexOf(gcName) !== -1
-          : (ci >= r.c0 && ci <= r.c1);
+          : ci !== -1;
         if (!inCols || row < r.r0 || row > r.r1) continue;
         tds[i].classList.add("ps-grid-selected");
         tds[i].setAttribute("aria-selected", "true");
@@ -9761,8 +9772,9 @@
           tds[i].classList.add("ps-grid-sel-left");
           tds[i].classList.add("ps-grid-sel-right");
         } else {
-          if (ci === r.c0) tds[i].classList.add("ps-grid-sel-left");
-          if (ci === r.c1) tds[i].classList.add("ps-grid-sel-right");
+          if (ci === 0) tds[i].classList.add("ps-grid-sel-left");
+          if (ci === r.cols.length - 1)
+            tds[i].classList.add("ps-grid-sel-right");
         }
         if (tds[i].getAttribute("data-gc") === r.focusCol &&
             row === r.focusRow) {
@@ -9858,7 +9870,7 @@
     if (GRID_SELECTION_COLS) copyCols = gridSelectedColumns();
     else {
       copyCols = [];
-      for (var cc = r.c0; cc <= r.c1; cc++) copyCols.push(t.order[cc]);
+      for (var cc = 0; cc < r.cols.length; cc++) copyCols.push(r.cols[cc]);
     }
     if (GRID_SELECTION_KIND === "column" || GRID_SELECTION_KIND === "all") {
       var head = [];
@@ -9923,8 +9935,11 @@
       for (var ac = 0; ac < t.order.length; ac++) t.raw[t.order[ac]].push("");
       t.caseIds.push(newCaseId());
     }
-    while (t.order.length < r.c0 + targetCols)
+    var visCols = gridVisibleColumns(t);
+    while (visCols.length < r.c0 + targetCols) {
       addColumnInternal(t.order[t.order.length - 1], null);
+      visCols = gridVisibleColumns(t);
+    }
     // Level census of the PRE-EXISTING pasted-into columns, taken before
     // the writes: a paste that explodes a factor-like column's distinct
     // values is almost always a misaligned block (Torry's wall-of-IDs
@@ -9941,8 +9956,8 @@
       return k;
     };
     var levelWatch = [];
-    for (var lw = 0; lw < targetCols && r.c0 + lw < t.order.length; lw++) {
-      var lwCol = t.order[r.c0 + lw];
+    for (var lw = 0; lw < targetCols && r.c0 + lw < visCols.length; lw++) {
+      var lwCol = visCols[r.c0 + lw];
       var lwBefore = distinctIn(lwCol);
       // Only factor-like columns (few distinct values) can "explode";
       // pasting fresh measurements into a numeric column legitimately
@@ -9956,14 +9971,14 @@
         var srcCol = fillSelection ? 0 : x;
         var value = matrix[srcRow] && matrix[srcRow][srcCol] != null
           ? matrix[srcRow][srcCol] : "";
-        t.raw[t.order[r.c0 + x]][r.r0 + y] = String(value);
+        t.raw[visCols[r.c0 + x]][r.r0 + y] = String(value);
       }
     }
     t.edited = true;
     retype(t); validateRoles();
     persist(); syncAll(); render();
-    gridSetSelection(t.order[r.c0], r.r0,
-      t.order[Math.min(t.order.length - 1, r.c0 + targetCols - 1)],
+    gridSetSelection(visCols[r.c0], r.r0,
+      visCols[Math.min(visCols.length - 1, r.c0 + targetCols - 1)],
       r.r0 + targetRows - 1, "cells");
     var worst = null;
     for (var lw2 = 0; lw2 < levelWatch.length; lw2++) {
