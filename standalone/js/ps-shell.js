@@ -2853,7 +2853,7 @@
       capField.style.display = "none";
       descField.style.display = "none";
       if (bgField) bgField.style.display = "none";
-      // The page's OWN record replaces the caption box here: nothing to
+      // The page's OWN record replaces the caption box here. Nothing to
       // type, because the page already knows when it was kept, what it
       // came from, and what the user wrote about it.
       recField.style.display = "";
@@ -4103,7 +4103,7 @@
       gt.charAt(0).toUpperCase() + gt.slice(1);
   }
   // A page needs a NAME before it can appear in a list, and every page
-  // already carries one: a kept comparison knows its own title, a kept
+  // already carries one. A kept comparison knows its own title, a kept
   // chart knows what it was and which variables it was drawn from. The
   // user's own title wins over all of it.
   function pinPageLabel(pin, idx) {
@@ -4136,7 +4136,7 @@
       (ttl ? " \u00b7 " + ttl : "") +
       (pin.at ? " \u00b7 kept " + pinKeptFmt(pin.at) : "");
   }
-  // Go to a page: the Notebook, its section, selected, and on screen.
+  // Go to a page. The Notebook, its section, selected, and on screen.
   function pinReveal(pinId) {
     var boards = pinBoards(), owner = null;
     for (var i = 0; i < boards.length; i++)
@@ -4152,7 +4152,7 @@
     var pg = scroll && scroll.querySelector(
       '.ps-pinpage[data-pin-id="' + pinId + '"]');
     if (!pg) return;
-    // "nearest" rather than "center": a page taller than the viewport
+    // "nearest" rather than "center", because a page taller than the viewport
     // should arrive at its TOP, which is where the chart is.
     try { pg.scrollIntoView({ block: "nearest", behavior: "smooth" }); }
     catch (e) { pg.scrollIntoView(); }
@@ -4255,7 +4255,7 @@
     var pins = board.pins;
     var entry = { id: pinNewId(), src: pinSvgSrc(svgText),
                   natW: w, natH: h, w: w, h: h, at: Date.now() };
-    // Everything pinProvenance recorded, not a hand-listed subset: the
+    // Everything pinProvenance recorded, not a hand-listed subset. The
     // field-by-field copy silently dropped each new provenance field the
     // moment one was added.
     if (prov)
@@ -5596,7 +5596,7 @@
   }
   function deletePin(id) {
     // Undo restores into the section the page was deleted FROM, captured
-    // here rather than resolved at undo time: the toast outlives a section
+    // here rather than resolved at undo time, because the toast outlives a section
     // switch, and projectPins() would have handed the page to whichever
     // section happened to be on screen when Undo was pressed. A record must
     // never end up somewhere the user did not put it. (deletePinBoard
@@ -5611,7 +5611,7 @@
         // drop the page silently, so fall back to the one on screen.
         var live = pinBoards().indexOf(board) !== -1 ? board : activePinBoard();
         live.pins.splice(Math.min(at, live.pins.length), 0, removed);
-        // Show the restored page: putting it back out of sight would be an
+        // Show the restored page, since putting it back out of sight would be an
         // undo the user cannot see.
         (PROJECT.ui = PROJECT.ui || {}).activeBoard = live.id;
         PIN_SEL = removed.id;
@@ -5627,11 +5627,11 @@
     }
   }
   // ---- moving a page between sections ---------------------------------
-  // Keeping into the wrong section was a one-way mistake: nothing in the
+  // Keeping into the wrong section was a one-way mistake. Nothing in the
   // page menu, the page bar or the rail moved a page, so the only remedy
   // was to delete it and keep it again from the source chart, which threw
   // away the note and the kept time - the two things that make it a record.
-  // Shaped like Send to layout: the sections by name, then New section.
+  // Shaped like Send to layout, with the sections by name then New section.
   function movePinToBoard(pinId, boardId) {
     var boards = pinBoards(), from = null, at = -1, pin = null, target = null;
     for (var i = 0; i < boards.length; i++) {
@@ -5961,7 +5961,7 @@
     root.setAttribute("width", String(w));
     root.setAttribute("height", String(h + lay.h));
     root.setAttribute("viewBox", "0 0 " + w + " " + (h + lay.h));
-    // White under the whole thing: a kept page may itself be transparent,
+    // White under the whole thing, because a kept page may itself be transparent,
     // and record text must never land on transparency.
     addSvgBackground(outer, "#ffffff", w, h + lay.h);
     var nested = outer.importNode(inner.documentElement, true);
@@ -5994,7 +5994,7 @@
     return { svg: new XMLSerializer().serializeToString(root),
              w: w, h: h + lay.h };
   }
-  // The page as it should export: with its record when the dialog asks for
+  // The page as it should export, with its record when the dialog asks for
   // one and the page has vector to nest, otherwise exactly as before.
   function pinExportSvg(pin, rec) {
     var made = rec ? pinComposeWithRecord(pin, rec) : null;
@@ -13427,7 +13427,7 @@
         "supported in layouts.", true);
     });
     // Notes and titles write on a 600ms debounce, so a reload inside that
-    // window used to lose what had just been typed. Blur flushes it: the
+    // window used to lose what had just been typed. Blur flushes it, since the
     // caret leaving the box is the moment the user considers it written.
     (function flushOnBlur() {
       var boxes = ["ps-pininsp-bnote", "ps-pininsp-note", "ps-pininsp-name"];
@@ -18248,7 +18248,7 @@
           }
           setTip(prow, pinPageLabel(pin, idx) + " \u00b7 " +
             (pin.at ? "kept " + pinKeptFmt(pin.at) + " \u00b7 " : "") + st.text +
-            (pin.note ? " \u00b7 Your note: " + pin.note : ""));
+            (pin.note ? " \u00b7 Your note - " + pin.note : ""));
           // A page with a drift or a note says so to a screen reader too,
           // where the dot and the tip cannot reach.
           prow.setAttribute("aria-label", "Page " + (idx + 1) + ", " +
