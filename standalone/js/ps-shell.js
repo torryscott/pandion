@@ -10247,6 +10247,12 @@
     for (var i = 0; i < matrix.length; i++) width = Math.max(width, matrix[i].length);
     if (!width) return;
     dataMark("the paste");
+    // Which columns already existed. Both censuses below skip the ones this
+    // paste creates, because filling a fresh column is the normal case and
+    // not the accident. Null prototype because column names are DATA and a column
+    // called "__proto__" would otherwise read as present everywhere.
+    var preCols = Object.create(null);
+    for (var pc = 0; pc < t.order.length; pc++) preCols[t.order[pc]] = 1;
     var targetRows = matrix.length, targetCols = width;
     var fillSelection = matrix.length === 1 && width === 1 &&
       ((r.r1 > r.r0) || (r.c1 > r.c0));
@@ -10310,11 +10316,45 @@
       if (gained >= 5 && (!worst || gained > worst.gained))
         worst = { col: levelWatch[lw2].col, gained: gained };
     }
-    showToast("Pasted " + targetRows + " \u00d7 " + targetCols + " cells" +
-      (worst
-        ? " \u00b7 " + worst.col + " gained " + worst.gained + " new values" +
-          " - press Cmd/Ctrl+Z if this paste was misaligned"
-        : ""), !!worst);
+    // The mirror image of that census. A block whose text lands in a
+    // Continuous column types to nothing, so the paste reported itself a
+    // success while every value in that column went missing, and the only
+    // column it named was the one that GAINED values. The raw text survives
+    // and one undo puts it back, which is exactly why saying so matters.
+    // Nothing on screen tells the user the column is recoverable.
+    var voided = null;
+    for (var vc = 0; vc < targetCols && r.c0 + vc < visCols.length; vc++) {
+      var vCol = visCols[r.c0 + vc];
+      if (!preCols[vCol]) continue;
+      var unread = 0;
+      for (var vr = 0; vr < targetRows; vr++)
+        if (unreadRaw(t, vCol, r.r0 + vr)) unread++;
+      // Same restraint as the type change. A stray value or two is ordinary
+      // and the variable card already names it; losing most of what was
+      // pasted is the case worth interrupting for.
+      if (unread >= Math.max(3, targetRows * 0.5) &&
+          (!voided || unread > voided.unread))
+        voided = { col: vCol, unread: unread,
+                   empty: countValid(t, vCol) === 0 };
+    }
+    // When both fire, the voided column is the one to name. A column that
+    // gained values still has them; a column that lost them looks exactly
+    // like one nobody pasted into. Both point at the same undo, so naming
+    // the worse one costs the user nothing.
+    var note = "";
+    if (voided)
+      note = " \u00b7 " + (voided.empty
+        ? "no value pasted into " + voided.col + " could be read as " +
+          typeLabel(t.types[voided.col]) + ", so the column is empty now"
+        : voided.unread + " of " + targetRows + " values pasted into " +
+          voided.col + " could not be read as " +
+          typeLabel(t.types[voided.col]) + ", so they are missing now") +
+        " - press Cmd/Ctrl+Z if this paste was misaligned";
+    else if (worst)
+      note = " \u00b7 " + worst.col + " gained " + worst.gained + " new values" +
+        " - press Cmd/Ctrl+Z if this paste was misaligned";
+    showToast("Pasted " + targetRows + " \u00d7 " + targetCols + " cells" + note,
+      !!(voided || worst));
   }
   function gridClearSelected() {
     var cells = gridSelectionCells(), t = PROJECT.table;
@@ -11393,6 +11433,30 @@
   // One cell edits at a time; commits write the RAW string, the column
   // TYPE stays declared (a non-parsing value in a numeric column becomes
   // missing, the jamovi NA convention), and the chart re-renders live.
+  // A cell can hold text its own column cannot read. "sixty one" in a
+  // Continuous column types to null exactly like an empty cell, so the grid
+  // drew both as the same em dash and the only difference lived in a Missing
+  // count in another pane. That asymmetry is the bug, because deliberately
+  // clearing a cell gets a toast with an undo and accidentally voiding one
+  // got silence.
+  // Returns the held text, or "" when the cell is missing for an honest
+  // reason (blank, a declared missing code, an exclusion).
+  function unreadRaw(t, col, i) {
+    if (!t || !t.columns || !t.columns[col] || !t.raw[col]) return "";
+    if (t.columns[col][i] != null || isExcluded(t, col, i)) return "";
+    var s = String(t.raw[col][i] == null ? "" : t.raw[col][i]).trim();
+    if (!s || isMissingRaw(t, s, col)) return "";
+    return s;
+  }
+  // Names the text and the type that could not read it. setColType already
+  // says this about a whole column; one cell gets the same words.
+  function unreadReason(t, col, i) {
+    var s = unreadRaw(t, col, i);
+    if (!s) return "";
+    if (s.length > 40) s = s.slice(0, 37) + "\u2026";
+    return "\u201c" + s + "\u201d could not be read as " +
+      typeLabel(t.types[col]);
+  }
   function gridCellView(t, col, i) {
     var rowExcl = isRowExcluded(t, i);
     var excl = isExcluded(t, col, i), v;
@@ -11409,12 +11473,20 @@
     if (excl) cls += " ps-grid-excl";
     if (rowExcl) cls += " ps-grid-row-excl";
     if (rowFiltered) cls += " ps-grid-row-filtered";
+    var tip = rowFiltered
+      ? "Hidden by the active row filter - the row stays in the dataset but leaves every chart"
+      : rowExcl
+      ? "Observation excluded from every chart - right-click to include the row"
+      : (excl ? "Value excluded from charts - right-click to include it" : "");
+    // Only a cell nobody excluded can be missing because nothing could read
+    // it, and only a missing cell is worth testing, so the token map this
+    // builds stays off the common path.
+    var note = (v == null && !excl)
+      ? unreadReason(t, col, i) : "";
+    if (note) note += ", so this cell is missing";
     return { cls: cls, text: v == null ? "\u2014" : String(v),
-             title: rowFiltered
-               ? "Hidden by the active row filter - the row stays in the dataset but leaves every chart"
-               : rowExcl
-               ? "Observation excluded from every chart - right-click to include the row"
-               : (excl ? "Value excluded from charts - right-click to include it" : "") };
+             note: note, tip: tip,
+             title: note ? (tip ? note + ". " + tip : note) : tip };
   }
   function gridColumnHeaderId(visibleCol) {
     return "ps-grid-col-" + visibleCol;
@@ -11427,10 +11499,13 @@
   }
   function gridCellState(t, col, view) {
     var parts = [];
-    if (view.cls.indexOf("ps-grid-miss") !== -1) parts.push("Missing value");
+    // The reason replaces the bare "Missing value" rather than joining it,
+    // because it already says the cell is missing and says why.
+    if (view.note) parts.push(view.note);
+    else if (view.cls.indexOf("ps-grid-miss") !== -1) parts.push("Missing value");
     if (isComputedColumn(t, col))
       parts.push("Computed value; edit the formula from the column menu");
-    if (view.title) parts.push(view.title);
+    if (view.tip) parts.push(view.tip);
     return parts.join(". ");
   }
   function gridPaintCell(td, col, row) {
@@ -11527,6 +11602,12 @@
     t.raw[ge.col][ge.row] = newRaw;
     t.edited = true;
     retype(t);
+    // The typed value is what every chart and statistic downstream will see.
+    // When nothing could read the text, the cell is missing, and announcing
+    // "Saved score, row 1 as sixty one" tells a screen reader user the value
+    // was stored in the one circumstance where it was not. Read AFTER retype,
+    // because that is what decides it.
+    var voided = unreadReason(t, ge.col, ge.row);
     gridPaintCell(ge.td, ge.col, ge.row);
     gridApplySelection();
     persist();
@@ -11537,9 +11618,20 @@
       gridSetSelection(ge.col, ge.row, ge.col, ge.row);        // item 11
       gridFocusSelf();
     }
-    gridAnnounceEdit("Saved " + gridEditTarget(ge.col, ge.row) +
-      " as " + gridEditValue(t, ge.col, newRaw) + "." +
+    gridAnnounceEdit((voided
+      ? gridEditTarget(ge.col, ge.row) + " is missing. " + voided + "."
+      : "Saved " + gridEditTarget(ge.col, ge.row) +
+        " as " + gridEditValue(t, ge.col, newRaw) + ".") +
       gridNextEditAnnouncement(next));
+    // The sighted half of the same report. This is not a toast on every
+    // edit. An ordinary edit lands, and only a value that was destroyed
+    // reaches here. The cell keeps the reason in its tooltip afterwards, so
+    // this pill is the moment-of-the-act half and does not have to persist.
+    // Wording and restraint follow setColType, including a plain keyboard
+    // hint rather than a button, because the way back is undo either way.
+    if (voided)
+      showToast(gridEditTarget(ge.col, ge.row) + " is missing \u00b7 " +
+        voided + " \u00b7 Cmd/Ctrl+Z puts it back");
   }
   function gridCancelEdit() {
     var ge = GRID_EDIT;

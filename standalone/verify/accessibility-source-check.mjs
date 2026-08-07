@@ -81,9 +81,11 @@ check(
     'the in-cell editor names its variable, row, and current value and references its instructions',
 );
 check(
-    /gridAnnounceEdit\("Saved "[\s\S]*?gridNextEditAnnouncement\(next\)\)/.test(shell) &&
+    // A commit whose text nothing could read is not a save, and the status
+    // has to say which of the two happened before it says what comes next.
+    /gridAnnounceEdit\(\(voided[\s\S]*?is missing\.[\s\S]*?"Saved "[\s\S]*?gridNextEditAnnouncement\(next\)\)/.test(shell) &&
     /gridAnnounceEdit\("Edit canceled\./.test(shell),
-    'save, advance, and cancel paths publish explicit edit status',
+    'save, unread, advance, and cancel paths publish explicit edit status',
 );
 check(
     /x\.setAttribute\("aria-label", removeLabel\)/.test(shell) &&
