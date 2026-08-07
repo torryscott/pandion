@@ -586,8 +586,8 @@ three probes. Both are already fixed in another session's working tree, so this
 resolves when they commit. My numbers are measured with that one probe skipped
 and its guard applied locally, never committed.
 
-With that exclusion, every probe in `run.sh` passes on this branch except two,
-and I checked both rather than assuming.
+With that exclusion, **111 probes pass** and two fail. I checked both rather
+than assuming, and neither is a regression.
 
 - `motion-check` failed once inside the full run with `Target page, context or
   browser has been closed`, and passes on its own. Three other deep dives were
