@@ -113,7 +113,11 @@
   /* Ko-fi's own symbol, used unmodified per their brand guidance: not
      recoloured, not distorted. Sits beside the heading it belongs to.
      Self-hosted so the page still makes no third-party requests. */
-  .kofi-mark { display: inline-flex; flex: 0 0 auto; }
+  .kofi-mark {
+    display: inline-flex; flex: 0 0 auto; border-radius: 8px;
+    transition: opacity 120ms ease, transform 120ms ease;
+  }
+  .kofi-mark:hover { opacity: 0.82; transform: translateY(-1px); }
   .kofi-mark img { display: block; width: 30px; height: auto; }
   .kofi-card h2 {
     margin: 0 0 9px; color: var(--navy); font-size: 21px;
@@ -288,7 +292,7 @@
       </div>
 
       <aside class="kofi-card">
-        <h2>Support on Ko-fi<span class="kofi-mark" aria-hidden="true"><img src="assets/kofi-symbol.svg" alt="" width="30" height="24"></span></h2>
+        <h2>Support on Ko-fi<a class="kofi-mark" href="https://ko-fi.com/pandionplots" aria-hidden="true" tabindex="-1"><img src="assets/kofi-symbol.svg" alt="" width="30" height="24"></a></h2>
         <p>
           Ko-fi is a simple way to send something if you want to. If you
           cannot, or would rather not, sharing Pandion with a friend or
