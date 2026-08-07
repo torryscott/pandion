@@ -586,6 +586,68 @@
     for (var i = 0; i < a.length; i++) s += a[i];
     return a.length ? s / a.length : 0;
   }
+  // Control, control and CONTROL are one group to a reader and three levels
+  // to the app, which is three bars, three palette colours and three cells in
+  // every statistic. Whitespace is already folded into levels, so the
+  // machinery for saying "these are the same" exists; it just stops at case.
+  //
+  // The key is deliberately SHALLOW. Lower-casing, collapsing runs of space
+  // and dropping the punctuation people vary by (hyphen, underscore, dot,
+  // comma) covers what actually goes wrong in hand-entered and multi-site
+  // data. It does NOT sort tokens, so "dose, high" and "high dose" stay
+  // separate; that is a real OpenRefine trick and also the first one that
+  // merges labels which are genuinely different.
+  function levelVariantKey(s) {
+    return String(s == null ? "" : s).toLocaleLowerCase()
+      .replace(/[-_.,]+/g, " ").replace(/\s+/g, " ").trim();
+  }
+  // retype RE-ADDS a declared level even when no row carries it any more, so
+  // any rewrite that retires a level has to say so here or the dead name
+  // comes back as an empty category. (Find and replace has the same exposure
+  // and does not do this today; a replaced-away level survives in a column
+  // whose order was set by hand.)
+  function pruneDeclaredLevels(t, col, gone) {
+    function drop(list) {
+      if (!Array.isArray(list)) return list;
+      var out = list.filter(function (v) { return !gone[String(v)]; });
+      return out.length ? out : list;
+    }
+    if (t.declaredLevels && Array.isArray(t.declaredLevels[col]))
+      t.declaredLevels[col] = drop(t.declaredLevels[col]);
+    if (t.levelOrderDefaults && Array.isArray(t.levelOrderDefaults[col]))
+      t.levelOrderDefaults[col] = drop(t.levelOrderDefaults[col]);
+  }
+  function levelVariantGroups(t, col) {
+    var type = t.types[col];
+    if (type !== "nominal" && type !== "ordinal") return null;
+    var levels = t.levels[col] || [];
+    // Two levels cannot be a spelling problem worth a card, and a column with
+    // hundreds of distinct values is free text rather than a category.
+    if (levels.length < 3 || levels.length > 200) return null;
+    var counts = Object.create(null), raw = t.raw[col] || [], i;
+    for (i = 0; i < raw.length; i++) {
+      var v = String(raw[i] == null ? "" : raw[i]).trim();
+      if (v !== "") counts[v] = (counts[v] || 0) + 1;
+    }
+    var byKey = Object.create(null), order = [];
+    for (i = 0; i < levels.length; i++) {
+      var k = levelVariantKey(levels[i]);
+      if (k === "") continue;
+      if (byKey[k] === undefined) { byKey[k] = []; order.push(k); }
+      byKey[k].push({ value: levels[i], count: counts[levels[i]] || 0 });
+    }
+    var groups = [];
+    for (i = 0; i < order.length; i++) {
+      var vs = byKey[order[i]];
+      if (vs.length < 2) continue;
+      // The commonest spelling wins, and level order breaks a tie, so the
+      // answer never depends on object key order.
+      var best = vs[0];
+      for (var j = 1; j < vs.length; j++) if (vs[j].count > best.count) best = vs[j];
+      groups.push({ key: order[i], canonical: best.value, variants: vs });
+    }
+    return groups.length ? groups : null;
+  }
   // A column "stores numbers" when its typed view is numeric: continuous,
   // or ordinal whose raw values all parse (usable as values AND as
   // ordered categories - the jamovi dual role).
@@ -1622,9 +1684,65 @@
                     blankDropped: BLANK_ROWS_DROPPED };
     return rows.slice();
   }
-  function parseTableText(text, delimiter, hasHeader) {
+  // A real export puts a title line and a generated-on line above the header,
+  // and "First row" only ever offered Variable names or Data values. The file
+  // then imported with its title as the first column name, V2..Vn for the
+  // rest, and the real names sitting in the table as a data row, with no
+  // promote-row-to-header command anywhere to undo it.
+  //
+  // This looks for the row the names are actually on. It has to be as
+  // conservative as the date detector: claiming a header that is not one
+  // would silently discard a row of real data, which is worse than the
+  // problem. So it fires only on the shape it is built for, a run of SHORT
+  // preamble rows followed by one full row of words. If row one already looks
+  // like a header there is no candidate above it and nothing is offered.
+  var HEADER_SCAN_ROWS = 20;
+  function headerRowGuess(rows) {
+    if (!rows || rows.length < 4) return null;
+    var i, j, counts = [], tally = Object.create(null), best = 0, width = 0;
+    for (i = 0; i < rows.length; i++) {
+      var n = 0;
+      for (j = 0; j < rows[i].length; j++)
+        if (String(rows[i][j] == null ? "" : rows[i][j]).trim() !== "") n++;
+      counts.push(n);
+      tally[n] = (tally[n] || 0) + 1;
+      if (tally[n] > best || (tally[n] === best && n > width)) {
+        best = tally[n]; width = n;
+      }
+    }
+    // One column is not a table, and a preamble cannot be distinguished from
+    // data there.
+    if (width < 2) return null;
+    var limit = Math.min(rows.length - 2, HEADER_SCAN_ROWS);
+    for (i = 0; i < limit; i++) {
+      if (counts[i] !== width) continue;
+      // The first full row is the header the app already uses. Only a full
+      // row sitting BELOW shorter ones is news.
+      if (i === 0) return null;
+      var cells = [], seen = Object.create(null), okRow = true;
+      for (j = 0; j < rows[i].length && okRow; j++) {
+        var v = String(rows[i][j] == null ? "" : rows[i][j]).trim();
+        if (v === "") continue;
+        // Names are words. A number in this row means it is data.
+        if (isFinite(Number(v))) okRow = false;
+        else if (seen[v] !== undefined) okRow = false;   // duplicate name
+        else { seen[v] = 1; cells.push(v); }
+      }
+      if (!okRow) continue;
+      // Everything above it must be shorter, or this is an ordinary table
+      // with a text row in the middle of it.
+      for (j = 0; j < i; j++) if (counts[j] >= width) { okRow = false; break; }
+      if (!okRow) return null;
+      return { index: i, cells: cells, skipped: i };
+    }
+    return null;
+  }
+  function parseTableText(text, delimiter, hasHeader, skipRows) {
     PARSE_ISSUE = "";
     var rows = splitDelimited(text, delimiter);
+    var guess = headerRowGuess(rows);
+    skipRows = Math.max(0, Math.min(Number(skipRows) || 0, rows.length - 1));
+    if (skipRows) { rows = rows.slice(skipRows); guess = null; }
     // Captured immediately: BLANK_ROWS_DROPPED is a side channel, and any
     // later parseDelimitedRows call would overwrite it.
     var blankDropped = BLANK_ROWS_DROPPED;
@@ -1670,6 +1788,8 @@
     var head = resolveHeader(header.slice(0, width));
     return { header: head.names, rows: rows,
              renamed: head.renamed,
+             headerGuess: hasHeader !== false ? guess : null,
+             skippedRows: skipRows,
              blankRowsDropped: blankDropped,
              delimiter: !delimiter || delimiter === "auto"
                ? sniffDelimiter(text) : delimiter,
@@ -17941,6 +18061,34 @@
           : [])
       };
     }
+    // Spellings of one category. Placed after the codes branch and before the
+    // rest because it changes what the chart IS, not merely how a column is
+    // typed. It cannot collide with the offenders branch below, which needs a
+    // mostly-numeric column, nor with idcoded, which needs bad === 0.
+    var vg = levelVariantGroups(t, col);
+    if (vg) {
+      var nLevels = (t.levels[col] || []).length;
+      var spelled = 0, ex = vg[0];
+      for (var g0 = 0; g0 < vg.length; g0++) spelled += vg[g0].variants.length;
+      var exList = ex.variants.slice(0, 3).map(function (v) {
+        return "<code>" + escHtml(v.value) + "</code>";
+      }).join(", ");
+      return {
+        kind: "variants",
+        html: "<strong>" + escHtml(col) + " has " + nLevels +
+          " categories, and " + spelled + " of them are spellings of just " +
+          vg.length + ".</strong> " + exList +
+          (ex.variants.length > 3 ? " and others" : "") +
+          " differ only by capitalisation or spacing, so a chart draws " +
+          (ex.variants.length === 2 ? "two bars" : ex.variants.length + " bars") +
+          " where there is one group. Merging keeps the commonest spelling.",
+        actions: [
+          { label: "Merge into " + vg.length +
+              (vg.length === 1 ? " category" : " categories"),
+            act: "advice-merge-variants" }
+        ]
+      };
+    }
     // t3-48. Dates land Nominal because there is no date measure type, and
     // that is not changing here. What the app CAN say is what it just did
     // about the order, and offer the two derived columns that turn 400 daily
@@ -18075,6 +18223,44 @@
     if (act === "advice-id") { setColType(col, "id"); return; }
     if (act === "advice-year" || act === "advice-month") {
       extractDatePart(col, act === "advice-year" ? "year" : "month");
+      return;
+    }
+    if (act === "advice-merge-variants") {
+      var vgm = levelVariantGroups(t, col);
+      if (!vgm) return;
+      var to = Object.create(null), gone = Object.create(null), n = 0, i0, j0;
+      for (i0 = 0; i0 < vgm.length; i0++)
+        for (j0 = 0; j0 < vgm[i0].variants.length; j0++) {
+          var vv = vgm[i0].variants[j0].value;
+          if (vv === vgm[i0].canonical) continue;
+          to[vv] = vgm[i0].canonical;
+          gone[vv] = 1;
+        }
+      // Worked out before anything is marked, the gridReplace rule: a mark
+      // that undoes nothing is worse than no mark.
+      var rawCol = t.raw[col] || [], hits = [];
+      for (i0 = 0; i0 < rawCol.length; i0++) {
+        // Levels are built from the TRIMMED value, so that is what carries a
+        // mapping; the cell may still hold the untrimmed original.
+        var trimmed = String(rawCol[i0] == null ? "" : rawCol[i0]).trim();
+        var want = to[trimmed];
+        if (want !== undefined && want !== rawCol[i0])
+          hits.push({ row: i0, value: want });
+      }
+      if (!hits.length) return;
+      dataMark("merging the spellings of " + col);
+      for (i0 = 0; i0 < hits.length; i0++) rawCol[hits[i0].row] = hits[i0].value;
+      // A hand-set level ORDER lists every old spelling, and retype re-adds a
+      // declared level even when nothing carries it any more, so a merge that
+      // forgot this would leave the dead spellings behind as empty
+      // categories. Same for the stored reset-order baseline.
+      pruneDeclaredLevels(t, col, gone);
+      t.edited = true;
+      retype(t); validateRoles();
+      persist(); syncAll(); render();
+      n = Object.keys(gone).length;
+      showToast("Merged " + n + " spelling" + (n === 1 ? "" : "s") + " in " +
+        col + " · Cmd/Ctrl+Z puts them back");
       return;
     }
     if (!a) return;
@@ -19074,16 +19260,23 @@
   var IMPORT_PENDING = null;
   var IMPORT_SOURCE_FILE = null;
   var IMPORT_SOURCE_TEXT = "";
+  // Leading lines the user has agreed to drop. Zero for every ordinary file,
+  // and reset with the rest of the loader state so a second import never
+  // inherits the first one's answer.
+  var IMPORT_SKIP_ROWS = 0;
   var IMPORT_SOURCE_NAME = "pasted-data";
   function importDelimiterValue() {
     var value = el("ps-import-delimiter").value;
     return value === "tab" ? "\t" : value;
   }
   function renderImportPreview(name, text) {
+    // A different file is a different question; only a re-render of the SAME
+    // text keeps the answer the user gave.
+    if (String(text || "") !== IMPORT_SOURCE_TEXT) IMPORT_SKIP_ROWS = 0;
     IMPORT_SOURCE_TEXT = String(text || "");
     IMPORT_SOURCE_NAME = name || "pasted-data";
     var parsed = parseTableText(IMPORT_SOURCE_TEXT, importDelimiterValue(),
-      el("ps-import-header").value !== "no");
+      el("ps-import-header").value !== "no", IMPORT_SKIP_ROWS);
     var root = el("ps-import-preview");
     if (!parsed || !parsed.rows.length) {
       IMPORT_PENDING = null;
@@ -19132,7 +19325,24 @@
            "columns: ") + demoted.slice(0, 3).join("; ") +
         (demoted.length > 3 ? "; and " + (demoted.length - 3) + " more" : "") +
         "</span>";
-    var h = '<div class="ps-import-summary">' +
+    // Offered, never taken. Adopting a header the app merely guessed at would
+    // throw away a row of somebody's data on a hunch, so the row it found is
+    // quoted back and the user decides.
+    var guessHtml = "";
+    if (parsed.headerGuess) {
+      var gc = parsed.headerGuess.cells, shown = gc.slice(0, 4)
+        .map(function (c) { return escHtml(c); }).join(", ");
+      if (gc.length > 4) shown += " and " + (gc.length - 4) + " more";
+      guessHtml = '<div class="ps-import-guess" data-role="header-guess">' +
+        "<div>The variable names look like they are further down. Row " +
+        (parsed.headerGuess.index + 1) + " reads <strong>" + shown +
+        "</strong>, and the " + parsed.headerGuess.skipped +
+        (parsed.headerGuess.skipped === 1 ? " line" : " lines") +
+        " above it do not fill the table.</div>" +
+        '<button type="button" data-header-use>Use row ' +
+        (parsed.headerGuess.index + 1) + " as the variable names</button></div>";
+    }
+    var h = guessHtml + '<div class="ps-import-summary">' +
       parsed.rows.length + " rows \u00d7 " + parsed.header.length + " columns" +
       notes + "</div><div class=\"ps-import-table-wrap\">" +
       '<table class="ps-import-table"><thead><tr>';
@@ -19270,6 +19480,7 @@
     IMPORT_PENDING = null;
     IMPORT_SOURCE_FILE = null;
     IMPORT_SOURCE_TEXT = "";
+    IMPORT_SKIP_ROWS = 0;
     IMPORT_SOURCE_NAME = "pasted-data";
     el("ps-import-preview").innerHTML = "";
     el("ps-import-preview").style.display = "none";
@@ -19351,6 +19562,14 @@
           adoptCSV(pending.name, pending.parsed);
         });
       else adoptCSV(pending.name, pending.parsed);
+    });
+    el("ps-import-preview").addEventListener("click", function (e) {
+      var use = e.target.closest ? e.target.closest("[data-header-use]") : null;
+      if (!use || !IMPORT_PENDING) return;
+      var g = IMPORT_PENDING.parsed.headerGuess;
+      if (!g) return;
+      IMPORT_SKIP_ROWS = g.skipped;
+      renderImportPreview(IMPORT_SOURCE_NAME, IMPORT_SOURCE_TEXT);
     });
     el("ps-import-preview").addEventListener("change", function (e) {
       var select = e.target.closest ? e.target.closest("[data-import-type]") : null;

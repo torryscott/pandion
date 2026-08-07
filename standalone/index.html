@@ -1914,6 +1914,25 @@
     border-radius: var(--ps-r-sm); font-size: 10px;
   }
   .ps-import-warning { color: #a14d30; }
+  /* The same amber the variable advice card uses, for the same reason: the
+     app has made a call worth checking and is offering a way through, and a
+     second colour for the same idea would teach two things where there is
+     one. Tokens only, no new values. */
+  .ps-import-guess {
+    display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    font-size: 11.5px; line-height: 1.5; color: var(--ps-warn-ink);
+    background: var(--ps-warn-wash); border-bottom: 1px solid var(--ps-warn-line);
+    border-left: 3px solid var(--ps-warn); padding: 8px 10px;
+  }
+  .ps-import-guess > div { flex: 1 1 220px; min-width: 0; }
+  .ps-import-guess strong { font-weight: 650; }
+  .ps-import-guess button {
+    font: inherit; font-size: 11.5px; padding: 3px 9px; flex: 0 0 auto;
+    border-radius: var(--ps-r-sm); border: 1px solid #c9a961;
+    background: var(--ps-s0); color: var(--ps-warn-ink); cursor: pointer;
+  }
+  .ps-import-guess button:hover { background: var(--ps-s2); }
+  .ps-import-guess button:active { background: #f5e9cf; }
   .ps-import-sheets {
     display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
     margin: 0 0 8px;
