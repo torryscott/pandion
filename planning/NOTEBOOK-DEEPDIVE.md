@@ -107,7 +107,7 @@ project.
 registrations, and one branch each in `undoScope`, `commandLabel`,
 `commandEnabled`, `commandDisabledReason`, the command runner and the keydown
 handler). No new persisted state, since the history is session-only like the
-layout one. Probe `notebook-undo-check.mjs`, 19 assertions. Half a day.
+layout one. Probe `notebook-undo-check.mjs`, 21 assertions. Half a day.
 
 **The smallest version.** The keydown branch alone, with the menu item
 disabled and honest. Three lines that stop the key reaching another
@@ -387,8 +387,8 @@ Branch `probe/notebook-deepdive`. Three probes added, all wired into
 | Probe | Cases | Demonstrated failing first |
 | --- | --- | --- |
 | `notebook-record-check.mjs` | 7 cases, 16 assertions | Yes. On the unchanged code it fails at case 1, because the option does not exist. The content assertion was proved separately by exporting the same annotated notebook on both revisions. The note is absent before and present after, and the page height goes from 368 to 428. |
-| `notebook-pages-check.mjs` | 6 cases, 15 assertions | Yes, at case 1, because no page rows exist in the rail. Case 6, the undo-scope defect, was also demonstrated independently in the running app before the fix (the b1 and b2 trace in item 5). |
-| `notebook-undo-check.mjs` | 5 cases, 19 assertions | Yes, at case 1, with exactly the symptom. The Edit menu reads "Undo chart styling" with the Notebook on screen. |
+| `notebook-pages-check.mjs` | 6 cases, 17 assertions | Yes, at case 1, because no page rows exist in the rail. Case 6, the undo-scope defect, was also demonstrated independently in the running app before the fix (the b1 and b2 trace in item 5). |
+| `notebook-undo-check.mjs` | 5 cases, 21 assertions | Yes, at case 1, with exactly the symptom. The Edit menu reads "Undo chart styling" with the Notebook on screen. |
 
 Two probe laws worth recording, because both cost time and will cost it
 again.
