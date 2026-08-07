@@ -95,6 +95,25 @@ const acts = await page.evaluate(() => Array.from(
 ok(acts.indexOf('advice-merge-variants') !== -1,
    'a one-click merge is offered, got ' + JSON.stringify(acts));
 
+console.log('case 1b: the level list says how many rows each category holds');
+// The claim on the card is only checkable if the sizes are visible. The list
+// named the categories and never their sizes, so "is CONTROL a typo or a
+// third of my data" needed a filter or a chart to answer.
+const counts = await page.evaluate(() => Array.from(
+    document.querySelectorAll('#ps-variable-levels .ps-level-order'))
+    .map(r => (r.querySelector('.ps-level-label') || {}).textContent + '=' +
+              ((r.querySelector('.ps-level-count') || {}).textContent || '')));
+ok(counts.length === 9 && counts.every(c => /=\d+$/.test(c)),
+   'every category carries a row count, got ' + JSON.stringify(counts));
+ok(counts.indexOf('Control=2') !== -1 && counts.indexOf('control=2') !== -1,
+   'and the counts are right, got ' + JSON.stringify(counts));
+const lbl = await page.evaluate(() => {
+    const r = document.querySelector('#ps-variable-levels .ps-level-order');
+    return r ? r.getAttribute('aria-label') : '';
+});
+ok(/2 rows/.test(lbl) && /position 1 of 9/.test(lbl),
+   'the count is announced without losing the position, got ' + JSON.stringify(lbl));
+
 console.log('case 2: merging keeps the commonest spelling');
 await page.evaluate(() =>
     document.querySelector('#ps-variable-advice [data-advice="advice-merge-variants"]').click());

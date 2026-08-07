@@ -18385,13 +18385,26 @@
       if (!levels.length)
         levelRoot.appendChild(mkEl("span", "ps-inspector-empty",
           "No levels"));
+      // The list said WHICH categories exist and never how many rows each
+      // holds, so "is CONTROL a typo or a third of my data" needed a filter
+      // or a chart to answer. Counted off the TYPED column, so excluded cells
+      // and missing labels are already out and the number agrees with every
+      // other count in the panel.
+      var lvCount = Object.create(null), lvSrc = t.columns[col] || [];
+      for (i = 0; i < lvSrc.length; i++)
+        if (lvSrc[i] != null) {
+          var lvk = String(lvSrc[i]);
+          lvCount[lvk] = (lvCount[lvk] || 0) + 1;
+        }
       for (i = 0; i < Math.min(levels.length, 40); i++) {
         var order = mkEl("div", "ps-level-order");
         var value = String(levels[i]);
         order.setAttribute("data-level", value);
         order.setAttribute("role", "listitem");
         order.tabIndex = 0;
-        order.setAttribute("aria-label", value + ", position " + (i + 1) +
+        var nAt = lvCount[value] || 0;
+        order.setAttribute("aria-label", value + ", " + nAt +
+          (nAt === 1 ? " row" : " rows") + ", position " + (i + 1) +
           " of " + levels.length +
           ". Drag vertically or press Alt plus Up or Down Arrow to reorder.");
         var grip = mkEl("span", "ps-level-grip", "\u28ff");
@@ -18400,6 +18413,10 @@
         var label = mkEl("span", "ps-level-label", value);
         setTip(label, value);
         order.appendChild(label);
+        var nEl = mkEl("span", "ps-level-count", String(nAt));
+        nEl.setAttribute("aria-hidden", "true");   // already in the label
+        setTip(nEl, nAt + (nAt === 1 ? " row" : " rows") + " in " + value);
+        order.appendChild(nEl);
         levelRoot.appendChild(order);
       }
       if (levels.length > 40)
