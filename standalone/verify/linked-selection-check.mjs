@@ -77,7 +77,7 @@ await dispatchOnHalo(point('A', 0), 'contextmenu');
 const pointMenu = page.locator('[data-role="gb2-point-menu"]');
 await pointMenu.waitFor({ state: 'visible' });
 const menuLabels = await pointMenu.locator('button').allTextContents();
-if (!menuLabels.includes('Exclude this value from dataset') ||
+if (!menuLabels.includes('Exclude this value from the dataset') ||
     !menuLabels.includes('Reveal in Data'))
     throw new Error('point menu does not expose both Data actions');
 await pointMenu.locator('[data-ps-action="reveal-point"]').click();

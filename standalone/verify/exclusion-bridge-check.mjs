@@ -75,9 +75,9 @@ await firstPoint.evaluate(point => {
 const pointMenu = page.locator('[data-role="gb2-point-menu"]');
 await pointMenu.waitFor({ state: 'visible' });
 const excludeAction = pointMenu.getByText(
-    'Exclude this value from dataset', { exact: true });
+    'Exclude this value from the dataset', { exact: true });
 const menuText = (await excludeAction.textContent()).trim();
-if (menuText !== 'Exclude this value from dataset')
+if (menuText !== 'Exclude this value from the dataset')
     throw new Error(`standalone point action was not relabeled: ${menuText}`);
 await excludeAction.click();
 // The shared engine intentionally batches style/spec commits for 1.5 s.
@@ -202,9 +202,9 @@ await page.waitForTimeout(2600);
     await menu2.waitFor({ state: 'visible', timeout: 5000 })
         .catch(() => { throw new Error('round setup: point menu never opened'); });
     const menu2Text = (await menu2.textContent()).trim();
-    if (!menu2Text.includes('Exclude this value from dataset'))
+    if (!menu2Text.includes('Exclude this value from the dataset'))
         throw new Error('round setup: unexpected menu text :: ' + menu2Text);
-    await menu2.getByText('Exclude this value from dataset').click();
+    await menu2.getByText('Exclude this value from the dataset').click();
     await page.waitForTimeout(1800);
 }
 const ghost2 = page.locator('[data-role="data-point-hidden"]');
@@ -237,7 +237,7 @@ await page.waitForTimeout(300);
 if (await ghost2.count() !== 1)
     throw new Error('a plain ghost click still instantly restores');
 const includeAction = page.locator('[data-role="gb2-point-menu"]')
-    .getByText('Include this value in dataset', { exact: true });
+    .getByText('Include this value in the dataset', { exact: true });
 if (!(await includeAction.isVisible()))
     throw new Error('the ghost menu does not offer inclusion by name');
 await includeAction.click();

@@ -4511,7 +4511,12 @@
         notes.push("excluded values are included as they appear in the grid");
       showToast("Exported " + base + ".csv" + (notes.length ? " (" + notes.join("; ") + ")" : ""));
     }, function (e) {
-      if (e && e.name === "AbortError") return;
+      // Swallowing a deliberate cancel is right, saying nothing at all is
+      // not: a cancelled save and a dead button looked identical.
+      if (e && e.name === "AbortError") {
+        showToast("Export cancelled \u00b7 nothing was written");
+        return;
+      }
       showToast("Could not export the data: " + String(e && e.message || e), true);
     });
   }
@@ -7046,8 +7051,8 @@
       // the check this relabel said "Exclude" on a button that INCLUDES.
       var hiddenPt = menu.hasAttribute("data-point-hidden");
       button.textContent = hiddenPt
-        ? "Include this value in dataset"
-        : "Exclude this value from dataset";
+        ? "Include this value in the dataset"
+        : "Exclude this value from the dataset";
       setTip(button, hiddenPt
         ? "Restores this source cell in Data and every standalone chart"
         : "Excludes this source cell in Data and every standalone chart");
@@ -10717,6 +10722,29 @@
     }
     gridSetSelection(result.col, result.row,
                      result.col, result.row, "cells");
+    // Vertical only was half a reveal. At 40 columns every match Find walked
+    // to was off screen to the RIGHT while the counter cheerfully advanced,
+    // so the one feature for locating a value could not show you one. Done
+    // after the selection, because the cell has to be painted before it can
+    // be measured, and only when it is actually out of view so an in-view
+    // match never jolts sideways.
+    var cell = gridFindTd(result.col, result.row);
+    if (cell && grid.scrollWidth > grid.clientWidth + 1) {
+      var cr = cell.getBoundingClientRect(), gr = grid.getBoundingClientRect();
+      // The row-number gutter is sticky, so a cell tucked behind it is as
+      // hidden as one past the right edge.
+      var gutter = grid.querySelector(".ps-grid-rownum");
+      var leftEdge = gr.left + (gutter ? gutter.getBoundingClientRect().width : 0);
+      if (cr.left < leftEdge || cr.right > gr.right) {
+        var target = grid.scrollLeft + (cr.left - leftEdge) -
+          Math.max(0, (gr.right - leftEdge - cr.width) / 2);
+        target = Math.max(0, Math.min(target, grid.scrollWidth - grid.clientWidth));
+        if (smooth && grid.scrollTo) {
+          try { grid.scrollTo({ left: target, behavior: "smooth" }); }
+          catch (e2) { grid.scrollLeft = target; }
+        } else grid.scrollLeft = target;
+      }
+    }
   }
   function gridFindStep(direction) {
     if (!GRID_FIND_RESULTS.length) return;
@@ -11600,6 +11628,10 @@
     persist();
     syncDataRow();
     syncDataGrid();
+    // The status bar's row count lives in syncAppShell, which this path never
+    // called, so the footer said 25 rows while the bar four pixels below said
+    // 24 and stayed there until an unrelated workspace switch healed it.
+    syncAppShell();
     render();
     var grid = el("ps-datagrid");
     grid.scrollTop = grid.scrollHeight;
@@ -11826,7 +11858,8 @@
   }
   function gridRestoreExclusions() {
     var t = PROJECT.table;
-    if (!t || !exclCount(t)) return;
+    var had = exclCount(t);
+    if (!t || !had) return;
     dataMark("restoring the exclusions");
     t.excluded = {};
     t.excludedRows = {};
@@ -11851,6 +11884,11 @@
     syncDataRow();
     syncDataGrid();
     render();
+    // Every small action in this app confirms itself, and this one reverses
+    // every exclusion the user made, in one click, and said nothing.
+    showToast(had === 1
+      ? "Restored 1 excluded value \u00b7 Cmd/Ctrl+Z puts it back"
+      : "Restored " + had + " excluded values \u00b7 Cmd/Ctrl+Z puts them back");
   }
   // ---- row-filter popover (Tier 1). A draft of condition rows edited
   // in place; Apply commits ONE data-history step; Clear all removes
@@ -18501,7 +18539,12 @@
     el("ps-variable-stats").innerHTML =
       inspectorStat("Rows", String(values.length)) +
       inspectorStat("Valid", String(nonmissing)) +
-      inspectorStat("Missing", String(values.length - nonmissing)) +
+      // An excluded value reads as missing everywhere downstream, which is
+      // the point of it, but reporting it under BOTH headings sent a reader
+      // looking for a blank cell that does not exist. Missing is now the ones
+      // with no value; Excluded is the ones the user set aside.
+      inspectorStat("Missing",
+        String(Math.max(0, values.length - nonmissing - excluded))) +
       inspectorStat("Distinct", String(Object.keys(seen).length)) +
       inspectorStat("Excluded", String(excluded)) +
       inspectorStat("Used in", String(uses) +
@@ -18595,12 +18638,20 @@
           + "such as -99 for an age or 9 for a rating.";
     }
   }
+  // Counts roles the user can SEE. Every chart keeps a stored role set per
+  // MODULE so switching analysis type inside a tab keeps that tab's memory,
+  // and this walked all of them, so a project with one bar chart reported
+  // "Used in 4 roles" for a variable used once, counting assignments in
+  // analyses that had never been opened. The number is read right before
+  // someone deletes a column, so it has to mean what it says.
   function variableRoleUseCount(col) {
     var count = 0;
     for (var ci = 0; ci < PROJECT.charts.length; ci++) {
-      var sets = PROJECT.charts[ci].roles || {};
+      var chart = PROJECT.charts[ci];
+      var sets = chart.roles || {};
       for (var mod in sets) {
         if (!Object.prototype.hasOwnProperty.call(sets, mod)) continue;
+        if (mod !== chart.module) continue;   // the analysis actually in use
         var rr = sets[mod] || {};
         for (var key in rr) {
           if (!Object.prototype.hasOwnProperty.call(rr, key)) continue;
