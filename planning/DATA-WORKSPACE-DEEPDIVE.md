@@ -29,6 +29,14 @@ Two sessions independently landed on the same line of code
 (`ps-shell.js:13309`) from two different tasks. That is the strongest signal in
 the whole exercise and it is item 3.
 
+The five logs carry **73 findings** between them, self-severity-rated as 21
+wrong-data, 11 dead-end, 19 slow and 22 papercut. This document ranks 13 of
+them, gathers 15 into the free-wins list and puts 6 to you as decisions. The
+rest are papercuts inside surfaces the ranked items already touch, and the full
+logs are in the session scratchpad if you want them. Nothing was dropped for
+being awkward; several were dropped after I checked them and found the premise
+wrong, which is what the rejected list is for.
+
 ---
 
 # THE PROPOSAL, strongest first
@@ -578,7 +586,16 @@ three probes. Both are already fixed in another session's working tree, so this
 resolves when they commit. My numbers are measured with that one probe skipped
 and its guard applied locally, never committed.
 
-With that exclusion every probe in `run.sh` passes on this branch.
+With that exclusion, every probe in `run.sh` passes on this branch except two,
+and I checked both rather than assuming.
+
+- `motion-check` failed once inside the full run with `Target page, context or
+  browser has been closed`, and passes on its own. Three other deep dives were
+  driving browsers on this machine at the time. Contention, not a regression.
+- `production-parity-check` fetches the LIVE site and byte-compares it against
+  a fresh local build. It fails on pristine HEAD as well, because the site
+  deploys from `main` and this is an unreleased branch. It is a release gate,
+  not a branch gate.
 
 ---
 
