@@ -508,6 +508,84 @@
   function inferType(rawVals, tokens) {
     return numericAudit(rawVals, tokens).numeric ? "continuous" : "nominal";
   }
+  // A numeric missing-value CODE passes every gate the audit above has. It
+  // reads as a number, so bad === 0, the column types Continuous, and the
+  // value is averaged. The inspector already prints "Min -99" two rows above
+  // the mean it poisoned, and the per-column missing field underneath both
+  // already carries the placeholder "such as -99 for an age" - three facts on
+  // one panel that nothing joined up.
+  //
+  // The detector reports; it never acts. That is what lets it be useful
+  // without being reckless, because the cost of a rare false positive is one
+  // glance at a card the user declines. What it must never do is fire on
+  // ordinary data, so two independent clauses carry the claim and a value
+  // must match the conventional SHAPE as well as one of them.
+  var MISSING_CODE_SHAPES = { 7: 1, 8: 1, 9: 1, 77: 1, 88: 1, 99: 1,
+                              777: 1, 888: 1, 999: 1,
+                              7777: 1, 8888: 1, 9999: 1 };
+  var MISSING_CODE_MIN_N = 6;
+  function missingCodeAudit(values) {
+    // values is the TYPED column, so anything already declared missing is
+    // null here and a handled code can never be reported twice.
+    var nums = [], i, v;
+    for (i = 0; i < values.length; i++) {
+      v = values[i];
+      if (typeof v === "number" && isFinite(v)) nums.push(v);
+    }
+    if (nums.length < MISSING_CODE_MIN_N) return null;
+    var cand = Object.create(null), n = 0;
+    for (i = 0; i < nums.length; i++) {
+      v = nums[i];
+      if (v === Math.round(v) && MISSING_CODE_SHAPES[Math.abs(v)]) {
+        if (cand[v] === undefined) { cand[v] = 0; n++; }
+        cand[v]++;
+      }
+    }
+    if (!n) return null;
+    // The body of ordinary data excludes EVERY candidate, not just the one
+    // under test. A column coded -99 for refused and -88 for not applicable
+    // otherwise hides each code behind the other, and both walk through.
+    var rest = [], distinct = Object.create(null), d = 0;
+    for (i = 0; i < nums.length; i++) if (cand[nums[i]] === undefined) {
+      rest.push(nums[i]);
+      if (distinct[nums[i]] === undefined) { distinct[nums[i]] = 1; d++; }
+    }
+    // Without a body of ordinary data to compare against there is no evidence
+    // either way, and guessing is exactly what this must not do.
+    if (rest.length < MISSING_CODE_MIN_N || d < 3) return null;
+    var lo = Math.min.apply(null, rest), hi = Math.max.apply(null, rest);
+    var span = hi - lo;
+    var found = [], keys = Object.keys(cand);
+    for (var k = 0; k < keys.length; k++) {
+      var c = Number(keys[k]);
+      // Clause A, sign impossibility. A negative value in a measurement that
+      // is otherwise never negative is the commonest real case (-99 and -999
+      // in survey and clinical exports) and the safest to claim, because a
+      // variable with genuine negatives - a change score, a temperature -
+      // fails it outright.
+      var signImpossible = c < 0 && lo >= 0;
+      // Clause B, distance. Further from the data than the data is wide,
+      // twice over. This is what catches 9999 in a 0..100 column while
+      // leaving a 99 that sits inside a range of scores alone.
+      var gap = c < lo ? lo - c : c > hi ? c - hi : 0;
+      var farOut = span > 0 && gap > 2 * span;
+      if (!signImpossible && !farOut) continue;
+      var firstRow = -1;
+      for (i = 0; i < values.length; i++)
+        if (values[i] === c) { firstRow = i; break; }
+      found.push({ value: c, count: cand[c], row: firstRow,
+                   restMin: lo, restMax: hi,
+                   meanWith: mean_(nums), meanWithout: mean_(rest) });
+    }
+    if (!found.length) return null;
+    found.sort(function (a, b) { return a.value - b.value; });
+    return found;
+  }
+  function mean_(a) {
+    var s = 0;
+    for (var i = 0; i < a.length; i++) s += a[i];
+    return a.length ? s / a.length : 0;
+  }
   // A column "stores numbers" when its typed view is numeric: continuous,
   // or ordinal whose raw values all parse (usable as values AND as
   // ordered categories - the jamovi dual role).
@@ -1460,6 +1538,10 @@
         if (wantLevels) t.levels[col] = lv;
       }
       t.columns[col] = out;
+      // Only where a code could hide. A nominal column stores strings, so
+      // the scan would find nothing, and running it anyway would cost a pass
+      // over the widest columns in the table for no result.
+      audit.codes = colStoresNumbers(t, col) ? missingCodeAudit(out) : null;
     }
   }
   function nRows(t) { return t.order.length ? t.raw[t.order[0]].length : 0; }
@@ -17792,6 +17874,47 @@
     var a = t.typeAudit && t.typeAudit[col];
     if (!a || !a.seen) return null;
     var type = t.types[col];
+    // Codes come first. A wrong number outranks a typing nudge, and the two
+    // can never both apply anyway (a column with text offenders types
+    // Nominal, so it stores no numbers for a code to hide in).
+    if (a.codes && a.codes.length) {
+      var cs = a.codes, names = cs.map(function (c) {
+        return "<code>" + escHtml(String(c.value)) + "</code>";
+      }).join(" and ");
+      var rows = cs.reduce(function (s, c) { return s + c.count; }, 0);
+      var one = cs.length === 1 ? cs[0] : null;
+      // The claim has to be worth its interruption, so it states the cost in
+      // the number the user is about to read rather than in the abstract.
+      var costs = "";
+      if (one) {
+        var mw = fmtStatValue(one.meanWith), mo = fmtStatValue(one.meanWithout);
+        if (mw !== mo)
+          costs = " Counted as data " + escHtml(String(one.value)) +
+            " moves the mean of " + escHtml(col) + " from " +
+            escHtml(mo) + " to " + escHtml(mw) + ".";
+      }
+      var many = cs.length > 1;
+      return {
+        kind: "codes",
+        html: "<strong>" + names + " " +
+          (many ? "appear in " + rows + " rows of "
+                : rows === 1 ? "appears once in "
+                             : "appears in " + rows + " rows of ") +
+          escHtml(col) + ", and " + (many ? "look" : "looks") +
+          " like " + (many ? "missing-value codes" : "a missing-value code") +
+          " rather than " + (many ? "measurements" : "a measurement") +
+          ".</strong> Every other value falls between " +
+          escHtml(fmtStatValue(cs[0].restMin)) + " and " +
+          escHtml(fmtStatValue(cs[0].restMax)) + "." + costs,
+        actions: [
+          { label: cs.length === 1 ? "Treat " + cs[0].value + " as missing"
+                                   : "Treat these as missing",
+            act: "advice-code-missing" },
+          { label: rows === 1 ? "Go to it" : "Go to the first one",
+            act: "advice-code-goto" }
+        ]
+      };
+    }
     // 18b: nearly-numeric column held back by a handful of values. Above a
     // fifth of the column this is simply a text variable, and saying so
     // would be noise.
@@ -17896,6 +18019,16 @@
   // t3-47. Numeric summary for the inspector. Uses ps-stat.js, which is the
   // same code the charts and the parity harness use, rather than a second
   // arithmetic that could disagree with the chart beside it.
+  // Hoisted out of variableNumericStats so the advice card quotes a number in
+  // exactly the form the panel above it prints. Two formatters would drift.
+  function fmtStatValue(x) {
+    if (!isFinite(x)) return "-";
+    // Three significant figures, but never scientific for ordinary data
+    // and never a long tail of decimals on integers.
+    var a = Math.abs(x);
+    if (a >= 1000 || x === Math.round(x)) return String(Math.round(x * 100) / 100);
+    return String(Number(x.toPrecision(3)));
+  }
   function variableNumericStats(t, col) {
     // Belt and braces: a nominal column stores STRINGS, so the numeric filter
     // below already excludes it and a control that removes this line changes
@@ -17906,14 +18039,7 @@
     for (var i = 0; i < src.length; i++)
       if (typeof src[i] === "number" && isFinite(src[i])) vals.push(src[i]);
     if (vals.length < 2) return "";
-    function fmt(x) {
-      if (!isFinite(x)) return "-";
-      // Three significant figures, but never scientific for ordinary data
-      // and never a long tail of decimals on integers.
-      var a = Math.abs(x);
-      if (a >= 1000 || x === Math.round(x)) return String(Math.round(x * 100) / 100);
-      return String(Number(x.toPrecision(3)));
-    }
+    var fmt = fmtStatValue;
     var S = window.PSStat;
     return inspectorStat("Mean", fmt(S.mean(vals))) +
       inspectorStat("SD", fmt(S.sdSample(vals))) +
@@ -17952,6 +18078,28 @@
       return;
     }
     if (!a) return;
+    if (act === "advice-code-goto") {
+      if (!a.codes || !a.codes.length || a.codes[0].row < 0) return;
+      gridRevealFound({ col: col, row: a.codes[0].row });
+      return;
+    }
+    if (act === "advice-code-missing") {
+      // The PER-COLUMN list, not the dataset one. A code means missing in the
+      // variable it was coded for, and -99 is a real temperature elsewhere;
+      // the field this writes to is the one whose own placeholder describes
+      // this exact case. Routing through setColumnMissingTokens keeps the
+      // undo step, the re-inference and the disclosure identical to typing
+      // the value in by hand.
+      if (!a.codes || !a.codes.length) return;
+      var have = hasColumnTokens(t, col)
+        ? (t.missingTokensByCol[col] || []).slice() : [];
+      for (var c0 = 0; c0 < a.codes.length; c0++) {
+        var s0 = String(a.codes[c0].value);
+        if (have.indexOf(s0) === -1) have.push(s0);
+      }
+      setColumnMissingTokens(col, have.join(", "));
+      return;
+    }
     if (act === "advice-goto") {
       if (a.firstBadRow < 0) return;
       gridRevealFound({ col: col, row: a.firstBadRow });
