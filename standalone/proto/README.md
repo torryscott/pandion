@@ -6,8 +6,14 @@ the repo's Stop hook re-minifies and side-loads any edit under `inst/widget/`
 straight into the local jamovi module, which is not a side effect a probe
 branch should have.
 
-`make-proto.py` applies the proposed engine change to a COPY of the engine
-and writes the two pages the probe runs against.
+The `brackclaim` RULE is LANDED in `inst/widget/graphbuilder2.js` (Aug 7
+2026, approved) and needs nothing here: `standalone/verify/chart-check-check.mjs`
+verifies it against the ordinary dev page, cases 1 to 4.
+
+What is left unlanded is the other half of the same proposal: a
+`__gb2_graphLint` host hook and the status-bar receipt the shell builds from
+it. `make-proto.py` applies that hook to a COPY of the engine and writes the
+two pages the receipt cases run against.
 
     python3 standalone/proto/make-proto.py
 
@@ -21,12 +27,11 @@ and (tracked on this branch, delete before any merge):
 
 Then:
 
+    node standalone/verify/chart-check-check.mjs       # cases 5-6 SKIP
     PS_BOOT=4000 PS_PAGE=standalone/proto-lint.html \
-        node standalone/verify/chart-check-check.mjs   # passes
-    node standalone/verify/chart-check-check.mjs       # fails at case 1
+        node standalone/verify/chart-check-check.mjs   # cases 5-6 run
 
-The engine change is two additions to `graphbuilder2.js`, both inside
-`render()`: a `__gb2_graphLint` host hook beside the existing
-`__gb2_serializeSvg` / `__gb2_chartSize` hooks, and a `brackclaim` rule plus
-its registry row inside `_graphLintFindings`. See `make-proto.py` for the
-exact text.
+The remaining engine change is nine lines: `host.__gb2_graphLint`, beside
+the existing `__gb2_serializeSvg` / `__gb2_chartSize` hooks inside
+`render()`, returning the same `{findings, passed, total}` report the Check
+graph panel draws. See `engine-lint.patch`.

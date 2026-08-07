@@ -29,7 +29,12 @@ const CASES = [
       // 're-spreads the palette' pins the access pill's Color section.
       basics: ['saves the chart as SVG', 'pie or donut', 'correlation cells',
                'describes itself to screen readers', 're-spreads the palette'],
-      lint: [], lintAbsent: ['panels hold very little data', 'its own Y scale'],
+      // brackclaim (Aug 2026): this fixture's bracket already carries
+      // text "*" with no autoPValue and no anchors, which is exactly
+      // what "+ Add > Sig. bracket" produces. Before the rule the panel
+      // answered "Looks good" on it.
+      lint: ['but no test was run', 'Compare pairs'],
+      lintAbsent: ['panels hold very little data', 'its own Y scale'],
       glossary: { browse: ['Significance and uncertainty', 'Common misread', 'How to read it',
                            // Jul 2026 in-context terms pass: 6 new groups
                            'Smoothing and density curves', 'Survey (Likert) charts'],
