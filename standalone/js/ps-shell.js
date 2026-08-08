@@ -8328,6 +8328,46 @@
   // reveal fully, tall ones partially (the person sees the panel exists
   // and wheels for the rest). Trusted pointer input only, so echoes,
   // re-renders and synthetic clicks (tours) can never move the view.
+  // The other half of the reveal. revealPanelAfterClick scrolls as far as
+  // its anchor bound allows, which on a laptop is often not far enough to
+  // show a tall panel - and macOS draws no scrollbar until you scroll, so
+  // nothing said there was more. Measured at 1280x800 with the Statistics
+  // panel open: 260px still below, offsetWidth === clientWidth, box-shadow
+  // none. The one control that places the brackets was in that 260px.
+  //
+  // Same cue, and the same values, the ENGINE already uses for its own long
+  // tables (its [data-st-scroll] wrappers): a bottom-edge inset shadow that
+  // shows while there is more and clears at the end. An inset shadow is
+  // painted on the padding box, so it stays put while the content scrolls.
+  // Deliberately absent when everything fits - a cue that is always on
+  // stops being a cue.
+  function syncPaneScrollCue() {
+    var sc = el("ps-main-workspace");
+    if (!sc) return;
+    var can = sc.scrollHeight > sc.clientHeight + 2;
+    var atEnd = sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 2;
+    sc.style.boxShadow = (can && !atEnd)
+      ? "inset 0 -10px 8px -8px rgba(0,0,0,0.22)" : "";
+  }
+  (function wirePaneScrollCue() {
+    var sc = el("ps-main-workspace");
+    if (!sc) return;
+    sc.addEventListener("scroll", syncPaneScrollCue);
+    // The pane's content changes without scrolling: a panel opens, a chart
+    // redraws, the window resizes. ResizeObserver catches the first two by
+    // watching the content box; guarded because the hardening harness's
+    // minimal DOM has neither observer.
+    try {
+      if (typeof ResizeObserver === "function") {
+        var ro = new ResizeObserver(function () { syncPaneScrollCue(); });
+        ro.observe(sc);
+        if (sc.firstElementChild) ro.observe(sc.firstElementChild);
+      }
+    } catch (e) {}
+    try { window.addEventListener("resize", syncPaneScrollCue); } catch (e) {}
+    syncPaneScrollCue();
+  })();
+
   var PANEL_REVEAL_STAMP = null;
   function revealPanelAfterClick(panel, clickY) {
     var scroller = el("ps-main-workspace");
@@ -8365,6 +8405,9 @@
     try {
       scroller.scrollBy({ top: by, behavior: reduce ? "auto" : "smooth" });
     } catch (e2) { scroller.scrollTop += by; }
+    // A smooth scroll finishes after this returns, and the cue describes
+    // where it LANDED.
+    try { window.setTimeout(syncPaneScrollCue, 420); } catch (e3) {}
     return by;
   }
   document.addEventListener("pointerup", function (e) {
