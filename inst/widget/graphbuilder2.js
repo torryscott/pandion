@@ -47859,7 +47859,7 @@
                 html += '<button type="button" data-cs-savego style="padding:2px 10px;font-size:11px;cursor:pointer;background:#3573bd;border:1px solid #2769c0;border-radius:3px;color:white;flex-shrink:0;">Save</button>';
                 html += '<button type="button" data-cs-savecancel title="Cancel" style="padding:2px 7px;font-size:11px;cursor:pointer;background:white;border:1px solid #aaa;border-radius:3px;color:#555;flex-shrink:0;">&#215;</button>';
                 html += "</div>";
-                html += '<div style="font-size:10.5px;color:#888;margin-top:5px;">A style is the look only. Unchecked groups are left out and never change when it is applied. Colors follow the palette, never per-series assignments; saving under an existing name replaces that style.</div>';
+                html += '<div style="font-size:10.5px;color:#888;margin-top:5px;">A style is the look only. Unchecked groups are left out and never change when it is applied. Colors travel with the style, including any you set on a single series; saving under an existing name replaces that style.</div>';
                 html += "</div>";
             }
             if (partsFor) {
@@ -49909,9 +49909,17 @@
                     ? psE.map(function (p6) { return isFinite(p6); })
                     : psE.map(function () { return false; });
                 if (!adjE) adjE = psE.slice();
+                var _nE = 0;
+                for (var _ce = 0; _ce < appE.length; _ce++) if (appE[_ce] === true) _nE++;
                 for (var e5 = 0; e5 < pairs.length; e5++) {
                     pairs[e5].adjP = adjE[e5];
                     pairs[e5].adjApplied = appE[e5] === true;
+                    // How many comparisons this p was corrected OVER. The
+                    // same pair, same test and same correction yields a
+                    // different adjusted p depending on how many others
+                    // were in the family, and the copied sentence used to
+                    // read identically either way.
+                    pairs[e5].adjN = _nE;
                 }
                 return { list: pairs, droppedDiag: droppedDiag, droppedNC: droppedNC };
             }
@@ -49929,9 +49937,13 @@
                     gAnns.push(pairs[idxs[g2]].ann);
                 }
                 var cf = _correctFacet(gRaw, order[o2], gAnns, correction);
+                var _nF = 0;
+                for (var _cf2 = 0; _cf2 < cf.applied.length; _cf2++)
+                    if (cf.applied[_cf2] === true) _nF++;
                 for (var g3 = 0; g3 < idxs.length; g3++) {
                     pairs[idxs[g3]].adjP = cf.adjusted[g3];
                     pairs[idxs[g3]].adjApplied = cf.applied[g3] === true;
+                    pairs[idxs[g3]].adjN = _nF;
                 }
             }
             return { list: pairs, droppedDiag: droppedDiag, droppedNC: droppedNC };
@@ -52442,10 +52454,26 @@
                                             cp3.raw.effect, cp3.raw.effectSym, "")
                                         : _gb2Stats.formatAPA(resF, cp3.raw.effect,
                                             cp3.raw.effectSym, cp3.raw.effectCi, "");
-                                    return cmpLabelOf(cp3.left) + " vs " + cmpLabelOf(cp3.right) +
-                                        ": " + apa +
+                                    // Name the pair the way its ROW does. The
+                                    // old form ran both cells through
+                                    // cmpLabelOf, so a within-group pair came
+                                    // out "Placebo <dot> Male vs Drug A <dot>
+                                    // Male" - the level repeated, and two
+                                    // middle dots a manuscript does not want -
+                                    // while the row said "Male: Placebo vs
+                                    // Drug A". cmpPlainLbl is what the row
+                                    // uses. Its sameCat form drops the
+                                    // category because the SECTION header
+                                    // carries it, which a pasted sentence does
+                                    // not have, so that one case is prefixed.
+                                    var lbl3 = (cp3.kind === "sameCat")
+                                        ? _stCatOf(cp3.left.cat) + ": " + cmpPlainLbl(cp3)
+                                        : cmpPlainLbl(cp3);
+                                    return lbl3 + ": " + apa +
                                         (cmpCorr !== "none" && cp3.adjApplied
-                                            ? " (" + _gb2CorrName(cmpCorr) + "-adjusted)" : "");
+                                            ? " (" + _gb2CorrName(cmpCorr) + "-adjusted across " +
+                                              (cp3.adjN || 1) + " comparison" +
+                                              ((cp3.adjN || 1) === 1 ? "" : "s") + ")" : "");
                                 });
                             })(cps[wc]);
                         }

@@ -15,7 +15,7 @@ cd "$(dirname "$0")/../.."
 # reads index.html source directly and runs once).
 FEATURE_PROBES="branding-check axe-state-check bypass-accessibility-check busy-check column-sizing-check \
 computed-variables-check coverage-gaps-check chart-accessibility-check export-accessibility-check \
-chart-check-check chart-from-selection-check chart-groups-check chart-size-check \
+chart-check-check compare-pairs-apa-check chart-from-selection-check chart-groups-check chart-size-check \
 default-style-routes-check column-gestures-check chrome-check clipboard-check copy-image-check copy-moment-check correctness-check \
 data-commandbar-check data-menu-check separator-accessibility-check \
 data-undo-check dates-check doclifecycle-check tab-accessibility-check drag-feel-check \
