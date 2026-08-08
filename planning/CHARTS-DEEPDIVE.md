@@ -400,6 +400,45 @@ could verify, I verified by running the affected probes directly.
 
 ---
 
+## Merge state (Aug 7 2026, after the Data dive landed)
+
+Rebased onto `e193d18`, the new `launch/standalone-desktop` tip, 32 Data
+commits ahead of my old base. No conflicts, which is the thing to distrust
+rather than celebrate, so I checked the result instead of the exit code:
+every one of my five identifiers appears exactly once, `e193d18` never
+carried my receipt so there was nothing to duplicate against, the engine is
+byte-identical at both tips (`e56b41d7`) so the rule and its minified hash
+still agree, and all 14 exposed probes pass.
+
+**The `syncChartCheck` collision is not what it looks like.** The handoff
+describes two branch bodies to reconcile, keeping whichever lands last.
+What actually happened is that `probe/layout-deepdive` carries MY receipt -
+markup, CSS, the 60 lines of JS and the click wiring - swept into commit
+`5bb6eee` while my work was sitting uncommitted in the shared tree. The
+"difference" between the two bodies is an earlier draft of mine against my
+final one: a dead `warns` counter I removed afterwards. It is not two
+implementations.
+
+So the resolution is not to pick a body. It is to **delete the receipt from
+the layout branch.** Reconciling it there would land an unapproved feature
+on `main` through a Layouts merge: dormant (that branch has no
+`__gb2_graphLint` hook, so the receipt hides itself and can never appear),
+untested (`chart-check-check.mjs` is not on that branch), and undecided -
+whether the receipt should exist at all is still an open question in this
+document. Keeping "whichever lands last" would additionally pick my draft
+over my final.
+
+**The suite blocker is still live at the new tip.** Two `MutationObserver`
+guards landed with the Data work, on `wireMomentButton` and
+`wireStandaloneEngineExclusionLabels`. The site that actually breaks the
+harness, `watchChartToolbar`, is still unguarded at `e193d18`, so
+`hardening-dom-check` still needs the stub on this branch to load at all -
+and once it loads it still reports the pre-existing `#ps-chart-zoom`
+failure, so `run.sh` still cannot complete. If the Layout session lands a
+shell-side guard, my harness stub becomes redundant but stays worth having:
+it protects the harness against the next boot-time observer rather than
+against this one.
+
 ## A coordination note, which is not a finding but cost real time
 
 Four deep-dive sessions are running against one working tree and one HEAD.
