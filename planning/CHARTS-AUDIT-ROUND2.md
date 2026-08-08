@@ -172,3 +172,45 @@ DROP FROM THE OUTSTANDING LIST. brackclaim (aa26564) re-verified on the rebased 
 
 Stated so it is not mistaken for a clean bill. (a) SIX of the seven chart types are essentially unexamined - every agent this round drove Compare Groups bars; Scatter, Distribution, Frequencies, Correlation, Likert and Repeated Measures panels were touched only incidentally, and several of the defects above are type-agnostic layout or engine code that would need re-measuring per type. (b) The 248 skipped probe runs are UNKNOWN, not passing: only 3 of 248 were spot-run (chart-check-check, statusbar-check, accessibility-source-check, all exit 0), so 'STANDALONE VERIFY: ALL GREEN' has never printed on this branch and cannot until rank 8 is closed. (c) File > Save project / .omv round-trip was not tested against the picker-loss case (rank 7) or against saved chart styles. (d) No screen-reader or keyboard-only end-to-end pass of the chart editor; the a11y evidence this round is source-level plus one Tab-walk. (e) Print and PDF export fidelity beyond the SVG harvest. (f) Multi-chart projects at scale, and Layouts interaction with any of the above. (g) One agent could not narrow a reproducible-once bug where a Find search result silently does nothing when a text-element panel is already open (Escape first, or reordering the edits, cleared it) - unresolved, low.
 
+
+---
+
+# Status after the fix pass (Aug 8 2026)
+
+Closed: ranks 1, 2, 3, 4, 6, 7, 9, plus 11 and 12; rank 14 closed as
+NOT A BUG (`revealPanelAfterClick` is a deliberate Aug 5 trade and says so
+in its own comment). Six new probes now gate things nothing gated before:
+`chart-check-check`, `default-style-routes-check`, `pane-scroll-cue-check`,
+`toolbar-scroll-cue-check`, `picker-persistence-check`,
+`compare-pairs-apa-check`. All are wired into `run.sh`.
+
+## Rank 13 - verified, deliberately NOT fixed, and why
+
+`_styleRekeyEntries` (graphbuilder2.js:47538) is called from exactly one
+place, `_styleApplyToChart`, so it is an apply-path function and nothing
+else. Its second line is
+
+    if (!Array.isArray(currentList) || currentList.length === 0) return entries;
+
+so applying a style carrying per-series colours to an UNGROUPED chart
+passes the entries through untouched, and they are committed verbatim -
+`groupColors: [{original: "Female", ...}]` written into a project that has
+no Female.
+
+The one-line change is precise and safe, because it can distinguish "no
+series" from "cannot tell":
+
+    if (!Array.isArray(currentList)) return entries;   // cannot tell
+    if (currentList.length === 0) return [];           // definitely none
+
+I did not make it, because it does not fix what the user actually
+complains about. An ungrouped chart has no series, so a per-series colour
+has nowhere to land: dropping the entries stops junk being written to the
+project, and the colour STILL does not come across. The visible symptom -
+"I applied my style and the colour did not arrive, and nothing said why" -
+needs a disclosure surface, not a data change, and choosing that surface
+is a design decision rather than a bug fix.
+
+Recommendation: take the one-liner for the stored-junk half whenever the
+next engine change is being batched (it needs a battery pair and does not
+deserve one of its own), and treat the disclosure as its own small item.
