@@ -58,7 +58,9 @@ before rasterising. The stored page is never rewritten.
 `pinRecordLayout`, `pinComposeWithRecord`, `pinExportSvg`, `pinRecordsFor`,
 `pinRecordWanted`, plus threading a record descriptor through `pinFileBytes`
 and `pinboardPdfBlob`), and `index.html` gains the checkbox and its style. No
-engine change. No new persisted state. Probe `notebook-record-check.mjs`, 16
+engine change. The checkbox's state is remembered in the existing export prefs
+(`pinRecord` in localStorage), which is the only new persisted thing; nothing
+new lands in the project file. Probe `notebook-record-check.mjs`, 17
 assertions. About half a day including the probe.
 
 **The smallest version.** The note alone, PDF only, no checkbox. That is
@@ -107,7 +109,7 @@ project.
 registrations, and one branch each in `undoScope`, `commandLabel`,
 `commandEnabled`, `commandDisabledReason`, the command runner and the keydown
 handler). No new persisted state, since the history is session-only like the
-layout one. Probe `notebook-undo-check.mjs`, 21 assertions. Half a day.
+layout one. Probe `notebook-undo-check.mjs`, 26 assertions. Half a day.
 
 **The smallest version.** The keydown branch alone, with the menu item
 disabled and honest. Three lines that stop the key reaching another
@@ -133,8 +135,16 @@ contents and it lists sections, then stops, one level short of what you go
 looking for. Screenshot `41-volume.png` shows forty pages with a rail reading
 "Section 1" and nothing else.
 
-Rendering is not the problem. Forty pages render in 17 ms and the project
-file is 566 KB. Navigation is the whole of it.
+Rendering is not the problem. Navigation is the whole of it. Two numbers I
+filed here need qualifying, because a re-measurement caught both. "Forty pages
+render in 17 ms" timed two synchronous workspace switches with no layout,
+decode or paint inside the interval, and it re-measures at 22 to 34 ms on
+another machine and 61 ms when the forty pages are distinct captures rather
+than forty clones of one. And "566 KB" is a floor, not a typical figure. It
+came from cloning a bar chart, the cheapest page in the family; forty distinct
+captures across the graph types come to 1.0 MB, because a raincloud page's SVG
+is about four times a bar's. Neither number changes the conclusion, and both
+were softer than I wrote them.
 
 **The prototype.** The rail lists the pages of the section you are in,
 numbered, named, with an amber dot when a page's source chart has moved on
@@ -147,15 +157,28 @@ reads everywhere else. Screenshot `50-outline.png`.
 
 A list needs names, and the derived one was useless. Four pages kept from one
 chart tab all read "Compare Groups - condition, score". Two changes fixed
-that. `pinProvenance` now records what kind of chart it was, so the default
-name reads "Bar - condition, score" and "Box - condition, score" and four
-explorations are four distinct lines. And a page can be given a title in the
-rail, which then names it in the list, on the page card, and in the exported
-record band.
+that. `pinProvenance` now records what kind of chart it was, so the name reads
+"Bar - condition, score" and "Box - condition, score" and four explorations
+are four distinct lines. And a page can be given a title in the rail, which
+then names it in the list, on the page card, and in the exported record band.
 
-While fixing that I found a live bug of the same family. `pushPin` copied
-provenance field by field, so it silently dropped every new provenance field
-the moment one was added. It now carries the whole record.
+Recording the type took two goes, and the first one did not work. It read the
+graph type from the chart's OPTION STORE, which is empty until the user
+switches type, and the engine writes nothing when you pick the type you are
+already on. So every page kept before a first type change carried no type at
+all and fell straight back to the undifferentiated name this item exists to
+fix, which for someone exploring by restyling is every page they keep. Scatter
+was structurally worse, because it switches type through `xyBin` rather than
+`graphType`, so a point cloud and a heatmap of the same two variables could
+never be told apart. The type is now resolved over the payload template the
+way `buildPayload` resolves it, and `xyBin` is read. See the self-audit at the
+end, which is what caught this.
+
+While fixing that I hit latent fragility of the same family. `pushPin` copied
+provenance field by field, and it dropped both fields I added the moment I
+added them. On the untouched baseline nothing was being lost, because the four
+fields it copied were the only four that existed, so this was a trap rather
+than a live bug. It now carries the whole record.
 
 **The cost.** `ps-shell.js` gains about 180 lines (the page rows,
 `pinPageLabel`, `pinTypeLabel`, `pinReveal`, `pinSyncCardLabel`, the title
@@ -163,7 +186,8 @@ field's wiring, the provenance additions), and `index.html` gains the title
 input and the row styles. Two additive persisted fields on a page,
 `pageTitle` plus `srcType` and `srcVars` on new keeps. Old projects load
 unchanged and fall back to the old derived name. Probe
-`notebook-pages-check.mjs`, cases 1 to 3. About a day with the naming work.
+`notebook-pages-check.mjs`, cases 1 to 3. About a day with the naming work,
+plus half a day for the second go at the type recording.
 
 **The smallest version.** The page rows alone, named from the graph type, no
 title field. That is most of the navigation for about a third of the lines.
@@ -386,9 +410,9 @@ Branch `probe/notebook-deepdive`. Three probes added, all wired into
 
 | Probe | Cases | Demonstrated failing first |
 | --- | --- | --- |
-| `notebook-record-check.mjs` | 7 cases, 16 assertions | Yes. On the unchanged code it fails at case 1, because the option does not exist. The content assertion was proved separately by exporting the same annotated notebook on both revisions. The note is absent before and present after, and the page height goes from 368 to 428. |
-| `notebook-pages-check.mjs` | 6 cases, 17 assertions | Yes, at case 1, because no page rows exist in the rail. Case 6, the undo-scope defect, was also demonstrated independently in the running app before the fix (the b1 and b2 trace in item 5). |
-| `notebook-undo-check.mjs` | 5 cases, 21 assertions | Yes, at case 1, with exactly the symptom. The Edit menu reads "Undo chart styling" with the Notebook on screen. |
+| `notebook-record-check.mjs` | 7 cases, 17 assertions | Yes. On the unchanged code it fails at case 1, because the option does not exist. The content assertion was proved separately by exporting the same annotated notebook on both revisions. The note is absent before and present after, and the page height goes from 368 to 428. |
+| `notebook-pages-check.mjs` | 8 cases, 22 assertions | Yes, at case 1, because no page rows exist in the rail. Case 6, the undo-scope defect, was also demonstrated independently in the running app before the fix (the b1 and b2 trace in item 5). |
+| `notebook-undo-check.mjs` | 6 cases, 26 assertions | Yes, at case 1, with exactly the symptom. The Edit menu reads "Undo chart styling" with the Notebook on screen. |
 
 ### What run.sh does on this branch
 
@@ -429,6 +453,57 @@ closes it on the second read and asserts against stale rows. Press Escape and
 confirm the menu is closed by computed display, not by the inline one, which
 is the empty string before the menu is first opened.
 
+### The self-audit, and the four things it caught
+
+After filing the above I had it re-verified independently, applying three
+tests the charts dive had found useful. Run a control yourself and make sure
+it fails. Check what surface the evidence was actually driven on. Re-measure a
+filed number. Seventeen agents did that, and every defect they raised went to
+a separate reviewer whose job was to refute it. Nine of twelve survived, and
+the material ones were all mine.
+
+Four defects in this dive's own code, now fixed in `c890809`.
+
+1. **The page naming did not work in the ordinary case.** It read the graph
+   type from the option store, which is empty until the type is switched. Two
+   keeps from one tab with only a style change between them produced two
+   identical rows, which is verbatim the failure item 3 says it fixed.
+2. **Scatter could never record its type at all**, because it switches through
+   `xyBin`. A scatter page and a heatmap page of the same variables were
+   permanently indistinguishable.
+3. **The exported band never carried the derived name.** Only a user-set
+   title reached it, so four variants exported the identical sentence. That is
+   the one thing item 1 exists to prevent, in the one place it matters most.
+4. **The Notebook history outlived its project.** Nothing cleared it, so after
+   opening a different project the Edit menu offered an enabled "Undo the
+   deleted page" and pressing it injected a page, note and all, from the
+   previous project. A weaker form of this is pre-existing through the delete
+   toast, which also survives a project load inside its six-second life.
+
+And one defect in the verification itself, which is why the first three
+shipped. **`notebook-pages-check` manufactured the field whose absence was the
+defect.** Its `keepAs` helper poked `setOption('graphType', ...)` before every
+keep, so the naming assertions passed against a state a user cannot reach, and
+the probe ran green over a broken feature. It now keeps its first page without
+touching anything, and the four new assertions were each demonstrated failing
+against the pre-fix tree.
+
+Two claims in this document were also wrong and are corrected above. Item 1
+said "no new persisted state" while the same paragraph described a checkbox
+remembered in localStorage, and item 3 called `pushPin`'s field-by-field copy
+"a live bug" when it was a trap that had not yet sprung on anyone but me.
+
+What survived unchanged is worth stating too, because it is most of the
+document. The five load-bearing claims all held under attack. Notes never
+reached an export, Cmd+Z really did reach the chart engine from the Notebook,
+`deletePin` really did resolve its section at undo time, the layout comment
+says what I quoted, and the branch touches no engine file. The 25,249 px and
+the 368-to-428 page heights reproduce exactly. The new code has no XSS
+surface, verified by execution as well as by reading. And two claims turned
+out to be understated rather than overstated. The Cmd+Z hazard has a second
+route I missed, where a recent data edit means the key silently undoes a
+DATASET change, and the layout reconciliation is more urgent than a footnote.
+
 ### A coordination note, because it changed what is on this branch
 
 Four sessions were writing to one working tree, and it cost real work.
@@ -449,7 +524,41 @@ outstanding hunks by owner (23 mine, 5 the DPI work, 14 the layout work, none
 mixed) and applying only mine.
 
 Everything since has been done in an isolated worktree at this branch's HEAD,
-which is also where the suite was run. Note that `probe/layout-deepdive`
-branched from `ca07680`, so it currently carries my first two commits,
-including the swept-in receipt and missing the undo work. That is worth their
-knowing before they merge.
+which is also where the suite was run.
+
+### The merge, measured rather than guessed
+
+`probe/layout-deepdive` branched from `ca07680`, an intermediate commit of
+this dive, so it carries the record band, the page naming, Move to section and
+all three probes, but not the undo history restored later in `48d1114`, and
+not the swept-in receipt's removal. Two consequences worth knowing.
+
+First, layout's `run.sh` is red today for a reason that has nothing to do with
+layout. Its line 32 wires in all three notebook probes, but its `ps-shell.js`
+has no `NB_UNDO`, so `notebook-undo-check` and `notebook-pages-check` fail
+there and the suite aborts long before it reaches artifact-parity.
+
+Second, the merge itself is clean, and I measured it rather than reasoning
+about it. `git merge-tree --write-tree probe/notebook-deepdive
+probe/layout-deepdive` exits 0 with no conflicts in either order, because both
+share `ca07680` as their real base. Auditing the materialised result gives
+`NB_UNDO` 10, `pageTitle` 6, the layout DPI functions intact, and
+`chartCheckReport` and `ps-status-check` at 0, because the receipt's removal
+is a one-sided delete against an unchanged copy.
+
+So the reconciliation instruction is short. Merge both with a plain `git
+merge`. Do not squash and do not rebase either branch, because the shared base
+`ca07680` is what makes it resolve. Then check `grep -c NB_UNDO
+standalone/js/ps-shell.js` is 10 and `grep -c chartCheckReport` is 0, and run
+`notebook-undo-check`, `notebook-pages-check` and `layout-figure-check`.
+
+### A correction for the charts session
+
+Their handoff says `run.sh` cannot complete on any branch until Layout's
+`#ps-chart-zoom` failure is fixed. That is not right, and it matters because
+it would send someone hunting a shared blocker that does not exist. The five
+probes touching `ps-chart-zoom` are byte-identical to the baseline on both the
+Notebook and Layout branches, and all five pass at both tips when run in a
+clean worktree. The failure is specific to `probe/charts-deepdive`'s own
+lineage, which forked before the baseline the other two dives share and so
+never received the fix that landed on Aug 7.
