@@ -136,6 +136,66 @@ ok(after === picked,
 ok(after !== before,
    'and not the stock default, which is what the loss looked like');
 
+console.log('case 4: and a SAVED file carries it too');
+// The durable path, and the one the first fix missed. Cmd/Ctrl+S is bound
+// on a window CAPTURE listener with no focused-field guard, so it fires
+// happily with the cursor in the picker's hex box - and projectFileText
+// snapshotted the option store, which the picker had not written to yet.
+// Measured before this: a .pand 581 bytes short with no colour key, while
+// the status bar said "Saved". Banking alone was not enough either: the
+// commit queues through the engine's 1500ms debounce, so the host hook
+// banks AND flushes.
+const bar2 = await page.evaluate(() => {
+    const svg = Array.from(document.querySelectorAll('#psroot svg'))
+        .sort((a, b) => b.getBoundingClientRect().width -
+                        a.getBoundingClientRect().width)[0];
+    const r = svg.querySelector('[data-bar-cat]').getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+});
+await page.mouse.click(bar2.x, bar2.y);
+await page.waitForTimeout(1400);
+await page.evaluate(() => {
+    const c = document.querySelector('#psroot [data-role="primary-color"]');
+    const r = c.getBoundingClientRect();
+    c.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1,
+        clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 }));
+});
+await page.waitForTimeout(900);
+const sq2 = await page.evaluate(() => {
+    const e = document.querySelector('#psroot [data-role="sv"]');
+    if (!e) return null;
+    e.scrollIntoView({ block: 'nearest' });
+    const r = e.getBoundingClientRect();
+    return { x: r.left + r.width * 0.85, y: r.top + r.height * 0.2 };
+});
+ok(!!sq2, 'the picker is open again');
+await page.mouse.move(sq2.x, sq2.y);
+await page.mouse.down();
+await page.mouse.move(sq2.x + 8, sq2.y + 8, { steps: 6 });
+await page.mouse.up();
+await page.waitForTimeout(1200);
+const saved = await page.evaluate(() => {
+    const svg = Array.from(document.querySelectorAll('#psroot svg'))
+        .sort((a, b) => b.getBoundingClientRect().width -
+                        a.getBoundingClientRect().width)[0];
+    const fill = getComputedStyle(svg.querySelector('[data-bar-cat]')).fill;
+    // THE SPECIFIC colour, not "a colour key exists". Cases 1 to 3 already
+    // committed one, so a presence test passes without the fix - it did,
+    // and this case proved nothing until it was written this way.
+    const m = fill.match(/(\d+),\s*(\d+),\s*(\d+)/);
+    const hex = m ? ('#' + [1, 2, 3].map(i =>
+        Number(m[i]).toString(16).padStart(2, '0')).join('')) : null;
+    const txt = window.PS_SHELL.projectFileText();
+    return { pickerOpen: !!document.querySelector('#psroot [data-role="sv"]'),
+             drawn: fill, hex: hex,
+             hasThis: !!hex && txt.toLowerCase().indexOf(hex) >= 0 };
+});
+ok(saved.pickerOpen,
+   'the picker is STILL open, which is the whole exposure');
+ok(saved.hasThis,
+   `the file the app would write carries THIS colour, the one on screen ` +
+   `(${saved.hex} / ${saved.drawn})`);
+
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('PICKER PERSISTENCE: PASS');
 await browser.close();

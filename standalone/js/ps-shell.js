@@ -2653,6 +2653,9 @@
   // The identity carries the product's real name (Pandion Plots); the
   // loader sniffs CONTENT, so .pand / .pnd / .pandion / .json all open.
   function projectFileText() {
+    // Every .pand the app writes goes through here, so this is where a
+    // pending colour has to be banked rather than at one call site.
+    bankPendingColor();
     var body = projectSnapshot();
     return JSON.stringify({
       kind: "pandion-plots-project",
@@ -2730,6 +2733,21 @@
       b.__psFlashing = false;
       updateDocumentState();
     }, 1200);
+  }
+  // A colour picked but not yet closed lives only in the engine's picker
+  // state. The unload flush banks it for a reload or a closing tab, but
+  // Cmd/Ctrl+S is neither, and that chord is bound on a window CAPTURE
+  // listener with no focused-field guard - so it fires happily while the
+  // cursor is in the picker's hex box. Measured before this: a .pand
+  // written 581 bytes short, with no colour key, while the status bar said
+  // "Saved". Bank it first, through the engine's own commit path, so the
+  // file contains the chart that is on screen.
+  function bankPendingColor() {
+    try {
+      var host = hostEl();
+      if (host && typeof host.__gb2_commitPendingColor === "function")
+        host.__gb2_commitPendingColor();
+    } catch (e) {}
   }
   function saveProjectFile() {
     var text = projectFileText();

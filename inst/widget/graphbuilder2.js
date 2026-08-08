@@ -10823,6 +10823,21 @@
             host.__gb2_graphLint = function () {
                 try { return _graphLintFindings(); } catch (_eGl) { return null; }
             };
+            // The picker commits on close. A host that writes a FILE while
+            // one is open would save a project without the colour that is
+            // on screen, and say it saved - the unload flush covers a
+            // reload and a closing tab, not Cmd/Ctrl+S. This banks the
+            // pending value through the ordinary commit path; jamovi never
+            // calls it, and it is a no-op when no picker is open.
+            host.__gb2_commitPendingColor = function () {
+                // Bank AND flush. _commitColorPickerInPlace only fires the
+                // commit callback, which queues through the 1500ms
+                // debounce - so a host that snapshotted immediately
+                // afterwards still wrote the pre-pick state. _flushOptsAndPicker
+                // is the pair the unload handlers already use.
+                try { _flushOptsAndPicker(); return true; }
+                catch (_eCp) { return false; }
+            };
             host.__gb2_accessibleDescription = function () {
                 return _gb2ChartAriaLabel(data, true);
             };
@@ -47537,7 +47552,13 @@
         };
         function _styleRekeyEntries(entries, keyField, savedList, currentList) {
             if (!Array.isArray(entries) || entries.length === 0) return entries;
-            if (!Array.isArray(currentList) || currentList.length === 0) return entries;
+            // An EMPTY current list means the chart genuinely has no series
+            // of this kind, so a per-series entry has nowhere to land and
+            // used to be committed verbatim - writing groupColors for a
+            // "Female" the project does not contain. A NON-array means we
+            // cannot tell, and there the old pass-through is still right.
+            if (!Array.isArray(currentList)) return entries;
+            if (currentList.length === 0) return [];
             var cur = {};
             for (var i = 0; i < currentList.length; i++) cur[String(currentList[i])] = 1;
             for (var j = 0; j < entries.length; j++) {
@@ -49359,6 +49380,18 @@
             // which spans a whole factor). A label the user typed that does
             // not read as a significance claim ("Delta = 4.2") is their
             // business and is left alone.
+            // Only cg/rm/freq have anchorable cells AND a Compare-pairs
+            // tab. A bracket carried onto a scatter, a distribution, a
+            // correlation matrix or a Likert chart still EXPORTS its
+            // asterisk, so the warning is right there - but telling that
+            // user to "drag each leg onto a bar" or to open a tab their
+            // module does not have makes a correct warning unactionable.
+            function _brackRemedy() {
+                var mk = _gbModuleKind();
+                if (mk === "cg" || mk === "rm" || mk === "freq")
+                    return "Open the bracket, turn on \"Auto-compute p-value from raw data\" and drag each leg onto a bar, or use the Statistics panel's Compare pairs tab, which runs every test and places the brackets for you.";
+                return "This chart type has no cells for a bracket to anchor to and no Compare pairs tab, so a computed test is not available here: either delete the bracket, or give it wording that reports a test you ran elsewhere rather than a bare significance mark.";
+            }
             (function () {
                 var anns = Array.isArray(data.annotations) ? data.annotations : [];
                 var claimed = 0, sample = "";
@@ -49381,7 +49414,7 @@
                         title: claimed === 1
                             ? "A bracket says \"" + sample + "\" but no test was run"
                             : claimed + " brackets show significance marks that no test produced",
-                        why: "A bracket labelled \"" + sample + "\" reads as a test result, and it will look like one in the exported figure, but nothing on this chart computed it. Open the bracket, turn on \"Auto-compute p-value from raw data\" and drag each leg onto a bar, or use the Statistics panel's Compare pairs tab, which runs every test and places the brackets for you. If the label is meant as a plain annotation, give it wording that does not read as a p-value.",
+                        why: "A bracket labelled \"" + sample + "\" reads as a test result, and it will look like one in the exported figure, but nothing on this chart computed it. " + _brackRemedy() + " If the label is meant as a plain annotation, give it wording that does not read as a p-value.",
                         fixGt: null });
                 }
             })();
@@ -49792,7 +49825,26 @@
             var html = '<div style="font-family:var(--gb2-ui-font);font-size:12px;line-height:1.5;max-width:560px;">';
             html += _helpTabsBar('graphLint');
             html += '<div style="color:#555;margin:0 0 9px;">This chart was run against <strong>' + total + '</strong> check' + (total === 1 ? '' : 's') + ' for its graph type' +
-                (findings.length ? (': <strong style="color:#b4500e;">' + findings.length + '</strong> need' + (findings.length === 1 ? 's' : '') + ' a look, <strong style="color:#155e52;">' + passed.length + '</strong> passed.') : '. <strong style="color:#155e52;">All passed.</strong>') + '</div>';
+                (findings.length ? (function () {
+                    // Severity-aware. This counted every finding in warning
+                    // amber, so a chart whose only finding was a NOTE (the
+                    // black-and-white one fires on ordinary default-palette
+                    // charts from three series up) read "1 needs a look" in
+                    // amber while carrying nothing wrong. Faults keep the
+                    // amber; notes get their own quieter clause.
+                    var _nW = 0;
+                    for (var _hi = 0; _hi < findings.length; _hi++)
+                        if (findings[_hi].sev === "warn") _nW++;
+                    var _nN = findings.length - _nW;
+                    var _bits = [];
+                    if (_nW) _bits.push('<strong style="color:#b4500e;">' + _nW +
+                        '</strong> need' + (_nW === 1 ? 's' : '') + ' a look');
+                    if (_nN) _bits.push('<strong style="color:#5f6f80;">' + _nN +
+                        '</strong> to note');
+                    _bits.push('<strong style="color:#155e52;">' + passed.length +
+                        '</strong> passed.');
+                    return ': ' + _bits.join(', ');
+                })() : '. <strong style="color:#155e52;">All passed.</strong>') + '</div>';
             if (!findings.length) {
                 html += '<div style="margin:0 0 9px;padding:9px 11px;background:#f1faf8;border:1px solid #bfe3dc;border-radius:5px;color:#155e52;"><strong>Looks good.</strong> No common pitfalls found against the current checks.</div>';
             } else {
