@@ -133,9 +133,18 @@ there.
 Total: about two hours including both battery runs.
 
 **Still outstanding from this item.** The host hook and the receipt. The
-hook is nine lines; the shell side is already written and committed
-(`20ebb63`) and is currently dormant, hiding itself because the hook is
-absent. Cases 5 and 6 of the probe skip rather than fail, and say so.
+hook is nine lines and is the only part that lives in `standalone/proto`.
+
+**Correction (round two).** An earlier version of this document said both
+"stay in `standalone/proto`". That is wrong about the receipt: commit
+`76f6df8` puts it in the LIVE shell (`standalone/index.html` +15, the
+`#ps-status-check` button and its CSS; `standalone/js/ps-shell.js` +68). It
+is correctly dormant - `syncChartCheck` bails without the hook and the
+button reads `hidden:true` at runtime - so it cannot misbehave, but merging
+this branch would settle "should the receipt exist at all", which this
+document still lists under Needs a decision, by accident. Same shape as the
+layout-branch collision below. Cases 5 and 6 of the probe skip rather than
+fail, and say so.
 
 **The smallest version.** The `brackclaim` rule alone, no host hook, no
 receipt. This is what was approved and what shipped. It converts "Looks
@@ -399,6 +408,29 @@ could verify, I verified by running the affected probes directly.
   wired, which presents as an unrelated `filechooser` timeout.
 
 ---
+
+## Round two supersedes parts of this document
+
+`planning/CHARTS-AUDIT-ROUND2.md` (Aug 7 2026) re-verified every item here
+against the rebased tree and covered the four brief tasks this dive never
+ran. Read it for the current outstanding list. What it corrected in THIS
+document:
+
+- **Item 3's "258 px below the fold" is stale and does not reconcile.** The
+  defect is real and worse than filed: at 1280x800 the Statistics panel
+  opens with 107 px of a 539 px card visible, zero of its ten data rows and
+  none of the five significant comparisons on screen, and Place brackets
+  406 px below the pane's visible bottom.
+- **"The palette flyout and the Add menu open over the plot rather than
+  below their triggers" is half wrong.** Both DO open below their triggers
+  (+21 px, edge-aligned). They cover the plot because the plot starts 6 px
+  above them. So it is occlusion, not mis-anchoring, and "same fix, same
+  place" as the coach mark is wrong: the coach is two lines of shell, the
+  menus are shared-engine chrome.
+- **Item 2's skipped-probe count.** 248 node runs, not "125 and their 125
+  repeats": FEATURE_PROBES is 119 files run twice, plus the Rscript steps
+  and the dist build.
+- **The dive hoped item 1 would make item 3 moot.** It does not.
 
 ## Merge state (Aug 7 2026, after the Data dive landed)
 
