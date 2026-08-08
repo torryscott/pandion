@@ -9831,6 +9831,26 @@
       t.excluded[next] = t.excluded[oldName];
       delete t.excluded[oldName];
     }
+    // The per-column missing labels were the one keyed store this did not
+    // carry, and losing them is not cosmetic. The column silently falls back
+    // to the dataset labels, so a code that WAS missing comes back as real
+    // data. Measured on a 12 row column with -99 declared missing for it,
+    // renaming took valid from 11 to 12 and the sentinel re-entered the mean.
+    if (t.missingTokensByCol && t.missingTokensByCol[oldName]) {
+      t.missingTokensByCol[next] = t.missingTokensByCol[oldName];
+      delete t.missingTokensByCol[oldName];
+    }
+    // Same shape, same reason: the jamovi provenance record is keyed by
+    // column too, and a renamed column that quietly stopped saying it was a
+    // snapshot would go stale with nothing on screen.
+    if (t.importedFormulas && t.importedFormulas[oldName]) {
+      t.importedFormulas[next] = t.importedFormulas[oldName];
+      delete t.importedFormulas[oldName];
+    }
+    if (t.dateColumns && t.dateColumns[oldName]) {
+      t.dateColumns[next] = t.dateColumns[oldName];
+      delete t.dateColumns[oldName];
+    }
     for (var ci = 0; ci < PROJECT.charts.length; ci++) {
       var roleSets = PROJECT.charts[ci].roles || {};
       for (var mod in roleSets) {

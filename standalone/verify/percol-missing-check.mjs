@@ -172,6 +172,40 @@ ok(panel.inherit.value === '' && /using the dataset labels/.test(panel.inherit.p
    `and a column without one shows an EMPTY box whose placeholder says what ` +
    `it is inheriting, so blank never reads as "no labels" ("${panel.inherit.ph}")`);
 
+console.log('case R: a rename carries the column\'s own missing labels with it');
+// The one keyed store the rename did not carry, and losing it is not
+// cosmetic. The column falls back to the dataset labels, so a code that WAS
+// missing comes back as real data. Measured before the fix: valid went from
+// 11 to 12 on a rename, and the sentinel re-entered the mean.
+await page.evaluate(() => {
+    const rows = [];
+    for (let i = 0; i < 12; i++) rows.push(['g', String(i === 3 ? -99 : 20 + i)]);
+    window.PS_SHELL.loadTable('rn', ['g', 'age'], rows);
+});
+await page.waitForTimeout(700);
+await page.evaluate(() => window.PS_SHELL.setColumnMissingTokens('age', '-99'));
+await page.waitForTimeout(700);
+const validOfR = c => page.evaluate(cc =>
+    (window.PS_SHELL.project.table.columns[cc] || [])
+        .filter(v => v !== null && v !== undefined).length, c);
+ok((await validOfR('age')) === 11,
+   'eleven valid while -99 is declared missing for this column, got ' +
+   (await validOfR('age')));
+await page.evaluate(() => window.PS_SHELL.setWorkspace('data'));
+await page.evaluate(() => window.PS_SHELL.selectVariable('age'));
+await page.waitForTimeout(300);
+await page.fill('#ps-variable-name', 'age_years');
+await page.press('#ps-variable-name', 'Enter');
+await page.waitForTimeout(900);
+ok((await validOfR('age_years')) === 11,
+   'and still eleven after the rename, got ' + (await validOfR('age_years')));
+ok((await page.evaluate(() => JSON.stringify(
+       window.PS_SHELL.project.table.missingTokensByCol))) ===
+   '{"age_years":["-99"]}',
+   'because the list moved with the column, got ' +
+   (await page.evaluate(() => JSON.stringify(
+       window.PS_SHELL.project.table.missingTokensByCol))));
+
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('PER-COLUMN MISSING CHECK PASS');
 await browser.close();
