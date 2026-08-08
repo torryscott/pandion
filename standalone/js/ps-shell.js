@@ -4932,7 +4932,10 @@
         roles[k] = ex.roles[k];
     PROJECT.charts = [{ id: "c1", name: "Chart 1",
       module: ex.fits[0] || "plotbuilder",
-      roles: roles, options: {} }];
+      // Brand new, so the default style may apply once - the same stamp
+      // newChart() sets. Its ABSENCE means "an older saved document, do
+      // not restyle it", which is why migrateSnapshot must not set it.
+      roles: roles, options: {}, styleStamp: false }];
     PROJECT.activeChart = "c1";
     PROJECT.ui = { dataOpen: false, workspace: "chart",
                    lastChart: "c1", lastLayout: null, columnWidths: {} };
@@ -6711,6 +6714,16 @@
         }) : [];
     applyLinkedPointSelection(built.payload);
     try { window.__gb2_authoritativeRender = true; } catch (e) {}
+    // The engine guards its default-style apply with the window-global
+    // __gb2_styleAutoApplyDone, which is "once per chart" in jamovi
+    // because an analysis owns its window. Here every chart shares one
+    // window, so the flag has to be re-armed for each chart the bridge
+    // has actually cleared. Gated on styleAutoApply, so a chart that is
+    // not eligible can still never be restyled twice.
+    try {
+      if (built.payload && built.payload.styleAutoApply === true)
+        window.__gb2_styleAutoApplyDone = false;
+    } catch (e) {}
     try { window.setTimeout(maybeShowCoach, 260); } catch (e) {}
     // Punch list 27: the ResizeObserver only fires when the PANE changes, and
     // on a cold load the pane reaches its size before there is a chart to fit,
@@ -19840,7 +19853,7 @@
     PROJECT.pinboards = [];
     if (PROJECT.ui) PROJECT.ui.activeBoard = null;
     PROJECT.charts = [{ id: "c1", name: "Chart 1",
-      module: "plotbuilder", roles: {}, options: {} }];
+      module: "plotbuilder", roles: {}, options: {}, styleStamp: false }];
     PROJECT.activeChart = "c1";
     PROJECT.ui.lastChart = "c1";
     PROJECT.ui.lastLayout = null;
