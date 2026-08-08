@@ -9396,8 +9396,7 @@
     if (rowK) excludedLabel.push(rowK + (rowK === 1 ? " row" : " rows"));
     if (valueK) excludedLabel.push(valueK + (valueK === 1 ? " value" : " values"));
     info.textContent = t
-      ? t.name + (t.edited ? " (edited)" : "") + " - " + nRows(t) +
-        " rows x " + t.order.length + " columns" +
+      ? t.name + (t.edited ? " (edited)" : "") + " - " + shapeText(nRows(t), t.order.length, "x") +
         (excludedLabel.length ? " - " + excludedLabel.join(" + ") + " excluded" : "")
       : "no data";
     var chips = el("ps-columns");
@@ -11591,8 +11590,7 @@
     var n = nRows(t);
     return '<span id="ps-grid-stats" class="ps-gridstats"></span>' +
       '<span id="ps-grid-selection-status" role="status" aria-live="polite"></span>' +
-      '<span class="ps-grid-shape">' + n.toLocaleString() + " rows \u00d7 " +
-      t.order.length + " columns" +
+      '<span class="ps-grid-shape">' + shapeText(n, t.order.length, "\u00d7", true) +
       (gridShouldVirtualize(t)
        ? " \u00b7 windowed view; the chart uses all of them" : "") + "</span>";
   }
@@ -19414,7 +19412,7 @@
     } else if (ws === "data") {
       elOrSink("ps-workspace-title").textContent = "Data";
       elOrSink("ps-workspace-subtitle").textContent = t
-        ? nRows(t) + " rows \u00d7 " + t.order.length + " columns"
+        ? shapeText(nRows(t), t.order.length, "\u00d7")
         : "No dataset loaded";
       el("ps-inspector-title").textContent = "Variable properties";
       el("ps-inspector-subtitle").textContent = INSPECTOR_VAR
@@ -19422,8 +19420,8 @@
       // What the data IS, not which workspace you are looking at: the
       // navigator highlight already says that.
       el("ps-status-context").textContent = t
-        ? nRows(t).toLocaleString() + " rows \u00b7 " + t.order.length +
-          " columns" + (dataExclusionCount(t) ? " \u00b7 " +
+        ? shapeText(nRows(t), t.order.length, "\u00b7", true) +
+          (dataExclusionCount(t) ? " \u00b7 " +
             dataExclusionCount(t) + " excluded" : "")
         : "No dataset";
       var rangeStatus = document.getElementById("ps-grid-selection-status");
@@ -19483,6 +19481,21 @@
       : secs < 3600 ? Math.round(secs / 60) + " min ago"
       : Math.round(secs / 3600) + " h ago";
     return (FILE_SAVED_REV == null ? "Autosaved " : "Saved ") + when;
+  }
+  // "1 rows x 2 columns". The singular branch was written inline at five
+  // places and missing at six others, so a one-row import read "1 rows x
+  // 2 columns" in the command bar while the selection readout one line
+  // below it correctly said "1 row". One helper instead of eleven
+  // decisions, so the next surface that reports a shape cannot get it
+  // wrong. The separator stays per-caller: the command bar and
+  // Diagnostics use "x", the grid footer and import preview a real
+  // multiplication sign, the Data status bar a middle dot.
+  function shapeText(rows, cols, sep, loc) {
+    var r = Number(rows) || 0, c = Number(cols) || 0;
+    return (loc ? r.toLocaleString() : String(r)) +
+      (r === 1 ? " row " : " rows ") + (sep || "\u00d7") + " " +
+      (loc ? c.toLocaleString() : String(c)) +
+      (c === 1 ? " column" : " columns");
   }
   function dataExclusionCount(t) {
     var n = rowExclCount(t);
@@ -20309,7 +20322,7 @@
         (parsed.headerGuess.index + 1) + " as the variable names</button></div>";
     }
     var h = guessHtml + '<div class="ps-import-summary">' +
-      parsed.rows.length + " rows \u00d7 " + parsed.header.length + " columns" +
+      shapeText(parsed.rows.length, parsed.header.length, "\u00d7") +
       notes + "</div><div class=\"ps-import-table-wrap\">" +
       '<table class="ps-import-table"><thead><tr>';
     for (c = 0; c < parsed.header.length; c++) {
@@ -20930,7 +20943,9 @@
         b.setAttribute("data-recent-id", item.id);
         b.appendChild(mkEl("span", "ps-recent-dot", "\u25a5"));
         b.appendChild(mkEl("span", "ps-recent-name", item.name));
-        var meta = item.rows + " rows \u00b7 " + recentTimeLabel(item.updatedAt);
+        var meta = item.rows +
+          (item.rows === 1 ? " row \u00b7 " : " rows \u00b7 ") +
+          recentTimeLabel(item.updatedAt);
         if (!item.snapshot)
           meta += " \u00b7 " + (item.hasFile ? "opens from its file"
                                             : "too large to keep a copy");
@@ -21499,8 +21514,7 @@
       ["Render", (LAST_RENDER_MS < 10 ? LAST_RENDER_MS.toFixed(1)
         : Math.round(LAST_RENDER_MS)) + " ms"],
       ["Payload build", measurePayloadMs() + " ms"],
-      ["Data", t ? nRows(t).toLocaleString() + " rows x " + t.order.length +
-        " columns" : "none"],
+      ["Data", t ? shapeText(nRows(t), t.order.length, "x", true) : "none"],
       ["Analysis", doc && !isLayoutTab(doc) && MODULES[doc.module]
         ? MODULES[doc.module].label : "-"],
       ["Plot size", (function () {
@@ -21651,8 +21665,7 @@
         : window.GraphBuilder2 ? "loaded, unstamped" : "NOT LOADED"],
       ["Payload channels", channelAuditText()],
       ["Project", PROJECT.name || "Untitled project"],
-      ["Dataset", (t ? nRows(t) : 0) + " rows \u00d7 " +
-        (t ? t.order.length : 0) + " columns"],
+      ["Dataset", shapeText(t ? nRows(t) : 0, t ? t.order.length : 0)],
       ["Documents", String(PROJECT.charts.length)],
       ["Snapshot size", formatBytes(LAST_PROJECT_BYTES ||
         JSON.stringify(projectSnapshot()).length)],
@@ -21987,12 +22000,41 @@
     if (appWorkspace() === "layout" && isLayoutTab(activeChart())) return "layout";
     return "chart";
   }
+  // Cmd/Ctrl+F, resolved by workspace - the undoScope precedent. The key
+  // used to call gridMenuFind() unconditionally, and that function hops to
+  // the Data workspace itself, so pressing Find while looking at a chart
+  // threw the chart away and opened the data grid. Meanwhile the ENGINE
+  // advertises the same chord for its own Find a setting, in its shortcuts
+  // sheet and on its toolbar button, so the one advertised route to a
+  // chart control never reached it.
+  function findScope() {
+    if (appWorkspace() !== "chart") return "data";
+    var host = hostEl();
+    // A chart tab with no variables has no engine toolbar to search.
+    return (host && host.querySelector("svg")) ? "chart" : "data";
+  }
+  function engineFindBtn() {
+    var host = hostEl();
+    return host ? host.querySelector('button[aria-label="Find a setting"]') : null;
+  }
+  function runFind() {
+    if (findScope() === "chart") {
+      var b = engineFindBtn();
+      if (b) { b.click(); return; }
+    }
+    gridMenuFind();
+  }
   function engineHistoryBtn(which) {
     var b = document.querySelector('.graphbuilder2-host button[aria-label="' +
       (which === "redo" ? "Redo" : "Undo") + '"]');
     return b && !b.disabled ? b : null;
   }
   function commandLabel(item) {
+    // Same rule as Undo below: one key, one menu row, and the row must
+    // name whichever thing the key will actually do here.
+    if (item && item.command === "find-data")
+      return findScope() === "chart"
+        ? "Find a chart setting\u2026" : "Find in data\u2026";
     // Punch list 4: an online destination is named in the label, so the click
     // is informed rather than surprising.
     if (item && item.command === "user-guide" && userGuideTarget().online)
@@ -22435,7 +22477,7 @@
       else gridMenuPaste();
     }
     else if (command === "select-all-cells") gridMenuSelectAll();
-    else if (command === "find-data") gridMenuFind();
+    else if (command === "find-data") runFind();
     else if (command === "replace-data") gridMenuReplace();
     else if (command === "help-chooser") {
       // On an undrawn chart the engine panel cannot exist, and "which
@@ -23520,7 +23562,7 @@
       // opened instead, uselessly searching the page chrome. Bound with
       // the find popup (Torry, Jul 31 2026); gridMenuFind hops to the
       // Data workspace itself, so it is safe app-wide.
-      else if (k === "f" && !e.shiftKey) gridMenuFind();
+      else if (k === "f" && !e.shiftKey) runFind();
     }, true);
     // t1-14 (second half). Cmd/Ctrl+W is unbound and, with no beforeunload,
     // ended the session silently. Work normally survives in the autosave and

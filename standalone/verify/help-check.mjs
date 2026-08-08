@@ -89,7 +89,10 @@ const sheet = await page.evaluate(() => {
 // The keys the old sheet had already lost. Each is genuinely bound in the app.
 for (const [what, key] of [['New project', 'Cmd/Ctrl + N'],
                            ['Preferences', 'Cmd/Ctrl + ,'],
-                           ['Find in data', 'Cmd/Ctrl + F']]) {
+                           // Workspace-scoped since Cmd/Ctrl+F was routed by
+                           // findScope(): in Charts it finds a chart setting,
+                           // in Data it finds data, and the row says which.
+                           ['Find (in data|a chart setting)', 'Cmd/Ctrl + F']]) {
     const hit = sheet.rows.find(r => new RegExp(what, 'i').test(r[0]));
     ok(hit && hit[1].replace(/\s+/g, '') === key.replace(/\s+/g, ''),
        `${what} is listed with its real key (${hit ? hit[1] : 'MISSING'})`);

@@ -21,7 +21,7 @@ data-commandbar-check data-menu-check separator-accessibility-check \
 data-undo-check dates-check doclifecycle-check tab-accessibility-check drag-feel-check \
 drag-selection-check outside-canvas-check hmc-list-check hidden-vars-check sigma-freshness-check \
 empty-states-check engine-stamp-check flyout-align-check filter-honesty-check examples-check exclusion-bridge-check \
-findpop-check finish-five-check fitpanes-check formula-unit-check formula-vocab-check \
+find-scope-check findpop-check finish-five-check fitpanes-check formula-unit-check formula-vocab-check \
 grid-keys-check help-check hierarchy-check hidden-selection-check \
 identifier-advice-check inspector-freshness-check menu-selection-check \
 missing-codes-check header-row-check level-variants-check typechange-cost-check \
@@ -38,7 +38,7 @@ pane-scroll-cue-check perf-check picker-persistence-check pinboard-check polish-
 probed-bugs-check provenance-check rail-icons-check punchlist-check reachability-check recents-check reshape-check \
 reflow-accessibility-check \
 row-filters-check \
-statusbar-check \
+shape-plural-check statusbar-check \
 textscale-check \
 safety-check \
 silent-failure-check selection-menus-check spreadsheet-gaps-check teaching-check \
