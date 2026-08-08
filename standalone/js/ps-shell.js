@@ -16589,7 +16589,42 @@
     bar.classList.remove("ps-tb-tight");
     if (bar.scrollWidth > bar.clientWidth + 2)
       bar.classList.add("ps-tb-tight");
+    syncToolbarEdgeCue(bar);
   }
+  // When compressing the labels is not enough. The bar is deliberately ONE
+  // 42px row that scrolls sideways, with its scrollbar hidden, so below
+  // about 1050px the controls past the right edge were simply invisible
+  // and nothing said the strip scrolled: measured on a fresh boot at
+  // 1000px, 182px of bar beyond the edge with Add to chart and the Zoom
+  // select outside it, and at 900px six controls including Chart
+  // settings, Find and Statistics.
+  //
+  // Same edge cue the workspace pane and the engine's own long tables use,
+  // turned sideways, and it shows on whichever side still has something.
+  // This does not touch the one-row decision; whether the bar should be
+  // allowed a second row instead is a layout call, not a bug fix.
+  function syncToolbarEdgeCue(bar) {
+    bar = bar || (document.getElementById("psroot") || document)
+      .querySelector('[data-role="chart-toolbar"]');
+    if (!bar) return;
+    var max = bar.scrollWidth - bar.clientWidth;
+    if (max <= 2) { bar.style.removeProperty("box-shadow"); return; }
+    var left = bar.scrollLeft > 2;
+    var right = bar.scrollLeft < max - 2;
+    var parts = [];
+    if (left) parts.push("inset 10px 0 8px -8px rgba(0,0,0,0.22)");
+    if (right) parts.push("inset -10px 0 8px -8px rgba(0,0,0,0.22)");
+    // Keep the bar's own resting shadow: this is an addition to it, not a
+    // replacement, or the strip loses its edge against the page.
+    parts.push("0 1px 2px rgba(25, 40, 57, 0.05)");
+    bar.style.setProperty("box-shadow", parts.join(", "), "important");
+  }
+  document.addEventListener("scroll", function (e) {
+    var t = e.target;
+    if (t && t.getAttribute &&
+        t.getAttribute("data-role") === "chart-toolbar")
+      syncToolbarEdgeCue(t);
+  }, true);
   window.addEventListener("resize", function () {
     window.setTimeout(syncToolbarTight, 60);
   });
