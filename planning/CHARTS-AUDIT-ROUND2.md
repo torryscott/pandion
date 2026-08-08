@@ -214,3 +214,26 @@ is a design decision rather than a bug fix.
 Recommendation: take the one-liner for the stored-junk half whenever the
 next engine change is being batched (it needs a battery pair and does not
 deserve one of its own), and treat the disclosure as its own small item.
+
+## Final state of the fix pass
+
+Closed: ranks 1, 2, 3, 4, 6, 7, 9, 11, 12, 16, 17. Rank 14 closed as NOT A
+BUG. Rank 13 verified with its one-line fix written out but deliberately
+not taken (see above).
+
+Left open, and both belong to other sessions' live files rather than to
+this one:
+
+- **Rank 5**, the import preview showing five of twenty columns. It is
+  `standalone/index.html`'s loader and `ps-shell.js`'s import summary, and
+  the Data deep-dive session has been editing both.
+- **Rank 8**, `hardening-dom-check`'s `#ps-chart-zoom` failure. The Zoom
+  select is chart-toolbar chrome the Layout session owns. The
+  MutationObserver half is fixed here; this residue is not mine, and until
+  it is fixed `run.sh` still cannot reach its own end under `set -e`.
+
+Eight probes were added across the pass, all wired into `run.sh`:
+`chart-check-check`, `default-style-routes-check`, `pane-scroll-cue-check`,
+`toolbar-scroll-cue-check`, `picker-persistence-check`,
+`compare-pairs-apa-check`, `shape-plural-check`, `find-scope-check`.
+Every one was demonstrated failing against the code before its fix.
