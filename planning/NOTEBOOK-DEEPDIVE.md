@@ -419,7 +419,8 @@ Branch `probe/notebook-deepdive`. Three probes added, all wired into
 Run from an isolated worktree at this branch's HEAD, so no other session's
 in-flight edits are in the measurement.
 
-109 steps ran. 107 green, including all three new probes. One step fails,
+109 steps ran. 107 green, including all three new probes; one step is the
+dist build banner, which succeeds but emits no pass marker. One step fails,
 `artifact-parity-check`, and it is not a behaviour regression. It is the
 release gate that requires the committed public artifacts
 (`website/pandion-plots.html` and the hashed files under `website/app/lib`)
@@ -436,6 +437,11 @@ coverage that matters for a shell change. `m0-check`, `m1-shell-check`, the
 three notebook probes, `pinboard-check`, `keep-fidelity-check`,
 `copy-moment-check`, `provenance-check` and `doclifecycle-check` all pass on
 `standalone/dist/pandion-plots.html`.
+
+Both figures are from the branch AS IT STANDS, after the four fixes the
+self-audit forced. The run before those fixes had the same shape, 109 steps
+and the same single artifact-parity failure, so the fixes introduced no new
+failure anywhere in the 107.
 
 Two probe laws worth recording, because both cost time and will cost it
 again.
