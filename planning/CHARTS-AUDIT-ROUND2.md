@@ -301,3 +301,50 @@ Rank 5 (import preview) is the Data session's file. Rank 8
 `run.sh` cannot reach its own end, so ALL GREEN has never printed on this
 branch. Everything here was verified by running affected probes directly
 and by two full jamovi batteries per engine change.
+
+---
+
+# Closeout, second attempt (Aug 8 2026)
+
+Everything the cross-module run raised against THIS workspace is now
+landed (5a094bb, 840c62b), except one item which is recorded rather than
+fixed, below.
+
+Fixed since the closeout verdict: the stale receipt on an empty chart; the
+pane cue's observer and its shrink path; Cmd/Ctrl+S writing a file without
+the colour on screen; brackclaim's remedy copy on the four modules that
+have neither anchorable cells nor a Compare pairs tab; the panel header's
+severity-blind amber count; and rank 13's one-liner, which rode this
+re-minify as intended.
+
+## Recorded, not fixed: a banked colour is not an undo step
+
+Convention 20 says every committed option is one undo step. A colour
+banked by the unload flush, or now by a save, persists correctly but does
+not push one: the live stack stays at 0 while the localStorage copy
+reaches 1, the toolbar Undo stays disabled, and after a reload the stack
+does not reload either (the engine restores it only when a
+content-changed render re-runs its IIFE).
+
+Left alone deliberately. Nobody LOST an undo they previously had - before
+these fixes the colour was discarded entirely - so this is an invariant
+break rather than a user-visible regression, and closing it means touching
+the undo engine, which is convention-20 territory and wants its own
+decision rather than being folded into a bug-fix batch.
+
+## Genuinely outside this workspace
+
+- Rank 5, the import preview showing five of twenty columns:
+  `standalone/index.html`'s loader, which the Data session has been editing.
+- Rank 8, `hardening-dom-check`'s `#ps-chart-zoom` assertion: chart-toolbar
+  chrome the Layout session owns. Until it is fixed `run.sh` cannot reach
+  its own end under `set -e`, so ALL GREEN has never printed on this
+  branch. Everything here was verified by running affected probes directly
+  and by a full jamovi battery pair per engine change.
+
+## Coverage still thin
+
+Six of the seven analyses were driven once each, by one agent, against a
+fixed checklist. That found two regressions the single-module pass had
+missed, which is the argument for doing it - but it is one pass, not a
+suite. The 248 skipped probe runs remain unknown rather than passing.
