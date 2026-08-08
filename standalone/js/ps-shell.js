@@ -338,10 +338,43 @@
       return s;
     });
   }
+  // A filter this app CAN honour, meaning it was switched on in jamovi and
+  // its column holds the confirmed 0/1 result. Anything else is still only
+  // described, never acted on.
+  function appliedJamoviFilters(t) {
+    return ((t && t.importedFilters) || []).filter(function (f) {
+      return f.active && f.binary && t.raw && t.raw[f.name];
+    });
+  }
+  // Which of them are STILL applied. The list above says which ones this app
+  // is able to honour; that is the right question at import and the wrong one
+  // afterwards, because the moment the reader deletes the condition in Filter
+  // the claim goes stale and the note keeps insisting the file's filter is on.
+  function liveJamoviFilters(t) {
+    var live = validFilters(t);
+    return appliedJamoviFilters(t).filter(function (f) {
+      return live.some(function (c) {
+        return c.col === f.name && c.op === "eq" && String(c.value) === "1";
+      });
+    });
+  }
   function importedFilterNote(t) {
     var list = t && t.importedFilters;
     if (!list || !list.length) return "";
     var one = list.length === 1;
+    var live = liveJamoviFilters(t);
+    var phrases = importedFilterPhrases(list).join("; ") + ".";
+    if (live.length) {
+      // The file declares these ON, and honouring a document's own declared
+      // state is fidelity rather than a decision this app made. It is stated
+      // rather than done quietly, and one click in Filter removes it.
+      var kept = nRows(t) - filteredRowCount(t);
+      return "This jamovi file's " + (live.length === 1 ? "filter is" :
+        live.length + " filters are") + " applied here, so the charts show " +
+        kept + " of " + nRows(t) + " rows, the same rows jamovi was showing. " +
+        "Turn " + (live.length === 1 ? "it" : "them") + " off in Filter to " +
+        "see everything. " + phrases;
+    }
     // Phrased as what the jamovi filters do NOT hide, rather than as "all N
     // rows are shown". The second claim is false the moment the reader adds
     // a filter of their own, and this sentence sits on the very control they
@@ -349,7 +382,7 @@
     return "This jamovi file carries " + (one ? "a filter" : list.length +
       " filters") + ", which " + (one ? "is" : "are") + " not applied here, " +
       "so " + (one ? "it hides" : "they hide") + " none of the " + nRows(t) +
-      " rows. " + importedFilterPhrases(list).join("; ") + ".";
+      " rows. " + phrases;
   }
   function importedFormulaOf(t, col) {
     var m = t && t.importedFormulas;
@@ -19756,6 +19789,20 @@
         ? parsed.derivedByCol : {};
     PROJECT.table.importedFilters =
       Array.isArray(parsed.filterColumns) ? parsed.filterColumns : [];
+    // Honour what the file declares. jamovi wrote these filters ON, and the
+    // sender's charts were of the kept rows, so opening at full size shows a
+    // different N from the one they published. This is an ordinary Pandion
+    // row filter pointing at the imported column, so it appears in the Filter
+    // chip, is editable, is removable in one click, and rides the project
+    // file like any other. Only for filters whose column holds the confirmed
+    // 0/1 result; anything else stays described and untouched.
+    var live = appliedJamoviFilters(PROJECT.table);
+    if (live.length) {
+      PROJECT.table.filters = live.map(function (f) {
+        return { col: f.name, op: "eq", value: "1" };
+      });
+      retype(PROJECT.table);
+    }
     resetDocumentsForNewData();
     PROJECT.ui.columnWidths = {};
     GRID_NATURAL_WIDTHS = {};

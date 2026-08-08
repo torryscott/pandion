@@ -240,8 +240,16 @@ const after = await page.evaluate(() => {
     t.order.forEach(c => { raw[c] = t.raw[c].slice(); });
     return { order: t.order.slice(), raw };
 });
-ok(JSON.stringify(after.order) === JSON.stringify(baseline.order),
-   'the same 18 columns in the same order, the filters excluded, got ' +
+// CONTRACT CHANGED, deliberately. This used to pin that filter columns were
+// excluded, which was right while the disclosure was all the app could offer.
+// Their per-row bytes are now confirmed to be the evaluated result (checked
+// against a real jamovi file, 89 rows, 89 of 89 rows agreeing with the
+// filter's own formula), so the column travels as ordinary data. That is what
+// jamovi itself shows, and it is the thing a Pandion row filter has to point
+// at, which is what lets the filter be honoured without translating a formula.
+ok(JSON.stringify(after.order) ===
+   JSON.stringify(['Filter 1', 'Filter 2'].concat(baseline.order)),
+   'the filter columns lead the 18 data columns, as they do in jamovi, got ' +
    JSON.stringify(after.order));
 let firstDrift = null;
 for (const c of baseline.order)
@@ -261,8 +269,11 @@ ok(/score > 0\.5/.test(dToasts),
 // Stated as what the filters do NOT hide. "All 240 rows are shown" would be
 // false the moment the reader added a filter of their own, and this same
 // sentence lives on the control they would use to do that.
-ok(/none of the 240 rows/i.test(dToasts),
-   'and it says the file\'s filters hide no rows, got ' +
+ok(/120 of 240 rows/.test(dToasts),
+   'and it says how many rows are being shown, which is what jamovi was ' +
+   'showing, got ' + JSON.stringify(dToasts.slice(0, 400)));
+ok(/same rows jamovi was showing/i.test(dToasts),
+   'and says whose decision it is honouring, got ' +
    JSON.stringify(dToasts.slice(0, 400)));
 ok(/switched off/i.test(dToasts),
    'and the one jamovi had switched off is marked as such, got ' +
@@ -273,9 +284,31 @@ const filterTip = await page.evaluate(() => {
     const b = document.getElementById('ps-data-filter-btn');
     return b ? (b.getAttribute('data-tip') || b.title || '') : '';
 });
-ok(/Filter 1/.test(filterTip) && /not applied/i.test(filterTip),
+ok(/Filter 1/.test(filterTip) && /applied here/i.test(filterTip),
    'the Filter control carries the file\'s filters, got ' +
    JSON.stringify(filterTip.slice(0, 300)));
+
+console.log('case 3b: the file\'s own declaration is honoured, and only that');
+const applied = await page.evaluate(() => {
+    const t = window.PS_SHELL.project.table;
+    return { filters: (t.filters || []).map(f => f.col + ' ' + f.op + ' ' + f.value),
+             kept: t.filteredView ? t.filteredView.raw[t.order[0]].length : null,
+             rows: t.raw[t.order[0]].length };
+});
+ok(JSON.stringify(applied.filters) === JSON.stringify(['Filter 1 eq 1']),
+   'the ACTIVE filter is applied and the one jamovi switched off is not, got ' +
+   JSON.stringify(applied.filters));
+ok(applied.kept === 120 && applied.rows === 240,
+   'and it keeps the 120 rows jamovi was keeping, out of 240, got ' +
+   JSON.stringify(applied));
+// It is an ordinary row filter, so the user can take it off like any other.
+await page.evaluate(() => window.PS_SHELL.setFilters([]));
+await page.waitForTimeout(900);
+ok((await page.evaluate(() => {
+        const t = window.PS_SHELL.project.table;
+        return t.filteredView ? t.filteredView.raw[t.order[0]].length
+                              : t.raw[t.order[0]].length;
+   })) === 240, 'and one click in Filter gives every row back');
 // The sentence sits on the control a reader uses to filter, so it has to
 // survive them doing exactly that. A claim that all rows are shown would go
 // false here while still being displayed.

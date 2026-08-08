@@ -117,31 +117,55 @@ window.PSOmv = (function () {
       var size = isNum ? 8 : 4;
       if (off + size * n > bin.byteLength)
         throw new Error("data.bin is shorter than the metadata describes");
-      // A jamovi filter HIDES rows. Dropping it in silence means a sender who
-      // filtered 240 cases down to 120 and charted that gets a recipient
-      // charting 240, with the word "Filter" appearing nowhere. The filter is
-      // still not applied here, because these formulas are a full expression
-      // language and a mistranslation would change N in a second, different
-      // way. What travels out is the DISCLOSURE, which is a strict subset of
-      // any fuller answer and so upgrades later without rework.
+      // A jamovi filter HIDES rows. Dropping it in silence means a sender
+      // who filtered 240 cases down to 120 and charted that gets a recipient
+      // charting 240, with the word "Filter" appearing nowhere.
       //
-      // UNCONFIRMED INFERENCE, deliberately NOT acted on. The offset advance
-      // below says a filter column occupies a full column of data, and
-      // jamovi's own writer (server/jamovi/server/formatio/omv.py) writes
-      // every non-virtual column's cells through column.raw(i), which would
-      // make these bytes the EVALUATED per-row result, an exact answer with
-      // no formula parser at all. Reading a writer is not the same as reading
-      // a file, and guessing about a row count is precisely the mistake this
-      // disclosure exists to stop. One thing settles it. Open a real
-      // jamovi-authored .omv that has an ACTIVE filter, and confirm this
-      // int32 column reads 1 on the rows jamovi keeps and 0 on the rows it
-      // hides. If it does, this skip becomes a read and the rows arrive
-      // already marked.
+      // CONFIRMED against a real jamovi-authored file (89 rows, formula
+      // Sex == "Female", 63 kept). A filter column occupies a full column of
+      // per-row data and stores the EVALUATED result, 1 on the rows jamovi
+      // keeps and 0 on the rows it hides, agreeing with its own formula on
+      // 89 of 89 rows with zero disagreements. That matches jamovi's writer,
+      // which sends every non-virtual column through column.raw(i) as int32,
+      // and its reader, which carries "filter BOOLEAN NOT NULL DEFAULT true"
+      // and defines is_row_filtered as NOT that value.
+      //
+      // So the rows arrive already marked and no formula parser is needed or
+      // wanted. The formula still travels out VERBATIM, as a quotation for
+      // the user to read, never as something this app re-evaluates.
+      // standalone/verify/omv-filter-bytes.mjs re-runs that confirmation
+      // against any .omv.
       if (f.columnType === "Filter") {
+        var fvals = [];
+        var binary = true;
+        for (var fr = 0; fr < n; fr++) {
+          var fv = isNum ? dv.getFloat64(off + fr * 8, true)
+                         : dv.getInt32(off + fr * 4, true);
+          var miss = isNum ? !isFinite(fv) : fv === INT_NA;
+          // Anything that is not the confirmed 0/1/missing shape is NOT
+          // treated as a filter result, because acting on a shape this has
+          // not seen is how a row count goes quietly wrong.
+          if (!miss && fv !== 0 && fv !== 1) binary = false;
+          fvals.push(miss ? null : fv);
+        }
         filterColumns.push({ name: String(f.name || ""),
                              formula: String(f.formula || "").trim(),
-                             active: f.active !== false });
+                             active: f.active !== false,
+                             binary: binary,
+                             values: fvals });
         off += size * n;
+        // The column travels as ORDINARY data, which is both what jamovi
+        // shows in its own spreadsheet and the thing a Pandion row filter
+        // needs to point at. Without it the filter could only be reproduced
+        // by translating the formula, which is the one thing this must not
+        // do. Typed nominal, so it groups and never lands on a value axis.
+        var fname = String(f.name || "Filter");
+        header.push(fname);
+        colVals.push(fvals.map(function (v) {
+          return v == null ? "" : String(v);
+        }));
+        types[fname] = "nominal";
+        levels[fname] = ["1", "0"];
         continue;
       }
       var x = xdata[f.name];
