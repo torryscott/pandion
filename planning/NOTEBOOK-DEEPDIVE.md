@@ -504,6 +504,32 @@ out to be understated rather than overstated. The Cmd+Z hazard has a second
 route I missed, where a recent data edit means the key silently undoes a
 DATASET change, and the layout reconciliation is more urgent than a footnote.
 
+### What this dive still gets wrong, disclosed rather than left to be found
+
+Three things the re-audit raised that I judged not worth fixing here, and one
+that is not mine to fix. All are disclosed rather than quietly carried.
+
+- **The rail page row truncates at about twenty characters** at the default
+  rail width, so a Likert battery and a Correlation matrix can show a shared
+  prefix. The type leads the name, which is the distinguishing part, and the
+  row's tooltip and aria-label carry the whole thing. A wider rail or a
+  two-line row is the real answer and it belongs to whoever owns the rail.
+- **A legacy bitmap page gets no record band.** Pages kept in the first hours
+  of the Notebook's life are stored as PNG, and `pinFileBytes` returns their
+  bytes before the composer runs. Those pages export exactly as they did
+  before. The dialog and the toast already say a bitmap page rides as PNG, so
+  nothing lies, but the band silently does not apply there.
+- **The cost estimates in this document are roughly fifteen percent light in
+  aggregate.** The five per-item figures sum to about 482 lines against 553
+  actually added to `ps-shell.js`. The word "about" absorbs some of that and
+  no decision here turns on it.
+- **Not mine.** The delete toast can outlive a project load on the untouched
+  baseline too. Inside its six-second life, clicking Undo after opening a
+  different project puts the old project's page into the new one. Clearing the
+  Notebook history closes the durable form of this, and the toast's own guard
+  now refuses a consumed step, but the pre-existing transient hole belongs to
+  whoever owns the toast.
+
 ### A coordination note, because it changed what is on this branch
 
 Four sessions were writing to one working tree, and it cost real work.
