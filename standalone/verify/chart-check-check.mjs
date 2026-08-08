@@ -266,6 +266,23 @@ if (bw) {
                 'note path not exercised on this fixture');
 }
 
+console.log('case 8: a chart with no variables carries no verdict');
+// renderChartIntoHost returns on the placeholder branch BEFORE the render
+// tail, so the receipt kept the previous chart's verdict over a chart that
+// does not exist: "Checks passed" sitting above "This chart needs
+// variables", which is the exact false assurance this whole feature was
+// built to prevent. Six of seven module agents met it independently, one
+// of them reading an AMBER "1 thing to check" over an empty chart.
+await page.evaluate(() => window.PS_SHELL.setRoles('plotbuilder', {}));
+await page.waitForTimeout(2600);
+const stripped = await page.evaluate(() => ({
+    hasSvg: !!document.querySelector('.graphbuilder2-host svg'),
+    hidden: document.getElementById('ps-status-check').hidden
+}));
+ok(stripped.hasSvg === false, 'the chart really is down to its empty state');
+ok(stripped.hidden === true,
+   'and the receipt says nothing at all rather than a stale verdict');
+
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('CHART CHECK: PASS');
 await browser.close();

@@ -6705,6 +6705,14 @@
         el("ps-status-context").textContent = chartStatusText(activeChartTab());
         el("ps-status-selection").textContent = "Needs chart setup";
       }
+      // This branch returns before the render tail, so the chart-check
+      // receipt was never re-synced and kept the PREVIOUS chart's verdict
+      // over a chart that does not exist - "Checks passed" above "This
+      // chart needs variables", which is the exact false assurance the
+      // receipt exists to prevent. Synchronous, not scheduled: there is no
+      // render to settle after.
+      syncChartCheck();
+      syncPaneScrollCue();
       return;
     }
     LAST_RENDER_PAYLOAD = built.payload;
@@ -8360,8 +8368,14 @@
     try {
       if (typeof ResizeObserver === "function") {
         var ro = new ResizeObserver(function () { syncPaneScrollCue(); });
+        // Observe the pane AND every element child. The first child is
+        // #ps-datacard, which is display:none in the chart workspace, so
+        // observing only that one meant the observer could never fire for
+        // chart content: the cue armed solely as a side effect of the
+        // reveal scroll, and it went stale when the content shrank.
         ro.observe(sc);
-        if (sc.firstElementChild) ro.observe(sc.firstElementChild);
+        for (var ci = 0; ci < sc.children.length; ci++)
+          ro.observe(sc.children[ci]);
       }
     } catch (e) {}
     try { window.addEventListener("resize", syncPaneScrollCue); } catch (e) {}

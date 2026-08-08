@@ -109,6 +109,27 @@ console.log('case 4: it is the same cue the engine uses for its own tables');
 ok((await pane()).shadow === 'rgba(0, 0, 0, 0.22) 0px -10px 8px -8px inset',
    'same offsets, blur and alpha as the Sigma panel table wrappers');
 
+console.log('case 5: the cue clears when the CONTENT shrinks, not just on scroll');
+// The first version wired its ResizeObserver to sc.firstElementChild,
+// which is #ps-datacard - display:none in this workspace, height 0,
+// permanently. So the observer could never fire for chart content: the
+// cue armed only as a side effect of the reveal scroll, and closing the
+// panel left the shadow painted with nothing below it. Closed here with
+// the panel's own visible Close button, a real gesture.
+const closeBtn = await page.evaluate(() => {
+    const x = document.querySelector('#psroot [data-role="st-close-btn"]');
+    if (!x) return null;
+    const r = x.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+});
+ok(!!closeBtn, 'the Statistics panel has its own Close button');
+await page.mouse.click(closeBtn.x, closeBtn.y);
+await page.waitForTimeout(1600);
+const shrunk = await pane();
+ok(shrunk.more <= 2, `closing it leaves nothing below (${shrunk.more}px)`);
+ok(shrunk.shadow === 'none',
+   `and the cue goes with it (${shrunk.shadow})`);
+
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('PANE SCROLL CUE: PASS');
 await browser.close();
