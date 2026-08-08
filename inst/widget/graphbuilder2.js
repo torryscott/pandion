@@ -4268,10 +4268,24 @@
         // about to lose interactivity - tab hidden, window blurred, or
         // the page unloads. Otherwise an in-flight 800ms debounce could
         // be lost if jamovi closes mid-window.
-        onWin("beforeunload", _flushOpts, false);
-        onWin("blur", _flushOpts, false);
+        // The colour picker commits ONCE, on close (_hideColorPicker:
+        // "This is when setOption fires"). The saturation square and the
+        // hex box only repaint the chart and mark state.changed. So a
+        // user who picks a colour and then closes the tab, or reloads,
+        // loses it: the drawn chart and the saved state genuinely
+        // disagree, and nothing tells them. _commitColorPickerInPlace
+        // already exists to bank a pending colour without tearing the
+        // picker down - it is what panel-internal toggles use - so the
+        // three "about to lose interactivity" handlers bank it first and
+        // the value rides the same debounced write as every other edit.
+        function _flushOptsAndPicker() {
+            try { _commitColorPickerInPlace(); } catch (_ePk) {}
+            _flushOpts();
+        }
+        onWin("beforeunload", _flushOptsAndPicker, false);
+        onWin("blur", _flushOptsAndPicker, false);
         onDoc("visibilitychange", function () {
-            if (document.visibilityState === "hidden") _flushOpts();
+            if (document.visibilityState === "hidden") _flushOptsAndPicker();
         }, false);
 
         // Track whether the user is mid-interaction inside the widget
