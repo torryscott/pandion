@@ -49388,8 +49388,15 @@
             // module does not have makes a correct warning unactionable.
             function _brackRemedy() {
                 var mk = _gbModuleKind();
-                if (mk === "cg" || mk === "rm" || mk === "freq")
+                if (mk === "cg" || mk === "rm")
                     return "Open the bracket, turn on \"Auto-compute p-value from raw data\" and drag each leg onto a bar, or use the Statistics panel's Compare pairs tab, which runs every test and places the brackets for you.";
+                if (mk === "freq")
+                    // Frequencies anchors brackets on its dodged bars and
+                    // runs the proportion tests, but its Sigma tab is named
+                    // Pairwise and has no Place button - the cg/rm copy
+                    // promised both, so the fix that was meant to stop the
+                    // remedy naming absent surfaces still named one here.
+                    return "Open the bracket, turn on \"Auto-compute p-value from raw data\" and drag each leg onto a bar; the Statistics panel's Pairwise tab lists the same comparisons and their tests.";
                 return "This chart type has no cells for a bracket to anchor to and no Compare pairs tab, so a computed test is not available here: either delete the bracket, or give it wording that reports a test you ran elsewhere rather than a bare significance mark.";
             }
             (function () {

@@ -5434,6 +5434,10 @@
     host.__gb2_serializeSvg = null;
     host.__gb2_accessibleDescription = null;
     host.__gb2_chartSize = null;
+    // The audit's two new hooks are per-render closures too; left in
+    // place they would answer from a torn-down DOM.
+    host.__gb2_graphLint = null;
+    host.__gb2_commitPendingColor = null;
     var assignment = /^Assign /.test(String(html).replace(/<[^>]+>/g, ""));
     var acts = assignment
       ? (fix && fix.kind === "example"
@@ -6402,6 +6406,18 @@
       host.__gb2_serializeSvg = null;
       host.__gb2_accessibleDescription = null;
       host.__gb2_chartSize = null;
+      host.__gb2_graphLint = null;
+      host.__gb2_commitPendingColor = null;
+      // Same bug, third door. The placeholder branch got its receipt sync
+      // in the empty-state fix; a render FAILURE tears the chart down the
+      // same way and also returned with the previous chart's verdict still
+      // in the status bar - and the closeout list even named this site.
+      // The hooks were just nulled above, so chartCheckReport returns
+      // null and the receipt hides - it runs before the innerHTML swap,
+      // when the old svg can still be present, which is why the hook
+      // guard and not the svg guard is what does the hiding here.
+      try { syncChartCheck(); } catch (eSc) {}
+      try { syncPaneScrollCue(); } catch (eSp) {}
       host.classList.remove("ps-offscreen");
       host.style.display = "";
       host.innerHTML = "";
@@ -6706,6 +6722,8 @@
       host.__gb2_serializeSvg = null;
       host.__gb2_accessibleDescription = null;
       host.__gb2_chartSize = null;
+      host.__gb2_graphLint = null;
+      host.__gb2_commitPendingColor = null;
       showEngineLoadFailure(host);
       return;
     }

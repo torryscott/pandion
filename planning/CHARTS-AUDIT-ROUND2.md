@@ -348,3 +348,38 @@ Six of the seven analyses were driven once each, by one agent, against a
 fixed checklist. That found two regressions the single-module pass had
 missed, which is the argument for doing it - but it is one pass, not a
 suite. The 248 skipped probe runs remain unknown rather than passing.
+
+---
+
+# Independent verification pass (Aug 8 2026, second model)
+
+Re-reviewed the full engine diff (194 added lines vs e193d18), the shell
+diff, hash integrity (min.js.hash equals source md5), run.sh wiring of all
+new probes, and independently re-ran chart-check, picker-persistence,
+shape-plural, find-scope and toolbar-scroll-cue. The issue selection,
+evidence and controls hold. Two residues found and fixed:
+
+1. **The receipt sync was half-applied against its own site list.** The
+   closeout named ps-shell.js's placeholder branch AND the render-failure
+   branch; only the first got the call. A chart whose redraw threw kept
+   the previous verdict over the recovery card. showRenderFailure (and
+   showMessage, and the engine-missing boot branch) also never nulled the
+   audit's two NEW host hooks, so a torn-down render could still answer
+   through them. All three sites now null the hooks and the failure path
+   syncs the receipt and pane cue. chart-check-check case 9, controlled.
+
+2. **The module-aware remedy was wrong on Frequencies.** The fix that
+   stopped brackclaim naming absent surfaces kept the cg/rm copy for freq,
+   whose Sigma tab is named Pairwise and has no Place button - so it still
+   promised a tab name and a capability that do not exist there. freq now
+   gets its own accurate copy. chart-check-check case 10, controlled
+   against the pre-change engine; batteries re-run on both bundles, 396
+   assertions each, exit 0.
+
+Also verified for the handoff: charts is the only dive branch touching the
+engine; the syncChartCheck charts-vs-layout collision recorded in the Data
+handoff is stale (both other tips carry no trace of the receipt);
+movePinToBoard still differs notebook-vs-layout. Noted, not changed: the
+"cannot tell" pass-through branch in _styleRekeyEntries is unreachable
+from its only call site, which always coerces the current list to an
+array - the comment overstates the safety valve.

@@ -283,6 +283,76 @@ ok(stripped.hasSvg === false, 'the chart really is down to its empty state');
 ok(stripped.hidden === true,
    'and the receipt says nothing at all rather than a stale verdict');
 
+console.log('case 9: a render FAILURE carries no verdict either');
+// The third door, named in the closeout's own site list and then only
+// half-fixed: the placeholder branch got its sync, the render-failure
+// branch did not, so a chart whose redraw threw kept the previous
+// verdict in the status bar over the recovery card.
+await page.evaluate(() => window.PS_SHELL.setRoles('plotbuilder',
+    { xvar: 'condition', yvar: 'score' }));
+await page.waitForTimeout(2200);
+ok(!(await receipt()).hidden, 'a drawn chart shows a receipt again');
+await page.evaluate(() => {
+    window.__psProbeRealRender = window.GraphBuilder2.render;
+    window.GraphBuilder2.render = function () {
+        throw new Error('probe: forced render failure');
+    };
+    window.PS_SHELL.setRoles('plotbuilder',
+        { xvar: 'site', yvar: 'score' });
+});
+await page.waitForTimeout(1600);
+const failed = await page.evaluate(() => ({
+    card: /could not be drawn/.test(
+        document.querySelector('.graphbuilder2-host').textContent),
+    hidden: document.getElementById('ps-status-check').hidden
+}));
+ok(failed.card, 'the recovery card is up, so the failure really happened');
+ok(failed.hidden,
+   'and the receipt says nothing rather than the previous chart\'s verdict');
+await page.evaluate(() => {
+    window.GraphBuilder2.render = window.__psProbeRealRender;
+    window.PS_SHELL.setRoles('plotbuilder',
+        { xvar: 'condition', yvar: 'score' });
+});
+await page.waitForTimeout(2200);
+ok(!(await receipt()).hidden, 'and it recovers with the next good render');
+
+console.log('case 10: the remedy names surfaces the module actually has');
+// The first module-aware version kept the cg/rm copy for Frequencies too,
+// but freq's Sigma tab is named Pairwise and has no Place button - the fix
+// that was meant to stop the remedy naming absent surfaces still named
+// one. Read the finding's own why-text through the host hook.
+const remedyOn = async (mod, roles) => {
+    await page.evaluate(([m, r]) => {
+        window.PS_SHELL.setModule(m);
+        window.PS_SHELL.setRoles(m, r);
+    }, [mod, roles]);
+    await page.waitForTimeout(2000);
+    return page.evaluate(() => {
+        const a = JSON.parse(
+            window.PS_SHELL.optionStore().annotationsJson || '[]');
+        a.push({ id: 'ann_probe_star', kind: 'bracket', text: '*',
+                 x: 200, x2: 320, y: 60, autoPValue: false, fontSize: 13 });
+        window.__gb2_setOption('annotationsJson', JSON.stringify(a));
+        return new Promise(res => setTimeout(() => {
+            const h = document.querySelector('.graphbuilder2-host');
+            const rep = h.__gb2_graphLint();
+            const f = rep && rep.findings.find(x => x.id === 'brackclaim');
+            res(f ? f.why : '(brackclaim did not fire)');
+        }, 2400));
+    });
+};
+const freqWhy = await remedyOn('freqplotbuilder',
+    { var: 'condition', groupVar: 'site' });
+ok(/Pairwise tab/.test(freqWhy) && !/Compare pairs tab/.test(freqWhy),
+   'Frequencies is pointed at its Pairwise tab, not a Compare pairs it lacks');
+ok(!/places the brackets for you/.test(freqWhy),
+   'and is not promised a Place button its panel does not have');
+const xyWhy = await remedyOn('xyplotbuilder',
+    { xvar: 'hours', yvar: 'score' });
+ok(/no cells for a bracket to anchor/.test(xyWhy),
+   'Scatter gets the honest no-surfaces copy');
+
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('CHART CHECK: PASS');
 await browser.close();
