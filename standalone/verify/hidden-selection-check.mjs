@@ -177,6 +177,36 @@ ok(!/6000/.test(stats),
    'and no value from the hidden column reaches the strip, got ' +
    JSON.stringify(stats.replace(/\n+/g, ' ')));
 
+console.log('case 6c: the extend gesture and New chart keep the same set');
+// Two MORE readers of the rectangle, found by a later review, the same mixed
+// index space a third time. Cmd/Ctrl+clicking a header to extend re-seeded
+// its list from t.order between c0 and c1, so a column fell out of its own
+// selection, and New chart from selection armed the gallery from a column
+// the user cannot see while dropping one they picked.
+await page.evaluate(() =>
+    window.PS_SHELL.setGridSelection('B', 0, 'E', 5, 'column'));
+await page.waitForTimeout(300);
+await page.evaluate(() => window.PS_SHELL.toggleColumnSelection('A'));
+await page.waitForTimeout(300);
+const extended = await page.evaluate(() => window.PS_SHELL.selectedColumns());
+ok(JSON.stringify(extended.slice().sort()) ===
+   JSON.stringify(['A', 'B', 'D', 'E']),
+   'the extend keeps every visible column it started from, got ' +
+   JSON.stringify(extended));
+await page.evaluate(() =>
+    window.PS_SHELL.setGridSelection('B', 0, 'E', 2, 'cells'));
+await page.waitForTimeout(250);
+await page.evaluate(() => window.PS_SHELL.runCommand('data-chart-sel'));
+await page.waitForTimeout(600);
+const chips = await page.evaluate(() => Array.from(
+    document.querySelectorAll('#ps-analysis-arm .ps-arm-chip'))
+    .map(c => c.textContent));
+ok(JSON.stringify(chips) === JSON.stringify(['B', 'D', 'E']),
+   'and New chart from selection is armed from the visible three, got ' +
+   JSON.stringify(chips));
+await page.keyboard.press('Escape');
+await page.waitForTimeout(300);
+
 console.log('case 7: with nothing hidden everything is exactly as before');
 await fixture([]);
 await selectB2toE2();

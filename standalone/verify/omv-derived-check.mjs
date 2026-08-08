@@ -327,6 +327,43 @@ ok(/Filter 1/.test(withOwn.tip) && /none of the 240 rows/i.test(withOwn.tip),
 await page.evaluate(() => { window.PS_SHELL.setFilters([]); });
 await page.waitForTimeout(200);
 
+console.log('case 3c: renaming the filter column keeps the disclosure true');
+// The record matches its column BY NAME, and the row filter itself follows a
+// rename. Without the sweep the tooltip flipped to "not applied here, so it
+// hides none of the rows" while the renamed condition kept hiding 120 of
+// them, two contradictory sentences on the one control.
+await page.evaluate(() => window.PS_SHELL.setFilters(
+    [{ col: 'Filter 1', op: 'eq', value: '1' }]));
+await page.waitForTimeout(900);
+await page.evaluate(() => window.PS_SHELL.setWorkspace('data'));
+await page.evaluate(() => window.PS_SHELL.selectVariable('Filter 1'));
+await page.waitForTimeout(300);
+await page.fill('#ps-variable-name', 'Keep');
+await page.press('#ps-variable-name', 'Enter');
+await page.waitForTimeout(900);
+const renamed = await page.evaluate(() => {
+    const t = window.PS_SHELL.project.table;
+    const b = document.getElementById('ps-data-filter-btn');
+    return { kept: t.filteredView ? t.filteredView.raw[t.order[0]].length : null,
+             tip: b ? (b.getAttribute('data-tip') || '') : '' };
+});
+ok(renamed.kept === 120,
+   'the row filter followed the rename and still keeps 120, got ' +
+   renamed.kept);
+ok(!/not applied/i.test(renamed.tip),
+   'and the disclosure does not contradict it, got ' +
+   JSON.stringify(renamed.tip.slice(0, 300)));
+ok(/applied here/i.test(renamed.tip) && /Keep/.test(renamed.tip),
+   'it still says the file\'s filter is applied, under the new name, got ' +
+   JSON.stringify(renamed.tip.slice(0, 300)));
+await page.evaluate(() => window.PS_SHELL.selectVariable('Keep'));
+await page.waitForTimeout(300);
+await page.fill('#ps-variable-name', 'Filter 1');
+await page.press('#ps-variable-name', 'Enter');
+await page.waitForTimeout(900);
+await page.evaluate(() => { window.PS_SHELL.setFilters([]); });
+await page.waitForTimeout(300);
+
 console.log('case 5: a computed column is labelled, and marked a snapshot');
 const derived = await page.evaluate(() => {
     const t = window.PS_SHELL.project.table;

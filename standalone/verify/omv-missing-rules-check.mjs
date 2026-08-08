@@ -139,6 +139,17 @@ ds.fields[rtIdx].missingValues = ['== ' + sentinel];
 // rather than dropped.
 const hoursIdx = ds.fields.findIndex(f => f.name === 'hours');
 ds.fields[hoursIdx].missingValues = ['> 999'];
+// A rule on a LABELLED code, the SPSS-style shape this feature exists for.
+// jamovi compares == 5 against the raw cell value, but the reader shows
+// those cells as their label, so the rule must arrive translated through
+// the same label table or it is a token no cell can ever match.
+const q6Idx = ds.fields.findIndex(f => f.name === 'q6');
+ds.fields[q6Idx].missingValues = ['== 5'];
+const xdEntry = entries.find(e => e.name === 'xdata.json');
+const xd = JSON.parse(xdEntry.data.toString('utf8'));
+xd.q6.labels = xd.q6.labels.map(L =>
+    L[0] === 5 ? [5, 'Always', 'Always'].concat(L.slice(3)) : L);
+xdEntry.data = Buffer.from(JSON.stringify(xd), 'utf8');
 entries.find(e => e.name === 'metadata.json').data =
     Buffer.from(JSON.stringify(meta), 'utf8');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-omv-'));
@@ -177,15 +188,43 @@ const rt = await page.evaluate(s => {
     const t = window.PS_SHELL.project.table;
     const v = (t.columns.rt || []).filter(x => x != null);
     return { tokens: (t.missingTokensByCol || {}).rt || null,
+             dataset: (Array.isArray(t.missingTokens) && t.missingTokens.length)
+                 ? t.missingTokens : ['NA'],
              stillThere: v.indexOf(s) !== -1,
              max: Math.max.apply(null, v) };
 }, sentinel);
-ok(JSON.stringify(rt.tokens) === JSON.stringify([String(sentinel)]),
+ok(Array.isArray(rt.tokens) && rt.tokens.indexOf(String(sentinel)) !== -1,
    'the per-column missing list carries it, got ' + JSON.stringify(rt.tokens));
+// A per-column list wins WHOLE over the dataset one, so a list holding only
+// the jamovi literal would quietly stop NA counting as missing in this one
+// column while its neighbours keep it. The rule joins the tokens in force,
+// it does not replace them.
+ok(rt.dataset.every(tok => rt.tokens.indexOf(tok) !== -1),
+   'and the dataset tokens stay in force beside it, got ' +
+   JSON.stringify(rt.tokens) + ' over ' + JSON.stringify(rt.dataset));
 ok(!rt.stillThere,
    'and ' + sentinel + ' is no longer a value in rt');
 ok(rt.max < sentinel,
    'so the max is a real measurement now, got ' + rt.max);
+
+console.log('case 2b: a rule on a labelled code follows the labels');
+const q6 = await page.evaluate(() => {
+    const t = window.PS_SHELL.project.table;
+    const raw = t.raw.q6 || [];
+    return { tokens: (t.missingTokensByCol || {}).q6 || null,
+             labelled: raw.filter(v => v === 'Always').length,
+             blank: raw.filter(v => v === '').length,
+             total: raw.length,
+             valid: (t.columns.q6 || []).filter(v => v != null).length };
+});
+ok(Array.isArray(q6.tokens) && q6.tokens.indexOf('Always') !== -1,
+   'the rule arrives as the label the cells wear, got ' +
+   JSON.stringify(q6.tokens));
+ok(q6.labelled > 0,
+   'the fixture really holds labelled cells to hide, got ' + q6.labelled);
+ok(q6.valid === q6.total - q6.blank - q6.labelled,
+   'and exactly those cells are missing, got ' + q6.valid + ' valid of ' +
+   q6.total + ' with ' + q6.labelled + ' labelled and ' + q6.blank + ' blank');
 
 console.log('case 3: a rule this app cannot hold is named, not dropped');
 const toasts = await page.evaluate(() => Array.from(
@@ -197,7 +236,10 @@ ok(/hours/.test(toasts) && /> 999/.test(toasts),
 ok(/NOT applied/.test(toasts),
    'and it says plainly that it is not applied, got ' +
    JSON.stringify(toasts.slice(0, 260)));
-ok(/rt/.test(toasts),
+// The word "Imported" contains "rt", so a bare /rt/ here passed given any
+// toast at all. The applied rule is reported as the column name with its
+// literal in brackets, so that exact shape is what to look for.
+ok(new RegExp('rt \\(' + sentinel + '\\)').test(toasts),
    'while the one that WAS applied is also reported, got ' +
    JSON.stringify(toasts.slice(0, 260)));
 

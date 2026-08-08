@@ -9501,12 +9501,12 @@
     // A handful is ordinary and saying so every time would be noise. Losing
     // most of a column is the case worth interrupting for.
     if (lost > 0 && wasValid > 0 && lost >= Math.max(3, wasValid * 0.5))
-      showToast(col + " is now " + typeLabel(type) + " · " +
+      showToast(col + " is now " + typeLabel(type) + " \u00b7 " +
         (lost === wasValid
           ? "no value could be read that way, so the column is empty"
           : lost + " of " + wasValid + " values could not be read that way, " +
             "so " + (lost === 1 ? "it is" : "they are") + " missing now") +
-        " · Cmd/Ctrl+Z puts it back");
+        " \u00b7 Cmd/Ctrl+Z puts it back");
   }
   function countValid(t, col) {
     var v = t.columns[col] || [], n = 0;
@@ -9551,9 +9551,12 @@
         return t.order.indexOf(c) !== -1 && !GRID_HIDDEN_COLUMNS[c];
       });
     }
+    // r.cols is the authoritative visible-column set. Walking t.order with
+    // the rect's c0..c1 mixed the two index spaces, so with a column hidden
+    // a Cmd/Ctrl+click extend re-seeded from the wrong set and silently
+    // dropped a selected column. Same repair as the header lighting.
     var r = gridSelectionRect(), out = [];
-    if (r) for (var i = r.c0; i <= r.c1; i++)
-      if (!GRID_HIDDEN_COLUMNS[t.order[i]]) out.push(t.order[i]);
+    if (r) for (var i = 0; i < r.cols.length; i++) out.push(r.cols[i]);
     return out;
   }
   function gridToggleColumnSelection(col) {
@@ -9851,6 +9854,15 @@
       t.dateColumns[next] = t.dateColumns[oldName];
       delete t.dateColumns[oldName];
     }
+    // The jamovi filter record matches its column BY NAME. The row filter
+    // itself already followed the rename, so without this the Filter tooltip
+    // flipped to "not applied here, so it hides none of the rows" while the
+    // renamed condition kept hiding them, two contradictory sentences on the
+    // one control.
+    if (Array.isArray(t.importedFilters))
+      for (var ifi = 0; ifi < t.importedFilters.length; ifi++)
+        if (t.importedFilters[ifi] && t.importedFilters[ifi].name === oldName)
+          t.importedFilters[ifi].name = next;
     for (var ci = 0; ci < PROJECT.charts.length; ci++) {
       var roleSets = PROJECT.charts[ci].roles || {};
       for (var mod in roleSets) {
@@ -9916,6 +9928,13 @@
       if (t.excluded) delete t.excluded[col];
       if (t.computed) delete t.computed[col];
       if (t.importedFormulas) delete t.importedFormulas[col];
+      // The per-column missing list would otherwise outlive the column, ride
+      // every saved project, and quietly re-attach to any future column that
+      // happens to take the same name, declaring codes the user never
+      // declared for it. The date record is session state but a stale key
+      // still lands in saves, so both go with the column.
+      if (t.missingTokensByCol) delete t.missingTokensByCol[col];
+      if (t.dateColumns) delete t.dateColumns[col];
     }
     if (Array.isArray(t.filters))
       t.filters = t.filters.filter(function (f) {
@@ -10439,6 +10458,15 @@
     }
     if (sourceCol && t.excluded && t.excluded[sourceCol])
       t.excluded[name] = Object.assign({}, t.excluded[sourceCol]);
+    // The copy keeps the source's own missing labels, or a duplicated column
+    // re-admits the declared code into its mean, the exact harm the rename
+    // bookkeeping exists to prevent. The provenance record rides too, since
+    // the copied values are still the snapshot it describes.
+    if (sourceCol && t.missingTokensByCol && t.missingTokensByCol[sourceCol])
+      t.missingTokensByCol[name] = t.missingTokensByCol[sourceCol].slice();
+    if (sourceCol && t.importedFormulas && t.importedFormulas[sourceCol])
+      t.importedFormulas[name] =
+        Object.assign({}, t.importedFormulas[sourceCol]);
     return name;
   }
   function gridApplyMatrix(matrix) {
@@ -13810,6 +13838,11 @@
       // New chart from selection and Fill down unreachable by mouse, each of
       // them telling the user to select something they had already selected.
       // The keyboard route always worked, because F10 fires no pointerdown.
+      // The command palette earns its place the same way. Its result buttons
+      // run commands that act on the selection, and the press landed here
+      // first, so a mouse click on "New chart from selection" destroyed the
+      // selection and then asked for it. The app submenu rides along for the
+      // day it holds a selection command.
       if (GRID_SELECTION &&
           !(e.target.closest && (e.target.closest("#ps-datagrid") ||
                                  e.target.closest("#ps-cellmenu") ||
@@ -13818,6 +13851,8 @@
                                  e.target.closest("#ps-rowmenu") ||
                                  e.target.closest("#ps-menubar") ||
                                  e.target.closest("#ps-appmenu") ||
+                                 e.target.closest("#ps-appsubmenu") ||
+                                 e.target.closest("#ps-command-palette") ||
                                  e.target.closest("#ps-datamenu") ||
                                  e.target.closest("#ps-data-more"))))
         gridClearSelection();
@@ -14185,11 +14220,12 @@
     var t = PROJECT.table, r = gridSelectionRect();
     if (!t || !r) return [];
     if (GRID_SELECTION_COLS) return gridSelectedColumns();
+    // r.cols, never t.order[c0..c1]. The rect indexes VISIBLE columns, so
+    // the old walk armed the chart from a column the user cannot see and
+    // dropped one they had selected whenever a hidden column sat earlier.
     var out = [];
-    for (var c = r.c0; c <= r.c1; c++) {
-      var col = t.order[c];
-      if (col && !GRID_HIDDEN_COLUMNS[col]) out.push(col);
-    }
+    for (var c = 0; c < r.cols.length; c++)
+      if (r.cols[c]) out.push(r.cols[c]);
     return out;
   }
   function armChartFromSelection(cols) {
@@ -18875,7 +18911,7 @@
       persist(); syncAll(); render();
       n = Object.keys(gone).length;
       showToast("Merged " + n + " spelling" + (n === 1 ? "" : "s") + " in " +
-        col + " · Cmd/Ctrl+Z puts them back");
+        col + " \u00b7 Cmd/Ctrl+Z puts them back");
       return;
     }
     if (!a) return;
@@ -19795,7 +19831,23 @@
     // counted in the mean. Applied after the build and retyped once, because
     // the typing pass is what turns a token into a null.
     if (parsed.missingByCol && Object.keys(parsed.missingByCol).length) {
-      PROJECT.table.missingTokensByCol = parsed.missingByCol;
+      // A per-column list WINS WHOLE over the dataset one (t3-58a), so a
+      // list holding only the jamovi literals would quietly stop NA counting
+      // as missing in the ruled columns while their neighbours keep it. The
+      // by-hand offer seeds from whatever is in force for the column, and
+      // the file's rules join it the same way.
+      var mtb = {};
+      for (var mbk in parsed.missingByCol) {
+        if (!Object.prototype.hasOwnProperty.call(parsed.missingByCol, mbk))
+          continue;
+        var mbSeed = columnTokenList(PROJECT.table, mbk).slice();
+        for (var mbi = 0; mbi < parsed.missingByCol[mbk].length; mbi++) {
+          var mbv = String(parsed.missingByCol[mbk][mbi]);
+          if (mbSeed.indexOf(mbv) === -1) mbSeed.push(mbv);
+        }
+        mtb[mbk] = mbSeed;
+      }
+      PROJECT.table.missingTokensByCol = mtb;
       retype(PROJECT.table);
     }
     // What the file derived. The values were always arriving intact; what was

@@ -157,7 +157,40 @@ ok(!!(await sel()),
 await page.keyboard.press('Escape');
 await page.waitForTimeout(200);
 
-console.log('case 5: clicking genuinely away still clears it');
+console.log('case 5: the command palette is on the list too');
+// The palette is the route the F1 sheet recommends by name, and its result
+// buttons run commands that act on the selection. The press on a result
+// landed in the same document handler first, so a mouse click on New chart
+// from selection destroyed the selection and then asked for it. The
+// keyboard route through the palette always worked, same signature as the
+// menus.
+await page.evaluate(() =>
+    window.PS_SHELL.setGridSelection('score', 0, 'hours', 0, 'column'));
+await page.waitForTimeout(300);
+ok(JSON.stringify(await page.evaluate(() =>
+    window.PS_SHELL.selectedColumns())) === JSON.stringify(['score', 'hours']),
+   'two columns are selected to begin with');
+await page.keyboard.press(
+    (process.platform === 'darwin' ? 'Meta' : 'Control') + '+Shift+KeyP');
+await page.waitForTimeout(400);
+await page.evaluate(() => {
+    const s = document.getElementById('ps-command-search');
+    s.value = 'chart from selection';
+    s.dispatchEvent(new Event('input'));
+});
+await page.waitForTimeout(300);
+await press('[data-palette-command="data-chart-sel"]');
+await page.waitForTimeout(600);
+const armedChips = await page.evaluate(() => Array.from(
+    document.querySelectorAll('#ps-analysis-arm .ps-arm-chip'))
+    .map(c => c.textContent));
+ok(JSON.stringify(armedChips) === JSON.stringify(['score', 'hours']),
+   'the command runs on the selection it was invoked for, got ' +
+   JSON.stringify(armedChips));
+await page.keyboard.press('Escape');
+await page.waitForTimeout(300);
+
+console.log('case 6: clicking genuinely away still clears it');
 await seatCell();
 const away = await page.evaluate(() => {
     const r = document.getElementById('ps-inspector-data').getBoundingClientRect();

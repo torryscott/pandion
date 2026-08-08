@@ -47,6 +47,13 @@ await page.waitForTimeout(500);
 const toastText = () => page.evaluate(() => Array.from(
     document.querySelectorAll('.ps-toast, [class*="toast"]'))
     .map(n => n.innerText).join(' | '));
+// Snapshot and diff, never remove. Removing toast nodes takes the app's own
+// container with them (the container carries a toast class while showing),
+// so later toasts have nowhere to render and every "nothing is announced"
+// assertion after that passes no matter what the app does.
+const voidToastCount = () => page.evaluate(() => Array.from(
+    document.querySelectorAll('#ps-toast .ps-toast-item'))
+    .filter(n => /could (not )?be read/.test(n.innerText)).length);
 const validOf = c => page.evaluate(cc => {
     const v = window.PS_SHELL.project.table.columns[cc] || [];
     return v.filter(x => x != null).length;
@@ -77,28 +84,30 @@ ok((await validOf('amount')) === 8, 'undo restores every value, got ' + (await v
 
 console.log('case 3: an ordinary type change stays quiet');
 await load(['12', '8', '19', '4', '33', '7', '14', '21']);
-await page.evaluate(() => {
-    document.querySelectorAll('.ps-toast, [class*="toast"]')
-        .forEach(n => n.remove());
-});
+const before3 = await voidToastCount();
 await page.evaluate(() => window.PS_SHELL.setColType('amount', 'nominal'));
 await page.waitForTimeout(600);
 ok((await validOf('amount')) === 8, 'nothing was lost');
-const t3 = await toastText();
-ok(!/could not/.test(t3),
-   'so nothing is announced, got ' + JSON.stringify(t3));
+ok((await voidToastCount()) <= before3,
+   'so nothing new is announced, ' + before3 + ' stale before and ' +
+   (await voidToastCount()) + ' after');
 
 console.log('case 4: losing one stray value is not worth an interruption');
 await load(['12', '8', '19', '4', 'n/a', '7', '14', '21']);
-await page.evaluate(() => {
-    document.querySelectorAll('.ps-toast, [class*="toast"]')
-        .forEach(n => n.remove());
-});
+const before4 = await voidToastCount();
 await page.evaluate(() => window.PS_SHELL.setColType('amount', 'continuous'));
 await page.waitForTimeout(600);
 ok((await validOf('amount')) === 7, 'one value went missing, got ' + (await validOf('amount')));
-ok(!/could not/.test(await toastText()),
+ok((await voidToastCount()) <= before4,
    'and it is not announced, because the variable advice card already names it');
+// The counter itself must be live, or the two quiet cases above prove
+// nothing. The whole-column flip from case 1 is repeated and must count.
+await load(['$12.50', '$8.75', '$19.00', '$4.25', '$33.10', '$7.05', '$14.90', '$21.40']);
+const before5 = await voidToastCount();
+await page.evaluate(() => window.PS_SHELL.setColType('amount', 'continuous'));
+await page.waitForTimeout(600);
+ok((await voidToastCount()) > before5,
+   'the toast counter still sees a real announcement when one fires');
 
 ok(errors.length === 0, 'no page errors: ' + errors.join(' | '));
 console.log('TYPE CHANGE COST CHECK: ALL GREEN');

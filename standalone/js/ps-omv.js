@@ -241,9 +241,24 @@ window.PSOmv = (function () {
         var lits = [];
         for (var mvi = 0; mvi < f.missingValues.length; mvi++) {
           var rule = String(f.missingValues[mvi]).trim();
-          var eqm = /^==\s*(.+)$/.exec(rule);
+          // One bare token or one quoted string, nothing greedier. The old
+          // (.+) swallowed compound rules like == 1 or == 2 as the literal
+          // "1 or == 2", a token that matches no cell, so the rule was
+          // neither applied nor disclosed. Now anything compound falls
+          // through to the disclosure list like the other expression forms.
+          var eqm = /^==\s*("[^"]*"|'[^']*'|\S+)$/.exec(rule);
           if (eqm) {
             var lit = eqm[1].trim().replace(/^(["'])(.*)\1$/, "$2");
+            // jamovi rules compare the RAW cell value, but the reader above
+            // stringifies labelled integer cells as their LABEL, so == 9 on
+            // a column showing "Refused" would arrive as a token no cell can
+            // match and the rule would silently do nothing. The rule takes
+            // the same path the cells took. Continuous cells were written
+            // as String(Number), so the token is normalised the same way.
+            if (!isNum && f.dataType !== "Text" && labelOf[lit] != null)
+              lit = labelOf[lit];
+            else if (isNum && lit !== "" && isFinite(Number(lit)))
+              lit = String(Number(lit));
             if (lit !== "" && lits.indexOf(lit) === -1) lits.push(lit);
           } else {
             missingSkipped.push(f.name + " (" + rule + ")");

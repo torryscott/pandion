@@ -206,6 +206,71 @@ ok((await page.evaluate(() => JSON.stringify(
    (await page.evaluate(() => JSON.stringify(
        window.PS_SHELL.project.table.missingTokensByCol))));
 
+console.log('case D: deleting the column takes its list with it');
+// The other half of case R. A deleted column's list would otherwise outlive
+// it, ride every saved project, and quietly re-attach to any future column
+// that takes the same name, declaring codes the user never declared for it.
+await page.evaluate(() => window.PS_SHELL.deleteVariable('age_years'));
+await page.waitForTimeout(700);
+const orphan = await page.evaluate(() => JSON.stringify(
+    window.PS_SHELL.project.table.missingTokensByCol || {}));
+ok(!/age_years/.test(orphan),
+   'the list went with the column, got ' + orphan);
+await page.evaluate(() => window.PS_SHELL.insertVariable('g', false));
+await page.waitForTimeout(500);
+await page.evaluate(() => window.PS_SHELL.setWorkspace('data'));
+const newCol = await page.evaluate(() => {
+    const t = window.PS_SHELL.project.table;
+    return t.order[t.order.indexOf('g') + 1];
+});
+await page.evaluate(c => window.PS_SHELL.selectVariable(c), newCol);
+await page.waitForTimeout(300);
+await page.fill('#ps-variable-name', 'age_years');
+await page.press('#ps-variable-name', 'Enter');
+await page.waitForTimeout(900);
+await page.evaluate(() => {
+    const t = window.PS_SHELL.project.table;
+    t.raw.age_years = t.raw.g.map((x, i) => String(i === 2 ? -99 : 30 + i));
+    t.edited = true;
+    window.PS_SHELL.retypeTable();
+});
+await page.waitForTimeout(700);
+const reborn = await page.evaluate(() =>
+    window.PS_SHELL.project.table.columns.age_years.slice());
+// The fresh column is nominal, so its values are strings. What matters is
+// that -99 is a VALUE and nothing was nulled by a list from beyond the
+// grave, whichever type the column takes.
+ok(reborn.some(v => String(v) === '-99') &&
+   reborn.filter(v => v == null).length === 0,
+   'and a fresh column under the old name starts with no declared codes, ' +
+   'so -99 is a value in it, got ' + JSON.stringify(reborn));
+
+console.log('case P: a duplicate keeps the source\'s own labels');
+// The same harm through the duplicate door. The copy holds the same values,
+// so a copy that re-admits the declared code averages it.
+await page.evaluate(() => {
+    const rows = [];
+    for (let i = 0; i < 12; i++) rows.push(['g', String(i === 3 ? -99 : 20 + i)]);
+    window.PS_SHELL.loadTable('dup', ['g', 'age'], rows);
+});
+await page.waitForTimeout(700);
+await page.evaluate(() => window.PS_SHELL.setColumnMissingTokens('age', '-99'));
+await page.waitForTimeout(700);
+await page.evaluate(() => window.PS_SHELL.insertVariable('age', true));
+await page.waitForTimeout(700);
+const dup = await page.evaluate(() => {
+    const t = window.PS_SHELL.project.table;
+    const copy = t.order.filter(c => c !== 'g' && c !== 'age')[0];
+    return { copy: copy,
+             valid: (t.columns[copy] || []).filter(v => v != null).length,
+             tokens: (t.missingTokensByCol || {})[copy] || null };
+});
+ok(dup.valid === 11,
+   'eleven valid in ' + dup.copy + ', the declared code stayed missing, got ' +
+   dup.valid);
+ok(Array.isArray(dup.tokens) && dup.tokens.indexOf('-99') !== -1,
+   'because the copy carries the labels, got ' + JSON.stringify(dup.tokens));
+
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('PER-COLUMN MISSING CHECK PASS');
 await browser.close();
