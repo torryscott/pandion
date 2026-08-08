@@ -237,3 +237,67 @@ Eight probes were added across the pass, all wired into `run.sh`:
 `toolbar-scroll-cue-check`, `picker-persistence-check`,
 `compare-pairs-apa-check`, `shape-plural-check`, `find-scope-check`.
 Every one was demonstrated failing against the code before its fix.
+
+---
+
+# Cross-module closeout (Aug 8 2026): NOT CLOSEABLE
+
+Nine agents drove all seven analyses against every landed fix, because the
+whole pass - and the audit that produced it - had only ever been verified
+on Compare Groups bar charts.
+
+## Confirmed to hold on all seven
+
+`brackclaim` (with negative controls everywhere, and the RM main-effect
+exemption proved), the `graypair` note and the `Red-green color safety`
+rename (the retired string was found nowhere), the default-style routes
+(pixel evidence on three modules, and the one-shot proved re-armed per
+chart), and Cmd/Ctrl+F (all seven, both chords, with the Data negative
+control).
+
+## Two regressions the pass introduced, both now FIXED (5a094bb)
+
+1. The receipt kept the previous chart's verdict over a chart with no
+   variables, including AMBER faults and a tip quoting the outgoing
+   module's rubric. `renderChartIntoHost` returns on the placeholder
+   branch before the render tail.
+2. The pane cue's ResizeObserver watched `#ps-datacard`, which is
+   `display:none` here, so it could never fire for chart content and went
+   stale when content shrank.
+
+## Still open in THIS workspace, in priority order
+
+1. **Cmd/Ctrl+S with the picker open writes a file without the colour on
+   screen, and reports "Saved".** Same class as the reload bug just fixed,
+   and the durable path rather than the volatile one. The chord is bound on
+   a window CAPTURE listener with no focused-field guard, and
+   `saveProjectFile` flushes nothing. Needs `_commitColorPickerInPlace`
+   exported from the engine and called before the snapshot, so an approved
+   engine change and a re-minify.
+2. **A colour banked by the unload flush is not an undo step.** Convention
+   20 says every committed option is one undo step; this path breaks it.
+   Nobody LOST an undo they had (before the fix the colour was discarded
+   entirely), so this is an invariant break rather than a user-visible
+   loss - but it wants deciding, then either `_undoTrackKey`/`_undoTake` or
+   documenting.
+3. **`brackclaim`'s remedy copy names surfaces that do not exist on
+   scatter, likert, corr and dist** ("drag each leg onto a bar", "the
+   Compare pairs tab"). Brackets genuinely reach those modules - a bracket
+   carried onto a Distribution chart exported with its asterisk - so the
+   warning is right and unactionable there.
+4. **The panel header's amber count is severity-blind**
+   (`graphbuilder2.js:49795` uses `findings.length`), so the receipt says
+   "1 note - nothing here is wrong" while the panel it opens says "1 needs
+   a look" in warning amber. The line is old; the contradiction is new,
+   because this pass introduced both the note/fault split and a tip that
+   fires on ordinary default-palette charts.
+5. Rank 13's one-liner, which should ride item 1's re-minify rather than
+   wait again.
+
+## Not this workspace
+
+Rank 5 (import preview) is the Data session's file. Rank 8
+(`#ps-chart-zoom`) is the Layout session's chrome, and until it is fixed
+`run.sh` cannot reach its own end, so ALL GREEN has never printed on this
+branch. Everything here was verified by running affected probes directly
+and by two full jamovi batteries per engine change.
