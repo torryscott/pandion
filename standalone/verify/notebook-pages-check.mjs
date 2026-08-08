@@ -61,11 +61,20 @@ async function chartOrigin() {
         return { x: best.x, y: best.y };
     });
 }
+// graphType === null means KEEP THE CHART AS IT COMES, touching nothing.
+// That case matters more than the others: this helper used to poke
+// setOption('graphType', ...) before every keep, which MANUFACTURED the very
+// field whose absence was the defect, so the naming assertions passed against
+// a state a user cannot reach. A real chart's option store is empty until the
+// type is switched, and the engine writes nothing when you pick the type you
+// are already on.
 async function keepAs(graphType, section) {
     await page.evaluate(() => window.PS_SHELL.setWorkspace('chart'));
     await page.waitForTimeout(300);
-    await page.evaluate((g) => window.setOption('graphType', g), graphType);
-    await page.waitForTimeout(1500);
+    if (graphType) {
+        await page.evaluate((g) => window.setOption('graphType', g), graphType);
+        await page.waitForTimeout(1500);
+    }
     const o = await chartOrigin();
     await page.mouse.click(o.x + 40, o.y + 20, { button: 'right' });
     await page.waitForTimeout(250);
@@ -89,9 +98,16 @@ async function pageMenuAt(nth) {
 }
 
 console.log('case 1: the rail lists the pages of the section you are in');
-await keepAs('bar', 'Section 1');
+// The FIRST keep touches nothing, which is how a page is normally kept.
+const storeAtFirstKeep = await page.evaluate(() =>
+    Object.keys(window.PS_SHELL.chart().options[window.PS_SHELL.chart().module] || {}));
+await keepAs(null, 'Section 1');
 await keepAs('box', 'Section 1');
 await keepAs('violin', 'Section 1');
+ok(storeAtFirstKeep.indexOf('graphType') === -1,
+   'the first page was kept from a chart whose option store holds no ' +
+   'graphType at all, which is the ordinary case (' +
+   JSON.stringify(storeAtFirstKeep) + ')');
 await page.evaluate(() => window.PS_SHELL.setWorkspace('pinboard'));
 await page.waitForTimeout(700);
 const rows = await page.evaluate(() =>
@@ -102,7 +118,44 @@ ok(new Set(rows).size === 3,
    'and each row names its own page rather than repeating the analysis ' +
    '(' + rows.join(' | ') + ')');
 ok(rows[0].indexOf('Bar') === 0 && rows[1].indexOf('Box') === 0,
-   'the derived name leads with what kind of chart it was');
+   'the derived name leads with what kind of chart it was, INCLUDING the ' +
+   'untouched default type nothing was ever committed for');
+
+console.log('case 1b: Scatter switches type through xyBin, not graphType');
+// Scatter is structural, not an edge case: its template declares
+// graphTypeOption "xyBin", so the flyout never writes graphType at all and a
+// point cloud and a heatmap of the same two variables were indistinguishable
+// in the page list and in the export, permanently.
+await page.evaluate(() => {
+    window.PS_SHELL.setWorkspace('chart');
+    window.PS_SHELL.setModule('xyplotbuilder');
+});
+// The roles validate themselves onto the sample's two continuous columns.
+await page.waitForFunction(() =>
+    !!document.querySelector('.graphbuilder2-host svg'), null, { timeout: 8000 });
+await page.waitForTimeout(600);
+await keepAs(null, 'Section 1');                 // a plain scatter
+await page.evaluate(() => window.setOption('xyBin', 'square'));
+await page.waitForTimeout(1700);
+await keepAs(null, 'Section 1');                 // the same data as a heatmap
+await page.evaluate(() => window.PS_SHELL.setWorkspace('pinboard'));
+await page.waitForTimeout(700);
+const xyRows = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-project-pin-id]')]
+        .map(r => r.querySelector('.ps-pinrow-name').textContent).slice(-2));
+ok(xyRows[0] !== xyRows[1],
+   'a scatter and a heatmap of the same variables get different names (' +
+   xyRows.join(' | ') + ')');
+ok(/Scatter/.test(xyRows[0]) && /Heatmap/.test(xyRows[1]),
+   'and each is named for what it actually is');
+// Put the tab back so the later cases run on the chart they expect.
+await page.evaluate(() => {
+    window.PS_SHELL.setWorkspace('chart');
+    window.PS_SHELL.setModule('plotbuilder');
+});
+await page.waitForTimeout(1600);
+await page.evaluate(() => window.PS_SHELL.setWorkspace('pinboard'));
+await page.waitForTimeout(600);
 
 console.log('case 2: a row jumps to its page');
 await page.evaluate(() => {
@@ -145,9 +198,13 @@ await page.evaluate(() => {
         .find(x => /Section 1/.test(x.textContent)).click();
 });
 await page.waitForTimeout(500);
-const movedId = await page.evaluate(() =>
-    window.PS_SHELL.project.pinboards[0].pins[2].id);
-await pageMenuAt(2);
+// Index-relative, not hard-coded: earlier cases add pages to this section.
+const before4 = await page.evaluate(() =>
+    window.PS_SHELL.project.pinboards.map(b => b.pins.length));
+const movedAt = 2;
+const movedId = await page.evaluate((n) =>
+    window.PS_SHELL.project.pinboards[0].pins[n].id, movedAt);
+await pageMenuAt(movedAt);
 const pm = await menu();
 ok(pm.some(t => /^Move to section/.test(t)),
    'the page menu offers Move to section (' + pm.join(' | ') + ')');
@@ -166,8 +223,11 @@ const afterMove = await page.evaluate((id) => {
              title: pin.pageTitle, note: pin.note || '', kept: !!pin.at,
              counts: bs.map(b => b.pins.length) };
 }, movedId);
-ok(afterMove.at === 1 && afterMove.counts[0] === 2 && afterMove.counts[1] === 2,
-   'the page left Section 1 and joined Section 2');
+ok(afterMove.at === 1 &&
+   afterMove.counts[0] === before4[0] - 1 &&
+   afterMove.counts[1] === before4[1] + 1,
+   'the page left Section 1 and joined Section 2 (' +
+   JSON.stringify(before4) + ' -> ' + JSON.stringify(afterMove.counts) + ')');
 ok(afterMove.title === 'The bimodal one' && afterMove.kept,
    'carrying its title and its kept time, which re-keeping would have lost');
 ok(afterMove.active === 'b2',
@@ -184,8 +244,26 @@ const undone = await page.evaluate((id) => {
     return { at: bs.findIndex(b => b.pins.some(p => p.id === id)),
              idx: bs[0].pins.findIndex(p => p.id === id) };
 }, movedId);
-ok(undone.at === 0 && undone.idx === 2,
+ok(undone.at === 0 && undone.idx === movedAt,
    'undo returns it to its own section AND its old position');
+
+console.log('case 5b: undoing a move to a NEW section takes the section too');
+const boards5 = await page.evaluate(() => window.PS_SHELL.project.pinboards.length);
+await pageMenuAt(0);
+await clickMenu('Move to section');
+await page.waitForTimeout(300);
+await clickMenu('New section');
+await page.waitForTimeout(700);
+ok(await page.evaluate(() => window.PS_SHELL.project.pinboards.length) === boards5 + 1,
+   'the move created a section for the page');
+await page.evaluate(() => {
+    const items = [...document.querySelectorAll('#ps-toast .ps-toast-item')];
+    items.find(i => /Moved to/.test(i.textContent)).querySelector('button').click();
+});
+await page.waitForTimeout(600);
+ok(await page.evaluate(() => window.PS_SHELL.project.pinboards.length) === boards5,
+   'and undoing takes it away again, rather than leaving an empty section ' +
+   'nobody asked for');
 
 console.log('case 6: deleting, switching section, then undoing');
 const doomed = await page.evaluate(() =>

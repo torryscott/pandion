@@ -199,6 +199,9 @@ ok(/Page 1 of 1/.test(pdf.text),
 ok(/kept /.test(pdf.text), 'so is the date it was kept');
 ok(/Compare Groups: condition, score/.test(pdf.text),
    'so is the analysis and the variables it came from');
+ok(/Bar \u00b7 Compare Groups: condition, score/.test(pdf.text),
+   'led by what KIND of chart it was, so four variants kept from one chart ' +
+   'tab do not all export the identical sentence');
 ok(pdf.stamp.pages === 1 && pdf.stamp.format === 'pdf',
    'and the export stamp is unchanged in shape');
 

@@ -2138,6 +2138,7 @@
     }) : [];
     PROJECT.charts = charts.length ? charts : [newChart("Chart 1")];
     layHistoryClear();
+    nbHistoryClear();
     clearAllEngineDocState();
     for (var ci = 0; ci < PROJECT.charts.length; ci++)
       if (isLayoutTab(PROJECT.charts[ci])) layNormalizeLayout(PROJECT.charts[ci]);
@@ -3985,11 +3986,20 @@
   function nbOfferUndo(message, step) {
     showUndoToast(message, function () {
       if (!NB_UNDO.length || NB_UNDO[NB_UNDO.length - 1] !== step) {
-        showToast("A newer Notebook change has already been made", true);
+        showToast(NB_REDO.indexOf(step) !== -1
+          ? "That change has already been undone"
+          : "A newer Notebook change has already been made", true);
         return;
       }
       nbUndo();
     });
+  }
+  // A history that outlives its project is not an undo, it is a way to
+  // inject a page from the old project into the new one. The layout history
+  // is cleared at every project boundary; this joins it there.
+  function nbHistoryClear() {
+    NB_UNDO.length = 0;
+    NB_REDO.length = 0;
   }
   function nbHistoryLabel(back) {
     var stack = back ? NB_UNDO : NB_REDO;
@@ -4049,10 +4059,26 @@
       // built from srcDesc reads the same on every page kept from one
       // chart tab (Compare Groups: condition, score, four times over) -
       // the graph type is what actually tells four explorations apart.
+      // The RESOLVED graph type, not merely an overridden one. A chart's
+      // option store is EMPTY until the user switches type, and the engine
+      // writes nothing when you pick the type you are already on, so reading
+      // the store alone recorded no type at all for every page kept before a
+      // first type change - which for someone exploring by restyling is all
+      // of them. Resolve the store over the template exactly as buildPayload
+      // does. Scatter is the exception worth naming: its type switch commits
+      // xyBin rather than graphType, so a heatmap is only visible there.
       var kind = "", vars = "";
       try {
         var opts = (c.options && c.options[c.module]) || {};
-        kind = pinTypeLabel(String(opts.graphType || ""));
+        var tplp = ((window.PS_TEMPLATES || {})[c.module] || {}).payload || {};
+        var gt = typeof opts.graphType === "string" && opts.graphType
+          ? opts.graphType
+          : (typeof tplp.graphType === "string" ? tplp.graphType : "");
+        var bin = typeof opts.xyBin === "string" && opts.xyBin
+          ? opts.xyBin
+          : (typeof tplp.xyBin === "string" ? tplp.xyBin : "none");
+        if (gt === "scatter" && bin && bin !== "none") gt = "heatmap";
+        kind = pinTypeLabel(gt);
         vars = desc.indexOf(": ") !== -1
           ? desc.slice(desc.indexOf(": ") + 2) : "";
       } catch (eK) {}
@@ -4668,6 +4694,7 @@
     PROJECT.pinboards = [];
     PROJECT.ui.activeBoard = null;
     layHistoryClear();
+    nbHistoryClear();
     PROJECT.name = ex.name;
     PROJECT_REV = 0;
     FILE_SAVED_REV = null;
@@ -5632,7 +5659,9 @@
   // was to delete it and keep it again from the source chart, which threw
   // away the note and the kept time - the two things that make it a record.
   // Shaped like Send to layout, with the sections by name then New section.
-  function movePinToBoard(pinId, boardId) {
+  // bornWith, when given, is a section created FOR this move: undo removes it
+  // along with the move, and redo puts it back.
+  function movePinToBoard(pinId, boardId, bornWith) {
     var boards = pinBoards(), from = null, at = -1, pin = null, target = null;
     for (var i = 0; i < boards.length; i++) {
       for (var j = 0; j < boards[i].pins.length; j++)
@@ -5656,9 +5685,15 @@
       }
       var home = pinBoards().indexOf(from) !== -1 ? from : activePinBoard();
       home.pins.splice(Math.min(at, home.pins.length), 0, pin);
+      if (bornWith && !bornWith.pins.length) {
+        var bs = pinBoards(), bi = bs.indexOf(bornWith);
+        if (bi !== -1 && bs.length > 1) bs.splice(bi, 1);
+      }
       PROJECT.ui.activeBoard = home.id;
       PIN_SEL = pin.id;
     }, function () {
+      if (bornWith && pinBoards().indexOf(bornWith) === -1)
+        pinBoards().push(bornWith);
       var k = from.pins.indexOf(pin);
       if (k !== -1) from.pins.splice(k, 1);
       target.pins.push(pin);
@@ -5684,7 +5719,10 @@
         var b = { id: newBoardId(),
                   name: "Section " + (pinBoards().length + 1), pins: [] };
         pinBoards().push(b);
-        movePinToBoard(pinId, b.id);
+        // The section was created for this move, so undoing the move must
+        // take it away again. Without this the page came back and an empty
+        // section nobody asked for stayed behind.
+        movePinToBoard(pinId, b.id, b);
       } });
     showContextMenu(x, y, items, null);
   }
@@ -5916,7 +5954,13 @@
       [{ size: 11, fill: "#5b6470", text: head.join(" \u00b7 ") }]);
     var st = pinSourceStatus(pin);
     var src = [], drift = st.state === "changed" || st.state === "gone";
-    if (pin.srcDesc) src.push(pin.srcDesc);
+    // The TYPE leads the source line. Four variants kept from one chart tab
+    // differ only by it, and without this every one of them exported the
+    // identical sentence - the page list could tell them apart and the
+    // document handed to someone else could not.
+    if (pin.srcDesc)
+      src.push(pin.srcType ? pin.srcType + " \u00b7 " + pin.srcDesc
+                           : pin.srcDesc);
     if (st.state === "changed")
       src.push("the source chart has changed since this page was kept");
     else if (st.state === "gone")
@@ -19242,6 +19286,7 @@
     PROJECT.ui.lastChart = "c1";
     PROJECT.ui.lastLayout = null;
     layHistoryClear();
+    nbHistoryClear();
   }
   function adoptCSV(name, parsed) {
     PROJECT_CHOSEN = true;
