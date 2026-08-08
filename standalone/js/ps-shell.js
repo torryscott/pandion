@@ -19627,7 +19627,8 @@
     var rep = chartCheckReport();
     var found = rep && Array.isArray(rep.findings) ? rep.findings : null;
     if (!rep || !found) { btn.hidden = true; return; }
-    var i;
+    var i, warns = 0;
+    for (i = 0; i < found.length; i++) if (found[i].sev === "warn") warns++;
     btn.hidden = false;
     if (!found.length) {
       btn.setAttribute("data-state", "ok");
@@ -19636,18 +19637,31 @@
         " checks for its graph type and passed them all. Click to read them.");
       return;
     }
+    // Amber is reserved for a FAULT. Some checks are notes rather than
+    // faults - black-and-white legibility is the standing example, since
+    // past about six series it often cannot be fixed with color at all -
+    // and if a note painted the chip amber then most ordinary charts would
+    // sit permanently amber, which is how a signal stops being one.
+    if (!warns) {
+      btn.setAttribute("data-state", "ok");
+      btn.textContent = found.length === 1 ? "1 note" : found.length + " notes";
+      setTip(btn, found[0].title + (found.length > 1
+        ? " (and " + (found.length - 1) + " more)" : "") +
+        ". Nothing here is wrong with the chart. Click to read it.");
+      return;
+    }
     btn.setAttribute("data-state", "warn");
-    btn.textContent = found.length === 1
+    btn.textContent = warns === 1
       ? "1 thing to check"
-      : found.length + " things to check";
+      : warns + " things to check";
     // Name the worst one in the tooltip: a bare count makes the user click
     // to find out whether it matters.
     var lead = null;
     for (i = 0; i < found.length; i++)
       if (found[i].sev === "warn") { lead = found[i]; break; }
     if (!lead) lead = found[0];
-    setTip(btn, lead.title + (found.length > 1
-      ? " (and " + (found.length - 1) + " more)" : "") +
+    setTip(btn, lead.title + (found.length > warns
+      ? " (and " + (found.length - warns) + " to note)" : "") +
       ". Click to open Check my chart.");
   }
   function syncFitSizeRow() {

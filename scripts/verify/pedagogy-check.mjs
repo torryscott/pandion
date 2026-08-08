@@ -75,6 +75,19 @@ const CASES = [
       lint: ['Some items have very few responses', 'Means on a short rating scale'],
       chipClick: { chip: 'Confidence interval', expect: '% confidence interval' } },
     // ---- tier 2 ----
+    // The pill used to be called "Colorblind safety" while the rule behind
+    // it tested only the red-green family, so it could report a green pass
+    // on a chart the Vision check flagged under grayscale. It now names
+    // what it tested, and black-and-white legibility is reported
+    // separately as a NOTE (registry applies:false, so it can never show
+    // as a passed pill).
+    // NOT the place to pin the registry pill's name. On this fixture the
+    // cvd rule FIRES, so it renders as a warning card and the pill is
+    // never drawn - a lintAbsent on the old name passes whether or not the
+    // rename happened, which I confirmed by putting the old name back and
+    // watching this file stay green. The rename is pinned instead by
+    // standalone/verify/chart-check-check.mjs case 7, on a fixture where
+    // the check PASSES and the pill is therefore on screen.
     { file: 'p_cg_cvd', lint: ['may merge for color-blind readers'] },
     { file: 'w_likert2', wizard: ['Likert / Survey', 'rating-scale items'],
       wizardClicks: ['[data-mode="questions"]', '[data-go="cmp_detail"]', '[data-go="L_cg_all"]'],

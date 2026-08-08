@@ -10800,6 +10800,15 @@
         try {
             host.__gb2_serializeSvg = serializeSvgForExport;
             host.__gb2_harvestClone = _gb2HarvestClone;
+            // Host hook: let a host shell ASK what the Check graph panel
+            // would say, without opening it. Returns the same
+            // {findings, passed, total} report renderInspectorGraphLint
+            // draws, so there is exactly one judgment and no second copy
+            // to drift. jamovi never calls this; the standalone uses it
+            // to put a quiet count where the user is already looking.
+            host.__gb2_graphLint = function () {
+                try { return _graphLintFindings(); } catch (_eGl) { return null; }
+            };
             host.__gb2_accessibleDescription = function () {
                 return _gb2ChartAriaLabel(data, true);
             };
@@ -49646,6 +49655,38 @@
                         why: "Most readers can tell these apart, but under red-green color blindness (about 1 in 12 men, 1 in 200 women) they become nearly the same: " + cvdListed + (cvdPairs.length > 3 ? ", and more" : "") + ". The Theme menu's Colors tab has a Colorblind-safe palette, or add patterns or shapes as a second cue.",
                         fixGt: null });
                 }
+                // Print, not color blindness. A figure photocopied or printed
+                // without color loses hue entirely. The Vision check has always
+                // judged this (its achromatopsia tile), and the lint did not, so
+                // the two could contradict each other on the SAME chart: the
+                // pill reported color safety passed while the tile said
+                // "Placebo" and "Drug B" are hard to tell apart. Reported as
+                // INFORMATION and never as a failed check (the corrmany idiom,
+                // applies:false in the registry): past about six series a
+                // grayscale merge often cannot be solved with color at all, and
+                // a warning nobody can clear teaches people to ignore warnings.
+                if (labs && labs.length >= 2) (function () {
+                    var grayPairs = [], gA, gB;
+                    for (gA = 0; gA < labs.length; gA++)
+                        for (gB = gA + 1; gB < labs.length; gB++) {
+                            try {
+                                var dG = _okDist(
+                                    _simulateCvd(col[labs[gA]], "achromatopsia"),
+                                    _simulateCvd(col[labs[gB]], "achromatopsia"));
+                                if (isFinite(dG) && dG < 0.08)
+                                    grayPairs.push({ d: dG, a: labs[gA], b: labs[gB] });
+                            } catch (_eG) {}
+                        }
+                    if (!grayPairs.length) return;
+                    grayPairs.sort(function (x, y) { return x.d - y.d; });
+                    var grayListed = grayPairs.slice(0, 3).map(function (pr) {
+                        return '"' + pr.a + '" and "' + pr.b + '"';
+                    }).join("; ");
+                    out.push({ id: "graypair", sev: "tip",
+                        title: "Colors that merge in black and white",
+                        why: "Printed or photocopied without color these become nearly the same shade: " + grayListed + (grayPairs.length > 3 ? ", and more" : "") + ". This is a print concern rather than a color-vision one, so it is a note and not a fault. Chart settings > Accessibility can re-spread the lightness for you; past about six series, patterns, direct labels or different marker shapes are the reliable answer.",
+                        fixGt: null });
+                })();
             })();
             // ---- The full checklist (registry): every check that APPLIES
             // to this chart, by id. The panel shows fired findings as cards
@@ -49709,7 +49750,8 @@
                 { id: "legendkey", name: "Colors have a key", tip: "When color carries meaning, a legend or direct labels must decode it.", applies: _legApp },
                 { id: "hiddendata", name: "No hidden data", tip: "Parts hidden with the eye tool should be shown, or disclosed in the figure note.", applies: true },
                 { id: "coldist", name: "Distinguishable colors", tip: "Series colors should be easy to tell apart.", applies: _colApp },
-                { id: "cvd", name: "Colorblind safety", tip: "Color pairs are also checked under simulated red-green color blindness.", applies: _colApp }
+                { id: "cvd", name: "Red-green color safety", tip: "Color pairs are re-tested under simulated protanopia and deuteranopia, the red-green family. Black-and-white legibility is reported separately, and the Vision check in Chart settings judges more vision types than this.", applies: _colApp },
+                { id: "graypair", name: "Black-and-white legibility", tip: "Whether the series stay distinguishable with the color removed, as in a photocopy.", applies: false }
             ];
             var firedIds = {};
             for (var _fo = 0; _fo < out.length; _fo++) if (out[_fo] && out[_fo].id) firedIds[out[_fo].id] = 1;

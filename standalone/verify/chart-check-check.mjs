@@ -66,6 +66,12 @@ const clickIn = async (re) => {
     if (!box) throw new Error('no visible button matching ' + re);
     await page.mouse.click(box.x, box.y);
 };
+const receipt = () => page.evaluate(() => {
+    const b = document.getElementById('ps-status-check');
+    if (!b) return { absent: true };
+    return { hidden: b.hidden, state: b.getAttribute('data-state'),
+             text: b.textContent, tip: b.getAttribute('data-tip') || '' };
+});
 const openAdd = () => page.evaluate(() => {
     const b = Array.from(document.querySelectorAll('#psroot button'))
         .find(x => /add/i.test(x.getAttribute('aria-label') || ''));
@@ -185,12 +191,6 @@ if (!hasHook) {
     console.log('cases 5-6: SKIPPED (no __gb2_graphLint hook on this engine)');
     console.log('           see standalone/proto/README.md to run them');
 } else {
-    const receipt = () => page.evaluate(() => {
-        const b = document.getElementById('ps-status-check');
-        if (!b) return { absent: true };
-        return { hidden: b.hidden, state: b.getAttribute('data-state'),
-                 text: b.textContent, tip: b.getAttribute('data-tip') || '' };
-    });
     console.log('case 5: the receipt counts what the panel found');
     await page.evaluate(() => window.__gb2_setOption('annotationsJson', '[]'));
     await page.waitForTimeout(2400);
@@ -219,6 +219,51 @@ if (!hasHook) {
     await page.evaluate(() => window.PS_SHELL.setWorkspace('chart'));
     await page.waitForTimeout(900);
     ok((await receipt()).hidden === false, 'and comes back in Charts');
+}
+
+console.log('case 7: a NOTE is not a fault, on either surface');
+// The two colour surfaces used to contradict each other on an untouched
+// default-palette chart: the lint reported a green "Colorblind safety"
+// pill while Chart settings > Accessibility said two series merge under
+// grayscale. The lint tests the red-green family only, so the pill was
+// claiming more than it had checked. It now names what it tested, and
+// black-and-white legibility is reported separately as information -
+// never as a failed check, because past about six series it often cannot
+// be solved with colour at all.
+// Clear what the earlier cases armed: case 5 truncated the value axis and
+// that warning is still live, which would make this case pass for the
+// wrong reason (a fault, not a note).
+await page.evaluate(() => {
+    window.__gb2_setOption('annotationsJson', '[]');
+    window.__gb2_setOption('yMinOverride', false);
+});
+await page.waitForTimeout(2400);
+// site x score by condition: three series on the stock palette, and the
+// ONLY thing the rubric finds is the black-and-white note, which is what
+// makes this a clean test of "a note is not a fault". Grouping by the x
+// variable instead produces a degenerate chart with real warnings and
+// would have passed this case for the wrong reason.
+await page.evaluate(() => window.PS_SHELL.setRoles('plotbuilder',
+    { xvar: 'site', yvar: 'score', groupVar: 'condition' }));
+await page.waitForTimeout(2000);
+const grouped = await page.evaluate(() =>
+    document.querySelectorAll('#psroot [data-legend-row]').length);
+ok(grouped >= 2, `a grouped chart, so the colour checks apply (${grouped} series)`);
+const colour = await readPanel();
+ok(!/Colorblind safety/.test(colour),
+   'the pill no longer claims "Colorblind safety" for a red-green-only test');
+ok(/Red-green color safety/.test(colour),
+   'it names what it actually tested');
+const bw = /merge in black and white/.test(colour);
+if (bw) {
+    ok(!/Black-and-white legibility/.test(colour.split('PASSED')[1] || ''),
+       'black and white is reported as a note, never as a passed pill');
+    const note = await receipt();
+    ok(note.state === 'ok' && /note/.test(note.text),
+       `and a note leaves the receipt quiet rather than amber ("${note.text}")`);
+} else {
+    console.log('  --   this palette has no black-and-white merge; ' +
+                'note path not exercised on this fixture');
 }
 
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
