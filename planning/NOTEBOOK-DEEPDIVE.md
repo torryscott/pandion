@@ -565,11 +565,17 @@ DATASET change, and the layout reconciliation is more urgent than a footnote.
 Three things the re-audit raised that I judged not worth fixing here, and one
 that is not mine to fix. All are disclosed rather than quietly carried.
 
-- **The rail page row truncates at about twenty characters** at the default
-  rail width, so a Likert battery and a Correlation matrix can show a shared
-  prefix. The type leads the name, which is the distinguishing part, and the
-  row's tooltip and aria-label carry the whole thing. A wider rail or a
-  two-line row is the real answer and it belongs to whoever owns the rail.
+- **The rail page row still truncates**, though far less than it did. The row
+  is about 117px wide. Measured after the type fix, "Bar - condition, score"
+  needs 119px and "Histogram - score" fits outright, but "Correlation heatmap
+  - score, hours" needed 193px, so the variables were always cut off. The four
+  correlation type labels are now named for the shape (Heatmap, Circles,
+  Numbers, Mixed) rather than restating the analysis, which brings that row
+  back to about 110px and also stops the exported band reading "Correlation
+  heatmap - Correlation Matrix: a, b". What remains is a couple of pixels on
+  the longest ordinary names, with the tooltip and the aria-label carrying the
+  whole string. A wider rail or a two-line row is the real answer and it
+  belongs to whoever owns the rail.
 - **A legacy bitmap page gets no record band.** Pages kept in the first hours
   of the Notebook's life are stored as PNG, and `pinFileBytes` returns their
   bytes before the composer runs. Those pages export exactly as they did

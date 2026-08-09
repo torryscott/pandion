@@ -4122,8 +4122,14 @@
     histogram: "Histogram", density: "Density",
     histdensity: "Histogram + density", qq: "Q-Q", ecdf: "ECDF",
     pie: "Pie", donut: "Donut", pareto: "Pareto",
-    corrheatmap: "Correlation heatmap", corrcircles: "Correlation circles",
-    corrnumbers: "Correlation numbers", corrmixed: "Correlation matrix",
+    // Named for the SHAPE, not restated with the analysis. The rail row is
+    // about 117px wide and "Correlation heatmap" alone needed 193px, so the
+    // variables were always cut off; and the exported band prints this next
+    // to srcDesc, where "Correlation heatmap - Correlation Matrix: a, b"
+    // said the same word twice. Scatter's Heatmap shares the name, which the
+    // variables and the analysis line either side of it settle.
+    corrheatmap: "Heatmap", corrcircles: "Circles",
+    corrnumbers: "Numbers", corrmixed: "Mixed",
     likertdiverging: "Diverging", likertstacked: "100% stacked",
     likertmeans: "Item means"
   };
