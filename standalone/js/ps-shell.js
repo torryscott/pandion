@@ -20460,15 +20460,21 @@
       var bits = [];
       if (n) bits.push(n.toLocaleString() + " case" + (n === 1 ? "" : "s"));
       if (cells) {
-        var noun = "plotted value";
-        if (c.module === "plotbuilder") noun = "group";
-        else if (c.module === "rmplotbuilder") noun = "condition";
-        else if (c.module === "freqplotbuilder") noun = "category";
+        // Plurals are declared, not derived. Adding "s" to "category" was
+        // printing "2 categorys" under every grouped frequency chart.
+        var noun = ["plotted value", "plotted values"];
+        if (c.module === "plotbuilder") noun = ["group", "groups"];
+        else if (c.module === "rmplotbuilder") noun = ["condition", "conditions"];
+        else if (c.module === "freqplotbuilder") noun = ["category", "categories"];
+        // Distribution ships one cell per group and the engine bins the raw
+        // values itself, so bars.length is the number of distributions drawn
+        // and never the number of bins. It read "1 bin" under a fourteen-bar
+        // histogram. The bin count is not in the payload to report.
         else if (c.module === "distplotbuilder")
-          noun = /hist/.test(String(p.graphType || ""))
-            ? "bin" : "distribution group";
-        else if (c.module === "likertplotbuilder") noun = "response category";
-        bits.push(cells + " " + noun + (cells === 1 ? "" : "s"));
+          noun = ["distribution", "distributions"];
+        else if (c.module === "likertplotbuilder")
+          noun = ["response category", "response categories"];
+        bits.push(cells + " " + noun[cells === 1 ? 0 : 1]);
       }
       if (p.missingNote) bits.push(p.missingNote);
       return bits.length ? bits.join(" \u00b7 ") : "Ready";

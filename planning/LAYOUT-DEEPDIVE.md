@@ -513,6 +513,24 @@ so no saved figure changes.
 **Not built**, because it changes what a template produces and that is a
 design call rather than a defect fix.
 
+---
+
+## 13. The status bar counted the right thing and called it the wrong name
+
+**What a user feels.** A histogram with fourteen bars on screen, and a status
+bar that says "1 bin". A grouped frequency chart that says "2 categorys".
+
+**The evidence.** Two faults on one line of `chartCaseText`. The plural was
+`noun + "s"`, which is where "categorys" and "response categorys" came from.
+And Distribution ships ONE payload cell per group with the raw values inside
+it, because the engine bins client-side, so `bars.length` is the number of
+distributions drawn and never the number of bins. The bin count is not in the
+payload to report at all.
+
+**BUILT.** Declared plurals, and Distribution reports distributions. Verified
+against a chart drawing fourteen bars, where the line now reads "24 cases, 1
+distribution". Covered by `statusbar-check` case 5, demonstrated failing first
+at "24 cases, 3 categorys".
 
 ---
 
