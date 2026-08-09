@@ -16269,18 +16269,21 @@
     return it && it.group ? it.group : null;
   }
   function layExpandGroups(ids) {
-    var want = {}, out = [], items = layItems(), i;
+    var out = [], items = layItems(), i, j;
     for (i = 0; i < ids.length; i++) {
       var g = layGroupOf(ids[i]);
-      if (g) want[g] = 1;
-    }
-    for (i = 0; i < ids.length; i++) {
-      if (out.indexOf(ids[i]) === -1) out.push(ids[i]);
-      var g2 = layGroupOf(ids[i]);
-      if (!g2) continue;
-      for (var j = 0; j < items.length; j++)
-        if (items[j].group === g2 && out.indexOf(items[j].id) === -1)
-          out.push(items[j].id);
+      if (g)
+        for (j = 0; j < items.length; j++)
+          if (items[j].group === g && out.indexOf(items[j].id) === -1 &&
+              items[j].id !== ids[i]) out.push(items[j].id);
+      // The asked-for id goes LAST within its own group, and the last id in
+      // the selection is the primary. Appending group-mates after it made the
+      // primary an arbitrary member, so clicking a grouped chart panel put
+      // the resize handle and the mini toolbar on its letter instead, and the
+      // panel could not be resized at all.
+      var at = out.indexOf(ids[i]);
+      if (at !== -1) out.splice(at, 1);
+      out.push(ids[i]);
     }
     return out;
   }
@@ -16346,6 +16349,18 @@
       it.x = (Number(it.x) || 0) + d.dx;
       it.y = (Number(it.y) || 0) + d.dy;
     }
+  }
+  // A group needs two members to mean anything. Called after a REMOVAL, not
+  // from layNormalizeLayout: normalize runs on every layItems() call, so a
+  // cleanup there deleted a group that was still being assembled one push at
+  // a time, which is exactly how paste and duplicate build one.
+  function layDropOrphanGroups() {
+    var items = layItems(), counts = {}, i;
+    for (i = 0; i < items.length; i++)
+      if (items[i].group)
+        counts[items[i].group] = (counts[items[i].group] || 0) + 1;
+    for (i = 0; i < items.length; i++)
+      if (items[i].group && counts[items[i].group] < 2) delete items[i].group;
   }
   function layGroupSelected() {
     var ids = laySelectedIds();
@@ -16468,7 +16483,10 @@
     if (!active) return;
     var ids = laySelectedIds(), at = ids.indexOf(active);
     if (at === -1) ids.push(active); else ids.splice(at, 1);
-    LAYOUT_SEL = ids;
+    // Through laySetSelection, not straight into LAYOUT_SEL. This was the one
+    // path that skipped the group normalisation, so Space could take a single
+    // member out of a group and the next nudge tore the group apart for good.
+    laySetSelection(ids);
     renderLayout();
     layFocusViewport();
     layAnnounce(layItemAccessibleLabel(layItemById(active)) +
@@ -16841,7 +16859,12 @@
     return item && (item.kind === "chart" || item.kind === "image");
   }
   function layMinSize(item) {
-    return item.kind === "image" ? { w: 24, h: 24 } : { w: 120, h: 80 };
+    if (item.kind === "image") return { w: 24, h: 24 };
+    // The minimum keeps the chart's SHAPE. A flat 120 by 80 is 1.5 against
+    // the engine's 1.469, so a figure scaled onto a small page hit the floor
+    // and came back letterboxed, which is the thing panel-fitting removed.
+    var a = layChartAspect(item.chartId);
+    return { w: 120, h: Math.max(40, Math.round(120 / (a > 0 ? a : 1.469))) };
   }
   function layItemRect(item) {
     var w, h;
@@ -17494,6 +17517,7 @@
     var removed = 0;
     for (var i = items.length - 1; i >= 0; i--)
       if (ids.indexOf(items[i].id) !== -1) { items.splice(i, 1); removed++; }
+    layDropOrphanGroups();
     laySetSelection([]);
     persist(); renderLayout();
     if (returnFocus) layFocusViewport();
@@ -17564,10 +17588,16 @@
     if (!LAY_CLIP || !LAY_CLIP.length) return false;
     if (!isLayoutTab(activeChart())) return false;
     laySnapshot("paste");
-    var made = [], p = layPage();
+    var made = [], p = layPage(), pasteGroups = {};
     for (var i = 0; i < LAY_CLIP.length; i++) {
       var copy = JSON.parse(JSON.stringify(LAY_CLIP[i]));
       copy.id = layNewItemId();
+      // Fresh group ids, the way duplicate does it. Group ids are only unique
+      // within one layout and every layout's templates start at g1, so a
+      // paste into another figure collided by construction and merged the
+      // pasted items into whatever already carried that id.
+      if (copy.group) copy.group = pasteGroups[copy.group] ||
+        (pasteGroups[copy.group] = layNewGroupId());
       // Offset like a duplicate, and clamp, so a paste into a SMALLER page
       // cannot drop an item off the canvas where it is unreachable.
       var r = layItemRect(copy);
@@ -17682,11 +17712,19 @@
         " pixels, y " + Math.round(moved.y) + " pixels.");
     }
   }
-  function layResizeSelectedFree(dw, dh) {
+  // One UNIT holding one sized item, not one item. A grouped chart panel is
+  // two items and one thing, and gating on the item count refused to resize
+  // it at all while the refusal told the user to select a single panel,
+  // which grouping had just made impossible.
+  function layResizeTarget() {
     var ids = laySelectedIds();
-    if (ids.length !== 1) return false;
-    var item = layItemById(ids[0]);
-    if (!laySizedKind(item)) return false;
+    if (layUnits(ids).length !== 1) return null;
+    var sized = laySizedSelection();
+    return sized.length === 1 ? sized[0] : null;
+  }
+  function layResizeSelectedFree(dw, dh) {
+    var item = layResizeTarget();
+    if (!item) return false;
     var p = layPage(), mins = layMinSize(item);
     laySnapshot("resize", "resize");
     item.w = layClamp((Number(item.w) || 480) + dw, mins.w, p.w - item.x);
@@ -17696,10 +17734,8 @@
     return true;
   }
   function layResizeSelectedProportionally(delta) {
-    var ids = laySelectedIds();
-    if (ids.length !== 1) return false;
-    var item = layItemById(ids[0]);
-    if (!laySizedKind(item)) return false;
+    var item = layResizeTarget();
+    if (!item) return false;
     var p = layPage();
     var origin = { item: item, x: Number(item.x) || 0,
       y: Number(item.y) || 0, w: Number(item.w) || 480,
@@ -17722,14 +17758,20 @@
     layAnnounce("Exact position and size fields opened in the settings panel.");
   }
   function layChangeSelectedTextStyle(kind, amount) {
-    var ids = laySelectedIds();
-    if (ids.length !== 1) return false;
-    var item = layItemById(ids[0]);
-    if (!item || item.kind !== "text") return false;
+    // Every text item in the selection, matching the rail's Text section. A
+    // grouped panel letter used to be unreachable from the keyboard, because
+    // selecting it selects its panel too and this refused any selection of
+    // more than one item.
+    var texts = layTextTargets();
+    if (!texts.length) return false;
     laySnapshot(kind === "bold" ? "bold" : "text size",
       kind === "size" ? "fontsize" : null);
-    if (kind === "bold") item.bold = !item.bold;
-    else item.fontSize = layClamp((Number(item.fontSize) || 14) + amount, 8, 72);
+    for (var ti = 0; ti < texts.length; ti++) {
+      var item = texts[ti];
+      if (kind === "bold") item.bold = !item.bold;
+      else item.fontSize = layClamp((Number(item.fontSize) || 14) + amount, 8, 72);
+    }
+    item = texts[0];
     layClampAllItems(); persist(); renderLayout(); layFocusViewport();
     layAnnounce((kind === "bold"
       ? (item.bold ? "Bold on. " : "Bold off. ")
@@ -18101,9 +18143,9 @@
     if (!ids.length || !b) return;
     if (prop === "x") layMoveSelected(value - b.x, 0);
     else if (prop === "y") layMoveSelected(0, value - b.y);
-    else if (ids.length === 1) {
-      var item = layItemById(ids[0]), p = layPage();
-      if (!laySizedKind(item)) return;
+    else {
+      var item = layResizeTarget(), p = layPage();
+      if (!item) return;
       var mins = layMinSize(item);
       laySnapshot("resize", "resize");
       if (prop === "w") item.w = layClamp(value, mins.w, p.w - item.x);
@@ -18112,43 +18154,15 @@
       layAnnounce("Resized " + layItemAccessibleLabel(item));
     }
   }
-  function layApplyPage(preset, w, h) {
-    var p = layPage();
-    laySnapshot("page size", "page");
-    if (LAY_PRESETS[preset]) {
-      p.preset = preset; p.w = LAY_PRESETS[preset].w; p.h = LAY_PRESETS[preset].h;
-    } else {
-      p.preset = "custom";
-      p.w = Math.round(layClamp(w || p.w, 320, 4000));
-      p.h = Math.round(layClamp(h || p.h, 240, 4000));
-    }
-    p.margin = Math.round(layClamp(p.margin, 0, Math.min(p.w, p.h) / 3));
-    layClampAllItems();
-    persist(); renderLayout();
-  }
-  function layPageOrientation() {
-    var p = layPage();
-    return p.h > p.w ? "portrait" : "landscape";
-  }
-  function layApplyOrientation(orientation) {
-    orientation = orientation === "portrait" ? "portrait" : "landscape";
-    var p = layPage();
-    if (layPageOrientation() === orientation) return;
-    laySnapshot("orientation");
-    var oldW = p.w, oldH = p.h;
-    var newW = oldH, newH = oldW;
-    // ONE scale factor, not one per axis. Scaling width and height
-    // independently turned a 463 by 267 panel into 309 by 401, and a chart
-    // has a fixed aspect, so it shrank to the smaller dimension and the panel
-    // filled with white. A flipped 2 by 2 came back about two thirds empty,
-    // which is not what "scales the current arrangement to fit" promises.
-    //
-    // The factor FITS the arrangement to the new page rather than being the
-    // page's own ratio. Using min(sx, sy) keeps the shapes but shrinks on
-    // EVERY flip, so flipping there and back left the figure at 44 percent
-    // and a third flip at 30. Fitting grows as readily as it shrinks, so a
-    // flip always fills the page it lands on.
-    var items = layItems(), i;
+  // Scale the whole arrangement onto a new page, keeping every item its own
+  // shape, and centre it. Shared by the orientation flip and by a page
+  // RESIZE, which used to CLAMP instead: setting a journal single-column
+  // width squashed each panel to the page width and slid them to x 0, so all
+  // four landed on top of each other, the letters stayed where they were, and
+  // the export shipped the pile. Clamping is right for one item that has
+  // strayed; it is wrong for a whole figure whose page has changed under it.
+  function layRefitToPage(newW, newH) {
+    var p = layPage(), items = layItems(), i;
     var lo = Infinity, ln = Infinity, hi = -Infinity, hn = -Infinity;
     for (i = 0; i < items.length; i++) {
       var r = layItemRect(items[i]);
@@ -18172,13 +18186,63 @@
       items[i].x = Math.round((Number(items[i].x) || 0) * k + offX);
       items[i].y = Math.round((Number(items[i].y) || 0) * k + offY);
       // laySizedKind rather than kind === "chart", because an image is a
-      // sized item everywhere else, and leaving its box alone made a flipped
-      // figure carry one item at its old size across the shrunken panels.
+      // sized item everywhere else, and leaving its box alone made a resized
+      // figure carry one item at its old size across the rescaled panels.
       if (laySizedKind(items[i])) {
         items[i].w = Math.round((Number(items[i].w) || 480) * k);
         items[i].h = Math.round((Number(items[i].h) || 320) * k);
       }
+      // TEXT scales too. Leaving font sizes alone made panel letters keep
+      // their size while everything around them shrank, so on a small page
+      // a 20 px letter sat on top of the panel it labels.
+      if (items[i].kind === "text" && k !== 1)
+        items[i].fontSize = layClamp(
+          Math.round((Number(items[i].fontSize) || 14) * k), 8, 72);
     }
+    return k;
+  }
+  function layApplyPage(preset, w, h) {
+    var p = layPage();
+    laySnapshot("page size", "page");
+    if (LAY_PRESETS[preset]) {
+      p.preset = preset; p.w = LAY_PRESETS[preset].w; p.h = LAY_PRESETS[preset].h;
+    } else {
+      p.preset = "custom";
+      p.w = Math.round(layClamp(w || p.w, 320, 4000));
+      p.h = Math.round(layClamp(h || p.h, 240, 4000));
+    }
+    p.margin = Math.round(layClamp(p.margin, 0, Math.min(p.w, p.h) / 3));
+    var kPage = layRefitToPage(p.w, p.h);
+    layClampAllItems();
+    persist(); renderLayout();
+    if (Math.abs(kPage - 1) > 0.005)
+      layAnnounce("Page is now " + pxToUnit(p.w) + " by " + pxToUnit(p.h) +
+        " " + unitLabel() + ". The figure was scaled to " +
+        Math.round(kPage * 100) + " percent to fit.");
+  }
+  function layPageOrientation() {
+    var p = layPage();
+    return p.h > p.w ? "portrait" : "landscape";
+  }
+  function layApplyOrientation(orientation) {
+    orientation = orientation === "portrait" ? "portrait" : "landscape";
+    var p = layPage();
+    if (layPageOrientation() === orientation) return;
+    laySnapshot("orientation");
+    var oldW = p.w, oldH = p.h;
+    var newW = oldH, newH = oldW;
+    // ONE scale factor, not one per axis. Scaling width and height
+    // independently turned a 463 by 267 panel into 309 by 401, and a chart
+    // has a fixed aspect, so it shrank to the smaller dimension and the panel
+    // filled with white. A flipped 2 by 2 came back about two thirds empty,
+    // which is not what "scales the current arrangement to fit" promises.
+    //
+    // The factor FITS the arrangement to the new page rather than being the
+    // page's own ratio. Using min(sx, sy) keeps the shapes but shrinks on
+    // EVERY flip, so flipping there and back left the figure at 44 percent
+    // and a third flip at 30. Fitting grows as readily as it shrinks, so a
+    // flip always fills the page it lands on.
+    layRefitToPage(newW, newH);
     var pairs = {
       canvas: "canvasp", canvasp: "canvas",
       wide: "tall", tall: "wide",
@@ -19674,7 +19738,20 @@
     el("ps-layout-selection-properties").style.display = has ? "block" : "none";
     if (!has) return;
     var bounds = laySelectionBounds(ids);
-    var one = ids.length === 1 ? layItemById(ids[0]) : null;
+    // One UNIT rather than one item, resolved to the item the user actually
+    // reached. A grouped chart panel is two items and one thing, and the
+    // identity rail went blank the moment a letter was bound to it: no title,
+    // no "Follows <chart>" line, no live-versus-snapshot answer.
+    var one = null;
+    if (layUnits(ids).length === 1) {
+      one = layItemById(ids[ids.length - 1]);
+      if (one && ids.length > 1) {
+        // Prefer the sized member, because that is what the panel IS; a
+        // letter is a label on it.
+        var sizedOne = laySizedSelection();
+        if (sizedOne.length === 1) one = sizedOne[0];
+      }
+    }
     var srcInfo = one ? layItemSourceInfo(one) : null;
     var txtSec = el("ps-layout-text-section");
     if (txtSec) {
@@ -19719,7 +19796,7 @@
     ["x", "y", "w", "h"].forEach(function (prop) {
       el("ps-ctx-l" + prop).step = String(unitStep());
     });
-    var ctxSized = !!one && laySizedKind(one);
+    var ctxSized = !!layResizeTarget();
     // A field that cannot be typed into must not look like one that can.
     // These carry the union width and height of a multi-selection, which is
     // read-only, and used to render identically to the live X and Y beside
@@ -19728,8 +19805,8 @@
       var field = el("ps-ctx-l" + prop);
       field.disabled = !ctxSized;
       setTip(field, ctxSized ? ""
-        : ids.length > 1
-          ? "Size applies to one item at a time. Select a single panel to change it."
+        : layUnits(ids).length > 1
+          ? "Size applies to one panel at a time. Select just the one you want to change."
           : "Text items size themselves to their content.");
     });
     // Progressive disclosure (Torry, Jul 29 2026): the align row is SHOWN

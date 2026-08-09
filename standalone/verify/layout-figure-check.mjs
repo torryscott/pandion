@@ -208,7 +208,10 @@ const look = await page.evaluate(() => {
 ok(look.disabled, 'Width is disabled on a multi-selection');
 ok(look.wColor !== look.xColor,
    'and reads differently from the live X field beside it');
-ok(/single panel/i.test(look.tip), 'with a tooltip that says why');
+// Copy CHANGED with grouping: it used to say "select a single panel", which
+// grouping had just made impossible for a panel bound to its letter.
+ok(/one panel at a time/i.test(look.tip),
+   'with a tooltip that says why ("' + look.tip + '")');
 
 console.log('case 7: a panel can be pointed at a different chart');
 const geomOf = id => page.evaluate(i => {
@@ -1269,6 +1272,181 @@ ok(await page.evaluate((g) => {
        return sel.length === 2 && sel.every(i => i.group && i.group !== g);
    }, srcGroup),
    'duplicating a grouped panel gives a second group, not a four-member one');
+
+console.log('case 31: a group cannot be torn apart by accident');
+// An adversarial pass found Space bypassing the group normalisation, so one
+// member could be taken out of a group and nudged away for good.
+await page.evaluate(() => window.PS_SHELL.setWorkspace('layout'));
+await page.waitForTimeout(500);
+await page.evaluate(() => window.PS_SHELL.showLayoutGallery());
+await page.waitForTimeout(500);
+await page.click('[data-layout-template="four"]');
+await page.waitForTimeout(300);
+await page.click('[data-layout-create], #ps-layout-gallery-create');
+await page.waitForTimeout(3500);
+const pairOf = () => page.evaluate(() => {
+    const c = window.PS_SHELL.chart();
+    const panel = c.items.find(i => i.kind === 'chart' && i.group);
+    const letter = c.items.find(i => i.kind === 'text' && i.group === panel.group);
+    return { panel: panel.id, letter: letter.id,
+             dy: Math.round(letter.y - panel.y),
+             dx: Math.round(letter.x - panel.x) };
+});
+const pair = await pairOf();
+await page.evaluate((id) => window.PS_SHELL.selectLayoutItems([id]), pair.panel);
+await page.evaluate(() => document.getElementById('ps-lviewport').focus());
+await page.waitForTimeout(400);
+await page.keyboard.press('Space');
+await page.waitForTimeout(400);
+await page.keyboard.press('Alt+ArrowDown');
+await page.keyboard.press('Alt+ArrowDown');
+await page.waitForTimeout(500);
+const pairAfter = await pairOf();
+ok(pairAfter.dy === pair.dy && pairAfter.dx === pair.dx,
+   'Space then a nudge leaves the letter on its panel (' +
+   pair.dx + ',' + pair.dy + ' then ' + pairAfter.dx + ',' + pairAfter.dy + ')');
+
+console.log('case 32: a grouped panel is still a panel');
+// Grouping made the primary an arbitrary member, so clicking a grouped chart
+// panel put the resize handle and the mini toolbar on its letter, the rail
+// lost the "Follows <chart>" line, and the panel could not be resized at all
+// while the refusal told the user to select a single panel.
+await page.evaluate((id) => window.PS_SHELL.selectLayoutItems([id]), pair.panel);
+await page.waitForTimeout(600);
+const chrome = await page.evaluate(() => {
+    const owner = sel => {
+        const n = document.querySelector('#ps-lcanvas ' + sel);
+        return n ? n.closest('.ps-litem').getAttribute('data-item-id') : null;
+    };
+    const line = document.getElementById('ps-layout-source-line');
+    return { primary: (document.querySelector('.ps-litem-primary') || {})
+                 .getAttribute ? document.querySelector('.ps-litem-primary')
+                 .getAttribute('data-item-id') : null,
+             handle: owner('.ps-lhandle'), bar: owner('.ps-lbar'),
+             title: document.getElementById('ps-layout-selection-title').textContent,
+             source: getComputedStyle(line).display === 'none' ? '' : line.textContent,
+             wEnabled: !document.getElementById('ps-ctx-lw').disabled };
+});
+ok(chrome.primary === pair.panel && chrome.handle === pair.panel &&
+   chrome.bar === pair.panel,
+   'the ring, the resize handle and the toolbar all sit on the panel, not ' +
+   'its letter (' + chrome.primary + '/' + chrome.handle + '/' + chrome.bar + ')');
+ok(/Chart panel/.test(chrome.title) && /Follows /.test(chrome.source),
+   'the rail still names it and says whether it is live ("' +
+   chrome.title + '", "' + chrome.source.slice(0, 30) + '")');
+ok(chrome.wEnabled, 'and its Width field is live');
+const wBefore = await page.evaluate((id) =>
+    Math.round(window.PS_SHELL.chart().items.find(i => i.id === id).w), pair.panel);
+await page.evaluate(() => document.getElementById('ps-lviewport').focus());
+await page.keyboard.press('Alt+Equal');
+await page.waitForTimeout(500);
+ok(await page.evaluate((id) =>
+       Math.round(window.PS_SHELL.chart().items.find(i => i.id === id).w),
+       pair.panel) > wBefore,
+   'and the keyboard can resize it (' + wBefore + ' px before)');
+
+console.log('case 33: a pasted group is its own group');
+// Group ids are only unique within a layout and every template starts at g1,
+// so a paste collided by construction and merged into whatever held that id.
+await page.evaluate((id) => {
+    window.PS_SHELL.selectLayoutItems([id]);
+    window.PS_SHELL.layCopySelected();
+}, pair.panel);
+await page.waitForTimeout(400);
+const nBefore = await page.evaluate(() => window.PS_SHELL.chart().items.length);
+await page.evaluate(() => window.PS_SHELL.layPasteClipboard());
+await page.waitForTimeout(900);
+const pasted = await page.evaluate((n) => {
+    const it = window.PS_SHELL.chart().items;
+    const made = it.slice(n);
+    return { groups: [...new Set(made.map(i => i.group))],
+             clashes: made.some(m => it.slice(0, n).some(o => o.group === m.group)) };
+}, nBefore);
+ok(pasted.groups.length === 1 && pasted.groups[0],
+   'the pasted pair shares one group (' + pasted.groups.join(',') + ')');
+ok(!pasted.clashes,
+   'and it is a NEW one, so it did not merge into a group already on the page');
+
+console.log('case 34: a group of one is not a group');
+await page.evaluate(() => {
+    const c = window.PS_SHELL.chart();
+    const t = c.items.find(i => i.kind === 'text' && i.group);
+    window.PS_SHELL.selectLayoutItems([t.id]);
+    window.__orphanPanel = c.items.find(i => i.kind === 'chart' &&
+        i.group === t.group).id;
+    window.__orphanText = t.id;
+});
+await page.evaluate(() => document.getElementById('ps-lviewport').focus());
+await page.keyboard.press('Meta+Shift+g');
+await page.waitForTimeout(500);
+await page.evaluate(() => window.PS_SHELL.selectLayoutItems([window.__orphanText]));
+await page.waitForTimeout(300);
+await page.keyboard.press('Delete');
+await page.waitForTimeout(800);
+ok(await page.evaluate(() => {
+       const p = window.PS_SHELL.chart().items.find(i => i.id === window.__orphanPanel);
+       return p && !p.group;
+   }), 'a survivor does not keep a group id, or offer Ungroup for nothing');
+
+console.log('case 35: resizing the page scales the figure, it does not stack it');
+// Both audits found this independently. layClampAllItems squashed each panel
+// to the page width and slid them to x 0, so a journal single-column page
+// landed all four on top of each other, the letters stayed where they were,
+// and the export shipped the pile.
+await page.evaluate(() => window.PS_SHELL.showLayoutGallery());
+await page.waitForTimeout(500);
+await page.click('[data-layout-template="four"]');
+await page.waitForTimeout(300);
+await page.click('[data-layout-create], #ps-layout-gallery-create');
+await page.waitForTimeout(3500);
+const overlapCount = () => page.evaluate(() => {
+    const p = window.PS_SHELL.chart().items.filter(i => i.kind === 'chart');
+    let n = 0;
+    for (let a = 0; a < p.length; a++)
+        for (let b = a + 1; b < p.length; b++) {
+            const A = p[a], B = p[b];
+            if (A.x < B.x + B.w && A.x + A.w > B.x &&
+                A.y < B.y + B.h && A.y + A.h > B.y) n++;
+        }
+    return n;
+});
+ok(await overlapCount() === 0, 'the template starts with nothing overlapping');
+await page.evaluate(() => document.getElementById('ps-lunit-cm').click());
+await page.waitForTimeout(400);
+await page.fill('#ps-lpage-w', '8.5');
+await page.press('#ps-lpage-w', 'Enter');
+await page.waitForTimeout(900);
+await page.fill('#ps-lpage-h', '12');
+await page.press('#ps-lpage-h', 'Enter');
+await page.waitForTimeout(1200);
+ok(await overlapCount() === 0,
+   'and a journal single-column page still has nothing overlapping');
+ok(/scaled to \d+ percent/.test(await page.evaluate(() =>
+       document.getElementById('ps-layout-live').textContent)),
+   'the figure says it was scaled rather than doing it silently');
+const fitKept = await page.evaluate(() => {
+    const c = window.PS_SHELL.chart();
+    const bad = [];
+    document.querySelectorAll('#ps-lcanvas .ps-litem[data-kind="chart"]')
+        .forEach(it => {
+            const svg = it.querySelector('svg');
+            const vb = (svg.getAttribute('viewBox') || '').split(/\s+/).map(Number);
+            const r = it.getBoundingClientRect();
+            const s = Math.min(r.width / vb[2], r.height / vb[3]);
+            if (Math.abs(r.width - vb[2] * s) > 2 ||
+                Math.abs(r.height - vb[3] * s) > 2) bad.push(1);
+        });
+    const letters = c.items.filter(i => i.kind === 'text' && i.group).every(t => {
+        const p = c.items.find(i => i.kind === 'chart' && i.group === t.group);
+        return p && Math.abs(t.x - p.x) < 3;
+    });
+    return { letterboxed: bad.length, lettersFollow: letters };
+});
+ok(fitKept.letterboxed === 0,
+   'the panels still fit their charts at the smaller size');
+ok(fitKept.lettersFollow, 'and the letters came with their panels');
+await page.evaluate(() => document.getElementById('ps-lunit-in').click());
+await page.waitForTimeout(300);
 
 ok(errors.length === 0, 'no page errors (' + errors.join(' | ') + ')');
 console.log('\nlayout-figure-check: all cases passed');
