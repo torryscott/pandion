@@ -6499,7 +6499,7 @@
     var margin = (doc.page && doc.page.margin) || 32;
     var contentW = Math.max(160, (doc.page.w || 1008) - margin * 2);
     var w = Math.min(460, contentW);
-    var h = 310;
+    var h = Math.round(w / layChartAspect(chartId));   // see layAddChart
     var items = doc.items || (doc.items = []);
     var mx = 0, y = margin;
     for (var j = 0; j < items.length; j++) {
@@ -16028,6 +16028,33 @@
     render();
   }
   function addLayout() { activateNewLayout(newLayout()); }
+  // A chart draws at a fixed aspect and is letterboxed inside its panel, so a
+  // panel box whose shape does not match its chart carries dead space the
+  // user cannot see and cannot close. On the four-panel template that was
+  // 62 px on a 404 px panel, about 15 percent, and it mattered beyond looks:
+  // align, snapping, the smart guides, the marquee and the selection outline
+  // all act on the BOX, so the user was lining up something 31 px away from
+  // the thing they were looking at.
+  //
+  // Fitting the box to the chart changes NOTHING in the exported figure. The
+  // ink was already drawn at the fitted size and centred in the box; only the
+  // invisible rectangle changes. The engine's own canvas is the fallback for
+  // a chart that has not been captured yet.
+  var LAY_CHART_ASPECT = 720 / 490;
+  function layChartAspect(chartId) {
+    var s = CHART_SNAPS[chartId];
+    if (s && s.w > 0 && s.h > 0) return s.w / s.h;
+    return LAY_CHART_ASPECT;
+  }
+  // Shrink a cell onto the chart's aspect, keeping the cell's centre, so a
+  // grid stays a grid and the figure does not move.
+  function layFitRectToChart(r, chartId) {
+    var a = layChartAspect(chartId);
+    if (!(a > 0) || !(r.w > 0) || !(r.h > 0)) return r;
+    var w = r.w, h = r.h;
+    if (w / h > a) w = h * a; else h = w / a;
+    return { x: r.x + (r.w - w) / 2, y: r.y + (r.h - h) / 2, w: w, h: h };
+  }
   function layoutTemplateRects(key, page) {
     var m = page.margin, gap = 18;
     var x = m, y = m, w = page.w - m * 2, h = page.h - m * 2;
@@ -16090,11 +16117,14 @@
       var chartId = selects[i] && selects[i].value;
       if (!chartById(chartId) || isLayoutTab(chartById(chartId))) continue;
       var r = rects[i];
+      var cell = { x: r.x, y: r.y + labelBand, w: r.w,
+                   h: Math.max(80, r.h - labelBand) };
+      var fit = layFitRectToChart(cell, chartId);
       c.items.push({ id: "i" + (++itemNumber), kind: "chart",
-                     chartId: chartId, x: Math.round(r.x),
-                     y: Math.round(r.y + labelBand),
-                     w: Math.round(r.w),
-                     h: Math.round(Math.max(80, r.h - labelBand)) });
+                     chartId: chartId, x: Math.round(fit.x),
+                     y: Math.round(fit.y),
+                     w: Math.round(fit.w),
+                     h: Math.round(fit.h) });
     }
     if (labels) {
       for (i = 0; i < rects.length; i++) {
@@ -18719,9 +18749,13 @@
   }
   function layAddChart(chartId) {
     var pos = layStagger(), p = layPage();
+    // Height from the chart's own aspect, not a constant, so a placed panel
+    // contains its chart exactly. 460 by 310 was 1.484 against the engine's
+    // 1.469 and letterboxed by a few pixels from the moment it landed.
+    var w = Math.min(460, p.w - 48);
+    var h = Math.min(Math.round(w / layChartAspect(chartId)), p.h - 48);
     layAddItem({ id: layNewItemId(), kind: "chart", chartId: chartId,
-                 x: pos.x, y: pos.y,
-                 w: Math.min(460, p.w - 48), h: Math.min(310, p.h - 48) });
+                 x: pos.x, y: pos.y, w: w, h: h });
     render();
   }
   function layAddText(text, fontSize, bold) {

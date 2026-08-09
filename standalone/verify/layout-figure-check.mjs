@@ -899,6 +899,59 @@ ok(Math.abs(wysiwyg.exportX - 204) < 1.5,
    'and it starts where the screen puts it, inside the same 4 px inset (' +
    wysiwyg.exportX + ')');
 
+console.log('case 26: a panel box contains its chart, with nothing spare');
+// A chart draws at a fixed aspect and letterboxes inside its panel, so a box
+// whose shape does not match its chart carries dead space the user cannot
+// see and cannot close. It was 62 px on a 404 px panel, about 15 percent,
+// and align, snapping, the guides, the marquee and the selection outline all
+// act on the BOX, so the user was lining up something 31 px from the thing
+// they were looking at. The exported figure is unchanged, verified against a
+// pre-change export at the same page size: the bar runs land within a pixel
+// and the best whole-pixel alignment between the two images is zero.
+await page.evaluate(() => window.PS_SHELL.setWorkspace('layout'));
+await page.waitForTimeout(500);
+await page.evaluate(() => window.PS_SHELL.showLayoutGallery());
+await page.waitForTimeout(500);
+await page.click('[data-layout-template="four"]');
+await page.waitForTimeout(300);
+await page.click('[data-layout-create], #ps-layout-gallery-create');
+await page.waitForTimeout(3500);
+const spare = await page.evaluate(() => {
+    const out = [];
+    document.querySelectorAll('#ps-lcanvas .ps-litem[data-kind="chart"]')
+        .forEach(it => {
+            const svg = it.querySelector('svg');
+            const vb = (svg.getAttribute('viewBox') || '').split(/\s+/).map(Number);
+            const r = it.getBoundingClientRect();
+            const s = Math.min(r.width / vb[2], r.height / vb[3]);
+            out.push({ w: Math.round(r.width - vb[2] * s),
+                       h: Math.round(r.height - vb[3] * s) });
+        });
+    return out;
+});
+ok(spare.length === 4 && spare.every(v => v.w === 0 && v.h === 0),
+   'every template panel fits its chart exactly (' +
+   spare.map(v => v.w + 'x' + v.h).join(' ') + ')');
+// The two placement paths pick a height from the chart too, rather than the
+// constant 310 that was 1.484 against the engine's 1.469.
+const placed = await page.evaluate(() => {
+    const before = window.PS_SHELL.chart().items.length;
+    const c = window.PS_SHELL.charts().filter(x => x.type !== 'layout')[0];
+    document.getElementById('ps-laddchart').click();
+    return { before: before, chartId: c.id };
+});
+await page.waitForTimeout(400);
+await page.click('#ps-lchartmenu button[data-chart]');
+await page.waitForTimeout(1500);
+const added = await page.evaluate(() => {
+    const it = window.PS_SHELL.chart().items.filter(i => i.kind === 'chart').pop();
+    const s = window.PS_SHELL.snapshotOf(it.chartId);
+    return { ratio: it.w / it.h, chart: s ? s.w / s.h : null };
+});
+ok(added.chart && Math.abs(added.ratio - added.chart) < 0.01,
+   'and Add chart places a panel at the chart\'s own ratio (' +
+   added.ratio.toFixed(3) + ' against ' + added.chart.toFixed(3) + ')');
+
 ok(errors.length === 0, 'no page errors (' + errors.join(' | ') + ')');
 console.log('\nlayout-figure-check: all cases passed');
 await browser.close();
