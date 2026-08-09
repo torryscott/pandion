@@ -481,9 +481,16 @@ committed the regenerated artifacts, because 4 MB of generated files would
 bury a proposal diff that is otherwise reviewable. Regenerate them at
 whatever point this work lands.
 
-`set -e` aborts the suite there, so the dist half never ran inside `run.sh`.
-I ran it by hand against the built single-file artifact instead, which is the
-coverage that matters for a shell change. `m0-check`, `m1-shell-check`, the
+`set -e` aborts the suite there, and it is worth being exact about what that
+costs rather than calling it "the dist half". Everything after the gate is
+skipped, which is `electron-check`, `m0-check` and `m1-shell-check` against
+the built artifact, the whole `FEATURE_PROBES` loop re-run against it (102
+probes), and the three R-parity blocks (`m1-parity`, `level-order`,
+`rm-panels`). I ran ten of those by hand against the single-file artifact,
+which is the coverage that matters for a shell change but is nowhere near all
+of it. Anyone landing this should regenerate the public artifacts first and
+then let the suite run to the end, which is the only way the R-parity blocks
+and the other 92 dist probes get exercised at all. `m0-check`, `m1-shell-check`, the
 three notebook probes, `pinboard-check`, `keep-fidelity-check`,
 `copy-moment-check`, `provenance-check` and `doclifecycle-check` all pass on
 `standalone/dist/pandion-plots.html`.
