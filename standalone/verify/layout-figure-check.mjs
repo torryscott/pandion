@@ -18,6 +18,15 @@
 //   6  "Print - 300 DPI" wrote a 3150x2100 PNG with no density metadata, so
 //      Word and Photoshop read it as a 44-inch figure at 72 dpi.
 //   7  Cmd/Ctrl+0 / + / - did nothing on the layout canvas.
+//   8  Send to layout recorded no history step, so the next undo in that
+//      layout removed the sent panel AND reverted an unrelated earlier edit.
+//   9  a drag on empty canvas cleared the selection and did nothing else;
+//      there was no marquee, so multi-select was click by click.
+//  10  there was no way to make two panels the same size.
+//  11  the Text section hid itself the moment a second item was selected,
+//      so restyling four panel letters was four visits to the same panel.
+//  12  a selected chart panel's toolbar sat exactly on its own panel letter
+//      (measured: a 19x24 label under a 33x24 bar at the same x).
 //
 // PROBE LAWS honored here: playwright resolves from /tmp/node_modules via
 // createRequire; the zoom keys must be pressed with the viewport focused
@@ -356,6 +365,208 @@ ok(afterUndo.pageH === beforeSend.pageH && afterUndo.preset === beforeSend.prese
 ok(Math.abs(afterUndo.firstX - beforeSend.firstX) < 0.01,
    'while leaving the earlier alignment alone, which is the whole point ' +
    '(' + afterUndo.firstX + ' vs ' + beforeSend.firstX + ')');
+
+console.log('case 12: a drag on empty canvas selects what it touches');
+// The gesture every design tool answers the same way, and the one that makes
+// multi-select cheap enough for the rows below to be worth having. Before
+// this, a drag on empty canvas cleared the selection and did nothing else.
+// Case 8 left the page portrait with a probe image on it, so this puts the
+// fixture back to the landscape 2 by 2 the geometry below assumes.
+await page.evaluate(() => {
+    const c = window.PS_SHELL.chart();
+    c.items = c.items.filter(i => i.id !== 'imgprobe');
+    window.PS_SHELL.selectLayoutItems([]);
+});
+await page.selectOption('#ps-layout-orientation', 'landscape');
+await page.waitForTimeout(1600);
+const canvasGeom = await page.evaluate(() => {
+    const cv = document.getElementById('ps-lcanvas');
+    const r = cv.getBoundingClientRect();
+    return { l: r.left, t: r.top, z: r.width / window.PS_SHELL.chart().page.w,
+             pageW: window.PS_SHELL.chart().page.w,
+             pageH: window.PS_SHELL.chart().page.h };
+});
+const at = (x, y) => ({ x: canvasGeom.l + x * canvasGeom.z,
+                        y: canvasGeom.t + y * canvasGeom.z });
+async function marquee(x0, y0, x1, y1, mod) {
+    const a = at(x0, y0), b = at(x1, y1);
+    if (mod) await page.keyboard.down(mod);
+    await page.mouse.move(a.x, a.y);
+    await page.mouse.down();
+    await page.mouse.move((a.x + b.x) / 2, (a.y + b.y) / 2, { steps: 6 });
+    await page.waitForTimeout(120);
+    const live = await page.evaluate(() =>
+        ({ box: !!document.querySelector('.ps-lmarquee'),
+           sel: window.PS_SHELL.layoutSelection().length }));
+    await page.mouse.move(b.x, b.y, { steps: 8 });
+    await page.waitForTimeout(120);
+    await page.mouse.up();
+    if (mod) await page.keyboard.up(mod);
+    await page.waitForTimeout(450);
+    return live;
+}
+await page.evaluate(() => window.PS_SHELL.selectLayoutItems([]));
+await page.waitForTimeout(300);
+// A box down the left half of the page. Asserted on WHICH items, not how
+// many, so it stays meaningful whatever the fixture's exact geometry is.
+const half = canvasGeom.pageW * 0.49;
+const live = await marquee(2, 2, half, canvasGeom.pageH - 2);
+ok(live.box, 'a box is drawn while the pointer is down');
+ok(live.sel > 0, 'and the selection updates live, before the release');
+const leftCol = await page.evaluate(() => window.PS_SHELL.layoutSelection());
+const expectIn = ['i1', 'i3', 'i5', 'i7'], expectOut = ['i2', 'i4', 'i6', 'i8'];
+ok(expectIn.every(k => leftCol.indexOf(k) !== -1),
+   'releasing keeps the two left panels and their two labels (' +
+   leftCol.join(',') + ')');
+ok(expectOut.every(k => leftCol.indexOf(k) === -1),
+   'and nothing from the right column came with them');
+ok(await page.evaluate(() => !document.querySelector('.ps-lmarquee')),
+   'and the box is gone');
+ok(/\d+ items selected/.test(await page.evaluate(() =>
+       document.getElementById('ps-layout-live').textContent)),
+   'the count is announced');
+await page.mouse.click(at(2, 2).x, at(2, 2).y);
+await page.waitForTimeout(400);
+ok((await page.evaluate(() => window.PS_SHELL.layoutSelection())).length === 0,
+   'a press that never travels still clears, which is what it always did');
+await page.evaluate(() => window.PS_SHELL.selectLayoutItems(['i1']));
+await page.waitForTimeout(250);
+await marquee(canvasGeom.pageW * 0.52, canvasGeom.pageH * 0.5,
+              canvasGeom.pageW - 2, canvasGeom.pageH - 2, 'Shift');
+ok((await page.evaluate(() => window.PS_SHELL.layoutSelection())).indexOf('i1') !== -1,
+   'shift-drag adds to the selection rather than replacing it');
+
+console.log('case 13: Escape abandons the box and puts the selection back');
+await page.evaluate(() => window.PS_SHELL.selectLayoutItems(['i1']));
+await page.waitForTimeout(250);
+{
+    const a = at(canvasGeom.pageW * 0.52, canvasGeom.pageH * 0.5);
+    const b = at(canvasGeom.pageW - 2, canvasGeom.pageH - 2);
+    await page.mouse.move(a.x, a.y);
+    await page.mouse.down();
+    await page.mouse.move(b.x, b.y, { steps: 8 });
+    await page.waitForTimeout(120);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+}
+const afterEsc = await page.evaluate(() => window.PS_SHELL.layoutSelection());
+ok(afterEsc.length === 1 && afterEsc[0] === 'i1',
+   'the selection that was there before the drag is restored (' +
+   afterEsc.join(',') + ')');
+ok(await page.evaluate(() => !document.querySelector('.ps-lmarquee')),
+   'and the box is torn down');
+
+console.log('case 14: two panels can be made the same size in one action');
+await page.evaluate(() => {
+    const it = window.PS_SHELL.chart().items.find(i => i.kind === 'chart');
+    it.w = 300; it.h = 200;
+    window.PS_SHELL.selectLayoutItems([]);
+});
+await page.waitForTimeout(400);
+await page.evaluate(() => window.PS_SHELL.selectLayoutItems(['i1', 'i2']));
+await page.waitForTimeout(400);
+ok(await page.evaluate(() => {
+       const r = document.querySelector('.ps-inspector-samesize');
+       return r && getComputedStyle(r).display !== 'none';
+   }), 'the Same size row appears for two sized items');
+ok(/Chart 2/.test(await page.evaluate(() =>
+       document.querySelector('[data-ctx-samesize="wh"]').getAttribute('data-tip'))),
+   'and names what it will match, so "the same as what" is never a guess');
+const sizeDepth = await page.evaluate(() => window.PS_SHELL.layoutHistoryDepth());
+await page.click('[data-ctx-samesize="w"]');
+await page.waitForTimeout(600);
+// Against the target's own width rather than a literal, because an earlier
+// case round-trips the page through portrait and back and a scale of 1.5
+// then 0.667 does not land on the same integer.
+const wOnly = await page.evaluate(() => {
+    const it = window.PS_SHELL.chart().items.find(i => i.id === 'i1');
+    const tgt = window.PS_SHELL.chart().items.find(i => i.id === 'i2');
+    return { w: Math.round(it.w), h: Math.round(it.h), tw: Math.round(tgt.w) };
+});
+ok(wOnly.w === wOnly.tw && wOnly.h === 200,
+   'Width matches the width and leaves the height alone (' +
+   wOnly.w + 'x' + wOnly.h + ', target width ' + wOnly.tw + ')');
+await page.click('[data-ctx-samesize="wh"]');
+await page.waitForTimeout(600);
+ok(await page.evaluate(() => {
+       const a = window.PS_SHELL.chart().items.find(i => i.id === 'i1');
+       const b = window.PS_SHELL.chart().items.find(i => i.id === 'i2');
+       return Math.round(a.w) === Math.round(b.w) && Math.round(a.h) === Math.round(b.h);
+   }), 'and Both matches both');
+ok(await page.evaluate(() => window.PS_SHELL.layoutHistoryDepth()) === sizeDepth + 2,
+   'each is one history entry');
+await page.evaluate(() => window.PS_SHELL.selectLayoutItems(['i5', 'i6']));
+await page.waitForTimeout(400);
+ok(await page.evaluate(() =>
+       getComputedStyle(document.querySelector('.ps-inspector-samesize')).display === 'none'),
+   'and it hides for text items, which size themselves to their content');
+
+console.log('case 15: a set of text items restyles together');
+await page.evaluate(() => window.PS_SHELL.selectLayoutItems(['i5', 'i6', 'i7', 'i8']));
+await page.waitForTimeout(450);
+const txtSec = () => page.evaluate(() => {
+    const e = document.getElementById('ps-layout-text-section');
+    const n = document.getElementById('ps-ltx-size-num');
+    return { shown: getComputedStyle(e).display !== 'none',
+             title: e.querySelector('.ps-inspector-section-title').textContent,
+             size: n.value, placeholder: n.placeholder,
+             italic: document.getElementById('ps-ltx-italic').getAttribute('aria-pressed') };
+});
+const four = await txtSec();
+ok(four.shown, 'the Text section is there with four labels selected');
+ok(/4 items/.test(four.title), 'and says how many it is about to change ("' +
+   four.title + '")');
+await page.evaluate(() => {
+    const n = document.getElementById('ps-ltx-size-num');
+    n.value = '11';
+    n.dispatchEvent(new Event('change', { bubbles: true }));
+});
+await page.waitForTimeout(700);
+ok(await page.evaluate(() =>
+       window.PS_SHELL.chart().items.filter(i => i.kind === 'text')
+           .every(i => i.fontSize === 11)),
+   'one edit changes all four');
+await page.evaluate(() => document.getElementById('ps-lviewport').focus());
+await page.keyboard.press('Meta+z');
+await page.waitForTimeout(700);
+ok(await page.evaluate(() =>
+       window.PS_SHELL.chart().items.filter(i => i.kind === 'text')
+           .every(i => i.fontSize !== 11)),
+   'and one undo takes all four back');
+await page.evaluate(() => {
+    const it = window.PS_SHELL.chart().items.find(i => i.text === 'B');
+    it.fontSize = 30; it.italic = true;
+    window.PS_SHELL.selectLayoutItems(['i5', 'i6', 'i7', 'i8']);
+});
+await page.waitForTimeout(500);
+const mixed = await txtSec();
+ok(mixed.size === '' && /Mixed/i.test(mixed.placeholder),
+   'where they disagree the field says Mixed rather than showing one of them');
+ok(mixed.italic === 'mixed', 'and a toggle reports aria-pressed="mixed"');
+
+console.log('case 16: selecting a panel does not cover its own letter');
+await page.evaluate(() => window.PS_SHELL.selectLayoutItems(['i1']));
+await page.waitForTimeout(450);
+const barHits = await page.evaluate(() => {
+    const bar = document.querySelector('#ps-lcanvas .ps-lbar');
+    if (!bar) return null;
+    const b = bar.getBoundingClientRect();
+    const hit = r => !(b.right < r.left || b.left > r.right ||
+                       b.bottom < r.top || b.top > r.bottom);
+    const labels = [...document.querySelectorAll(
+        '#ps-lcanvas .ps-litem[data-kind="text"]')].map(e => e.getBoundingClientRect());
+    const badge = document.querySelector('#ps-lcanvas .ps-litem-srcbadge');
+    const handle = document.querySelector('#ps-lcanvas .ps-lhandle');
+    return { label: labels.some(hit),
+             badge: badge ? hit(badge.getBoundingClientRect()) : false,
+             handle: handle ? hit(handle.getBoundingClientRect()) : false };
+});
+ok(barHits && !barHits.label,
+   'the panel toolbar clears every panel letter on the page');
+ok(barHits && !barHits.badge && !barHits.handle,
+   'and neither the Live badge nor the resize handle');
 
 ok(errors.length === 0, 'no page errors (' + errors.join(' | ') + ')');
 console.log('\nlayout-figure-check: all cases passed');

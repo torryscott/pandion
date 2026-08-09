@@ -16409,42 +16409,74 @@
     layTextApply("text color", "ltx-color",
       function (it) { it.color = hex; }, live);
   }
-  function layTextSelected() {
-    var ids = laySelectedIds();
-    if (ids.length !== 1) return null;
-    var item = layItemById(ids[0]);
-    return item && item.kind === "text" ? item : null;
+  // Every text item in the selection, not only a lone one. A figure's panel
+  // letters are four separate items, and restyling them used to be four
+  // separate visits to this panel because the section hid itself the moment a
+  // second thing was selected.
+  //
+  // A SUBSET is allowed on purpose. A marquee that catches a column catches
+  // its labels with it, and requiring an all-text selection would make the
+  // gesture that finds the labels the one gesture that cannot style them. The
+  // section heading says how many it is about to change.
+  function layTextTargets() {
+    var ids = laySelectedIds(), out = [];
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (it && it.kind === "text") out.push(it);
+    }
+    return out;
   }
   function layTextApply(label, key, fn, live) {
-    var item = layTextSelected();
-    if (!item) return;
+    var items = layTextTargets();
+    if (!items.length) return;
     laySnapshot(label, key);
-    fn(item);
+    for (var i = 0; i < items.length; i++) fn(items[i]);
     layClampAllItems();
     persist(!live);
     renderLayout();
-    layTextSyncControls(item);
+    layTextSyncControls(items);
   }
   function layTextSyncControls(item) {
-    function setVal(id, v) {
-      var n = el(id);
-      if (n && document.activeElement !== n) n.value = String(v);
+    // Takes one item or a set. Where the set disagrees the control says so
+    // rather than picking one member's value and implying the rest match:
+    // a number box goes blank with a Mixed placeholder, a toggle reports
+    // aria-pressed="mixed", and no colour chip is marked current.
+    var items = Array.isArray(item) ? item : (item ? [item] : []);
+    if (!items.length) return;
+    item = items[0];
+    function agree(read) {
+      for (var i = 1; i < items.length; i++)
+        if (read(items[i]) !== read(items[0])) return false;
+      return true;
     }
-    var fs = Math.max(8, Math.min(72, Number(item.fontSize) || 14));
-    setVal("ps-ltx-size", fs);
-    setVal("ps-ltx-size-num", fs);
-    var rot = layTextRotate(item);
-    setVal("ps-ltx-rot", rot);
-    setVal("ps-ltx-rot-num", rot);
+    function setVal(id, v, mixed) {
+      var n = el(id);
+      if (!n || document.activeElement === n) return;
+      if (mixed && n.type === "number") { n.value = ""; n.placeholder = "Mixed"; }
+      else { n.value = String(v); if (n.type === "number") n.placeholder = ""; }
+    }
+    var readSize = function (t) {
+      return Math.max(8, Math.min(72, Number(t.fontSize) || 14));
+    };
+    var fs = readSize(item), fsMixed = !agree(readSize);
+    setVal("ps-ltx-size", fs, false);
+    setVal("ps-ltx-size-num", fs, fsMixed);
+    var rot = layTextRotate(item), rotMixed = !agree(layTextRotate);
+    setVal("ps-ltx-rot", rot, false);
+    setVal("ps-ltx-rot-num", rot, rotMixed);
     el("ps-ltx-bold").setAttribute("aria-pressed",
-      item.bold ? "true" : "false");
+      !agree(function (t) { return !!t.bold; }) ? "mixed"
+        : item.bold ? "true" : "false");
     el("ps-ltx-italic").setAttribute("aria-pressed",
-      item.italic ? "true" : "false");
+      !agree(function (t) { return !!t.italic; }) ? "mixed"
+        : item.italic ? "true" : "false");
     var cur = layTextColor(item).toLowerCase();
+    var colMixed = !agree(function (t) { return layTextColor(t).toLowerCase(); });
     var chips = el("ps-ltx-swatches").querySelectorAll("button[data-color]");
     for (var i = 0; i < chips.length; i++)
       chips[i].setAttribute("aria-pressed",
-        chips[i].getAttribute("data-color") === cur ? "true" : "false");
+        !colMixed && chips[i].getAttribute("data-color") === cur
+          ? "true" : "false");
     if (!LTX_PICKING) {
       var hsv = ltxHexToHsv(cur);
       if (hsv) LTX_HSV = hsv;
@@ -17099,12 +17131,21 @@
   }
   function layMiniBar(item) {
     var bar = mkEl("div", "ps-lbar");
-    bar.style.left = "0";
+    bar.style.left = item.kind === "text" ? "0" : "50%";
+    bar.style.transform = item.kind === "text" ? "" : "translateX(-50%)";
     // TEXT items park the bar BELOW the box (Torry's screenshot, Aug 6
     // 2026): the rotate grip owns the top-centre, and on a narrow box
     // the bar's first button sat exactly under the knob. Below, the two
     // can never meet at any width or rotation; sized items keep the bar
     // above (they have no grip, and the resize handle owns the bottom).
+    // A sized item's bar is CENTRED on its top edge. The top-LEFT is where
+    // the figure's own panel letter sits and the bar covered it exactly
+    // (measured, a 19x24 label under a 33x24 bar at the same x), so selecting
+    // panel A hid the A. The letter is content and ships in the export, the
+    // bar is chrome, so the chrome moves. Centre rather than below, because
+    // below is the NEXT row's letter in a labelled grid, and rather than
+    // right, which is the Live badge. Text items keep the bar below them:
+    // their rotate grip owns the top centre.
     bar.style.top = item.kind === "text" ? "calc(100% + 6px)" : "-34px";
     bar.setAttribute("aria-hidden", "true");
     if (item.kind === "text") {
@@ -17730,6 +17771,58 @@
       : "Those panels are already lined up.");
     return true;
   }
+  // ---- Same size. The second reflex after align in every multi-panel
+  // figure, and the one the rail had no answer to: you read a width off one
+  // panel, select the other, and type it in, twice.
+  //
+  // Sized to the PRIMARY, which is the last item added to the selection, the
+  // same key-object convention Illustrator uses. The buttons name it so the
+  // question "the same as what" never has to be guessed, and text items are
+  // skipped entirely because they size themselves to their content.
+  function laySizedSelection() {
+    var ids = laySelectedIds(), out = [];
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (it && laySizedKind(it)) out.push(it);
+    }
+    return out;
+  }
+  function laySameSizeTarget() {
+    var pool = laySizedSelection();
+    if (pool.length < 2) return null;
+    var primary = layItemById(layPrimaryId());
+    if (primary && laySizedKind(primary)) return primary;
+    return pool[pool.length - 1];
+  }
+  function laySameSizeLabel(item) {
+    if (!item) return "";
+    if (item.kind === "chart") {
+      var c = chartById(item.chartId);
+      return c ? (c.name || "that panel") : "that panel";
+    }
+    return item.srcChart ? "that Notebook page" : "that image";
+  }
+  function laySameSize(dim) {
+    var target = laySameSizeTarget();
+    if (!target) return false;
+    var pool = laySizedSelection(), p = layPage(), changed = 0;
+    laySnapshot("same size");
+    for (var i = 0; i < pool.length; i++) {
+      var it = pool[i];
+      if (it === target) continue;
+      var mins = layMinSize(it);
+      if (dim !== "h")
+        it.w = layClamp(Number(target.w) || it.w, mins.w, p.w - (Number(it.x) || 0));
+      if (dim !== "w")
+        it.h = layClamp(Number(target.h) || it.h, mins.h, p.h - (Number(it.y) || 0));
+      changed++;
+    }
+    persist(); renderLayout();
+    layAnnounce("Matched " + changed +
+      (changed === 1 ? " item" : " items") + " to " +
+      laySameSizeLabel(target) + ".");
+    return true;
+  }
   function layApplyInspector(prop, value) {
     // Typed in the user's unit, applied in pixels.
     value = unitToPx(value);
@@ -17920,7 +18013,10 @@
       if (openEd) openEd.blur();
       var itemEl = e.target.closest ? e.target.closest(".ps-litem") : null;
       if (!itemEl) {
-        if (laySelectedIds().length) { laySetSelection([]); renderLayout(); }
+        // Arm a marquee rather than clearing straight away. A press that
+        // never travels still clears, on pointer-up.
+        layMarqueeStart(e, canvas);
+        e.preventDefault();
         return;
       }
       var id = itemEl.getAttribute("data-item-id");
@@ -18063,6 +18159,7 @@
         // A live drag outranks the selection: cancel it and keep the
         // selection, which is what every other cancel in the app does.
         if (layCancelDrag()) { e.preventDefault(); return; }
+        if (layMarqueeCancel()) { e.preventDefault(); return; }
         if (ids.length) {
           e.preventDefault(); laySetSelection([]); renderLayout();
         }
@@ -18144,6 +18241,131 @@
         if (isLayoutTab(activeChart()) && layView().zoom === "fit") renderLayout();
       }, 100);
     });
+  }
+  // ---- Marquee selection. Dragging on empty canvas used to clear the
+  // selection and nothing else, which is the one gesture every design tool
+  // answers the same way and the one that makes multi-select cheap enough to
+  // be worth having. Everything that acts on several items at once (align,
+  // plot-area alignment, same size, restyling a set of labels) was gated
+  // behind clicking each one.
+  //
+  // Deliberately INTERSECT rather than contain, the Figma and Illustrator
+  // rule. A panel label is a small item at a panel's corner, and requiring a
+  // box that fully encloses it makes the tiny things the hardest to catch.
+  //
+  // The box lives INSIDE the canvas so it inherits the zoom transform and can
+  // be positioned in ordinary page pixels, which is also why every pointer
+  // delta here is divided by the zoom, the same rule the item drag follows.
+  var LAY_MARQ = null;
+  function layMarqueeRect(d) {
+    return { x: Math.min(d.x0, d.x1), y: Math.min(d.y0, d.y1),
+             w: Math.abs(d.x1 - d.x0), h: Math.abs(d.y1 - d.y0) };
+  }
+  function layMarqueeHits(r) {
+    var items = layItems(), out = [];
+    for (var i = 0; i < items.length; i++) {
+      var b = layItemRect(items[i]);
+      if (b.x < r.x + r.w && b.x + b.w > r.x &&
+          b.y < r.y + r.h && b.y + b.h > r.y) out.push(items[i].id);
+    }
+    return out;
+  }
+  function layMarqueeStart(e, canvas) {
+    var z = layZoom(), box = canvas.getBoundingClientRect();
+    LAY_MARQ = {
+      x0: (e.clientX - box.left) / z, y0: (e.clientY - box.top) / z,
+      x1: (e.clientX - box.left) / z, y1: (e.clientY - box.top) / z,
+      sx: e.clientX, sy: e.clientY, zoom: z, box: box, armed: false,
+      // Shift or Cmd/Ctrl ADDS to what is already selected, matching the
+      // click gesture directly above this one.
+      add: !!(e.shiftKey || e.metaKey || e.ctrlKey),
+      // Captured whatever the modifier state, because `add` decides what the
+      // box UNIONS with while `base` is what Escape has to put back. Storing
+      // it only for the additive case made a cancelled plain drag leave the
+      // selection empty instead of restoring it.
+      base: laySelectedIds()
+    };
+    document.addEventListener("pointermove", layMarqueeMove);
+    document.addEventListener("pointerup", layMarqueeUp);
+  }
+  function layMarqueeMove(e) {
+    var d = LAY_MARQ;
+    if (!d) return;
+    if (!d.armed &&
+        Math.abs(e.clientX - d.sx) < 4 && Math.abs(e.clientY - d.sy) < 4) return;
+    if (!d.armed) {
+      d.armed = true;
+      var cv = el("ps-lcanvas");
+      d.el = mkEl("div", "ps-lmarquee");
+      d.el.setAttribute("aria-hidden", "true");
+      if (cv) cv.appendChild(d.el);
+    }
+    var p = layPage();
+    d.x1 = layClamp((e.clientX - d.box.left) / d.zoom, 0, p.w);
+    d.y1 = layClamp((e.clientY - d.box.top) / d.zoom, 0, p.h);
+    var r = layMarqueeRect(d);
+    if (d.el) {
+      d.el.style.left = r.x + "px"; d.el.style.top = r.y + "px";
+      d.el.style.width = r.w + "px"; d.el.style.height = r.h + "px";
+    }
+    // Live, so the user sees what they are about to get. Selecting through
+    // laySetSelection rather than renderLayout keeps the box itself alive;
+    // a full rebuild would destroy the node the gesture is drawing into.
+    var hits = layMarqueeHits(r);
+    if (d.add)
+      for (var i = 0; i < d.base.length; i++)
+        if (hits.indexOf(d.base[i]) === -1) hits.push(d.base[i]);
+
+    laySetSelection(hits);
+    layMarqueePaint(hits);
+    laySyncInspector();
+    e.preventDefault();
+  }
+  // Selection chrome without a rebuild: the classes renderLayout would set.
+  function layMarqueePaint(ids) {
+    var cv = el("ps-lcanvas");
+    if (!cv) return;
+    var nodes = cv.querySelectorAll(".ps-litem");
+    for (var i = 0; i < nodes.length; i++) {
+      var on = ids.indexOf(nodes[i].getAttribute("data-item-id")) !== -1;
+      nodes[i].classList.toggle("ps-litem-sel", on);
+      nodes[i].classList.remove("ps-litem-primary");
+    }
+  }
+  function layMarqueeTeardown() {
+    var d = LAY_MARQ;
+    LAY_MARQ = null;
+    document.removeEventListener("pointermove", layMarqueeMove);
+    document.removeEventListener("pointerup", layMarqueeUp);
+    if (d && d.el && d.el.parentNode) d.el.parentNode.removeChild(d.el);
+    return d;
+  }
+  function layMarqueeUp() {
+    var d = layMarqueeTeardown();
+    if (!d) return;
+    if (!d.armed) {
+      // A press that never travelled is the old click-on-empty-space, which
+      // clears the selection.
+      if (laySelectedIds().length) { laySetSelection([]); renderLayout(); }
+      return;
+    }
+    var n = laySelectedIds().length;
+    renderLayout();
+    layAnnounce(n ? n + (n === 1 ? " item selected." : " items selected.")
+                  : "Nothing in that area.");
+  }
+  // Escape abandons the box and puts the selection back, matching the way
+  // Escape abandons an item drag.
+  function layMarqueeCancel() {
+    var d = LAY_MARQ;
+    if (!d) return false;
+    var base = d.base.slice(), armed = d.armed;
+    layMarqueeTeardown();
+    if (!armed) return false;
+    laySetSelection(base);
+    renderLayout();
+    layAnnounce("Selection box cancelled.");
+    return true;
   }
   function layPointerMove(e) {
     var d = LAY_DRAG;
@@ -19055,9 +19277,13 @@
     var srcInfo = one ? layItemSourceInfo(one) : null;
     var txtSec = el("ps-layout-text-section");
     if (txtSec) {
-      var oneText = one && one.kind === "text" ? one : null;
-      txtSec.style.display = oneText ? "" : "none";
-      if (oneText) layTextSyncControls(oneText);
+      var texts = layTextTargets();
+      txtSec.style.display = texts.length ? "" : "none";
+      var txtTitle = txtSec.querySelector(".ps-inspector-section-title");
+      if (txtTitle)
+        txtTitle.textContent = texts.length > 1
+          ? "Text (" + texts.length + " items)" : "Text";
+      if (texts.length) layTextSyncControls(texts);
     }
     el("ps-layout-selection-title").textContent = one
       ? (one.kind === "chart"
@@ -19142,12 +19368,26 @@
         : "Move these panels so their x axes sit on one line");
       if (live) anyPlot = true;
     }
+    // Same size appears on the same rule as the rows above it, once the
+    // selection actually holds two things that HAVE a size.
+    var sameRow = document.querySelector(".ps-inspector-samesize");
+    var sameTarget = laySameSizeTarget();
+    if (sameRow) {
+      sameRow.style.display = sameTarget ? "" : "none";
+      var sameBtns = sameRow.querySelectorAll("[data-ctx-samesize]");
+      for (i = 0; i < sameBtns.length; i++) {
+        var dim = sameBtns[i].getAttribute("data-ctx-samesize");
+        setTip(sameBtns[i], "Match the " +
+          (dim === "w" ? "width" : dim === "h" ? "height" : "width and height") +
+          " of " + laySameSizeLabel(sameTarget));
+      }
+    }
     if (plotRow) {
       plotRow.style.display = anyPlot ? "" : "none";
       var visible = 0;
       for (i = 0; i < plotBtns.length; i++)
         if (plotBtns[i].style.display !== "none") visible++;
-      plotRow.querySelector(".ps-inspector-plotalign-row").style
+      plotRow.querySelector(".ps-inspector-subrow-cells").style
         .gridTemplateColumns = "repeat(" + Math.max(1, visible) + ", 1fr)";
     }
   }
@@ -19716,6 +19956,11 @@
     for (var pi = 0; pi < plotAlign.length; pi++)
       plotAlign[pi].addEventListener("click", function () {
         layAlignPlots(this.getAttribute("data-ctx-plotalign"));
+      });
+    var sameSize = document.querySelectorAll("[data-ctx-samesize]");
+    for (var si = 0; si < sameSize.length; si++)
+      sameSize[si].addEventListener("click", function () {
+        laySameSize(this.getAttribute("data-ctx-samesize"));
       });
   }
 

@@ -1120,6 +1120,13 @@
     display: none; position: absolute; z-index: 1001; pointer-events: none;
     background: #d2267a;
   }
+  /* The selection box. Built from the accent already used for a selected
+     item, so a marquee reads as the same act as clicking one. */
+  .ps-lmarquee {
+    position: absolute; z-index: 1002; pointer-events: none;
+    border: 1px solid var(--ps-accent);
+    background: rgba(53, 115, 189, 0.10);
+  }
   .ps-lguide-v { top: 0; bottom: 0; width: 1px; }
   .ps-lguide-h { left: 0; right: 0; height: 1px; }
   .ps-lmissing {
@@ -2623,11 +2630,16 @@
   .ps-inspector-field input:disabled {
     color: var(--ps-muted); background: var(--ps-s2); cursor: default;
   }
-  .ps-inspector-plotalign { margin-top: 7px; }
-  .ps-inspector-plotalign-row {
+  /* Shared look for the rows under Align. The identity classes
+     (ps-inspector-plotalign, ps-inspector-samesize) are for finding a row,
+     never for styling it, so adding a second row can never make the first
+     one's querySelector match the wrong element. */
+  .ps-inspector-subrow { margin-top: 7px; }
+  .ps-inspector-subrow-cells {
     display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px;
   }
-  .ps-inspector-plotalign-row .ps-btn { padding: 4px 3px; font-size: 10px; }
+  .ps-inspector-subrow-cells .ps-btn { padding: 4px 3px; font-size: 10px; }
+  .ps-inspector-samesize-row { grid-template-columns: repeat(3, 1fr); }
   /* The section title's own vocabulary, one notch quieter. This labels a
      row inside a section rather than the section itself. */
   .ps-inspector-sublabel {
@@ -4408,9 +4420,26 @@
                when the selection actually holds two chart panels that share
                a column (or a row), which is when the action can do
                something. -->
-          <div class="ps-inspector-plotalign" style="display:none;">
+          <!-- Same size. Sized to the PRIMARY, the last item added to the
+               selection, and the buttons name it so "the same as what" is
+               never a guess. Text items are skipped; they size themselves to
+               their content. -->
+          <div class="ps-inspector-subrow ps-inspector-samesize"
+               style="display:none;">
+            <span class="ps-inspector-sublabel">Same size</span>
+            <div class="ps-inspector-subrow-cells ps-inspector-samesize-row">
+              <button type="button" class="ps-btn"
+                      data-ctx-samesize="w">Width</button>
+              <button type="button" class="ps-btn"
+                      data-ctx-samesize="h">Height</button>
+              <button type="button" class="ps-btn"
+                      data-ctx-samesize="wh">Both</button>
+            </div>
+          </div>
+          <div class="ps-inspector-subrow ps-inspector-plotalign"
+               style="display:none;">
             <span class="ps-inspector-sublabel">Plot areas</span>
-            <div class="ps-inspector-plotalign-row">
+            <div class="ps-inspector-subrow-cells ps-inspector-plotalign-row">
               <button type="button" class="ps-btn"
                       data-ctx-plotalign="left">Left axes</button>
               <button type="button" class="ps-btn"
