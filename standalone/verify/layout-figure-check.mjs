@@ -246,16 +246,30 @@ await page.evaluate(() => {
     window.PS_SHELL.chart().items.push({ id: 'imgprobe', kind: 'image', src: src,
         natW: 200, natH: 100, x: 300, y: 250, w: 400, h: 200 });
     window.PS_SHELL.selectLayoutItems([]);
+    window.beforeFlipPanelW =
+        window.PS_SHELL.chart().items.find(i => i.kind === 'chart').w;
 });
 await page.waitForTimeout(400);
 await page.selectOption('#ps-layout-orientation', 'portrait');
 await page.waitForTimeout(1600);
-const img = await page.evaluate(() =>
-    window.PS_SHELL.chart().items.find(i => i.id === 'imgprobe'));
-ok(img.w !== 400 && img.h !== 200,
-   'the image box scaled with the page (' + img.w + 'x' + img.h + ')');
-ok(Math.abs(img.w / 400 - 672 / 1008) < 0.02,
-   'by the same factor the page did');
+// Against a PANEL's factor, not the page's ratio. Case 27 changed the flip
+// to fit the arrangement to the new page rather than scale by the page's own
+// ratio, and this assertion had been passing on the old contract by luck.
+const flipScale = await page.evaluate(() => {
+    const it = window.PS_SHELL.chart().items;
+    const img = it.find(i => i.id === 'imgprobe');
+    const panel = it.find(i => i.kind === 'chart');
+    return { img: img.w / 400, imgH: img.h / 200,
+             panel: panel.w / beforeFlipPanelW };
+});
+ok(flipScale.img !== 1,
+   'the image box scaled with the flip (factor ' +
+   flipScale.img.toFixed(3) + ')');
+ok(Math.abs(flipScale.img - flipScale.panel) < 0.02 &&
+   Math.abs(flipScale.img - flipScale.imgH) < 0.02,
+   'by the same factor as the panels, and the same on both axes, so it keeps ' +
+   'its shape (' + flipScale.img.toFixed(3) + ' against ' +
+   flipScale.panel.toFixed(3) + ')');
 
 console.log('case 9: the zoom keys every canvas application binds');
 await page.evaluate(() => {
@@ -452,7 +466,15 @@ await page.waitForTimeout(250);
     await page.waitForTimeout(300);
 }
 const afterEsc = await page.evaluate(() => window.PS_SHELL.layoutSelection());
-ok(afterEsc.length === 1 && afterEsc[0] === 'i1',
+// The whole GROUP of i1, since case 29's templates bind a panel to its
+// letter and selection normalises to whole groups.
+const escWant = await page.evaluate(() => {
+    const it = window.PS_SHELL.chart().items;
+    const p = it.find(i => i.id === 'i1');
+    return it.filter(i => p.group ? i.group === p.group : i.id === 'i1')
+             .map(i => i.id).sort().join(',');
+});
+ok(afterEsc.slice().sort().join(',') === escWant,
    'the selection that was there before the drag is restored (' +
    afterEsc.join(',') + ')');
 ok(await page.evaluate(() => !document.querySelector('.ps-lmarquee')),
@@ -497,7 +519,16 @@ ok(await page.evaluate(() => {
    }), 'and Both matches both');
 ok(await page.evaluate(() => window.PS_SHELL.layoutHistoryDepth()) === sizeDepth + 2,
    'each is one history entry');
-await page.evaluate(() => window.PS_SHELL.selectLayoutItems(['i5', 'i6']));
+// UNGROUPED text, because case 29's templates bind each letter to a panel
+// and selecting a letter therefore selects a panel too, which does have a
+// size. This is about text on its own.
+await page.evaluate(() => {
+    ['i5', 'i6'].forEach(id => {
+        const it = window.PS_SHELL.chart().items.find(i => i.id === id);
+        if (it) delete it.group;
+    });
+    window.PS_SHELL.selectLayoutItems(['i5', 'i6']);
+});
 await page.waitForTimeout(400);
 ok(await page.evaluate(() =>
        getComputedStyle(document.querySelector('.ps-inspector-samesize')).display === 'none'),
@@ -696,6 +727,22 @@ ok(sizes.cd.every(v => v !== 9), 'and the second group came back (' +
    sizes.cd.join(',') + ')');
 
 console.log('case 21: the marquee survives what pointer gestures run into');
+// Earlier cases move panels to deliberately awkward places, and grouping
+// carries their letters with them, so this puts the 2 by 2 back before
+// pressing on what has to be empty canvas.
+await page.evaluate(() => {
+    const c = window.PS_SHELL.chart();
+    const put = (id, x, y, w, h) => {
+        const it = c.items.find(i => i.id === id);
+        if (it) { it.x = x; it.y = y; if (w) { it.w = w; it.h = h; } }
+    };
+    put('i1', 67, 60, 392, 267); put('i2', 548, 60, 392, 267);
+    put('i3', 67, 373, 392, 267); put('i4', 548, 373, 392, 267);
+    put('i5', 67, 32); put('i6', 548, 32);
+    put('i7', 67, 345); put('i8', 548, 345);
+    window.PS_SHELL.selectLayoutItems([]);
+});
+await page.waitForTimeout(600);
 const cg = await page.evaluate(() => {
     const r = document.getElementById('ps-lcanvas').getBoundingClientRect();
     return { l: r.left, t: r.top, z: r.width / window.PS_SHELL.chart().page.w,
@@ -739,6 +786,11 @@ ok(await boxCount() === 0 &&
 await page.mouse.up();
 // A switch mid-drag must not go on rewriting a figure nobody is looking at.
 await page.evaluate(() => window.PS_SHELL.selectLayoutItems(['i1', 'i2', 'i3']));
+await page.waitForTimeout(200);
+// The EXPANDED selection, because those panels are grouped with their
+// letters and selection normalises to whole groups.
+const preSwitch = await page.evaluate(() =>
+    window.PS_SHELL.layoutSelection().slice().sort().join(','));
 await page.mouse.move(pt(4, 4).x, pt(4, 4).y);
 await page.mouse.down();
 await page.mouse.move(pt(200, 200).x, pt(200, 200).y, { steps: 5 });
@@ -750,7 +802,7 @@ await page.waitForTimeout(250);
 await page.mouse.up();
 await page.waitForTimeout(300);
 const kept = await page.evaluate(() => window.PS_SHELL.layoutSelection());
-ok(kept.length === 3 && await boxCount() === 0,
+ok(kept.slice().sort().join(',') === preSwitch && await boxCount() === 0,
    'a workspace switch ends the gesture and restores what was selected (' +
    kept.join(',') + ')');
 await page.evaluate(() => window.PS_SHELL.setWorkspace('layout'));
@@ -1081,6 +1133,142 @@ ok(/Alt with an arrow moves selected items/.test(said.instructions),
    'the canvas instructions say Alt with an arrow');
 ok(/Alt\+arrow nudges/.test(said.tip) && !/^.*[^+]Arrows nudge/.test(said.tip),
    'and the Selection tooltip agrees ("' + said.tip.slice(-46) + '")');
+
+console.log('case 29: a panel letter belongs to its panel');
+// The loose end item 1 shipped with. Aligning a column moved the panels and
+// left the letters where they were, so a figure came out with its letters at
+// different offsets from their plots. Templates bind each letter to its own
+// panel, so the common case needs no action at all.
+await page.evaluate(() => window.PS_SHELL.setWorkspace('layout'));
+await page.waitForTimeout(600);
+await page.evaluate(() => window.PS_SHELL.showLayoutGallery());
+await page.waitForTimeout(500);
+await page.click('[data-layout-template="four"]');
+await page.waitForTimeout(300);
+await page.click('[data-layout-create], #ps-layout-gallery-create');
+await page.waitForTimeout(3500);
+const bound = await page.evaluate(() => {
+    const it = window.PS_SHELL.chart().items;
+    const panels = it.filter(i => i.kind === 'chart');
+    const texts = it.filter(i => i.kind === 'text');
+    return { allGrouped: panels.every(p => p.group) && texts.every(t => t.group),
+             pairs: panels.every(p => texts.some(t => t.group === p.group)),
+             flush: panels.every(p => texts.some(t => t.group === p.group &&
+                                                 Math.abs(t.x - p.x) < 2)) };
+});
+ok(bound.allGrouped && bound.pairs,
+   'a template binds each letter to its own panel');
+ok(bound.flush,
+   'and places it against that panel, not at the cell corner it used to sit in');
+await page.evaluate(() => {
+    const p = window.PS_SHELL.chart().items.find(i => i.kind === 'chart');
+    window.PS_SHELL.selectLayoutItems([p.id]);
+});
+await page.waitForTimeout(400);
+ok((await page.evaluate(() => window.PS_SHELL.layoutSelection())).length === 2,
+   'clicking one member takes the whole group');
+// The loose end itself.
+const lefts = () => page.evaluate(() => {
+    const it = window.PS_SHELL.chart().items;
+    const p = it.filter(i => i.kind === 'chart')
+        .sort((a, b) => a.y - b.y || a.x - b.x)[0];
+    const t = it.find(i => i.kind === 'text' && i.group === p.group);
+    return { panel: Math.round(p.x), letter: Math.round(t.x) };
+});
+const preAlign = await lefts();
+await page.evaluate(() => {
+    const it = window.PS_SHELL.chart().items.filter(i => i.kind === 'chart')
+        .sort((a, b) => a.x - b.x);
+    window.PS_SHELL.selectLayoutItems([it[0].id, it[1].id]);
+});
+await page.waitForTimeout(500);
+await page.click('[data-ctx-plotalign="left"]');
+await page.waitForTimeout(800);
+const postAlign = await lefts();
+ok(postAlign.panel !== preAlign.panel,
+   'aligning the plot areas moved a panel (' + preAlign.panel + ' to ' +
+   postAlign.panel + ')');
+ok(postAlign.letter - postAlign.panel === preAlign.letter - preAlign.panel,
+   'and its letter moved with it, keeping the same offset (' +
+   (preAlign.letter - preAlign.panel) + ' then ' +
+   (postAlign.letter - postAlign.panel) + ')');
+
+console.log('case 30: grouping is a whole gesture');
+await page.evaluate(() => {
+    const p = window.PS_SHELL.chart().items.filter(i => i.kind === 'chart');
+    window.PS_SHELL.selectLayoutItems([p[0].id, p[1].id]);
+});
+await page.waitForTimeout(400);
+// Align must treat a group as ONE thing, or a column would stack each letter
+// on top of its own panel.
+const unitAlign = await page.evaluate(() => {
+    const it = window.PS_SHELL.chart().items;
+    const sel = window.PS_SHELL.layoutSelection();
+    return { selected: sel.length,
+             groups: [...new Set(sel.map(id =>
+                 it.find(i => i.id === id).group))].length };
+});
+ok(unitAlign.selected === 4 && unitAlign.groups === 2,
+   'selecting two grouped panels selects four items in two units');
+await page.click('[data-ctx-align="left"]');
+await page.waitForTimeout(700);
+const stacked = await page.evaluate(() => {
+    const it = window.PS_SHELL.chart().items;
+    const sel = window.PS_SHELL.layoutSelection().map(id =>
+        it.find(i => i.id === id));
+    const panels = sel.filter(i => i.kind === 'chart').map(i => Math.round(i.x));
+    const texts = sel.filter(i => i.kind === 'text').map(i => Math.round(i.x));
+    return { panels: panels, texts: texts };
+});
+ok(stacked.panels[0] === stacked.panels[1],
+   'aligning left puts both panels on one edge (' + stacked.panels.join(',') + ')');
+ok(stacked.texts[0] === stacked.texts[1] &&
+   stacked.texts[0] === stacked.panels[0],
+   'and their letters came with them rather than being aligned separately (' +
+   stacked.texts.join(',') + ')');
+// Cmd+G and Cmd+Shift+G.
+await page.evaluate(() => {
+    const p = window.PS_SHELL.chart().items.filter(i => i.kind === 'chart');
+    window.PS_SHELL.selectLayoutItems([p[2].id, p[3].id]);
+    document.getElementById('ps-lviewport').focus();
+});
+await page.waitForTimeout(400);
+const preG = await page.evaluate(() => window.PS_SHELL.layoutSelection().length);
+await page.keyboard.press('Meta+g');
+await page.waitForTimeout(700);
+ok(await page.evaluate(() => {
+       const it = window.PS_SHELL.chart().items;
+       const sel = window.PS_SHELL.layoutSelection().map(id =>
+           it.find(i => i.id === id));
+       return [...new Set(sel.map(i => i.group))].length === 1;
+   }), 'Cmd/Ctrl+G binds the selection into one group (was ' + preG + ' items)');
+await page.keyboard.press('Meta+Shift+g');
+await page.waitForTimeout(700);
+ok(await page.evaluate(() => {
+       const it = window.PS_SHELL.chart().items;
+       return window.PS_SHELL.layoutSelection().every(id =>
+           !it.find(i => i.id === id).group);
+   }), 'and Cmd/Ctrl+Shift+G breaks it apart again');
+// A duplicate is its own group, not a bigger one.
+await page.evaluate(() => {
+    const p = window.PS_SHELL.chart().items.find(i => i.kind === 'chart' && i.group);
+    window.PS_SHELL.selectLayoutItems([p.id]);
+});
+await page.waitForTimeout(400);
+const srcGroup = await page.evaluate(() => {
+    const id = window.PS_SHELL.layoutSelection()[0];
+    return window.PS_SHELL.chart().items.find(i => i.id === id).group;
+});
+await page.evaluate(() => document.getElementById('ps-lviewport').focus());
+await page.keyboard.press('Meta+d');
+await page.waitForTimeout(800);
+ok(await page.evaluate((g) => {
+       const it = window.PS_SHELL.chart().items;
+       const sel = window.PS_SHELL.layoutSelection().map(id =>
+           it.find(i => i.id === id));
+       return sel.length === 2 && sel.every(i => i.group && i.group !== g);
+   }, srcGroup),
+   'duplicating a grouped panel gives a second group, not a four-member one');
 
 ok(errors.length === 0, 'no page errors (' + errors.join(' | ') + ')');
 console.log('\nlayout-figure-check: all cases passed');

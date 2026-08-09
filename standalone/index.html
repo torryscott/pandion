@@ -4377,6 +4377,22 @@
                when the selection actually holds two chart panels that share
                a column (or a row), which is when the action can do
                something. -->
+          <!-- Group. A figure's panel letter is a separate item, so aligning
+               a column moved the panels and left the letters behind. Nothing
+               guesses which text belongs to which panel; the user says so,
+               and every operation that works on a selection then works on the
+               group. Templates group each panel with its own letter, so the
+               common case needs no action at all. -->
+          <div class="ps-inspector-subrow ps-inspector-grouprow"
+               style="display:none;">
+            <span class="ps-inspector-sublabel">Group</span>
+            <div class="ps-inspector-subrow-cells">
+              <button type="button" class="ps-btn" data-ctx-group="on"
+                      data-tip="Move, align and resize these together (Cmd/Ctrl+G)">Group</button>
+              <button type="button" class="ps-btn" data-ctx-group="off"
+                      data-tip="Break this group apart (Cmd/Ctrl+Shift+G)">Ungroup</button>
+            </div>
+          </div>
           <!-- Same size. Sized to the PRIMARY, the last item added to the
                selection, and the buttons name it so "the same as what" is
                never a guess. Text items are skipped; they size themselves to
@@ -4674,6 +4690,8 @@
         extends the selection. Alt with an arrow moves selected items.
         Control plus Alt with an arrow resizes a selected chart or image.
         Enter opens exact position and size fields. F2 edits selected text.
+        Control or Command plus G groups the selection so it moves and aligns
+        as one; add Shift to ungroup.
         Shift F10 opens item commands. Press F1 for the complete shortcuts.
       </p>
       <span class="ps-visually-hidden" id="ps-layout-live"

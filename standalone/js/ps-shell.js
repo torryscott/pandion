@@ -16113,6 +16113,7 @@
                      x: c.page.margin, y: 22 });
       rects[0].y += 48; rects[0].h -= 48;
     }
+    var slotPanel = [];
     for (var i = 0; i < rects.length; i++) {
       var chartId = selects[i] && selects[i].value;
       if (!chartById(chartId) || isLayoutTab(chartById(chartId))) continue;
@@ -16120,19 +16121,32 @@
       var cell = { x: r.x, y: r.y + labelBand, w: r.w,
                    h: Math.max(80, r.h - labelBand) };
       var fit = layFitRectToChart(cell, chartId);
-      c.items.push({ id: "i" + (++itemNumber), kind: "chart",
-                     chartId: chartId, x: Math.round(fit.x),
-                     y: Math.round(fit.y),
-                     w: Math.round(fit.w),
-                     h: Math.round(fit.h) });
+      var panelItem = { id: "i" + (++itemNumber), kind: "chart",
+                        chartId: chartId, x: Math.round(fit.x),
+                        y: Math.round(fit.y),
+                        w: Math.round(fit.w),
+                        h: Math.round(fit.h) };
+      c.items.push(panelItem);
+      slotPanel[i] = panelItem;   // remembered, not matched back by geometry
     }
     if (labels) {
       for (i = 0; i < rects.length; i++) {
-        c.items.push({ id: "i" + (++itemNumber), kind: "text",
-                       text: String.fromCharCode(65 + i),
-                       fontSize: 20, bold: true,
-                       x: Math.round(rects[i].x),
-                       y: Math.round(rects[i].y) });
+        // Grouped with its own panel, and placed against it. A figure's
+        // letter belongs to its panel, so aligning a column should carry it,
+        // and nothing should have to guess which letter goes with which
+        // chart. Positioned from the PANEL rather than the cell, because
+        // fitting the panel to its chart moves it inside the cell and the
+        // letter was being left behind at the cell's corner.
+        var panel = slotPanel[i];
+        var lx = panel ? panel.x : Math.round(rects[i].x);
+        var ly = panel ? Math.max(0, panel.y - 28) : Math.round(rects[i].y);
+        var gid = panel ? "g" + (i + 1) : null;
+        if (panel) panel.group = gid;
+        var label = { id: "i" + (++itemNumber), kind: "text",
+                      text: String.fromCharCode(65 + i),
+                      fontSize: 20, bold: true, x: lx, y: ly };
+        if (gid) label.group = gid;
+        c.items.push(label);
       }
       c.nextLabel = rects.length;
     }
@@ -16232,8 +16246,137 @@
     return ids.length ? ids[ids.length - 1] : null;
   }
   function layIsSelected(id) { return laySelectedIds().indexOf(id) !== -1; }
+  // ---- Groups. A figure's panel letter is a separate item, so aligning a
+  // column moved the panels and left the letters where they were. Grouping is
+  // the honest answer to that: no rule guesses which text belongs to which
+  // panel, the user says so, and every operation that already works on a
+  // selection then works on the group for free.
+  //
+  // A group is a string on the members. Selection is normalised to whole
+  // groups at the moment it is SET, which is the one choke point, so
+  // laySelectedIds stays cheap and every caller downstream sees a complete
+  // group without knowing groups exist.
+  var LAY_GROUP_SEQ = 0;
+  function layNewGroupId() {
+    var items = layItems(), seen = {}, i;
+    for (i = 0; i < items.length; i++)
+      if (items[i].group) seen[items[i].group] = 1;
+    do { LAY_GROUP_SEQ++; } while (seen["g" + LAY_GROUP_SEQ]);
+    return "g" + LAY_GROUP_SEQ;
+  }
+  function layGroupOf(id) {
+    var it = layItemById(id);
+    return it && it.group ? it.group : null;
+  }
+  function layExpandGroups(ids) {
+    var want = {}, out = [], items = layItems(), i;
+    for (i = 0; i < ids.length; i++) {
+      var g = layGroupOf(ids[i]);
+      if (g) want[g] = 1;
+    }
+    for (i = 0; i < ids.length; i++) {
+      if (out.indexOf(ids[i]) === -1) out.push(ids[i]);
+      var g2 = layGroupOf(ids[i]);
+      if (!g2) continue;
+      for (var j = 0; j < items.length; j++)
+        if (items[j].group === g2 && out.indexOf(items[j].id) === -1)
+          out.push(items[j].id);
+    }
+    return out;
+  }
+  // Align and its relatives must treat a group as ONE thing, or aligning a
+  // column would stack each panel letter on top of its own panel.
+  function layUnits(ids) {
+    var seen = {}, units = [], i;
+    for (i = 0; i < ids.length; i++) {
+      var g = layGroupOf(ids[i]);
+      if (g) {
+        if (seen[g]) { seen[g].ids.push(ids[i]); continue; }
+        seen[g] = { ids: [ids[i]] };
+        units.push(seen[g]);
+      } else units.push({ ids: [ids[i]] });
+    }
+    for (i = 0; i < units.length; i++) {
+      var lo = Infinity, ln = Infinity, hi = -Infinity, hn = -Infinity;
+      for (var k = 0; k < units[i].ids.length; k++) {
+        var r = layItemRect(layItemById(units[i].ids[k]));
+        if (r.x < lo) lo = r.x;
+        if (r.y < ln) ln = r.y;
+        if (r.right > hi) hi = r.right;
+        if (r.bottom > hn) hn = r.bottom;
+      }
+      units[i].rect = { x: lo, y: ln, w: hi - lo, h: hn - ln,
+                        right: hi, bottom: hn };
+    }
+    return units;
+  }
+  // Clamped as ONE thing. Moving each member and letting the page clamp catch
+  // them individually would pull a group apart, and moving them unclamped
+  // pushed a member off the page: a panel letter grouped with a panel that
+  // Same size relocated ended up at 0,0 with its offset lost.
+  // What a shift would ACTUALLY be, clamped against the page as ONE thing.
+  // Exposed separately so a caller can plan with the real delta: Same size
+  // decides whether a press changes anything before it snapshots, and asking
+  // for a move the clamp then shortens made its no-op test wrong.
+  function layUnitClampDelta(ids, dx, dy) {
+    var p = layPage();
+    var lo = Infinity, ln = Infinity, hi = -Infinity, hn = -Infinity;
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (!it) continue;
+      var r = layItemRect(it);
+      if (r.x < lo) lo = r.x;
+      if (r.y < ln) ln = r.y;
+      if (r.right > hi) hi = r.right;
+      if (r.bottom > hn) hn = r.bottom;
+    }
+    if (!isFinite(lo)) return { dx: dx, dy: dy };
+    return { dx: layClamp(dx, -lo, Math.max(0, p.w - hi)),
+             dy: layClamp(dy, -ln, Math.max(0, p.h - hn)) };
+  }
+  // Clamped as ONE thing. Moving each member and letting the page clamp catch
+  // them individually would pull a group apart, and moving them unclamped
+  // pushed a member off the page: a panel letter grouped with a panel that
+  // Same size relocated ended up at 0,0 with its offset lost.
+  function layShiftUnit(unit, dx, dy) {
+    var d = layUnitClampDelta(unit.ids, dx, dy);
+    for (var i = 0; i < unit.ids.length; i++) {
+      var it = layItemById(unit.ids[i]);
+      if (!it) continue;
+      it.x = (Number(it.x) || 0) + d.dx;
+      it.y = (Number(it.y) || 0) + d.dy;
+    }
+  }
+  function layGroupSelected() {
+    var ids = laySelectedIds();
+    if (ids.length < 2) return false;
+    laySnapshot("group");
+    var g = layNewGroupId();
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (it) it.group = g;
+    }
+    persist(); renderLayout();
+    layAnnounce("Grouped " + ids.length + " items. They now move, align and " +
+      "resize together.");
+    return true;
+  }
+  function layUngroupSelected() {
+    var ids = laySelectedIds(), had = false, i;
+    for (i = 0; i < ids.length; i++) if (layGroupOf(ids[i])) had = true;
+    if (!had) return false;
+    laySnapshot("ungroup");
+    for (i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (it && it.group) delete it.group;
+    }
+    persist(); renderLayout();
+    layAnnounce("Ungrouped.");
+    return true;
+  }
   function laySetSelection(ids) {
-    LAYOUT_SEL = Array.isArray(ids) ? ids.slice() : (ids ? [ids] : []);
+    LAYOUT_SEL = layExpandGroups(
+      Array.isArray(ids) ? ids.slice() : (ids ? [ids] : []));
     var valid = laySelectedIds();
     if (valid.length) LAYOUT_ACTIVE_ID = valid[valid.length - 1];
     else if (LAYOUT_ACTIVE_ID && !layItemById(LAYOUT_ACTIVE_ID))
@@ -17009,7 +17152,12 @@
       node.appendChild(ltxFrame);
       node.__ltxFrame = ltxFrame;
     }
-    if (primary && laySelectedIds().length === 1) {
+    // One UNIT, not one item. A grouped panel is two items and one thing, and
+    // gating on the item count took its remove button and its resize handle
+    // away the moment a letter was bound to it. The handle grows from the
+    // bottom right, so the panel's top left does not move and a letter
+    // anchored there stays put.
+    if (primary && layUnits(laySelectedIds()).length === 1) {
       if (laySizedKind(item)) {
         var hnd = mkEl("div", "ps-lhandle");
         hnd.setAttribute("data-role", "lay-resize");
@@ -17364,12 +17512,16 @@
     if (!ids.length) return;
     var returnFocus = document.activeElement === el("ps-lviewport");
     laySnapshot("duplicate");
-    var made = [], p = layPage();
+    var made = [], p = layPage(), dupGroups = {};
     for (var i = 0; i < ids.length; i++) {
       var src = layItemById(ids[i]);
       if (!src) continue;
       var copy = JSON.parse(JSON.stringify(src));
       copy.id = layNewItemId();
+      // The copies form their OWN group, so duplicating a grouped panel
+      // gives a second panel rather than a four-member group.
+      if (copy.group) copy.group = dupGroups[copy.group] ||
+        (dupGroups[copy.group] = layNewGroupId());
       var r = layItemRect(copy);
       copy.x = Math.min(Math.max(0, p.w - r.w), (Number(src.x) || 0) + 12);
       copy.y = Math.min(Math.max(0, p.h - r.h), (Number(src.y) || 0) + 12);
@@ -17684,17 +17836,24 @@
   function layAlign(kind) {
     var ids = laySelectedIds(), b = laySelectionBounds(ids);
     if (ids.length < 2 || !b) return;
+    // Units, not items: a group is one thing to align, or a column of
+    // panels would stack each panel letter on top of its own panel.
+    var units = layUnits(ids);
+    if (units.length < 2) return;
     laySnapshot("align");
-    for (var i = 0; i < ids.length; i++) {
-      var item = layItemById(ids[i]), r = layItemRect(item);
-      if (kind === "left") item.x = b.x;
-      else if (kind === "hcenter") item.x = b.x + (b.w - r.w) / 2;
-      else if (kind === "right") item.x = b.right - r.w;
-      else if (kind === "top") item.y = b.y;
-      else if (kind === "vcenter") item.y = b.y + (b.h - r.h) / 2;
-      else if (kind === "bottom") item.y = b.bottom - r.h;
+    for (var i = 0; i < units.length; i++) {
+      var r = units[i].rect, dx = 0, dy = 0;
+      if (kind === "left") dx = b.x - r.x;
+      else if (kind === "hcenter") dx = b.x + (b.w - r.w) / 2 - r.x;
+      else if (kind === "right") dx = b.right - r.w - r.x;
+      else if (kind === "top") dy = b.y - r.y;
+      else if (kind === "vcenter") dy = b.y + (b.h - r.h) / 2 - r.y;
+      else if (kind === "bottom") dy = b.bottom - r.h - r.y;
+      layShiftUnit(units[i], dx, dy);
     }
     persist(); renderLayout();
+    layAnnounce("Aligned " + units.length +
+      (units.length === 1 ? " item." : " items."));
   }
   // ---- Plot-area alignment. A multi-panel figure reads as aligned when
   // the PLOT AREAS line up, not the panel boxes. A panel's box includes its
@@ -17801,8 +17960,11 @@
         d = target - list[k].plot[edge === "left" ? "l" : "b"];
         if (Math.abs(d) < 0.02) continue;
         if (!snapped) { laySnapshot("align plot areas"); snapped = true; }
-        if (edge === "left") list[k].item.x = (Number(list[k].item.x) || 0) + d;
-        else list[k].item.y = (Number(list[k].item.y) || 0) + d;
+        // Shift the panel's whole GROUP, so a panel letter grouped with it
+        // keeps its place against the plot. This was the loose end the
+        // plot-align feature shipped with.
+        layShiftUnit({ ids: layExpandGroups([list[k].item.id]) },
+                     edge === "left" ? d : 0, edge === "left" ? 0 : d);
         moved++;
       }
     }
@@ -17875,9 +18037,15 @@
       if (y + h > p.h) y = Math.max(0, p.h - h);
       if (w > p.w) { w = p.w; x = 0; short++; }
       if (h > p.h) { h = p.h; y = 0; short++; }
+      // The move is clamped against the item's whole GROUP, so the plan has
+      // to ask what the shift will really be, or a press that can move
+      // nothing still looks like a change and costs a history entry.
+      var unit = layExpandGroups([it.id]);
+      var real = layUnitClampDelta(unit, x - (Number(it.x) || 0),
+                                         y - (Number(it.y) || 0));
       if (w === (Number(it.w) || 0) && h === (Number(it.h) || 0) &&
-          x === (Number(it.x) || 0) && y === (Number(it.y) || 0)) continue;
-      plan.push({ it: it, x: x, y: y, w: w, h: h });
+          Math.abs(real.dx) < 0.01 && Math.abs(real.dy) < 0.01) continue;
+      plan.push({ it: it, unit: unit, dx: real.dx, dy: real.dy, w: w, h: h });
     }
     if (!plan.length) {
       layAnnounce("Already the same size as " + laySameSizeLabel(target) + ".");
@@ -17885,7 +18053,8 @@
     }
     laySnapshot("same size");
     for (i = 0; i < plan.length; i++) {
-      plan[i].it.x = plan[i].x; plan[i].it.y = plan[i].y;
+      // The size is the panel's; the MOVE carries its group.
+      layShiftUnit({ ids: plan[i].unit }, plan[i].dx, plan[i].dy);
       plan[i].it.w = plan[i].w; plan[i].it.h = plan[i].h;
       moved++;
     }
@@ -18322,6 +18491,14 @@
         if (!every.length) return;
         laySetSelection(every);
         renderLayout();   // the selection panel reports the count itself
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && String(e.key).toLowerCase() === "g") {
+        e.preventDefault();
+        if (e.shiftKey) {
+          if (!layUngroupSelected()) layAnnounce("Nothing grouped is selected.");
+        } else if (!layGroupSelected())
+          layAnnounce("Select two or more items to group them.");
         return;
       }
       if ((e.metaKey || e.ctrlKey) && String(e.key).toLowerCase() === "d" &&
@@ -19563,7 +19740,9 @@
     // genuinely have an inapplicable state at the ends of the stack, which
     // is a different thing from a capability that does not apply yet.)
     var alignRow = document.querySelector(".ps-inspector-align");
-    var canAlign = ids.length >= 2;
+    // Two UNITS. One grouped panel and its letter is two items and one
+    // thing, and there is nothing to align it to.
+    var canAlign = layUnits(ids).length >= 2;
     if (alignRow) alignRow.style.display = canAlign ? "" : "none";
     // The whole section follows: with the Arrange buttons gone (Aug 5
     // 2026, Torry - they duplicated the right-click, which also gained
@@ -19591,6 +19770,23 @@
         ? "Move these panels so their y axes sit on one line"
         : "Move these panels so their x axes sit on one line");
       if (live) anyPlot = true;
+    }
+    // Group appears once there are two units to bind; Ungroup once anything
+    // selected is already in one. Both are hidden rather than disabled, the
+    // rule the align row set.
+    var groupRow = document.querySelector(".ps-inspector-grouprow");
+    var anyGrouped = false;
+    for (i = 0; i < ids.length; i++) if (layGroupOf(ids[i])) anyGrouped = true;
+    var canGroup = layUnits(ids).length >= 2;
+    if (groupRow) {
+      var gOn = groupRow.querySelector('[data-ctx-group="on"]');
+      var gOff = groupRow.querySelector('[data-ctx-group="off"]');
+      if (gOn) gOn.style.display = canGroup ? "" : "none";
+      if (gOff) gOff.style.display = anyGrouped ? "" : "none";
+      groupRow.style.display = canGroup || anyGrouped ? "" : "none";
+      groupRow.querySelector(".ps-inspector-subrow-cells").style
+        .gridTemplateColumns = "repeat(" +
+          ((canGroup ? 1 : 0) + (anyGrouped ? 1 : 0) || 1) + ", 1fr)";
     }
     // Same size appears on the same rule as the rows above it, once the
     // selection actually holds two things that HAVE a size.
@@ -20180,6 +20376,12 @@
     for (var pi = 0; pi < plotAlign.length; pi++)
       plotAlign[pi].addEventListener("click", function () {
         layAlignPlots(this.getAttribute("data-ctx-plotalign"));
+      });
+    var groupBtns = document.querySelectorAll("[data-ctx-group]");
+    for (var gi = 0; gi < groupBtns.length; gi++)
+      groupBtns[gi].addEventListener("click", function () {
+        if (this.getAttribute("data-ctx-group") === "on") layGroupSelected();
+        else layUngroupSelected();
       });
     var sameSize = document.querySelectorAll("[data-ctx-samesize]");
     for (var si = 0; si < sameSize.length; si++)
@@ -21457,6 +21659,7 @@
         rows: [
           ["Move through items", "Arrow keys / Home / End"],
           ["Extend or reduce the selection", "Shift + arrows / Space"],
+          ["Group / ungroup", "Cmd/Ctrl + G / Shift + G"],
           ["Nudge the selection", "Alt + arrows"],
           ["Nudge by 10", "Alt + Shift + arrows"],
           ["Free resize a chart or image", "Ctrl/Cmd + Alt + arrows"],
