@@ -4027,16 +4027,20 @@
       h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
     return h.toString(16);
   }
-  function pinProvenance(chartEl) {
+  // forId describes a chart OTHER than the one on screen, which is what
+  // keeping an updated copy of a drifted page needs. Without it this reads
+  // the active chart, as every existing caller wants.
+  function pinProvenance(chartEl, forId) {
     try {
-      var id = PROJECT.activeChart, c = chartById(id);
+      var id = forId || PROJECT.activeChart, c = chartById(id);
       if (!c || isLayoutTab(c)) return null;
       // Prefer the authoritative snapshot (captured at render,
       // size-guarded) so the signature is byte-comparable with later
-      // captures; fall back to a snapshot-style clone of the live svg.
+      // captures; fall back to a snapshot-style clone of the live svg. The
+      // fallback is only valid for the chart actually on screen.
       var s = validSnap(id);
-      var html = s ? s.svg : chartEl
-        ? svgSelfContainedClone(chartEl, "snap-" + id + "-").html : null;
+      var html = s ? s.svg : (!forId && chartEl
+        ? svgSelfContainedClone(chartEl, "snap-" + id + "-").html : null);
       if (!html) return null;
       // Analysis + variables at pin time, so a page stays self-describing
       // even after its source chart is deleted (Torry's rail round).
@@ -4261,6 +4265,14 @@
     el("ps-pininsp-open").style.display =
       sel.srcChart && chartById(sel.srcChart) &&
       !isLayoutTab(chartById(sel.srcChart)) ? "" : "none";
+    // Only on a page whose source has actually moved on. On a page that
+    // still matches, an update button would offer a duplicate.
+    var upd = el("ps-pininsp-update");
+    if (upd) {
+      upd.style.display = pinCanUpdate(sel) ? "" : "none";
+      setTip(upd, "Keep the chart as it is NOW as a new page below this one. " +
+        "This page is left exactly as it was.");
+    }
     var nm = el("ps-pininsp-name");
     if (nm && document.activeElement !== nm) {
       nm.value = sel.pageTitle || "";
@@ -5427,6 +5439,18 @@
         "Page " + (idx + 1) + " of " + pins.length +
         (ttl ? " \u00b7 " + ttl : "") +
         (pin.at ? " \u00b7 kept " + pinKeptFmt(pin.at) : "")));
+      // The freshness verdict lived only in the rail of the SELECTED page,
+      // so scrolling a notebook showed nothing and a page whose source had
+      // moved on looked exactly like one that had not.
+      var pst = pinSourceStatus(pin);
+      if (pst.state === "changed" || pst.state === "gone") {
+        var dw = mkEl("span", "ps-pinpage-drift",
+          pst.state === "gone" ? "source chart is gone"
+                               : "source chart has changed");
+        dw.setAttribute("data-state", pst.state);
+        setTip(dw, pst.text);
+        bar.appendChild(dw);
+      }
       // The four verbs live in ONE wrapping group, so a narrow card drops
       // them below the info line together instead of stranding whichever
       // fit beside the text (Torry's low-zoom report, Aug 5 2026).
@@ -5652,6 +5676,59 @@
       nbOfferUndo("Page removed from " + board.name, step);
       return;
     }
+  }
+  // ---- keeping an updated copy of a page whose source has moved on -----
+  // The rail told you a page's source chart had changed and then offered
+  // nothing to do about it. The answer is append-only, because that is what
+  // makes a record defensible months later: the current chart joins the
+  // notebook as a NEW page directly below the old one, carrying the note and
+  // the title forward, and both versions keep their own kept dates. Refresh
+  // in place would have been cheaper and would have destroyed the evidence,
+  // which is the one thing a lab notebook is not supposed to allow.
+  function pinCanUpdate(pin) {
+    return !!(pin && pin.srcChart && pinSourceStatus(pin).state === "changed");
+  }
+  function pinKeepUpdatedCopy(pinId) {
+    var boards = pinBoards(), board = null, at = -1, pin = null, i, j;
+    for (i = 0; i < boards.length; i++)
+      for (j = 0; j < boards[i].pins.length; j++)
+        if (boards[i].pins[j].id === pinId) {
+          board = boards[i]; at = j; pin = boards[i].pins[j];
+        }
+    if (!pin || !pinCanUpdate(pin)) return;
+    // "changed" is only reachable with a valid snapshot, so this is the same
+    // capture the verdict was computed against, not a re-render.
+    var s = validSnap(pin.srcChart);
+    if (!s) return;
+    var entry = { id: pinNewId(), src: pinSvgSrc(s.svg),
+                  natW: s.w, natH: s.h, w: s.w, h: s.h, at: Date.now() };
+    var prov = pinProvenance(null, pin.srcChart);
+    if (prov)
+      for (var pk in prov)
+        if (Object.prototype.hasOwnProperty.call(prov, pk) &&
+            prov[pk] != null && prov[pk] !== "") entry[pk] = prov[pk];
+    // The note is the reason the page exists, and the title is what it is
+    // called. This is the same figure, later, so both come forward.
+    if (pin.note) entry.note = pin.note;
+    if (pin.pageTitle) entry.pageTitle = pin.pageTitle;
+    board.pins.splice(at + 1, 0, entry);
+    var step = nbStep("the updated copy", function () {
+      var k = board.pins.indexOf(entry);
+      if (k !== -1) board.pins.splice(k, 1);
+      (PROJECT.ui = PROJECT.ui || {}).activeBoard = board.id;
+      PIN_SEL = pin.id;
+    }, function () {
+      board.pins.splice(Math.min(at + 1, board.pins.length), 0, entry);
+      (PROJECT.ui = PROJECT.ui || {}).activeBoard = board.id;
+      PIN_SEL = entry.id;
+    });
+    (PROJECT.ui = PROJECT.ui || {}).activeBoard = board.id;
+    PIN_SEL = entry.id;
+    persist(); syncAll();
+    if (appWorkspace() === "pinboard") renderPinboard();
+    repairPinFonts();
+    pinReveal(entry.id);
+    nbOfferUndo("Updated copy kept, below the original", step);
   }
   // ---- moving a page between sections ---------------------------------
   // Keeping into the wrong section was a one-way mistake. Nothing in the
@@ -13485,6 +13562,9 @@
       activePinBoard().note = this.value;
       if (PIN_NOTE_T) clearTimeout(PIN_NOTE_T);
       PIN_NOTE_T = setTimeout(function () { persist(false); }, 600);
+    });
+    el("ps-pininsp-update").addEventListener("click", function () {
+      if (PIN_SEL) pinKeepUpdatedCopy(PIN_SEL);
     });
     el("ps-pininsp-open").addEventListener("click", function () {
       var pins = projectPins();
@@ -22910,6 +22990,15 @@
               action: function () {
                 showPinMoveMenu(e.clientX, e.clientY, ctxPinId);
               } },
+            { label: "Keep an updated copy", key: "pin-update",
+              disabled: !(function () {
+                var hit = allPins().filter(function (en) {
+                  return en.pin.id === ctxPinId; })[0];
+                return hit && pinCanUpdate(hit.pin);
+              })(),
+              tip: "Available when this page's source chart has changed " +
+                   "since it was kept",
+              action: function () { pinKeepUpdatedCopy(ctxPinId); } },
             "separator",
             { label: "Export this page\u2026", key: "pin-export-page",
               action: function () {

@@ -265,6 +265,92 @@ ok(await page.evaluate(() => window.PS_SHELL.project.pinboards.length) === board
    'and undoing takes it away again, rather than leaving an empty section ' +
    'nobody asked for');
 
+console.log('case 5c: a drifted page can be brought up to date');
+// Append-only. The current chart joins as a NEW page below the old one, both
+// keeping their own dates, because refreshing in place would destroy the
+// evidence the record exists to hold.
+await page.evaluate(() => window.PS_SHELL.setWorkspace('chart'));
+await page.waitForTimeout(400);
+await page.evaluate(() => window.setOption('barCornerRadius', 22));
+await page.waitForTimeout(1900);
+await page.evaluate(() => window.PS_SHELL.setWorkspace('pinboard'));
+await page.waitForTimeout(800);
+const drifted = await page.evaluate(() => {
+    const b = window.PS_SHELL.project.pinboards
+        .find(bb => bb.pins.some(p => p.srcChart));
+    const p = b.pins.find(p => p.srcChart);
+    return { id: p.id, board: b.id, n: b.pins.length };
+});
+await page.evaluate((id) => {
+    const el = document.querySelector('.ps-pinpage[data-pin-id="' + id + '"]');
+    el.scrollIntoView({ block: 'center' });
+}, drifted.id);
+await page.waitForTimeout(300);
+const driftChip = await page.evaluate((id) => {
+    const el = document.querySelector('.ps-pinpage[data-pin-id="' + id + '"]');
+    const d = el && el.querySelector('.ps-pinpage-drift');
+    return d ? d.textContent : null;
+}, drifted.id);
+ok(driftChip === 'source chart has changed',
+   'the page card itself says its source has moved on, so scrolling the ' +
+   'notebook shows it rather than only the rail of a selected page');
+// Give it a note and a title so we can prove both come forward.
+for (let i = 0; i < 3; i++) {
+    const on = await page.evaluate(() =>
+        document.getElementById('ps-pininsp-sel').style.display !== 'none');
+    if (on) break;
+    await page.evaluate((id) => {
+        document.querySelector('.ps-pinpage[data-pin-id="' + id + '"]').click();
+    }, drifted.id);
+    await page.waitForTimeout(350);
+}
+await page.click('#ps-pininsp-note');
+await page.type('#ps-pininsp-note', 'THE REASON THIS PAGE EXISTS', { delay: 1 });
+await page.evaluate(() => document.getElementById('ps-pininsp-note').blur());
+await page.waitForTimeout(400);
+ok(await page.evaluate(() =>
+    document.getElementById('ps-pininsp-update').style.display !== 'none'),
+   'the rail offers Keep an updated copy on a drifted page');
+await page.click('#ps-pininsp-update');
+await page.waitForTimeout(900);
+const updated = await page.evaluate((d) => {
+    const b = window.PS_SHELL.project.pinboards.find(bb => bb.id === d.board);
+    const at = b.pins.findIndex(p => p.id === d.id);
+    const orig = b.pins[at], copy = b.pins[at + 1];
+    return { n: b.pins.length, origAt: at,
+             origSrc: orig.src.length, origAt_: orig.at,
+             copyNote: copy && copy.note, copyAt: copy && copy.at,
+             copySame: copy && copy.src === orig.src,
+             copyId: copy && copy.id, selected: window.PS_SHELL.project.pinboards
+                 .flatMap(x => x.pins).length };
+}, drifted);
+ok(updated.n === drifted.n + 1,
+   'one new page, not a replacement (' + drifted.n + ' -> ' + updated.n + ')');
+ok(!updated.copySame,
+   'the copy holds the CURRENT chart, which differs from the original');
+ok(updated.copyNote === 'THE REASON THIS PAGE EXISTS',
+   'and carries the note forward, which is why the page existed');
+ok(updated.copyAt > updated.origAt_,
+   'both versions keep their own kept dates');
+const verdicts = await page.evaluate((d) => {
+    const b = window.PS_SHELL.project.pinboards.find(bb => bb.id === d.board);
+    const at = b.pins.findIndex(p => p.id === d.id);
+    return [...document.querySelectorAll('.ps-pinpage')]
+        .filter(el => [b.pins[at].id, b.pins[at + 1].id]
+            .indexOf(el.getAttribute('data-pin-id')) !== -1)
+        .map(el => !!el.querySelector('.ps-pinpage-drift'));
+}, drifted);
+ok(verdicts[0] === true && verdicts[1] === false,
+   'the original still reads as drifted and the copy reads as current');
+await page.evaluate(() => {
+    const items = [...document.querySelectorAll('#ps-toast .ps-toast-item')];
+    items.find(i => /Updated copy/.test(i.textContent)).querySelector('button').click();
+});
+await page.waitForTimeout(600);
+ok(await page.evaluate((d) => window.PS_SHELL.project.pinboards
+       .find(bb => bb.id === d.board).pins.length, drifted) === drifted.n,
+   'and it is one click back');
+
 console.log('case 6: deleting, switching section, then undoing');
 const doomed = await page.evaluate(() =>
     window.PS_SHELL.project.pinboards[0].pins[0].id);

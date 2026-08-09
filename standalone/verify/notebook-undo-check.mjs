@@ -127,25 +127,36 @@ await press(true);
 ok(JSON.stringify(await counts()) === '[2]', 'and redo puts it back');
 
 console.log('case 3: the keyboard does not reach past the Notebook');
-const styleBefore = await page.evaluate(() =>
-    JSON.stringify(window.PS_SHELL.optionStore()));
-await page.evaluate(() => window.PS_SHELL.setWorkspace('chart'));
-await page.waitForTimeout(400);
-await page.evaluate(() => window.setOption('barCornerRadius', 18));
-await page.waitForTimeout(1600);
-const styled = await page.evaluate(() =>
-    JSON.parse(JSON.stringify(window.PS_SHELL.optionStore())));
-ok(String(styled.barCornerRadius) === '18', 'a chart style edit is committed');
+// The hazard has TWO routes, and this tests the one whose observable
+// actually moves. The engine route needs a real on-chart panel gesture to
+// arm its history, and neither window.setOption nor __gb2_setOption does
+// that, so an assertion driven by either passes on the broken code as well
+// and proves nothing. The DATA route does move. With a data edit as the most
+// recent act, the shell's key router falls through to a recency test and
+// undoes a DATASET change, which on the unchanged code is exactly what
+// Cmd+Z in the Notebook did.
+await page.evaluate(() => window.PS_SHELL.setWorkspace('data'));
+await page.waitForTimeout(500);
+await page.evaluate(() => window.PS_SHELL.setExcluded('score', 0, true));
+await page.waitForTimeout(1200);
+const dataArmed = await page.evaluate(() =>
+    JSON.stringify(window.PS_SHELL.project.table.excluded || null));
+ok(dataArmed && dataArmed !== 'null',
+   'a data edit is the most recent act, so the recency route is armed');
+const pagesBefore3 = JSON.stringify(await counts());
 await press(false);   // undo, from inside the Notebook
-const afterKb = await page.evaluate(() =>
-    JSON.parse(JSON.stringify(window.PS_SHELL.optionStore())));
-ok(String(afterKb.barCornerRadius) === '18',
-   'undoing in the Notebook leaves the chart style alone: the key no ' +
-   'longer edits a chart in another workspace');
-ok(JSON.stringify(await counts()) === '[1]',
+const after3 = await page.evaluate(() => ({
+    data: JSON.stringify(window.PS_SHELL.project.table.excluded || null),
+    store: JSON.parse(JSON.stringify(window.PS_SHELL.optionStore())),
+}));
+ok(after3.data === dataArmed,
+   'undoing in the Notebook leaves the DATA alone: the key no longer ' +
+   'reaches a dataset change in another workspace');
+ok(JSON.stringify(await counts()) !== pagesBefore3,
    'it undid the Notebook step instead');
 await press(true);
-ok(styleBefore !== null, 'redo restores the Notebook step');
+ok(JSON.stringify(await counts()) === pagesBefore3,
+   'and redo restores the Notebook step');
 
 console.log('case 4: deleting, moving and reordering all reach the keyboard');
 await keep('New section');

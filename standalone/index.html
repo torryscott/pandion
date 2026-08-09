@@ -2397,6 +2397,16 @@
     flex: 1 1 auto; min-width: 0; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap;
   }
+  /* The freshness verdict on the page card. Amber, the same colour the rail
+     and the exported record band use for it, so one fact has one look. */
+  .ps-pinpage-drift {
+    flex: 0 0 auto; padding: 1px 7px; font-size: 11px; line-height: 1.5;
+    color: #7a4a05; background: #fdf3e2; border: 1px solid #e6c893;
+    border-radius: var(--ps-r-sm);
+  }
+  .ps-pinpage-drift[data-state="gone"] {
+    color: var(--ps-danger-2); background: #fdeceb; border-color: #f0c2bf;
+  }
   .ps-pinrow-dot {
     flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%;
     background: #c98a1e;
@@ -4173,6 +4183,8 @@
             <div class="ps-inspector-actions">
               <button id="ps-pininsp-open" class="ps-btn" type="button"
                       style="display:none;">Open source chart</button>
+              <button id="ps-pininsp-update" class="ps-btn" type="button"
+                      style="display:none;">Keep an updated copy</button>
             </div>
           </div>
           <label class="ps-inspector-field">
