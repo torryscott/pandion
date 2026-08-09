@@ -239,6 +239,41 @@ ok(/\.ps-shortcut-list kbd \{[^}]*border-bottom-width/.test(src),
     await hc.close();
 }
 
+console.log('case 9: a tooltip does not cover what the click just opened');
+// Clicking a control focuses it, the capture pointerdown hid the tip, and the
+// focusin handler put it straight back with no delay. On the project "+" that
+// put a 118 by 26 tip across the first item of the 150 by 60 menu it had just
+// opened. Keyboard focus still shows it at once, which case 3 pins.
+const p9 = await page.evaluate(() => {
+    const b = document.getElementById('ps-project-add');
+    const r = b.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+});
+await page.mouse.move(p9.x, p9.y);
+await page.waitForTimeout(800);
+ok(await page.evaluate(() =>
+       document.getElementById('ps-tip').getAttribute('data-open') === '1'),
+   'setup: hovering the project plus really shows its tip');
+await page.mouse.click(p9.x, p9.y);
+await page.waitForTimeout(500);
+const p9After = await page.evaluate(() => {
+    const t = document.getElementById('ps-tip');
+    const m = document.getElementById('ps-addmenu');
+    const box = e => { const r = e.getBoundingClientRect();
+        return [r.left, r.top, r.width, r.height]; };
+    const tb = box(t), mb = box(m);
+    return { menuOpen: getComputedStyle(m).display === 'block',
+             tipOpen: t.getAttribute('data-open') === '1',
+             overlap: getComputedStyle(t).display !== 'none' &&
+                 tb[0] < mb[0] + mb[2] && tb[0] + tb[2] > mb[0] &&
+                 tb[1] < mb[1] + mb[3] && tb[1] + tb[3] > mb[1] };
+});
+ok(p9After.menuOpen, 'the click opened the menu');
+ok(!p9After.tipOpen && !p9After.overlap,
+   'and the tip did not come back over it');
+await page.keyboard.press('Escape');
+await page.waitForTimeout(300);
+
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('CHROME CHECK PASS');
 await browser.close();

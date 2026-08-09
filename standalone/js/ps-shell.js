@@ -8894,6 +8894,9 @@
   function tipTarget(node) {
     return node && node.closest ? node.closest("[data-tip]") : null;
   }
+  // What a press last landed on, so the focus it causes does not re-summon
+  // the tip it just dismissed.
+  var TIP_PRESSED = null, TIP_PRESSED_AT = 0;
   function wireTooltips() {
     document.addEventListener("pointerover", function (e) {
       var target = tipTarget(e.target);
@@ -8911,10 +8914,19 @@
       if (to === target) return;     // moving within the same target
       hideTip();
     });
-    // Keyboard focus shows it AT ONCE: a delay on focus is a delay on the only
-    // way a keyboard user can see it at all.
+    // Keyboard focus shows it AT ONCE, because a delay on focus is a delay on
+    // the only way a keyboard user can see it at all.
+    //
+    // Except when a POINTER just put the focus there. Clicking a control
+    // focuses it, so the pointerdown below would hide the tip and this would
+    // put it straight back, with no delay, on top of whatever the click just
+    // opened. The project "+" was the visible case: its tip sat across the
+    // first item of the menu it had opened. Keyboard focus is untouched, and
+    // so is a programmatic focus() call, because neither carries a press.
     document.addEventListener("focusin", function (e) {
       var target = tipTarget(e.target);
+      if (target && target === TIP_PRESSED &&
+          Date.now() - TIP_PRESSED_AT < 400) { hideTip(); return; }
       if (target) showTipFor(target);
       else hideTip();
     });
@@ -8925,7 +8937,11 @@
       if (e.key === "Escape") hideTip();
     }, true);
     // A tooltip must never outlive what it describes, or survive a scroll.
-    document.addEventListener("pointerdown", hideTip, true);
+    document.addEventListener("pointerdown", function (e) {
+      TIP_PRESSED = tipTarget(e.target);
+      TIP_PRESSED_AT = Date.now();
+      hideTip();
+    }, true);
     window.addEventListener("scroll", hideTip, true);
     window.addEventListener("blur", hideTip);
   }

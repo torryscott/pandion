@@ -566,6 +566,41 @@ at "24 cases, 3 categorys".
 
 ---
 
+## 14. A tooltip sat on top of the menu it had just opened
+
+**What a user feels.** They click the project "+", the menu opens, and its
+first item is covered by the tooltip for the button they pressed.
+
+**The evidence.** Measured on the project "+", a 118 by 26 tip at 119,290
+across a 150 by 60 menu at 167,286. The mechanism is general rather than
+particular to that button. Clicking a control focuses it; the capture-phase
+`pointerdown` correctly hides the tip, and then the `focusin` handler puts it
+straight back with no delay, because focus is the only way a keyboard user
+ever sees a tooltip and it is deliberately instant there.
+
+**BUILT.** A press records what it landed on, and a focus that arrives within
+400 ms on that same control does not re-summon the tip. Keyboard focus is
+untouched, and so is a programmatic `focus()`, because neither carries a
+press. `chrome-check` case 9, demonstrated failing first; case 3 already pins
+the keyboard half.
+
+---
+
+## 15. Two things I recorded as defects and could not reproduce
+
+Both are struck rather than fixed, because measuring them showed nothing
+wrong.
+
+- **Template panels 392 and 394.** Measured three ways across four templates,
+  same-row panels are identical everywhere.
+- **The panel-letters checkbox self-ticking.** A user's untick survives every
+  template change. The only state change is on the path where the user never
+  touched it, going from a multi-panel template to a one-panel one, where the
+  box is disabled and shows the effective state, and back. That is a disabled
+  control reporting the truth, not a control changing itself.
+
+---
+
 # Free wins
 
 All five are in `cba8f8f`, all five were demonstrated failing first, all
