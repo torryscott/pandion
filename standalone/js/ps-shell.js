@@ -16429,7 +16429,13 @@
   function layTextApply(label, key, fn, live) {
     var items = layTextTargets();
     if (!items.length) return;
-    laySnapshot(label, key);
+    // The coalesce key carries WHICH items, the same rule the nudge key
+    // follows. Without it, restyling one group of labels and then another
+    // within 1.2 s folded into one step and a single undo pulled both back,
+    // which is exactly how a person restyles a figure.
+    var ids = [];
+    for (var k = 0; k < items.length; k++) ids.push(items[k].id);
+    laySnapshot(label, key ? key + ":" + ids.join(",") : null);
     for (var i = 0; i < items.length; i++) fn(items[i]);
     layClampAllItems();
     persist(!live);
@@ -16631,12 +16637,21 @@
     wirePair("ps-ltx-rot", "ps-ltx-rot-num", "rotate", function (it, v) {
       it.rotate = Math.max(-90, Math.min(90, Math.round(v)));
     });
+    // SET a value across the whole set rather than inverting each member.
+    // Inverting leaves a mixed selection mixed forever, so the control could
+    // never make a set uniform, which is the only thing anyone presses it
+    // for. The rule every editor uses: if any member is off, turn them all
+    // on; otherwise turn them all off.
+    function layTextToggle(field, label) {
+      var items = layTextTargets(), on = false;
+      for (var i = 0; i < items.length; i++) if (!items[i][field]) on = true;
+      layTextApply(label, null, function (it) { it[field] = on; });
+    }
     el("ps-ltx-bold").addEventListener("click", function () {
-      layTextApply("text bold", null, function (it) { it.bold = !it.bold; });
+      layTextToggle("bold", "text bold");
     });
     el("ps-ltx-italic").addEventListener("click", function () {
-      layTextApply("text italic", null,
-        function (it) { it.italic = !it.italic; });
+      layTextToggle("italic", "text italic");
     });
   }
   function layApproxTextRect(item) {
@@ -17805,23 +17820,79 @@
   function laySameSize(dim) {
     var target = laySameSizeTarget();
     if (!target) return false;
-    var pool = laySizedSelection(), p = layPage(), changed = 0;
-    laySnapshot("same size");
-    for (var i = 0; i < pool.length; i++) {
+    var pool = laySizedSelection(), p = layPage();
+    var moved = 0, short = 0, snapped = false, i;
+    // Work out the whole change first, so a press that would alter nothing
+    // costs no history entry and claims nothing. The old version snapshotted
+    // and counted before comparing, so an undo after a no-op appeared to do
+    // nothing at all.
+    var plan = [];
+    for (i = 0; i < pool.length; i++) {
       var it = pool[i];
       if (it === target) continue;
       var mins = layMinSize(it);
-      if (dim !== "h")
-        it.w = layClamp(Number(target.w) || it.w, mins.w, p.w - (Number(it.x) || 0));
-      if (dim !== "w")
-        it.h = layClamp(Number(target.h) || it.h, mins.h, p.h - (Number(it.y) || 0));
-      changed++;
+      var x = Number(it.x) || 0, y = Number(it.y) || 0;
+      var w = dim === "h" ? (Number(it.w) || mins.w)
+                          : Math.max(mins.w, Number(target.w) || 0);
+      var h = dim === "w" ? (Number(it.h) || mins.h)
+                          : Math.max(mins.h, Number(target.h) || 0);
+      // If the size does not fit where the item currently sits, MOVE it
+      // rather than quietly shrinking it. Only when it cannot fit the page
+      // at all is it cut down, and then the announcement says so. Clamping
+      // in silence meant the panel ended a different size from the one the
+      // button named while the live region reported a match.
+      if (x + w > p.w) x = Math.max(0, p.w - w);
+      if (y + h > p.h) y = Math.max(0, p.h - h);
+      if (w > p.w) { w = p.w; x = 0; short++; }
+      if (h > p.h) { h = p.h; y = 0; short++; }
+      if (w === (Number(it.w) || 0) && h === (Number(it.h) || 0) &&
+          x === (Number(it.x) || 0) && y === (Number(it.y) || 0)) continue;
+      plan.push({ it: it, x: x, y: y, w: w, h: h });
+    }
+    if (!plan.length) {
+      layAnnounce("Already the same size as " + laySameSizeLabel(target) + ".");
+      return true;
+    }
+    laySnapshot("same size");
+    for (i = 0; i < plan.length; i++) {
+      plan[i].it.x = plan[i].x; plan[i].it.y = plan[i].y;
+      plan[i].it.w = plan[i].w; plan[i].it.h = plan[i].h;
+      moved++;
     }
     persist(); renderLayout();
-    layAnnounce("Matched " + changed +
-      (changed === 1 ? " item" : " items") + " to " +
-      laySameSizeLabel(target) + ".");
+    // Changing a panel's size moves its axis INSIDE its box, so evening the
+    // panels out undoes a plot-area alignment made a moment earlier. The two
+    // rail rows genuinely fight in the order a person uses them. Rather than
+    // re-aligning behind their back, say it, so the row above is worth
+    // clicking again.
+    var broke = layAlignmentBroken();
+    layAnnounce("Matched " + moved + (moved === 1 ? " item" : " items") +
+      " to " + laySameSizeLabel(target) + "." +
+      (short ? " One was larger than the page and was cut down to fit." : "") +
+      (broke ? " Their axes no longer line up." : ""));
     return true;
+  }
+  // True when the selected panels share a column or a row and their plot
+  // edges have drifted apart by more than half a pixel.
+  function layAlignmentBroken() {
+    var pool = layPlotAlignPool();
+    if (pool.length < 2) return false;
+    var axes = [["x", "l"], ["y", "b"]];
+    for (var a = 0; a < axes.length; a++) {
+      var groups = layOverlapGroups(pool, axes[a][0]);
+      for (var g = 0; g < groups.length; g++) {
+        var list = groups[g].list;
+        if (list.length < 2) continue;
+        var lo = Infinity, hi = -Infinity;
+        for (var k = 0; k < list.length; k++) {
+          var v = list[k].plot[axes[a][1]];
+          if (v < lo) lo = v;
+          if (v > hi) hi = v;
+        }
+        if (hi - lo > 0.5) return true;
+      }
+    }
+    return false;
   }
   function layApplyInspector(prop, value) {
     // Typed in the user's unit, applied in pixels.
@@ -18007,8 +18078,17 @@
     });
     canvas.addEventListener("pointerdown", function (e) {
       if (e.button !== 0) return;
-      if (e.target.closest &&
-          (e.target.closest(".ps-lbar") || e.target.closest(".ps-ltext-edit"))) return;
+      // A press on a mini-bar BUTTON belongs to the button. A press on the
+      // bar's own padding does not, and since the sized-item bar moved to the
+      // top centre that padding sits in the gutter between two rows, which is
+      // exactly where someone drags to rubber-band a row.
+      if (e.target.closest && e.target.closest(".ps-ltext-edit")) return;
+      if (e.target.closest && e.target.closest(".ps-lbar")) {
+        if (e.target.closest("button")) return;
+        layMarqueeStart(e, canvas);
+        e.preventDefault();
+        return;
+      }
       var openEd = canvas.querySelector(".ps-ltext-edit");
       if (openEd) openEd.blur();
       var itemEl = e.target.closest ? e.target.closest(".ps-litem") : null;
@@ -18261,21 +18341,55 @@
     return { x: Math.min(d.x0, d.x1), y: Math.min(d.y0, d.y1),
              w: Math.abs(d.x1 - d.x0), h: Math.abs(d.y1 - d.y0) };
   }
-  function layMarqueeHits(r) {
+  // A text item's ROTATION is a CSS transform on an inner node, so its model
+  // rect is the unrotated box and a marquee over a rotated axis label missed
+  // it and caught the panel behind. The rendered box is measured instead,
+  // for text only, and converted back to page pixels through the zoom.
+  function layMarqueeItemRect(item, canvasBox, z) {
+    if (item.kind === "text" && canvasBox) {
+      var node = el("ps-lcanvas");
+      node = node && node.querySelector(
+        '.ps-litem[data-item-id="' + item.id + '"] .ps-ltext');
+      if (node) {
+        var b = node.getBoundingClientRect();
+        if (b.width && b.height)
+          return { x: (b.left - canvasBox.left) / z,
+                   y: (b.top - canvasBox.top) / z,
+                   w: b.width / z, h: b.height / z };
+      }
+    }
+    return layItemRect(item);
+  }
+  function layMarqueeHits(r, canvasBox, z) {
     var items = layItems(), out = [];
     for (var i = 0; i < items.length; i++) {
-      var b = layItemRect(items[i]);
+      var b = layMarqueeItemRect(items[i], canvasBox, z);
       if (b.x < r.x + r.w && b.x + b.w > r.x &&
           b.y < r.y + r.h && b.y + b.h > r.y) out.push(items[i].id);
+    }
+    // A SIZED item goes last, so the primary is a panel whenever the box
+    // caught one. The primary is the key object every multi-item action
+    // names, and a column marquee catches panel letters too, so without this
+    // the on-canvas primary ring pointed at a label while Same size sized to
+    // a panel. A text-only box still ends on a text item.
+    for (var k = out.length - 1; k >= 0; k--) {
+      var it = layItemById(out[k]);
+      if (it && laySizedKind(it)) {
+        out.push(out.splice(k, 1)[0]);
+        break;
+      }
     }
     return out;
   }
   function layMarqueeStart(e, canvas) {
+    // A second pointer landing mid-gesture used to overwrite LAY_MARQ and
+    // orphan the first box on the canvas for good.
+    if (LAY_MARQ) layMarqueeTeardown();
     var z = layZoom(), box = canvas.getBoundingClientRect();
     LAY_MARQ = {
       x0: (e.clientX - box.left) / z, y0: (e.clientY - box.top) / z,
       x1: (e.clientX - box.left) / z, y1: (e.clientY - box.top) / z,
-      sx: e.clientX, sy: e.clientY, zoom: z, box: box, armed: false,
+      sx: e.clientX, sy: e.clientY, zoom: z, armed: false,
       // Shift or Cmd/Ctrl ADDS to what is already selected, matching the
       // click gesture directly above this one.
       add: !!(e.shiftKey || e.metaKey || e.ctrlKey),
@@ -18287,10 +18401,27 @@
     };
     document.addEventListener("pointermove", layMarqueeMove);
     document.addEventListener("pointerup", layMarqueeUp);
+    // A cancelled pointer never sends pointerup, so without this the box
+    // stayed on the canvas with both listeners attached and went on growing
+    // under a cursor with no button held.
+    document.addEventListener("pointercancel", layMarqueeCancelEvent);
+  }
+  function layMarqueeCancelEvent() { layMarqueeCancel(true); }
+  // The gesture belongs to the layout on screen. Leaving another workspace's
+  // pointer movement rewriting the selection meant a switch mid-drag went on
+  // changing a figure the user was no longer looking at, and announced into
+  // its live region.
+  function layMarqueeStillLive() {
+    return appWorkspace() === "layout" && isLayoutTab(activeChart());
   }
   function layMarqueeMove(e) {
     var d = LAY_MARQ;
     if (!d) return;
+    if (!layMarqueeStillLive()) { layMarqueeCancel(true); return; }
+    // Re-read rather than cache: scrolling the viewport mid-drag moved the
+    // canvas under a box that was still measuring from where it started.
+    var cvBox = el("ps-lcanvas");
+    d.box = cvBox ? cvBox.getBoundingClientRect() : d.box;
     if (!d.armed &&
         Math.abs(e.clientX - d.sx) < 4 && Math.abs(e.clientY - d.sy) < 4) return;
     if (!d.armed) {
@@ -18311,10 +18442,18 @@
     // Live, so the user sees what they are about to get. Selecting through
     // laySetSelection rather than renderLayout keeps the box itself alive;
     // a full rebuild would destroy the node the gesture is drawing into.
-    var hits = layMarqueeHits(r);
-    if (d.add)
-      for (var i = 0; i < d.base.length; i++)
-        if (hits.indexOf(d.base[i]) === -1) hits.push(d.base[i]);
+    // The base goes FIRST, so the primary is something the BOX reached rather
+    // than whatever happened to be selected already. Shift-click appends the
+    // new item last for the same reason, and the two additive gestures have
+    // to agree because Same size names the primary.
+    var hits = [];
+    if (d.add) hits = d.base.slice();
+    var found = layMarqueeHits(r, d.box, d.zoom);
+    for (var i = 0; i < found.length; i++) {
+      var at = hits.indexOf(found[i]);
+      if (at !== -1) hits.splice(at, 1);
+      hits.push(found[i]);
+    }
 
     laySetSelection(hits);
     layMarqueePaint(hits);
@@ -18325,11 +18464,16 @@
   function layMarqueePaint(ids) {
     var cv = el("ps-lcanvas");
     if (!cv) return;
+    // The primary ring stays ON during the drag. Dropping it meant the one
+    // piece of chrome that says "this is the key object" vanished for
+    // exactly the gesture that is choosing it, while the rail's Same size
+    // row was already on screen naming one.
+    var primary = ids.length ? ids[ids.length - 1] : null;
     var nodes = cv.querySelectorAll(".ps-litem");
     for (var i = 0; i < nodes.length; i++) {
-      var on = ids.indexOf(nodes[i].getAttribute("data-item-id")) !== -1;
-      nodes[i].classList.toggle("ps-litem-sel", on);
-      nodes[i].classList.remove("ps-litem-primary");
+      var id = nodes[i].getAttribute("data-item-id");
+      nodes[i].classList.toggle("ps-litem-sel", ids.indexOf(id) !== -1);
+      nodes[i].classList.toggle("ps-litem-primary", id === primary);
     }
   }
   function layMarqueeTeardown() {
@@ -18337,10 +18481,12 @@
     LAY_MARQ = null;
     document.removeEventListener("pointermove", layMarqueeMove);
     document.removeEventListener("pointerup", layMarqueeUp);
+    document.removeEventListener("pointercancel", layMarqueeCancelEvent);
     if (d && d.el && d.el.parentNode) d.el.parentNode.removeChild(d.el);
     return d;
   }
   function layMarqueeUp() {
+    if (!layMarqueeStillLive()) { layMarqueeCancel(true); return; }
     var d = layMarqueeTeardown();
     if (!d) return;
     if (!d.armed) {
@@ -18356,9 +18502,15 @@
   }
   // Escape abandons the box and puts the selection back, matching the way
   // Escape abandons an item drag.
-  function layMarqueeCancel() {
+  // `force` tears the gesture down even before it has armed, which is what a
+  // pointercancel or a workspace switch needs. Escape does NOT force: a press
+  // that has not travelled is still a live click, and tearing it down there
+  // left the press inert, so the drag that followed drew no box and the
+  // release did not clear the selection either.
+  function layMarqueeCancel(force) {
     var d = LAY_MARQ;
     if (!d) return false;
+    if (!d.armed && !force) return false;
     var base = d.base.slice(), armed = d.armed;
     layMarqueeTeardown();
     if (!armed) return false;

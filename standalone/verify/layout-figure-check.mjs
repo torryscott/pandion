@@ -581,6 +581,277 @@ ok(barHits && !barHits.label,
 ok(barHits && !barHits.badge && !barHits.handle,
    'and neither the Live badge nor the resize handle');
 
+console.log('case 17: Same size never claims a match it did not make');
+// An adversarial audit of the first cut found it clamping the copied size to
+// the room left where the item already sat, then announcing a match anyway,
+// so the panel ended a different size from the one the button named.
+await page.evaluate(() => {
+    const c = window.PS_SHELL.chart();
+    const a = c.items.find(i => i.id === 'i1'), b = c.items.find(i => i.id === 'i4');
+    a.x = 20; a.y = 20; a.w = 900; a.h = 600;
+    b.x = 900; b.y = 600; b.w = 100; b.h = 60;
+    window.PS_SHELL.selectLayoutItems(['i4', 'i1']);
+});
+await page.waitForTimeout(500);
+await page.click('[data-ctx-samesize="wh"]');
+await page.waitForTimeout(700);
+const matched = await page.evaluate(() => {
+    const b = window.PS_SHELL.chart().items.find(i => i.id === 'i4');
+    return { w: Math.round(b.w), h: Math.round(b.h),
+             x: Math.round(b.x), y: Math.round(b.y),
+             said: document.getElementById('ps-layout-live').textContent };
+});
+ok(matched.w === 900 && matched.h === 600,
+   'the item really is the size the button named (' +
+   matched.w + 'x' + matched.h + ')');
+ok(matched.x < 900 && matched.y < 600,
+   'reached by MOVING it to where that size fits, not by shrinking it ' +
+   'to the room that happened to be left (' + matched.x + ',' + matched.y + ')');
+const noopDepth = await page.evaluate(() => window.PS_SHELL.layoutHistoryDepth());
+await page.click('[data-ctx-samesize="wh"]');
+await page.waitForTimeout(600);
+ok(await page.evaluate(() => window.PS_SHELL.layoutHistoryDepth()) === noopDepth,
+   'a press that changes nothing costs no history entry');
+ok(/Already the same size/.test(await page.evaluate(() =>
+       document.getElementById('ps-layout-live').textContent)),
+   'and says so rather than reporting a match');
+
+console.log('case 18: Same size says when it has undone an alignment');
+// The two rail rows genuinely fight in the order a person uses them, because
+// changing a panel's size moves its axis inside its box. Disclosed rather
+// than re-aligned behind their back.
+await page.evaluate(() => {
+    const c = window.PS_SHELL.chart();
+    const a = c.items.find(i => i.id === 'i1');
+    a.x = 32; a.y = 60; a.w = 463; a.h = 240;
+    const b = c.items.find(i => i.id === 'i3');
+    b.x = 32; b.y = 373; b.w = 463; b.h = 267;
+    window.PS_SHELL.selectLayoutItems(['i1', 'i3']);
+});
+await page.waitForTimeout(600);
+await page.click('[data-ctx-plotalign="left"]');
+await page.waitForTimeout(700);
+await page.evaluate(() => window.PS_SHELL.selectLayoutItems(['i1', 'i3']));
+await page.waitForTimeout(400);
+await page.click('[data-ctx-samesize="h"]');
+await page.waitForTimeout(700);
+ok(/no longer line up/.test(await page.evaluate(() =>
+       document.getElementById('ps-layout-live').textContent)),
+   'evening the heights out says the axes drifted, so the row above is ' +
+   'worth clicking again');
+
+console.log('case 19: Bold resolves a mixed set instead of inverting it');
+await page.evaluate(() => {
+    window.PS_SHELL.chart().items.filter(i => i.kind === 'text')
+        .forEach((t, n) => { t.bold = n === 0; t.italic = false; });
+    window.PS_SHELL.selectLayoutItems(['i5', 'i6', 'i7', 'i8']);
+});
+await page.waitForTimeout(500);
+ok(await page.evaluate(() =>
+       document.getElementById('ps-ltx-bold').getAttribute('aria-pressed')) === 'mixed',
+   'a set that disagrees reports mixed');
+await page.click('#ps-ltx-bold');
+await page.waitForTimeout(600);
+ok(await page.evaluate(() =>
+       window.PS_SHELL.chart().items.filter(i => i.kind === 'text')
+           .every(t => t.bold)),
+   'and one press makes them all bold, rather than flipping each member ' +
+   'and leaving the set mixed forever');
+await page.click('#ps-ltx-bold');
+await page.waitForTimeout(600);
+ok(await page.evaluate(() =>
+       window.PS_SHELL.chart().items.filter(i => i.kind === 'text')
+           .every(t => !t.bold)),
+   'a second press turns them all off');
+
+console.log('case 20: two text edits on two sets are two undo steps');
+// The same defect case 5 fixed for nudges, in the control that made it easy
+// to hit: restyling a figure's labels in two groups is the normal way.
+await page.evaluate(() => window.PS_SHELL.selectLayoutItems(['i5', 'i6']));
+await page.waitForTimeout(300);
+await page.evaluate(() => {
+    const n = document.getElementById('ps-ltx-size-num');
+    n.value = '30'; n.dispatchEvent(new Event('change', { bubbles: true }));
+});
+await page.waitForTimeout(400);
+await page.evaluate(() => window.PS_SHELL.selectLayoutItems(['i7', 'i8']));
+await page.waitForTimeout(200);          // inside the 1.2 s coalesce window
+await page.evaluate(() => {
+    const n = document.getElementById('ps-ltx-size-num');
+    n.value = '9'; n.dispatchEvent(new Event('change', { bubbles: true }));
+});
+await page.waitForTimeout(600);
+await page.evaluate(() => document.getElementById('ps-lviewport').focus());
+await page.keyboard.press('Meta+z');
+await page.waitForTimeout(700);
+const sizes = await page.evaluate(() => {
+    const t = window.PS_SHELL.chart().items.filter(i => i.kind === 'text');
+    return { ab: t.filter(i => 'AB'.indexOf(i.text) !== -1).map(i => i.fontSize),
+             cd: t.filter(i => 'CD'.indexOf(i.text) !== -1).map(i => i.fontSize) };
+});
+ok(sizes.ab.every(v => v === 30),
+   'undoing the second group leaves the first group where it was (' +
+   sizes.ab.join(',') + ')');
+ok(sizes.cd.every(v => v !== 9), 'and the second group came back (' +
+   sizes.cd.join(',') + ')');
+
+console.log('case 21: the marquee survives what pointer gestures run into');
+const cg = await page.evaluate(() => {
+    const r = document.getElementById('ps-lcanvas').getBoundingClientRect();
+    return { l: r.left, t: r.top, z: r.width / window.PS_SHELL.chart().page.w,
+             pw: window.PS_SHELL.chart().page.w,
+             ph: window.PS_SHELL.chart().page.h };
+});
+const pt = (x, y) => ({ x: cg.l + x * cg.z, y: cg.t + y * cg.z });
+const boxCount = () => page.evaluate(() =>
+    document.querySelectorAll('.ps-lmarquee').length);
+// Escape before the press has travelled must leave the press usable, not
+// silently kill it. The first cut tore the gesture down before checking
+// whether it had armed, so the drag that followed drew nothing at all.
+await page.evaluate(() => window.PS_SHELL.selectLayoutItems([]));
+await page.waitForTimeout(300);
+await page.mouse.move(pt(4, 4).x, pt(4, 4).y);
+await page.mouse.down();
+await page.keyboard.press('Escape');
+await page.waitForTimeout(200);
+await page.mouse.move(pt(cg.pw * 0.49, cg.ph - 4).x, pt(cg.pw * 0.49, cg.ph - 4).y,
+                      { steps: 8 });
+await page.waitForTimeout(150);
+ok(await boxCount() > 0,
+   'a press that was Escaped before it travelled still draws a box');
+await page.mouse.up();
+await page.waitForTimeout(400);
+// A cancelled pointer never sends pointerup, so nothing else would end it.
+await page.evaluate(() => window.PS_SHELL.selectLayoutItems([]));
+await page.mouse.move(pt(4, 4).x, pt(4, 4).y);
+await page.mouse.down();
+await page.mouse.move(pt(300, 300).x, pt(300, 300).y, { steps: 6 });
+await page.waitForTimeout(150);
+await page.evaluate(() =>
+    document.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true })));
+await page.waitForTimeout(300);
+ok(await boxCount() === 0, 'a pointercancel tears the box down');
+await page.mouse.move(pt(900, 600).x, pt(900, 600).y, { steps: 6 });
+await page.waitForTimeout(250);
+ok(await boxCount() === 0 &&
+   (await page.evaluate(() => window.PS_SHELL.layoutSelection())).length === 0,
+   'and a move with no button held afterwards does nothing');
+await page.mouse.up();
+// A switch mid-drag must not go on rewriting a figure nobody is looking at.
+await page.evaluate(() => window.PS_SHELL.selectLayoutItems(['i1', 'i2', 'i3']));
+await page.mouse.move(pt(4, 4).x, pt(4, 4).y);
+await page.mouse.down();
+await page.mouse.move(pt(200, 200).x, pt(200, 200).y, { steps: 5 });
+await page.waitForTimeout(150);
+await page.evaluate(() => window.PS_SHELL.setWorkspace('data'));
+await page.waitForTimeout(400);
+await page.mouse.move(pt(900, 600).x, pt(900, 600).y, { steps: 5 });
+await page.waitForTimeout(250);
+await page.mouse.up();
+await page.waitForTimeout(300);
+const kept = await page.evaluate(() => window.PS_SHELL.layoutSelection());
+ok(kept.length === 3 && await boxCount() === 0,
+   'a workspace switch ends the gesture and restores what was selected (' +
+   kept.join(',') + ')');
+await page.evaluate(() => window.PS_SHELL.setWorkspace('layout'));
+await page.waitForTimeout(1000);
+
+console.log('case 22: the primary is something the box reached, and the rail agrees');
+// Earlier cases move panels about deliberately, so this puts the 2 by 2 back
+// and pre-selects a panel in the RIGHT column, which the left-half box below
+// cannot reach. That is the whole point of the assertion.
+await page.evaluate(() => {
+    const c = window.PS_SHELL.chart();
+    const put = (id, x, y) => {
+        const it = c.items.find(i => i.id === id);
+        it.x = x; it.y = y; it.w = 463; it.h = 267;
+    };
+    put('i1', 32, 60); put('i2', 513, 60); put('i3', 32, 373); put('i4', 513, 373);
+    window.PS_SHELL.selectLayoutItems(['i4']);
+});
+await page.waitForTimeout(500);
+await page.keyboard.down('Shift');
+await page.mouse.move(pt(2, 2).x, pt(2, 2).y);
+await page.mouse.down();
+await page.mouse.move(pt(cg.pw * 0.49, cg.ph - 2).x, pt(cg.pw * 0.49, cg.ph - 2).y,
+                      { steps: 8 });
+await page.waitForTimeout(200);
+const ringsDuring = await page.evaluate(() =>
+    document.querySelectorAll('.ps-litem-primary').length);
+await page.mouse.up();
+await page.keyboard.up('Shift');
+await page.waitForTimeout(500);
+ok(ringsDuring === 1,
+   'the key-object ring stays on during the drag that is choosing it');
+const agree = await page.evaluate(() => {
+    const sel = window.PS_SHELL.layoutSelection();
+    const ring = document.querySelector('.ps-litem-primary');
+    const btn = document.querySelector('[data-ctx-samesize="wh"]');
+    return { last: sel[sel.length - 1],
+             ring: ring ? ring.getAttribute('data-item-id') : null,
+             tip: btn ? btn.getAttribute('data-tip') : '' };
+});
+ok(agree.last !== 'i4',
+   'shift-marquee makes something the BOX reached primary, not whatever was ' +
+   'already selected, so it agrees with shift-click');
+ok(agree.ring === agree.last,
+   'the ring is on the primary (' + agree.ring + ')');
+ok(/Chart/.test(agree.tip),
+   'and Same size names a chart panel rather than a label ("' + agree.tip + '")');
+
+console.log('case 23: the panel toolbar is not a hole in the canvas');
+// Moving it to the top centre for case 16 put its padding in the gutter
+// between two rows, which is exactly where someone drags to select a row.
+await page.evaluate(() => window.PS_SHELL.selectLayoutItems(['i3']));
+await page.waitForTimeout(500);
+const barPt = await page.evaluate(() => {
+    const r = document.querySelector('#ps-lcanvas .ps-lbar').getBoundingClientRect();
+    return { x: r.left + 2, y: r.top + 2 };
+});
+await page.mouse.move(barPt.x, barPt.y);
+await page.mouse.down();
+await page.mouse.move(barPt.x + 260, barPt.y + 120, { steps: 8 });
+await page.waitForTimeout(200);
+ok(await boxCount() > 0,
+   'a drag starting on the bar\'s own padding still draws a box');
+await page.mouse.up();
+await page.waitForTimeout(300);
+
+console.log('case 24: a marquee catches a rotated label');
+// A text item's rotation is a CSS transform on an inner node, so the model
+// rect is the unrotated box and a box over the rendered strip missed it.
+await page.evaluate(() => {
+    const it = window.PS_SHELL.chart().items.find(i => i.text === 'A');
+    it.rotate = 90; it.x = 470; it.y = 150; it.fontSize = 40;
+    window.PS_SHELL.selectLayoutItems([]);
+});
+await page.waitForTimeout(700);
+const rot = await page.evaluate(() => {
+    const n = document.querySelector('.ps-litem[data-item-id="i5"]');
+    const t = n.querySelector('.ps-ltext');
+    const cv = document.getElementById('ps-lcanvas').getBoundingClientRect();
+    const z = cv.width / window.PS_SHELL.chart().page.w;
+    const nb = n.getBoundingClientRect(), tb = t.getBoundingClientRect();
+    return { un: [(nb.left - cv.left) / z, (nb.left + nb.width - cv.left) / z],
+             re: [(tb.left - cv.left) / z, (tb.top - cv.top) / z,
+                  (tb.top + tb.height - cv.top) / z] };
+});
+ok(rot.re[0] < rot.un[0] - 2,
+   'the rendered box really does stick out past the unrotated one (' +
+   Math.round(rot.re[0]) + ' vs ' + Math.round(rot.un[0]) + ')');
+// A thin strip in the sliver that only the RENDERED box covers.
+{
+    const a = pt(rot.re[0] + 1, rot.re[1] + 2);
+    const b = pt(rot.un[0] - 2, rot.re[2] - 2);
+    await page.mouse.move(a.x, a.y);
+    await page.mouse.down();
+    await page.mouse.move(b.x, b.y, { steps: 8 });
+    await page.mouse.up();
+    await page.waitForTimeout(500);
+}
+ok((await page.evaluate(() => window.PS_SHELL.layoutSelection())).indexOf('i5') !== -1,
+   'and a box drawn only in that sliver catches the label');
+
 ok(errors.length === 0, 'no page errors (' + errors.join(' | ') + ')');
 console.log('\nlayout-figure-check: all cases passed');
 await browser.close();
