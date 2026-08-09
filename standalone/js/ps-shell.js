@@ -13786,41 +13786,6 @@
     // engine's styling history. Outside Data, recency remains a fallback
     // for commands invoked from application chrome. This avoids a Data
     // change's required chart rerender stealing Cmd/Ctrl+Z back from Data.
-    // Canvas zoom shortcuts. Cmd/Ctrl+wheel already zoomed, but the three
-    // keys every canvas application binds did nothing, so the only way to
-    // step the zoom was the select in the toolbar.
-    window.addEventListener("keydown", function (e) {
-      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
-      if (!(appWorkspace() === "layout" && isLayoutTab(activeChart()))) return;
-      var zk = e.key;
-      var step = zk === "=" || zk === "+" ? 1 : (zk === "-" || zk === "_") ? -1 : 0;
-      if (zk !== "0" && !step) return;
-      var tgt = e.target;
-      if (tgt && tgt.closest &&
-          tgt.closest("input, textarea, select, [contenteditable]")) return;
-      e.preventDefault();
-      var view = layView();
-      if (zk === "0") {
-        // Cmd+0 toggles between fitting the page and actual size, which is
-        // the pair a figure author flips between.
-        view.zoom = view.zoom === "fit" ? "1" : "fit";
-      } else {
-        var ladder = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
-        var now = layZoom(), at = 0, i;
-        for (i = 0; i < ladder.length; i++)
-          if (Math.abs(ladder[i] - now) < Math.abs(ladder[at] - now)) at = i;
-        if (step > 0 && ladder[at] <= now + 0.001) at++;
-        if (step < 0 && ladder[at] >= now - 0.001) at--;
-        view.zoom = String(ladder[Math.max(0, Math.min(ladder.length - 1, at))]);
-      }
-      persist(); renderLayout();
-      layAnnounce(view.zoom === "fit" ? "Zoom fit to page."
-        : "Zoom " + Math.round(Number(view.zoom) * 100) + " percent.");
-    // CAPTURE. Something on the way down already stops propagation for
-    // plain Cmd/Ctrl chords, so a bubble-phase window listener never sees
-    // "=" or "-" at all (Cmd+0 arrived, which is what made the first
-    // attempt look half-working).
-    }, true);
     window.addEventListener("keydown", function (e) {
       if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
       var k = (e.key || "").toLowerCase();
@@ -13891,6 +13856,41 @@
           '.graphbuilder2-host button[aria-label="Redo"]');
         if (rb) rb.click();
       }
+    }, true);
+    // Canvas zoom shortcuts. Cmd/Ctrl+wheel already zoomed, but the three
+    // keys every canvas application binds did nothing, so the only way to
+    // step the zoom was the select in the toolbar.
+    window.addEventListener("keydown", function (e) {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+      if (!(appWorkspace() === "layout" && isLayoutTab(activeChart()))) return;
+      var zk = e.key;
+      var step = zk === "=" || zk === "+" ? 1 : (zk === "-" || zk === "_") ? -1 : 0;
+      if (zk !== "0" && !step) return;
+      var tgt = e.target;
+      if (tgt && tgt.closest &&
+          tgt.closest("input, textarea, select, [contenteditable]")) return;
+      e.preventDefault();
+      var view = layView();
+      if (zk === "0") {
+        // Cmd+0 toggles between fitting the page and actual size, which is
+        // the pair a figure author flips between.
+        view.zoom = view.zoom === "fit" ? "1" : "fit";
+      } else {
+        var ladder = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+        var now = layZoom(), at = 0, i;
+        for (i = 0; i < ladder.length; i++)
+          if (Math.abs(ladder[i] - now) < Math.abs(ladder[at] - now)) at = i;
+        if (step > 0 && ladder[at] <= now + 0.001) at++;
+        if (step < 0 && ladder[at] >= now - 0.001) at--;
+        view.zoom = String(ladder[Math.max(0, Math.min(ladder.length - 1, at))]);
+      }
+      persist(); renderLayout();
+      layAnnounce(view.zoom === "fit" ? "Zoom fit to page."
+        : "Zoom " + Math.round(Number(view.zoom) * 100) + " percent.");
+    // CAPTURE. Something on the way down already stops propagation for
+    // plain Cmd/Ctrl chords, so a bubble-phase window listener never sees
+    // "=" or "-" at all (Cmd+0 arrived, which is what made the first
+    // attempt look half-working).
     }, true);
   }
 

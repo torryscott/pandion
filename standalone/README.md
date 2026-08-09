@@ -1095,6 +1095,59 @@ Probes: `pinboard-check`, `notebook-record-check`, `notebook-pages-check`,
 `notebook-undo-check`, `copy-moment-check`, `keep-fidelity-check`,
 `provenance-check`, `rail-icons-check`, `doclifecycle-check`.
 
+## The Layouts workspace
+
+Switcher key `layout`. A layout is not a separate document type in storage.
+It is a `PROJECT.charts` entry with `type:"layout"`, discriminated by
+`isLayoutTab`, holding `items`, `page`, `view` and `nextLabel`. The code sits
+in the `layout` banner section of `js/ps-shell.js` behind the `lay*` prefix.
+
+It composes finished charts into one figure for a paper, a poster or a slide.
+An `item.kind` is `chart`, `text` or `image`, and `laySizedKind` (chart or
+image) is the predicate for anything that has a box. A chart panel is a LIVE
+reference redrawn whenever its source chart changes; a Notebook placement
+arrives as an `image` item carrying `srcChart`, which is frozen. The
+selection badge, the rail card, the accessible label and the right-click all
+state that difference in the same words.
+
+Things worth knowing before changing it:
+
+- **Pixels are the model, everywhere.** Units, zoom and the rail are display
+  only. Never store a converted number. Zoom is a CSS transform on the canvas
+  alone, so anything measuring with `getBoundingClientRect` inside it must
+  divide by `layZoom()`.
+- **A panel's box is not what the reader sees.** The chart snapshot is
+  `viewBox="0 0 720 490"` with `preserveAspectRatio="xMidYMid meet"`, and
+  `layoutTemplateRects` sizes cells from the page geometry alone, so a
+  four-panel cell of 463 by 267 letterboxes the chart and leaves about 35 px
+  dead on each side. Align, snap and the smart guides all act on the box.
+  `layPlotFrac` / `layPlotRect` are the pair that reason about the DRAWN plot
+  instead, and they measure the axis as a FRACTION of the item box so the
+  number survives the zoom transform and a live drag transform.
+- **Equal panels do not line their axes up.** A panel box carries its tick
+  labels, so a column reading 100000 sits about 6 to 11 px off one reading
+  0.10. `layAlignPlots` moves the panels so the plots coincide, grouping the
+  selection by the column or row the panels already sit in.
+- **Arrow keys mean two different things.** Inside `#ps-lviewport` plain
+  arrows NAVIGATE between items and Alt+Arrow nudges, which is the engine's
+  rule and the assistive-technology model. A second handler further down the
+  same keydown function nudges on PLAIN arrows whenever focus is anywhere
+  else in the workspace. A probe that focuses the viewport must press
+  Alt+Arrow. Unifying the two is an open decision.
+- **The canvas is `aria-hidden` on purpose.** A parallel hidden list of plain
+  `role="option"` divs is the assistive-technology model, because a captured
+  chart SVG would otherwise become a pile of nested interactive descendants
+  inside an ARIA option. Mirror any new on-canvas chrome into the option
+  list; do not un-hide the canvas.
+- **View state is deliberately outside the undo snapshot.** Folding zoom,
+  grid or snap in would make undoing a delete also switch the grid back on.
+- **Never mix live `getBoundingClientRect` with animated transforms in slot
+  math.** Cache geometry once at grab, the way the tab reorder does.
+- **A plain Cmd/Ctrl chord needs a CAPTURE listener on window.** Something on
+  the way down stops propagation, so a bubble-phase window keydown never sees
+  `=` or `-` while `0` arrives, which makes a half-bound shortcut look like a
+  working one.
+
 ## Known gaps (documented, deliberate)
 
 Checked and rewritten Jul 26 2026 (punch list t4-14). Three of the five
