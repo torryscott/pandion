@@ -1208,6 +1208,33 @@ Rscript standalone/build-templates.R   # regenerate templates (needs jmvcore)
 
 ## Harness laws learned here
 
+- **A probe must not write the state it is testing for.** The Notebook page
+  list is named from a graph type the shell records at keep time.
+  `notebook-pages-check` poked `setOption('graphType', ...)` before every
+  keep, which MANUFACTURED the field whose absence was the defect, so its
+  naming assertions passed against a state a user cannot reach and the probe
+  ran green over a broken feature for the length of a dive. That is worse than
+  having no probe, because it produced confidence. If an assertion depends on
+  a field, reach that field the way a user does, or leave it alone entirely
+  and assert on what the app puts there by itself. The corollary is that a
+  control has to be judged, not just run: a probe that dies on a missing DOM
+  node before testing anything proves only that new markup is absent, which is
+  true of any new feature.
+- **A jsPDF file's text lives in Flate streams**, so a raw byte search over an
+  exported PDF is a false negative, and a naive `indexOf('stream')` also
+  matches `endstream` and walks the offsets off the data. Match
+  `/stream\r?\n/`, trim the trailing newline before the keyword (node's
+  inflate tolerates trailing bytes, the browser's `DecompressionStream`
+  rejects them), then join the parenthesised literals. `python3` with `fitz`
+  (pymupdf) is the easier route when the probe can reach outside the browser.
+- **The app-menu button toggles**, so a probe that reads the Edit menu twice
+  closes it on the second read and asserts against stale rows. Press Escape
+  first and confirm the menu is closed by COMPUTED display, not the inline
+  one, which is the empty string before the menu has ever opened.
+- **`PS_TOUR.play()` returns a promise that resolves when the tour ends**, so
+  `page.evaluate(() => PS_TOUR.play(k))` blocks for the whole walkthrough.
+  Fire it inside a block body to observe a tour while it runs.
+
 - Rscript runs in the C locale: force `Sys.setlocale("LC_ALL",
   "en_US.UTF-8")` BEFORE sourcing the b.R files or the multibyte facet
   separator degrades to ASCII "<c2><a6>" inside emitted payloads, and
