@@ -228,15 +228,28 @@ Italic, Color and Rotate. Select four and the TEXT section disappears
 entirely, leaving only Align and a read-only geometry block. Every design
 tool applies text properties to the whole selection.
 
-**No prototype.** The panel already exists and already writes per-item
-fields; the work is rendering it for a homogeneous multi-selection and
-looping the writer. I left it because items 1 to 4 were the ones with
-evidence behind them, and because it needs one small decision, namely what a
-control shows when the selected items disagree (Figma shows "Mixed").
+**BUILT**, `3600e7b`. The section stays whenever the selection holds any text
+item, says how many it is about to change, and applies to all of them.
 
-*Recommendation.* Render the TEXT section whenever every selected item is a
-text item; show a value when they agree and a blank field when they do not;
-apply to all. About 60 lines and one probe case.
+A SUBSET is allowed on purpose, which is a change from what I first proposed.
+Requiring an all-text selection reads tidier until you try it. A marquee that
+catches a column catches its labels with it, so the gesture that finds the
+labels would have been the one gesture that cannot style them. The heading
+carries the count so the scope is never a guess.
+
+Where the set disagrees the control says so rather than showing one member's
+value and implying the rest match. A number field goes blank with a Mixed
+placeholder and a toggle reports `aria-pressed="mixed"`, which is real ARIA
+rather than a look.
+
+**Cost.** About 70 lines. It also moved the align section above the text
+section (`6ce9569`), because Text had never coexisted with Align before and
+its colour picker is around 330 px tall, so a selection made in order to
+arrange something pushed every arrangement control below the fold.
+
+**What it risks.** `layout-text-check` case 1 asserted the OLD contract, that
+the section LEAVES on a multi-selection. Rewritten to the new one with the
+reason in the probe, rather than quietly.
 
 ---
 
@@ -261,15 +274,32 @@ select them, and instead the selection clears.
 Marquee is the largest of these. It is the gesture that makes multi-select
 cheap, and multi-select is what items 1 and 6 both depend on.
 
-**No prototype.** Marquee needs pointer handling on the canvas that does not
-fight the drag threshold or the Escape-cancels-a-drag rule, and it has an
-interaction with the deliberately `aria-hidden` canvas (a marquee has to
-mirror into the option list). It is the biggest single item here and it is
-not a free win. Estimate 120 to 180 lines, two probe cases, half a day.
+**Marquee is BUILT**, `3600e7b`. A drag on empty canvas draws a box and
+selects what it touches, live, so you can see what you are about to get.
 
-Grouping is separate and larger, and it is also the honest answer to the
-loose end in item 1. I would take marquee first and let grouping wait for
-evidence that people want it.
+Three decisions inside it. It is INTERSECT rather than contain, the Figma and
+Illustrator rule, because a panel letter is a small item at a panel's corner
+and requiring a box that encloses it makes the tiny things the hardest to
+catch. Shift or Cmd adds to what is already selected, matching the click
+gesture it sits beside. And Escape abandons the box and restores the
+selection that was there, the way Escape abandons an item drag, which is also
+where the one bug in it was, because the base selection was being captured
+only for the additive case and a cancelled plain drag left the selection
+empty.
+
+The box lives INSIDE the canvas, so it inherits the zoom transform and is
+positioned in ordinary page pixels, and every pointer delta is divided by the
+zoom. It paints selection classes directly rather than calling
+`renderLayout`, because a rebuild would destroy the node the gesture is
+drawing into.
+
+**Cost.** About 130 lines. No AT work was needed after all, because the
+canvas is `aria-hidden` and the option list is rebuilt by `renderLayout` on
+release, so a pointer-only gesture has nothing to mirror mid-drag.
+
+**Still open.** Grouping (Cmd/Ctrl+G) and Alt+drag to duplicate. Grouping is
+also the honest answer to the loose end in item 1, and I would still let it
+wait for evidence that people want it.
 
 ---
 
@@ -308,10 +338,18 @@ the second reflex after align in every multi-panel figure. Resize is also
 only available from a **single bottom-right corner handle**; there are no
 edge handles and no other corners.
 
-*Recommendation.* A `SAME SIZE` row beside `PLOT AREAS` with Width, Height
-and Both, sizing every selected sized item to the primary (last-selected)
-one. About 40 lines, reusing `layAlign`'s grammar and `laySnapshot`. Edge
-handles are a separate, larger piece of work.
+**BUILT**, `3600e7b`. A `SAME SIZE` row with Width, Height and Both, sizing
+to the primary, which is the last item added to the selection, the key-object
+convention. The buttons NAME it ("Match the width of Chart 2"), so the
+question a match-size command always raises is answered before it is asked.
+Text items are skipped, because they size themselves to their content, and
+the row hides when the selection holds none that qualify.
+
+**Cost.** About 55 lines, reusing `layAlign`'s grammar and `laySnapshot`. One
+history entry per press.
+
+**Still open.** Edge handles. A panel still resizes only from its
+bottom-right corner, which is a separate and larger piece of work.
 
 ---
 
@@ -353,7 +391,7 @@ an adversarial auditor run over the merge, and it is the one lead from the
 brief that my own passes missed. `addChartToLayout` and `addPinToLayout`
 mutate the target layout while a DIFFERENT document is on screen, and
 neither took a snapshot. Worse than the lead said, because the send does
-three things: it adds an item, it grows the page, and it flips the preset to
+three things. It adds an item, it grows the page, and it flips the preset to
 custom. With no step recorded, the next Cmd/Ctrl+Z in that layout removed
 the sent panel AND reverted whatever the user had done before it, in one
 unlabelled move. Measured before the fix, depth 1 to 1 across the send, then
@@ -363,9 +401,14 @@ named document rather than the active one, storing that document's selection
 only when it is the one on screen. Probe case 11, demonstrated failing
 first.
 
-**F7 · (not built, one line)** Selecting a chart panel covers its own panel
-label. The mini bar sits at (277, 230, 33x24) and the "A" text item at
-(277, 235, 19x24), measured. Offsetting the bar by its own height clears it.
+**F7 · Selecting a panel no longer covers its own letter.** The bar sat at
+(277, 230, 33x24) and the "A" label at (277, 235, 19x24), measured, so
+selecting panel A hid the A. Filed as one line and it was not, because
+offsetting the bar downward puts it on the NEXT row's letter in a labelled
+grid, which is worse; it then covers a different panel's letter. It moves to the top
+CENTRE, which is free of the label at the left and the Live badge at the
+right. The letter is content and ships in the export; the bar is chrome, so
+the chrome moves.
 
 ---
 
@@ -418,9 +461,11 @@ wiring, `15286e3` this proposal, `a0a2042` the merge with the Notebook dive,
 `7cd0c1c` the README and a comment-placement fix, `89e5f6d` the
 send-to-layout history step.
 
-**Probe added.** `standalone/verify/layout-figure-check.mjs`, 11 cases,
+**Probe added.** `standalone/verify/layout-figure-check.mjs`, 16 cases,
 wired into `run.sh` beside the other layout probes and honoring `PS_PAGE` so
-it runs on the dev page and the dist.
+it runs on the dev page and the dist. One existing probe changed contract
+rather than passing quietly, `layout-text-check` case 1, which asserted that
+the Text section LEAVES on a multi-selection.
 
 **Demonstrated failing first.** Every case was reproduced against the code
 before its fix. The axis spread was measured at 6 px and 11 px on the
@@ -430,8 +475,10 @@ two-panel nudge sequence; the disabled fields read back as the same
 with an image item and left it at 400x200; the export was written to disk
 and inspected with `file` and PIL, reporting `density 1x1` and `dpi = None`;
 the zoom keys were pressed and recorded as no-ops; the context menu was
-dumped and had no replace entry; and case 11 reports depth 4 to 4 against
-`HEAD` and 4 to 5 with the fix. Case 1 is deliberately a *characterisation*
+dumped and had no replace entry; case 11 reports depth 4 to 4 against `HEAD`
+and 4 to 5 with the fix; and cases 12 to 14 were run against the parent,
+where no box is drawn, the live selection never updates, Escape restores
+nothing, and the Same size row does not exist to be queried. Case 1 is deliberately a *characterisation*
 rather than a regression, because it asserts the misalignment exists, so it
 will start failing the day the engine-side gutter fix lands, which is the
 correct signal.
