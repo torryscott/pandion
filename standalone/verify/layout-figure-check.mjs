@@ -47,6 +47,18 @@
 //  17  bringing the new item into view used scrollIntoView, which negotiates
 //      with every scrolling ancestor, so it also scrolled the workspace pane
 //      33 px and took the toolbar out from under the pointer.
+//  18  Send to layout writes into a document that is not on screen and
+//      nothing clamped it, so a send onto a page of 3990 left the panel's
+//      bottom at 4492 against a page clamped to 4000. 492 px of it sat below
+//      the page, permanently and invisibly, and opening the layout did not
+//      correct it.
+//
+// One hazard is closed here WITHOUT a live repro, and is recorded rather than
+// probed. Item ids are per document and every template starts at i1, so the
+// canvas can hold a node carrying an item's id that belongs to a different
+// layout. It measures zero today only because the layout pane is hidden
+// whenever a send runs, so layItemRect now compares item IDENTITY against the
+// active layout instead of trusting the id.
 //
 // PROBE LAWS honored here: playwright resolves from /tmp/node_modules via
 // createRequire; the zoom keys must be pressed with the viewport focused
@@ -1948,6 +1960,110 @@ const p46 = await page.evaluate(() => {
 ok(p46.n === 1 && p46.w === 360,
    'the chart panel takes the width the kept pages are using (' +
    p46.w + ' against 360)');
+
+console.log('case 47: a send cannot leave a panel below the page');
+// Send to layout writes into a document that is not on screen, and nothing
+// clamped it. Measured before the fix: a send onto a page of 3990 left the
+// panel at y 3850 with a height of 642 against a page clamped to 4000, so
+// 492 px of it sat below the page, permanently and invisibly, and opening
+// the layout did not correct it.
+await page.evaluate(() => window.PS_SHELL.setWorkspace('chart'));
+await page.waitForTimeout(1200);
+await p41Send('chart-to-new');
+const p47Layout = await page.evaluate(() => {
+    const ls = window.PS_SHELL.charts().filter(c => c.type === 'layout');
+    return ls[ls.length - 1].id;
+});
+await page.evaluate(id => {
+    // A page near the maximum, filled edge to edge, so the next panel cannot
+    // fit anywhere and the growth it needs is not available.
+    const c = window.PS_SHELL.charts().find(x => x.id === id);
+    c.page.h = 3990; c.page.preset = 'custom';
+    const p = c.items[0];
+    p.x = 32; p.y = 32; p.w = 944; p.h = 3800;
+}, p47Layout);
+await page.waitForTimeout(300);
+await p41Send('chart-to-' + p47Layout);
+const p47 = await page.evaluate(id => {
+    const c = window.PS_SHELL.charts().find(x => x.id === id);
+    const toast = document.getElementById('ps-toast');
+    return { pageH: c.page.h,
+             below: c.items.filter(i => (i.y + (i.h || 0)) > c.page.h + 0.5)
+                 .map(i => i.id),
+             lowest: Math.max.apply(null,
+                 c.items.map(i => (i.y || 0) + (i.h || 0))),
+             toast: toast ? toast.textContent : '' };
+}, p47Layout);
+ok(p47.pageH <= 4000,
+   'the page stops at its maximum (' + p47.pageH + ')');
+ok(p47.below.length === 0,
+   'and no item is left below it (' + Math.round(p47.lowest) + ' against ' +
+   p47.pageH + ')');
+ok(/at its largest/.test(p47.toast),
+   'the send says the page could not grow rather than claiming it did ("' +
+   p47.toast.trim() + '")');
+await page.evaluate(id => window.PS_SHELL.switchChart(id), p47Layout);
+await page.evaluate(() => window.PS_SHELL.setWorkspace('layout'));
+await page.waitForTimeout(1600);
+ok(await page.evaluate(id => {
+       const c = window.PS_SHELL.charts().find(x => x.id === id);
+       return c.items.every(i => (i.y || 0) + (i.h || 0) <= c.page.h + 0.5);
+   }, p47Layout),
+   'and opening the layout does not reveal one that was hiding below it');
+
+console.log('case 48: the two routes place a panel identically');
+// Case 41 sends into an EMPTY layout, where the two routes cannot disagree.
+// A caption in the target is what separates them, because a send measures a
+// document that is not on screen and has to work from the text estimate
+// while the toolbar can read the rendered box.
+async function p48Fixture() {
+    await page.evaluate(() => window.PS_SHELL.addLayout());
+    await page.waitForTimeout(1300);
+    return page.evaluate(() => {
+        const c = window.PS_SHELL.chart();
+        c.items.push({ id: 'i1', kind: 'text', fontSize: 14, x: 32, y: 32,
+            text: 'Figure 2. Scores by condition across every session, ' +
+                  'with ninety five per cent confidence intervals shown.' });
+        window.PS_SHELL.selectLayoutItems([]);
+        return c.id;
+    });
+}
+const p48Sent = await p48Fixture();
+await page.waitForTimeout(700);
+const p48Caption = await page.evaluate(() => {
+    const c = window.PS_SHELL.chart();
+    const n = document.querySelector('#ps-lcanvas .ps-litem[data-item-id="i1"]');
+    const cv = document.getElementById('ps-lcanvas').getBoundingClientRect();
+    const z = cv.width / c.page.w;
+    const r = n.getBoundingClientRect();
+    return { w: +(r.width / z).toFixed(1), h: +(r.height / z).toFixed(1) };
+});
+ok(p48Caption.h > 20,
+   'the caption renders as a real box (' + p48Caption.w + ' by ' +
+   p48Caption.h + ')');
+await p41Send('chart-to-' + p48Sent);
+const p48A = await page.evaluate(id => {
+    const c = window.PS_SHELL.charts().find(x => x.id === id);
+    const p = c.items.filter(i => i.kind === 'chart')[0];
+    return p ? { x: p.x, y: p.y, w: p.w, h: p.h } : null;
+}, p48Sent);
+await p48Fixture();
+await page.waitForTimeout(700);
+await p38AddChart();
+const p48B = await page.evaluate(() => {
+    const c = window.PS_SHELL.chart();
+    const p = c.items.filter(i => i.kind === 'chart')[0];
+    return p ? { x: p.x, y: p.y, w: p.w, h: p.h } : null;
+});
+ok(p48A && p48B, 'both routes placed a panel');
+ok(p48A.x === p48B.x && p48A.y === p48B.y,
+   'in the same place (' + p48A.x + ',' + p48A.y + ' and ' + p48B.x + ',' +
+   p48B.y + ')');
+ok(p48A.w === p48B.w && p48A.h === p48B.h,
+   'at the same size (' + p48A.w + ' by ' + p48A.h + ')');
+ok(p48A.y >= 32 + p48Caption.h,
+   'clear of the caption rather than on it (' + p48A.y + ' against a ' +
+   'caption ending at ' + Math.round(32 + p48Caption.h) + ')');
 
 ok(errors.length === 0, 'no page errors (' + errors.join(' | ') + ')');
 console.log('\nlayout-figure-check: all cases passed');

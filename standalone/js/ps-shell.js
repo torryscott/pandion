@@ -5985,13 +5985,12 @@
       doc.page.h = Math.min(LAY_PAGE_MAX, Math.round(spot.needH));
       doc.page.preset = "custom";
     }
+    layClampItemsIn(doc);
     persist(); syncAll();
     if (activeChart().id === doc.id && appWorkspace() === "layout")
       renderLayout();
-    showActionToast("Sent to " + doc.name +
-      (grew ? " \u00b7 the page grew to fit it" : ""), "Open", function () {
-      switchChart(doc.id);
-    });
+    showActionToast("Sent to " + doc.name + laySendNote(grew, spot.capped),
+      "Open", function () { switchChart(doc.id); });
   }
   // ---- Notebook export: scope -> format (Torry, Aug 5 2026) ----------
   // The Export button (and a page right-click) picks a SCOPE - one page,
@@ -6468,6 +6467,13 @@
   // want the behavior to be consistent") - each layout by name, then New
   // layout; only the placing function differs, so the two surfaces can
   // never drift apart.
+  // What a send appends to its own toast. layGrewNote is the toolbar's
+  // equivalent and shows a toast of its own; a send already has one.
+  function laySendNote(grew, capped) {
+    if (capped)
+      return " \u00b7 the page is at its largest, so it landed on the figure";
+    return grew ? " \u00b7 the page grew to fit it" : "";
+  }
   function showSendToLayoutMenu(x, y, keyPrefix, place) {
     var items = [];
     for (var i = 0; i < PROJECT.charts.length; i++) (function (c) {
@@ -6542,13 +6548,12 @@
       doc.page.h = Math.min(LAY_PAGE_MAX, Math.round(spot.needH));
       doc.page.preset = "custom";
     }
+    layClampItemsIn(doc);
     persist(); syncAll();
     if (activeChart().id === doc.id && appWorkspace() === "layout")
       renderLayout();
-    showActionToast("Sent to " + doc.name +
-      (grew ? " \u00b7 the page grew to fit it" : ""), "Open", function () {
-      switchChart(doc.id);
-    });
+    showActionToast("Sent to " + doc.name + laySendNote(grew, spot.capped),
+      "Open", function () { switchChart(doc.id); });
   }
   function render() {
     echoTimer = null;
@@ -17076,6 +17081,17 @@
     var a = layChartAspect(item.chartId);
     return { w: 120, h: Math.max(40, Math.round(120 / (a > 0 ? a : 1.469))) };
   }
+  // Item ids are per DOCUMENT and every template starts at i1, so the canvas
+  // can be holding a node with this item's id that belongs to a different
+  // layout. Today those measure zero because the pane is hidden whenever a
+  // send runs, which is luck rather than a rule. Identity, not id.
+  function layItemIsOnScreen(item) {
+    var c = activeChart();
+    if (!c || !isLayoutTab(c) || !Array.isArray(c.items)) return false;
+    for (var i = 0; i < c.items.length; i++)
+      if (c.items[i] === item) return true;
+    return false;
+  }
   function layItemRect(item) {
     var w, h;
     if (laySizedKind(item)) {
@@ -17083,7 +17099,7 @@
       w = Math.max(mins.w, Number(item.w) || 480);
       h = Math.max(mins.h, Number(item.h) || 320);
     } else {
-      var node = el("ps-lcanvas");
+      var node = layItemIsOnScreen(item) ? el("ps-lcanvas") : null;
       node = node && node.querySelector(
         '.ps-litem[data-item-id="' + item.id + '"]');
       if (node && node.offsetWidth && node.offsetHeight) {
@@ -17112,8 +17128,16 @@
     return { x: minX, y: minY, w: maxX - minX, h: maxY - minY,
              right: maxX, bottom: maxY };
   }
-  function layClampAllItems() {
-    var p = layPage(), items = layItems();
+  function layClampAllItems() { layClampItemsIn(activeChart()); }
+  // Doc-aware, because Send to layout writes into a document that is not on
+  // screen and nothing clamped it. A send onto a page near the 4000 px
+  // maximum left the panel at y 3850 with a height of 642 against a page of
+  // 4000, which is 492 px below the page, permanently and invisibly, and
+  // opening the layout did not correct it.
+  function layClampItemsIn(doc) {
+    if (!doc || !isLayoutTab(doc)) return;
+    layNormalizeLayout(doc);
+    var p = doc.page, items = doc.items;
     for (var i = 0; i < items.length; i++) {
       var item = items[i];
       if (laySizedKind(item)) {

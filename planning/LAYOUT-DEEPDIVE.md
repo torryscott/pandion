@@ -472,6 +472,27 @@ Four defects in the change itself, all fixed and all now covered.
   Notebook pages, which are image items, got the flat 460 and matched nothing.
   Image panels set the width when there are no chart panels.
 
+**A second round closed what the first only half closed.** Three findings
+were partly addressed and were measured again rather than assumed.
+
+- A send onto a page near the 4000 px maximum left the panel's bottom at 4492
+  against a page clamped to 4000, so 492 px of it sat below the page,
+  permanently and invisibly, and opening the layout did not correct it.
+  Capping `page.h` was not enough because nothing clamped the ITEMS of a
+  document that is not on screen. The clamp is doc-aware now, and a send that
+  could not grow its page says so instead of claiming it did.
+- The two routes were said to still disagree, because a send measures a
+  document that is not on screen and has to work from the estimate. Measured
+  after the exact-measurement fix, they agree exactly. A caption of 480 by 39
+  puts the panel at 32,89 by both routes. Case 48 pins it, since case 41 sends
+  into an empty layout where they cannot disagree.
+- Item ids are per document and every template starts at i1, so the canvas can
+  hold a node carrying an item's id that belongs to a different layout.
+  `layItemRect` compares item IDENTITY against the active layout now. This one
+  is closed WITHOUT a live repro and recorded as such, because the layout pane
+  is hidden whenever a send runs, so the stale nodes measure zero and the
+  hazard is latent rather than reachable.
+
 **And one in the commit before it.** `layoutTextNode` has been passing a font
 to `wrapCaptionLines` since item 10, and `wrapCaptionLines` took three
 arguments, so the fourth went on the floor and the file wrapped in the UI font
