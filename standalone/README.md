@@ -1040,6 +1040,61 @@ untouched; this shell shares the SAME committed bundle
   Restore all clears them. Exclusions persist and toggle freely.
   (Torry's ask: something jamovi itself cannot do.)
 
+## The Notebook workspace
+
+Switcher key `pinboard`. **Grep for `pinboard`, not `notebook`.** The August
+2026 rename was display-only and ratified that way, so ids, file-format
+fields, function names and menu action keys all still say pin and board. Old
+projects load untouched and probe selectors keep working. Do not clean the
+naming up.
+
+It is not a writing surface. There is no block model, no rich text, no
+formatting controls and no prose. It is a lab notebook in the evidence sense,
+an append-only chronological stack of frozen, provenance-tracked chart
+captures, grouped into sections, each annotatable with a plain-text note in
+the right rail. The hierarchy is OneNote's, one level deep. Notebook, then
+sections, then pages, and nothing nests inside a section. Freeform
+composition is Layouts' job, and that boundary is why this stopped being
+called Pinboard. Judge it as a record, not as a document editor.
+
+The vocabulary is load-bearing. A **section** is a `board`
+(`PROJECT.pinboards`, `activePinBoard()`). A **page** is a `pin`
+(`board.pins`, `pushPin()`, `PIN_SEL`). The verb is **Keep**, never Pin and
+never Add. A page record is `{id, src, natW, natH, w, h, at, note, pageTitle,
+srcChart, srcName, srcSig, srcDesc, srcType, srcVars, momEyebrow, momTitle,
+momText}`. `src` is a full SVG data URI, so a page stays vector through the
+board, a layout placement and the PDF.
+
+Things worth knowing before changing it:
+
+- **Provenance is resolved, not read.** `pinProvenance` derives the graph type
+  by resolving the chart's option store OVER the payload template, because the
+  store is empty until the user switches type and the engine writes nothing
+  when you pick the type you are already on. Scatter switches through `xyBin`
+  rather than `graphType`, so a heatmap is only visible there. Reading the
+  store alone recorded no type for most pages, and the probe that should have
+  caught it manufactured the field by poking `setOption`.
+- **The freshness verdict never claims what it has not checked.** The snapshot
+  epoch bumps on any edit anywhere, so a stale snapshot says "not checked" and
+  heals into a true verdict the next time the source chart renders.
+- **Exports carry the record.** `pinComposeWithRecord` nests the page's svg in
+  a taller one and typesets the page number, kept date, source, drift verdict
+  and note beneath it, reusing `wrapCaptionLines` from the chart exporter so
+  the two cannot drift. A checkbox in the export dialog turns it off. Legacy
+  bitmap pages get no band, because their bytes are returned before the
+  composer runs.
+- **The history is session-only and must not outlive its project.**
+  `nbHistoryClear()` is called beside `layHistoryClear()` at all three project
+  boundaries. Without it, undo could inject a page from a previous project.
+- **Capture fidelity has laws.** `stripHoverFromClone`, `stampPinFonts` and
+  `repairPinFonts` each exist because of a field bug. Read them before
+  touching the capture path.
+- A page can outlive the chart that made it. That is a feature.
+
+Probes: `pinboard-check`, `notebook-record-check`, `notebook-pages-check`,
+`notebook-undo-check`, `copy-moment-check`, `keep-fidelity-check`,
+`provenance-check`, `rail-icons-check`, `doclifecycle-check`.
+
 ## Known gaps (documented, deliberate)
 
 Checked and rewritten Jul 26 2026 (punch list t4-14). Three of the five

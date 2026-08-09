@@ -427,16 +427,31 @@ All four went to Torry and all four came back as the recommendation.
   and the new code follows the same convention (`pinRecordBlocks`,
   `movePinToBoard`).
 
-## Two gaps I did not fill
+## The two documentation gaps
 
-Both are documentation rather than code, and both are worth someone's hour.
+One is filled. The other is costed.
 
-- **`standalone/README.md` never mentions this workspace.** It is the truth
-  about the app and it describes three of the four. Everything I learned
-  about the Notebook came from the source and from using it.
+- **`standalone/README.md` never mentioned this workspace.** It is the truth
+  about the app and it described three of the four. Now written, as a section
+  covering the naming rule, the evidence-not-editor framing, the vocabulary,
+  and the six things worth knowing before changing it.
 - **`ps-tour.js` has no walkthrough for it.** The tours are the app's way of
   teaching a workflow by performing it, and keeping evidence is exactly the
-  kind of workflow they suit.
+  kind of workflow they suit. I attempted one and backed it out, so here is
+  what it costs rather than a guess. The tour DATA is easy and the target
+  resolver is already document-wide, so a walkthrough can point at Notebook
+  elements without any change. Two things are not easy. Keep lives on the
+  chart's right-click, and the driver only fires left clicks, so it needs a
+  right-click path; I wrote one and verified in isolation that a synthetic
+  contextmenu does open the real menu with the right items. But the tour then
+  stalled before ever reaching that step, with no miss recorded, which means
+  something in the play loop does not survive a tour that crosses workspaces,
+  and pinning that down needs the driver's own instrumentation rather than
+  guesses from outside. Half a day, most of it in the driver, and it should be
+  done by someone holding the tour machinery rather than bolted on from this
+  dive. I reverted `ps-tour.js` to untouched rather than leave a walkthrough
+  that narrates a step it did not perform, which is the one thing the driver's
+  own comments say never to do.
 
 ## Verification
 
