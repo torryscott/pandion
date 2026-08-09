@@ -545,6 +545,19 @@ const mixed = await txtSec();
 ok(mixed.size === '' && /Mixed/i.test(mixed.placeholder),
    'where they disagree the field says Mixed rather than showing one of them');
 ok(mixed.italic === 'mixed', 'and a toggle reports aria-pressed="mixed"');
+// Order matters once Text can appear beside Align. With several things
+// selected, arranging them is why you selected them, and the Text section
+// carries a colour picker about 330 px tall, so leaving Text first pushed
+// every arrangement control below the fold.
+await page.evaluate(() => window.PS_SHELL.selectLayoutItems(['i1', 'i3', 'i5', 'i7']));
+await page.waitForTimeout(500);
+const railOrder = await page.evaluate(() =>
+    [...document.querySelectorAll('#ps-layout-selection-properties ' +
+        '.ps-inspector-section-title, #ps-layout-selection-properties ' +
+        '.ps-inspector-sublabel')]
+        .filter(e => e.offsetParent).map(e => e.textContent).join(' > '));
+ok(railOrder.indexOf('Align') < railOrder.indexOf('Text'),
+   'arranging comes before styling on a mixed selection ("' + railOrder + '")');
 
 console.log('case 16: selecting a panel does not cover its own letter');
 await page.evaluate(() => window.PS_SHELL.selectLayoutItems(['i1']));

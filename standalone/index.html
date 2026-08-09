@@ -4336,60 +4336,6 @@
              chart's pop-down panel exists because the engine must live
              inside jamovi, which has no rail; nothing here touches the
              jamovi module. -->
-        <div class="ps-inspector-section" id="ps-layout-text-section"
-             style="display:none;">
-          <span class="ps-inspector-section-title">Text</span>
-          <div class="ps-inspector-field ps-ltx-row">
-            <span class="ps-layout-field-label" id="ps-ltx-size-label">Size</span>
-            <input id="ps-ltx-size" type="range" min="8" max="72" step="1"
-                   aria-labelledby="ps-ltx-size-label">
-            <input id="ps-ltx-size-num" type="number" min="8" max="72"
-                   step="1" aria-label="Text size in pixels">
-            <button type="button" class="ps-btn ps-ltx-style" id="ps-ltx-bold"
-                    aria-pressed="false" aria-label="Bold"
-                    style="font-weight:700;">B</button>
-            <button type="button" class="ps-btn ps-ltx-style" id="ps-ltx-italic"
-                    aria-pressed="false" aria-label="Italic"
-                    style="font-style:italic;">I</button>
-          </div>
-          <div class="ps-inspector-field ps-ltx-row">
-            <span class="ps-layout-field-label">Color</span>
-            <div id="ps-ltx-swatches" class="ps-ltx-swatches"></div>
-          </div>
-          <!-- The chart panel's color stack (Torry, Aug 6 2026): quick
-               swatches above, then the same SV square + hue + hex the
-               engine's picker offers - built shell-side, the engine's
-               picker is engine chrome. -->
-          <div id="ps-ltx-picker">
-            <div id="ps-ltx-sv" role="slider" tabindex="0"
-                 aria-label="Saturation and brightness"
-                 aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-              <div class="ps-ltx-sv-dot"></div>
-            </div>
-            <input id="ps-ltx-hue" type="range" min="0" max="360" step="1"
-                   aria-label="Hue">
-            <div class="ps-ltx-hexrow">
-              <span class="ps-layout-field-label" id="ps-ltx-hex-label">Hex</span>
-              <input id="ps-ltx-hex" type="text" maxlength="7"
-                     spellcheck="false" autocomplete="off"
-                     aria-labelledby="ps-ltx-hex-label">
-              <span id="ps-ltx-cur" aria-hidden="true"></span>
-            </div>
-          </div>
-          <div class="ps-inspector-field ps-ltx-row">
-            <span class="ps-layout-field-label" id="ps-ltx-rot-label">Rotate</span>
-            <input id="ps-ltx-rot" type="range" min="-90" max="90" step="1"
-                   aria-labelledby="ps-ltx-rot-label">
-            <input id="ps-ltx-rot-num" type="number" min="-90" max="90"
-                   step="1" aria-label="Rotation in degrees">
-          </div>
-        </div>
-        <!-- The Arrange button cluster (Duplicate / Back / Forward /
-             Delete) is GONE (Torry, Aug 5 2026): every one of them
-             duplicated the item right-click, which also carries Move to
-             front / Move to back now, and the keyboard keeps Delete and
-             Cmd/Ctrl+D. Only Align remains - it is multi-select-only and
-             lives nowhere else. -->
         <div class="ps-inspector-section" id="ps-layout-align-section"
              style="display:none;">
           <span class="ps-inspector-section-title">Align</span>
@@ -4445,6 +4391,60 @@
               <button type="button" class="ps-btn"
                       data-ctx-plotalign="bottom">Baselines</button>
             </div>
+          </div>
+        </div>
+        <!-- The Arrange button cluster (Duplicate / Back / Forward /
+             Delete) is GONE (Torry, Aug 5 2026): every one of them
+             duplicated the item right-click, which also carries Move to
+             front / Move to back now, and the keyboard keeps Delete and
+             Cmd/Ctrl+D. Only Align remains - it is multi-select-only and
+             lives nowhere else. -->
+        <div class="ps-inspector-section" id="ps-layout-text-section"
+             style="display:none;">
+          <span class="ps-inspector-section-title">Text</span>
+          <div class="ps-inspector-field ps-ltx-row">
+            <span class="ps-layout-field-label" id="ps-ltx-size-label">Size</span>
+            <input id="ps-ltx-size" type="range" min="8" max="72" step="1"
+                   aria-labelledby="ps-ltx-size-label">
+            <input id="ps-ltx-size-num" type="number" min="8" max="72"
+                   step="1" aria-label="Text size in pixels">
+            <button type="button" class="ps-btn ps-ltx-style" id="ps-ltx-bold"
+                    aria-pressed="false" aria-label="Bold"
+                    style="font-weight:700;">B</button>
+            <button type="button" class="ps-btn ps-ltx-style" id="ps-ltx-italic"
+                    aria-pressed="false" aria-label="Italic"
+                    style="font-style:italic;">I</button>
+          </div>
+          <div class="ps-inspector-field ps-ltx-row">
+            <span class="ps-layout-field-label">Color</span>
+            <div id="ps-ltx-swatches" class="ps-ltx-swatches"></div>
+          </div>
+          <!-- The chart panel's color stack (Torry, Aug 6 2026): quick
+               swatches above, then the same SV square + hue + hex the
+               engine's picker offers - built shell-side, the engine's
+               picker is engine chrome. -->
+          <div id="ps-ltx-picker">
+            <div id="ps-ltx-sv" role="slider" tabindex="0"
+                 aria-label="Saturation and brightness"
+                 aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div class="ps-ltx-sv-dot"></div>
+            </div>
+            <input id="ps-ltx-hue" type="range" min="0" max="360" step="1"
+                   aria-label="Hue">
+            <div class="ps-ltx-hexrow">
+              <span class="ps-layout-field-label" id="ps-ltx-hex-label">Hex</span>
+              <input id="ps-ltx-hex" type="text" maxlength="7"
+                     spellcheck="false" autocomplete="off"
+                     aria-labelledby="ps-ltx-hex-label">
+              <span id="ps-ltx-cur" aria-hidden="true"></span>
+            </div>
+          </div>
+          <div class="ps-inspector-field ps-ltx-row">
+            <span class="ps-layout-field-label" id="ps-ltx-rot-label">Rotate</span>
+            <input id="ps-ltx-rot" type="range" min="-90" max="90" step="1"
+                   aria-labelledby="ps-ltx-rot-label">
+            <input id="ps-ltx-rot-num" type="number" min="-90" max="90"
+                   step="1" aria-label="Rotation in degrees">
           </div>
         </div>
       </div>
