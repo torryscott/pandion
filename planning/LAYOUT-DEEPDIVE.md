@@ -271,7 +271,7 @@ select them, and instead the selection clears.
 | reflex | result |
 | --- | --- |
 | drag on empty canvas (marquee) | clears the selection |
-| Alt+drag to duplicate | moves, does not duplicate |
+| Alt+drag to duplicate | moves, does not duplicate (now fixed, case 50) |
 | Cmd/Ctrl+G to group | nothing |
 | Cmd/Ctrl+D duplicate | works |
 | Cmd/Ctrl+A select all | works |
@@ -305,9 +305,11 @@ drawing into.
 canvas is `aria-hidden` and the option list is rebuilt by `renderLayout` on
 release, so a pointer-only gesture has nothing to mirror mid-drag.
 
-**Still open.** Grouping (Cmd/Ctrl+G) and Alt+drag to duplicate. Grouping is
-also the honest answer to the loose end in item 1, and I would still let it
-wait for evidence that people want it.
+**Since built.** Grouping (Cmd/Ctrl+G, cases 29 to 34) and Alt+drag to
+duplicate (case 50). Alt+drag makes its copies on the first real movement
+rather than on the press, so an Alt+click that never travels stays an
+ordinary selection, and it is the COPIES that follow the pointer so the
+original stays where it was. One history entry covers the copy and the move.
 
 ---
 
@@ -531,8 +533,17 @@ from the top panel's span rather than from the half cells.
 `createLayoutFromTemplate`, plus a probe case. Templates run only at creation,
 so no saved figure changes.
 
-**Not built**, because it changes what a template produces and that is a
-design call rather than a defect fix.
+**BUILT.** The top row's height is solved for the promise rather than split
+evenly, and the pair below is placed from the top panel's own span instead of
+from half cells, so the three read as one block. On the default page that is
+529 by 360 over two 256 by 174, whose combined width plus the gutter is 530
+against the top panel's 529. The gallery picture was redrawn to the same
+shape, since a preview that promises a full-width bar is the other half of
+the same defect, and a portrait preview was added because the portrait page
+caps the top panel at the content width and centres the block.
+
+Covered by `layout-figure-check` case 49, demonstrated failing first at
+"392 against 392".
 
 ---
 

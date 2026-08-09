@@ -52,6 +52,14 @@
 //      bottom at 4492 against a page clamped to 4000. 492 px of it sat below
 //      the page, permanently and invisibly, and opening the layout did not
 //      correct it.
+//  19  the "Three panels" template says one wide chart above two supporting
+//      ones and drew a wide bar in the gallery, and made three identical
+//      392 by 267 panels, the top one at x 308 with 276 px of white either
+//      side. A chart's aspect is fixed, so a 267 px tall panel is 392 px
+//      wide whatever its cell is, and an evenly split height could not
+//      deliver the promise.
+//  20  Alt+drag moved the item, like a plain drag, in an application where
+//      every neighbour pulls off a copy.
 //
 // One hazard is closed here WITHOUT a live repro, and is recorded rather than
 // probed. Item ids are per document and every template starts at i1, so the
@@ -2064,6 +2072,138 @@ ok(p48A.w === p48B.w && p48A.h === p48B.h,
 ok(p48A.y >= 32 + p48Caption.h,
    'clear of the caption rather than on it (' + p48A.y + ' against a ' +
    'caption ending at ' + Math.round(32 + p48Caption.h) + ')');
+
+console.log('case 49: "Three panels" makes the figure it advertises');
+// The template says "One wide chart above two supporting charts" and its
+// gallery picture drew a bar more than twice the width of the two below.
+// Measured before the fix: three identical 392 by 267 panels, the top one at
+// x 308 with 276 px of white either side. A chart's aspect is fixed, so a
+// 267 px tall panel is 392 px wide whatever its cell is, and an evenly split
+// height could never deliver the promise.
+await page.evaluate(() => window.PS_SHELL.setWorkspace('layout'));
+await page.waitForTimeout(500);
+await page.evaluate(() => window.PS_SHELL.showLayoutGallery());
+await page.waitForTimeout(500);
+const p49Picture = await page.evaluate(() => {
+    const card = document.querySelector('[data-layout-template="three"]');
+    const bars = Array.from(card.querySelectorAll(
+        '.ps-layout-template-preview span'));
+    const pc = el => Number((el.style.width || '0').replace('%', ''));
+    return bars.map(pc);
+});
+await page.click('[data-layout-template="three"]');
+await page.waitForTimeout(300);
+await page.click('[data-layout-create], #ps-layout-gallery-create');
+await page.waitForTimeout(3500);
+const p49 = await page.evaluate(() => {
+    const c = window.PS_SHELL.chart();
+    const p = c.items.filter(i => i.kind === 'chart')
+        .slice().sort((a, b) => a.y - b.y || a.x - b.x);
+    let hits = 0;
+    for (let a = 0; a < p.length; a++)
+        for (let b = a + 1; b < p.length; b++)
+            if (p[a].x < p[b].x + p[b].w && p[a].x + p[a].w > p[b].x &&
+                p[a].y < p[b].y + p[b].h && p[a].y + p[a].h > p[b].y) hits++;
+    return { n: p.length, overlaps: hits, page: { w: c.page.w, h: c.page.h },
+             top: p[0], left: p[1], right: p[2] };
+});
+ok(p49.n === 3 && p49.overlaps === 0,
+   'three panels, nothing overlapping');
+ok(p49.top.w > p49.left.w * 1.5,
+   'the top panel really is the wide one (' + p49.top.w + ' against ' +
+   p49.left.w + ')');
+ok(Math.abs((p49.left.w + 18 + p49.right.w) - p49.top.w) <= 2,
+   'and the pair beneath spans it, so the three read as one block (' +
+   (p49.left.w + 18 + p49.right.w) + ' against ' + p49.top.w + ')');
+ok(p49.left.x === p49.top.x &&
+   Math.abs((p49.right.x + p49.right.w) - (p49.top.x + p49.top.w)) <= 2,
+   'flush at both outer edges (' + p49.left.x + ' and ' +
+   (p49.right.x + p49.right.w) + ' against ' + p49.top.x + ' and ' +
+   (p49.top.x + p49.top.w) + ')');
+ok(p49.top.y >= 0 && p49.right.y + p49.right.h <= p49.page.h,
+   'and the block sits on the page (' + p49.top.y + ' to ' +
+   Math.round(p49.right.y + p49.right.h) + ' of ' + p49.page.h + ')');
+ok(p49Picture.length === 3 &&
+   Math.abs(p49Picture[0] - (p49Picture[1] + p49Picture[2])) < 6,
+   'the gallery picture shows the same shape rather than a full-width bar (' +
+   p49Picture.join('/') + ' per cent)');
+
+console.log('case 50: Alt+drag pulls off a copy');
+// The one reflex from the arrange audit that was never built. Alt+drag moved
+// the item, like a plain drag, in an application where every neighbour makes
+// a copy.
+await page.evaluate(() => window.PS_SHELL.setWorkspace('layout'));
+await page.waitForTimeout(500);
+await page.evaluate(() => window.PS_SHELL.showLayoutGallery());
+await page.waitForTimeout(500);
+await page.click('[data-layout-template="single"]');
+await page.waitForTimeout(300);
+await page.click('[data-layout-create], #ps-layout-gallery-create');
+await page.waitForTimeout(3200);
+const p50State = () => page.evaluate(() => {
+    const c = window.PS_SHELL.chart();
+    return { n: c.items.length,
+             panels: c.items.filter(i => i.kind === 'chart')
+                 .map(i => ({ id: i.id, x: i.x, y: i.y })),
+             depth: window.PS_SHELL.layoutHistoryDepth(),
+             sel: window.PS_SHELL.layoutSelection() };
+});
+async function p50Grab(id) {
+    const box = await page.evaluate(x => {
+        const n = document.querySelector(
+            '#ps-lcanvas .ps-litem[data-item-id="' + x + '"]');
+        n.scrollIntoView({ block: 'center' });
+        const r = n.getBoundingClientRect();
+        return { x: r.left + 30, y: r.top + 30 };
+    }, id);
+    return box;
+}
+const p50Before = await p50State();
+const p50Src = p50Before.panels[0];
+// An Alt press that never travels must stay a selection.
+let g = await p50Grab(p50Src.id);
+await page.keyboard.down('Alt');
+await page.mouse.move(g.x, g.y);
+await page.mouse.down();
+await page.mouse.up();
+await page.keyboard.up('Alt');
+await page.waitForTimeout(500);
+const p50Tap = await p50State();
+ok(p50Tap.n === p50Before.n,
+   'an Alt press that does not travel leaves nothing behind (' +
+   p50Tap.n + ' items)');
+// Now the real gesture.
+g = await p50Grab(p50Src.id);
+await page.keyboard.down('Alt');
+await page.mouse.move(g.x, g.y);
+await page.mouse.down();
+await page.mouse.move(g.x + 90, g.y + 60, { steps: 8 });
+await page.mouse.up();
+await page.keyboard.up('Alt');
+await page.waitForTimeout(700);
+const p50After = await p50State();
+ok(p50After.panels.length === p50Before.panels.length + 1,
+   'Alt+drag made a copy (' + p50Before.panels.length + ' to ' +
+   p50After.panels.length + ' panels)');
+const p50Orig = p50After.panels.filter(p => p.id === p50Src.id)[0];
+ok(p50Orig && p50Orig.x === p50Src.x && p50Orig.y === p50Src.y,
+   'the original stayed where it was (' + p50Orig.x + ',' + p50Orig.y + ')');
+const p50Copy = p50After.panels.filter(p => p.id !== p50Src.id)[0];
+ok(p50Copy.x > p50Src.x && p50Copy.y > p50Src.y,
+   'and the copy is the one that followed the pointer (' + p50Copy.x + ',' +
+   p50Copy.y + ')');
+ok(p50After.sel.length === 1 && p50After.sel[0] === p50Copy.id,
+   'the copy is what ends up selected, so the next edit lands on it');
+ok(p50After.depth === p50Before.depth + 1,
+   'the copy and the move are one history entry (' + p50Before.depth +
+   ' to ' + p50After.depth + ')');
+await page.evaluate(() => document.getElementById('ps-lviewport').focus());
+await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z');
+await page.waitForTimeout(800);
+const p50Undone = await p50State();
+ok(p50Undone.panels.length === p50Before.panels.length,
+   'and one undo takes the whole gesture back (' +
+   p50Undone.panels.length + ' panels)');
 
 ok(errors.length === 0, 'no page errors (' + errors.join(' | ') + ')');
 console.log('\nlayout-figure-check: all cases passed');

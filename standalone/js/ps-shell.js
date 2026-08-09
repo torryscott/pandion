@@ -15233,7 +15233,8 @@
     { key: "three", name: "Three panels", slots: 3,
       description: "One wide chart above two supporting charts.",
       note: "A common results-figure structure.",
-      preview: [[7, 7, 86, 40], [7, 54, 40, 39], [53, 54, 40, 39]] },
+      preview: [[24, 9, 52, 54], [24, 69, 25, 26], [51, 69, 25, 26]],
+      portraitPreview: [[5, 19, 90, 41], [5, 64, 44, 20], [51, 64, 44, 20]] },
     { key: "four", name: "Four-panel grid", slots: 4,
       description: "A balanced 2 by 2 figure for related results.",
       note: "Designed for multi-part publication figures.",
@@ -16095,8 +16096,9 @@
     if (w / h > a) w = h * a; else h = w / a;
     return { x: r.x + (r.w - w) / 2, y: r.y + (r.h - h) / 2, w: w, h: h };
   }
-  function layoutTemplateRects(key, page) {
+  function layoutTemplateRects(key, page, band) {
     var m = page.margin, gap = 18;
+    band = Number(band) || 0;
     var x = m, y = m, w = page.w - m * 2, h = page.h - m * 2;
     var halfW = (w - gap) / 2, halfH = (h - gap) / 2;
     if (key === "single" || key === "presentation")
@@ -16119,11 +16121,36 @@
               { x: x + mainW + gap, y: y,
                 w: w - mainW - gap, h: h }];
     }
-    if (key === "three")
-      return [{ x: x, y: y, w: w, h: halfH },
-              { x: x, y: y + halfH + gap, w: halfW, h: halfH },
-              { x: x + halfW + gap, y: y + halfH + gap,
-                w: halfW, h: halfH }];
+    if (key === "three") {
+      // The template says one wide chart above two supporting ones and its
+      // picture drew a wide bar, and an evenly split height cannot deliver
+      // either. A chart's aspect is fixed, so a 267 px tall panel is 392 px
+      // wide whatever its cell is, and the top panel came out the same size
+      // as the two below with 276 px of white either side.
+      //
+      // So solve the top row's height for the figure the template promises,
+      // the top panel spanning the pair beneath it. With w_t = (t - band)A
+      // and w_b = (H - gap - t - band)A, setting 2*w_b + gap = w_t gives the
+      // t below. The pair is then placed from the top panel's own span
+      // rather than from half cells, so the three read as one block.
+      var A = LAY_CHART_ASPECT;
+      var t = (2 * A * h - 2 * A * gap - A * band + gap) / (3 * A);
+      // On a tall page the top panel hits the content width first, and then
+      // its row only needs the height that width implies. Without this the
+      // top cell kept a height it could not use and the panel floated in it.
+      if ((t - band) * A > w) t = w / A + band;
+      t = Math.max(band + 60, Math.min(h - gap - band - 60, t));
+      var topW = Math.min(w, (t - band) * A);
+      var botW = Math.max(40, (topW - gap) / 2);
+      var botH = botW / A + band;
+      var topX = x + (w - topW) / 2;
+      // Centred vertically, because capping the top panel at the content
+      // width can leave the block shorter than the page.
+      var y0 = y + Math.max(0, (h - (t + gap + botH)) / 2);
+      return [{ x: x, y: y0, w: w, h: t },
+              { x: topX, y: y0 + t + gap, w: botW, h: botH },
+              { x: topX + botW + gap, y: y0 + t + gap, w: botW, h: botH }];
+    }
     if (key === "four")
       return [{ x: x, y: y, w: halfW, h: halfH },
               { x: x + halfW + gap, y: y, w: halfW, h: halfH },
@@ -16144,9 +16171,9 @@
     } else if (portrait) {
       c.page = { preset: "canvasp", w: 672, h: 1008, margin: 32 };
     }
-    var rects = layoutTemplateRects(def.key, c.page);
     var labels = !!el("ps-layout-template-labels").checked && def.slots > 1;
     var itemNumber = 0, labelBand = labels ? 28 : 0;
+    var rects = layoutTemplateRects(def.key, c.page, labelBand);
     if (def.presentation) {
       c.items.push({ id: "i" + (++itemNumber), kind: "text",
                      text: "Figure title", fontSize: 24, bold: true,
@@ -17765,13 +17792,12 @@
     laySetSelection([id]);
     layDeleteSelected();
   }
-  function layDuplicateSelected() {
-    var ids = laySelectedIds();
-    if (!ids.length) return;
-    var returnFocus = document.activeElement === el("ps-lviewport");
-    laySnapshot("duplicate");
-    var made = [], p = layPage(), dupGroups = {};
-    for (var i = 0; i < ids.length; i++) {
+  // The copy machinery on its own, without the history entry, the render or
+  // the announcement, so Alt+drag can make its copies inside a gesture that
+  // already owns all three.
+  function layDuplicateItems(ids, dx, dy) {
+    var made = [], p = layPage(), dupGroups = {}, i;
+    for (i = 0; i < ids.length; i++) {
       var src = layItemById(ids[i]);
       if (!src) continue;
       var copy = JSON.parse(JSON.stringify(src));
@@ -17781,11 +17807,19 @@
       if (copy.group) copy.group = dupGroups[copy.group] ||
         (dupGroups[copy.group] = layNewGroupId());
       var r = layItemRect(copy);
-      copy.x = Math.min(Math.max(0, p.w - r.w), (Number(src.x) || 0) + 12);
-      copy.y = Math.min(Math.max(0, p.h - r.h), (Number(src.y) || 0) + 12);
+      copy.x = Math.min(Math.max(0, p.w - r.w), (Number(src.x) || 0) + dx);
+      copy.y = Math.min(Math.max(0, p.h - r.h), (Number(src.y) || 0) + dy);
       layItems().push(copy);
       made.push(copy.id);
     }
+    return made;
+  }
+  function layDuplicateSelected() {
+    var ids = laySelectedIds();
+    if (!ids.length) return;
+    var returnFocus = document.activeElement === el("ps-lviewport");
+    laySnapshot("duplicate");
+    var made = layDuplicateItems(ids, 12, 12);
     laySetSelection(made);
     persist(); renderLayout();
     if (returnFocus) layFocusViewport();
@@ -18648,6 +18682,11 @@
       }
       LAY_DRAG = { ids: ids, primary: item, origins: origins, bounds: bounds,
                    resizing: resizing, sx: e.clientX, sy: e.clientY,
+                   // Alt+drag duplicates, the reflex every drawing
+                   // application shares. Armed here, acted on at the first
+                   // real movement, so an Alt+click that never travels stays
+                   // an ordinary selection and leaves nothing behind.
+                   altCopy: !!e.altKey && !resizing,
                    zoom: layZoom(), moved: false,
                    // Captured here rather than on first movement because the
                    // move handler mutates items in place; pushed at pointer-up
@@ -19072,6 +19111,31 @@
     // never travels is a SELECTION, and lifting it would flash on every
     // ordinary click.
     if (!d.moved) {
+      if (d.altCopy) {
+        // Copies made in place, and it is the COPIES that follow the pointer,
+        // so the original stays exactly where it was. One history entry
+        // covers the copy and the move together, which is why d.before was
+        // taken on the press, before any of this existed.
+        var copies = layDuplicateItems(d.ids, 0, 0);
+        d.altCopy = false;
+        if (copies.length) {
+          laySetSelection(copies);
+          renderLayout();
+          d.ids = copies;
+          d.origins = [];
+          for (var ci = 0; ci < copies.length; ci++) {
+            var cit = layItemById(copies[ci]);
+            if (!cit) continue;
+            d.origins.push({ item: cit, x: Number(cit.x) || 0,
+                             y: Number(cit.y) || 0,
+                             w: Number(cit.w) || 480,
+                             h: Number(cit.h) || 320 });
+          }
+          d.primary = layItemById(copies[copies.length - 1]) || d.primary;
+          layAnnounce("Duplicating " + copies.length + " item" +
+            (copies.length === 1 ? "" : "s") + ".");
+        }
+      }
       var cv = el("ps-lcanvas");
       if (cv) cv.classList.add(d.resizing ? "ps-lcanvas-resizing"
                                           : "ps-lcanvas-dragging");
@@ -22029,6 +22093,7 @@
           ["Move forward or backward", "Alt + Page Up / Page Down"],
           ["Open item commands", "Shift + F10"],
           ["Duplicate the selection", "Cmd/Ctrl + D"],
+          ["Drag off a copy", "Alt + drag"],
           ["Delete the selection", "Delete"],
           ["Cancel a drag, then clear the selection", "Escape"]
         ] },
