@@ -127,25 +127,36 @@ await press(true);
 ok(JSON.stringify(await counts()) === '[2]', 'and redo puts it back');
 
 console.log('case 3: the keyboard does not reach past the Notebook');
-const styleBefore = await page.evaluate(() =>
-    JSON.stringify(window.PS_SHELL.optionStore()));
-await page.evaluate(() => window.PS_SHELL.setWorkspace('chart'));
-await page.waitForTimeout(400);
-await page.evaluate(() => window.setOption('barCornerRadius', 18));
-await page.waitForTimeout(1600);
-const styled = await page.evaluate(() =>
-    JSON.parse(JSON.stringify(window.PS_SHELL.optionStore())));
-ok(String(styled.barCornerRadius) === '18', 'a chart style edit is committed');
+// The hazard has TWO routes, and this tests the one whose observable
+// actually moves. The engine route needs a real on-chart panel gesture to
+// arm its history, and neither window.setOption nor __gb2_setOption does
+// that, so an assertion driven by either passes on the broken code as well
+// and proves nothing. The DATA route does move. With a data edit as the most
+// recent act, the shell's key router falls through to a recency test and
+// undoes a DATASET change, which on the unchanged code is exactly what
+// Cmd+Z in the Notebook did.
+await page.evaluate(() => window.PS_SHELL.setWorkspace('data'));
+await page.waitForTimeout(500);
+await page.evaluate(() => window.PS_SHELL.setExcluded('score', 0, true));
+await page.waitForTimeout(1200);
+const dataArmed = await page.evaluate(() =>
+    JSON.stringify(window.PS_SHELL.project.table.excluded || null));
+ok(dataArmed && dataArmed !== 'null',
+   'a data edit is the most recent act, so the recency route is armed');
+const pagesBefore3 = JSON.stringify(await counts());
 await press(false);   // undo, from inside the Notebook
-const afterKb = await page.evaluate(() =>
-    JSON.parse(JSON.stringify(window.PS_SHELL.optionStore())));
-ok(String(afterKb.barCornerRadius) === '18',
-   'undoing in the Notebook leaves the chart style alone: the key no ' +
-   'longer edits a chart in another workspace');
-ok(JSON.stringify(await counts()) === '[1]',
+const after3 = await page.evaluate(() => ({
+    data: JSON.stringify(window.PS_SHELL.project.table.excluded || null),
+    store: JSON.parse(JSON.stringify(window.PS_SHELL.optionStore())),
+}));
+ok(after3.data === dataArmed,
+   'undoing in the Notebook leaves the DATA alone: the key no longer ' +
+   'reaches a dataset change in another workspace');
+ok(JSON.stringify(await counts()) !== pagesBefore3,
    'it undid the Notebook step instead');
 await press(true);
-ok(styleBefore !== null, 'redo restores the Notebook step');
+ok(JSON.stringify(await counts()) === pagesBefore3,
+   'and redo restores the Notebook step');
 
 console.log('case 4: deleting, moving and reordering all reach the keyboard');
 await keep('New section');
@@ -223,6 +234,62 @@ await page.evaluate(() => {
 await page.waitForTimeout(500);
 ok(JSON.stringify(await counts()) === nAfterKb,
    'and the stale toast declines rather than undoing it a second time');
+
+console.log('case 6: the history does not outlive its project');
+// A history that survives a project boundary is not an undo, it is a way to
+// inject a page from the old project into the new one. Worse than a stray
+// keystroke: the empty Notebook's Edit menu offered "Undo the deleted page",
+// enabled, in a project that never had one.
+await page.evaluate(() => window.PS_SHELL.setWorkspace('pinboard'));
+await page.waitForTimeout(400);
+await keep('Section 1');
+await page.evaluate(() => window.PS_SHELL.setWorkspace('pinboard'));
+await page.waitForTimeout(500);
+// Click SELECTS or DESELECTS, so drive it until the page pane is showing.
+for (let i = 0; i < 3; i++) {
+    const on = await page.evaluate(() =>
+        document.getElementById('ps-pininsp-sel').style.display !== 'none');
+    if (on) break;
+    await page.evaluate(() => {
+        const p = document.querySelector('.ps-pinpage');
+        p.scrollIntoView({ block: 'center' });
+        p.click();
+    });
+    await page.waitForTimeout(350);
+}
+await page.click('#ps-pininsp-note');
+await page.type('#ps-pininsp-note', 'NOTE-FROM-THE-OLD-PROJECT', { delay: 1 });
+await page.evaluate(() => document.getElementById('ps-pininsp-note').blur());
+await page.waitForTimeout(400);
+await page.evaluate(() => document.querySelector('[data-pin-delete]').click());
+await page.waitForTimeout(400);
+const depthBefore = await page.evaluate(() =>
+    window.PS_SHELL.notebookHistory().undo.length);
+ok(depthBefore > 0, 'there is a Notebook history to carry across (' +
+   depthBefore + ' steps)');
+// A genuinely different project.
+await page.evaluate(() => window.PS_SHELL.loadSample('practice'));
+await page.waitForTimeout(2200);
+const afterLoad = await page.evaluate(() => ({
+    hist: window.PS_SHELL.notebookHistory(),
+    pages: (window.PS_SHELL.project.pinboards || []).flatMap(b => b.pins).length,
+}));
+ok(afterLoad.pages === 0, 'the new project starts with an empty Notebook');
+ok(afterLoad.hist.undo.length === 0 && afterLoad.hist.redo.length === 0,
+   'and with an empty history, so nothing from the old project can be ' +
+   'undone into it (' + JSON.stringify(afterLoad.hist) + ')');
+await page.evaluate(() => window.PS_SHELL.setWorkspace('pinboard'));
+await page.waitForTimeout(400);
+m = await editMenu();
+const u6 = m.find(r => /^Undo/.test(r.text));
+ok(u6.off, 'the Edit menu offers nothing to undo, rather than inviting it ' +
+   '("' + u6.text.split('Cmd')[0].trim() + '")');
+await press(false);
+await page.waitForTimeout(400);
+const injected = await page.evaluate(() =>
+    window.PS_SHELL.projectFileText().indexOf('NOTE-FROM-THE-OLD-PROJECT') !== -1);
+ok(!injected,
+   'and pressing the key injects nothing from the previous project');
 
 ok(errors.length === 0, 'no page errors (' + errors.slice(0, 2).join(' | ') + ')');
 console.log('notebook-undo-check: all cases passed');

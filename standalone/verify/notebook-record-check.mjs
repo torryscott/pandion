@@ -199,6 +199,9 @@ ok(/Page 1 of 1/.test(pdf.text),
 ok(/kept /.test(pdf.text), 'so is the date it was kept');
 ok(/Compare Groups: condition, score/.test(pdf.text),
    'so is the analysis and the variables it came from');
+ok(/Bar \u00b7 Compare Groups: condition, score/.test(pdf.text),
+   'led by what KIND of chart it was, so four variants kept from one chart ' +
+   'tab do not all export the identical sentence');
 ok(pdf.stamp.pages === 1 && pdf.stamp.format === 'pdf',
    'and the export stamp is unchanged in shape');
 
@@ -228,6 +231,19 @@ ok(/Section 1 · Page 1 of 1/.test(all.text) &&
 const oneSection = await exportAndRead('pdf', 'This section');
 ok(/Page 1 of 2/.test(oneSection.text) && !/Section 2 · Page/.test(oneSection.text),
    'a single-section file drops the redundant section name');
+
+console.log('case 4b: one page exported alone still knows where it sits');
+// Section 2 holds two pages. Export only the second.
+await page.evaluate(() => {
+    const p = [...document.querySelectorAll('.ps-pinpage')][1];
+    p.scrollIntoView({ block: 'center' });
+    p.click();
+});
+await page.waitForTimeout(300);
+const one = await exportAndRead('pdf', 'This page');
+ok(/Page 2 of 2/.test(one.text) && !/Page 1 of 1/.test(one.text),
+   "the number is the page's place in its SECTION, not in the export, so " +
+   'exporting page 2 alone does not relabel it page 1 of 1');
 
 console.log('case 5: SVG carries it too, and unchecking the box removes it');
 const svgOn = await exportAndRead('svg', 'This section');

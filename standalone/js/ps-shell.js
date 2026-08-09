@@ -2138,6 +2138,7 @@
     }) : [];
     PROJECT.charts = charts.length ? charts : [newChart("Chart 1")];
     layHistoryClear();
+    nbHistoryClear();
     clearAllEngineDocState();
     for (var ci = 0; ci < PROJECT.charts.length; ci++)
       if (isLayoutTab(PROJECT.charts[ci])) layNormalizeLayout(PROJECT.charts[ci]);
@@ -2853,7 +2854,7 @@
       capField.style.display = "none";
       descField.style.display = "none";
       if (bgField) bgField.style.display = "none";
-      // The page's OWN record replaces the caption box here: nothing to
+      // The page's OWN record replaces the caption box here. Nothing to
       // type, because the page already knows when it was kept, what it
       // came from, and what the user wrote about it.
       recField.style.display = "";
@@ -4028,6 +4029,69 @@
     }
     if (changed) persist(false);
   }
+  // ---- Notebook history ------------------------------------------------
+  // Cmd/Ctrl+Z is the app's promise everywhere else, and in this workspace
+  // it fell through to the chart engine: the Edit menu read "Undo chart
+  // styling" while the Notebook was on screen, and the key silently edited
+  // a chart the user was not looking at. Keeping, deleting, moving between
+  // sections and reordering are the structural acts on the record, and they
+  // are what this covers. Notes and titles are text fields, where the
+  // browser's own undo already works while the caret is in them.
+  var NB_UNDO = [], NB_REDO = [], NB_SEQ = 0;
+  function nbStep(label, undo, redo) {
+    NB_SEQ++;
+    var step = { seq: NB_SEQ, label: label, undo: undo, redo: redo };
+    NB_UNDO.push(step);
+    // Same ceiling as the layout history: deep enough to cover a working
+    // session, bounded so a long one cannot grow without limit.
+    if (NB_UNDO.length > 60) NB_UNDO.shift();
+    NB_REDO.length = 0;
+    return step;
+  }
+  function nbApply(fn) {
+    fn();
+    persist();
+    syncAll();
+    if (appWorkspace() === "pinboard") renderPinboard();
+  }
+  function nbUndo() {
+    var step = NB_UNDO.pop();
+    if (!step) return;
+    nbApply(step.undo);
+    NB_REDO.push(step);
+  }
+  function nbRedo() {
+    var step = NB_REDO.pop();
+    if (!step) return;
+    nbApply(step.redo);
+    NB_UNDO.push(step);
+  }
+  // The toast's Undo button and the keyboard must not both undo the same
+  // act: the toast outlives later changes, so it undoes its own step only
+  // while that step is still the one Cmd+Z would reach (the offerDataUndo
+  // rule, applied here).
+  function nbOfferUndo(message, step) {
+    showUndoToast(message, function () {
+      if (!NB_UNDO.length || NB_UNDO[NB_UNDO.length - 1] !== step) {
+        showToast(NB_REDO.indexOf(step) !== -1
+          ? "That change has already been undone"
+          : "A newer Notebook change has already been made", true);
+        return;
+      }
+      nbUndo();
+    });
+  }
+  // A history that outlives its project is not an undo, it is a way to
+  // inject a page from the old project into the new one. The layout history
+  // is cleared at every project boundary; this joins it there.
+  function nbHistoryClear() {
+    NB_UNDO.length = 0;
+    NB_REDO.length = 0;
+  }
+  function nbHistoryLabel(back) {
+    var stack = back ? NB_UNDO : NB_REDO;
+    return stack.length ? stack[stack.length - 1].label : "";
+  }
   // ---- page selection + provenance (Torry, Aug 1 2026: the empty rail,
   // "notes about the current page", the kept time, and "whether the chart
   // it was pulled from has changed") ----
@@ -4050,16 +4114,20 @@
       h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
     return h.toString(16);
   }
-  function pinProvenance(chartEl) {
+  // forId describes a chart OTHER than the one on screen, which is what
+  // keeping an updated copy of a drifted page needs. Without it this reads
+  // the active chart, as every existing caller wants.
+  function pinProvenance(chartEl, forId) {
     try {
-      var id = PROJECT.activeChart, c = chartById(id);
+      var id = forId || PROJECT.activeChart, c = chartById(id);
       if (!c || isLayoutTab(c)) return null;
       // Prefer the authoritative snapshot (captured at render,
       // size-guarded) so the signature is byte-comparable with later
-      // captures; fall back to a snapshot-style clone of the live svg.
+      // captures; fall back to a snapshot-style clone of the live svg. The
+      // fallback is only valid for the chart actually on screen.
       var s = validSnap(id);
-      var html = s ? s.svg : chartEl
-        ? svgSelfContainedClone(chartEl, "snap-" + id + "-").html : null;
+      var html = s ? s.svg : (!forId && chartEl
+        ? svgSelfContainedClone(chartEl, "snap-" + id + "-").html : null);
       if (!html) return null;
       // Analysis + variables at pin time, so a page stays self-describing
       // even after its source chart is deleted (Torry's rail round).
@@ -4082,10 +4150,26 @@
       // built from srcDesc reads the same on every page kept from one
       // chart tab (Compare Groups: condition, score, four times over) -
       // the graph type is what actually tells four explorations apart.
+      // The RESOLVED graph type, not merely an overridden one. A chart's
+      // option store is EMPTY until the user switches type, and the engine
+      // writes nothing when you pick the type you are already on, so reading
+      // the store alone recorded no type at all for every page kept before a
+      // first type change - which for someone exploring by restyling is all
+      // of them. Resolve the store over the template exactly as buildPayload
+      // does. Scatter is the exception worth naming: its type switch commits
+      // xyBin rather than graphType, so a heatmap is only visible there.
       var kind = "", vars = "";
       try {
         var opts = (c.options && c.options[c.module]) || {};
-        kind = pinTypeLabel(String(opts.graphType || ""));
+        var tplp = ((window.PS_TEMPLATES || {})[c.module] || {}).payload || {};
+        var gt = typeof opts.graphType === "string" && opts.graphType
+          ? opts.graphType
+          : (typeof tplp.graphType === "string" ? tplp.graphType : "");
+        var bin = typeof opts.xyBin === "string" && opts.xyBin
+          ? opts.xyBin
+          : (typeof tplp.xyBin === "string" ? tplp.xyBin : "none");
+        if (gt === "scatter" && bin && bin !== "none") gt = "heatmap";
+        kind = pinTypeLabel(gt);
         vars = desc.indexOf(": ") !== -1
           ? desc.slice(desc.indexOf(": ") + 2) : "";
       } catch (eK) {}
@@ -4125,8 +4209,14 @@
     histogram: "Histogram", density: "Density",
     histdensity: "Histogram + density", qq: "Q-Q", ecdf: "ECDF",
     pie: "Pie", donut: "Donut", pareto: "Pareto",
-    corrheatmap: "Correlation heatmap", corrcircles: "Correlation circles",
-    corrnumbers: "Correlation numbers", corrmixed: "Correlation matrix",
+    // Named for the SHAPE, not restated with the analysis. The rail row is
+    // about 117px wide and "Correlation heatmap" alone needed 193px, so the
+    // variables were always cut off; and the exported band prints this next
+    // to srcDesc, where "Correlation heatmap - Correlation Matrix: a, b"
+    // said the same word twice. Scatter's Heatmap shares the name, which the
+    // variables and the analysis line either side of it settle.
+    corrheatmap: "Heatmap", corrcircles: "Circles",
+    corrnumbers: "Numbers", corrmixed: "Mixed",
     likertdiverging: "Diverging", likertstacked: "100% stacked",
     likertmeans: "Item means"
   };
@@ -4136,11 +4226,11 @@
       gt.charAt(0).toUpperCase() + gt.slice(1);
   }
   // A page needs a NAME before it can appear in a list, and every page
-  // already carries one: a kept comparison knows its own title, a kept
+  // already carries one. A kept comparison knows its own title, a kept
   // chart knows what it was and which variables it was drawn from. The
   // user's own title wins over all of it.
   function pinPageLabel(pin, idx) {
-    var t = String(pin.title || "").trim();
+    var t = String(pin.pageTitle || "").trim();
     if (t) return t;
     t = String(pin.momTitle || "").trim();
     if (t) return t;
@@ -4164,12 +4254,12 @@
     for (var i = 0; i < pins.length; i++)
       if (pins[i].id === pinId) { at = i; pin = pins[i]; }
     if (!pin) return;
-    var ttl = String(pin.title || "").trim();
+    var ttl = String(pin.pageTitle || "").trim();
     num.textContent = "Page " + (at + 1) + " of " + pins.length +
       (ttl ? " \u00b7 " + ttl : "") +
       (pin.at ? " \u00b7 kept " + pinKeptFmt(pin.at) : "");
   }
-  // Go to a page: the Notebook, its section, selected, and on screen.
+  // Go to a page. The Notebook, its section, selected, and on screen.
   function pinReveal(pinId) {
     var boards = pinBoards(), owner = null;
     for (var i = 0; i < boards.length; i++)
@@ -4185,7 +4275,7 @@
     var pg = scroll && scroll.querySelector(
       '.ps-pinpage[data-pin-id="' + pinId + '"]');
     if (!pg) return;
-    // "nearest" rather than "center": a page taller than the viewport
+    // "nearest" rather than "center", because a page taller than the viewport
     // should arrive at its TOP, which is where the chart is.
     try { pg.scrollIntoView({ block: "nearest", behavior: "smooth" }); }
     catch (e) { pg.scrollIntoView(); }
@@ -4268,9 +4358,17 @@
     el("ps-pininsp-open").style.display =
       sel.srcChart && chartById(sel.srcChart) &&
       !isLayoutTab(chartById(sel.srcChart)) ? "" : "none";
+    // Only on a page whose source has actually moved on. On a page that
+    // still matches, an update button would offer a duplicate.
+    var upd = el("ps-pininsp-update");
+    if (upd) {
+      upd.style.display = pinCanUpdate(sel) ? "" : "none";
+      setTip(upd, "Keep the chart as it is NOW as a new page below this one. " +
+        "This page is left exactly as it was.");
+    }
     var nm = el("ps-pininsp-name");
     if (nm && document.activeElement !== nm) {
-      nm.value = sel.title || "";
+      nm.value = sel.pageTitle || "";
       // The placeholder shows the name the page carries when untitled, so
       // an empty box reads as "this is what it is called" rather than as a
       // blank the user has to fill in.
@@ -4288,7 +4386,7 @@
     var pins = board.pins;
     var entry = { id: pinNewId(), src: pinSvgSrc(svgText),
                   natW: w, natH: h, w: w, h: h, at: Date.now() };
-    // Everything pinProvenance recorded, not a hand-listed subset: the
+    // Everything pinProvenance recorded, not a hand-listed subset. The
     // field-by-field copy silently dropped each new provenance field the
     // moment one was added.
     if (prov)
@@ -4299,6 +4397,15 @@
       for (var xk in extra)
         if (extra[xk] != null && extra[xk] !== "") entry[xk] = extra[xk];
     pins.push(entry);
+    nbStep("the keep", function () {
+      var k = pins.indexOf(entry);
+      if (k !== -1) pins.splice(k, 1);
+      (PROJECT.ui = PROJECT.ui || {}).activeBoard = board.id;
+    }, function () {
+      pins.push(entry);
+      (PROJECT.ui = PROJECT.ui || {}).activeBoard = board.id;
+      PIN_SEL = entry.id;
+    });
     persist();
     syncAll();
     if (appWorkspace() === "pinboard") renderPinboard();
@@ -4692,6 +4799,7 @@
     PROJECT.pinboards = [];
     PROJECT.ui.activeBoard = null;
     layHistoryClear();
+    nbHistoryClear();
     PROJECT.name = ex.name;
     PROJECT_REV = 0;
     FILE_SAVED_REV = null;
@@ -5300,16 +5408,19 @@
       if (PROJECT.ui.activeBoard === id) PROJECT.ui.activeBoard = null;
       persist(); syncAll();
       if (appWorkspace() === "pinboard") renderPinboard();
-      showUndoToast("Deleted " + removed.name +
+      var step = nbStep("the deleted section", function () {
+        var bs = pinBoards();
+        bs.splice(Math.min(at, bs.length), 0, removed);
+        PROJECT.ui.activeBoard = removed.id;
+      }, function () {
+        var bs = pinBoards(), k = bs.indexOf(removed);
+        if (k !== -1) bs.splice(k, 1);
+        if (PROJECT.ui.activeBoard === removed.id)
+          PROJECT.ui.activeBoard = null;
+      });
+      nbOfferUndo("Deleted " + removed.name +
         (removed.pins.length ? " and its " + removed.pins.length +
-          (removed.pins.length === 1 ? " page" : " pages") : ""),
-        function () {
-          var bs = pinBoards();
-          bs.splice(Math.min(at, bs.length), 0, removed);
-          PROJECT.ui.activeBoard = removed.id;
-          persist(); syncAll();
-          if (appWorkspace() === "pinboard") renderPinboard();
-        });
+          (removed.pins.length === 1 ? " page" : " pages") : ""), step);
       return;
     }
   }
@@ -5416,11 +5527,23 @@
       img.draggable = false;
       page.appendChild(img);
       var bar = mkEl("div", "ps-pinpage-bar");
-      var ttl = String(pin.title || "").trim();
+      var ttl = String(pin.pageTitle || "").trim();
       bar.appendChild(mkEl("span", "ps-pinpage-num",
         "Page " + (idx + 1) + " of " + pins.length +
         (ttl ? " \u00b7 " + ttl : "") +
         (pin.at ? " \u00b7 kept " + pinKeptFmt(pin.at) : "")));
+      // The freshness verdict lived only in the rail of the SELECTED page,
+      // so scrolling a notebook showed nothing and a page whose source had
+      // moved on looked exactly like one that had not.
+      var pst = pinSourceStatus(pin);
+      if (pst.state === "changed" || pst.state === "gone") {
+        var dw = mkEl("span", "ps-pinpage-drift",
+          pst.state === "gone" ? "source chart is gone"
+                               : "source chart has changed");
+        dw.setAttribute("data-state", pst.state);
+        setTip(dw, pst.text);
+        bar.appendChild(dw);
+      }
       // The four verbs live in ONE wrapping group, so a narrow card drops
       // them below the info line together instead of stranding whichever
       // fit beside the text (Torry's low-zoom report, Aug 5 2026).
@@ -5578,6 +5701,15 @@
     if (slot < 0) slot = 0;
     if (slot > pins.length) slot = pins.length;
     pins.splice(slot, 0, moved);
+    if (slot !== at) (function (from, to, list, item) {
+      function put(k) {
+        var cur = list.indexOf(item);
+        if (cur !== -1) list.splice(cur, 1);
+        list.splice(Math.min(k, list.length), 0, item);
+      }
+      nbStep("the page order", function () { put(from); },
+             function () { put(to); });
+    })(at, slot, pins, moved);
     persist();
     renderPinboard();
     var after = scroll ? scroll.querySelectorAll(".ps-pinpage") : [];
@@ -5608,7 +5740,7 @@
   }
   function deletePin(id) {
     // Undo restores into the section the page was deleted FROM, captured
-    // here rather than resolved at undo time: the toast outlives a section
+    // here rather than resolved at undo time, because the toast outlives a section
     // switch, and projectPins() would have handed the page to whichever
     // section happened to be on screen when Undo was pressed. A record must
     // never end up somewhere the user did not put it. (deletePinBoard
@@ -5617,31 +5749,89 @@
     for (var i = 0; i < pins.length; i++) {
       if (pins[i].id !== id) continue;
       var removed = pins.splice(i, 1)[0], at = i;
-      persist(); syncAll();
-      if (appWorkspace() === "pinboard") renderPinboard();
-      showUndoToast("Page removed from " + board.name, function () {
+      var step = nbStep("the deleted page", function () {
         // The section itself may have been deleted meanwhile, and its own
-        // undo is a separate toast. Restoring into a detached section would
+        // undo is a separate step. Restoring into a detached section would
         // drop the page silently, so fall back to the one on screen.
         var live = pinBoards().indexOf(board) !== -1 ? board : activePinBoard();
         live.pins.splice(Math.min(at, live.pins.length), 0, removed);
-        // Show the restored page: putting it back out of sight would be an
+        // Show the restored page, since putting it back out of sight would be an
         // undo the user cannot see.
         (PROJECT.ui = PROJECT.ui || {}).activeBoard = live.id;
         PIN_SEL = removed.id;
-        persist(); syncAll();
-        if (appWorkspace() === "pinboard") renderPinboard();
+      }, function () {
+        var k = board.pins.indexOf(removed);
+        if (k !== -1) board.pins.splice(k, 1);
+        (PROJECT.ui = PROJECT.ui || {}).activeBoard = board.id;
       });
+      persist(); syncAll();
+      if (appWorkspace() === "pinboard") renderPinboard();
+      nbOfferUndo("Page removed from " + board.name, step);
       return;
     }
   }
+  // ---- keeping an updated copy of a page whose source has moved on -----
+  // The rail told you a page's source chart had changed and then offered
+  // nothing to do about it. The answer is append-only, because that is what
+  // makes a record defensible months later: the current chart joins the
+  // notebook as a NEW page directly below the old one, carrying the note and
+  // the title forward, and both versions keep their own kept dates. Refresh
+  // in place would have been cheaper and would have destroyed the evidence,
+  // which is the one thing a lab notebook is not supposed to allow.
+  function pinCanUpdate(pin) {
+    return !!(pin && pin.srcChart && pinSourceStatus(pin).state === "changed");
+  }
+  function pinKeepUpdatedCopy(pinId) {
+    var boards = pinBoards(), board = null, at = -1, pin = null, i, j;
+    for (i = 0; i < boards.length; i++)
+      for (j = 0; j < boards[i].pins.length; j++)
+        if (boards[i].pins[j].id === pinId) {
+          board = boards[i]; at = j; pin = boards[i].pins[j];
+        }
+    if (!pin || !pinCanUpdate(pin)) return;
+    // "changed" is only reachable with a valid snapshot, so this is the same
+    // capture the verdict was computed against, not a re-render.
+    var s = validSnap(pin.srcChart);
+    if (!s) return;
+    var entry = { id: pinNewId(), src: pinSvgSrc(s.svg),
+                  natW: s.w, natH: s.h, w: s.w, h: s.h, at: Date.now() };
+    var prov = pinProvenance(null, pin.srcChart);
+    if (prov)
+      for (var pk in prov)
+        if (Object.prototype.hasOwnProperty.call(prov, pk) &&
+            prov[pk] != null && prov[pk] !== "") entry[pk] = prov[pk];
+    // The note is the reason the page exists, and the title is what it is
+    // called. This is the same figure, later, so both come forward.
+    if (pin.note) entry.note = pin.note;
+    if (pin.pageTitle) entry.pageTitle = pin.pageTitle;
+    board.pins.splice(at + 1, 0, entry);
+    var step = nbStep("the updated copy", function () {
+      var k = board.pins.indexOf(entry);
+      if (k !== -1) board.pins.splice(k, 1);
+      (PROJECT.ui = PROJECT.ui || {}).activeBoard = board.id;
+      PIN_SEL = pin.id;
+    }, function () {
+      board.pins.splice(Math.min(at + 1, board.pins.length), 0, entry);
+      (PROJECT.ui = PROJECT.ui || {}).activeBoard = board.id;
+      PIN_SEL = entry.id;
+    });
+    (PROJECT.ui = PROJECT.ui || {}).activeBoard = board.id;
+    PIN_SEL = entry.id;
+    persist(); syncAll();
+    if (appWorkspace() === "pinboard") renderPinboard();
+    repairPinFonts();
+    pinReveal(entry.id);
+    nbOfferUndo("Updated copy kept, below the original", step);
+  }
   // ---- moving a page between sections ---------------------------------
-  // Keeping into the wrong section was a one-way mistake: nothing in the
+  // Keeping into the wrong section was a one-way mistake. Nothing in the
   // page menu, the page bar or the rail moved a page, so the only remedy
   // was to delete it and keep it again from the source chart, which threw
   // away the note and the kept time - the two things that make it a record.
-  // Shaped like Send to layout: the sections by name, then New section.
-  function movePinToBoard(pinId, boardId) {
+  // Shaped like Send to layout, with the sections by name then New section.
+  // bornWith, when given, is a section created FOR this move: undo removes it
+  // along with the move, and redo puts it back.
+  function movePinToBoard(pinId, boardId, bornWith) {
     var boards = pinBoards(), from = null, at = -1, pin = null, target = null;
     for (var i = 0; i < boards.length; i++) {
       for (var j = 0; j < boards[i].pins.length; j++)
@@ -5657,7 +5847,7 @@
     PIN_SEL = pin.id;
     persist(); syncAll();
     if (appWorkspace() === "pinboard") renderPinboard();
-    showUndoToast("Moved to " + target.name, function () {
+    var step = nbStep("the move", function () {
       var back = pinBoards().indexOf(target) !== -1 ? target : null;
       if (back) {
         var k = back.pins.indexOf(pin);
@@ -5665,11 +5855,22 @@
       }
       var home = pinBoards().indexOf(from) !== -1 ? from : activePinBoard();
       home.pins.splice(Math.min(at, home.pins.length), 0, pin);
+      if (bornWith && !bornWith.pins.length) {
+        var bs = pinBoards(), bi = bs.indexOf(bornWith);
+        if (bi !== -1 && bs.length > 1) bs.splice(bi, 1);
+      }
       PROJECT.ui.activeBoard = home.id;
       PIN_SEL = pin.id;
-      persist(); syncAll();
-      if (appWorkspace() === "pinboard") renderPinboard();
+    }, function () {
+      if (bornWith && pinBoards().indexOf(bornWith) === -1)
+        pinBoards().push(bornWith);
+      var k = from.pins.indexOf(pin);
+      if (k !== -1) from.pins.splice(k, 1);
+      target.pins.push(pin);
+      PROJECT.ui.activeBoard = target.id;
+      PIN_SEL = pin.id;
     });
+    nbOfferUndo("Moved to " + target.name, step);
   }
   function showPinMoveMenu(x, y, pinId) {
     var boards = pinBoards(), owner = null, items = [];
@@ -5688,7 +5889,10 @@
         var b = { id: newBoardId(),
                   name: "Section " + (pinBoards().length + 1), pins: [] };
         pinBoards().push(b);
-        movePinToBoard(pinId, b.id);
+        // The section was created for this move, so undoing the move must
+        // take it away again. Without this the page came back and an empty
+        // section nobody asked for stayed behind.
+        movePinToBoard(pinId, b.id, b);
       } });
     showContextMenu(x, y, items, null);
   }
@@ -5911,8 +6115,8 @@
   // matching the numbers the page card shows on screen.
   function pinRecordBlocks(pin, rec) {
     var out0 = [], head = [];
-    var title = String(pin.title || "").trim();
-    if (title) out0.push({ size: 13, fill: "#222222", text: title });
+    var ttl = String(pin.pageTitle || "").trim();
+    if (ttl) out0.push({ size: 13, fill: "#222222", text: ttl });
     if (rec.manyBoards && rec.board) head.push(rec.board);
     head.push("Page " + (rec.idx + 1) + " of " + rec.total);
     if (pin.at) head.push("kept " + pinKeptFmt(pin.at));
@@ -5920,7 +6124,13 @@
       [{ size: 11, fill: "#5b6470", text: head.join(" \u00b7 ") }]);
     var st = pinSourceStatus(pin);
     var src = [], drift = st.state === "changed" || st.state === "gone";
-    if (pin.srcDesc) src.push(pin.srcDesc);
+    // The TYPE leads the source line. Four variants kept from one chart tab
+    // differ only by it, and without this every one of them exported the
+    // identical sentence - the page list could tell them apart and the
+    // document handed to someone else could not.
+    if (pin.srcDesc)
+      src.push(pin.srcType ? pin.srcType + " \u00b7 " + pin.srcDesc
+                           : pin.srcDesc);
     if (st.state === "changed")
       src.push("the source chart has changed since this page was kept");
     else if (st.state === "gone")
@@ -5965,7 +6175,7 @@
     root.setAttribute("width", String(w));
     root.setAttribute("height", String(h + lay.h));
     root.setAttribute("viewBox", "0 0 " + w + " " + (h + lay.h));
-    // White under the whole thing: a kept page may itself be transparent,
+    // White under the whole thing, because a kept page may itself be transparent,
     // and record text must never land on transparency.
     addSvgBackground(outer, "#ffffff", w, h + lay.h);
     var nested = outer.importNode(inner.documentElement, true);
@@ -5998,7 +6208,7 @@
     return { svg: new XMLSerializer().serializeToString(root),
              w: w, h: h + lay.h };
   }
-  // The page as it should export: with its record when the dialog asks for
+  // The page as it should export, with its record when the dialog asks for
   // one and the page has vector to nest, otherwise exactly as before.
   function pinExportSvg(pin, rec) {
     var made = rec ? pinComposeWithRecord(pin, rec) : null;
@@ -6097,26 +6307,28 @@
     var box = el("ps-export-record");
     return box ? !!box.checked : true;
   }
-  // Per-page record descriptors for an export scope. Page numbers are
-  // per SECTION so the exported page agrees with the card on screen, and
-  // the section is named only when more than one is in the file.
-  function pinRecordsFor(scope, pins) {
+  // Per-page record descriptors for an export scope. The page number is the
+  // page's position in its own SECTION, not in the exported selection, so
+  // exporting page 3 on its own still says "Page 3 of 12" and agrees with
+  // the card on screen. The section is named only when the file holds more
+  // than one.
+  function pinRecordsFor(pins) {
     if (!pinRecordWanted()) return null;
-    var owners = {}, everything = allPins(), seen = {}, i;
+    var owners = {}, everything = allPins(), i;
     for (i = 0; i < everything.length; i++)
       owners[everything[i].pin.id] = everything[i].board;
-    var totals = {};
+    var boardsInFile = {};
     for (i = 0; i < pins.length; i++) {
       var bd = owners[pins[i].id];
-      var k = bd ? bd.id : "-";
-      totals[k] = (totals[k] || 0) + 1;
+      if (bd) boardsInFile[bd.id] = 1;
     }
-    var many = Object.keys(totals).length > 1;
+    var many = Object.keys(boardsInFile).length > 1;
     var out = [];
     for (i = 0; i < pins.length; i++) {
-      var b = owners[pins[i].id], key = b ? b.id : "-";
-      seen[key] = (seen[key] || 0) + 1;
-      out.push({ idx: seen[key] - 1, total: totals[key],
+      var b = owners[pins[i].id];
+      var list = b ? b.pins : pins;
+      var at = list.indexOf(pins[i]);
+      out.push({ idx: at === -1 ? i : at, total: list.length,
                  board: b ? b.name : "", manyBoards: many });
     }
     return out;
@@ -6159,7 +6371,7 @@
       try { console.warn("Pandion Plots notebook export failed", e); }
       catch (ignore) {}
     }
-    var recs = pinRecordsFor(scope, pins);
+    var recs = pinRecordsFor(pins);
     if (format === "pdf") {
       var pdfName = base + ".pdf";
       setExportStatus("Rendering " + pdfName + "...", false);
@@ -6766,7 +6978,6 @@
       captureChartSnapshot(c.id);
     }
     applyViewZoom();
-    scheduleChartCheck();
     // Re-adopt the zoom control into the bar the engine just rebuilt.
     // The observer below is the BACKSTOP for renders the shell does not
     // drive; doing it here as well means the control is never missing for
@@ -13433,7 +13644,7 @@
         "supported in layouts.", true);
     });
     // Notes and titles write on a 600ms debounce, so a reload inside that
-    // window used to lose what had just been typed. Blur flushes it: the
+    // window used to lose what had just been typed. Blur flushes it, since the
     // caret leaving the box is the moment the user considers it written.
     (function flushOnBlur() {
       var boxes = ["ps-pininsp-bnote", "ps-pininsp-note", "ps-pininsp-name"];
@@ -13447,6 +13658,9 @@
       activePinBoard().note = this.value;
       if (PIN_NOTE_T) clearTimeout(PIN_NOTE_T);
       PIN_NOTE_T = setTimeout(function () { persist(false); }, 600);
+    });
+    el("ps-pininsp-update").addEventListener("click", function () {
+      if (PIN_SEL) pinKeepUpdatedCopy(PIN_SEL);
     });
     el("ps-pininsp-open").addEventListener("click", function () {
       var pins = projectPins();
@@ -13462,7 +13676,7 @@
       var pins = projectPins(), v = String(this.value || "").trim();
       for (var i = 0; i < pins.length; i++)
         if (pins[i].id === PIN_SEL) {
-          if (v) pins[i].title = v; else delete pins[i].title;
+          if (v) pins[i].pageTitle = v; else delete pins[i].pageTitle;
         }
       // The rail's page list and the page's own footer both read this
       // label, so both follow every keystroke. The footer is patched in
@@ -13626,6 +13840,22 @@
           if (!layUndo()) showToast("Nothing to undo in this layout");
         } else {
           if (!layRedo()) showToast("Nothing to redo in this layout");
+        }
+        return;
+      }
+      // The Notebook owns it the same way, and for the same reason the
+      // layout branch above exists: without this the press reached the
+      // engine and undid a style edit on a chart in another workspace,
+      // invisibly, while the user was looking at their record.
+      if (appWorkspace() === "pinboard") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (isUndo) {
+          if (NB_UNDO.length) nbUndo();
+          else showToast("Nothing to undo in the Notebook");
+        } else {
+          if (NB_REDO.length) nbRedo();
+          else showToast("Nothing to redo in the Notebook");
         }
         return;
       }
@@ -18449,7 +18679,7 @@
           }
           setTip(prow, pinPageLabel(pin, idx) + " \u00b7 " +
             (pin.at ? "kept " + pinKeptFmt(pin.at) + " \u00b7 " : "") + st.text +
-            (pin.note ? " \u00b7 Your note: " + pin.note : ""));
+            (pin.note ? " \u00b7 Your note - " + pin.note : ""));
           // A page with a drift or a note says so to a screen reader too,
           // where the dot and the tip cannot reach.
           prow.setAttribute("aria-label", "Page " + (idx + 1) + ", " +
@@ -19074,7 +19304,6 @@
     syncContextInspector();
     syncProjectNavigator();
     updateDocumentState();
-    syncChartCheck();
   }
 
   // Punch list 37: real instrumentation for the chart workspace, read from the
@@ -19226,71 +19455,6 @@
       if (p.missingNote) bits.push(p.missingNote);
       return bits.length ? bits.join(" \u00b7 ") : "Ready";
     } catch (e) { return "Ready"; }
-  }
-  // The size row, on its own, because render() re-runs it once the chart
-  // has actually drawn: only a finished chart can say whether a part sits
-  // outside the canvas, and a legend drag commits no size option, so
-  // nothing else in the sync path would ever refresh it.
-  // ---- the chart-check receipt -----------------------------------------
-  // The engine already judges a chart against its graph type's rubric
-  // (Help > Check my chart). It only ever spoke when asked, so a chart
-  // could carry a truncated bar baseline, or a significance star with no
-  // test behind it, and every surface in the app stayed silent - while
-  // the export carried the claim.
-  //
-  // This asks the engine the same question after each render and puts the
-  // answer where the user is already looking. ONE judgment, in the engine,
-  // read through the host hook __gb2_graphLint - never a second copy in the
-  // shell, which would drift. Clean charts get a muted receipt rather than
-  // nothing, so the feature is discoverable before it has bad news; a
-  // finding turns it amber, which is the colour the panel itself uses.
-  var CHECK_TIMER = null;
-  function scheduleChartCheck() {
-    if (CHECK_TIMER) clearTimeout(CHECK_TIMER);
-    // After the render settles. The lint reads rendered geometry (colours
-    // off legend swatches, tick labels off the axes), so it must run on a
-    // painted chart, and a burst of style commits should cost one pass.
-    CHECK_TIMER = setTimeout(syncChartCheck, 260);
-  }
-  function chartCheckReport() {
-    if (appWorkspace() !== "chart") return null;
-    var doc = workspaceDocument("chart");
-    if (!doc || isLayoutTab(doc)) return null;
-    var host = hostEl();
-    if (!host || typeof host.__gb2_graphLint !== "function") return null;
-    if (!host.querySelector("svg")) return null;   // guided empty state
-    try { return host.__gb2_graphLint(); } catch (e) { return null; }
-  }
-  function syncChartCheck() {
-    CHECK_TIMER = null;
-    var btn = el("ps-status-check");
-    if (!btn) return;
-    var rep = chartCheckReport();
-    var found = rep && Array.isArray(rep.findings) ? rep.findings : null;
-    if (!rep || !found) { btn.hidden = true; return; }
-    var warns = 0, i;
-    for (i = 0; i < found.length; i++) if (found[i].sev === "warn") warns++;
-    btn.hidden = false;
-    if (!found.length) {
-      btn.setAttribute("data-state", "ok");
-      btn.textContent = "Checks passed";
-      setTip(btn, "This chart was run against " + rep.total +
-        " checks for its graph type and passed them all. Click to read them.");
-      return;
-    }
-    btn.setAttribute("data-state", "warn");
-    btn.textContent = found.length === 1
-      ? "1 thing to check"
-      : found.length + " things to check";
-    // Name the worst one in the tooltip: a bare count makes the user click
-    // to find out whether it matters.
-    var lead = null;
-    for (i = 0; i < found.length; i++)
-      if (found[i].sev === "warn") { lead = found[i]; break; }
-    if (!lead) lead = found[0];
-    setTip(btn, lead.title + (found.length > 1
-      ? " (and " + (found.length - 1) + " more)" : "") +
-      ". Click to open Check my chart.");
   }
   function syncFitSizeRow() {
     var fitBox = el("ps-fit-pane");
@@ -19546,6 +19710,7 @@
     PROJECT.ui.lastChart = "c1";
     PROJECT.ui.lastLayout = null;
     layHistoryClear();
+    nbHistoryClear();
   }
   function adoptCSV(name, parsed) {
     PROJECT_CHOSEN = true;
@@ -21403,6 +21568,7 @@
   function undoScope() {
     if (appWorkspace() === "data") return "data";
     if (appWorkspace() === "layout" && isLayoutTab(activeChart())) return "layout";
+    if (appWorkspace() === "pinboard") return "notebook";
     return "chart";
   }
   function engineHistoryBtn(which) {
@@ -21438,6 +21604,11 @@
       var named = dataStepLabel(back ? DATA_UNDO : DATA_REDO);
       return (back ? "Undo " : "Redo ") + (named || "data change");
     }
+    // The Notebook names the step, like the data workspace does: "Undo the
+    // deleted page" says what the key will do, where a fixed noun does not.
+    if (s === "notebook")
+      return (back ? "Undo " : "Redo ") +
+        (nbHistoryLabel(back) || "Notebook change");
     return (back ? "Undo " : "Redo ") +
       (s === "layout" ? "layout change" : "chart styling");
   }
@@ -21650,6 +21821,7 @@
         var h = layHist();
         return !!h && (back ? h.undo : h.redo).length > 0;
       }
+      if (scope === "notebook") return (back ? NB_UNDO : NB_REDO).length > 0;
       return !!engineHistoryBtn(back ? "undo" : "redo");
     }
     if (command.indexOf("goto-document:") === 0)
@@ -21732,7 +21904,8 @@
     if (command === "undo" || command === "redo") {
       var scope = undoScope();
       var what = scope === "data" ? "data changes" :
-        scope === "layout" ? "layout changes" : "chart style changes";
+        scope === "layout" ? "layout changes" :
+        scope === "notebook" ? "Notebook changes" : "chart style changes";
       return "No " + what + " to " + command;
     }
     if (command === "data-exclude" || command === "data-chart-sel")
@@ -21802,6 +21975,7 @@
       var back = command === "undo", scope = undoScope();
       if (scope === "data") { if (back) dataUndo(); else dataRedo(); }
       else if (scope === "layout") { if (back) layUndo(); else layRedo(); }
+      else if (scope === "notebook") { if (back) nbUndo(); else nbRedo(); }
       else {
         var eb = engineHistoryBtn(back ? "undo" : "redo");
         if (eb) eb.click();
@@ -22913,12 +23087,6 @@
       render();
     });
     el("ps-save").addEventListener("click", saveProjectFile);
-    // The receipt IS the way in: it names what it found and opens the
-    // panel that explains it. Same route the Help menu takes, so there is
-    // one path to the panel, not two.
-    el("ps-status-check").addEventListener("click", function () {
-      openEngineHelp("graphLint");
-    });
     // Cmd/Ctrl+S saves the project (window CAPTURE so it beats the
     // browser's own save-page dialog everywhere, including inputs).
     window.addEventListener("keydown", function (e) {
@@ -23166,6 +23334,15 @@
               action: function () {
                 showPinMoveMenu(e.clientX, e.clientY, ctxPinId);
               } },
+            { label: "Keep an updated copy", key: "pin-update",
+              disabled: !(function () {
+                var hit = allPins().filter(function (en) {
+                  return en.pin.id === ctxPinId; })[0];
+                return hit && pinCanUpdate(hit.pin);
+              })(),
+              tip: "Available when this page's source chart has changed " +
+                   "since it was kept",
+              action: function () { pinKeepUpdatedCopy(ctxPinId); } },
             "separator",
             { label: "Export this page\u2026", key: "pin-export-page",
               action: function () {
@@ -23400,6 +23577,11 @@
     resizeLayoutPanel: layResizeDimensions,
     selectLayoutItems: function (ids) { laySetSelection(ids); renderLayout(); },
     layoutSelection: laySelectedIds,
+    // The layoutHistoryDepth idiom: what the Notebook's Cmd+Z would do.
+    notebookHistory: function () {
+      return { undo: NB_UNDO.map(function (s) { return s.label; }),
+               redo: NB_REDO.map(function (s) { return s.label; }) };
+    },
     layoutHistoryDepth: function () {
       var n = 0;
       for (var k in LAYOUT_HIST)

@@ -2397,6 +2397,16 @@
     flex: 1 1 auto; min-width: 0; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap;
   }
+  /* The freshness verdict on the page card. Amber, the same colour the rail
+     and the exported record band use for it, so one fact has one look. */
+  .ps-pinpage-drift {
+    flex: 0 0 auto; padding: 1px 7px; font-size: 11px; line-height: 1.5;
+    color: #7a4a05; background: #fdf3e2; border: 1px solid #e6c893;
+    border-radius: var(--ps-r-sm);
+  }
+  .ps-pinpage-drift[data-state="gone"] {
+    color: var(--ps-danger-2); background: #fdeceb; border-color: #f0c2bf;
+  }
   .ps-pinrow-dot {
     flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%;
     background: #c98a1e;
@@ -2667,20 +2677,6 @@
   .ps-statusbar > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #ps-status-context { color: var(--ps-ink-3); }
   #ps-status-document { color: #4f718f; }
-  /* The chart-check receipt. Two states, both quiet: a muted "all
-     passed" that teaches the feature exists, and an amber count that
-     asks to be clicked. Amber is already the Check-graph panel's
-     warning colour, so this introduces no new vocabulary. */
-  #ps-status-check {
-    flex: 0 0 auto; padding: 1px 7px; font: inherit; line-height: 1.5;
-    color: var(--ps-muted); background: transparent; cursor: pointer;
-    border: 1px solid transparent; border-radius: var(--ps-r-sm);
-  }
-  #ps-status-check:hover { background: var(--ps-s3); border-color: var(--ps-l3); }
-  #ps-status-check[data-state="warn"] {
-    color: #7a4a05; background: #fdf3e2; border-color: #e6c893;
-  }
-  #ps-status-check[data-state="warn"]:hover { background: #fbe9cd; }
   #ps-appmenu, #ps-appsubmenu {
     position: fixed; display: none; z-index: 12000; min-width: 215px;
     padding: 5px; color: var(--ps-ink-2); background: var(--ps-s0);
@@ -4203,6 +4199,8 @@
             <div class="ps-inspector-actions">
               <button id="ps-pininsp-open" class="ps-btn" type="button"
                       style="display:none;">Open source chart</button>
+              <button id="ps-pininsp-update" class="ps-btn" type="button"
+                      style="display:none;">Keep an updated copy</button>
             </div>
           </div>
           <label class="ps-inspector-field">
@@ -4657,7 +4655,6 @@
     <span id="ps-status-context">Ready</span>
     <span class="ps-status-spacer"></span>
     <span id="ps-status-selection"></span>
-    <button type="button" id="ps-status-check" hidden></button>
     <span id="ps-status-document">Local autosave on</span>
   </div>
 </div>
