@@ -202,19 +202,27 @@ centred, leaving **35 px of dead space on each side of every panel**, 15.2%
 of the panel width. Alignment, snapping and the smart guides all operate on
 the box, so the user is aligning something 35 px away from what they see.
 
-**No prototype.** I judged it without building because it interacts with the
-decision in item 1, because the engine-side common-gutter fix would remove the
-letterboxing as a side effect, and the shell-side fix I did build makes the
-alignment consequence mostly moot. Building the panel-aspect fix now could
-be work thrown away.
+**BUILT**, `35b2750`. Template cells shrink onto the chart's aspect about
+their own centre, so a grid stays a grid, and the two placement paths take a
+height from the chart rather than the constant 310 that was 1.484 against the
+engine's 1.469.
 
-*Recommendation, if item 1's engine version is not taken.* Size template
-cells to the assigned chart's aspect and centre them in their grid slot.
-About 25 lines in `layoutTemplateRects` plus the chart lookup. Existing
-layouts are untouched; only newly created ones differ.
+**The exported figure does not change**, which is the fact that made this
+safe to take before deciding item 1. The ink was already drawn at the fitted
+size and centred in the box; only the invisible rectangle moves. Verified
+against a pre-change export at the same page size, the ink bounding box is
+unchanged, the bar runs land within a pixel, and the best whole-pixel
+alignment between the two images is zero. The 7120 differing pixels out of
+677376 are sub-pixel antialiasing from rounding the fitted box to whole
+pixels.
 
-**Cost of leaving it.** The figure still exports correctly. It costs
-honesty in every alignment gesture and a slightly loose-looking figure.
+**Cost.** About 30 lines. New layouts only; existing ones are untouched.
+
+**What it risks.** Nothing measured. It does NOT tighten the gutter between
+columns, because the panels shrink about their own centres, so the visible
+gap between two panels grows by the letterbox amount they each shed. Packing
+the grid tighter is a further change and would move the figure, which this
+one deliberately does not.
 
 ---
 
@@ -353,6 +361,38 @@ bottom-right corner, which is a separate and larger piece of work.
 
 ---
 
+## 10. Layout text was a different width in the file than on screen
+
+**What a user feels.** They line a caption up against a panel edge, export,
+and it is not quite where they put it.
+
+**The evidence.** An adversarial pass reported that exported text was not
+where the screen put it. Half right, and the half that was wrong mattered, so
+this is what the measurement says. The ANCHOR is exact, because the export
+writes `item.x + 4` and the screen's own 4 px inset puts the ink in the same
+place, 204 against 204. What differed was the WIDTH. The export writes
+`sans-serif` deliberately, so the file renders the same everywhere and the
+PDF path can map it to a core font, while the canvas drew in the application
+UI stack, which measures 3 to 5 percent wider. A 320 px caption came out
+16.5 px narrower in the file. That is not cosmetic, because `layItemRect`
+measures the SCREEN box and align, the marquee and the page clamp all reason
+from it.
+
+**The prototype.** `19f7be4`. The canvas draws the font the file declares.
+Fixing the export end instead would have been the wrong way round, because
+the portable declaration is the correct one and shipping a UI font stack into
+an SVG makes a file that renders differently on every machine. Measured
+after, the same caption is 294.83 px on screen and 294.82 px in the file.
+
+**Cost.** Two CSS declarations. The layout canvas's text now looks like the
+output font, which a figure composer should show anyway.
+
+**What it risks.** The canvas looks very slightly different. Guarded by
+`layout-figure-check` case 25, which pins screen family, export family and
+measured width together.
+
+---
+
 # Free wins
 
 All five are in `cba8f8f`, all five were demonstrated failing first, all
@@ -414,15 +454,23 @@ the chrome moves.
 
 # Needs a decision
 
+Three of the original five are now built and out of this table. What is left
+changes what an EXISTING gesture does, rather than adding a capability, which
+is why I have not taken them on my own.
+
 | | Recommendation | Cost of each branch |
 | --- | --- | --- |
-| **Orientation flip** (item 4) | Scale by `min(sx, sy)` and centre, so items keep their shape | Fix: ~15 lines + 1 probe case. Leave: a portrait flip keeps producing two-thirds-empty panels |
-| **Arrow keys** (item 8) | Delete the fall-through; Alt+Arrow nudges everywhere | Fix: 3 lines. Leave: the same key keeps meaning two things |
-| **Template panel aspect** (item 5) | Only if the engine gutter fix in item 1 is *not* taken | Fix: ~25 lines, new layouts only. Leave: 15% of each panel stays dead space |
-| **Engine common gutter** (item 1) | Take it only if you want alignment to be automatic rather than a button | Engine: ~15 lines + shell two-pass + jamovi battery on both bundles, about a day. Not taking it: the shipped button already measures exact |
-| **Marquee** (item 7) | Take it; it is what makes multi-select cheap | ~150 lines, half a day, plus mirroring into the AT option list |
+| **Orientation flip** (item 4) | Scale by `min(sx, sy)` and centre, so items keep their shape | Fix: ~15 lines + 1 probe case. Leave: a portrait flip keeps producing panels that are about two thirds empty, and it is now the ONLY way an item can end up letterboxed |
+| **Arrow keys** (item 8) | Delete the fall-through; Alt+Arrow nudges everywhere | Fix: 3 lines. Leave: the same key keeps meaning two things depending on where focus happens to be |
+| **Engine common gutter** (item 1) | Take it only if you want alignment to be automatic rather than a button | Engine: ~15 lines + a shell two-pass + the jamovi battery on both bundles, about a day. Not taking it: the shipped button measures exact, and item 5 has since removed the letterboxing it would also have fixed |
 
----
+Still unbuilt and needing no decision, in the order I would take them:
+grouping (Cmd/Ctrl+G), which is also the honest answer to the loose end in
+item 1; Alt+drag to duplicate; edge resize handles; and the pre-existing
+placement disagreement an audit found in passing, where the toolbar's Add
+chart drops a panel on a fixed cascade from the top-left while Send to layout
+flows it below everything and grows the page. Two entry points for one act,
+two placements.
 
 # Considered and rejected
 
