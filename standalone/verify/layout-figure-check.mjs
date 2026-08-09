@@ -27,6 +27,26 @@
 //      so restyling four panel letters was four visits to the same panel.
 //  12  a selected chart panel's toolbar sat exactly on its own panel letter
 //      (measured: a 19x24 label under a 33x24 bar at the same x).
+//  13  there were three placement rules and the loudest one covered your
+//      work. Add chart on a two-column template landed at 128,112 across
+//      BOTH panels; on a full four-panel page it landed at 76,68 across two
+//      of them, with no page growth and nothing said. It was 460 wide
+//      against the template's 463, so the new panel never matched. Send to
+//      layout used a third rule, stacking two charts at y 32 and y 359 and
+//      growing the page to 704, where the toolbar would have put them side
+//      by side.
+//  14  the file wrapped layout text in the UI font stack while declaring
+//      sans-serif, because wrapCaptionLines took three arguments and
+//      layoutTextNode had been passing four since the caption fix.
+//  15  page growth was written straight into page.h, so asking past the 4000
+//      maximum toasted that the page had grown over an item that had just
+//      been clamped back on top of the figure.
+//  16  a pasted paragraph measured 21 px tall against the 284 px it renders,
+//      because the text estimate counted characters on the longest logical
+//      line and never wrapped, so the placement dropped it on a panel.
+//  17  bringing the new item into view used scrollIntoView, which negotiates
+//      with every scrolling ancestor, so it also scrolled the workspace pane
+//      33 px and took the toolbar out from under the pointer.
 //
 // PROBE LAWS honored here: playwright resolves from /tmp/node_modules via
 // createRequire; the zoom keys must be pressed with the viewport focused
@@ -1558,6 +1578,376 @@ ok(wrapCmp.screenWidths.every((w, i) =>
 ok(wrapCmp.screenSteps.every(v => Math.abs(v - 13 * 1.25) < 1),
    'and stepping its lines by the same 1.25 em the file writes (' +
    wrapCmp.screenSteps.join(',') + ' against ' + (13 * 1.25) + ')');
+
+console.log('case 38: a new item never lands on top of the figure');
+// There were three placement rules. The toolbar cascaded from the top-left
+// corner in steps of 26 by 22 and wrapped every sixth item, so on any
+// template the first Add chart landed ON panel A and a seventh landed exactly
+// on the first; Send to layout stacked below everything; a pasted image did
+// its own variant. Now there is one rule, the reading order of a figure.
+await page.evaluate(() => window.PS_SHELL.showLayoutGallery());
+await page.waitForTimeout(500);
+await page.click('[data-layout-template="two-columns"]');
+await page.waitForTimeout(300);
+await page.click('[data-layout-create], #ps-layout-gallery-create');
+await page.waitForTimeout(3500);
+// Overlap is counted among SIZED items only. A template's panel letter sits
+// at panel.y - 28 in a padded box a few pixels taller than that, so it laps
+// its own panel by design and by four pixels; text over a chart is a
+// legitimate thing to want. A PANEL covering a panel is not.
+const p38Geom = () => page.evaluate(() => {
+    const c = window.PS_SHELL.chart();
+    const rs = c.items.filter(i => i.kind === 'chart' || i.kind === 'image')
+        .map(i => ({ x: i.x, y: i.y, w: i.w, h: i.h }));
+    let hits = 0;
+    for (let a = 0; a < rs.length; a++)
+        for (let b = a + 1; b < rs.length; b++)
+            if (rs[a].x < rs[b].x + rs[b].w && rs[a].x + rs[a].w > rs[b].x &&
+                rs[a].y < rs[b].y + rs[b].h && rs[a].y + rs[a].h > rs[b].y) hits++;
+    return { overlaps: hits, pageH: c.page.h, preset: c.page.preset,
+             panels: c.items.filter(i => i.kind === 'chart')
+                 .map(i => ({ id: i.id, x: i.x, y: i.y, w: i.w, h: i.h })),
+             depth: window.PS_SHELL.layoutHistoryDepth() };
+});
+async function p38AddChart() {
+    await page.click('#ps-laddchart');
+    await page.waitForTimeout(300);
+    const btn = await page.$('#ps-lchartmenu button[data-chart]:not([disabled])');
+    await btn.click();
+    await page.waitForTimeout(1400);
+}
+const p38Two = await p38Geom();
+ok(p38Two.overlaps === 0 && p38Two.panels.length === 2,
+   'the two-column template starts as two panels, nothing overlapping');
+await p38AddChart();
+const p38Added = await p38Geom();
+ok(p38Added.panels.length === 3, 'the added panel arrived');
+ok(p38Added.overlaps === 0,
+   'and it is not sitting on anything (' + p38Added.overlaps + ' overlaps)');
+ok(p38Added.panels[2].y > p38Two.panels[0].y,
+   'it went below the row that was already there rather than into the ' +
+   'top-left corner (y ' + p38Added.panels[2].y + ' against ' +
+   p38Two.panels[0].y + ')');
+
+console.log('case 39: a new panel is the size of the panels already there');
+// The toolbar used a flat 460 while a four-panel template gives 392, so the
+// fifth panel of a 2 by 2 arrived as the odd one out and matching it was
+// hand work. Only the WIDTH is matched; height still comes from the chart's
+// own aspect, so the panel still contains its chart exactly.
+ok(p38Added.panels[2].w === p38Two.panels[0].w,
+   'the added panel matches the template width (' + p38Added.panels[2].w +
+   ' against ' + p38Two.panels[0].w + ')');
+const p39Aspect = Math.abs(p38Added.panels[2].w / p38Added.panels[2].h -
+    p38Two.panels[0].w / p38Two.panels[0].h);
+ok(p39Aspect < 0.02,
+   'and keeps the chart aspect rather than copying a height (off by ' +
+   p39Aspect.toFixed(4) + ')');
+
+console.log('case 40: a full page grows, says so, and undoes in one step');
+await page.evaluate(() => window.PS_SHELL.showLayoutGallery());
+await page.waitForTimeout(500);
+await page.click('[data-layout-template="four"]');
+await page.waitForTimeout(300);
+await page.click('[data-layout-create], #ps-layout-gallery-create');
+await page.waitForTimeout(3500);
+const p40Before = await p38Geom();
+ok(p40Before.overlaps === 0 && p40Before.panels.length === 4,
+   'a four-panel template fills the page with nothing overlapping');
+await p38AddChart();
+const p40After = await p38Geom();
+ok(p40After.overlaps === 0,
+   'the fifth panel still lands clear of the other four (' +
+   p40After.overlaps + ' overlaps)');
+ok(p40After.pageH > p40Before.pageH,
+   'the page grew to hold it (' + p40Before.pageH + ' to ' +
+   p40After.pageH + ')');
+ok(await page.evaluate(() => {
+       const t = document.getElementById('ps-toast');
+       return !!t && /page grew/i.test(t.textContent || '');
+   }), 'and said so rather than resizing the figure silently');
+ok(p40After.depth === p40Before.depth + 1,
+   'the add and the growth are one history entry (' + p40Before.depth +
+   ' to ' + p40After.depth + ')');
+await page.evaluate(() => window.PS_SHELL.setWorkspace('layout'));
+await page.waitForTimeout(300);
+await page.evaluate(() => document.getElementById('ps-lviewport').focus());
+// ONE press. The router accepts either modifier, so pressing both fired undo
+// twice and the assertion below claimed one had done the work; it passed only
+// because the second press found an empty stack.
+await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z');
+await page.waitForTimeout(900);
+const p40Undone = await p38Geom();
+ok(p40Undone.panels.length === 4 && p40Undone.pageH === p40Before.pageH,
+   'and one undo takes back both the panel and the height (' +
+   p40Undone.panels.length + ' panels, page ' + p40Undone.pageH + ')');
+
+console.log('case 41: Send to layout places the same way Add chart does');
+// Sending two charts to an empty layout used to stack them down the page and
+// grow it into a tall strip, while the toolbar put them side by side, so the
+// same two charts made two different figures depending on the route in.
+async function p41Send(actionKey) {
+    await page.evaluate(() => window.PS_SHELL.setWorkspace('chart'));
+    await page.waitForTimeout(1500);
+    const o = await page.evaluate(() => {
+        const r = document.querySelector('.graphbuilder2-host')
+            .getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    });
+    await page.mouse.click(o.x, o.y, { button: 'right' });
+    await page.waitForTimeout(500);
+    await page.click('#ps-contextmenu button[data-context-action="chart-send"]');
+    await page.waitForTimeout(500);
+    await page.click('#ps-contextmenu button[data-context-action="' +
+        actionKey + '"]');
+    await page.waitForTimeout(1800);
+}
+await p41Send('chart-to-new');
+const p41Layout = await page.evaluate(() => {
+    const ls = window.PS_SHELL.charts().filter(c => c.type === 'layout');
+    return ls[ls.length - 1].id;
+});
+const p41Charts = await page.evaluate(() =>
+    window.PS_SHELL.charts().filter(c => c.type !== 'layout').map(c => c.id));
+await page.evaluate(id => window.PS_SHELL.switchChart(id), p41Charts[1]);
+await page.waitForTimeout(1200);
+await p41Send('chart-to-' + p41Layout);
+const p41Sent = await page.evaluate(id => {
+    const c = window.PS_SHELL.charts().find(x => x.id === id);
+    const p = c.items.filter(i => i.kind === 'chart');
+    return { n: p.length, pageH: c.page.h, preset: c.page.preset,
+             a: p[0], b: p[1] };
+}, p41Layout);
+ok(p41Sent.n === 2, 'both charts arrived (' + p41Sent.n + ')');
+ok(p41Sent.b.y === p41Sent.a.y && p41Sent.b.x > p41Sent.a.x,
+   'the second sits beside the first rather than under it (' +
+   p41Sent.a.x + ',' + p41Sent.a.y + ' then ' + p41Sent.b.x + ',' + p41Sent.b.y + ')');
+ok(p41Sent.b.w === p41Sent.a.w,
+   'at the same width (' + p41Sent.a.w + ' and ' + p41Sent.b.w + ')');
+ok(p41Sent.preset !== 'custom',
+   'and the page did not have to grow to hold them (' + p41Sent.preset +
+   ', ' + p41Sent.pageH + ')');
+
+console.log('case 42: the file wraps in the weight the item actually is');
+// layoutTextNode has passed a font to wrapCaptionLines since the caption fix
+// landed, and wrapCaptionLines took three arguments, so the fourth was
+// dropped on the floor and the file wrapped in the UI font stack at weight
+// 400 while declaring sans-serif at the item's real weight. Headless
+// Chromium resolves both stacks to the same face, which is exactly why case
+// 37 agreed; a Mac resolves them to San Francisco and Helvetica. Weight is
+// the half that shows up here, because the same caption in 700 has to break
+// earlier than in 400.
+// Case 41 left a CHART tab active, so this makes its own layout and its own
+// caption rather than reaching for whatever was last on screen.
+await page.evaluate(() => window.PS_SHELL.setWorkspace('layout'));
+await page.waitForTimeout(500);
+await page.evaluate(() => window.PS_SHELL.showLayoutGallery());
+await page.waitForTimeout(500);
+await page.click('[data-layout-template="single"]');
+await page.waitForTimeout(300);
+await page.click('[data-layout-create], #ps-layout-gallery-create');
+await page.waitForTimeout(3200);
+const p42Weight = await page.evaluate(async () => {
+    const c = window.PS_SHELL.chart();
+    c.items.push({ id: 'i70', kind: 'text', fontSize: 13, x: 60, y: 500,
+        text: 'Figure 1. Scores by condition, with ninety five per cent ' +
+              'confidence intervals and individual observations shown.' });
+    const t = c.items[c.items.length - 1];
+    t.rotate = 0;
+    const readAt = async (bold) => {
+        t.bold = bold;
+        window.PS_SHELL.selectLayoutItems([]);
+        await new Promise(r => setTimeout(r, 500));
+        const svg = (await window.PS_SHELL.exportSource({ format: 'svg' })).svg;
+        const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
+        let hit = null;
+        doc.querySelectorAll('text').forEach(x => {
+            if (/Figure 1\./.test(x.textContent)) hit = x;
+        });
+        const sp = [...hit.querySelectorAll('tspan')].map(x => x.textContent);
+        return { first: sp[0], lines: sp.length,
+                 weight: hit.getAttribute('font-weight') };
+    };
+    const plain = await readAt(false);
+    const heavy = await readAt(true);
+    t.bold = false;
+    window.PS_SHELL.selectLayoutItems([]);
+    await new Promise(r => setTimeout(r, 300));
+    return { plain: plain, heavy: heavy };
+});
+ok(p42Weight.heavy.weight === '700' && p42Weight.plain.weight === '400',
+   'the file declares the weight it was asked for');
+ok(p42Weight.heavy.first !== p42Weight.plain.first,
+   'and wraps in it, so bold breaks its first line earlier ("' +
+   p42Weight.heavy.first + '" against "' + p42Weight.plain.first + '")');
+ok(p42Weight.heavy.lines >= p42Weight.plain.lines,
+   'taking at least as many lines to do it (' + p42Weight.heavy.lines +
+   ' against ' + p42Weight.plain.lines + ')');
+
+console.log('case 43: a page has a maximum, and the toast knows it');
+// Growth used to be written straight into page.h. layNormalizeLayout clamps
+// it to 4000, so asking for more produced a toast promising the page had
+// grown over a panel that layClampAllItems had just pulled back on top of
+// the figure.
+await page.evaluate(() => window.PS_SHELL.setWorkspace('layout'));
+await page.waitForTimeout(400);
+await page.evaluate(() => window.PS_SHELL.showLayoutGallery());
+await page.waitForTimeout(500);
+await page.click('[data-layout-template="single"]');
+await page.waitForTimeout(300);
+await page.click('[data-layout-create], #ps-layout-gallery-create');
+await page.waitForTimeout(3200);
+await page.evaluate(() => {
+    // A page close to the maximum with one panel filling it, WIDTH included,
+    // so the next add cannot fit anywhere. A tall narrow panel leaves a clear
+    // column beside it and the placement quite correctly uses it.
+    const c = window.PS_SHELL.chart();
+    c.page.h = 3900; c.page.preset = 'custom';
+    const p = c.items.filter(i => i.kind === 'chart')[0];
+    p.x = 32; p.y = 32; p.w = 944; p.h = 3700;
+    window.PS_SHELL.selectLayoutItems([]);
+});
+await page.waitForTimeout(700);
+await p38AddChart();
+const p43 = await page.evaluate(() => ({
+    pageH: window.PS_SHELL.chart().page.h,
+    toast: (document.getElementById('ps-toast') || {}).textContent || ''
+}));
+ok(p43.pageH <= 4000,
+   'the page stops at its maximum rather than being written past it (' +
+   p43.pageH + ')');
+ok(/at its largest/.test(p43.toast) && !/grew to fit/.test(p43.toast),
+   'and the message says that instead of claiming the page grew ("' +
+   p43.toast.trim() + '")');
+
+console.log('case 44: a pasted paragraph is measured, not guessed');
+// The old estimate counted characters on the longest LOGICAL line and never
+// wrapped, so a pasted paragraph measured about 21 px tall against the 284 px
+// it renders, and the placement dropped it straight onto a panel.
+//
+// The reload is not decoration. The layout's own cut and paste clipboard is a
+// session variable and takes priority over the system one, so once case 33
+// has copied a group the document paste handler correctly stands down for the
+// rest of the run. A reload empties it and the project reloads from storage.
+await page.reload();
+await page.waitForTimeout(2500);
+await page.evaluate(() => window.PS_SHELL.setWorkspace('layout'));
+await page.waitForTimeout(600);
+await page.evaluate(() => window.PS_SHELL.showLayoutGallery());
+await page.waitForTimeout(500);
+await page.click('[data-layout-template="two-columns"]');
+await page.waitForTimeout(300);
+await page.click('[data-layout-create], #ps-layout-gallery-create');
+await page.waitForTimeout(3200);
+const p44 = await page.evaluate(async () => {
+    const words = ('Participants in the treatment condition reported ' +
+        'consistently higher scores across every session, and the ' +
+        'difference held after adjusting for baseline. ').repeat(4);
+    const dt = new DataTransfer();
+    dt.setData('text/plain', words);
+    document.dispatchEvent(new ClipboardEvent('paste', {
+        clipboardData: dt, bubbles: true, cancelable: true }));
+    await new Promise(r => setTimeout(r, 900));
+    const c = window.PS_SHELL.chart();
+    const t = c.items.filter(i => i.kind === 'text').pop();
+    if (!t) return { pasted: false };
+    const node = document.querySelector(
+        '#ps-lcanvas .ps-litem[data-item-id="' + t.id + '"]');
+    const cv = document.getElementById('ps-lcanvas').getBoundingClientRect();
+    const z = cv.width / c.page.w;
+    const nb = node.getBoundingClientRect();
+    const box = { x: t.x, y: t.y, w: nb.width / z, h: nb.height / z };
+    let hits = 0;
+    for (const p of c.items.filter(i => i.kind === 'chart'))
+        if (box.x < p.x + p.w && box.x + box.w > p.x &&
+            box.y < p.y + p.h && box.y + box.h > p.y) hits++;
+    return { pasted: true, box: box, hits: hits, pageH: c.page.h,
+             bottom: box.y + box.h,
+             toast: (document.getElementById('ps-toast') || {}).textContent || '' };
+});
+ok(p44.pasted, 'the paste produced a text item');
+ok(p44.box.h > 100,
+   'a wrapped paragraph is a tall box, and the placement knows it (' +
+   Math.round(p44.box.h) + ' px)');
+ok(p44.hits === 0,
+   'so it does not land on a panel (' + p44.hits + ' overlaps)');
+ok(p44.bottom <= p44.pageH + 1,
+   'and it fits on the page it landed on (' + Math.round(p44.bottom) +
+   ' against ' + p44.pageH + ')');
+
+console.log('case 45: bringing a new item into view moves only the canvas');
+// scrollIntoView negotiates with every scrolling ancestor, and the workspace
+// pane is one, so showing the new item also slid the toolbar out from under
+// the pointer. Measured with scrollIntoView restored, this window and this
+// zoom: the pane went 0 to 33 and the toolbar's top went 132 to 99.
+//
+// The window shrinks for this case because a tall one leaves the workspace
+// pane unscrollable, and a test of what a scroll does needs something that
+// can scroll. It is restored afterwards.
+await page.setViewportSize({ width: 1440, height: 620 });
+await page.waitForTimeout(500);
+await page.evaluate(() => {
+    const c = window.PS_SHELL.chart();
+    c.view.zoom = '2';
+    window.PS_SHELL.selectLayoutItems([]);
+});
+await page.waitForTimeout(800);
+const p45Read = () => page.evaluate(() => {
+    const ws = document.querySelector('.ps-main-workspace');
+    const tb = document.getElementById('ps-ltoolbar');
+    return { ws: ws ? ws.scrollTop : 0,
+             scrollable: ws ? ws.scrollHeight > ws.clientHeight : false,
+             vp: document.getElementById('ps-lviewport').scrollTop,
+             toolbar: tb ? Math.round(tb.getBoundingClientRect().top) : 0 };
+});
+const p45Before = await p45Read();
+ok(p45Before.scrollable,
+   'the workspace pane can scroll, so this case is testing something');
+await p38AddChart();
+const p45After = await p45Read();
+ok(p45After.ws === p45Before.ws,
+   'the workspace pane did not move (' + p45Before.ws + ' to ' +
+   p45After.ws + ')');
+ok(p45After.toolbar === p45Before.toolbar,
+   'so the toolbar stayed where the pointer left it (' + p45Before.toolbar +
+   ' to ' + p45After.toolbar + ')');
+ok(p45After.vp !== p45Before.vp,
+   'while the canvas viewport did move, so the item was actually brought ' +
+   'into view (' + p45Before.vp + ' to ' + p45After.vp + ')');
+await page.setViewportSize({ width: 1500, height: 1000 });
+await page.waitForTimeout(500);
+
+console.log('case 46: a figure of kept pages sets the width for a chart too');
+// A layout built entirely from Notebook pages carries image items and no
+// chart panel, and those ARE its panels, so a chart added beside them took
+// the flat 460 and did not match anything.
+await page.evaluate(() => window.PS_SHELL.addLayout());
+await page.waitForTimeout(1200);
+await page.evaluate(() => {
+    // Injected rather than dropped through the file picker, which a probe
+    // cannot drive. Only the kind and the width matter here.
+    const c = window.PS_SHELL.chart();
+    c.items.push({ id: 'i90', kind: 'image', natW: 720, natH: 480,
+                   src: 'data:image/svg+xml;base64,' +
+                        btoa('<svg xmlns="http://www.w3.org/2000/svg" ' +
+                             'width="720" height="480"></svg>'),
+                   x: 32, y: 32, w: 360, h: 240 });
+    c.items.push({ id: 'i91', kind: 'image', natW: 720, natH: 480,
+                   src: 'data:image/svg+xml;base64,' +
+                        btoa('<svg xmlns="http://www.w3.org/2000/svg" ' +
+                             'width="720" height="480"></svg>'),
+                   x: 420, y: 32, w: 360, h: 240 });
+    window.PS_SHELL.selectLayoutItems([]);
+});
+await page.waitForTimeout(700);
+await p38AddChart();
+const p46 = await page.evaluate(() => {
+    const c = window.PS_SHELL.chart();
+    const ch = c.items.filter(i => i.kind === 'chart');
+    return { w: ch.length ? ch[ch.length - 1].w : null, n: ch.length };
+});
+ok(p46.n === 1 && p46.w === 360,
+   'the chart panel takes the width the kept pages are using (' +
+   p46.w + ' against 360)');
 
 ok(errors.length === 0, 'no page errors (' + errors.join(' | ') + ')');
 console.log('\nlayout-figure-check: all cases passed');

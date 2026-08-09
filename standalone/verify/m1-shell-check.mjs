@@ -1958,7 +1958,10 @@ await page.waitForTimeout(400);
     });
     ok(lExact.x === 90 && lExact.shown === '90',
        'exact coordinates and Alt+Shift+arrow nudging stay synchronized');
-    // Drag chart 2's panel to a clear spot (pointer path, item follows).
+    // Drag chart 1's panel to a clear spot (pointer path, item follows).
+    // i1 rather than i2 because placement now packs the two panels across the
+    // content width, and the right-hand one has 38 px of travel before the
+    // page edge clamps it, which would test the clamp instead of the drag.
     async function itemRect(id) {
         return await page.evaluate((id) => {
             const r = document.querySelector(
@@ -1967,20 +1970,20 @@ await page.waitForTimeout(400);
         }, id);
     }
     const beforeDrag = await page.evaluate(() => {
-        const it = window.PS_SHELL.chart().items.find(i => i.kind === 'chart' && i.id === 'i2');
+        const it = window.PS_SHELL.chart().items.find(i => i.kind === 'chart' && i.id === 'i1');
         return { x: it.x, y: it.y };
     });
-    let r2 = await itemRect('i2');
+    let r2 = await itemRect('i1');
     await page.mouse.move(r2.x + 40, r2.y + 12);
     await page.mouse.down();
     await page.mouse.move(r2.x + 40 + 60, r2.y + 12 + 300, { steps: 6 });
     await page.mouse.up();
     await page.waitForTimeout(200);
     const l4 = await page.evaluate((was) => {
-        const it = window.PS_SHELL.chart().items.find(i => i.id === 'i2');
+        const it = window.PS_SHELL.chart().items.find(i => i.id === 'i1');
         const saved = JSON.parse(localStorage.getItem('psstandalone.project.v2'));
         const savedIt = saved.charts.find(c => c.type === 'layout')
-            .items.find(i => i.id === 'i2');
+            .items.find(i => i.id === 'i1');
         return { dx: it.x - was.x, dy: it.y - was.y,
                  persisted: savedIt.x === it.x && savedIt.y === it.y };
     }, beforeDrag);

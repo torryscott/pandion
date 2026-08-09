@@ -3257,11 +3257,14 @@
       w: size.w, h: size.h + capH
     };
   }
-  function wrapCaptionLines(textStr, maxW, fontSize) {
+  function wrapCaptionLines(textStr, maxW, fontSize, font) {
     var cv = document.createElement("canvas");
     var ctx = cv.getContext("2d");
-    ctx.font = fontSize + "px -apple-system, 'Segoe UI', Roboto, " +
-      "Helvetica, Arial, sans-serif";
+    // font is optional and defaults to the UI stack, so the two callers that
+    // measure UI text are unchanged. Layout text passes the family and weight
+    // it actually declares.
+    ctx.font = font || (fontSize + "px -apple-system, 'Segoe UI', Roboto, " +
+      "Helvetica, Arial, sans-serif");
     var out = [];
     var paragraphs = String(textStr).split(/\r?\n/);
     for (var pI = 0; pI < paragraphs.length; pI++) {
@@ -5952,18 +5955,18 @@
     // history, so the next undo there removed the sent page AND reverted
     // whatever the user had done before it, in one unlabelled move.
     laySnapshotDoc(doc, "send to layout");
-    var margin = (doc.page && doc.page.margin) || 32;
-    var contentW = Math.max(160, (doc.page.w || 1008) - margin * 2);
+    layNormalizeLayout(doc);
+    var margin = doc.page.margin;
+    var contentW = Math.max(160, doc.page.w - margin * 2);
     var w = Math.min(pin.w || contentW, contentW);
     var h = Math.round((pin.h || w) * (w / (pin.w || w)));
-    var items = doc.items || (doc.items = []);
-    var mx = 0, y = margin;
+    var items = doc.items;
+    var mx = 0;
     for (var j = 0; j < items.length; j++) {
       var m2 = /^i(\d+)$/.exec(items[j].id || "");
       if (m2) mx = Math.max(mx, Number(m2[1]));
-      var bot = (Number(items[j].y) || 0) + (Number(items[j].h) || 0);
-      if (bot + 14 > y) y = bot + 14;
     }
+    var spot = layPlaceRect(items, doc.page, w, h);
     items.push({ id: "i" + (mx + 1), kind: "image", src: pin.src,
                  natW: pin.natW, natH: pin.natH,
                  srcChart: pin.srcChart || undefined,
@@ -5976,15 +5979,17 @@
                  srcName: pin.srcName || undefined,
                  srcSig: pin.srcSig || undefined,
                  keptAt: pin.at || undefined,
-                 x: margin, y: y, w: w, h: h });
-    if (y + h + margin > doc.page.h) {
-      doc.page.h = y + h + margin;
+                 x: spot.x, y: spot.y, w: w, h: h });
+    var grew = spot.needH > doc.page.h;
+    if (grew) {
+      doc.page.h = Math.min(LAY_PAGE_MAX, Math.round(spot.needH));
       doc.page.preset = "custom";
     }
     persist(); syncAll();
     if (activeChart().id === doc.id && appWorkspace() === "layout")
       renderLayout();
-    showActionToast("Sent to " + doc.name, "Open", function () {
+    showActionToast("Sent to " + doc.name +
+      (grew ? " \u00b7 the page grew to fit it" : ""), "Open", function () {
       switchChart(doc.id);
     });
   }
@@ -6518,28 +6523,30 @@
     if (!c || isLayoutTab(c) || !doc || !isLayoutTab(doc)) return;
     // See addPinToLayout. The send is one step, page growth included.
     laySnapshotDoc(doc, "send to layout");
-    var margin = (doc.page && doc.page.margin) || 32;
-    var contentW = Math.max(160, (doc.page.w || 1008) - margin * 2);
-    var w = Math.min(460, contentW);
+    layNormalizeLayout(doc);
+    var items = doc.items;
+    // The same placement and the same size as the toolbar's Add chart. Two
+    // ways of putting a chart into a figure produced two different figures.
+    var w = layPanelWidthFor(items, doc.page);
     var h = Math.round(w / layChartAspect(chartId));   // see layAddChart
-    var items = doc.items || (doc.items = []);
-    var mx = 0, y = margin;
+    var mx = 0;
     for (var j = 0; j < items.length; j++) {
       var m2 = /^i(\d+)$/.exec(items[j].id || "");
       if (m2) mx = Math.max(mx, Number(m2[1]));
-      var bot = (Number(items[j].y) || 0) + (Number(items[j].h) || 0);
-      if (bot + 14 > y) y = bot + 14;
     }
+    var spot = layPlaceRect(items, doc.page, w, h);
+    var grew = spot.needH > doc.page.h;
     items.push({ id: "i" + (mx + 1), kind: "chart", chartId: chartId,
-                 x: margin, y: y, w: w, h: h });
-    if (y + h + margin > doc.page.h) {
-      doc.page.h = y + h + margin;
+                 x: spot.x, y: spot.y, w: w, h: h });
+    if (grew) {
+      doc.page.h = Math.min(LAY_PAGE_MAX, Math.round(spot.needH));
       doc.page.preset = "custom";
     }
     persist(); syncAll();
     if (activeChart().id === doc.id && appWorkspace() === "layout")
       renderLayout();
-    showActionToast("Sent to " + doc.name, "Open", function () {
+    showActionToast("Sent to " + doc.name +
+      (grew ? " \u00b7 the page grew to fit it" : ""), "Open", function () {
       switchChart(doc.id);
     });
   }
@@ -13662,11 +13669,17 @@
       var txt = cd.getData("text/plain");
       if (txt && txt.trim()) {
         e.preventDefault();
-        var pos = layStagger();
-        layAddItem({ id: layNewItemId(), kind: "text",
-          text: txt.trim().slice(0, 2000), x: pos.x, y: pos.y,
-          w: 260, h: 60, size: 14 });
-        showToast("Text pasted \u00b7 drag to place");
+        var pasted = { id: layNewItemId(), kind: "text",
+          text: txt.trim().slice(0, 2000), x: 0, y: 0,
+          w: 260, h: 60, size: 14 };
+        var pspot = layPlaceText(pasted);
+        var pgrew = pspot.needH > layPage().h;
+        pasted.x = pspot.x; pasted.y = pspot.y;
+        layAddItem(pasted, false, pspot.needH);
+        // A paste can grow the page like any other add, and said nothing.
+        showToast("Text pasted \u00b7 " + (pspot.capped
+          ? "the page is at its largest, so drag it clear"
+          : pgrew ? "the page grew to fit it" : "drag to place"));
         return;
       }
       showToast("Paste an image or text - other clipboard content is not " +
@@ -16202,6 +16215,10 @@
     letterl: { w: 1056, h: 816 },
     letterp: { w: 816, h: 1056 }
   };
+  // The one page maximum. layPlaceRect caps what it asks for against it and
+  // layNormalizeLayout enforces it, so a growth that would have gone past it
+  // can no longer be promised in a toast and then quietly clamped away.
+  var LAY_PAGE_MAX = 4000;
   function layClamp(n, lo, hi) {
     n = Number(n);
     if (!isFinite(n)) n = lo;
@@ -16214,8 +16231,8 @@
     if (!c.view || typeof c.view !== "object") c.view = {};
     c.page.preset = LAY_PRESETS[c.page.preset] ? c.page.preset :
       (c.page.preset === "custom" ? "custom" : "canvas");
-    c.page.w = Math.round(layClamp(c.page.w || 1024, 320, 4000));
-    c.page.h = Math.round(layClamp(c.page.h || 680, 240, 4000));
+    c.page.w = Math.round(layClamp(c.page.w || 1024, 320, LAY_PAGE_MAX));
+    c.page.h = Math.round(layClamp(c.page.h || 680, 240, LAY_PAGE_MAX));
     c.page.margin = Math.round(layClamp(c.page.margin == null ? 32 : c.page.margin,
                                        0, Math.min(c.page.w, c.page.h) / 3));
     var z = c.view.zoom;
@@ -16527,22 +16544,161 @@
   // the new item was selected but every Space press activated that button
   // again and added another one, Enter did the same, and F2 renamed the
   // DOCUMENT instead of editing the text that had just appeared.
-  function layAddItem(item, keepFocus) {
+  function layAddItem(item, keepFocus, needH) {
     laySnapshot("add");
+    // Growing the page is part of the same step, so one undo takes back the
+    // item AND the height, the way Send to layout already worked.
+    var p = layPage();
+    if (needH > p.h) {
+      p.h = Math.min(LAY_PAGE_MAX, Math.round(needH));
+      p.preset = "custom";
+    }
     layItems().push(item);
     laySetSelection([item.id]);
     layClampAllItems();
     persist();
     renderLayout();
+    layScrollItemIntoView(item.id);
     if (!keepFocus) layFocusViewport();
     return item.id;
   }
-  function layStagger() {
-    var n = layItems().length, p = layPage();
-    return {
-      x: Math.min(Math.max(12, p.w - 140), 24 + (n % 6) * 26),
-      y: Math.min(Math.max(12, p.h - 90), 24 + (n % 6) * 22)
-    };
+  // Where a new item lands.
+  //
+  // There were three rules. The toolbar cascaded from the top-left corner
+  // and wrapped every sixth item, so an added chart covered panel A and a
+  // seventh landed exactly on the first; Send to layout stacked below
+  // everything and grew the page; a pasted image did its own variant of the
+  // cascade. Covering work you can already see is the worst of those, so
+  // there is one rule now and it is the reading order of a figure. Take the
+  // first clear space going left to right and top to bottom, and when the
+  // page is full go below the last item and grow the page, which is what
+  // Send to layout always did.
+  //
+  // Candidate edges are the page margin, every item's left or top, and every
+  // item's right or bottom plus the template's own gutter. The left and top
+  // edges are what make a new panel land in a template's empty cell aligned
+  // with the column above it rather than merely next to its neighbour. A
+  // template panel is fitted to its chart and centred in its cell, so its
+  // left edge is nowhere near its neighbour's right edge plus a gutter.
+  var LAY_PLACE_GAP = 18;
+  function layPlaceRect(items, page, w, h) {
+    var margin = Number(page.margin) || 0, gap = LAY_PLACE_GAP;
+    var taken = [], xs = [margin], ys = [margin], i, j, k;
+    for (i = 0; i < items.length; i++) {
+      var r = layItemRect(items[i]);
+      if (!(r.w > 0) || !(r.h > 0)) continue;
+      taken.push(r);
+      xs.push(r.x, r.right + gap);
+      ys.push(r.y, r.bottom + gap);
+    }
+    function tidy(list) {
+      var out = [];
+      list.sort(function (a, b) { return a - b; });
+      for (var n = 0; n < list.length; n++)
+        if (list[n] >= 0 && out.indexOf(list[n]) === -1) out.push(list[n]);
+      return out;
+    }
+    xs = tidy(xs); ys = tidy(ys);
+    var limitX = page.w - margin, limitY = page.h - margin;
+    for (i = 0; i < ys.length; i++) {
+      if (ys[i] + h > limitY) continue;
+      for (j = 0; j < xs.length; j++) {
+        if (xs[j] + w > limitX) continue;
+        var clear = true;
+        for (k = 0; k < taken.length; k++) {
+          var t = taken[k];
+          if (xs[j] < t.right && xs[j] + w > t.x &&
+              ys[i] < t.bottom && ys[i] + h > t.y) { clear = false; break; }
+        }
+        if (clear) return { x: xs[j], y: ys[i], needH: page.h };
+      }
+    }
+    var below = margin;
+    for (i = 0; i < taken.length; i++)
+      below = Math.max(below, taken[i].bottom + gap);
+    var want = below + h + margin;
+    // A page has a maximum. Asking for more than it and then letting
+    // layNormalizeLayout clamp it produced a toast saying the page grew over
+    // a panel that had been pulled back on top of the figure.
+    return { x: margin, y: below, needH: Math.min(want, LAY_PAGE_MAX),
+             capped: want > LAY_PAGE_MAX };
+  }
+  // Text wraps at whichever is smaller, the 480 px cap or the room left on
+  // the page, so its height depends on where it lands while where it lands
+  // depends on its height. One extra pass settles it, because the second
+  // placement is measured at the width the first one produced.
+  function layPlaceText(item) {
+    var p = layPage(), items = layItems();
+    var box = layApproxTextRect(item);
+    var spot = layPlaceRect(items, p, box.w, box.h);
+    var room = Math.min(LAY_TEXT_MAX_W, p.w - spot.x);
+    if (room < LAY_TEXT_MAX_W) {
+      box = layApproxTextRect(item, room);
+      spot = layPlaceRect(items, p, box.w, box.h);
+    }
+    return spot;
+  }
+  // A new chart panel is the size of the panels already in the figure. The
+  // toolbar used a flat 460 while a four-panel template gives 392, so the
+  // fifth panel of a 2x2 arrived as the odd one out and matching it by hand
+  // was work the app could have saved. Width is what carries; height still
+  // comes from the chart's own aspect, so a panel contains its chart exactly.
+  function layPanelWidthFor(items, page) {
+    // Chart panels first. A figure built entirely from Notebook pages carries
+    // image items and no chart panel, and those ARE its panels, so they set
+    // the width when nothing else can. The floor keeps a logo or an inset
+    // from sizing a chart panel down to nothing.
+    var w = layCommonWidth(items, "chart", 0);
+    if (!w) w = layCommonWidth(items, "image", 160);
+    var cap = Math.max(160, (Number(page.w) || 1008) -
+      (Number(page.margin) || 0) * 2);
+    return Math.min(w || 460, cap);
+  }
+  function layCommonWidth(items, kind, floor) {
+    var counts = {}, best = 0, bestN = 0, i;
+    for (i = 0; i < items.length; i++) {
+      if (!items[i] || items[i].kind !== kind) continue;
+      var w = Math.round(Number(items[i].w) || 0);
+      if (!(w > floor)) continue;
+      var key = "w" + w;
+      counts[key] = (counts[key] || 0) + 1;
+      if (counts[key] > bestN || (counts[key] === bestN && w > best)) {
+        best = w; bestN = counts[key];
+      }
+    }
+    return bestN ? best : 0;
+  }
+  // The page growing is a change to the figure, not a side effect the user
+  // should have to notice, so every add path that can trigger it says so.
+  // capped is the page already being at its maximum, where the new item gets
+  // clamped back onto the figure and claiming the page grew would be a lie.
+  function layGrewNote(grew, capped) {
+    if (capped)
+      showToast("The page is already at its largest, so this landed on top " +
+        "of the figure. Drag it where you want it.");
+    else if (grew)
+      showToast("The page grew to fit the new item \u00b7 " +
+        "undo takes both back");
+  }
+  // Zoomed in, or on a page that just grew, the new item can be off screen.
+  // It is selected and the rail describes it, so not showing it is the one
+  // thing left that reads as nothing having happened.
+  //
+  // The VIEWPORT scrolls, nothing else. scrollIntoView negotiates with every
+  // scrolling ancestor, and the workspace pane is one, so bringing an item
+  // into view also slid the toolbar 33 px out from under the pointer.
+  function layScrollItemIntoView(id) {
+    var vp = el("ps-lviewport"), canvas = el("ps-lcanvas");
+    var node = canvas && canvas.querySelector(
+      '.ps-litem[data-item-id="' + id + '"]');
+    if (!vp || !node || !node.getBoundingClientRect) return;
+    var nb = node.getBoundingClientRect(), vb = vp.getBoundingClientRect();
+    if (!nb.height || !vb.height) return;
+    var pad = 16;
+    if (nb.bottom > vb.bottom - pad) vp.scrollTop += nb.bottom - vb.bottom + pad;
+    else if (nb.top < vb.top + pad) vp.scrollTop -= vb.top + pad - nb.top;
+    if (nb.right > vb.right - pad) vp.scrollLeft += nb.right - vb.right + pad;
+    else if (nb.left < vb.left + pad) vp.scrollLeft -= vb.left + pad - nb.left;
   }
   function layZoom() {
     var v = layView();
@@ -16874,13 +17030,38 @@
       layTextToggle("italic", "text italic");
     });
   }
-  function layApproxTextRect(item) {
+  var LAY_TEXT_CTX = null;
+  function layTextCtx() {
+    if (!LAY_TEXT_CTX) {
+      try {
+        LAY_TEXT_CTX = document.createElement("canvas").getContext("2d");
+      } catch (ignore) { LAY_TEXT_CTX = null; }
+    }
+    return LAY_TEXT_CTX;
+  }
+  // A text item's box, measured rather than guessed. The old version counted
+  // CHARACTERS on the longest logical line and did not wrap at all, so a
+  // pasted paragraph measured 21 px tall against the 284 px it renders, and
+  // the placement dropped it on a panel. This wraps with the same function
+  // the export uses, in the family, weight and cap the canvas declares, so
+  // the number agrees with the rendered box whether or not the layout is on
+  // screen. capW is the wrap width to measure at and defaults to the cap.
+  function layApproxTextRect(item, capW) {
     var fs = Math.max(8, Number(item.fontSize) || 14);
-    var lines = String(item.text || "Text").split(/\r?\n/);
-    var max = 1;
-    for (var i = 0; i < lines.length; i++) max = Math.max(max, lines[i].length);
-    return { w: Math.min(480, Math.max(18, max * fs * 0.61 + 8)),
-             h: Math.max(fs * 1.25 + 4, lines.length * fs * 1.25 + 4) };
+    var cap = Math.max(40, Math.min(LAY_TEXT_MAX_W,
+      Number(capW) || LAY_TEXT_MAX_W));
+    var font = (item.italic ? "italic " : "") +
+      (item.bold ? "700" : "400") + " " + fs + "px sans-serif";
+    var lines = wrapCaptionLines(String(item.text || "Text"),
+      cap - LAY_TEXT_PAD_X * 2, fs, font);
+    var ctx = layTextCtx(), wide = 0, i;
+    if (ctx) {
+      ctx.font = font;
+      for (i = 0; i < lines.length; i++)
+        wide = Math.max(wide, ctx.measureText(lines[i]).width);
+    } else wide = cap - LAY_TEXT_PAD_X * 2;
+    return { w: Math.min(cap, Math.max(18, wide + LAY_TEXT_PAD_X * 2)),
+             h: Math.max(1, lines.length) * fs * LAY_TEXT_LINE + 4 };
   }
   // Chart panels and images are both SIZED items (explicit w/h, corner
   // resize, proportional default); text items self-size.
@@ -17365,14 +17546,14 @@
       scale = Math.max(48 / natW, 48 / natH);
     var w = Math.max(1, Math.round(natW * scale));
     var h = Math.max(1, Math.round(natH * scale));
-    var pos = layStagger();
+    var spot = layPlaceRect(layItems(), page, w, h);
+    var grew = spot.needH > page.h;
     layAddItem({ id: layNewItemId(), kind: "image", src: src,
                  natW: natW, natH: natH,
-                 x: Math.min(pos.x, Math.max(0, page.w - w)),
-                 y: Math.min(pos.y, Math.max(0, page.h - h)),
-                 w: w, h: h });
+                 x: spot.x, y: spot.y, w: w, h: h }, false, spot.needH);
     showToast("Image added" + (note ? " \u00b7 " + note : "") +
-      " \u00b7 drag to place, corner to resize");
+      (grew ? " \u00b7 the page grew to fit it \u00b7 drag to place"
+            : " \u00b7 drag to place, corner to resize"));
   }
   function layMiniBar(item) {
     var bar = mkEl("div", "ps-lbar");
@@ -19087,21 +19268,28 @@
     m.style.top = Math.min(r.bottom + 3, window.innerHeight - 220) + "px";
   }
   function layAddChart(chartId) {
-    var pos = layStagger(), p = layPage();
+    var p = layPage(), items = layItems();
     // Height from the chart's own aspect, not a constant, so a placed panel
     // contains its chart exactly. 460 by 310 was 1.484 against the engine's
     // 1.469 and letterboxed by a few pixels from the moment it landed.
-    var w = Math.min(460, p.w - 48);
-    var h = Math.min(Math.round(w / layChartAspect(chartId)), p.h - 48);
+    var w = layPanelWidthFor(items, p);
+    var h = Math.round(w / layChartAspect(chartId));
+    var spot = layPlaceRect(items, p, w, h);
+    var grew = spot.needH > p.h;   // p.h is mutated by the add, so read first
     layAddItem({ id: layNewItemId(), kind: "chart", chartId: chartId,
-                 x: pos.x, y: pos.y, w: w, h: h });
+                 x: spot.x, y: spot.y, w: w, h: h }, false, spot.needH);
+    layGrewNote(grew, spot.capped);
     render();
   }
   function layAddText(text, fontSize, bold, edit) {
-    var pos = layStagger(), id = layNewItemId();
-    layAddItem({ id: id, kind: "text",
-                 text: text, fontSize: fontSize, bold: !!bold,
-                 x: pos.x, y: pos.y }, !!edit);
+    var id = layNewItemId();
+    var item = { id: id, kind: "text", text: text, fontSize: fontSize,
+                 bold: !!bold, x: 0, y: 0 };
+    var spot = layPlaceText(item);
+    var grew = spot.needH > layPage().h;
+    item.x = spot.x; item.y = spot.y;
+    layAddItem(item, !!edit, spot.needH);
+    layGrewNote(grew, spot.capped);
     // A new text box opens its editor with the placeholder selected, so the
     // caption you came to write is what typing produces.
     if (edit) layEditText(id);

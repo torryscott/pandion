@@ -393,6 +393,129 @@ measured width together.
 
 ---
 
+## 11. Three rules for where a new thing lands, and the loudest one covered your work
+
+**What a user feels.** They build a four-panel figure, decide it needs a
+fifth chart, and press Add chart. The new panel appears on top of panel A.
+They drag it out of the way. Later they send a chart across from the chart
+workspace instead, and that one goes somewhere else entirely, at a different
+size.
+
+**The evidence.** Measured on the code before the change.
+
+| route | where it landed | size |
+| --- | --- | --- |
+| Add chart on a two-column template | 128,112, across BOTH panels | 460 wide against the template's 463 |
+| Add chart on a full four-panel page | 76,68, across two panels, page unchanged, nothing said | 460 |
+| Send to layout, twice, into an empty layout | y 32 then y 359, page grown to 704 | 460 |
+
+Three functions, three answers. `layStagger()` cascaded from the top-left
+corner in steps of 26 by 22 and wrapped every sixth item, so the seventh
+thing you added landed exactly on the first. `addChartToLayout` and
+`addPinToLayout` stacked below everything and grew the page. `layPlaceImage`
+did a clamped variant of the cascade. The cascade is the one that hurts,
+because it deliberately starts where your work already is.
+
+**BUILT**, `layPlaceRect`. One rule, and it is the reading order of a figure.
+Take the first clear space going left to right and top to bottom; when the
+page is full, go below the last item and grow the page, which is what Send to
+layout always did. Candidate edges are the page margin, every item's left and
+top, and every item's right and bottom plus the 18 px gutter the templates
+use. The left and top edges are what make a new panel land in a template's
+empty cell aligned with the column above it. A template panel is fitted to
+its chart and centred in its cell, so its left edge is nowhere near its
+neighbour's right edge plus a gutter.
+
+Two things ride with it. A new chart panel takes the **most common width
+among the panels already in the figure**, so the fifth panel of a 2 by 2
+arrives at 392 rather than 460 and is already alignable; height still comes
+from the chart's own aspect, so the panel contains its chart exactly. And the
+page growth happens **inside the add's own history entry**, so one undo takes
+back both the panel and the height, with a toast that says the page grew.
+
+**Cost.** About 90 lines, replacing 8. Four probe cases. No new persisted
+state and no new option.
+
+**What the adversarial pass found.** Eight agents, four probe shards and four
+lenses. Two committed probes went from pass to fail, both on the placement
+change and both reproduced serially, and `run.sh` uses `set -e` so either
+would have closed the gate.
+
+- `m1-shell-check` drags a panel by 60 px and asserts the model moved by 60.
+  Two toolbar-added panels now sit side by side across the content width, and
+  the right-hand one has 38 px of travel before the page edge, so the case was
+  measuring a correct clamp. The drag moved to the panel with room.
+- `layout-arrange-check` right-clicks an item by hit-testing its centre. Every
+  toolbar-added text item now lands on one row, so the previous case's Align
+  left leaves two of them exactly stacked and the hit test is ambiguous by
+  construction. That case spreads them first. Aligning items that share a y
+  really does stack them, for the user too, which belongs to align.
+
+Four defects in the change itself, all fixed and all now covered.
+
+- Page growth was written straight into `page.h`. `layNormalizeLayout` clamps
+  at 4000, so asking past it toasted that the page had grown over an item that
+  had just been clamped back on top of the figure. There is one `LAY_PAGE_MAX`
+  now, the placement caps what it asks for against it, and a page already at
+  its largest says so instead.
+- A pasted paragraph measured 21 px tall against the 284 px it renders,
+  because the text estimate counted characters on the longest logical line and
+  never wrapped. It now measures through the same `wrapCaptionLines` the
+  export uses, in the family, weight and cap the canvas declares, so the
+  number is the same whether or not the layout is on screen. Paste also
+  discloses page growth, which it never did.
+- Bringing the new item into view used `scrollIntoView`, which negotiates with
+  every scrolling ancestor. Measured at 200 per cent in a 1440 by 620 window,
+  it scrolled the workspace pane 33 px and moved the toolbar from 132 to 99,
+  out from under the pointer. It scrolls the viewport itself now.
+- Width matching read only `kind === "chart"`, so a figure built entirely from
+  Notebook pages, which are image items, got the flat 460 and matched nothing.
+  Image panels set the width when there are no chart panels.
+
+**And one in the commit before it.** `layoutTextNode` has been passing a font
+to `wrapCaptionLines` since item 10, and `wrapCaptionLines` took three
+arguments, so the fourth went on the floor and the file wrapped in the UI font
+stack while declaring `sans-serif`. Headless Chromium resolves both to the
+same face, which is exactly why item 10's probe agreed; a Mac resolves them to
+San Francisco and Helvetica. Case 42 pins it through weight, where a bold
+caption has to break earlier than the same words in regular.
+
+---
+
+## 12. "Three panels" does not make the figure it advertises
+
+**What a user feels.** They pick the template whose picture shows a wide chart
+above two smaller ones, and get three identical panels, the top one floating
+in the middle of a lot of white.
+
+**The evidence.** The template's own words are "One wide chart above two
+supporting charts" and its preview draws the top bar more than twice the width
+of the two below. Measured output on the default 1008 by 672 page with panel
+letters on: all three panels 392 by 267, the top one at x 308 with 276 px of
+white either side, the two below at x 67 and x 548.
+
+The cause is arithmetic rather than a bug. A chart's aspect is fixed at 1.469,
+so a 267 px tall panel is 392 px wide no matter how wide its cell is, and the
+top cell's extra 552 px cannot be used. Before panels were fitted to their
+charts (item 5) the box was 944 wide and the ink was still 392, so this is
+what the template has always produced. Fitting only made the box honest.
+
+**Proposed.** Size the rows so the top panel spans the two below rather than
+splitting the height evenly. Solving for it on the default page gives a 388 px
+top row and a 202 px bottom row, which is a 529 by 360 panel over two 256 by
+174 panels whose combined width matches it, and the bottom pair positioned
+from the top panel's span rather than from the half cells.
+
+**Cost.** About 30 lines in `layoutTemplateRects` and
+`createLayoutFromTemplate`, plus a probe case. Templates run only at creation,
+so no saved figure changes.
+
+**Not built**, because it changes what a template produces and that is a
+design call rather than a defect fix.
+
+
+---
+
 # Free wins
 
 All five are in `cba8f8f`, all five were demonstrated failing first, all
