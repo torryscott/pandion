@@ -272,7 +272,7 @@ undo, and the toast now names the section it came out of.
 
 ## 6. A page whose source has drifted tells you, and then offers nothing
 
-**Judged, not built.** This one needs your ruling before code.
+**Built, after your ruling.** Keep an updated copy, append-only.
 
 **What a user feels.** The rail says "Chart 1 - has changed since it was
 kept." Good. Now what? There is no way to bring the page up to date. The
@@ -285,8 +285,8 @@ Nothing refreshes, updates or re-keeps. Item 1 above at least carries the
 verdict into the export, so a reader is warned, but the author still has no
 move.
 
-**Why I did not build it.** There are two defensible designs, and the choice
-is a product decision rather than an implementation one.
+**The two designs.** The choice was a product decision rather than an
+implementation one, so it went to you before any code.
 
 - **Refresh in place.** The page adopts the current chart, keeping its title,
   note and position, and the kept date updates. Cheap and obvious, but it
@@ -298,16 +298,37 @@ is a product decision rather than an implementation one.
   append-only. It grows the notebook, and the user has to delete the old page
   themselves if they did not want two.
 
-I recommend the second, with the first available from the same menu for the
-case where the drift was a typo in an axis title. Roughly half a day either
-way, since the composition and provenance code it needs already exists.
+You chose the second, which is the one I recommended.
 
-**Related, and cheaper.** The drift verdict currently lives only in the rail
-of the selected page, so scrolling the notebook shows nothing. The rail's
-page list now carries a dot per page (item 3) and the export carries the
-sentence (item 1), so the remaining gap is the page card itself. A line in
-the card footer would close it for about ten lines. I did not add it because
-it belongs with whatever you decide above.
+**The prototype.** "Keep an updated copy" appears in the rail and in the page
+menu, and only on a page whose source has actually moved on, because on a page
+that still matches it would offer a duplicate. It puts the chart as it is now
+into the notebook as a new page directly below the old one, carrying the note
+and the title forward, and both versions keep their own kept dates. The
+original still reads as drifted and the copy reads as current, so the record
+shows the change rather than hiding it. It is built from the same
+authoritative snapshot the freshness verdict was computed against, so it costs
+no re-render, and it is one click back through the toast or Cmd+Z.
+
+The verdict also moved onto the page card, which was the related gap. It lived
+only in the rail of the selected page, so scrolling a notebook showed nothing
+and a drifted page looked exactly like a current one. An amber chip in the card
+footer now says so, in the same colour the rail and the exported band use, so
+one fact has one look wherever it appears.
+
+**The cost.** `ps-shell.js` gains about 70 lines (`pinCanUpdate`,
+`pinKeepUpdatedCopy`, an optional chart argument on `pinProvenance`, the card
+chip), plus the rail button and its style. No engine change, no new persisted
+field. Probe `notebook-pages-check.mjs`, case 5c, 8 assertions. Half a day.
+
+**The smallest version.** The card chip alone, about ten lines, so a drifted
+page at least announces itself while you scroll. That leaves the author with
+no move, which is the actual complaint.
+
+**What it risks.** A notebook that grows when someone updates repeatedly. That
+is inherent to append-only and is the price of the property being bought. The
+old page is one Delete away, and the undo removes the copy rather than the
+original if the click was a mistake.
 
 ---
 
@@ -329,7 +350,21 @@ Small, already built, and approving them is a formality.
 - **`window.PS_SHELL.notebookHistory()`** joins `layoutHistoryDepth()` on the
   probe surface, so what Cmd+Z would do is inspectable.
 
-## Needs a decision
+## Decided
+
+All four went to Torry and all four came back as the recommendation.
+
+1. **Drift action.** Keep an updated copy, append-only. Built, item 6 above.
+2. **The drift warning stays in the exported record.** The rail already says
+   it, and an export that hides it is less honest than one that does not.
+3. **"Move to section" stays off the page card.** The card's four verbs
+   already wrap at low zoom, and the section is a property of where a page
+   lives rather than something you do to the page as an object. It remains in
+   the page menu and the rail.
+4. **Copy image stays bare.** Copy is aimed at slides, where a page number and
+   a kept date are noise. Export is where the record belongs.
+
+## The reasoning behind those four, kept
 
 1. **Does the drift warning belong in the exported record?** It rides the
    band today. It is true and it is what a reader needs. But someone who
@@ -411,7 +446,7 @@ Branch `probe/notebook-deepdive`. Three probes added, all wired into
 | Probe | Cases | Demonstrated failing first |
 | --- | --- | --- |
 | `notebook-record-check.mjs` | 7 cases, 17 assertions | Yes. On the unchanged code it fails at case 1, because the option does not exist. The content assertion was proved separately by exporting the same annotated notebook on both revisions. The note is absent before and present after, and the page height goes from 368 to 428. |
-| `notebook-pages-check.mjs` | 8 cases, 22 assertions | Yes, at case 1, because no page rows exist in the rail. Case 6, the undo-scope defect, was also demonstrated independently in the running app before the fix (the b1 and b2 trace in item 5). |
+| `notebook-pages-check.mjs` | 9 cases, 30 assertions | Yes, at case 1, because no page rows exist in the rail. Case 6, the undo-scope defect, was also demonstrated independently in the running app before the fix (the b1 and b2 trace in item 5). |
 | `notebook-undo-check.mjs` | 6 cases, 26 assertions | Yes, at case 1, with exactly the symptom. The Edit menu reads "Undo chart styling" with the Notebook on screen. |
 
 ### What run.sh does on this branch
