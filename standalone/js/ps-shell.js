@@ -5925,6 +5925,11 @@
       if (everything[i].pin.id === pinId) pin = everything[i].pin;
     var doc = chartById(layoutId);
     if (!pin || !doc || !isLayoutTab(doc)) return;
+    // One step for the whole send. It adds an item and can also grow the page
+    // and flip its preset to custom, and none of that was in the layout's
+    // history, so the next undo there removed the sent page AND reverted
+    // whatever the user had done before it, in one unlabelled move.
+    laySnapshotDoc(doc, "send to layout");
     var margin = (doc.page && doc.page.margin) || 32;
     var contentW = Math.max(160, (doc.page.w || 1008) - margin * 2);
     var w = Math.min(pin.w || contentW, contentW);
@@ -6489,6 +6494,8 @@
   function addChartToLayout(chartId, layoutId) {
     var c = chartById(chartId), doc = chartById(layoutId);
     if (!c || isLayoutTab(c) || !doc || !isLayoutTab(doc)) return;
+    // See addPinToLayout. The send is one step, page growth included.
+    laySnapshotDoc(doc, "send to layout");
     var margin = (doc.page && doc.page.margin) || 32;
     var contentW = Math.max(160, (doc.page.w || 1008) - margin * 2);
     var w = Math.min(460, contentW);
@@ -17169,6 +17176,28 @@
       items: c.items || [], page: c.page || {},
       sel: Array.isArray(LAYOUT_SEL) ? LAYOUT_SEL : []
     });
+  }
+  // The send-to-layout paths mutate a layout while a DIFFERENT document is on
+  // screen, so they cannot use laySnapshot, which is bound to the active
+  // chart. Same push, aimed at a named document.
+  //
+  // The stored selection is that document's only when it is the one on
+  // screen. LAYOUT_SEL belongs to whatever layout the user is actually
+  // looking at, and restoring it into a different one would come back with
+  // the wrong things selected.
+  function laySnapshotDoc(doc, label) {
+    var h = layHist(doc);
+    if (!h) return;
+    layNormalizeLayout(doc);
+    var live = activeChart();
+    var sel = live && live.id === doc.id && Array.isArray(LAYOUT_SEL)
+      ? LAYOUT_SEL : [];
+    h.undo.push({ label: label || "change",
+                  state: JSON.stringify({ items: doc.items || [],
+                                          page: doc.page || {}, sel: sel }) });
+    if (h.undo.length > LAYOUT_HIST_LIMIT) h.undo.shift();
+    h.redo.length = 0;
+    LAY_COALESCE = null;
   }
   // Call BEFORE the mutation. A coalesceKey folds a burst of the same small
   // action (arrow-key nudges, a run of clicks on the font-size stepper) into

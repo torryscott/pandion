@@ -302,6 +302,61 @@ ok(meta.phys.unit === 1 && Math.round(meta.phys.ppu * 0.0254) === 300,
 ok(meta.jfifUnits === 1 && meta.jfifX === 300 && meta.jfifY === 300,
    'and the JPEG says 300 dpi in its JFIF header');
 
+console.log('case 11: sending something to a layout is one undoable step');
+// Found by an adversarial auditor after the Notebook dive was merged in, and
+// reproduced from the menu. Send to layout adds an item and can ALSO grow the
+// page and flip its preset to custom, and none of it reached the layout's
+// history. The next Cmd/Ctrl+Z there removed the sent panel AND reverted
+// whatever the user had done before it, in one unlabelled step.
+const layState = () => page.evaluate(() => {
+    const c = window.PS_SHELL.charts().find(x => x.type === 'layout');
+    return { n: c.items.length, pageH: c.page.h, preset: c.page.preset,
+             firstX: (c.items.find(i => i.kind === 'chart') || {}).x,
+             depth: window.PS_SHELL.layoutHistoryDepth() };
+});
+// An ordinary layout edit first, so an over-eager undo has something to eat.
+await page.evaluate(() => window.PS_SHELL.setWorkspace('layout'));
+await page.waitForTimeout(600);
+await page.evaluate(i => window.PS_SHELL.selectLayoutItems(i), ids);
+await page.waitForTimeout(400);
+await page.click('[data-ctx-plotalign="left"]');
+await page.waitForTimeout(800);
+const beforeSend = await layState();
+
+async function sendActiveChartToLayout() {
+    await page.evaluate(() => window.PS_SHELL.setWorkspace('chart'));
+    await page.waitForTimeout(1400);
+    const o = await page.evaluate(() => {
+        const r = document.querySelector('.graphbuilder2-host').getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    });
+    await page.mouse.click(o.x, o.y, { button: 'right' });
+    await page.waitForTimeout(500);
+    await page.click('#ps-contextmenu button[data-context-action="chart-send"]');
+    await page.waitForTimeout(500);
+    await page.click('#ps-contextmenu button:not([disabled])');
+    await page.waitForTimeout(1600);
+}
+await sendActiveChartToLayout();
+const afterSend = await layState();
+ok(afterSend.n === beforeSend.n + 1, 'the panel arrived (' + afterSend.n + ' items)');
+ok(afterSend.depth === beforeSend.depth + 1,
+   'and the send pushed exactly one history entry (' + beforeSend.depth +
+   ' to ' + afterSend.depth + ')');
+await page.evaluate(() => window.PS_SHELL.setWorkspace('layout'));
+await page.waitForTimeout(1200);
+await page.evaluate(() => document.getElementById('ps-lviewport').focus());
+await page.keyboard.press('Meta+z');
+await page.waitForTimeout(1000);
+const afterUndo = await layState();
+ok(afterUndo.n === beforeSend.n, 'one undo takes the sent panel back off');
+ok(afterUndo.pageH === beforeSend.pageH && afterUndo.preset === beforeSend.preset,
+   'and restores the page it grew (' + afterSend.pageH + ' ' + afterSend.preset +
+   ' back to ' + afterUndo.pageH + ' ' + afterUndo.preset + ')');
+ok(Math.abs(afterUndo.firstX - beforeSend.firstX) < 0.01,
+   'while leaving the earlier alignment alone, which is the whole point ' +
+   '(' + afterUndo.firstX + ' vs ' + beforeSend.firstX + ')');
+
 ok(errors.length === 0, 'no page errors (' + errors.join(' | ') + ')');
 console.log('\nlayout-figure-check: all cases passed');
 await browser.close();

@@ -161,6 +161,14 @@ path tests `laySizedKind`. A 400 by 200 logo stayed 400 by 200 while the
 panels around it shrank to two thirds, so it landed across the figure.
 Verified, fixed in `cba8f8f`, guarded by case 8.
 
+This turned out bigger than I wrote it up. The Notebook dive, merged into
+this branch afterwards, added **From Notebook**, and a placed Notebook page
+arrives as `kind: "image"` (`ps-shell.js` around line 5940, carrying
+`srcChart`, `srcPin` and the drift fingerprint). So image items are not the
+rare pasted logo any more, they are how one of the two ways to get content
+onto a page works, and every one of them survived an orientation flip at the
+wrong size. The fix already covers them because it keys off `laySizedKind`.
+
 **Needs a decision.** The flip scales width by `sx` and height by `sy`
 *independently*, so a 463 by 267 panel becomes 309 by 401. The chart inside
 has a fixed aspect, so it shrinks to the smaller dimension and the panel
@@ -340,7 +348,22 @@ the next launch, by which point the undo was long gone and the panel read
 `["x","y","w","h"].forEach(...)` block appeared twice in immediate
 succession, so every typed X/Y/W/H ran `layApplyInspector` twice.
 
-**F6 · (not built, one line)** Selecting a chart panel covers its own panel
+**F6 · Sending something to a layout is one undoable step.** Found late, by
+an adversarial auditor run over the merge, and it is the one lead from the
+brief that my own passes missed. `addChartToLayout` and `addPinToLayout`
+mutate the target layout while a DIFFERENT document is on screen, and
+neither took a snapshot. Worse than the lead said, because the send does
+three things: it adds an item, it grows the page, and it flips the preset to
+custom. With no step recorded, the next Cmd/Ctrl+Z in that layout removed
+the sent panel AND reverted whatever the user had done before it, in one
+unlabelled move. Measured before the fix, depth 1 to 1 across the send, then
+one undo took the panel off and put an aligned column back to where it
+started. The fix is `laySnapshotDoc(doc, label)`, the same push aimed at a
+named document rather than the active one, storing that document's selection
+only when it is the one on screen. Probe case 11, demonstrated failing
+first.
+
+**F7 · (not built, one line)** Selecting a chart panel covers its own panel
 label. The mini bar sits at (277, 230, 33x24) and the "A" text item at
 (277, 235, 19x24), measured. Offsetting the bar by its own height clears it.
 
@@ -390,51 +413,77 @@ label. The mini bar sits at (277, 230, 33x24) and the "A" text item at
 
 # Verification
 
-**Branch.** `probe/layout-deepdive`, commits `cba8f8f` (the work) and
-`fb9e327` (wiring the probe into `run.sh`).
+**Branch.** `probe/layout-deepdive`. `cba8f8f` the work, `fb9e327` the probe
+wiring, `15286e3` this proposal, `a0a2042` the merge with the Notebook dive,
+`7cd0c1c` the README and a comment-placement fix, `<F6>` the send-to-layout
+history step.
 
-**Probe added.** `standalone/verify/layout-figure-check.mjs`, 10 cases, 26
-assertions, wired into `run.sh` beside the other layout probes and honoring
-`PS_PAGE` so it runs on the dev page and the dist.
+**Probe added.** `standalone/verify/layout-figure-check.mjs`, 11 cases,
+wired into `run.sh` beside the other layout probes and honoring `PS_PAGE` so
+it runs on the dev page and the dist.
 
-**Demonstrated failing first.** Every case was reproduced against the
-pre-change code before its fix. The axis spread was measured at 6 px and
-11 px on the untouched four-panel template; the coalescing bug was
-reproduced with a two-panel nudge sequence; the disabled fields were read
-back as the same `rgb(48,59,71)` on white as the live fields; the
-orientation flip was run with an image item and left it at 400x200; the
-export was written to disk and inspected with `file` and PIL, reporting
-`density 1x1` and `dpi = None`; the zoom keys were pressed and recorded as
-no-ops; and the context menu was dumped and had no replace entry. Case 1 is
-deliberately a *characterisation* rather than a regression, because it asserts the
-misalignment exists, so it will start failing the day the engine-side gutter
-fix lands, which is the correct signal.
+**Demonstrated failing first.** Every case was reproduced against the code
+before its fix. The axis spread was measured at 6 px and 11 px on the
+untouched four-panel template; the coalescing bug was reproduced with a
+two-panel nudge sequence; the disabled fields read back as the same
+`rgb(48,59,71)` on white as the live fields; the orientation flip was run
+with an image item and left it at 400x200; the export was written to disk
+and inspected with `file` and PIL, reporting `density 1x1` and `dpi = None`;
+the zoom keys were pressed and recorded as no-ops; the context menu was
+dumped and had no replace entry; and case 11 reports depth 4 to 4 against
+`HEAD` and 4 to 5 with the fix. Case 1 is deliberately a *characterisation*
+rather than a regression, because it asserts the misalignment exists, so it
+will start failing the day the engine-side gutter fix lands, which is the
+correct signal.
 
-**Suite.** `layout-figure-check` passes on both the dev page and
-`dist/pandion-plots.html`. Green on this branch.
+**The Notebook dive is merged in.** `git merge probe/notebook-deepdive`,
+base `ca07680`, zero conflicts, and `git merge-tree --write-tree` returns a
+byte-identical tree in either direction, which is worth measuring rather
+than reasoning about. The committed merge tree equals that prediction. Two
+corrections to the handoff that came with it. Its expected `grep -c NB_UNDO`
+of 10 was recorded mid-dive and the tip carries 11, so the right check is
+that the merged count equals the notebook tip rather than a literal. And
+`chartCheckReport` reaching zero is correct, but it was never either dive's
+work; it arrived through the shared baseline commit `39623fd` and is
+committed properly on `probe/charts-deepdive`.
+
+**Suite.** Run as the probe list directly rather than through `run.sh`, so
+nothing hides behind an early abort.
 
 ```
-layout-arrange   layout-undo      layout-orientation  layout-accessibility
-layout-rail      layout-selectall layout-text         layout-clipboard
-layout-reuse     layout-image     units               fitpanes
-outside-canvas   chart-size       drag-feel           tokens
-polish           visuals          copy-image          export-accessibility
-axe-state        modal-a11y       reflow-a11y         narrow
-m1-shell         grid-a11y        separator-a11y      bypass-a11y
-tab-a11y
+104 feature probes  x dev and dist   208 runs, 0 failing, 0 skipped
+m0-check, m1-shell-check             pass on both
+accessibility-source-check           pass
+hardening-dom-check                  pass
+level-order-check   (R fixture)      pass
+rm-panels-check     (R fixture)      pass
+m1-parity                            5750 comparisons, no mismatches
 ```
 
-**One probe went red and was fixed, not suppressed.** `tokens-check`
-enforces "nothing is set below 10px"; my first sub-label was 9.5px. It now
-reuses the section-title vocabulary at 10px. That contract did its job.
+Not run, on purpose. `artifact-parity-check` is a release gate, not a
+regression. Any change under `standalone/` makes the committed website
+artifacts stale until `website/build.sh` runs, and regenerating them on a
+probe branch would be noise. Because `run.sh` uses `set -e` it aborts there,
+which is what hides the dist probes and the R blocks behind it, so those
+were run directly instead. `electron-check` is opt-in per machine.
 
-**A full `run.sh` was not completed.** Another session is working in this
-same checkout and committed to this branch twice during the dive, and a
-`git stash` I took to produce before-evidence auto-merged their in-flight
-work into my files. My two commits were rebuilt from `HEAD` so they carry
-only my blast radius; the working tree still holds their uncommitted work
-untouched. A clean end-to-end suite run needs a moment when the tree is not
-being written by two sessions.
+**Three adversarial auditors** were run over the merge, because zero
+conflicts is not zero semantic loss when two dives edit 23000 lines of the
+same file. All three returned clean.
+
+* *Did either parent lose work.* Every line, every identifier and every
+  function body each parent added is present. 42 tokens added by the
+  Layouts side and 21 by the Notebook side, none missing. 918 functions
+  common to all four versions, 8 modified by one parent and 32 by the other,
+  every one landing byte-for-byte; only two were co-edited, and the merge
+  carries both sides' hunks in each.
+* *Did the merge create a double.* One cosmetic finding, which I had already
+  fixed in `7cd0c1c`. The merge left my zoom block between the undo router's
+  comment and the router itself.
+* *Does it work together at runtime.* The undo key routes to the right
+  history in all three workspaces and never lands in another one; the zoom
+  keys stay inert outside Layouts. It also found F6 above, which is the one
+  real defect any of this turned up, and it is mine rather than the merge's.
 
 **No engine change.** `inst/widget/graphbuilder2.js` is untouched, so
 nothing here reaches the jamovi module.
