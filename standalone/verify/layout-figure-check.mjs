@@ -952,6 +952,136 @@ ok(added.chart && Math.abs(added.ratio - added.chart) < 0.01,
    'and Add chart places a panel at the chart\'s own ratio (' +
    added.ratio.toFixed(3) + ' against ' + added.chart.toFixed(3) + ')');
 
+console.log('case 27: an orientation flip keeps every item its own shape');
+// Approved decision. The flip used to scale width and height independently,
+// so a 463 by 267 panel became 309 by 401 and the chart inside, which has a
+// fixed aspect, shrank to the smaller dimension. A flipped 2 by 2 came back
+// about two thirds empty. The factor FITS the arrangement to the new page
+// rather than being the page's own ratio, so it grows as readily as it
+// shrinks and a flip does not compound.
+await page.evaluate(() => window.PS_SHELL.setWorkspace('layout'));
+await page.waitForTimeout(600);
+await page.evaluate(() => window.PS_SHELL.showLayoutGallery());
+await page.waitForTimeout(500);
+await page.click('[data-layout-template="four"]');
+await page.waitForTimeout(300);
+await page.click('[data-layout-create], #ps-layout-gallery-create');
+await page.waitForTimeout(3500);
+const shape = () => page.evaluate(() => {
+    const c = window.PS_SHELL.chart();
+    const p = c.items.filter(i => i.kind === 'chart');
+    const b = p.reduce((a, i) => ({
+        x0: Math.min(a.x0, i.x), y0: Math.min(a.y0, i.y),
+        x1: Math.max(a.x1, i.x + i.w), y1: Math.max(a.y1, i.y + i.h)
+    }), { x0: 1e9, y0: 1e9, x1: -1e9, y1: -1e9 });
+    return { ratio: +(p[0].w / p[0].h).toFixed(3),
+             blockW: Math.round(b.x1 - b.x0), blockH: Math.round(b.y1 - b.y0),
+             pageW: c.page.w, pageH: c.page.h };
+});
+const flat = await shape();
+await page.selectOption('#ps-layout-orientation', 'portrait');
+await page.waitForTimeout(1600);
+const tall = await shape();
+ok(Math.abs(tall.ratio - flat.ratio) < 0.02,
+   'a flipped panel keeps its aspect (' + flat.ratio + ' to ' + tall.ratio + ')');
+ok(await page.evaluate(() =>
+       Array.from(document.querySelectorAll(
+           '#ps-lcanvas .ps-litem[data-kind="chart"]')).every(it => {
+           const svg = it.querySelector('svg');
+           const vb = (svg.getAttribute('viewBox') || '').split(/\s+/).map(Number);
+           const r = it.getBoundingClientRect();
+           const s = Math.min(r.width / vb[2], r.height / vb[3]);
+           return Math.abs(r.width - vb[2] * s) < 2 &&
+                  Math.abs(r.height - vb[3] * s) < 2;
+       })),
+   'so the chart still fills it, instead of the panel filling with white');
+// Measured over EVERY item, which is what the centring uses; the panel
+// letters sit above and left of the panels, so a chart-only bbox is not the
+// block that was centred.
+const gaps = await page.evaluate(() => {
+    const c = window.PS_SHELL.chart();
+    const nodes = [...document.querySelectorAll('#ps-lcanvas .ps-litem')];
+    const cv = document.getElementById('ps-lcanvas').getBoundingClientRect();
+    const z = cv.width / c.page.w;
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    nodes.forEach(n => {
+        const r = n.getBoundingClientRect();
+        x0 = Math.min(x0, (r.left - cv.left) / z);
+        x1 = Math.max(x1, (r.right - cv.left) / z);
+        y0 = Math.min(y0, (r.top - cv.top) / z);
+        y1 = Math.max(y1, (r.bottom - cv.top) / z);
+    });
+    return { left: x0, right: c.page.w - x1, top: y0, bottom: c.page.h - y1 };
+});
+ok(Math.abs(gaps.left - gaps.right) < 3 && Math.abs(gaps.top - gaps.bottom) < 3,
+   'and the fitted block is centred on the page (margins ' +
+   [gaps.left, gaps.right, gaps.top, gaps.bottom].map(Math.round).join(' ') + ')');
+// There and back must not compound.
+await page.selectOption('#ps-layout-orientation', 'landscape');
+await page.waitForTimeout(1600);
+const back = await shape();
+await page.selectOption('#ps-layout-orientation', 'portrait');
+await page.waitForTimeout(1600);
+await page.selectOption('#ps-layout-orientation', 'landscape');
+await page.waitForTimeout(1600);
+const again = await shape();
+ok(Math.abs(again.blockW - back.blockW) < 3,
+   'flipping twice more lands on the same size, so the flip does not shrink ' +
+   'the figure a little each time (' + back.blockW + ' then ' + again.blockW + ')');
+
+console.log('case 28: one rule for the arrow keys');
+// Approved decision. Inside the canvas plain arrows navigate and Alt+Arrow
+// nudges, the engine's rule and what the hidden option list serves. A second
+// handler nudged on PLAIN arrows whenever focus was anywhere else in the
+// workspace, so the same key did two opposite things.
+const px = () => page.evaluate(() => {
+    const it = window.PS_SHELL.chart().items.find(i => i.kind === 'chart');
+    return Math.round(it.x);
+});
+await page.evaluate(() => {
+    const it = window.PS_SHELL.chart().items.find(i => i.kind === 'chart');
+    window.PS_SHELL.selectLayoutItems([it.id]);
+});
+await page.waitForTimeout(400);
+await page.evaluate(() => {
+    const b = document.querySelector('[data-ctx-align="left"]') ||
+              document.getElementById('ps-laddtext');
+    b.focus();
+});
+const rail0 = await px();
+await page.keyboard.press('ArrowRight');
+await page.waitForTimeout(400);
+ok(await px() === rail0,
+   'a plain arrow with focus on a rail button moves nothing (' + rail0 + ')');
+await page.evaluate(() => document.getElementById('ps-lviewport').focus());
+await page.waitForTimeout(250);
+const canv0 = await px();
+await page.keyboard.press('Alt+ArrowRight');
+await page.waitForTimeout(400);
+ok(await px() === canv0 + 1, 'Alt+Arrow nudges inside the canvas');
+await page.evaluate(() => {
+    const b = document.querySelector('[data-ctx-align="left"]') ||
+              document.getElementById('ps-laddtext');
+    b.focus();
+});
+const rail1 = await px();
+await page.keyboard.press('Alt+ArrowRight');
+await page.waitForTimeout(400);
+ok(await px() === rail1 + 1, 'and outside it, so there is one rule');
+// The canvas instructions and the shortcuts reference already said Alt with
+// an arrow; only the code disagreed. Pinned so the three cannot drift apart
+// again.
+const said = await page.evaluate(() => ({
+    instructions: document.getElementById('ps-layout-instructions').textContent,
+    tip: (document.querySelector('[data-tip*="corner resize"]') || {})
+             .getAttribute ? document.querySelector('[data-tip*="corner resize"]')
+             .getAttribute('data-tip') : ''
+}));
+ok(/Alt with an arrow moves selected items/.test(said.instructions),
+   'the canvas instructions say Alt with an arrow');
+ok(/Alt\+arrow nudges/.test(said.tip) && !/^.*[^+]Arrows nudge/.test(said.tip),
+   'and the Selection tooltip agrees ("' + said.tip.slice(-46) + '")');
+
 ok(errors.length === 0, 'no page errors (' + errors.join(' | ') + ')');
 console.log('\nlayout-figure-check: all cases passed');
 await browser.close();

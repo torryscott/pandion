@@ -74,12 +74,15 @@ console.log('case 2: the selection is real, not just a highlight');
 // nudging moves everything, and one undo puts it all back.
 const before = await page.evaluate(() =>
     (window.PS_SHELL.chart().items || []).map(i => Math.round(i.x)));
-await page.keyboard.press('ArrowRight');
+// ALT+Arrow. CONTRACT CHANGED, deliberately, Aug 2026 and approved: nudging
+// is Alt+Arrow everywhere, because plain arrows nudged from outside the
+// canvas and navigated inside it, which made one key mean two things.
+await page.keyboard.press('Alt+ArrowRight');
 await page.waitForTimeout(400);
 const moved = await page.evaluate(() =>
     (window.PS_SHELL.chart().items || []).map(i => Math.round(i.x)));
 ok(moved.every((x, i) => x === before[i] + 1),
-   `an arrow key nudges every selected item together ` +
+   `Alt+Arrow nudges every selected item together ` +
    `(${JSON.stringify(before)} -> ${JSON.stringify(moved)})`);
 
 console.log('case 3: other places keep the native meaning');

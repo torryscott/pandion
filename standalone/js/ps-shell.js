@@ -17968,17 +17968,46 @@
     laySnapshot("orientation");
     var oldW = p.w, oldH = p.h;
     var newW = oldH, newH = oldW;
-    var sx = newW / oldW, sy = newH / oldH;
-    var items = layItems();
-    for (var i = 0; i < items.length; i++) {
-      items[i].x = Math.round((Number(items[i].x) || 0) * sx);
-      items[i].y = Math.round((Number(items[i].y) || 0) * sy);
+    // ONE scale factor, not one per axis. Scaling width and height
+    // independently turned a 463 by 267 panel into 309 by 401, and a chart
+    // has a fixed aspect, so it shrank to the smaller dimension and the panel
+    // filled with white. A flipped 2 by 2 came back about two thirds empty,
+    // which is not what "scales the current arrangement to fit" promises.
+    //
+    // The factor FITS the arrangement to the new page rather than being the
+    // page's own ratio. Using min(sx, sy) keeps the shapes but shrinks on
+    // EVERY flip, so flipping there and back left the figure at 44 percent
+    // and a third flip at 30. Fitting grows as readily as it shrinks, so a
+    // flip always fills the page it lands on.
+    var items = layItems(), i;
+    var lo = Infinity, ln = Infinity, hi = -Infinity, hn = -Infinity;
+    for (i = 0; i < items.length; i++) {
+      var r = layItemRect(items[i]);
+      if (r.x < lo) lo = r.x;
+      if (r.y < ln) ln = r.y;
+      if (r.right > hi) hi = r.right;
+      if (r.bottom > hn) hn = r.bottom;
+    }
+    var k = 1, offX = 0, offY = 0;
+    if (items.length && isFinite(lo) && hi > lo && hn > ln) {
+      var availW = Math.max(1, newW - p.margin * 2);
+      var availH = Math.max(1, newH - p.margin * 2);
+      k = Math.min(availW / (hi - lo), availH / (hn - ln));
+      // Centred, because a fitted block no longer fills both axes and
+      // leaving it against the top-left would move the problem from inside
+      // the panels to around them.
+      offX = (newW - (hi - lo) * k) / 2 - lo * k;
+      offY = (newH - (hn - ln) * k) / 2 - ln * k;
+    }
+    for (i = 0; i < items.length; i++) {
+      items[i].x = Math.round((Number(items[i].x) || 0) * k + offX);
+      items[i].y = Math.round((Number(items[i].y) || 0) * k + offY);
       // laySizedKind rather than kind === "chart", because an image is a
       // sized item everywhere else, and leaving its box alone made a flipped
       // figure carry one item at its old size across the shrunken panels.
       if (laySizedKind(items[i])) {
-        items[i].w = Math.round((Number(items[i].w) || 480) * sx);
-        items[i].h = Math.round((Number(items[i].h) || 320) * sy);
+        items[i].w = Math.round((Number(items[i].w) || 480) * k);
+        items[i].h = Math.round((Number(items[i].h) || 320) * k);
       }
     }
     var pairs = {
@@ -17989,8 +18018,9 @@
     };
     p.preset = pairs[p.preset] || "custom";
     p.w = newW; p.h = newH;
-    p.margin = Math.round(layClamp(p.margin * Math.min(sx, sy), 0,
-                                   Math.min(p.w, p.h) / 3));
+    // The margin is a length on paper, and the paper has only been turned,
+    // so it keeps its value. Scaling it shrank it on every flip.
+    p.margin = Math.round(layClamp(p.margin, 0, Math.min(p.w, p.h) / 3));
     layClampAllItems();
     persist(); renderLayout();
   }
@@ -18298,8 +18328,16 @@
           ids.length) {
         e.preventDefault(); layDuplicateSelected(); return;
       }
-      if (!ids.length || ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]
-          .indexOf(e.key) === -1) return;
+      // ONE rule for the arrow keys. Inside the canvas plain arrows navigate
+      // between items and Alt+Arrow nudges, which is the engine's rule and
+      // what the hidden option list exists to serve. A second handler here
+      // used to nudge on PLAIN arrows whenever focus was anywhere else in the
+      // workspace, which in practice is any time the user has just clicked a
+      // rail or toolbar button, so the same key did two opposite things
+      // decided by something invisible. Alt+Arrow nudges everywhere now.
+      if (!ids.length || !e.altKey ||
+          ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]
+            .indexOf(e.key) === -1) return;
       e.preventDefault();
       var step = e.shiftKey ? 10 : 1;
       layMoveSelected(e.key === "ArrowLeft" ? -step :
