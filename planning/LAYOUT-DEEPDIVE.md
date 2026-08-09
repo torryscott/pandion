@@ -415,8 +415,8 @@ label. The mini bar sits at (277, 230, 33x24) and the "A" text item at
 
 **Branch.** `probe/layout-deepdive`. `cba8f8f` the work, `fb9e327` the probe
 wiring, `15286e3` this proposal, `a0a2042` the merge with the Notebook dive,
-`7cd0c1c` the README and a comment-placement fix, `<F6>` the send-to-layout
-history step.
+`7cd0c1c` the README and a comment-placement fix, `89e5f6d` the
+send-to-layout history step.
 
 **Probe added.** `standalone/verify/layout-figure-check.mjs`, 11 cases,
 wired into `run.sh` beside the other layout probes and honoring `PS_PAGE` so
