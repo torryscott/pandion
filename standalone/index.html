@@ -1147,7 +1147,16 @@
   .ps-ltext {
     font-family: sans-serif;
     font-size: 14px; color: #222; white-space: pre-wrap; cursor: grab;
-    padding: 2px 4px; max-width: 480px;
+    padding: 2px 4px; max-width: 480px; box-sizing: border-box;
+    /* box-sizing so max-width bounds the BORDER box: the export wraps at
+       LAY_TEXT_MAX_W minus twice LAY_TEXT_PAD_X, and without this the screen
+       had 480 px of content against the file's 472 and broke a line earlier. */
+    /* Declared rather than left at normal, so the canvas and the file step
+       their lines identically. The export writes dy 1.25em; a computed
+       normal was 18 px where the file used 20, and the drift compounded
+       down a caption, putting the fourth line 1.6 mm low on paper. The two
+       numbers above are LAY_TEXT_MAX_W and LAY_TEXT_PAD_X in ps-shell.js. */
+    line-height: 1.25;
   }
   .ps-lhandle {
     position: absolute; width: 11px; height: 11px; right: -6px; bottom: -6px;
@@ -1170,7 +1179,7 @@
   .ps-lbar button.ps-lbar-del:hover { background: var(--ps-s3); color: var(--ps-danger); }
   .ps-ltext-edit {
     /* The editor has to measure the same as the item it replaces. */
-    font-family: sans-serif; border: 1px solid var(--ps-accent); border-radius: var(--ps-r-sm);
+    font-family: sans-serif; line-height: 1.25; max-width: 480px; border: 1px solid var(--ps-accent); border-radius: var(--ps-r-sm);
     padding: 2px 4px; outline: none; background: var(--ps-s0); resize: both;
     min-width: 120px; min-height: 24px;
   }

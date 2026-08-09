@@ -3281,6 +3281,12 @@
     }
     return out.length ? out : [String(textStr)];
   }
+  // The canvas's own text box, so the export can break where the screen does.
+  // The same three numbers are written in .ps-ltext in index.html, and a
+  // probe pins the two together.
+  var LAY_TEXT_MAX_W = 480;
+  var LAY_TEXT_PAD_X = 4;
+  var LAY_TEXT_LINE = 1.25;
   function layoutTextNode(doc, item) {
     var ns = "http://www.w3.org/2000/svg";
     var t = doc.createElementNS(ns, "text");
@@ -3300,11 +3306,27 @@
         ((Number(item.x) || 0) + texRect.w / 2) + " " +
         ((Number(item.y) || 0) + texRect.h / 2) + ")");
     }
-    var lines = String(item.text || "Text").split(/\r?\n/);
+    // WRAPPED where the canvas wraps it. The canvas caps a text item at
+    // .ps-ltext max-width 480 px and wraps inside that; the file used to
+    // split on newlines only, so a caption came out as one long line that
+    // changed the figure's shape and could run past the page edge and be
+    // cut. Measured in the same family and weight the file declares, so the
+    // two break in the same places.
+    // The effective width is whichever is smaller, the 480 px cap or the room
+    // left on the page, because an absolutely positioned box shrinks to fit
+    // its containing block. On a journal-width page the canvas wrapped at the
+    // room left while the file still wrapped at 480 and produced one line
+    // fewer.
+    var pageW = layPage().w;
+    var wrapW = Math.max(40, Math.min(LAY_TEXT_MAX_W,
+      pageW - (Number(item.x) || 0))) - LAY_TEXT_PAD_X * 2;
+    var lines = wrapCaptionLines(String(item.text || "Text"), wrapW, fs,
+      (item.italic ? "italic " : "") + (item.bold ? "700" : "400") +
+      " " + fs + "px sans-serif");
     for (var i = 0; i < lines.length; i++) {
       var sp = doc.createElementNS(ns, "tspan");
       sp.setAttribute("x", String(x));
-      if (i > 0) sp.setAttribute("dy", "1.25em");
+      if (i > 0) sp.setAttribute("dy", LAY_TEXT_LINE + "em");
       sp.textContent = lines[i] || " ";
       t.appendChild(sp);
     }
@@ -13728,7 +13750,7 @@
       showContextMenu(r.left, r.bottom + 4, items, null);
     });
     el("ps-laddtext").addEventListener("click", function () {
-      layAddText("Text", 14, false);
+      layAddText("Text", 14, false, true);
     });
     el("ps-laddlabel").addEventListener("click", function () {
       var c = activeChart();
@@ -16500,13 +16522,20 @@
     }
     return "i" + (mx + 1);
   }
-  function layAddItem(item) {
+  // keepFocus is for the caller that is about to open an editor. Otherwise
+  // focus moves to the canvas, because it was staying on the toolbar BUTTON:
+  // the new item was selected but every Space press activated that button
+  // again and added another one, Enter did the same, and F2 renamed the
+  // DOCUMENT instead of editing the text that had just appeared.
+  function layAddItem(item, keepFocus) {
     laySnapshot("add");
     layItems().push(item);
     laySetSelection([item.id]);
     layClampAllItems();
     persist();
     renderLayout();
+    if (!keepFocus) layFocusViewport();
+    return item.id;
   }
   function layStagger() {
     var n = layItems().length, p = layPage();
@@ -18931,6 +18960,30 @@
       persist(); renderLayout();
     }
   }
+  // While a text field is open, the composite is NOT an option list. Exposing
+  // the item so its editor is reachable makes it a child the listbox role
+  // does not allow, and simply dropping the role orphans the parallel option
+  // list underneath, whose options then have no listbox parent. Both go
+  // together: the viewport becomes a plain group and the option mirror is
+  // hidden for the duration, because the canvas is not navigable mid-edit
+  // anyway. Both revert when the edit ends.
+  function layComposeEditingAria(editing) {
+    var vp = el("ps-lviewport"), opts = el("ps-layout-options");
+    if (vp) {
+      if (editing) {
+        vp.setAttribute("role", "group");
+        vp.removeAttribute("aria-multiselectable");
+        vp.removeAttribute("aria-activedescendant");
+      } else {
+        vp.setAttribute("role", "listbox");
+        vp.setAttribute("aria-multiselectable", "true");
+      }
+    }
+    if (opts) {
+      if (editing) opts.setAttribute("aria-hidden", "true");
+      else opts.removeAttribute("aria-hidden");
+    }
+  }
   function layEditText(id) {
     var item = layItemById(id);
     if (!item || item.kind !== "text") return;
@@ -18951,6 +19004,12 @@
     itemEl.removeAttribute("aria-hidden");
     itemEl.innerHTML = "";
     itemEl.appendChild(ta);
+    // While a text field is open inside it, the viewport is not a listbox.
+    // Exposing the item so its editor is reachable makes it a child the
+    // listbox role does not allow, which is a real violation and not a
+    // detail: an option list whose children are not options is not
+    // navigable. It goes back to a listbox when the edit ends.
+    layComposeEditingAria(true);
     ta.focus(); ta.select();
     var done = false;
     function commit(cancel) {
@@ -18965,6 +19024,7 @@
         layClampAllItems();
         persist();
       }
+      layComposeEditingAria(false);
       renderLayout();
       var resultMessage = cancel ? "Text edit canceled." : "Text saved.";
       if (returnFocus) {
@@ -19037,11 +19097,15 @@
                  x: pos.x, y: pos.y, w: w, h: h });
     render();
   }
-  function layAddText(text, fontSize, bold) {
-    var pos = layStagger();
-    layAddItem({ id: layNewItemId(), kind: "text",
+  function layAddText(text, fontSize, bold, edit) {
+    var pos = layStagger(), id = layNewItemId();
+    layAddItem({ id: id, kind: "text",
                  text: text, fontSize: fontSize, bold: !!bold,
-                 x: pos.x, y: pos.y });
+                 x: pos.x, y: pos.y }, !!edit);
+    // A new text box opens its editor with the placeholder selected, so the
+    // caption you came to write is what typing produces.
+    if (edit) layEditText(id);
+    return id;
   }
 
   // ======================================================== application frame

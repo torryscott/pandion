@@ -2062,16 +2062,25 @@ await page.waitForTimeout(400);
     }, { b64: pxShot.toString('base64'), x: pxPt.x, y: pxPt.y });
     ok(pxRGB[0] < 240 || pxRGB[1] < 240 || pxRGB[2] < 240,
        'snapshot bars actually paint (clip ids rewritten): rgb ' + pxRGB.join(','));
-    // Plain text: add, double-click edit, background click commits.
+    // Plain text: add, type, background click commits.
+    // CONTRACT CHANGED, deliberately, Aug 2026: Add text now opens the new
+    // item's editor with its placeholder selected, so you can type the
+    // caption you came to write. Focus used to stay on the toolbar BUTTON,
+    // which meant every space bar press added another text box, Enter added
+    // another, and F2 renamed the document. The double-click that used to be
+    // needed here would now land INSIDE the open textarea and select a word,
+    // so the typing that follows would replace that word rather than the
+    // placeholder. The assertion under test is unchanged: a background click
+    // commits the edit.
     await page.click('#ps-laddtext');
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(250);
     const textId = await page.evaluate(() => {
         const its = window.PS_SHELL.chart().items;
         return its[its.length - 1].id;
     });
-    const rt = await itemRect(textId);
-    await page.mouse.dblclick(rt.x + 10, rt.y + 8);
-    await page.waitForTimeout(150);
+    if (!(await page.evaluate(() =>
+            document.activeElement.classList.contains('ps-ltext-edit'))))
+        throw new Error('setup: Add text did not open its editor');
     await page.keyboard.type('Figure 1. Dose response.');
     // Commit path = a background click (the editor-flush guard).
     // PROBE GEOMETRY LAW (Jul 28 2026, found by a focus spy): the canvas

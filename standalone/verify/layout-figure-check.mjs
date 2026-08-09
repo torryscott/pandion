@@ -1098,22 +1098,35 @@ await page.evaluate(() => {
     window.PS_SHELL.selectLayoutItems([it.id]);
 });
 await page.waitForTimeout(400);
+// A VISIBLE button. The align row is hidden for a single unit, and focusing a
+// display:none element is a no-op that leaves focus in the canvas, where a
+// plain arrow legitimately navigates. The first version of this case did
+// exactly that and passed for the wrong reason.
 await page.evaluate(() => {
-    const b = document.querySelector('[data-ctx-align="left"]') ||
-              document.getElementById('ps-laddtext');
+    const b = [...document.querySelectorAll('#ps-laddtext, #ps-laddlabel, ' +
+        '[data-ctx-align], [data-ctx-samesize]')].find(n => n.offsetParent);
     b.focus();
 });
+const focusedRail = await page.evaluate(() => document.activeElement.id ||
+    document.activeElement.getAttribute('data-ctx-align') || '');
+ok(focusedRail && focusedRail !== 'ps-lviewport',
+   'focus really is on a control outside the canvas ("' + focusedRail + '")');
 const rail0 = await px();
+const railSel = await page.evaluate(() =>
+    window.PS_SHELL.layoutSelection().join(','));
 await page.keyboard.press('ArrowRight');
 await page.waitForTimeout(400);
 ok(await px() === rail0,
    'a plain arrow with focus on a rail button moves nothing (' + rail0 + ')');
+ok(await page.evaluate(() => window.PS_SHELL.layoutSelection().join(',')) ===
+   railSel, 'and does not navigate either, because focus is not in the canvas');
 await page.evaluate(() => document.getElementById('ps-lviewport').focus());
 await page.waitForTimeout(250);
 const canv0 = await px();
 await page.keyboard.press('Alt+ArrowRight');
 await page.waitForTimeout(400);
-ok(await px() === canv0 + 1, 'Alt+Arrow nudges inside the canvas');
+ok(await px() === canv0 + 1,
+   'Alt+Arrow nudges inside the canvas (' + canv0 + ' -> ' + (await px()) + ')');
 await page.evaluate(() => {
     const b = document.querySelector('[data-ctx-align="left"]') ||
               document.getElementById('ps-laddtext');
@@ -1447,6 +1460,104 @@ ok(fitKept.letterboxed === 0,
 ok(fitKept.lettersFollow, 'and the letters came with their panels');
 await page.evaluate(() => document.getElementById('ps-lunit-in').click());
 await page.waitForTimeout(300);
+
+console.log('case 36: Add text lets you type the text');
+// Focus stayed on the toolbar BUTTON, so every Space press activated it again
+// and added another text box, Enter did the same, and F2 renamed the document
+// instead of editing the text that had just appeared.
+await page.evaluate(() => window.PS_SHELL.setWorkspace('layout'));
+await page.waitForTimeout(500);
+const beforeAdd = await page.evaluate(() => ({
+    n: window.PS_SHELL.chart().items.length,
+    name: window.PS_SHELL.chart().name }));
+await page.click('#ps-laddtext');
+await page.waitForTimeout(700);
+ok(await page.evaluate(() =>
+       document.activeElement.classList.contains('ps-ltext-edit')),
+   'the new text box takes focus, with its editor open');
+const caption = 'Figure 1. Dose response by condition and site over the ' +
+    'whole study window, with error bars showing the standard error of the ' +
+    'mean for each of the four dosing groups.';
+await page.keyboard.type(caption);
+await page.waitForTimeout(400);
+await page.evaluate(() => {
+    const t = document.querySelector('.ps-ltext-edit');
+    if (t) t.blur();
+});
+await page.waitForTimeout(800);
+const afterAdd = await page.evaluate(() => ({
+    n: window.PS_SHELL.chart().items.length,
+    name: window.PS_SHELL.chart().name,
+    text: window.PS_SHELL.chart().items.filter(i => i.kind === 'text').pop().text }));
+ok(afterAdd.n === beforeAdd.n + 1,
+   'typing adds ONE item, not one per space bar (' + beforeAdd.n + ' to ' +
+   afterAdd.n + ')');
+ok(afterAdd.text === caption, 'and what you typed is what the item says');
+ok(afterAdd.name === beforeAdd.name,
+   'while the document keeps its name ("' + afterAdd.name + '")');
+
+console.log('case 37: a caption breaks in the file where it breaks on screen');
+// The canvas caps a text item at 480 px and wraps inside it; the file split
+// on newlines only, so a caption came out as one long line, which changes the
+// figure's shape and can run past the page edge and be cut. The line STEP
+// disagreed too: a computed line-height of normal against the file's
+// dy 1.25em drifted a fourth line 1.6 mm low on paper.
+const wrapCmp = await page.evaluate(async () => {
+    const c = window.PS_SHELL.chart();
+    const t = c.items.filter(i => i.kind === 'text').pop();
+    t.x = 60; t.y = 500; t.fontSize = 13; t.bold = false; t.rotate = 0;
+    window.PS_SHELL.selectLayoutItems([]);
+    await new Promise(r => setTimeout(r, 700));
+    const node = document.querySelector(
+        '.ps-litem[data-item-id="' + t.id + '"] .ps-ltext');
+    const cv = document.getElementById('ps-lcanvas').getBoundingClientRect();
+    const z = cv.width / c.page.w;
+    const rg = document.createRange();
+    rg.selectNodeContents(node);
+    // One rect per line fragment, so fold them onto their line by top edge.
+    // Bin to the nearest pixel. A single wrapped line can come back as
+    // several rects whose tops differ in the third decimal, so a finer bin
+    // counts one line twice.
+    const byTop = {};
+    [...rg.getClientRects()].forEach(r => {
+        const top = Math.round((r.top - cv.top) / z);
+        byTop[top] = (byTop[top] || 0) + r.width / z;
+    });
+    const tops = Object.keys(byTop).map(Number).sort((a, b) => a - b);
+    const svg = (await window.PS_SHELL.exportSource({ format: 'svg' })).svg;
+    const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
+    let hit = null;
+    doc.querySelectorAll('text').forEach(x => {
+        if (/Figure 1\./.test(x.textContent)) hit = x;
+    });
+    const spans = [...hit.querySelectorAll('tspan')].map(sp => sp.textContent);
+    const ctx = document.createElement('canvas').getContext('2d');
+    ctx.font = '400 13px sans-serif';
+    return { screenLines: tops.length,
+             screenSteps: tops.slice(1).map((v, i) => +(v - tops[i]).toFixed(1)),
+             screenWidths: tops.map(t => +byTop[t].toFixed(1)),
+             fileLines: spans.length,
+             fileWidths: spans.map(l => +ctx.measureText(l).width.toFixed(1)),
+             // A wrapped line's client rect includes the trailing space that
+             // the break consumed; the file's line text has it trimmed. That
+             // is the whole residual, so it is measured rather than guessed.
+             spaceW: +ctx.measureText(' ').width.toFixed(2) };
+});
+ok(wrapCmp.fileLines > 1,
+   'the file wraps the caption rather than writing one long line (' +
+   wrapCmp.fileLines + ' lines)');
+ok(wrapCmp.fileLines === wrapCmp.screenLines,
+   'into the same number of lines the canvas shows (' +
+   wrapCmp.screenLines + ' on screen)');
+ok(wrapCmp.screenWidths.every((w, i) =>
+       Math.abs(w - wrapCmp.fileWidths[i]) <= wrapCmp.spaceW + 0.5),
+   'breaking at the same words, so the block is the same shape, within the ' +
+   wrapCmp.spaceW + ' px trailing space (' +
+   wrapCmp.screenWidths.join('/') + ' against ' +
+   wrapCmp.fileWidths.join('/') + ')');
+ok(wrapCmp.screenSteps.every(v => Math.abs(v - 13 * 1.25) < 1),
+   'and stepping its lines by the same 1.25 em the file writes (' +
+   wrapCmp.screenSteps.join(',') + ' against ' + (13 * 1.25) + ')');
 
 ok(errors.length === 0, 'no page errors (' + errors.join(' | ') + ')');
 console.log('\nlayout-figure-check: all cases passed');
