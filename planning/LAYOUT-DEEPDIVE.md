@@ -586,7 +586,24 @@ the keyboard half.
 
 ---
 
-## 15. Two things I recorded as defects and could not reproduce
+## 15. The Edit menu advertised a key that did something else
+
+**What a user feels.** They open Edit in a layout, read "Duplicate document,
+Cmd/Ctrl+D", press it with a panel selected, and get a duplicated panel.
+
+**The evidence.** The routing is deliberate and right. With something selected
+in a layout the key duplicates the SELECTION, by the same rule that gives Undo
+to the layout while a figure is on screen. Only the label was wrong.
+
+**BUILT.** The menu stops advertising the key beside Duplicate document for
+exactly as long as a layout has a selection, and the canvas and item menus
+carry it on their own Duplicate instead, so the key is always shown next to
+the thing it will actually do. The chart and data workspaces are untouched.
+`layout-figure-check` case 51.
+
+---
+
+## 16. Two things I recorded as defects and could not reproduce
 
 Both are struck rather than fixed, because measuring them showed nothing
 wrong.
@@ -598,6 +615,11 @@ wrong.
   touched it, going from a multi-panel template to a one-panel one, where the
   box is disabled and shows the effective state, and back. That is a disabled
   control reporting the truth, not a control changing itself.
+
+A third is recorded but unverified. Rotated layout text is said to sit about a
+pixel off, and the reason I wrote down for it was wrong: `.ps-ltext` padding is
+`2px 4px`, which is symmetric on both axes, so it cannot be the origin drift I
+claimed. Whatever the pixel is, it is not that, and it is one pixel.
 
 ---
 

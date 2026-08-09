@@ -2205,6 +2205,53 @@ ok(p50Undone.panels.length === p50Before.panels.length,
    'and one undo takes the whole gesture back (' +
    p50Undone.panels.length + ' panels)');
 
+console.log('case 51: the menu says who owns Cmd/Ctrl+D');
+// A layout with something selected duplicates the SELECTION, by the same
+// routing rule that gives Undo to the layout while a figure is on screen.
+// The Edit menu went on advertising the key beside Duplicate document, so
+// pressing what the menu showed did the other thing.
+await page.evaluate(() => window.PS_SHELL.setWorkspace('layout'));
+await page.waitForTimeout(500);
+await page.evaluate(() => window.PS_SHELL.showLayoutGallery());
+await page.waitForTimeout(500);
+await page.click('[data-layout-template="single"]');
+await page.waitForTimeout(300);
+await page.click('[data-layout-create], #ps-layout-gallery-create');
+await page.waitForTimeout(3200);
+async function p51Edit() {
+    await page.click('[data-ps-menu="edit"]');
+    await page.waitForTimeout(350);
+    const rows = await page.evaluate(() =>
+        Array.from(document.querySelectorAll('#ps-appmenu button')).map(b => {
+            const sp = b.querySelectorAll('span');
+            return { label: (sp[0] || {}).textContent || '',
+                     key: (sp[1] || {}).textContent || '' };
+        }).filter(r => /Duplicate document/.test(r.label)));
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(250);
+    return rows[0] || null;
+}
+await page.evaluate(() => window.PS_SHELL.laySetSelection([]));
+await page.waitForTimeout(300);
+const p51Empty = await p51Edit();
+ok(p51Empty && /Cmd\/Ctrl\+D/.test(p51Empty.key),
+   'with nothing selected the key really does duplicate the document ("' +
+   (p51Empty || {}).key + '")');
+await page.evaluate(() => {
+    const c = window.PS_SHELL.chart();
+    window.PS_SHELL.selectLayoutItems([c.items[0].id]);
+});
+await page.waitForTimeout(400);
+const p51Sel = await p51Edit();
+ok(p51Sel && p51Sel.key === '',
+   'and stops claiming it once a panel is selected, because the panel has ' +
+   'it ("' + (p51Sel || {}).key + '")');
+await page.evaluate(() => window.PS_SHELL.setWorkspace('chart'));
+await page.waitForTimeout(1300);
+const p51Chart = await p51Edit();
+ok(p51Chart && /Cmd\/Ctrl\+D/.test(p51Chart.key),
+   'the chart workspace is untouched ("' + (p51Chart || {}).key + '")');
+
 ok(errors.length === 0, 'no page errors (' + errors.join(' | ') + ')');
 console.log('\nlayout-figure-check: all cases passed');
 await browser.close();

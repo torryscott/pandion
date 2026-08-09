@@ -18090,7 +18090,8 @@
   }
   function layItemMenuItems(id) {
     var out = [
-      { label: "Duplicate", command: "duplicate-selection" },
+      { label: "Duplicate", command: "duplicate-selection",
+        shortcut: "Cmd/Ctrl+D" },
       { label: "Delete", command: "delete-selection" },
       "separator",
       { label: "Move backward", command: "layer-back" },
@@ -22013,6 +22014,18 @@
     closeShellDialog("ps-preferences");
     showToast("Preferences applied");
   }
+  // Cmd/Ctrl+D belongs to whichever duplicate is in front. A layout with
+  // something selected duplicates the SELECTION, by the same routing rule
+  // that gives Undo to the layout while a figure is on screen, so the menu
+  // has to stop advertising the key beside Duplicate document for as long as
+  // that is true. The item menu on the canvas carries it instead, and says
+  // which duplicate it means.
+  function commandShortcut(item) {
+    if (item.command === "duplicate-document" &&
+        appWorkspace() === "layout" && isLayoutTab(activeChart()) &&
+        laySelectedIds().length) return "";
+    return item.shortcut || "";
+  }
   // ---- punch list t3-55: the shortcuts sheet ----
   // Thirteen hand-written rows that had already drifted: no Cmd+N, no
   // Cmd+comma, no Cmd+F, none of the level-reordering or formula keys, one row
@@ -23365,7 +23378,7 @@
         var label = item.workspace === appWorkspace()
           ? "\u2713  " + commandLabel(item) : commandLabel(item);
         b.appendChild(mkEl("span", "", label));
-        b.appendChild(mkEl("span", "ps-menu-shortcut", item.shortcut || ""));
+        b.appendChild(mkEl("span", "ps-menu-shortcut", commandShortcut(item)));
         b.disabled = !commandEnabled(item.command) ||
           (item.layoutOnly && !isLayoutTab(activeChart()));
         if (b.disabled) setTip(b, commandDisabledReason(item.command) ||
@@ -24449,7 +24462,8 @@
           { label: "Add chart\u2026", command: "layout-add-chart" },
           { label: "Add text", command: "layout-add-text" },
           "separator",
-          { label: "Duplicate", command: "duplicate-selection" },
+          { label: "Duplicate", command: "duplicate-selection",
+            shortcut: "Cmd/Ctrl+D" },
           { label: "Delete", command: "delete-selection" },
           "separator",
           { label: "Export\u2026", command: "export" }
