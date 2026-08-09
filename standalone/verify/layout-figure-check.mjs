@@ -852,6 +852,53 @@ ok(rot.re[0] < rot.un[0] - 2,
 ok((await page.evaluate(() => window.PS_SHELL.layoutSelection())).indexOf('i5') !== -1,
    'and a box drawn only in that sliver catches the label');
 
+console.log('case 25: layout text measures the same on screen as in the file');
+// The export writes sans-serif on purpose, so the file renders the same
+// everywhere. The canvas was drawing in the application UI stack, which is 3
+// to 5 percent wider, and everything downstream measures the SCREEN box
+// (layItemRect, and through it align, the marquee and the page clamp), so a
+// caption placed against a panel edge by eye landed elsewhere in the file.
+await page.evaluate(() => {
+    const it = window.PS_SHELL.chart().items.find(i => i.id === 'i5');
+    it.x = 200; it.y = 500; it.fontSize = 13; it.bold = false; it.rotate = 0;
+    it.text = 'Figure 1. Mean score across four dosing conditions';
+    window.PS_SHELL.selectLayoutItems([]);
+});
+await page.waitForTimeout(800);
+const wysiwyg = await page.evaluate(async () => {
+    const n = document.querySelector('.ps-litem[data-item-id="i5"] .ps-ltext');
+    const cv = document.getElementById('ps-lcanvas').getBoundingClientRect();
+    const z = cv.width / window.PS_SHELL.chart().page.w;
+    const rg = document.createRange();
+    rg.selectNodeContents(n);
+    const ink = rg.getBoundingClientRect();
+    const svg = (await window.PS_SHELL.exportSource({ format: 'svg' })).svg;
+    const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
+    let hit = null;
+    doc.querySelectorAll('text').forEach(t => {
+        if (/Figure 1\./.test(t.textContent)) hit = t;
+    });
+    // Measure the exported declaration with the browser's own text metrics.
+    const c = document.createElement('canvas').getContext('2d');
+    c.font = (hit.getAttribute('font-weight') || '400') + ' ' +
+             hit.getAttribute('font-size') + 'px ' +
+             hit.getAttribute('font-family');
+    return { screenFamily: getComputedStyle(n).fontFamily,
+             exportFamily: hit.getAttribute('font-family'),
+             screenW: +(ink.width / z).toFixed(2),
+             exportW: +c.measureText(hit.textContent).width.toFixed(2),
+             exportX: Number(hit.getAttribute('x')) };
+});
+ok(wysiwyg.screenFamily === wysiwyg.exportFamily,
+   'the canvas draws the family the file declares ("' +
+   wysiwyg.screenFamily + '")');
+ok(Math.abs(wysiwyg.screenW - wysiwyg.exportW) < 1,
+   'so a caption is the same width in both (' + wysiwyg.screenW + ' vs ' +
+   wysiwyg.exportW + ')');
+ok(Math.abs(wysiwyg.exportX - 204) < 1.5,
+   'and it starts where the screen puts it, inside the same 4 px inset (' +
+   wysiwyg.exportX + ')');
+
 ok(errors.length === 0, 'no page errors (' + errors.join(' | ') + ')');
 console.log('\nlayout-figure-check: all cases passed');
 await browser.close();

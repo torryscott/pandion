@@ -1135,7 +1135,17 @@
      background: var(--ps-s1); border: 1px dashed var(--ps-l2);
     text-align: center; padding: 10px; box-sizing: border-box;
   }
+  /* The font the EXPORT will use, not the application's UI font. A layout
+     exports text as sans-serif deliberately, so the file renders the same
+     everywhere, but the canvas was drawing it in the system UI stack, which
+     is 3 to 5 percent wider (measured: a 320px caption came out 16.5px
+     narrower in the export). Everything downstream measures the SCREEN box
+     (layItemRect, and through it align, the marquee and the page clamp), so
+     a caption placed against a panel edge by eye landed somewhere else in
+     the file. Showing the output font makes all of that exact, and it is
+     what a figure composer should show anyway. */
   .ps-ltext {
+    font-family: sans-serif;
     font-size: 14px; color: #222; white-space: pre-wrap; cursor: grab;
     padding: 2px 4px; max-width: 480px;
   }
@@ -1159,7 +1169,8 @@
   .ps-lbar button.ps-lbar-on { background: var(--ps-tint-3); color: var(--ps-accent-bright); border-color: var(--ps-accent); }
   .ps-lbar button.ps-lbar-del:hover { background: var(--ps-s3); color: var(--ps-danger); }
   .ps-ltext-edit {
-    font-family: inherit; border: 1px solid var(--ps-accent); border-radius: var(--ps-r-sm);
+    /* The editor has to measure the same as the item it replaces. */
+    font-family: sans-serif; border: 1px solid var(--ps-accent); border-radius: var(--ps-r-sm);
     padding: 2px 4px; outline: none; background: var(--ps-s0); resize: both;
     min-width: 120px; min-height: 24px;
   }
