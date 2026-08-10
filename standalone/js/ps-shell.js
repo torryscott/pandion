@@ -7607,6 +7607,27 @@
       kill[k].parentNode.removeChild(kill[k]);
     clone.removeAttribute("tabindex");
     clone.removeAttribute("aria-label");
+    // The snapshot has to hash the same whether the pointer is on the
+    // chart, was ever on it, or never was. Two hover residues broke that:
+    // a capture mid-hover carried the brightness filter and the engine's
+    // data-base-* bookkeeping, and a bar that had EVER been hovered kept a
+    // re-serialized style attribute ("cursor: pointer;" for the literal
+    // "cursor:pointer;") for as long as its element lived, so a kept page
+    // read "source chart has changed" until an unrelated edit rebuilt the
+    // chart, which is why resizing appeared to heal it. Dropping the
+    // transient filter and rewriting every style attribute in the CSSOM's
+    // own canonical form makes hovered and never-hovered captures
+    // byte-identical.
+    var styled = clone.querySelectorAll("[style]");
+    for (var sv = 0; sv < styled.length; sv++) {
+      styled[sv].style.filter = "";
+      var css = styled[sv].style.cssText;
+      if (css) styled[sv].setAttribute("style", css);
+      else styled[sv].removeAttribute("style");
+    }
+    var based = clone.querySelectorAll("[data-base-fill-opacity]");
+    for (var bv = 0; bv < based.length; bv++)
+      based[bv].removeAttribute("data-base-fill-opacity");
     // Same growth rule as the chart export: a part dragged outside the
     // canvas belongs to the figure, so the layout panel carries it too.
     // Measured on the LIVE element (`best`) - the clone is detached and has
