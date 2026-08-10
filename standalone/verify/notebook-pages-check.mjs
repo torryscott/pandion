@@ -383,7 +383,7 @@ ok(back.at === 0 && back.idx === 0,
 ok(back.active === 'b1',
    'and the Notebook goes there, so the undo is visible rather than silent');
 
-console.log('case 10: a section folds its page list, and a keep reopens it');
+console.log('case 10: a section folds its page list, and keeps stay folded');
 // Forty pages is forty rail rows, and the rail's table of contents could
 // not be closed. The active section row is the disclosure, wearing the
 // chart groups' exact vocabulary: chevron, aria-expanded, the count badge
@@ -418,7 +418,9 @@ await page.waitForTimeout(2200);
 const f2 = await foldState();
 ok(f2.pages === 0 && f2.aria === 'false',
    'the fold survives a reload');
-// keep a page from the chart workspace; the fold must open for it
+// keep a page from the chart workspace; the fold is an explicit choice and
+// STAYS (Torry's ruling, Aug 10 2026, reversing the first cut's force-open):
+// the toast announces the keep and the count badge ticks up.
 await page.evaluate(() => window.PS_SHELL.setWorkspace('chart'));
 await page.waitForTimeout(1400);
 const fo = await page.evaluate(() => {
@@ -440,25 +442,87 @@ await page.evaluate(() => {
 });
 await page.waitForTimeout(1100);
 const f3 = await foldState();
-ok(f3.pages === f0.pages + 1 && f3.aria === 'true',
-   'keeping a page into the folded section opens it, once, so the keep is ' +
-   'visible (' + f3.pages + ' pages showing)');
+ok(f3.pages === 0 && f3.aria === 'false' &&
+   f3.count === String(f0.pages + 1),
+   'keeping a page into a folded section leaves it folded, with the badge ' +
+   'ticking up to say the keep landed (' + f3.count + ')');
 await page.evaluate(() => window.PS_SHELL.setWorkspace('pinboard'));
 await page.waitForTimeout(600);
 await page.evaluate(() => {
     document.querySelector('[data-project-board-id].ps-project-active').click();
 });
 await page.waitForTimeout(400);
-const f4 = await foldState();
-ok(f4.pages === 0 && f4.count === String(f0.pages + 1),
-   'and an explicit click wins over the force-open, re-folding at the new ' +
-   'count (' + f4.count + ')');
+ok((await foldState()).pages === f0.pages + 1,
+   'a click shows all of them, new page included');
 await page.evaluate(() => {
     document.querySelector('[data-project-board-id].ps-project-active').click();
 });
 await page.waitForTimeout(400);
-ok((await foldState()).pages === f0.pages + 1,
-   'a second click shows them again, so the whole thing is one toggle');
+ok((await foldState()).pages === 0,
+   'and a second click folds again, so the whole thing is one toggle');
+
+console.log('case 11: page order is ONE order, and the rail can drag it');
+// Reordering pages in the Notebook committed with persist and a pinboard
+// render only, so the rail kept the old order until something else
+// happened to sync it. And the rail itself had no reorder at all. Both
+// now route through the notebook drag's own commit, so the order, the
+// undo history, the PDF export and both surfaces agree from one path.
+await page.evaluate(() => {
+    document.querySelector('[data-project-board-id].ps-project-active').click();
+});
+await page.waitForTimeout(400);
+const railOrder = () => page.evaluate(() =>
+    [...document.querySelectorAll('[data-project-pin-id]')]
+        .map(r => r.getAttribute('data-project-pin-id')));
+const modelOrder = () => page.evaluate(() =>
+    window.PS_SHELL.project.pinboards[0].pins.map(p => p.id));
+const o11 = await modelOrder();
+// the notebook's own drag: first page below the second
+const pg11 = await page.evaluate(() => {
+    const cards = [...document.querySelectorAll('.ps-pinpage')];
+    const a = cards[0].getBoundingClientRect();
+    const b = cards[1].getBoundingClientRect();
+    return { ax: a.left + a.width / 2, ay: a.top + 20,
+             bx: b.left + b.width / 2, by: b.bottom - 4 };
+});
+await page.mouse.move(pg11.ax, pg11.ay);
+await page.mouse.down();
+await page.mouse.move(pg11.ax + 4, pg11.ay + 30, { steps: 3 });
+await page.mouse.move(pg11.bx, pg11.by + 10, { steps: 6 });
+await page.mouse.up();
+await page.waitForTimeout(700);
+const r11 = await railOrder(), m11 = await modelOrder();
+ok(m11.join() !== o11.join(),
+   'the notebook drag reordered (' + m11.join(',') + ')');
+ok(r11.join() === m11.join(),
+   'and the rail shows the SAME order immediately (' + r11.join(',') + ')');
+// now drag a RAIL row to the end of its section
+const rows11 = await page.evaluate(() => {
+    const rs = [...document.querySelectorAll('[data-project-pin-id]')];
+    return rs.map(r => { const b = r.getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2,
+                 bottom: b.bottom }; });
+});
+await page.mouse.move(rows11[0].x, rows11[0].y);
+await page.mouse.down();
+await page.mouse.move(rows11[0].x, rows11[0].y + 8, { steps: 2 });
+await page.mouse.move(rows11[0].x,
+    rows11[rows11.length - 1].bottom + 4, { steps: 5 });
+await page.mouse.up();
+await page.waitForTimeout(700);
+const r11b = await railOrder(), m11b = await modelOrder();
+ok(m11b[m11b.length - 1] === m11[0] && r11b.join() === m11b.join(),
+   'dragging a rail row moved that page to the end on BOTH surfaces (' +
+   r11b.join(',') + ')');
+ok(await page.evaluate(() => window.PS_SHELL.workspace()) === 'pinboard',
+   'and the release did not fire the row\'s own navigation');
+await page.evaluate(() => document.body.focus());
+await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z');
+await page.waitForTimeout(600);
+ok((await modelOrder()).join() === m11.join() &&
+   (await railOrder()).join() === m11.join(),
+   'one undo restores the order on both surfaces, because the rail drag ' +
+   'commits through the notebook drag\'s own function');
 
 ok(errors.length === 0, 'no page errors (' + errors.slice(0, 2).join(' | ') + ')');
 console.log('notebook-pages-check: all cases passed');

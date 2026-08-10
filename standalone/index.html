@@ -2461,6 +2461,11 @@
   /* Notebook page rows: a number, a name that truncates, and a dot when
      the page's source chart has moved on since it was kept. */
   .ps-pinrow { gap: 7px; }
+  /* rail page drag: the lifted row dims, the insertion mark is an inset
+     accent line so nothing shifts while choosing a slot */
+  .ps-pinrow-lift { opacity: 0.45; }
+  .ps-pinrow-drop { box-shadow: inset 0 2px 0 var(--ps-accent); }
+  .ps-pinrow-drop-end { box-shadow: inset 0 -2px 0 var(--ps-accent); }
   .ps-pinrow-num {
     flex: 0 0 auto; min-width: 15px; color: var(--ps-ink-4);
     font-size: 10.5px; font-variant-numeric: tabular-nums; text-align: right;

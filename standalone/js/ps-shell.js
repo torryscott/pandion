@@ -4903,13 +4903,10 @@
       (PROJECT.ui = PROJECT.ui || {}).activeBoard = board.id;
       PIN_SEL = entry.id;
     });
-    // Keeping a page into a FOLDED section must never look like nothing
-    // happened, so the fold opens for it, once. An explicit click on the
-    // section row re-folds it. Armed here at the source, because the live
-    // keep path never touches PIN_SEL (that assignment is the REDO closure)
-    // and a render-time change detector therefore watched a signal that
-    // never fires.
-    if (collapsedBoards()[board.id]) BOARD_FORCE_OPEN[board.id] = 1;
+    // A folded section STAYS folded when a page is kept into it (Torry's
+    // ruling, Aug 10 2026, reversing the first cut's force-open): the fold
+    // is an explicit choice, the toast already announces the keep, and the
+    // count badge on the folded row ticks up.
     persist();
     syncAll();
     if (appWorkspace() === "pinboard") renderPinboard();
@@ -6228,6 +6225,10 @@
     })(at, slot, pins, moved);
     persist();
     renderPinboard();
+    // The rail lists these pages too. Undo and redo reach it through
+    // nbApply's syncAll; the live commit skipped it, so reordering pages
+    // in the Notebook left the rail showing the old order.
+    syncProjectNavigator();
     var after = scroll ? scroll.querySelectorAll(".ps-pinpage") : [];
     for (i = 0; i < after.length; i++) (function (pg) {
       var id = pg.getAttribute("data-pin-id");
@@ -6361,8 +6362,6 @@
     target.pins.push(pin);
     (PROJECT.ui = PROJECT.ui || {}).activeBoard = target.id;
     PIN_SEL = pin.id;
-    // The keep rule: arriving in a folded section opens it once.
-    if (collapsedBoards()[target.id]) BOARD_FORCE_OPEN[target.id] = 1;
     persist(); syncAll();
     if (appWorkspace() === "pinboard") renderPinboard();
     var step = nbStep("the move", function () {
@@ -17196,10 +17195,6 @@
   // Publication-figure composer. Canvas coordinates are always stored at
   // full page size; zoom affects only the view, never project geometry or
   // export. Selection is an ordered id array; the final id is primary.
-  // The Notebook sections' force-open one-shot, the GROUP_FORCE_OPEN idiom.
-  // Armed at the keep and move sites, consumed by the rail render, cleared
-  // by an explicit click on the section row.
-  var BOARD_FORCE_OPEN = {};
   var LAYOUT_SEL = [];
   var LAYOUT_ACTIVE_ID = null;
   var LAY_DRAG = null;
@@ -20677,6 +20672,77 @@
     '<rect x="3" y="4" width="18" height="16" rx="2"/>' +
     '<path d="M12 4v16M3 12h9"/></svg>';
   MODULE_RAIL_ICONS.plotbuilder = RAIL_ICON_CHART;
+  // ---- drag to reorder pages ON THE RAIL --------------------------
+  // The dist-drag idiom: document-level listeners, a 4 px threshold so a
+  // press that never travels stays a click, an insertion mark instead of
+  // live reshuffling (the rail rebuilds wholesale from the commit), and a
+  // trusted-only self-disarming swallow so the click that follows a real
+  // drag cannot fire the row's own navigation.
+  var RAIL_PIN_DRAG = null;
+  function railPinRows() {
+    return Array.prototype.slice.call(document.querySelectorAll(
+      "#ps-project-nav [data-project-pin-id]"));
+  }
+  function railPinDragClear() {
+    var rows = railPinRows();
+    for (var i = 0; i < rows.length; i++)
+      rows[i].classList.remove("ps-pinrow-lift", "ps-pinrow-drop",
+        "ps-pinrow-drop-end");
+  }
+  function railPinDragSlot(clientY, pinId) {
+    var rows = railPinRows(), slot = 0;
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].getAttribute("data-project-pin-id") === pinId) continue;
+      var r = rows[i].getBoundingClientRect();
+      if (clientY > r.top + r.height / 2) slot++;
+    }
+    return slot;
+  }
+  function railPinDragStart(e, pinId) {
+    RAIL_PIN_DRAG = { pinId: pinId, sy: e.clientY, armed: false };
+    document.addEventListener("pointermove", railPinDragMove);
+    document.addEventListener("pointerup", railPinDragUp);
+  }
+  function railPinDragMove(e) {
+    var d = RAIL_PIN_DRAG;
+    if (!d) return;
+    if (!d.armed && Math.abs(e.clientY - d.sy) < 4) return;
+    d.armed = true;
+    e.preventDefault();
+    railPinDragClear();
+    var rows = railPinRows(), others = [], i;
+    for (i = 0; i < rows.length; i++) {
+      if (rows[i].getAttribute("data-project-pin-id") === d.pinId)
+        rows[i].classList.add("ps-pinrow-lift");
+      else others.push(rows[i]);
+    }
+    var slot = railPinDragSlot(e.clientY, d.pinId);
+    if (others.length) {
+      if (slot < others.length) others[slot].classList.add("ps-pinrow-drop");
+      else others[others.length - 1].classList.add("ps-pinrow-drop-end");
+    }
+  }
+  function railPinDragUp(e) {
+    var d = RAIL_PIN_DRAG;
+    RAIL_PIN_DRAG = null;
+    document.removeEventListener("pointermove", railPinDragMove);
+    document.removeEventListener("pointerup", railPinDragUp);
+    if (!d || !d.armed) return;
+    railPinDragClear();
+    var slot = railPinDragSlot(e.clientY, d.pinId);
+    // The commit rebuilds the rail, so the click that follows this release
+    // would land on a dead node and still run its navigation handler.
+    var swallow = function (ce) {
+      if (!ce.isTrusted) return;
+      ce.stopPropagation(); ce.preventDefault();
+      document.removeEventListener("click", swallow, true);
+    };
+    document.addEventListener("click", swallow, true);
+    window.setTimeout(function () {
+      document.removeEventListener("click", swallow, true);
+    }, 250);
+    movePinToIndex(d.pinId, slot);
+  }
   function syncProjectNavigator() {
     var root = el("ps-project-nav");
     root.innerHTML = "";
@@ -20839,8 +20905,7 @@
         // everywhere else a click on the row means "take me there".
         var listed = activePinBoard().id === b.id;
         var isActive = appWorkspace() === "pinboard" && listed;
-        var folded = listed && !!collapsedBoards()[b.id] &&
-          !BOARD_FORCE_OPEN[b.id];
+        var folded = listed && !!collapsedBoards()[b.id];
         var row = mkEl("button", "ps-project-item" +
           (isActive ? " ps-project-active" : ""));
         row.type = "button";
@@ -20868,9 +20933,7 @@
         row.addEventListener("click", function () {
           if (appWorkspace() === "pinboard" && activePinBoard().id === b.id) {
             var folds = collapsedBoards();
-            var showing = !folds[b.id] || !!BOARD_FORCE_OPEN[b.id];
-            delete BOARD_FORCE_OPEN[b.id];   // an explicit click always wins
-            if (showing) folds[b.id] = 1; else delete folds[b.id];
+            if (folds[b.id]) delete folds[b.id]; else folds[b.id] = 1;
             persist(false); syncProjectNavigator();
             return;
           }
@@ -20893,7 +20956,6 @@
               key: "board-fold",
               action: function () {
                 var folds = collapsedBoards();
-                delete BOARD_FORCE_OPEN[b.id];
                 if (folded) delete folds[b.id]; else folds[b.id] = 1;
                 persist(false); syncProjectNavigator();
               } });
@@ -20947,6 +21009,14 @@
           prow.addEventListener("click", function () {
             narrowCloseAfterNavigation();
             pinReveal(pin.id);
+          });
+          // Drag a page row to reorder it, committing through the SAME
+          // function the Notebook's own drag uses, so the page order, the
+          // Notebook, the PDF export and the undo history all follow one
+          // path, and the rail resyncs from that commit.
+          prow.addEventListener("pointerdown", function (e) {
+            if (e.button !== 0) return;
+            railPinDragStart(e, pin.id);
           });
           prow.addEventListener("contextmenu", function (e) {
             e.preventDefault();
