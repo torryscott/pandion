@@ -2036,9 +2036,25 @@
     }
     return out;
   }
+  // A fold map from a saved project: plain truthy keys only, so a hand
+  //-edited or hostile file cannot smuggle anything structured in.
+  function uiFoldMap(o) {
+    var out = {};
+    if (o && typeof o === "object")
+      for (var k in o)
+        if (Object.prototype.hasOwnProperty.call(o, k) && o[k]) out[k] = 1;
+    return out;
+  }
   function collapsedGroups() {
     if (!PROJECT.ui.collapsedGroups) PROJECT.ui.collapsedGroups = {};
     return PROJECT.ui.collapsedGroups;
+  }
+  // The Notebook sections' page lists fold with the same idiom, keyed by
+  // board id. A forty-page section is forty rail rows; the rail is a table
+  // of contents, and a table of contents you cannot close is a wall.
+  function collapsedBoards() {
+    if (!PROJECT.ui.collapsedBoards) PROJECT.ui.collapsedBoards = {};
+    return PROJECT.ui.collapsedBoards;
   }
   function canonicalGroupName(name) {
     // Names compare case-insensitively for collision, display as typed:
@@ -2586,7 +2602,12 @@
         // the ui REBUILD used to wipe these two - they were restored
         // above, before this literal replaced the object (Aug 2 2026)
         activeBoard: (s.ui.activeBoard || null),
-        pinZoom: s.ui.pinZoom != null ? s.ui.pinZoom : "fit"
+        pinZoom: s.ui.pinZoom != null ? s.ui.pinZoom : "fit",
+        // The rail folds. The ui rebuild wiped them, the same trap the
+        // activeBoard comment above records, so a collapsed chart group or
+        // a collapsed Notebook section sprang open on every reload.
+        collapsedGroups: uiFoldMap(s.ui.collapsedGroups),
+        collapsedBoards: uiFoldMap(s.ui.collapsedBoards)
       };
       if (s.ui.columnWidths && typeof s.ui.columnWidths === "object") {
         for (var widthCol in s.ui.columnWidths) {
@@ -4882,6 +4903,13 @@
       (PROJECT.ui = PROJECT.ui || {}).activeBoard = board.id;
       PIN_SEL = entry.id;
     });
+    // Keeping a page into a FOLDED section must never look like nothing
+    // happened, so the fold opens for it, once. An explicit click on the
+    // section row re-folds it. Armed here at the source, because the live
+    // keep path never touches PIN_SEL (that assignment is the REDO closure)
+    // and a render-time change detector therefore watched a signal that
+    // never fires.
+    if (collapsedBoards()[board.id]) BOARD_FORCE_OPEN[board.id] = 1;
     persist();
     syncAll();
     if (appWorkspace() === "pinboard") renderPinboard();
@@ -6333,6 +6361,8 @@
     target.pins.push(pin);
     (PROJECT.ui = PROJECT.ui || {}).activeBoard = target.id;
     PIN_SEL = pin.id;
+    // The keep rule: arriving in a folded section opens it once.
+    if (collapsedBoards()[target.id]) BOARD_FORCE_OPEN[target.id] = 1;
     persist(); syncAll();
     if (appWorkspace() === "pinboard") renderPinboard();
     var step = nbStep("the move", function () {
@@ -17145,6 +17175,10 @@
   // Publication-figure composer. Canvas coordinates are always stored at
   // full page size; zoom affects only the view, never project geometry or
   // export. Selection is an ordered id array; the final id is primary.
+  // The Notebook sections' force-open one-shot, the GROUP_FORCE_OPEN idiom.
+  // Armed at the keep and move sites, consumed by the rail render, cleared
+  // by an explicit click on the section row.
+  var BOARD_FORCE_OPEN = {};
   var LAYOUT_SEL = [];
   var LAYOUT_ACTIVE_ID = null;
   var LAY_DRAG = null;
@@ -20697,18 +20731,47 @@
       wrap.appendChild(mkEl("div", "ps-project-group-label", "Notebook"));
       var boards = pinBoards();
       for (var i = 0; i < boards.length; i++) (function (b) {
+        // The page list renders for the active board in EVERY workspace,
+        // so the fold and its chrome follow the LIST, not the workspace.
+        // Only the click-to-toggle needs the pinboard workspace, because
+        // everywhere else a click on the row means "take me there".
+        var listed = activePinBoard().id === b.id;
+        var isActive = appWorkspace() === "pinboard" && listed;
+        var folded = listed && !!collapsedBoards()[b.id] &&
+          !BOARD_FORCE_OPEN[b.id];
         var row = mkEl("button", "ps-project-item" +
-          (appWorkspace() === "pinboard" && activePinBoard().id === b.id
-           ? " ps-project-active" : ""));
+          (isActive ? " ps-project-active" : ""));
         row.type = "button";
         row.setAttribute("data-project-board-id", b.id);
         setTip(row, b.name + " - " + b.pins.length +
-          (b.pins.length === 1 ? " page" : " pages"));
+          (b.pins.length === 1 ? " page" : " pages") +
+          (isActive ? (folded ? " \u00b7 click to show them"
+                              : " \u00b7 click to collapse them") : ""));
         var ico = mkEl("span", "ps-nav-icon");
         ico.innerHTML = RAIL_ICON_NOTEBOOK;
         row.appendChild(ico);
         row.appendChild(mkEl("span", "", b.name));
+        // The ACTIVE section is the only one that lists pages, so it is the
+        // only one with anything to disclose: it wears the group headers'
+        // chevron and, when folded, their count badge, and a click on it
+        // TOGGLES rather than navigating, because you are already there.
+        if (listed) {
+          row.setAttribute("aria-expanded", folded ? "false" : "true");
+          row.appendChild(mkEl("span", "ps-project-gchev",
+            folded ? "\u25b8" : "\u25be"));
+          if (folded)
+            row.appendChild(mkEl("span", "ps-project-gcount",
+              String(b.pins.length)));
+        }
         row.addEventListener("click", function () {
+          if (appWorkspace() === "pinboard" && activePinBoard().id === b.id) {
+            var folds = collapsedBoards();
+            var showing = !folds[b.id] || !!BOARD_FORCE_OPEN[b.id];
+            delete BOARD_FORCE_OPEN[b.id];   // an explicit click always wins
+            if (showing) folds[b.id] = 1; else delete folds[b.id];
+            persist(false); syncProjectNavigator();
+            return;
+          }
           narrowCloseAfterNavigation();
           (PROJECT.ui = PROJECT.ui || {}).activeBoard = b.id;
           persist(false);
@@ -20721,7 +20784,18 @@
         // that workspace's tab strip.
         row.addEventListener("contextmenu", function (e) {
           e.preventDefault();
-          showContextMenu(e.clientX, e.clientY, [
+          var secItems = [];
+          if (listed && b.pins.length)
+            secItems.push({
+              label: folded ? "Show pages" : "Collapse pages",
+              key: "board-fold",
+              action: function () {
+                var folds = collapsedBoards();
+                delete BOARD_FORCE_OPEN[b.id];
+                if (folded) delete folds[b.id]; else folds[b.id] = 1;
+                persist(false); syncProjectNavigator();
+              } });
+          showContextMenu(e.clientX, e.clientY, secItems.concat([
             { label: "Rename section\u2026", key: "board-rename",
               action: function () {
                 BOARD_RENAME = b.id;
@@ -20730,7 +20804,7 @@
               } },
             { label: "Delete section", key: "board-delete",
               action: function () { deletePinBoard(b.id); } }
-          ], null);
+          ]), null);
         });
         wrap.appendChild(row);
         // The pages of the section you are looking at (Torry's rail is the
@@ -20740,6 +20814,7 @@
         // expands, which is how a notebook with sections and pages reads
         // everywhere else.
         if (b.id !== activePinBoard().id) return;
+        if (folded) return;
         for (var pI = 0; pI < b.pins.length; pI++) (function (pin, idx) {
           var prow = mkEl("button",
             "ps-project-item ps-project-item-grouped ps-pinrow" +

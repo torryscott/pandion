@@ -640,12 +640,32 @@ window.PSData = (function () {
           pts = S.olsFit(fe.x, fe.y, deg, ciLevel, xseq);
         }
         if (!pts || pts.xs.length < 2) continue;
+        // LOESS ships the CURVE ONLY (Torry, Aug 10 2026). loessFit's curve is
+        // exact-R: measured against stats::loess on three shapes (n = 40, 60,
+        // 200, span 0.75, degree 2) the maximum difference was 0.0000. Its
+        // BAND is 3 to 4.5% narrow, because the effective degrees of freedom
+        // are estimated as 1.2 * (n / q) rather than computed from the trace
+        // of the smoother, so pEff floors at 2 where R's enp is about 4.35.
+        // The error is a constant scalar, not a shape error, and it errs
+        // toward overconfidence. A band that is quietly too tight is worse
+        // than no band, so the fit types that CAN draw an exact one keep it
+        // and loess does not.
+        // Omitting the two arrays is the whole mechanism: the engine gates the
+        // band on `_fit.points[0].lwr !== undefined` (graphbuilder2.js ~35084)
+        // and its parallel-array decompression already guards
+        // `Array.isArray(_xfP.lwrs)` (~2946). So this needs NO engine change,
+        // which also leaves the jamovi module alone - its bands come from R's
+        // own loess and are exact, and must keep drawing.
+        var fitPts = { parallel: true,
+                       xs: pts.xs.map(S.sigR), ys: pts.ys.map(S.sigR) };
+        if (fitType !== "loess") {
+          fitPts.lwrs = pts.lwrs.map(S.sigR);
+          fitPts.uprs = pts.uprs.map(S.sigR);
+        }
         xyFits.push({
           group: hasGroup ? poolGroups[fg] : null,
           fit_type: fitType,
-          points: { parallel: true,
-                    xs: pts.xs.map(S.sigR), ys: pts.ys.map(S.sigR),
-                    lwrs: pts.lwrs.map(S.sigR), uprs: pts.uprs.map(S.sigR) }
+          points: fitPts
         });
       }
     }
@@ -735,17 +755,14 @@ window.PSData = (function () {
       yLabelDefault: roles.yvar,
       groupLabelDefault: hasGroup ? roles.groupVar : "",
       facetLevels: fLevels,
-      // Punch list t4-17. Every other statistic in this shell is R-parity by
-      // construction; the LOESS confidence band is not. loessFit approximates
-      // the effective degrees of freedom as 1.2 * (n / q) instead of R's exact
-      // trace-based value, so the CURVE matches and the BAND does not - which
-      // is the worst way round, because the difference is invisible. It was
-      // disclosed only in the README. It is disclosed on the chart now, in the
-      // same note that already carries the missing-data count.
-      missingNote: [missingNoteFor(nMissing, nTotal),
-        (fitType === "loess" && opts.showFit && opts.showCI && xyFits.length)
-          ? "LOESS confidence band is approximate"
-          : ""].filter(Boolean).join(" \u00b7 ")
+      // t4-17 used to append "LOESS confidence band is approximate" here. That
+      // disclosure is retired because there is nothing left to disclose: loess
+      // now ships no band at all (see the fit block above). The note was also
+      // dead code by the time it was removed - it gated on opts.showFit and
+      // opts.showCI, which optsFrom read from the option store's TOP LEVEL,
+      // and the chartSpec consolidation moved both keys inside the blob, so
+      // the gate could never be true from the app's own UI.
+      missingNote: missingNoteFor(nMissing, nTotal)
     } };
   }
 
@@ -1281,12 +1298,13 @@ window.PSData = (function () {
           loessSpan: typeof st.xyLoessSpan === "number" ? st.xyLoessSpan : tpl.xyLoessSpan,
           ciLevel: typeof st.xyCILevel === "number" ? st.xyCILevel : tpl.xyCILevel,
           ellLevel: typeof st.xyEllipseLevel === "number" ? st.xyEllipseLevel : tpl.xyEllipseLevel,
-          corrType: typeof st.xyStatsCorrType === "string" ? st.xyStatsCorrType : tpl.xyStatsCorrType,
-          // t4-17: the LOESS band disclosure only makes sense when a band is
-          // actually DRAWN, and only the option store knows that - the fits
-          // themselves are computed unconditionally.
-          showFit: typeof st.xyShowFit === "boolean" ? st.xyShowFit : !!tpl.xyShowFit,
-          showCI: typeof st.xyShowCI === "boolean" ? st.xyShowCI : !!tpl.xyShowCI
+          corrType: typeof st.xyStatsCorrType === "string" ? st.xyStatsCorrType : tpl.xyStatsCorrType
+          // showFit / showCI used to be read here for the t4-17 band
+          // disclosure. Both were read from the option store's top level,
+          // where the chartSpec consolidation means they never appear, so both
+          // were always the template default. The disclosure is retired and so
+          // are these; the fits themselves are computed unconditionally and
+          // the engine gates the drawing.
         };
       }
     }

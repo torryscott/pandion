@@ -8051,12 +8051,32 @@ window.PSData = (function () {
           pts = S.olsFit(fe.x, fe.y, deg, ciLevel, xseq);
         }
         if (!pts || pts.xs.length < 2) continue;
+        // LOESS ships the CURVE ONLY (Torry, Aug 10 2026). loessFit's curve is
+        // exact-R: measured against stats::loess on three shapes (n = 40, 60,
+        // 200, span 0.75, degree 2) the maximum difference was 0.0000. Its
+        // BAND is 3 to 4.5% narrow, because the effective degrees of freedom
+        // are estimated as 1.2 * (n / q) rather than computed from the trace
+        // of the smoother, so pEff floors at 2 where R's enp is about 4.35.
+        // The error is a constant scalar, not a shape error, and it errs
+        // toward overconfidence. A band that is quietly too tight is worse
+        // than no band, so the fit types that CAN draw an exact one keep it
+        // and loess does not.
+        // Omitting the two arrays is the whole mechanism: the engine gates the
+        // band on `_fit.points[0].lwr !== undefined` (graphbuilder2.js ~35084)
+        // and its parallel-array decompression already guards
+        // `Array.isArray(_xfP.lwrs)` (~2946). So this needs NO engine change,
+        // which also leaves the jamovi module alone - its bands come from R's
+        // own loess and are exact, and must keep drawing.
+        var fitPts = { parallel: true,
+                       xs: pts.xs.map(S.sigR), ys: pts.ys.map(S.sigR) };
+        if (fitType !== "loess") {
+          fitPts.lwrs = pts.lwrs.map(S.sigR);
+          fitPts.uprs = pts.uprs.map(S.sigR);
+        }
         xyFits.push({
           group: hasGroup ? poolGroups[fg] : null,
           fit_type: fitType,
-          points: { parallel: true,
-                    xs: pts.xs.map(S.sigR), ys: pts.ys.map(S.sigR),
-                    lwrs: pts.lwrs.map(S.sigR), uprs: pts.uprs.map(S.sigR) }
+          points: fitPts
         });
       }
     }
@@ -8146,17 +8166,14 @@ window.PSData = (function () {
       yLabelDefault: roles.yvar,
       groupLabelDefault: hasGroup ? roles.groupVar : "",
       facetLevels: fLevels,
-      // Punch list t4-17. Every other statistic in this shell is R-parity by
-      // construction; the LOESS confidence band is not. loessFit approximates
-      // the effective degrees of freedom as 1.2 * (n / q) instead of R's exact
-      // trace-based value, so the CURVE matches and the BAND does not - which
-      // is the worst way round, because the difference is invisible. It was
-      // disclosed only in the README. It is disclosed on the chart now, in the
-      // same note that already carries the missing-data count.
-      missingNote: [missingNoteFor(nMissing, nTotal),
-        (fitType === "loess" && opts.showFit && opts.showCI && xyFits.length)
-          ? "LOESS confidence band is approximate"
-          : ""].filter(Boolean).join(" \u00b7 ")
+      // t4-17 used to append "LOESS confidence band is approximate" here. That
+      // disclosure is retired because there is nothing left to disclose: loess
+      // now ships no band at all (see the fit block above). The note was also
+      // dead code by the time it was removed - it gated on opts.showFit and
+      // opts.showCI, which optsFrom read from the option store's TOP LEVEL,
+      // and the chartSpec consolidation moved both keys inside the blob, so
+      // the gate could never be true from the app's own UI.
+      missingNote: missingNoteFor(nMissing, nTotal)
     } };
   }
 
@@ -8692,12 +8709,13 @@ window.PSData = (function () {
           loessSpan: typeof st.xyLoessSpan === "number" ? st.xyLoessSpan : tpl.xyLoessSpan,
           ciLevel: typeof st.xyCILevel === "number" ? st.xyCILevel : tpl.xyCILevel,
           ellLevel: typeof st.xyEllipseLevel === "number" ? st.xyEllipseLevel : tpl.xyEllipseLevel,
-          corrType: typeof st.xyStatsCorrType === "string" ? st.xyStatsCorrType : tpl.xyStatsCorrType,
-          // t4-17: the LOESS band disclosure only makes sense when a band is
-          // actually DRAWN, and only the option store knows that - the fits
-          // themselves are computed unconditionally.
-          showFit: typeof st.xyShowFit === "boolean" ? st.xyShowFit : !!tpl.xyShowFit,
-          showCI: typeof st.xyShowCI === "boolean" ? st.xyShowCI : !!tpl.xyShowCI
+          corrType: typeof st.xyStatsCorrType === "string" ? st.xyStatsCorrType : tpl.xyStatsCorrType
+          // showFit / showCI used to be read here for the t4-17 band
+          // disclosure. Both were read from the option store's top level,
+          // where the chartSpec consolidation means they never appear, so both
+          // were always the template default. The disclosure is retired and so
+          // are these; the fits themselves are computed unconditionally and
+          // the engine gates the drawing.
         };
       }
     }
@@ -11134,9 +11152,25 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     }
     return out;
   }
+  // A fold map from a saved project: plain truthy keys only, so a hand
+  //-edited or hostile file cannot smuggle anything structured in.
+  function uiFoldMap(o) {
+    var out = {};
+    if (o && typeof o === "object")
+      for (var k in o)
+        if (Object.prototype.hasOwnProperty.call(o, k) && o[k]) out[k] = 1;
+    return out;
+  }
   function collapsedGroups() {
     if (!PROJECT.ui.collapsedGroups) PROJECT.ui.collapsedGroups = {};
     return PROJECT.ui.collapsedGroups;
+  }
+  // The Notebook sections' page lists fold with the same idiom, keyed by
+  // board id. A forty-page section is forty rail rows; the rail is a table
+  // of contents, and a table of contents you cannot close is a wall.
+  function collapsedBoards() {
+    if (!PROJECT.ui.collapsedBoards) PROJECT.ui.collapsedBoards = {};
+    return PROJECT.ui.collapsedBoards;
   }
   function canonicalGroupName(name) {
     // Names compare case-insensitively for collision, display as typed:
@@ -11684,7 +11718,12 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
         // the ui REBUILD used to wipe these two - they were restored
         // above, before this literal replaced the object (Aug 2 2026)
         activeBoard: (s.ui.activeBoard || null),
-        pinZoom: s.ui.pinZoom != null ? s.ui.pinZoom : "fit"
+        pinZoom: s.ui.pinZoom != null ? s.ui.pinZoom : "fit",
+        // The rail folds. The ui rebuild wiped them, the same trap the
+        // activeBoard comment above records, so a collapsed chart group or
+        // a collapsed Notebook section sprang open on every reload.
+        collapsedGroups: uiFoldMap(s.ui.collapsedGroups),
+        collapsedBoards: uiFoldMap(s.ui.collapsedBoards)
       };
       if (s.ui.columnWidths && typeof s.ui.columnWidths === "object") {
         for (var widthCol in s.ui.columnWidths) {
@@ -13980,6 +14019,13 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       (PROJECT.ui = PROJECT.ui || {}).activeBoard = board.id;
       PIN_SEL = entry.id;
     });
+    // Keeping a page into a FOLDED section must never look like nothing
+    // happened, so the fold opens for it, once. An explicit click on the
+    // section row re-folds it. Armed here at the source, because the live
+    // keep path never touches PIN_SEL (that assignment is the REDO closure)
+    // and a render-time change detector therefore watched a signal that
+    // never fires.
+    if (collapsedBoards()[board.id]) BOARD_FORCE_OPEN[board.id] = 1;
     persist();
     syncAll();
     if (appWorkspace() === "pinboard") renderPinboard();
@@ -15431,6 +15477,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     target.pins.push(pin);
     (PROJECT.ui = PROJECT.ui || {}).activeBoard = target.id;
     PIN_SEL = pin.id;
+    // The keep rule: arriving in a folded section opens it once.
+    if (collapsedBoards()[target.id]) BOARD_FORCE_OPEN[target.id] = 1;
     persist(); syncAll();
     if (appWorkspace() === "pinboard") renderPinboard();
     var step = nbStep("the move", function () {
@@ -26243,6 +26291,10 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   // Publication-figure composer. Canvas coordinates are always stored at
   // full page size; zoom affects only the view, never project geometry or
   // export. Selection is an ordered id array; the final id is primary.
+  // The Notebook sections' force-open one-shot, the GROUP_FORCE_OPEN idiom.
+  // Armed at the keep and move sites, consumed by the rail render, cleared
+  // by an explicit click on the section row.
+  var BOARD_FORCE_OPEN = {};
   var LAYOUT_SEL = [];
   var LAYOUT_ACTIVE_ID = null;
   var LAY_DRAG = null;
@@ -29795,18 +29847,47 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       wrap.appendChild(mkEl("div", "ps-project-group-label", "Notebook"));
       var boards = pinBoards();
       for (var i = 0; i < boards.length; i++) (function (b) {
+        // The page list renders for the active board in EVERY workspace,
+        // so the fold and its chrome follow the LIST, not the workspace.
+        // Only the click-to-toggle needs the pinboard workspace, because
+        // everywhere else a click on the row means "take me there".
+        var listed = activePinBoard().id === b.id;
+        var isActive = appWorkspace() === "pinboard" && listed;
+        var folded = listed && !!collapsedBoards()[b.id] &&
+          !BOARD_FORCE_OPEN[b.id];
         var row = mkEl("button", "ps-project-item" +
-          (appWorkspace() === "pinboard" && activePinBoard().id === b.id
-           ? " ps-project-active" : ""));
+          (isActive ? " ps-project-active" : ""));
         row.type = "button";
         row.setAttribute("data-project-board-id", b.id);
         setTip(row, b.name + " - " + b.pins.length +
-          (b.pins.length === 1 ? " page" : " pages"));
+          (b.pins.length === 1 ? " page" : " pages") +
+          (isActive ? (folded ? " \u00b7 click to show them"
+                              : " \u00b7 click to collapse them") : ""));
         var ico = mkEl("span", "ps-nav-icon");
         ico.innerHTML = RAIL_ICON_NOTEBOOK;
         row.appendChild(ico);
         row.appendChild(mkEl("span", "", b.name));
+        // The ACTIVE section is the only one that lists pages, so it is the
+        // only one with anything to disclose: it wears the group headers'
+        // chevron and, when folded, their count badge, and a click on it
+        // TOGGLES rather than navigating, because you are already there.
+        if (listed) {
+          row.setAttribute("aria-expanded", folded ? "false" : "true");
+          row.appendChild(mkEl("span", "ps-project-gchev",
+            folded ? "\u25b8" : "\u25be"));
+          if (folded)
+            row.appendChild(mkEl("span", "ps-project-gcount",
+              String(b.pins.length)));
+        }
         row.addEventListener("click", function () {
+          if (appWorkspace() === "pinboard" && activePinBoard().id === b.id) {
+            var folds = collapsedBoards();
+            var showing = !folds[b.id] || !!BOARD_FORCE_OPEN[b.id];
+            delete BOARD_FORCE_OPEN[b.id];   // an explicit click always wins
+            if (showing) folds[b.id] = 1; else delete folds[b.id];
+            persist(false); syncProjectNavigator();
+            return;
+          }
           narrowCloseAfterNavigation();
           (PROJECT.ui = PROJECT.ui || {}).activeBoard = b.id;
           persist(false);
@@ -29819,7 +29900,18 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
         // that workspace's tab strip.
         row.addEventListener("contextmenu", function (e) {
           e.preventDefault();
-          showContextMenu(e.clientX, e.clientY, [
+          var secItems = [];
+          if (listed && b.pins.length)
+            secItems.push({
+              label: folded ? "Show pages" : "Collapse pages",
+              key: "board-fold",
+              action: function () {
+                var folds = collapsedBoards();
+                delete BOARD_FORCE_OPEN[b.id];
+                if (folded) delete folds[b.id]; else folds[b.id] = 1;
+                persist(false); syncProjectNavigator();
+              } });
+          showContextMenu(e.clientX, e.clientY, secItems.concat([
             { label: "Rename section\u2026", key: "board-rename",
               action: function () {
                 BOARD_RENAME = b.id;
@@ -29828,7 +29920,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
               } },
             { label: "Delete section", key: "board-delete",
               action: function () { deletePinBoard(b.id); } }
-          ], null);
+          ]), null);
         });
         wrap.appendChild(row);
         // The pages of the section you are looking at (Torry's rail is the
@@ -29838,6 +29930,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
         // expands, which is how a notebook with sections and pages reads
         // everywhere else.
         if (b.id !== activePinBoard().id) return;
+        if (folded) return;
         for (var pI = 0; pI < b.pins.length; pI++) (function (pin, idx) {
           var prow = mkEl("button",
             "ps-project-item ps-project-item-grouped ps-pinrow" +

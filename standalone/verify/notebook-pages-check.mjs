@@ -383,6 +383,83 @@ ok(back.at === 0 && back.idx === 0,
 ok(back.active === 'b1',
    'and the Notebook goes there, so the undo is visible rather than silent');
 
+console.log('case 10: a section folds its page list, and a keep reopens it');
+// Forty pages is forty rail rows, and the rail's table of contents could
+// not be closed. The active section row is the disclosure, wearing the
+// chart groups' exact vocabulary: chevron, aria-expanded, the count badge
+// when folded, a persisted fold, and the one-shot force-open so a keep
+// into a folded section can never look like nothing happened.
+const foldState = () => page.evaluate(() => {
+    const rows = [...document.querySelectorAll('[data-project-board-id]')];
+    const listed = rows.find(r => r.querySelector('.ps-project-gchev'));
+    return {
+        pages: document.querySelectorAll('[data-project-pin-id]').length,
+        aria: listed ? listed.getAttribute('aria-expanded') : null,
+        count: listed ? ((listed.querySelector('.ps-project-gcount') || {})
+            .textContent || null) : null
+    };
+});
+await page.evaluate(() => window.PS_SHELL.setWorkspace('pinboard'));
+await page.waitForTimeout(700);
+const f0 = await foldState();
+ok(f0.pages > 0 && f0.aria === 'true',
+   'the active section lists its pages and says it is expanded (' +
+   f0.pages + ' pages)');
+await page.evaluate(() => {
+    document.querySelector('[data-project-board-id].ps-project-active').click();
+});
+await page.waitForTimeout(400);
+const f1 = await foldState();
+ok(f1.pages === 0 && f1.aria === 'false' && f1.count === String(f0.pages),
+   'clicking the row you are already reading folds the list, and the badge ' +
+   'carries the hidden count (' + f1.count + ')');
+await page.reload();
+await page.waitForTimeout(2200);
+const f2 = await foldState();
+ok(f2.pages === 0 && f2.aria === 'false',
+   'the fold survives a reload');
+// keep a page from the chart workspace; the fold must open for it
+await page.evaluate(() => window.PS_SHELL.setWorkspace('chart'));
+await page.waitForTimeout(1400);
+const fo = await page.evaluate(() => {
+    const r = document.querySelector('.graphbuilder2-host').getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+});
+await page.mouse.click(fo.x, fo.y, { button: 'right' });
+await page.waitForTimeout(400);
+await page.evaluate(() => {
+    const b = [...document.querySelectorAll('#ps-contextmenu button')]
+        .find(x => /^Keep/i.test(x.textContent.trim()));
+    b.click();
+});
+await page.waitForTimeout(400);
+await page.evaluate(() => {
+    const b = [...document.querySelectorAll('#ps-contextmenu button')]
+        .find(x => /keep-to-/.test(x.getAttribute('data-context-action') || ''));
+    if (b) b.click();
+});
+await page.waitForTimeout(1100);
+const f3 = await foldState();
+ok(f3.pages === f0.pages + 1 && f3.aria === 'true',
+   'keeping a page into the folded section opens it, once, so the keep is ' +
+   'visible (' + f3.pages + ' pages showing)');
+await page.evaluate(() => window.PS_SHELL.setWorkspace('pinboard'));
+await page.waitForTimeout(600);
+await page.evaluate(() => {
+    document.querySelector('[data-project-board-id].ps-project-active').click();
+});
+await page.waitForTimeout(400);
+const f4 = await foldState();
+ok(f4.pages === 0 && f4.count === String(f0.pages + 1),
+   'and an explicit click wins over the force-open, re-folding at the new ' +
+   'count (' + f4.count + ')');
+await page.evaluate(() => {
+    document.querySelector('[data-project-board-id].ps-project-active').click();
+});
+await page.waitForTimeout(400);
+ok((await foldState()).pages === f0.pages + 1,
+   'a second click shows them again, so the whole thing is one toggle');
+
 ok(errors.length === 0, 'no page errors (' + errors.slice(0, 2).join(' | ') + ')');
 console.log('notebook-pages-check: all cases passed');
 await browser.close();

@@ -170,7 +170,15 @@ const nav = await page.evaluate(() => {
             .map(n => n.textContent),
         boards: [...document.querySelectorAll(
             '#ps-project-nav [data-project-board-id]')]
-            .map(n => n.textContent.trim()),
+            .map(n => {
+                // The NAME, without the disclosure chrome: the active
+                // section row carries the fold chevron and, when folded,
+                // the count badge, and this assertion is about naming.
+                const c = n.cloneNode(true);
+                c.querySelectorAll('.ps-project-gchev, .ps-project-gcount')
+                    .forEach(x => x.remove());
+                return c.textContent.trim();
+            }),
         iconMatches: sig(document.querySelector(
             '#ps-project-nav [data-project-board-id] svg')) ===
             sig(document.querySelector(
