@@ -38,6 +38,12 @@
   var PS_SAVE_KEY = "psstandalone.project.v2";
   var PS_BACKUP_KEY = "psstandalone.project.backup.v1";
   var PS_RECENT_KEY = "psstandalone.recent.v1";
+  // Written when an autosave fails and cleared when one succeeds, so a RELOAD
+  // can tell that the snapshot it is about to offer predates the work that was
+  // on screen. Deliberately tiny, and its write is best-effort: if the store
+  // is so full that twenty bytes will not fit, the app is no worse off than
+  // before.
+  var PS_STALE_KEY = "psstandalone.autosaveStale.v1";
   var PS_WELCOME_SESSION_KEY = "psstandalone.welcome.dismissed";
   var PS_PREF_KEY = "psstandalone.preferences.v1";
   var PS_COACH_KEY = "psstandalone.coach.clickToEdit.v1";
@@ -311,6 +317,93 @@
     return !!(col && t && t.missingTokensByCol &&
               Array.isArray(t.missingTokensByCol[col]));
   }
+  // ---- what a jamovi file derived, and this app does not -------------------
+  // Two silences in the .omv reader, one rule for both. A jamovi FILTER hides
+  // rows and was dropped outright, so a sender who charted 120 of 240 cases
+  // got a recipient charting 240 with nothing said. A jamovi COMPUTED column
+  // arrived as ordinary data, so it went stale the moment a source value was
+  // edited, again with nothing said. Neither formula is translated, because
+  // both languages differ from this app's and a wrong translation is worse
+  // than an honest gap. What is offered instead is the plain statement of
+  // what the file carries and what is not being done with it.
+  //
+  // The wording lives here, in one place, so the toast at import and the
+  // surfaces that outlive it cannot end up telling different stories.
+  function importedFilterPhrases(list) {
+    return (list || []).map(function (f) {
+      var s = f.name || "an unnamed filter";
+      if (f.formula)
+        s += " (" + f.formula + (f.active ? "" : ", switched off in jamovi") + ")";
+      else if (!f.active) s += " (switched off in jamovi)";
+      return s;
+    });
+  }
+  // A filter this app CAN honour, meaning it was switched on in jamovi and
+  // its column holds the confirmed 0/1 result. Anything else is still only
+  // described, never acted on.
+  function appliedJamoviFilters(t) {
+    return ((t && t.importedFilters) || []).filter(function (f) {
+      return f.active && f.binary && t.raw && t.raw[f.name];
+    });
+  }
+  // Which of them are STILL applied. The list above says which ones this app
+  // is able to honour; that is the right question at import and the wrong one
+  // afterwards, because the moment the reader deletes the condition in Filter
+  // the claim goes stale and the note keeps insisting the file's filter is on.
+  function liveJamoviFilters(t) {
+    var live = validFilters(t);
+    return appliedJamoviFilters(t).filter(function (f) {
+      return live.some(function (c) {
+        return c.col === f.name && c.op === "eq" && String(c.value) === "1";
+      });
+    });
+  }
+  function importedFilterNote(t) {
+    var list = t && t.importedFilters;
+    if (!list || !list.length) return "";
+    var one = list.length === 1;
+    var live = liveJamoviFilters(t);
+    var phrases = importedFilterPhrases(list).join("; ") + ".";
+    if (live.length) {
+      // The file declares these ON, and honouring a document's own declared
+      // state is fidelity rather than a decision this app made. It is stated
+      // rather than done quietly, and one click in Filter removes it.
+      var kept = nRows(t) - filteredRowCount(t);
+      return "This jamovi file's " + (live.length === 1 ? "filter is" :
+        live.length + " filters are") + " applied here, so the charts show " +
+        kept + " of " + nRows(t) + " rows, the same rows jamovi was showing. " +
+        "Turn " + (live.length === 1 ? "it" : "them") + " off in Filter to " +
+        "see everything. " + phrases;
+    }
+    // Phrased as what the jamovi filters do NOT hide, rather than as "all N
+    // rows are shown". The second claim is false the moment the reader adds
+    // a filter of their own, and this sentence sits on the very control they
+    // would use to do it.
+    return "This jamovi file carries " + (one ? "a filter" : list.length +
+      " filters") + ", which " + (one ? "is" : "are") + " not applied here, " +
+      "so " + (one ? "it hides" : "they hide") + " none of the " + nRows(t) +
+      " rows. " + phrases;
+  }
+  function importedFormulaOf(t, col) {
+    var m = t && t.importedFormulas;
+    return (m && col && m[col]) ? m[col] : null;
+  }
+  function importedFormulaHeading(rec) {
+    if (!rec) return "";
+    if (rec.kind === "Recoded") return "Recoded in jamovi";
+    if (rec.kind === "Output") return "Made by a jamovi analysis";
+    return "Computed in jamovi";
+  }
+  // The one-line form, for a tooltip. "Snapshot" is the word the extracted
+  // date columns already use for exactly this, so it is the word used here.
+  function importedFormulaNote(rec) {
+    if (!rec) return "";
+    var made = importedFormulaHeading(rec);
+    if (rec.kind === "Recoded" && rec.transform) made += " by " + rec.transform;
+    if (rec.formula) made += " as " + rec.formula;
+    return made +
+      ". A snapshot of its values, so it does not follow its sources here.";
+  }
   // t3-53. Parsed from the preference each time rather than cached, so a
   // change applies to the very next import with no reload.
   function prefMissingTokens() {
@@ -508,6 +601,146 @@
   function inferType(rawVals, tokens) {
     return numericAudit(rawVals, tokens).numeric ? "continuous" : "nominal";
   }
+  // A numeric missing-value CODE passes every gate the audit above has. It
+  // reads as a number, so bad === 0, the column types Continuous, and the
+  // value is averaged. The inspector already prints "Min -99" two rows above
+  // the mean it poisoned, and the per-column missing field underneath both
+  // already carries the placeholder "such as -99 for an age" - three facts on
+  // one panel that nothing joined up.
+  //
+  // The detector reports; it never acts. That is what lets it be useful
+  // without being reckless, because the cost of a rare false positive is one
+  // glance at a card the user declines. What it must never do is fire on
+  // ordinary data, so two independent clauses carry the claim and a value
+  // must match the conventional SHAPE as well as one of them.
+  var MISSING_CODE_SHAPES = { 7: 1, 8: 1, 9: 1, 77: 1, 88: 1, 99: 1,
+                              777: 1, 888: 1, 999: 1,
+                              7777: 1, 8888: 1, 9999: 1 };
+  var MISSING_CODE_MIN_N = 6;
+  function missingCodeAudit(values) {
+    // values is the TYPED column, so anything already declared missing is
+    // null here and a handled code can never be reported twice.
+    var nums = [], i, v;
+    for (i = 0; i < values.length; i++) {
+      v = values[i];
+      if (typeof v === "number" && isFinite(v)) nums.push(v);
+    }
+    if (nums.length < MISSING_CODE_MIN_N) return null;
+    var cand = Object.create(null), n = 0;
+    for (i = 0; i < nums.length; i++) {
+      v = nums[i];
+      if (v === Math.round(v) && MISSING_CODE_SHAPES[Math.abs(v)]) {
+        if (cand[v] === undefined) { cand[v] = 0; n++; }
+        cand[v]++;
+      }
+    }
+    if (!n) return null;
+    // The body of ordinary data excludes EVERY candidate, not just the one
+    // under test. A column coded -99 for refused and -88 for not applicable
+    // otherwise hides each code behind the other, and both walk through.
+    var rest = [], distinct = Object.create(null), d = 0;
+    for (i = 0; i < nums.length; i++) if (cand[nums[i]] === undefined) {
+      rest.push(nums[i]);
+      if (distinct[nums[i]] === undefined) { distinct[nums[i]] = 1; d++; }
+    }
+    // Without a body of ordinary data to compare against there is no evidence
+    // either way, and guessing is exactly what this must not do.
+    if (rest.length < MISSING_CODE_MIN_N || d < 3) return null;
+    var lo = Math.min.apply(null, rest), hi = Math.max.apply(null, rest);
+    var span = hi - lo;
+    var found = [], keys = Object.keys(cand);
+    for (var k = 0; k < keys.length; k++) {
+      var c = Number(keys[k]);
+      // Clause A, sign impossibility. A negative value in a measurement that
+      // is otherwise never negative is the commonest real case (-99 and -999
+      // in survey and clinical exports) and the safest to claim, because a
+      // variable with genuine negatives - a change score, a temperature -
+      // fails it outright.
+      var signImpossible = c < 0 && lo >= 0;
+      // Clause B, distance. Further from the data than the data is wide,
+      // twice over. This is what catches 9999 in a 0..100 column while
+      // leaving a 99 that sits inside a range of scores alone.
+      var gap = c < lo ? lo - c : c > hi ? c - hi : 0;
+      var farOut = span > 0 && gap > 2 * span;
+      if (!signImpossible && !farOut) continue;
+      var firstRow = -1;
+      for (i = 0; i < values.length; i++)
+        if (values[i] === c) { firstRow = i; break; }
+      found.push({ value: c, count: cand[c], row: firstRow,
+                   restMin: lo, restMax: hi,
+                   meanWith: mean_(nums), meanWithout: mean_(rest) });
+    }
+    if (!found.length) return null;
+    found.sort(function (a, b) { return a.value - b.value; });
+    return found;
+  }
+  function mean_(a) {
+    var s = 0;
+    for (var i = 0; i < a.length; i++) s += a[i];
+    return a.length ? s / a.length : 0;
+  }
+  // Control, control and CONTROL are one group to a reader and three levels
+  // to the app, which is three bars, three palette colours and three cells in
+  // every statistic. Whitespace is already folded into levels, so the
+  // machinery for saying "these are the same" exists; it just stops at case.
+  //
+  // The key is deliberately SHALLOW. Lower-casing, collapsing runs of space
+  // and dropping the punctuation people vary by (hyphen, underscore, dot,
+  // comma) covers what actually goes wrong in hand-entered and multi-site
+  // data. It does NOT sort tokens, so "dose, high" and "high dose" stay
+  // separate; that is a real OpenRefine trick and also the first one that
+  // merges labels which are genuinely different.
+  function levelVariantKey(s) {
+    return String(s == null ? "" : s).toLocaleLowerCase()
+      .replace(/[-_.,]+/g, " ").replace(/\s+/g, " ").trim();
+  }
+  // retype RE-ADDS a declared level even when no row carries it any more, so
+  // any rewrite that retires a level has to say so here or the dead name
+  // comes back as an empty category. (Find and replace has the same exposure
+  // and does not do this today; a replaced-away level survives in a column
+  // whose order was set by hand.)
+  function pruneDeclaredLevels(t, col, gone) {
+    function drop(list) {
+      if (!Array.isArray(list)) return list;
+      var out = list.filter(function (v) { return !gone[String(v)]; });
+      return out.length ? out : list;
+    }
+    if (t.declaredLevels && Array.isArray(t.declaredLevels[col]))
+      t.declaredLevels[col] = drop(t.declaredLevels[col]);
+    if (t.levelOrderDefaults && Array.isArray(t.levelOrderDefaults[col]))
+      t.levelOrderDefaults[col] = drop(t.levelOrderDefaults[col]);
+  }
+  function levelVariantGroups(t, col) {
+    var type = t.types[col];
+    if (type !== "nominal" && type !== "ordinal") return null;
+    var levels = t.levels[col] || [];
+    // Two levels cannot be a spelling problem worth a card, and a column with
+    // hundreds of distinct values is free text rather than a category.
+    if (levels.length < 3 || levels.length > 200) return null;
+    var counts = Object.create(null), raw = t.raw[col] || [], i;
+    for (i = 0; i < raw.length; i++) {
+      var v = String(raw[i] == null ? "" : raw[i]).trim();
+      if (v !== "") counts[v] = (counts[v] || 0) + 1;
+    }
+    var byKey = Object.create(null), order = [];
+    for (i = 0; i < levels.length; i++) {
+      var k = levelVariantKey(levels[i]);
+      if (k === "") continue;
+      if (byKey[k] === undefined) { byKey[k] = []; order.push(k); }
+      byKey[k].push({ value: levels[i], count: counts[levels[i]] || 0 });
+    }
+    var groups = [];
+    for (i = 0; i < order.length; i++) {
+      var vs = byKey[order[i]];
+      if (vs.length < 2) continue;
+      // The commonest spelling wins, and level order breaks a tie, so the
+      // answer never depends on object key order.
+      var best = vs[0];
+      for (var j = 1; j < vs.length; j++) if (vs[j].count > best.count) best = vs[j];
+      groups.push({ key: order[i], canonical: best.value, variants: vs });
+    }
+    return groups.length ? groups : null;
+  }
   // A column "stores numbers" when its typed view is numeric: continuous,
   // or ordinal whose raw values all parse (usable as values AND as
   // ordered categories - the jamovi dual role).
@@ -697,18 +930,32 @@
     gt: { label: ">", num: true, cat: false },
     ge: { label: "\u2265", num: true, cat: false },
     lt: { label: "<", num: true, cat: false },
-    le: { label: "\u2264", num: true, cat: false }
+    le: { label: "\u2264", num: true, cat: false },
+    // "Which rows are incomplete" had no answer anywhere. Find matches no
+    // blanks, the Missing count in the panel is not a link, and the only
+    // working route was sorting a column ascending, which is one column at a
+    // time and permanently reorders the dataset to answer a read-only
+    // question. These two take no value, which is why every value test below
+    // has to exempt them.
+    nul: { label: "is missing", num: true, cat: true, noValue: true },
+    nnul: { label: "is not missing", num: true, cat: true, noValue: true }
   };
+  function filterNeedsValue(op) {
+    return !(FILTER_OPS[op] && FILTER_OPS[op].noValue);
+  }
   function validFilters(t) {
     if (!t || !Array.isArray(t.filters)) return [];
     return t.filters.filter(function (f) {
       return f && f.col && t.raw && t.raw[f.col] && FILTER_OPS[f.op] &&
-        String(f.value == null ? "" : f.value) !== "";
+        (!filterNeedsValue(f.op) ||
+         String(f.value == null ? "" : f.value) !== "");
     });
   }
   function filterSummaryText(t) {
     return validFilters(t).map(function (f) {
       var num = colStoresNumbers(t, f.col);
+      if (!filterNeedsValue(f.op))
+        return f.col + " " + FILTER_OPS[f.op].label;
       return f.col + " " + FILTER_OPS[f.op].label + " " +
         (num ? String(f.value) : '"' + String(f.value) + '"');
     }).join(" and ");
@@ -736,6 +983,13 @@
       for (var f = 0; f < fs.length && !out; f++) {
         var flt = fs[f];
         var v = t.columns[flt.col] ? t.columns[flt.col][i] : null;
+        // Asked BEFORE the rule below, because these two operators exist to
+        // talk about exactly the case it discards. A row kept by "is missing"
+        // was not dropped for missingness and must not be counted as such.
+        if (!filterNeedsValue(flt.op)) {
+          if ((flt.op === "nul") !== (v == null)) out = true;
+          continue;
+        }
         // B6. A row whose filter column is MISSING is dropped, and the note
         // named only the conditions and counts, so a reader attributed every
         // dropped row to the stated threshold. The rule is unchanged (a row
@@ -1155,6 +1409,87 @@
     }
     return out;
   }
+  // Every column that has a quick transform to offer. The row used to render
+  // for ONE column, the one that happened to be selected before the dialog
+  // opened, and nothing on screen said so - while the empty preview promised
+  // "or pick a quick transform" whether or not any were there. A student can
+  // hand-write (score - MEAN(score)) / SD(score) with a one-click z-score
+  // sitting behind an invisible precondition, which is what happened.
+  function formulaSourceChoices(t) {
+    var out = [];
+    if (!t) return out;
+    for (var i = 0; i < t.order.length; i++)
+      if (formulaTemplatesFor(t.order[i], t).length) out.push(t.order[i]);
+    return out;
+  }
+  // With no column named, land on the one the user is most likely to want.
+  // The inspected variable first, because that is what the app already thinks
+  // they are looking at, then the first numeric column, because five of the
+  // six transforms are numeric and a factor's only offer is a long recode.
+  function formulaDefaultSource(t, choices) {
+    if (!choices.length) return null;
+    if (INSPECTOR_VAR && choices.indexOf(INSPECTOR_VAR) !== -1)
+      return INSPECTOR_VAR;
+    for (var i = 0; i < choices.length; i++)
+      if (colStoresNumbers(t, choices[i])) return choices[i];
+    return choices[0];
+  }
+  function formulaTemplatesShown() {
+    var tpl = el("ps-formula-templates");
+    return !!tpl && tpl.style.display !== "none" &&
+      !!tpl.querySelector("[data-formula-template]");
+  }
+  // The source is now a control rather than hidden state, so the dialog can
+  // always show the transforms AND say which column they read - and the user
+  // can point them somewhere else without closing and starting again.
+  function renderFormulaTemplates(source) {
+    var t = PROJECT.table;
+    var tpl = el("ps-formula-templates");
+    if (!tpl) return;
+    var choices = formulaSourceChoices(t);
+    tpl.innerHTML = "";
+    if (!choices.length) {
+      tpl.style.display = "none";
+      if (FORMULA_EDIT) FORMULA_EDIT.source = null;
+      return;
+    }
+    tpl.style.display = "flex";
+    tpl.appendChild(mkEl("span", "ps-formula-templates-label",
+      "Quick transforms for"));
+    var pick = mkEl("select");
+    pick.id = "ps-formula-source";
+    pick.setAttribute("aria-label", "Column the quick transforms read");
+    for (var c = 0; c < choices.length; c++) {
+      var opt = mkEl("option", "", choices[c]);
+      opt.value = choices[c];
+      pick.appendChild(opt);
+    }
+    pick.value = source && choices.indexOf(source) !== -1
+      ? source : formulaDefaultSource(t, choices);
+    pick.addEventListener("change", function () {
+      renderFormulaTemplates(this.value);
+    });
+    tpl.appendChild(pick);
+    // The chosen source is also where a saved column LANDS (saveComputedColumn
+    // places it after afterCol), so the picker has to write it back.
+    if (FORMULA_EDIT) FORMULA_EDIT.source = pick.value;
+    var templates = formulaTemplatesFor(pick.value, t);
+    for (var i = 0; i < templates.length; i++) {
+      (function (tp) {
+        var b = mkEl("button", "", tp.label);
+        b.type = "button";
+        b.setAttribute("data-formula-template", tp.label);
+        setTip(b, tp.formula);
+        b.addEventListener("click", function () {
+          el("ps-formula-input").value = tp.formula;
+          if (!FORMULA_EDIT.col)
+            el("ps-formula-name").value = uniqueColumnName(tp.name);
+          refreshFormulaPreview();
+        });
+        tpl.appendChild(b);
+      })(templates[i]);
+    }
+  }
   function uniqueColumnName(base) {
     var t = PROJECT.table, name = base, k = 2;
     while (t.order.indexOf(name) !== -1 &&
@@ -1173,26 +1508,7 @@
     el("ps-formula-name").disabled = !!editingCol;
     el("ps-formula-input").value = editingCol
       ? (t.computed[editingCol] || "") : "";
-    var tpl = el("ps-formula-templates");
-    tpl.innerHTML =
-      '<span class="ps-formula-templates-label">Quick transforms</span>';
-    var templates = formulaTemplatesFor(source, t);
-    for (var i = 0; i < templates.length; i++) {
-      (function (tp) {
-        var b = mkEl("button", "", tp.label);
-        b.type = "button";
-        b.setAttribute("data-formula-template", tp.label);
-        setTip(b, tp.formula);
-        b.addEventListener("click", function () {
-          el("ps-formula-input").value = tp.formula;
-          if (!FORMULA_EDIT.col)
-            el("ps-formula-name").value = uniqueColumnName(tp.name);
-          refreshFormulaPreview();
-        });
-        tpl.appendChild(b);
-      })(templates[i]);
-    }
-    tpl.style.display = templates.length ? "flex" : "none";
+    renderFormulaTemplates(source);
     refreshFormulaPreview();
     openShellDialog("ps-formula-dialog");
   }
@@ -1202,8 +1518,12 @@
     var msg = el("ps-formula-msg"), prev = el("ps-formula-preview");
     if (!String(formula).trim()) {
       msg.textContent = "";
-      prev.textContent = "Type a formula (or pick a quick transform) " +
-        "to preview its first values.";
+      // Only promise the shortcut when the shortcut is on screen. A table with
+      // nothing to transform gets the shorter sentence rather than a pointer
+      // to a row that is not there.
+      prev.textContent = formulaTemplatesShown()
+        ? "Type a formula (or pick a quick transform) to preview its first values."
+        : "Type a formula to preview its first values.";
       return;
     }
     var editing = FORMULA_EDIT && FORMULA_EDIT.col;
@@ -1261,6 +1581,14 @@
         t.computed[next] = t.computed[oldName];
         delete t.computed[oldName];
       }
+    }
+    // The record follows its column, and the formula TEXT is left alone. It
+    // is a quotation of what jamovi did, in jamovi's own vocabulary, and
+    // rewriting the names inside it would make it a paraphrase presented as
+    // a quotation.
+    if (t.importedFormulas && t.importedFormulas[oldName] != null) {
+      t.importedFormulas[next] = t.importedFormulas[oldName];
+      delete t.importedFormulas[oldName];
     }
   }
   function valueExclCount(t) {
@@ -1460,6 +1788,10 @@
         if (wantLevels) t.levels[col] = lv;
       }
       t.columns[col] = out;
+      // Only where a code could hide. A nominal column stores strings, so
+      // the scan would find nothing, and running it anyway would cost a pass
+      // over the widest columns in the table for no result.
+      audit.codes = colStoresNumbers(t, col) ? missingCodeAudit(out) : null;
     }
   }
   function nRows(t) { return t.order.length ? t.raw[t.order[0]].length : 0; }
@@ -1540,9 +1872,65 @@
                     blankDropped: BLANK_ROWS_DROPPED };
     return rows.slice();
   }
-  function parseTableText(text, delimiter, hasHeader) {
+  // A real export puts a title line and a generated-on line above the header,
+  // and "First row" only ever offered Variable names or Data values. The file
+  // then imported with its title as the first column name, V2..Vn for the
+  // rest, and the real names sitting in the table as a data row, with no
+  // promote-row-to-header command anywhere to undo it.
+  //
+  // This looks for the row the names are actually on. It has to be as
+  // conservative as the date detector: claiming a header that is not one
+  // would silently discard a row of real data, which is worse than the
+  // problem. So it fires only on the shape it is built for, a run of SHORT
+  // preamble rows followed by one full row of words. If row one already looks
+  // like a header there is no candidate above it and nothing is offered.
+  var HEADER_SCAN_ROWS = 20;
+  function headerRowGuess(rows) {
+    if (!rows || rows.length < 4) return null;
+    var i, j, counts = [], tally = Object.create(null), best = 0, width = 0;
+    for (i = 0; i < rows.length; i++) {
+      var n = 0;
+      for (j = 0; j < rows[i].length; j++)
+        if (String(rows[i][j] == null ? "" : rows[i][j]).trim() !== "") n++;
+      counts.push(n);
+      tally[n] = (tally[n] || 0) + 1;
+      if (tally[n] > best || (tally[n] === best && n > width)) {
+        best = tally[n]; width = n;
+      }
+    }
+    // One column is not a table, and a preamble cannot be distinguished from
+    // data there.
+    if (width < 2) return null;
+    var limit = Math.min(rows.length - 2, HEADER_SCAN_ROWS);
+    for (i = 0; i < limit; i++) {
+      if (counts[i] !== width) continue;
+      // The first full row is the header the app already uses. Only a full
+      // row sitting BELOW shorter ones is news.
+      if (i === 0) return null;
+      var cells = [], seen = Object.create(null), okRow = true;
+      for (j = 0; j < rows[i].length && okRow; j++) {
+        var v = String(rows[i][j] == null ? "" : rows[i][j]).trim();
+        if (v === "") continue;
+        // Names are words. A number in this row means it is data.
+        if (isFinite(Number(v))) okRow = false;
+        else if (seen[v] !== undefined) okRow = false;   // duplicate name
+        else { seen[v] = 1; cells.push(v); }
+      }
+      if (!okRow) continue;
+      // Everything above it must be shorter, or this is an ordinary table
+      // with a text row in the middle of it.
+      for (j = 0; j < i; j++) if (counts[j] >= width) { okRow = false; break; }
+      if (!okRow) return null;
+      return { index: i, cells: cells, skipped: i };
+    }
+    return null;
+  }
+  function parseTableText(text, delimiter, hasHeader, skipRows) {
     PARSE_ISSUE = "";
     var rows = splitDelimited(text, delimiter);
+    var guess = headerRowGuess(rows);
+    skipRows = Math.max(0, Math.min(Number(skipRows) || 0, rows.length - 1));
+    if (skipRows) { rows = rows.slice(skipRows); guess = null; }
     // Captured immediately: BLANK_ROWS_DROPPED is a side channel, and any
     // later parseDelimitedRows call would overwrite it.
     var blankDropped = BLANK_ROWS_DROPPED;
@@ -1588,6 +1976,8 @@
     var head = resolveHeader(header.slice(0, width));
     return { header: head.names, rows: rows,
              renamed: head.renamed,
+             headerGuess: hasHeader !== false ? guess : null,
+             skippedRows: skipRows,
              blankRowsDropped: blankDropped,
              delimiter: !delimiter || delimiter === "auto"
                ? sniffDelimiter(text) : delimiter,
@@ -1840,6 +2230,10 @@
                excludedRows: t.excludedRows || {},
                filters: t.filters || [],
                computed: t.computed || {},
+               // Provenance, not data. A saved project that forgot which
+               // columns jamovi derived would put the silence straight back.
+               importedFormulas: t.importedFormulas || {},
+               importedFilters: t.importedFilters || [],
                missingTokens: t.missingTokens || ["NA"],
                missingTokensByCol: t.missingTokensByCol || {} }
     };
@@ -2061,6 +2455,7 @@
       AUTOSAVE_HEALTH = "ok";
       AUTOSAVE_LAST_OK = Date.now();
       AUTOSAVE_DETAIL = "Local recovery is current";
+      try { window.localStorage.removeItem(PS_STALE_KEY); } catch (e0) {}
       // Recents stay on BOTH edges. They are observable immediately (the
       // start centre lists them, and anything can ask for them straight after
       // an action), and unlike the backup they do not re-parse the previous
@@ -2071,9 +2466,18 @@
     } catch (e) {
       AUTOSAVE_HEALTH = "error";
       AUTOSAVE_FAILS++;
-      AUTOSAVE_DETAIL = /quota/i.test(String(e && (e.name || e.message)))
-        ? "Browser storage is full; recent changes remain in memory"
+      // The 5k to 12k case already says the useful thing, naming .pand as the
+      // copy that does not depend on this browser. At the size where the data
+      // is ACTUALLY lost the message degraded to one that named no fix and
+      // read as reassurance, so the sentence that would have saved the work
+      // only appeared when it was not needed.
+      var quota = /quota/i.test(String(e && (e.name || e.message)));
+      AUTOSAVE_DETAIL = quota
+        ? "Browser storage is full, so this project is no longer being " +
+          "autosaved. Your work is safe in this tab, and a reload would lose " +
+          "it. Save it to a .pand file now."
         : "Local recovery could not be updated";
+      try { window.localStorage.setItem(PS_STALE_KEY, "1"); } catch (e1) {}
       updateDocumentState();
       showToast(AUTOSAVE_DETAIL, true);
     }
@@ -2127,6 +2531,11 @@
         ? s.table.filters : [];
       PROJECT.table.computed = (s.table.computed &&
         typeof s.table.computed === "object") ? s.table.computed : {};
+      PROJECT.table.importedFormulas = (s.table.importedFormulas &&
+        typeof s.table.importedFormulas === "object")
+          ? s.table.importedFormulas : {};
+      PROJECT.table.importedFilters = Array.isArray(s.table.importedFilters)
+        ? s.table.importedFilters : [];
       retype(PROJECT.table);
     }
     PROJECT.id = s.id || newProjectId();
@@ -2138,6 +2547,7 @@
     }) : [];
     PROJECT.charts = charts.length ? charts : [newChart("Chart 1")];
     layHistoryClear();
+    nbHistoryClear();
     clearAllEngineDocState();
     for (var ci = 0; ci < PROJECT.charts.length; ci++)
       if (isLayoutTab(PROJECT.charts[ci])) layNormalizeLayout(PROJECT.charts[ci]);
@@ -2244,6 +2654,9 @@
   // The identity carries the product's real name (Pandion Plots); the
   // loader sniffs CONTENT, so .pand / .pnd / .pandion / .json all open.
   function projectFileText() {
+    // Every .pand the app writes goes through here, so this is where a
+    // pending colour has to be banked rather than at one call site.
+    bankPendingColor();
     var body = projectSnapshot();
     return JSON.stringify({
       kind: "pandion-plots-project",
@@ -2321,6 +2734,21 @@
       b.__psFlashing = false;
       updateDocumentState();
     }, 1200);
+  }
+  // A colour picked but not yet closed lives only in the engine's picker
+  // state. The unload flush banks it for a reload or a closing tab, but
+  // Cmd/Ctrl+S is neither, and that chord is bound on a window CAPTURE
+  // listener with no focused-field guard - so it fires happily while the
+  // cursor is in the picker's hex box. Measured before this: a .pand
+  // written 581 bytes short, with no colour key, while the status bar said
+  // "Saved". Bank it first, through the engine's own commit path, so the
+  // file contains the chart that is on screen.
+  function bankPendingColor() {
+    try {
+      var host = hostEl();
+      if (host && typeof host.__gb2_commitPendingColor === "function")
+        host.__gb2_commitPendingColor();
+    } catch (e) {}
   }
   function saveProjectFile() {
     var text = projectFileText();
@@ -2402,7 +2830,8 @@
   var EXPORT_PIN_SCOPE = null;
 
   function exportPrefs() {
-    var out = { format: "svg", dpi: 300, background: "shown" };
+    var out = { format: "svg", dpi: 300, background: "shown",
+                pinRecord: true };
     try {
       var p = JSON.parse(window.localStorage.getItem(PS_EXPORT_PREF_KEY) || "null");
       if (p && /^(svg|pdf|png|jpg)$/.test(p.format)) out.format = p.format;
@@ -2410,6 +2839,7 @@
         out.dpi = Number(p.dpi);
       if (p && /^(shown|transparent|white)$/.test(p.background))
         out.background = p.background;
+      if (p && p.pinRecord === false) out.pinRecord = false;
     } catch (e) {}
     return out;
   }
@@ -2419,7 +2849,8 @@
       window.localStorage.setItem(PS_EXPORT_PREF_KEY, JSON.stringify({
         format: selectedExportFormat(),
         dpi: Number(el("ps-export-dpi").value) || 300,
-        background: bgEl.__psBeforeForced || bgEl.value || "shown"
+        background: bgEl.__psBeforeForced || bgEl.value || "shown",
+        pinRecord: !!el("ps-export-record").checked
       }));
     } catch (e) {}
   }
@@ -2832,6 +3263,7 @@
     el("ps-export-bg").value = p.background;
     var capField = el("ps-export-caption-field");
     var descField = el("ps-export-description-field");
+    var recField = el("ps-export-record-field");
     var bgField = el("ps-export-bg").closest(".ps-export-field");
     if (EXPORT_PIN_SCOPE) {
       // Notebook mode: a page is a finished capture - its caption,
@@ -2849,6 +3281,11 @@
       capField.style.display = "none";
       descField.style.display = "none";
       if (bgField) bgField.style.display = "none";
+      // The page's OWN record replaces the caption box here. Nothing to
+      // type, because the page already knows when it was kept, what it
+      // came from, and what the user wrote about it.
+      recField.style.display = "";
+      el("ps-export-record").checked = exportPrefs().pinRecord;
     } else {
       var c = activeChart();
       el("ps-export-title").textContent =
@@ -2866,6 +3303,7 @@
       el("ps-export-description").value =
         savedDescription || generatedExportDescription();
       descField.style.display = "";
+      recField.style.display = "none";
       if (bgField) bgField.style.display = "";
     }
     el("ps-export-copy-status").textContent = "";
@@ -3246,11 +3684,14 @@
       w: size.w, h: size.h + capH
     };
   }
-  function wrapCaptionLines(textStr, maxW, fontSize) {
+  function wrapCaptionLines(textStr, maxW, fontSize, font) {
     var cv = document.createElement("canvas");
     var ctx = cv.getContext("2d");
-    ctx.font = fontSize + "px -apple-system, 'Segoe UI', Roboto, " +
-      "Helvetica, Arial, sans-serif";
+    // font is optional and defaults to the UI stack, so the two callers that
+    // measure UI text are unchanged. Layout text passes the family and weight
+    // it actually declares.
+    ctx.font = font || (fontSize + "px -apple-system, 'Segoe UI', Roboto, " +
+      "Helvetica, Arial, sans-serif");
     var out = [];
     var paragraphs = String(textStr).split(/\r?\n/);
     for (var pI = 0; pI < paragraphs.length; pI++) {
@@ -3270,6 +3711,12 @@
     }
     return out.length ? out : [String(textStr)];
   }
+  // The canvas's own text box, so the export can break where the screen does.
+  // The same three numbers are written in .ps-ltext in index.html, and a
+  // probe pins the two together.
+  var LAY_TEXT_MAX_W = 480;
+  var LAY_TEXT_PAD_X = 4;
+  var LAY_TEXT_LINE = 1.25;
   function layoutTextNode(doc, item) {
     var ns = "http://www.w3.org/2000/svg";
     var t = doc.createElementNS(ns, "text");
@@ -3289,11 +3736,27 @@
         ((Number(item.x) || 0) + texRect.w / 2) + " " +
         ((Number(item.y) || 0) + texRect.h / 2) + ")");
     }
-    var lines = String(item.text || "Text").split(/\r?\n/);
+    // WRAPPED where the canvas wraps it. The canvas caps a text item at
+    // .ps-ltext max-width 480 px and wraps inside that; the file used to
+    // split on newlines only, so a caption came out as one long line that
+    // changed the figure's shape and could run past the page edge and be
+    // cut. Measured in the same family and weight the file declares, so the
+    // two break in the same places.
+    // The effective width is whichever is smaller, the 480 px cap or the room
+    // left on the page, because an absolutely positioned box shrinks to fit
+    // its containing block. On a journal-width page the canvas wrapped at the
+    // room left while the file still wrapped at 480 and produced one line
+    // fewer.
+    var pageW = layPage().w;
+    var wrapW = Math.max(40, Math.min(LAY_TEXT_MAX_W,
+      pageW - (Number(item.x) || 0))) - LAY_TEXT_PAD_X * 2;
+    var lines = wrapCaptionLines(String(item.text || "Text"), wrapW, fs,
+      (item.italic ? "italic " : "") + (item.bold ? "700" : "400") +
+      " " + fs + "px sans-serif");
     for (var i = 0; i < lines.length; i++) {
       var sp = doc.createElementNS(ns, "tspan");
       sp.setAttribute("x", String(x));
-      if (i > 0) sp.setAttribute("dy", "1.25em");
+      if (i > 0) sp.setAttribute("dy", LAY_TEXT_LINE + "em");
       sp.textContent = lines[i] || " ";
       t.appendChild(sp);
     }
@@ -3441,6 +3904,91 @@
       } catch (e) { reject(e); }
     });
   }
+  // ---- Physical resolution in the file, not just in the dialog.
+  // "Print - 300 DPI" produced a 3150x2100 canvas with NO density metadata,
+  // so Word, Photoshop and every journal submission checker read the file at
+  // the default 72 or 96 dpi and reported it as a 33 to 44 inch figure that
+  // had to be resampled by hand. The pixels were always right; only the
+  // declared size was missing. Canvas cannot write this, so the encoded
+  // bytes are patched after toBlob, a pHYs chunk for PNG and the JFIF
+  // density fields for JPEG. Both are single, well-defined edits on a file the
+  // browser just produced, and both no-op safely on anything unexpected.
+  var PS_CRC_TABLE = null;
+  function psCrc32(bytes, from, to) {
+    var i, j, c;
+    if (!PS_CRC_TABLE) {
+      PS_CRC_TABLE = new Int32Array(256);
+      for (i = 0; i < 256; i++) {
+        c = i;
+        for (j = 0; j < 8; j++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+        PS_CRC_TABLE[i] = c;
+      }
+    }
+    c = -1;
+    for (i = from; i < to; i++)
+      c = PS_CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ -1) >>> 0;
+  }
+  function psPngWithDpi(bytes, dpi) {
+    var sig = [137, 80, 78, 71, 13, 10, 26, 10], i;
+    for (i = 0; i < 8; i++) if (bytes[i] !== sig[i]) return null;
+    // Walk to the first chunk that pHYs must precede, and bail if the file
+    // already declares a density (nothing to correct, and never two).
+    var at = 8, insertAt = -1;
+    while (at + 8 <= bytes.length) {
+      var len = (bytes[at] << 24 | bytes[at + 1] << 16 |
+                 bytes[at + 2] << 8 | bytes[at + 3]) >>> 0;
+      var type = String.fromCharCode(bytes[at + 4], bytes[at + 5],
+                                     bytes[at + 6], bytes[at + 7]);
+      if (type === "pHYs") return null;
+      if (type === "IDAT" || type === "IEND") { insertAt = at; break; }
+      at += 12 + len;
+    }
+    if (insertAt < 0) return null;
+    var ppu = Math.round((Number(dpi) || 96) / 0.0254);
+    var chunk = new Uint8Array(21);
+    chunk[0] = 0; chunk[1] = 0; chunk[2] = 0; chunk[3] = 9;
+    chunk[4] = 112; chunk[5] = 72; chunk[6] = 89; chunk[7] = 115;   // pHYs
+    chunk[8] = ppu >>> 24 & 255; chunk[9] = ppu >>> 16 & 255;
+    chunk[10] = ppu >>> 8 & 255; chunk[11] = ppu & 255;
+    chunk[12] = ppu >>> 24 & 255; chunk[13] = ppu >>> 16 & 255;
+    chunk[14] = ppu >>> 8 & 255; chunk[15] = ppu & 255;
+    chunk[16] = 1;                                                   // metres
+    var crc = psCrc32(chunk, 4, 17);
+    chunk[17] = crc >>> 24 & 255; chunk[18] = crc >>> 16 & 255;
+    chunk[19] = crc >>> 8 & 255; chunk[20] = crc & 255;
+    var out = new Uint8Array(bytes.length + 21);
+    out.set(bytes.subarray(0, insertAt), 0);
+    out.set(chunk, insertAt);
+    out.set(bytes.subarray(insertAt), insertAt + 21);
+    return out;
+  }
+  function psJpegWithDpi(bytes, dpi) {
+    // Canvas writes a standard JFIF APP0 straight after SOI, carrying
+    // units 0 (pixel aspect only) and 1x1. Rewrite those five bytes.
+    if (bytes[0] !== 0xFF || bytes[1] !== 0xD8) return null;
+    if (bytes[2] !== 0xFF || bytes[3] !== 0xE0) return null;
+    if (!(bytes[4] << 8 | bytes[5]) || bytes[6] !== 0x4A ||
+        bytes[7] !== 0x46 || bytes[8] !== 0x49 || bytes[9] !== 0x46 ||
+        bytes[10] !== 0) return null;
+    var d = Math.max(1, Math.min(65535, Math.round(Number(dpi) || 96)));
+    var out = new Uint8Array(bytes);
+    out[13] = 1;                                       // units: dots per inch
+    out[14] = d >>> 8 & 255; out[15] = d & 255;        // Xdensity
+    out[16] = d >>> 8 & 255; out[17] = d & 255;        // Ydensity
+    return out;
+  }
+  function psStampBlobDpi(blob, mime, dpi) {
+    if (!blob || !blob.arrayBuffer) return Promise.resolve(blob);
+    return blob.arrayBuffer().then(function (buf) {
+      var bytes = new Uint8Array(buf), out = null;
+      try {
+        out = mime === "image/png" ? psPngWithDpi(bytes, dpi)
+            : mime === "image/jpeg" ? psJpegWithDpi(bytes, dpi) : null;
+      } catch (e) { out = null; }
+      return out ? new Blob([out], { type: mime }) : blob;
+    }, function () { return blob; });
+  }
   function rasterizeExport(source, mime, dpi) {
     return new Promise(function (resolve, reject) {
       var scale = (Number(dpi) || 96) / 96;
@@ -3467,7 +4015,9 @@
         catch (e) { reject(new Error("The browser could not render the exported SVG.")); return; }
         canvas.toBlob(function (blob) {
           if (!blob) { reject(new Error("The browser could not encode the exported image.")); return; }
-          resolve({ blob: blob, width: w, height: h });
+          psStampBlobDpi(blob, mime, Number(dpi) || 96).then(function (stamped) {
+            resolve({ blob: stamped, width: w, height: h });
+          });
         }, mime, mime === "image/jpeg" ? 0.96 : undefined);
       };
       img.onerror = function () {
@@ -3931,6 +4481,69 @@
     }
     if (changed) persist(false);
   }
+  // ---- Notebook history ------------------------------------------------
+  // Cmd/Ctrl+Z is the app's promise everywhere else, and in this workspace
+  // it fell through to the chart engine: the Edit menu read "Undo chart
+  // styling" while the Notebook was on screen, and the key silently edited
+  // a chart the user was not looking at. Keeping, deleting, moving between
+  // sections and reordering are the structural acts on the record, and they
+  // are what this covers. Notes and titles are text fields, where the
+  // browser's own undo already works while the caret is in them.
+  var NB_UNDO = [], NB_REDO = [], NB_SEQ = 0;
+  function nbStep(label, undo, redo) {
+    NB_SEQ++;
+    var step = { seq: NB_SEQ, label: label, undo: undo, redo: redo };
+    NB_UNDO.push(step);
+    // Same ceiling as the layout history: deep enough to cover a working
+    // session, bounded so a long one cannot grow without limit.
+    if (NB_UNDO.length > 60) NB_UNDO.shift();
+    NB_REDO.length = 0;
+    return step;
+  }
+  function nbApply(fn) {
+    fn();
+    persist();
+    syncAll();
+    if (appWorkspace() === "pinboard") renderPinboard();
+  }
+  function nbUndo() {
+    var step = NB_UNDO.pop();
+    if (!step) return;
+    nbApply(step.undo);
+    NB_REDO.push(step);
+  }
+  function nbRedo() {
+    var step = NB_REDO.pop();
+    if (!step) return;
+    nbApply(step.redo);
+    NB_UNDO.push(step);
+  }
+  // The toast's Undo button and the keyboard must not both undo the same
+  // act: the toast outlives later changes, so it undoes its own step only
+  // while that step is still the one Cmd+Z would reach (the offerDataUndo
+  // rule, applied here).
+  function nbOfferUndo(message, step) {
+    showUndoToast(message, function () {
+      if (!NB_UNDO.length || NB_UNDO[NB_UNDO.length - 1] !== step) {
+        showToast(NB_REDO.indexOf(step) !== -1
+          ? "That change has already been undone"
+          : "A newer Notebook change has already been made", true);
+        return;
+      }
+      nbUndo();
+    });
+  }
+  // A history that outlives its project is not an undo, it is a way to
+  // inject a page from the old project into the new one. The layout history
+  // is cleared at every project boundary; this joins it there.
+  function nbHistoryClear() {
+    NB_UNDO.length = 0;
+    NB_REDO.length = 0;
+  }
+  function nbHistoryLabel(back) {
+    var stack = back ? NB_UNDO : NB_REDO;
+    return stack.length ? stack[stack.length - 1].label : "";
+  }
   // ---- page selection + provenance (Torry, Aug 1 2026: the empty rail,
   // "notes about the current page", the kept time, and "whether the chart
   // it was pulled from has changed") ----
@@ -3953,16 +4566,20 @@
       h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
     return h.toString(16);
   }
-  function pinProvenance(chartEl) {
+  // forId describes a chart OTHER than the one on screen, which is what
+  // keeping an updated copy of a drifted page needs. Without it this reads
+  // the active chart, as every existing caller wants.
+  function pinProvenance(chartEl, forId) {
     try {
-      var id = PROJECT.activeChart, c = chartById(id);
+      var id = forId || PROJECT.activeChart, c = chartById(id);
       if (!c || isLayoutTab(c)) return null;
       // Prefer the authoritative snapshot (captured at render,
       // size-guarded) so the signature is byte-comparable with later
-      // captures; fall back to a snapshot-style clone of the live svg.
+      // captures; fall back to a snapshot-style clone of the live svg. The
+      // fallback is only valid for the chart actually on screen.
       var s = validSnap(id);
-      var html = s ? s.svg : chartEl
-        ? svgSelfContainedClone(chartEl, "snap-" + id + "-").html : null;
+      var html = s ? s.svg : (!forId && chartEl
+        ? svgSelfContainedClone(chartEl, "snap-" + id + "-").html : null);
       if (!html) return null;
       // Analysis + variables at pin time, so a page stays self-describing
       // even after its source chart is deleted (Torry's rail round).
@@ -3981,8 +4598,36 @@
         desc = (modDef ? modDef.label : c.module) +
           (vals.length ? ": " + vals.join(", ") : "");
       } catch (eD) {}
+      // What KIND of chart this was, and the variables alone. A page list
+      // built from srcDesc reads the same on every page kept from one
+      // chart tab (Compare Groups: condition, score, four times over) -
+      // the graph type is what actually tells four explorations apart.
+      // The RESOLVED graph type, not merely an overridden one. A chart's
+      // option store is EMPTY until the user switches type, and the engine
+      // writes nothing when you pick the type you are already on, so reading
+      // the store alone recorded no type at all for every page kept before a
+      // first type change - which for someone exploring by restyling is all
+      // of them. Resolve the store over the template exactly as buildPayload
+      // does. Scatter is the exception worth naming: its type switch commits
+      // xyBin rather than graphType, so a heatmap is only visible there.
+      var kind = "", vars = "";
+      try {
+        var opts = (c.options && c.options[c.module]) || {};
+        var tplp = ((window.PS_TEMPLATES || {})[c.module] || {}).payload || {};
+        var gt = typeof opts.graphType === "string" && opts.graphType
+          ? opts.graphType
+          : (typeof tplp.graphType === "string" ? tplp.graphType : "");
+        var bin = typeof opts.xyBin === "string" && opts.xyBin
+          ? opts.xyBin
+          : (typeof tplp.xyBin === "string" ? tplp.xyBin : "none");
+        if (gt === "scatter" && bin && bin !== "none") gt = "heatmap";
+        kind = pinTypeLabel(gt);
+        vars = desc.indexOf(": ") !== -1
+          ? desc.slice(desc.indexOf(": ") + 2) : "";
+      } catch (eK) {}
       return { srcChart: id, srcName: c.name, srcSig: pinSig(html),
-               srcDesc: desc };
+               srcDesc: desc, srcType: kind || undefined,
+               srcVars: vars || undefined };
     } catch (e) { return null; }
   }
   // The verdict never CLAIMS what it has not verified: the snapshot epoch
@@ -4006,6 +4651,87 @@
       ? { text: name + " - unchanged since it was kept.", state: "same" }
       : { text: name + " - has changed since it was kept.",
           state: "changed" };
+  }
+  // The engine's graphType values in the app's own words. Only the ones a
+  // page can be kept from; anything unlisted falls back to the raw value
+  // rather than inventing a name for it.
+  var PIN_TYPE_LABELS = {
+    bar: "Bar", line: "Line", dot: "Dot", box: "Box", violin: "Violin",
+    raincloud: "Raincloud", scatter: "Scatter", heatmap: "Heatmap",
+    histogram: "Histogram", density: "Density",
+    histdensity: "Histogram + density", qq: "Q-Q", ecdf: "ECDF",
+    pie: "Pie", donut: "Donut", pareto: "Pareto",
+    // Named for the SHAPE, not restated with the analysis. The rail row is
+    // about 117px wide and "Correlation heatmap" alone needed 193px, so the
+    // variables were always cut off; and the exported band prints this next
+    // to srcDesc, where "Correlation heatmap - Correlation Matrix: a, b"
+    // said the same word twice. Scatter's Heatmap shares the name, which the
+    // variables and the analysis line either side of it settle.
+    corrheatmap: "Heatmap", corrcircles: "Circles",
+    corrnumbers: "Numbers", corrmixed: "Mixed",
+    likertdiverging: "Diverging", likertstacked: "100% stacked",
+    likertmeans: "Item means"
+  };
+  function pinTypeLabel(gt) {
+    if (!gt) return "";
+    return PIN_TYPE_LABELS[gt] ||
+      gt.charAt(0).toUpperCase() + gt.slice(1);
+  }
+  // A page needs a NAME before it can appear in a list, and every page
+  // already carries one. A kept comparison knows its own title, a kept
+  // chart knows what it was and which variables it was drawn from. The
+  // user's own title wins over all of it.
+  function pinPageLabel(pin, idx) {
+    var t = String(pin.pageTitle || "").trim();
+    if (t) return t;
+    t = String(pin.momTitle || "").trim();
+    if (t) return t;
+    if (pin.srcType)
+      return pin.srcType + (pin.srcVars ? " \u00b7 " + pin.srcVars : "");
+    t = String(pin.srcDesc || "").trim();
+    if (t) return t;
+    t = String(pin.srcName || "").trim();
+    if (t) return t;
+    return "Page " + (idx + 1);
+  }
+  // The one page footer that names this page, refreshed without touching
+  // the rest of the board.
+  function pinSyncCardLabel(pinId) {
+    var scroll = el("ps-pinscroll");
+    var pg = scroll && scroll.querySelector(
+      '.ps-pinpage[data-pin-id="' + pinId + '"]');
+    var num = pg && pg.querySelector(".ps-pinpage-num");
+    if (!num) return;
+    var pins = projectPins(), at = -1, pin = null;
+    for (var i = 0; i < pins.length; i++)
+      if (pins[i].id === pinId) { at = i; pin = pins[i]; }
+    if (!pin) return;
+    var ttl = String(pin.pageTitle || "").trim();
+    num.textContent = "Page " + (at + 1) + " of " + pins.length +
+      (ttl ? " \u00b7 " + ttl : "") +
+      (pin.at ? " \u00b7 kept " + pinKeptFmt(pin.at) : "");
+  }
+  // Go to a page. The Notebook, its section, selected, and on screen.
+  function pinReveal(pinId) {
+    var boards = pinBoards(), owner = null;
+    for (var i = 0; i < boards.length; i++)
+      for (var j = 0; j < boards[i].pins.length; j++)
+        if (boards[i].pins[j].id === pinId) owner = boards[i];
+    if (!owner) return;
+    (PROJECT.ui = PROJECT.ui || {}).activeBoard = owner.id;
+    PIN_SEL = pinId;
+    persist(false);
+    setAppWorkspace("pinboard");
+    renderPinboard();
+    var scroll = el("ps-pinscroll");
+    var pg = scroll && scroll.querySelector(
+      '.ps-pinpage[data-pin-id="' + pinId + '"]');
+    if (!pg) return;
+    // "nearest" rather than "center", because a page taller than the viewport
+    // should arrive at its TOP, which is where the chart is.
+    try { pg.scrollIntoView({ block: "nearest", behavior: "smooth" }); }
+    catch (e) { pg.scrollIntoView(); }
+    pg.focus();
   }
   function pinDayFmt(at) {
     try {
@@ -4084,6 +4810,22 @@
     el("ps-pininsp-open").style.display =
       sel.srcChart && chartById(sel.srcChart) &&
       !isLayoutTab(chartById(sel.srcChart)) ? "" : "none";
+    // Only on a page whose source has actually moved on. On a page that
+    // still matches, an update button would offer a duplicate.
+    var upd = el("ps-pininsp-update");
+    if (upd) {
+      upd.style.display = pinCanUpdate(sel) ? "" : "none";
+      setTip(upd, "Keep the chart as it is NOW as a new page below this one. " +
+        "This page is left exactly as it was.");
+    }
+    var nm = el("ps-pininsp-name");
+    if (nm && document.activeElement !== nm) {
+      nm.value = sel.pageTitle || "";
+      // The placeholder shows the name the page carries when untitled, so
+      // an empty box reads as "this is what it is called" rather than as a
+      // blank the user has to fill in.
+      nm.placeholder = pinPageLabel(sel, 0);
+    }
     var ta = el("ps-pininsp-note");
     if (document.activeElement !== ta) ta.value = sel.note || "";
   }
@@ -4096,16 +4838,26 @@
     var pins = board.pins;
     var entry = { id: pinNewId(), src: pinSvgSrc(svgText),
                   natW: w, natH: h, w: w, h: h, at: Date.now() };
-    if (prov) {
-      entry.srcChart = prov.srcChart;
-      entry.srcName = prov.srcName;
-      entry.srcSig = prov.srcSig;
-      if (prov.srcDesc) entry.srcDesc = prov.srcDesc;
-    }
+    // Everything pinProvenance recorded, not a hand-listed subset. The
+    // field-by-field copy silently dropped each new provenance field the
+    // moment one was added.
+    if (prov)
+      for (var pk in prov)
+        if (Object.prototype.hasOwnProperty.call(prov, pk) &&
+            prov[pk] != null && prov[pk] !== "") entry[pk] = prov[pk];
     if (extra)
       for (var xk in extra)
         if (extra[xk] != null && extra[xk] !== "") entry[xk] = extra[xk];
     pins.push(entry);
+    nbStep("the keep", function () {
+      var k = pins.indexOf(entry);
+      if (k !== -1) pins.splice(k, 1);
+      (PROJECT.ui = PROJECT.ui || {}).activeBoard = board.id;
+    }, function () {
+      pins.push(entry);
+      (PROJECT.ui = PROJECT.ui || {}).activeBoard = board.id;
+      PIN_SEL = entry.id;
+    });
     persist();
     syncAll();
     if (appWorkspace() === "pinboard") renderPinboard();
@@ -4272,7 +5024,12 @@
         notes.push("excluded values are included as they appear in the grid");
       showToast("Exported " + base + ".csv" + (notes.length ? " (" + notes.join("; ") + ")" : ""));
     }, function (e) {
-      if (e && e.name === "AbortError") return;
+      // Swallowing a deliberate cancel is right, saying nothing at all is
+      // not: a cancelled save and a dead button looked identical.
+      if (e && e.name === "AbortError") {
+        showToast("Export cancelled \u00b7 nothing was written");
+        return;
+      }
       showToast("Could not export the data: " + String(e && e.message || e), true);
     });
   }
@@ -4499,6 +5256,7 @@
     PROJECT.pinboards = [];
     PROJECT.ui.activeBoard = null;
     layHistoryClear();
+    nbHistoryClear();
     PROJECT.name = ex.name;
     PROJECT_REV = 0;
     FILE_SAVED_REV = null;
@@ -4518,7 +5276,10 @@
         roles[k] = ex.roles[k];
     PROJECT.charts = [{ id: "c1", name: "Chart 1",
       module: ex.fits[0] || "plotbuilder",
-      roles: roles, options: {} }];
+      // Brand new, so the default style may apply once - the same stamp
+      // newChart() sets. Its ABSENCE means "an older saved document, do
+      // not restyle it", which is why migrateSnapshot must not set it.
+      roles: roles, options: {}, styleStamp: false }];
     PROJECT.activeChart = "c1";
     PROJECT.ui = { dataOpen: false, workspace: "chart",
                    lastChart: "c1", lastLayout: null, columnWidths: {} };
@@ -4999,6 +5760,10 @@
     host.__gb2_serializeSvg = null;
     host.__gb2_accessibleDescription = null;
     host.__gb2_chartSize = null;
+    // The audit's two new hooks are per-render closures too; left in
+    // place they would answer from a torn-down DOM.
+    host.__gb2_graphLint = null;
+    host.__gb2_commitPendingColor = null;
     var assignment = /^Assign /.test(String(html).replace(/<[^>]+>/g, ""));
     var acts = assignment
       ? (fix && fix.kind === "example"
@@ -5107,16 +5872,19 @@
       if (PROJECT.ui.activeBoard === id) PROJECT.ui.activeBoard = null;
       persist(); syncAll();
       if (appWorkspace() === "pinboard") renderPinboard();
-      showUndoToast("Deleted " + removed.name +
+      var step = nbStep("the deleted section", function () {
+        var bs = pinBoards();
+        bs.splice(Math.min(at, bs.length), 0, removed);
+        PROJECT.ui.activeBoard = removed.id;
+      }, function () {
+        var bs = pinBoards(), k = bs.indexOf(removed);
+        if (k !== -1) bs.splice(k, 1);
+        if (PROJECT.ui.activeBoard === removed.id)
+          PROJECT.ui.activeBoard = null;
+      });
+      nbOfferUndo("Deleted " + removed.name +
         (removed.pins.length ? " and its " + removed.pins.length +
-          (removed.pins.length === 1 ? " page" : " pages") : ""),
-        function () {
-          var bs = pinBoards();
-          bs.splice(Math.min(at, bs.length), 0, removed);
-          PROJECT.ui.activeBoard = removed.id;
-          persist(); syncAll();
-          if (appWorkspace() === "pinboard") renderPinboard();
-        });
+          (removed.pins.length === 1 ? " page" : " pages") : ""), step);
       return;
     }
   }
@@ -5223,9 +5991,23 @@
       img.draggable = false;
       page.appendChild(img);
       var bar = mkEl("div", "ps-pinpage-bar");
+      var ttl = String(pin.pageTitle || "").trim();
       bar.appendChild(mkEl("span", "ps-pinpage-num",
         "Page " + (idx + 1) + " of " + pins.length +
+        (ttl ? " \u00b7 " + ttl : "") +
         (pin.at ? " \u00b7 kept " + pinKeptFmt(pin.at) : "")));
+      // The freshness verdict lived only in the rail of the SELECTED page,
+      // so scrolling a notebook showed nothing and a page whose source had
+      // moved on looked exactly like one that had not.
+      var pst = pinSourceStatus(pin);
+      if (pst.state === "changed" || pst.state === "gone") {
+        var dw = mkEl("span", "ps-pinpage-drift",
+          pst.state === "gone" ? "source chart is gone"
+                               : "source chart has changed");
+        dw.setAttribute("data-state", pst.state);
+        setTip(dw, pst.text);
+        bar.appendChild(dw);
+      }
       // The four verbs live in ONE wrapping group, so a narrow card drops
       // them below the info line together instead of stranding whichever
       // fit beside the text (Torry's low-zoom report, Aug 5 2026).
@@ -5383,6 +6165,15 @@
     if (slot < 0) slot = 0;
     if (slot > pins.length) slot = pins.length;
     pins.splice(slot, 0, moved);
+    if (slot !== at) (function (from, to, list, item) {
+      function put(k) {
+        var cur = list.indexOf(item);
+        if (cur !== -1) list.splice(cur, 1);
+        list.splice(Math.min(k, list.length), 0, item);
+      }
+      nbStep("the page order", function () { put(from); },
+             function () { put(to); });
+    })(at, slot, pins, moved);
     persist();
     renderPinboard();
     var after = scroll ? scroll.querySelectorAll(".ps-pinpage") : [];
@@ -5412,19 +6203,162 @@
     syncPinInspector();
   }
   function deletePin(id) {
-    var pins = projectPins();
+    // Undo restores into the section the page was deleted FROM, captured
+    // here rather than resolved at undo time, because the toast outlives a section
+    // switch, and projectPins() would have handed the page to whichever
+    // section happened to be on screen when Undo was pressed. A record must
+    // never end up somewhere the user did not put it. (deletePinBoard
+    // already captured its index this way; this is the same rule.)
+    var board = activePinBoard(), pins = board.pins;
     for (var i = 0; i < pins.length; i++) {
       if (pins[i].id !== id) continue;
       var removed = pins.splice(i, 1)[0], at = i;
+      var step = nbStep("the deleted page", function () {
+        // The section itself may have been deleted meanwhile, and its own
+        // undo is a separate step. Restoring into a detached section would
+        // drop the page silently, so fall back to the one on screen.
+        var live = pinBoards().indexOf(board) !== -1 ? board : activePinBoard();
+        live.pins.splice(Math.min(at, live.pins.length), 0, removed);
+        // Show the restored page, since putting it back out of sight would be an
+        // undo the user cannot see.
+        (PROJECT.ui = PROJECT.ui || {}).activeBoard = live.id;
+        PIN_SEL = removed.id;
+      }, function () {
+        var k = board.pins.indexOf(removed);
+        if (k !== -1) board.pins.splice(k, 1);
+        (PROJECT.ui = PROJECT.ui || {}).activeBoard = board.id;
+      });
       persist(); syncAll();
       if (appWorkspace() === "pinboard") renderPinboard();
-      showUndoToast("Page removed from the Notebook", function () {
-        projectPins().splice(Math.min(at, projectPins().length), 0, removed);
-        persist(); syncAll();
-        if (appWorkspace() === "pinboard") renderPinboard();
-      });
+      nbOfferUndo("Page removed from " + board.name, step);
       return;
     }
+  }
+  // ---- keeping an updated copy of a page whose source has moved on -----
+  // The rail told you a page's source chart had changed and then offered
+  // nothing to do about it. The answer is append-only, because that is what
+  // makes a record defensible months later: the current chart joins the
+  // notebook as a NEW page directly below the old one, carrying the note and
+  // the title forward, and both versions keep their own kept dates. Refresh
+  // in place would have been cheaper and would have destroyed the evidence,
+  // which is the one thing a lab notebook is not supposed to allow.
+  function pinCanUpdate(pin) {
+    return !!(pin && pin.srcChart && pinSourceStatus(pin).state === "changed");
+  }
+  function pinKeepUpdatedCopy(pinId) {
+    var boards = pinBoards(), board = null, at = -1, pin = null, i, j;
+    for (i = 0; i < boards.length; i++)
+      for (j = 0; j < boards[i].pins.length; j++)
+        if (boards[i].pins[j].id === pinId) {
+          board = boards[i]; at = j; pin = boards[i].pins[j];
+        }
+    if (!pin || !pinCanUpdate(pin)) return;
+    // "changed" is only reachable with a valid snapshot, so this is the same
+    // capture the verdict was computed against, not a re-render.
+    var s = validSnap(pin.srcChart);
+    if (!s) return;
+    var entry = { id: pinNewId(), src: pinSvgSrc(s.svg),
+                  natW: s.w, natH: s.h, w: s.w, h: s.h, at: Date.now() };
+    var prov = pinProvenance(null, pin.srcChart);
+    if (prov)
+      for (var pk in prov)
+        if (Object.prototype.hasOwnProperty.call(prov, pk) &&
+            prov[pk] != null && prov[pk] !== "") entry[pk] = prov[pk];
+    // The note is the reason the page exists, and the title is what it is
+    // called. This is the same figure, later, so both come forward.
+    if (pin.note) entry.note = pin.note;
+    if (pin.pageTitle) entry.pageTitle = pin.pageTitle;
+    board.pins.splice(at + 1, 0, entry);
+    var step = nbStep("the updated copy", function () {
+      var k = board.pins.indexOf(entry);
+      if (k !== -1) board.pins.splice(k, 1);
+      (PROJECT.ui = PROJECT.ui || {}).activeBoard = board.id;
+      PIN_SEL = pin.id;
+    }, function () {
+      board.pins.splice(Math.min(at + 1, board.pins.length), 0, entry);
+      (PROJECT.ui = PROJECT.ui || {}).activeBoard = board.id;
+      PIN_SEL = entry.id;
+    });
+    (PROJECT.ui = PROJECT.ui || {}).activeBoard = board.id;
+    PIN_SEL = entry.id;
+    persist(); syncAll();
+    if (appWorkspace() === "pinboard") renderPinboard();
+    repairPinFonts();
+    pinReveal(entry.id);
+    nbOfferUndo("Updated copy kept, below the original", step);
+  }
+  // ---- moving a page between sections ---------------------------------
+  // Keeping into the wrong section was a one-way mistake. Nothing in the
+  // page menu, the page bar or the rail moved a page, so the only remedy
+  // was to delete it and keep it again from the source chart, which threw
+  // away the note and the kept time - the two things that make it a record.
+  // Shaped like Send to layout, with the sections by name then New section.
+  // bornWith, when given, is a section created FOR this move: undo removes it
+  // along with the move, and redo puts it back.
+  function movePinToBoard(pinId, boardId, bornWith) {
+    var boards = pinBoards(), from = null, at = -1, pin = null, target = null;
+    for (var i = 0; i < boards.length; i++) {
+      for (var j = 0; j < boards[i].pins.length; j++)
+        if (boards[i].pins[j].id === pinId) {
+          from = boards[i]; at = j; pin = boards[i].pins[j];
+        }
+      if (boards[i].id === boardId) target = boards[i];
+    }
+    if (!pin || !target || target === from) return;
+    from.pins.splice(at, 1);
+    target.pins.push(pin);
+    (PROJECT.ui = PROJECT.ui || {}).activeBoard = target.id;
+    PIN_SEL = pin.id;
+    persist(); syncAll();
+    if (appWorkspace() === "pinboard") renderPinboard();
+    var step = nbStep("the move", function () {
+      var back = pinBoards().indexOf(target) !== -1 ? target : null;
+      if (back) {
+        var k = back.pins.indexOf(pin);
+        if (k !== -1) back.pins.splice(k, 1);
+      }
+      var home = pinBoards().indexOf(from) !== -1 ? from : activePinBoard();
+      home.pins.splice(Math.min(at, home.pins.length), 0, pin);
+      if (bornWith && !bornWith.pins.length) {
+        var bs = pinBoards(), bi = bs.indexOf(bornWith);
+        if (bi !== -1 && bs.length > 1) bs.splice(bi, 1);
+      }
+      PROJECT.ui.activeBoard = home.id;
+      PIN_SEL = pin.id;
+    }, function () {
+      if (bornWith && pinBoards().indexOf(bornWith) === -1)
+        pinBoards().push(bornWith);
+      var k = from.pins.indexOf(pin);
+      if (k !== -1) from.pins.splice(k, 1);
+      target.pins.push(pin);
+      PROJECT.ui.activeBoard = target.id;
+      PIN_SEL = pin.id;
+    });
+    nbOfferUndo("Moved to " + target.name, step);
+  }
+  function showPinMoveMenu(x, y, pinId) {
+    var boards = pinBoards(), owner = null, items = [];
+    for (var i = 0; i < boards.length; i++)
+      for (var j = 0; j < boards[i].pins.length; j++)
+        if (boards[i].pins[j].id === pinId) owner = boards[i];
+    for (i = 0; i < boards.length; i++) (function (b) {
+      items.push({ label: b.name, key: "pin-move-" + b.id,
+        disabled: b === owner,
+        tip: b === owner ? "This page is already in " + b.name : "",
+        action: function () { movePinToBoard(pinId, b.id); } });
+    })(boards[i]);
+    if (items.length) items.push("separator");
+    items.push({ label: "New section", key: "pin-move-new",
+      action: function () {
+        var b = { id: newBoardId(),
+                  name: "Section " + (pinBoards().length + 1), pins: [] };
+        pinBoards().push(b);
+        // The section was created for this move, so undoing the move must
+        // take it away again. Without this the page came back and an empty
+        // section nobody asked for stayed behind.
+        movePinToBoard(pinId, b.id, b);
+      } });
+    showContextMenu(x, y, items, null);
   }
   function copyPinToClipboard(pin) {
     if (!navigator.clipboard || !navigator.clipboard.write ||
@@ -5455,18 +6389,23 @@
       if (everything[i].pin.id === pinId) pin = everything[i].pin;
     var doc = chartById(layoutId);
     if (!pin || !doc || !isLayoutTab(doc)) return;
-    var margin = (doc.page && doc.page.margin) || 32;
-    var contentW = Math.max(160, (doc.page.w || 1008) - margin * 2);
+    // One step for the whole send. It adds an item and can also grow the page
+    // and flip its preset to custom, and none of that was in the layout's
+    // history, so the next undo there removed the sent page AND reverted
+    // whatever the user had done before it, in one unlabelled move.
+    laySnapshotDoc(doc, "send to layout");
+    layNormalizeLayout(doc);
+    var margin = doc.page.margin;
+    var contentW = Math.max(160, doc.page.w - margin * 2);
     var w = Math.min(pin.w || contentW, contentW);
     var h = Math.round((pin.h || w) * (w / (pin.w || w)));
-    var items = doc.items || (doc.items = []);
-    var mx = 0, y = margin;
+    var items = doc.items;
+    var mx = 0;
     for (var j = 0; j < items.length; j++) {
       var m2 = /^i(\d+)$/.exec(items[j].id || "");
       if (m2) mx = Math.max(mx, Number(m2[1]));
-      var bot = (Number(items[j].y) || 0) + (Number(items[j].h) || 0);
-      if (bot + 14 > y) y = bot + 14;
     }
+    var spot = layPlaceRect(items, doc.page, w, h);
     items.push({ id: "i" + (mx + 1), kind: "image", src: pin.src,
                  natW: pin.natW, natH: pin.natH,
                  srcChart: pin.srcChart || undefined,
@@ -5479,17 +6418,18 @@
                  srcName: pin.srcName || undefined,
                  srcSig: pin.srcSig || undefined,
                  keptAt: pin.at || undefined,
-                 x: margin, y: y, w: w, h: h });
-    if (y + h + margin > doc.page.h) {
-      doc.page.h = y + h + margin;
+                 x: spot.x, y: spot.y, w: w, h: h });
+    var grew = spot.needH > doc.page.h;
+    if (grew) {
+      doc.page.h = Math.min(LAY_PAGE_MAX, Math.round(spot.needH));
       doc.page.preset = "custom";
     }
+    layClampItemsIn(doc);
     persist(); syncAll();
     if (activeChart().id === doc.id && appWorkspace() === "layout")
       renderLayout();
-    showActionToast("Sent to " + doc.name, "Open", function () {
-      switchChart(doc.id);
-    });
+    showActionToast("Sent to " + doc.name + laySendNote(grew, spot.capped),
+      "Open", function () { switchChart(doc.id); });
   }
   // ---- Notebook export: scope -> format (Torry, Aug 5 2026) ----------
   // The Export button (and a page right-click) picks a SCOPE - one page,
@@ -5635,23 +6575,132 @@
     out.set(eocd, at);
     return out;
   }
+  // ---- the record band -------------------------------------------------
+  // A kept page is evidence, and evidence that leaves the app without its
+  // note, its date and its source is only a picture. The chart exporter has
+  // typeset a caption under a figure since t3-59; this composes the same
+  // band from the page's OWN record instead of a typed sentence, so the two
+  // paths share wrapCaptionLines and the geometry cannot drift apart.
+  // rec = {idx, total, board, manyBoards} - idx and total are per SECTION,
+  // matching the numbers the page card shows on screen.
+  function pinRecordBlocks(pin, rec) {
+    var out0 = [], head = [];
+    var ttl = String(pin.pageTitle || "").trim();
+    if (ttl) out0.push({ size: 13, fill: "#222222", text: ttl });
+    if (rec.manyBoards && rec.board) head.push(rec.board);
+    head.push("Page " + (rec.idx + 1) + " of " + rec.total);
+    if (pin.at) head.push("kept " + pinKeptFmt(pin.at));
+    var out = out0.concat(
+      [{ size: 11, fill: "#5b6470", text: head.join(" \u00b7 ") }]);
+    var st = pinSourceStatus(pin);
+    var src = [], drift = st.state === "changed" || st.state === "gone";
+    // The TYPE leads the source line. Four variants kept from one chart tab
+    // differ only by it, and without this every one of them exported the
+    // identical sentence - the page list could tell them apart and the
+    // document handed to someone else could not.
+    if (pin.srcDesc)
+      src.push(pin.srcType ? pin.srcType + " \u00b7 " + pin.srcDesc
+                           : pin.srcDesc);
+    if (st.state === "changed")
+      src.push("the source chart has changed since this page was kept");
+    else if (st.state === "gone")
+      src.push("the source chart is no longer in the project");
+    if (src.length)
+      out.push({ size: 11, fill: drift ? "#8a5512" : "#5b6470",
+                 text: src.join(" \u00b7 ") });
+    var note = String(pin.note || "").trim();
+    if (note) out.push({ size: 13, fill: "#222222", text: note, gap: 7 });
+    return out;
+  }
+  var PIN_REC_PAD = 13, PIN_REC_X = 14;
+  // Measure first, so the PDF page and the raster canvas are sized from the
+  // same numbers that draw the text.
+  function pinRecordLayout(pin, rec, w) {
+    var blocks = pinRecordBlocks(pin, rec), rows = [], y = PIN_REC_PAD;
+    for (var i = 0; i < blocks.length; i++) {
+      var b = blocks[i], lh = Math.round(b.size * 1.38);
+      y += b.gap || 0;
+      var lines = wrapCaptionLines(b.text, w - PIN_REC_X * 2, b.size);
+      for (var j = 0; j < lines.length; j++) {
+        y += lh;
+        rows.push({ text: lines[j], size: b.size, fill: b.fill, y: y - 3 });
+      }
+    }
+    return { rows: rows, h: y + PIN_REC_PAD };
+  }
+  // The page's svg nested inside a taller one, with the record typeset
+  // under it. Mirrors composeExportSvg's caption branch exactly.
+  function pinComposeWithRecord(pin, rec) {
+    var svgText = pinSvgText(pin);
+    if (!svgText || !rec) return null;
+    var w = pin.w || 720, h = pin.h || 480;
+    var lay = pinRecordLayout(pin, rec, w);
+    if (!lay.rows.length) return null;
+    var ns = "http://www.w3.org/2000/svg";
+    var inner = parseExportSvg(svgText);
+    var outer = document.implementation.createDocument(ns, "svg", null);
+    var root = outer.documentElement;
+    root.setAttribute("xmlns", ns);
+    root.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
+    root.setAttribute("width", String(w));
+    root.setAttribute("height", String(h + lay.h));
+    root.setAttribute("viewBox", "0 0 " + w + " " + (h + lay.h));
+    // White under the whole thing, because a kept page may itself be transparent,
+    // and record text must never land on transparency.
+    addSvgBackground(outer, "#ffffff", w, h + lay.h);
+    var nested = outer.importNode(inner.documentElement, true);
+    nested.setAttribute("x", "0"); nested.setAttribute("y", "0");
+    nested.setAttribute("width", String(w));
+    nested.setAttribute("height", String(h));
+    nested.removeAttribute("role");
+    nested.removeAttribute("aria-labelledby");
+    root.appendChild(nested);
+    var rule = outer.createElementNS(ns, "line");
+    rule.setAttribute("x1", String(PIN_REC_X));
+    rule.setAttribute("x2", String(w - PIN_REC_X));
+    rule.setAttribute("y1", String(h + 0.5));
+    rule.setAttribute("y2", String(h + 0.5));
+    rule.setAttribute("stroke", "#dfe4ea");
+    root.appendChild(rule);
+    for (var i = 0; i < lay.rows.length; i++) {
+      var r = lay.rows[i];
+      var t = outer.createElementNS(ns, "text");
+      t.setAttribute("x", String(PIN_REC_X));
+      t.setAttribute("y", String(h + r.y));
+      t.setAttribute("fill", r.fill);
+      t.setAttribute("font-size", String(r.size));
+      t.setAttribute("font-family",
+        "-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif");
+      t.setAttribute("data-role", "pin-record");
+      t.textContent = r.text;
+      root.appendChild(t);
+    }
+    return { svg: new XMLSerializer().serializeToString(root),
+             w: w, h: h + lay.h };
+  }
+  // The page as it should export, with its record when the dialog asks for
+  // one and the page has vector to nest, otherwise exactly as before.
+  function pinExportSvg(pin, rec) {
+    var made = rec ? pinComposeWithRecord(pin, rec) : null;
+    return made || { svg: pinSvgText(pin), w: pin.w || 720, h: pin.h || 480 };
+  }
   // One page -> one file's bytes. A v1 bitmap page has no vector to give:
   // whatever the format asked, its stored PNG bytes are the honest payload
   // (the dialog and the toast both say so).
-  function pinFileBytes(pin, format, dpi) {
+  function pinFileBytes(pin, format, dpi, rec) {
     var svgText = pinSvgText(pin);
     if (!svgText)
       return dataUriBytes(pin.src).then(function (bytes) {
         return { ext: "png", bytes: bytes };
       });
+    var made = pinExportSvg(pin, rec);
     if (format === "svg")
       return Promise.resolve({ ext: "svg",
         bytes: new TextEncoder().encode(
           '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n' +
-          svgText) });
+          made.svg) });
     var mime = format === "jpg" ? "image/jpeg" : "image/png";
-    return rasterizeExport({ svg: svgText, w: pin.w || 720,
-        h: pin.h || 480 }, mime, dpi)
+    return rasterizeExport({ svg: made.svg, w: made.w, h: made.h }, mime, dpi)
       .then(function (out) { return out.blob.arrayBuffer(); })
       .then(function (buf) {
         return { ext: format === "jpg" ? "jpg" : "png",
@@ -5682,20 +6731,23 @@
     return names;
   }
   // The PDF core: one page per pin, vector where the pin holds svg.
-  function pinboardPdfBlob(pins) {
+  // recs is index-aligned with pins (null when the record band is off), so
+  // a page grows downward by exactly its own band.
+  function pinboardPdfBlob(pins, recs) {
     var JsPDF = window.jspdf && window.jspdf.jsPDF;
     if (!JsPDF || !JsPDF.API || typeof JsPDF.API.svg !== "function")
       return Promise.reject(new Error(
         "The PDF exporter did not load. Reload and try again."));
     var pdf = null;
-    function pageDims(pin) {
-      return { w: Math.max(36, (pin.w || 720) * 72 / 96),
-               h: Math.max(36, (pin.h || 480) * 72 / 96) };
-    }
     var chain = Promise.resolve();
-    pins.forEach(function (pin) {
+    pins.forEach(function (pin, i) {
       chain = chain.then(function () {
-        var d = pageDims(pin);
+        var rec = recs ? recs[i] : null;
+        var made = pinSvgText(pin) ? pinExportSvg(pin, rec) : null;
+        var pw = made ? made.w : (pin.w || 720);
+        var ph = made ? made.h : (pin.h || 480);
+        var d = { w: Math.max(36, pw * 72 / 96),
+                  h: Math.max(36, ph * 72 / 96) };
         if (!pdf) {
           pdf = new JsPDF({
             orientation: d.w >= d.h ? "landscape" : "portrait",
@@ -5707,9 +6759,8 @@
         } else {
           pdf.addPage([d.w, d.h], d.w >= d.h ? "landscape" : "portrait");
         }
-        var svgText = pinSvgText(pin);
-        if (svgText) {
-          var sdoc = parseExportSvg(svgText);
+        if (made) {
+          var sdoc = parseExportSvg(made.svg);
           normalizePdfFonts(sdoc.documentElement);
           return pdf.svg(sdoc.documentElement,
             { x: 0, y: 0, width: d.w, height: d.h,
@@ -5720,6 +6771,37 @@
       });
     });
     return chain.then(function () { return pdf.output("blob"); });
+  }
+  // The dialog's answer, read at export time.
+  function pinRecordWanted() {
+    var box = el("ps-export-record");
+    return box ? !!box.checked : true;
+  }
+  // Per-page record descriptors for an export scope. The page number is the
+  // page's position in its own SECTION, not in the exported selection, so
+  // exporting page 3 on its own still says "Page 3 of 12" and agrees with
+  // the card on screen. The section is named only when the file holds more
+  // than one.
+  function pinRecordsFor(pins) {
+    if (!pinRecordWanted()) return null;
+    var owners = {}, everything = allPins(), i;
+    for (i = 0; i < everything.length; i++)
+      owners[everything[i].pin.id] = everything[i].board;
+    var boardsInFile = {};
+    for (i = 0; i < pins.length; i++) {
+      var bd = owners[pins[i].id];
+      if (bd) boardsInFile[bd.id] = 1;
+    }
+    var many = Object.keys(boardsInFile).length > 1;
+    var out = [];
+    for (i = 0; i < pins.length; i++) {
+      var b = owners[pins[i].id];
+      var list = b ? b.pins : pins;
+      var at = list.indexOf(pins[i]);
+      out.push({ idx: at === -1 ? i : at, total: list.length,
+                 board: b ? b.name : "", manyBoards: many });
+    }
+    return out;
   }
   // The dialog's Export button, notebook mode. Stamps __psPinExportLast
   // BEFORE the save picker (probes and diagnostics read it; the picker
@@ -5759,10 +6841,11 @@
       try { console.warn("Pandion Plots notebook export failed", e); }
       catch (ignore) {}
     }
+    var recs = pinRecordsFor(pins);
     if (format === "pdf") {
       var pdfName = base + ".pdf";
       setExportStatus("Rendering " + pdfName + "...", false);
-      pinboardPdfBlob(pins).then(function (blob) {
+      pinboardPdfBlob(pins, recs).then(function (blob) {
         stamp({ bytes: blob.size, container: "pdf" });
         setExportStatus("Choose where to save " + pdfName + "...", false);
         return saveExportBlob(blob, pdfName, "pdf");
@@ -5773,7 +6856,7 @@
       return;
     }
     if (pins.length === 1) {
-      pinFileBytes(pins[0], format, dpi).then(function (f) {
+      pinFileBytes(pins[0], format, dpi, recs && recs[0]).then(function (f) {
         var oneName = base + "." + f.ext;
         var blob = new Blob([f.bytes], { type: exportMime(f.ext) });
         stamp({ bytes: blob.size, container: "file", files: [oneName] });
@@ -5794,7 +6877,8 @@
       chain = chain.then(function () {
         setExportStatus("Rendering page " + (idx + 1) + " of " +
           pins.length + "...", false);
-        return pinFileBytes(pin, format, dpi).then(function (f) {
+        return pinFileBytes(pin, format, dpi, recs && recs[idx])
+          .then(function (f) {
           if (f.ext === "png" && format !== "png") bitmapN++;
           entries.push({ name: names[idx] + "." + f.ext, data: f.bytes });
         });
@@ -5822,6 +6906,13 @@
   // want the behavior to be consistent") - each layout by name, then New
   // layout; only the placing function differs, so the two surfaces can
   // never drift apart.
+  // What a send appends to its own toast. layGrewNote is the toolbar's
+  // equivalent and shows a toast of its own; a send already has one.
+  function laySendNote(grew, capped) {
+    if (capped)
+      return " \u00b7 the page is at its largest, so it landed on the figure";
+    return grew ? " \u00b7 the page grew to fit it" : "";
+  }
   function showSendToLayoutMenu(x, y, keyPrefix, place) {
     var items = [];
     for (var i = 0; i < PROJECT.charts.length; i++) (function (c) {
@@ -5875,30 +6966,33 @@
   function addChartToLayout(chartId, layoutId) {
     var c = chartById(chartId), doc = chartById(layoutId);
     if (!c || isLayoutTab(c) || !doc || !isLayoutTab(doc)) return;
-    var margin = (doc.page && doc.page.margin) || 32;
-    var contentW = Math.max(160, (doc.page.w || 1008) - margin * 2);
-    var w = Math.min(460, contentW);
-    var h = 310;
-    var items = doc.items || (doc.items = []);
-    var mx = 0, y = margin;
+    // See addPinToLayout. The send is one step, page growth included.
+    laySnapshotDoc(doc, "send to layout");
+    layNormalizeLayout(doc);
+    var items = doc.items;
+    // The same placement and the same size as the toolbar's Add chart. Two
+    // ways of putting a chart into a figure produced two different figures.
+    var w = layPanelWidthFor(items, doc.page);
+    var h = Math.round(w / layChartAspect(chartId));   // see layAddChart
+    var mx = 0;
     for (var j = 0; j < items.length; j++) {
       var m2 = /^i(\d+)$/.exec(items[j].id || "");
       if (m2) mx = Math.max(mx, Number(m2[1]));
-      var bot = (Number(items[j].y) || 0) + (Number(items[j].h) || 0);
-      if (bot + 14 > y) y = bot + 14;
     }
+    var spot = layPlaceRect(items, doc.page, w, h);
+    var grew = spot.needH > doc.page.h;
     items.push({ id: "i" + (mx + 1), kind: "chart", chartId: chartId,
-                 x: margin, y: y, w: w, h: h });
-    if (y + h + margin > doc.page.h) {
-      doc.page.h = y + h + margin;
+                 x: spot.x, y: spot.y, w: w, h: h });
+    if (grew) {
+      doc.page.h = Math.min(LAY_PAGE_MAX, Math.round(spot.needH));
       doc.page.preset = "custom";
     }
+    layClampItemsIn(doc);
     persist(); syncAll();
     if (activeChart().id === doc.id && appWorkspace() === "layout")
       renderLayout();
-    showActionToast("Sent to " + doc.name, "Open", function () {
-      switchChart(doc.id);
-    });
+    showActionToast("Sent to " + doc.name + laySendNote(grew, spot.capped),
+      "Open", function () { switchChart(doc.id); });
   }
   function render() {
     echoTimer = null;
@@ -5967,6 +7061,18 @@
       host.__gb2_serializeSvg = null;
       host.__gb2_accessibleDescription = null;
       host.__gb2_chartSize = null;
+      host.__gb2_graphLint = null;
+      host.__gb2_commitPendingColor = null;
+      // Same bug, third door. The placeholder branch got its receipt sync
+      // in the empty-state fix; a render FAILURE tears the chart down the
+      // same way and also returned with the previous chart's verdict still
+      // in the status bar - and the closeout list even named this site.
+      // The hooks were just nulled above, so chartCheckReport returns
+      // null and the receipt hides - it runs before the innerHTML swap,
+      // when the old svg can still be present, which is why the hook
+      // guard and not the svg guard is what does the hiding here.
+      try { syncChartCheck(); } catch (eSc) {}
+      try { syncPaneScrollCue(); } catch (eSp) {}
       host.classList.remove("ps-offscreen");
       host.style.display = "";
       host.innerHTML = "";
@@ -6271,6 +7377,8 @@
       host.__gb2_serializeSvg = null;
       host.__gb2_accessibleDescription = null;
       host.__gb2_chartSize = null;
+      host.__gb2_graphLint = null;
+      host.__gb2_commitPendingColor = null;
       showEngineLoadFailure(host);
       return;
     }
@@ -6288,6 +7396,14 @@
         el("ps-status-context").textContent = chartStatusText(activeChartTab());
         el("ps-status-selection").textContent = "Needs chart setup";
       }
+      // This branch returns before the render tail, so the chart-check
+      // receipt was never re-synced and kept the PREVIOUS chart's verdict
+      // over a chart that does not exist - "Checks passed" above "This
+      // chart needs variables", which is the exact false assurance the
+      // receipt exists to prevent. Synchronous, not scheduled: there is no
+      // render to settle after.
+      syncChartCheck();
+      syncPaneScrollCue();
       return;
     }
     LAST_RENDER_PAYLOAD = built.payload;
@@ -6297,6 +7413,16 @@
         }) : [];
     applyLinkedPointSelection(built.payload);
     try { window.__gb2_authoritativeRender = true; } catch (e) {}
+    // The engine guards its default-style apply with the window-global
+    // __gb2_styleAutoApplyDone, which is "once per chart" in jamovi
+    // because an analysis owns its window. Here every chart shares one
+    // window, so the flag has to be re-armed for each chart the bridge
+    // has actually cleared. Gated on styleAutoApply, so a chart that is
+    // not eligible can still never be restyled twice.
+    try {
+      if (built.payload && built.payload.styleAutoApply === true)
+        window.__gb2_styleAutoApplyDone = false;
+    } catch (e) {}
     try { window.setTimeout(maybeShowCoach, 260); } catch (e) {}
     // Punch list 27: the ResizeObserver only fires when the PANE changes, and
     // on a cold load the pane reaches its size before there is a chart to fit,
@@ -6369,6 +7495,7 @@
     // drive; doing it here as well means the control is never missing for
     // the beat between an engine render and the observer's callback.
     dockChartZoomInToolbar();
+    scheduleChartCheck();
   }
 
   // ---- chart snapshots for layouts (session cache, chrome-stripped) ----
@@ -6812,8 +7939,8 @@
       // the check this relabel said "Exclude" on a button that INCLUDES.
       var hiddenPt = menu.hasAttribute("data-point-hidden");
       button.textContent = hiddenPt
-        ? "Include this value in dataset"
-        : "Exclude this value from dataset";
+        ? "Include this value in the dataset"
+        : "Exclude this value from the dataset";
       setTip(button, hiddenPt
         ? "Restores this source cell in Data and every standalone chart"
         : "Excludes this source cell in Data and every standalone chart");
@@ -7905,6 +9032,52 @@
   // reveal fully, tall ones partially (the person sees the panel exists
   // and wheels for the rest). Trusted pointer input only, so echoes,
   // re-renders and synthetic clicks (tours) can never move the view.
+  // The other half of the reveal. revealPanelAfterClick scrolls as far as
+  // its anchor bound allows, which on a laptop is often not far enough to
+  // show a tall panel - and macOS draws no scrollbar until you scroll, so
+  // nothing said there was more. Measured at 1280x800 with the Statistics
+  // panel open: 260px still below, offsetWidth === clientWidth, box-shadow
+  // none. The one control that places the brackets was in that 260px.
+  //
+  // Same cue, and the same values, the ENGINE already uses for its own long
+  // tables (its [data-st-scroll] wrappers): a bottom-edge inset shadow that
+  // shows while there is more and clears at the end. An inset shadow is
+  // painted on the padding box, so it stays put while the content scrolls.
+  // Deliberately absent when everything fits - a cue that is always on
+  // stops being a cue.
+  function syncPaneScrollCue() {
+    var sc = el("ps-main-workspace");
+    if (!sc) return;
+    var can = sc.scrollHeight > sc.clientHeight + 2;
+    var atEnd = sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 2;
+    sc.style.boxShadow = (can && !atEnd)
+      ? "inset 0 -10px 8px -8px rgba(0,0,0,0.22)" : "";
+  }
+  (function wirePaneScrollCue() {
+    var sc = el("ps-main-workspace");
+    if (!sc) return;
+    sc.addEventListener("scroll", syncPaneScrollCue);
+    // The pane's content changes without scrolling: a panel opens, a chart
+    // redraws, the window resizes. ResizeObserver catches the first two by
+    // watching the content box; guarded because the hardening harness's
+    // minimal DOM has neither observer.
+    try {
+      if (typeof ResizeObserver === "function") {
+        var ro = new ResizeObserver(function () { syncPaneScrollCue(); });
+        // Observe the pane AND every element child. The first child is
+        // #ps-datacard, which is display:none in the chart workspace, so
+        // observing only that one meant the observer could never fire for
+        // chart content: the cue armed solely as a side effect of the
+        // reveal scroll, and it went stale when the content shrank.
+        ro.observe(sc);
+        for (var ci = 0; ci < sc.children.length; ci++)
+          ro.observe(sc.children[ci]);
+      }
+    } catch (e) {}
+    try { window.addEventListener("resize", syncPaneScrollCue); } catch (e) {}
+    syncPaneScrollCue();
+  })();
+
   var PANEL_REVEAL_STAMP = null;
   function revealPanelAfterClick(panel, clickY) {
     var scroller = el("ps-main-workspace");
@@ -7942,6 +9115,9 @@
     try {
       scroller.scrollBy({ top: by, behavior: reduce ? "auto" : "smooth" });
     } catch (e2) { scroller.scrollTop += by; }
+    // A smooth scroll finishes after this returns, and the cue describes
+    // where it LANDED.
+    try { window.setTimeout(syncPaneScrollCue, 420); } catch (e3) {}
     return by;
   }
   document.addEventListener("pointerup", function (e) {
@@ -8239,6 +9415,9 @@
   function tipTarget(node) {
     return node && node.closest ? node.closest("[data-tip]") : null;
   }
+  // What a press last landed on, so the focus it causes does not re-summon
+  // the tip it just dismissed.
+  var TIP_PRESSED = null, TIP_PRESSED_AT = 0;
   function wireTooltips() {
     document.addEventListener("pointerover", function (e) {
       var target = tipTarget(e.target);
@@ -8256,21 +9435,40 @@
       if (to === target) return;     // moving within the same target
       hideTip();
     });
-    // Keyboard focus shows it AT ONCE: a delay on focus is a delay on the only
-    // way a keyboard user can see it at all.
+    // Keyboard focus shows it AT ONCE, because a delay on focus is a delay on
+    // the only way a keyboard user can see it at all.
+    //
+    // Except when a POINTER just put the focus there. Clicking a control
+    // focuses it, so the pointerdown below would hide the tip and this would
+    // put it straight back, with no delay, on top of whatever the click just
+    // opened. The project "+" was the visible case: its tip sat across the
+    // first item of the menu it had opened. Keyboard focus is untouched, and
+    // so is a programmatic focus() call, because neither carries a press.
     document.addEventListener("focusin", function (e) {
       var target = tipTarget(e.target);
+      if (target && target === TIP_PRESSED &&
+          Date.now() - TIP_PRESSED_AT < 400) { hideTip(); return; }
       if (target) showTipFor(target);
       else hideTip();
     });
     document.addEventListener("focusout", function (e) {
+      // Clearing the press marker here is what keeps the suppression above
+      // causal rather than merely timed. The focusin a press causes always
+      // arrives BEFORE any focusout, so the intended case is untouched, while
+      // a keyboard user who tabs away and back inside 400 ms gets the tooltip
+      // they asked for. It also stops the marker pinning a detached node.
+      TIP_PRESSED = null;
       if (tipTarget(e.target)) hideTip();
     });
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape") hideTip();
     }, true);
     // A tooltip must never outlive what it describes, or survive a scroll.
-    document.addEventListener("pointerdown", hideTip, true);
+    document.addEventListener("pointerdown", function (e) {
+      TIP_PRESSED = tipTarget(e.target);
+      TIP_PRESSED_AT = Date.now();
+      hideTip();
+    }, true);
     window.addEventListener("scroll", hideTip, true);
     window.addEventListener("blur", hideTip);
   }
@@ -8930,8 +10128,7 @@
     if (rowK) excludedLabel.push(rowK + (rowK === 1 ? " row" : " rows"));
     if (valueK) excludedLabel.push(valueK + (valueK === 1 ? " value" : " values"));
     info.textContent = t
-      ? t.name + (t.edited ? " (edited)" : "") + " - " + nRows(t) +
-        " rows x " + t.order.length + " columns" +
+      ? t.name + (t.edited ? " (edited)" : "") + " - " + shapeText(nRows(t), t.order.length, "x") +
         (excludedLabel.length ? " - " + excludedLabel.join(" + ") + " excluded" : "")
       : "no data";
     var chips = el("ps-columns");
@@ -9072,6 +10269,14 @@
     type = normType(type);
     if (!type || !t || !t.types || !(col in t.types)) return;
     if (t.types[col] === type) return;
+    // A type change can empty a column. "$12.50" and "1,234" parse as nothing,
+    // so a currency or thousands-separated variable flipped to Continuous
+    // loses every value at once, and the only report was Valid 0 in a panel
+    // the user has no reason to be reading. The raw text is kept and one undo
+    // restores the type, so the house answer applies: do it, then say what it
+    // did and carry the way back. Counted BEFORE the change so the comparison
+    // is against what was actually on screen.
+    var wasValid = countValid(t, col);
     dataMark("the type change");
     t.types[col] = type;
     retype(t);
@@ -9079,6 +10284,22 @@
     persist();
     syncAll();
     render();
+    var nowValid = countValid(t, col);
+    var lost = wasValid - nowValid;
+    // A handful is ordinary and saying so every time would be noise. Losing
+    // most of a column is the case worth interrupting for.
+    if (lost > 0 && wasValid > 0 && lost >= Math.max(3, wasValid * 0.5))
+      showToast(col + " is now " + typeLabel(type) + " \u00b7 " +
+        (lost === wasValid
+          ? "no value could be read that way, so the column is empty"
+          : lost + " of " + wasValid + " values could not be read that way, " +
+            "so " + (lost === 1 ? "it is" : "they are") + " missing now") +
+        " \u00b7 Cmd/Ctrl+Z puts it back");
+  }
+  function countValid(t, col) {
+    var v = t.columns[col] || [], n = 0;
+    for (var i = 0; i < v.length; i++) if (v[i] != null) n++;
+    return n;
   }
   // ---- editable data grid ----
   // Column names and factor values are DATA - always escaped before
@@ -9118,9 +10339,12 @@
         return t.order.indexOf(c) !== -1 && !GRID_HIDDEN_COLUMNS[c];
       });
     }
+    // r.cols is the authoritative visible-column set. Walking t.order with
+    // the rect's c0..c1 mixed the two index spaces, so with a column hidden
+    // a Cmd/Ctrl+click extend re-seeded from the wrong set and silently
+    // dropped a selected column. Same repair as the header lighting.
     var r = gridSelectionRect(), out = [];
-    if (r) for (var i = r.c0; i <= r.c1; i++)
-      if (!GRID_HIDDEN_COLUMNS[t.order[i]]) out.push(t.order[i]);
+    if (r) for (var i = 0; i < r.cols.length; i++) out.push(r.cols[i]);
     return out;
   }
   function gridToggleColumnSelection(col) {
@@ -9159,6 +10383,33 @@
     "ps-grid-selected", "ps-grid-sel-top", "ps-grid-sel-right",
     "ps-grid-sel-bottom", "ps-grid-sel-left", "ps-grid-sel-focus"
   ];
+  var GRID_PAINT_CLEAR_CLASSES =
+    GRID_SELECTION_CLASSES.concat(["ps-grid-linked"]);
+  // The selection painter used to scrub every rendered cell on every change.
+  // At 40 columns the 140-row window is 5,600 cells, and a plain cursor move
+  // repaints twice, so one arrow key cost 78,702 DOM writes to move a
+  // highlight by one cell. These two lists are what the LAST paint touched,
+  // and they are the only things the next paint clears. Selection classes
+  // are added in gridApplySelection and nowhere else, so the bookkeeping is
+  // complete by construction. A grid re-render detaches the remembered
+  // nodes, where clearing is a harmless no-op, and the freshly built cells
+  // start clean, so the two states can never disagree.
+  var GRID_PAINTED_CELLS = [];
+  var GRID_PAINTED_HEADS = [];
+  function gridClearPainted() {
+    var cells = GRID_PAINTED_CELLS, heads = GRID_PAINTED_HEADS, i;
+    GRID_PAINTED_CELLS = [];
+    GRID_PAINTED_HEADS = [];
+    for (i = 0; i < cells.length; i++) {
+      // One variadic remove is one attribute write. Seven calls were seven,
+      // whether or not the class was there to begin with.
+      cells[i].classList.remove.apply(cells[i].classList,
+                                      GRID_PAINT_CLEAR_CLASSES);
+      cells[i].removeAttribute("aria-selected");
+    }
+    for (i = 0; i < heads.length; i++)
+      heads[i].classList.remove("ps-grid-axis-selected");
+  }
   function gridShouldVirtualize(t) {
     if (!t) return false;
     var rows = nRows(t), cols = t.order ? t.order.length : 0;
@@ -9371,6 +10622,35 @@
       t.excluded[next] = t.excluded[oldName];
       delete t.excluded[oldName];
     }
+    // The per-column missing labels were the one keyed store this did not
+    // carry, and losing them is not cosmetic. The column silently falls back
+    // to the dataset labels, so a code that WAS missing comes back as real
+    // data. Measured on a 12 row column with -99 declared missing for it,
+    // renaming took valid from 11 to 12 and the sentinel re-entered the mean.
+    if (t.missingTokensByCol && t.missingTokensByCol[oldName]) {
+      t.missingTokensByCol[next] = t.missingTokensByCol[oldName];
+      delete t.missingTokensByCol[oldName];
+    }
+    // Same shape, same reason: the jamovi provenance record is keyed by
+    // column too, and a renamed column that quietly stopped saying it was a
+    // snapshot would go stale with nothing on screen.
+    if (t.importedFormulas && t.importedFormulas[oldName]) {
+      t.importedFormulas[next] = t.importedFormulas[oldName];
+      delete t.importedFormulas[oldName];
+    }
+    if (t.dateColumns && t.dateColumns[oldName]) {
+      t.dateColumns[next] = t.dateColumns[oldName];
+      delete t.dateColumns[oldName];
+    }
+    // The jamovi filter record matches its column BY NAME. The row filter
+    // itself already followed the rename, so without this the Filter tooltip
+    // flipped to "not applied here, so it hides none of the rows" while the
+    // renamed condition kept hiding them, two contradictory sentences on the
+    // one control.
+    if (Array.isArray(t.importedFilters))
+      for (var ifi = 0; ifi < t.importedFilters.length; ifi++)
+        if (t.importedFilters[ifi] && t.importedFilters[ifi].name === oldName)
+          t.importedFilters[ifi].name = next;
     for (var ci = 0; ci < PROJECT.charts.length; ci++) {
       var roleSets = PROJECT.charts[ci].roles || {};
       for (var mod in roleSets) {
@@ -9435,6 +10715,14 @@
       if (t.levelOrderDefaults) delete t.levelOrderDefaults[col];
       if (t.excluded) delete t.excluded[col];
       if (t.computed) delete t.computed[col];
+      if (t.importedFormulas) delete t.importedFormulas[col];
+      // The per-column missing list would otherwise outlive the column, ride
+      // every saved project, and quietly re-attach to any future column that
+      // happens to take the same name, declaring codes the user never
+      // declared for it. The date record is session state but a stale key
+      // still lands in saves, so both go with the column.
+      if (t.missingTokensByCol) delete t.missingTokensByCol[col];
+      if (t.dateColumns) delete t.dateColumns[col];
     }
     if (Array.isArray(t.filters))
       t.filters = t.filters.filter(function (f) {
@@ -9634,7 +10922,7 @@
   function gridFillDown() {
     var t = PROJECT.table, sel = gridSelectionRect();
     if (!t || !sel) { showToast("Select a cell to fill from"); return; }
-    var col = t.order[sel.c0];
+    var col = sel.cols[0];
     if (!col || !t.raw[col]) return;
     var from = sel.r0, value = t.raw[col][from];
     var last = nRows(t) - 1;
@@ -9686,10 +10974,20 @@
     persist(); syncAll(); render();
     showToast("Rows sorted by " + col + " \u00b7 Undo restores the prior order");
   }
+  // The rectangle is over the columns the user can SEE. It used to index
+  // t.order, the full column list, while the grid renders only the visible
+  // ones, so a hidden column between the anchor and the focus was inside
+  // every range operation and outside every pixel of the highlight. Copy
+  // carried it, fill and clear and Delete overwrote it, exclude excluded it,
+  // and a paste landed its values one column to the left of where they
+  // appeared to land. All of it silent, in a column by definition not on
+  // screen. r.cols is the authority; nothing downstream should walk t.order
+  // between c0 and c1 again.
   function gridSelectionRect() {
     var t = PROJECT.table, s = GRID_SELECTION;
     if (!t || !s) return null;
-    var a = t.order.indexOf(s.anchorCol), b = t.order.indexOf(s.focusCol);
+    var vis = gridVisibleColumns(t);
+    var a = vis.indexOf(s.anchorCol), b = vis.indexOf(s.focusCol);
     if (a < 0 || b < 0) return null;
     var maxRow = nRows(t) - 1;
     if (maxRow < 0) return null;
@@ -9697,7 +10995,8 @@
     if (!isFinite(ar) || !isFinite(fr)) return null;
     ar = Math.max(0, Math.min(maxRow, ar));
     fr = Math.max(0, Math.min(maxRow, fr));
-    return { c0: Math.min(a, b), c1: Math.max(a, b),
+    var c0 = Math.min(a, b), c1 = Math.max(a, b);
+    return { c0: c0, c1: c1, cols: vis.slice(c0, c1 + 1),
              r0: Math.min(ar, fr), r1: Math.max(ar, fr),
              focusCol: s.focusCol, focusRow: fr };
   }
@@ -9712,8 +11011,8 @@
       return out;
     }
     for (var row = r.r0; row <= r.r1; row++)
-      for (var col = r.c0; col <= r.c1; col++)
-        out.push({ col: t.order[col], row: row });
+      for (var col = 0; col < r.cols.length; col++)
+        out.push({ col: r.cols[col], row: row });
     return out;
   }
   function gridSelectionContains(col, row) {
@@ -9722,57 +11021,81 @@
     if (GRID_SELECTION_COLS)
       return GRID_SELECTION_COLS.indexOf(col) !== -1 &&
         row >= r.r0 && row <= r.r1;
-    var ci = t.order.indexOf(col);
-    return ci >= r.c0 && ci <= r.c1 && row >= r.r0 && row <= r.r1;
+    return r.cols.indexOf(col) !== -1 && row >= r.r0 && row <= r.r1;
   }
   function gridSelectionSummary(count, r) {
     if (!count || !r) return "";
-    var rows = r.r1 - r.r0 + 1, cols = r.c1 - r.c0 + 1;
+    var rows = r.r1 - r.r0 + 1;
+    var cols = r.cols ? r.cols.length : r.c1 - r.c0 + 1;
     if (count === 1) return "1 cell selected";
-    return rows + (rows === 1 ? " row" : " rows") + " \u00d7 " +
-      cols + (cols === 1 ? " column" : " columns") + " \u00b7 " +
-      count + " cells selected \u00b7 Cmd/Ctrl+C to copy";
+    // Separators, because the shape line sharing this footer and the status
+    // bar below it both use them. "20000 rows x 40 columns, 800000 cells" sat
+    // forty pixels above "20,000 rows, 40 columns", two formats for one fact.
+    // The same toLocaleString call as its neighbours, so they cannot disagree.
+    return rows.toLocaleString() + (rows === 1 ? " row" : " rows") + " \u00d7 " +
+      cols.toLocaleString() + (cols === 1 ? " column" : " columns") + " \u00b7 " +
+      count.toLocaleString() + " cells selected \u00b7 Cmd/Ctrl+C to copy";
   }
   function gridApplySelection() {
     var grid = el("ps-datagrid");
-    var tds = grid.querySelectorAll("td[data-gc]");
-    var activeCell = null;
-    for (var i = 0; i < tds.length; i++) {
-      for (var k = 0; k < GRID_SELECTION_CLASSES.length; k++)
-        tds[i].classList.remove(GRID_SELECTION_CLASSES[k]);
-      tds[i].classList.remove("ps-grid-linked");
-      tds[i].removeAttribute("aria-selected");
-    }
+    var activeCell = null, i;
+    gridClearPainted();
     var r = gridSelectionRect();
     if (!r) GRID_SELECTION = null;
-    var count = r ? (r.r1 - r.r0 + 1) * (r.c1 - r.c0 + 1) : 0;
+    var count = r ? (r.r1 - r.r0 + 1) * r.cols.length : 0;
     var t = PROJECT.table;
+    // Column names are DATA, so membership rides a null-prototype map. A
+    // column called "constructor" must not answer yes to every question.
+    var colIx = null, setIx = null;
     if (r && t) {
-      for (i = 0; i < tds.length; i++) {
-        var row = Number(tds[i].getAttribute("data-gr"));
-        var gcName = tds[i].getAttribute("data-gc");
-        var ci = t.order.indexOf(gcName);
-        var inCols = GRID_SELECTION_COLS
-          ? GRID_SELECTION_COLS.indexOf(gcName) !== -1
-          : (ci >= r.c0 && ci <= r.c1);
-        if (!inCols || row < r.r0 || row > r.r1) continue;
-        tds[i].classList.add("ps-grid-selected");
-        tds[i].setAttribute("aria-selected", "true");
-        if (row === r.r0) tds[i].classList.add("ps-grid-sel-top");
-        if (row === r.r1) tds[i].classList.add("ps-grid-sel-bottom");
-        if (GRID_SELECTION_COLS) {
-          // Discontiguous columns draw as separate bands: each carries its
-          // own left and right edge.
-          tds[i].classList.add("ps-grid-sel-left");
-          tds[i].classList.add("ps-grid-sel-right");
-        } else {
-          if (ci === r.c0) tds[i].classList.add("ps-grid-sel-left");
-          if (ci === r.c1) tds[i].classList.add("ps-grid-sel-right");
-        }
-        if (tds[i].getAttribute("data-gc") === r.focusCol &&
-            row === r.focusRow) {
-          tds[i].classList.add("ps-grid-sel-focus");
-          activeCell = tds[i];
+      colIx = Object.create(null);
+      for (i = 0; i < r.cols.length; i++) colIx[r.cols[i]] = i;
+      if (GRID_SELECTION_COLS) {
+        setIx = Object.create(null);
+        for (i = 0; i < GRID_SELECTION_COLS.length; i++)
+          setIx[GRID_SELECTION_COLS[i]] = true;
+      }
+      // Walk the rows in range, not every cell in the window. The window is
+      // 140 rows deep while a cursor move touches one of them, so reading a
+      // row index off each tr and descending only when it is inside the
+      // selection is the whole difference between 5,600 cells of work and
+      // the handful the user actually selected.
+      var body = grid.querySelector("tbody");
+      var trs = body ? body.children : [];
+      var lastCol = r.cols.length - 1;
+      for (var ti = 0; ti < trs.length; ti++) {
+        var tr = trs[ti];
+        var rowIndex = tr.getAttribute("aria-rowindex");
+        if (rowIndex == null) continue;          // the window spacer rows
+        var row = Number(rowIndex) - 2;
+        if (row < r.r0 || row > r.r1) continue;
+        var cells = tr.children;
+        for (var ci2 = 0; ci2 < cells.length; ci2++) {
+          var td = cells[ci2];
+          var gcName = td.getAttribute("data-gc");
+          if (gcName == null) continue;          // the row-number header
+          var ci = colIx[gcName];
+          if (ci === undefined) ci = -1;
+          if (setIx ? setIx[gcName] !== true : ci === -1) continue;
+          var add = ["ps-grid-selected"];
+          if (row === r.r0) add.push("ps-grid-sel-top");
+          if (row === r.r1) add.push("ps-grid-sel-bottom");
+          if (setIx) {
+            // Discontiguous columns draw as separate bands: each carries its
+            // own left and right edge.
+            add.push("ps-grid-sel-left");
+            add.push("ps-grid-sel-right");
+          } else {
+            if (ci === 0) add.push("ps-grid-sel-left");
+            if (ci === lastCol) add.push("ps-grid-sel-right");
+          }
+          if (gcName === r.focusCol && row === r.focusRow) {
+            add.push("ps-grid-sel-focus");
+            activeCell = td;
+          }
+          td.classList.add.apply(td.classList, add);
+          td.setAttribute("aria-selected", "true");
+          GRID_PAINTED_CELLS.push(td);
         }
       }
     }
@@ -9786,34 +11109,44 @@
     var appStatus = document.getElementById("ps-status-selection");
     if (appStatus && appWorkspace() === "data")
       appStatus.textContent = count ? gridSelectionSummary(count, r) : "No range selected";
-    var heads = grid.querySelectorAll("th[data-grid-col], .ps-grid-rownum");
-    for (i = 0; i < heads.length; i++)
-      heads[i].classList.remove("ps-grid-axis-selected");
     if (r && t && (GRID_SELECTION_KIND === "column" || GRID_SELECTION_KIND === "all")) {
       var colHeads = grid.querySelectorAll("th[data-grid-col]");
       for (i = 0; i < colHeads.length; i++) {
         var headName = colHeads[i].getAttribute("data-grid-col");
-        var hi = t.order.indexOf(headName);
-        var headIn = GRID_SELECTION_COLS
-          ? GRID_SELECTION_COLS.indexOf(headName) !== -1
-          : (hi >= r.c0 && hi <= r.c1);
-        if (headIn) colHeads[i].classList.add("ps-grid-axis-selected");
+        // r.cols is the authority, per the note on gridSelectionRect. This
+        // used to ask t.order where the header sat and compare that against
+        // c0 and c1, which are indices into the VISIBLE list, so a hidden
+        // column slid the lit headers off the selected columns.
+        var headIn = setIx ? setIx[headName] === true
+                           : colIx[headName] !== undefined;
+        if (headIn) {
+          colHeads[i].classList.add("ps-grid-axis-selected");
+          GRID_PAINTED_HEADS.push(colHeads[i]);
+        }
       }
     }
     if (r && (GRID_SELECTION_KIND === "row" || GRID_SELECTION_KIND === "all")) {
       var rowHeads = grid.querySelectorAll("td[data-grid-row]");
       for (i = 0; i < rowHeads.length; i++) {
         var hr = Number(rowHeads[i].getAttribute("data-grid-row"));
-        if (hr >= r.r0 && hr <= r.r1) rowHeads[i].classList.add("ps-grid-axis-selected");
+        if (hr >= r.r0 && hr <= r.r1) {
+          rowHeads[i].classList.add("ps-grid-axis-selected");
+          GRID_PAINTED_HEADS.push(rowHeads[i]);
+        }
       }
     }
     var corner = grid.querySelector("th[data-grid-all]");
-    if (corner && GRID_SELECTION_KIND === "all")
+    if (corner && GRID_SELECTION_KIND === "all") {
       corner.classList.add("ps-grid-axis-selected");
+      GRID_PAINTED_HEADS.push(corner);
+    }
     var linkedRow = linkedCellRow();
     if (LINKED_CELL && LINKED_REVEAL_EMPHASIS && linkedRow >= 0) {
       var linkedTd = gridFindTd(LINKED_CELL.col, linkedRow);
-      if (linkedTd) linkedTd.classList.add("ps-grid-linked");
+      if (linkedTd) {
+        linkedTd.classList.add("ps-grid-linked");
+        GRID_PAINTED_CELLS.push(linkedTd);
+      }
     }
   }
   function gridSetSelection(anchorCol, anchorRow, focusCol, focusRow, kind) {
@@ -9822,7 +11155,13 @@
                        focusCol: focusCol, focusRow: focusRow };
     GRID_SELECTION_KIND = kind || "cells";
     gridApplySelection();
-    if (focusCol !== INSPECTOR_VAR) selectInspectorVariable(focusCol);
+    // A row is not a variable, and neither is the whole table. Both are
+    // selected by spanning every visible column, so following focusCol seated
+    // the inspector on the LAST column of the table - "Inspecting site" after
+    // a click on row 1, a variable the user never touched. Cells and columns
+    // still lead it, because there the focus genuinely IS a variable.
+    if (GRID_SELECTION_KIND !== "row" && GRID_SELECTION_KIND !== "all" &&
+        focusCol !== INSPECTOR_VAR) selectInspectorVariable(focusCol);
     if (GRID_SELECTION_KIND === "cells" &&
         anchorCol === focusCol && Number(anchorRow) === Number(focusRow) &&
         PROJECT.table.caseIds[Number(focusRow)]) {
@@ -9863,7 +11202,7 @@
     if (GRID_SELECTION_COLS) copyCols = gridSelectedColumns();
     else {
       copyCols = [];
-      for (var cc = r.c0; cc <= r.c1; cc++) copyCols.push(t.order[cc]);
+      for (var cc = 0; cc < r.cols.length; cc++) copyCols.push(r.cols[cc]);
     }
     if (GRID_SELECTION_KIND === "column" || GRID_SELECTION_KIND === "all") {
       var head = [];
@@ -9907,6 +11246,15 @@
     }
     if (sourceCol && t.excluded && t.excluded[sourceCol])
       t.excluded[name] = Object.assign({}, t.excluded[sourceCol]);
+    // The copy keeps the source's own missing labels, or a duplicated column
+    // re-admits the declared code into its mean, the exact harm the rename
+    // bookkeeping exists to prevent. The provenance record rides too, since
+    // the copied values are still the snapshot it describes.
+    if (sourceCol && t.missingTokensByCol && t.missingTokensByCol[sourceCol])
+      t.missingTokensByCol[name] = t.missingTokensByCol[sourceCol].slice();
+    if (sourceCol && t.importedFormulas && t.importedFormulas[sourceCol])
+      t.importedFormulas[name] =
+        Object.assign({}, t.importedFormulas[sourceCol]);
     return name;
   }
   function gridApplyMatrix(matrix) {
@@ -9916,6 +11264,12 @@
     for (var i = 0; i < matrix.length; i++) width = Math.max(width, matrix[i].length);
     if (!width) return;
     dataMark("the paste");
+    // Which columns already existed. Both censuses below skip the ones this
+    // paste creates, because filling a fresh column is the normal case and
+    // not the accident. Null prototype because column names are DATA and a column
+    // called "__proto__" would otherwise read as present everywhere.
+    var preCols = Object.create(null);
+    for (var pc = 0; pc < t.order.length; pc++) preCols[t.order[pc]] = 1;
     var targetRows = matrix.length, targetCols = width;
     var fillSelection = matrix.length === 1 && width === 1 &&
       ((r.r1 > r.r0) || (r.c1 > r.c0));
@@ -9928,8 +11282,11 @@
       for (var ac = 0; ac < t.order.length; ac++) t.raw[t.order[ac]].push("");
       t.caseIds.push(newCaseId());
     }
-    while (t.order.length < r.c0 + targetCols)
+    var visCols = gridVisibleColumns(t);
+    while (visCols.length < r.c0 + targetCols) {
       addColumnInternal(t.order[t.order.length - 1], null);
+      visCols = gridVisibleColumns(t);
+    }
     // Level census of the PRE-EXISTING pasted-into columns, taken before
     // the writes: a paste that explodes a factor-like column's distinct
     // values is almost always a misaligned block (Torry's wall-of-IDs
@@ -9946,8 +11303,8 @@
       return k;
     };
     var levelWatch = [];
-    for (var lw = 0; lw < targetCols && r.c0 + lw < t.order.length; lw++) {
-      var lwCol = t.order[r.c0 + lw];
+    for (var lw = 0; lw < targetCols && r.c0 + lw < visCols.length; lw++) {
+      var lwCol = visCols[r.c0 + lw];
       var lwBefore = distinctIn(lwCol);
       // Only factor-like columns (few distinct values) can "explode";
       // pasting fresh measurements into a numeric column legitimately
@@ -9961,14 +11318,14 @@
         var srcCol = fillSelection ? 0 : x;
         var value = matrix[srcRow] && matrix[srcRow][srcCol] != null
           ? matrix[srcRow][srcCol] : "";
-        t.raw[t.order[r.c0 + x]][r.r0 + y] = String(value);
+        t.raw[visCols[r.c0 + x]][r.r0 + y] = String(value);
       }
     }
     t.edited = true;
     retype(t); validateRoles();
     persist(); syncAll(); render();
-    gridSetSelection(t.order[r.c0], r.r0,
-      t.order[Math.min(t.order.length - 1, r.c0 + targetCols - 1)],
+    gridSetSelection(visCols[r.c0], r.r0,
+      visCols[Math.min(visCols.length - 1, r.c0 + targetCols - 1)],
       r.r0 + targetRows - 1, "cells");
     var worst = null;
     for (var lw2 = 0; lw2 < levelWatch.length; lw2++) {
@@ -9976,11 +11333,45 @@
       if (gained >= 5 && (!worst || gained > worst.gained))
         worst = { col: levelWatch[lw2].col, gained: gained };
     }
-    showToast("Pasted " + targetRows + " \u00d7 " + targetCols + " cells" +
-      (worst
-        ? " \u00b7 " + worst.col + " gained " + worst.gained + " new values" +
-          " - press Cmd/Ctrl+Z if this paste was misaligned"
-        : ""), !!worst);
+    // The mirror image of that census. A block whose text lands in a
+    // Continuous column types to nothing, so the paste reported itself a
+    // success while every value in that column went missing, and the only
+    // column it named was the one that GAINED values. The raw text survives
+    // and one undo puts it back, which is exactly why saying so matters.
+    // Nothing on screen tells the user the column is recoverable.
+    var voided = null;
+    for (var vc = 0; vc < targetCols && r.c0 + vc < visCols.length; vc++) {
+      var vCol = visCols[r.c0 + vc];
+      if (!preCols[vCol]) continue;
+      var unread = 0;
+      for (var vr = 0; vr < targetRows; vr++)
+        if (unreadRaw(t, vCol, r.r0 + vr)) unread++;
+      // Same restraint as the type change. A stray value or two is ordinary
+      // and the variable card already names it; losing most of what was
+      // pasted is the case worth interrupting for.
+      if (unread >= Math.max(3, targetRows * 0.5) &&
+          (!voided || unread > voided.unread))
+        voided = { col: vCol, unread: unread,
+                   empty: countValid(t, vCol) === 0 };
+    }
+    // When both fire, the voided column is the one to name. A column that
+    // gained values still has them; a column that lost them looks exactly
+    // like one nobody pasted into. Both point at the same undo, so naming
+    // the worse one costs the user nothing.
+    var note = "";
+    if (voided)
+      note = " \u00b7 " + (voided.empty
+        ? "no value pasted into " + voided.col + " could be read as " +
+          typeLabel(t.types[voided.col]) + ", so the column is empty now"
+        : voided.unread + " of " + targetRows + " values pasted into " +
+          voided.col + " could not be read as " +
+          typeLabel(t.types[voided.col]) + ", so they are missing now") +
+        " - press Cmd/Ctrl+Z if this paste was misaligned";
+    else if (worst)
+      note = " \u00b7 " + worst.col + " gained " + worst.gained + " new values" +
+        " - press Cmd/Ctrl+Z if this paste was misaligned";
+    showToast("Pasted " + targetRows + " \u00d7 " + targetCols + " cells" + note,
+      !!(voided || worst));
   }
   function gridClearSelected() {
     var cells = gridSelectionCells(), t = PROJECT.table;
@@ -10350,9 +11741,14 @@
     if (fActive && t.filterInapplicable && t.filterInapplicable.length)
       fExtra += ". Not applied: " + t.filterInapplicable.join(", ") +
         " (that comparison needs numbers)";
-    setTip(fBtn, fActive
+    // The imported-filter fact belongs HERE and not only in a toast. This is
+    // the control a reader uses to ask "is anything filtered", and on a file
+    // that arrived with jamovi filters the honest answer is longer than "no".
+    var fImported = importedFilterNote(t);
+    setTip(fBtn, (fActive
       ? "Active: " + filterSummaryText(t) + fExtra + " - click to edit"
-      : "Filter rows without changing the dataset");
+      : "Filter rows without changing the dataset") +
+      (fImported ? " " + fImported : ""));
     var rowK = rowExclCount(t), valueK = valueExclCount(t);
     var total = rowK + valueK;
     var exclusion = el("ps-data-exclusions");
@@ -10409,6 +11805,16 @@
       if (GRID_HIDDEN_COLUMNS[t.order[i]])
         html.push('<button type="button" role="menuitem" data-show-column="' +
           escHtml(t.order[i]) + '">Show ' + escHtml(t.order[i]) + "</button>");
+    // Decision D. Hiding a column is view state, deliberately kept out of the
+    // project file, snapshots, autosave, export and every chart payload. That
+    // decision stands, and it was undisclosed either way, so a saved project
+    // came back with every column visible and nothing had said it would. Said
+    // here, where the arrangement is being made, rather than as a surprise on
+    // reopen. Only while something is actually hidden.
+    if (html.length)
+      html.push('<div class="ps-loader-hint" style="padding:6px 10px 2px;">' +
+        "Hiding is for looking, so it is not saved with the project. " +
+        "Reopening shows every column again.</div>");
     list.innerHTML = html.join("");
     el("ps-columnview-showall").disabled =
       !gridHiddenColumnCount(t) && !GRID_FOCUS_CHART_COLUMNS;
@@ -10444,6 +11850,29 @@
     }
     gridSetSelection(result.col, result.row,
                      result.col, result.row, "cells");
+    // Vertical only was half a reveal. At 40 columns every match Find walked
+    // to was off screen to the RIGHT while the counter cheerfully advanced,
+    // so the one feature for locating a value could not show you one. Done
+    // after the selection, because the cell has to be painted before it can
+    // be measured, and only when it is actually out of view so an in-view
+    // match never jolts sideways.
+    var cell = gridFindTd(result.col, result.row);
+    if (cell && grid.scrollWidth > grid.clientWidth + 1) {
+      var cr = cell.getBoundingClientRect(), gr = grid.getBoundingClientRect();
+      // The row-number gutter is sticky, so a cell tucked behind it is as
+      // hidden as one past the right edge.
+      var gutter = grid.querySelector(".ps-grid-rownum");
+      var leftEdge = gr.left + (gutter ? gutter.getBoundingClientRect().width : 0);
+      if (cr.left < leftEdge || cr.right > gr.right) {
+        var target = grid.scrollLeft + (cr.left - leftEdge) -
+          Math.max(0, (gr.right - leftEdge - cr.width) / 2);
+        target = Math.max(0, Math.min(target, grid.scrollWidth - grid.clientWidth));
+        if (smooth && grid.scrollTo) {
+          try { grid.scrollTo({ left: target, behavior: "smooth" }); }
+          catch (e2) { grid.scrollLeft = target; }
+        } else grid.scrollLeft = target;
+      }
+    }
   }
   function gridFindStep(direction) {
     if (!GRID_FIND_RESULTS.length) return;
@@ -10709,6 +12138,13 @@
                   : "Computed: " + t.computed[col]) + '"' +
                 (t.computedErrors && t.computedErrors[col]
                   ? ' data-fx-error="1"' : "") + ">fx</span>"
+              // A column jamovi derived is a computed column too, so it wears
+              // the same badge. The muted variant and the tip carry the one
+              // difference that matters, which is that this one is frozen.
+              : importedFormulaOf(t, col)
+              ? '<span class="ps-grid-fx" data-fx-frozen="1" data-tip="' +
+                escHtml(importedFormulaNote(importedFormulaOf(t, col))) +
+                '">fx</span>'
               : "") +
              (roleOf[col]
               ? '<span class="ps-grid-role">' + escHtml(roleOf[col]) + "</span>"
@@ -10818,9 +12254,13 @@
     var t = PROJECT.table, r = gridSelectionRect();
     if (!t || !r) return null;
     var nums = [], cells = 0, nonNum = 0, blank = 0;
+    // r.cols, not t.order between c0 and c1, per the note on
+    // gridSelectionRect. Those two index the VISIBLE columns, so with a
+    // column hidden this counted and averaged a different set of columns
+    // than the one under the highlight.
     for (var row = r.r0; row <= r.r1; row++)
-      for (var c = r.c0; c <= r.c1; c++) {
-        var col = t.order[c];
+      for (var c = 0; c < r.cols.length; c++) {
+        var col = r.cols[c];
         if (!col) continue;
         cells++;
         var v = (t.columns[col] || [])[row];
@@ -10882,8 +12322,7 @@
     var n = nRows(t);
     return '<span id="ps-grid-stats" class="ps-gridstats"></span>' +
       '<span id="ps-grid-selection-status" role="status" aria-live="polite"></span>' +
-      '<span class="ps-grid-shape">' + n.toLocaleString() + " rows \u00d7 " +
-      t.order.length + " columns" +
+      '<span class="ps-grid-shape">' + shapeText(n, t.order.length, "\u00d7", true) +
       (gridShouldVirtualize(t)
        ? " \u00b7 windowed view; the chart uses all of them" : "") + "</span>";
   }
@@ -10922,6 +12361,8 @@
                             excludedRows: t.excludedRows || {},
                             filters: t.filters || [],
                             computed: t.computed || {},
+                            importedFormulas: t.importedFormulas || {},
+                            importedFilters: t.importedFilters || [],
                             chartRoles: PROJECT.charts.map(function (c) {
                               return { id: c.id, roles: c.roles || {} };
                             }) });
@@ -10964,6 +12405,13 @@
     t.filters = Array.isArray(s.filters) ? s.filters : [];
     t.computed = (s.computed && typeof s.computed === "object")
       ? s.computed : {};
+    // Undo restores the columns, so it has to restore what was known about
+    // them. Deleting a derived column and undoing it must bring back the
+    // label as well as the values.
+    t.importedFormulas = (s.importedFormulas &&
+      typeof s.importedFormulas === "object") ? s.importedFormulas : {};
+    t.importedFilters = Array.isArray(s.importedFilters)
+      ? s.importedFilters : [];
     if (Object.prototype.hasOwnProperty.call(s, "declaredLevels"))
       t.declaredLevels = s.declaredLevels;
     t.levelOrderDefaults = s.levelOrderDefaults || {};
@@ -11022,6 +12470,30 @@
   // One cell edits at a time; commits write the RAW string, the column
   // TYPE stays declared (a non-parsing value in a numeric column becomes
   // missing, the jamovi NA convention), and the chart re-renders live.
+  // A cell can hold text its own column cannot read. "sixty one" in a
+  // Continuous column types to null exactly like an empty cell, so the grid
+  // drew both as the same em dash and the only difference lived in a Missing
+  // count in another pane. That asymmetry is the bug, because deliberately
+  // clearing a cell gets a toast with an undo and accidentally voiding one
+  // got silence.
+  // Returns the held text, or "" when the cell is missing for an honest
+  // reason (blank, a declared missing code, an exclusion).
+  function unreadRaw(t, col, i) {
+    if (!t || !t.columns || !t.columns[col] || !t.raw[col]) return "";
+    if (t.columns[col][i] != null || isExcluded(t, col, i)) return "";
+    var s = String(t.raw[col][i] == null ? "" : t.raw[col][i]).trim();
+    if (!s || isMissingRaw(t, s, col)) return "";
+    return s;
+  }
+  // Names the text and the type that could not read it. setColType already
+  // says this about a whole column; one cell gets the same words.
+  function unreadReason(t, col, i) {
+    var s = unreadRaw(t, col, i);
+    if (!s) return "";
+    if (s.length > 40) s = s.slice(0, 37) + "\u2026";
+    return "\u201c" + s + "\u201d could not be read as " +
+      typeLabel(t.types[col]);
+  }
   function gridCellView(t, col, i) {
     var rowExcl = isRowExcluded(t, i);
     var excl = isExcluded(t, col, i), v;
@@ -11038,12 +12510,20 @@
     if (excl) cls += " ps-grid-excl";
     if (rowExcl) cls += " ps-grid-row-excl";
     if (rowFiltered) cls += " ps-grid-row-filtered";
+    var tip = rowFiltered
+      ? "Hidden by the active row filter - the row stays in the dataset but leaves every chart"
+      : rowExcl
+      ? "Observation excluded from every chart - right-click to include the row"
+      : (excl ? "Value excluded from charts - right-click to include it" : "");
+    // Only a cell nobody excluded can be missing because nothing could read
+    // it, and only a missing cell is worth testing, so the token map this
+    // builds stays off the common path.
+    var note = (v == null && !excl)
+      ? unreadReason(t, col, i) : "";
+    if (note) note += ", so this cell is missing";
     return { cls: cls, text: v == null ? "\u2014" : String(v),
-             title: rowFiltered
-               ? "Hidden by the active row filter - the row stays in the dataset but leaves every chart"
-               : rowExcl
-               ? "Observation excluded from every chart - right-click to include the row"
-               : (excl ? "Value excluded from charts - right-click to include it" : "") };
+             note: note, tip: tip,
+             title: note ? (tip ? note + ". " + tip : note) : tip };
   }
   function gridColumnHeaderId(visibleCol) {
     return "ps-grid-col-" + visibleCol;
@@ -11056,10 +12536,13 @@
   }
   function gridCellState(t, col, view) {
     var parts = [];
-    if (view.cls.indexOf("ps-grid-miss") !== -1) parts.push("Missing value");
+    // The reason replaces the bare "Missing value" rather than joining it,
+    // because it already says the cell is missing and says why.
+    if (view.note) parts.push(view.note);
+    else if (view.cls.indexOf("ps-grid-miss") !== -1) parts.push("Missing value");
     if (isComputedColumn(t, col))
       parts.push("Computed value; edit the formula from the column menu");
-    if (view.title) parts.push(view.title);
+    if (view.tip) parts.push(view.tip);
     return parts.join(". ");
   }
   function gridPaintCell(td, col, row) {
@@ -11156,6 +12639,12 @@
     t.raw[ge.col][ge.row] = newRaw;
     t.edited = true;
     retype(t);
+    // The typed value is what every chart and statistic downstream will see.
+    // When nothing could read the text, the cell is missing, and announcing
+    // "Saved score, row 1 as sixty one" tells a screen reader user the value
+    // was stored in the one circumstance where it was not. Read AFTER retype,
+    // because that is what decides it.
+    var voided = unreadReason(t, ge.col, ge.row);
     gridPaintCell(ge.td, ge.col, ge.row);
     gridApplySelection();
     persist();
@@ -11166,9 +12655,20 @@
       gridSetSelection(ge.col, ge.row, ge.col, ge.row);        // item 11
       gridFocusSelf();
     }
-    gridAnnounceEdit("Saved " + gridEditTarget(ge.col, ge.row) +
-      " as " + gridEditValue(t, ge.col, newRaw) + "." +
+    gridAnnounceEdit((voided
+      ? gridEditTarget(ge.col, ge.row) + " is missing. " + voided + "."
+      : "Saved " + gridEditTarget(ge.col, ge.row) +
+        " as " + gridEditValue(t, ge.col, newRaw) + ".") +
       gridNextEditAnnouncement(next));
+    // The sighted half of the same report. This is not a toast on every
+    // edit. An ordinary edit lands, and only a value that was destroyed
+    // reaches here. The cell keeps the reason in its tooltip afterwards, so
+    // this pill is the moment-of-the-act half and does not have to persist.
+    // Wording and restraint follow setColType, including a plain keyboard
+    // hint rather than a button, because the way back is undo either way.
+    if (voided)
+      showToast(gridEditTarget(ge.col, ge.row) + " is missing \u00b7 " +
+        voided + " \u00b7 Cmd/Ctrl+Z puts it back");
   }
   function gridCancelEdit() {
     var ge = GRID_EDIT;
@@ -11327,6 +12827,10 @@
     persist();
     syncDataRow();
     syncDataGrid();
+    // The status bar's row count lives in syncAppShell, which this path never
+    // called, so the footer said 25 rows while the bar four pixels below said
+    // 24 and stayed there until an unrelated workspace switch healed it.
+    syncAppShell();
     render();
     var grid = el("ps-datagrid");
     grid.scrollTop = grid.scrollHeight;
@@ -11497,6 +13001,13 @@
     el("ps-gridfoot").innerHTML = gridFootHtml(t);
     syncDataCommandBar();
     gridApplySelection();
+    // The panel a foot to the right carries Excluded, Valid, Missing and the
+    // Mean, and it was never told. Excluding an outlier left it reading
+    // "Excluded 0" and the OLD mean beside a toolbar chip already saying
+    // "Excluded 1", and it only healed if you clicked a DIFFERENT column and
+    // came back. Someone chasing an outlier excludes two more values watching
+    // a number that never moves.
+    syncVariableInspector();
     persist();
     syncDataRow();
     render();
@@ -11546,7 +13057,8 @@
   }
   function gridRestoreExclusions() {
     var t = PROJECT.table;
-    if (!t || !exclCount(t)) return;
+    var had = exclCount(t);
+    if (!t || !had) return;
     dataMark("restoring the exclusions");
     t.excluded = {};
     t.excludedRows = {};
@@ -11571,6 +13083,11 @@
     syncDataRow();
     syncDataGrid();
     render();
+    // Every small action in this app confirms itself, and this one reverses
+    // every exclusion the user made, in one click, and said nothing.
+    showToast(had === 1
+      ? "Restored 1 excluded value \u00b7 Cmd/Ctrl+Z puts it back"
+      : "Restored " + had + " excluded values \u00b7 Cmd/Ctrl+Z puts them back");
   }
   // ---- row-filter popover (Tier 1). A draft of condition rows edited
   // in place; Apply commits ONE data-history step; Clear all removes
@@ -11615,7 +13132,7 @@
     var t = PROJECT.table, n = nRows(t), kept = 0;
     var fs = FILTER_DRAFT.filter(function (f) {
       return f.col && t.raw[f.col] && FILTER_OPS[f.op] &&
-        String(f.value) !== "";
+        (!filterNeedsValue(f.op) || String(f.value) !== "");
     });
     if (!fs.length) return n;
     var saved = t.filters;
@@ -11688,7 +13205,11 @@
           opSel.appendChild(oo);
         }
         opSel.addEventListener("change", function () {
-          f.op = this.value; refreshFilterCount();
+          f.op = this.value;
+          // Rebuilt, not just recounted, because the value box appears and
+          // disappears with the operator.
+          renderFilterMenu();
+          refreshFilterCount();
         });
         row.appendChild(opSel);
         var valueEl;
@@ -11732,6 +13253,8 @@
         }
         valueEl.setAttribute("aria-label",
           "Filter " + (idx + 1) + " value");
+        // An operator that takes no value must not show a box inviting one.
+        if (!filterNeedsValue(f.op)) valueEl.style.display = "none";
         row.appendChild(valueEl);
         var strayVal = String(f.value) !== "" && !num && lv && lv.length &&
           lv.indexOf(String(f.value)) === -1;
@@ -11773,7 +13296,9 @@
     clear.type = "button";
     clear.setAttribute("data-filter-clear", "");
     clear.disabled = !validFilters(t).length &&
-      !FILTER_DRAFT.some(function (f) { return String(f.value) !== ""; });
+      !FILTER_DRAFT.some(function (f) {
+        return !filterNeedsValue(f.op) || String(f.value) !== "";
+      });
     clear.addEventListener("click", function () { applyFilters(true); });
     actions.appendChild(clear);
     var count = mkEl("span", "ps-filter-count", "");
@@ -11796,8 +13321,9 @@
     var t = PROJECT.table;
     var next = clearAll ? [] : FILTER_DRAFT.filter(function (f) {
       return f.col && t.raw[f.col] && FILTER_OPS[f.op] &&
-        String(f.value) !== "";
+        (!filterNeedsValue(f.op) || String(f.value) !== "");
     }).map(function (f) {
+      if (!filterNeedsValue(f.op)) return { col: f.col, op: f.op, value: "" };
       return { col: f.col, op: f.op,
                value: colStoresNumbers(t, f.col) ? Number(f.value)
                                                  : String(f.value) };
@@ -11821,6 +13347,7 @@
     persist();
     syncDataGrid();
     syncDataCommandBar();
+    syncVariableInspector();
     render();
     hideFilterMenu();
     showToast(next.length
@@ -11920,6 +13447,7 @@
     if (td) {
       drag.focusCol = td.getAttribute("data-gc");
       drag.focusRow = Number(td.getAttribute("data-gr"));
+      drag.paintedTd = td;
       gridSetSelection(drag.anchorCol, drag.anchorRow,
                        drag.focusCol, drag.focusRow);
     }
@@ -12411,6 +13939,13 @@
         drag.focusCol = td.getAttribute("data-gc");
         drag.focusRow = Number(td.getAttribute("data-gr"));
       }
+      // A pointer crossing one cell fires dozens of moves inside it, and the
+      // selection changes on none of them. Node identity is the test rather
+      // than the column name and row number, because a grid rebuilt under an
+      // auto-scroll hands back a different element for the same cell, and
+      // that one really does have to repaint.
+      if (td && td === drag.paintedTd) { e.preventDefault(); return; }
+      drag.paintedTd = td || null;
       gridSetSelection(drag.anchorCol, drag.anchorRow,
                        drag.focusCol, drag.focusRow);
       e.preventDefault();
@@ -12771,9 +14306,6 @@
     el("ps-formula-close").addEventListener("click", function () {
       closeShellDialog("ps-formula-dialog");
     });
-    el("ps-formula-cancel").addEventListener("click", function () {
-      closeShellDialog("ps-formula-dialog");
-    });
     el("ps-formula-save").addEventListener("click", submitFormulaDialog);
     el("ps-formula-input").addEventListener("input", refreshFormulaPreview);
     el("ps-formula-input").addEventListener("keydown", function (e) {
@@ -12940,7 +14472,10 @@
       var btn = e.target.closest ? e.target.closest("button[data-chart]") : null;
       if (!btn) return;
       el("ps-lchartmenu").style.display = "none";
-      layAddChart(btn.getAttribute("data-chart"));
+      var target = LAY_CHARTMENU_REPLACE;
+      LAY_CHARTMENU_REPLACE = null;
+      if (target) layReplaceChart(target, btn.getAttribute("data-chart"));
+      else layAddChart(btn.getAttribute("data-chart"));
     });
     el("ps-laddimage").addEventListener("click", function () {
       el("ps-laddimage-file").click();
@@ -13016,20 +14551,40 @@
       var txt = cd.getData("text/plain");
       if (txt && txt.trim()) {
         e.preventDefault();
-        var pos = layStagger();
-        layAddItem({ id: layNewItemId(), kind: "text",
-          text: txt.trim().slice(0, 2000), x: pos.x, y: pos.y,
-          w: 260, h: 60, size: 14 });
-        showToast("Text pasted \u00b7 drag to place");
+        var pasted = { id: layNewItemId(), kind: "text",
+          text: txt.trim().slice(0, 2000), x: 0, y: 0,
+          w: 260, h: 60, size: 14 };
+        var pspot = layPlaceText(pasted);
+        var pgrew = pspot.needH > layPage().h;
+        pasted.x = pspot.x; pasted.y = pspot.y;
+        layAddItem(pasted, false, pspot.needH);
+        // A paste can grow the page like any other add, and said nothing.
+        showToast("Text pasted \u00b7 " + (pspot.capped
+          ? "the page is at its largest, so drag it clear"
+          : pgrew ? "the page grew to fit it" : "drag to place"));
         return;
       }
       showToast("Paste an image or text - other clipboard content is not " +
         "supported in layouts.", true);
     });
+    // Notes and titles write on a 600ms debounce, so a reload inside that
+    // window used to lose what had just been typed. Blur flushes it, since the
+    // caret leaving the box is the moment the user considers it written.
+    (function flushOnBlur() {
+      var boxes = ["ps-pininsp-bnote", "ps-pininsp-note", "ps-pininsp-name"];
+      for (var i = 0; i < boxes.length; i++)
+        el(boxes[i]).addEventListener("blur", function () {
+          if (PIN_NOTE_T) { clearTimeout(PIN_NOTE_T); PIN_NOTE_T = null; }
+          persist(false);
+        });
+    })();
     el("ps-pininsp-bnote").addEventListener("input", function () {
       activePinBoard().note = this.value;
       if (PIN_NOTE_T) clearTimeout(PIN_NOTE_T);
       PIN_NOTE_T = setTimeout(function () { persist(false); }, 600);
+    });
+    el("ps-pininsp-update").addEventListener("click", function () {
+      if (PIN_SEL) pinKeepUpdatedCopy(PIN_SEL);
     });
     el("ps-pininsp-open").addEventListener("click", function () {
       var pins = projectPins();
@@ -13040,6 +14595,21 @@
         setAppWorkspace("chart");
         return;
       }
+    });
+    el("ps-pininsp-name").addEventListener("input", function () {
+      var pins = projectPins(), v = String(this.value || "").trim();
+      for (var i = 0; i < pins.length; i++)
+        if (pins[i].id === PIN_SEL) {
+          if (v) pins[i].pageTitle = v; else delete pins[i].pageTitle;
+        }
+      // The rail's page list and the page's own footer both read this
+      // label, so both follow every keystroke. The footer is patched in
+      // place rather than through renderPinboard, which would rebuild
+      // every page image on the board once per character.
+      syncProjectNavigator();
+      pinSyncCardLabel(PIN_SEL);
+      if (PIN_NOTE_T) clearTimeout(PIN_NOTE_T);
+      PIN_NOTE_T = setTimeout(function () { persist(false); }, 600);
     });
     el("ps-pininsp-note").addEventListener("input", function () {
       var pins = projectPins();
@@ -13075,7 +14645,7 @@
       showContextMenu(r.left, r.bottom + 4, items, null);
     });
     el("ps-laddtext").addEventListener("click", function () {
-      layAddText("Text", 14, false);
+      layAddText("Text", 14, false, true);
     });
     el("ps-laddlabel").addEventListener("click", function () {
       var c = activeChart();
@@ -13086,12 +14656,30 @@
       persist();
     });
     document.addEventListener("pointerdown", function (e) {
+      // The menus ACT ON the selection, so pressing one is not clicking away.
+      // Without the menu bar and the grid's own command bar on this list the
+      // press that OPENED a menu threw the selection away before any item was
+      // clicked, which left Edit > Paste, Data > Exclude or include, Data >
+      // New chart from selection and Fill down unreachable by mouse, each of
+      // them telling the user to select something they had already selected.
+      // The keyboard route always worked, because F10 fires no pointerdown.
+      // The command palette earns its place the same way. Its result buttons
+      // run commands that act on the selection, and the press landed here
+      // first, so a mouse click on "New chart from selection" destroyed the
+      // selection and then asked for it. The app submenu rides along for the
+      // day it holds a selection command.
       if (GRID_SELECTION &&
           !(e.target.closest && (e.target.closest("#ps-datagrid") ||
                                  e.target.closest("#ps-cellmenu") ||
                                  e.target.closest("#ps-columnmenu") ||
                                  e.target.closest("#ps-columnview-menu") ||
-                                 e.target.closest("#ps-rowmenu"))))
+                                 e.target.closest("#ps-rowmenu") ||
+                                 e.target.closest("#ps-menubar") ||
+                                 e.target.closest("#ps-appmenu") ||
+                                 e.target.closest("#ps-appsubmenu") ||
+                                 e.target.closest("#ps-command-palette") ||
+                                 e.target.closest("#ps-datamenu") ||
+                                 e.target.closest("#ps-data-more"))))
         gridClearSelection();
       if (el("ps-addmenu").style.display === "block" &&
           !(e.target.closest && e.target.closest("#ps-addmenu")))
@@ -13162,6 +14750,22 @@
         }
         return;
       }
+      // The Notebook owns it the same way, and for the same reason the
+      // layout branch above exists: without this the press reached the
+      // engine and undid a style edit on a chart in another workspace,
+      // invisibly, while the user was looking at their record.
+      if (appWorkspace() === "pinboard") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (isUndo) {
+          if (NB_UNDO.length) nbUndo();
+          else showToast("Nothing to undo in the Notebook");
+        } else {
+          if (NB_REDO.length) nbRedo();
+          else showToast("Nothing to redo in the Notebook");
+        }
+        return;
+      }
       var dataWorkspace = appWorkspace() === "data";
       if (dataWorkspace) {
         e.preventDefault();
@@ -13194,6 +14798,41 @@
           '.graphbuilder2-host button[aria-label="Redo"]');
         if (rb) rb.click();
       }
+    }, true);
+    // Canvas zoom shortcuts. Cmd/Ctrl+wheel already zoomed, but the three
+    // keys every canvas application binds did nothing, so the only way to
+    // step the zoom was the select in the toolbar.
+    window.addEventListener("keydown", function (e) {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+      if (!(appWorkspace() === "layout" && isLayoutTab(activeChart()))) return;
+      var zk = e.key;
+      var step = zk === "=" || zk === "+" ? 1 : (zk === "-" || zk === "_") ? -1 : 0;
+      if (zk !== "0" && !step) return;
+      var tgt = e.target;
+      if (tgt && tgt.closest &&
+          tgt.closest("input, textarea, select, [contenteditable]")) return;
+      e.preventDefault();
+      var view = layView();
+      if (zk === "0") {
+        // Cmd+0 toggles between fitting the page and actual size, which is
+        // the pair a figure author flips between.
+        view.zoom = view.zoom === "fit" ? "1" : "fit";
+      } else {
+        var ladder = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+        var now = layZoom(), at = 0, i;
+        for (i = 0; i < ladder.length; i++)
+          if (Math.abs(ladder[i] - now) < Math.abs(ladder[at] - now)) at = i;
+        if (step > 0 && ladder[at] <= now + 0.001) at++;
+        if (step < 0 && ladder[at] >= now - 0.001) at--;
+        view.zoom = String(ladder[Math.max(0, Math.min(ladder.length - 1, at))]);
+      }
+      persist(); renderLayout();
+      layAnnounce(view.zoom === "fit" ? "Zoom fit to page."
+        : "Zoom " + Math.round(Number(view.zoom) * 100) + " percent.");
+    // CAPTURE. Something on the way down already stops propagation for
+    // plain Cmd/Ctrl chords, so a bubble-phase window listener never sees
+    // "=" or "-" at all (Cmd+0 arrived, which is what made the first
+    // attempt look half-working).
     }, true);
   }
 
@@ -13457,11 +15096,12 @@
     var t = PROJECT.table, r = gridSelectionRect();
     if (!t || !r) return [];
     if (GRID_SELECTION_COLS) return gridSelectedColumns();
+    // r.cols, never t.order[c0..c1]. The rect indexes VISIBLE columns, so
+    // the old walk armed the chart from a column the user cannot see and
+    // dropped one they had selected whenever a hidden column sat earlier.
     var out = [];
-    for (var c = r.c0; c <= r.c1; c++) {
-      var col = t.order[c];
-      if (col && !GRID_HIDDEN_COLUMNS[col]) out.push(col);
-    }
+    for (var c = 0; c < r.cols.length; c++)
+      if (r.cols[c]) out.push(r.cols[c]);
     return out;
   }
   function armChartFromSelection(cols) {
@@ -14489,7 +16129,8 @@
     { key: "three", name: "Three panels", slots: 3,
       description: "One wide chart above two supporting charts.",
       note: "A common results-figure structure.",
-      preview: [[7, 7, 86, 40], [7, 54, 40, 39], [53, 54, 40, 39]] },
+      preview: [[24, 9, 52, 54], [24, 69, 25, 26], [51, 69, 25, 26]],
+      portraitPreview: [[5, 19, 90, 41], [5, 64, 44, 20], [51, 64, 44, 20]] },
     { key: "four", name: "Four-panel grid", slots: 4,
       description: "A balanced 2 by 2 figure for related results.",
       note: "Designed for multi-part publication figures.",
@@ -14663,7 +16304,23 @@
     persist();
     syncAll();
     render();
-    showUndoToast("Deleted " + removed.name, function () {
+    // Say it while the Undo is still on screen. A layout keeps drawing a
+    // deleted chart's captured picture for the rest of the session, so
+    // nothing looked wrong until the next launch, by which point the offer
+    // to put it back was long gone.
+    var usedBy = [];
+    if (!isLayoutTab(removed))
+      for (var ui = 0; ui < PROJECT.charts.length; ui++) {
+        var lay = PROJECT.charts[ui];
+        if (!isLayoutTab(lay) || !Array.isArray(lay.items)) continue;
+        for (var uj = 0; uj < lay.items.length; uj++)
+          if (lay.items[uj].kind === "chart" &&
+              lay.items[uj].chartId === removed.id) {
+            usedBy.push(lay.name || "a layout"); break;
+          }
+      }
+    showUndoToast("Deleted " + removed.name + (usedBy.length
+      ? " (used by " + usedBy.join(", ") + ")" : ""), function () {
       if (chartById(removed.id)) return;
       PROJECT.charts.splice(Math.min(idx, PROJECT.charts.length), 0, removed);
       PROJECT.activeChart = wasActive === removed.id ? removed.id : PROJECT.activeChart;
@@ -15308,8 +16965,36 @@
     render();
   }
   function addLayout() { activateNewLayout(newLayout()); }
-  function layoutTemplateRects(key, page) {
+  // A chart draws at a fixed aspect and is letterboxed inside its panel, so a
+  // panel box whose shape does not match its chart carries dead space the
+  // user cannot see and cannot close. On the four-panel template that was
+  // 62 px on a 404 px panel, about 15 percent, and it mattered beyond looks:
+  // align, snapping, the smart guides, the marquee and the selection outline
+  // all act on the BOX, so the user was lining up something 31 px away from
+  // the thing they were looking at.
+  //
+  // Fitting the box to the chart changes NOTHING in the exported figure. The
+  // ink was already drawn at the fitted size and centred in the box; only the
+  // invisible rectangle changes. The engine's own canvas is the fallback for
+  // a chart that has not been captured yet.
+  var LAY_CHART_ASPECT = 720 / 490;
+  function layChartAspect(chartId) {
+    var s = CHART_SNAPS[chartId];
+    if (s && s.w > 0 && s.h > 0) return s.w / s.h;
+    return LAY_CHART_ASPECT;
+  }
+  // Shrink a cell onto the chart's aspect, keeping the cell's centre, so a
+  // grid stays a grid and the figure does not move.
+  function layFitRectToChart(r, chartId) {
+    var a = layChartAspect(chartId);
+    if (!(a > 0) || !(r.w > 0) || !(r.h > 0)) return r;
+    var w = r.w, h = r.h;
+    if (w / h > a) w = h * a; else h = w / a;
+    return { x: r.x + (r.w - w) / 2, y: r.y + (r.h - h) / 2, w: w, h: h };
+  }
+  function layoutTemplateRects(key, page, band) {
     var m = page.margin, gap = 18;
+    band = Number(band) || 0;
     var x = m, y = m, w = page.w - m * 2, h = page.h - m * 2;
     var halfW = (w - gap) / 2, halfH = (h - gap) / 2;
     if (key === "single" || key === "presentation")
@@ -15332,11 +17017,36 @@
               { x: x + mainW + gap, y: y,
                 w: w - mainW - gap, h: h }];
     }
-    if (key === "three")
-      return [{ x: x, y: y, w: w, h: halfH },
-              { x: x, y: y + halfH + gap, w: halfW, h: halfH },
-              { x: x + halfW + gap, y: y + halfH + gap,
-                w: halfW, h: halfH }];
+    if (key === "three") {
+      // The template says one wide chart above two supporting ones and its
+      // picture drew a wide bar, and an evenly split height cannot deliver
+      // either. A chart's aspect is fixed, so a 267 px tall panel is 392 px
+      // wide whatever its cell is, and the top panel came out the same size
+      // as the two below with 276 px of white either side.
+      //
+      // So solve the top row's height for the figure the template promises,
+      // the top panel spanning the pair beneath it. With w_t = (t - band)A
+      // and w_b = (H - gap - t - band)A, setting 2*w_b + gap = w_t gives the
+      // t below. The pair is then placed from the top panel's own span
+      // rather than from half cells, so the three read as one block.
+      var A = LAY_CHART_ASPECT;
+      var t = (2 * A * h - 2 * A * gap - A * band + gap) / (3 * A);
+      // On a tall page the top panel hits the content width first, and then
+      // its row only needs the height that width implies. Without this the
+      // top cell kept a height it could not use and the panel floated in it.
+      if ((t - band) * A > w) t = w / A + band;
+      t = Math.max(band + 60, Math.min(h - gap - band - 60, t));
+      var topW = Math.min(w, (t - band) * A);
+      var botW = Math.max(40, (topW - gap) / 2);
+      var botH = botW / A + band;
+      var topX = x + (w - topW) / 2;
+      // Centred vertically, because capping the top panel at the content
+      // width can leave the block shorter than the page.
+      var y0 = y + Math.max(0, (h - (t + gap + botH)) / 2);
+      return [{ x: x, y: y0, w: w, h: t },
+              { x: topX, y: y0 + t + gap, w: botW, h: botH },
+              { x: topX + botW + gap, y: y0 + t + gap, w: botW, h: botH }];
+    }
     if (key === "four")
       return [{ x: x, y: y, w: halfW, h: halfH },
               { x: x + halfW + gap, y: y, w: halfW, h: halfH },
@@ -15357,32 +17067,49 @@
     } else if (portrait) {
       c.page = { preset: "canvasp", w: 672, h: 1008, margin: 32 };
     }
-    var rects = layoutTemplateRects(def.key, c.page);
     var labels = !!el("ps-layout-template-labels").checked && def.slots > 1;
     var itemNumber = 0, labelBand = labels ? 28 : 0;
+    var rects = layoutTemplateRects(def.key, c.page, labelBand);
     if (def.presentation) {
       c.items.push({ id: "i" + (++itemNumber), kind: "text",
                      text: "Figure title", fontSize: 24, bold: true,
                      x: c.page.margin, y: 22 });
       rects[0].y += 48; rects[0].h -= 48;
     }
+    var slotPanel = [];
     for (var i = 0; i < rects.length; i++) {
       var chartId = selects[i] && selects[i].value;
       if (!chartById(chartId) || isLayoutTab(chartById(chartId))) continue;
       var r = rects[i];
-      c.items.push({ id: "i" + (++itemNumber), kind: "chart",
-                     chartId: chartId, x: Math.round(r.x),
-                     y: Math.round(r.y + labelBand),
-                     w: Math.round(r.w),
-                     h: Math.round(Math.max(80, r.h - labelBand)) });
+      var cell = { x: r.x, y: r.y + labelBand, w: r.w,
+                   h: Math.max(80, r.h - labelBand) };
+      var fit = layFitRectToChart(cell, chartId);
+      var panelItem = { id: "i" + (++itemNumber), kind: "chart",
+                        chartId: chartId, x: Math.round(fit.x),
+                        y: Math.round(fit.y),
+                        w: Math.round(fit.w),
+                        h: Math.round(fit.h) };
+      c.items.push(panelItem);
+      slotPanel[i] = panelItem;   // remembered, not matched back by geometry
     }
     if (labels) {
       for (i = 0; i < rects.length; i++) {
-        c.items.push({ id: "i" + (++itemNumber), kind: "text",
-                       text: String.fromCharCode(65 + i),
-                       fontSize: 20, bold: true,
-                       x: Math.round(rects[i].x),
-                       y: Math.round(rects[i].y) });
+        // Grouped with its own panel, and placed against it. A figure's
+        // letter belongs to its panel, so aligning a column should carry it,
+        // and nothing should have to guess which letter goes with which
+        // chart. Positioned from the PANEL rather than the cell, because
+        // fitting the panel to its chart moves it inside the cell and the
+        // letter was being left behind at the cell's corner.
+        var panel = slotPanel[i];
+        var lx = panel ? panel.x : Math.round(rects[i].x);
+        var ly = panel ? Math.max(0, panel.y - 28) : Math.round(rects[i].y);
+        var gid = panel ? "g" + (i + 1) : null;
+        if (panel) panel.group = gid;
+        var label = { id: "i" + (++itemNumber), kind: "text",
+                      text: String.fromCharCode(65 + i),
+                      fontSize: 20, bold: true, x: lx, y: ly };
+        if (gid) label.group = gid;
+        c.items.push(label);
       }
       c.nextLabel = rects.length;
     }
@@ -15416,6 +17143,10 @@
     letterl: { w: 1056, h: 816 },
     letterp: { w: 816, h: 1056 }
   };
+  // The one page maximum. layPlaceRect caps what it asks for against it and
+  // layNormalizeLayout enforces it, so a growth that would have gone past it
+  // can no longer be promised in a toast and then quietly clamped away.
+  var LAY_PAGE_MAX = 4000;
   function layClamp(n, lo, hi) {
     n = Number(n);
     if (!isFinite(n)) n = lo;
@@ -15428,8 +17159,8 @@
     if (!c.view || typeof c.view !== "object") c.view = {};
     c.page.preset = LAY_PRESETS[c.page.preset] ? c.page.preset :
       (c.page.preset === "custom" ? "custom" : "canvas");
-    c.page.w = Math.round(layClamp(c.page.w || 1024, 320, 4000));
-    c.page.h = Math.round(layClamp(c.page.h || 680, 240, 4000));
+    c.page.w = Math.round(layClamp(c.page.w || 1024, 320, LAY_PAGE_MAX));
+    c.page.h = Math.round(layClamp(c.page.h || 680, 240, LAY_PAGE_MAX));
     c.page.margin = Math.round(layClamp(c.page.margin == null ? 32 : c.page.margin,
                                        0, Math.min(c.page.w, c.page.h) / 3));
     var z = c.view.zoom;
@@ -15482,8 +17213,152 @@
     return ids.length ? ids[ids.length - 1] : null;
   }
   function layIsSelected(id) { return laySelectedIds().indexOf(id) !== -1; }
+  // ---- Groups. A figure's panel letter is a separate item, so aligning a
+  // column moved the panels and left the letters where they were. Grouping is
+  // the honest answer to that: no rule guesses which text belongs to which
+  // panel, the user says so, and every operation that already works on a
+  // selection then works on the group for free.
+  //
+  // A group is a string on the members. Selection is normalised to whole
+  // groups at the moment it is SET, which is the one choke point, so
+  // laySelectedIds stays cheap and every caller downstream sees a complete
+  // group without knowing groups exist.
+  var LAY_GROUP_SEQ = 0;
+  function layNewGroupId() {
+    var items = layItems(), seen = {}, i;
+    for (i = 0; i < items.length; i++)
+      if (items[i].group) seen[items[i].group] = 1;
+    do { LAY_GROUP_SEQ++; } while (seen["g" + LAY_GROUP_SEQ]);
+    return "g" + LAY_GROUP_SEQ;
+  }
+  function layGroupOf(id) {
+    var it = layItemById(id);
+    return it && it.group ? it.group : null;
+  }
+  function layExpandGroups(ids) {
+    var out = [], items = layItems(), i, j;
+    for (i = 0; i < ids.length; i++) {
+      var g = layGroupOf(ids[i]);
+      if (g)
+        for (j = 0; j < items.length; j++)
+          if (items[j].group === g && out.indexOf(items[j].id) === -1 &&
+              items[j].id !== ids[i]) out.push(items[j].id);
+      // The asked-for id goes LAST within its own group, and the last id in
+      // the selection is the primary. Appending group-mates after it made the
+      // primary an arbitrary member, so clicking a grouped chart panel put
+      // the resize handle and the mini toolbar on its letter instead, and the
+      // panel could not be resized at all.
+      var at = out.indexOf(ids[i]);
+      if (at !== -1) out.splice(at, 1);
+      out.push(ids[i]);
+    }
+    return out;
+  }
+  // Align and its relatives must treat a group as ONE thing, or aligning a
+  // column would stack each panel letter on top of its own panel.
+  function layUnits(ids) {
+    var seen = {}, units = [], i;
+    for (i = 0; i < ids.length; i++) {
+      var g = layGroupOf(ids[i]);
+      if (g) {
+        if (seen[g]) { seen[g].ids.push(ids[i]); continue; }
+        seen[g] = { ids: [ids[i]] };
+        units.push(seen[g]);
+      } else units.push({ ids: [ids[i]] });
+    }
+    for (i = 0; i < units.length; i++) {
+      var lo = Infinity, ln = Infinity, hi = -Infinity, hn = -Infinity;
+      for (var k = 0; k < units[i].ids.length; k++) {
+        var r = layItemRect(layItemById(units[i].ids[k]));
+        if (r.x < lo) lo = r.x;
+        if (r.y < ln) ln = r.y;
+        if (r.right > hi) hi = r.right;
+        if (r.bottom > hn) hn = r.bottom;
+      }
+      units[i].rect = { x: lo, y: ln, w: hi - lo, h: hn - ln,
+                        right: hi, bottom: hn };
+    }
+    return units;
+  }
+  // Clamped as ONE thing. Moving each member and letting the page clamp catch
+  // them individually would pull a group apart, and moving them unclamped
+  // pushed a member off the page: a panel letter grouped with a panel that
+  // Same size relocated ended up at 0,0 with its offset lost.
+  // What a shift would ACTUALLY be, clamped against the page as ONE thing.
+  // Exposed separately so a caller can plan with the real delta: Same size
+  // decides whether a press changes anything before it snapshots, and asking
+  // for a move the clamp then shortens made its no-op test wrong.
+  function layUnitClampDelta(ids, dx, dy) {
+    var p = layPage();
+    var lo = Infinity, ln = Infinity, hi = -Infinity, hn = -Infinity;
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (!it) continue;
+      var r = layItemRect(it);
+      if (r.x < lo) lo = r.x;
+      if (r.y < ln) ln = r.y;
+      if (r.right > hi) hi = r.right;
+      if (r.bottom > hn) hn = r.bottom;
+    }
+    if (!isFinite(lo)) return { dx: dx, dy: dy };
+    return { dx: layClamp(dx, -lo, Math.max(0, p.w - hi)),
+             dy: layClamp(dy, -ln, Math.max(0, p.h - hn)) };
+  }
+  // Clamped as ONE thing. Moving each member and letting the page clamp catch
+  // them individually would pull a group apart, and moving them unclamped
+  // pushed a member off the page: a panel letter grouped with a panel that
+  // Same size relocated ended up at 0,0 with its offset lost.
+  function layShiftUnit(unit, dx, dy) {
+    var d = layUnitClampDelta(unit.ids, dx, dy);
+    for (var i = 0; i < unit.ids.length; i++) {
+      var it = layItemById(unit.ids[i]);
+      if (!it) continue;
+      it.x = (Number(it.x) || 0) + d.dx;
+      it.y = (Number(it.y) || 0) + d.dy;
+    }
+  }
+  // A group needs two members to mean anything. Called after a REMOVAL, not
+  // from layNormalizeLayout: normalize runs on every layItems() call, so a
+  // cleanup there deleted a group that was still being assembled one push at
+  // a time, which is exactly how paste and duplicate build one.
+  function layDropOrphanGroups() {
+    var items = layItems(), counts = {}, i;
+    for (i = 0; i < items.length; i++)
+      if (items[i].group)
+        counts[items[i].group] = (counts[items[i].group] || 0) + 1;
+    for (i = 0; i < items.length; i++)
+      if (items[i].group && counts[items[i].group] < 2) delete items[i].group;
+  }
+  function layGroupSelected() {
+    var ids = laySelectedIds();
+    if (ids.length < 2) return false;
+    laySnapshot("group");
+    var g = layNewGroupId();
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (it) it.group = g;
+    }
+    persist(); renderLayout();
+    layAnnounce("Grouped " + ids.length + " items. They now move, align and " +
+      "resize together.");
+    return true;
+  }
+  function layUngroupSelected() {
+    var ids = laySelectedIds(), had = false, i;
+    for (i = 0; i < ids.length; i++) if (layGroupOf(ids[i])) had = true;
+    if (!had) return false;
+    laySnapshot("ungroup");
+    for (i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (it && it.group) delete it.group;
+    }
+    persist(); renderLayout();
+    layAnnounce("Ungrouped.");
+    return true;
+  }
   function laySetSelection(ids) {
-    LAYOUT_SEL = Array.isArray(ids) ? ids.slice() : (ids ? [ids] : []);
+    LAYOUT_SEL = layExpandGroups(
+      Array.isArray(ids) ? ids.slice() : (ids ? [ids] : []));
     var valid = laySelectedIds();
     if (valid.length) LAYOUT_ACTIVE_ID = valid[valid.length - 1];
     else if (LAYOUT_ACTIVE_ID && !layItemById(LAYOUT_ACTIVE_ID))
@@ -15575,7 +17450,10 @@
     if (!active) return;
     var ids = laySelectedIds(), at = ids.indexOf(active);
     if (at === -1) ids.push(active); else ids.splice(at, 1);
-    LAYOUT_SEL = ids;
+    // Through laySetSelection, not straight into LAYOUT_SEL. This was the one
+    // path that skipped the group normalisation, so Space could take a single
+    // member out of a group and the next nudge tore the group apart for good.
+    laySetSelection(ids);
     renderLayout();
     layFocusViewport();
     layAnnounce(layItemAccessibleLabel(layItemById(active)) +
@@ -15589,20 +17467,166 @@
     }
     return "i" + (mx + 1);
   }
-  function layAddItem(item) {
+  // keepFocus is for the caller that is about to open an editor. Otherwise
+  // focus moves to the canvas, because it was staying on the toolbar BUTTON:
+  // the new item was selected but every Space press activated that button
+  // again and added another one, Enter did the same, and F2 renamed the
+  // DOCUMENT instead of editing the text that had just appeared.
+  function layAddItem(item, keepFocus, needH) {
     laySnapshot("add");
+    // Growing the page is part of the same step, so one undo takes back the
+    // item AND the height, the way Send to layout already worked.
+    var p = layPage();
+    if (needH > p.h) {
+      p.h = Math.min(LAY_PAGE_MAX, Math.round(needH));
+      p.preset = "custom";
+    }
     layItems().push(item);
     laySetSelection([item.id]);
     layClampAllItems();
     persist();
     renderLayout();
+    layScrollItemIntoView(item.id);
+    if (!keepFocus) layFocusViewport();
+    return item.id;
   }
-  function layStagger() {
-    var n = layItems().length, p = layPage();
-    return {
-      x: Math.min(Math.max(12, p.w - 140), 24 + (n % 6) * 26),
-      y: Math.min(Math.max(12, p.h - 90), 24 + (n % 6) * 22)
-    };
+  // Where a new item lands.
+  //
+  // There were three rules. The toolbar cascaded from the top-left corner
+  // and wrapped every sixth item, so an added chart covered panel A and a
+  // seventh landed exactly on the first; Send to layout stacked below
+  // everything and grew the page; a pasted image did its own variant of the
+  // cascade. Covering work you can already see is the worst of those, so
+  // there is one rule now and it is the reading order of a figure. Take the
+  // first clear space going left to right and top to bottom, and when the
+  // page is full go below the last item and grow the page, which is what
+  // Send to layout always did.
+  //
+  // Candidate edges are the page margin, every item's left or top, and every
+  // item's right or bottom plus the template's own gutter. The left and top
+  // edges are what make a new panel land in a template's empty cell aligned
+  // with the column above it rather than merely next to its neighbour. A
+  // template panel is fitted to its chart and centred in its cell, so its
+  // left edge is nowhere near its neighbour's right edge plus a gutter.
+  var LAY_PLACE_GAP = 18;
+  function layPlaceRect(items, page, w, h) {
+    var margin = Number(page.margin) || 0, gap = LAY_PLACE_GAP;
+    var taken = [], xs = [margin], ys = [margin], i, j, k;
+    for (i = 0; i < items.length; i++) {
+      var r = layItemRect(items[i], page);
+      if (!(r.w > 0) || !(r.h > 0)) continue;
+      taken.push(r);
+      xs.push(r.x, r.right + gap);
+      ys.push(r.y, r.bottom + gap);
+    }
+    function tidy(list) {
+      var out = [];
+      list.sort(function (a, b) { return a - b; });
+      for (var n = 0; n < list.length; n++)
+        if (list[n] >= 0 && out.indexOf(list[n]) === -1) out.push(list[n]);
+      return out;
+    }
+    xs = tidy(xs); ys = tidy(ys);
+    var limitX = page.w - margin, limitY = page.h - margin;
+    for (i = 0; i < ys.length; i++) {
+      if (ys[i] + h > limitY) continue;
+      for (j = 0; j < xs.length; j++) {
+        if (xs[j] + w > limitX) continue;
+        var clear = true;
+        for (k = 0; k < taken.length; k++) {
+          var t = taken[k];
+          if (xs[j] < t.right && xs[j] + w > t.x &&
+              ys[i] < t.bottom && ys[i] + h > t.y) { clear = false; break; }
+        }
+        if (clear) return { x: xs[j], y: ys[i], needH: page.h };
+      }
+    }
+    var below = margin;
+    for (i = 0; i < taken.length; i++)
+      below = Math.max(below, taken[i].bottom + gap);
+    var want = below + h + margin;
+    // A page has a maximum. Asking for more than it and then letting
+    // layNormalizeLayout clamp it produced a toast saying the page grew over
+    // a panel that had been pulled back on top of the figure.
+    return { x: margin, y: below, needH: Math.min(want, LAY_PAGE_MAX),
+             capped: want > LAY_PAGE_MAX };
+  }
+  // Text wraps at whichever is smaller, the 480 px cap or the room left on
+  // the page, so its height depends on where it lands while where it lands
+  // depends on its height. One extra pass settles it, because the second
+  // placement is measured at the width the first one produced.
+  function layPlaceText(item) {
+    var p = layPage(), items = layItems();
+    var box = layApproxTextRect(item);
+    var spot = layPlaceRect(items, p, box.w, box.h);
+    var room = Math.min(LAY_TEXT_MAX_W, p.w - spot.x);
+    if (room < LAY_TEXT_MAX_W) {
+      box = layApproxTextRect(item, room);
+      spot = layPlaceRect(items, p, box.w, box.h);
+    }
+    return spot;
+  }
+  // A new chart panel is the size of the panels already in the figure. The
+  // toolbar used a flat 460 while a four-panel template gives 392, so the
+  // fifth panel of a 2x2 arrived as the odd one out and matching it by hand
+  // was work the app could have saved. Width is what carries; height still
+  // comes from the chart's own aspect, so a panel contains its chart exactly.
+  function layPanelWidthFor(items, page) {
+    // Chart panels first. A figure built entirely from Notebook pages carries
+    // image items and no chart panel, and those ARE its panels, so they set
+    // the width when nothing else can. The floor keeps a logo or an inset
+    // from sizing a chart panel down to nothing.
+    var w = layCommonWidth(items, "chart", 0);
+    if (!w) w = layCommonWidth(items, "image", 160);
+    var cap = Math.max(160, (Number(page.w) || 1008) -
+      (Number(page.margin) || 0) * 2);
+    return Math.min(w || 460, cap);
+  }
+  function layCommonWidth(items, kind, floor) {
+    var counts = {}, best = 0, bestN = 0, i;
+    for (i = 0; i < items.length; i++) {
+      if (!items[i] || items[i].kind !== kind) continue;
+      var w = Math.round(Number(items[i].w) || 0);
+      if (!(w > floor)) continue;
+      var key = "w" + w;
+      counts[key] = (counts[key] || 0) + 1;
+      if (counts[key] > bestN || (counts[key] === bestN && w > best)) {
+        best = w; bestN = counts[key];
+      }
+    }
+    return bestN ? best : 0;
+  }
+  // The page growing is a change to the figure, not a side effect the user
+  // should have to notice, so every add path that can trigger it says so.
+  // capped is the page already being at its maximum, where the new item gets
+  // clamped back onto the figure and claiming the page grew would be a lie.
+  function layGrewNote(grew, capped) {
+    if (capped)
+      showToast("The page is already at its largest, so this landed on top " +
+        "of the figure. Drag it where you want it.");
+    else if (grew)
+      showToast("The page grew to fit the new item \u00b7 " +
+        "undo takes both back");
+  }
+  // Zoomed in, or on a page that just grew, the new item can be off screen.
+  // It is selected and the rail describes it, so not showing it is the one
+  // thing left that reads as nothing having happened.
+  //
+  // The VIEWPORT scrolls, nothing else. scrollIntoView negotiates with every
+  // scrolling ancestor, and the workspace pane is one, so bringing an item
+  // into view also slid the toolbar 33 px out from under the pointer.
+  function layScrollItemIntoView(id) {
+    var vp = el("ps-lviewport"), canvas = el("ps-lcanvas");
+    var node = canvas && canvas.querySelector(
+      '.ps-litem[data-item-id="' + id + '"]');
+    if (!vp || !node || !node.getBoundingClientRect) return;
+    var nb = node.getBoundingClientRect(), vb = vp.getBoundingClientRect();
+    if (!nb.height || !vb.height) return;
+    var pad = 16;
+    if (nb.bottom > vb.bottom - pad) vp.scrollTop += nb.bottom - vb.bottom + pad;
+    else if (nb.top < vb.top + pad) vp.scrollTop -= vb.top + pad - nb.top;
+    if (nb.right > vb.right - pad) vp.scrollLeft += nb.right - vb.right + pad;
+    else if (nb.left < vb.left + pad) vp.scrollLeft -= vb.left + pad - nb.left;
   }
   function layZoom() {
     var v = layView();
@@ -15689,42 +17713,80 @@
     layTextApply("text color", "ltx-color",
       function (it) { it.color = hex; }, live);
   }
-  function layTextSelected() {
-    var ids = laySelectedIds();
-    if (ids.length !== 1) return null;
-    var item = layItemById(ids[0]);
-    return item && item.kind === "text" ? item : null;
+  // Every text item in the selection, not only a lone one. A figure's panel
+  // letters are four separate items, and restyling them used to be four
+  // separate visits to this panel because the section hid itself the moment a
+  // second thing was selected.
+  //
+  // A SUBSET is allowed on purpose. A marquee that catches a column catches
+  // its labels with it, and requiring an all-text selection would make the
+  // gesture that finds the labels the one gesture that cannot style them. The
+  // section heading says how many it is about to change.
+  function layTextTargets() {
+    var ids = laySelectedIds(), out = [];
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (it && it.kind === "text") out.push(it);
+    }
+    return out;
   }
   function layTextApply(label, key, fn, live) {
-    var item = layTextSelected();
-    if (!item) return;
-    laySnapshot(label, key);
-    fn(item);
+    var items = layTextTargets();
+    if (!items.length) return;
+    // The coalesce key carries WHICH items, the same rule the nudge key
+    // follows. Without it, restyling one group of labels and then another
+    // within 1.2 s folded into one step and a single undo pulled both back,
+    // which is exactly how a person restyles a figure.
+    var ids = [];
+    for (var k = 0; k < items.length; k++) ids.push(items[k].id);
+    laySnapshot(label, key ? key + ":" + ids.join(",") : null);
+    for (var i = 0; i < items.length; i++) fn(items[i]);
     layClampAllItems();
     persist(!live);
     renderLayout();
-    layTextSyncControls(item);
+    layTextSyncControls(items);
   }
   function layTextSyncControls(item) {
-    function setVal(id, v) {
-      var n = el(id);
-      if (n && document.activeElement !== n) n.value = String(v);
+    // Takes one item or a set. Where the set disagrees the control says so
+    // rather than picking one member's value and implying the rest match:
+    // a number box goes blank with a Mixed placeholder, a toggle reports
+    // aria-pressed="mixed", and no colour chip is marked current.
+    var items = Array.isArray(item) ? item : (item ? [item] : []);
+    if (!items.length) return;
+    item = items[0];
+    function agree(read) {
+      for (var i = 1; i < items.length; i++)
+        if (read(items[i]) !== read(items[0])) return false;
+      return true;
     }
-    var fs = Math.max(8, Math.min(72, Number(item.fontSize) || 14));
-    setVal("ps-ltx-size", fs);
-    setVal("ps-ltx-size-num", fs);
-    var rot = layTextRotate(item);
-    setVal("ps-ltx-rot", rot);
-    setVal("ps-ltx-rot-num", rot);
+    function setVal(id, v, mixed) {
+      var n = el(id);
+      if (!n || document.activeElement === n) return;
+      if (mixed && n.type === "number") { n.value = ""; n.placeholder = "Mixed"; }
+      else { n.value = String(v); if (n.type === "number") n.placeholder = ""; }
+    }
+    var readSize = function (t) {
+      return Math.max(8, Math.min(72, Number(t.fontSize) || 14));
+    };
+    var fs = readSize(item), fsMixed = !agree(readSize);
+    setVal("ps-ltx-size", fs, false);
+    setVal("ps-ltx-size-num", fs, fsMixed);
+    var rot = layTextRotate(item), rotMixed = !agree(layTextRotate);
+    setVal("ps-ltx-rot", rot, false);
+    setVal("ps-ltx-rot-num", rot, rotMixed);
     el("ps-ltx-bold").setAttribute("aria-pressed",
-      item.bold ? "true" : "false");
+      !agree(function (t) { return !!t.bold; }) ? "mixed"
+        : item.bold ? "true" : "false");
     el("ps-ltx-italic").setAttribute("aria-pressed",
-      item.italic ? "true" : "false");
+      !agree(function (t) { return !!t.italic; }) ? "mixed"
+        : item.italic ? "true" : "false");
     var cur = layTextColor(item).toLowerCase();
+    var colMixed = !agree(function (t) { return layTextColor(t).toLowerCase(); });
     var chips = el("ps-ltx-swatches").querySelectorAll("button[data-color]");
     for (var i = 0; i < chips.length; i++)
       chips[i].setAttribute("aria-pressed",
-        chips[i].getAttribute("data-color") === cur ? "true" : "false");
+        !colMixed && chips[i].getAttribute("data-color") === cur
+          ? "true" : "false");
     if (!LTX_PICKING) {
       var hsv = ltxHexToHsv(cur);
       if (hsv) LTX_HSV = hsv;
@@ -15768,7 +17830,42 @@
     bar.classList.remove("ps-tb-tight");
     if (bar.scrollWidth > bar.clientWidth + 2)
       bar.classList.add("ps-tb-tight");
+    syncToolbarEdgeCue(bar);
   }
+  // When compressing the labels is not enough. The bar is deliberately ONE
+  // 42px row that scrolls sideways, with its scrollbar hidden, so below
+  // about 1050px the controls past the right edge were simply invisible
+  // and nothing said the strip scrolled: measured on a fresh boot at
+  // 1000px, 182px of bar beyond the edge with Add to chart and the Zoom
+  // select outside it, and at 900px six controls including Chart
+  // settings, Find and Statistics.
+  //
+  // Same edge cue the workspace pane and the engine's own long tables use,
+  // turned sideways, and it shows on whichever side still has something.
+  // This does not touch the one-row decision; whether the bar should be
+  // allowed a second row instead is a layout call, not a bug fix.
+  function syncToolbarEdgeCue(bar) {
+    bar = bar || (document.getElementById("psroot") || document)
+      .querySelector('[data-role="chart-toolbar"]');
+    if (!bar) return;
+    var max = bar.scrollWidth - bar.clientWidth;
+    if (max <= 2) { bar.style.removeProperty("box-shadow"); return; }
+    var left = bar.scrollLeft > 2;
+    var right = bar.scrollLeft < max - 2;
+    var parts = [];
+    if (left) parts.push("inset 10px 0 8px -8px rgba(0,0,0,0.22)");
+    if (right) parts.push("inset -10px 0 8px -8px rgba(0,0,0,0.22)");
+    // Keep the bar's own resting shadow: this is an addition to it, not a
+    // replacement, or the strip loses its edge against the page.
+    parts.push("0 1px 2px rgba(25, 40, 57, 0.05)");
+    bar.style.setProperty("box-shadow", parts.join(", "), "important");
+  }
+  document.addEventListener("scroll", function (e) {
+    var t = e.target;
+    if (t && t.getAttribute &&
+        t.getAttribute("data-role") === "chart-toolbar")
+      syncToolbarEdgeCue(t);
+  }, true);
   window.addEventListener("resize", function () {
     window.setTimeout(syncToolbarTight, 60);
   });
@@ -15879,21 +17976,60 @@
     wirePair("ps-ltx-rot", "ps-ltx-rot-num", "rotate", function (it, v) {
       it.rotate = Math.max(-90, Math.min(90, Math.round(v)));
     });
+    // SET a value across the whole set rather than inverting each member.
+    // Inverting leaves a mixed selection mixed forever, so the control could
+    // never make a set uniform, which is the only thing anyone presses it
+    // for. The rule every editor uses: if any member is off, turn them all
+    // on; otherwise turn them all off.
+    function layTextToggle(field, label) {
+      var items = layTextTargets(), on = false;
+      for (var i = 0; i < items.length; i++) if (!items[i][field]) on = true;
+      layTextApply(label, null, function (it) { it[field] = on; });
+    }
     el("ps-ltx-bold").addEventListener("click", function () {
-      layTextApply("text bold", null, function (it) { it.bold = !it.bold; });
+      layTextToggle("bold", "text bold");
     });
     el("ps-ltx-italic").addEventListener("click", function () {
-      layTextApply("text italic", null,
-        function (it) { it.italic = !it.italic; });
+      layTextToggle("italic", "text italic");
     });
   }
-  function layApproxTextRect(item) {
+  var LAY_TEXT_CTX = null;
+  function layTextCtx() {
+    if (!LAY_TEXT_CTX) {
+      try {
+        LAY_TEXT_CTX = document.createElement("canvas").getContext("2d");
+      } catch (ignore) { LAY_TEXT_CTX = null; }
+    }
+    return LAY_TEXT_CTX;
+  }
+  // A text item's box, measured rather than guessed. The old version counted
+  // CHARACTERS on the longest logical line and did not wrap at all, so a
+  // pasted paragraph measured 21 px tall against the 284 px it renders, and
+  // the placement dropped it on a panel. This wraps with the same function
+  // the export uses, in the family, weight and cap the canvas declares, so
+  // the number agrees with the rendered box whether or not the layout is on
+  // screen. capW is the wrap width to measure at and defaults to the cap.
+  function layApproxTextRect(item, capW) {
     var fs = Math.max(8, Number(item.fontSize) || 14);
-    var lines = String(item.text || "Text").split(/\r?\n/);
-    var max = 1;
-    for (var i = 0; i < lines.length; i++) max = Math.max(max, lines[i].length);
-    return { w: Math.min(480, Math.max(18, max * fs * 0.61 + 8)),
-             h: Math.max(fs * 1.25 + 4, lines.length * fs * 1.25 + 4) };
+    var cap = Math.max(40, Math.min(LAY_TEXT_MAX_W,
+      Number(capW) || LAY_TEXT_MAX_W));
+    var font = (item.italic ? "italic " : "") +
+      (item.bold ? "700" : "400") + " " + fs + "px sans-serif";
+    var lines = wrapCaptionLines(String(item.text || "Text"),
+      cap - LAY_TEXT_PAD_X * 2, fs, font);
+    var ctx = layTextCtx(), wide = 0, i;
+    if (ctx) {
+      ctx.font = font;
+      for (i = 0; i < lines.length; i++)
+        wide = Math.max(wide, ctx.measureText(lines[i]).width);
+    } else wide = cap - LAY_TEXT_PAD_X * 2;
+    // ROUNDED, because the other half of this measurement is offsetWidth and
+    // offsetHeight, which are integers. A 56.5 px caption measured here and
+    // 57 on screen put the two placement routes half a pixel apart and wrote
+    // fractional coordinates into a model that is otherwise whole pixels.
+    return { w: Math.round(Math.min(cap,
+               Math.max(18, wide + LAY_TEXT_PAD_X * 2))),
+             h: Math.round(Math.max(1, lines.length) * fs * LAY_TEXT_LINE + 4) };
   }
   // Chart panels and images are both SIZED items (explicit w/h, corner
   // resize, proportional default); text items self-size.
@@ -15901,22 +18037,46 @@
     return item && (item.kind === "chart" || item.kind === "image");
   }
   function layMinSize(item) {
-    return item.kind === "image" ? { w: 24, h: 24 } : { w: 120, h: 80 };
+    if (item.kind === "image") return { w: 24, h: 24 };
+    // The minimum keeps the chart's SHAPE. A flat 120 by 80 is 1.5 against
+    // the engine's 1.469, so a figure scaled onto a small page hit the floor
+    // and came back letterboxed, which is the thing panel-fitting removed.
+    var a = layChartAspect(item.chartId);
+    return { w: 120, h: Math.max(40, Math.round(120 / (a > 0 ? a : 1.469))) };
   }
-  function layItemRect(item) {
+  // Item ids are per DOCUMENT and every template starts at i1, so the canvas
+  // can be holding a node with this item's id that belongs to a different
+  // layout. Today those measure zero because the pane is hidden whenever a
+  // send runs, which is luck rather than a rule. Identity, not id.
+  function layItemIsOnScreen(item) {
+    var c = activeChart();
+    if (!c || !isLayoutTab(c) || !Array.isArray(c.items)) return false;
+    for (var i = 0; i < c.items.length; i++)
+      if (c.items[i] === item) return true;
+    return false;
+  }
+  // page is optional and only used for TEXT, which wraps at whichever is
+  // smaller, the 480 px cap or the room left on its page. Callers working on
+  // a document that is not on screen have to pass it, because layPage() would
+  // hand back the page of whatever IS on screen. Without it a send clamped an
+  // off-screen layout using a 480 px estimate for a caption that renders
+  // narrower, and silently slid it left.
+  function layItemRect(item, page) {
     var w, h;
     if (laySizedKind(item)) {
       var mins = layMinSize(item);
       w = Math.max(mins.w, Number(item.w) || 480);
       h = Math.max(mins.h, Number(item.h) || 320);
     } else {
-      var node = el("ps-lcanvas");
+      var node = layItemIsOnScreen(item) ? el("ps-lcanvas") : null;
       node = node && node.querySelector(
         '.ps-litem[data-item-id="' + item.id + '"]');
       if (node && node.offsetWidth && node.offsetHeight) {
         w = node.offsetWidth; h = node.offsetHeight;
       } else {
-        var approx = layApproxTextRect(item);
+        var pw = page && Number(page.w) > 0 ? Number(page.w) : 0;
+        var approx = layApproxTextRect(item, pw
+          ? pw - (Number(item.x) || 0) : 0);
         w = approx.w; h = approx.h;
       }
     }
@@ -15939,8 +18099,16 @@
     return { x: minX, y: minY, w: maxX - minX, h: maxY - minY,
              right: maxX, bottom: maxY };
   }
-  function layClampAllItems() {
-    var p = layPage(), items = layItems();
+  function layClampAllItems() { layClampItemsIn(activeChart()); }
+  // Doc-aware, because Send to layout writes into a document that is not on
+  // screen and nothing clamped it. A send onto a page near the 4000 px
+  // maximum left the panel at y 3850 with a height of 642 against a page of
+  // 4000, which is 492 px below the page, permanently and invisibly, and
+  // opening the layout did not correct it.
+  function layClampItemsIn(doc) {
+    if (!doc || !isLayoutTab(doc)) return;
+    layNormalizeLayout(doc);
+    var p = doc.page, items = doc.items;
     for (var i = 0; i < items.length; i++) {
       var item = items[i];
       if (laySizedKind(item)) {
@@ -15948,7 +18116,7 @@
         item.w = layClamp(item.w || 480, mins2.w, p.w);
         item.h = layClamp(item.h || 320, mins2.h, p.h);
       }
-      var r = layItemRect(item);
+      var r = layItemRect(item, p);
       item.x = layClamp(item.x || 0, 0, Math.max(0, p.w - r.w));
       item.y = layClamp(item.y || 0, 0, Math.max(0, p.h - r.h));
     }
@@ -16212,7 +18380,12 @@
       node.appendChild(ltxFrame);
       node.__ltxFrame = ltxFrame;
     }
-    if (primary && laySelectedIds().length === 1) {
+    // One UNIT, not one item. A grouped panel is two items and one thing, and
+    // gating on the item count took its remove button and its resize handle
+    // away the moment a letter was bound to it. The handle grows from the
+    // bottom right, so the panel's top left does not move and a letter
+    // anchored there stays put.
+    if (primary && layUnits(laySelectedIds()).length === 1) {
       if (laySizedKind(item)) {
         var hnd = mkEl("div", "ps-lhandle");
         hnd.setAttribute("data-role", "lay-resize");
@@ -16368,23 +18541,32 @@
       scale = Math.max(48 / natW, 48 / natH);
     var w = Math.max(1, Math.round(natW * scale));
     var h = Math.max(1, Math.round(natH * scale));
-    var pos = layStagger();
+    var spot = layPlaceRect(layItems(), page, w, h);
+    var grew = spot.needH > page.h;
     layAddItem({ id: layNewItemId(), kind: "image", src: src,
                  natW: natW, natH: natH,
-                 x: Math.min(pos.x, Math.max(0, page.w - w)),
-                 y: Math.min(pos.y, Math.max(0, page.h - h)),
-                 w: w, h: h });
+                 x: spot.x, y: spot.y, w: w, h: h }, false, spot.needH);
     showToast("Image added" + (note ? " \u00b7 " + note : "") +
-      " \u00b7 drag to place, corner to resize");
+      (grew ? " \u00b7 the page grew to fit it \u00b7 drag to place"
+            : " \u00b7 drag to place, corner to resize"));
   }
   function layMiniBar(item) {
     var bar = mkEl("div", "ps-lbar");
-    bar.style.left = "0";
+    bar.style.left = item.kind === "text" ? "0" : "50%";
+    bar.style.transform = item.kind === "text" ? "" : "translateX(-50%)";
     // TEXT items park the bar BELOW the box (Torry's screenshot, Aug 6
     // 2026): the rotate grip owns the top-centre, and on a narrow box
     // the bar's first button sat exactly under the knob. Below, the two
     // can never meet at any width or rotation; sized items keep the bar
     // above (they have no grip, and the resize handle owns the bottom).
+    // A sized item's bar is CENTRED on its top edge. The top-LEFT is where
+    // the figure's own panel letter sits and the bar covered it exactly
+    // (measured, a 19x24 label under a 33x24 bar at the same x), so selecting
+    // panel A hid the A. The letter is content and ships in the export, the
+    // bar is chrome, so the chrome moves. Centre rather than below, because
+    // below is the NEXT row's letter in a labelled grid, and rather than
+    // right, which is the Live badge. Text items keep the bar below them:
+    // their rotate grip owns the top centre.
     bar.style.top = item.kind === "text" ? "calc(100% + 6px)" : "-34px";
     bar.setAttribute("aria-hidden", "true");
     if (item.kind === "text") {
@@ -16457,6 +18639,28 @@
       sel: Array.isArray(LAYOUT_SEL) ? LAYOUT_SEL : []
     });
   }
+  // The send-to-layout paths mutate a layout while a DIFFERENT document is on
+  // screen, so they cannot use laySnapshot, which is bound to the active
+  // chart. Same push, aimed at a named document.
+  //
+  // The stored selection is that document's only when it is the one on
+  // screen. LAYOUT_SEL belongs to whatever layout the user is actually
+  // looking at, and restoring it into a different one would come back with
+  // the wrong things selected.
+  function laySnapshotDoc(doc, label) {
+    var h = layHist(doc);
+    if (!h) return;
+    layNormalizeLayout(doc);
+    var live = activeChart();
+    var sel = live && live.id === doc.id && Array.isArray(LAYOUT_SEL)
+      ? LAYOUT_SEL : [];
+    h.undo.push({ label: label || "change",
+                  state: JSON.stringify({ items: doc.items || [],
+                                          page: doc.page || {}, sel: sel }) });
+    if (h.undo.length > LAYOUT_HIST_LIMIT) h.undo.shift();
+    h.redo.length = 0;
+    LAY_COALESCE = null;
+  }
   // Call BEFORE the mutation. A coalesceKey folds a burst of the same small
   // action (arrow-key nudges, a run of clicks on the font-size stepper) into
   // ONE undo step, which is what a user means by "undo that nudge".
@@ -16518,6 +18722,7 @@
     var removed = 0;
     for (var i = items.length - 1; i >= 0; i--)
       if (ids.indexOf(items[i].id) !== -1) { items.splice(i, 1); removed++; }
+    layDropOrphanGroups();
     laySetSelection([]);
     persist(); renderLayout();
     if (returnFocus) layFocusViewport();
@@ -16531,23 +18736,54 @@
     laySetSelection([id]);
     layDeleteSelected();
   }
+  // The copy machinery on its own, without the history entry, the render or
+  // the announcement, so Alt+drag can make its copies inside a gesture that
+  // already owns all three.
+  function layDuplicateItems(ids, dx, dy) {
+    var made = [], p = layPage(), dupGroups = {}, i;
+    for (i = 0; i < ids.length; i++) {
+      var src = layItemById(ids[i]);
+      if (!src) continue;
+      var copy = JSON.parse(JSON.stringify(src));
+      copy.id = layNewItemId();
+      // The copies form their OWN group, so duplicating a grouped panel
+      // gives a second panel rather than a four-member group.
+      if (copy.group) copy.group = dupGroups[copy.group] ||
+        (dupGroups[copy.group] = layNewGroupId());
+      if (!dx && !dy) {
+        // A copy made exactly on a legal item is legal, and measuring it
+        // here would measure a text item that is not in the document yet,
+        // so its rect falls to the estimate and the clamp shoves the copy
+        // hundreds of pixels left of the thing it is a copy OF.
+        copy.x = Number(src.x) || 0;
+        copy.y = Number(src.y) || 0;
+      } else {
+        var r = layItemRect(copy);
+        copy.x = Math.min(Math.max(0, p.w - r.w), (Number(src.x) || 0) + dx);
+        copy.y = Math.min(Math.max(0, p.h - r.h), (Number(src.y) || 0) + dy);
+      }
+      layItems().push(copy);
+      made.push(copy.id);
+    }
+    return made;
+  }
+  // One body for the Cmd/Ctrl+A key and the Edit menu row, so the two
+  // surfaces cannot drift. The menu used to run the GRID select-all here,
+  // which early-returns off the Data workspace, so the row sat enabled,
+  // advertised the key, and did nothing when clicked.
+  function laySelectAllItems() {
+    var every = layItems().map(function (it) { return it.id; });
+    if (!every.length) return false;
+    laySetSelection(every);
+    renderLayout();   // the selection panel reports the count itself
+    return true;
+  }
   function layDuplicateSelected() {
     var ids = laySelectedIds();
     if (!ids.length) return;
     var returnFocus = document.activeElement === el("ps-lviewport");
     laySnapshot("duplicate");
-    var made = [], p = layPage();
-    for (var i = 0; i < ids.length; i++) {
-      var src = layItemById(ids[i]);
-      if (!src) continue;
-      var copy = JSON.parse(JSON.stringify(src));
-      copy.id = layNewItemId();
-      var r = layItemRect(copy);
-      copy.x = Math.min(Math.max(0, p.w - r.w), (Number(src.x) || 0) + 12);
-      copy.y = Math.min(Math.max(0, p.h - r.h), (Number(src.y) || 0) + 12);
-      layItems().push(copy);
-      made.push(copy.id);
-    }
+    var made = layDuplicateItems(ids, 12, 12);
     laySetSelection(made);
     persist(); renderLayout();
     if (returnFocus) layFocusViewport();
@@ -16584,10 +18820,16 @@
     if (!LAY_CLIP || !LAY_CLIP.length) return false;
     if (!isLayoutTab(activeChart())) return false;
     laySnapshot("paste");
-    var made = [], p = layPage();
+    var made = [], p = layPage(), pasteGroups = {};
     for (var i = 0; i < LAY_CLIP.length; i++) {
       var copy = JSON.parse(JSON.stringify(LAY_CLIP[i]));
       copy.id = layNewItemId();
+      // Fresh group ids, the way duplicate does it. Group ids are only unique
+      // within one layout and every layout's templates start at g1, so a
+      // paste into another figure collided by construction and merged the
+      // pasted items into whatever already carried that id.
+      if (copy.group) copy.group = pasteGroups[copy.group] ||
+        (pasteGroups[copy.group] = layNewGroupId());
       // Offset like a duplicate, and clamp, so a paste into a SMALLER page
       // cannot drop an item off the canvas where it is unreachable.
       var r = layItemRect(copy);
@@ -16683,7 +18925,10 @@
     // The pointer drag snapshots itself at pointer-down (it knows whether the
     // gesture actually moved anything); everything else that lands here is a
     // nudge or an inspector edit, coalesced into one step per burst.
-    if (!LAY_DRAG) laySnapshot("move", "move");
+    // The coalesce key carries the SELECTION. Without it a nudge on one
+    // panel folded into a nudge on another whenever the two happened within
+    // 1.2 s, and one undo pulled both back.
+    if (!LAY_DRAG) laySnapshot("move", "move:" + ids.join(","));
     dx = layClamp(dx, -b.x, p.w - b.right);
     dy = layClamp(dy, -b.y, p.h - b.bottom);
     for (var i = 0; i < ids.length; i++) {
@@ -16699,11 +18944,19 @@
         " pixels, y " + Math.round(moved.y) + " pixels.");
     }
   }
-  function layResizeSelectedFree(dw, dh) {
+  // One UNIT holding one sized item, not one item. A grouped chart panel is
+  // two items and one thing, and gating on the item count refused to resize
+  // it at all while the refusal told the user to select a single panel,
+  // which grouping had just made impossible.
+  function layResizeTarget() {
     var ids = laySelectedIds();
-    if (ids.length !== 1) return false;
-    var item = layItemById(ids[0]);
-    if (!laySizedKind(item)) return false;
+    if (layUnits(ids).length !== 1) return null;
+    var sized = laySizedSelection();
+    return sized.length === 1 ? sized[0] : null;
+  }
+  function layResizeSelectedFree(dw, dh) {
+    var item = layResizeTarget();
+    if (!item) return false;
     var p = layPage(), mins = layMinSize(item);
     laySnapshot("resize", "resize");
     item.w = layClamp((Number(item.w) || 480) + dw, mins.w, p.w - item.x);
@@ -16713,10 +18966,8 @@
     return true;
   }
   function layResizeSelectedProportionally(delta) {
-    var ids = laySelectedIds();
-    if (ids.length !== 1) return false;
-    var item = layItemById(ids[0]);
-    if (!laySizedKind(item)) return false;
+    var item = layResizeTarget();
+    if (!item) return false;
     var p = layPage();
     var origin = { item: item, x: Number(item.x) || 0,
       y: Number(item.y) || 0, w: Number(item.w) || 480,
@@ -16739,14 +18990,20 @@
     layAnnounce("Exact position and size fields opened in the settings panel.");
   }
   function layChangeSelectedTextStyle(kind, amount) {
-    var ids = laySelectedIds();
-    if (ids.length !== 1) return false;
-    var item = layItemById(ids[0]);
-    if (!item || item.kind !== "text") return false;
+    // Every text item in the selection, matching the rail's Text section. A
+    // grouped panel letter used to be unreachable from the keyboard, because
+    // selecting it selects its panel too and this refused any selection of
+    // more than one item.
+    var texts = layTextTargets();
+    if (!texts.length) return false;
     laySnapshot(kind === "bold" ? "bold" : "text size",
       kind === "size" ? "fontsize" : null);
-    if (kind === "bold") item.bold = !item.bold;
-    else item.fontSize = layClamp((Number(item.fontSize) || 14) + amount, 8, 72);
+    for (var ti = 0; ti < texts.length; ti++) {
+      var item = texts[ti];
+      if (kind === "bold") item.bold = !item.bold;
+      else item.fontSize = layClamp((Number(item.fontSize) || 14) + amount, 8, 72);
+    }
+    item = texts[0];
     layClampAllItems(); persist(); renderLayout(); layFocusViewport();
     layAnnounce((kind === "bold"
       ? (item.bold ? "Bold on. " : "Bold off. ")
@@ -16781,7 +19038,8 @@
   }
   function layItemMenuItems(id) {
     var out = [
-      { label: "Duplicate", command: "duplicate-selection" },
+      { label: "Duplicate", command: "duplicate-selection",
+        shortcut: "Cmd/Ctrl+D" },
       { label: "Delete", command: "delete-selection" },
       "separator",
       { label: "Move backward", command: "layer-back" },
@@ -16793,6 +19051,15 @@
     var info = layItemSourceInfo(item);
     var src = info && info.chartId ? chartById(info.chartId) : null;
     var head = [];
+    if (item && item.kind === "chart" &&
+        PROJECT.charts.filter(function (c) { return !isLayoutTab(c); }).length > 1)
+      head.push({ label: "Show a different chart here",
+        key: "lay-replace-chart",
+        action: function () {
+          var node = el("ps-lcanvas").querySelector(
+            '.ps-litem[data-item-id="' + id + '"]');
+          layAddChartMenu(id, node);
+        } });
     if (src && !isLayoutTab(src))
       head.push({ label: info.kind === "live"
           ? "Show live chart in Charts" : "Open source chart",
@@ -16844,17 +19111,262 @@
   function layAlign(kind) {
     var ids = laySelectedIds(), b = laySelectionBounds(ids);
     if (ids.length < 2 || !b) return;
+    // Units, not items: a group is one thing to align, or a column of
+    // panels would stack each panel letter on top of its own panel.
+    var units = layUnits(ids);
+    if (units.length < 2) return;
     laySnapshot("align");
-    for (var i = 0; i < ids.length; i++) {
-      var item = layItemById(ids[i]), r = layItemRect(item);
-      if (kind === "left") item.x = b.x;
-      else if (kind === "hcenter") item.x = b.x + (b.w - r.w) / 2;
-      else if (kind === "right") item.x = b.right - r.w;
-      else if (kind === "top") item.y = b.y;
-      else if (kind === "vcenter") item.y = b.y + (b.h - r.h) / 2;
-      else if (kind === "bottom") item.y = b.bottom - r.h;
+    for (var i = 0; i < units.length; i++) {
+      var r = units[i].rect, dx = 0, dy = 0;
+      if (kind === "left") dx = b.x - r.x;
+      else if (kind === "hcenter") dx = b.x + (b.w - r.w) / 2 - r.x;
+      else if (kind === "right") dx = b.right - r.w - r.x;
+      else if (kind === "top") dy = b.y - r.y;
+      else if (kind === "vcenter") dy = b.y + (b.h - r.h) / 2 - r.y;
+      else if (kind === "bottom") dy = b.bottom - r.h - r.y;
+      layShiftUnit(units[i], dx, dy);
     }
     persist(); renderLayout();
+    layAnnounce("Aligned " + units.length +
+      (units.length === 1 ? " item." : " items."));
+  }
+  // ---- Plot-area alignment. A multi-panel figure reads as aligned when
+  // the PLOT AREAS line up, not the panel boxes. A panel's box includes its
+  // tick labels, and an axis reading 100000 is wider than one reading 0.10,
+  // so two identically sized panels draw their axes at different places.
+  // Measured on the four-panel template with score / cost / hours / rate,
+  // the left column's axes sat 6 px apart and the right column's 11 px,
+  // which is about 3 mm on a printed 7-inch figure. This is the one thing a
+  // figure tool can do that a page-layout tool cannot, because it knows the
+  // rectangles are charts. (patchwork and matplotlib's constrained layout
+  // solve the same problem by reserving one common gutter; here the panels
+  // are already drawn, so the panels move instead of the gutters.)
+  //
+  // Fractions of the item box, never absolute pixels. The item box and the
+  // axis line go through the same zoom transform and the same drag
+  // transform, so a ratio between them is invariant to both.
+  function layPlotFrac(item) {
+    if (!item || item.kind !== "chart") return null;
+    var canvas = el("ps-lcanvas");
+    var node = canvas && canvas.querySelector(
+      '.ps-litem[data-item-id="' + item.id + '"]');
+    if (!node) return null;
+    var ya = node.querySelector('[data-role="y-axis-line"]');
+    var xa = node.querySelector('[data-role="x-axis-line"]');
+    if (!ya || !xa) return null;
+    var nb = node.getBoundingClientRect();
+    if (!nb.width || !nb.height) return null;
+    var yb = ya.getBoundingClientRect(), xb = xa.getBoundingClientRect();
+    if (!yb.height || !xb.width) return null;
+    // Axis strokes have width; the plot edge is the stroke's centre line.
+    return { l: (yb.left + yb.width / 2 - nb.left) / nb.width,
+             r: (xb.right - nb.left) / nb.width,
+             t: (yb.top - nb.top) / nb.height,
+             b: (xb.top + xb.height / 2 - nb.top) / nb.height };
+  }
+  function layPlotRect(item) {
+    var f = layPlotFrac(item);
+    if (!f) return null;
+    var r = layItemRect(item);
+    return { l: r.x + f.l * r.w, r: r.x + f.r * r.w,
+             t: r.y + f.t * r.h, b: r.y + f.b * r.h };
+  }
+  // Panels that already sit in the same column (or row) are the ones the
+  // user means, so select-all then one click fixes a whole grid. Grouping
+  // is plain box overlap on the cross axis, which is what "same column"
+  // looks like on screen and needs no explaining.
+  function layOverlapGroups(pool, axis) {
+    var sorted = pool.slice().sort(function (a, b) {
+      return axis === "x" ? a.rect.x - b.rect.x : a.rect.y - b.rect.y;
+    });
+    var out = [], cur = null, i;
+    for (i = 0; i < sorted.length; i++) {
+      var lo = axis === "x" ? sorted[i].rect.x : sorted[i].rect.y;
+      var hi = lo + (axis === "x" ? sorted[i].rect.w : sorted[i].rect.h);
+      if (cur && lo < cur.hi - 1) {
+        cur.list.push(sorted[i]);
+        cur.hi = Math.max(cur.hi, hi);
+      } else {
+        cur = { hi: hi, list: [sorted[i]] };
+        out.push(cur);
+      }
+    }
+    return out;
+  }
+  // Which panels can take part, and can any group actually act. Drives both
+  // the action and the button's own visibility, so they can never disagree.
+  function layPlotAlignPool() {
+    var ids = laySelectedIds(), pool = [], i;
+    for (i = 0; i < ids.length; i++) {
+      var item = layItemById(ids[i]);
+      var plot = layPlotRect(item);
+      if (plot) pool.push({ item: item, rect: layItemRect(item), plot: plot });
+    }
+    return pool;
+  }
+  function layCanAlignPlots(edge) {
+    var pool = layPlotAlignPool();
+    if (pool.length < 2) return false;
+    var groups = layOverlapGroups(pool, edge === "left" ? "x" : "y");
+    for (var g = 0; g < groups.length; g++)
+      if (groups[g].list.length > 1) return true;
+    return false;
+  }
+  function layAlignPlots(edge) {
+    var pool = layPlotAlignPool();
+    if (pool.length < 2) return false;
+    var axis = edge === "left" ? "x" : "y";
+    var groups = layOverlapGroups(pool, axis), moved = 0, used = 0, lanes = 0;
+    var snapped = false, g, k, list, target, d;
+    for (g = 0; g < groups.length; g++) {
+      list = groups[g].list;
+      if (list.length < 2) continue;
+      lanes++;
+      used += list.length;
+      target = list[0].plot[edge === "left" ? "l" : "b"];
+      for (k = 1; k < list.length; k++) {
+        d = list[k].plot[edge === "left" ? "l" : "b"];
+        // Left axes line up on the leftmost plot edge, baselines on the
+        // lowest one, so the panel that needs the most room keeps its place
+        // and the others come to it.
+        if (edge === "left" ? d < target : d > target) target = d;
+      }
+      for (k = 0; k < list.length; k++) {
+        d = target - list[k].plot[edge === "left" ? "l" : "b"];
+        if (Math.abs(d) < 0.02) continue;
+        if (!snapped) { laySnapshot("align plot areas"); snapped = true; }
+        // Shift the panel's whole GROUP, so a panel letter grouped with it
+        // keeps its place against the plot. This was the loose end the
+        // plot-align feature shipped with.
+        layShiftUnit({ ids: layExpandGroups([list[k].item.id]) },
+                     edge === "left" ? d : 0, edge === "left" ? 0 : d);
+        moved++;
+      }
+    }
+    if (!used) return false;
+    if (moved) { persist(); renderLayout(); }
+    layAnnounce(moved
+      ? "Lined up " + (edge === "left" ? "left axes" : "baselines") +
+        " for " + used + " panels in " + lanes +
+        (edge === "left" ? (lanes === 1 ? " column." : " columns.")
+                         : (lanes === 1 ? " row." : " rows."))
+      : "Those panels are already lined up.");
+    return true;
+  }
+  // ---- Same size. The second reflex after align in every multi-panel
+  // figure, and the one the rail had no answer to: you read a width off one
+  // panel, select the other, and type it in, twice.
+  //
+  // Sized to the PRIMARY, which is the last item added to the selection, the
+  // same key-object convention Illustrator uses. The buttons name it so the
+  // question "the same as what" never has to be guessed, and text items are
+  // skipped entirely because they size themselves to their content.
+  function laySizedSelection() {
+    var ids = laySelectedIds(), out = [];
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (it && laySizedKind(it)) out.push(it);
+    }
+    return out;
+  }
+  function laySameSizeTarget() {
+    var pool = laySizedSelection();
+    if (pool.length < 2) return null;
+    var primary = layItemById(layPrimaryId());
+    if (primary && laySizedKind(primary)) return primary;
+    return pool[pool.length - 1];
+  }
+  function laySameSizeLabel(item) {
+    if (!item) return "";
+    if (item.kind === "chart") {
+      var c = chartById(item.chartId);
+      return c ? (c.name || "that panel") : "that panel";
+    }
+    return item.srcChart ? "that Notebook page" : "that image";
+  }
+  function laySameSize(dim) {
+    var target = laySameSizeTarget();
+    if (!target) return false;
+    var pool = laySizedSelection(), p = layPage();
+    var moved = 0, short = 0, snapped = false, i;
+    // Work out the whole change first, so a press that would alter nothing
+    // costs no history entry and claims nothing. The old version snapshotted
+    // and counted before comparing, so an undo after a no-op appeared to do
+    // nothing at all.
+    var plan = [];
+    for (i = 0; i < pool.length; i++) {
+      var it = pool[i];
+      if (it === target) continue;
+      var mins = layMinSize(it);
+      var x = Number(it.x) || 0, y = Number(it.y) || 0;
+      var w = dim === "h" ? (Number(it.w) || mins.w)
+                          : Math.max(mins.w, Number(target.w) || 0);
+      var h = dim === "w" ? (Number(it.h) || mins.h)
+                          : Math.max(mins.h, Number(target.h) || 0);
+      // If the size does not fit where the item currently sits, MOVE it
+      // rather than quietly shrinking it. Only when it cannot fit the page
+      // at all is it cut down, and then the announcement says so. Clamping
+      // in silence meant the panel ended a different size from the one the
+      // button named while the live region reported a match.
+      if (x + w > p.w) x = Math.max(0, p.w - w);
+      if (y + h > p.h) y = Math.max(0, p.h - h);
+      if (w > p.w) { w = p.w; x = 0; short++; }
+      if (h > p.h) { h = p.h; y = 0; short++; }
+      // The move is clamped against the item's whole GROUP, so the plan has
+      // to ask what the shift will really be, or a press that can move
+      // nothing still looks like a change and costs a history entry.
+      var unit = layExpandGroups([it.id]);
+      var real = layUnitClampDelta(unit, x - (Number(it.x) || 0),
+                                         y - (Number(it.y) || 0));
+      if (w === (Number(it.w) || 0) && h === (Number(it.h) || 0) &&
+          Math.abs(real.dx) < 0.01 && Math.abs(real.dy) < 0.01) continue;
+      plan.push({ it: it, unit: unit, dx: real.dx, dy: real.dy, w: w, h: h });
+    }
+    if (!plan.length) {
+      layAnnounce("Already the same size as " + laySameSizeLabel(target) + ".");
+      return true;
+    }
+    laySnapshot("same size");
+    for (i = 0; i < plan.length; i++) {
+      // The size is the panel's; the MOVE carries its group.
+      layShiftUnit({ ids: plan[i].unit }, plan[i].dx, plan[i].dy);
+      plan[i].it.w = plan[i].w; plan[i].it.h = plan[i].h;
+      moved++;
+    }
+    persist(); renderLayout();
+    // Changing a panel's size moves its axis INSIDE its box, so evening the
+    // panels out undoes a plot-area alignment made a moment earlier. The two
+    // rail rows genuinely fight in the order a person uses them. Rather than
+    // re-aligning behind their back, say it, so the row above is worth
+    // clicking again.
+    var broke = layAlignmentBroken();
+    layAnnounce("Matched " + moved + (moved === 1 ? " item" : " items") +
+      " to " + laySameSizeLabel(target) + "." +
+      (short ? " One was larger than the page and was cut down to fit." : "") +
+      (broke ? " Their axes no longer line up." : ""));
+    return true;
+  }
+  // True when the selected panels share a column or a row and their plot
+  // edges have drifted apart by more than half a pixel.
+  function layAlignmentBroken() {
+    var pool = layPlotAlignPool();
+    if (pool.length < 2) return false;
+    var axes = [["x", "l"], ["y", "b"]];
+    for (var a = 0; a < axes.length; a++) {
+      var groups = layOverlapGroups(pool, axes[a][0]);
+      for (var g = 0; g < groups.length; g++) {
+        var list = groups[g].list;
+        if (list.length < 2) continue;
+        var lo = Infinity, hi = -Infinity;
+        for (var k = 0; k < list.length; k++) {
+          var v = list[k].plot[axes[a][1]];
+          if (v < lo) lo = v;
+          if (v > hi) hi = v;
+        }
+        if (hi - lo > 0.5) return true;
+      }
+    }
+    return false;
   }
   function layApplyInspector(prop, value) {
     // Typed in the user's unit, applied in pixels.
@@ -16864,9 +19376,9 @@
     if (!ids.length || !b) return;
     if (prop === "x") layMoveSelected(value - b.x, 0);
     else if (prop === "y") layMoveSelected(0, value - b.y);
-    else if (ids.length === 1) {
-      var item = layItemById(ids[0]), p = layPage();
-      if (!laySizedKind(item)) return;
+    else {
+      var item = layResizeTarget(), p = layPage();
+      if (!item) return;
       var mins = layMinSize(item);
       laySnapshot("resize", "resize");
       if (prop === "w") item.w = layClamp(value, mins.w, p.w - item.x);
@@ -16874,6 +19386,53 @@
       persist(); renderLayout();
       layAnnounce("Resized " + layItemAccessibleLabel(item));
     }
+  }
+  // Scale the whole arrangement onto a new page, keeping every item its own
+  // shape, and centre it. Shared by the orientation flip and by a page
+  // RESIZE, which used to CLAMP instead: setting a journal single-column
+  // width squashed each panel to the page width and slid them to x 0, so all
+  // four landed on top of each other, the letters stayed where they were, and
+  // the export shipped the pile. Clamping is right for one item that has
+  // strayed; it is wrong for a whole figure whose page has changed under it.
+  function layRefitToPage(newW, newH) {
+    var p = layPage(), items = layItems(), i;
+    var lo = Infinity, ln = Infinity, hi = -Infinity, hn = -Infinity;
+    for (i = 0; i < items.length; i++) {
+      var r = layItemRect(items[i]);
+      if (r.x < lo) lo = r.x;
+      if (r.y < ln) ln = r.y;
+      if (r.right > hi) hi = r.right;
+      if (r.bottom > hn) hn = r.bottom;
+    }
+    var k = 1, offX = 0, offY = 0;
+    if (items.length && isFinite(lo) && hi > lo && hn > ln) {
+      var availW = Math.max(1, newW - p.margin * 2);
+      var availH = Math.max(1, newH - p.margin * 2);
+      k = Math.min(availW / (hi - lo), availH / (hn - ln));
+      // Centred, because a fitted block no longer fills both axes and
+      // leaving it against the top-left would move the problem from inside
+      // the panels to around them.
+      offX = (newW - (hi - lo) * k) / 2 - lo * k;
+      offY = (newH - (hn - ln) * k) / 2 - ln * k;
+    }
+    for (i = 0; i < items.length; i++) {
+      items[i].x = Math.round((Number(items[i].x) || 0) * k + offX);
+      items[i].y = Math.round((Number(items[i].y) || 0) * k + offY);
+      // laySizedKind rather than kind === "chart", because an image is a
+      // sized item everywhere else, and leaving its box alone made a resized
+      // figure carry one item at its old size across the rescaled panels.
+      if (laySizedKind(items[i])) {
+        items[i].w = Math.round((Number(items[i].w) || 480) * k);
+        items[i].h = Math.round((Number(items[i].h) || 320) * k);
+      }
+      // TEXT scales too. Leaving font sizes alone made panel letters keep
+      // their size while everything around them shrank, so on a small page
+      // a 20 px letter sat on top of the panel it labels.
+      if (items[i].kind === "text" && k !== 1)
+        items[i].fontSize = layClamp(
+          Math.round((Number(items[i].fontSize) || 14) * k), 8, 72);
+    }
+    return k;
   }
   function layApplyPage(preset, w, h) {
     var p = layPage();
@@ -16886,8 +19445,13 @@
       p.h = Math.round(layClamp(h || p.h, 240, 4000));
     }
     p.margin = Math.round(layClamp(p.margin, 0, Math.min(p.w, p.h) / 3));
+    var kPage = layRefitToPage(p.w, p.h);
     layClampAllItems();
     persist(); renderLayout();
+    if (Math.abs(kPage - 1) > 0.005)
+      layAnnounce("Page is now " + pxToUnit(p.w) + " by " + pxToUnit(p.h) +
+        " " + unitLabel() + ". The figure was scaled to " +
+        Math.round(kPage * 100) + " percent to fit.");
   }
   function layPageOrientation() {
     var p = layPage();
@@ -16900,16 +19464,18 @@
     laySnapshot("orientation");
     var oldW = p.w, oldH = p.h;
     var newW = oldH, newH = oldW;
-    var sx = newW / oldW, sy = newH / oldH;
-    var items = layItems();
-    for (var i = 0; i < items.length; i++) {
-      items[i].x = Math.round((Number(items[i].x) || 0) * sx);
-      items[i].y = Math.round((Number(items[i].y) || 0) * sy);
-      if (items[i].kind === "chart") {
-        items[i].w = Math.round((Number(items[i].w) || 480) * sx);
-        items[i].h = Math.round((Number(items[i].h) || 320) * sy);
-      }
-    }
+    // ONE scale factor, not one per axis. Scaling width and height
+    // independently turned a 463 by 267 panel into 309 by 401, and a chart
+    // has a fixed aspect, so it shrank to the smaller dimension and the panel
+    // filled with white. A flipped 2 by 2 came back about two thirds empty,
+    // which is not what "scales the current arrangement to fit" promises.
+    //
+    // The factor FITS the arrangement to the new page rather than being the
+    // page's own ratio. Using min(sx, sy) keeps the shapes but shrinks on
+    // EVERY flip, so flipping there and back left the figure at 44 percent
+    // and a third flip at 30. Fitting grows as readily as it shrinks, so a
+    // flip always fills the page it lands on.
+    layRefitToPage(newW, newH);
     var pairs = {
       canvas: "canvasp", canvasp: "canvas",
       wide: "tall", tall: "wide",
@@ -16918,8 +19484,9 @@
     };
     p.preset = pairs[p.preset] || "custom";
     p.w = newW; p.h = newH;
-    p.margin = Math.round(layClamp(p.margin * Math.min(sx, sy), 0,
-                                   Math.min(p.w, p.h) / 3));
+    // The margin is a length on paper, and the paper has only been turned,
+    // so it keeps its value. Scaling it shrank it on every flip.
+    p.margin = Math.round(layClamp(p.margin, 0, Math.min(p.w, p.h) / 3));
     layClampAllItems();
     persist(); renderLayout();
   }
@@ -17037,13 +19604,25 @@
     });
     canvas.addEventListener("pointerdown", function (e) {
       if (e.button !== 0) return;
-      if (e.target.closest &&
-          (e.target.closest(".ps-lbar") || e.target.closest(".ps-ltext-edit"))) return;
+      // A press on a mini-bar BUTTON belongs to the button. A press on the
+      // bar's own padding does not, and since the sized-item bar moved to the
+      // top centre that padding sits in the gutter between two rows, which is
+      // exactly where someone drags to rubber-band a row.
+      if (e.target.closest && e.target.closest(".ps-ltext-edit")) return;
+      if (e.target.closest && e.target.closest(".ps-lbar")) {
+        if (e.target.closest("button")) return;
+        layMarqueeStart(e, canvas);
+        e.preventDefault();
+        return;
+      }
       var openEd = canvas.querySelector(".ps-ltext-edit");
       if (openEd) openEd.blur();
       var itemEl = e.target.closest ? e.target.closest(".ps-litem") : null;
       if (!itemEl) {
-        if (laySelectedIds().length) { laySetSelection([]); renderLayout(); }
+        // Arm a marquee rather than clearing straight away. A press that
+        // never travels still clears, on pointer-up.
+        layMarqueeStart(e, canvas);
+        e.preventDefault();
         return;
       }
       var id = itemEl.getAttribute("data-item-id");
@@ -17068,6 +19647,11 @@
       }
       LAY_DRAG = { ids: ids, primary: item, origins: origins, bounds: bounds,
                    resizing: resizing, sx: e.clientX, sy: e.clientY,
+                   // Alt+drag duplicates, the reflex every drawing
+                   // application shares. Armed here, acted on at the first
+                   // real movement, so an Alt+click that never travels stays
+                   // an ordinary selection and leaves nothing behind.
+                   altCopy: !!e.altKey && !resizing,
                    zoom: layZoom(), moved: false,
                    // Captured here rather than on first movement because the
                    // move handler mutates items in place; pushed at pointer-up
@@ -17097,6 +19681,12 @@
     });
     document.addEventListener("keydown", function (e) {
       if (!isLayoutTab(activeChart())) return;
+      // The visible workspace owns the keys, the undo router's rule. A
+      // layout stays the ACTIVE document while the Data workspace is on
+      // screen, so without this gate Cmd/Ctrl+D duplicated a hidden layout
+      // item from the data grid, Delete could remove one, and nothing on
+      // screen changed.
+      if (appWorkspace() !== "layout") return;
       var t = e.target;
       if (t && t.closest &&
           t.closest("input, textarea, select, [contenteditable]")) return;
@@ -17186,6 +19776,7 @@
         // A live drag outranks the selection: cancel it and keep the
         // selection, which is what every other cancel in the app does.
         if (layCancelDrag()) { e.preventDefault(); return; }
+        if (layMarqueeCancel()) { e.preventDefault(); return; }
         if (ids.length) {
           e.preventDefault(); laySetSelection([]); renderLayout();
         }
@@ -17204,18 +19795,31 @@
           String(e.key).toLowerCase() === "a" &&
           appWorkspace() === "layout") {
         e.preventDefault();
-        var every = layItems().map(function (it) { return it.id; });
-        if (!every.length) return;
-        laySetSelection(every);
-        renderLayout();   // the selection panel reports the count itself
+        laySelectAllItems();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && String(e.key).toLowerCase() === "g") {
+        e.preventDefault();
+        if (e.shiftKey) {
+          if (!layUngroupSelected()) layAnnounce("Nothing grouped is selected.");
+        } else if (!layGroupSelected())
+          layAnnounce("Select two or more items to group them.");
         return;
       }
       if ((e.metaKey || e.ctrlKey) && String(e.key).toLowerCase() === "d" &&
           ids.length) {
         e.preventDefault(); layDuplicateSelected(); return;
       }
-      if (!ids.length || ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]
-          .indexOf(e.key) === -1) return;
+      // ONE rule for the arrow keys. Inside the canvas plain arrows navigate
+      // between items and Alt+Arrow nudges, which is the engine's rule and
+      // what the hidden option list exists to serve. A second handler here
+      // used to nudge on PLAIN arrows whenever focus was anywhere else in the
+      // workspace, which in practice is any time the user has just clicked a
+      // rail or toolbar button, so the same key did two opposite things
+      // decided by something invisible. Alt+Arrow nudges everywhere now.
+      if (!ids.length || !e.altKey ||
+          ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]
+            .indexOf(e.key) === -1) return;
       e.preventDefault();
       var step = e.shiftKey ? 10 : 1;
       layMoveSelected(e.key === "ArrowLeft" ? -step :
@@ -17268,6 +19872,203 @@
       }, 100);
     });
   }
+  // ---- Marquee selection. Dragging on empty canvas used to clear the
+  // selection and nothing else, which is the one gesture every design tool
+  // answers the same way and the one that makes multi-select cheap enough to
+  // be worth having. Everything that acts on several items at once (align,
+  // plot-area alignment, same size, restyling a set of labels) was gated
+  // behind clicking each one.
+  //
+  // Deliberately INTERSECT rather than contain, the Figma and Illustrator
+  // rule. A panel label is a small item at a panel's corner, and requiring a
+  // box that fully encloses it makes the tiny things the hardest to catch.
+  //
+  // The box lives INSIDE the canvas so it inherits the zoom transform and can
+  // be positioned in ordinary page pixels, which is also why every pointer
+  // delta here is divided by the zoom, the same rule the item drag follows.
+  var LAY_MARQ = null;
+  function layMarqueeRect(d) {
+    return { x: Math.min(d.x0, d.x1), y: Math.min(d.y0, d.y1),
+             w: Math.abs(d.x1 - d.x0), h: Math.abs(d.y1 - d.y0) };
+  }
+  // A text item's ROTATION is a CSS transform on an inner node, so its model
+  // rect is the unrotated box and a marquee over a rotated axis label missed
+  // it and caught the panel behind. The rendered box is measured instead,
+  // for text only, and converted back to page pixels through the zoom.
+  function layMarqueeItemRect(item, canvasBox, z) {
+    if (item.kind === "text" && canvasBox) {
+      var node = el("ps-lcanvas");
+      node = node && node.querySelector(
+        '.ps-litem[data-item-id="' + item.id + '"] .ps-ltext');
+      if (node) {
+        var b = node.getBoundingClientRect();
+        if (b.width && b.height)
+          return { x: (b.left - canvasBox.left) / z,
+                   y: (b.top - canvasBox.top) / z,
+                   w: b.width / z, h: b.height / z };
+      }
+    }
+    return layItemRect(item);
+  }
+  function layMarqueeHits(r, canvasBox, z) {
+    var items = layItems(), out = [];
+    for (var i = 0; i < items.length; i++) {
+      var b = layMarqueeItemRect(items[i], canvasBox, z);
+      if (b.x < r.x + r.w && b.x + b.w > r.x &&
+          b.y < r.y + r.h && b.y + b.h > r.y) out.push(items[i].id);
+    }
+    // A SIZED item goes last, so the primary is a panel whenever the box
+    // caught one. The primary is the key object every multi-item action
+    // names, and a column marquee catches panel letters too, so without this
+    // the on-canvas primary ring pointed at a label while Same size sized to
+    // a panel. A text-only box still ends on a text item.
+    for (var k = out.length - 1; k >= 0; k--) {
+      var it = layItemById(out[k]);
+      if (it && laySizedKind(it)) {
+        out.push(out.splice(k, 1)[0]);
+        break;
+      }
+    }
+    return out;
+  }
+  function layMarqueeStart(e, canvas) {
+    // A second pointer landing mid-gesture used to overwrite LAY_MARQ and
+    // orphan the first box on the canvas for good.
+    if (LAY_MARQ) layMarqueeTeardown();
+    var z = layZoom(), box = canvas.getBoundingClientRect();
+    LAY_MARQ = {
+      x0: (e.clientX - box.left) / z, y0: (e.clientY - box.top) / z,
+      x1: (e.clientX - box.left) / z, y1: (e.clientY - box.top) / z,
+      sx: e.clientX, sy: e.clientY, zoom: z, armed: false,
+      // Shift or Cmd/Ctrl ADDS to what is already selected, matching the
+      // click gesture directly above this one.
+      add: !!(e.shiftKey || e.metaKey || e.ctrlKey),
+      // Captured whatever the modifier state, because `add` decides what the
+      // box UNIONS with while `base` is what Escape has to put back. Storing
+      // it only for the additive case made a cancelled plain drag leave the
+      // selection empty instead of restoring it.
+      base: laySelectedIds()
+    };
+    document.addEventListener("pointermove", layMarqueeMove);
+    document.addEventListener("pointerup", layMarqueeUp);
+    // A cancelled pointer never sends pointerup, so without this the box
+    // stayed on the canvas with both listeners attached and went on growing
+    // under a cursor with no button held.
+    document.addEventListener("pointercancel", layMarqueeCancelEvent);
+  }
+  function layMarqueeCancelEvent() { layMarqueeCancel(true); }
+  // The gesture belongs to the layout on screen. Leaving another workspace's
+  // pointer movement rewriting the selection meant a switch mid-drag went on
+  // changing a figure the user was no longer looking at, and announced into
+  // its live region.
+  function layMarqueeStillLive() {
+    return appWorkspace() === "layout" && isLayoutTab(activeChart());
+  }
+  function layMarqueeMove(e) {
+    var d = LAY_MARQ;
+    if (!d) return;
+    if (!layMarqueeStillLive()) { layMarqueeCancel(true); return; }
+    // Re-read rather than cache: scrolling the viewport mid-drag moved the
+    // canvas under a box that was still measuring from where it started.
+    var cvBox = el("ps-lcanvas");
+    d.box = cvBox ? cvBox.getBoundingClientRect() : d.box;
+    if (!d.armed &&
+        Math.abs(e.clientX - d.sx) < 4 && Math.abs(e.clientY - d.sy) < 4) return;
+    if (!d.armed) {
+      d.armed = true;
+      var cv = el("ps-lcanvas");
+      d.el = mkEl("div", "ps-lmarquee");
+      d.el.setAttribute("aria-hidden", "true");
+      if (cv) cv.appendChild(d.el);
+    }
+    var p = layPage();
+    d.x1 = layClamp((e.clientX - d.box.left) / d.zoom, 0, p.w);
+    d.y1 = layClamp((e.clientY - d.box.top) / d.zoom, 0, p.h);
+    var r = layMarqueeRect(d);
+    if (d.el) {
+      d.el.style.left = r.x + "px"; d.el.style.top = r.y + "px";
+      d.el.style.width = r.w + "px"; d.el.style.height = r.h + "px";
+    }
+    // Live, so the user sees what they are about to get. Selecting through
+    // laySetSelection rather than renderLayout keeps the box itself alive;
+    // a full rebuild would destroy the node the gesture is drawing into.
+    // The base goes FIRST, so the primary is something the BOX reached rather
+    // than whatever happened to be selected already. Shift-click appends the
+    // new item last for the same reason, and the two additive gestures have
+    // to agree because Same size names the primary.
+    var hits = [];
+    if (d.add) hits = d.base.slice();
+    var found = layMarqueeHits(r, d.box, d.zoom);
+    for (var i = 0; i < found.length; i++) {
+      var at = hits.indexOf(found[i]);
+      if (at !== -1) hits.splice(at, 1);
+      hits.push(found[i]);
+    }
+
+    laySetSelection(hits);
+    layMarqueePaint(hits);
+    laySyncInspector();
+    e.preventDefault();
+  }
+  // Selection chrome without a rebuild: the classes renderLayout would set.
+  function layMarqueePaint(ids) {
+    var cv = el("ps-lcanvas");
+    if (!cv) return;
+    // The primary ring stays ON during the drag. Dropping it meant the one
+    // piece of chrome that says "this is the key object" vanished for
+    // exactly the gesture that is choosing it, while the rail's Same size
+    // row was already on screen naming one.
+    var primary = ids.length ? ids[ids.length - 1] : null;
+    var nodes = cv.querySelectorAll(".ps-litem");
+    for (var i = 0; i < nodes.length; i++) {
+      var id = nodes[i].getAttribute("data-item-id");
+      nodes[i].classList.toggle("ps-litem-sel", ids.indexOf(id) !== -1);
+      nodes[i].classList.toggle("ps-litem-primary", id === primary);
+    }
+  }
+  function layMarqueeTeardown() {
+    var d = LAY_MARQ;
+    LAY_MARQ = null;
+    document.removeEventListener("pointermove", layMarqueeMove);
+    document.removeEventListener("pointerup", layMarqueeUp);
+    document.removeEventListener("pointercancel", layMarqueeCancelEvent);
+    if (d && d.el && d.el.parentNode) d.el.parentNode.removeChild(d.el);
+    return d;
+  }
+  function layMarqueeUp() {
+    if (!layMarqueeStillLive()) { layMarqueeCancel(true); return; }
+    var d = layMarqueeTeardown();
+    if (!d) return;
+    if (!d.armed) {
+      // A press that never travelled is the old click-on-empty-space, which
+      // clears the selection.
+      if (laySelectedIds().length) { laySetSelection([]); renderLayout(); }
+      return;
+    }
+    var n = laySelectedIds().length;
+    renderLayout();
+    layAnnounce(n ? n + (n === 1 ? " item selected." : " items selected.")
+                  : "Nothing in that area.");
+  }
+  // Escape abandons the box and puts the selection back, matching the way
+  // Escape abandons an item drag.
+  // `force` tears the gesture down even before it has armed, which is what a
+  // pointercancel or a workspace switch needs. Escape does NOT force: a press
+  // that has not travelled is still a live click, and tearing it down there
+  // left the press inert, so the drag that followed drew no box and the
+  // release did not clear the selection either.
+  function layMarqueeCancel(force) {
+    var d = LAY_MARQ;
+    if (!d) return false;
+    if (!d.armed && !force) return false;
+    var base = d.base.slice(), armed = d.armed;
+    layMarqueeTeardown();
+    if (!armed) return false;
+    laySetSelection(base);
+    renderLayout();
+    layAnnounce("Selection box cancelled.");
+    return true;
+  }
   function layPointerMove(e) {
     var d = LAY_DRAG;
     if (!d) return;
@@ -17278,6 +20079,41 @@
     // never travels is a SELECTION, and lifting it would flash on every
     // ordinary click.
     if (!d.moved) {
+      if (d.altCopy) {
+        // Copies made in place, and it is the COPIES that follow the pointer,
+        // so the original stays exactly where it was. One history entry
+        // covers the copy and the move together, which is why d.before was
+        // taken on the press, before any of this existed.
+        var copies = layDuplicateItems(d.ids, 0, 0);
+        d.altCopy = false;
+        if (copies.length) {
+          // What Escape has to take back. The copies sit exactly on their
+          // originals until the pointer moves, so a cancel that only restored
+          // positions left a second panel invisibly on top of the first, with
+          // no history entry and nothing for undo to remove.
+          d.copiedIds = copies.slice();
+          d.copiedFrom = d.ids.slice();
+          laySetSelection(copies);
+          renderLayout();
+          d.ids = copies;
+          d.origins = [];
+          for (var ci = 0; ci < copies.length; ci++) {
+            var cit = layItemById(copies[ci]);
+            if (!cit) continue;
+            d.origins.push({ item: cit, x: Number(cit.x) || 0,
+                             y: Number(cit.y) || 0,
+                             w: Number(cit.w) || 480,
+                             h: Number(cit.h) || 320 });
+          }
+          d.primary = layItemById(copies[copies.length - 1]) || d.primary;
+          // The bounds were measured for the ORIGINALS and the move clamp
+          // reads them, so leaving them stale pinned a copy against a page
+          // edge computed for an item that is no longer being dragged.
+          d.bounds = laySelectionBounds(copies) || d.bounds;
+          layAnnounce("Duplicating " + copies.length + " item" +
+            (copies.length === 1 ? "" : "s") + ".");
+        }
+      }
       var cv = el("ps-lcanvas");
       if (cv) cv.classList.add(d.resizing ? "ps-lcanvas-resizing"
                                           : "ps-lcanvas-dragging");
@@ -17303,7 +20139,11 @@
         dx = Math.round((d.bounds.x + dx) / v.grid) * v.grid - d.bounds.x;
         dy = Math.round((d.bounds.y + dy) / v.grid) * v.grid - d.bounds.y;
       }
-      var adj = laySmartAdjust(d.bounds, dx, dy, d.ids);
+      // The originals are excluded from the guides too. A copy starts exactly
+      // on its source, so with snapping off a short drag was pulled straight
+      // back onto it by the smart guides and looked like nothing happened.
+      var adj = laySmartAdjust(d.bounds, dx, dy,
+        d.copiedFrom ? d.ids.concat(d.copiedFrom) : d.ids);
       dx = layClamp(adj.dx, -d.bounds.x, p.w - d.bounds.right);
       dy = layClamp(adj.dy, -d.bounds.y, p.h - d.bounds.bottom);
       layShowGuides(adj.gx, adj.gy);
@@ -17338,6 +20178,17 @@
       o.item.x = o.x; o.item.y = o.y;
       if (laySizedKind(o.item)) { o.item.w = o.w; o.item.h = o.h; }
     }
+    // An Alt+drag that is cancelled has to lose its copies, or it leaves a
+    // second item exactly on top of the first with no history entry, which is
+    // both invisible and permanent.
+    if (d.copiedIds && d.copiedIds.length) {
+      var items = layItems(), keep = [], ci2;
+      for (ci2 = 0; ci2 < items.length; ci2++)
+        if (d.copiedIds.indexOf(items[ci2].id) === -1) keep.push(items[ci2]);
+      items.length = 0;
+      for (ci2 = 0; ci2 < keep.length; ci2++) items.push(keep[ci2]);
+      laySetSelection(d.copiedFrom || []);
+    }
     renderLayout();
     return true;
   }
@@ -17371,6 +20222,30 @@
       persist(); renderLayout();
     }
   }
+  // While a text field is open, the composite is NOT an option list. Exposing
+  // the item so its editor is reachable makes it a child the listbox role
+  // does not allow, and simply dropping the role orphans the parallel option
+  // list underneath, whose options then have no listbox parent. Both go
+  // together: the viewport becomes a plain group and the option mirror is
+  // hidden for the duration, because the canvas is not navigable mid-edit
+  // anyway. Both revert when the edit ends.
+  function layComposeEditingAria(editing) {
+    var vp = el("ps-lviewport"), opts = el("ps-layout-options");
+    if (vp) {
+      if (editing) {
+        vp.setAttribute("role", "group");
+        vp.removeAttribute("aria-multiselectable");
+        vp.removeAttribute("aria-activedescendant");
+      } else {
+        vp.setAttribute("role", "listbox");
+        vp.setAttribute("aria-multiselectable", "true");
+      }
+    }
+    if (opts) {
+      if (editing) opts.setAttribute("aria-hidden", "true");
+      else opts.removeAttribute("aria-hidden");
+    }
+  }
   function layEditText(id) {
     var item = layItemById(id);
     if (!item || item.kind !== "text") return;
@@ -17391,6 +20266,12 @@
     itemEl.removeAttribute("aria-hidden");
     itemEl.innerHTML = "";
     itemEl.appendChild(ta);
+    // While a text field is open inside it, the viewport is not a listbox.
+    // Exposing the item so its editor is reachable makes it a child the
+    // listbox role does not allow, which is a real violation and not a
+    // detail: an option list whose children are not options is not
+    // navigable. It goes back to a listbox when the edit ends.
+    layComposeEditingAria(true);
     ta.focus(); ta.select();
     var done = false;
     function commit(cancel) {
@@ -17405,6 +20286,7 @@
         layClampAllItems();
         persist();
       }
+      layComposeEditingAria(false);
       renderLayout();
       var resultMessage = cancel ? "Text edit canceled." : "Text saved.";
       if (returnFocus) {
@@ -17422,13 +20304,38 @@
     });
     ta.addEventListener("blur", function () { commit(false); });
   }
-  function layAddChartMenu() {
+  // The same flyout serves "Add chart" and "Show a different chart here".
+  // Non-null while the next pick REPLACES the panel it names.
+  var LAY_CHARTMENU_REPLACE = null;
+  // Point an existing panel at another chart, keeping its exact box. Without
+  // this, correcting a panel meant deleting it and placing a new one, which
+  // threw away the position and size that were the whole point of the
+  // figure - and reusing a finished layout for a second set of results was
+  // a rebuild rather than four picks.
+  function layReplaceChart(itemId, chartId) {
+    var item = layItemById(itemId), c = chartById(chartId);
+    if (!item || item.kind !== "chart" || !c || isLayoutTab(c)) return false;
+    if (item.chartId === chartId) return false;
+    laySnapshot("replace chart");
+    item.chartId = chartId;
+    laySetSelection([itemId]);
+    persist();
+    ensureSnapshotsThen(renderLayout);
+    layAnnounce("Panel now shows " + (c.name || "the chart") + ".");
+    return true;
+  }
+  function layAddChartMenu(replaceItemId, anchorEl) {
     var m = el("ps-lchartmenu");
+    LAY_CHARTMENU_REPLACE = replaceItemId || null;
     var chartTabs = PROJECT.charts.filter(function (c) { return !isLayoutTab(c); });
-    var h = ['<div class="ps-tm-head">Add a chart</div>'];
+    var h = ['<div class="ps-tm-head">' +
+      (replaceItemId ? "Show a different chart here" : "Add a chart") +
+      '</div>'];
     for (var i = 0; i < chartTabs.length; i++) {
       var c = chartTabs[i];
-      h.push('<button type="button" data-chart="' + escHtml(c.id) + '">' +
+      var shown = layItemById(replaceItemId || "");
+      h.push('<button type="button" data-chart="' + escHtml(c.id) + '"' +
+        (shown && shown.chartId === c.id ? " disabled" : "") + ">" +
         "<span>" + escHtml(c.name) + "</span>" +
         '<span style="margin-left:auto;color:#98a0a8;font-size:11px;">' +
         escHtml(MODULES[c.module] ? MODULES[c.module].label : "") + "</span></button>");
@@ -17436,23 +20343,38 @@
     if (!chartTabs.length)
       h.push('<div class="ps-slot-empty" style="padding:5px 12px;">no chart tabs yet</div>');
     m.innerHTML = h.join("");
-    var r = el("ps-laddchart").getBoundingClientRect();
+    var r = (anchorEl || el("ps-laddchart")).getBoundingClientRect();
     m.style.display = "block";
     m.style.left = Math.min(r.left, window.innerWidth - 200) + "px";
     m.style.top = Math.min(r.bottom + 3, window.innerHeight - 220) + "px";
   }
   function layAddChart(chartId) {
-    var pos = layStagger(), p = layPage();
+    var p = layPage(), items = layItems();
+    // Height from the chart's own aspect, not a constant, so a placed panel
+    // contains its chart exactly. 460 by 310 was 1.484 against the engine's
+    // 1.469 and letterboxed by a few pixels from the moment it landed.
+    var w = layPanelWidthFor(items, p);
+    var h = Math.round(w / layChartAspect(chartId));
+    var spot = layPlaceRect(items, p, w, h);
+    var grew = spot.needH > p.h;   // p.h is mutated by the add, so read first
     layAddItem({ id: layNewItemId(), kind: "chart", chartId: chartId,
-                 x: pos.x, y: pos.y,
-                 w: Math.min(460, p.w - 48), h: Math.min(310, p.h - 48) });
+                 x: spot.x, y: spot.y, w: w, h: h }, false, spot.needH);
+    layGrewNote(grew, spot.capped);
     render();
   }
-  function layAddText(text, fontSize, bold) {
-    var pos = layStagger();
-    layAddItem({ id: layNewItemId(), kind: "text",
-                 text: text, fontSize: fontSize, bold: !!bold,
-                 x: pos.x, y: pos.y });
+  function layAddText(text, fontSize, bold, edit) {
+    var id = layNewItemId();
+    var item = { id: id, kind: "text", text: text, fontSize: fontSize,
+                 bold: !!bold, x: 0, y: 0 };
+    var spot = layPlaceText(item);
+    var grew = spot.needH > layPage().h;
+    item.x = spot.x; item.y = spot.y;
+    layAddItem(item, !!edit, spot.needH);
+    layGrewNote(grew, spot.capped);
+    // A new text box opens its editor with the placeholder selected, so the
+    // caption you came to write is what typing produces.
+    if (edit) layEditText(id);
+    return id;
   }
 
   // ======================================================== application frame
@@ -17780,6 +20702,57 @@
           ], null);
         });
         wrap.appendChild(row);
+        // The pages of the section you are looking at (Torry's rail is the
+        // project's table of contents, and it stopped one level short of
+        // the thing you actually go looking for). Forty pages is forty
+        // screens of scrolling; this is one list. Only the ACTIVE section
+        // expands, which is how a notebook with sections and pages reads
+        // everywhere else.
+        if (b.id !== activePinBoard().id) return;
+        for (var pI = 0; pI < b.pins.length; pI++) (function (pin, idx) {
+          var prow = mkEl("button",
+            "ps-project-item ps-project-item-grouped ps-pinrow" +
+            (PIN_SEL === pin.id && appWorkspace() === "pinboard"
+             ? " ps-project-active" : ""));
+          prow.type = "button";
+          prow.setAttribute("data-project-pin-id", pin.id);
+          var st = pinSourceStatus(pin);
+          var num = mkEl("span", "ps-pinrow-num", String(idx + 1));
+          prow.appendChild(num);
+          prow.appendChild(mkEl("span", "ps-pinrow-name",
+            pinPageLabel(pin, idx)));
+          if (st.state === "changed" || st.state === "gone") {
+            var dot = mkEl("span", "ps-pinrow-dot");
+            dot.setAttribute("aria-hidden", "true");
+            prow.appendChild(dot);
+          }
+          setTip(prow, pinPageLabel(pin, idx) + " \u00b7 " +
+            (pin.at ? "kept " + pinKeptFmt(pin.at) + " \u00b7 " : "") + st.text +
+            (pin.note ? " \u00b7 Your note - " + pin.note : ""));
+          // A page with a drift or a note says so to a screen reader too,
+          // where the dot and the tip cannot reach.
+          prow.setAttribute("aria-label", "Page " + (idx + 1) + ", " +
+            pinPageLabel(pin, idx) +
+            (st.state === "changed" ? ", source chart has changed" :
+             st.state === "gone" ? ", source chart is gone" : "") +
+            (pin.note ? ", has a note" : ""));
+          prow.addEventListener("click", function () {
+            narrowCloseAfterNavigation();
+            pinReveal(pin.id);
+          });
+          prow.addEventListener("contextmenu", function (e) {
+            e.preventDefault();
+            showContextMenu(e.clientX, e.clientY, [
+              { label: "Move to section\u2026", key: "pin-move",
+                action: function () {
+                  showPinMoveMenu(e.clientX, e.clientY, pin.id);
+                } },
+              { label: "Delete page", key: "pin-delete",
+                action: function () { deletePin(pin.id); } }
+            ], null);
+          });
+          wrap.appendChild(prow);
+        })(b.pins[pI], pI);
       })(boards[i]);
       root.appendChild(wrap);
     }
@@ -17800,6 +20773,47 @@
     var a = t.typeAudit && t.typeAudit[col];
     if (!a || !a.seen) return null;
     var type = t.types[col];
+    // Codes come first. A wrong number outranks a typing nudge, and the two
+    // can never both apply anyway (a column with text offenders types
+    // Nominal, so it stores no numbers for a code to hide in).
+    if (a.codes && a.codes.length) {
+      var cs = a.codes, names = cs.map(function (c) {
+        return "<code>" + escHtml(String(c.value)) + "</code>";
+      }).join(" and ");
+      var rows = cs.reduce(function (s, c) { return s + c.count; }, 0);
+      var one = cs.length === 1 ? cs[0] : null;
+      // The claim has to be worth its interruption, so it states the cost in
+      // the number the user is about to read rather than in the abstract.
+      var costs = "";
+      if (one) {
+        var mw = fmtStatValue(one.meanWith), mo = fmtStatValue(one.meanWithout);
+        if (mw !== mo)
+          costs = " Counted as data " + escHtml(String(one.value)) +
+            " moves the mean of " + escHtml(col) + " from " +
+            escHtml(mo) + " to " + escHtml(mw) + ".";
+      }
+      var many = cs.length > 1;
+      return {
+        kind: "codes",
+        html: "<strong>" + names + " " +
+          (many ? "appear in " + rows + " rows of "
+                : rows === 1 ? "appears once in "
+                             : "appears in " + rows + " rows of ") +
+          escHtml(col) + ", and " + (many ? "look" : "looks") +
+          " like " + (many ? "missing-value codes" : "a missing-value code") +
+          " rather than " + (many ? "measurements" : "a measurement") +
+          ".</strong> Every other value falls between " +
+          escHtml(fmtStatValue(cs[0].restMin)) + " and " +
+          escHtml(fmtStatValue(cs[0].restMax)) + "." + costs,
+        actions: [
+          { label: cs.length === 1 ? "Treat " + cs[0].value + " as missing"
+                                   : "Treat these as missing",
+            act: "advice-code-missing" },
+          { label: rows === 1 ? "Go to it" : "Go to the first one",
+            act: "advice-code-goto" }
+        ]
+      };
+    }
     // 18b: nearly-numeric column held back by a handful of values. Above a
     // fifth of the column this is simply a text variable, and saying so
     // would be noise.
@@ -17824,6 +20838,34 @@
                  ? "Treat it as missing" : "Treat these as missing",
               act: "advice-missing" }]
           : [])
+      };
+    }
+    // Spellings of one category. Placed after the codes branch and before the
+    // rest because it changes what the chart IS, not merely how a column is
+    // typed. It cannot collide with the offenders branch below, which needs a
+    // mostly-numeric column, nor with idcoded, which needs bad === 0.
+    var vg = levelVariantGroups(t, col);
+    if (vg) {
+      var nLevels = (t.levels[col] || []).length;
+      var spelled = 0, ex = vg[0];
+      for (var g0 = 0; g0 < vg.length; g0++) spelled += vg[g0].variants.length;
+      var exList = ex.variants.slice(0, 3).map(function (v) {
+        return "<code>" + escHtml(v.value) + "</code>";
+      }).join(", ");
+      return {
+        kind: "variants",
+        html: "<strong>" + escHtml(col) + " has " + nLevels +
+          " categories, and " + spelled + " of them are spellings of just " +
+          vg.length + ".</strong> " + exList +
+          (ex.variants.length > 3 ? " and others" : "") +
+          " differ only by capitalisation or spacing, so a chart draws " +
+          (ex.variants.length === 2 ? "two bars" : ex.variants.length + " bars") +
+          " where there is one group. Merging keeps the commonest spelling.",
+        actions: [
+          { label: "Merge into " + vg.length +
+              (vg.length === 1 ? " category" : " categories"),
+            act: "advice-merge-variants" }
+        ]
       };
     }
     // t3-48. Dates land Nominal because there is no date measure type, and
@@ -17861,7 +20903,69 @@
         actions: [{ label: "Set type to ID", act: "advice-id" }]
       };
     }
+    // The identifier signature the branch above MISSES. Its trigger is a
+    // leading zero, which is a formatting accident, so 001..040 got a card
+    // while the same column written 1..40 or P001..P040 got nothing, and the
+    // plain-integer one types Continuous and is then averaged. The real
+    // signature is that every value is different, which the panel already
+    // computes and prints as Distinct beside Rows two lines above this slot,
+    // and which the catsingle lint already reasons from on the CATEGORY axis.
+    var idn = identifierShape(t, col);
+    if (idn && type !== "id") {
+      return {
+        kind: "allunique",
+        html: "<strong>Every one of the " + idn.n + " values in " +
+          escHtml(col) + " is different.</strong> That is the shape of a case " +
+          "number rather than something measured" +
+          (idn.numeric
+            ? ", and because it reads as a number a chart will happily average it"
+            : "") + ". If it names cases rather than measuring them, set its " +
+          "type to ID and it is kept out of every chart role.",
+        actions: [{ label: "Set type to ID", act: "advice-id" }]
+      };
+    }
     return null;
+  }
+  // Deliberately narrow, because the cost of being wrong is a card on a real
+  // measurement. Every value distinct is necessary and nowhere near
+  // sufficient, since reaction times are all distinct too. For a NUMERIC
+  // column the values must also be whole numbers packed into a
+  // near-consecutive range, which is what a case number looks like and what a
+  // measurement does not. Text needs no such test: an all-unique text column
+  // is either an identifier or free text, and neither belongs on an axis.
+  var ID_SHAPE_MIN_N = 12;
+  var ID_SHAPE_DENSITY = 0.9;
+  function identifierShape(t, col) {
+    var type = t.types[col];
+    if (type !== "continuous" && type !== "nominal" && type !== "ordinal")
+      return null;
+    var vals = t.columns[col] || [], seen = Object.create(null);
+    var n = 0, distinct = 0, i, v;
+    var numeric = true, lo = Infinity, hi = -Infinity;
+    for (i = 0; i < vals.length; i++) {
+      v = vals[i];
+      if (v == null) continue;
+      n++;
+      var k = String(v);
+      if (seen[k] === undefined) { seen[k] = 1; distinct++; }
+      if (numeric) {
+        var num = typeof v === "number" ? v : Number(k);
+        if (!isFinite(num) || num !== Math.round(num)) numeric = false;
+        else { if (num < lo) lo = num; if (num > hi) hi = num; }
+      }
+    }
+    if (n < ID_SHAPE_MIN_N || distinct !== n) return null;
+    // A declared ORDINAL with a hand-set level order is a deliberate choice
+    // about a scale, not an accident, so it is left alone.
+    if (type === "ordinal" && t.declaredLevels && t.declaredLevels[col])
+      return null;
+    if (colStoresNumbers(t, col)) {
+      if (!numeric) return null;
+      var span = hi - lo + 1;
+      if (!(span > 0) || n / span < ID_SHAPE_DENSITY) return null;
+      return { n: n, numeric: true };
+    }
+    return { n: n, numeric: false };
   }
   // t3-48. A plain derived column, not a formula: the formula engine is
   // numeric (ABS, SQRT, MEAN and friends) and has no string functions, so
@@ -17904,6 +21008,16 @@
   // t3-47. Numeric summary for the inspector. Uses ps-stat.js, which is the
   // same code the charts and the parity harness use, rather than a second
   // arithmetic that could disagree with the chart beside it.
+  // Hoisted out of variableNumericStats so the advice card quotes a number in
+  // exactly the form the panel above it prints. Two formatters would drift.
+  function fmtStatValue(x) {
+    if (!isFinite(x)) return "-";
+    // Three significant figures, but never scientific for ordinary data
+    // and never a long tail of decimals on integers.
+    var a = Math.abs(x);
+    if (a >= 1000 || x === Math.round(x)) return String(Math.round(x * 100) / 100);
+    return String(Number(x.toPrecision(3)));
+  }
   function variableNumericStats(t, col) {
     // Belt and braces: a nominal column stores STRINGS, so the numeric filter
     // below already excludes it and a control that removes this line changes
@@ -17914,20 +21028,35 @@
     for (var i = 0; i < src.length; i++)
       if (typeof src[i] === "number" && isFinite(src[i])) vals.push(src[i]);
     if (vals.length < 2) return "";
-    function fmt(x) {
-      if (!isFinite(x)) return "-";
-      // Three significant figures, but never scientific for ordinary data
-      // and never a long tail of decimals on integers.
-      var a = Math.abs(x);
-      if (a >= 1000 || x === Math.round(x)) return String(Math.round(x * 100) / 100);
-      return String(Number(x.toPrecision(3)));
-    }
+    var fmt = fmtStatValue;
     var S = window.PSStat;
     return inspectorStat("Mean", fmt(S.mean(vals))) +
       inspectorStat("SD", fmt(S.sdSample(vals))) +
       inspectorStat("Median", fmt(S.median(vals))) +
       inspectorStat("Min", fmt(Math.min.apply(null, vals))) +
       inspectorStat("Max", fmt(Math.max.apply(null, vals)));
+  }
+  // A column jamovi derived showed a name, a measure type and summary
+  // statistics, and nothing at all about where the numbers came from. The
+  // formula is printed EXACTLY as jamovi wrote it and never rewritten, even
+  // when a source column has since been renamed here, because rewriting it
+  // would make it claim something the sender did not write.
+  function syncVariableDerived(t, col) {
+    var section = el("ps-variable-derived-section");
+    if (!section) return;
+    var rec = importedFormulaOf(t, col);
+    if (!rec) { section.style.display = "none"; return; }
+    section.style.display = "block";
+    el("ps-variable-derived-title").textContent = importedFormulaHeading(rec);
+    var h = "";
+    if (rec.kind === "Recoded" && rec.transform)
+      h += "<strong>Recoded by " + escHtml(rec.transform) + ".</strong> ";
+    if (rec.formula) h += "<code>" + escHtml(rec.formula) + "</code><br>";
+    h += "The values arrived as a snapshot. Pandion does not recompute them, " +
+      "so they will not follow the variables they came from, and editing " +
+      "those changes nothing here. To make it live, add a computed column " +
+      "from the Data menu using this app's own formulas.";
+    el("ps-variable-derived").innerHTML = h;
   }
   function syncVariableAdvice(t, col) {
     var section = el("ps-variable-advice-section");
@@ -17959,7 +21088,70 @@
       extractDatePart(col, act === "advice-year" ? "year" : "month");
       return;
     }
+    if (act === "advice-merge-variants") {
+      var vgm = levelVariantGroups(t, col);
+      if (!vgm) return;
+      var to = Object.create(null), gone = Object.create(null), n = 0, i0, j0;
+      for (i0 = 0; i0 < vgm.length; i0++)
+        for (j0 = 0; j0 < vgm[i0].variants.length; j0++) {
+          var vv = vgm[i0].variants[j0].value;
+          if (vv === vgm[i0].canonical) continue;
+          to[vv] = vgm[i0].canonical;
+          gone[vv] = 1;
+        }
+      // Worked out before anything is marked, the gridReplace rule: a mark
+      // that undoes nothing is worse than no mark.
+      var rawCol = t.raw[col] || [], hits = [];
+      for (i0 = 0; i0 < rawCol.length; i0++) {
+        // Levels are built from the TRIMMED value, so that is what carries a
+        // mapping; the cell may still hold the untrimmed original.
+        var trimmed = String(rawCol[i0] == null ? "" : rawCol[i0]).trim();
+        var want = to[trimmed];
+        if (want !== undefined && want !== rawCol[i0])
+          hits.push({ row: i0, value: want });
+      }
+      if (!hits.length) return;
+      dataMark("merging the spellings of " + col);
+      for (i0 = 0; i0 < hits.length; i0++) rawCol[hits[i0].row] = hits[i0].value;
+      // A hand-set level ORDER lists every old spelling, and retype re-adds a
+      // declared level even when nothing carries it any more, so a merge that
+      // forgot this would leave the dead spellings behind as empty
+      // categories. Same for the stored reset-order baseline.
+      pruneDeclaredLevels(t, col, gone);
+      t.edited = true;
+      retype(t); validateRoles();
+      persist(); syncAll(); render();
+      n = Object.keys(gone).length;
+      showToast("Merged " + n + " spelling" + (n === 1 ? "" : "s") + " in " +
+        col + " \u00b7 Cmd/Ctrl+Z puts them back");
+      return;
+    }
     if (!a) return;
+    if (act === "advice-code-goto") {
+      if (!a.codes || !a.codes.length || a.codes[0].row < 0) return;
+      gridRevealFound({ col: col, row: a.codes[0].row });
+      return;
+    }
+    if (act === "advice-code-missing") {
+      // The PER-COLUMN list, not the dataset one. A code means missing in the
+      // variable it was coded for, and -99 is a real temperature elsewhere;
+      // the field this writes to is the one whose own placeholder describes
+      // this exact case. Routing through setColumnMissingTokens keeps the
+      // undo step, the re-inference and the disclosure identical to typing
+      // the value in by hand.
+      if (!a.codes || !a.codes.length) return;
+      // A per-column list WINS WHOLE over the dataset one rather than merging
+      // (t3-58a), so seeding an empty list with only the code would quietly
+      // stop NA counting as missing in this column. Start from whatever is
+      // in force for it today.
+      var have = columnTokenList(t, col).slice();
+      for (var c0 = 0; c0 < a.codes.length; c0++) {
+        var s0 = String(a.codes[c0].value);
+        if (have.indexOf(s0) === -1) have.push(s0);
+      }
+      setColumnMissingTokens(col, have.join(", "));
+      return;
+    }
     if (act === "advice-goto") {
       if (a.firstBadRow < 0) return;
       gridRevealFound({ col: col, row: a.firstBadRow });
@@ -18003,10 +21195,16 @@
     }
     var excluded = variableExcludedCount(col);
     var uses = variableRoleUseCount(col);
+    var filterOn = validFilters(t).length > 0;
     el("ps-variable-stats").innerHTML =
       inspectorStat("Rows", String(values.length)) +
       inspectorStat("Valid", String(nonmissing)) +
-      inspectorStat("Missing", String(values.length - nonmissing)) +
+      // An excluded value reads as missing everywhere downstream, which is
+      // the point of it, but reporting it under BOTH headings sent a reader
+      // looking for a blank cell that does not exist. Missing is now the ones
+      // with no value; Excluded is the ones the user set aside.
+      inspectorStat("Missing",
+        String(Math.max(0, values.length - nonmissing - excluded))) +
       inspectorStat("Distinct", String(Object.keys(seen).length)) +
       inspectorStat("Excluded", String(excluded)) +
       inspectorStat("Used in", String(uses) +
@@ -18015,7 +21213,18 @@
       // nominal variable's codes is the classic way to mislead yourself, and
       // the app refuses to compute one rather than printing it small.
       variableNumericStats(t, col);
+    // Said once, under the numbers, rather than on every tile.
+    var basis = el("ps-variable-basis");
+    if (basis) {
+      basis.textContent = filterOn
+        ? "These describe every row. The chart is showing " +
+          (nRows(t) - filteredRowCount(t)) + " of " + nRows(t) +
+          ", because a row filter is on."
+        : "";
+      basis.style.display = filterOn ? "block" : "none";
+    }
     syncVariableAdvice(t, col);
+    syncVariableDerived(t, col);
     var levels = t.levels[col] || [], levelRoot = el("ps-variable-levels");
     var categorical = t.types[col] === "nominal" ||
       t.types[col] === "ordinal";
@@ -18032,13 +21241,26 @@
       if (!levels.length)
         levelRoot.appendChild(mkEl("span", "ps-inspector-empty",
           "No levels"));
+      // The list said WHICH categories exist and never how many rows each
+      // holds, so "is CONTROL a typo or a third of my data" needed a filter
+      // or a chart to answer. Counted off the TYPED column, so excluded cells
+      // and missing labels are already out and the number agrees with every
+      // other count in the panel.
+      var lvCount = Object.create(null), lvSrc = t.columns[col] || [];
+      for (i = 0; i < lvSrc.length; i++)
+        if (lvSrc[i] != null) {
+          var lvk = String(lvSrc[i]);
+          lvCount[lvk] = (lvCount[lvk] || 0) + 1;
+        }
       for (i = 0; i < Math.min(levels.length, 40); i++) {
         var order = mkEl("div", "ps-level-order");
         var value = String(levels[i]);
         order.setAttribute("data-level", value);
         order.setAttribute("role", "listitem");
         order.tabIndex = 0;
-        order.setAttribute("aria-label", value + ", position " + (i + 1) +
+        var nAt = lvCount[value] || 0;
+        order.setAttribute("aria-label", value + ", " + nAt +
+          (nAt === 1 ? " row" : " rows") + ", position " + (i + 1) +
           " of " + levels.length +
           ". Drag vertically or press Alt plus Up or Down Arrow to reorder.");
         var grip = mkEl("span", "ps-level-grip", "\u28ff");
@@ -18047,12 +21269,24 @@
         var label = mkEl("span", "ps-level-label", value);
         setTip(label, value);
         order.appendChild(label);
+        var nEl = mkEl("span", "ps-level-count", String(nAt));
+        nEl.setAttribute("aria-hidden", "true");   // already in the label
+        setTip(nEl, nAt + (nAt === 1 ? " row" : " rows") + " in " + value);
+        order.appendChild(nEl);
         levelRoot.appendChild(order);
       }
       if (levels.length > 40)
         levelRoot.appendChild(mkEl("span", "ps-level-chip",
           "+" + (levels.length - 40) + " more"));
     }
+    // Sort A-Z shares the .ps-level-reset class, which is display:none, and
+    // only its SIBLING ever had its display restored. So the button existed,
+    // carried a tooltip and a working handler, and could never appear. It is
+    // the escape hatch for the deliberate first-seen level order, which is
+    // exactly the divergence from R that the README leaves open, so it should
+    // be reachable on any variable with an order to change.
+    el("ps-variable-level-sort").style.display =
+      categorical && levels.length > 1 ? "inline-block" : "none";
     el("ps-variable-level-reset").style.display =
       categorical && t.levelOrderDefaults &&
       t.levelOrderDefaults[col] ? "inline-block" : "none";
@@ -18075,12 +21309,20 @@
           + "such as -99 for an age or 9 for a rating.";
     }
   }
+  // Counts roles the user can SEE. Every chart keeps a stored role set per
+  // MODULE so switching analysis type inside a tab keeps that tab's memory,
+  // and this walked all of them, so a project with one bar chart reported
+  // "Used in 4 roles" for a variable used once, counting assignments in
+  // analyses that had never been opened. The number is read right before
+  // someone deletes a column, so it has to mean what it says.
   function variableRoleUseCount(col) {
     var count = 0;
     for (var ci = 0; ci < PROJECT.charts.length; ci++) {
-      var sets = PROJECT.charts[ci].roles || {};
+      var chart = PROJECT.charts[ci];
+      var sets = chart.roles || {};
       for (var mod in sets) {
         if (!Object.prototype.hasOwnProperty.call(sets, mod)) continue;
+        if (mod !== chart.module) continue;   // the analysis actually in use
         var rr = sets[mod] || {};
         for (var key in rr) {
           if (!Object.prototype.hasOwnProperty.call(rr, key)) continue;
@@ -18098,13 +21340,30 @@
     el("ps-layout-selection-properties").style.display = has ? "block" : "none";
     if (!has) return;
     var bounds = laySelectionBounds(ids);
-    var one = ids.length === 1 ? layItemById(ids[0]) : null;
+    // One UNIT rather than one item, resolved to the item the user actually
+    // reached. A grouped chart panel is two items and one thing, and the
+    // identity rail went blank the moment a letter was bound to it: no title,
+    // no "Follows <chart>" line, no live-versus-snapshot answer.
+    var one = null;
+    if (layUnits(ids).length === 1) {
+      one = layItemById(ids[ids.length - 1]);
+      if (one && ids.length > 1) {
+        // Prefer the sized member, because that is what the panel IS; a
+        // letter is a label on it.
+        var sizedOne = laySizedSelection();
+        if (sizedOne.length === 1) one = sizedOne[0];
+      }
+    }
     var srcInfo = one ? layItemSourceInfo(one) : null;
     var txtSec = el("ps-layout-text-section");
     if (txtSec) {
-      var oneText = one && one.kind === "text" ? one : null;
-      txtSec.style.display = oneText ? "" : "none";
-      if (oneText) layTextSyncControls(oneText);
+      var texts = layTextTargets();
+      txtSec.style.display = texts.length ? "" : "none";
+      var txtTitle = txtSec.querySelector(".ps-inspector-section-title");
+      if (txtTitle)
+        txtTitle.textContent = texts.length > 1
+          ? "Text (" + texts.length + " items)" : "Text";
+      if (texts.length) layTextSyncControls(texts);
     }
     el("ps-layout-selection-title").textContent = one
       ? (one.kind === "chart"
@@ -18139,9 +21398,19 @@
     ["x", "y", "w", "h"].forEach(function (prop) {
       el("ps-ctx-l" + prop).step = String(unitStep());
     });
-    var ctxSized = !!one && laySizedKind(one);
-    el("ps-ctx-lw").disabled = !ctxSized;
-    el("ps-ctx-lh").disabled = !ctxSized;
+    var ctxSized = !!layResizeTarget();
+    // A field that cannot be typed into must not look like one that can.
+    // These carry the union width and height of a multi-selection, which is
+    // read-only, and used to render identically to the live X and Y beside
+    // them with no tooltip - the same defect the align buttons had.
+    ["w", "h"].forEach(function (prop) {
+      var field = el("ps-ctx-l" + prop);
+      field.disabled = !ctxSized;
+      setTip(field, ctxSized ? ""
+        : layUnits(ids).length > 1
+          ? "Size applies to one panel at a time. Select just the one you want to change."
+          : "Text items size themselves to their content.");
+    });
     // Progressive disclosure (Torry, Jul 29 2026): the align row is SHOWN
     // only once a second item is selected, instead of six greyed buttons
     // sitting under Arrange at every selection. They stay enabled whenever
@@ -18150,7 +21419,9 @@
     // genuinely have an inapplicable state at the ends of the stack, which
     // is a different thing from a capability that does not apply yet.)
     var alignRow = document.querySelector(".ps-inspector-align");
-    var canAlign = ids.length >= 2;
+    // Two UNITS. One grouped panel and its letter is two items and one
+    // thing, and there is nothing to align it to.
+    var canAlign = layUnits(ids).length >= 2;
     if (alignRow) alignRow.style.display = canAlign ? "" : "none";
     // The whole section follows: with the Arrange buttons gone (Aug 5
     // 2026, Torry - they duplicated the right-click, which also gained
@@ -18162,6 +21433,61 @@
     for (var i = 0; i < align.length; i++) {
       align[i].disabled = false;
       setTip(align[i], "Align the selected items");
+    }
+    // Plot-area alignment follows the same progressive-disclosure rule as
+    // the row above, but tested per button. "Left axes" needs two panels in
+    // one column and "Baselines" two in one row, so a side-by-side pair offers
+    // baselines and a stacked pair offers left axes.
+    var plotRow = document.querySelector(".ps-inspector-plotalign");
+    var plotBtns = document.querySelectorAll("[data-ctx-plotalign]");
+    var anyPlot = false;
+    for (i = 0; i < plotBtns.length; i++) {
+      var edge = plotBtns[i].getAttribute("data-ctx-plotalign");
+      var live = canAlign && layCanAlignPlots(edge);
+      plotBtns[i].style.display = live ? "" : "none";
+      setTip(plotBtns[i], edge === "left"
+        ? "Move these panels so their y axes sit on one line"
+        : "Move these panels so their x axes sit on one line");
+      if (live) anyPlot = true;
+    }
+    // Group appears once there are two units to bind; Ungroup once anything
+    // selected is already in one. Both are hidden rather than disabled, the
+    // rule the align row set.
+    var groupRow = document.querySelector(".ps-inspector-grouprow");
+    var anyGrouped = false;
+    for (i = 0; i < ids.length; i++) if (layGroupOf(ids[i])) anyGrouped = true;
+    var canGroup = layUnits(ids).length >= 2;
+    if (groupRow) {
+      var gOn = groupRow.querySelector('[data-ctx-group="on"]');
+      var gOff = groupRow.querySelector('[data-ctx-group="off"]');
+      if (gOn) gOn.style.display = canGroup ? "" : "none";
+      if (gOff) gOff.style.display = anyGrouped ? "" : "none";
+      groupRow.style.display = canGroup || anyGrouped ? "" : "none";
+      groupRow.querySelector(".ps-inspector-subrow-cells").style
+        .gridTemplateColumns = "repeat(" +
+          ((canGroup ? 1 : 0) + (anyGrouped ? 1 : 0) || 1) + ", 1fr)";
+    }
+    // Same size appears on the same rule as the rows above it, once the
+    // selection actually holds two things that HAVE a size.
+    var sameRow = document.querySelector(".ps-inspector-samesize");
+    var sameTarget = laySameSizeTarget();
+    if (sameRow) {
+      sameRow.style.display = sameTarget ? "" : "none";
+      var sameBtns = sameRow.querySelectorAll("[data-ctx-samesize]");
+      for (i = 0; i < sameBtns.length; i++) {
+        var dim = sameBtns[i].getAttribute("data-ctx-samesize");
+        setTip(sameBtns[i], "Match the " +
+          (dim === "w" ? "width" : dim === "h" ? "height" : "width and height") +
+          " of " + laySameSizeLabel(sameTarget));
+      }
+    }
+    if (plotRow) {
+      plotRow.style.display = anyPlot ? "" : "none";
+      var visible = 0;
+      for (i = 0; i < plotBtns.length; i++)
+        if (plotBtns[i].style.display !== "none") visible++;
+      plotRow.querySelector(".ps-inspector-subrow-cells").style
+        .gridTemplateColumns = "repeat(" + Math.max(1, visible) + ", 1fr)";
     }
   }
   // True when moving the selection this direction would change nothing:
@@ -18292,7 +21618,7 @@
     } else if (ws === "data") {
       elOrSink("ps-workspace-title").textContent = "Data";
       elOrSink("ps-workspace-subtitle").textContent = t
-        ? nRows(t) + " rows \u00d7 " + t.order.length + " columns"
+        ? shapeText(nRows(t), t.order.length, "\u00d7")
         : "No dataset loaded";
       el("ps-inspector-title").textContent = "Variable properties";
       el("ps-inspector-subtitle").textContent = INSPECTOR_VAR
@@ -18300,8 +21626,8 @@
       // What the data IS, not which workspace you are looking at: the
       // navigator highlight already says that.
       el("ps-status-context").textContent = t
-        ? nRows(t).toLocaleString() + " rows \u00b7 " + t.order.length +
-          " columns" + (dataExclusionCount(t) ? " \u00b7 " +
+        ? shapeText(nRows(t), t.order.length, "\u00b7", true) +
+          (dataExclusionCount(t) ? " \u00b7 " +
             dataExclusionCount(t) + " excluded" : "")
         : "No dataset";
       var rangeStatus = document.getElementById("ps-grid-selection-status");
@@ -18346,6 +21672,7 @@
     syncContextInspector();
     syncProjectNavigator();
     updateDocumentState();
+    syncChartCheck();
   }
 
   // Punch list 37: real instrumentation for the chart workspace, read from the
@@ -18360,6 +21687,21 @@
       : secs < 3600 ? Math.round(secs / 60) + " min ago"
       : Math.round(secs / 3600) + " h ago";
     return (FILE_SAVED_REV == null ? "Autosaved " : "Saved ") + when;
+  }
+  // "1 rows x 2 columns". The singular branch was written inline at five
+  // places and missing at six others, so a one-row import read "1 rows x
+  // 2 columns" in the command bar while the selection readout one line
+  // below it correctly said "1 row". One helper instead of eleven
+  // decisions, so the next surface that reports a shape cannot get it
+  // wrong. The separator stays per-caller: the command bar and
+  // Diagnostics use "x", the grid footer and import preview a real
+  // multiplication sign, the Data status bar a middle dot.
+  function shapeText(rows, cols, sep, loc) {
+    var r = Number(rows) || 0, c = Number(cols) || 0;
+    return (loc ? r.toLocaleString() : String(r)) +
+      (r === 1 ? " row " : " rows ") + (sep || "\u00d7") + " " +
+      (loc ? c.toLocaleString() : String(c)) +
+      (c === 1 ? " column" : " columns");
   }
   function dataExclusionCount(t) {
     var n = rowExclCount(t);
@@ -18471,6 +21813,28 @@
     }
     return named.length ? label + " \u00b7 " + named.join(" \u00d7 ") : label;
   }
+  // How many things are actually ON the axes. x categories arrive
+  // facet-encoded, so the panel prefix is stripped before they are counted,
+  // and both counts are distinct values rather than list lengths.
+  function chartAxisCounts(p) {
+    var sep = typeof p.facetSeparator === "string" && p.facetSeparator
+      ? p.facetSeparator : "";
+    var xs = Array.isArray(p.xCategories) ? p.xCategories : [];
+    var seen = {}, cats = 0, i, key, at;
+    for (i = 0; i < xs.length; i++) {
+      key = String(xs[i]);
+      if (sep) {
+        at = key.indexOf(sep);
+        if (at !== -1) key = key.slice(at + sep.length);
+      }
+      if (!Object.prototype.hasOwnProperty.call(seen, "k" + key)) {
+        seen["k" + key] = 1; cats++;
+      }
+    }
+    var gs = p.hasGroups && Array.isArray(p.groupCategories)
+      ? p.groupCategories.length : 0;
+    return { cats: cats, groups: gs };
+  }
   function chartCaseText(c) {
     try {
       var built = buildPayload();
@@ -18484,15 +21848,42 @@
       var bits = [];
       if (n) bits.push(n.toLocaleString() + " case" + (n === 1 ? "" : "s"));
       if (cells) {
-        var noun = "plotted value";
-        if (c.module === "plotbuilder") noun = "group";
-        else if (c.module === "rmplotbuilder") noun = "condition";
-        else if (c.module === "freqplotbuilder") noun = "category";
+        // Plurals are declared, not derived. Adding "s" to "category" was
+        // printing "2 categorys" under every grouped frequency chart.
+        var noun = ["plotted value", "plotted values"];
+        // The x levels are CATEGORIES even here, and the grouping variable's
+        // levels are the groups. Calling both groups printed the unusable
+        // "3 groups, 2 groups" the moment a grouping variable was added.
+        if (c.module === "plotbuilder") noun = ["category", "categories"];
+        else if (c.module === "rmplotbuilder") noun = ["condition", "conditions"];
+        else if (c.module === "freqplotbuilder") noun = ["category", "categories"];
+        // Distribution ships one cell per group and the engine bins the raw
+        // values itself, so bars.length is the number of distributions drawn
+        // and never the number of bins. It read "1 bin" under a fourteen-bar
+        // histogram. The bin count is not in the payload to report.
         else if (c.module === "distplotbuilder")
-          noun = /hist/.test(String(p.graphType || ""))
-            ? "bin" : "distribution group";
-        else if (c.module === "likertplotbuilder") noun = "response category";
-        bits.push(cells + " " + noun + (cells === 1 ? "" : "s"));
+          noun = ["distribution", "distributions"];
+        else if (c.module === "likertplotbuilder")
+          noun = ["response category", "response categories"];
+        // bars.length is CELLS, which is categories times groups times
+        // panels. Reporting it as the noun said "6 categories" over a chart
+        // with three of them and "6 groups" over a chart with two. Only
+        // Distribution, whose x axis is one empty slot, has a cell per
+        // distribution and so counts correctly from the cells.
+        var axis = c.module === "distplotbuilder"
+          ? { cats: cells, groups: 0 } : chartAxisCounts(p);
+        // Pie and donut ship each slice in the GROUP field with one empty x
+        // slot (the module convention, so per-slice colors and the legend
+        // come free), so the axis counts read a three-slice pie as one
+        // category with three groups. The slices ARE the categories, and
+        // there is no grouping variable to report.
+        if (c.module === "freqplotbuilder" &&
+            /^(pie|donut)$/.test(String(p.graphType || "")))
+          axis = { cats: (Array.isArray(p.groupCategories)
+            ? p.groupCategories.length : 0) || cells, groups: 0 };
+        bits.push(axis.cats + " " + noun[axis.cats === 1 ? 0 : 1]);
+        if (axis.groups > 1)
+          bits.push(axis.groups + " group" + (axis.groups === 1 ? "" : "s"));
       }
       if (p.missingNote) bits.push(p.missingNote);
       return bits.length ? bits.join(" \u00b7 ") : "Ready";
@@ -18502,6 +21893,80 @@
   // has actually drawn: only a finished chart can say whether a part sits
   // outside the canvas, and a legend drag commits no size option, so
   // nothing else in the sync path would ever refresh it.
+  // ---- the chart-check receipt -----------------------------------------
+  // The engine already judges a chart against its graph type's rubric
+  // (Help > Check my chart). It only ever spoke when asked, so a chart
+  // could carry a truncated bar baseline, or a significance star with no
+  // test behind it, and every surface in the app stayed silent - while
+  // the export carried the claim.
+  //
+  // This asks the engine the same question after each render and puts the
+  // answer where the user is already looking. ONE judgment, in the engine,
+  // read through the host hook __gb2_graphLint - never a second copy in the
+  // shell, which would drift. Clean charts get a muted receipt rather than
+  // nothing, so the feature is discoverable before it has bad news; a
+  // finding turns it amber, which is the colour the panel itself uses.
+  var CHECK_TIMER = null;
+  function scheduleChartCheck() {
+    if (CHECK_TIMER) clearTimeout(CHECK_TIMER);
+    // After the render settles. The lint reads rendered geometry (colours
+    // off legend swatches, tick labels off the axes), so it must run on a
+    // painted chart, and a burst of style commits should cost one pass.
+    CHECK_TIMER = setTimeout(syncChartCheck, 260);
+  }
+  function chartCheckReport() {
+    if (appWorkspace() !== "chart") return null;
+    var doc = workspaceDocument("chart");
+    if (!doc || isLayoutTab(doc)) return null;
+    var host = hostEl();
+    if (!host || typeof host.__gb2_graphLint !== "function") return null;
+    if (!host.querySelector("svg")) return null;   // guided empty state
+    try { return host.__gb2_graphLint(); } catch (e) { return null; }
+  }
+  function syncChartCheck() {
+    CHECK_TIMER = null;
+    var btn = el("ps-status-check");
+    if (!btn) return;
+    var rep = chartCheckReport();
+    var found = rep && Array.isArray(rep.findings) ? rep.findings : null;
+    if (!rep || !found) { btn.hidden = true; return; }
+    var i, warns = 0;
+    for (i = 0; i < found.length; i++) if (found[i].sev === "warn") warns++;
+    btn.hidden = false;
+    if (!found.length) {
+      btn.setAttribute("data-state", "ok");
+      btn.textContent = "Checks passed";
+      setTip(btn, "This chart was run against " + rep.total +
+        " checks for its graph type and passed them all. Click to read them.");
+      return;
+    }
+    // Amber is reserved for a FAULT. Some checks are notes rather than
+    // faults - black-and-white legibility is the standing example, since
+    // past about six series it often cannot be fixed with color at all -
+    // and if a note painted the chip amber then most ordinary charts would
+    // sit permanently amber, which is how a signal stops being one.
+    if (!warns) {
+      btn.setAttribute("data-state", "ok");
+      btn.textContent = found.length === 1 ? "1 note" : found.length + " notes";
+      setTip(btn, found[0].title + (found.length > 1
+        ? " (and " + (found.length - 1) + " more)" : "") +
+        ". Nothing here is wrong with the chart. Click to read it.");
+      return;
+    }
+    btn.setAttribute("data-state", "warn");
+    btn.textContent = warns === 1
+      ? "1 thing to check"
+      : warns + " things to check";
+    // Name the worst one in the tooltip: a bare count makes the user click
+    // to find out whether it matters.
+    var lead = null;
+    for (i = 0; i < found.length; i++)
+      if (found[i].sev === "warn") { lead = found[i]; break; }
+    if (!lead) lead = found[0];
+    setTip(btn, lead.title + (found.length > warns
+      ? " (and " + (found.length - warns) + " to note)" : "") +
+      ". Click to open Check my chart.");
+  }
   function syncFitSizeRow() {
     var fitBox = el("ps-fit-pane");
     if (!fitBox) return;
@@ -18716,11 +22181,9 @@
     el("ps-layout-orientation").addEventListener("change", function () {
       layApplyOrientation(this.value);
     });
-    ["x", "y", "w", "h"].forEach(function (prop) {
-      el("ps-ctx-l" + prop).addEventListener("change", function () {
-        layApplyInspector(prop, this.value);
-      });
-    });
+    // One registration per field. This block used to appear twice in
+    // immediate succession, so every typed X/Y/W/H ran layApplyInspector
+    // twice and pushed two history entries for one edit.
     ["x", "y", "w", "h"].forEach(function (prop) {
       el("ps-ctx-l" + prop).addEventListener("change", function () {
         layApplyInspector(prop, this.value);
@@ -18730,6 +22193,22 @@
     for (var i = 0; i < align.length; i++)
       align[i].addEventListener("click", function () {
         layAlign(this.getAttribute("data-ctx-align"));
+      });
+    var plotAlign = document.querySelectorAll("[data-ctx-plotalign]");
+    for (var pi = 0; pi < plotAlign.length; pi++)
+      plotAlign[pi].addEventListener("click", function () {
+        layAlignPlots(this.getAttribute("data-ctx-plotalign"));
+      });
+    var groupBtns = document.querySelectorAll("[data-ctx-group]");
+    for (var gi = 0; gi < groupBtns.length; gi++)
+      groupBtns[gi].addEventListener("click", function () {
+        if (this.getAttribute("data-ctx-group") === "on") layGroupSelected();
+        else layUngroupSelected();
+      });
+    var sameSize = document.querySelectorAll("[data-ctx-samesize]");
+    for (var si = 0; si < sameSize.length; si++)
+      sameSize[si].addEventListener("click", function () {
+        laySameSize(this.getAttribute("data-ctx-samesize"));
       });
   }
 
@@ -18748,11 +22227,12 @@
     PROJECT.pinboards = [];
     if (PROJECT.ui) PROJECT.ui.activeBoard = null;
     PROJECT.charts = [{ id: "c1", name: "Chart 1",
-      module: "plotbuilder", roles: {}, options: {} }];
+      module: "plotbuilder", roles: {}, options: {}, styleStamp: false }];
     PROJECT.activeChart = "c1";
     PROJECT.ui.lastChart = "c1";
     PROJECT.ui.lastLayout = null;
     layHistoryClear();
+    nbHistoryClear();
   }
   function adoptCSV(name, parsed) {
     PROJECT_CHOSEN = true;
@@ -18796,6 +22276,55 @@
     FILE_HANDLE = null;
     PROJECT.table = buildTable(parsed.name, parsed.header, parsed.rows,
                                parsed.types, parsed.levels);
+    // The sender's own per-column missing rules, which were being dropped, so
+    // a value they had declared missing arrived as ordinary data and was
+    // counted in the mean. Applied after the build and retyped once, because
+    // the typing pass is what turns a token into a null.
+    if (parsed.missingByCol && Object.keys(parsed.missingByCol).length) {
+      // A per-column list WINS WHOLE over the dataset one (t3-58a), so a
+      // list holding only the jamovi literals would quietly stop NA counting
+      // as missing in the ruled columns while their neighbours keep it. The
+      // by-hand offer seeds from whatever is in force for the column, and
+      // the file's rules join it the same way.
+      var mtb = {};
+      for (var mbk in parsed.missingByCol) {
+        if (!Object.prototype.hasOwnProperty.call(parsed.missingByCol, mbk))
+          continue;
+        var mbSeed = columnTokenList(PROJECT.table, mbk).slice();
+        for (var mbi = 0; mbi < parsed.missingByCol[mbk].length; mbi++) {
+          var mbv = String(parsed.missingByCol[mbk][mbi]);
+          if (mbSeed.indexOf(mbv) === -1) mbSeed.push(mbv);
+        }
+        mtb[mbk] = mbSeed;
+      }
+      PROJECT.table.missingTokensByCol = mtb;
+      retype(PROJECT.table);
+    }
+    // What the file derived. The values were always arriving intact; what was
+    // missing was any way to tell that they are DERIVED, so a filtered
+    // dataset opened at full size and a computed column went stale in
+    // silence. Kept on the table rather than announced once, because the
+    // grid badge, the variable panel and the Filter control all read it and
+    // a toast is gone in eight seconds.
+    PROJECT.table.importedFormulas =
+      (parsed.derivedByCol && typeof parsed.derivedByCol === "object")
+        ? parsed.derivedByCol : {};
+    PROJECT.table.importedFilters =
+      Array.isArray(parsed.filterColumns) ? parsed.filterColumns : [];
+    // Honour what the file declares. jamovi wrote these filters ON, and the
+    // sender's charts were of the kept rows, so opening at full size shows a
+    // different N from the one they published. This is an ordinary Pandion
+    // row filter pointing at the imported column, so it appears in the Filter
+    // chip, is editable, is removable in one click, and rides the project
+    // file like any other. Only for filters whose column holds the confirmed
+    // 0/1 result; anything else stays described and untouched.
+    var live = appliedJamoviFilters(PROJECT.table);
+    if (live.length) {
+      PROJECT.table.filters = live.map(function (f) {
+        return { col: f.name, op: "eq", value: "1" };
+      });
+      retype(PROJECT.table);
+    }
     resetDocumentsForNewData();
     PROJECT.ui.columnWidths = {};
     GRID_NATURAL_WIDTHS = {};
@@ -18812,12 +22341,58 @@
     // per-column type select and no correction surface. When a measure type
     // could not be mapped, say which columns were guessed and where to change
     // them, rather than reporting a clean success.
+    // Two separate things to disclose, and they are about different columns,
+    // so they are two sentences rather than one merged apology.
+    var mbc = parsed.missingByCol ? Object.keys(parsed.missingByCol) : [];
+    if (mbc.length)
+      showToast("Imported. " + mbc.length +
+        (mbc.length === 1 ? " variable brought its own missing-value label"
+                          : " variables brought their own missing-value labels") +
+        " from jamovi: " + mbc.map(function (c) {
+          return c + " (" + parsed.missingByCol[c].join(", ") + ")";
+        }).join("; ") + ".", true);
+    if (parsed.missingSkipped && parsed.missingSkipped.length)
+      showToast("Imported. " + parsed.missingSkipped.length +
+        (parsed.missingSkipped.length === 1 ? " missing-value rule was"
+                                            : " missing-value rules were") +
+        " a comparison rather than a single value, which this app cannot " +
+        "hold, so " + (parsed.missingSkipped.length === 1 ? "it is" : "they are") +
+        " NOT applied: " + parsed.missingSkipped.join(", ") +
+        ". Those values are being read as ordinary data.", true);
     if (parsed.unmapped && parsed.unmapped.length)
       showToast("Imported. " + parsed.unmapped.length +
         (parsed.unmapped.length === 1 ? " column had" : " columns had") +
         " a measure type Pandion does not recognise and was read as: " +
         parsed.unmapped.join(", ") +
         ". Change it in the Data workspace if that is wrong.", true);
+    // Said LAST on purpose. The stack keeps three and drops the oldest
+    // announcement, and of everything reported here these two are the ones
+    // whose loss leaves a reader believing something FALSE rather than
+    // merely uninformed, namely a row count that is not the sender's, and a
+    // column that looks measured and is not. Both have a durable home too,
+    // so the toast is the opening, not the whole disclosure.
+    var dbc = PROJECT.table.importedFormulas || {};
+    var dcols = Object.keys(dbc);
+    if (dcols.length) {
+      var one = dcols.length === 1;
+      showToast("Imported. " + dcols.length +
+        (one ? " variable was derived in jamovi and arrives as a snapshot of "
+             + "its values, so it does not follow its sources here. "
+             : " variables were derived in jamovi and arrive as a snapshot of "
+             + "their values, so they do not follow their sources here. ") +
+        dcols.map(function (c) {
+          var r = dbc[c];
+          // A recoded column is known by the transform's NAME in jamovi, so
+          // that is what a reader will recognise; the formula is the proof.
+          var what = (r.kind === "Recoded" && r.transform)
+            ? r.transform + (r.formula ? ", " + r.formula : "")
+            : (r.formula || r.transform || "");
+          return c + (what ? " (" + what + ")" : "");
+        }).join("; ") +
+        ". Each one is marked fx in the grid.", true);
+    }
+    var fnote = importedFilterNote(PROJECT.table);
+    if (fnote) showToast("Imported. " + fnote, true);
   }
   function isOmvFile(f) {
     return /\.omv$/i.test(f && f.name ? f.name : "");
@@ -18934,16 +22509,23 @@
   var IMPORT_PENDING = null;
   var IMPORT_SOURCE_FILE = null;
   var IMPORT_SOURCE_TEXT = "";
+  // Leading lines the user has agreed to drop. Zero for every ordinary file,
+  // and reset with the rest of the loader state so a second import never
+  // inherits the first one's answer.
+  var IMPORT_SKIP_ROWS = 0;
   var IMPORT_SOURCE_NAME = "pasted-data";
   function importDelimiterValue() {
     var value = el("ps-import-delimiter").value;
     return value === "tab" ? "\t" : value;
   }
   function renderImportPreview(name, text) {
+    // A different file is a different question; only a re-render of the SAME
+    // text keeps the answer the user gave.
+    if (String(text || "") !== IMPORT_SOURCE_TEXT) IMPORT_SKIP_ROWS = 0;
     IMPORT_SOURCE_TEXT = String(text || "");
     IMPORT_SOURCE_NAME = name || "pasted-data";
     var parsed = parseTableText(IMPORT_SOURCE_TEXT, importDelimiterValue(),
-      el("ps-import-header").value !== "no");
+      el("ps-import-header").value !== "no", IMPORT_SKIP_ROWS);
     var root = el("ps-import-preview");
     if (!parsed || !parsed.rows.length) {
       IMPORT_PENDING = null;
@@ -18992,8 +22574,25 @@
            "columns: ") + demoted.slice(0, 3).join("; ") +
         (demoted.length > 3 ? "; and " + (demoted.length - 3) + " more" : "") +
         "</span>";
-    var h = '<div class="ps-import-summary">' +
-      parsed.rows.length + " rows \u00d7 " + parsed.header.length + " columns" +
+    // Offered, never taken. Adopting a header the app merely guessed at would
+    // throw away a row of somebody's data on a hunch, so the row it found is
+    // quoted back and the user decides.
+    var guessHtml = "";
+    if (parsed.headerGuess) {
+      var gc = parsed.headerGuess.cells, shown = gc.slice(0, 4)
+        .map(function (c) { return escHtml(c); }).join(", ");
+      if (gc.length > 4) shown += " and " + (gc.length - 4) + " more";
+      guessHtml = '<div class="ps-import-guess" data-role="header-guess">' +
+        "<div>The variable names look like they are further down. Row " +
+        (parsed.headerGuess.index + 1) + " reads <strong>" + shown +
+        "</strong>, and the " + parsed.headerGuess.skipped +
+        (parsed.headerGuess.skipped === 1 ? " line" : " lines") +
+        " above it do not fill the table.</div>" +
+        '<button type="button" data-header-use>Use row ' +
+        (parsed.headerGuess.index + 1) + " as the variable names</button></div>";
+    }
+    var h = guessHtml + '<div class="ps-import-summary">' +
+      shapeText(parsed.rows.length, parsed.header.length, "\u00d7") +
       notes + "</div><div class=\"ps-import-table-wrap\">" +
       '<table class="ps-import-table"><thead><tr>';
     for (c = 0; c < parsed.header.length; c++) {
@@ -19130,6 +22729,7 @@
     IMPORT_PENDING = null;
     IMPORT_SOURCE_FILE = null;
     IMPORT_SOURCE_TEXT = "";
+    IMPORT_SKIP_ROWS = 0;
     IMPORT_SOURCE_NAME = "pasted-data";
     el("ps-import-preview").innerHTML = "";
     el("ps-import-preview").style.display = "none";
@@ -19211,6 +22811,14 @@
           adoptCSV(pending.name, pending.parsed);
         });
       else adoptCSV(pending.name, pending.parsed);
+    });
+    el("ps-import-preview").addEventListener("click", function (e) {
+      var use = e.target.closest ? e.target.closest("[data-header-use]") : null;
+      if (!use || !IMPORT_PENDING) return;
+      var g = IMPORT_PENDING.parsed.headerGuess;
+      if (!g) return;
+      IMPORT_SKIP_ROWS = g.skipped;
+      renderImportPreview(IMPORT_SOURCE_NAME, IMPORT_SOURCE_TEXT);
     });
     el("ps-import-preview").addEventListener("change", function (e) {
       var select = e.target.closest ? e.target.closest("[data-import-type]") : null;
@@ -19394,7 +23002,9 @@
     // actually be a loss.
     if (!projectHasWork()) return null;
     try {
-      return { json: JSON.stringify(projectSnapshot()),
+      var snap = projectSnapshot();
+      return { json: JSON.stringify(snap),
+               id: snap && snap.id,
                name: PROJECT.name || "the previous project",
                charts: PROJECT.charts.length };
     } catch (e) { return null; }
@@ -19402,8 +23012,24 @@
   function offerReplacedProjectBack(prev, whatOpened) {
     if (!prev) return;
     var noun = prev.charts === 1 ? " document" : " documents";
+    // The toast expires and the toolbar Undo does not cover this, so it read
+    // as the only way back. There usually IS a second one, because the
+    // replaced project was autosaved before it was replaced and is sitting in
+    // Recent projects, and saying so turns a six second window into a durable
+    // route. Claimed only when it is actually true, since a project the
+    // recents ladder could not carry has no entry to go back to.
+    var inRecents = false;
+    try {
+      inRecents = recentProjects().some(function (r) {
+        return r.id === prev.id && !!r.snapshot;
+      });
+    } catch (e) {}
     showUndoToast("Opened " + whatOpened + ". " + prev.name + " (" +
-                  prev.charts + noun + ") was not saved to a file.",
+                  prev.charts + noun + ") was not saved to a file." +
+                  (inRecents
+                    ? " It is in Recent projects on the start screen if you " +
+                      "want it later."
+                    : ""),
       function () {
         var snap = null;
         try { snap = JSON.parse(prev.json); } catch (e) { snap = null; }
@@ -19558,10 +23184,20 @@
     continueBtn.style.display = BOOT_RESTORED ? "flex" : "none";
     if (BOOT_RESTORED) {
       var age = BOOT_SAVED_AT ? recentTimeLabel(BOOT_SAVED_AT) : "";
+      // A snapshot whose own timestamp is recent can still be BEHIND the work
+      // that was on screen, because the autosave that would have replaced it
+      // failed. Then "saved just now" was true of the snapshot and false of
+      // everything the user had done since, which is the reading that matters.
+      var stale = false;
+      try { stale = window.localStorage.getItem(PS_STALE_KEY) === "1"; }
+      catch (e2) {}
       el("ps-welcome-continue-meta").textContent =
         (PROJECT.name || "Untitled project") + " \u00b7 " +
         (PROJECT.table ? nRows(PROJECT.table) + " rows" : "local recovery") +
-        (age ? " \u00b7 saved " + age : "");
+        (stale
+          ? " \u00b7 from before the browser ran out of room, so later " +
+            "changes are not in it"
+          : (age ? " \u00b7 saved " + age : ""));
     }
     var root = el("ps-recent-list"), list = recentProjects();
     root.innerHTML = "";
@@ -19577,7 +23213,9 @@
         b.setAttribute("data-recent-id", item.id);
         b.appendChild(mkEl("span", "ps-recent-dot", "\u25a5"));
         b.appendChild(mkEl("span", "ps-recent-name", item.name));
-        var meta = item.rows + " rows \u00b7 " + recentTimeLabel(item.updatedAt);
+        var meta = item.rows +
+          (item.rows === 1 ? " row \u00b7 " : " rows \u00b7 ") +
+          recentTimeLabel(item.updatedAt);
         if (!item.snapshot)
           meta += " \u00b7 " + (item.hasFile ? "opens from its file"
                                             : "too large to keep a copy");
@@ -19916,6 +23554,21 @@
     closeShellDialog("ps-preferences");
     showToast("Preferences applied");
   }
+  // Cmd/Ctrl+D belongs to whichever duplicate is in front. A layout with
+  // something selected duplicates the SELECTION, by the same routing rule
+  // that gives Undo to the layout while a figure is on screen, so the menu
+  // has to stop advertising the key beside Duplicate document for as long as
+  // that is true. The item menu on the canvas carries it instead, and says
+  // which duplicate it means.
+  function commandShortcut(item) {
+    // The workspace test matches the handler, which now stands down outside
+    // the layout workspace. In Data or on a chart the key duplicates the
+    // DOCUMENT again, so the menu goes back to advertising it there.
+    if (item.command === "duplicate-document" &&
+        appWorkspace() === "layout" && isLayoutTab(activeChart()) &&
+        laySelectedIds().length) return "";
+    return item.shortcut || "";
+  }
   // ---- punch list t3-55: the shortcuts sheet ----
   // Thirteen hand-written rows that had already drifted: no Cmd+N, no
   // Cmd+comma, no Cmd+F, none of the level-reordering or formula keys, one row
@@ -19928,12 +23581,20 @@
   // listeners with no single declaration to read - but they are grouped by
   // where they apply, which is the part that makes a sheet usable.
   function shortcutMenuRows() {
-    var order = ["file", "edit", "view", "insert", "help"], rows = [], seen = {};
+    // "data" belongs here as much as any other menu. Leaving it out is what
+    // kept Cmd/Ctrl+E, the app's own high-frequency exclusion chord, out of
+    // the sheet while the Data menu had been declaring it all along.
+    var order = ["file", "edit", "data", "view", "insert", "help"],
+      rows = [], seen = {};
     for (var g = 0; g < order.length; g++) {
       var defs = APP_MENU_DEFS[order[g]] || [];
       for (var i = 0; i < defs.length; i++) {
         var item = defs[i];
         if (item === "separator" || !item.shortcut || seen[item.command]) continue;
+        // The sheet is a reference rather than a live menu, so it prints the
+        // key unconditionally. The Layouts section carries its own
+        // Duplicate-the-selection row, and each row is true in the workspace
+        // its section names.
         seen[item.command] = 1;
         rows.push([commandLabel(item).replace(/\u2026/g, ""),
                    item.shortcut.replace(/\+/g, " + ").replace(/ {2,}/g, " ")]);
@@ -19977,6 +23638,24 @@
           ["Find in the data", "Cmd/Ctrl + F"],
           ["Clear the selection", "Escape"]
         ] },
+      { title: "Rows, columns and variables",
+        // The four holes the sheet carried while documenting thirteen grid
+        // keys. None of these has an accelerator of its own, and saying so is
+        // the honest half - each is either a Data menu command or a control in
+        // the variable properties panel, and both have keyboard routes worth
+        // writing down. Every key here was driven before it was written.
+        note: "Inserting, duplicating, deleting, sorting and hiding a column " +
+              "are all Data menu commands, so the first two keys reach every " +
+              "one of them. Measure type, levels and missing codes live in " +
+              "the variable properties panel. Inserting or deleting a row in " +
+              "the middle of the data is on the row number's own menu, and " +
+              "Cmd/Ctrl+E is listed under Commands above.",
+        rows: [
+          ["Open the Data menu", "F10, then D, then Enter"],
+          ["Find a Data command by name", "Cmd/Ctrl + Shift + P"],
+          ["Open the variable properties panel", "Second Tab stop"],
+          ["Add a row at the bottom", "Tab to Add row in the data toolbar"]
+        ] },
       { title: "Variables and formulas",
         rows: [
           ["Reorder a level (in the variable panel)", "Alt + Up / Down"],
@@ -20001,6 +23680,7 @@
         rows: [
           ["Move through items", "Arrow keys / Home / End"],
           ["Extend or reduce the selection", "Shift + arrows / Space"],
+          ["Group / ungroup", "Cmd/Ctrl + G / Shift + G"],
           ["Nudge the selection", "Alt + arrows"],
           ["Nudge by 10", "Alt + Shift + arrows"],
           ["Free resize a chart or image", "Ctrl/Cmd + Alt + arrows"],
@@ -20011,6 +23691,7 @@
           ["Move forward or backward", "Alt + Page Up / Page Down"],
           ["Open item commands", "Shift + F10"],
           ["Duplicate the selection", "Cmd/Ctrl + D"],
+          ["Drag off a copy", "Alt + drag"],
           ["Delete the selection", "Delete"],
           ["Cancel a drag, then clear the selection", "Escape"]
         ] },
@@ -20124,8 +23805,7 @@
       ["Render", (LAST_RENDER_MS < 10 ? LAST_RENDER_MS.toFixed(1)
         : Math.round(LAST_RENDER_MS)) + " ms"],
       ["Payload build", measurePayloadMs() + " ms"],
-      ["Data", t ? nRows(t).toLocaleString() + " rows x " + t.order.length +
-        " columns" : "none"],
+      ["Data", t ? shapeText(nRows(t), t.order.length, "x", true) : "none"],
       ["Analysis", doc && !isLayoutTab(doc) && MODULES[doc.module]
         ? MODULES[doc.module].label : "-"],
       ["Plot size", (function () {
@@ -20276,8 +23956,7 @@
         : window.GraphBuilder2 ? "loaded, unstamped" : "NOT LOADED"],
       ["Payload channels", channelAuditText()],
       ["Project", PROJECT.name || "Untitled project"],
-      ["Dataset", (t ? nRows(t) : 0) + " rows \u00d7 " +
-        (t ? t.order.length : 0) + " columns"],
+      ["Dataset", shapeText(t ? nRows(t) : 0, t ? t.order.length : 0)],
       ["Documents", String(PROJECT.charts.length)],
       ["Snapshot size", formatBytes(LAST_PROJECT_BYTES ||
         JSON.stringify(projectSnapshot()).length)],
@@ -20610,7 +24289,32 @@
   function undoScope() {
     if (appWorkspace() === "data") return "data";
     if (appWorkspace() === "layout" && isLayoutTab(activeChart())) return "layout";
+    if (appWorkspace() === "pinboard") return "notebook";
     return "chart";
+  }
+  // Cmd/Ctrl+F, resolved by workspace - the undoScope precedent. The key
+  // used to call gridMenuFind() unconditionally, and that function hops to
+  // the Data workspace itself, so pressing Find while looking at a chart
+  // threw the chart away and opened the data grid. Meanwhile the ENGINE
+  // advertises the same chord for its own Find a setting, in its shortcuts
+  // sheet and on its toolbar button, so the one advertised route to a
+  // chart control never reached it.
+  function findScope() {
+    if (appWorkspace() !== "chart") return "data";
+    var host = hostEl();
+    // A chart tab with no variables has no engine toolbar to search.
+    return (host && host.querySelector("svg")) ? "chart" : "data";
+  }
+  function engineFindBtn() {
+    var host = hostEl();
+    return host ? host.querySelector('button[aria-label="Find a setting"]') : null;
+  }
+  function runFind() {
+    if (findScope() === "chart") {
+      var b = engineFindBtn();
+      if (b) { b.click(); return; }
+    }
+    gridMenuFind();
   }
   function engineHistoryBtn(which) {
     var b = document.querySelector('.graphbuilder2-host button[aria-label="' +
@@ -20618,6 +24322,11 @@
     return b && !b.disabled ? b : null;
   }
   function commandLabel(item) {
+    // Same rule as Undo below: one key, one menu row, and the row must
+    // name whichever thing the key will actually do here.
+    if (item && item.command === "find-data")
+      return findScope() === "chart"
+        ? "Find a chart setting\u2026" : "Find in data\u2026";
     // Punch list 4: an online destination is named in the label, so the click
     // is informed rather than surprising.
     if (item && item.command === "user-guide" && userGuideTarget().online)
@@ -20645,6 +24354,11 @@
       var named = dataStepLabel(back ? DATA_UNDO : DATA_REDO);
       return (back ? "Undo " : "Redo ") + (named || "data change");
     }
+    // The Notebook names the step, like the data workspace does: "Undo the
+    // deleted page" says what the key will do, where a fixed noun does not.
+    if (s === "notebook")
+      return (back ? "Undo " : "Redo ") +
+        (nbHistoryLabel(back) || "Notebook change");
     return (back ? "Undo " : "Redo ") +
       (s === "layout" ? "layout change" : "chart styling");
   }
@@ -20857,6 +24571,7 @@
         var h = layHist();
         return !!h && (back ? h.undo : h.redo).length > 0;
       }
+      if (scope === "notebook") return (back ? NB_UNDO : NB_REDO).length > 0;
       return !!engineHistoryBtn(back ? "undo" : "redo");
     }
     if (command.indexOf("goto-document:") === 0)
@@ -20901,8 +24616,18 @@
     if (command === "paste-cells")
       return (appWorkspace() === "data" && !!gridSelectionRect()) ||
         (isLayoutTab(activeChart()) && layHasClipboard());
-    if (command === "select-all-cells" || command === "find-data" ||
-        command === "replace-data")
+    if (command === "select-all-cells")
+      // The copy/cut/paste rule one branch up: an Edit row that means
+      // something in two workspaces is enabled per context and routed per
+      // workspace. It was enabled anywhere a table existed and ran the grid
+      // select-all, which early-returns off the Data workspace, so in a
+      // layout it advertised Cmd/Ctrl+A, did nothing when clicked, and the
+      // key did something else.
+      return appWorkspace() === "layout"
+        ? (isLayoutTab(activeChart()) && layItems().length > 0)
+        : appWorkspace() === "data" &&
+          !!(PROJECT.table && PROJECT.table.order.length);
+    if (command === "find-data" || command === "replace-data")
       return !!(PROJECT.table && PROJECT.table.order.length);
     if (command === "copy-image")
       return appWorkspace() !== "data" && !!workspaceDocument(appWorkspace()) &&
@@ -20939,7 +24664,8 @@
     if (command === "undo" || command === "redo") {
       var scope = undoScope();
       var what = scope === "data" ? "data changes" :
-        scope === "layout" ? "layout changes" : "chart style changes";
+        scope === "layout" ? "layout changes" :
+        scope === "notebook" ? "Notebook changes" : "chart style changes";
       return "No " + what + " to " + command;
     }
     if (command === "data-exclude" || command === "data-chart-sel")
@@ -21009,6 +24735,7 @@
       var back = command === "undo", scope = undoScope();
       if (scope === "data") { if (back) dataUndo(); else dataRedo(); }
       else if (scope === "layout") { if (back) layUndo(); else layRedo(); }
+      else if (scope === "notebook") { if (back) nbUndo(); else nbRedo(); }
       else {
         var eb = engineHistoryBtn(back ? "undo" : "redo");
         if (eb) eb.click();
@@ -21059,8 +24786,12 @@
       if (isLayoutTab(activeChart()) && layHasClipboard()) layPasteClipboard();
       else gridMenuPaste();
     }
-    else if (command === "select-all-cells") gridMenuSelectAll();
-    else if (command === "find-data") gridMenuFind();
+    else if (command === "select-all-cells") {
+      if (appWorkspace() === "layout" && isLayoutTab(activeChart()))
+        laySelectAllItems();
+      else gridMenuSelectAll();
+    }
+    else if (command === "find-data") runFind();
     else if (command === "replace-data") gridMenuReplace();
     else if (command === "help-chooser") {
       // On an undrawn chart the engine panel cannot exist, and "which
@@ -21257,7 +24988,7 @@
         var label = item.workspace === appWorkspace()
           ? "\u2713  " + commandLabel(item) : commandLabel(item);
         b.appendChild(mkEl("span", "", label));
-        b.appendChild(mkEl("span", "ps-menu-shortcut", item.shortcut || ""));
+        b.appendChild(mkEl("span", "ps-menu-shortcut", commandShortcut(item)));
         b.disabled = !commandEnabled(item.command) ||
           (item.layoutOnly && !isLayoutTab(activeChart()));
         if (b.disabled) setTip(b, commandDisabledReason(item.command) ||
@@ -21337,6 +25068,12 @@
       }
       (function (item) {
         var b = mkEl("button", "", item.label);
+        // Menu rows carry a shortcut when the key belongs to THIS command
+        // rather than to the document-level one of the same name. Without
+        // rendering it the property was dead data and the key was advertised
+        // in no menu at all at the moment the Edit menu withdrew it.
+        if (item.shortcut)
+          b.appendChild(mkEl("span", "ps-menu-shortcut", item.shortcut));
         b.type = "button";
         // item.action: a direct callback for dynamic targets (the group
         // menus), where a registered command name would be ceremony.
@@ -21498,7 +25235,7 @@
             item.command === "command-palette") continue;
         seen[item.command] = 1;
         out.push({ label: commandLabel(item).replace(/\u2026/g, ""),
-                   group: groups[gi][0], shortcut: item.shortcut || "",
+                   group: groups[gi][0], shortcut: commandShortcut(item),
                    command: item.command, layoutOnly: item.layoutOnly });
       }
     }
@@ -22060,7 +25797,11 @@
         var duplicateDoc = appWorkspace() === "data" ? activeChart() :
           workspaceDocument(appWorkspace());
         if (!duplicateDoc) return;
-        if (isLayoutTab(duplicateDoc) && laySelectedIds().length) return;
+        // Defer only where the layout handler will actually take the key.
+        // Outside the layout workspace that handler stands down, so a
+        // deferral here would leave the key doing nothing at all.
+        if (appWorkspace() === "layout" && isLayoutTab(duplicateDoc) &&
+            laySelectedIds().length) return;
         e.preventDefault(); duplicateDocument(duplicateDoc.id);
       }
     });
@@ -22120,6 +25861,12 @@
       render();
     });
     el("ps-save").addEventListener("click", saveProjectFile);
+    // The receipt IS the way in: it names what it found and opens the
+    // panel that explains it. Same route the Help menu takes, so there is
+    // one path to the panel, not two.
+    el("ps-status-check").addEventListener("click", function () {
+      openEngineHelp("graphLint");
+    });
     // Cmd/Ctrl+S saves the project (window CAPTURE so it beats the
     // browser's own save-page dialog everywhere, including inputs).
     window.addEventListener("keydown", function (e) {
@@ -22139,7 +25886,7 @@
       // opened instead, uselessly searching the page chrome. Bound with
       // the find popup (Torry, Jul 31 2026); gridMenuFind hops to the
       // Data workspace itself, so it is safe app-wide.
-      else if (k === "f" && !e.shiftKey) gridMenuFind();
+      else if (k === "f" && !e.shiftKey) runFind();
     }, true);
     // t1-14 (second half). Cmd/Ctrl+W is unbound and, with no beforeunload,
     // ended the session silently. Work normally survives in the autosave and
@@ -22341,7 +26088,8 @@
           { label: "Add chart\u2026", command: "layout-add-chart" },
           { label: "Add text", command: "layout-add-text" },
           "separator",
-          { label: "Duplicate", command: "duplicate-selection" },
+          { label: "Duplicate", command: "duplicate-selection",
+            shortcut: "Cmd/Ctrl+D" },
           { label: "Delete", command: "delete-selection" },
           "separator",
           { label: "Export\u2026", command: "export" }
@@ -22363,6 +26111,19 @@
               action: function () {
                 showPinSendMenu(e.clientX, e.clientY, ctxPinId);
               } },
+            { label: "Move to section\u2026", key: "pin-move",
+              action: function () {
+                showPinMoveMenu(e.clientX, e.clientY, ctxPinId);
+              } },
+            { label: "Keep an updated copy", key: "pin-update",
+              disabled: !(function () {
+                var hit = allPins().filter(function (en) {
+                  return en.pin.id === ctxPinId; })[0];
+                return hit && pinCanUpdate(hit.pin);
+              })(),
+              tip: "Available when this page's source chart has changed " +
+                   "since it was kept",
+              action: function () { pinKeepUpdatedCopy(ctxPinId); } },
             "separator",
             { label: "Export this page\u2026", key: "pin-export-page",
               action: function () {
@@ -22597,6 +26358,11 @@
     resizeLayoutPanel: layResizeDimensions,
     selectLayoutItems: function (ids) { laySetSelection(ids); renderLayout(); },
     layoutSelection: laySelectedIds,
+    // The layoutHistoryDepth idiom: what the Notebook's Cmd+Z would do.
+    notebookHistory: function () {
+      return { undo: NB_UNDO.map(function (s) { return s.label; }),
+               redo: NB_REDO.map(function (s) { return s.label; }) };
+    },
     layoutHistoryDepth: function () {
       var n = 0;
       for (var k in LAYOUT_HIST)

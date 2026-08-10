@@ -456,6 +456,22 @@ by an automated check, so they run as written:</p>
 <tr><td>Round for display</td>
 <td><code data-guide-formula>ROUND(score / 10)</code></td>
 <td><code>FLOOR</code> and <code>CEILING</code> round down / up.</td></tr>
+<tr><td>Fill a gap from another column</td>
+<td><code data-guide-formula>COALESCE(post, pre)</code></td>
+<td>The first value that is there. Add more fallbacks as you like, and a
+number last for a value that can never itself be missing.</td></tr>
+<tr><td>Flag the rows with no value</td>
+<td><code data-guide-formula>ISMISSING(post)</code></td>
+<td>1 where the cell is empty, 0 where it is not. Everything else in the
+language goes missing when its input does, so this is the way to ask.</td></tr>
+<tr><td>Substitute for a missing value</td>
+<td><code data-guide-formula>IF(ISMISSING(post), 0, post)</code></td>
+<td>Say why in your write-up. Treating an absence as a zero is a claim.</td></tr>
+<tr><td>Tidy up messy category labels</td>
+<td><code data-guide-formula>IF(CONTAINS(LOWER(TRIM(arm)), "control"), "Control", "Treatment")</code></td>
+<td>Folds "Control", "control" and "CONTROL" into one level, ready for
+Group By. <code>LOWER</code> and <code>UPPER</code> fold the case,
+<code>TRIM</code> tidies the spaces, <code>LEN</code> counts characters.</td></tr>
 <tr><td>Names with spaces</td>
 <td><code data-guide-formula>`first quiz` * 2</code></td>
 <td>Backticks around the name, exactly as typed in the header.</td></tr>
@@ -1021,7 +1037,8 @@ control, is identical in both.</div>
 <div class="check"><span class="sev warn">WARN</span><b>Colors have a key</b>When color carries meaning, a legend or direct labels must decode it.</div>
 <div class="check"><span class="sev tip">TIP</span><b>No hidden data</b>Parts hidden with the eye tool should be shown or disclosed in the figure note; states the module's hidden-data rule.</div>
 <div class="check"><span class="sev warn">WARN</span><b>Distinguishable colors</b>Two series' colors are identical or nearly so; lists the pairs.</div>
-<div class="check"><span class="sev tip">TIP</span><b>Colorblind safety</b>Color pairs are re-tested under simulated red-green color blindness; suggests the colorblind-safe palettes or patterns.</div>
+<div class="check"><span class="sev tip">TIP</span><b>Red-green color safety</b>Color pairs are re-tested under simulated protanopia and deuteranopia; suggests the colorblind-safe palettes or patterns.</div>
+<div class="check"><span class="sev tip">TIP</span><b>Black-and-white legibility</b>Whether the series stay distinguishable with the color removed, as in a photocopy. Reported as a note rather than a fault, because past about six series it often cannot be solved with color at all.</div>
 <div class="check"><span class="sev tip">TIP</span><b>Error bars explained</b>If you wrote a figure note, it should say whether error bars are SE, SD, or a CI (a chart with no note is never nagged).</div>
 <div class="check"><span class="sev tip">TIP</span><b>P-value correction in the note</b>If a correction adjusted a displayed bracket, the note should name it.</div>
 <div class="check"><span class="sev tip">TIP</span><b>Asterisk key in the note</b>Star-labelled brackets should carry the key "* p &lt; .05, ** p &lt; .01, *** p &lt; .001."</div>
