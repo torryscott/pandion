@@ -204,7 +204,15 @@ await page.waitForTimeout(300);
 ok(await page.evaluate(() => {
     const b = document.querySelector(
         '#ps-contextmenu [data-context-command="duplicate-selection"]');
-    return !!b && b.textContent === 'Duplicate';
+    if (!b) return false;
+    // The LABEL, excluding the shortcut span the row carries since the
+    // Cmd/Ctrl+D ownership work. The contract here is the NAMING (item
+    // action says "Duplicate", the tab menu says "Duplicate document");
+    // the key hint is chrome, not part of the name.
+    const c = b.cloneNode(true);
+    const sp = c.querySelector('.ps-menu-shortcut');
+    if (sp) sp.remove();
+    return c.textContent.trim() === 'Duplicate';
 }), 'the item action names its target from the right-click (the rail ' +
     'cluster is gone, Aug 5 2026)');
 await page.keyboard.press('Escape');
