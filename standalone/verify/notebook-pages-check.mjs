@@ -391,7 +391,11 @@ console.log('case 10: a section folds its page list, and keeps stay folded');
 // into a folded section can never look like nothing happened.
 const foldState = () => page.evaluate(() => {
     const rows = [...document.querySelectorAll('[data-project-board-id]')];
-    const listed = rows.find(r => r.querySelector('.ps-project-gchev'));
+    // The section that LISTS its pages is the active one. It carries no
+    // chevron: every section wears its notebook glyph and the row itself
+    // is the toggle, so aria-expanded and the count badge are the state.
+    const listed = rows.find(r => r.hasAttribute('aria-expanded')) ||
+        rows.find(r => r.classList.contains('ps-project-active'));
     return {
         pages: document.querySelectorAll('[data-project-pin-id]').length,
         aria: listed ? listed.getAttribute('aria-expanded') : null,
@@ -523,6 +527,64 @@ ok((await modelOrder()).join() === m11.join() &&
    (await railOrder()).join() === m11.join(),
    'one undo restores the order on both surfaces, because the rail drag ' +
    'commits through the notebook drag\'s own function');
+
+console.log('case 12: clicking a section shows its contents, wherever you are');
+// Every section wears its own notebook glyph and the ROW is the toggle.
+// Arriving at a section that stayed shut would answer the click with
+// nothing, so a click on any OTHER section goes there and opens it, even
+// when that section was left folded; only the one you are already reading
+// folds instead, because the click has nowhere to take you.
+await page.evaluate(() => window.PS_SHELL.setWorkspace('pinboard'));
+await page.waitForTimeout(700);
+const p12 = () => page.evaluate(() => {
+    const rows = [...document.querySelectorAll('[data-project-board-id]')];
+    return {
+        boards: rows.map(r => r.getAttribute('data-project-board-id')),
+        icons: rows.every(r => !!r.querySelector('.ps-nav-icon svg')),
+        chevrons: rows.some(r => !!r.querySelector('.ps-project-gchev')),
+        active: (rows.find(r => r.classList.contains('ps-project-active')) ||
+            {}).getAttribute ? rows.find(r =>
+                r.classList.contains('ps-project-active'))
+                .getAttribute('data-project-board-id') : null,
+        pages: document.querySelectorAll('[data-project-pin-id]').length,
+        collapsed: Object.keys(
+            (window.PS_SHELL.project.ui || {}).collapsedBoards || {})
+    };
+});
+const p12a = await p12();
+ok(p12a.icons, 'every section row carries its notebook glyph');
+ok(!p12a.chevrons, 'and none carries a chevron, because the row is the toggle');
+// fold the one on screen, then leave for another section
+await page.evaluate(() => {
+    document.querySelector('[data-project-board-id].ps-project-active').click();
+});
+await page.waitForTimeout(500);
+ok((await p12()).pages === 0, 'the section you are reading folds on a click');
+const p12mid = await p12();
+const p12other = p12mid.boards.filter(b => b !== p12mid.active)[0];
+if (p12other) {
+    await page.evaluate(id => {
+        document.querySelector(
+            '[data-project-board-id="' + id + '"]').click();
+    }, p12other);
+    await page.waitForTimeout(700);
+    const p12b = await p12();
+    ok(p12b.active === p12other,
+       'clicking another section goes to it (' + p12b.active + ')');
+    // and now come BACK to the one that was left folded
+    const p12first = p12a.active;
+    await page.evaluate(id => {
+        document.querySelector(
+            '[data-project-board-id="' + id + '"]').click();
+    }, p12first);
+    await page.waitForTimeout(700);
+    const p12c = await p12();
+    ok(p12c.active === p12first && p12c.pages > 0,
+       'and returning to the folded one OPENS it rather than arriving at ' +
+       'nothing (' + p12c.pages + ' pages)');
+    ok(p12c.collapsed.indexOf(p12first) === -1,
+       'the fold state is cleared by that visit, not merely overridden');
+}
 
 ok(errors.length === 0, 'no page errors (' + errors.slice(0, 2).join(' | ') + ')');
 console.log('notebook-pages-check: all cases passed');

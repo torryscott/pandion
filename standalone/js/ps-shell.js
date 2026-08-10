@@ -20946,6 +20946,10 @@
       h.setAttribute("aria-expanded", collapsed ? "false" : "true");
       h.appendChild(mkEl("span", "ps-project-gchev",
         collapsed ? "\u25b8" : "\u25be"));
+      // Chevron then name, NO glyph. The settled rail rule (Torry's three
+      // rounds, Aug 10 2026): FOLD HEADERS ARE ANONYMOUS, and identity
+      // glyphs live on the leaf rows, charts wearing their module glyphs
+      // and pages the notebook symbol.
       h.appendChild(mkEl("span", "ps-project-gname", name));
       if (collapsed)
         h.appendChild(mkEl("span", "ps-project-gcount", String(memberCount)));
@@ -21047,34 +21051,35 @@
         row.setAttribute("data-project-board-id", b.id);
         setTip(row, b.name + " - " + b.pins.length +
           (b.pins.length === 1 ? " page" : " pages") +
-          (isActive ? (folded ? " \u00b7 click to show them"
-                              : " \u00b7 click to collapse them") : ""));
-        // The ACTIVE section is the only one that lists pages, so it is the
-        // only one with anything to disclose. It reads like the chart
-        // groups: disclosure FIRST in the leading column, then the
-        // notebook icon, then the name (Torry, Aug 10 2026, matching the
-        // group headers after their redesign), with the count badge while
-        // folded. A click on it TOGGLES rather than navigating, because
-        // you are already there.
-        if (listed) {
-          row.setAttribute("aria-expanded", folded ? "false" : "true");
-          row.appendChild(mkEl("span", "ps-project-gchev",
-            folded ? "\u25b8" : "\u25be"));
-        }
+          (isActive && !folded ? " \u00b7 click to collapse them"
+                               : " \u00b7 click to show them"));
+        // EVERY section wears its own notebook glyph, and the ROW is the
+        // disclosure: no chevron, because the click already tells the whole
+        // story (Torry's settled round, Aug 10 2026, returning to the
+        // original look). Click a section and it shows its contents; click
+        // the one you are already reading and it hides them. The count
+        // badge is what says a folded section still holds pages.
         var ico = mkEl("span", "ps-nav-icon");
         ico.innerHTML = RAIL_ICON_NOTEBOOK;
         row.appendChild(ico);
         row.appendChild(mkEl("span", "", b.name));
+        if (listed) row.setAttribute("aria-expanded", folded ? "false" : "true");
         if (listed && folded)
           row.appendChild(mkEl("span", "ps-project-gcount",
             String(b.pins.length)));
         row.addEventListener("click", function () {
+          var folds = collapsedBoards();
+          // The section you are already reading, in the Notebook: the click
+          // has nowhere to take you, so it folds and unfolds instead.
           if (appWorkspace() === "pinboard" && activePinBoard().id === b.id) {
-            var folds = collapsedBoards();
             if (folds[b.id]) delete folds[b.id]; else folds[b.id] = 1;
             persist(false); syncProjectNavigator();
             return;
           }
+          // Any other section: go to it AND show its contents, because
+          // arriving at a section that stayed shut would answer the click
+          // with nothing.
+          delete folds[b.id];
           narrowCloseAfterNavigation();
           (PROJECT.ui = PROJECT.ui || {}).activeBoard = b.id;
           persist(false);
@@ -21125,8 +21130,10 @@
           prow.type = "button";
           prow.setAttribute("data-project-pin-id", pin.id);
           var st = pinSourceStatus(pin);
-          var num = mkEl("span", "ps-pinrow-num", String(idx + 1));
-          prow.appendChild(num);
+          // A plain number. The notebook glyph belongs to the SECTION
+          // rows, and a page row carrying one too said the same thing
+          // twice (Torry, Aug 10 2026).
+          prow.appendChild(mkEl("span", "ps-pinrow-num", String(idx + 1)));
           prow.appendChild(mkEl("span", "ps-pinrow-name",
             pinPageLabel(pin, idx)));
           if (st.state === "changed" || st.state === "gone") {
