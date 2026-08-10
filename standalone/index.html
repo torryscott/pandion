@@ -2441,11 +2441,18 @@
      user's own. */
   .ps-project-ghead {
     -webkit-appearance: none; appearance: none; display: flex;
-    align-items: center; gap: 8px; width: 100%; border: 0;
+    align-items: center; gap: 8px; width: 100%; box-sizing: border-box;
     border-radius: var(--ps-r-md); min-height: 28px;
     background: transparent; font: inherit; font-size: 12px;
-    font-weight: 600; color: var(--ps-ink-3); padding: 4px 8px;
+    font-weight: 600; color: var(--ps-ink-3);
     cursor: pointer; text-align: left;
+    /* The row box model, to the pixel, so the group's glyph starts on the
+       same vertical as a section's: .ps-project-item carries a 1px
+       transparent border and a 12px left pad, and a border of 0 with an
+       8px pad put this header 5px to the left of every row beside it.
+       chart-groups-check measures the two icon edges against each other,
+       so the alignment cannot drift back. */
+    border: 1px solid transparent; padding: 4px 8px 4px 12px;
   }
   .ps-project-ghead:hover { color: var(--ps-accent-ink); background: var(--ps-s3); }
   /* 10px, not smaller: tokens-check holds the app's type floor there. */

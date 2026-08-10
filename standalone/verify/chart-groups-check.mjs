@@ -428,6 +428,77 @@ ok(p9s3.groups.filter(g => g !== '').length === 3 &&
    'an edge drop inside a group joins it AT that position (' +
    p9s3.array.join(',') + ' with ' + p9s3.groups.join(',') + ')');
 
+console.log('case 10: one container rule for the whole rail');
+// A chart group and a Notebook section are the same kind of thing, so
+// they read the same way: no chevron, an identity glyph, and the ROW is
+// the toggle. The group wears the chart mark with a second chart behind
+// it, the section wears its notebook, so they rhyme without being the
+// same picture. A chevron on the group and a glyph on the section were
+// each tried on the way here and each read as clutter.
+const p10 = () => page.evaluate(() => {
+    const head = document.querySelector('#ps-project-nav .ps-project-ghead');
+    const board = document.querySelector(
+        '#ps-project-nav [data-project-board-id]');
+    const svg = el => {
+        const s = el && el.querySelector('.ps-nav-icon svg');
+        return s ? s.innerHTML.replace(/\s+/g, ' ').trim() : null;
+    };
+    return {
+        headChevron: !!(head && head.querySelector('.ps-project-gchev')),
+        headGlyph: svg(head), boardGlyph: svg(board),
+        headAria: head ? head.getAttribute('aria-expanded') : null,
+        members: document.querySelectorAll(
+            '.ps-project-item-grouped[data-project-chart-id]').length
+    };
+});
+const p10a = await p10();
+ok(!p10a.headChevron,
+   'the group header carries no chevron, like the section rows');
+ok(p10a.headGlyph && p10a.boardGlyph,
+   'both containers carry an identity glyph');
+ok(p10a.headGlyph !== p10a.boardGlyph,
+   'and the two glyphs differ, so a group is not mistaken for a section');
+ok(/rect|path/.test(p10a.headGlyph) && p10a.headGlyph.indexOf('opacity') !== -1,
+   'the group glyph is the chart mark with a second chart behind it');
+ok(p10a.members > 0 && p10a.headAria === 'true',
+   'the group is open and listing its charts (' + p10a.members + ')');
+await page.click('#ps-project-nav .ps-project-ghead');
+await page.waitForTimeout(400);
+const p10b = await p10();
+ok(p10b.members === 0 && p10b.headAria === 'false',
+   'a click on the row folds it, no chevron needed');
+await page.click('#ps-project-nav .ps-project-ghead');
+await page.waitForTimeout(400);
+ok((await p10()).members === p10a.members,
+   'and a second click opens it again');
+// The group header used to carry border 0 and an 8px left pad while every
+// row carries a 1px transparent border and 12px, so its glyph sat 5px left
+// of the section's. Measured against each other, not against a number, so
+// the check survives a change to the row padding.
+const p10align = await page.evaluate(() => {
+    const L = el => el ? +el.getBoundingClientRect().left.toFixed(1) : null;
+    const ico = el => el && el.querySelector('.ps-nav-icon');
+    const head = document.querySelector('#ps-project-nav .ps-project-ghead');
+    const board = document.querySelector(
+        '#ps-project-nav [data-project-board-id]');
+    const member = document.querySelector(
+        '.ps-project-item-grouped[data-project-chart-id]');
+    const pin = document.querySelector('[data-project-pin-id]');
+    return { groupRow: L(head), sectionRow: L(board),
+             groupIcon: L(ico(head)), sectionIcon: L(ico(board)),
+             memberRow: L(member), pageRow: L(pin) };
+});
+ok(p10align.groupRow === p10align.sectionRow,
+   'a group header and a section row start on the same vertical (' +
+   p10align.groupRow + ' and ' + p10align.sectionRow + ')');
+ok(p10align.groupIcon === p10align.sectionIcon,
+   'and so do their glyphs, which is what the eye actually reads (' +
+   p10align.groupIcon + ' and ' + p10align.sectionIcon + ')');
+if (p10align.pageRow !== null)
+    ok(p10align.memberRow === p10align.pageRow,
+       'grouped charts and notebook pages share one member indent (' +
+       p10align.memberRow + ' and ' + p10align.pageRow + ')');
+
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('CHART GROUPS CHECK PASS');
 await browser.close();

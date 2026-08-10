@@ -20617,6 +20617,22 @@
     'fill="currentColor" stroke="none"/>' +
     '<rect x="13" y="7" width="3.2" height="10" rx="0.6" ' +
     'fill="currentColor" stroke="none"/></svg>';
+  // A GROUP of charts: the chart glyph with a second card behind it, the
+  // stacked-copies idiom, so the row says "several charts" while staying
+  // recognisably the chart icon (Torry, Aug 10 2026).
+  var RAIL_ICON_CHART_GROUP =
+    '<svg class="ps-icn" width="15" height="15" viewBox="0 0 24 24" ' +
+    'fill="none" stroke="currentColor" stroke-width="1.8" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    // The chart mark stays nearly full size, shifted down-left, and the
+    // second chart is a corner bracket behind it. Bars inside a card go
+    // illegible at 15 px; two overlapping FRAMES read at any size.
+    '<path d="M8.5 3.5h12v12" opacity="0.45"/>' +
+    '<path d="M3 19.5V5"/><path d="M3 19.5h14"/>' +
+    '<rect x="6" y="11" width="3.2" height="6" rx="0.6" ' +
+    'fill="currentColor" stroke="none"/>' +
+    '<rect x="11.2" y="7.6" width="3.2" height="9.4" rx="0.6" ' +
+    'fill="currentColor" stroke="none"/></svg>';
   // Per-analysis rail icons (Torry approved, Jul 28 2026: with generic
   // "Chart 2" names, the rail saying WHAT each chart is earns its glyphs).
   // Same 24-grid, stroke 1.8, currentColor as every other rail icon; each
@@ -20944,12 +20960,14 @@
       h.type = "button";
       h.setAttribute("data-group-name", name);
       h.setAttribute("aria-expanded", collapsed ? "false" : "true");
-      h.appendChild(mkEl("span", "ps-project-gchev",
-        collapsed ? "\u25b8" : "\u25be"));
-      // Chevron then name, NO glyph. The settled rail rule (Torry's three
-      // rounds, Aug 10 2026): FOLD HEADERS ARE ANONYMOUS, and identity
-      // glyphs live on the leaf rows, charts wearing their module glyphs
-      // and pages the notebook symbol.
+      // ONE container rule across the rail (Torry, Aug 10 2026): no
+      // chevron, an identity glyph, and the ROW is the toggle. A section
+      // wears its notebook; a group of charts wears the chart glyph with a
+      // second card behind it, so the two containers rhyme without being
+      // the same picture.
+      var ghIco = mkEl("span", "ps-nav-icon");
+      ghIco.innerHTML = RAIL_ICON_CHART_GROUP;
+      h.appendChild(ghIco);
       h.appendChild(mkEl("span", "ps-project-gname", name));
       if (collapsed)
         h.appendChild(mkEl("span", "ps-project-gcount", String(memberCount)));
