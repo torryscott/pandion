@@ -1695,16 +1695,29 @@ await page.waitForTimeout(500);
 const sentLive = await page.evaluate((ctx) => {
     const doc = window.PS_SHELL.project.charts.find(c => c.id === ctx.docId);
     const added = doc.items[doc.items.length - 1];
+    // Clear of the figure, WHEREVER that is. The old clause here pinned the
+    // pre-placement-rule behaviour (a send always stacked below everything);
+    // since the layout dive's one-placement rule, a send takes the first
+    // clear space in reading order, the same spot the toolbar's Add chart
+    // would use, and layout-figure-check cases 41, 47 and 48 own that
+    // contract. This case's own contract is the LIVE panel and the toast.
+    let overlaps = 0;
+    for (const it of doc.items) {
+        if (it === added || (it.kind !== 'chart' && it.kind !== 'image'))
+            continue;
+        if (added.x < it.x + it.w && added.x + added.w > it.x &&
+            added.y < it.y + it.h && added.y + added.h > it.y) overlaps++;
+    }
     return { count: doc.items.length, kind: added.kind,
-             chartId: added.chartId, y: added.y,
+             chartId: added.chartId, overlaps: overlaps,
              toast: (document.getElementById('ps-toast') || {})
                  .textContent || '' };
 }, sendCtx);
 ok(sentLive.count === sendCtx.count + 1 && sentLive.kind === 'chart' &&
-   sentLive.chartId === sendCtx.chartId && sentLive.y >= sendCtx.bottom + 14 &&
+   sentLive.chartId === sendCtx.chartId && sentLive.overlaps === 0 &&
    /Sent to /.test(sentLive.toast),
-   `it lands as a LIVE panel, flowing below existing content, with the ` +
-   `pin send's toast (y ${sentLive.y} under ${sendCtx.bottom})`);
+   `it lands as a LIVE panel, clear of the figure, with the pin send's ` +
+   `toast (${sentLive.overlaps} overlaps)`);
 
 console.log('case 32: Cmd/Ctrl+scroll zooms the board smoothly');
 // Aug 6 2026 (Torry, the day after the chart gesture: add the same to
