@@ -264,12 +264,12 @@ ok(await page.evaluate(() =>
 
 console.log('case 8: charts group by DRAG, the way every desktop teaches');
 // The only way into a group was right-click, Move to group, second menu.
-// Now a chart row drops ONTO another chart to form a group of the two
-// (named exactly once, in place), onto a group header to join it, and a
-// grouped chart drops onto the Charts label to leave. Deliberately unlike
-// the page rows one section down, which drag BETWEEN rows to reorder: the
-// target wears a ring, not an insertion line, so the gestures cannot be
-// mistaken. The menu path survives untouched.
+// Now a chart row drops ONTO another chart (the middle band) to form a
+// group of the two, named exactly once in place, onto a group header to
+// join it, and a grouped chart drops onto the Charts label to leave. The
+// row EDGES mean between, which is reorder, case 9. Ring means onto, the
+// insertion line means between, one vocabulary across the rail. The menu
+// path survives untouched.
 await page.evaluate(async () => {
     const w = ms => new Promise(r => setTimeout(r, ms));
     while (window.PS_SHELL.charts().filter(c => c.type !== 'layout').length < 3) {
@@ -348,6 +348,85 @@ await page.mouse.click(p8r.x, p8r.y);
 await page.waitForTimeout(500);
 ok(await page.evaluate(() => window.PS_SHELL.chart().id) === p8ids[0],
    'a press that never travels is still a click, and activates the chart');
+
+console.log('case 9: the row edges reorder, and the tab strip follows');
+// The middle of a row groups; the top and bottom bands are BETWEEN, the
+// springboard split. A between-drop reorders PROJECT.charts, which is the
+// tab strip's own order, and the chart adopts the group of the row it
+// lands beside, so sliding into a group's span joins at that position and
+// sliding out to the flat rows leaves. Before the zones, an edge drop
+// grouped instead of reordering, and before the sync fix a TAB drag left
+// the rail showing the old order.
+await page.evaluate(() => {
+    window.PS_SHELL.charts().forEach(c => { delete c.group; });
+});
+await page.waitForTimeout(700);
+const p9state = () => page.evaluate(() => ({
+    array: window.PS_SHELL.charts().filter(c => c.type !== 'layout')
+        .map(c => c.id),
+    tabs: [...document.querySelectorAll('#ps-tabs .ps-tab')]
+        .map(t => t.getAttribute('data-chart-id')).filter(Boolean),
+    rail: [...document.querySelectorAll('[data-project-chart-id]')]
+        .map(r => r.getAttribute('data-project-chart-id')),
+    groups: window.PS_SHELL.charts().filter(c => c.type !== 'layout')
+        .map(c => c.group || '')
+}));
+const p9rect = id => page.evaluate(x => {
+    const n = document.querySelector('[data-project-chart-id="' + x + '"]');
+    n.scrollIntoView({ block: 'center' });
+    const r = n.getBoundingClientRect();
+    return { x: r.left + r.width / 2, bottom: r.bottom,
+             midY: r.top + r.height / 2 };
+}, id);
+const p9s0 = await p9state();
+let p9a = await p9rect(p9s0.array[0]);
+let p9c = await p9rect(p9s0.array[2]);
+await page.mouse.move(p9a.x, p9a.midY);
+await page.mouse.down();
+await page.mouse.move(p9a.x + 2, p9a.midY + 10, { steps: 2 });
+await page.mouse.move(p9c.x, p9c.bottom - 2, { steps: 6 });
+await page.mouse.up();
+await page.waitForTimeout(700);
+const p9s1 = await p9state();
+ok(p9s1.array.join() ===
+   [p9s0.array[1], p9s0.array[2], p9s0.array[0]]
+       .concat(p9s0.array.slice(3)).join(),
+   'an edge drop below the third chart reorders rather than grouping (' +
+   p9s1.array.join(',') + ')');
+ok(p9s1.groups.every(g => g === ''),
+   'and no group was created by it');
+ok(p9s1.tabs.join() === p9s1.array.join(),
+   'the tab strip shows the same order immediately (' +
+   p9s1.tabs.join(',') + ')');
+ok(p9s1.rail.join() === p9s1.array.join(),
+   'and so does the rail');
+// group two, then slide the loose third INTO the group's span by its edge
+let p9x = await p9rect(p9s1.array[0]);
+let p9y = await p9rect(p9s1.array[1]);
+await page.mouse.move(p9x.x, p9x.midY);
+await page.mouse.down();
+await page.mouse.move(p9x.x + 2, p9x.midY + 10, { steps: 2 });
+await page.mouse.move(p9y.x, p9y.midY, { steps: 6 });
+await page.mouse.up();
+await page.waitForTimeout(600);
+await page.keyboard.press('Enter');
+await page.waitForTimeout(500);
+const p9s2 = await p9state();
+const p9loose = p9s2.array[p9s2.groups.indexOf('')];
+const p9first = p9s2.array[p9s2.groups.findIndex(g => g !== '')];
+let p9l = await p9rect(p9loose);
+let p9f = await p9rect(p9first);
+await page.mouse.move(p9l.x, p9l.midY);
+await page.mouse.down();
+await page.mouse.move(p9l.x + 2, p9l.midY - 10, { steps: 2 });
+await page.mouse.move(p9f.x, p9f.bottom - 2, { steps: 6 });
+await page.mouse.up();
+await page.waitForTimeout(700);
+const p9s3 = await p9state();
+ok(p9s3.groups.filter(g => g !== '').length === 3 &&
+   p9s3.array.indexOf(p9loose) === p9s3.array.indexOf(p9first) + 1,
+   'an edge drop inside a group joins it AT that position (' +
+   p9s3.array.join(',') + ' with ' + p9s3.groups.join(',') + ')');
 
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('CHART GROUPS CHECK PASS');

@@ -16599,6 +16599,9 @@
         PROJECT.charts[i] = same[next++];
     persist();
     syncTabs();
+    // The rail lists the same documents in the same order, and a tab drag
+    // used to leave it stale, the notebook reorder's exact desync.
+    syncProjectNavigator();
   }
   var TAB_LAST_CLICK = { id: null, at: 0 };
   var TAB_PENDING_FOCUS_ID = null;
@@ -20672,21 +20675,27 @@
     '<rect x="3" y="4" width="18" height="16" rx="2"/>' +
     '<path d="M12 4v16M3 12h9"/></svg>';
   MODULE_RAIL_ICONS.plotbuilder = RAIL_ICON_CHART;
-  // ---- drag a chart row onto another to GROUP them ----------------
+  // ---- drag a chart row to GROUP it or to REORDER it --------------
   // The menu path (right-click, Move to group, pick a name) survives, but
-  // the elegant path is the one every desktop teaches: drop a chart ON
-  // another chart and the two become a group, named in place; drop it on a
-  // group and it joins; drop a grouped chart on the Charts label and it
-  // leaves its group. Deliberately DIFFERENT from the page rows one section
-  // down, which drag BETWEEN rows to reorder: charts drop ONTO things, and
-  // the target wears a ring rather than an insertion line, so the two
-  // gestures cannot be mistaken for each other.
+  // the elegant paths are the gestures every desktop teaches, split by
+  // ZONE the way a springboard splits them. The middle of another chart
+  // row means ONTO: the two become a group, named in place, or the dragged
+  // chart joins the target's group; the target wears a ring. The top and
+  // bottom edges mean BETWEEN: the chart reorders to that spot, the tab
+  // strip follows because both read PROJECT.charts, and it adopts the
+  // group of the row it lands beside, so sliding into a group's span joins
+  // it at that position and sliding out to the flat list leaves; the mark
+  // is the page rows' insertion line. Ring is onto, line is between, the
+  // same vocabulary everywhere on the rail.
   var RAIL_CHART_DRAG = null;
   function railChartDragClear() {
     var marked = document.querySelectorAll(
-      ".ps-grouprow-target, .ps-pinrow-lift[data-project-chart-id]");
+      ".ps-grouprow-target, .ps-pinrow-lift[data-project-chart-id]," +
+      "[data-project-chart-id].ps-pinrow-drop," +
+      "[data-project-chart-id].ps-pinrow-drop-end");
     for (var i = 0; i < marked.length; i++)
-      marked[i].classList.remove("ps-grouprow-target", "ps-pinrow-lift");
+      marked[i].classList.remove("ps-grouprow-target", "ps-pinrow-lift",
+        "ps-pinrow-drop", "ps-pinrow-drop-end");
   }
   function railChartDragTarget(e) {
     var el2 = document.elementFromPoint(e.clientX, e.clientY);
@@ -20697,6 +20706,12 @@
       if (tid === RAIL_CHART_DRAG.chartId) return null;
       var tdoc = chartById(tid);
       if (!tdoc || isLayoutTab(tdoc)) return null;
+      var rb = row.getBoundingClientRect();
+      var frac = (e.clientY - rb.top) / Math.max(1, rb.height);
+      if (frac < 0.3) return { kind: "before", el: row, id: tid,
+                               group: chartGroupOf(tdoc) };
+      if (frac > 0.7) return { kind: "after", el: row, id: tid,
+                               group: chartGroupOf(tdoc) };
       return { kind: "chart", el: row, id: tid,
                group: chartGroupOf(tdoc) };
     }
@@ -20727,7 +20742,10 @@
       '[data-project-chart-id="' + d.chartId + '"]');
     if (src) src.classList.add("ps-pinrow-lift");
     var t = railChartDragTarget(e);
-    if (t) t.el.classList.add("ps-grouprow-target");
+    if (!t) return;
+    if (t.kind === "before") t.el.classList.add("ps-pinrow-drop");
+    else if (t.kind === "after") t.el.classList.add("ps-pinrow-drop-end");
+    else t.el.classList.add("ps-grouprow-target");
   }
   function railChartDragUp(e) {
     var d = RAIL_CHART_DRAG;
@@ -20750,6 +20768,25 @@
       document.removeEventListener("click", swallow, true);
     }, 250);
     if (t.kind === "ungroup") { setChartGroup(d.chartId, ""); return; }
+    if (t.kind === "before" || t.kind === "after") {
+      // Landing beside a row adopts that row's group, so a reorder into a
+      // group's span joins at that position and a reorder out to the flat
+      // list leaves. Then the position itself: the slot is the target's
+      // index in the same-type list WITHOUT the dragged chart, which is
+      // the space moveChartToIndex splices in.
+      var dragDoc = chartById(d.chartId), tDoc = chartById(t.id);
+      if (!dragDoc || !tDoc) return;
+      if ((chartGroupOf(dragDoc) || "") !== (t.group || ""))
+        setChartGroup(d.chartId, t.group || "");
+      var same = [], si;
+      for (si = 0; si < PROJECT.charts.length; si++)
+        if (!isLayoutTab(PROJECT.charts[si]) &&
+            PROJECT.charts[si] !== dragDoc)
+          same.push(PROJECT.charts[si]);
+      var slot = same.indexOf(tDoc) + (t.kind === "after" ? 1 : 0);
+      moveChartToIndex(d.chartId, slot);
+      return;
+    }
     if (t.kind === "group" || (t.kind === "chart" && t.group)) {
       setChartGroup(d.chartId, t.group);
       return;
