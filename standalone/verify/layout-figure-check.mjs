@@ -2570,6 +2570,116 @@ ok(!p57Trans.panel && !p57Trans.kept,
    'a deliberately transparent export keeps every panel transparent (' +
    JSON.stringify(p57Trans) + ')');
 
+console.log('case 58: a selection drags as one thing');
+// Marquee three panels or Cmd/Ctrl+A them and everything highlighted, and
+// then dragging any one of them moved only that one: the press collapsed
+// the selection to the clicked item before the drag armed. The collapse
+// was right, its timing was wrong. It lives on the RELEASE now, and only
+// for a press that never travelled, which is what a click actually is.
+await page.evaluate(() => window.PS_SHELL.setWorkspace('layout'));
+await page.waitForTimeout(500);
+await page.evaluate(() => window.PS_SHELL.addLayout());
+await page.waitForTimeout(1100);
+const p58Chart = await page.evaluate(() => {
+    const c = window.PS_SHELL.charts().find(x => x.type !== 'layout').id;
+    const doc = window.PS_SHELL.chart();
+    doc.view.snap = false;
+    doc.items.push({ id: 'iA', kind: 'chart', chartId: c,
+                     x: 40, y: 40, w: 300, h: 204 });
+    doc.items.push({ id: 'iB', kind: 'chart', chartId: c,
+                     x: 380, y: 40, w: 300, h: 204 });
+    doc.items.push({ id: 'iC', kind: 'chart', chartId: c,
+                     x: 40, y: 300, w: 300, h: 204 });
+    window.PS_SHELL.selectLayoutItems(['iA', 'iB']);
+    return c;
+});
+await page.waitForTimeout(900);
+const p58Geo = () => page.evaluate(() => {
+    const c = window.PS_SHELL.chart();
+    const m = {};
+    c.items.forEach(i => m[i.id] = { x: i.x, y: i.y, w: i.w, h: i.h });
+    m.sel = window.PS_SHELL.layoutSelection().slice();
+    m.depth = window.PS_SHELL.layoutHistoryDepth();
+    return m;
+});
+const p58Mid = id => page.evaluate(x => {
+    const n = document.querySelector('.ps-litem[data-item-id="' + x + '"]');
+    n.scrollIntoView({ block: 'center' });
+    const r = n.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+}, id);
+const p58a = await p58Geo();
+let p58c = await p58Mid('iA');
+await page.mouse.move(p58c.x, p58c.y);
+await page.mouse.down();
+await page.mouse.move(p58c.x + 60, p58c.y + 40, { steps: 6 });
+await page.mouse.up();
+await page.waitForTimeout(500);
+const p58b = await p58Geo();
+const p58dA = [p58b.iA.x - p58a.iA.x, p58b.iA.y - p58a.iA.y];
+const p58dB = [p58b.iB.x - p58a.iB.x, p58b.iB.y - p58a.iB.y];
+ok(p58dA[0] > 20 && Math.abs(p58dA[0] - p58dB[0]) < 0.5 &&
+   Math.abs(p58dA[1] - p58dB[1]) < 0.5,
+   'dragging one selected panel moves the other by the same delta (' +
+   p58dA.map(v => v.toFixed(1)).join(',') + ' and ' +
+   p58dB.map(v => v.toFixed(1)).join(',') + ')');
+ok(p58b.iC.x === p58a.iC.x && p58b.iC.y === p58a.iC.y,
+   'while the unselected panel stays put');
+ok(p58b.sel.length === 2,
+   'and the selection survives the drag (' + p58b.sel.join(',') + ')');
+ok(p58b.depth === p58a.depth + 1,
+   'as one history entry (' + p58a.depth + ' to ' + p58b.depth + ')');
+p58c = await p58Mid('iA');
+await page.mouse.click(p58c.x, p58c.y);
+await page.waitForTimeout(400);
+ok((await p58Geo()).sel.join(',') === 'iA',
+   'a press that never travels is a click, and collapses to the clicked ' +
+   'item on release');
+
+console.log('case 59: selected panels resize together');
+// A multi-selection had no resize at all: the handle only rendered for a
+// single unit and the resize branch was gated to one item. Now every
+// selected panel wears the handle, whichever one is grabbed drives, and
+// two panels of the SAME size stay the same size to the pixel, because a
+// same-size follower copies the driver rather than multiplying a ratio.
+await page.evaluate(() => window.PS_SHELL.selectLayoutItems(['iA', 'iB']));
+await page.waitForTimeout(400);
+ok(await page.evaluate(() =>
+       document.querySelectorAll('.ps-lhandle').length) === 2,
+   'both selected panels wear a resize handle');
+const p59a = await p58Geo();
+const p59h = await page.evaluate(() => {
+    const n = document.querySelector(
+        '.ps-litem[data-item-id="iA"] .ps-lhandle');
+    const r = n.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+});
+await page.mouse.move(p59h.x, p59h.y);
+await page.mouse.down();
+await page.mouse.move(p59h.x + 60, p59h.y + 60, { steps: 6 });
+await page.mouse.up();
+await page.waitForTimeout(500);
+const p59b = await p58Geo();
+ok(p59b.iA.w > p59a.iA.w,
+   'the grabbed panel grew (' + p59a.iA.w + ' to ' +
+   p59b.iA.w.toFixed(1) + ')');
+ok(p59b.iA.w === p59b.iB.w && p59b.iA.h === p59b.iB.h,
+   'and its same-size partner is the SAME size after, to the pixel (' +
+   p59b.iB.w.toFixed(1) + ' by ' + p59b.iB.h.toFixed(1) + ')');
+ok(Math.abs(p59b.iA.w / p59b.iA.h - 300 / 204) < 0.02,
+   'a plain drag keeps the aspect on both (' +
+   (p59b.iA.w / p59b.iA.h).toFixed(3) + ')');
+ok(p59b.iC.w === p59a.iC.w,
+   'the unselected panel keeps its size');
+ok(p59b.depth === p59a.depth + 1,
+   'one history entry for the whole synced resize');
+await page.evaluate(() => document.getElementById('ps-lviewport').focus());
+await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z');
+await page.waitForTimeout(600);
+const p59u = await p58Geo();
+ok(p59u.iA.w === p59a.iA.w && p59u.iB.w === p59a.iB.w,
+   'and one undo restores both (' + p59u.iA.w + ' and ' + p59u.iB.w + ')');
+
 ok(errors.length === 0, 'no page errors (' + errors.join(' | ') + ')');
 console.log('\nlayout-figure-check: all cases passed');
 await browser.close();

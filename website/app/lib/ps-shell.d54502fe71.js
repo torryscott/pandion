@@ -18443,11 +18443,19 @@
     // away the moment a letter was bound to it. The handle grows from the
     // bottom right, so the panel's top left does not move and a letter
     // anchored there stays put.
-    if (primary && layUnits(laySelectedIds()).length === 1) {
+    //
+    // With SEVERAL units selected, every selected sized item wears the
+    // handle, and whichever one is grabbed drives a synced resize of them
+    // all. The old single-unit gate left a multi-selection with no way to
+    // resize at all.
+    var multiUnits = layUnits(laySelectedIds()).length > 1;
+    if ((primary && !multiUnits) || (selected && multiUnits)) {
       if (laySizedKind(item)) {
         var hnd = mkEl("div", "ps-lhandle");
         hnd.setAttribute("data-role", "lay-resize");
-        setTip(hnd, "Resize proportionally. Hold Shift for free resize.");
+        setTip(hnd, multiUnits
+          ? "Resize every selected panel together. Hold Shift for free resize."
+          : "Resize proportionally. Hold Shift for free resize.");
         // This is a pointer affordance. The canvas instructions expose the
         // keyboard resize route, so the decorative handle stays out of the
         // option's accessibility subtree.
@@ -19700,10 +19708,19 @@
       }
       if (multi) {
         var add = laySelectedIds(); add.push(id); laySetSelection(add); renderLayout();
-      } else if (!layIsSelected(id) || laySelectedIds().length > 1) {
+      } else if (!layIsSelected(id)) {
         laySetSelection([id]); renderLayout();
       }
       var resizing = !!(e.target.closest && e.target.closest('[data-role="lay-resize"]'));
+      // A plain press on an item that is ALREADY selected keeps the whole
+      // selection, so dragging any member moves everything selected, the
+      // rule in every drawing application. The old collapse-to-one happened
+      // here on the PRESS, which made a marquee or Cmd/Ctrl+A selection
+      // undraggable: the first thing a drag did was throw it away. The
+      // collapse still exists, on RELEASE, and only for a press that never
+      // travelled, which is what a click actually is.
+      var collapseTo = (!multi && !resizing && layIsSelected(id) &&
+        laySelectedIds().length > 1) ? id : null;
       var ids = laySelectedIds(), origins = [], bounds = laySelectionBounds(ids);
       for (var i = 0; i < ids.length; i++) {
         var it = layItemById(ids[i]);
@@ -19711,7 +19728,8 @@
                        w: Number(it.w) || 480, h: Number(it.h) || 320 });
       }
       LAY_DRAG = { ids: ids, primary: item, origins: origins, bounds: bounds,
-                   resizing: resizing, sx: e.clientX, sy: e.clientY,
+                   resizing: resizing, collapseTo: collapseTo,
+                   sx: e.clientX, sy: e.clientY,
                    // Alt+drag duplicates, the reflex every drawing
                    // application shares. Armed here, acted on at the first
                    // real movement, so an Alt+click that never travels stays
@@ -20190,14 +20208,51 @@
     }
     d.moved = true;
     var p = layPage(), v = layView();
-    if (d.resizing && d.ids.length === 1 && laySizedKind(d.primary)) {
-      var o = d.origins[0];
-      var resized = layResizeDimensions(o, dx, dy, p, v, !!e.shiftKey);
-      var w = resized.w, h = resized.h;
-      d.primary.w = w; d.primary.h = h;
-      var elR = el("ps-lcanvas").querySelector(
-        '.ps-litem[data-item-id="' + d.primary.id + '"]');
-      if (elR) { elR.style.width = w + "px"; elR.style.height = h + "px"; }
+    if (d.resizing && laySizedKind(d.primary)) {
+      // The grabbed panel follows the pointer exactly, the existing math.
+      // Every OTHER selected sized item follows by RATIO, so two same-size
+      // charts stay the same size all the way through, and different sizes
+      // scale in proportion. A plain drag locks aspect on the driver, so
+      // the ratio is one number and every follower keeps its own shape too.
+      var po = null, oi;
+      for (oi = 0; oi < d.origins.length; oi++)
+        if (d.origins[oi].item === d.primary) po = d.origins[oi];
+      po = po || d.origins[0];
+      var resized = layResizeDimensions(po, dx, dy, p, v, !!e.shiftKey);
+      var rw = po.w > 0 ? resized.w / po.w : 1;
+      var rh = po.h > 0 ? resized.h / po.h : 1;
+      var cvR = el("ps-lcanvas");
+      for (oi = 0; oi < d.origins.length; oi++) {
+        var oo = d.origins[oi];
+        if (!laySizedKind(oo.item)) continue;
+        var nw, nh;
+        if (oo === po) { nw = resized.w; nh = resized.h; }
+        else if (oo.w === po.w && oo.h === po.h) {
+          // Same size COPIES the driver exactly. Ratio arithmetic lands a
+          // hair off in floating point, and the whole point of resizing two
+          // equal panels together is that they stay equal to the pixel.
+          nw = resized.w; nh = resized.h;
+        } else {
+          nw = oo.w * rw; nh = oo.h * rh;
+          // A follower clamps to ITS OWN room on the page, scaling both
+          // sides by one factor so its shape survives the clamp, and to
+          // its own minimum the same way. It carries the driver's
+          // fractional precision, the model's existing drag behaviour.
+          var fmins = layMinSize(oo.item);
+          var froomW = p.w - (Number(oo.item.x) || 0);
+          var froomH = p.h - (Number(oo.item.y) || 0);
+          var fs = Math.min(1, froomW / nw, froomH / nh);
+          nw *= fs; nh *= fs;
+          if (nw < fmins.w || nh < fmins.h) {
+            var fs2 = Math.max(fmins.w / nw, fmins.h / nh);
+            nw *= fs2; nh *= fs2;
+          }
+        }
+        oo.item.w = nw; oo.item.h = nh;
+        var elR = cvR.querySelector(
+          '.ps-litem[data-item-id="' + oo.item.id + '"]');
+        if (elR) { elR.style.width = nw + "px"; elR.style.height = nh + "px"; }
+      }
       layHideGuides();
     } else {
       if (v.snap) {
@@ -20285,6 +20340,12 @@
         LAY_COALESCE = null;
       }
       persist(); renderLayout();
+    } else if (d && d.collapseTo) {
+      // The press kept the multi-selection so a drag could move it; a press
+      // that never travelled is a CLICK, and a click on one item means that
+      // item. laySetSelection re-expands a grouped member to its unit.
+      laySetSelection([d.collapseTo]);
+      renderLayout();
     }
   }
   // While a text field is open, the composite is NOT an option list. Exposing

@@ -619,6 +619,17 @@ window.PSData = (function () {
     if (fs) xyPoints.facets = facets;
 
     // Fits (always computed; the widget gates drawing on xyShowFit/CI).
+    // Resolving one of those flags means looking in three places in order:
+    // the parsed chartSpec (where the engine actually writes them), the
+    // option store's top level (old projects, and any caller that sets them
+    // directly), then the template default. opts.spec is absent on the
+    // thumbnail path, hence the guard.
+    var specFlags = (opts && opts.spec) ? opts.spec : {};
+    function specFlag(key) {
+      if (typeof specFlags[key] === "boolean") return specFlags[key];
+      if (typeof opts[key] === "boolean") return opts[key];
+      return false;
+    }
     var fitType = opts.fitType || "linear";
     var ciLevel = (opts.ciLevel > 0 && opts.ciLevel < 1) ? opts.ciLevel : 0.95;
     var loessSpan = (opts.loessSpan > 0) ? opts.loessSpan : 0.75;
@@ -755,14 +766,26 @@ window.PSData = (function () {
       yLabelDefault: roles.yvar,
       groupLabelDefault: hasGroup ? roles.groupVar : "",
       facetLevels: fLevels,
-      // t4-17 used to append "LOESS confidence band is approximate" here. That
-      // disclosure is retired because there is nothing left to disclose: loess
-      // now ships no band at all (see the fit block above). The note was also
-      // dead code by the time it was removed - it gated on opts.showFit and
-      // opts.showCI, which optsFrom read from the option store's TOP LEVEL,
-      // and the chartSpec consolidation moved both keys inside the blob, so
-      // the gate could never be true from the app's own UI.
-      missingNote: missingNoteFor(nMissing, nTotal)
+      // t4-17 used to say "LOESS confidence band is approximate" here. There is
+      // no longer a band to qualify, but the Confidence band control stays
+      // tickable (it belongs to the shared engine, and it is correct for the
+      // other fit types), so a user who ticks it on a loess chart would
+      // otherwise watch nothing happen. Saying so is the whole fix: this note
+      // rides missingNote, which the engine draws as a dismissible pill in the
+      // app and NOT inside the figure, so it explains the absence on screen
+      // without following the chart into an export.
+      //
+      // It reads the flags from opts.spec, which ps-shell.js attaches from the
+      // parsed chartSpec immediately after calling optsFrom. The old gate read
+      // st.xyShowFit / st.xyShowCI from the store's TOP LEVEL, where the
+      // chartSpec consolidation means they never appear, so it could never
+      // fire from the app's own UI - the reason the disclosure was silently
+      // dead. Top level and template are kept as fallbacks for old projects.
+      missingNote: [missingNoteFor(nMissing, nTotal),
+        (fitType === "loess" && xyFits.length
+         && specFlag("xyShowFit") && specFlag("xyShowCI"))
+          ? "LOESS is drawn without a confidence band"
+          : ""].filter(Boolean).join(" \u00b7 ")
     } };
   }
 
@@ -1298,13 +1321,15 @@ window.PSData = (function () {
           loessSpan: typeof st.xyLoessSpan === "number" ? st.xyLoessSpan : tpl.xyLoessSpan,
           ciLevel: typeof st.xyCILevel === "number" ? st.xyCILevel : tpl.xyCILevel,
           ellLevel: typeof st.xyEllipseLevel === "number" ? st.xyEllipseLevel : tpl.xyEllipseLevel,
-          corrType: typeof st.xyStatsCorrType === "string" ? st.xyStatsCorrType : tpl.xyStatsCorrType
-          // showFit / showCI used to be read here for the t4-17 band
-          // disclosure. Both were read from the option store's top level,
-          // where the chartSpec consolidation means they never appear, so both
-          // were always the template default. The disclosure is retired and so
-          // are these; the fits themselves are computed unconditionally and
-          // the engine gates the drawing.
+          corrType: typeof st.xyStatsCorrType === "string" ? st.xyStatsCorrType : tpl.xyStatsCorrType,
+          // Passed through under the OPTION's own names, not renamed to
+          // showFit / showCI as they were for t4-17. buildXY's specFlag()
+          // prefers the parsed chartSpec, which is where the engine writes
+          // them today; these are the fallback for a project saved before the
+          // chartSpec consolidation, when they lived at the top level. Reading
+          // ONLY here is what made the old disclosure permanently dead.
+          xyShowFit: typeof st.xyShowFit === "boolean" ? st.xyShowFit : undefined,
+          xyShowCI: typeof st.xyShowCI === "boolean" ? st.xyShowCI : undefined
         };
       }
     }

@@ -1158,12 +1158,33 @@ most misleading page in the repo. What actually still holds:
 - **Shapiro-Wilk is client-computed**, so `distNormality` is populated but
   is not R's `shapiro.test` to the last digit. It was empty in v1; the
   older wording here said so long after it stopped being true.
-- **LOESS confidence bands are approximate.** `loessFit` estimates the
-  effective degrees of freedom as `1.2 * (n / q)` rather than R's exact
-  trace-based value, so the CURVE matches R and the BAND does not. As of
-  Jul 26 2026 the app says so on the chart itself, in the same note that
-  carries the missing-data count, and only when a band is actually drawn.
-  Linear and polynomial fits are exact-R.
+- **LOESS draws a curve and no confidence band** (Torry, Aug 10 2026). This
+  replaces the old "the band is approximate, and says so" treatment.
+  The CURVE is exact-R and always was: measured against `stats::loess` on
+  three shapes (n = 40, 60, 200; span 0.75, degree 2) the maximum difference
+  was `0.0000`. The BAND ran 3 to 4.5% NARROW, because `loessFit` estimates
+  the effective degrees of freedom as `1.2 * (n / q)` instead of tracing the
+  smoother, which floors `pEff` at 2 where R's `enp` is about 4.35. The error
+  was a constant scalar rather than a shape error, and it erred toward
+  overconfidence. Substituting R's own `enp` closes it to 0.2 to 1.2%, so the
+  arithmetic is fixable; the call was that a band which is quietly too tight
+  is worse than no band, and that a curve matching R exactly should not be
+  withdrawn over it.
+  Mechanism: `buildXY` omits `lwrs`/`uprs` from a loess fit's points. The
+  engine gates the band on `_fit.points[0].lwr !== undefined`
+  (`graphbuilder2.js` ~35084), so this needs NO engine change, and the jamovi
+  module keeps drawing its own bands, which come from R's `loess` and are
+  exact. Linear and polynomial fits are exact-R and keep theirs.
+  The Confidence band control belongs to the shared engine and stays
+  tickable, so ticking it on a loess chart appends "LOESS is drawn without a
+  confidence band" to the `missingNote` pill: an explanation on screen, and
+  never inside the figure. Guarded by `polish-check.mjs` case 6, which drives
+  `__gb2_setOption` (the engine's own setter) rather than the host-level
+  `window.setOption` the previous case used. That distinction is the whole
+  reason the old disclosure could rot unnoticed: the engine writes these two
+  keys inside `chartSpec`, `optsFrom` read them from the store's top level,
+  and the probe wrote the top level too, so it proved a state the app itself
+  could no longer produce.
 - **Nominal level order is FIRST-SEEN, not sorted.** R's `factor()` sorts
   levels, so the same CSV can produce a different X order - and therefore a
   different palette assignment - in this shell and in jamovi. First-seen is

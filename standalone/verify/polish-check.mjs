@@ -148,32 +148,64 @@ ok(dbg.ignored,
    'marked ignore-html, so it can never ride into a copy or an export');
 ok(dbg.offAgain, 'and switching it off removes it');
 
-console.log('case 6: the LOESS band admits it is approximate (t4-17)');
+console.log('case 6: LOESS draws its curve and no band (t4-17, revised Aug 10 2026)');
+// The old case asserted the band DISCLOSED that it was approximate. Torry's
+// call: drop the band instead. loessFit's curve is exact-R (max difference
+// 0.0000 against stats::loess at n = 40 / 60 / 200), but its band ran 3 to
+// 4.5% narrow because the effective df were estimated rather than traced, and
+// a band that is quietly too confident is worse than no band.
+//
+// The old case also drove window.setOption, which writes the option store's
+// TOP LEVEL. The engine writes these two keys inside chartSpec, so the probe
+// was exercising a path the app itself can no longer produce - which is
+// exactly why the disclosure could rot without any probe noticing. This case
+// drives __gb2_setOption, the engine's own setter, and asserts the DRAWN
+// result rather than only the payload.
 const loess = await page.evaluate(async () => {
     const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const set = (k, v) => window.__gb2_setOption(k, v);
+    const read = () => {
+        const p = window.PS_SHELL.buildPayload();
+        const f = (p.xyFits || [])[0];
+        const svg = [...document.querySelectorAll('svg')].sort((a, x) =>
+            x.getBoundingClientRect().width - a.getBoundingClientRect().width)[0];
+        const q = s => (svg ? svg.querySelectorAll(s).length : 0);
+        return { type: f ? f.fit_type : null,
+                 lwrs: !!(f && f.points && Array.isArray(f.points.lwrs)),
+                 band: q('[data-role="xy-ci"]'), curve: q('[data-role="xy-fit"]'),
+                 note: p.missingNote };
+    };
     window.PS_SHELL.setModule('xyplotbuilder');
     window.PS_SHELL.setRoles('xyplotbuilder', { xvar: 'hours', yvar: 'score' });
-    await sleep(800);
-    const plain = window.PS_SHELL.buildPayload().missingNote;
-    window.setOption('xyShowFit', true);
-    window.setOption('xyFitType', 'loess');
-    await sleep(700);
-    const fitOnly = window.PS_SHELL.buildPayload().missingNote;
-    window.setOption('xyShowCI', true);
-    await sleep(700);
-    const band = window.PS_SHELL.buildPayload().missingNote;
-    window.setOption('xyFitType', 'linear');
-    await sleep(700);
-    return { plain, fitOnly, band,
-             linear: window.PS_SHELL.buildPayload().missingNote };
+    await sleep(1500);
+    set('xyFitType', 'loess'); set('xyShowFit', true);
+    await sleep(2400);
+    const fitOnly = read();
+    set('xyShowCI', true);
+    await sleep(2400);
+    const ciOn = read();
+    set('xyFitType', 'linear');
+    await sleep(2400);
+    const linear = read();
+    set('xyFitType', 'loess');
+    await sleep(2400);
+    return { fitOnly, ciOn, linear, backToLoess: read() };
 });
-ok(/approximate/.test(loess.band),
-   `a drawn LOESS band says so on the chart, not only in a README ` +
-   `("${loess.band}")`);
-ok(!/approximate/.test(loess.fitOnly),
-   'the curve alone does not, because the CURVE is not the approximation');
-ok(!/approximate/.test(loess.linear) && !/approximate/.test(loess.plain),
-   'and an OLS band never claims it');
+ok(loess.fitOnly.curve > 0 && loess.ciOn.curve > 0,
+   'the LOESS curve is drawn, with and without the band asked for');
+ok(loess.ciOn.band === 0 && loess.ciOn.lwrs === false,
+   'ticking Confidence band on a LOESS fit draws no band, and ships no ' +
+   `bounds to draw one from (band els ${loess.ciOn.band})`);
+ok(/without a confidence band/.test(loess.ciOn.note),
+   `and it SAYS so rather than silently doing nothing ("${loess.ciOn.note}")`);
+ok(loess.fitOnly.note === '',
+   'the curve alone says nothing, because nothing was asked for');
+ok(loess.linear.band > 0 && loess.linear.lwrs === true &&
+   loess.linear.note === '',
+   'a linear fit keeps its exact band and needs no note');
+ok(loess.backToLoess.band === 0 && loess.linear.band > 0,
+   'switching types round trips: the preference survives, the band follows ' +
+   'the fit type');
 
 console.log('case 7: an error is not announced like a confirmation (t4-22)');
 const toast = await page.evaluate(async () => {
