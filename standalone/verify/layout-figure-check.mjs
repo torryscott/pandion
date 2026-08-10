@@ -2680,6 +2680,51 @@ const p59u = await p58Geo();
 ok(p59u.iA.w === p59a.iA.w && p59u.iB.w === p59a.iB.w,
    'and one undo restores both (' + p59u.iA.w + ' and ' + p59u.iB.w + ')');
 
+console.log('case 60: the typed Width and Height keep the panel proportions');
+// Setting one side from the rail used to change that side alone, so the
+// typed fields were the one resize in the app that letterboxed a chart by
+// default, while the corner drag has locked aspect all along. The other
+// side follows now, the paired field updates in place, and a clamp scales
+// both sides by one factor so the shape survives the page edge too.
+await page.evaluate(() => {
+    window.PS_SHELL.selectLayoutItems(['iC']);
+});
+await page.waitForTimeout(500);
+const p60 = async () => page.evaluate(() => {
+    const i = window.PS_SHELL.chart().items
+        .find(x => x.id === 'iC');
+    return { w: +(+i.w).toFixed(2), h: +(+i.h).toFixed(2),
+             ratio: +(i.w / i.h).toFixed(4),
+             fieldH: document.getElementById('ps-ctx-lh').value };
+});
+const p60a = await p60();
+await page.fill('#ps-ctx-lw', '5');
+await page.press('#ps-ctx-lw', 'Enter');
+await page.waitForTimeout(500);
+const p60b = await p60();
+ok(Math.abs(p60b.w - 480) < 1,
+   'typing a width applies it (' + p60b.w + ' px for 5 in)');
+ok(Math.abs(p60b.ratio - p60a.ratio) < 0.001,
+   'and the height followed, keeping the shape (' + p60b.ratio +
+   ' against ' + p60a.ratio + ')');
+ok(Math.abs(Number(p60b.fieldH) - p60b.h / 96) < 0.02,
+   'with the Height field showing the real result in place (' +
+   p60b.fieldH + ')');
+await page.fill('#ps-ctx-lh', '1.5');
+await page.press('#ps-ctx-lh', 'Enter');
+await page.waitForTimeout(500);
+const p60c = await p60();
+ok(Math.abs(p60c.h - 144) < 1 && Math.abs(p60c.ratio - p60a.ratio) < 0.001,
+   'typing a height pulls the width along the same way (' + p60c.w +
+   ' by ' + p60c.h + ')');
+await page.fill('#ps-ctx-lw', '40');
+await page.press('#ps-ctx-lw', 'Enter');
+await page.waitForTimeout(500);
+const p60d = await p60();
+ok(Math.abs(p60d.ratio - p60a.ratio) < 0.001,
+   'an impossible width clamps to the page with the shape intact (' +
+   p60d.w + ' by ' + p60d.h + ', ratio ' + p60d.ratio + ')');
+
 ok(errors.length === 0, 'no page errors (' + errors.join(' | ') + ')');
 console.log('\nlayout-figure-check: all cases passed');
 await browser.close();

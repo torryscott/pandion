@@ -19454,10 +19454,30 @@
       if (!item) return;
       var mins = layMinSize(item);
       laySnapshot("resize", "resize");
-      if (prop === "w") item.w = layClamp(value, mins.w, p.w - item.x);
-      if (prop === "h") item.h = layClamp(value, mins.h, p.h - item.y);
+      // The typed fields keep the item's proportions, like the corner drag.
+      // Setting one side used to change that side alone, so the rail was
+      // the one resize in the app that letterboxed a chart by default. The
+      // OTHER side follows from the item's own current shape, and every
+      // clamp scales both sides by one factor so the shape survives the
+      // clamp too. Freeform remains where it always was, Shift on the
+      // corner drag.
+      var aspect = (Number(item.w) > 0 && Number(item.h) > 0)
+        ? Number(item.w) / Number(item.h) : 1;
+      var nw, nh;
+      if (prop === "w") { nw = value; nh = value / aspect; }
+      else { nh = value; nw = value * aspect; }
+      var roomW = p.w - (Number(item.x) || 0);
+      var roomH = p.h - (Number(item.y) || 0);
+      var fit = Math.min(1, roomW / nw, roomH / nh);
+      nw *= fit; nh *= fit;
+      if (nw < mins.w || nh < mins.h) {
+        var lift = Math.max(mins.w / nw, mins.h / nh);
+        nw *= lift; nh *= lift;
+      }
+      item.w = nw; item.h = nh;
       persist(); renderLayout();
-      layAnnounce("Resized " + layItemAccessibleLabel(item));
+      layAnnounce("Resized " + layItemAccessibleLabel(item) + " to " +
+        pxToUnit(nw) + " by " + pxToUnit(nh) + " " + unitLabel());
     }
   }
   // Scale the whole arrangement onto a new page, keeping every item its own
