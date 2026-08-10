@@ -2430,23 +2430,37 @@
     text-align: center; color: var(--ps-muted); font-size: 12.5px;
     padding: 60px 20px; max-width: 420px; margin: 0 auto; line-height: 1.6;
   }
+  /* A group header is a CONTAINER row, so it wears the rail's own grid
+     and nothing else: the chevron takes the 17px icon column every row's
+     glyph uses, the name starts where the row names start at heading
+     weight, and hover speaks the rows' language. No band and no card,
+     because this rail expresses hierarchy with alignment and weight (the
+     section labels are flat too) and its only surfaces are the active and
+     hover tints. A white bordered card was tried and read as a foreign
+     element (Torry, Aug 10 2026). Sentence case, because the name is the
+     user's own. */
   .ps-project-ghead {
     -webkit-appearance: none; appearance: none; display: flex;
-    align-items: center; gap: 6px; width: 100%; border: 0;
-    background: none; font: inherit; font-size: 11px; font-weight: 650;
-    color: var(--ps-ink-3); padding: 5px 12px 3px; cursor: pointer;
-    text-align: left; letter-spacing: 0.02em;
+    align-items: center; gap: 8px; width: 100%; border: 0;
+    border-radius: var(--ps-r-md); min-height: 28px;
+    background: transparent; font: inherit; font-size: 12px;
+    font-weight: 600; color: var(--ps-ink-3); padding: 4px 8px;
+    cursor: pointer; text-align: left;
   }
-  .ps-project-ghead:hover { color: var(--ps-accent-ink); }
+  .ps-project-ghead:hover { color: var(--ps-accent-ink); background: var(--ps-s3); }
   /* 10px, not smaller: tokens-check holds the app's type floor there. */
-  .ps-project-gchev { flex: 0 0 auto; font-size: 10px; color: var(--ps-muted); }
+  .ps-project-gchev {
+    flex: 0 0 auto; display: inline-flex; align-items: center;
+    justify-content: center; width: 17px; font-size: 10px;
+    color: var(--ps-ink-4);
+  }
   .ps-project-gname {
     flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
     white-space: nowrap;
   }
   .ps-project-gcount {
-    flex: 0 0 auto; font-weight: 400; color: var(--ps-muted);
-    background: var(--ps-s2); border-radius: 8px; padding: 0 6px;
+    flex: 0 0 auto; font-weight: 500; color: var(--ps-ink-4);
+    background: var(--ps-s3); border-radius: 8px; padding: 1px 7px;
     font-size: 10px;
   }
   .ps-project-ghead-editing { padding: 3px 12px 2px; }
@@ -2456,8 +2470,16 @@
     border-radius: var(--ps-r-sm);
   }
   /* Both classes, or the later .ps-project-item padding rule outranks the
-     indent by source order. */
+     indent by source order. GROUP members (chart rows) also hang off a
+     thin guide line at the icon column, the tree idiom, so containment
+     stays visible when the header has scrolled away; notebook page rows
+     share the class for their indent but keep their own look. */
   .ps-project-item.ps-project-item-grouped { padding-left: 26px; }
+  .ps-project-item.ps-project-item-grouped[data-project-chart-id] {
+    margin-left: 16px; width: calc(100% - 16px); padding-left: 10px;
+    border-left: 2px solid var(--ps-l2b); border-radius: 0 var(--ps-r-md)
+    var(--ps-r-md) 0;
+  }
   /* Notebook page rows: a number, a name that truncates, and a dot when
      the page's source chart has moved on since it was kept. */
   .ps-pinrow { gap: 7px; }
