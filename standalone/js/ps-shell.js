@@ -8931,6 +8931,12 @@
       else hideTip();
     });
     document.addEventListener("focusout", function (e) {
+      // Clearing the press marker here is what keeps the suppression above
+      // causal rather than merely timed. The focusin a press causes always
+      // arrives BEFORE any focusout, so the intended case is untouched, while
+      // a keyboard user who tabs away and back inside 400 ms gets the tooltip
+      // they asked for. It also stops the marker pinning a detached node.
+      TIP_PRESSED = null;
       if (tipTarget(e.target)) hideTip();
     });
     document.addEventListener("keydown", function (e) {
@@ -16633,7 +16639,7 @@
     var margin = Number(page.margin) || 0, gap = LAY_PLACE_GAP;
     var taken = [], xs = [margin], ys = [margin], i, j, k;
     for (i = 0; i < items.length; i++) {
-      var r = layItemRect(items[i]);
+      var r = layItemRect(items[i], page);
       if (!(r.w > 0) || !(r.h > 0)) continue;
       taken.push(r);
       xs.push(r.x, r.right + gap);
@@ -17108,8 +17114,13 @@
       for (i = 0; i < lines.length; i++)
         wide = Math.max(wide, ctx.measureText(lines[i]).width);
     } else wide = cap - LAY_TEXT_PAD_X * 2;
-    return { w: Math.min(cap, Math.max(18, wide + LAY_TEXT_PAD_X * 2)),
-             h: Math.max(1, lines.length) * fs * LAY_TEXT_LINE + 4 };
+    // ROUNDED, because the other half of this measurement is offsetWidth and
+    // offsetHeight, which are integers. A 56.5 px caption measured here and
+    // 57 on screen put the two placement routes half a pixel apart and wrote
+    // fractional coordinates into a model that is otherwise whole pixels.
+    return { w: Math.round(Math.min(cap,
+               Math.max(18, wide + LAY_TEXT_PAD_X * 2))),
+             h: Math.round(Math.max(1, lines.length) * fs * LAY_TEXT_LINE + 4) };
   }
   // Chart panels and images are both SIZED items (explicit w/h, corner
   // resize, proportional default); text items self-size.
@@ -17135,7 +17146,13 @@
       if (c.items[i] === item) return true;
     return false;
   }
-  function layItemRect(item) {
+  // page is optional and only used for TEXT, which wraps at whichever is
+  // smaller, the 480 px cap or the room left on its page. Callers working on
+  // a document that is not on screen have to pass it, because layPage() would
+  // hand back the page of whatever IS on screen. Without it a send clamped an
+  // off-screen layout using a 480 px estimate for a caption that renders
+  // narrower, and silently slid it left.
+  function layItemRect(item, page) {
     var w, h;
     if (laySizedKind(item)) {
       var mins = layMinSize(item);
@@ -17148,7 +17165,9 @@
       if (node && node.offsetWidth && node.offsetHeight) {
         w = node.offsetWidth; h = node.offsetHeight;
       } else {
-        var approx = layApproxTextRect(item);
+        var pw = page && Number(page.w) > 0 ? Number(page.w) : 0;
+        var approx = layApproxTextRect(item, pw
+          ? pw - (Number(item.x) || 0) : 0);
         w = approx.w; h = approx.h;
       }
     }
@@ -17188,7 +17207,7 @@
         item.w = layClamp(item.w || 480, mins2.w, p.w);
         item.h = layClamp(item.h || 320, mins2.h, p.h);
       }
-      var r = layItemRect(item);
+      var r = layItemRect(item, p);
       item.x = layClamp(item.x || 0, 0, Math.max(0, p.w - r.w));
       item.y = layClamp(item.y || 0, 0, Math.max(0, p.h - r.h));
     }
@@ -17822,9 +17841,18 @@
       // gives a second panel rather than a four-member group.
       if (copy.group) copy.group = dupGroups[copy.group] ||
         (dupGroups[copy.group] = layNewGroupId());
-      var r = layItemRect(copy);
-      copy.x = Math.min(Math.max(0, p.w - r.w), (Number(src.x) || 0) + dx);
-      copy.y = Math.min(Math.max(0, p.h - r.h), (Number(src.y) || 0) + dy);
+      if (!dx && !dy) {
+        // A copy made exactly on a legal item is legal, and measuring it
+        // here would measure a text item that is not in the document yet,
+        // so its rect falls to the estimate and the clamp shoves the copy
+        // hundreds of pixels left of the thing it is a copy OF.
+        copy.x = Number(src.x) || 0;
+        copy.y = Number(src.y) || 0;
+      } else {
+        var r = layItemRect(copy);
+        copy.x = Math.min(Math.max(0, p.w - r.w), (Number(src.x) || 0) + dx);
+        copy.y = Math.min(Math.max(0, p.h - r.h), (Number(src.y) || 0) + dy);
+      }
       layItems().push(copy);
       made.push(copy.id);
     }
@@ -19136,6 +19164,12 @@
         var copies = layDuplicateItems(d.ids, 0, 0);
         d.altCopy = false;
         if (copies.length) {
+          // What Escape has to take back. The copies sit exactly on their
+          // originals until the pointer moves, so a cancel that only restored
+          // positions left a second panel invisibly on top of the first, with
+          // no history entry and nothing for undo to remove.
+          d.copiedIds = copies.slice();
+          d.copiedFrom = d.ids.slice();
           laySetSelection(copies);
           renderLayout();
           d.ids = copies;
@@ -19149,6 +19183,10 @@
                              h: Number(cit.h) || 320 });
           }
           d.primary = layItemById(copies[copies.length - 1]) || d.primary;
+          // The bounds were measured for the ORIGINALS and the move clamp
+          // reads them, so leaving them stale pinned a copy against a page
+          // edge computed for an item that is no longer being dragged.
+          d.bounds = laySelectionBounds(copies) || d.bounds;
           layAnnounce("Duplicating " + copies.length + " item" +
             (copies.length === 1 ? "" : "s") + ".");
         }
@@ -19178,7 +19216,11 @@
         dx = Math.round((d.bounds.x + dx) / v.grid) * v.grid - d.bounds.x;
         dy = Math.round((d.bounds.y + dy) / v.grid) * v.grid - d.bounds.y;
       }
-      var adj = laySmartAdjust(d.bounds, dx, dy, d.ids);
+      // The originals are excluded from the guides too. A copy starts exactly
+      // on its source, so with snapping off a short drag was pulled straight
+      // back onto it by the smart guides and looked like nothing happened.
+      var adj = laySmartAdjust(d.bounds, dx, dy,
+        d.copiedFrom ? d.ids.concat(d.copiedFrom) : d.ids);
       dx = layClamp(adj.dx, -d.bounds.x, p.w - d.bounds.right);
       dy = layClamp(adj.dy, -d.bounds.y, p.h - d.bounds.bottom);
       layShowGuides(adj.gx, adj.gy);
@@ -19212,6 +19254,17 @@
       var o = d.origins[i];
       o.item.x = o.x; o.item.y = o.y;
       if (laySizedKind(o.item)) { o.item.w = o.w; o.item.h = o.h; }
+    }
+    // An Alt+drag that is cancelled has to lose its copies, or it leaves a
+    // second item exactly on top of the first with no history entry, which is
+    // both invisible and permanent.
+    if (d.copiedIds && d.copiedIds.length) {
+      var items = layItems(), keep = [], ci2;
+      for (ci2 = 0; ci2 < items.length; ci2++)
+        if (d.copiedIds.indexOf(items[ci2].id) === -1) keep.push(items[ci2]);
+      items.length = 0;
+      for (ci2 = 0; ci2 < keep.length; ci2++) items.push(keep[ci2]);
+      laySetSelection(d.copiedFrom || []);
     }
     renderLayout();
     return true;
@@ -20552,6 +20605,28 @@
     }
     return named.length ? label + " \u00b7 " + named.join(" \u00d7 ") : label;
   }
+  // How many things are actually ON the axes. x categories arrive
+  // facet-encoded, so the panel prefix is stripped before they are counted,
+  // and both counts are distinct values rather than list lengths.
+  function chartAxisCounts(p) {
+    var sep = typeof p.facetSeparator === "string" && p.facetSeparator
+      ? p.facetSeparator : "";
+    var xs = Array.isArray(p.xCategories) ? p.xCategories : [];
+    var seen = {}, cats = 0, i, key, at;
+    for (i = 0; i < xs.length; i++) {
+      key = String(xs[i]);
+      if (sep) {
+        at = key.indexOf(sep);
+        if (at !== -1) key = key.slice(at + sep.length);
+      }
+      if (!Object.prototype.hasOwnProperty.call(seen, "k" + key)) {
+        seen["k" + key] = 1; cats++;
+      }
+    }
+    var gs = p.hasGroups && Array.isArray(p.groupCategories)
+      ? p.groupCategories.length : 0;
+    return { cats: cats, groups: gs };
+  }
   function chartCaseText(c) {
     try {
       var built = buildPayload();
@@ -20568,7 +20643,10 @@
         // Plurals are declared, not derived. Adding "s" to "category" was
         // printing "2 categorys" under every grouped frequency chart.
         var noun = ["plotted value", "plotted values"];
-        if (c.module === "plotbuilder") noun = ["group", "groups"];
+        // The x levels are CATEGORIES even here, and the grouping variable's
+        // levels are the groups. Calling both groups printed the unusable
+        // "3 groups, 2 groups" the moment a grouping variable was added.
+        if (c.module === "plotbuilder") noun = ["category", "categories"];
         else if (c.module === "rmplotbuilder") noun = ["condition", "conditions"];
         else if (c.module === "freqplotbuilder") noun = ["category", "categories"];
         // Distribution ships one cell per group and the engine bins the raw
@@ -20579,7 +20657,16 @@
           noun = ["distribution", "distributions"];
         else if (c.module === "likertplotbuilder")
           noun = ["response category", "response categories"];
-        bits.push(cells + " " + noun[cells === 1 ? 0 : 1]);
+        // bars.length is CELLS, which is categories times groups times
+        // panels. Reporting it as the noun said "6 categories" over a chart
+        // with three of them and "6 groups" over a chart with two. Only
+        // Distribution, whose x axis is one empty slot, has a cell per
+        // distribution and so counts correctly from the cells.
+        var axis = c.module === "distplotbuilder"
+          ? { cats: cells, groups: 0 } : chartAxisCounts(p);
+        bits.push(axis.cats + " " + noun[axis.cats === 1 ? 0 : 1]);
+        if (axis.groups > 1)
+          bits.push(axis.groups + " group" + (axis.groups === 1 ? "" : "s"));
       }
       if (p.missingNote) bits.push(p.missingNote);
       return bits.length ? bits.join(" \u00b7 ") : "Ready";
@@ -22021,9 +22108,12 @@
   // that is true. The item menu on the canvas carries it instead, and says
   // which duplicate it means.
   function commandShortcut(item) {
+    // No workspace test, because the handler that takes the key has none.
+    // Switching to Data or the Notebook leaves the layout document active and
+    // its selection intact, so Cmd/Ctrl+D still duplicated the SELECTION
+    // while the Edit menu went back to advertising the document.
     if (item.command === "duplicate-document" &&
-        appWorkspace() === "layout" && isLayoutTab(activeChart()) &&
-        laySelectedIds().length) return "";
+        isLayoutTab(activeChart()) && laySelectedIds().length) return "";
     return item.shortcut || "";
   }
   // ---- punch list t3-55: the shortcuts sheet ----
@@ -22044,6 +22134,8 @@
       for (var i = 0; i < defs.length; i++) {
         var item = defs[i];
         if (item === "separator" || !item.shortcut || seen[item.command]) continue;
+        // The sheet is a reference rather than a live menu, so it prints the
+        // key unconditionally and says who arbitrates instead.
         seen[item.command] = 1;
         rows.push([commandLabel(item).replace(/\u2026/g, ""),
                    item.shortcut.replace(/\+/g, " + ").replace(/ {2,}/g, " ")]);
@@ -23458,6 +23550,12 @@
       }
       (function (item) {
         var b = mkEl("button", "", item.label);
+        // Menu rows carry a shortcut when the key belongs to THIS command
+        // rather than to the document-level one of the same name. Without
+        // rendering it the property was dead data and the key was advertised
+        // in no menu at all at the moment the Edit menu withdrew it.
+        if (item.shortcut)
+          b.appendChild(mkEl("span", "ps-menu-shortcut", item.shortcut));
         b.type = "button";
         // item.action: a direct callback for dynamic targets (the group
         // menus), where a registered command name would be ceremony.
@@ -23619,7 +23717,7 @@
             item.command === "command-palette") continue;
         seen[item.command] = 1;
         out.push({ label: commandLabel(item).replace(/\u2026/g, ""),
-                   group: groups[gi][0], shortcut: item.shortcut || "",
+                   group: groups[gi][0], shortcut: commandShortcut(item),
                    command: item.command, layoutOnly: item.layoutOnly });
       }
     }

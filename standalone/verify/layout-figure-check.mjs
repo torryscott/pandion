@@ -60,6 +60,23 @@
 //      deliver the promise.
 //  20  Alt+drag moved the item, like a plain drag, in an application where
 //      every neighbour pulls off a copy.
+//  21  Escape during an Alt+drag left the copy behind, at 57,32 on top of
+//      57,32, with layoutHistoryDepth still 0 and nothing for undo to
+//      remove. Invisible on screen and present in select-all, Same size,
+//      plot-align and every export.
+//  22  an Alt+drag copy of a caption near the right edge was born 309 px
+//      left of its source, because the copy was clamped with a rect measured
+//      before it joined the document, and its x then stayed pinned because
+//      the drag kept the ORIGINAL selection's bounds.
+//  23  with snapping off, a 4 px Alt+drag put the copy back at 120,160 on
+//      top of its source at 120,160, because the source stopped being
+//      excluded from the smart guides and became a guide for its own copy.
+//  24  a send measured an off-screen layout's text at the flat 480 px cap
+//      while the canvas wraps at the room left on the page, so it silently
+//      moved a caption that had no need to move.
+//  25  case 48 pinned the two placement routes at x 32, the one position
+//      where the estimate and the rendered box agree by construction, so it
+//      could not have caught 24.
 //
 // One hazard is closed here WITHOUT a live repro, and is recorded rather than
 // probed. Item ids are per document and every template starts at i1, so the
@@ -2029,7 +2046,13 @@ async function p48Fixture() {
     await page.waitForTimeout(1300);
     return page.evaluate(() => {
         const c = window.PS_SHELL.chart();
-        c.items.push({ id: 'i1', kind: 'text', fontSize: 14, x: 32, y: 32,
+        // x 380 on a 672-wide page, NOT the margin. At x 32 the room left
+        // on the page exceeds the 480 px cap, so the estimate and the
+        // rendered box agree by construction and the case cannot fail. Here
+        // the caption wraps at the room it has, and a send measuring it at
+        // the flat cap reads it wider than it is.
+        c.page = { preset: 'canvasp', w: 672, h: 1008, margin: 32 };
+        c.items.push({ id: 'i1', kind: 'text', fontSize: 14, x: 380, y: 32,
             text: 'Figure 2. Scores by condition across every session, ' +
                   'with ninety five per cent confidence intervals shown.' });
         window.PS_SHELL.selectLayoutItems([]);
@@ -2046,9 +2069,14 @@ const p48Caption = await page.evaluate(() => {
     const r = n.getBoundingClientRect();
     return { w: +(r.width / z).toFixed(1), h: +(r.height / z).toFixed(1) };
 });
-ok(p48Caption.h > 20,
-   'the caption renders as a real box (' + p48Caption.w + ' by ' +
+ok(p48Caption.h > 20 && p48Caption.w < 480,
+   'the caption renders narrower than the 480 px cap, so the estimate and ' +
+   'the rendered box can disagree (' + p48Caption.w + ' by ' +
    p48Caption.h + ')');
+const p48Moved = await page.evaluate(id => {
+    const c = window.PS_SHELL.charts().find(x => x.id === id);
+    return c.items.filter(i => i.kind === 'text')[0].x;
+}, p48Sent);
 await p41Send('chart-to-' + p48Sent);
 const p48A = await page.evaluate(id => {
     const c = window.PS_SHELL.charts().find(x => x.id === id);
@@ -2251,6 +2279,149 @@ await page.waitForTimeout(1300);
 const p51Chart = await p51Edit();
 ok(p51Chart && /Cmd\/Ctrl\+D/.test(p51Chart.key),
    'the chart workspace is untouched ("' + (p51Chart || {}).key + '")');
+
+console.log('case 52: Escape during an Alt+drag takes the copy back');
+// The gesture made its copies on the first movement and repointed the drag at
+// them, and layCancelDrag only restored positions. Escape therefore left a
+// second panel exactly on top of the first, at 57,32 over 57,32, with
+// layoutHistoryDepth still 0 and nothing for undo to remove. Invisible on
+// screen, and present in select-all, Same size, plot-align and every export.
+await page.evaluate(() => window.PS_SHELL.setWorkspace('layout'));
+await page.waitForTimeout(500);
+await page.evaluate(() => window.PS_SHELL.showLayoutGallery());
+await page.waitForTimeout(500);
+await page.click('[data-layout-template="single"]');
+await page.waitForTimeout(300);
+await page.click('[data-layout-create], #ps-layout-gallery-create');
+await page.waitForTimeout(3200);
+const p52 = () => page.evaluate(() => {
+    const c = window.PS_SHELL.chart();
+    return { n: c.items.length, depth: window.PS_SHELL.layoutHistoryDepth(),
+             ids: c.items.map(i => i.id),
+             sel: window.PS_SHELL.layoutSelection().slice() };
+});
+const p52Before = await p52();
+const p52Grab = await page.evaluate(() => {
+    const n = document.querySelector('#ps-lcanvas .ps-litem');
+    n.scrollIntoView({ block: 'center' });
+    const r = n.getBoundingClientRect();
+    return { x: r.left + 40, y: r.top + 40 };
+});
+await page.keyboard.down('Alt');
+await page.mouse.move(p52Grab.x, p52Grab.y);
+await page.mouse.down();
+await page.mouse.move(p52Grab.x + 80, p52Grab.y + 50, { steps: 6 });
+await page.keyboard.press('Escape');
+await page.waitForTimeout(400);
+await page.mouse.up();
+await page.keyboard.up('Alt');
+await page.waitForTimeout(700);
+const p52After = await p52();
+ok(p52After.n === p52Before.n,
+   'a cancelled Alt+drag leaves the item count where it was (' +
+   p52Before.n + ' to ' + p52After.n + ')');
+ok(p52After.depth === p52Before.depth,
+   'and pushes no history entry (' + p52After.depth + ')');
+ok(p52After.ids.join() === p52Before.ids.join(),
+   'the items are the ones that were there (' + p52After.ids.join() + ')');
+// The press itself selects what it pressed, so the selection is the ORIGINAL
+// rather than whatever was selected before the gesture started.
+ok(p52After.sel.length === 1 &&
+   p52Before.ids.indexOf(p52After.sel[0]) !== -1,
+   'and the selection is the original, not a copy that no longer exists (' +
+   p52After.sel.join() + ')');
+
+console.log('case 53: an Alt+drag copy goes where the pointer goes');
+// Two faults compounded on a text item near the right edge. The copy was
+// clamped with a rect measured before it joined the document, so it was born
+// hundreds of pixels left of its source rather than in place, and the drag
+// kept the ORIGINAL selection's bounds, so the move clamp was computed for an
+// item that was no longer being dragged and pinned the copy's x.
+await page.evaluate(() => {
+    const c = window.PS_SHELL.chart();
+    // LONG text at a right-edge x, which is the shape that separates the two
+    // measurements. The rendered box is bounded by the room left on the page,
+    // about 100 px here, while an estimate taken at the flat 480 px cap reads
+    // it as roughly 455 wide, and the clamp then shoves the copy left by the
+    // difference. A short caption measures the same either way and cannot
+    // show it, which is how the first version of this case passed against the
+    // very code it was written for.
+    c.items.push({ id: 'i80', kind: 'text', fontSize: 14, x: 900, y: 420,
+                   text: 'Scores by condition across every session, with ' +
+                         'ninety five per cent confidence intervals.' });
+    c.view.snap = false;
+    window.PS_SHELL.selectLayoutItems(['i80']);
+});
+await page.waitForTimeout(700);
+const p53Grab = await page.evaluate(() => {
+    const n = document.querySelector('#ps-lcanvas .ps-litem[data-item-id="i80"]');
+    n.scrollIntoView({ block: 'center' });
+    const r = n.getBoundingClientRect();
+    return { x: r.left + 8, y: r.top + 8 };
+});
+await page.keyboard.down('Alt');
+await page.mouse.move(p53Grab.x, p53Grab.y);
+await page.mouse.down();
+await page.mouse.move(p53Grab.x + 10, p53Grab.y + 40, { steps: 4 });
+await page.mouse.move(p53Grab.x + 20, p53Grab.y + 90, { steps: 6 });
+await page.mouse.up();
+await page.keyboard.up('Alt');
+await page.waitForTimeout(700);
+const p53 = await page.evaluate(() => {
+    const c = window.PS_SHELL.chart();
+    const t = c.items.filter(i => i.kind === 'text');
+    const src = t.filter(i => i.id === 'i80')[0];
+    const copy = t.filter(i => i.id !== 'i80')[0];
+    return { src: src ? { x: src.x, y: src.y } : null,
+             copy: copy ? { x: copy.x, y: copy.y } : null, n: t.length };
+});
+ok(p53.n === 2 && p53.copy, 'the copy was made');
+ok(p53.src.x === 900, 'the original did not move (' + p53.src.x + ')');
+ok(Math.abs(p53.copy.x - 900) < 40,
+   'and the copy started where its source is rather than hundreds of ' +
+   'pixels away (' + p53.copy.x + ' against 900)');
+ok(p53.copy.y > p53.src.y + 40,
+   'the copy followed the pointer down the page (' + p53.copy.y +
+   ' against ' + p53.src.y + ')');
+
+console.log('case 54: a short Alt+drag is not snapped back onto its source');
+// With snapping off, the copy starts exactly on its source and the source
+// stopped being excluded from the smart guides, so it became a guide for its
+// own copy and a 4 px drag put them back on top of each other.
+await page.evaluate(() => {
+    const c = window.PS_SHELL.chart();
+    // i900, well clear of the ids the app hands out, because case 53's own
+    // Alt+drag copy legitimately takes the next one and a hardcoded id
+    // collided with it.
+    c.items.push({ id: 'i900', kind: 'text', fontSize: 14, x: 120, y: 160,
+                   text: 'Note' });
+    c.view.snap = false;
+    window.PS_SHELL.selectLayoutItems(['i900']);
+});
+await page.waitForTimeout(700);
+const p54Grab = await page.evaluate(() => {
+    const n = document.querySelector('#ps-lcanvas .ps-litem[data-item-id="i900"]');
+    n.scrollIntoView({ block: 'center' });
+    const r = n.getBoundingClientRect();
+    return { x: r.left + 6, y: r.top + 6 };
+});
+await page.keyboard.down('Alt');
+await page.mouse.move(p54Grab.x, p54Grab.y);
+await page.mouse.down();
+await page.mouse.move(p54Grab.x + 4, p54Grab.y + 4, { steps: 2 });
+await page.mouse.move(p54Grab.x + 4, p54Grab.y + 4, { steps: 2 });
+await page.mouse.up();
+await page.keyboard.up('Alt');
+await page.waitForTimeout(700);
+const p54 = await page.evaluate(() => {
+    const c = window.PS_SHELL.chart();
+    const t = c.items.filter(i => i.kind === 'text' && /^Note$/.test(i.text));
+    return t.map(i => ({ id: i.id, x: i.x, y: i.y }));
+});
+ok(p54.length === 2, 'the short drag still made a copy (' + p54.length + ')');
+ok(!(p54[0].x === p54[1].x && p54[0].y === p54[1].y),
+   'and the two are not sitting on each other (' +
+   p54.map(i => i.x + ',' + i.y).join(' and ') + ')');
 
 ok(errors.length === 0, 'no page errors (' + errors.join(' | ') + ')');
 console.log('\nlayout-figure-check: all cases passed');

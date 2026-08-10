@@ -149,6 +149,19 @@ ok(!/categorys/.test(freqBar.text),
    `a frequency chart does not say "categorys" ("${freqBar.text}")`);
 ok(/\d+ categor(y|ies)\b/.test(freqBar.text),
    `it counts categories ("${freqBar.text}")`);
+// GROUPED, which is where the count was wrong. bars.length is cells, so a
+// three-category chart with two sites reported six of whatever noun applied.
+const freqGrouped = await statusFor('freqplotbuilder',
+                                    { var: 'condition', groupVar: 'site' });
+ok(/3 categories/.test(freqGrouped.text),
+   `it counts the categories on the axis, not the cells ("${freqGrouped.text}")`);
+ok(/2 groups/.test(freqGrouped.text),
+   `and reports the grouping separately ("${freqGrouped.text}")`);
+const cgGrouped = await statusFor('plotbuilder',
+    { xvar: 'condition', yvar: 'score', groupVar: 'site' });
+ok(/3 categories/.test(cgGrouped.text) && /2 groups/.test(cgGrouped.text),
+   `Compare Groups says the same thing rather than "3 groups, 2 groups" ` +
+   `("${cgGrouped.text}")`);
 const histBar = await statusFor('distplotbuilder', { var: 'score' },
                                 { count: '[data-role="dist-hist-bar"]' });
 ok(histBar.drawn > 1,

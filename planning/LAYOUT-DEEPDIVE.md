@@ -603,7 +603,65 @@ the thing it will actually do. The chart and data workspaces are untouched.
 
 ---
 
-## 16. Two things I recorded as defects and could not reproduce
+## 16. What the third adversarial pass found
+
+Seven agents over the whole range. Nine confirmed, one of them a blocker in a
+gesture I had shipped the same day.
+
+- **Escape during an Alt+drag left the copy behind.** The copies are made on
+  the first movement and the drag is repointed at them, and `layCancelDrag`
+  only restored positions. So a cancel left a second panel at 57,32 on top of
+  57,32, with no history entry and nothing for undo to remove. Invisible on
+  screen, and present in select-all, Same size, plot-align and every export.
+  My own case 50 exercised the release and never the cancel.
+- **An Alt+drag copy of a caption near the right edge was born 309 px left of
+  its source**, because the copy was clamped with a rect measured before it
+  joined the document, and then its x stayed pinned because the drag kept the
+  ORIGINAL selection's bounds while the move clamp read them.
+- **With snapping off, a 4 px Alt+drag put the copy back exactly on its
+  source**, because the source stopped being excluded from the smart guides
+  and became a guide for its own copy.
+- **A send silently moved a caption it had no business touching.** The
+  doc-aware clamp from item 11 runs on a layout that is not on screen, where
+  the identity guard correctly refuses the DOM, so every text item fell to an
+  estimate taken at the flat 480 px cap while the canvas wraps at the room
+  left on the page. The measurement now takes the page it belongs to.
+- **The Cmd/Ctrl+D hint from item 15 was never rendered.** `showContextMenu`
+  built each row from the label alone, so the property was dead data and in
+  the exact state that item targeted the key was advertised in no menu at
+  all. And the gate carried a workspace test the handler does not have, so
+  the Edit menu went back to claiming the key in Data and the Notebook while
+  the layout still took it.
+- **The status bar counted cells and called them categories.** Item 13 fixed
+  the plural and the Distribution noun and left the quantity, and
+  `bars.length` is categories times groups times panels. A three-category
+  chart with two sites read "6 categories", and Compare Groups read
+  "6 groups" for two of them. It counts the axis now and reports the grouping
+  separately, and calls the x levels categories, because "3 groups, 2 groups"
+  was the alternative.
+- **The tooltip guard from item 14 was timed rather than causal**, so a
+  keyboard user tabbing away and back inside 400 ms lost the tooltip they had
+  asked for. Clearing the marker when focus leaves keeps the case the guard
+  exists for, since a press-caused focus always arrives before any focusout.
+
+**And a lesson about my own probes.** The first versions of the two Alt+drag
+cases passed against the unfixed code. A short caption measures the same at
+the cap and at the page edge, and a 9 px drag is past the guide tolerance, so
+neither fixture could express the thing it was written for. I only caught it
+because running the new cases against the previous commit is part of the
+routine. Both now fail before and pass after, at 591 against 900 and at
+120,160 on top of 120,160.
+
+Two findings were confirmed and deliberately left. A tooltip summoned by a
+pointer still parks when focus is restored to a DIFFERENT control, which is
+the same family as item 14 but predates it and reaches every
+`shellRestoreFocus` caller. And Edit's Select all is enabled and a silent
+no-op outside the Data workspace while advertising a key the layout claims,
+which is the same shape as item 15 one row further up the same menu.
+
+---
+
+## 17. Two things I recorded as defects and could not reproduce
 
 Both are struck rather than fixed, because measuring them showed nothing
 wrong.

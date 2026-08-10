@@ -274,6 +274,35 @@ ok(!p9After.tipOpen && !p9After.overlap,
 await page.keyboard.press('Escape');
 await page.waitForTimeout(300);
 
+console.log('case 10: the press guard does not swallow a keyboard return');
+// The guard was a timestamp rather than causality, so any return of focus to
+// the pressed control within 400 ms was suppressed too, including a keyboard
+// user tabbing away and back. The press-caused focusin always arrives before
+// any focusout, so clearing the marker there keeps the case it exists for.
+// Driven from the same real press case 9 uses, and the round trip is timed,
+// so the case cannot pass merely by taking longer than the window.
+await page.evaluate(() => { window.__p10At = Date.now(); });
+await page.mouse.click(p9.x, p9.y);
+const p10 = await page.evaluate(async () => {
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const b = document.getElementById('ps-project-add');
+    const t = document.getElementById('ps-tip');
+    t.removeAttribute('data-open');
+    b.blur();
+    await sleep(20);
+    b.focus();
+    await sleep(90);
+    return { open: t.getAttribute('data-open') === '1',
+             ms: Date.now() - window.__p10At };
+});
+ok(p10.ms < 400,
+   'the whole round trip finished inside the suppression window (' +
+   p10.ms + ' ms)');
+ok(p10.open,
+   'and focus returning to the pressed control still shows the tooltip');
+await page.keyboard.press('Escape');
+await page.waitForTimeout(250);
+
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('CHROME CHECK PASS');
 await browser.close();
