@@ -2462,6 +2462,12 @@
   /* Notebook page rows: a number, a name that truncates, and a dot when
      the page's source chart has moved on since it was kept. */
   .ps-pinrow { gap: 7px; }
+  /* rail chart drag: the DROP TARGET wears a ring, deliberately unlike the
+     page rows' insertion line, because dropping ONTO a chart groups with it
+     while dropping BETWEEN pages reorders them */
+  .ps-grouprow-target {
+    box-shadow: inset 0 0 0 2px var(--ps-accent); border-radius: var(--ps-r-sm);
+  }
   /* rail page drag: the lifted row dims, the insertion mark is an inset
      accent line so nothing shifts while choosing a slot */
   .ps-pinrow-lift { opacity: 0.45; }
@@ -29818,6 +29824,98 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     '<rect x="3" y="4" width="18" height="16" rx="2"/>' +
     '<path d="M12 4v16M3 12h9"/></svg>';
   MODULE_RAIL_ICONS.plotbuilder = RAIL_ICON_CHART;
+  // ---- drag a chart row onto another to GROUP them ----------------
+  // The menu path (right-click, Move to group, pick a name) survives, but
+  // the elegant path is the one every desktop teaches: drop a chart ON
+  // another chart and the two become a group, named in place; drop it on a
+  // group and it joins; drop a grouped chart on the Charts label and it
+  // leaves its group. Deliberately DIFFERENT from the page rows one section
+  // down, which drag BETWEEN rows to reorder: charts drop ONTO things, and
+  // the target wears a ring rather than an insertion line, so the two
+  // gestures cannot be mistaken for each other.
+  var RAIL_CHART_DRAG = null;
+  function railChartDragClear() {
+    var marked = document.querySelectorAll(
+      ".ps-grouprow-target, .ps-pinrow-lift[data-project-chart-id]");
+    for (var i = 0; i < marked.length; i++)
+      marked[i].classList.remove("ps-grouprow-target", "ps-pinrow-lift");
+  }
+  function railChartDragTarget(e) {
+    var el2 = document.elementFromPoint(e.clientX, e.clientY);
+    if (!el2 || !el2.closest) return null;
+    var row = el2.closest("[data-project-chart-id]");
+    if (row) {
+      var tid = row.getAttribute("data-project-chart-id");
+      if (tid === RAIL_CHART_DRAG.chartId) return null;
+      var tdoc = chartById(tid);
+      if (!tdoc || isLayoutTab(tdoc)) return null;
+      return { kind: "chart", el: row, id: tid,
+               group: chartGroupOf(tdoc) };
+    }
+    var head = el2.closest("[data-group-name]");
+    if (head) return { kind: "group", el: head,
+                       group: head.getAttribute("data-group-name") };
+    var label = el2.closest(".ps-project-group-label");
+    if (label && label.textContent === "Charts" &&
+        chartGroupOf(chartById(RAIL_CHART_DRAG.chartId)))
+      return { kind: "ungroup", el: label };
+    return null;
+  }
+  function railChartDragStart(e, chartId) {
+    RAIL_CHART_DRAG = { chartId: chartId, sy: e.clientY, sx: e.clientX,
+                        armed: false };
+    document.addEventListener("pointermove", railChartDragMove);
+    document.addEventListener("pointerup", railChartDragUp);
+  }
+  function railChartDragMove(e) {
+    var d = RAIL_CHART_DRAG;
+    if (!d) return;
+    if (!d.armed && Math.abs(e.clientY - d.sy) < 4 &&
+        Math.abs(e.clientX - d.sx) < 4) return;
+    d.armed = true;
+    e.preventDefault();
+    railChartDragClear();
+    var src = document.querySelector(
+      '[data-project-chart-id="' + d.chartId + '"]');
+    if (src) src.classList.add("ps-pinrow-lift");
+    var t = railChartDragTarget(e);
+    if (t) t.el.classList.add("ps-grouprow-target");
+  }
+  function railChartDragUp(e) {
+    var d = RAIL_CHART_DRAG;
+    RAIL_CHART_DRAG = null;
+    document.removeEventListener("pointermove", railChartDragMove);
+    document.removeEventListener("pointerup", railChartDragUp);
+    if (!d || !d.armed) return;
+    RAIL_CHART_DRAG = d;                 // the target reader needs the id
+    var t = railChartDragTarget(e);
+    RAIL_CHART_DRAG = null;
+    railChartDragClear();
+    if (!t) return;
+    var swallow = function (ce) {
+      if (!ce.isTrusted) return;
+      ce.stopPropagation(); ce.preventDefault();
+      document.removeEventListener("click", swallow, true);
+    };
+    document.addEventListener("click", swallow, true);
+    window.setTimeout(function () {
+      document.removeEventListener("click", swallow, true);
+    }, 250);
+    if (t.kind === "ungroup") { setChartGroup(d.chartId, ""); return; }
+    if (t.kind === "group" || (t.kind === "chart" && t.group)) {
+      setChartGroup(d.chartId, t.group);
+      return;
+    }
+    // Two loose charts become a NEW group, named exactly once, in place,
+    // the same rename-in-place the menu path arms.
+    var base = "New group", name = base, nno = 2;
+    while (chartGroups().some(function (g) {
+      return g.toLowerCase() === name.toLowerCase(); }))
+      name = base + " " + (nno++);
+    setChartGroup(d.chartId, name);
+    setChartGroup(t.id, name);
+    startGroupRename(name);
+  }
   // ---- drag to reorder pages ON THE RAIL --------------------------
   // The dist-drag idiom: document-level listeners, a 4 px threshold so a
   // press that never travels stays a click, an insertion mark instead of
@@ -29917,6 +30015,12 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
         e.preventDefault();
         showDocumentContextMenu(e.clientX, e.clientY, doc.id);
       });
+      // Charts group by drag; layouts do not group at all.
+      if (!wantLayout)
+        b.addEventListener("pointerdown", function (e) {
+          if (e.button !== 0) return;
+          railChartDragStart(e, doc.id);
+        });
       return b;
     }
     function groupHeader(name, memberCount, collapsed) {

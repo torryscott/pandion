@@ -262,6 +262,93 @@ ok(await page.evaluate(() =>
    (await railHeads()).length === 0,
    'a CSV open replaces the documents, groups included (t4-67 extended)');
 
+console.log('case 8: charts group by DRAG, the way every desktop teaches');
+// The only way into a group was right-click, Move to group, second menu.
+// Now a chart row drops ONTO another chart to form a group of the two
+// (named exactly once, in place), onto a group header to join it, and a
+// grouped chart drops onto the Charts label to leave. Deliberately unlike
+// the page rows one section down, which drag BETWEEN rows to reorder: the
+// target wears a ring, not an insertion line, so the gestures cannot be
+// mistaken. The menu path survives untouched.
+await page.evaluate(async () => {
+    const w = ms => new Promise(r => setTimeout(r, ms));
+    while (window.PS_SHELL.charts().filter(c => c.type !== 'layout').length < 3) {
+        window.PS_SHELL.addChart(); await w(600);
+    }
+    // start clean: no groups
+    window.PS_SHELL.charts().forEach(c => { delete c.group; });
+});
+await page.waitForTimeout(800);
+const p8ids = await page.evaluate(() =>
+    window.PS_SHELL.charts().filter(c => c.type !== 'layout')
+        .map(c => c.id).slice(0, 3));
+const p8state = () => page.evaluate(() => ({
+    groups: window.PS_SHELL.charts().filter(c => c.type !== 'layout')
+        .map(c => c.group || ''),
+    renameOpen: !!document.querySelector('[data-group-rename]')
+}));
+const p8mid = id => page.evaluate(x => {
+    const n = document.querySelector('[data-project-chart-id="' + x + '"]');
+    n.scrollIntoView({ block: 'center' });
+    const r = n.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+}, id);
+let p8a = await p8mid(p8ids[0]), p8b = await p8mid(p8ids[1]);
+await page.mouse.move(p8a.x, p8a.y);
+await page.mouse.down();
+await page.mouse.move(p8a.x + 2, p8a.y + 10, { steps: 2 });
+await page.mouse.move(p8b.x, p8b.y, { steps: 5 });
+await page.mouse.up();
+await page.waitForTimeout(600);
+const p8c = await p8state();
+ok(p8c.groups[0] && p8c.groups[0] === p8c.groups[1] && !p8c.groups[2],
+   'dropping one chart on another makes a group of exactly those two (' +
+   p8c.groups.join(',') + ')');
+ok(p8c.renameOpen,
+   "with the name armed for typing in place, the menu path's own idiom");
+await page.keyboard.type('Figure pair');
+await page.keyboard.press('Enter');
+await page.waitForTimeout(500);
+const p8head = await page.evaluate(() => {
+    const h = document.querySelector('[data-group-name]');
+    const r = h.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2,
+             name: h.getAttribute('data-group-name') };
+});
+ok(p8head.name === 'Figure pair', 'the typed name landed (' + p8head.name + ')');
+let p8m = await p8mid(p8ids[2]);
+await page.mouse.move(p8m.x, p8m.y);
+await page.mouse.down();
+await page.mouse.move(p8m.x + 2, p8m.y - 10, { steps: 2 });
+await page.mouse.move(p8head.x, p8head.y, { steps: 5 });
+await page.mouse.up();
+await page.waitForTimeout(600);
+ok((await p8state()).groups.every(g => g === 'Figure pair'),
+   'dropping a third chart on the header joins it');
+const p8label = await page.evaluate(() => {
+    const l = [...document.querySelectorAll('.ps-project-group-label')]
+        .find(x => x.textContent === 'Charts');
+    const r = l.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+});
+p8m = await p8mid(p8ids[2]);
+await page.mouse.move(p8m.x, p8m.y);
+await page.mouse.down();
+await page.mouse.move(p8m.x + 2, p8m.y - 10, { steps: 2 });
+await page.mouse.move(p8label.x, p8label.y, { steps: 5 });
+await page.mouse.up();
+await page.waitForTimeout(600);
+const p8u = await p8state();
+ok(p8u.groups[2] === '' && p8u.groups[0] === 'Figure pair',
+   'and dropping a member on the Charts label takes it back out (' +
+   p8u.groups.join(',') + ')');
+const p8was = await page.evaluate(() => window.PS_SHELL.chart().id);
+let p8r = await p8mid(p8ids[0]);
+await page.mouse.click(p8r.x, p8r.y);
+await page.waitForTimeout(500);
+ok(await page.evaluate(() => window.PS_SHELL.chart().id) === p8ids[0],
+   'a press that never travels is still a click, and activates the chart');
+
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('CHART GROUPS CHECK PASS');
 await browser.close();
