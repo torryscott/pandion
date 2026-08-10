@@ -2728,7 +2728,10 @@
   }
   #ps-appmenu button:hover { color: var(--ps-accent-ink); background: var(--ps-s3); }
   #ps-appmenu button:disabled { color: var(--ps-muted); background: transparent; }
-  #ps-appmenu .ps-menu-shortcut { margin-left: 25px; color: var(--ps-ink); font-size: 10.5px; }
+  /* Both menus render the span; scoping this to the app menu alone left the
+     layout item menu reading "DuplicateCmd/Ctrl+D" run together. */
+  #ps-appmenu .ps-menu-shortcut, #ps-contextmenu .ps-menu-shortcut {
+    margin-left: 25px; color: var(--ps-ink); font-size: 10.5px; }
   #ps-appmenu .ps-menu-separator { height: 1px; margin: 4px 5px; background: var(--ps-l2); }
   #ps-contextmenu {
     position: fixed; display: none; z-index: 12500; min-width: 185px;

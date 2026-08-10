@@ -18761,6 +18761,12 @@
     });
     document.addEventListener("keydown", function (e) {
       if (!isLayoutTab(activeChart())) return;
+      // The visible workspace owns the keys, the undo router's rule. A
+      // layout stays the ACTIVE document while the Data workspace is on
+      // screen, so without this gate Cmd/Ctrl+D duplicated a hidden layout
+      // item from the data grid, Delete could remove one, and nothing on
+      // screen changed.
+      if (appWorkspace() !== "layout") return;
       var t = e.target;
       if (t && t.closest &&
           t.closest("input, textarea, select, [contenteditable]")) return;
@@ -20664,6 +20670,15 @@
         // distribution and so counts correctly from the cells.
         var axis = c.module === "distplotbuilder"
           ? { cats: cells, groups: 0 } : chartAxisCounts(p);
+        // Pie and donut ship each slice in the GROUP field with one empty x
+        // slot (the module convention, so per-slice colors and the legend
+        // come free), so the axis counts read a three-slice pie as one
+        // category with three groups. The slices ARE the categories, and
+        // there is no grouping variable to report.
+        if (c.module === "freqplotbuilder" &&
+            /^(pie|donut)$/.test(String(p.graphType || "")))
+          axis = { cats: (Array.isArray(p.groupCategories)
+            ? p.groupCategories.length : 0) || cells, groups: 0 };
         bits.push(axis.cats + " " + noun[axis.cats === 1 ? 0 : 1]);
         if (axis.groups > 1)
           bits.push(axis.groups + " group" + (axis.groups === 1 ? "" : "s"));
@@ -22108,12 +22123,12 @@
   // that is true. The item menu on the canvas carries it instead, and says
   // which duplicate it means.
   function commandShortcut(item) {
-    // No workspace test, because the handler that takes the key has none.
-    // Switching to Data or the Notebook leaves the layout document active and
-    // its selection intact, so Cmd/Ctrl+D still duplicated the SELECTION
-    // while the Edit menu went back to advertising the document.
+    // The workspace test matches the handler, which now stands down outside
+    // the layout workspace. In Data or on a chart the key duplicates the
+    // DOCUMENT again, so the menu goes back to advertising it there.
     if (item.command === "duplicate-document" &&
-        isLayoutTab(activeChart()) && laySelectedIds().length) return "";
+        appWorkspace() === "layout" && isLayoutTab(activeChart()) &&
+        laySelectedIds().length) return "";
     return item.shortcut || "";
   }
   // ---- punch list t3-55: the shortcuts sheet ----
@@ -22135,7 +22150,9 @@
         var item = defs[i];
         if (item === "separator" || !item.shortcut || seen[item.command]) continue;
         // The sheet is a reference rather than a live menu, so it prints the
-        // key unconditionally and says who arbitrates instead.
+        // key unconditionally. The Layouts section carries its own
+        // Duplicate-the-selection row, and each row is true in the workspace
+        // its section names.
         seen[item.command] = 1;
         rows.push([commandLabel(item).replace(/\u2026/g, ""),
                    item.shortcut.replace(/\+/g, " + ").replace(/ {2,}/g, " ")]);
@@ -24279,7 +24296,11 @@
         var duplicateDoc = appWorkspace() === "data" ? activeChart() :
           workspaceDocument(appWorkspace());
         if (!duplicateDoc) return;
-        if (isLayoutTab(duplicateDoc) && laySelectedIds().length) return;
+        // Defer only where the layout handler will actually take the key.
+        // Outside the layout workspace that handler stands down, so a
+        // deferral here would leave the key doing nothing at all.
+        if (appWorkspace() === "layout" && isLayoutTab(duplicateDoc) &&
+            laySelectedIds().length) return;
         e.preventDefault(); duplicateDocument(duplicateDoc.id);
       }
     });

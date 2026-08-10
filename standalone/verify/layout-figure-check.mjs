@@ -2280,6 +2280,88 @@ const p51Chart = await p51Edit();
 ok(p51Chart && /Cmd\/Ctrl\+D/.test(p51Chart.key),
    'the chart workspace is untouched ("' + (p51Chart || {}).key + '")');
 
+console.log('case 55: a hidden layout cannot be edited from another workspace');
+// The layout stays the ACTIVE document while the Data workspace is on
+// screen, and the layout key handler gated only on the active document, so
+// Cmd/Ctrl+D there duplicated a hidden layout item with nothing on screen
+// changing, and the Edit menu had to withdraw the key to stay honest. The
+// visible workspace owns the keys now, the undo router's rule, so in Data
+// the key duplicates the DOCUMENT, which arrives as a visible new tab.
+await page.evaluate(() => window.PS_SHELL.setWorkspace('layout'));
+await page.waitForTimeout(600);
+await page.evaluate(() => {
+    const c = window.PS_SHELL.chart();
+    window.PS_SHELL.laySetSelection([c.items[0].id]);
+});
+await page.evaluate(() => window.PS_SHELL.setWorkspace('data'));
+await page.waitForTimeout(900);
+const p55Before = await page.evaluate(() => ({
+    layItems: window.PS_SHELL.chart().items.length,
+    docs: window.PS_SHELL.charts().length,
+    sel: window.PS_SHELL.layoutSelection().length
+}));
+ok(p55Before.sel === 1,
+   'setup: the hidden layout still carries a selection');
+const p55Menu = await p51Edit();
+ok(p55Menu && /Cmd\/Ctrl\+D/.test(p55Menu.key),
+   'the Edit menu advertises the key for the document here ("' +
+   (p55Menu || {}).key + '")');
+await page.evaluate(() => { document.body.focus(); });
+await page.keyboard.press(process.platform === 'darwin' ? 'Meta+d' : 'Control+d');
+await page.waitForTimeout(800);
+const p55After = await page.evaluate(() => ({
+    layItems: window.PS_SHELL.charts().find(c => c.type === 'layout' &&
+        c.id === window.PS_SHELL.project.activeChart) ?
+        window.PS_SHELL.chart().items.length : window.PS_SHELL.chart().items.length,
+    docs: window.PS_SHELL.charts().length
+}));
+ok(p55After.docs === p55Before.docs + 1,
+   'and pressing it duplicates the document, visibly (' + p55Before.docs +
+   ' to ' + p55After.docs + ' documents)');
+ok(p55After.layItems === p55Before.layItems,
+   'while the hidden layout is untouched (' + p55After.layItems + ' items)');
+// undo the duplicate document so later cases see the fixture they expect
+await page.evaluate(() => {
+    const ds = window.PS_SHELL.charts();
+    window.PS_SHELL.closeDocument(ds[ds.length - 1].id);
+});
+await page.waitForTimeout(600);
+
+console.log('case 56: the item menu writes its shortcut like a menu');
+// The span was rendered but the styling was scoped to the app menu, so the
+// row read "DuplicateCmd/Ctrl+D" run together.
+await page.evaluate(() => window.PS_SHELL.setWorkspace('layout'));
+await page.waitForTimeout(700);
+const p56Box = await page.evaluate(() => {
+    const c = window.PS_SHELL.chart();
+    const p = c.items.filter(i => i.kind === 'chart')[0] || c.items[0];
+    window.PS_SHELL.selectLayoutItems([p.id]);
+    const n = document.querySelector(
+        '#ps-lcanvas .ps-litem[data-item-id="' + p.id + '"]');
+    n.scrollIntoView({ block: 'center' });
+    const r = n.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+});
+await page.waitForTimeout(300);
+await page.mouse.click(p56Box.x, p56Box.y, { button: 'right' });
+await page.waitForTimeout(500);
+const p56 = await page.evaluate(() => {
+    const rows = Array.from(
+        document.querySelectorAll('#ps-contextmenu button'));
+    const dup = rows.find(b => /Duplicate/.test(b.textContent));
+    if (!dup) return null;
+    const sp = dup.querySelector('.ps-menu-shortcut');
+    return { hasSpan: !!sp,
+             marginLeft: sp ? getComputedStyle(sp).marginLeft : null,
+             fontSize: sp ? getComputedStyle(sp).fontSize : null };
+});
+await page.keyboard.press('Escape');
+await page.waitForTimeout(300);
+ok(p56 && p56.hasSpan, 'the Duplicate row carries its shortcut span');
+ok(p56.marginLeft === '25px' && p56.fontSize === '10.5px',
+   'and the span is styled as a menu shortcut rather than crammed against ' +
+   'the label (' + p56.marginLeft + ', ' + p56.fontSize + ')');
+
 console.log('case 52: Escape during an Alt+drag takes the copy back');
 // The gesture made its copies on the first movement and repointed the drag at
 // them, and layCancelDrag only restored positions. Escape therefore left a

@@ -545,6 +545,15 @@ caps the top panel at the content width and centres the block.
 Covered by `layout-figure-check` case 49, demonstrated failing first at
 "392 against 392".
 
+**A caveat the third audit confirmed and this write-up initially lost.** The
+row solve uses the engine's constant 1.469 aspect while the fitting step uses
+each chart's own snapshot aspect, so if a chart's size was un-fitted to a
+different shape before the template is created, the top panel no longer spans
+the pair exactly. The geometry stays legal, the promise degrades. Left as is,
+because solving per-assignment means threading the chart picks into
+`layoutTemplateRects`, and a snapshot only departs from 1.469 when the user
+has deliberately reshaped that chart.
+
 ---
 
 ## 13. The status bar counted the right thing and called it the wrong name
@@ -661,7 +670,41 @@ which is the same shape as item 15 one row further up the same menu.
 
 ---
 
-## 17. Two things I recorded as defects and could not reproduce
+## 17. What a fresh-eyes verification pass found in the audit's own fixes
+
+A separate model re-read the whole session diff, re-derived the geometry, and
+re-probed the claims. The fixes held; the last round's patches had four loose
+ends, all fixed and all now probe-covered.
+
+- **The axis-count fix broke the pie.** Pie and donut ship each slice in the
+  GROUP field with one empty x slot, so `chartAxisCounts` read a three-slice
+  pie as "1 category, 3 groups". The slices are the categories, and there is
+  no grouping variable to report. `statusbar-check` case 5 gained the pie
+  shape, demonstrated failing first.
+- **The Cmd/Ctrl+D fix documented the defect instead of fixing it.** The
+  audit framed the mismatch as a label problem and the fix followed that
+  framing, so pressing the key in the Data workspace still duplicated a
+  hidden layout item with nothing on screen changing. The layout key handler
+  now stands down outside the layout workspace, the undo router's rule, so in
+  Data the key duplicates the DOCUMENT and a new tab appears. The menu gate
+  and the document-duplicate deferral both match. Case 55, demonstrated by
+  probe before the fix at "items 1 to 2, no toast".
+- **The context-menu shortcut rendered unstyled.** `.ps-menu-shortcut` was
+  scoped to the app menu, so the item menu's row read "DuplicateCmd/Ctrl+D"
+  run together, visible in the earlier probe's own output. The selector now
+  covers both menus. Case 56.
+- **A comment claimed the shortcuts sheet "says who arbitrates", and it does
+  not.** The sheet has three Cmd/Ctrl+D rows in three sections with no
+  arbitration note. The comment now describes what is actually true, that
+  each row is labelled by the workspace its section names.
+
+And one disposition restored: the third audit's mixed-aspect finding on the
+"Three panels" template was confirmed, then fell out of the write-up without
+a fix or a disclosure. It is now disclosed under item 12.
+
+---
+
+## 18. Two things I recorded as defects and could not reproduce
 
 Both are struck rather than fixed, because measuring them showed nothing
 wrong.

@@ -162,6 +162,26 @@ const cgGrouped = await statusFor('plotbuilder',
 ok(/3 categories/.test(cgGrouped.text) && /2 groups/.test(cgGrouped.text),
    `Compare Groups says the same thing rather than "3 groups, 2 groups" ` +
    `("${cgGrouped.text}")`);
+// PIE, which ships each slice in the GROUP field with one empty x slot, so
+// the axis counts read a three-slice pie as "1 category, 3 groups". The
+// slices are the categories, and there is no grouping variable to report.
+const freqPie = await (async () => {
+    await page.evaluate(async () => {
+        const w = ms => new Promise(r => setTimeout(r, ms));
+        const S = window.PS_SHELL;
+        S.setModule('freqplotbuilder'); await w(500);
+        S.optionStore().graphType = 'pie';
+        S.setRoles('freqplotbuilder', { var: 'condition' }); await w(1400);
+    });
+    await page.waitForTimeout(1500);
+    return { text: (await bar()).sel };
+})();
+ok(/3 categories/.test(freqPie.text) && !/group/.test(freqPie.text),
+   `a pie's slices are its categories, with no phantom grouping ` +
+   `("${freqPie.text}")`);
+await page.evaluate(() => {
+    window.PS_SHELL.optionStore().graphType = 'bar';
+});
 const histBar = await statusFor('distplotbuilder', { var: 'score' },
                                 { count: '[data-role="dist-hist-bar"]' });
 ok(histBar.drawn > 1,
