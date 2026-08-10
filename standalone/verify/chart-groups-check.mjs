@@ -1,7 +1,9 @@
 // Chart groups (planning/CHART-GROUPS-SPEC.md, approved by Torry Jul 31
-// 2026). The structural decision under test everywhere here: grouping is a
-// RAIL concept only - tabs, Alt+number, and every keyboard path stay flat -
-// and a project with no groups renders ZERO group chrome.
+// 2026, revised by him Aug 10 2026). The structural decision under test
+// everywhere here: A GROUP IS A SPACE. The tab strip shows the charts of
+// the group you are in and nothing else, the ungrouped charts are a space
+// too, and the rail is the space switcher. A project with no groups
+// renders ZERO group chrome, on the rail and in the strip alike.
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
@@ -50,8 +52,11 @@ const tabOrder = () => page.evaluate(() =>
 console.log('case 1: a flat project renders zero group chrome');
 ok((await railHeads()).length === 0, 'no headers, nothing to learn until used');
 
-console.log('case 2: move-to-group via the REAL context menu; tabs stay flat');
+console.log('case 2: move-to-group via the REAL context menu; strip scopes');
 const tabsBefore = await tabOrder();
+const p2moved = await page.evaluate(() => document.querySelectorAll(
+    '#ps-project-nav [data-project-chart-id]')[1]
+    .getAttribute('data-project-chart-id'));
 await page.locator('#ps-project-nav [data-project-chart-id]').nth(1)
     .click({ button: 'right' });
 await page.waitForTimeout(250);
@@ -71,8 +76,10 @@ ok((await railHeads()).some(h => h.includes('Extinction')),
 ok(await page.evaluate(() =>
        document.querySelectorAll('.ps-project-item-grouped').length) === 1,
    'with its member indented beneath it');
-ok(await tabOrder() === tabsBefore,
-   'and the TAB STRIP is untouched: grouping is rail-only');
+const p2tabs = await tabOrder();
+ok(p2tabs === tabsBefore.split(',').filter(id => id !== p2moved).join(','),
+   'and the strip shows only the space the ACTIVE chart is in, so the ' +
+   'chart that just joined a group has left it (' + p2tabs + ')');
 
 console.log('case 3: collapse hides rows, shows the count, active auto-expands');
 // Put a second chart in, then make a NON-member active so collapse hides.
@@ -498,6 +505,133 @@ if (p10align.pageRow !== null)
     ok(p10align.memberRow === p10align.pageRow,
        'grouped charts and notebook pages share one member indent (' +
        p10align.memberRow + ' and ' + p10align.pageRow + ')');
+
+console.log('case 11: a group is a SPACE, so the strip shows one at a time');
+// Torry, Aug 10 2026, revising the spec's original rail-only rule. On the
+// build before this one the strip listed every chart in the project
+// whatever group was active, and eight of the assertions below fail there.
+const p11 = () => page.evaluate(() => ({
+    order: window.PS_SHELL.charts().filter(c => c.type !== 'layout')
+        .map(c => c.id),
+    groups: window.PS_SHELL.charts().filter(c => c.type !== 'layout')
+        .map(c => c.group || ''),
+    tabs: [...document.querySelectorAll('#ps-tabs .ps-tab[data-chart-id]')]
+        .map(t => t.getAttribute('data-chart-id')),
+    scope: (document.querySelector('.ps-tab-scope-name') || {}).textContent
+        || null,
+    label: document.querySelector('.ps-tablist-inner')
+        .getAttribute('aria-label'),
+    active: window.PS_SHELL.chart().id
+}));
+await page.evaluate(async () => {
+    const s = ms => new Promise(r => setTimeout(r, ms));
+    const S = window.PS_SHELL;
+    S.charts().forEach(c => { delete c.group; });
+    // Two in and two out, or the scoped list and the whole list coincide
+    // and half of this case would pass on the build it is meant to catch.
+    while (S.charts().filter(c => c.type !== 'layout').length < 4) {
+        S.addChart('plotbuilder');
+        await s(400);
+    }
+    const cs = S.charts().filter(c => c.type !== 'layout');
+    cs[0].group = 'Main figures';
+    cs[1].group = 'Main figures';
+    S.switchChart(cs[0].id);
+    await s(500);
+});
+await page.waitForTimeout(500);
+const p11a = await p11();
+const p11in = p11a.order.filter((id, i) => p11a.groups[i] === 'Main figures');
+const p11out = p11a.order.filter((id, i) => p11a.groups[i] === '');
+ok(p11in.length === 2 && p11out.length >= 2,
+   'fixture: two charts in a group and at least two outside it');
+ok(p11a.tabs.join() === p11in.join(),
+   'inside a group the strip shows that group and nothing else (' +
+   p11a.tabs.join(',') + ')');
+ok(p11a.scope === 'Main figures',
+   'and names the space it is showing, since the rail is off to the side');
+ok(p11a.label === 'Chart documents in Main figures',
+   'the tablist says which space to a screen reader too');
+await page.evaluate(async (id) => {
+    window.PS_SHELL.switchChart(id);
+    await new Promise(r => setTimeout(r, 400));
+}, p11out[0]);
+await page.waitForTimeout(400);
+const p11b = await p11();
+ok(p11b.tabs.join() === p11out.join(),
+   'the ungrouped charts are a space of their own (' +
+   p11b.tabs.join(',') + ')');
+ok(p11b.scope === null && p11b.label === 'Chart documents',
+   'wearing no tag, so a project with no groups looks exactly as it did');
+await page.evaluate(async (id) => {
+    const S = window.PS_SHELL;
+    S.switchChart(id);
+    await new Promise(r => setTimeout(r, 400));
+    S.addChart('plotbuilder');
+    await new Promise(r => setTimeout(r, 600));
+}, p11in[0]);
+await page.waitForTimeout(500);
+const p11c = await p11();
+ok(p11c.groups[p11c.order.indexOf(p11c.active)] === 'Main figures' &&
+   p11c.tabs.indexOf(p11c.active) !== -1,
+   'a new chart is born in the space you are looking at, so adding one ' +
+   'never swaps the strip out from under you');
+const p11tab = k => page.evaluate(i => {
+    const t = [...document.querySelectorAll(
+        '#ps-tabs .ps-tab[data-chart-id]')][i];
+    const r = t.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2,
+             right: r.right - 3 };
+}, k);
+const p11d0 = await p11tab(0);
+const p11dN = await p11tab(p11c.tabs.length - 1);
+await page.mouse.move(p11d0.x, p11d0.y);
+await page.mouse.down();
+await page.mouse.move(p11d0.x + 8, p11d0.y, { steps: 3 });
+await page.mouse.move(p11dN.right, p11d0.y, { steps: 6 });
+await page.mouse.up();
+await page.waitForTimeout(700);
+const p11d = await p11();
+ok(p11d.tabs.join() ===
+       p11c.tabs.slice(1).concat(p11c.tabs[0]).join(),
+   'a tab drag reorders inside the space (' + p11d.tabs.join(',') + ')');
+ok(p11out.every(id =>
+       p11d.order.indexOf(id) === p11c.order.indexOf(id)),
+   'and leaves every chart outside it at the index it already held');
+await page.keyboard.press('Alt+Digit2');
+await page.waitForTimeout(500);
+const p11e = await p11();
+ok(p11e.active === p11e.tabs[1] &&
+   p11e.groups[p11e.order.indexOf(p11e.active)] === 'Main figures',
+   'Alt+2 picks the second tab in this space, not the second chart in ' +
+   'the project');
+// Close a chart INSIDE the group while the group still holds others, so
+// the replacement is a real choice rather than the only chart left.
+const p11last = p11e.order.filter(
+    (id, i) => p11e.groups[i] === 'Main figures').pop();
+await page.evaluate(async (id) => {
+    window.PS_SHELL.switchChart(id);
+    await new Promise(r => setTimeout(r, 400));
+}, p11last);
+await page.waitForTimeout(300);
+await page.evaluate(() => {
+    document.querySelector('#ps-tabs .ps-tab-active .ps-tab-x').click();
+});
+await page.waitForTimeout(800);
+const p11f = await p11();
+ok(p11f.groups[p11f.order.indexOf(p11f.active)] === 'Main figures',
+   'closing a tab lands on a neighbour in the same space, never on a ' +
+   'chart in another group');
+await page.evaluate(async () => {
+    const S = window.PS_SHELL;
+    S.charts().forEach(c => { delete c.group; });
+    S.switchChart(S.chart().id);
+    await new Promise(r => setTimeout(r, 400));
+});
+await page.waitForTimeout(400);
+const p11g = await p11();
+ok(p11g.tabs.join() === p11g.order.join() && p11g.scope === null,
+   'and once the groups are gone the strip is flat again, tag included');
 
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('CHART GROUPS CHECK PASS');

@@ -894,6 +894,22 @@
      bypass-link idiom. At rest it takes no layout space. */
   .ps-tab-x-kbd { position: absolute; transform: translateY(-300%); }
   .ps-tab-x-kbd:focus { position: static; transform: none; }
+  /* The strip shows ONE chart group at a time (Torry, Aug 10 2026), so it
+     names the group it is showing. A neutral chip in the rail header's own
+     ink, deliberately NOT accent: the blue underline means selected, and a
+     second blue thing beside it would compete for that meaning. It reads
+     as a container rather than a tab because nothing else in the strip is
+     filled. */
+  .ps-tab-scope {
+    display: inline-flex; align-items: center; gap: 5px; cursor: default;
+    margin: 0 8px 0 2px; padding: 3px 9px; border-radius: 999px;
+    background: var(--ps-s3); color: var(--ps-ink-3);
+    font-size: 11.5px; font-weight: 700; max-width: 170px;
+  }
+  .ps-tab-scope .ps-nav-icon { width: 15px; color: var(--ps-ink-4); }
+  .ps-tab-scope-name {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
   .ps-tab-add {
     -webkit-appearance: none; appearance: none; border: none;
     background: none; color: var(--ps-accent); font-weight: 700; font-size: 15px;
@@ -5672,7 +5688,7 @@
 <script src="lib/jspdf.umd.min.979a2ef514.js"></script>
 <script src="lib/svg2pdf.umd.min.4ada250f50.js"></script>
 <script src="lib/graphbuilder2.min.46bbf285c9.js"></script>
-<script src="lib/ps-shell.98a7c42b8c.js"></script>
+<script src="lib/ps-shell.7c2217c568.js"></script>
 <script src="lib/ps-tour.b02cf78f7f.js"></script>
 </body>
 </html>

@@ -1,7 +1,8 @@
 # Chart groups in the project rail: spec
 
-Status: SPEC ONLY, not scheduled. Requested by Torry Jul 31 2026 after the
-design discussion ("Yes, please spec it"). Nothing here is built.
+Status: BUILT Jul 31 2026, and REVISED by Torry Aug 10 2026 (see "The one
+structural decision" below, which he reversed). Requested after the design
+discussion ("Yes, please spec it").
 
 ## The problem
 
@@ -25,6 +26,41 @@ the implementation risk.
 
 Corollary: **one level deep, no nesting.** Two levels in a stats tool is
 where people lose charts instead of finding them.
+
+### REVISED Aug 10 2026 by Torry: a group is a SPACE
+
+He used the shipped feature and asked for the opposite of the paragraph
+above. "When you make a new group for charts, the tabs should only be
+visible for the group that is currently selected. All ungrouped charts
+should be in their own space."
+
+So the strip shows the charts of the group the active chart belongs to and
+nothing else, and the ungrouped charts are a space of their own, the one
+with no name. The rail becomes the space switcher, which it was always
+shaped like. The reasoning that produced the original cut still holds
+(pick ONE smart surface), it just picked the wrong one for a strip that
+was already showing 15 tabs. Figma is the closer analogue after all, where
+choosing a page swaps the frame bar wholesale.
+
+What follows from it, all built:
+
+- Alt+number keeps meaning "the nth tab I can see", which now scopes for
+  free (it already read the strip rather than `PROJECT.charts`).
+- A tab drag reorders inside the visible space and leaves every other
+  group's charts at the index they held (`moveChartToTabSlot`). The rail's
+  own drag still means the whole list, because it can drop a chart beside
+  a row of a different group.
+- A new chart is born in the space you are looking at, or adding one would
+  swap the strip out from under you.
+- Closing a tab prefers a replacement in the same group, falling back to
+  any chart when that was the group's last one.
+- The strip names the space it is showing, since the rail is off to the
+  side. Ungrouped wears no tag, so a project with no groups looks exactly
+  as it always did.
+- Layouts never group, so the Layouts strip stays flat.
+
+Pinned by `chart-groups-check` case 11, and by case 2, which used to assert
+the rule this section reverses.
 
 ## Data model (additive, migration-free)
 

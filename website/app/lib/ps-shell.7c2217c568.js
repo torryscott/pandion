@@ -2010,8 +2010,13 @@
   }
   function isLayoutTab(c) { return !!c && c.type === "layout"; }
   // ---- chart groups (planning/CHART-GROUPS-SPEC.md, Torry-approved) ----
-  // Grouping is a RAIL concept only: tabs, Alt+number, and every keyboard
-  // path stay flat. One level deep. The group IS its name; charts carry an
+  // A GROUP IS A SPACE (Torry, Aug 10 2026, revising the spec's original
+  // rail-only rule). The tab strip shows the charts of the group you are
+  // in and nothing else; the ungrouped charts are a space too, the one
+  // with no name. The rail is the space switcher, so clicking a chart in
+  // another group moves you there and the strip follows. Alt+number reads
+  // the strip, so it scopes with it. Layouts never group and their strip
+  // stays flat. One level deep. The group IS its name; charts carry an
   // optional `group` string and PROJECT.ui.collapsedGroups remembers folds.
   // Both fields are additive, so version-3 files round-trip untouched.
   var GROUP_RENAME = null;   // group name whose rail header is an input
@@ -2035,6 +2040,15 @@
       if (g && !seen[g.toLowerCase()]) { seen[g.toLowerCase()] = 1; out.push(g); }
     }
     return out;
+  }
+  // Which space the chart strip is showing. The active document decides,
+  // and a layout hands off to the last chart, so leaving the Layout
+  // workspace returns you to the group you were working in.
+  function chartTabScope() {
+    var c = chartById(PROJECT.activeChart);
+    if (!c || isLayoutTab(c))
+      c = appRememberedDocument(false) || appFirstDocument(false);
+    return chartGroupOf(c);
   }
   // A fold map from a saved project: plain truthy keys only, so a hand
   //-edited or hostile file cannot smuggle anything structured in.
@@ -14951,6 +14965,11 @@
     if (PS_FLUSH_PENDING_OPTS) PS_FLUSH_PENDING_OPTS();
     var c = newChart();
     if (moduleKey && MODULES[moduleKey]) c.module = moduleKey;
+    // Born in the space you are looking at. An ungrouped new chart would
+    // swap the whole strip to the ungrouped space the instant you added
+    // one, which reads as the group you were working in disappearing.
+    var bornIn = chartTabScope();
+    if (bornIn) c.group = bornIn;
     PROJECT.charts.push(c);
     PROJECT.activeChart = c.id;
     PROJECT.ui.workspace = "chart";
@@ -16354,16 +16373,25 @@
     var memoryKey = isLayoutTab(removed) ? "lastLayout" : "lastChart";
     PROJECT.charts.splice(idx, 1);
     if (PROJECT.activeChart === id) {
-      var replacement = null;
-      for (var ri = Math.min(idx - 1, PROJECT.charts.length - 1); ri >= 0; ri--)
-        if (isLayoutTab(PROJECT.charts[ri]) === isLayoutTab(removed)) {
-          replacement = PROJECT.charts[ri]; break;
-        }
-      if (!replacement)
-        for (ri = 0; ri < PROJECT.charts.length; ri++)
-          if (isLayoutTab(PROJECT.charts[ri]) === isLayoutTab(removed)) {
+      // Prefer a neighbour in the SAME group, because the strip shows one
+      // group and landing outside it reads as the rest of the group having
+      // been closed too. Pass two drops the preference, for the case where
+      // that was the group's last chart.
+      var replacement = null, ri, pass, wantGroup = chartGroupOf(removed);
+      for (pass = 0; pass < 2 && !replacement; pass++) {
+        var inGroup = pass === 0 && !isLayoutTab(removed);
+        for (ri = Math.min(idx - 1, PROJECT.charts.length - 1); ri >= 0; ri--)
+          if (isLayoutTab(PROJECT.charts[ri]) === isLayoutTab(removed) &&
+              (!inGroup || chartGroupOf(PROJECT.charts[ri]) === wantGroup)) {
             replacement = PROJECT.charts[ri]; break;
           }
+        if (!replacement)
+          for (ri = 0; ri < PROJECT.charts.length; ri++)
+            if (isLayoutTab(PROJECT.charts[ri]) === isLayoutTab(removed) &&
+                (!inGroup || chartGroupOf(PROJECT.charts[ri]) === wantGroup)) {
+              replacement = PROJECT.charts[ri]; break;
+            }
+      }
       PROJECT.activeChart = (replacement || PROJECT.charts[0]).id;
       if (replacement) rememberDocument(replacement);
       else PROJECT.ui[memoryKey] = null;
@@ -16549,7 +16577,7 @@
     tabSwallowNextClick();
     // Board tabs ride the SAME drag machinery (they are .ps-tab elements
     // in the same strip); only the commit differs, dispatched by id.
-    if (chartById(d.id)) moveChartToIndex(d.id, d.slot);
+    if (chartById(d.id)) moveChartToTabSlot(d.id, d.slot);
     else moveBoardToIndex(d.id, d.slot);
   }
   function moveBoardToIndex(boardId, slot) {
@@ -16601,6 +16629,35 @@
     syncTabs();
     // The rail lists the same documents in the same order, and a tab drag
     // used to leave it stale, the notebook reorder's exact desync.
+    syncProjectNavigator();
+  }
+  // The strip shows one group, so a tab drag's slot counts only the tabs
+  // on screen. This permutes the scoped positions and leaves every other
+  // group's charts exactly where they sit, which is what keeps a group
+  // readable on the rail even when its members are not adjacent in the
+  // project. The rail's own drag still uses moveChartToIndex, because it
+  // can drop a chart between rows of a DIFFERENT group and means the
+  // whole list.
+  function moveChartToTabSlot(dragId, slot) {
+    var dragged = chartById(dragId), i;
+    if (!dragged) return;
+    var wantLayout = isLayoutTab(dragged);
+    if (wantLayout) { moveChartToIndex(dragId, slot); return; }
+    var scope = chartGroupOf(dragged), at = [], list = [];
+    for (i = 0; i < PROJECT.charts.length; i++) {
+      var c = PROJECT.charts[i];
+      if (isLayoutTab(c) || chartGroupOf(c) !== scope) continue;
+      at.push(i); list.push(c);
+    }
+    var from = list.indexOf(dragged);
+    if (from === -1) return;
+    list.splice(from, 1);
+    if (slot < 0) slot = 0;
+    if (slot > list.length) slot = list.length;
+    list.splice(slot, 0, dragged);
+    for (i = 0; i < at.length; i++) PROJECT.charts[at[i]] = list[i];
+    persist();
+    syncTabs();
     syncProjectNavigator();
   }
   var TAB_LAST_CLICK = { id: null, at: 0 };
@@ -16823,6 +16880,7 @@
     bar.innerHTML = "";
     activeChart();   // ensures at least one chart + a valid active id
     var ws = appWorkspace(), wantLayout = ws === "layout";
+    var tabScope = wantLayout ? "" : chartTabScope();
     var panelId = ws === "pinboard" ? "ps-pinpane"
       : wantLayout ? "ps-layout" : "psroot";
     bar.setAttribute("role", "group");
@@ -16834,12 +16892,30 @@
     tablist.setAttribute("role", "tablist");
     tablist.setAttribute("aria-label",
       ws === "pinboard" ? "Notebook sections" :
-      wantLayout ? "Layout documents" : "Chart documents");
+      wantLayout ? "Layout documents" :
+      tabScope ? "Chart documents in " + tabScope : "Chart documents");
+    // Name the space when it has a name. The rail already says where you
+    // are, but the strip is where the eyes are, and a strip that quietly
+    // shows a subset reads as charts having gone missing. A label, not a
+    // control: the rail is where you change groups. An ungrouped project
+    // has no tag at all, so it looks exactly as it always did.
+    if (ws === "chart" && tabScope) {
+      var scopeTag = mkEl("span", "ps-tab-scope");
+      scopeTag.setAttribute("aria-hidden", "true");
+      var scopeIcon = mkEl("span", "ps-nav-icon");
+      scopeIcon.innerHTML = RAIL_ICON_CHART_GROUP;
+      scopeTag.appendChild(scopeIcon);
+      scopeTag.appendChild(mkEl("span", "ps-tab-scope-name", tabScope));
+      setTip(scopeTag, "Showing the charts in " + tabScope +
+        ". The other groups are on the left rail.");
+      bar.appendChild(scopeTag);
+    }
     bar.appendChild(tablist);
     if (ws === "pinboard") { renderBoardTabs(tablist, bar); return; }
     for (var i = 0; i < PROJECT.charts.length; i++) {
       if (ws === "data" || ws === "pinboard" ||
           isLayoutTab(PROJECT.charts[i]) !== wantLayout) continue;
+      if (!wantLayout && chartGroupOf(PROJECT.charts[i]) !== tabScope) continue;
       (function (c) {
         var tab = mkEl("div", "ps-tab" +
           (c.id === PROJECT.activeChart ? " ps-tab-active" : ""));
