@@ -3686,7 +3686,12 @@
   }
   function wrapCaptionLines(textStr, maxW, fontSize, font) {
     var cv = document.createElement("canvas");
-    var ctx = cv.getContext("2d");
+    var ctx = cv.getContext ? cv.getContext("2d") : null;
+    // A hardened or headless DOM can decline a 2d context, and without
+    // measureText there is nothing to wrap WITH, so the text falls back to
+    // its logical lines rather than throwing mid-render. Real browsers
+    // always grant the context; the hardening probe is what exercises this.
+    if (!ctx) return String(textStr).split(/\r?\n/);
     // font is optional and defaults to the UI stack, so the two callers that
     // measure UI text are unchanged. Layout text passes the family and weight
     // it actually declares.
