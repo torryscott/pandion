@@ -1392,6 +1392,9 @@
     color: var(--ps-ink-4); background: var(--ps-s3); border-color: var(--ps-l2b);
   }
   .ps-litem[data-kind="image"] { cursor: grab; }
+  /* A kept Notebook page is a figure panel like a chart, so it carries the
+     same panel white; ordinary images keep their own transparency. */
+  .ps-litem[data-kept="1"] { background: var(--ps-s0); }
   .ps-litem[data-kind="image"] img { user-select: none; }
   .ps-reshape-pickers {
     display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;
@@ -5628,7 +5631,7 @@
 <script src="lib/jspdf.umd.min.979a2ef514.js"></script>
 <script src="lib/svg2pdf.umd.min.4ada250f50.js"></script>
 <script src="lib/graphbuilder2.min.46bbf285c9.js"></script>
-<script src="lib/ps-shell.c94ebd72fa.js"></script>
+<script src="lib/ps-shell.f89966e387.js"></script>
 <script src="lib/ps-tour.b02cf78f7f.js"></script>
 </body>
 </html>

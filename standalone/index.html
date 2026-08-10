@@ -1391,6 +1391,9 @@
     color: var(--ps-ink-4); background: var(--ps-s3); border-color: var(--ps-l2b);
   }
   .ps-litem[data-kind="image"] { cursor: grab; }
+  /* A kept Notebook page is a figure panel like a chart, so it carries the
+     same panel white; ordinary images keep their own transparency. */
+  .ps-litem[data-kept="1"] { background: var(--ps-s0); }
   .ps-litem[data-kind="image"] img { user-select: none; }
   .ps-reshape-pickers {
     display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;

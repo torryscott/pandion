@@ -3779,9 +3779,28 @@
     root.setAttribute("viewBox", "0 0 " + page.w + " " + page.h);
     var bg = effectiveExportBackground(mode, true);
     addSvgBackground(doc, bg, page.w, page.h);
+    // Chart panels and kept pages are WHITE PANELS on the canvas (the CSS
+    // on data-kind chart and data-kept), and the export has to say the same
+    // thing, or two overlapping panels export with the lower one showing
+    // through where the screen showed an opaque card. A deliberately
+    // TRANSPARENT export is the one exception: the user asked for
+    // transparency, so the panels follow the page. Ordinary uploaded
+    // images never get a panel: a logo's transparency is intentional.
+    function panelRect(it) {
+      if (!bg) return;
+      var r = doc.createElementNS(ns, "rect");
+      r.setAttribute("x", String(Number(it.x) || 0));
+      r.setAttribute("y", String(Number(it.y) || 0));
+      r.setAttribute("width", String(Math.max(24, Number(it.w) || 240)));
+      r.setAttribute("height", String(Math.max(24, Number(it.h) || 180)));
+      r.setAttribute("fill", "#ffffff");
+      root.appendChild(r);
+    }
     var items = layItems();
     for (var i = 0; i < items.length; i++) {
       var item = items[i];
+      if (item.kind === "chart" ||
+          (item.kind === "image" && item.srcPin)) panelRect(item);
       if (item.kind === "text") {
         root.appendChild(layoutTextNode(doc, item));
         continue;
@@ -18430,6 +18449,13 @@
     var elI = mkEl("div", cls);
     elI.setAttribute("data-item-id", item.id);
     elI.setAttribute("data-kind", item.kind);
+    // A kept page is a FIGURE PANEL, like a chart, so it wears the same
+    // white the chart panels get from CSS. Without this the canvas grid
+    // showed through kept pages while chart panels sat opaque beside them,
+    // which read as "some sends arrive transparent". Ordinary uploaded
+    // images are NOT marked: a logo's transparency is intentional.
+    if (item.kind === "image" && item.srcPin)
+      elI.setAttribute("data-kept", "1");
     elI.style.left = (Number(item.x) || 0) + "px";
     elI.style.top = (Number(item.y) || 0) + "px";
     if (item.kind === "chart") {

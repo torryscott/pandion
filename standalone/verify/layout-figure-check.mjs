@@ -2505,6 +2505,71 @@ ok(!(p54[0].x === p54[1].x && p54[0].y === p54[1].y),
    'and the two are not sitting on each other (' +
    p54.map(i => i.x + ',' + i.y).join(' and ') + ')');
 
+console.log('case 57: every figure panel is a white panel, canvas and file');
+// A kept Notebook page arrived as an image item with no background while a
+// chart panel wore white from CSS, so the canvas grid showed through kept
+// pages, which read as "some sends arrive transparent". And the export
+// painted NO panel backgrounds at all, so two overlapping panels exported
+// with the lower one showing through where the screen showed an opaque
+// card. Ordinary uploaded images are exempt on purpose: a logo's
+// transparency is intentional. A deliberately transparent export is the
+// other exemption: the user asked for transparency, so panels follow.
+await page.evaluate(() => window.PS_SHELL.setWorkspace('layout'));
+await page.waitForTimeout(500);
+await page.evaluate(() => window.PS_SHELL.addLayout());
+await page.waitForTimeout(1100);
+const p57Charts = await page.evaluate(() =>
+    window.PS_SHELL.charts().filter(c => c.type !== 'layout').map(c => c.id));
+await page.evaluate((chartId) => {
+    const c = window.PS_SHELL.chart();
+    const px = 'data:image/svg+xml;base64,' +
+        btoa('<svg xmlns="http://www.w3.org/2000/svg" width="200" ' +
+             'height="140"><circle cx="100" cy="70" r="50" ' +
+             'fill="#4478ad"/></svg>');
+    // one of each: a chart panel, a kept page (srcPin), a plain image
+    c.items.push({ id: 'i1', kind: 'chart', chartId: chartId,
+                   x: 40, y: 40, w: 300, h: 204 });
+    c.items.push({ id: 'i2', kind: 'image', src: px, srcPin: 'p99',
+                   natW: 200, natH: 140, x: 380, y: 40, w: 200, h: 140 });
+    c.items.push({ id: 'i3', kind: 'image', src: px,
+                   natW: 200, natH: 140, x: 620, y: 40, w: 200, h: 140 });
+    window.PS_SHELL.selectLayoutItems([]);
+}, p57Charts[0]);
+await page.waitForTimeout(1200);
+const p57Canvas = await page.evaluate(() => {
+    const read = id => {
+        const n = document.querySelector(
+            '#ps-lcanvas .ps-litem[data-item-id="' + id + '"]');
+        return n ? getComputedStyle(n).backgroundColor : null;
+    };
+    return { panel: read('i1'), kept: read('i2'), plain: read('i3') };
+});
+ok(p57Canvas.kept === 'rgb(255, 255, 255)',
+   'a kept page is a white panel on the canvas, like the chart beside it (' +
+   p57Canvas.kept + ')');
+ok(p57Canvas.plain === 'rgba(0, 0, 0, 0)',
+   'while an ordinary image keeps its own transparency (' +
+   p57Canvas.plain + ')');
+const p57Rects = mode => page.evaluate(async (m) => {
+    const r = await window.PS_SHELL.exportSource(m);
+    const doc = new DOMParser().parseFromString(r.svg, 'image/svg+xml');
+    const whites = [...doc.querySelectorAll('rect')]
+        .filter(x => /^(#fff(fff)?|white)$/i.test(x.getAttribute('fill') || ''))
+        .map(x => [+x.getAttribute('x'), +x.getAttribute('y')]);
+    const under = (ix, iy) => whites.some(w => w[0] === ix && w[1] === iy);
+    return { panel: under(40, 40), kept: under(380, 40), plain: under(620, 40) };
+}, mode);
+const p57Shown = await p57Rects('shown');
+ok(p57Shown.panel && p57Shown.kept,
+   'the export paints the same white under the chart panel and the kept ' +
+   'page (' + JSON.stringify(p57Shown) + ')');
+ok(!p57Shown.plain,
+   'and none under the ordinary image');
+const p57Trans = await p57Rects('transparent');
+ok(!p57Trans.panel && !p57Trans.kept,
+   'a deliberately transparent export keeps every panel transparent (' +
+   JSON.stringify(p57Trans) + ')');
+
 ok(errors.length === 0, 'no page errors (' + errors.join(' | ') + ')');
 console.log('\nlayout-figure-check: all cases passed');
 await browser.close();
