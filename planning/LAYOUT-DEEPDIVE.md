@@ -664,9 +664,15 @@ routine. Both now fail before and pass after, at 591 against 900 and at
 Two findings were confirmed and deliberately left. A tooltip summoned by a
 pointer still parks when focus is restored to a DIFFERENT control, which is
 the same family as item 14 but predates it and reaches every
-`shellRestoreFocus` caller. And Edit's Select all is enabled and a silent
+`shellRestoreFocus` caller. And Edit's Select all was enabled and a silent
 no-op outside the Data workspace while advertising a key the layout claims,
-which is the same shape as item 15 one row further up the same menu.
+the same shape as item 15 one row further up the same menu. CLOSED in the
+verification round's follow-up: the row now follows the copy/cut/paste rule
+in `commandEnabled`, enabled per context and routed per workspace, so in a
+layout it selects every item (one body, `laySelectAllItems`, shared with the
+chord so the two surfaces cannot drift), in Data it selects the grid, and on
+a chart it is honestly disabled with a reason. `layout-selectall-check`
+gained the menu-row case, demonstrated failing first at "0 of 2".
 
 ---
 

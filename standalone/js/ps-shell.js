@@ -17858,6 +17858,17 @@
     }
     return made;
   }
+  // One body for the Cmd/Ctrl+A key and the Edit menu row, so the two
+  // surfaces cannot drift. The menu used to run the GRID select-all here,
+  // which early-returns off the Data workspace, so the row sat enabled,
+  // advertised the key, and did nothing when clicked.
+  function laySelectAllItems() {
+    var every = layItems().map(function (it) { return it.id; });
+    if (!every.length) return false;
+    laySetSelection(every);
+    renderLayout();   // the selection panel reports the count itself
+    return true;
+  }
   function layDuplicateSelected() {
     var ids = laySelectedIds();
     if (!ids.length) return;
@@ -18875,10 +18886,7 @@
           String(e.key).toLowerCase() === "a" &&
           appWorkspace() === "layout") {
         e.preventDefault();
-        var every = layItems().map(function (it) { return it.id; });
-        if (!every.length) return;
-        laySetSelection(every);
-        renderLayout();   // the selection panel reports the count itself
+        laySelectAllItems();
         return;
       }
       if ((e.metaKey || e.ctrlKey) && String(e.key).toLowerCase() === "g") {
@@ -23129,8 +23137,18 @@
     if (command === "paste-cells")
       return (appWorkspace() === "data" && !!gridSelectionRect()) ||
         (isLayoutTab(activeChart()) && layHasClipboard());
-    if (command === "select-all-cells" || command === "find-data" ||
-        command === "replace-data")
+    if (command === "select-all-cells")
+      // The copy/cut/paste rule one branch up: an Edit row that means
+      // something in two workspaces is enabled per context and routed per
+      // workspace. It was enabled anywhere a table existed and ran the grid
+      // select-all, which early-returns off the Data workspace, so in a
+      // layout it advertised Cmd/Ctrl+A, did nothing when clicked, and the
+      // key did something else.
+      return appWorkspace() === "layout"
+        ? (isLayoutTab(activeChart()) && layItems().length > 0)
+        : appWorkspace() === "data" &&
+          !!(PROJECT.table && PROJECT.table.order.length);
+    if (command === "find-data" || command === "replace-data")
       return !!(PROJECT.table && PROJECT.table.order.length);
     if (command === "copy-image")
       return appWorkspace() !== "data" && !!workspaceDocument(appWorkspace()) &&
@@ -23289,7 +23307,11 @@
       if (isLayoutTab(activeChart()) && layHasClipboard()) layPasteClipboard();
       else gridMenuPaste();
     }
-    else if (command === "select-all-cells") gridMenuSelectAll();
+    else if (command === "select-all-cells") {
+      if (appWorkspace() === "layout" && isLayoutTab(activeChart()))
+        laySelectAllItems();
+      else gridMenuSelectAll();
+    }
     else if (command === "find-data") gridMenuFind();
     else if (command === "replace-data") gridMenuReplace();
     else if (command === "help-chooser") {
