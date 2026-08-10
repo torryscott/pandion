@@ -2476,7 +2476,8 @@
      stays visible when the header has scrolled away; notebook page rows
      share the class for their indent but keep their own look. */
   .ps-project-item.ps-project-item-grouped { padding-left: 26px; }
-  .ps-project-item.ps-project-item-grouped[data-project-chart-id] {
+  .ps-project-item.ps-project-item-grouped[data-project-chart-id],
+  .ps-project-item.ps-project-item-grouped[data-project-pin-id] {
     margin-left: 16px; width: calc(100% - 16px); padding-left: 10px;
     border-left: 2px solid var(--ps-l2b); border-radius: 0 var(--ps-r-md)
     var(--ps-r-md) 0;
@@ -30223,22 +30224,25 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
           (b.pins.length === 1 ? " page" : " pages") +
           (isActive ? (folded ? " \u00b7 click to show them"
                               : " \u00b7 click to collapse them") : ""));
-        var ico = mkEl("span", "ps-nav-icon");
-        ico.innerHTML = RAIL_ICON_NOTEBOOK;
-        row.appendChild(ico);
-        row.appendChild(mkEl("span", "", b.name));
         // The ACTIVE section is the only one that lists pages, so it is the
-        // only one with anything to disclose: it wears the group headers'
-        // chevron and, when folded, their count badge, and a click on it
-        // TOGGLES rather than navigating, because you are already there.
+        // only one with anything to disclose. It reads like the chart
+        // groups: disclosure FIRST in the leading column, then the
+        // notebook icon, then the name (Torry, Aug 10 2026, matching the
+        // group headers after their redesign), with the count badge while
+        // folded. A click on it TOGGLES rather than navigating, because
+        // you are already there.
         if (listed) {
           row.setAttribute("aria-expanded", folded ? "false" : "true");
           row.appendChild(mkEl("span", "ps-project-gchev",
             folded ? "\u25b8" : "\u25be"));
-          if (folded)
-            row.appendChild(mkEl("span", "ps-project-gcount",
-              String(b.pins.length)));
         }
+        var ico = mkEl("span", "ps-nav-icon");
+        ico.innerHTML = RAIL_ICON_NOTEBOOK;
+        row.appendChild(ico);
+        row.appendChild(mkEl("span", "", b.name));
+        if (listed && folded)
+          row.appendChild(mkEl("span", "ps-project-gcount",
+            String(b.pins.length)));
         row.addEventListener("click", function () {
           if (appWorkspace() === "pinboard" && activePinBoard().id === b.id) {
             var folds = collapsedBoards();

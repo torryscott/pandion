@@ -21049,22 +21049,25 @@
           (b.pins.length === 1 ? " page" : " pages") +
           (isActive ? (folded ? " \u00b7 click to show them"
                               : " \u00b7 click to collapse them") : ""));
-        var ico = mkEl("span", "ps-nav-icon");
-        ico.innerHTML = RAIL_ICON_NOTEBOOK;
-        row.appendChild(ico);
-        row.appendChild(mkEl("span", "", b.name));
         // The ACTIVE section is the only one that lists pages, so it is the
-        // only one with anything to disclose: it wears the group headers'
-        // chevron and, when folded, their count badge, and a click on it
-        // TOGGLES rather than navigating, because you are already there.
+        // only one with anything to disclose. It reads like the chart
+        // groups: disclosure FIRST in the leading column, then the
+        // notebook icon, then the name (Torry, Aug 10 2026, matching the
+        // group headers after their redesign), with the count badge while
+        // folded. A click on it TOGGLES rather than navigating, because
+        // you are already there.
         if (listed) {
           row.setAttribute("aria-expanded", folded ? "false" : "true");
           row.appendChild(mkEl("span", "ps-project-gchev",
             folded ? "\u25b8" : "\u25be"));
-          if (folded)
-            row.appendChild(mkEl("span", "ps-project-gcount",
-              String(b.pins.length)));
         }
+        var ico = mkEl("span", "ps-nav-icon");
+        ico.innerHTML = RAIL_ICON_NOTEBOOK;
+        row.appendChild(ico);
+        row.appendChild(mkEl("span", "", b.name));
+        if (listed && folded)
+          row.appendChild(mkEl("span", "ps-project-gcount",
+            String(b.pins.length)));
         row.addEventListener("click", function () {
           if (appWorkspace() === "pinboard" && activePinBoard().id === b.id) {
             var folds = collapsedBoards();

@@ -2475,7 +2475,8 @@
      stays visible when the header has scrolled away; notebook page rows
      share the class for their indent but keep their own look. */
   .ps-project-item.ps-project-item-grouped { padding-left: 26px; }
-  .ps-project-item.ps-project-item-grouped[data-project-chart-id] {
+  .ps-project-item.ps-project-item-grouped[data-project-chart-id],
+  .ps-project-item.ps-project-item-grouped[data-project-pin-id] {
     margin-left: 16px; width: calc(100% - 16px); padding-left: 10px;
     border-left: 2px solid var(--ps-l2b); border-radius: 0 var(--ps-r-md)
     var(--ps-r-md) 0;
