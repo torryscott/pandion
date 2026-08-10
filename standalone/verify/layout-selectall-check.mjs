@@ -74,12 +74,15 @@ console.log('case 2: the selection is real, not just a highlight');
 // nudging moves everything, and one undo puts it all back.
 const before = await page.evaluate(() =>
     (window.PS_SHELL.chart().items || []).map(i => Math.round(i.x)));
-await page.keyboard.press('ArrowRight');
+// ALT+Arrow. CONTRACT CHANGED, deliberately, Aug 2026 and approved: nudging
+// is Alt+Arrow everywhere, because plain arrows nudged from outside the
+// canvas and navigated inside it, which made one key mean two things.
+await page.keyboard.press('Alt+ArrowRight');
 await page.waitForTimeout(400);
 const moved = await page.evaluate(() =>
     (window.PS_SHELL.chart().items || []).map(i => Math.round(i.x)));
 ok(moved.every((x, i) => x === before[i] + 1),
-   `an arrow key nudges every selected item together ` +
+   `Alt+Arrow nudges every selected item together ` +
    `(${JSON.stringify(before)} -> ${JSON.stringify(moved)})`);
 
 console.log('case 3: other places keep the native meaning');
@@ -119,6 +122,69 @@ if (!inField.skipped) {
        `the chord still selects the TEXT when a field has focus ` +
        `(${sel} characters)`);
 }
+
+console.log('case: the Edit menu row does what the chord does, per workspace');
+// The row ran the GRID select-all everywhere, which early-returns off the
+// Data workspace. So in a layout it sat enabled, advertised Cmd/Ctrl+A, did
+// nothing when clicked, and the key it advertised did something else. It now
+// follows the copy/cut/paste rule one branch up in commandEnabled: enabled
+// per context, routed per workspace, honestly disabled where nothing here
+// can be selected.
+const editRow = async () => {
+    await page.click('[data-ps-menu="edit"]');
+    await page.waitForTimeout(350);
+    return page.evaluate(() => {
+        const b = Array.from(document.querySelectorAll('#ps-appmenu button'))
+            .find(x => /Select all/.test(x.textContent));
+        return b ? { disabled: b.disabled,
+                     tip: b.getAttribute('data-tip') || '' } : null;
+    });
+};
+const clickRow = () => page.evaluate(() => {
+    Array.from(document.querySelectorAll('#ps-appmenu button'))
+        .find(x => /Select all/.test(x.textContent)).click();
+});
+await page.evaluate(() => window.PS_SHELL.setWorkspace('layout'));
+await page.waitForTimeout(600);
+await page.evaluate(() => window.PS_SHELL.laySetSelection([]));
+await page.waitForTimeout(300);
+const rowLay = await editRow();
+ok(rowLay && !rowLay.disabled,
+   'in a layout with items the row is enabled');
+await clickRow();
+await page.waitForTimeout(500);
+const afterClick = await page.evaluate(() => ({
+    sel: window.PS_SHELL.layoutSelection().length,
+    items: window.PS_SHELL.chart().items.length
+}));
+ok(afterClick.sel === afterClick.items && afterClick.sel > 0,
+   'and clicking it selects every layout item, what the chord does (' +
+   afterClick.sel + ' of ' + afterClick.items + ')');
+await page.keyboard.press('Escape');
+await page.waitForTimeout(250);
+await page.evaluate(() => window.PS_SHELL.setWorkspace('chart'));
+await page.waitForTimeout(1100);
+const rowChart = await editRow();
+ok(rowChart && rowChart.disabled && /unavailable/.test(rowChart.tip),
+   'on a chart, where nothing here can be selected, it is honestly ' +
+   'disabled with a reason (' + JSON.stringify(rowChart) + ')');
+await page.keyboard.press('Escape');
+await page.waitForTimeout(250);
+await page.evaluate(() => window.PS_SHELL.setWorkspace('data'));
+await page.waitForTimeout(800);
+const rowData = await editRow();
+await clickRow();
+await page.waitForTimeout(500);
+const gridCount = await page.evaluate(() => {
+    const f = document.getElementById('ps-gridfoot');
+    const m = /COUNT\s+(\d+)/i.exec(f ? f.innerText : '');
+    return m ? Number(m[1]) : 0;
+});
+ok(rowData && !rowData.disabled && gridCount > 0,
+   'and in Data it still selects the whole grid (' + gridCount +
+   ' cells counted)');
+await page.keyboard.press('Escape');
+await page.waitForTimeout(250);
 
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('LAYOUT SELECT ALL CHECK PASS');

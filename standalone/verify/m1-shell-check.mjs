@@ -1958,7 +1958,10 @@ await page.waitForTimeout(400);
     });
     ok(lExact.x === 90 && lExact.shown === '90',
        'exact coordinates and Alt+Shift+arrow nudging stay synchronized');
-    // Drag chart 2's panel to a clear spot (pointer path, item follows).
+    // Drag chart 1's panel to a clear spot (pointer path, item follows).
+    // i1 rather than i2 because placement now packs the two panels across the
+    // content width, and the right-hand one has 38 px of travel before the
+    // page edge clamps it, which would test the clamp instead of the drag.
     async function itemRect(id) {
         return await page.evaluate((id) => {
             const r = document.querySelector(
@@ -1967,20 +1970,20 @@ await page.waitForTimeout(400);
         }, id);
     }
     const beforeDrag = await page.evaluate(() => {
-        const it = window.PS_SHELL.chart().items.find(i => i.kind === 'chart' && i.id === 'i2');
+        const it = window.PS_SHELL.chart().items.find(i => i.kind === 'chart' && i.id === 'i1');
         return { x: it.x, y: it.y };
     });
-    let r2 = await itemRect('i2');
+    let r2 = await itemRect('i1');
     await page.mouse.move(r2.x + 40, r2.y + 12);
     await page.mouse.down();
     await page.mouse.move(r2.x + 40 + 60, r2.y + 12 + 300, { steps: 6 });
     await page.mouse.up();
     await page.waitForTimeout(200);
     const l4 = await page.evaluate((was) => {
-        const it = window.PS_SHELL.chart().items.find(i => i.id === 'i2');
+        const it = window.PS_SHELL.chart().items.find(i => i.id === 'i1');
         const saved = JSON.parse(localStorage.getItem('psstandalone.project.v2'));
         const savedIt = saved.charts.find(c => c.type === 'layout')
-            .items.find(i => i.id === 'i2');
+            .items.find(i => i.id === 'i1');
         return { dx: it.x - was.x, dy: it.y - was.y,
                  persisted: savedIt.x === it.x && savedIt.y === it.y };
     }, beforeDrag);
@@ -2062,16 +2065,25 @@ await page.waitForTimeout(400);
     }, { b64: pxShot.toString('base64'), x: pxPt.x, y: pxPt.y });
     ok(pxRGB[0] < 240 || pxRGB[1] < 240 || pxRGB[2] < 240,
        'snapshot bars actually paint (clip ids rewritten): rgb ' + pxRGB.join(','));
-    // Plain text: add, double-click edit, background click commits.
+    // Plain text: add, type, background click commits.
+    // CONTRACT CHANGED, deliberately, Aug 2026: Add text now opens the new
+    // item's editor with its placeholder selected, so you can type the
+    // caption you came to write. Focus used to stay on the toolbar BUTTON,
+    // which meant every space bar press added another text box, Enter added
+    // another, and F2 renamed the document. The double-click that used to be
+    // needed here would now land INSIDE the open textarea and select a word,
+    // so the typing that follows would replace that word rather than the
+    // placeholder. The assertion under test is unchanged: a background click
+    // commits the edit.
     await page.click('#ps-laddtext');
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(250);
     const textId = await page.evaluate(() => {
         const its = window.PS_SHELL.chart().items;
         return its[its.length - 1].id;
     });
-    const rt = await itemRect(textId);
-    await page.mouse.dblclick(rt.x + 10, rt.y + 8);
-    await page.waitForTimeout(150);
+    if (!(await page.evaluate(() =>
+            document.activeElement.classList.contains('ps-ltext-edit'))))
+        throw new Error('setup: Add text did not open its editor');
     await page.keyboard.type('Figure 1. Dose response.');
     // Commit path = a background click (the editor-flush guard).
     // PROBE GEOMETRY LAW (Jul 28 2026, found by a focus spy): the canvas

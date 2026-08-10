@@ -2547,6 +2547,7 @@
     }) : [];
     PROJECT.charts = charts.length ? charts : [newChart("Chart 1")];
     layHistoryClear();
+    nbHistoryClear();
     clearAllEngineDocState();
     for (var ci = 0; ci < PROJECT.charts.length; ci++)
       if (isLayoutTab(PROJECT.charts[ci])) layNormalizeLayout(PROJECT.charts[ci]);
@@ -2829,7 +2830,8 @@
   var EXPORT_PIN_SCOPE = null;
 
   function exportPrefs() {
-    var out = { format: "svg", dpi: 300, background: "shown" };
+    var out = { format: "svg", dpi: 300, background: "shown",
+                pinRecord: true };
     try {
       var p = JSON.parse(window.localStorage.getItem(PS_EXPORT_PREF_KEY) || "null");
       if (p && /^(svg|pdf|png|jpg)$/.test(p.format)) out.format = p.format;
@@ -2837,6 +2839,7 @@
         out.dpi = Number(p.dpi);
       if (p && /^(shown|transparent|white)$/.test(p.background))
         out.background = p.background;
+      if (p && p.pinRecord === false) out.pinRecord = false;
     } catch (e) {}
     return out;
   }
@@ -2846,7 +2849,8 @@
       window.localStorage.setItem(PS_EXPORT_PREF_KEY, JSON.stringify({
         format: selectedExportFormat(),
         dpi: Number(el("ps-export-dpi").value) || 300,
-        background: bgEl.__psBeforeForced || bgEl.value || "shown"
+        background: bgEl.__psBeforeForced || bgEl.value || "shown",
+        pinRecord: !!el("ps-export-record").checked
       }));
     } catch (e) {}
   }
@@ -3259,6 +3263,7 @@
     el("ps-export-bg").value = p.background;
     var capField = el("ps-export-caption-field");
     var descField = el("ps-export-description-field");
+    var recField = el("ps-export-record-field");
     var bgField = el("ps-export-bg").closest(".ps-export-field");
     if (EXPORT_PIN_SCOPE) {
       // Notebook mode: a page is a finished capture - its caption,
@@ -3276,6 +3281,11 @@
       capField.style.display = "none";
       descField.style.display = "none";
       if (bgField) bgField.style.display = "none";
+      // The page's OWN record replaces the caption box here. Nothing to
+      // type, because the page already knows when it was kept, what it
+      // came from, and what the user wrote about it.
+      recField.style.display = "";
+      el("ps-export-record").checked = exportPrefs().pinRecord;
     } else {
       var c = activeChart();
       el("ps-export-title").textContent =
@@ -3293,6 +3303,7 @@
       el("ps-export-description").value =
         savedDescription || generatedExportDescription();
       descField.style.display = "";
+      recField.style.display = "none";
       if (bgField) bgField.style.display = "";
     }
     el("ps-export-copy-status").textContent = "";
@@ -3673,11 +3684,14 @@
       w: size.w, h: size.h + capH
     };
   }
-  function wrapCaptionLines(textStr, maxW, fontSize) {
+  function wrapCaptionLines(textStr, maxW, fontSize, font) {
     var cv = document.createElement("canvas");
     var ctx = cv.getContext("2d");
-    ctx.font = fontSize + "px -apple-system, 'Segoe UI', Roboto, " +
-      "Helvetica, Arial, sans-serif";
+    // font is optional and defaults to the UI stack, so the two callers that
+    // measure UI text are unchanged. Layout text passes the family and weight
+    // it actually declares.
+    ctx.font = font || (fontSize + "px -apple-system, 'Segoe UI', Roboto, " +
+      "Helvetica, Arial, sans-serif");
     var out = [];
     var paragraphs = String(textStr).split(/\r?\n/);
     for (var pI = 0; pI < paragraphs.length; pI++) {
@@ -3697,6 +3711,12 @@
     }
     return out.length ? out : [String(textStr)];
   }
+  // The canvas's own text box, so the export can break where the screen does.
+  // The same three numbers are written in .ps-ltext in index.html, and a
+  // probe pins the two together.
+  var LAY_TEXT_MAX_W = 480;
+  var LAY_TEXT_PAD_X = 4;
+  var LAY_TEXT_LINE = 1.25;
   function layoutTextNode(doc, item) {
     var ns = "http://www.w3.org/2000/svg";
     var t = doc.createElementNS(ns, "text");
@@ -3716,11 +3736,27 @@
         ((Number(item.x) || 0) + texRect.w / 2) + " " +
         ((Number(item.y) || 0) + texRect.h / 2) + ")");
     }
-    var lines = String(item.text || "Text").split(/\r?\n/);
+    // WRAPPED where the canvas wraps it. The canvas caps a text item at
+    // .ps-ltext max-width 480 px and wraps inside that; the file used to
+    // split on newlines only, so a caption came out as one long line that
+    // changed the figure's shape and could run past the page edge and be
+    // cut. Measured in the same family and weight the file declares, so the
+    // two break in the same places.
+    // The effective width is whichever is smaller, the 480 px cap or the room
+    // left on the page, because an absolutely positioned box shrinks to fit
+    // its containing block. On a journal-width page the canvas wrapped at the
+    // room left while the file still wrapped at 480 and produced one line
+    // fewer.
+    var pageW = layPage().w;
+    var wrapW = Math.max(40, Math.min(LAY_TEXT_MAX_W,
+      pageW - (Number(item.x) || 0))) - LAY_TEXT_PAD_X * 2;
+    var lines = wrapCaptionLines(String(item.text || "Text"), wrapW, fs,
+      (item.italic ? "italic " : "") + (item.bold ? "700" : "400") +
+      " " + fs + "px sans-serif");
     for (var i = 0; i < lines.length; i++) {
       var sp = doc.createElementNS(ns, "tspan");
       sp.setAttribute("x", String(x));
-      if (i > 0) sp.setAttribute("dy", "1.25em");
+      if (i > 0) sp.setAttribute("dy", LAY_TEXT_LINE + "em");
       sp.textContent = lines[i] || " ";
       t.appendChild(sp);
     }
@@ -3868,6 +3904,91 @@
       } catch (e) { reject(e); }
     });
   }
+  // ---- Physical resolution in the file, not just in the dialog.
+  // "Print - 300 DPI" produced a 3150x2100 canvas with NO density metadata,
+  // so Word, Photoshop and every journal submission checker read the file at
+  // the default 72 or 96 dpi and reported it as a 33 to 44 inch figure that
+  // had to be resampled by hand. The pixels were always right; only the
+  // declared size was missing. Canvas cannot write this, so the encoded
+  // bytes are patched after toBlob, a pHYs chunk for PNG and the JFIF
+  // density fields for JPEG. Both are single, well-defined edits on a file the
+  // browser just produced, and both no-op safely on anything unexpected.
+  var PS_CRC_TABLE = null;
+  function psCrc32(bytes, from, to) {
+    var i, j, c;
+    if (!PS_CRC_TABLE) {
+      PS_CRC_TABLE = new Int32Array(256);
+      for (i = 0; i < 256; i++) {
+        c = i;
+        for (j = 0; j < 8; j++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+        PS_CRC_TABLE[i] = c;
+      }
+    }
+    c = -1;
+    for (i = from; i < to; i++)
+      c = PS_CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ -1) >>> 0;
+  }
+  function psPngWithDpi(bytes, dpi) {
+    var sig = [137, 80, 78, 71, 13, 10, 26, 10], i;
+    for (i = 0; i < 8; i++) if (bytes[i] !== sig[i]) return null;
+    // Walk to the first chunk that pHYs must precede, and bail if the file
+    // already declares a density (nothing to correct, and never two).
+    var at = 8, insertAt = -1;
+    while (at + 8 <= bytes.length) {
+      var len = (bytes[at] << 24 | bytes[at + 1] << 16 |
+                 bytes[at + 2] << 8 | bytes[at + 3]) >>> 0;
+      var type = String.fromCharCode(bytes[at + 4], bytes[at + 5],
+                                     bytes[at + 6], bytes[at + 7]);
+      if (type === "pHYs") return null;
+      if (type === "IDAT" || type === "IEND") { insertAt = at; break; }
+      at += 12 + len;
+    }
+    if (insertAt < 0) return null;
+    var ppu = Math.round((Number(dpi) || 96) / 0.0254);
+    var chunk = new Uint8Array(21);
+    chunk[0] = 0; chunk[1] = 0; chunk[2] = 0; chunk[3] = 9;
+    chunk[4] = 112; chunk[5] = 72; chunk[6] = 89; chunk[7] = 115;   // pHYs
+    chunk[8] = ppu >>> 24 & 255; chunk[9] = ppu >>> 16 & 255;
+    chunk[10] = ppu >>> 8 & 255; chunk[11] = ppu & 255;
+    chunk[12] = ppu >>> 24 & 255; chunk[13] = ppu >>> 16 & 255;
+    chunk[14] = ppu >>> 8 & 255; chunk[15] = ppu & 255;
+    chunk[16] = 1;                                                   // metres
+    var crc = psCrc32(chunk, 4, 17);
+    chunk[17] = crc >>> 24 & 255; chunk[18] = crc >>> 16 & 255;
+    chunk[19] = crc >>> 8 & 255; chunk[20] = crc & 255;
+    var out = new Uint8Array(bytes.length + 21);
+    out.set(bytes.subarray(0, insertAt), 0);
+    out.set(chunk, insertAt);
+    out.set(bytes.subarray(insertAt), insertAt + 21);
+    return out;
+  }
+  function psJpegWithDpi(bytes, dpi) {
+    // Canvas writes a standard JFIF APP0 straight after SOI, carrying
+    // units 0 (pixel aspect only) and 1x1. Rewrite those five bytes.
+    if (bytes[0] !== 0xFF || bytes[1] !== 0xD8) return null;
+    if (bytes[2] !== 0xFF || bytes[3] !== 0xE0) return null;
+    if (!(bytes[4] << 8 | bytes[5]) || bytes[6] !== 0x4A ||
+        bytes[7] !== 0x46 || bytes[8] !== 0x49 || bytes[9] !== 0x46 ||
+        bytes[10] !== 0) return null;
+    var d = Math.max(1, Math.min(65535, Math.round(Number(dpi) || 96)));
+    var out = new Uint8Array(bytes);
+    out[13] = 1;                                       // units: dots per inch
+    out[14] = d >>> 8 & 255; out[15] = d & 255;        // Xdensity
+    out[16] = d >>> 8 & 255; out[17] = d & 255;        // Ydensity
+    return out;
+  }
+  function psStampBlobDpi(blob, mime, dpi) {
+    if (!blob || !blob.arrayBuffer) return Promise.resolve(blob);
+    return blob.arrayBuffer().then(function (buf) {
+      var bytes = new Uint8Array(buf), out = null;
+      try {
+        out = mime === "image/png" ? psPngWithDpi(bytes, dpi)
+            : mime === "image/jpeg" ? psJpegWithDpi(bytes, dpi) : null;
+      } catch (e) { out = null; }
+      return out ? new Blob([out], { type: mime }) : blob;
+    }, function () { return blob; });
+  }
   function rasterizeExport(source, mime, dpi) {
     return new Promise(function (resolve, reject) {
       var scale = (Number(dpi) || 96) / 96;
@@ -3894,7 +4015,9 @@
         catch (e) { reject(new Error("The browser could not render the exported SVG.")); return; }
         canvas.toBlob(function (blob) {
           if (!blob) { reject(new Error("The browser could not encode the exported image.")); return; }
-          resolve({ blob: blob, width: w, height: h });
+          psStampBlobDpi(blob, mime, Number(dpi) || 96).then(function (stamped) {
+            resolve({ blob: stamped, width: w, height: h });
+          });
         }, mime, mime === "image/jpeg" ? 0.96 : undefined);
       };
       img.onerror = function () {
@@ -4358,6 +4481,69 @@
     }
     if (changed) persist(false);
   }
+  // ---- Notebook history ------------------------------------------------
+  // Cmd/Ctrl+Z is the app's promise everywhere else, and in this workspace
+  // it fell through to the chart engine: the Edit menu read "Undo chart
+  // styling" while the Notebook was on screen, and the key silently edited
+  // a chart the user was not looking at. Keeping, deleting, moving between
+  // sections and reordering are the structural acts on the record, and they
+  // are what this covers. Notes and titles are text fields, where the
+  // browser's own undo already works while the caret is in them.
+  var NB_UNDO = [], NB_REDO = [], NB_SEQ = 0;
+  function nbStep(label, undo, redo) {
+    NB_SEQ++;
+    var step = { seq: NB_SEQ, label: label, undo: undo, redo: redo };
+    NB_UNDO.push(step);
+    // Same ceiling as the layout history: deep enough to cover a working
+    // session, bounded so a long one cannot grow without limit.
+    if (NB_UNDO.length > 60) NB_UNDO.shift();
+    NB_REDO.length = 0;
+    return step;
+  }
+  function nbApply(fn) {
+    fn();
+    persist();
+    syncAll();
+    if (appWorkspace() === "pinboard") renderPinboard();
+  }
+  function nbUndo() {
+    var step = NB_UNDO.pop();
+    if (!step) return;
+    nbApply(step.undo);
+    NB_REDO.push(step);
+  }
+  function nbRedo() {
+    var step = NB_REDO.pop();
+    if (!step) return;
+    nbApply(step.redo);
+    NB_UNDO.push(step);
+  }
+  // The toast's Undo button and the keyboard must not both undo the same
+  // act: the toast outlives later changes, so it undoes its own step only
+  // while that step is still the one Cmd+Z would reach (the offerDataUndo
+  // rule, applied here).
+  function nbOfferUndo(message, step) {
+    showUndoToast(message, function () {
+      if (!NB_UNDO.length || NB_UNDO[NB_UNDO.length - 1] !== step) {
+        showToast(NB_REDO.indexOf(step) !== -1
+          ? "That change has already been undone"
+          : "A newer Notebook change has already been made", true);
+        return;
+      }
+      nbUndo();
+    });
+  }
+  // A history that outlives its project is not an undo, it is a way to
+  // inject a page from the old project into the new one. The layout history
+  // is cleared at every project boundary; this joins it there.
+  function nbHistoryClear() {
+    NB_UNDO.length = 0;
+    NB_REDO.length = 0;
+  }
+  function nbHistoryLabel(back) {
+    var stack = back ? NB_UNDO : NB_REDO;
+    return stack.length ? stack[stack.length - 1].label : "";
+  }
   // ---- page selection + provenance (Torry, Aug 1 2026: the empty rail,
   // "notes about the current page", the kept time, and "whether the chart
   // it was pulled from has changed") ----
@@ -4380,16 +4566,20 @@
       h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
     return h.toString(16);
   }
-  function pinProvenance(chartEl) {
+  // forId describes a chart OTHER than the one on screen, which is what
+  // keeping an updated copy of a drifted page needs. Without it this reads
+  // the active chart, as every existing caller wants.
+  function pinProvenance(chartEl, forId) {
     try {
-      var id = PROJECT.activeChart, c = chartById(id);
+      var id = forId || PROJECT.activeChart, c = chartById(id);
       if (!c || isLayoutTab(c)) return null;
       // Prefer the authoritative snapshot (captured at render,
       // size-guarded) so the signature is byte-comparable with later
-      // captures; fall back to a snapshot-style clone of the live svg.
+      // captures; fall back to a snapshot-style clone of the live svg. The
+      // fallback is only valid for the chart actually on screen.
       var s = validSnap(id);
-      var html = s ? s.svg : chartEl
-        ? svgSelfContainedClone(chartEl, "snap-" + id + "-").html : null;
+      var html = s ? s.svg : (!forId && chartEl
+        ? svgSelfContainedClone(chartEl, "snap-" + id + "-").html : null);
       if (!html) return null;
       // Analysis + variables at pin time, so a page stays self-describing
       // even after its source chart is deleted (Torry's rail round).
@@ -4408,8 +4598,36 @@
         desc = (modDef ? modDef.label : c.module) +
           (vals.length ? ": " + vals.join(", ") : "");
       } catch (eD) {}
+      // What KIND of chart this was, and the variables alone. A page list
+      // built from srcDesc reads the same on every page kept from one
+      // chart tab (Compare Groups: condition, score, four times over) -
+      // the graph type is what actually tells four explorations apart.
+      // The RESOLVED graph type, not merely an overridden one. A chart's
+      // option store is EMPTY until the user switches type, and the engine
+      // writes nothing when you pick the type you are already on, so reading
+      // the store alone recorded no type at all for every page kept before a
+      // first type change - which for someone exploring by restyling is all
+      // of them. Resolve the store over the template exactly as buildPayload
+      // does. Scatter is the exception worth naming: its type switch commits
+      // xyBin rather than graphType, so a heatmap is only visible there.
+      var kind = "", vars = "";
+      try {
+        var opts = (c.options && c.options[c.module]) || {};
+        var tplp = ((window.PS_TEMPLATES || {})[c.module] || {}).payload || {};
+        var gt = typeof opts.graphType === "string" && opts.graphType
+          ? opts.graphType
+          : (typeof tplp.graphType === "string" ? tplp.graphType : "");
+        var bin = typeof opts.xyBin === "string" && opts.xyBin
+          ? opts.xyBin
+          : (typeof tplp.xyBin === "string" ? tplp.xyBin : "none");
+        if (gt === "scatter" && bin && bin !== "none") gt = "heatmap";
+        kind = pinTypeLabel(gt);
+        vars = desc.indexOf(": ") !== -1
+          ? desc.slice(desc.indexOf(": ") + 2) : "";
+      } catch (eK) {}
       return { srcChart: id, srcName: c.name, srcSig: pinSig(html),
-               srcDesc: desc };
+               srcDesc: desc, srcType: kind || undefined,
+               srcVars: vars || undefined };
     } catch (e) { return null; }
   }
   // The verdict never CLAIMS what it has not verified: the snapshot epoch
@@ -4433,6 +4651,87 @@
       ? { text: name + " - unchanged since it was kept.", state: "same" }
       : { text: name + " - has changed since it was kept.",
           state: "changed" };
+  }
+  // The engine's graphType values in the app's own words. Only the ones a
+  // page can be kept from; anything unlisted falls back to the raw value
+  // rather than inventing a name for it.
+  var PIN_TYPE_LABELS = {
+    bar: "Bar", line: "Line", dot: "Dot", box: "Box", violin: "Violin",
+    raincloud: "Raincloud", scatter: "Scatter", heatmap: "Heatmap",
+    histogram: "Histogram", density: "Density",
+    histdensity: "Histogram + density", qq: "Q-Q", ecdf: "ECDF",
+    pie: "Pie", donut: "Donut", pareto: "Pareto",
+    // Named for the SHAPE, not restated with the analysis. The rail row is
+    // about 117px wide and "Correlation heatmap" alone needed 193px, so the
+    // variables were always cut off; and the exported band prints this next
+    // to srcDesc, where "Correlation heatmap - Correlation Matrix: a, b"
+    // said the same word twice. Scatter's Heatmap shares the name, which the
+    // variables and the analysis line either side of it settle.
+    corrheatmap: "Heatmap", corrcircles: "Circles",
+    corrnumbers: "Numbers", corrmixed: "Mixed",
+    likertdiverging: "Diverging", likertstacked: "100% stacked",
+    likertmeans: "Item means"
+  };
+  function pinTypeLabel(gt) {
+    if (!gt) return "";
+    return PIN_TYPE_LABELS[gt] ||
+      gt.charAt(0).toUpperCase() + gt.slice(1);
+  }
+  // A page needs a NAME before it can appear in a list, and every page
+  // already carries one. A kept comparison knows its own title, a kept
+  // chart knows what it was and which variables it was drawn from. The
+  // user's own title wins over all of it.
+  function pinPageLabel(pin, idx) {
+    var t = String(pin.pageTitle || "").trim();
+    if (t) return t;
+    t = String(pin.momTitle || "").trim();
+    if (t) return t;
+    if (pin.srcType)
+      return pin.srcType + (pin.srcVars ? " \u00b7 " + pin.srcVars : "");
+    t = String(pin.srcDesc || "").trim();
+    if (t) return t;
+    t = String(pin.srcName || "").trim();
+    if (t) return t;
+    return "Page " + (idx + 1);
+  }
+  // The one page footer that names this page, refreshed without touching
+  // the rest of the board.
+  function pinSyncCardLabel(pinId) {
+    var scroll = el("ps-pinscroll");
+    var pg = scroll && scroll.querySelector(
+      '.ps-pinpage[data-pin-id="' + pinId + '"]');
+    var num = pg && pg.querySelector(".ps-pinpage-num");
+    if (!num) return;
+    var pins = projectPins(), at = -1, pin = null;
+    for (var i = 0; i < pins.length; i++)
+      if (pins[i].id === pinId) { at = i; pin = pins[i]; }
+    if (!pin) return;
+    var ttl = String(pin.pageTitle || "").trim();
+    num.textContent = "Page " + (at + 1) + " of " + pins.length +
+      (ttl ? " \u00b7 " + ttl : "") +
+      (pin.at ? " \u00b7 kept " + pinKeptFmt(pin.at) : "");
+  }
+  // Go to a page. The Notebook, its section, selected, and on screen.
+  function pinReveal(pinId) {
+    var boards = pinBoards(), owner = null;
+    for (var i = 0; i < boards.length; i++)
+      for (var j = 0; j < boards[i].pins.length; j++)
+        if (boards[i].pins[j].id === pinId) owner = boards[i];
+    if (!owner) return;
+    (PROJECT.ui = PROJECT.ui || {}).activeBoard = owner.id;
+    PIN_SEL = pinId;
+    persist(false);
+    setAppWorkspace("pinboard");
+    renderPinboard();
+    var scroll = el("ps-pinscroll");
+    var pg = scroll && scroll.querySelector(
+      '.ps-pinpage[data-pin-id="' + pinId + '"]');
+    if (!pg) return;
+    // "nearest" rather than "center", because a page taller than the viewport
+    // should arrive at its TOP, which is where the chart is.
+    try { pg.scrollIntoView({ block: "nearest", behavior: "smooth" }); }
+    catch (e) { pg.scrollIntoView(); }
+    pg.focus();
   }
   function pinDayFmt(at) {
     try {
@@ -4511,6 +4810,22 @@
     el("ps-pininsp-open").style.display =
       sel.srcChart && chartById(sel.srcChart) &&
       !isLayoutTab(chartById(sel.srcChart)) ? "" : "none";
+    // Only on a page whose source has actually moved on. On a page that
+    // still matches, an update button would offer a duplicate.
+    var upd = el("ps-pininsp-update");
+    if (upd) {
+      upd.style.display = pinCanUpdate(sel) ? "" : "none";
+      setTip(upd, "Keep the chart as it is NOW as a new page below this one. " +
+        "This page is left exactly as it was.");
+    }
+    var nm = el("ps-pininsp-name");
+    if (nm && document.activeElement !== nm) {
+      nm.value = sel.pageTitle || "";
+      // The placeholder shows the name the page carries when untitled, so
+      // an empty box reads as "this is what it is called" rather than as a
+      // blank the user has to fill in.
+      nm.placeholder = pinPageLabel(sel, 0);
+    }
     var ta = el("ps-pininsp-note");
     if (document.activeElement !== ta) ta.value = sel.note || "";
   }
@@ -4523,16 +4838,26 @@
     var pins = board.pins;
     var entry = { id: pinNewId(), src: pinSvgSrc(svgText),
                   natW: w, natH: h, w: w, h: h, at: Date.now() };
-    if (prov) {
-      entry.srcChart = prov.srcChart;
-      entry.srcName = prov.srcName;
-      entry.srcSig = prov.srcSig;
-      if (prov.srcDesc) entry.srcDesc = prov.srcDesc;
-    }
+    // Everything pinProvenance recorded, not a hand-listed subset. The
+    // field-by-field copy silently dropped each new provenance field the
+    // moment one was added.
+    if (prov)
+      for (var pk in prov)
+        if (Object.prototype.hasOwnProperty.call(prov, pk) &&
+            prov[pk] != null && prov[pk] !== "") entry[pk] = prov[pk];
     if (extra)
       for (var xk in extra)
         if (extra[xk] != null && extra[xk] !== "") entry[xk] = extra[xk];
     pins.push(entry);
+    nbStep("the keep", function () {
+      var k = pins.indexOf(entry);
+      if (k !== -1) pins.splice(k, 1);
+      (PROJECT.ui = PROJECT.ui || {}).activeBoard = board.id;
+    }, function () {
+      pins.push(entry);
+      (PROJECT.ui = PROJECT.ui || {}).activeBoard = board.id;
+      PIN_SEL = entry.id;
+    });
     persist();
     syncAll();
     if (appWorkspace() === "pinboard") renderPinboard();
@@ -4931,6 +5256,7 @@
     PROJECT.pinboards = [];
     PROJECT.ui.activeBoard = null;
     layHistoryClear();
+    nbHistoryClear();
     PROJECT.name = ex.name;
     PROJECT_REV = 0;
     FILE_SAVED_REV = null;
@@ -5546,16 +5872,19 @@
       if (PROJECT.ui.activeBoard === id) PROJECT.ui.activeBoard = null;
       persist(); syncAll();
       if (appWorkspace() === "pinboard") renderPinboard();
-      showUndoToast("Deleted " + removed.name +
+      var step = nbStep("the deleted section", function () {
+        var bs = pinBoards();
+        bs.splice(Math.min(at, bs.length), 0, removed);
+        PROJECT.ui.activeBoard = removed.id;
+      }, function () {
+        var bs = pinBoards(), k = bs.indexOf(removed);
+        if (k !== -1) bs.splice(k, 1);
+        if (PROJECT.ui.activeBoard === removed.id)
+          PROJECT.ui.activeBoard = null;
+      });
+      nbOfferUndo("Deleted " + removed.name +
         (removed.pins.length ? " and its " + removed.pins.length +
-          (removed.pins.length === 1 ? " page" : " pages") : ""),
-        function () {
-          var bs = pinBoards();
-          bs.splice(Math.min(at, bs.length), 0, removed);
-          PROJECT.ui.activeBoard = removed.id;
-          persist(); syncAll();
-          if (appWorkspace() === "pinboard") renderPinboard();
-        });
+          (removed.pins.length === 1 ? " page" : " pages") : ""), step);
       return;
     }
   }
@@ -5662,9 +5991,23 @@
       img.draggable = false;
       page.appendChild(img);
       var bar = mkEl("div", "ps-pinpage-bar");
+      var ttl = String(pin.pageTitle || "").trim();
       bar.appendChild(mkEl("span", "ps-pinpage-num",
         "Page " + (idx + 1) + " of " + pins.length +
+        (ttl ? " \u00b7 " + ttl : "") +
         (pin.at ? " \u00b7 kept " + pinKeptFmt(pin.at) : "")));
+      // The freshness verdict lived only in the rail of the SELECTED page,
+      // so scrolling a notebook showed nothing and a page whose source had
+      // moved on looked exactly like one that had not.
+      var pst = pinSourceStatus(pin);
+      if (pst.state === "changed" || pst.state === "gone") {
+        var dw = mkEl("span", "ps-pinpage-drift",
+          pst.state === "gone" ? "source chart is gone"
+                               : "source chart has changed");
+        dw.setAttribute("data-state", pst.state);
+        setTip(dw, pst.text);
+        bar.appendChild(dw);
+      }
       // The four verbs live in ONE wrapping group, so a narrow card drops
       // them below the info line together instead of stranding whichever
       // fit beside the text (Torry's low-zoom report, Aug 5 2026).
@@ -5822,6 +6165,15 @@
     if (slot < 0) slot = 0;
     if (slot > pins.length) slot = pins.length;
     pins.splice(slot, 0, moved);
+    if (slot !== at) (function (from, to, list, item) {
+      function put(k) {
+        var cur = list.indexOf(item);
+        if (cur !== -1) list.splice(cur, 1);
+        list.splice(Math.min(k, list.length), 0, item);
+      }
+      nbStep("the page order", function () { put(from); },
+             function () { put(to); });
+    })(at, slot, pins, moved);
     persist();
     renderPinboard();
     var after = scroll ? scroll.querySelectorAll(".ps-pinpage") : [];
@@ -5851,19 +6203,162 @@
     syncPinInspector();
   }
   function deletePin(id) {
-    var pins = projectPins();
+    // Undo restores into the section the page was deleted FROM, captured
+    // here rather than resolved at undo time, because the toast outlives a section
+    // switch, and projectPins() would have handed the page to whichever
+    // section happened to be on screen when Undo was pressed. A record must
+    // never end up somewhere the user did not put it. (deletePinBoard
+    // already captured its index this way; this is the same rule.)
+    var board = activePinBoard(), pins = board.pins;
     for (var i = 0; i < pins.length; i++) {
       if (pins[i].id !== id) continue;
       var removed = pins.splice(i, 1)[0], at = i;
+      var step = nbStep("the deleted page", function () {
+        // The section itself may have been deleted meanwhile, and its own
+        // undo is a separate step. Restoring into a detached section would
+        // drop the page silently, so fall back to the one on screen.
+        var live = pinBoards().indexOf(board) !== -1 ? board : activePinBoard();
+        live.pins.splice(Math.min(at, live.pins.length), 0, removed);
+        // Show the restored page, since putting it back out of sight would be an
+        // undo the user cannot see.
+        (PROJECT.ui = PROJECT.ui || {}).activeBoard = live.id;
+        PIN_SEL = removed.id;
+      }, function () {
+        var k = board.pins.indexOf(removed);
+        if (k !== -1) board.pins.splice(k, 1);
+        (PROJECT.ui = PROJECT.ui || {}).activeBoard = board.id;
+      });
       persist(); syncAll();
       if (appWorkspace() === "pinboard") renderPinboard();
-      showUndoToast("Page removed from the Notebook", function () {
-        projectPins().splice(Math.min(at, projectPins().length), 0, removed);
-        persist(); syncAll();
-        if (appWorkspace() === "pinboard") renderPinboard();
-      });
+      nbOfferUndo("Page removed from " + board.name, step);
       return;
     }
+  }
+  // ---- keeping an updated copy of a page whose source has moved on -----
+  // The rail told you a page's source chart had changed and then offered
+  // nothing to do about it. The answer is append-only, because that is what
+  // makes a record defensible months later: the current chart joins the
+  // notebook as a NEW page directly below the old one, carrying the note and
+  // the title forward, and both versions keep their own kept dates. Refresh
+  // in place would have been cheaper and would have destroyed the evidence,
+  // which is the one thing a lab notebook is not supposed to allow.
+  function pinCanUpdate(pin) {
+    return !!(pin && pin.srcChart && pinSourceStatus(pin).state === "changed");
+  }
+  function pinKeepUpdatedCopy(pinId) {
+    var boards = pinBoards(), board = null, at = -1, pin = null, i, j;
+    for (i = 0; i < boards.length; i++)
+      for (j = 0; j < boards[i].pins.length; j++)
+        if (boards[i].pins[j].id === pinId) {
+          board = boards[i]; at = j; pin = boards[i].pins[j];
+        }
+    if (!pin || !pinCanUpdate(pin)) return;
+    // "changed" is only reachable with a valid snapshot, so this is the same
+    // capture the verdict was computed against, not a re-render.
+    var s = validSnap(pin.srcChart);
+    if (!s) return;
+    var entry = { id: pinNewId(), src: pinSvgSrc(s.svg),
+                  natW: s.w, natH: s.h, w: s.w, h: s.h, at: Date.now() };
+    var prov = pinProvenance(null, pin.srcChart);
+    if (prov)
+      for (var pk in prov)
+        if (Object.prototype.hasOwnProperty.call(prov, pk) &&
+            prov[pk] != null && prov[pk] !== "") entry[pk] = prov[pk];
+    // The note is the reason the page exists, and the title is what it is
+    // called. This is the same figure, later, so both come forward.
+    if (pin.note) entry.note = pin.note;
+    if (pin.pageTitle) entry.pageTitle = pin.pageTitle;
+    board.pins.splice(at + 1, 0, entry);
+    var step = nbStep("the updated copy", function () {
+      var k = board.pins.indexOf(entry);
+      if (k !== -1) board.pins.splice(k, 1);
+      (PROJECT.ui = PROJECT.ui || {}).activeBoard = board.id;
+      PIN_SEL = pin.id;
+    }, function () {
+      board.pins.splice(Math.min(at + 1, board.pins.length), 0, entry);
+      (PROJECT.ui = PROJECT.ui || {}).activeBoard = board.id;
+      PIN_SEL = entry.id;
+    });
+    (PROJECT.ui = PROJECT.ui || {}).activeBoard = board.id;
+    PIN_SEL = entry.id;
+    persist(); syncAll();
+    if (appWorkspace() === "pinboard") renderPinboard();
+    repairPinFonts();
+    pinReveal(entry.id);
+    nbOfferUndo("Updated copy kept, below the original", step);
+  }
+  // ---- moving a page between sections ---------------------------------
+  // Keeping into the wrong section was a one-way mistake. Nothing in the
+  // page menu, the page bar or the rail moved a page, so the only remedy
+  // was to delete it and keep it again from the source chart, which threw
+  // away the note and the kept time - the two things that make it a record.
+  // Shaped like Send to layout, with the sections by name then New section.
+  // bornWith, when given, is a section created FOR this move: undo removes it
+  // along with the move, and redo puts it back.
+  function movePinToBoard(pinId, boardId, bornWith) {
+    var boards = pinBoards(), from = null, at = -1, pin = null, target = null;
+    for (var i = 0; i < boards.length; i++) {
+      for (var j = 0; j < boards[i].pins.length; j++)
+        if (boards[i].pins[j].id === pinId) {
+          from = boards[i]; at = j; pin = boards[i].pins[j];
+        }
+      if (boards[i].id === boardId) target = boards[i];
+    }
+    if (!pin || !target || target === from) return;
+    from.pins.splice(at, 1);
+    target.pins.push(pin);
+    (PROJECT.ui = PROJECT.ui || {}).activeBoard = target.id;
+    PIN_SEL = pin.id;
+    persist(); syncAll();
+    if (appWorkspace() === "pinboard") renderPinboard();
+    var step = nbStep("the move", function () {
+      var back = pinBoards().indexOf(target) !== -1 ? target : null;
+      if (back) {
+        var k = back.pins.indexOf(pin);
+        if (k !== -1) back.pins.splice(k, 1);
+      }
+      var home = pinBoards().indexOf(from) !== -1 ? from : activePinBoard();
+      home.pins.splice(Math.min(at, home.pins.length), 0, pin);
+      if (bornWith && !bornWith.pins.length) {
+        var bs = pinBoards(), bi = bs.indexOf(bornWith);
+        if (bi !== -1 && bs.length > 1) bs.splice(bi, 1);
+      }
+      PROJECT.ui.activeBoard = home.id;
+      PIN_SEL = pin.id;
+    }, function () {
+      if (bornWith && pinBoards().indexOf(bornWith) === -1)
+        pinBoards().push(bornWith);
+      var k = from.pins.indexOf(pin);
+      if (k !== -1) from.pins.splice(k, 1);
+      target.pins.push(pin);
+      PROJECT.ui.activeBoard = target.id;
+      PIN_SEL = pin.id;
+    });
+    nbOfferUndo("Moved to " + target.name, step);
+  }
+  function showPinMoveMenu(x, y, pinId) {
+    var boards = pinBoards(), owner = null, items = [];
+    for (var i = 0; i < boards.length; i++)
+      for (var j = 0; j < boards[i].pins.length; j++)
+        if (boards[i].pins[j].id === pinId) owner = boards[i];
+    for (i = 0; i < boards.length; i++) (function (b) {
+      items.push({ label: b.name, key: "pin-move-" + b.id,
+        disabled: b === owner,
+        tip: b === owner ? "This page is already in " + b.name : "",
+        action: function () { movePinToBoard(pinId, b.id); } });
+    })(boards[i]);
+    if (items.length) items.push("separator");
+    items.push({ label: "New section", key: "pin-move-new",
+      action: function () {
+        var b = { id: newBoardId(),
+                  name: "Section " + (pinBoards().length + 1), pins: [] };
+        pinBoards().push(b);
+        // The section was created for this move, so undoing the move must
+        // take it away again. Without this the page came back and an empty
+        // section nobody asked for stayed behind.
+        movePinToBoard(pinId, b.id, b);
+      } });
+    showContextMenu(x, y, items, null);
   }
   function copyPinToClipboard(pin) {
     if (!navigator.clipboard || !navigator.clipboard.write ||
@@ -5894,18 +6389,23 @@
       if (everything[i].pin.id === pinId) pin = everything[i].pin;
     var doc = chartById(layoutId);
     if (!pin || !doc || !isLayoutTab(doc)) return;
-    var margin = (doc.page && doc.page.margin) || 32;
-    var contentW = Math.max(160, (doc.page.w || 1008) - margin * 2);
+    // One step for the whole send. It adds an item and can also grow the page
+    // and flip its preset to custom, and none of that was in the layout's
+    // history, so the next undo there removed the sent page AND reverted
+    // whatever the user had done before it, in one unlabelled move.
+    laySnapshotDoc(doc, "send to layout");
+    layNormalizeLayout(doc);
+    var margin = doc.page.margin;
+    var contentW = Math.max(160, doc.page.w - margin * 2);
     var w = Math.min(pin.w || contentW, contentW);
     var h = Math.round((pin.h || w) * (w / (pin.w || w)));
-    var items = doc.items || (doc.items = []);
-    var mx = 0, y = margin;
+    var items = doc.items;
+    var mx = 0;
     for (var j = 0; j < items.length; j++) {
       var m2 = /^i(\d+)$/.exec(items[j].id || "");
       if (m2) mx = Math.max(mx, Number(m2[1]));
-      var bot = (Number(items[j].y) || 0) + (Number(items[j].h) || 0);
-      if (bot + 14 > y) y = bot + 14;
     }
+    var spot = layPlaceRect(items, doc.page, w, h);
     items.push({ id: "i" + (mx + 1), kind: "image", src: pin.src,
                  natW: pin.natW, natH: pin.natH,
                  srcChart: pin.srcChart || undefined,
@@ -5918,17 +6418,18 @@
                  srcName: pin.srcName || undefined,
                  srcSig: pin.srcSig || undefined,
                  keptAt: pin.at || undefined,
-                 x: margin, y: y, w: w, h: h });
-    if (y + h + margin > doc.page.h) {
-      doc.page.h = y + h + margin;
+                 x: spot.x, y: spot.y, w: w, h: h });
+    var grew = spot.needH > doc.page.h;
+    if (grew) {
+      doc.page.h = Math.min(LAY_PAGE_MAX, Math.round(spot.needH));
       doc.page.preset = "custom";
     }
+    layClampItemsIn(doc);
     persist(); syncAll();
     if (activeChart().id === doc.id && appWorkspace() === "layout")
       renderLayout();
-    showActionToast("Sent to " + doc.name, "Open", function () {
-      switchChart(doc.id);
-    });
+    showActionToast("Sent to " + doc.name + laySendNote(grew, spot.capped),
+      "Open", function () { switchChart(doc.id); });
   }
   // ---- Notebook export: scope -> format (Torry, Aug 5 2026) ----------
   // The Export button (and a page right-click) picks a SCOPE - one page,
@@ -6074,23 +6575,132 @@
     out.set(eocd, at);
     return out;
   }
+  // ---- the record band -------------------------------------------------
+  // A kept page is evidence, and evidence that leaves the app without its
+  // note, its date and its source is only a picture. The chart exporter has
+  // typeset a caption under a figure since t3-59; this composes the same
+  // band from the page's OWN record instead of a typed sentence, so the two
+  // paths share wrapCaptionLines and the geometry cannot drift apart.
+  // rec = {idx, total, board, manyBoards} - idx and total are per SECTION,
+  // matching the numbers the page card shows on screen.
+  function pinRecordBlocks(pin, rec) {
+    var out0 = [], head = [];
+    var ttl = String(pin.pageTitle || "").trim();
+    if (ttl) out0.push({ size: 13, fill: "#222222", text: ttl });
+    if (rec.manyBoards && rec.board) head.push(rec.board);
+    head.push("Page " + (rec.idx + 1) + " of " + rec.total);
+    if (pin.at) head.push("kept " + pinKeptFmt(pin.at));
+    var out = out0.concat(
+      [{ size: 11, fill: "#5b6470", text: head.join(" \u00b7 ") }]);
+    var st = pinSourceStatus(pin);
+    var src = [], drift = st.state === "changed" || st.state === "gone";
+    // The TYPE leads the source line. Four variants kept from one chart tab
+    // differ only by it, and without this every one of them exported the
+    // identical sentence - the page list could tell them apart and the
+    // document handed to someone else could not.
+    if (pin.srcDesc)
+      src.push(pin.srcType ? pin.srcType + " \u00b7 " + pin.srcDesc
+                           : pin.srcDesc);
+    if (st.state === "changed")
+      src.push("the source chart has changed since this page was kept");
+    else if (st.state === "gone")
+      src.push("the source chart is no longer in the project");
+    if (src.length)
+      out.push({ size: 11, fill: drift ? "#8a5512" : "#5b6470",
+                 text: src.join(" \u00b7 ") });
+    var note = String(pin.note || "").trim();
+    if (note) out.push({ size: 13, fill: "#222222", text: note, gap: 7 });
+    return out;
+  }
+  var PIN_REC_PAD = 13, PIN_REC_X = 14;
+  // Measure first, so the PDF page and the raster canvas are sized from the
+  // same numbers that draw the text.
+  function pinRecordLayout(pin, rec, w) {
+    var blocks = pinRecordBlocks(pin, rec), rows = [], y = PIN_REC_PAD;
+    for (var i = 0; i < blocks.length; i++) {
+      var b = blocks[i], lh = Math.round(b.size * 1.38);
+      y += b.gap || 0;
+      var lines = wrapCaptionLines(b.text, w - PIN_REC_X * 2, b.size);
+      for (var j = 0; j < lines.length; j++) {
+        y += lh;
+        rows.push({ text: lines[j], size: b.size, fill: b.fill, y: y - 3 });
+      }
+    }
+    return { rows: rows, h: y + PIN_REC_PAD };
+  }
+  // The page's svg nested inside a taller one, with the record typeset
+  // under it. Mirrors composeExportSvg's caption branch exactly.
+  function pinComposeWithRecord(pin, rec) {
+    var svgText = pinSvgText(pin);
+    if (!svgText || !rec) return null;
+    var w = pin.w || 720, h = pin.h || 480;
+    var lay = pinRecordLayout(pin, rec, w);
+    if (!lay.rows.length) return null;
+    var ns = "http://www.w3.org/2000/svg";
+    var inner = parseExportSvg(svgText);
+    var outer = document.implementation.createDocument(ns, "svg", null);
+    var root = outer.documentElement;
+    root.setAttribute("xmlns", ns);
+    root.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
+    root.setAttribute("width", String(w));
+    root.setAttribute("height", String(h + lay.h));
+    root.setAttribute("viewBox", "0 0 " + w + " " + (h + lay.h));
+    // White under the whole thing, because a kept page may itself be transparent,
+    // and record text must never land on transparency.
+    addSvgBackground(outer, "#ffffff", w, h + lay.h);
+    var nested = outer.importNode(inner.documentElement, true);
+    nested.setAttribute("x", "0"); nested.setAttribute("y", "0");
+    nested.setAttribute("width", String(w));
+    nested.setAttribute("height", String(h));
+    nested.removeAttribute("role");
+    nested.removeAttribute("aria-labelledby");
+    root.appendChild(nested);
+    var rule = outer.createElementNS(ns, "line");
+    rule.setAttribute("x1", String(PIN_REC_X));
+    rule.setAttribute("x2", String(w - PIN_REC_X));
+    rule.setAttribute("y1", String(h + 0.5));
+    rule.setAttribute("y2", String(h + 0.5));
+    rule.setAttribute("stroke", "#dfe4ea");
+    root.appendChild(rule);
+    for (var i = 0; i < lay.rows.length; i++) {
+      var r = lay.rows[i];
+      var t = outer.createElementNS(ns, "text");
+      t.setAttribute("x", String(PIN_REC_X));
+      t.setAttribute("y", String(h + r.y));
+      t.setAttribute("fill", r.fill);
+      t.setAttribute("font-size", String(r.size));
+      t.setAttribute("font-family",
+        "-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif");
+      t.setAttribute("data-role", "pin-record");
+      t.textContent = r.text;
+      root.appendChild(t);
+    }
+    return { svg: new XMLSerializer().serializeToString(root),
+             w: w, h: h + lay.h };
+  }
+  // The page as it should export, with its record when the dialog asks for
+  // one and the page has vector to nest, otherwise exactly as before.
+  function pinExportSvg(pin, rec) {
+    var made = rec ? pinComposeWithRecord(pin, rec) : null;
+    return made || { svg: pinSvgText(pin), w: pin.w || 720, h: pin.h || 480 };
+  }
   // One page -> one file's bytes. A v1 bitmap page has no vector to give:
   // whatever the format asked, its stored PNG bytes are the honest payload
   // (the dialog and the toast both say so).
-  function pinFileBytes(pin, format, dpi) {
+  function pinFileBytes(pin, format, dpi, rec) {
     var svgText = pinSvgText(pin);
     if (!svgText)
       return dataUriBytes(pin.src).then(function (bytes) {
         return { ext: "png", bytes: bytes };
       });
+    var made = pinExportSvg(pin, rec);
     if (format === "svg")
       return Promise.resolve({ ext: "svg",
         bytes: new TextEncoder().encode(
           '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n' +
-          svgText) });
+          made.svg) });
     var mime = format === "jpg" ? "image/jpeg" : "image/png";
-    return rasterizeExport({ svg: svgText, w: pin.w || 720,
-        h: pin.h || 480 }, mime, dpi)
+    return rasterizeExport({ svg: made.svg, w: made.w, h: made.h }, mime, dpi)
       .then(function (out) { return out.blob.arrayBuffer(); })
       .then(function (buf) {
         return { ext: format === "jpg" ? "jpg" : "png",
@@ -6121,20 +6731,23 @@
     return names;
   }
   // The PDF core: one page per pin, vector where the pin holds svg.
-  function pinboardPdfBlob(pins) {
+  // recs is index-aligned with pins (null when the record band is off), so
+  // a page grows downward by exactly its own band.
+  function pinboardPdfBlob(pins, recs) {
     var JsPDF = window.jspdf && window.jspdf.jsPDF;
     if (!JsPDF || !JsPDF.API || typeof JsPDF.API.svg !== "function")
       return Promise.reject(new Error(
         "The PDF exporter did not load. Reload and try again."));
     var pdf = null;
-    function pageDims(pin) {
-      return { w: Math.max(36, (pin.w || 720) * 72 / 96),
-               h: Math.max(36, (pin.h || 480) * 72 / 96) };
-    }
     var chain = Promise.resolve();
-    pins.forEach(function (pin) {
+    pins.forEach(function (pin, i) {
       chain = chain.then(function () {
-        var d = pageDims(pin);
+        var rec = recs ? recs[i] : null;
+        var made = pinSvgText(pin) ? pinExportSvg(pin, rec) : null;
+        var pw = made ? made.w : (pin.w || 720);
+        var ph = made ? made.h : (pin.h || 480);
+        var d = { w: Math.max(36, pw * 72 / 96),
+                  h: Math.max(36, ph * 72 / 96) };
         if (!pdf) {
           pdf = new JsPDF({
             orientation: d.w >= d.h ? "landscape" : "portrait",
@@ -6146,9 +6759,8 @@
         } else {
           pdf.addPage([d.w, d.h], d.w >= d.h ? "landscape" : "portrait");
         }
-        var svgText = pinSvgText(pin);
-        if (svgText) {
-          var sdoc = parseExportSvg(svgText);
+        if (made) {
+          var sdoc = parseExportSvg(made.svg);
           normalizePdfFonts(sdoc.documentElement);
           return pdf.svg(sdoc.documentElement,
             { x: 0, y: 0, width: d.w, height: d.h,
@@ -6159,6 +6771,37 @@
       });
     });
     return chain.then(function () { return pdf.output("blob"); });
+  }
+  // The dialog's answer, read at export time.
+  function pinRecordWanted() {
+    var box = el("ps-export-record");
+    return box ? !!box.checked : true;
+  }
+  // Per-page record descriptors for an export scope. The page number is the
+  // page's position in its own SECTION, not in the exported selection, so
+  // exporting page 3 on its own still says "Page 3 of 12" and agrees with
+  // the card on screen. The section is named only when the file holds more
+  // than one.
+  function pinRecordsFor(pins) {
+    if (!pinRecordWanted()) return null;
+    var owners = {}, everything = allPins(), i;
+    for (i = 0; i < everything.length; i++)
+      owners[everything[i].pin.id] = everything[i].board;
+    var boardsInFile = {};
+    for (i = 0; i < pins.length; i++) {
+      var bd = owners[pins[i].id];
+      if (bd) boardsInFile[bd.id] = 1;
+    }
+    var many = Object.keys(boardsInFile).length > 1;
+    var out = [];
+    for (i = 0; i < pins.length; i++) {
+      var b = owners[pins[i].id];
+      var list = b ? b.pins : pins;
+      var at = list.indexOf(pins[i]);
+      out.push({ idx: at === -1 ? i : at, total: list.length,
+                 board: b ? b.name : "", manyBoards: many });
+    }
+    return out;
   }
   // The dialog's Export button, notebook mode. Stamps __psPinExportLast
   // BEFORE the save picker (probes and diagnostics read it; the picker
@@ -6198,10 +6841,11 @@
       try { console.warn("Pandion Plots notebook export failed", e); }
       catch (ignore) {}
     }
+    var recs = pinRecordsFor(pins);
     if (format === "pdf") {
       var pdfName = base + ".pdf";
       setExportStatus("Rendering " + pdfName + "...", false);
-      pinboardPdfBlob(pins).then(function (blob) {
+      pinboardPdfBlob(pins, recs).then(function (blob) {
         stamp({ bytes: blob.size, container: "pdf" });
         setExportStatus("Choose where to save " + pdfName + "...", false);
         return saveExportBlob(blob, pdfName, "pdf");
@@ -6212,7 +6856,7 @@
       return;
     }
     if (pins.length === 1) {
-      pinFileBytes(pins[0], format, dpi).then(function (f) {
+      pinFileBytes(pins[0], format, dpi, recs && recs[0]).then(function (f) {
         var oneName = base + "." + f.ext;
         var blob = new Blob([f.bytes], { type: exportMime(f.ext) });
         stamp({ bytes: blob.size, container: "file", files: [oneName] });
@@ -6233,7 +6877,8 @@
       chain = chain.then(function () {
         setExportStatus("Rendering page " + (idx + 1) + " of " +
           pins.length + "...", false);
-        return pinFileBytes(pin, format, dpi).then(function (f) {
+        return pinFileBytes(pin, format, dpi, recs && recs[idx])
+          .then(function (f) {
           if (f.ext === "png" && format !== "png") bitmapN++;
           entries.push({ name: names[idx] + "." + f.ext, data: f.bytes });
         });
@@ -6261,6 +6906,13 @@
   // want the behavior to be consistent") - each layout by name, then New
   // layout; only the placing function differs, so the two surfaces can
   // never drift apart.
+  // What a send appends to its own toast. layGrewNote is the toolbar's
+  // equivalent and shows a toast of its own; a send already has one.
+  function laySendNote(grew, capped) {
+    if (capped)
+      return " \u00b7 the page is at its largest, so it landed on the figure";
+    return grew ? " \u00b7 the page grew to fit it" : "";
+  }
   function showSendToLayoutMenu(x, y, keyPrefix, place) {
     var items = [];
     for (var i = 0; i < PROJECT.charts.length; i++) (function (c) {
@@ -6314,30 +6966,33 @@
   function addChartToLayout(chartId, layoutId) {
     var c = chartById(chartId), doc = chartById(layoutId);
     if (!c || isLayoutTab(c) || !doc || !isLayoutTab(doc)) return;
-    var margin = (doc.page && doc.page.margin) || 32;
-    var contentW = Math.max(160, (doc.page.w || 1008) - margin * 2);
-    var w = Math.min(460, contentW);
-    var h = 310;
-    var items = doc.items || (doc.items = []);
-    var mx = 0, y = margin;
+    // See addPinToLayout. The send is one step, page growth included.
+    laySnapshotDoc(doc, "send to layout");
+    layNormalizeLayout(doc);
+    var items = doc.items;
+    // The same placement and the same size as the toolbar's Add chart. Two
+    // ways of putting a chart into a figure produced two different figures.
+    var w = layPanelWidthFor(items, doc.page);
+    var h = Math.round(w / layChartAspect(chartId));   // see layAddChart
+    var mx = 0;
     for (var j = 0; j < items.length; j++) {
       var m2 = /^i(\d+)$/.exec(items[j].id || "");
       if (m2) mx = Math.max(mx, Number(m2[1]));
-      var bot = (Number(items[j].y) || 0) + (Number(items[j].h) || 0);
-      if (bot + 14 > y) y = bot + 14;
     }
+    var spot = layPlaceRect(items, doc.page, w, h);
+    var grew = spot.needH > doc.page.h;
     items.push({ id: "i" + (mx + 1), kind: "chart", chartId: chartId,
-                 x: margin, y: y, w: w, h: h });
-    if (y + h + margin > doc.page.h) {
-      doc.page.h = y + h + margin;
+                 x: spot.x, y: spot.y, w: w, h: h });
+    if (grew) {
+      doc.page.h = Math.min(LAY_PAGE_MAX, Math.round(spot.needH));
       doc.page.preset = "custom";
     }
+    layClampItemsIn(doc);
     persist(); syncAll();
     if (activeChart().id === doc.id && appWorkspace() === "layout")
       renderLayout();
-    showActionToast("Sent to " + doc.name, "Open", function () {
-      switchChart(doc.id);
-    });
+    showActionToast("Sent to " + doc.name + laySendNote(grew, spot.capped),
+      "Open", function () { switchChart(doc.id); });
   }
   function render() {
     echoTimer = null;
@@ -6835,6 +7490,11 @@
       captureChartSnapshot(c.id);
     }
     applyViewZoom();
+    // Re-adopt the zoom control into the bar the engine just rebuilt.
+    // The observer below is the BACKSTOP for renders the shell does not
+    // drive; doing it here as well means the control is never missing for
+    // the beat between an engine render and the observer's callback.
+    dockChartZoomInToolbar();
     scheduleChartCheck();
   }
 
@@ -8755,6 +9415,9 @@
   function tipTarget(node) {
     return node && node.closest ? node.closest("[data-tip]") : null;
   }
+  // What a press last landed on, so the focus it causes does not re-summon
+  // the tip it just dismissed.
+  var TIP_PRESSED = null, TIP_PRESSED_AT = 0;
   function wireTooltips() {
     document.addEventListener("pointerover", function (e) {
       var target = tipTarget(e.target);
@@ -8772,21 +9435,40 @@
       if (to === target) return;     // moving within the same target
       hideTip();
     });
-    // Keyboard focus shows it AT ONCE: a delay on focus is a delay on the only
-    // way a keyboard user can see it at all.
+    // Keyboard focus shows it AT ONCE, because a delay on focus is a delay on
+    // the only way a keyboard user can see it at all.
+    //
+    // Except when a POINTER just put the focus there. Clicking a control
+    // focuses it, so the pointerdown below would hide the tip and this would
+    // put it straight back, with no delay, on top of whatever the click just
+    // opened. The project "+" was the visible case: its tip sat across the
+    // first item of the menu it had opened. Keyboard focus is untouched, and
+    // so is a programmatic focus() call, because neither carries a press.
     document.addEventListener("focusin", function (e) {
       var target = tipTarget(e.target);
+      if (target && target === TIP_PRESSED &&
+          Date.now() - TIP_PRESSED_AT < 400) { hideTip(); return; }
       if (target) showTipFor(target);
       else hideTip();
     });
     document.addEventListener("focusout", function (e) {
+      // Clearing the press marker here is what keeps the suppression above
+      // causal rather than merely timed. The focusin a press causes always
+      // arrives BEFORE any focusout, so the intended case is untouched, while
+      // a keyboard user who tabs away and back inside 400 ms gets the tooltip
+      // they asked for. It also stops the marker pinning a detached node.
+      TIP_PRESSED = null;
       if (tipTarget(e.target)) hideTip();
     });
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape") hideTip();
     }, true);
     // A tooltip must never outlive what it describes, or survive a scroll.
-    document.addEventListener("pointerdown", hideTip, true);
+    document.addEventListener("pointerdown", function (e) {
+      TIP_PRESSED = tipTarget(e.target);
+      TIP_PRESSED_AT = Date.now();
+      hideTip();
+    }, true);
     window.addEventListener("scroll", hideTip, true);
     window.addEventListener("blur", hideTip);
   }
@@ -13790,7 +14472,10 @@
       var btn = e.target.closest ? e.target.closest("button[data-chart]") : null;
       if (!btn) return;
       el("ps-lchartmenu").style.display = "none";
-      layAddChart(btn.getAttribute("data-chart"));
+      var target = LAY_CHARTMENU_REPLACE;
+      LAY_CHARTMENU_REPLACE = null;
+      if (target) layReplaceChart(target, btn.getAttribute("data-chart"));
+      else layAddChart(btn.getAttribute("data-chart"));
     });
     el("ps-laddimage").addEventListener("click", function () {
       el("ps-laddimage-file").click();
@@ -13866,20 +14551,40 @@
       var txt = cd.getData("text/plain");
       if (txt && txt.trim()) {
         e.preventDefault();
-        var pos = layStagger();
-        layAddItem({ id: layNewItemId(), kind: "text",
-          text: txt.trim().slice(0, 2000), x: pos.x, y: pos.y,
-          w: 260, h: 60, size: 14 });
-        showToast("Text pasted \u00b7 drag to place");
+        var pasted = { id: layNewItemId(), kind: "text",
+          text: txt.trim().slice(0, 2000), x: 0, y: 0,
+          w: 260, h: 60, size: 14 };
+        var pspot = layPlaceText(pasted);
+        var pgrew = pspot.needH > layPage().h;
+        pasted.x = pspot.x; pasted.y = pspot.y;
+        layAddItem(pasted, false, pspot.needH);
+        // A paste can grow the page like any other add, and said nothing.
+        showToast("Text pasted \u00b7 " + (pspot.capped
+          ? "the page is at its largest, so drag it clear"
+          : pgrew ? "the page grew to fit it" : "drag to place"));
         return;
       }
       showToast("Paste an image or text - other clipboard content is not " +
         "supported in layouts.", true);
     });
+    // Notes and titles write on a 600ms debounce, so a reload inside that
+    // window used to lose what had just been typed. Blur flushes it, since the
+    // caret leaving the box is the moment the user considers it written.
+    (function flushOnBlur() {
+      var boxes = ["ps-pininsp-bnote", "ps-pininsp-note", "ps-pininsp-name"];
+      for (var i = 0; i < boxes.length; i++)
+        el(boxes[i]).addEventListener("blur", function () {
+          if (PIN_NOTE_T) { clearTimeout(PIN_NOTE_T); PIN_NOTE_T = null; }
+          persist(false);
+        });
+    })();
     el("ps-pininsp-bnote").addEventListener("input", function () {
       activePinBoard().note = this.value;
       if (PIN_NOTE_T) clearTimeout(PIN_NOTE_T);
       PIN_NOTE_T = setTimeout(function () { persist(false); }, 600);
+    });
+    el("ps-pininsp-update").addEventListener("click", function () {
+      if (PIN_SEL) pinKeepUpdatedCopy(PIN_SEL);
     });
     el("ps-pininsp-open").addEventListener("click", function () {
       var pins = projectPins();
@@ -13890,6 +14595,21 @@
         setAppWorkspace("chart");
         return;
       }
+    });
+    el("ps-pininsp-name").addEventListener("input", function () {
+      var pins = projectPins(), v = String(this.value || "").trim();
+      for (var i = 0; i < pins.length; i++)
+        if (pins[i].id === PIN_SEL) {
+          if (v) pins[i].pageTitle = v; else delete pins[i].pageTitle;
+        }
+      // The rail's page list and the page's own footer both read this
+      // label, so both follow every keystroke. The footer is patched in
+      // place rather than through renderPinboard, which would rebuild
+      // every page image on the board once per character.
+      syncProjectNavigator();
+      pinSyncCardLabel(PIN_SEL);
+      if (PIN_NOTE_T) clearTimeout(PIN_NOTE_T);
+      PIN_NOTE_T = setTimeout(function () { persist(false); }, 600);
     });
     el("ps-pininsp-note").addEventListener("input", function () {
       var pins = projectPins();
@@ -13925,7 +14645,7 @@
       showContextMenu(r.left, r.bottom + 4, items, null);
     });
     el("ps-laddtext").addEventListener("click", function () {
-      layAddText("Text", 14, false);
+      layAddText("Text", 14, false, true);
     });
     el("ps-laddlabel").addEventListener("click", function () {
       var c = activeChart();
@@ -14030,6 +14750,22 @@
         }
         return;
       }
+      // The Notebook owns it the same way, and for the same reason the
+      // layout branch above exists: without this the press reached the
+      // engine and undid a style edit on a chart in another workspace,
+      // invisibly, while the user was looking at their record.
+      if (appWorkspace() === "pinboard") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (isUndo) {
+          if (NB_UNDO.length) nbUndo();
+          else showToast("Nothing to undo in the Notebook");
+        } else {
+          if (NB_REDO.length) nbRedo();
+          else showToast("Nothing to redo in the Notebook");
+        }
+        return;
+      }
       var dataWorkspace = appWorkspace() === "data";
       if (dataWorkspace) {
         e.preventDefault();
@@ -14062,6 +14798,41 @@
           '.graphbuilder2-host button[aria-label="Redo"]');
         if (rb) rb.click();
       }
+    }, true);
+    // Canvas zoom shortcuts. Cmd/Ctrl+wheel already zoomed, but the three
+    // keys every canvas application binds did nothing, so the only way to
+    // step the zoom was the select in the toolbar.
+    window.addEventListener("keydown", function (e) {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+      if (!(appWorkspace() === "layout" && isLayoutTab(activeChart()))) return;
+      var zk = e.key;
+      var step = zk === "=" || zk === "+" ? 1 : (zk === "-" || zk === "_") ? -1 : 0;
+      if (zk !== "0" && !step) return;
+      var tgt = e.target;
+      if (tgt && tgt.closest &&
+          tgt.closest("input, textarea, select, [contenteditable]")) return;
+      e.preventDefault();
+      var view = layView();
+      if (zk === "0") {
+        // Cmd+0 toggles between fitting the page and actual size, which is
+        // the pair a figure author flips between.
+        view.zoom = view.zoom === "fit" ? "1" : "fit";
+      } else {
+        var ladder = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+        var now = layZoom(), at = 0, i;
+        for (i = 0; i < ladder.length; i++)
+          if (Math.abs(ladder[i] - now) < Math.abs(ladder[at] - now)) at = i;
+        if (step > 0 && ladder[at] <= now + 0.001) at++;
+        if (step < 0 && ladder[at] >= now - 0.001) at--;
+        view.zoom = String(ladder[Math.max(0, Math.min(ladder.length - 1, at))]);
+      }
+      persist(); renderLayout();
+      layAnnounce(view.zoom === "fit" ? "Zoom fit to page."
+        : "Zoom " + Math.round(Number(view.zoom) * 100) + " percent.");
+    // CAPTURE. Something on the way down already stops propagation for
+    // plain Cmd/Ctrl chords, so a bubble-phase window listener never sees
+    // "=" or "-" at all (Cmd+0 arrived, which is what made the first
+    // attempt look half-working).
     }, true);
   }
 
@@ -15358,7 +16129,8 @@
     { key: "three", name: "Three panels", slots: 3,
       description: "One wide chart above two supporting charts.",
       note: "A common results-figure structure.",
-      preview: [[7, 7, 86, 40], [7, 54, 40, 39], [53, 54, 40, 39]] },
+      preview: [[24, 9, 52, 54], [24, 69, 25, 26], [51, 69, 25, 26]],
+      portraitPreview: [[5, 19, 90, 41], [5, 64, 44, 20], [51, 64, 44, 20]] },
     { key: "four", name: "Four-panel grid", slots: 4,
       description: "A balanced 2 by 2 figure for related results.",
       note: "Designed for multi-part publication figures.",
@@ -15532,7 +16304,23 @@
     persist();
     syncAll();
     render();
-    showUndoToast("Deleted " + removed.name, function () {
+    // Say it while the Undo is still on screen. A layout keeps drawing a
+    // deleted chart's captured picture for the rest of the session, so
+    // nothing looked wrong until the next launch, by which point the offer
+    // to put it back was long gone.
+    var usedBy = [];
+    if (!isLayoutTab(removed))
+      for (var ui = 0; ui < PROJECT.charts.length; ui++) {
+        var lay = PROJECT.charts[ui];
+        if (!isLayoutTab(lay) || !Array.isArray(lay.items)) continue;
+        for (var uj = 0; uj < lay.items.length; uj++)
+          if (lay.items[uj].kind === "chart" &&
+              lay.items[uj].chartId === removed.id) {
+            usedBy.push(lay.name || "a layout"); break;
+          }
+      }
+    showUndoToast("Deleted " + removed.name + (usedBy.length
+      ? " (used by " + usedBy.join(", ") + ")" : ""), function () {
       if (chartById(removed.id)) return;
       PROJECT.charts.splice(Math.min(idx, PROJECT.charts.length), 0, removed);
       PROJECT.activeChart = wasActive === removed.id ? removed.id : PROJECT.activeChart;
@@ -16177,8 +16965,36 @@
     render();
   }
   function addLayout() { activateNewLayout(newLayout()); }
-  function layoutTemplateRects(key, page) {
+  // A chart draws at a fixed aspect and is letterboxed inside its panel, so a
+  // panel box whose shape does not match its chart carries dead space the
+  // user cannot see and cannot close. On the four-panel template that was
+  // 62 px on a 404 px panel, about 15 percent, and it mattered beyond looks:
+  // align, snapping, the smart guides, the marquee and the selection outline
+  // all act on the BOX, so the user was lining up something 31 px away from
+  // the thing they were looking at.
+  //
+  // Fitting the box to the chart changes NOTHING in the exported figure. The
+  // ink was already drawn at the fitted size and centred in the box; only the
+  // invisible rectangle changes. The engine's own canvas is the fallback for
+  // a chart that has not been captured yet.
+  var LAY_CHART_ASPECT = 720 / 490;
+  function layChartAspect(chartId) {
+    var s = CHART_SNAPS[chartId];
+    if (s && s.w > 0 && s.h > 0) return s.w / s.h;
+    return LAY_CHART_ASPECT;
+  }
+  // Shrink a cell onto the chart's aspect, keeping the cell's centre, so a
+  // grid stays a grid and the figure does not move.
+  function layFitRectToChart(r, chartId) {
+    var a = layChartAspect(chartId);
+    if (!(a > 0) || !(r.w > 0) || !(r.h > 0)) return r;
+    var w = r.w, h = r.h;
+    if (w / h > a) w = h * a; else h = w / a;
+    return { x: r.x + (r.w - w) / 2, y: r.y + (r.h - h) / 2, w: w, h: h };
+  }
+  function layoutTemplateRects(key, page, band) {
     var m = page.margin, gap = 18;
+    band = Number(band) || 0;
     var x = m, y = m, w = page.w - m * 2, h = page.h - m * 2;
     var halfW = (w - gap) / 2, halfH = (h - gap) / 2;
     if (key === "single" || key === "presentation")
@@ -16201,11 +17017,36 @@
               { x: x + mainW + gap, y: y,
                 w: w - mainW - gap, h: h }];
     }
-    if (key === "three")
-      return [{ x: x, y: y, w: w, h: halfH },
-              { x: x, y: y + halfH + gap, w: halfW, h: halfH },
-              { x: x + halfW + gap, y: y + halfH + gap,
-                w: halfW, h: halfH }];
+    if (key === "three") {
+      // The template says one wide chart above two supporting ones and its
+      // picture drew a wide bar, and an evenly split height cannot deliver
+      // either. A chart's aspect is fixed, so a 267 px tall panel is 392 px
+      // wide whatever its cell is, and the top panel came out the same size
+      // as the two below with 276 px of white either side.
+      //
+      // So solve the top row's height for the figure the template promises,
+      // the top panel spanning the pair beneath it. With w_t = (t - band)A
+      // and w_b = (H - gap - t - band)A, setting 2*w_b + gap = w_t gives the
+      // t below. The pair is then placed from the top panel's own span
+      // rather than from half cells, so the three read as one block.
+      var A = LAY_CHART_ASPECT;
+      var t = (2 * A * h - 2 * A * gap - A * band + gap) / (3 * A);
+      // On a tall page the top panel hits the content width first, and then
+      // its row only needs the height that width implies. Without this the
+      // top cell kept a height it could not use and the panel floated in it.
+      if ((t - band) * A > w) t = w / A + band;
+      t = Math.max(band + 60, Math.min(h - gap - band - 60, t));
+      var topW = Math.min(w, (t - band) * A);
+      var botW = Math.max(40, (topW - gap) / 2);
+      var botH = botW / A + band;
+      var topX = x + (w - topW) / 2;
+      // Centred vertically, because capping the top panel at the content
+      // width can leave the block shorter than the page.
+      var y0 = y + Math.max(0, (h - (t + gap + botH)) / 2);
+      return [{ x: x, y: y0, w: w, h: t },
+              { x: topX, y: y0 + t + gap, w: botW, h: botH },
+              { x: topX + botW + gap, y: y0 + t + gap, w: botW, h: botH }];
+    }
     if (key === "four")
       return [{ x: x, y: y, w: halfW, h: halfH },
               { x: x + halfW + gap, y: y, w: halfW, h: halfH },
@@ -16226,32 +17067,49 @@
     } else if (portrait) {
       c.page = { preset: "canvasp", w: 672, h: 1008, margin: 32 };
     }
-    var rects = layoutTemplateRects(def.key, c.page);
     var labels = !!el("ps-layout-template-labels").checked && def.slots > 1;
     var itemNumber = 0, labelBand = labels ? 28 : 0;
+    var rects = layoutTemplateRects(def.key, c.page, labelBand);
     if (def.presentation) {
       c.items.push({ id: "i" + (++itemNumber), kind: "text",
                      text: "Figure title", fontSize: 24, bold: true,
                      x: c.page.margin, y: 22 });
       rects[0].y += 48; rects[0].h -= 48;
     }
+    var slotPanel = [];
     for (var i = 0; i < rects.length; i++) {
       var chartId = selects[i] && selects[i].value;
       if (!chartById(chartId) || isLayoutTab(chartById(chartId))) continue;
       var r = rects[i];
-      c.items.push({ id: "i" + (++itemNumber), kind: "chart",
-                     chartId: chartId, x: Math.round(r.x),
-                     y: Math.round(r.y + labelBand),
-                     w: Math.round(r.w),
-                     h: Math.round(Math.max(80, r.h - labelBand)) });
+      var cell = { x: r.x, y: r.y + labelBand, w: r.w,
+                   h: Math.max(80, r.h - labelBand) };
+      var fit = layFitRectToChart(cell, chartId);
+      var panelItem = { id: "i" + (++itemNumber), kind: "chart",
+                        chartId: chartId, x: Math.round(fit.x),
+                        y: Math.round(fit.y),
+                        w: Math.round(fit.w),
+                        h: Math.round(fit.h) };
+      c.items.push(panelItem);
+      slotPanel[i] = panelItem;   // remembered, not matched back by geometry
     }
     if (labels) {
       for (i = 0; i < rects.length; i++) {
-        c.items.push({ id: "i" + (++itemNumber), kind: "text",
-                       text: String.fromCharCode(65 + i),
-                       fontSize: 20, bold: true,
-                       x: Math.round(rects[i].x),
-                       y: Math.round(rects[i].y) });
+        // Grouped with its own panel, and placed against it. A figure's
+        // letter belongs to its panel, so aligning a column should carry it,
+        // and nothing should have to guess which letter goes with which
+        // chart. Positioned from the PANEL rather than the cell, because
+        // fitting the panel to its chart moves it inside the cell and the
+        // letter was being left behind at the cell's corner.
+        var panel = slotPanel[i];
+        var lx = panel ? panel.x : Math.round(rects[i].x);
+        var ly = panel ? Math.max(0, panel.y - 28) : Math.round(rects[i].y);
+        var gid = panel ? "g" + (i + 1) : null;
+        if (panel) panel.group = gid;
+        var label = { id: "i" + (++itemNumber), kind: "text",
+                      text: String.fromCharCode(65 + i),
+                      fontSize: 20, bold: true, x: lx, y: ly };
+        if (gid) label.group = gid;
+        c.items.push(label);
       }
       c.nextLabel = rects.length;
     }
@@ -16285,6 +17143,10 @@
     letterl: { w: 1056, h: 816 },
     letterp: { w: 816, h: 1056 }
   };
+  // The one page maximum. layPlaceRect caps what it asks for against it and
+  // layNormalizeLayout enforces it, so a growth that would have gone past it
+  // can no longer be promised in a toast and then quietly clamped away.
+  var LAY_PAGE_MAX = 4000;
   function layClamp(n, lo, hi) {
     n = Number(n);
     if (!isFinite(n)) n = lo;
@@ -16297,8 +17159,8 @@
     if (!c.view || typeof c.view !== "object") c.view = {};
     c.page.preset = LAY_PRESETS[c.page.preset] ? c.page.preset :
       (c.page.preset === "custom" ? "custom" : "canvas");
-    c.page.w = Math.round(layClamp(c.page.w || 1024, 320, 4000));
-    c.page.h = Math.round(layClamp(c.page.h || 680, 240, 4000));
+    c.page.w = Math.round(layClamp(c.page.w || 1024, 320, LAY_PAGE_MAX));
+    c.page.h = Math.round(layClamp(c.page.h || 680, 240, LAY_PAGE_MAX));
     c.page.margin = Math.round(layClamp(c.page.margin == null ? 32 : c.page.margin,
                                        0, Math.min(c.page.w, c.page.h) / 3));
     var z = c.view.zoom;
@@ -16351,8 +17213,152 @@
     return ids.length ? ids[ids.length - 1] : null;
   }
   function layIsSelected(id) { return laySelectedIds().indexOf(id) !== -1; }
+  // ---- Groups. A figure's panel letter is a separate item, so aligning a
+  // column moved the panels and left the letters where they were. Grouping is
+  // the honest answer to that: no rule guesses which text belongs to which
+  // panel, the user says so, and every operation that already works on a
+  // selection then works on the group for free.
+  //
+  // A group is a string on the members. Selection is normalised to whole
+  // groups at the moment it is SET, which is the one choke point, so
+  // laySelectedIds stays cheap and every caller downstream sees a complete
+  // group without knowing groups exist.
+  var LAY_GROUP_SEQ = 0;
+  function layNewGroupId() {
+    var items = layItems(), seen = {}, i;
+    for (i = 0; i < items.length; i++)
+      if (items[i].group) seen[items[i].group] = 1;
+    do { LAY_GROUP_SEQ++; } while (seen["g" + LAY_GROUP_SEQ]);
+    return "g" + LAY_GROUP_SEQ;
+  }
+  function layGroupOf(id) {
+    var it = layItemById(id);
+    return it && it.group ? it.group : null;
+  }
+  function layExpandGroups(ids) {
+    var out = [], items = layItems(), i, j;
+    for (i = 0; i < ids.length; i++) {
+      var g = layGroupOf(ids[i]);
+      if (g)
+        for (j = 0; j < items.length; j++)
+          if (items[j].group === g && out.indexOf(items[j].id) === -1 &&
+              items[j].id !== ids[i]) out.push(items[j].id);
+      // The asked-for id goes LAST within its own group, and the last id in
+      // the selection is the primary. Appending group-mates after it made the
+      // primary an arbitrary member, so clicking a grouped chart panel put
+      // the resize handle and the mini toolbar on its letter instead, and the
+      // panel could not be resized at all.
+      var at = out.indexOf(ids[i]);
+      if (at !== -1) out.splice(at, 1);
+      out.push(ids[i]);
+    }
+    return out;
+  }
+  // Align and its relatives must treat a group as ONE thing, or aligning a
+  // column would stack each panel letter on top of its own panel.
+  function layUnits(ids) {
+    var seen = {}, units = [], i;
+    for (i = 0; i < ids.length; i++) {
+      var g = layGroupOf(ids[i]);
+      if (g) {
+        if (seen[g]) { seen[g].ids.push(ids[i]); continue; }
+        seen[g] = { ids: [ids[i]] };
+        units.push(seen[g]);
+      } else units.push({ ids: [ids[i]] });
+    }
+    for (i = 0; i < units.length; i++) {
+      var lo = Infinity, ln = Infinity, hi = -Infinity, hn = -Infinity;
+      for (var k = 0; k < units[i].ids.length; k++) {
+        var r = layItemRect(layItemById(units[i].ids[k]));
+        if (r.x < lo) lo = r.x;
+        if (r.y < ln) ln = r.y;
+        if (r.right > hi) hi = r.right;
+        if (r.bottom > hn) hn = r.bottom;
+      }
+      units[i].rect = { x: lo, y: ln, w: hi - lo, h: hn - ln,
+                        right: hi, bottom: hn };
+    }
+    return units;
+  }
+  // Clamped as ONE thing. Moving each member and letting the page clamp catch
+  // them individually would pull a group apart, and moving them unclamped
+  // pushed a member off the page: a panel letter grouped with a panel that
+  // Same size relocated ended up at 0,0 with its offset lost.
+  // What a shift would ACTUALLY be, clamped against the page as ONE thing.
+  // Exposed separately so a caller can plan with the real delta: Same size
+  // decides whether a press changes anything before it snapshots, and asking
+  // for a move the clamp then shortens made its no-op test wrong.
+  function layUnitClampDelta(ids, dx, dy) {
+    var p = layPage();
+    var lo = Infinity, ln = Infinity, hi = -Infinity, hn = -Infinity;
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (!it) continue;
+      var r = layItemRect(it);
+      if (r.x < lo) lo = r.x;
+      if (r.y < ln) ln = r.y;
+      if (r.right > hi) hi = r.right;
+      if (r.bottom > hn) hn = r.bottom;
+    }
+    if (!isFinite(lo)) return { dx: dx, dy: dy };
+    return { dx: layClamp(dx, -lo, Math.max(0, p.w - hi)),
+             dy: layClamp(dy, -ln, Math.max(0, p.h - hn)) };
+  }
+  // Clamped as ONE thing. Moving each member and letting the page clamp catch
+  // them individually would pull a group apart, and moving them unclamped
+  // pushed a member off the page: a panel letter grouped with a panel that
+  // Same size relocated ended up at 0,0 with its offset lost.
+  function layShiftUnit(unit, dx, dy) {
+    var d = layUnitClampDelta(unit.ids, dx, dy);
+    for (var i = 0; i < unit.ids.length; i++) {
+      var it = layItemById(unit.ids[i]);
+      if (!it) continue;
+      it.x = (Number(it.x) || 0) + d.dx;
+      it.y = (Number(it.y) || 0) + d.dy;
+    }
+  }
+  // A group needs two members to mean anything. Called after a REMOVAL, not
+  // from layNormalizeLayout: normalize runs on every layItems() call, so a
+  // cleanup there deleted a group that was still being assembled one push at
+  // a time, which is exactly how paste and duplicate build one.
+  function layDropOrphanGroups() {
+    var items = layItems(), counts = {}, i;
+    for (i = 0; i < items.length; i++)
+      if (items[i].group)
+        counts[items[i].group] = (counts[items[i].group] || 0) + 1;
+    for (i = 0; i < items.length; i++)
+      if (items[i].group && counts[items[i].group] < 2) delete items[i].group;
+  }
+  function layGroupSelected() {
+    var ids = laySelectedIds();
+    if (ids.length < 2) return false;
+    laySnapshot("group");
+    var g = layNewGroupId();
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (it) it.group = g;
+    }
+    persist(); renderLayout();
+    layAnnounce("Grouped " + ids.length + " items. They now move, align and " +
+      "resize together.");
+    return true;
+  }
+  function layUngroupSelected() {
+    var ids = laySelectedIds(), had = false, i;
+    for (i = 0; i < ids.length; i++) if (layGroupOf(ids[i])) had = true;
+    if (!had) return false;
+    laySnapshot("ungroup");
+    for (i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (it && it.group) delete it.group;
+    }
+    persist(); renderLayout();
+    layAnnounce("Ungrouped.");
+    return true;
+  }
   function laySetSelection(ids) {
-    LAYOUT_SEL = Array.isArray(ids) ? ids.slice() : (ids ? [ids] : []);
+    LAYOUT_SEL = layExpandGroups(
+      Array.isArray(ids) ? ids.slice() : (ids ? [ids] : []));
     var valid = laySelectedIds();
     if (valid.length) LAYOUT_ACTIVE_ID = valid[valid.length - 1];
     else if (LAYOUT_ACTIVE_ID && !layItemById(LAYOUT_ACTIVE_ID))
@@ -16444,7 +17450,10 @@
     if (!active) return;
     var ids = laySelectedIds(), at = ids.indexOf(active);
     if (at === -1) ids.push(active); else ids.splice(at, 1);
-    LAYOUT_SEL = ids;
+    // Through laySetSelection, not straight into LAYOUT_SEL. This was the one
+    // path that skipped the group normalisation, so Space could take a single
+    // member out of a group and the next nudge tore the group apart for good.
+    laySetSelection(ids);
     renderLayout();
     layFocusViewport();
     layAnnounce(layItemAccessibleLabel(layItemById(active)) +
@@ -16458,20 +17467,166 @@
     }
     return "i" + (mx + 1);
   }
-  function layAddItem(item) {
+  // keepFocus is for the caller that is about to open an editor. Otherwise
+  // focus moves to the canvas, because it was staying on the toolbar BUTTON:
+  // the new item was selected but every Space press activated that button
+  // again and added another one, Enter did the same, and F2 renamed the
+  // DOCUMENT instead of editing the text that had just appeared.
+  function layAddItem(item, keepFocus, needH) {
     laySnapshot("add");
+    // Growing the page is part of the same step, so one undo takes back the
+    // item AND the height, the way Send to layout already worked.
+    var p = layPage();
+    if (needH > p.h) {
+      p.h = Math.min(LAY_PAGE_MAX, Math.round(needH));
+      p.preset = "custom";
+    }
     layItems().push(item);
     laySetSelection([item.id]);
     layClampAllItems();
     persist();
     renderLayout();
+    layScrollItemIntoView(item.id);
+    if (!keepFocus) layFocusViewport();
+    return item.id;
   }
-  function layStagger() {
-    var n = layItems().length, p = layPage();
-    return {
-      x: Math.min(Math.max(12, p.w - 140), 24 + (n % 6) * 26),
-      y: Math.min(Math.max(12, p.h - 90), 24 + (n % 6) * 22)
-    };
+  // Where a new item lands.
+  //
+  // There were three rules. The toolbar cascaded from the top-left corner
+  // and wrapped every sixth item, so an added chart covered panel A and a
+  // seventh landed exactly on the first; Send to layout stacked below
+  // everything and grew the page; a pasted image did its own variant of the
+  // cascade. Covering work you can already see is the worst of those, so
+  // there is one rule now and it is the reading order of a figure. Take the
+  // first clear space going left to right and top to bottom, and when the
+  // page is full go below the last item and grow the page, which is what
+  // Send to layout always did.
+  //
+  // Candidate edges are the page margin, every item's left or top, and every
+  // item's right or bottom plus the template's own gutter. The left and top
+  // edges are what make a new panel land in a template's empty cell aligned
+  // with the column above it rather than merely next to its neighbour. A
+  // template panel is fitted to its chart and centred in its cell, so its
+  // left edge is nowhere near its neighbour's right edge plus a gutter.
+  var LAY_PLACE_GAP = 18;
+  function layPlaceRect(items, page, w, h) {
+    var margin = Number(page.margin) || 0, gap = LAY_PLACE_GAP;
+    var taken = [], xs = [margin], ys = [margin], i, j, k;
+    for (i = 0; i < items.length; i++) {
+      var r = layItemRect(items[i], page);
+      if (!(r.w > 0) || !(r.h > 0)) continue;
+      taken.push(r);
+      xs.push(r.x, r.right + gap);
+      ys.push(r.y, r.bottom + gap);
+    }
+    function tidy(list) {
+      var out = [];
+      list.sort(function (a, b) { return a - b; });
+      for (var n = 0; n < list.length; n++)
+        if (list[n] >= 0 && out.indexOf(list[n]) === -1) out.push(list[n]);
+      return out;
+    }
+    xs = tidy(xs); ys = tidy(ys);
+    var limitX = page.w - margin, limitY = page.h - margin;
+    for (i = 0; i < ys.length; i++) {
+      if (ys[i] + h > limitY) continue;
+      for (j = 0; j < xs.length; j++) {
+        if (xs[j] + w > limitX) continue;
+        var clear = true;
+        for (k = 0; k < taken.length; k++) {
+          var t = taken[k];
+          if (xs[j] < t.right && xs[j] + w > t.x &&
+              ys[i] < t.bottom && ys[i] + h > t.y) { clear = false; break; }
+        }
+        if (clear) return { x: xs[j], y: ys[i], needH: page.h };
+      }
+    }
+    var below = margin;
+    for (i = 0; i < taken.length; i++)
+      below = Math.max(below, taken[i].bottom + gap);
+    var want = below + h + margin;
+    // A page has a maximum. Asking for more than it and then letting
+    // layNormalizeLayout clamp it produced a toast saying the page grew over
+    // a panel that had been pulled back on top of the figure.
+    return { x: margin, y: below, needH: Math.min(want, LAY_PAGE_MAX),
+             capped: want > LAY_PAGE_MAX };
+  }
+  // Text wraps at whichever is smaller, the 480 px cap or the room left on
+  // the page, so its height depends on where it lands while where it lands
+  // depends on its height. One extra pass settles it, because the second
+  // placement is measured at the width the first one produced.
+  function layPlaceText(item) {
+    var p = layPage(), items = layItems();
+    var box = layApproxTextRect(item);
+    var spot = layPlaceRect(items, p, box.w, box.h);
+    var room = Math.min(LAY_TEXT_MAX_W, p.w - spot.x);
+    if (room < LAY_TEXT_MAX_W) {
+      box = layApproxTextRect(item, room);
+      spot = layPlaceRect(items, p, box.w, box.h);
+    }
+    return spot;
+  }
+  // A new chart panel is the size of the panels already in the figure. The
+  // toolbar used a flat 460 while a four-panel template gives 392, so the
+  // fifth panel of a 2x2 arrived as the odd one out and matching it by hand
+  // was work the app could have saved. Width is what carries; height still
+  // comes from the chart's own aspect, so a panel contains its chart exactly.
+  function layPanelWidthFor(items, page) {
+    // Chart panels first. A figure built entirely from Notebook pages carries
+    // image items and no chart panel, and those ARE its panels, so they set
+    // the width when nothing else can. The floor keeps a logo or an inset
+    // from sizing a chart panel down to nothing.
+    var w = layCommonWidth(items, "chart", 0);
+    if (!w) w = layCommonWidth(items, "image", 160);
+    var cap = Math.max(160, (Number(page.w) || 1008) -
+      (Number(page.margin) || 0) * 2);
+    return Math.min(w || 460, cap);
+  }
+  function layCommonWidth(items, kind, floor) {
+    var counts = {}, best = 0, bestN = 0, i;
+    for (i = 0; i < items.length; i++) {
+      if (!items[i] || items[i].kind !== kind) continue;
+      var w = Math.round(Number(items[i].w) || 0);
+      if (!(w > floor)) continue;
+      var key = "w" + w;
+      counts[key] = (counts[key] || 0) + 1;
+      if (counts[key] > bestN || (counts[key] === bestN && w > best)) {
+        best = w; bestN = counts[key];
+      }
+    }
+    return bestN ? best : 0;
+  }
+  // The page growing is a change to the figure, not a side effect the user
+  // should have to notice, so every add path that can trigger it says so.
+  // capped is the page already being at its maximum, where the new item gets
+  // clamped back onto the figure and claiming the page grew would be a lie.
+  function layGrewNote(grew, capped) {
+    if (capped)
+      showToast("The page is already at its largest, so this landed on top " +
+        "of the figure. Drag it where you want it.");
+    else if (grew)
+      showToast("The page grew to fit the new item \u00b7 " +
+        "undo takes both back");
+  }
+  // Zoomed in, or on a page that just grew, the new item can be off screen.
+  // It is selected and the rail describes it, so not showing it is the one
+  // thing left that reads as nothing having happened.
+  //
+  // The VIEWPORT scrolls, nothing else. scrollIntoView negotiates with every
+  // scrolling ancestor, and the workspace pane is one, so bringing an item
+  // into view also slid the toolbar 33 px out from under the pointer.
+  function layScrollItemIntoView(id) {
+    var vp = el("ps-lviewport"), canvas = el("ps-lcanvas");
+    var node = canvas && canvas.querySelector(
+      '.ps-litem[data-item-id="' + id + '"]');
+    if (!vp || !node || !node.getBoundingClientRect) return;
+    var nb = node.getBoundingClientRect(), vb = vp.getBoundingClientRect();
+    if (!nb.height || !vb.height) return;
+    var pad = 16;
+    if (nb.bottom > vb.bottom - pad) vp.scrollTop += nb.bottom - vb.bottom + pad;
+    else if (nb.top < vb.top + pad) vp.scrollTop -= vb.top + pad - nb.top;
+    if (nb.right > vb.right - pad) vp.scrollLeft += nb.right - vb.right + pad;
+    else if (nb.left < vb.left + pad) vp.scrollLeft -= vb.left + pad - nb.left;
   }
   function layZoom() {
     var v = layView();
@@ -16558,42 +17713,80 @@
     layTextApply("text color", "ltx-color",
       function (it) { it.color = hex; }, live);
   }
-  function layTextSelected() {
-    var ids = laySelectedIds();
-    if (ids.length !== 1) return null;
-    var item = layItemById(ids[0]);
-    return item && item.kind === "text" ? item : null;
+  // Every text item in the selection, not only a lone one. A figure's panel
+  // letters are four separate items, and restyling them used to be four
+  // separate visits to this panel because the section hid itself the moment a
+  // second thing was selected.
+  //
+  // A SUBSET is allowed on purpose. A marquee that catches a column catches
+  // its labels with it, and requiring an all-text selection would make the
+  // gesture that finds the labels the one gesture that cannot style them. The
+  // section heading says how many it is about to change.
+  function layTextTargets() {
+    var ids = laySelectedIds(), out = [];
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (it && it.kind === "text") out.push(it);
+    }
+    return out;
   }
   function layTextApply(label, key, fn, live) {
-    var item = layTextSelected();
-    if (!item) return;
-    laySnapshot(label, key);
-    fn(item);
+    var items = layTextTargets();
+    if (!items.length) return;
+    // The coalesce key carries WHICH items, the same rule the nudge key
+    // follows. Without it, restyling one group of labels and then another
+    // within 1.2 s folded into one step and a single undo pulled both back,
+    // which is exactly how a person restyles a figure.
+    var ids = [];
+    for (var k = 0; k < items.length; k++) ids.push(items[k].id);
+    laySnapshot(label, key ? key + ":" + ids.join(",") : null);
+    for (var i = 0; i < items.length; i++) fn(items[i]);
     layClampAllItems();
     persist(!live);
     renderLayout();
-    layTextSyncControls(item);
+    layTextSyncControls(items);
   }
   function layTextSyncControls(item) {
-    function setVal(id, v) {
-      var n = el(id);
-      if (n && document.activeElement !== n) n.value = String(v);
+    // Takes one item or a set. Where the set disagrees the control says so
+    // rather than picking one member's value and implying the rest match:
+    // a number box goes blank with a Mixed placeholder, a toggle reports
+    // aria-pressed="mixed", and no colour chip is marked current.
+    var items = Array.isArray(item) ? item : (item ? [item] : []);
+    if (!items.length) return;
+    item = items[0];
+    function agree(read) {
+      for (var i = 1; i < items.length; i++)
+        if (read(items[i]) !== read(items[0])) return false;
+      return true;
     }
-    var fs = Math.max(8, Math.min(72, Number(item.fontSize) || 14));
-    setVal("ps-ltx-size", fs);
-    setVal("ps-ltx-size-num", fs);
-    var rot = layTextRotate(item);
-    setVal("ps-ltx-rot", rot);
-    setVal("ps-ltx-rot-num", rot);
+    function setVal(id, v, mixed) {
+      var n = el(id);
+      if (!n || document.activeElement === n) return;
+      if (mixed && n.type === "number") { n.value = ""; n.placeholder = "Mixed"; }
+      else { n.value = String(v); if (n.type === "number") n.placeholder = ""; }
+    }
+    var readSize = function (t) {
+      return Math.max(8, Math.min(72, Number(t.fontSize) || 14));
+    };
+    var fs = readSize(item), fsMixed = !agree(readSize);
+    setVal("ps-ltx-size", fs, false);
+    setVal("ps-ltx-size-num", fs, fsMixed);
+    var rot = layTextRotate(item), rotMixed = !agree(layTextRotate);
+    setVal("ps-ltx-rot", rot, false);
+    setVal("ps-ltx-rot-num", rot, rotMixed);
     el("ps-ltx-bold").setAttribute("aria-pressed",
-      item.bold ? "true" : "false");
+      !agree(function (t) { return !!t.bold; }) ? "mixed"
+        : item.bold ? "true" : "false");
     el("ps-ltx-italic").setAttribute("aria-pressed",
-      item.italic ? "true" : "false");
+      !agree(function (t) { return !!t.italic; }) ? "mixed"
+        : item.italic ? "true" : "false");
     var cur = layTextColor(item).toLowerCase();
+    var colMixed = !agree(function (t) { return layTextColor(t).toLowerCase(); });
     var chips = el("ps-ltx-swatches").querySelectorAll("button[data-color]");
     for (var i = 0; i < chips.length; i++)
       chips[i].setAttribute("aria-pressed",
-        chips[i].getAttribute("data-color") === cur ? "true" : "false");
+        !colMixed && chips[i].getAttribute("data-color") === cur
+          ? "true" : "false");
     if (!LTX_PICKING) {
       var hsv = ltxHexToHsv(cur);
       if (hsv) LTX_HSV = hsv;
@@ -16678,7 +17871,10 @@
   });
   (function watchChartToolbar() {
     var host = document.getElementById("psroot");
-    if (!host) return;
+    // linkedom (the headless DOM smoke) has no MutationObserver, and the
+    // re-dock is a browser-only nicety - the same guard every other
+    // observer in this file carries.
+    if (!host || typeof MutationObserver !== "function") return;
     var pending = false;
     new MutationObserver(function () {
       if (pending) return;
@@ -16780,21 +17976,60 @@
     wirePair("ps-ltx-rot", "ps-ltx-rot-num", "rotate", function (it, v) {
       it.rotate = Math.max(-90, Math.min(90, Math.round(v)));
     });
+    // SET a value across the whole set rather than inverting each member.
+    // Inverting leaves a mixed selection mixed forever, so the control could
+    // never make a set uniform, which is the only thing anyone presses it
+    // for. The rule every editor uses: if any member is off, turn them all
+    // on; otherwise turn them all off.
+    function layTextToggle(field, label) {
+      var items = layTextTargets(), on = false;
+      for (var i = 0; i < items.length; i++) if (!items[i][field]) on = true;
+      layTextApply(label, null, function (it) { it[field] = on; });
+    }
     el("ps-ltx-bold").addEventListener("click", function () {
-      layTextApply("text bold", null, function (it) { it.bold = !it.bold; });
+      layTextToggle("bold", "text bold");
     });
     el("ps-ltx-italic").addEventListener("click", function () {
-      layTextApply("text italic", null,
-        function (it) { it.italic = !it.italic; });
+      layTextToggle("italic", "text italic");
     });
   }
-  function layApproxTextRect(item) {
+  var LAY_TEXT_CTX = null;
+  function layTextCtx() {
+    if (!LAY_TEXT_CTX) {
+      try {
+        LAY_TEXT_CTX = document.createElement("canvas").getContext("2d");
+      } catch (ignore) { LAY_TEXT_CTX = null; }
+    }
+    return LAY_TEXT_CTX;
+  }
+  // A text item's box, measured rather than guessed. The old version counted
+  // CHARACTERS on the longest logical line and did not wrap at all, so a
+  // pasted paragraph measured 21 px tall against the 284 px it renders, and
+  // the placement dropped it on a panel. This wraps with the same function
+  // the export uses, in the family, weight and cap the canvas declares, so
+  // the number agrees with the rendered box whether or not the layout is on
+  // screen. capW is the wrap width to measure at and defaults to the cap.
+  function layApproxTextRect(item, capW) {
     var fs = Math.max(8, Number(item.fontSize) || 14);
-    var lines = String(item.text || "Text").split(/\r?\n/);
-    var max = 1;
-    for (var i = 0; i < lines.length; i++) max = Math.max(max, lines[i].length);
-    return { w: Math.min(480, Math.max(18, max * fs * 0.61 + 8)),
-             h: Math.max(fs * 1.25 + 4, lines.length * fs * 1.25 + 4) };
+    var cap = Math.max(40, Math.min(LAY_TEXT_MAX_W,
+      Number(capW) || LAY_TEXT_MAX_W));
+    var font = (item.italic ? "italic " : "") +
+      (item.bold ? "700" : "400") + " " + fs + "px sans-serif";
+    var lines = wrapCaptionLines(String(item.text || "Text"),
+      cap - LAY_TEXT_PAD_X * 2, fs, font);
+    var ctx = layTextCtx(), wide = 0, i;
+    if (ctx) {
+      ctx.font = font;
+      for (i = 0; i < lines.length; i++)
+        wide = Math.max(wide, ctx.measureText(lines[i]).width);
+    } else wide = cap - LAY_TEXT_PAD_X * 2;
+    // ROUNDED, because the other half of this measurement is offsetWidth and
+    // offsetHeight, which are integers. A 56.5 px caption measured here and
+    // 57 on screen put the two placement routes half a pixel apart and wrote
+    // fractional coordinates into a model that is otherwise whole pixels.
+    return { w: Math.round(Math.min(cap,
+               Math.max(18, wide + LAY_TEXT_PAD_X * 2))),
+             h: Math.round(Math.max(1, lines.length) * fs * LAY_TEXT_LINE + 4) };
   }
   // Chart panels and images are both SIZED items (explicit w/h, corner
   // resize, proportional default); text items self-size.
@@ -16802,22 +18037,46 @@
     return item && (item.kind === "chart" || item.kind === "image");
   }
   function layMinSize(item) {
-    return item.kind === "image" ? { w: 24, h: 24 } : { w: 120, h: 80 };
+    if (item.kind === "image") return { w: 24, h: 24 };
+    // The minimum keeps the chart's SHAPE. A flat 120 by 80 is 1.5 against
+    // the engine's 1.469, so a figure scaled onto a small page hit the floor
+    // and came back letterboxed, which is the thing panel-fitting removed.
+    var a = layChartAspect(item.chartId);
+    return { w: 120, h: Math.max(40, Math.round(120 / (a > 0 ? a : 1.469))) };
   }
-  function layItemRect(item) {
+  // Item ids are per DOCUMENT and every template starts at i1, so the canvas
+  // can be holding a node with this item's id that belongs to a different
+  // layout. Today those measure zero because the pane is hidden whenever a
+  // send runs, which is luck rather than a rule. Identity, not id.
+  function layItemIsOnScreen(item) {
+    var c = activeChart();
+    if (!c || !isLayoutTab(c) || !Array.isArray(c.items)) return false;
+    for (var i = 0; i < c.items.length; i++)
+      if (c.items[i] === item) return true;
+    return false;
+  }
+  // page is optional and only used for TEXT, which wraps at whichever is
+  // smaller, the 480 px cap or the room left on its page. Callers working on
+  // a document that is not on screen have to pass it, because layPage() would
+  // hand back the page of whatever IS on screen. Without it a send clamped an
+  // off-screen layout using a 480 px estimate for a caption that renders
+  // narrower, and silently slid it left.
+  function layItemRect(item, page) {
     var w, h;
     if (laySizedKind(item)) {
       var mins = layMinSize(item);
       w = Math.max(mins.w, Number(item.w) || 480);
       h = Math.max(mins.h, Number(item.h) || 320);
     } else {
-      var node = el("ps-lcanvas");
+      var node = layItemIsOnScreen(item) ? el("ps-lcanvas") : null;
       node = node && node.querySelector(
         '.ps-litem[data-item-id="' + item.id + '"]');
       if (node && node.offsetWidth && node.offsetHeight) {
         w = node.offsetWidth; h = node.offsetHeight;
       } else {
-        var approx = layApproxTextRect(item);
+        var pw = page && Number(page.w) > 0 ? Number(page.w) : 0;
+        var approx = layApproxTextRect(item, pw
+          ? pw - (Number(item.x) || 0) : 0);
         w = approx.w; h = approx.h;
       }
     }
@@ -16840,8 +18099,16 @@
     return { x: minX, y: minY, w: maxX - minX, h: maxY - minY,
              right: maxX, bottom: maxY };
   }
-  function layClampAllItems() {
-    var p = layPage(), items = layItems();
+  function layClampAllItems() { layClampItemsIn(activeChart()); }
+  // Doc-aware, because Send to layout writes into a document that is not on
+  // screen and nothing clamped it. A send onto a page near the 4000 px
+  // maximum left the panel at y 3850 with a height of 642 against a page of
+  // 4000, which is 492 px below the page, permanently and invisibly, and
+  // opening the layout did not correct it.
+  function layClampItemsIn(doc) {
+    if (!doc || !isLayoutTab(doc)) return;
+    layNormalizeLayout(doc);
+    var p = doc.page, items = doc.items;
     for (var i = 0; i < items.length; i++) {
       var item = items[i];
       if (laySizedKind(item)) {
@@ -16849,7 +18116,7 @@
         item.w = layClamp(item.w || 480, mins2.w, p.w);
         item.h = layClamp(item.h || 320, mins2.h, p.h);
       }
-      var r = layItemRect(item);
+      var r = layItemRect(item, p);
       item.x = layClamp(item.x || 0, 0, Math.max(0, p.w - r.w));
       item.y = layClamp(item.y || 0, 0, Math.max(0, p.h - r.h));
     }
@@ -17113,7 +18380,12 @@
       node.appendChild(ltxFrame);
       node.__ltxFrame = ltxFrame;
     }
-    if (primary && laySelectedIds().length === 1) {
+    // One UNIT, not one item. A grouped panel is two items and one thing, and
+    // gating on the item count took its remove button and its resize handle
+    // away the moment a letter was bound to it. The handle grows from the
+    // bottom right, so the panel's top left does not move and a letter
+    // anchored there stays put.
+    if (primary && layUnits(laySelectedIds()).length === 1) {
       if (laySizedKind(item)) {
         var hnd = mkEl("div", "ps-lhandle");
         hnd.setAttribute("data-role", "lay-resize");
@@ -17269,23 +18541,32 @@
       scale = Math.max(48 / natW, 48 / natH);
     var w = Math.max(1, Math.round(natW * scale));
     var h = Math.max(1, Math.round(natH * scale));
-    var pos = layStagger();
+    var spot = layPlaceRect(layItems(), page, w, h);
+    var grew = spot.needH > page.h;
     layAddItem({ id: layNewItemId(), kind: "image", src: src,
                  natW: natW, natH: natH,
-                 x: Math.min(pos.x, Math.max(0, page.w - w)),
-                 y: Math.min(pos.y, Math.max(0, page.h - h)),
-                 w: w, h: h });
+                 x: spot.x, y: spot.y, w: w, h: h }, false, spot.needH);
     showToast("Image added" + (note ? " \u00b7 " + note : "") +
-      " \u00b7 drag to place, corner to resize");
+      (grew ? " \u00b7 the page grew to fit it \u00b7 drag to place"
+            : " \u00b7 drag to place, corner to resize"));
   }
   function layMiniBar(item) {
     var bar = mkEl("div", "ps-lbar");
-    bar.style.left = "0";
+    bar.style.left = item.kind === "text" ? "0" : "50%";
+    bar.style.transform = item.kind === "text" ? "" : "translateX(-50%)";
     // TEXT items park the bar BELOW the box (Torry's screenshot, Aug 6
     // 2026): the rotate grip owns the top-centre, and on a narrow box
     // the bar's first button sat exactly under the knob. Below, the two
     // can never meet at any width or rotation; sized items keep the bar
     // above (they have no grip, and the resize handle owns the bottom).
+    // A sized item's bar is CENTRED on its top edge. The top-LEFT is where
+    // the figure's own panel letter sits and the bar covered it exactly
+    // (measured, a 19x24 label under a 33x24 bar at the same x), so selecting
+    // panel A hid the A. The letter is content and ships in the export, the
+    // bar is chrome, so the chrome moves. Centre rather than below, because
+    // below is the NEXT row's letter in a labelled grid, and rather than
+    // right, which is the Live badge. Text items keep the bar below them:
+    // their rotate grip owns the top centre.
     bar.style.top = item.kind === "text" ? "calc(100% + 6px)" : "-34px";
     bar.setAttribute("aria-hidden", "true");
     if (item.kind === "text") {
@@ -17358,6 +18639,28 @@
       sel: Array.isArray(LAYOUT_SEL) ? LAYOUT_SEL : []
     });
   }
+  // The send-to-layout paths mutate a layout while a DIFFERENT document is on
+  // screen, so they cannot use laySnapshot, which is bound to the active
+  // chart. Same push, aimed at a named document.
+  //
+  // The stored selection is that document's only when it is the one on
+  // screen. LAYOUT_SEL belongs to whatever layout the user is actually
+  // looking at, and restoring it into a different one would come back with
+  // the wrong things selected.
+  function laySnapshotDoc(doc, label) {
+    var h = layHist(doc);
+    if (!h) return;
+    layNormalizeLayout(doc);
+    var live = activeChart();
+    var sel = live && live.id === doc.id && Array.isArray(LAYOUT_SEL)
+      ? LAYOUT_SEL : [];
+    h.undo.push({ label: label || "change",
+                  state: JSON.stringify({ items: doc.items || [],
+                                          page: doc.page || {}, sel: sel }) });
+    if (h.undo.length > LAYOUT_HIST_LIMIT) h.undo.shift();
+    h.redo.length = 0;
+    LAY_COALESCE = null;
+  }
   // Call BEFORE the mutation. A coalesceKey folds a burst of the same small
   // action (arrow-key nudges, a run of clicks on the font-size stepper) into
   // ONE undo step, which is what a user means by "undo that nudge".
@@ -17419,6 +18722,7 @@
     var removed = 0;
     for (var i = items.length - 1; i >= 0; i--)
       if (ids.indexOf(items[i].id) !== -1) { items.splice(i, 1); removed++; }
+    layDropOrphanGroups();
     laySetSelection([]);
     persist(); renderLayout();
     if (returnFocus) layFocusViewport();
@@ -17432,23 +18736,54 @@
     laySetSelection([id]);
     layDeleteSelected();
   }
+  // The copy machinery on its own, without the history entry, the render or
+  // the announcement, so Alt+drag can make its copies inside a gesture that
+  // already owns all three.
+  function layDuplicateItems(ids, dx, dy) {
+    var made = [], p = layPage(), dupGroups = {}, i;
+    for (i = 0; i < ids.length; i++) {
+      var src = layItemById(ids[i]);
+      if (!src) continue;
+      var copy = JSON.parse(JSON.stringify(src));
+      copy.id = layNewItemId();
+      // The copies form their OWN group, so duplicating a grouped panel
+      // gives a second panel rather than a four-member group.
+      if (copy.group) copy.group = dupGroups[copy.group] ||
+        (dupGroups[copy.group] = layNewGroupId());
+      if (!dx && !dy) {
+        // A copy made exactly on a legal item is legal, and measuring it
+        // here would measure a text item that is not in the document yet,
+        // so its rect falls to the estimate and the clamp shoves the copy
+        // hundreds of pixels left of the thing it is a copy OF.
+        copy.x = Number(src.x) || 0;
+        copy.y = Number(src.y) || 0;
+      } else {
+        var r = layItemRect(copy);
+        copy.x = Math.min(Math.max(0, p.w - r.w), (Number(src.x) || 0) + dx);
+        copy.y = Math.min(Math.max(0, p.h - r.h), (Number(src.y) || 0) + dy);
+      }
+      layItems().push(copy);
+      made.push(copy.id);
+    }
+    return made;
+  }
+  // One body for the Cmd/Ctrl+A key and the Edit menu row, so the two
+  // surfaces cannot drift. The menu used to run the GRID select-all here,
+  // which early-returns off the Data workspace, so the row sat enabled,
+  // advertised the key, and did nothing when clicked.
+  function laySelectAllItems() {
+    var every = layItems().map(function (it) { return it.id; });
+    if (!every.length) return false;
+    laySetSelection(every);
+    renderLayout();   // the selection panel reports the count itself
+    return true;
+  }
   function layDuplicateSelected() {
     var ids = laySelectedIds();
     if (!ids.length) return;
     var returnFocus = document.activeElement === el("ps-lviewport");
     laySnapshot("duplicate");
-    var made = [], p = layPage();
-    for (var i = 0; i < ids.length; i++) {
-      var src = layItemById(ids[i]);
-      if (!src) continue;
-      var copy = JSON.parse(JSON.stringify(src));
-      copy.id = layNewItemId();
-      var r = layItemRect(copy);
-      copy.x = Math.min(Math.max(0, p.w - r.w), (Number(src.x) || 0) + 12);
-      copy.y = Math.min(Math.max(0, p.h - r.h), (Number(src.y) || 0) + 12);
-      layItems().push(copy);
-      made.push(copy.id);
-    }
+    var made = layDuplicateItems(ids, 12, 12);
     laySetSelection(made);
     persist(); renderLayout();
     if (returnFocus) layFocusViewport();
@@ -17485,10 +18820,16 @@
     if (!LAY_CLIP || !LAY_CLIP.length) return false;
     if (!isLayoutTab(activeChart())) return false;
     laySnapshot("paste");
-    var made = [], p = layPage();
+    var made = [], p = layPage(), pasteGroups = {};
     for (var i = 0; i < LAY_CLIP.length; i++) {
       var copy = JSON.parse(JSON.stringify(LAY_CLIP[i]));
       copy.id = layNewItemId();
+      // Fresh group ids, the way duplicate does it. Group ids are only unique
+      // within one layout and every layout's templates start at g1, so a
+      // paste into another figure collided by construction and merged the
+      // pasted items into whatever already carried that id.
+      if (copy.group) copy.group = pasteGroups[copy.group] ||
+        (pasteGroups[copy.group] = layNewGroupId());
       // Offset like a duplicate, and clamp, so a paste into a SMALLER page
       // cannot drop an item off the canvas where it is unreachable.
       var r = layItemRect(copy);
@@ -17584,7 +18925,10 @@
     // The pointer drag snapshots itself at pointer-down (it knows whether the
     // gesture actually moved anything); everything else that lands here is a
     // nudge or an inspector edit, coalesced into one step per burst.
-    if (!LAY_DRAG) laySnapshot("move", "move");
+    // The coalesce key carries the SELECTION. Without it a nudge on one
+    // panel folded into a nudge on another whenever the two happened within
+    // 1.2 s, and one undo pulled both back.
+    if (!LAY_DRAG) laySnapshot("move", "move:" + ids.join(","));
     dx = layClamp(dx, -b.x, p.w - b.right);
     dy = layClamp(dy, -b.y, p.h - b.bottom);
     for (var i = 0; i < ids.length; i++) {
@@ -17600,11 +18944,19 @@
         " pixels, y " + Math.round(moved.y) + " pixels.");
     }
   }
-  function layResizeSelectedFree(dw, dh) {
+  // One UNIT holding one sized item, not one item. A grouped chart panel is
+  // two items and one thing, and gating on the item count refused to resize
+  // it at all while the refusal told the user to select a single panel,
+  // which grouping had just made impossible.
+  function layResizeTarget() {
     var ids = laySelectedIds();
-    if (ids.length !== 1) return false;
-    var item = layItemById(ids[0]);
-    if (!laySizedKind(item)) return false;
+    if (layUnits(ids).length !== 1) return null;
+    var sized = laySizedSelection();
+    return sized.length === 1 ? sized[0] : null;
+  }
+  function layResizeSelectedFree(dw, dh) {
+    var item = layResizeTarget();
+    if (!item) return false;
     var p = layPage(), mins = layMinSize(item);
     laySnapshot("resize", "resize");
     item.w = layClamp((Number(item.w) || 480) + dw, mins.w, p.w - item.x);
@@ -17614,10 +18966,8 @@
     return true;
   }
   function layResizeSelectedProportionally(delta) {
-    var ids = laySelectedIds();
-    if (ids.length !== 1) return false;
-    var item = layItemById(ids[0]);
-    if (!laySizedKind(item)) return false;
+    var item = layResizeTarget();
+    if (!item) return false;
     var p = layPage();
     var origin = { item: item, x: Number(item.x) || 0,
       y: Number(item.y) || 0, w: Number(item.w) || 480,
@@ -17640,14 +18990,20 @@
     layAnnounce("Exact position and size fields opened in the settings panel.");
   }
   function layChangeSelectedTextStyle(kind, amount) {
-    var ids = laySelectedIds();
-    if (ids.length !== 1) return false;
-    var item = layItemById(ids[0]);
-    if (!item || item.kind !== "text") return false;
+    // Every text item in the selection, matching the rail's Text section. A
+    // grouped panel letter used to be unreachable from the keyboard, because
+    // selecting it selects its panel too and this refused any selection of
+    // more than one item.
+    var texts = layTextTargets();
+    if (!texts.length) return false;
     laySnapshot(kind === "bold" ? "bold" : "text size",
       kind === "size" ? "fontsize" : null);
-    if (kind === "bold") item.bold = !item.bold;
-    else item.fontSize = layClamp((Number(item.fontSize) || 14) + amount, 8, 72);
+    for (var ti = 0; ti < texts.length; ti++) {
+      var item = texts[ti];
+      if (kind === "bold") item.bold = !item.bold;
+      else item.fontSize = layClamp((Number(item.fontSize) || 14) + amount, 8, 72);
+    }
+    item = texts[0];
     layClampAllItems(); persist(); renderLayout(); layFocusViewport();
     layAnnounce((kind === "bold"
       ? (item.bold ? "Bold on. " : "Bold off. ")
@@ -17682,7 +19038,8 @@
   }
   function layItemMenuItems(id) {
     var out = [
-      { label: "Duplicate", command: "duplicate-selection" },
+      { label: "Duplicate", command: "duplicate-selection",
+        shortcut: "Cmd/Ctrl+D" },
       { label: "Delete", command: "delete-selection" },
       "separator",
       { label: "Move backward", command: "layer-back" },
@@ -17694,6 +19051,15 @@
     var info = layItemSourceInfo(item);
     var src = info && info.chartId ? chartById(info.chartId) : null;
     var head = [];
+    if (item && item.kind === "chart" &&
+        PROJECT.charts.filter(function (c) { return !isLayoutTab(c); }).length > 1)
+      head.push({ label: "Show a different chart here",
+        key: "lay-replace-chart",
+        action: function () {
+          var node = el("ps-lcanvas").querySelector(
+            '.ps-litem[data-item-id="' + id + '"]');
+          layAddChartMenu(id, node);
+        } });
     if (src && !isLayoutTab(src))
       head.push({ label: info.kind === "live"
           ? "Show live chart in Charts" : "Open source chart",
@@ -17745,17 +19111,262 @@
   function layAlign(kind) {
     var ids = laySelectedIds(), b = laySelectionBounds(ids);
     if (ids.length < 2 || !b) return;
+    // Units, not items: a group is one thing to align, or a column of
+    // panels would stack each panel letter on top of its own panel.
+    var units = layUnits(ids);
+    if (units.length < 2) return;
     laySnapshot("align");
-    for (var i = 0; i < ids.length; i++) {
-      var item = layItemById(ids[i]), r = layItemRect(item);
-      if (kind === "left") item.x = b.x;
-      else if (kind === "hcenter") item.x = b.x + (b.w - r.w) / 2;
-      else if (kind === "right") item.x = b.right - r.w;
-      else if (kind === "top") item.y = b.y;
-      else if (kind === "vcenter") item.y = b.y + (b.h - r.h) / 2;
-      else if (kind === "bottom") item.y = b.bottom - r.h;
+    for (var i = 0; i < units.length; i++) {
+      var r = units[i].rect, dx = 0, dy = 0;
+      if (kind === "left") dx = b.x - r.x;
+      else if (kind === "hcenter") dx = b.x + (b.w - r.w) / 2 - r.x;
+      else if (kind === "right") dx = b.right - r.w - r.x;
+      else if (kind === "top") dy = b.y - r.y;
+      else if (kind === "vcenter") dy = b.y + (b.h - r.h) / 2 - r.y;
+      else if (kind === "bottom") dy = b.bottom - r.h - r.y;
+      layShiftUnit(units[i], dx, dy);
     }
     persist(); renderLayout();
+    layAnnounce("Aligned " + units.length +
+      (units.length === 1 ? " item." : " items."));
+  }
+  // ---- Plot-area alignment. A multi-panel figure reads as aligned when
+  // the PLOT AREAS line up, not the panel boxes. A panel's box includes its
+  // tick labels, and an axis reading 100000 is wider than one reading 0.10,
+  // so two identically sized panels draw their axes at different places.
+  // Measured on the four-panel template with score / cost / hours / rate,
+  // the left column's axes sat 6 px apart and the right column's 11 px,
+  // which is about 3 mm on a printed 7-inch figure. This is the one thing a
+  // figure tool can do that a page-layout tool cannot, because it knows the
+  // rectangles are charts. (patchwork and matplotlib's constrained layout
+  // solve the same problem by reserving one common gutter; here the panels
+  // are already drawn, so the panels move instead of the gutters.)
+  //
+  // Fractions of the item box, never absolute pixels. The item box and the
+  // axis line go through the same zoom transform and the same drag
+  // transform, so a ratio between them is invariant to both.
+  function layPlotFrac(item) {
+    if (!item || item.kind !== "chart") return null;
+    var canvas = el("ps-lcanvas");
+    var node = canvas && canvas.querySelector(
+      '.ps-litem[data-item-id="' + item.id + '"]');
+    if (!node) return null;
+    var ya = node.querySelector('[data-role="y-axis-line"]');
+    var xa = node.querySelector('[data-role="x-axis-line"]');
+    if (!ya || !xa) return null;
+    var nb = node.getBoundingClientRect();
+    if (!nb.width || !nb.height) return null;
+    var yb = ya.getBoundingClientRect(), xb = xa.getBoundingClientRect();
+    if (!yb.height || !xb.width) return null;
+    // Axis strokes have width; the plot edge is the stroke's centre line.
+    return { l: (yb.left + yb.width / 2 - nb.left) / nb.width,
+             r: (xb.right - nb.left) / nb.width,
+             t: (yb.top - nb.top) / nb.height,
+             b: (xb.top + xb.height / 2 - nb.top) / nb.height };
+  }
+  function layPlotRect(item) {
+    var f = layPlotFrac(item);
+    if (!f) return null;
+    var r = layItemRect(item);
+    return { l: r.x + f.l * r.w, r: r.x + f.r * r.w,
+             t: r.y + f.t * r.h, b: r.y + f.b * r.h };
+  }
+  // Panels that already sit in the same column (or row) are the ones the
+  // user means, so select-all then one click fixes a whole grid. Grouping
+  // is plain box overlap on the cross axis, which is what "same column"
+  // looks like on screen and needs no explaining.
+  function layOverlapGroups(pool, axis) {
+    var sorted = pool.slice().sort(function (a, b) {
+      return axis === "x" ? a.rect.x - b.rect.x : a.rect.y - b.rect.y;
+    });
+    var out = [], cur = null, i;
+    for (i = 0; i < sorted.length; i++) {
+      var lo = axis === "x" ? sorted[i].rect.x : sorted[i].rect.y;
+      var hi = lo + (axis === "x" ? sorted[i].rect.w : sorted[i].rect.h);
+      if (cur && lo < cur.hi - 1) {
+        cur.list.push(sorted[i]);
+        cur.hi = Math.max(cur.hi, hi);
+      } else {
+        cur = { hi: hi, list: [sorted[i]] };
+        out.push(cur);
+      }
+    }
+    return out;
+  }
+  // Which panels can take part, and can any group actually act. Drives both
+  // the action and the button's own visibility, so they can never disagree.
+  function layPlotAlignPool() {
+    var ids = laySelectedIds(), pool = [], i;
+    for (i = 0; i < ids.length; i++) {
+      var item = layItemById(ids[i]);
+      var plot = layPlotRect(item);
+      if (plot) pool.push({ item: item, rect: layItemRect(item), plot: plot });
+    }
+    return pool;
+  }
+  function layCanAlignPlots(edge) {
+    var pool = layPlotAlignPool();
+    if (pool.length < 2) return false;
+    var groups = layOverlapGroups(pool, edge === "left" ? "x" : "y");
+    for (var g = 0; g < groups.length; g++)
+      if (groups[g].list.length > 1) return true;
+    return false;
+  }
+  function layAlignPlots(edge) {
+    var pool = layPlotAlignPool();
+    if (pool.length < 2) return false;
+    var axis = edge === "left" ? "x" : "y";
+    var groups = layOverlapGroups(pool, axis), moved = 0, used = 0, lanes = 0;
+    var snapped = false, g, k, list, target, d;
+    for (g = 0; g < groups.length; g++) {
+      list = groups[g].list;
+      if (list.length < 2) continue;
+      lanes++;
+      used += list.length;
+      target = list[0].plot[edge === "left" ? "l" : "b"];
+      for (k = 1; k < list.length; k++) {
+        d = list[k].plot[edge === "left" ? "l" : "b"];
+        // Left axes line up on the leftmost plot edge, baselines on the
+        // lowest one, so the panel that needs the most room keeps its place
+        // and the others come to it.
+        if (edge === "left" ? d < target : d > target) target = d;
+      }
+      for (k = 0; k < list.length; k++) {
+        d = target - list[k].plot[edge === "left" ? "l" : "b"];
+        if (Math.abs(d) < 0.02) continue;
+        if (!snapped) { laySnapshot("align plot areas"); snapped = true; }
+        // Shift the panel's whole GROUP, so a panel letter grouped with it
+        // keeps its place against the plot. This was the loose end the
+        // plot-align feature shipped with.
+        layShiftUnit({ ids: layExpandGroups([list[k].item.id]) },
+                     edge === "left" ? d : 0, edge === "left" ? 0 : d);
+        moved++;
+      }
+    }
+    if (!used) return false;
+    if (moved) { persist(); renderLayout(); }
+    layAnnounce(moved
+      ? "Lined up " + (edge === "left" ? "left axes" : "baselines") +
+        " for " + used + " panels in " + lanes +
+        (edge === "left" ? (lanes === 1 ? " column." : " columns.")
+                         : (lanes === 1 ? " row." : " rows."))
+      : "Those panels are already lined up.");
+    return true;
+  }
+  // ---- Same size. The second reflex after align in every multi-panel
+  // figure, and the one the rail had no answer to: you read a width off one
+  // panel, select the other, and type it in, twice.
+  //
+  // Sized to the PRIMARY, which is the last item added to the selection, the
+  // same key-object convention Illustrator uses. The buttons name it so the
+  // question "the same as what" never has to be guessed, and text items are
+  // skipped entirely because they size themselves to their content.
+  function laySizedSelection() {
+    var ids = laySelectedIds(), out = [];
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (it && laySizedKind(it)) out.push(it);
+    }
+    return out;
+  }
+  function laySameSizeTarget() {
+    var pool = laySizedSelection();
+    if (pool.length < 2) return null;
+    var primary = layItemById(layPrimaryId());
+    if (primary && laySizedKind(primary)) return primary;
+    return pool[pool.length - 1];
+  }
+  function laySameSizeLabel(item) {
+    if (!item) return "";
+    if (item.kind === "chart") {
+      var c = chartById(item.chartId);
+      return c ? (c.name || "that panel") : "that panel";
+    }
+    return item.srcChart ? "that Notebook page" : "that image";
+  }
+  function laySameSize(dim) {
+    var target = laySameSizeTarget();
+    if (!target) return false;
+    var pool = laySizedSelection(), p = layPage();
+    var moved = 0, short = 0, snapped = false, i;
+    // Work out the whole change first, so a press that would alter nothing
+    // costs no history entry and claims nothing. The old version snapshotted
+    // and counted before comparing, so an undo after a no-op appeared to do
+    // nothing at all.
+    var plan = [];
+    for (i = 0; i < pool.length; i++) {
+      var it = pool[i];
+      if (it === target) continue;
+      var mins = layMinSize(it);
+      var x = Number(it.x) || 0, y = Number(it.y) || 0;
+      var w = dim === "h" ? (Number(it.w) || mins.w)
+                          : Math.max(mins.w, Number(target.w) || 0);
+      var h = dim === "w" ? (Number(it.h) || mins.h)
+                          : Math.max(mins.h, Number(target.h) || 0);
+      // If the size does not fit where the item currently sits, MOVE it
+      // rather than quietly shrinking it. Only when it cannot fit the page
+      // at all is it cut down, and then the announcement says so. Clamping
+      // in silence meant the panel ended a different size from the one the
+      // button named while the live region reported a match.
+      if (x + w > p.w) x = Math.max(0, p.w - w);
+      if (y + h > p.h) y = Math.max(0, p.h - h);
+      if (w > p.w) { w = p.w; x = 0; short++; }
+      if (h > p.h) { h = p.h; y = 0; short++; }
+      // The move is clamped against the item's whole GROUP, so the plan has
+      // to ask what the shift will really be, or a press that can move
+      // nothing still looks like a change and costs a history entry.
+      var unit = layExpandGroups([it.id]);
+      var real = layUnitClampDelta(unit, x - (Number(it.x) || 0),
+                                         y - (Number(it.y) || 0));
+      if (w === (Number(it.w) || 0) && h === (Number(it.h) || 0) &&
+          Math.abs(real.dx) < 0.01 && Math.abs(real.dy) < 0.01) continue;
+      plan.push({ it: it, unit: unit, dx: real.dx, dy: real.dy, w: w, h: h });
+    }
+    if (!plan.length) {
+      layAnnounce("Already the same size as " + laySameSizeLabel(target) + ".");
+      return true;
+    }
+    laySnapshot("same size");
+    for (i = 0; i < plan.length; i++) {
+      // The size is the panel's; the MOVE carries its group.
+      layShiftUnit({ ids: plan[i].unit }, plan[i].dx, plan[i].dy);
+      plan[i].it.w = plan[i].w; plan[i].it.h = plan[i].h;
+      moved++;
+    }
+    persist(); renderLayout();
+    // Changing a panel's size moves its axis INSIDE its box, so evening the
+    // panels out undoes a plot-area alignment made a moment earlier. The two
+    // rail rows genuinely fight in the order a person uses them. Rather than
+    // re-aligning behind their back, say it, so the row above is worth
+    // clicking again.
+    var broke = layAlignmentBroken();
+    layAnnounce("Matched " + moved + (moved === 1 ? " item" : " items") +
+      " to " + laySameSizeLabel(target) + "." +
+      (short ? " One was larger than the page and was cut down to fit." : "") +
+      (broke ? " Their axes no longer line up." : ""));
+    return true;
+  }
+  // True when the selected panels share a column or a row and their plot
+  // edges have drifted apart by more than half a pixel.
+  function layAlignmentBroken() {
+    var pool = layPlotAlignPool();
+    if (pool.length < 2) return false;
+    var axes = [["x", "l"], ["y", "b"]];
+    for (var a = 0; a < axes.length; a++) {
+      var groups = layOverlapGroups(pool, axes[a][0]);
+      for (var g = 0; g < groups.length; g++) {
+        var list = groups[g].list;
+        if (list.length < 2) continue;
+        var lo = Infinity, hi = -Infinity;
+        for (var k = 0; k < list.length; k++) {
+          var v = list[k].plot[axes[a][1]];
+          if (v < lo) lo = v;
+          if (v > hi) hi = v;
+        }
+        if (hi - lo > 0.5) return true;
+      }
+    }
+    return false;
   }
   function layApplyInspector(prop, value) {
     // Typed in the user's unit, applied in pixels.
@@ -17765,9 +19376,9 @@
     if (!ids.length || !b) return;
     if (prop === "x") layMoveSelected(value - b.x, 0);
     else if (prop === "y") layMoveSelected(0, value - b.y);
-    else if (ids.length === 1) {
-      var item = layItemById(ids[0]), p = layPage();
-      if (!laySizedKind(item)) return;
+    else {
+      var item = layResizeTarget(), p = layPage();
+      if (!item) return;
       var mins = layMinSize(item);
       laySnapshot("resize", "resize");
       if (prop === "w") item.w = layClamp(value, mins.w, p.w - item.x);
@@ -17775,6 +19386,53 @@
       persist(); renderLayout();
       layAnnounce("Resized " + layItemAccessibleLabel(item));
     }
+  }
+  // Scale the whole arrangement onto a new page, keeping every item its own
+  // shape, and centre it. Shared by the orientation flip and by a page
+  // RESIZE, which used to CLAMP instead: setting a journal single-column
+  // width squashed each panel to the page width and slid them to x 0, so all
+  // four landed on top of each other, the letters stayed where they were, and
+  // the export shipped the pile. Clamping is right for one item that has
+  // strayed; it is wrong for a whole figure whose page has changed under it.
+  function layRefitToPage(newW, newH) {
+    var p = layPage(), items = layItems(), i;
+    var lo = Infinity, ln = Infinity, hi = -Infinity, hn = -Infinity;
+    for (i = 0; i < items.length; i++) {
+      var r = layItemRect(items[i]);
+      if (r.x < lo) lo = r.x;
+      if (r.y < ln) ln = r.y;
+      if (r.right > hi) hi = r.right;
+      if (r.bottom > hn) hn = r.bottom;
+    }
+    var k = 1, offX = 0, offY = 0;
+    if (items.length && isFinite(lo) && hi > lo && hn > ln) {
+      var availW = Math.max(1, newW - p.margin * 2);
+      var availH = Math.max(1, newH - p.margin * 2);
+      k = Math.min(availW / (hi - lo), availH / (hn - ln));
+      // Centred, because a fitted block no longer fills both axes and
+      // leaving it against the top-left would move the problem from inside
+      // the panels to around them.
+      offX = (newW - (hi - lo) * k) / 2 - lo * k;
+      offY = (newH - (hn - ln) * k) / 2 - ln * k;
+    }
+    for (i = 0; i < items.length; i++) {
+      items[i].x = Math.round((Number(items[i].x) || 0) * k + offX);
+      items[i].y = Math.round((Number(items[i].y) || 0) * k + offY);
+      // laySizedKind rather than kind === "chart", because an image is a
+      // sized item everywhere else, and leaving its box alone made a resized
+      // figure carry one item at its old size across the rescaled panels.
+      if (laySizedKind(items[i])) {
+        items[i].w = Math.round((Number(items[i].w) || 480) * k);
+        items[i].h = Math.round((Number(items[i].h) || 320) * k);
+      }
+      // TEXT scales too. Leaving font sizes alone made panel letters keep
+      // their size while everything around them shrank, so on a small page
+      // a 20 px letter sat on top of the panel it labels.
+      if (items[i].kind === "text" && k !== 1)
+        items[i].fontSize = layClamp(
+          Math.round((Number(items[i].fontSize) || 14) * k), 8, 72);
+    }
+    return k;
   }
   function layApplyPage(preset, w, h) {
     var p = layPage();
@@ -17787,8 +19445,13 @@
       p.h = Math.round(layClamp(h || p.h, 240, 4000));
     }
     p.margin = Math.round(layClamp(p.margin, 0, Math.min(p.w, p.h) / 3));
+    var kPage = layRefitToPage(p.w, p.h);
     layClampAllItems();
     persist(); renderLayout();
+    if (Math.abs(kPage - 1) > 0.005)
+      layAnnounce("Page is now " + pxToUnit(p.w) + " by " + pxToUnit(p.h) +
+        " " + unitLabel() + ". The figure was scaled to " +
+        Math.round(kPage * 100) + " percent to fit.");
   }
   function layPageOrientation() {
     var p = layPage();
@@ -17801,16 +19464,18 @@
     laySnapshot("orientation");
     var oldW = p.w, oldH = p.h;
     var newW = oldH, newH = oldW;
-    var sx = newW / oldW, sy = newH / oldH;
-    var items = layItems();
-    for (var i = 0; i < items.length; i++) {
-      items[i].x = Math.round((Number(items[i].x) || 0) * sx);
-      items[i].y = Math.round((Number(items[i].y) || 0) * sy);
-      if (items[i].kind === "chart") {
-        items[i].w = Math.round((Number(items[i].w) || 480) * sx);
-        items[i].h = Math.round((Number(items[i].h) || 320) * sy);
-      }
-    }
+    // ONE scale factor, not one per axis. Scaling width and height
+    // independently turned a 463 by 267 panel into 309 by 401, and a chart
+    // has a fixed aspect, so it shrank to the smaller dimension and the panel
+    // filled with white. A flipped 2 by 2 came back about two thirds empty,
+    // which is not what "scales the current arrangement to fit" promises.
+    //
+    // The factor FITS the arrangement to the new page rather than being the
+    // page's own ratio. Using min(sx, sy) keeps the shapes but shrinks on
+    // EVERY flip, so flipping there and back left the figure at 44 percent
+    // and a third flip at 30. Fitting grows as readily as it shrinks, so a
+    // flip always fills the page it lands on.
+    layRefitToPage(newW, newH);
     var pairs = {
       canvas: "canvasp", canvasp: "canvas",
       wide: "tall", tall: "wide",
@@ -17819,8 +19484,9 @@
     };
     p.preset = pairs[p.preset] || "custom";
     p.w = newW; p.h = newH;
-    p.margin = Math.round(layClamp(p.margin * Math.min(sx, sy), 0,
-                                   Math.min(p.w, p.h) / 3));
+    // The margin is a length on paper, and the paper has only been turned,
+    // so it keeps its value. Scaling it shrank it on every flip.
+    p.margin = Math.round(layClamp(p.margin, 0, Math.min(p.w, p.h) / 3));
     layClampAllItems();
     persist(); renderLayout();
   }
@@ -17938,13 +19604,25 @@
     });
     canvas.addEventListener("pointerdown", function (e) {
       if (e.button !== 0) return;
-      if (e.target.closest &&
-          (e.target.closest(".ps-lbar") || e.target.closest(".ps-ltext-edit"))) return;
+      // A press on a mini-bar BUTTON belongs to the button. A press on the
+      // bar's own padding does not, and since the sized-item bar moved to the
+      // top centre that padding sits in the gutter between two rows, which is
+      // exactly where someone drags to rubber-band a row.
+      if (e.target.closest && e.target.closest(".ps-ltext-edit")) return;
+      if (e.target.closest && e.target.closest(".ps-lbar")) {
+        if (e.target.closest("button")) return;
+        layMarqueeStart(e, canvas);
+        e.preventDefault();
+        return;
+      }
       var openEd = canvas.querySelector(".ps-ltext-edit");
       if (openEd) openEd.blur();
       var itemEl = e.target.closest ? e.target.closest(".ps-litem") : null;
       if (!itemEl) {
-        if (laySelectedIds().length) { laySetSelection([]); renderLayout(); }
+        // Arm a marquee rather than clearing straight away. A press that
+        // never travels still clears, on pointer-up.
+        layMarqueeStart(e, canvas);
+        e.preventDefault();
         return;
       }
       var id = itemEl.getAttribute("data-item-id");
@@ -17969,6 +19647,11 @@
       }
       LAY_DRAG = { ids: ids, primary: item, origins: origins, bounds: bounds,
                    resizing: resizing, sx: e.clientX, sy: e.clientY,
+                   // Alt+drag duplicates, the reflex every drawing
+                   // application shares. Armed here, acted on at the first
+                   // real movement, so an Alt+click that never travels stays
+                   // an ordinary selection and leaves nothing behind.
+                   altCopy: !!e.altKey && !resizing,
                    zoom: layZoom(), moved: false,
                    // Captured here rather than on first movement because the
                    // move handler mutates items in place; pushed at pointer-up
@@ -17998,6 +19681,12 @@
     });
     document.addEventListener("keydown", function (e) {
       if (!isLayoutTab(activeChart())) return;
+      // The visible workspace owns the keys, the undo router's rule. A
+      // layout stays the ACTIVE document while the Data workspace is on
+      // screen, so without this gate Cmd/Ctrl+D duplicated a hidden layout
+      // item from the data grid, Delete could remove one, and nothing on
+      // screen changed.
+      if (appWorkspace() !== "layout") return;
       var t = e.target;
       if (t && t.closest &&
           t.closest("input, textarea, select, [contenteditable]")) return;
@@ -18087,6 +19776,7 @@
         // A live drag outranks the selection: cancel it and keep the
         // selection, which is what every other cancel in the app does.
         if (layCancelDrag()) { e.preventDefault(); return; }
+        if (layMarqueeCancel()) { e.preventDefault(); return; }
         if (ids.length) {
           e.preventDefault(); laySetSelection([]); renderLayout();
         }
@@ -18105,18 +19795,31 @@
           String(e.key).toLowerCase() === "a" &&
           appWorkspace() === "layout") {
         e.preventDefault();
-        var every = layItems().map(function (it) { return it.id; });
-        if (!every.length) return;
-        laySetSelection(every);
-        renderLayout();   // the selection panel reports the count itself
+        laySelectAllItems();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && String(e.key).toLowerCase() === "g") {
+        e.preventDefault();
+        if (e.shiftKey) {
+          if (!layUngroupSelected()) layAnnounce("Nothing grouped is selected.");
+        } else if (!layGroupSelected())
+          layAnnounce("Select two or more items to group them.");
         return;
       }
       if ((e.metaKey || e.ctrlKey) && String(e.key).toLowerCase() === "d" &&
           ids.length) {
         e.preventDefault(); layDuplicateSelected(); return;
       }
-      if (!ids.length || ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]
-          .indexOf(e.key) === -1) return;
+      // ONE rule for the arrow keys. Inside the canvas plain arrows navigate
+      // between items and Alt+Arrow nudges, which is the engine's rule and
+      // what the hidden option list exists to serve. A second handler here
+      // used to nudge on PLAIN arrows whenever focus was anywhere else in the
+      // workspace, which in practice is any time the user has just clicked a
+      // rail or toolbar button, so the same key did two opposite things
+      // decided by something invisible. Alt+Arrow nudges everywhere now.
+      if (!ids.length || !e.altKey ||
+          ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]
+            .indexOf(e.key) === -1) return;
       e.preventDefault();
       var step = e.shiftKey ? 10 : 1;
       layMoveSelected(e.key === "ArrowLeft" ? -step :
@@ -18169,6 +19872,203 @@
       }, 100);
     });
   }
+  // ---- Marquee selection. Dragging on empty canvas used to clear the
+  // selection and nothing else, which is the one gesture every design tool
+  // answers the same way and the one that makes multi-select cheap enough to
+  // be worth having. Everything that acts on several items at once (align,
+  // plot-area alignment, same size, restyling a set of labels) was gated
+  // behind clicking each one.
+  //
+  // Deliberately INTERSECT rather than contain, the Figma and Illustrator
+  // rule. A panel label is a small item at a panel's corner, and requiring a
+  // box that fully encloses it makes the tiny things the hardest to catch.
+  //
+  // The box lives INSIDE the canvas so it inherits the zoom transform and can
+  // be positioned in ordinary page pixels, which is also why every pointer
+  // delta here is divided by the zoom, the same rule the item drag follows.
+  var LAY_MARQ = null;
+  function layMarqueeRect(d) {
+    return { x: Math.min(d.x0, d.x1), y: Math.min(d.y0, d.y1),
+             w: Math.abs(d.x1 - d.x0), h: Math.abs(d.y1 - d.y0) };
+  }
+  // A text item's ROTATION is a CSS transform on an inner node, so its model
+  // rect is the unrotated box and a marquee over a rotated axis label missed
+  // it and caught the panel behind. The rendered box is measured instead,
+  // for text only, and converted back to page pixels through the zoom.
+  function layMarqueeItemRect(item, canvasBox, z) {
+    if (item.kind === "text" && canvasBox) {
+      var node = el("ps-lcanvas");
+      node = node && node.querySelector(
+        '.ps-litem[data-item-id="' + item.id + '"] .ps-ltext');
+      if (node) {
+        var b = node.getBoundingClientRect();
+        if (b.width && b.height)
+          return { x: (b.left - canvasBox.left) / z,
+                   y: (b.top - canvasBox.top) / z,
+                   w: b.width / z, h: b.height / z };
+      }
+    }
+    return layItemRect(item);
+  }
+  function layMarqueeHits(r, canvasBox, z) {
+    var items = layItems(), out = [];
+    for (var i = 0; i < items.length; i++) {
+      var b = layMarqueeItemRect(items[i], canvasBox, z);
+      if (b.x < r.x + r.w && b.x + b.w > r.x &&
+          b.y < r.y + r.h && b.y + b.h > r.y) out.push(items[i].id);
+    }
+    // A SIZED item goes last, so the primary is a panel whenever the box
+    // caught one. The primary is the key object every multi-item action
+    // names, and a column marquee catches panel letters too, so without this
+    // the on-canvas primary ring pointed at a label while Same size sized to
+    // a panel. A text-only box still ends on a text item.
+    for (var k = out.length - 1; k >= 0; k--) {
+      var it = layItemById(out[k]);
+      if (it && laySizedKind(it)) {
+        out.push(out.splice(k, 1)[0]);
+        break;
+      }
+    }
+    return out;
+  }
+  function layMarqueeStart(e, canvas) {
+    // A second pointer landing mid-gesture used to overwrite LAY_MARQ and
+    // orphan the first box on the canvas for good.
+    if (LAY_MARQ) layMarqueeTeardown();
+    var z = layZoom(), box = canvas.getBoundingClientRect();
+    LAY_MARQ = {
+      x0: (e.clientX - box.left) / z, y0: (e.clientY - box.top) / z,
+      x1: (e.clientX - box.left) / z, y1: (e.clientY - box.top) / z,
+      sx: e.clientX, sy: e.clientY, zoom: z, armed: false,
+      // Shift or Cmd/Ctrl ADDS to what is already selected, matching the
+      // click gesture directly above this one.
+      add: !!(e.shiftKey || e.metaKey || e.ctrlKey),
+      // Captured whatever the modifier state, because `add` decides what the
+      // box UNIONS with while `base` is what Escape has to put back. Storing
+      // it only for the additive case made a cancelled plain drag leave the
+      // selection empty instead of restoring it.
+      base: laySelectedIds()
+    };
+    document.addEventListener("pointermove", layMarqueeMove);
+    document.addEventListener("pointerup", layMarqueeUp);
+    // A cancelled pointer never sends pointerup, so without this the box
+    // stayed on the canvas with both listeners attached and went on growing
+    // under a cursor with no button held.
+    document.addEventListener("pointercancel", layMarqueeCancelEvent);
+  }
+  function layMarqueeCancelEvent() { layMarqueeCancel(true); }
+  // The gesture belongs to the layout on screen. Leaving another workspace's
+  // pointer movement rewriting the selection meant a switch mid-drag went on
+  // changing a figure the user was no longer looking at, and announced into
+  // its live region.
+  function layMarqueeStillLive() {
+    return appWorkspace() === "layout" && isLayoutTab(activeChart());
+  }
+  function layMarqueeMove(e) {
+    var d = LAY_MARQ;
+    if (!d) return;
+    if (!layMarqueeStillLive()) { layMarqueeCancel(true); return; }
+    // Re-read rather than cache: scrolling the viewport mid-drag moved the
+    // canvas under a box that was still measuring from where it started.
+    var cvBox = el("ps-lcanvas");
+    d.box = cvBox ? cvBox.getBoundingClientRect() : d.box;
+    if (!d.armed &&
+        Math.abs(e.clientX - d.sx) < 4 && Math.abs(e.clientY - d.sy) < 4) return;
+    if (!d.armed) {
+      d.armed = true;
+      var cv = el("ps-lcanvas");
+      d.el = mkEl("div", "ps-lmarquee");
+      d.el.setAttribute("aria-hidden", "true");
+      if (cv) cv.appendChild(d.el);
+    }
+    var p = layPage();
+    d.x1 = layClamp((e.clientX - d.box.left) / d.zoom, 0, p.w);
+    d.y1 = layClamp((e.clientY - d.box.top) / d.zoom, 0, p.h);
+    var r = layMarqueeRect(d);
+    if (d.el) {
+      d.el.style.left = r.x + "px"; d.el.style.top = r.y + "px";
+      d.el.style.width = r.w + "px"; d.el.style.height = r.h + "px";
+    }
+    // Live, so the user sees what they are about to get. Selecting through
+    // laySetSelection rather than renderLayout keeps the box itself alive;
+    // a full rebuild would destroy the node the gesture is drawing into.
+    // The base goes FIRST, so the primary is something the BOX reached rather
+    // than whatever happened to be selected already. Shift-click appends the
+    // new item last for the same reason, and the two additive gestures have
+    // to agree because Same size names the primary.
+    var hits = [];
+    if (d.add) hits = d.base.slice();
+    var found = layMarqueeHits(r, d.box, d.zoom);
+    for (var i = 0; i < found.length; i++) {
+      var at = hits.indexOf(found[i]);
+      if (at !== -1) hits.splice(at, 1);
+      hits.push(found[i]);
+    }
+
+    laySetSelection(hits);
+    layMarqueePaint(hits);
+    laySyncInspector();
+    e.preventDefault();
+  }
+  // Selection chrome without a rebuild: the classes renderLayout would set.
+  function layMarqueePaint(ids) {
+    var cv = el("ps-lcanvas");
+    if (!cv) return;
+    // The primary ring stays ON during the drag. Dropping it meant the one
+    // piece of chrome that says "this is the key object" vanished for
+    // exactly the gesture that is choosing it, while the rail's Same size
+    // row was already on screen naming one.
+    var primary = ids.length ? ids[ids.length - 1] : null;
+    var nodes = cv.querySelectorAll(".ps-litem");
+    for (var i = 0; i < nodes.length; i++) {
+      var id = nodes[i].getAttribute("data-item-id");
+      nodes[i].classList.toggle("ps-litem-sel", ids.indexOf(id) !== -1);
+      nodes[i].classList.toggle("ps-litem-primary", id === primary);
+    }
+  }
+  function layMarqueeTeardown() {
+    var d = LAY_MARQ;
+    LAY_MARQ = null;
+    document.removeEventListener("pointermove", layMarqueeMove);
+    document.removeEventListener("pointerup", layMarqueeUp);
+    document.removeEventListener("pointercancel", layMarqueeCancelEvent);
+    if (d && d.el && d.el.parentNode) d.el.parentNode.removeChild(d.el);
+    return d;
+  }
+  function layMarqueeUp() {
+    if (!layMarqueeStillLive()) { layMarqueeCancel(true); return; }
+    var d = layMarqueeTeardown();
+    if (!d) return;
+    if (!d.armed) {
+      // A press that never travelled is the old click-on-empty-space, which
+      // clears the selection.
+      if (laySelectedIds().length) { laySetSelection([]); renderLayout(); }
+      return;
+    }
+    var n = laySelectedIds().length;
+    renderLayout();
+    layAnnounce(n ? n + (n === 1 ? " item selected." : " items selected.")
+                  : "Nothing in that area.");
+  }
+  // Escape abandons the box and puts the selection back, matching the way
+  // Escape abandons an item drag.
+  // `force` tears the gesture down even before it has armed, which is what a
+  // pointercancel or a workspace switch needs. Escape does NOT force: a press
+  // that has not travelled is still a live click, and tearing it down there
+  // left the press inert, so the drag that followed drew no box and the
+  // release did not clear the selection either.
+  function layMarqueeCancel(force) {
+    var d = LAY_MARQ;
+    if (!d) return false;
+    if (!d.armed && !force) return false;
+    var base = d.base.slice(), armed = d.armed;
+    layMarqueeTeardown();
+    if (!armed) return false;
+    laySetSelection(base);
+    renderLayout();
+    layAnnounce("Selection box cancelled.");
+    return true;
+  }
   function layPointerMove(e) {
     var d = LAY_DRAG;
     if (!d) return;
@@ -18179,6 +20079,41 @@
     // never travels is a SELECTION, and lifting it would flash on every
     // ordinary click.
     if (!d.moved) {
+      if (d.altCopy) {
+        // Copies made in place, and it is the COPIES that follow the pointer,
+        // so the original stays exactly where it was. One history entry
+        // covers the copy and the move together, which is why d.before was
+        // taken on the press, before any of this existed.
+        var copies = layDuplicateItems(d.ids, 0, 0);
+        d.altCopy = false;
+        if (copies.length) {
+          // What Escape has to take back. The copies sit exactly on their
+          // originals until the pointer moves, so a cancel that only restored
+          // positions left a second panel invisibly on top of the first, with
+          // no history entry and nothing for undo to remove.
+          d.copiedIds = copies.slice();
+          d.copiedFrom = d.ids.slice();
+          laySetSelection(copies);
+          renderLayout();
+          d.ids = copies;
+          d.origins = [];
+          for (var ci = 0; ci < copies.length; ci++) {
+            var cit = layItemById(copies[ci]);
+            if (!cit) continue;
+            d.origins.push({ item: cit, x: Number(cit.x) || 0,
+                             y: Number(cit.y) || 0,
+                             w: Number(cit.w) || 480,
+                             h: Number(cit.h) || 320 });
+          }
+          d.primary = layItemById(copies[copies.length - 1]) || d.primary;
+          // The bounds were measured for the ORIGINALS and the move clamp
+          // reads them, so leaving them stale pinned a copy against a page
+          // edge computed for an item that is no longer being dragged.
+          d.bounds = laySelectionBounds(copies) || d.bounds;
+          layAnnounce("Duplicating " + copies.length + " item" +
+            (copies.length === 1 ? "" : "s") + ".");
+        }
+      }
       var cv = el("ps-lcanvas");
       if (cv) cv.classList.add(d.resizing ? "ps-lcanvas-resizing"
                                           : "ps-lcanvas-dragging");
@@ -18204,7 +20139,11 @@
         dx = Math.round((d.bounds.x + dx) / v.grid) * v.grid - d.bounds.x;
         dy = Math.round((d.bounds.y + dy) / v.grid) * v.grid - d.bounds.y;
       }
-      var adj = laySmartAdjust(d.bounds, dx, dy, d.ids);
+      // The originals are excluded from the guides too. A copy starts exactly
+      // on its source, so with snapping off a short drag was pulled straight
+      // back onto it by the smart guides and looked like nothing happened.
+      var adj = laySmartAdjust(d.bounds, dx, dy,
+        d.copiedFrom ? d.ids.concat(d.copiedFrom) : d.ids);
       dx = layClamp(adj.dx, -d.bounds.x, p.w - d.bounds.right);
       dy = layClamp(adj.dy, -d.bounds.y, p.h - d.bounds.bottom);
       layShowGuides(adj.gx, adj.gy);
@@ -18239,6 +20178,17 @@
       o.item.x = o.x; o.item.y = o.y;
       if (laySizedKind(o.item)) { o.item.w = o.w; o.item.h = o.h; }
     }
+    // An Alt+drag that is cancelled has to lose its copies, or it leaves a
+    // second item exactly on top of the first with no history entry, which is
+    // both invisible and permanent.
+    if (d.copiedIds && d.copiedIds.length) {
+      var items = layItems(), keep = [], ci2;
+      for (ci2 = 0; ci2 < items.length; ci2++)
+        if (d.copiedIds.indexOf(items[ci2].id) === -1) keep.push(items[ci2]);
+      items.length = 0;
+      for (ci2 = 0; ci2 < keep.length; ci2++) items.push(keep[ci2]);
+      laySetSelection(d.copiedFrom || []);
+    }
     renderLayout();
     return true;
   }
@@ -18272,6 +20222,30 @@
       persist(); renderLayout();
     }
   }
+  // While a text field is open, the composite is NOT an option list. Exposing
+  // the item so its editor is reachable makes it a child the listbox role
+  // does not allow, and simply dropping the role orphans the parallel option
+  // list underneath, whose options then have no listbox parent. Both go
+  // together: the viewport becomes a plain group and the option mirror is
+  // hidden for the duration, because the canvas is not navigable mid-edit
+  // anyway. Both revert when the edit ends.
+  function layComposeEditingAria(editing) {
+    var vp = el("ps-lviewport"), opts = el("ps-layout-options");
+    if (vp) {
+      if (editing) {
+        vp.setAttribute("role", "group");
+        vp.removeAttribute("aria-multiselectable");
+        vp.removeAttribute("aria-activedescendant");
+      } else {
+        vp.setAttribute("role", "listbox");
+        vp.setAttribute("aria-multiselectable", "true");
+      }
+    }
+    if (opts) {
+      if (editing) opts.setAttribute("aria-hidden", "true");
+      else opts.removeAttribute("aria-hidden");
+    }
+  }
   function layEditText(id) {
     var item = layItemById(id);
     if (!item || item.kind !== "text") return;
@@ -18292,6 +20266,12 @@
     itemEl.removeAttribute("aria-hidden");
     itemEl.innerHTML = "";
     itemEl.appendChild(ta);
+    // While a text field is open inside it, the viewport is not a listbox.
+    // Exposing the item so its editor is reachable makes it a child the
+    // listbox role does not allow, which is a real violation and not a
+    // detail: an option list whose children are not options is not
+    // navigable. It goes back to a listbox when the edit ends.
+    layComposeEditingAria(true);
     ta.focus(); ta.select();
     var done = false;
     function commit(cancel) {
@@ -18306,6 +20286,7 @@
         layClampAllItems();
         persist();
       }
+      layComposeEditingAria(false);
       renderLayout();
       var resultMessage = cancel ? "Text edit canceled." : "Text saved.";
       if (returnFocus) {
@@ -18323,13 +20304,38 @@
     });
     ta.addEventListener("blur", function () { commit(false); });
   }
-  function layAddChartMenu() {
+  // The same flyout serves "Add chart" and "Show a different chart here".
+  // Non-null while the next pick REPLACES the panel it names.
+  var LAY_CHARTMENU_REPLACE = null;
+  // Point an existing panel at another chart, keeping its exact box. Without
+  // this, correcting a panel meant deleting it and placing a new one, which
+  // threw away the position and size that were the whole point of the
+  // figure - and reusing a finished layout for a second set of results was
+  // a rebuild rather than four picks.
+  function layReplaceChart(itemId, chartId) {
+    var item = layItemById(itemId), c = chartById(chartId);
+    if (!item || item.kind !== "chart" || !c || isLayoutTab(c)) return false;
+    if (item.chartId === chartId) return false;
+    laySnapshot("replace chart");
+    item.chartId = chartId;
+    laySetSelection([itemId]);
+    persist();
+    ensureSnapshotsThen(renderLayout);
+    layAnnounce("Panel now shows " + (c.name || "the chart") + ".");
+    return true;
+  }
+  function layAddChartMenu(replaceItemId, anchorEl) {
     var m = el("ps-lchartmenu");
+    LAY_CHARTMENU_REPLACE = replaceItemId || null;
     var chartTabs = PROJECT.charts.filter(function (c) { return !isLayoutTab(c); });
-    var h = ['<div class="ps-tm-head">Add a chart</div>'];
+    var h = ['<div class="ps-tm-head">' +
+      (replaceItemId ? "Show a different chart here" : "Add a chart") +
+      '</div>'];
     for (var i = 0; i < chartTabs.length; i++) {
       var c = chartTabs[i];
-      h.push('<button type="button" data-chart="' + escHtml(c.id) + '">' +
+      var shown = layItemById(replaceItemId || "");
+      h.push('<button type="button" data-chart="' + escHtml(c.id) + '"' +
+        (shown && shown.chartId === c.id ? " disabled" : "") + ">" +
         "<span>" + escHtml(c.name) + "</span>" +
         '<span style="margin-left:auto;color:#98a0a8;font-size:11px;">' +
         escHtml(MODULES[c.module] ? MODULES[c.module].label : "") + "</span></button>");
@@ -18337,23 +20343,38 @@
     if (!chartTabs.length)
       h.push('<div class="ps-slot-empty" style="padding:5px 12px;">no chart tabs yet</div>');
     m.innerHTML = h.join("");
-    var r = el("ps-laddchart").getBoundingClientRect();
+    var r = (anchorEl || el("ps-laddchart")).getBoundingClientRect();
     m.style.display = "block";
     m.style.left = Math.min(r.left, window.innerWidth - 200) + "px";
     m.style.top = Math.min(r.bottom + 3, window.innerHeight - 220) + "px";
   }
   function layAddChart(chartId) {
-    var pos = layStagger(), p = layPage();
+    var p = layPage(), items = layItems();
+    // Height from the chart's own aspect, not a constant, so a placed panel
+    // contains its chart exactly. 460 by 310 was 1.484 against the engine's
+    // 1.469 and letterboxed by a few pixels from the moment it landed.
+    var w = layPanelWidthFor(items, p);
+    var h = Math.round(w / layChartAspect(chartId));
+    var spot = layPlaceRect(items, p, w, h);
+    var grew = spot.needH > p.h;   // p.h is mutated by the add, so read first
     layAddItem({ id: layNewItemId(), kind: "chart", chartId: chartId,
-                 x: pos.x, y: pos.y,
-                 w: Math.min(460, p.w - 48), h: Math.min(310, p.h - 48) });
+                 x: spot.x, y: spot.y, w: w, h: h }, false, spot.needH);
+    layGrewNote(grew, spot.capped);
     render();
   }
-  function layAddText(text, fontSize, bold) {
-    var pos = layStagger();
-    layAddItem({ id: layNewItemId(), kind: "text",
-                 text: text, fontSize: fontSize, bold: !!bold,
-                 x: pos.x, y: pos.y });
+  function layAddText(text, fontSize, bold, edit) {
+    var id = layNewItemId();
+    var item = { id: id, kind: "text", text: text, fontSize: fontSize,
+                 bold: !!bold, x: 0, y: 0 };
+    var spot = layPlaceText(item);
+    var grew = spot.needH > layPage().h;
+    item.x = spot.x; item.y = spot.y;
+    layAddItem(item, !!edit, spot.needH);
+    layGrewNote(grew, spot.capped);
+    // A new text box opens its editor with the placeholder selected, so the
+    // caption you came to write is what typing produces.
+    if (edit) layEditText(id);
+    return id;
   }
 
   // ======================================================== application frame
@@ -18681,6 +20702,57 @@
           ], null);
         });
         wrap.appendChild(row);
+        // The pages of the section you are looking at (Torry's rail is the
+        // project's table of contents, and it stopped one level short of
+        // the thing you actually go looking for). Forty pages is forty
+        // screens of scrolling; this is one list. Only the ACTIVE section
+        // expands, which is how a notebook with sections and pages reads
+        // everywhere else.
+        if (b.id !== activePinBoard().id) return;
+        for (var pI = 0; pI < b.pins.length; pI++) (function (pin, idx) {
+          var prow = mkEl("button",
+            "ps-project-item ps-project-item-grouped ps-pinrow" +
+            (PIN_SEL === pin.id && appWorkspace() === "pinboard"
+             ? " ps-project-active" : ""));
+          prow.type = "button";
+          prow.setAttribute("data-project-pin-id", pin.id);
+          var st = pinSourceStatus(pin);
+          var num = mkEl("span", "ps-pinrow-num", String(idx + 1));
+          prow.appendChild(num);
+          prow.appendChild(mkEl("span", "ps-pinrow-name",
+            pinPageLabel(pin, idx)));
+          if (st.state === "changed" || st.state === "gone") {
+            var dot = mkEl("span", "ps-pinrow-dot");
+            dot.setAttribute("aria-hidden", "true");
+            prow.appendChild(dot);
+          }
+          setTip(prow, pinPageLabel(pin, idx) + " \u00b7 " +
+            (pin.at ? "kept " + pinKeptFmt(pin.at) + " \u00b7 " : "") + st.text +
+            (pin.note ? " \u00b7 Your note - " + pin.note : ""));
+          // A page with a drift or a note says so to a screen reader too,
+          // where the dot and the tip cannot reach.
+          prow.setAttribute("aria-label", "Page " + (idx + 1) + ", " +
+            pinPageLabel(pin, idx) +
+            (st.state === "changed" ? ", source chart has changed" :
+             st.state === "gone" ? ", source chart is gone" : "") +
+            (pin.note ? ", has a note" : ""));
+          prow.addEventListener("click", function () {
+            narrowCloseAfterNavigation();
+            pinReveal(pin.id);
+          });
+          prow.addEventListener("contextmenu", function (e) {
+            e.preventDefault();
+            showContextMenu(e.clientX, e.clientY, [
+              { label: "Move to section\u2026", key: "pin-move",
+                action: function () {
+                  showPinMoveMenu(e.clientX, e.clientY, pin.id);
+                } },
+              { label: "Delete page", key: "pin-delete",
+                action: function () { deletePin(pin.id); } }
+            ], null);
+          });
+          wrap.appendChild(prow);
+        })(b.pins[pI], pI);
       })(boards[i]);
       root.appendChild(wrap);
     }
@@ -19268,13 +21340,30 @@
     el("ps-layout-selection-properties").style.display = has ? "block" : "none";
     if (!has) return;
     var bounds = laySelectionBounds(ids);
-    var one = ids.length === 1 ? layItemById(ids[0]) : null;
+    // One UNIT rather than one item, resolved to the item the user actually
+    // reached. A grouped chart panel is two items and one thing, and the
+    // identity rail went blank the moment a letter was bound to it: no title,
+    // no "Follows <chart>" line, no live-versus-snapshot answer.
+    var one = null;
+    if (layUnits(ids).length === 1) {
+      one = layItemById(ids[ids.length - 1]);
+      if (one && ids.length > 1) {
+        // Prefer the sized member, because that is what the panel IS; a
+        // letter is a label on it.
+        var sizedOne = laySizedSelection();
+        if (sizedOne.length === 1) one = sizedOne[0];
+      }
+    }
     var srcInfo = one ? layItemSourceInfo(one) : null;
     var txtSec = el("ps-layout-text-section");
     if (txtSec) {
-      var oneText = one && one.kind === "text" ? one : null;
-      txtSec.style.display = oneText ? "" : "none";
-      if (oneText) layTextSyncControls(oneText);
+      var texts = layTextTargets();
+      txtSec.style.display = texts.length ? "" : "none";
+      var txtTitle = txtSec.querySelector(".ps-inspector-section-title");
+      if (txtTitle)
+        txtTitle.textContent = texts.length > 1
+          ? "Text (" + texts.length + " items)" : "Text";
+      if (texts.length) layTextSyncControls(texts);
     }
     el("ps-layout-selection-title").textContent = one
       ? (one.kind === "chart"
@@ -19309,9 +21398,19 @@
     ["x", "y", "w", "h"].forEach(function (prop) {
       el("ps-ctx-l" + prop).step = String(unitStep());
     });
-    var ctxSized = !!one && laySizedKind(one);
-    el("ps-ctx-lw").disabled = !ctxSized;
-    el("ps-ctx-lh").disabled = !ctxSized;
+    var ctxSized = !!layResizeTarget();
+    // A field that cannot be typed into must not look like one that can.
+    // These carry the union width and height of a multi-selection, which is
+    // read-only, and used to render identically to the live X and Y beside
+    // them with no tooltip - the same defect the align buttons had.
+    ["w", "h"].forEach(function (prop) {
+      var field = el("ps-ctx-l" + prop);
+      field.disabled = !ctxSized;
+      setTip(field, ctxSized ? ""
+        : layUnits(ids).length > 1
+          ? "Size applies to one panel at a time. Select just the one you want to change."
+          : "Text items size themselves to their content.");
+    });
     // Progressive disclosure (Torry, Jul 29 2026): the align row is SHOWN
     // only once a second item is selected, instead of six greyed buttons
     // sitting under Arrange at every selection. They stay enabled whenever
@@ -19320,7 +21419,9 @@
     // genuinely have an inapplicable state at the ends of the stack, which
     // is a different thing from a capability that does not apply yet.)
     var alignRow = document.querySelector(".ps-inspector-align");
-    var canAlign = ids.length >= 2;
+    // Two UNITS. One grouped panel and its letter is two items and one
+    // thing, and there is nothing to align it to.
+    var canAlign = layUnits(ids).length >= 2;
     if (alignRow) alignRow.style.display = canAlign ? "" : "none";
     // The whole section follows: with the Arrange buttons gone (Aug 5
     // 2026, Torry - they duplicated the right-click, which also gained
@@ -19332,6 +21433,61 @@
     for (var i = 0; i < align.length; i++) {
       align[i].disabled = false;
       setTip(align[i], "Align the selected items");
+    }
+    // Plot-area alignment follows the same progressive-disclosure rule as
+    // the row above, but tested per button. "Left axes" needs two panels in
+    // one column and "Baselines" two in one row, so a side-by-side pair offers
+    // baselines and a stacked pair offers left axes.
+    var plotRow = document.querySelector(".ps-inspector-plotalign");
+    var plotBtns = document.querySelectorAll("[data-ctx-plotalign]");
+    var anyPlot = false;
+    for (i = 0; i < plotBtns.length; i++) {
+      var edge = plotBtns[i].getAttribute("data-ctx-plotalign");
+      var live = canAlign && layCanAlignPlots(edge);
+      plotBtns[i].style.display = live ? "" : "none";
+      setTip(plotBtns[i], edge === "left"
+        ? "Move these panels so their y axes sit on one line"
+        : "Move these panels so their x axes sit on one line");
+      if (live) anyPlot = true;
+    }
+    // Group appears once there are two units to bind; Ungroup once anything
+    // selected is already in one. Both are hidden rather than disabled, the
+    // rule the align row set.
+    var groupRow = document.querySelector(".ps-inspector-grouprow");
+    var anyGrouped = false;
+    for (i = 0; i < ids.length; i++) if (layGroupOf(ids[i])) anyGrouped = true;
+    var canGroup = layUnits(ids).length >= 2;
+    if (groupRow) {
+      var gOn = groupRow.querySelector('[data-ctx-group="on"]');
+      var gOff = groupRow.querySelector('[data-ctx-group="off"]');
+      if (gOn) gOn.style.display = canGroup ? "" : "none";
+      if (gOff) gOff.style.display = anyGrouped ? "" : "none";
+      groupRow.style.display = canGroup || anyGrouped ? "" : "none";
+      groupRow.querySelector(".ps-inspector-subrow-cells").style
+        .gridTemplateColumns = "repeat(" +
+          ((canGroup ? 1 : 0) + (anyGrouped ? 1 : 0) || 1) + ", 1fr)";
+    }
+    // Same size appears on the same rule as the rows above it, once the
+    // selection actually holds two things that HAVE a size.
+    var sameRow = document.querySelector(".ps-inspector-samesize");
+    var sameTarget = laySameSizeTarget();
+    if (sameRow) {
+      sameRow.style.display = sameTarget ? "" : "none";
+      var sameBtns = sameRow.querySelectorAll("[data-ctx-samesize]");
+      for (i = 0; i < sameBtns.length; i++) {
+        var dim = sameBtns[i].getAttribute("data-ctx-samesize");
+        setTip(sameBtns[i], "Match the " +
+          (dim === "w" ? "width" : dim === "h" ? "height" : "width and height") +
+          " of " + laySameSizeLabel(sameTarget));
+      }
+    }
+    if (plotRow) {
+      plotRow.style.display = anyPlot ? "" : "none";
+      var visible = 0;
+      for (i = 0; i < plotBtns.length; i++)
+        if (plotBtns[i].style.display !== "none") visible++;
+      plotRow.querySelector(".ps-inspector-subrow-cells").style
+        .gridTemplateColumns = "repeat(" + Math.max(1, visible) + ", 1fr)";
     }
   }
   // True when moving the selection this direction would change nothing:
@@ -19657,6 +21813,28 @@
     }
     return named.length ? label + " \u00b7 " + named.join(" \u00d7 ") : label;
   }
+  // How many things are actually ON the axes. x categories arrive
+  // facet-encoded, so the panel prefix is stripped before they are counted,
+  // and both counts are distinct values rather than list lengths.
+  function chartAxisCounts(p) {
+    var sep = typeof p.facetSeparator === "string" && p.facetSeparator
+      ? p.facetSeparator : "";
+    var xs = Array.isArray(p.xCategories) ? p.xCategories : [];
+    var seen = {}, cats = 0, i, key, at;
+    for (i = 0; i < xs.length; i++) {
+      key = String(xs[i]);
+      if (sep) {
+        at = key.indexOf(sep);
+        if (at !== -1) key = key.slice(at + sep.length);
+      }
+      if (!Object.prototype.hasOwnProperty.call(seen, "k" + key)) {
+        seen["k" + key] = 1; cats++;
+      }
+    }
+    var gs = p.hasGroups && Array.isArray(p.groupCategories)
+      ? p.groupCategories.length : 0;
+    return { cats: cats, groups: gs };
+  }
   function chartCaseText(c) {
     try {
       var built = buildPayload();
@@ -19670,15 +21848,42 @@
       var bits = [];
       if (n) bits.push(n.toLocaleString() + " case" + (n === 1 ? "" : "s"));
       if (cells) {
-        var noun = "plotted value";
-        if (c.module === "plotbuilder") noun = "group";
-        else if (c.module === "rmplotbuilder") noun = "condition";
-        else if (c.module === "freqplotbuilder") noun = "category";
+        // Plurals are declared, not derived. Adding "s" to "category" was
+        // printing "2 categorys" under every grouped frequency chart.
+        var noun = ["plotted value", "plotted values"];
+        // The x levels are CATEGORIES even here, and the grouping variable's
+        // levels are the groups. Calling both groups printed the unusable
+        // "3 groups, 2 groups" the moment a grouping variable was added.
+        if (c.module === "plotbuilder") noun = ["category", "categories"];
+        else if (c.module === "rmplotbuilder") noun = ["condition", "conditions"];
+        else if (c.module === "freqplotbuilder") noun = ["category", "categories"];
+        // Distribution ships one cell per group and the engine bins the raw
+        // values itself, so bars.length is the number of distributions drawn
+        // and never the number of bins. It read "1 bin" under a fourteen-bar
+        // histogram. The bin count is not in the payload to report.
         else if (c.module === "distplotbuilder")
-          noun = /hist/.test(String(p.graphType || ""))
-            ? "bin" : "distribution group";
-        else if (c.module === "likertplotbuilder") noun = "response category";
-        bits.push(cells + " " + noun + (cells === 1 ? "" : "s"));
+          noun = ["distribution", "distributions"];
+        else if (c.module === "likertplotbuilder")
+          noun = ["response category", "response categories"];
+        // bars.length is CELLS, which is categories times groups times
+        // panels. Reporting it as the noun said "6 categories" over a chart
+        // with three of them and "6 groups" over a chart with two. Only
+        // Distribution, whose x axis is one empty slot, has a cell per
+        // distribution and so counts correctly from the cells.
+        var axis = c.module === "distplotbuilder"
+          ? { cats: cells, groups: 0 } : chartAxisCounts(p);
+        // Pie and donut ship each slice in the GROUP field with one empty x
+        // slot (the module convention, so per-slice colors and the legend
+        // come free), so the axis counts read a three-slice pie as one
+        // category with three groups. The slices ARE the categories, and
+        // there is no grouping variable to report.
+        if (c.module === "freqplotbuilder" &&
+            /^(pie|donut)$/.test(String(p.graphType || "")))
+          axis = { cats: (Array.isArray(p.groupCategories)
+            ? p.groupCategories.length : 0) || cells, groups: 0 };
+        bits.push(axis.cats + " " + noun[axis.cats === 1 ? 0 : 1]);
+        if (axis.groups > 1)
+          bits.push(axis.groups + " group" + (axis.groups === 1 ? "" : "s"));
       }
       if (p.missingNote) bits.push(p.missingNote);
       return bits.length ? bits.join(" \u00b7 ") : "Ready";
@@ -19976,11 +22181,9 @@
     el("ps-layout-orientation").addEventListener("change", function () {
       layApplyOrientation(this.value);
     });
-    ["x", "y", "w", "h"].forEach(function (prop) {
-      el("ps-ctx-l" + prop).addEventListener("change", function () {
-        layApplyInspector(prop, this.value);
-      });
-    });
+    // One registration per field. This block used to appear twice in
+    // immediate succession, so every typed X/Y/W/H ran layApplyInspector
+    // twice and pushed two history entries for one edit.
     ["x", "y", "w", "h"].forEach(function (prop) {
       el("ps-ctx-l" + prop).addEventListener("change", function () {
         layApplyInspector(prop, this.value);
@@ -19990,6 +22193,22 @@
     for (var i = 0; i < align.length; i++)
       align[i].addEventListener("click", function () {
         layAlign(this.getAttribute("data-ctx-align"));
+      });
+    var plotAlign = document.querySelectorAll("[data-ctx-plotalign]");
+    for (var pi = 0; pi < plotAlign.length; pi++)
+      plotAlign[pi].addEventListener("click", function () {
+        layAlignPlots(this.getAttribute("data-ctx-plotalign"));
+      });
+    var groupBtns = document.querySelectorAll("[data-ctx-group]");
+    for (var gi = 0; gi < groupBtns.length; gi++)
+      groupBtns[gi].addEventListener("click", function () {
+        if (this.getAttribute("data-ctx-group") === "on") layGroupSelected();
+        else layUngroupSelected();
+      });
+    var sameSize = document.querySelectorAll("[data-ctx-samesize]");
+    for (var si = 0; si < sameSize.length; si++)
+      sameSize[si].addEventListener("click", function () {
+        laySameSize(this.getAttribute("data-ctx-samesize"));
       });
   }
 
@@ -20013,6 +22232,7 @@
     PROJECT.ui.lastChart = "c1";
     PROJECT.ui.lastLayout = null;
     layHistoryClear();
+    nbHistoryClear();
   }
   function adoptCSV(name, parsed) {
     PROJECT_CHOSEN = true;
@@ -21334,6 +23554,21 @@
     closeShellDialog("ps-preferences");
     showToast("Preferences applied");
   }
+  // Cmd/Ctrl+D belongs to whichever duplicate is in front. A layout with
+  // something selected duplicates the SELECTION, by the same routing rule
+  // that gives Undo to the layout while a figure is on screen, so the menu
+  // has to stop advertising the key beside Duplicate document for as long as
+  // that is true. The item menu on the canvas carries it instead, and says
+  // which duplicate it means.
+  function commandShortcut(item) {
+    // The workspace test matches the handler, which now stands down outside
+    // the layout workspace. In Data or on a chart the key duplicates the
+    // DOCUMENT again, so the menu goes back to advertising it there.
+    if (item.command === "duplicate-document" &&
+        appWorkspace() === "layout" && isLayoutTab(activeChart()) &&
+        laySelectedIds().length) return "";
+    return item.shortcut || "";
+  }
   // ---- punch list t3-55: the shortcuts sheet ----
   // Thirteen hand-written rows that had already drifted: no Cmd+N, no
   // Cmd+comma, no Cmd+F, none of the level-reordering or formula keys, one row
@@ -21356,6 +23591,10 @@
       for (var i = 0; i < defs.length; i++) {
         var item = defs[i];
         if (item === "separator" || !item.shortcut || seen[item.command]) continue;
+        // The sheet is a reference rather than a live menu, so it prints the
+        // key unconditionally. The Layouts section carries its own
+        // Duplicate-the-selection row, and each row is true in the workspace
+        // its section names.
         seen[item.command] = 1;
         rows.push([commandLabel(item).replace(/\u2026/g, ""),
                    item.shortcut.replace(/\+/g, " + ").replace(/ {2,}/g, " ")]);
@@ -21441,6 +23680,7 @@
         rows: [
           ["Move through items", "Arrow keys / Home / End"],
           ["Extend or reduce the selection", "Shift + arrows / Space"],
+          ["Group / ungroup", "Cmd/Ctrl + G / Shift + G"],
           ["Nudge the selection", "Alt + arrows"],
           ["Nudge by 10", "Alt + Shift + arrows"],
           ["Free resize a chart or image", "Ctrl/Cmd + Alt + arrows"],
@@ -21451,6 +23691,7 @@
           ["Move forward or backward", "Alt + Page Up / Page Down"],
           ["Open item commands", "Shift + F10"],
           ["Duplicate the selection", "Cmd/Ctrl + D"],
+          ["Drag off a copy", "Alt + drag"],
           ["Delete the selection", "Delete"],
           ["Cancel a drag, then clear the selection", "Escape"]
         ] },
@@ -22048,6 +24289,7 @@
   function undoScope() {
     if (appWorkspace() === "data") return "data";
     if (appWorkspace() === "layout" && isLayoutTab(activeChart())) return "layout";
+    if (appWorkspace() === "pinboard") return "notebook";
     return "chart";
   }
   // Cmd/Ctrl+F, resolved by workspace - the undoScope precedent. The key
@@ -22112,6 +24354,11 @@
       var named = dataStepLabel(back ? DATA_UNDO : DATA_REDO);
       return (back ? "Undo " : "Redo ") + (named || "data change");
     }
+    // The Notebook names the step, like the data workspace does: "Undo the
+    // deleted page" says what the key will do, where a fixed noun does not.
+    if (s === "notebook")
+      return (back ? "Undo " : "Redo ") +
+        (nbHistoryLabel(back) || "Notebook change");
     return (back ? "Undo " : "Redo ") +
       (s === "layout" ? "layout change" : "chart styling");
   }
@@ -22324,6 +24571,7 @@
         var h = layHist();
         return !!h && (back ? h.undo : h.redo).length > 0;
       }
+      if (scope === "notebook") return (back ? NB_UNDO : NB_REDO).length > 0;
       return !!engineHistoryBtn(back ? "undo" : "redo");
     }
     if (command.indexOf("goto-document:") === 0)
@@ -22368,8 +24616,18 @@
     if (command === "paste-cells")
       return (appWorkspace() === "data" && !!gridSelectionRect()) ||
         (isLayoutTab(activeChart()) && layHasClipboard());
-    if (command === "select-all-cells" || command === "find-data" ||
-        command === "replace-data")
+    if (command === "select-all-cells")
+      // The copy/cut/paste rule one branch up: an Edit row that means
+      // something in two workspaces is enabled per context and routed per
+      // workspace. It was enabled anywhere a table existed and ran the grid
+      // select-all, which early-returns off the Data workspace, so in a
+      // layout it advertised Cmd/Ctrl+A, did nothing when clicked, and the
+      // key did something else.
+      return appWorkspace() === "layout"
+        ? (isLayoutTab(activeChart()) && layItems().length > 0)
+        : appWorkspace() === "data" &&
+          !!(PROJECT.table && PROJECT.table.order.length);
+    if (command === "find-data" || command === "replace-data")
       return !!(PROJECT.table && PROJECT.table.order.length);
     if (command === "copy-image")
       return appWorkspace() !== "data" && !!workspaceDocument(appWorkspace()) &&
@@ -22406,7 +24664,8 @@
     if (command === "undo" || command === "redo") {
       var scope = undoScope();
       var what = scope === "data" ? "data changes" :
-        scope === "layout" ? "layout changes" : "chart style changes";
+        scope === "layout" ? "layout changes" :
+        scope === "notebook" ? "Notebook changes" : "chart style changes";
       return "No " + what + " to " + command;
     }
     if (command === "data-exclude" || command === "data-chart-sel")
@@ -22476,6 +24735,7 @@
       var back = command === "undo", scope = undoScope();
       if (scope === "data") { if (back) dataUndo(); else dataRedo(); }
       else if (scope === "layout") { if (back) layUndo(); else layRedo(); }
+      else if (scope === "notebook") { if (back) nbUndo(); else nbRedo(); }
       else {
         var eb = engineHistoryBtn(back ? "undo" : "redo");
         if (eb) eb.click();
@@ -22526,7 +24786,11 @@
       if (isLayoutTab(activeChart()) && layHasClipboard()) layPasteClipboard();
       else gridMenuPaste();
     }
-    else if (command === "select-all-cells") gridMenuSelectAll();
+    else if (command === "select-all-cells") {
+      if (appWorkspace() === "layout" && isLayoutTab(activeChart()))
+        laySelectAllItems();
+      else gridMenuSelectAll();
+    }
     else if (command === "find-data") runFind();
     else if (command === "replace-data") gridMenuReplace();
     else if (command === "help-chooser") {
@@ -22724,7 +24988,7 @@
         var label = item.workspace === appWorkspace()
           ? "\u2713  " + commandLabel(item) : commandLabel(item);
         b.appendChild(mkEl("span", "", label));
-        b.appendChild(mkEl("span", "ps-menu-shortcut", item.shortcut || ""));
+        b.appendChild(mkEl("span", "ps-menu-shortcut", commandShortcut(item)));
         b.disabled = !commandEnabled(item.command) ||
           (item.layoutOnly && !isLayoutTab(activeChart()));
         if (b.disabled) setTip(b, commandDisabledReason(item.command) ||
@@ -22804,6 +25068,12 @@
       }
       (function (item) {
         var b = mkEl("button", "", item.label);
+        // Menu rows carry a shortcut when the key belongs to THIS command
+        // rather than to the document-level one of the same name. Without
+        // rendering it the property was dead data and the key was advertised
+        // in no menu at all at the moment the Edit menu withdrew it.
+        if (item.shortcut)
+          b.appendChild(mkEl("span", "ps-menu-shortcut", item.shortcut));
         b.type = "button";
         // item.action: a direct callback for dynamic targets (the group
         // menus), where a registered command name would be ceremony.
@@ -22965,7 +25235,7 @@
             item.command === "command-palette") continue;
         seen[item.command] = 1;
         out.push({ label: commandLabel(item).replace(/\u2026/g, ""),
-                   group: groups[gi][0], shortcut: item.shortcut || "",
+                   group: groups[gi][0], shortcut: commandShortcut(item),
                    command: item.command, layoutOnly: item.layoutOnly });
       }
     }
@@ -23527,7 +25797,11 @@
         var duplicateDoc = appWorkspace() === "data" ? activeChart() :
           workspaceDocument(appWorkspace());
         if (!duplicateDoc) return;
-        if (isLayoutTab(duplicateDoc) && laySelectedIds().length) return;
+        // Defer only where the layout handler will actually take the key.
+        // Outside the layout workspace that handler stands down, so a
+        // deferral here would leave the key doing nothing at all.
+        if (appWorkspace() === "layout" && isLayoutTab(duplicateDoc) &&
+            laySelectedIds().length) return;
         e.preventDefault(); duplicateDocument(duplicateDoc.id);
       }
     });
@@ -23814,7 +26088,8 @@
           { label: "Add chart\u2026", command: "layout-add-chart" },
           { label: "Add text", command: "layout-add-text" },
           "separator",
-          { label: "Duplicate", command: "duplicate-selection" },
+          { label: "Duplicate", command: "duplicate-selection",
+            shortcut: "Cmd/Ctrl+D" },
           { label: "Delete", command: "delete-selection" },
           "separator",
           { label: "Export\u2026", command: "export" }
@@ -23836,6 +26111,19 @@
               action: function () {
                 showPinSendMenu(e.clientX, e.clientY, ctxPinId);
               } },
+            { label: "Move to section\u2026", key: "pin-move",
+              action: function () {
+                showPinMoveMenu(e.clientX, e.clientY, ctxPinId);
+              } },
+            { label: "Keep an updated copy", key: "pin-update",
+              disabled: !(function () {
+                var hit = allPins().filter(function (en) {
+                  return en.pin.id === ctxPinId; })[0];
+                return hit && pinCanUpdate(hit.pin);
+              })(),
+              tip: "Available when this page's source chart has changed " +
+                   "since it was kept",
+              action: function () { pinKeepUpdatedCopy(ctxPinId); } },
             "separator",
             { label: "Export this page\u2026", key: "pin-export-page",
               action: function () {
@@ -24070,6 +26358,11 @@
     resizeLayoutPanel: layResizeDimensions,
     selectLayoutItems: function (ids) { laySetSelection(ids); renderLayout(); },
     layoutSelection: laySelectedIds,
+    // The layoutHistoryDepth idiom: what the Notebook's Cmd+Z would do.
+    notebookHistory: function () {
+      return { undo: NB_UNDO.map(function (s) { return s.label; }),
+               redo: NB_REDO.map(function (s) { return s.label; }) };
+    },
     layoutHistoryDepth: function () {
       var n = 0;
       for (var k in LAYOUT_HIST)

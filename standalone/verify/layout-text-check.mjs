@@ -63,10 +63,24 @@ await page.evaluate(() => {
     window.PS_SHELL.selectLayoutItems(ids);
 });
 await page.waitForTimeout(300);
-ok(await page.evaluate(() =>
-       document.getElementById('ps-layout-text-section')
-           .style.display === 'none'),
-   'and it leaves for a multi-selection: the section styles ONE item');
+// CONTRACT CHANGED, deliberately, Aug 2026. This used to assert that the
+// section LEFT on a multi-selection, because it styled one item. That made
+// restyling a figure's four panel letters four separate visits to this
+// panel, which is the one thing the section exists for. It now stays, says
+// how many items it is about to change, and applies to all of them; where
+// they disagree a field reads Mixed rather than showing one member's value.
+// The per-set behaviour is covered in layout-figure-check case 15.
+{
+    const sec = await page.evaluate(() => {
+        const e = document.getElementById('ps-layout-text-section');
+        return { shown: e.style.display !== 'none',
+                 title: e.querySelector('.ps-inspector-section-title').textContent };
+    });
+    ok(sec.shown, 'and it STAYS for a multi-selection, because a set of ' +
+       'labels is exactly what a figure needs restyled together');
+    ok(/2 items/.test(sec.title),
+       'saying how many it will change ("' + sec.title + '")');
+}
 await page.evaluate((id) => window.PS_SHELL.selectLayoutItems([id]), textId);
 await page.waitForTimeout(300);
 

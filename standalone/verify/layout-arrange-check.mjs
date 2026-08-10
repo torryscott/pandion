@@ -126,6 +126,18 @@ ok((await alignRowShown()).display === 'none',
    'and dropping back to one selection hides it again');
 
 console.log('case 3: layer moves gate at the ends, from the menu');
+// Case 2 leaves the first two items aligned on the same x, and placement now
+// puts every toolbar-added text item on one row at the same y, so those two
+// are exactly stacked and a right-click at either centre is ambiguous by
+// construction. This case is about layer ORDER, so it spreads them down the
+// page first and aims at a known item. Aligning items that share a y really
+// does stack them, for the user too; that belongs to align, not to this case.
+await page.evaluate(() => {
+    const items = window.PS_SHELL.chart().items;
+    for (let i = 0; i < items.length; i++) items[i].y = 32 + i * 90;
+    window.PS_SHELL.selectLayoutItems([]);
+});
+await page.waitForTimeout(400);
 const ids = await itemIds();
 const menuFor = async (id) => {
     await page.evaluate((x) => window.PS_SHELL.selectLayoutItems([x]), id);

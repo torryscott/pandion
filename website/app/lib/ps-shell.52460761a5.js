@@ -6364,6 +6364,11 @@
       captureChartSnapshot(c.id);
     }
     applyViewZoom();
+    // Re-adopt the zoom control into the bar the engine just rebuilt.
+    // The observer below is the BACKSTOP for renders the shell does not
+    // drive; doing it here as well means the control is never missing for
+    // the beat between an engine render and the observer's callback.
+    dockChartZoomInToolbar();
   }
 
   // ---- chart snapshots for layouts (session cache, chrome-stripped) ----
@@ -15769,7 +15774,10 @@
   });
   (function watchChartToolbar() {
     var host = document.getElementById("psroot");
-    if (!host) return;
+    // linkedom (the headless DOM smoke) has no MutationObserver, and the
+    // re-dock is a browser-only nicety - the same guard every other
+    // observer in this file carries.
+    if (!host || typeof MutationObserver !== "function") return;
     var pending = false;
     new MutationObserver(function () {
       if (pending) return;

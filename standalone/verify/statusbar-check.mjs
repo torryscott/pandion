@@ -119,6 +119,79 @@ ok(/nothing numeric/.test(none),
    `and a text-only selection says so instead of showing a sum of nothing ` +
    `("${none.slice(0, 80)}")`);
 
+console.log('case 5: it counts the right thing and spells the plural');
+// Two wrong readings of the same line. The plural was noun + "s", so every
+// grouped frequency chart said "2 categorys". And Distribution ships ONE
+// payload cell per group with the raw values inside it, because the engine
+// bins client-side, so bars.length is the number of distributions drawn and
+// never the number of bins. A fourteen-bar histogram reported "1 bin".
+// Cases 3 and 4 work in the grid, so the selection slot is reporting cells.
+await page.evaluate(() => window.PS_SHELL.setWorkspace('chart'));
+await page.waitForTimeout(1200);
+async function statusFor(mod, roles, opts) {
+    await page.evaluate(async o => {
+        const w = ms => new Promise(r => setTimeout(r, ms));
+        const S = window.PS_SHELL;
+        S.setModule(o.mod); await w(600);
+        S.setRoles(o.mod, o.roles); await w(1400);
+    }, { mod: mod, roles: roles });
+    await page.waitForTimeout(1600);
+    if (opts && opts.count) {
+        const n = await page.evaluate(sel =>
+            document.querySelectorAll(
+                '.graphbuilder2-host ' + sel).length, opts.count);
+        return { text: (await bar()).sel, drawn: n };
+    }
+    return { text: (await bar()).sel, drawn: null };
+}
+const freqBar = await statusFor('freqplotbuilder', { var: 'condition' });
+ok(!/categorys/.test(freqBar.text),
+   `a frequency chart does not say "categorys" ("${freqBar.text}")`);
+ok(/\d+ categor(y|ies)\b/.test(freqBar.text),
+   `it counts categories ("${freqBar.text}")`);
+// GROUPED, which is where the count was wrong. bars.length is cells, so a
+// three-category chart with two sites reported six of whatever noun applied.
+const freqGrouped = await statusFor('freqplotbuilder',
+                                    { var: 'condition', groupVar: 'site' });
+ok(/3 categories/.test(freqGrouped.text),
+   `it counts the categories on the axis, not the cells ("${freqGrouped.text}")`);
+ok(/2 groups/.test(freqGrouped.text),
+   `and reports the grouping separately ("${freqGrouped.text}")`);
+const cgGrouped = await statusFor('plotbuilder',
+    { xvar: 'condition', yvar: 'score', groupVar: 'site' });
+ok(/3 categories/.test(cgGrouped.text) && /2 groups/.test(cgGrouped.text),
+   `Compare Groups says the same thing rather than "3 groups, 2 groups" ` +
+   `("${cgGrouped.text}")`);
+// PIE, which ships each slice in the GROUP field with one empty x slot, so
+// the axis counts read a three-slice pie as "1 category, 3 groups". The
+// slices are the categories, and there is no grouping variable to report.
+const freqPie = await (async () => {
+    await page.evaluate(async () => {
+        const w = ms => new Promise(r => setTimeout(r, ms));
+        const S = window.PS_SHELL;
+        S.setModule('freqplotbuilder'); await w(500);
+        S.optionStore().graphType = 'pie';
+        S.setRoles('freqplotbuilder', { var: 'condition' }); await w(1400);
+    });
+    await page.waitForTimeout(1500);
+    return { text: (await bar()).sel };
+})();
+ok(/3 categories/.test(freqPie.text) && !/group/.test(freqPie.text),
+   `a pie's slices are its categories, with no phantom grouping ` +
+   `("${freqPie.text}")`);
+await page.evaluate(() => {
+    window.PS_SHELL.optionStore().graphType = 'bar';
+});
+const histBar = await statusFor('distplotbuilder', { var: 'score' },
+                                { count: '[data-role="dist-hist-bar"]' });
+ok(histBar.drawn > 1,
+   'the histogram really draws several bars (' + histBar.drawn + ')');
+ok(!/\bbins?\b/.test(histBar.text),
+   `and the status bar does not claim a bin count it does not have ` +
+   `("${histBar.text}")`);
+ok(/1 distribution\b/.test(histBar.text),
+   `it reports what the payload actually carries ("${histBar.text}")`);
+
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('STATUS BAR CHECK PASS');
 await browser.close();

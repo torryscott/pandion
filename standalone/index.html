@@ -990,18 +990,37 @@
      column inside a half-width slot would starve the inputs, so paired
      rows size the label to its text instead. */
   .ps-linsp-row .ps-linsp-inline { grid-template-columns: auto minmax(0, 1fr); }
-  /* The Size select shares the W input's LEFT EDGE (Torry, Aug 7 2026:
-     the 76px column put it mid-panel, crowding the row below): Size and
-     the page W/H pair share one 48px label column, and the Size row gets
-     its breathing room back. */
-  #ps-inspector-layout .ps-linsp-size {
-    grid-template-columns: 48px minmax(0, 1fr); margin-bottom: 8px;
+  /* The page section is one label column (Torry, Aug 7 2026, two notes).
+     First: the Size select floated mid-panel because it used the 76px
+     column while the W and H pair sized their labels to the text, so no
+     two controls could share a left edge. Second: each label sat 23px
+     from its own input and 6px from the neighbouring one, so proximity
+     bound H's label to W's box - "it might look like you're saying it's
+     26.7 cm high, but really it's 26.7 cm wide".
+     Both are fixed by one arrangement: Size, W and H share a 44px label
+     column, every label ENDS at that column edge, and its own control
+     starts 6px later. Ending the ink at the edge is what makes the bond
+     hold - the visible gap IS the grid gap, whatever width the text
+     renders at, so no font metric can reopen it - while the W and H
+     groups sit a clear step apart. 44px is set against a widest measured
+     label of 39.7px ("W (cm)"; the metric tags are the wide ones), so a
+     font a tenth wider still fits, and past that the ink outdents rather
+     than colliding with the box. */
+  #ps-inspector-layout .ps-linsp-size,
+  .ps-lpage-pair .ps-linsp-inline {
+    grid-template-columns: 44px minmax(0, 1fr); gap: 6px;
   }
-  .ps-lpage-pair .ps-linsp-inline { grid-template-columns: 48px minmax(0, 1fr); }
+  #ps-inspector-layout .ps-linsp-size { margin-bottom: 8px; }
+  #ps-inspector-layout .ps-linsp-size > span,
+  .ps-lpage-pair .ps-linsp-inline > span {
+    justify-self: end; text-align: right;
+  }
+  .ps-lpage-pair .ps-linsp-inline + .ps-linsp-inline { margin-left: 8px; }
   .ps-lunit-seg { display: flex; gap: 3px; flex: 0 0 auto; }
   /* The pair row carries three tenants now; tighter gaps keep the H
      input wide enough for its own digits. */
   .ps-lpage-pair { gap: 6px; }
+  .ps-lpage-pair .ps-lunit-seg { margin-left: 6px; }
   .ps-lpage-pair .ps-lunit-seg button { min-width: 26px; padding: 3px 5px; }
   .ps-lunit-seg button {
     min-width: 30px; padding: 3px 7px; font-size: 11px; font-weight: 600;
@@ -1101,6 +1120,13 @@
     display: none; position: absolute; z-index: 1001; pointer-events: none;
     background: #d2267a;
   }
+  /* The selection box. Built from the accent already used for a selected
+     item, so a marquee reads as the same act as clicking one. */
+  .ps-lmarquee {
+    position: absolute; z-index: 1002; pointer-events: none;
+    border: 1px solid var(--ps-accent);
+    background: rgba(53, 115, 189, 0.10);
+  }
   .ps-lguide-v { top: 0; bottom: 0; width: 1px; }
   .ps-lguide-h { left: 0; right: 0; height: 1px; }
   .ps-lmissing {
@@ -1109,9 +1135,28 @@
      background: var(--ps-s1); border: 1px dashed var(--ps-l2);
     text-align: center; padding: 10px; box-sizing: border-box;
   }
+  /* The font the EXPORT will use, not the application's UI font. A layout
+     exports text as sans-serif deliberately, so the file renders the same
+     everywhere, but the canvas was drawing it in the system UI stack, which
+     is 3 to 5 percent wider (measured: a 320px caption came out 16.5px
+     narrower in the export). Everything downstream measures the SCREEN box
+     (layItemRect, and through it align, the marquee and the page clamp), so
+     a caption placed against a panel edge by eye landed somewhere else in
+     the file. Showing the output font makes all of that exact, and it is
+     what a figure composer should show anyway. */
   .ps-ltext {
+    font-family: sans-serif;
     font-size: 14px; color: #222; white-space: pre-wrap; cursor: grab;
-    padding: 2px 4px; max-width: 480px;
+    padding: 2px 4px; max-width: 480px; box-sizing: border-box;
+    /* box-sizing so max-width bounds the BORDER box: the export wraps at
+       LAY_TEXT_MAX_W minus twice LAY_TEXT_PAD_X, and without this the screen
+       had 480 px of content against the file's 472 and broke a line earlier. */
+    /* Declared rather than left at normal, so the canvas and the file step
+       their lines identically. The export writes dy 1.25em; a computed
+       normal was 18 px where the file used 20, and the drift compounded
+       down a caption, putting the fourth line 1.6 mm low on paper. The two
+       numbers above are LAY_TEXT_MAX_W and LAY_TEXT_PAD_X in ps-shell.js. */
+    line-height: 1.25;
   }
   .ps-lhandle {
     position: absolute; width: 11px; height: 11px; right: -6px; bottom: -6px;
@@ -1133,7 +1178,8 @@
   .ps-lbar button.ps-lbar-on { background: var(--ps-tint-3); color: var(--ps-accent-bright); border-color: var(--ps-accent); }
   .ps-lbar button.ps-lbar-del:hover { background: var(--ps-s3); color: var(--ps-danger); }
   .ps-ltext-edit {
-    font-family: inherit; border: 1px solid var(--ps-accent); border-radius: var(--ps-r-sm);
+    /* The editor has to measure the same as the item it replaces. */
+    font-family: sans-serif; line-height: 1.25; max-width: 480px; border: 1px solid var(--ps-accent); border-radius: var(--ps-r-sm);
     padding: 2px 4px; outline: none; background: var(--ps-s0); resize: both;
     min-width: 120px; min-height: 24px;
   }
@@ -2039,6 +2085,12 @@
     background: var(--ps-s2); border: 1px solid var(--ps-l1); border-radius: var(--ps-r-md);
     padding: 7px 9px; font-size: 11.5px; line-height: 1.35;
   }
+  .ps-export-check {
+    display: flex; align-items: center; gap: 8px; min-height: 26px;
+    font-size: 13px; color: var(--ps-ink-2); cursor: pointer;
+    margin-bottom: 7px;
+  }
+  .ps-export-check input { width: 16px; height: 16px; margin: 5px; flex: none; }
   .ps-export-a11y-note {
     margin: -6px 0 8px; color: var(--ps-ink-4);
     font-size: 11.5px; line-height: 1.45;
@@ -2301,6 +2353,16 @@
   }
   .ps-pininsp-fact[data-state="changed"] { color: #8a5a00; }
   .ps-pininsp-fact[data-state="gone"] { color: var(--ps-danger-2); }
+  #ps-pininsp-name {
+    width: 100%; box-sizing: border-box; min-height: 30px;
+    padding: 5px 8px; font: inherit; font-size: 12px; color: var(--ps-ink-2);
+    background: #fff; border: 1px solid var(--ps-l1);
+    border-radius: var(--ps-r-md);
+  }
+  #ps-pininsp-name:focus {
+    outline: none; border-color: var(--ps-accent-bright);
+    box-shadow: 0 0 0 3px var(--ps-tint-1);
+  }
   #ps-pininsp-note, #ps-pininsp-bnote {
     box-sizing: border-box; width: 100%; min-height: 96px; padding: 6px 8px;
     color: var(--ps-ink-2); background: var(--ps-s0);
@@ -2393,6 +2455,31 @@
   /* Both classes, or the later .ps-project-item padding rule outranks the
      indent by source order. */
   .ps-project-item.ps-project-item-grouped { padding-left: 26px; }
+  /* Notebook page rows: a number, a name that truncates, and a dot when
+     the page's source chart has moved on since it was kept. */
+  .ps-pinrow { gap: 7px; }
+  .ps-pinrow-num {
+    flex: 0 0 auto; min-width: 15px; color: var(--ps-ink-4);
+    font-size: 10.5px; font-variant-numeric: tabular-nums; text-align: right;
+  }
+  .ps-pinrow-name {
+    flex: 1 1 auto; min-width: 0; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+  /* The freshness verdict on the page card. Amber, the same colour the rail
+     and the exported record band use for it, so one fact has one look. */
+  .ps-pinpage-drift {
+    flex: 0 0 auto; padding: 1px 7px; font-size: 11px; line-height: 1.5;
+    color: #7a4a05; background: #fdf3e2; border: 1px solid #e6c893;
+    border-radius: var(--ps-r-sm);
+  }
+  .ps-pinpage-drift[data-state="gone"] {
+    color: var(--ps-danger-2); background: #fdeceb; border-color: #f0c2bf;
+  }
+  .ps-pinrow-dot {
+    flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%;
+    background: #c98a1e;
+  }
   .ps-project-item { min-height: 28px; padding-left: 12px; font-size: 11.5px; }
   .ps-project-item.ps-project-active {
     color: var(--ps-accent-ink); background: var(--ps-l1); font-weight: 650;
@@ -2608,6 +2695,27 @@
   }
   .ps-inspector-align { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
   .ps-inspector-align .ps-btn { padding: 4px 3px; font-size: 10px; }
+  /* A disabled geometry field must not look like a live one. */
+  .ps-inspector-field input:disabled {
+    color: var(--ps-muted); background: var(--ps-s2); cursor: default;
+  }
+  /* Shared look for the rows under Align. The identity classes
+     (ps-inspector-plotalign, ps-inspector-samesize) are for finding a row,
+     never for styling it, so adding a second row can never make the first
+     one's querySelector match the wrong element. */
+  .ps-inspector-subrow { margin-top: 7px; }
+  .ps-inspector-subrow-cells {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px;
+  }
+  .ps-inspector-subrow-cells .ps-btn { padding: 4px 3px; font-size: 10px; }
+  .ps-inspector-samesize-row { grid-template-columns: repeat(3, 1fr); }
+  /* The section title's own vocabulary, one notch quieter. This labels a
+     row inside a section rather than the section itself. */
+  .ps-inspector-sublabel {
+    display: block; margin: 0 0 4px; color: var(--ps-muted);
+    font-size: 10px; font-weight: 700; letter-spacing: 0.45px;
+    text-transform: uppercase;
+  }
   .ps-grid-table th.ps-grid-col-active {
     color: var(--ps-accent-ink); background: var(--ps-s3); box-shadow: inset 0 -2px var(--ps-accent);
   }
@@ -2683,7 +2791,10 @@
   }
   #ps-appmenu button:hover { color: var(--ps-accent-ink); background: var(--ps-s3); }
   #ps-appmenu button:disabled { color: var(--ps-muted); background: transparent; }
-  #ps-appmenu .ps-menu-shortcut { margin-left: 25px; color: var(--ps-ink); font-size: 10.5px; }
+  /* Both menus render the span; scoping this to the app menu alone left the
+     layout item menu reading "DuplicateCmd/Ctrl+D" run together. */
+  #ps-appmenu .ps-menu-shortcut, #ps-contextmenu .ps-menu-shortcut {
+    margin-left: 25px; color: var(--ps-ink); font-size: 10.5px; }
   #ps-appmenu .ps-menu-separator { height: 1px; margin: 4px 5px; background: var(--ps-l2); }
   #ps-contextmenu {
     position: fixed; display: none; z-index: 12500; min-width: 185px;
@@ -4175,6 +4286,11 @@
           see when it was kept, where it came from, and your notes on
           it.</div>
         <div id="ps-pininsp-sel" style="display:none;">
+          <label class="ps-inspector-field">
+            <span>Title</span>
+            <input type="text" id="ps-pininsp-name" maxlength="120"
+                   spellcheck="true" autocomplete="off">
+          </label>
           <div class="ps-inspector-field">
             <span>Kept</span>
             <div id="ps-pininsp-kept" class="ps-pininsp-fact"></div>
@@ -4195,6 +4311,8 @@
             <div class="ps-inspector-actions">
               <button id="ps-pininsp-open" class="ps-btn" type="button"
                       style="display:none;">Open source chart</button>
+              <button id="ps-pininsp-update" class="ps-btn" type="button"
+                      style="display:none;">Keep an updated copy</button>
             </div>
           </div>
           <label class="ps-inspector-field">
@@ -4301,7 +4419,7 @@
       <div id="ps-layout-selection-properties" style="display:none;">
         <div class="ps-inspector-section">
           <span class="ps-inspector-section-title" id="ps-layout-selection-title"
-                data-tip="Drag to move; corner resize keeps proportions, hold Shift for free resize. Arrows nudge; Shift+arrow moves 10 px.">Selection</span>
+                data-tip="Drag to move; corner resize keeps proportions, hold Shift for free resize. Alt+arrow nudges; Alt+Shift+arrow moves 10 px.">Selection</span>
           <div id="ps-layout-source-line" class="ps-layout-source-line"
                style="display:none;"></div>
           <div class="ps-inspector-grid ps-layout-position-grid">
@@ -4318,6 +4436,85 @@
              chart's pop-down panel exists because the engine must live
              inside jamovi, which has no rail; nothing here touches the
              jamovi module. -->
+        <div class="ps-inspector-section" id="ps-layout-align-section"
+             style="display:none;">
+          <span class="ps-inspector-section-title">Align</span>
+          <!-- Progressive disclosure (Torry, Jul 29 2026): aligning is
+               meaningless with one item selected, so rather than showing six
+               greyed buttons at every selection, the row APPEARS when a
+               second item is selected. The disabled-with-a-reason idiom is
+               still right for a control the user can reach in its own
+               state (Back/Forward at the ends of the stack); it is the
+               wrong idiom for a whole capability that does not apply yet.
+               Distribute across / Distribute down were removed the same
+               day: "I've used this in a lot of different scenarios, and I
+               just don't quite see the utility in it." -->
+          <div class="ps-inspector-align" aria-label="Align selected items"
+               style="display:none;">
+            <button type="button" class="ps-btn" data-ctx-align="left">Left</button>
+            <button type="button" class="ps-btn" data-ctx-align="hcenter">Center</button>
+            <button type="button" class="ps-btn" data-ctx-align="right">Right</button>
+            <button type="button" class="ps-btn" data-ctx-align="top">Top</button>
+            <button type="button" class="ps-btn" data-ctx-align="vcenter">Middle</button>
+            <button type="button" class="ps-btn" data-ctx-align="bottom">Bottom</button>
+          </div>
+          <!-- Plot areas. Aligning panel BOXES lines up rectangles; a reader
+               sees the axes. A panel box carries its tick labels, so two
+               equally sized panels put their axes in different places and a
+               grid that is exactly aligned still looks crooked. These two
+               move panels so the drawn plots line up instead. Shown only
+               when the selection actually holds two chart panels that share
+               a column (or a row), which is when the action can do
+               something. -->
+          <!-- Group. A figure's panel letter is a separate item, so aligning
+               a column moved the panels and left the letters behind. Nothing
+               guesses which text belongs to which panel; the user says so,
+               and every operation that works on a selection then works on the
+               group. Templates group each panel with its own letter, so the
+               common case needs no action at all. -->
+          <div class="ps-inspector-subrow ps-inspector-grouprow"
+               style="display:none;">
+            <span class="ps-inspector-sublabel">Group</span>
+            <div class="ps-inspector-subrow-cells">
+              <button type="button" class="ps-btn" data-ctx-group="on"
+                      data-tip="Move, align and resize these together (Cmd/Ctrl+G)">Group</button>
+              <button type="button" class="ps-btn" data-ctx-group="off"
+                      data-tip="Break this group apart (Cmd/Ctrl+Shift+G)">Ungroup</button>
+            </div>
+          </div>
+          <!-- Same size. Sized to the PRIMARY, the last item added to the
+               selection, and the buttons name it so "the same as what" is
+               never a guess. Text items are skipped; they size themselves to
+               their content. -->
+          <div class="ps-inspector-subrow ps-inspector-samesize"
+               style="display:none;">
+            <span class="ps-inspector-sublabel">Same size</span>
+            <div class="ps-inspector-subrow-cells ps-inspector-samesize-row">
+              <button type="button" class="ps-btn"
+                      data-ctx-samesize="w">Width</button>
+              <button type="button" class="ps-btn"
+                      data-ctx-samesize="h">Height</button>
+              <button type="button" class="ps-btn"
+                      data-ctx-samesize="wh">Both</button>
+            </div>
+          </div>
+          <div class="ps-inspector-subrow ps-inspector-plotalign"
+               style="display:none;">
+            <span class="ps-inspector-sublabel">Plot areas</span>
+            <div class="ps-inspector-subrow-cells ps-inspector-plotalign-row">
+              <button type="button" class="ps-btn"
+                      data-ctx-plotalign="left">Left axes</button>
+              <button type="button" class="ps-btn"
+                      data-ctx-plotalign="bottom">Baselines</button>
+            </div>
+          </div>
+        </div>
+        <!-- The Arrange button cluster (Duplicate / Back / Forward /
+             Delete) is GONE (Torry, Aug 5 2026): every one of them
+             duplicated the item right-click, which also carries Move to
+             front / Move to back now, and the keyboard keeps Delete and
+             Cmd/Ctrl+D. Only Align remains - it is multi-select-only and
+             lives nowhere else. -->
         <div class="ps-inspector-section" id="ps-layout-text-section"
              style="display:none;">
           <span class="ps-inspector-section-title">Text</span>
@@ -4364,35 +4561,6 @@
                    aria-labelledby="ps-ltx-rot-label">
             <input id="ps-ltx-rot-num" type="number" min="-90" max="90"
                    step="1" aria-label="Rotation in degrees">
-          </div>
-        </div>
-        <!-- The Arrange button cluster (Duplicate / Back / Forward /
-             Delete) is GONE (Torry, Aug 5 2026): every one of them
-             duplicated the item right-click, which also carries Move to
-             front / Move to back now, and the keyboard keeps Delete and
-             Cmd/Ctrl+D. Only Align remains - it is multi-select-only and
-             lives nowhere else. -->
-        <div class="ps-inspector-section" id="ps-layout-align-section"
-             style="display:none;">
-          <span class="ps-inspector-section-title">Align</span>
-          <!-- Progressive disclosure (Torry, Jul 29 2026): aligning is
-               meaningless with one item selected, so rather than showing six
-               greyed buttons at every selection, the row APPEARS when a
-               second item is selected. The disabled-with-a-reason idiom is
-               still right for a control the user can reach in its own
-               state (Back/Forward at the ends of the stack); it is the
-               wrong idiom for a whole capability that does not apply yet.
-               Distribute across / Distribute down were removed the same
-               day: "I've used this in a lot of different scenarios, and I
-               just don't quite see the utility in it." -->
-          <div class="ps-inspector-align" aria-label="Align selected items"
-               style="display:none;">
-            <button type="button" class="ps-btn" data-ctx-align="left">Left</button>
-            <button type="button" class="ps-btn" data-ctx-align="hcenter">Center</button>
-            <button type="button" class="ps-btn" data-ctx-align="right">Right</button>
-            <button type="button" class="ps-btn" data-ctx-align="top">Top</button>
-            <button type="button" class="ps-btn" data-ctx-align="vcenter">Middle</button>
-            <button type="button" class="ps-btn" data-ctx-align="bottom">Bottom</button>
           </div>
         </div>
       </div>
@@ -4611,6 +4779,8 @@
         extends the selection. Alt with an arrow moves selected items.
         Control plus Alt with an arrow resizes a selected chart or image.
         Enter opens exact position and size fields. F2 edits selected text.
+        Control or Command plus G groups the selection so it moves and aligns
+        as one; add Shift to ungroup.
         Shift F10 opens item commands. Press F1 for the complete shortcuts.
       </p>
       <span class="ps-visually-hidden" id="ps-layout-live"
@@ -5359,6 +5529,19 @@
         <button type="button" class="ps-btn ps-caption-prov"
                 id="ps-export-provenance">Add what produced this chart</button>
       </label>
+      <!-- Notebook mode only. A kept page is evidence, and the note, the
+           date and the source are what make it evidence rather than a
+           picture, so this ships on. -->
+      <div class="ps-export-field" id="ps-export-record-field" style="display:none;">
+        <label class="ps-export-check">
+          <input type="checkbox" id="ps-export-record" checked>
+          <span>Include each page's details and notes under the figure</span>
+        </label>
+        <p class="ps-export-note" id="ps-export-record-note">
+          Adds the page number, the date it was kept, the analysis it came
+          from, and anything you wrote about it.
+        </p>
+      </div>
       <div class="ps-export-field" id="ps-export-description-field">
         <label class="ps-export-label" for="ps-export-description">
           Image description for accessibility

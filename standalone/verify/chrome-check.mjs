@@ -239,6 +239,70 @@ ok(/\.ps-shortcut-list kbd \{[^}]*border-bottom-width/.test(src),
     await hc.close();
 }
 
+console.log('case 9: a tooltip does not cover what the click just opened');
+// Clicking a control focuses it, the capture pointerdown hid the tip, and the
+// focusin handler put it straight back with no delay. On the project "+" that
+// put a 118 by 26 tip across the first item of the 150 by 60 menu it had just
+// opened. Keyboard focus still shows it at once, which case 3 pins.
+const p9 = await page.evaluate(() => {
+    const b = document.getElementById('ps-project-add');
+    const r = b.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+});
+await page.mouse.move(p9.x, p9.y);
+await page.waitForTimeout(800);
+ok(await page.evaluate(() =>
+       document.getElementById('ps-tip').getAttribute('data-open') === '1'),
+   'setup: hovering the project plus really shows its tip');
+await page.mouse.click(p9.x, p9.y);
+await page.waitForTimeout(500);
+const p9After = await page.evaluate(() => {
+    const t = document.getElementById('ps-tip');
+    const m = document.getElementById('ps-addmenu');
+    const box = e => { const r = e.getBoundingClientRect();
+        return [r.left, r.top, r.width, r.height]; };
+    const tb = box(t), mb = box(m);
+    return { menuOpen: getComputedStyle(m).display === 'block',
+             tipOpen: t.getAttribute('data-open') === '1',
+             overlap: getComputedStyle(t).display !== 'none' &&
+                 tb[0] < mb[0] + mb[2] && tb[0] + tb[2] > mb[0] &&
+                 tb[1] < mb[1] + mb[3] && tb[1] + tb[3] > mb[1] };
+});
+ok(p9After.menuOpen, 'the click opened the menu');
+ok(!p9After.tipOpen && !p9After.overlap,
+   'and the tip did not come back over it');
+await page.keyboard.press('Escape');
+await page.waitForTimeout(300);
+
+console.log('case 10: the press guard does not swallow a keyboard return');
+// The guard was a timestamp rather than causality, so any return of focus to
+// the pressed control within 400 ms was suppressed too, including a keyboard
+// user tabbing away and back. The press-caused focusin always arrives before
+// any focusout, so clearing the marker there keeps the case it exists for.
+// Driven from the same real press case 9 uses, and the round trip is timed,
+// so the case cannot pass merely by taking longer than the window.
+await page.evaluate(() => { window.__p10At = Date.now(); });
+await page.mouse.click(p9.x, p9.y);
+const p10 = await page.evaluate(async () => {
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const b = document.getElementById('ps-project-add');
+    const t = document.getElementById('ps-tip');
+    t.removeAttribute('data-open');
+    b.blur();
+    await sleep(20);
+    b.focus();
+    await sleep(90);
+    return { open: t.getAttribute('data-open') === '1',
+             ms: Date.now() - window.__p10At };
+});
+ok(p10.ms < 400,
+   'the whole round trip finished inside the suppression window (' +
+   p10.ms + ' ms)');
+ok(p10.open,
+   'and focus returning to the pressed control still shows the tooltip');
+await page.keyboard.press('Escape');
+await page.waitForTimeout(250);
+
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('CHROME CHECK PASS');
 await browser.close();

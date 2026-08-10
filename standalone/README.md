@@ -1040,6 +1040,114 @@ untouched; this shell shares the SAME committed bundle
   Restore all clears them. Exclusions persist and toggle freely.
   (Torry's ask: something jamovi itself cannot do.)
 
+## The Notebook workspace
+
+Switcher key `pinboard`. **Grep for `pinboard`, not `notebook`.** The August
+2026 rename was display-only and ratified that way, so ids, file-format
+fields, function names and menu action keys all still say pin and board. Old
+projects load untouched and probe selectors keep working. Do not clean the
+naming up.
+
+It is not a writing surface. There is no block model, no rich text, no
+formatting controls and no prose. It is a lab notebook in the evidence sense,
+an append-only chronological stack of frozen, provenance-tracked chart
+captures, grouped into sections, each annotatable with a plain-text note in
+the right rail. The hierarchy is OneNote's, one level deep. Notebook, then
+sections, then pages, and nothing nests inside a section. Freeform
+composition is Layouts' job, and that boundary is why this stopped being
+called Pinboard. Judge it as a record, not as a document editor.
+
+The vocabulary is load-bearing. A **section** is a `board`
+(`PROJECT.pinboards`, `activePinBoard()`). A **page** is a `pin`
+(`board.pins`, `pushPin()`, `PIN_SEL`). The verb is **Keep**, never Pin and
+never Add. A page record is `{id, src, natW, natH, w, h, at, note, pageTitle,
+srcChart, srcName, srcSig, srcDesc, srcType, srcVars, momEyebrow, momTitle,
+momText}`. `src` is a full SVG data URI, so a page stays vector through the
+board, a layout placement and the PDF.
+
+Things worth knowing before changing it:
+
+- **Provenance is resolved, not read.** `pinProvenance` derives the graph type
+  by resolving the chart's option store OVER the payload template, because the
+  store is empty until the user switches type and the engine writes nothing
+  when you pick the type you are already on. Scatter switches through `xyBin`
+  rather than `graphType`, so a heatmap is only visible there. Reading the
+  store alone recorded no type for most pages, and the probe that should have
+  caught it manufactured the field by poking `setOption`.
+- **The freshness verdict never claims what it has not checked.** The snapshot
+  epoch bumps on any edit anywhere, so a stale snapshot says "not checked" and
+  heals into a true verdict the next time the source chart renders.
+- **Exports carry the record.** `pinComposeWithRecord` nests the page's svg in
+  a taller one and typesets the page number, kept date, source, drift verdict
+  and note beneath it, reusing `wrapCaptionLines` from the chart exporter so
+  the two cannot drift. A checkbox in the export dialog turns it off. Legacy
+  bitmap pages get no band, because their bytes are returned before the
+  composer runs.
+- **The history is session-only and must not outlive its project.**
+  `nbHistoryClear()` is called beside `layHistoryClear()` at all three project
+  boundaries. Without it, undo could inject a page from a previous project.
+- **Capture fidelity has laws.** `stripHoverFromClone`, `stampPinFonts` and
+  `repairPinFonts` each exist because of a field bug. Read them before
+  touching the capture path.
+- A page can outlive the chart that made it. That is a feature.
+
+Probes: `pinboard-check`, `notebook-record-check`, `notebook-pages-check`,
+`notebook-undo-check`, `copy-moment-check`, `keep-fidelity-check`,
+`provenance-check`, `rail-icons-check`, `doclifecycle-check`.
+
+## The Layouts workspace
+
+Switcher key `layout`. A layout is not a separate document type in storage.
+It is a `PROJECT.charts` entry with `type:"layout"`, discriminated by
+`isLayoutTab`, holding `items`, `page`, `view` and `nextLabel`. The code sits
+in the `layout` banner section of `js/ps-shell.js` behind the `lay*` prefix.
+
+It composes finished charts into one figure for a paper, a poster or a slide.
+An `item.kind` is `chart`, `text` or `image`, and `laySizedKind` (chart or
+image) is the predicate for anything that has a box. A chart panel is a LIVE
+reference redrawn whenever its source chart changes; a Notebook placement
+arrives as an `image` item carrying `srcChart`, which is frozen. The
+selection badge, the rail card, the accessible label and the right-click all
+state that difference in the same words.
+
+Things worth knowing before changing it:
+
+- **Pixels are the model, everywhere.** Units, zoom and the rail are display
+  only. Never store a converted number. Zoom is a CSS transform on the canvas
+  alone, so anything measuring with `getBoundingClientRect` inside it must
+  divide by `layZoom()`.
+- **A panel's box is not what the reader sees.** The chart snapshot is
+  `viewBox="0 0 720 490"` with `preserveAspectRatio="xMidYMid meet"`, and
+  `layoutTemplateRects` sizes cells from the page geometry alone, so a
+  four-panel cell of 463 by 267 letterboxes the chart and leaves about 35 px
+  dead on each side. Align, snap and the smart guides all act on the box.
+  `layPlotFrac` / `layPlotRect` are the pair that reason about the DRAWN plot
+  instead, and they measure the axis as a FRACTION of the item box so the
+  number survives the zoom transform and a live drag transform.
+- **Equal panels do not line their axes up.** A panel box carries its tick
+  labels, so a column reading 100000 sits about 6 to 11 px off one reading
+  0.10. `layAlignPlots` moves the panels so the plots coincide, grouping the
+  selection by the column or row the panels already sit in.
+- **Arrow keys mean two different things.** Inside `#ps-lviewport` plain
+  arrows NAVIGATE between items and Alt+Arrow nudges, which is the engine's
+  rule and the assistive-technology model. A second handler further down the
+  same keydown function nudges on PLAIN arrows whenever focus is anywhere
+  else in the workspace. A probe that focuses the viewport must press
+  Alt+Arrow. Unifying the two is an open decision.
+- **The canvas is `aria-hidden` on purpose.** A parallel hidden list of plain
+  `role="option"` divs is the assistive-technology model, because a captured
+  chart SVG would otherwise become a pile of nested interactive descendants
+  inside an ARIA option. Mirror any new on-canvas chrome into the option
+  list; do not un-hide the canvas.
+- **View state is deliberately outside the undo snapshot.** Folding zoom,
+  grid or snap in would make undoing a delete also switch the grid back on.
+- **Never mix live `getBoundingClientRect` with animated transforms in slot
+  math.** Cache geometry once at grab, the way the tab reorder does.
+- **A plain Cmd/Ctrl chord needs a CAPTURE listener on window.** Something on
+  the way down stops propagation, so a bubble-phase window keydown never sees
+  `=` or `-` while `0` arrives, which makes a half-bound shortcut look like a
+  working one.
+
 ## Known gaps (documented, deliberate)
 
 Checked and rewritten Jul 26 2026 (punch list t4-14). Three of the five
@@ -1152,6 +1260,33 @@ Rscript standalone/build-templates.R   # regenerate templates (needs jmvcore)
 ```
 
 ## Harness laws learned here
+
+- **A probe must not write the state it is testing for.** The Notebook page
+  list is named from a graph type the shell records at keep time.
+  `notebook-pages-check` poked `setOption('graphType', ...)` before every
+  keep, which MANUFACTURED the field whose absence was the defect, so its
+  naming assertions passed against a state a user cannot reach and the probe
+  ran green over a broken feature for the length of a dive. That is worse than
+  having no probe, because it produced confidence. If an assertion depends on
+  a field, reach that field the way a user does, or leave it alone entirely
+  and assert on what the app puts there by itself. The corollary is that a
+  control has to be judged, not just run: a probe that dies on a missing DOM
+  node before testing anything proves only that new markup is absent, which is
+  true of any new feature.
+- **A jsPDF file's text lives in Flate streams**, so a raw byte search over an
+  exported PDF is a false negative, and a naive `indexOf('stream')` also
+  matches `endstream` and walks the offsets off the data. Match
+  `/stream\r?\n/`, trim the trailing newline before the keyword (node's
+  inflate tolerates trailing bytes, the browser's `DecompressionStream`
+  rejects them), then join the parenthesised literals. `python3` with `fitz`
+  (pymupdf) is the easier route when the probe can reach outside the browser.
+- **The app-menu button toggles**, so a probe that reads the Edit menu twice
+  closes it on the second read and asserts against stale rows. Press Escape
+  first and confirm the menu is closed by COMPUTED display, not the inline
+  one, which is the empty string before the menu has ever opened.
+- **`PS_TOUR.play()` returns a promise that resolves when the tour ends**, so
+  `page.evaluate(() => PS_TOUR.play(k))` blocks for the whole walkthrough.
+  Fire it inside a block body to observe a tour while it runs.
 
 - Rscript runs in the C locale: force `Sys.setlocale("LC_ALL",
   "en_US.UTF-8")` BEFORE sourcing the b.R files or the multibyte facet
