@@ -10403,6 +10403,18 @@
             'xmlns="http://www.w3.org/2000/svg"><path d="M10 3 L3 10 M10 7 L7 10" ' +
             'stroke="#8a8a8a" stroke-width="1.4" stroke-linecap="round" fill="none"/></svg>';
         gripXY.appendChild(gripXYGlyph);
+        // Under jamovi's Svg element the resize handle belongs to the
+        // HOST (keyed on jmv-results-svg-selection), and Jonathon asked
+        // for the corner to be clear so the jamovi handle has it to
+        // itself (Aug 2026). Detach our grip there; every listener and
+        // style write below binds to the detached node harmlessly.
+        // Production jamovi (Html results) and the standalone never
+        // have that ancestor, so they keep the grip - and when the Svg
+        // element someday ships for real, the handoff to the jamovi
+        // handle happens on its own.
+        if (host.closest && host.closest("jmv-results-svg")) {
+            try { wrap.removeChild(gripXY); } catch (_eGxOff) {}
+        }
         // Transient "W x H px" readout while resizing (the jamovi-image
         // size display). Hidden at rest; fades out after release.
         var sizeTag = document.createElement("div");
@@ -57672,7 +57684,7 @@
                 var _colorBtnHtml =
                     '<button type="button" data-field="color-btn" style="width:28px;height:28px;padding:0;border:1px solid #888;border-radius:4px;cursor:pointer;background:' + _yaInitLineColor + ';flex-shrink:0;" aria-label="Axis color" title="Axis color"></button>' +
                     _renderPaletteRowHtml(_yaInitLineColor, "color-btn", "ya") +
-                    '<span style="color:#666;font-size:11px;margin-left:8px;">or use the HSV picker on the right.</span>' +
+                    '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>' +
                     '<a href="#" data-field="color-default" style="color:#4a90e2;font-size:11px;text-decoration:none;margin-left:6px;" title="Clear the custom axis color">Use default color</a>';
                 // _attachSliderNumInputs() auto-appends a "px" suffix
                 // span next to the slider's number-input partner
@@ -57708,7 +57720,7 @@
                 var _tickColorBtnHtml =
                     '<button type="button" data-field="tick-color-btn" style="width:28px;height:28px;padding:0;border:1px solid #888;border-radius:4px;cursor:pointer;background:' + _yaInitTickColor + ';flex-shrink:0;" aria-label="Tick color" title="Tick color"></button>' +
                     _renderPaletteRowHtml(_yaInitTickColor, "tick-color-btn", "ya") +
-                    '<span style="color:#666;font-size:11px;margin-left:8px;">or use the HSV picker on the right.</span>' +
+                    '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>' +
                     '<a href="#" data-field="tick-color-default" style="color:#4a90e2;font-size:11px;text-decoration:none;margin-left:6px;" title="Clear the custom tick color and keep following the axis line">Follow axis line</a>';
                 // Tick width: same layout idiom as the Y-axis line
                 // width above (presets on row 1, custom slider + num
@@ -59175,7 +59187,7 @@
                     var _xaColorCtrl =
                         '<button type="button" data-field="color-btn" style="width:28px;height:28px;padding:0;border:1px solid #888;border-radius:4px;cursor:pointer;background:' + _xaInitLineColor + ';flex-shrink:0;" aria-label="Axis color" title="Axis color"></button>' +
                         _renderPaletteRowHtml(_xaInitLineColor, "color-btn", "xa") +
-                        '<span style="color:#666;font-size:11px;margin-left:8px;">or use the HSV picker on the right.</span>' +
+                        '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>' +
                         '<a href="#" data-field="color-default" style="color:#4a90e2;font-size:11px;text-decoration:none;margin-left:6px;" title="Clear the custom axis color">Use default color</a>';
                     // Width: 4 preset pills (0.75 / 1.5 / 2.5 / 4) on
                     // row 1, custom slider + num on row 2 — matches
@@ -59230,7 +59242,7 @@
                     var _xaTickColorCtrl =
                         '<button type="button" data-field="tick-color-btn" style="width:28px;height:28px;padding:0;border:1px solid #888;border-radius:4px;cursor:pointer;background:' + _xaInitTickColor + ';flex-shrink:0;" aria-label="Tick color" title="Tick color"></button>' +
                         _renderPaletteRowHtml(_xaInitTickColor, "tick-color-btn", "xa") +
-                        '<span style="color:#666;font-size:11px;margin-left:8px;">or use the HSV picker on the right.</span>' +
+                        '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>' +
                         '<a href="#" data-field="tick-color-default" style="color:#4a90e2;font-size:11px;text-decoration:none;margin-left:6px;" title="Clear the custom tick color and keep following the axis line">Follow axis line</a>';
                     var _xaCurTkThk = (typeof data.xTickThickness === "number" && data.xTickThickness >= 0)
                         ? data.xTickThickness : 1;
@@ -62570,7 +62582,7 @@
                 var _bsWColorCtrl =
                     '<button type="button" data-field="bx-w-color" style="width:28px;height:28px;padding:0;border:1px solid #888;border-radius:4px;cursor:pointer;background:' + _bsWColor + ';flex-shrink:0;" title="Whisker color" aria-label="Whisker color"></button>' +
                     _renderPaletteRowHtml(_bsWColor, "bx-w-color", "bxW", 20) +
-                    '<span style="color:#666;font-size:11px;margin-left:8px;">or use the HSV picker on the right.</span>';
+                    '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>';
                 var _bsWWidthCtrl =
                     _renderWidthPresets(_bsWWidth, "bx-w-width", [0, 0.75, 1.5, 2.5, 4]) +
                     '<div style="flex-basis:100%;height:0;"></div>' +
@@ -62593,7 +62605,7 @@
                 var _bsMColorCtrl =
                     '<button type="button" data-field="bx-m-color" style="width:28px;height:28px;padding:0;border:1px solid #888;border-radius:4px;cursor:pointer;background:' + _bsMColor + ';flex-shrink:0;" title="Median color" aria-label="Median color"></button>' +
                     _renderPaletteRowHtml(_bsMColor, "bx-m-color", "bxM", 20) +
-                    '<span style="color:#666;font-size:11px;margin-left:8px;">or use the HSV picker on the right.</span>';
+                    '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>';
                 var _bsMWidthCtrl =
                     _renderWidthPresets(_bsMWidth, "bx-m-width", [0, 0.75, 1.5, 2.5, 4]) +
                     '<div style="flex-basis:100%;height:0;"></div>' +
@@ -62869,7 +62881,7 @@
                 var _bsVIbColorCtrl =
                     '<button type="button" data-field="vl-ib-color" style="width:28px;height:28px;padding:0;border:1px solid #888;border-radius:4px;cursor:pointer;background:' + _bsVBoxColor + ';flex-shrink:0;" title="Inner box color" aria-label="Inner box color"></button>' +
                     _renderPaletteRowHtml(_bsVBoxColor, "vl-ib-color", "vlIb", 20) +
-                    '<span style="color:#666;font-size:11px;margin-left:8px;">or use the HSV picker on the right.</span>';
+                    '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>';
                 var _bsVIbOpacityCtrl =
                     '<input type="range" data-field="vl-ib-opacity" min="0" max="1" step="0.05" value="' + _bsVBoxOpacity + '" style="' + _GB2_DIM_SLIDER_CSS + '" />' +
                     '<input type="number" data-field="vl-ib-opacity-num" min="0" max="1" step="0.05" value="' + _bsVBoxOpacity.toFixed(2) + '" style="' + _GB2_DIM_NUM_CSS + '" />';
@@ -62881,7 +62893,7 @@
                 var _bsVMdColorCtrl =
                     '<button type="button" data-field="vl-md-color" style="width:28px;height:28px;padding:0;border:1px solid #888;border-radius:4px;cursor:pointer;background:' + _bsVMedColor + ';flex-shrink:0;" title="Median marker color" aria-label="Median marker color"></button>' +
                     _renderPaletteRowHtml(_bsVMedColor, "vl-md-color", "vlMd", 20) +
-                    '<span style="color:#666;font-size:11px;margin-left:8px;">or use the HSV picker on the right.</span>';
+                    '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>';
                 var _bsVMdSizeCtrl =
                     '<input type="range" data-field="vl-md-size" data-unit="px" min="0" max="12" step="0.5" value="' + _bsVMedSize + '" style="' + _GB2_DIM_SLIDER_CSS + '" />' +
                     '<input type="number" data-field="vl-md-size-num" min="0" max="999" step="0.5" value="' + _bsVMedSize + '" style="' + _GB2_DIM_NUM_CSS + '" />' +
@@ -62890,7 +62902,7 @@
                 var _bsVWColorCtrl =
                     '<button type="button" data-field="vl-w-color" style="width:28px;height:28px;padding:0;border:1px solid #888;border-radius:4px;cursor:pointer;background:' + _bsVWColor + ';flex-shrink:0;" title="Whisker color" aria-label="Whisker color"></button>' +
                     _renderPaletteRowHtml(_bsVWColor, "vl-w-color", "vlW", 20) +
-                    '<span style="color:#666;font-size:11px;margin-left:8px;">or use the HSV picker on the right.</span>';
+                    '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>';
                 var _bsVWWidthCtrl =
                     _renderWidthPresets(_bsVWWidth, "vl-w-width", [0, 0.75, 1.5, 2.5, 4]) +
                     '<div style="flex-basis:100%;height:0;"></div>' +
@@ -67213,7 +67225,7 @@
             var _mkOutlineColorCtrl =
                 '<button type="button" data-field="marker-outline-color-btn" style="width:26px;height:26px;padding:0;border:1px solid #888;border-radius:3px;cursor:pointer;background:' + (_mkOutInitColor || "#000000") + ';flex-shrink:0;" aria-label="' + _mkOutlineName + '" title="' + _mkOutlineName + '"></button>' +
                 _renderPaletteRowHtml(_mkOutInitColor || "#000000", "marker-outline-color-btn", "mkout", 20) +
-                '<span style="color:#666;font-size:11px;margin-left:8px;">or use the HSV picker on the right.</span>';
+                '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>';
             var _lsCurMkOutW = (typeof data.markerOutlineWidth === "number" && data.markerOutlineWidth >= 0)
                 ? data.markerOutlineWidth : 0;
             var _mkOutlineWidthCtrl =
@@ -72688,7 +72700,7 @@
             var _fsDivColorCtrl =
                 '<button type="button" data-field="f-divider-color" data-role="primary-color" style="width:28px;height:28px;padding:0;border:1px solid #888;border-radius:4px;cursor:pointer;background:' + fDividerColor + ';flex-shrink:0;" aria-label="Divider color" title="Divider color"></button>' +
                 _renderPaletteRowHtml(fDividerColor, "f-divider-color", "fdiv", 18) +
-                '<span style="color:#666;font-size:11px;margin-left:8px;">or use the HSV picker on the right.</span>' +
+                '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>' +
                 '<a href="#" data-field="f-divider-color-default" style="color:#4a90e2;font-size:11px;text-decoration:none;margin-left:6px;" title="Restore the default divider color">Use default color</a>';
             // Width strip — preset pills + custom slider + num input.
             // Mirrors the Y-axis Width strip layout (presets row 1,
@@ -74001,7 +74013,7 @@
                 (_psScopeable && !_psScopeAllNow()
                     ? '<span style="flex-basis:100%;height:0;"></span><button type="button" data-field="p-color-use-palette" style="' + _psFollowActionCss + '" title="Remove this group\'s custom color and follow the chart palette">Use palette</button>'
                     : '') +
-                '<span style="color:#666;font-size:11px;margin-left:8px;">or use the HSV picker on the right.</span>';
+                '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>';
             // Shape picker: one button per shape, each showing that
             // shape's glyph (filled vs open is visible at a glance). The
             // selected shape's button is highlighted. Replaces the old
@@ -74054,7 +74066,7 @@
                 '<button type="button" data-field="p-outline-swatch" style="' + _psBigSwatchStyle +
                   'background:' + ptOutlineC + ';" title="Point outline color"></button>' +
                 _psPaletteRow(ptOutlineC, "p-outline") +
-                '<span style="color:#666;font-size:11px;margin-left:8px;">or use the HSV picker on the right.</span>';
+                '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>';
             // Quick-pick width pills (0 = no outline) + slider + num,
             // matching every other Width strip in the inspector. The
             // pills sit on row 1; the flex break drops the slider to
@@ -75089,7 +75101,7 @@
                   _flBigSwatchStyle + 'background:' + resolvedFitColor + ';" ' +
                   'aria-label="Fit line color" title="Fit line color"></button>' +
                 _flPaletteRow(resolvedFitColor) +
-                '<span style="color:#666;font-size:11px;margin-left:8px;">or use the HSV picker on the right.</span>' +
+                '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>' +
                 '<div style="flex-basis:100%;height:2px;"></div>' +
                 _stdMatchBtnHtml("f-color-match-btn", fitMatch, "Follow point colors", "When on, the fit line follows each group&#39;s palette color; turn off to pick a custom color.");
             var _flWidthCtrl =
@@ -75925,7 +75937,7 @@
                   swatchCss + 'background:' + resolvedEllColor + ';" ' +
                   'aria-label="Ellipse color" title="Ellipse color"></button>' +
                 _renderPaletteRowHtml(resolvedEllColor, "color", "xe", 18, false) +
-                '<span style="color:#666;font-size:11px;margin-left:6px;">or use the HSV picker on the right.</span>' +
+                '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>' +
                 '<div style="flex-basis:100%;height:2px;"></div>' +
                 _stdMatchBtnHtml("xe-color-match-btn", ellMatch, "Follow point colors", "When on, ellipses follow each group&#39;s palette color; turn off to pick a custom color.");
             var _xeWidthCtrl =
@@ -76512,7 +76524,7 @@
                   swatchCss + 'background:' + resolvedD2Color + ';" ' +
                   'aria-label="Contour color" title="Contour color"></button>' +
                 _renderPaletteRowHtml(resolvedD2Color, "color", "xd", 18, false) +
-                '<span style="color:#666;font-size:11px;margin-left:6px;">or use the HSV picker on the right.</span>' +
+                '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>' +
                 '<div style="flex-basis:100%;height:2px;"></div>' +
                 _stdMatchBtnHtml("xd-color-match-btn", d2Match, "Follow point colors", "When on, contours follow each group&#39;s palette color; turn off to pick a custom color.");
             var _xdWidthCtrl =
@@ -78858,7 +78870,7 @@
                 _distStripHtml("outcolor",
                     '<button type="button" data-field="dh-outc" data-role="primary-color" style="' + _DIST_swatchCss + _distSwatchBg(outC) + '" aria-label="Outline color"></button>' +
                     _renderPaletteRowHtml(outC, "outcolor", "dho", 18, true) +
-                    '<span style="color:#666;font-size:11px;margin-left:6px;">or use the HSV picker on the right.</span>') +
+                    '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>') +
                 _distStripHtml("outwidth",
                     // Border-width preset pills (the bar Border tab's set:
                     // 0 / 0.75 / 1.5 / 2.5 / 4) on the top row, then the
@@ -79040,7 +79052,7 @@
                     '<div data-field="drg-custom-row" style="flex-basis:100%;display:flex;align-items:center;gap:6px;flex-wrap:wrap;order:-1;margin-bottom:6px;' + (_drMatch ? "opacity:0.5;" : "") + '">' +
                       '<button type="button" data-field="drg-color" data-role="primary-color" style="' + _DIST_swatchCss + _distSwatchBg(_drRes) + '" aria-label="Rug color"></button>' +
                       _renderPaletteRowHtml(_drMatch ? "" : _drCustom, "color", "drg", 18, false) +
-                      '<span style="color:#666;font-size:11px;margin-left:6px;">or use the HSV picker on the right.</span>' +
+                      '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>' +
                     '</div>') +
                 _distStripHtml("length", _distRangeHtml("drg-len", 1, 30, 0.5, _drLen, "px")) +
                 _distStripHtml("width", _distRangeHtml("drg-w", 0, 5, 0.25, _drW, "px") + '<span style="color:#666;">0 hides the ticks</span>') +
@@ -79175,7 +79187,7 @@
                     '<div data-field="dnc-custom-row" style="flex-basis:100%;display:flex;align-items:center;gap:6px;flex-wrap:wrap;order:-1;margin-bottom:6px;' + ((_dnMatch && !_dnHasOv) ? "opacity:0.5;" : "") + '">' +
                       '<button type="button" data-field="dnc-color" data-role="primary-color" style="' + _DIST_swatchCss + _distSwatchBg(_dnRes) + '" aria-label="Curve color"></button>' +
                       _renderPaletteRowHtml((_dnMatch && !_dnHasOv) ? "" : _dnCustom, "color", "dnc", 18, false) +
-                      '<span style="color:#666;font-size:11px;margin-left:6px;">or use the HSV picker on the right.</span>' +
+                      '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>' +
                     '</div>') +
                 _distStripHtml("width", _renderWidthPresets(_dnW, "dnc-w", [0, 0.75, 1.5, 2.5, 4]) + '<div style="flex-basis:100%;height:0;"></div>' + _distRangeHtml("dnc-w", 0, 8, 0.25, _dnW, "px") + '<span style="color:#666;">0 hides the curve</span>') +
                 _distStripHtml("style", _distStyleSegHtml("dnc-st", "solid", "Solid", _dnSt) + _distStyleSegHtml("dnc-st", "dashed", "Dashed", _dnSt) + _distStyleSegHtml("dnc-st", "longdash", "Long dash", _dnSt) + _distStyleSegHtml("dnc-st", "dotted", "Dotted", _dnSt)) +
@@ -79630,7 +79642,7 @@
                     '<div data-field="dd-lcustom-row" style="flex-basis:100%;display:flex;align-items:center;gap:6px;flex-wrap:wrap;order:-1;margin-bottom:6px;' + (lmatch ? "opacity:0.5;" : "") + '">' +
                       '<button type="button" data-field="dd-lcolor" data-role="primary-color" style="' + _DIST_swatchCss + _distSwatchBg(lcol) + '" aria-label="Line color"></button>' +
                       _renderPaletteRowHtml(lmatch ? "" : lcustom, "color", "ddl", 18, false, true) +
-                      '<span style="color:#666;font-size:11px;margin-left:6px;">or use the HSV picker on the right.</span>' +
+                      '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>' +
                     '</div>') +
                 _distStripHtml("width", _renderWidthPresets(lw, "dd-lw", [0, 0.75, 1.5, 2.5, 4]) + '<div style="flex-basis:100%;height:0;"></div>' + _distRangeHtml("dd-lw", 0, 6, 0.25, lw, "px")) +
                 _distStripHtml("style", _distStyleSegHtml("dd-lst", "solid", "Solid", lst) + _distStyleSegHtml("dd-lst", "dashed", "Dashed", lst) + _distStyleSegHtml("dd-lst", "longdash", "Long dash", lst) + _distStyleSegHtml("dd-lst", "dotted", "Dotted", lst)) +
@@ -79916,7 +79928,7 @@
                     '<div data-field="qqb-custom-row" style="flex-basis:100%;display:flex;align-items:center;gap:6px;flex-wrap:wrap;order:-1;margin-bottom:6px;' + (_qbMatch ? "opacity:0.5;" : "") + '">' +
                       '<button type="button" data-field="qqb-color" data-role="primary-color" style="' + _DIST_swatchCss + _distSwatchBg(_qbCol) + '" aria-label="Band color"></button>' +
                       _renderPaletteRowHtml(_qbMatch ? "" : _qbColRaw, "color", "qqb", 18, false) +
-                      '<span style="color:#666;font-size:11px;margin-left:6px;">or use the HSV picker on the right.</span>' +
+                      '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>' +
                     '</div>') +
                 _distStripHtml("opacity", _distRangeHtml("qqb-op", 0, 1, 0.05, _qbOp) + '<span style="color:#666;">opacity</span>') +
                 _distStripHtml("level",
@@ -80069,7 +80081,7 @@
                     '<div data-field="qq-lcustom-row" style="flex-basis:100%;display:flex;align-items:center;gap:6px;flex-wrap:wrap;order:-1;margin-bottom:6px;' + (lmatch ? "opacity:0.5;" : "") + '">' +
                       '<button type="button" data-field="qq-lcolor" data-role="primary-color" style="' + _DIST_swatchCss + _distSwatchBg(lcol) + '" aria-label="Line color"></button>' +
                       _renderPaletteRowHtml(lmatch ? "" : lcustom, "color", "qql", 18, false, true) +
-                      '<span style="color:#666;font-size:11px;margin-left:6px;">or use the HSV picker on the right.</span>' +
+                      '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>' +
                     '</div>') +
                 _distStripHtml("width", _renderWidthPresets(lw, "qq-lw", [0, 0.75, 1.5, 2.5, 4]) + '<div style="flex-basis:100%;height:0;"></div>' + _distRangeHtml("qq-lw", 0, 6, 0.25, lw, "px")) +
                 _distStripHtml("style", _distStyleSegHtml("qq-lst", "solid", "Solid", lst) + _distStyleSegHtml("qq-lst", "dashed", "Dashed", lst) + _distStyleSegHtml("qq-lst", "longdash", "Long dash", lst) + _distStyleSegHtml("qq-lst", "dotted", "Dotted", lst)) +
@@ -80156,7 +80168,7 @@
                 _distStripHtml("color",
                     '<button type="button" data-field="qq-outc" data-role="primary-color" style="' + _DIST_swatchCss + _distSwatchBg(outC) + '" aria-label="Outline color"></button>' +
                     _renderPaletteRowHtml(outC, "color", "qqo", 18, false) +
-                    '<span style="color:#666;font-size:11px;margin-left:6px;">or use the HSV picker on the right.</span>') +
+                    '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>') +
                 _distStripHtml("width",
                     _renderWidthPresets(outW, "qq-outw", [0, 0.5, 1, 2]) +
                     '<div style="flex-basis:100%;height:0;"></div>' +
@@ -80719,7 +80731,7 @@
                 _distStripHtml("fqslbcolor",
                     '<button type="button" data-field="fqb-color" data-role="primary-color" style="' + _DIST_swatchCss + _distSwatchBg(_bd.color) + '" aria-label="Border color"></button>' +
                     _renderPaletteRowHtml(_bd.color, "color", "fqb", 18, false) +
-                    '<span style="color:#666;font-size:11px;margin-left:6px;">or use the HSV picker on the right.</span>') +
+                    '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>') +
                 _distStripHtml("fqslbwidth", _renderWidthPresets(_bd.width, "fqb-w", [0, 0.75, 1.5, 2.5, 4]) + '<div style="flex-basis:100%;height:0;"></div>' + _distRangeHtml("fqb-w", 0, 8, 0.25, _bd.width, "px") + '<span style="color:#666;">0 removes the separators</span>') +
                 _distStripHtml("fqslbstyle", _distStyleSegHtml("fqb-st", "solid", "Solid", _bd.style) + _distStyleSegHtml("fqb-st", "dashed", "Dashed", _bd.style) + _distStyleSegHtml("fqb-st", "longdash", "Long dash", _bd.style) + _distStyleSegHtml("fqb-st", "dotted", "Dotted", _bd.style)) +
                 _distStripHtml("fqslbopacity", _distRangeHtml("fqb-op", 0, 1, 0.05, _bd.opacity) + '<span style="color:#666;">opacity</span>');
@@ -80848,7 +80860,7 @@
                 _distStripHtml("color",
                     '<button type="button" data-field="fpl-color" data-role="primary-color" style="' + _DIST_swatchCss + _distSwatchBg(_plC) + '" aria-label="Line color"></button>' +
                     _renderPaletteRowHtml(_plC, "color", "fpl", 18, false, true) +
-                    '<span style="color:#666;font-size:11px;margin-left:6px;">or use the HSV picker on the right.</span>') +
+                    '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>') +
                 _distStripHtml("width",
                     // Line-width preset pills (0 / 0.75 / 1.5 / 2.5 / 4 — the
                     // canonical line set; 0 hides the line) on the top row,
@@ -80925,7 +80937,7 @@
                       '<div data-field="fpm-custom-row" style="flex-basis:100%;display:flex;align-items:center;gap:6px;flex-wrap:wrap;order:-1;margin-bottom:6px;' + (_mkMatch ? "opacity:0.5;" : "") + '">' +
                         '<button type="button" data-field="fpm-color" data-role="primary-color" style="' + _DIST_swatchCss + _distSwatchBg(_mkC) + '" aria-label="Marker color"></button>' +
                         _renderPaletteRowHtml(_mkMatch ? "" : _mkC, "color", "fpm", 18, false, true) +
-                        '<span style="color:#666;font-size:11px;margin-left:6px;">or use the HSV picker on the right.</span>' +
+                        '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>' +
                       '</div>') +
                   _distStripHtml("shape", '<div style="' + _GB2_COMPACT_SHAPE_GRID_CSS + '">' + _shapeSeg + '</div>') +
                   _distStripHtml("size", _distRangeHtml("fpm-size", 1, 20, 0.5, _mkSz, "px")) +
@@ -81023,7 +81035,7 @@
                 _distStripHtml("outcolor",
                     '<button type="button" data-field="fpo-outc" data-role="primary-color" style="' + _DIST_swatchCss + _distSwatchBg(_mkOutC) + '" aria-label="Marker outline color"></button>' +
                     _renderPaletteRowHtml(_mkOutC, "outcolor", "fpo", 18, false) +
-                    '<span style="color:#666;font-size:11px;margin-left:6px;">or use the HSV picker on the right.</span>') +
+                    '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>') +
                 _distStripHtml("outwidth",
                     // Marker-outline preset pills (0 / 0.5 / 1 / 2; 0 = no
                     // outline) on the top row, then the slider below.
@@ -81220,7 +81232,7 @@
                 _distStripHtml("color",
                     '<button type="button" data-field="pax-color" data-role="primary-color" style="' + _DIST_swatchCss + _distSwatchBg(col) + '" aria-label="Axis line color"></button>' +
                     _renderPaletteRowHtml(col, "color", "paxc", 18, false) +
-                    '<span style="color:#666;font-size:11px;margin-left:6px;">or use the HSV picker on the right.</span>') +
+                    '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>') +
                 _distStripHtml("width", _distRangeHtml("pax-w", 0, 12, 0.25, thk, "px") + '<span style="color:#666;">0 hides the line</span>') +
                 _distStripHtml("style", _distStyleSegHtml("pax-st", "solid", "Solid", st) + _distStyleSegHtml("pax-st", "dashed", "Dashed", st) + _distStyleSegHtml("pax-st", "longdash", "Long dash", st) + _distStyleSegHtml("pax-st", "dotted", "Dotted", st));
             _distWireStrips(pane, "color");
@@ -81244,7 +81256,7 @@
                 _distStripHtml("tcolor",
                     '<button type="button" data-field="pax-tcolor" data-role="primary-color" style="' + _DIST_swatchCss + _distSwatchBg(tcol) + '" aria-label="Tick color"></button>' +
                     _renderPaletteRowHtml(tcol, "color", "paxt", 18, false) +
-                    '<span style="color:#666;font-size:11px;margin-left:6px;">or use the HSV picker on the right.</span>') +
+                    '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>') +
                 _distStripHtml("direction", _distSegHtml("pax-dir", "out", "Out", tdir) + _distSegHtml("pax-dir", "in", "In", tdir) + _distSegHtml("pax-dir", "both", "Both", tdir)) +
                 _distStripHtml("step", _distRangeHtml("pax-step", 5, 50, 5, tstep, "%"));
             _distWireStrips(pane, "length");
@@ -81265,7 +81277,7 @@
                 _distStripHtml("lcolor",
                     '<button type="button" data-field="pax-lcolor" data-role="primary-color" style="' + _DIST_swatchCss + _distSwatchBg(lcol) + '" aria-label="Label color"></button>' +
                     _renderPaletteRowHtml(lcol, "color", "paxl", 18, false) +
-                    '<span style="color:#666;font-size:11px;margin-left:6px;">or use the HSV picker on the right.</span>') +
+                    '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>') +
                 _distStripHtml("size", _distRangeHtml("pax-lsz", 4, 60, 0.5, lsz, "px"));
             _distWireStrips(pane, "lcolor");
             _paxWireColorStrip(pane, "pax-lcolor", "lcolor", "paxl", "paretoTickLabelColor", _paxLblColorEff);
@@ -81511,7 +81523,7 @@
                 _distStripHtml("corrlblcolor",
                     '<button type="button" data-field="cvl-color" data-role="primary-color" style="' + _DIST_swatchCss + _distSwatchBg(curC) + '" aria-label="Label color"></button>' +
                     _renderPaletteRowHtml(curC, "color", "cvl", 18, false) +
-                    '<span style="color:#666;font-size:11px;margin-left:6px;">or use the HSV picker on the right.</span>') +
+                    '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>') +
                 _distStripHtml("corrlblsize", _distRangeHtml("cvl-size", 8, 24, 0.5, curS, "px")) +
                 _distStripHtml("corrlblbold", _distCheckHtml("cvl-bold", "Bold labels", curB));
             _distWireStrips(pane, "corrlblcolor");
@@ -82992,7 +83004,7 @@
                 _distStripHtml("lkitemcolor",
                     '<button type="button" data-field="lkit-color" data-role="primary-color" style="' + _DIST_swatchCss + _distSwatchBg(curC) + '" aria-label="Item label color"></button>' +
                     _renderPaletteRowHtml(curC, "color", "lkit", 18, false) +
-                    '<span style="color:#666;font-size:11px;margin-left:6px;">or use the HSV picker on the right.</span>') +
+                    '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>') +
                 _distStripHtml("lkitemsize", _distRangeHtml("lkit-size", 8, 24, 0.5, curS, "px")) +
                 _distStripHtml("lkitembold", _distCheckHtml("lkit-bold", "Bold item labels", curB));
             _distWireStrips(pane, "lkitemcolor");
@@ -83601,7 +83613,7 @@
                   swatchCss + 'background:' + resolvedRugColor + ';" ' +
                   'aria-label="Rug color" title="Custom rug color"></button>' +
                 _renderPaletteRowHtml(resolvedRugColor, "color", "xr", 18, false) +
-                '<span style="color:#666;font-size:11px;margin-left:6px;">or use the HSV picker on the right.</span>' +
+                '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>' +
                 '<div style="flex-basis:100%;height:2px;"></div>' +
                 _stdMatchBtnHtml("xr-color-match-btn", rugMatch, "Follow point colors", "When on, the rug follows each group&#39;s palette color; turn off to pick a custom color.");
             var _xrLengthCtrl =
@@ -84669,7 +84681,7 @@
                   swatchCss + 'background:' + mgColor + ';" ' +
                   'aria-label="Marginal color" title="Marginal color"></button>' +
                 _renderPaletteRowHtml(mgColor, "color", "xm", 18, false) +
-                '<span style="color:#666;font-size:11px;margin-left:6px;">or use the HSV picker on the right.</span>' +
+                '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>' +
                 '<div style="flex-basis:100%;height:2px;"></div>' +
                 _stdMatchBtnHtml("xm-color-match-btn", mgMatch, "Follow point colors", "When on, each group&#39;s marginal follows its palette color; turn off to pick a custom color.");
             if (_xmHasGroups && !_distScopeAllFor("mgopacity")) { var _mgTo = _xyGSField("xyMarginalGroupStyles", _xmTargetGroup(), "opacity"); if (_mgTo != null) mgOp = _mgTo; }
@@ -86186,7 +86198,7 @@
                   'style="width:28px;height:28px;padding:0;border:1px solid #888;border-radius:4px;cursor:pointer;background:' + accColor + ';flex-shrink:0;" ' +
                   'aria-label="Accent line color" title="Accent line color"></button>' +
                 _renderPaletteRowHtml(accColor, "facet-accent-color-btn", "facacc", 18) +
-                '<span style="color:#666;font-size:11px;margin-left:8px;">or use the HSV picker on the right.</span>' +
+                '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>' +
                 '<a href="#" data-field="facet-accent-color-default" style="color:#4a90e2;font-size:11px;text-decoration:none;margin-left:6px;" title="Restore the default accent-line color">Use default color</a>';
 
             // Width: 4 preset pills on row 1, slider + numeric on row 2.
@@ -86723,7 +86735,7 @@
             var _gMajorColorCtrl =
                 '<button type="button" data-field="major-chip" data-role="primary-color" style="width:28px;height:28px;padding:0;border:1px solid #888;border-radius:4px;cursor:pointer;background:' + majorColor + ';flex-shrink:0;" title="Major grid color" aria-label="Major grid color"></button>' +
                 _renderPaletteRowHtml(majorColor, "major-chip", "grM", 20) +
-                '<span style="color:#666;font-size:11px;margin-left:8px;">or use the HSV picker on the right.</span>';
+                '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>';
             var _gMajorWidthCtrl =
                 _renderWidthPresets(majorThk, "major-thk", [0.5, 0.75, 1.5, 2.5]) +
                 '<div style="flex-basis:100%;height:0;"></div>' +
@@ -86747,7 +86759,7 @@
             var _gMinorColorCtrl =
                 '<button type="button" data-field="minor-chip" style="width:28px;height:28px;padding:0;border:1px solid #888;border-radius:4px;cursor:pointer;background:' + minorColor + ';flex-shrink:0;" title="Minor grid color" aria-label="Minor grid color"></button>' +
                 _renderPaletteRowHtml(minorColor, "minor-chip", "grN", 20) +
-                '<span style="color:#666;font-size:11px;margin-left:8px;">or use the HSV picker on the right.</span>';
+                '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>';
             var _gMinorWidthCtrl =
                 _renderWidthPresets(minorThk, "minor-thk", [0.25, 0.5, 0.75, 1.5]) +
                 '<div style="flex-basis:100%;height:0;"></div>' +
@@ -90697,7 +90709,7 @@
             var _rlColorCtrl =
                 '<button type="button" data-field="line-color-btn" style="width:28px;height:28px;padding:0;border:1px solid #888;border-radius:4px;cursor:pointer;background:' + _rlInitColor + ';flex-shrink:0;" title="Line color" aria-label="Line color"></button>' +
                 _renderPaletteRowHtml(_rlInitColor, "line-color-btn", "rl", 20) +
-                '<span style="color:#666;font-size:11px;margin-left:8px;">or use the HSV picker on the right.</span>';
+                '<div style="flex-basis:100%;height:0;"></div><span style="color:#666;font-size:11px;margin-top:6px;">or use the HSV picker on the right.</span>';
             // Width strip: preset pills on top row, slider 200 px +
             // num 50 px + explicit "px" suffix on the second row.
             // Same chrome as the Bar Style panel's Border width

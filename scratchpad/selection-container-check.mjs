@@ -85,6 +85,13 @@ await sf.evaluate(() => {
 });
 good('wrapped jamovi\'s real setOption (commits observed, still delivered)');
 
+// under the Svg element the corner belongs to the host handle: our own
+// grip must be detached (the gripresize probe guards the unwrapped case)
+const gripOff = await sf.evaluate(() =>
+  [...document.querySelectorAll('div')].filter((d) =>
+    d.style.cursor === 'nwse-resize' && d.isConnected && d.offsetParent).length === 0);
+gripOff ? good('own corner grip is OFF under the Svg element') : bad('corner grip still present');
+
 const snap = () => sf.evaluate(() => {
   const live = document.querySelector('.graphbuilder2-host svg[data-role="gb2-chart-svg"]');
   const pt = document.querySelector('.graphbuilder2-host [data-role="xy-point"]');

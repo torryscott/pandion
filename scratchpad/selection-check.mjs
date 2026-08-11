@@ -48,6 +48,14 @@ ok(st.liveContent === false, 'live chart shed jmv-results-svg-content (twin stan
 ok(st.twinClass === 'jmv-results-svg-content', 'twin class is content ONLY: ' + st.twinClass);
 ok(st.firstMatch === 'gb2-chart-svg', 'selection selector lands on the LIVE chart, not the twin');
 
+// inside the Svg element the corner is the HOST handle's territory:
+// our own grip must be detached (it stays everywhere else - the
+// gripresize probe guards the unwrapped case)
+const gripGone = await page.evaluate(() =>
+  [...document.querySelectorAll('div')].filter((d) =>
+    d.style.cursor === 'nwse-resize' && d.isConnected && d.offsetParent).length === 0);
+ok(gripGone, 'own corner grip is OFF inside jmv-results-svg');
+
 // external resize, the way jamovi's handle would do it
 const grew = { w: st.w + 120, h: st.h + 90 };
 await page.evaluate((g) => {
