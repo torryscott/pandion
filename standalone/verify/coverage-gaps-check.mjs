@@ -324,7 +324,7 @@ await openEdit('alpha');
 await page.fill('#ps-formula-input', 'beta + 1');
 await page.waitForTimeout(300);
 d = await dialogState();
-ok(d.msg === '' && /^First values:/.test(d.preview),
+ok(d.msg === '' && /beta/.test(d.preview) && /\d/.test(d.preview),
    'the dialog accepts "beta + 1" because beta exists, which is why a cycle ' +
    'has to be caught at recompute time (msg "' + d.msg + '", preview "' +
    d.preview.slice(0, 40) + '")');

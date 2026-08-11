@@ -54,10 +54,14 @@ await page.waitForTimeout(300);
 const seeded = await page.evaluate(() => ({
     name: document.getElementById('ps-formula-name').value,
     formula: document.getElementById('ps-formula-input').value,
-    preview: document.getElementById('ps-formula-preview').textContent
+    // The preview is a TABLE since the builder round (inputs beside the
+    // result); the live values ride the result column's cells.
+    res: Array.from(document.querySelectorAll(
+        '#ps-formula-preview td.ps-fprev-res')).map(n => n.textContent)
 }));
 if (seeded.formula !== '(score - VMEAN(score)) / VSD(score)' ||
-    seeded.name !== 'score_z' || !/First values: -?\d/.test(seeded.preview))
+    seeded.name !== 'score_z' ||
+    !seeded.res.length || !seeded.res.every(v => /^-?\d/.test(v)))
     throw new Error('z template wrong: ' + JSON.stringify(seeded));
 console.log('  ok  quick transforms write visible formulas with a live preview');
 
