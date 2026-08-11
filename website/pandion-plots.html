@@ -1537,11 +1537,37 @@
     padding: 5px 10px; cursor: pointer; font-family: inherit;
   }
   .ps-fn-row:hover { background: var(--ps-tint-1); }
+  .ps-fn-row[aria-expanded="true"] { background: var(--ps-tint-1); }
   .ps-fn-row code {
     font-family: ui-monospace, Menlo, monospace; font-size: 11.5px;
     color: var(--ps-ink); flex: 0 0 190px;
   }
   .ps-fn-row span { font-size: 11.5px; color: var(--ps-muted); }
+  /* The inline argument picker a clicked function expands under its
+     row: the Combine-columns picker's look, docked inside the panel. */
+  .ps-fn-args {
+    background: var(--ps-tint-1); border-top: 1px solid var(--ps-tint-line-2);
+    border-left: 3px solid var(--ps-accent); padding: 8px 12px 9px;
+  }
+  .ps-fn-args .ps-fpk-row { margin-top: 0; }
+  .ps-fn-args .ps-fpk-chips { margin-top: 2px; }
+  .ps-fn-args .ps-fpk-miss { margin-top: 7px; }
+  .ps-fn-args .ps-fn-insert {
+    -webkit-appearance: none; appearance: none; font-family: inherit;
+    font-size: 11.5px; font-weight: 600; color: #fff;
+    background: var(--ps-accent); border: 0; border-radius: var(--ps-r-md);
+    padding: 4px 12px; cursor: pointer; margin-top: 8px;
+  }
+  .ps-fn-args .ps-fn-insert:disabled {
+    background: var(--ps-l3); cursor: default;
+  }
+  .ps-fpk-chips button .ps-fpk-ord {
+    display: inline-block; min-width: 13px; margin-right: 5px;
+    font-family: inherit; font-size: 9.5px; font-weight: 700;
+    color: var(--ps-accent-press); background: #fff;
+    border: 1px solid var(--ps-accent); border-radius: 999px;
+    line-height: 13px;
+  }
   /* The preview's inputs-beside-result table. */
   #ps-formula-preview table { border-collapse: collapse; }
   #ps-formula-preview th, #ps-formula-preview td {
@@ -5241,20 +5267,25 @@
                 aria-pressed="false">Reverse-score</button>
       </div>
       <div class="ps-formula-picker" id="ps-formula-picker" hidden></div>
-      <label class="ps-inspector-field">Formula
-        <textarea id="ps-formula-input" rows="3" spellcheck="false"></textarea>
-      </label>
       <!-- The functions BROWSER replaces the old uppercase reference
-           wall: grouped, one plain sentence each, click to insert at
-           the cursor. Collapsed by default so a novice who never opens
-           it never meets it. -->
+           wall, and sits WITH the guided rows above the box (Torry,
+           Aug 11 2026): grouped, one plain sentence each, and clicking
+           a function opens an inline argument picker right in its row -
+           point it at a column and the completed call drops into the
+           formula box at the cursor. Insert-at-cursor is what keeps it
+           COMPOSITIONAL: two clicks and a typed minus build a z-score.
+           Collapsed by default so a novice who never opens it never
+           meets it. -->
       <div class="ps-fn-bar">
         <button type="button" id="ps-fn-toggle"
                 aria-expanded="false">Functions &#9662;</button>
         <span id="ps-fn-hint">28 functions in six groups &#183;
-          click one to insert it</span>
+          click one and point it at a column</span>
       </div>
       <div class="ps-fn-panel" id="ps-fn-panel" hidden></div>
+      <label class="ps-inspector-field">Formula
+        <textarea id="ps-formula-input" rows="3" spellcheck="false"></textarea>
+      </label>
       <div id="ps-formula-msg" aria-live="polite"></div>
       <div id="ps-formula-preview"></div>
     </div>
@@ -11145,47 +11176,257 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     }
   }
   // The functions browser (replaces the uppercase reference wall).
-  // Grouped, one plain sentence each, click to insert at the cursor.
-  // The vocabulary here is the ENGINE's - a name listed but not
-  // implemented would be a lie a novice pays for, so formula-unit-check
-  // exercises every insertable name.
+  // Grouped, one plain sentence each. The third element is the
+  // ARGUMENT SHAPE (Torry, Aug 11 2026: "you click that, and that
+  // would be it, instead of having to type the column name"): clicking
+  // a row expands an inline picker for that shape, and the COMPLETED
+  // call inserts at the cursor. num1/any1 = one column select (numeric
+  // / any); multi = the MEAN family's chips + ignore_missing;
+  // ordermulti = COALESCE's ordered chips; round/bin/contains = column
+  // plus one extra field; no spec = plain opener insert (IF wants a
+  // CONDITION, which a column click cannot complete); noins = the
+  // operators row, information only. The vocabulary here is the
+  // ENGINE's - formula-unit-check exercises every name.
   var FORMULA_FN_GROUPS = [
     ["Across a row (several columns)", [
-      ["MEAN(a, b, ...)", "The average of several columns, row by row. A scale score."],
-      ["SUM(a, b, ...)", "The total of several columns, row by row."],
-      ["MIN(a, b, ...)", "The smallest of several columns, row by row."],
-      ["MAX(a, b, ...)", "The largest of several columns, row by row."]]],
+      ["MEAN(a, b, ...)", "The average of several columns, row by row. A scale score.", "multi"],
+      ["SUM(a, b, ...)", "The total of several columns, row by row.", "multi"],
+      ["MIN(a, b, ...)", "The smallest of several columns, row by row.", "multi"],
+      ["MAX(a, b, ...)", "The largest of several columns, row by row.", "multi"]]],
     ["Whole column (one number)", [
-      ["VMEAN(column)", "The mean of the whole column, repeated on every row."],
-      ["VSD(column)", "The standard deviation of the whole column."],
-      ["VMEDIAN(column)", "The median of the whole column."],
-      ["VMIN(column)", "The column's smallest value."],
-      ["VMAX(column)", "The column's largest value."],
-      ["VSUM(column)", "The total of the whole column."],
-      ["N(column)", "How many rows have a value."]]],
+      ["VMEAN(column)", "The mean of the whole column, repeated on every row.", "num1"],
+      ["VSD(column)", "The standard deviation of the whole column.", "num1"],
+      ["VMEDIAN(column)", "The median of the whole column.", "num1"],
+      ["VMIN(column)", "The column's smallest value.", "num1"],
+      ["VMAX(column)", "The column's largest value.", "num1"],
+      ["VSUM(column)", "The total of the whole column.", "num1"],
+      ["N(column)", "How many rows have a value.", "num1"]]],
     ["Math", [
-      ["LOG10(x)", "Base-10 logarithm, for skewed measurements."],
-      ["LN(x)", "Natural logarithm."],
-      ["SQRT(x)", "Square root."],
-      ["ABS(x)", "Absolute value."],
-      ["EXP(x)", "e raised to the value."],
-      ["ROUND(x, digits)", "Round to a number of decimal places."],
-      ["FLOOR(x)", "Round down."],
-      ["CEILING(x)", "Round up."],
-      ["BIN(column, k)", "Cut a column into k equal-width groups."]]],
+      ["LOG10(x)", "Base-10 logarithm, for skewed measurements.", "num1"],
+      ["LN(x)", "Natural logarithm.", "num1"],
+      ["SQRT(x)", "Square root.", "num1"],
+      ["ABS(x)", "Absolute value.", "num1"],
+      ["EXP(x)", "e raised to the value.", "num1"],
+      ["ROUND(x, digits)", "Round to a number of decimal places.", "round"],
+      ["FLOOR(x)", "Round down.", "num1"],
+      ["CEILING(x)", "Round up.", "num1"],
+      ["BIN(column, k)", "Cut a column into k equal-width groups.", "bin"]]],
     ["Decisions", [
       ["IF(test, then, else)", "One value when the test holds, another when it does not."],
       ["AND, OR, NOT", "Combine tests. Comparisons: ==  !=  <  <=  >  >=", "noins"]]],
     ["Text", [
-      ["UPPER(x)", "Fold to upper case."],
-      ["LOWER(x)", "Fold to lower case."],
-      ["TRIM(x)", "Tidy stray spaces."],
-      ["LEN(x)", "How many characters."],
-      ["CONTAINS(text, part)", "Does the text contain the part? Case sensitive."]]],
+      ["UPPER(x)", "Fold to upper case.", "any1"],
+      ["LOWER(x)", "Fold to lower case.", "any1"],
+      ["TRIM(x)", "Tidy stray spaces.", "any1"],
+      ["LEN(x)", "How many characters.", "any1"],
+      ["CONTAINS(text, part)", "Does the text contain the part? Case sensitive.", "contains"]]],
     ["Missing values", [
-      ["ISMISSING(x)", "1 when the value is missing, 0 when it is there."],
-      ["COALESCE(a, b, ...)", "The first value that is not missing."]]]
+      ["ISMISSING(x)", "1 when the value is missing, 0 when it is there.", "any1"],
+      ["COALESCE(a, b, ...)", "The first value that is not missing.", "ordermulti"]]]
   ];
+  // Insert-at-cursor is what keeps the browser COMPOSITIONAL: two
+  // clicks and a typed minus build a z-score. An insert also releases
+  // any active recipe - after it, the box is no longer the recipe's
+  // writing, the same law as hand-editing.
+  function formulaInsertAtCursor(text) {
+    var box = el("ps-formula-input");
+    var at = box.selectionStart != null ? box.selectionStart
+      : box.value.length;
+    var end = box.selectionEnd != null ? box.selectionEnd : at;
+    box.value = box.value.slice(0, at) + text + box.value.slice(end);
+    if (FORMULA_RECIPE) {
+      FORMULA_RECIPE = null;
+      var pk = el("ps-formula-picker");
+      if (pk) { pk.hidden = true; pk.innerHTML = ""; }
+      renderFormulaCombine();
+    }
+    box.focus();
+    box.selectionStart = box.selectionEnd = at + text.length;
+    refreshFormulaPreview();
+  }
+  function formulaFnCollapseArgs() {
+    var panel = el("ps-fn-panel");
+    if (!panel) return;
+    var open = panel.querySelectorAll(".ps-fn-args");
+    for (var i = 0; i < open.length; i++)
+      open[i].parentNode.removeChild(open[i]);
+    var rows = panel.querySelectorAll('.ps-fn-row[aria-expanded="true"]');
+    for (var r = 0; r < rows.length; r++)
+      rows[r].setAttribute("aria-expanded", "false");
+  }
+  // The inline argument picker a clicked function expands under its
+  // row. Built FRESH per click so the column lists are always current;
+  // one open at a time; completing it inserts and collapses.
+  function formulaFnOpenArgs(row, fn) {
+    var t = PROJECT.table;
+    row.setAttribute("aria-expanded", "true");
+    var name = fn[0].split("(")[0];
+    var spec = fn[2];
+    var host = mkEl("div", "ps-fn-args");
+    var editing = FORMULA_EDIT && FORMULA_EDIT.col;
+    var numCols = formulaNumericChoices(t);
+    var anyCols = t.order.filter(function (c) { return c !== editing; });
+    var bt = formulaBacktick;
+    function colSelect(cols, label, onpick) {
+      var s = mkEl("select");
+      s.setAttribute("aria-label", label);
+      var ph = mkEl("option", "", "choose a column...");
+      ph.value = ""; ph.disabled = true; ph.selected = true;
+      s.appendChild(ph);
+      for (var i = 0; i < cols.length; i++) {
+        var o = mkEl("option", "", cols[i]);
+        o.value = cols[i];
+        s.appendChild(o);
+      }
+      s.addEventListener("change", function () { onpick(this.value); });
+      return s;
+    }
+    function done(text) {
+      formulaFnCollapseArgs();
+      formulaInsertAtCursor(text);
+    }
+    if (spec === "num1" || spec === "any1") {
+      // One column-shaped hole: picking the column IS the completion.
+      var r1 = mkEl("div", "ps-fpk-row");
+      r1.appendChild(mkEl("span", "", name + " of"));
+      r1.appendChild(colSelect(spec === "num1" ? numCols : anyCols,
+        name + " column", function (c) {
+          done(name + "(" + bt(c) + ")");
+        }));
+      host.appendChild(r1);
+    } else if (spec === "multi" || spec === "ordermulti") {
+      var ordered = spec === "ordermulti";
+      var pool = ordered ? anyCols : numCols;
+      var picked = [], ig = false, insBtn;
+      host.appendChild(mkEl("p", "ps-fpk-lead", ordered
+        ? "Tick in order: the first column that has a value wins."
+        : "Tick two or more columns."));
+      var chips = mkEl("div", "ps-fpk-chips");
+      function callText() {
+        return name + "(" + picked.map(bt).join(", ") +
+          (ig ? ", ignore_missing = 1" : "") + ")";
+      }
+      function refreshChips() {
+        var bs = chips.querySelectorAll("button");
+        for (var i = 0; i < bs.length; i++) {
+          var c = bs[i].getAttribute("data-fn-col");
+          var at = picked.indexOf(c);
+          bs[i].setAttribute("aria-pressed", at !== -1 ? "true" : "false");
+          var badge = bs[i].querySelector(".ps-fpk-ord");
+          if (badge) {
+            badge.textContent = at === -1 ? "" : String(at + 1);
+            badge.style.display = ordered && at !== -1 ? "" : "none";
+          }
+        }
+        insBtn.disabled = picked.length < 2;
+        insBtn.textContent = picked.length < 2
+          ? "Insert" : "Insert " + callText();
+      }
+      for (var pi = 0; pi < pool.length; pi++) (function (c) {
+        var b = mkEl("button", "");
+        b.type = "button";
+        b.setAttribute("data-fn-col", c);
+        b.setAttribute("aria-pressed", "false");
+        if (ordered) {
+          var badge = mkEl("span", "ps-fpk-ord", "");
+          badge.style.display = "none";
+          b.appendChild(badge);
+        }
+        b.appendChild(document.createTextNode(c));
+        b.addEventListener("click", function () {
+          var at = picked.indexOf(c);
+          if (at === -1) picked.push(c); else picked.splice(at, 1);
+          refreshChips();
+        });
+        chips.appendChild(b);
+      })(pool[pi]);
+      host.appendChild(chips);
+      if (!ordered) {
+        var miss = mkEl("label", "ps-fpk-miss");
+        var cb = mkEl("input");
+        cb.type = "checkbox";
+        miss.appendChild(cb);
+        miss.appendChild(mkEl("span", "", "Still score a row that has " +
+          "a hole, from the values it has"));
+        host.appendChild(miss);
+        cb.addEventListener("change", function () {
+          ig = this.checked;
+          refreshChips();
+        });
+      }
+      insBtn = mkEl("button", "ps-fn-insert", "Insert");
+      insBtn.type = "button";
+      insBtn.addEventListener("click", function () {
+        if (picked.length >= 2) done(callText());
+      });
+      host.appendChild(insBtn);
+      refreshChips();
+    } else if (spec === "round" || spec === "bin") {
+      var isBin = spec === "bin";
+      var chosen2 = null, ib2;
+      var r2 = mkEl("div", "ps-fpk-row");
+      r2.appendChild(mkEl("span", "", name + " of"));
+      r2.appendChild(colSelect(numCols, name + " column", function (c) {
+        chosen2 = c;
+        ib2.disabled = false;
+      }));
+      r2.appendChild(mkEl("span", "", isBin ? "into" : "to"));
+      var nf = mkEl("input");
+      nf.type = "number";
+      nf.min = isBin ? "2" : "0";
+      nf.max = isBin ? "12" : "6";
+      nf.value = isBin ? "4" : "1";
+      nf.style.width = "56px";
+      nf.setAttribute("aria-label",
+        isBin ? "Number of groups" : "Decimal places");
+      r2.appendChild(nf);
+      r2.appendChild(mkEl("span", "",
+        isBin ? "equal-width groups" : "decimal places"));
+      host.appendChild(r2);
+      ib2 = mkEl("button", "ps-fn-insert", "Insert");
+      ib2.type = "button";
+      ib2.disabled = true;
+      ib2.addEventListener("click", function () {
+        if (!chosen2) return;
+        var k = Math.round(Number(nf.value));
+        if (!isFinite(k)) k = isBin ? 4 : 0;
+        if (isBin && k < 2) k = 2;
+        done(name + "(" + bt(chosen2) + ", " + k + ")");
+      });
+      host.appendChild(ib2);
+    } else if (spec === "contains") {
+      var chosen3 = null, ib3;
+      var r3 = mkEl("div", "ps-fpk-row");
+      r3.appendChild(mkEl("span", "", "Does"));
+      r3.appendChild(colSelect(anyCols, "Text column", function (c) {
+        chosen3 = c;
+        ib3.disabled = false;
+      }));
+      r3.appendChild(mkEl("span", "", "contain"));
+      var tf = mkEl("input");
+      tf.type = "text";
+      tf.placeholder = "text";
+      tf.style.width = "120px";
+      tf.setAttribute("aria-label", "Text to look for");
+      r3.appendChild(tf);
+      host.appendChild(r3);
+      ib3 = mkEl("button", "ps-fn-insert", "Insert");
+      ib3.type = "button";
+      ib3.disabled = true;
+      ib3.addEventListener("click", function () {
+        if (!chosen3) return;
+        // The language has no escape inside string literals, so a
+        // double quote in the search text cannot ride along.
+        var part = String(tf.value || "").replace(/"/g, "");
+        done("CONTAINS(" + bt(chosen3) + ", \"" + part + "\")");
+      });
+      host.appendChild(ib3);
+    }
+    row.parentNode.insertBefore(host, row.nextSibling);
+    // A row near the panel's bottom edge would open its picker below
+    // the fold of the scrolling panel; keep the whole exchange visible.
+    try { host.scrollIntoView({ block: "nearest" }); } catch (e) {}
+  }
   function renderFormulaFnPanel() {
     var panel = el("ps-fn-panel");
     if (!panel || panel.childNodes.length) return;   // static; build once
@@ -11193,21 +11434,30 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       panel.appendChild(mkEl("div", "ps-fn-group", FORMULA_FN_GROUPS[g][0]));
       var fns = FORMULA_FN_GROUPS[g][1];
       for (var i = 0; i < fns.length; i++) (function (fn) {
+        var spec = fn[2];
         // The operators row informs; it is not an insertable call.
-        var row = mkEl(fn[2] === "noins" ? "div" : "button", "ps-fn-row");
-        if (fn[2] !== "noins") row.type = "button";
+        var row = mkEl(spec === "noins" ? "div" : "button", "ps-fn-row");
+        if (spec !== "noins") row.type = "button";
         row.appendChild(mkEl("code", "", fn[0]));
         row.appendChild(mkEl("span", "", fn[1]));
-        if (fn[2] !== "noins") row.addEventListener("click", function () {
-          var box = el("ps-formula-input");
-          var ins = fn[0].split("(")[0] + "(";
-          var at = box.selectionStart != null ? box.selectionStart
-            : box.value.length;
-          box.value = box.value.slice(0, at) + ins + box.value.slice(at);
-          box.focus();
-          box.selectionStart = box.selectionEnd = at + ins.length;
-          refreshFormulaPreview();
-        });
+        if (spec && spec !== "noins") {
+          row.setAttribute("aria-expanded", "false");
+          row.addEventListener("click", function (e) {
+            // Clicks inside the expanded picker bubble up through the
+            // panel, not this row; a row click toggles its own picker.
+            var open = row.getAttribute("aria-expanded") === "true";
+            formulaFnCollapseArgs();
+            if (!open) formulaFnOpenArgs(row, fn);
+          });
+        } else if (!spec) {
+          // IF wants a CONDITION, which a column click cannot
+          // complete, so it stays a plain opener insert - and like any
+          // row click, it retires whichever picker was open.
+          row.addEventListener("click", function () {
+            formulaFnCollapseArgs();
+            formulaInsertAtCursor(fn[0].split("(")[0] + "(");
+          });
+        }
         panel.appendChild(row);
       })(fns[i]);
     }
@@ -11229,6 +11479,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     renderFormulaPicker();
     renderFormulaFnPanel();
     var fnPanel = el("ps-fn-panel"), fnTog = el("ps-fn-toggle");
+    formulaFnCollapseArgs();   // a picker from the last open is stale
     if (fnPanel) fnPanel.hidden = true;
     if (fnTog) {
       fnTog.setAttribute("aria-expanded", "false");
