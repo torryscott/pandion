@@ -22341,17 +22341,69 @@
     if (mcLabel && mcInput && mcHint) {
       var own = hasColumnTokens(t, INSPECTOR_VAR);
       var dataset = (t.missingTokens || ["NA"]).join(", ");
-      mcLabel.textContent = "Missing labels for " + INSPECTOR_VAR;
-      mcInput.value = own ? t.missingTokensByCol[INSPECTOR_VAR].join(", ") : "";
-      mcInput.placeholder = dataset
-        ? "using the dataset labels: " + dataset
-        : "using the dataset labels";
-      mcHint.textContent = own
-        ? "Only this variable uses these. Clear the box to go back to the "
-          + "dataset labels."
-        : "Set a list here when a code means missing in THIS variable only, "
-          + "such as -99 for an age or 9 for a rating.";
+      mcLabel.textContent = "Missing values for " + INSPECTOR_VAR;
+      // The radio pair IS the state (t4-134): no placeholder carries it.
+      el("ps-missing-mode-dataset").checked = !own;
+      el("ps-missing-mode-own").checked = own;
+      el("ps-missing-opt-dataset").textContent = dataset
+        ? "Use the dataset labels: " + dataset
+        : "Use the dataset labels (none set)";
+      el("ps-missing-opt-own").textContent =
+        "Give " + INSPECTOR_VAR + " its own labels";
+      el("ps-missing-own-wrap").hidden = !own;
+      mcInput.value = own
+        ? t.missingTokensByCol[INSPECTOR_VAR].join(", ") : "";
+      // The live count line: every edit tied to its consequence in THIS
+      // column, with the would-be dataset count alongside when forked.
+      var mcCounts = missingMatchCounts(t, INSPECTOR_VAR,
+        columnTokenList(t, INSPECTOR_VAR));
+      var line;
+      if (own) {
+        var dsCounts = missingMatchCounts(t, INSPECTOR_VAR,
+          (t.missingTokens || ["NA"]));
+        line = "Marking " + mcCounts.m + " cell" +
+          (mcCounts.m === 1 ? "" : "s") + " in " + INSPECTOR_VAR +
+          " as missing (the dataset labels would mark " + dsCounts.m +
+          "). Deleting a code from the copy says it is real here.";
+      } else {
+        line = (dataset || "The dataset list") + " matches " +
+          (mcCounts.m === 0 ? "no cells" :
+            mcCounts.m + " cell" + (mcCounts.m === 1 ? "" : "s")) +
+          " in " + INSPECTOR_VAR + ".";
+      }
+      if (mcCounts.b) line += " " + mcCounts.b + " blank cell" +
+        (mcCounts.b === 1 ? " is" : "s are") + " missing as always.";
+      else line += " Blank cells are always missing.";
+      mcHint.textContent = line;
+      // The dataset field's scope line names the exceptions, so "every
+      // variable" is never silently untrue.
+      var dsHint = el("ps-missing-dataset-hint");
+      if (dsHint) {
+        var owns = t.order.filter(function (c) {
+          return hasColumnTokens(t, c);
+        });
+        dsHint.textContent = (owns.length
+          ? "Used by every variable except " + owns.join(", ") +
+            (owns.length === 1 ? ", which has its own list." :
+              ", which have their own lists.")
+          : "Used by every variable that has no list of its own.") +
+          " Blank cells are always missing.";
+      }
     }
+  }
+  // How many cells a token list marks missing in one column: the raw
+  // text is the data, so the count scans it the same way typing does.
+  function missingMatchCounts(t, col, list) {
+    var raw = (t.raw && t.raw[col]) || [], m = 0, b = 0;
+    var toks = Object.create(null);
+    for (var i = 0; i < list.length; i++)
+      toks[String(list[i]).trim()] = 1;
+    for (var r = 0; r < raw.length; r++) {
+      var v = String(raw[r] == null ? "" : raw[r]).trim();
+      if (v === "") b++;
+      else if (toks[v]) m++;
+    }
+    return { m: m, b: b };
   }
   // Counts roles the user can SEE. Every chart keeps a stored role set per
   // MODULE so switching analysis type inside a tab keeps that tab's memory,
@@ -23086,6 +23138,25 @@
     });
     el("ps-variable-missing-col").addEventListener("change", function () {
       if (INSPECTOR_VAR) setColumnMissingTokens(INSPECTOR_VAR, this.value);
+    });
+    el("ps-missing-mode-dataset").addEventListener("change", function () {
+      if (!this.checked || !INSPECTOR_VAR) return;
+      var t = PROJECT.table;
+      if (t && hasColumnTokens(t, INSPECTOR_VAR))
+        setColumnMissingTokens(INSPECTOR_VAR, "");
+    });
+    el("ps-missing-mode-own").addEventListener("change", function () {
+      if (!this.checked || !INSPECTOR_VAR) return;
+      var t = PROJECT.table;
+      if (!t || hasColumnTokens(t, INSPECTOR_VAR)) return;
+      // Fork = persist a COPY of the dataset labels and edit from
+      // there: replace-semantics become visible as "your own copy",
+      // and deleting a code from it says the code is real here. An
+      // empty dataset list has nothing to copy, so seed the default.
+      var seed = (t.missingTokens || ["NA"]).join(", ") || "NA";
+      setColumnMissingTokens(INSPECTOR_VAR, seed);
+      var box = el("ps-variable-missing-col");
+      if (box) { box.focus(); box.select(); }
     });
     el("ps-variable-missing-col").addEventListener("keydown", function (e) {
       if (e.key === "Enter") { e.preventDefault(); this.blur(); }
