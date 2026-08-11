@@ -1537,8 +1537,9 @@
     background: var(--ps-l3); cursor: default;
   }
   .ps-fpk-chips button .ps-fpk-ord {
-    display: inline-block; min-width: 13px; margin-right: 5px;
-    font-family: inherit; font-size: 9.5px; font-weight: 700;
+    display: inline-block; min-width: 14px; margin-right: 5px;
+    /* 10px is the app-wide floor (tokens-check); a badge is not exempt. */
+    font-family: inherit; font-size: 10px; font-weight: 700;
     color: var(--ps-accent-press); background: #fff;
     border: 1px solid var(--ps-accent); border-radius: 999px;
     line-height: 13px;
