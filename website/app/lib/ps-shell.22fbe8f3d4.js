@@ -22340,59 +22340,84 @@
     var mcHint = el("ps-variable-missing-col-hint");
     if (mcLabel && mcInput && mcHint) {
       var own = hasColumnTokens(t, INSPECTOR_VAR);
-      var dataset = (t.missingTokens || ["NA"]).join(", ");
-      mcLabel.textContent = "Missing values for " + INSPECTOR_VAR;
+      var dsList = (t.missingTokens || ["NA"]);
+      // The name lives in ONE place, in its own casing (t4-135).
+      var nameEl = el("ps-missing-varname");
+      if (nameEl) {
+        nameEl.textContent = INSPECTOR_VAR;
+        // The app's own tip, never a native title: chrome-check holds
+        // that line for the whole shell.
+        setTip(nameEl, INSPECTOR_VAR);
+      }
       // The radio pair IS the state (t4-134): no placeholder carries it.
       el("ps-missing-mode-dataset").checked = !own;
       el("ps-missing-mode-own").checked = own;
-      el("ps-missing-opt-dataset").textContent = dataset
-        ? "Use the dataset labels: " + dataset
-        : "Use the dataset labels (none set)";
+      // Whole entries up to ~48 chars, then real text, never a CSS
+      // ellipsis: the visible string and the spoken string must match.
+      var shown = [], used = 0;
+      for (var li = 0; li < dsList.length; li++) {
+        var ent = String(dsList[li]);
+        if (used && used + ent.length + 2 > 48) break;
+        shown.push(ent);
+        used += ent.length + 2;
+      }
+      var more = dsList.length - shown.length;
+      el("ps-missing-opt-dataset").textContent = dsList.length
+        ? "Use the dataset list: " + shown.join(", ") +
+          (more > 0 ? ", and " + more + " more" : "")
+        : "Use the dataset list (none set)";
       el("ps-missing-opt-own").textContent =
-        "Give " + INSPECTOR_VAR + " its own labels";
+        "Give this variable its own list";
       el("ps-missing-own-wrap").hidden = !own;
       mcInput.value = own
         ? t.missingTokensByCol[INSPECTOR_VAR].join(", ") : "";
-      // The live count line: every edit tied to its consequence in THIS
-      // column, with the would-be dataset count alongside when forked.
-      var mcCounts = missingMatchCounts(t, INSPECTOR_VAR,
-        columnTokenList(t, INSPECTOR_VAR));
-      var line;
-      if (own) {
-        var dsCounts = missingMatchCounts(t, INSPECTOR_VAR,
-          (t.missingTokens || ["NA"]));
-        line = "Marking " + mcCounts.m + " cell" +
-          (mcCounts.m === 1 ? "" : "s") + " in " + INSPECTOR_VAR +
-          " as missing (the dataset labels would mark " + dsCounts.m +
-          "). Deleting a code from the copy says it is real here.";
-      } else {
-        line = (dataset || "The dataset list") + " matches " +
-          (mcCounts.m === 0 ? "no cells" :
-            mcCounts.m + " cell" + (mcCounts.m === 1 ? "" : "s")) +
-          " in " + INSPECTOR_VAR + ".";
+      MISSING_READOUT_COL = INSPECTOR_VAR;
+      var lines = missingReadoutLines(
+        missingMatchCounts(t, INSPECTOR_VAR,
+          columnTokenList(t, INSPECTOR_VAR)),
+        missingMatchCounts(t, INSPECTOR_VAR, dsList),
+        own, columnTokenList(t, INSPECTOR_VAR), dsList);
+      // Bold the leading count so the eye lands on a number without
+      // reading, via a span rather than <strong>: some screen readers
+      // announce emphasis boundaries, and this text is spoken whole on
+      // every change.
+      var html = escHtml(lines.a).replace(/^(\d[\d,]*)/,
+        '<span class="ps-missing-n">$1</span>');
+      if (lines.b) html += '<span class="ps-missing-b2">' +
+        escHtml(lines.b) + '</span>';
+      // Writing identical text re-announces in several screen readers,
+      // and a variable SWITCH is not something the user did in this
+      // panel, so it is muted rather than spoken over the selection.
+      if (mcHint.innerHTML !== html) {
+        var switched = MISSING_LAST_COL !== INSPECTOR_VAR;
+        if (switched) mcHint.setAttribute("aria-busy", "true");
+        mcHint.innerHTML = html;
+        if (switched) window.setTimeout(function () {
+          mcHint.removeAttribute("aria-busy");
+        }, 0);
       }
-      if (mcCounts.b) line += " " + mcCounts.b + " blank cell" +
-        (mcCounts.b === 1 ? " is" : "s are") + " missing as always.";
-      else line += " Blank cells are always missing.";
-      mcHint.textContent = line;
-      // The dataset field's scope line names the exceptions, so "every
-      // variable" is never silently untrue.
+      MISSING_LAST_COL = INSPECTOR_VAR;
+      // The dataset field's scope line COUNTS its exceptions rather than
+      // naming them: one long instrument name would wrap the line past
+      // the point of being read.
       var dsHint = el("ps-missing-dataset-hint");
       if (dsHint) {
-        var owns = t.order.filter(function (c) {
+        var k = t.order.filter(function (c) {
           return hasColumnTokens(t, c);
-        });
-        dsHint.textContent = (owns.length
-          ? "Used by every variable except " + owns.join(", ") +
-            (owns.length === 1 ? ", which has its own list." :
-              ", which have their own lists.")
-          : "Used by every variable that has no list of its own.") +
-          " Blank cells are always missing.";
+        }).length;
+        dsHint.textContent = k === 0
+          ? "Used by every variable in this dataset."
+          : "Used by every variable except " + k +
+            (k === 1 ? " variable that has its own list."
+                     : " variables that have their own lists.");
       }
     }
   }
+  var MISSING_LAST_COL = null;
   // How many cells a token list marks missing in one column: the raw
   // text is the data, so the count scans it the same way typing does.
+  // Blanks are counted FIRST and labels only in the else branch, so the
+  // two categories are disjoint and labelled + blank is the true total.
   function missingMatchCounts(t, col, list) {
     var raw = (t.raw && t.raw[col]) || [], m = 0, b = 0;
     var toks = Object.create(null);
@@ -22403,8 +22428,67 @@
       if (v === "") b++;
       else if (toks[v]) m++;
     }
-    return { m: m, b: b };
+    return { m: m, b: b, total: raw.length };
   }
+  // The readout, as a PURE function of the counts (t4-135). Two rules
+  // decide everything, and between them they make the field failure
+  // structurally unprintable:
+  //
+  //   TOTAL FIRST. Every line leads with how many cells are missing and
+  //   presents the parts as its breakdown, so two numbers can never
+  //   read as rival claims.
+  //   NEVER PRINT A COUNT OF ZERO. Each zero collapses into a clause
+  //   ("all of them blank", "They all match the list") or a word
+  //   ("Nothing is missing here", "No cell matches"). A 0 beside a 5 is
+  //   exactly what read as a contradiction, and this makes that pairing
+  //   impossible to emit.
+  //
+  // Line A is chosen by the COUNTS ALONE and is identical in both
+  // modes, so switching radios changes numbers, never grammar. Line B
+  // exists only in own-list mode and exactly one rule fires.
+  function missingReadoutLines(c, ds, own, list, dsList) {
+    var a, b = null;
+    var n = c.m + c.b;
+    if (c.total === 0) a = "This variable has no rows yet.";
+    else if (c.m > 0 && c.b > 0)
+      a = n + " of " + c.total + " cells are missing: " + c.m +
+          " match the list, " + c.b + " are blank.";
+    else if (c.m > 0)
+      a = c.m + " of " + c.total +
+          " cells are missing. They all match the list.";
+    else if (c.b > 0)
+      a = c.b + " of " + c.total + " cells are missing, all of them blank.";
+    else a = "Nothing is missing here. All " + c.total + " cells have a value.";
+    if (own && c.total > 0) {
+      var diff = c.m - ds.m;
+      var ad = Math.abs(diff);
+      var cmp = diff === 0 ? "" : "This list counts " + ad +
+        (diff > 0 ? " more" : " fewer") + " cell" + (ad === 1 ? "" : "s") +
+        " as missing than the dataset list would.";
+      var same = list.length === dsList.length &&
+        list.every(function (v) { return dsList.indexOf(v) !== -1; });
+      if (!list.length)
+        b = "This list is empty, so only blank cells count as missing here.";
+      else if (c.m === 0)
+        b = "No cell matches " +
+            (list.length === 1 ? list[0] : "anything in the list") + "." +
+            (cmp ? " " + cmp : "");
+      else if (diff !== 0) b = cmp;
+      else if (same) b = "Same as the dataset list so far.";
+      else {
+        // Same count by a different route: name a label that earns
+        // nothing, because a list entry matching no cell is usually a
+        // typo and nothing else would ever say so.
+        var dead = list.filter(function (v) {
+          return missingMatchCounts(PROJECT.table, MISSING_READOUT_COL,
+            [v]).m === 0;
+        });
+        if (dead.length) b = dead[0] + " matches no cell here.";
+      }
+    }
+    return { a: a, b: b };
+  }
+  var MISSING_READOUT_COL = null;   // the column the dead-label scan reads
   // Counts roles the user can SEE. Every chart keeps a stored role set per
   // MODULE so switching analysis type inside a tab keeps that tab's memory,
   // and this walked all of them, so a project with one bar chart reported
@@ -23155,8 +23239,9 @@
       // empty dataset list has nothing to copy, so seed the default.
       var seed = (t.missingTokens || ["NA"]).join(", ") || "NA";
       setColumnMissingTokens(INSPECTOR_VAR, seed);
-      var box = el("ps-variable-missing-col");
-      if (box) { box.focus(); box.select(); }
+      // Deliberately NOT focusing the box: taking focus out of a radio
+      // group mid-arrow-key strands a keyboard user who wanted to arrow
+      // back to the other option. The box is the next tab stop.
     });
     el("ps-variable-missing-col").addEventListener("keydown", function (e) {
       if (e.key === "Enter") { e.preventDefault(); this.blur(); }
