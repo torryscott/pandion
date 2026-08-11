@@ -216,7 +216,20 @@ await clickRow('VMEAN');
 await page.waitForTimeout(250);
 ok(await page.evaluate(() =>
        !!document.querySelector('.ps-fn-args select')),
-   'clicking VMEAN expands an inline column picker in its row');
+   'clicking VMEAN opens a column picker');
+// Torry, Aug 11 2026: the picker is a SEPARATE box under the panel in
+// the Combine-columns band, never a row docked inside the scrolling
+// list, where a tall chip set overflowed the panel's little window.
+ok(await page.evaluate(() => {
+       const a = document.querySelector('.ps-fn-args');
+       const panel = document.getElementById('ps-fn-panel');
+       return !panel.contains(a) &&
+           a.classList.contains('ps-formula-picker') &&
+           a.getBoundingClientRect().top >=
+               panel.getBoundingClientRect().bottom - 1;
+   }),
+   'and the picker is its own band BELOW the panel, outside the scroll ' +
+   'window, dressed like the Combine picker');
 await page.selectOption('.ps-fn-args select', 'pre');
 await page.waitForTimeout(250);
 st = await read();

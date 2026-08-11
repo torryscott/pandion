@@ -1786,8 +1786,10 @@
   }
   function formulaFnCollapseArgs() {
     var panel = el("ps-fn-panel");
-    if (!panel) return;
-    var open = panel.querySelectorAll(".ps-fn-args");
+    if (!panel || !panel.parentNode) return;
+    // The box lives BESIDE the panel (its own band below), so the
+    // sweep runs over the panel's parent, not the panel.
+    var open = panel.parentNode.querySelectorAll(".ps-fn-args");
     for (var i = 0; i < open.length; i++)
       open[i].parentNode.removeChild(open[i]);
     var rows = panel.querySelectorAll('.ps-fn-row[aria-expanded="true"]');
@@ -1802,7 +1804,12 @@
     row.setAttribute("aria-expanded", "true");
     var name = fn[0].split("(")[0];
     var spec = fn[2];
-    var host = mkEl("div", "ps-fn-args");
+    // A SEPARATE box below the panel, in the Combine-columns picker's
+    // own dress (Torry, Aug 11 2026: the inline row cramped the chips
+    // against the panel's scroll window) - the clicked row keeps its
+    // highlight so the box visibly belongs to it, and the lead names
+    // the function since the box no longer touches its row.
+    var host = mkEl("div", "ps-formula-picker ps-fn-args");
     var editing = FORMULA_EDIT && FORMULA_EDIT.col;
     var numCols = formulaNumericChoices(t);
     var anyCols = t.order.filter(function (c) { return c !== editing; });
@@ -1839,8 +1846,8 @@
       var pool = ordered ? anyCols : numCols;
       var picked = [], ig = false, insBtn;
       host.appendChild(mkEl("p", "ps-fpk-lead", ordered
-        ? "Tick in order: the first column that has a value wins."
-        : "Tick two or more columns."));
+        ? name + ": tick in order. The first column that has a value wins."
+        : name + ": tick two or more columns."));
       var chips = mkEl("div", "ps-fpk-chips");
       function callText() {
         return name + "(" + picked.map(bt).join(", ") +
@@ -1962,9 +1969,9 @@
       });
       host.appendChild(ib3);
     }
-    row.parentNode.insertBefore(host, row.nextSibling);
-    // A row near the panel's bottom edge would open its picker below
-    // the fold of the scrolling panel; keep the whole exchange visible.
+    var panel = el("ps-fn-panel");
+    panel.parentNode.insertBefore(host, panel.nextSibling);
+    // The box sits under a possibly tall panel; keep it on screen.
     try { host.scrollIntoView({ block: "nearest" }); } catch (e) {}
   }
   function renderFormulaFnPanel() {
@@ -14979,6 +14986,7 @@
       var panel = el("ps-fn-panel");
       var open = panel.hidden;
       panel.hidden = !open;
+      if (!open) formulaFnCollapseArgs();   // closing takes the picker too
       this.setAttribute("aria-expanded", open ? "true" : "false");
       this.textContent = "Functions " + (open ? "\u25b4" : "\u25be");
     });
