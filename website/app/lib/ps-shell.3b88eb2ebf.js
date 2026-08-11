@@ -1372,123 +1372,14 @@
       (res.notes.length ? " \u00b7 " + res.notes.join(" \u00b7 ") : "") +
       " \u00b7 one undo restores the long table");
   }
-  // ---- the formula dialog (guided transforms + free formulas in ONE
-  // surface: every quick-transform button just writes a visible,
-  // editable formula).
+  // ---- the formula dialog. ONE guided surface (Torry, Aug 11 2026:
+  // the quick-transform and Combine-columns rows retired into the
+  // functions browser): every click writes a visible, editable formula.
   var FORMULA_EDIT = null;   // { col: editing column or null, source }
   function formulaBacktick(name) {
     return /^[A-Za-z_][A-Za-z0-9_.]*$/.test(name) &&
       ["AND", "OR", "NOT"].indexOf(name.toUpperCase()) === -1
       ? name : "`" + name + "`";
-  }
-  function formulaTemplatesFor(source, t) {
-    if (!source || !t.raw[source]) return [];
-    var ref = formulaBacktick(source);
-    var out = [];
-    if (colStoresNumbers(t, source)) {
-      out.push({ label: "log10", name: source + "_log10",
-                 formula: "LOG10(" + ref + ")" });
-      out.push({ label: "ln", name: source + "_ln",
-                 formula: "LN(" + ref + ")" });
-      out.push({ label: "z-score", name: source + "_z",
-                 formula: "(" + ref + " - VMEAN(" + ref + ")) / VSD(" + ref + ")" });
-      out.push({ label: "center", name: source + "_centered",
-                 formula: ref + " - VMEAN(" + ref + ")" });
-      out.push({ label: "bin into 4", name: source + "_bin",
-                 formula: "BIN(" + ref + ", 4)" });
-    }
-    var lv = t.levels[source];
-    if (lv && lv.length && t.types[source] !== "id") {
-      var f = "", close = "";
-      for (var i = 0; i < lv.length; i++) {
-        f += "IF(" + ref + ' == "' + lv[i] + '", "' + lv[i] + '", ';
-        close += ")";
-      }
-      out.push({ label: "recode", name: source + "_recoded",
-                 formula: f + ref + close });
-    }
-    return out;
-  }
-  // Every column that has a quick transform to offer. The row used to render
-  // for ONE column, the one that happened to be selected before the dialog
-  // opened, and nothing on screen said so - while the empty preview promised
-  // "or pick a quick transform" whether or not any were there. A student can
-  // hand-write (score - MEAN(score)) / SD(score) with a one-click z-score
-  // sitting behind an invisible precondition, which is what happened.
-  function formulaSourceChoices(t) {
-    var out = [];
-    if (!t) return out;
-    for (var i = 0; i < t.order.length; i++)
-      if (formulaTemplatesFor(t.order[i], t).length) out.push(t.order[i]);
-    return out;
-  }
-  // With no column named, land on the one the user is most likely to want.
-  // The inspected variable first, because that is what the app already thinks
-  // they are looking at, then the first numeric column, because five of the
-  // six transforms are numeric and a factor's only offer is a long recode.
-  function formulaDefaultSource(t, choices) {
-    if (!choices.length) return null;
-    if (INSPECTOR_VAR && choices.indexOf(INSPECTOR_VAR) !== -1)
-      return INSPECTOR_VAR;
-    for (var i = 0; i < choices.length; i++)
-      if (colStoresNumbers(t, choices[i])) return choices[i];
-    return choices[0];
-  }
-  function formulaTemplatesShown() {
-    var tpl = el("ps-formula-templates");
-    return !!tpl && tpl.style.display !== "none" &&
-      !!tpl.querySelector("[data-formula-template]");
-  }
-  // The source is now a control rather than hidden state, so the dialog can
-  // always show the transforms AND say which column they read - and the user
-  // can point them somewhere else without closing and starting again.
-  function renderFormulaTemplates(source) {
-    var t = PROJECT.table;
-    var tpl = el("ps-formula-templates");
-    if (!tpl) return;
-    var choices = formulaSourceChoices(t);
-    tpl.innerHTML = "";
-    if (!choices.length) {
-      tpl.style.display = "none";
-      if (FORMULA_EDIT) FORMULA_EDIT.source = null;
-      return;
-    }
-    tpl.style.display = "flex";
-    tpl.appendChild(mkEl("span", "ps-formula-templates-label",
-      "Quick transforms for"));
-    var pick = mkEl("select");
-    pick.id = "ps-formula-source";
-    pick.setAttribute("aria-label", "Column the quick transforms read");
-    for (var c = 0; c < choices.length; c++) {
-      var opt = mkEl("option", "", choices[c]);
-      opt.value = choices[c];
-      pick.appendChild(opt);
-    }
-    pick.value = source && choices.indexOf(source) !== -1
-      ? source : formulaDefaultSource(t, choices);
-    pick.addEventListener("change", function () {
-      renderFormulaTemplates(this.value);
-    });
-    tpl.appendChild(pick);
-    // The chosen source is also where a saved column LANDS (saveComputedColumn
-    // places it after afterCol), so the picker has to write it back.
-    if (FORMULA_EDIT) FORMULA_EDIT.source = pick.value;
-    var templates = formulaTemplatesFor(pick.value, t);
-    for (var i = 0; i < templates.length; i++) {
-      (function (tp) {
-        var b = mkEl("button", "", tp.label);
-        b.type = "button";
-        b.setAttribute("data-formula-template", tp.label);
-        setTip(b, tp.formula);
-        b.addEventListener("click", function () {
-          el("ps-formula-input").value = tp.formula;
-          if (!FORMULA_EDIT.col)
-            el("ps-formula-name").value = uniqueColumnName(tp.name);
-          refreshFormulaPreview();
-        });
-        tpl.appendChild(b);
-      })(templates[i]);
-    }
   }
   function uniqueColumnName(base) {
     var t = PROJECT.table, name = base, k = 2;
@@ -1497,16 +1388,7 @@
       name = base + "_" + (k++);
     return name;
   }
-  // ---- Combine columns (Aug 2026, Torry's novice question): the
-  // multi-column recipes - scale scores, change scores, percent change,
-  // reverse-scoring. The design law, same as the quick transforms:
-  // every recipe WRITES the visible formula and never replaces it. The
-  // box is the truth, the picker is a scaffold you can outgrow, and a
-  // student who clicks Average five times has read MEAN(...) five
-  // times. Hand-editing the box dismisses the picker (the choices no
-  // longer describe the text), which is also why there is no reverse
-  // parse: one grammar, one direction.
-  var FORMULA_RECIPE = null; // { kind, cols[], a, b, rcol, rmax, ig }
+  // Column pools for the browser pickers.
   function formulaNumericChoices(t) {
     var out = [], editing = FORMULA_EDIT && FORMULA_EDIT.col;
     for (var i = 0; i < t.order.length; i++) {
@@ -1515,24 +1397,6 @@
       if (colStoresNumbers(t, c)) out.push(c);
     }
     return out;
-  }
-  function renderFormulaCombine() {
-    var t = PROJECT.table;
-    var row = el("ps-formula-combine");
-    if (!row || !t) return;
-    var nums = formulaNumericChoices(t);
-    // Two numeric columns make the combining recipes meaningful;
-    // Reverse-score needs only one. Below that the row would be a
-    // strip of dead ends, so it leaves rather than disables.
-    row.style.display = nums.length >= 1 ? "flex" : "none";
-    var btns = row.querySelectorAll("[data-formula-recipe]");
-    for (var i = 0; i < btns.length; i++) {
-      var kind = btns[i].getAttribute("data-formula-recipe");
-      btns[i].style.display =
-        nums.length >= (kind === "rev" ? 1 : 2) ? "" : "none";
-      btns[i].setAttribute("aria-pressed",
-        FORMULA_RECIPE && FORMULA_RECIPE.kind === kind ? "true" : "false");
-    }
   }
   // The observed scale maximum seeds Reverse-score: a 1-7 battery
   // defaults to 7 without being asked, and anything implausible for a
@@ -1544,176 +1408,6 @@
         mx = mx == null ? v[i] : Math.max(mx, v[i]);
     mx = mx == null ? 5 : Math.round(mx);
     return mx >= 2 && mx <= 11 ? mx : 5;
-  }
-  function formulaRecipeStart(kind) {
-    var t = PROJECT.table;
-    var nums = formulaNumericChoices(t);
-    if (!nums.length) return;
-    var src = FORMULA_EDIT && FORMULA_EDIT.source;
-    if (!src || nums.indexOf(src) === -1) src = nums[0];
-    var second = null;
-    for (var i = 0; i < nums.length; i++)
-      if (nums[i] !== src) { second = nums[i]; break; }
-    FORMULA_RECIPE = { kind: kind, cols: [], a: null, b: null,
-                       rcol: null, rmax: 5, ig: false };
-    if (kind === "avg" || kind === "sum")
-      FORMULA_RECIPE.cols = second ? [src, second] : [src];
-    if (kind === "diff" || kind === "pct") {
-      FORMULA_RECIPE.a = second || src;
-      FORMULA_RECIPE.b = src;
-    }
-    if (kind === "rev") {
-      FORMULA_RECIPE.rcol = src;
-      FORMULA_RECIPE.rmax = formulaScaleMax(t, src);
-    }
-    renderFormulaCombine();
-    renderFormulaPicker();
-    formulaRecipeWrite();
-  }
-  function formulaRecipeFormula() {
-    var r = FORMULA_RECIPE, bt = formulaBacktick;
-    if (!r) return "";
-    if (r.kind === "avg" || r.kind === "sum") {
-      if (r.cols.length < 2) return "";
-      return (r.kind === "avg" ? "MEAN(" : "SUM(") +
-        r.cols.map(bt).join(", ") +
-        (r.ig ? ", ignore_missing = 1" : "") + ")";
-    }
-    if (r.kind === "diff") return bt(r.a) + " - " + bt(r.b);
-    if (r.kind === "pct")
-      return "(" + bt(r.a) + " - " + bt(r.b) + ") / " + bt(r.b) + " * 100";
-    if (r.kind === "rev") return (r.rmax + 1) + " - " + bt(r.rcol);
-    return "";
-  }
-  function formulaRecipeName() {
-    var r = FORMULA_RECIPE;
-    if (r.kind === "avg" || r.kind === "sum") {
-      var base = r.kind === "avg" ? "avg" : "sum";
-      return r.cols.length > 3 ? base + "_" + r.cols.length + "_items"
-        : base + "_" + r.cols.join("_");
-    }
-    if (r.kind === "diff") return r.a + "_change";
-    if (r.kind === "pct") return r.a + "_pctchange";
-    if (r.kind === "rev") return r.rcol + "_reversed";
-    return "computed";
-  }
-  function formulaRecipeWrite() {
-    var f = formulaRecipeFormula();
-    // Programmatic .value fires no input event, so this write can
-    // never trip the hand-edit dismissal below.
-    el("ps-formula-input").value = f;
-    if (FORMULA_EDIT && !FORMULA_EDIT.col && f)
-      el("ps-formula-name").value = uniqueColumnName(formulaRecipeName());
-    refreshFormulaPreview();
-  }
-  function renderFormulaPicker() {
-    var host = el("ps-formula-picker");
-    var t = PROJECT.table, r = FORMULA_RECIPE;
-    if (!host) return;
-    host.innerHTML = "";
-    if (!r) { host.hidden = true; return; }
-    host.hidden = false;
-    var nums = formulaNumericChoices(t);
-    function lead(text) { host.appendChild(mkEl("p", "ps-fpk-lead", text)); }
-    function mkSelect(value, ariaLabel, onchange) {
-      var s = mkEl("select");
-      s.setAttribute("aria-label", ariaLabel);
-      for (var i = 0; i < nums.length; i++) {
-        var o = mkEl("option", "", nums[i]);
-        o.value = nums[i];
-        s.appendChild(o);
-      }
-      s.value = value;
-      s.addEventListener("change", function () { onchange(this.value); });
-      return s;
-    }
-    if (r.kind === "avg" || r.kind === "sum") {
-      lead((r.kind === "avg" ? "Average" : "Sum") +
-        " which columns? Tick two or more.");
-      var chips = mkEl("div", "ps-fpk-chips");
-      for (var ci = 0; ci < nums.length; ci++) (function (c) {
-        var b = mkEl("button", "", c);
-        b.type = "button";
-        b.setAttribute("data-fpk-col", c);
-        b.setAttribute("aria-pressed",
-          r.cols.indexOf(c) !== -1 ? "true" : "false");
-        b.addEventListener("click", function () {
-          var at = r.cols.indexOf(c);
-          if (at === -1) r.cols.push(c); else r.cols.splice(at, 1);
-          b.setAttribute("aria-pressed", at === -1 ? "true" : "false");
-          formulaRecipeWrite();
-        });
-        chips.appendChild(b);
-      })(nums[ci]);
-      host.appendChild(chips);
-      // The one real statistical decision in the recipe, made VISIBLE:
-      // under the language's propagation law a person who skipped an
-      // item gets no score, and sometimes that is exactly wrong.
-      var miss = mkEl("label", "ps-fpk-miss");
-      var cb = mkEl("input");
-      cb.type = "checkbox";
-      cb.id = "ps-fpk-miss";
-      cb.checked = r.ig;
-      miss.appendChild(cb);
-      miss.appendChild(mkEl("span", "", "Still score a person who " +
-        "skipped an item, using the items they answered"));
-      host.appendChild(miss);
-      var hint = mkEl("div", "ps-fpk-hint", "Every ticked column must " +
-        "have a value, or the result is missing for that row.");
-      host.appendChild(hint);
-      cb.addEventListener("change", function () {
-        r.ig = this.checked;
-        hint.textContent = r.ig
-          ? "A person with at least one answer gets a score from the " +
-            "items they answered. Say so in your write-up."
-          : "Every ticked column must have a value, or the result is " +
-            "missing for that row.";
-        formulaRecipeWrite();
-      });
-    } else if (r.kind === "diff" || r.kind === "pct") {
-      lead(r.kind === "diff" ? "Which two columns?"
-        : "Percent change from which column to which?");
-      var rowEl = mkEl("div", "ps-fpk-row");
-      rowEl.appendChild(mkSelect(r.a, "First column", function (v) {
-        r.a = v; formulaRecipeWrite();
-      }));
-      rowEl.appendChild(mkEl("span", "",
-        r.kind === "diff" ? "minus" : "compared with"));
-      rowEl.appendChild(mkSelect(r.b, "Second column", function (v) {
-        r.b = v; formulaRecipeWrite();
-      }));
-      host.appendChild(rowEl);
-      host.appendChild(mkEl("div", "ps-fpk-hint", r.kind === "diff"
-        ? "Change scores read best as after minus before."
-        : "Reads: how far the first column moved, as a percent of the second."));
-    } else if (r.kind === "rev") {
-      lead("Reverse-score which item?");
-      var rw = mkEl("div", "ps-fpk-row");
-      rw.appendChild(mkSelect(r.rcol, "Item to reverse-score", function (v) {
-        r.rcol = v;
-        r.rmax = formulaScaleMax(t, v);
-        renderFormulaPicker();
-        formulaRecipeWrite();
-      }));
-      rw.appendChild(mkEl("span", "", "on a scale that runs 1 to"));
-      var mx = mkEl("input");
-      mx.type = "number"; mx.min = "2"; mx.max = "11";
-      mx.value = String(r.rmax);
-      mx.style.width = "56px";
-      mx.setAttribute("aria-label", "Scale maximum");
-      mx.addEventListener("input", function () {
-        var v2 = Number(this.value);
-        if (isFinite(v2) && v2 >= 2 && v2 <= 11) {
-          r.rmax = Math.round(v2);
-          formulaRecipeWrite();
-        }
-      });
-      rw.appendChild(mx);
-      host.appendChild(rw);
-      host.appendChild(mkEl("div", "ps-fpk-hint",
-        "A 1 becomes a " + r.rmax + ", a " + r.rmax + " becomes a 1: " +
-        "the item flips around scale max + 1."));
-    }
   }
   // The functions browser (replaces the uppercase reference wall).
   // Grouped, one plain sentence each. The third element is the
@@ -1728,6 +1422,13 @@
   // operators row, information only. The vocabulary here is the
   // ENGINE's - formula-unit-check exercises every name.
   var FORMULA_FN_GROUPS = [
+    ["Common recipes", [
+      ["z-score", "How far from the column mean, in standard deviations.", "zscore"],
+      ["Center", "The value minus the column mean.", "center"],
+      ["Difference", "One column minus another. A change score.", "diffp"],
+      ["Percent change", "How far one column moved, as a percent of another.", "pctchange"],
+      ["Reverse-score", "Flip a rating item around its scale midpoint.", "revscore"],
+      ["Recode", "Rewrite a category column label by label, ready to edit.", "recode"]]],
     ["Across a row (several columns)", [
       ["MEAN(a, b, ...)", "The average of several columns, row by row. A scale score.", "multi"],
       ["SUM(a, b, ...)", "The total of several columns, row by row.", "multi"],
@@ -1768,18 +1469,18 @@
   // clicks and a typed minus build a z-score. An insert also releases
   // any active recipe - after it, the box is no longer the recipe's
   // writing, the same law as hand-editing.
-  function formulaInsertAtCursor(text) {
+  function formulaInsertAtCursor(text, nameBase) {
     var box = el("ps-formula-input");
+    var wasEmpty = box.value.trim() === "";
     var at = box.selectionStart != null ? box.selectionStart
       : box.value.length;
     var end = box.selectionEnd != null ? box.selectionEnd : at;
     box.value = box.value.slice(0, at) + text + box.value.slice(end);
-    if (FORMULA_RECIPE) {
-      FORMULA_RECIPE = null;
-      var pk = el("ps-formula-picker");
-      if (pk) { pk.hidden = true; pk.innerHTML = ""; }
-      renderFormulaCombine();
-    }
+    // An insert into an EMPTY box is the whole formula, so it also
+    // names the variable (the old recipes' naming, kept); an insert
+    // into existing text is a fragment and touches nothing else.
+    if (wasEmpty && nameBase && FORMULA_EDIT && !FORMULA_EDIT.col)
+      el("ps-formula-name").value = uniqueColumnName(nameBase);
     box.focus();
     box.selectionStart = box.selectionEnd = at + text.length;
     refreshFormulaPreview();
@@ -1811,8 +1512,21 @@
     // the function since the box no longer touches its row.
     var host = mkEl("div", "ps-formula-picker ps-fn-args");
     var editing = FORMULA_EDIT && FORMULA_EDIT.col;
-    var numCols = formulaNumericChoices(t);
-    var anyCols = t.order.filter(function (c) { return c !== editing; });
+    // The column this dialog was opened FROM leads every pool: opening
+    // from a header means that column is probably the subject.
+    function sourceFirst(cols) {
+      var src = FORMULA_EDIT && FORMULA_EDIT.source;
+      var at = src ? cols.indexOf(src) : -1;
+      if (at <= 0) return cols;
+      var out = cols.slice();
+      out.splice(at, 1);
+      out.unshift(src);
+      return out;
+    }
+    var numCols = sourceFirst(formulaNumericChoices(t));
+    var anyCols = sourceFirst(t.order.filter(function (c) {
+      return c !== editing;
+    }));
     var bt = formulaBacktick;
     function colSelect(cols, label, onpick) {
       var s = mkEl("select");
@@ -1828,19 +1542,131 @@
       s.addEventListener("change", function () { onpick(this.value); });
       return s;
     }
-    function done(text) {
+    function done(text, nameBase) {
       formulaFnCollapseArgs();
-      formulaInsertAtCursor(text);
+      formulaInsertAtCursor(text, nameBase);
+    }
+    function needs(kind) {
+      host.appendChild(mkEl("p", "ps-fpk-lead",
+        "This needs " + kind + ", and the table has none yet."));
     }
     if (spec === "num1" || spec === "any1") {
       // One column-shaped hole: picking the column IS the completion.
-      var r1 = mkEl("div", "ps-fpk-row");
-      r1.appendChild(mkEl("span", "", name + " of"));
-      r1.appendChild(colSelect(spec === "num1" ? numCols : anyCols,
-        name + " column", function (c) {
-          done(name + "(" + bt(c) + ")");
+      var cols1 = spec === "num1" ? numCols : anyCols;
+      if (!cols1.length) { needs("a numeric column"); }
+      else {
+        var r1 = mkEl("div", "ps-fpk-row");
+        r1.appendChild(mkEl("span", "", name + " of"));
+        r1.appendChild(colSelect(cols1, name + " column", function (c) {
+          done(name + "(" + bt(c) + ")", c + "_" + name.toLowerCase());
         }));
-      host.appendChild(r1);
+        host.appendChild(r1);
+      }
+    } else if (spec === "zscore" || spec === "center") {
+      // The z-score and centering PATTERNS: one numeric column expands
+      // into the whole expression, V-forms visible.
+      if (!numCols.length) { needs("a numeric column"); }
+      else {
+        var rz = mkEl("div", "ps-fpk-row");
+        rz.appendChild(mkEl("span", "", name + " of"));
+        rz.appendChild(colSelect(numCols, name + " column", function (c) {
+          var f = spec === "zscore"
+            ? "(" + bt(c) + " - VMEAN(" + bt(c) + ")) / VSD(" + bt(c) + ")"
+            : bt(c) + " - VMEAN(" + bt(c) + ")";
+          done(f, c + (spec === "zscore" ? "_z" : "_centered"));
+        }));
+        host.appendChild(rz);
+      }
+    } else if (spec === "diffp" || spec === "pctchange") {
+      if (numCols.length < 2) { needs("two numeric columns"); }
+      else {
+        var da = null, db = null, ibD;
+        host.appendChild(mkEl("p", "ps-fpk-lead", spec === "diffp"
+          ? "Which two columns? Change scores read best as after minus before."
+          : "How far the first column moved, as a percent of the second."));
+        var rd = mkEl("div", "ps-fpk-row");
+        rd.appendChild(colSelect(numCols, "First column", function (v) {
+          da = v; ibD.disabled = !(da && db);
+        }));
+        rd.appendChild(mkEl("span", "",
+          spec === "diffp" ? "minus" : "compared with"));
+        rd.appendChild(colSelect(numCols, "Second column", function (v) {
+          db = v; ibD.disabled = !(da && db);
+        }));
+        host.appendChild(rd);
+        ibD = mkEl("button", "ps-fn-insert", "Insert");
+        ibD.type = "button";
+        ibD.disabled = true;
+        ibD.addEventListener("click", function () {
+          if (!da || !db) return;
+          if (spec === "diffp")
+            done(bt(da) + " - " + bt(db), da + "_change");
+          else
+            done("(" + bt(da) + " - " + bt(db) + ") / " + bt(db) + " * 100",
+              da + "_pctchange");
+        });
+        host.appendChild(ibD);
+      }
+    } else if (spec === "revscore") {
+      if (!numCols.length) { needs("a numeric column"); }
+      else {
+        var rcol = null;
+        var rr = mkEl("div", "ps-fpk-row");
+        rr.appendChild(mkEl("span", "", "Reverse-score"));
+        var mxR = mkEl("input");
+        rr.appendChild(colSelect(numCols, "Item to reverse-score",
+          function (c) {
+            rcol = c;
+            mxR.value = String(formulaScaleMax(t, c));
+            ibR.disabled = false;
+          }));
+        rr.appendChild(mkEl("span", "", "on a scale that runs 1 to"));
+        mxR.type = "number"; mxR.min = "2"; mxR.max = "11";
+        mxR.value = "5";
+        mxR.style.width = "56px";
+        mxR.setAttribute("aria-label", "Scale maximum");
+        rr.appendChild(mxR);
+        host.appendChild(rr);
+        host.appendChild(mkEl("div", "ps-fpk-hint",
+          "A 1 becomes the scale maximum and the maximum becomes a 1: " +
+          "the item flips around scale max + 1."));
+        var ibR = mkEl("button", "ps-fn-insert", "Insert");
+        ibR.type = "button";
+        ibR.disabled = true;
+        ibR.addEventListener("click", function () {
+          if (!rcol) return;
+          var mx2 = Math.round(Number(mxR.value));
+          if (!isFinite(mx2) || mx2 < 2 || mx2 > 11) mx2 = 5;
+          done((mx2 + 1) + " - " + bt(rcol), rcol + "_reversed");
+        });
+        host.appendChild(ibR);
+      }
+    } else if (spec === "recode") {
+      // A category column expands into the editable IF chain, one
+      // label per branch - the point is what the student edits next.
+      var recodable = sourceFirst(t.order.filter(function (c) {
+        return c !== editing && t.levels[c] && t.levels[c].length &&
+          t.types[c] !== "id";
+      }));
+      if (!recodable.length) { needs("a category column"); }
+      else {
+        var rc = mkEl("div", "ps-fpk-row");
+        rc.appendChild(mkEl("span", "", "Recode"));
+        rc.appendChild(colSelect(recodable, "Column to recode",
+          function (c) {
+            var lv = t.levels[c], f = "", close = "";
+            for (var li = 0; li < lv.length; li++) {
+              f += "IF(" + bt(c) + ' == "' + lv[li] + '", "' + lv[li] +
+                '", ';
+              close += ")";
+            }
+            done(f + bt(c) + close, c + "_recoded");
+          }));
+        host.appendChild(rc);
+        host.appendChild(mkEl("div", "ps-fpk-hint",
+          "Each label maps to itself to start - edit the second value " +
+          "in each IF to the label you want instead."));
+      }
     } else if (spec === "multi" || spec === "ordermulti") {
       var ordered = spec === "ordermulti";
       var pool = ordered ? anyCols : numCols;
@@ -1904,7 +1730,12 @@
       insBtn = mkEl("button", "ps-fn-insert", "Insert");
       insBtn.type = "button";
       insBtn.addEventListener("click", function () {
-        if (picked.length >= 2) done(callText());
+        if (picked.length < 2) return;
+        var base = ordered ? picked[0] + "_filled"
+          : (name === "MEAN" ? "avg" : name.toLowerCase()) +
+            (picked.length > 3 ? "_" + picked.length + "_items"
+              : "_" + picked.join("_"));
+        done(callText(), base);
       });
       host.appendChild(insBtn);
       refreshChips();
@@ -1938,7 +1769,8 @@
         var k = Math.round(Number(nf.value));
         if (!isFinite(k)) k = isBin ? 4 : 0;
         if (isBin && k < 2) k = 2;
-        done(name + "(" + bt(chosen2) + ", " + k + ")");
+        done(name + "(" + bt(chosen2) + ", " + k + ")",
+          chosen2 + (isBin ? "_bin" : "_rounded"));
       });
       host.appendChild(ib2);
     } else if (spec === "contains") {
@@ -1965,7 +1797,8 @@
         // The language has no escape inside string literals, so a
         // double quote in the search text cannot ride along.
         var part = String(tf.value || "").replace(/"/g, "");
-        done("CONTAINS(" + bt(chosen3) + ", \"" + part + "\")");
+        done("CONTAINS(" + bt(chosen3) + ", \"" + part + "\")",
+          chosen3 + "_contains");
       });
       host.appendChild(ib3);
     }
@@ -2020,17 +1853,16 @@
     el("ps-formula-name").disabled = !!editingCol;
     el("ps-formula-input").value = editingCol
       ? (t.computed[editingCol] || "") : "";
-    renderFormulaTemplates(source);
-    FORMULA_RECIPE = null;
-    renderFormulaCombine();
-    renderFormulaPicker();
     renderFormulaFnPanel();
-    var fnPanel = el("ps-fn-panel"), fnTog = el("ps-fn-toggle");
     formulaFnCollapseArgs();   // a picker from the last open is stale
-    if (fnPanel) fnPanel.hidden = true;
+    // The browser is the ONLY guided surface now, so it arrives OPEN
+    // (still collapsible): a dialog whose guidance hides behind a
+    // closed toggle guides nobody.
+    var fnPanel = el("ps-fn-panel"), fnTog = el("ps-fn-toggle");
+    if (fnPanel) fnPanel.hidden = false;
     if (fnTog) {
-      fnTog.setAttribute("aria-expanded", "false");
-      fnTog.textContent = "Functions \u25be";
+      fnTog.setAttribute("aria-expanded", "true");
+      fnTog.textContent = "Functions \u25b4";
     }
     refreshFormulaPreview();
     openShellDialog("ps-formula-dialog");
@@ -2041,12 +1873,10 @@
     var msg = el("ps-formula-msg"), prev = el("ps-formula-preview");
     if (!String(formula).trim()) {
       msg.textContent = "";
-      // Only promise the shortcut when the shortcut is on screen. A table with
-      // nothing to transform gets the shorter sentence rather than a pointer
-      // to a row that is not there.
-      prev.textContent = formulaTemplatesShown()
-        ? "Type a formula (or pick a quick transform) to preview its first values."
-        : "Type a formula to preview its first values.";
+      // The functions browser is always on screen, so the promise is
+      // always honest - even an all-text table has LEN and friends.
+      prev.textContent = "Type a formula, or pick one from the " +
+        "Functions list, to preview its first values.";
       return;
     }
     var editing = FORMULA_EDIT && FORMULA_EDIT.col;
@@ -14964,23 +14794,12 @@
     });
     el("ps-formula-save").addEventListener("click", submitFormulaDialog);
     el("ps-formula-input").addEventListener("input", refreshFormulaPreview);
-    // Hand-editing the formula dismisses the recipe picker: the box is
-    // the truth, and once the text no longer came from the choices the
-    // choices would be describing someone else's formula. Programmatic
-    // writes never fire input, so recipe writes cannot dismiss
-    // themselves.
+    // Hand-editing the formula retires an open argument picker: the
+    // box is the truth, and once the text is the user's own typing the
+    // picker would be describing someone else's formula. Programmatic
+    // writes never fire input, so a picker cannot dismiss itself.
     el("ps-formula-input").addEventListener("input", function () {
-      if (!FORMULA_RECIPE) return;
-      FORMULA_RECIPE = null;
-      var pk = el("ps-formula-picker");
-      if (pk) { pk.hidden = true; pk.innerHTML = ""; }
-      renderFormulaCombine();
-    });
-    el("ps-formula-combine").addEventListener("click", function (e) {
-      var b = e.target && e.target.closest
-        ? e.target.closest("[data-formula-recipe]") : null;
-      if (!b) return;
-      formulaRecipeStart(b.getAttribute("data-formula-recipe"));
+      formulaFnCollapseArgs();
     });
     el("ps-fn-toggle").addEventListener("click", function () {
       var panel = el("ps-fn-panel");
