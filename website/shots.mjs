@@ -80,23 +80,66 @@ async function shot(page, name) {
 // ---------------------------------------------------------------- 1. chart
 {
     const { ctx, page } = await session();
-    // Scatter with marginal distributions, from the built-in sample: the
-    // shot the landing page has always used, in the current UI.
-    await page.evaluate(() => window.PS_SHELL.setModule('xyplotbuilder'));
+    // A grouped bar with the raw observations on top. This replaced a
+    // scatter with marginal histograms: the marginals read as clutter at
+    // the size the landing page renders this, and a single-colour scatter
+    // showed neither grouping nor the error bars and points that are the
+    // reason to reach for this app over a spreadsheet.
+    await page.evaluate(() => window.PS_SHELL.setRoles(
+        'plotbuilder', { xvar: 'condition', yvar: 'score', groupVar: 'site' }));
+    await page.waitForTimeout(1800);
+    // Through the chart's own "+" menu, not by poking options: the overlay
+    // is computed when that menu enables it, so setting showDataPoints
+    // directly stores the option and draws nothing.
+    await page.click('[aria-label="Add to chart"]');
+    await page.waitForTimeout(250);
+    await page.click('button[data-kind="showDataPoints"]');
     await page.waitForTimeout(1400);
-    // Through the chart's own "+" menu, not by poking options: the
-    // overlays are computed when that menu enables them, so setting
-    // xyMarginal directly stores the option and draws nothing.
-    for (const kind of ['ovl_fit', 'ovl_marginal']) {
-        await page.click('[aria-label="Add to chart"]');
-        await page.waitForTimeout(250);
-        await page.click(`button[data-kind="${kind}"]`);
-        await page.waitForTimeout(1200);
-        // Each item opens the new overlay's style panel; close it so the
-        // shot shows the chart, not an editor mid-edit.
-        await page.keyboard.press('Escape');
-        await page.waitForTimeout(400);
-    }
+    // The item opens the new overlay's style panel; close it so the shot
+    // shows the chart, not an editor mid-edit.
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(500);
+
+    // Styling, all of it reachable from the app's own panels.
+    await page.evaluate(() => {
+        const set = window.__gb2_setOption;
+        // Capitalised axis titles and legend heading: what a reader gets by
+        // clicking each title and typing. The variable chips in the setup
+        // panel keep the real column names, which are lower case.
+        set('xTitleOverride', true);     set('xTitle', 'Condition');
+        set('yTitleOverride', true);     set('yTitle', 'Score');
+        set('groupTitleOverride', true); set('groupTitle', 'Site');
+        // The automatic range tops out at 120, which leaves the tallest bar
+        // sitting two thirds up the panel. 100 puts the top of the range just
+        // above the data, and a step of 10 keeps the gridline spacing honest
+        // at that shorter range. The tallest observation is 91, so nothing is
+        // clipped: Check graph would raise "Axis range shows all data" if it
+        // were, and the shot asserts that check still passes.
+        set('yMaxOverride', true);       set('yMax', 100);
+        // Each range field is gated by its OWN override flag; yInterval on
+        // its own is stored and ignored, which is why the ticks stayed at 20.
+        set('yIntervalOverride', true);  set('yInterval', 10);
+        // Blue and red. The blue is PALETTE[0]; the red is one step darker
+        // than PALETTE[2]. That step is not cosmetic: at the palette red the
+        // app's own Check graph raises "Colors that merge in black and
+        // white", because #c2242c and #4478ad sit ~12 apart in grayscale and
+        // converge in a photocopy. Darkening the red clears the check, so the
+        // shot shows "Checks passed" honestly rather than by hiding a note.
+        set('groupColors', [{ original: 'East', color: '#4478ad' },
+                            { original: 'West', color: '#a81f26' }]);
+        // The observations take a DARKER SHADE OF THEIR OWN BAR rather than
+        // one flat colour, so each dot still reads as belonging to its
+        // group. Darkened in HLS, holding hue and saturation and dropping
+        // lightness ~30%: scaling RGB instead desaturates, and a "darker
+        // red" comes out brown. Per-group, so this is the Data points
+        // panel's "This group" scope, not anything bespoke.
+        set('pointColorMatch', false);
+        set('pointSize', 5.5);
+        set('pointOpacity', 1);
+        set('groupDataPoints', [{ original: 'East', color: '#305479' },
+                                 { original: 'West', color: '#76161b' }]);
+    });
+    await page.waitForTimeout(2600);
     await shot(page, 'app-chart.png');
     await ctx.close();
 }

@@ -21,11 +21,15 @@ MIME = {'.svg': 'image/svg+xml', '.png': 'image/png',
         '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg'}
 
 PAGES = [
-    ('index',   'index.html',   'Home'),
-    ('gallery', 'gallery.html', 'Gallery'),
-    ('about',   'about.html',   'About'),
-    ('v2',      'v2.html',      'Landing: dark'),
-    ('v3',      'v3.html',      'Landing: editorial'),
+    ('index',    'index.html',         'Home'),
+    ('download', 'download.html',      'Downloads'),
+    ('gallery',  'gallery.html',       'Gallery'),
+    ('about',    'about.html',         'About'),
+    ('support',  'support.html',       'Support'),
+    ('a11y',     'accessibility.html', 'Accessibility'),
+    ('notfound', '404.html',           'Not found'),
+    ('v2',       'v2.html',            'Landing: dark'),
+    ('v3',       'v3.html',            'Landing: editorial'),
 ]
 
 _asset_cache = {}
@@ -98,6 +102,19 @@ INJECT = """
 
 def prepare(html):
     """Inline assets, reroute internal links, keep external links usable."""
+    # The shared nav arrived as an external stylesheet and script. Fold their
+    # TEXT in rather than data-URI them, so the preview needs no network and
+    # no same-origin fetch.
+    def sub_css(m):
+        return '<style>\n' + (ROOT / m.group(1)).read_text(encoding='utf-8') + '\n</style>'
+    html = re.sub(r'<link rel="stylesheet" href="(assets/[^"]+\.css)">',
+                  sub_css, html)
+
+    def sub_js(m):
+        return '<script>\n' + (ROOT / m.group(1)).read_text(encoding='utf-8') + '\n</script>'
+    html = re.sub(r'<script src="(assets/[^"]+\.js)"[^>]*></script>',
+                  sub_js, html)
+
     # assets -> data URIs (src= and href=, e.g. the favicon link)
     def sub_asset(m):
         return '%s="%s"' % (m.group(1), data_uri(m.group(2)))
