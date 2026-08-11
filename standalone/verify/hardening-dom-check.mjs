@@ -152,8 +152,10 @@ const migrated = window.PS_SHELL.migrateSnapshot({
     module: 'freqplotbuilder', roles: { freqplotbuilder: { var: 'group' } },
     options: { freqplotbuilder: { showCounts: true } }
 });
-ok(migrated && migrated.version === 3 && migrated.charts.length === 1,
-    'v2 becomes a v3 single-document project');
+// v4 since Aug 2026 (the formula vocabulary rewrite): a v2 snapshot
+// walks the whole chain, v2 -> v3 shape -> v4 vocabulary.
+ok(migrated && migrated.version === 4 && migrated.charts.length === 1,
+    'v2 becomes a current single-document project');
 ok(migrated.charts[0].module === 'freqplotbuilder',
     'migration preserves the analysis type');
 
