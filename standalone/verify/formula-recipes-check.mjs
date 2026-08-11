@@ -115,6 +115,53 @@ ok(await page.evaluate(() =>
 await page.click('#ps-fn-toggle');
 await page.waitForTimeout(200);
 
+console.log('case 1s: the search bar, matching plain words');
+// VISUAL visibility (offsetParent), not the hidden attribute: the
+// rows' own display rule defeated [hidden] on the first build, and an
+// attribute assertion sailed past what the eye plainly saw.
+const visRows = () => page.evaluate(() =>
+    Array.from(document.querySelectorAll('#ps-fn-panel .ps-fn-row'))
+        .filter(r => r.offsetParent !== null)
+        .map(r => r.querySelector('code').textContent.split('(')[0]));
+await page.fill('#ps-fn-search', 'average');
+await page.waitForTimeout(200);
+ok(String(await visRows()) === 'MEAN,VMEAN',
+   'typing "average" leaves exactly the two means on screen');
+ok(await page.evaluate(() =>
+       Array.from(document.querySelectorAll(
+           '#ps-fn-panel .ps-fn-group'))
+           .filter(g => g.offsetParent !== null).length === 2),
+   'and only their two group headers survive');
+await page.fill('#ps-fn-search', 'spread');
+await page.waitForTimeout(200);
+ok(String(await visRows()) === 'VSD',
+   'a synonym works: "spread" finds VSD without knowing its name');
+await page.fill('#ps-fn-search', 'zzzz');
+await page.waitForTimeout(200);
+ok(await page.evaluate(() => {
+       const n = document.querySelector('.ps-fn-nomatch');
+       return n && n.offsetParent !== null &&
+           /Nothing matches/.test(n.textContent);
+   }),
+   'an empty result says so instead of showing a silent blank');
+await page.fill('#ps-fn-search', 'average');
+await page.waitForTimeout(200);
+await page.focus('#ps-fn-search');
+await page.keyboard.press('Enter');
+await page.waitForTimeout(250);
+ok(await page.evaluate(() => !!document.querySelector('.ps-fn-args')),
+   'Enter takes the first match: search, Enter, pick a column');
+await page.keyboard.press('Escape');
+await page.waitForTimeout(200);
+ok(await page.evaluate(() => ({
+       q: document.getElementById('ps-fn-search').value,
+       open: document.getElementById('ps-formula-dialog')
+           .style.display === 'flex'
+   })).then(r => r.q === '' && r.open),
+   'the first Escape clears the search and the dialog survives it');
+ok((await visRows()).length === 35,
+   'and every row returns (34 clickable + the operators note)');
+
 console.log('case 2: the scale score, end to end through MEAN');
 await clickRow('MEAN(');
 await page.waitForTimeout(250);
