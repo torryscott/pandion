@@ -10296,6 +10296,18 @@
             'xmlns="http://www.w3.org/2000/svg"><path d="M10 3 L3 10 M10 7 L7 10" ' +
             'stroke="#8a8a8a" stroke-width="1.4" stroke-linecap="round" fill="none"/></svg>';
         gripXY.appendChild(gripXYGlyph);
+        // Under jamovi's Svg element the resize handle belongs to the
+        // HOST (keyed on jmv-results-svg-selection), and Jonathon asked
+        // for the corner to be clear so the jamovi handle has it to
+        // itself (Aug 2026). Detach our grip there; every listener and
+        // style write below binds to the detached node harmlessly.
+        // Production jamovi (Html results) and the standalone never
+        // have that ancestor, so they keep the grip - and when the Svg
+        // element someday ships for real, the handoff to the jamovi
+        // handle happens on its own.
+        if (host.closest && host.closest("jmv-results-svg")) {
+            try { wrap.removeChild(gripXY); } catch (_eGxOff) {}
+        }
         // Transient "W x H px" readout while resizing (the jamovi-image
         // size display). Hidden at rest; fades out after release.
         var sizeTag = document.createElement("div");
