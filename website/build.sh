@@ -324,6 +324,14 @@ grep -rq "APP_VERSION = \"$VERSION\"" website/app/lib || {
     echo "WARN: the web app does not declare APP_VERSION = $VERSION" >&2; DRIFT=1; }
 grep -q "APP_VERSION = \"$VERSION\"" website/pandion-plots.html || {
     echo "WARN: the portable download does not declare APP_VERSION = $VERSION" >&2; DRIFT=1; }
+# The downloads card states the portable file's size. It grew from 3.9 MB to
+# 4.5 MB without anyone noticing, so check it here rather than trusting a
+# number typed once. Decimal MB, which is what a browser reports on download.
+SIZE_MB=$(python3 -c "import os;print(f'{os.path.getsize(\"website/pandion-plots.html\")/1e6:.1f}')")
+grep -q "One file, about ${SIZE_MB} MB" website/index.html || {
+    echo "WARN: the downloads card does not say ${SIZE_MB} MB (portable file size)" >&2
+    DRIFT=1; }
+
 if [ "$DRIFT" = "0" ]; then
     echo "version $VERSION consistent across the site + CITATION.cff"
 else
