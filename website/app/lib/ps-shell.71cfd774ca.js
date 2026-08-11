@@ -1807,6 +1807,87 @@
     // The box sits under a possibly tall panel; keep it on screen.
     try { host.scrollIntoView({ block: "nearest" }); } catch (e) {}
   }
+  // Search synonyms (Torry, Aug 11 2026: "a search bar where you can
+  // type in what you're looking for"). The engine's did-you-mean table
+  // maps other tools' names to ours in ERRORS; this is its search-side
+  // cousin, so "average" finds MEAN, "spread" finds VSD, and "blank"
+  // finds ISMISSING. Keyed by the row's code-cell name.
+  var FORMULA_FN_SYNONYMS = {
+    "z-score": "standardize standardise zscore z score sd units",
+    "Center": "demean centered deviation mean",
+    "Difference": "change minus subtract gain loss delta",
+    "Percent change": "pct percentage growth relative",
+    "Reverse-score": "flip reversed likert scale item",
+    "Recode": "relabel rename map categories levels clean labels",
+    "MEAN": "average avg scale score",
+    "SUM": "total add",
+    "MIN": "smallest minimum lowest",
+    "MAX": "largest maximum highest",
+    "VMEAN": "average avg grand mean",
+    "VSD": "sd stdev stddev standard deviation spread variability",
+    "VMEDIAN": "median middle typical",
+    "VMIN": "minimum smallest lowest",
+    "VMAX": "maximum largest highest",
+    "VSUM": "total",
+    "N": "count how many sample size valid",
+    "LOG10": "log logarithm skew transform",
+    "LN": "log natural logarithm skew",
+    "SQRT": "square root",
+    "ABS": "absolute magnitude",
+    "EXP": "exponential",
+    "ROUND": "decimals digits",
+    "FLOOR": "round down integer",
+    "CEILING": "round up integer ceil",
+    "BIN": "bins groups cut quartiles equal width",
+    "IF": "condition test then else branch",
+    "AND, OR, NOT": "logic boolean comparisons operators equals greater less",
+    "UPPER": "uppercase case fold capitals",
+    "LOWER": "lowercase case fold",
+    "TRIM": "spaces whitespace tidy strip",
+    "LEN": "length characters nchar",
+    "CONTAINS": "search find includes substring match",
+    "ISMISSING": "missing blank empty null na isblank",
+    "COALESCE": "fill fallback first missing ifna replace"
+  };
+  // Filter the panel to the rows matching every typed word, against
+  // name + sentence + synonyms. Group headers with nothing left hide;
+  // an empty result says so instead of showing a silent blank.
+  function formulaFnFilter(query) {
+    var panel = el("ps-fn-panel");
+    if (!panel) return;
+    formulaFnCollapseArgs();   // a filtered-away row keeps no picker
+    var toks = String(query || "").trim().toLowerCase().split(/\s+/)
+      .filter(Boolean);
+    var kids = panel.children;
+    var curHeader = null, headerHits = 0, any = false;
+    for (var i = 0; i < kids.length; i++) {
+      var k = kids[i];
+      if (k.classList.contains("ps-fn-group")) {
+        if (curHeader) curHeader.hidden = headerHits === 0;
+        curHeader = k;
+        headerHits = 0;
+        continue;
+      }
+      if (!k.classList.contains("ps-fn-row")) continue;
+      var hay = k.getAttribute("data-fn-search") || "";
+      var hit = toks.every(function (tk) { return hay.indexOf(tk) !== -1; });
+      k.hidden = !hit;
+      if (hit) { headerHits++; any = true; }
+    }
+    if (curHeader) curHeader.hidden = headerHits === 0;
+    var nm = panel.querySelector(".ps-fn-nomatch");
+    if (!any) {
+      if (!nm) {
+        nm = mkEl("div", "ps-fn-nomatch");
+        panel.appendChild(nm);
+      }
+      nm.hidden = false;
+      nm.textContent = "Nothing matches \"" + String(query).trim() +
+        "\". Try plain words: average, total, missing, log, recode.";
+    } else if (nm) {
+      nm.hidden = true;
+    }
+  }
   function renderFormulaFnPanel() {
     var panel = el("ps-fn-panel");
     if (!panel || panel.childNodes.length) return;   // static; build once
@@ -1820,6 +1901,9 @@
         if (spec !== "noins") row.type = "button";
         row.appendChild(mkEl("code", "", fn[0]));
         row.appendChild(mkEl("span", "", fn[1]));
+        var fnKey = fn[0].split("(")[0];
+        row.setAttribute("data-fn-search", (fn[0] + " " + fn[1] + " " +
+          (FORMULA_FN_SYNONYMS[fnKey] || "")).toLowerCase());
         if (spec && spec !== "noins") {
           row.setAttribute("aria-expanded", "false");
           row.addEventListener("click", function (e) {
@@ -1863,6 +1947,11 @@
     if (fnTog) {
       fnTog.setAttribute("aria-expanded", "true");
       fnTog.textContent = "Functions \u25b4";
+    }
+    var fnSearch = el("ps-fn-search");
+    if (fnSearch && fnSearch.value) {
+      fnSearch.value = "";
+      formulaFnFilter("");
     }
     refreshFormulaPreview();
     openShellDialog("ps-formula-dialog");
@@ -14800,6 +14889,31 @@
     // writes never fire input, so a picker cannot dismiss itself.
     el("ps-formula-input").addEventListener("input", function () {
       formulaFnCollapseArgs();
+    });
+    el("ps-fn-search").addEventListener("input", function () {
+      // Typing is intent: a collapsed menu reopens to show the matches.
+      var panel = el("ps-fn-panel"), tog = el("ps-fn-toggle");
+      if (panel.hidden) {
+        panel.hidden = false;
+        tog.setAttribute("aria-expanded", "true");
+        tog.textContent = "Functions \u25b4";
+      }
+      formulaFnFilter(this.value);
+    });
+    el("ps-fn-search").addEventListener("keydown", function (e) {
+      if (e.key === "Enter") {
+        // Enter takes the first match - search, Enter, pick a column.
+        e.preventDefault();
+        var first = document.querySelector(
+          "#ps-fn-panel button.ps-fn-row:not([hidden])");
+        if (first) first.click();
+      } else if (e.key === "Escape" && this.value) {
+        // First Escape clears the search; only an empty one closes the
+        // dialog, so a typo never costs the whole dialog.
+        e.stopPropagation();
+        this.value = "";
+        formulaFnFilter("");
+      }
     });
     el("ps-fn-toggle").addEventListener("click", function () {
       var panel = el("ps-fn-panel");
