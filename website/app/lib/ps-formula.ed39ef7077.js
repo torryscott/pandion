@@ -1,7 +1,8 @@
 // Pandion Plots standalone - the computed-variable FORMULA engine
 // (Tier 1). A small spreadsheet-flavored language evaluated per row:
 //
-//   (score - MEAN(score)) / SD(score)
+//   MEAN(pre, post)                       across columns: a scale score
+//   (score - VMEAN(score)) / VSD(score)   against the whole column
 //   LOG10(rt)
 //   IF(condition == "Control", "baseline", "dosed")
 //   BIN(score, 4)
@@ -11,21 +12,37 @@
 // Column references are bare identifiers (backtick-quote names with
 // spaces: `reaction time`). Row-wise functions: ABS SQRT LN LOG10 EXP
 // ROUND(x[,digits]) FLOOR CEILING IF(test, then, else) BIN(col, k).
+// Row-wise STATISTICS across columns: MEAN SUM MIN MAX take two or
+// more arguments and combine them within each row (a scale score, a
+// total); the optional ignore_missing = 1 scores a row from the
+// values it has.
 // Text functions: TRIM UPPER LOWER LEN CONTAINS(text, part).
 // Missing-value functions: ISMISSING(x) COALESCE(a, b, ...).
-// Column aggregates (computed once over a column's valid values):
-// MEAN SD MEDIAN MIN MAX SUM N - their argument must be a plain column
-// reference. Operators: + - * / ^, comparisons == != (or =) < <= > >=,
+// Whole-column aggregates (one number over a column's valid values,
+// the V prefix): VMEAN VSD VMEDIAN VMIN VMAX VSUM, plus N - the
+// argument must be a plain column reference.
+// Operators: + - * / ^, comparisons == != (or =) < <= > >=,
 // logic AND OR NOT (also && || !), parentheses, unary minus, string
 // literals in double quotes.
 //
+// WHY TWO MEANS (Aug 2026, Torry's novice question): the average of
+// two columns is the commonest computed variable there is, and under
+// the old vocabulary the obvious MEAN(pre, post) was an error while
+// MEAN(score) silently meant the COLUMN mean - the reverse of jamovi,
+// so the same formula gave different numbers in the two apps. Row-wise
+// MEAN + whole-column VMEAN now matches jamovi name for name. Formulas
+// saved under the old vocabulary are rewritten at project load
+// (migrateVocabulary below; snapshot version 4 marks the rewrite).
+//
 // MISSING PROPAGATES: any missing input makes the result missing. The
-// two exceptions are the functions that exist to break that chain.
-// ISMISSING always answers 1 or 0, and COALESCE returns the first
+// exceptions are the constructs that exist to break that chain.
+// ISMISSING always answers 1 or 0, COALESCE returns the first
 // argument that is there (stopping at it, so the rest is never
-// evaluated); IF likewise evaluates only the taken branch. The text
-// functions do still propagate, they simply read their input as text
-// instead of coercing it to a number.
+// evaluated), IF evaluates only the taken branch, and a row-wise
+// statistic given ignore_missing = 1 scores the row from the values
+// that are present (a row with nothing present stays missing). The
+// text functions do still propagate, they simply read their input as
+// text instead of coercing it to a number.
 //
 // Missing is the single sentinel null. There is no separate error
 // value, so a formula that cannot compute a row and a row with no data
@@ -56,9 +73,20 @@ window.PSFormula = (function () {
     CEILING: { n: 1 }, IF: { n: 3 }, BIN: { n: 2 },
     ISMISSING: { n: 1, raw: 1 }, COALESCE: { n: 1, max: Infinity, raw: 1 },
     TRIM: { n: 1, raw: 1 }, UPPER: { n: 1, raw: 1 }, LOWER: { n: 1, raw: 1 },
-    LEN: { n: 1, raw: 1 }, CONTAINS: { n: 2, raw: 1 }
+    LEN: { n: 1, raw: 1 }, CONTAINS: { n: 2, raw: 1 },
+    // The row-wise statistics (jamovi's MEAN family): two or more
+    // columns or expressions combined WITHIN each row. stat marks them
+    // for the ignore_missing named argument and the teaching arity
+    // error below.
+    MEAN: { n: 2, max: Infinity, stat: 1 },
+    SUM: { n: 2, max: Infinity, stat: 1 },
+    MIN: { n: 2, max: Infinity, stat: 1 },
+    MAX: { n: 2, max: Infinity, stat: 1 }
   };
-  var AGG_FN = { MEAN: 1, SD: 1, MEDIAN: 1, MIN: 1, MAX: 1, SUM: 1, N: 1 };
+  // Whole-column aggregates wear jamovi's V prefix. N stays N: it
+  // counts a column's values under both vocabularies.
+  var AGG_FN = { VMEAN: 1, VSD: 1, VMEDIAN: 1, VMIN: 1, VMAX: 1,
+                 VSUM: 1, N: 1 };
 
   // ---- did-you-mean. An error that names the fix is the difference
   // between a user carrying on and a user giving up, and this engine
@@ -72,9 +100,12 @@ window.PSFormula = (function () {
   // negatives and STARTSWITH is not CONTAINS, so neither is here.
   var FN_ALIAS = {
     LOG: "LOG10 for base 10, or LN for natural log",
-    AVERAGE: "MEAN", AVG: "MEAN",
-    STDEV: "SD", "STDEV.S": "SD", STDDEV: "SD",
-    COUNT: "N", COUNTA: "N", TOTAL: "SUM",
+    AVERAGE: "MEAN(a, b, ...) row by row, or VMEAN(column) for the whole column",
+    AVG: "MEAN(a, b, ...) row by row, or VMEAN(column) for the whole column",
+    SD: "VSD", STDEV: "VSD", "STDEV.S": "VSD", STDDEV: "VSD",
+    VSTDEV: "VSD", MEDIAN: "VMEDIAN", VMED: "VMEDIAN", VN: "N",
+    COUNT: "N", COUNTA: "N",
+    TOTAL: "SUM(a, b, ...) row by row, or VSUM(column) for the whole column",
     LENGTH: "LEN", NCHAR: "LEN",
     ISBLANK: "ISMISSING", ISNULL: "ISMISSING", ISNA: "ISMISSING",
     ISEMPTY: "ISMISSING",
@@ -215,14 +246,36 @@ window.PSFormula = (function () {
         if (peek() && peek().t === "op" && peek().v === "(") {
           var fname = tk.v.toUpperCase();
           next();   // (
-          var args = [];
-          if (!(peek() && peek().t === "op" && peek().v === ")")) {
+          var args = [], ignoreMissing = null;
+          // jamovi's named argument, accepted anywhere in the list:
+          // ignore_missing = 1 (or 0). Recognized by NAME before the
+          // expression parser runs, so it can never be misread as a
+          // comparison against a column called ignore_missing.
+          var parseOneArg = function () {
+            var t1 = peek(), t2 = toks[pos + 1];
+            if (t1 && t1.t === "ident" &&
+                t1.v.toUpperCase() === "IGNORE_MISSING" &&
+                t2 && t2.t === "op" && t2.v === "=") {
+              pos += 2;
+              var vt = next();
+              if (!vt || vt.t !== "num" || (vt.v !== 0 && vt.v !== 1))
+                throw new Error("ignore_missing takes 0 or 1");
+              ignoreMissing = vt.v === 1;
+              return;
+            }
             args.push(parseExpr(0));
+          };
+          if (!(peek() && peek().t === "op" && peek().v === ")")) {
+            parseOneArg();
             while (peek() && peek().t === "op" && peek().v === ",") {
-              next(); args.push(parseExpr(0));
+              next(); parseOneArg();
             }
           }
           expectOp(")");
+          var statSpec = ROW_FN[fname] && ROW_FN[fname].stat;
+          if (ignoreMissing !== null && !statSpec)
+            throw new Error("ignore_missing only applies to the row-wise " +
+              "statistics MEAN, SUM, MIN and MAX");
           if (AGG_FN[fname]) {
             if (args.length !== 1 || args[0].k !== "col")
               throw new Error(fname + "() takes one column name");
@@ -230,6 +283,19 @@ window.PSFormula = (function () {
           } else if (ROW_FN[fname]) {
             var spec = ROW_FN[fname];
             var lo = spec.n, hi = spec.max || spec.n;
+            // The teaching error for the commonest confusion: a
+            // row-wise statistic handed ONE column. A bare "takes 2 or
+            // more arguments" would explain the syntax without
+            // revealing the concept, so name the whole-column form the
+            // user probably wants, with their own column in it.
+            if (spec.stat && args.length === 1) {
+              var argName = args[0].k === "col" ? args[0].name : "column";
+              throw new Error(fname + "(a, b, ...) works ACROSS columns, " +
+                "row by row, so it needs at least two. For the " +
+                (fname === "MEAN" ? "average" : fname === "SUM" ? "total"
+                  : fname === "MIN" ? "smallest value" : "largest value") +
+                " of the whole column, use V" + fname + "(" + argName + ")");
+            }
             if (args.length < lo || args.length > hi)
               throw new Error(fname + "() takes " +
                 (hi === Infinity ? lo + " or more"
@@ -238,6 +304,7 @@ window.PSFormula = (function () {
             if (fname === "BIN" && args[0].k !== "col")
               throw new Error("BIN() takes a column name first");
             left = { k: "fn", fn: fname, args: args };
+            if (statSpec && ignoreMissing) left.ig = 1;
           } else {
             throw new Error("unknown function " + fname + "()" +
               didYouMeanFn(fname));
@@ -296,16 +363,16 @@ window.PSFormula = (function () {
     var v = validNumbers(values), n = v.length, i, s;
     if (fn === "N") return n;
     if (!n) return null;
-    if (fn === "SUM") { s = 0; for (i = 0; i < n; i++) s += v[i]; return s; }
-    if (fn === "MEAN") { s = 0; for (i = 0; i < n; i++) s += v[i]; return s / n; }
-    if (fn === "MIN") return Math.min.apply(null, v);
-    if (fn === "MAX") return Math.max.apply(null, v);
-    if (fn === "MEDIAN") {
+    if (fn === "VSUM") { s = 0; for (i = 0; i < n; i++) s += v[i]; return s; }
+    if (fn === "VMEAN") { s = 0; for (i = 0; i < n; i++) s += v[i]; return s / n; }
+    if (fn === "VMIN") return Math.min.apply(null, v);
+    if (fn === "VMAX") return Math.max.apply(null, v);
+    if (fn === "VMEDIAN") {
       var sorted = v.slice().sort(function (a, b) { return a - b; });
       var mid = Math.floor(n / 2);
       return n % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
     }
-    if (fn === "SD") {
+    if (fn === "VSD") {
       if (n < 2) return null;
       var m = 0; for (i = 0; i < n; i++) m += v[i];
       m /= n;
@@ -412,13 +479,33 @@ window.PSFormula = (function () {
       var k = toNum(evalNode(ast.args[1], row, env));
       if (v == null || k == null || k < 2) return null;
       k = Math.round(k);
-      var lo = env.agg["MIN:" + col], hi = env.agg["MAX:" + col];
+      var lo = env.agg["VMIN:" + col], hi = env.agg["VMAX:" + col];
       if (lo == null || hi == null) return null;
       if (hi === lo) return "bin 1";
       var idx = Math.floor((v - lo) / (hi - lo) * k);
       if (idx >= k) idx = k - 1;
       if (idx < 0) idx = 0;
       return "bin " + (idx + 1);
+    }
+    // The row-wise statistics: combine the arguments WITHIN this row.
+    // ignore_missing = 1 (ast.ig) scores the row from the values that
+    // are present; the default is the language's propagation law, and
+    // a row with nothing present stays missing either way.
+    if (ROW_FN[fn] && ROW_FN[fn].stat) {
+      var vals = [], vi, vv;
+      for (vi = 0; vi < ast.args.length; vi++) {
+        vv = toNum(evalNode(ast.args[vi], row, env));
+        if (vv == null) { if (!ast.ig) return null; }
+        else vals.push(vv);
+      }
+      if (!vals.length) return null;
+      var acc = vals[0];
+      for (vi = 1; vi < vals.length; vi++) {
+        if (fn === "MIN") acc = Math.min(acc, vals[vi]);
+        else if (fn === "MAX") acc = Math.max(acc, vals[vi]);
+        else acc += vals[vi];
+      }
+      return fn === "MEAN" ? acc / vals.length : acc;
     }
     // Everything from here down null-propagates by construction, so the
     // functions that must not go through toNum are dispatched first.
@@ -474,8 +561,8 @@ window.PSFormula = (function () {
     if (ast.k === "agg") out[ast.fn + ":" + ast.col] = { fn: ast.fn, col: ast.col };
     if (ast.k === "fn" && ast.fn === "BIN") {
       var c = ast.args[0].name;
-      out["MIN:" + c] = { fn: "MIN", col: c };
-      out["MAX:" + c] = { fn: "MAX", col: c };
+      out["VMIN:" + c] = { fn: "VMIN", col: c };
+      out["VMAX:" + c] = { fn: "VMAX", col: c };
     }
     if (ast.a) collectAggNeeds(ast.a, out);
     if (ast.b) collectAggNeeds(ast.b, out);
@@ -564,5 +651,45 @@ window.PSFormula = (function () {
     return out;
   }
 
-  return { compile: compile, renameRef: renameRef };
+  // Rewrite a formula saved under the pre-Aug-2026 vocabulary, where
+  // MEAN SD MEDIAN MIN MAX SUM in call position were whole-column
+  // aggregates. Unconditionally correct for such formulas: the old
+  // parser accepted those names ONLY as one-column aggregates, so any
+  // saved formula that ever worked means its V-form. The caller gates
+  // on the project format version (snapshot v3 -> v4), never on
+  // content. Token-level like renameRef: strings and backtick names
+  // are never touched, and only a word followed by "(" is a call.
+  var OLD_AGG = { MEAN: "VMEAN", SD: "VSD", MEDIAN: "VMEDIAN",
+                  MIN: "VMIN", MAX: "VMAX", SUM: "VSUM" };
+  function migrateVocabulary(formula) {
+    var s = String(formula || ""), out = "", i = 0;
+    while (i < s.length) {
+      var ch = s[i];
+      if (ch === '"') {
+        var j = i + 1;
+        while (j < s.length && s[j] !== '"') j++;
+        out += s.slice(i, Math.min(j + 1, s.length));
+        i = j + 1; continue;
+      }
+      if (ch === "`") {
+        var j2 = i + 1;
+        while (j2 < s.length && s[j2] !== "`") j2++;
+        out += s.slice(i, Math.min(j2 + 1, s.length));
+        i = j2 + 1; continue;
+      }
+      if (/[A-Za-z_]/.test(ch)) {
+        var m = /^[A-Za-z_][A-Za-z0-9_.]*/.exec(s.slice(i));
+        var word = m[0];
+        var isCall = s.slice(i + word.length).replace(/^\s+/, "")[0] === "(";
+        var up = word.toUpperCase();
+        out += (isCall && OLD_AGG[up]) ? OLD_AGG[up] : word;
+        i += word.length; continue;
+      }
+      out += ch; i++;
+    }
+    return out;
+  }
+
+  return { compile: compile, renameRef: renameRef,
+           migrateVocabulary: migrateVocabulary };
 })();
