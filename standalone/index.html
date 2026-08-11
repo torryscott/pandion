@@ -1513,6 +1513,24 @@
     position: relative; top: 1px; }
   #ps-missing-own-wrap { margin: 2px 0 4px 23px; }
   #ps-variable-missing-col { width: 100%; box-sizing: border-box; }
+  #ps-missing-box-hint { margin: 4px 0 0; }
+  #ps-missing-invariant { margin: 6px 0 0; }
+  /* The eyebrow upper-cases; the variable name keeps its own casing and
+     wraps to at most two lines, with the full name on hover. */
+  .ps-missing-name {
+    text-transform: none; letter-spacing: 0; font-size: 11px;
+    color: var(--ps-ink-3); display: inline;
+  }
+  /* OUTPUT, not advice. Three identical grey hint lines in one panel is
+     why the section read as mush: this one is live output and now looks
+     like it. */
+  .ps-missing-readout {
+    background: var(--ps-tint-2); border: 1px solid var(--ps-tint-line-2);
+    border-radius: var(--ps-r-md); padding: 8px 10px; margin: 6px 0 8px;
+    font-size: 12px; line-height: 1.5; color: #22364d;
+  }
+  .ps-missing-readout .ps-missing-n { font-weight: 700; }
+  .ps-missing-readout .ps-missing-b2 { display: block; margin-top: 3px; }
   .ps-fn-panel {
     border: 1px solid var(--ps-l1); border-radius: var(--ps-r-md);
     margin-top: 7px; max-height: 200px; overflow: auto;
@@ -4424,34 +4442,55 @@
                "edit your own copy" and deleting a code says it is real
                here), and a live count line ties every edit to its
                consequence in THIS column. -->
+          <!-- The variable name appears ONCE in the whole section, here,
+               in its natural case: an upper-cased instrument name risks
+               being spelled out letter by letter in a screen reader, and
+               the true casing is information. -->
           <span class="ps-inspector-section-title"
-                id="ps-variable-missing-col-label">Missing values</span>
+                id="ps-variable-missing-col-label"><span
+                class="ps-missing-eyebrow">Missing values for</span> <span
+                class="ps-missing-name" id="ps-missing-varname"></span></span>
+          <!-- The group carries the variable via aria-labelledby, so the
+               radios never have to (their accessible names must equal
+               their visible labels: WCAG 2.5.3 Label in Name). -->
           <div class="ps-missing-choice" role="radiogroup"
-               aria-label="Which missing-value labels this variable uses">
+               aria-labelledby="ps-variable-missing-col-label">
             <label class="ps-missing-opt">
               <input type="radio" name="ps-missing-mode"
                      id="ps-missing-mode-dataset" value="dataset">
-              <span id="ps-missing-opt-dataset">Use the dataset labels</span>
+              <span id="ps-missing-opt-dataset">Use the dataset list</span>
             </label>
             <label class="ps-missing-opt">
               <input type="radio" name="ps-missing-mode"
                      id="ps-missing-mode-own" value="own">
-              <span id="ps-missing-opt-own">Give this variable its own labels</span>
+              <span id="ps-missing-opt-own">Give this variable its own list</span>
             </label>
           </div>
           <div id="ps-missing-own-wrap" hidden>
             <input id="ps-variable-missing-col" type="text"
-                   aria-label="This variable's own missing-value labels">
+                   aria-label="This variable's own missing-value list"
+                   aria-describedby="ps-missing-box-hint">
+            <div class="ps-loader-hint" id="ps-missing-box-hint">Separate
+              values with commas. This list replaces the dataset list for
+              this variable.</div>
           </div>
-          <div class="ps-loader-hint" id="ps-variable-missing-col-hint"></div>
+          <!-- The one fact no list can change, stated where it cannot be
+               mistaken for a property OF a list, and never inside a
+               sentence that also carries a count. -->
+          <div class="ps-loader-hint" id="ps-missing-invariant">Blank cells
+            always count as missing, whatever this list says.</div>
+          <!-- Output, not advice: the readout is tinted so it cannot be
+               mistaken for the plain grey hints around it. No left accent
+               bar - that idiom is spoken for by the stat strips, where it
+               means "this control changes the numbers". -->
+          <div class="ps-missing-readout" id="ps-variable-missing-col-hint"
+               role="status" aria-atomic="true"></div>
           <label class="ps-inspector-field" style="margin-top:10px;">
-            Dataset missing-value labels
+            Dataset missing values
             <input id="ps-variable-missing" type="text"
                    placeholder="NA, N/A, .">
           </label>
-          <div class="ps-loader-hint" id="ps-missing-dataset-hint">Used by
-            every variable that has no list of its own. Blank cells are
-            always missing.</div>
+          <div class="ps-loader-hint" id="ps-missing-dataset-hint"></div>
         </div>
       </div>
     </div>

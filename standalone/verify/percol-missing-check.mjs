@@ -155,41 +155,39 @@ const panel = await page.evaluate(async () => {
     await s(300);
     window.PS_SHELL.selectVariable('rating');
     await s(400);
-    // t4-134: the state is an explicit RADIO pair now, the box exists
-    // only when forked, and a live count line ties the list to its
-    // consequence in this column.
-    const own = { label: document.getElementById('ps-variable-missing-col-label').textContent,
+    const own = { name: document.getElementById('ps-missing-varname').textContent,
                   ownChecked: document.getElementById('ps-missing-mode-own').checked,
                   wrapHidden: document.getElementById('ps-missing-own-wrap').hidden,
                   value: document.getElementById('ps-variable-missing-col').value,
-                  hint: document.getElementById('ps-variable-missing-col-hint').textContent,
+                  readout: document.getElementById('ps-variable-missing-col-hint').innerText,
                   dsHint: document.getElementById('ps-missing-dataset-hint').textContent };
     window.PS_SHELL.selectVariable('errors');
     await s(400);
     const inherit = { dsChecked: document.getElementById('ps-missing-mode-dataset').checked,
                       wrapHidden: document.getElementById('ps-missing-own-wrap').hidden,
                       optDs: document.getElementById('ps-missing-opt-dataset').textContent,
-                      hint: document.getElementById('ps-variable-missing-col-hint').textContent };
+                      optOwn: document.getElementById('ps-missing-opt-own').textContent,
+                      readout: document.getElementById('ps-variable-missing-col-hint').innerText };
     return { own, inherit };
 });
-ok(/rating/.test(panel.own.label) && panel.own.ownChecked &&
+ok(panel.own.name === 'rating' && panel.own.ownChecked &&
    !panel.own.wrapHidden && panel.own.value === '9',
    `a column with its own list shows the OWN radio checked and the list ` +
-   `in its box ("${panel.own.label}" = "${panel.own.value}")`);
-ok(/Marking \d+ cell/.test(panel.own.hint) &&
-   /dataset labels would mark/.test(panel.own.hint),
-   `with a live count against the dataset alternative ` +
-   `("${panel.own.hint}")`);
-ok(/except/.test(panel.own.dsHint) && /rating/.test(panel.own.dsHint),
-   `and the dataset field names its exceptions, so "every variable" is ` +
-   `never silently untrue ("${panel.own.dsHint}")`);
+   `in its box (name "${panel.own.name}", list "${panel.own.value}")`);
+ok(/of \d+ cells are missing/.test(panel.own.readout),
+   `with a readout that leads with the TOTAL missing, so the parts can ` +
+   `never read as rival numbers ("${panel.own.readout.split('\n')[0]}")`);
+ok(/except \d+ variable/.test(panel.own.dsHint),
+   `and the dataset field COUNTS its exceptions rather than naming them, ` +
+   `so one long instrument name cannot wrap the line away ` +
+   `("${panel.own.dsHint}")`);
 ok(panel.inherit.dsChecked && panel.inherit.wrapHidden &&
-   /Use the dataset labels: /.test(panel.inherit.optDs),
+   /^Use the dataset list: /.test(panel.inherit.optDs),
    `a column without one shows the DATASET radio checked, naming what it ` +
    `inherits, with no box at all ("${panel.inherit.optDs}")`);
-ok(/matches .* in errors/.test(panel.inherit.hint),
-   `and its count line speaks about THIS column ` +
-   `("${panel.inherit.hint}")`);
+ok(panel.inherit.optOwn === 'Give this variable its own list',
+   `and the other radio never carries the variable name, so a long name ` +
+   `cannot wrap it ("${panel.inherit.optOwn}")`);
 
 console.log('case 6b: forking pre-fills a COPY, and the radio walks back');
 const fork = await page.evaluate(async () => {
@@ -201,8 +199,10 @@ const fork = await page.evaluate(async () => {
     const t = window.PS_SHELL.project.table;
     const afterFork = {
         box: document.getElementById('ps-variable-missing-col').value,
+        readout: document.getElementById('ps-variable-missing-col-hint').innerText,
         stored: t.missingTokensByCol && t.missingTokensByCol.errors
-            ? t.missingTokensByCol.errors.slice() : null
+            ? t.missingTokensByCol.errors.slice() : null,
+        focusStayed: document.activeElement.id !== 'ps-variable-missing-col'
     };
     document.getElementById('ps-missing-mode-dataset').click();
     await s(700);
@@ -217,8 +217,57 @@ ok(fork.afterFork.box !== '' &&
    `forking pre-fills the box with a persisted COPY of the dataset ` +
    `labels, so replace-semantics read as editing your own copy ` +
    `("${fork.afterFork.box}")`);
+ok(fork.afterFork.focusStayed,
+   'and focus stays on the radio, so a keyboard user can still arrow ' +
+   'back to the other option');
 ok(!fork.afterBack.stored && fork.afterBack.dsChecked,
-   'and the dataset radio deletes the override, falling back whole');
+   'the dataset radio deletes the override, falling back whole');
+
+console.log('case 6c: the readout never prints a count of zero');
+// t4-135, the field failure: "Marking 0 cells" beside "5 blank cells are
+// missing" read as a contradiction. Two rules make that unprintable -
+// the total leads and every zero collapses into a clause. This walks a
+// matrix of shapes and asserts the rule holds in every one, which is a
+// stronger claim than checking any single sentence.
+const shapes = await page.evaluate(async () => {
+    const s = ms => new Promise(r => setTimeout(r, ms));
+    window.PS_SHELL.loadTable('shapes',
+        ['bothk', 'allblank', 'alllab', 'nothing'],
+        [['1', '', 'NA', '1'],
+         ['NA', '', 'NA', '2'],
+         ['', '3', '3', '3']],
+        { bothk: 'nominal', allblank: 'nominal', alllab: 'nominal',
+          nothing: 'continuous' });
+    window.PS_SHELL.setWorkspace('data');
+    await s(500);
+    const out = {};
+    for (const c of ['bothk', 'allblank', 'alllab', 'nothing']) {
+        window.PS_SHELL.selectVariable(c);
+        await s(350);
+        out[c] = document.getElementById('ps-variable-missing-col-hint')
+            .innerText;
+    }
+    return out;
+});
+ok(/^2 of 3 cells are missing: 1 match the list, 1 are blank\.$/
+       .test(shapes.bothk.trim()),
+   `both routes present: total first, then the breakdown ` +
+   `("${shapes.bothk.trim()}")`);
+ok(/^2 of 3 cells are missing, all of them blank\.$/
+       .test(shapes.allblank.trim()),
+   `zero labelled collapses to a clause instead of printing 0 ` +
+   `("${shapes.allblank.trim()}")`);
+ok(/^2 of 3 cells are missing\. They all match the list\.$/
+       .test(shapes.alllab.trim()),
+   `and zero blanks collapses the other way ("${shapes.alllab.trim()}")`);
+ok(/^Nothing is missing here\. All 3 cells have a value\.$/
+       .test(shapes.nothing.trim()),
+   `nothing missing opens with a word, never with a 0 ` +
+   `("${shapes.nothing.trim()}")`);
+for (const [col, text] of Object.entries(shapes))
+    ok(!/(^|[^\d])0([^\d]|$)/.test(text),
+       `no count of 0 is printed anywhere in the ${col} readout, which is ` +
+       `what makes the reported contradiction structurally impossible`);
 
 console.log('case R: a rename carries the column\'s own missing labels with it');
 // The one keyed store the rename did not carry, and losing it is not
