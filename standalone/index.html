@@ -1536,11 +1536,37 @@
     padding: 5px 10px; cursor: pointer; font-family: inherit;
   }
   .ps-fn-row:hover { background: var(--ps-tint-1); }
+  .ps-fn-row[aria-expanded="true"] { background: var(--ps-tint-1); }
   .ps-fn-row code {
     font-family: ui-monospace, Menlo, monospace; font-size: 11.5px;
     color: var(--ps-ink); flex: 0 0 190px;
   }
   .ps-fn-row span { font-size: 11.5px; color: var(--ps-muted); }
+  /* The inline argument picker a clicked function expands under its
+     row: the Combine-columns picker's look, docked inside the panel. */
+  .ps-fn-args {
+    background: var(--ps-tint-1); border-top: 1px solid var(--ps-tint-line-2);
+    border-left: 3px solid var(--ps-accent); padding: 8px 12px 9px;
+  }
+  .ps-fn-args .ps-fpk-row { margin-top: 0; }
+  .ps-fn-args .ps-fpk-chips { margin-top: 2px; }
+  .ps-fn-args .ps-fpk-miss { margin-top: 7px; }
+  .ps-fn-args .ps-fn-insert {
+    -webkit-appearance: none; appearance: none; font-family: inherit;
+    font-size: 11.5px; font-weight: 600; color: #fff;
+    background: var(--ps-accent); border: 0; border-radius: var(--ps-r-md);
+    padding: 4px 12px; cursor: pointer; margin-top: 8px;
+  }
+  .ps-fn-args .ps-fn-insert:disabled {
+    background: var(--ps-l3); cursor: default;
+  }
+  .ps-fpk-chips button .ps-fpk-ord {
+    display: inline-block; min-width: 13px; margin-right: 5px;
+    font-family: inherit; font-size: 9.5px; font-weight: 700;
+    color: var(--ps-accent-press); background: #fff;
+    border: 1px solid var(--ps-accent); border-radius: 999px;
+    line-height: 13px;
+  }
   /* The preview's inputs-beside-result table. */
   #ps-formula-preview table { border-collapse: collapse; }
   #ps-formula-preview th, #ps-formula-preview td {
@@ -5240,20 +5266,25 @@
                 aria-pressed="false">Reverse-score</button>
       </div>
       <div class="ps-formula-picker" id="ps-formula-picker" hidden></div>
-      <label class="ps-inspector-field">Formula
-        <textarea id="ps-formula-input" rows="3" spellcheck="false"></textarea>
-      </label>
       <!-- The functions BROWSER replaces the old uppercase reference
-           wall: grouped, one plain sentence each, click to insert at
-           the cursor. Collapsed by default so a novice who never opens
-           it never meets it. -->
+           wall, and sits WITH the guided rows above the box (Torry,
+           Aug 11 2026): grouped, one plain sentence each, and clicking
+           a function opens an inline argument picker right in its row -
+           point it at a column and the completed call drops into the
+           formula box at the cursor. Insert-at-cursor is what keeps it
+           COMPOSITIONAL: two clicks and a typed minus build a z-score.
+           Collapsed by default so a novice who never opens it never
+           meets it. -->
       <div class="ps-fn-bar">
         <button type="button" id="ps-fn-toggle"
                 aria-expanded="false">Functions &#9662;</button>
         <span id="ps-fn-hint">28 functions in six groups &#183;
-          click one to insert it</span>
+          click one and point it at a column</span>
       </div>
       <div class="ps-fn-panel" id="ps-fn-panel" hidden></div>
+      <label class="ps-inspector-field">Formula
+        <textarea id="ps-formula-input" rows="3" spellcheck="false"></textarea>
+      </label>
       <div id="ps-formula-msg" aria-live="polite"></div>
       <div id="ps-formula-preview"></div>
     </div>

@@ -199,16 +199,110 @@ for (const name of ['MEAN', 'VMEAN', 'VSD', 'VMEDIAN', 'VSUM', 'BIN',
 ok(fnPanel.buttons === 28 && fnPanel.opRow === 1,
    '28 insertable functions plus the operators row, which informs but ' +
    'does not insert');
-await page.evaluate(() => {
-    const b = document.getElementById('ps-formula-input');
-    b.value = ''; b.focus();
+const clickRow = (prefix) => page.evaluate((pfx) => {
     const rows = Array.from(document.querySelectorAll('button.ps-fn-row'));
     rows.find(r => r.querySelector('code').textContent
-        .indexOf('VMEAN') === 0).click();
+        .indexOf(pfx) === 0).click();
+}, prefix);
+const clearBox = () => page.evaluate(() => {
+    const b = document.getElementById('ps-formula-input');
+    b.value = ''; b.focus();
+    b.selectionStart = b.selectionEnd = 0;
+});
+
+console.log('case 8b: click a function, point it at a column, done');
+await clearBox();
+await clickRow('VMEAN');
+await page.waitForTimeout(250);
+ok(await page.evaluate(() =>
+       !!document.querySelector('.ps-fn-args select')),
+   'clicking VMEAN expands an inline column picker in its row');
+await page.selectOption('.ps-fn-args select', 'pre');
+await page.waitForTimeout(250);
+st = await read();
+ok(st.formula === 'VMEAN(pre)' &&
+   await page.evaluate(() => !document.querySelector('.ps-fn-args')),
+   'picking the column completes the call and the picker collapses: ' +
+   st.formula);
+
+console.log('case 8c: inserts land at the cursor, so clicks compose');
+await page.evaluate(() => {
+    const b = document.getElementById('ps-formula-input');
+    b.value = 'post - '; b.focus();
+    b.selectionStart = b.selectionEnd = b.value.length;
+});
+await clickRow('VMEAN');
+await page.waitForTimeout(200);
+await page.selectOption('.ps-fn-args select', 'post');
+await page.waitForTimeout(250);
+ok((await read()).formula === 'post - VMEAN(post)',
+   'a typed fragment plus a picked call build a centering formula');
+
+console.log('case 8d: the MEAN row carries the chips and the checkbox');
+await clickRow('MEAN(');
+await page.waitForTimeout(250);
+await page.evaluate(() => {
+    Array.from(document.querySelectorAll('.ps-fn-args [data-fn-col]'))
+        .filter(b => ['q1', 'q3'].indexOf(b.getAttribute('data-fn-col')) !== -1)
+        .forEach(b => b.click());
+});
+await page.click('.ps-fn-args .ps-fpk-miss input');
+await page.waitForTimeout(200);
+ok(await page.evaluate(() =>
+       document.querySelector('.ps-fn-args .ps-fn-insert').textContent ===
+       'Insert MEAN(q1, q3, ignore_missing = 1)'),
+   'the Insert button PREVIEWS the exact call it will write');
+await clearBox();
+await page.click('.ps-fn-args .ps-fn-insert');
+await page.waitForTimeout(250);
+ok((await read()).formula === 'MEAN(q1, q3, ignore_missing = 1)',
+   'and writes exactly that');
+
+console.log('case 8e: COALESCE ticks in order, because order is meaning');
+await clickRow('COALESCE');
+await page.waitForTimeout(250);
+await page.evaluate(() => {
+    const chips = Array.from(
+        document.querySelectorAll('.ps-fn-args [data-fn-col]'));
+    chips.find(b => b.getAttribute('data-fn-col') === 'post').click();
+    chips.find(b => b.getAttribute('data-fn-col') === 'pre').click();
 });
 await page.waitForTimeout(200);
-ok((await read()).formula === 'VMEAN(',
-   'clicking a function inserts its call opener at the cursor');
+ok(await page.evaluate(() =>
+       Array.from(document.querySelectorAll('.ps-fn-args [data-fn-col]'))
+           .filter(b => b.getAttribute('aria-pressed') === 'true')
+           .map(b => b.getAttribute('data-fn-col') + ':' +
+               b.querySelector('.ps-fpk-ord').textContent)
+           .sort().join(',') === 'post:1,pre:2'),
+   'the chips wear order badges: first ticked wins first');
+await clearBox();
+await page.click('.ps-fn-args .ps-fn-insert');
+await page.waitForTimeout(200);
+ok((await read()).formula === 'COALESCE(post, pre)',
+   'and the call keeps the tick order');
+
+console.log('case 8f: column + one extra field, and the IF boundary');
+await clickRow('BIN');
+await page.waitForTimeout(200);
+await page.selectOption('.ps-fn-args select', 'q1');
+await clearBox();
+await page.click('.ps-fn-args .ps-fn-insert');
+await page.waitForTimeout(200);
+ok((await read()).formula === 'BIN(q1, 4)',
+   'BIN takes its column and its group count from the picker');
+await clickRow('LOWER');
+await page.waitForTimeout(200);
+ok(await page.evaluate(() =>
+       Array.from(document.querySelectorAll('.ps-fn-args option'))
+           .some(o => o.value === 'person')),
+   'a text function offers EVERY column, not just the numeric ones');
+await clearBox();
+await clickRow('IF(');
+await page.waitForTimeout(200);
+ok((await read()).formula === 'IF(' &&
+   await page.evaluate(() => !document.querySelector('.ps-fn-args')),
+   'IF stays a plain opener: a condition cannot be completed by a ' +
+   'column click');
 await page.click('#ps-formula-close');
 await page.waitForTimeout(300);
 
