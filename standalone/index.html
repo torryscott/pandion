@@ -1440,30 +1440,6 @@
     max-width: 120px;
   }
   #ps-reshape-preview th { background: var(--ps-s2); font-weight: 650; }
-  .ps-formula-templates {
-    display: flex; gap: 5px; align-items: center; flex-wrap: wrap;
-    margin: 2px 0 10px;
-  }
-  .ps-formula-templates-label {
-    font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em;
-    text-transform: uppercase; color: var(--ps-muted); margin-right: 2px;
-  }
-  .ps-formula-templates button {
-    -webkit-appearance: none; appearance: none; font-family: inherit;
-    font-size: 11.5px; color: var(--ps-accent-press); background: var(--ps-s2);
-    border: 1px solid var(--ps-tint-line-2); border-radius: var(--ps-r-lg); padding: 2px 10px;
-    cursor: pointer;
-  }
-  .ps-formula-templates button:hover { background: #dfeafc; }
-  /* The picker that says WHICH column the transforms beside it apply to. It
-     is the same chip as its sibling buttons, minus the appearance reset, so
-     the browser keeps drawing an arrow and it still reads as a choice. */
-  #ps-formula-source {
-    font-family: inherit; font-size: 11.5px; color: var(--ps-accent-press);
-    background: var(--ps-s2); border: 1px solid var(--ps-tint-line-2);
-    border-radius: var(--ps-r-md); padding: 2px 4px; margin-right: 4px;
-    max-width: 190px; cursor: pointer;
-  }
   #ps-formula-input {
     font-family: ui-monospace, Menlo, monospace; font-size: 12.5px;
     width: 100%; box-sizing: border-box; border: 1px solid var(--ps-l3);
@@ -5243,42 +5219,19 @@
       <label class="ps-inspector-field">Variable name
         <input id="ps-formula-name" type="text" maxlength="60" spellcheck="false">
       </label>
-      <div class="ps-formula-templates" id="ps-formula-templates">
-        <span class="ps-formula-templates-label">Quick transforms</span>
-      </div>
-      <!-- Combine columns (Aug 2026, Torry's novice question): the
-           multi-column recipes - scale scores, change scores,
-           reverse-scoring. Each opens an inline picker and WRITES the
-           formula into the box as choices are made, the same law as the
-           quick transforms: the box always shows what the choice means,
-           so the tool teaches the language instead of hiding it. -->
-      <div class="ps-formula-templates" id="ps-formula-combine">
-        <span class="ps-formula-templates-label">Combine columns</span>
-        <button type="button" data-formula-recipe="avg"
-                aria-pressed="false">Average</button>
-        <button type="button" data-formula-recipe="sum"
-                aria-pressed="false">Sum</button>
-        <button type="button" data-formula-recipe="diff"
-                aria-pressed="false">Difference</button>
-        <button type="button" data-formula-recipe="pct"
-                aria-pressed="false">Percent change</button>
-        <button type="button" data-formula-recipe="rev"
-                aria-pressed="false">Reverse-score</button>
-      </div>
-      <div class="ps-formula-picker" id="ps-formula-picker" hidden></div>
-      <!-- The functions BROWSER replaces the old uppercase reference
-           wall, and sits WITH the guided rows above the box (Torry,
-           Aug 11 2026): grouped, one plain sentence each, and clicking
-           a function opens an inline argument picker right in its row -
-           point it at a column and the completed call drops into the
-           formula box at the cursor. Insert-at-cursor is what keeps it
-           COMPOSITIONAL: two clicks and a typed minus build a z-score.
-           Collapsed by default so a novice who never opens it never
-           meets it. -->
+      <!-- ONE guided surface (Torry, Aug 11 2026: the quick-transform
+           and Combine-columns rows retired into the browser). Clicking
+           an entry opens its argument picker in a separate band below;
+           the completed call inserts at the CURSOR, which is what keeps
+           it compositional, and an insert into an empty box also names
+           the variable. The Common recipes group carries the patterns
+           that are not single functions (z-score, Difference, Percent
+           change, Reverse-score, Recode). Opens OPEN: the only guided
+           surface must not hide behind a closed toggle. -->
       <div class="ps-fn-bar">
         <button type="button" id="ps-fn-toggle"
-                aria-expanded="false">Functions &#9662;</button>
-        <span id="ps-fn-hint">28 functions in six groups &#183;
+                aria-expanded="true">Functions &#9652;</button>
+        <span id="ps-fn-hint">Common recipes and 28 functions &#183;
           click one and point it at a column</span>
       </div>
       <div class="ps-fn-panel" id="ps-fn-panel" hidden></div>

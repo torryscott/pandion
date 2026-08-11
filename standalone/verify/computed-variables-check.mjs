@@ -40,16 +40,27 @@ await page.click('#ps-columnmenu-compute');
 await page.waitForTimeout(400);
 const dlg = await page.evaluate(() => ({
     open: document.getElementById('ps-formula-dialog').style.display === 'flex',
-    templates: Array.from(document.querySelectorAll(
-        '#ps-formula-templates button')).map(b => b.textContent.trim())
+    // The guided surface is the functions browser now (Aug 2026): it
+    // arrives open, recipes first.
+    panelOpen: !document.getElementById('ps-fn-panel').hidden,
+    rows: Array.from(document.querySelectorAll(
+        '#ps-fn-panel .ps-fn-row code')).map(b => b.textContent.trim())
 }));
-if (!dlg.open || dlg.templates.indexOf('z-score') === -1 ||
-    dlg.templates.indexOf('log10') === -1)
-    throw new Error('dialog/templates wrong: ' + JSON.stringify(dlg));
-console.log('  ok  the column menu opens the formula dialog with quick transforms');
+if (!dlg.open || !dlg.panelOpen ||
+    dlg.rows.indexOf('z-score') === -1 ||
+    dlg.rows.indexOf('LOG10(x)') === -1)
+    throw new Error('dialog/browser wrong: ' + JSON.stringify(dlg));
+console.log('  ok  the column menu opens the formula dialog with the guided browser');
 
-// ---- the z-score button writes a VISIBLE formula + live preview
-await page.click('[data-formula-template="z-score"]');
+// ---- the z-score recipe writes a VISIBLE formula + live preview
+await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('button.ps-fn-row'));
+    rows.find(r => r.querySelector('code').textContent
+        .indexOf('z-score') === 0).click();
+});
+await page.waitForTimeout(300);
+// The dialog was opened from the score column, so score leads the pool.
+await page.selectOption('.ps-fn-args select', 'score');
 await page.waitForTimeout(300);
 const seeded = await page.evaluate(() => ({
     name: document.getElementById('ps-formula-name').value,
@@ -63,7 +74,7 @@ if (seeded.formula !== '(score - VMEAN(score)) / VSD(score)' ||
     seeded.name !== 'score_z' ||
     !seeded.res.length || !seeded.res.every(v => /^-?\d/.test(v)))
     throw new Error('z template wrong: ' + JSON.stringify(seeded));
-console.log('  ok  quick transforms write visible formulas with a live preview');
+console.log('  ok  the z-score recipe writes a visible formula with a live preview');
 
 // ---- a parse error reports inline
 await page.fill('#ps-formula-input', 'LOG10(score');

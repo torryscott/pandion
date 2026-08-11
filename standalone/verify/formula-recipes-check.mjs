@@ -1,21 +1,23 @@
 // The computed-variable BUILDER (Aug 2026, Torry: "if someone wanted to
 // make a new computed variable that was the average of two existing
-// columns, I could see someone really struggling with that").
+// columns, I could see someone really struggling with that" - then,
+// after three field rounds: "remove the quick transforms and the
+// combined columns, and just have the functions be the main deal").
 //
-// Two halves, one law. The Combine-columns recipes (Average, Sum,
-// Difference, Percent change, Reverse-score) open an inline picker and
-// WRITE the formula into the visible box as choices are made; the
-// functions browser replaces the uppercase reference wall. The law is
-// that the box is the truth: pickers only ever write it, hand-editing
-// it dismisses them, and there is no second grammar to maintain.
+// ONE guided surface. The functions browser arrives OPEN, leads with a
+// Common recipes group carrying the patterns that are not single
+// functions (z-score, Center, Difference, Percent change,
+// Reverse-score, Recode), and clicking any argument-taking entry opens
+// its picker in a separate band below the panel. The law throughout:
+// every completion INSERTS AT THE CURSOR in the visible formula box
+// (which is what lets clicks compose with typing), an insert into an
+// EMPTY box also names the variable, and hand-editing the box retires
+// an open picker.
 //
 // This probe also owns the MIGRATION contract: a version-3 project
 // whose formulas were written under the old vocabulary (MEAN as the
 // column aggregate) must load with its formulas rewritten to the
-// V-forms and its NUMBERS unchanged. Under the new engine an
-// unmigrated MEAN(score) is an arity error, so a broken migration
-// blanks the column - which is exactly what the control run proves
-// this probe catches.
+// V-forms and its NUMBERS unchanged.
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
@@ -37,7 +39,7 @@ const PAGE = 'file://' + (process.env.PS_PAGE
     ? path.resolve(process.env.PS_PAGE)
     : path.resolve(new URL('.', import.meta.url).pathname, '..', 'index.html'));
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
+const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 const errors = [];
 page.on('pageerror', e => errors.push(String(e)));
 await page.goto(PAGE);
@@ -48,7 +50,7 @@ if (await page.locator('#ps-welcome').isVisible()) {
 }
 // A battery a student would actually score: three 1-5 items (q2 has a
 // hole), a pre/post pair, and a label column that must never appear in
-// a numeric picker.
+// a numeric picker but MUST appear in Recode's.
 await page.evaluate(() => {
     window.PS_SHELL.loadTable('recipes',
         ['person', 'q1', 'q2', 'q3', 'pre', 'post'],
@@ -64,141 +66,10 @@ await page.waitForTimeout(500);
 const read = () => page.evaluate(() => ({
     formula: document.getElementById('ps-formula-input').value,
     name: document.getElementById('ps-formula-name').value,
-    pickerOpen: !document.getElementById('ps-formula-picker').hidden,
+    argsOpen: !!document.querySelector('.ps-fn-args'),
     res: Array.from(document.querySelectorAll(
-        '#ps-formula-preview td.ps-fprev-res')).map(n => n.textContent),
-    heads: Array.from(document.querySelectorAll(
-        '#ps-formula-preview th')).map(n => n.textContent)
+        '#ps-formula-preview td.ps-fprev-res')).map(n => n.textContent)
 }));
-
-console.log('case 1: Average writes MEAN into the visible box');
-await page.evaluate(() => window.PS_SHELL.runCommand('data-compute'));
-await page.waitForTimeout(500);
-await page.click('[data-formula-recipe="avg"]');
-await page.waitForTimeout(300);
-let st = await read();
-ok(st.formula === 'MEAN(q1, q2)' && st.pickerOpen,
-   'clicking Average opens the picker and writes MEAN of the first two ' +
-   'numeric columns: ' + st.formula);
-ok(st.heads.length === 3 && st.heads[0] === 'q1' && st.heads[1] === 'q2',
-   'the preview shows the INPUT columns beside the result, so row-by-row ' +
-   'is visible');
-const chipCols = await page.evaluate(() =>
-    Array.from(document.querySelectorAll('[data-fpk-col]'))
-        .map(b => b.getAttribute('data-fpk-col')));
-ok(String(chipCols) === 'q1,q2,q3,pre,post',
-   'the chips offer every numeric column and never the label column');
-
-console.log('case 2: ticking a third column grows the formula');
-await page.click('[data-fpk-col="q3"]');
-await page.waitForTimeout(250);
-st = await read();
-ok(st.formula === 'MEAN(q1, q2, q3)',
-   'the formula follows the ticks: ' + st.formula);
-// Hand-computed from the fixture: row a (4+3+5)/3=4, row b has a hole
-// in q2 so it is missing, row c (5+4+4)/3=4.33...
-ok(String(st.res) === '4,—,4.33333',
-   'the preview values are exact, and the hole in q2 visibly costs row ' +
-   'b its score: ' + st.res);
-
-console.log('case 3: the missing-data decision is visible and disclosed');
-await page.click('#ps-fpk-miss');
-await page.waitForTimeout(250);
-st = await read();
-ok(st.formula === 'MEAN(q1, q2, q3, ignore_missing = 1)',
-   'ticking the box writes the jamovi named argument: ' + st.formula);
-ok(String(st.res) === '4,1.5,4.33333',
-   'and row b is now scored from the items it has ((2+1)/2 = 1.5)');
-const hint = await page.evaluate(() =>
-    document.querySelector('.ps-fpk-hint').textContent);
-ok(/Say so in your write-up/.test(hint),
-   'the hint states the choice just made and nudges the disclosure');
-
-console.log('case 4: the saved column carries the recipe numbers');
-const savedName = st.name;
-await page.click('#ps-formula-save');
-await page.waitForTimeout(700);
-const saved = await page.evaluate((nm) => {
-    const t = window.PS_SHELL.project.table;
-    return { formula: t.computed[nm], vals: t.columns[nm],
-             err: t.computedErrors ? t.computedErrors[nm] : null };
-}, savedName);
-ok(!saved.err && saved.formula === 'MEAN(q1, q2, q3, ignore_missing = 1)',
-   'the stored formula is exactly what the box showed');
-ok(Math.abs(saved.vals[0] - 4) < 1e-9 &&
-   Math.abs(saved.vals[1] - 1.5) < 1e-9 &&
-   Math.abs(saved.vals[2] - 13 / 3) < 1e-9,
-   'and the column computes the hand-checked scale scores');
-
-console.log('case 5: Difference and Percent change ride two selects');
-await page.evaluate(() => window.PS_SHELL.runCommand('data-compute'));
-await page.waitForTimeout(500);
-await page.click('[data-formula-recipe="diff"]');
-await page.waitForTimeout(300);
-// The selects default to the first two numerics; point them at the
-// pre/post pair the way a user would.
-await page.evaluate(() => {
-    const sels = document.querySelectorAll('.ps-fpk-row select');
-    sels[0].value = 'post';
-    sels[0].dispatchEvent(new Event('change', { bubbles: true }));
-    sels[1].value = 'pre';
-    sels[1].dispatchEvent(new Event('change', { bubbles: true }));
-});
-await page.waitForTimeout(250);
-st = await read();
-ok(st.formula === 'post - pre' && st.name === 'post_change',
-   'Difference writes after minus before and names the column: ' +
-   st.formula);
-ok(String(st.res) === '4,3,3', 'with the right change scores');
-await page.click('[data-formula-recipe="pct"]');
-await page.waitForTimeout(300);
-st = await read();
-ok(/\) \/ \w+ \* 100$/.test(st.formula),
-   'Percent change writes the full expression, denominator visible: ' +
-   st.formula);
-
-console.log('case 6: Reverse-score seeds its scale from the data');
-await page.click('[data-formula-recipe="rev"]');
-await page.waitForTimeout(300);
-// q1 runs 2..5, so the observed max seeds 5 and the formula flips
-// around 6.
-st = await read();
-ok(st.formula === '6 - q1' && st.name === 'q1_reversed',
-   'the item flips around observed max + 1: ' + st.formula);
-ok(String(st.res) === '2,4,1', 'reversal is exact (4,2,5 -> 2,4,1)');
-
-console.log('case 7: hand-editing the box dismisses the picker');
-await page.focus('#ps-formula-input');
-await page.keyboard.type(' + 1');
-await page.waitForTimeout(250);
-st = await read();
-ok(!st.pickerOpen, 'typing in the box closes the picker: the box is the ' +
-   'truth and the choices no longer describe it');
-ok(await page.evaluate(() =>
-       Array.from(document.querySelectorAll('[data-formula-recipe]'))
-           .every(b => b.getAttribute('aria-pressed') === 'false')),
-   'and no recipe pill still claims the formula');
-
-console.log('case 8: the functions browser inserts at the cursor');
-await page.click('#ps-fn-toggle');
-await page.waitForTimeout(250);
-const fnPanel = await page.evaluate(() => {
-    const panel = document.getElementById('ps-fn-panel');
-    return {
-        open: !panel.hidden,
-        text: panel.textContent.replace(/\s+/g, ' '),
-        buttons: panel.querySelectorAll('button.ps-fn-row').length,
-        opRow: panel.querySelector('div.ps-fn-row') ? 1 : 0
-    };
-});
-ok(fnPanel.open, 'the Functions toggle opens the browser');
-for (const name of ['MEAN', 'VMEAN', 'VSD', 'VMEDIAN', 'VSUM', 'BIN',
-                    'COALESCE', 'CONTAINS'])
-    ok(fnPanel.text.indexOf(name) !== -1,
-       'the browser names ' + name + ' with a plain sentence');
-ok(fnPanel.buttons === 28 && fnPanel.opRow === 1,
-   '28 insertable functions plus the operators row, which informs but ' +
-   'does not insert');
 const clickRow = (prefix) => page.evaluate((pfx) => {
     const rows = Array.from(document.querySelectorAll('button.ps-fn-row'));
     rows.find(r => r.querySelector('code').textContent
@@ -209,69 +80,187 @@ const clearBox = () => page.evaluate(() => {
     b.value = ''; b.focus();
     b.selectionStart = b.selectionEnd = 0;
 });
+const twoSelects = (a, b) => page.evaluate((v) => {
+    const sels = document.querySelectorAll('.ps-fn-args select');
+    sels[0].value = v[0];
+    sels[0].dispatchEvent(new Event('change', { bubbles: true }));
+    sels[1].value = v[1];
+    sels[1].dispatchEvent(new Event('change', { bubbles: true }));
+}, [a, b]);
 
-console.log('case 8b: click a function, point it at a column, done');
-await clearBox();
-await clickRow('VMEAN');
-await page.waitForTimeout(250);
-ok(await page.evaluate(() =>
-       !!document.querySelector('.ps-fn-args select')),
-   'clicking VMEAN opens a column picker');
-// Torry, Aug 11 2026: the picker is a SEPARATE box under the panel in
-// the Combine-columns band, never a row docked inside the scrolling
-// list, where a tall chip set overflowed the panel's little window.
-ok(await page.evaluate(() => {
-       const a = document.querySelector('.ps-fn-args');
-       const panel = document.getElementById('ps-fn-panel');
-       return !panel.contains(a) &&
-           a.classList.contains('ps-formula-picker') &&
-           a.getBoundingClientRect().top >=
-               panel.getBoundingClientRect().bottom - 1;
-   }),
-   'and the picker is its own band BELOW the panel, outside the scroll ' +
-   'window, dressed like the Combine picker');
-await page.selectOption('.ps-fn-args select', 'pre');
-await page.waitForTimeout(250);
-st = await read();
-ok(st.formula === 'VMEAN(pre)' &&
-   await page.evaluate(() => !document.querySelector('.ps-fn-args')),
-   'picking the column completes the call and the picker collapses: ' +
-   st.formula);
-
-console.log('case 8c: inserts land at the cursor, so clicks compose');
-await page.evaluate(() => {
-    const b = document.getElementById('ps-formula-input');
-    b.value = 'post - '; b.focus();
-    b.selectionStart = b.selectionEnd = b.value.length;
-});
-await clickRow('VMEAN');
+console.log('case 1: one guided surface, open on arrival');
+await page.evaluate(() =>
+    window.PS_SHELL.openFormulaDialog('pre', null));
+await page.waitForTimeout(500);
+const arrival = await page.evaluate(() => ({
+    rowsGone: !document.getElementById('ps-formula-templates') &&
+        !document.getElementById('ps-formula-combine'),
+    panelOpen: !document.getElementById('ps-fn-panel').hidden,
+    groups: Array.from(document.querySelectorAll('.ps-fn-group'))
+        .map(g => g.textContent)
+}));
+ok(arrival.rowsGone,
+   'the quick-transform and Combine-columns rows are gone');
+ok(arrival.panelOpen,
+   'the browser arrives OPEN: the only guided surface does not hide ' +
+   'behind a closed toggle');
+ok(arrival.groups[0] === 'Common recipes' && arrival.groups.length === 7,
+   'Common recipes leads its seven groups: ' + arrival.groups.join(' | '));
+// Still collapsible, and reopenable.
+await page.click('#ps-fn-toggle');
 await page.waitForTimeout(200);
-await page.selectOption('.ps-fn-args select', 'post');
-await page.waitForTimeout(250);
-ok((await read()).formula === 'post - VMEAN(post)',
-   'a typed fragment plus a picked call build a centering formula');
+ok(await page.evaluate(() =>
+       document.getElementById('ps-fn-panel').hidden),
+   'the toggle still collapses it');
+await page.click('#ps-fn-toggle');
+await page.waitForTimeout(200);
 
-console.log('case 8d: the MEAN row carries the chips and the checkbox');
+console.log('case 2: the scale score, end to end through MEAN');
 await clickRow('MEAN(');
 await page.waitForTimeout(250);
 await page.evaluate(() => {
     Array.from(document.querySelectorAll('.ps-fn-args [data-fn-col]'))
-        .filter(b => ['q1', 'q3'].indexOf(b.getAttribute('data-fn-col')) !== -1)
+        .filter(b => ['q1', 'q2', 'q3']
+            .indexOf(b.getAttribute('data-fn-col')) !== -1)
         .forEach(b => b.click());
 });
 await page.click('.ps-fn-args .ps-fpk-miss input');
-await page.waitForTimeout(200);
-ok(await page.evaluate(() =>
-       document.querySelector('.ps-fn-args .ps-fn-insert').textContent ===
-       'Insert MEAN(q1, q3, ignore_missing = 1)'),
-   'the Insert button PREVIEWS the exact call it will write');
 await clearBox();
 await page.click('.ps-fn-args .ps-fn-insert');
-await page.waitForTimeout(250);
-ok((await read()).formula === 'MEAN(q1, q3, ignore_missing = 1)',
-   'and writes exactly that');
+await page.waitForTimeout(300);
+let st = await read();
+ok(st.formula === 'MEAN(q1, q2, q3, ignore_missing = 1)',
+   'chips + the missing-data checkbox write the full call: ' + st.formula);
+ok(st.name === 'avg_q1_q2_q3',
+   'an insert into an EMPTY box names the variable: ' + st.name);
+ok(String(st.res) === '4,1.5,4.33333',
+   'the preview scores the hand-computed values, hole handled: ' + st.res);
+const savedName = st.name;
+await page.click('#ps-formula-save');
+await page.waitForTimeout(700);
+const saved = await page.evaluate((nm) => {
+    const t = window.PS_SHELL.project.table;
+    return { formula: t.computed[nm], vals: t.columns[nm],
+             err: t.computedErrors ? t.computedErrors[nm] : null };
+}, savedName);
+ok(!saved.err && Math.abs(saved.vals[0] - 4) < 1e-9 &&
+   Math.abs(saved.vals[1] - 1.5) < 1e-9 &&
+   Math.abs(saved.vals[2] - 13 / 3) < 1e-9,
+   'and the saved column computes the hand-checked scale scores');
 
-console.log('case 8e: COALESCE ticks in order, because order is meaning');
+console.log('case 3: the z-score recipe, with the source column leading');
+await page.evaluate(() =>
+    window.PS_SHELL.openFormulaDialog('pre', null));
+await page.waitForTimeout(500);
+await clickRow('z-score');
+await page.waitForTimeout(250);
+ok(await page.evaluate(() => {
+       const a = document.querySelector('.ps-fn-args');
+       const panel = document.getElementById('ps-fn-panel');
+       return a && !panel.contains(a) &&
+           a.classList.contains('ps-formula-picker');
+   }),
+   'the recipe picker is the separate band below the panel');
+ok(await page.evaluate(() =>
+       document.querySelectorAll('.ps-fn-args option')[1].value === 'pre'),
+   'the column this dialog was opened FROM leads the pool');
+await page.selectOption('.ps-fn-args select', 'pre');
+await page.waitForTimeout(250);
+st = await read();
+ok(st.formula === '(pre - VMEAN(pre)) / VSD(pre)' && st.name === 'pre_z',
+   'one pick writes the whole pattern, V-forms visible, and names it: ' +
+   st.formula);
+
+console.log('case 4: Difference and Percent change');
+await clearBox();
+await clickRow('Difference');
+await page.waitForTimeout(250);
+await twoSelects('post', 'pre');
+await page.click('.ps-fn-args .ps-fn-insert');
+await page.waitForTimeout(250);
+st = await read();
+ok(st.formula === 'post - pre' && st.name === 'post_change' &&
+   String(st.res) === '4,3,3',
+   'Difference writes after minus before with the right values: ' +
+   st.formula);
+await clearBox();
+await clickRow('Percent change');
+await page.waitForTimeout(250);
+await twoSelects('post', 'pre');
+await page.click('.ps-fn-args .ps-fn-insert');
+await page.waitForTimeout(250);
+st = await read();
+ok(st.formula === '(post - pre) / pre * 100' && st.name === 'post_pctchange',
+   'Percent change writes the full expression, denominator visible: ' +
+   st.formula);
+
+console.log('case 5: Reverse-score reads its scale from the data');
+await clearBox();
+await clickRow('Reverse-score');
+await page.waitForTimeout(250);
+await page.selectOption('.ps-fn-args select', 'q1');
+await page.waitForTimeout(200);
+ok(await page.evaluate(() =>
+       document.querySelector('.ps-fn-args input[type="number"]')
+           .value === '5'),
+   'q1 runs to 5, so the scale maximum seeds itself');
+await page.click('.ps-fn-args .ps-fn-insert');
+await page.waitForTimeout(250);
+st = await read();
+ok(st.formula === '6 - q1' && st.name === 'q1_reversed' &&
+   String(st.res) === '2,4,1',
+   'the item flips around max + 1, exactly: ' + st.formula);
+
+console.log('case 6: Recode expands the label-by-label IF chain');
+await clearBox();
+await clickRow('Recode');
+await page.waitForTimeout(250);
+ok(await page.evaluate(() =>
+       Array.from(document.querySelectorAll('.ps-fn-args option'))
+           .some(o => o.value === 'person')),
+   'Recode offers the CATEGORY columns the numeric pickers exclude');
+await page.selectOption('.ps-fn-args select', 'person');
+await page.waitForTimeout(250);
+st = await read();
+ok(/^IF\(person == "a", "a", IF\(person == "b", "b", /.test(st.formula) &&
+   st.name === 'person_recoded',
+   'each label maps to itself, ready to edit: ' + st.formula.slice(0, 48));
+
+console.log('case 7: the box stays the truth');
+await page.evaluate(() => {
+    const b = document.getElementById('ps-formula-input');
+    b.value = 'pre + '; b.focus();
+    b.selectionStart = b.selectionEnd = b.value.length;
+    document.getElementById('ps-formula-name').value = 'my_name';
+});
+await clickRow('VMEAN');
+await page.waitForTimeout(200);
+await page.selectOption('.ps-fn-args select', 'pre');
+await page.waitForTimeout(250);
+st = await read();
+ok(st.formula === 'pre + VMEAN(pre)' && st.name === 'my_name',
+   'an insert into EXISTING text is a fragment: it composes at the ' +
+   'cursor and never touches the name');
+await clickRow('Center');
+await page.waitForTimeout(200);
+ok((await read()).argsOpen, 'a picker is open');
+await page.focus('#ps-formula-input');
+await page.keyboard.type(' + 1');
+await page.waitForTimeout(250);
+ok(!(await read()).argsOpen,
+   'hand-editing the box retires it: the choices no longer describe ' +
+   'the text');
+
+console.log('case 8: the function pickers, by argument shape');
+await clearBox();
+await clickRow('VMEAN');
+await page.waitForTimeout(250);
+await page.selectOption('.ps-fn-args select', 'pre');
+await page.waitForTimeout(250);
+st = await read();
+ok(st.formula === 'VMEAN(pre)' && st.name === 'pre_vmean' && !st.argsOpen,
+   'one column-shaped hole: picking IS completing, and it names the ' +
+   'variable: ' + st.formula);
 await clickRow('COALESCE');
 await page.waitForTimeout(250);
 await page.evaluate(() => {
@@ -287,14 +276,13 @@ ok(await page.evaluate(() =>
            .map(b => b.getAttribute('data-fn-col') + ':' +
                b.querySelector('.ps-fpk-ord').textContent)
            .sort().join(',') === 'post:1,pre:2'),
-   'the chips wear order badges: first ticked wins first');
+   'COALESCE chips wear order badges: first ticked wins first');
 await clearBox();
 await page.click('.ps-fn-args .ps-fn-insert');
 await page.waitForTimeout(200);
-ok((await read()).formula === 'COALESCE(post, pre)',
-   'and the call keeps the tick order');
-
-console.log('case 8f: column + one extra field, and the IF boundary');
+st = await read();
+ok(st.formula === 'COALESCE(post, pre)' && st.name === 'post_filled',
+   'and the call keeps the tick order: ' + st.formula);
 await clickRow('BIN');
 await page.waitForTimeout(200);
 await page.selectOption('.ps-fn-args select', 'q1');
@@ -312,10 +300,18 @@ ok(await page.evaluate(() =>
 await clearBox();
 await clickRow('IF(');
 await page.waitForTimeout(200);
-ok((await read()).formula === 'IF(' &&
-   await page.evaluate(() => !document.querySelector('.ps-fn-args')),
+st = await read();
+ok(st.formula === 'IF(' && !st.argsOpen,
    'IF stays a plain opener: a condition cannot be completed by a ' +
    'column click');
+const counts = await page.evaluate(() => ({
+    buttons: document.querySelectorAll(
+        '#ps-fn-panel button.ps-fn-row').length,
+    opRow: document.querySelectorAll('#ps-fn-panel div.ps-fn-row').length
+}));
+ok(counts.buttons === 34 && counts.opRow === 1,
+   '6 recipes + 28 functions are clickable, the operators row informs ' +
+   'only (' + counts.buttons + ' + ' + counts.opRow + ')');
 await page.click('#ps-formula-close');
 await page.waitForTimeout(300);
 

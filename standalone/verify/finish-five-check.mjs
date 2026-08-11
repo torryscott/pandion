@@ -72,16 +72,17 @@ async function clickAt(sel) {
     await page.waitForTimeout(180);
 }
 const readFormulaDialog = () => page.evaluate(() => {
-    const tpl = document.getElementById('ps-formula-templates');
-    const src = document.getElementById('ps-formula-source');
+    // The guided surface is the functions BROWSER now (Aug 2026): it
+    // arrives open, Common recipes first, pickers in a band below.
+    const panel = document.getElementById('ps-fn-panel');
+    const args = document.querySelector('.ps-fn-args');
     return {
-        shown: getComputedStyle(tpl).display !== 'none',
-        buttons: Array.from(tpl.querySelectorAll('[data-formula-template]'))
+        panelOpen: !panel.hidden,
+        rows: Array.from(panel.querySelectorAll('.ps-fn-row code'))
             .map(b => b.textContent),
-        tips: Array.from(tpl.querySelectorAll('[data-formula-template]'))
-            .map(b => b.getAttribute('data-tip') || ''),
-        source: src ? src.value : null,
-        sourceOptions: src ? Array.from(src.options).map(o => o.value) : null,
+        argsText: args ? args.textContent.replace(/\s+/g, ' ').trim() : null,
+        argsOptions: args ? Array.from(args.querySelectorAll('option'))
+            .map(o => o.value).filter(Boolean) : null,
         preview: document.getElementById('ps-formula-preview').textContent.trim(),
         name: document.getElementById('ps-formula-name').value,
         formula: document.getElementById('ps-formula-input').value,
@@ -91,40 +92,38 @@ const readFormulaDialog = () => page.evaluate(() => {
         })
     };
 });
+const clickFnRow = (prefix) => page.evaluate((pfx) => {
+    const rows = Array.from(document.querySelectorAll('button.ps-fn-row'));
+    rows.find(r => r.querySelector('code').textContent
+        .indexOf(pfx) === 0).click();
+}, prefix);
 
-console.log('case 1: the dialog does not promise a shortcut it is hiding');
+console.log('case 1: guidance is visible on arrival, not behind a toggle');
 await page.evaluate(() => window.PS_SHELL.openFormulaDialog(null, null));
 await page.waitForTimeout(300);
 let d = await readFormulaDialog();
-ok(!(/quick transform/i.test(d.preview) && !d.shown),
-   'the empty preview promises a quick transform only when one is on screen ' +
-   `(promise ${/quick transform/i.test(d.preview)}, row shown ${d.shown})`);
-ok(d.shown && d.buttons.length,
-   `opened with no column chosen, the transforms are still offered ` +
-   `(${JSON.stringify(d.buttons)})`);
-ok(d.source && d.sourceOptions && d.sourceOptions.length >= 2,
-   `and the dialog says which column they apply to, changeably ` +
-   `(${d.source} of ${JSON.stringify(d.sourceOptions)})`);
-ok(d.buttons.some(b => /z-score/i.test(b)),
-   'the z-score is one of them, which is the one a student hand-writes');
+ok(d.panelOpen && d.rows.length,
+   `opened with no column chosen, the browser is OPEN and offering ` +
+   `(${d.rows.length} rows)`);
+ok(d.rows.some(b => /z-score/i.test(b)),
+   'the z-score recipe is one of them, which is the one a student ' +
+   'hand-writes');
 
-const zAt = d.buttons.findIndex(b => /z-score/i.test(b));
-await clickAt(`[data-formula-template="${d.buttons[zAt]}"]`);
+await clickFnRow('z-score');
+await page.waitForTimeout(250);
 d = await readFormulaDialog();
-ok(/MEAN\(/.test(d.formula) && /SD\(/.test(d.formula),
-   `clicking it writes the formula out in full ("${d.formula}")`);
-ok(new RegExp('^' + d.source + '_z').test(d.name),
-   `and names the column after the one it transforms ("${d.name}")`);
-
-// CONTROL: the picker has to be live. An inert select that merely decorates
-// the row would satisfy every assertion above.
-const other = d.sourceOptions.find(o => o !== d.source);
-await page.selectOption('#ps-formula-source', other);
-await page.waitForTimeout(200);
-const d2 = await readFormulaDialog();
-ok(d2.tips.some(t => t.indexOf(other) !== -1),
-   `choosing another column rebuilds the transforms for it ` +
-   `(${JSON.stringify(d2.tips.slice(0, 2))})`);
+ok(d.argsOptions && d.argsOptions.length >= 2,
+   `clicking it asks WHICH column, changeably ` +
+   `(${JSON.stringify(d.argsOptions)})`);
+const zCol = d.argsOptions[0];
+await page.selectOption('.ps-fn-args select', zCol);
+await page.waitForTimeout(250);
+d = await readFormulaDialog();
+ok(/VMEAN\(/.test(d.formula) && /VSD\(/.test(d.formula),
+   `picking it writes the formula out in full ("${d.formula}")`);
+const d2 = d;
+ok(new RegExp('^' + zCol + '_z').test(d2.name),
+   `and names the column after the one it transforms ("${d2.name}")`);
 
 console.log('case 2: one way out of the dialog, not two');
 ok(d2.exits.length === 1,
@@ -152,8 +151,8 @@ ok(await page.evaluate(() =>
            .display === 'none'),
    'Escape still closes it');
 
-console.log('case 1b: a column already chosen still leads, and a table with ' +
-            'nothing to transform says so');
+console.log('case 1b: a column already chosen still leads, and an empty ' +
+            'pool says so honestly');
 const numeric = await page.evaluate(() => {
     const t = window.PS_SHELL.project.table;
     return t.order.filter(c => t.types[c] === 'continuous');
@@ -161,23 +160,31 @@ const numeric = await page.evaluate(() => {
 ok(numeric.length >= 2, `the sample has numeric columns (${numeric})`);
 await page.evaluate(c => window.PS_SHELL.openFormulaDialog(c, null), numeric[1]);
 await page.waitForTimeout(250);
+await clickFnRow('z-score');
+await page.waitForTimeout(250);
 d = await readFormulaDialog();
-ok(d.source === numeric[1],
-   `opening from a column preselects THAT column (${d.source})`);
+ok(d.argsOptions && d.argsOptions[0] === numeric[1],
+   `opening from a column puts THAT column first in the picker ` +
+   `(${d.argsOptions && d.argsOptions[0]})`);
 await clickAt('#ps-formula-close');
 
-// NON-FIRE: no numeric column and no recodable factor means there is genuinely
-// nothing to offer, and then the sentence must not promise one either.
+// NON-FIRE: no numeric column means a numeric recipe has nothing to
+// offer, and its picker must SAY so instead of presenting an empty
+// select. The browser itself stays honest: LEN and friends still apply
+// to an all-text table.
 await page.evaluate(() => window.PS_SHELL.loadTable('ids',
     ['label'], [['aa'], ['bb'], ['cc'], ['dd'], ['ee']], { label: 'id' }));
 await page.waitForTimeout(400);
 await page.evaluate(() => window.PS_SHELL.setWorkspace('data'));
 await page.evaluate(() => window.PS_SHELL.openFormulaDialog(null, null));
 await page.waitForTimeout(250);
+await clickFnRow('z-score');
+await page.waitForTimeout(250);
 d = await readFormulaDialog();
-ok(!d.shown, 'a table with nothing to transform shows no transforms row');
-ok(!/quick transform/i.test(d.preview),
-   `and its empty preview promises none ("${d.preview}")`);
+ok(d.argsText && /needs a numeric column/.test(d.argsText) &&
+   (!d.argsOptions || !d.argsOptions.length),
+   `an empty pool explains itself rather than offering an empty select ` +
+   `("${d.argsText}")`);
 await clickAt('#ps-formula-close');
 
 console.log('case 3: a row selection leaves the variable inspector alone');
