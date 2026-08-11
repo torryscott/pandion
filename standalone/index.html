@@ -1469,7 +1469,86 @@
     width: 100%; box-sizing: border-box; border: 1px solid var(--ps-l3);
     border-radius: var(--ps-r-md); padding: 7px 8px; resize: vertical;
   }
-  .ps-formula-help { font-size: 11px; color: var(--ps-muted); margin: 6px 0 8px; }
+  /* The Combine-columns inline picker: the role cards' inline-expansion
+     idiom, tinted like the stat bands so it reads as a working area of
+     the row above rather than a new dialog level. */
+  .ps-formula-picker {
+    background: var(--ps-tint-1); border: 1px solid var(--ps-tint-line-2);
+    border-left: 3px solid var(--ps-accent); border-radius: var(--ps-r-md);
+    padding: 9px 11px 10px; margin: -4px 0 10px;
+  }
+  .ps-formula-picker .ps-fpk-lead {
+    font-size: 12px; font-weight: 600; color: var(--ps-ink-2);
+    margin: 0 0 7px;
+  }
+  .ps-fpk-chips { display: flex; gap: 5px; flex-wrap: wrap; }
+  .ps-fpk-chips button {
+    -webkit-appearance: none; appearance: none;
+    font-family: ui-monospace, Menlo, monospace; font-size: 12px;
+    color: var(--ps-ink-2); background: var(--ps-s0);
+    border: 1px solid var(--ps-l3); border-radius: var(--ps-r-md);
+    padding: 3px 10px; cursor: pointer;
+  }
+  .ps-fpk-chips button[aria-pressed="true"] {
+    color: var(--ps-accent-press); border-color: var(--ps-accent);
+    background: #e3eefb; font-weight: 700;
+  }
+  .ps-fpk-row {
+    display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+    margin-top: 8px; font-size: 12.5px; color: var(--ps-ink-2);
+  }
+  .ps-fpk-row select, .ps-fpk-row input[type="number"] {
+    font-family: inherit; font-size: 12px; color: var(--ps-ink-2);
+    background: var(--ps-s0); border: 1px solid var(--ps-l3);
+    border-radius: var(--ps-r-md); padding: 3px 6px;
+  }
+  .ps-fpk-miss {
+    display: flex; align-items: center; gap: 7px; margin-top: 9px;
+    font-size: 12px; color: var(--ps-ink-2); cursor: pointer;
+  }
+  .ps-fpk-hint { font-size: 11px; color: var(--ps-muted); margin-top: 6px; }
+  /* The functions browser (replaces the uppercase reference wall). */
+  .ps-fn-bar {
+    display: flex; align-items: center; gap: 8px; margin: 8px 0 0;
+    font-size: 11.5px; color: var(--ps-muted);
+  }
+  .ps-fn-bar button {
+    -webkit-appearance: none; appearance: none; font-family: inherit;
+    font-size: 11.5px; font-weight: 600; color: var(--ps-accent-press);
+    background: var(--ps-s2); border: 1px solid var(--ps-tint-line-2);
+    border-radius: var(--ps-r-md); padding: 2px 10px; cursor: pointer;
+  }
+  .ps-fn-panel {
+    border: 1px solid var(--ps-l1); border-radius: var(--ps-r-md);
+    margin-top: 7px; max-height: 200px; overflow: auto;
+  }
+  .ps-fn-group {
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em;
+    text-transform: uppercase; color: var(--ps-ink-3);
+    background: var(--ps-s1); padding: 5px 10px;
+    border-top: 1px solid var(--ps-l1); position: sticky; top: 0;
+  }
+  .ps-fn-panel .ps-fn-group:first-child { border-top: 0; }
+  .ps-fn-row {
+    display: flex; gap: 10px; align-items: baseline; width: 100%;
+    -webkit-appearance: none; appearance: none; text-align: left;
+    background: transparent; border: 0; border-top: 1px solid var(--ps-s1);
+    padding: 5px 10px; cursor: pointer; font-family: inherit;
+  }
+  .ps-fn-row:hover { background: var(--ps-tint-1); }
+  .ps-fn-row code {
+    font-family: ui-monospace, Menlo, monospace; font-size: 11.5px;
+    color: var(--ps-ink); flex: 0 0 190px;
+  }
+  .ps-fn-row span { font-size: 11.5px; color: var(--ps-muted); }
+  /* The preview's inputs-beside-result table. */
+  #ps-formula-preview table { border-collapse: collapse; }
+  #ps-formula-preview th, #ps-formula-preview td {
+    padding: 1px 14px 1px 0; text-align: right; font-weight: 400;
+  }
+  #ps-formula-preview th { color: var(--ps-muted); font-size: 11px; }
+  #ps-formula-preview .ps-fprev-res { color: var(--ps-accent-press); font-weight: 700; }
+  .ps-fprev-note { color: var(--ps-muted); font-size: 11px; margin-top: 4px; }
   #ps-formula-msg { min-height: 16px; font-size: 12px; color: var(--ps-danger-2); }
   #ps-formula-preview {
     font-family: ui-monospace, Menlo, monospace; font-size: 11.5px;
@@ -5141,15 +5220,40 @@
       <div class="ps-formula-templates" id="ps-formula-templates">
         <span class="ps-formula-templates-label">Quick transforms</span>
       </div>
+      <!-- Combine columns (Aug 2026, Torry's novice question): the
+           multi-column recipes - scale scores, change scores,
+           reverse-scoring. Each opens an inline picker and WRITES the
+           formula into the box as choices are made, the same law as the
+           quick transforms: the box always shows what the choice means,
+           so the tool teaches the language instead of hiding it. -->
+      <div class="ps-formula-templates" id="ps-formula-combine">
+        <span class="ps-formula-templates-label">Combine columns</span>
+        <button type="button" data-formula-recipe="avg"
+                aria-pressed="false">Average</button>
+        <button type="button" data-formula-recipe="sum"
+                aria-pressed="false">Sum</button>
+        <button type="button" data-formula-recipe="diff"
+                aria-pressed="false">Difference</button>
+        <button type="button" data-formula-recipe="pct"
+                aria-pressed="false">Percent change</button>
+        <button type="button" data-formula-recipe="rev"
+                aria-pressed="false">Reverse-score</button>
+      </div>
+      <div class="ps-formula-picker" id="ps-formula-picker" hidden></div>
       <label class="ps-inspector-field">Formula
         <textarea id="ps-formula-input" rows="3" spellcheck="false"></textarea>
       </label>
-      <div class="ps-formula-help">Functions: LOG10, LN, SQRT, ABS, EXP, ROUND,
-        FLOOR, CEILING, IF(test, then, else), BIN(column, k) &#183;
-        Missing values: ISMISSING(x), COALESCE(x, fallback) &#183;
-        Text: TRIM, UPPER, LOWER, LEN, CONTAINS(text, part) &#183;
-        Aggregates: MEAN, SD, MEDIAN, MIN, MAX, SUM, N &#183;
-        Operators: + - * / ^ == != &lt; &lt;= &gt; &gt;= AND OR NOT</div>
+      <!-- The functions BROWSER replaces the old uppercase reference
+           wall: grouped, one plain sentence each, click to insert at
+           the cursor. Collapsed by default so a novice who never opens
+           it never meets it. -->
+      <div class="ps-fn-bar">
+        <button type="button" id="ps-fn-toggle"
+                aria-expanded="false">Functions &#9662;</button>
+        <span id="ps-fn-hint">28 functions in six groups &#183;
+          click one to insert it</span>
+      </div>
+      <div class="ps-fn-panel" id="ps-fn-panel" hidden></div>
       <div id="ps-formula-msg" aria-live="polite"></div>
       <div id="ps-formula-preview"></div>
     </div>

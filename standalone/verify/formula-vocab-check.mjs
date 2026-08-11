@@ -61,14 +61,24 @@ await page.evaluate(() => {
 await page.waitForTimeout(500);
 
 console.log('case 1: the dialog offers the new vocabulary');
-const help = await page.evaluate(() => {
-    const h = document.querySelector('.ps-formula-help');
-    return h ? h.textContent.replace(/\s+/g, ' ') : '';
+// The reference wall became the functions BROWSER (Aug 2026): the
+// discoverability contract is the same - the dialog itself names every
+// function - the surface is a grouped panel behind the Functions
+// toggle, built when the dialog opens.
+const help = await page.evaluate(async () => {
+    window.PS_SHELL.runCommand('data-compute');
+    await new Promise(r => setTimeout(r, 400));
+    const tog = document.getElementById('ps-fn-toggle');
+    if (tog && document.getElementById('ps-fn-panel').hidden) tog.click();
+    const h = document.getElementById('ps-fn-panel');
+    const text = h ? h.textContent.replace(/\s+/g, ' ') : '';
+    document.getElementById('ps-formula-close').click();
+    return text;
 });
 for (const fn of ['ISMISSING', 'COALESCE', 'TRIM', 'UPPER', 'LOWER',
                   'LEN', 'CONTAINS'])
     ok(help.indexOf(fn) !== -1,
-       `the dialog help names ${fn}, so it is discoverable without the docs`);
+       `the functions browser names ${fn}, so it is discoverable without the docs`);
 
 console.log('case 2: a missing value can be tested and filled, through the dialog');
 await page.click('th[data-grid-col="post"]', { button: 'right' });
@@ -83,10 +93,14 @@ await page.fill('#ps-formula-input', 'COALESCE(post, pre)');
 await page.waitForTimeout(250);
 const prev = await page.evaluate(() => ({
     msg: document.getElementById('ps-formula-msg').textContent,
-    preview: document.getElementById('ps-formula-preview').textContent
+    // The preview is a TABLE now (inputs beside the result, first three
+    // rows); the filled values ride the result column's cells.
+    res: Array.from(document.querySelectorAll(
+        '#ps-formula-preview td.ps-fprev-res')).map(n => n.textContent)
 }));
-ok(prev.msg === '' && /14, 12, 16, 11, 18/.test(prev.preview),
-   'the live preview shows the filled values before saving: ' + prev.preview);
+ok(prev.msg === '' && String(prev.res) === '14,12,16',
+   'the live preview shows the filled values beside their inputs: ' +
+   prev.res);
 await page.click('#ps-formula-save');
 await page.waitForTimeout(700);
 const filled = await page.evaluate(() => {
@@ -205,7 +219,7 @@ ok(!plain.err && String(plain.typed) === '4,,7,,5' &&
    'a plain difference score still propagates missing rather than filling it');
 const zres = await page.evaluate(() =>
     window.PS_SHELL.saveComputedColumn('pre_z',
-        '(pre - MEAN(pre)) / SD(pre)'));
+        '(pre - VMEAN(pre)) / VSD(pre)'));
 await page.waitForTimeout(500);
 const z0 = await page.evaluate(() =>
     window.PS_SHELL.project.table.columns.pre_z[0]);

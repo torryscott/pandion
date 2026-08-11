@@ -308,13 +308,16 @@ by an automated check, so they run as written:</p>
 <td><code data-guide-formula>6 - supported</code></td>
 <td>For a 1-7 scale use <code>8 - item</code>: max + 1 minus the item.</td></tr>
 <tr><td>Scale mean across items</td>
-<td><code data-guide-formula>(paced + clear + useful + supported) / 4</code></td>
-<td>Reverse-score first, then average the corrected columns.</td></tr>
+<td><code data-guide-formula>MEAN(paced, clear, useful, supported)</code></td>
+<td>Reverse-score first, then average the corrected columns. A person
+who skipped an item gets no score; add <code>ignore_missing = 1</code>
+inside the brackets to score them from the items they answered (and say
+so in your write-up).</td></tr>
 <tr><td>z-scores</td>
-<td><code data-guide-formula>(score - MEAN(score)) / SD(score)</code></td>
+<td><code data-guide-formula>(score - VMEAN(score)) / VSD(score)</code></td>
 <td>The same thing the <b>z-score</b> chip writes.</td></tr>
 <tr><td>Center a variable</td>
-<td><code data-guide-formula>score - MEAN(score)</code></td>
+<td><code data-guide-formula>score - VMEAN(score)</code></td>
 <td>Handy before interactions; the <b>center</b> chip.</td></tr>
 <tr><td>Tame a skewed variable</td>
 <td><code data-guide-formula>LOG10(rt)</code></td>
@@ -323,13 +326,13 @@ by an automated check, so they run as written:</p>
 <td><code data-guide-formula>post - pre</code></td>
 <td>Positive = improvement when higher is better.</td></tr>
 <tr><td>Split at the mean</td>
-<td><code data-guide-formula>IF(score >= MEAN(score), "high", "low")</code></td>
+<td><code data-guide-formula>IF(score >= VMEAN(score), "high", "low")</code></td>
 <td>Text results make a nominal variable, ready for Group By.</td></tr>
 <tr><td>Equal-count bins</td>
 <td><code data-guide-formula>BIN(score, 4)</code></td>
 <td>Labels the rows "bin 1" through "bin 4" (quartile groups).</td></tr>
 <tr><td>Flag extreme values</td>
-<td><code data-guide-formula>IF(ABS(score - MEAN(score)) / SD(score) > 3, 1, 0)</code></td>
+<td><code data-guide-formula>IF(ABS(score - VMEAN(score)) / VSD(score) > 3, 1, 0)</code></td>
 <td>1 = more than 3 SDs from the mean. Investigate before excluding.</td></tr>
 <tr><td>Round for display</td>
 <td><code data-guide-formula>ROUND(score / 10)</code></td>

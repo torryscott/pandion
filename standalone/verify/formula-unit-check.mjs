@@ -134,11 +134,11 @@ ok(vals('score + backup') === '11,-,-,44,-',
 
 console.log('case 5: the vocabulary that already worked still works');
 ok(vals('score * 2') === '20,-,60,80,-', 'arithmetic');
-ok(vals('(score - MEAN(score)) / SD(score)').split(',')[0].slice(0, 6) ===
+ok(vals('(score - VMEAN(score)) / VSD(score)').split(',')[0].slice(0, 6) ===
    '-1.091', 'the z-score aggregate, to four places');
-ok(vals('MEAN(score)') === '26.666666666666668,26.666666666666668,' +
+ok(vals('VMEAN(score)') === '26.666666666666668,26.666666666666668,' +
    '26.666666666666668,26.666666666666668,26.666666666666668',
-   'MEAN is computed once over the column');
+   'VMEAN is computed once over the column');
 ok(vals('N(score)') === '3,3,3,3,3', 'N counts the values that are there');
 ok(vals('IF(score >= 30, "high", "low")') === 'low,-,high,high,-',
    'IF over a comparison');
@@ -191,7 +191,7 @@ console.log('case 6: the error messages name the fix');
 }
 {
     const e = err('STDEV(score)');
-    ok(/\bSD\b/.test(e), 'STDEV points at SD: ' + e);
+    ok(/\bVSD\b/.test(e), 'STDEV points at VSD, the whole-column form: ' + e);
 }
 {
     // The honesty control. There is no near name for this, so the engine
@@ -225,8 +225,60 @@ ok(/CONTAINS\(\) takes 2 arguments/.test(err('CONTAINS(group)')),
     ok(/COALESCE\(\) takes 1 or more arguments/.test(e),
        'and the variadic arity reads as a range, not as Infinity: ' + e);
 }
-ok(/takes one column name/.test(err('MEAN(score, backup)')),
+ok(/takes one column name/.test(err('VMEAN(score, backup)')),
    'the aggregates still take exactly one plain column');
+
+// The vocabulary change itself (Aug 2026, Torry's novice question): the
+// average of two columns is the commonest computed variable there is,
+// and the obvious way to write it must BE the way. Row-wise MEAN/SUM/
+// MIN/MAX match jamovi name for name; the whole-column forms wear the
+// V prefix; and the errors at the seam teach the concept, not just the
+// arity. Values are hand-computed from the fixture (score 10,-,30,40,-;
+// backup 1,2,-,4,-).
+console.log('case 9: the row-wise statistics, jamovi vocabulary');
+ok(vals('MEAN(score, backup)') === '5.5,-,-,22,-',
+   'MEAN(a, b) averages within each row and propagates missing');
+ok(vals('MEAN(score, backup, ignore_missing = 1)') === '5.5,2,30,22,-',
+   'ignore_missing = 1 scores a row from the values it has');
+ok(vals('SUM(score, backup, ignore_missing = 1)') === '11,2,30,44,-',
+   'SUM likewise, and an all-missing row stays missing');
+ok(vals('MIN(score, backup)') === '1,-,-,4,-', 'row-wise MIN');
+ok(vals('MAX(score, backup, ignore_missing = 1)') === '10,2,30,40,-',
+   'row-wise MAX under ignore_missing');
+{
+    const e = err('MEAN(score)');
+    ok(/ACROSS columns/.test(e) && /VMEAN\(score\)/.test(e),
+       'one-column MEAN teaches the concept and names VMEAN with the ' +
+       'user\'s own column: ' + e);
+}
+{
+    const e = err('SD(score)');
+    ok(/unknown function SD/.test(e) && /VSD/.test(e),
+       'the old aggregate spelling points at its V-form: ' + e);
+}
+ok(/ignore_missing only applies/.test(err('ABS(score, ignore_missing = 1)')),
+   'ignore_missing is refused where it means nothing');
+ok(/ignore_missing takes 0 or 1/.test(
+       err('MEAN(score, backup, ignore_missing = 2)')),
+   'and takes only 0 or 1');
+
+console.log('case 10: saved old-vocabulary formulas migrate exactly');
+ok(PSFormula.migrateVocabulary('(score - MEAN(score)) / SD(score)') ===
+   '(score - VMEAN(score)) / VSD(score)',
+   'the old z-score rewrites to its V-forms');
+ok(PSFormula.migrateVocabulary('SUM(score) + "MEAN(x)" + \`MIN\`') ===
+   'VSUM(score) + "MEAN(x)" + \`MIN\`',
+   'strings and backtick names are never touched');
+ok(PSFormula.migrateVocabulary('mean( score )') === 'VMEAN( score )',
+   'case-insensitive, spacing preserved');
+{
+    // The migrated z-score must compute the SAME numbers the old
+    // engine produced, which is the whole point of migrating.
+    const migrated = PSFormula.migrateVocabulary(
+        '(score - MEAN(score)) / SD(score)');
+    ok(vals(migrated).split(',')[0].slice(0, 6) === '-1.091',
+       'a migrated formula reproduces the old values');
+}
 
 console.log('case 8: renameRef still rewrites only real references');
 ok(PSFormula.renameRef('COALESCE(score, backup)', 'score', 'points') ===

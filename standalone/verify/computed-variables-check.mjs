@@ -56,7 +56,7 @@ const seeded = await page.evaluate(() => ({
     formula: document.getElementById('ps-formula-input').value,
     preview: document.getElementById('ps-formula-preview').textContent
 }));
-if (seeded.formula !== '(score - MEAN(score)) / SD(score)' ||
+if (seeded.formula !== '(score - VMEAN(score)) / VSD(score)' ||
     seeded.name !== 'score_z' || !/First values: -?\d/.test(seeded.preview))
     throw new Error('z template wrong: ' + JSON.stringify(seeded));
 console.log('  ok  quick transforms write visible formulas with a live preview');
@@ -71,7 +71,7 @@ if (!/expected "\)"/.test(err))
 console.log('  ok  parse errors report inline');
 
 // ---- save the z-score
-await page.fill('#ps-formula-input', '(score - MEAN(score)) / SD(score)');
+await page.fill('#ps-formula-input', '(score - VMEAN(score)) / VSD(score)');
 await page.waitForTimeout(200);
 await page.click('#ps-formula-save');
 await page.waitForTimeout(700);
@@ -171,7 +171,7 @@ const renamed = await page.evaluate(() => ({
     formula: window.PS_SHELL.project.table.computed.score_z,
     z0: window.PS_SHELL.project.table.columns.score_z[0]
 }));
-if (renamed.formula !== '(points - MEAN(points)) / SD(points)' ||
+if (renamed.formula !== '(points - VMEAN(points)) / VSD(points)' ||
     renamed.z0 == null)
     throw new Error('rename did not rewrite the formula: ' +
                     JSON.stringify(renamed));

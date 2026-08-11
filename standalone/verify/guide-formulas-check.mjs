@@ -79,14 +79,15 @@ function vals(f) {
 }
 ok(String(vals('6 - supported')) === '2,1,3,2',
    'reverse-scoring is exact (6 - supported -> 2,1,3,2)');
-ok(String(vals('(paced + clear + useful + supported) / 4')) ===
-   '4,4.75,3,4', 'the scale mean is exact (4, 4.75, 3, 4)');
-const z = (vals('(score - MEAN(score)) / SD(score)') || [])
+ok(String(vals('MEAN(paced, clear, useful, supported)')) ===
+   '4,4.75,3,4',
+   'the scale mean is exact and row-wise (4, 4.75, 3, 4)');
+const z = (vals('(score - VMEAN(score)) / VSD(score)') || [])
     .map(Number);
 ok(Math.abs(z[0] - (61 - 71) / 14.674404) < 1e-4 &&
    Math.abs(z[3] - (90 - 71) / 14.674404) < 1e-4,
    `z-scores use the Bessel SD (${z[0].toFixed(4)}, ${z[3].toFixed(4)})`);
-ok(String(vals('IF(score >= MEAN(score), "high", "low")')) ===
+ok(String(vals('IF(score >= VMEAN(score), "high", "low")')) ===
    'low,high,low,high',
    'the mean split labels the right rows (low,high,low,high)');
 ok(String(vals('`first quiz` * 2')) === '14,16,10,18',

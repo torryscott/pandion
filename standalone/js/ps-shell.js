@@ -1391,9 +1391,9 @@
       out.push({ label: "ln", name: source + "_ln",
                  formula: "LN(" + ref + ")" });
       out.push({ label: "z-score", name: source + "_z",
-                 formula: "(" + ref + " - MEAN(" + ref + ")) / SD(" + ref + ")" });
+                 formula: "(" + ref + " - VMEAN(" + ref + ")) / VSD(" + ref + ")" });
       out.push({ label: "center", name: source + "_centered",
-                 formula: ref + " - MEAN(" + ref + ")" });
+                 formula: ref + " - VMEAN(" + ref + ")" });
       out.push({ label: "bin into 4", name: source + "_bin",
                  formula: "BIN(" + ref + ", 4)" });
     }
@@ -1497,6 +1497,292 @@
       name = base + "_" + (k++);
     return name;
   }
+  // ---- Combine columns (Aug 2026, Torry's novice question): the
+  // multi-column recipes - scale scores, change scores, percent change,
+  // reverse-scoring. The design law, same as the quick transforms:
+  // every recipe WRITES the visible formula and never replaces it. The
+  // box is the truth, the picker is a scaffold you can outgrow, and a
+  // student who clicks Average five times has read MEAN(...) five
+  // times. Hand-editing the box dismisses the picker (the choices no
+  // longer describe the text), which is also why there is no reverse
+  // parse: one grammar, one direction.
+  var FORMULA_RECIPE = null; // { kind, cols[], a, b, rcol, rmax, ig }
+  function formulaNumericChoices(t) {
+    var out = [], editing = FORMULA_EDIT && FORMULA_EDIT.col;
+    for (var i = 0; i < t.order.length; i++) {
+      var c = t.order[i];
+      if (c === editing) continue;
+      if (colStoresNumbers(t, c)) out.push(c);
+    }
+    return out;
+  }
+  function renderFormulaCombine() {
+    var t = PROJECT.table;
+    var row = el("ps-formula-combine");
+    if (!row || !t) return;
+    var nums = formulaNumericChoices(t);
+    // Two numeric columns make the combining recipes meaningful;
+    // Reverse-score needs only one. Below that the row would be a
+    // strip of dead ends, so it leaves rather than disables.
+    row.style.display = nums.length >= 1 ? "flex" : "none";
+    var btns = row.querySelectorAll("[data-formula-recipe]");
+    for (var i = 0; i < btns.length; i++) {
+      var kind = btns[i].getAttribute("data-formula-recipe");
+      btns[i].style.display =
+        nums.length >= (kind === "rev" ? 1 : 2) ? "" : "none";
+      btns[i].setAttribute("aria-pressed",
+        FORMULA_RECIPE && FORMULA_RECIPE.kind === kind ? "true" : "false");
+    }
+  }
+  // The observed scale maximum seeds Reverse-score: a 1-7 battery
+  // defaults to 7 without being asked, and anything implausible for a
+  // rating scale falls back to 5.
+  function formulaScaleMax(t, col) {
+    var v = t.columns[col] || [], mx = null;
+    for (var i = 0; i < v.length; i++)
+      if (typeof v[i] === "number" && isFinite(v[i]))
+        mx = mx == null ? v[i] : Math.max(mx, v[i]);
+    mx = mx == null ? 5 : Math.round(mx);
+    return mx >= 2 && mx <= 11 ? mx : 5;
+  }
+  function formulaRecipeStart(kind) {
+    var t = PROJECT.table;
+    var nums = formulaNumericChoices(t);
+    if (!nums.length) return;
+    var src = FORMULA_EDIT && FORMULA_EDIT.source;
+    if (!src || nums.indexOf(src) === -1) src = nums[0];
+    var second = null;
+    for (var i = 0; i < nums.length; i++)
+      if (nums[i] !== src) { second = nums[i]; break; }
+    FORMULA_RECIPE = { kind: kind, cols: [], a: null, b: null,
+                       rcol: null, rmax: 5, ig: false };
+    if (kind === "avg" || kind === "sum")
+      FORMULA_RECIPE.cols = second ? [src, second] : [src];
+    if (kind === "diff" || kind === "pct") {
+      FORMULA_RECIPE.a = second || src;
+      FORMULA_RECIPE.b = src;
+    }
+    if (kind === "rev") {
+      FORMULA_RECIPE.rcol = src;
+      FORMULA_RECIPE.rmax = formulaScaleMax(t, src);
+    }
+    renderFormulaCombine();
+    renderFormulaPicker();
+    formulaRecipeWrite();
+  }
+  function formulaRecipeFormula() {
+    var r = FORMULA_RECIPE, bt = formulaBacktick;
+    if (!r) return "";
+    if (r.kind === "avg" || r.kind === "sum") {
+      if (r.cols.length < 2) return "";
+      return (r.kind === "avg" ? "MEAN(" : "SUM(") +
+        r.cols.map(bt).join(", ") +
+        (r.ig ? ", ignore_missing = 1" : "") + ")";
+    }
+    if (r.kind === "diff") return bt(r.a) + " - " + bt(r.b);
+    if (r.kind === "pct")
+      return "(" + bt(r.a) + " - " + bt(r.b) + ") / " + bt(r.b) + " * 100";
+    if (r.kind === "rev") return (r.rmax + 1) + " - " + bt(r.rcol);
+    return "";
+  }
+  function formulaRecipeName() {
+    var r = FORMULA_RECIPE;
+    if (r.kind === "avg" || r.kind === "sum") {
+      var base = r.kind === "avg" ? "avg" : "sum";
+      return r.cols.length > 3 ? base + "_" + r.cols.length + "_items"
+        : base + "_" + r.cols.join("_");
+    }
+    if (r.kind === "diff") return r.a + "_change";
+    if (r.kind === "pct") return r.a + "_pctchange";
+    if (r.kind === "rev") return r.rcol + "_reversed";
+    return "computed";
+  }
+  function formulaRecipeWrite() {
+    var f = formulaRecipeFormula();
+    // Programmatic .value fires no input event, so this write can
+    // never trip the hand-edit dismissal below.
+    el("ps-formula-input").value = f;
+    if (FORMULA_EDIT && !FORMULA_EDIT.col && f)
+      el("ps-formula-name").value = uniqueColumnName(formulaRecipeName());
+    refreshFormulaPreview();
+  }
+  function renderFormulaPicker() {
+    var host = el("ps-formula-picker");
+    var t = PROJECT.table, r = FORMULA_RECIPE;
+    if (!host) return;
+    host.innerHTML = "";
+    if (!r) { host.hidden = true; return; }
+    host.hidden = false;
+    var nums = formulaNumericChoices(t);
+    function lead(text) { host.appendChild(mkEl("p", "ps-fpk-lead", text)); }
+    function mkSelect(value, ariaLabel, onchange) {
+      var s = mkEl("select");
+      s.setAttribute("aria-label", ariaLabel);
+      for (var i = 0; i < nums.length; i++) {
+        var o = mkEl("option", "", nums[i]);
+        o.value = nums[i];
+        s.appendChild(o);
+      }
+      s.value = value;
+      s.addEventListener("change", function () { onchange(this.value); });
+      return s;
+    }
+    if (r.kind === "avg" || r.kind === "sum") {
+      lead((r.kind === "avg" ? "Average" : "Sum") +
+        " which columns? Tick two or more.");
+      var chips = mkEl("div", "ps-fpk-chips");
+      for (var ci = 0; ci < nums.length; ci++) (function (c) {
+        var b = mkEl("button", "", c);
+        b.type = "button";
+        b.setAttribute("data-fpk-col", c);
+        b.setAttribute("aria-pressed",
+          r.cols.indexOf(c) !== -1 ? "true" : "false");
+        b.addEventListener("click", function () {
+          var at = r.cols.indexOf(c);
+          if (at === -1) r.cols.push(c); else r.cols.splice(at, 1);
+          b.setAttribute("aria-pressed", at === -1 ? "true" : "false");
+          formulaRecipeWrite();
+        });
+        chips.appendChild(b);
+      })(nums[ci]);
+      host.appendChild(chips);
+      // The one real statistical decision in the recipe, made VISIBLE:
+      // under the language's propagation law a person who skipped an
+      // item gets no score, and sometimes that is exactly wrong.
+      var miss = mkEl("label", "ps-fpk-miss");
+      var cb = mkEl("input");
+      cb.type = "checkbox";
+      cb.id = "ps-fpk-miss";
+      cb.checked = r.ig;
+      miss.appendChild(cb);
+      miss.appendChild(mkEl("span", "", "Still score a person who " +
+        "skipped an item, using the items they answered"));
+      host.appendChild(miss);
+      var hint = mkEl("div", "ps-fpk-hint", "Every ticked column must " +
+        "have a value, or the result is missing for that row.");
+      host.appendChild(hint);
+      cb.addEventListener("change", function () {
+        r.ig = this.checked;
+        hint.textContent = r.ig
+          ? "A person with at least one answer gets a score from the " +
+            "items they answered. Say so in your write-up."
+          : "Every ticked column must have a value, or the result is " +
+            "missing for that row.";
+        formulaRecipeWrite();
+      });
+    } else if (r.kind === "diff" || r.kind === "pct") {
+      lead(r.kind === "diff" ? "Which two columns?"
+        : "Percent change from which column to which?");
+      var rowEl = mkEl("div", "ps-fpk-row");
+      rowEl.appendChild(mkSelect(r.a, "First column", function (v) {
+        r.a = v; formulaRecipeWrite();
+      }));
+      rowEl.appendChild(mkEl("span", "",
+        r.kind === "diff" ? "minus" : "compared with"));
+      rowEl.appendChild(mkSelect(r.b, "Second column", function (v) {
+        r.b = v; formulaRecipeWrite();
+      }));
+      host.appendChild(rowEl);
+      host.appendChild(mkEl("div", "ps-fpk-hint", r.kind === "diff"
+        ? "Change scores read best as after minus before."
+        : "Reads: how far the first column moved, as a percent of the second."));
+    } else if (r.kind === "rev") {
+      lead("Reverse-score which item?");
+      var rw = mkEl("div", "ps-fpk-row");
+      rw.appendChild(mkSelect(r.rcol, "Item to reverse-score", function (v) {
+        r.rcol = v;
+        r.rmax = formulaScaleMax(t, v);
+        renderFormulaPicker();
+        formulaRecipeWrite();
+      }));
+      rw.appendChild(mkEl("span", "", "on a scale that runs 1 to"));
+      var mx = mkEl("input");
+      mx.type = "number"; mx.min = "2"; mx.max = "11";
+      mx.value = String(r.rmax);
+      mx.style.width = "56px";
+      mx.setAttribute("aria-label", "Scale maximum");
+      mx.addEventListener("input", function () {
+        var v2 = Number(this.value);
+        if (isFinite(v2) && v2 >= 2 && v2 <= 11) {
+          r.rmax = Math.round(v2);
+          formulaRecipeWrite();
+        }
+      });
+      rw.appendChild(mx);
+      host.appendChild(rw);
+      host.appendChild(mkEl("div", "ps-fpk-hint",
+        "A 1 becomes a " + r.rmax + ", a " + r.rmax + " becomes a 1: " +
+        "the item flips around scale max + 1."));
+    }
+  }
+  // The functions browser (replaces the uppercase reference wall).
+  // Grouped, one plain sentence each, click to insert at the cursor.
+  // The vocabulary here is the ENGINE's - a name listed but not
+  // implemented would be a lie a novice pays for, so formula-unit-check
+  // exercises every insertable name.
+  var FORMULA_FN_GROUPS = [
+    ["Across a row (several columns)", [
+      ["MEAN(a, b, ...)", "The average of several columns, row by row. A scale score."],
+      ["SUM(a, b, ...)", "The total of several columns, row by row."],
+      ["MIN(a, b, ...)", "The smallest of several columns, row by row."],
+      ["MAX(a, b, ...)", "The largest of several columns, row by row."]]],
+    ["Whole column (one number)", [
+      ["VMEAN(column)", "The mean of the whole column, repeated on every row."],
+      ["VSD(column)", "The standard deviation of the whole column."],
+      ["VMEDIAN(column)", "The median of the whole column."],
+      ["VMIN(column)", "The column's smallest value."],
+      ["VMAX(column)", "The column's largest value."],
+      ["VSUM(column)", "The total of the whole column."],
+      ["N(column)", "How many rows have a value."]]],
+    ["Math", [
+      ["LOG10(x)", "Base-10 logarithm, for skewed measurements."],
+      ["LN(x)", "Natural logarithm."],
+      ["SQRT(x)", "Square root."],
+      ["ABS(x)", "Absolute value."],
+      ["EXP(x)", "e raised to the value."],
+      ["ROUND(x, digits)", "Round to a number of decimal places."],
+      ["FLOOR(x)", "Round down."],
+      ["CEILING(x)", "Round up."],
+      ["BIN(column, k)", "Cut a column into k equal-width groups."]]],
+    ["Decisions", [
+      ["IF(test, then, else)", "One value when the test holds, another when it does not."],
+      ["AND, OR, NOT", "Combine tests. Comparisons: ==  !=  <  <=  >  >=", "noins"]]],
+    ["Text", [
+      ["UPPER(x)", "Fold to upper case."],
+      ["LOWER(x)", "Fold to lower case."],
+      ["TRIM(x)", "Tidy stray spaces."],
+      ["LEN(x)", "How many characters."],
+      ["CONTAINS(text, part)", "Does the text contain the part? Case sensitive."]]],
+    ["Missing values", [
+      ["ISMISSING(x)", "1 when the value is missing, 0 when it is there."],
+      ["COALESCE(a, b, ...)", "The first value that is not missing."]]]
+  ];
+  function renderFormulaFnPanel() {
+    var panel = el("ps-fn-panel");
+    if (!panel || panel.childNodes.length) return;   // static; build once
+    for (var g = 0; g < FORMULA_FN_GROUPS.length; g++) {
+      panel.appendChild(mkEl("div", "ps-fn-group", FORMULA_FN_GROUPS[g][0]));
+      var fns = FORMULA_FN_GROUPS[g][1];
+      for (var i = 0; i < fns.length; i++) (function (fn) {
+        // The operators row informs; it is not an insertable call.
+        var row = mkEl(fn[2] === "noins" ? "div" : "button", "ps-fn-row");
+        if (fn[2] !== "noins") row.type = "button";
+        row.appendChild(mkEl("code", "", fn[0]));
+        row.appendChild(mkEl("span", "", fn[1]));
+        if (fn[2] !== "noins") row.addEventListener("click", function () {
+          var box = el("ps-formula-input");
+          var ins = fn[0].split("(")[0] + "(";
+          var at = box.selectionStart != null ? box.selectionStart
+            : box.value.length;
+          box.value = box.value.slice(0, at) + ins + box.value.slice(at);
+          box.focus();
+          box.selectionStart = box.selectionEnd = at + ins.length;
+          refreshFormulaPreview();
+        });
+        panel.appendChild(row);
+      })(fns[i]);
+    }
+  }
   function openFormulaDialog(source, editingCol) {
     var t = PROJECT.table;
     if (!t) return;
@@ -1509,6 +1795,16 @@
     el("ps-formula-input").value = editingCol
       ? (t.computed[editingCol] || "") : "";
     renderFormulaTemplates(source);
+    FORMULA_RECIPE = null;
+    renderFormulaCombine();
+    renderFormulaPicker();
+    renderFormulaFnPanel();
+    var fnPanel = el("ps-fn-panel"), fnTog = el("ps-fn-toggle");
+    if (fnPanel) fnPanel.hidden = true;
+    if (fnTog) {
+      fnTog.setAttribute("aria-expanded", "false");
+      fnTog.textContent = "Functions \u25be";
+    }
     refreshFormulaPreview();
     openShellDialog("ps-formula-dialog");
   }
@@ -1535,12 +1831,41 @@
       return;
     }
     msg.textContent = "";
-    var n = Math.min(6, nRows(t));
-    var values = compiled.run(t.columns, nRows(t)).slice(0, n);
-    prev.textContent = "First values: " + values.map(function (v) {
+    var total = nRows(t);
+    var values = compiled.run(t.columns, total);
+    var fmtv = function (v) {
       return v == null ? "\u2014"
         : typeof v === "number" ? String(Number(v.toPrecision(6))) : String(v);
-    }).join(", ");
+    };
+    prev.textContent = "";
+    var refs = compiled.refs || [];
+    if (refs.length && refs.length <= 5 && total) {
+      // Inputs BESIDE the result for the first rows, so the row-by-row
+      // idea is visible: a hole in an input visibly becomes a missing
+      // result (or, under ignore_missing, visibly does not). Wide
+      // formulas (6+ columns) fall back to the plain first-values line.
+      var nres = Math.min(3, total);
+      var tab = mkEl("table"), thr = mkEl("tr");
+      for (var ri = 0; ri < refs.length; ri++)
+        thr.appendChild(mkEl("th", "", refs[ri]));
+      thr.appendChild(mkEl("th", "ps-fprev-res",
+        "\u2192 " + (el("ps-formula-name").value || "result")));
+      tab.appendChild(thr);
+      for (var rr = 0; rr < nres; rr++) {
+        var tr = mkEl("tr");
+        for (ri = 0; ri < refs.length; ri++)
+          tr.appendChild(mkEl("td", "",
+            fmtv(t.columns[refs[ri]] ? t.columns[refs[ri]][rr] : null)));
+        tr.appendChild(mkEl("td", "ps-fprev-res", fmtv(values[rr])));
+        tab.appendChild(tr);
+      }
+      prev.appendChild(tab);
+      prev.appendChild(mkEl("div", "ps-fprev-note",
+        "first " + nres + " of " + total + " rows"));
+    } else {
+      prev.textContent = "First values: " +
+        values.slice(0, Math.min(6, total)).map(fmtv).join(", ");
+    }
   }
   function submitFormulaDialog() {
     var res = saveComputedColumn(
@@ -1995,7 +2320,7 @@
   // switching analysis type within a tab keeps that tab's memory - the
   // same semantics the single-chart shell had.
   var PROJECT = {
-    version: 3,
+    version: 4,
     id: null,
     name: "Untitled project",
     table: null,
@@ -2244,7 +2569,7 @@
   function projectSnapshot() {
     var t = PROJECT.table;
     return {
-      version: 3,
+      version: 4,
       savedAt: new Date().toISOString(),
       id: PROJECT.id,
       name: PROJECT.name,
@@ -2514,9 +2839,9 @@
   }
   function migrateSnapshot(input) {
     if (!input || typeof input !== "object") return null;
-    if (input.version === 3) return input;
+    if (input.version === 4) return input;
     if (input.version === 2) {
-      return {
+      input = {
         version: 3,
         id: input.id || newProjectId(),
         name: input.name || (input.table && input.table.name) || "Untitled project",
@@ -2528,6 +2853,22 @@
         activeChart: "c1",
         ui: input.ui || { dataOpen: false, workspace: "chart" }
       };
+    }
+    if (input.version === 3) {
+      // v3 -> v4 is the formula vocabulary change (Aug 2026): the old
+      // engine's MEAN/SD/MEDIAN/MIN/MAX/SUM were whole-column
+      // aggregates, the new ones are jamovi's row-wise family, so a
+      // saved formula must be rewritten to its V-form or it would
+      // silently change meaning (or error) on load. The rewrite is
+      // token-exact and gated HERE, on the version, never on content.
+      var comp = input.table && input.table.computed;
+      if (comp && window.PSFormula && window.PSFormula.migrateVocabulary) {
+        for (var cn in comp)
+          if (Object.prototype.hasOwnProperty.call(comp, cn))
+            comp[cn] = window.PSFormula.migrateVocabulary(comp[cn]);
+      }
+      input.version = 4;
+      return input;
     }
     return null;
   }
@@ -14396,6 +14737,31 @@
     });
     el("ps-formula-save").addEventListener("click", submitFormulaDialog);
     el("ps-formula-input").addEventListener("input", refreshFormulaPreview);
+    // Hand-editing the formula dismisses the recipe picker: the box is
+    // the truth, and once the text no longer came from the choices the
+    // choices would be describing someone else's formula. Programmatic
+    // writes never fire input, so recipe writes cannot dismiss
+    // themselves.
+    el("ps-formula-input").addEventListener("input", function () {
+      if (!FORMULA_RECIPE) return;
+      FORMULA_RECIPE = null;
+      var pk = el("ps-formula-picker");
+      if (pk) { pk.hidden = true; pk.innerHTML = ""; }
+      renderFormulaCombine();
+    });
+    el("ps-formula-combine").addEventListener("click", function (e) {
+      var b = e.target && e.target.closest
+        ? e.target.closest("[data-formula-recipe]") : null;
+      if (!b) return;
+      formulaRecipeStart(b.getAttribute("data-formula-recipe"));
+    });
+    el("ps-fn-toggle").addEventListener("click", function () {
+      var panel = el("ps-fn-panel");
+      var open = panel.hidden;
+      panel.hidden = !open;
+      this.setAttribute("aria-expanded", open ? "true" : "false");
+      this.textContent = "Functions " + (open ? "\u25b4" : "\u25be");
+    });
     el("ps-formula-input").addEventListener("keydown", function (e) {
       if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault(); submitFormulaDialog();
