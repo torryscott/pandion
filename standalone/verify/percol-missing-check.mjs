@@ -155,22 +155,70 @@ const panel = await page.evaluate(async () => {
     await s(300);
     window.PS_SHELL.selectVariable('rating');
     await s(400);
+    // t4-134: the state is an explicit RADIO pair now, the box exists
+    // only when forked, and a live count line ties the list to its
+    // consequence in this column.
     const own = { label: document.getElementById('ps-variable-missing-col-label').textContent,
+                  ownChecked: document.getElementById('ps-missing-mode-own').checked,
+                  wrapHidden: document.getElementById('ps-missing-own-wrap').hidden,
                   value: document.getElementById('ps-variable-missing-col').value,
-                  ph: document.getElementById('ps-variable-missing-col').placeholder,
-                  hint: document.getElementById('ps-variable-missing-col-hint').textContent };
+                  hint: document.getElementById('ps-variable-missing-col-hint').textContent,
+                  dsHint: document.getElementById('ps-missing-dataset-hint').textContent };
     window.PS_SHELL.selectVariable('errors');
     await s(400);
-    const inherit = { value: document.getElementById('ps-variable-missing-col').value,
-                      ph: document.getElementById('ps-variable-missing-col').placeholder };
+    const inherit = { dsChecked: document.getElementById('ps-missing-mode-dataset').checked,
+                      wrapHidden: document.getElementById('ps-missing-own-wrap').hidden,
+                      optDs: document.getElementById('ps-missing-opt-dataset').textContent,
+                      hint: document.getElementById('ps-variable-missing-col-hint').textContent };
     return { own, inherit };
 });
-ok(/rating/.test(panel.own.label) && panel.own.value === '9',
-   `a column with its own list shows it, under its own name ` +
-   `("${panel.own.label}" = "${panel.own.value}")`);
-ok(panel.inherit.value === '' && /using the dataset labels/.test(panel.inherit.ph),
-   `and a column without one shows an EMPTY box whose placeholder says what ` +
-   `it is inheriting, so blank never reads as "no labels" ("${panel.inherit.ph}")`);
+ok(/rating/.test(panel.own.label) && panel.own.ownChecked &&
+   !panel.own.wrapHidden && panel.own.value === '9',
+   `a column with its own list shows the OWN radio checked and the list ` +
+   `in its box ("${panel.own.label}" = "${panel.own.value}")`);
+ok(/Marking \d+ cell/.test(panel.own.hint) &&
+   /dataset labels would mark/.test(panel.own.hint),
+   `with a live count against the dataset alternative ` +
+   `("${panel.own.hint}")`);
+ok(/except/.test(panel.own.dsHint) && /rating/.test(panel.own.dsHint),
+   `and the dataset field names its exceptions, so "every variable" is ` +
+   `never silently untrue ("${panel.own.dsHint}")`);
+ok(panel.inherit.dsChecked && panel.inherit.wrapHidden &&
+   /Use the dataset labels: /.test(panel.inherit.optDs),
+   `a column without one shows the DATASET radio checked, naming what it ` +
+   `inherits, with no box at all ("${panel.inherit.optDs}")`);
+ok(/matches .* in errors/.test(panel.inherit.hint),
+   `and its count line speaks about THIS column ` +
+   `("${panel.inherit.hint}")`);
+
+console.log('case 6b: forking pre-fills a COPY, and the radio walks back');
+const fork = await page.evaluate(async () => {
+    const s = ms => new Promise(r => setTimeout(r, ms));
+    window.PS_SHELL.selectVariable('errors');
+    await s(300);
+    document.getElementById('ps-missing-mode-own').click();
+    await s(700);
+    const t = window.PS_SHELL.project.table;
+    const afterFork = {
+        box: document.getElementById('ps-variable-missing-col').value,
+        stored: t.missingTokensByCol && t.missingTokensByCol.errors
+            ? t.missingTokensByCol.errors.slice() : null
+    };
+    document.getElementById('ps-missing-mode-dataset').click();
+    await s(700);
+    const afterBack = {
+        stored: !!(t.missingTokensByCol && t.missingTokensByCol.errors),
+        dsChecked: document.getElementById('ps-missing-mode-dataset').checked
+    };
+    return { afterFork, afterBack };
+});
+ok(fork.afterFork.box !== '' &&
+   String(fork.afterFork.stored) === fork.afterFork.box.split(', ').join(','),
+   `forking pre-fills the box with a persisted COPY of the dataset ` +
+   `labels, so replace-semantics read as editing your own copy ` +
+   `("${fork.afterFork.box}")`);
+ok(!fork.afterBack.stored && fork.afterBack.dsChecked,
+   'and the dataset radio deletes the override, falling back whole');
 
 console.log('case R: a rename carries the column\'s own missing labels with it');
 // The one keyed store the rename did not carry, and losing it is not

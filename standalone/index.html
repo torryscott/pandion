@@ -1502,6 +1502,17 @@
     padding: 4px 9px;
   }
   .ps-fn-nomatch { padding: 10px 12px; font-size: 12px; color: var(--ps-muted); }
+  /* The missing-values choice: two radio rows, then the own-labels box
+     when forked. The radio IS the state, so no placeholder ever has to
+     carry it again. */
+  .ps-missing-choice { display: flex; flex-direction: column; gap: 5px;
+    margin: 2px 0 7px; }
+  .ps-missing-opt { display: flex; align-items: baseline; gap: 7px;
+    font-size: 12.5px; color: var(--ps-ink-2); cursor: pointer; }
+  .ps-missing-opt input { accent-color: var(--ps-accent); flex-shrink: 0;
+    position: relative; top: 1px; }
+  #ps-missing-own-wrap { margin: 2px 0 4px 23px; }
+  #ps-variable-missing-col { width: 100%; box-sizing: border-box; }
   .ps-fn-panel {
     border: 1px solid var(--ps-l1); border-radius: var(--ps-r-md);
     margin-top: 7px; max-height: 200px; overflow: auto;
@@ -4404,20 +4415,43 @@
         </div>
         <div class="ps-inspector-section">
           <!-- t3-58a: one shared list cannot say "-99 means missing in Age,
-               9 means missing in a rating item, 0 is real in Errors". The
-               per-column field leads, because this panel is headed
-               "Inspecting <name>" and that is the scope a reader assumes. -->
-          <label class="ps-inspector-field">
-            <span id="ps-variable-missing-col-label">Missing labels for this variable</span>
-            <input id="ps-variable-missing-col" type="text" placeholder="">
-          </label>
+               9 means missing in a rating item, 0 is real in Errors".
+               t4-134 (Torry, Aug 11 2026: even he was not sure how the two
+               boxes related): the inheritance STATE was carried by a
+               placeholder and the override's replace-semantics were never
+               stated. Now the choice is an explicit radio pair, forking
+               PRE-FILLS a copy of the dataset labels (so "replace" becomes
+               "edit your own copy" and deleting a code says it is real
+               here), and a live count line ties every edit to its
+               consequence in THIS column. -->
+          <span class="ps-inspector-section-title"
+                id="ps-variable-missing-col-label">Missing values</span>
+          <div class="ps-missing-choice" role="radiogroup"
+               aria-label="Which missing-value labels this variable uses">
+            <label class="ps-missing-opt">
+              <input type="radio" name="ps-missing-mode"
+                     id="ps-missing-mode-dataset" value="dataset">
+              <span id="ps-missing-opt-dataset">Use the dataset labels</span>
+            </label>
+            <label class="ps-missing-opt">
+              <input type="radio" name="ps-missing-mode"
+                     id="ps-missing-mode-own" value="own">
+              <span id="ps-missing-opt-own">Give this variable its own labels</span>
+            </label>
+          </div>
+          <div id="ps-missing-own-wrap" hidden>
+            <input id="ps-variable-missing-col" type="text"
+                   aria-label="This variable's own missing-value labels">
+          </div>
           <div class="ps-loader-hint" id="ps-variable-missing-col-hint"></div>
           <label class="ps-inspector-field" style="margin-top:10px;">
             Dataset missing-value labels
             <input id="ps-variable-missing" type="text"
                    placeholder="NA, N/A, .">
           </label>
-          <div class="ps-loader-hint">Used by every variable that has no list of its own. Blank cells are always missing.</div>
+          <div class="ps-loader-hint" id="ps-missing-dataset-hint">Used by
+            every variable that has no list of its own. Blank cells are
+            always missing.</div>
         </div>
       </div>
     </div>
