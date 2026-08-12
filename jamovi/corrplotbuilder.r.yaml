@@ -6,7 +6,7 @@ jrs:   '1.1'
 items:
     - name: widget
       title: Correlation Matrix
-      type: Svg
+      type: Html
       visible: true
 
     - name: snapshotImage

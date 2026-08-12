@@ -6,7 +6,7 @@ jrs:   '1.1'
 items:
     - name: widget
       title: Distribution
-      type: Svg
+      type: Html
       visible: true
 
     # Native static copy of the chart (Jul 2026 PROTOTYPE, Distribution
