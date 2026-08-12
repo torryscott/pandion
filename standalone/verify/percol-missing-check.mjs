@@ -184,96 +184,118 @@ ok(!resting.datasetFieldInRail,
    'and the DATASET-wide field is no longer inside the per-variable ' +
    'panel, which was the second cause of the busy feeling');
 
-console.log('case 6: the inspector says which list is in force');
-const panel = await page.evaluate(async () => {
+console.log('case 6: the chips say what counts, each with its own cost');
+// t4-137. Each code is a chip carrying its own live match count, so
+// cause and consequence sit in one glyph; the blank chip is permanent
+// and unremovable, making "blank always counts" a visible fact. The
+// expected counts are recomputed here from the raw text, the same way
+// the app reads it, so the assertion is exact without hand-copying the
+// fixture.
+const chipsFor = async (col) => page.evaluate(async (c) => {
     const s = ms => new Promise(r => setTimeout(r, ms));
-    window.PS_SHELL.setWorkspace('data');
-    await s(300);
-    window.PS_SHELL.selectVariable('rating');
-    await s(400);
-    document.getElementById('ps-variable-missing-toggle').click();
-    await s(300);
-    const own = { name: document.getElementById('ps-missing-varname').textContent,
-                  ownChecked: document.getElementById('ps-missing-mode-own').checked,
-                  wrapHidden: document.getElementById('ps-missing-own-wrap').hidden,
-                  value: document.getElementById('ps-variable-missing-col').value,
-                  readout: document.getElementById('ps-variable-missing-col-hint').innerText,
-                  dsHint: document.getElementById('ps-missing-dataset-hint').textContent,
-                  ruleOwn: document.getElementById('ps-missing-rule').textContent };
-    window.PS_SHELL.selectVariable('errors');
-    await s(400);
-    const inherit = { dsChecked: document.getElementById('ps-missing-mode-dataset').checked,
-                      wrapHidden: document.getElementById('ps-missing-own-wrap').hidden,
-                      optDs: document.getElementById('ps-missing-opt-dataset').textContent,
-                      optOwn: document.getElementById('ps-missing-opt-own').textContent,
-                      readout: document.getElementById('ps-variable-missing-col-hint').innerText };
-    return { own, inherit };
-});
-ok(panel.own.name === 'rating' && panel.own.ownChecked &&
-   !panel.own.wrapHidden && panel.own.value === '9',
-   `a column with its own list shows the OWN radio checked and the list ` +
-   `in its box (name "${panel.own.name}", list "${panel.own.value}")`);
-ok(/of \d+ cells are missing/.test(panel.own.readout),
-   `with a readout that leads with the TOTAL missing, so the parts can ` +
-   `never read as rival numbers ("${panel.own.readout.split('\n')[0]}")`);
-ok(/except \d+ variable/.test(panel.own.dsHint),
-   `and the dataset field COUNTS its exceptions rather than naming them, ` +
-   `so one long instrument name cannot wrap the line away ` +
-   `("${panel.own.dsHint}")`);
-ok(/\(this variable's list\)\.$/.test(panel.own.ruleOwn),
-   `the resting rule follows the mode, naming the variable's OWN list ` +
-   `("${panel.own.ruleOwn}")`);
-ok(panel.inherit.dsChecked && panel.inherit.wrapHidden &&
-   /^Use the dataset list: /.test(panel.inherit.optDs),
-   `a column without one shows the DATASET radio checked, naming what it ` +
-   `inherits, with no box at all ("${panel.inherit.optDs}")`);
-ok(panel.inherit.optOwn === 'Give this variable its own list',
-   `and the other radio never carries the variable name, so a long name ` +
-   `cannot wrap it ("${panel.inherit.optOwn}")`);
-
-console.log('case 6b: forking pre-fills a COPY, and the radio walks back');
-const fork = await page.evaluate(async () => {
-    const s = ms => new Promise(r => setTimeout(r, ms));
-    window.PS_SHELL.selectVariable('errors');
-    await s(300);
+    window.PS_SHELL.selectVariable(c);
+    await s(350);
     if (document.getElementById('ps-variable-missing-wrap').hidden)
         document.getElementById('ps-variable-missing-toggle').click();
     await s(250);
-    document.getElementById('ps-missing-mode-own').click();
-    await s(700);
     const t = window.PS_SHELL.project.table;
-    const afterFork = {
-        box: document.getElementById('ps-variable-missing-col').value,
-        readout: document.getElementById('ps-variable-missing-col-hint').innerText,
+    const raw = t.raw[c].map(v => String(v == null ? '' : v).trim());
+    return {
+        raw,
+        dsLen: (t.missingTokens || ['NA']).length,
+        chips: Array.from(document.querySelectorAll(
+            '#ps-missing-chips .ps-missing-chip')).map(ch => ({
+                text: ch.textContent.replace(/\u2715/g, '').trim(),
+                dead: ch.classList.contains('ps-missing-chip-dead'),
+                blank: ch.classList.contains('ps-missing-chip-blank'),
+                removable: !!ch.querySelector('.ps-missing-chip-x')
+            })),
+        agg: document.getElementById('ps-missing-agg').textContent,
+        state: document.getElementById('ps-missing-state').textContent,
+        rule: document.getElementById('ps-missing-rule').textContent
+    };
+}, col);
+const rating6 = await chipsFor('rating');
+const nines = rating6.raw.filter(v => v === '9').length;
+const blanks6 = rating6.raw.filter(v => v === '').length;
+ok(rating6.chips[0].blank && !rating6.chips[0].removable &&
+   rating6.chips[0].text === 'blank(' + blanks6 + ')',
+   `the blank chip leads, carries its count, and has no remove button: ` +
+   `"blank always counts" is a fact you can see (` +
+   rating6.chips[0].text + ')');
+ok(rating6.chips.length === 2 &&
+   rating6.chips[1].text === '9(' + nines + ')' &&
+   rating6.chips[1].removable,
+   `the column's own code is a chip with ITS cost on it ` +
+   `(${rating6.chips[1].text})`);
+ok(/\(this variable's list\)\.$/.test(rating6.rule) &&
+   /^Different from the dataset/.test(rating6.state),
+   'the rule and the state line both say this variable differs');
+const errors6 = await chipsFor('errors');
+ok(errors6.chips.length === errors6.dsLen + 1 &&
+   errors6.chips[1].text.indexOf('NA(') === 0,
+   `an inheriting column shows every dataset code as a chip, one per ` +
+   `code plus blank (${errors6.chips.map(c => c.text)})`);
+ok(/^Same as the rest of the dataset\.$/.test(errors6.state),
+   'and its state line says so');
+
+console.log('case 6b: editing the chips IS choosing the list');
+// Adding a code forks; removing back to the dataset set UN-forks; the
+// revert link drops the override whole. The state line can never lie
+// because "different" is true exactly when the set differs.
+const forked = await page.evaluate(async () => {
+    const s = ms => new Promise(r => setTimeout(r, ms));
+    const t = window.PS_SHELL.project.table;
+    const expected = (t.missingTokens || ['NA']).concat('-99');
+    const add = document.getElementById('ps-missing-add');
+    add.value = '-99';
+    add.dispatchEvent(new Event('change', { bubbles: true }));
+    await s(700);
+    const afterAdd = {
+        expected,
         stored: t.missingTokensByCol && t.missingTokensByCol.errors
             ? t.missingTokensByCol.errors.slice() : null,
-        focusStayed: document.activeElement.id !== 'ps-variable-missing-col'
+        state: document.getElementById('ps-missing-state').textContent,
+        hasRevert: !!document.getElementById('ps-missing-usedataset')
     };
-    document.getElementById('ps-missing-mode-dataset').click();
+    const x = Array.from(document.querySelectorAll('.ps-missing-chip-x'))
+        .find(b => b.getAttribute('aria-label').indexOf('-99') !== -1);
+    x.click();
     await s(700);
-    const afterBack = {
+    const afterRemove = {
         stored: !!(t.missingTokensByCol && t.missingTokensByCol.errors),
-        dsChecked: document.getElementById('ps-missing-mode-dataset').checked
+        state: document.getElementById('ps-missing-state').textContent
     };
-    return { afterFork, afterBack };
+    return { afterAdd, afterRemove };
 });
-ok(fork.afterFork.box !== '' &&
-   String(fork.afterFork.stored) === fork.afterFork.box.split(', ').join(','),
-   `forking pre-fills the box with a persisted COPY of the dataset ` +
-   `labels, so replace-semantics read as editing your own copy ` +
-   `("${fork.afterFork.box}")`);
-ok(fork.afterFork.focusStayed,
-   'and focus stays on the radio, so a keyboard user can still arrow ' +
-   'back to the other option');
-ok(!fork.afterBack.stored && fork.afterBack.dsChecked,
-   'the dataset radio deletes the override, falling back whole');
+ok(String(forked.afterAdd.stored) === String(forked.afterAdd.expected) &&
+   /^Different from the dataset/.test(forked.afterAdd.state) &&
+   forked.afterAdd.hasRevert,
+   'adding a code forks the list and the state line discloses it, with ' +
+   'a one-click way back');
+ok(!forked.afterRemove.stored &&
+   /^Same as the rest of the dataset\.$/.test(forked.afterRemove.state),
+   'removing it back to the dataset set UN-forks automatically, so an ' +
+   'identical list is never claimed to be different');
+const reverted = await page.evaluate(async () => {
+    const s = ms => new Promise(r => setTimeout(r, ms));
+    const t = window.PS_SHELL.project.table;
+    const add = document.getElementById('ps-missing-add');
+    add.value = '-77';
+    add.dispatchEvent(new Event('change', { bubbles: true }));
+    await s(700);
+    document.getElementById('ps-missing-usedataset').click();
+    await s(700);
+    return !!(t.missingTokensByCol && t.missingTokensByCol.errors);
+});
+ok(!reverted, 'and the revert link drops the override whole');
 
-console.log('case 6c: the readout never prints a count of zero');
-// t4-135, the field failure: "Marking 0 cells" beside "5 blank cells are
-// missing" read as a contradiction. Two rules make that unprintable -
-// the total leads and every zero collapses into a clause. This walks a
-// matrix of shapes and asserts the rule holds in every one, which is a
-// stronger claim than checking any single sentence.
+console.log('case 6c: the aggregate never prints a zero; the chips ' +
+            'carry the split');
+// The t4-135 no-printed-zero rule now governs the AGGREGATE sentence.
+// The chips DO print (0), deliberately: on a chip the zero is a
+// per-code count and the typo warning, and it cannot read as a rival
+// claim because the chips visibly sum to the aggregate.
 const shapes = await page.evaluate(async () => {
     const s = ms => new Promise(r => setTimeout(r, ms));
     window.PS_SHELL.loadTable('shapes',
@@ -292,61 +314,101 @@ const shapes = await page.evaluate(async () => {
         if (document.getElementById('ps-variable-missing-wrap').hidden)
             document.getElementById('ps-variable-missing-toggle').click();
         await s(200);
-        out[c] = document.getElementById('ps-variable-missing-col-hint')
-            .innerText;
+        out[c] = {
+            agg: document.getElementById('ps-missing-agg').textContent.trim(),
+            chips: Array.from(document.querySelectorAll(
+                '#ps-missing-chips .ps-missing-chip')).map(ch =>
+                    ch.textContent.replace(/\u2715/g, '').trim()),
+            dead: Array.from(document.querySelectorAll(
+                '#ps-missing-chips .ps-missing-chip-dead')).length,
+            showHidden: document.getElementById('ps-missing-show').hidden
+        };
     }
     return out;
 });
-ok(/^2 of 3 cells are missing: 1 matches the list, 1 is blank\.$/
-       .test(shapes.bothk.trim()),
-   `both routes present: total first, then the breakdown ` +
-   `("${shapes.bothk.trim()}")`);
-ok(/^2 of 3 cells are missing, all of them blank\.$/
-       .test(shapes.allblank.trim()),
-   `zero labelled collapses to a clause instead of printing 0 ` +
-   `("${shapes.allblank.trim()}")`);
-ok(/^2 of 3 cells are missing\. They all match the list\.$/
-       .test(shapes.alllab.trim()),
-   `and zero blanks collapses the other way ("${shapes.alllab.trim()}")`);
-ok(/^Nothing is missing here\. All 3 cells have a value\.$/
-       .test(shapes.nothing.trim()),
-   `nothing missing opens with a word, never with a 0 ` +
-   `("${shapes.nothing.trim()}")`);
-// A count of 1 must agree with its verb: "1 match the list" makes a
-// reader stop and re-read, which is the exact cost this redesign exists
-// to remove.
-const singulars = await page.evaluate(async () => {
-    const s = ms => new Promise(r => setTimeout(r, ms));
-    window.PS_SHELL.loadTable('sing', ['onelab', 'oneblank'],
-        [['NA', ''], ['5', '2'], ['6', '3']],
-        { onelab: 'nominal', oneblank: 'nominal' });
-    window.PS_SHELL.setWorkspace('data');
-    await s(500);
-    const out = {};
-    for (const c of ['onelab', 'oneblank']) {
-        window.PS_SHELL.selectVariable(c);
-        await s(350);
-        if (document.getElementById('ps-variable-missing-wrap').hidden)
-            document.getElementById('ps-variable-missing-toggle').click();
-        await s(200);
-        out[c] = document.getElementById('ps-variable-missing-col-hint')
-            .innerText.trim();
-    }
-    return out;
-});
-ok(singulars.onelab === '1 of 3 cells is missing. It matches the list.',
-   `one labelled cell agrees with its verb ("${singulars.onelab}")`);
-ok(singulars.oneblank === '1 of 3 cells is missing, and it is blank.',
-   `and so does one blank ("${singulars.oneblank}")`);
+ok(shapes.bothk.agg === '2 of 3 cells are missing.' &&
+   String(shapes.bothk.chips) === 'blank(1),NA(1)',
+   `both routes: the aggregate is the total, the chips are the parts, ` +
+   `and they visibly sum (${shapes.bothk.chips})`);
+ok(shapes.allblank.agg === '2 of 3 cells are missing.' &&
+   String(shapes.allblank.chips) === 'blank(2),NA(0)' &&
+   shapes.allblank.dead === 1,
+   `a code matching nothing wears (0) in grey: the zero is the typo ` +
+   `warning, ON the code it indicts (${shapes.allblank.chips})`);
+ok(shapes.alllab.agg === '2 of 3 cells are missing.' &&
+   String(shapes.alllab.chips) === 'blank(0),NA(2)',
+   `and the all-labelled shape mirrors it (${shapes.alllab.chips})`);
+ok(shapes.nothing.agg === 'Nothing is missing here. All 3 cells have a value.' &&
+   shapes.nothing.showHidden,
+   'nothing missing opens with a word, never a 0, and Show them ' +
+   'withdraws rather than pointing at nothing');
+for (const [col, v] of Object.entries(shapes))
+    ok(!/(^|[^\d])0([^\d]|$)/.test(v.agg),
+       `no zero is printed in the ${col} aggregate, where a zero beside ` +
+       `a count is what read as a contradiction in the field`);
 
-for (const [col, text] of Object.entries(shapes))
-    ok(!/(^|[^\d])0([^\d]|$)/.test(text),
-       `no count of 0 is printed anywhere in the ${col} readout, which is ` +
-       `what makes the reported contradiction structurally impossible`);
+console.log('case 6s: a count of one agrees with its verb');
+const single = await page.evaluate(async () => {
+    const s = ms => new Promise(r => setTimeout(r, ms));
+    window.PS_SHELL.selectVariable('bothk');
+    await s(350);
+    const t = window.PS_SHELL.project.table;
+    window.PS_SHELL.setColumnMissingTokens('bothk', 'zzz');
+    await s(600);
+    const agg = document.getElementById('ps-missing-agg').textContent.trim();
+    window.PS_SHELL.setColumnMissingTokens('bothk', '');
+    await s(400);
+    return agg;
+});
+ok(single === '1 of 3 cells is missing.',
+   `one missing cell agrees with its verb ("${single}")`);
+
+console.log('case 6e: Show them paints the cells, live, and lets go');
+const showThem = await page.evaluate(async () => {
+    const s = ms => new Promise(r => setTimeout(r, ms));
+    window.PS_SHELL.selectVariable('allblank');
+    await s(350);
+    if (document.getElementById('ps-variable-missing-wrap').hidden)
+        document.getElementById('ps-variable-missing-toggle').click();
+    await s(250);
+    document.getElementById('ps-missing-show').click();
+    await s(400);
+    const lit = document.querySelectorAll('td.ps-grid-missinghit').length;
+    const label = document.getElementById('ps-missing-show').textContent;
+    // The highlight is LIVE: declaring another code while it is on
+    // paints the newly missing cells the moment the chip lands.
+    const add = document.getElementById('ps-missing-add');
+    add.value = '3';
+    add.dispatchEvent(new Event('change', { bubbles: true }));
+    await s(700);
+    const litAfterAdd = document.querySelectorAll(
+        'td.ps-grid-missinghit').length;
+    // Switching the subject retires the paint.
+    window.PS_SHELL.selectVariable('bothk');
+    await s(400);
+    const litAfterSwitch = document.querySelectorAll(
+        'td.ps-grid-missinghit').length;
+    window.PS_SHELL.setColumnMissingTokens('allblank', '');
+    await s(300);
+    return { lit, label, litAfterAdd, litAfterSwitch };
+});
+ok(showThem.lit === 2 && showThem.label === 'Hide them',
+   `Show them outlines exactly the missing cells in the grid ` +
+   `(${showThem.lit}) and offers the way back`);
+ok(showThem.litAfterAdd === 3,
+   'the highlight is LIVE: declaring a code while it is on paints the ' +
+   'newly missing cell immediately, which is cause and effect in the ' +
+   'data itself');
+ok(showThem.litAfterSwitch === 0,
+   'and switching variables retires the paint rather than leaving it ' +
+   'behind');
 
 console.log('case 6d: the explanation and the dataset list are one click away');
 const doors = await page.evaluate(async () => {
     const s = ms => new Promise(r => setTimeout(r, ms));
+    if (document.getElementById('ps-variable-missing-wrap').hidden)
+        document.getElementById('ps-variable-missing-toggle').click();
+    await s(250);
     document.getElementById('ps-missing-explain').click();
     await s(400);
     const dlg = document.getElementById('ps-missing-dialog');
@@ -358,7 +420,6 @@ const doors = await page.evaluate(async () => {
     };
     document.getElementById('ps-missing-dialog-close').click();
     await s(300);
-    // The second door: no variable need be selected to reach it.
     window.PS_SHELL.runCommand('data-missing');
     await s(400);
     out.viaMenu = getComputedStyle(dlg).display === 'flex';
@@ -370,8 +431,7 @@ ok(doors.open && doors.field,
    'How this works opens a dialog carrying BOTH the explanation and the ' +
    'dataset-wide list, since neither is about the variable being inspected');
 ok(/blank/i.test(doors.text) && /REPLACES/.test(doors.text),
-   'the explanation states the invariant and the replace-semantics, which ' +
-   'is the model the rail can only gesture at');
+   'the explanation states the invariant and the replace-semantics');
 ok(doors.described === 'ps-missing-dialog-lead',
    'and the dialog describes itself, so a screen reader hears the model ' +
    'on open rather than landing silently on a button');
