@@ -12,6 +12,205 @@
   // other hosts (notably jamovi), and suppress it only in this shell.
   window.__gb2ShowDeveloperDiagnosticsInChartSettings = false;
 
+  // ================================================================ dropper
+  // t4-140. Safari and Firefox have no native EyeDropper API, so the
+  // engine's color picker hid its dropper button there ("the color
+  // dropper feature is missing", Torry's Safari report). This is a
+  // same-contract polyfill - new EyeDropper().open() resolves
+  // {sRGBHex} or rejects on cancel - installed only when the global is
+  // absent, so Chrome/Edge/Electron keep the real one (which can sample
+  // OTHER windows; this one can sample anything in the app, which is
+  // the case that matters here: match a color already on the chart).
+  //
+  // How a pixel is read without a screen API: a full-viewport capture
+  // overlay owns the pointer (so a click samples a bar instead of
+  // opening its editor, and never bubbles to the engine's outside-click
+  // closers); the color under the cursor comes from
+  // document.elementsFromPoint - skip our own chrome, then walk the
+  // stack top-down collecting paints (SVG fill/stroke via computed
+  // style, IMG/CANVAS via a pixel read, HTML background-color) until
+  // one is opaque, and composite the translucent ones over it src-over
+  // on a 1x1 canvas, which is also the universal color-string parser.
+  // That matches what the eye (and the native dropper) sees on a
+  // translucent mark. Known miss: gradient fills (url() paints) fall
+  // through to whatever is beneath them.
+  if (typeof window.EyeDropper !== "function") (function () {
+    var px = document.createElement("canvas");
+    px.width = px.height = 1;
+    var pctx = px.getContext("2d", { willReadFrequently: true });
+    function parseColor(str) {
+      if (!str || str === "none") return null;
+      pctx.clearRect(0, 0, 1, 1);
+      pctx.globalAlpha = 1;
+      pctx.fillStyle = "#000";
+      try { pctx.fillStyle = str; } catch (e) { return null; }
+      // An unparseable string (url(#grad), currentcolor leaks) leaves
+      // fillStyle at #000 - disambiguate real black via the string.
+      if (pctx.fillStyle === "#000000" &&
+          !/^#0{3,8}$|^black$|^rgba?\(\s*0[,\s]+0[,\s]+0/i.test(str))
+        return null;
+      pctx.fillRect(0, 0, 1, 1);
+      var d = pctx.getImageData(0, 0, 1, 1).data;
+      return d[3] === 0 ? null
+        : { r: d[0], g: d[1], b: d[2], a: d[3] / 255 };
+    }
+    function pixelOf(el, x, y) {
+      try {
+        var r = el.getBoundingClientRect();
+        if (!r.width || !r.height) return null;
+        var c = document.createElement("canvas");
+        c.width = c.height = 1;
+        var g = c.getContext("2d");
+        var sx = (x - r.left) * ((el.naturalWidth || el.width) / r.width);
+        var sy = (y - r.top) * ((el.naturalHeight || el.height) / r.height);
+        g.drawImage(el, sx, sy, 1, 1, 0, 0, 1, 1);
+        var d = g.getImageData(0, 0, 1, 1).data;
+        return d[3] === 0 ? null
+          : { r: d[0], g: d[1], b: d[2], a: d[3] / 255 };
+      } catch (e) { return null; }   // tainted or unreadable
+    }
+    function paintOf(el, x, y) {
+      var tag = (el.tagName || "").toUpperCase();
+      if (tag === "IMG" || tag === "CANVAS") return pixelOf(el, x, y);
+      var cs;
+      try { cs = getComputedStyle(el); } catch (e) { return null; }
+      var alpha = parseFloat(cs.opacity);
+      if (!(alpha > 0)) return null;
+      if (el.ownerSVGElement || tag === "SVG") {
+        var fill = parseColor(cs.fill);
+        if (fill) {
+          fill.a *= alpha * (parseFloat(cs.fillOpacity) || 1);
+          return fill.a > 0 ? fill : null;
+        }
+        var stroke = parseColor(cs.stroke);
+        if (stroke) {
+          stroke.a *= alpha * (parseFloat(cs.strokeOpacity) || 1);
+          return stroke.a > 0 ? stroke : null;
+        }
+        return null;
+      }
+      var bg = parseColor(cs.backgroundColor);
+      if (bg) { bg.a *= alpha; return bg.a > 0 ? bg : null; }
+      return null;
+    }
+    function hex2(n) { return (n < 16 ? "0" : "") + n.toString(16); }
+    function colorAt(x, y, ours) {
+      var stack, layers = [], base = null;
+      try { stack = document.elementsFromPoint(x, y); } catch (e) { stack = []; }
+      for (var i = 0; i < stack.length; i++) {
+        var el = stack[i];
+        if (ours(el)) continue;
+        var p = paintOf(el, x, y);
+        if (!p) continue;
+        if (p.a >= 0.999) { base = p; break; }
+        layers.push(p);
+      }
+      // Composite the translucent layers over the first opaque one
+      // (page-white when nothing opaque was hit), bottom-up src-over.
+      var r = base ? base.r : 255, g = base ? base.g : 255,
+          b = base ? base.b : 255;
+      for (var j = layers.length - 1; j >= 0; j--) {
+        var L = layers[j];
+        r = L.r * L.a + r * (1 - L.a);
+        g = L.g * L.a + g * (1 - L.a);
+        b = L.b * L.a + b * (1 - L.a);
+      }
+      return "#" + hex2(Math.round(r)) + hex2(Math.round(g)) +
+        hex2(Math.round(b));
+    }
+    window.EyeDropper = function () {
+      this.open = function (opts) {
+        return new Promise(function (resolve, reject) {
+          var overlay = document.createElement("div");
+          overlay.id = "ps-eyedrop-overlay";
+          overlay.style.cssText = "position:fixed;inset:0;" +
+            "z-index:2147483000;cursor:crosshair;background:transparent;" +
+            "touch-action:none;";
+          // The live readout: swatch + hex + the honest scope note (the
+          // native dropper samples the whole screen; this one samples
+          // the app). aria-hidden - the committed color is announced by
+          // the picker's own controls.
+          var chip = document.createElement("div");
+          chip.id = "ps-eyedrop-chip";
+          chip.setAttribute("aria-hidden", "true");
+          chip.style.cssText = "position:fixed;left:-9999px;top:-9999px;" +
+            "z-index:2147483001;pointer-events:none;display:flex;" +
+            "align-items:center;gap:6px;padding:4px 8px;background:#fff;" +
+            "border:1px solid #bbb;border-radius:5px;" +
+            "box-shadow:0 2px 8px rgba(0,0,0,0.18);font:11px/1.3 " +
+            "-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;" +
+            "color:#333;";
+          var sw = document.createElement("span");
+          sw.style.cssText = "width:14px;height:14px;border-radius:3px;" +
+            "border:1px solid rgba(0,0,0,0.25);flex-shrink:0;";
+          var tx = document.createElement("span");
+          tx.style.cssText = "font-family:monospace;";
+          var hint = document.createElement("span");
+          hint.style.cssText = "color:#888;";
+          hint.textContent = "click a color in the app \u00b7 Esc cancels";
+          chip.appendChild(sw); chip.appendChild(tx); chip.appendChild(hint);
+          var ours = function (el) {
+            return el === overlay || el === chip || chip.contains(el);
+          };
+          var last = "#ffffff";
+          function place(e) {
+            last = colorAt(e.clientX, e.clientY, ours);
+            sw.style.background = last;
+            tx.textContent = last;
+            var cw = chip.offsetWidth || 200, ch = chip.offsetHeight || 26;
+            var lx = e.clientX + 16, ly = e.clientY + 18;
+            if (lx + cw > window.innerWidth - 4) lx = e.clientX - cw - 12;
+            if (ly + ch > window.innerHeight - 4) ly = e.clientY - ch - 12;
+            chip.style.left = lx + "px";
+            chip.style.top = ly + "px";
+          }
+          function done(hexOrNull) {
+            window.removeEventListener("keydown", onKey, true);
+            if (opts && opts.signal)
+              opts.signal.removeEventListener("abort", onAbort);
+            overlay.remove(); chip.remove();
+            if (hexOrNull) resolve({ sRGBHex: hexOrNull });
+            else {
+              var err = new Error("The user canceled the selection.");
+              err.name = "AbortError";
+              reject(err);
+            }
+          }
+          function onKey(e) {
+            if (e.key !== "Escape") return;
+            // WINDOW capture runs before any document-capture listener,
+            // so this preempts the engine's Esc authority: the first
+            // Escape cancels sampling and KEEPS the picker open, the
+            // second reaches the engine and closes the picker - a
+            // proper layered exit.
+            e.preventDefault(); e.stopPropagation();
+            done(null);
+          }
+          function onAbort() { done(null); }
+          overlay.addEventListener("pointermove", place);
+          overlay.addEventListener("pointerdown", function (e) {
+            e.preventDefault(); e.stopPropagation();
+          });
+          overlay.addEventListener("pointerup", function (e) {
+            e.preventDefault(); e.stopPropagation();
+            place(e);
+            done(last);
+          });
+          overlay.addEventListener("click", function (e) {
+            e.preventDefault(); e.stopPropagation();
+          });
+          window.addEventListener("keydown", onKey, true);
+          if (opts && opts.signal) {
+            if (opts.signal.aborted) { onAbort(); return; }
+            opts.signal.addEventListener("abort", onAbort);
+          }
+          document.body.appendChild(overlay);
+          document.body.appendChild(chip);
+        });
+      };
+    };
+  })();
+
   // ================================================================ sample
   // Built-in demo dataset: a dose-response study. condition/score are the
   // M0 columns (the probes pin their statistics); hours/site exercise the

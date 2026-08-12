@@ -18,7 +18,7 @@ computed-variables-check coverage-gaps-check chart-accessibility-check export-ac
 chart-check-check compare-pairs-apa-check chart-from-selection-check chart-groups-check chart-size-check \
 default-style-routes-check column-gestures-check chrome-check clipboard-check copy-image-check copy-moment-check correctness-check \
 data-commandbar-check data-menu-check separator-accessibility-check \
-data-undo-check dates-check doclifecycle-check tab-accessibility-check drag-feel-check \
+data-undo-check dates-check eyedropper-check doclifecycle-check tab-accessibility-check drag-feel-check \
 drag-selection-check outside-canvas-check hmc-list-check hidden-vars-check sigma-freshness-check \
 empty-states-check engine-stamp-check flyout-align-check filter-honesty-check examples-check exclusion-bridge-check \
 find-scope-check findpop-check finish-five-check fitpanes-check formula-unit-check formula-vocab-check formula-recipes-check \
