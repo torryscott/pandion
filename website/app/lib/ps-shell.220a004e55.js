@@ -120,6 +120,26 @@
     }
     window.EyeDropper = function () {
       this.open = function (opts) {
+        // The desktop app (t4-142): Electron 33 ships NO EyeDropper API,
+        // so this polyfill is what runs there - but its main process CAN
+        // read the whole screen. Prefer that bridge: a real OS-wide pick
+        // (instant screenshot overlay, any window, no share dialog).
+        // Only a permission refusal falls back to the in-page sampler.
+        var desk = window.PS_DESKTOP &&
+          typeof window.PS_DESKTOP.pickColor === "function";
+        function inPage() { return inPageSampler(opts); }
+        if (desk) {
+          return window.PS_DESKTOP.pickColor().then(function (res) {
+            if (res && res.ok) return { sRGBHex: res.hex };
+            if (res && res.reason === "permission") return inPage();
+            var err = new Error("The user canceled the selection.");
+            err.name = "AbortError";
+            throw err;
+          }, function () { return inPage(); });
+        }
+        return inPage();
+      };
+      function inPageSampler(opts) {
         return new Promise(function (resolve, reject) {
           var overlay = document.createElement("div");
           overlay.id = "ps-eyedrop-overlay";
@@ -161,7 +181,9 @@
           // OUT of the page. Only rendered when the browser can share a
           // screen - a door to nothing is chrome.
           var canShare = !!(navigator.mediaDevices &&
-            typeof navigator.mediaDevices.getDisplayMedia === "function");
+            typeof navigator.mediaDevices.getDisplayMedia === "function") &&
+            !(window.PS_DESKTOP &&
+              typeof window.PS_DESKTOP.pickColor === "function");
           var banner = document.createElement("div");
           banner.id = "ps-eyedrop-banner";
           banner.style.cssText = "position:fixed;top:10px;left:50%;" +
@@ -368,7 +390,7 @@
           document.body.appendChild(banner);
           document.body.appendChild(chip);
         });
-      };
+      }
     };
   })();
 
