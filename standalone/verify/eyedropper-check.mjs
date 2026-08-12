@@ -358,6 +358,78 @@ ok(errors2.length === 0, 'no page errors across the share drive ' +
    JSON.stringify(errors2.slice(0, 2)));
 await page.close();
 
+// --------------------------------------------------------------- desktop
+// t4-142. Electron 33 ships NO EyeDropper API, so the polyfill runs in
+// the desktop app too - and there the main process can capture the
+// whole screen (eyedrop.js, probed by eyedrop-electron-check). The
+// polyfill must PREFER that bridge: instant OS-wide pick, no in-page
+// overlay, and the dead share door never renders.
+console.log('case 7: the desktop bridge is preferred over in-page sampling');
+page = await browser.newPage({ viewport: { width: 1440, height: 940 } });
+await page.addInitScript(() => {
+    try { delete window.EyeDropper; } catch (e) { window.EyeDropper = undefined; }
+    window.__pickCalls = [];
+    window.PS_DESKTOP = {
+        version: 'probe', platform: 'darwin',
+        pickColor: () => {
+            window.__pickCalls.push(1);
+            return Promise.resolve(window.__pickResult ||
+                { ok: true, hex: '#123456' });
+        }
+    };
+});
+await boot(page);
+const desk = await page.evaluate(async () => {
+    const s = ms => new Promise(r => setTimeout(r, ms));
+    const hex = document.querySelector('[data-role="hex"]');
+    const before = hex.value.toLowerCase();
+    document.querySelector('[data-role="eyedrop"]').click();
+    await s(300);
+    const afterPick = {
+        calls: window.__pickCalls.length,
+        overlay: !!document.getElementById('ps-eyedrop-overlay'),
+        committed: hex.value.toLowerCase(),
+        before
+    };
+    // A cancel commits nothing and opens nothing.
+    window.__pickResult = { ok: false, reason: 'cancel' };
+    document.querySelector('[data-role="eyedrop"]').click();
+    await s(300);
+    const afterCancel = {
+        overlay: !!document.getElementById('ps-eyedrop-overlay'),
+        committed: hex.value.toLowerCase(),
+        pickerOpen: !!hex.offsetParent
+    };
+    // A permission refusal falls back to the in-page sampler, whose
+    // share door must NOT render in the desktop app (Electron wires no
+    // display-media handler - the door would always decline).
+    window.__pickResult = { ok: false, reason: 'permission' };
+    document.querySelector('[data-role="eyedrop"]').click();
+    await s(300);
+    const fallback = {
+        overlay: !!document.getElementById('ps-eyedrop-overlay'),
+        shareBtn: !!document.getElementById('ps-eyedrop-share')
+    };
+    window.dispatchEvent(new KeyboardEvent('keydown',
+        { key: 'Escape', bubbles: true, cancelable: true }));
+    await s(150);
+    return { afterPick, afterCancel, fallback };
+});
+ok(desk.afterPick.calls === 1 && !desk.afterPick.overlay,
+   'the dropper button routes to the desktop bridge with NO in-page ' +
+   'overlay - the OS-wide pick replaces it');
+ok(desk.afterPick.committed === '#123456' &&
+   desk.afterPick.committed !== desk.afterPick.before,
+   `and the picked color lands in the picker, changing it ` +
+   `(${desk.afterPick.before} -> ${desk.afterPick.committed})`);
+ok(!desk.afterCancel.overlay &&
+   desk.afterCancel.committed === '#123456' && desk.afterCancel.pickerOpen,
+   'a cancel commits nothing, opens nothing, and keeps the picker');
+ok(desk.fallback.overlay && !desk.fallback.shareBtn,
+   'a permission refusal falls back to in-page sampling WITHOUT the ' +
+   'share door, which is dead weight in the desktop app');
+await page.close();
+
 // -------------------------------------------------------------- Chromium
 console.log('case 4: where the real API exists, the polyfill stays out');
 page = await browser.newPage({ viewport: { width: 1440, height: 940 } });

@@ -93,6 +93,17 @@ if node standalone/verify/electron-check.mjs; then :; else
         exit "$st"
     fi
 fi
+echo "== eyedrop-electron-check (the desktop OS-wide dropper)"
+# Same opt-in; drives the real pick overlay with a synthetic frame, so a
+# small window flashes briefly. Exit 2 = electron not installed, skipped.
+if bash standalone/verify/run-eyedrop-electron.sh; then :; else
+    st=$?
+    if [ "$st" = "2" ]; then
+        echo "WARN: electron not installed - skipped"
+    else
+        exit "$st"
+    fi
+fi
 PS_PAGE=standalone/dist/pandion-plots.html node standalone/verify/m0-check.mjs
 PS_PAGE=standalone/dist/pandion-plots.html node standalone/verify/m1-shell-check.mjs
 for p in $FEATURE_PROBES; do

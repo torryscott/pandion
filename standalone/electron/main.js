@@ -22,6 +22,7 @@
 //   3. One instance: two windows would share one localStorage autosave
 //      and race it. Second launch focuses the first window.
 const { app, BrowserWindow, Menu, shell, dialog } = require("electron");
+const eyedrop = require("./eyedrop");
 const path = require("path");
 const fs = require("fs");
 
@@ -168,6 +169,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(() => {
+  eyedrop.wire();
     if (process.platform === "darwin") {
       app.setAboutPanelOptions({
         applicationName: "Pandion Plots",

@@ -35,7 +35,10 @@
     },
     "files": [
       "main.js",
-      "preload.js"
+      "preload.js",
+      "eyedrop.js",
+      "eyedrop-preload.js",
+      "eyedrop-overlay.html"
     ],
     "extraResources": [
       {

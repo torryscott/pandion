@@ -1,0 +1,96 @@
+<!doctype html>
+<!-- The dropper's full-screen overlay: the captured frame shown 1:1,
+     a crosshair cursor, and a magnifier loupe chip riding the pointer.
+     Click reports the pixel under the cursor; Escape cancels. Kept
+     self-contained and dependency-free: this window lives for seconds. -->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden;
+    background: #000; cursor: crosshair; user-select: none;
+    font: 11px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif; }
+  #shot { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #chip { position: fixed; left: -9999px; top: -9999px; display: flex;
+    align-items: center; gap: 6px; padding: 4px 8px; background: #fff;
+    border: 1px solid #bbb; border-radius: 5px; color: #333;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.35); pointer-events: none; }
+  #sw { width: 14px; height: 14px; border-radius: 3px;
+    border: 1px solid rgba(0,0,0,0.25); }
+  #hx { font-family: monospace; }
+  #hint { color: #888; }
+  #loupe { border: 1px solid rgba(0,0,0,0.25); border-radius: 4px; }
+</style>
+</head>
+<body>
+<canvas id="shot"></canvas>
+<div id="chip" aria-hidden="true">
+  <span id="sw"></span><span id="hx"></span>
+  <span id="hint">click to pick &#183; Esc cancels</span>
+  <canvas id="loupe" width="96" height="96"></canvas>
+</div>
+<script>
+(function () {
+  "use strict";
+  var src = null;                 // full-resolution frame canvas
+  var shot = document.getElementById("shot");
+  var chip = document.getElementById("chip");
+  var sw = document.getElementById("sw");
+  var hx = document.getElementById("hx");
+  var loupe = document.getElementById("loupe");
+  var last = null;
+  function hex2(n) { return (n < 16 ? "0" : "") + n.toString(16); }
+  window.PS_EYEDROP.onFrame(function (frame) {
+    var img = new Image();
+    img.onload = function () {
+      src = document.createElement("canvas");
+      src.width = frame.w; src.height = frame.h;
+      src.getContext("2d").drawImage(img, 0, 0);
+      // Display 1:1 with the screen: the frame is physical pixels, the
+      // canvas is stretched over the CSS viewport that covers the same
+      // display, so what you see is exactly where you point.
+      shot.width = frame.w; shot.height = frame.h;
+      shot.getContext("2d").drawImage(img, 0, 0);
+      // Probe handshake: input is only meaningful once the frame is
+      // sampleable (a click before this resolves cancel by design -
+      // a human cannot click a screenshot they cannot yet see).
+      window.__edReady = true;
+    };
+    img.src = frame.png;
+  });
+  function sample(e) {
+    if (!src) return;
+    var fx = Math.max(0, Math.min(src.width - 1,
+      Math.round(e.clientX / window.innerWidth * src.width)));
+    var fy = Math.max(0, Math.min(src.height - 1,
+      Math.round(e.clientY / window.innerHeight * src.height)));
+    var d = src.getContext("2d").getImageData(fx, fy, 1, 1).data;
+    last = "#" + hex2(d[0]) + hex2(d[1]) + hex2(d[2]);
+    sw.style.background = last;
+    hx.textContent = last;
+    var g = loupe.getContext("2d");
+    g.imageSmoothingEnabled = false;
+    g.clearRect(0, 0, 96, 96);
+    g.drawImage(src, fx - 5.5, fy - 5.5, 12, 12, 0, 0, 96, 96);
+    g.strokeStyle = "rgba(0,0,0,0.6)";
+    g.strokeRect(44, 44, 8, 8);
+    var cw = chip.offsetWidth || 220, ch = chip.offsetHeight || 100;
+    var lx = e.clientX + 16, ly = e.clientY + 18;
+    if (lx + cw > window.innerWidth - 4) lx = e.clientX - cw - 12;
+    if (ly + ch > window.innerHeight - 4) ly = e.clientY - ch - 12;
+    chip.style.left = lx + "px";
+    chip.style.top = ly + "px";
+  }
+  document.addEventListener("pointermove", sample);
+  document.addEventListener("pointerup", function (e) {
+    sample(e);
+    window.PS_EYEDROP.done(last);
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") window.PS_EYEDROP.done(null);
+  });
+})();
+</script>
+</body>
+</html>

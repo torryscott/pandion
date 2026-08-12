@@ -36,6 +36,10 @@ ipcRenderer.on("ps-menu-paste", () => {
 contextBridge.exposeInMainWorld("PS_DESKTOP", {
   version: version,
   platform: process.platform,
+  // The OS-wide color dropper (t4-142): main captures the screen and
+  // runs the pick overlay; resolves {ok, hex|reason}. The shell's
+  // EyeDropper polyfill prefers this over its in-page sampler.
+  pickColor: () => ipcRenderer.invoke("ps-eyedrop-pick"),
   onOpenFile: (cb) => {
     if (typeof cb !== "function") return;
     deliverFile = cb;
