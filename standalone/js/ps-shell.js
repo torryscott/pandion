@@ -11375,7 +11375,13 @@
     retype(t);
     persist(); syncAll(); render();
   }
-  function setMissingTokens(text) {
+  // opts (all optional, absent = the original behaviour byte for byte):
+  //   clearCol  a variable whose own list is being pushed up here, and
+  //             which must stop being an exception in the SAME history
+  //             step, because to the user it was one action
+  //   mark      the undo label
+  //   toast     a confirmation that leads any re-typing news
+  function setMissingTokens(text, opts) {
     var t = PROJECT.table;
     if (!t) return;
     var list = String(text || "").split(",").map(function (v) {
@@ -11384,7 +11390,9 @@
       return v !== "" && arr.indexOf(v) === i;
     });
     if (JSON.stringify(list) === JSON.stringify(t.missingTokens || [])) return;
-    dataMark("the missing-value labels");
+    dataMark((opts && opts.mark) || "the missing-value labels");
+    if (opts && opts.clearCol && t.missingTokensByCol)
+      delete t.missingTokensByCol[opts.clearCol];
     var prevTokens = tableMissingTokens(t);
     t.missingTokens = list;
     t.edited = true;
@@ -11420,13 +11428,17 @@
     retype(t); validateRoles();
     persist(); syncAll(); render();
     var changed = promoted.concat(demoted);
-    if (changed.length)
-      showToast(changed.slice(0, 3).join(", ") +
+    var note = changed.length
+      ? changed.slice(0, 3).join(", ") +
         (changed.length > 3 ? " and " + (changed.length - 3) + " more" : "") +
         (changed.length === 1 ? " is now " : " are now ") +
         (promoted.length && !demoted.length ? "Continuous"
          : demoted.length && !promoted.length ? "Nominal" : "re-typed") +
-        " \u00b7 the missing labels changed what parses");
+        " \u00b7 the missing labels changed what parses"
+      : "";
+    var lead = (opts && opts.toast) || "";
+    if (lead || note)
+      showToast(lead && note ? lead + " \u00b7 " + note : (lead || note));
   }
   // t3-58a. Empty text CLEARS the override (back to the dataset list) rather
   // than declaring "no tokens at all": a blank field reads as "I have not set
@@ -22410,15 +22422,37 @@
         stateEl.appendChild(document.createTextNode(own
           ? "Different from the dataset now."
           : "Same as the rest of the dataset."));
+        // Two verbs, and only while there is a difference for either to
+        // end. Mirrored wording so the DIRECTION is unmistakable: make
+        // these the dataset's values, or use the dataset's values.
         if (own) {
+          var acts = mkEl("div", "ps-missing-acts");
+          var k = t.order.filter(function (c) {
+            return c !== INSPECTOR_VAR && hasColumnTokens(t, c);
+          }).length;
+          var up = mkEl("button", "ps-linklike",
+            "Make these the dataset's values");
+          up.type = "button";
+          up.id = "ps-missing-todataset";
+          setTip(up, "Every variable that has not been given its own " +
+            "list will use these." + (k ? " The " + k + (k === 1
+              ? " variable with its own list keeps it."
+              : " variables with their own lists keep them.") : ""));
+          up.addEventListener("click", function () {
+            missingPromoteToDataset(INSPECTOR_VAR);
+          });
+          acts.appendChild(up);
           var back = mkEl("button", "ps-linklike",
             "Use the dataset's values");
           back.type = "button";
           back.id = "ps-missing-usedataset";
+          setTip(back, "Drops this variable's own list and follows the " +
+            "dataset again.");
           back.addEventListener("click", function () {
             setColumnMissingTokens(INSPECTOR_VAR, "");
           });
-          stateEl.appendChild(back);
+          acts.appendChild(back);
+          stateEl.appendChild(acts);
         }
       }
       MISSING_LAST_COL = INSPECTOR_VAR;
@@ -22528,6 +22562,35 @@
       return ds.indexOf(v) !== -1;
     });
     setColumnMissingTokens(col, same ? "" : next.join(", "));
+  }
+  // The other direction (t4-139). "Use the dataset's values" pulls the
+  // shared list down onto this variable; this pushes this variable's list
+  // up to be the shared one, and drops the exception it was, in one
+  // history step. Variables that have their OWN lists are deliberately
+  // untouched - they opted out - and the toast says so when there are any.
+  function missingPromoteToDataset(col) {
+    var t = PROJECT.table;
+    if (!t || !hasColumnTokens(t, col)) return;
+    var list = t.missingTokensByCol[col].slice();
+    // A fork whose list already equals the dataset's is a fork on paper
+    // only: there is nothing to push, so this is simply an un-fork.
+    if (JSON.stringify(list) === JSON.stringify(t.missingTokens || [])) {
+      setColumnMissingTokens(col, "");
+      return;
+    }
+    var k = t.order.filter(function (c) {
+      return c !== col && hasColumnTokens(t, c);
+    }).length;
+    setMissingTokens(list.join(", "), {
+      clearCol: col,
+      mark: "the dataset's missing-value labels",
+      toast: (list.length
+        ? "The dataset now treats " + list.join(", ") + " as missing"
+        : "The dataset now treats only blank cells as missing") +
+        (k ? " \u00b7 " + k + (k === 1 ? " variable keeps its own list"
+                                       : " variables keep their own lists")
+           : "")
+    });
   }
   var MISSING_PANEL_OPEN = false;
   function setMissingPanelOpen(on) {
@@ -23311,12 +23374,6 @@
       // persisted to the project, because it is a view state, not work.
       MISSING_PANEL_OPEN = el("ps-variable-missing-wrap").hasAttribute("hidden");
       setMissingPanelOpen(MISSING_PANEL_OPEN);
-    });
-    el("ps-missing-explain").addEventListener("click", function () {
-      openShellDialog("ps-missing-dialog");
-    });
-    el("ps-missing-editds").addEventListener("click", function () {
-      openShellDialog("ps-missing-dialog");
     });
     el("ps-missing-dialog-close").addEventListener("click", function () {
       closeShellDialog("ps-missing-dialog");

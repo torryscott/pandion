@@ -403,77 +403,169 @@ ok(showThem.litAfterSwitch === 0,
    'and switching variables retires the paint rather than leaving it ' +
    'behind');
 
-console.log('case 6d: the explanation and the dataset list are one click away');
+console.log('case 6d: the panel has no doors, and the dataset view is a ' +
+            'menu item');
+// t4-139. Two links into one dialog was the band-aid. The panel now
+// holds only controls that act on the variable in front of you; the
+// dataset-level VIEW (the shared list, who differs, and the model) is
+// one item in the Data menu, which is where dataset-wide settings live.
 const doors = await page.evaluate(async () => {
     const s = ms => new Promise(r => setTimeout(r, ms));
     if (document.getElementById('ps-variable-missing-wrap').hidden)
         document.getElementById('ps-variable-missing-toggle').click();
     await s(250);
-    document.getElementById('ps-missing-explain').click();
-    await s(400);
-    const dlg = document.getElementById('ps-missing-dialog');
+    const wrap = document.getElementById('ps-variable-missing-wrap');
     const out = {
-        open: getComputedStyle(dlg).display === 'flex',
-        text: dlg.textContent.replace(/\s+/g, ' '),
-        field: !!dlg.querySelector('#ps-variable-missing'),
-        described: dlg.getAttribute('aria-describedby')
+        // A door is any control in the panel whose NAME promises a room
+        // rather than an act. Asserted by text, not by id, so putting a
+        // differently-named link back would still fail this.
+        doorish: Array.from(wrap.querySelectorAll('button'))
+            .map(b => b.textContent.trim())
+            .filter(x => /how this works|dataset list|\u2026$|\.\.\.$/i.test(x))
     };
-    document.getElementById('ps-missing-dialog-close').click();
-    await s(300);
     window.PS_SHELL.runCommand('data-missing');
     await s(400);
+    const dlg = document.getElementById('ps-missing-dialog');
     out.viaMenu = getComputedStyle(dlg).display === 'flex';
+    out.text = dlg.textContent.replace(/\s+/g, ' ');
+    out.field = !!dlg.querySelector('#ps-variable-missing');
+    out.described = dlg.getAttribute('aria-describedby');
     document.getElementById('ps-missing-dialog-close').click();
     await s(200);
     return out;
 });
-ok(doors.open && doors.field,
-   'How this works opens a dialog carrying BOTH the explanation and the ' +
-   'dataset-wide list, since neither is about the variable being inspected');
-ok(/blank/i.test(doors.text) && /REPLACES/.test(doors.text),
-   'the explanation states the invariant and the replace-semantics');
+ok(doors.doorish.length === 0,
+   `the panel offers no doors at all, only acts (found ` +
+   `${JSON.stringify(doors.doorish)})`);
+ok(doors.viaMenu && doors.field,
+   'and the dataset-level view is reached from Data > Missing values, ' +
+   'carrying the shared list itself');
+ok(/blank/i.test(doors.text) && /REPLACES/.test(doors.text) &&
+   /both ways to end the difference/i.test(doors.text),
+   'the explanation states the invariant, the replace-semantics, and the ' +
+   'pair of verbs the panel offers, so the two surfaces agree');
 ok(doors.described === 'ps-missing-dialog-lead',
    'and the dialog describes itself, so a screen reader hears the model ' +
    'on open rather than landing silently on a button');
-ok(doors.viaMenu,
-   'the Data menu reaches it too, so the dataset setting does not require ' +
-   'selecting a variable first');
 
-console.log('case 6f: the dataset list has a door NAMED for editing');
-// Hiding an editing control behind a button called "How this works"
-// made changing the dataset list a secret. Both doors open the same
-// dialog; each is honest about why you would click it. Inherited chips
-// also carry their provenance, so removing one is never a surprise.
-const named = await page.evaluate(async () => {
+console.log('case 6f: a difference offers BOTH ways out');
+// t4-139. The panel could give a variable its own list but could never
+// change the shared one, so the dataset list needed a door. The state
+// line now carries the other direction too, and both verbs appear only
+// while there is a difference for either to end.
+await load();
+const twoWay = await page.evaluate(async () => {
     const s = ms => new Promise(r => setTimeout(r, ms));
+    const T = () => window.PS_SHELL.project.table;
+    const ds0 = (T().missingTokens || []).slice();
+    // A second variable with its OWN list. It opted out, so pushing from
+    // another variable must leave it alone.
+    window.PS_SHELL.setColumnMissingTokens('rating', '9');
+    await s(800);
+    window.PS_SHELL.selectVariable('errors');
+    await s(600);
     if (document.getElementById('ps-variable-missing-wrap').hidden)
         document.getElementById('ps-variable-missing-toggle').click();
-    await s(250);
-    const btn = document.getElementById('ps-missing-editds');
-    const out = { label: btn ? btn.textContent : null };
-    btn.click();
-    await s(400);
-    const dlg = document.getElementById('ps-missing-dialog');
-    out.open = getComputedStyle(dlg).display === 'flex';
-    out.fieldLabel = dlg.querySelector('.ps-missing-ds .ps-inspector-field')
-        .textContent.replace(/\s+/g, ' ').trim();
-    document.getElementById('ps-missing-dialog-close').click();
     await s(300);
-    const chip = Array.from(document.querySelectorAll(
-        '#ps-missing-chips .ps-missing-chip:not(.ps-missing-chip-blank)'))
-        .find(c => !c.classList.contains('ps-missing-chip-dead'));
-    out.tip = chip ? chip.getAttribute('data-tip') : null;
-    return out;
+    const rest = {
+        up: !!document.getElementById('ps-missing-todataset'),
+        back: !!document.getElementById('ps-missing-usedataset'),
+        state: document.getElementById('ps-missing-state').textContent
+    };
+    const add = document.getElementById('ps-missing-add');
+    add.value = '-99';
+    add.dispatchEvent(new Event('change', { bubbles: true }));
+    await s(900);
+    const up = document.getElementById('ps-missing-todataset');
+    const forked = {
+        // Derived from the model, never hand-copied: earlier cases in this
+        // file have moved the dataset list before now.
+        expected: ds0.concat('-99'),
+        stored: (T().missingTokensByCol.errors || []).slice(),
+        up: !!up, back: !!document.getElementById('ps-missing-usedataset'),
+        label: up ? up.textContent.trim() : null,
+        tip: up ? up.getAttribute('data-tip') : null
+    };
+    up.click();
+    await s(1000);
+    const after = {
+        dataset: (T().missingTokens || []).slice(),
+        errorsForked: !!(T().missingTokensByCol &&
+                         T().missingTokensByCol.errors),
+        rating: T().missingTokensByCol && T().missingTokensByCol.rating
+            ? T().missingTokensByCol.rating.slice() : null,
+        state: document.getElementById('ps-missing-state').textContent,
+        up: !!document.getElementById('ps-missing-todataset')
+    };
+    window.PS_SHELL.dataUndo();
+    await s(900);
+    const undone = {
+        dataset: (T().missingTokens || []).slice(),
+        errors: T().missingTokensByCol && T().missingTokensByCol.errors
+            ? T().missingTokensByCol.errors.slice() : null
+    };
+    // Leave the fixture as this case found it.
+    window.PS_SHELL.setColumnMissingTokens('errors', '');
+    window.PS_SHELL.setColumnMissingTokens('rating', '');
+    await s(700);
+    return { ds0, rest, forked, after, undone };
 });
-ok(/^Edit the dataset list/.test(named.label) && named.open,
-   'the rail names the editing door, and it opens the dialog');
-ok(/^Dataset list/.test(named.fieldLabel),
-   `whose field now carries the same name the rule line uses ` +
-   `("${named.fieldLabel.slice(0, 24)}")`);
-ok(named.tip !== null &&
-   (/(comes from the dataset list|this variable's own list)/.test(named.tip)),
-   `and a chip states its provenance, so removing one is never a ` +
-   `surprise ("${named.tip}")`);
+ok(!twoWay.rest.up && !twoWay.rest.back &&
+   /^Same as the rest of the dataset\.$/.test(twoWay.rest.state),
+   'with no difference the line states that and offers nothing, because ' +
+   'a control that cannot act is the same mistake as a printed zero');
+ok(twoWay.forked.up && twoWay.forked.back &&
+   String(twoWay.forked.stored) === String(twoWay.forked.expected),
+   'editing the chips forks the list and BOTH directions appear');
+ok(/^Make these the dataset's values$/.test(twoWay.forked.label),
+   `the new one is the mirror of "Use the dataset's values", so the ` +
+   `direction is unmistakable ("${twoWay.forked.label}")`);
+ok(/variable with its own list keeps it/.test(twoWay.forked.tip || ''),
+   `and it discloses what it does NOT reach, counted rather than named ` +
+   `("${twoWay.forked.tip}")`);
+ok(String(twoWay.after.dataset) === String(twoWay.forked.expected) &&
+   !twoWay.after.errorsForked,
+   'pushing sets the SHARED list and drops the exception the variable was');
+ok(String(twoWay.after.rating) === String(['9']),
+   'while a variable that has its own list keeps it, since it opted out');
+ok(!twoWay.after.up &&
+   /^Same as the rest of the dataset\.$/.test(twoWay.after.state),
+   'the line goes back to agreeing, and the verbs retire with the ' +
+   'difference they existed to end');
+ok(String(twoWay.undone.dataset) === String(twoWay.ds0) &&
+   String(twoWay.undone.errors) === String(twoWay.forked.expected),
+   'and ONE undo restores both halves, because to the user it was one act');
+// Provenance is read on a column that HAS a live match for the code, so
+// the chip under test is a real one rather than a dead-code chip whose
+// typo warning wins the tip. age carries -99 twice in this fixture.
+const prov = await page.evaluate(async () => {
+    const s = ms => new Promise(r => setTimeout(r, ms));
+    const pick = () => {
+        const c = Array.from(document.querySelectorAll(
+            '#ps-missing-chips .ps-missing-chip:not(.ps-missing-chip-blank)'))
+            .find(x => !x.classList.contains('ps-missing-chip-dead'));
+        return c ? c.getAttribute('data-tip') : null;
+    };
+    window.PS_SHELL.setColumnMissingTokens('age', '-99');
+    await s(800);
+    window.PS_SHELL.selectVariable('age');
+    await s(500);
+    if (document.getElementById('ps-variable-missing-wrap').hidden)
+        document.getElementById('ps-variable-missing-toggle').click();
+    await s(300);
+    const own = pick();
+    window.PS_SHELL.setColumnMissingTokens('age', '');
+    await s(700);
+    window.PS_SHELL.setMissingTokens('-99');
+    await s(900);
+    return { own, inherited: pick() };
+});
+ok(/is in this variable's own list/.test(prov.own || ''),
+   `a chip on a forked variable says the code is its own ("${prov.own}")`);
+ok(/comes from the dataset list/.test(prov.inherited || '') &&
+   /changes only this variable/.test(prov.inherited || ''),
+   `and an inherited chip says where it came from AND what removing it ` +
+   `reaches, which the chips alone cannot show ("${prov.inherited}")`);
 
 console.log('case R: a rename carries the column\'s own missing labels with it');
 // The one keyed store the rename did not carry, and losing it is not
