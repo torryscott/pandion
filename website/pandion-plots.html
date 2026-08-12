@@ -1536,17 +1536,18 @@
   .ps-missing-readout .ps-linklike { font-size: 12px;
     color: var(--ps-accent); background: none; border: 0; padding: 0;
     font-family: inherit; }
+  /* The sentence and its verbs STACK: two link-like buttons trailing a
+     sentence on one line read as part of it, and in a 250px rail they
+     wrap into an unreadable ribbon. */
   .ps-missing-state { font-size: 12px; color: var(--ps-muted);
-    margin: 0 0 2px; display: flex; align-items: baseline; gap: 8px;
-    flex-wrap: wrap; }
+    margin: 0 0 2px; }
+  /* Stacked, not inline: neither verb fits beside the other in a 250px
+     rail, and a separator left dangling at a wrap is litter. */
+  .ps-missing-acts { display: flex; flex-direction: column;
+    align-items: flex-start; gap: 1px; margin-top: 3px; }
   .ps-missing-state .ps-linklike { font-size: 12px;
     color: var(--ps-accent); background: none; border: 0; padding: 0;
-    font-family: inherit; }
-  .ps-missing-links { display: flex; align-items: baseline; gap: 7px;
-    margin-top: 2px; color: var(--ps-l3); }
-  .ps-missing-links .ps-linklike { font-size: 12px;
-    color: var(--ps-accent); background: none; border: 0; padding: 0;
-    font-family: inherit; }
+    font-family: inherit; text-align: left; }
   /* The transient grid highlight Show-them paints, applied by the cell
      renderer so it survives scrolling through a virtualized window. */
   td.ps-grid-missinghit { box-shadow: inset 0 0 0 2px var(--ps-accent);
@@ -1575,10 +1576,6 @@
   }
   .ps-missing-toggle:hover .ps-missing-rule { color: var(--ps-ink-2); }
   #ps-variable-missing-wrap { margin-top: 10px; }
-  #ps-missing-explain {
-    margin-top: 2px; font-size: 12px; color: var(--ps-accent);
-    background: none; border: 0; padding: 0; font-family: inherit;
-  }
   #ps-missing-dialog .ps-dialog-body p { margin: 0 0 9px; font-size: 13px; }
   #ps-missing-dialog .ps-missing-ds { margin-top: 14px; }
   /* The eyebrow upper-cases; the variable name keeps its own casing and
@@ -4558,19 +4555,17 @@
                     hidden>Show them</button>
           </div>
           <div class="ps-missing-state" id="ps-missing-state"></div>
-          <!-- The dataset-wide list is NOT here (a dataset control inside
-               a per-variable panel was half the old busy feeling), but its
-               door is NAMED: hiding an editing control behind a button
-               called "How this works" made changing the dataset list a
-               secret (Torry's report). Both doors open the same Missing
-               values dialog; each is honest about why you would click it. -->
-          <div class="ps-missing-links">
-            <button type="button" class="ps-linklike"
-                    id="ps-missing-editds">Edit the dataset list&#8230;</button>
-            <span aria-hidden="true">&#183;</span>
-            <button type="button" class="ps-linklike"
-                    id="ps-missing-explain">How this works</button>
-          </div>
+          <!-- t4-139. No link row. Two doors into one dialog was a
+               band-aid over a MISSING CAPABILITY: the panel could give a
+               variable its own list but could never change the shared
+               one, so the dataset list had to be reachable from here.
+               The state line above now carries both directions - use the
+               dataset's values here, or make these the dataset's values -
+               which is the whole two-list model as two verbs, offered at
+               the only moment either can act. With the shared list
+               editable from where you already are, the rail needs no
+               door to it; the dataset-level view (the list, who differs,
+               and the explanation) is one item in the Data menu. -->
           </div>
         </div>
       </div>
@@ -5448,7 +5443,9 @@
         code can mean missing in most variables but stay a real value in
         one of them. The line under the chips says which is in force,
         "Same as the rest of the dataset" or "Different from the dataset
-        now".</p>
+        now". When a variable differs, that line offers both ways to end
+        the difference: take the dataset's values here, or make this
+        variable's values the dataset's.</p>
       <p><b>What a code does.</b> Surveys often store an unanswered
         question as -99, or "not applicable" as 9. Declaring the code does
         not change any cell: the value stays in the table, and the app
@@ -20999,7 +20996,13 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     retype(t);
     persist(); syncAll(); render();
   }
-  function setMissingTokens(text) {
+  // opts (all optional, absent = the original behaviour byte for byte):
+  //   clearCol  a variable whose own list is being pushed up here, and
+  //             which must stop being an exception in the SAME history
+  //             step, because to the user it was one action
+  //   mark      the undo label
+  //   toast     a confirmation that leads any re-typing news
+  function setMissingTokens(text, opts) {
     var t = PROJECT.table;
     if (!t) return;
     var list = String(text || "").split(",").map(function (v) {
@@ -21008,7 +21011,9 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       return v !== "" && arr.indexOf(v) === i;
     });
     if (JSON.stringify(list) === JSON.stringify(t.missingTokens || [])) return;
-    dataMark("the missing-value labels");
+    dataMark((opts && opts.mark) || "the missing-value labels");
+    if (opts && opts.clearCol && t.missingTokensByCol)
+      delete t.missingTokensByCol[opts.clearCol];
     var prevTokens = tableMissingTokens(t);
     t.missingTokens = list;
     t.edited = true;
@@ -21044,13 +21049,17 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     retype(t); validateRoles();
     persist(); syncAll(); render();
     var changed = promoted.concat(demoted);
-    if (changed.length)
-      showToast(changed.slice(0, 3).join(", ") +
+    var note = changed.length
+      ? changed.slice(0, 3).join(", ") +
         (changed.length > 3 ? " and " + (changed.length - 3) + " more" : "") +
         (changed.length === 1 ? " is now " : " are now ") +
         (promoted.length && !demoted.length ? "Continuous"
          : demoted.length && !promoted.length ? "Nominal" : "re-typed") +
-        " \u00b7 the missing labels changed what parses");
+        " \u00b7 the missing labels changed what parses"
+      : "";
+    var lead = (opts && opts.toast) || "";
+    if (lead || note)
+      showToast(lead && note ? lead + " \u00b7 " + note : (lead || note));
   }
   // t3-58a. Empty text CLEARS the override (back to the dataset list) rather
   // than declaring "no tokens at all": a blank field reads as "I have not set
@@ -32034,15 +32043,37 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
         stateEl.appendChild(document.createTextNode(own
           ? "Different from the dataset now."
           : "Same as the rest of the dataset."));
+        // Two verbs, and only while there is a difference for either to
+        // end. Mirrored wording so the DIRECTION is unmistakable: make
+        // these the dataset's values, or use the dataset's values.
         if (own) {
+          var acts = mkEl("div", "ps-missing-acts");
+          var k = t.order.filter(function (c) {
+            return c !== INSPECTOR_VAR && hasColumnTokens(t, c);
+          }).length;
+          var up = mkEl("button", "ps-linklike",
+            "Make these the dataset's values");
+          up.type = "button";
+          up.id = "ps-missing-todataset";
+          setTip(up, "Every variable that has not been given its own " +
+            "list will use these." + (k ? " The " + k + (k === 1
+              ? " variable with its own list keeps it."
+              : " variables with their own lists keep them.") : ""));
+          up.addEventListener("click", function () {
+            missingPromoteToDataset(INSPECTOR_VAR);
+          });
+          acts.appendChild(up);
           var back = mkEl("button", "ps-linklike",
             "Use the dataset's values");
           back.type = "button";
           back.id = "ps-missing-usedataset";
+          setTip(back, "Drops this variable's own list and follows the " +
+            "dataset again.");
           back.addEventListener("click", function () {
             setColumnMissingTokens(INSPECTOR_VAR, "");
           });
-          stateEl.appendChild(back);
+          acts.appendChild(back);
+          stateEl.appendChild(acts);
         }
       }
       MISSING_LAST_COL = INSPECTOR_VAR;
@@ -32152,6 +32183,35 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       return ds.indexOf(v) !== -1;
     });
     setColumnMissingTokens(col, same ? "" : next.join(", "));
+  }
+  // The other direction (t4-139). "Use the dataset's values" pulls the
+  // shared list down onto this variable; this pushes this variable's list
+  // up to be the shared one, and drops the exception it was, in one
+  // history step. Variables that have their OWN lists are deliberately
+  // untouched - they opted out - and the toast says so when there are any.
+  function missingPromoteToDataset(col) {
+    var t = PROJECT.table;
+    if (!t || !hasColumnTokens(t, col)) return;
+    var list = t.missingTokensByCol[col].slice();
+    // A fork whose list already equals the dataset's is a fork on paper
+    // only: there is nothing to push, so this is simply an un-fork.
+    if (JSON.stringify(list) === JSON.stringify(t.missingTokens || [])) {
+      setColumnMissingTokens(col, "");
+      return;
+    }
+    var k = t.order.filter(function (c) {
+      return c !== col && hasColumnTokens(t, c);
+    }).length;
+    setMissingTokens(list.join(", "), {
+      clearCol: col,
+      mark: "the dataset's missing-value labels",
+      toast: (list.length
+        ? "The dataset now treats " + list.join(", ") + " as missing"
+        : "The dataset now treats only blank cells as missing") +
+        (k ? " \u00b7 " + k + (k === 1 ? " variable keeps its own list"
+                                       : " variables keep their own lists")
+           : "")
+    });
   }
   var MISSING_PANEL_OPEN = false;
   function setMissingPanelOpen(on) {
@@ -32935,12 +32995,6 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       // persisted to the project, because it is a view state, not work.
       MISSING_PANEL_OPEN = el("ps-variable-missing-wrap").hasAttribute("hidden");
       setMissingPanelOpen(MISSING_PANEL_OPEN);
-    });
-    el("ps-missing-explain").addEventListener("click", function () {
-      openShellDialog("ps-missing-dialog");
-    });
-    el("ps-missing-editds").addEventListener("click", function () {
-      openShellDialog("ps-missing-dialog");
     });
     el("ps-missing-dialog-close").addEventListener("click", function () {
       closeShellDialog("ps-missing-dialog");

@@ -1536,17 +1536,18 @@
   .ps-missing-readout .ps-linklike { font-size: 12px;
     color: var(--ps-accent); background: none; border: 0; padding: 0;
     font-family: inherit; }
+  /* The sentence and its verbs STACK: two link-like buttons trailing a
+     sentence on one line read as part of it, and in a 250px rail they
+     wrap into an unreadable ribbon. */
   .ps-missing-state { font-size: 12px; color: var(--ps-muted);
-    margin: 0 0 2px; display: flex; align-items: baseline; gap: 8px;
-    flex-wrap: wrap; }
+    margin: 0 0 2px; }
+  /* Stacked, not inline: neither verb fits beside the other in a 250px
+     rail, and a separator left dangling at a wrap is litter. */
+  .ps-missing-acts { display: flex; flex-direction: column;
+    align-items: flex-start; gap: 1px; margin-top: 3px; }
   .ps-missing-state .ps-linklike { font-size: 12px;
     color: var(--ps-accent); background: none; border: 0; padding: 0;
-    font-family: inherit; }
-  .ps-missing-links { display: flex; align-items: baseline; gap: 7px;
-    margin-top: 2px; color: var(--ps-l3); }
-  .ps-missing-links .ps-linklike { font-size: 12px;
-    color: var(--ps-accent); background: none; border: 0; padding: 0;
-    font-family: inherit; }
+    font-family: inherit; text-align: left; }
   /* The transient grid highlight Show-them paints, applied by the cell
      renderer so it survives scrolling through a virtualized window. */
   td.ps-grid-missinghit { box-shadow: inset 0 0 0 2px var(--ps-accent);
@@ -1575,10 +1576,6 @@
   }
   .ps-missing-toggle:hover .ps-missing-rule { color: var(--ps-ink-2); }
   #ps-variable-missing-wrap { margin-top: 10px; }
-  #ps-missing-explain {
-    margin-top: 2px; font-size: 12px; color: var(--ps-accent);
-    background: none; border: 0; padding: 0; font-family: inherit;
-  }
   #ps-missing-dialog .ps-dialog-body p { margin: 0 0 9px; font-size: 13px; }
   #ps-missing-dialog .ps-missing-ds { margin-top: 14px; }
   /* The eyebrow upper-cases; the variable name keeps its own casing and
@@ -4558,19 +4555,17 @@
                     hidden>Show them</button>
           </div>
           <div class="ps-missing-state" id="ps-missing-state"></div>
-          <!-- The dataset-wide list is NOT here (a dataset control inside
-               a per-variable panel was half the old busy feeling), but its
-               door is NAMED: hiding an editing control behind a button
-               called "How this works" made changing the dataset list a
-               secret (Torry's report). Both doors open the same Missing
-               values dialog; each is honest about why you would click it. -->
-          <div class="ps-missing-links">
-            <button type="button" class="ps-linklike"
-                    id="ps-missing-editds">Edit the dataset list&#8230;</button>
-            <span aria-hidden="true">&#183;</span>
-            <button type="button" class="ps-linklike"
-                    id="ps-missing-explain">How this works</button>
-          </div>
+          <!-- t4-139. No link row. Two doors into one dialog was a
+               band-aid over a MISSING CAPABILITY: the panel could give a
+               variable its own list but could never change the shared
+               one, so the dataset list had to be reachable from here.
+               The state line above now carries both directions - use the
+               dataset's values here, or make these the dataset's values -
+               which is the whole two-list model as two verbs, offered at
+               the only moment either can act. With the shared list
+               editable from where you already are, the rail needs no
+               door to it; the dataset-level view (the list, who differs,
+               and the explanation) is one item in the Data menu. -->
           </div>
         </div>
       </div>
@@ -5448,7 +5443,9 @@
         code can mean missing in most variables but stay a real value in
         one of them. The line under the chips says which is in force,
         "Same as the rest of the dataset" or "Different from the dataset
-        now".</p>
+        now". When a variable differs, that line offers both ways to end
+        the difference: take the dataset's values here, or make this
+        variable's values the dataset's.</p>
       <p><b>What a code does.</b> Surveys often store an unanswered
         question as -99, or "not applicable" as 9. Declaring the code does
         not change any cell: the value stays in the table, and the app
@@ -5987,7 +5984,7 @@
 <script src="lib/jspdf.umd.min.979a2ef514.js"></script>
 <script src="lib/svg2pdf.umd.min.4ada250f50.js"></script>
 <script src="lib/graphbuilder2.min.e397de20dd.js"></script>
-<script src="lib/ps-shell.e58008b65c.js"></script>
+<script src="lib/ps-shell.e6366ff811.js"></script>
 <script src="lib/ps-tour.b02cf78f7f.js"></script>
 </body>
 </html>
