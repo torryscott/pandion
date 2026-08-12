@@ -11497,6 +11497,16 @@
             exportBtn.style.background = "rgba(255,255,255,0.7)";
         });
         wrap.appendChild(exportBtn);
+        // Under jamovi's Svg element, export is jamovi's job (right-click
+        // on the chart; the harvest twin supplies the clean picture), so
+        // the module's own Export button comes off the toolbar there
+        // (Jonathon's ask, Aug 2026). Production jamovi (Html results)
+        // keeps it until the Svg element ships for real, and the
+        // standalone keeps it always; display:none so the toolbar
+        // re-parent machinery is untouched.
+        if (host.closest && host.closest("jmv-results-svg")) {
+            exportBtn.style.display = "none";
+        }
 
         // --- Add-annotation icon + menu ---------------------------------
         // Sits to the left of the export icon. Click reveals a small menu
@@ -54364,7 +54374,9 @@
                     dot('<strong>Click any part of the chart</strong> (bars, points, lines, axes, legend, title) to open its style panel.') +
                     dot('<strong>Double-click any text</strong> to edit it in place.') +
                     dot('The <strong>+</strong> button adds overlays &amp; annotations; the <strong>eye</strong> shows / hides anything (and restores hidden items).') +
-                    dot('The <strong>export</strong> button in the toolbar saves the chart as SVG, PDF, PNG or JPG.') +
+                    ((host.closest && host.closest("jmv-results-svg"))
+                        ? dot('Right-click the chart to copy or export it; jamovi handles saving natively here.')
+                        : dot('The <strong>export</strong> button in the toolbar saves the chart as SVG, PDF, PNG or JPG.')) +
                     dot(kchip(mod + "+Z") + ' undoes any styling change; ' + kchip("Delete") + ' hides the selected element; ' + kchip("?") + ' opens this help panel.') +
                   '</ul>';
             }
@@ -56970,8 +56982,15 @@
                     renderInspectorGlossary(body);
                 }
             } else if (sel === "export") {
-                titleEl.textContent = "Export plot";
-                renderInspectorExport(body);
+                if (host.closest && host.closest("jmv-results-svg")) {
+                    // stale session state from before export moved to the
+                    // host: land on Basics rather than a hidden feature
+                    titleEl.textContent = "Help & shortcuts";
+                    renderInspectorHelp(body);
+                } else {
+                    titleEl.textContent = "Export plot";
+                    renderInspectorExport(body);
+                }
             } else if (sel === "grid") {
                 titleEl.textContent = "Grid";
                 renderInspectorGrid(body);
