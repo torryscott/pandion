@@ -11,7 +11,7 @@
   "scripts": {
     "start": "electron .",
     "pack": "electron-builder --dir",
-    "dist:mac": "electron-builder --mac",
+    "dist:mac": "bash build-mac-sampler.sh && electron-builder --mac",
     "dist:win": "electron-builder --win"
   },
   "dependencies": {
@@ -46,6 +46,17 @@
         "to": "app/pandion-plots.html"
       }
     ],
+    "mac": {
+      "extraResources": [
+        {
+          "from": "mac-sampler/out/pandion-color-sampler",
+          "to": "pandion-color-sampler"
+        }
+      ],
+      "binaries": [
+        "mac-sampler/out/pandion-color-sampler"
+      ]
+    },
     "fileAssociations": [
       {
         "ext": "pand",

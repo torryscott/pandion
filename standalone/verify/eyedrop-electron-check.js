@@ -66,6 +66,7 @@ app.whenReady().then(async () => {
   try {
     console.log("case 1: a click reports the exact pixel under it");
     let r = await eyedrop.pickColor({
+      samplerPath: null,
       permission: () => "granted",
       capture: async () => testFrame(),
       display: DISPLAY,
@@ -80,6 +81,7 @@ app.whenReady().then(async () => {
 
     console.log("case 2: the letterbox mapping holds on the other side");
     r = await eyedrop.pickColor({
+      samplerPath: null,
       permission: () => "granted",
       capture: async () => testFrame(),
       display: DISPLAY,
@@ -94,6 +96,7 @@ app.whenReady().then(async () => {
 
     console.log("case 3: Escape cancels");
     r = await eyedrop.pickColor({
+      samplerPath: null,
       permission: () => "granted",
       capture: async () => testFrame(),
       display: DISPLAY,
@@ -108,6 +111,7 @@ app.whenReady().then(async () => {
     console.log("case 4: a denied permission explains and reports itself");
     let explained = 0;
     r = await eyedrop.pickColor({
+      samplerPath: null,
       permission: () => "denied",
       explain: async () => { explained++; },
       capture: async () => { throw new Error("must not capture"); },
@@ -118,12 +122,64 @@ app.whenReady().then(async () => {
 
     console.log("case 5: an empty capture is an error, not a hang");
     r = await eyedrop.pickColor({
+      samplerPath: null,
       permission: () => "granted",
       capture: async () => null,
       display: DISPLAY,
     });
     ok(r.ok === false && r.reason === "error",
       "a null frame resolves error (got " + JSON.stringify(r) + ")");
+
+    console.log("case 6: the system sampler is preferred and needs no permission");
+    // t4-143. A fake helper stands in for NSColorSampler; permission and
+    // capture are booby-trapped to PROVE the sampler path touches neither.
+    const os = require("os");
+    const fsx = require("fs");
+    const pathx = require("path");
+    const mk = (body) => {
+      const f = pathx.join(os.tmpdir(),
+        "ps-fake-sampler-" + Math.random().toString(36).slice(2));
+      fsx.writeFileSync(f, "#!/bin/bash\n" + body + "\n");
+      fsx.chmodSync(f, 0o755);
+      return f;
+    };
+    const trap = () => { throw new Error("must not be reached"); };
+    r = await eyedrop.pickColor({
+      samplerPath: mk('echo "#A1B2C3"'),
+      permission: trap,
+      capture: trap,
+      display: DISPLAY,
+    });
+    ok(r.ok === true && r.hex === "#a1b2c3",
+      "the helper's pick is the result, normalized, with NO permission " +
+      "check and NO capture (got " + JSON.stringify(r) + ")");
+
+    console.log("case 7: the system sampler's dismissal is a cancel");
+    r = await eyedrop.pickColor({
+      samplerPath: mk('echo "cancel"'),
+      permission: trap,
+      capture: trap,
+      display: DISPLAY,
+    });
+    ok(r.ok === false && r.reason === "cancel",
+      "Escape in the loupe cancels, never falls back (got " +
+      JSON.stringify(r) + ")");
+
+    console.log("case 8: a broken helper falls back to the capture overlay");
+    r = await eyedrop.pickColor({
+      samplerPath: mk('exit 1'),
+      permission: () => "granted",
+      capture: async () => testFrame(),
+      display: DISPLAY,
+      onOverlay: (o) => drive(o, [
+        { type: "mouseMove", x: 100, y: 150 },
+        { type: "mouseDown", x: 100, y: 150, button: "left", clickCount: 1 },
+        { type: "mouseUp", x: 100, y: 150, button: "left", clickCount: 1 },
+      ]),
+    });
+    ok(r.ok === true && r.hex === "#0000ff",
+      "helper failure degrades to the capture flow, which still picks " +
+      "exactly (got " + JSON.stringify(r) + ")");
 
     console.log("EYEDROP ELECTRON CHECK PASS");
     app.exit(0);

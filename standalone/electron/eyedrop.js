@@ -26,6 +26,8 @@
 "use strict";
 
 const path = require("path");
+const fs = require("fs");
+const { execFile } = require("child_process");
 const {
   BrowserWindow,
   desktopCapturer,
@@ -84,9 +86,64 @@ async function captureDisplay(display) {
   return img && !img.isEmpty() ? img : null;
 }
 
+// The macOS SYSTEM sampler (t4-143, Torry's observation that
+// Chromium droppers need no permission): NSColorSampler is Apple's
+// sanctioned picking service - the system draws the live loupe and
+// hands the app exactly ONE color, so it is exempt from the Screen
+// Recording permission that gates whole-screen capture. Chromium
+// implements the web EyeDropper API with it; we ship it as a tiny
+// spawned helper (mac-sampler/sampler.swift). When the helper is
+// missing or fails, the capture-overlay flow below is the fallback.
+function samplerPath() {
+  const cands = [
+    process.resourcesPath
+      ? path.join(process.resourcesPath, "pandion-color-sampler")
+      : null,
+    path.join(__dirname, "mac-sampler", "out", "pandion-color-sampler"),
+  ];
+  for (const c of cands) {
+    try {
+      if (c && fs.existsSync(c)) return c;
+    } catch (e) {}
+  }
+  return null;
+}
+
+// Resolves {ok,...} like pickColor, or null meaning "helper failed,
+// fall back". A timeout (nobody picks for 10 minutes) is a cancel,
+// never a fallback - a capture overlay bursting in later would be
+// a jump scare.
+function pickViaSystemSampler(bin) {
+  return new Promise((resolve) => {
+    execFile(bin, [], { timeout: 600000 }, (err, stdout) => {
+      const out = String(stdout || "").trim().toLowerCase();
+      if (!err && /^#[0-9a-f]{6}$/.test(out)) {
+        resolve({ ok: true, hex: out });
+      } else if (!err && out === "cancel") {
+        resolve({ ok: false, reason: "cancel" });
+      } else if (err && err.killed) {
+        resolve({ ok: false, reason: "cancel" });
+      } else {
+        resolve(null);
+      }
+    });
+  });
+}
+
 // Resolves {ok:true, hex} | {ok:false, reason:"cancel"|"permission"|"error"}.
 async function pickColor(opts) {
   opts = opts || {};
+  // opts.samplerPath: undefined = discover; null = skip (the probes
+  // exercising the capture flow must not summon the real loupe).
+  if (process.platform === "darwin") {
+    const bin = opts.samplerPath !== undefined
+      ? opts.samplerPath
+      : samplerPath();
+    if (bin) {
+      const picked = await pickViaSystemSampler(bin);
+      if (picked) return picked;
+    }
+  }
   const perm = (opts.permission || screenPermission)();
   if (perm === "denied" || perm === "restricted") {
     await (opts.explain || explainPermission)(
