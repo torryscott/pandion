@@ -1514,7 +1514,36 @@
   #ps-missing-own-wrap { margin: 2px 0 4px 23px; }
   #ps-variable-missing-col { width: 100%; box-sizing: border-box; }
   #ps-missing-box-hint { margin: 4px 0 0; }
-  #ps-missing-invariant { margin: 6px 0 0; }
+  /* The resting row IS the disclosure button. Its height never changes
+     with the data or the mode, so clicking down a column of variables
+     cannot make the rail's scroll length jump under the pointer. */
+  .ps-missing-toggle {
+    -webkit-appearance: none; appearance: none; display: block; width: 100%;
+    text-align: left; background: transparent; border: 0; padding: 0;
+    font-family: inherit; cursor: pointer;
+  }
+  .ps-missing-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 8px;
+  }
+  .ps-missing-head .ps-inspector-section-title { margin: 0; }
+  .ps-missing-chev { color: var(--ps-muted); font-size: 10px; }
+  .ps-missing-toggle[aria-expanded="true"] .ps-missing-chev {
+    transform: rotate(180deg); display: inline-block;
+  }
+  /* Information, not advice, so not the grey the hints use. */
+  .ps-missing-rule {
+    display: block; margin-top: 3px; font-size: 12px; line-height: 1.45;
+    color: var(--ps-ink-3);
+  }
+  .ps-missing-toggle:hover .ps-missing-rule { color: var(--ps-ink-2); }
+  #ps-variable-missing-wrap { margin-top: 10px; }
+  #ps-missing-explain {
+    margin-top: 2px; font-size: 12px; color: var(--ps-accent);
+    background: none; border: 0; padding: 0; font-family: inherit;
+  }
+  #ps-missing-dialog .ps-dialog-body p { margin: 0 0 9px; font-size: 13px; }
+  #ps-missing-dialog .ps-missing-ds { margin-top: 14px; }
   /* The eyebrow upper-cases; the variable name keeps its own casing and
      wraps to at most two lines, with the full name on hover. */
   .ps-missing-name {
@@ -4442,14 +4471,32 @@
                "edit your own copy" and deleting a code says it is real
                here), and a live count line ties every edit to its
                consequence in THIS column. -->
-          <!-- The variable name appears ONCE in the whole section, here,
-               in its natural case: an upper-cased instrument name risks
-               being spelled out letter by letter in a screen reader, and
-               the true casing is information. -->
-          <span class="ps-inspector-section-title"
-                id="ps-variable-missing-col-label"><span
-                class="ps-missing-eyebrow">Missing values for</span> <span
-                class="ps-missing-name" id="ps-missing-varname"></span></span>
+          <!-- t4-136. At rest this section is ONE row, and what it states
+               is the RULE IN FORCE, not a count. A rule cannot contradict
+               the Summary card's Missing tile three inches above (which a
+               second count could, since the total and the split come from
+               functions that disagree about excluded and unparseable
+               cells), it does not change with the data so there is no
+               zero-state where the feature goes silent, and leading every
+               variable in every dataset with the word "Blank" SHOWS the
+               invariant instead of explaining it. Nine words carry the
+               whole two-level model; everything else is one click away. -->
+          <button type="button" class="ps-missing-toggle"
+                  id="ps-variable-missing-toggle" aria-expanded="false"
+                  aria-controls="ps-variable-missing-wrap">
+            <span class="ps-missing-head">
+              <span class="ps-inspector-section-title">Missing values</span>
+              <span class="ps-missing-chev" aria-hidden="true">&#9662;</span>
+            </span>
+            <span class="ps-missing-rule" id="ps-missing-rule"></span>
+          </button>
+          <div id="ps-variable-missing-wrap" hidden>
+          <!-- The group's name replaces the deleted section title. Kept in
+               the variable's own casing: an upper-cased instrument name
+               risks being spelled out letter by letter. -->
+          <span class="ps-visually-hidden"
+                id="ps-variable-missing-col-label">Missing values for <span
+                id="ps-missing-varname"></span></span>
           <!-- The group carries the variable via aria-labelledby, so the
                radios never have to (their accessible names must equal
                their visible labels: WCAG 2.5.3 Label in Name). -->
@@ -4474,23 +4521,20 @@
               values with commas. This list replaces the dataset list for
               this variable.</div>
           </div>
-          <!-- The one fact no list can change, stated where it cannot be
-               mistaken for a property OF a list, and never inside a
-               sentence that also carries a count. -->
-          <div class="ps-loader-hint" id="ps-missing-invariant">Blank cells
-            always count as missing, whatever this list says.</div>
           <!-- Output, not advice: the readout is tinted so it cannot be
                mistaken for the plain grey hints around it. No left accent
                bar - that idiom is spoken for by the stat strips, where it
                means "this control changes the numbers". -->
           <div class="ps-missing-readout" id="ps-variable-missing-col-hint"
                role="status" aria-atomic="true"></div>
-          <label class="ps-inspector-field" style="margin-top:10px;">
-            Dataset missing values
-            <input id="ps-variable-missing" type="text"
-                   placeholder="NA, N/A, .">
-          </label>
-          <div class="ps-loader-hint" id="ps-missing-dataset-hint"></div>
+          <!-- The dataset-wide list is NOT here. A dataset control inside a
+               per-variable panel, printed after its own exception, was the
+               second cause of the busy feeling; it lives in the dialog
+               below with the explanation, which is the other thing that is
+               not about this variable. -->
+          <button type="button" class="ps-linklike" id="ps-missing-explain"
+                  >How this works</button>
+          </div>
         </div>
       </div>
     </div>
@@ -5339,6 +5383,43 @@
            the decision alone. -->
       <button type="button" class="ps-btn ps-primary"
               id="ps-formula-save">Save variable</button>
+    </div>
+  </div>
+</div>
+<div id="ps-missing-dialog" class="ps-dialog-overlay" role="dialog"
+     aria-modal="true" aria-labelledby="ps-missing-dialog-title"
+     aria-describedby="ps-missing-dialog-lead">
+  <div class="ps-dialog-card" style="max-width:520px;">
+    <div class="ps-dialog-head">
+      <div>
+        <h2 id="ps-missing-dialog-title">Missing values</h2>
+        <p>What counts as missing, and the list this dataset uses.</p>
+      </div>
+      <button type="button" class="ps-btn ps-dialog-close"
+              id="ps-missing-dialog-close">Close</button>
+    </div>
+    <div class="ps-dialog-body">
+      <p id="ps-missing-dialog-lead">A cell counts as missing when it is
+        blank, or when its text matches one of the missing-value labels.
+        Missing cells are left out of charts and statistics.</p>
+      <p>Blank cells always count as missing. No list can change that.</p>
+      <p><b>The two lists.</b> The dataset list is used by every variable
+        that has no list of its own. A variable can be given its own list
+        instead, which REPLACES the dataset list for that variable. That is
+        how you say a code means missing in most variables but is a real
+        value in one of them.</p>
+      <p><b>What a label does.</b> Surveys often code an unanswered
+        question as -99, or "not applicable" as 9. Declaring the code here
+        does not change the cell: the value stays in the table, and the app
+        stops counting it as data.</p>
+      <div class="ps-missing-ds">
+        <label class="ps-inspector-field">
+          Dataset missing values
+          <input id="ps-variable-missing" type="text"
+                 placeholder="NA, N/A, .">
+        </label>
+        <div class="ps-loader-hint" id="ps-missing-dataset-hint"></div>
+      </div>
     </div>
   </div>
 </div>

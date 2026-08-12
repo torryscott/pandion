@@ -148,6 +148,42 @@ ok(cleared.age.indexOf(-99) !== -1,
 ok(cleared.age.filter(v => v === null).length === 0,
    'and clearing did not leave the column blanked by an empty list');
 
+console.log('case 6r: at rest the section is one row stating the RULE');
+// t4-136. A rule cannot contradict the Summary card's Missing tile the
+// way a second count could, it does not change with the data so the
+// section never goes silent, and leading with "Blank cells" SHOWS the
+// invariant on every variable instead of explaining it.
+const resting = await page.evaluate(async () => {
+    const s = ms => new Promise(r => setTimeout(r, ms));
+    window.PS_SHELL.setWorkspace('data');
+    await s(300);
+    window.PS_SHELL.selectVariable('errors');
+    await s(400);
+    const sec = document.getElementById('ps-variable-missing-toggle')
+        .closest('.ps-inspector-section');
+    return {
+        rule: document.getElementById('ps-missing-rule').textContent,
+        expanded: document.getElementById('ps-variable-missing-toggle')
+            .getAttribute('aria-expanded'),
+        wrapHidden: document.getElementById('ps-variable-missing-wrap').hidden,
+        height: Math.round(sec.getBoundingClientRect().height),
+        datasetFieldInRail: !!sec.querySelector('#ps-variable-missing')
+    };
+});
+ok(resting.expanded === 'false' && resting.wrapHidden,
+   'the section is collapsed until asked');
+ok(/^Blank cells, or /.test(resting.rule),
+   `and the one visible line states the RULE in force, leading with the ` +
+   `one part no list can change ("${resting.rule}")`);
+ok(/\(dataset list\)\.$/.test(resting.rule),
+   'naming which of the two lists it is, so the scope is asserted ' +
+   'continuously even though the control is not standing there');
+ok(resting.height < 90,
+   `in about one row rather than a block (${resting.height}px)`);
+ok(!resting.datasetFieldInRail,
+   'and the DATASET-wide field is no longer inside the per-variable ' +
+   'panel, which was the second cause of the busy feeling');
+
 console.log('case 6: the inspector says which list is in force');
 const panel = await page.evaluate(async () => {
     const s = ms => new Promise(r => setTimeout(r, ms));
@@ -155,12 +191,15 @@ const panel = await page.evaluate(async () => {
     await s(300);
     window.PS_SHELL.selectVariable('rating');
     await s(400);
+    document.getElementById('ps-variable-missing-toggle').click();
+    await s(300);
     const own = { name: document.getElementById('ps-missing-varname').textContent,
                   ownChecked: document.getElementById('ps-missing-mode-own').checked,
                   wrapHidden: document.getElementById('ps-missing-own-wrap').hidden,
                   value: document.getElementById('ps-variable-missing-col').value,
                   readout: document.getElementById('ps-variable-missing-col-hint').innerText,
-                  dsHint: document.getElementById('ps-missing-dataset-hint').textContent };
+                  dsHint: document.getElementById('ps-missing-dataset-hint').textContent,
+                  ruleOwn: document.getElementById('ps-missing-rule').textContent };
     window.PS_SHELL.selectVariable('errors');
     await s(400);
     const inherit = { dsChecked: document.getElementById('ps-missing-mode-dataset').checked,
@@ -181,6 +220,9 @@ ok(/except \d+ variable/.test(panel.own.dsHint),
    `and the dataset field COUNTS its exceptions rather than naming them, ` +
    `so one long instrument name cannot wrap the line away ` +
    `("${panel.own.dsHint}")`);
+ok(/\(this variable's list\)\.$/.test(panel.own.ruleOwn),
+   `the resting rule follows the mode, naming the variable's OWN list ` +
+   `("${panel.own.ruleOwn}")`);
 ok(panel.inherit.dsChecked && panel.inherit.wrapHidden &&
    /^Use the dataset list: /.test(panel.inherit.optDs),
    `a column without one shows the DATASET radio checked, naming what it ` +
@@ -194,6 +236,9 @@ const fork = await page.evaluate(async () => {
     const s = ms => new Promise(r => setTimeout(r, ms));
     window.PS_SHELL.selectVariable('errors');
     await s(300);
+    if (document.getElementById('ps-variable-missing-wrap').hidden)
+        document.getElementById('ps-variable-missing-toggle').click();
+    await s(250);
     document.getElementById('ps-missing-mode-own').click();
     await s(700);
     const t = window.PS_SHELL.project.table;
@@ -244,12 +289,15 @@ const shapes = await page.evaluate(async () => {
     for (const c of ['bothk', 'allblank', 'alllab', 'nothing']) {
         window.PS_SHELL.selectVariable(c);
         await s(350);
+        if (document.getElementById('ps-variable-missing-wrap').hidden)
+            document.getElementById('ps-variable-missing-toggle').click();
+        await s(200);
         out[c] = document.getElementById('ps-variable-missing-col-hint')
             .innerText;
     }
     return out;
 });
-ok(/^2 of 3 cells are missing: 1 match the list, 1 are blank\.$/
+ok(/^2 of 3 cells are missing: 1 matches the list, 1 is blank\.$/
        .test(shapes.bothk.trim()),
    `both routes present: total first, then the breakdown ` +
    `("${shapes.bothk.trim()}")`);
@@ -264,10 +312,72 @@ ok(/^Nothing is missing here\. All 3 cells have a value\.$/
        .test(shapes.nothing.trim()),
    `nothing missing opens with a word, never with a 0 ` +
    `("${shapes.nothing.trim()}")`);
+// A count of 1 must agree with its verb: "1 match the list" makes a
+// reader stop and re-read, which is the exact cost this redesign exists
+// to remove.
+const singulars = await page.evaluate(async () => {
+    const s = ms => new Promise(r => setTimeout(r, ms));
+    window.PS_SHELL.loadTable('sing', ['onelab', 'oneblank'],
+        [['NA', ''], ['5', '2'], ['6', '3']],
+        { onelab: 'nominal', oneblank: 'nominal' });
+    window.PS_SHELL.setWorkspace('data');
+    await s(500);
+    const out = {};
+    for (const c of ['onelab', 'oneblank']) {
+        window.PS_SHELL.selectVariable(c);
+        await s(350);
+        if (document.getElementById('ps-variable-missing-wrap').hidden)
+            document.getElementById('ps-variable-missing-toggle').click();
+        await s(200);
+        out[c] = document.getElementById('ps-variable-missing-col-hint')
+            .innerText.trim();
+    }
+    return out;
+});
+ok(singulars.onelab === '1 of 3 cells is missing. It matches the list.',
+   `one labelled cell agrees with its verb ("${singulars.onelab}")`);
+ok(singulars.oneblank === '1 of 3 cells is missing, and it is blank.',
+   `and so does one blank ("${singulars.oneblank}")`);
+
 for (const [col, text] of Object.entries(shapes))
     ok(!/(^|[^\d])0([^\d]|$)/.test(text),
        `no count of 0 is printed anywhere in the ${col} readout, which is ` +
        `what makes the reported contradiction structurally impossible`);
+
+console.log('case 6d: the explanation and the dataset list are one click away');
+const doors = await page.evaluate(async () => {
+    const s = ms => new Promise(r => setTimeout(r, ms));
+    document.getElementById('ps-missing-explain').click();
+    await s(400);
+    const dlg = document.getElementById('ps-missing-dialog');
+    const out = {
+        open: getComputedStyle(dlg).display === 'flex',
+        text: dlg.textContent.replace(/\s+/g, ' '),
+        field: !!dlg.querySelector('#ps-variable-missing'),
+        described: dlg.getAttribute('aria-describedby')
+    };
+    document.getElementById('ps-missing-dialog-close').click();
+    await s(300);
+    // The second door: no variable need be selected to reach it.
+    window.PS_SHELL.runCommand('data-missing');
+    await s(400);
+    out.viaMenu = getComputedStyle(dlg).display === 'flex';
+    document.getElementById('ps-missing-dialog-close').click();
+    await s(200);
+    return out;
+});
+ok(doors.open && doors.field,
+   'How this works opens a dialog carrying BOTH the explanation and the ' +
+   'dataset-wide list, since neither is about the variable being inspected');
+ok(/blank/i.test(doors.text) && /REPLACES/.test(doors.text),
+   'the explanation states the invariant and the replace-semantics, which ' +
+   'is the model the rail can only gesture at');
+ok(doors.described === 'ps-missing-dialog-lead',
+   'and the dialog describes itself, so a screen reader hears the model ' +
+   'on open rather than landing silently on a button');
+ok(doors.viaMenu,
+   'the Data menu reaches it too, so the dataset setting does not require ' +
+   'selecting a variable first');
 
 console.log('case R: a rename carries the column\'s own missing labels with it');
 // The one keyed store the rename did not carry, and losing it is not

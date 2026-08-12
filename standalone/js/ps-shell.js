@@ -22371,6 +22371,9 @@
       el("ps-missing-own-wrap").hidden = !own;
       mcInput.value = own
         ? t.missingTokensByCol[INSPECTOR_VAR].join(", ") : "";
+      var ruleEl = el("ps-missing-rule");
+      if (ruleEl) ruleEl.textContent =
+        missingRuleLine(columnTokenList(t, INSPECTOR_VAR), own);
       MISSING_READOUT_COL = INSPECTOR_VAR;
       var lines = missingReadoutLines(
         missingMatchCounts(t, INSPECTOR_VAR,
@@ -22397,6 +22400,7 @@
         }, 0);
       }
       MISSING_LAST_COL = INSPECTOR_VAR;
+      setMissingPanelOpen(MISSING_PANEL_OPEN);
       // The dataset field's scope line COUNTS its exceptions rather than
       // naming them: one long instrument name would wrap the line past
       // the point of being read.
@@ -22414,6 +22418,15 @@
     }
   }
   var MISSING_LAST_COL = null;
+  var MISSING_PANEL_OPEN = false;
+  function setMissingPanelOpen(on) {
+    var wrap = el("ps-variable-missing-wrap");
+    var tog = el("ps-variable-missing-toggle");
+    if (!wrap || !tog) return;
+    if (on) wrap.removeAttribute("hidden");
+    else wrap.setAttribute("hidden", "");
+    tog.setAttribute("aria-expanded", on ? "true" : "false");
+  }
   // How many cells a token list marks missing in one column: the raw
   // text is the data, so the count scans it the same way typing does.
   // Blanks are counted FIRST and labels only in the else branch, so the
@@ -22449,16 +22462,25 @@
   function missingReadoutLines(c, ds, own, list, dsList) {
     var a, b = null;
     var n = c.m + c.b;
+    // Verb agreement is not pedantry here: this line is read at a
+    // glance and "1 match the list" makes a reader stop and re-read,
+    // which is the exact cost the whole redesign exists to remove.
     if (c.total === 0) a = "This variable has no rows yet.";
     else if (c.m > 0 && c.b > 0)
       a = n + " of " + c.total + " cells are missing: " + c.m +
-          " match the list, " + c.b + " are blank.";
+          (c.m === 1 ? " matches" : " match") + " the list, " + c.b +
+          (c.b === 1 ? " is" : " are") + " blank.";
     else if (c.m > 0)
-      a = c.m + " of " + c.total +
-          " cells are missing. They all match the list.";
+      a = c.m + " of " + c.total + " cells " +
+          (c.m === 1 ? "is missing. It matches" : "are missing. They all match") +
+          " the list.";
     else if (c.b > 0)
-      a = c.b + " of " + c.total + " cells are missing, all of them blank.";
-    else a = "Nothing is missing here. All " + c.total + " cells have a value.";
+      a = c.b + " of " + c.total + " cells " +
+          (c.b === 1 ? "is missing, and it is blank."
+                     : "are missing, all of them blank.");
+    else a = "Nothing is missing here. " + (c.total === 1
+      ? "Its only cell has a value."
+      : "All " + c.total + " cells have a value.");
     if (own && c.total > 0) {
       var diff = c.m - ds.m;
       var ad = Math.abs(diff);
@@ -22489,6 +22511,26 @@
     return { a: a, b: b };
   }
   var MISSING_READOUT_COL = null;   // the column the dead-label scan reads
+  // The RESTING line (t4-136): the rule in force, never a count. It reads
+  // the same on an empty dataset and a full one, so the section can never
+  // go silent, and it always leads with "Blank cells" because that is the
+  // one rule no list can change.
+  function missingRuleLine(list, own) {
+    var scope = own ? "this variable's list" : "dataset list";
+    if (!list.length)
+      return "Blank cells only (" + (own ? "this variable's list is empty"
+        : "the dataset list is empty") + ").";
+    var shown = [], used = 0;
+    for (var i = 0; i < list.length; i++) {
+      var ent = String(list[i]);
+      if (used && used + ent.length + 2 > 48) break;
+      shown.push(ent);
+      used += ent.length + 2;
+    }
+    var more = list.length - shown.length;
+    return "Blank cells, or " + shown.join(", ") +
+      (more > 0 ? ", and " + more + " more" : "") + " (" + scope + ").";
+  }
   // Counts roles the user can SEE. Every chart keeps a stored role set per
   // MODULE so switching analysis type inside a tab keeps that tab's memory,
   // and this walked all of them, so a project with one bar chart reported
@@ -23222,6 +23264,18 @@
     });
     el("ps-variable-missing-col").addEventListener("change", function () {
       if (INSPECTOR_VAR) setColumnMissingTokens(INSPECTOR_VAR, this.value);
+    });
+    el("ps-variable-missing-toggle").addEventListener("click", function () {
+      // Session-sticky: a user cleaning six columns opens it once. Not
+      // persisted to the project, because it is a view state, not work.
+      MISSING_PANEL_OPEN = el("ps-variable-missing-wrap").hasAttribute("hidden");
+      setMissingPanelOpen(MISSING_PANEL_OPEN);
+    });
+    el("ps-missing-explain").addEventListener("click", function () {
+      openShellDialog("ps-missing-dialog");
+    });
+    el("ps-missing-dialog-close").addEventListener("click", function () {
+      closeShellDialog("ps-missing-dialog");
     });
     el("ps-missing-mode-dataset").addEventListener("change", function () {
       if (!this.checked || !INSPECTOR_VAR) return;
@@ -25387,6 +25441,7 @@
     ],
     data: [
       { label: "Add computed column\u2026", command: "data-compute" },
+      { label: "Missing values\u2026", command: "data-missing" },
       { label: "Reshape to wide\u2026", command: "data-reshape" },
       "separator",
       { label: "Insert column to the left", command: "data-insert-left" },
@@ -26028,6 +26083,13 @@
     var col = INSPECTOR_VAR;
     if (appWorkspace() !== "data") setAppWorkspace("data");
     if (command === "data-compute") { openFormulaDialog(col || null); return; }
+    if (command === "data-missing") {
+      // A second door, so the dataset-wide list is reachable without
+      // first selecting a variable - and so the command palette can
+      // find it, which a hand-built menu button never is.
+      openShellDialog("ps-missing-dialog");
+      return;
+    }
     if (command === "data-reshape") { openReshapeDialog(); return; }
     // Route through the SAME functions the grid popover uses (the comment
     // above promises exactly that, and these two had drifted): show-all
