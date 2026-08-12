@@ -22459,18 +22459,28 @@
     setTip(blank, "Blank cells always count as missing. " +
       counts.b + " here.");
     host.appendChild(blank);
+    var ownList = hasColumnTokens(t, col);
     for (var i = 0; i < list.length; i++) (function (code) {
       var m = missingMatchCounts(t, col, [code]).m;
       var chip = mkEl("span", "ps-missing-chip" +
         (m === 0 ? " ps-missing-chip-dead" : ""));
       chip.appendChild(mkEl("span", "", code));
       chip.appendChild(mkEl("span", "ps-missing-chip-n", "(" + m + ")"));
-      if (m === 0) setTip(chip, "No cell in " + col + " matches " + code +
-        ". Check the spelling, or remove it.");
+      // Provenance answers the question the chips alone cannot: WHOSE
+      // code is this, and what does removing it reach? A dead code's
+      // typo warning still wins the tip.
+      setTip(chip, m === 0
+        ? "No cell in " + col + " matches " + code +
+          ". Check the spelling, or remove it."
+        : ownList
+        ? code + " is in this variable's own list."
+        : code + " comes from the dataset list. Removing it here " +
+          "changes only this variable.");
       var x = mkEl("button", "ps-missing-chip-x", "\u2715");
       x.type = "button";
       x.setAttribute("aria-label", "Stop counting " + code +
-        " as missing (matches " + m + " cell" + (m === 1 ? "" : "s") + ")");
+        " as missing in this variable (matches " + m + " cell" +
+        (m === 1 ? "" : "s") + ")");
       x.addEventListener("click", function () {
         missingChipsCommit(col, list.filter(function (v) {
           return v !== code;
@@ -23303,6 +23313,9 @@
       setMissingPanelOpen(MISSING_PANEL_OPEN);
     });
     el("ps-missing-explain").addEventListener("click", function () {
+      openShellDialog("ps-missing-dialog");
+    });
+    el("ps-missing-editds").addEventListener("click", function () {
       openShellDialog("ps-missing-dialog");
     });
     el("ps-missing-dialog-close").addEventListener("click", function () {

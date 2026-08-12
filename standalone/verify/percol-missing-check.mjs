@@ -439,6 +439,42 @@ ok(doors.viaMenu,
    'the Data menu reaches it too, so the dataset setting does not require ' +
    'selecting a variable first');
 
+console.log('case 6f: the dataset list has a door NAMED for editing');
+// Hiding an editing control behind a button called "How this works"
+// made changing the dataset list a secret. Both doors open the same
+// dialog; each is honest about why you would click it. Inherited chips
+// also carry their provenance, so removing one is never a surprise.
+const named = await page.evaluate(async () => {
+    const s = ms => new Promise(r => setTimeout(r, ms));
+    if (document.getElementById('ps-variable-missing-wrap').hidden)
+        document.getElementById('ps-variable-missing-toggle').click();
+    await s(250);
+    const btn = document.getElementById('ps-missing-editds');
+    const out = { label: btn ? btn.textContent : null };
+    btn.click();
+    await s(400);
+    const dlg = document.getElementById('ps-missing-dialog');
+    out.open = getComputedStyle(dlg).display === 'flex';
+    out.fieldLabel = dlg.querySelector('.ps-missing-ds .ps-inspector-field')
+        .textContent.replace(/\s+/g, ' ').trim();
+    document.getElementById('ps-missing-dialog-close').click();
+    await s(300);
+    const chip = Array.from(document.querySelectorAll(
+        '#ps-missing-chips .ps-missing-chip:not(.ps-missing-chip-blank)'))
+        .find(c => !c.classList.contains('ps-missing-chip-dead'));
+    out.tip = chip ? chip.getAttribute('data-tip') : null;
+    return out;
+});
+ok(/^Edit the dataset list/.test(named.label) && named.open,
+   'the rail names the editing door, and it opens the dialog');
+ok(/^Dataset list/.test(named.fieldLabel),
+   `whose field now carries the same name the rule line uses ` +
+   `("${named.fieldLabel.slice(0, 24)}")`);
+ok(named.tip !== null &&
+   (/(comes from the dataset list|this variable's own list)/.test(named.tip)),
+   `and a chip states its provenance, so removing one is never a ` +
+   `surprise ("${named.tip}")`);
+
 console.log('case R: a rename carries the column\'s own missing labels with it');
 // The one keyed store the rename did not carry, and losing it is not
 // cosmetic. The column falls back to the dataset labels, so a code that WAS

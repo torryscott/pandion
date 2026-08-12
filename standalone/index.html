@@ -1541,6 +1541,11 @@
   .ps-missing-state .ps-linklike { font-size: 12px;
     color: var(--ps-accent); background: none; border: 0; padding: 0;
     font-family: inherit; }
+  .ps-missing-links { display: flex; align-items: baseline; gap: 7px;
+    margin-top: 2px; color: var(--ps-l3); }
+  .ps-missing-links .ps-linklike { font-size: 12px;
+    color: var(--ps-accent); background: none; border: 0; padding: 0;
+    font-family: inherit; }
   /* The transient grid highlight Show-them paints, applied by the cell
      renderer so it survives scrolling through a virtualized window. */
   td.ps-grid-missinghit { box-shadow: inset 0 0 0 2px var(--ps-accent);
@@ -4552,13 +4557,19 @@
                     hidden>Show them</button>
           </div>
           <div class="ps-missing-state" id="ps-missing-state"></div>
-          <!-- The dataset-wide list is NOT here. A dataset control inside a
-               per-variable panel, printed after its own exception, was the
-               second cause of the busy feeling; it lives in the dialog
-               below with the explanation, which is the other thing that is
-               not about this variable. -->
-          <button type="button" class="ps-linklike" id="ps-missing-explain"
-                  >How this works</button>
+          <!-- The dataset-wide list is NOT here (a dataset control inside
+               a per-variable panel was half the old busy feeling), but its
+               door is NAMED: hiding an editing control behind a button
+               called "How this works" made changing the dataset list a
+               secret (Torry's report). Both doors open the same Missing
+               values dialog; each is honest about why you would click it. -->
+          <div class="ps-missing-links">
+            <button type="button" class="ps-linklike"
+                    id="ps-missing-editds">Edit the dataset list&#8230;</button>
+            <span aria-hidden="true">&#183;</span>
+            <button type="button" class="ps-linklike"
+                    id="ps-missing-explain">How this works</button>
+          </div>
           </div>
         </div>
       </div>
@@ -5418,28 +5429,32 @@
     <div class="ps-dialog-head">
       <div>
         <h2 id="ps-missing-dialog-title">Missing values</h2>
-        <p>What counts as missing, and the list this dataset uses.</p>
+        <p>What counts as missing, and the dataset list every variable
+          starts with.</p>
       </div>
       <button type="button" class="ps-btn ps-dialog-close"
               id="ps-missing-dialog-close">Close</button>
     </div>
     <div class="ps-dialog-body">
       <p id="ps-missing-dialog-lead">A cell counts as missing when it is
-        blank, or when its text matches one of the missing-value labels.
-        Missing cells are left out of charts and statistics.</p>
-      <p>Blank cells always count as missing. No list can change that.</p>
-      <p><b>The two lists.</b> The dataset list is used by every variable
-        that has no list of its own. A variable can be given its own list
-        instead, which REPLACES the dataset list for that variable. That is
-        how you say a code means missing in most variables but is a real
-        value in one of them.</p>
-      <p><b>What a label does.</b> Surveys often code an unanswered
-        question as -99, or "not applicable" as 9. Declaring the code here
-        does not change the cell: the value stays in the table, and the app
+        blank, or when its text matches one of the codes shown as chips in
+        the panel. Missing cells are left out of charts and statistics.</p>
+      <p>Blank cells always count as missing. That is why the blank chip
+        has no remove button.</p>
+      <p><b>The two lists.</b> Every variable starts with the dataset list
+        below. Editing a variable's chips gives that variable its own
+        list, which REPLACES the dataset list for it alone: that is how a
+        code can mean missing in most variables but stay a real value in
+        one of them. The line under the chips says which is in force,
+        "Same as the rest of the dataset" or "Different from the dataset
+        now".</p>
+      <p><b>What a code does.</b> Surveys often store an unanswered
+        question as -99, or "not applicable" as 9. Declaring the code does
+        not change any cell: the value stays in the table, and the app
         stops counting it as data.</p>
       <div class="ps-missing-ds">
         <label class="ps-inspector-field">
-          Dataset missing values
+          Dataset list
           <input id="ps-variable-missing" type="text"
                  placeholder="NA, N/A, .">
         </label>
