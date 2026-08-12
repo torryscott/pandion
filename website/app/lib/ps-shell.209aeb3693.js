@@ -147,14 +147,75 @@
           tx.style.cssText = "font-family:monospace;";
           var hint = document.createElement("span");
           hint.style.cssText = "color:#888;";
-          hint.textContent = "click a color in the app \u00b7 Esc cancels";
+          hint.textContent = "click a color \u00b7 Esc cancels";
           chip.appendChild(sw); chip.appendChild(tx); chip.appendChild(hint);
+          // The loupe: a zoomed patch of the SNAPSHOT around the cursor,
+          // shown only in snapshot mode - a raster has no element
+          // outlines, so precise picking needs magnification.
+          var loupe = document.createElement("canvas");
+          loupe.width = loupe.height = 96;
+          loupe.style.cssText = "display:none;border-radius:4px;" +
+            "border:1px solid rgba(0,0,0,0.25);";
+          chip.appendChild(loupe);
+          // The banner (top center): names the mode, and offers the way
+          // OUT of the page. Only rendered when the browser can share a
+          // screen - a door to nothing is chrome.
+          var canShare = !!(navigator.mediaDevices &&
+            typeof navigator.mediaDevices.getDisplayMedia === "function");
+          var banner = document.createElement("div");
+          banner.id = "ps-eyedrop-banner";
+          banner.style.cssText = "position:fixed;top:10px;left:50%;" +
+            "transform:translateX(-50%);z-index:2147483002;display:flex;" +
+            "align-items:center;gap:10px;padding:6px 12px;background:#fff;" +
+            "border:1px solid #bbb;border-radius:6px;" +
+            "box-shadow:0 2px 10px rgba(0,0,0,0.22);font:12px/1.4 " +
+            "-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;" +
+            "color:#333;";
+          var bmsg = document.createElement("span");
+          bmsg.textContent = "Sampling colors in the app";
+          banner.appendChild(bmsg);
+          var bbtn = null;
+          if (canShare) {
+            bbtn = document.createElement("button");
+            bbtn.type = "button";
+            bbtn.id = "ps-eyedrop-share";
+            bbtn.textContent = "Pick from another window\u2026";
+            bbtn.style.cssText = "font:inherit;color:#3573bd;" +
+              "background:none;border:0;padding:0;cursor:pointer;" +
+              "text-decoration:underline;";
+            setTip(bbtn, "Your browser will ask which window or screen " +
+              "to share. One snapshot is taken so you can click a color " +
+              "in it; nothing is recorded.");
+            banner.appendChild(bbtn);
+          }
           var ours = function (el) {
-            return el === overlay || el === chip || chip.contains(el);
+            return el === overlay || el === chip || chip.contains(el) ||
+              el === banner || banner.contains(el);
           };
+          // Snapshot mode state: the full-resolution captured frame,
+          // the on-screen view of it, and the view's placement (for
+          // pointer -> frame coordinate mapping).
+          var still = null, view = null, fit = null;
           var last = "#ffffff";
+          function sampleStill(e) {
+            // Map the pointer through the letterboxed view onto the
+            // full-resolution frame, clamped to its edges.
+            var fx = Math.max(0, Math.min(still.width - 1,
+              Math.round((e.clientX - fit.x) / fit.scale)));
+            var fy = Math.max(0, Math.min(still.height - 1,
+              Math.round((e.clientY - fit.y) / fit.scale)));
+            var d = still.getContext("2d").getImageData(fx, fy, 1, 1).data;
+            var g = loupe.getContext("2d");
+            g.imageSmoothingEnabled = false;
+            g.clearRect(0, 0, 96, 96);
+            g.drawImage(still, fx - 5.5, fy - 5.5, 12, 12, 0, 0, 96, 96);
+            g.strokeStyle = "rgba(0,0,0,0.6)";
+            g.strokeRect(44, 44, 8, 8);
+            return "#" + hex2(d[0]) + hex2(d[1]) + hex2(d[2]);
+          }
           function place(e) {
-            last = colorAt(e.clientX, e.clientY, ours);
+            last = still ? sampleStill(e)
+                         : colorAt(e.clientX, e.clientY, ours);
             sw.style.background = last;
             tx.textContent = last;
             var cw = chip.offsetWidth || 200, ch = chip.offsetHeight || 26;
@@ -164,11 +225,110 @@
             chip.style.left = lx + "px";
             chip.style.top = ly + "px";
           }
+          function enterStill(frame) {
+            still = frame;
+            view = document.createElement("canvas");
+            var vw = window.innerWidth - 24,
+                vh = window.innerHeight - 60;
+            var scale = Math.min(vw / frame.width, vh / frame.height, 1);
+            view.width = Math.round(frame.width * scale);
+            view.height = Math.round(frame.height * scale);
+            view.getContext("2d").drawImage(frame, 0, 0,
+              view.width, view.height);
+            fit = { scale: scale,
+              x: Math.round((window.innerWidth - view.width) / 2),
+              y: Math.max(46,
+                Math.round((window.innerHeight - view.height) / 2)) };
+            view.style.cssText = "position:fixed;pointer-events:none;" +
+              "left:" + fit.x + "px;top:" + fit.y + "px;" +
+              "border:1px solid #555;";
+            overlay.style.background = "rgba(17,17,17,0.96)";
+            overlay.appendChild(view);
+            loupe.style.display = "block";
+            bmsg.textContent =
+              "A snapshot of what you shared \u00b7 click a color in it";
+            if (bbtn) bbtn.textContent = "Share a different window\u2026";
+          }
+          function exitStill() {
+            still = null; fit = null;
+            if (view) { view.remove(); view = null; }
+            overlay.style.background = "transparent";
+            loupe.style.display = "none";
+            bmsg.textContent = "Sampling colors in the app";
+            if (bbtn) bbtn.textContent = "Pick from another window\u2026";
+          }
+          function shareNote(text) {
+            bmsg.textContent = text;
+            window.setTimeout(function () {
+              if (!still) bmsg.textContent = "Sampling colors in the app";
+            }, 4000);
+          }
+          function screenMode() {
+            navigator.mediaDevices.getDisplayMedia({ video: true,
+              audio: false }).then(function (stream) {
+              var stop = function () {
+                stream.getTracks().forEach(function (t) {
+                  try { t.stop(); } catch (e2) {}
+                });
+              };
+              var video = document.createElement("video");
+              video.muted = true;
+              video.setAttribute("playsinline", "");
+              video.srcObject = stream;
+              var grabbed = false;
+              var grab = function () {
+                if (grabbed) return;
+                grabbed = true;
+                var w = video.videoWidth, h = video.videoHeight;
+                // The capture stops the moment the frame lands: one
+                // still, nothing recorded, nothing kept after exit.
+                if (!w || !h) {
+                  stop();
+                  shareNote("The shared picture never arrived \u00b7 " +
+                    "still sampling in the app");
+                  return;
+                }
+                var frame = document.createElement("canvas");
+                frame.width = w; frame.height = h;
+                frame.getContext("2d").drawImage(video, 0, 0);
+                stop();
+                video.srcObject = null;
+                if (still) exitStill();
+                enterStill(frame);
+              };
+              // The FIRST frame can be black while the pipeline warms
+              // up (Safari); take the second when the browser can say
+              // which frames are real, else settle briefly.
+              if (video.requestVideoFrameCallback) {
+                video.requestVideoFrameCallback(function () {
+                  video.requestVideoFrameCallback(function () { grab(); });
+                });
+              } else {
+                video.addEventListener("canplay", function () {
+                  window.setTimeout(grab, 150);
+                });
+              }
+              window.setTimeout(function () {
+                if (!grabbed) { grabbed = true; stop();
+                  shareNote("The shared picture never arrived \u00b7 " +
+                    "still sampling in the app"); }
+              }, 8000);
+              video.play().then(null, function () {});
+            }, function () {
+              shareNote("Sharing was declined \u00b7 still sampling " +
+                "in the app");
+            });
+          }
+          if (bbtn) bbtn.addEventListener("click", function (e) {
+            e.preventDefault(); e.stopPropagation();
+            screenMode();
+          });
           function done(hexOrNull) {
             window.removeEventListener("keydown", onKey, true);
             if (opts && opts.signal)
               opts.signal.removeEventListener("abort", onAbort);
-            overlay.remove(); chip.remove();
+            overlay.remove(); chip.remove(); banner.remove();
+            still = null;
             if (hexOrNull) resolve({ sRGBHex: hexOrNull });
             else {
               var err = new Error("The user canceled the selection.");
@@ -179,11 +339,11 @@
           function onKey(e) {
             if (e.key !== "Escape") return;
             // WINDOW capture runs before any document-capture listener,
-            // so this preempts the engine's Esc authority: the first
-            // Escape cancels sampling and KEEPS the picker open, the
-            // second reaches the engine and closes the picker - a
-            // proper layered exit.
+            // so this preempts the engine's Esc authority. Layers, one
+            // Escape each: snapshot -> app sampling -> sampler closed
+            // (picker still open) -> the engine closes the picker.
             e.preventDefault(); e.stopPropagation();
+            if (still) { exitStill(); return; }
             done(null);
           }
           function onAbort() { done(null); }
@@ -205,6 +365,7 @@
             opts.signal.addEventListener("abort", onAbort);
           }
           document.body.appendChild(overlay);
+          document.body.appendChild(banner);
           document.body.appendChild(chip);
         });
       };
