@@ -48559,7 +48559,14 @@
                 _helpTab('anatomy', 'Label parts', TAG, activeKey === 'anatomy') +
                 _helpTab('graphChooser', 'Which graph?', BARS, activeKey === 'graphChooser') +
                 _helpTab('graphLint', 'Check graph', CHK, activeKey === 'graphLint') +
-                _helpTab('glossary', 'Glossary', BOOK, activeKey === 'glossary') +
+                ((host.closest && (host.closest("jmv-results-html") || host.closest("jmv-results-svg")))
+                    // In jamovi the glossary lives in the online user
+                    // guide (reference content this large overwhelmed
+                    // the results column; jamovi's future help sidebar
+                    // may host it natively later). The standalone and
+                    // plain pages keep the in-panel tab.
+                    ? ''
+                    : _helpTab('glossary', 'Glossary', BOOK, activeKey === 'glossary')) +
                 '</div>';
         }
         function _wireHelpNavTabs(body) {
@@ -54383,12 +54390,14 @@
                   '<button type="button" data-role="open-user-guide" style="display:inline-flex;align-items:center;gap:6px;padding:5px 12px;font-size:11px;font-weight:600;font-family:var(--gb2-ui-font);cursor:pointer;background:#3573bd;color:#fff;border:none;border-radius:4px;">' +
                     '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>' +
                     '<span>Open the user guide</span></button>' +
-                  '<span style="font-size:11px;color:#666;">The full illustrated guide; opens in your browser.</span>' +
+                  '<button type="button" data-role="open-glossary" style="display:inline-flex;align-items:center;gap:6px;padding:5px 12px;font-size:11px;font-weight:600;font-family:var(--gb2-ui-font);cursor:pointer;background:#fff;color:#3573bd;border:1px solid #3573bd;border-radius:4px;">' +
+                    '<span>Statistics glossary</span></button>' +
+                  '<span style="font-size:11px;color:#666;">The illustrated guide and the glossary; open in your browser.</span>' +
                 '</div>';
             body.innerHTML =
                 '<div style="font-family:var(--gb2-ui-font);font-size:12px;line-height:1.5;max-width:580px;">' +
                   _helpTabsBar('help') +
-                  '<div style="font-size:11px;color:#666;margin:0 0 10px;">Tips for working with this chart. Use the tabs above to <strong>label the parts</strong>, pick <strong>which graph</strong> fits your data, <strong>check</strong> the chart for common pitfalls, or look up a term in the <strong>glossary</strong>.</div>' +
+                  '<div style="font-size:11px;color:#666;margin:0 0 10px;">Tips for working with this chart. Use the tabs above to <strong>label the parts</strong>, pick <strong>which graph</strong> fits your data, <strong>check</strong> the chart for common pitfalls' + ((host.closest && (host.closest("jmv-results-html") || host.closest("jmv-results-svg"))) ? '.' : ', or look up a term in the <strong>glossary</strong>.') + '</div>' +
                   '<div data-role="basics-pills" style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px;">' +
                     pill("start", "Start here", topic === "start") +
                     pill("arrange", "Arrange", topic === "arrange") +
@@ -54423,6 +54432,17 @@
                     if (typeof window.openUrl === "function" && /^https?:/i.test(url)) window.openUrl(url);
                     else window.open(url, "_blank");
                 } catch (_eUg) {}
+            });
+            var glBtn = body.querySelector('[data-role="open-glossary"]');
+            if (glBtn) glBtn.addEventListener("click", function (e) {
+                e.preventDefault();
+                try {
+                    var base = String(window.location.href).split(/[?#]/)[0];
+                    if (!/\/$/.test(base)) base += "/";
+                    var url = base + "module/" + ugPath + "#glossary";
+                    if (typeof window.openUrl === "function" && /^https?:/i.test(url)) window.openUrl(url);
+                    else window.open(url, "_blank");
+                } catch (_eGl) {}
             });
             _wireHelpNavTabs(body);
             inspector.flushFn = null;
@@ -56939,8 +56959,16 @@
                 try { window.__gb2_helpBasicsTopic = "access"; } catch (_eA11y) {}
                 renderInspectorHelp(body);
             } else if (sel === "glossary") {
-                titleEl.textContent = "Glossary";
-                renderInspectorGlossary(body);
+                if (host.closest && (host.closest("jmv-results-html") || host.closest("jmv-results-svg"))) {
+                    // stale session state from before the glossary moved
+                    // to the user guide in jamovi: land on Basics, which
+                    // carries the guide and glossary buttons
+                    titleEl.textContent = "Help & shortcuts";
+                    renderInspectorHelp(body);
+                } else {
+                    titleEl.textContent = "Glossary";
+                    renderInspectorGlossary(body);
+                }
             } else if (sel === "export") {
                 titleEl.textContent = "Export plot";
                 renderInspectorExport(body);
