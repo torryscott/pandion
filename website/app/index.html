@@ -1503,18 +1503,49 @@
     padding: 4px 9px;
   }
   .ps-fn-nomatch { padding: 10px 12px; font-size: 12px; color: var(--ps-muted); }
-  /* The missing-values choice: two radio rows, then the own-labels box
-     when forked. The radio IS the state, so no placeholder ever has to
-     carry it again. */
-  .ps-missing-choice { display: flex; flex-direction: column; gap: 5px;
-    margin: 2px 0 7px; }
-  .ps-missing-opt { display: flex; align-items: baseline; gap: 7px;
-    font-size: 12.5px; color: var(--ps-ink-2); cursor: pointer; }
-  .ps-missing-opt input { accent-color: var(--ps-accent); flex-shrink: 0;
-    position: relative; top: 1px; }
-  #ps-missing-own-wrap { margin: 2px 0 4px 23px; }
-  #ps-variable-missing-col { width: 100%; box-sizing: border-box; }
-  #ps-missing-box-hint { margin: 4px 0 0; }
+  /* The chips: each code with its own live count, the blank chip
+     permanent. Chip height 26px keeps the remove targets comfortable. */
+  .ps-missing-lead { font-size: 12px; font-weight: 600;
+    color: var(--ps-ink-3); margin: 0 0 6px; }
+  .ps-missing-chips { display: flex; flex-wrap: wrap; gap: 5px;
+    align-items: center; margin: 0 0 8px; }
+  .ps-missing-chip { display: inline-flex; align-items: center; gap: 5px;
+    min-height: 26px; padding: 1px 8px; font-size: 12px;
+    font-family: ui-monospace, Menlo, monospace; color: var(--ps-ink-2);
+    background: var(--ps-s0); border: 1px solid var(--ps-l3);
+    border-radius: 999px; }
+  .ps-missing-chip-n { font-family: inherit; font-size: 11px;
+    color: var(--ps-ink-3); }
+  .ps-missing-chip-blank { background: var(--ps-s1); border-style: dashed; }
+  /* A code that matches nothing announces itself: the (0) is the typo
+     warning, no sentence required. */
+  .ps-missing-chip-dead { color: var(--ps-muted); }
+  .ps-missing-chip-dead .ps-missing-chip-n { color: var(--ps-muted); }
+  .ps-missing-chip-x { -webkit-appearance: none; appearance: none;
+    border: 0; background: transparent; color: var(--ps-ink-3);
+    font-size: 12px; line-height: 1; padding: 4px 2px; cursor: pointer;
+    border-radius: 999px; }
+  .ps-missing-chip-x:hover { color: var(--ps-danger-2); }
+  .ps-missing-add { width: 72px; min-height: 26px; box-sizing: border-box;
+    font-family: inherit; font-size: 12px; color: var(--ps-ink-2);
+    background: transparent; border: 1px dashed var(--ps-l3);
+    border-radius: 999px; padding: 1px 10px; }
+  .ps-missing-add:focus { border-style: solid; background: var(--ps-s0); }
+  .ps-missing-readout { display: flex; align-items: baseline; gap: 8px;
+    flex-wrap: wrap; }
+  .ps-missing-readout .ps-linklike { font-size: 12px;
+    color: var(--ps-accent); background: none; border: 0; padding: 0;
+    font-family: inherit; }
+  .ps-missing-state { font-size: 12px; color: var(--ps-muted);
+    margin: 0 0 2px; display: flex; align-items: baseline; gap: 8px;
+    flex-wrap: wrap; }
+  .ps-missing-state .ps-linklike { font-size: 12px;
+    color: var(--ps-accent); background: none; border: 0; padding: 0;
+    font-family: inherit; }
+  /* The transient grid highlight Show-them paints, applied by the cell
+     renderer so it survives scrolling through a virtualized window. */
+  td.ps-grid-missinghit { box-shadow: inset 0 0 0 2px var(--ps-accent);
+    background: var(--ps-tint-2); }
   /* The resting row IS the disclosure button. Its height never changes
      with the data or the mode, so clicking down a column of variables
      cannot make the rail's scroll length jump under the pointer. */
@@ -4498,36 +4529,30 @@
           <span class="ps-visually-hidden"
                 id="ps-variable-missing-col-label">Missing values for <span
                 id="ps-missing-varname"></span></span>
-          <!-- The group carries the variable via aria-labelledby, so the
-               radios never have to (their accessible names must equal
-               their visible labels: WCAG 2.5.3 Label in Name). -->
-          <div class="ps-missing-choice" role="radiogroup"
-               aria-labelledby="ps-variable-missing-col-label">
-            <label class="ps-missing-opt">
-              <input type="radio" name="ps-missing-mode"
-                     id="ps-missing-mode-dataset" value="dataset">
-              <span id="ps-missing-opt-dataset">Use the dataset list</span>
-            </label>
-            <label class="ps-missing-opt">
-              <input type="radio" name="ps-missing-mode"
-                     id="ps-missing-mode-own" value="own">
-              <span id="ps-missing-opt-own">Give this variable its own list</span>
-            </label>
-          </div>
-          <div id="ps-missing-own-wrap" hidden>
-            <input id="ps-variable-missing-col" type="text"
-                   aria-label="This variable's own missing-value list"
-                   aria-describedby="ps-missing-box-hint">
-            <div class="ps-loader-hint" id="ps-missing-box-hint">Separate
-              values with commas. This list replaces the dataset list for
-              this variable.</div>
-          </div>
+          <!-- t4-137. Each code is a CHIP carrying its own live match
+               count, so cause and consequence sit in one glyph: add -99
+               and "-99 (3)" appears; a code matching nothing shows (0) in
+               grey, which IS the typo warning. The blank chip is
+               permanent and unremovable, so "blank always counts" is a
+               visible fact rather than a sentence. Editing the chips IS
+               choosing this variable's own list: the set forks when it
+               differs from the dataset and un-forks when edited back to
+               equality, so the state line below is always literally true.
+               The radios, the text box and their hints are deleted. -->
+          <div class="ps-missing-lead" id="ps-missing-lead">Counts as
+            missing here:</div>
+          <div class="ps-missing-chips" id="ps-missing-chips" role="group"
+               aria-labelledby="ps-variable-missing-col-label"></div>
           <!-- Output, not advice: the readout is tinted so it cannot be
                mistaken for the plain grey hints around it. No left accent
                bar - that idiom is spoken for by the stat strips, where it
                means "this control changes the numbers". -->
-          <div class="ps-missing-readout" id="ps-variable-missing-col-hint"
-               role="status" aria-atomic="true"></div>
+          <div class="ps-missing-readout" id="ps-variable-missing-col-hint">
+            <span id="ps-missing-agg" role="status" aria-atomic="true"></span>
+            <button type="button" class="ps-linklike" id="ps-missing-show"
+                    hidden>Show them</button>
+          </div>
+          <div class="ps-missing-state" id="ps-missing-state"></div>
           <!-- The dataset-wide list is NOT here. A dataset control inside a
                per-variable panel, printed after its own exception, was the
                second cause of the busy feeling; it lives in the dialog
@@ -5947,7 +5972,7 @@
 <script src="lib/jspdf.umd.min.979a2ef514.js"></script>
 <script src="lib/svg2pdf.umd.min.4ada250f50.js"></script>
 <script src="lib/graphbuilder2.min.e397de20dd.js"></script>
-<script src="lib/ps-shell.cb81e22f32.js"></script>
+<script src="lib/ps-shell.f09e3172db.js"></script>
 <script src="lib/ps-tour.b02cf78f7f.js"></script>
 </body>
 </html>

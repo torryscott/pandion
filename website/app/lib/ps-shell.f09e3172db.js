@@ -13081,6 +13081,12 @@
     var cls = "ps-grid-editable";
     if (v != null && typeof v === "number") cls = "ps-grid-num " + cls;
     if (v == null) cls = "ps-grid-miss " + cls;
+    // Show-them (t4-137): painted HERE so the highlight survives
+    // scrolling through the virtualized window, and stays live as codes
+    // are added or removed while it is on.
+    if (MISSING_SHOW_COL === col &&
+        isMissingRaw(t, t.raw[col][i], col))
+      cls += " ps-grid-missinghit";
     var rowFiltered = !rowExcl && isRowFiltered(t, i);
     if (excl) cls += " ps-grid-excl";
     if (rowExcl) cls += " ps-grid-row-excl";
@@ -22336,11 +22342,9 @@
       t.levelOrderDefaults[col] ? "inline-block" : "none";
     el("ps-variable-missing").value = (t.missingTokens || ["NA"]).join(", ");
     var mcLabel = el("ps-variable-missing-col-label");
-    var mcInput = el("ps-variable-missing-col");
     var mcHint = el("ps-variable-missing-col-hint");
-    if (mcLabel && mcInput && mcHint) {
+    if (mcLabel && mcHint) {
       var own = hasColumnTokens(t, INSPECTOR_VAR);
-      var dsList = (t.missingTokens || ["NA"]);
       // The name lives in ONE place, in its own casing (t4-135).
       var nameEl = el("ps-missing-varname");
       if (nameEl) {
@@ -22349,55 +22353,73 @@
         // that line for the whole shell.
         setTip(nameEl, INSPECTOR_VAR);
       }
-      // The radio pair IS the state (t4-134): no placeholder carries it.
-      el("ps-missing-mode-dataset").checked = !own;
-      el("ps-missing-mode-own").checked = own;
-      // Whole entries up to ~48 chars, then real text, never a CSS
-      // ellipsis: the visible string and the spoken string must match.
-      var shown = [], used = 0;
-      for (var li = 0; li < dsList.length; li++) {
-        var ent = String(dsList[li]);
-        if (used && used + ent.length + 2 > 48) break;
-        shown.push(ent);
-        used += ent.length + 2;
-      }
-      var more = dsList.length - shown.length;
-      el("ps-missing-opt-dataset").textContent = dsList.length
-        ? "Use the dataset list: " + shown.join(", ") +
-          (more > 0 ? ", and " + more + " more" : "")
-        : "Use the dataset list (none set)";
-      el("ps-missing-opt-own").textContent =
-        "Give this variable its own list";
-      el("ps-missing-own-wrap").hidden = !own;
-      mcInput.value = own
-        ? t.missingTokensByCol[INSPECTOR_VAR].join(", ") : "";
       var ruleEl = el("ps-missing-rule");
       if (ruleEl) ruleEl.textContent =
         missingRuleLine(columnTokenList(t, INSPECTOR_VAR), own);
       MISSING_READOUT_COL = INSPECTOR_VAR;
-      var lines = missingReadoutLines(
-        missingMatchCounts(t, INSPECTOR_VAR,
-          columnTokenList(t, INSPECTOR_VAR)),
-        missingMatchCounts(t, INSPECTOR_VAR, dsList),
-        own, columnTokenList(t, INSPECTOR_VAR), dsList);
-      // Bold the leading count so the eye lands on a number without
-      // reading, via a span rather than <strong>: some screen readers
-      // announce emphasis boundaries, and this text is spoken whole on
-      // every change.
-      var html = escHtml(lines.a).replace(/^(\d[\d,]*)/,
+      renderMissingChips(t, INSPECTOR_VAR);
+      var c = missingMatchCounts(t, INSPECTOR_VAR,
+        columnTokenList(t, INSPECTOR_VAR));
+      var n = c.m + c.b;
+      // The aggregate is TOTAL-ONLY: the chips are the breakdown, each
+      // part sitting on the code that causes it. The no-printed-zero
+      // rule still governs this sentence.
+      var agg;
+      if (c.total === 0) agg = "This variable has no rows yet.";
+      else if (n === 0) agg = "Nothing is missing here. " +
+        (c.total === 1 ? "Its only cell has a value."
+          : "All " + c.total + " cells have a value.");
+      else agg = n + " of " + c.total + " cell" +
+        (c.total === 1 ? "" : "s") + (n === 1 ? " is" : " are") +
+        " missing.";
+      var aggEl = el("ps-missing-agg");
+      var html = escHtml(agg).replace(/^(\d[\d,]*)/,
         '<span class="ps-missing-n">$1</span>');
-      if (lines.b) html += '<span class="ps-missing-b2">' +
-        escHtml(lines.b) + '</span>';
+      var switched = MISSING_LAST_COL !== INSPECTOR_VAR;
+      // The highlight is a question about ONE column; switching the
+      // subject retires it rather than leaving paint behind. This must
+      // NOT sit inside the text-diff guard below: two columns can
+      // produce the identical aggregate sentence, and the clear would
+      // silently be skipped with it.
+      if (switched && MISSING_SHOW_COL) {
+        MISSING_SHOW_COL = null;
+        syncDataGrid();
+      }
       // Writing identical text re-announces in several screen readers,
       // and a variable SWITCH is not something the user did in this
       // panel, so it is muted rather than spoken over the selection.
-      if (mcHint.innerHTML !== html) {
-        var switched = MISSING_LAST_COL !== INSPECTOR_VAR;
-        if (switched) mcHint.setAttribute("aria-busy", "true");
-        mcHint.innerHTML = html;
+      if (aggEl && aggEl.innerHTML !== html) {
+        if (switched) aggEl.setAttribute("aria-busy", "true");
+        aggEl.innerHTML = html;
         if (switched) window.setTimeout(function () {
-          mcHint.removeAttribute("aria-busy");
+          aggEl.removeAttribute("aria-busy");
         }, 0);
+      }
+      var showBtn = el("ps-missing-show");
+      if (showBtn) {
+        showBtn.hidden = n === 0;
+        showBtn.textContent = MISSING_SHOW_COL === INSPECTOR_VAR
+          ? "Hide them" : "Show them";
+      }
+      // The state line is LITERALLY true by construction: the set forks
+      // only when it differs and un-forks at equality, so "different"
+      // is never claimed of an identical list.
+      var stateEl = el("ps-missing-state");
+      if (stateEl) {
+        stateEl.textContent = "";
+        stateEl.appendChild(document.createTextNode(own
+          ? "Different from the dataset now."
+          : "Same as the rest of the dataset."));
+        if (own) {
+          var back = mkEl("button", "ps-linklike",
+            "Use the dataset's values");
+          back.type = "button";
+          back.id = "ps-missing-usedataset";
+          back.addEventListener("click", function () {
+            setColumnMissingTokens(INSPECTOR_VAR, "");
+          });
+          stateEl.appendChild(back);
+        }
       }
       MISSING_LAST_COL = INSPECTOR_VAR;
       setMissingPanelOpen(MISSING_PANEL_OPEN);
@@ -22418,6 +22440,85 @@
     }
   }
   var MISSING_LAST_COL = null;
+  var MISSING_SHOW_COL = null;   // the column Show-them is painting
+  // One chip per code, each carrying its own live match count. The
+  // blank chip leads and cannot be removed: "blank always counts" is a
+  // fact you can see, not a sentence you must trust.
+  function renderMissingChips(t, col) {
+    var host = el("ps-missing-chips");
+    if (!host) return;
+    host.textContent = "";
+    var list = columnTokenList(t, col);
+    var counts = missingMatchCounts(t, col, list);
+    var blank = mkEl("span", "ps-missing-chip ps-missing-chip-blank");
+    blank.appendChild(mkEl("span", "", "blank"));
+    blank.appendChild(mkEl("span", "ps-missing-chip-n",
+      "(" + counts.b + ")"));
+    blank.setAttribute("aria-label", "Blank cells: " + counts.b +
+      ". Blank always counts as missing.");
+    setTip(blank, "Blank cells always count as missing. " +
+      counts.b + " here.");
+    host.appendChild(blank);
+    for (var i = 0; i < list.length; i++) (function (code) {
+      var m = missingMatchCounts(t, col, [code]).m;
+      var chip = mkEl("span", "ps-missing-chip" +
+        (m === 0 ? " ps-missing-chip-dead" : ""));
+      chip.appendChild(mkEl("span", "", code));
+      chip.appendChild(mkEl("span", "ps-missing-chip-n", "(" + m + ")"));
+      if (m === 0) setTip(chip, "No cell in " + col + " matches " + code +
+        ". Check the spelling, or remove it.");
+      var x = mkEl("button", "ps-missing-chip-x", "\u2715");
+      x.type = "button";
+      x.setAttribute("aria-label", "Stop counting " + code +
+        " as missing (matches " + m + " cell" + (m === 1 ? "" : "s") + ")");
+      x.addEventListener("click", function () {
+        missingChipsCommit(col, list.filter(function (v) {
+          return v !== code;
+        }));
+      });
+      chip.appendChild(x);
+      host.appendChild(chip);
+    })(list[i]);
+    var add = mkEl("input", "ps-missing-add");
+    add.type = "text";
+    add.id = "ps-missing-add";
+    add.placeholder = "+ add";
+    add.setAttribute("aria-label",
+      "Add a value that should count as missing in " + col);
+    add.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); this.blur(); }
+    });
+    add.addEventListener("change", function () {
+      var parts = String(this.value || "").split(",").map(function (v) {
+        return v.trim();
+      }).filter(Boolean);
+      if (!parts.length) return;
+      var next = list.slice();
+      for (var p = 0; p < parts.length; p++)
+        if (next.indexOf(parts[p]) === -1) next.push(parts[p]);
+      missingChipsCommit(col, next);
+      // The renderer rebuilds this input; re-focus the fresh one so a
+      // run of codes can be typed without re-clicking.
+      window.setTimeout(function () {
+        var fresh = el("ps-missing-add");
+        if (fresh) fresh.focus();
+      }, 0);
+    });
+    host.appendChild(add);
+  }
+  // The edit model (t4-137): editing the chips IS choosing the list.
+  // The set FORKS when it differs from the dataset and UN-FORKS when
+  // edited back to equality, so a variable is "different" exactly when
+  // its list actually is, and the state line can never lie.
+  function missingChipsCommit(col, next) {
+    var t = PROJECT.table;
+    if (!t) return;
+    var ds = (t.missingTokens || ["NA"]);
+    var same = next.length === ds.length && next.every(function (v) {
+      return ds.indexOf(v) !== -1;
+    });
+    setColumnMissingTokens(col, same ? "" : next.join(", "));
+  }
   var MISSING_PANEL_OPEN = false;
   function setMissingPanelOpen(on) {
     var wrap = el("ps-variable-missing-wrap");
@@ -22442,73 +22543,6 @@
       else if (toks[v]) m++;
     }
     return { m: m, b: b, total: raw.length };
-  }
-  // The readout, as a PURE function of the counts (t4-135). Two rules
-  // decide everything, and between them they make the field failure
-  // structurally unprintable:
-  //
-  //   TOTAL FIRST. Every line leads with how many cells are missing and
-  //   presents the parts as its breakdown, so two numbers can never
-  //   read as rival claims.
-  //   NEVER PRINT A COUNT OF ZERO. Each zero collapses into a clause
-  //   ("all of them blank", "They all match the list") or a word
-  //   ("Nothing is missing here", "No cell matches"). A 0 beside a 5 is
-  //   exactly what read as a contradiction, and this makes that pairing
-  //   impossible to emit.
-  //
-  // Line A is chosen by the COUNTS ALONE and is identical in both
-  // modes, so switching radios changes numbers, never grammar. Line B
-  // exists only in own-list mode and exactly one rule fires.
-  function missingReadoutLines(c, ds, own, list, dsList) {
-    var a, b = null;
-    var n = c.m + c.b;
-    // Verb agreement is not pedantry here: this line is read at a
-    // glance and "1 match the list" makes a reader stop and re-read,
-    // which is the exact cost the whole redesign exists to remove.
-    if (c.total === 0) a = "This variable has no rows yet.";
-    else if (c.m > 0 && c.b > 0)
-      a = n + " of " + c.total + " cells are missing: " + c.m +
-          (c.m === 1 ? " matches" : " match") + " the list, " + c.b +
-          (c.b === 1 ? " is" : " are") + " blank.";
-    else if (c.m > 0)
-      a = c.m + " of " + c.total + " cells " +
-          (c.m === 1 ? "is missing. It matches" : "are missing. They all match") +
-          " the list.";
-    else if (c.b > 0)
-      a = c.b + " of " + c.total + " cells " +
-          (c.b === 1 ? "is missing, and it is blank."
-                     : "are missing, all of them blank.");
-    else a = "Nothing is missing here. " + (c.total === 1
-      ? "Its only cell has a value."
-      : "All " + c.total + " cells have a value.");
-    if (own && c.total > 0) {
-      var diff = c.m - ds.m;
-      var ad = Math.abs(diff);
-      var cmp = diff === 0 ? "" : "This list counts " + ad +
-        (diff > 0 ? " more" : " fewer") + " cell" + (ad === 1 ? "" : "s") +
-        " as missing than the dataset list would.";
-      var same = list.length === dsList.length &&
-        list.every(function (v) { return dsList.indexOf(v) !== -1; });
-      if (!list.length)
-        b = "This list is empty, so only blank cells count as missing here.";
-      else if (c.m === 0)
-        b = "No cell matches " +
-            (list.length === 1 ? list[0] : "anything in the list") + "." +
-            (cmp ? " " + cmp : "");
-      else if (diff !== 0) b = cmp;
-      else if (same) b = "Same as the dataset list so far.";
-      else {
-        // Same count by a different route: name a label that earns
-        // nothing, because a list entry matching no cell is usually a
-        // typo and nothing else would ever say so.
-        var dead = list.filter(function (v) {
-          return missingMatchCounts(PROJECT.table, MISSING_READOUT_COL,
-            [v]).m === 0;
-        });
-        if (dead.length) b = dead[0] + " matches no cell here.";
-      }
-    }
-    return { a: a, b: b };
   }
   var MISSING_READOUT_COL = null;   // the column the dead-label scan reads
   // The RESTING line (t4-136): the rule in force, never a count. It reads
@@ -23262,9 +23296,6 @@
     el("ps-variable-missing").addEventListener("change", function () {
       setMissingTokens(this.value);
     });
-    el("ps-variable-missing-col").addEventListener("change", function () {
-      if (INSPECTOR_VAR) setColumnMissingTokens(INSPECTOR_VAR, this.value);
-    });
     el("ps-variable-missing-toggle").addEventListener("click", function () {
       // Session-sticky: a user cleaning six columns opens it once. Not
       // persisted to the project, because it is a view state, not work.
@@ -23277,28 +23308,23 @@
     el("ps-missing-dialog-close").addEventListener("click", function () {
       closeShellDialog("ps-missing-dialog");
     });
-    el("ps-missing-mode-dataset").addEventListener("change", function () {
-      if (!this.checked || !INSPECTOR_VAR) return;
-      var t = PROJECT.table;
-      if (t && hasColumnTokens(t, INSPECTOR_VAR))
-        setColumnMissingTokens(INSPECTOR_VAR, "");
-    });
-    el("ps-missing-mode-own").addEventListener("change", function () {
-      if (!this.checked || !INSPECTOR_VAR) return;
-      var t = PROJECT.table;
-      if (!t || hasColumnTokens(t, INSPECTOR_VAR)) return;
-      // Fork = persist a COPY of the dataset labels and edit from
-      // there: replace-semantics become visible as "your own copy",
-      // and deleting a code from it says the code is real here. An
-      // empty dataset list has nothing to copy, so seed the default.
-      var seed = (t.missingTokens || ["NA"]).join(", ") || "NA";
-      setColumnMissingTokens(INSPECTOR_VAR, seed);
-      // Deliberately NOT focusing the box: taking focus out of a radio
-      // group mid-arrow-key strands a keyboard user who wanted to arrow
-      // back to the other option. The box is the next tab stop.
-    });
-    el("ps-variable-missing-col").addEventListener("keydown", function (e) {
-      if (e.key === "Enter") { e.preventDefault(); this.blur(); }
+    el("ps-missing-show").addEventListener("click", function () {
+      // A live highlight, not a snapshot: the cell renderer repaints it
+      // on every sync, so adding a code while it is on shows the new
+      // missing cells the moment the chip lands.
+      MISSING_SHOW_COL = MISSING_SHOW_COL === INSPECTOR_VAR
+        ? null : INSPECTOR_VAR;
+      this.textContent = MISSING_SHOW_COL ? "Hide them" : "Show them";
+      if (MISSING_SHOW_COL) {
+        var t = PROJECT.table;
+        for (var r = 0; r < nRows(t); r++)
+          if (isMissingRaw(t, t.raw[MISSING_SHOW_COL][r],
+              MISSING_SHOW_COL)) {
+            gridRevealFound({ col: MISSING_SHOW_COL, row: r });
+            break;
+          }
+      }
+      syncDataGrid();
     });
     el("ps-variable-missing").addEventListener("keydown", function (e) {
       if (e.key === "Enter") { e.preventDefault(); this.blur(); }
