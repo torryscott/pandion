@@ -58,10 +58,8 @@ gb2_engine_placeholder_html <- function(message_html,
     frame_svg <- paste0(
         '<svg viewBox="0 0 576 400" aria-hidden="true" ',
              'style="display:block;width:100%;height:auto;">',
-          # faint horizontal gridlines across the plot area
-          paste0('<line x1="52" x2="556" y1="', c(17, 84, 151, 218, 285),
-                 '" y2="', c(17, 84, 151, 218, 285),
-                 '" stroke="#f0f0f0" stroke-width="1"/>', collapse = ''),
+          # no gridlines: the default chart draws none, and the empty
+          # state should promise exactly what the first render delivers
           # y ticks
           paste0('<line x1="46" x2="52" y1="', c(17, 84, 151, 218, 285, 352),
                  '" y2="', c(17, 84, 151, 218, 285, 352),
@@ -70,7 +68,7 @@ gb2_engine_placeholder_html <- function(message_html,
           paste0('<line y1="352" y2="358" x1="', c(52, 178, 304, 430, 556),
                  '" x2="', c(52, 178, 304, 430, 556),
                  '" stroke="#c9c9c9" stroke-width="1.5"/>', collapse = ''),
-          # axes drawn last so they sit over the gridlines
+          # axes drawn last
           '<line x1="52" x2="52" y1="16" y2="352" stroke="#c9c9c9" stroke-width="1.5"/>',
           '<line x1="52" x2="556" y1="352" y2="352" stroke="#c9c9c9" stroke-width="1.5"/>',
         '</svg>')
