@@ -46,14 +46,43 @@ gb2_init_script_src <- function(html_result) {
 gb2_engine_placeholder_html <- function(message_html,
                                         client_bundle_hash = "",
                                         script_src_ready = FALSE) {
-    # Cap the message width so the text wraps under ANY results container.
-    # jamovi's Html element imposes width:500px, which quietly did the
-    # wrapping for us; the experimental Svg element imposes no width, so
-    # an uncapped placeholder stretched the whole results page sideways
-    # (Torry's field report, Aug 2026). Own the wrapping instead of
-    # relying on the host. 560px has no visible effect inside the Html
-    # element's 500px, so production renders byte-for-byte the same.
-    message_html <- paste0('<div style="max-width:560px;">', message_html, '</div>')
+    # The jamovi convention is to draw placeholders at full size rather
+    # than a bare text box (Jonathon's ask, Aug 2026): an empty chart
+    # frame - axes, ticks, faint gridlines, all quiet gray - at the
+    # default plot size, with the module's message centered in the plot
+    # area. The frame is one scalable svg (viewBox), so it shrinks
+    # cleanly inside jamovi's 500px Html column and never stretches the
+    # page sideways under the width-less Svg element (the earlier
+    # sprawl fix). The overlay anchors in PERCENTAGES of the frame, so
+    # the message stays centered at any scale.
+    frame_svg <- paste0(
+        '<svg viewBox="0 0 576 400" aria-hidden="true" ',
+             'style="display:block;width:100%;height:auto;">',
+          # faint horizontal gridlines across the plot area
+          paste0('<line x1="52" x2="556" y1="', c(17, 84, 151, 218, 285),
+                 '" y2="', c(17, 84, 151, 218, 285),
+                 '" stroke="#f0f0f0" stroke-width="1"/>', collapse = ''),
+          # y ticks
+          paste0('<line x1="46" x2="52" y1="', c(17, 84, 151, 218, 285, 352),
+                 '" y2="', c(17, 84, 151, 218, 285, 352),
+                 '" stroke="#c9c9c9" stroke-width="1.5"/>', collapse = ''),
+          # x ticks
+          paste0('<line y1="352" y2="358" x1="', c(52, 178, 304, 430, 556),
+                 '" x2="', c(52, 178, 304, 430, 556),
+                 '" stroke="#c9c9c9" stroke-width="1.5"/>', collapse = ''),
+          # axes drawn last so they sit over the gridlines
+          '<line x1="52" x2="52" y1="16" y2="352" stroke="#c9c9c9" stroke-width="1.5"/>',
+          '<line x1="52" x2="556" y1="352" y2="352" stroke="#c9c9c9" stroke-width="1.5"/>',
+        '</svg>')
+    message_html <- paste0(
+        '<div style="position:relative;max-width:576px;">',
+          frame_svg,
+          '<div style="position:absolute;left:12%;right:6%;top:8%;bottom:16%;',
+                      'display:flex;align-items:center;justify-content:center;',
+                      'text-align:center;">',
+            '<div style="max-width:420px;color:#555;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;">', message_html, '</div>',
+          '</div>',
+        '</div>')
     if (gb2_script_src_on() && isTRUE(script_src_ready))
         message_html
     else
