@@ -231,31 +231,36 @@ rain_rows = ([['Control', v] for v in CTRL] + [['Low dose', v] for v in LOW]
              + [['High dose', v] for v in HIGH])
 
 # ------------------------------------------------------------------- emit
+# Column names are capitalised because the chart derives its axis titles and
+# its legend heading straight from them. Renaming the column is therefore the
+# whole fix: no per-figure title overrides, and a reader who opens the same
+# table in the app sees the labels the figure shows. Sentence case, not title
+# case, so "Reaction time" rather than "Reaction Time".
 DATASETS = {
-    'donut': dict(name='Student majors', header=['major'], rows=donut_rows,
-                  types={'major': 'nominal'},
-                  levels={'major': [m for m, _ in MAJORS]}),
-    'groupedBar': dict(name='Practice and recall', header=['test', 'practice', 'recall'],
+    'donut': dict(name='Student majors', header=['Major'], rows=donut_rows,
+                  types={'Major': 'nominal'},
+                  levels={'Major': [m for m, _ in MAJORS]}),
+    'groupedBar': dict(name='Practice and recall', header=['Test', 'Practice', 'Recall'],
                        rows=bar_rows,
-                       types={'test': 'nominal', 'practice': 'nominal', 'recall': 'continuous'},
-                       levels={'test': ['Immediate', 'One week'],
-                               'practice': ['Massed', 'Spaced']}),
+                       types={'Test': 'nominal', 'Practice': 'nominal', 'Recall': 'continuous'},
+                       levels={'Test': ['Immediate', 'One week'],
+                               'Practice': ['Massed', 'Spaced']}),
     'rmLine': dict(name='Treatment over eight weeks',
-                   header=['group', 'Baseline', 'Week 4', 'Week 8'], rows=rm_rows,
-                   types={'group': 'nominal', 'Baseline': 'continuous',
+                   header=['Group', 'Baseline', 'Week 4', 'Week 8'], rows=rm_rows,
+                   types={'Group': 'nominal', 'Baseline': 'continuous',
                           'Week 4': 'continuous', 'Week 8': 'continuous'},
-                   levels={'group': ['Placebo', 'Treatment']}),
-    'scatter': dict(name='Stress and cortisol', header=['age group', 'stress', 'cortisol'],
+                   levels={'Group': ['Placebo', 'Treatment']}),
+    'scatter': dict(name='Stress and cortisol', header=['Age group', 'Stress', 'Cortisol'],
                     rows=sc_rows,
-                    types={'age group': 'nominal', 'stress': 'continuous',
-                           'cortisol': 'continuous'},
-                    levels={'age group': ['Adolescent', 'Adult']}),
-    'histDensity': dict(name='Reaction times', header=['reaction time'],
+                    types={'Age group': 'nominal', 'Stress': 'continuous',
+                           'Cortisol': 'continuous'},
+                    levels={'Age group': ['Adolescent', 'Adult']}),
+    'histDensity': dict(name='Reaction times', header=['Reaction time'],
                         rows=[[v] for v in rt],
-                        types={'reaction time': 'continuous'}, levels={}),
-    'raincloud': dict(name='Dose and score', header=['condition', 'score'], rows=rain_rows,
-                      types={'condition': 'nominal', 'score': 'continuous'},
-                      levels={'condition': ['Control', 'Low dose', 'High dose']}),
+                        types={'Reaction time': 'continuous'}, levels={}),
+    'raincloud': dict(name='Dose and score', header=['Condition', 'Score'], rows=rain_rows,
+                      types={'Condition': 'nominal', 'Score': 'continuous'},
+                      levels={'Condition': ['Control', 'Low dose', 'High dose']}),
 }
 
 if fail:

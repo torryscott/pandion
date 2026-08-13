@@ -15,7 +15,7 @@ export const GALLERY_DATA = {
   "donut": {
     "name": "Student majors",
     "header": [
-      "major"
+      "Major"
     ],
     "rows": [
       [
@@ -320,10 +320,10 @@ export const GALLERY_DATA = {
       ]
     ],
     "types": {
-      "major": "nominal"
+      "Major": "nominal"
     },
     "levels": {
-      "major": [
+      "Major": [
         "Psychology",
         "Biology",
         "Nursing",
@@ -335,9 +335,9 @@ export const GALLERY_DATA = {
   "groupedBar": {
     "name": "Practice and recall",
     "header": [
-      "test",
-      "practice",
-      "recall"
+      "Test",
+      "Practice",
+      "Recall"
     ],
     "rows": [
       [
@@ -542,16 +542,16 @@ export const GALLERY_DATA = {
       ]
     ],
     "types": {
-      "test": "nominal",
-      "practice": "nominal",
-      "recall": "continuous"
+      "Test": "nominal",
+      "Practice": "nominal",
+      "Recall": "continuous"
     },
     "levels": {
-      "test": [
+      "Test": [
         "Immediate",
         "One week"
       ],
-      "practice": [
+      "Practice": [
         "Massed",
         "Spaced"
       ]
@@ -560,7 +560,7 @@ export const GALLERY_DATA = {
   "rmLine": {
     "name": "Treatment over eight weeks",
     "header": [
-      "group",
+      "Group",
       "Baseline",
       "Week 4",
       "Week 8"
@@ -712,13 +712,13 @@ export const GALLERY_DATA = {
       ]
     ],
     "types": {
-      "group": "nominal",
+      "Group": "nominal",
       "Baseline": "continuous",
       "Week 4": "continuous",
       "Week 8": "continuous"
     },
     "levels": {
-      "group": [
+      "Group": [
         "Placebo",
         "Treatment"
       ]
@@ -727,9 +727,9 @@ export const GALLERY_DATA = {
   "scatter": {
     "name": "Stress and cortisol",
     "header": [
-      "age group",
-      "stress",
-      "cortisol"
+      "Age group",
+      "Stress",
+      "Cortisol"
     ],
     "rows": [
       [
@@ -1074,12 +1074,12 @@ export const GALLERY_DATA = {
       ]
     ],
     "types": {
-      "age group": "nominal",
-      "stress": "continuous",
-      "cortisol": "continuous"
+      "Age group": "nominal",
+      "Stress": "continuous",
+      "Cortisol": "continuous"
     },
     "levels": {
-      "age group": [
+      "Age group": [
         "Adolescent",
         "Adult"
       ]
@@ -1088,7 +1088,7 @@ export const GALLERY_DATA = {
   "histDensity": {
     "name": "Reaction times",
     "header": [
-      "reaction time"
+      "Reaction time"
     ],
     "rows": [
       [
@@ -1483,15 +1483,15 @@ export const GALLERY_DATA = {
       ]
     ],
     "types": {
-      "reaction time": "continuous"
+      "Reaction time": "continuous"
     },
     "levels": {}
   },
   "raincloud": {
     "name": "Dose and score",
     "header": [
-      "condition",
-      "score"
+      "Condition",
+      "Score"
     ],
     "rows": [
       [
@@ -1724,11 +1724,11 @@ export const GALLERY_DATA = {
       ]
     ],
     "types": {
-      "condition": "nominal",
-      "score": "continuous"
+      "Condition": "nominal",
+      "Score": "continuous"
     },
     "levels": {
-      "condition": [
+      "Condition": [
         "Control",
         "Low dose",
         "High dose"

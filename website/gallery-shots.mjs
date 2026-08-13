@@ -45,14 +45,14 @@ const FIGURES = [
     {
         file: 'donut.png', data: 'donut',
         module: 'freqplotbuilder',
-        roles: { var: 'major' },
+        roles: { var: 'Major' },
         options: { graphType: 'donut' },
         expect: { 'freq-slice': 5, 'freq-slice-label': 5 },
     },
     {
         file: 'grouped-bar.png', data: 'groupedBar',
         module: 'plotbuilder',
-        roles: { xvar: 'test', yvar: 'recall', groupVar: 'practice' },
+        roles: { xvar: 'Test', yvar: 'Recall', groupVar: 'Practice' },
         // "Bars show condition means with standard-error bars."
         options: { graphType: 'bar', summaryFunc: 'mean', errorBarType: 'se' },
         expect: { 'error-bar': 4 },
@@ -61,17 +61,23 @@ const FIGURES = [
     {
         file: 'rm-line.png', data: 'rmLine',
         module: 'rmplotbuilder',
-        roles: { measures: ['Baseline', 'Week 4', 'Week 8'], betweenVar: 'group' },
+        roles: { measures: ['Baseline', 'Week 4', 'Week 8'], betweenVar: 'Group' },
         // "Points are means with Cousineau-Morey-corrected error bars."
         // The correction IS errorBarMethod: within; without it the caption
         // would be describing something the chart is not doing.
         options: { graphType: 'line', errorBarType: 'se', errorBarMethod: 'within' },
+        // Repeated Measures ships NO y title by default. That is deliberate
+        // in the app, a nudge to name your own measure, but it leaves this
+        // the only figure in the gallery with a blank axis, and the app's
+        // own Check graph flags it. Naming it is what the nudge is asking
+        // for. Axis titles are chartSpec keys, not top-level options.
+        spec: { yTitleOverride: true, yTitle: 'Score' },
         expect: { 'line-series': 2, 'line-marker': 6, 'error-bar': 6 },
     },
     {
         file: 'scatter-marginals.png', data: 'scatter',
         module: 'xyplotbuilder',
-        roles: { xvar: 'stress', yvar: 'cortisol', groupVar: 'age group' },
+        roles: { xvar: 'Stress', yvar: 'Cortisol', groupVar: 'Age group' },
         // No marginals, deliberately. The file is named for them but the
         // July image never had any, the caption does not claim them, and
         // the site's own alt text calls it "Scatter by group".
@@ -81,7 +87,7 @@ const FIGURES = [
     {
         file: 'histdensity.png', data: 'histDensity',
         module: 'distplotbuilder',
-        roles: { var: 'reaction time' },
+        roles: { var: 'Reaction time' },
         // "Bars show counts and the overlaid curve shows the estimated
         // distribution shape."
         options: { graphType: 'histdensity', histStat: 'count' },
@@ -94,7 +100,7 @@ const FIGURES = [
     {
         file: 'raincloud.png', data: 'raincloud',
         module: 'plotbuilder',
-        roles: { xvar: 'condition', yvar: 'score' },
+        roles: { xvar: 'Condition', yvar: 'Score' },
         options: { graphType: 'raincloud' },
         expect: { 'violin-fill': 3, 'box-fill': 3, 'box-median': 3 },
         // "a red ring identifies a low-dose score near 53 as a potential
@@ -165,6 +171,11 @@ for (const fig of FIGURES) {
     await page.evaluate((opts) => {
         for (const [k, v] of Object.entries(opts)) window.setOption(k, v);
     }, fig.options);
+    // Style keys travel in one chartSpec blob rather than as top-level
+    // options, and writing it REPLACES what is there, so it goes in a single
+    // call after the real options.
+    if (fig.spec)
+        await page.evaluate((sp) => window.setOption('chartSpec', JSON.stringify(sp)), fig.spec);
     await page.waitForTimeout(1800);
 
     // Node count, not a fixed sleep: a placeholder has very few nodes.
@@ -202,6 +213,21 @@ for (const fig of FIGURES) {
             }).length;
         return counts;
     }, CHART);
+
+    // Every visible word on the figure starts with a capital: axis titles,
+    // the legend heading and its entries, category labels. Numeric ticks and
+    // percentages start with a digit or a minus and are left alone. The
+    // titles come from the column names, so this is really a guard on
+    // gallery-data.py, and it belongs here because nothing else would catch
+    // a lower-case column name creeping back in.
+    const lower = await page.evaluate((sel) => {
+        const svg = document.querySelector(sel);
+        return [...svg.querySelectorAll('text')]
+            .map(t => (t.textContent || '').trim())
+            .filter(s => /^[a-z]/.test(s));
+    }, CHART);
+    if (lower.length)
+        problems.push(`${fig.file}: labels start lower case: ${[...new Set(lower)].join(', ')}`);
 
     for (const [role, want] of Object.entries(fig.expect || {})) {
         const got = seen[role] || 0;
