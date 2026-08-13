@@ -119,27 +119,58 @@ async function shot(page, name) {
         // Each range field is gated by its OWN override flag; yInterval on
         // its own is stored and ignored, which is why the ticks stayed at 20.
         set('yIntervalOverride', true);  set('yInterval', 10);
-        // Blue and red. The blue is PALETTE[0]; the red is one step darker
-        // than PALETTE[2]. That step is not cosmetic: at the palette red the
-        // app's own Check graph raises "Colors that merge in black and
-        // white", because #c2242c and #4478ad sit ~12 apart in grayscale and
-        // converge in a photocopy. Darkening the red clears the check, so the
-        // shot shows "Checks passed" honestly rather than by hiding a note.
-        set('groupColors', [{ original: 'East', color: '#4478ad' },
-                            { original: 'West', color: '#a81f26' }]);
+        // Blue and red, straight from the shipped default palette: slot 0
+        // and slot 2, no hand-tuning. The shot used to darken the red by
+        // hand because the OLD palette's blue and red merged in black and
+        // white (0.056 apart, under the app's own 0.08 line), which Check
+        // graph flagged. The rainbow default fixed that at the source: this
+        // pair measures 0.136 in grayscale and clears every vision check.
+        //
+        // Slot 2 rather than the palette's own second colour because the
+        // default two-group pair, blue and orange, is the one that still
+        // fails grayscale (0.065). So the red is not a preference dressed
+        // up as a standard; it is the pair that raises nothing.
+        set('groupColors', [{ original: 'East', color: '#417499' },
+                            { original: 'West', color: '#86262c' }]);
         // The observations take a DARKER SHADE OF THEIR OWN BAR rather than
         // one flat colour, so each dot still reads as belonging to its
         // group. Darkened in HLS, holding hue and saturation and dropping
-        // lightness ~30%: scaling RGB instead desaturates, and a "darker
-        // red" comes out brown. Per-group, so this is the Data points
-        // panel's "This group" scope, not anything bespoke.
+        // lightness: scaling RGB instead desaturates, and a "darker red"
+        // comes out brown. Per-group, so this is the Data points panel's
+        // "This group" scope, not anything bespoke.
+        //
+        // Literals, not a formula. One factor no longer serves both: the
+        // new red is already dark, so the 0.70 that suits the blue leaves
+        // its dots only 0.095 from their own bar. 0.62 on the red gives
+        // 0.123, which matches the blue's 0.121. Pinning the hex also keeps
+        // the blue off a rounding boundary it sits one ULP away from.
         set('pointColorMatch', false);
         set('pointSize', 5.5);
         set('pointOpacity', 1);
-        set('groupDataPoints', [{ original: 'East', color: '#305479' },
-                                 { original: 'West', color: '#76161b' }]);
+        set('groupDataPoints', [{ original: 'East', color: '#2d516b' },
+                                 { original: 'West', color: '#53181b' }]);
     });
     await page.waitForTimeout(2600);
+
+    // The comment above promises Check graph passes. Promise kept here
+    // rather than in prose: the hero is the one image where the app is
+    // being held up as an example, so it must not be quietly showing a
+    // chart its own checks would complain about.
+    // The accessor hangs off the chart HOST element, not off window.
+    const lint = await page.evaluate(() => {
+        const host = document.querySelector('.graphbuilder2-host');
+        if (!host || typeof host.__gb2_graphLint !== 'function') return 'MISSING';
+        const f = host.__gb2_graphLint();
+        if (!f) return 'MISSING';
+        const list = f.findings || f;
+        return (list || []).map(x => x.id || x.title || 'unnamed').join(', ');
+    });
+    if (lint === 'MISSING')
+        problems.push('hero: __gb2_graphLint is gone, the check went unverified');
+    else if (lint)
+        problems.push('hero: Check graph raised ' + lint);
+    else console.log('  hero: Check graph raised nothing');
+
     await shot(page, 'app-chart.png');
     await ctx.close();
 }
