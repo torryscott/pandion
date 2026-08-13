@@ -150,15 +150,23 @@ expect("enabled output carries no bundle localStorage key",
        !grepl(paste0("graphbuilder2.bundle.", js_hash), ss, fixed = TRUE))
 expect("enabled output reports scriptsrc mode",
        grepl('\\"bundle_mode\\":\\"scriptsrc\\"', ss))
-# "Plain" means engine-free and byte-deterministic, not byte-identical to
-# the input: since Aug 2026 every placeholder deliberately wraps in a
-# max-width cap (the Svg element imposes no width, so an uncapped
-# placeholder stretched the results page - see gb2_engine_placeholder_html).
-# Still asserted byte-exact so any NEW addition to the enabled path fails.
+# "Plain" means engine-free and deterministic, not byte-frozen: since
+# Aug 2026 placeholders deliberately draw a full-size EMPTY chart frame
+# (the jamovi convention, Jonathon's ask) around the message, so the
+# old byte-exact expectation would re-fail on every frame polish. The
+# durable contract: the message rides through verbatim, an aria-hidden
+# frame svg may accompany it, and the enabled path never smuggles the
+# engine or a bundle store in with it.
+ph1 <- gb2_engine_placeholder_html(
+    "<div>placeholder</div>", js_hash, script_src_ready = TRUE)
+ph2 <- gb2_engine_placeholder_html(
+    "<div>placeholder</div>", js_hash, script_src_ready = TRUE)
 expect("enabled placeholder stays plain",
-       identical(gb2_engine_placeholder_html(
-           "<div>placeholder</div>", js_hash, script_src_ready = TRUE),
-           '<div style="max-width:560px;"><div>placeholder</div></div>'))
+       grepl("<div>placeholder</div>", ph1, fixed = TRUE) &&
+       !grepl("GB2_BUNDLE_START", ph1, fixed = TRUE) &&
+       !grepl("localStorage", ph1, fixed = TRUE) &&
+       !grepl("<script", ph1, fixed = TRUE) &&
+       identical(ph1, ph2))
 
 # Guard and rollback switch. A module not declaring readiness must not emit an
 # engine-less script-src payload, and the explicit rollback must preserve the

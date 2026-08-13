@@ -146,6 +146,14 @@ for (const c of CASES) {
             const svgs = [...document.querySelectorAll('svg')];
             return {
                 hasSvg: svgs.length > 0,
+                // Data marks, as opposed to frame chrome: placeholders
+                // may draw a full-size empty chart frame (the jamovi
+                // convention since Aug 2026), but never data.
+                dataMarks: document.querySelectorAll(
+                    '[data-bar-cat], [data-role="xy-point"], ' +
+                    '[data-role="corr-cell"], [data-role="likert-seg"], ' +
+                    '[data-role="dist-hist-bar"], [data-role="freq-slice"], ' +
+                    '[data-role="line-marker"]').length,
                 nodes: document.querySelectorAll(
                     'svg path, svg rect, svg circle, svg line, svg polyline, svg text').length,
                 rects: document.querySelectorAll('svg rect').length,
@@ -171,8 +179,12 @@ for (const c of CASES) {
         if (c.placeholder) {
             if (!probe.body.includes(c.placeholder))
                 problems.push(`placeholder text not found: "${c.placeholder}"`);
-            if (probe.hasSvg)
-                problems.push('expected a placeholder but an <svg> chart rendered');
+            // Placeholders draw a full-size EMPTY chart frame since Aug
+            // 2026 (an svg with axes and no data), so the contract is
+            // "no DATA marks", not "no svg".
+            if (probe.dataMarks > 0)
+                problems.push('expected a placeholder but ' +
+                    probe.dataMarks + ' data marks rendered');
         }
         if (c.svg) {
             if (!probe.hasSvg) problems.push('no <svg> rendered');

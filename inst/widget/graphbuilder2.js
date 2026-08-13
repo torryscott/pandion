@@ -202,14 +202,46 @@
         if (!cols || cols.length < 2) return cols;
         k = Math.max(1, k | 0);
         if (k === 1) return [cols[Math.round((cols.length - 1) / 2)]];
-        var out = [];
-        for (var i = 0; i < k; i++) {
-            var t = i / (k - 1) * (cols.length - 1);
-            var lo = Math.floor(t), hi = Math.min(cols.length - 1, lo + 1), f = t - lo;
-            if (f <= 0.0001 || lo === hi) { out.push(cols[lo]); continue; }
+        // Sampled series colors keep a VISIBILITY FLOOR against the
+        // white page (Torry, Aug 2026: Blues at k=2 handed the second
+        // group the near-white terminus - right for a 9-step gradient,
+        // "so light you really can't see it" as a bar or line). Each
+        // END of the ramp is pulled inward until it keeps a minimum
+        // OKLab distance from white, then the k groups sample evenly
+        // over what remains. Diverging ramps end DARK, so this no-ops
+        // there (their near-white CENTER means "neutral" and stays),
+        // and a saturated light end like viridis yellow passes on
+        // chroma (0.20 dOK) - only genuinely washy ends move. The
+        // floor sits above the CVD-merge line (0.08): a sampled series
+        // is never closer to the page than two series may be to each
+        // other. Blues clamps to ~stop 7's pale blue (#C6DBEF-ish).
+        var n = cols.length - 1;
+        var at = function (t) {
+            var lo = Math.floor(t), hi = Math.min(n, lo + 1), f = t - lo;
+            if (f <= 0.0001 || lo === hi) return cols[lo];
             var a = hexToRgb(cols[lo]), b = hexToRgb(cols[hi]);
-            out.push(rgbToHex(a.r + (b.r - a.r) * f, a.g + (b.g - a.g) * f, a.b + (b.b - a.b) * f));
+            return rgbToHex(a.r + (b.r - a.r) * f, a.g + (b.g - a.g) * f, a.b + (b.b - a.b) * f);
+        };
+        var MIN_W = 0.11;
+        var vis = function (t) { return _okDist(at(t), "#FFFFFF") >= MIN_W; };
+        var tLo = 0, tHi = n;
+        // Bisect only a failing end toward the middle; a degenerate
+        // ramp whose middle also fails keeps the full range untouched.
+        if ((!vis(tLo) || !vis(tHi)) && vis(n / 2)) {
+            var a0, b0, m, i;
+            if (!vis(tLo)) {
+                a0 = 0; b0 = n / 2;
+                for (i = 0; i < 20; i++) { m = (a0 + b0) / 2; if (vis(m)) b0 = m; else a0 = m; }
+                tLo = b0;
+            }
+            if (!vis(tHi)) {
+                a0 = n / 2; b0 = n;
+                for (i = 0; i < 20; i++) { m = (a0 + b0) / 2; if (vis(m)) a0 = m; else b0 = m; }
+                tHi = a0;
+            }
         }
+        var out = [];
+        for (var j = 0; j < k; j++) out.push(at(tLo + (tHi - tLo) * j / (k - 1)));
         return out;
     }
     // Display labels for the built-in entries (used by the gallery's
