@@ -36,10 +36,20 @@
     // light neutral gray, NOT white, so a borderless bar never vanishes
     // against the page. The old default lives on in the gallery as the
     // premade "Tableau 10".
+    // REPLACED AGAIN Aug 2026 (t4-147, Torry's pick from the rainbow
+    // collection): a classic-rainbow 8 - blue, orange, red, green,
+    // yellow, violet, then a cyan + pink tail tuned against the six -
+    // verified under the CORRECTED simulation (t4-145) to clear the
+    // 0.08 merge line for protanopia, deuteranopia AND tritanopia at
+    // EVERY prefix k=2..8 (worst full-set pair 0.082, deutan
+    // green/pink; k<=6 margins 0.14+). No tan, no brown, nothing at
+    // the neon gamut edge, and every light member keeps >= 0.16 dOK
+    // from the white page. Grayscale remains impossible for any 8-set;
+    // patterns are the cue there. Generator + verification:
+    // scratchpad/palgen-rainbow.mjs in the Aug 13 session.
     var PALETTE = [
-        "#4478ad", "#dd7e2b", "#c2242c", "#6fb3ad",
-        "#266741", "#eed254", "#7c3167", "#976d76",
-        "#2e2e2e", "#ebebeb"
+        "#417499", "#c9672e", "#86262c", "#80bb8e",
+        "#fae770", "#38237a", "#85ddf3", "#ea78c3"
     ];
     // Named palettes. Picked by the global Chart Settings panel.
     // - "default": the accessible house palette (see PALETTE above).
@@ -140,15 +150,35 @@
     // verified against _cbSafePalette's exact criterion (min pairwise
     // post-CVD dOK >= 0.08 under deuteranopia AND protanopia). The
     // gallery badge is COMPUTED, so these earn it automatically.
+    // Verified under the CORRECTED simulation (t4-145/147, Aug 2026):
+    // every palette here clears the 0.08 dOK line for protanopia,
+    // deuteranopia AND tritanopia across its FULL set. The ones that
+    // did not survive the accurate transforms moved to
+    // PREMADE_CBSAFE_RETIRED below.
     var PREMADE_CBSAFE = [
-        { id: "cb-spectrum-ladder-iv", label: "Spectrum Ladder IV", colors: ["#b8acff", "#fec6ff", "#cd646a", "#6b3700", "#896e00", "#1c3d00", "#3bbdb8", "#006385"] },
         { id: "cb-bold-ladder-i", label: "Bold Ladder I", colors: ["#4c5c00", "#00a6a5", "#004266", "#e4ccff", "#c62c58", "#ff9a32"] },
         { id: "cb-print-proof-i", label: "Print Proof I", colors: ["#4394ba", "#271b64", "#794182", "#aa5551", "#5b3a00", "#dbc750", "#61be8d", "#90f1fc"] },
         { id: "cb-print-proof-v", label: "Print Proof V", colors: ["#433774", "#6f4b83", "#5b0b18", "#bc7d57", "#817100", "#9ed39f", "#48f6fc", "#61b8d9"] },
+        { id: "cb-high-contrast-i", label: "High Contrast I", colors: ["#201300", "#3c7532", "#00d2e2", "#003787", "#f2e5ff", "#e3557a"] },
+        { id: "cb-spectrum-classic-ii", label: "Spectrum Classic II", colors: ["#954647", "#c69300", "#344c00", "#00d2ac", "#0087ae", "#201b78", "#ffc5f6"] },
+        { id: "cb-spectrum-classic-iii", label: "Spectrum Classic III", colors: ["#6b5f00", "#003706", "#0dabb6", "#124a76", "#c6acff", "#bb5d6e", "#ffd1a5"] },
+        { id: "cb-spectrum-jewel-i", label: "Spectrum Jewel I", colors: ["#4e4600", "#002c04", "#007a83", "#003860", "#9274cd", "#99324a", "#cc8b49"] },
+        { id: "cb-spectrum-pastel-ii", label: "Spectrum Pastel II", colors: ["#8b8e51", "#387c77", "#80bae4", "#f0e1ff", "#c68ead", "#eec195"] },
+        { id: "cb-spectrum-contrast-i", label: "Spectrum Contrast I", colors: ["#001a00", "#14cff8", "#17308d", "#ffe1ef", "#d26d63", "#7d5c00"] },
+        { id: "cb-spectrum-print-iii", label: "Spectrum Print III", colors: ["#003324", "#004a60", "#7ea5e0", "#7f64a3", "#ffd0d7", "#cf6d28", "#e6bd5d", "#4d6005"] },
+        { id: "cb-spectrum-muted-iv", label: "Spectrum Muted IV", colors: ["#8ea169", "#0b352d", "#2f8d95", "#334a75", "#c0afc6", "#ffccd8", "#795c3f"] }
+    ];
+    // Retired Aug 2026 (Torry: "remove the colorblind safe palettes
+    // that are not currently colorblind safe"): these shipped under
+    // the Colorblind-safe label but FAIL the corrected simulation at
+    // the 0.08 line for at least one deficiency. Kept ONLY so old
+    // files that persisted an id keep their look - the PREMADE_THEMES
+    // idiom: resolution and label lookup, no gallery listing.
+    var PREMADE_CBSAFE_RETIRED = [
+        { id: "cb-spectrum-ladder-iv", label: "Spectrum Ladder IV", colors: ["#b8acff", "#fec6ff", "#cd646a", "#6b3700", "#896e00", "#1c3d00", "#3bbdb8", "#006385"] },
         { id: "cb-soft-ladder-i", label: "Soft Ladder I", colors: ["#889a61", "#6dccb9", "#0e7488", "#5e77b3", "#f1e2ff", "#6f4858", "#ce9781", "#e9cc9a"] },
         { id: "cb-soft-ladder-iv", label: "Soft Ladder IV", colors: ["#329187", "#7dcae6", "#7493cf", "#dcbfea", "#9b5161", "#ffd8c2", "#59552f", "#9baf79"] },
         { id: "cb-dark-lines-i", label: "Dark Lines I", colors: ["#1c3395", "#b15aba", "#be474a", "#815800", "#1b631b", "#00353f"] },
-        { id: "cb-high-contrast-i", label: "High Contrast I", colors: ["#201300", "#3c7532", "#00d2e2", "#003787", "#f2e5ff", "#e3557a"] },
         { id: "cb-pastel-steps-i", label: "Pastel Steps I", colors: ["#637743", "#84ab99", "#4f92b1", "#cbc6f6", "#ffe0e8", "#dcad89"] },
         { id: "cb-pastel-steps-iv", label: "Pastel Steps IV", colors: ["#af9e6b", "#537a51", "#94e3db", "#6f8aaa", "#ffd6fd", "#eda2a9"] },
         { id: "cb-jewel-ladder-i", label: "Jewel Ladder I", colors: ["#9671c4", "#8a3069", "#581e00", "#b49000", "#002916", "#00515b", "#0071b1"] },
@@ -157,25 +187,18 @@
         { id: "cb-ocean-and-sunset-v", label: "Ocean & Sunset V", colors: ["#002f44", "#00c7fa", "#006b7b", "#7a1f1b", "#e48051", "#a27149", "#bed9ff"] },
         { id: "cb-earth-tones-iii", label: "Earth Tones III", colors: ["#1d3214", "#c1b99f", "#927358", "#6a6330", "#4a4d36", "#b19362", "#ffd0ba"] },
         { id: "cb-spectrum-grand-i", label: "Spectrum Grand I", colors: ["#0a4178", "#bcb1ff", "#b57496", "#9e3028", "#392700", "#dede96", "#00886b", "#00b4ce"] },
-        { id: "cb-spectrum-classic-ii", label: "Spectrum Classic II", colors: ["#954647", "#c69300", "#344c00", "#00d2ac", "#0087ae", "#201b78", "#ffc5f6"] },
-        { id: "cb-spectrum-classic-iii", label: "Spectrum Classic III", colors: ["#6b5f00", "#003706", "#0dabb6", "#124a76", "#c6acff", "#bb5d6e", "#ffd1a5"] },
-        { id: "cb-spectrum-jewel-i", label: "Spectrum Jewel I", colors: ["#4e4600", "#002c04", "#007a83", "#003860", "#9274cd", "#99324a", "#cc8b49"] },
-        { id: "cb-spectrum-pastel-ii", label: "Spectrum Pastel II", colors: ["#8b8e51", "#387c77", "#80bae4", "#f0e1ff", "#c68ead", "#eec195"] },
         { id: "cb-spectrum-dark-ii", label: "Spectrum Dark II", colors: ["#003001", "#007790", "#183087", "#c04c8c", "#953833", "#5d4400"] },
         { id: "cb-spectrum-dark-iii", label: "Spectrum Dark III", colors: ["#008269", "#00295c", "#8465d6", "#9e3059", "#723400", "#244000"] },
-        { id: "cb-spectrum-contrast-i", label: "Spectrum Contrast I", colors: ["#001a00", "#14cff8", "#17308d", "#ffe1ef", "#d26d63", "#7d5c00"] },
         { id: "cb-spectrum-print-i", label: "Spectrum Print I", colors: ["#7c65b1", "#ffa8cf", "#f78464", "#a5854e", "#386620", "#004f3b", "#b0efff", "#1a1772"] },
         { id: "cb-spectrum-print-ii", label: "Spectrum Print II", colors: ["#82f6f1", "#003443", "#5988d5", "#8c61a0", "#6d2e41", "#894600", "#cdc270", "#8cb36a"] },
-        { id: "cb-spectrum-print-iii", label: "Spectrum Print III", colors: ["#003324", "#004a60", "#7ea5e0", "#7f64a3", "#ffd0d7", "#cf6d28", "#e6bd5d", "#4d6005"] },
-        { id: "cb-spectrum-muted-i", label: "Spectrum Muted I", colors: ["#a6c1ac", "#003230", "#7aa0d4", "#655983", "#facde2", "#9d7055", "#514c01"] },
-        { id: "cb-spectrum-muted-iv", label: "Spectrum Muted IV", colors: ["#8ea169", "#0b352d", "#2f8d95", "#334a75", "#c0afc6", "#ffccd8", "#795c3f"] }
+        { id: "cb-spectrum-muted-i", label: "Spectrum Muted I", colors: ["#a6c1ac", "#003230", "#7aa0d4", "#655983", "#facde2", "#9d7055", "#514c01"] }
     ];
     // Flatten the premades into PALETTES so paletteFor() resolves
     // their ids without special-casing. Built-ins come first in the
     // table; premades are appended without overriding (their ids are
     // distinct - "viridis-rich" vs the built-in "viridis").
     (function () {
-        var groups = [PREMADE_QUALITATIVE, PREMADE_SEQUENTIAL, PREMADE_DIVERGING, PREMADE_THEMES, PREMADE_CBSAFE];
+        var groups = [PREMADE_QUALITATIVE, PREMADE_SEQUENTIAL, PREMADE_DIVERGING, PREMADE_THEMES, PREMADE_CBSAFE, PREMADE_CBSAFE_RETIRED];
         for (var g = 0; g < groups.length; g++) {
             for (var i = 0; i < groups[g].length; i++) {
                 var p = groups[g][i];
@@ -25738,8 +25761,8 @@
         // the most-used colors are one click away without scanning the
         // full hue grid.
         var PICKER_PALETTE = [
-            "#4478ad", "#dd7e2b", "#c2242c", "#6fb3ad", "#266741", "#eed254",
-            "#7c3167", "#976d76", "#000000", "#555555", "#aaaaaa", "#ffffff"
+            "#417499", "#c9672e", "#86262c", "#80bb8e", "#fae770", "#38237a",
+            "#85ddf3", "#ea78c3", "#000000", "#555555", "#aaaaaa", "#ffffff"
         ];
         // Fixed neutral "standard colors" tail for the series-identity
         // quick-pick rows (bar fill, line, marker, point, fit). Model:
@@ -27726,7 +27749,7 @@
             _picker.state.commitCallback = onCommit || null;
             _picker.state.changed = false;
             _pickerSkipNextDocClick = true;
-            _setPickerHex(_picker, currentHex || "#4478ad", false);
+            _setPickerHex(_picker, currentHex || "#417499", false);
             // Refresh the recent row so any color committed in a prior
             // picker session shows up here, and sync the bottom-row
             // visibility to whichever tab is currently active (Swatches
@@ -27953,7 +27976,7 @@
         stylePopover.innerHTML =
             '<div data-role="title" style="font-weight:600;margin-bottom:5px;color:#444;cursor:move;user-select:none;padding:1px 4px 3px 4px;margin:-1px -4px 4px -4px;border-bottom:1px solid #eee;font-size:11px;"></div>' +
             '<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px;">' +
-              '<button type="button" data-role="color-btn" style="width:22px;height:22px;padding:0;border:1px solid #888;border-radius:3px;cursor:pointer;background:#4478ad;flex-shrink:0;" aria-label="Color" title="Color"></button>' +
+              '<button type="button" data-role="color-btn" style="width:22px;height:22px;padding:0;border:1px solid #888;border-radius:3px;cursor:pointer;background:#417499;flex-shrink:0;" aria-label="Color" title="Color"></button>' +
               '<select data-role="pattern" style="flex:1;padding:2px 4px;font-size:11px;border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);" title="Pattern">' +
                 '<option value="none">No pattern</option>' +
                 '<option value="stripes">Stripes</option>' +
@@ -47853,8 +47876,8 @@
                 var pid = (typeof o.chartPalette === "string" && o.chartPalette.length) ? o.chartPalette : "default";
                 cols = paletteFor(pid, (typeof o.customPalette === "string") ? o.customPalette : "");
             } catch (_e) {}
-            if (!cols || !cols.length) cols = ["#4478ad", "#dd7e2b"];
-            var c0 = cols[0] || "#4478ad", c1 = cols[1] || c0;
+            if (!cols || !cols.length) cols = ["#417499", "#c9672e"];
+            var c0 = cols[0] || "#417499", c1 = cols[1] || c0;
             // A style carrying literal per-series colors shows THOSE on
             // the card, not the palette they deviate from (Jul 9 2026).
             try {
@@ -67110,7 +67133,7 @@
             // Resolve the current group's palette color for the
             // "Edit color" swatch. Falls back to a neutral if the
             // group isn't in the palette.
-            var swatchColor = "#4478ad";
+            var swatchColor = "#417499";
             try {
                 if (typeof colorFor === "function") swatchColor = colorFor(hasGroups ? (groupName || "") : "");
             } catch (_ce) {}
@@ -70860,7 +70883,7 @@
                 if (active === "custom") return "Custom";
                 if (active.indexOf("saved:") === 0) return active.substring(6);
                 if (BUILTIN_PALETTE_LABELS[active]) return BUILTIN_PALETTE_LABELS[active];
-                var groups = [PREMADE_QUALITATIVE, PREMADE_SEQUENTIAL, PREMADE_DIVERGING, PREMADE_THEMES, PREMADE_CBSAFE];
+                var groups = [PREMADE_QUALITATIVE, PREMADE_SEQUENTIAL, PREMADE_DIVERGING, PREMADE_THEMES, PREMADE_CBSAFE, PREMADE_CBSAFE_RETIRED];
                 for (var g = 0; g < groups.length; g++) {
                     for (var i = 0; i < groups[g].length; i++) {
                         if (groups[g][i].id === active) return groups[g][i].label;
@@ -77415,7 +77438,7 @@
             if (color === "transparent") {
                 return "background-color:#fff;background-image:linear-gradient(45deg,#cfcfcf 25%,transparent 25%),linear-gradient(-45deg,#cfcfcf 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#cfcfcf 75%),linear-gradient(-45deg,transparent 75%,#cfcfcf 75%);background-size:8px 8px;background-position:0 0,0 4px,4px -4px,-4px 0;";
             }
-            return "background:" + (color || "#4478ad") + ";";
+            return "background:" + (color || "#417499") + ";";
         }
         function _distApplySwatchBg(sw, color) {
             if (!sw) return;
@@ -77510,8 +77533,8 @@
             redraw();
         }
         function _distGroupColor(g) {
-            try { return (typeof colorFor === "function") ? colorFor(g || "") : "#4478ad"; }
-            catch (_e) { return "#4478ad"; }
+            try { return (typeof colorFor === "function") ? colorFor(g || "") : "#417499"; }
+            catch (_e) { return "#417499"; }
         }
         function _distShowStrip(body, stripId, sync) {
             var strips = body.querySelectorAll('[data-dist-strip]');
@@ -87653,7 +87676,7 @@
                 ? data.pointColor
                 : ((typeof singleBarColor === "string" && singleBarColor.length > 0)
                     ? singleBarColor
-                    : (PALETTE[0] || "#4478ad"));
+                    : (PALETTE[0] || "#417499"));
             var _dpInitColor = _dpResolvedColor;
             var _dpInitOutline = (typeof data.pointOutlineColor === "string" && data.pointOutlineColor.length > 0)
                 ? data.pointOutlineColor : "#000000";
@@ -88224,7 +88247,7 @@
                         ? data.pointColor
                         : ((typeof singleBarColor === "string" && singleBarColor.length > 0)
                             ? singleBarColor
-                            : (PALETTE[0] || "#4478ad"));
+                            : (PALETTE[0] || "#417499"));
                     var _ocLive = (typeof data.pointOutlineColor === "string" && data.pointOutlineColor.length > 0)
                         ? data.pointOutlineColor : "#000000";
                     var _pcBtn = body.querySelector('[data-dp-btn="point-color"]');
@@ -96214,7 +96237,7 @@
                     { header: "Built-in" },
                     { id: "default", label: "Pandion" },
                     { header: "Colorblind-safe" },
-                    { id: "cb-spectrum-dark-ii", label: "Spectrum Dark II" },
+                    { id: "cb-spectrum-classic-ii", label: "Spectrum Classic II" },
                     { id: "cb-spectrum-muted-iv", label: "Spectrum Muted IV" },
                     { header: "Qualitative" },
                     { id: "okabe-ito", label: "Okabe-Ito" },

@@ -242,7 +242,7 @@ for (const axis of ['x', 'y']) {
         await clickAxisLine(page, axis);
         await page.locator('[data-' + axis + 'a-tab="line"]').click();
         await page.locator('[data-' + axis + 'a-btn="line-color"]').click();
-        const target = '[data-' + axis + 'a-palette="#c2242c"]' +
+        const target = '[data-' + axis + 'a-palette="#86262c"]' +
             '[data-' + axis + 'a-palette-target="color-btn"]';
         await page.locator(target).click();
         await page.waitForTimeout(40);
@@ -253,10 +253,10 @@ for (const axis of ['x', 'y']) {
                 .map(el => (el.getAttribute('stroke') || '').toLowerCase())
         }), { lineRole: role, tickRole: axis + '-tick' });
         check('Live ' + axis.toUpperCase() + '-axis color repaints every facet segment',
-            result.lines.length > 1 && result.lines.every(color => color === '#c2242c'),
+            result.lines.length > 1 && result.lines.every(color => color === '#86262c'),
             JSON.stringify(result.lines));
         check('Following ' + axis.toUpperCase() + '-axis ticks repaint with the line',
-            result.ticks.length > 1 && result.ticks.every(color => color === '#c2242c'),
+            result.ticks.length > 1 && result.ticks.every(color => color === '#86262c'),
             JSON.stringify(result.ticks));
     });
 }

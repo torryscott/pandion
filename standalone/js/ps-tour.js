@@ -1110,7 +1110,7 @@
         // tour whose closing line promises an honest legend (Torry's
         // screenshot, Aug 2026). Red collides only on charts with three
         // or more series, where it is slot three.
-        { click: '[data-bs-palette="#c2242c"][data-bs-palette-target="fill-chip"]', hold: 1400,
+        { click: '[data-bs-palette="#86262c"][data-bs-palette-target="fill-chip"]', hold: 1400,
           say: "Pick a color. Only the bar you clicked changes." },
         { click: '[data-bs-btn="bar-opacity"]', hold: 900,
           say: "Other style controls ask a question first: change THIS bar, or ALL bars?" },

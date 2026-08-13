@@ -146,7 +146,7 @@ await playToEnd('one-bar-color');
 const afterCol = await chartState();
 // Count by colour rather than by index: bars carry invisible hit clones that
 // also match [data-bar-cat], so a positional diff is not a stable count.
-const recolored = afterCol.barFills.filter(f => /c2242c/i.test(f)).length;
+const recolored = afterCol.barFills.filter(f => /86262c/i.test(f)).length;
 if (recolored < 1)
     throw new Error('bar-color walkthrough did not apply the new colour: ' +
                     JSON.stringify(afterCol.barFills));
@@ -868,7 +868,7 @@ await page.waitForTimeout(300);
     const fills = await page.evaluate(() =>
         [...new Set([...document.querySelectorAll('[data-bar-cat]')]
             .map(e => e.getAttribute('fill')).filter(Boolean))]);
-    if (!fills.some(f => /c2242c/i.test(f)))
+    if (!fills.some(f => /86262c/i.test(f)))
         throw new Error('grouped color tour did not apply the color: ' + JSON.stringify(fills));
     if (fills.length < 2)
         throw new Error('grouped color tour flattened every series to one color: ' +
