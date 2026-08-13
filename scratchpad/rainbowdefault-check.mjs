@@ -23,8 +23,8 @@ function ok(cond, msg) {
     console.log('  ok  ' + msg);
 }
 
-const NEW = ['#417499', '#c9672e', '#86262c', '#80bb8e',
-             '#fae770', '#38237a', '#85ddf3', '#ea78c3'];
+const NEW = ['#2d5c94', '#902634', '#e18e4c', '#597b2f',
+             '#faca59', '#32295e', '#5bb1ba', '#d35a80'];
 const { chromium } = loadPlaywright();
 const pageUrl = 'file://' + (process.env.PS_PAGE
     ? path.resolve(process.env.PS_PAGE)
@@ -63,7 +63,7 @@ const fills = await page.evaluate(async () => {
 const legend = fills.map(toHex);
 ok(legend.length === 3 && legend[0] === NEW[0] && legend[1] === NEW[1] &&
    legend[2] === NEW[2],
-   `three series paint blue, orange, red in order (${legend})`);
+   `three series paint blue, red, orange in order (${legend})`);
 
 console.log('case 2: an EIGHT-group default chart passes every Vision tile');
 const tiles = await page.evaluate(async () => {

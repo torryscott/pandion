@@ -122,7 +122,7 @@ const CHART_SVG_JS = `(() => {
     ok(info.hasSvg, 'chart svg present');
     ok(!info.nanInSvg, 'no NaN in svg');
     ok(info.barFills.length === 3, '3 visible bars (got ' + info.barFills.length + ')');
-    ok(info.barFills.every(f => f === '#417499'), 'stock default fill on every bar');
+    ok(info.barFills.every(f => f === '#2d5c94'), 'stock default fill on every bar');
     for (const t of ['Control', 'Low dose', 'High dose', 'condition', 'score'])
         ok(info.texts.some(s => (s || '').indexOf(t) !== -1), 'svg text: ' + t);
     ok(!info.exportBtnLive,
@@ -184,7 +184,7 @@ const CHART_SVG_JS = `(() => {
                          b.offsetParent !== null &&
                          b.getBoundingClientRect().width < 40 &&
                          b.getBoundingClientRect().width > 8);
-        const target = swatches.find(b => b.style.backgroundColor === 'rgb(201, 103, 46)');
+        const target = swatches.find(b => b.style.backgroundColor === 'rgb(225, 142, 76)');
         if (!target) return { panelOpen: host.textContent.indexOf('Bars - Control') !== -1, swatch: null };
         // The panel can sit below the fold - a mouse click at off-viewport
         // coordinates hits nothing (the M1 layout lesson).
@@ -231,9 +231,9 @@ const CHART_SVG_JS = `(() => {
     ok(after.keys.indexOf('chartSpec') !== -1 && leaked.length === 0,
        'the store holds chartSpec and no loose style key (got ' +
        after.keys.join(',') + ')');
-    ok(after.color === '#c9672e' && after.original === 'Control',
+    ok(after.color === '#e18e4c' && after.original === 'Control',
        'chartSpec carries the Control recolor');
-    ok(after.barFill === '#c9672e', 'bar repainted through the echo');
+    ok(after.barFill === '#e18e4c', 'bar repainted through the echo');
     ok(after.ls, 'project persisted to localStorage');
     ok(errors.length === 0, 'zero page errors through the gesture' +
        (errors.length ? ': ' + errors[0] : ''));
@@ -248,14 +248,14 @@ const CHART_SVG_JS = `(() => {
         return { barFill: bar ? bar.getAttribute('fill') : null,
                  keys: Object.keys(window.PS_SHELL.optionStore()) };
     })()`);
-    ok(reborn.barFill === '#c9672e', 'edit survives cold reload');
+    ok(reborn.barFill === '#e18e4c', 'edit survives cold reload');
     ok(reborn.keys.indexOf('chartSpec') !== -1, 'options restored from localStorage');
 
     // Reset returns to defaults.
     await page.click('#ps-reset');
     await page.waitForTimeout(300);
     const resetFill = await page.evaluate(`document.querySelectorAll('[data-bar-cat]')[0].getAttribute('fill')`);
-    ok(resetFill === '#417499', 'reset restores the stock palette');
+    ok(resetFill === '#2d5c94', 'reset restores the stock palette');
 
     await ctx.close();
 }

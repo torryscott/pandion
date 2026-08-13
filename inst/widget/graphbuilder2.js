@@ -36,20 +36,22 @@
     // light neutral gray, NOT white, so a borderless bar never vanishes
     // against the page. The old default lives on in the gallery as the
     // premade "Tableau 10".
-    // REPLACED AGAIN Aug 2026 (t4-147, Torry's pick from the rainbow
-    // collection): a classic-rainbow 8 - blue, orange, red, green,
-    // yellow, violet, then a cyan + pink tail tuned against the six -
+    // REPLACED AGAIN Aug 2026 (t4-148, same day as t4-147: Torry
+    // compared mood variants on the same slots and chose "Jewel",
+    // reordered blue, red, orange, then green, yellow, violet, teal,
+    // pink): royal blue, deep red, golden yellow, dark violet - richer
+    // throughout -
     // verified under the CORRECTED simulation (t4-145) to clear the
     // 0.08 merge line for protanopia, deuteranopia AND tritanopia at
-    // EVERY prefix k=2..8 (worst full-set pair 0.082, deutan
-    // green/pink; k<=6 margins 0.14+). No tan, no brown, nothing at
+    // EVERY prefix k=2..8 with 1.19x+ margins (worst pair 0.095,
+    // deutan red/green). No tan, no brown, nothing at
     // the neon gamut edge, and every light member keeps >= 0.16 dOK
     // from the white page. Grayscale remains impossible for any 8-set;
     // patterns are the cue there. Generator + verification:
     // scratchpad/palgen-rainbow.mjs in the Aug 13 session.
     var PALETTE = [
-        "#417499", "#c9672e", "#86262c", "#80bb8e",
-        "#fae770", "#38237a", "#85ddf3", "#ea78c3"
+        "#2d5c94", "#902634", "#e18e4c", "#597b2f",
+        "#faca59", "#32295e", "#5bb1ba", "#d35a80"
     ];
     // Named palettes. Picked by the global Chart Settings panel.
     // - "default": the accessible house palette (see PALETTE above).
@@ -25761,8 +25763,8 @@
         // the most-used colors are one click away without scanning the
         // full hue grid.
         var PICKER_PALETTE = [
-            "#417499", "#c9672e", "#86262c", "#80bb8e", "#fae770", "#38237a",
-            "#85ddf3", "#ea78c3", "#000000", "#555555", "#aaaaaa", "#ffffff"
+            "#2d5c94", "#902634", "#e18e4c", "#597b2f", "#faca59", "#32295e",
+            "#5bb1ba", "#d35a80", "#000000", "#555555", "#aaaaaa", "#ffffff"
         ];
         // Fixed neutral "standard colors" tail for the series-identity
         // quick-pick rows (bar fill, line, marker, point, fit). Model:
@@ -27749,7 +27751,7 @@
             _picker.state.commitCallback = onCommit || null;
             _picker.state.changed = false;
             _pickerSkipNextDocClick = true;
-            _setPickerHex(_picker, currentHex || "#417499", false);
+            _setPickerHex(_picker, currentHex || "#2d5c94", false);
             // Refresh the recent row so any color committed in a prior
             // picker session shows up here, and sync the bottom-row
             // visibility to whichever tab is currently active (Swatches
@@ -27976,7 +27978,7 @@
         stylePopover.innerHTML =
             '<div data-role="title" style="font-weight:600;margin-bottom:5px;color:#444;cursor:move;user-select:none;padding:1px 4px 3px 4px;margin:-1px -4px 4px -4px;border-bottom:1px solid #eee;font-size:11px;"></div>' +
             '<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px;">' +
-              '<button type="button" data-role="color-btn" style="width:22px;height:22px;padding:0;border:1px solid #888;border-radius:3px;cursor:pointer;background:#417499;flex-shrink:0;" aria-label="Color" title="Color"></button>' +
+              '<button type="button" data-role="color-btn" style="width:22px;height:22px;padding:0;border:1px solid #888;border-radius:3px;cursor:pointer;background:#2d5c94;flex-shrink:0;" aria-label="Color" title="Color"></button>' +
               '<select data-role="pattern" style="flex:1;padding:2px 4px;font-size:11px;border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);" title="Pattern">' +
                 '<option value="none">No pattern</option>' +
                 '<option value="stripes">Stripes</option>' +
@@ -47876,8 +47878,8 @@
                 var pid = (typeof o.chartPalette === "string" && o.chartPalette.length) ? o.chartPalette : "default";
                 cols = paletteFor(pid, (typeof o.customPalette === "string") ? o.customPalette : "");
             } catch (_e) {}
-            if (!cols || !cols.length) cols = ["#417499", "#c9672e"];
-            var c0 = cols[0] || "#417499", c1 = cols[1] || c0;
+            if (!cols || !cols.length) cols = ["#2d5c94", "#902634"];
+            var c0 = cols[0] || "#2d5c94", c1 = cols[1] || c0;
             // A style carrying literal per-series colors shows THOSE on
             // the card, not the palette they deviate from (Jul 9 2026).
             try {
@@ -67133,7 +67135,7 @@
             // Resolve the current group's palette color for the
             // "Edit color" swatch. Falls back to a neutral if the
             // group isn't in the palette.
-            var swatchColor = "#417499";
+            var swatchColor = "#2d5c94";
             try {
                 if (typeof colorFor === "function") swatchColor = colorFor(hasGroups ? (groupName || "") : "");
             } catch (_ce) {}
@@ -77438,7 +77440,7 @@
             if (color === "transparent") {
                 return "background-color:#fff;background-image:linear-gradient(45deg,#cfcfcf 25%,transparent 25%),linear-gradient(-45deg,#cfcfcf 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#cfcfcf 75%),linear-gradient(-45deg,transparent 75%,#cfcfcf 75%);background-size:8px 8px;background-position:0 0,0 4px,4px -4px,-4px 0;";
             }
-            return "background:" + (color || "#417499") + ";";
+            return "background:" + (color || "#2d5c94") + ";";
         }
         function _distApplySwatchBg(sw, color) {
             if (!sw) return;
@@ -77533,8 +77535,8 @@
             redraw();
         }
         function _distGroupColor(g) {
-            try { return (typeof colorFor === "function") ? colorFor(g || "") : "#417499"; }
-            catch (_e) { return "#417499"; }
+            try { return (typeof colorFor === "function") ? colorFor(g || "") : "#2d5c94"; }
+            catch (_e) { return "#2d5c94"; }
         }
         function _distShowStrip(body, stripId, sync) {
             var strips = body.querySelectorAll('[data-dist-strip]');
@@ -87676,7 +87678,7 @@
                 ? data.pointColor
                 : ((typeof singleBarColor === "string" && singleBarColor.length > 0)
                     ? singleBarColor
-                    : (PALETTE[0] || "#417499"));
+                    : (PALETTE[0] || "#2d5c94"));
             var _dpInitColor = _dpResolvedColor;
             var _dpInitOutline = (typeof data.pointOutlineColor === "string" && data.pointOutlineColor.length > 0)
                 ? data.pointOutlineColor : "#000000";
@@ -88247,7 +88249,7 @@
                         ? data.pointColor
                         : ((typeof singleBarColor === "string" && singleBarColor.length > 0)
                             ? singleBarColor
-                            : (PALETTE[0] || "#417499"));
+                            : (PALETTE[0] || "#2d5c94"));
                     var _ocLive = (typeof data.pointOutlineColor === "string" && data.pointOutlineColor.length > 0)
                         ? data.pointOutlineColor : "#000000";
                     var _pcBtn = body.querySelector('[data-dp-btn="point-color"]');

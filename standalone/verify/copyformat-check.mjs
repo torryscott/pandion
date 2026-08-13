@@ -80,7 +80,7 @@ await page.evaluate(() => {
     window.PS_SHELL.switchChart(window.PS_SHELL.project.activeChart);
 });
 await page.waitForTimeout(2200);
-ok(await barFill() === '#417499', 'chart B renders the stock look first');
+ok(await barFill() === '#2d5c94', 'chart B renders the stock look first');
 await openChartMenu();
 await page.waitForTimeout(300);
 ok(!(await menuItem('paste-format')).disabled, 'Paste is enabled now');
@@ -108,7 +108,7 @@ await page.evaluate(() => {
     b.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 });
 await page.waitForTimeout(900);
-ok(await barFill() === '#417499',
+ok(await barFill() === '#2d5c94',
    'one Undo puts chart B back to the stock look');
 
 console.log('case 5: paste onto a DIFFERENT module applies what applies');

@@ -71,7 +71,7 @@
     list(arg = "chart_background", opt = "chartBackground", bool = FALSE, default = ""),
     list(arg = "chart_font_family", opt = "chartFontFamily", bool = FALSE, default = ""),
     list(arg = "chart_palette", opt = "chartPalette", bool = FALSE, default = ""),
-    list(arg = "custom_palette", opt = "customPalette", bool = FALSE, default = "#417499,#c9672e,#86262c,#80bb8e,#fae770,#38237a,#85ddf3,#ea78c3"),
+    list(arg = "custom_palette", opt = "customPalette", bool = FALSE, default = "#2d5c94,#902634,#e18e4c,#597b2f,#faca59,#32295e,#5bb1ba,#d35a80"),
     list(arg = "chart_border", opt = "chartBorder", bool = FALSE, default = "none"),
     list(arg = "chart_grid", opt = "chartGrid", bool = FALSE, default = "none"),
     list(arg = "chart_grid_layer", opt = "chartGridLayer", bool = FALSE, default = "behind"),

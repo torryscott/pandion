@@ -432,7 +432,7 @@ const ids = await page.evaluate(() => {
 await page.waitForTimeout(900);
 await playTour('one-bar-color');                 // a REAL engine-side edit on A
 await page.waitForTimeout(900);
-const aRecoloured = (await barFills()).filter(f => /86262c/i.test(f)).length;
+const aRecoloured = (await barFills()).filter(f => /e18e4c/i.test(f)).length;
 ok(aRecoloured >= 1, `chart A really was recoloured through the engine ` +
    `(${aRecoloured} bars)`);
 const undoArmed = await page.evaluate(() => {
@@ -467,16 +467,16 @@ await page.waitForTimeout(900);
 const bAfter = await barFills();
 ok(JSON.stringify(bAfter) === JSON.stringify(bBefore),
    "undo on chart B changes nothing on chart B");
-ok(!bAfter.some(f => /86262c/i.test(f)),
+ok(!bAfter.some(f => /e18e4c/i.test(f)),
    "chart A's colour never leaked onto chart B");
 
 await page.evaluate(id => window.PS_SHELL.switchChart(id), ids.a);
 await page.waitForTimeout(1200);
-ok((await barFills()).filter(f => /86262c/i.test(f)).length >= 1,
+ok((await barFills()).filter(f => /e18e4c/i.test(f)).length >= 1,
    'chart A kept its own edit across the round trip');
 await page.keyboard.press(`${MOD}+z`);
 await page.waitForTimeout(1500);
-ok((await barFills()).filter(f => /86262c/i.test(f)).length === 0,
+ok((await barFills()).filter(f => /e18e4c/i.test(f)).length === 0,
    "and undo on chart A still reverts chart A's own edit");
 
 // ---- B7: the filter disclosure must ride the exported FIGURE ----
