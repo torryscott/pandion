@@ -123,12 +123,18 @@ lk <- data.frame(
 wr(likertplotbuilder(data = lk, items = c("A", "B", "C", "D"),
                      graphType = "likertmeans"), "p_likert_lint")
 
-# 10. CVD lint: custom yellow/pink pair (a true deuteranopia merge that the
-# normal-vision color rule does NOT flag; custom palette = no exemption).
+# 10. CVD lint: custom red/green pair - a TRUE deuteranopia merge (0.003
+# dOK under the corrected Vienot simulation, t4-145) that the
+# normal-vision color rule does NOT flag (hue-opposed, so
+# _paletteColorDist is far above 16). The old fixture pair
+# (#edc949/#ff9da7 yellow/pink) was chosen by the pre-2026 improvised
+# matrices and is genuinely SEPARABLE for deutan/protan under the
+# accurate simulation - it only merges under tritanopia, which the lint
+# deliberately does not test (prevalence; the Vision tiles cover it).
 cvd <- data.frame(x = rep(c("A", "B"), each = 20), y = rnorm(40, 10, 2),
                   g = rep(c("G1", "G2"), 20))
 wr(plotbuilder(data = cvd, xvar = "x", yvar = "y", groupVar = "g", facetVar = NULL,
-               chartSpec = cspec(chartPalette = "custom", customPalette = "#edc949,#ff9da7")),
+               chartSpec = cspec(chartPalette = "custom", customPalette = "#e15759,#59a14f")),
    "p_cg_cvd")
 
 # 11-13. Help Me Choose data-route refinements.

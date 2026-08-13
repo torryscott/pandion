@@ -799,10 +799,24 @@
         // the palette directly via _simulateCvd.
         return base;
     }
-    // Color-vision-deficiency simulation. Linear-RGB matrix approach
-    // (Brettel/Viénot/Mollon) - applies a confusion-line projection
-    // in linear RGB space. Achromatopsia is just luma. Accuracy is
-    // "preview-good", not clinical.
+    // Color-vision-deficiency simulation: the published reference
+    // transforms, exactly. Protanopia/deuteranopia use Viénot, Brettel
+    // & Mollon (1999)'s single-matrix reduction in linear sRGB;
+    // tritanopia uses Brettel, Viénot & Mollon (1997)'s two half-plane
+    // projection (a single matrix is a known-bad approximation for
+    // tritan). Constants verbatim from libDaltonLens (public domain,
+    // daltonlens.org), which derives them per the papers from the
+    // Smith-Pokorny cone fundamentals. Severity is full dichromacy,
+    // the conservative standard for legibility checking - the tiles
+    // label it so. Achromatopsia is equal-luminance gray (Rec. 709
+    // luma in linear light), unchanged.
+    // HISTORY (Aug 2026, Torry's accuracy audit): the matrices here
+    // used to be the improvised 2009 "ColorMatrix" web set, disavowed
+    // by its own author and falsely attributed to Brettel/Viénot in
+    // this comment; mean error vs the reference was 0.10-0.12 dOK,
+    // LARGER than the 0.08 merge line the vision tiles and the
+    // Check-graph cvd rule judge against, and it flipped verdicts in
+    // both directions (missed true merges AND false alarms).
     function _srgbToLin(c) {
         c /= 255;
         return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
@@ -813,9 +827,24 @@
         return Math.round(v * 255);
     }
     var _CVD_MATRICES = {
-        "protanopia":  [[0.567, 0.433, 0.000], [0.558, 0.442, 0.000], [0.000, 0.242, 0.758]],
-        "deuteranopia":[[0.625, 0.375, 0.000], [0.700, 0.300, 0.000], [0.000, 0.300, 0.700]],
-        "tritanopia":  [[0.950, 0.050, 0.000], [0.000, 0.433, 0.567], [0.000, 0.475, 0.525]]
+        "protanopia":   [[0.11238, 0.88762, 0.00000],
+                         [0.11238, 0.88762, -0.00000],
+                         [0.00401, -0.00401, 1.00000]],
+        "deuteranopia": [[0.29275, 0.70725, 0.00000],
+                         [0.29275, 0.70725, -0.00000],
+                         [-0.02234, 0.02234, 1.00000]]
+    };
+    // Brettel 1997 tritanopia: two projection planes; the separation
+    // plane's normal (already in linear-RGB space) picks which one
+    // applies to a given color.
+    var _CVD_TRITAN = {
+        p1: [[1.01277, 0.13548, -0.14826],
+             [-0.01243, 0.86812, 0.14431],
+             [0.07589, 0.80500, 0.11911]],
+        p2: [[0.93678, 0.18979, -0.12657],
+             [0.06154, 0.81526, 0.12320],
+             [-0.37562, 1.12767, 0.24796]],
+        n: [0.03901, -0.02788, -0.01113]
     };
     function _simulateCvd(hex, mode) {
         if (!mode || mode === "none") return hex;
@@ -828,11 +857,17 @@
             var s = _linToSrgb(y);
             return rgbToHex(s, s, s);
         }
-        var m = _CVD_MATRICES[mode];
-        if (!m) return hex;
         var lr = _srgbToLin(rgb.r);
         var lg = _srgbToLin(rgb.g);
         var lb = _srgbToLin(rgb.b);
+        var m;
+        if (mode === "tritanopia") {
+            var t = _CVD_TRITAN;
+            m = (lr * t.n[0] + lg * t.n[1] + lb * t.n[2]) >= 0 ? t.p1 : t.p2;
+        } else {
+            m = _CVD_MATRICES[mode];
+        }
+        if (!m) return hex;
         var nr = m[0][0] * lr + m[0][1] * lg + m[0][2] * lb;
         var ng = m[1][0] * lr + m[1][1] * lg + m[1][2] * lb;
         var nb = m[2][0] * lr + m[2][1] * lg + m[2][2] * lb;
@@ -49738,15 +49773,20 @@
                 // tools (_simulateCvd + the OKLab distance _okDist): a pair
                 // "merges" when its SIMULATED colors land within 0.08 dOK
                 // under deuteranopia or protanopia (the common red-green
-                // family). Fires for BUILT-IN palettes too (the exemption
-                // was removed per Torry, Jul 2026: the student publishes the
-                // figure, so they should hear it even when the colors are
-                // stock - e.g. the default palette's orange/red sits at
-                // 0.067 dOK under deutan simulation). NOTE: a textbook "red
-                // vs green" pair with clearly different lightness does NOT
-                // fire - the simulation says dichromats still separate those
-                // by darkness; this rule catches true merges (orange vs red,
-                // yellow vs pink, matched-lightness picks).
+                // family; tritanopia is deliberately not tested here for
+                // prevalence - the Vision tiles cover it). Fires for
+                // BUILT-IN palettes too (the exemption was removed per
+                // Torry, Jul 2026: the student publishes the figure, so
+                // they should hear it even when the colors are stock).
+                // Since the simulation was corrected to the published
+                // transforms (Aug 2026, t4-145) the canonical firing case
+                // is a matched-lightness red vs green (Tableau's
+                // #e15759/#59a14f lands at 0.003 dOK under deutan -
+                // essentially one color to a deuteranope), while a red vs
+                // green pair with clearly different lightness still does
+                // NOT fire (dichromats separate those by darkness). The
+                // old comment's examples were artifacts of the improvised
+                // matrices and read backwards against the accurate sim.
                 var flagged = {};
                 for (var fi = 0; fi < pairs.length; fi++) flagged[pairs[fi].a + "\u0001" + pairs[fi].b] = 1;
                 var cvdPairs = [], cvdModes = ["deuteranopia", "protanopia"];
