@@ -1108,9 +1108,11 @@
         // color, so on a grouped chart the demo recolored one series to
         // exactly the other's color - two indistinguishable series, in a
         // tour whose closing line promises an honest legend (Torry's
-        // screenshot, Aug 2026). Red collides only on charts with three
-        // or more series, where it is slot three.
-        { click: '[data-bs-palette="#86262c"][data-bs-palette-target="fill-chip"]', hold: 1400,
+        // screenshot, Aug 2026). The quick-row ORANGE collides only on
+        // charts with three or more series, where it is slot three
+        // (red moved to slot two in the Forest and Steel default, t4-148,
+        // so red would collide on this very chart).
+        { click: '[data-bs-palette="#e18e4c"][data-bs-palette-target="fill-chip"]', hold: 1400,
           say: "Pick a color. Only the bar you clicked changes." },
         { click: '[data-bs-btn="bar-opacity"]', hold: 900,
           say: "Other style controls ask a question first: change THIS bar, or ALL bars?" },
