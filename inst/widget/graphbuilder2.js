@@ -3526,6 +3526,17 @@
         // is assigned the routing chokepoint sees undefined and would
         // commit a migrated module's style keys under their RAW names
         // instead of folding them into the chartSpec blob (t4-150).
+        var _STYLE_KEYED_STORES = {
+            groupColors:        { key: "original", list: "groups" },
+            groupPatterns:      { key: "original", list: "groups" },
+            groupCornerRadii:   { key: "original", list: "groups" },
+            groupOpacities:     { key: "original", list: "groups" },
+            groupBorders:       { key: "original", list: "groups" },
+            groupErrorBars:     { key: "original", list: "groups" },
+            lineGroupOverrides: { key: "group",    list: "groups" },
+            groupDataPoints:    { key: "original", list: "groups" },
+            categoryStyles:     { key: "original", list: "cats" }
+        };
         try {
             if (data && data.styleAutoApply === true && !window.__gb2_styleAutoApplyDone) {
                 var _saSt = (window.__gb2_styleDefaultId && window.__gb2_styleLib) ?
@@ -3534,9 +3545,32 @@
                     window.__gb2_styleAutoApplyDone = true;
                     var _saPairs = _styleApplyPairs(_saSt, null);
                     var _saCan = (typeof window.setOption === "function");
+                    // Re-key per-series stores onto THIS chart's series
+                    // names, exactly like the manual apply path. The
+                    // payload already carries the names, so a default
+                    // style's per-series look (transparent fills set
+                    // series by series, per-group patterns...) lands on
+                    // a new chart's differently named series instead of
+                    // silently losing to the palette (Torry's field
+                    // report, Aug 14 2026). Absent name fields degrade
+                    // to the old verbatim pass-through.
+                    var _saSnap = (_saSt.opts && _saSt.opts.gb2SeriesSnapshot &&
+                        typeof _saSt.opts.gb2SeriesSnapshot === "object")
+                        ? _saSt.opts.gb2SeriesSnapshot : null;
+                    var _saGroupsCur = Array.isArray(data.groupCategories)
+                        ? data.groupCategories : null;
+                    var _saCatsCur = Array.isArray(data.xCategories)
+                        ? data.xCategories : null;
                     for (var _sai = 0; _sai < _saPairs.length; _sai++) {
-                        data[_saPairs[_sai].k] = _styleClone(_saPairs[_sai].v);
-                        if (_saCan) { try { _setOption(_saPairs[_sai].k, _saPairs[_sai].v); } catch (_eS1) {} }
+                        var _saV = _styleClone(_saPairs[_sai].v);
+                        var _saKd = _STYLE_KEYED_STORES[_saPairs[_sai].k];
+                        if (_saKd) {
+                            _saV = _styleRekeyEntries(_saV, _saKd.key,
+                                _saSnap ? _saSnap[_saKd.list] : null,
+                                _saKd.list === "cats" ? _saCatsCur : _saGroupsCur);
+                        }
+                        data[_saPairs[_sai].k] = _saV;
+                        if (_saCan) { try { _setOption(_saPairs[_sai].k, _saV); } catch (_eS1) {} }
                     }
                     if (_saCan) { try { _setOption("styleStamp", true); } catch (_eS2) {} }
                 }
@@ -47677,17 +47711,9 @@
         // gb2SeriesSnapshot order; entry array index as the fallback
         // for snapshot-less styles). Entries past the current series
         // count drop.
-        var _STYLE_KEYED_STORES = {
-            groupColors:        { key: "original", list: "groups" },
-            groupPatterns:      { key: "original", list: "groups" },
-            groupCornerRadii:   { key: "original", list: "groups" },
-            groupOpacities:     { key: "original", list: "groups" },
-            groupBorders:       { key: "original", list: "groups" },
-            groupErrorBars:     { key: "original", list: "groups" },
-            lineGroupOverrides: { key: "group",    list: "groups" },
-            groupDataPoints:    { key: "original", list: "groups" },
-            categoryStyles:     { key: "original", list: "cats" }
-        };
+        // _STYLE_KEYED_STORES lives up beside the default-style
+        // auto-apply fold (render entry): the fold re-keys through it
+        // too, and a `var` initialized down here is undefined up there.
         function _styleRekeyEntries(entries, keyField, savedList, currentList) {
             if (!Array.isArray(entries) || entries.length === 0) return entries;
             // An EMPTY current list means the chart genuinely has no series
