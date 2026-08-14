@@ -25934,7 +25934,12 @@
     file: [
       { label: "New project\u2026", shortcut: "Cmd/Ctrl+N", command: "new-project" },
       { label: "Open data or project\u2026", shortcut: "Cmd/Ctrl+O", command: "open" },
-      { label: "Start center\u2026", command: "welcome" },
+      // No "Start center" row: New project OPENS the start center (it is the
+      // same overlay, just with the New action focused), so listing both put
+      // two doors on one room - here and, since the palette renders from
+      // these same definitions, in the command palette too (Torry, Aug 14
+      // 2026). The "welcome" command itself survives in runAppCommand as the
+      // programmatic entry point.
       { label: "Open recent", command: "open-recent", submenu: "recent" },
       "separator",
       { label: "Rename project\u2026", command: "rename-project" },

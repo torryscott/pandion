@@ -130,7 +130,7 @@ await page.waitForTimeout(400);
     }));
     ok(menu.shown === 'block' &&
        JSON.stringify(menu.commands) ===
-       '["new-project","open","welcome","rename-project","save","save-as","export",' +
+       '["new-project","open","rename-project","save","save-as","export",' +
        '"export-data"]',
        'File menu exposes the complete project lifecycle');
     await page.keyboard.press('Escape');
