@@ -25183,12 +25183,42 @@
     el("ps-pref-export-format").value = exp.format;
     el("ps-pref-export-dpi").value = String(exp.dpi);
     el("ps-pref-missing").value = APP_PREFS.missingTokens;
+    populatePrefStyleSelect();
     refreshPrefStorage();
     openShellDialog("ps-preferences");
   }
   // t3-53. Diagnostics already computed the estimate and this dialog is where
   // a person would look for it, so it is stated here in the same words as the
   // action beside it.
+  // t4-150. The default-chart-style POINTER is a follows-you setting,
+  // so it surfaces here; the styles themselves stay in the Chart styles
+  // library (Chart settings), which is the engine's own surface for
+  // them. Rebuilt on every open: the library changes between opens.
+  function populatePrefStyleSelect() {
+    var sel = el("ps-pref-style");
+    if (!sel) return;
+    sel.textContent = "";
+    var none = document.createElement("option");
+    none.value = "";
+    none.textContent = "Pandion default (no saved style)";
+    sel.appendChild(none);
+    var names = Object.keys(PS_LIBS.style.styles || {}).sort(function (a, b) {
+      return a.toLowerCase() < b.toLowerCase() ? -1 : 1;
+    });
+    for (var i = 0; i < names.length; i++) {
+      var o = document.createElement("option");
+      o.value = names[i];
+      o.textContent = names[i];   // names are data - never markup
+      sel.appendChild(o);
+    }
+    sel.value = styleDefaultIdResolved();
+    var hint = sel.closest("label");
+    if (hint && !names.length) {
+      hint.setAttribute("data-tip", "No saved styles yet. Style a chart, " +
+        "then save the look in Chart settings, under Chart styles, and " +
+        "it will appear here.");
+    }
+  }
   function refreshPrefStorage() {
     var line = el("ps-pref-storage");
     if (!line) return;
@@ -25264,6 +25294,7 @@
     el("ps-pref-missing").value = APP_PREFS_DEFAULTS.missingTokens;
     el("ps-pref-export-format").value = "svg";
     el("ps-pref-export-dpi").value = "300";
+    if (el("ps-pref-style")) el("ps-pref-style").value = "";
     showToast("Defaults restored - press Apply to keep them");
   }
   function savePreferences() {
@@ -25282,6 +25313,24 @@
         background: oldExport.background
       }));
     } catch (e) {}
+    // The default-style pointer writes through the SAME store the
+    // Chart-styles star uses (one source of truth), with the same
+    // guard: a named default must exist.
+    var styleSel = el("ps-pref-style");
+    if (styleSel) {
+      var want = String(styleSel.value || "");
+      if (want && !(PS_LIBS.style.styles || {})[want]) want = "";
+      if (PS_LIBS.style.defaultStyle !== want) {
+        PS_LIBS.style.defaultStyle = want;
+        saveLibrariesNow();
+      }
+      // Push the pointer into the engine's window state too, the way
+      // the engine's own star does. During the engine's fresh-local
+      // window (10 s after any style save) render entry KEEPS the
+      // window value instead of adopting the payload's, so a prefs
+      // write alone would silently miss the very next new chart.
+      try { window.__gb2_styleDefaultId = want; } catch (e) {}
+    }
     applyAppPrefs();
     closeShellDialog("ps-preferences");
     showToast("Preferences applied");

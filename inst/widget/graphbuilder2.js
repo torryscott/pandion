@@ -3101,31 +3101,6 @@
                     ? data.styleDefaultId : "");
         } catch (_eSL) {}
 
-        // "Default style for new charts": R flags an analysis that has
-        // never rendered a widget before (styleStamp false AND no
-        // committed clientBundleHash - see widget.R's style_auto_apply
-        // derivation). Fold the default style into the payload NOW
-        // (pre-hash, pre-draw: the first frame paints already styled
-        // and the R echo of the commits hashes identical), then stamp
-        // styleStamp in the same debounce batch so this fires once.
-        // The window guard covers echoes inside the debounce window.
-        try {
-            if (data && data.styleAutoApply === true && !window.__gb2_styleAutoApplyDone) {
-                var _saSt = (window.__gb2_styleDefaultId && window.__gb2_styleLib) ?
-                    window.__gb2_styleLib[window.__gb2_styleDefaultId] : null;
-                if (_saSt) {
-                    window.__gb2_styleAutoApplyDone = true;
-                    var _saPairs = _styleApplyPairs(_saSt, null);
-                    var _saCan = (typeof window.setOption === "function");
-                    for (var _sai = 0; _sai < _saPairs.length; _sai++) {
-                        data[_saPairs[_sai].k] = _styleClone(_saPairs[_sai].v);
-                        if (_saCan) { try { _setOption(_saPairs[_sai].k, _saPairs[_sai].v); } catch (_eS1) {} }
-                    }
-                    if (_saCan) { try { _setOption("styleStamp", true); } catch (_eS2) {} }
-                }
-            }
-        } catch (_eSA) {}
-
         // Was this render() entered from R's results-HTML loader (an
         // AUTHORITATIVE echo of a recompute), or from a bundle-internal local
         // re-entry (panel preview, _gb2RerenderSoon, type-switch folds, undo)?
@@ -3537,6 +3512,36 @@
                 _reTitle("groupTitleOverride", "groupTitle", "groupLabel", "groupLabelDefault");
             }
         } catch (_csErr) {}
+
+        // "Default style for new charts": R flags an analysis that has
+        // never rendered a widget before (styleStamp false AND no
+        // committed clientBundleHash - see widget.R's style_auto_apply
+        // derivation). Fold the default style into the payload NOW
+        // (pre-hash, pre-draw: the first frame paints already styled
+        // and the R echo of the commits hashes identical), then stamp
+        // styleStamp in the same debounce batch so this fires once.
+        // The window guard covers echoes inside the debounce window.
+        // This block must sit AFTER the chartSpec bridge above: the
+        // fold commits through _setOption, and before _gb2SpecRealSet
+        // is assigned the routing chokepoint sees undefined and would
+        // commit a migrated module's style keys under their RAW names
+        // instead of folding them into the chartSpec blob (t4-150).
+        try {
+            if (data && data.styleAutoApply === true && !window.__gb2_styleAutoApplyDone) {
+                var _saSt = (window.__gb2_styleDefaultId && window.__gb2_styleLib) ?
+                    window.__gb2_styleLib[window.__gb2_styleDefaultId] : null;
+                if (_saSt) {
+                    window.__gb2_styleAutoApplyDone = true;
+                    var _saPairs = _styleApplyPairs(_saSt, null);
+                    var _saCan = (typeof window.setOption === "function");
+                    for (var _sai = 0; _sai < _saPairs.length; _sai++) {
+                        data[_saPairs[_sai].k] = _styleClone(_saPairs[_sai].v);
+                        if (_saCan) { try { _setOption(_saPairs[_sai].k, _saPairs[_sai].v); } catch (_eS1) {} }
+                    }
+                    if (_saCan) { try { _setOption("styleStamp", true); } catch (_eS2) {} }
+                }
+            }
+        } catch (_eSA) {}
 
         // Skip the rebuild entirely when the post-override `data` is
         // byte-identical to what we just rendered. R round-trips for
@@ -47403,6 +47408,7 @@
             var BARS = ["cg", "rm", "scatter", "dist", "freq", "likert"];
             var S = ["scatter"], D = ["dist"], F = ["freq"], L = ["likert"];
             var CRDF = ["cg", "rm", "dist", "freq"];
+            var CRD = ["cg", "rm", "dist"];
             var BARNS = ["cg", "rm", "dist", "freq", "likert"];
             var LINES = ["cg", "rm", "scatter"];
             return [
@@ -47509,6 +47515,23 @@
                 { k: "groupErrorBars", g: "bars", mods: CRDF },
                 { k: "lineGroupOverrides", g: "bars", mods: LINES },
                 { k: "categoryStyles", g: "bars", mods: CRDF },
+                // The Individual Data Points overlay (t4-150): its
+                // styling was the one mark family a saved look silently
+                // dropped - the direct colleague's default (outlined
+                // symbols, transparent fill, matched to condition) could
+                // not stick. showDataPoints rides along: "my charts show
+                // the raw points" is part of a look.
+                { k: "showDataPoints", g: "bars", mods: CRD },
+                { k: "pointScatter", g: "bars", mods: CRD },
+                { k: "pointShape", g: "bars", mods: CRD },
+                { k: "pointSize", g: "bars", mods: CRD },
+                { k: "pointSpreadWidth", g: "bars", mods: CRD },
+                { k: "pointOpacity", g: "bars", mods: CRD },
+                { k: "pointColor", g: "bars", mods: CRD },
+                { k: "pointColorMatch", g: "bars", mods: CRD },
+                { k: "pointOutlineWidth", g: "bars", mods: CRD },
+                { k: "pointOutlineColor", g: "bars", mods: CRD },
+                { k: "groupDataPoints", g: "bars", mods: CRD },
 
                 { k: "chartBackground", g: "background", mods: null },
                 { k: "chartBorder", g: "background", mods: null },
@@ -47662,6 +47685,7 @@
             groupBorders:       { key: "original", list: "groups" },
             groupErrorBars:     { key: "original", list: "groups" },
             lineGroupOverrides: { key: "group",    list: "groups" },
+            groupDataPoints:    { key: "original", list: "groups" },
             categoryStyles:     { key: "original", list: "cats" }
         };
         function _styleRekeyEntries(entries, keyField, savedList, currentList) {

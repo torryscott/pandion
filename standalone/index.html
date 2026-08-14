@@ -5467,7 +5467,8 @@
       <div>
         <h2 id="ps-preferences-title">Preferences</h2>
         <p>Settings that follow you rather than any one project:
-          startup, appearance, units, and export defaults.</p>
+          startup, appearance, units, exports, and the default chart
+          style.</p>
       </div>
       <button type="button" class="ps-btn ps-dialog-close"
               id="ps-preferences-close">Close</button>
@@ -5509,6 +5510,11 @@
           <option value="cm">Centimetres</option>
           <option value="px">Pixels</option>
         </select>
+      </label>
+      <label class="ps-inspector-field"
+             data-tip="Applied when you create a new chart. Save and manage looks in Chart settings, under Chart styles.">
+        Default chart style
+        <select id="ps-pref-style"></select>
       </label>
       <label class="ps-inspector-field">Default raster DPI
         <select id="ps-pref-export-dpi">

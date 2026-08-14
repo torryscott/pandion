@@ -83,6 +83,13 @@ const withRoles = async (x, y) => {
 const applied = () => page.evaluate(() => {
     const c = window.PS_SHELL.chart();
     const p = window.PS_SHELL.buildPayload();
+    // Since t4-150 the auto-apply fold routes style keys through the
+    // chartSpec blob on migrated modules (the commit lands in the slot
+    // the module actually persists), so the ink lives in the blob, not
+    // at the payload top level.
+    let spec = {};
+    try { spec = p && p.chartSpec ? JSON.parse(p.chartSpec) : {}; }
+    catch (e) { /* unparseable blob reads as unstyled */ }
     const svg = Array.from(document.querySelectorAll('#psroot svg'))
         .sort((a, b) => b.getBoundingClientRect().width -
                         a.getBoundingClientRect().width)[0];
@@ -90,7 +97,7 @@ const applied = () => page.evaluate(() => {
     return { id: c.id,
              hasOwnStamp:
                  Object.prototype.hasOwnProperty.call(c, 'styleStamp'),
-             ink: (p && p.chartTextColor) || '',
+             ink: (p && p.chartTextColor) || spec.chartTextColor || '',
              drawn: t ? getComputedStyle(t).fill : null };
 });
 const openLoader = () => page.evaluate(() => {
