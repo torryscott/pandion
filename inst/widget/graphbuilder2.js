@@ -3586,10 +3586,23 @@
         // user pick always wins, and the auto follows type switches
         // (raincloud lies down, switching back stands the chart up).
         try {
-            if (data && data.graphType === "raincloud"
-                && data.chartOrientation !== "horizontal"
-                && data.chartOrientation !== "vertical")
-                data.chartOrientation = "horizontal";
+            if (data && data.graphType === "raincloud") {
+                if (data.chartOrientation !== "horizontal"
+                    && data.chartOrientation !== "vertical")
+                    data.chartOrientation = "horizontal";
+                // t4-167: cloud ON TOP, rain below. Slot fractions run
+                // DOWN the screen in horizontal mode, so side "left"
+                // (toward slot start) is the upward bulge; the draw
+                // site's "right" fallback put the cloud on the bottom.
+                if (data.chartOrientation === "horizontal"
+                    && data.rainSide !== "left" && data.rainSide !== "right")
+                    data.rainSide = "left";
+                // t4-167: untrimmed tails by default - the cloud tapers
+                // off like weather instead of being cut at the observed
+                // min and max. Violin keeps its trimmed default.
+                if (typeof data.violinTrim !== "boolean")
+                    data.violinTrim = false;
+            }
         } catch (_eOr) {}
 
         // Skip the rebuild entirely when the post-override `data` is
@@ -56598,6 +56611,12 @@
                 || btn.getAttribute("data-xytab") || btn.getAttribute("data-ps-tab")
                 || btn.getAttribute("data-dp-tab") || "";
             var label = String(btn.textContent || "").replace(/\s+/g, " ").trim();
+            // t4-168 (Torry): the Data points panel is named for what it
+            // EDITS, not for its active tab - "Marker" as the panel name
+            // read as a different panel. Its tabs (Points | Outline |
+            // Connectors) stay visible right below the title.
+            if (btn.hasAttribute("data-dp-tab"))
+                return "Data points" + (g ? " - " + g : "");
             // Pluralize only the literal "Bar" tab - the box family reuses
             // tab id "bar" with labels Box / Violin / Raincloud, which must
             // pass through as-is (Torry's dist type-switch round).
@@ -88101,7 +88120,7 @@
                 '</select>';
             // ============== Tab bar ===============
             var _dpTabs = [
-                { id: "point",   label: "Marker"  },
+                { id: "point",   label: "Points"  },
                 { id: "outline", label: "Outline" }
             ];
             if (_dpShowConnTab) _dpTabs.push({ id: "connectors", label: "Connectors" });

@@ -6403,16 +6403,21 @@
     }
     var opts = MODULES[mod].optsFrom(st, tpl.payload);
     opts.spec = parseSpec(typeof st.chartSpec === "string" ? st.chartSpec : tpl.payload.chartSpec);
-    // t4-165: the template's chartOrientation is widget.R boilerplate,
-    // not a user choice. When the user never picked one (neither the
-    // raw store nor the spec blob carries the key), ship the "" auto
-    // sentinel so the engine can resolve it per type - a raincloud
-    // lies down, everything else stays vertical. An explicit pick
-    // rides the blob and wins.
-    if (Object.prototype.hasOwnProperty.call(payload, "chartOrientation")
-        && !Object.prototype.hasOwnProperty.call(st, "chartOrientation")
-        && !Object.prototype.hasOwnProperty.call(opts.spec, "chartOrientation"))
-      payload.chartOrientation = "";
+    // t4-165/t4-167: template values for these keys are widget.R
+    // boilerplate, not user choices. When the user never picked one
+    // (neither the raw store nor the spec blob carries the key), ship
+    // an auto sentinel so the engine resolves per type: a raincloud
+    // lies down, cloud on top, tails untrimmed; everything else keeps
+    // the stock defaults. Explicit picks ride the blob and win.
+    var AUTO_SENTINEL_KEYS = [
+      ["chartOrientation", ""], ["rainSide", ""], ["violinTrim", null]];
+    for (var asI = 0; asI < AUTO_SENTINEL_KEYS.length; asI++) {
+      var asK = AUTO_SENTINEL_KEYS[asI][0];
+      if (Object.prototype.hasOwnProperty.call(payload, asK)
+          && !Object.prototype.hasOwnProperty.call(st, asK)
+          && !Object.prototype.hasOwnProperty.call(opts.spec, asK))
+        payload[asK] = AUTO_SENTINEL_KEYS[asI][1];
+    }
     var res = MODULES[mod].build(tableForPointVisibility(mod, rr), rr, opts);
     if (res.error) return { placeholder: res.error, fix: res.fix || null };
     // t3-60: what the BUILDER wrote, kept for the channel audit. Auditing the
