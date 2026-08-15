@@ -6816,6 +6816,8 @@
         if (PROJECT.ui.activeBoard === removed.id)
           PROJECT.ui.activeBoard = null;
       });
+      recordClosedItem({ kind: "section", board: removed,
+                         at: Date.now(), step: step });
       nbOfferUndo("Deleted " + removed.name +
         (removed.pins.length ? " and its " + removed.pins.length +
           (removed.pins.length === 1 ? " page" : " pages") : ""), step);
@@ -7166,6 +7168,8 @@
         if (k !== -1) board.pins.splice(k, 1);
         (PROJECT.ui = PROJECT.ui || {}).activeBoard = board.id;
       });
+      recordClosedItem({ kind: "page", pin: removed, board: board,
+                         idx: at, at: Date.now(), step: step });
       persist(); syncAll();
       if (appWorkspace() === "pinboard") renderPinboard();
       nbOfferUndo("Page removed from " + board.name, step);
@@ -13395,27 +13399,72 @@
   // never a stale copy) and the t4-153 op entry, so all three recovery
   // surfaces (toast, undo, this list) act on one shared act.
   var CLOSED_DOCS = [], CLOSED_DOCS_CAP = 10;
+  function recordClosedItem(rec) {
+    CLOSED_DOCS.push(rec);
+    if (CLOSED_DOCS.length > CLOSED_DOCS_CAP) CLOSED_DOCS.shift();
+  }
+  // Record kinds: chart / layout (closeChart, t4-153 op entries) and
+  // page / section (the Notebook's deletePin / deletePinBoard, nbStep
+  // entries; t4-155 per Torry - the Restore flyout lists the Notebook
+  // beside charts and layouts).
+  function closedRecAbsent(rec) {
+    if (rec.kind === "page") {
+      var bs = pinBoards();
+      for (var i = 0; i < bs.length; i++)
+        for (var j = 0; j < bs[i].pins.length; j++)
+          if (bs[i].pins[j].id === rec.pin.id) return false;
+      return true;
+    }
+    if (rec.kind === "section") {
+      var bs2 = pinBoards();
+      for (var k = 0; k < bs2.length; k++)
+        if (bs2[k].id === rec.board.id) return false;
+      return true;
+    }
+    return !chartById(rec.doc.id);
+  }
+  function closedRecName(rec) {
+    if (rec.kind === "page") return pinPageLabel(rec.pin, rec.idx || 0);
+    if (rec.kind === "section") return rec.board.name || "Untitled section";
+    return rec.doc.name || "Untitled";
+  }
+  function closedRecId(rec) {
+    return rec.kind === "page" ? rec.pin.id
+         : rec.kind === "section" ? rec.board.id : rec.doc.id;
+  }
   function closedDocsAvailable() {
-    // Derived, never book-kept: list a record only while its document
-    // is absent. Restores by any route self-heal the list, and a
-    // REDONE delete lists again. Newest first.
+    // Derived, never book-kept: list a record only while its item is
+    // absent. Restores by any route self-heal the list, and a REDONE
+    // delete lists again. Newest first.
     var out = [];
     for (var i = CLOSED_DOCS.length - 1; i >= 0; i--)
-      if (!chartById(CLOSED_DOCS[i].doc.id)) out.push(CLOSED_DOCS[i]);
+      if (closedRecAbsent(CLOSED_DOCS[i])) out.push(CLOSED_DOCS[i]);
     return out;
   }
-  function reopenClosedDoc(rec) {
-    if (chartById(rec.doc.id)) return false;
-    // Reopening is a NEW act, not a step back through the timeline, so
+  function restoreClosedRec(rec) {
+    if (!closedRecAbsent(rec)) return false;
+    // Restoring is a NEW act, not a step back through the timeline, so
     // the delete's own undo entry retires outright (no redo push): a
-    // surviving "Undo the deleted chart" row would either duplicate
-    // the document or no-op - the exact lie t4-153 removed.
-    var i = CHART_OPS_UNDO.indexOf(rec.op);
-    if (i >= 0) CHART_OPS_UNDO.splice(i, 1);
-    i = CHART_OPS_REDO.indexOf(rec.op);
-    if (i >= 0) CHART_OPS_REDO.splice(i, 1);
-    rec.restore();
-    showToast("Reopened " + (rec.doc.name || "the document"));
+    // surviving "Undo the deleted ..." row would either duplicate the
+    // item or no-op - the exact lie t4-153 removed.
+    var i;
+    if (rec.kind === "page" || rec.kind === "section") {
+      i = NB_UNDO.indexOf(rec.step);
+      if (i >= 0) NB_UNDO.splice(i, 1);
+      i = NB_REDO.indexOf(rec.step);
+      if (i >= 0) NB_REDO.splice(i, 1);
+      nbApply(rec.step.undo);
+      // Show what came back: the chart restore lands on the restored
+      // tab, so the Notebook restore lands on the Notebook.
+      setAppWorkspace("pinboard");
+    } else {
+      i = CHART_OPS_UNDO.indexOf(rec.op);
+      if (i >= 0) CHART_OPS_UNDO.splice(i, 1);
+      i = CHART_OPS_REDO.indexOf(rec.op);
+      if (i >= 0) CHART_OPS_REDO.splice(i, 1);
+      rec.restore();
+    }
+    showToast("Restored " + closedRecName(rec));
     return true;
   }
   // The layout history's rule, word for word: a history that outlives
@@ -17495,11 +17544,9 @@
     // The reopen list outlives the 20-op undo cap on its own 10-doc cap.
     // A REDO of this delete (noHistory) revives the existing record via
     // the absent-filter instead of stacking a duplicate.
-    if (closeOp) {
-      CLOSED_DOCS.push({ doc: removed, at: Date.now(),
-                         op: closeOp, restore: restore });
-      if (CLOSED_DOCS.length > CLOSED_DOCS_CAP) CLOSED_DOCS.shift();
-    }
+    if (closeOp) recordClosedItem({
+      kind: isLayoutTab(removed) ? "layout" : "chart",
+      doc: removed, at: Date.now(), op: closeOp, restore: restore });
     showUndoToast("Deleted " + removed.name + (usedBy.length
       ? " (used by " + usedBy.join(", ") + ")" : ""), function () {
       if (closeOp) runChartOp(closeOp, true);
@@ -26089,7 +26136,7 @@
       // 2026). The "welcome" command itself survives in runAppCommand as the
       // programmatic entry point.
       { label: "Open recent", command: "open-recent", submenu: "recent" },
-      { label: "Reopen closed document", command: "reopen-closed", submenu: "closed" },
+      { label: "Restore", command: "reopen-closed", submenu: "closed" },
       "separator",
       { label: "Rename project\u2026", command: "rename-project" },
       { label: "Save project", shortcut: "Cmd/Ctrl+S", command: "save" },
@@ -26267,6 +26314,8 @@
     // is informed rather than surprising.
     if (item && item.command === "user-guide" && userGuideTarget().online)
       return "User guide (online)";
+    if (item && item.command === "reopen-closed")
+      return "Restore the last closed item";
     // t3-46 put a plain "Copy" two rows above this one, so "Copy as image"
     // became ambiguous. It names what it will copy, which also stops the label
     // lying in the Layouts workspace, where the same command copies the
@@ -26610,7 +26659,8 @@
       return "No " + what + " to " + command;
     }
     if (command === "reopen-closed")
-      return "Charts and layouts you close appear here for this session";
+      return "Charts, layouts, and Notebook items you close appear " +
+             "here for this session";
     if (command === "data-exclude" || command === "data-chart-sel")
       return "Select cells in the Data workspace first";
     if (PROJECT.table && PROJECT.table.order.length) {
@@ -26667,7 +26717,7 @@
     else if (command === "welcome") showWelcome(true);
     else if (command === "reopen-closed") {
       var closedNow = closedDocsAvailable();
-      if (closedNow.length) reopenClosedDoc(closedNow[0]);
+      if (closedNow.length) restoreClosedRec(closedNow[0]);
     }
     else if (command === "rename-project") renameProjectInline();
     else if (command === "save") saveProjectFile();
@@ -26829,28 +26879,49 @@
     var s = el("ps-appsubmenu");
     s.innerHTML = "";
     if (kind === "closed") {
-      // t4-154 rows: live document name (never a stale copy), what it
-      // is, and how long ago it went.
+      s.setAttribute("aria-label", "Restore");
+      // t4-155 (Torry): grouped by KIND - Charts / Notebook / Layouts,
+      // his order, only the kinds with something to restore. Rows show
+      // the item's LIVE name (never a stale copy) and how long ago it
+      // went; the group header says what it is.
       var closedRecs = closedDocsAvailable();
-      for (var ci = 0; ci < closedRecs.length; ci++) {
-        (function (rec) {
-          var cb = mkEl("button", "");
-          cb.type = "button";
-          cb.setAttribute("role", "menuitem");
-          cb.setAttribute("data-closed-menu", rec.doc.id);
-          cb.appendChild(mkEl("span", "", rec.doc.name || "Untitled"));
-          cb.appendChild(mkEl("span", "ps-menu-shortcut",
-            (isLayoutTab(rec.doc) ? "layout" : "chart") + " \u00b7 " +
-            recentTimeLabel(rec.at)));
-          cb.addEventListener("click", function () {
-            hideRecentSubmenu();
-            hideAppMenu(false);
-            reopenClosedDoc(rec);
-          });
-          s.appendChild(cb);
-        })(closedRecs[ci]);
+      var closedGroups = [["chart", "Charts"], ["nb", "Notebook"],
+                          ["layout", "Layouts"]];
+      for (var cgI = 0; cgI < closedGroups.length; cgI++) {
+        var members = [];
+        for (var cmI = 0; cmI < closedRecs.length; cmI++) {
+          var rk = closedRecs[cmI].kind;
+          var bucket = (rk === "page" || rk === "section") ? "nb" : rk;
+          if (bucket === closedGroups[cgI][0]) members.push(closedRecs[cmI]);
+        }
+        if (!members.length) continue;
+        var hd = mkEl("div", "");
+        hd.setAttribute("role", "presentation");
+        hd.setAttribute("data-closed-group", closedGroups[cgI][0]);
+        hd.textContent = closedGroups[cgI][1];
+        hd.style.cssText = "font-size:10.5px;letter-spacing:0.06em;" +
+          "text-transform:uppercase;color:#666;padding:7px 12px 3px;";
+        s.appendChild(hd);
+        for (var ci = 0; ci < members.length; ci++) {
+          (function (rec) {
+            var cb = mkEl("button", "");
+            cb.type = "button";
+            cb.setAttribute("role", "menuitem");
+            cb.setAttribute("data-closed-menu", closedRecId(rec));
+            cb.appendChild(mkEl("span", "", closedRecName(rec)));
+            cb.appendChild(mkEl("span", "ps-menu-shortcut",
+              recentTimeLabel(rec.at)));
+            cb.addEventListener("click", function () {
+              hideRecentSubmenu();
+              hideAppMenu(false);
+              restoreClosedRec(rec);
+            });
+            s.appendChild(cb);
+          })(members[ci]);
+        }
       }
     } else {
+      s.setAttribute("aria-label", "Open recent");
     var recents = recentProjects();
     for (var ri = 0; ri < recents.length; ri++) {
       (function (rec) {
@@ -26930,7 +27001,8 @@
           if (!rows.length) {
             tr.disabled = true;
             setTip(tr, kind === "closed"
-              ? "Charts and layouts you close appear here for this session"
+              ? "Charts, layouts, and Notebook items you close appear " +
+                "here for this session"
               : "Projects you open or save appear here");
           } else {
             tr.addEventListener("mouseenter", function () {
