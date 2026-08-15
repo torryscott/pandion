@@ -26895,12 +26895,10 @@
           if (bucket === closedGroups[cgI][0]) members.push(closedRecs[cmI]);
         }
         if (!members.length) continue;
-        var hd = mkEl("div", "");
+        var hd = mkEl("div", "ps-menu-heading");
         hd.setAttribute("role", "presentation");
         hd.setAttribute("data-closed-group", closedGroups[cgI][0]);
         hd.textContent = closedGroups[cgI][1];
-        hd.style.cssText = "font-size:10.5px;letter-spacing:0.06em;" +
-          "text-transform:uppercase;color:#666;padding:7px 12px 3px;";
         s.appendChild(hd);
         for (var ci = 0; ci < members.length; ci++) {
           (function (rec) {
@@ -26955,7 +26953,8 @@
       });
     }
     var r = trigger.getBoundingClientRect();
-    s.style.display = "block";
+    s.classList.toggle("ps-submenu-grid", kind === "closed");
+    s.style.display = kind === "closed" ? "flex" : "block";
     var w = s.offsetWidth || 230;
     var left = r.right + 2;
     if (left + w > window.innerWidth - 8) left = Math.max(8, r.left - w - 2);

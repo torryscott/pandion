@@ -3028,18 +3028,40 @@
     padding: 7px 9px 3px; color: var(--ps-muted); font-size: 10px;
     font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
   }
-  #ps-appmenu button {
+  #ps-appmenu button, #ps-appsubmenu button {
     -webkit-appearance: none; appearance: none; display: grid;
     grid-template-columns: 1fr auto; align-items: center; width: 100%;
     min-height: 29px; padding: 5px 9px; color: inherit; background: transparent;
     border: 0; border-radius: var(--ps-r-sm); font-size: 12px; text-align: left; cursor: default;
   }
-  #ps-appmenu button:hover { color: var(--ps-accent-ink); background: var(--ps-s3); }
+  #ps-appmenu button:hover, #ps-appsubmenu button:hover {
+    color: var(--ps-accent-ink); background: var(--ps-s3); }
   #ps-appmenu button:disabled { color: var(--ps-muted); background: transparent; }
   /* Both menus render the span; scoping this to the app menu alone left the
-     layout item menu reading "DuplicateCmd/Ctrl+D" run together. */
-  #ps-appmenu .ps-menu-shortcut, #ps-contextmenu .ps-menu-shortcut {
+     layout item menu reading "DuplicateCmd/Ctrl+D" run together. (t4-156:
+     the SUBMENU had been left out of BOTH rules the same way, so its rows
+     rendered as unstyled inline pills with the name running into the time,
+     "Chart 51 min ago" - masked in Open recent by usually holding one row,
+     exposed the moment Restore listed several.) */
+  #ps-appmenu .ps-menu-shortcut, #ps-appsubmenu .ps-menu-shortcut,
+  #ps-contextmenu .ps-menu-shortcut {
     margin-left: 25px; color: var(--ps-ink); font-size: 10.5px; }
+  /* t4-156: the Restore flyout is a wrapping pill GRID (Torry's design:
+     "a limit on how wide that is, and after that, it starts to populate
+     underneath... make that reasonably wide"). The kind headers take a
+     full line; each pill separates the name from its age with a gap. The
+     display itself is set inline by the shower (flex here, block for the
+     recents list), since the inline display toggle owns visibility. */
+  #ps-appsubmenu.ps-submenu-grid {
+    flex-wrap: wrap; gap: 5px; align-items: center; max-width: 440px;
+  }
+  #ps-appsubmenu.ps-submenu-grid .ps-menu-heading { flex: 0 0 100%; }
+  #ps-appsubmenu.ps-submenu-grid button {
+    display: inline-flex; width: auto; align-items: baseline; gap: 8px;
+    padding: 4px 11px; border: 1px solid var(--ps-l2); border-radius: 999px;
+  }
+  #ps-appsubmenu.ps-submenu-grid .ps-menu-shortcut {
+    margin-left: 0; color: var(--ps-muted); font-size: 10px; }
   #ps-appmenu .ps-menu-separator { height: 1px; margin: 4px 5px; background: var(--ps-l2); }
   #ps-contextmenu {
     position: fixed; display: none; z-index: 12500; min-width: 185px;
@@ -36523,12 +36545,10 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
           if (bucket === closedGroups[cgI][0]) members.push(closedRecs[cmI]);
         }
         if (!members.length) continue;
-        var hd = mkEl("div", "");
+        var hd = mkEl("div", "ps-menu-heading");
         hd.setAttribute("role", "presentation");
         hd.setAttribute("data-closed-group", closedGroups[cgI][0]);
         hd.textContent = closedGroups[cgI][1];
-        hd.style.cssText = "font-size:10.5px;letter-spacing:0.06em;" +
-          "text-transform:uppercase;color:#666;padding:7px 12px 3px;";
         s.appendChild(hd);
         for (var ci = 0; ci < members.length; ci++) {
           (function (rec) {
@@ -36583,7 +36603,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       });
     }
     var r = trigger.getBoundingClientRect();
-    s.style.display = "block";
+    s.classList.toggle("ps-submenu-grid", kind === "closed");
+    s.style.display = kind === "closed" ? "flex" : "block";
     var w = s.offsetWidth || 230;
     var left = r.right + 2;
     if (left + w > window.innerWidth - 8) left = Math.max(8, r.left - w - 2);
