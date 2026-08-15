@@ -5185,7 +5185,7 @@
             <span class="ps-launch-icon"><svg class="ps-icn" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/><path d="M12 11v6M9 14h6"/></svg></span>
             <span class="ps-launch-copy">
               <strong>New project</strong>
-              <span>Start clean: paste data straight from a spreadsheet</span>
+              <span>Paste data from a spreadsheet, or start with a blank sheet</span>
             </span>
           </button>
         </div>
@@ -5865,6 +5865,8 @@
         <button type="button" class="ps-btn ps-primary" id="ps-import-use"
                 style="display:none;">Import data</button>
         <button type="button" class="ps-btn" id="ps-sample">Use sample data</button>
+        <button type="button" class="ps-btn" id="ps-blank"
+                data-tip="An empty data sheet to type into, with one fresh chart">Start with a blank sheet</button>
       </div>
       <div id="ps-import-preview"></div>
     </div>
@@ -34428,6 +34430,41 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       syncAll();
       render();
       closeLoader();
+    });
+    // t4-158 (a colleague's find, via Torry): File > New project led ONLY
+    // to imports - there was no way to a truly blank sheet. This is the
+    // missing door: adoptCSV's full replacement choreography with an
+    // empty three-column grid (A, B, C - the jamovi convention), landing
+    // on the Data workspace since typing data IS the next act. The fresh
+    // chart carries styleStamp false, so a default chart style dresses
+    // it exactly like any other new chart.
+    el("ps-blank").addEventListener("click", function () {
+      PROJECT_CHOSEN = true;
+      var replaced = captureReplacedProject();    // item 13
+      dataHistoryClear();
+      PROJECT.id = newProjectId();
+      PROJECT.name = "Untitled project";
+      PROJECT_REV = 0;
+      FILE_SAVED_REV = null;
+      FILE_LABEL = null;
+      FILE_HANDLE = null;
+      var blankRows = [];
+      for (var bi = 0; bi < 10; bi++) blankRows.push(["", "", ""]);
+      PROJECT.table = buildTable("Untitled project",
+        ["A", "B", "C"], blankRows, null);
+      resetDocumentsForNewData();
+      PROJECT.ui.columnWidths = {};
+      GRID_NATURAL_WIDTHS = {};
+      gridResetColumnView();
+      GRID_FIND_QUERY = ""; GRID_FIND_RESULTS = []; GRID_FIND_INDEX = -1;
+      validateRoles();
+      persist();
+      syncAll();
+      render();
+      hideWelcome();
+      closeLoader();
+      setAppWorkspace("data");
+      offerReplacedProjectBack(replaced, "a blank project");
     });
     // Whole-page drag-drop.
     // Punch list 21. The loader advertises "or drop one anywhere on the page"

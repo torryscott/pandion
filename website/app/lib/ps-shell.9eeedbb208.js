@@ -24772,6 +24772,41 @@
       render();
       closeLoader();
     });
+    // t4-158 (a colleague's find, via Torry): File > New project led ONLY
+    // to imports - there was no way to a truly blank sheet. This is the
+    // missing door: adoptCSV's full replacement choreography with an
+    // empty three-column grid (A, B, C - the jamovi convention), landing
+    // on the Data workspace since typing data IS the next act. The fresh
+    // chart carries styleStamp false, so a default chart style dresses
+    // it exactly like any other new chart.
+    el("ps-blank").addEventListener("click", function () {
+      PROJECT_CHOSEN = true;
+      var replaced = captureReplacedProject();    // item 13
+      dataHistoryClear();
+      PROJECT.id = newProjectId();
+      PROJECT.name = "Untitled project";
+      PROJECT_REV = 0;
+      FILE_SAVED_REV = null;
+      FILE_LABEL = null;
+      FILE_HANDLE = null;
+      var blankRows = [];
+      for (var bi = 0; bi < 10; bi++) blankRows.push(["", "", ""]);
+      PROJECT.table = buildTable("Untitled project",
+        ["A", "B", "C"], blankRows, null);
+      resetDocumentsForNewData();
+      PROJECT.ui.columnWidths = {};
+      GRID_NATURAL_WIDTHS = {};
+      gridResetColumnView();
+      GRID_FIND_QUERY = ""; GRID_FIND_RESULTS = []; GRID_FIND_INDEX = -1;
+      validateRoles();
+      persist();
+      syncAll();
+      render();
+      hideWelcome();
+      closeLoader();
+      setAppWorkspace("data");
+      offerReplacedProjectBack(replaced, "a blank project");
+    });
     // Whole-page drag-drop.
     // Punch list 21. The loader advertises "or drop one anywhere on the page"
     // and the page itself did nothing to show it: a bare dragover
