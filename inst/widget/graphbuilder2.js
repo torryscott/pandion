@@ -83034,7 +83034,6 @@
             pane.innerHTML =
                 '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
                   centerHtml +
-                  _lkSortSelectHtml() +
                   '<span style="flex-basis:100%;"></span>' +
                   '<span style="color:#666;">Legend</span>' +
                   '<button type="button" data-field="lk-leg-open" style="padding:3px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:white;cursor:pointer;">Legend options\u2026</button>' +
@@ -83052,7 +83051,6 @@
                     })(btns[i]);
                 }
             })();
-            _lkWireSortSelect(pane);
             (function () {
                 var ob = pane.querySelector('[data-field="lk-leg-open"]');
                 if (ob) ob.addEventListener("click", function (e) {
@@ -83205,7 +83203,7 @@
             ];
             // Order (reorder items) only with more than one item - dist gate.
             if (_lkOrderedItems().length > 1) {
-                _lkLvlTabs.push({ id: "order", label: "Custom order" });
+                _lkLvlTabs.push({ id: "order", label: "Order" });
             }
             _xyRenderTabbedPanel(body, {
                 title: "Response: " + _lkTitleSubj,
@@ -83455,10 +83453,25 @@
                 Array.isArray(data.likertItemOrder) ? data.likertItemOrder : []);
         }
         function _lkItemOrderTab(pane) {
+            // t4-172 round 2 (Torry): the sort select lives HERE, right
+            // above the reorder rows - one Order tab matching the bar and
+            // means panels; the Layout tab no longer hosts an ordering
+            // control.
             pane.innerHTML =
-                '<div style="font-size:10px;color:#666;padding:2px 4px 8px 4px;font-style:italic;">Drag a row or use the arrows to reorder the items (switches Sort to Custom).</div>' +
+                _lkSortSelectHtml() +
+                '<div style="height:7px;"></div>' +
+                '<div style="font-size:10px;color:#666;padding:2px 4px 8px 4px;font-style:italic;">Drag a row or use the arrows to reorder the items (switches Order to Custom).</div>' +
                 '<div data-field="lki-order" style="display:flex;flex-direction:column;gap:2px;align-items:stretch;"></div>';
+            _lkWireSortSelect(pane, function () { _lkItemOrderTab(pane); });
             var box = pane.querySelector('[data-field="lki-order"]');
+            // Rows list the DRAWN order (the chart's own sort computation,
+            // stashed per draw), so under Most-agree-first the list matches
+            // the picture; a move commits that visible order as the new
+            // custom baseline.
+            function _rowsOrder() {
+                var d = window.__gb2_lkDrawnOrder;
+                return (Array.isArray(d) && d.length) ? d.slice() : _lkOrderedItems();
+            }
             // Size every row label to the widest label so the arrows line
             // up in ONE column right after the longest question name --
             // instead of flex:1 stretching each label and pushing the
@@ -83540,12 +83553,12 @@
             // clicks (one slot) and multi-slot drags both route through here.
             function _moveLkOrder(fromIdx, toIdx) {
                 if (fromIdx === toIdx) return;
-                var arr0 = _lkOrderedItems();
+                var arr0 = _rowsOrder();
                 if (fromIdx < 0 || fromIdx >= arr0.length) return;
                 if (toIdx < 0 || toIdx >= arr0.length) return;
                 var oldChartRects = _lkOrderCaptureChartRows();
                 _animateReorder(box, "data-item", function () {
-                    var arr = _lkOrderedItems();
+                    var arr = _rowsOrder();
                     var item = arr.splice(fromIdx, 1)[0];
                     arr.splice(toIdx, 0, item);
                     data.likertItemOrder = arr.slice();
@@ -83559,7 +83572,7 @@
             }
             function rebuild() {
                 box.innerHTML = "";
-                var ordered = _lkOrderedItems();
+                var ordered = _rowsOrder();
                 ordered.forEach(function (v, i) {
                     var row = document.createElement("div");
                     row.style.cssText = "display:flex;align-items:center;gap:6px;padding:2px 4px;background:white;border-radius:3px;color:#333;";
@@ -83585,22 +83598,22 @@
                     if (i > 0) {
                         btnUp.addEventListener("click", function (e) {
                             e.preventDefault(); e.stopPropagation();
-                            var idx = _lkOrderedItems().indexOf(v);
+                            var idx = _rowsOrder().indexOf(v);
                             _moveLkOrder(idx, idx - 1);
                         });
                     }
                     if (i < ordered.length - 1) {
                         btnDown.addEventListener("click", function (e) {
                             e.preventDefault(); e.stopPropagation();
-                            var idx = _lkOrderedItems().indexOf(v);
+                            var idx = _rowsOrder().indexOf(v);
                             _moveLkOrder(idx, idx + 1);
                         });
                     }
                     // Drag the whole row (splice-and-insert, so a larger drag
                     // jumps multiple slots). Arrow buttons keep their clicks.
                     _attachReorderDrag(row,
-                        function () { return _lkOrderedItems().indexOf(v); },
-                        function () { return _lkOrderedItems().length; },
+                        function () { return _rowsOrder().indexOf(v); },
+                        function () { return _rowsOrder().length; },
                         _moveLkOrder);
                     box.appendChild(row);
                 });
@@ -83643,58 +83656,6 @@
                 redraw();
                 if (onAfter) { try { onAfter(); } catch (_e2) {} }
             });
-        }
-        // t4-172: the Order pane (sort select + per-item arrows) for
-        // the MEANS panel's Order tab - the means chart has no segments,
-        // so the Level panel's Layout tab cannot be opened there (the
-        // colleague's switch-types-to-reorder complaint). Named apart
-        // from _lkItemOrderTab, the Level panel's arrows-only tab.
-        function _lkOrderPane(pane, name) {
-            var order = (window.__gb2_lkDrawnOrder || []).slice();
-            var _mvBtn = 'style="padding:1px 6px;font-size:9px;border:1px solid #bbb;' +
-                'border-radius:3px;background:white;cursor:pointer;"';
-            var h = _lkSortSelectHtml() +
-                '<div style="height:7px;"></div>' +
-                '<div style="font-weight:600;color:#666;padding:2px 0 4px;font-size:10px;' +
-                'letter-spacing:0.06em;text-transform:uppercase;">Item order</div>' +
-                '<div data-field="lk-itemorder" style="display:flex;flex-direction:column;' +
-                'gap:2px;align-items:flex-start;">';
-            for (var i = 0; i < order.length; i++) {
-                h += '<div style="display:flex;align-items:center;gap:5px;">' +
-                    '<button type="button" data-lk-move="up" data-idx="' + i + '" ' +
-                    (i === 0 ? 'disabled ' : '') + _mvBtn + '>\u25B2</button>' +
-                    '<button type="button" data-lk-move="down" data-idx="' + i + '" ' +
-                    (i === order.length - 1 ? 'disabled ' : '') + _mvBtn + '>\u25BC</button>' +
-                    '<span style="font-size:11px;' +
-                    (order[i] === name ? 'font-weight:700;' : '') + '">' +
-                    _nmEsc(_lkDispItem(order[i])) + '</span></div>';
-            }
-            h += '</div><div style="color:#888;font-size:10px;margin-top:6px;">' +
-                'Dragging a row on the chart also reorders.</div>';
-            pane.innerHTML = h;
-            _lkWireSortSelect(pane, function () { _lkOrderPane(pane, name); });
-            var btns = pane.querySelectorAll('[data-lk-move]');
-            for (var bI = 0; bI < btns.length; bI++) {
-                (function (btn) {
-                    btn.addEventListener("click", function (e) {
-                        e.preventDefault();
-                        var idx = parseInt(btn.getAttribute("data-idx"), 10);
-                        var to = btn.getAttribute("data-lk-move") === "up" ? idx - 1 : idx + 1;
-                        var cur = (window.__gb2_lkDrawnOrder || []).slice();
-                        if (idx < 0 || idx >= cur.length || to < 0 || to >= cur.length) return;
-                        var it = cur.splice(idx, 1)[0];
-                        cur.splice(to, 0, it);
-                        data.likertItemOrder = cur;
-                        data.likertSort = "custom";
-                        if (hasSetOption) {
-                            try { _setOption("likertItemOrder", cur); } catch (_e1) {}
-                            try { _setOption("likertSort", "custom"); } catch (_e2) {}
-                        }
-                        redraw();
-                        _lkOrderPane(pane, name);
-                    });
-                })(btns[bI]);
-            }
         }
         function renderInspectorLikertItem(body, name) {
             _xyRenderTabbedPanel(body, {
@@ -83913,7 +83874,7 @@
                 onShowTab: function (tabId, pane) {
                     if (tabId === "outline") _lkMeansOutlineTab(pane);
                     else if (tabId === "errorbars") _lkMeansErrorTab(pane);
-                    else if (tabId === "order") _lkOrderPane(pane, null);
+                    else if (tabId === "order") _lkItemOrderTab(pane);
                     else _lkMeansMarkerTab(pane);
                     _distHistDockPicker(pane);
                 }
