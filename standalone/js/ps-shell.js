@@ -8362,8 +8362,14 @@
     // has actually cleared. Gated on styleAutoApply, so a chart that is
     // not eligible can still never be restyled twice.
     try {
-      if (built.payload && built.payload.styleAutoApply === true)
+      if (built.payload && built.payload.styleAutoApply === true) {
         window.__gb2_styleAutoApplyDone = false;
+        // The apply's commits arrive on the engine's debounce, well
+        // inside this window; a real user edit made this soon after a
+        // reset merely defers to the shell op in undo ordering, and
+        // stays undoable after it.
+        AUTO_APPLY_QUIET_UNTIL = Date.now() + 6000;
+      }
     } catch (e) {}
     try { window.setTimeout(maybeShowCoach, 260); } catch (e) {}
     // Punch list 27: the ResizeObserver only fires when the PANE changes, and
@@ -9382,7 +9388,8 @@
     // A genuine edit is the newest thing in the chart scope and, like any
     // new action after an undo, it invalidates the redo stack. Commits
     // replayed by the engine's own Undo are neither.
-    if (Date.now() >= ENGINE_REPLAY_UNTIL) {
+    if (Date.now() >= ENGINE_REPLAY_UNTIL &&
+        Date.now() >= AUTO_APPLY_QUIET_UNTIL) {
       CHART_USER_AT = Date.now();
       CHART_OPS_REDO.length = 0;
     }
@@ -13341,6 +13348,15 @@
   // through this same bridge, and counting those as fresh edits would
   // both skew recency and wipe the redo stack mid-undo.
   var CHART_USER_AT = 0, ENGINE_REPLAY_UNTIL = 0;
+  // t4-161: the default-style AUTO-APPLY's commits flush through this
+  // same bridge a beat after any render that re-arms it (reset, a new
+  // chart), and counting them as USER edits poisoned strict recency:
+  // Undo-after-reset concluded a user edit was newer than the reset op,
+  // routed to the ENGINE's undo, and stepped back exactly one engine
+  // step - Torry's purple bar came back transparent. Machine-generated
+  // commits must not stamp the user clock (the ENGINE_REPLAY_UNTIL
+  // principle); the window opens at the re-arm chokepoint below.
+  var AUTO_APPLY_QUIET_UNTIL = 0;
   function pushChartOp(label, undoFn, redoFn) {
     var entry = { label: label, at: Date.now(), undo: undoFn, redo: redoFn };
     CHART_OPS_UNDO.push(entry);

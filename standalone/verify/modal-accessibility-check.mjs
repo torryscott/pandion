@@ -209,6 +209,11 @@ ok(special.focused === 'ps-loader-close' && !special.hiddenImportRendered,
    'Load Data places focus on Close and leaves its conditional Import action out');
 await page.focus('#ps-sample');
 await page.keyboard.press('Tab');
+// t4-158 added the blank-sheet action after Use sample data; it is a
+// rendered control, so it belongs in the ring before the wrap.
+ok(await page.evaluate(() => document.activeElement.id) === 'ps-blank',
+   'the blank-sheet action joined the tab ring after Use sample data');
+await page.keyboard.press('Tab');
 ok(await page.evaluate(() => document.activeElement.id) === 'ps-loader-close',
    'Load Data wraps past its hidden conditional action');
 await page.keyboard.press('Escape');
