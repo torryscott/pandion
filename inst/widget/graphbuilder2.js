@@ -3586,23 +3586,57 @@
         // user pick always wins, and the auto follows type switches
         // (raincloud lies down, switching back stands the chart up).
         try {
+            // t4-170: UN-BAKE first. These folds mutate the payload, and
+            // a LOCAL re-render (the instant type switch) reuses a clone
+            // of the mutated payload - so a raincloud's baked
+            // horizontal/side/trim leaked into the next type for the
+            // ~1.5s until the echo (Torry: "starts out horizontal...
+            // switches back"). The window marker records what THE FOLD
+            // baked; a value is reset only when the marker owns it AND
+            // the spec blob does not state the key, so explicit picks
+            // are never touched. jamovi never fires the folds, so the
+            // markers stay false there by construction.
+            var _rabPrev = window.__gb2_rainAutoBaked || {};
+            var _rabStated = function (k) {
+                return _gb2SpecState
+                    && Object.prototype.hasOwnProperty.call(_gb2SpecState, k);
+            };
+            if (data) {
+                if (_rabPrev.orient && !_rabStated("chartOrientation")
+                    && data.chartOrientation === "horizontal")
+                    data.chartOrientation = "";
+                if (_rabPrev.side && !_rabStated("rainSide")
+                    && data.rainSide === "left")
+                    data.rainSide = "";
+                if (_rabPrev.trim && !_rabStated("violinTrim")
+                    && data.violinTrim === false)
+                    data.violinTrim = null;
+            }
+            var _rabNow = { orient: false, side: false, trim: false };
             if (data && data.graphType === "raincloud") {
                 if (data.chartOrientation !== "horizontal"
-                    && data.chartOrientation !== "vertical")
+                    && data.chartOrientation !== "vertical") {
                     data.chartOrientation = "horizontal";
+                    _rabNow.orient = true;
+                }
                 // t4-167: cloud ON TOP, rain below. Slot fractions run
                 // DOWN the screen in horizontal mode, so side "left"
                 // (toward slot start) is the upward bulge; the draw
                 // site's "right" fallback put the cloud on the bottom.
                 if (data.chartOrientation === "horizontal"
-                    && data.rainSide !== "left" && data.rainSide !== "right")
+                    && data.rainSide !== "left" && data.rainSide !== "right") {
                     data.rainSide = "left";
+                    _rabNow.side = true;
+                }
                 // t4-167: untrimmed tails by default - the cloud tapers
                 // off like weather instead of being cut at the observed
                 // min and max. Violin keeps its trimmed default.
-                if (typeof data.violinTrim !== "boolean")
+                if (typeof data.violinTrim !== "boolean") {
                     data.violinTrim = false;
+                    _rabNow.trim = true;
+                }
             }
+            window.__gb2_rainAutoBaked = _rabNow;
         } catch (_eOr) {}
 
         // Skip the rebuild entirely when the post-override `data` is
