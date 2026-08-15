@@ -33373,6 +33373,37 @@
                 return r / 233280 - 0.5;
             }
 
+            // Stacked (t4-169): symmetric centered columns, the
+            // Wilkinson dot-plot arrangement. Consecutive value-sorted
+            // points whose pixel gap is under a point diameter form a
+            // cluster; a cluster of k gets slots (i - (k-1)/2) * pitch,
+            // so pairs straddle the centerline at -r/+r. The pitch
+            // compresses when a big cluster would poke past the Spread
+            // cap. Values keep their true axis positions - only the
+            // perpendicular offset is arranged.
+            function computeStackedOffsets(values, ypxs, radius, maxOffset) {
+                var n = values.length;
+                var offsets = new Array(n);
+                var sorted = [];
+                for (var i = 0; i < n; i++) sorted.push({ y: ypxs[i], idx: i });
+                sorted.sort(function (a, b) { return a.y - b.y; });
+                var start = 0;
+                while (start < n) {
+                    var end = start;
+                    while (end + 1 < n &&
+                           Math.abs(sorted[end + 1].y - sorted[end].y) < 2 * radius)
+                        end++;
+                    var k = end - start + 1;
+                    var pitch = 2 * radius;
+                    if (k > 1 && pitch * (k - 1) / 2 > maxOffset)
+                        pitch = (2 * maxOffset) / (k - 1);
+                    for (var m = 0; m < k; m++)
+                        offsets[sorted[start + m].idx] = (m - (k - 1) / 2) * pitch;
+                    start = end + 1;
+                }
+                return offsets;
+            }
+
             function computeBeeswarmOffsets(values, ypxs, radius, maxOffset) {
                 var n = values.length;
                 var offsets = new Array(n);
@@ -33507,6 +33538,8 @@
                     }
                 } else if (method === "beeswarm") {
                     offsets = computeBeeswarmOffsets(values, ypxs, pointSize / 2 + 0.5, maxJitter);
+                } else if (method === "stacked") {
+                    offsets = computeStackedOffsets(values, ypxs, pointSize / 2 + 0.5, maxJitter);
                 } else {
                     offsets = new Array(n); for (var jj = 0; jj < n; jj++) offsets[jj] = 0;
                 }
@@ -88003,6 +88036,7 @@
                   '<option value="strip">Strip</option>' +
                   '<option value="jitter">Jitter</option>' +
                   '<option value="beeswarm">Beeswarm</option>' +
+                  '<option value="stacked">Stacked</option>' +
                   '<option value="none">None</option>' +
                 '</select>' +
                 '<div data-field="spread-row" style="display:inline-flex;align-items:center;gap:8px;margin-left:8px;">' +
@@ -88311,7 +88345,7 @@
             // in those modes so the control's irrelevance is visible.
             function _refreshSpreadEnabled() {
                 var m = iScatter.value;
-                var active = (m === "jitter" || m === "beeswarm");
+                var active = (m === "jitter" || m === "beeswarm" || m === "stacked");
                 iSpread.disabled = !active;
                 if (iSpreadLabel) iSpreadLabel.style.opacity = active ? "" : "0.5";
                 iSpreadVal.style.opacity = active ? "" : "0.5";
