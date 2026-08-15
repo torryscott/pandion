@@ -545,8 +545,12 @@ window.PSData = (function () {
       var isFactor = ty === "factor" || ty === "nominal" ||
                      ((ty === "ordinal" || ty === "id") && !numish);
       if (!isFactor) {
+        // ordHint: the user TYPED this numeric column Ordinal, so the
+        // engine may jitter it (capped inside a value's own step) even
+        // though no levels ship - without the hint the jitter slider was
+        // silently dead on numeric rating scales (Aug 2026).
         return { vals: col.map(function (v) { return isFiniteNum(v) ? v : NaN; }),
-                 levels: [] };
+                 levels: [], ordHint: ty === "ordinal" };
       }
       var lv = (table.levels && table.levels[colName]) || levelsOf(table, colName,
         col.map(function (_, k) { return k; }));
@@ -754,6 +758,8 @@ window.PSData = (function () {
       xyEllipses: xyEllipses,
       xyXLevels: xv.levels,
       xyYLevels: yv.levels,
+      xyXOrdinalHint: xv.ordHint === true,
+      xyYOrdinalHint: yv.ordHint === true,
       groupCategories: gLevels,
       hasGroups: hasGroup,
       xLabel: titleFrom(spec, "xTitleOverride", "xTitle", roles.xvar),
