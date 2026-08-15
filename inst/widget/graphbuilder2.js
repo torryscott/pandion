@@ -3577,6 +3577,21 @@
             }
         } catch (_eSA) {}
 
+        // t4-165 (Torry's ruling): a raincloud is CLASSICALLY horizontal
+        // - cloud above, rain falling below. When the HOST has not stated
+        // an orientation (key absent, or an "" auto sentinel), a
+        // raincloud resolves horizontal and every other type keeps the
+        // vertical fallback. jamovi's R side always states one
+        // explicitly today, so this is standalone-effective; an explicit
+        // user pick always wins, and the auto follows type switches
+        // (raincloud lies down, switching back stands the chart up).
+        try {
+            if (data && data.graphType === "raincloud"
+                && data.chartOrientation !== "horizontal"
+                && data.chartOrientation !== "vertical")
+                data.chartOrientation = "horizontal";
+        } catch (_eOr) {}
+
         // Skip the rebuild entirely when the post-override `data` is
         // byte-identical to what we just rendered. R round-trips for
         // persistence-only option commits (axis color, hide flags,

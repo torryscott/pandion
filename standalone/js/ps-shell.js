@@ -6403,6 +6403,16 @@
     }
     var opts = MODULES[mod].optsFrom(st, tpl.payload);
     opts.spec = parseSpec(typeof st.chartSpec === "string" ? st.chartSpec : tpl.payload.chartSpec);
+    // t4-165: the template's chartOrientation is widget.R boilerplate,
+    // not a user choice. When the user never picked one (neither the
+    // raw store nor the spec blob carries the key), ship the "" auto
+    // sentinel so the engine can resolve it per type - a raincloud
+    // lies down, everything else stays vertical. An explicit pick
+    // rides the blob and wins.
+    if (Object.prototype.hasOwnProperty.call(payload, "chartOrientation")
+        && !Object.prototype.hasOwnProperty.call(st, "chartOrientation")
+        && !Object.prototype.hasOwnProperty.call(opts.spec, "chartOrientation"))
+      payload.chartOrientation = "";
     var res = MODULES[mod].build(tableForPointVisibility(mod, rr), rr, opts);
     if (res.error) return { placeholder: res.error, fix: res.fix || null };
     // t3-60: what the BUILDER wrote, kept for the channel audit. Auditing the
