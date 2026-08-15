@@ -37916,30 +37916,52 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       // data deletions), and the app deliberately has no confirm() anywhere.
       var chart = activeChartTab();
       if (!chart) return;
+      // t4-157: drain the in-flight edit FIRST (closeChart's B12 rule).
+      // Engine commits debounce for a second or two, so without this,
+      // `prev` missed whatever was edited just before the click and
+      // Undo restored a state one edit OLDER than the one on screen -
+      // Torry's "didn't always go to the truly last saved state",
+      // timing-dependent, which is exactly why it was intermittent.
+      if (PS_FLUSH_PENDING_OPTS) PS_FLUSH_PENDING_OPTS();
       var mod = curModule();
       var prev = chart.options[mod];
       if (!prev || !Object.keys(prev).length) {
         showToast("This chart has no styling to reset");
         return;
       }
-      chart.options[mod] = {};
-      bumpSnapEpoch();
-      persist();
-      render();
+      // t4-157 (Torry): reset means "back to how a NEW chart starts",
+      // and with a default chart style set, a new chart starts WEARING
+      // it - not the bare palette. Re-arming the stamp lets the
+      // render's ordinary auto-apply dress the chart again; without a
+      // default, reset stays what it always was. Undo restores the
+      // exact prior stamp, absence included (an absent stamp marks an
+      // older document the auto-apply must never touch UNASKED - an
+      // explicit Reset is the asking).
+      var hadStamp = Object.prototype.hasOwnProperty.call(chart, "styleStamp");
+      var prevStamp = chart.styleStamp;
+      var restamp = !!styleDefaultIdResolved();
+      var applyReset = function () {
+        chart.options[mod] = {};
+        if (restamp) chart.styleStamp = false;
+        bumpSnapEpoch();
+        persist();
+        render();
+      };
+      var undoReset = function () {
+        chart.options[mod] = prev;
+        if (restamp) {
+          if (hadStamp) chart.styleStamp = prevStamp;
+          else delete chart.styleStamp;
+        }
+        bumpSnapEpoch();
+        persist();
+        render();
+      };
+      applyReset();
       // The toast is the offer in the moment; the history entry is what
       // answers the person who goes looking for Undo a minute later.
       // Both run the SAME entry, so taking one retires the other.
-      var resetOp = pushChartOp("the styling reset", function () {
-        chart.options[mod] = prev;
-        bumpSnapEpoch();
-        persist();
-        render();
-      }, function () {
-        chart.options[mod] = {};
-        bumpSnapEpoch();
-        persist();
-        render();
-      });
+      var resetOp = pushChartOp("the styling reset", undoReset, applyReset);
       showUndoToast("Chart styling reset", function () {
         runChartOp(resetOp, true);
       });
