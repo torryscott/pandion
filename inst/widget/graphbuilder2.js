@@ -49222,8 +49222,13 @@
             // choice visible instead of silently accepted.
             if (_bkTruncTypes[gt] === 1 && data.yMinOverride === true && typeof data.yMin === "number" && isFinite(data.yMin) && data.yMin > 0 && _bkBreakOn)
                 out.push({ id: "breakinfo", sev: "tip", title: "The value axis starts above zero (cut is disclosed)", why: "Your value axis starts at " + data.yMin + " with the axis break mark (//) on, so the cut is visible to readers - a legitimate display for this chart type. Just confirm the tighter window is the story you want to tell; set the minimum back to 0 in the axis panel to show the full scale.", fixGt: null });
-            if ((gt === "box" || gt === "violin" || gt === "raincloud") && minN !== null && minN < 10)
-                out.push({ id: "shapen", sev: "warn", title: "Very few points per group", why: "The smallest group has n = " + minN + ". Box and violin shapes imply a distribution that small samples cannot really support. A raincloud shows every raw point, which is more honest here.", fixGt: (gt !== "raincloud" && choiceHas("raincloud")) ? "raincloud" : null });
+            // Raincloud is EXEMPT from the fire (not the registry): it
+            // shows every raw point, which is this rule's own remedy -
+            // firing it there recommended the chart the user was already
+            // looking at (Torry's screenshot, Aug 14 2026). It stays in
+            // the registry's applies gate so the check shows as PASSED.
+            if ((gt === "box" || gt === "violin") && minN !== null && minN < 10)
+                out.push({ id: "shapen", sev: "warn", title: "Very few points per group", why: "The smallest group has n = " + minN + ". Box and violin shapes imply a distribution that small samples cannot really support. A raincloud shows every raw point, which is more honest here.", fixGt: choiceHas("raincloud") ? "raincloud" : null });
             else if (gt === "violin" && minN !== null && minN < 20)
                 out.push({ id: "violinn", sev: "tip", title: "Small samples for a violin", why: "Violins estimate a smooth distribution; with n = " + minN + " that estimate is shaky. A box plot or raincloud is steadier here.", fixGt: choiceHas("box") ? "box" : null });
             // Median charts draw no SE/SD/CI bars BY DESIGN (the median
@@ -49941,7 +49946,7 @@
                 // state to report - an untouched axis is not an
                 // achievement.
                 { id: "breakinfo", name: "Axis cut disclosed", tip: "An above-zero start with the break mark on is a fine, visible choice - this note just keeps it deliberate.", applies: false },
-                { id: "shapen", name: "Enough data for the shape", tip: "Box and violin shapes need a reasonable sample in every group (about n of 10 or more).", applies: (gt === "box" || gt === "violin" || gt === "raincloud") && minN !== null },
+                { id: "shapen", name: "Enough data for the shape", tip: "Box and violin shapes need a reasonable sample in every group (about n of 10 or more); a raincloud is exempt because it shows every raw point.", applies: (gt === "box" || gt === "violin" || gt === "raincloud") && minN !== null },
                 { id: "violinn", name: "Violin sample size", tip: "A violin's smooth outline is trustworthy from about n = 20 per group.", applies: gt === "violin" && minN !== null && minN >= 10 },
                 { id: "errbars", name: "Uncertainty shown", tip: "Summary charts should show error bars (SE, SD, or a CI) so precision is visible. Not applicable to a median summary, which draws no error bars by design.", applies: isBarType && (_mk === "cg" || _mk === "rm") && bars.length > 0 && data.summaryFunc !== "median" },
                 { id: "unequaln", name: "Comparable group sizes", tip: "Cells with very different ns should not look interchangeable; show or report the ns.", applies: _unApp },
