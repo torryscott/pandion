@@ -13408,6 +13408,34 @@
     if (t.kind === "op") return runChartOp(t.op, back);
     return runEngineHistory(back);
   }
+  // t4-164 (Torry: "I'm still having an issue... the undo button"):
+  // the ENGINE's own toolbar undo/redo is the FOURTH undo surface, and
+  // the only one that bypassed chartUndoTarget - it stepped the engine
+  // stack directly, so undo-after-reset skipped the reset op and pulled
+  // back one engine step (the t4-161 symptom through a different door).
+  // A document-CAPTURE listener beats the button's own handler: when a
+  // shell op is next, the op runs instead; when the engine is genuinely
+  // next, the click passes through WITH the replay window marked -
+  // toolbar-driven engine undos never marked it, so their replayed
+  // commits stamped the user clock (the same poison, latent).
+  // runEngineHistory's own programmatic click resolves to the engine by
+  // construction and passes through harmlessly.
+  document.addEventListener("click", function (e) {
+    var t = e.target && e.target.closest ? e.target.closest(
+      '.graphbuilder2-host button[aria-label="Undo"], ' +
+      '.graphbuilder2-host button[aria-label="Redo"]') : null;
+    if (!t) return;
+    if (undoScope() !== "chart") return;
+    var back = t.getAttribute("aria-label") === "Undo";
+    var target = chartUndoTarget(back);
+    if (target && target.kind === "op") {
+      e.preventDefault();
+      e.stopPropagation();
+      runChartOp(target.op, back);
+    } else if (target) {
+      ENGINE_REPLAY_UNTIL = Date.now() + 1500;
+    }
+  }, true);
   // t4-154: the session's closed documents, for File > Reopen closed
   // document. Undo is destructive recovery - reaching an old delete
   // unwinds every newer edit first - so the list is the selective way
@@ -15983,6 +16011,10 @@
           e.preventDefault();
           e.stopPropagation();
           chartHistoryGo(true);
+        } else if (ut) {
+          // The engine's handler takes the chord; its replayed commits
+          // are machine acts, not user edits (the t4-164 toolbar rule).
+          ENGINE_REPLAY_UNTIL = Date.now() + 1500;
         }
         return;   // else the engine's document-capture handler takes it
       }
@@ -15999,6 +16031,7 @@
         chartHistoryGo(false);
         return;
       }
+      if (rt) ENGINE_REPLAY_UNTIL = Date.now() + 1500;
       if (k === "y") {
         e.preventDefault();
         var rb = document.querySelector(
