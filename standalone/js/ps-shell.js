@@ -10330,8 +10330,61 @@
       if (START_THUMBS[i][0].test(text)) return graphThumb(START_THUMBS[i][1]);
     return "";
   }
-  function startChip(label, mod) {
-    var chip = mkEl("span", "");
+  // t4-171: which option commit starts a chart on the chip's type.
+  // Labels are prose ("Line for naturally ordered groups"), so the
+  // resolution is regex-first like startThumb; null = the module's
+  // default start (Scatter plot, Box / Violin's ambiguous pair).
+  function hmcStartValue(label, mod) {
+    var text = String(label || "");
+    if (mod === "xyplotbuilder")
+      return /^heatmap/i.test(text) ? { key: "xyBin", value: "square" } : null;
+    if (mod === "corrplotbuilder") {
+      if (/^heatmap/i.test(text)) return { key: "graphType", value: "corrheatmap" };
+      if (/^circles/i.test(text)) return { key: "graphType", value: "corrcircles" };
+      if (/^numbers/i.test(text)) return { key: "graphType", value: "corrnumbers" };
+      if (/^mixed/i.test(text)) return { key: "graphType", value: "corrmixed" };
+      return null;
+    }
+    if (mod === "likertplotbuilder") {
+      if (/^diverging/i.test(text)) return { key: "graphType", value: "likertdiverging" };
+      if (/^100%/i.test(text)) return { key: "graphType", value: "likertstacked" };
+      if (/^item means/i.test(text)) return { key: "graphType", value: "likertmeans" };
+      return null;
+    }
+    if (mod === "freqplotbuilder") {
+      if (/^pie/i.test(text)) return { key: "graphType", value: "pie" };
+      if (/^pareto/i.test(text)) return { key: "graphType", value: "pareto" };
+      if (/^bar/i.test(text)) return { key: "graphType", value: "bar" };
+      return null;
+    }
+    if (mod === "distplotbuilder") {
+      if (/^histogram/i.test(text)) return { key: "graphType", value: "histogram" };
+      if (/^density/i.test(text)) return { key: "graphType", value: "density" };
+      if (/^q-?q/i.test(text)) return { key: "graphType", value: "qq" };
+      if (/^ecdf/i.test(text)) return { key: "graphType", value: "ecdf" };
+      if (/^box/i.test(text)) return { key: "graphType", value: "box" };
+      return null;
+    }
+    // Compare Groups / Repeated Measures share the categorical family.
+    var fam = ["raincloud", "violin", "box", "line", "dot", "bar"];
+    for (var i = 0; i < fam.length; i++)
+      if (new RegExp("^" + fam[i], "i").test(text))
+        return { key: "graphType", value: fam[i] };
+    return null;
+  }
+  // t4-171 (Torry): the chip is a DOOR, not a caption - clicking Bar /
+  // Dot / Line creates the recommended chart on that type. onPick
+  // absent keeps the old inert chip (nothing renders that way today,
+  // but the fallback keeps the builder honest).
+  function startChip(label, mod, onPick) {
+    var chip = mkEl(onPick ? "button" : "span",
+      onPick ? "ps-hmc-chip-btn" : "");
+    if (onPick) {
+      chip.type = "button";
+      chip.setAttribute("data-hmc-start", String(label));
+      setTip(chip, "Create this chart as a " + String(label).toLowerCase());
+      chip.addEventListener("click", function () { onPick(label); });
+    }
     var art = startThumb(label, mod);
     if (art) {
       var box = mkEl("span", "ps-hmc-chip-art");
@@ -16949,13 +17002,28 @@
     }
     return {};
   }
-  function hmcOpenRecommendation(result, summary, recommendation) {
+  function hmcOpenRecommendation(result, summary, recommendation, startLabel) {
     hideHelpMeChoose();
     addChart(result.module);
+    var chart = activeChart();
+    var dirty = false;
     if (summary && summary.vars && summary.vars.length) {
-      var chart = activeChart();
       chart.roles[result.module] =
         hmcRolesForRecommendation(result.module, summary, recommendation);
+      dirty = true;
+    }
+    // t4-171: a chip click starts ON that graph type. graphType (and
+    // scatter's xyBin) are real options; the store write is what a
+    // toolbar switch would have committed.
+    var startType = startLabel
+      ? hmcStartValue(startLabel, result.module) : null;
+    if (startType) {
+      var opts = chart.options[result.module] =
+        chart.options[result.module] || {};
+      opts[startType.key] = startType.value;
+      dirty = true;
+    }
+    if (dirty) {
       validateRoles();
       persist();
       syncAll();
@@ -17079,7 +17147,9 @@
       "Good starting chart types"));
     var types = mkEl("div", "ps-hmc-chart-types");
     result.starts.forEach(function (start) {
-      types.appendChild(startChip(start, result.module));
+      types.appendChild(startChip(start, result.module, function (label) {
+        hmcOpenRecommendation(result, summary, recommendation, label);
+      }));
     });
     content.appendChild(types);
     if (hmcRecordsByKind(summary, "cat").length >= 2) {
@@ -17307,7 +17377,8 @@
       "Good starting chart types"));
     var types = mkEl("div", "ps-hmc-chart-types");
     for (var si = 0; si < result.starts.length; si++)
-      types.appendChild(startChip(result.starts[si], result.module));
+      types.appendChild(startChip(result.starts[si], result.module,
+        function (label) { hmcOpenRecommendation(result, null, null, label); }));
     resultBody.appendChild(types);
     resultBody.appendChild(mkEl("p", "ps-hmc-requirement",
       moduleRequirementText(result.module) +

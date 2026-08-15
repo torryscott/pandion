@@ -3440,6 +3440,20 @@
     border-radius: var(--ps-r-md); font-size: 10px; font-weight: 650;
   }
   .ps-hmc-chart-types span span { padding: 0; border: 0; background: none; }
+  /* t4-171: the chips are DOORS now - clicking Bar / Dot / Line creates
+     the recommended chart on that type, so they wear the chip look with
+     a button's affordances. */
+  .ps-hmc-chip-btn {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 9px 4px 5px; color: var(--ps-accent-ink);
+    background: var(--ps-s0); border: 1px solid var(--ps-tint-line-1);
+    border-radius: var(--ps-r-md); font-size: 10px; font-weight: 650;
+    font-family: inherit; cursor: pointer;
+  }
+  .ps-hmc-chip-btn:hover, .ps-hmc-chip-btn:focus-visible {
+    border-color: var(--ps-accent, #3573bd); background: var(--ps-s2);
+  }
+  .ps-hmc-chip-btn span { padding: 0; border: 0; background: none; }
   .ps-hmc-chip-art {
     display: inline-flex; width: 30px; height: 21px; flex: 0 0 auto;
     align-items: center; justify-content: center;
