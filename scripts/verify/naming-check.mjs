@@ -229,7 +229,9 @@ await withPage('freq_bar_stack', async page => {
 await withPage('likert_div', async page => {
     await clickFirst(page, '[data-role="likert-seg"]');
     const t = await tabs(page);
-    ok('Likert tabs distinguish fill/display/order', t.includes('Fill') && t.includes('Display') && t.includes('Custom order'), JSON.stringify(t));
+    // t4-172 round 2 (Torry): the reorder tab is plain "Order" - "Custom
+    // order" was the odd one out next to the bar and means panels.
+    ok('Likert tabs distinguish fill/display/order', t.includes('Fill') && t.includes('Display') && t.includes('Order') && !t.includes('Custom order'), JSON.stringify(t));
 });
 
 await withPage('corr_heat', async page => {

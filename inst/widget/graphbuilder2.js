@@ -35851,12 +35851,43 @@
                 //     within the level's slot.
                 var _jChartW = Math.max(chartRight - chartLeft, 1);
                 var _jChartH = Math.max(chartBottom - chartTop, 1);
+                // Host-declared ordinal NUMERIC axes (Aug 2026): the
+                // standalone types a 1-5 rating Ordinal but plots its
+                // true values, so no levels ship and the caps above saw
+                // a continuous axis - the slider was silently dead on
+                // exactly the charts jitter exists for. The additive
+                // xyX/YOrdinalHint keys carry the user's own typing
+                // (jamovi never ships them; ordinal there is a factor,
+                // so levels already flow). Cap = 40% of the smallest gap
+                // between adjacent distinct values, so a point can never
+                // reach a neighboring value. Continuous-typed axes stay
+                // refused.
+                var _jOrdHX = data.xyXOrdinalHint === true && _jOrdXN === 0;
+                var _jOrdHY = data.xyYOrdinalHint === true && _jOrdYN === 0;
+                function _jMinGapPx(axisY) {
+                    var pts = Array.isArray(data.xyPoints) ? data.xyPoints : [];
+                    var seen = {}, vs = [], i, v, k;
+                    for (i = 0; i < pts.length; i++) {
+                        v = axisY ? pts[i].y : pts[i].x;
+                        if (typeof v === "number" && isFinite(v)) {
+                            k = String(v);
+                            if (!seen[k]) { seen[k] = 1; vs.push(v); if (vs.length > 60) break; }
+                        }
+                    }
+                    if (vs.length < 2) return 0;
+                    vs.sort(function (a, b) { return a - b; });
+                    var g = Infinity, j, d;
+                    for (j = 1; j < vs.length; j++) { d = vs[j] - vs[j - 1]; if (d > 0 && d < g) g = d; }
+                    if (!isFinite(g)) return 0;
+                    return axisY ? Math.abs(toPxY(vs[0] + g) - toPxY(vs[0]))
+                                 : Math.abs(toPxX(vs[0] + g) - toPxX(vs[0]));
+                }
                 var _jMaxPxX = _jOrdXN > 0
                     ? _jMag * 0.4 * (_jChartW / _jOrdXN)
-                    : 0;
+                    : (_jOrdHX && _jMag > 0 ? _jMag * 0.4 * _jMinGapPx(false) : 0);
                 var _jMaxPxY = _jOrdYN > 0
                     ? _jMag * 0.4 * (_jChartH / _jOrdYN)
-                    : 0;
+                    : (_jOrdHY && _jMag > 0 ? _jMag * 0.4 * _jMinGapPx(true) : 0);
                 // Shared per-point tooltip text builder (slow-path
                 // delegated hover + large-N fast layer). Honors
                 // ordinal axes and shows group / facet rows only
@@ -49432,6 +49463,46 @@
             if (gt === "scatter" && (!data.xyBin || data.xyBin === "none")) {
                 var npts = Array.isArray(data.xyPoints) ? data.xyPoints.length : q('[data-role="xy-point"]').length;
                 if (npts > 500) out.push({ id: "overplot", sev: "tip", title: "Points are overlapping", why: "With " + npts + " points, dots pile on top of each other and hide where the data are densest. A heatmap (2-D bins) or a lower point opacity shows the density better.", fixGt: choiceVal("heatmap") });
+                // --- Exact-overlap duplicates (the 9-of-24 case, Aug 2026).
+                // Coarse data stack points invisibly at shared positions, so
+                // the drawn chart underreports the data. Distinct from the
+                // density rule above (npts > 500 owns that); the remedy copy
+                // is type-aware: ordinal axes have the honest Jitter slider,
+                // a rating scale TYPED continuous is pointed at the measure
+                // type (jitter on continuous stays refused - it would draw
+                // values that were never measured), and true duplicates get
+                // opacity / heatmap.
+                if (npts >= 8 && npts <= 500 && Array.isArray(data.xyPoints)) {
+                    var _dpSeen = {}, _dpPos = 0, _dpXV = {}, _dpYV = {}, _dpXN = 0, _dpYN = 0;
+                    for (var _dpi = 0; _dpi < data.xyPoints.length; _dpi++) {
+                        var _dpP = data.xyPoints[_dpi] || {};
+                        var _dpK = String(_dpP.x) + "\u001F" + String(_dpP.y) + "\u001F" + String(_dpP.facet || "");
+                        if (!_dpSeen[_dpK]) { _dpSeen[_dpK] = 1; _dpPos++; }
+                        if (typeof _dpP.x === "number" && isFinite(_dpP.x)) { var _dpKx = String(_dpP.x); if (!_dpXV[_dpKx]) { _dpXV[_dpKx] = 1; _dpXN++; } }
+                        if (typeof _dpP.y === "number" && isFinite(_dpP.y)) { var _dpKy = String(_dpP.y); if (!_dpYV[_dpKy]) { _dpYV[_dpKy] = 1; _dpYN++; } }
+                    }
+                    var _dpDup = npts - _dpPos;
+                    if (_dpDup > 0 && _dpDup / npts >= 0.2) {
+                        var _dpOrdX = (Array.isArray(data.xyXLevels) && data.xyXLevels.length > 0) || data.xyXOrdinalHint === true;
+                        var _dpOrdY = (Array.isArray(data.xyYLevels) && data.xyYLevels.length > 0) || data.xyYOrdinalHint === true;
+                        var _dpHead = npts + " observations draw at only " + _dpPos + " spots, so stacked points read as one and the plot understates how much data sits there. ";
+                        var _dpSev = (_dpDup / npts >= 0.3) ? "warn" : "tip";
+                        if (_dpOrdX || _dpOrdY) {
+                            out.push({ id: "xydupes", sev: _dpSev, title: "Points sit exactly on top of each other", why: _dpHead + "This chart has " + ((_dpOrdX && _dpOrdY) ? "ordinal axes" : "an ordinal axis") + ", so Jitter can spread the stacks honestly: click any point and raise Jitter in the Points tab. Points shift only within their own step, never onto a neighboring value. Lowering point opacity also helps (stacks read darker).", fixGt: null });
+                        } else {
+                            var _dpXNm = (typeof data.xLabelDefault === "string" && data.xLabelDefault.length) ? data.xLabelDefault : ((typeof data.xLabel === "string" && data.xLabel.length) ? data.xLabel : "X");
+                            var _dpYNm = (typeof data.yLabelDefault === "string" && data.yLabelDefault.length) ? data.yLabelDefault : ((typeof data.yLabel === "string" && data.yLabel.length) ? data.yLabel : "Y");
+                            var _dpLat = [];
+                            if (_dpXN > 0 && _dpXN <= 12) _dpLat.push(_dpXNm);
+                            if (_dpYN > 0 && _dpYN <= 12) _dpLat.push(_dpYNm);
+                            if (_dpLat.length) {
+                                out.push({ id: "xydupes", sev: _dpSev, title: "Points sit exactly on top of each other", why: _dpHead + "The values of " + _dpLat.join(" and ") + " step through a small set of numbers, like a rating scale, but the measure type is continuous, so jitter is not offered (moving a continuous point would draw a value that was never measured). If these really are ratings, set the measure type to Ordinal and the Jitter control appears (click any point, Points tab). Or lower point opacity so stacks darken, or switch to Heatmap.", fixGt: choiceVal("heatmap") });
+                            } else {
+                                out.push({ id: "xydupes", sev: _dpSev, title: "Points sit exactly on top of each other", why: _dpHead + "Duplicate observations land on exactly the same spot and read as one point. Lower point opacity so stacks darken, or switch to Heatmap to show counts.", fixGt: choiceVal("heatmap") });
+                            }
+                        }
+                    }
+                }
             }
             // --- Small-sample cautions for the smoothed one-variable views ---
             if (gt === "qq" && minN !== null && minN < 20)
@@ -50075,6 +50146,7 @@
                 { id: "facetn", name: "Enough data per panel", tip: "Panels split the data; every panel needs enough observations to show more than noise.", applies: _nPanels >= 2 && _loPanel !== null && _loPanel > 0 },
                 { id: "facetfreey", name: "Free Y scales disclosed", tip: "When panels use independent Y ranges, equal heights stop meaning equal values; the figure note should say so.", applies: data.facetFreeY === true && _nPanels >= 2 },
                 { id: "overplot", name: "Overplotting", tip: "With very many points, dots pile up and hide where the data are densest.", applies: gt === "scatter" && !_hmOn },
+                { id: "xydupes", name: "Each observation visible", tip: "Points sharing an exact position stack invisibly; jitter (ordinal axes), point opacity, or a heatmap shows how many observations sit there.", applies: gt === "scatter" && !_hmOn },
                 { id: "fitfew", name: "Enough points for a fit line", tip: "A regression line on fewer than about 10 points is fragile.", applies: _ffApp },
                 { id: "logscale", name: "Log axis flagged", tip: "A logarithmic axis should be named in the axis title or the caption.", applies: _lgApp },
                 { id: "qqn", name: "Sample size for a Q-Q plot", tip: "With few points, wander off the line is expected even for truly normal data.", applies: gt === "qq" && minN !== null },
