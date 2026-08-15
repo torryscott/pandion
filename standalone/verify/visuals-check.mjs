@@ -161,7 +161,9 @@ const wiz = await page.evaluate(async () => {
         b.click();
         await sleep(350);
     }
-    const chips = Array.from(document.querySelectorAll('.ps-hmc-chart-types > span'));
+    // t4-171 made the chips clickable doors (buttons), so match both.
+    const chips = Array.from(document.querySelectorAll(
+        '.ps-hmc-chart-types > span, .ps-hmc-chart-types > button'));
     return { chips: chips.length,
              art: chips.filter(c => c.querySelector('.ps-hmc-chip-art svg')).length,
              labels: chips.map(c => c.textContent.trim()),

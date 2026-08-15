@@ -42353,10 +42353,28 @@
                     ordered.sort(function (a, b) {
                         return sortMode === "desc" ? netOf(b) - netOf(a) : netOf(a) - netOf(b);
                     });
+                } else if (sortMode === "meandesc" || sortMode === "meanasc") {
+                    // t4-172 (the colleague's ordered-by-mean display):
+                    // reflected means via _lkMeanOf, so reverse-scored
+                    // items rank by their displayed values.
+                    var _mSortOf = function (it) {
+                        var m = _lkMeanOf(it);
+                        return (m && typeof m.mean === "number" && isFinite(m.mean))
+                            ? m.mean : -Infinity;
+                    };
+                    ordered.sort(function (a, b) {
+                        return sortMode === "meandesc"
+                            ? _mSortOf(b) - _mSortOf(a)
+                            : _mSortOf(a) - _mSortOf(b);
+                    });
                 } else if (sortMode === "custom") {
                     ordered = _applyUserOrder(ordered,
                         Array.isArray(data.likertItemOrder) ? data.likertItemOrder : []);
                 }
+                // The DRAWN order (hidden items included), for the item
+                // panel's Order tab - derived from the same computation
+                // the chart uses, so the two can never disagree.
+                try { window.__gb2_lkDrawnOrder = ordered.slice(); } catch (_eDo) {}
                 var items = [];
                 for (var ii0 = 0; ii0 < ordered.length; ii0++) {
                     if (!_isElementHidden("likertItem:" + ordered[ii0])) items.push(ordered[ii0]);
@@ -60789,7 +60807,22 @@
                 '</div>';
         }
         function _buildOrderPaneHtml(_showFn, _hasGroups) {
+            // t4-172: value ordering returns after its noise removal, as
+            // ONE quiet select with DERIVED state (no extra buttons):
+            // "Keep this order" reflects any manual arrangement. RM keeps
+            // occasion order and pareto IS its rank, so neither offers it.
+            var _catSortable = !data.isRepeatedMeasures
+                && data.graphType !== "pareto" && xCats.length > 1;
             return '<div data-tab-pane="order" style="' + _showFn("order") + '">' +
+                (_catSortable
+                    ? '<div data-field="cat-sortrow" style="display:flex;align-items:center;gap:7px;padding:0 4px 7px;">' +
+                        '<span style="font:700 9px var(--gb2-ui-font);letter-spacing:.1em;text-transform:uppercase;color:#5b6872;">Order</span>' +
+                        '<select data-field="cat-sortsel" style="padding:3px 6px;font-size:11px;border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);">' +
+                          '<option value="custom">Keep this order</option>' +
+                          '<option value="asc">Lowest value first</option>' +
+                          '<option value="desc">Highest value first</option>' +
+                        '</select></div>'
+                    : '') +
                 '<div style="font-weight:600;color:#666;padding:2px 4px 4px 4px;font-size:10px;letter-spacing:0.06em;text-transform:uppercase;">Category order</div>' +
                 '<div data-field="cat-order" style="display:flex;flex-direction:column;gap:2px;align-items:flex-start;"></div>' +
                 (_hasGroups ?
@@ -60933,10 +60966,77 @@
                     }
                     redraw();
                     _paintCatOrder();
+                    try { _syncCatSortSel(); } catch (_eSy) {}
                 });
                 _playBarFlip(oldBarRects);
             }
             _paintCatOrder();
+            // ---- t4-172: the value-order select (derived state) ----
+            var iCatSortSel = body.querySelector('[data-field="cat-sortsel"]');
+            function _catValKey(cat) {
+                var tot = 0, n = 0;
+                var bs = Array.isArray(data.bars) ? data.bars : [];
+                for (var i = 0; i < bs.length; i++) {
+                    var b = bs[i];
+                    if (!b || String(b.x) !== String(cat)) continue;
+                    if (data.freqMode === true) {
+                        tot += (typeof b._freqRawCount === "number") ? b._freqRawCount
+                             : ((typeof b.mean === "number") ? b.mean : 0);
+                        n = 1;
+                    } else if (typeof b.mean === "number" && isFinite(b.mean)) {
+                        tot += b.mean; n++;
+                    }
+                }
+                return n ? (data.freqMode === true ? tot : tot / n) : -Infinity;
+            }
+            function _catSortedOrder(dir) {
+                // Facet blocks keep their panel positions; categories
+                // sort WITHIN each panel by that panel's own values.
+                var blocks = [], byFacet = {};
+                for (var i = 0; i < xCats.length; i++) {
+                    var f = _facetOf(xCats[i]);
+                    if (!byFacet[f]) { byFacet[f] = []; blocks.push(f); }
+                    byFacet[f].push(xCats[i]);
+                }
+                var out = [];
+                for (var bI = 0; bI < blocks.length; bI++) {
+                    var arr = byFacet[blocks[bI]].slice();
+                    arr.sort(function (a, b) {
+                        return dir === "asc" ? _catValKey(a) - _catValKey(b)
+                                             : _catValKey(b) - _catValKey(a);
+                    });
+                    out = out.concat(arr);
+                }
+                return out;
+            }
+            function _syncCatSortSel() {
+                if (!iCatSortSel) return;
+                var cur = xCats.join("\u001F");
+                iCatSortSel.value =
+                    cur === _catSortedOrder("asc").join("\u001F") ? "asc"
+                  : cur === _catSortedOrder("desc").join("\u001F") ? "desc"
+                  : "custom";
+            }
+            if (iCatSortSel) {
+                _syncCatSortSel();
+                iCatSortSel.addEventListener("change", function () {
+                    var dir = iCatSortSel.value;
+                    if (dir !== "asc" && dir !== "desc") { _syncCatSortSel(); return; }
+                    var next = _catSortedOrder(dir);
+                    if (next.join("\u001F") === xCats.join("\u001F")) return;
+                    var oldBarRects = _captureBarRects();
+                    xCats.length = 0;
+                    Array.prototype.push.apply(xCats, next);
+                    _syncFacetBucketsFromXCats();
+                    data.categoryOrder = xCats.slice();
+                    if (hasSetOption) {
+                        try { _setOption("categoryOrder", data.categoryOrder); } catch (_e) {}
+                    }
+                    redraw();
+                    _paintCatOrder();
+                    _playBarFlip(oldBarRects);
+                });
+            }
 
             // ---- Group order rows (only when hasGroups) ----------
             // Same UX as Category order. Reordering a group reorders
@@ -82934,11 +83034,7 @@
             pane.innerHTML =
                 '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
                   centerHtml +
-                  '<span style="color:#666;">Sort items</span>' +
-                  _distSegHtml("lk-sort", "original", "Original", sortCur) +
-                  _distSegHtml("lk-sort", "desc", "Most agree", sortCur) +
-                  _distSegHtml("lk-sort", "asc", "Least agree", sortCur) +
-                  ((sortCur === "custom") ? _distSegHtml("lk-sort", "custom", "Custom", sortCur) : "") +
+                  _lkSortSelectHtml() +
                   '<span style="flex-basis:100%;"></span>' +
                   '<span style="color:#666;">Legend</span>' +
                   '<button type="button" data-field="lk-leg-open" style="padding:3px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:white;cursor:pointer;">Legend options\u2026</button>' +
@@ -82956,7 +83052,7 @@
                     })(btns[i]);
                 }
             })();
-            _distWireSeg(pane, "lk-sort", "likertSort");
+            _lkWireSortSelect(pane);
             (function () {
                 var ob = pane.querySelector('[data-field="lk-leg-open"]');
                 if (ob) ob.addEventListener("click", function (e) {
@@ -83512,6 +83608,94 @@
             }
             rebuild();
         }
+        // t4-172: ONE quiet Order control for the likert surfaces - a
+        // micro-label + select, no seg clusters (the taste bar Torry set
+        // after the old sort buttons were removed as noise). "Custom"
+        // appears only while a dragged/manual order is active.
+        function _lkSortSelectHtml() {
+            var cur = (typeof data.likertSort === "string") ? data.likertSort : "original";
+            var opts = [["original", "Original order"],
+                        ["desc", "Most agree first"],
+                        ["asc", "Least agree first"],
+                        ["meandesc", "Highest mean first"],
+                        ["meanasc", "Lowest mean first"]];
+            var h = '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;">' +
+                '<span style="font:700 9px var(--gb2-ui-font);letter-spacing:.1em;' +
+                'text-transform:uppercase;color:#5b6872;">Order</span>' +
+                '<select data-field="lk-sortsel" style="padding:3px 6px;font-size:11px;' +
+                'border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);">';
+            for (var i = 0; i < opts.length; i++)
+                h += '<option value="' + opts[i][0] + '"' +
+                    (cur === opts[i][0] ? ' selected' : '') + '>' + opts[i][1] + '</option>';
+            if (cur === "custom")
+                h += '<option value="custom" selected>Custom (as arranged)</option>';
+            h += '</select></div>';
+            return h;
+        }
+        function _lkWireSortSelect(pane, onAfter) {
+            var sel = pane.querySelector('[data-field="lk-sortsel"]');
+            if (!sel) return;
+            sel.addEventListener("change", function () {
+                var v = sel.value;
+                if (v === "custom") return;
+                data.likertSort = v;
+                if (hasSetOption) { try { _setOption("likertSort", v); } catch (_e) {} }
+                redraw();
+                if (onAfter) { try { onAfter(); } catch (_e2) {} }
+            });
+        }
+        // t4-172: the Order pane (sort select + per-item arrows) for
+        // the MEANS panel's Order tab - the means chart has no segments,
+        // so the Level panel's Layout tab cannot be opened there (the
+        // colleague's switch-types-to-reorder complaint). Named apart
+        // from _lkItemOrderTab, the Level panel's arrows-only tab.
+        function _lkOrderPane(pane, name) {
+            var order = (window.__gb2_lkDrawnOrder || []).slice();
+            var _mvBtn = 'style="padding:1px 6px;font-size:9px;border:1px solid #bbb;' +
+                'border-radius:3px;background:white;cursor:pointer;"';
+            var h = _lkSortSelectHtml() +
+                '<div style="height:7px;"></div>' +
+                '<div style="font-weight:600;color:#666;padding:2px 0 4px;font-size:10px;' +
+                'letter-spacing:0.06em;text-transform:uppercase;">Item order</div>' +
+                '<div data-field="lk-itemorder" style="display:flex;flex-direction:column;' +
+                'gap:2px;align-items:flex-start;">';
+            for (var i = 0; i < order.length; i++) {
+                h += '<div style="display:flex;align-items:center;gap:5px;">' +
+                    '<button type="button" data-lk-move="up" data-idx="' + i + '" ' +
+                    (i === 0 ? 'disabled ' : '') + _mvBtn + '>\u25B2</button>' +
+                    '<button type="button" data-lk-move="down" data-idx="' + i + '" ' +
+                    (i === order.length - 1 ? 'disabled ' : '') + _mvBtn + '>\u25BC</button>' +
+                    '<span style="font-size:11px;' +
+                    (order[i] === name ? 'font-weight:700;' : '') + '">' +
+                    _nmEsc(_lkDispItem(order[i])) + '</span></div>';
+            }
+            h += '</div><div style="color:#888;font-size:10px;margin-top:6px;">' +
+                'Dragging a row on the chart also reorders.</div>';
+            pane.innerHTML = h;
+            _lkWireSortSelect(pane, function () { _lkOrderPane(pane, name); });
+            var btns = pane.querySelectorAll('[data-lk-move]');
+            for (var bI = 0; bI < btns.length; bI++) {
+                (function (btn) {
+                    btn.addEventListener("click", function (e) {
+                        e.preventDefault();
+                        var idx = parseInt(btn.getAttribute("data-idx"), 10);
+                        var to = btn.getAttribute("data-lk-move") === "up" ? idx - 1 : idx + 1;
+                        var cur = (window.__gb2_lkDrawnOrder || []).slice();
+                        if (idx < 0 || idx >= cur.length || to < 0 || to >= cur.length) return;
+                        var it = cur.splice(idx, 1)[0];
+                        cur.splice(to, 0, it);
+                        data.likertItemOrder = cur;
+                        data.likertSort = "custom";
+                        if (hasSetOption) {
+                            try { _setOption("likertItemOrder", cur); } catch (_e1) {}
+                            try { _setOption("likertSort", "custom"); } catch (_e2) {}
+                        }
+                        redraw();
+                        _lkOrderPane(pane, name);
+                    });
+                })(btns[bI]);
+            }
+        }
         function renderInspectorLikertItem(body, name) {
             _xyRenderTabbedPanel(body, {
                 title: "Item",
@@ -83711,16 +83895,25 @@
         function renderInspectorLikertMeans(body) {
             _xyRenderTabbedPanel(body, {
                 title: "Item means",
-                tabs: [
-                    { id: "marker", label: "Dots" },
-                    { id: "outline", label: "Outline" },
-                    { id: "errorbars", label: "Error bars" }
-                ],
+                tabs: (function () {
+                    var t = [
+                        { id: "marker", label: "Dots" },
+                        { id: "outline", label: "Outline" },
+                        { id: "errorbars", label: "Error bars" }
+                    ];
+                    // t4-172: ordering must be reachable IN means mode
+                    // (no segments here, so the Level panel's Layout tab
+                    // is unreachable) - dist gate, >1 item only.
+                    if (_lkOrderedItems().length > 1)
+                        t.push({ id: "order", label: "Order" });
+                    return t;
+                })(),
                 active: "marker",
                 stickyKey: "__gb2_likertMeansTab",
                 onShowTab: function (tabId, pane) {
                     if (tabId === "outline") _lkMeansOutlineTab(pane);
                     else if (tabId === "errorbars") _lkMeansErrorTab(pane);
+                    else if (tabId === "order") _lkOrderPane(pane, null);
                     else _lkMeansMarkerTab(pane);
                     _distHistDockPicker(pane);
                 }
