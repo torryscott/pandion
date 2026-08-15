@@ -28326,7 +28326,22 @@
       if (PS_FLUSH_PENDING_OPTS) PS_FLUSH_PENDING_OPTS();
       var mod = curModule();
       var prev = chart.options[mod];
-      if (!prev || !Object.keys(prev).length) {
+      // t4-163 (Torry): reset the LOOK, keep the STRUCTURE. The graph
+      // type is what the chart IS, not how it dresses - resetting a
+      // raincloud must leave a raincloud. The kept set is the engine
+      // undo denylist's own structural boundary: graphType, scatter's
+      // xyBin, and RM's displayRoles.
+      var RESET_KEEP = { graphType: 1, xyBin: 1, displayRoles: 1 };
+      var keptStructure = {};
+      var hasLook = false;
+      if (prev) {
+        for (var pk in prev) {
+          if (!Object.prototype.hasOwnProperty.call(prev, pk)) continue;
+          if (RESET_KEEP[pk]) keptStructure[pk] = prev[pk];
+          else hasLook = true;
+        }
+      }
+      if (!hasLook) {
         showToast("This chart has no styling to reset");
         return;
       }
@@ -28343,6 +28358,9 @@
       var restamp = !!styleDefaultIdResolved();
       var applyReset = function () {
         chart.options[mod] = {};
+        for (var kk in keptStructure)
+          if (Object.prototype.hasOwnProperty.call(keptStructure, kk))
+            chart.options[mod][kk] = keptStructure[kk];
         if (restamp) chart.styleStamp = false;
         bumpSnapEpoch();
         persist();
