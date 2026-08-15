@@ -87980,15 +87980,15 @@
             // The Spread sub-row is wrapped so it can be dimmed as a
             // unit when scatter mode doesn't support spreading.
             var _dpScatterCtrl =
-                '<select data-field="scatter" title="Scatter placement" style="padding:4px 6px;font-size:12px;border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);">' +
+                '<select data-field="scatter" title="Point placement" style="padding:4px 6px;font-size:12px;border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);">' +
                   '<option value="strip">Strip</option>' +
                   '<option value="jitter">Jitter</option>' +
                   '<option value="beeswarm">Beeswarm</option>' +
-                  '<option value="none">No scatter</option>' +
+                  '<option value="none">None</option>' +
                 '</select>' +
                 '<div data-field="spread-row" style="display:inline-flex;align-items:center;gap:8px;margin-left:8px;">' +
                   '<span data-field="spread-label" style="color:#555;font-size:11px;">Spread</span>' +
-                  '<input type="range" data-field="spread" min="0" max="1" step="0.05" value="0.4" style="width:120px;" title="Scatter spread (fraction of bar/category width). Ignored by Strip and No-scatter modes." />' +
+                  '<input type="range" data-field="spread" min="0" max="1" step="0.05" value="0.4" style="width:120px;" title="Spread (fraction of bar/category width). Ignored by the Strip and None placements." />' +
                   '<span data-field="spread-val" style="' + _dpVal + '">0.40</span>' +
                 '</div>';
             // Outline color: chip + 12-color palette. No "auto"
@@ -88162,7 +88162,7 @@
                      _dpBtn("point-shape",   "shape",   "Shape") +
                      _dpBtn("point-size",    "size",    "Size") +
                      _dpBtn("point-opacity", "opacity", "Opacity") +
-                     _dpBtn("point-scatter", "scatter", "Scatter") +
+                     _dpBtn("point-scatter", "scatter", "Placement") +
                   '</div>' +
                   _dpStrip("point-color",   _dpColorCtrl) +
                   _dpStrip("point-shape",   _dpShapeCtrl) +
