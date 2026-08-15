@@ -3058,7 +3058,14 @@
   #ps-appsubmenu.ps-submenu-grid .ps-menu-heading { flex: 0 0 100%; }
   #ps-appsubmenu.ps-submenu-grid button {
     display: inline-flex; width: auto; align-items: baseline; gap: 8px;
-    padding: 4px 11px; border: 1px solid var(--ps-l2); border-radius: 999px;
+    padding: 5px 11px; border: 1px solid var(--ps-l2); border-radius: 999px;
+    /* The shared menu-row rule's min-height leaves slack under the text,
+       and baseline alignment parks the line at the TOP of it - the text
+       rode high in the pill (Torry's screenshot). Hugging the content
+       centers it by construction while keeping the name and its age on
+       one baseline; 5px padding keeps the pill above the 24px
+       target-size floor. */
+    min-height: 0;
   }
   #ps-appsubmenu.ps-submenu-grid .ps-menu-shortcut {
     margin-left: 0; color: var(--ps-muted); font-size: 10px; }
