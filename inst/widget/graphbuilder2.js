@@ -62248,8 +62248,19 @@
             // produce a legible tint on the title-bar Hide-bar
             // button. Dark colors pass through unchanged.
             function _legibleTint(hex) {
+                // "transparent", "none", "" and anything else hexToRgb
+                // cannot parse must NOT pass through: callers paint WHITE
+                // text on the returned value (or use it as text on white),
+                // and a transparent background put white text straight on
+                // the light panel - the Applies-to toggle was unreadable
+                // the moment a bar's fill was transparent (Torry, Aug 14
+                // 2026). The suite accent is the legible fallback in both
+                // usage modes.
+                var _ts = String(hex || "").toLowerCase();
+                if (!_ts || _ts === "transparent" || _ts === "none")
+                    return "#1a5fb4";
                 var rgb = hexToRgb(hex);
-                if (!rgb) return hex;
+                if (!rgb) return "#1a5fb4";
                 var hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
                 if (hsl.l <= 0.4) return hex;
                 var out = hslToRgb(hsl.h, hsl.s, 0.4);
