@@ -87980,7 +87980,7 @@
             // The Spread sub-row is wrapped so it can be dimmed as a
             // unit when scatter mode doesn't support spreading.
             var _dpScatterCtrl =
-                '<select data-field="scatter" title="Point placement" style="padding:4px 6px;font-size:12px;border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);">' +
+                '<select data-field="scatter" title="How the points are arranged" style="padding:4px 6px;font-size:12px;border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);">' +
                   '<option value="strip">Strip</option>' +
                   '<option value="jitter">Jitter</option>' +
                   '<option value="beeswarm">Beeswarm</option>' +
@@ -88162,7 +88162,7 @@
                      _dpBtn("point-shape",   "shape",   "Shape") +
                      _dpBtn("point-size",    "size",    "Size") +
                      _dpBtn("point-opacity", "opacity", "Opacity") +
-                     _dpBtn("point-scatter", "scatter", "Placement") +
+                     _dpBtn("point-scatter", "scatter", "Arrange") +
                   '</div>' +
                   _dpStrip("point-color",   _dpColorCtrl) +
                   _dpStrip("point-shape",   _dpShapeCtrl) +
