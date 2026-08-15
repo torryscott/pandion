@@ -9373,6 +9373,13 @@
   window.setOption = function (key, value) {
     if (DROP_KEYS[key]) return;
     CHART_LAST_AT = Date.now();
+    // A genuine edit is the newest thing in the chart scope and, like any
+    // new action after an undo, it invalidates the redo stack. Commits
+    // replayed by the engine's own Undo are neither.
+    if (Date.now() >= ENGINE_REPLAY_UNTIL) {
+      CHART_USER_AT = Date.now();
+      CHART_OPS_REDO.length = 0;
+    }
     // Library actions are ONE-SHOT (never stored as options): interpret
     // the verb into the machine library, then let the ordinary echo
     // ship the updated library object back to the engine.
@@ -13318,6 +13325,67 @@
   var DATA_HIST_MIN = 3;
   var DATA_ACTION_SEQ = 0;
   var DATA_LAST_AT = 0, CHART_LAST_AT = 0;
+  // Shell-level chart operations, so the chart scope has a history like
+  // every other scope. An entry is one act with the state needed to put
+  // it back: Reset keeps the option store it wiped, Close keeps the
+  // removed document and where it sat.
+  var CHART_OPS_UNDO = [], CHART_OPS_REDO = [], CHART_OPS_CAP = 20;
+  // The last commit that came from the USER rather than from us driving
+  // the engine's own Undo: _undoApply re-emits every restored key
+  // through this same bridge, and counting those as fresh edits would
+  // both skew recency and wipe the redo stack mid-undo.
+  var CHART_USER_AT = 0, ENGINE_REPLAY_UNTIL = 0;
+  function pushChartOp(label, undoFn, redoFn) {
+    var entry = { label: label, at: Date.now(), undo: undoFn, redo: redoFn };
+    CHART_OPS_UNDO.push(entry);
+    if (CHART_OPS_UNDO.length > CHART_OPS_CAP) CHART_OPS_UNDO.shift();
+    CHART_OPS_REDO.length = 0;
+    return entry;
+  }
+  // One resolver, three consumers (the menu label, the enable gate, and
+  // both dispatch paths), so the row can never name one thing and do
+  // another - the rule commandLabel already states for Find and Undo.
+  //
+  // STRICT RECENCY. Undo: the engine wins while it still has anything to
+  // undo AND a user edit landed after this op, because every such edit is
+  // newer than the op by construction; once the engine's stack is spent
+  // its button disables and the op is next. Redo mirrors it: an op is
+  // only ever undone when the engine had nothing left, so anything in the
+  // engine's redo stack was undone BEFORE it and the op redoes first.
+  function chartUndoTarget(back) {
+    if (undoScope() !== "chart") return null;
+    var op = back ? CHART_OPS_UNDO[CHART_OPS_UNDO.length - 1]
+                  : CHART_OPS_REDO[CHART_OPS_REDO.length - 1];
+    var engine = engineHistoryBtn(back ? "undo" : "redo");
+    if (!op) return engine ? { kind: "engine" } : null;
+    if (back && engine && CHART_USER_AT > op.at) return { kind: "engine" };
+    return { kind: "op", op: op };
+  }
+  function runChartOp(entry, back) {
+    var from = back ? CHART_OPS_UNDO : CHART_OPS_REDO;
+    var to = back ? CHART_OPS_REDO : CHART_OPS_UNDO;
+    var i = from.indexOf(entry);
+    if (i < 0) return false;    // already taken by the toast, or stale
+    from.splice(i, 1);
+    (back ? entry.undo : entry.redo)();
+    to.push(entry);
+    return true;
+  }
+  // Driving the engine's own history: mark the window so the commits it
+  // replays are not mistaken for new user edits.
+  function runEngineHistory(back) {
+    var b = engineHistoryBtn(back ? "undo" : "redo");
+    if (!b) return false;
+    ENGINE_REPLAY_UNTIL = Date.now() + 1500;
+    b.click();
+    return true;
+  }
+  function chartHistoryGo(back) {
+    var t = chartUndoTarget(back);
+    if (!t) return false;
+    if (t.kind === "op") return runChartOp(t.op, back);
+    return runEngineHistory(back);
+  }
   function dataSnapshot() {
     var t = PROJECT.table;
     return JSON.stringify({ order: t.order, raw: t.raw, types: t.types,
@@ -15798,6 +15866,16 @@
           e.preventDefault();
           e.stopPropagation();
           dataUndo();
+          return;
+        }
+        // A shell-level chart act only claims the chord when it is
+        // genuinely next; otherwise the engine's own handler takes it,
+        // exactly as before.
+        var ut = chartUndoTarget(true);
+        if (ut && ut.kind === "op") {
+          e.preventDefault();
+          e.stopPropagation();
+          chartHistoryGo(true);
         }
         return;   // else the engine's document-capture handler takes it
       }
@@ -15805,6 +15883,13 @@
         e.preventDefault();
         e.stopPropagation();
         dataRedo();
+        return;
+      }
+      var rt = chartUndoTarget(false);
+      if (rt && rt.kind === "op") {
+        e.preventDefault();
+        e.stopPropagation();
+        chartHistoryGo(false);
         return;
       }
       if (k === "y") {
@@ -17278,7 +17363,7 @@
     openShellDialog("ps-layout-gallery");
   }
   function hideLayoutGallery() { closeShellDialog("ps-layout-gallery"); }
-  function closeChart(id) {
+  function closeChart(id, opts) {
     if (PROJECT.charts.length <= 1) return;
     // The B12/t4-31 drain: an in-flight edit lands on the document that
     // produced it (still restorable through this close's own undo toast)
@@ -17348,8 +17433,7 @@
             usedBy.push(lay.name || "a layout"); break;
           }
       }
-    showUndoToast("Deleted " + removed.name + (usedBy.length
-      ? " (used by " + usedBy.join(", ") + ")" : ""), function () {
+    var restore = function () {
       if (chartById(removed.id)) return;
       PROJECT.charts.splice(Math.min(idx, PROJECT.charts.length), 0, removed);
       PROJECT.activeChart = wasActive === removed.id ? removed.id : PROJECT.activeChart;
@@ -17357,6 +17441,19 @@
       PROJECT.ui.dataOpen = priorWorkspace === "data";
       if (wasActive === removed.id) rememberDocument(removed);
       persist(); syncAll(); render();
+    };
+    // Deleting a document is a shell act the engine's history cannot see,
+    // so it goes on the chart scope's own stack and survives the toast.
+    // The redo re-enters this function with the history suppressed, so
+    // redoing a delete does not stack a second entry for the same act.
+    var closeOp = (opts && opts.noHistory) ? null
+      : pushChartOp(isLayoutTab(removed) ? "the deleted layout"
+                                         : "the deleted chart",
+          restore, function () { closeChart(removed.id, { noHistory: true }); });
+    showUndoToast("Deleted " + removed.name + (usedBy.length
+      ? " (used by " + usedBy.join(", ") + ")" : ""), function () {
+      if (closeOp) runChartOp(closeOp, true);
+      else restore();
     });
   }
   function renameDocument(id, requested) {
@@ -26146,8 +26243,12 @@
     if (s === "notebook")
       return (back ? "Undo " : "Redo ") +
         (nbHistoryLabel(back) || "Notebook change");
+    if (s === "layout") return (back ? "Undo " : "Redo ") + "layout change";
+    // Name the pending shell-level act the way the data scope names its
+    // step, so the row says what the key will actually do.
+    var ct = chartUndoTarget(back);
     return (back ? "Undo " : "Redo ") +
-      (s === "layout" ? "layout change" : "chart styling");
+      (ct && ct.kind === "op" ? ct.op.label : "chart styling");
   }
   // ---- punch list 3: opening the engine's own teaching panels ----
   // Driven through the engine's PUBLIC surface: its toolbar "?" button and the
@@ -26359,7 +26460,7 @@
         return !!h && (back ? h.undo : h.redo).length > 0;
       }
       if (scope === "notebook") return (back ? NB_UNDO : NB_REDO).length > 0;
-      return !!engineHistoryBtn(back ? "undo" : "redo");
+      return !!chartUndoTarget(back);
     }
     if (command.indexOf("goto-document:") === 0)
       return !!chartById(command.slice(14));
@@ -26523,10 +26624,7 @@
       if (scope === "data") { if (back) dataUndo(); else dataRedo(); }
       else if (scope === "layout") { if (back) layUndo(); else layRedo(); }
       else if (scope === "notebook") { if (back) nbUndo(); else nbRedo(); }
-      else {
-        var eb = engineHistoryBtn(back ? "undo" : "redo");
-        if (eb) eb.click();
-      }
+      else chartHistoryGo(back);
     }
     else if (command === "rename-document")
       beginDocumentRename(targetDoc && targetDoc.id);
@@ -28013,11 +28111,22 @@
       bumpSnapEpoch();
       persist();
       render();
-      showUndoToast("Chart styling reset", function () {
+      // The toast is the offer in the moment; the history entry is what
+      // answers the person who goes looking for Undo a minute later.
+      // Both run the SAME entry, so taking one retires the other.
+      var resetOp = pushChartOp("the styling reset", function () {
         chart.options[mod] = prev;
         bumpSnapEpoch();
         persist();
         render();
+      }, function () {
+        chart.options[mod] = {};
+        bumpSnapEpoch();
+        persist();
+        render();
+      });
+      showUndoToast("Chart styling reset", function () {
+        runChartOp(resetOp, true);
       });
     });
   }
