@@ -33463,58 +33463,76 @@
                         // far to one side. Rows closer together than a
                         // marker may overlap vertically, which is what
                         // plotting exact values with round markers costs.
-                        var pc = Math.min(pitch, (2 * cap) / (k - 1));
+                        // Overflow rides the GUTTER convention (R
+                        // ggbeeswarm's corral, seaborn's gutter): keep the
+                        // spacing at one marker and let anything past the
+                        // slot sit ON its edge, rather than compressing
+                        // the whole row until markers overlap - which is
+                        // nobody's convention.
                         best = [];
-                        for (var m2 = 0; m2 < k; m2++)
-                            best.push((m2 - (k - 1) / 2) * pc);
-                    } else {
-                        // A LONE value nestles into the nearest free slot
-                        // to the centre, half a pitch at a time - this is
-                        // what gives continuous data a swarm rather than
-                        // one stacked column.
-                        //
-                        // WHICH SIDE is load-bearing. Taking the positive
-                        // side first made isolated points cascade right,
-                        // so wherever the data thinned the swarm leaned
-                        // and the cloud read as tilted (Torry, Aug 2026).
-                        // At equal distance from the centre, take the slot
-                        // that best RE-CENTRES the neighbourhood: sum the
-                        // offsets of the rows still close enough to
-                        // collide and prefer the side that pulls that sum
-                        // back toward zero. No counters, no fixed
-                        // preference, symmetric by construction.
-                        var balSum = 0;
-                        for (var bp = live; bp < placed.length; bp++) balSum += placed[bp].x;
-                        for (var t = 0; t < 48 && best === null; t++) {
-                            var cands = (t === 0) ? [0] : [t * pitch / 2, -t * pitch / 2];
-                            var free = [];
-                            for (var ci = 0; ci < cands.length; ci++) {
-                                var x = cands[ci];
-                                if (Math.abs(x) > cap) continue;
-                                var fits = true;
-                                for (var p = live; p < placed.length; p++) {
-                                    if (Math.abs(placed[p].y - y) < pitch &&
-                                        Math.abs(placed[p].x - x) < pitch - 0.01) {
-                                        fits = false; break;
-                                    }
-                                }
-                                if (fits) free.push(x);
-                            }
-                            if (free.length === 1) best = [free[0]];
-                            else if (free.length > 1) {
-                                var _sa = Math.abs(balSum + free[0]);
-                                var _sb = Math.abs(balSum + free[1]);
-                                // A BALANCED neighbourhood ties, and that
-                                // is the common case - resolving it by
-                                // "first candidate" is exactly the fixed
-                                // preference this rule exists to avoid, so
-                                // ties alternate instead.
-                                best = [(_sa < _sb) ? free[0]
-                                      : (_sb < _sa) ? free[1]
-                                      : (((placed.length & 1) === 0) ? free[0] : free[1])];
-                            }
+                        for (var m2 = 0; m2 < k; m2++) {
+                            var _rx = (m2 - (k - 1) / 2) * pitch;
+                            best.push(Math.max(-cap, Math.min(cap, _rx)));
                         }
-                        if (best === null) best = [0];
+                    } else {
+                        // A LONE value follows the beeswarm convention
+                        // (R's beeswarm package, seaborn's swarmplot):
+                        // the candidates are ZERO plus the offsets where
+                        // this marker would sit exactly TANGENT to each
+                        // neighbour close enough to collide, and the
+                        // smallest absolute offset that actually fits
+                        // wins. Tangency positions are continuous, which
+                        // is why the reference implementations never grew
+                        // the lean our old fixed half-pitch lattice did:
+                        // that lattice made exact ties the normal case,
+                        // and any fixed side preference then compounds.
+                        var cand = [0];
+                        var balSum = 0, balCnt = 0;
+                        for (var q = live; q < placed.length; q++) {
+                            balSum += placed[q].x;
+                            if (placed[q].x > 0.001) balCnt++;
+                            else if (placed[q].x < -0.001) balCnt--;
+                            var _dy = y - placed[q].y;
+                            if (Math.abs(_dy) >= pitch) continue;
+                            var _dx = Math.sqrt(pitch * pitch - _dy * _dy);
+                            cand.push(placed[q].x + _dx);
+                            cand.push(placed[q].x - _dx);
+                        }
+                        // Nearest to the centre first. Ties still happen
+                        // (a symmetric neighbourhood offers mirrored
+                        // positions), so they resolve toward whichever
+                        // side re-centres the cloud, and alternate when
+                        // even that is balanced.
+                        var _par = (placed.length & 1) === 1;
+                        cand.sort(function (a, b) {
+                            var da = Math.abs(a), db = Math.abs(b);
+                            if (Math.abs(da - db) > 0.001) return da - db;
+                            // How MANY sit each side decides first: it
+                            // tracks the visible symmetry better than the
+                            // summed offsets, which one far-out stray can
+                            // dominate.
+                            var ca = Math.abs(balCnt + (a > 0 ? 1 : a < 0 ? -1 : 0));
+                            var cb = Math.abs(balCnt + (b > 0 ? 1 : b < 0 ? -1 : 0));
+                            if (ca !== cb) return ca - cb;
+                            var sa = Math.abs(balSum + a), sb = Math.abs(balSum + b);
+                            if (Math.abs(sa - sb) > 0.001) return sa - sb;
+                            return _par ? (a - b) : (b - a);
+                        });
+                        for (var ci = 0; ci < cand.length && best === null; ci++) {
+                            var cx = cand[ci];
+                            if (Math.abs(cx) > cap) continue;
+                            var clear = true;
+                            for (var p2 = live; p2 < placed.length; p2++) {
+                                var ddx = cx - placed[p2].x, ddy = y - placed[p2].y;
+                                if (ddx * ddx + ddy * ddy < pitch * pitch * 0.999) {
+                                    clear = false; break;
+                                }
+                            }
+                            if (clear) best = [cx];
+                        }
+                        // Nothing fits inside the slot: take the gutter on
+                        // the emptier side (the corral convention).
+                        if (best === null) best = [(balSum > 0) ? -cap : cap];
                     }
                     for (var m3 = 0; m3 < k; m3++) {
                         offsets[order[s + m3]] = best[m3];
