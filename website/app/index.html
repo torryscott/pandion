@@ -5809,8 +5809,16 @@
       <button type="button" id="ps-data-find-next" aria-label="Next match"
               data-tip="Next match">&#8250;</button>
     </label>
+    <!-- A WORD, not a glyph (a collaborator, Aug 2026): the field is a
+         type=search input, so the browser draws its OWN clear "x" inside
+         it, and this button sat immediately to its right wearing the
+         same shape. Two adjacent identical crosses, one throwing the
+         search away and one keeping it. The browser's cross is not ours
+         to restyle, so the way out of the ambiguity is to stop competing
+         with it. The accessible name still leads with the visible word,
+         so speaking "Close" activates it. -->
     <button type="button" class="ps-btn" id="ps-findpop-close"
-            aria-label="Close find" data-tip="Close (Esc)">&#10005;</button>
+            aria-label="Close find" data-tip="Close (Esc)">Close</button>
   </div>
   <!-- t3-47's ruling survives the move: Find is sticky, Replace is a MODE
        revealed on demand - now for focus economy rather than bar width. -->
