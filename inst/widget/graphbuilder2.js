@@ -74574,11 +74574,15 @@
             // axis (it spreads points within a level's slot). On two
             // continuous axes it would shift points off their true
             // numeric values, so hide the Jitter control entirely
-            // unless at least one axis is a factor/ordinal (which is
-            // exactly when data.xyXLevels / xyYLevels are non-empty).
+            // unless at least one axis is a factor/ordinal - levels
+            // shipped, OR the host-declared ordinal hint for numeric
+            // ordinals (Aug 2026: the standalone ships no levels for a
+            // numeric-typed 1-5 rating, so the chip was hidden on
+            // exactly the charts jitter exists for - Torry's screenshot).
             var _jitterUseful =
                 (Array.isArray(data.xyXLevels) && data.xyXLevels.length > 0) ||
-                (Array.isArray(data.xyYLevels) && data.xyYLevels.length > 0);
+                (Array.isArray(data.xyYLevels) && data.xyYLevels.length > 0) ||
+                data.xyXOrdinalHint === true || data.xyYOrdinalHint === true;
             body.innerHTML =
                 _psTabBar +
                 // POINT TAB
