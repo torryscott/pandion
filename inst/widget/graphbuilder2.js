@@ -50021,6 +50021,46 @@
                 if (eff < 10)
                     out.push({ id: "fitfew", sev: "tip", title: "A fit line on very few points", why: (kCount > 1 ? "The smallest group's fit line rests on only n = " + eff + " points." : "The fit line rests on only n = " + eff + " points.") + " With so few observations a single point can swing the slope, so the line looks more authoritative than it is. Report it cautiously, or remove it from the + menu.", fixGt: null });
             })();
+            // --- A fit line or correlation across UNORDERED categories.
+            // Now that a text-labelled categorical can sit on an axis
+            // (its levels plot by code, 1..k), a fit line or an r is
+            // computed on codes that a different level order would
+            // change. Two levels is the legitimate case and stays quiet:
+            // that IS a point-biserial, or a phi when both axes are
+            // dichotomies. Three or more unordered categories is the
+            // misuse. An ORDERED scale is left alone, since plotting a
+            // rating by rank is a defensible approximation and its own
+            // argument to have.
+            var _ccApp = false;
+            (function () {
+                if (gt !== "scatter") return;
+                var _ccFit = typeof data.xyFitType === "string" &&
+                             data.xyFitType !== "" && data.xyFitType !== "none";
+                var _ccStat = data.xyShowStats === true;
+                var _ccAx = [];
+                if (Array.isArray(data.xyXLevels) && data.xyXLevels.length > 2 &&
+                    data.xyXNominal === true)
+                    _ccAx.push({ n: (typeof data.xLabelDefault === "string" && data.xLabelDefault.length)
+                                    ? data.xLabelDefault : "the X variable",
+                                 k: data.xyXLevels.length });
+                if (Array.isArray(data.xyYLevels) && data.xyYLevels.length > 2 &&
+                    data.xyYNominal === true)
+                    _ccAx.push({ n: (typeof data.yLabelDefault === "string" && data.yLabelDefault.length)
+                                    ? data.yLabelDefault : "the Y variable",
+                                 k: data.xyYLevels.length });
+                if (!_ccAx.length) return;
+                _ccApp = _ccFit || _ccStat;
+                if (!_ccApp) return;
+                var _ccWhich = _ccAx.map(function (a) {
+                    return a.n + " (" + a.k + " categories)";
+                }).join(" and ");
+                var _ccWhat = (_ccFit && _ccStat) ? "The fit line and the correlation are"
+                            : _ccFit ? "The fit line is" : "The correlation is";
+                out.push({ id: "catcode", sev: "warn",
+                    title: "A fit across unordered categories",
+                    why: _ccWhich + " has no natural order, so the chart plots its categories in whatever order they happen to be in. " + _ccWhat + " then computed on those positions, and putting the categories in a different order would give a different answer. Compare Groups compares unordered categories honestly. If the categories really do have an order, set the variable's measure type to Ordinal and the numbers become meaningful. Two categories are the exception and are never flagged here: that is what a point-biserial, or a phi between two dichotomies, already is.",
+                    fixGt: null });
+            })();
             var _skApp = false;
             (function () {
                 if (!((_mk === "cg" || _mk === "rm") && isBarType)) return;
@@ -50277,6 +50317,7 @@
                 { id: "overplot", name: "Overplotting", tip: "With very many points, dots pile up and hide where the data are densest.", applies: gt === "scatter" && !_hmOn },
                 { id: "xydupes", name: "Each observation visible", tip: "Points sharing an exact position stack invisibly; jitter (ordinal axes), point opacity, or a heatmap shows how many observations sit there.", applies: gt === "scatter" && !_hmOn },
                 { id: "fitfew", name: "Enough points for a fit line", tip: "A regression line on fewer than about 10 points is fragile.", applies: _ffApp },
+                { id: "catcode", name: "Fits use meaningful positions", tip: "A fit line or correlation across three or more unordered categories is computed on arbitrary category positions.", applies: _ccApp },
                 { id: "logscale", name: "Log axis flagged", tip: "A logarithmic axis should be named in the axis title or the caption.", applies: _lgApp },
                 { id: "qqn", name: "Sample size for a Q-Q plot", tip: "With few points, wander off the line is expected even for truly normal data.", applies: gt === "qq" && minN !== null },
                 { id: "densn", name: "Sample size for a density curve", tip: "Smoothing needs data; with small samples the bumps are mostly smoothing.", applies: gt === "density" && minN !== null },

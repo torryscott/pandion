@@ -99,6 +99,8 @@ graphbuilder2_html <- function(bars,
                                xy_points = list(),
                                xy_fits = list(),
                                xy_x_levels = character(0),
+                              xy_x_nominal = NULL,
+                              xy_y_nominal = NULL,
                                xy_y_levels = character(0),
                                xy_point_size = 5,
                                xy_point_shape = "circle",
@@ -2059,6 +2061,14 @@ graphbuilder2_html <- function(bars,
     # errorBarMethod (RM only): lets the Label-parts copy say truthfully
     # whether the bars carry the within-subject correction. Same
     # conditional-key convention as errorBarType above.
+    # Scatter only: whether each axis variable is an UNORDERED factor,
+    # for the Check-graph rule about fit lines across arbitrary category
+    # codes. Conditional like errorBarType above, so no other module's
+    # payload changes by a byte.
+    if (!is.null(xy_x_nominal))
+        payload$xyXNominal <- isTRUE(xy_x_nominal)
+    if (!is.null(xy_y_nominal))
+        payload$xyYNominal <- isTRUE(xy_y_nominal)
     if (!is.null(error_bar_method))
         payload$errorBarMethod <- as.character(error_bar_method)
     # Chi-square test entries (freqplotbuilder only): shipped whenever the

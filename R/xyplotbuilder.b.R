@@ -368,6 +368,15 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
                 as.character(levels(data[[xvar]])) else character(0)
             xy_y_levels <- if (is.factor(data[[yvar]]))
                 as.character(levels(data[[yvar]])) else character(0)
+            # UNORDERED categoricals specifically (jamovi ships an ordinal
+            # measure type as an ORDERED factor, the is.ordered convention
+            # helpmechoose already relies on). The Check-graph rule needs
+            # the distinction: an ordered scale plotted by rank is a
+            # defensible approximation, whereas a fit line across
+            # unordered categories is computed on codes an arbitrary
+            # reordering would change.
+            xy_x_nominal <- is.factor(data[[xvar]]) && !is.ordered(data[[xvar]])
+            xy_y_nominal <- is.factor(data[[yvar]]) && !is.ordered(data[[yvar]])
             # Coerce to numeric and drop any row with a non-finite
             # X or Y. groupVar / facetVar stay as factors so their
             # levels are stable.
@@ -1327,6 +1336,8 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
                 xy_label_var = if (has_label) as.character(labelVar) else "",
                 xy_fits = xy_fits,
                 xy_x_levels = xy_x_levels,
+                xy_x_nominal = xy_x_nominal,
+                xy_y_nominal = xy_y_nominal,
                 xy_y_levels = xy_y_levels,
                 xy_ellipses = xy_ellipses,
                 xy_ellipse_level = self$options$xyEllipseLevel,
