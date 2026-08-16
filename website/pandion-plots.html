@@ -18420,13 +18420,21 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       return;
     }
   }
-  function setLinkedCell(caseId, col) {
+  // armRing=false links the cell WITHOUT arming the chart-side reveal.
+  // The ring answers "where is this row in the chart", so it belongs to
+  // a DATA-side action. Arming it from a chart click meant the click
+  // that opened a point's panel also queued a ring, which the next
+  // render (the echo of whatever you then edited, a second later)
+  // painted back with nothing selected - Torry's mystery ring, second
+  // report: select a point, change jitter, click off, watch it return.
+  function setLinkedCell(caseId, col, armRing) {
     if (!caseId || !col || !PROJECT.table.raw[col]) return false;
     var row = PROJECT.table.caseIds.indexOf(String(caseId));
     if (row < 0) return false;
     LINKED_CELL = { caseId: String(caseId), col: String(col) };
     LINKED_REVEAL_EMPHASIS = true;
-    LINK_RING_ARMED = true;
+    if (armRing === false) LINK_RING_ARMED = false;
+    else LINK_RING_ARMED = true;
     gridApplySelection();
     return true;
   }
@@ -18480,7 +18488,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       idx: Number(node.getAttribute("data-point-idx"))
     };
     var sourceCell = caseCellForHiddenPoint(point);
-    return !!(sourceCell && setLinkedCell(sourceCell.caseId, sourceCell.col));
+    return !!(sourceCell && setLinkedCell(sourceCell.caseId, sourceCell.col, false));
   }
   function caseCellForHiddenPoint(point, payload) {
     var source = payload || LAST_RENDER_PAYLOAD;
