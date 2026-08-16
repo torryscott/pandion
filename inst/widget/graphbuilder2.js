@@ -33415,34 +33415,85 @@
             // compresses when a big cluster would poke past the Spread
             // cap. Values keep their true axis positions - only the
             // perpendicular offset is arranged.
-            function computeStackedOffsets(values, ypxs, radius, maxOffset) {
+            function computeStackedOffsets(values, ypxs, radius, maxOffset, hardMax) {
+                // Beeswarm packing, the reference scheme (Torry's image,
+                // Aug 2026): points that DRAW at the same height form a
+                // row and that row is centred on the category; rows that
+                // would collide nestle into each other's gaps, half a
+                // pitch at a time. Values are never moved - only the
+                // sideways slot is chosen - so this stays a swarm, not a
+                // binned dot plot.
+                //
+                // The previous version binned by a PIXEL BAND measured
+                // from the row's first point, so one slot assignment
+                // could straddle two nearby values: the points then drew
+                // at two heights, each showing only part of a symmetric
+                // set, which read as rows shoved off-centre (+24.5px and
+                // -39.5px on adjacent rows in the same category).
                 var n = values.length;
                 var offsets = new Array(n);
-                var sorted = [];
-                for (var i = 0; i < n; i++) sorted.push({ y: ypxs[i], idx: i });
-                sorted.sort(function (a, b) { return a.y - b.y; });
-                var start = 0;
-                while (start < n) {
-                    var end = start;
-                    // Rows are BINNED, not chained: a row spans one marker
-                    // height measured from its OWN first point. The chaining
-                    // rule (each point within 2r of the PREVIOUS one) let a
-                    // dense column swallow itself into a single cluster of
-                    // n points, and the symmetric slots below then ran
-                    // monotonically from the lowest value to the highest -
-                    // drawing a diagonal streak instead of a swarm (Torry's
-                    // screenshot, Aug 2026; only visible with enough points
-                    // to chain, which is why sparse categories looked fine).
-                    while (end + 1 < n &&
-                           (sorted[end + 1].y - sorted[start].y) < 2 * radius)
-                        end++;
-                    var k = end - start + 1;
-                    var pitch = 2 * radius;
-                    if (k > 1 && pitch * (k - 1) / 2 > maxOffset)
-                        pitch = (2 * maxOffset) / (k - 1);
-                    for (var m = 0; m < k; m++)
-                        offsets[sorted[start + m].idx] = (m - (k - 1) / 2) * pitch;
-                    start = end + 1;
+                if (!n) return offsets;
+                var order = [];
+                for (var i = 0; i < n; i++) order.push(i);
+                order.sort(function (a, b) { return ypxs[a] - ypxs[b]; });
+                var pitch = 2 * radius;
+                // Emergent width, bounded by the slot rather than by the
+                // Spread fraction (t4-177).
+                var cap = (typeof hardMax === "number" && isFinite(hardMax)
+                           && hardMax > maxOffset) ? hardMax : maxOffset;
+                var placed = [];   // {x, y}, kept in y order
+                var live = 0;      // first entry still within a pitch
+                var s = 0;
+                while (s < n) {
+                    // One row = the points that will draw at the same
+                    // height (sub-pixel tolerance).
+                    var e = s;
+                    while (e + 1 < n &&
+                           Math.abs(ypxs[order[e + 1]] - ypxs[order[s]]) <= 0.5) e++;
+                    var k = e - s + 1;
+                    var y = ypxs[order[s]];
+                    // Forget rows too far above to collide with this one.
+                    while (live < placed.length && (y - placed[live].y) >= pitch) live++;
+                    var best = null;
+                    if (k > 1) {
+                        // A REAL ROW (two or more equal values) is always
+                        // centred on the category and never dodged: that
+                        // symmetry is the whole point of the scheme, and
+                        // trying to dodge a whole row instead shoves it
+                        // far to one side. Rows closer together than a
+                        // marker may overlap vertically, which is what
+                        // plotting exact values with round markers costs.
+                        var pc = Math.min(pitch, (2 * cap) / (k - 1));
+                        best = [];
+                        for (var m2 = 0; m2 < k; m2++)
+                            best.push((m2 - (k - 1) / 2) * pc);
+                    } else {
+                        // A LONE value nestles: nearest free slot to the
+                        // centre, half a pitch at a time. This is what
+                        // gives continuous data a swarm instead of a
+                        // single stacked column.
+                        for (var t = 0; t < 48 && best === null; t++) {
+                            var shifts = (t === 0) ? [0] : [t * pitch / 2, -t * pitch / 2];
+                            for (var si = 0; si < shifts.length && best === null; si++) {
+                                var x = shifts[si];
+                                if (Math.abs(x) > cap) continue;
+                                var fits = true;
+                                for (var p = live; p < placed.length; p++) {
+                                    if (Math.abs(placed[p].y - y) < pitch &&
+                                        Math.abs(placed[p].x - x) < pitch - 0.01) {
+                                        fits = false; break;
+                                    }
+                                }
+                                if (fits) best = [x];
+                            }
+                        }
+                        if (best === null) best = [0];
+                    }
+                    for (var m3 = 0; m3 < k; m3++) {
+                        offsets[order[s + m3]] = best[m3];
+                        placed.push({ x: best[m3], y: y });
+                    }
+                    s = e + 1;
                 }
                 return offsets;
             }
@@ -33589,7 +33640,7 @@
                     // what Torry flagged; with a single swarm entry in the
                     // menu it has to be the correct one. A saved chart on
                     // the retired "stacked" value lands here unchanged.
-                    offsets = computeStackedOffsets(values, ypxs, pointSize / 2 + 0.5, maxJitter);
+                    offsets = computeStackedOffsets(values, ypxs, pointSize / 2 + 0.5, maxJitter, barWPx * 0.5);
                 } else {
                     offsets = new Array(n); for (var jj = 0; jj < n; jj++) offsets[jj] = 0;
                 }
@@ -88362,7 +88413,7 @@
                 '</select>' +
                 '<div data-field="spread-row" style="display:inline-flex;align-items:center;gap:8px;margin-left:8px;">' +
                   '<span data-field="spread-label" style="color:#555;font-size:11px;">Spread</span>' +
-                  '<input type="range" data-field="spread" min="0" max="1" step="0.05" value="0.4" style="width:120px;" title="Spread (fraction of bar/category width). Ignored by the Strip placement." />' +
+                  '<input type="range" data-field="spread" min="0" max="1" step="0.05" value="0.4" style="width:120px;" title="Spread (fraction of bar/category width). Applies to Normal jitter; Beeswarm packs at the point size and Strip adds no offset." />' +
                   '<span data-field="spread-val" style="' + _dpVal + '">0.40</span>' +
                 '</div>';
             // Outline color: chip + 12-color palette. No "auto"
@@ -88666,7 +88717,10 @@
             // in those modes so the control's irrelevance is visible.
             function _refreshSpreadEnabled() {
                 var m = iScatter.value;
-                var active = (m === "jitter" || m === "beeswarm" || m === "stacked");
+                // Beeswarm packs at the point size, so Spread has nothing
+                // to do there: the width is the data. Point size is the
+                // lever, exactly as in the beeswarm literature.
+                var active = (m === "jitter");
                 iSpread.disabled = !active;
                 if (iSpreadLabel) iSpreadLabel.style.opacity = active ? "" : "0.5";
                 iSpreadVal.style.opacity = active ? "" : "0.5";
