@@ -33468,14 +33468,28 @@
                         for (var m2 = 0; m2 < k; m2++)
                             best.push((m2 - (k - 1) / 2) * pc);
                     } else {
-                        // A LONE value nestles: nearest free slot to the
-                        // centre, half a pitch at a time. This is what
-                        // gives continuous data a swarm instead of a
-                        // single stacked column.
+                        // A LONE value nestles into the nearest free slot
+                        // to the centre, half a pitch at a time - this is
+                        // what gives continuous data a swarm rather than
+                        // one stacked column.
+                        //
+                        // WHICH SIDE is load-bearing. Taking the positive
+                        // side first made isolated points cascade right,
+                        // so wherever the data thinned the swarm leaned
+                        // and the cloud read as tilted (Torry, Aug 2026).
+                        // At equal distance from the centre, take the slot
+                        // that best RE-CENTRES the neighbourhood: sum the
+                        // offsets of the rows still close enough to
+                        // collide and prefer the side that pulls that sum
+                        // back toward zero. No counters, no fixed
+                        // preference, symmetric by construction.
+                        var balSum = 0;
+                        for (var bp = live; bp < placed.length; bp++) balSum += placed[bp].x;
                         for (var t = 0; t < 48 && best === null; t++) {
-                            var shifts = (t === 0) ? [0] : [t * pitch / 2, -t * pitch / 2];
-                            for (var si = 0; si < shifts.length && best === null; si++) {
-                                var x = shifts[si];
+                            var cands = (t === 0) ? [0] : [t * pitch / 2, -t * pitch / 2];
+                            var free = [];
+                            for (var ci = 0; ci < cands.length; ci++) {
+                                var x = cands[ci];
                                 if (Math.abs(x) > cap) continue;
                                 var fits = true;
                                 for (var p = live; p < placed.length; p++) {
@@ -33484,7 +33498,20 @@
                                         fits = false; break;
                                     }
                                 }
-                                if (fits) best = [x];
+                                if (fits) free.push(x);
+                            }
+                            if (free.length === 1) best = [free[0]];
+                            else if (free.length > 1) {
+                                var _sa = Math.abs(balSum + free[0]);
+                                var _sb = Math.abs(balSum + free[1]);
+                                // A BALANCED neighbourhood ties, and that
+                                // is the common case - resolving it by
+                                // "first candidate" is exactly the fixed
+                                // preference this rule exists to avoid, so
+                                // ties alternate instead.
+                                best = [(_sa < _sb) ? free[0]
+                                      : (_sb < _sa) ? free[1]
+                                      : (((placed.length & 1) === 0) ? free[0] : free[1])];
                             }
                         }
                         if (best === null) best = [0];
