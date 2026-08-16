@@ -12,7 +12,7 @@
     "channels": ["bars", "facetLabel", "facetLevels", "facetSeparator", "freqTests", "groupCategories", "groupLabel", "groupLabelDefault", "hasGroups", "missingNote", "xCategories", "xLabel", "xLabelDefault"]
   },
   "xyplotbuilder": {
-    "keys": 552,
+    "keys": 554,
     "channels": ["facetLabel", "facetLevels", "groupCategories", "groupLabel", "groupLabelDefault", "hasGroups", "missingNote", "xLabel", "xLabelDefault", "xyEllipses", "xyFits", "xyPoints", "xyStats", "yLabel", "yLabelDefault"]
   },
   "rmplotbuilder": {
@@ -28,9 +28,9 @@
     "channels": ["likertAlpha", "likertCells", "likertItems", "likertLevels", "likertMeans", "missingNote"]
   },
   "__stamp": {
-    "marshalMd5": "0500c6fe48844522488737fed83da562",
+    "marshalMd5": "2b00fad2be16d7f8067ccb42634ae3bd",
     "marshalFiles": ["R/widget.R", "R/spec_explode.R", "R/utils.R", "R/plotbuilder.b.R", "R/distplotbuilder.b.R", "R/freqplotbuilder.b.R", "R/xyplotbuilder.b.R", "R/rmplotbuilder.b.R", "R/corrplotbuilder.b.R", "R/likertplotbuilder.b.R"],
-    "engineMd5": "6aca5f703521b1bf53cfc69f980530c0",
-    "generated": "2026-08-13"
+    "engineMd5": "ef7bb6de6424b9b7f2ab8ddf64de32df",
+    "generated": "2026-08-16"
   }
 }
