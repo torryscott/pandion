@@ -33438,6 +33438,9 @@
                 return offsets;
             }
 
+            // RETIRED t4-174: the greedy packer (offset 0 first, then
+            // +/- step) left tied pairs off-centre. computeStackedOffsets
+            // serves "beeswarm" now. Kept for reference only - no callers.
             function computeBeeswarmOffsets(values, ypxs, radius, maxOffset) {
                 var n = values.length;
                 var offsets = new Array(n);
@@ -33570,9 +33573,13 @@
                         var _jSeed = _subjAligned ? 0 : values[k];
                         offsets[k] = deterministicJitter(_jSeed, k) * 2 * maxJitter;
                     }
-                } else if (method === "beeswarm") {
-                    offsets = computeBeeswarmOffsets(values, ypxs, pointSize / 2 + 0.5, maxJitter);
-                } else if (method === "stacked") {
+                } else if (method === "beeswarm" || method === "stacked") {
+                    // t4-174: ONE swarm method, and it packs SYMMETRICALLY
+                    // about the slot centre (t4-169's stacked rule).
+                    // Greedy packing left a tied pair off-centre, which is
+                    // what Torry flagged; with a single swarm entry in the
+                    // menu it has to be the correct one. A saved chart on
+                    // the retired "stacked" value lands here unchanged.
                     offsets = computeStackedOffsets(values, ypxs, pointSize / 2 + 0.5, maxJitter);
                 } else {
                     offsets = new Array(n); for (var jj = 0; jj < n; jj++) offsets[jj] = 0;
@@ -74542,7 +74549,7 @@
             var _psJitterCtrl =
                 '<input type="range" data-field="p-jitter" min="0" max="1" step="0.05" value="' + ptJitter + '" style="' + rangeCss + '"/>' +
                 '<input type="number" data-field="p-jitter-num" min="0" max="1" step="0.05" value="' + ptJitter + '" style="' + numInputCss + '"/>' +
-                '<span style="color:#666;font-size:10px;flex-basis:100%;">Only applies to ordinal / factor axes - continuous variables aren\'t jittered (it would shift points off their true values). Offsets are stable across redraws.</span>';
+                '<span style="color:#666;font-size:10px;flex-basis:100%;">Only applies to ordinal and factor axes. Continuous variables are never jittered, because that would shift points off their true measured values. Offsets stay put across redraws.</span>';
 
             // ---- OUTLINE TAB strip contents ----
             var _psOutlineColorCtrl =
@@ -88295,17 +88302,30 @@
             //      for jitter / beeswarm; dimmed for strip / none.
             // The Spread sub-row is wrapped so it can be dimmed as a
             // unit when scatter mode doesn't support spreading.
+            // t4-174 (Torry): the chip is Jitter now, so the method
+            // named "Jitter" becomes "Normal" (the ordinary random
+            // offset) and the menu carries only the three that differ in
+            // LOOK. "Stacked" folded INTO Beeswarm - its centering
+            // became the swarm packing rule, so removing the entry keeps
+            // the fix - and "None" was a second off-switch for an
+            // overlay the eye and the + menu already govern. Both values
+            // still resolve when a saved chart carries them, and such a
+            // chart shows its own value rather than a blank select.
+            var _dpScMode = (typeof data.pointScatter === "string" && data.pointScatter.length)
+                ? data.pointScatter : "jitter";
+            var _dpScLegacy =
+                (_dpScMode === "stacked") ? '<option value="stacked">Stacked</option>' :
+                (_dpScMode === "none") ? '<option value="none">None</option>' : "";
             var _dpScatterCtrl =
-                '<select data-field="scatter" title="How the points are arranged" style="padding:4px 6px;font-size:12px;border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);">' +
-                  '<option value="strip">Strip</option>' +
-                  '<option value="jitter">Jitter</option>' +
+                '<select data-field="scatter" title="How the points are spread sideways" style="padding:4px 6px;font-size:12px;border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);">' +
+                  '<option value="jitter">Normal</option>' +
                   '<option value="beeswarm">Beeswarm</option>' +
-                  '<option value="stacked">Stacked</option>' +
-                  '<option value="none">None</option>' +
+                  '<option value="strip">Strip</option>' +
+                  _dpScLegacy +
                 '</select>' +
                 '<div data-field="spread-row" style="display:inline-flex;align-items:center;gap:8px;margin-left:8px;">' +
                   '<span data-field="spread-label" style="color:#555;font-size:11px;">Spread</span>' +
-                  '<input type="range" data-field="spread" min="0" max="1" step="0.05" value="0.4" style="width:120px;" title="Spread (fraction of bar/category width). Ignored by the Strip and None placements." />' +
+                  '<input type="range" data-field="spread" min="0" max="1" step="0.05" value="0.4" style="width:120px;" title="Spread (fraction of bar/category width). Ignored by the Strip placement." />' +
                   '<span data-field="spread-val" style="' + _dpVal + '">0.40</span>' +
                 '</div>';
             // Outline color: chip + 12-color palette. No "auto"
@@ -88479,7 +88499,7 @@
                      _dpBtn("point-shape",   "shape",   "Shape") +
                      _dpBtn("point-size",    "size",    "Size") +
                      _dpBtn("point-opacity", "opacity", "Opacity") +
-                     _dpBtn("point-scatter", "scatter", "Arrange") +
+                     _dpBtn("point-scatter", "scatter", "Jitter") +
                   '</div>' +
                   _dpStrip("point-color",   _dpColorCtrl) +
                   _dpStrip("point-shape",   _dpShapeCtrl) +
