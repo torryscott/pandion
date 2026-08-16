@@ -78649,8 +78649,19 @@
         // hex toward L<=0.4 so white text on a color-tinted active scope
         // button stays readable. Shared by the scope-toggle accent.
         function _gbLegibleTint(hex) {
+            // Same guard as the bar panel's _legibleTint (t4-160): callers
+            // paint WHITE text on this value, so "transparent" / "none" /
+            // "" must never pass through - the Applies-to toggle went
+            // invisible the moment the DATA POINTS were transparent
+            // (Torry, Aug 2026), exactly the bar-fill bug one panel over.
+            // This is the GLOBAL sibling, so the fix reaches every scope
+            // row that tints itself from its element: data points, the
+            // dist families, freq slices, likert, the Q-Q band.
+            var _ts = String(hex || "").toLowerCase();
+            if (!_ts || _ts === "transparent" || _ts === "none")
+                return "#1a5fb4";
             var rgb = hexToRgb(hex);
-            if (!rgb) return hex;
+            if (!rgb) return "#1a5fb4";
             var hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
             if (hsl.l <= 0.4) return hex;
             var out = hslToRgb(hsl.h, hsl.s, 0.4);
