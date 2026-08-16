@@ -309,12 +309,18 @@ const picker = await page.evaluate(() => {
                  '#ps-columns .ps-chip.ps-chip-dim'))
                  .map(c => c.getAttribute('data-col')).sort().join(',') };
 });
-if (!picker || picker.cols !== 'hours,score' ||
+// Scatter accepts text-labelled categoricals since t4-181 (a scatter of
+// two dichotomies IS a phi coefficient), so every non-id column is
+// eligible for this role and nothing dims - there is nothing left for
+// this role to refuse. The role-card glow/dim teaching is still checked
+// on hover further down, and textcat-check pins that a role which DOES
+// restrict (Group By) still offers only what it accepts.
+if (!picker || picker.cols !== 'condition,hours,score,site' ||
     !/horizontal/.test(picker.blurb) || !/Accepts/.test(picker.blurb) ||
-    picker.dimmed !== 'condition,site')
+    picker.dimmed !== '')
     throw new Error('inline picker wrong: ' + JSON.stringify(picker));
-console.log('  ok  the card expands into an inline picker (eligible only, ' +
-            'teaching blurb inside) and dims incompatible list chips');
+console.log('  ok  the card expands into an inline picker with a teaching ' +
+            'blurb, and offers every compatible column');
 await page.click('#ps-slots .ps-role-picker button[data-col="score"]');
 await page.waitForTimeout(600);
 const afterPick = await page.evaluate(() => ({
@@ -366,8 +372,10 @@ const hover = await page.evaluate(() => {
     return { xvar: get('xvar'), groupVar: get('groupVar'),
              facetVar: get('facetVar') };
 });
+// Since t4-181 an X axis accepts a text-labelled categorical too, so
+// hovering one lights every role it could go in - including X.
 if (hover.groupVar !== 'glow' || hover.facetVar !== 'glow' ||
-    hover.xvar !== 'dim')
+    hover.xvar !== 'glow')
     throw new Error('hover highlight wrong: ' + JSON.stringify(hover));
 await page.mouse.move(5, 5);
 await page.waitForTimeout(150);

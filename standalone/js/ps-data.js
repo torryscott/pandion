@@ -1328,8 +1328,15 @@ window.PSData = (function () {
         // point-biserial. Only the standalone was refusing them, so a
         // yes/no column could not be dropped at all while its 0/1
         // twin could.
-        { key: "xvar", label: "X", accepts: ["continuous", "ordinal", "nominal"], required: true },
-        { key: "yvar", label: "Y", accepts: ["continuous", "ordinal", "nominal"], required: true },
+        // accepts = what may be DROPPED (jamovi's permitted), prefers =
+        // what the role is FOR (jamovi's suggested). Opening the roles to
+        // categoricals otherwise cost the one-candidate suggestion chip,
+        // which only appears when exactly one unassigned variable fits:
+        // once everything fits, nothing is ever the only candidate.
+        { key: "xvar", label: "X", accepts: ["continuous", "ordinal", "nominal"],
+          prefers: ["continuous", "ordinal"], required: true },
+        { key: "yvar", label: "Y", accepts: ["continuous", "ordinal", "nominal"],
+          prefers: ["continuous", "ordinal"], required: true },
         { key: "groupVar", label: "Group By", accepts: ["nominal", "ordinal"], required: false },
         { key: "facetVar", label: "Panels", accepts: ["nominal", "ordinal"], required: false }
       ],

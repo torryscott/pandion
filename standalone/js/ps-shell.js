@@ -11107,9 +11107,23 @@
         // explicit one-click accept - never assign silently.
         if (def.required && !def.multi && !members.length) {
           var assigned = roleTagsFor(curModule());
+          // A role that declares what it PREFERS suggests from that
+          // shorter list: an X axis accepts a categorical but is FOR a
+          // measurement, so "the only variable that fits" should mean
+          // the only one it is for. Falls back to everything eligible
+          // when the preference rules nothing in, and roles without a
+          // preference are untouched.
+          var pool = eligible;
+          if (def.prefers && def.prefers.length) {
+            var pref = [];
+            for (var pi = 0; pi < eligible.length; pi++)
+              if (def.prefers.indexOf(PROJECT.table.types[eligible[pi]]) !== -1)
+                pref.push(eligible[pi]);
+            if (pref.length) pool = pref;
+          }
           var cands = [];
-          for (var ci = 0; ci < eligible.length; ci++)
-            if (!assigned[eligible[ci]]) cands.push(eligible[ci]);
+          for (var ci = 0; ci < pool.length; ci++)
+            if (!assigned[pool[ci]]) cands.push(pool[ci]);
           if (cands.length === 1) {
             (function (col) {
               var sug = mkEl("button", "ps-role-suggest");
