@@ -760,6 +760,9 @@ window.PSData = (function () {
       xyYLevels: yv.levels,
       xyXOrdinalHint: xv.ordHint === true,
       xyYOrdinalHint: yv.ordHint === true,
+      // Unordered categoricals, for the fit-line-on-arbitrary-codes rule.
+      xyXNominal: (table.types || {})[roles.xvar] === "nominal",
+      xyYNominal: (table.types || {})[roles.yvar] === "nominal",
       groupCategories: gLevels,
       hasGroups: hasGroup,
       xLabel: titleFrom(spec, "xTitleOverride", "xTitle", roles.xvar),
