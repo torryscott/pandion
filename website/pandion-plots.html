@@ -9278,8 +9278,15 @@ window.PSData = (function () {
         // point-biserial. Only the standalone was refusing them, so a
         // yes/no column could not be dropped at all while its 0/1
         // twin could.
-        { key: "xvar", label: "X", accepts: ["continuous", "ordinal", "nominal"], required: true },
-        { key: "yvar", label: "Y", accepts: ["continuous", "ordinal", "nominal"], required: true },
+        // accepts = what may be DROPPED (jamovi's permitted), prefers =
+        // what the role is FOR (jamovi's suggested). Opening the roles to
+        // categoricals otherwise cost the one-candidate suggestion chip,
+        // which only appears when exactly one unassigned variable fits:
+        // once everything fits, nothing is ever the only candidate.
+        { key: "xvar", label: "X", accepts: ["continuous", "ordinal", "nominal"],
+          prefers: ["continuous", "ordinal"], required: true },
+        { key: "yvar", label: "Y", accepts: ["continuous", "ordinal", "nominal"],
+          prefers: ["continuous", "ordinal"], required: true },
         { key: "groupVar", label: "Group By", accepts: ["nominal", "ordinal"], required: false },
         { key: "facetVar", label: "Panels", accepts: ["nominal", "ordinal"], required: false }
       ],
@@ -20805,9 +20812,23 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
         // explicit one-click accept - never assign silently.
         if (def.required && !def.multi && !members.length) {
           var assigned = roleTagsFor(curModule());
+          // A role that declares what it PREFERS suggests from that
+          // shorter list: an X axis accepts a categorical but is FOR a
+          // measurement, so "the only variable that fits" should mean
+          // the only one it is for. Falls back to everything eligible
+          // when the preference rules nothing in, and roles without a
+          // preference are untouched.
+          var pool = eligible;
+          if (def.prefers && def.prefers.length) {
+            var pref = [];
+            for (var pi = 0; pi < eligible.length; pi++)
+              if (def.prefers.indexOf(PROJECT.table.types[eligible[pi]]) !== -1)
+                pref.push(eligible[pi]);
+            if (pref.length) pool = pref;
+          }
           var cands = [];
-          for (var ci = 0; ci < eligible.length; ci++)
-            if (!assigned[eligible[ci]]) cands.push(eligible[ci]);
+          for (var ci = 0; ci < pool.length; ci++)
+            if (!assigned[pool[ci]]) cands.push(pool[ci]);
           if (cands.length === 1) {
             (function (col) {
               var sug = mkEl("button", "ps-role-suggest");
