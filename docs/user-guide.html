@@ -1638,19 +1638,19 @@ control, is identical in both.</div>
 <p style="margin:2px 0"><b>Common misread.</b> The sideways spread is arbitrary placement, not a second variable, so do not interpret a point's offset.</p>
 </div>
 <div class="glossentry" style="margin:0 0 14px">
-<p style="margin:10px 0 2px"><b>Beeswarm</b><span style="color:#8a8a8a;font-size:.85em"> · Compare, RM, Dist</span></p>
-<p style="margin:2px 0">A beeswarm layout moves points sideways just enough to reduce overlap while leaving their measured values unchanged. Points stay within the selected Spread width, so some may still overlap when space is tight. Regions with many nearby values usually form wider bulges.</p>
+<p style="margin:10px 0 2px"><b>Swarm</b><span style="color:#8a8a8a;font-size:.85em"> · Compare, RM, Dist</span></p>
+<p style="margin:2px 0">A swarm layout (a beeswarm in the wider literature) moves points sideways just enough to reduce overlap while leaving their measured values unchanged. Points stay within the selected Spread width, so some may still overlap when space is tight. Regions with many nearby values usually form wider bulges.</p>
 <p style="margin:2px 0"><b>How to read it.</b> Use the bulges as a rough visual cue to where values are concentrated, not as an exact density estimate. Only the value-axis position is measured; the sideways position is used for packing.</p>
 <p style="margin:2px 0"><b>Common misread.</b> As with jitter, the sideways position is only for packing, it is not a measured quantity.</p>
 </div>
 <div class="glossentry" style="margin:0 0 14px">
 <p style="margin:10px 0 2px"><b>Strip plot</b><span style="color:#8a8a8a;font-size:.85em"> · Compare, RM, Dist</span></p>
 <p style="margin:2px 0">A strip layout adds no sideways offset. All points in a category share the same category position, so identical or nearby values may overlap and hide how many observations are there.</p>
-<p style="margin:2px 0"><b>How to read it.</b> One visible dot may represent several observations. Switch to jitter or beeswarm when seeing overlap is important.</p>
+<p style="margin:2px 0"><b>How to read it.</b> One visible dot may represent several observations. Switch to jitter or swarm when seeing overlap is important.</p>
 </div>
 <div class="glossentry" style="margin:0 0 14px">
 <p style="margin:10px 0 2px"><b>Spread (jitter / swarm width)</b><span style="color:#8a8a8a;font-size:.85em"> · Compare, RM, Dist</span></p>
-<p style="margin:2px 0">Spread sets how far the jitter or beeswarm points may fan out on each side, as a fraction of the bar or category width. It is a layout setting, not a statistic, and the Strip and No-scatter modes ignore it.</p>
+<p style="margin:2px 0">Spread sets how far the jitter or swarm points may fan out on each side, as a fraction of the bar or category width. It is a layout setting, not a statistic, and the Strip and No-scatter modes ignore it.</p>
 <p style="margin:2px 0"><b>How to read it.</b> Read it as a crowding dial: widen it when points overlap, narrow it to keep each group compact.</p>
 <p style="margin:2px 0"><b>Common misread.</b> This spread has nothing to do with statistical spread such as standard deviation, it only controls point placement.</p>
 </div>

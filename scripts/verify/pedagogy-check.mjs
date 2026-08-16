@@ -45,7 +45,7 @@ const CASES = [
                              // Jul 2026 in-context terms pass
                              ['silverman', "Silverman's rule of thumb"],
                              ['kendall', 'Kendall tau'],
-                             ['beeswarm', 'Beeswarm'],
+                             ['beeswarm', 'Swarm'],
                              ['whisker', 'Whisker (box plot)']] },
       // Jul 2026: drawn shapes are labeled by their REAL kind (the
       // fixture's shape is a rect -> "Rectangle", not "Annotation").
