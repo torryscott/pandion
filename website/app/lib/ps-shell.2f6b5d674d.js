@@ -12722,7 +12722,7 @@
   // that only matched whole cells would be far less useful.
   function gridReplace(all) {
     var t = PROJECT.table;
-    if (!t || !GRID_FIND_QUERY) {
+    if (!t || !GRID_FIND_QUERY.trim()) {
       showToast("Type something to find first");
       return;
     }
@@ -12785,7 +12785,7 @@
     var priorKey = gridFindResultKey(prior);
     GRID_FIND_RESULTS = [];
     var t = PROJECT.table, needle = GRID_FIND_QUERY.toLocaleLowerCase();
-    if (t && needle) {
+    if (t && needle && GRID_FIND_QUERY.trim()) {
       var visible = gridVisibleColumns(t);
       for (var row = 0; row < nRows(t); row++)
         for (var ci = 0; ci < visible.length; ci++) {
@@ -12810,7 +12810,7 @@
     el("ps-data-redo").disabled = !DATA_REDO.length;
     el("ps-data-find-prev").disabled = !GRID_FIND_RESULTS.length;
     el("ps-data-find-next").disabled = !GRID_FIND_RESULTS.length;
-    var findCountTxt = !GRID_FIND_QUERY ? "" :
+    var findCountTxt = !GRID_FIND_QUERY.trim() ? "" :
       (GRID_FIND_RESULTS.length
        ? (GRID_FIND_INDEX + 1) + " of " + GRID_FIND_RESULTS.length
        : "No matches");
@@ -12820,7 +12820,7 @@
     var findBtn = el("ps-data-find-btn");
     if (findBtn) {
       var findLabel = findBtn.querySelector("svg");
-      findBtn.classList.toggle("ps-data-filter-active", !!GRID_FIND_QUERY);
+      findBtn.classList.toggle("ps-data-filter-active", !!GRID_FIND_QUERY.trim());
       while (findLabel && findLabel.nextSibling)
         findBtn.removeChild(findLabel.nextSibling);
       findBtn.appendChild(document.createTextNode(
@@ -12982,7 +12982,15 @@
     gridRevealFound(GRID_FIND_RESULTS[GRID_FIND_INDEX]);
   }
   function gridSetFindQuery(query) {
-    GRID_FIND_QUERY = String(query || "").trim();
+    // VERBATIM, not trimmed. The command bar writes this value back into
+    // the search box, so trimming here deleted the space the moment it
+    // was typed: "Low dose" arrived as "Lowdose" and a category name with
+    // a space could not be searched at all (a collaborator's report, Aug
+    // 2026). Whitespace-only input still finds nothing, because the
+    // matcher below tests the TRIMMED query for emptiness, and a real
+    // trailing space is now meaningful: "Low " matches "Low dose" and
+    // not "Lower".
+    GRID_FIND_QUERY = String(query == null ? "" : query);
     GRID_FIND_INDEX = -1;
     gridRefreshFindResults();
     syncDataCommandBar();
