@@ -1316,8 +1316,17 @@ window.PSData = (function () {
       label: "Scatter",
       build: buildXY,
       roles: [
-        { key: "xvar", label: "X", accepts: ["continuous", "ordinal"], required: true },
-        { key: "yvar", label: "Y", accepts: ["continuous", "ordinal"], required: true },
+        // Text-labelled categoricals belong here (Torry, Aug 2026). The
+        // engine has always plotted factor axes by level code and ships
+        // their names for the ticks, jamovi's own roles permit factor,
+        // and jitter is what makes such an axis readable - a scatter of
+        // two dichotomies is a phi coefficient, which nothing else
+        // draws, and a dichotomy against a continuous variable is a
+        // point-biserial. Only the standalone was refusing them, so a
+        // yes/no column could not be dropped at all while its 0/1
+        // twin could.
+        { key: "xvar", label: "X", accepts: ["continuous", "ordinal", "nominal"], required: true },
+        { key: "yvar", label: "Y", accepts: ["continuous", "ordinal", "nominal"], required: true },
         { key: "groupVar", label: "Group By", accepts: ["nominal", "ordinal"], required: false },
         { key: "facetVar", label: "Panels", accepts: ["nominal", "ordinal"], required: false }
       ],
