@@ -33424,8 +33424,17 @@
                 var start = 0;
                 while (start < n) {
                     var end = start;
+                    // Rows are BINNED, not chained: a row spans one marker
+                    // height measured from its OWN first point. The chaining
+                    // rule (each point within 2r of the PREVIOUS one) let a
+                    // dense column swallow itself into a single cluster of
+                    // n points, and the symmetric slots below then ran
+                    // monotonically from the lowest value to the highest -
+                    // drawing a diagonal streak instead of a swarm (Torry's
+                    // screenshot, Aug 2026; only visible with enough points
+                    // to chain, which is why sparse categories looked fine).
                     while (end + 1 < n &&
-                           Math.abs(sorted[end + 1].y - sorted[end].y) < 2 * radius)
+                           (sorted[end + 1].y - sorted[start].y) < 2 * radius)
                         end++;
                     var k = end - start + 1;
                     var pitch = 2 * radius;
@@ -33784,7 +33793,24 @@
                     // so the user can press Delete to hide it.
                     var _selKey = (bar.x || "") + "::" + (bar.group || "") + "::" + idx;
                     var _selCurrent = window.__gb2_selectedPointKey;
-                    if (_selCurrent === _selKey) {
+                    // The ring is SELECTION chrome, so it paints only while
+                    // that selection is actually live: the Data points panel
+                    // open, or the point's own context menu up (which sets
+                    // the key without touching the inspector selection).
+                    // The key is a WINDOW global and outlives any single
+                    // chart, so without this gate a ring reappeared on a
+                    // chart with nothing selected - switch charts, come
+                    // back, and a dot wore a dashed ring the user had to
+                    // click-and-unclick to clear (Torry, Aug 2026). The
+                    // key's own lifetime is unchanged, so Delete-to-hide
+                    // still works exactly as before.
+                    var _selLive = false;
+                    try {
+                        _selLive = (inspector.selection.length === 1 &&
+                                    inspector.selection[0] === "dataPoints") ||
+                                   !!document.querySelector('[data-role="gb2-point-menu"]');
+                    } catch (_eSl) { _selLive = false; }
+                    if (_selCurrent === _selKey && _selLive) {
                         var _selR = Math.max(pointSize + 4, 8);
                         var _selHalo = svgEl("circle", {
                             cx: px, cy: py, r: _selR,

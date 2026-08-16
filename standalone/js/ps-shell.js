@@ -8656,6 +8656,13 @@
   // ================================================================ sink
   var LAST_DATA_HIDDEN_POINTS = [];
   var LINKED_CELL = null; // { caseId, col }; session-only cross-view selection
+  // The chart-side ring for that link is a REVEAL, armed by a data-side
+  // action and spent once the user turns to the charts. Without this it
+  // was re-applied on every render for as long as LINKED_CELL lived, so
+  // one ordinary spreadsheet click left a dashed ring on a point in
+  // every chart, with nothing selected, which reads as a stuck
+  // selection (Torry, Aug 2026).
+  var LINK_RING_ARMED = false;
   var LINKED_REVEAL_EMPHASIS = false;
   function pointForCaseCell(payload, caseId, col) {
     if (!payload || !Array.isArray(payload.bars)) return null;
@@ -8677,7 +8684,17 @@
       ? PROJECT.table.caseIds.indexOf(LINKED_CELL.caseId) : -1;
   }
   function applyLinkedPointSelection(payload) {
-    if (!LINKED_CELL) return;
+    if (!LINKED_CELL || !LINK_RING_ARMED) {
+      // Spent or absent: drop any ring left over from a previous render
+      // and release the engine key, so nothing paints it back.
+      var host0 = hostEl();
+      var old0 = host0
+        ? host0.querySelectorAll('[data-role="data-point-selected"]') : [];
+      for (var oi = 0; oi < old0.length; oi++)
+        if (old0[oi].parentNode) old0[oi].parentNode.removeChild(old0[oi]);
+      try { window.__gb2_selectedPointKey = null; } catch (e) {}
+      return;
+    }
     var host = hostEl();
     var priorRings = host
       ? host.querySelectorAll('[data-role="data-point-selected"]') : [];
@@ -8689,6 +8706,7 @@
       ? point.cat + "::" + point.group + "::" + point.idx : null;
   }
   function ensureLinkedPointRing() {
+    if (!LINK_RING_ARMED) return;
     var key = window.__gb2_selectedPointKey;
     var host = hostEl();
     if (!key || !host ||
@@ -8722,6 +8740,7 @@
     if (row < 0) return false;
     LINKED_CELL = { caseId: String(caseId), col: String(col) };
     LINKED_REVEAL_EMPHASIS = true;
+    LINK_RING_ARMED = true;
     gridApplySelection();
     return true;
   }
@@ -12226,6 +12245,7 @@
         caseId: String(PROJECT.table.caseIds[Number(focusRow)]),
         col: String(focusCol)
       };
+      LINK_RING_ARMED = true;
       // The spreadsheet already has its own active-cell border. A normal Data
       // click updates chart linking but releases the extra Reveal emphasis.
       LINKED_REVEAL_EMPHASIS = false;
@@ -12233,6 +12253,7 @@
     } else if (appWorkspace() === "data") {
       LINKED_CELL = null;
       LINKED_REVEAL_EMPHASIS = false;
+      LINK_RING_ARMED = false;
       try { window.__gb2_selectedPointKey = null; } catch (e) {}
     }
   }
@@ -13992,6 +14013,7 @@
       col: String(col)
     };
     LINKED_REVEAL_EMPHASIS = false;
+    LINK_RING_ARMED = true;
     selectInspectorVariable(col);
     var td = gridFindTd(col, row);
     if (!td) {
@@ -16170,6 +16192,12 @@
     if (!isLayoutTab(cur)) captureChartSnapshot(cur.id);
     if (PS_FLUSH_PENDING_OPTS) PS_FLUSH_PENDING_OPTS();   // B12
     PROJECT.activeChart = id;
+    // Engine-side per-point selection is a WINDOW global, so it would
+    // otherwise follow us onto the next chart and ring whichever point
+    // happens to share its category/group/index (Torry, Aug 2026).
+    try { window.__gb2_selectedPointKey = null; } catch (e) {}
+    try { window.__gb2_dpClickedGroup = null; } catch (e) {}
+    LINK_RING_ARMED = false;
     LAYOUT_SEL = [];
     LAYOUT_ACTIVE_ID = null;
     persist(false);
