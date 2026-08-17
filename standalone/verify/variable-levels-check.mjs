@@ -36,10 +36,12 @@ console.log('  ok  continuous variables omit the levels section');
 
 await page.click('#ps-datagrid th[data-grid-col="condition"]');
 await page.waitForTimeout(80);
+// The header states the true category count since t4-188 (the clipped
+// list read as a complete list, so the total moved on screen).
 if (!(await page.locator('#ps-variable-level-section').isVisible()) ||
     await page.locator('#ps-variable-level-title').textContent() !==
-        'Category order')
-    throw new Error('nominal variables do not expose Category order');
+        'Category order (3)')
+    throw new Error('nominal variables do not expose Category order with its count');
 if (await page.locator('#ps-variable-levels button').count())
     throw new Error('visible up/down level buttons remain');
 if (await page.locator('#ps-variable-levels [data-level]').count() !== 3 ||
@@ -129,8 +131,8 @@ console.log('  ok  keyboard reordering is accessible and undoable');
 await page.selectOption('#ps-variable-type', 'ordinal');
 await page.waitForTimeout(120);
 if (await page.locator('#ps-variable-level-title').textContent() !==
-    'Ordered levels')
-    throw new Error('ordinal variables do not expose Ordered levels');
+    'Ordered levels (3)')
+    throw new Error('ordinal variables do not expose Ordered levels with its count');
 console.log('  ok  ordinal variables identify Ordered levels');
 
 if (errors.length) throw new Error(`page errors: ${errors.join(' | ')}`);
