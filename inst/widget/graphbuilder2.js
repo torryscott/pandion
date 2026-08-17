@@ -6526,6 +6526,24 @@
             return s;
         }
         function setSvgText(el, content) {
+            // SVG collapses runs of whitespace like HTML, so two category
+            // names differing only by an extra space drew IDENTICALLY -
+            // measured at the same 63.5px on a real chart (a collaborator,
+            // Aug 2026: names are space sensitive, but the program hides
+            // the extra spaces making it impossible to see the difference).
+            // Preserving is the honest choice for a figure: the label
+            // shows the name the data actually carries. It also brings the
+            // drawn width into line with the canvas measureText the margin
+            // maths already uses, which counts every space.
+            // BOTH mechanisms: browsers govern SVG text whitespace through
+            // CSS now (the attribute alone left the two labels measuring an
+            // identical 63.5px), while xml:space is what the librsvg-based
+            // PDF export reads. "pre" is safe here because this engine
+            // splits its own lines into tspans and never relies on wrapping.
+            try {
+                el.setAttribute("xml:space", "preserve");
+                el.style.whiteSpace = "pre";
+            } catch (_eXs) {}
             while (el.firstChild) el.removeChild(el.firstChild);
             var s = String(content == null ? "" : content);
             if (s.indexOf("\n") < 0) {
