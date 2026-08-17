@@ -2808,7 +2808,13 @@
   .ps-var-advice code { white-space: pre-wrap; }
   .ps-level-list {
     display: flex; flex-direction: column; gap: 4px;
-    max-height: 176px; overflow: auto;
+    /* No internal cap (Torry, Aug 2026: "maybe make it more obvious that
+       we need to scroll, or just list them all"). 176px held about five
+       chips, macOS hides the scrollbar until you scroll, and the Sort
+       links sat right under the fold - so a 19-level list read as a
+       complete 5-level list, convincingly enough that it was chased as
+       a data bug. The renderer already caps at 40 chips with a "+N
+       more" tail, so the section stays bounded and the rail scrolls. */
   }
   .ps-level-chip {
     max-width: 100%; overflow: hidden; text-overflow: ellipsis;
@@ -6066,7 +6072,7 @@
 <script src="lib/jspdf.umd.min.979a2ef514.js"></script>
 <script src="lib/svg2pdf.umd.min.4ada250f50.js"></script>
 <script src="lib/graphbuilder2.min.0fecbdcf98.js"></script>
-<script src="lib/ps-shell.1c19e985d6.js"></script>
+<script src="lib/ps-shell.2e10d7ac08.js"></script>
 <script src="lib/ps-tour.fe1b2fd3ed.js"></script>
 </body>
 </html>
