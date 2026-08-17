@@ -22899,30 +22899,41 @@
       "from the Data menu using this app's own formulas.";
     el("ps-variable-derived").innerHTML = h;
   }
+  // Cards the user has waved away, per column + advice kind, session
+  // only (Torry, Aug 2026: "there's no way to clear it except to say
+  // merge" - advice must be declinable without taking the action).
+  var ADVICE_DISMISSED = Object.create(null);
   function syncVariableAdvice(t, col) {
     var section = el("ps-variable-advice-section");
     var body = el("ps-variable-advice");
     var advice = variableAdvice(t, col);
-    if (!advice) {
+    if (!advice || ADVICE_DISMISSED[col + "\u001F" + advice.kind]) {
       section.style.display = "none";
       body.innerHTML = "";
       return;
     }
     section.style.display = "block";
     var h = advice.html;
+    h += '<div class="ps-var-advice-actions">';
     if (advice.actions && advice.actions.length) {
-      h += '<div class="ps-var-advice-actions">';
       for (var i = 0; i < advice.actions.length; i++)
         h += '<button type="button" data-advice="' +
           escHtml(advice.actions[i].act) + '">' +
           escHtml(advice.actions[i].label) + "</button>";
-      h += "</div>";
     }
+    h += '<button type="button" data-advice="advice-dismiss">Dismiss</button>' +
+      "</div>";
     body.innerHTML = h;
   }
   function runVariableAdvice(act) {
     var t = PROJECT.table, col = INSPECTOR_VAR;
     if (!t || !col) return;
+    if (act === "advice-dismiss") {
+      var adv = variableAdvice(t, col);
+      if (adv) ADVICE_DISMISSED[col + "\u001F" + adv.kind] = 1;
+      syncVariableInspector();
+      return;
+    }
     var a = t.typeAudit && t.typeAudit[col];
     if (act === "advice-id") { setColType(col, "id"); return; }
     if (act === "advice-year" || act === "advice-month") {
@@ -23068,8 +23079,25 @@
         : "";
       basis.style.display = filterOn ? "block" : "none";
     }
-    syncVariableAdvice(t, col);
-    syncVariableDerived(t, col);
+    // ADVISORY sections, guarded (Torry, Aug 2026): these two render
+    // directly ABOVE the Category Order list, in the same pass. A failure
+    // in either used to abort the sync right here, so the card and the
+    // stats stayed fresh while the level list below froze at its last
+    // good render - which a user experiences as "the yellow card is
+    // blocking the category order", with no error visible anywhere. A
+    // card is advice; it must never be able to take the structural
+    // sections down with it. The failure now lands in the console with
+    // its cause instead of freezing the panel.
+    try { syncVariableAdvice(t, col); }
+    catch (eAdv) {
+      try { el("ps-variable-advice-section").style.display = "none"; } catch (e2) {}
+      try { console.error("variable advice card failed; hidden", eAdv); } catch (e3) {}
+    }
+    try { syncVariableDerived(t, col); }
+    catch (eDer) {
+      try { el("ps-variable-derived-section").style.display = "none"; } catch (e4) {}
+      try { console.error("derived-formula note failed; hidden", eDer); } catch (e5) {}
+    }
     var levels = t.levels[col] || [], levelRoot = el("ps-variable-levels");
     var categorical = t.types[col] === "nominal" ||
       t.types[col] === "ordinal";
