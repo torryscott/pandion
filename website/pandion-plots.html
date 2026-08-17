@@ -12358,12 +12358,22 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
           }
         for (i = 0; i < rv.length; i++) {
           if (isExcluded(t, col, i)) { out.push(null); continue; }
-          var s2 = String(rv[i]).trim();
-          if (tokens[s2]) { out.push(null); continue; }
-          out.push(s2);
-          if (wantLevels && seenS[s2] === undefined) {
-            seenS[s2] = 1;
-            lv.push(s2);
+          // The typed value keeps the string AS STORED. Trimming it here
+          // silently merged categories that differ by leading or trailing
+          // space: the cell showed "S 1 ", the Distinct count counted it,
+          // the spellings card counted it, and the Category Order list did
+          // not have it, because by then it had become "S 1" (Torry, Aug
+          // 2026: I would like to see every single variation in there).
+          // Merging is a CHOICE the spellings card offers, not something
+          // typing should do behind the user's back. Missing tokens are
+          // still matched against the TRIMMED text, so a cell holding
+          // " NA " still reads as missing.
+          var s2raw = String(rv[i]);
+          if (tokens[s2raw.trim()]) { out.push(null); continue; }
+          out.push(s2raw);
+          if (wantLevels && seenS[s2raw] === undefined) {
+            seenS[s2raw] = 1;
+            lv.push(s2raw);
           }
         }
         if (wantLevels) t.levels[col] = lv;
@@ -32662,10 +32672,14 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       // that undoes nothing is worse than no mark.
       var rawCol = t.raw[col] || [], hits = [];
       for (i0 = 0; i0 < rawCol.length; i0++) {
-        // Levels are built from the TRIMMED value, so that is what carries a
-        // mapping; the cell may still hold the untrimmed original.
-        var trimmed = String(rawCol[i0] == null ? "" : rawCol[i0]).trim();
-        var want = to[trimmed];
+        // Levels carry the value AS STORED now (they used to be trimmed,
+        // and this lookup was written for that), so the cell's own text is
+        // what holds a mapping. The trimmed form stays as a fallback for a
+        // project saved under the old rule, whose declared level list may
+        // still hold trimmed names.
+        var cell = String(rawCol[i0] == null ? "" : rawCol[i0]);
+        var want = to[cell];
+        if (want === undefined) want = to[cell.trim()];
         if (want !== undefined && want !== rawCol[i0])
           hits.push({ row: i0, value: want });
       }
