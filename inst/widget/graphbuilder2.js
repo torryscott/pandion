@@ -49603,7 +49603,7 @@
                             : _lcStride > 1 ? "thinned" : "tilted") +
                         " to fit under the " + _lcNoun + "s. Turning the chart " +
                         "sideways gives each name a straight line of its own: " +
-                        "set Orientation to Horizontal on this chart's style " +
+                        "set Direction to Horizontal on this chart's style " +
                         "panel (click a " + _lcNoun + "), in Chart settings, " +
                         "or with the button below.",
                     fixGt: null, fixOrient: "horizontal" });
@@ -63883,7 +63883,7 @@
             var _bsBarTabLabel =
                 _bsIsBox       ? "Box body"       :
                 _bsIsViolin    ? "Fill"           :
-                _bsIsRaincloud ? (_bsRcKindEarly === "box" ? "Box body" : "Cloud fill") :
+                _bsIsRaincloud ? (_bsRcKindEarly === "box" ? "Box body" : "Cloud") :
                                  "Bars";
             var _bsTabs = [
                 { id: "bar",    label: _bsBarTabLabel },
@@ -64166,7 +64166,7 @@
                      (_bsShowFreqStat ? _bsBtn("bar-freqdisplay", "appearance", "Display",
                          "Choose what bar height represents and how groups share each category") : "") +
                      ((_bsShowSummary || _bsShowFreqStat || _bsShowFreqPos) ? _gb2ChipDivHtml() : "") +
-                     _bsBtn("bar-orient",  "rotation", "Orientation",
+                     _bsBtn("bar-orient",  "rotation", "Direction",
                          "Run the chart up or sideways - applies to the whole chart") +
                      _bsBtn("bar-color",   "color",   "Color") +
                      _bsBtn("bar-pattern", "pattern", "Pattern") +
@@ -68210,7 +68210,7 @@
                      _lsBtn("marker-color", "color", "Color") +
                      _lsBtn("marker-shape", "shape", "Shape") +
                      _lsBtn("marker-size",  "size",  "Size")  +
-                     _lsBtn("marker-orient", "rotation", "Orientation") +
+                     _lsBtn("marker-orient", "rotation", "Direction") +
                   '</div>' +
                   _lsStrip("marker-color", _mkColorCtrl) +
                   _lsStrip("marker-shape", _mkShapeCtrl) +
@@ -95399,7 +95399,7 @@
                 var _findRainKind = (gt === "raincloud" && window.__gb2_rcPanelKind === "box") ? "box" : "cloud";
                 var _findBodyTab = gt === "box" ? "Box body"
                     : gt === "violin" ? "Fill"
-                    : gt === "raincloud" ? (_findRainKind === "box" ? "Box body" : "Cloud fill")
+                    : gt === "raincloud" ? (_findRainKind === "box" ? "Box body" : "Cloud")
                     : "Bars";
                 var _findBodyNoun = gt === "box" ? "Box"
                     : gt === "violin" ? "Violin"
