@@ -58,6 +58,8 @@
     list(arg = "corr_show_values", opt = "corrShowValues", bool = TRUE, default = TRUE),
     list(arg = "corr_sig_stars", opt = "corrSigStars", bool = TRUE, default = FALSE),
     list(arg = "corr_number_grid", opt = "corrNumberGrid", bool = TRUE, default = TRUE),
+    list(arg = "corr_value_content", opt = "corrValueContent", bool = FALSE, default = "r"),
+    list(arg = "corr_color_numbers", opt = "corrColorNumbers", bool = TRUE, default = TRUE),
     list(arg = "corr_legend_show", opt = "corrLegendShow", bool = TRUE, default = TRUE)
 )
 

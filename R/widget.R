@@ -700,6 +700,13 @@ graphbuilder2_html <- function(bars,
                                corr_cell_border_width = 0,
                                corr_circle_scale = 0.92,
                                corr_number_grid = TRUE,
+                               # What the cells print: "r" (default), "rp" =
+                               # r with the deciding p beneath, "p" = the p
+                               # value alone (Aug 2026 collaborator request).
+                               corr_value_content = "r",
+                               # FALSE = plain near-black numbers instead of
+                               # the diverging value tint (numbers + mixed).
+                               corr_color_numbers = TRUE,
                                corr_var_order = NULL,
                                corr_var_relabels = NULL,
                                corr_var_styles = NULL,
@@ -1950,6 +1957,8 @@ graphbuilder2_html <- function(bars,
         corrCellBorderWidth = as.numeric(corr_cell_border_width),
         corrCircleScale = as.numeric(corr_circle_scale),
         corrNumberGrid = isTRUE(corr_number_grid),
+        corrValueContent = as.character(corr_value_content),
+        corrColorNumbers = isTRUE(corr_color_numbers),
         corrVarOrder = if (is.null(corr_var_order)) list() else as.list(as.character(corr_var_order)),
         corrVarRelabels = if (is.null(corr_var_relabels)) list() else corr_var_relabels,
         corrVarStyles = if (is.null(corr_var_styles)) list() else corr_var_styles,

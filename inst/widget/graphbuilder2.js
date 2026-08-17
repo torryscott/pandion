@@ -41666,6 +41666,20 @@
                 var tri = (typeof data.corrTriangle === "string") ? data.corrTriangle : "full";
                 if (data.graphType === "corrmixed") tri = "full";
                 var diagMode = (typeof data.corrDiagonal === "string") ? data.corrDiagonal : "one";
+                // What the cells PRINT (Aug 2026, a collaborator: the
+                // matrix showed everything except whether the
+                // correlations are significant): "r" (default), "rp" =
+                // r with the deciding p beneath, "p" = the p alone.
+                var vContent = (data.corrValueContent === "rp" || data.corrValueContent === "p")
+                    ? data.corrValueContent : "r";
+                function fmtPCell(p) {
+                    // bare in-cell p: ".017" / "<.001" - fixed 3 dp,
+                    // the suite-wide p convention (corrDecimals
+                    // governs r only, convention 19)
+                    if (typeof p !== "number" || !isFinite(p)) return "\u2014";
+                    if (p < 0.001) return "<.001";
+                    return p.toFixed(3).replace(/^0\./, ".");
+                }
                 // ---- layout
                 var lblStyle = getEffectiveTextStyle("corrVarLabel");
                 var lblFs = (lblStyle && typeof lblStyle.fontSize === "number" && lblStyle.fontSize > 0)
@@ -41679,7 +41693,13 @@
                 // Color-scale legend reservation. A shown vertical legend
                 // sits in the right gutter; a horizontal one sits below the
                 // matrix (reserve bottom space); a hidden one reclaims both.
-                var _clShow = !_isElementHidden("corrLegend");
+                // Plain (uncolored) numbers mode color-codes nothing,
+                // so the diverging scale would describe nothing that
+                // is drawn - drop it and reclaim the gutter (Aug 2026,
+                // the same collaborator report). Mixed keeps its
+                // colored circles, so its legend stays.
+                var _clShow = !_isElementHidden("corrLegend")
+                    && !(data.graphType === "corrnumbers" && data.corrColorNumbers === false);
                 var _clHoriz = (data.corrLegendOrient === "horizontal");
                 var _clScL = (typeof data.corrLegendScale === "number" && data.corrLegendScale > 0)
                     ? Math.max(0.4, Math.min(3, data.corrLegendScale)) : 1;
@@ -41806,7 +41826,11 @@
                             }
                         }
                         // value text: tiles + circles get it when enabled;
-                        // numbers mode IS the value.
+                        // numbers mode IS the value. vContent picks WHAT
+                        // prints; the p shown is the DECIDING one - the
+                        // adjusted value when Adjust-p is on - exactly what
+                        // stars and fades key on (the tooltip keeps raw +
+                        // adjusted for disclosure).
                         var wantValue = (mode === "number")
                             || (data.corrShowValues === true);
                         if (wantValue && !(mode === "circle" && rV == null && !isDiag)) {
@@ -41816,12 +41840,37 @@
                             } else if (mode === "tile") {
                                 tFill = _crContrast(colorOfR(rV));
                             } else if (mode === "number") {
-                                tFill = textColorOfR(rV);
+                                // plain = one near-black (Aug 2026, a
+                                // collaborator: "I do not want my numbers
+                                // in color"); the diverging tint stays the
+                                // default
+                                tFill = (data.corrColorNumbers === false)
+                                    ? "#333333" : textColorOfR(rV);
                             } else {
                                 tFill = "#333333";
                             }
+                            var mainStr, subStr = null;
+                            if (isDiag) {
+                                // the diagonal is r = 1 by definition and
+                                // carries no test; under "p" it prints an
+                                // em-dash, never a "1" that would read as
+                                // p = 1
+                                mainStr = (vContent === "p") ? "\u2014" : fmtR(rV);
+                            } else if (vContent === "p") {
+                                mainStr = fmtPCell(pV) + starsOf(pV);
+                            } else {
+                                mainStr = fmtR(rV) + starsOf(pV);
+                                if (vContent === "rp" && pV != null)
+                                    subStr = (pV < 0.001) ? "p<.001"
+                                        : "p=" + pV.toFixed(3).replace(/^0\./, ".");
+                            }
+                            var _vFsEff = (_vTS && typeof _vTS.fontSize === "number" && _vTS.fontSize > 0)
+                                ? _vTS.fontSize : vFs;
+                            var subFs = Math.max(7, Math.round(_vFsEff * 7.8) / 10);
                             var vTxt = svgEl("text", {
-                                x: cx0 + cell / 2, y: cy0 + cell / 2 + vFs * 0.35,
+                                x: cx0 + cell / 2,
+                                y: subStr ? (cy0 + cell / 2 - vFs * 0.12)
+                                          : (cy0 + cell / 2 + vFs * 0.35),
                                 "text-anchor": "middle",
                                 "font-size": vFs,
                                 "font-family": "sans-serif",
@@ -41830,7 +41879,7 @@
                                 "pointer-events": "none",
                                 "data-role": "corr-value"
                             });
-                            setSvgText(vTxt, fmtR(rV) + (isDiag ? "" : starsOf(pV)));
+                            setSvgText(vTxt, mainStr);
                             applyTextStyleToElement(vTxt, "corrValueLabel");
                             vTxt.setAttribute("fill", tFill);
                             if (!(_vTS && typeof _vTS.fontSize === "number" && _vTS.fontSize > 0)) {
@@ -41838,6 +41887,30 @@
                             }
                             cellG.appendChild(vTxt);
                             visuals.push(vTxt);
+                            if (subStr) {
+                                // the p rides a second text node (own size
+                                // + dimmer), inheriting the corrValueLabel
+                                // family/weight; fill follows the main text
+                                // so it stays readable on dark tiles
+                                var pTxt = svgEl("text", {
+                                    x: cx0 + cell / 2,
+                                    y: cy0 + cell / 2 + subFs * 1.05,
+                                    "text-anchor": "middle",
+                                    "font-size": subFs,
+                                    "font-family": "sans-serif",
+                                    fill: tFill,
+                                    "fill-opacity": 0.8 * fade,
+                                    "pointer-events": "none",
+                                    "data-role": "corr-value-p"
+                                });
+                                setSvgText(pTxt, subStr);
+                                applyTextStyleToElement(pTxt, "corrValueLabel");
+                                pTxt.setAttribute("fill", tFill);
+                                pTxt.setAttribute("fill-opacity", 0.8 * fade);
+                                pTxt.setAttribute("font-size", subFs);
+                                cellG.appendChild(pTxt);
+                                visuals.push(pTxt);
+                            }
                         }
                         if (!sigOk && treat === "cross") {
                             var in0 = gap / 2 + 1;
@@ -41865,10 +41938,11 @@
                             // clicks landing on its bbox open the text
                             // panel (the bar value-label convention),
                             // clicks elsewhere open the Cells panel.
-                            var _vEl = null;
+                            var _vEls = [];
                             for (var _ve = 0; _ve < els.length; _ve++) {
-                                if (els[_ve].getAttribute
-                                    && els[_ve].getAttribute("data-role") === "corr-value") _vEl = els[_ve];
+                                var _vr = els[_ve].getAttribute
+                                    ? els[_ve].getAttribute("data-role") : null;
+                                if (_vr === "corr-value" || _vr === "corr-value-p") _vEls.push(els[_ve]);
                             }
                             hit.addEventListener("mouseenter", function () {
                                 for (var e2 = 0; e2 < els.length; e2++) {
@@ -41896,18 +41970,20 @@
                             });
                             hit.addEventListener("click", function (ev) {
                                 ev.stopPropagation(); ev.preventDefault();
-                                if (_vEl) {
+                                if (_vEls.length) {
                                     try {
                                         var _pt6 = svg.createSVGPoint();
                                         _pt6.x = ev.clientX; _pt6.y = ev.clientY;
                                         var _m6 = svg.getScreenCTM();
                                         if (_m6) {
                                             var _sp6 = _pt6.matrixTransform(_m6.inverse());
-                                            var _vb6 = _vEl.getBBox();
-                                            if (_sp6.x >= _vb6.x - 2 && _sp6.x <= _vb6.x + _vb6.width + 2
-                                                && _sp6.y >= _vb6.y - 2 && _sp6.y <= _vb6.y + _vb6.height + 2) {
-                                                setInspectorSelection("text:corrValueLabel");
-                                                return;
+                                            for (var _vq = 0; _vq < _vEls.length; _vq++) {
+                                                var _vb6 = _vEls[_vq].getBBox();
+                                                if (_sp6.x >= _vb6.x - 2 && _sp6.x <= _vb6.x + _vb6.width + 2
+                                                    && _sp6.y >= _vb6.y - 2 && _sp6.y <= _vb6.y + _vb6.height + 2) {
+                                                    setInspectorSelection("text:corrValueLabel");
+                                                    return;
+                                                }
                                             }
                                         }
                                     } catch (_eV6) {}
@@ -82381,13 +82457,17 @@
                         _distRangeHtml("cr-bw", 0, 6, 0.25, (typeof data.corrCellBorderWidth === "number" ? data.corrCellBorderWidth : 0), "px") +
                         '<span style="color:#666;">0 hides cell borders</span>');
             } else if (gt === "corrnumbers") {
-                html += _distStripHtml("crgrid", _distCheckHtml("cr-grid", "Show grid lines", data.corrNumberGrid !== false));
+                html += _distStripHtml("crgrid", _distCheckHtml("cr-grid", "Show grid lines", data.corrNumberGrid !== false)
+                    + '<span style="display:inline-block;width:14px;"></span>'
+                    + _distCheckHtml("cr-colnum", "Color numbers by value", data.corrColorNumbers !== false));
             } else {
                 var _crScalePct = _gb2PercentUiValue(
                     typeof data.corrCircleScale === "number" ? data.corrCircleScale : 0.92);
                 html += _distStripHtml("crscale", _distRangeHtml("cr-scale", 40, 100, 2, _crScalePct, "% of cell", _crScalePct))
                     + _distStripHtml("cropacity", _distRangeHtml("cr-op", 0, 1, 0.05, (typeof data.corrCellOpacity === "number" ? data.corrCellOpacity : 1)))
-                    + _distStripHtml("crgrid", _distCheckHtml("cr-grid", "Show grid lines", data.corrNumberGrid !== false));
+                    + _distStripHtml("crgrid", _distCheckHtml("cr-grid", "Show grid lines", data.corrNumberGrid !== false)
+                        + '<span style="display:inline-block;width:14px;"></span>'
+                        + _distCheckHtml("cr-colnum", "Color numbers by value", data.corrColorNumbers !== false));
             }
             pane.innerHTML = html;
             _distWireStrips(pane, (gt === "corrnumbers") ? "crgrid" : (gt === "corrheatmap" ? "crgap" : "crscale"));
@@ -82405,6 +82485,7 @@
             _distWireSlider(pane, "cr-scale", "corrCircleScale", 40, 100, false,
                 function (v) { return v / 100; });
             _distWireCheck(pane, "cr-grid", "corrNumberGrid");
+            _distWireCheck(pane, "cr-colnum", "corrColorNumbers");
             _distWireColor(pane, "crb-color",
                 function () { var c = data.corrCellBorderColor || "#ffffff"; return (c === "transparent") ? "#ffffff" : c; },
                 function (c) { _distCommit("corrCellBorderColor", c); _distSetBtnSwatch(pane, "crbcolor", c); });
@@ -82439,6 +82520,8 @@
                 ? data.corrMethod : "pearson";
             var aCur = String((typeof data.corrSigLevel === "number") ? data.corrSigLevel : 0.05);
             var pAdjCur = (typeof data.corrPAdjust === "string") ? data.corrPAdjust : "none";
+            var vcCur = (data.corrValueContent === "rp" || data.corrValueContent === "p")
+                ? data.corrValueContent : "r";
             // Method + Alpha + Adjust-p share ONE band (they decide
             // which coefficients print and which cells count as
             // significant); Show values / Decimals / stars are display
@@ -82449,6 +82532,12 @@
                 _distSegHtml("cr-method", "pearson", "Pearson", mCur) +
                 _distSegHtml("cr-method", "spearman", "Spearman", mCur) +
                 _distSegHtml("cr-method", "kendall", "Kendall \u03c4-b", mCur) +
+                '</div>' +
+                '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">' +
+                '<span style="color:#666;" title="What the cells print: the correlation, the correlation with its p value beneath, or the p value alone. The p shown is the deciding one - the adjusted value when Adjust p is on.">Cells show</span>' +
+                _distSegHtml("cr-content", "r", "r", vcCur) +
+                _distSegHtml("cr-content", "rp", "r and p", vcCur) +
+                _distSegHtml("cr-content", "p", "p only", vcCur) +
                 '</div>' +
                 '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">' +
                 '<span style="color:#666;">Alpha</span>' +
@@ -82530,6 +82619,28 @@
                 }
             })();
             _distWireSeg(pane, "cr-padj", "corrPAdjust");
+            (function () {
+                // picking a content mode while values are hidden must
+                // SHOW them (the enable-then-open idiom) - on heatmap /
+                // circles with Show values off the seg would otherwise
+                // change nothing visible; registered BEFORE the generic
+                // wire so the flip rides the same click. Numbers mode
+                // always shows values; mixed responds via its number
+                // triangle without forcing text onto the circles.
+                var _vcB = pane.querySelectorAll('[data-field="cr-content"]');
+                for (var _vc = 0; _vc < _vcB.length; _vc++) {
+                    _vcB[_vc].addEventListener("click", function () {
+                        if ((data.graphType === "corrheatmap" || data.graphType === "corrcircles")
+                            && data.corrShowValues !== true) {
+                            data.corrShowValues = true;
+                            if (hasSetOption) { try { _setOption("corrShowValues", true); } catch (_e) {} }
+                            var _vcCb = pane.querySelector('[data-field="cr-showvals"]');
+                            if (_vcCb) _vcCb.checked = true;
+                        }
+                    });
+                }
+            })();
+            _distWireSeg(pane, "cr-content", "corrValueContent");
             _distWireCheck(pane, "cr-stars", "corrSigStars");
         }
         function _corrCellsLayoutTab(pane) {
@@ -82593,6 +82704,7 @@
                         data.corrCellBorderColor = ""; data.corrCellBorderWidth = 0;
                         data.corrCircleScale = 0.92; data.corrNumberGrid = true;
                         data.corrShowValues = true; data.corrDecimals = 2; data.corrSigStars = false;
+                        data.corrValueContent = "r"; data.corrColorNumbers = true;
                         data.corrSigLevel = 0.05; data.corrSigTreat = "none";
                         data.corrPAdjust = "none";
                         data.corrTriangle = "full"; data.corrDiagonal = "one";
@@ -82601,6 +82713,7 @@
                             _setOption("corrCellOpacity", 1); _setOption("corrCellBorderColor", "");
                             _setOption("corrCellBorderWidth", 0); _setOption("corrCircleScale", 0.92);
                             _setOption("corrNumberGrid", true); _setOption("corrShowValues", true);
+                            _setOption("corrValueContent", "r"); _setOption("corrColorNumbers", true);
                             _setOption("corrDecimals", 2); _setOption("corrSigStars", false);
                             _setOption("corrSigLevel", 0.05); _setOption("corrSigTreat", "none");
                             _setOption("corrPAdjust", "none");
