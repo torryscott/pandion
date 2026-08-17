@@ -1736,7 +1736,7 @@
     position: sticky; top: 0; z-index: 1;
     background: var(--ps-s1); text-align: left; font-weight: 600;
     padding: 6px 10px 5px; border-bottom: 2px solid var(--ps-l2b);
-    border-right: 1px solid var(--ps-s3); white-space: nowrap;
+    border-right: 1px solid var(--ps-s3); white-space: pre;
   }
   .ps-grid-table.ps-grid-sized {
     table-layout: fixed;
@@ -1767,7 +1767,13 @@
   }
   .ps-grid-table td {
     padding: 3px 10px; border-bottom: 1px solid var(--ps-s3);
-    border-right: 1px solid var(--ps-s2); white-space: nowrap;
+    border-right: 1px solid var(--ps-s2);
+    /* pre, not nowrap (Torry, Aug 2026): both hold the cell to one line,
+       but nowrap COLLAPSES runs of spaces, so a cell holding "low   dose"
+       read exactly like "low dose" in the one place the value is meant to
+       be shown as it IS. Costs nothing per cell: it is the same single
+       rule, not per-cell chrome. */
+    white-space: pre;
   }
   .ps-grid-table .ps-grid-spacer td {
     padding: 0; border: 0; background: transparent; pointer-events: none;
