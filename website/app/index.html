@@ -2795,6 +2795,11 @@
   .ps-level-hint {
     margin: -3px 0 8px; color: var(--ps-muted); font-size: 10px; line-height: 1.35;
   }
+  /* A category's name is its identity, so the places that NAME one print
+     its spaces rather than collapsing them: two levels differing only by
+     an extra space were impossible to tell apart in the very panel where
+     you go to merge them (a collaborator, Aug 2026). */
+  .ps-var-advice code { white-space: pre-wrap; }
   .ps-level-list {
     display: flex; flex-direction: column; gap: 4px;
     max-height: 176px; overflow: auto;
@@ -2827,7 +2832,11 @@
   .ps-level-order .ps-level-label {
     flex: 1 1 auto;
     min-width: 0; overflow: hidden; text-overflow: ellipsis;
-    padding: 5px 8px; font-size: 10.5px; white-space: nowrap;
+    padding: 5px 8px; font-size: 10.5px;
+    /* pre, not nowrap: both keep the chip on one line, but nowrap still
+       COLLAPSES runs of spaces, so two levels differing only by an extra
+       space looked identical in the very list you use to merge them. */
+    white-space: pre;
   }
   /* How many rows each category holds. Quiet, right-aligned and tabular so
      the numbers line up as a readable column down the list. */
@@ -6050,7 +6059,7 @@
 <script src="lib/ps-data.c6f77dc8f5.js"></script>
 <script src="lib/jspdf.umd.min.979a2ef514.js"></script>
 <script src="lib/svg2pdf.umd.min.4ada250f50.js"></script>
-<script src="lib/graphbuilder2.min.ef7bb6de64.js"></script>
+<script src="lib/graphbuilder2.min.0fecbdcf98.js"></script>
 <script src="lib/ps-shell.2f6b5d674d.js"></script>
 <script src="lib/ps-tour.fe1b2fd3ed.js"></script>
 </body>
