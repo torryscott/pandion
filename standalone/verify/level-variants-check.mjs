@@ -3,12 +3,11 @@
 // levels to the app, which means four bars, four palette colours and four
 // cells in every statistic.
 //
-// The app already normalises WHITESPACE into levels, so " Control" and
-// "Control" arrive merged and the machinery for this exists. It stops at
-// case, and there is no cluster-and-merge anywhere, so the only route is to
-// find and replace once per variant and know in advance what the variants
-// are. On a three-group study spelled inconsistently that is six replaces
-// before any work starts.
+// Since t4-186 the app does NOT normalise whitespace into levels: " Control"
+// and "Control" are distinct categories, stored and DISPLAYED verbatim (the
+// silent trailing-space merge was real data loss, and hiding the spaces made
+// the difference impossible to see). The advice card is the honest route:
+// it names the variants, counts them, and merges on one click.
 //
 // This probe pins that the app notices, says how many categories are really
 // there, merges on one click keeping the commonest spelling, and takes one
@@ -60,8 +59,10 @@ const levelsOf = c => page.evaluate(cc =>
 const rawOf = c => page.evaluate(cc =>
     (window.PS_SHELL.project.table.raw[cc] || []).slice(), c);
 
-// Twelve rows, three real groups, each spelled three ways, plus the trailing
-// space the app already handles so the two mechanisms are seen together.
+// Eighteen rows, three real groups, each spelled three ways, including a
+// trailing-space variant - since t4-186 that space makes a DISTINCT level
+// (stored and shown verbatim), so the card must count it and the merge
+// must fold it.
 async function loadVariants() {
     await page.evaluate(() => {
         const spell = ['Control', 'control ', 'CONTROL',
@@ -105,8 +106,10 @@ const counts = await page.evaluate(() => Array.from(
               ((r.querySelector('.ps-level-count') || {}).textContent || '')));
 ok(counts.length === 9 && counts.every(c => /=\d+$/.test(c)),
    'every category carries a row count, got ' + JSON.stringify(counts));
-ok(counts.indexOf('Control=2') !== -1 && counts.indexOf('control=2') !== -1,
-   'and the counts are right, got ' + JSON.stringify(counts));
+ok(counts.indexOf('Control=2') !== -1 && counts.indexOf('control =2') !== -1,
+   'and the counts are right - the trailing-space variant keeps its space ' +
+   'IN the label (t4-185/186: whitespace is visible, never silently merged), ' +
+   'got ' + JSON.stringify(counts));
 const lbl = await page.evaluate(() => {
     const r = document.querySelector('#ps-variable-levels .ps-level-order');
     return r ? r.getAttribute('aria-label') : '';
