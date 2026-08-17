@@ -23105,8 +23105,11 @@
     levelSection.style.display = categorical ? "block" : "none";
     levelRoot.innerHTML = "";
     if (categorical) {
+      // The count in the header: the list shows at most 40 chips before
+      // the "+N more" tail, so the title carries the true total.
       el("ps-variable-level-title").textContent =
-        t.types[col] === "ordinal" ? "Ordered levels" : "Category order";
+        (t.types[col] === "ordinal" ? "Ordered levels" : "Category order") +
+        (levels.length > 1 ? " (" + levels.length + ")" : "");
       el("ps-variable-level-hint").textContent =
         t.types[col] === "ordinal"
           ? "Drag to set analytical and display order."
