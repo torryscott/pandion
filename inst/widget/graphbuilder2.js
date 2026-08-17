@@ -49567,6 +49567,47 @@
                         "many categories, check the variable in the X-axis slot.",
                     fixGt: null });
             })();
+            // The sideways nudge (Aug 2026, the colleague's page-43 dot-plot
+            // / horizontal-bars comment): when a VERTICAL categorical chart
+            // is already tilting or thinning its category names to fit,
+            // horizontal orientation gives each name a straight line of its
+            // own. cg + freq bar families only: RM occasions are a sequence
+            // and read left-to-right, dist's box family rides one unnamed
+            // category, and pareto is rank-defined. Thresholds are a first
+            // draft to tune.
+            (function () {
+                var _mkLc = _gbModuleKind();
+                if (!(_mkLc === "cg" || (_mkLc === "freq" && gt === "bar"))) return;
+                if (!(gt === "bar" || gt === "dot" || gt === "box"
+                    || gt === "violin" || gt === "raincloud")) return;
+                if (data.chartOrientation === "horizontal") return;
+                var _lcCats = Array.isArray(data.xCategories) ? data.xCategories : [];
+                if (_lcCats.length < 2) return;
+                var _lcEls = q('[data-role="x-cat-label"]');
+                var _lcStride = 0, _lcRot = false, _lcMaxLen = 0;
+                for (var _lc = 0; _lc < _lcEls.length; _lc++) {
+                    var _lcS = parseInt(_lcEls[_lc].getAttribute("data-cat-stride"), 10);
+                    if (isFinite(_lcS) && _lcS > _lcStride) _lcStride = _lcS;
+                    var _lcT = _lcEls[_lc].getAttribute("transform") || "";
+                    if (_lcT.indexOf("rotate(") >= 0) _lcRot = true;
+                    var _lcL = String(_lcEls[_lc].textContent || "").length;
+                    if (_lcL > _lcMaxLen) _lcMaxLen = _lcL;
+                }
+                if (!(_lcStride > 1 || (_lcRot && _lcMaxLen >= 10))) return;
+                var _lcNoun = gt === "bar" ? "bar" : gt === "dot" ? "dot"
+                    : gt === "box" ? "box" : gt === "violin" ? "violin" : "cloud";
+                out.push({ id: "longcats", sev: "tip",
+                    title: "Long category names read better sideways",
+                    why: "Your category names are " +
+                        (_lcStride > 1 && _lcRot ? "tilted and thinned"
+                            : _lcStride > 1 ? "thinned" : "tilted") +
+                        " to fit under the " + _lcNoun + "s. Turning the chart " +
+                        "sideways gives each name a straight line of its own: " +
+                        "set Orientation to Horizontal on this chart's style " +
+                        "panel (click a " + _lcNoun + "), in Chart settings, " +
+                        "or with the button below.",
+                    fixGt: null, fixOrient: "horizontal" });
+            })();
             if ((gt === "bar" || gt === "histogram" || gt === "histdensity" || gt === "pareto") && data.yMinOverride === true && typeof data.yMin === "number" && isFinite(data.yMin) && data.yMin > 0)
                 out.push({ id: "zerobase", sev: "warn", title: "The value axis doesn't start at zero", why: "Your value axis starts at " + data.yMin + ", not 0. Bars and histogram columns are read by their height, so cutting off the bottom makes some look much taller than others relative to one another. Set the Y-axis minimum back to 0.", fixGt: null });
             // Truncation disclosure (breakoff): on position-encoded types
@@ -50383,6 +50424,14 @@
             var _axDistCat = (_mk === "dist" && !_axContX);
             var _colApp = (nGroups >= 2) || q('[data-legend-row]').length >= 2;
             var _hmOn = (gt === "scatter" && typeof data.xyBin === "string" && data.xyBin !== "" && data.xyBin !== "none");
+            var _lcApp = (function () {
+                var _m2 = _gbModuleKind();
+                return (_m2 === "cg" || (_m2 === "freq" && gt === "bar"))
+                    && (gt === "bar" || gt === "dot" || gt === "box"
+                        || gt === "violin" || gt === "raincloud")
+                    && data.chartOrientation !== "horizontal"
+                    && Array.isArray(data.xCategories) && data.xCategories.length >= 2;
+            })();
             var checks = [
                 { id: "catsingle", name: "Categories hold real groups", tip: "A variable whose levels are almost all single observations is usually an identifier column in the wrong slot, not a grouping variable.", applies: _csApp },
                 { id: "cliprange", name: "Axis range shows all data", tip: "Axis limits should not push bars, boxes, or points outside the plot window.", applies: _crApp },
@@ -50431,6 +50480,7 @@
                 // Display note only (the corrmany idiom): a thinned axis is
                 // reported when it happens, never as a passed check.
                 { id: "xcatthin", name: "Crowded axis labels thinned", tip: "When there are more categories than room for names, the axis prints a subset and keeps every tick.", applies: false },
+                { id: "longcats", name: "Category names fit upright", tip: "On a vertical chart, checks that the category names still read cleanly without tilting or thinning; long names read best on a horizontal chart.", applies: _lcApp },
                 { id: "legendkey", name: "Colors have a key", tip: "When color carries meaning, a legend or direct labels must decode it.", applies: _legApp },
                 { id: "hiddendata", name: "No hidden data", tip: "Parts hidden with the eye tool should be shown, or disclosed in the figure note.", applies: true },
                 { id: "coldist", name: "Distinguishable colors", tip: "Series colors should be easy to tell apart.", applies: _colApp },
@@ -50493,6 +50543,7 @@
                         '<div style="font-weight:700;color:' + ic + ';margin:0 0 2px;"><span style="margin-right:5px;">' + glyph + '</span>' + _anatEsc(f.title) + '</div>' +
                         '<div style="color:#444;font-size:11.5px;">' + _anatEsc(f.why) + '</div>' +
                         (f.fixGt ? '<button type="button" data-lint-fix="' + _anatEsc(String(f.fixGt)) + '" style="margin-top:6px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;background:#fff;color:#0f766e;border:1px solid #0f766e;border-radius:4px;">Switch to ' + _anatEsc(_gbTypeLabel(f.fixGt)) + '</button>' : '') +
+                        (f.fixOrient ? '<button type="button" data-lint-fix-orient="' + _anatEsc(String(f.fixOrient)) + '" style="margin-top:6px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;background:#fff;color:#0f766e;border:1px solid #0f766e;border-radius:4px;">Make it horizontal</button>' : '') +
                         '</div>';
                 }
             }
@@ -50511,6 +50562,8 @@
             _wireHelpNavTabs(body);
             var fixes = body.querySelectorAll('[data-lint-fix]');
             for (var pf = 0; pf < fixes.length; pf++) (function (btn) { btn.addEventListener("click", function (e) { e.preventDefault(); _gbSwitchGraphType(btn.getAttribute("data-lint-fix")); }); })(fixes[pf]);
+            var fixesOr = body.querySelectorAll('[data-lint-fix-orient]');
+            for (var pfo = 0; pfo < fixesOr.length; pfo++) (function (btn) { btn.addEventListener("click", function (e) { e.preventDefault(); if (_gb2ApplyOrientation(btn.getAttribute("data-lint-fix-orient"))) renderInspectorPanel(); }); })(fixesOr[pfo]);
             inspector.flushFn = null;
         }
         // Help & shortcuts cheat sheet (toolbar "?" / selection key
@@ -62759,6 +62812,36 @@
         // ---- Bar style section (per group, or single for ungrouped) -----
         // The selection key encodes the group: "bars:Saline" / "bars:" for
         // ungrouped. Empty group string == single-color bars.
+        // Chart orientation, applied identically from Chart settings and
+        // the mark panels' Orientation segs (Aug 2026, the colleague's
+        // horizontal-bars comment): poke the flag, clear the pixel-bound
+        // overrides (dragged label / legend positions are meaningless
+        // after the axes swap), commit, and redraw() - the flip is
+        // instant and the R echo hash-skips. Same-value calls are a
+        // no-op, so clicking the already-active seg never nukes dragged
+        // labels. Undo rides the flush-time wrapper (no local re-render
+        // here, so the edit-time undo law does not apply).
+        function _gb2ApplyOrientation(v) {
+            v = (v === "horizontal") ? "horizontal" : "vertical";
+            var cur = (data.chartOrientation === "horizontal") ? "horizontal" : "vertical";
+            if (cur === v) return false;
+            data.chartOrientation = v;
+            data.textOffsets = [];
+            textOffsets = {};
+            data.legendItemOffsets = [];
+            data.legendLayoutCustom = false;
+            data.legendOrder = [];
+            if (hasSetOption) {
+                try { _setOption("chartOrientation", v); } catch (err) {}
+                try { _setOption("textOffsets", []); } catch (err) {}
+                try { _setOption("legendItemOffsets", []); } catch (err) {}
+                try { _setOption("legendLayoutCustom", false); } catch (err) {}
+                try { _setOption("legendOrder", []); } catch (err) {}
+            }
+            redraw();
+            try { redrawInspectorIndicator(); } catch (_eOi) {}
+            return true;
+        }
         function renderInspectorBarStyle(body, groupName) {
             // Category mode: ungrouped chart where the user clicked a
             // specific bar (= category). `groupName` then carries the
@@ -63998,6 +64081,18 @@
                     "flex-shrink:0"
                 ].join(";") + '">' + label + '</button>';
             }
+            // Orientation seg (Aug 2026): bars / boxes / violins / clouds
+            // run up or sideways - the same control as Chart settings >
+            // Appearance, surfaced where the click lands (long category
+            // names read better sideways). Chart-wide; a plain chip, it
+            // changes the look, never a number.
+            var _bsOrCur = (data.chartOrientation === "horizontal") ? "horizontal" : "vertical";
+            var _bsOrientCtrl =
+                _bsChoiceBtn("data-bs-orient", "vertical", "Vertical", _bsOrCur,
+                    "Categories along the bottom, values rising") +
+                _bsChoiceBtn("data-bs-orient", "horizontal", "Horizontal", _bsOrCur,
+                    "Categories down the side, values running across - long names each get a straight line") +
+                '<span style="flex-basis:100%;color:#666;font-size:10.5px;">Applies to the whole chart. Also in Chart settings.</span>';
             var _bsSummaryCtrl = "", _bsFreqStatCtrl = "", _bsFreqPosCtrl = "";
             if (_bsShowSummary) {
                 var _bsCurSf = String(data.summaryFunc || "mean");
@@ -64071,6 +64166,8 @@
                      (_bsShowFreqStat ? _bsBtn("bar-freqdisplay", "appearance", "Display",
                          "Choose what bar height represents and how groups share each category") : "") +
                      ((_bsShowSummary || _bsShowFreqStat || _bsShowFreqPos) ? _gb2ChipDivHtml() : "") +
+                     _bsBtn("bar-orient",  "rotation", "Orientation",
+                         "Run the chart up or sideways - applies to the whole chart") +
                      _bsBtn("bar-color",   "color",   "Color") +
                      _bsBtn("bar-pattern", "pattern", "Pattern") +
                      _bsBtn("bar-opacity", "opacity", "Opacity") +
@@ -64085,6 +64182,7 @@
                       _bsPatColorSub
                   ) +
                   _bsStrip("bar-opacity", _bsOpacityCtrl) +
+                  _bsStrip("bar-orient",  _bsOrientCtrl) +
                   ((_bsIsViolin || (_bsIsRaincloud && _bsRcKindEarly !== "box")) ? "" : _bsStrip("bar-corner",  _bsCornerCtrl)) +
                   (_bsShowSummary  ? _bsStrip("bar-summary",  _bsSummaryCtrl,  { stat: "what each bar's height means" }) : "") +
                   (_bsShowFreqStat ? _bsStrip("bar-freqdisplay", _bsFreqDisplayCtrl,
@@ -64327,6 +64425,12 @@
                     })(btns[i]);
                 }
             }
+            _bsWireChartSeg("data-bs-orient", function (v) {
+                // Shared flip (same-value = no-op); rebuild the panel so
+                // the seg repaints and the halo re-anchors to the
+                // rebuilt marks.
+                if (_gb2ApplyOrientation(v)) renderInspectorPanel();
+            });
             _bsWireChartSeg("data-bs-summary", function (v) {
                 if (String(data.summaryFunc || "mean") === v) return;
                 var oldEt = String(data.errorBarType || "se");
@@ -67270,7 +67374,8 @@
                             || _bsBarInitial
                             || "bar-color";
                         if (sub === "bar-summary" || sub === "bar-freqdisplay"
-                            || sub === "bar-freqstat" || sub === "bar-freqpos") {
+                            || sub === "bar-freqstat" || sub === "bar-freqpos"
+                            || sub === "bar-orient") {
                             // Chart-wide controls ported from the native
                             // left panel - no per-bar scope to toggle.
                             return "hidden";
@@ -68048,6 +68153,26 @@
                         : "Applies to the whole chart.") +
                     '</span>';
             }
+            // Orientation seg (Aug 2026): the same control as Chart
+            // settings, surfaced on the marks people click. Chart-wide.
+            var _lsOrCur = (data.chartOrientation === "horizontal") ? "horizontal" : "vertical";
+            var _lsOrBtn = function (val, label, tip) {
+                var on = (_lsOrCur === val);
+                return '<button type="button" data-ls-orient="' + val + '" title="' + tip + '" style="' + [
+                    "display:inline-flex", "align-items:center", "padding:4px 10px",
+                    "background:" + (on ? "#e8f0fb" : "white"),
+                    "color:" + (on ? "#1a5fb4" : "#333"),
+                    "border:1px solid " + (on ? "#1a5fb4" : "#ccc"),
+                    "border-radius:3px", "cursor:pointer",
+                    "font-family:var(--gb2-ui-font)", "font-size:11px",
+                    "font-weight:" + (on ? "600" : "400"),
+                    "flex-shrink:0"
+                ].join(";") + '">' + label + '</button>';
+            };
+            var _lsOrientCtrl =
+                _lsOrBtn("vertical", "Vertical", "Categories along the bottom, values rising") +
+                _lsOrBtn("horizontal", "Horizontal", "Categories down the side, values running across - long names each get a straight line") +
+                '<span style="flex-basis:100%;color:#666;font-size:10.5px;">Applies to the whole chart. Also in Chart settings.</span>';
             body.innerHTML =
                 '<button type="button" data-field="color-btn" data-role="primary-color" style="display:none;" aria-label="Line color" title="Line color"></button>' +
                 '<div style="display:flex;flex-wrap:wrap;gap:2px;padding:0 4px;margin-bottom:8px;border-bottom:1px solid #ccc;">' +
@@ -68085,10 +68210,12 @@
                      _lsBtn("marker-color", "color", "Color") +
                      _lsBtn("marker-shape", "shape", "Shape") +
                      _lsBtn("marker-size",  "size",  "Size")  +
+                     _lsBtn("marker-orient", "rotation", "Orientation") +
                   '</div>' +
                   _lsStrip("marker-color", _mkColorCtrl) +
                   _lsStrip("marker-shape", _mkShapeCtrl) +
                   _lsStrip("marker-size",  _mkSizeCtrl)  +
+                  _lsStrip("marker-orient", _lsOrientCtrl) +
                   (_lsShowSummary ? _lsStrip("marker-summary", _lsSummaryCtrl, { stat: "what each " + _lsSfNoun + "'s height means" }) : "") +
                 '</div>' +
                 // ===== OUTLINE TAB =====
@@ -68252,6 +68379,19 @@
                     });
                 })(_lsBtnsAll[_lsbi]);
             }
+            // ---- Orientation seg wiring (chart-wide; shared flip) ----
+            (function () {
+                var _orBtns = body.querySelectorAll('[data-ls-orient]');
+                for (var _ori = 0; _ori < _orBtns.length; _ori++) {
+                    (function (btn) {
+                        btn.addEventListener("click", function (e) {
+                            e.preventDefault();
+                            if (_gb2ApplyOrientation(btn.getAttribute("data-ls-orient")))
+                                renderInspectorPanel();
+                        });
+                    })(_orBtns[_ori]);
+                }
+            })();
             // ---- Summary seg wiring (chart-wide REAL-option commit;
             // the local re-render rebuilds the panel + Y range) ----
             (function () {
@@ -68423,9 +68563,9 @@
                 // opacity/smoothing where broadcasting works.
                 var _activeStrip = _noScope ? "" : _lsActiveStripFor(id);
                 var _isColorStrip = (_activeStrip === "line-color" || _activeStrip === "marker-color");
-                if (_activeStrip === "marker-summary") {
-                    // Chart-wide Summary strip (ported from the native
-                    // panel) - no per-series scope to toggle.
+                if (_activeStrip === "marker-summary" || _activeStrip === "marker-orient") {
+                    // Chart-wide strips (Summary ported from the native
+                    // panel; Orientation) - no per-series scope to toggle.
                     _lsScopeRow.style.display = "none";
                     return;
                 }
@@ -71253,28 +71393,10 @@
             var iOrient = body.querySelector('[data-field="orientation"]');
             iOrient.value = (data.chartOrientation === "horizontal") ? "horizontal" : "vertical";
             iOrient.addEventListener("change", function () {
-                var v = iOrient.value;
-                data.chartOrientation = v;
-                // Clear the LOCAL mirrors of the pixel-bound overrides
-                // too (not just the R options), so the instant redraw
-                // below matches what the R echo will paint.
-                data.textOffsets = [];
-                textOffsets = {};
-                data.legendItemOffsets = [];
-                data.legendLayoutCustom = false;
-                data.legendOrder = [];
-                if (hasSetOption) {
-                    try { _setOption("chartOrientation", v); } catch (err) {}
-                    try { _setOption("textOffsets", []); } catch (err) {}
-                    try { _setOption("legendItemOffsets", []); } catch (err) {}
-                    try { _setOption("legendLayoutCustom", false); } catch (err) {}
-                    try { _setOption("legendOrder", []); } catch (err) {}
-                }
-                // Instant flip: redraw() re-derives the horizontal flag,
-                // margins and geometry client-side, so the chart turns
-                // immediately instead of waiting ~1s for the R echo
-                // (which then hash-matches and is skipped).
-                redraw();
+                // Shared with the mark panels' Orientation segs (Aug
+                // 2026): poke + clear pixel-bound overrides + commit +
+                // instant redraw all live in _gb2ApplyOrientation.
+                _gb2ApplyOrientation(iOrient.value);
             });
 
             // Border / Orientation segmented strips drive their hidden
