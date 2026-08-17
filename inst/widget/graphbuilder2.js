@@ -88679,7 +88679,7 @@
                 (_dpScMode === "stacked") ? '<option value="stacked">Stacked</option>' :
                 (_dpScMode === "none") ? '<option value="none">None</option>' : "";
             var _dpScatterCtrl =
-                '<select data-field="scatter" title="How the points are spread sideways" style="padding:4px 6px;font-size:12px;border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);">' +
+                '<select data-field="scatter" title="How the points are spread sideways. Strip draws each dot at its exact value: overlapping points sit on top of each other, so lower the opacity or use Swarm to see how many share a spot." style="padding:4px 6px;font-size:12px;border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);">' +
                   '<option value="jitter">Normal</option>' +
                   '<option value="beeswarm">Swarm</option>' +
                   '<option value="strip">Strip</option>' +
