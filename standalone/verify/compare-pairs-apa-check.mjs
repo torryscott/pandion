@@ -1,21 +1,26 @@
-// What Compare pairs puts on the clipboard has to match the row you
-// clicked, and an adjusted p has to say what it was adjusted over.
+// The Compare-pairs APA sentence has to match the row it belongs to,
+// and an adjusted p has to say what it was adjusted over.
 //
-// TWO BUGS, both in the same sentence builder.
+// Since Aug 2026 the sentence is DISPLAY-ONLY: every APA copy button is
+// retired (a colleague's pedagogy comment - click-to-paste teaches
+// nothing about APA style or reading a table; Torry agreed), the
+// builder rides the ROW (tr.gb2ApaFn, un-mangled so probes can read it) and the focus card shows the
+// sentence when a row is pinned. Students read it and type it. The two
+// original sentence contracts still hold, now read from the builder:
 //
-// 1. The row reads "Male: Placebo vs Drug A". The clipboard used to get
+// 1. The row reads "Male: Placebo vs Drug A". The sentence used to get
 //    "Placebo <middot> Male vs Drug A <middot> Male" - both cells run
 //    through cmpLabelOf, so the level is repeated and two middle dots ride
 //    into a manuscript. cmpPlainLbl is what the row itself uses. Its
 //    sameCat form drops the category because the SECTION header carries
-//    it, which a pasted sentence does not have, so that one case is
+//    it, which a standalone sentence does not have, so that one case is
 //    prefixed with the category.
 //
 // 2. The same pair, same test and same correction gives a DIFFERENT
 //    adjusted p depending on how many comparisons were in the family, and
 //    the sentence read identically either way. Measured on the trial data
 //    with Holm: "Both (recommended)" gives p = .147 over 9 comparisons and
-//    "Every pair" gives p = .206 over 15, and both used to copy as
+//    "Every pair" gives p = .206 over 15, and both used to read as
 //    "(Holm-adjusted)" with nothing to tell them apart.
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -96,36 +101,69 @@ const setSel = async (valRe) => {
     await page.waitForTimeout(1800);
     return hit;
 };
-const copyRow = async (match) => {
-    await page.evaluate((m) => {
+const sentenceOf = async (match) => {
+    return page.evaluate((m) => {
         const r = Array.from(document.querySelectorAll(
             '#psroot [data-st-pane="pairs"] tr'))
             .find(x => x.textContent.indexOf(m) >= 0 &&
-                       x.querySelector('[data-cmp-copy]'));
-        if (r) r.querySelector('[data-cmp-copy]').click();
+                       typeof x.gb2ApaFn === 'function');
+        return r ? r.gb2ApaFn() : null;
     }, match);
-    await page.waitForTimeout(500);
-    return page.evaluate(() => navigator.clipboard.readText());
 };
 
+console.log('case 0: the copy affordance is gone, the sentence is not');
+const affordance = await page.evaluate(() => ({
+    copyBtns: document.querySelectorAll('[data-cmp-copy]').length,
+    rowsWithBuilder: Array.from(document.querySelectorAll(
+        '#psroot [data-st-pane="pairs"] tr'))
+        .filter(x => typeof x.gb2ApaFn === 'function').length
+}));
+ok(affordance.copyBtns === 0,
+   'no per-row APA copy buttons remain (the pedagogy retirement)');
+ok(affordance.rowsWithBuilder > 0,
+   `while every pair row still carries its sentence builder ` +
+   `(${affordance.rowsWithBuilder} rows)`);
+// pin a row: the focus card must still DISPLAY the sentence, with no
+// Copy button beside it
+await page.evaluate(() => {
+    const r = document.querySelector('#psroot [data-st-pane="pairs"] tr[data-link]');
+    r.cells[1].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+});
+await page.waitForTimeout(600);
+const card = await page.evaluate(() => {
+    const c = document.querySelector('[data-role="st-focus-card"]');
+    return { present: !!c,
+             sentence: c ? ((c.querySelector('[data-st-fsentence]') || {}).textContent || '') : '',
+             copyBtn: c ? !!c.querySelector('[data-st-act="ffcopy"]') : null };
+});
+ok(card.present && /p [=<]/.test(card.sentence),
+   `the focus card still shows the APA sentence ("${card.sentence.slice(0, 36)}...")`);
+ok(card.copyBtn === false, 'and carries no Copy button of its own');
+
 console.log('case 1: the sentence names the pair the way its row does');
-const within = await copyRow('Placebo vs Drug A');
+const within = await sentenceOf('Placebo vs Drug A');
 ok(/^[A-Z]\w*: Placebo vs Drug A: /.test(within),
    `a within-group pair reads once, not twice ("${within.slice(0, 34)}...")`);
 ok(within.indexOf('·') < 0,
    'and carries no middle dots into a manuscript');
-const across = await copyRow('Female vs Male');
-ok(/vs /.test(across) && across.split(':')[0].length > 0,
+// The row says "F vs M" (the section header carries the drug). NOTE:
+// the retired copy-button version of this case matched 'Female vs
+// Male', which matched NO row - copyRow silently skipped the click and
+// read the PREVIOUS sentence still sitting on the clipboard, and the
+// loose regex passed on it. Reading the builder directly returns null
+// for a bad match, which is how the vacuous pass surfaced.
+const across = await sentenceOf('F vs M');
+ok(!!across && /vs /.test(across) && /^[^:]+: F vs M: /.test(across),
    `a within-category pair keeps its category, which its row got from the ` +
-   `section header ("${across.slice(0, 34)}...")`);
+   `section header ("${String(across).slice(0, 34)}...")`);
 
 console.log('case 2: an adjusted p says what it was adjusted over');
 ok(await setSel('^holm$') === 'holm', 'Holm selected');
-const bothScope = await copyRow('Placebo vs Drug A');
+const bothScope = await sentenceOf('Placebo vs Drug A');
 const mBoth = bothScope.match(/Holm-adjusted across (\d+) comparisons/);
 ok(!!mBoth, `the family size rides the sentence ("${bothScope.slice(-42)}")`);
 ok(await setSel('^all$') === 'all', 'scope widened to every pair');
-const everyScope = await copyRow('Placebo vs Drug A');
+const everyScope = await sentenceOf('Placebo vs Drug A');
 const mEvery = everyScope.match(/Holm-adjusted across (\d+) comparisons/);
 ok(!!mEvery, 'and on the wider scope too');
 ok(Number(mEvery[1]) > Number(mBoth[1]),

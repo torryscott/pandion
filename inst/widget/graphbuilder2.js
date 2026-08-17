@@ -52253,11 +52253,17 @@
             }
             var listF = _stFocusRows(row);
             var idxF = listF.indexOf(row);
-            var apaBtn = row.querySelector("[data-cmp-copy]");
-            var sentence = "";
-            if (apaBtn && typeof apaBtn.__gb2ApaFn === "function") {
-                try { sentence = apaBtn.__gb2ApaFn() || ""; } catch (_eS) {}
+            // the builder lives on the ROW since the copy buttons
+            // retired (Aug 2026, un-mangled name so probes can read it);
+            // the old button lookup stays as a fallback
+            var apaFn = (typeof row.gb2ApaFn === "function") ? row.gb2ApaFn : null;
+            if (!apaFn) {
+                var apaBtn = row.querySelector("[data-cmp-copy]");
+                if (apaBtn && typeof apaBtn.__gb2ApaFn === "function")
+                    apaFn = apaBtn.__gb2ApaFn;
             }
+            var sentence = "";
+            if (apaFn) { try { sentence = apaFn() || ""; } catch (_eS) {} }
             // Display strips the sentence's identity prefix (the title
             // line already says who) — the stats start after the LAST
             // ": " (names may contain ": ", statistics never do). Copy
@@ -52310,11 +52316,7 @@
                 (sentence
                     ? '<div style="display:flex;align-items:baseline;gap:8px;margin:5px 0 0;">' +
                       '<span data-st-fsentence style="font-size:11px;color:#33475e;">' +
-                      sentDisp + '</span>' +
-                      '<button type="button" data-st-act="ffcopy" title="Copy this APA sentence"' +
-                      ' style="font-size:9.5px;padding:1px 7px;border:1px solid #9ab6dc;' +
-                      'border-radius:3px;background:white;color:#1a5fb4;cursor:pointer;' +
-                      'flex-shrink:0;">Copy</button></div>'
+                      sentDisp + '</span></div>'
                     : ((chips || chipsCI)
                         ? '<div style="display:flex;flex-wrap:wrap;align-items:baseline;' +
                           'column-gap:14px;row-gap:4px;margin:6px 0 0;">' + chips + '</div>' +
@@ -52343,10 +52345,6 @@
             if (nx) nx.addEventListener("click", function () {
                 if (idxF < listF.length - 1) stepTo(listF[idxF + 1]);
             });
-            if (sentence) {
-                _stWireCopy(card.querySelector('[data-st-act="ffcopy"]'),
-                    function () { return sentence; });
-            }
         }
         function _stApplyPinStyles(bd) {
             if (!bd) bd = window.__gb2_statsBody;
@@ -52841,6 +52839,7 @@
                             _stLinkAttr([[cp2.left.cat, cp2.left.group],
                                          [cp2.right.cat, cp2.right.group]]) +
                             ' data-cmp-sec="' + secAttr(secOf[cr]) + '"' +
+                            ' data-cmp-apa="' + cr + '"' +
                             ' style="' + (secFolded && secHdr[secOf[cr]] ? 'display:none;' : '') + '">' +
                             '<td style="padding:4px 6px;border-bottom:1px solid #eee;">' +
                             '<input type="checkbox" data-cmp-cb data-key="' +
@@ -52861,12 +52860,7 @@
                             '<td style="padding:4px 7px;border-bottom:1px solid #eee;white-space:nowrap;font-family:var(--gb2-ui-font);">' +
                             _adjTd + '</td>' +
                             '<td style="padding:4px 7px;border-bottom:1px solid #eee;white-space:nowrap;font-family:var(--gb2-ui-font);">' +
-                            _effTd + '</td>' +
-                            '<td style="padding:4px 6px;border-bottom:1px solid #eee;">' +
-                            '<button type="button" data-cmp-copy="' + cr + '"' +
-                            ' title="Copy an APA-style sentence for this comparison" style="font-size:10px;' +
-                            'padding:2px 7px;border:1px solid #aaa;border-radius:3px;background:#fff;' +
-                            'color:#444;cursor:pointer;">APA</button></td></tr>';
+                            _effTd + '</td></tr>';
                     }
                     var cmpIsRM = (mk === "rm");
                     var cmpSel = function (name, opts2) {
@@ -52989,7 +52983,7 @@
                              "Sort rows by p, smallest first, within each section (uses the adjusted p when a correction is on)"),
                          _stTerm(cmpCorr === "none" ? 'p (adj)'
                              : 'p (' + _gb2CorrName(cmpCorr) + ')', 'pAdj'),
-                         _stTerm('Effect', 'effectSize'), '']
+                         _stTerm('Effect', 'effectSize')]
                             .map(function (hcol) {
                                 return '<th style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;' +
                                     'color:#666;text-align:left;font-weight:600;padding:3px 7px;' +
@@ -53174,11 +53168,21 @@
                                 if (mEl2) mEl2.style.display = "none";
                             }, true);
                         }
-                        var cps = body.querySelectorAll('[data-cmp-copy]');
+                        var cps = body.querySelectorAll('[data-cmp-apa]');
                         for (var wc = 0; wc < cps.length; wc++) {
                             (function (btn) {
-                                var ci2 = parseInt(btn.getAttribute("data-cmp-copy"), 10);
-                                _stWireCopy(btn, function () {
+                                // btn is the ROW now: the copy button is
+                                // retired (Aug 2026, the colleague's
+                                // pedagogy comment - click-to-paste
+                                // teaches nothing), but the sentence
+                                // builder STAYS because the focus card
+                                // displays it. Students read and type.
+                                var ci2 = parseInt(btn.getAttribute("data-cmp-apa"), 10);
+                                // NON-underscore name on purpose: the
+                                // minifier mangles _-prefixed props, and
+                                // the verify suites read this from
+                                // outside the bundle
+                                btn.gb2ApaFn = function () {
                                     var cp3 = cmpPairs[ci2];
                                     if (!cp3) return "";
                                     var dispP = cmpBasisP(cp3);
@@ -53216,7 +53220,7 @@
                                             ? " (" + _gb2CorrName(cmpCorr) + "-adjusted across " +
                                               (cp3.adjN || 1) + " comparison" +
                                               ((cp3.adjN || 1) === 1 ? "" : "s") + ")" : "");
-                                });
+                                };
                             })(cps[wc]);
                         }
                     }]);
@@ -53445,17 +53449,12 @@
                                        omniRows, null, true)
                             : "") +
                         (omniPlain.length ? _stReadout(omniPlain.join("\n")) : "") +
-                        _stBtnRow(
-                            _stBtn("copyomni", "Copy APA", false)) +
                         _stFoot(omniFoot +
                             (omniGG
                                 ? ((mk === "rm" && data.hasGroups)
                                     ? " The within-subject rows (" + _stOccName() + " + its interactions) are Greenhouse-Geisser-corrected (eps = " + omniGG + "); the between-subjects rows need no sphericity correction."
                                     : " Degrees of freedom are Greenhouse-Geisser-corrected (eps = " + omniGG + ").")
                                 : "")));
-                    wire.push(["copyomni", function (btn) {
-                        _stWireCopy(btn, function () { return oLines.join("\n"); });
-                    }]);
                     wire.push(["omnieff", function (sel3) {
                         sel3.addEventListener("change", function () {
                             window.__gb2_statsOmniEff = sel3.value;
@@ -53568,15 +53567,11 @@
                             // The former on-chart chi-square plate is
                             // retired; Statistics remains the single home
                             // for the test results.
-                            _stBtn("copychisq", "Copy APA", false) +
                             _stBtn("copychtbl", "Copy table", false)) +
                         _stFoot(fTestName + ". Standardized residuals of 2 or more mark " +
                             "cells departing from expectation."));
                     wire.push(["copychtbl", function (btn) {
                         _stWireTableCopy(btn, body, '[data-st-pane="chisq"]');
-                    }]);
-                    wire.push(["copychisq", function (btn) {
-                        _stWireCopy(btn, function () { return fLines.join("\n"); });
                     }]);
                 } else {
                     fqChiCard = _stCard("",
@@ -54226,7 +54221,6 @@
                             return xC;
                         })(), xRows, null, true) + '</div>' +
                         _stBtnRow(
-                            _stBtn("copyxy", "Copy APA", false) +
                             _stBtn("copyxytbl", "Copy table", false)) +
                         _stFoot((_xmSel === "spearman"
                                 ? "Spearman rho is rank-based: it measures any consistently increasing or decreasing relationship, not just straight-line ones. When it differs a lot from Pearson r, suspect a curve or outliers. "
@@ -54268,9 +54262,6 @@
                     }]);
                     wire.push(["copyxytbl", function (btn) {
                         _stWireTableCopy(btn, body, '[data-st-xystats]');
-                    }]);
-                    wire.push(["copyxy", function (btn) {
-                        _stWireCopy(btn, function () { return xCopy.join("\n"); });
                     }]);
                 } else {
                     html += _stCard("Correlation",
@@ -54338,34 +54329,6 @@
                         'border-radius:3px;padding:0 5px;display:inline-block;">' +
                         txt + '</span>';
                 };
-                // Per-pair APA sentences (Jul 10 2026, Torry): method-
-                // aware wording mirroring the scatter Copy APA - Pearson
-                // reports r(df) with df = n - 2, the rank methods report
-                // the named coefficient without a df. The DECIDING p is
-                // copied (adjusted when a matrix-wide correction is on,
-                // with the correction named).
-                var _corrApaFor = function (ce2) {
-                    var m2 = (typeof data.corrMethod === "string" && data.corrMethod.length)
-                        ? data.corrMethod : "pearson";
-                    var pAdjV = (_aMS && typeof _aMS[ce2.a + "\u0000" + ce2.b] === "number")
-                        ? _aMS[ce2.a + "\u0000" + ce2.b] : null;
-                    var pUse = (pAdjV != null) ? pAdjV : ce2.p;
-                    var tail = _stP(pUse) +
-                        ((pAdjV != null) ? " (" + _corrPAdjLabel() + "-adjusted)" : "");
-                    var rTxt = _stStrip0(ce2.r, cDec);
-                    var lead = ce2.a + " × " + ce2.b + ": ";
-                    if (m2 === "spearman") return lead + "Spearman rho = " + rTxt + ", " + tail;
-                    if (m2 === "kendall") return lead + "Kendall tau-b = " + rTxt + ", " + tail;
-                    return lead + "r(" + ((typeof ce2.n === "number") ? (ce2.n - 2) : "?") +
-                        ") = " + rTxt + ", " + tail;
-                };
-                var _corrApaBtn = function (key2) {
-                    return '<button type="button" data-corr-apa="' + key2 + '"' +
-                        ' title="Copy an APA-style sentence for this pair" style="font-size:10px;' +
-                        'padding:2px 7px;border:1px solid #aaa;border-radius:3px;background:#fff;' +
-                        'color:#444;cursor:pointer;">APA</button>';
-                };
-                var _corrApaCells = [];
                 var strongRows = [];
                 if (strongest) {
                     var _spE = strongest.p;
@@ -54378,8 +54341,7 @@
                         _stCellTerm(_sRt, coefKey, _coefHereFor(strongest, _sRt)),
                         ((typeof _spE === "number" && _spE < alpha)
                             ? cChip(cpS) : cpS),
-                        String(strongest.n),
-                        _corrApaBtn("strong")]);
+                        String(strongest.n)]);
                 }
                 // Method / Alpha / Adjust-p live HERE too (Jul 10 2026,
                 // Torry: the Values tab and the statistics section should
@@ -54452,7 +54414,7 @@
                     '</span></div>' +
                     (strongRows.length
                         ? _stTable(["Strongest pair", coefHdr,
-                            (_aMS ? "p (" + _corrPAdjLabel() + ")" : "p"), "N", ""], strongRows, null, true)
+                            (_aMS ? "p (" + _corrPAdjLabel() + ")" : "p"), "N"], strongRows, null, true)
                         : "") +
                     _stBtnRow(
                         _stBtn("copymat", "Copy matrix (r values)", false)) +
@@ -54483,16 +54445,12 @@
                     _prow.push(_aMS ? _pRawS : (_pSig ? cChip(_pRawS) : _pRawS));
                     if (_aMS) _prow.push(_pSig ? cChip(_pAdjS) : _pAdjS);
                     _prow.push((typeof _pe.n === "number") ? String(_pe.n) : "—");
-                    _prow.push((typeof _pe.r === "number" && isFinite(_pe.r))
-                        ? _corrApaBtn(String(_corrApaCells.length)) : "");
-                    _corrApaCells.push(_pe);
                     _pairRows.push(_prow);
                 }
                 if (_pairRows.length) {
                     var _pairCols = ["Pair", coefHdr, "p"];
                     if (_aMS) _pairCols.push("p (" + _corrPAdjLabel() + ")");
                     _pairCols.push("N");
-                    _pairCols.push("");
                     html += _stCard("All pairs",
                         '<div data-st-corrpairs>' + _stTable(_pairCols, _pairRows, null, true) + '</div>' +
                         _stBtnRow(_stBtn("copypairs", "Copy table", false)) +
@@ -54503,21 +54461,6 @@
                     }]);
                 }
                 wire.push(["copymat", function (btn) {
-                    // per-row APA copies (pairs + strongest) piggyback on
-                    // this always-rendered wire step; _stWireCopy defaults
-                    // to _gb2ApaHtml so pastes keep the italics
-                    (function () {
-                        var abtns = body.querySelectorAll("[data-corr-apa]");
-                        for (var ab = 0; ab < abtns.length; ab++) {
-                            (function (bt) {
-                                var key3 = bt.getAttribute("data-corr-apa");
-                                var ce3 = (key3 === "strong")
-                                    ? strongest : _corrApaCells[parseInt(key3, 10)];
-                                if (!ce3) return;
-                                _stWireCopy(bt, function () { return _corrApaFor(ce3); });
-                            })(abtns[ab]);
-                        }
-                    })();
                     _stWireCopy(btn, function () {
                         var vars = Array.isArray(data.corrVars) ? data.corrVars : [];
                         var lut = {};
@@ -54624,16 +54567,8 @@
                             { html: '<span style="text-transform:none;">' + _stTerm("Cronbach\u2019s \u03b1", "cronbachAlpha") + '</span>' },
                             "Items", "Complete N"],
                             [[_stCellTerm(_stStrip0(la.alpha), "cronbachAlpha", _laHere), String(la.k), String(la.n)]], null, true) +
-                        _stBtnRow(
-                            _stBtn("copyalpha", "Copy", false)) +
                         _stFoot("Raw Cronbach's α is computed from listwise-complete, reverse-scored item codes. It depends on item covariance, variances, and item count; it does not test unidimensionality or validity. Treating it as score reliability requires measurement assumptions such as essential tau-equivalence and uncorrelated errors."));
 
-                    wire.push(["copyalpha", function (btn) {
-                        _stWireCopy(btn, function () {
-                            return "Cronbach's α = " + _stStrip0(la.alpha) +
-                                " (" + la.k + " items, n = " + la.n + ")";
-                        });
-                    }]);
                 } else {
                     lkAlphaCard = _stCard("",
                         _stFoot("Cronbach's α needs at least two items and three complete responses on a shared scale."));
@@ -90542,17 +90477,6 @@
                     '<div data-role="autoP-result" style="margin-top:6px;padding:8px 10px;background:#eef4fc;border:1px solid #cfe0f5;border-radius:6px;font-family:var(--gb2-ui-font);font-size:11px;color:#22364d;line-height:1.5;min-height:48px;white-space:pre-wrap;">' +
                       'Loading…' +
                     '</div>' +
-                    // Copy-APA button — writes a single-line APA-
-                    // style string (`t(28) = 2.45, p = .017, d = 0.84`)
-                    // to the clipboard. Convenient for pasting into
-                    // the manuscript without having to change the
-                    // bracket label format. Visible label feedback
-                    // ("Copied!") swaps in for ~1.4 s after click.
-                    '<div style="display:flex;justify-content:flex-end;margin-top:4px;">' +
-                      '<button type="button" data-field="autoP-copy" style="padding:4px 10px;font-size:11px;border:1px solid #aaa;border-radius:3px;background:white;cursor:pointer;font-family:var(--gb2-ui-font);color:#444;">' +
-                        'Copy APA' +
-                      '</button>' +
-                    '</div>' +
                   '</div>' +
                 '</div>';
             // Live-tint the Line tab's Color button.
@@ -91414,99 +91338,6 @@
                     }
                     redraw();
                     _baPaintStatsResult();
-                });
-            }
-            // Copy APA button — composes a full APA-style string
-            // from the current result (using the ADJUSTED p when
-            // correction is on, so the manuscript line matches
-            // what the bracket shows) and writes it to the
-            // clipboard. Briefly swaps the button label so the
-            // user gets visible feedback that the copy succeeded.
-            var _baCopyBtn = body.querySelector('[data-field="autoP-copy"]');
-            if (_baCopyBtn) {
-                _baCopyBtn.addEventListener("click", function (e) {
-                    e.preventDefault();
-                    var cur = findAnnotation(ann.id) || ann;
-                    var r = computeAutoPForBracket(cur);
-                    if (!r || !r.ok) return;
-                    // Synthesize a res-like object with the
-                    // adjusted p so the APA formatter shows the
-                    // value the bracket actually displays.
-                    var resForCopy = {};
-                    for (var k in r.res) {
-                        if (Object.prototype.hasOwnProperty.call(r.res, k)) {
-                            resForCopy[k] = r.res[k];
-                        }
-                    }
-                    resForCopy.p = r.adjustedP;
-                    var _cpTn = (r.tail === "greater" || r.tail === "less")
-                        ? "one-tailed" : "";
-                    var _dfC = function (dv) {
-                        return (typeof dv === "number" && dv % 1 !== 0)
-                            ? dv.toFixed(2) : String(dv);
-                    };
-                    var apa = (r.testKind === "rmAnova")
-                        ? ("F(" + _dfC(resForCopy.df1) + ", " + _dfC(resForCopy.df2) +
-                           ") = " + resForCopy.F.toFixed(2) + ", " +
-                           _gb2Stats.formatP(resForCopy.p) +
-                           (isFinite(r.effect)
-                               ? ", η²p = " +
-                                 r.effect.toFixed(2).replace(/^0/, "")
-                               : "") +
-                           ((typeof resForCopy.eps === "number" &&
-                             resForCopy.eps < 0.9995)
-                               ? ", Greenhouse-Geisser corrected" : ""))
-                        : (r.testFamily === "anova")
-                        ? _gb2Stats.formatANOVA(resForCopy, r.effect)
-                        : (r.testFamily === "prop")
-                            ? ("z = " + resForCopy.z.toFixed(2) + ", " +
-                               _gb2Stats.formatP(resForCopy.p) +
-                               (_cpTn ? ", " + _cpTn : "") +
-                               (isFinite(r.effect)
-                                   ? ", \u0394p = " + r.effect.toFixed(2).replace(/^(-?)0\./, "$1.")
-                                   : "") +
-                               (r.ci && isFinite(r.ci.lo)
-                                   ? ", 95% CI [" + r.ci.lo.toFixed(2).replace(/^(-?)0\./, "$1.") + ", " +
-                                     r.ci.hi.toFixed(2).replace(/^(-?)0\./, "$1.") + "]"
-                                   : ""))
-                        : (r.testFamily === "rank")
-                            ? _gb2StatsFormatRankAPA(resForCopy, r.testKind,
-                                                      r.effect, r.effectSym, _cpTn)
-                            : _gb2Stats.formatAPA(resForCopy, r.effect, r.effectSym, r.effectCi, _cpTn);
-                    // Synchronous execCommand FIRST — it is the path
-                    // that works inside jamovi desktop's Qt WebEngine (the
-                    // async Clipboard API throws "Document is not focused"
-                    // there). Only claim "Copied!" when a copy actually
-                    // happened; otherwise leave the APA text selected
-                    // on-screen for a manual Cmd/Ctrl+C — never a false
-                    // "Copied!".
-                    // Copy the APA sentence with italic statistical symbols
-                    // (rich text/html + plain-text fallback) via the shared
-                    // clipboard helper (Electron execCommand + async fallback).
-                    var _okCopy = _gb2ClipboardWrite(apa, _gb2ApaHtml(apa)), _ta = null;
-                    if (_okCopy) {
-                        _baCopyBtn.textContent = "Copied!";
-                        setTimeout(function () {
-                            try { _baCopyBtn.textContent = "Copy APA"; } catch (_e4) {}
-                        }, 1400);
-                    } else {
-                        // Clipboard blocked: surface the text for a manual
-                        // Cmd/Ctrl+C so we never claim a false "Copied!".
-                        _ta = document.createElement("textarea");
-                        _ta.value = apa;
-                        document.body.appendChild(_ta);
-                        var _mod = "Ctrl";
-                        try { if (navigator.platform &&
-                            /mac/i.test(navigator.platform)) _mod = "\u2318"; } catch (_e5) {}
-                        _ta.style.cssText = "position:fixed;left:8px;bottom:8px;width:240px;" +
-                            "height:22px;z-index:2147483647;font:11px ui-monospace,Menlo,monospace;";
-                        _ta.focus(); _ta.select();
-                        _baCopyBtn.textContent = "Press " + _mod + "+C";
-                        setTimeout(function () {
-                            try { if (_ta.parentNode) _ta.parentNode.removeChild(_ta); } catch (_e6) {}
-                            try { _baCopyBtn.textContent = "Copy APA"; } catch (_e7) {}
-                        }, 3000);
-                    }
                 });
             }
             // Initial paint.

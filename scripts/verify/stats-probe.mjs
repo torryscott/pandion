@@ -969,14 +969,16 @@ async function sbClick(page, act) {
     console.log('case T1 (CG omnibus: Show-on-chart removed):');
     check('no page errors', errs.length === 0, errs.join(' | '));
     await openStats(page);
-    // "Show on chart" was removed from the omnibus tab per Torry; only the
-    // Copy APA button remains (the on-chart omnibus stat box is retired).
+    // "Show on chart" was removed from the omnibus tab per Torry, and the
+    // Copy APA button followed in Aug 2026 (the colleague's pedagogy
+    // comment: click-to-paste teaches nothing) - the omnibus card shows
+    // its table + sentences with no copy affordance at all.
     const oq = await page.evaluate(() => ({
         sbomni: !!document.querySelector('[data-st-act="sbomni"]'),
         copyomni: !!document.querySelector('[data-st-act="copyomni"]')
     }));
     check('omnibus Show-on-chart button removed', oq.sbomni === false, 'sbomni still present');
-    check('omnibus Copy APA button kept', oq.copyomni === true, 'copyomni missing');
+    check('omnibus Copy APA button retired too', oq.copyomni === false, 'copyomni still present');
     await ctx.close();
 }
 {
@@ -984,14 +986,16 @@ async function sbClick(page, act) {
     console.log('case T2 (stat box, likert alpha):');
     await openStats(page);
     // "Show on chart" is REMOVED from the Reliability tab (Jul 9 2026,
-    // Torry) - only Copy remains. The alpha stat box survives for old
-    // saved charts: inject it and check the LIVE-computed text.
+    // Torry), and the sentence Copy followed in Aug 2026 (the APA-copy
+    // retirement) - the alpha table displays everything, nothing copies.
+    // The alpha stat box survives for old saved charts: inject it and
+    // check the LIVE-computed text.
     const btnsA = await page.evaluate(() => ({
         sbalpha: !!document.querySelector('[data-st-act="sbalpha"]'),
         copyalpha: !!document.querySelector('[data-st-act="copyalpha"]')
     }));
-    check('reliability tab: only Copy remains',
-          !btnsA.sbalpha && btnsA.copyalpha, JSON.stringify(btnsA));
+    check('reliability tab: no buttons remain',
+          !btnsA.sbalpha && !btnsA.copyalpha, JSON.stringify(btnsA));
     await page.evaluate(() => {
         const d = window.gb2_undo.getData();
         if (!Array.isArray(d.annotations)) d.annotations = [];
@@ -2218,15 +2222,19 @@ async function copyFlips(page, actKey) {
     }, actKey);
 }
 
-// case AA (F1: freq Chi-square "Copy APA" wired — was a dead fLines ref)
+// case AA (Aug 2026: the chisq Copy APA is RETIRED with every other APA
+// copy button - the colleague's pedagogy comment - while the Copy table
+// TSV stays and still wires)
 {
     const { ctx, page, errs } = await openPage('i_freq_prop_brackets.html');
-    console.log('case AA (freq chisq Copy APA works):');
+    console.log('case AA (freq chisq: APA copy retired, table copy works):');
     check('no page errors', errs.length === 0, errs.join(' | '));
     await openStats(page);
-    const r = await copyFlips(page, 'copychisq');
-    check('Copy APA button present', r.has, 'missing');
-    check('click produces content (label flips)',
+    const gone = await page.evaluate(() =>
+        !!document.querySelector('[data-st-act="copychisq"]'));
+    check('Copy APA button retired', gone === false, 'copychisq still present');
+    const r = await copyFlips(page, 'copychtbl');
+    check('Copy table stays and its click produces content (label flips)',
           r.has && r.after !== r.before && /copied|failed/i.test(r.after),
           JSON.stringify(r));
     await ctx.close();
