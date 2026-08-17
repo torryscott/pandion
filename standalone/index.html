@@ -165,7 +165,14 @@
      browser: OS delay, OS font, unstylable, and never shown on keyboard focus.
      One element, positioned by the shell, on hover AND on focus. */
   #ps-tip {
-    position: fixed; z-index: 12000; display: none; max-width: 280px;
+    /* Above EVERY surface a tip can anchor inside - menus (12000),
+       welcome (13000), the command palette (14000). At the menus' own
+       12000 the later-in-DOM #ps-appmenu painted OVER the tip, so a
+       disabled menu row's "unavailable in this workspace" explanation
+       showed only as unreadable slivers poking out past the menu edges
+       (a collaborator's screenshot, Aug 2026) - or, with a narrower
+       tip, not at all. */
+    position: fixed; z-index: 15000; display: none; max-width: 280px;
     padding: 5px 8px 6px; color: var(--ps-s0); background: #2b3a4c;
     border-radius: var(--ps-r-sm); box-shadow: var(--ps-e-2);
     font-size: var(--ps-fs-xs); line-height: 1.4; pointer-events: none;
