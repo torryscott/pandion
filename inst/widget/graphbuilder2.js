@@ -62093,8 +62093,11 @@
                        _ebChoiceBtn("data-eb-type", "sd",   "SD",     _ebCurType, "Standard deviation") +
                        _ebChoiceBtn("data-eb-type", "ci95", "95% CI", _ebCurType, "95% confidence interval") +
                        _ebChoiceBtn("data-eb-type", "ci99", "99% CI", _ebCurType, "99% confidence interval") +
-                       _ebChoiceBtn("data-eb-type", "ci95c", "Comparison", _ebCurType,
-                           "Comparison-adjusted: two bars that do not overlap differ at p < .05") +
+                       _ebChoiceBtn("data-eb-type", "ci95c", "Comparison-adjusted", _ebCurType,
+                           "A 95% interval adjusted for comparing pairs: two bars that do not " +
+                           "overlap differ at p < .05. Read by OVERLAP - note that superb\u2019s " +
+                           "difference-adjusted CIs are twice as wide and are read the other way, " +
+                           "by whether one mean falls inside the other\u2019s interval.") +
                        _ebChoiceBtn("data-eb-type", "none", "None",   _ebCurType, "Draw no error bars") +
                        // The reading rule IS the feature, so it gets the
                        // hint line rather than a tooltip - with the
