@@ -46692,6 +46692,17 @@
                 styleBits.push("transform-origin:center center");
             }
             input.style.cssText = styleBits.join(";");
+            // The document-level outside-click handler needs to be able to
+            // RECOGNISE this editor. Without an identity, clicking inside
+            // it read as a click on inert space: the handler cleared the
+            // selection, setInspectorSelection committed the UNCHANGED
+            // text and tore the editor down, so a user who double-clicked
+            // a label and then clicked into the box to place the cursor
+            // watched the edit fail and went to the panel instead (a
+            // colleague, Aug 2026). Typing straight after the
+            // double-click always worked, which is why this looked
+            // intermittent.
+            input.setAttribute("data-role", "inline-text-editor");
             wrap.appendChild(input);
 
             // Hide the underlying SVG text while the editor is live
@@ -100361,7 +100372,7 @@
             // gestures with page.mouse.)
             try {
                 if (e.target && e.target.closest &&
-                    e.target.closest('[data-role="graphtype-flyout"], [data-role="palette-flyout"], [data-role="add-ann-menu"], [data-role="setting-search"]')) return;
+                    e.target.closest('[data-role="graphtype-flyout"], [data-role="palette-flyout"], [data-role="add-ann-menu"], [data-role="setting-search"], [data-role="inline-text-editor"]')) return;
             } catch (_eMn) {}
             clearInspectorSelection();
         });
