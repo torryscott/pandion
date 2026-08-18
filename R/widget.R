@@ -482,6 +482,10 @@ graphbuilder2_html <- function(bars,
                                bar_outlier_iqr_k = 1.5,
                                bar_outlier_sd_k = 3,
                                bar_outlier_color = "#d62728",
+                               # Fill of the dot drawn at a flagged
+                               # value when the data-point overlay is
+                               # off. Empty = follow the ring color.
+                               bar_outlier_dot_color = "",
                                bar_outlier_label = FALSE,
                                bar_outlier_size = 1,
                                bar_outlier_width = 1.6,
@@ -1825,6 +1829,7 @@ graphbuilder2_html <- function(bars,
         barOutlierIqrK = as.numeric(bar_outlier_iqr_k),
         barOutlierSdK = as.numeric(bar_outlier_sd_k),
         barOutlierColor = as.character(bar_outlier_color),
+        barOutlierDotColor = as.character(bar_outlier_dot_color),
         barOutlierLabel = isTRUE(bar_outlier_label),
         barOutlierSize = as.numeric(bar_outlier_size),
         barOutlierWidth = as.numeric(bar_outlier_width),

@@ -183,6 +183,7 @@
     list(arg = "bar_outlier_iqr_k", opt = "barOutlierIqrK", bool = FALSE, default = 1.5),
     list(arg = "bar_outlier_sd_k", opt = "barOutlierSdK", bool = FALSE, default = 3),
     list(arg = "bar_outlier_color", opt = "barOutlierColor", bool = FALSE, default = "#d62728"),
+    list(arg = "bar_outlier_dot_color", opt = "barOutlierDotColor", bool = FALSE, default = ""),
     list(arg = "bar_outlier_size", opt = "barOutlierSize", bool = FALSE, default = 1),
     list(arg = "bar_outlier_width", opt = "barOutlierWidth", bool = FALSE, default = 1.6),
     list(arg = "facet_strip_show", opt = "facetStripShow", bool = TRUE, default = TRUE),

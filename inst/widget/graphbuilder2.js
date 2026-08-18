@@ -34174,6 +34174,26 @@
                 var olColor = (typeof data.barOutlierColor === "string"
                                  && data.barOutlierColor.length > 0)
                     ? data.barOutlierColor : "#d62728";
+                // The dot drawn when the points overlay is OFF is the
+                // only mark showing that value, so it is outlier chrome
+                // and carries its own color, defaulting to the ring's
+                // (Aug 2026, t4-204: it used to inherit the Data-points
+                // fill, which with Match-graph on painted it the bar's
+                // own color - "not very helpful", and the Outliers
+                // panel's Color moved only the ring).
+                var olDotColor = (typeof data.barOutlierDotColor === "string"
+                                    && data.barOutlierDotColor.length > 0)
+                    ? data.barOutlierDotColor : olColor;
+                // Both parts of the mark open the Outliers panel.
+                var _boOpenPanel = function (e) {
+                    e.stopPropagation(); e.preventDefault();
+                    var prevSel = inspector.selection.slice();
+                    try { setInspectorSelection("barOutliers"); } catch (_eI) {}
+                    if (prevSel.length === 1 && prevSel[0] === "barOutliers") {
+                        try { renderInspectorPanel(); } catch (_eR) {}
+                        try { redrawInspectorIndicator(); } catch (_eRi) {}
+                    }
+                };
                 var olLabel = data.barOutlierLabel === true;
                 var olSizeF = (typeof data.barOutlierSize === "number" && data.barOutlierSize > 0) ? data.barOutlierSize : 1;
                 var olW = (typeof data.barOutlierWidth === "number" && data.barOutlierWidth > 0) ? data.barOutlierWidth : 1.6;
@@ -34228,18 +34248,25 @@
                     // own outlier dots already sit at center, so skip
                     // the duplicate unless the user hid them.
                     if (!dotsShown && !_bxOwnDots) {
-                        var dotFill = (data.pointColorMatch !== false)
-                            ? colorFor(bar.group) : (data.pointColor || "#222");
                         var _dotOutlineW = (typeof data.pointOutlineWidth === "number"
                                               && data.pointOutlineWidth > 0)
                             ? data.pointOutlineWidth : 0;
-                        var _dotOp = (typeof data.pointOpacity === "number")
-                            ? data.pointOpacity : 0.6;
+                        // Opaque: at the old 0.6 the fill blended with
+                        // the bar underneath it, which is half of why
+                        // it read as "the same color as the bars".
                         var dotEl = pointShapeEl(data.pointShape || "circle",
-                            px, py, ptSize, dotFill,
-                            data.pointOutlineColor || "#000000", _dotOutlineW, _dotOp);
+                            px, py, ptSize, olDotColor,
+                            data.pointOutlineColor || "#000000", _dotOutlineW, 1);
                         dotEl.setAttribute("data-role", "bar-outlier-dot");
                         dotEl.setAttribute("data-bar-group", bar.group || "");
+                        // The ring's hit band is stroke-only so the
+                        // center passes through to a real data point
+                        // when the overlay is on. With the overlay off
+                        // there is nothing underneath, so the dot takes
+                        // its own click instead of falling to the
+                        // background (which cleared the selection).
+                        try { dotEl.style.cursor = "pointer"; } catch (_eBoCur) {}
+                        dotEl.addEventListener("click", _boOpenPanel);
                         dataGroup.appendChild(dotEl);
                     }
 
@@ -34292,15 +34319,7 @@
                             rEl.setAttribute("stroke-width", String(olW));
                             rEl.setAttribute("stroke-opacity", "0.9");
                         });
-                        hEl.addEventListener("click", function (e) {
-                            e.stopPropagation(); e.preventDefault();
-                            var prevSel = inspector.selection.slice();
-                            try { setInspectorSelection("barOutliers"); } catch (_eI) {}
-                            if (prevSel.length === 1 && prevSel[0] === "barOutliers") {
-                                try { renderInspectorPanel(); } catch (_eR) {}
-                                try { redrawInspectorIndicator(); } catch (_eRi) {}
-                            }
-                        });
+                        hEl.addEventListener("click", _boOpenPanel);
                     })(ringEl, hitEl);
                     dataGroup.appendChild(hitEl);
                 }
@@ -86803,6 +86822,29 @@
             var olLabel = data.barOutlierLabel === true;
             var olSize = (typeof data.barOutlierSize === "number" && data.barOutlierSize > 0) ? data.barOutlierSize : 1;
             var olWidth = (typeof data.barOutlierWidth === "number" && data.barOutlierWidth > 0) ? data.barOutlierWidth : 1.6;
+            // The Dot control is offered only where a dot of ours is
+            // actually drawn. With the points overlay ON that mark IS a
+            // data point (Data points styles it); the box family draws
+            // its own outlier dots. Mirrors renderBarOutliers' gate.
+            var _boGt = data.graphType || "bar";
+            var _boDotsShown = (_boGt === "raincloud" || data.showDataPoints === true)
+                && !_isElementHidden("dataPoints")
+                && (data.pointScatter || "jitter") !== "none";
+            var _boBoxOwn = (_boGt === "box" || _boGt === "violin" || _boGt === "raincloud")
+                && !_boDotsShown && (data.boxShowOutliers !== false);
+            var _boHasDot = !_boDotsShown && !_boBoxOwn;
+            function _boDotMatchOn() {
+                return !(typeof data.barOutlierDotColor === "string"
+                           && data.barOutlierDotColor.length > 0);
+            }
+            function _boDotResolved() {
+                var live = (typeof data.barOutlierColor === "string"
+                              && data.barOutlierColor.length > 0)
+                    ? data.barOutlierColor : "#d62728";
+                return _boDotMatchOn() ? live : data.barOutlierDotColor;
+            }
+            var _boDotMatch = _boDotMatchOn();
+            var olDotColor = _boDotResolved();
 
             var _boBtnStyle = [
                 "min-width:60px","height:44px","padding:3px 8px",
@@ -86873,6 +86915,24 @@
                   'aria-label="Outlier ring color" title="Outlier ring color"></button>' +
                 _renderPaletteRowHtml(olColor, "color", "bo", 18, false) +
                 '<span style="color:#666;font-size:11px;flex-basis:100%;margin-top:2px;">Ring drawn around each flagged value. Or use the HSV picker on the right.</span>';
+            var _boDotCtrl =
+                '<button type="button" data-field="bo-dot-match" ' +
+                    'style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;font-size:11px;font-family:var(--gb2-ui-font);' +
+                    'background:' + (_boDotMatch ? "#1a5fb4" : "white") + ';' +
+                    'color:' + (_boDotMatch ? "#ffffff" : "#333") + ';' +
+                    'border:1px solid ' + (_boDotMatch ? "#1a5fb4" : "#aaa") + ';' +
+                    'border-radius:4px;cursor:pointer;font-weight:' + (_boDotMatch ? "600" : "400") + ';flex-shrink:0;" ' +
+                    'title="When on, the flagged value is filled with the ring color; turn off to pick a separate fill.">' +
+                    '<span data-role="match-indicator" style="font-size:12px;line-height:1;width:12px;display:inline-flex;justify-content:center;">' + (_boDotMatch ? "&#10003;" : "&#9675;") + '</span>' +
+                    '<span>Match the ring color</span>' +
+                '</button>' +
+                '<div data-field="bo-dot-custom-row" style="flex-basis:100%;display:flex;align-items:center;gap:6px;flex-wrap:wrap;order:-1;margin-bottom:6px;' + (_boDotMatch ? "opacity:0.5;" : "") + '">' +
+                  '<button type="button" data-field="bo-dot-swatch" data-role="primary-color" style="' +
+                    swatchCss + 'background:' + olDotColor + ';" ' +
+                    'aria-label="Outlier dot color" title="Outlier dot color"></button>' +
+                  _renderPaletteRowHtml(_boDotMatch ? "" : olDotColor, "dotcolor", "bo", 18, false) +
+                '</div>' +
+                '<span style="color:#666;font-size:11px;flex-basis:100%;margin-top:2px;">Fill of the flagged value itself. It is drawn here because the individual data points are off. Or use the HSV picker on the right.</span>';
             var _boSizeCtrl =
                 '<input type="range" data-field="bo-size" min="0.3" max="4" step="0.1" value="' + olSize + '" style="' + rangeCss + '"/>' +
                 '<input type="number" data-field="bo-size-num" min="0.3" max="4" step="0.1" value="' + olSize + '" style="' + numInputCss + '"/>' +
@@ -86890,13 +86950,15 @@
             body.innerHTML =
                 '<div data-bo-btns style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
                    _boBtn("method", "shape", "Method") +
-                   _boBtn("color",  "color", "Color")  +
+                   _boBtn("color",  "color", "Ring")   +
+                   (_boHasDot ? _boBtn("dot", "color", "Dot") : "") +
                    _boBtn("size",   "size",  "Size")   +
                    _boBtn("width",  "width", "Width")  +
                    _boBtn("label",  "fill",  "Label")  +
                 '</div>' +
                 _boStrip("method", _boMethodCtrl) +
                 _boStrip("color",  _boColorCtrl)  +
+                (_boHasDot ? _boStrip("dot", _boDotCtrl) : "") +
                 _boStrip("size",   _boSizeCtrl)   +
                 _boStrip("width",  _boWidthCtrl)  +
                 _boStrip("label",  _boLabelCtrl);
@@ -86908,6 +86970,8 @@
                         ? data.barOutlierColor : "#d62728";
                     var _b = body.querySelector('[data-bo-btn="color"]');
                     if (_b) _b.style.setProperty('--gb2-color-accent', _live);
+                    var _bd = body.querySelector('[data-bo-btn="dot"]');
+                    if (_bd) _bd.style.setProperty('--gb2-color-accent', _boDotResolved());
                 };
                 window.__gb2_colorIconRefresher();
             } catch (_e) {}
@@ -86941,8 +87005,9 @@
                         e.preventDefault(); e.stopPropagation();
                         var sid = btn.getAttribute("data-bo-btn");
                         _boShowStrip(sid);
-                        if (sid === "color") {
-                            var sw = body.querySelector('[data-field="bo-color-swatch"]');
+                        if (sid === "color" || sid === "dot") {
+                            var sw = body.querySelector('[data-field="'
+                                + (sid === "dot" ? "bo-dot-swatch" : "bo-color-swatch") + '"]');
                             if (sw) {
                                 try { _pickerSkipNextFocus = true; } catch (_e0) {}
                                 try { window.__gb2_pickerSkipExpand = true; } catch (_e1) {}
@@ -87082,6 +87147,67 @@
                     }); })(_pal[_pi]);
                 }
             })();
+            (function () {
+                // Dot fill: the "match" state is the empty-string
+                // sentinel, so the default costs no stored value and a
+                // ring recolor carries the dot with it.
+                var _row = body.querySelector('[data-field="bo-dot-custom-row"]');
+                var _btn = body.querySelector('[data-field="bo-dot-match"]');
+                function _refresh() {
+                    var m = _boDotMatchOn();
+                    if (_btn) {
+                        _btn.style.background  = m ? "#1a5fb4" : "white";
+                        _btn.style.color       = m ? "#ffffff" : "#333";
+                        _btn.style.borderColor = m ? "#1a5fb4" : "#aaa";
+                        _btn.style.fontWeight  = m ? "600" : "400";
+                        var ind = _btn.querySelector('[data-role="match-indicator"]');
+                        if (ind) ind.innerHTML = m ? "&#10003;" : "&#9675;";
+                    }
+                    if (_row) _row.style.opacity = m ? "0.5" : "";
+                    // Re-query: an R re-render may have rebuilt the
+                    // panel since this closure was made.
+                    var _sw = body.querySelector('[data-field="bo-dot-swatch"]');
+                    if (_sw) _sw.style.background = _boDotResolved();
+                    try { if (window.__gb2_colorIconRefresher) window.__gb2_colorIconRefresher(); } catch (_e) {}
+                }
+                function _set(v) {
+                    data.barOutlierDotColor = v;
+                    redraw();
+                    if (hasSetOption) { try { _setOption("barOutlierDotColor", v); } catch (_e) {} }
+                    _refresh();
+                }
+                if (_btn) {
+                    _btn.addEventListener("click", function (e) {
+                        e.preventDefault();
+                        if (_boDotMatchOn()) {
+                            _set(window.__gb2_boDotColorMem || _boDotResolved());
+                        } else {
+                            try { window.__gb2_boDotColorMem = data.barOutlierDotColor; } catch (_e) {}
+                            _set("");
+                        }
+                    });
+                }
+                var _sw0 = body.querySelector('[data-field="bo-dot-swatch"]');
+                if (_sw0) {
+                    _sw0.addEventListener("click", function (e) {
+                        e.preventDefault();
+                        function _ap(newC) {
+                            try { window.__gb2_boDotColorMem = newC; } catch (_e) {}
+                            _set(newC);
+                        }
+                        openColorPicker(_boDotResolved(), _ap, _ap);
+                    });
+                }
+                var _pal = body.querySelectorAll('[data-bo-palette][data-bo-palette-target="dotcolor"]');
+                for (var _pi = 0; _pi < _pal.length; _pi++) {
+                    (function (btn) { btn.addEventListener("click", function (e) { e.preventDefault();
+                        var hex = btn.getAttribute("data-bo-palette");
+                        try { window.__gb2_boDotColorMem = hex; } catch (_e) {}
+                        _set(hex);
+                        if (typeof _refreshPaletteRowHighlight === "function") { try { _refreshPaletteRowHighlight(body, "dotcolor", "bo", hex); } catch (_e) {} }
+                    }); })(_pal[_pi]);
+                }
+            })();
             var boLabelCb = body.querySelector('[data-field="bo-label"]');
             if (boLabelCb) {
                 boLabelCb.addEventListener("change", function () {
@@ -87098,6 +87224,7 @@
                         data.barOutlierIqrK = 1.5;
                         data.barOutlierSdK = 3;
                         data.barOutlierColor = "#d62728";
+                        data.barOutlierDotColor = "";
                         data.barOutlierLabel = false;
                         data.barOutlierSize = 1;
                         data.barOutlierWidth = 1.6;
@@ -87106,6 +87233,7 @@
                             try { _setOption("barOutlierIqrK", 1.5); } catch (_e) {}
                             try { _setOption("barOutlierSdK", 3); } catch (_e) {}
                             try { _setOption("barOutlierColor", "#d62728"); } catch (_e) {}
+                            try { _setOption("barOutlierDotColor", ""); } catch (_e) {}
                             try { _setOption("barOutlierLabel", false); } catch (_e) {}
                             try { _setOption("barOutlierSize", 1); } catch (_e) {}
                             try { _setOption("barOutlierWidth", 1.6); } catch (_e) {}
