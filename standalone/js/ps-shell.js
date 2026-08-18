@@ -8388,6 +8388,25 @@
       syncPaneScrollCue();
       return;
     }
+    // t4-202. The engine refuses to draw a significance bracket whose
+    // anchors no longer name bars on this chart, and reports the ids in
+    // window.__gb2_orphanBrackets. A bracket quietly disappearing is its
+    // own kind of silence, so say it ONCE per transition into that state
+    // (not on every render, and not when the count merely holds steady) -
+    // the same disclosure duty reconcileOverlayState carries for an
+    // overlay it switches off. Check graph keeps the durable explanation.
+    try {
+      var _orph = Array.isArray(window.__gb2_orphanBrackets)
+        ? window.__gb2_orphanBrackets.length : 0;
+      if (_orph > ORPHAN_BRACKETS_TOLD) {
+        showToast(_orph + " significance bracket" + (_orph === 1 ? "" : "s") +
+          (_orph === 1 ? " no longer matches" : " no longer match") +
+          " this chart, so " + (_orph === 1 ? "it is" : "they are") +
+          " not drawn. Nothing was deleted - undo the change to bring " +
+          (_orph === 1 ? "it" : "them") + " back, or see Check graph.", true);
+      }
+      ORPHAN_BRACKETS_TOLD = _orph;
+    } catch (e) {}
     LAST_RENDER_PAYLOAD = built.payload;
     LAST_DATA_HIDDEN_POINTS = Array.isArray(built.payload.hiddenPoints)
       ? built.payload.hiddenPoints.map(function (point) {
@@ -9311,6 +9330,9 @@
   // render entry; the engine's "+" menu then offers Distributions /
   // Contours again and ONE click recomputes against the current data.
   var RECON_BIN_PIN = null;
+  // How many orphaned brackets the user has already been told about, so
+  // the notice fires on the TRANSITION rather than on every render.
+  var ORPHAN_BRACKETS_TOLD = 0;
   // t3-49. Re-adds an overlay through the ENGINE's own affordance rather than
   // by committing the option: the geometry is computed client-side by the
   // engine, and only its add gesture rebuilds it. Setting the option alone

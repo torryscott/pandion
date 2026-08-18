@@ -3110,6 +3110,9 @@
         // by construction (it renders the very data the pin holds), and
         // clearing on it released the guard while stale trailing echoes were
         // still queued (the undo "flash back then forward" artifact).
+        // Orphaned-bracket tally is per render: the draw pass below
+        // refills it, so a structural change that heals (undo) clears it.
+        try { window.__gb2_orphanBrackets = []; } catch (_eOr0) {}
         var _gb2AuthRender = false;
         try {
             _gb2AuthRender = !!window.__gb2_authoritativeRender;
@@ -16069,19 +16072,45 @@
                     ann.anchorRightGroup = _autoR.group;
                 }
             }
+            // ORPHAN CHECK (Aug 2026, Torry's ruling after a colleague's
+            // report). An anchored bracket used to fall back to its last
+            // known pixel coords when its bar vanished, so changing the
+            // STRUCTURE - adding a Group By, splitting into panels,
+            // swapping the X variable - left the bracket hanging over
+            // whatever now occupied that spot, labelled with an em-dash
+            // and describing nothing. It rode into exports that way.
+            // A bracket that named specific bars and can no longer find
+            // them is not describing this chart, so it is not drawn. It
+            // is NOT deleted: undo the structural change and the anchors
+            // resolve again, so it simply returns. Deliberately NOT
+            // re-anchored to the surviving category cluster - that would
+            // silently turn a cell-vs-cell comparison into a pooled one
+            // while keeping the same appearance.
+            var _orphanBr = false;
             if (ann.anchorLeftCat) {
                 var _aL = findBarCenterX({
                     cat: ann.anchorLeftCat,
                     group: ann.anchorLeftGroup || ""
                 });
-                if (_aL != null) ann.x = _aL;
+                if (_aL != null) ann.x = _aL; else _orphanBr = true;
             }
             if (ann.anchorRightCat) {
                 var _aR = findBarCenterX({
                     cat: ann.anchorRightCat,
                     group: ann.anchorRightGroup || ""
                 });
-                if (_aR != null) ann.x2 = _aR;
+                if (_aR != null) ann.x2 = _aR; else _orphanBr = true;
+            }
+            // Main-effect brackets span the whole factor rather than two
+            // named cells, so a missing cell never orphans them.
+            if (_orphanBr && !_isMainEffectAnn(ann)) {
+                try {
+                    if (!Array.isArray(window.__gb2_orphanBrackets))
+                        window.__gb2_orphanBrackets = [];
+                    if (window.__gb2_orphanBrackets.indexOf(ann.id) < 0)
+                        window.__gb2_orphanBrackets.push(ann.id);
+                } catch (_eOb) {}
+                return;
             }
             // Main-effect brackets span the WHOLE factor, not two
             // anchored cells: stretch from the leftmost to the
@@ -49610,6 +49639,42 @@
                         "or with the button below.",
                     fixGt: null, fixOrient: "horizontal" });
             })();
+            // Orphaned brackets: named bars that are no longer on the
+            // chart, so they are not drawn (see the orphan check in
+            // renderAnnotationBracket). Say so here, because a bracket
+            // quietly vanishing is its own kind of silence.
+            (function () {
+                var _obList = Array.isArray(window.__gb2_orphanBrackets)
+                    ? window.__gb2_orphanBrackets : [];
+                if (!_obList.length) return;
+                var _obAuto = 0, _obAnns = data.annotations || [];
+                for (var _ob = 0; _ob < _obAnns.length; _ob++) {
+                    var _obA = _obAnns[_ob];
+                    if (_obA && _obList.indexOf(_obA.id) >= 0 && _obA.autoGen === true) _obAuto++;
+                }
+                out.push({ id: "brorphan", sev: "warn",
+                    title: _obList.length + " significance bracket" +
+                        (_obList.length === 1 ? "" : "s") + " no longer match this chart",
+                    why: "Th" + (_obList.length === 1 ? "is bracket named two bars" : "ese brackets named bars") +
+                        " that are not on the chart any more - the variables, the " +
+                        "grouping, or the panels changed underneath " +
+                        (_obList.length === 1 ? "it" : "them") + ". " +
+                        (_obList.length === 1 ? "It is" : "They are") +
+                        " not drawn, because " + (_obList.length === 1 ? "it" : "they") +
+                        " would sit over bars " + (_obList.length === 1 ? "it" : "they") +
+                        " does not describe, and nothing has been deleted: undo the " +
+                        "change and " + (_obList.length === 1 ? "it comes" : "they come") +
+                        " straight back. " +
+                        (_obAuto > 0
+                            ? "Press Place brackets in the Statistics panel to place " +
+                              "comparisons for the chart as it is now, or remove " +
+                              (_obList.length === 1 ? "it" : "them") + " from the Visibility panel."
+                            : "Re-draw " + (_obList.length === 1 ? "it" : "them") +
+                              " for the chart as it is now, or remove " +
+                              (_obList.length === 1 ? "it" : "them") +
+                              " from the Visibility panel."),
+                    fixGt: null });
+            })();
             if ((gt === "bar" || gt === "histogram" || gt === "histdensity" || gt === "pareto") && data.yMinOverride === true && typeof data.yMin === "number" && isFinite(data.yMin) && data.yMin > 0)
                 out.push({ id: "zerobase", sev: "warn", title: "The value axis doesn't start at zero", why: "Your value axis starts at " + data.yMin + ", not 0. Bars and histogram columns are read by their height, so cutting off the bottom makes some look much taller than others relative to one another. Set the Y-axis minimum back to 0.", fixGt: null });
             // Truncation disclosure (breakoff): on position-encoded types
@@ -50472,6 +50537,7 @@
                 { id: "chisqexp", name: "Chi-square expected counts", tip: "The chi-square approximation needs expected counts of about 5 or more per cell.", applies: _mk === "freq" && Array.isArray(data.freqTests) && data.freqTests.length > 0 },
                 { id: "corrn", name: "Pairs behind each correlation", tip: "Correlations built on very few complete pairs swing wildly from sample to sample.", applies: gt.indexOf("corr") === 0 && Array.isArray(data.corrCells) && data.corrCells.length > 0 },
                 { id: "corrmany", name: "Many-tests caveat", tip: "Testing many correlations at once produces some false alarms by chance.", applies: false },
+                { id: "brorphan", name: "Brackets match the chart", tip: "A significance bracket must still name bars that exist; when the variables, grouping or panels change underneath one, it is not drawn.", applies: _bkAnyBracket },
                 { id: "brackclaim", name: "Significance marks are earned", tip: "Every bracket showing a star or a p value should have a computed test behind it, not a typed placeholder.", applies: _bkAnyBracket },
                 { id: "bracketcorr", name: "Multiple-comparisons handling", tip: "Several significance brackets call for a correction, or a stated caveat.", applies: _abCount >= 1 },
                 { id: "likertn", name: "Responses per item", tip: "Items answered by very few people have unstable percentages.", applies: gt.indexOf("likert") === 0 },
