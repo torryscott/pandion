@@ -50848,19 +50848,23 @@
             redraw();
             return rows.length;
         }
-        // Re-label every placed (autoGen) bracket in the chosen format.
-        // Labels are computed live per draw from ann.autoPFormat, so a
-        // persist + redraw is the whole job.
-        function _cmpRelabelAuto(fmt) {
+        // Re-label brackets in the chosen format. Labels are computed
+        // live per draw from ann.autoPFormat, so a persist + redraw is
+        // the whole job. onlyAuto restricts it to Sigma-PLACED brackets
+        // (the Place menu's own scope); everything else re-labels every
+        // auto-p bracket on the chart, because the label format is a
+        // chart-wide convention - see _baWireAutoPSelect.
+        function _cmpRelabelAuto(fmt, onlyAuto) {
             var nRl = 0;
             var annsRl = data.annotations || [];
             for (var rl = 0; rl < annsRl.length; rl++) {
-                if (annsRl[rl] && annsRl[rl].autoGen === true &&
-                    annsRl[rl].kind === "bracket" &&
-                    annsRl[rl].autoPFormat !== fmt) {
-                    annsRl[rl].autoPFormat = fmt;
-                    nRl++;
-                }
+                var aRl = annsRl[rl];
+                if (!aRl || aRl.kind !== "bracket") continue;
+                if (onlyAuto !== false && aRl.autoGen !== true) continue;
+                if (onlyAuto === false && aRl.autoPValue !== true) continue;
+                if (aRl.autoPFormat === fmt) continue;
+                aRl.autoPFormat = fmt;
+                nRl++;
             }
             if (nRl > 0) {
                 persistAnnotations();
@@ -53150,7 +53154,11 @@
                                     var v3 = ib.getAttribute("data-cmp-style");
                                     window.__gb2_cmpLabelStyle = v3;
                                     window.__gb2_cmpStyleMenuOpen = false;
-                                    _cmpRelabelAuto(v3);   // live re-label of placed brackets
+                                    // Chart-wide, like the bracket panel's own
+                                    // Label select: the format is one figure
+                                    // convention, so the two surfaces that set
+                                    // it must not disagree about its scope.
+                                    _cmpRelabelAuto(v3, false);
                                     renderInspectorStats(body);
                                 });
                             })(styItems[si2]);
@@ -91211,6 +91219,28 @@
                     var partial = {};
                     partial[fieldName] = el.value;
                     commitAnnotationChange(ann.id, partial);
+                    // The LABEL FORMAT is a property of the figure, not of
+                    // one bracket (a colleague, Aug 2026: they should all
+                    // change together, the way the correction does). A
+                    // figure carries one convention - the starnote lint
+                    // already assumes it, asking the caption for an
+                    // asterisk key, which means nothing if only some
+                    // brackets show asterisks. So this select sets the
+                    // convention for every auto-p bracket on the chart;
+                    // the correction dropdown two rows up has always
+                    // behaved this way.
+                    if (fieldName === "autoPFormat") {
+                        try {
+                            window.__gb2_cmpLabelStyle = el.value;
+                            var _nFmt = _cmpRelabelAuto(el.value, false);
+                            // Say it once, to the live region, when the
+                            // change reached brackets other than this one -
+                            // a silent edit to marks off-screen is the kind
+                            // of thing that should not be silent.
+                            if (_nFmt > 0) _kbAnnounce(
+                                "Every significance label on this chart now uses this format.");
+                        } catch (_eFmt) {}
+                    }
                     _baSyncEffectAvailability();
                     _baPaintStatsResult();
                 });
