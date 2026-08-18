@@ -22282,6 +22282,11 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   }
   function gridRememberNaturalWidths() {
     if (gridHasColumnWidths()) return;
+    // Only a render showing EVERY column is an honest baseline. A render
+    // with columns hidden has already stretched its survivors to fill the
+    // width, and remembering those would make the stretch permanent (and
+    // would defeat the pinning in syncDataGrid, which reads these).
+    if (gridHiddenColumnCount(PROJECT.table) > 0) return;
     var heads = el("ps-datagrid").querySelectorAll("th[data-grid-col]");
     for (var i = 0; i < heads.length; i++) {
       var col = heads[i].getAttribute("data-grid-col");
@@ -22955,6 +22960,28 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     GRID_WINDOW_START = start;
     GRID_WINDOW_END = end;
     var sized = gridHasColumnWidths(), widths = gridColumnWidths(false);
+    // Hiding columns must not resize the ones that remain (a colleague,
+    // Aug 2026, on chart-variable focus: "I wish it didn't change the
+    // width of the columns"). An un-resized grid is width:100% with auto
+    // layout, so the browser hands the whole container width to whatever
+    // columns survive - focus 2 of 8 and those 2 balloon. When columns are
+    // hidden we PIN each survivor to the width it had in the last
+    // all-columns render (GRID_NATURAL_WIDTHS) and let the table end where
+    // it ends, the way a spreadsheet does. The pin object is LOCAL: it
+    // never touches PROJECT.ui.columnWidths, so this is not mistaken for
+    // the user having resized anything, and turning focus off restores the
+    // ordinary stretch exactly.
+    if (!sized && gridHiddenColumnCount(t) > 0 && visibleCols.length) {
+      var pin = {}, canPin = true;
+      for (var pw = 0; pw < visibleCols.length; pw++) {
+        var pinW = Number(GRID_NATURAL_WIDTHS[visibleCols[pw]]);
+        if (!isFinite(pinW)) { canPin = false; break; }
+        pin[visibleCols[pw]] = pinW;
+      }
+      // A column added while hidden has no remembered width; rather than
+      // guess one, fall back to the old stretch for that render.
+      if (canPin) { widths = pin; sized = true; }
+    }
     var tableClass = "ps-grid-table" + (sized ? " ps-grid-sized" : "");
     var tableStyle = sized
       ? ' style="width:' + gridWidthTotal(widths, visibleCols) + 'px;"' : "";
