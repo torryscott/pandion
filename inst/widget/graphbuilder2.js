@@ -87058,7 +87058,12 @@
             var _boTabs = [{ id: "rule", label: "Rule" }, { id: "ring", label: "Ring" }];
             if (_boHasDot) {
                 _boTabs.push({ id: "dot", label: "Dot" });
-                _boTabs.push({ id: "outline", label: "Outline" });
+                // "Dot outline" rather than a bare "Outline": the Ring
+                // is a stroke too, so the short name was ambiguous
+                // beside it (Torry, Aug 2026). Matches the Q-Q panel's
+                // "Point outline". The tab id stays "outline" so the
+                // sticky and its default strip are unaffected.
+                _boTabs.push({ id: "outline", label: "Dot outline" });
             }
             var _boChipsFor = {
                 rule:    [["method", "shape", "Method"], ["label", "fill", "Label"]],
