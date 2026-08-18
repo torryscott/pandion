@@ -16086,19 +16086,40 @@
             // re-anchored to the surviving category cluster - that would
             // silently turn a cell-vs-cell comparison into a pooled one
             // while keeping the same appearance.
+            // An EMPTY anchor group is not a missing group: it means the
+            // bracket was never group-specific, so it compares the whole
+            // category (all its data, pooled). That comparison is still
+            // exactly what it always was after a Group By is added - the
+            // category simply now draws as a cluster of bars - so the
+            // honest position is the CLUSTER's centre, and orphaning it
+            // would be wrong. Only a named group that has gone, or a
+            // category with no bars at all, leaves nothing to point at.
+            // (Caught by stats-probe case K, whose mixed-RM fixture
+            // brackets two occasions with no group: a first, blunter
+            // version of this check suppressed it and took the panel
+            // with it.)
+            function _brAnchorX(cat, grp) {
+                var exact = findBarCenterX({ cat: cat, group: grp || "" });
+                if (exact != null) return exact;
+                if (grp) return null;              // a named group has gone
+                var lo = Infinity, hi = -Infinity;
+                for (var _bi = 0; _bi < barCenterIds.length; _bi++) {
+                    var _id = barCenterIds[_bi];
+                    if (!_id || _id.cat !== cat) continue;
+                    var _bx = barCenterXs[_bi];
+                    if (!isFinite(_bx)) continue;
+                    if (_bx < lo) lo = _bx;
+                    if (_bx > hi) hi = _bx;
+                }
+                return isFinite(lo) ? (lo + hi) / 2 : null;
+            }
             var _orphanBr = false;
             if (ann.anchorLeftCat) {
-                var _aL = findBarCenterX({
-                    cat: ann.anchorLeftCat,
-                    group: ann.anchorLeftGroup || ""
-                });
+                var _aL = _brAnchorX(ann.anchorLeftCat, ann.anchorLeftGroup);
                 if (_aL != null) ann.x = _aL; else _orphanBr = true;
             }
             if (ann.anchorRightCat) {
-                var _aR = findBarCenterX({
-                    cat: ann.anchorRightCat,
-                    group: ann.anchorRightGroup || ""
-                });
+                var _aR = _brAnchorX(ann.anchorRightCat, ann.anchorRightGroup);
                 if (_aR != null) ann.x2 = _aR; else _orphanBr = true;
             }
             // Main-effect brackets span the whole factor rather than two
