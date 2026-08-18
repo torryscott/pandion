@@ -34197,6 +34197,11 @@
                 var olLabel = data.barOutlierLabel === true;
                 var olSizeF = (typeof data.barOutlierSize === "number" && data.barOutlierSize > 0) ? data.barOutlierSize : 1;
                 var olW = (typeof data.barOutlierWidth === "number" && data.barOutlierWidth > 0) ? data.barOutlierWidth : 1.6;
+                // Ring line style, through the shared dash table so a
+                // dashed ring matches every other dashed stroke in the
+                // suite (Aug 2026, Torry).
+                var olDash = (typeof dashArrayFor === "function")
+                    ? dashArrayFor(data.barOutlierStyle || "solid") : "";
                 var ptSize = (typeof data.pointSize === "number" && data.pointSize > 0)
                     ? data.pointSize : 3;
                 // Parity with the Data points panel (Aug 2026, Torry):
@@ -34301,6 +34306,7 @@
                         "data-role": "bar-outlier",
                         "data-bar-group": bar.group || ""
                     });
+                    if (olDash) ringEl.setAttribute("stroke-dasharray", olDash);
                     ringEl.setAttribute("pointer-events", "none");
                     dataGroup.appendChild(ringEl);
 
@@ -86844,6 +86850,7 @@
             var olLabel = data.barOutlierLabel === true;
             var olSize = (typeof data.barOutlierSize === "number" && data.barOutlierSize > 0) ? data.barOutlierSize : 1;
             var olWidth = (typeof data.barOutlierWidth === "number" && data.barOutlierWidth > 0) ? data.barOutlierWidth : 1.6;
+            var olStyle = data.barOutlierStyle || "solid";
             // The Dot control is offered only where a dot of ours is
             // actually drawn. With the points overlay ON that mark IS a
             // data point (Data points styles it); the box family draws
@@ -86983,6 +86990,11 @@
                 '<input type="range" data-field="bo-width" min="0.5" max="6" step="0.1" value="' + olWidth + '" style="' + rangeCss + '"/>' +
                 '<input type="number" data-field="bo-width-num" min="0.5" max="6" step="0.1" value="' + olWidth + '" style="' + numInputCss + '"/>' +
                 '<span style="color:#666;">px ring stroke</span>';
+            var _boStyleCtrl =
+                _distStyleSegHtml("bo-style", "solid",    "Solid",     olStyle) +
+                _distStyleSegHtml("bo-style", "dashed",   "Dashed",    olStyle) +
+                _distStyleSegHtml("bo-style", "longdash", "Long dash", olStyle) +
+                _distStyleSegHtml("bo-style", "dotted",   "Dotted",    olStyle);
             var _boLabelCtrl =
                 '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;">' +
                   '<input type="checkbox" data-field="bo-label"' + (olLabel ? ' checked' : '') + '/>' +
@@ -87051,7 +87063,7 @@
             var _boChipsFor = {
                 rule:    [["method", "shape", "Method"], ["label", "fill", "Label"]],
                 ring:    [["color", "color", "Color"], ["size", "size", "Size"],
-                          ["width", "width", "Width"]],
+                          ["width", "width", "Width"], ["style", "style", "Style"]],
                 dot:     [["dotcolor", "color", "Color"], ["dotshape", "shape", "Shape"],
                           ["dotsize", "size", "Size"], ["dotopacity", "opacity", "Opacity"]],
                 outline: [["dotoutcolor", "color", "Color"], ["dotoutwidth", "width", "Width"]]
@@ -87059,6 +87071,7 @@
             var _boCtrlFor = {
                 method: _boMethodCtrl, label: _boLabelCtrl,
                 color: _boColorCtrl, size: _boSizeCtrl, width: _boWidthCtrl,
+                style: _boStyleCtrl,
                 dotcolor: _boDotCtrl, dotshape: _boDotShapeCtrl,
                 dotsize: _boDotSizeCtrl, dotopacity: _boDotOpCtrl,
                 dotoutcolor: _boDotOutCCtrl, dotoutwidth: _boDotOutWCtrl
@@ -87453,6 +87466,9 @@
                     }); })(_opal[_oi]);
                 }
             })();
+            if (typeof _distWireSeg === "function") {
+                try { _distWireSeg(body, "bo-style", "barOutlierStyle"); } catch (_eBoS) {}
+            }
             var boLabelCb = body.querySelector('[data-field="bo-label"]');
             if (boLabelCb) {
                 boLabelCb.addEventListener("change", function () {
@@ -87469,6 +87485,7 @@
                         data.barOutlierIqrK = 1.5;
                         data.barOutlierSdK = 3;
                         data.barOutlierColor = "#d62728";
+                        data.barOutlierStyle = "solid";
                         data.barOutlierDotColor = "";
                         data.barOutlierDotShape = "";
                         data.barOutlierDotSize = -1;
@@ -87483,6 +87500,7 @@
                             try { _setOption("barOutlierIqrK", 1.5); } catch (_e) {}
                             try { _setOption("barOutlierSdK", 3); } catch (_e) {}
                             try { _setOption("barOutlierColor", "#d62728"); } catch (_e) {}
+                            try { _setOption("barOutlierStyle", "solid"); } catch (_e) {}
                             try { _setOption("barOutlierDotColor", ""); } catch (_e) {}
                             try { _setOption("barOutlierDotShape", ""); } catch (_e) {}
                             try { _setOption("barOutlierDotSize", -1); } catch (_e) {}
