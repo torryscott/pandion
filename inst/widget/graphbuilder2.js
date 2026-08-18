@@ -34199,6 +34199,30 @@
                 var olW = (typeof data.barOutlierWidth === "number" && data.barOutlierWidth > 0) ? data.barOutlierWidth : 1.6;
                 var ptSize = (typeof data.pointSize === "number" && data.pointSize > 0)
                     ? data.pointSize : 3;
+                // Parity with the Data points panel (Aug 2026, Torry):
+                // with the overlay off the dot is OUR mark, so every
+                // property of it is settable from the Outliers panel.
+                // Each sentinel means "follow the data point", so a
+                // chart keeps one look across an overlay toggle until
+                // the user deliberately parts them. Opacity is the
+                // exception - it defaults to opaque, which IS the fix.
+                var olDotSize = (typeof data.barOutlierDotSize === "number"
+                                   && data.barOutlierDotSize > 0)
+                    ? data.barOutlierDotSize : ptSize;
+                var olDotShape = (typeof data.barOutlierDotShape === "string"
+                                    && data.barOutlierDotShape.length > 0)
+                    ? data.barOutlierDotShape : (data.pointShape || "circle");
+                var olDotOpacity = (typeof data.barOutlierDotOpacity === "number"
+                                      && data.barOutlierDotOpacity >= 0)
+                    ? data.barOutlierDotOpacity : 1;
+                var olDotOutlineColor = (typeof data.barOutlierDotOutlineColor === "string"
+                                           && data.barOutlierDotOutlineColor.length > 0)
+                    ? data.barOutlierDotOutlineColor : (data.pointOutlineColor || "#000000");
+                var olDotOutlineWidth = (typeof data.barOutlierDotOutlineWidth === "number"
+                                           && data.barOutlierDotOutlineWidth >= 0)
+                    ? data.barOutlierDotOutlineWidth
+                    : ((typeof data.pointOutlineWidth === "number" && data.pointOutlineWidth > 0)
+                        ? data.pointOutlineWidth : 0);
                 // Raincloud's rain IS the data-point overlay (forced on
                 // at the call site), so its rings ride the jittered rain
                 // even with showDataPoints off.
@@ -34240,7 +34264,7 @@
                     if (horizontal) { px = toPxX(val); py = center + off; }
                     else { px = center + off; py = toPxY(val); }
 
-                    var olR = Math.max((_bxCentered ? _bxDotSz : ptSize) * 0.9 + 3, 6) * olSizeF;
+                    var olR = Math.max((_bxCentered ? _bxDotSz : olDotSize) * 0.9 + 3, 6) * olSizeF;
 
                     // When the data-point dots aren't drawn, draw a dot
                     // so the outlier is visible; otherwise it's already
@@ -34248,15 +34272,13 @@
                     // own outlier dots already sit at center, so skip
                     // the duplicate unless the user hid them.
                     if (!dotsShown && !_bxOwnDots) {
-                        var _dotOutlineW = (typeof data.pointOutlineWidth === "number"
-                                              && data.pointOutlineWidth > 0)
-                            ? data.pointOutlineWidth : 0;
-                        // Opaque: at the old 0.6 the fill blended with
-                        // the bar underneath it, which is half of why
-                        // it read as "the same color as the bars".
-                        var dotEl = pointShapeEl(data.pointShape || "circle",
-                            px, py, ptSize, olDotColor,
-                            data.pointOutlineColor || "#000000", _dotOutlineW, 1);
+                        // Opaque by default: at the old 0.6 the fill
+                        // blended with the bar underneath it, which is
+                        // half of why it read as "the same color as
+                        // the bars".
+                        var dotEl = pointShapeEl(olDotShape,
+                            px, py, olDotSize, olDotColor,
+                            olDotOutlineColor, olDotOutlineWidth, olDotOpacity);
                         dotEl.setAttribute("data-role", "bar-outlier-dot");
                         dotEl.setAttribute("data-bar-group", bar.group || "");
                         // The ring's hit band is stroke-only so the
@@ -86845,6 +86867,26 @@
             }
             var _boDotMatch = _boDotMatchOn();
             var olDotColor = _boDotResolved();
+            // Same sentinels the draw site reads: absent = follow the
+            // data point, so the control shows the value in force.
+            var _boDotShape = (typeof data.barOutlierDotShape === "string"
+                                 && data.barOutlierDotShape.length > 0)
+                ? data.barOutlierDotShape : (data.pointShape || "circle");
+            var _boDotSize = (typeof data.barOutlierDotSize === "number"
+                                && data.barOutlierDotSize > 0)
+                ? data.barOutlierDotSize
+                : ((typeof data.pointSize === "number" && data.pointSize > 0) ? data.pointSize : 3);
+            var _boDotOpacity = (typeof data.barOutlierDotOpacity === "number"
+                                   && data.barOutlierDotOpacity >= 0)
+                ? data.barOutlierDotOpacity : 1;
+            var _boDotOutC = (typeof data.barOutlierDotOutlineColor === "string"
+                                && data.barOutlierDotOutlineColor.length > 0)
+                ? data.barOutlierDotOutlineColor : (data.pointOutlineColor || "#000000");
+            var _boDotOutW = (typeof data.barOutlierDotOutlineWidth === "number"
+                                && data.barOutlierDotOutlineWidth >= 0)
+                ? data.barOutlierDotOutlineWidth
+                : ((typeof data.pointOutlineWidth === "number" && data.pointOutlineWidth > 0)
+                    ? data.pointOutlineWidth : 0);
 
             var _boBtnStyle = [
                 "min-width:60px","height:44px","padding:3px 8px",
@@ -86936,7 +86978,7 @@
             var _boSizeCtrl =
                 '<input type="range" data-field="bo-size" min="0.3" max="4" step="0.1" value="' + olSize + '" style="' + rangeCss + '"/>' +
                 '<input type="number" data-field="bo-size-num" min="0.3" max="4" step="0.1" value="' + olSize + '" style="' + numInputCss + '"/>' +
-                '<span style="color:#666;">&times; point size</span>';
+                '<span style="color:#666;">&times; dot size</span>';
             var _boWidthCtrl =
                 '<input type="range" data-field="bo-width" min="0.5" max="6" step="0.1" value="' + olWidth + '" style="' + rangeCss + '"/>' +
                 '<input type="number" data-field="bo-width-num" min="0.5" max="6" step="0.1" value="' + olWidth + '" style="' + numInputCss + '"/>' +
@@ -86946,22 +86988,114 @@
                   '<input type="checkbox" data-field="bo-label"' + (olLabel ? ' checked' : '') + '/>' +
                   '<span>Label outliers with their value</span>' +
                 '</label>';
+            function _boFollowLink(field) {
+                return '<span style="flex-basis:100%;height:0;"></span>' +
+                    '<button type="button" data-field="' + field + '" ' +
+                    'title="Delete this override and go back to whatever the individual data points use" ' +
+                    'style="padding:3px 8px;border:1px solid #aaa;border-radius:3px;background:white;' +
+                    'color:#1a5fb4;cursor:pointer;font-size:11px;font-family:var(--gb2-ui-font);">' +
+                    'Follow data points</button>';
+            }
+            function _boHasOv(key) {
+                var v = data[key];
+                if (typeof v === "string") return v.length > 0;
+                return (typeof v === "number" && v >= 0);
+            }
+            var _boDotShapeCtrl = (function () {
+                var shapes = [["circle", "Circle"], ["square", "Square"],
+                              ["triangle", "Triangle"], ["diamond", "Diamond"],
+                              ["circleOpen", "Circle"], ["squareOpen", "Square"],
+                              ["triangleOpen", "Triangle"], ["diamondOpen", "Diamond"]];
+                var h = '<div style="display:flex;gap:4px;flex-wrap:wrap;">';
+                for (var i = 0; i < shapes.length; i++)
+                    h += _distShapeSegHtml("bo-dot-shape", shapes[i][0], shapes[i][1], _boDotShape);
+                h += '</div>';
+                if (_boHasOv("barOutlierDotShape")) h += _boFollowLink("bo-follow-shape");
+                return h;
+            })();
+            var _boDotSizeCtrl =
+                '<input type="range" data-field="bo-dot-size" min="1" max="20" step="0.5" value="' + _boDotSize + '" style="' + rangeCss + '"/>' +
+                '<input type="number" data-field="bo-dot-size-num" min="1" max="20" step="0.5" value="' + _boDotSize + '" style="' + numInputCss + '"/>' +
+                '<span style="color:#666;">px across</span>' +
+                (_boHasOv("barOutlierDotSize") ? _boFollowLink("bo-follow-size") : "");
+            var _boDotOpCtrl =
+                '<input type="range" data-field="bo-dot-op" min="0" max="1" step="0.05" value="' + _boDotOpacity + '" style="' + rangeCss + '"/>' +
+                '<input type="number" data-field="bo-dot-op-num" min="0" max="1" step="0.05" value="' + _boDotOpacity + '" style="' + numInputCss + '"/>' +
+                '<span style="color:#666;">opacity</span>' +
+                (_boHasOv("barOutlierDotOpacity") ? _boFollowLink("bo-follow-op") : "");
+            var _boDotOutCCtrl =
+                '<button type="button" data-field="bo-dot-out-swatch" data-role="primary-color" style="' +
+                  swatchCss + 'background:' + _boDotOutC + ';" ' +
+                  'aria-label="Outlier dot outline color" title="Outlier dot outline color"></button>' +
+                _renderPaletteRowHtml(_boDotOutC, "dotoutcolor", "bo", 18, false) +
+                '<span style="color:#666;font-size:11px;flex-basis:100%;margin-top:2px;">Outline around the flagged value. Or use the HSV picker on the right.</span>' +
+                (_boHasOv("barOutlierDotOutlineColor") ? _boFollowLink("bo-follow-outc") : "");
+            var _boDotOutWCtrl =
+                '<input type="range" data-field="bo-dot-out-w" min="0" max="3" step="0.25" value="' + _boDotOutW + '" style="' + rangeCss + '"/>' +
+                '<input type="number" data-field="bo-dot-out-w-num" min="0" max="3" step="0.25" value="' + _boDotOutW + '" style="' + numInputCss + '"/>' +
+                '<span style="color:#666;">px (0 = none)</span>' +
+                (_boHasOv("barOutlierDotOutlineWidth") ? _boFollowLink("bo-follow-outw") : "");
 
-            body.innerHTML =
+            // The mark has two parts and a rule behind it, and each
+            // part now carries a full point-style set - too many chips
+            // for one row, and "Size" would mean two different things
+            // in it. So the panel tabs by PART, exactly as the Data
+            // points panel does (Points / Outline), and each tab keeps
+            // the chip-strip idiom inside it. Dot tabs appear only
+            // where a dot of ours is drawn.
+            var _boTabs = [{ id: "rule", label: "Rule" }, { id: "ring", label: "Ring" }];
+            if (_boHasDot) {
+                _boTabs.push({ id: "dot", label: "Dot" });
+                _boTabs.push({ id: "outline", label: "Outline" });
+            }
+            var _boChipsFor = {
+                rule:    [["method", "shape", "Method"], ["label", "fill", "Label"]],
+                ring:    [["color", "color", "Color"], ["size", "size", "Size"],
+                          ["width", "width", "Width"]],
+                dot:     [["dotcolor", "color", "Color"], ["dotshape", "shape", "Shape"],
+                          ["dotsize", "size", "Size"], ["dotopacity", "opacity", "Opacity"]],
+                outline: [["dotoutcolor", "color", "Color"], ["dotoutwidth", "width", "Width"]]
+            };
+            var _boCtrlFor = {
+                method: _boMethodCtrl, label: _boLabelCtrl,
+                color: _boColorCtrl, size: _boSizeCtrl, width: _boWidthCtrl,
+                dotcolor: _boDotCtrl, dotshape: _boDotShapeCtrl,
+                dotsize: _boDotSizeCtrl, dotopacity: _boDotOpCtrl,
+                dotoutcolor: _boDotOutCCtrl, dotoutwidth: _boDotOutWCtrl
+            };
+            var _boTabDefault = { rule: "method", ring: "color", dot: "dotcolor", outline: "dotoutcolor" };
+            var _boActiveTab = window.__gb2_boActiveTab || "rule";
+            (function () {
+                var found = false;
+                for (var i = 0; i < _boTabs.length; i++) if (_boTabs[i].id === _boActiveTab) found = true;
+                if (!found) _boActiveTab = "rule";
+            })();
+            var _boTabBar = (function () {
+                var html = '<div style="display:flex;flex-wrap:wrap;gap:2px;padding:0 4px;margin-bottom:8px;border-bottom:1px solid #ccc;align-items:flex-end;">';
+                for (var i = 0; i < _boTabs.length; i++) {
+                    if (i > 0) html += _TAB_DIVIDER_HTML;
+                    html += _tabBtnHtmlGeneric({ id: _boTabs[i].id, label: _boTabs[i].label,
+                                                 active: _boTabs[i].id === _boActiveTab,
+                                                 dataAttr: "data-bo-tab" });
+                }
+                return html + '</div>';
+            })();
+            // Only the active tab's chips and strips are built, so a
+            // stale strip sticky from another tab simply is not found
+            // and the tab's own default opens instead.
+            var _boChipHtml = "", _boStripsHtml = "";
+            (function () {
+                var list = _boChipsFor[_boActiveTab] || _boChipsFor.rule;
+                for (var i = 0; i < list.length; i++) {
+                    _boChipHtml += _boBtn(list[i][0], list[i][1], list[i][2]);
+                    _boStripsHtml += _boStrip(list[i][0], _boCtrlFor[list[i][0]]);
+                }
+            })();
+            body.innerHTML = _boTabBar +
                 '<div data-bo-btns style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
-                   _boBtn("method", "shape", "Method") +
-                   _boBtn("color",  "color", "Ring")   +
-                   (_boHasDot ? _boBtn("dot", "color", "Dot") : "") +
-                   _boBtn("size",   "size",  "Size")   +
-                   _boBtn("width",  "width", "Width")  +
-                   _boBtn("label",  "fill",  "Label")  +
+                   _boChipHtml +
                 '</div>' +
-                _boStrip("method", _boMethodCtrl) +
-                _boStrip("color",  _boColorCtrl)  +
-                (_boHasDot ? _boStrip("dot", _boDotCtrl) : "") +
-                _boStrip("size",   _boSizeCtrl)   +
-                _boStrip("width",  _boWidthCtrl)  +
-                _boStrip("label",  _boLabelCtrl);
+                _boStripsHtml;
 
             try {
                 window.__gb2_colorIconRefresher = function () {
@@ -86970,7 +87104,7 @@
                         ? data.barOutlierColor : "#d62728";
                     var _b = body.querySelector('[data-bo-btn="color"]');
                     if (_b) _b.style.setProperty('--gb2-color-accent', _live);
-                    var _bd = body.querySelector('[data-bo-btn="dot"]');
+                    var _bd = body.querySelector('[data-bo-btn="dotcolor"]');
                     if (_bd) _bd.style.setProperty('--gb2-color-accent', _boDotResolved());
                 };
                 window.__gb2_colorIconRefresher();
@@ -86992,11 +87126,30 @@
                 }
                 try { window.__gb2_boActiveStrip = stripId; } catch (_e) {}
             }
-            var _boInit = window.__gb2_boActiveStrip || "method";
+            var _boInit = window.__gb2_boActiveStrip || _boTabDefault[_boActiveTab];
             if (!body.querySelector('[data-bo-strip="' + _boInit + '"]')) {
-                _boInit = "method";
+                _boInit = _boTabDefault[_boActiveTab] || "method";
             }
             _boShowStrip(_boInit);
+
+            // Tab clicks re-render the panel: the generic auto-dock is
+            // visibility-gated, so the picker follows to whichever
+            // color swatch the new tab shows (or hides where there is
+            // none) with no bespoke docking here.
+            (function () {
+                var tbs = body.querySelectorAll('[data-bo-tab]');
+                for (var i = 0; i < tbs.length; i++) {
+                    (function (btn) {
+                        btn.addEventListener("click", function (e) {
+                            e.preventDefault(); e.stopPropagation();
+                            var t = btn.getAttribute("data-bo-tab");
+                            try { window.__gb2_boActiveTab = t; } catch (_e0) {}
+                            try { window.__gb2_boActiveStrip = _boTabDefault[t] || "method"; } catch (_e1) {}
+                            renderInspectorPanel();
+                        });
+                    })(tbs[i]);
+                }
+            })();
 
             var _boBtns = body.querySelectorAll('[data-bo-btn]');
             for (var _bobi = 0; _bobi < _boBtns.length; _bobi++) {
@@ -87005,9 +87158,10 @@
                         e.preventDefault(); e.stopPropagation();
                         var sid = btn.getAttribute("data-bo-btn");
                         _boShowStrip(sid);
-                        if (sid === "color" || sid === "dot") {
-                            var sw = body.querySelector('[data-field="'
-                                + (sid === "dot" ? "bo-dot-swatch" : "bo-color-swatch") + '"]');
+                        var _swField = { color: "bo-color-swatch", dotcolor: "bo-dot-swatch",
+                                         dotoutcolor: "bo-dot-out-swatch" }[sid];
+                        if (_swField) {
+                            var sw = body.querySelector('[data-field="' + _swField + '"]');
                             if (sw) {
                                 try { _pickerSkipNextFocus = true; } catch (_e0) {}
                                 try { window.__gb2_pickerSkipExpand = true; } catch (_e1) {}
@@ -87208,6 +87362,97 @@
                     }); })(_pal[_pi]);
                 }
             })();
+            // Dot shape / size / opacity / outline. Writing an
+            // explicit value is what parts the dot from the data point
+            // it had been following; panel Reset puts it back.
+            (function () {
+                if (typeof _distWireShapeSegApply === "function") {
+                    _distWireShapeSegApply(body, "bo-dot-shape", function (v) {
+                        data.barOutlierDotShape = v;
+                        redraw();
+                        if (hasSetOption) { try { _setOption("barOutlierDotShape", v); } catch (_e) {} }
+                    });
+                }
+                function _boPair(sldField, numField, key, lo, hi) {
+                    var sld = body.querySelector('[data-field="' + sldField + '"]');
+                    var num = body.querySelector('[data-field="' + numField + '"]');
+                    function apply(v, commit) {
+                        if (!isFinite(v)) return;
+                        v = Math.max(lo, Math.min(hi, v));
+                        data[key] = v;
+                        redraw();
+                        if (commit && hasSetOption) { try { _setOption(key, v); } catch (_e) {} }
+                    }
+                    if (sld) {
+                        sld.addEventListener("input", function () {
+                            var v = parseFloat(sld.value);
+                            if (num && document.activeElement !== num) num.value = v;
+                            apply(v, false);
+                        });
+                        sld.addEventListener("change", function () { apply(parseFloat(sld.value), true); });
+                    }
+                    if (num) {
+                        num.addEventListener("input", function () {
+                            var v = parseFloat(num.value);
+                            if (sld) sld.value = v;
+                            apply(v, false);
+                        });
+                        num.addEventListener("change", function () { apply(parseFloat(num.value), true); });
+                    }
+                }
+                _boPair("bo-dot-size",  "bo-dot-size-num",  "barOutlierDotSize", 1, 20);
+                _boPair("bo-dot-op",    "bo-dot-op-num",    "barOutlierDotOpacity", 0, 1);
+                _boPair("bo-dot-out-w", "bo-dot-out-w-num", "barOutlierDotOutlineWidth", 0, 3);
+                function _boOutRes() {
+                    return (typeof data.barOutlierDotOutlineColor === "string"
+                              && data.barOutlierDotOutlineColor.length > 0)
+                        ? data.barOutlierDotOutlineColor : (data.pointOutlineColor || "#000000");
+                }
+                function _boSetOut(hex) {
+                    data.barOutlierDotOutlineColor = hex;
+                    var sw = body.querySelector('[data-field="bo-dot-out-swatch"]');
+                    if (sw) sw.style.background = hex;
+                    redraw();
+                    if (hasSetOption) { try { _setOption("barOutlierDotOutlineColor", hex); } catch (_e) {} }
+                }
+                var _osw = body.querySelector('[data-field="bo-dot-out-swatch"]');
+                if (_osw) {
+                    _osw.addEventListener("click", function (e) {
+                        e.preventDefault();
+                        openColorPicker(_boOutRes(), _boSetOut, _boSetOut);
+                    });
+                }
+                var _boFollowMap = {
+                    "bo-follow-shape": ["barOutlierDotShape", ""],
+                    "bo-follow-size":  ["barOutlierDotSize", -1],
+                    "bo-follow-op":    ["barOutlierDotOpacity", -1],
+                    "bo-follow-outc":  ["barOutlierDotOutlineColor", ""],
+                    "bo-follow-outw":  ["barOutlierDotOutlineWidth", -1]
+                };
+                for (var _fk in _boFollowMap) {
+                    if (!Object.prototype.hasOwnProperty.call(_boFollowMap, _fk)) continue;
+                    (function (fk) {
+                        var btn = body.querySelector('[data-field="' + fk + '"]');
+                        if (!btn) return;
+                        btn.addEventListener("click", function (e) {
+                            e.preventDefault();
+                            var key = _boFollowMap[fk][0], sentinel = _boFollowMap[fk][1];
+                            data[key] = sentinel;
+                            redraw();
+                            if (hasSetOption) { try { _setOption(key, sentinel); } catch (_e) {} }
+                            renderInspectorPanel();
+                        });
+                    })(_fk);
+                }
+                var _opal = body.querySelectorAll('[data-bo-palette][data-bo-palette-target="dotoutcolor"]');
+                for (var _oi = 0; _oi < _opal.length; _oi++) {
+                    (function (btn) { btn.addEventListener("click", function (e) { e.preventDefault();
+                        var hex = btn.getAttribute("data-bo-palette");
+                        _boSetOut(hex);
+                        if (typeof _refreshPaletteRowHighlight === "function") { try { _refreshPaletteRowHighlight(body, "dotoutcolor", "bo", hex); } catch (_e) {} }
+                    }); })(_opal[_oi]);
+                }
+            })();
             var boLabelCb = body.querySelector('[data-field="bo-label"]');
             if (boLabelCb) {
                 boLabelCb.addEventListener("change", function () {
@@ -87225,6 +87470,11 @@
                         data.barOutlierSdK = 3;
                         data.barOutlierColor = "#d62728";
                         data.barOutlierDotColor = "";
+                        data.barOutlierDotShape = "";
+                        data.barOutlierDotSize = -1;
+                        data.barOutlierDotOpacity = -1;
+                        data.barOutlierDotOutlineColor = "";
+                        data.barOutlierDotOutlineWidth = -1;
                         data.barOutlierLabel = false;
                         data.barOutlierSize = 1;
                         data.barOutlierWidth = 1.6;
@@ -87234,6 +87484,11 @@
                             try { _setOption("barOutlierSdK", 3); } catch (_e) {}
                             try { _setOption("barOutlierColor", "#d62728"); } catch (_e) {}
                             try { _setOption("barOutlierDotColor", ""); } catch (_e) {}
+                            try { _setOption("barOutlierDotShape", ""); } catch (_e) {}
+                            try { _setOption("barOutlierDotSize", -1); } catch (_e) {}
+                            try { _setOption("barOutlierDotOpacity", -1); } catch (_e) {}
+                            try { _setOption("barOutlierDotOutlineColor", ""); } catch (_e) {}
+                            try { _setOption("barOutlierDotOutlineWidth", -1); } catch (_e) {}
                             try { _setOption("barOutlierLabel", false); } catch (_e) {}
                             try { _setOption("barOutlierSize", 1); } catch (_e) {}
                             try { _setOption("barOutlierWidth", 1.6); } catch (_e) {}

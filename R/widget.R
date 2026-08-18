@@ -486,6 +486,16 @@ graphbuilder2_html <- function(bars,
                                # value when the data-point overlay is
                                # off. Empty = follow the ring color.
                                bar_outlier_dot_color = "",
+                               # The rest of the flagged value's look.
+                               # Sentinels ("" / -1) mean "follow the
+                               # data point", so an overlay toggle
+                               # keeps one look until the user parts
+                               # them; opacity defaults to opaque.
+                               bar_outlier_dot_shape = "",
+                               bar_outlier_dot_size = -1,
+                               bar_outlier_dot_opacity = -1,
+                               bar_outlier_dot_outline_color = "",
+                               bar_outlier_dot_outline_width = -1,
                                bar_outlier_label = FALSE,
                                bar_outlier_size = 1,
                                bar_outlier_width = 1.6,
@@ -1830,6 +1840,11 @@ graphbuilder2_html <- function(bars,
         barOutlierSdK = as.numeric(bar_outlier_sd_k),
         barOutlierColor = as.character(bar_outlier_color),
         barOutlierDotColor = as.character(bar_outlier_dot_color),
+        barOutlierDotShape = as.character(bar_outlier_dot_shape),
+        barOutlierDotSize = as.numeric(bar_outlier_dot_size),
+        barOutlierDotOpacity = as.numeric(bar_outlier_dot_opacity),
+        barOutlierDotOutlineColor = as.character(bar_outlier_dot_outline_color),
+        barOutlierDotOutlineWidth = as.numeric(bar_outlier_dot_outline_width),
         barOutlierLabel = isTRUE(bar_outlier_label),
         barOutlierSize = as.numeric(bar_outlier_size),
         barOutlierWidth = as.numeric(bar_outlier_width),
