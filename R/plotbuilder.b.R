@@ -355,6 +355,19 @@ plotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Class
                         "sd" = sd_val,
                         "ci95" = se_val * stats::qt(0.975, n - 1),
                         "ci99" = se_val * stats::qt(0.995, n - 1),
+                        # Comparison-adjusted (Goldstein & Healy 1995): the
+                        # 95% half-width over root 2, so two bars just touch
+                        # when the gap equals t * sqrt(se1^2 + se2^2) - the
+                        # two-sample t boundary - the one reading rule
+                        # students already try to apply to ordinary CIs,
+                        # where it is simply wrong. Each cell uses its OWN
+                        # df while the two-sample test pools df, and
+                        # t(n-1) >= t(2n-2) always, so the drawn bars are
+                        # never narrower than the exact boundary:
+                        # non-overlap ALWAYS implies p < .05, while a
+                        # borderline significant pair can still touch. That
+                        # one-sided guarantee is what the panel copy claims.
+                        "ci95c" = se_val * stats::qt(0.975, n - 1) / sqrt(2),
                         se_val
                     )
                 }

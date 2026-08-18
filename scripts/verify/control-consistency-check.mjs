@@ -230,8 +230,10 @@ await withPage('rm_bar', async page => {
     });
     check('RM Method has no separate top-level button or strip',
         info.topMethodButton === 0 && info.topMethodStrip === 0, JSON.stringify(info));
+    // ci95c (comparison-adjusted) joined the list Aug 2026; it sits with
+    // the other CI choices, before None.
     check('RM Type contains all type choices',
-        JSON.stringify(info.types) === JSON.stringify(['se', 'sd', 'ci95', 'ci99', 'none']), JSON.stringify(info.types));
+        JSON.stringify(info.types) === JSON.stringify(['se', 'sd', 'ci95', 'ci99', 'ci95c', 'none']), JSON.stringify(info.types));
     check('RM Type contains the two Method choices',
         info.methodHeading && JSON.stringify(info.methods) === JSON.stringify(['within', 'between']), JSON.stringify(info.methods));
 });

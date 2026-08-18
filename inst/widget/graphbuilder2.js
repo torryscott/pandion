@@ -10376,6 +10376,8 @@
                     se: "standard errors",
                     sd: "standard deviations",
                     ci95: "95 percent confidence intervals",
+                    ci99: "99 percent confidence intervals",
+                    ci95c: "comparison-adjusted 95 percent intervals, which do not overlap when groups differ",
                     ci: "confidence intervals"
                 }[String(d.errorBarType || "").toLowerCase()];
                 if (_ebName)
@@ -49968,6 +49970,7 @@
                     var _ebW = (data.errorBarType === "sd") ? "plus or minus one standard deviation"
                              : (data.errorBarType === "ci95") ? "95% confidence intervals"
                              : (data.errorBarType === "ci99") ? "99% confidence intervals"
+                             : (data.errorBarType === "ci95c") ? "comparison-adjusted 95% intervals (non-overlapping bars differ at p < .05)"
                              : "plus or minus one standard error";
                     out.push({ id: "ebnote", sev: "tip", title: "The note does not say what the error bars show", why: "Your figure note does not mention whether the bars are standard errors, standard deviations, or confidence intervals - and each means something different. A line like 'Error bars show " + _ebW + ".' completes it.", fixGt: null });
                 }
@@ -53263,7 +53266,8 @@
                             var _hw = (typeof b._origSE === "number") ? b._origSE : b.se;
                             var _km = (_ebT === "sd") ? Math.sqrt(mo.n)
                                 : (_ebT === "ci95") ? _tCriticalTwoSided(0.05, mo.n - 1)
-                                : (_ebT === "ci99") ? _tCriticalTwoSided(0.01, mo.n - 1) : 1;
+                                : (_ebT === "ci99") ? _tCriticalTwoSided(0.01, mo.n - 1)
+                                : (_ebT === "ci95c") ? _tCriticalTwoSided(0.05, mo.n - 1) / Math.SQRT2 : 1;
                             _seNum = (typeof _hw === "number" && isFinite(_hw) && _km > 0)
                                 ? (_hw / _km) : (mo.sd / Math.sqrt(mo.n));
                         } else {
@@ -55299,6 +55303,7 @@
                 if (ebT === "se") ebExp = "On this chart: plus or minus one standard error, the precision of the group summary. Longer bars mean a less precise estimate.";
                 else if (ebT === "sd") ebExp = "On this chart: plus or minus one standard deviation. It shows how spread out the raw values are, not how precise the summary is.";
                 else if (ebT === "ci95" || ebT === "ci99") ebExp = "On this chart: a " + (ebT === "ci99" ? "99" : "95") + "% confidence interval, the range of plausible values for the group summary. Longer bars mean more uncertainty.";
+                else if (ebT === "ci95c") ebExp = "On this chart: a comparison-adjusted interval. Read it by overlap - two bars that do not overlap mark groups that differ at p < .05. It is narrower than an ordinary 95% CI because it is scaled for comparing pairs, so do not read one bar on its own as the range for that mean. It errs on the cautious side, so a borderline pair can still touch.";
                 else ebExp = "Shows the uncertainty around a bar or point; longer means less precise (often a standard error or 95% CI).";
                 // Repeated measures: say what the correction MEANS (or that
                 // it is off) - the same bars read differently within- vs
@@ -62088,8 +62093,21 @@
                        _ebChoiceBtn("data-eb-type", "sd",   "SD",     _ebCurType, "Standard deviation") +
                        _ebChoiceBtn("data-eb-type", "ci95", "95% CI", _ebCurType, "95% confidence interval") +
                        _ebChoiceBtn("data-eb-type", "ci99", "99% CI", _ebCurType, "99% confidence interval") +
+                       _ebChoiceBtn("data-eb-type", "ci95c", "Comparison", _ebCurType,
+                           "Comparison-adjusted: two bars that do not overlap differ at p < .05") +
                        _ebChoiceBtn("data-eb-type", "none", "None",   _ebCurType, "Draw no error bars") +
-                       '<span style="flex-basis:100%;color:#666;font-size:10.5px;">Applies to the whole chart.</span>');
+                       // The reading rule IS the feature, so it gets the
+                       // hint line rather than a tooltip - with the
+                       // condition under which it is exact.
+                       (_ebCurType === "ci95c"
+                         ? '<span style="flex-basis:100%;color:#666;font-size:10.5px;line-height:1.5;">' +
+                           'Read these by overlap: two bars that do NOT overlap mark groups ' +
+                           'that differ at p &lt; .05 on a two-sample t test. They are scaled ' +
+                           'for comparing pairs, so a single bar is not that mean\u2019s own ' +
+                           '95% CI. The check errs on the cautious side: a borderline pair can ' +
+                           'still touch, so use a significance bracket when you need the p value.' +
+                           '</span>'
+                         : '<span style="flex-basis:100%;color:#666;font-size:10.5px;">Applies to the whole chart.</span>'));
             }
             var _ebMethodCtrl = "";
             if (_ebHasMethod) {
@@ -102840,6 +102858,11 @@
         if (type === "sd") return Math.sqrt(n);
         if (type === "ci95") return _gb2QtTail(0.975, n - 1);
         if (type === "ci99") return _gb2QtTail(0.995, n - 1);
+        // Comparison-adjusted: the ordinary 95% half-width divided by
+        // root 2. Two bars then just touch when the gap between the
+        // means equals t * sqrt(se1^2 + se2^2), the two-sample t
+        // boundary - so non-overlap IS the test at p = .05.
+        if (type === "ci95c") return _gb2QtTail(0.975, n - 1) / Math.SQRT2;
         return 1;
     }
     // Fold a summaryFunc / errorBarType change into the payload cells.
@@ -102911,7 +102934,7 @@
                     var nv=[],q; for(q=0;q<cc.ns.length;q++){ var xv=cc.ns[q]; if(typeof xv==="number"&&isFinite(xv)) nv.push(xv); }
                     if (nv.length>=2){
                         var sdv=_gb2RmSd(nv)*morey, sev=sdv/Math.sqrt(nv.length);
-                        err = etype==="sd" ? sdv : (etype==="ci95"? sev*_gb2QtTail(0.975,nv.length-1) : (etype==="ci99"? sev*_gb2QtTail(0.995,nv.length-1) : sev));
+                        err = etype==="sd" ? sdv : (etype==="ci95"? sev*_gb2QtTail(0.975,nv.length-1) : (etype==="ci99"? sev*_gb2QtTail(0.995,nv.length-1) : (etype==="ci95c"? sev*_gb2QtTail(0.975,nv.length-1)/Math.SQRT2 : sev)));
                     }
                 }
                 bars.push({ x: hasF?(fOrder[fi]+SEP+xOrder[xi]):xOrder[xi], group: hasG?gOrder[gi]:null,

@@ -507,6 +507,11 @@ rmplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
                                 "sd" = sd_val,
                                 "ci95" = se_val * stats::qt(0.975, n_norm - 1),
                                 "ci99" = se_val * stats::qt(0.995, n_norm - 1),
+                                # Comparison-adjusted, over the ALREADY
+                                # Cousineau-Morey-corrected SE: the two knobs
+                                # are orthogonal (superb pairs its difference
+                                # adjustment with every within-subject method).
+                                "ci95c" = se_val * stats::qt(0.975, n_norm - 1) / sqrt(2),
                                 se_val
                             )
                         }
@@ -986,6 +991,7 @@ rmplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
                             "se" = se_val, "sd" = sd_val,
                             "ci95" = se_val * stats::qt(0.975, length(nv) - 1),
                             "ci99" = se_val * stats::qt(0.995, length(nv) - 1),
+                            "ci95c" = se_val * stats::qt(0.975, length(nv) - 1) / sqrt(2),
                             se_val)
                     }
                 }

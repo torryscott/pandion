@@ -99,6 +99,8 @@ options:
           title: 95% Confidence Interval
         - name: ci99
           title: 99% Confidence Interval
+        - name: ci95c
+          title: Comparison-adjusted 95% Interval
         - name: none
           title: None
       default: se

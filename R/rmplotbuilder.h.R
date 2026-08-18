@@ -93,6 +93,7 @@ rmplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Cla
                     "sd",
                     "ci95",
                     "ci99",
+                    "ci95c",
                     "none"),
                 default="se")
             private$..exportPath <- jmvcore::OptionString$new(

@@ -90,6 +90,7 @@ plotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Class
                     "sd",
                     "ci95",
                     "ci99",
+                    "ci95c",
                     "none"),
                 default="se")
             private$..showDataPoints <- jmvcore::OptionBool$new(
