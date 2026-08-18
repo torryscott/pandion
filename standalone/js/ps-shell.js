@@ -6408,7 +6408,22 @@
     var payload = JSON.parse(JSON.stringify(tpl.payload));
     for (var k in st) {
       if (!Object.prototype.hasOwnProperty.call(st, k)) continue;
-      if (k === "annotationsJson") { payload.annotations = parseAnnotations(st[k]); continue; }
+      if (k === "annotationsJson") {
+        payload.annotations = parseAnnotations(st[k]);
+        // ALSO echo the raw string. The engine pins every committed
+        // option in __gb2_recentCommits and releases the pin only when a
+        // render echoes back an IDENTICAL value; the payload carried
+        // `annotations` (the array) and never `annotationsJson` (the
+        // string), so that comparison was forever undefined vs "[...]"
+        // and the pin never released. It then re-injected the old
+        // annotations on EVERY subsequent render, which is why deleted
+        // significance brackets came back after Reset styling and then
+        // followed the user onto a completely different dataset (a
+        // colleague, Aug 2026). Echoing the string is the honest fix:
+        // the pin sees its own value and lets go.
+        payload.annotationsJson = st[k];
+        continue;
+      }
       payload[k] = st[k];
     }
     var opts = MODULES[mod].optsFrom(st, tpl.payload);
@@ -28627,7 +28642,19 @@
       var hadStamp = Object.prototype.hasOwnProperty.call(chart, "styleStamp");
       var prevStamp = chart.styleStamp;
       var restamp = !!styleDefaultIdResolved();
+      // Pins hold values the engine committed and expects to see echoed
+      // back. A reset REPLACES the store wholesale, so every pin is
+      // stale the moment it runs - without this the engine re-injects
+      // what was just reset (the annotations case above), and the pin
+      // outlives the thing it was pinning. Same reasoning as the
+      // document-switch clear in syncEngineDocState.
+      var dropEnginePins = function () {
+        try { window.__gb2_pendingOpts = {}; } catch (e) {}
+        try { window.__gb2_recentCommits = {}; } catch (e) {}
+        try { window.__gb2_localOptCommits = {}; } catch (e) {}
+      };
       var applyReset = function () {
+        dropEnginePins();
         chart.options[mod] = {};
         for (var kk in keptStructure)
           if (Object.prototype.hasOwnProperty.call(keptStructure, kk))
@@ -28638,6 +28665,7 @@
         render();
       };
       var undoReset = function () {
+        dropEnginePins();
         chart.options[mod] = prev;
         if (restamp) {
           if (hadStamp) chart.styleStamp = prevStamp;
