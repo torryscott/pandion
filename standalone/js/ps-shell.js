@@ -25019,10 +25019,32 @@
     });
     el("ps-file").addEventListener("change", function () {
       var f = el("ps-file").files && el("ps-file").files[0];
+      // Clear the selection the moment we have the File in hand. A file
+      // input fires "change" only when its VALUE changes, so picking the
+      // same path twice in a row fired nothing at all and the app never
+      // heard the second pick: export the data, edit it in Excel, open it
+      // again under its own name, and Pandion sat there deaf (a
+      // collaborator, Aug 2026, who found that renaming the file made it
+      // work). The File object stays valid after the reset - it is a
+      // reference we already hold - and this is the same one-liner the
+      // layout image input has always had. Reading is unaffected: the
+      // import path keeps its own IMPORT_SOURCE_FILE.
+      el("ps-file").value = "";
       if (!f) return;
       readPickedFile(f);
     });
     el("ps-paste-use").addEventListener("click", function () {
+      // An empty box used to fall through to the parser, which reported
+      // "There is nothing to read in that file: it is empty" - a sentence
+      // about a FILE, on the one path where no file is involved. That is
+      // what the deaf file input above sent people to: pick a same-named
+      // file, watch nothing happen, press the only obvious button, and be
+      // told your data file was empty.
+      if (!String(el("ps-paste").value || "").trim()) {
+        showLoaderMessage("The paste box is empty. Paste some rows into it, " +
+          "or choose a file above.");
+        return;
+      }
       IMPORT_SOURCE_FILE = null;
       XLSX_SHEETS = null;
       renderImportPreview("pasted-data", el("ps-paste").value);
