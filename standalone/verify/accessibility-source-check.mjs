@@ -37,8 +37,12 @@ check(
     'settings bypass opens the responsive inspector before focusing it',
 );
 check(
-    /Skip to the active workspace", "First Tab stop"/.test(shell) &&
-    /Skip to the settings panel", "Second Tab stop"/.test(shell),
+    // The keys column names a GESTURE now: "First Tab stop" named no
+    // key at all, in a column where every other entry is a keystroke
+    // (t4-210). What the suite is protecting is that both bypass
+    // routes are documented, so it pins the rows, not the old wording.
+    /Skip to the active workspace", "Tab, then Enter"/.test(shell) &&
+    /Skip to the settings panel", "Tab twice, then Enter"/.test(shell),
     'the Keyboard shortcuts sheet documents both bypass routes',
 );
 check(
