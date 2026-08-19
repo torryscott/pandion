@@ -10402,6 +10402,20 @@
   // someone typing.
   var RESERVE_TIMER = null;
   var RESERVE_HOST = null;
+  // Where the pointer LIVES, not just whether it pressed recently:
+  // Torry's pattern-work report (Aug 19 2026) - he was clicking presets
+  // in the panel with natural pauses over 700ms, the presets changed
+  // the panel's height, and the release glided the page mid-work,
+  // pulling him away from the controls. Pointer quiet is a PAUSE, not
+  // done. The release may drop the floor silently any time (invisible),
+  // but a glide-back only happens once the mouse has LEFT the chart
+  // area. Updated on every pointerover; a parked mouse keeps its last
+  // known side.
+  var RESERVE_POINTER_IN = false;
+  document.addEventListener("pointerover", function (e) {
+    RESERVE_POINTER_IN = !!(e.target && e.target.closest &&
+      e.target.closest(".graphbuilder2-host"));
+  }, true);
   function releaseHeightReserve() {
     RESERVE_TIMER = null;
     var host = RESERVE_HOST;
@@ -10410,22 +10424,29 @@
       RESERVE_HOST = null;
       return;
     }
-    if (document.querySelector('textarea[data-role="inline-text-editor"]')) {
-      // Someone is typing into the chart; hold still and try later.
-      RESERVE_TIMER = window.setTimeout(releaseHeightReserve, 700);
+    var sc = el("ps-main-workspace");
+    if (!sc) {
+      RESERVE_HOST = null;
+      try { host.style.minHeight = ""; } catch (e0) {}
       return;
     }
-    RESERVE_HOST = null;
-    var sc = el("ps-main-workspace");
-    if (!sc) { try { host.style.minHeight = ""; } catch (e0) {} return; }
     try {
       var prevMin = host.style.minHeight;
       var st0 = sc.scrollTop;
       host.style.minHeight = "";
       var maxTop = Math.max(0, sc.scrollHeight - sc.clientHeight);
-      if (st0 <= maxTop + 1) return; // no clamp would occur - done
-      // Releasing outright would jump; put the floor back (pre-paint,
-      // invisible), glide down, then drop it once the glide lands.
+      if (st0 <= maxTop + 1) { RESERVE_HOST = null; return; } // silent
+      // A glide would move the page. Hold the floor while the mouse is
+      // still over the chart area or the inline editor is open - put it
+      // back (pre-paint, invisible) and check again later.
+      if (RESERVE_POINTER_IN || document.querySelector(
+            'textarea[data-role="inline-text-editor"]')) {
+        host.style.minHeight = prevMin;
+        sc.scrollTop = st0;
+        RESERVE_TIMER = window.setTimeout(releaseHeightReserve, 700);
+        return;
+      }
+      RESERVE_HOST = null;
       host.style.minHeight = prevMin;
       sc.scrollTop = st0;
       var reduce = false;
