@@ -309,7 +309,10 @@ by an automated check, so they run as written:</p>
 <tr><th>Goal</th><th>Formula</th><th>Notes</th></tr>
 <tr><td>Reverse-score a 1-5 item</td>
 <td><code data-guide-formula>6 - supported</code></td>
-<td>For a 1-7 scale use <code>8 - item</code>: max + 1 minus the item.</td></tr>
+<td>The recipe builder writes this for you: pick the item and set where
+the scale starts and ends. It reverses around start plus end, so a 1-7
+item gives <code>8 - item</code> and a 0-4 item gives
+<code>4 - item</code>.</td></tr>
 <tr><td>Scale mean across items</td>
 <td><code data-guide-formula>MEAN(paced, clear, useful, supported)</code></td>
 <td>Reverse-score first, then average the corrected columns. A person

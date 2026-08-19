@@ -247,10 +247,13 @@ await clickRow('Reverse-score');
 await page.waitForTimeout(250);
 await page.selectOption('.ps-fn-args select', 'q1');
 await page.waitForTimeout(200);
-ok(await page.evaluate(() =>
-       document.querySelector('.ps-fn-args input[type="number"]')
-           .value === '5'),
-   'q1 runs to 5, so the scale maximum seeds itself');
+// Both endpoints seed from the data now (t4-214), so the first number
+// field is the MINIMUM and a first-match selector would read it.
+ok(await page.evaluate(() => {
+       const ins = document.querySelectorAll('.ps-fn-args input[type="number"]');
+       return ins.length === 2 && ins[0].value === '1' && ins[1].value === '5';
+   }),
+   'q1 runs 1 to 5, so both ends of the scale seed themselves');
 await page.click('.ps-fn-args .ps-fn-insert');
 await page.waitForTimeout(250);
 st = await read();

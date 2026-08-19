@@ -1780,16 +1780,32 @@
     }
     return out;
   }
-  // The observed scale maximum seeds Reverse-score: a 1-7 battery
-  // defaults to 7 without being asked, and anything implausible for a
-  // rating scale falls back to 5.
-  function formulaScaleMax(t, col) {
-    var v = t.columns[col] || [], mx = null;
-    for (var i = 0; i < v.length; i++)
-      if (typeof v[i] === "number" && isFinite(v[i]))
-        mx = mx == null ? v[i] : Math.max(mx, v[i]);
-    mx = mx == null ? 5 : Math.round(mx);
-    return mx >= 2 && mx <= 11 ? mx : 5;
+  // Both endpoints of a Reverse-score scale seed from the data, so a
+  // 1-7 battery defaults to 1 and 7 and a 0-4 "none = 0" item defaults
+  // to 0 and 4 without being asked (Aug 2026, a collaborator: the
+  // recipe could not express a 0-4 scale at all, and wrote 5 - item,
+  // which put every value one point high and mapped 0 to 5).
+  //
+  // The maximum used to fall back to 5 for anything outside 2..11,
+  // which quietly turned a 0-100 thermometer into "6 - item". A seed
+  // is a suggestion the user can see and change, so the honest seed is
+  // what the data actually reaches.
+  function formulaScaleBounds(t, col) {
+    var v = t.columns[col] || [], mn = null, mx = null;
+    for (var i = 0; i < v.length; i++) {
+      var q = v[i];
+      if (typeof q !== "number" || !isFinite(q)) continue;
+      mn = mn == null ? q : Math.min(mn, q);
+      mx = mx == null ? q : Math.max(mx, q);
+    }
+    if (mn == null || mx == null || !(mx > mn)) return { min: 1, max: 5 };
+    mn = Math.round(mn);
+    mx = Math.round(mx);
+    // A scale that reaches zero or below cannot be 1-anchored, so its
+    // own minimum is right. Above zero, seed 1 rather than the observed
+    // minimum: a 1-5 item nobody scored a 1 on must not read as 2-5,
+    // which would reverse every answer wrongly.
+    return { min: mn <= 0 ? mn : 1, max: mx };
   }
   // The functions browser (replaces the uppercase reference wall).
   // Grouped, one plain sentence each. The third element is the
@@ -1995,31 +2011,74 @@
         var rcol = null;
         var rr = mkEl("div", "ps-fpk-row");
         rr.appendChild(mkEl("span", "", "Reverse-score"));
+        var mnR = mkEl("input");
         var mxR = mkEl("input");
         rr.appendChild(colSelect(numCols, "Item to reverse-score",
           function (c) {
             rcol = c;
-            mxR.value = String(formulaScaleMax(t, c));
-            ibR.disabled = false;
+            var b = formulaScaleBounds(t, c);
+            mnR.value = String(b.min);
+            mxR.value = String(b.max);
+            syncR();
           }));
-        rr.appendChild(mkEl("span", "", "on a scale that runs 1 to"));
-        mxR.type = "number"; mxR.min = "2"; mxR.max = "11";
+        rr.appendChild(mkEl("span", "", "on a scale that runs"));
+        // Wide bounds on purpose. The old field said 2 to 11 and the
+        // handler silently rewrote anything else to 5, so a 0-100
+        // thermometer typed as 100 produced "6 - item" with no signal.
+        // Reverse scoring is meaningful on any bounded scale, including
+        // one anchored below zero (a -3 to +3 semantic differential).
+        mnR.type = "number"; mnR.min = "-1000"; mnR.max = "1000";
+        mnR.value = "1";
+        mnR.style.width = "56px";
+        mnR.setAttribute("aria-label", "Scale minimum");
+        rr.appendChild(mnR);
+        rr.appendChild(mkEl("span", "", "to"));
+        mxR.type = "number"; mxR.min = "-1000"; mxR.max = "1000";
         mxR.value = "5";
         mxR.style.width = "56px";
         mxR.setAttribute("aria-label", "Scale maximum");
         rr.appendChild(mxR);
         host.appendChild(rr);
-        host.appendChild(mkEl("div", "ps-fpk-hint",
-          "A 1 becomes the scale maximum and the maximum becomes a 1: " +
-          "the item flips around scale max + 1."));
+        // The preview is the teaching. It shows the exact formula and
+        // what happens to the two endpoints BEFORE the click, which is
+        // what would have caught the 0-4 case at a glance.
+        var hintR = mkEl("div", "ps-fpk-hint",
+          "Pick the item to reverse-score.");
+        host.appendChild(hintR);
         var ibR = mkEl("button", "ps-fn-insert", "Insert");
         ibR.type = "button";
         ibR.disabled = true;
+        function boundsR() {
+          var mn = Math.round(Number(mnR.value));
+          var mx = Math.round(Number(mxR.value));
+          if (!isFinite(mn) || !isFinite(mx) ||
+              String(mnR.value).trim() === "" ||
+              String(mxR.value).trim() === "") return null;
+          if (!(mx > mn)) return null;
+          return { min: mn, max: mx };
+        }
+        function syncR() {
+          var b = boundsR();
+          // An unusable pair REFUSES rather than falling back to a
+          // guess: a silent substitution here writes a wrong statistic
+          // into the dataset and says nothing.
+          ibR.disabled = !rcol || !b;
+          if (!rcol) { hintR.textContent = "Pick the item to reverse-score."; return; }
+          if (!b) {
+            hintR.textContent = "The end of the scale has to be a larger " +
+              "number than the start.";
+            return;
+          }
+          hintR.textContent = "Inserts " + (b.min + b.max) + " - " + rcol +
+            ", so a " + b.min + " becomes a " + b.max +
+            " and a " + b.max + " becomes a " + b.min + ".";
+        }
+        mnR.addEventListener("input", syncR);
+        mxR.addEventListener("input", syncR);
         ibR.addEventListener("click", function () {
-          if (!rcol) return;
-          var mx2 = Math.round(Number(mxR.value));
-          if (!isFinite(mx2) || mx2 < 2 || mx2 > 11) mx2 = 5;
-          done((mx2 + 1) + " - " + bt(rcol), rcol + "_reversed");
+          var b = boundsR();
+          if (!rcol || !b) return;
+          done((b.min + b.max) + " - " + bt(rcol), rcol + "_reversed");
         });
         host.appendChild(ibR);
       }
