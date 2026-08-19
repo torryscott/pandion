@@ -3674,7 +3674,7 @@
     // writes to it silently - desktop-style Cmd+S. A stale handle (file
     // moved / permission lost) falls back to a download this once and
     // re-picks next time.
-    if (!framed && window.showSaveFilePicker) {
+    if (nativeSaveAvailable()) {
       var reuse = !!FILE_HANDLE;
       var handleP = FILE_HANDLE
         ? Promise.resolve(FILE_HANDLE)
@@ -5979,7 +5979,7 @@
   function saveExportBlob(blob, filename, ext) {
     var framed = false;
     try { framed = window.top !== window; } catch (e) { framed = true; }
-    if (!framed && window.showSaveFilePicker) {
+    if (nativeSaveAvailable()) {
       return window.showSaveFilePicker({
         suggestedName: filename,
         types: [{ description: exportDescription(ext),
@@ -26349,7 +26349,7 @@
         ? (LAST_RENDER_MS < 10 ? LAST_RENDER_MS.toFixed(1) :
            Math.round(LAST_RENDER_MS)) + " ms" : "Not measured"],
       ["Vector PDF", window.jspdf && window.svg2pdf ? "Available" : "Unavailable"],
-      ["Native Save As", window.showSaveFilePicker ? "Available" : "Download fallback"],
+      ["Native Save As", nativeSaveAvailable() ? "Available" : "Download fallback"],
       ["OMV decompression", window.DecompressionStream ? "Available" : "Unavailable"],
       ["Browser storage", storageInfo || "Estimate unavailable"],
       ["Browser", (window.navigator && window.navigator.userAgent) || "Unknown"]
@@ -26691,7 +26691,27 @@
       (which === "redo" ? "Redo" : "Undo") + '"]');
     return b && !b.disabled ? b : null;
   }
+  // Chrome and Edge can write back to the file the user picked, so the
+  // first save chooses it and every later save is silent - desktop
+  // behaviour. Safari and Firefox have no such API, and a framed page
+  // may not use it, so a download is the only way a page is permitted
+  // to write a file at all. In that state Save and Save As CANNOT
+  // differ, which reads as a bug unless the menu says so (Aug 2026, a
+  // collaborator: both take me straight to a download prompt). One
+  // definition, used by the menu labels, the save paths and the
+  // Diagnostics row, so the four can never disagree.
+  function nativeSaveAvailable() {
+    var framed = false;
+    try { framed = window.top !== window; } catch (e) { framed = true; }
+    return !framed && !!window.showSaveFilePicker;
+  }
   function commandLabel(item) {
+    // Say what the click will do, in the place he clicked. Without this
+    // the only statement of it was a Diagnostics row nobody opens.
+    if (item && (item.command === "save" || item.command === "save-as") &&
+        !nativeSaveAvailable())
+      return (item.command === "save"
+        ? "Save project" : "Save project as\u2026") + " (downloads a copy)";
     // Same rule as Undo below: one key, one menu row, and the row must
     // name whichever thing the key will actually do here.
     if (item && item.command === "find-data")
