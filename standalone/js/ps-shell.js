@@ -16147,7 +16147,26 @@
       var isRedo = k === "y" || (k === "z" && e.shiftKey);
       if (!isUndo && !isRedo) return;
       var tgt = e.target;
-      if (tgt && tgt.closest &&
+      // A grid cell editor is an <input>, so the guard below handed
+      // Cmd/Ctrl+Z to the browser's text undo and the DATA edit the
+      // user wanted back stayed put. The collaborator's report: edit a
+      // value, click another cell, undo, nothing happens - and nobody
+      // expects to have to leave edit mode first. An editor the user
+      // has not typed into has nothing of its own to undo, so it closes
+      // and the dataset history takes the press. One they HAVE typed
+      // into keeps the native behaviour, so the first press still
+      // undoes the typing and, once the field is back to its stored
+      // value, a further press reaches the data.
+      var _geTook = false;
+      if (GRID_EDIT && GRID_EDIT.input && tgt === GRID_EDIT.input) {
+        var _geNow = String(GRID_EDIT.input.value);
+        var _geWas = "";
+        try {
+          _geWas = String(PROJECT.table.raw[GRID_EDIT.col][GRID_EDIT.row]);
+        } catch (_geErr) { _geWas = _geNow + "\u0000"; }
+        if (_geNow === _geWas) { gridCancelEdit(); _geTook = true; }
+      }
+      if (!_geTook && tgt && tgt.closest &&
           tgt.closest("input, textarea, select, [contenteditable]")) return;
       // Layout owns the shortcut while a figure is on screen (punch list item
       // 7). Without this the press fell through to the engine's handler and
