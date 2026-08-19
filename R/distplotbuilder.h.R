@@ -15,7 +15,7 @@ distplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6C
             facetVar = NULL,
             graphType = "histogram",
             groupVar = NULL,
-            histBins = 30,
+            histBins = -1,
             histPosition = "overlay",
             histStat = "count",
             paletteLibrary = "",
@@ -101,8 +101,8 @@ distplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6C
             private$..histBins <- jmvcore::OptionInteger$new(
                 "histBins",
                 histBins,
-                default=30,
-                min=1,
+                default=-1,
+                min=-1,
                 max=500,
                 hidden=TRUE)
             private$..histPosition <- jmvcore::OptionList$new(
@@ -329,7 +329,7 @@ distplotbuilder <- function(
     facetVar,
     graphType = "histogram",
     groupVar,
-    histBins = 30,
+    histBins = -1,
     histPosition = "overlay",
     histStat = "count",
     paletteLibrary = "",

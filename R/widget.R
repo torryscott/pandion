@@ -583,7 +583,10 @@ graphbuilder2_html <- function(bars,
                                # sibling modules never pass these, so they keep
                                # their defaults and the JS only reads them under
                                # the histogram/density/qq/ecdf graph types. ---
-                               hist_bins = 30,
+                               # -1 = automatic: the data decides the
+                               # bin width (never narrower than the
+                               # values own resolution).
+                               hist_bins = -1,
                                hist_bin_width = -1,
                                hist_stat = "count",
                                hist_position = "overlay",

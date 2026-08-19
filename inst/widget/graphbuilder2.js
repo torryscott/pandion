@@ -2813,7 +2813,78 @@
         d += "L" + J(pts[pts.length - 1][0], baseY) + "Z";
         return d;
     }
-    function _distBinEdges(lo, hi, nBins, binWidth) {
+    // Round a lattice multiple to the nearest 1/2/5 x 10^k, so a bin
+    // width lands on a number people write down (1, 2, 5, 10, 20 ...)
+    // rather than 3 or 7. Nearest on a log scale, floored at one step.
+    function _distNice125(m) {
+        if (!(m > 1)) return 1;
+        var pow = Math.pow(10, Math.floor(Math.log(m) / Math.LN10));
+        var best = pow, bestD = Infinity;
+        var mult = [1, 2, 5, 10];
+        for (var i = 0; i < mult.length; i++) {
+            var cand = mult[i] * pow;
+            var d = Math.abs(Math.log(m / cand));
+            if (d < bestD) { bestD = d; best = cand; }
+        }
+        return Math.max(1, Math.round(best));
+    }
+    function _distGcd(a, b) {
+        a = Math.abs(a); b = Math.abs(b);
+        while (b > 0) { var t = a % b; a = b; b = t; }
+        return a;
+    }
+    // A bin can never be narrower than the data's own resolution: if
+    // every value is a whole number there is nothing between 8 and 9
+    // to show, so a half-unit bin leaves every other bin empty BY
+    // CONSTRUCTION and the histogram reads as a picket fence (Aug 2026,
+    // the colleague's report: a score histogram binned at every 0.5).
+    // So the automatic width starts from sqrt(n) bins and is then
+    // snapped up to a whole multiple of the lattice step, which for
+    // integers is 1 (and 5 for data recorded in fives, and so on).
+    // Non-lattice data keeps the plain span/count width.
+    function _distAutoBinInfo(bars) {
+        if (!Array.isArray(bars)) return 0;
+        var n = 0, allInt = true, min = Infinity, max = -Infinity, step = 0;
+        for (var bi = 0; bi < bars.length; bi++) {
+            var vals = bars[bi] && bars[bi].values;
+            if (!Array.isArray(vals)) continue;
+            for (var vi = 0; vi < vals.length; vi++) {
+                var v = vals[vi];
+                if (typeof v !== "number" || !isFinite(v)) continue;
+                n++;
+                if (v < min) min = v;
+                if (v > max) max = v;
+                if (allInt && Math.abs(v - Math.round(v)) > 1e-9) allInt = false;
+            }
+        }
+        if (n < 2 || !isFinite(min) || !isFinite(max) || max <= min) return null;
+        var span = max - min;
+        // sqrt(n) is the starting point the Check-graph copy already
+        // recommends, floored at 6 so a small sample does not land on
+        // three or four very wide bars once the width is snapped.
+        var target = Math.min(30, Math.max(6, Math.ceil(Math.sqrt(n))));
+        var w = span / target;
+        if (!allInt) return { w: w, step: 0, min: min, max: max };
+        // Lattice step: the gcd of every value's offset from the
+        // smallest, so data recorded in 5s bins in 5s.
+        var base = Math.round(min);
+        for (var bj = 0; bj < bars.length && step !== 1; bj++) {
+            var vs = bars[bj] && bars[bj].values;
+            if (!Array.isArray(vs)) continue;
+            for (var vj = 0; vj < vs.length; vj++) {
+                var vv = vs[vj];
+                if (typeof vv !== "number" || !isFinite(vv)) continue;
+                var d = Math.abs(Math.round(vv) - base);
+                if (d === 0) continue;
+                step = step ? _distGcd(step, d) : d;
+                if (step === 1) break;
+            }
+        }
+        if (!(step > 0)) step = 1;
+        return { w: _distNice125(Math.round(w / step)) * step, step: step,
+                 min: min, max: max };
+    }
+    function _distBinEdges(lo, hi, nBins, binWidth, bars) {
         var edges = [], i;
         if (typeof binWidth === "number" && binWidth > 0) {
             var start = Math.floor(lo / binWidth) * binWidth;
@@ -2821,7 +2892,31 @@
             if (edges.length < 2) edges = [lo, hi];
             return edges;
         }
-        var nb = Math.max(1, Math.round(nBins || 30));
+        // Automatic: the bin count is unset (the -1 sentinel), so the
+        // data decides. Lattice data is offset by half a step so the
+        // whole numbers sit INSIDE their bars instead of on the edges
+        // between two of them.
+        if (!(nBins > 0) && bars) {
+            var ai = _distAutoBinInfo(bars);
+            if (ai && ai.w > 0) {
+                var aStart = (ai.step > 0) ? (ai.min - ai.step / 2) : ai.min;
+                // Edges are computed from the index rather than
+                // accumulated, so a fractional width cannot drift, and
+                // the run stops at the FIRST edge past the largest
+                // value - one more and the histogram would carry an
+                // empty bin off its right end.
+                var k = 0;
+                while (k < 2000) {
+                    var ax = aStart + k * ai.w;
+                    edges.push(ax);
+                    if (ax > ai.max + 1e-9) break;
+                    k++;
+                }
+                if (edges.length >= 2) return edges;
+                edges = [];
+            }
+        }
+        var nb = Math.max(1, Math.round(nBins > 0 ? nBins : 30));
         var span = (hi - lo) || 1, w = span / nb;
         for (i = 0; i <= nb; i++) edges.push(lo + i * w);
         return edges;
@@ -5943,7 +6038,7 @@
                             }
                             xStep = niceTickStep(xMin, xMax, 6);
                         } else {
-                            var _edg = _distBinEdges(xMin, xMax, data.histBins, data.histBinWidth);
+                            var _edg = _distBinEdges(xMin, xMax, data.histBins, data.histBinWidth, bars);
                             var _bw0 = _edg[1] - _edg[0];
                             var _stat0 = data.histStat || "count";
                             var _pos0 = data.histPosition || "overlay";
@@ -5980,7 +6075,7 @@
                         if (data.distNormalCurve
                             && !(typeof _isElementHidden === "function" && _isElementHidden("distNormal"))
                             && (_distType === "histogram" || _distType === "histdensity" || _distType === "density")) {
-                            var _nrEdg = (_distType === "density") ? null : _distBinEdges(xMin, xMax, data.histBins, data.histBinWidth);
+                            var _nrEdg = (_distType === "density") ? null : _distBinEdges(xMin, xMax, data.histBins, data.histBinWidth, bars);
                             var _nrBw = _nrEdg ? (_nrEdg[1] - _nrEdg[0]) : 0;
                             var _nrStat = data.histStat || "count";
                             for (var _nri = 0; _nri < bars.length; _nri++) {
@@ -37762,8 +37857,12 @@
                         });
                     }
                     if (graphType === "histogram" || graphType === "histdensity") {
-                        var _edges = _distBinEdges(xMin, xMax, data.histBins, data.histBinWidth);
+                        var _edges = _distBinEdges(xMin, xMax, data.histBins, data.histBinWidth, bars);
                         var _nb = _edges.length - 1;
+                        // The Bins slider shows what is DRAWN while the
+                        // count is automatic, so the number under the
+                        // control is never a fiction.
+                        try { window.__gb2_distBinsDrawn = _nb; } catch (_eBd) {}
                         var _hStat = data.histStat || "count";
                         var _hPos = data.histPosition || "overlay";
                         // Per-group style (opacity / outline*) is resolved into
@@ -38420,7 +38519,7 @@
                         }
                     }
                     if (data.distNormalCurve && !_isElementHidden("distNormal") && (graphType === "histogram" || graphType === "histdensity" || graphType === "density")) {
-                        var _nEdges = (graphType === "density") ? null : _distBinEdges(xMin, xMax, data.histBins, data.histBinWidth);
+                        var _nEdges = (graphType === "density") ? null : _distBinEdges(xMin, xMax, data.histBins, data.histBinWidth, bars);
                         var _nbinw = _nEdges ? (_nEdges[1] - _nEdges[0]) : 0;
                         var _nStat = data.histStat || "count";
                         var _nW2 = (typeof data.distNormalWidth === "number") ? data.distNormalWidth : 2;
@@ -49921,8 +50020,33 @@
                 out.push({ id: "densn", sev: "tip", title: "Small sample for a density curve", why: "A density curve is a smoothed estimate; with n = " + minN + " the smoothing does most of the work, so bumps and dips may be noise rather than real features. A histogram of the actual counts is more honest here.", fixGt: choiceHas("histogram") ? "histogram" : null });
             if ((gt === "histogram" || gt === "histdensity") && typeof data.histBins === "number" && isFinite(data.histBins)) {
                 var _hbN = 0; for (var _hb = 0; _hb < bars.length; _hb++) if (bars[_hb] && typeof bars[_hb].n === "number") _hbN += bars[_hb].n;
-                if (_hbN > 0 && data.histBins > Math.max(12, _hbN / 2))
+                if (data.histBins > 0 && _hbN > 0 && data.histBins > Math.max(12, _hbN / 2))
                     out.push({ id: "binfit", sev: "tip", title: "More bins than the data can fill", why: "You are using " + data.histBins + " bins for " + _hbN + " values, so most bins hold 0 or 1 point and the shape reads as noise. Try fewer bins; the square root of n is a common starting point.", fixGt: null });
+                // Bins finer than the data's own resolution: whole bins
+                // are empty BY CONSTRUCTION, not because the data is
+                // sparse there, and the picket fence reads as structure.
+                if (data.histBins > 0) {
+                    var _blW = 0, _blStep = 0, _blInt = true, _blLo = Infinity, _blHi = -Infinity;
+                    for (var _bl = 0; _bl < bars.length; _bl++) {
+                        var _blV = bars[_bl] && bars[_bl].values;
+                        if (!Array.isArray(_blV)) continue;
+                        for (var _blj = 0; _blj < _blV.length; _blj++) {
+                            var _blq = _blV[_blj];
+                            if (typeof _blq !== "number" || !isFinite(_blq)) continue;
+                            if (_blq < _blLo) _blLo = _blq;
+                            if (_blq > _blHi) _blHi = _blq;
+                            if (_blInt && Math.abs(_blq - Math.round(_blq)) > 1e-9) _blInt = false;
+                        }
+                    }
+                    if (_blInt && isFinite(_blLo) && _blHi > _blLo) {
+                        _blStep = 1;
+                        _blW = (_blHi - _blLo) / data.histBins;
+                        if (_blW < _blStep) {
+                            var _blFit = Math.max(1, Math.floor((_blHi - _blLo) / _blStep) + 1);
+                            out.push({ id: "binlattice", sev: "warn", title: "Bins narrower than the data can be", why: "Every value here is a whole number, so there is nothing between " + Math.round(_blLo) + " and " + (Math.round(_blLo) + 1) + " to show. At " + data.histBins + " bins each one is about " + (Math.round(_blW * 100) / 100) + " wide, so whole bins are empty because they CANNOT hold anything, and the gaps read as structure that is not in the data. Use about " + _blFit + " bins or fewer, or press Auto beside the Bins slider to let the data choose.", fixGt: null });
+                        }
+                    }
+                }
             }
             // --- A heatmap that a plain scatter would serve better ---
             if (gt === "scatter" && typeof data.xyBin === "string" && data.xyBin !== "" && data.xyBin !== "none") {
@@ -50612,6 +50736,7 @@
                 { id: "qqn", name: "Sample size for a Q-Q plot", tip: "With few points, wander off the line is expected even for truly normal data.", applies: gt === "qq" && minN !== null },
                 { id: "densn", name: "Sample size for a density curve", tip: "Smoothing needs data; with small samples the bumps are mostly smoothing.", applies: gt === "density" && minN !== null },
                 { id: "binfit", name: "Bin count fits the data", tip: "Using far more bins than values makes the histogram read as noise.", applies: (gt === "histogram" || gt === "histdensity") && typeof data.histBins === "number" },
+                { id: "binlattice", name: "Bins match the data's resolution", tip: "Bins narrower than the step between possible values leave gaps that cannot hold anything.", applies: (gt === "histogram" || gt === "histdensity") && typeof data.histBins === "number" },
                 { id: "heatfew", name: "Enough points for a heatmap", tip: "A heatmap earns its keep when points overlap heavily; few points suit a scatter.", applies: _hmOn },
                 { id: "chisqexp", name: "Chi-square expected counts", tip: "The chi-square approximation needs expected counts of about 5 or more per cell.", applies: _mk === "freq" && Array.isArray(data.freqTests) && data.freqTests.length > 0 },
                 { id: "corrn", name: "Pairs behind each correlation", tip: "Correlations built on very few complete pairs swing wildly from sample to sample.", applies: gt.indexOf("corr") === 0 && Array.isArray(data.corrCells) && data.corrCells.length > 0 },
@@ -54091,7 +54216,7 @@
                         if (data.xMaxOverride === true &&
                             typeof data.xMax === "number" && isFinite(data.xMax)) hi2 = data.xMax;
                         if (hi2 <= lo2) hi2 = lo2 + Math.max(1, Math.abs(lo2));
-                        var edges2 = _distBinEdges(lo2, hi2, data.histBins, data.histBinWidth);
+                        var edges2 = _distBinEdges(lo2, hi2, data.histBins, data.histBinWidth, bars);
                         var nb2 = edges2.length - 1;
                         if (nb2 >= 1) {
                             // label decimals: enough to print the bin width
@@ -79935,7 +80060,10 @@
             } catch (_e) {}
         }
         function _distHistShapeTab(pane, g) {
-            var bins = (typeof data.histBins === "number" && data.histBins > 0) ? data.histBins : 30;
+            var _binsAuto = !(typeof data.histBins === "number" && data.histBins > 0);
+            var bins = _binsAuto
+                ? (window.__gb2_distBinsDrawn || 30)
+                : data.histBins;
             var stat = data.histStat || "count";
             var pos = data.histPosition || "overlay";
             function _row(label, ctrl) {
@@ -79946,7 +80074,15 @@
             // distribution, the statistic rewrites the axis, position
             // changes what heights mean) - one band wraps it all.
             pane.innerHTML = _gb2StatPaneWrap(
-                _row("Bins", _distRangeHtml("dh-bins", 1, 100, 1, bins)) +
+                _row("Bins", _distRangeHtml("dh-bins", 1, 100, 1, bins) +
+                    '<span data-field="dh-bins-note" style="color:#666;font-size:11px;' +
+                      (_binsAuto ? '' : 'display:none;') + '">chosen from the data</span>' +
+                    '<button type="button" data-field="dh-bins-auto" ' +
+                      'title="Go back to letting the data choose the bin width" ' +
+                      'style="padding:3px 8px;border:1px solid #aaa;border-radius:3px;' +
+                      'background:white;color:#1a5fb4;cursor:pointer;font-size:11px;' +
+                      'font-family:var(--gb2-ui-font);' +
+                      (_binsAuto ? 'display:none;' : '') + '">Auto</button>') +
                 _row("Statistic", _distSegHtml("dh-stat", "count", "Count", stat) + _distSegHtml("dh-stat", "density", "Density", stat) + _distSegHtml("dh-stat", "proportion", "Proportion", stat)) +
                 // Position only matters with a Group By variable
                 // (overlay/stack/dodge arrange the GROUPS); on an
@@ -79955,6 +80091,34 @@
                     ? _row("Position", _distSegHtml("dh-pos", "overlay", "Overlay", pos) + _distSegHtml("dh-pos", "stack", "Stack", pos) + _distSegHtml("dh-pos", "dodge", "Dodge", pos))
                     : ""), "the shape of the distribution");
             _distWireSlider(pane, "dh-bins", "histBins", 1, 500, true);
+            (function () {
+                var ab = pane.querySelector('[data-field="dh-bins-auto"]');
+                var nt = pane.querySelector('[data-field="dh-bins-note"]');
+                var sl = pane.querySelector('[data-field="dh-bins"]');
+                function _syncAuto() {
+                    var isAuto = !(typeof data.histBins === "number" && data.histBins > 0);
+                    if (ab) ab.style.display = isAuto ? "none" : "";
+                    if (nt) nt.style.display = isAuto ? "" : "none";
+                }
+                if (sl) {
+                    sl.addEventListener("input", _syncAuto);
+                    sl.addEventListener("change", _syncAuto);
+                }
+                var nm = pane.querySelector('[data-field="dh-bins-num"]');
+                if (nm) {
+                    nm.addEventListener("input", _syncAuto);
+                    nm.addEventListener("change", _syncAuto);
+                }
+                if (ab) {
+                    ab.addEventListener("click", function (e) {
+                        e.preventDefault();
+                        data.histBins = -1;
+                        redraw();
+                        if (hasSetOption) { try { _setOption("histBins", -1); } catch (_e) {} }
+                        renderInspectorPanel();
+                    });
+                }
+            })();
             // Statistic also drives the DEFAULT Y-axis title (Count /
             // Density / Proportion, mirroring distplotbuilder.b.R's
             // default_y). Predict it client-side BEFORE the commit so

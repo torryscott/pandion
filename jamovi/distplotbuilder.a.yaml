@@ -112,8 +112,8 @@ options:
     - name: histBins
       title: Bins
       type: Integer
-      default: 30
-      min: 1
+      default: -1
+      min: -1
       max: 500
       hidden: true
 
