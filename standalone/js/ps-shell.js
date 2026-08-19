@@ -10254,10 +10254,20 @@
     });
   }
 
-  // ---- workspace scroll cue (the panel-fit machinery is further down).
-  // The chart workspace can overflow - a tall chart, an open panel - and
-  // macOS draws no scrollbar until you scroll, so nothing says there is
-  // more below.
+  // ---- panel reveal (Torry, Aug 5 2026): colleagues on low-res screens
+  // clicked a chart part and never saw the editor - it opened below the
+  // fold. After a REAL click on the chart host, once the engine panel
+  // settles, scroll the workspace the MINIMUM that shows the panel,
+  // capped so the CLICKED PART never leaves the screen: short panels
+  // reveal fully, tall ones partially (the person sees the panel exists
+  // and wheels for the rest). Trusted pointer input only, so echoes,
+  // re-renders and synthetic clicks (tours) can never move the view.
+  // The other half of the reveal. revealPanelAfterClick scrolls as far as
+  // its anchor bound allows, which on a laptop is often not far enough to
+  // show a tall panel - and macOS draws no scrollbar until you scroll, so
+  // nothing said there was more. Measured at 1280x800 with the Statistics
+  // panel open: 260px still below, offsetWidth === clientWidth, box-shadow
+  // none. The one control that places the brackets was in that 260px.
   //
   // Same cue, and the same values, the ENGINE already uses for its own long
   // tables (its [data-st-scroll] wrappers): a bottom-edge inset shadow that
@@ -10298,103 +10308,23 @@
     syncPaneScrollCue();
   })();
 
-  // ---- panel fit (Aug 2026, t4-203; replaces the Aug 5 reveal SCROLL).
-  // The old mechanism scrolled the workspace to show a panel that opened
-  // below the fold. Scrolling moves the whole page under a stationary
-  // pointer: click a bar (tall panel opens, page scrolls ~20px), then
-  // double-click the axis title - the first click swaps in a SHORTER
-  // panel, the content no longer overflows, the browser clamps the
-  // scroll back to 0, and the label drops 20px between the two presses.
-  // The second press lands on the svg, the browser never pairs the two
-  // into a dblclick on the text, and the editor never opens. Under
-  // prefers-reduced-motion the scroll was instant, so the people who
-  // asked not to be moved were the ones it broke for every time.
-  //
-  // The replacement never moves the page:
-  //   1. CLAMP (the whole job in normal geometry): when the panel's
-  //      natural height would run past the view bottom, it gets a
-  //      max-height and scrolls INTERNALLY, with the same bottom-edge
-  //      inset cue the engine's own long tables use. The panel sits
-  //      flush under the chart, so this shows everything that can be
-  //      shown without covering or moving a single chart pixel - which
-  //      also means no click pair can ever be broken again, and the
-  //      whole panel is reachable where the old scroll left tall panels
-  //      260px short.
-  //   2. LIFT (tiny-window rescue only): when the window is so short
-  //      the panel's TOP is at the fold, it rises as a sheet
-  //      (transform: translateY moves pixels, never layout, so scroll
-  //      positions cannot change) far enough to show a usable strip,
-  //      capped so it never covers the clicked part (44px of breathing
-  //      room) nor the top of the plot (chartTop + 80: what must stay
-  //      visible is the data the panel talks about, not the button
-  //      that summoned it).
-  // Trusted pointer input arms it, like the old reveal; a press INSIDE
-  // the panel keeps the anchor of the click that opened it. Engine
-  // re-renders rebuild the panel node and its inline styles, so a
-  // MutationObserver re-applies the fit to the fresh element; the
-  // engine's own expand/collapse animation writes maxHeight/overflow
-  // and clears them ~170ms in, so a clamped apply re-verifies shortly
-  // after. Kill switch: localStorage ps.panelFit = "off".
-  var PANEL_FIT = null;   // { host, panel, clickY, rise, clamped }
-  var PANEL_FIT_ANCHOR = null;   // { host, clickY } - survives clears
-  var PANEL_FIT_STAMP = null;
-  function panelFitOff() {
-    try { return localStorage.getItem("ps.panelFit") === "off"; }
-    catch (e) { return false; }
-  }
-  function clearPanelFit() {
-    var f = PANEL_FIT;
-    PANEL_FIT = null;
-    if (!f || !f.panel) return;
-    var p = f.panel;
-    try {
-      p.style.transform = "";
-      p.style.transition = "";
-      p.style.position = "";
-      p.style.zIndex = "";
-      p.style.boxShadow = "";
-      p.style.maxHeight = "";
-      p.style.overflowY = "";
-      p.style.overscrollBehavior = "";
-      if (p.__psFitPrevRadius != null) {
-        p.style.borderRadius = p.__psFitPrevRadius;
-        p.__psFitPrevRadius = null;
-      }
-    } catch (e) {}
-  }
-  function panelFitShadow(f, atEnd) {
-    var parts = [];
-    if (f.rise > 0) parts.push("0 -6px 16px rgba(0,0,0,0.18)");
-    if (f.clamped && !atEnd)
-      parts.push("inset 0 -10px 8px -8px rgba(0,0,0,0.22)");
-    return parts.join(", ");
-  }
-  function syncPanelFitCue() {
-    var f = PANEL_FIT;
-    if (!f || !f.panel || !f.clamped) return;
-    var p = f.panel;
-    var atEnd = p.scrollTop + p.clientHeight >= p.scrollHeight - 2;
-    try { p.style.boxShadow = panelFitShadow(f, atEnd); } catch (e) {}
-  }
-  function applyPanelFit(host, panel, clickY, animate) {
+  var PANEL_REVEAL_STAMP = null;
+  function revealPanelAfterClick(panel, clickY) {
     var scroller = el("ps-main-workspace");
-    if (!scroller || !panel) return;
-    if (PANEL_FIT && PANEL_FIT.panel !== panel) clearPanelFit();
+    if (!scroller || !panel) return 0;
     var sr = scroller.getBoundingClientRect();
     var pr = panel.getBoundingClientRect();
-    // scrollHeight, not rect height: mid-expand the rect is still
-    // small, and the EARLY apply below runs during that animation on
-    // purpose (so the roll stops at the box instead of bouncing).
-    if (Math.max(pr.height, panel.scrollHeight) < 40) {
-      clearPanelFit(); return;
-    }
-    var prevRise = (PANEL_FIT && PANEL_FIT.panel === panel)
-      ? PANEL_FIT.rise : 0;
-    var flowTop = pr.top + prevRise;
-    var naturalH = Math.max(pr.height, panel.scrollHeight + 2);
+    if (pr.height < 40) return 0;
     var viewBottom = Math.min(sr.bottom, window.innerHeight || sr.bottom);
-    if (flowTop + naturalH <= viewBottom - 4) { clearPanelFit(); return; }
-    var svgs = host.querySelectorAll("svg");
+    var needed = Math.ceil(pr.bottom - viewBottom) + 10;
+    if (needed <= 0) return 0;
+    // Anchor bound: the clicked part keeps 44px of breathing room. The
+    // anchor floors at the PLOT area: a toolbar click (the Sigma button
+    // sits above the chart) should still reveal the panel it opened -
+    // what must stay visible is the data the panel talks about, not the
+    // button that summoned it.
+    var svgs = panel.closest(".graphbuilder2-host")
+      ? panel.closest(".graphbuilder2-host").querySelectorAll("svg") : [];
     var chartTop = null, area = 0;
     for (var si = 0; si < svgs.length; si++) {
       var rr = svgs[si].getBoundingClientRect();
@@ -10403,240 +10333,130 @@
         chartTop = rr.top;
       }
     }
-    var anchorY = chartTop == null
-      ? (clickY == null ? Math.max(sr.top, 0) : clickY)
-      : Math.max(clickY == null ? -Infinity : clickY, chartTop + 80);
-    var sheetTopMin = Math.max(anchorY + 44, Math.max(sr.top, 0) + 8);
-    // Lift only when the panel's top is at the fold; otherwise the
-    // clamp does the whole job with zero movement.
-    var MIN_SHOW = 40, LIFT_SHOW = 160;
-    var rise = 0;
-    if (flowTop > viewBottom - MIN_SHOW) {
-      rise = Math.max(0, Math.floor(
-        flowTop - Math.max(sheetTopMin, viewBottom - LIFT_SHOW)));
-    }
-    var visualTop = flowTop - rise;
-    var maxH = Math.floor(viewBottom - 10 - visualTop);
-    // Clamp-only geometry never letterboxes below 240px: a ~100px slice
-    // of a style panel (or a Sigma table) is unusable, and exact-fit
-    // would make it the permanent view at that window size. A floored
-    // box can hang below the fold; the USER wheels the bounded
-    // remainder into view (the workspace cue says so), which cannot
-    // break a gesture because nothing scrolls by itself. Lifted sheets
-    // keep the exact fit - extending a sheet below the fold buys
-    // nothing.
-    if (!rise) maxH = Math.max(maxH, 240);
-    var clamped = naturalH > maxH + 2 && maxH >= (rise ? 80 : 240);
-    if (!rise && !clamped) { clearPanelFit(); return; }
+    var anchorY = chartTop == null ? clickY
+      : Math.max(clickY, chartTop + 80);
+    var cap = Math.floor(anchorY - (Math.max(sr.top, 0) + 44));
+    var by = Math.min(needed, Math.max(0, cap));
+    if (by < 4) return 0;
     var reduce = false;
     try {
       reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     } catch (e) {}
-    if (PANEL_FIT && PANEL_FIT.panel === panel) {
-      PANEL_FIT.rise = rise; PANEL_FIT.clamped = clamped;
-      PANEL_FIT.clickY = clickY; PANEL_FIT.host = host;
-      PANEL_FIT.maxH = maxH;
-    } else {
-      PANEL_FIT = { host: host, panel: panel, clickY: clickY,
-        rise: rise, clamped: clamped, maxH: maxH };
-    }
-    // While the engine's own expand/collapse transition is live, its
-    // max-height animation IS the reveal motion - never overwrite the
-    // transition mid-roll (that would freeze it).
-    var engineAnim =
-      (panel.style.transition || "").indexOf("max-height") !== -1;
     try {
-      if (!engineAnim)
-        panel.style.transition = (animate && !reduce && rise !== prevRise)
-          ? "transform 220ms ease-out" : "none";
-      panel.style.transform = rise > 0
-        ? "translateY(-" + rise + "px)" : "";
-      if (rise > 0) {
-        // A transformed element gets its own stacking context, but the
-        // wrap's absolutely-positioned chrome carries z-indexes;
-        // position:relative lets the z-index take.
-        panel.style.position = "relative";
-        panel.style.zIndex = "60";
-        if (panel.__psFitPrevRadius == null)
-          panel.__psFitPrevRadius = panel.style.borderRadius || "";
-        panel.style.borderRadius = "6px 6px 4px 4px";
-      } else {
-        panel.style.position = "";
-        panel.style.zIndex = "";
-        if (panel.__psFitPrevRadius != null) {
-          panel.style.borderRadius = panel.__psFitPrevRadius;
-          panel.__psFitPrevRadius = null;
-        }
-      }
-      if (clamped) {
-        // Mid-expand, retarget the engine's own roll so it STOPS at
-        // the box instead of reaching natural height and bouncing
-        // back (Torry's rolls-down-then-rolls-back-up report). At
-        // rest, plain apply.
-        var curMh = parseFloat(panel.style.maxHeight);
-        if (!engineAnim || !isFinite(curMh) || curMh > maxH)
-          panel.style.maxHeight = maxH + "px";
-        panel.style.overflowY = "auto";
-        panel.style.overscrollBehavior = "contain";
-        if (!panel.__psFitCueWired) {
-          panel.__psFitCueWired = true;
-          panel.addEventListener("scroll", syncPanelFitCue);
-        }
-        // The engine's expand/collapse writes maxHeight itself and its
-        // cleanup CLEARS it ~170ms in; a style observer re-pins the
-        // clamp in the same microtask, before paint, so the panel
-        // never shows a natural-height frame. Equality guards stop
-        // self-triggering.
-        if (!panel.__psFitStyleMo) {
-          try {
-            panel.__psFitStyleMo = new MutationObserver(function () {
-              var f = PANEL_FIT;
-              var p2 = f && f.panel;
-              if (!p2 || p2 !== panel || !f.clamped) return;
-              var want = f.maxH + "px";
-              var cur = p2.style.maxHeight;
-              if (cur === want) return;
-              var anim = (p2.style.transition || "")
-                .indexOf("max-height") !== -1;
-              if (anim) {
-                // Live roll: retarget only when the engine aimed PAST
-                // the box; leave its 0-start frame alone so the roll
-                // still starts closed.
-                var v = parseFloat(cur);
-                if (isFinite(v) && v > f.maxH)
-                  p2.style.maxHeight = want;
-              } else {
-                p2.style.maxHeight = want;
-                if (p2.style.overflowY !== "auto")
-                  p2.style.overflowY = "auto";
-              }
-            });
-            panel.__psFitStyleMo.observe(panel,
-              { attributes: true, attributeFilter: ["style"] });
-          } catch (eMo) {}
-        }
-      } else {
-        panel.style.maxHeight = "";
-        panel.style.overflowY = "";
-        panel.style.overscrollBehavior = "";
-      }
-      var atEnd = !clamped ||
-        panel.scrollTop + panel.clientHeight >= panel.scrollHeight - 2;
-      panel.style.boxShadow = panelFitShadow(PANEL_FIT, atEnd);
-    } catch (e2) {}
-    try { syncPaneScrollCue(); } catch (e3) {}
+      scroller.scrollBy({ top: by, behavior: reduce ? "auto" : "smooth" });
+    } catch (e2) { scroller.scrollTop += by; }
+    // A smooth scroll finishes after this returns, and the cue describes
+    // where it LANDED.
+    try { window.setTimeout(syncPaneScrollCue, 420); } catch (e3) {}
+    return by;
   }
-  function armPanelFit(host, clickY, animate) {
-    var stamp = { at: Date.now() };
-    PANEL_FIT_STAMP = stamp;
-    // TRACKING watch: the panel slides open over ~150ms and its content
-    // can rebuild once more after that (the picker dock grows it). A
-    // one-shot apply at settle time pulled an over-rolled panel back
-    // ~40ms after paint - Torry's rolls-down-then-rolls-back-up report
-    // - so the fit applies EVERY frame while the panel is live (writes
-    // are equality-guarded; the clamp engages the same frame content
-    // outgrows the box) and finishes with one authoritative apply when
-    // the height holds still.
+  document.addEventListener("pointerup", function (e) {
+    if (!e.isTrusted) return;
+    if (appWorkspace() !== "chart") return;
+    var host = e.target && e.target.closest &&
+      e.target.closest(".graphbuilder2-host");
+    if (!host) return;
+    var stamp = { at: Date.now(), y: e.clientY };
+    PANEL_REVEAL_STAMP = stamp;
+    // Settle-watch: the panel slides open over ~150ms and its content can
+    // rebuild once more after that; act when the height holds still.
     var frames = 0, lastH = -1, still = 0;
     (function watch() {
-      if (PANEL_FIT_STAMP !== stamp || Date.now() - stamp.at > 1400)
+      if (PANEL_REVEAL_STAMP !== stamp || Date.now() - stamp.at > 1400)
         return;
       var panel = host.querySelector(".gb2-panel");
       var h = panel ? panel.getBoundingClientRect().height : 0;
-      var live = panel && getComputedStyle(panel).display !== "none" &&
-        Math.max(h, panel.scrollHeight) > 40;
-      if (live) applyPanelFit(host, panel, clickY, false);
       if (panel && h > 40 && Math.abs(h - lastH) < 1) {
         still++;
         if (still >= 3) {
-          applyPanelFit(host, panel, clickY, animate);
+          revealPanelAfterClick(panel, stamp.y);
           return;
         }
       } else still = 0;
       lastH = h;
       if (++frames < 90) window.requestAnimationFrame(watch);
     })();
+  }, true);
+
+  // ---- height reserve (t4-203 part two, Aug 19 2026 - the settled
+  // design, after a panel-fit rework was built, field-tested by Torry
+  // on a short window, and VETOED: the nested option strips made a
+  // capped internally-scrolling panel worse than the scroll, so the
+  // reveal above stays exactly as it was and only the CLAMP is cured).
+  //
+  // The bug the reserve fixes: the reveal scrolls the page; when a
+  // click swaps in a SHORTER panel the content stops overflowing and
+  // the browser clamps the scroll back - instantly, mid-gesture - so
+  // the axis title moved ~20px between the two presses of a
+  // double-click and the browser never paired them into a dblclick on
+  // the text (double-click-to-edit silently failed; worst under
+  // prefers-reduced-motion, where the reveal scroll was instant).
+  //
+  // The cure: each trusted press on the chart FLOORS the host's height
+  // at its current value, so a panel swap can never shrink the page
+  // mid-gesture; after 700ms of pointer quiet the floor releases,
+  // gliding the page back down if it was left past the new bottom (the
+  // same roll-back motion the reveal always had). The measurement in
+  // release() is pre-paint, so nothing flashes; while the inline text
+  // editor is open the release waits, so the page never glides under
+  // someone typing.
+  var RESERVE_TIMER = null;
+  var RESERVE_HOST = null;
+  function releaseHeightReserve() {
+    RESERVE_TIMER = null;
+    var host = RESERVE_HOST;
+    if (!host) return;
+    if (!host.isConnected) {
+      RESERVE_HOST = null;
+      return;
+    }
+    if (document.querySelector('textarea[data-role="inline-text-editor"]')) {
+      // Someone is typing into the chart; hold still and try later.
+      RESERVE_TIMER = window.setTimeout(releaseHeightReserve, 700);
+      return;
+    }
+    RESERVE_HOST = null;
+    var sc = el("ps-main-workspace");
+    if (!sc) { try { host.style.minHeight = ""; } catch (e0) {} return; }
+    try {
+      var prevMin = host.style.minHeight;
+      var st0 = sc.scrollTop;
+      host.style.minHeight = "";
+      var maxTop = Math.max(0, sc.scrollHeight - sc.clientHeight);
+      if (st0 <= maxTop + 1) return; // no clamp would occur - done
+      // Releasing outright would jump; put the floor back (pre-paint,
+      // invisible), glide down, then drop it once the glide lands.
+      host.style.minHeight = prevMin;
+      sc.scrollTop = st0;
+      var reduce = false;
+      try {
+        reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      } catch (e1) {}
+      try { sc.scrollTo({ top: maxTop, behavior: reduce ? "auto" : "smooth" }); }
+      catch (e2) { sc.scrollTop = maxTop; }
+      window.setTimeout(function () {
+        if (RESERVE_HOST === host) return; // a new press re-armed
+        try { host.style.minHeight = ""; } catch (e3) {}
+      }, reduce ? 60 : 460);
+    } catch (e4) {}
   }
   document.addEventListener("pointerup", function (e) {
     if (!e.isTrusted) return;
-    if (panelFitOff()) return;
     if (appWorkspace() !== "chart") return;
     var host = e.target && e.target.closest &&
       e.target.closest(".graphbuilder2-host");
     if (!host) return;
-    // A press inside the PANEL (tab switch, slider release) is
-    // interaction with the panel, not part selection: its y-coordinate
-    // is meaningless as a keep-visible anchor, so keep the anchor of
-    // the click that opened the fit (or the plot floor when none).
-    var onPanel = !!(e.target.closest && e.target.closest(".gb2-panel"));
-    var y = onPanel
-      ? (PANEL_FIT && PANEL_FIT.clickY != null ? PANEL_FIT.clickY : null)
-      : e.clientY;
-    // The anchor OUTLIVES the fit: a small panel needs no fit today,
-    // but a window resize can create the need with no click to arm it.
-    PANEL_FIT_ANCHOR = { host: host, clickY: y };
-    armPanelFit(host, y, true);
+    if (RESERVE_HOST && RESERVE_HOST !== host) {
+      try { RESERVE_HOST.style.minHeight = ""; } catch (e5) {}
+    }
+    RESERVE_HOST = host;
+    // offsetHeight BEFORE the engine's handlers run: the height the
+    // user pressed against. Re-pressing while floored reads the
+    // floored height, so the floor never lowers mid-burst.
+    try { host.style.minHeight = host.offsetHeight + "px"; } catch (e6) {}
+    if (RESERVE_TIMER) clearTimeout(RESERVE_TIMER);
+    RESERVE_TIMER = window.setTimeout(releaseHeightReserve, 700);
   }, true);
-  (function wirePanelFitRepair() {
-    var sc = el("ps-main-workspace");
-    if (!sc) return;
-    // Engine re-renders rebuild the panel NODE, wiping the fit's inline
-    // styles; re-apply to the fresh element. The settle logic absorbs
-    // mutation storms (each mutation restamps the watch).
-    try {
-      new MutationObserver(function () {
-        var f = PANEL_FIT;
-        if (!f || !f.host) return;
-        if (!f.host.isConnected) { clearPanelFit(); return; }
-        if (f.panel && f.panel.isConnected &&
-            f.host.querySelector(".gb2-panel") === f.panel) return;
-        armPanelFit(f.host, f.clickY, false);
-      }).observe(sc, { childList: true, subtree: true });
-    } catch (e) {}
-    // Scrolling makes a lift unnecessary from the top down: only RELAX
-    // here (shrink the rise), so a mid-scroll content change can never
-    // clamp the user's own scroll position. Clamp tightening waits for
-    // the next click, resize, or rebuild.
-    sc.addEventListener("scroll", function () {
-      var f = PANEL_FIT;
-      if (!f || !f.panel || f.rise <= 0) return;
-      if (!f.panel.isConnected) { clearPanelFit(); return; }
-      var pr = f.panel.getBoundingClientRect();
-      var srr = sc.getBoundingClientRect();
-      var vb = Math.min(srr.bottom, window.innerHeight || srr.bottom);
-      var flowTop = pr.top + f.rise;
-      var newRise = Math.max(0, Math.min(f.rise,
-        Math.floor(flowTop - (vb - 160))));
-      if (newRise === f.rise) return;
-      f.rise = newRise;
-      try {
-        f.panel.style.transition = "none";
-        f.panel.style.transform = newRise > 0
-          ? "translateY(-" + newRise + "px)" : "";
-        if (!newRise) {
-          f.panel.style.position = "";
-          f.panel.style.zIndex = "";
-          if (f.panel.__psFitPrevRadius != null) {
-            f.panel.style.borderRadius = f.panel.__psFitPrevRadius;
-            f.panel.__psFitPrevRadius = null;
-          }
-          var atEnd = !f.clamped || f.panel.scrollTop +
-            f.panel.clientHeight >= f.panel.scrollHeight - 2;
-          f.panel.style.boxShadow = panelFitShadow(f, atEnd);
-          if (!f.clamped) clearPanelFit();
-        }
-      } catch (e) {}
-    });
-    try {
-      window.addEventListener("resize", function () {
-        var a = PANEL_FIT || PANEL_FIT_ANCHOR;
-        if (!a || !a.host) return;
-        if (!a.host.isConnected) { clearPanelFit(); return; }
-        armPanelFit(a.host, a.clickY, false);
-      });
-    } catch (e2) {}
-  })();
-
   // Punch list 45: the workspace heading is gone (it named the active document
   // a third time). Its writers are left calling this, which returns a detached
   // node rather than throwing, so the shape of syncWorkspaceHeading can stay
