@@ -5677,6 +5677,31 @@
         // call it again per panel with that panel's bars. Reads
         // isDistGraph + pointsVisible + data.y* overrides via
         // closure; the only varying input is the bars array.
+        // A count axis can only be read in whole numbers: half an
+        // observation does not exist. The tick chooser knows the numeric
+        // range but not what the quantity IS, so a chart whose tallest
+        // bar is 3 was being ticked 0, 0.5, 1.0 ... 3.0 (Aug 2026, the
+        // colleague's report - the same sentence that flagged the
+        // half-unit bins). True only where the value axis really is a
+        // count: density, proportion, percent and ECDF axes are
+        // fractional by nature and must keep their steps.
+        function _gb2IsCountValueAxis() {
+            var gt = data.graphType || "bar";
+            if (data.freqMode === true) {
+                if ((data.freqPosition || "") === "fill") return false;   // 100% stacked
+                return (data.freqStat || "count") === "count";
+            }
+            if (gt === "histogram" || gt === "histdensity")
+                return (data.histStat || "count") === "count";
+            return false;
+        }
+        // niceTickStep only ever returns 1, 2, 5 or 10 times a power of
+        // ten, so anything fractional is below one and one is the
+        // smallest honest step.
+        function _gb2CountStep(step) {
+            if (!isFinite(step) || step <= 0) return step;
+            return (step < 1 && _gb2IsCountValueAxis()) ? 1 : step;
+        }
         function _computeYRange(barsArr) {
             // Frequencies stacked / 100% bars: the axis must fit per-
             // category segment SUMS, not the tallest single segment.
@@ -5753,13 +5778,13 @@
                 typeof data.yMax === "number" && isFinite(data.yMax);
 
             var yStepL = stepOverrideL ? data.yInterval
-                : niceTickStep(rawMinL, rawMaxL, 6);
+                : _gb2CountStep(niceTickStep(rawMinL, rawMaxL, 6));
             var yMinL = minOverrideL ? data.yMin
                 : Math.floor(rawMinL / yStepL) * yStepL;
             var yMaxL = maxOverrideL ? data.yMax
                 : Math.ceil(rawMaxL / yStepL) * yStepL;
             if (yMaxL <= yMinL) yMaxL = yMinL + Math.max(1, Math.abs(yMinL) || 1);
-            if (!stepOverrideL) yStepL = niceTickStep(yMinL, yMaxL, 6);
+            if (!stepOverrideL) yStepL = _gb2CountStep(niceTickStep(yMinL, yMaxL, 6));
             return { yMin: yMinL, yMax: yMaxL, yStep: yStepL };
         }
         var _yR0 = _computeYRange(bars);
@@ -6111,7 +6136,7 @@
             if (data.xIntervalOverride === true && typeof data.xInterval === "number" && data.xInterval > 0) xStep = data.xInterval;
             else xStep = niceTickStep(xMin, xMax, 6);
             if (data.yIntervalOverride === true && typeof data.yInterval === "number" && data.yInterval > 0) yStep = data.yInterval;
-            else yStep = niceTickStep(yMin, yMax, 6);
+            else yStep = _gb2CountStep(niceTickStep(yMin, yMax, 6));
         }
         var xMin = 0, xMax = 1, xStep = 1;
         if (_isScatterGraph) {
