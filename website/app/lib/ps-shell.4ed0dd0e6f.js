@@ -14446,8 +14446,16 @@
     dataMark("inserting the variable");
     var name = uniqueColumnName("Variable");
     var at = referenceAt + (toRight ? 1 : 0);
+    // Count the rows BEFORE the splice. nRows reads the length of the
+    // FIRST column's array, so inserting to the left of the first
+    // column put the new name at index 0 and then asked for the length
+    // of an array that does not exist yet: it threw, and left a column
+    // in the order with no data behind it. Shipped and unnoticed
+    // because no probe inserted to the left of the first column
+    // (Aug 2026, found by the Insert-menu probe).
+    var rowCount = nRows(t);
     t.order.splice(at, 0, name);
-    t.raw[name] = Array(nRows(t)).fill("");
+    t.raw[name] = Array(rowCount).fill("");
     t.types[name] = "nominal";
     t.edited = true;
     INSPECTOR_VAR = name;
@@ -26709,6 +26717,14 @@
       { label: "Duplicate column", command: "data-duplicate-col" },
       { label: "Delete column", command: "data-delete-col" },
       "separator",
+      // Rows had no menu-bar home at all: insert, duplicate and delete
+      // existed only on the row number's own context menu, which is
+      // not a place anyone finds by looking (Aug 2026, a collaborator).
+      { label: "Insert row above", command: "data-insert-row-above" },
+      { label: "Insert row below", command: "data-insert-row-below" },
+      { label: "Duplicate row", command: "data-duplicate-row" },
+      { label: "Delete row", command: "data-delete-row" },
+      "separator",
       { label: "Sort rows ascending", command: "data-sort-asc" },
       { label: "Sort rows descending", command: "data-sort-desc" },
       "separator",
@@ -26746,6 +26762,22 @@
       { label: "Command palette\u2026", shortcut: "Cmd/Ctrl+Shift+P", command: "command-palette" }
     ],
     insert: [
+      // Excel and SPSS put rows and columns on the Insert menu, which
+      // is the habit our students arrive with, and this menu already
+      // existed without them (Aug 2026, a collaborator: "to insert a
+      // column in a data set, you must go to Data menu, rather than
+      // the Insert menu. This will confuse users"). The SAME command
+      // ids as the Data menu, so there is one implementation and one
+      // enable rule; only insert verbs belong here, while duplicate
+      // and delete stay on Data beside the rest of the column work.
+      // No dataOnly flag: commandEnabled already returns false off the
+      // Data workspace, so these disable with a reason there the same
+      // way the layoutOnly rows below do.
+      { label: "Column to the left", command: "data-insert-left" },
+      { label: "Column to the right", command: "data-insert-right" },
+      { label: "Row above", command: "data-insert-row-above" },
+      { label: "Row below", command: "data-insert-row-below" },
+      "separator",
       { label: "New chart", command: "new-chart" },
       { label: "New layout", command: "new-layout" },
       "separator",
@@ -27142,6 +27174,14 @@
         return true;
       if (command === "data-exclude" || command === "data-chart-sel")
         return appWorkspace() === "data" && !!gridSelectionRect();
+      // Row commands ask for a selection, not for a variable.
+      if (command === "data-insert-row-above" ||
+          command === "data-insert-row-below" ||
+          command === "data-duplicate-row")
+        return appWorkspace() === "data" && !!GRID_SELECTION;
+      if (command === "data-delete-row")
+        return appWorkspace() === "data" && !!GRID_SELECTION &&
+               nRows(PROJECT.table) > 1;
       return !!INSPECTOR_VAR && PROJECT.table.order.indexOf(INSPECTOR_VAR) !== -1;
     }
     if (command === "reset") return !!doc && !isLayoutTab(doc);
@@ -27215,6 +27255,14 @@
              "here for this session";
     if (command === "data-exclude" || command === "data-chart-sel")
       return "Select cells in the Data workspace first";
+    if (command === "data-insert-row-above" ||
+        command === "data-insert-row-below" ||
+        command === "data-duplicate-row")
+      return "Select a cell or a row in the Data workspace first";
+    if (command === "data-delete-row")
+      return PROJECT.table && nRows(PROJECT.table) <= 1
+        ? "A table keeps at least one row"
+        : "Select a cell or a row in the Data workspace first";
     if (PROJECT.table && PROJECT.table.order.length) {
       if (command === "data-restore-excl") return "Nothing is excluded";
       if (command === "data-show-all") return "No columns are hidden";
@@ -27392,6 +27440,26 @@
     if (command === "data-fitall") { gridAutoFitAll(); return; }
     if (command === "data-resetwidths") { gridResetAllWidths(); return; }
     if (command === "data-restore-excl") { gridRestoreExclusions(); return; }
+    // Row commands run off the SELECTION, not off the inspector's
+    // variable, and they have to be routed BEFORE the guard below.
+    // Selecting a row deliberately does not seat INSPECTOR_VAR ("a row
+    // is not a variable"), which is exactly the state a user is in the
+    // instant before they want Insert row - so a row command placed
+    // after the guard would render enabled and do nothing.
+    if (command === "data-insert-row-above" ||
+        command === "data-insert-row-below" ||
+        command === "data-duplicate-row" ||
+        command === "data-delete-row") {
+      var rsel = GRID_SELECTION;
+      if (!rsel) return;
+      var rrow = Number(rsel.focusRow);
+      if (!isFinite(rrow) || rrow < 0) return;
+      if (command === "data-insert-row-above") gridInsertRowAt(rrow);
+      else if (command === "data-insert-row-below") gridInsertRowAt(rrow + 1);
+      else if (command === "data-duplicate-row") gridDuplicateRow(rrow);
+      else if (nRows(PROJECT.table) > 1) gridDeleteRows(rowMenuTargets(rrow));
+      return;
+    }
     if (!col) return;
     if (command === "data-insert-left") gridInsertColumnAt(col, false);
     else if (command === "data-insert-right") gridInsertColumnAt(col, true);
