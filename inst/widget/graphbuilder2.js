@@ -58339,6 +58339,27 @@
                     try { primaryColorBtn.click(); } catch (e) {}
                     window.__gb2_pickerSkipExpand = false;
                 } else {
+                    // Pre-collapse SYNCHRONOUSLY (Aug 2026, Torry's
+                    // first-open flash): the expand below is deferred a
+                    // task so the picker can dock first, and in that gap
+                    // the fully built panel painted one FULL-HEIGHT frame
+                    // before collapsing to 0 and rolling open - visible
+                    // as a jump-into-existence, clear, then roll. Only
+                    // panels WITH a color control took this deferred
+                    // path, which is why the flash felt intermittent
+                    // (the no-picker branch below expands synchronously
+                    // and never flashed). Arming the collapsed state
+                    // here, in the same task that showed the panel,
+                    // means the first painted frame is closed and the
+                    // roll starts clean; _animatePanelExpand re-applies
+                    // these idempotently and still measures scrollHeight
+                    // AFTER the picker dock, so the roll target is the
+                    // full post-dock height as before.
+                    try {
+                        inspectorPanel.style.overflow = "hidden";
+                        inspectorPanel.style.maxHeight = "0";
+                        inspectorPanel.style.minHeight = "0";
+                    } catch (ePre) {}
                     setTimeout(function () {
                         // The selection can change between scheduling and
                         // firing (Cmd+click compare: pointerup opens the
