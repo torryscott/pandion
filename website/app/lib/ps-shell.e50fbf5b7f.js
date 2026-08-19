@@ -25968,11 +25968,13 @@
       { title: "Commands", rows: shortcutMenuRows() },
       { title: "Application navigation",
         rows: [
-          ["Skip to the active workspace", "First Tab stop"],
-          ["Skip to the settings panel", "Second Tab stop"]
+          ["Skip to the active workspace", "Tab, then Enter"],
+          ["Skip to the settings panel", "Tab twice, then Enter"]
         ],
-        note: "These links appear when focused and bypass the application " +
-              "menus, document navigator, and setup chrome." },
+        note: "These are the first two things Tab reaches from the top of " +
+              "the page. Each is a link that stays hidden until it is " +
+              "focused, and taking it jumps past the application menus, " +
+              "document navigator, and setup chrome." },
       { title: "Undo and redo",
         // The app keeps three histories on purpose and arbitrates the key by
         // workspace. One row saying "Undo / redo" hid that, and the first time
@@ -26014,7 +26016,7 @@
         rows: [
           ["Open the Data menu", "F10, then D, then Enter"],
           ["Find a Data command by name", "Cmd/Ctrl + Shift + P"],
-          ["Open the variable properties panel", "Second Tab stop"],
+          ["Open the variable properties panel", "Tab twice, then Enter"],
           ["Add a row at the bottom", "Tab to Add row in the data toolbar"]
         ] },
       { title: "Variables and formulas",
