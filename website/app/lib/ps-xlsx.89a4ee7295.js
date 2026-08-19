@@ -205,5 +205,174 @@ window.PSXlsx = (function () {
     return lines.join("\n");
   }
 
-  return { parse: parse, sheetToTsv: sheetToTsv };
+  // ---- writer -------------------------------------------------------
+  // The app could READ xlsx and not write one, so a table that arrived
+  // as Excel could not go back as Excel. CSV is not a substitute: our
+  // CSV writer deliberately keeps the original strings so that 007
+  // stays 007, and Excel then destroys that on open, turning it into 7
+  // - and does the same to 1-5 and 3/4, which it reads as dates, and to
+  // dot decimals in a comma-decimal locale, which it splits into extra
+  // columns. In an xlsx the type is recorded in the file, so nothing is
+  // guessed on open (Aug 2026, Torry).
+  //
+  // Dependency-free, like the reader. An xlsx is a ZIP of five small
+  // XML parts, and ZIP entries may be STORED uncompressed, so no
+  // compression is needed at all - just CRC32 and the headers. Strings
+  // are written inline rather than through a shared-string table: a
+  // little larger, much simpler, and Excel reads both.
+  var CRC_TABLE = null;
+  function crcTable() {
+    if (CRC_TABLE) return CRC_TABLE;
+    var t = new Uint32Array(256), c, n, k;
+    for (n = 0; n < 256; n++) {
+      c = n;
+      for (k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      t[n] = c >>> 0;
+    }
+    CRC_TABLE = t;
+    return t;
+  }
+  function crc32(bytes) {
+    var t = crcTable(), c = 0xFFFFFFFF;
+    for (var i = 0; i < bytes.length; i++)
+      c = t[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
+  }
+  function utf8(str) { return new TextEncoder().encode(str); }
+  function xmlEsc(v) {
+    return String(v == null ? "" : v)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      // XML 1.0 forbids most control characters outright, and Excel
+      // refuses to open a file that contains one, so they are dropped
+      // rather than escaped.
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
+  }
+  // 0 -> "A", 26 -> "AA". The inverse of colIndex above.
+  function colName(i) {
+    var out = "";
+    i = i + 1;
+    while (i > 0) {
+      var r = (i - 1) % 26;
+      out = String.fromCharCode(65 + r) + out;
+      i = Math.floor((i - 1) / 26);
+    }
+    return out;
+  }
+  // Excel rejects these characters in a sheet name, and a blank name,
+  // and anything past 31 characters.
+  function safeSheetName(name) {
+    var n = String(name == null ? "" : name)
+      .replace(/[\\\/\?\*\[\]:]+/g, " ").replace(/\s+/g, " ").trim();
+    if (!n) n = "Data";
+    return n.substring(0, 31);
+  }
+  function sheetXml(rows) {
+    var out = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+      "<sheetData>"];
+    for (var r = 0; r < rows.length; r++) {
+      var row = rows[r] || [], cells = "";
+      for (var c = 0; c < row.length; c++) {
+        var v = row[c];
+        // A missing value is an ABSENT cell, not an empty string: that
+        // is what makes Excel treat it as blank rather than as text.
+        if (v == null || v === "") continue;
+        var ref = colName(c) + (r + 1);
+        if (typeof v === "number" && isFinite(v))
+          cells += '<c r="' + ref + '"><v>' + v + "</v></c>";
+        else
+          cells += '<c r="' + ref + '" t="inlineStr"><is><t xml:space="preserve">' +
+                   xmlEsc(v) + "</t></is></c>";
+      }
+      if (cells) out.push('<row r="' + (r + 1) + '">' + cells + "</row>");
+    }
+    out.push("</sheetData></worksheet>");
+    return out.join("");
+  }
+  function zipStored(files) {
+    var locals = [], central = [], offset = 0, i;
+    // A fixed DOS timestamp keeps the output byte-stable, which makes
+    // the file diffable and the probes exact. Excel does not care.
+    var dosTime = 0, dosDate = 33;   // 1 Jan 1980, 00:00
+    for (i = 0; i < files.length; i++) {
+      var nameB = utf8(files[i].name), body = files[i].bytes;
+      var crc = crc32(body);
+      var lh = new Uint8Array(30 + nameB.length);
+      var lv = new DataView(lh.buffer);
+      lv.setUint32(0, 0x04034b50, true);
+      lv.setUint16(4, 20, true); lv.setUint16(6, 0, true);
+      lv.setUint16(8, 0, true);                       // stored
+      lv.setUint16(10, dosTime, true); lv.setUint16(12, dosDate, true);
+      lv.setUint32(14, crc, true);
+      lv.setUint32(18, body.length, true); lv.setUint32(22, body.length, true);
+      lv.setUint16(26, nameB.length, true); lv.setUint16(28, 0, true);
+      lh.set(nameB, 30);
+      locals.push(lh, body);
+      var ch = new Uint8Array(46 + nameB.length);
+      var cv = new DataView(ch.buffer);
+      cv.setUint32(0, 0x02014b50, true);
+      cv.setUint16(4, 20, true); cv.setUint16(6, 20, true);
+      cv.setUint16(8, 0, true); cv.setUint16(10, 0, true);
+      cv.setUint16(12, dosTime, true); cv.setUint16(14, dosDate, true);
+      cv.setUint32(16, crc, true);
+      cv.setUint32(20, body.length, true); cv.setUint32(24, body.length, true);
+      cv.setUint16(28, nameB.length, true);
+      cv.setUint16(30, 0, true); cv.setUint16(32, 0, true);
+      cv.setUint16(34, 0, true); cv.setUint16(36, 0, true);
+      cv.setUint32(38, 0, true); cv.setUint32(42, offset, true);
+      ch.set(nameB, 46);
+      central.push(ch);
+      offset += lh.length + body.length;
+    }
+    var cdSize = 0;
+    for (i = 0; i < central.length; i++) cdSize += central[i].length;
+    var end = new Uint8Array(22), ev = new DataView(end.buffer);
+    ev.setUint32(0, 0x06054b50, true);
+    ev.setUint16(4, 0, true); ev.setUint16(6, 0, true);
+    ev.setUint16(8, files.length, true); ev.setUint16(10, files.length, true);
+    ev.setUint32(12, cdSize, true); ev.setUint32(16, offset, true);
+    ev.setUint16(20, 0, true);
+    var parts = locals.concat(central, [end]), total = 0;
+    for (i = 0; i < parts.length; i++) total += parts[i].length;
+    var buf = new Uint8Array(total), at = 0;
+    for (i = 0; i < parts.length; i++) { buf.set(parts[i], at); at += parts[i].length; }
+    return buf;
+  }
+  // rows: an array of arrays. A cell is a number (written as a number),
+  // a string (written as text), or null / "" (written as no cell at all).
+  function write(sheetName, rows) {
+    var sheet = safeSheetName(sheetName);
+    var NS = "http://schemas.openxmlformats.org/";
+    var files = [
+      { name: "[Content_Types].xml", bytes: utf8(
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<Types xmlns="' + NS + 'package/2006/content-types">' +
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+        '<Default Extension="xml" ContentType="application/xml"/>' +
+        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+        '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
+        "</Types>") },
+      { name: "_rels/.rels", bytes: utf8(
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<Relationships xmlns="' + NS + 'package/2006/relationships">' +
+        '<Relationship Id="rId1" Type="' + NS + 'officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' +
+        "</Relationships>") },
+      { name: "xl/workbook.xml", bytes: utf8(
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<workbook xmlns="' + NS + 'spreadsheetml/2006/main" xmlns:r="' + NS + 'officeDocument/2006/relationships">' +
+        '<sheets><sheet name="' + xmlEsc(sheet) + '" sheetId="1" r:id="rId1"/></sheets>' +
+        "</workbook>") },
+      { name: "xl/_rels/workbook.xml.rels", bytes: utf8(
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<Relationships xmlns="' + NS + 'package/2006/relationships">' +
+        '<Relationship Id="rId1" Type="' + NS + 'officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' +
+        "</Relationships>") },
+      { name: "xl/worksheets/sheet1.xml", bytes: utf8(sheetXml(rows)) }
+    ];
+    return zipStored(files);
+  }
+
+  return { parse: parse, sheetToTsv: sheetToTsv, write: write,
+           colName: colName, safeSheetName: safeSheetName };
 })();

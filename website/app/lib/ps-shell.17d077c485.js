@@ -3779,6 +3779,8 @@
     if (ext === "jpg") return "image/jpeg";
     if (ext === "pdf") return "application/pdf";
     if (ext === "csv") return "text/csv";
+    if (ext === "xlsx")
+      return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
     if (ext === "zip") return "application/zip";
     return "application/octet-stream";
   }
@@ -3788,6 +3790,7 @@
     if (ext === "jpg") return "JPEG image";
     if (ext === "pdf") return "PDF document";
     if (ext === "csv") return "CSV spreadsheet";
+    if (ext === "xlsx") return "Excel workbook";
     if (ext === "zip") return "ZIP archive";
     return "Export";
   }
@@ -5951,6 +5954,70 @@
       lines.push(row.join(","));
     }
     return lines.join("\r\n") + "\r\n";
+  }
+  // Same columns and rows as the CSV writer, differing only in TYPE.
+  // A cell becomes a number when the column stores numbers AND the text
+  // round-trips exactly, so 61 is a number while 007 stays text: its
+  // written form is part of the value, and a number would destroy it -
+  // which is precisely what Excel does to our CSV today. Anything else,
+  // including a missing-value code like NA, is written verbatim, so the
+  // export stays lossless; only a genuinely empty cell is left blank.
+  function tableToXlsxRows(t) {
+    var cols = t.order, rows = [cols.slice()], j;
+    var n = cols.length ? t.raw[cols[0]].length : 0;
+    var numeric = {};
+    for (j = 0; j < cols.length; j++)
+      numeric[cols[j]] = colStoresNumbers(t, cols[j]);
+    for (var i = 0; i < n; i++) {
+      var row = [];
+      for (j = 0; j < cols.length; j++) {
+        var col = cols[j], raw = t.raw[col][i];
+        var str = raw == null ? "" : String(raw);
+        var trimmed = str.trim();
+        if (!trimmed) { row.push(null); continue; }
+        if (numeric[col]) {
+          var num = Number(trimmed);
+          if (isFinite(num) && String(num) === trimmed) { row.push(num); continue; }
+        }
+        row.push(str);
+      }
+      rows.push(row);
+    }
+    return rows;
+  }
+  function exportDataXlsx() {
+    var t = PROJECT.table;
+    if (!t || !t.order.length) { showToast("There is no data to export", true); return; }
+    if (!window.PSXlsx || typeof window.PSXlsx.write !== "function") {
+      showToast("The Excel writer did not load - export as CSV instead", true);
+      return;
+    }
+    var base = String(t.name || "data").replace(/\.[^.]+$/, "").replace(/[\\/:*?"<>|]+/g, "-") || "data";
+    var bytes;
+    try {
+      bytes = window.PSXlsx.write(base, tableToXlsxRows(t));
+    } catch (e) {
+      showToast("Could not build the workbook: " + String(e && e.message || e), true);
+      return;
+    }
+    var blob = new Blob([bytes], { type: exportMime("xlsx") });
+    saveExportBlob(blob, base + ".xlsx", "xlsx").then(function () {
+      // Same disclosure as the CSV export: say what the file contains,
+      // so nothing is silently included or left out.
+      var notes = [];
+      if (validFilters(t).length)
+        notes.push("row filters are not applied - every row is included");
+      var exCols = t.excluded ? Object.keys(t.excluded).length : 0;
+      if (exCols || rowExclCount(t))
+        notes.push("excluded values are included as they appear in the grid");
+      showToast("Exported " + base + ".xlsx" + (notes.length ? " (" + notes.join("; ") + ")" : ""));
+    }, function (e) {
+      if (e && e.name === "AbortError") {
+        showToast("Export cancelled \u00b7 nothing was written");
+        return;
+      }
+      showToast("Could not export the data: " + String(e && e.message || e), true);
+    });
   }
   function exportDataCsv() {
     var t = PROJECT.table;
@@ -26530,7 +26597,8 @@
       { label: "Save project as\u2026", shortcut: "Cmd/Ctrl+Shift+S", command: "save-as" },
       "separator",
       { label: "Export\u2026", shortcut: "Cmd/Ctrl+Shift+E", command: "export" },
-      { label: "Export data as CSV\u2026", command: "export-data" }
+      { label: "Export data as CSV\u2026", command: "export-data" },
+      { label: "Export data as Excel\u2026", command: "export-data-xlsx" }
     ],
     edit: [
       { label: "Undo data change", shortcut: "Cmd/Ctrl+Z", command: "undo" },
@@ -27134,6 +27202,7 @@
     }
     else if (command === "export") exportCurrentWorkspace();
     else if (command === "export-data") exportDataCsv();
+    else if (command === "export-data-xlsx") exportDataXlsx();
     else if (command === "copy-image") copyActiveAsImage();
     else if (command === "undo" || command === "redo") {
       var back = command === "undo", scope = undoScope();
