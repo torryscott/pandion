@@ -1,0 +1,9 @@
+# Legacy and guessable guide addresses all land on the guide. The
+# colleague report (Aug 2026) reached the 404 page from a stale guide
+# link; the guide's repo filename is docs/user-guide.html, so that
+# shape is what people bookmark, guess, and share.
+/docs/user-guide.html /docs/ 301
+/docs/user-guide /docs/ 301
+/user-guide /docs/ 301
+/guide /docs/ 301
+/help /docs/ 301

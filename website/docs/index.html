@@ -310,7 +310,7 @@ html{scroll-padding-top:76px}
 <tr><th>Analysis</th><th>What it is for</th></tr>
 <tr><td><b>Distribution</b></td><td>The shape and spread of one numeric variable: histograms, density curves, box / violin / raincloud, Q-Q plots, ECDF.</td></tr>
 <tr><td><b>Frequencies</b></td><td>Counts or percentages of a categorical variable: bar (side-by-side, stacked, 100%), pie, donut, Pareto, with chi-square tests.</td></tr>
-<tr><td><b>Compare Groups</b></td><td>A numeric outcome across the levels of a categorical variable (different people in each group): bar, line, dot, box, violin, raincloud.</td></tr>
+<tr><td><b>Compare Groups</b></td><td>A numeric outcome across the levels of a categorical variable (different people in each group): bar, line, dot, box, violin, raincloud. Reach for bar or dot when the categories have no natural order; a line implies a trend, so save it for ordered steps (doses, grades, sizes) - the <b>Check graph</b> tab flags a line drawn over unordered categories, and when the category names are themselves numbers, line and dot charts space them by value rather than evenly.</td></tr>
 <tr><td><b>Repeated Measures</b></td><td>The same people measured on two or more occasions (wide data, one column per occasion), with within-subject error bars.</td></tr>
 <tr><td><b>Scatter</b></td><td>The relationship between two numeric variables, with fit lines, confidence bands, data ellipses, marginals, and a heatmap mode for big samples.</td></tr>
 <tr><td><b>Correlation Matrix</b></td><td>All the pairwise correlations among two or more numeric variables, as a heatmap, circles, numbers, or a mixed matrix.</td></tr>
@@ -426,7 +426,11 @@ clicking any entry asks for the column or columns it needs, then writes
 the finished formula into the box for you - at the cursor, so clicks and
 typing mix freely.</p>
 <p>Recipes worth stealing - every formula below is verified against the app
-by an automated check, so they run as written:</p>
+by an automated check, so they run as written. The column names come from
+the example datasets on the welcome screen: <code>supported</code>,
+<code>paced</code>, <code>clear</code>, and <code>useful</code> are items
+in the Course feedback survey, and <code>score</code> comes from the Dose
+response study. Swap in your own column names.</p>
 <div class="tablewrap"><table>
 <tr><th>Goal</th><th>Formula</th><th>Notes</th></tr>
 <tr><td>Reverse-score a 1-5 item</td>
@@ -437,16 +441,18 @@ item gives <code>8 - item</code> and a 0-4 item gives
 <code>4 - item</code>.</td></tr>
 <tr><td>Scale mean across items</td>
 <td><code data-guide-formula>MEAN(paced, clear, useful, supported)</code></td>
-<td>Reverse-score first, then average the corrected columns. A person
-who skipped an item gets no score; add <code>ignore_missing = 1</code>
+<td><code>MEAN</code> only averages - it never reverse-scores anything.
+Reverse-score any reversed items yourself first (the Reverse-score
+recipe does one item at a time), then average the corrected columns. A
+person who skipped an item gets no score; add <code>ignore_missing = 1</code>
 inside the brackets to score them from the items they answered (and say
 so in your write-up).</td></tr>
 <tr><td>z-scores</td>
 <td><code data-guide-formula>(score - VMEAN(score)) / VSD(score)</code></td>
-<td>The same thing the <b>z-score</b> chip writes.</td></tr>
+<td>The same thing the <b>z-score</b> recipe writes.</td></tr>
 <tr><td>Center a variable</td>
 <td><code data-guide-formula>score - VMEAN(score)</code></td>
-<td>Handy before interactions; the <b>center</b> chip.</td></tr>
+<td>Handy before interactions; the <b>Center</b> recipe.</td></tr>
 <tr><td>Tame a skewed variable</td>
 <td><code data-guide-formula>LOG10(rt)</code></td>
 <td><code>LN</code> and <code>SQRT</code> work the same way.</td></tr>
@@ -831,7 +837,7 @@ control, is identical in both.</div>
 <li><b>Quick palette switch:</b> toolbar <b>Theme ▾</b> → <b>Colors</b>. Picking a palette recolors the whole chart instantly and clears per-series overrides; one Undo reverts.</li>
 <li><b>The full gallery</b> lives in Chart settings → <b>Palette</b>: 50+ palettes in Built-in / Colorblind-safe / Qualitative / Sequential / Diverging categories. Ramp palettes (Blues, Viridis…) automatically spread across however many groups your chart has: three groups on "Blues" get dark / mid / light, not three near-identical blues. A <b>CB</b> badge marks palettes whose colors stay separable under color-blindness <i>at your current group count</i>.</li>
 <li><b>Build your own:</b> the gallery's <b>Build your own</b> editor lets you click swatches to edit them, drag to reorder, add up to 12 colors, and <b>lock</b> the ones you want kept; <b>Suggest colors</b> proposes a fresh set around your locks (with style strategies like "Similar shades" and "Spread out", or <b>Surprise</b>). <b>Tweak these colors →</b> turns any existing palette into your own editable copy. <b>Save…</b> stores it in your library; <b>Use as default for new charts</b> makes every new analysis start with it.</li>
-<li><b>Per-series colors:</b> click the element (bar, point series, slice, segment) and pick a color. The picker docks on the panel's right side with two tabs: <b>HSV</b> (saturation / value square, hue and lightness strips, a hex field, and an eyedropper "Pick color from screen" where the browser supports it) and <b>Swatches</b> (your recent colors, the stock quick row, and a full hue grid). A checkerboard "transparent" chip appears where "no fill" makes sense.</li>
+<li><b>Per-series colors:</b> click the element (bar, point series, slice, segment) and pick a color. The picker docks on the panel's right side with two tabs: <b>HSV</b> (saturation / value square, hue and lightness strips, a hex field, and an eyedropper "Pick color from screen" where the browser supports it) and <b>Swatches</b> (your recent colors, the stock quick row, and a full hue grid). A checkerboard "transparent" swatch appears where "no fill" makes sense.</li>
 <li><b>"Follow … colors"</b> toggles appear on overlays (error bars, fit lines, connectors, rug marks, normal curves…). The label names the source, such as Follow graph colors, Follow point colors, or Follow line color. When the toggle is on, the overlay inherits that color automatically. Picking a custom color turns following off; switching it back on restores the live link.</li>
 </ul>
 <figure class="shot">
@@ -940,7 +946,7 @@ control, is identical in both.</div>
 </table></div>
 <figure class="shot">
   <img src="img/shots/guide-stats.png" alt="The Statistics panel showing Compare pairs" loading="lazy">
-  <figcaption>Compare pairs on a grouped bar chart: sections, green significance chips, a tally pill, and the Place brackets button.</figcaption>
+  <figcaption>Compare pairs on a grouped bar chart: sections, green highlights on the significant pairs, a tally pill, and the Place brackets button.</figcaption>
 </figure>
 <p><b>Panel-wide behaviors:</b></p>
 <ul>
@@ -950,7 +956,7 @@ control, is identical in both.</div>
 <li><b><kbd>Cmd/Ctrl</kbd>+click any bar</b>, from anywhere, to jump straight into the panel with that cell's numbers pinned.</li>
 <li><b>Tap-a-term definitions.</b> Column headers and many value cells are tappable: a popover gives a plain-language definition plus an <b>"In this table"</b> reading computed from that row's own numbers ("Here t(11.7) = 2.77 for A vs B: the two group means sit about 2.77 standard errors apart…"). <kbd>Esc</kbd> closes it.</li>
 <li><b>Copy everywhere:</b> per-row APA sentences, Copy APA on omnibus cards, and Copy table buttons that paste straight into Excel or Word.</li>
-<li><b>Alpha</b> is a reading lens (.10 / .05 / .01 / .001): it recolors the green significance chips and tallies without changing anything saved.</li>
+<li><b>Alpha</b> is a reading lens (.10 / .05 / .01 / .001): it recolors the green significance highlights and tallies without changing anything saved.</li>
 </ul>
 
 <h3 id="compare-pairs">Compare pairs → Place brackets</h3>
@@ -991,15 +997,15 @@ control, is identical in both.</div>
 </figure>
 
 <h3 id="label-parts">Label parts: name every part of the chart</h3>
-<p>The <b>Label parts</b> tab overlays named callout chips on every part of the live chart (bars, error bars, axes, ticks, category labels, the legend, brackets, curves), each with a leader line pointing at it.</p>
+<p>The <b>Label parts</b> tab overlays named callout labels on every part of the live chart (bars, error bars, axes, ticks, category labels, the legend, brackets, curves), each with a leader line pointing at it.</p>
 <figure class="shot">
   <img src="img/shots/guide-label-parts.png" alt="Anatomy mode labeling the parts of a bar chart" loading="lazy">
-  <figcaption>Label parts: every detected part gets a chip; click one to read what it is, drag chips out of the way, click through to the part's editor.</figcaption>
+  <figcaption>Label parts: every detected part gets a callout label; click one to read what it is, drag labels out of the way, click through to the part's editor.</figcaption>
 </figure>
 <ul>
-<li><b>Hover</b> a chip for an explanation that reflects your actual settings (the Error bar chip says whether yours show SE, SD, or a CI).</li>
-<li><b>Click</b> a part or its chip to read its description in the panel below; <b>"Open this part's editor"</b> jumps straight to styling it.</li>
-<li><b>Drag</b> chips anywhere; click a <i>different</i> bar or tick to move a chip to that one.</li>
+<li><b>Hover</b> a callout for an explanation that reflects your actual settings (the Error bar callout says whether yours show SE, SD, or a CI).</li>
+<li><b>Click</b> a part or its callout to read its description in the panel below; <b>"Open this part's editor"</b> jumps straight to styling it.</li>
+<li><b>Drag</b> callouts anywhere; click a <i>different</i> bar or tick to move a callout to that one.</li>
 <li>The labels stay up while you work. <kbd>Esc</kbd> or <b>Clear Labels</b> dismisses them.</li>
 </ul>
 
