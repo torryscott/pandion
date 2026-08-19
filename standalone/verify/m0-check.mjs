@@ -179,24 +179,32 @@ const CHART_SVG_JS = `(() => {
 
     const panel = await page.evaluate(`(() => {
         const host = document.getElementById('psroot');
+        return { panelOpen: host.textContent.indexOf('Bars - Control') !== -1 };
+    })()`);
+    ok(panel.panelOpen, 'bar click opened the Bars - Control panel');
+
+    // Click the swatch as a LIVE ELEMENT, not at measured coordinates:
+    // the panel-fit machinery (t4-203b) settles the panel on scroll, so
+    // a coordinate measured before a scrollIntoView is stale by click
+    // time - at this 720-high default viewport the panel opens as a
+    // lifted sheet and the old measure-then-click pattern missed it.
+    // Playwright's element click auto-scrolls and waits for a stable
+    // box, the way a person tracks the control with their eye. (Still a
+    // real mouse event underneath - the phantom-click guards stay
+    // exercised.)
+    const swatchHandle = await page.evaluateHandle(`(() => {
+        const host = document.getElementById('psroot');
         const swatches = Array.from(host.querySelectorAll('button'))
             .filter(b => /rgb\\(/.test(b.style.backgroundColor || '') &&
                          b.offsetParent !== null &&
                          b.getBoundingClientRect().width < 40 &&
                          b.getBoundingClientRect().width > 8);
-        const target = swatches.find(b => b.style.backgroundColor === 'rgb(225, 142, 76)');
-        if (!target) return { panelOpen: host.textContent.indexOf('Bars - Control') !== -1, swatch: null };
-        // The panel can sit below the fold - a mouse click at off-viewport
-        // coordinates hits nothing (the M1 layout lesson).
-        target.scrollIntoView({ block: 'center' });
-        const r = target.getBoundingClientRect();
-        return { panelOpen: host.textContent.indexOf('Bars - Control') !== -1,
-                 swatch: { x: r.left + r.width / 2, y: r.top + r.height / 2 } };
+        return swatches.find(b => b.style.backgroundColor === 'rgb(225, 142, 76)') || null;
     })()`);
-    ok(panel.panelOpen, 'bar click opened the Bars - Control panel');
-    ok(!!panel.swatch, 'orange palette swatch located');
+    const swatchEl = swatchHandle.asElement();
+    ok(!!swatchEl, 'orange palette swatch located');
 
-    await page.mouse.click(panel.swatch.x, panel.swatch.y);
+    await swatchEl.click();
     await page.waitForTimeout(150);
     // Force the engine's debounced commit flush. The flush defers while
     // __gb2_inspectorInputAt is fresh (<700 ms), so zero the stamp first
