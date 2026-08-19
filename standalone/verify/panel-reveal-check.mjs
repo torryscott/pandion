@@ -3,10 +3,12 @@
 // the fold. Two cures, both pinned here:
 //   1. the chart's View zoom moved from the collapsed Size & view card to
 //      a header Zoom row, the same placement Notebook and Layouts use;
-//   2. after a REAL chart click, the workspace scrolls the MINIMUM that
-//      shows the settled panel, capped so the clicked part (floored at
-//      the plot area) never leaves the screen - short panels reveal
-//      fully, tall ones partially; synthetic input never scrolls.
+//   2. after a REAL chart click, the settled panel is FITTED into view
+//      WITHOUT moving the page (t4-203b replaced the scroll, which broke
+//      double-click-to-edit via the shorter-panel scroll clamp):
+//      max-height + internal scrolling normally, a lifted sheet on tiny
+//      windows, capped so the clicked part never leaves the screen.
+//      Synthetic input never arms it; the workspace never auto-scrolls.
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
@@ -82,14 +84,19 @@ await page.waitForTimeout(400);
 await page.selectOption('#ps-chart-zoom', '1');
 await page.waitForTimeout(400);
 
-console.log('case 2: a chart click reveals the panel that opened below ' +
-            'the fold');
+console.log('case 2: a chart click FITS the panel into view without ' +
+            'moving the page');
 const scrollerSel = '#ps-main-workspace';
 const barSpot = await page.evaluate(() => {
     const host = document.querySelector('.graphbuilder2-host');
     const bar = host.querySelector('svg [data-bar-cat]');
     const r = bar.getBoundingClientRect();
     return { x: r.left + r.width / 2, y: r.top + Math.min(60, r.height / 2) };
+});
+const chartBefore2 = await page.evaluate(() => {
+    const svg = document.querySelector('.graphbuilder2-host svg');
+    const r = svg.getBoundingClientRect();
+    return { y: Math.round(r.y), h: Math.round(r.height) };
 });
 const before2 = await page.evaluate(s =>
     document.querySelector(s).scrollTop, scrollerSel);
@@ -99,22 +106,26 @@ const after2 = await page.evaluate((s) => {
     const scroller = document.querySelector(s);
     const panel = document.querySelector('.graphbuilder2-host .gb2-panel');
     const pr = panel ? panel.getBoundingClientRect() : null;
+    const svg = document.querySelector('.graphbuilder2-host svg');
+    const cr = svg.getBoundingClientRect();
     return { scrollTop: scroller.scrollTop,
+             panelTop: pr ? pr.top : null,
              panelBottom: pr ? pr.bottom : null,
              panelH: pr ? pr.height : 0,
+             chart: { y: Math.round(cr.y), h: Math.round(cr.height) },
              viewH: window.innerHeight };
 }, scrollerSel);
 ok(after2.panelH > 40, `setup: the click opened a panel (${Math.round(after2.panelH)}px)`);
-ok(after2.scrollTop > before2 + 20 &&
+ok(Math.abs(after2.scrollTop - before2) <= 1,
+   `the page did not scroll - the panel is fitted instead ` +
+   `(${Math.round(before2)} -> ${Math.round(after2.scrollTop)})`);
+ok(after2.panelTop < after2.viewH - 60 &&
    after2.panelBottom <= after2.viewH + 4,
-   `the workspace scrolled the panel into view ` +
-   `(${Math.round(before2)} -> ${Math.round(after2.scrollTop)}, panel ` +
+   `the fitted panel is on screen (top ${Math.round(after2.panelTop)}, ` +
    `bottom ${Math.round(after2.panelBottom)} vs window ${after2.viewH})`);
-ok(await page.evaluate((spot) => {
-    const el = document.elementFromPoint(spot.x, 60);
-    return true; // geometry probe below is the real check
-}, barSpot) && (barSpot.y - (after2.scrollTop - before2)) > 40,
-   'the clicked bar is still on screen (anchor bound held)');
+ok(after2.chart.y === chartBefore2.y && after2.chart.h === chartBefore2.h,
+   `the chart never moved a pixel - the guarantee the old scroll could ` +
+   `not make (y ${chartBefore2.y} -> ${after2.chart.y})`);
 
 console.log('case 3: with the panel visible, another click moves nothing');
 const bar2 = await page.evaluate(() => {
