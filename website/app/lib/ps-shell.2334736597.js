@@ -1978,30 +1978,68 @@
     } else if (spec === "diffp" || spec === "pctchange") {
       if (numCols.length < 2) { needs("two numeric columns"); }
       else {
-        var da = null, db = null, ibD;
-        host.appendChild(mkEl("p", "ps-fpk-lead", spec === "diffp"
-          ? "Which two columns? Change scores read best as after minus before."
-          : "How far the first column moved, as a percent of the second."));
+        // Percent change reads FROM the baseline TO the new value, so
+        // the baseline is picked first, under the word that demands it.
+        // It used to read "first column compared with second column",
+        // emitting (first - second) / second * 100 - so the SECOND pick
+        // was the baseline while "compared with" gave no hint of that.
+        // Picking in reading order (before, after) got the direction
+        // AND the magnitude wrong, because the denominator swapped too:
+        // a rise from 10 to 15 showed as -33.3% rather than +50%, and
+        // nothing in the numbers looked wrong (Aug 2026, found in a
+        // sweep after the reverse-scoring report). Difference keeps its
+        // own order, where "minus" is an operator nobody misreads.
+        var isPct = spec === "pctchange";
+        var da = null, db = null, ibD, hintD;
+        host.appendChild(mkEl("p", "ps-fpk-lead", isPct
+          ? "Percent change reads from the earlier value to the later one."
+          : "Which two columns? Change scores read best as after minus before."));
         var rd = mkEl("div", "ps-fpk-row");
-        rd.appendChild(colSelect(numCols, "First column", function (v) {
-          da = v; ibD.disabled = !(da && db);
-        }));
-        rd.appendChild(mkEl("span", "",
-          spec === "diffp" ? "minus" : "compared with"));
-        rd.appendChild(colSelect(numCols, "Second column", function (v) {
-          db = v; ibD.disabled = !(da && db);
-        }));
+        rd.appendChild(mkEl("span", "", isPct ? "Percent change from" : ""));
+        // For percent change the FIRST select is the baseline; for a
+        // difference it stays the minuend. syncD names them in the
+        // preview either way, so the roles are never inferred.
+        rd.appendChild(colSelect(numCols, isPct ? "Earlier value" : "First column",
+          function (v) { da = v; syncD(); }));
+        rd.appendChild(mkEl("span", "", isPct ? "to" : "minus"));
+        rd.appendChild(colSelect(numCols, isPct ? "Later value" : "Second column",
+          function (v) { db = v; syncD(); }));
         host.appendChild(rd);
+        hintD = mkEl("div", "ps-fpk-hint", isPct
+          ? "Pick the earlier value, then the later one."
+          : "Pick the two columns.");
+        host.appendChild(hintD);
         ibD = mkEl("button", "ps-fn-insert", "Insert");
         ibD.type = "button";
         ibD.disabled = true;
+        function formulaD() {
+          if (!da || !db) return null;
+          return isPct
+            ? "(" + bt(db) + " - " + bt(da) + ") / " + bt(da) + " * 100"
+            : bt(da) + " - " + bt(db);
+        }
+        // The preview states the exact expression and works one example
+        // through it, which is what makes the direction checkable
+        // before the click rather than after.
+        function syncD() {
+          var f = formulaD();
+          ibD.disabled = !f;
+          if (!f) {
+            hintD.textContent = isPct
+              ? "Pick the earlier value, then the later one."
+              : "Pick the two columns.";
+            return;
+          }
+          hintD.textContent = isPct
+            ? "Inserts " + f + ", so " + da + " 10 rising to " + db +
+              " 15 shows as +50."
+            : "Inserts " + f + ", so a row with " + da + " 15 and " +
+              db + " 10 shows as 5.";
+        }
         ibD.addEventListener("click", function () {
-          if (!da || !db) return;
-          if (spec === "diffp")
-            done(bt(da) + " - " + bt(db), da + "_change");
-          else
-            done("(" + bt(da) + " - " + bt(db) + ") / " + bt(db) + " * 100",
-              da + "_pctchange");
+          var f = formulaD();
+          if (!f) return;
+          done(f, (isPct ? db : da) + (isPct ? "_pctchange" : "_change"));
         });
         host.appendChild(ibD);
       }

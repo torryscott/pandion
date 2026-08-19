@@ -233,7 +233,10 @@ ok(st.formula === 'post - pre' && st.name === 'post_change' &&
 await clearBox();
 await clickRow('Percent change');
 await page.waitForTimeout(250);
-await twoSelects('post', 'pre');
+// The picks are EARLIER then LATER now (t4-217): the row reads
+// "Percent change from ... to ...", so the baseline is chosen first,
+// under the word that demands it. The emitted formula is unchanged.
+await twoSelects('pre', 'post');
 await page.click('.ps-fn-args .ps-fn-insert');
 await page.waitForTimeout(250);
 st = await read();
