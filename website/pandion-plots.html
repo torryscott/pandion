@@ -5503,34 +5503,31 @@
     <div class="ps-dialog-head">
       <div>
         <h2 id="ps-missing-dialog-title">Missing values</h2>
-        <p>What counts as missing, and the dataset list every variable
-          starts with.</p>
+        <p>Which values the app should treat as no answer.</p>
       </div>
       <button type="button" class="ps-btn ps-dialog-close"
               id="ps-missing-dialog-close">Close</button>
     </div>
     <div class="ps-dialog-body">
       <p id="ps-missing-dialog-lead">A cell counts as missing when it is
-        blank, or when its text matches one of the codes shown as chips in
-        the panel. Missing cells are left out of charts and statistics.</p>
-      <p>Blank cells always count as missing. That is why the blank chip
-        has no remove button.</p>
-      <p><b>The two lists.</b> Every variable starts with the dataset list
-        below. Editing a variable's chips gives that variable its own
-        list, which REPLACES the dataset list for it alone: that is how a
-        code can mean missing in most variables but stay a real value in
-        one of them. The line under the chips says which is in force,
-        "Same as the rest of the dataset" or "Different from the dataset
-        now". When a variable differs, that line offers both ways to end
-        the difference: take the dataset's values here, or make this
-        variable's values the dataset's.</p>
-      <p><b>What a code does.</b> Surveys often store an unanswered
-        question as -99, or "not applicable" as 9. Declaring the code does
-        not change any cell: the value stays in the table, and the app
-        stops counting it as data.</p>
+        blank, or when it holds one of the codes listed for that variable.
+        Nothing is deleted: the value stays in the table, and charts and
+        statistics skip it.</p>
+      <p>Blank cells always count as missing, in every variable. That is
+        why the blank marker has no remove button.</p>
+      <p><b>Why you would list a code.</b> Surveys often store an
+        unanswered question as -99, or "not applicable" as 9. Those are
+        not measurements, and averaging them in would be wrong. Listing
+        the code tells the app to skip it.</p>
+      <p><b>One set of codes, with exceptions.</b> The codes in the box
+        below are used by every variable. One variable can differ: 0 might
+        be a real count in Errors even though it means missing elsewhere.
+        Edit the codes shown for that variable in the panel and it keeps
+        its own set from then on. The line under them says which set is in
+        force, and offers the way back.</p>
       <div class="ps-missing-ds">
         <label class="ps-inspector-field">
-          Dataset list
+          Codes used by every variable
           <input id="ps-variable-missing" type="text"
                  placeholder="NA, N/A, .">
         </label>
@@ -33368,8 +33365,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       if (stateEl) {
         stateEl.textContent = "";
         stateEl.appendChild(document.createTextNode(own
-          ? "Different from the dataset now."
-          : "Same as the rest of the dataset."));
+          ? "This variable has its own codes."
+          : "Using the codes every variable uses."));
         // Two verbs, and only while there is a difference for either to
         // end. Mirrored wording so the DIRECTION is unmistakable: make
         // these the dataset's values, or use the dataset's values.
@@ -33379,23 +33376,23 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
             return c !== INSPECTOR_VAR && hasColumnTokens(t, c);
           }).length;
           var up = mkEl("button", "ps-linklike",
-            "Make these the dataset's values");
+            "Use these for every variable");
           up.type = "button";
           up.id = "ps-missing-todataset";
           setTip(up, "Every variable that has not been given its own " +
-            "list will use these." + (k ? " The " + k + (k === 1
-              ? " variable with its own list keeps it."
-              : " variables with their own lists keep them.") : ""));
+            "codes will use these." + (k ? " The " + k + (k === 1
+              ? " variable with its own codes keeps them."
+              : " variables with their own codes keep them.") : ""));
           up.addEventListener("click", function () {
             missingPromoteToDataset(INSPECTOR_VAR);
           });
           acts.appendChild(up);
           var back = mkEl("button", "ps-linklike",
-            "Use the dataset's values");
+            "Go back to the shared codes");
           back.type = "button";
           back.id = "ps-missing-usedataset";
-          setTip(back, "Drops this variable's own list and follows the " +
-            "dataset again.");
+          setTip(back, "Drops this variable's own codes and follows the " +
+            "shared ones again.");
           back.addEventListener("click", function () {
             setColumnMissingTokens(INSPECTOR_VAR, "");
           });
@@ -33455,8 +33452,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
         ? "No cell in " + col + " matches " + code +
           ". Check the spelling, or remove it."
         : ownList
-        ? code + " is in this variable's own list."
-        : code + " comes from the dataset list. Removing it here " +
+        ? code + " is listed for this variable only."
+        : code + " is one of the shared codes. Removing it here " +
           "changes only this variable.");
       var x = mkEl("button", "ps-missing-chip-x", "\u2715");
       x.type = "button";
@@ -33571,10 +33568,14 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   // go silent, and it always leads with "Blank cells" because that is the
   // one rule no list can change.
   function missingRuleLine(list, own) {
-    var scope = own ? "this variable's list" : "dataset list";
+    // Say the SCOPE in words a reader already has. "(dataset list)" and
+    // "(this variable's list)" named an internal model that nothing on
+    // screen explained (Aug 2026, a collaborator: "What is a chip? What
+    // two lists?").
+    var scope = own ? "just this variable" : "every variable";
     if (!list.length)
-      return "Blank cells only (" + (own ? "this variable's list is empty"
-        : "the dataset list is empty") + ").";
+      return "Blank cells only (no codes listed for " + (own
+        ? "this variable" : "any variable") + ").";
     var shown = [], used = 0;
     for (var i = 0; i < list.length; i++) {
       var ent = String(list[i]);

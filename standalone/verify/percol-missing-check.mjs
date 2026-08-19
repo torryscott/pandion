@@ -175,7 +175,7 @@ ok(resting.expanded === 'false' && resting.wrapHidden,
 ok(/^Blank cells, or /.test(resting.rule),
    `and the one visible line states the RULE in force, leading with the ` +
    `one part no list can change ("${resting.rule}")`);
-ok(/\(dataset list\)\.$/.test(resting.rule),
+ok(/\(every variable\)\.$/.test(resting.rule),
    'naming which of the two lists it is, so the scope is asserted ' +
    'continuously even though the control is not standing there');
 ok(resting.height < 90,
@@ -228,15 +228,15 @@ ok(rating6.chips.length === 2 &&
    rating6.chips[1].removable,
    `the column's own code is a chip with ITS cost on it ` +
    `(${rating6.chips[1].text})`);
-ok(/\(this variable's list\)\.$/.test(rating6.rule) &&
-   /^Different from the dataset/.test(rating6.state),
+ok(/\(just this variable\)\.$/.test(rating6.rule) &&
+   /^This variable has its own codes/.test(rating6.state),
    'the rule and the state line both say this variable differs');
 const errors6 = await chipsFor('errors');
 ok(errors6.chips.length === errors6.dsLen + 1 &&
    errors6.chips[1].text.indexOf('NA(') === 0,
    `an inheriting column shows every dataset code as a chip, one per ` +
    `code plus blank (${errors6.chips.map(c => c.text)})`);
-ok(/^Same as the rest of the dataset\.$/.test(errors6.state),
+ok(/^Using the codes every variable uses\.$/.test(errors6.state),
    'and its state line says so');
 
 console.log('case 6b: editing the chips IS choosing the list');
@@ -269,12 +269,12 @@ const forked = await page.evaluate(async () => {
     return { afterAdd, afterRemove };
 });
 ok(String(forked.afterAdd.stored) === String(forked.afterAdd.expected) &&
-   /^Different from the dataset/.test(forked.afterAdd.state) &&
+   /^This variable has its own codes/.test(forked.afterAdd.state) &&
    forked.afterAdd.hasRevert,
    'adding a code forks the list and the state line discloses it, with ' +
    'a one-click way back');
 ok(!forked.afterRemove.stored &&
-   /^Same as the rest of the dataset\.$/.test(forked.afterRemove.state),
+   /^Using the codes every variable uses\.$/.test(forked.afterRemove.state),
    'removing it back to the dataset set UN-forks automatically, so an ' +
    'identical list is never claimed to be different');
 const reverted = await page.evaluate(async () => {
@@ -440,10 +440,15 @@ ok(doors.doorish.length === 0,
 ok(doors.viaMenu && doors.field,
    'and the dataset-level view is reached from Data > Missing values, ' +
    'carrying the shared list itself');
-ok(/blank/i.test(doors.text) && /REPLACES/.test(doors.text) &&
-   /both ways to end the difference/i.test(doors.text),
-   'the explanation states the invariant, the replace-semantics, and the ' +
-   'pair of verbs the panel offers, so the two surfaces agree');
+// The claims the dialog must still make, now in the plain wording
+// (t4-216): blanks always count, a variable can keep its own set, and
+// there is a way back. The old assertion pinned the words REPLACES and
+// "both ways to end the difference", which were the mechanism-first
+// phrasing a reader could not follow.
+ok(/blank/i.test(doors.text) && /keeps its own set/i.test(doors.text) &&
+   /the way back/i.test(doors.text),
+   'the explanation states the invariant, that a variable can differ, ' +
+   'and that there is a way back, so the two surfaces agree');
 ok(doors.described === 'ps-missing-dialog-lead',
    'and the dialog describes itself, so a screen reader hears the model ' +
    'on open rather than landing silently on a button');
@@ -511,16 +516,16 @@ const twoWay = await page.evaluate(async () => {
     return { ds0, rest, forked, after, undone };
 });
 ok(!twoWay.rest.up && !twoWay.rest.back &&
-   /^Same as the rest of the dataset\.$/.test(twoWay.rest.state),
+   /^Using the codes every variable uses\.$/.test(twoWay.rest.state),
    'with no difference the line states that and offers nothing, because ' +
    'a control that cannot act is the same mistake as a printed zero');
 ok(twoWay.forked.up && twoWay.forked.back &&
    String(twoWay.forked.stored) === String(twoWay.forked.expected),
    'editing the chips forks the list and BOTH directions appear');
-ok(/^Make these the dataset's values$/.test(twoWay.forked.label),
-   `the new one is the mirror of "Use the dataset's values", so the ` +
+ok(/^Use these for every variable$/.test(twoWay.forked.label),
+   `the new one is the mirror of "Go back to the shared codes", so the ` +
    `direction is unmistakable ("${twoWay.forked.label}")`);
-ok(/variable with its own list keeps it/.test(twoWay.forked.tip || ''),
+ok(/variable with its own codes keeps them/.test(twoWay.forked.tip || ''),
    `and it discloses what it does NOT reach, counted rather than named ` +
    `("${twoWay.forked.tip}")`);
 ok(String(twoWay.after.dataset) === String(twoWay.forked.expected) &&
@@ -529,7 +534,7 @@ ok(String(twoWay.after.dataset) === String(twoWay.forked.expected) &&
 ok(String(twoWay.after.rating) === String(['9']),
    'while a variable that has its own list keeps it, since it opted out');
 ok(!twoWay.after.up &&
-   /^Same as the rest of the dataset\.$/.test(twoWay.after.state),
+   /^Using the codes every variable uses\.$/.test(twoWay.after.state),
    'the line goes back to agreeing, and the verbs retire with the ' +
    'difference they existed to end');
 ok(String(twoWay.undone.dataset) === String(twoWay.ds0) &&
@@ -560,9 +565,9 @@ const prov = await page.evaluate(async () => {
     await s(900);
     return { own, inherited: pick() };
 });
-ok(/is in this variable's own list/.test(prov.own || ''),
+ok(/is listed for this variable only/.test(prov.own || ''),
    `a chip on a forked variable says the code is its own ("${prov.own}")`);
-ok(/comes from the dataset list/.test(prov.inherited || '') &&
+ok(/is one of the shared codes/.test(prov.inherited || '') &&
    /changes only this variable/.test(prov.inherited || ''),
    `and an inherited chip says where it came from AND what removing it ` +
    `reaches, which the chips alone cannot show ("${prov.inherited}")`);

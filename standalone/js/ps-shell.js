@@ -23451,8 +23451,8 @@
       if (stateEl) {
         stateEl.textContent = "";
         stateEl.appendChild(document.createTextNode(own
-          ? "Different from the dataset now."
-          : "Same as the rest of the dataset."));
+          ? "This variable has its own codes."
+          : "Using the codes every variable uses."));
         // Two verbs, and only while there is a difference for either to
         // end. Mirrored wording so the DIRECTION is unmistakable: make
         // these the dataset's values, or use the dataset's values.
@@ -23462,23 +23462,23 @@
             return c !== INSPECTOR_VAR && hasColumnTokens(t, c);
           }).length;
           var up = mkEl("button", "ps-linklike",
-            "Make these the dataset's values");
+            "Use these for every variable");
           up.type = "button";
           up.id = "ps-missing-todataset";
           setTip(up, "Every variable that has not been given its own " +
-            "list will use these." + (k ? " The " + k + (k === 1
-              ? " variable with its own list keeps it."
-              : " variables with their own lists keep them.") : ""));
+            "codes will use these." + (k ? " The " + k + (k === 1
+              ? " variable with its own codes keeps them."
+              : " variables with their own codes keep them.") : ""));
           up.addEventListener("click", function () {
             missingPromoteToDataset(INSPECTOR_VAR);
           });
           acts.appendChild(up);
           var back = mkEl("button", "ps-linklike",
-            "Use the dataset's values");
+            "Go back to the shared codes");
           back.type = "button";
           back.id = "ps-missing-usedataset";
-          setTip(back, "Drops this variable's own list and follows the " +
-            "dataset again.");
+          setTip(back, "Drops this variable's own codes and follows the " +
+            "shared ones again.");
           back.addEventListener("click", function () {
             setColumnMissingTokens(INSPECTOR_VAR, "");
           });
@@ -23538,8 +23538,8 @@
         ? "No cell in " + col + " matches " + code +
           ". Check the spelling, or remove it."
         : ownList
-        ? code + " is in this variable's own list."
-        : code + " comes from the dataset list. Removing it here " +
+        ? code + " is listed for this variable only."
+        : code + " is one of the shared codes. Removing it here " +
           "changes only this variable.");
       var x = mkEl("button", "ps-missing-chip-x", "\u2715");
       x.type = "button";
@@ -23654,10 +23654,14 @@
   // go silent, and it always leads with "Blank cells" because that is the
   // one rule no list can change.
   function missingRuleLine(list, own) {
-    var scope = own ? "this variable's list" : "dataset list";
+    // Say the SCOPE in words a reader already has. "(dataset list)" and
+    // "(this variable's list)" named an internal model that nothing on
+    // screen explained (Aug 2026, a collaborator: "What is a chip? What
+    // two lists?").
+    var scope = own ? "just this variable" : "every variable";
     if (!list.length)
-      return "Blank cells only (" + (own ? "this variable's list is empty"
-        : "the dataset list is empty") + ").";
+      return "Blank cells only (no codes listed for " + (own
+        ? "this variable" : "any variable") + ").";
     var shown = [], used = 0;
     for (var i = 0; i < list.length; i++) {
       var ent = String(list[i]);

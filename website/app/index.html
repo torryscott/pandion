@@ -5503,34 +5503,31 @@
     <div class="ps-dialog-head">
       <div>
         <h2 id="ps-missing-dialog-title">Missing values</h2>
-        <p>What counts as missing, and the dataset list every variable
-          starts with.</p>
+        <p>Which values the app should treat as no answer.</p>
       </div>
       <button type="button" class="ps-btn ps-dialog-close"
               id="ps-missing-dialog-close">Close</button>
     </div>
     <div class="ps-dialog-body">
       <p id="ps-missing-dialog-lead">A cell counts as missing when it is
-        blank, or when its text matches one of the codes shown as chips in
-        the panel. Missing cells are left out of charts and statistics.</p>
-      <p>Blank cells always count as missing. That is why the blank chip
-        has no remove button.</p>
-      <p><b>The two lists.</b> Every variable starts with the dataset list
-        below. Editing a variable's chips gives that variable its own
-        list, which REPLACES the dataset list for it alone: that is how a
-        code can mean missing in most variables but stay a real value in
-        one of them. The line under the chips says which is in force,
-        "Same as the rest of the dataset" or "Different from the dataset
-        now". When a variable differs, that line offers both ways to end
-        the difference: take the dataset's values here, or make this
-        variable's values the dataset's.</p>
-      <p><b>What a code does.</b> Surveys often store an unanswered
-        question as -99, or "not applicable" as 9. Declaring the code does
-        not change any cell: the value stays in the table, and the app
-        stops counting it as data.</p>
+        blank, or when it holds one of the codes listed for that variable.
+        Nothing is deleted: the value stays in the table, and charts and
+        statistics skip it.</p>
+      <p>Blank cells always count as missing, in every variable. That is
+        why the blank marker has no remove button.</p>
+      <p><b>Why you would list a code.</b> Surveys often store an
+        unanswered question as -99, or "not applicable" as 9. Those are
+        not measurements, and averaging them in would be wrong. Listing
+        the code tells the app to skip it.</p>
+      <p><b>One set of codes, with exceptions.</b> The codes in the box
+        below are used by every variable. One variable can differ: 0 might
+        be a real count in Errors even though it means missing elsewhere.
+        Edit the codes shown for that variable in the panel and it keeps
+        its own set from then on. The line under them says which set is in
+        force, and offers the way back.</p>
       <div class="ps-missing-ds">
         <label class="ps-inspector-field">
-          Dataset list
+          Codes used by every variable
           <input id="ps-variable-missing" type="text"
                  placeholder="NA, N/A, .">
         </label>
@@ -6079,7 +6076,7 @@
 <script src="lib/jspdf.umd.min.979a2ef514.js"></script>
 <script src="lib/svg2pdf.umd.min.4ada250f50.js"></script>
 <script src="lib/graphbuilder2.min.e9bdd53846.js"></script>
-<script src="lib/ps-shell.4ed0dd0e6f.js"></script>
+<script src="lib/ps-shell.ec1a0739e3.js"></script>
 <script src="lib/ps-tour.fe1b2fd3ed.js"></script>
 </body>
 </html>
