@@ -10382,7 +10382,12 @@
     if (PANEL_FIT && PANEL_FIT.panel !== panel) clearPanelFit();
     var sr = scroller.getBoundingClientRect();
     var pr = panel.getBoundingClientRect();
-    if (pr.height < 40) { clearPanelFit(); return; }
+    // scrollHeight, not rect height: mid-expand the rect is still
+    // small, and the EARLY apply below runs during that animation on
+    // purpose (so the roll stops at the box instead of bouncing).
+    if (Math.max(pr.height, panel.scrollHeight) < 40) {
+      clearPanelFit(); return;
+    }
     var prevRise = (PANEL_FIT && PANEL_FIT.panel === panel)
       ? PANEL_FIT.rise : 0;
     var flowTop = pr.top + prevRise;
@@ -10430,13 +10435,20 @@
     if (PANEL_FIT && PANEL_FIT.panel === panel) {
       PANEL_FIT.rise = rise; PANEL_FIT.clamped = clamped;
       PANEL_FIT.clickY = clickY; PANEL_FIT.host = host;
+      PANEL_FIT.maxH = maxH;
     } else {
       PANEL_FIT = { host: host, panel: panel, clickY: clickY,
-        rise: rise, clamped: clamped };
+        rise: rise, clamped: clamped, maxH: maxH };
     }
+    // While the engine's own expand/collapse transition is live, its
+    // max-height animation IS the reveal motion - never overwrite the
+    // transition mid-roll (that would freeze it).
+    var engineAnim =
+      (panel.style.transition || "").indexOf("max-height") !== -1;
     try {
-      panel.style.transition = (animate && !reduce && rise !== prevRise)
-        ? "transform 220ms ease-out" : "none";
+      if (!engineAnim)
+        panel.style.transition = (animate && !reduce && rise !== prevRise)
+          ? "transform 220ms ease-out" : "none";
       panel.style.transform = rise > 0
         ? "translateY(-" + rise + "px)" : "";
       if (rise > 0) {
@@ -10457,21 +10469,52 @@
         }
       }
       if (clamped) {
-        panel.style.maxHeight = maxH + "px";
+        // Mid-expand, retarget the engine's own roll so it STOPS at
+        // the box instead of reaching natural height and bouncing
+        // back (Torry's rolls-down-then-rolls-back-up report). At
+        // rest, plain apply.
+        var curMh = parseFloat(panel.style.maxHeight);
+        if (!engineAnim || !isFinite(curMh) || curMh > maxH)
+          panel.style.maxHeight = maxH + "px";
         panel.style.overflowY = "auto";
         panel.style.overscrollBehavior = "contain";
         if (!panel.__psFitCueWired) {
           panel.__psFitCueWired = true;
           panel.addEventListener("scroll", syncPanelFitCue);
         }
-        // The engine's expand animation clears maxHeight/overflow at
-        // ~170ms; if that cleanup lands after this apply, re-apply.
-        window.setTimeout(function () {
-          var f = PANEL_FIT;
-          if (f && f.panel === panel && f.clamped &&
-              !panel.style.maxHeight && panel.isConnected)
-            applyPanelFit(host, panel, clickY, false);
-        }, 220);
+        // The engine's expand/collapse writes maxHeight itself and its
+        // cleanup CLEARS it ~170ms in; a style observer re-pins the
+        // clamp in the same microtask, before paint, so the panel
+        // never shows a natural-height frame. Equality guards stop
+        // self-triggering.
+        if (!panel.__psFitStyleMo) {
+          try {
+            panel.__psFitStyleMo = new MutationObserver(function () {
+              var f = PANEL_FIT;
+              var p2 = f && f.panel;
+              if (!p2 || p2 !== panel || !f.clamped) return;
+              var want = f.maxH + "px";
+              var cur = p2.style.maxHeight;
+              if (cur === want) return;
+              var anim = (p2.style.transition || "")
+                .indexOf("max-height") !== -1;
+              if (anim) {
+                // Live roll: retarget only when the engine aimed PAST
+                // the box; leave its 0-start frame alone so the roll
+                // still starts closed.
+                var v = parseFloat(cur);
+                if (isFinite(v) && v > f.maxH)
+                  p2.style.maxHeight = want;
+              } else {
+                p2.style.maxHeight = want;
+                if (p2.style.overflowY !== "auto")
+                  p2.style.overflowY = "auto";
+              }
+            });
+            panel.__psFitStyleMo.observe(panel,
+              { attributes: true, attributeFilter: ["style"] });
+          } catch (eMo) {}
+        }
       } else {
         panel.style.maxHeight = "";
         panel.style.overflowY = "";
@@ -10486,14 +10529,23 @@
   function armPanelFit(host, clickY, animate) {
     var stamp = { at: Date.now() };
     PANEL_FIT_STAMP = stamp;
-    // Settle-watch: the panel slides open over ~150ms and its content can
-    // rebuild once more after that; act when the height holds still.
+    // TRACKING watch: the panel slides open over ~150ms and its content
+    // can rebuild once more after that (the picker dock grows it). A
+    // one-shot apply at settle time pulled an over-rolled panel back
+    // ~40ms after paint - Torry's rolls-down-then-rolls-back-up report
+    // - so the fit applies EVERY frame while the panel is live (writes
+    // are equality-guarded; the clamp engages the same frame content
+    // outgrows the box) and finishes with one authoritative apply when
+    // the height holds still.
     var frames = 0, lastH = -1, still = 0;
     (function watch() {
       if (PANEL_FIT_STAMP !== stamp || Date.now() - stamp.at > 1400)
         return;
       var panel = host.querySelector(".gb2-panel");
       var h = panel ? panel.getBoundingClientRect().height : 0;
+      var live = panel && getComputedStyle(panel).display !== "none" &&
+        Math.max(h, panel.scrollHeight) > 40;
+      if (live) applyPanelFit(host, panel, clickY, false);
       if (panel && h > 40 && Math.abs(h - lastH) < 1) {
         still++;
         if (still >= 3) {
