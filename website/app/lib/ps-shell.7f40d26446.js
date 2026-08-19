@@ -25164,6 +25164,24 @@
       // file, watch nothing happen, press the only obvious button, and be
       // told your data file was empty.
       if (!String(el("ps-paste").value || "").trim()) {
+        // The label says "Preview data", but this button only ever read
+        // the PASTE box. With a file already loaded it found an empty
+        // box, said so - and because every message resets the loader,
+        // threw the file's preview AND the file itself away with it,
+        // taking the Import button along (Aug 2026, Torry: drop an
+        // Excel file, press Preview, and you are back at the start).
+        // So an empty box now previews whatever IS loaded. Pressing
+        // Preview after changing Delimiter, First row or Encoding is
+        // exactly when someone would, and for a text file that re-reads
+        // it with the new settings.
+        if (XLSX_SHEETS && XLSX_SHEETS[XLSX_ACTIVE]) {
+          showXlsxSheet(XLSX_ACTIVE);
+          return;
+        }
+        if (IMPORT_SOURCE_FILE && !isOmvFile(IMPORT_SOURCE_FILE)) {
+          rereadImportFile();
+          return;
+        }
         showLoaderMessage("The paste box is empty. Paste some rows into it, " +
           "or choose a file above.");
         return;
