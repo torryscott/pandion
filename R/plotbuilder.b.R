@@ -181,6 +181,7 @@
     list(arg = "bar_outlier_method", opt = "barOutlierMethod", bool = FALSE, default = "iqr"),
     list(arg = "bar_outlier_iqr_k", opt = "barOutlierIqrK", bool = FALSE, default = 1.5),
     list(arg = "bar_outlier_sd_k", opt = "barOutlierSdK", bool = FALSE, default = 3),
+    list(arg = "x_value_spacing", opt = "xValueSpacing", bool = TRUE, default = FALSE),
     list(arg = "bar_outlier_color", opt = "barOutlierColor", bool = FALSE, default = "#d62728"),
     list(arg = "bar_outlier_style", opt = "barOutlierStyle", bool = FALSE, default = "solid"),
     list(arg = "bar_outlier_dot_color", opt = "barOutlierDotColor", bool = FALSE, default = ""),

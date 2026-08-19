@@ -481,6 +481,10 @@ graphbuilder2_html <- function(bars,
                                bar_outlier_method = "iqr",
                                bar_outlier_iqr_k = 1.5,
                                bar_outlier_sd_k = 3,
+                               # Place numeric category names at their
+                               # real distances apart instead of in
+                               # equal slots (line / dot only).
+                               x_value_spacing = FALSE,
                                bar_outlier_color = "#d62728",
                                bar_outlier_style = "solid",
                                # Fill of the dot drawn at a flagged
@@ -1842,6 +1846,7 @@ graphbuilder2_html <- function(bars,
         barOutlierMethod = as.character(bar_outlier_method),
         barOutlierIqrK = as.numeric(bar_outlier_iqr_k),
         barOutlierSdK = as.numeric(bar_outlier_sd_k),
+        xValueSpacing = isTRUE(x_value_spacing),
         barOutlierColor = as.character(bar_outlier_color),
         barOutlierStyle = as.character(bar_outlier_style),
         barOutlierDotColor = as.character(bar_outlier_dot_color),

@@ -2935,6 +2935,22 @@
         return counts;
     }
 
+    // Read a category list as numbers, STRICTLY: the whole name must
+    // be a number, so "10 mg" and "Low" both disqualify the set. The
+    // value-spacing layout and the control that offers it both call
+    // this, so the two can never disagree about when it applies.
+    function _gb2CatNumericValues(cats) {
+        if (!Array.isArray(cats) || cats.length < 3) return null;
+        var out = [];
+        for (var i = 0; i < cats.length; i++) {
+            var t = String(cats[i] == null ? "" : cats[i]).trim();
+            if (!/^-?(?:[0-9]+\.?[0-9]*|\.[0-9]+)$/.test(t)) return null;
+            var v = parseFloat(t);
+            if (!isFinite(v)) return null;
+            out.push(v);
+        }
+        return out;
+    }
     function dashArrayFor(style) {
         if (style === "dashed") return "6,4";
         if (style === "dotted") return "2,3";
@@ -31141,11 +31157,59 @@
                 if (fHere && fHere !== fPrev) return _facetGapLive;
                 return 0;
             }
+            // VALUE SPACING (Aug 2026, the collaborator's dose-response
+            // report). A Compare Groups x-axis is categorical, so 0, 10
+            // and 40 mg drew in equal slots: the first step rose over
+            // 10 mg and the second over 30, but both were drawn the same
+            // width, so a curve that flattens read as a straight line.
+            // With the option on, the slots are placed at their VALUES.
+            //
+            // It is expressed purely as extra gaps BEFORE each category,
+            // which is why nothing else in the render has to change -
+            // markers, ticks, category labels, brackets, hit areas and
+            // facet runs all derive their x from cumExtraGap + catWidth
+            // already. The arithmetic is self-consistent: with slot
+            // width w and scale k = (base - w) / span, the gaps sum to
+            // base - n*w, which is exactly what catWidth divides back
+            // out below. w is capped so the smallest gap is never
+            // negative.
+            //
+            // Line and dot only: a bar or a box would have to rethink
+            // its width against the new spacing, and a line graph is
+            // what is being asked for.
+            var _valGapBefore = [];
+            (function () {
+                for (var _vg = 0; _vg < visibleXCats.length; _vg++) _valGapBefore.push(0);
+                if (data.xValueSpacing !== true) return;
+                if (!_gbLineFam()) return;
+                if (_facetSep) return;              // per-panel values are out of scope
+                var vals = _gb2CatNumericValues(visibleXCats);
+                if (!vals) return;
+                var nv = vals.length;
+                var span = vals[nv - 1] - vals[0];
+                if (!(span > 0)) return;
+                var dmin = Infinity;
+                for (var _vi = 1; _vi < nv; _vi++) {
+                    var d = vals[_vi] - vals[_vi - 1];
+                    if (!(d > 0)) return;           // not strictly ascending: leave equal slots
+                    if (d < dmin) dmin = d;
+                }
+                var other = 0;
+                for (var _vo = 0; _vo < visibleXCats.length; _vo++)
+                    other += _extraGapBefore(visibleXCats[_vo]);
+                var base = innerW - other;
+                if (!(base > 0)) return;
+                var w = base * dmin / (span + dmin);
+                var k = (base - w) / span;
+                for (var _vj = 1; _vj < nv; _vj++)
+                    _valGapBefore[_vj] = Math.max(0, k * (vals[_vj] - vals[_vj - 1]) - w);
+            })();
             var cumExtraGap = [];
             var sumExtra = 0;
             for (var _cgi = 0; _cgi < visibleXCats.length; _cgi++) {
                 sumExtra += _extraGapBefore(visibleXCats[_cgi]);
                 sumExtra += _facetBoundaryGapBefore(_cgi);
+                sumExtra += (_valGapBefore[_cgi] || 0);
                 cumExtraGap.push(sumExtra);
             }
             var availableForSlots = Math.max(0, innerW - sumExtra);
@@ -61403,7 +61467,33 @@
                 // unfaceted line chart.
                 var _catDivider = (_markerSpreadRow || _facetGapRow) ?
                     '<div style="border-top:1px solid #eee;margin:8px 0 6px 0;"></div>' : '';
+                // Value spacing: offered only where it can mean
+                // something - a line or dot chart, unfaceted, whose
+                // category names are all numbers. When the names are
+                // quantities, equal slots misdraw the distances
+                // between them (Aug 2026, the dose-response report).
+                var _vsCats = (data && Array.isArray(data.xCategories)) ? data.xCategories : [];
+                var _vsFaceted = !!(data && typeof data.facetSeparator === "string"
+                                      && data.facetSeparator.length > 0);
+                var _vsVals = _vsFaceted ? null : _gb2CatNumericValues(_vsCats);
+                var _vsOn = (data && data.xValueSpacing === true);
+                var _vsRow = _vsVals ?
+                    ('<div style="padding:2px 4px 8px 4px;">' +
+                       '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#333;cursor:pointer;">' +
+                         '<input type="checkbox" data-field="cat-value-spacing"' +
+                         (_vsOn ? ' checked' : '') + ' style="margin:0;" />' +
+                         '<span>Space categories by their value</span>' +
+                       '</label>' +
+                       '<div style="color:#666;font-size:11px;margin:4px 0 0 22px;">' +
+                         'Your categories are numbers, so they can sit at their real ' +
+                         'distances apart instead of in equal slots. Turning this on ' +
+                         'also puts them in ascending order.' +
+                       '</div>' +
+                     '</div>' +
+                     '<div style="border-top:1px solid #eee;margin:2px 0 6px 0;"></div>')
+                    : '';
                 return '<div data-tab-pane="spacing" style="' + _showFn("spacing") + '">' +
+                    _vsRow +
                     _markerSpreadRow +
                     _facetGapRow +
                     _catDivider +
@@ -61604,6 +61694,45 @@
             }
             _paintCatOrder();
             // ---- t4-172: the value-order select (derived state) ----
+            // Value spacing. Turning it ON also sorts the categories
+            // ascending, because positions taken from values are only
+            // readable in value order - and a factor's level order is
+            // a STRING sort, which puts 10 before 5. Both commits ride
+            // one click so a single undo puts everything back.
+            (function () {
+                var vsCb = body.querySelector('[data-field="cat-value-spacing"]');
+                if (!vsCb) return;
+                vsCb.addEventListener("change", function () {
+                    var on = !!vsCb.checked;
+                    if (on) {
+                        var vals = _gb2CatNumericValues(xCats);
+                        if (vals) {
+                            var pairs = [];
+                            for (var i = 0; i < xCats.length; i++)
+                                pairs.push({ c: xCats[i], v: vals[i] });
+                            pairs.sort(function (a, b) { return a.v - b.v; });
+                            var next = [];
+                            for (var j = 0; j < pairs.length; j++) next.push(pairs[j].c);
+                            if (next.join("\u001F") !== xCats.join("\u001F")) {
+                                xCats.length = 0;
+                                Array.prototype.push.apply(xCats, next);
+                                try { _syncFacetBucketsFromXCats(); } catch (_eSf) {}
+                                data.categoryOrder = xCats.slice();
+                                if (hasSetOption) {
+                                    try { _setOption("categoryOrder", data.categoryOrder); } catch (_e) {}
+                                }
+                            }
+                        }
+                    }
+                    data.xValueSpacing = on;
+                    if (hasSetOption) {
+                        try { _setOption("xValueSpacing", on); } catch (_e) {}
+                    }
+                    redraw();
+                    try { _refreshAxisChromeLayout(); } catch (_eRa) {}
+                    renderInspectorPanel();
+                });
+            })();
             var iCatSortSel = body.querySelector('[data-field="cat-sortsel"]');
             function _catValKey(cat) {
                 var tot = 0, n = 0;
