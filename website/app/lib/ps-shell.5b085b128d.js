@@ -10450,8 +10450,20 @@
       return;
     }
     var quiet = Date.now() - RESERVE_LAST;
-    if (quiet < 1500) { reserveSchedule(1600 - quiet); return; }
+    // At scrollTop 0 the floor is PURPOSELESS - a clamp cannot move a
+    // page already at 0 - so it drops on a short quiet (600ms, enough
+    // to outlast the reveal's own scroll-down starting); holding it
+    // there only kept the more-below cue lit over honest nothing (the
+    // pane-scroll-cue contract). A scrolled page keeps the full hold.
+    var need = sc.scrollTop <= 1 ? 600 : 1500;
+    if (quiet < need) { reserveSchedule(need - quiet + 100); return; }
     try {
+      if (sc.scrollTop <= 1) {
+        host.style.minHeight = "";
+        RESERVE_HOST = null;
+        reserveStopWatch();
+        return;
+      }
       var prevMin = host.style.minHeight;
       var st0 = sc.scrollTop;
       host.style.minHeight = "";
@@ -10500,6 +10512,7 @@
             var now2 = h2.offsetHeight;
             if (now2 > cur) h2.style.minHeight = now2 + "px";
           } catch (eG) {}
+          if (!RESERVE_TIMER) reserveSchedule(800);
         });
         RESERVE_MO.observe(host, { childList: true, subtree: true });
       } catch (e4) {}
