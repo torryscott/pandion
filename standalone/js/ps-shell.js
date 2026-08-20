@@ -9718,6 +9718,18 @@
 
   // ================================================================ UI
   function el(id) { return document.getElementById(id); }
+  // The grid's paste sink is a real textarea (it has to be: browsers
+  // deliver a paste only to an editable target, and the Cmd/Ctrl
+  // modifier arms it before the second key of a chord arrives - see
+  // t4-225). Nobody TYPES in it, so every "is the user editing text?"
+  // guard must look straight through it, or chords held while it is
+  // armed (Cmd+Z, Cmd+E, ...) read as typing and die in the guard. A
+  // keydown's e.target is stamped at dispatch, so refocusing cannot
+  // fix this after the fact - the guards have to know it by name.
+  function psIsPasteSink(node) {
+    return !!(node && node.getAttribute &&
+      node.getAttribute("data-role") === "grid-paste-sink");
+  }
   // ---- punch list 27, second half: the pane splitters ----
   // The three-pane grid was fixed at 205px / 1fr / 330px with no resizer, so a
   // student on a 1366px Chromebook could not give the chart more room, and the
@@ -16660,9 +16672,7 @@
       // cannot un-stamp it: the guard has to know the sink by name or
       // every chord held over an armed sink (Cmd+Z first among them)
       // reads as "the user is typing" and dies here.
-      var _tgtSink = !!(tgt && tgt.getAttribute &&
-        tgt.getAttribute("data-role") === "grid-paste-sink");
-      if (!_geTook && !_tgtSink && tgt && tgt.closest &&
+      if (!_geTook && !psIsPasteSink(tgt) && tgt && tgt.closest &&
           tgt.closest("input, textarea, select, [contenteditable]")) return;
       // Layout owns the shortcut while a figure is on screen (punch list item
       // 7). Without this the press fell through to the engine's handler and
@@ -28764,7 +28774,7 @@
       }
       if (el("ps-command-palette").style.display === "flex") return;
       var target = e.target;
-      var editing = target && target.closest &&
+      var editing = target && target.closest && !psIsPasteSink(target) &&
         target.closest("input, textarea, select, [contenteditable]");
       if (!editing && e.key === "F2") {
         var renameDoc = appWorkspace() === "data" ? activeChart() :
