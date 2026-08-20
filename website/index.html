@@ -25,6 +25,9 @@
   :root {
     --navy: #192E49;
     --cobalt: #375CA0;
+    /* The hero bird's lower wing, and slot 0 of the chart palette.
+       Used for the headline phrase so the type and the art agree. */
+    --wing: #417499;
     --sky: #3E6DA9;
     --amber: #E3A12E;
     --ink: #22364d;
@@ -85,7 +88,7 @@
     font-size: clamp(34px, 5vw, 50px); line-height: 1.12;
     letter-spacing: -0.02em; font-weight: 800;
   }
-  .hero h1 em { font-style: normal; color: var(--cobalt); }
+  .hero h1 em { font-style: normal; color: var(--wing); }
   .hero p.lede {
     margin: 0 0 30px; max-width: 34em;
     color: var(--muted); font-size: 18.5px;
@@ -115,7 +118,7 @@
   }
 
   /* ---- product shot ---- */
-  .shot { padding: 64px 0 8px; }
+  .shot { padding: 64px 0 72px; }
   .shot figure { margin: 0; }
   .shot-frame {
     border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
@@ -172,6 +175,10 @@
   }
   .release-line b { color: var(--navy); }
   /* ---- download cards ---- */
+  #downloads {
+    background: var(--wash);
+    border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  }
   .cards {
     display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px;
   }
@@ -201,7 +208,10 @@
     margin-top: 10px; color: #6b7887; font-size: 12px; text-align: center;
   }
   /* ---- gallery teaser ---- */
-  .gallery-teaser { padding-top: 8px; }
+  .gallery-teaser {
+    background: var(--wash);
+    border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  }
   .tease-grid {
     display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px;
   }
@@ -221,8 +231,7 @@
   .tease-more a:hover { text-decoration: underline; }
 
   /* ---- features: the lab / classroom pillars ---- */
-  .features { background: var(--wash); border-top: 1px solid var(--line);
-    border-bottom: 1px solid var(--line); }
+  .features { background: #fff; }
   .pillars {
     display: grid; grid-template-columns: 1fr 1fr; gap: 26px 44px;
   }
@@ -251,7 +260,7 @@
   .feature p { margin: 0; color: var(--muted); font-size: 14.5px; }
 
   /* ---- footer ---- */
-  footer { padding: 44px 0 56px; }
+  footer { padding: 44px 0 56px; border-top: 1px solid var(--line); }
   .foot {
     display: flex; flex-wrap: wrap; gap: 18px; align-items: center;
     color: var(--muted); font-size: 13.5px;
