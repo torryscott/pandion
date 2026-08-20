@@ -6623,8 +6623,19 @@
             // Legend items, group items, anything else
             return { fontSize: 12, color: "#000", bold: false, italic: false, rotation: 0 };
         }
+        // User-facing all-text multiplier (Torry, Aug 2026): scales
+        // EVERY text relative to its own size - explicit sizes included,
+        // unlike the host textScale, which retunes defaults only - so
+        // hierarchy is preserved (110% of a title stays bigger than
+        // 110% of a tick). Stored as a chartSpec key; 1 = off.
+        function _gb2UserTextScale() {
+            var v = data ? data.chartFontScale : null;
+            return (typeof v === "number" && isFinite(v) &&
+                    v >= 0.5 && v <= 2) ? v : 1;
+        }
         function getEffectiveTextStyle(id) {
             var d = getTextDefaults(id);
+            var us = _gb2UserTextScale();
             // Global text-color override (data.chartTextColor) acts as
             // the base color when no per-element textStyles override is
             // set. Useful for dark-themed charts where the built-in
@@ -6634,7 +6645,8 @@
             var entry = textStyleLookup[id];
             if (!entry) {
                 return {
-                    fontSize: d.fontSize,
+                    fontSize: Math.round(d.fontSize * us * 10) / 10,
+                    baseFontSize: d.fontSize,
                     color: globalTextColor || d.color,
                     bold: d.bold, italic: d.italic, rotation: d.rotation,
                     align: ""
@@ -6644,8 +6656,10 @@
             if (entry.color && entry.color.length > 0) color = entry.color;
             else if (globalTextColor) color = globalTextColor;
             else color = d.color;
+            var _bfs = (typeof entry.fontSize === "number" && entry.fontSize > 0) ? entry.fontSize : d.fontSize;
             return {
-                fontSize: (typeof entry.fontSize === "number" && entry.fontSize > 0) ? entry.fontSize : d.fontSize,
+                fontSize: Math.round(_bfs * us * 10) / 10,
+                baseFontSize: _bfs,
                 color: color,
                 bold: !!entry.bold,
                 italic: !!entry.italic,
@@ -13270,8 +13284,8 @@
             var fRot = body.querySelector('[data-field="rotation"]');
             var fRotNum = body.querySelector('[data-field="rotation-num"]');
             var fRotVal = body.querySelector('[data-field="rotation-val"]');
-            if (fSize && active !== fSize) fSize.value = _gb2PtFromPx(s.fontSize);
-            if (fSizeNum && active !== fSizeNum) fSizeNum.value = _gb2PtFromPx(s.fontSize);
+            if (fSize && active !== fSize) fSize.value = _gb2PtFromPx(s.baseFontSize || s.fontSize);
+            if (fSizeNum && active !== fSizeNum) fSizeNum.value = _gb2PtFromPx(s.baseFontSize || s.fontSize);
             if (fColor) fColor.style.background = s.color;
             if (fBold) {
                 fBold.style.background = s.bold ? "#1a5fb4" : "white";
@@ -48181,6 +48195,7 @@
 
                 { k: "chartFontFamily", g: "text", mods: null },
                 { k: "chartTextColor", g: "text", mods: null },
+                { k: "chartFontScale", g: "text", mods: null },
                 { k: "textStyles", g: "text", mods: null },
                 { k: "legendSwatchSize", g: "text", mods: CART },
                 { k: "legendRowSpacing", g: "text", mods: CART },
@@ -94021,7 +94036,114 @@
             return null;
         }
 
+        function _renderAllTextPanel(body) {
+            var cur = (typeof data.chartTextColor === "string" && data.chartTextColor.length > 0)
+                ? data.chartTextColor : "";
+            var pct = Math.round(_gb2UserTextScale() * 100);
+            body.innerHTML =
+                '<div style="display:flex;flex-direction:column;gap:10px;font-family:var(--gb2-ui-font);font-size:12px;color:#333;">' +
+                '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+                  '<label style="width:44px;text-align:right;color:#555;flex-shrink:0;">Color</label>' +
+                  '<button type="button" data-field="atx-color-btn" data-role="primary-color" style="width:22px;height:22px;padding:0;border:1px solid #888;border-radius:3px;cursor:pointer;background:' + (cur || "#000000") + ';flex-shrink:0;" aria-label="All-text color" title="All-text color"></button>' +
+                  _renderPaletteRowHtml(cur || "#000000", "atx-color-btn", "atx", 14) +
+                  '<a href="#" data-field="atx-color-reset" style="color:#4a90e2;font-size:11px;text-decoration:none;flex-shrink:0;' + (cur ? "" : "visibility:hidden;") + '">Reset</a>' +
+                '</div>' +
+                '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+                  '<label style="width:44px;text-align:right;color:#555;flex-shrink:0;">Size</label>' +
+                  '<input type="range" data-field="atx-scale" min="50" max="200" step="5" value="' + pct + '" style="width:150px;" />' +
+                  '<input type="number" data-field="atx-scale-num" min="50" max="200" step="5" value="' + pct + '" style="width:44px;padding:2px 4px;font-size:11px;border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);outline:none;text-align:right;" />' +
+                  '<span style="color:#666;font-size:11px;">%</span>' +
+                  '<a href="#" data-field="atx-scale-reset" style="color:#4a90e2;font-size:11px;text-decoration:none;flex-shrink:0;' + (pct !== 100 ? "" : "visibility:hidden;") + '">Reset to 100%</a>' +
+                '</div>' +
+                '<div style="font-size:11px;color:#888;">Color applies wherever no custom text color is set. Size scales every text relative to its own size, so titles stay larger than tick labels.</div>' +
+                '</div>';
+            var cBtn = body.querySelector('[data-field="atx-color-btn"]');
+            var cReset = body.querySelector('[data-field="atx-color-reset"]');
+            function _atxSetColor(hex, commit) {
+                data.chartTextColor = hex;
+                redraw();
+                if (cBtn) cBtn.style.background = hex || "#000000";
+                if (cReset) cReset.style.visibility = hex ? "visible" : "hidden";
+                if (commit && hasSetOption) {
+                    try { _setOption("chartTextColor", hex); } catch (_e) {}
+                }
+            }
+            if (cBtn) cBtn.addEventListener("click", function (e) {
+                e.preventDefault(); e.stopPropagation();
+                _highlightActiveColorSwatch(cBtn);
+                openColorPicker(cur || "#000000", function (hex) {
+                    _atxSetColor(hex, false);
+                }, function (hex) {
+                    _atxSetColor(hex, true);
+                }, cBtn);
+            });
+            body.addEventListener("click", function (e) {
+                var sw = e.target && e.target.closest ? e.target.closest("[data-atx-palette]") : null;
+                if (sw) {
+                    e.preventDefault(); e.stopPropagation();
+                    _atxSetColor(sw.getAttribute("data-atx-palette"), true);
+                }
+            });
+            if (cReset) cReset.addEventListener("click", function (e) {
+                e.preventDefault(); e.stopPropagation();
+                _atxSetColor("", true);
+            });
+            var sc = body.querySelector('[data-field="atx-scale"]');
+            var scN = body.querySelector('[data-field="atx-scale-num"]');
+            var scR = body.querySelector('[data-field="atx-scale-reset"]');
+            function _atxSetScale(p, commit) {
+                if (!isFinite(p)) return;
+                p = Math.max(50, Math.min(200, p));
+                data.chartFontScale = p / 100;
+                redraw();
+                if (sc && document.activeElement !== sc) sc.value = p;
+                if (scN && document.activeElement !== scN) scN.value = p;
+                if (scR) scR.style.visibility = p !== 100 ? "visible" : "hidden";
+                if (commit && hasSetOption) {
+                    try { _setOption("chartFontScale", p / 100); } catch (_e) {}
+                }
+            }
+            if (sc) {
+                sc.addEventListener("input", function () { _atxSetScale(parseFloat(sc.value), false); });
+                sc.addEventListener("change", function () { _atxSetScale(parseFloat(sc.value), true); });
+            }
+            if (scN) {
+                scN.addEventListener("input", function () { _atxSetScale(parseFloat(scN.value), false); });
+                scN.addEventListener("change", function () { _atxSetScale(parseFloat(scN.value), true); });
+            }
+            if (scR) scR.addEventListener("click", function (e) {
+                e.preventDefault(); e.stopPropagation();
+                _atxSetScale(100, true);
+            });
+        }
         function renderInspectorText(body, id) {
+            // "Applies to: This text / All text" (Torry, Aug 2026, the
+            // bar panel's scope idiom brought to text). The All-text
+            // side offers exactly two whole-figure controls: Color
+            // (commits the existing chartTextColor, which per-element
+            // colors still beat) and a RELATIVE size - a percent
+            // multiplier on every text's own size, so hierarchy is
+            // preserved rather than flattened. Rotate / bold / italic
+            // stay per-text on purpose. Session-scoped flag; the chip
+            // renders in the title bar on both sides.
+            var _txAll = window.__gb2_txScopeAll === true;
+            _mountScopeRowInTitle(
+                '<div data-field="tx-scope-row" style="display:flex;align-items:center;gap:0;flex-shrink:0;">' +
+                '<button type="button" data-tx-scope="this" style="' + _distScopeBtnCss(!_txAll, "this") + '" title="Style only this text">This text</button>' +
+                '<button type="button" data-tx-scope="all" style="' + _distScopeBtnCss(_txAll, "all") + '" title="Color or scale every text on the figure">All text</button>' +
+                '</div>');
+            (function _wireTxScope() {
+                var row = inspectorPanel.querySelector('[data-field="tx-scope-row"]');
+                if (!row) return;
+                row.addEventListener("click", function (e) {
+                    var b = e.target && e.target.closest ? e.target.closest("[data-tx-scope]") : null;
+                    if (!b) return;
+                    e.preventDefault(); e.stopPropagation();
+                    window.__gb2_txScopeAll = b.getAttribute("data-tx-scope") === "all";
+                    renderInspectorPanel();
+                });
+            })();
+            if (_txAll) { _renderAllTextPanel(body); return; }
             // Style lookups go through textStyleIdFor: most inspector ids
             // are their own style id, but yTick:* ids all collapse to the
             // shared "yTickLabel" id so the slider drives every tick.
@@ -94427,8 +94549,8 @@
             });
 
             var s = getEffectiveTextStyle(styleId);
-            iSize.value = _gb2PtFromPx(s.fontSize);
-            iSizeNum.value = _gb2PtFromPx(s.fontSize);
+            iSize.value = _gb2PtFromPx(s.baseFontSize || s.fontSize);
+            iSizeNum.value = _gb2PtFromPx(s.baseFontSize || s.fontSize);
             iColor.style.background = s.color;
             iBold.style.background = s.bold ? "#1a5fb4" : "white";
             iBold.style.color = s.bold ? "white" : "#222";
@@ -94466,7 +94588,8 @@
             iSizeNum.addEventListener("change", function () {
                 var v = parseFloat(iSizeNum.value);
                 if (!isFinite(v) || v <= 0) {
-                    var fallback = _gb2PtFromPx(getEffectiveTextStyle(styleId).fontSize);
+                    var _fes = getEffectiveTextStyle(styleId);
+                    var fallback = _gb2PtFromPx(_fes.baseFontSize || _fes.fontSize);
                     iSizeNum.value = fallback;
                     iSize.value = fallback;
                 }
@@ -94974,7 +95097,7 @@
             var boldShared = allSame(styles, "bold");
             var italicShared = allSame(styles, "italic");
             var rotShared = allSame(styles, "rotation");
-            var sharedSize = sizeShared ? styles[0].fontSize : "";
+            var sharedSize = sizeShared ? (styles[0].baseFontSize || styles[0].fontSize) : "";
             var sharedColor = colorShared ? styles[0].color : "#888";
             var sharedBold = boldShared ? styles[0].bold : false;
             var sharedItalic = italicShared ? styles[0].italic : false;
@@ -95060,7 +95183,7 @@
                     // Restore to whatever's currently shared (or first
                     // entry's value if mixed).
                     var s = readStyles();
-                    var fb = _gb2PtFromPx(allSame(s, "fontSize") ? s[0].fontSize : s[0].fontSize);
+                    var fb = _gb2PtFromPx(s[0].baseFontSize || s[0].fontSize);
                     iSizeNum.value = fb; iSize.value = fb;
                 }
             });

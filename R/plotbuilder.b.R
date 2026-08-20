@@ -65,6 +65,7 @@
     list(arg = "chart_grid_major_style", opt = "chartGridMajorStyle", bool = FALSE, default = "solid"),
     list(arg = "chart_grid_minor_style", opt = "chartGridMinorStyle", bool = FALSE, default = "solid"),
     list(arg = "chart_text_color", opt = "chartTextColor", bool = FALSE, default = ""),
+    list(arg = "chart_font_scale", opt = "chartFontScale", bool = FALSE, default = 1),
     list(arg = "hidden_bars", opt = "hiddenBars", bool = FALSE, default = list()),
     list(arg = "hidden_points", opt = "hiddenPoints", bool = FALSE, default = list()),
     list(arg = "hidden_elements", opt = "hiddenElements", bool = FALSE, default = list()),

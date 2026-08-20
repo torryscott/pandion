@@ -24,6 +24,7 @@
     list(arg = "chart_border", opt = "chartBorder", bool = FALSE, default = "none"),
     list(arg = "chart_font_family", opt = "chartFontFamily", bool = FALSE, default = ""),
     list(arg = "chart_text_color", opt = "chartTextColor", bool = FALSE, default = ""),
+    list(arg = "chart_font_scale", opt = "chartFontScale", bool = FALSE, default = 1),
     list(arg = "hidden_elements", opt = "hiddenElements", bool = FALSE, default = list()),
     list(arg = "text_styles", opt = "textStyles", bool = FALSE, default = list()),
     list(arg = "text_offsets", opt = "textOffsets", bool = FALSE, default = list()),
