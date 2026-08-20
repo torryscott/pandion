@@ -70033,15 +70033,9 @@
                         label: _lkDispItem(_lkOrd[_lkv])
                     });
                 }
-                allGroupItems.push({ kind: "el", id: "likertGrid", label: "Grid lines" });
-                if (Array.isArray(data.hiddenElements)) {
-                    for (var _hkv = 0; _hkv < data.hiddenElements.length; _hkv++) {
-                        var _hkid = String(data.hiddenElements[_hkv]);
-                        if (_hkid.indexOf("likertXTick:") === 0) {
-                            allGroupItems.push({ kind: "el", id: _hkid, label: "Axis number " + _hkid.substring("likertXTick:".length) });
-                        }
-                    }
-                }
+                // Grid lines + hidden axis numbers are NOT items; they
+                // list under Other (Torry, Aug 2026: "Grid Lines is also
+                // under the Items tab ... and it shouldn't be").
             } else if (_gbCorrMode) {
                 // Correlation matrix: one row per variable (eye id
                 // corrVar:<name>), hidden ones restorable from Hidden.
@@ -70211,7 +70205,23 @@
             if (_ebCanDraw) {
                 _otherItems.push({ kind: "el", id: "errorBars", label: "Error bars" });
             }
-            _otherItems.push({ kind: "el", id: "dataPoints", label: "Data points" });
+            // Data points only where the raw-points overlay can DRAW
+            // (bar/line/dot/box/violin/raincloud; never Frequencies -
+            // counts have no raw values) and - the Value labels /
+            // Outliers listing convention - only while the layer is on
+            // (raincloud's rain always is; a hidden layer stays listed
+            // as its restore path). The old unconditional row was inert
+            // on likert/corr/pie/scatter/histogram (Torry, Aug 2026:
+            // "there aren't any individual data points on the Likert
+            // survey graph").
+            var _dpFam = ["bar", "line", "dot", "box", "violin",
+                "raincloud"].indexOf(data.graphType) >= 0;
+            if (_dpFam && data.freqMode !== true
+                && (data.graphType === "raincloud"
+                    || data.showDataPoints === true
+                    || _isElementHidden("dataPoints"))) {
+                _otherItems.push({ kind: "el", id: "dataPoints", label: "Data points" });
+            }
             // Bar/line outliers + pie slice labels: listed while their
             // "+"-menu layer is active (the value-labels listing convention).
             if (data.showBarOutliers === true) {
@@ -70224,9 +70234,22 @@
                 _otherItems.push({ kind: "el", id: "pieSliceLabel", label: "Slice labels" });
             }
             // Grid is display:none on axis-less types (pie/donut, corr,
-            // likert), so the toggle would be inert there.
+            // likert), so the generic toggle would be inert there - but
+            // likert draws its OWN grid under its own id, and that row
+            // belongs here, not in the Items tab.
             if (!(_gbFreqPie || _gbCorrMode || _gbLikertMode)) {
                 _otherItems.push({ kind: "el", id: "grid", label: "Grid" });
+            } else if (_gbLikertMode) {
+                _otherItems.push({ kind: "el", id: "likertGrid", label: "Grid lines" });
+                if (Array.isArray(data.hiddenElements)) {
+                    for (var _hkv = 0; _hkv < data.hiddenElements.length; _hkv++) {
+                        var _hkid = String(data.hiddenElements[_hkv]);
+                        if (_hkid.indexOf("likertXTick:") === 0) {
+                            _otherItems.push({ kind: "el", id: _hkid,
+                                label: "Axis number " + _hkid.substring("likertXTick:".length) });
+                        }
+                    }
+                }
             }
             // Value / n labels are one hideable layer; listed only
             // while the "+"-menu option has added them (the scatter-
