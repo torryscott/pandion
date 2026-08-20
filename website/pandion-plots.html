@@ -19528,6 +19528,25 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     harvestOverlayArrays();
   }
   var echoTimer = null;
+  // A re-render tears down the whole chart DOM, including an OPEN
+  // inline label editor - which read as "it yanks it back and puts the
+  // original label back on it" when an earlier style edit's echo
+  // landed mid-typing (Torry, Aug 2026; the t4-203 double-click fix
+  // made editors live long enough to collide with echoes, unmasking
+  // this). Echoes HOLD while the editor is open, the jamovi mid-drag
+  // delivery-guard precedent: the editor's own close commits its text,
+  // which schedules the next echo, so held deliveries coalesce and
+  // nothing is lost. Only the echo timer routes through here - direct
+  // render() calls (workspace switches) still tear down, because the
+  // user asked to leave.
+  function renderWhenEditorIdle() {
+    if (document.querySelector(
+          'textarea[data-role="inline-text-editor"]')) {
+      echoTimer = window.setTimeout(renderWhenEditorIdle, 300);
+      return;
+    }
+    render();
+  }
   // Echo delay: this debounce stands in for jamovi's R round trip.
   //
   // Punch list item 28 proposed raising this past the engine's 250ms
@@ -19573,7 +19592,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       if (key === "paletteLibrary") applyPaletteAction(value);
       else applyStyleAction(value);
       if (echoTimer) window.clearTimeout(echoTimer);
-      echoTimer = window.setTimeout(render, ECHO_MS);
+      echoTimer = window.setTimeout(renderWhenEditorIdle, ECHO_MS);
       return;
     }
     // The engine stamps styleStamp TRUE in the same batch that
@@ -19608,7 +19627,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     if (NO_ECHO_KEYS[key]) harvestOverlayArrays();
     if (NO_ECHO_KEYS[key] && !echoTimer) return;
     if (echoTimer) window.clearTimeout(echoTimer);
-    echoTimer = window.setTimeout(render, ECHO_MS);
+    echoTimer = window.setTimeout(renderWhenEditorIdle, ECHO_MS);
   };
 
   // ================================================================ UI
