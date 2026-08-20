@@ -20,6 +20,13 @@
 (function (root) {
     var SVGNS = "http://www.w3.org/2000/svg";
     var PX_PER_INCH = 96;
+    // Font sizes are STORED in chart px (96 per inch of chart) and
+    // DISPLAYED in points (72 per inch), the unit Word / Excel / Docs
+    // use (Torry, Aug 2026). The chart's inch size carries through
+    // export, so a label shown at 12 pt genuinely prints at Word's
+    // 12 pt. Exact at the 96 px/inch layout: pt = px * 0.75.
+    function _gb2PtFromPx(px) { return Math.round(px * 75) / 100; }
+    function _gb2PxFromPt(pt) { return pt * 4 / 3; }
     var MIN_W_IN = 3, MAX_W_IN = 14;
     var MIN_H_IN = 2, MAX_H_IN = 10;
     var EDGE_HIT_PX = 14;
@@ -13263,8 +13270,8 @@
             var fRot = body.querySelector('[data-field="rotation"]');
             var fRotNum = body.querySelector('[data-field="rotation-num"]');
             var fRotVal = body.querySelector('[data-field="rotation-val"]');
-            if (fSize && active !== fSize) fSize.value = s.fontSize;
-            if (fSizeNum && active !== fSizeNum) fSizeNum.value = s.fontSize;
+            if (fSize && active !== fSize) fSize.value = _gb2PtFromPx(s.fontSize);
+            if (fSizeNum && active !== fSizeNum) fSizeNum.value = _gb2PtFromPx(s.fontSize);
             if (fColor) fColor.style.background = s.color;
             if (fBold) {
                 fBold.style.background = s.bold ? "#1a5fb4" : "white";
@@ -78249,9 +78256,9 @@
             // purely by dragging it on the chart; the offset is applied
             // in the chart-render path.)
             var _xsFontCtrl =
-                '<input type="range" data-field="xs-font" min="6" max="32" step="1" value="' + fontSize + '" style="' + rangeCss + '"/>' +
-                '<input type="number" data-field="xs-font-num" min="6" max="48" step="1" value="' + fontSize + '" style="' + numInputCss + '"/>' +
-                '<span style="color:#666;">px</span>';
+                '<input type="range" data-field="xs-font" min="4.5" max="24" step="0.5" value="' + _gb2PtFromPx(fontSize) + '" style="' + rangeCss + '"/>' +
+                '<input type="number" data-field="xs-font-num" min="4.5" max="36" step="0.5" value="' + _gb2PtFromPx(fontSize) + '" style="' + numInputCss + '"/>' +
+                '<span style="color:#666;">pt</span>';
             // Custom plate size (set by dragging an edge on the chart).
             // 0 = auto (fit text). Shown as a readout + Reset alongside
             // the plate toggle.
@@ -78409,7 +78416,7 @@
                     _xsCommit(dataKey, !!cb.checked);
                 });
             }
-            function _xsWireSliderNum(field, dataKey, min, max, isInt) {
+            function _xsWireSliderNum(field, dataKey, min, max, isInt, toStore) {
                 var s = body.querySelector('[data-field="' + field + '"]');
                 var n = body.querySelector('[data-field="' + field + '-num"]');
                 function apply(val, commit) {
@@ -78417,10 +78424,12 @@
                     if (typeof min === "number") val = Math.max(min, val);
                     if (typeof max === "number") val = Math.min(max, val);
                     if (isInt) val = Math.round(val);
-                    data[dataKey] = val;
+                    // Display unit -> stored unit (pt -> px for fonts).
+                    var sv = toStore ? toStore(val) : val;
+                    data[dataKey] = sv;
                     redraw();
                     if (commit && hasSetOption) {
-                        try { _setOption(dataKey, val); } catch (_e) {}
+                        try { _setOption(dataKey, sv); } catch (_e) {}
                     }
                 }
                 if (s) {
@@ -78468,7 +78477,7 @@
                     renderInspectorPanel();
                 });
             }
-            _xsWireSliderNum("xs-font", "xyStatsFontSize", 6, 48, true);
+            _xsWireSliderNum("xs-font", "xyStatsFontSize", 4.5, 36, false, _gb2PxFromPt);
             _xsWireCheckbox("xs-plate", "xyStatsPlate");
 
             // Reset: restore every stats-overlay option to its
@@ -90803,8 +90812,8 @@
             // larger) + B/I pair. Identical structure to _txSizeCtrl.
             var _atSizeCtrl =
                 '<span style="display:inline-flex;align-items:center;gap:3px;flex-shrink:0;flex-wrap:nowrap;">' +
-                  '<input type="range" data-field="size" data-unit="px" min="6" max="36" step="1" value="' + _atInitSize + '" style="width:100px;" />' +
-                  '<input type="number" data-field="size-num" min="1" max="999" step="1" value="' + _atInitSize + '" style="width:36px;padding:2px 4px;font-size:11px;border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);outline:none;text-align:right;" title="Type a font size (the slider caps at 36 but you can type larger here)" />' +
+                  '<input type="range" data-field="size" data-unit="pt" min="4.5" max="27" step="0.5" value="' + _gb2PtFromPx(_atInitSize) + '" style="width:100px;" />' +
+                  '<input type="number" data-field="size-num" min="1" max="750" step="0.5" value="' + _gb2PtFromPx(_atInitSize) + '" style="width:36px;padding:2px 4px;font-size:11px;border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);outline:none;text-align:right;" title="Type a font size in points, the unit Word and Docs use (the slider caps at 27 but you can type larger here)" />' +
                 '</span>' +
                 '<span style="display:inline-flex;flex-shrink:0;margin-left:6px;">' +
                   '<button type="button" data-field="bold" style="width:22px;height:22px;padding:0;border:1px solid #aaa;border-right:none;border-radius:3px 0 0 3px;background:white;cursor:pointer;font-weight:bold;font-size:12px;color:#222;" aria-label="Bold" title="Bold">B</button>' +
@@ -90858,8 +90867,8 @@
             var iRotReset = body.querySelector('[data-field="rotation-reset"]');
 
             iText.value = ann.text || "";
-            iSize.value = _atInitSize;
-            iSizeNum.value = _atInitSize;
+            iSize.value = _gb2PtFromPx(_atInitSize);
+            iSizeNum.value = _gb2PtFromPx(_atInitSize);
             iColor.style.background = ann.color || "#000";
             iBold.style.background = ann.bold ? "#1a5fb4" : "white";
             iBold.style.color = ann.bold ? "white" : "#222";
@@ -90906,24 +90915,24 @@
                 var v = parseFloat(iSize.value);
                 if (!isFinite(v) || v <= 0) return;
                 if (document.activeElement !== iSizeNum) iSizeNum.value = v;
-                applyAnnotationChange(ann.id, { fontSize: v });
+                applyAnnotationChange(ann.id, { fontSize: _gb2PxFromPt(v) });
             });
             iSize.addEventListener("change", function () {
                 var v = parseFloat(iSize.value);
-                if (isFinite(v) && v > 0) commitAnnotationChange(ann.id, { fontSize: v });
+                if (isFinite(v) && v > 0) commitAnnotationChange(ann.id, { fontSize: _gb2PxFromPt(v) });
             });
             iSizeNum.addEventListener("input", function () {
                 var v = parseFloat(iSizeNum.value);
                 if (!isFinite(v) || v <= 0) return;
                 iSize.value = v;  // pins to slider min/max if outside
-                applyAnnotationChange(ann.id, { fontSize: v });
+                applyAnnotationChange(ann.id, { fontSize: _gb2PxFromPt(v) });
             });
             iSizeNum.addEventListener("change", function () {
                 var v = parseFloat(iSizeNum.value);
-                if (isFinite(v) && v > 0) commitAnnotationChange(ann.id, { fontSize: v });
+                if (isFinite(v) && v > 0) commitAnnotationChange(ann.id, { fontSize: _gb2PxFromPt(v) });
                 else {
-                    iSizeNum.value = ann.fontSize || 14;
-                    iSize.value = ann.fontSize || 14;
+                    iSizeNum.value = _gb2PtFromPx(ann.fontSize || 14);
+                    iSize.value = _gb2PtFromPx(ann.fontSize || 14);
                 }
             });
             iColor.addEventListener("click", function (e) {
@@ -91030,8 +91039,8 @@
                 '<div style="font-size:11px;color:#888;">The numbers in this box are computed from the chart and update with it - the box itself cannot be typed into.</div>' +
                 '<div style="display:flex;align-items:center;gap:8px;">' +
                 '<label style="width:64px;font-size:11px;color:#555;text-align:right;">Size:</label>' +
-                '<input type="range" data-field="sb-size" min="8" max="20" step="1" value="' + fs + '" style="flex:1;max-width:180px;"/>' +
-                '<span data-field="sb-size-val" style="font-size:11px;color:#666;min-width:34px;">' + fs + 'px</span>' +
+                '<input type="range" data-field="sb-size" min="6" max="15" step="0.5" value="' + _gb2PtFromPx(fs) + '" style="flex:1;max-width:180px;"/>' +
+                '<span data-field="sb-size-val" style="font-size:11px;color:#666;min-width:34px;">' + _gb2PtFromPx(fs) + 'pt</span>' +
                 '</div>' +
                 '<div style="display:flex;align-items:center;gap:8px;">' +
                 '<label style="width:64px;font-size:11px;color:#555;text-align:right;">Plate:</label>' +
@@ -91043,11 +91052,11 @@
             var slv = body.querySelector('[data-field="sb-size-val"]');
             if (sl) {
                 sl.addEventListener("input", function () {
-                    if (slv) slv.textContent = sl.value + "px";
-                    applyAnnotationChange(ann.id, { fontSize: parseFloat(sl.value) });
+                    if (slv) slv.textContent = sl.value + "pt";
+                    applyAnnotationChange(ann.id, { fontSize: _gb2PxFromPt(parseFloat(sl.value)) });
                 });
                 sl.addEventListener("change", function () {
-                    commitAnnotationChange(ann.id, { fontSize: parseFloat(sl.value) });
+                    commitAnnotationChange(ann.id, { fontSize: _gb2PxFromPt(parseFloat(sl.value)) });
                 });
             }
             var pc = body.querySelector('[data-field="sb-plate"]');
@@ -91158,8 +91167,8 @@
             // axis titles).
             var _baSizeCtrl =
                 '<span style="display:inline-flex;align-items:center;gap:3px;flex-shrink:0;flex-wrap:nowrap;">' +
-                  '<input type="range" data-field="size" data-unit="px" min="6" max="36" step="1" value="' + _baInitSize + '" style="width:100px;" />' +
-                  '<input type="number" data-field="size-num" min="1" max="999" step="1" value="' + _baInitSize + '" style="width:36px;padding:2px 4px;font-size:11px;border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);outline:none;text-align:right;" title="Type a font size (slider caps at 36 but you can type larger here)" />' +
+                  '<input type="range" data-field="size" data-unit="pt" min="4.5" max="27" step="0.5" value="' + _gb2PtFromPx(_baInitSize) + '" style="width:100px;" />' +
+                  '<input type="number" data-field="size-num" min="1" max="750" step="0.5" value="' + _gb2PtFromPx(_baInitSize) + '" style="width:36px;padding:2px 4px;font-size:11px;border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);outline:none;text-align:right;" title="Type a font size in points, the unit Word and Docs use (slider caps at 27 but you can type larger here)" />' +
                 '</span>' +
                 '<span style="display:inline-flex;flex-shrink:0;margin-left:6px;">' +
                   '<button type="button" data-field="bold" style="width:22px;height:22px;padding:0;border:1px solid #aaa;border-right:none;border-radius:3px 0 0 3px;background:white;cursor:pointer;font-weight:bold;font-size:12px;color:#222;" title="Bold">B</button>' +
@@ -91760,14 +91769,14 @@
                 iSizeVal.textContent = v;
                 var iSzNum = body.querySelector('[data-field="size-num"]');
                 if (iSzNum && document.activeElement !== iSzNum) iSzNum.value = v;
-                applyAnnotationChange(ann.id, { fontSize: v });
+                applyAnnotationChange(ann.id, { fontSize: _gb2PxFromPt(v) });
             });
             iSize.addEventListener("change", function () {
                 var v = parseFloat(iSize.value);
-                if (isFinite(v) && v > 0) commitAnnotationChange(ann.id, { fontSize: v });
+                if (isFinite(v) && v > 0) commitAnnotationChange(ann.id, { fontSize: _gb2PxFromPt(v) });
             });
             // Size num input (new in the tabbed layout). Typed value
-            // can exceed the slider's 36 px cap.
+            // can exceed the slider's 27 pt cap.
             var iBaSizeNum = body.querySelector('[data-field="size-num"]');
             if (iBaSizeNum) {
                 iBaSizeNum.addEventListener("input", function () {
@@ -91775,11 +91784,11 @@
                     if (!isFinite(v) || v <= 0) return;
                     iSize.value = v;
                     iSizeVal.textContent = v;
-                    applyAnnotationChange(ann.id, { fontSize: v });
+                    applyAnnotationChange(ann.id, { fontSize: _gb2PxFromPt(v) });
                 });
                 iBaSizeNum.addEventListener("change", function () {
                     var v = parseFloat(iBaSizeNum.value);
-                    if (isFinite(v) && v > 0) commitAnnotationChange(ann.id, { fontSize: v });
+                    if (isFinite(v) && v > 0) commitAnnotationChange(ann.id, { fontSize: _gb2PxFromPt(v) });
                 });
             }
             iTextOff.addEventListener("input", function () {
@@ -94099,8 +94108,8 @@
             // there.
             var _txSizeCtrl =
                 '<span style="display:inline-flex;align-items:center;gap:3px;flex-shrink:0;flex-wrap:nowrap;">' +
-                  '<input type="range" data-field="size" data-unit="px" min="4" max="36" step="1" value="12" style="width:100px;" />' +
-                  '<input type="number" data-field="size-num" min="1" max="999" step="1" value="12" style="width:36px;padding:2px 4px;font-size:11px;border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);outline:none;text-align:right;" title="Type a font size (the slider caps at 36 but you can type larger here)" />' +
+                  '<input type="range" data-field="size" data-unit="pt" min="3" max="27" step="0.5" value="9" style="width:100px;" />' +
+                  '<input type="number" data-field="size-num" min="1" max="750" step="0.5" value="9" style="width:36px;padding:2px 4px;font-size:11px;border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);outline:none;text-align:right;" title="Type a font size in points, the unit Word and Docs use (the slider caps at 27 but you can type larger here)" />' +
                 '</span>' +
                 '<span style="display:inline-flex;flex-shrink:0;margin-left:6px;">' +
                   '<button type="button" data-field="bold" style="width:22px;height:22px;padding:0;border:1px solid #aaa;border-right:none;border-radius:3px 0 0 3px;background:white;cursor:pointer;font-weight:bold;font-size:12px;color:#222;" aria-label="Bold" title="Bold">B</button>' +
@@ -94418,8 +94427,8 @@
             });
 
             var s = getEffectiveTextStyle(styleId);
-            iSize.value = s.fontSize;
-            iSizeNum.value = s.fontSize;
+            iSize.value = _gb2PtFromPx(s.fontSize);
+            iSizeNum.value = _gb2PtFromPx(s.fontSize);
             iColor.style.background = s.color;
             iBold.style.background = s.bold ? "#1a5fb4" : "white";
             iBold.style.color = s.bold ? "white" : "#222";
@@ -94440,7 +94449,7 @@
                 var v = parseFloat(iSize.value);
                 if (isFinite(v) && v > 0) {
                     iSizeNum.value = v;
-                    applyTextStyle(styleId, { fontSize: v });
+                    applyTextStyle(styleId, { fontSize: _gb2PxFromPt(v) });
                 }
             });
             iSizeNum.addEventListener("input", function () {
@@ -94449,7 +94458,7 @@
                 // / mid-edit field (e.g. "" or "-") shouldn't redraw.
                 if (isFinite(v) && v > 0) {
                     iSize.value = v;  // pins to slider min/max if outside
-                    applyTextStyle(styleId, { fontSize: v });
+                    applyTextStyle(styleId, { fontSize: _gb2PxFromPt(v) });
                 }
             });
             // Enter / blur: clamp obviously-bad values back to a usable
@@ -94457,7 +94466,7 @@
             iSizeNum.addEventListener("change", function () {
                 var v = parseFloat(iSizeNum.value);
                 if (!isFinite(v) || v <= 0) {
-                    var fallback = getEffectiveTextStyle(styleId).fontSize;
+                    var fallback = _gb2PtFromPx(getEffectiveTextStyle(styleId).fontSize);
                     iSizeNum.value = fallback;
                     iSize.value = fallback;
                 }
@@ -94990,8 +94999,8 @@
                 '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;">' +
                   '<label style="color:#555;font-size:11px;width:48px;text-align:right;flex-shrink:0;">Size</label>' +
                   '<span style="display:inline-flex;align-items:center;gap:3px;flex-shrink:0;flex-wrap:nowrap;">' +
-                    '<input type="range" data-field="size" data-unit="px" min="4" max="36" step="1" value="' + (sizeShared ? sharedSize : 12) + '" style="width:100px;" />' +
-                    '<input type="number" data-field="size-num" min="1" max="999" step="1" placeholder="—" value="' + (sizeShared ? sharedSize : "") + '" style="width:36px;padding:2px 4px;font-size:11px;border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);outline:none;text-align:right;" title="Type a font size (the slider caps at 36 but you can type larger here)" />' +
+                    '<input type="range" data-field="size" data-unit="pt" min="3" max="27" step="0.5" value="' + (sizeShared ? _gb2PtFromPx(sharedSize) : 9) + '" style="width:100px;" />' +
+                    '<input type="number" data-field="size-num" min="1" max="750" step="0.5" placeholder="—" value="' + (sizeShared ? _gb2PtFromPx(sharedSize) : "") + '" style="width:36px;padding:2px 4px;font-size:11px;border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);outline:none;text-align:right;" title="Type a font size in points, the unit Word and Docs use (the slider caps at 27 but you can type larger here)" />' +
                   '</span>' +
                   // Connected B/I toggle group.
                   '<span style="display:inline-flex;flex-shrink:0;margin-left:6px;">' +
@@ -95035,14 +95044,14 @@
                 var v = parseFloat(iSize.value);
                 if (isFinite(v) && v > 0) {
                     iSizeNum.value = v;
-                    applyToAll({ fontSize: v });
+                    applyToAll({ fontSize: _gb2PxFromPt(v) });
                 }
             });
             iSizeNum.addEventListener("input", function () {
                 var v = parseFloat(iSizeNum.value);
                 if (isFinite(v) && v > 0) {
                     iSize.value = v;
-                    applyToAll({ fontSize: v });
+                    applyToAll({ fontSize: _gb2PxFromPt(v) });
                 }
             });
             iSizeNum.addEventListener("change", function () {
@@ -95051,7 +95060,7 @@
                     // Restore to whatever's currently shared (or first
                     // entry's value if mixed).
                     var s = readStyles();
-                    var fb = allSame(s, "fontSize") ? s[0].fontSize : s[0].fontSize;
+                    var fb = _gb2PtFromPx(allSame(s, "fontSize") ? s[0].fontSize : s[0].fontSize);
                     iSizeNum.value = fb; iSize.value = fb;
                 }
             });
