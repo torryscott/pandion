@@ -6106,6 +6106,34 @@
                                 }
                             }
                         }
+                        // Histdensity's own KDE overlay: widen to each
+                        // group's curve peak, scaled exactly as the draw
+                        // site scales the curve (histDensityScaleToCount,
+                        // then per-stat: count -> n*bw, proportion -> bw,
+                        // density -> 1). The density TYPE already folds
+                        // maxD into _yTop above; histdensity's range came
+                        // from bin counts alone, so a curve peakier than
+                        // its histogram (narrow bandwidth vs wide bins)
+                        // poked past the 1.08 pad and clipped flat at the
+                        // plot ceiling.
+                        if (_distType === "histdensity") {
+                            var _hkEdg = _distBinEdges(xMin, xMax, data.histBins, data.histBinWidth, bars);
+                            var _hkBw = _hkEdg[1] - _hkEdg[0];
+                            var _hkScaleCnt = data.histDensityScaleToCount !== false;
+                            var _hkStat = data.histStat || "count";
+                            for (var _hki = 0; _hki < bars.length; _hki++) {
+                                var _hkk = _computeKDE(bars[_hki].values, data.densBandwidthAdjust || 1, false, data.densKernel);
+                                if (!_hkk || !_hkk.points.length) continue;
+                                var _hkv = bars[_hki].values; var _hkn = 0;
+                                if (Array.isArray(_hkv)) for (var _hkj = 0; _hkj < _hkv.length; _hkj++) if (isFinite(_hkv[_hkj])) _hkn++;
+                                var _hkf = !_hkScaleCnt ? 1
+                                    : (_hkStat === "density") ? 1
+                                    : (_hkStat === "proportion") ? _hkBw
+                                    : _hkn * _hkBw;
+                                var _hkPeak = _hkk.maxD * _hkf;
+                                if (_hkPeak > _yTop) _yTop = _hkPeak;
+                            }
+                        }
                         // Normal-curve overlay: widen to each group's
                         // analytic peak (dnorm at the mean, scaled the
                         // same way the render scales the curve) so the
@@ -24586,7 +24614,14 @@
             var pad = trim === false ? 3 * h : 0;
             var lo2 = minV - pad, hi2 = maxV + pad;
             if (hi2 - lo2 < 1e-9) { lo2 -= 0.5; hi2 += 0.5; }
-            var NSAMP = 96;
+            // 384, not 96: the curve is drawn as straight chords
+            // between these samples, and at 96 a sharp peak showed
+            // its corners once count-scaling steepened it (a flat cap
+            // and visible kinks at the apex, ~0.4% of peak height).
+            // At 384 the worst chord error is ~0.02%, below a pixel
+            // at any plot size. Violin and raincloud outlines come
+            // from the same samples and smooth out with it.
+            var NSAMP = 384;
             var points = [];
             var maxD = 0;
             // Kernel selection (R density() convention: each kernel is
