@@ -3618,6 +3618,21 @@
             // window. (Inline typing already rides __gb2_textData above.)
             if (_gb2SpecRealSet) {
                 var _reTitle = function (ovr, titleK, fld, dfltFld) {
+                    // In-progress typing WINS: _applyTypedTextToData keeps
+                    // the live text in __gb2_textData[fld], applied to data
+                    // just above - re-deriving from the exploded blob here
+                    // stomped it with the PREVIOUSLY COMMITTED title when an
+                    // echo landed mid-keystroke (Torry's Safari revert, Aug
+                    // 2026: rename a label, click it again, type into the
+                    // panel box, and the ~1.5s snapshot echo put the old
+                    // name back; Chromium masked the stomp in the panel's
+                    // re-seed, WebKit did not). The old comment's "already
+                    // rides __gb2_textData above" was the trap: running
+                    // above is exactly why it was overwritten.
+                    var _tdv = (typeof window !== "undefined")
+                        ? window.__gb2_textData : null;
+                    if (_tdv && Object.prototype.hasOwnProperty.call(_tdv, fld))
+                        return;
                     if (data[ovr] === true && typeof data[titleK] === "string") data[fld] = data[titleK];
                     else if (data[ovr] === false && typeof data[dfltFld] === "string") data[fld] = data[dfltFld];
                 };
