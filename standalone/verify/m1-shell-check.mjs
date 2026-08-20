@@ -1382,7 +1382,11 @@ await page.waitForTimeout(400);
         n: window.PS_SHELL.charts().length,
         closeBtns: document.querySelectorAll('.ps-tab-x').length
     }));
-    ok(t6.n === 1 && t6.closeBtns === 0, 'close removes the tab (last tab unclosable)');
+    // t4-222 (Torry): the LAST tab is closable too - closing it lands
+    // on a fresh blank chart with undo as the way back - so the close
+    // affordance stays rendered (mouse x + keyboard x = 2).
+    ok(t6.n === 1 && t6.closeBtns >= 1,
+       'close removes the tab (the last one stays closable, t4-222)');
     // The saved two-chart file restores both tabs in a fresh session.
     const ctx3 = await newTestContext();
     const page3 = await ctx3.newPage();

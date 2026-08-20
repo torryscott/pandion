@@ -18082,7 +18082,12 @@
   }
   function hideLayoutGallery() { closeShellDialog("ps-layout-gallery"); }
   function closeChart(id, opts) {
-    if (PROJECT.charts.length <= 1) return;
+    // The last document CAN be closed (Torry, Aug 2026: "no way to
+    // delete the chart if there's only one remaining"): the workspace
+    // falls back to the existing No-charts-yet card, whose Create
+    // button opens the same picker as "+", and the close's own undo
+    // toast is the way back. The old <= 1 guard made the tab's close
+    // affordance a silent no-op on the last chart.
     // The B12/t4-31 drain: an in-flight edit lands on the document that
     // produced it (still restorable through this close's own undo toast)
     // rather than flushing onto whichever neighbor becomes active.
@@ -18122,9 +18127,30 @@
               replacement = PROJECT.charts[ri]; break;
             }
       }
-      PROJECT.activeChart = (replacement || PROJECT.charts[0]).id;
+      var fallback = replacement || PROJECT.charts[0] || null;
+      PROJECT.activeChart = fallback ? fallback.id : null;
       if (replacement) rememberDocument(replacement);
       else PROJECT.ui[memoryKey] = null;
+    }
+    // Closing the LAST document lands on a fresh blank chart, made
+    // EXPLICITLY here rather than left to activeChart()'s chartless
+    // auto-create: that fallback reuses the lowest free id, which
+    // collides with the just-removed chart's id and makes the undo
+    // restore refuse ("already exists"). The blank takes a
+    // deliberately different id, and the restore below removes it
+    // again while it is still pristine, so undo returns the project
+    // to exactly the pre-close state.
+    var blankId = null;
+    if (PROJECT.charts.length === 0) {
+      var blank = newChart();
+      if (blank.id === removed.id) {
+        var rn = Number(String(removed.id).replace(/^c/, ""));
+        blank.id = "c" + (isFinite(rn) ? rn + 1 : 2);
+      }
+      blankId = blank.id;
+      PROJECT.charts.push(blank);
+      PROJECT.activeChart = blank.id;
+      rememberDocument(blank);
     }
     if (PROJECT.ui[memoryKey] === removed.id) {
       var rememberedReplacement = appFirstDocument(isLayoutTab(removed));
@@ -18153,6 +18179,23 @@
       }
     var restore = function () {
       if (chartById(removed.id)) return;
+      if (blankId) {
+        var bdoc = chartById(blankId);
+        // Pristine = no ACTUAL assignments: rolesFor() lazily
+        // creates an empty per-module container on mere render, so
+        // roles like { plotbuilder: {} } still count as untouched.
+        var pristine = bdoc && !isLayoutTab(bdoc) &&
+          Object.keys(bdoc.options || {}).length === 0 &&
+          Object.keys(bdoc.roles || {}).every(function (mk) {
+            var rr = bdoc.roles[mk];
+            return rr && typeof rr === "object" &&
+              Object.keys(rr).length === 0;
+          });
+        if (pristine)
+          for (var bi = PROJECT.charts.length - 1; bi >= 0; bi--)
+            if (PROJECT.charts[bi].id === blankId)
+              PROJECT.charts.splice(bi, 1);
+      }
       PROJECT.charts.splice(Math.min(idx, PROJECT.charts.length), 0, removed);
       PROJECT.activeChart = wasActive === removed.id ? removed.id : PROJECT.activeChart;
       PROJECT.ui.workspace = priorWorkspace;
@@ -18761,7 +18804,9 @@
         // siblings inside the wrappers and axe failed 8 states; this is
         // WHY the close always lived outside the strip). The accessible
         // close is the labelled keyboard button after the tablist below.
-        if (PROJECT.charts.length > 1) {
+        // The close renders on the LAST document too (t4-222): closing
+        // it lands on the No-charts-yet card, with undo as the way back.
+        {
           var tx = mkEl("button", "ps-tab-x", "\u00d7");
           tx.type = "button";
           tx.setAttribute("data-chart-id", c.id);
@@ -18786,7 +18831,7 @@
     // until keyboard focus reaches it - the bypass-link idiom. Tab from
     // the selected tab lands here, exactly the pre-Jul-29 keyboard model.
     var currentDocument = chartById(PROJECT.activeChart);
-    if (currentDocument && PROJECT.charts.length > 1) {
+    if (currentDocument) {
       var x = mkEl("button", "ps-tab-x ps-tab-x-kbd", "\u00d7");
       x.type = "button";
       x.setAttribute("data-chart-id", currentDocument.id);
