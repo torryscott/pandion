@@ -58,13 +58,13 @@ window.PSData = (function () {
     var err = 0;
     if (n >= 2 && errorType !== "none" && summaryFunc !== "median") {
       var sd = S.sdSample(v), se = sd / Math.sqrt(n);
-      // ci95c = comparison-adjusted: the 95% half-width over root 2, so
+      // ci95c = difference-adjusted (superb): the 95% half-width TIMES
       // two bars that do not overlap differ at p < .05. Mirrors the same
       // switch in plotbuilder.b.R cell_stat().
       err = errorType === "sd" ? sd
           : errorType === "ci95" ? se * S.qt(0.975, n - 1)
           : errorType === "ci99" ? se * S.qt(0.995, n - 1)
-          : errorType === "ci95c" ? se * S.qt(0.975, n - 1) / Math.SQRT2
+          : errorType === "ci95c" ? se * S.qt(0.975, n - 1) * Math.SQRT2
           : se;
     }
     return { center: center, err: err, n: n, values: v };
@@ -911,12 +911,12 @@ window.PSData = (function () {
             if (isFinite(norm[i][j])) nv.push(norm[i][j]);
           if (nv.length >= 2) {
             var sd = S.sdSample(nv) * morey, se = sd / Math.sqrt(nv.length);
-            // comparison-adjusted rides ON TOP of the Cousineau-Morey
+            // difference-adjusted rides ON TOP of the Cousineau-Morey
             // correction already in `se` - the two are orthogonal
             err = opts.errorBarType === "sd" ? sd
                 : opts.errorBarType === "ci95" ? se * S.qt(0.975, nv.length - 1)
                 : opts.errorBarType === "ci99" ? se * S.qt(0.995, nv.length - 1)
-                : opts.errorBarType === "ci95c" ? se * S.qt(0.975, nv.length - 1) / Math.SQRT2
+                : opts.errorBarType === "ci95c" ? se * S.qt(0.975, nv.length - 1) * Math.SQRT2
                 : se;
           }
         }

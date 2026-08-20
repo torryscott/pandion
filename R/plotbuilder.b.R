@@ -376,7 +376,7 @@ plotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Class
                         # non-overlap ALWAYS implies p < .05, while a
                         # borderline significant pair can still touch. That
                         # one-sided guarantee is what the panel copy claims.
-                        "ci95c" = se_val * stats::qt(0.975, n - 1) / sqrt(2),
+                        "ci95c" = se_val * stats::qt(0.975, n - 1) * sqrt(2),
                         se_val
                     )
                 }
