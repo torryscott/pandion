@@ -15707,15 +15707,68 @@
       e.preventDefault();
       showToast("Copied " + cells.length + (cells.length === 1 ? " cell" : " cells"));
     });
-    // Paste routes at the DOCUMENT level, not the grid (Torry, Aug
-    // 2026): Ctrl+V worked because the focused grid sat on the event
-    // path, but Safari's context-menu Paste dispatches at whatever
-    // holds focus - often the body after an unrelated click - so it
-    // sailed past a grid-level listener and silently did nothing.
-    // Gated to the data workspace with a live selection and no editor
-    // open; pastes aimed at real inputs (the cell editor, dialogs,
-    // find bars) are never intercepted. A paste that bubbles up FROM
-    // the grid lands here just the same, so Ctrl+V is unchanged.
+    // THE PASTE SINK (Torry, Aug 2026, round 2 - his Safari showed a
+    // paste bubble on Cmd+V and his Chrome a clipboard-permission
+    // loop): browsers only guarantee delivery of a paste keystroke's
+    // clipboardData into an EDITABLE target. So a hidden textarea
+    // lives INSIDE the grid, and the Cmd/Ctrl+V keydown hops focus
+    // onto it BEFORE the browser executes the paste default action -
+    // the native paste then lands in an editable element (Safari
+    // delivers without its bubble, no browser needs a clipboard-read
+    // permission), the sink's own paste handler parses and applies,
+    // and focus returns to the grid. Being a textarea, the document
+    // listener below skips it, so nothing double-applies; being a
+    // CHILD of the grid, its stray keydowns still bubble to the grid
+    // handler. If no paste arrives (empty clipboard), a short timer
+    // hands focus back.
+    var GRID_PASTE_SINK = null;
+    function gridPasteSink() {
+      if (GRID_PASTE_SINK && GRID_PASTE_SINK.isConnected)
+        return GRID_PASTE_SINK;
+      var sink = document.createElement("textarea");
+      sink.setAttribute("data-role", "grid-paste-sink");
+      sink.setAttribute("aria-hidden", "true");
+      sink.tabIndex = -1;
+      sink.style.cssText = "position:absolute;left:-9999px;top:0;" +
+        "width:2px;height:2px;opacity:0;border:0;padding:0;resize:none;";
+      sink.addEventListener("paste", function (e) {
+        var text = e.clipboardData
+          ? e.clipboardData.getData("text/plain") : "";
+        e.preventDefault();
+        sink.value = "";
+        gridFocusSelf();
+        if (!text || !GRID_SELECTION || GRID_EDIT) return;
+        var delimiter = text.indexOf("\t") !== -1
+          ? "\t" : sniffDelimiter(text);
+        var matrix = parseDelimitedRows(text, delimiter, true);
+        if (matrix.length) gridApplyMatrix(matrix);
+      });
+      grid.appendChild(sink);
+      GRID_PASTE_SINK = sink;
+      return sink;
+    }
+    document.addEventListener("keydown", function (e) {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+      if (String(e.key || "").toLowerCase() !== "v") return;
+      if (appWorkspace() !== "data" || !GRID_SELECTION || GRID_EDIT) return;
+      var a = document.activeElement;
+      if (a && a.closest &&
+          a.closest("input, textarea, [contenteditable]")) return;
+      var sink = gridPasteSink();
+      sink.value = "";
+      try { sink.focus({ preventScroll: true }); }
+      catch (_e) { try { sink.focus(); } catch (_e2) {} }
+      // No preventDefault: the imminent native paste is the payload.
+      window.setTimeout(function () {
+        if (document.activeElement === sink) gridFocusSelf();
+      }, 400);
+    }, true);
+    // Paste ALSO routes at the DOCUMENT level (round 1): Safari's
+    // context-menu Paste dispatches at whatever holds focus - often
+    // the body - so it sailed past a grid-level listener. Gated to the
+    // data workspace with a live selection and no editor open; pastes
+    // aimed at real inputs (the cell editor, dialogs, find bars, and
+    // the sink above) are never intercepted.
     document.addEventListener("paste", function (e) {
       if (appWorkspace() !== "data") return;
       if (GRID_EDIT || !GRID_SELECTION || !e.clipboardData) return;
@@ -27362,7 +27415,9 @@
       var rows = parseDelimitedRows(text, delimiter, true);
       if (rows.length) gridApplyMatrix(rows);
     }, function () {
-      showToast("The browser refused clipboard access. Use Cmd/Ctrl+V.", true);
+      showToast("This browser blocks menu paste for local files. " +
+                "Click a cell and press Cmd/Ctrl+V instead - that " +
+                "always works.", true);
     });
   }
   function gridMenuSelectAll() {
