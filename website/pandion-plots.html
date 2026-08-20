@@ -25641,10 +25641,30 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
         return GRID_PASTE_SINK;
       var sink = document.createElement("textarea");
       sink.setAttribute("data-role", "grid-paste-sink");
-      sink.setAttribute("aria-hidden", "true");
+      // NOT aria-hidden: focus can DWELL here while Safari's paste
+      // bubble waits for a click, and aria-hidden on a focused
+      // element is an axe violation. Labelled instead, out of the tab
+      // order, and never announced as content because it is empty.
+      sink.setAttribute("aria-label", "Paste target");
       sink.tabIndex = -1;
-      sink.style.cssText = "position:absolute;left:-9999px;top:0;" +
-        "width:2px;height:2px;opacity:0;border:0;padding:0;resize:none;";
+      // IN the viewport, not parked at left:-9999px (round 3): Safari
+      // will not treat an off-screen editable as a real paste target,
+      // which is why it kept showing its bubble even with the sink
+      // focused. One transparent pixel over the selected cell.
+      sink.style.cssText = "position:fixed;left:0;top:0;width:1px;" +
+        "height:1px;opacity:0;border:0;padding:0;margin:0;" +
+        "resize:none;z-index:-1;";
+      // Any key that is not the paste chord means the user moved on:
+      // hand focus back so type-over, arrows and Enter behave. (Arrows
+      // already bubble to the grid handler - the sink is a grid child
+      // - so this is about not swallowing typed characters.)
+      sink.addEventListener("keydown", function (e) {
+        var k = String(e.key || "").toLowerCase();
+        if (k === "meta" || k === "control" || k === "shift" ||
+            (k === "v" && (e.metaKey || e.ctrlKey))) return;
+        gridFocusSelf();
+      });
+      sink.addEventListener("blur", function () { sink.value = ""; });
       sink.addEventListener("paste", function (e) {
         var text = e.clipboardData
           ? e.clipboardData.getData("text/plain") : "";
@@ -25670,12 +25690,36 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
           a.closest("input, textarea, [contenteditable]")) return;
       var sink = gridPasteSink();
       sink.value = "";
+      // Park the pixel over the selected cell so the paste target is
+      // where the user is looking (and genuinely on screen).
+      try {
+        var td = grid.querySelector("td.ps-gsel, td[data-gsel]") ||
+                 grid.querySelector("td[data-gc]");
+        if (td) {
+          var r = td.getBoundingClientRect();
+          if (r.width && r.top >= 0) {
+            sink.style.left = Math.round(r.left + r.width / 2) + "px";
+            sink.style.top = Math.round(r.top + r.height / 2) + "px";
+          }
+        }
+      } catch (_ePos) {}
       try { sink.focus({ preventScroll: true }); }
       catch (_e) { try { sink.focus(); } catch (_e2) {} }
       // No preventDefault: the imminent native paste is the payload.
+      // NO short timer (round 3): Safari's paste bubble waits for a
+      // USER CLICK, seconds later - a 400ms hand-back meant that click
+      // delivered the paste to whatever had focus by then, which is
+      // how Torry's numbers ended up in the chart. Focus dwells on the
+      // sink until the paste lands, another key is pressed, or the
+      // user clicks elsewhere; the long stop is a backstop only.
       window.setTimeout(function () {
         if (document.activeElement === sink) gridFocusSelf();
-      }, 400);
+      }, 30000);
+    }, true);
+    // A click anywhere else while the sink waits releases it.
+    document.addEventListener("pointerdown", function () {
+      if (GRID_PASTE_SINK && document.activeElement === GRID_PASTE_SINK)
+        gridFocusSelf();
     }, true);
     // Paste ALSO routes at the DOCUMENT level (round 1): Safari's
     // context-menu Paste dispatches at whatever holds focus - often
