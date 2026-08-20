@@ -15707,8 +15707,21 @@
       e.preventDefault();
       showToast("Copied " + cells.length + (cells.length === 1 ? " cell" : " cells"));
     });
-    grid.addEventListener("paste", function (e) {
+    // Paste routes at the DOCUMENT level, not the grid (Torry, Aug
+    // 2026): Ctrl+V worked because the focused grid sat on the event
+    // path, but Safari's context-menu Paste dispatches at whatever
+    // holds focus - often the body after an unrelated click - so it
+    // sailed past a grid-level listener and silently did nothing.
+    // Gated to the data workspace with a live selection and no editor
+    // open; pastes aimed at real inputs (the cell editor, dialogs,
+    // find bars) are never intercepted. A paste that bubbles up FROM
+    // the grid lands here just the same, so Ctrl+V is unchanged.
+    document.addEventListener("paste", function (e) {
+      if (appWorkspace() !== "data") return;
       if (GRID_EDIT || !GRID_SELECTION || !e.clipboardData) return;
+      var t = e.target;
+      if (t && t.closest && t.closest("input, textarea, [contenteditable]"))
+        return;
       var text = e.clipboardData.getData("text/plain");
       if (!text) return;
       var delimiter = text.indexOf("\t") !== -1 ? "\t" : sniffDelimiter(text);
