@@ -1727,7 +1727,8 @@
     max-height: 340px; overflow: auto; outline: none;
     --ps-grid-selection: var(--ps-accent);
   }
-  .ps-datagrid:focus-visible {
+  .ps-datagrid:focus-visible,
+  .ps-datagrid:focus-within {
     box-shadow: inset 0 0 0 2px rgba(53,115,189,0.28);
   }
   .ps-datagrid.ps-grid-selecting { user-select: none; cursor: cell; }

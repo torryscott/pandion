@@ -15744,12 +15744,9 @@
       // hand focus back so type-over, arrows and Enter behave. (Arrows
       // already bubble to the grid handler - the sink is a grid child
       // - so this is about not swallowing typed characters.)
-      sink.addEventListener("keydown", function (e) {
-        var k = String(e.key || "").toLowerCase();
-        if (k === "meta" || k === "control" || k === "shift" ||
-            (k === "v" && (e.metaKey || e.ctrlKey))) return;
-        gridFocusSelf();
-      });
+      // No hand-back on ordinary keys: the sink IS the resting focus
+      // now, and its keystrokes bubble to the grid handler unchanged.
+      // (The cell editor takes focus on its own when it opens.)
       sink.addEventListener("blur", function () { sink.value = ""; });
       sink.addEventListener("paste", function (e) {
         var text = e.clipboardData
@@ -15763,18 +15760,50 @@
         var matrix = parseDelimitedRows(text, delimiter, true);
         if (matrix.length) gridApplyMatrix(matrix);
       });
+      // A typed character reaches the sink as well as the grid's
+      // type-over handler; keep it empty so nothing accumulates.
+      sink.addEventListener("input", function () { sink.value = ""; });
       grid.appendChild(sink);
       GRID_PASTE_SINK = sink;
       return sink;
     }
-    document.addEventListener("keydown", function (e) {
-      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
-      if (String(e.key || "").toLowerCase() !== "v") return;
+    // gridFocusSelf lives above this scope; hand it the factory.
+    window.__psGridPasteSink = gridPasteSink;
+    // ARM ON THE MODIFIER, NOT ON V (round 4). Proven with a native
+    // CDP paste command: a browser fires NO paste event at all unless
+    // the focused element was ALREADY editable when the paste command
+    // resolved - so hopping focus during the V keydown is too late,
+    // which is why rounds 1-3 failed in both Safari and Chrome. But
+    // parking focus in the sink permanently breaks the ARIA grid
+    // contract (a screen reader tracks the active cell through
+    // aria-activedescendant on the FOCUSED grid). The modifier press
+    // is the seam: Cmd/Ctrl keydown fires BEFORE the V keydown, so the
+    // sink is armed in time for the paste, while every navigation key
+    // leaves DOM focus on the grid where the a11y contract needs it.
+    // Focus returns to the grid shortly after the modifier is released.
+    // WINDOW capture, and registered before the undo router (which is
+    // also window-capture): a chord that is NOT paste must find focus
+    // back on the grid before any other handler inspects e.target,
+    // because those guards read a focused textarea as "the user is
+    // typing" and bail - which silently broke Cmd/Ctrl+Z the moment
+    // the modifier armed the sink.
+    window.addEventListener("keydown", function (e) {
+      var k = String(e.key || "").toLowerCase();
+      var isMod = (k === "meta" || k === "control");
+      if (!isMod && !((e.metaKey || e.ctrlKey) && k === "v")) {
+        // Any other key while the sink is armed: hand the grid its
+        // focus back SYNCHRONOUSLY, before this event is seen again.
+        if (GRID_PASTE_SINK && document.activeElement === GRID_PASTE_SINK)
+          gridFocusSelf();
+        return;
+      }
+      if (e.altKey) return;
       if (appWorkspace() !== "data" || !GRID_SELECTION || GRID_EDIT) return;
       var a = document.activeElement;
       if (a && a.closest &&
           a.closest("input, textarea, [contenteditable]")) return;
       var sink = gridPasteSink();
+      if (document.activeElement === sink) return;   // already armed
       sink.value = "";
       // Park the pixel over the selected cell so the paste target is
       // where the user is looking (and genuinely on screen).
@@ -15802,11 +15831,18 @@
         if (document.activeElement === sink) gridFocusSelf();
       }, 30000);
     }, true);
-    // A click anywhere else while the sink waits releases it.
-    document.addEventListener("pointerdown", function () {
-      if (GRID_PASTE_SINK && document.activeElement === GRID_PASTE_SINK)
-        gridFocusSelf();
+    window.addEventListener("keyup", function (e) {
+      var k = String(e.key || "").toLowerCase();
+      if (k !== "meta" && k !== "control") return;
+      if (!GRID_PASTE_SINK || document.activeElement !== GRID_PASTE_SINK)
+        return;
+      // Let the paste (and Safari's bubble, which can resolve later)
+      // land before handing the grid its focus back.
+      window.setTimeout(function () {
+        if (document.activeElement === GRID_PASTE_SINK) gridFocusSelf();
+      }, 900);
     }, true);
+
     // Paste ALSO routes at the DOCUMENT level (round 1): Safari's
     // context-menu Paste dispatches at whatever holds focus - often
     // the body - so it sailed past a grid-level listener. Gated to the
@@ -16617,7 +16653,16 @@
         } catch (_geErr) { _geWas = _geNow + "\u0000"; }
         if (_geNow === _geWas) { gridCancelEdit(); _geTook = true; }
       }
-      if (!_geTook && tgt && tgt.closest &&
+      // The grid's paste sink is a textarea, but nobody TYPES in it -
+      // it exists only to catch a paste, and the Cmd/Ctrl modifier
+      // arms it before the second key arrives (t4-225 round 4). A
+      // keydown's e.target is stamped at dispatch, so refocusing
+      // cannot un-stamp it: the guard has to know the sink by name or
+      // every chord held over an armed sink (Cmd+Z first among them)
+      // reads as "the user is typing" and dies here.
+      var _tgtSink = !!(tgt && tgt.getAttribute &&
+        tgt.getAttribute("data-role") === "grid-paste-sink");
+      if (!_geTook && !_tgtSink && tgt && tgt.closest &&
           tgt.closest("input, textarea, select, [contenteditable]")) return;
       // Layout owns the shortcut while a figure is on screen (punch list item
       // 7). Without this the press fell through to the engine's handler and
