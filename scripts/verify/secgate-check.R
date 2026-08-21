@@ -14,7 +14,7 @@ if (!requireNamespace("jsonlite", quietly = TRUE)) {
 CFG <- file.path(tempdir(), "gb2-secgate-cfg")
 unlink(CFG, recursive = TRUE); dir.create(CFG, recursive = TRUE, showWarnings = FALSE)
 Sys.setenv(R_USER_CONFIG_DIR = CFG)
-source("R/utils.R"); source("R/palette_library.R")
+source("R/utils.R"); source("R/palette_library.R"); source("R/style_library.R")
 
 fails <- 0L
 ok <- function(cond, msg) {
@@ -111,6 +111,77 @@ if (length(blk) == 1) {
        "a normal request still names the file correctly")
     ok(identical(run_block(list(format = "PNG", filename = "../../escape.png")),
                  "escape.png"), "path traversal still stripped")
+}
+
+# ---- palette library: replay protection --------------------------------
+# lastAppliedTs must be strictly increasing, so reopening a file cannot
+# re-apply an action that already ran.
+replayed <- .gb_palette_lib_apply(lib, jsonlite::toJSON(list(kind = "save",
+    name = "Replay", colors = c("#444444"), machineId = "M1",
+    timestamp = 1000), auto_unbox = TRUE))
+ok(length(replayed$palettes) == 1 && is.null(replayed$palettes[["Replay"]]),
+   "an action at the already-applied timestamp is ignored (replay protection)")
+older <- .gb_palette_lib_apply(lib, jsonlite::toJSON(list(kind = "save",
+    name = "Older", colors = c("#555555"), machineId = "M1",
+    timestamp = 1), auto_unbox = TRUE))
+ok(is.null(older$palettes[["Older"]]), "an older timestamp is ignored")
+for (bad_ts in c('"timestamp":null', '"timestamp":[1,2]', '"timestamp":"soon"')) {
+    j <- paste0('{"kind":"save","name":"X","colors":["#666666"],',
+                '"machineId":"M1",', bad_ts, '}')
+    out <- tryCatch(.gb_palette_lib_apply(lib, j),
+                    error = function(e) structure(list(e = conditionMessage(e)),
+                                                  class = "gberr"))
+    ok(!inherits(out, "gberr") && is.null(out$palettes[["X"]]),
+       paste("a malformed timestamp is ignored, not thrown on:", bad_ts))
+}
+
+# ---- style library: the same guards, same shapes ------------------------
+slib0 <- .gb_style_lib_empty("M1")
+slib <- .gb_style_lib_apply(slib0, jsonlite::toJSON(list(kind = "save",
+    name = "Look", groups = c("colors"), opts = list(barColor = "#111111"),
+    machineId = "M1", timestamp = 1000), auto_unbox = TRUE))
+ok(length(slib$styles) == 1, "a style can be saved")
+ok(length(.gb_style_lib_apply(slib, jsonlite::toJSON(list(kind = "save",
+    name = "Theirs", groups = c("colors"), opts = list(barColor = "#222222"), machineId = "OTHER",
+    timestamp = 2000), auto_unbox = TRUE))$styles) == 1,
+   "a style action from another machine is ignored")
+for (bad_ts in c('"timestamp":null', '"timestamp":[1,2]')) {
+    j <- paste0('{"kind":"save","name":"Y","groups":["colors"],"opts":{"barColor":"#333333"},"machineId":"M1",', bad_ts, '}')
+    out <- tryCatch(.gb_style_lib_apply(slib, j),
+                    error = function(e) structure(list(e = conditionMessage(e)),
+                                                  class = "gberr"))
+    ok(!inherits(out, "gberr"),
+       paste("style library survives a malformed timestamp:", bad_ts))
+}
+
+# ---- export request: the staleness window ------------------------------
+# This gate is why a crafted .omv cannot reach the file-writing code at
+# all: a replayed request carries an old (or absent, or array) id and must
+# be refused. Extracted from the shipped source so it cannot drift.
+gate_src <- regmatches(src, regexpr(
+    "(?s)req_ts <- suppressWarnings.*?req_ts > now_ms \\+ 60000\\)",
+    src, perl = TRUE))
+ok(length(gate_src) == 1 && nzchar(gate_src),
+   "the export staleness gate was located in the source")
+if (length(gate_src) == 1) {
+    stale <- function(id) {
+        e <- new.env(); assign("parsed", list(id = id), envir = e)
+        txt <- sub("^(req_ts <- )", "\\1", gate_src)
+        txt <- sub("if \\(", "stale <- (", txt)
+        tryCatch({ eval(parse(text = txt), envir = e); get("stale", envir = e) },
+                 error = function(err) paste("THREW:", conditionMessage(err)))
+    }
+    fresh <- paste0(format(as.numeric(Sys.time()) * 1000, scientific = FALSE), "-abc")
+    ok(identical(stale(fresh), FALSE), "a request made just now is accepted")
+    ok(identical(stale("1000000000000-abc"), TRUE),
+       "a replayed request from a saved file is refused")
+    ok(identical(stale(paste0(format(as.numeric(Sys.time()) * 1000 + 600000,
+                                     scientific = FALSE), "-abc")), TRUE),
+       "a future-dated request is refused")
+    for (weird in list(NULL, c("1", "2"), NA, "no-timestamp-here", list(1)))
+        ok(isTRUE(stale(weird)),
+           paste("a malformed request id is refused, not thrown on:",
+                 paste(utils::head(as.character(weird), 2), collapse = ",")))
 }
 
 if (fails > 0L) { cat("SECGATE CHECK: FAIL\n"); quit(status = 1) }
