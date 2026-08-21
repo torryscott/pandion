@@ -3733,7 +3733,14 @@
                 "groupBorders", "groupErrorBars", "lineGroupOverrides",
                 "groupDataPoints", "groupPatterns", "textStyles",
                 "densGroupStyles", "distNormalGroupStyles",
-                "customPalette", "annotations"];
+                "customPalette", "annotations",
+                // The saved libraries too. Their colours never met the
+                // chartSpec gate - they live in palettes.json / styles.json,
+                // written from a library ACTION that a shared .omv can carry
+                // - and the palette flyout and style thumbnails build markup
+                // straight from them. This was a live, executing injection
+                // before the gate reached here (Aug 2026 audit round 3).
+                "paletteLibrary", "styleLibrary"];
             for (var _sci = 0; _sci < _gb2ColorStores.length; _sci++) {
                 var _scv = data[_gb2ColorStores[_sci]];
                 if (_scv && typeof _scv === "object")
@@ -98282,7 +98289,10 @@
                 }
                 function _swatchHtml(colors, n, w, h) {
                     var out = "", k = Math.min(colors.length, n);
-                    for (var i = 0; i < k; i++) out += '<span style="display:inline-block;width:' + w + 'px;height:' + h + 'px;background:' + colors[i] + ';"></span>';
+                    // Gated at the sink as well as at render entry: one
+                    // scrub is one oversight away from being bypassed, and
+                    // these colours come from a file-writable library.
+                    for (var i = 0; i < k; i++) out += '<span style="display:inline-block;width:' + w + 'px;height:' + h + 'px;background:' + _gb2CssColSafe(colors[i]) + ';"></span>';
                     return out;
                 }
                 function _renderTrig() {

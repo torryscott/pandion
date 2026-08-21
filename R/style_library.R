@@ -147,6 +147,10 @@
         opts <- action$opts
         if (!is.list(opts) || length(opts) == 0 || is.null(names(opts))) return(lib)
         opts <- opts[nzchar(names(opts))]
+        # A saved style is a bag of option values, colours among them, and
+        # the style thumbnails build markup from it. Same door, same gate
+        # as the palette library (Aug 2026 audit round 3).
+        opts <- gb_sanitize_colors(opts)
         if (length(opts) == 0) return(lib)
         lib$styles[[name]] <- list(groups = as.list(groups), opts = opts)
         if (identical(kind, "savedefault"))

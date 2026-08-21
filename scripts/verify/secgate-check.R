@@ -14,7 +14,8 @@ if (!requireNamespace("jsonlite", quietly = TRUE)) {
 CFG <- file.path(tempdir(), "gb2-secgate-cfg")
 unlink(CFG, recursive = TRUE); dir.create(CFG, recursive = TRUE, showWarnings = FALSE)
 Sys.setenv(R_USER_CONFIG_DIR = CFG)
-source("R/utils.R"); source("R/palette_library.R"); source("R/style_library.R")
+source("R/utils.R"); source("R/spec_explode.R")
+source("R/palette_library.R"); source("R/style_library.R")
 
 fails <- 0L
 ok <- function(cond, msg) {
@@ -153,6 +154,30 @@ for (bad_ts in c('"timestamp":null', '"timestamp":[1,2]')) {
     ok(!inherits(out, "gberr"),
        paste("style library survives a malformed timestamp:", bad_ts))
 }
+
+# ---- the libraries are a colour source too -----------------------------
+# They do not go through chartSpec: they live in palettes.json /
+# styles.json, written from an action a shared .omv can carry, and the
+# palette flyout builds swatch markup from them. That was a live,
+# executing injection until this gate (Aug 2026 audit round 3).
+hostile <- 'red;"><img src=x onerror=alert(1)>'
+poisoned <- .gb_palette_lib_apply(.gb_palette_lib_empty("M1"),
+    jsonlite::toJSON(list(kind = "save", name = "P",
+        colors = c(hostile, "#2d5c94"), machineId = "M1",
+        timestamp = 5000), auto_unbox = TRUE))
+stored <- unlist(poisoned$palettes[["P"]])
+ok(!any(grepl("<img", stored, fixed = TRUE)),
+   "a hostile colour never reaches the saved palette library")
+ok("#2d5c94" %in% stored, "the legitimate colour in the same action survives")
+
+pstyle <- .gb_style_lib_apply(.gb_style_lib_empty("M1"),
+    jsonlite::toJSON(list(kind = "save", name = "S", groups = c("colors"),
+        opts = list(barColor = hostile, barOpacity = 0.9),
+        machineId = "M1", timestamp = 5000), auto_unbox = TRUE))
+sopts <- pstyle$styles[["S"]]$opts
+ok(!is.null(sopts) && !grepl("<img", as.character(sopts$barColor), fixed = TRUE),
+   "a hostile colour never reaches a saved style")
+ok(identical(sopts$barOpacity, 0.9), "a non-colour option in the same style is untouched")
 
 # ---- export request: the staleness window ------------------------------
 # This gate is why a crafted .omv cannot reach the file-writing code at

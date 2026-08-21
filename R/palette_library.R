@@ -201,6 +201,13 @@
                 character(1))
         }
         cols <- cols[!is.na(cols) & nzchar(cols)]
+        # Gate at the door: these strings are written to palettes.json and
+        # then shipped in every later payload, where the palette flyout
+        # builds swatch markup from them. The action can arrive from a
+        # shared .omv, so an ungated colour was a persistent, executing
+        # injection (Aug 2026 audit round 3).
+        cols <- vapply(cols, gb_safe_color, character(1), USE.NAMES = FALSE)
+        cols <- cols[nzchar(cols)]
         if (length(cols) == 0) return(lib)
         lib$palettes[[name]] <- as.list(cols)
     } else if (identical(kind, "delete")) {
@@ -248,6 +255,13 @@
                 character(1))
         }
         cols <- cols[!is.na(cols) & nzchar(cols)]
+        # Gate at the door: these strings are written to palettes.json and
+        # then shipped in every later payload, where the palette flyout
+        # builds swatch markup from them. The action can arrive from a
+        # shared .omv, so an ungated colour was a persistent, executing
+        # injection (Aug 2026 audit round 3).
+        cols <- vapply(cols, gb_safe_color, character(1), USE.NAMES = FALSE)
+        cols <- cols[nzchar(cols)]
         if (length(cols) == 0) return(lib)
         lib$palettes[[name]] <- as.list(cols)
         lib$defaultPalette <- paste0("saved:", name)
@@ -275,6 +289,13 @@
                     error = function(e) character(0))
             }
             cols <- cols[!is.na(cols) & nzchar(cols)]
+            # Gate at the door: these strings are written to palettes.json and
+            # then shipped in every later payload, where the palette flyout
+            # builds swatch markup from them. The action can arrive from a
+            # shared .omv, so an ungated colour was a persistent, executing
+            # injection (Aug 2026 audit round 3).
+            cols <- vapply(cols, gb_safe_color, character(1), USE.NAMES = FALSE)
+            cols <- cols[nzchar(cols)]
             if (length(cols) == 0) next
             new_pals[[nm]] <- as.list(cols)
         }

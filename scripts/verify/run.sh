@@ -127,6 +127,17 @@ if Rscript "$HERE/secgate-check.R"; then :; else
     if [ "$rc" -eq 2 ]; then echo "   skipped: jsonlite not available"; else exit "$rc"; fi
 fi
 
+echo "== saved palette/style libraries cannot inject through a colour"
+if GB2_XSS_OUT="$OUT-libgate" R_USER_CONFIG_DIR="$OUT-libgate-cfg" \
+       Rscript "$HERE/libgate-poison.R" &&
+   GB2_XSS_OUT="$OUT-libgate" R_USER_CONFIG_DIR="$OUT-libgate-cfg" GB2_BUNDLE="$BUNDLE" \
+       Rscript "$HERE/libgate-render.R"; then
+    GB2_XSS_OUT="$OUT-libgate" GB2_BUNDLE="$BUNDLE" node "$HERE/libgate-check.mjs"
+else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then echo "   skipped: jmvcore not available"; else exit "$rc"; fi
+fi
+
 echo "== colour gate: a shared .omv cannot inject through a colour (pure R)"
 if Rscript "$HERE/colorgate-check.R"; then :; else
     rc=$?
