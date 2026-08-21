@@ -1,1 +1,47 @@
-exportPattern("^[[:alpha:]]+")
+# Explicit exports. Keep in sync with jamovi/0000.yaml.
+#
+# The jamovi-compiler APPENDS "export(<name>Class)" and "export(<name>Options)"
+# for every analysis at build time (it appends into its own temp copy, so this
+# file is never rewritten). It does NOT export the wrapper functions, and those
+# must be public: jmvcore's Analysis$asProtoBuf embeds asSource() in every
+# results payload as "pandion::<analysis>(...)", which is what jamovi shows in
+# syntax mode and what users paste into Rj - and "::" requires an export.
+# Omitting one is silent in the GUI and only breaks when a user runs the syntax,
+# so scripts/verify/export-surface-check.R asserts this list against the
+# INSTALLED package.
+#
+# Adding an analysis? Add its three lines here. Everything else (the *Base and
+# *Results generators, graphbuilder2_html, and the gb_*/gb2_* helpers) is
+# internal and resolves within the namespace.
+
+export(corrplotbuilder)
+export(corrplotbuilderClass)
+export(corrplotbuilderOptions)
+
+export(distplotbuilder)
+export(distplotbuilderClass)
+export(distplotbuilderOptions)
+
+export(freqplotbuilder)
+export(freqplotbuilderClass)
+export(freqplotbuilderOptions)
+
+export(helpmechoose)
+export(helpmechooseClass)
+export(helpmechooseOptions)
+
+export(likertplotbuilder)
+export(likertplotbuilderClass)
+export(likertplotbuilderOptions)
+
+export(plotbuilder)
+export(plotbuilderClass)
+export(plotbuilderOptions)
+
+export(rmplotbuilder)
+export(rmplotbuilderClass)
+export(rmplotbuilderOptions)
+
+export(xyplotbuilder)
+export(xyplotbuilderClass)
+export(xyplotbuilderOptions)
