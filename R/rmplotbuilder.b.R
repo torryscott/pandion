@@ -108,7 +108,7 @@
     list(arg = "legend_swatch_gap", opt = "legendSwatchGap", bool = FALSE, default = 6),
     list(arg = "legend_offset_x", opt = "legendOffsetX", bool = FALSE, default = 0),
     list(arg = "legend_offset_y", opt = "legendOffsetY", bool = FALSE, default = 0),
-    list(arg = "auto_p_correction", opt = "autoPCorrection", bool = FALSE, default = "holm"),
+    list(arg = "auto_p_correction", opt = "autoPCorrection", bool = FALSE, default = "none"),
     list(arg = "x_axis_thickness", opt = "xAxisThickness", bool = FALSE, default = 1.5),
     list(arg = "y_axis_thickness", opt = "yAxisThickness", bool = FALSE, default = 1.5),
     list(arg = "x_axis_style", opt = "xAxisStyle", bool = FALSE, default = "solid"),

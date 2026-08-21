@@ -2839,7 +2839,12 @@ async function copyFlips(page, actKey) {
         const sel = document.querySelector('[data-cmp-corr]');
         return sel ? sel.value : null;
     });
-    check('Compare Groups defaults to Tukey', cg === 'tukey',
+    // The shipped default is "none" again (Aug 20 2026): defaulting to
+    // Tukey made the ROW incoherent in a new way - the Test control
+    // resolves to Welch while a pooled correction forces the pooled
+    // statistic, so the displayed t stopped matching the named test.
+    // Pinned here either way, so the default is never accidental.
+    check('Compare Groups ships no correction by default', cg === 'none',
           'select=' + JSON.stringify(cg));
     // A default is NOT a deliberate pick: the bracket panel's rule that
     // keeps a chosen pooled correction visible must not fire on it, or
@@ -2855,8 +2860,8 @@ async function copyFlips(page, actKey) {
         const sel = document.querySelector('[data-cmp-corr]');
         return sel ? sel.value : null;
     });
-    check('Repeated Measures defaults to Holm, which always applies',
-          rm === 'holm', 'select=' + JSON.stringify(rm));
+    check('Repeated Measures ships no correction by default',
+          rm === 'none', 'select=' + JSON.stringify(rm));
     check('no page errors', errs.length === 0, JSON.stringify(errs));
     await ctx.close();
 }
