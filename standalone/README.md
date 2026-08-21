@@ -3,15 +3,14 @@
 Browser-only Pandion Plots: the full graphbuilder2 editing experience with no
 jamovi and no R at runtime. One engine, two shells - the jamovi module is
 untouched; this shell shares the SAME committed bundle
-(`inst/widget/graphbuilder2.min.js`). Build brief: `../planning/STANDALONE-BRIEF.md`.
+(`inst/widget/graphbuilder2.min.js`). The build brief and the working
+punch lists are maintainer-local and not published with this repo.
 
 ## Status
 
-- SWEEP FIXES DONE (Jul 25 2026): first pass on the audit in
-  `../planning/STANDALONE-SWEEP-JUL25.md` (125-item checklist in
-  `../planning/STANDALONE-PUNCHLIST.html`, which is self-marking: items carry `d:1`
-  plus a note, and a manual untick stores an explicit 0 so it beats the file
-  default). FORTY-FIVE fixed, ONE rejected. THE BUG TIER (B1-B24) IS CLEAR.
+- SWEEP FIXES DONE (Jul 25 2026): first pass on a 125-item audit tracked in
+  the maintainer-local punch list. FORTY-FIVE fixed, ONE rejected. THE BUG
+  TIER (B1-B24) IS CLEAR.
   * PROJECT SAFETY + CHROME (items 12, 13, 15, 16): all four
     project-replacing paths now capture the outgoing project and offer it back
     (the B18 pattern), gated so it never fires on a project with no work in it

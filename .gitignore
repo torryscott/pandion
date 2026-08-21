@@ -165,9 +165,25 @@ website/pandion-site-preview.html
 # sources and generated website artifacts remain the release source of truth.
 /.release/
 
-# Local review and handoff artifacts. Keep the maintained standalone brief,
-# sweep, and regression punch list in source control because the code and
-# standalone README reference them.
+# Internal working material stays LOCAL (Torry, Aug 20 2026). This repo is
+# public, and correspondence, audits and working notes are not things a user
+# or contributor needs to build or run the app - while they do quote named
+# third parties and colleagues verbatim. The line: the repo carries code,
+# README, licence, the shipped user guide, the website and the release
+# checklists; everything that is correspondence, internal critique or a
+# working note lives on disk only, like CLAUDE.md already does.
+#
+# These were previously tracked and remain in git HISTORY - untracking stops
+# further exposure, it does not erase the past. Scrubbing history was
+# considered and deliberately declined: it renames every commit since July
+# 2026, strands other clones and worktrees, and still leaves copies GitHub
+# must be asked to purge.
+/docs/jonathon-svg-findings.md
+/planning/
+/GHOST-TOGGLE-FIX-PROPOSAL.md
+/ROTATE-TEXT-BOX-NOTE.md
+
+# Local review and handoff artifacts.
 /COPY-FIX-HANDOFF-v*.md
 /PANDION-RENAME-PLAN.md
 /PANDION-RENAME-QA.html
