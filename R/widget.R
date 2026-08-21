@@ -2277,7 +2277,7 @@ graphbuilder2_html <- function(bars,
             # Poll exhausted (~9 s): the engine is not coming. Say so, and
             # show the saved picture if the file carries one, instead of
             # leaving the wait note up indefinitely.
-            '      else { try { window.__gb2_armModuleMissing(); } catch (_eMM1) {} }\n',
+            '      else { try { __gb2_armModuleMissing(); } catch (_eMM1) {} }\n',
             '    })(0);\n',
             '  }\n',
             '} catch (_eC) {}\n'
@@ -2306,7 +2306,7 @@ graphbuilder2_html <- function(bars,
             '  __gb2_engineOk = !!(typeof window !== "undefined" && window.GraphBuilder2\n',
             '      && window.GraphBuilder2.render && window.GraphBuilder2.__hash === "', js_hash, '");\n',
             '  if (!window.GraphBuilder2 || !window.GraphBuilder2.render) {\n',
-            '    try { window.__gb2_armModuleMissing(); } catch (_eMM0) {}\n',
+            '    try { __gb2_armModuleMissing(); } catch (_eMM0) {}\n',
             '  }\n',
             '  if (!__gb2_engineOk) {\n',
             '    (function __gb2_poke(n) {\n',
@@ -3027,7 +3027,7 @@ graphbuilder2_html <- function(bars,
 # live, so it is inert on a healthy machine.
 .gb2_module_missing_chunk <- function() {
     paste0(
-'  window.__gb2_armModuleMissing = function () {\n',
+'  var __gb2_armModuleMissing = function () {\n',
         '  if (window.GraphBuilder2 && window.GraphBuilder2.render) return;\n',
             # With a snapshot present the picture IS the feedback: show it
             # alone and hide the host outright - the "Loading chart
