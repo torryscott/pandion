@@ -109,6 +109,12 @@ GB2_VERIFY_OUT="$OUT" node "$HERE/hover-export-check.mjs"
 echo "== crowded-category label thinning: the stride decision (pure unit)"
 node "$HERE/catstride-unit.mjs"
 
+echo "== the snapshot image renders from the option (no duplicate copy in state)"
+if Rscript "$HERE/snapshot-render-check.R"; then :; else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then echo "   skipped: jmvcore or rsvg not available"; else exit "$rc"; fi
+fi
+
 echo "== colour gate: a shared .omv cannot inject through a colour (pure R)"
 if Rscript "$HERE/colorgate-check.R"; then :; else
     rc=$?

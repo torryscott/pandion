@@ -592,7 +592,6 @@ plotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Class
             tryCatch({
                 dims <- gb_svg_dims(snap$svg)
                 img$setSize(dims$w, dims$h)
-                img$setState(snap$svg)
                 img$setVisible(TRUE)
             }, error = function(e) NULL)
         },
@@ -602,7 +601,15 @@ plotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Class
         # with the module (the PDF-export dependency); without it the
         # image stays empty rather than erroring (FALSE = nothing drawn).
         .renderSnapshot = function(image, ggtheme, theme, ...) {
-            svg <- image$state
+            # Read the snapshot from the OPTION rather than this image's
+            # state. Both persist in the .omv, so setting state stored a
+            # second copy of the same SVG - measured at 13% of the saved
+            # analyses in a real multi-chart file (Aug 2026 audit, and
+            # jamovi's maintainer asked whether the state was still
+            # needed). jmvcore gates rendering on filePath / visible /
+            # requiresData, never on state, so dropping it is inert here.
+            snap <- gb_parse_snapshot(self$options$chartSnapshot)
+            svg <- if (is.null(snap)) NULL else snap$svg
             if (is.null(svg) || !is.character(svg) || !nzchar(svg))
                 return(FALSE)
             if (!requireNamespace("rsvg", quietly = TRUE))
