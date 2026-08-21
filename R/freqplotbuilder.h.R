@@ -9,7 +9,6 @@ freqplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6C
             annotationsJson = "",
             chartSnapshot = "",
             clientBundleHash = "",
-            errorBarType = "se",
             exportPath = "",
             exportRequest = "",
             facetVar = NULL,
@@ -18,10 +17,8 @@ freqplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6C
             graphType = "bar",
             groupVar = NULL,
             paletteLibrary = "",
-            showDataPoints = FALSE,
             styleLibrary = "",
             styleStamp = FALSE,
-            summaryFunc = "mean",
             var = NULL,
             chartSpec = "", ...) {
 
@@ -45,17 +42,6 @@ freqplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6C
                 "clientBundleHash",
                 clientBundleHash,
                 default="",
-                hidden=TRUE)
-            private$..errorBarType <- jmvcore::OptionList$new(
-                "errorBarType",
-                errorBarType,
-                options=list(
-                    "se",
-                    "sd",
-                    "ci95",
-                    "ci99",
-                    "none"),
-                default="se",
                 hidden=TRUE)
             private$..exportPath <- jmvcore::OptionString$new(
                 "exportPath",
@@ -116,11 +102,6 @@ freqplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6C
                 paletteLibrary,
                 default="",
                 hidden=TRUE)
-            private$..showDataPoints <- jmvcore::OptionBool$new(
-                "showDataPoints",
-                showDataPoints,
-                default=FALSE,
-                hidden=TRUE)
             private$..styleLibrary <- jmvcore::OptionString$new(
                 "styleLibrary",
                 styleLibrary,
@@ -130,14 +111,6 @@ freqplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6C
                 "styleStamp",
                 styleStamp,
                 default=FALSE,
-                hidden=TRUE)
-            private$..summaryFunc <- jmvcore::OptionList$new(
-                "summaryFunc",
-                summaryFunc,
-                options=list(
-                    "mean",
-                    "median"),
-                default="mean",
                 hidden=TRUE)
             private$..var <- jmvcore::OptionVariable$new(
                 "var",
@@ -156,7 +129,6 @@ freqplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6C
             self$.addOption(private$..annotationsJson)
             self$.addOption(private$..chartSnapshot)
             self$.addOption(private$..clientBundleHash)
-            self$.addOption(private$..errorBarType)
             self$.addOption(private$..exportPath)
             self$.addOption(private$..exportRequest)
             self$.addOption(private$..facetVar)
@@ -165,10 +137,8 @@ freqplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6C
             self$.addOption(private$..graphType)
             self$.addOption(private$..groupVar)
             self$.addOption(private$..paletteLibrary)
-            self$.addOption(private$..showDataPoints)
             self$.addOption(private$..styleLibrary)
             self$.addOption(private$..styleStamp)
-            self$.addOption(private$..summaryFunc)
             self$.addOption(private$..var)
             self$.addOption(private$..chartSpec)
         }),
@@ -176,7 +146,6 @@ freqplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6C
         annotationsJson = function() private$..annotationsJson$value,
         chartSnapshot = function() private$..chartSnapshot$value,
         clientBundleHash = function() private$..clientBundleHash$value,
-        errorBarType = function() private$..errorBarType$value,
         exportPath = function() private$..exportPath$value,
         exportRequest = function() private$..exportRequest$value,
         facetVar = function() private$..facetVar$value,
@@ -185,17 +154,14 @@ freqplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6C
         graphType = function() private$..graphType$value,
         groupVar = function() private$..groupVar$value,
         paletteLibrary = function() private$..paletteLibrary$value,
-        showDataPoints = function() private$..showDataPoints$value,
         styleLibrary = function() private$..styleLibrary$value,
         styleStamp = function() private$..styleStamp$value,
-        summaryFunc = function() private$..summaryFunc$value,
         var = function() private$..var$value,
         chartSpec = function() private$..chartSpec$value),
     private = list(
         ..annotationsJson = NA,
         ..chartSnapshot = NA,
         ..clientBundleHash = NA,
-        ..errorBarType = NA,
         ..exportPath = NA,
         ..exportRequest = NA,
         ..facetVar = NA,
@@ -204,10 +170,8 @@ freqplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6C
         ..graphType = NA,
         ..groupVar = NA,
         ..paletteLibrary = NA,
-        ..showDataPoints = NA,
         ..styleLibrary = NA,
         ..styleStamp = NA,
-        ..summaryFunc = NA,
         ..var = NA,
         ..chartSpec = NA)
 )
@@ -280,7 +244,6 @@ freqplotbuilderBase <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Clas
 #' @param chartSnapshot .
 #' @param clientBundleHash .
 #' @param data .
-#' @param errorBarType .
 #' @param exportPath .
 #' @param exportRequest .
 #' @param facetVar .
@@ -289,10 +252,8 @@ freqplotbuilderBase <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Clas
 #' @param graphType .
 #' @param groupVar .
 #' @param paletteLibrary .
-#' @param showDataPoints .
 #' @param styleLibrary .
 #' @param styleStamp .
-#' @param summaryFunc .
 #' @param var .
 #' @param chartSpec .
 #' @return A results object containing:
@@ -308,7 +269,6 @@ freqplotbuilder <- function(
     chartSnapshot = "",
     clientBundleHash = "",
     data,
-    errorBarType = "se",
     exportPath = "",
     exportRequest = "",
     facetVar,
@@ -317,10 +277,8 @@ freqplotbuilder <- function(
     graphType = "bar",
     groupVar,
     paletteLibrary = "",
-    showDataPoints = FALSE,
     styleLibrary = "",
     styleStamp = FALSE,
-    summaryFunc = "mean",
     var,
     chartSpec = "") {
 
@@ -345,7 +303,6 @@ freqplotbuilder <- function(
         annotationsJson = annotationsJson,
         chartSnapshot = chartSnapshot,
         clientBundleHash = clientBundleHash,
-        errorBarType = errorBarType,
         exportPath = exportPath,
         exportRequest = exportRequest,
         facetVar = facetVar,
@@ -354,10 +311,8 @@ freqplotbuilder <- function(
         graphType = graphType,
         groupVar = groupVar,
         paletteLibrary = paletteLibrary,
-        showDataPoints = showDataPoints,
         styleLibrary = styleLibrary,
         styleStamp = styleStamp,
-        summaryFunc = summaryFunc,
         var = var,
         chartSpec = chartSpec)
 

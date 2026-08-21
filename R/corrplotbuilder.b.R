@@ -235,7 +235,7 @@ corrplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6C
                 corr_cells = cells,
                 corr_raw = corr_raw,
                 corr_method = method,
-                chart_spec = self$options$chartSpec,
+                chart_spec = gb_spec_sanitized_json(self$options$chartSpec),
                 spec_real_keys = spec_real_keys,
                 spec_keys = spec_keys
             )

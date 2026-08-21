@@ -1311,7 +1311,7 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
             spec_real_keys <- list(
                 "data", "xvar", "yvar", "groupVar", "facetVar",
                 "sizeVar", "labelVar", "graphType", "xyBin",
-                "xyBinCount", "summaryFunc", "errorBarType",
+                "xyBinCount",
                 "showDataPoints", "xyFitType", "xyLoessSpan",
                 "xyShowDensity2D", "xyDensity2DLevels", "xyMarginal",
                 "xyMarginalBins", "xyCILevel", "xyEllipseLevel",
@@ -1390,7 +1390,7 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
                 annotations = gb_resolve_annotations(
                         self$options$annotationsJson, list()),
                 show_data_points = isTRUE(self$options$showDataPoints),
-                chart_spec = self$options$chartSpec,
+                chart_spec = gb_spec_sanitized_json(self$options$chartSpec),
                 spec_real_keys = spec_real_keys,
                 spec_keys = spec_keys
             )

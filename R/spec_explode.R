@@ -51,6 +51,76 @@ gb_spec_default <- function(table, opt) {
     for (row in table) if (identical(row$opt, opt)) return(row$default)
     NULL
 }
+# ---- Color sanitisation (Aug 2026 audit) -------------------------------
+# chartSpec is a hidden String option: it persists in the .omv and can be
+# replaced wholesale by anyone who edits the file, and the widget
+# interpolates color-valued entries into style="..." attributes assigned
+# via innerHTML. gb_safe_color (utils.R) closes the breakout; this walker
+# applies it to every color-carrying entry: any name containing "color"
+# (the store convention - groupColors entries, categoryStyles fields,
+# textStyles, bandColor and friends all follow it) plus the color-valued
+# options whose names do not say so. Unnamed children (customPalette's
+# bare hex strings) inherit the parent name. Booleans like
+# pointColorMatch match the name rule but fail is.character, so they pass
+# untouched. chartPalette is deliberately NOT listed: its value is a
+# palette ID or a user-typed saved-palette NAME, never a CSS color.
+# The heatmap ramp stops carry CSS colours but their names do not say so.
+.gb2_color_extras <- c("chartBackground", "facetStripBackground",
+                       "chartBorder", "customPalette",
+                       "xyBinCustomLow", "xyBinCustomMid", "xyBinCustomHigh")
+gb_spec_color_name <- function(name) {
+    nzchar(name) && (grepl("color", name, ignore.case = TRUE) ||
+                     name %in% .gb2_color_extras)
+}
+gb_sanitize_colors <- function(x, name = "") {
+    if (is.list(x)) {
+        nm <- names(x)
+        for (i in seq_along(x)) {
+            child <- if (!is.null(nm) && nzchar(nm[i])) nm[i] else name
+            # x[i] <- list(v), NOT x[[i]] <- v: a JSON null parses to NULL,
+            # and [[<- DELETES the element rather than storing it, so the
+            # list shrinks mid-loop and seq_along walks off the end.
+            x[i] <- list(gb_sanitize_colors(x[[i]], child))
+        }
+        return(x)
+    }
+    # customPalette is a comma-joined LIST of colors, not a single one, so
+    # the per-color length cap has to apply per ELEMENT (a 9-color palette
+    # is already 71 chars). Split, gate, rejoin: legitimate values survive
+    # byte-identically - including functional notations, whose fragments
+    # ("rgb(68" / " 120" / " 173)") are each charset-clean and rejoin
+    # exactly - while one bad slot degrades to the palette default instead
+    # of destroying the whole palette.
+    if (identical(name, "customPalette") && is.character(x) &&
+        length(x) == 1L && !is.na(x) && grepl(",", x, fixed = TRUE))
+        return(paste(vapply(strsplit(x, ",", fixed = TRUE)[[1]],
+                            gb_safe_color, character(1), USE.NAMES = FALSE),
+                     collapse = ","))
+    if (gb_spec_color_name(name) && is.character(x))
+        return(gb_safe_color(x))
+    x
+}
+
+# The blob shipped to the client must stay BYTE-IDENTICAL for legitimate
+# files (the client-side explode and the echo hash-skip both key on it),
+# so the sanitized spec is re-serialized ONLY when the walk actually
+# changed something - i.e. only for a hostile or corrupt blob.
+gb_spec_sanitized_json <- function(spec_raw) {
+    if (is.null(spec_raw) || !is.character(spec_raw) ||
+        length(spec_raw) != 1L || !nzchar(spec_raw)) return(spec_raw)
+    # Never throw: this runs during fixed_args assembly, outside the .run()
+    # tryCatch, so an unforeseen blob shape must degrade (ship the raw
+    # string, which R's own arg mapping ignores key-by-key) rather than
+    # abort the analysis every time the file is opened.
+    tryCatch({
+        spec <- gb_parse_spec(spec_raw)
+        clean <- gb_sanitize_colors(spec)
+        if (identical(clean, spec)) spec_raw
+        else as.character(jsonlite::toJSON(clean, auto_unbox = TRUE,
+                                           digits = NA))
+    }, error = function(e) spec_raw)
+}
+
 gb_spec_args <- function(spec, table) {
     out <- vector("list", length(table))
     nms <- character(length(table))
@@ -58,6 +128,7 @@ gb_spec_args <- function(spec, table) {
         row <- table[[i]]
         v <- spec[[row$opt]]
         if (is.null(v)) v <- row$default
+        v <- tryCatch(gb_sanitize_colors(v, row$opt), error = function(e) row$default)
         if (isTRUE(row$bool)) v <- isTRUE(v)
         out[[i]] <- v
         nms[i] <- row$arg

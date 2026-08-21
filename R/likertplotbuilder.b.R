@@ -360,7 +360,7 @@ likertplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R
                 likert_alpha = likert_alpha,
                 likert_continuous = continuous,
                 likert_ci_level = ci_level,
-                chart_spec = self$options$chartSpec,
+                chart_spec = gb_spec_sanitized_json(self$options$chartSpec),
                 spec_real_keys = spec_real_keys,
                 spec_keys = spec_keys
             )

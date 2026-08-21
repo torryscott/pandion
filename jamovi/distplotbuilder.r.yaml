@@ -27,11 +27,6 @@ items:
         - chartSnapshot
       visible: false
 
-    # The numbers behind the chart: one row per plotted cell (group x
-    # facet; ungrouped and unfaceted charts get a single row), populated
-    # from the same per-cell raw values the widget renders. Group/facet
-    # columns are revealed at runtime when those roles are assigned.
-
     - name: exportStatus
       title: Export Status
       type: Html

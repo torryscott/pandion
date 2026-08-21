@@ -366,8 +366,13 @@ freqplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6C
                     if (is_pie) {
                         if (identical(key, cl)) tot <- tot + b$n
                     } else {
-                        # strip any facet prefix back off
-                        bare <- if (use_facet) sub(paste0("^.*", FACET_SEP), "", key) else key
+                        # Strip the bar's OWN facet prefix back off - exact
+                        # substring arithmetic, not a greedy regex: a
+                        # category (or facet) label that itself contains
+                        # the separator must survive intact.
+                        bare <- if (use_facet)
+                            substring(key, nchar(b$facet) + nchar(FACET_SEP) + 1L)
+                        else key
                         if (identical(bare, cl)) tot <- tot + b$n
                     }
                 }
@@ -384,7 +389,7 @@ freqplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6C
                         tot <- 0
                         for (b in bars) {
                             if (identical(b$facet, fl)) {
-                                bare <- sub(paste0("^.*", FACET_SEP), "", b$x)
+                                bare <- substring(b$x, nchar(fl) + nchar(FACET_SEP) + 1L)
                                 if (identical(bare, cl)) tot <- tot + b$n
                             }
                         }
@@ -445,7 +450,7 @@ freqplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6C
 
             spec_real_keys <- list(
                 "data", "var", "groupVar", "facetVar", "freqStat", "freqPosition",
-                "graphType", "summaryFunc", "errorBarType", "showDataPoints",
+                "graphType",
                 "exportRequest", "exportPath", "clientBundleHash",
                 "paletteLibrary", "styleLibrary", "styleStamp",
                 "annotationsJson", "chartSnapshot", "chartSpec"
@@ -485,7 +490,7 @@ freqplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6C
                 freq_position = freq_position,
                 freq_pooled_note = freq_pooled_note,
                 freq_tests = tests,
-                chart_spec = self$options$chartSpec,
+                chart_spec = gb_spec_sanitized_json(self$options$chartSpec),
                 spec_real_keys = spec_real_keys,
                 spec_keys = spec_keys,
                 auto_p_correction_default =

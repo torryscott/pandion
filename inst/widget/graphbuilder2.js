@@ -3574,6 +3574,51 @@
             } catch (_aje) {}
         } catch (_ovE) {}
 
+        // CSS-safe color gate (Aug 2026 audit) - the JS mirror of R's
+        // gb_safe_color / gb_sanitize_colors (R/spec_explode.R; see there
+        // for the charset rationale). Color-valued entries land in
+        // style="..." attributes assigned via innerHTML (panel swatches,
+        // tooltip swatch rows), and chartSpec / annotationsJson persist in
+        // the .omv where anyone can rewrite them wholesale. Keys carrying
+        // colors follow the store convention (name contains "color") plus
+        // the few that do not; chartPalette is deliberately absent - its
+        // value is a palette ID or a user-typed saved-palette NAME, never
+        // a CSS value.
+        function _gb2CssColOK(v) {
+            return typeof v === "string" && v.length <= 64 &&
+                /^[-#a-zA-Z0-9(),.% ]*$/.test(v);
+        }
+        function _gb2CssColSafe(v) { return _gb2CssColOK(v) ? v : ""; }
+        function _gb2ColorishKey(k) {
+            return /color/i.test(k) || k === "customPalette" ||
+                k === "chartBackground" || k === "facetStripBackground" ||
+                k === "chartBorder" || k === "xyBinCustomLow" ||
+                k === "xyBinCustomMid" || k === "xyBinCustomHigh";
+        }
+        function _gb2SanitizeColors(x, name) {
+            if (x && typeof x === "object") {
+                if (Array.isArray(x)) {
+                    for (var _i = 0; _i < x.length; _i++)
+                        x[_i] = _gb2SanitizeColors(x[_i], name);
+                } else {
+                    for (var _k in x) {
+                        if (!Object.prototype.hasOwnProperty.call(x, _k)) continue;
+                        x[_k] = _gb2SanitizeColors(x[_k], _k);
+                    }
+                }
+                return x;
+            }
+            // customPalette is a comma-joined LIST of colours, so the
+            // per-colour length cap has to apply per ELEMENT (a 9-colour
+            // palette already exceeds it). Legitimate values rejoin
+            // byte-identically, functional notations included.
+            if (typeof x === "string" && name === "customPalette" && x.indexOf(",") >= 0)
+                return x.split(",").map(_gb2CssColSafe).join(",");
+            if (typeof x === "string" && name && _gb2ColorishKey(name))
+                return _gb2CssColSafe(x);
+            return x;
+        }
+
         // chartSpec migration (speed pass Phase 2, Jul 2026): a MIGRATED
         // module (Compare Groups first) ships data.specRealKeys - the option
         // names that stay real jamovi options - and data.chartSpec, a sparse
@@ -3611,7 +3656,11 @@
                 if (_csObj && typeof _csObj === "object") {
                     for (var _csk in _csObj) {
                         if (!Object.prototype.hasOwnProperty.call(_csObj, _csk)) continue;
-                        if (_gb2SpecKeySet && !_gb2SpecKeySet[_csk]) continue; // reject non-style keys
+                        // hasOwnProperty, not a bare read: "__proto__" and
+                        // "constructor" resolve up the prototype chain and
+                        // would sail through an allowlist checked that way.
+                        if (_gb2SpecKeySet && !Object.prototype.hasOwnProperty.call(_gb2SpecKeySet, _csk))
+                            continue; // reject non-style keys
                         data[_csk] = _csObj[_csk];       // explode (allowlisted)
                         _gb2SpecState[_csk] = _csObj[_csk]; // seed (allowlisted)
                     }
@@ -3659,6 +3708,39 @@
                 _reTitle("groupTitleOverride", "groupTitle", "groupLabel", "groupLabelDefault");
             }
         } catch (_csErr) {}
+        // Colour hygiene runs OUTSIDE the chartSpec bridge's try:
+        // a malformed blob makes JSON.parse throw, which used to
+        // abort the bridge before the scrub and leave every colour
+        // ungated while the render carried on regardless.
+        // Color hygiene (Aug 2026 audit): runs AFTER the explode so
+        // blob-carried, R-payload-carried and annotation colors are all
+        // covered whatever the source, and scrubs the specState seed so
+        // a later commit re-persists clean values. Store entries share
+        // object references with data.*, so one in-place walk fixes
+        // both. Legitimate values pass byte-identical (the charset gate
+        // never rewrites a real color), keeping echo hash-stability.
+        try {
+            for (var _sck in data) {
+                if (!Object.prototype.hasOwnProperty.call(data, _sck)) continue;
+                // through _gb2SanitizeColors, NOT _gb2CssColSafe directly:
+                // customPalette is a comma-joined list and the per-colour
+                // cap must reach its elements, or a 9+-colour palette is
+                // wiped here even though the walker knows better.
+                if (typeof data[_sck] === "string" && _gb2ColorishKey(_sck))
+                    data[_sck] = _gb2SanitizeColors(data[_sck], _sck);
+            }
+            var _gb2ColorStores = ["groupColors", "categoryStyles",
+                "groupBorders", "groupErrorBars", "lineGroupOverrides",
+                "groupDataPoints", "groupPatterns", "textStyles",
+                "densGroupStyles", "distNormalGroupStyles",
+                "customPalette", "annotations"];
+            for (var _sci = 0; _sci < _gb2ColorStores.length; _sci++) {
+                var _scv = data[_gb2ColorStores[_sci]];
+                if (_scv && typeof _scv === "object")
+                    _gb2SanitizeColors(_scv, _gb2ColorStores[_sci]);
+            }
+            _gb2SanitizeColors(_gb2SpecState, "");
+        } catch (_eSanC) {}
 
         // "Default style for new charts": R flags an analysis that has
         // never rendered a widget before (styleStamp false AND no
@@ -9425,8 +9507,18 @@
             }
             return el;
         }
+        // A font family is a CSS value from a persisted option, and it
+        // reaches a <style> element and the export clone. textContent
+        // blocks markup, so the risk is CSS injection rather than script,
+        // but the charset gate is free: names, quotes, commas and spaces
+        // are all a font stack ever needs, while ; { } : ( ) are what an
+        // injected declaration or an url() would need.
+        function _gb2FontSafe(v) {
+            return (typeof v === "string" && v.length <= 200 &&
+                /^[-a-zA-Z0-9 ,'"]*$/.test(v)) ? v : "";
+        }
         function applyChartFontFamily(family) {
-            data.chartFontFamily = (typeof family === "string") ? family : "";
+            data.chartFontFamily = _gb2FontSafe(family);
             host.style.fontFamily = data.chartFontFamily.length > 0
                 ? data.chartFontFamily : "sans-serif";
             var styleEl = _gb2FontStyleEl();
@@ -11162,8 +11254,7 @@
             // consistently (they otherwise inherit from CSS that's not
             // present in the standalone file). Use the user's chosen
             // chart font family if set, falling back to sans-serif.
-            var _exportFont = (typeof data.chartFontFamily === "string" && data.chartFontFamily.length > 0)
-                ? data.chartFontFamily : "sans-serif";
+            var _exportFont = _gb2FontSafe(data.chartFontFamily) || "sans-serif";
             var styleEl = document.createElementNS("http://www.w3.org/2000/svg", "style");
             styleEl.textContent = 'text { font-family: ' + _exportFont + '; }';
             copy.insertBefore(styleEl, copy.firstChild);
@@ -36495,7 +36586,7 @@
                     }
                     if (ptData.group) {
                         rows += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">' +
-                            '<span style="display:inline-block;width:10px;height:10px;border:1px solid rgba(0,0,0,0.2);border-radius:2px;background:' + haloFill + ';"></span>' +
+                            '<span style="display:inline-block;width:10px;height:10px;border:1px solid rgba(0,0,0,0.2);border-radius:2px;background:' + _gb2CssColSafe(haloFill) + ';"></span>' +
                             '<span style="font-weight:600;color:#222;">' + _esc(ptData.group) + '</span>' +
                             '</div>';
                     }
@@ -38645,7 +38736,7 @@
                                         var yLab = (typeof data.yLabel === "string" && data.yLabel.length > 0) ? data.yLabel : "Sample";
                                         function _esc(t) { return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
                                         var rows = "";
-                                        if (grpLabel) rows += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;"><span style="display:inline-block;width:10px;height:10px;border:1px solid rgba(0,0,0,0.2);border-radius:2px;background:' + col + ';"></span><span style="font-weight:600;color:#222;">' + _esc(grpLabel) + '</span></div>';
+                                        if (grpLabel) rows += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;"><span style="display:inline-block;width:10px;height:10px;border:1px solid rgba(0,0,0,0.2);border-radius:2px;background:' + _gb2CssColSafe(col) + ';"></span><span style="font-weight:600;color:#222;">' + _esc(grpLabel) + '</span></div>';
                                         rows += '<div><span style="color:#666;">' + _esc(xLab) + ':</span> ' + _esc(_xyFmtNum(thv)) + '</div>';
                                         rows += '<div><span style="color:#666;">' + _esc(yLab) + ':</span> ' + _esc(_xyFmtNum(sv)) + '</div>';
                                         if (facet) rows += '<div style="color:#666;margin-top:3px;">' + _esc(facet) + '</div>';
@@ -39036,7 +39127,7 @@
                             function _esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
                             var _xLab = (typeof data.xLabel === "string" && data.xLabel.length > 0) ? data.xLabel : "Value";
                             var _rows = "";
-                            if (_grp) _rows += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;"><span style="display:inline-block;width:10px;height:10px;border:1px solid rgba(0,0,0,0.2);border-radius:2px;background:' + _col + ';"></span><span style="font-weight:600;color:#222;">' + _esc(displayGroup(_grp)) + '</span></div>';
+                            if (_grp) _rows += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;"><span style="display:inline-block;width:10px;height:10px;border:1px solid rgba(0,0,0,0.2);border-radius:2px;background:' + _gb2CssColSafe(_col) + ';"></span><span style="font-weight:600;color:#222;">' + _esc(displayGroup(_grp)) + '</span></div>';
                             if (isFinite(_lo) && isFinite(_hi)) _rows += '<div><span style="color:#666;">' + _esc(_xLab) + ':</span> ' + _esc(_xyFmtNum(_lo)) + ' &ndash; ' + _esc(_xyFmtNum(_hi)) + '</div>';
                             _rows += '<div><span style="color:#666;">' + _esc(_statLbl) + ':</span> ' + _esc(_xyFmtNum(_val)) + '</div>';
                             return _rows;

@@ -9,7 +9,6 @@ xyplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Cla
             annotationsJson = "",
             chartSnapshot = "",
             clientBundleHash = "",
-            errorBarType = "se",
             exportPath = "",
             exportRequest = "",
             facetVar = NULL,
@@ -21,7 +20,6 @@ xyplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Cla
             sizeVar = NULL,
             styleLibrary = "",
             styleStamp = FALSE,
-            summaryFunc = "mean",
             xvar = NULL,
             xyBin = "none",
             xyBinCount = 30,
@@ -57,17 +55,6 @@ xyplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Cla
                 "clientBundleHash",
                 clientBundleHash,
                 default="",
-                hidden=TRUE)
-            private$..errorBarType <- jmvcore::OptionList$new(
-                "errorBarType",
-                errorBarType,
-                options=list(
-                    "se",
-                    "sd",
-                    "ci95",
-                    "ci99",
-                    "none"),
-                default="se",
                 hidden=TRUE)
             private$..exportPath <- jmvcore::OptionString$new(
                 "exportPath",
@@ -133,14 +120,6 @@ xyplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Cla
                 "styleStamp",
                 styleStamp,
                 default=FALSE,
-                hidden=TRUE)
-            private$..summaryFunc <- jmvcore::OptionList$new(
-                "summaryFunc",
-                summaryFunc,
-                options=list(
-                    "mean",
-                    "median"),
-                default="mean",
                 hidden=TRUE)
             private$..xvar <- jmvcore::OptionVariable$new(
                 "xvar",
@@ -252,7 +231,6 @@ xyplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Cla
             self$.addOption(private$..annotationsJson)
             self$.addOption(private$..chartSnapshot)
             self$.addOption(private$..clientBundleHash)
-            self$.addOption(private$..errorBarType)
             self$.addOption(private$..exportPath)
             self$.addOption(private$..exportRequest)
             self$.addOption(private$..facetVar)
@@ -264,7 +242,6 @@ xyplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Cla
             self$.addOption(private$..sizeVar)
             self$.addOption(private$..styleLibrary)
             self$.addOption(private$..styleStamp)
-            self$.addOption(private$..summaryFunc)
             self$.addOption(private$..xvar)
             self$.addOption(private$..xyBin)
             self$.addOption(private$..xyBinCount)
@@ -284,7 +261,6 @@ xyplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Cla
         annotationsJson = function() private$..annotationsJson$value,
         chartSnapshot = function() private$..chartSnapshot$value,
         clientBundleHash = function() private$..clientBundleHash$value,
-        errorBarType = function() private$..errorBarType$value,
         exportPath = function() private$..exportPath$value,
         exportRequest = function() private$..exportRequest$value,
         facetVar = function() private$..facetVar$value,
@@ -296,7 +272,6 @@ xyplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Cla
         sizeVar = function() private$..sizeVar$value,
         styleLibrary = function() private$..styleLibrary$value,
         styleStamp = function() private$..styleStamp$value,
-        summaryFunc = function() private$..summaryFunc$value,
         xvar = function() private$..xvar$value,
         xyBin = function() private$..xyBin$value,
         xyBinCount = function() private$..xyBinCount$value,
@@ -315,7 +290,6 @@ xyplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Cla
         ..annotationsJson = NA,
         ..chartSnapshot = NA,
         ..clientBundleHash = NA,
-        ..errorBarType = NA,
         ..exportPath = NA,
         ..exportRequest = NA,
         ..facetVar = NA,
@@ -327,7 +301,6 @@ xyplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Cla
         ..sizeVar = NA,
         ..styleLibrary = NA,
         ..styleStamp = NA,
-        ..summaryFunc = NA,
         ..xvar = NA,
         ..xyBin = NA,
         ..xyBinCount = NA,
@@ -412,7 +385,6 @@ xyplotbuilderBase <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Class(
 #' @param chartSnapshot .
 #' @param clientBundleHash .
 #' @param data .
-#' @param errorBarType .
 #' @param exportPath .
 #' @param exportRequest .
 #' @param facetVar .
@@ -424,7 +396,6 @@ xyplotbuilderBase <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Class(
 #' @param sizeVar .
 #' @param styleLibrary .
 #' @param styleStamp .
-#' @param summaryFunc .
 #' @param xvar .
 #' @param xyBin .
 #' @param xyBinCount .
@@ -452,7 +423,6 @@ xyplotbuilder <- function(
     chartSnapshot = "",
     clientBundleHash = "",
     data,
-    errorBarType = "se",
     exportPath = "",
     exportRequest = "",
     facetVar,
@@ -464,7 +434,6 @@ xyplotbuilder <- function(
     sizeVar,
     styleLibrary = "",
     styleStamp = FALSE,
-    summaryFunc = "mean",
     xvar,
     xyBin = "none",
     xyBinCount = 30,
@@ -506,7 +475,6 @@ xyplotbuilder <- function(
         annotationsJson = annotationsJson,
         chartSnapshot = chartSnapshot,
         clientBundleHash = clientBundleHash,
-        errorBarType = errorBarType,
         exportPath = exportPath,
         exportRequest = exportRequest,
         facetVar = facetVar,
@@ -518,7 +486,6 @@ xyplotbuilder <- function(
         sizeVar = sizeVar,
         styleLibrary = styleLibrary,
         styleStamp = styleStamp,
-        summaryFunc = summaryFunc,
         xvar = xvar,
         xyBin = xyBin,
         xyBinCount = xyBinCount,

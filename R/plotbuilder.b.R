@@ -541,7 +541,7 @@ plotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Class
                 show_data_points = isTRUE(self$options$showDataPoints),
                 # Raw blob (JS seeds its specState from data.chartSpec) +
                 # the real-key list (JS routing) - both additive payload keys.
-                chart_spec = self$options$chartSpec,
+                chart_spec = gb_spec_sanitized_json(self$options$chartSpec),
                 spec_real_keys = spec_real_keys,
                 spec_keys = spec_keys,
                 auto_p_correction_default =

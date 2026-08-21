@@ -109,6 +109,31 @@ GB2_VERIFY_OUT="$OUT" node "$HERE/hover-export-check.mjs"
 echo "== crowded-category label thinning: the stride decision (pure unit)"
 node "$HERE/catstride-unit.mjs"
 
+echo "== colour gate: a shared .omv cannot inject through a colour (pure R)"
+if Rscript "$HERE/colorgate-check.R"; then :; else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then echo "   skipped: jsonlite not available"; else exit "$rc"; fi
+fi
+
+echo "== pareto totals survive a category named with the panel separator"
+if Rscript "$HERE/facetsep-check.R"; then :; else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then echo "   skipped: jmvcore not available"; else exit "$rc"; fi
+fi
+
+echo "== colour gate, end to end (hostile .omv values through R into the engine)"
+if GB2_COLORGATE_OUT="$OUT-colorgate" GB2_BUNDLE="$BUNDLE" Rscript "$HERE/colorgate-render.R"; then
+    GB2_COLORGATE_OUT="$OUT-colorgate" GB2_BUNDLE="$BUNDLE" node "$HERE/colorgate-client-check.mjs"
+    GB2_COLORGATE_OUT="$OUT-colorgate" GB2_BUNDLE="$BUNDLE" node "$HERE/colorgate-bypass-check.mjs"
+else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then
+        echo "   skipped: jmvcore not available in this R library"
+    else
+        exit "$rc"
+    fi
+fi
+
 echo "== chartSpec migration (route style commits -> one blob; explode; per-key undo)"
 if GB2_CHARTSPEC_OUT="$OUT-chartspec" GB2_BUNDLE="$BUNDLE" Rscript "$HERE/chartspec-render.R"; then
     GB2_CHARTSPEC_OUT="$OUT-chartspec" node "$HERE/chartspec-check.mjs"

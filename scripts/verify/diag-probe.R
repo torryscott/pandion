@@ -97,6 +97,24 @@ expect("cached: pending box present too",
 expect("cached: self-heal note kept (not an error box)",
        grepl("Loading chart engine", cached, fixed = TRUE))
 
+# The shipped default is script-src, so the "shared .omv opened where
+# Pandion is not installed" case renders through THAT branch. Build it
+# by asking for a script-src delivery while forcing the rollback flag
+# off, so the page carries the loader with no inline engine.
+old_inline <- Sys.getenv("GB2_INLINE_BUNDLE", unset = NA_character_)
+Sys.unsetenv("GB2_INLINE_BUNDLE")
+ssmiss <- getC(plotbuilder(data = dat, xvar = "grp", yvar = "y",
+                           groupVar = NULL, facetVar = NULL))
+if (!is.na(old_inline)) Sys.setenv(GB2_INLINE_BUNDLE = old_inline)
+wr(ssmiss, "diag-ssmiss.html")
+expect("scriptsrc: renders through the script-src branch",
+       grepl('"bundle_mode\\":\\"scriptsrc', ssmiss) ||
+       grepl('bundle_mode":"scriptsrc', ssmiss, fixed = TRUE))
+expect("scriptsrc: carries the module-missing fallback",
+       grepl("gb2-module-missing", ssmiss, fixed = TRUE))
+expect("scriptsrc: keeps the diag-pending element for the primer",
+       grepl("gb2-diag-pending", ssmiss, fixed = TRUE))
+
 expect("healthy build: NO min-missing note in either page",
        !grepl("gb2-diag-minmissing", inline, fixed = TRUE) &&
        !grepl("gb2-diag-minmissing", cached, fixed = TRUE))
