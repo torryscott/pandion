@@ -16,8 +16,8 @@
 #' @return Character scalar of HTML.
 #' @keywords internal
 
-# Script-src is the production default. Keep the former inline/localStorage
-# delivery behind an emergency rollback switch while the transition settles.
+# Script-src is the production default. Keep the former inline delivery
+# behind an emergency rollback switch while the transition settles.
 # The env var works for harnesses/probes; real jamovi strips inherited env at
 # the Electron->server spawn, so a live installation uses the flag file:
 #   touch ~/.plotstudio-inlinebundle  # temporarily use the legacy loader
@@ -40,8 +40,8 @@ gb2_init_script_src <- function(html_result) {
     }, error = function(e) invisible(FALSE))
 }
 
-# Empty analyses used to pre-warm the inline/localStorage cache by shipping
-# the engine with their placeholder. In script-src mode the Html result has
+# Empty analyses used to pre-warm the inline handshake by shipping the
+# engine with their placeholder. In script-src mode the Html result has
 # already requested the engine, so keep placeholders payload-only.
 gb2_engine_placeholder_html <- function(message_html,
                                         client_bundle_hash = "",
@@ -544,10 +544,10 @@ graphbuilder2_html <- function(bars,
                                missing_note = "",
                                # md5 of the bundle the CLIENT confirmed it has
                                # cached (hidden clientBundleHash option, written
-                               # back by the widget after it copies the bundle
-                               # into localStorage). When it matches the bundle
-                               # on disk we skip inlining the ~1.9 MB JS and emit
-                               # a small loader instead. "" = always inline.
+                               # back by the widget once the engine is live in
+                               # its window). When it matches the bundle on disk
+                               # we skip inlining the ~1.9 MB JS and emit a small
+                               # loader instead. "" = always inline.
                                client_bundle_hash = "",
                                # Epoch seconds captured at the module's .run()
                                # entry (as.numeric(Sys.time())). Feeds the debug
@@ -2188,8 +2188,7 @@ graphbuilder2_html <- function(bars,
     #   inline : the client hasn't confirmed this exact bundle (or the
     #            GB2_NO_BUNDLE_CACHE escape hatch is set). Embed the
     #            full bundle as before, plus a deferred snippet that
-    #            copies the bundle text into localStorage and writes
-    #            the hash back through the hidden clientBundleHash
+    #            writes the hash back through the hidden clientBundleHash
     #            option (debounced via window.__gb2_setOption so it
     #            coalesces with other early edits).
     #   cached : the persisted clientBundleHash matches the bundle on
@@ -3115,7 +3114,7 @@ graphbuilder2_html <- function(bars,
 #                                   self$options$clientBundleHash))
 # While the user is still choosing variables, this ships the widget
 # bundle behind the SAME hash handshake as a real render (gated body +
-# localStorage store + clientBundleHash write-back) but with no payload
+# clientBundleHash write-back) but with no payload
 # and no render() call. By the time the first variable lands, the hash
 # has usually round-tripped and the first data render takes the ~16 KB
 # cached branch instead of paying the 1.9 MB inline ship + parse +
