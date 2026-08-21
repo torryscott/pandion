@@ -28,7 +28,7 @@
     "channels": ["likertAlpha", "likertCells", "likertItems", "likertLevels", "likertMeans", "missingNote"]
   },
   "__stamp": {
-    "marshalMd5": "518c65e09dc517662bb50c3a49d6f8bf",
+    "marshalMd5": "193b9ee64f7a63bbdd38b55573f72050",
     "marshalFiles": ["R/widget.R", "R/spec_explode.R", "R/utils.R", "R/plotbuilder.b.R", "R/distplotbuilder.b.R", "R/freqplotbuilder.b.R", "R/xyplotbuilder.b.R", "R/rmplotbuilder.b.R", "R/corrplotbuilder.b.R", "R/likertplotbuilder.b.R"],
     "engineMd5": "e0689a84dc50bd6c892f6c93e48c97f8",
     "generated": "2026-08-21"
