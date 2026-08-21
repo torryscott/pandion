@@ -3617,6 +3617,17 @@
                     }
                 }
             }
+            // "Did this document (or this session) actually STATE this
+            // option?" - the chartSpec blob carries only keys that were
+            // really set, so presence is the honest test, and _setOption
+            // adds a key the moment the user picks something. Published
+            // HERE, at the bridge, because it must answer on every chart:
+            // an earlier home inside the raincloud fold left it undefined
+            // on a plain bar chart, where the fallback then showed a
+            // pooled correction the test cannot take (Aug 2026).
+            try {
+                window.__gb2_specStated = _gb2SpecState;
+            } catch (_eSt) {}
             // The axis-title options route through chartSpec, so _bridgeTitle's
             // pending/recent source is empty for them; re-derive the rendered
             // *Label fields from the exploded *Title/*Override + defaults,
@@ -10493,7 +10504,7 @@
             // chrome-y chart rather than jamovi's first-svg fallback (which
             // would grab a toolbar icon).
             // jmv-results-svg-selection (Aug 2026, agreed with
-            // Jonathon): the marker jamovi's element-level resize handle
+            // jamovi's maintainer): the marker jamovi's element-level resize handle
             // keys on. It stays on the LIVE chart permanently - the twin
             // build overwrites its own class attribute wholesale, so the
             // marker can never leak onto the hidden copy and the handle
@@ -10820,7 +10831,7 @@
             'stroke="#8a8a8a" stroke-width="1.4" stroke-linecap="round" fill="none"/></svg>';
         gripXY.appendChild(gripXYGlyph);
         // Under jamovi's Svg element the resize handle belongs to the
-        // HOST (keyed on jmv-results-svg-selection), and Jonathon asked
+        // HOST (keyed on jmv-results-svg-selection), and jamovi's maintainer asked
         // for the corner to be clear so the jamovi handle has it to
         // itself (Aug 2026). Detach our grip there; every listener and
         // style write below binds to the detached node harmlessly.
@@ -11358,7 +11369,7 @@
         // first build lands right after this render's synchronous body
         _gb2ScheduleHarvestTwin(30);
 
-        // ===== jamovi-side resize follow (Aug 2026, Jonathon's design):
+        // ===== jamovi-side resize follow (Aug 2026, the maintainer's design):
         // the host places a resize handle on svg.jmv-results-svg-selection
         // and resizes that svg; this observer folds the new size back into
         // plotWidth/plotHeight so the change redraws at the new geometry
@@ -11916,7 +11927,7 @@
         // Under jamovi's Svg element, export is jamovi's job (right-click
         // on the chart; the harvest twin supplies the clean picture), so
         // the module's own Export button comes off the toolbar there
-        // (Jonathon's ask, Aug 2026). Production jamovi (Html results)
+        // (jamovi's maintainer asked for this, Aug 2026). Production jamovi (Html results)
         // keeps it until the Svg element ships for real, and the
         // standalone keeps it always; display:none so the toolbar
         // re-parent machinery is untouched.
@@ -15224,6 +15235,9 @@
             // (no pooled-variance basis) — the readout uses this flag
             // to SAY so instead of silently implying a corrected p.
             var applied = ps.map(function (p) { return isFinite(p); });
+            // Per-bracket {t, df} belonging to the CORRECTION's error
+            // term, filled only by the corrections that compute one.
+            var corrStat = [];
             var adj, kCells = 0;
             if (correction === "bonferroni") {
                 adj = _gb2Stats.bonferroni(ps);
@@ -15262,6 +15276,17 @@
                         !(n1 > 0) || !(n2 > 0)) { applied[ai] = false; return r.res.p; }
                     var q = Math.abs(m1 - m2) /
                             Math.sqrt((MSE / 2) * (1 / n1 + 1 / n2));
+                    // The statistic that BELONGS to this p: Tukey's q
+                    // is |t| * sqrt(2) on the pooled error term, so the
+                    // matching t is the pooled-variance t with the
+                    // ANOVA's own df. Recorded here (the only place
+                    // MSE / dfW exist) so the readout can show a t and
+                    // df from the SAME error term as the p instead of
+                    // the per-pair test's - Torry, Aug 2026.
+                    corrStat[ai] = {
+                        t: (m1 - m2) / Math.sqrt(MSE * (1 / n1 + 1 / n2)),
+                        df: dfW, basis: "pooled"
+                    };
                     return 1 - _gb2Stats.ptukey(q, kCells, dfW);
                 });
             } else if (correction === "gamesHowell") {
@@ -15287,6 +15312,11 @@
                               (v2 / rr.n2) * (v2 / rr.n2) / (rr.n2 - 1);
                     var df = num / den;
                     if (!isFinite(df) || df <= 0) { applied[ai] = false; return rr.p; }
+                    // Games-Howell IS a Welch pair under a studentized
+                    // range; when the chosen test was Student's, the
+                    // displayed statistic would otherwise disagree with
+                    // its own p.
+                    corrStat[ai] = { t: t, df: df, basis: "welch" };
                     return 1 - _gb2Stats.ptukey(Math.abs(t) * Math.SQRT2, kCells, df);
                 });
             } else if (correction === "dunnett") {
@@ -15374,6 +15404,8 @@
                                 applied[ai] = false;
                                 return r.res.p;
                             }
+                            corrStat[ai] = { t: tObs[ai], df: dfD,
+                                             basis: "pooled" };
                             var pd = 1 - _gb2Stats.dunnettCdf(
                                 qD, lambdas, dfD);
                             return Math.max(0, Math.min(1, pd));
@@ -15387,7 +15419,8 @@
             var fSize = 0;
             for (var z = 0; z < ps.length; z++) if (isFinite(ps[z])) fSize++;
             return { adjusted: adj, familySize: fSize, kCells: kCells,
-                     applied: applied, correction: correction };
+                     applied: applied, correction: correction,
+                     corrStat: corrStat };
         }
 
         // Build the chart-wide family of auto-p brackets and apply
@@ -15472,7 +15505,8 @@
                         adjustedP: cf.adjusted[gi],
                         familyK: dispK,
                         facet: fct,
-                        corrApplied: (cf.applied && cf.applied[gi] === true)
+                        corrApplied: (cf.applied && cf.applied[gi] === true),
+                        corrStat: (cf.corrStat && cf.corrStat[gi]) || null
                     };
                 }
             }
@@ -15490,7 +15524,7 @@
         // visible label needs to use the CORRECTED p, while the
         // res object still carries the raw p in res.p (we don't
         // mutate the raw result). Returns the displayed string.
-        function _autoPFormatLabel(raw, ann, displayP) {
+        function _autoPFormatLabel(raw, ann, displayP, corrStat) {
             if (!raw || !raw.ok) return "—";
             var fmt = ann.autoPFormat || "asterisks";
             // One-tailed disclosure (Jul 2026): a directional p on the
@@ -15503,7 +15537,18 @@
             // for the APA formatter (which reads res.p directly).
             // The original raw.res is untouched.
             var resForFmt = raw.res;
-            if (displayP !== raw.res.p) {
+            // A correction that computed its own t / df owns the whole
+            // reported line: showing the per-pair statistic beside the
+            // corrected p would describe two different tests.
+            if (corrStat && isFinite(corrStat.t) && isFinite(corrStat.df)) {
+                resForFmt = {};
+                for (var _ck in raw.res)
+                    if (Object.prototype.hasOwnProperty.call(raw.res, _ck))
+                        resForFmt[_ck] = raw.res[_ck];
+                resForFmt.t = corrStat.t;
+                resForFmt.df = corrStat.df;
+                resForFmt.p = displayP;
+            } else if (displayP !== raw.res.p) {
                 resForFmt = {};
                 for (var k in raw.res) {
                     if (Object.prototype.hasOwnProperty.call(raw.res, k)) {
@@ -15619,7 +15664,8 @@
             var entry = family.byId[ann.id];
             var adjustedP = entry ? entry.adjustedP : raw.res.p;
             if (!isFinite(adjustedP)) adjustedP = raw.res.p;
-            var label = _autoPFormatLabel(raw, ann, adjustedP);
+            var label = _autoPFormatLabel(raw, ann, adjustedP,
+                entry ? entry.corrStat : null);
             return {
                 ok: true,
                 testKind: raw.testKind,
@@ -15636,6 +15682,11 @@
                 // null when the bracket isn't in the family at all
                 // (auto-p off) so the readout stays quiet.
                 corrApplied: entry ? (entry.corrApplied === true) : null,
+                // {t, df, basis} from the correction's OWN error term
+                // when a pooled / Welch-type correction supplied one -
+                // so a readout never shows a per-pair t beside a
+                // pooled p (Torry's seam, Aug 2026).
+                corrStat: entry ? entry.corrStat : null,
                 excludedHidden: raw.excludedHidden === true,
                 correction: family.correction,
                 familySize: family.familySize,
@@ -23228,8 +23279,28 @@
         function _gb2DrawCloudGlow(els, front, boost) {
             try {
                 var any = false, i, k, bb, cx, cy, r, clipv, gc, col, pf, ps;
+                // Halo geometry SCALES WITH THE MARKER (Torry, Aug 2026:
+                // "a little in-your-face... I want it really quite
+                // subtle"). The offsets used to be fixed pixels, so a
+                // 4px scatter marker wore a 13px halo - more than three
+                // times its own radius - and in a dense cloud the
+                // neighbouring halos compounded into fog. Scaling by the
+                // marker radius makes the glow read as "these points are
+                // selected" at any size, and two rings instead of three
+                // stop the core stacking three coats of the same colour.
+                // Floors keep a tiny marker's halo visible at all; the
+                // dense-cloud branch (>1200) is unchanged.
+                var _glowR = 4;
+                try {
+                    var _b0 = els[0] && els[0].getBBox ? els[0].getBBox() : null;
+                    if (_b0 && (_b0.width || _b0.height))
+                        _glowR = Math.max(_b0.width, _b0.height) / 2;
+                } catch (_eR0) {}
+                var _ringSpread = Math.max(2.5, _glowR * 1.5);
+                var _ringInner = Math.max(1.5, _glowR * 0.7);
                 var rings = boost ? [[10, 0.10], [6, 0.16], [3, 0.24]]
-                          : ((els.length > 1200) ? [[8, 0.08]] : [[9, 0.035], [5.5, 0.06], [3, 0.10]]);
+                          : ((els.length > 1200) ? [[8, 0.08]]
+                             : [[_ringSpread, 0.05], [_ringInner, 0.07]]);
                 var _glowTgt = front ? inspectorIndicatorGroup : inspectorIndicatorUnderGroup;
                 // Front glow (bar charts) paints ABOVE the opaque bar, but the
                 // points must stay crisp ON TOP of the glow - so stash a non-
@@ -51120,6 +51191,11 @@
                     pairs[idxs[g3]].adjP = cf.adjusted[g3];
                     pairs[idxs[g3]].adjApplied = cf.applied[g3] === true;
                     pairs[idxs[g3]].adjN = _nF;
+                    // {t, df} from the correction's own error term, when
+                    // it computed one - the table must not print a
+                    // per-pair t beside a pooled p.
+                    pairs[idxs[g3]].corrStat =
+                        (cf.corrStat && cf.corrStat[g3]) || null;
                 }
             }
             return { list: pairs, droppedDiag: droppedDiag, droppedNC: droppedNC };
@@ -53039,7 +53115,13 @@
                     return sym === "d" ? "cohensD" : sym === "dz" ? "cohensDz" :
                            sym === "g" ? "hedgesG" : sym === "r" ? "rankBiserialR" : null;
                 };
-                var cmpStat = function (raw) {
+                var cmpStat = function (raw, corrStat) {
+                    if (corrStat && isFinite(corrStat.t) && isFinite(corrStat.df)
+                            && raw.testFamily !== "rank") {
+                        var dfC = (corrStat.df % 1 === 0)
+                            ? String(corrStat.df) : corrStat.df.toFixed(2);
+                        return "t(" + dfC + ") = " + corrStat.t.toFixed(2);
+                    }
                     if (raw.testFamily === "rank") {
                         var st = (raw.testKind === "mannWhitneyU" && isFinite(raw.res.U))
                             ? "U = " + (Math.round(raw.res.U * 100) / 100)
@@ -53076,9 +53158,23 @@
                 };
                 var cmpHere = function (cp, which) {
                     var lbl = cmpPlainLbl(cp), raw = cp.raw, res = raw.res;
+                    var _cs = cp.corrStat;
                     if (which === "stat") {
                         if (raw.testFamily === "rank")
                             return "Here " + cmpStat(raw) + " for " + lbl + ". Rank tests summarize how the two sets of scores overlap; read the p value to judge it, and the effect size for how big the gap is.";
+                        if (_cs && isFinite(_cs.t) && isFinite(_cs.df)) {
+                            var dfP = (_cs.df % 1 === 0)
+                                ? String(_cs.df) : _cs.df.toFixed(2);
+                            return "Here t(" + dfP + ") = " + _cs.t.toFixed(2) +
+                                " for " + lbl + ", computed on the same error term as " +
+                                "the adjusted p beside it" +
+                                (_cs.basis === "pooled"
+                                    ? " - the pooled variance from every " +
+                                      (mk === "rm" ? "condition" : "group") +
+                                      " in this panel, which is what gives it more degrees of freedom than a two-group test."
+                                    : " - each pair's own variances, unpooled.") +
+                                " The further t is from zero, the more the difference stands out from the noise.";
+                        }
                         var dfS = (res.df % 1 === 0) ? String(res.df) : res.df.toFixed(2);
                         return "Here t(" + dfS + ") = " + res.t.toFixed(2) + " for " + lbl +
                             ": the two " + (mk === "rm" ? "condition" : "group") +
@@ -53264,7 +53360,7 @@
                             rowLbl = _stEsc(cmpLabelOf(cp2.left)) + " vs " +
                                 _stEsc(cmpLabelOf(cp2.right));
                         }
-                        var _stStatTd = _stCellTerm(_stEsc(cmpStat(cp2.raw)), _cmpStatKey(cp2.raw), cmpHere(cp2, "stat"));
+                        var _stStatTd = _stCellTerm(_stEsc(cmpStat(cp2.raw, cp2.corrStat)), _cmpStatKey(cp2.raw), cmpHere(cp2, "stat"));
                         var _pTd0 = _stCellTerm(_stEsc(_stP(cp2.raw.res.p).replace(/^p = /, "").replace(/^p /, "")), "p", cmpHere(cp2, "p"));
                         var _pTd = (sig && !chipOnAdj) ? sigChip(_pTd0) : _pTd0;
                         var _adjHere = cmpHere(cp2, "padj");
@@ -53341,9 +53437,19 @@
                     var _cmpPooledOK = !cmpIsRM && cmpScope !== "every" &&
                         (cmpTest === "auto" || cmpTest === "welch" || cmpTest === "studentT");
                     if (!cmpIsRM) {
-                        if (_cmpPooledOK || cmpCorr === "tukey") corrOpts.push(["tukey", "Tukey (studentized range)", cmpCorr === "tukey"]);
-                        if (_cmpPooledOK || cmpCorr === "gamesHowell") corrOpts.push(["gamesHowell", "Games-Howell (unequal var)", cmpCorr === "gamesHowell"]);
-                        if (_cmpPooledOK || cmpCorr === "dunnett") corrOpts.push(["dunnett", "Dunnett (vs control)", cmpCorr === "dunnett"]);
+                        // Same default-is-not-a-pick rule as the bracket
+                        // panel (see _baPicked).
+                        var _cmpPick = function (o) {
+                            if (cmpCorr !== o) return false;
+                            try {
+                                return !!(window.__gb2_specStated &&
+                                    Object.prototype.hasOwnProperty.call(
+                                        window.__gb2_specStated, "autoPCorrection"));
+                            } catch (_e) { return false; }
+                        };
+                        if (_cmpPooledOK || _cmpPick("tukey")) corrOpts.push(["tukey", "Tukey (studentized range)", cmpCorr === "tukey"]);
+                        if (_cmpPooledOK || _cmpPick("gamesHowell")) corrOpts.push(["gamesHowell", "Games-Howell (unequal var)", cmpCorr === "gamesHowell"]);
+                        if (_cmpPooledOK || _cmpPick("dunnett")) corrOpts.push(["dunnett", "Dunnett (vs control)", cmpCorr === "dunnett"]);
                     }
                     var alphaOpts = [["0.1", ".10", stAlpha === 0.1],
                                      ["0.05", ".05", stAlpha === 0.05],
@@ -53629,12 +53735,20 @@
                                     if (!cp3) return "";
                                     var dispP = cmpBasisP(cp3);
                                     var resF = cp3.raw.res;
-                                    if (dispP !== resF.p) {
+                                    var csA = cp3.corrStat;
+                                    var wantStat = !!(csA && isFinite(csA.t) &&
+                                        isFinite(csA.df) &&
+                                        cp3.raw.testFamily !== "rank");
+                                    if (dispP !== resF.p || wantStat) {
                                         var cl2 = {};
                                         for (var kk in resF) {
                                             if (Object.prototype.hasOwnProperty.call(resF, kk)) cl2[kk] = resF[kk];
                                         }
                                         cl2.p = dispP;
+                                        // A pasted sentence must report the
+                                        // statistic that goes WITH the p it
+                                        // quotes (Torry's seam, Aug 2026).
+                                        if (wantStat) { cl2.t = csA.t; cl2.df = csA.df; }
                                         resF = cl2;
                                     }
                                     var apa = (cp3.raw.testFamily === "rank")
@@ -91423,6 +91537,14 @@
                         // select never misreports a saved chart's state.
                         var _corrTk = "";
                         try { _corrTk = _autoPResolvedTestKind(ann); } catch (_eTk) {}
+                        var _corrPicked = function (opt, cur) {
+                            if (cur !== opt) return false;
+                            try {
+                                return !!(window.__gb2_specStated &&
+                                    Object.prototype.hasOwnProperty.call(
+                                        window.__gb2_specStated, "autoPCorrection"));
+                            } catch (_e) { return false; }
+                        };
                         var _corrPooledOK = !(data && (data.isRepeatedMeasures || data.freqMode === true))
                             && (_corrTk === "welch" || _corrTk === "studentT");
                         return '<div style="display:flex;align-items:center;gap:8px;">' +
@@ -91432,11 +91554,16 @@
                             '<option value="bonferroni"' + (corrCur === "bonferroni" ? ' selected' : '') + '>Bonferroni</option>' +
                             '<option value="holm"'       + (corrCur === "holm"       ? ' selected' : '') + '>Holm</option>' +
                             '<option value="fdrBH"'      + (corrCur === "fdrBH"      ? ' selected' : '') + '>Benjamini-Hochberg (FDR)</option>' +
-                            ((_corrPooledOK || corrCur === "tukey")
+                            // Same default-is-not-a-pick rule as the
+                            // re-sync path below (_baPicked): this is the
+                            // FIRST-RENDER build of the same select, and
+                            // patching only one of the two left the gate
+                            // disabled on the render that actually shows.
+                            ((_corrPooledOK || _corrPicked("tukey", corrCur))
                               ? '<option value="tukey"'      + (corrCur === "tukey"      ? ' selected' : '') + '>Tukey (studentized range)</option>' : '') +
-                            ((_corrPooledOK || corrCur === "gamesHowell")
+                            ((_corrPooledOK || _corrPicked("gamesHowell", corrCur))
                               ? '<option value="gamesHowell"' + (corrCur === "gamesHowell" ? ' selected' : '') + '>Games-Howell (unequal var)</option>' : '') +
-                            ((_corrPooledOK || corrCur === "dunnett")
+                            ((_corrPooledOK || _corrPicked("dunnett", corrCur))
                               ? '<option value="dunnett"' + (corrCur === "dunnett" ? ' selected' : '') + '>Dunnett (vs control)</option>' : '') +
                           '</select>' +
                         '</div>';
@@ -92257,6 +92384,17 @@
                 var cur = (data && typeof data.autoPCorrection === "string") ? data.autoPCorrection : "none";
                 var tk = "";
                 try { tk = _autoPResolvedTestKind(ann); } catch (_eTk2) {}
+                var _baPicked = function (opt, cur) {
+                    if (cur !== opt) return false;
+                    // A value equal to the default is indistinguishable
+                    // BY VALUE from a deliberate pick of the same thing,
+                    // so ask whether it was stated rather than compare.
+                    try {
+                        return !!(window.__gb2_specStated &&
+                            Object.prototype.hasOwnProperty.call(
+                                window.__gb2_specStated, "autoPCorrection"));
+                    } catch (_e) { return false; }
+                };
                 var pooledOK = !(data && (data.isRepeatedMeasures || data.freqMode === true))
                     && (tk === "welch" || tk === "studentT");
                 el.innerHTML =
@@ -92264,9 +92402,14 @@
                     '<option value="bonferroni">Bonferroni</option>' +
                     '<option value="holm">Holm</option>' +
                     '<option value="fdrBH">Benjamini-Hochberg (FDR)</option>' +
-                    ((pooledOK || cur === "tukey") ? '<option value="tukey">Tukey (studentized range)</option>' : '') +
-                    ((pooledOK || cur === "gamesHowell") ? '<option value="gamesHowell">Games-Howell (unequal var)</option>' : '') +
-                    ((pooledOK || cur === "dunnett") ? '<option value="dunnett">Dunnett (vs control)</option>' : '');
+                    // A pooled correction stays listed when the user
+                    // PICKED it (so a saved chart's select never
+                    // misreports) - but not when it is merely this
+                    // module's default, or the exemption would fire on
+                    // every chart and silently disable the gate.
+                    ((pooledOK || _baPicked("tukey", cur)) ? '<option value="tukey">Tukey (studentized range)</option>' : '') +
+                    ((pooledOK || _baPicked("gamesHowell", cur)) ? '<option value="gamesHowell">Games-Howell (unequal var)</option>' : '') +
+                    ((pooledOK || _baPicked("dunnett", cur)) ? '<option value="dunnett">Dunnett (vs control)</option>' : '');
                 el.value = cur;
             }
             // autoPTest gets bespoke wiring (not the generic helper):

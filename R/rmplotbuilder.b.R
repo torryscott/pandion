@@ -108,7 +108,7 @@
     list(arg = "legend_swatch_gap", opt = "legendSwatchGap", bool = FALSE, default = 6),
     list(arg = "legend_offset_x", opt = "legendOffsetX", bool = FALSE, default = 0),
     list(arg = "legend_offset_y", opt = "legendOffsetY", bool = FALSE, default = 0),
-    list(arg = "auto_p_correction", opt = "autoPCorrection", bool = FALSE, default = "none"),
+    list(arg = "auto_p_correction", opt = "autoPCorrection", bool = FALSE, default = "holm"),
     list(arg = "x_axis_thickness", opt = "xAxisThickness", bool = FALSE, default = 1.5),
     list(arg = "y_axis_thickness", opt = "yAxisThickness", bool = FALSE, default = 1.5),
     list(arg = "x_axis_style", opt = "xAxisStyle", bool = FALSE, default = "solid"),
@@ -677,7 +677,9 @@ rmplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
                 connect_subjects = isTRUE(self$options$connectSubjects),
                 chart_spec = self$options$chartSpec,
                 spec_real_keys = spec_real_keys,
-                spec_keys = spec_keys
+                spec_keys = spec_keys,
+                auto_p_correction_default =
+                    gb_spec_default(.rmplotbuilderSpecTable, "autoPCorrection")
             )
             spec_args <- gb_spec_args(spec, .rmplotbuilderSpecTable)
 

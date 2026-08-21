@@ -2,7 +2,7 @@
 # for the browser half). The chartSnapshot option (Jul 2026) carries a
 # JS-committed "<sig>|<svg>" back to R, which embeds the SVG as a hidden
 # data-URI <img> beside the host div so a machine WITHOUT the module
-# still shows the chart (the shared-.omv case from Jonathon's email).
+# still shows the chart (the shared-.omv case jamovi's maintainer raised).
 # This half asserts the R-side contract:
 #   - no snapshot  -> no fallback block, no chartSnapshotKey payload key
 #                     (byte-stability for every pre-snapshot page)

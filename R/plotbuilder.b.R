@@ -111,7 +111,7 @@
     list(arg = "legend_swatch_gap", opt = "legendSwatchGap", bool = FALSE, default = 6),
     list(arg = "legend_offset_x", opt = "legendOffsetX", bool = FALSE, default = 0),
     list(arg = "legend_offset_y", opt = "legendOffsetY", bool = FALSE, default = 0),
-    list(arg = "auto_p_correction", opt = "autoPCorrection", bool = FALSE, default = "none"),
+    list(arg = "auto_p_correction", opt = "autoPCorrection", bool = FALSE, default = "tukey"),
     list(arg = "x_axis_thickness", opt = "xAxisThickness", bool = FALSE, default = 1.5),
     list(arg = "y_axis_thickness", opt = "yAxisThickness", bool = FALSE, default = 1.5),
     list(arg = "x_axis_style", opt = "xAxisStyle", bool = FALSE, default = "solid"),
@@ -238,7 +238,7 @@ plotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Class
         # SCRIPT-SRC PROTOTYPE (GB2_SCRIPT_SRC=1, Jul 2026, pilot module):
         # serve the bundle from the module directory via the Html result's
         # scripts field instead of inlining it in the results content.
-        # Set in .init() per Jonathon's guidance (Jul 2026 thread): the
+        # Set in .init() per jamovi's maintainer (Jul 2026): the
         # INIT delivery already carries the scripts field, so the
         # resultsview element loads the JS while R computes and the
         # .run() payload arrives with the engine loaded and waiting.
@@ -543,7 +543,9 @@ plotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Class
                 # the real-key list (JS routing) - both additive payload keys.
                 chart_spec = self$options$chartSpec,
                 spec_real_keys = spec_real_keys,
-                spec_keys = spec_keys
+                spec_keys = spec_keys,
+                auto_p_correction_default =
+                    gb_spec_default(.plotbuilderSpecTable, "autoPCorrection")
             )
             # Explode the ~200 style values from the parsed spec into their
             # snake_case graphbuilder2_html args (defaults from the table, so

@@ -47,7 +47,7 @@ gb2_engine_placeholder_html <- function(message_html,
                                         client_bundle_hash = "",
                                         script_src_ready = FALSE) {
     # The jamovi convention is to draw placeholders at full size rather
-    # than a bare text box (Jonathon's ask, Aug 2026): an empty chart
+    # than a bare text box (jamovi's maintainer asked for this, Aug 2026): an empty chart
     # frame - axes, ticks, faint gridlines, all quiet gray - at the
     # default plot size, with the module's message centered in the plot
     # area. The frame is one scalable svg (viewBox), so it shrinks
@@ -394,6 +394,7 @@ graphbuilder2_html <- function(bars,
                                # reopen. Bracket-bearing modules pass
                                # self$options$autoPCorrection.
                                auto_p_correction = "none",
+                               auto_p_correction_default = "",
                                # Set TRUE by the rmgraph module so the
                                # widget knows the x-categories represent
                                # repeated measure columns (same subjects
@@ -1770,6 +1771,7 @@ graphbuilder2_html <- function(bars,
         legendOffsetY = as.numeric(legend_offset_y),
         annotations = normalize_annotations(annotations),
         autoPCorrection = as.character(auto_p_correction),
+        autoPCorrectionDefault = as.character(auto_p_correction_default),
         legendRowSpacing = as.numeric(legend_row_spacing),
         legendSwatchGap = as.numeric(legend_swatch_gap),
         xAxisThickness = as.numeric(x_axis_thickness),
@@ -2200,7 +2202,7 @@ graphbuilder2_html <- function(bars,
     # resultsview gates content insertion on the script's load promise,
     # so the engine should already be defined when the inline payload
     # script runs; engine-absent is the lifecycle diagnostic this
-    # prototype exists to surface. Jonathon-agreed direction (Jul 2026
+    # prototype exists to surface. Agreed with jamovi's maintainer (Jul 2026
     # thread); env-gated so shipped behavior is byte-identical.
     # script_src_ready: per-module opt-in - only modules whose .init()
     # actually sets widget$scripts may take this branch (the audit's catch:

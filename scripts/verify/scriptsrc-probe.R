@@ -152,7 +152,7 @@ expect("enabled output reports scriptsrc mode",
        grepl('\\"bundle_mode\\":\\"scriptsrc\\"', ss))
 # "Plain" means engine-free and deterministic, not byte-frozen: since
 # Aug 2026 placeholders deliberately draw a full-size EMPTY chart frame
-# (the jamovi convention, Jonathon's ask) around the message, so the
+# (the jamovi convention, its maintainer's ask) around the message, so the
 # old byte-exact expectation would re-fail on every frame polish. The
 # durable contract: the message rides through verbatim, an aria-hidden
 # frame svg may accompany it, and the enabled path never smuggles the

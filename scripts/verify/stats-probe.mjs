@@ -2824,6 +2824,43 @@ async function copyFlips(page, actKey) {
     await ctx.close();
 }
 
+// ---- Case DEF: the SHIPPED default correction ------------------------
+// Aug 2026 (Torry): a panel that lists every pair with no adjustment is
+// the least defensible default in the app, so Compare Groups now
+// defaults to Tukey - exact for the all-pairs family it enumerates -
+// and the families where Tukey has no pooled basis (repeated measures,
+// proportions) default to Holm, which always applies. Pinned here
+// because every other Compare-pairs case STATES its correction.
+{
+    const { ctx, page, errs } = await openPage('v_cmp_default.html');
+    console.log('case DEF (shipped default correction):');
+    await openStats(page);
+    const cg = await page.evaluate(() => {
+        const sel = document.querySelector('[data-cmp-corr]');
+        return sel ? sel.value : null;
+    });
+    check('Compare Groups defaults to Tukey', cg === 'tukey',
+          'select=' + JSON.stringify(cg));
+    // A default is NOT a deliberate pick: the bracket panel's rule that
+    // keeps a chosen pooled correction visible must not fire on it, or
+    // the test gate is disabled everywhere (this is what caught it).
+    check('no page errors', errs.length === 0, JSON.stringify(errs));
+    await ctx.close();
+}
+{
+    const { ctx, page, errs } = await openPage('a_rm_auto.html');
+    console.log('case DEF2 (repeated measures default):');
+    await openStats(page);
+    const rm = await page.evaluate(() => {
+        const sel = document.querySelector('[data-cmp-corr]');
+        return sel ? sel.value : null;
+    });
+    check('Repeated Measures defaults to Holm, which always applies',
+          rm === 'holm', 'select=' + JSON.stringify(rm));
+    check('no page errors', errs.length === 0, JSON.stringify(errs));
+    await ctx.close();
+}
+
 await browser.close();
 console.log(fails === 0 ? 'ALL PROBES PASS' : fails + ' FAILURES');
 process.exit(fails === 0 ? 0 : 1);

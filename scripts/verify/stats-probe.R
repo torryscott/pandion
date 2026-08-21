@@ -185,6 +185,7 @@ annI <- paste0(
   '"anchorLeftCat":"Agree","anchorLeftGroup":"F",',
   '"anchorRightCat":"Disagree","anchorRightGroup":"F"}]')
 wr(freqplotbuilder(data = fq2, var = "resp", groupVar = "g", facetVar = NULL,
+                   chartSpec = cspec(autoPCorrection = "none"),
                    annotationsJson = annI), "i_freq_prop_brackets")
 # Independent pair (Agree: F vs M) — prop.test(correct = FALSE) parity.
 pt1 <- prop.test(c(40, 30), c(100, 100), correct = FALSE)
@@ -336,7 +337,8 @@ yA <- cgd$y[cgd$x == "A"]; yB <- cgd$y[cgd$x == "B"]
 wq <- t.test(yA[-c(1, 2)], yB)
 wr(plotbuilder(data = cgd, xvar = "x", yvar = "y", groupVar = NULL,
                facetVar = NULL, graphType = "bar",
-               chartSpec = cspec(hiddenPoints = list(list(cat = "A", group = "", idx = 0L),
+               chartSpec = cspec(autoPCorrection = "none",
+                                 hiddenPoints = list(list(cat = "A", group = "", idx = 0L),
                                                      list(cat = "A", group = "", idx = 1L))),
                annotationsJson = annJson("welch", "p", "A", "B")),
    "q_cg_hidden_exclude")
@@ -425,8 +427,16 @@ close(con)
 cat("expected7:", exp7, "\n")
 
 # ==== Phase 2: Compare-pairs table + Place brackets ====================
+# autoPCorrection "none" is STATED, not assumed: these cases check the
+# Compare-pairs mechanics against RAW t-test expectations computed just
+# below, and Compare Groups now defaults to Tukey (Aug 2026).
 wr(plotbuilder(data = cg3, xvar = "x", yvar = "y", groupVar = NULL,
-               facetVar = NULL, graphType = "bar"), "v_cmp_place")
+               facetVar = NULL, graphType = "bar",
+               chartSpec = cspec(autoPCorrection = "none")), "v_cmp_place")
+# No chartSpec at all: this one exists to pin the shipped DEFAULT
+# correction, which is the whole point of the Aug 2026 change.
+wr(plotbuilder(data = cg3, xvar = "x", yvar = "y", groupVar = NULL,
+               facetVar = NULL, graphType = "bar"), "v_cmp_default")
 stripP <- function(x) sub("^p ", "", sub("^p = ", "", x))
 yA <- cg3$y[cg3$x == "A"]; yB <- cg3$y[cg3$x == "B"]; yC <- cg3$y[cg3$x == "C"]
 wABp <- t.test(yA, yB)$p.value
@@ -451,7 +461,8 @@ cgw <- rbind(
     mkcell("C", "F", 15, 14), mkcell("C", "M", 11, 13))
 cgw$x <- factor(cgw$x); cgw$g <- factor(cgw$g)
 wr(plotbuilder(data = cgw, xvar = "x", yvar = "y", groupVar = "g",
-               facetVar = NULL, graphType = "bar"), "w_twoway")
+               facetVar = NULL, graphType = "bar",
+               chartSpec = cspec(autoPCorrection = "none")), "w_twoway")
 # Type III via sum-coded model comparisons (unbalanced, so the SS
 # types genuinely differ — this is the discriminating reference).
 X <- model.matrix(~ x * g, data = cgw,

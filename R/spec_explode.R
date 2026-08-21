@@ -41,6 +41,16 @@ gb_parse_spec <- function(spec_raw) {
 # spec + a module table. Every table row yields exactly one argument, so
 # the render is fully determined by (spec + table defaults) with no
 # dependence on the shared signature's defaults.
+# The DEFAULT for one option, read from the same table that supplies it.
+# Shipped to the client for autoPCorrection so the bracket panel can tell
+# a deliberate pick from a mere default (Aug 2026): the panel keeps a
+# persisted pooled correction visible even where it cannot apply, and
+# once a pooled correction became the DEFAULT that exemption would have
+# fired on every chart, quietly disabling the gate.
+gb_spec_default <- function(table, opt) {
+    for (row in table) if (identical(row$opt, opt)) return(row$default)
+    NULL
+}
 gb_spec_args <- function(spec, table) {
     out <- vector("list", length(table))
     nms <- character(length(table))

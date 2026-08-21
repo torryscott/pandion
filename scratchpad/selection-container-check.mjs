@@ -1,4 +1,4 @@
-// End-to-end proof in REAL jamovi (Jonathon's svg-ftw container) that the
+// End-to-end proof in REAL jamovi (the maintainer's svg-ftw container) that the
 // selection-class resize contract works for BOTH ways jamovi resizes things:
 //   A. CSS `resize: both` -> inline style width/height  (jamovi's own image idiom)
 //   B. width/height attribute writes
