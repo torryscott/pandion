@@ -76,6 +76,25 @@ cg <- data.frame(
 # --- Compare Groups -------------------------------------------------
 wr(plotbuilder(data = cg, xvar = "x", yvar = "y", groupVar = "g", facetVar = NULL,
                graphType = "bar", chartSpec = cspec(barValueLabels = TRUE, barNLabels = TRUE)), "cg_bar_labels")
+# A full 12-slot custom palette on a 12-group chart, so every stored
+# colour has to survive the pipeline AND get drawn. customPalette is a
+# comma-joined LIST, and a per-colour length cap applied to the whole
+# string once wiped any palette past eight (Aug 2026 audit); nothing
+# else in this battery would notice.
+set.seed(12)
+pal12 <- data.frame(
+    x = factor(rep(c("A", "B"), each = 24)),
+    y = rnorm(48, 50, 8),
+    g = factor(rep(paste0("G", sprintf("%02d", 1:12)), 4)))
+wr(plotbuilder(data = pal12, xvar = "x", yvar = "y", groupVar = "g",
+               facetVar = NULL, graphType = "bar",
+               chartSpec = cspec(chartPalette = "custom",
+                                 customPalette = paste(c(
+                                     "#2d5c94", "#902634", "#e18e4c", "#597b2f",
+                                     "#faca59", "#32295e", "#5bb1ba", "#d35a80",
+                                     "#4478ad", "#6fb3ad", "#266741", "#976d76"),
+                                     collapse = ","))), "cg_palette12")
+
 wr(plotbuilder(data = cg, xvar = "x", yvar = "y", groupVar = "g", facetVar = NULL,
                graphType = "dot"), "cg_dot")
 wr(plotbuilder(data = cg, xvar = "x", yvar = "y", groupVar = "g", facetVar = NULL,

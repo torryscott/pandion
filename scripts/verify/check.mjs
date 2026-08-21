@@ -48,6 +48,9 @@ const CASES = [
     { name: 'cg_bar_labels',    svg: true, roles: { 'bar-value-label': 12 } },
     // Dot plot: line machinery, stroke suppressed - markers + error bars
     // only (3 cats x 2 groups = 6 markers; 6 error bars).
+    // 12 groups x 2 categories = 24 bars, and the 12 stored palette
+    // colours must all reach the chart (see render.R's note).
+    { name: 'cg_palette12',     svg: true, distinctBarFills: 12 },
     { name: 'cg_dot',           svg: true, roles: { 'line-marker': 6, 'error-bar': 6 } },
     { name: 'cg_box',           svg: true },
     { name: 'cg_violin',        svg: true },
@@ -157,6 +160,15 @@ for (const c of CASES) {
                 nodes: document.querySelectorAll(
                     'svg path, svg rect, svg circle, svg line, svg polyline, svg text').length,
                 rects: document.querySelectorAll('svg rect').length,
+                barFills: (() => {
+                    const f = new Set();
+                    for (const e of document.querySelectorAll(
+                            'path[data-bar-cat], rect[data-bar-cat]')) {
+                        const v = e.getAttribute('fill');
+                        if (v && /^#|^rgb/.test(v)) f.add(v.toLowerCase());
+                    }
+                    return [...f];
+                })(),
                 hasNaN: svgs.some((s) => s.outerHTML.includes('NaN')),
                 texts: [...document.querySelectorAll('svg text')]
                     .map((t) => {
@@ -203,6 +215,10 @@ for (const c of CASES) {
                 if (n < min)
                     problems.push(`data-role="${role}": ${n} found (< ${min})`);
             }
+            if (c.distinctBarFills && probe.barFills.length < c.distinctBarFills)
+                problems.push(`only ${probe.barFills.length} distinct bar fills ` +
+                    `(< ${c.distinctBarFills}) - a stored palette slot did not reach the chart: ` +
+                    probe.barFills.join(' '));
             if (c.name === 'likert_div' && probe.likertLegendRows.length > 1 &&
                 Math.min(...probe.likertLegendRows) < 2)
                 problems.push('Likert legend leaves an orphaned response level on its own row');
