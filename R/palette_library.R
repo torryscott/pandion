@@ -248,7 +248,15 @@
         lib$defaultPalette <- paste0("saved:", name)
     } else if (identical(kind, "replace")) {
         repl <- action$palettes
-        if (!is.list(repl)) return(lib)
+        # A NAMED list only. A JSON array parses to a list with no names,
+        # so it passed is.list(), contributed nothing to the loop below,
+        # and the assignment at the end then wiped every saved palette -
+        # and wrote the empty library straight to disk (Aug 2026 audit).
+        # Replacing with nothing is never a legitimate request: the caller
+        # deletes by name.
+        if (!is.list(repl) || length(repl) == 0L ||
+            is.null(names(repl)) || !any(nzchar(names(repl))))
+            return(lib)
         new_pals <- setNames(list(), character(0))
         for (nm in names(repl)) {
             if (!is.character(nm) || !nzchar(nm)) next
@@ -265,6 +273,8 @@
             if (length(cols) == 0) next
             new_pals[[nm]] <- as.list(cols)
         }
+        # Every entry unusable is the same request as an empty one.
+        if (length(new_pals) == 0L) return(lib)
         lib$palettes <- new_pals
     } else {
         return(lib)

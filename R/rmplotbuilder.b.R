@@ -1150,11 +1150,26 @@ rmplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
             }
             private$.writeLastExportId(req_id)
 
-            ext <- tolower(parsed$format)
-            base_name <- if (!is.null(parsed$filename) && nzchar(parsed$filename))
-                parsed$filename
-            else
-                paste0("plot.", ext)
+            # Coerce to length 1 BEFORE any use. jsonlite simplifies a JSON
+            # array into a vector, and both `nzchar(...)` in a condition and
+            # `paste0("plot.", ext)` then misbehave - the condition throws
+            # ("the condition has length > 1" / "'length = 2' in coercion to
+            # 'logical(1)'"), and this method is called bare from .run(), so a
+            # throw is a dead analysis rather than a failed export. The stale-
+            # request window above already blocks a crafted .omv from reaching
+            # here, so this is belt to that braces (Aug 2026 audit).
+            .one <- function(x) {
+                # is.atomic first: as.character(list(NULL)) is the STRING
+                # "NULL", which would sail through nzchar() and name the
+                # exported file "NULL".
+                if (!is.atomic(x) || length(x) != 1L) return("")
+                x <- suppressWarnings(as.character(x))
+                if (is.na(x) || !nzchar(x)) "" else x
+            }
+            ext <- tolower(.one(parsed$format))
+            if (!nzchar(ext)) ext <- "png"
+            fn <- .one(parsed$filename)
+            base_name <- if (nzchar(fn)) fn else paste0("plot.", ext)
             # Sanitize to a single, safe filename component: strip any
             # directory parts and separators so a crafted name ("../../x",
             # an absolute path, a Windows path) can never escape target_dir.
