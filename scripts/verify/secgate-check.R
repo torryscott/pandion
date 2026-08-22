@@ -114,6 +114,38 @@ if (length(blk) == 1) {
                  "escape.png"), "path traversal still stripped")
 }
 
+# ---- export request: the destination alias is the same shape hazard ----
+# nzchar() and switch() both need a length-1 value, and this sits in the
+# same block as the format/filename pair above.
+dblk <- regmatches(src, regexpr(
+    "(?s)dest_alias <- \\.one\\(parsed\\$destination\\).*?if \\(!is\\.null\\(sub\\)\\) target_dir <- file\\.path\\(user_home, sub\\)\n            \\}",
+    src, perl = TRUE))
+ok(length(dblk) == 1 && nzchar(dblk), "the destination block was located in the source")
+if (length(dblk) == 1) {
+    .one_ref <- function(x) {
+        if (!is.atomic(x) || length(x) != 1L) return("")
+        x <- suppressWarnings(as.character(x))
+        if (is.na(x) || !nzchar(x)) "" else x
+    }
+    run_dest <- function(dest) {
+        e <- new.env()
+        assign("parsed", list(destination = dest), envir = e)
+        assign(".one", .one_ref, envir = e)
+        assign("user_home", "/home/u", envir = e)
+        tryCatch({ eval(parse(text = dblk), envir = e); get("target_dir", envir = e) },
+                 error = function(err) paste("THREW:", conditionMessage(err)))
+    }
+    for (d in list(c("desktop", "downloads"), list(NULL), NA, NULL, character(0))) {
+        got <- run_dest(d)
+        ok(is.character(got) && length(got) == 1 && !grepl("^THREW", got),
+           paste0("destination survives a malformed request -> ",
+                  if (nzchar(got)) got else "(unset, falls through)"))
+    }
+    ok(identical(run_dest("desktop"), file.path("/home/u", "Desktop")),
+       "a normal destination alias still resolves")
+    ok(identical(run_dest("nowhere"), ""), "an unknown alias falls through")
+}
+
 # ---- palette library: replay protection --------------------------------
 # lastAppliedTs must be strictly increasing, so reopening a file cannot
 # re-apply an action that already ran.

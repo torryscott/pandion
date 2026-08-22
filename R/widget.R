@@ -425,7 +425,6 @@ graphbuilder2_html <- function(bars,
                                # reopen. Bracket-bearing modules pass
                                # self$options$autoPCorrection.
                                auto_p_correction = "none",
-                               auto_p_correction_default = "",
                                # Set TRUE by the rmgraph module so the
                                # widget knows the x-categories represent
                                # repeated measure columns (same subjects
@@ -1820,7 +1819,6 @@ graphbuilder2_html <- function(bars,
         legendOffsetY = as.numeric(legend_offset_y),
         annotations = normalize_annotations(annotations),
         autoPCorrection = as.character(auto_p_correction),
-        autoPCorrectionDefault = as.character(auto_p_correction_default),
         legendRowSpacing = as.numeric(legend_row_spacing),
         legendSwatchGap = as.numeric(legend_swatch_gap),
         xAxisThickness = as.numeric(x_axis_thickness),

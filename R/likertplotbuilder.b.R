@@ -522,9 +522,9 @@ likertplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R
                 path.expand("~")
             }
 
-            dest_alias <- parsed$destination
+            dest_alias <- .one(parsed$destination)
             target_dir <- ""
-            if (!is.null(dest_alias) && nzchar(dest_alias)) {
+            if (nzchar(dest_alias)) {
                 sub <- switch(
                     tolower(dest_alias),
                     "desktop"   = "Desktop",

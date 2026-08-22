@@ -591,9 +591,7 @@ distplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6C
                 dist_normality = dist_normality,
                 chart_spec = gb_spec_sanitized_json(self$options$chartSpec),
                 spec_real_keys = spec_real_keys,
-                spec_keys = spec_keys,
-                auto_p_correction_default =
-                    gb_spec_default(.distplotbuilderSpecTable, "autoPCorrection")
+                spec_keys = spec_keys
             )
             spec_args <- gb_spec_args(spec, .distplotbuilderSpecTable)
 
@@ -763,9 +761,9 @@ distplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6C
                 path.expand("~")
             }
 
-            dest_alias <- parsed$destination
+            dest_alias <- .one(parsed$destination)
             target_dir <- ""
-            if (!is.null(dest_alias) && nzchar(dest_alias)) {
+            if (nzchar(dest_alias)) {
                 sub <- switch(
                     tolower(dest_alias),
                     "desktop"   = "Desktop",

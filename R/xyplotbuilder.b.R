@@ -1569,9 +1569,9 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
             #      "documents", "downloads") -> <user_home>/<alias>.
             #   2. self$options$exportPath if set.
             #   3. Default: ~/Downloads if it exists, else user home.
-            dest_alias <- parsed$destination
+            dest_alias <- .one(parsed$destination)
             target_dir <- ""
-            if (!is.null(dest_alias) && nzchar(dest_alias)) {
+            if (nzchar(dest_alias)) {
                 sub <- switch(
                     tolower(dest_alias),
                     "desktop"   = "Desktop",

@@ -677,9 +677,7 @@ rmplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
                 connect_subjects = isTRUE(self$options$connectSubjects),
                 chart_spec = gb_spec_sanitized_json(self$options$chartSpec),
                 spec_real_keys = spec_real_keys,
-                spec_keys = spec_keys,
-                auto_p_correction_default =
-                    gb_spec_default(.rmplotbuilderSpecTable, "autoPCorrection")
+                spec_keys = spec_keys
             )
             spec_args <- gb_spec_args(spec, .rmplotbuilderSpecTable)
 
@@ -1195,9 +1193,9 @@ rmplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
             #      "documents", "downloads") -> <user_home>/<alias>.
             #   2. self$options$exportPath if set.
             #   3. Default: ~/Downloads if it exists, else user home.
-            dest_alias <- parsed$destination
+            dest_alias <- .one(parsed$destination)
             target_dir <- ""
-            if (!is.null(dest_alias) && nzchar(dest_alias)) {
+            if (nzchar(dest_alias)) {
                 sub <- switch(
                     tolower(dest_alias),
                     "desktop"   = "Desktop",
