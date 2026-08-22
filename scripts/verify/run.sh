@@ -127,6 +127,14 @@ if Rscript "$HERE/secgate-check.R"; then :; else
     if [ "$rc" -eq 2 ]; then echo "   skipped: jsonlite not available"; else exit "$rc"; fi
 fi
 
+echo "== the Svg-element handover waits for our switch, not jamovi's schedule"
+if GB2_HANDOVER_OUT="$OUT-handover" GB2_BUNDLE="$BUNDLE" Rscript "$HERE/handover-render.R"; then
+    GB2_HANDOVER_OUT="$OUT-handover" GB2_BUNDLE="$BUNDLE" node "$HERE/handover-check.mjs"
+else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then echo "   skipped: jmvcore not available"; else exit "$rc"; fi
+fi
+
 echo "== JSON-string stores and annotation ids cannot inject"
 if GB2_STOREGATE_OUT="$OUT-storegate" GB2_BUNDLE="$BUNDLE" \
        Rscript "$HERE/storegate-render.R"; then

@@ -28,6 +28,37 @@ gb2_script_src_on <- function() {
     !rollback && !file.exists(path.expand("~/.plotstudio-inlinebundle"))
 }
 
+# ---- Svg-element handover switches ------------------------------------
+# When jamovi renders this module inside its Svg results element, the
+# module's own resize grip and Export button are meant to stand down in
+# favour of jamovi's native ones (its maintainer's ask, Aug 2026). The
+# gates for that live in the engine and key off the element, so WITHOUT
+# these switches the handover would happen the moment any jamovi build
+# ships that element - on jamovi's schedule, not ours, and possibly
+# before the replacement is finished.
+#
+# So each half is held behind its own switch, defaulting to "not yet".
+# Flip one to TRUE (and cut a release) once the jamovi-side replacement
+# has actually been seen working. They are separate because they arrive
+# separately: the resize handles are Damo's work, the native save comes
+# with the Svg element itself.
+#
+# The exact-size Sizing panel in Chart settings is deliberately NOT
+# behind either switch. It is the floor: whatever else stands down, a
+# user can always type a size.
+.gb2_handover_on <- function(env_var, ready_default) {
+    v <- tolower(trimws(Sys.getenv(env_var)))
+    if (v %in% c("1", "true", "yes", "on")) return(TRUE)
+    if (v %in% c("0", "false", "no", "off")) return(FALSE)
+    isTRUE(ready_default)
+}
+# Damo's resize handles replace our corner grip.
+gb2_handover_resize <- function()
+    .gb2_handover_on("GB2_HANDOVER_RESIZE", FALSE)
+# jamovi's native right-click save replaces our Export button.
+gb2_handover_export <- function()
+    .gb2_handover_on("GB2_HANDOVER_EXPORT", FALSE)
+
 # Shared script-src wiring for every chart analysis. The raw binding is
 # intentional: jmvcore's setScripts() helper double-prefixes the package name
 # on the jamovi 2.7.x versions this prototype targets.
@@ -2115,6 +2146,11 @@ graphbuilder2_html <- function(bars,
     # diff an incoming options snapshot against the rendered state and
     # optimistically recompute the cells (graphbuilder2.js
     # _gb2StatFold); the eventual R echo then hashes identical.
+    # Svg-element handover: only shipped once a switch is flipped, so a
+    # payload with the handover still pending is byte-identical to before
+    # the switches existed and the echo still hash-skips.
+    if (isTRUE(gb2_handover_resize())) payload$svgHandoverResize <- TRUE
+    if (isTRUE(gb2_handover_export())) payload$svgHandoverExport <- TRUE
     if (!is.null(summary_func))
         payload$summaryFunc <- as.character(summary_func)
     if (!is.null(error_bar_type))

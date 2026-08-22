@@ -10942,7 +10942,7 @@
         // have that ancestor, so they keep the grip - and when the Svg
         // element someday ships for real, the handoff to the jamovi
         // handle happens on its own.
-        if (host.closest && host.closest("jmv-results-svg")) {
+        if (host.closest && host.closest("jmv-results-svg") && data.svgHandoverResize === true) {
             try { wrap.removeChild(gripXY); } catch (_eGxOff) {}
         }
         // Transient "W x H px" readout while resizing (the jamovi-image
@@ -12033,7 +12033,7 @@
         // keeps it until the Svg element ships for real, and the
         // standalone keeps it always; display:none so the toolbar
         // re-parent machinery is untouched.
-        if (host.closest && host.closest("jmv-results-svg")) {
+        if (host.closest && host.closest("jmv-results-svg") && data.svgHandoverExport === true) {
             exportBtn.style.display = "none";
         }
 
@@ -55628,7 +55628,7 @@
                     dot('<strong>Click any part of the chart</strong> (bars, points, lines, axes, legend, title) to open its style panel.') +
                     dot('<strong>Double-click any text</strong> to edit it in place.') +
                     dot('The <strong>+</strong> button adds overlays &amp; annotations; the <strong>eye</strong> shows / hides anything (and restores hidden items).') +
-                    ((host.closest && host.closest("jmv-results-svg"))
+                    ((host.closest && host.closest("jmv-results-svg") && data.svgHandoverExport === true)
                         ? dot('Right-click the chart to copy or export it; jamovi handles saving natively here.')
                         : dot('The <strong>export</strong> button in the toolbar saves the chart as SVG, PDF, PNG or JPG.')) +
                     dot(kchip(mod + "+Z") + ' undoes any styling change; ' + kchip("Delete") + ' hides the selected element; ' + kchip("?") + ' opens this help panel.') +
@@ -58243,7 +58243,7 @@
                     renderInspectorGlossary(body);
                 }
             } else if (sel === "export") {
-                if (host.closest && host.closest("jmv-results-svg")) {
+                if (host.closest && host.closest("jmv-results-svg") && data.svgHandoverExport === true) {
                     // stale session state from before export moved to the
                     // host: land on Basics rather than a hidden feature
                     titleEl.textContent = "Help & shortcuts";
