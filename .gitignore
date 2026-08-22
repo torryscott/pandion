@@ -159,6 +159,7 @@ website/pandion-site-preview.html
 # attached by the release workflow. Scratch probes are local investigations;
 # the maintained verification suite lives in standalone/verify/.
 /standalone/dist/
+/scratchpad/
 /standalone/scratchpad/
 
 # Prepared release bundles are reproducible local/CI outputs. The committed
