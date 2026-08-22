@@ -27,6 +27,42 @@
     // 12 pt. Exact at the 96 px/inch layout: pt = px * 0.75.
     function _gb2PtFromPx(px) { return Math.round(px * 75) / 100; }
     function _gb2PxFromPt(pt) { return pt * 4 / 3; }
+
+    // A faceted category key is built server-side as
+    // "<facet level><separator><category>". Splitting it on the FIRST
+    // separator is right when a CATEGORY label contains one, and wrong
+    // when a FACET LEVEL does; splitting on the LAST is right the other
+    // way round. The engine carried both conventions in different
+    // places, so each was silently broken for one kind of label. The
+    // shipped facet levels settle it: take the LONGEST level the key
+    // actually begins with. A key whose level is not listed (nothing
+    // ships one today) falls back to the first-separator split, so the
+    // old behavior still governs anything unrecognised.
+    // Returns the length of the facet prefix, or -1 for an unfaceted key.
+    function _gb2FacetPrefixLen(name, sep, levels) {
+        if (typeof name !== "string" || typeof sep !== "string" || !sep)
+            return -1;
+        var first = name.indexOf(sep);
+        if (first < 0) return -1;
+        var best = -1;
+        if (levels && levels.length) {
+            for (var k = 0; k < levels.length; k++) {
+                var lv = levels[k];
+                if (typeof lv !== "string" || lv.length <= best) continue;
+                if (name.length >= lv.length + sep.length
+                    && name.lastIndexOf(lv + sep, 0) === 0) best = lv.length;
+            }
+        }
+        return best >= 0 ? best : first;
+    }
+    function _gb2FacetOfKey(name, sep, levels) {
+        var n = _gb2FacetPrefixLen(name, sep, levels);
+        return n < 0 ? "" : name.substring(0, n);
+    }
+    function _gb2CatOfKey(name, sep, levels) {
+        var n = _gb2FacetPrefixLen(name, sep, levels);
+        return n < 0 ? name : name.substring(n + sep.length);
+    }
     var MIN_W_IN = 3, MAX_W_IN = 14;
     var MIN_H_IN = 2, MAX_H_IN = 10;
     var EDGE_HIT_PX = 14;
@@ -5625,7 +5661,7 @@
             var _foSep = data.facetSeparator;
             var _foRank = {};
             for (var _foi = 0; _foi < data.facetOrder.length; _foi++) _foRank[data.facetOrder[_foi]] = _foi;
-            var _foFacOf = function (k) { var p = String(k).split(_foSep); return p.slice(0, p.length - 1).join(_foSep); };
+            var _foFacOf = function (k) { return _gb2FacetOfKey(String(k), _foSep, data.facetLevels); };
             xCats = xCats.map(function (c, i) { return { c: c, i: i }; }).sort(function (a, b) {
                 var ra = _foRank[_foFacOf(a.c)]; var rb = _foRank[_foFacOf(b.c)];
                 if (typeof ra !== "number") ra = 1e9;
@@ -5706,8 +5742,7 @@
                 && data.facetSeparator.length > 0) ? data.facetSeparator : null;
             var _fqFacetOf = function (b) {
                 if (!_fqSep) return "";
-                var s = String(b.x), k = s.indexOf(_fqSep);
-                return k >= 0 ? s.slice(0, k) : "";
+                return _gb2FacetOfKey(String(b.x), _fqSep, data.facetLevels);
             };
             var _fqTotals = {}, _fqB, _fqI2;
             for (_fqI2 = 0; _fqI2 < bars.length; _fqI2++) {
@@ -6503,11 +6538,11 @@
         }
         function _facetOf(name) {
             if (!_isFacetedCat(name)) return "";
-            return name.substring(0, name.indexOf(_facetSep));
+            return _gb2FacetOfKey(name, _facetSep, _facetLevels);
         }
         function _catWithoutFacet(name) {
             if (!_isFacetedCat(name)) return name;
-            return name.substring(name.indexOf(_facetSep) + _facetSep.length);
+            return _gb2CatOfKey(name, _facetSep, _facetLevels);
         }
         function _facetIsHidden(level) {
             return !!_hiddenFacets[level];
@@ -14013,7 +14048,7 @@
                     var _coSep = data.facetSeparator;
                     var _coRank = {};
                     for (var _coi = 0; _coi < newOrder.length; _coi++) _coRank[newOrder[_coi]] = _coi;
-                    var _coFacOf = function (k) { var p = String(k).split(_coSep); return p.slice(0, p.length - 1).join(_coSep); };
+                    var _coFacOf = function (k) { return _gb2FacetOfKey(String(k), _coSep, data.facetLevels); };
                     xCats = xCats.map(function (c, i) { return { c: c, i: i }; }).sort(function (a, b) {
                         var ra = _coRank[_coFacOf(a.c)]; var rb = _coRank[_coFacOf(b.c)];
                         if (typeof ra !== "number") ra = 1e9;
@@ -22322,10 +22357,7 @@
                 if (!_gb2LabOn() && _barScopeAll && data.graphType === "bar" && nodes.length > 1) {
                     var _combSep = (typeof data.facetSeparator === "string" && data.facetSeparator.length) ? data.facetSeparator : "";
                     var _combFacetOf = function (cat) {
-                        if (_combSep && String(cat).indexOf(_combSep) > -1) {
-                            var _cp = String(cat).split(_combSep); return _cp.slice(0, _cp.length - 1).join(_combSep);
-                        }
-                        return "";
+                        return _gb2FacetOfKey(String(cat), _combSep, data.facetLevels);
                     };
                     var _combGroups = {}, _combOrder = [];
                     for (var _cbi = 0; _cbi < nodes.length; _cbi++) {
@@ -29667,7 +29699,7 @@
             // boundaries (the "haywire" the user saw).
             var _dsSep = (typeof data.facetSeparator === "string" && data.facetSeparator.length > 0) ? data.facetSeparator : "";
             var _dsFaceted = _dsSep && st.cat.indexOf(_dsSep) > -1;
-            var _dsFacOf = function (k) { if (!_dsSep) return ""; var p = String(k).split(_dsSep); return p.slice(0, p.length - 1).join(_dsSep); };
+            var _dsFacOf = function (k) { return _gb2FacetOfKey(String(k), _dsSep, data.facetLevels); };
             var _dsDragFac = _dsFaceted ? _dsFacOf(st.cat) : null;
             var groups = {};
             for (var j = 0; j < bars.length; j++) {
@@ -29788,7 +29820,7 @@
                 // facet-major xCats) so other panels stay put.
                 var _psSep = (typeof data.facetSeparator === "string" && data.facetSeparator.length > 0) ? data.facetSeparator : "";
                 var _psFaceted = _psSep && st.cat.indexOf(_psSep) > -1;
-                var _psFacOf = function (k) { if (!_psSep) return ""; var p = String(k).split(_psSep); return p.slice(0, p.length - 1).join(_psSep); };
+                var _psFacOf = function (k) { return _gb2FacetOfKey(String(k), _psSep, data.facetLevels); };
                 if (_psFaceted && _psFacOf(bcat) !== _psFacOf(st.cat)) return 0;
                 var _psList = _psFaceted ? xCats.filter(function (c) { return _psFacOf(c) === _psFacOf(st.cat); }) : xCats;
                 var dC = _psList.indexOf(st.cat);
@@ -30025,7 +30057,7 @@
                     // _computeDropSlot), so compare in the same space.
                     var _cdSep = (typeof data.facetSeparator === "string" && data.facetSeparator.length > 0) ? data.facetSeparator : "";
                     if (_cdSep && st.cat.indexOf(_cdSep) > -1) {
-                        var _cdFacOf = function (k) { var p = String(k).split(_cdSep); return p.slice(0, p.length - 1).join(_cdSep); };
+                        var _cdFacOf = function (k) { return _gb2FacetOfKey(String(k), _cdSep, data.facetLevels); };
                         var _cdFac = _cdFacOf(st.cat);
                         var _cdRun = xCats.filter(function (c) { return _cdFacOf(c) === _cdFac; });
                         fromIdx = _cdRun.indexOf(st.cat);
@@ -30066,8 +30098,8 @@
                     ? data.facetSeparator : "";
                 var _catFaceted = _facSep && st.cat.indexOf(_facSep) > -1;
                 if (_catFaceted) {
-                    var _bareOf = function (k) { var p = String(k).split(_facSep); return p[p.length - 1]; };
-                    var _facOf  = function (k) { var p = String(k).split(_facSep); return p.slice(0, p.length - 1).join(_facSep); };
+                    var _bareOf = function (k) { return _gb2CatOfKey(String(k), _facSep, data.facetLevels); };
+                    var _facOf  = function (k) { return _gb2FacetOfKey(String(k), _facSep, data.facetLevels); };
                     var _dragFac = _facOf(st.cat);
                     // Indices of the dragged facet's contiguous block +
                     // its bare-category sequence.
@@ -46615,8 +46647,7 @@
                     ? data.facetSeparator : null;
                 function stripFacet(v) {
                     v = (v == null) ? "" : String(v);
-                    return (sep && v.indexOf(sep) >= 0)
-                        ? v.slice(v.indexOf(sep) + sep.length) : v;
+                    return _gb2CatOfKey(v, sep, data.facetLevels);
                 }
                 function pushUnique(arr, v) {
                     v = (v == null) ? "" : String(v);
@@ -50020,8 +50051,7 @@
                     ? data.facetSeparator : null;
                 function _csCat(x) {
                     var s = (typeof x === "string") ? x : "";
-                    if (_csSep && s.indexOf(_csSep) >= 0) return s.slice(s.indexOf(_csSep) + _csSep.length);
-                    return s;
+                    return _gb2CatOfKey(s, _csSep, data.facetLevels);
                 }
                 // Which roles are checkable per module. RM's categories are
                 // the measure columns the user picked BY HAND (an ID cannot
@@ -50288,7 +50318,7 @@
                 if (!bars[_fb]) continue;
                 var _bF = bars[_fb].facet;
                 if ((_bF === undefined || _bF === null || _bF === "") && _fSep && typeof bars[_fb].x === "string" && bars[_fb].x.indexOf(_fSep) >= 0)
-                    _bF = bars[_fb].x.split(_fSep)[0]; // x = "<facet><sep><category>" (plotbuilder-family encode order)
+                    _bF = _gb2FacetOfKey(bars[_fb].x, _fSep, data.facetLevels); // x = "<facet><sep><category>"
                 if (_bF === undefined || _bF === null || _bF === "") continue;
                 var _bN2 = (typeof bars[_fb].n === "number" && isFinite(bars[_fb].n)) ? bars[_fb].n : 0;
                 _fPanels[String(_bF)] = (_fPanels[String(_bF)] || 0) + _bN2;
@@ -51513,11 +51543,7 @@
         }
         function _stCatOf(x) {
             var s = (typeof x === "string") ? x : "";
-            var sep = data.facetSeparator;
-            if (sep && s.indexOf(sep) >= 0) {
-                return s.slice(s.indexOf(sep) + sep.length);
-            }
-            return s;
+            return _gb2CatOfKey(s, data.facetSeparator, data.facetLevels);
         }
         function _stMoments(vals) {
             var v = [], i;
@@ -104818,8 +104844,8 @@
                 cat = (cat == null) ? "" : String(cat);
                 // faceted bar: x is facet-encoded ("F <sep> cat") - the
                 // pooled identity is the category after the separator
-                if (from === "bar" && _fqSep && cat.indexOf(_fqSep) >= 0) {
-                    cat = cat.slice(cat.indexOf(_fqSep) + _fqSep.length);
+                if (from === "bar" && _fqSep) {
+                    cat = _gb2CatOfKey(cat, _fqSep, data.facetLevels);
                 }
                 var raw = (typeof b._freqRawCount === "number") ? b._freqRawCount
                     : (typeof b.mean === "number" && isFinite(b.mean)) ? b.mean : 0;

@@ -109,6 +109,9 @@ GB2_VERIFY_OUT="$OUT" node "$HERE/hover-export-check.mjs"
 echo "== crowded-category label thinning: the stride decision (pure unit)"
 node "$HERE/catstride-unit.mjs"
 
+echo "== facet key split: category and panel level may both hold the separator (pure unit)"
+node "$HERE/facetkey-unit.mjs"
+
 echo "== installed export surface (syntax-mode wrappers stay public)"
 if Rscript "$HERE/export-surface-check.R"; then :; else
     rc=$?
@@ -164,8 +167,10 @@ if Rscript "$HERE/colorgate-check.R"; then :; else
     if [ "$rc" -eq 2 ]; then echo "   skipped: jsonlite not available"; else exit "$rc"; fi
 fi
 
-echo "== pareto totals survive a category named with the panel separator"
-if Rscript "$HERE/facetsep-check.R"; then :; else
+echo "== panel keys survive the separator in a category OR a panel level"
+if GB2_FACETSEP_OUT="$OUT-facetsep" GB2_BUNDLE="$BUNDLE" Rscript "$HERE/facetsep-check.R"; then
+    GB2_FACETSEP_OUT="$OUT-facetsep" GB2_BUNDLE="$BUNDLE" node "$HERE/facetsep-client-check.mjs"
+else
     rc=$?
     if [ "$rc" -eq 2 ]; then echo "   skipped: jmvcore not available"; else exit "$rc"; fi
 fi

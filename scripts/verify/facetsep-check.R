@@ -37,3 +37,38 @@ stopifnot(length(xc) == 4,
           grepl(paste0("^F1 ¦ ", hostile, "$"), xc[1]),
           grepl(paste0("^F2 ¦ ", hostile, "$"), xc[3]))
 cat("facetsep-check: PASS (hostile-label category ranked by its true counts)\n")
+
+# ---- The MIRROR case: a FACET LEVEL that contains the separator. The
+# key is "<level><sep><category>", so splitting on the first separator
+# truncates the level and hands its tail back as part of the category.
+# R must ship the true levels; the client probe then checks the drawn
+# panels (facetsep-client-check.mjs).
+hostileLv <- "North \u00a6 East"
+df2 <- data.frame(
+    cat = factor(rep(c("A", "B", "A"), 8)),
+    fac = factor(rep(c(hostileLv, "South"), each = 12),
+                 levels = c(hostileLv, "South"))
+)
+an2 <- freqplotbuilder(data = df2, var = "cat", groupVar = NULL,
+                       facetVar = "fac", graphType = "bar")
+h2 <- an2$widget$content
+fl <- regmatches(h2, regexpr('"facetLevels":\\[[^]]*\\]', h2))
+stopifnot(length(fl) == 1)
+fls <- jsonlite::fromJSON(sub('"facetLevels":', '', fl))
+stopifnot(length(fls) == 2, identical(fls[1], hostileLv), identical(fls[2], "South"))
+cat("facetsep-check: PASS (hostile facet level shipped whole)\n")
+
+OUT <- Sys.getenv("GB2_FACETSEP_OUT", "")
+if (nzchar(OUT)) {
+    Sys.setenv(GB2_INLINE_BUNDLE = "1")
+    an3 <- freqplotbuilder(data = df2, var = "cat", groupVar = NULL,
+                           facetVar = "fac", graphType = "bar")
+    dir.create(OUT, showWarnings = FALSE, recursive = TRUE)
+    bn <- if (identical(Sys.getenv("GB2_BUNDLE"), "min")) "min" else "src"
+    fp <- file.path(OUT, paste0("facetlv_", bn, ".html"))
+    con <- file(fp, open = "wb")
+    writeLines('<meta charset="utf-8">', con, useBytes = TRUE)
+    writeLines(enc2utf8(an3$widget$content), con, useBytes = TRUE)
+    close(con)
+    cat("wrote", fp, "\n")
+}
