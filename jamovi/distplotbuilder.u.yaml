@@ -28,14 +28,11 @@ children:
             name: facetVar
             maxItemCount: 1
             isTarget: true
-  # The variables are the panel's only job: everything else lives on the
-  # chart (the "About this chart" guidance box was tried and removed Jul
-  # 2026 per Torry - an empty panel says "look right" on its own). One
-  # data-tip Label survives, at the moment of assignment; it is restyled
-  # (muted italic) by jamovi/js/distplotbuilder.js (shared gbPanelTip
-  # helper), whose TIP_TEXT anchor must match this string exactly or the
-  # line just renders plain.
+  # Styled muted-italic by the shared gbPanelTip helper, which finds it
+  # by the zero-width marker at the start of the label below. Keep the
+  # marker when editing the wording; losing it only means the tip
+  # renders plain.
   - type: Label
     margin: small
-    label: 'One numeric variable. Group By overlays shapes; Panels separates them.'
+    label: '​One numeric variable. Group By overlays shapes; Panels separates them.'
 compilerMode: tame

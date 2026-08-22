@@ -127,6 +127,9 @@ if Rscript "$HERE/secgate-check.R"; then :; else
     if [ "$rc" -eq 2 ]; then echo "   skipped: jsonlite not available"; else exit "$rc"; fi
 fi
 
+echo "== the left-panel tip is found by its marker, not a copied string"
+if Rscript "$HERE/paneltip-check.R"; then :; else exit $?; fi
+
 echo "== the Svg-element handover waits for our switch, not jamovi's schedule"
 if GB2_HANDOVER_OUT="$OUT-handover" GB2_BUNDLE="$BUNDLE" Rscript "$HERE/handover-render.R"; then
     GB2_HANDOVER_OUT="$OUT-handover" GB2_BUNDLE="$BUNDLE" node "$HERE/handover-check.mjs"

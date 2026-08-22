@@ -21,15 +21,13 @@ const rma_cell = require('./rmacell');
 const panelTip = require('./gbPanelTip');
 
 // Left-panel data-tip (see gbPanelTip.js); must match rmplotbuilder.u.yaml.
-const TIP_TEXT =
-    'Wide format: one column per measurement occasion, one row per subject.';
 
 module.exports = {
 
     // Fired once when the options view is (re)built: seed the factor-cell
     // grid from whatever `rm` currently holds.
     view_updated: function(ui) {
-        panelTip.style(TIP_TEXT);
+        panelTip.style();
         this._factorCells = null;
         this.updateFactorCells(ui);
     },
