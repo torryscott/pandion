@@ -11,8 +11,18 @@ import { spawnSync } from 'node:child_process';
 // path.resolve reads as drive-relative and turns into D:\D:\a\...
 const root = path.resolve(fileURLToPath(new URL('.', import.meta.url)), '..', '..');
 const read = rel => fs.readFileSync(path.join(root, rel), 'utf8');
-function ok(cond, message) {
-    if (!cond) throw new Error(message);
+function ok(cond, message, result) {
+    if (!cond) {
+        // Say WHY. These run on runners we cannot attach to, and an
+        // assertion that only restates its own title costs a round trip
+        // per guess.
+        const why = result
+            ? `\n  exit: ${result.status}` +
+              `\n  stdout: ${(result.stdout || '').trim() || '(empty)'}` +
+              `\n  stderr: ${(result.stderr || '').trim() || '(empty)'}`
+            : '';
+        throw new Error(message + why);
+    }
     console.log(`  ok  ${message}`);
 }
 function run(command, args, options = {}) {
@@ -30,10 +40,10 @@ const future = `${major}.${minor}.${patch + 1}`;
 
 let result = run('node', ['scripts/release-version.mjs', 'check', version]);
 ok(result.status === 0 && /RELEASE VERSION CHECK PASS/.test(result.stdout),
-    'all maintained source version references agree');
+    'all maintained source version references agree', result);
 result = run('bash', ['scripts/minify-widget.sh', '--check']);
 ok(result.status === 0 && /MINIFIED WIDGET CHECK PASS/.test(result.stdout),
-    'the committed minified engine is fresh and parses without downloads');
+    'the committed minified engine is fresh and parses without downloads', result);
 
 result = run('node', [
     'scripts/release-version.mjs', 'set', future,
