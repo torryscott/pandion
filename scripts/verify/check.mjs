@@ -45,18 +45,21 @@ const OUT = process.env.GB2_VERIFY_OUT || '/tmp/gb2-verify';
 // exact tick/label strings somewhere in the SVG; `placeholder`
 // requires the message text and NO chart.
 const CASES = [
-    { name: 'cg_bar_labels',    svg: true, roles: { 'bar-value-label': 12 } },
+    { name: 'cg_bar_labels',    svg: true, roles: { 'bar-value-label': 12, 'error-bar': 6, 'legend-swatch': 2, 'legend-bg': 1, 'x-cat-label': 3 } },
     // Dot plot: line machinery, stroke suppressed - markers + error bars
     // only (3 cats x 2 groups = 6 markers; 6 error bars).
     // 12 groups x 2 categories = 24 bars, and the 12 stored palette
     // colours must all reach the chart (see render.R's note).
     { name: 'cg_palette12',     svg: true, distinctBarFills: 12 },
     { name: 'cg_dot',           svg: true, roles: { 'line-marker': 6, 'error-bar': 6 } },
-    { name: 'cg_box',           svg: true },
-    { name: 'cg_violin',        svg: true },
-    { name: 'cg_raincloud',     svg: true },
-    { name: 'rm_line',          svg: true },
-    { name: 'rm_bar',           svg: true },
+    // 3 categories x 2 groups = 6 boxes, 2 whiskers each. Without these
+    // the box could lose its median or whiskers and still 'render'.
+    // N labels on a box take a separate branch from bar value labels.
+    { name: 'cg_box',           svg: true, roles: { 'bar-value-label': 6, 'box-fill': 6, 'box-median': 6, 'box-whisker': 12, 'box-whisker-cap': 12, 'box-border': 6, 'box-outlier': 1 } },
+    { name: 'cg_violin',        svg: true, roles: { 'violin-fill': 6, 'violin-inner-box': 6, 'violin-inner-median': 6, 'violin-inner-whisker': 12 } },
+    { name: 'cg_raincloud',     svg: true, roles: { 'violin-fill': 6, 'box-fill': 6, 'box-median': 6, 'box-whisker-cap': 12, 'data-point': 120, 'box-outlier-ring': 1 } },
+    { name: 'rm_line',          svg: true, roles: { 'line-series': 2, 'line-marker': 6, 'error-bar': 6 } },
+    { name: 'rm_bar',           svg: true, roles: { 'error-bar': 6 } },
     { name: 'rm_dot',           svg: true, roles: { 'line-marker': 6, 'error-bar': 6 } },
     // CROSSED within factors: Time(3) x Emotion(2), no between. Default one-per-
     // slot -> x=Time(3), grouped=Emotion(2). 2 lines, 6 markers, 6 error bars.
@@ -70,8 +73,17 @@ const CASES = [
     { name: 'rm_crossed',       svg: true, roles: { 'line-series': 4, 'line-marker': 8, 'error-bar': 8 }, texts: ['T1', 'T2', 'Happy', 'Sad', 'Drug', 'Placebo'] },
     { name: 'xy_basic',         svg: true, roles: { 'xy-point': 100 } },
     { name: 'xy_facet',         svg: true, roles: { 'xy-point': 100 }, texts: ['Panel A', 'Panel B'] },
-    { name: 'xy_fit_ci',        svg: true, roles: { 'xy-point': 100 } },
-    { name: 'xy_heatmap',       svg: true, roles: { 'xy-bin': 9, 'xy-bin-legend': 1 } },
+    // The fixture is named for the fit and the band; assert them, not just
+    // the points. Ungrouped, so one of each.
+    { name: 'xy_fit_ci',        svg: true, roles: { 'xy-point': 100, 'xy-fit': 1, 'xy-ci': 1, 'xy-fit-hit': 1 } },
+    // The overlay layers nothing else exercised. Counts are measured from
+    // a real render: one rug tick per point per axis, contours and
+    // marginal bars vary with the data so those assert a floor.
+    { name: 'xy_overlays',      svg: true, roles: { 'xy-outlier': 4, 'xy-outlier-label': 4, 'xy-stats-group': 1, 'xy-stats': 3, 'xy-point': 150,
+        'xy-ellipse': 2, 'xy-density2d': 4, 'xy-rug-x': 150, 'xy-rug-y': 150,
+        'xy-marginal-x': 10, 'xy-marginal-y': 10 } },
+    // The zero-count wash only paints under a ramp palette.
+    { name: 'xy_heatmap',       svg: true, roles: { 'xy-bin-bg': 1, 'xy-bin': 9, 'xy-bin-legend': 1 } },
     // log10 axes are DORMANT (Jul 9 2026, Torry: removed for now) - this
     // case now proves a SAVED log10 state renders sanely LINEAR (decade
     // ticks '10' gone, linear ticks present). Restore ['10','100'] when
@@ -80,37 +92,40 @@ const CASES = [
     { name: 'xy_bubble_labels', svg: true, roles: { 'xy-point': 20, 'xy-point-label': 20, 'xy-size-legend': 1 }, texts: ['P01'] },
     // Histogram bins ride the bar pipeline (_buildBarShape) and come
     // out as <path>, so count their data-role rather than rects.
-    { name: 'dist_hist',        svg: true, roles: { 'dist-hist-bar': 10 } },
-    { name: 'dist_hist_normal', svg: true, roles: { 'dist-hist-bar': 10, 'dist-normal': 2 } },
-    { name: 'dist_density',     svg: true },
-    { name: 'dist_histdensity', svg: true },
-    { name: 'dist_qq_band',     svg: true, roles: { 'dist-qq-band': 2 } },
-    { name: 'dist_ecdf',        svg: true },
-    { name: 'dist_box',         svg: true },
+    { name: 'dist_hist',        svg: true, roles: { 'dist-hist-bar': 10, 'dist-hist-outline': 2, 'dist-hist-outline-all': 1 } },
+    // One rug tick per observation; floored under the true 180.
+    { name: 'dist_hist_normal', svg: true, roles: { 'dist-rug': 170, 'dist-hist-bar': 10, 'dist-normal': 2 } },
+    { name: 'dist_density',     svg: true, roles: { 'dist-density-line': 2, 'dist-density-fill': 2, 'dist-density-outline-all': 1 } },
+    { name: 'dist_histdensity', svg: true, roles: { 'dist-hist-bar': 10, 'dist-density-line': 2, 'dist-density-outline-all': 1 } },
+    { name: 'dist_qq_band',     svg: true, roles: { 'dist-qq-band': 2, 'dist-qq-line': 2, 'dist-qq-point': 100 } },
+    { name: 'dist_ecdf',        svg: true, roles: { 'dist-ecdf-line': 2, 'dist-ecdf-outline-all': 1 } },
+    { name: 'dist_box',         svg: true, roles: { 'box-fill': 2, 'box-median': 2, 'box-whisker': 4, 'box-whisker-cap': 4 } },
     { name: 'freq_bar_stack',    svg: true, roles: { 'bar-value-label': 6 } },
-    { name: 'freq_bar_fill_facet', svg: true, texts: ['100'] },
+    // 100%-stacked segments carry no data-role, so their value labels are
+    // the only role-shaped proof the fill layout ran.
+    { name: 'freq_bar_fill_facet', svg: true, roles: { 'bar-value-label': 12 }, texts: ['100'] },
     { name: 'freq_pie',          svg: true, roles: { 'freq-slice': 3, 'freq-slice-label': 3, 'freq-pie-outline-all': 1 } },
     // The pooled-roles heads-up is now the shared dismissible HTML pill
     // (data-role="freq-pooled-note-pill" in `wrap`, queried off the whole
     // document), not the old static SVG footnote.
-    { name: 'freq_donut_pooled', svg: true, roles: { 'freq-slice': 3, 'freq-pooled-note-pill': 1 } },
+    { name: 'freq_donut_pooled', svg: true, roles: { 'freq-slice': 3, 'freq-pooled-note-pill': 1, 'freq-donut-hole-handle': 1 } },
     { name: 'freq_pie_callout',  svg: true, roles: { 'freq-slice': 4, 'freq-slice-label': 4, 'freq-pie-leader': 2 }, texts: ['2.5%', '1.9%'] },
-    { name: 'freq_pareto',       svg: true, roles: { 'pareto-line': 1, 'pareto-marker': 3, 'pareto-axis-label': 6 } },
+    { name: 'freq_pareto',       svg: true, roles: { 'pareto-line': 1, 'pareto-marker': 3, 'pareto-axis-label': 6, 'pareto-axis': 5 } },
     { name: 'freq_single_cat',   svg: true, minNodes: 8 },
     { name: 'freq_allna',        placeholder: 'has no usable (non-missing) rows' },
-    { name: 'corr_heat',         svg: true, roles: { 'corr-tile': 16, 'corr-var-label': 8, 'corr-legend-bar': 1, 'corr-legend-tick': 3 } },
-    { name: 'corr_circles',      svg: true, roles: { 'corr-circle': 10, 'corr-cell': 16 } },
+    { name: 'corr_heat',         svg: true, roles: { 'corr-tile': 16, 'corr-var-label': 8, 'corr-legend-bar': 1, 'corr-legend-tick': 3, 'corr-matrix-outline': 1 } },
+    { name: 'corr_circles',      svg: true, roles: { 'corr-circle': 10, 'corr-cell': 16, 'corr-grid': 16, 'corr-cross': 4 } },
     // stars are SUFFIXES on the value texts (".62***"), and the texts
     // assertion is exact-match — anchor on the diagonal's stable "1.00".
-    { name: 'corr_numbers',      svg: true, roles: { 'corr-value': 16 }, texts: ['1.00'] },
+    { name: 'corr_numbers',      svg: true, roles: { 'corr-value': 16, 'corr-value-p': 12 }, texts: ['1.00'] },
     { name: 'corr_two',          svg: true, roles: { 'corr-cell': 4 } },
     { name: 'corr_one_placeholder', placeholder: 'two or more' },
-    { name: 'likert_div',        svg: true, roles: { 'likert-seg': 12, 'likert-item-label': 3, 'likert-legend-item': 5, 'likert-center': 1 } },
+    { name: 'likert_div',        svg: true, roles: { 'likert-seg': 12, 'likert-item-label': 3, 'likert-legend-item': 5, 'likert-center': 1, 'likert-value': 8, 'likert-axis': 5, 'likert-axis-label': 5, 'likert-grid': 5 } },
     { name: 'likert_stacked',    svg: true, roles: { 'likert-seg': 12, 'likert-value': 8 } },
-    { name: 'likert_means',      svg: true, roles: { 'likert-dot': 3, 'likert-ci': 3 } },
-    { name: 'likert_reverse',    svg: true, roles: { 'likert-seg': 12, 'likert-item-label': 3 }, texts: ['Workload (R)'] },
+    { name: 'likert_means',      svg: true, roles: { 'likert-dot': 3, 'likert-ci': 3, 'likert-ci-cap': 6 } },
+    { name: 'likert_reverse',    svg: true, roles: { 'likert-topbox': 3, 'likert-seg': 12, 'likert-item-label': 3 }, texts: ['Workload (R)'] },
     { name: 'likert_numeric',    svg: true, roles: { 'likert-seg': 8, 'likert-item-label': 2 } },
-    { name: 'likert_continuous', svg: true, roles: { 'likert-dot': 2, 'likert-ci': 2 } },
+    { name: 'likert_continuous', svg: true, roles: { 'likert-dot': 2, 'likert-ci': 2, 'likert-ci-cap': 4 } },
     { name: 'likert_textrefuse', placeholder: 'is not numeric' },
     { name: 'edge_allna',       placeholder: 'has no usable (non-missing) values' },
     { name: 'edge_n1_hist',     svg: true, minNodes: 10, roles: { 'dist-hist-bar': 1 } },
