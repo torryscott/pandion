@@ -101,9 +101,11 @@ const CASES = [
     { name: 'dist_ecdf',        svg: true, roles: { 'dist-ecdf-line': 2, 'dist-ecdf-outline-all': 1 } },
     { name: 'dist_box',         svg: true, roles: { 'box-fill': 2, 'box-median': 2, 'box-whisker': 4, 'box-whisker-cap': 4 } },
     { name: 'freq_bar_stack',    svg: true, roles: { 'bar-value-label': 6 } },
-    // 100%-stacked segments carry no data-role, so their value labels are
-    // the only role-shaped proof the fill layout ran.
-    { name: 'freq_bar_fill_facet', svg: true, roles: { 'bar-value-label': 12 }, texts: ['100'] },
+    { name: 'freq_bar_fill_facet', svg: true, texts: ['100'] },
+    // The fill layout's only role-shaped evidence: 3 responses x 2 cohorts.
+    // On its own fixture because a label sits over the bar centre and would
+    // intercept the clicks smallwins-check drives on freq_bar_fill_facet.
+    { name: 'freq_bar_fill_labels', svg: true, roles: { 'bar-value-label': 6 } },
     { name: 'freq_pie',          svg: true, roles: { 'freq-slice': 3, 'freq-slice-label': 3, 'freq-pie-outline-all': 1 } },
     // The pooled-roles heads-up is now the shared dismissible HTML pill
     // (data-role="freq-pooled-note-pill" in `wrap`, queried off the whole

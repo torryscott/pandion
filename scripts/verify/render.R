@@ -250,8 +250,14 @@ fqd <- data.frame(
 wr(freqplotbuilder(data = fqd, var = "resp", groupVar = "cohort", facetVar = NULL,
                    freqPosition = "stack", chartSpec = cspec(barValueLabels = TRUE)), "freq_bar_stack")
 wr(freqplotbuilder(data = fqd, var = "resp", groupVar = "cohort", facetVar = "site",
+                   freqPosition = "fill"), "freq_bar_fill_facet")
+# 100%-stacked segments carry data-bar-cat rather than a data-role, so their
+# value labels are the only role-shaped proof the fill layout actually ran.
+# They live on their own fixture because a label sits over the bar centre and
+# would intercept the clicks smallwins-check drives on freq_bar_fill_facet.
+wr(freqplotbuilder(data = fqd, var = "resp", groupVar = "cohort", facetVar = NULL,
                    freqPosition = "fill",
-                   chartSpec = cspec(barValueLabels = TRUE)), "freq_bar_fill_facet")
+                   chartSpec = cspec(barValueLabels = TRUE)), "freq_bar_fill_labels")
 wr(freqplotbuilder(data = fqd, var = "resp", groupVar = NULL, facetVar = NULL,
                    graphType = "pie"), "freq_pie")
 wr(freqplotbuilder(data = fqd, var = "resp", groupVar = "cohort", facetVar = NULL,
