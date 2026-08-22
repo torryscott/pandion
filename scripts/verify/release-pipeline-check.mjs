@@ -3,9 +3,13 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
-const root = path.resolve(new URL('.', import.meta.url).pathname, '..', '..');
+// fileURLToPath, not .pathname: on Windows the pathname of a file URL
+// keeps a leading slash before the drive letter (/D:/a/...), which
+// path.resolve reads as drive-relative and turns into D:\D:\a\...
+const root = path.resolve(fileURLToPath(new URL('.', import.meta.url)), '..', '..');
 const read = rel => fs.readFileSync(path.join(root, rel), 'utf8');
 function ok(cond, message) {
     if (!cond) throw new Error(message);

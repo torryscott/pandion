@@ -14,9 +14,12 @@ version="${2#v}"
 }
 [[ -f "$jmo" ]] || { echo "JMO not found: $jmo" >&2; exit 1; }
 command -v unzip >/dev/null || { echo "unzip is required" >&2; exit 1; }
+# grep, not ripgrep: this runs on GitHub's macOS and Windows runners,
+# which ship neither rg nor a way to assume one. -F on the required-member
+# check also stops a literal path's dots matching any character.
 
 entries="$(unzip -Z1 "$jmo")"
-if rg -q '(^/|(^|/)\.\.(/|$))' <<<"$entries"; then
+if grep -qE '(^/|(^|/)\.\.(/|$))' <<<"$entries"; then
     echo "Unsafe absolute or parent path in $jmo" >&2
     exit 1
 fi
@@ -27,24 +30,24 @@ for required in \
     pandion/R/pandion/widget/graphbuilder2.min.js \
     pandion/R/pandion/widget/graphbuilder2.min.js.hash \
     pandion/R/pandion/docs/user-guide.html; do
-    rg -qx "$required" <<<"$entries" || {
+    grep -qxF "$required" <<<"$entries" || {
         echo "Required package member missing: $required" >&2
         exit 1
     }
 done
 
 manifest="$(unzip -p "$jmo" pandion/jamovi.yaml)"
-rg -q "^version:[[:space:]]*${version}[[:space:]]*$" <<<"$manifest" || {
+grep -qE "^version:[[:space:]]*${version}[[:space:]]*$" <<<"$manifest" || {
     echo "pandion/jamovi.yaml does not declare version $version" >&2
     exit 1
 }
 description="$(unzip -p "$jmo" pandion/R/pandion/DESCRIPTION)"
-rg -q "^Version:[[:space:]]*${version}[[:space:]]*$" <<<"$description" || {
+grep -qE "^Version:[[:space:]]*${version}[[:space:]]*$" <<<"$description" || {
     echo "Packaged R DESCRIPTION does not declare version $version" >&2
     exit 1
 }
 
-if rg -qi '(^|/)(\.env($|\.)|credentials\.json$|secrets\.json$|id_(rsa|ed25519)$|[^/]+\.(pem|key|p12|pfx)$)' \
+if grep -qiE '(^|/)(\.env($|\.)|credentials\.json$|secrets\.json$|id_(rsa|ed25519)$|[^/]+\.(pem|key|p12|pfx)$)' \
     <<<"$entries"; then
     echo "Credential-like file packaged in $jmo" >&2
     exit 1
