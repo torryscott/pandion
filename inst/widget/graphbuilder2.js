@@ -27,6 +27,42 @@
     // 12 pt. Exact at the 96 px/inch layout: pt = px * 0.75.
     function _gb2PtFromPx(px) { return Math.round(px * 75) / 100; }
     function _gb2PxFromPt(pt) { return pt * 4 / 3; }
+
+    // A faceted category key is built server-side as
+    // "<facet level><separator><category>". Splitting it on the FIRST
+    // separator is right when a CATEGORY label contains one, and wrong
+    // when a FACET LEVEL does; splitting on the LAST is right the other
+    // way round. The engine carried both conventions in different
+    // places, so each was silently broken for one kind of label. The
+    // shipped facet levels settle it: take the LONGEST level the key
+    // actually begins with. A key whose level is not listed (nothing
+    // ships one today) falls back to the first-separator split, so the
+    // old behavior still governs anything unrecognised.
+    // Returns the length of the facet prefix, or -1 for an unfaceted key.
+    function _gb2FacetPrefixLen(name, sep, levels) {
+        if (typeof name !== "string" || typeof sep !== "string" || !sep)
+            return -1;
+        var first = name.indexOf(sep);
+        if (first < 0) return -1;
+        var best = -1;
+        if (levels && levels.length) {
+            for (var k = 0; k < levels.length; k++) {
+                var lv = levels[k];
+                if (typeof lv !== "string" || lv.length <= best) continue;
+                if (name.length >= lv.length + sep.length
+                    && name.lastIndexOf(lv + sep, 0) === 0) best = lv.length;
+            }
+        }
+        return best >= 0 ? best : first;
+    }
+    function _gb2FacetOfKey(name, sep, levels) {
+        var n = _gb2FacetPrefixLen(name, sep, levels);
+        return n < 0 ? "" : name.substring(0, n);
+    }
+    function _gb2CatOfKey(name, sep, levels) {
+        var n = _gb2FacetPrefixLen(name, sep, levels);
+        return n < 0 ? name : name.substring(n + sep.length);
+    }
     var MIN_W_IN = 3, MAX_W_IN = 14;
     var MIN_H_IN = 2, MAX_H_IN = 10;
     var EDGE_HIT_PX = 14;
@@ -3574,6 +3610,55 @@
             } catch (_aje) {}
         } catch (_ovE) {}
 
+        // CSS-safe color gate (Aug 2026 audit) - the JS mirror of R's
+        // gb_safe_color / gb_sanitize_colors (R/spec_explode.R; see there
+        // for the charset rationale). Color-valued entries land in
+        // style="..." attributes assigned via innerHTML (panel swatches,
+        // tooltip swatch rows), and chartSpec / annotationsJson persist in
+        // the .omv where anyone can rewrite them wholesale. Keys carrying
+        // colors follow the store convention (name contains "color") plus
+        // the few that do not; chartPalette is deliberately absent - its
+        // value is a palette ID or a user-typed saved-palette NAME, never
+        // a CSS value.
+        function _gb2CssColOK(v) {
+            return typeof v === "string" && v.length <= 64 &&
+                /^[-#a-zA-Z0-9(),.% ]*$/.test(v);
+        }
+        function _gb2CssColSafe(v) { return _gb2CssColOK(v) ? v : ""; }
+        function _gb2ColorishKey(k) {
+            return /color/i.test(k) || k === "customPalette" ||
+                k === "chartBackground" || k === "facetStripBackground" ||
+                k === "chartBorder" || k === "xyBinCustomLow" ||
+                k === "xyBinCustomMid" || k === "xyBinCustomHigh";
+        }
+        function _gb2SanitizeColors(x, name) {
+            if (x && typeof x === "object") {
+                if (Array.isArray(x)) {
+                    // Keep the parent's name for the members: an array under a
+                    // colour-ish key is a list OF colours (the palette library
+                    // is {name: [colours]}, where the member name would
+                    // otherwise be the user's palette title and gate nothing).
+                    for (var _i = 0; _i < x.length; _i++)
+                        x[_i] = _gb2SanitizeColors(x[_i], _gb2ColorishKey(name) ? "color" : name);
+                } else {
+                    for (var _k in x) {
+                        if (!Object.prototype.hasOwnProperty.call(x, _k)) continue;
+                        x[_k] = _gb2SanitizeColors(x[_k], _k);
+                    }
+                }
+                return x;
+            }
+            // customPalette is a comma-joined LIST of colours, so the
+            // per-colour length cap has to apply per ELEMENT (a 9-colour
+            // palette already exceeds it). Legitimate values rejoin
+            // byte-identically, functional notations included.
+            if (typeof x === "string" && name === "customPalette" && x.indexOf(",") >= 0)
+                return x.split(",").map(_gb2CssColSafe).join(",");
+            if (typeof x === "string" && name && _gb2ColorishKey(name))
+                return _gb2CssColSafe(x);
+            return x;
+        }
+
         // chartSpec migration (speed pass Phase 2, Jul 2026): a MIGRATED
         // module (Compare Groups first) ships data.specRealKeys - the option
         // names that stay real jamovi options - and data.chartSpec, a sparse
@@ -3611,7 +3696,11 @@
                 if (_csObj && typeof _csObj === "object") {
                     for (var _csk in _csObj) {
                         if (!Object.prototype.hasOwnProperty.call(_csObj, _csk)) continue;
-                        if (_gb2SpecKeySet && !_gb2SpecKeySet[_csk]) continue; // reject non-style keys
+                        // hasOwnProperty, not a bare read: "__proto__" and
+                        // "constructor" resolve up the prototype chain and
+                        // would sail through an allowlist checked that way.
+                        if (_gb2SpecKeySet && !Object.prototype.hasOwnProperty.call(_gb2SpecKeySet, _csk))
+                            continue; // reject non-style keys
                         data[_csk] = _csObj[_csk];       // explode (allowlisted)
                         _gb2SpecState[_csk] = _csObj[_csk]; // seed (allowlisted)
                     }
@@ -3659,6 +3748,46 @@
                 _reTitle("groupTitleOverride", "groupTitle", "groupLabel", "groupLabelDefault");
             }
         } catch (_csErr) {}
+        // Colour hygiene runs OUTSIDE the chartSpec bridge's try:
+        // a malformed blob makes JSON.parse throw, which used to
+        // abort the bridge before the scrub and leave every colour
+        // ungated while the render carried on regardless.
+        // Color hygiene (Aug 2026 audit): runs AFTER the explode so
+        // blob-carried, R-payload-carried and annotation colors are all
+        // covered whatever the source, and scrubs the specState seed so
+        // a later commit re-persists clean values. Store entries share
+        // object references with data.*, so one in-place walk fixes
+        // both. Legitimate values pass byte-identical (the charset gate
+        // never rewrites a real color), keeping echo hash-stability.
+        try {
+            for (var _sck in data) {
+                if (!Object.prototype.hasOwnProperty.call(data, _sck)) continue;
+                // through _gb2SanitizeColors, NOT _gb2CssColSafe directly:
+                // customPalette is a comma-joined list and the per-colour
+                // cap must reach its elements, or a 9+-colour palette is
+                // wiped here even though the walker knows better.
+                if (typeof data[_sck] === "string" && _gb2ColorishKey(_sck))
+                    data[_sck] = _gb2SanitizeColors(data[_sck], _sck);
+            }
+            var _gb2ColorStores = ["groupColors", "categoryStyles",
+                "groupBorders", "groupErrorBars", "lineGroupOverrides",
+                "groupDataPoints", "groupPatterns", "textStyles",
+                "densGroupStyles", "distNormalGroupStyles",
+                "customPalette", "annotations",
+                // The saved libraries too. Their colours never met the
+                // chartSpec gate - they live in palettes.json / styles.json,
+                // written from a library ACTION that a shared .omv can carry
+                // - and the palette flyout and style thumbnails build markup
+                // straight from them. This was a live, executing injection
+                // before the gate reached here (Aug 2026 audit round 3).
+                "paletteLibrary", "styleLibrary"];
+            for (var _sci = 0; _sci < _gb2ColorStores.length; _sci++) {
+                var _scv = data[_gb2ColorStores[_sci]];
+                if (_scv && typeof _scv === "object")
+                    _gb2SanitizeColors(_scv, _gb2ColorStores[_sci]);
+            }
+            _gb2SanitizeColors(_gb2SpecState, "");
+        } catch (_eSanC) {}
 
         // "Default style for new charts": R flags an analysis that has
         // never rendered a widget before (styleStamp false AND no
@@ -5532,7 +5661,7 @@
             var _foSep = data.facetSeparator;
             var _foRank = {};
             for (var _foi = 0; _foi < data.facetOrder.length; _foi++) _foRank[data.facetOrder[_foi]] = _foi;
-            var _foFacOf = function (k) { var p = String(k).split(_foSep); return p.slice(0, p.length - 1).join(_foSep); };
+            var _foFacOf = function (k) { return _gb2FacetOfKey(String(k), _foSep, data.facetLevels); };
             xCats = xCats.map(function (c, i) { return { c: c, i: i }; }).sort(function (a, b) {
                 var ra = _foRank[_foFacOf(a.c)]; var rb = _foRank[_foFacOf(b.c)];
                 if (typeof ra !== "number") ra = 1e9;
@@ -5613,8 +5742,7 @@
                 && data.facetSeparator.length > 0) ? data.facetSeparator : null;
             var _fqFacetOf = function (b) {
                 if (!_fqSep) return "";
-                var s = String(b.x), k = s.indexOf(_fqSep);
-                return k >= 0 ? s.slice(0, k) : "";
+                return _gb2FacetOfKey(String(b.x), _fqSep, data.facetLevels);
             };
             var _fqTotals = {}, _fqB, _fqI2;
             for (_fqI2 = 0; _fqI2 < bars.length; _fqI2++) {
@@ -6410,11 +6538,11 @@
         }
         function _facetOf(name) {
             if (!_isFacetedCat(name)) return "";
-            return name.substring(0, name.indexOf(_facetSep));
+            return _gb2FacetOfKey(name, _facetSep, _facetLevels);
         }
         function _catWithoutFacet(name) {
             if (!_isFacetedCat(name)) return name;
-            return name.substring(name.indexOf(_facetSep) + _facetSep.length);
+            return _gb2CatOfKey(name, _facetSep, _facetLevels);
         }
         function _facetIsHidden(level) {
             return !!_hiddenFacets[level];
@@ -9425,8 +9553,18 @@
             }
             return el;
         }
+        // A font family is a CSS value from a persisted option, and it
+        // reaches a <style> element and the export clone. textContent
+        // blocks markup, so the risk is CSS injection rather than script,
+        // but the charset gate is free: names, quotes, commas and spaces
+        // are all a font stack ever needs, while ; { } : ( ) are what an
+        // injected declaration or an url() would need.
+        function _gb2FontSafe(v) {
+            return (typeof v === "string" && v.length <= 200 &&
+                /^[-a-zA-Z0-9 ,'"]*$/.test(v)) ? v : "";
+        }
         function applyChartFontFamily(family) {
-            data.chartFontFamily = (typeof family === "string") ? family : "";
+            data.chartFontFamily = _gb2FontSafe(family);
             host.style.fontFamily = data.chartFontFamily.length > 0
                 ? data.chartFontFamily : "sans-serif";
             var styleEl = _gb2FontStyleEl();
@@ -10839,7 +10977,7 @@
         // have that ancestor, so they keep the grip - and when the Svg
         // element someday ships for real, the handoff to the jamovi
         // handle happens on its own.
-        if (host.closest && host.closest("jmv-results-svg")) {
+        if (host.closest && host.closest("jmv-results-svg") && data.svgHandoverResize === true) {
             try { wrap.removeChild(gripXY); } catch (_eGxOff) {}
         }
         // Transient "W x H px" readout while resizing (the jamovi-image
@@ -11162,8 +11300,7 @@
             // consistently (they otherwise inherit from CSS that's not
             // present in the standalone file). Use the user's chosen
             // chart font family if set, falling back to sans-serif.
-            var _exportFont = (typeof data.chartFontFamily === "string" && data.chartFontFamily.length > 0)
-                ? data.chartFontFamily : "sans-serif";
+            var _exportFont = _gb2FontSafe(data.chartFontFamily) || "sans-serif";
             var styleEl = document.createElementNS("http://www.w3.org/2000/svg", "style");
             styleEl.textContent = 'text { font-family: ' + _exportFont + '; }';
             copy.insertBefore(styleEl, copy.firstChild);
@@ -11931,7 +12068,7 @@
         // keeps it until the Svg element ships for real, and the
         // standalone keeps it always; display:none so the toolbar
         // re-parent machinery is untouched.
-        if (host.closest && host.closest("jmv-results-svg")) {
+        if (host.closest && host.closest("jmv-results-svg") && data.svgHandoverExport === true) {
             exportBtn.style.display = "none";
         }
 
@@ -13911,7 +14048,7 @@
                     var _coSep = data.facetSeparator;
                     var _coRank = {};
                     for (var _coi = 0; _coi < newOrder.length; _coi++) _coRank[newOrder[_coi]] = _coi;
-                    var _coFacOf = function (k) { var p = String(k).split(_coSep); return p.slice(0, p.length - 1).join(_coSep); };
+                    var _coFacOf = function (k) { return _gb2FacetOfKey(String(k), _coSep, data.facetLevels); };
                     xCats = xCats.map(function (c, i) { return { c: c, i: i }; }).sort(function (a, b) {
                         var ra = _coRank[_coFacOf(a.c)]; var rb = _coRank[_coFacOf(b.c)];
                         if (typeof ra !== "number") ra = 1e9;
@@ -22220,10 +22357,7 @@
                 if (!_gb2LabOn() && _barScopeAll && data.graphType === "bar" && nodes.length > 1) {
                     var _combSep = (typeof data.facetSeparator === "string" && data.facetSeparator.length) ? data.facetSeparator : "";
                     var _combFacetOf = function (cat) {
-                        if (_combSep && String(cat).indexOf(_combSep) > -1) {
-                            var _cp = String(cat).split(_combSep); return _cp.slice(0, _cp.length - 1).join(_combSep);
-                        }
-                        return "";
+                        return _gb2FacetOfKey(String(cat), _combSep, data.facetLevels);
                     };
                     var _combGroups = {}, _combOrder = [];
                     for (var _cbi = 0; _cbi < nodes.length; _cbi++) {
@@ -26368,7 +26502,8 @@
         // outlineColor,outlineWidth}; shape stays in xyPointShapes. Resolvers
         // fall back to the chart-wide xyPoint* values.
         function _psGetGroupStyles() {
-            try { var o = JSON.parse(data.xyPointGroupStyles || "{}"); return (o && typeof o === "object") ? o : {}; } catch (_e) { return {}; }
+            // Same JSON-string store shape as _xyGSGet; scrub on parse.
+            try { var o = JSON.parse(data.xyPointGroupStyles || "{}"); if (!o || typeof o !== "object") return {}; try { _gb2SanitizeColors(o, ""); } catch (_eSp) {} return o; } catch (_e) { return {}; }
         }
         function _psGroupField(group, field) {
             if (!group) return undefined;
@@ -26413,7 +26548,12 @@
         // Generic per-group-style JSON store (data[storeKey] = {group:{field:val}}).
         // Backs the ellipse / rug / marginal "this group vs all" overrides.
         function _xyGSGet(storeKey) {
-            try { var raw = data[storeKey]; var o = (typeof raw === "string" && raw.length) ? JSON.parse(raw) : {}; return (o && typeof o === "object") ? o : {}; } catch (_e) { return {}; }
+            // Scrub on the way OUT of the blob: this store rides chartSpec as
+            // a JSON STRING under a key whose name is not colour-ish, so the
+            // payload walkers never reach the colours inside it. Once parsed
+            // the child keys really are color/outlineColor, so the ordinary
+            // name rule applies (Aug 2026 audit round 4).
+            try { var raw = data[storeKey]; var o = (typeof raw === "string" && raw.length) ? JSON.parse(raw) : {}; if (!o || typeof o !== "object") return {}; try { _gb2SanitizeColors(o, ""); } catch (_eSg) {} return o; } catch (_e) { return {}; }
         }
         function _xyGSField(storeKey, group, field) {
             if (group == null) return undefined; var o = _xyGSGet(storeKey); var g = o[String(group)]; return (g && g[field] != null) ? g[field] : undefined;
@@ -29559,7 +29699,7 @@
             // boundaries (the "haywire" the user saw).
             var _dsSep = (typeof data.facetSeparator === "string" && data.facetSeparator.length > 0) ? data.facetSeparator : "";
             var _dsFaceted = _dsSep && st.cat.indexOf(_dsSep) > -1;
-            var _dsFacOf = function (k) { if (!_dsSep) return ""; var p = String(k).split(_dsSep); return p.slice(0, p.length - 1).join(_dsSep); };
+            var _dsFacOf = function (k) { return _gb2FacetOfKey(String(k), _dsSep, data.facetLevels); };
             var _dsDragFac = _dsFaceted ? _dsFacOf(st.cat) : null;
             var groups = {};
             for (var j = 0; j < bars.length; j++) {
@@ -29680,7 +29820,7 @@
                 // facet-major xCats) so other panels stay put.
                 var _psSep = (typeof data.facetSeparator === "string" && data.facetSeparator.length > 0) ? data.facetSeparator : "";
                 var _psFaceted = _psSep && st.cat.indexOf(_psSep) > -1;
-                var _psFacOf = function (k) { if (!_psSep) return ""; var p = String(k).split(_psSep); return p.slice(0, p.length - 1).join(_psSep); };
+                var _psFacOf = function (k) { return _gb2FacetOfKey(String(k), _psSep, data.facetLevels); };
                 if (_psFaceted && _psFacOf(bcat) !== _psFacOf(st.cat)) return 0;
                 var _psList = _psFaceted ? xCats.filter(function (c) { return _psFacOf(c) === _psFacOf(st.cat); }) : xCats;
                 var dC = _psList.indexOf(st.cat);
@@ -29917,7 +30057,7 @@
                     // _computeDropSlot), so compare in the same space.
                     var _cdSep = (typeof data.facetSeparator === "string" && data.facetSeparator.length > 0) ? data.facetSeparator : "";
                     if (_cdSep && st.cat.indexOf(_cdSep) > -1) {
-                        var _cdFacOf = function (k) { var p = String(k).split(_cdSep); return p.slice(0, p.length - 1).join(_cdSep); };
+                        var _cdFacOf = function (k) { return _gb2FacetOfKey(String(k), _cdSep, data.facetLevels); };
                         var _cdFac = _cdFacOf(st.cat);
                         var _cdRun = xCats.filter(function (c) { return _cdFacOf(c) === _cdFac; });
                         fromIdx = _cdRun.indexOf(st.cat);
@@ -29958,8 +30098,8 @@
                     ? data.facetSeparator : "";
                 var _catFaceted = _facSep && st.cat.indexOf(_facSep) > -1;
                 if (_catFaceted) {
-                    var _bareOf = function (k) { var p = String(k).split(_facSep); return p[p.length - 1]; };
-                    var _facOf  = function (k) { var p = String(k).split(_facSep); return p.slice(0, p.length - 1).join(_facSep); };
+                    var _bareOf = function (k) { return _gb2CatOfKey(String(k), _facSep, data.facetLevels); };
+                    var _facOf  = function (k) { return _gb2FacetOfKey(String(k), _facSep, data.facetLevels); };
                     var _dragFac = _facOf(st.cat);
                     // Indices of the dragged facet's contiguous block +
                     // its bare-category sequence.
@@ -36495,7 +36635,7 @@
                     }
                     if (ptData.group) {
                         rows += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">' +
-                            '<span style="display:inline-block;width:10px;height:10px;border:1px solid rgba(0,0,0,0.2);border-radius:2px;background:' + haloFill + ';"></span>' +
+                            '<span style="display:inline-block;width:10px;height:10px;border:1px solid rgba(0,0,0,0.2);border-radius:2px;background:' + _gb2CssColSafe(haloFill) + ';"></span>' +
                             '<span style="font-weight:600;color:#222;">' + _esc(ptData.group) + '</span>' +
                             '</div>';
                     }
@@ -38645,7 +38785,7 @@
                                         var yLab = (typeof data.yLabel === "string" && data.yLabel.length > 0) ? data.yLabel : "Sample";
                                         function _esc(t) { return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
                                         var rows = "";
-                                        if (grpLabel) rows += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;"><span style="display:inline-block;width:10px;height:10px;border:1px solid rgba(0,0,0,0.2);border-radius:2px;background:' + col + ';"></span><span style="font-weight:600;color:#222;">' + _esc(grpLabel) + '</span></div>';
+                                        if (grpLabel) rows += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;"><span style="display:inline-block;width:10px;height:10px;border:1px solid rgba(0,0,0,0.2);border-radius:2px;background:' + _gb2CssColSafe(col) + ';"></span><span style="font-weight:600;color:#222;">' + _esc(grpLabel) + '</span></div>';
                                         rows += '<div><span style="color:#666;">' + _esc(xLab) + ':</span> ' + _esc(_xyFmtNum(thv)) + '</div>';
                                         rows += '<div><span style="color:#666;">' + _esc(yLab) + ':</span> ' + _esc(_xyFmtNum(sv)) + '</div>';
                                         if (facet) rows += '<div style="color:#666;margin-top:3px;">' + _esc(facet) + '</div>';
@@ -39036,7 +39176,7 @@
                             function _esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
                             var _xLab = (typeof data.xLabel === "string" && data.xLabel.length > 0) ? data.xLabel : "Value";
                             var _rows = "";
-                            if (_grp) _rows += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;"><span style="display:inline-block;width:10px;height:10px;border:1px solid rgba(0,0,0,0.2);border-radius:2px;background:' + _col + ';"></span><span style="font-weight:600;color:#222;">' + _esc(displayGroup(_grp)) + '</span></div>';
+                            if (_grp) _rows += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;"><span style="display:inline-block;width:10px;height:10px;border:1px solid rgba(0,0,0,0.2);border-radius:2px;background:' + _gb2CssColSafe(_col) + ';"></span><span style="font-weight:600;color:#222;">' + _esc(displayGroup(_grp)) + '</span></div>';
                             if (isFinite(_lo) && isFinite(_hi)) _rows += '<div><span style="color:#666;">' + _esc(_xLab) + ':</span> ' + _esc(_xyFmtNum(_lo)) + ' &ndash; ' + _esc(_xyFmtNum(_hi)) + '</div>';
                             _rows += '<div><span style="color:#666;">' + _esc(_statLbl) + ':</span> ' + _esc(_xyFmtNum(_val)) + '</div>';
                             return _rows;
@@ -46507,8 +46647,7 @@
                     ? data.facetSeparator : null;
                 function stripFacet(v) {
                     v = (v == null) ? "" : String(v);
-                    return (sep && v.indexOf(sep) >= 0)
-                        ? v.slice(v.indexOf(sep) + sep.length) : v;
+                    return _gb2CatOfKey(v, sep, data.facetLevels);
                 }
                 function pushUnique(arr, v) {
                     v = (v == null) ? "" : String(v);
@@ -49912,8 +50051,7 @@
                     ? data.facetSeparator : null;
                 function _csCat(x) {
                     var s = (typeof x === "string") ? x : "";
-                    if (_csSep && s.indexOf(_csSep) >= 0) return s.slice(s.indexOf(_csSep) + _csSep.length);
-                    return s;
+                    return _gb2CatOfKey(s, _csSep, data.facetLevels);
                 }
                 // Which roles are checkable per module. RM's categories are
                 // the measure columns the user picked BY HAND (an ID cannot
@@ -50180,7 +50318,7 @@
                 if (!bars[_fb]) continue;
                 var _bF = bars[_fb].facet;
                 if ((_bF === undefined || _bF === null || _bF === "") && _fSep && typeof bars[_fb].x === "string" && bars[_fb].x.indexOf(_fSep) >= 0)
-                    _bF = bars[_fb].x.split(_fSep)[0]; // x = "<facet><sep><category>" (plotbuilder-family encode order)
+                    _bF = _gb2FacetOfKey(bars[_fb].x, _fSep, data.facetLevels); // x = "<facet><sep><category>"
                 if (_bF === undefined || _bF === null || _bF === "") continue;
                 var _bN2 = (typeof bars[_fb].n === "number" && isFinite(bars[_fb].n)) ? bars[_fb].n : 0;
                 _fPanels[String(_bF)] = (_fPanels[String(_bF)] || 0) + _bN2;
@@ -51405,11 +51543,7 @@
         }
         function _stCatOf(x) {
             var s = (typeof x === "string") ? x : "";
-            var sep = data.facetSeparator;
-            if (sep && s.indexOf(sep) >= 0) {
-                return s.slice(s.indexOf(sep) + sep.length);
-            }
-            return s;
+            return _gb2CatOfKey(s, data.facetSeparator, data.facetLevels);
         }
         function _stMoments(vals) {
             var v = [], i;
@@ -55520,7 +55654,7 @@
                     dot('<strong>Click any part of the chart</strong> (bars, points, lines, axes, legend, title) to open its style panel.') +
                     dot('<strong>Double-click any text</strong> to edit it in place.') +
                     dot('The <strong>+</strong> button adds overlays &amp; annotations; the <strong>eye</strong> shows / hides anything (and restores hidden items).') +
-                    ((host.closest && host.closest("jmv-results-svg"))
+                    ((host.closest && host.closest("jmv-results-svg") && data.svgHandoverExport === true)
                         ? dot('Right-click the chart to copy or export it; jamovi handles saving natively here.')
                         : dot('The <strong>export</strong> button in the toolbar saves the chart as SVG, PDF, PNG or JPG.')) +
                     dot(kchip(mod + "+Z") + ' undoes any styling change; ' + kchip("Delete") + ' hides the selected element; ' + kchip("?") + ' opens this help panel.') +
@@ -58135,7 +58269,7 @@
                     renderInspectorGlossary(body);
                 }
             } else if (sel === "export") {
-                if (host.closest && host.closest("jmv-results-svg")) {
+                if (host.closest && host.closest("jmv-results-svg") && data.svgHandoverExport === true) {
                     // stale session state from before export moved to the
                     // host: land on Basics rather than a hidden feature
                     titleEl.textContent = "Help & shortcuts";
@@ -72222,7 +72356,7 @@
                 var n = Math.min(colors.length, max);
                 var out = "";
                 for (var i = 0; i < n; i++) {
-                    out += '<span style="display:inline-block;width:' + size + 'px;height:' + size + 'px;background:' + colors[i] + ';border:1px solid rgba(0,0,0,0.12);border-radius:1px;"></span>';
+                    out += '<span style="display:inline-block;width:' + size + 'px;height:' + size + 'px;background:' + _gb2CssColSafe(colors[i]) + ';border:1px solid rgba(0,0,0,0.12);border-radius:1px;"></span>';
                 }
                 return out;
             }
@@ -98191,7 +98325,10 @@
                 }
                 function _swatchHtml(colors, n, w, h) {
                     var out = "", k = Math.min(colors.length, n);
-                    for (var i = 0; i < k; i++) out += '<span style="display:inline-block;width:' + w + 'px;height:' + h + 'px;background:' + colors[i] + ';"></span>';
+                    // Gated at the sink as well as at render entry: one
+                    // scrub is one oversight away from being bypassed, and
+                    // these colours come from a file-writable library.
+                    for (var i = 0; i < k; i++) out += '<span style="display:inline-block;width:' + w + 'px;height:' + h + 'px;background:' + _gb2CssColSafe(colors[i]) + ';"></span>';
                     return out;
                 }
                 function _renderTrig() {
@@ -104707,8 +104844,8 @@
                 cat = (cat == null) ? "" : String(cat);
                 // faceted bar: x is facet-encoded ("F <sep> cat") - the
                 // pooled identity is the category after the separator
-                if (from === "bar" && _fqSep && cat.indexOf(_fqSep) >= 0) {
-                    cat = cat.slice(cat.indexOf(_fqSep) + _fqSep.length);
+                if (from === "bar" && _fqSep) {
+                    cat = _gb2CatOfKey(cat, _fqSep, data.facetLevels);
                 }
                 var raw = (typeof b._freqRawCount === "number") ? b._freqRawCount
                     : (typeof b.mean === "number" && isFinite(b.mean)) ? b.mean : 0;

@@ -1311,7 +1311,7 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
             spec_real_keys <- list(
                 "data", "xvar", "yvar", "groupVar", "facetVar",
                 "sizeVar", "labelVar", "graphType", "xyBin",
-                "xyBinCount", "summaryFunc", "errorBarType",
+                "xyBinCount",
                 "showDataPoints", "xyFitType", "xyLoessSpan",
                 "xyShowDensity2D", "xyDensity2DLevels", "xyMarginal",
                 "xyMarginalBins", "xyCILevel", "xyEllipseLevel",
@@ -1390,7 +1390,7 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
                 annotations = gb_resolve_annotations(
                         self$options$annotationsJson, list()),
                 show_data_points = isTRUE(self$options$showDataPoints),
-                chart_spec = self$options$chartSpec,
+                chart_spec = gb_spec_sanitized_json(self$options$chartSpec),
                 spec_real_keys = spec_real_keys,
                 spec_keys = spec_keys
             )
@@ -1439,7 +1439,6 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
             tryCatch({
                 dims <- gb_svg_dims(snap$svg)
                 img$setSize(dims$w, dims$h)
-                img$setState(snap$svg)
                 img$setVisible(TRUE)
             }, error = function(e) NULL)
         },
@@ -1449,7 +1448,15 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
         # with the module (the PDF-export dependency); without it the
         # image stays empty rather than erroring (FALSE = nothing drawn).
         .renderSnapshot = function(image, ggtheme, theme, ...) {
-            svg <- image$state
+            # Read the snapshot from the OPTION rather than this image's
+            # state. Both persist in the .omv, so setting state stored a
+            # second copy of the same SVG - measured at 13% of the saved
+            # analyses in a real multi-chart file (Aug 2026 audit, and
+            # jamovi's maintainer asked whether the state was still
+            # needed). jmvcore gates rendering on filePath / visible /
+            # requiresData, never on state, so dropping it is inert here.
+            snap <- gb_parse_snapshot(self$options$chartSnapshot)
+            svg <- if (is.null(snap)) NULL else snap$svg
             if (is.null(svg) || !is.character(svg) || !nzchar(svg))
                 return(FALSE)
             if (!requireNamespace("rsvg", quietly = TRUE))
@@ -1517,11 +1524,26 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
             }
             private$.writeLastExportId(req_id)
 
-            ext <- tolower(parsed$format)
-            base_name <- if (!is.null(parsed$filename) && nzchar(parsed$filename))
-                parsed$filename
-            else
-                paste0("plot.", ext)
+            # Coerce to length 1 BEFORE any use. jsonlite simplifies a JSON
+            # array into a vector, and both `nzchar(...)` in a condition and
+            # `paste0("plot.", ext)` then misbehave - the condition throws
+            # ("the condition has length > 1" / "'length = 2' in coercion to
+            # 'logical(1)'"), and this method is called bare from .run(), so a
+            # throw is a dead analysis rather than a failed export. The stale-
+            # request window above already blocks a crafted .omv from reaching
+            # here, so this is belt to that braces (Aug 2026 audit).
+            .one <- function(x) {
+                # is.atomic first: as.character(list(NULL)) is the STRING
+                # "NULL", which would sail through nzchar() and name the
+                # exported file "NULL".
+                if (!is.atomic(x) || length(x) != 1L) return("")
+                x <- suppressWarnings(as.character(x))
+                if (is.na(x) || !nzchar(x)) "" else x
+            }
+            ext <- tolower(.one(parsed$format))
+            if (!nzchar(ext)) ext <- "png"
+            fn <- .one(parsed$filename)
+            base_name <- if (nzchar(fn)) fn else paste0("plot.", ext)
             # Sanitize to a single, safe filename component: strip any
             # directory parts and separators so a crafted name ("../../x",
             # an absolute path, a Windows path) can never escape target_dir.
@@ -1547,9 +1569,9 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
             #      "documents", "downloads") -> <user_home>/<alias>.
             #   2. self$options$exportPath if set.
             #   3. Default: ~/Downloads if it exists, else user home.
-            dest_alias <- parsed$destination
+            dest_alias <- .one(parsed$destination)
             target_dir <- ""
-            if (!is.null(dest_alias) && nzchar(dest_alias)) {
+            if (nzchar(dest_alias)) {
                 sub <- switch(
                     tolower(dest_alias),
                     "desktop"   = "Desktop",

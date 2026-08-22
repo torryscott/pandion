@@ -85,11 +85,22 @@ jobs:
             try { Invoke-WebRequest -UseBasicParsing -UserAgent $ua -Uri $url -OutFile jamovi-setup.exe -ErrorAction Stop } catch { return $false }
             return ((Get-Item jamovi-setup.exe -ErrorAction SilentlyContinue).Length -gt 5000000)
           }
-          $ver = "2.7.31.0"
-          try { $ver = (Invoke-RestMethod -UseBasicParsing "https://formulae.brew.sh/api/cask/jamovi.json").version } catch {}
+          # Build against the jamovi LINE this module targets (minApp in
+          # jamovi/0000.yaml), not simply whatever is newest. The Homebrew
+          # oracle now answers 28.2.0.0, while the macOS runner's own cask
+          # snapshot still installs 2.7.34.0 - so following the oracle blindly
+          # built the two platforms against different jamovi majors, and only
+          # Windows noticed, with "a newer version of the jamovi-compiler is
+          # required". Moving to the 28 line is a deliberate decision, not
+          # something an API lookup should make for us.
+          $line = "2.7"
+          $ver = "2.7.34.0"
+          try {
+            $api = (Invoke-RestMethod -UseBasicParsing "https://formulae.brew.sh/api/cask/jamovi.json").version
+            if ($api -like "$line.*") { $ver = $api }
+          } catch {}
           $ok = Get-Jamovi $ver
           if (-not $ok) {
-            $line = ($ver -split '\.')[0,1] -join '.'
             foreach ($p in 45..20) { if (Get-Jamovi "$line.$p.0") { $ver = "$line.$p.0"; $ok = $true; break } }
           }
           if (-not $ok) { Write-Error "No hosted jamovi Windows installer found on archives.jamovi.org"; exit 1 }

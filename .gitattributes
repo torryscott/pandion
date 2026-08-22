@@ -1,0 +1,12 @@
+# The engine and its sidecar are HASHED: scripts/minify-widget.sh --check
+# and scripts/verify-jmo.sh both compare an MD5 of the source against the
+# recorded one. A Windows checkout converting LF to CRLF changes that hash
+# for a file nobody edited, so the release build fails claiming the
+# minified bundle is stale. Never translate these.
+inst/widget/graphbuilder2.js          -text
+inst/widget/graphbuilder2.min.js      -text
+inst/widget/graphbuilder2.min.js.hash -text
+
+# Shell scripts run under Git Bash on the Windows runner, which chokes on
+# a trailing \r in a shebang or a heredoc delimiter.
+*.sh text eol=lf

@@ -214,6 +214,29 @@ const diagState = () => ({
     await ctx.close();
 }
 
+// ---- 5b. script-src mode, engine never arrives (a shared .omv opened
+// where Pandion is not installed - the SHIPPED default path). It must
+// end at the install message, not sit on "Loading the chart engine"
+// forever, which is what it did before the Aug 2026 audit.
+{
+    const { ctx, page } = await freshPage();
+    await page.goto('file://' + path.join(OUT, 'diag-ssmiss.html'));
+    // the poll runs ~9 s, then the module-missing timers add ~3 s
+    await page.waitForFunction(() =>
+        !!document.querySelector('[data-role="gb2-module-missing"]'),
+        null, { timeout: 25000 });
+    const txt = await page.evaluate(() =>
+        (document.querySelector('[data-role="gb2-module-missing"]').textContent || ''));
+    expect('scriptsrc-absent: ends at the install message, not a spinner',
+           /needs the Pandion Plots module/.test(txt));
+    expect('scriptsrc-absent: tells the user the data is still in the file',
+           /saved in this file/.test(txt));
+    const stuck = await page.evaluate(() =>
+        (document.body.innerText || '').indexOf('Loading the chart engine') >= 0);
+    expect('scriptsrc-absent: the wait note is gone by then', !stuck);
+    await ctx.close();
+}
+
 // ---- 6. built-without-minify note: visible AND survives the render
 {
     const { ctx, page } = await freshPage();

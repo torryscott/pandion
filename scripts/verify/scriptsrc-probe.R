@@ -182,8 +182,13 @@ expect("emergency rollback disables script-src", !gb2_script_src_on())
 set.seed(1)
 cached <- graphbuilder2_html(bars = bars, script_src_ready = TRUE,
                              client_bundle_hash = js_hash)
+# The cached loader reuses the engine already live in the window; its
+# localStorage second layer was removed in the Aug 2026 audit (the cached
+# VALUE was never verified against the hash keying it). Pinned negatively.
 expect("rollback preserves cached-inline loader",
-       grepl(paste0("graphbuilder2.bundle.", js_hash), cached, fixed = TRUE))
+       grepl("window.GraphBuilder2.__hash ===", cached, fixed = TRUE))
+expect("rollback loader reads no cached bundle from localStorage",
+       !grepl("graphbuilder2.bundle.", cached, fixed = TRUE))
 expect("rollback reports cached mode",
        grepl('\\"bundle_mode\\":\\"cached\\"', cached))
 

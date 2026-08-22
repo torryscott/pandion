@@ -1,8 +1,8 @@
-# Shared utility functions for pandion module
-# Used by both bargraph (Categorical Plot Builder) and rmgraph (Repeated Measures Plot Builder)
-
-# Convert pt value to mm for ggplot2 linewidth/stroke (1pt = 0.3528mm)
-ptToMm <- function(pt) as.numeric(pt) * 0.3528
+# Shared utility functions for the pandion module. The v1 ggplot-era
+# helpers that used to live here (unit conversion, theme/line-style
+# parsers, shape codes) were removed Aug 2026: dead since the v2 JS
+# renderer landed, and dead-looking validation code reads as a safety
+# net that is not actually wired in.
 
 # Resolve the chart annotations from options. The widget persists
 # annotations as a JSON STRING (annotationsJson) rather than via the
@@ -25,199 +25,23 @@ gb_resolve_annotations <- function(annotations_json, annotations_legacy) {
     annotations_legacy
 }
 
-# Convert tick length preset name to numeric pt value
-tickLenPt <- function(val) {
-    switch(val,
-        "none"   = 0,
-        "vshort" = 3,
-        "short"  = 5,
-        "medium" = 8,
-        "long"   = 13,
-        "vlong"  = 21,
-        5  # fallback
-    )
-}
-
-# Compute minor break positions between major breaks
-computeMinorBreaks <- function(majorBreaks, count) {
-    if (is.null(majorBreaks) || length(majorBreaks) < 2 || is.na(count) || count < 1) return(NULL)
-    unlist(lapply(seq_len(length(majorBreaks) - 1), function(i) {
-        seq(majorBreaks[i], majorBreaks[i + 1], length.out = count + 2)[2:(count + 1)]
-    }))
-}
-
-# Validate colors (hex codes or R color names)
-validateColor <- function(colorVal, fallback = '#808080') {
-    if (is.null(colorVal) || length(colorVal) == 0 || is.na(colorVal) || colorVal == '') return(fallback)
-    colorVal <- trimws(colorVal)
-    if (grepl('^#[0-9A-Fa-f]{6}$', colorVal)) return(colorVal)
-    if (tolower(colorVal) %in% tolower(grDevices::colors())) return(colorVal)
-    return(fallback)
-}
-
-# Parse "x, y" offset string into list(x=, y=)
-parseOffset <- function(val, defaultX = 0, defaultY = 0) {
-    if (is.null(val) || val == '') return(list(x = defaultX, y = defaultY))
-    parts <- strsplit(trimws(val), ",")[[1]]
-    x <- as.numeric(trimws(parts[1]))
-    y <- if (length(parts) >= 2) as.numeric(trimws(parts[2])) else defaultY
-    list(x = ifelse(is.na(x), defaultX, x), y = ifelse(is.na(y), defaultY, y))
-}
-
-# Splice additions into a base vector at a given start position
-spliceAt <- function(base, additions, startAt, pad = '#808080') {
-    if (length(additions) == 0) return(base)
-    startIdx <- max(1L, as.integer(startAt))
-    endIdx <- startIdx + length(additions) - 1L
-    if (startIdx > length(base)) {
-        base <- c(base, rep(pad, startIdx - length(base) - 1L))
-        base <- c(base, additions)
-    } else {
-        if (endIdx > length(base)) base <- c(base, rep(pad, endIdx - length(base)))
-        base[startIdx:endIdx] <- additions
-    }
-    base
-}
-
-# Smart parser for theme direct input entries — classifies tokens by type, not position
-# First token is always fill color (any R color name or #hex); remaining tokens:
-#   pattern name, color name/#hex (for pattern color), or number (1st=density, 2nd=angle)
-parseThemeEntry <- function(entry, mapPatCol) {
-    tokens <- trimws(strsplit(trimws(entry), ",")[[1]])
-    tokens <- tokens[nchar(tokens) > 0]
-    if (length(tokens) == 0) return(NULL)
-
-    fillCol <- validateColor(tokens[1], '#808080')
-    pat <- 'none'; dens <- 0.3; patCol <- '#000000'; ang <- 30
-
-    knownPatterns <- c('none', 'stripe', 'crosshatch', 'circle')
-    allRColors <- tolower(grDevices::colors())
-
-    for (tk in tokens[-1]) {
-        tkLower <- tolower(tk)
-        if (tkLower %in% knownPatterns) {
-            pat <- tkLower
-        } else if (grepl('^#[0-9A-Fa-f]{6}$', tk) || tkLower %in% allRColors) {
-            patCol <- tk
-        } else {
-            v <- suppressWarnings(as.numeric(tk))
-            if (!is.na(v)) {
-                if (v >= 0 && v <= 1) dens <- v
-                else ang <- v
-            }
-        }
-    }
-
-    list(c = fillCol, p = pat, d = dens, pc = patCol, a = ang)
-}
-
-# Smart parser for line style override entries — classifies tokens by type
-parseLineStyleEntry <- function(entry) {
-    tokens <- trimws(strsplit(trimws(entry), ",")[[1]])
-    tokens <- tokens[nchar(tokens) > 0]
-    if (length(tokens) == 0) return(NULL)
-
-    style <- NULL; width <- NULL; shape <- NULL; pointSize <- NULL; color <- NULL
-
-    knownStyles <- c('solid', 'dashed', 'dotted', 'dotdash', 'longdash', 'twodash')
-    knownShapes <- c('circle', 'square', 'triangle', 'diamond',
-                     'circleopen', 'squareopen', 'triangleopen', 'diamondopen')
-
-    numberCount <- 0
-    for (tk in tokens) {
-        tkLower <- tolower(tk)
-        if (tkLower %in% knownStyles) {
-            style <- tkLower
-        } else if (tkLower %in% knownShapes) {
-            shape <- switch(tkLower,
-                'circleopen' = 'circleOpen', 'squareopen' = 'squareOpen',
-                'triangleopen' = 'triangleOpen', 'diamondopen' = 'diamondOpen',
-                tkLower)
-        } else if (is.null(color) && grepl('^#[0-9A-Fa-f]{6}$', tk)) {
-            color <- tk
-        } else if (is.null(color) && tkLower %in% tolower(grDevices::colors())) {
-            color <- tk
-        } else {
-            v <- suppressWarnings(as.numeric(tk))
-            if (!is.na(v)) {
-                numberCount <- numberCount + 1
-                if (numberCount == 1) width <- v
-                else if (numberCount == 2) pointSize <- v
-            }
-        }
-    }
-
-    list(style = style, width = width, shape = shape, pointSize = pointSize, color = color)
-}
-
-# Resolve a color option that has a "custom" hex companion
-resolveColor <- function(colorVal, customHex, fallback = '#000000') {
-    if (colorVal == 'custom') {
-        return(validateColor(customHex, fallback))
-    }
-    colorMap <- list(
-        'black'  = '#000000',
-        'white'  = '#FFFFFF',
-        'gray'   = '#808080',
-        'red'    = '#CB181D',
-        'orange' = '#F16913',
-        'green'  = '#238B45',
-        'blue'   = '#08519C',
-        'teal'   = '#4EB3D3',
-        'purple' = '#6A51A3'
-    )
-    mapped <- colorMap[[colorVal]]
-    if (!is.null(mapped)) return(mapped)
-    return(validateColor(colorVal, fallback))
-}
-
-# Build fontface string from bold/italic booleans
-fontFace <- function(bold, italic) {
-    if (bold && italic) "bold.italic"
-    else if (bold) "bold"
-    else if (italic) "italic"
-    else "plain"
-}
-
-# Map shape name to ggplot2 numeric code (solid, no fill/stroke)
-shapeCode <- function(shapeName) {
-    switch(shapeName,
-        'circle'        = 16,
-        'square'        = 15,
-        'triangle'      = 17,
-        'diamond'       = 18,
-        'circleOpen'    = 1,
-        'squareOpen'    = 0,
-        'triangleOpen'  = 2,
-        'diamondOpen'   = 5,
-        16  # default circle
-    )
-}
-
-# Map shape name to fillable ggplot2 code (supports fill + color/border)
-shapeCodeFillable <- function(shapeName) {
-    switch(shapeName,
-        'circle'        = 21,
-        'square'        = 22,
-        'triangle'      = 24,
-        'diamond'       = 23,
-        'circleOpen'    = 1,
-        'squareOpen'    = 0,
-        'triangleOpen'  = 2,
-        'diamondOpen'   = 5,
-        21  # default circle
-    )
-}
-
-# Map pattern name to ggpattern key
-patternKey <- function(patternName) {
-    switch(tolower(patternName),
-        'stripe'     = 'stripe',
-        'crosshatch' = 'crosshatch',
-        'circle'     = 'circle',
-        'none'       = 'none',
-        'none'  # default
-    )
+# A CSS-safe color gate (Aug 2026 audit). The rule is a CHARSET
+# allowlist, not a format whitelist: every value the suite legitimately
+# stores passes untouched - the '' sentinel ("derive a sensible
+# default"), transparent/none, any hex form (#RGB / #RRGGBB / #RRGGBBAA),
+# rgb()/rgba()/hsl() with numeric guts, and plain color names - while a
+# breakout needs characters a color never does (quotes, angle brackets,
+# semicolons, colons, slashes, braces, backslashes). Without those a
+# value cannot escape a style="..." attribute, start a second CSS
+# declaration, smuggle a url(scheme:...), or inject markup. Anything
+# outside the charset maps to '' = unset, so a hostile value degrades to
+# the renderer's own default rather than to a visible gray.
+gb_safe_color <- function(v, fallback = '') {
+    if (is.null(v) || length(v) != 1L || !is.character(v) || is.na(v))
+        return(fallback)
+    if (!nzchar(v)) return(v)
+    if (nchar(v) > 64L) return(fallback)
+    if (grepl('^[-#a-zA-Z0-9(),.% ]*$', v)) v else fallback
 }
 
 # ---- Static-snapshot helpers (Jul 2026) --------------------------------
@@ -230,12 +54,33 @@ patternKey <- function(patternName) {
 # URI, rsvg rasterization - are the second fence).
 gb_parse_snapshot <- function(raw) {
     if (!is.character(raw) || length(raw) != 1L || is.na(raw) ||
-        !nzchar(raw) || nchar(raw) >= 4000000) return(NULL)
-    m <- regmatches(raw, regexec("^([0-9]+:-?[0-9]+)\\|", raw))[[1]]
+        !nzchar(raw)) return(NULL)
+    # Measure BYTES, not characters (Aug 2026 audit). The ceiling this cap
+    # exists to respect is jamovi's 4 MB nanomsg per-message limit, which
+    # is a byte limit, and nchar() on a multibyte string counts fewer
+    # characters than bytes - so a character cap let an oversized payload
+    # through. nchar() also THROWS on invalid multibyte input, and this
+    # runs at the tail of .run() outside any tryCatch, where a throw is a
+    # dead analysis rather than a missing snapshot; type = "bytes" cannot
+    # throw.
+    if (nchar(raw, type = "bytes") >= 4000000) return(NULL)
+    # Refuse invalid encoding outright. Under a UTF-8 locale - which is what
+    # production jamovi runs - substring() and grepl() THROW on an invalid
+    # multibyte string, and useBytes cannot rescue a string that is already
+    # marked invalid. A snapshot is an SVG this widget generated, so invalid
+    # bytes mean a corrupt or crafted option: degrade to "no snapshot"
+    # rather than kill the analysis. validUTF8() itself never throws.
+    if (!isTRUE(validUTF8(raw))) return(NULL)
+    # useBytes on every match: the option can carry invalid multibyte data
+    # from a crafted or truncated file, and R's regex engine THROWS when it
+    # tries to translate that to a wide string ("input string 1 is invalid
+    # in this locale"). This runs at the tail of .run() outside any
+    # tryCatch, so a throw is a dead analysis (Aug 2026 audit).
+    m <- regmatches(raw, regexec("^([0-9]+:-?[0-9]+)\\|", raw, useBytes = TRUE))[[1]]
     if (length(m) != 2L) return(NULL)
     body <- substring(raw, nchar(m[1]) + 1L)
-    if (!grepl("^\\s*<svg[\\s>]", body, perl = TRUE)) return(NULL)
-    if (grepl("<script", body, ignore.case = TRUE)) return(NULL)
+    if (!grepl("^\\s*<svg[\\s>]", body, perl = TRUE, useBytes = TRUE)) return(NULL)
+    if (grepl("<script", body, ignore.case = TRUE, useBytes = TRUE)) return(NULL)
     list(key = m[2], svg = body)
 }
 

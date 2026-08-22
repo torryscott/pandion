@@ -3,14 +3,14 @@
 # Renders the pages boot-check.mjs drives, then asserts the R-side
 # emission contract:
 #   boot.html      empty-variable placeholder WITH the engine boot:
-#                  marker-wrapped bundle + localStorage store snippet +
-#                  clientBundleHash write-back, but NO payload and NO
+#                  marker-wrapped bundle + clientBundleHash
+#                  write-back, but NO payload and NO
 #                  render() call.
 #   confirmed.html the same placeholder once the client hash matches:
 #                  plain message only (this is what the hash echo's
 #                  re-run emits, replacing the 1.9 MB boot content).
 #   cached.html    a DATA render with the hash confirmed: the ~20 KB
-#                  payload+loader page (localStorage eval path).
+#                  payload+loader page (in-window engine reuse).
 #
 # Always uses the MINIFIED bundle regardless of GB2_BUNDLE: that is
 # what production ships, and the un-minified source (~5.8 MB) exceeds
@@ -95,8 +95,20 @@ cached <- getC(plotbuilder(data = dat, xvar = "grp", yvar = "y",
 wr(cached, "cached.html")
 expect("cached: no bundle markers",
        !grepl("GB2_BUNDLE_START", cached, fixed = TRUE))
-expect("cached: localStorage eval loader present",
-       grepl(paste0("graphbuilder2.bundle.", JS_HASH), cached, fixed = TRUE))
+# The cached loader reuses the engine already live in this window; the
+# localStorage copy it used to eval as a second layer was removed in the
+# Aug 2026 audit (the cached VALUE was never verified against the hash
+# that keyed it). Pinned negatively so the eval cannot return by accident.
+expect("cached: reuses the in-window engine",
+       grepl("window.GraphBuilder2.__hash ===", cached, fixed = TRUE))
+expect("cached: NO localStorage bundle read",
+       !grepl("graphbuilder2.bundle.", cached, fixed = TRUE))
+expect("cached: NO eval of cached script",
+       !grepl("(0, eval)", cached, fixed = TRUE))
+expect("cached: self-heal poke present (clears the hash when no engine)",
+       grepl('setOption("clientBundleHash", "")', cached, fixed = TRUE))
+expect("cached: module-missing fallback retained",
+       grepl("gb2-module-missing", cached, fixed = TRUE))
 expect("cached: small (payload + loader only)", nchar(cached) < 300000)
 expect("cached: run-entry prelude timing present",
        grepl("prelude=", cached, fixed = TRUE))

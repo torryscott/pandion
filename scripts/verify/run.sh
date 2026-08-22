@@ -109,6 +109,85 @@ GB2_VERIFY_OUT="$OUT" node "$HERE/hover-export-check.mjs"
 echo "== crowded-category label thinning: the stride decision (pure unit)"
 node "$HERE/catstride-unit.mjs"
 
+echo "== facet key split: category and panel level may both hold the separator (pure unit)"
+node "$HERE/facetkey-unit.mjs"
+
+echo "== installed export surface (syntax-mode wrappers stay public)"
+if Rscript "$HERE/export-surface-check.R"; then :; else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then echo "   skipped: module not installed here"; else exit "$rc"; fi
+fi
+
+echo "== the snapshot image renders from the option (no duplicate copy in state)"
+if Rscript "$HERE/snapshot-render-check.R"; then :; else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then echo "   skipped: jmvcore or rsvg not available"; else exit "$rc"; fi
+fi
+
+echo "== R-side gates survive option values that are not the expected shape"
+if Rscript "$HERE/secgate-check.R"; then :; else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then echo "   skipped: jsonlite not available"; else exit "$rc"; fi
+fi
+
+echo "== the left-panel tip is found by its marker, not a copied string"
+if Rscript "$HERE/paneltip-check.R"; then :; else exit $?; fi
+
+echo "== the Svg-element handover waits for our switch, not jamovi's schedule"
+if GB2_HANDOVER_OUT="$OUT-handover" GB2_BUNDLE="$BUNDLE" Rscript "$HERE/handover-render.R"; then
+    GB2_HANDOVER_OUT="$OUT-handover" GB2_BUNDLE="$BUNDLE" node "$HERE/handover-check.mjs"
+else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then echo "   skipped: jmvcore not available"; else exit "$rc"; fi
+fi
+
+echo "== JSON-string stores and annotation ids cannot inject"
+if GB2_STOREGATE_OUT="$OUT-storegate" GB2_BUNDLE="$BUNDLE" \
+       Rscript "$HERE/storegate-render.R"; then
+    GB2_STOREGATE_OUT="$OUT-storegate" GB2_BUNDLE="$BUNDLE" node "$HERE/storegate-check.mjs"
+else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then echo "   skipped: jmvcore not available"; else exit "$rc"; fi
+fi
+
+echo "== saved palette/style libraries cannot inject through a colour"
+if GB2_XSS_OUT="$OUT-libgate" R_USER_CONFIG_DIR="$OUT-libgate-cfg" \
+       Rscript "$HERE/libgate-poison.R" &&
+   GB2_XSS_OUT="$OUT-libgate" R_USER_CONFIG_DIR="$OUT-libgate-cfg" GB2_BUNDLE="$BUNDLE" \
+       Rscript "$HERE/libgate-render.R"; then
+    GB2_XSS_OUT="$OUT-libgate" GB2_BUNDLE="$BUNDLE" node "$HERE/libgate-check.mjs"
+else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then echo "   skipped: jmvcore not available"; else exit "$rc"; fi
+fi
+
+echo "== colour gate: a shared .omv cannot inject through a colour (pure R)"
+if Rscript "$HERE/colorgate-check.R"; then :; else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then echo "   skipped: jsonlite not available"; else exit "$rc"; fi
+fi
+
+echo "== panel keys survive the separator in a category OR a panel level"
+if GB2_FACETSEP_OUT="$OUT-facetsep" GB2_BUNDLE="$BUNDLE" Rscript "$HERE/facetsep-check.R"; then
+    GB2_FACETSEP_OUT="$OUT-facetsep" GB2_BUNDLE="$BUNDLE" node "$HERE/facetsep-client-check.mjs"
+else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then echo "   skipped: jmvcore not available"; else exit "$rc"; fi
+fi
+
+echo "== colour gate, end to end (hostile .omv values through R into the engine)"
+if GB2_COLORGATE_OUT="$OUT-colorgate" GB2_BUNDLE="$BUNDLE" Rscript "$HERE/colorgate-render.R"; then
+    GB2_COLORGATE_OUT="$OUT-colorgate" GB2_BUNDLE="$BUNDLE" node "$HERE/colorgate-client-check.mjs"
+    GB2_COLORGATE_OUT="$OUT-colorgate" GB2_BUNDLE="$BUNDLE" node "$HERE/colorgate-bypass-check.mjs"
+else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then
+        echo "   skipped: jmvcore not available in this R library"
+    else
+        exit "$rc"
+    fi
+fi
+
 echo "== chartSpec migration (route style commits -> one blob; explode; per-key undo)"
 if GB2_CHARTSPEC_OUT="$OUT-chartspec" GB2_BUNDLE="$BUNDLE" Rscript "$HERE/chartspec-render.R"; then
     GB2_CHARTSPEC_OUT="$OUT-chartspec" node "$HERE/chartspec-check.mjs"

@@ -27453,6 +27453,15 @@
   // discipline: the newest entry's version must equal APP_VERSION, so shipping
   // a release without a note here fails the suite.
   var RELEASE_NOTES = [
+    { version: "3.1.0", date: "August 2026", notes: [
+      "Opening a project someone else made is safer. Colors, annotations " +
+        "and saved palettes are now checked before they reach the page, so " +
+        "a file built to misbehave cannot run anything in your browser.",
+      "Panels no longer go missing when a grouping value happens to contain " +
+        "the characters the chart uses to tell a panel from a category.",
+      "The saved palette and style libraries are checked the same way, and " +
+        "a malformed one is refused instead of overwriting what you saved."
+    ] },
     { version: "3.0.0", date: "July 2026", notes: [
       "First browser-only release. The whole chart editor runs on this page " +
         "with no jamovi and no R: same engine, same charts, no install.",

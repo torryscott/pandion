@@ -76,10 +76,32 @@ cg <- data.frame(
 # --- Compare Groups -------------------------------------------------
 wr(plotbuilder(data = cg, xvar = "x", yvar = "y", groupVar = "g", facetVar = NULL,
                graphType = "bar", chartSpec = cspec(barValueLabels = TRUE, barNLabels = TRUE)), "cg_bar_labels")
+# A full 12-slot custom palette on a 12-group chart, so every stored
+# colour has to survive the pipeline AND get drawn. customPalette is a
+# comma-joined LIST, and a per-colour length cap applied to the whole
+# string once wiped any palette past eight (Aug 2026 audit); nothing
+# else in this battery would notice.
+set.seed(12)
+pal12 <- data.frame(
+    x = factor(rep(c("A", "B"), each = 24)),
+    y = rnorm(48, 50, 8),
+    g = factor(rep(paste0("G", sprintf("%02d", 1:12)), 4)))
+wr(plotbuilder(data = pal12, xvar = "x", yvar = "y", groupVar = "g",
+               facetVar = NULL, graphType = "bar",
+               chartSpec = cspec(chartPalette = "custom",
+                                 customPalette = paste(c(
+                                     "#2d5c94", "#902634", "#e18e4c", "#597b2f",
+                                     "#faca59", "#32295e", "#5bb1ba", "#d35a80",
+                                     "#4478ad", "#6fb3ad", "#266741", "#976d76"),
+                                     collapse = ","))), "cg_palette12")
+
 wr(plotbuilder(data = cg, xvar = "x", yvar = "y", groupVar = "g", facetVar = NULL,
                graphType = "dot"), "cg_dot")
 wr(plotbuilder(data = cg, xvar = "x", yvar = "y", groupVar = "g", facetVar = NULL,
-               graphType = "box"), "cg_box")
+               # barNLabels on a box family chart takes a SEPARATE `_vlBoxFam` branch from
+               # the bar value labels (n only, docked at the value axis floor);
+               # nothing else in the battery reaches it.
+               graphType = "box", chartSpec = cspec(barNLabels = TRUE)), "cg_box")
 wr(plotbuilder(data = cg, xvar = "x", yvar = "y", groupVar = "g", facetVar = NULL,
                graphType = "violin"), "cg_violin")
 wr(plotbuilder(data = cg, xvar = "x", yvar = "y", groupVar = "g", facetVar = NULL,
@@ -165,8 +187,27 @@ wr(xyplotbuilder(data = sc, xvar = "x", yvar = "y", groupVar = "g", facetVar = "
 wr(xyplotbuilder(data = sc, xvar = "x", yvar = "y", groupVar = NULL, facetVar = NULL,
                  sizeVar = NULL, labelVar = NULL,
                  chartSpec = cspec(xyShowFit = TRUE, xyShowCI = TRUE)), "xy_fit_ci")
+# The remaining scatter overlays, none of which any other fixture turned on:
+# ellipses, 2-D density contours, rug marks and both marginal strips. Each is
+# an optional layer that could stop drawing without the chart looking broken,
+# so they are asserted by role in check.mjs. Grouped, so the per-group layers
+# come out two apiece. xyShowEllipse and xyRug ride chartSpec; the density,
+# marginal and level options are real options.
+wr(xyplotbuilder(data = sc, xvar = "x", yvar = "y", groupVar = "g", facetVar = NULL,
+                 sizeVar = NULL, labelVar = NULL,
+                 xyShowDensity2D = TRUE, xyDensity2DLevels = 4,
+                 xyMarginal = "histogram", xyEllipseLevel = 0.95,
+                 chartSpec = cspec(xyShowEllipse = TRUE, xyRug = "both",
+                                   xyShowOutliers = TRUE, xyOutlierLabel = TRUE,
+                                   xyShowStats = TRUE)),
+   "xy_overlays")
+
 wr(xyplotbuilder(data = sc, xvar = "x", yvar = "y", groupVar = NULL, facetVar = NULL,
-                 sizeVar = NULL, labelVar = NULL, xyBin = "square"), "xy_heatmap")
+                 sizeVar = NULL, labelVar = NULL, xyBin = "square",
+                 # A RAMP palette is what makes the zero-count background wash
+                 # draw at all: the engine paints it only when the palette's
+                 # t=0 stop is non-white, and the default "single" never is.
+                 chartSpec = cspec(xyBinPalette = "blues")), "xy_heatmap")
 set.seed(9)
 ln <- data.frame(x = rlnorm(150, 3, 1), y = rlnorm(150, 2, 1.2))
 wr(xyplotbuilder(data = ln, xvar = "x", yvar = "y", groupVar = NULL, facetVar = NULL,
@@ -188,7 +229,7 @@ dd <- data.frame(y = c(rnorm(90, 50, 10), rnorm(90, 60, 8)),
 wr(distplotbuilder(data = dd, var = "y", groupVar = "grp", facetVar = NULL,
                    graphType = "histogram"), "dist_hist")
 wr(distplotbuilder(data = dd, var = "y", groupVar = "grp", facetVar = NULL,
-                   graphType = "histogram", chartSpec = cspec(distNormalCurve = TRUE)), "dist_hist_normal")
+                   graphType = "histogram", chartSpec = cspec(distNormalCurve = TRUE, distRug = TRUE)), "dist_hist_normal")
 wr(distplotbuilder(data = dd, var = "y", groupVar = "grp", facetVar = NULL,
                    graphType = "density"), "dist_density")
 wr(distplotbuilder(data = dd, var = "y", groupVar = "grp", facetVar = NULL,
@@ -210,6 +251,13 @@ wr(freqplotbuilder(data = fqd, var = "resp", groupVar = "cohort", facetVar = NUL
                    freqPosition = "stack", chartSpec = cspec(barValueLabels = TRUE)), "freq_bar_stack")
 wr(freqplotbuilder(data = fqd, var = "resp", groupVar = "cohort", facetVar = "site",
                    freqPosition = "fill"), "freq_bar_fill_facet")
+# 100%-stacked segments carry data-bar-cat rather than a data-role, so their
+# value labels are the only role-shaped proof the fill layout actually ran.
+# They live on their own fixture because a label sits over the bar centre and
+# would intercept the clicks smallwins-check drives on freq_bar_fill_facet.
+wr(freqplotbuilder(data = fqd, var = "resp", groupVar = "cohort", facetVar = NULL,
+                   freqPosition = "fill",
+                   chartSpec = cspec(barValueLabels = TRUE)), "freq_bar_fill_labels")
 wr(freqplotbuilder(data = fqd, var = "resp", groupVar = NULL, facetVar = NULL,
                    graphType = "pie"), "freq_pie")
 wr(freqplotbuilder(data = fqd, var = "resp", groupVar = "cohort", facetVar = NULL,
@@ -233,9 +281,14 @@ crd <- local({
 })
 crd$Anxiety[sample(crn, 10)] <- NA
 wr(corrplotbuilder(data = crd, vars = names(crd)), "corr_heat")
-wr(corrplotbuilder(data = crd, vars = names(crd), graphType = "corrcircles"), "corr_circles")
+# corrSigTreat "cross" strikes out the non-significant cells. It is the one
+# non-significance treatment that ADDS elements, so it is the one a roles
+# minimum can see (fade only dims, blank only removes).
+wr(corrplotbuilder(data = crd, vars = names(crd), graphType = "corrcircles",
+                   chartSpec = cspec(corrSigTreat = "cross")), "corr_circles")
 wr(corrplotbuilder(data = crd, vars = names(crd), graphType = "corrnumbers",
-                   chartSpec = cspec(corrSigStars = TRUE, corrSigTreat = "fade")), "corr_numbers")
+                   chartSpec = cspec(corrSigStars = TRUE, corrSigTreat = "fade",
+                                     corrValueContent = "rp")), "corr_numbers")
 wr(corrplotbuilder(data = crd, vars = c("Anxiety", "Depression")), "corr_two")
 wr(corrplotbuilder(data = crd, vars = "Anxiety"), "corr_one_placeholder")
 
@@ -253,7 +306,8 @@ wr(likertplotbuilder(data = lkd, items = names(lkd),
                      graphType = "likertmeans"), "likert_means")
 # Reverse-scored item: counts mirror across the scale, label gains (R).
 wr(likertplotbuilder(data = lkd, items = names(lkd),
-                     chartSpec = cspec(likertReverseItems = list("Workload"))), "likert_reverse")
+                     chartSpec = cspec(likertReverseItems = list("Workload"),
+                                       likertShowTopBox = TRUE)), "likert_reverse")
 lkn <- data.frame(Q1 = sample(1:5, 90, TRUE), Q2 = sample(1:5, 90, TRUE))
 wr(likertplotbuilder(data = lkn, items = c("Q1", "Q2")), "likert_numeric")
 # Continuous battery (>25 distinct values, all numeric): routes to the

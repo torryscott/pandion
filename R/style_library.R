@@ -125,7 +125,12 @@
     if (!identical(as.character(action$machineId), as.character(lib$machineId))) {
         return(lib)
     }
+    # Length-1 or nothing. A JSON null yields numeric(0) and a JSON array
+    # yields a vector; both make the is.finite() test below length 0 or 2,
+    # and `if` then THROWS ("argument is of length zero" / "the condition
+    # has length > 1") instead of refusing the action (Aug 2026 audit).
     ts <- suppressWarnings(as.numeric(action$timestamp))
+    if (length(ts) != 1L) ts <- NA_real_
     if (!is.finite(ts) || ts <= as.numeric(lib$lastAppliedTs)) {
         return(lib)
     }
@@ -142,6 +147,10 @@
         opts <- action$opts
         if (!is.list(opts) || length(opts) == 0 || is.null(names(opts))) return(lib)
         opts <- opts[nzchar(names(opts))]
+        # A saved style is a bag of option values, colours among them, and
+        # the style thumbnails build markup from it. Same door, same gate
+        # as the palette library (Aug 2026 audit round 3).
+        opts <- gb_sanitize_colors(opts)
         if (length(opts) == 0) return(lib)
         lib$styles[[name]] <- list(groups = as.list(groups), opts = opts)
         if (identical(kind, "savedefault"))

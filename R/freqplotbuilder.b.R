@@ -366,8 +366,13 @@ freqplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6C
                     if (is_pie) {
                         if (identical(key, cl)) tot <- tot + b$n
                     } else {
-                        # strip any facet prefix back off
-                        bare <- if (use_facet) sub(paste0("^.*", FACET_SEP), "", key) else key
+                        # Strip the bar's OWN facet prefix back off - exact
+                        # substring arithmetic, not a greedy regex: a
+                        # category (or facet) label that itself contains
+                        # the separator must survive intact.
+                        bare <- if (use_facet)
+                            substring(key, nchar(b$facet) + nchar(FACET_SEP) + 1L)
+                        else key
                         if (identical(bare, cl)) tot <- tot + b$n
                     }
                 }
@@ -384,7 +389,7 @@ freqplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6C
                         tot <- 0
                         for (b in bars) {
                             if (identical(b$facet, fl)) {
-                                bare <- sub(paste0("^.*", FACET_SEP), "", b$x)
+                                bare <- substring(b$x, nchar(fl) + nchar(FACET_SEP) + 1L)
                                 if (identical(bare, cl)) tot <- tot + b$n
                             }
                         }
@@ -445,7 +450,7 @@ freqplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6C
 
             spec_real_keys <- list(
                 "data", "var", "groupVar", "facetVar", "freqStat", "freqPosition",
-                "graphType", "summaryFunc", "errorBarType", "showDataPoints",
+                "graphType",
                 "exportRequest", "exportPath", "clientBundleHash",
                 "paletteLibrary", "styleLibrary", "styleStamp",
                 "annotationsJson", "chartSnapshot", "chartSpec"
@@ -485,11 +490,9 @@ freqplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6C
                 freq_position = freq_position,
                 freq_pooled_note = freq_pooled_note,
                 freq_tests = tests,
-                chart_spec = self$options$chartSpec,
+                chart_spec = gb_spec_sanitized_json(self$options$chartSpec),
                 spec_real_keys = spec_real_keys,
-                spec_keys = spec_keys,
-                auto_p_correction_default =
-                    gb_spec_default(.freqplotbuilderSpecTable, "autoPCorrection")
+                spec_keys = spec_keys
             )
             spec_args <- gb_spec_args(spec, .freqplotbuilderSpecTable)
 
@@ -708,7 +711,6 @@ freqplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6C
             tryCatch({
                 dims <- gb_svg_dims(snap$svg)
                 img$setSize(dims$w, dims$h)
-                img$setState(snap$svg)
                 img$setVisible(TRUE)
             }, error = function(e) NULL)
         },
@@ -718,7 +720,15 @@ freqplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6C
         # with the module (the PDF-export dependency); without it the
         # image stays empty rather than erroring (FALSE = nothing drawn).
         .renderSnapshot = function(image, ggtheme, theme, ...) {
-            svg <- image$state
+            # Read the snapshot from the OPTION rather than this image's
+            # state. Both persist in the .omv, so setting state stored a
+            # second copy of the same SVG - measured at 13% of the saved
+            # analyses in a real multi-chart file (Aug 2026 audit, and
+            # jamovi's maintainer asked whether the state was still
+            # needed). jmvcore gates rendering on filePath / visible /
+            # requiresData, never on state, so dropping it is inert here.
+            snap <- gb_parse_snapshot(self$options$chartSnapshot)
+            svg <- if (is.null(snap)) NULL else snap$svg
             if (is.null(svg) || !is.character(svg) || !nzchar(svg))
                 return(FALSE)
             if (!requireNamespace("rsvg", quietly = TRUE))
@@ -776,11 +786,26 @@ freqplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6C
             }
             private$.writeLastExportId(req_id)
 
-            ext <- tolower(parsed$format)
-            base_name <- if (!is.null(parsed$filename) && nzchar(parsed$filename))
-                parsed$filename
-            else
-                paste0("plot.", ext)
+            # Coerce to length 1 BEFORE any use. jsonlite simplifies a JSON
+            # array into a vector, and both `nzchar(...)` in a condition and
+            # `paste0("plot.", ext)` then misbehave - the condition throws
+            # ("the condition has length > 1" / "'length = 2' in coercion to
+            # 'logical(1)'"), and this method is called bare from .run(), so a
+            # throw is a dead analysis rather than a failed export. The stale-
+            # request window above already blocks a crafted .omv from reaching
+            # here, so this is belt to that braces (Aug 2026 audit).
+            .one <- function(x) {
+                # is.atomic first: as.character(list(NULL)) is the STRING
+                # "NULL", which would sail through nzchar() and name the
+                # exported file "NULL".
+                if (!is.atomic(x) || length(x) != 1L) return("")
+                x <- suppressWarnings(as.character(x))
+                if (is.na(x) || !nzchar(x)) "" else x
+            }
+            ext <- tolower(.one(parsed$format))
+            if (!nzchar(ext)) ext <- "png"
+            fn <- .one(parsed$filename)
+            base_name <- if (nzchar(fn)) fn else paste0("plot.", ext)
             # Sanitize to a single, safe filename component: strip any
             # directory parts and separators so a crafted name ("../../x",
             # an absolute path, a Windows path) can never escape target_dir.
@@ -795,9 +820,9 @@ freqplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6C
                 path.expand("~")
             }
 
-            dest_alias <- parsed$destination
+            dest_alias <- .one(parsed$destination)
             target_dir <- ""
-            if (!is.null(dest_alias) && nzchar(dest_alias)) {
+            if (nzchar(dest_alias)) {
                 sub <- switch(
                     tolower(dest_alias),
                     "desktop"   = "Desktop",

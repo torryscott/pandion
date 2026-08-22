@@ -16,8 +16,8 @@
 #' @return Character scalar of HTML.
 #' @keywords internal
 
-# Script-src is the production default. Keep the former inline/localStorage
-# delivery behind an emergency rollback switch while the transition settles.
+# Script-src is the production default. Keep the former inline delivery
+# behind an emergency rollback switch while the transition settles.
 # The env var works for harnesses/probes; real jamovi strips inherited env at
 # the Electron->server spawn, so a live installation uses the flag file:
 #   touch ~/.plotstudio-inlinebundle  # temporarily use the legacy loader
@@ -27,6 +27,52 @@ gb2_script_src_on <- function() {
     rollback <- rollback %in% c("1", "true", "yes", "on")
     !rollback && !file.exists(path.expand("~/.plotstudio-inlinebundle"))
 }
+
+# ---- Svg-element handover switches ------------------------------------
+# When jamovi renders this module inside its Svg results element, the
+# module's own resize grip and Export button are meant to stand down in
+# favour of jamovi's native ones (its maintainer's ask, Aug 2026). The
+# gates for that live in the engine and key off the element, so WITHOUT
+# these switches the handover would happen the moment any jamovi build
+# ships that element - on jamovi's schedule, not ours, and possibly
+# before the replacement is finished.
+#
+# So each half is held behind its own switch, defaulting to "not yet".
+# Flip one's ready_default to TRUE (and cut a release) once the
+# jamovi-side replacement has actually been seen working. They are
+# separate because they arrive separately: the resize handles are Damo's
+# work, the native save comes with the Svg element itself.
+#
+# Trying one BEFORE that release needs a switch that works in a real
+# installation, and an env var is not it - same reason gb2_script_src_on
+# above uses a file: jamovi strips inherited env at the Electron->server
+# spawn, so GB2_HANDOVER_* reaches harnesses and probes but never a
+# running jamovi. Without the flag file the only way to see the handover
+# against a live build is to edit this line and rebuild, which is not
+# something we can ask jamovi's own people to do when they want to test
+# their half against ours. So:
+#   touch ~/.plotstudio-handover-resize   # stand our grip down
+#   rm ~/.plotstudio-handover-resize      # take it back
+# The env var still wins when set, so a harness can force either state.
+#
+# The exact-size Sizing panel in Chart settings is deliberately NOT
+# behind either switch. It is the floor: whatever else stands down, a
+# user can always type a size.
+.gb2_handover_on <- function(env_var, flag_file, ready_default) {
+    v <- tolower(trimws(Sys.getenv(env_var)))
+    if (v %in% c("1", "true", "yes", "on")) return(TRUE)
+    if (v %in% c("0", "false", "no", "off")) return(FALSE)
+    if (file.exists(path.expand(flag_file))) return(TRUE)
+    isTRUE(ready_default)
+}
+# Damo's resize handles replace our corner grip.
+gb2_handover_resize <- function()
+    .gb2_handover_on("GB2_HANDOVER_RESIZE",
+                     "~/.plotstudio-handover-resize", FALSE)
+# jamovi's native right-click save replaces our Export button.
+gb2_handover_export <- function()
+    .gb2_handover_on("GB2_HANDOVER_EXPORT",
+                     "~/.plotstudio-handover-export", FALSE)
 
 # Shared script-src wiring for every chart analysis. The raw binding is
 # intentional: jmvcore's setScripts() helper double-prefixes the package name
@@ -40,8 +86,8 @@ gb2_init_script_src <- function(html_result) {
     }, error = function(e) invisible(FALSE))
 }
 
-# Empty analyses used to pre-warm the inline/localStorage cache by shipping
-# the engine with their placeholder. In script-src mode the Html result has
+# Empty analyses used to pre-warm the inline handshake by shipping the
+# engine with their placeholder. In script-src mode the Html result has
 # already requested the engine, so keep placeholders payload-only.
 gb2_engine_placeholder_html <- function(message_html,
                                         client_bundle_hash = "",
@@ -394,7 +440,6 @@ graphbuilder2_html <- function(bars,
                                # reopen. Bracket-bearing modules pass
                                # self$options$autoPCorrection.
                                auto_p_correction = "none",
-                               auto_p_correction_default = "",
                                # Set TRUE by the rmgraph module so the
                                # widget knows the x-categories represent
                                # repeated measure columns (same subjects
@@ -544,10 +589,10 @@ graphbuilder2_html <- function(bars,
                                missing_note = "",
                                # md5 of the bundle the CLIENT confirmed it has
                                # cached (hidden clientBundleHash option, written
-                               # back by the widget after it copies the bundle
-                               # into localStorage). When it matches the bundle
-                               # on disk we skip inlining the ~1.9 MB JS and emit
-                               # a small loader instead. "" = always inline.
+                               # back by the widget once the engine is live in
+                               # its window). When it matches the bundle on disk
+                               # we skip inlining the ~1.9 MB JS and emit a small
+                               # loader instead. "" = always inline.
                                client_bundle_hash = "",
                                # Epoch seconds captured at the module's .run()
                                # entry (as.numeric(Sys.time())). Feeds the debug
@@ -973,7 +1018,14 @@ graphbuilder2_html <- function(bars,
         for (i in seq_along(x)) {
             r <- x[[i]]
             if (!is.list(r)) next
+            # The id is interpolated into id="..." / for="..." attributes in
+            # the bracket panel, so it is an output context, not just a key.
+            # It is generated client-side as a short token, so an allowlist
+            # costs nothing and closes the attribute breakout (Aug 2026
+            # audit round 4).
             id_v <- if (!is.null(r$id)) as.character(r$id) else ""
+            if (length(id_v) != 1L || is.na(id_v) ||
+                !grepl("^[A-Za-z0-9_:.-]{1,64}$", id_v)) id_v <- ""
             kind_v <- if (!is.null(r$kind)) as.character(r$kind) else "text"
             if (!nzchar(id_v) || !nzchar(kind_v)) next
             entry <- list(
@@ -1076,6 +1128,17 @@ graphbuilder2_html <- function(bars,
             # cells' per-type ceiling. Only-when-present, so payloads
             # without it stay byte-identical.
             if (!is.null(r$yRel)) entry$yRel <- as.numeric(r$yRel)
+            # Colour hygiene (Aug 2026 audit). annotationsJson persists in
+            # the .omv independently of chartSpec, so its colours never met
+            # the spec gate - and they land in style attributes when the
+            # annotation is drawn or selected. Gate every colour-named
+            # field here, so a field added later is covered by default.
+            for (.k in names(entry)) {
+                if (grepl("color", .k, ignore.case = TRUE) &&
+                    is.character(entry[[.k]]) && length(entry[[.k]]) == 1L)
+                    entry[[.k]] <- gb_safe_color(entry[[.k]],
+                                                 fallback = "#222222")
+            }
             out[[length(out) + 1L]] <- entry
         }
         out
@@ -1771,7 +1834,6 @@ graphbuilder2_html <- function(bars,
         legendOffsetY = as.numeric(legend_offset_y),
         annotations = normalize_annotations(annotations),
         autoPCorrection = as.character(auto_p_correction),
-        autoPCorrectionDefault = as.character(auto_p_correction_default),
         legendRowSpacing = as.numeric(legend_row_spacing),
         legendSwatchGap = as.numeric(legend_swatch_gap),
         xAxisThickness = as.numeric(x_axis_thickness),
@@ -2097,6 +2159,11 @@ graphbuilder2_html <- function(bars,
     # diff an incoming options snapshot against the rendered state and
     # optimistically recompute the cells (graphbuilder2.js
     # _gb2StatFold); the eventual R echo then hashes identical.
+    # Svg-element handover: only shipped once a switch is flipped, so a
+    # payload with the handover still pending is byte-identical to before
+    # the switches existed and the echo still hash-skips.
+    if (isTRUE(gb2_handover_resize())) payload$svgHandoverResize <- TRUE
+    if (isTRUE(gb2_handover_export())) payload$svgHandoverExport <- TRUE
     if (!is.null(summary_func))
         payload$summaryFunc <- as.character(summary_func)
     if (!is.null(error_bar_type))
@@ -2177,20 +2244,18 @@ graphbuilder2_html <- function(bars,
     #   inline : the client hasn't confirmed this exact bundle (or the
     #            GB2_NO_BUNDLE_CACHE escape hatch is set). Embed the
     #            full bundle as before, plus a deferred snippet that
-    #            copies the bundle text into localStorage and writes
-    #            the hash back through the hidden clientBundleHash
+    #            writes the hash back through the hidden clientBundleHash
     #            option (debounced via window.__gb2_setOption so it
     #            coalesces with other early edits).
     #   cached : the persisted clientBundleHash matches the bundle on
     #            disk. Emit only the payload plus a loader that reuses
-    #            window.GraphBuilder2 (same-document re-render), falls
-    #            back to the localStorage copy (fresh document), and
-    #            as a last resort clears clientBundleHash so the next
+    #            window.GraphBuilder2 (same-document re-render) and, if
+    #            no engine answers, clears clientBundleHash so the next
     #            run re-ships the bundle (self-heal; a "Loading chart
-    #            engine" note shows meanwhile).
-    # A localStorage flag graphbuilder2.bundle.evalBlocked permanently
-    # falls back to inline mode on clients whose webview rejects
-    # eval(), so a broken cache can never wedge rendering.
+    #            engine" note shows meanwhile). A localStorage copy of
+    #            the bundle used to be eval'd here for the fresh-document
+    #            case; removed in the Aug 2026 audit (see the cached
+    #            branch below).
     if (nzchar(Sys.getenv("GB2_NO_BUNDLE_CACHE")))
         client_bundle_hash <- ""
     js_hash <- .gb2_widget_js_hash()
@@ -2225,7 +2290,7 @@ graphbuilder2_html <- function(bars,
         # empty-variable engine-boot placeholder) so the two paths can
         # never drift - see their definitions near .gb2_widget_js().
         engine_chunk <- .gb2_engine_chunk_inline(js_hash, js_code)
-        store_chunk  <- .gb2_store_chunk(js_hash)
+        store_chunk  <- .gb2_hash_commit_chunk(js_hash)
     } else if (bundle_mode == "scriptsrc") {
         # The bundle arrived (or should have) via the scripts field's
         # <script src>. NO hash gate on the engine check: the script tag
@@ -2245,94 +2310,58 @@ graphbuilder2_html <- function(bars,
             '  else {\n',
             '    try { window.__gb2_scriptSrcLate = (window.__gb2_scriptSrcLate || 0) + 1; } catch (_eL) {}\n',
             '    var __gb2_ssHost = document.getElementById(__gb2_id);\n',
-            "    if (__gb2_ssHost) __gb2_ssHost.innerHTML = '<div data-role=\"gb2-scriptsrc-wait\" style=\"padding:24px 12px;color:#666;font:13px var(--gb2-ui-font);text-align:center;\">Loading the chart engine…</div>';\n",
+            # APPEND the wait note - do not replace innerHTML. The host
+            # carries the gb2-diag-pending element the 6 s primer upgrades
+            # into a real diagnosis, and wiping it left a module-less
+            # viewer on "Loading the chart engine..." with no snapshot and
+            # no explanation, forever (Aug 2026 audit).
+            '    if (__gb2_ssHost) {\n',
+            '      var __gb2_ssNote = document.createElement("div");\n',
+            '      __gb2_ssNote.setAttribute("data-role", "gb2-scriptsrc-wait");\n',
+            '      __gb2_ssNote.setAttribute("style", "padding:24px 12px;color:#666;font:13px var(--gb2-ui-font);text-align:center;");\n',
+            '      __gb2_ssNote.textContent = "Loading the chart engine\\u2026";\n',
+            '      __gb2_ssHost.appendChild(__gb2_ssNote);\n',
+            '    }\n',
             '    (function __gb2_ssPoll(n) {\n',
             '      if (window.GraphBuilder2 && window.GraphBuilder2.render) {\n',
             '        try { window.GraphBuilder2.__hash = "', js_hash, '"; } catch (_eS2) {}\n',
             '        try { window.__gb2_scriptSrcLateMs = n * 150; } catch (_eL2) {}\n',
             '        try { window.__gb2_authoritativeRender = true; } catch (_eA) {}\n',
             '        try { window.GraphBuilder2.render(__gb2_id, __gb2_payload); } catch (_eR) {}\n',
-            '      } else if (n < 60) setTimeout(function () { __gb2_ssPoll(n + 1); }, 150);\n',
+            '      } else if (n < 60) { setTimeout(function () { __gb2_ssPoll(n + 1); }, 150); }\n',
+            # Poll exhausted (~9 s): the engine is not coming. Say so, and
+            # show the saved picture if the file carries one, instead of
+            # leaving the wait note up indefinitely.
+            '      else { try { __gb2_armModuleMissing(); } catch (_eMM1) {} }\n',
             '    })(0);\n',
             '  }\n',
             '} catch (_eC) {}\n'
         )
         store_chunk <- ''
     } else {
+        # CACHED: the client already confirmed this exact bundle, so the
+        # engine is expected to be live in THIS window (the results iframe
+        # survives jamovi's re-deliveries, and one run is delivered several
+        # times) - we ship the payload + loader only, ~20 KB instead of
+        # ~2 MB. A localStorage copy of the bundle used to be eval'd here
+        # as a second recovery layer; it was REMOVED in the Aug 2026 audit
+        # pass. The cache key was namespaced by the bundle hash but the
+        # VALUE was never verified against it, so anything able to write
+        # that origin's localStorage could have had arbitrary JS executed
+        # with the widget's privileges (including its option-writing
+        # bridge). It bought little: jamovi serves each session on a random
+        # port and localStorage is origin-scoped, so the copy never
+        # survived a restart anyway (Jul 2026 finding). Engine absent now
+        # falls through to the self-heal poke below, which clears the
+        # client hash so the next run ships inline - one extra round trip
+        # in a fallback mode that production (script-src) never enters.
         engine_chunk <- paste0(
             'var __gb2_engineOk = false;\n',
             'try {\n',
             '  __gb2_engineOk = !!(typeof window !== "undefined" && window.GraphBuilder2\n',
             '      && window.GraphBuilder2.render && window.GraphBuilder2.__hash === "', js_hash, '");\n',
-            '  if (!__gb2_engineOk) {\n',
-            '    var __gb2_blocked = false;\n',
-            '    try { __gb2_blocked = !!(window.localStorage && window.localStorage.getItem("graphbuilder2.bundle.evalBlocked")); } catch (_eB) {}\n',
-            '    if (!__gb2_blocked) {\n',
-            '      try {\n',
-            '        var __gb2_src = window.localStorage ? window.localStorage.getItem("graphbuilder2.bundle.', js_hash, '") : null;\n',
-            '        if (__gb2_src && __gb2_src.length > 100000) {\n',
-            '          __gb2_body_ran = true;\n',
-            '          (0, eval)(__gb2_src);\n',
-            '          if (window.GraphBuilder2) window.GraphBuilder2.__hash = "', js_hash, '";\n',
-            '        }\n',
-            '      } catch (_eE) {\n',
-            '        try { window.localStorage.setItem("graphbuilder2.bundle.evalBlocked", "1"); } catch (_eE2) {}\n',
-            '      }\n',
-            '      __gb2_engineOk = !!(window.GraphBuilder2 && window.GraphBuilder2.render && window.GraphBuilder2.__hash === "', js_hash, '");\n',
-            '    }\n',
-            '  }\n',
             '  if (!window.GraphBuilder2 || !window.GraphBuilder2.render) {\n',
-            # With a snapshot present the picture IS the feedback: show it
-            # alone and hide the host outright - the "Loading chart
-            # engine" note on top of a visible chart read as noise/alarm
-            # (Torry's 2nd field test), and on a live-but-warming machine
-            # the engine's re-ship replaces this whole DOM anyway. The
-            # note survives ONLY for snapshot-less pages (old files),
-            # where it is the sole feedback until the honest message.
-            '    try {\n',
-            '      var __gb2_snap0 = document.getElementById(__gb2_id + "-snap");\n',
-            '      var __gb2_hostHeal = document.getElementById(__gb2_id);\n',
-            '      if (__gb2_snap0) {\n',
-            '        __gb2_snap0.style.display = "block";\n',
-            '        if (__gb2_hostHeal) __gb2_hostHeal.style.display = "none";\n',
-            '      } else if (__gb2_hostHeal) {\n',
-            "        __gb2_hostHeal.innerHTML = '<div style=\"padding:24px 12px;color:#666;font:13px var(--gb2-ui-font);text-align:center;\">Loading chart engine…<span style=\"display:block;margin-top:6px;font-size:11.5px;color:#999;\">This resolves by itself in a few seconds. If it does not, please screenshot this and report it with your jamovi version.</span></div>';\n",
-            '      }\n',
-            '    } catch (_eH) {}\n',
-            # Staged confirmation (the caption claims "not installed
-            # here", so it must never flash on a live-but-warming
-            # machine): ~3 s when window.setOption never appeared (no
-            # live session exists without the bridge), else the 8 s
-            # worst case. Probe overrides: __gb2_mmFast / __gb2_mmDelay.
-            '    var __gb2_mmFin = function () { try {\n',
-            '      var __mmH = document.getElementById(__gb2_id);\n',
-            '      if (!__mmH || !__mmH.isConnected) return;\n',
-            '      if (window.GraphBuilder2 && window.GraphBuilder2.render) return;\n',
-            '      var __mmS = document.getElementById(__gb2_id + "-snap");\n',
-            '      if (__mmS) {\n',
-            '        __mmS.style.display = "block";\n',
-            '        var __mmC = __mmS.querySelector("[data-role=gb2-static-fallback-caption]");\n',
-            '        if (__mmC) __mmC.style.display = "block";\n',
-            '        try {\n',
-            '          var __mmA = __mmS.querySelector("[data-role=gb2-snap-save]");\n',
-            '          var __mmI = __mmS.querySelector("img");\n',
-            '          if (__mmA && __mmI && __mmA.getAttribute("href") === "#") __mmA.setAttribute("href", __mmI.getAttribute("src"));\n',
-            # Click feedback: the webview blocks downloads, so the Save
-            # link is a silent no-op here - reveal the explanatory note
-            # instead of dead silence. Listener-only (never serialized),
-            # so exported HTML keeps the plain working download.
-            '          if (__mmA && !__mmA.__gb2NoteWired) { __mmA.__gb2NoteWired = true; __mmA.addEventListener("click", function () { try { var __mmN = __mmS.querySelector("[data-role=gb2-snap-save-note]"); if (__mmN) __mmN.style.display = "block"; } catch (_eNt) {} }); }\n',
-            '        } catch (_eSv) {}\n',
-            '        __mmH.style.display = "none";\n',
-            '      } else {\n',
-            "        __mmH.innerHTML = '<div data-role=\"gb2-module-missing\" style=\"margin:10px;padding:12px 14px;max-width:620px;font-size:12.5px;line-height:1.55;color:#555;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;\"><b>This chart needs the Pandion Plots module.</b><br>It does not appear to be installed here, so the chart cannot be drawn. The data and chart settings are saved in this file: install Pandion Plots (github.com/torryscott/pandion, Releases) and reopen the file to see the chart. If Pandion Plots is installed, re-running the analysis will restore the chart.</div>';\n",
-            '      }\n',
-            '    } catch (_eMM) {} };\n',
-            '    try {\n',
-            '      setTimeout(function () { try { if (typeof window.setOption !== "function") __gb2_mmFin(); } catch (_eF1) {} },\n',
-            '                 (typeof window.__gb2_mmFast === "number" ? window.__gb2_mmFast : 3000));\n',
-            '      setTimeout(__gb2_mmFin, (typeof window.__gb2_mmDelay === "number" ? window.__gb2_mmDelay : 8000));\n',
-            '    } catch (_eMMArm) {}\n',
+            '    try { __gb2_armModuleMissing(); } catch (_eMM0) {}\n',
             '  }\n',
             '  if (!__gb2_engineOk) {\n',
             '    (function __gb2_poke(n) {\n',
@@ -2388,7 +2417,6 @@ graphbuilder2_html <- function(bars,
         js_bytes = if (bundle_mode == "inline") nchar(js_code) else 0L,
         bundle_mode = bundle_mode,
         bundle_reason = bundle_reason,
-        bundle_hash = js_hash,
         # Wall-clock anchor for the debug overlay's transport-gap line:
         # client Date.now() minus this ~= R marshal + jamovi engine
         # serialize + IPC + DOM insertion (same-machine clocks).
@@ -2434,7 +2462,6 @@ graphbuilder2_html <- function(bars,
         # parse independently) and upgrades the Layer A box.
         .gb2_diag_primer_script(widget_id_json),
         '<script>(function(){\n',
-        .gb2_self_capture_chunk(),
         'var __gb2_payload = ', payload_json, ';\n',
         'var __gb2_id = ', widget_id_json, ';\n',
         'var __gb2_r_timing = ', r_timing_json, ';\n',
@@ -2444,6 +2471,7 @@ graphbuilder2_html <- function(bars,
         # (incl. jamovi re-posts of the same run) - makes multi-delivery
         # churn visible on the overlay.
         'try { window.__gb2_deliveryCount = (window.__gb2_deliveryCount || 0) + 1; } catch (_eDc) {}\n',
+        .gb2_module_missing_chunk(),
         engine_chunk,
         'var __gb2_t1 = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();\n',
         # Mark this render AUTHORITATIVE (it carries R\'s recomputed payload).
@@ -2645,8 +2673,6 @@ graphbuilder2_html <- function(bars,
         '    var __gb2_em = __gb2_eh.querySelector("[data-role=gb2-diag-err-msg]");\n',
         '    if (__gb2_em) __gb2_em.textContent = __gb2_renderErr;\n',
         '    var __gb2_meta = "module v', mod_ver, ' | bundle: " + __gb2_r_timing.bundle_mode + (__gb2_r_timing.bundle_reason ? " (" + __gb2_r_timing.bundle_reason + ")" : "") + " | engine: " + ((typeof window !== "undefined" && window.GraphBuilder2) ? "loaded" : "absent");\n',
-        '    try { if (window.__gb2_bundleStoreDiag) __gb2_meta += " | store: " + window.__gb2_bundleStoreDiag; } catch (_eSd) {}\n',
-        '    try { if (window.localStorage && window.localStorage.getItem("graphbuilder2.bundle.evalBlocked")) __gb2_meta += " | evalBlocked"; } catch (_eEb) {}\n',
         '    try { __gb2_meta += " | " + navigator.userAgent; } catch (_eUa) {}\n',
         '    var __gb2_emeta = __gb2_eh.querySelector("[data-role=gb2-diag-err-meta]");\n',
         '    if (__gb2_emeta) __gb2_emeta.textContent = __gb2_meta;\n',
@@ -2684,16 +2710,11 @@ graphbuilder2_html <- function(bars,
         '        + (__gb2_r_timing.bundle_reason ? " - " + __gb2_r_timing.bundle_reason : "")\n',
         '        + (__gb2_body_ran ? " (engine ran)" : " (engine reused)"));\n',
         '    try { lines.push("R start->now:    " + (Math.round((Date.now() / 1000 - __gb2_r_timing.t_start_epoch) * 1000) / 1000) + " s (marshal+transport)"); } catch (_eGap) {}\n',
-        # Client-side cache state: diagnoses a handshake that never
-        # settles (bundle not stored, or the permanent evalBlocked
-        # inline fallback) without needing devtools on the machine.
+        # localStorage pressure: the bundle is no longer cached there
+        # (Aug 2026 audit), but undo persistence still shares the quota,
+        # so the total remains worth one glance.
         '    try {\n',
-        '      if (window.localStorage && __gb2_r_timing.bundle_hash) {\n',
-        '        var _dbgStored = window.localStorage.getItem("graphbuilder2.bundle." + __gb2_r_timing.bundle_hash);\n',
-        '        var _dbgEB = window.localStorage.getItem("graphbuilder2.bundle.evalBlocked");\n',
-        '        lines.push("Client cache:    " + (_dbgStored ? "bundle stored (" + Math.round(_dbgStored.length / 1024) + " KB)" : "bundle NOT stored")\n',
-        '            + (_dbgEB ? " / evalBlocked SET (eval banned - permanent inline)" : ""));\n',
-        '        if (window.__gb2_bundleStoreDiag) lines.push("Last store:      " + window.__gb2_bundleStoreDiag);\n',
+        '      if (window.localStorage) {\n',
         '        try {\n',
         '          var _dbgTot = 0;\n',
         '          for (var _dbgI = 0; _dbgI < window.localStorage.length; _dbgI++) {\n',
@@ -2864,7 +2885,7 @@ graphbuilder2_html <- function(bars,
 #   Layer B (inline in graphbuilder2_html's loader): try/catch around
 #     the render() invocation + a final else for "bundle ran but never
 #     defined the engine". Writes an immediate red box (module version,
-#     error + stack head, bundle mode/reason, store diag, evalBlocked,
+#     error + stack head, bundle mode/reason,
 #     UA) and re-throws ASYNCHRONOUSLY so devtools/pageerror probes
 #     still see the original exception. Dynamic strings go through
 #     textContent - exception messages can quote data-derived names.
@@ -3050,118 +3071,96 @@ graphbuilder2_html <- function(bars,
     )
 }
 
-# Self-source capture, spliced at the TOP of every script that carries
-# the store chunk. The store snippet must find the marker-wrapped
-# bundle text; production jamovi's results renderer executes our
-# script such that a document.getElementsByTagName("script") scan
-# cannot see it ("marker not found in 1 scripts", Torry's Jul 2026
-# field report - shadow DOM / discard-after-execute), so the script
-# captures its OWN source synchronously instead:
-#   1. document.currentScript.textContent (script-element execution,
-#      works inside shadow roots);
-#   2. String(arguments.callee) - the enclosing IIFE's source - when
-#      the code was eval'ed (currentScript null there);
-#   3. the old DOM scan survives in the store chunk as last resort.
-.gb2_self_capture_chunk <- function() {
+
+# The "this chart needs the module" fallback. Emitted for EVERY delivery
+# mode, because the case it exists for - a shared .omv opened where
+# Pandion is not installed - does not care which mode wrote the file.
+# It used to live only in the cached branch, so under the shipped
+# script-src default a module-less viewer sat on "Loading the chart
+# engine..." forever with no snapshot and no explanation (Aug 2026
+# audit). Self-guarding: every path returns early once the engine is
+# live, so it is inert on a healthy machine.
+.gb2_module_missing_chunk <- function() {
     paste0(
-        'var __gb2_selfText = "";\n',
-        'try { if (document.currentScript && document.currentScript.textContent) __gb2_selfText = document.currentScript.textContent; } catch (_eCS) {}\n',
-        'try { if (!__gb2_selfText && typeof arguments !== "undefined" && arguments.callee) __gb2_selfText = String(arguments.callee); } catch (_eCal) {}\n'
+'  var __gb2_armModuleMissing = function () {\n',
+        '  if (window.GraphBuilder2 && window.GraphBuilder2.render) return;\n',
+            # With a snapshot present the picture IS the feedback: show it
+            # alone and hide the host outright - the "Loading chart
+            # engine" note on top of a visible chart read as noise/alarm
+            # (Torry's 2nd field test), and on a live-but-warming machine
+            # the engine's re-ship replaces this whole DOM anyway. The
+            # note survives ONLY for snapshot-less pages (old files),
+            # where it is the sole feedback until the honest message.
+        '    try {\n',
+        '      var __gb2_snap0 = document.getElementById(__gb2_id + "-snap");\n',
+        '      var __gb2_hostHeal = document.getElementById(__gb2_id);\n',
+        '      if (__gb2_snap0) {\n',
+        '        __gb2_snap0.style.display = "block";\n',
+        '        if (__gb2_hostHeal) __gb2_hostHeal.style.display = "none";\n',
+        '      } else if (__gb2_hostHeal) {\n',
+            "        __gb2_hostHeal.innerHTML = '<div style=\"padding:24px 12px;color:#666;font:13px var(--gb2-ui-font);text-align:center;\">Loading chart engine…<span style=\"display:block;margin-top:6px;font-size:11.5px;color:#999;\">This resolves by itself in a few seconds. If it does not, please screenshot this and report it with your jamovi version.</span></div>';\n",
+        '      }\n',
+        '    } catch (_eH) {}\n',
+            # Staged confirmation (the caption claims "not installed
+            # here", so it must never flash on a live-but-warming
+            # machine): ~3 s when window.setOption never appeared (no
+            # live session exists without the bridge), else the 8 s
+            # worst case. Probe overrides: __gb2_mmFast / __gb2_mmDelay.
+        '    var __gb2_mmFin = function () { try {\n',
+        '      var __mmH = document.getElementById(__gb2_id);\n',
+        '      if (!__mmH || !__mmH.isConnected) return;\n',
+        '      if (window.GraphBuilder2 && window.GraphBuilder2.render) return;\n',
+        '      var __mmS = document.getElementById(__gb2_id + "-snap");\n',
+        '      if (__mmS) {\n',
+        '        __mmS.style.display = "block";\n',
+        '        var __mmC = __mmS.querySelector("[data-role=gb2-static-fallback-caption]");\n',
+        '        if (__mmC) __mmC.style.display = "block";\n',
+        '        try {\n',
+        '          var __mmA = __mmS.querySelector("[data-role=gb2-snap-save]");\n',
+        '          var __mmI = __mmS.querySelector("img");\n',
+        '          if (__mmA && __mmI && __mmA.getAttribute("href") === "#") __mmA.setAttribute("href", __mmI.getAttribute("src"));\n',
+            # Click feedback: the webview blocks downloads, so the Save
+            # link is a silent no-op here - reveal the explanatory note
+            # instead of dead silence. Listener-only (never serialized),
+            # so exported HTML keeps the plain working download.
+        '          if (__mmA && !__mmA.__gb2NoteWired) { __mmA.__gb2NoteWired = true; __mmA.addEventListener("click", function () { try { var __mmN = __mmS.querySelector("[data-role=gb2-snap-save-note]"); if (__mmN) __mmN.style.display = "block"; } catch (_eNt) {} }); }\n',
+        '        } catch (_eSv) {}\n',
+        '        __mmH.style.display = "none";\n',
+        '      } else {\n',
+            "        __mmH.innerHTML = '<div data-role=\"gb2-module-missing\" style=\"margin:10px;padding:12px 14px;max-width:620px;font-size:12.5px;line-height:1.55;color:#555;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;\"><b>This chart needs the Pandion Plots module.</b><br>It does not appear to be installed here, so the chart cannot be drawn. The data and chart settings are saved in this file: install Pandion Plots (github.com/torryscott/pandion, Releases) and reopen the file to see the chart. If Pandion Plots is installed, re-running the analysis will restore the chart.</div>';\n",
+        '      }\n',
+        '    } catch (_eMM) {} };\n',
+        '    try {\n',
+        '      setTimeout(function () { try { if (typeof window.setOption !== "function") __gb2_mmFin(); } catch (_eF1) {} },\n',
+        '                 (typeof window.__gb2_mmFast === "number" ? window.__gb2_mmFast : 3000));\n',
+        '      setTimeout(__gb2_mmFin, (typeof window.__gb2_mmDelay === "number" ? window.__gb2_mmDelay : 8000));\n',
+        '    } catch (_eMMArm) {}\n',
+        '  };\n'
     )
 }
 
-# Deferred (400 ms) localStorage store + clientBundleHash write-back.
-# Deferred so it never delays first paint. The hash write-back only
-# happens after a verified localStorage store, so a failed store
-# degrades to inline-every-render. The hash-tagged start marker
-# guarantees we never store a different version's bundle text under
-# this version's key. The marker literals are split
-# ("GB2_BUNDLE_" + "START...") so this snippet's own source can never
-# match its own search - searching the whole script text for an
-# intact literal would otherwise find the snippet itself (that bug
-# shipped a malformed bundle copy in the first cut).
-.gb2_store_chunk <- function(js_hash) {
+# Deferred (400 ms) clientBundleHash write-back. Deferred so it never
+# delays first paint, and gated on the engine actually being live.
+.gb2_hash_commit_chunk <- function(js_hash) {
     if (!nzchar(js_hash)) return('')
     paste0(
-        'try {\n',
-        '  if (typeof window !== "undefined" && window.localStorage) {\n',
-        # Every exit records WHY into window.__gb2_bundleStoreDiag (the
-        # iframe window survives deliveries), surfaced on the debug
-        # overlay's Client cache line - a store that silently never
-        # succeeds (Jul 2026 field bug) is diagnosable without devtools.
-        '    if (window.localStorage.getItem("graphbuilder2.bundle.evalBlocked")) {\n',
-        '      window.__gb2_bundleStoreDiag = "skipped: evalBlocked";\n',
-        '    } else {\n',
-        '    setTimeout(function () { try {\n',
-        '      var KEY = "graphbuilder2.bundle.', js_hash, '";\n',
-        '      var MARK = "/*GB2_BUNDLE_" + "START:', js_hash, '*/";\n',
-        '      var ENDM = "/*GB2_BUNDLE_" + "END:', js_hash, '*/";\n',
-        '      if (!window.localStorage.getItem(KEY)) {\n',
-        '        var txt = null, scs = null, selfN = 0, viaSelf = false;\n',
-        '        try {\n',
-        '          if (typeof __gb2_selfText === "string" && __gb2_selfText) {\n',
-        '            selfN = __gb2_selfText.length;\n',
-        '            var sa = __gb2_selfText.indexOf(MARK);\n',
-        '            if (sa >= 0) {\n',
-        '              var sb = __gb2_selfText.indexOf(ENDM, sa + MARK.length);\n',
-        '              if (sb > sa) { txt = __gb2_selfText.slice(sa + MARK.length, sb); viaSelf = true; }\n',
-        '            }\n',
-        '          }\n',
-        '        } catch (_eSf) {}\n',
-        '        if (!txt) {\n',
-        '          scs = document.getElementsByTagName("script");\n',
-        '          for (var i = 0; i < scs.length; i++) {\n',
-        '            var t = scs[i].textContent || "";\n',
-        '            var a = t.indexOf(MARK);\n',
-        '            if (a >= 0) {\n',
-        '              var b = t.indexOf(ENDM, a + MARK.length);\n',
-        '              if (b > a) { txt = t.slice(a + MARK.length, b); break; }\n',
-        '            }\n',
-        '          }\n',
-        '        }\n',
-        '        if (txt && txt.length > 100000) {\n',
-        '          for (var j = window.localStorage.length - 1; j >= 0; j--) {\n',
-        '            var k = window.localStorage.key(j);\n',
-        '            if (k && k.indexOf("graphbuilder2.bundle.") === 0 && k !== KEY\n',
-        '                && k !== "graphbuilder2.bundle.evalBlocked")\n',
-        '              window.localStorage.removeItem(k);\n',
-        '          }\n',
-        # The bundle is structural; undo LS persistence is a
-        # nice-to-have (the in-memory undo stack survives). On quota
-        # pressure, prune our own bulky keys and retry ONCE.
-        '          try {\n',
-        '            window.localStorage.setItem(KEY, txt);\n',
-        '            window.__gb2_bundleStoreDiag = "stored (from " + (viaSelf ? "self-source" : "dom scan") + ")";\n',
-        '          } catch (_eQ) {\n',
-        '            try {\n',
-        '              window.localStorage.removeItem("graphbuilder2.undo.v2");\n',
-        '              window.localStorage.removeItem("graphbuilder2.undo.v1");\n',
-        '              window.localStorage.setItem(KEY, txt);\n',
-        '              window.__gb2_bundleStoreDiag = "stored after pruning undo (" + (_eQ && _eQ.name ? _eQ.name : "error") + ")";\n',
-        '            } catch (_eQ2) {\n',
-        '              window.__gb2_bundleStoreDiag = "store FAILED: " + (_eQ2 && _eQ2.name ? _eQ2.name : "error");\n',
-        '            }\n',
-        '          }\n',
-        '        } else if (txt) {\n',
-        '          window.__gb2_bundleStoreDiag = "bundle text too short: " + txt.length;\n',
-        '        } else {\n',
-        '          window.__gb2_bundleStoreDiag = "marker not found (self-source " + selfN + " chars, " + (scs ? scs.length : 0) + " scripts)";\n',
-        '        }\n',
-        '      } else {\n',
-        '        window.__gb2_bundleStoreDiag = "already stored";\n',
-        '      }\n',
-        '      if (window.localStorage.getItem(KEY) && typeof window.setOption === "function") {\n',
-        '        if (typeof window.__gb2_setOption === "function")\n',
-        '          window.__gb2_setOption("clientBundleHash", "', js_hash, '");\n',
-        '        else window.setOption("clientBundleHash", "', js_hash, '");\n',
-        '      }\n',
-        # Release the captured self-source (~1.9 MB) once the store has
-        # run - the timeout closure would otherwise pin it until GC.
-        '      try { __gb2_selfText = null; } catch (_eRel) {}\n',
-        '    } catch (_eS) { try { window.__gb2_bundleStoreDiag = "store threw: " + (_eS && _eS.name ? _eS.name : "error"); } catch (_eS2) {} } }, 400);\n',
-        '    }\n',
+        # Tell R the engine for THIS bundle is live in this window, so the
+        # next delivery ships the ~20 KB payload+loader instead of the
+        # ~2 MB inline bundle. Deferred so the commit lands after the
+        # bundle has actually defined itself, and gated on the engine
+        # really being there - a hash committed for an engine that never
+        # loaded would cost a wasted round trip on every later render.
+        # (Before the Aug 2026 audit this also wrote the bundle text into
+        # localStorage for a cross-window eval; that path is gone - see
+        # the cached branch in graphbuilder2_html for why.)
+        'try { setTimeout(function () { try {\n',
+        '  if (window.GraphBuilder2 && window.GraphBuilder2.render\n',
+        '      && typeof window.setOption === "function") {\n',
+        '    if (typeof window.__gb2_setOption === "function")\n',
+        '      window.__gb2_setOption("clientBundleHash", "', js_hash, '");\n',
+        '    else window.setOption("clientBundleHash", "', js_hash, '");\n',
         '  }\n',
-        '} catch (_eS0) {}\n'
+        '} catch (_eS) {} }, 400); } catch (_eS0) {}\n'
     )
 }
 
@@ -3171,7 +3170,7 @@ graphbuilder2_html <- function(bars,
 #                                   self$options$clientBundleHash))
 # While the user is still choosing variables, this ships the widget
 # bundle behind the SAME hash handshake as a real render (gated body +
-# localStorage store + clientBundleHash write-back) but with no payload
+# clientBundleHash write-back) but with no payload
 # and no render() call. By the time the first variable lands, the hash
 # has usually round-tripped and the first data render takes the ~16 KB
 # cached branch instead of paying the 1.9 MB inline ship + parse +
@@ -3204,10 +3203,9 @@ gb2_engine_boot_html <- function(message_html, client_bundle_hash = "") {
             # sees it before ever adding a variable.
             .gb2_min_missing_note_html(),
             '<script>(function(){\n',
-            .gb2_self_capture_chunk(),
             'var __gb2_body_ran = false;\n',
             .gb2_engine_chunk_inline(js_hash, js_code),
-            .gb2_store_chunk(js_hash),
+            .gb2_hash_commit_chunk(js_hash),
             '})();</script>'
         )
     }, error = function(e) message_html)

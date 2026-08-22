@@ -178,7 +178,12 @@
     if (!identical(as.character(action$machineId), as.character(lib$machineId))) {
         return(lib)
     }
+    # Length-1 or nothing. A JSON null yields numeric(0) and a JSON array
+    # yields a vector; both make the is.finite() test below length 0 or 2,
+    # and `if` then THROWS ("argument is of length zero" / "the condition
+    # has length > 1") instead of refusing the action (Aug 2026 audit).
     ts <- suppressWarnings(as.numeric(action$timestamp))
+    if (length(ts) != 1L) ts <- NA_real_
     if (!is.finite(ts) || ts <= as.numeric(lib$lastAppliedTs)) {
         return(lib)
     }
@@ -196,6 +201,13 @@
                 character(1))
         }
         cols <- cols[!is.na(cols) & nzchar(cols)]
+        # Gate at the door: these strings are written to palettes.json and
+        # then shipped in every later payload, where the palette flyout
+        # builds swatch markup from them. The action can arrive from a
+        # shared .omv, so an ungated colour was a persistent, executing
+        # injection (Aug 2026 audit round 3).
+        cols <- vapply(cols, gb_safe_color, character(1), USE.NAMES = FALSE)
+        cols <- cols[nzchar(cols)]
         if (length(cols) == 0) return(lib)
         lib$palettes[[name]] <- as.list(cols)
     } else if (identical(kind, "delete")) {
@@ -243,12 +255,27 @@
                 character(1))
         }
         cols <- cols[!is.na(cols) & nzchar(cols)]
+        # Gate at the door: these strings are written to palettes.json and
+        # then shipped in every later payload, where the palette flyout
+        # builds swatch markup from them. The action can arrive from a
+        # shared .omv, so an ungated colour was a persistent, executing
+        # injection (Aug 2026 audit round 3).
+        cols <- vapply(cols, gb_safe_color, character(1), USE.NAMES = FALSE)
+        cols <- cols[nzchar(cols)]
         if (length(cols) == 0) return(lib)
         lib$palettes[[name]] <- as.list(cols)
         lib$defaultPalette <- paste0("saved:", name)
     } else if (identical(kind, "replace")) {
         repl <- action$palettes
-        if (!is.list(repl)) return(lib)
+        # A NAMED list only. A JSON array parses to a list with no names,
+        # so it passed is.list(), contributed nothing to the loop below,
+        # and the assignment at the end then wiped every saved palette -
+        # and wrote the empty library straight to disk (Aug 2026 audit).
+        # Replacing with nothing is never a legitimate request: the caller
+        # deletes by name.
+        if (!is.list(repl) || length(repl) == 0L ||
+            is.null(names(repl)) || !any(nzchar(names(repl))))
+            return(lib)
         new_pals <- setNames(list(), character(0))
         for (nm in names(repl)) {
             if (!is.character(nm) || !nzchar(nm)) next
@@ -262,9 +289,18 @@
                     error = function(e) character(0))
             }
             cols <- cols[!is.na(cols) & nzchar(cols)]
+            # Gate at the door: these strings are written to palettes.json and
+            # then shipped in every later payload, where the palette flyout
+            # builds swatch markup from them. The action can arrive from a
+            # shared .omv, so an ungated colour was a persistent, executing
+            # injection (Aug 2026 audit round 3).
+            cols <- vapply(cols, gb_safe_color, character(1), USE.NAMES = FALSE)
+            cols <- cols[nzchar(cols)]
             if (length(cols) == 0) next
             new_pals[[nm]] <- as.list(cols)
         }
+        # Every entry unusable is the same request as an empty one.
+        if (length(new_pals) == 0L) return(lib)
         lib$palettes <- new_pals
     } else {
         return(lib)
