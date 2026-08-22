@@ -973,7 +973,14 @@ graphbuilder2_html <- function(bars,
         for (i in seq_along(x)) {
             r <- x[[i]]
             if (!is.list(r)) next
+            # The id is interpolated into id="..." / for="..." attributes in
+            # the bracket panel, so it is an output context, not just a key.
+            # It is generated client-side as a short token, so an allowlist
+            # costs nothing and closes the attribute breakout (Aug 2026
+            # audit round 4).
             id_v <- if (!is.null(r$id)) as.character(r$id) else ""
+            if (length(id_v) != 1L || is.na(id_v) ||
+                !grepl("^[A-Za-z0-9_:.-]{1,64}$", id_v)) id_v <- ""
             kind_v <- if (!is.null(r$kind)) as.character(r$kind) else "text"
             if (!nzchar(id_v) || !nzchar(kind_v)) next
             entry <- list(

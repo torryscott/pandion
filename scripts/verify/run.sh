@@ -127,6 +127,15 @@ if Rscript "$HERE/secgate-check.R"; then :; else
     if [ "$rc" -eq 2 ]; then echo "   skipped: jsonlite not available"; else exit "$rc"; fi
 fi
 
+echo "== JSON-string stores and annotation ids cannot inject"
+if GB2_STOREGATE_OUT="$OUT-storegate" GB2_BUNDLE="$BUNDLE" \
+       Rscript "$HERE/storegate-render.R"; then
+    GB2_STOREGATE_OUT="$OUT-storegate" GB2_BUNDLE="$BUNDLE" node "$HERE/storegate-check.mjs"
+else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then echo "   skipped: jmvcore not available"; else exit "$rc"; fi
+fi
+
 echo "== saved palette/style libraries cannot inject through a colour"
 if GB2_XSS_OUT="$OUT-libgate" R_USER_CONFIG_DIR="$OUT-libgate-cfg" \
        Rscript "$HERE/libgate-poison.R" &&

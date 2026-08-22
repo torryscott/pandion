@@ -3598,8 +3598,12 @@
         function _gb2SanitizeColors(x, name) {
             if (x && typeof x === "object") {
                 if (Array.isArray(x)) {
+                    // Keep the parent's name for the members: an array under a
+                    // colour-ish key is a list OF colours (the palette library
+                    // is {name: [colours]}, where the member name would
+                    // otherwise be the user's palette title and gate nothing).
                     for (var _i = 0; _i < x.length; _i++)
-                        x[_i] = _gb2SanitizeColors(x[_i], name);
+                        x[_i] = _gb2SanitizeColors(x[_i], _gb2ColorishKey(name) ? "color" : name);
                 } else {
                     for (var _k in x) {
                         if (!Object.prototype.hasOwnProperty.call(x, _k)) continue;
@@ -26466,7 +26470,8 @@
         // outlineColor,outlineWidth}; shape stays in xyPointShapes. Resolvers
         // fall back to the chart-wide xyPoint* values.
         function _psGetGroupStyles() {
-            try { var o = JSON.parse(data.xyPointGroupStyles || "{}"); return (o && typeof o === "object") ? o : {}; } catch (_e) { return {}; }
+            // Same JSON-string store shape as _xyGSGet; scrub on parse.
+            try { var o = JSON.parse(data.xyPointGroupStyles || "{}"); if (!o || typeof o !== "object") return {}; try { _gb2SanitizeColors(o, ""); } catch (_eSp) {} return o; } catch (_e) { return {}; }
         }
         function _psGroupField(group, field) {
             if (!group) return undefined;
@@ -26511,7 +26516,12 @@
         // Generic per-group-style JSON store (data[storeKey] = {group:{field:val}}).
         // Backs the ellipse / rug / marginal "this group vs all" overrides.
         function _xyGSGet(storeKey) {
-            try { var raw = data[storeKey]; var o = (typeof raw === "string" && raw.length) ? JSON.parse(raw) : {}; return (o && typeof o === "object") ? o : {}; } catch (_e) { return {}; }
+            // Scrub on the way OUT of the blob: this store rides chartSpec as
+            // a JSON STRING under a key whose name is not colour-ish, so the
+            // payload walkers never reach the colours inside it. Once parsed
+            // the child keys really are color/outlineColor, so the ordinary
+            // name rule applies (Aug 2026 audit round 4).
+            try { var raw = data[storeKey]; var o = (typeof raw === "string" && raw.length) ? JSON.parse(raw) : {}; if (!o || typeof o !== "object") return {}; try { _gb2SanitizeColors(o, ""); } catch (_eSg) {} return o; } catch (_e) { return {}; }
         }
         function _xyGSField(storeKey, group, field) {
             if (group == null) return undefined; var o = _xyGSGet(storeKey); var g = o[String(group)]; return (g && g[field] != null) ? g[field] : undefined;
@@ -72320,7 +72330,7 @@
                 var n = Math.min(colors.length, max);
                 var out = "";
                 for (var i = 0; i < n; i++) {
-                    out += '<span style="display:inline-block;width:' + size + 'px;height:' + size + 'px;background:' + colors[i] + ';border:1px solid rgba(0,0,0,0.12);border-radius:1px;"></span>';
+                    out += '<span style="display:inline-block;width:' + size + 'px;height:' + size + 'px;background:' + _gb2CssColSafe(colors[i]) + ';border:1px solid rgba(0,0,0,0.12);border-radius:1px;"></span>';
                 }
                 return out;
             }

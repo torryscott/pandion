@@ -179,6 +179,26 @@ ok(!is.null(sopts) && !grepl("<img", as.character(sopts$barColor), fixed = TRUE)
    "a hostile colour never reaches a saved style")
 ok(identical(sopts$barOpacity, 0.9), "a non-colour option in the same style is untouched")
 
+# ---- JSON-string stores and the annotation id --------------------------
+# Five xy stores persist as a JSON STRING under a key whose name is not
+# colour-ish, so the name-rule walker passed the whole blob through while
+# the client parsed the colours back out of it (Aug 2026 audit round 4).
+HJ <- '{"G1":{"color":"red;\\"><img src=x onerror=alert(1)>","outlineColor":"#2d5c94"}}'
+for (k in c("xyPointGroupStyles", "xyEllipseGroupStyles", "xyRugGroupStyles",
+            "xyMarginalGroupStyles", "xyDensity2DGroupStyles")) {
+    out <- gb_sanitize_colors(HJ, k)
+    ok(!grepl("<img", out, fixed = TRUE), paste0(k, ": nested colour gated"))
+    ok(grepl("#2d5c94", out, fixed = TRUE),
+       paste0(k, ": the legitimate sibling colour survives"))
+}
+ok(identical(gb_sanitize_colors('{"G1":{"color":"#111111"}}', "xyPointGroupStyles"),
+             '{"G1":{"color":"#111111"}}'),
+   "a clean JSON store is returned byte-identical")
+ok(identical(gb_sanitize_colors("", "xyPointGroupStyles"), ""),
+   "an empty JSON store is untouched")
+ok(identical(gb_sanitize_colors("not json", "xyPointGroupStyles"), "not json"),
+   "an unparseable store degrades rather than throwing")
+
 # ---- export request: the staleness window ------------------------------
 # This gate is why a crafted .omv cannot reach the file-writing code at
 # all: a replayed request carries an old (or absent, or array) id and must

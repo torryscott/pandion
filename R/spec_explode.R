@@ -72,7 +72,29 @@ gb_spec_color_name <- function(name) {
     nzchar(name) && (grepl("color", name, ignore.case = TRUE) ||
                      name %in% .gb2_color_extras)
 }
+# A handful of per-group stores persist as a JSON STRING rather than a
+# list, so the name rule never sees the colour keys inside them: the walker
+# is handed one long string under a key like "xyEllipseGroupStyles", which
+# is not colour-ish, and passes it straight through. The client then parses
+# it back out and concatenates the colours into style attributes. Parse,
+# walk, re-serialise - and only when something actually changed, so a
+# legitimate blob stays byte-identical and the echo still hash-skips.
+.gb2_json_color_stores <- c(
+    "xyPointGroupStyles", "xyEllipseGroupStyles", "xyRugGroupStyles",
+    "xyMarginalGroupStyles", "xyDensity2DGroupStyles")
+gb_sanitize_json_store <- function(v) {
+    if (!is.character(v) || length(v) != 1L || is.na(v) || !nzchar(v)) return(v)
+    parsed <- tryCatch(jsonlite::fromJSON(v, simplifyVector = FALSE),
+                       error = function(e) NULL)
+    if (!is.list(parsed)) return(v)
+    clean <- gb_sanitize_colors(parsed)
+    if (identical(clean, parsed)) return(v)
+    tryCatch(as.character(jsonlite::toJSON(clean, auto_unbox = TRUE,
+                                           digits = NA)),
+             error = function(e) "")
+}
 gb_sanitize_colors <- function(x, name = "") {
+    if (name %in% .gb2_json_color_stores) return(gb_sanitize_json_store(x))
     if (is.list(x)) {
         nm <- names(x)
         for (i in seq_along(x)) {
