@@ -59,7 +59,7 @@ for (let g = 0; g < GROUPS.length; g++) {
     for (const t of entries) {
         const sym = t.y && t.y !== t.n ? ` <span style="color:#666;font-weight:400">(${esc(t.y)})</span>` : '';
         const mods = Array.isArray(t.m) && t.m.length
-            ? `<span style="color:#8a8a8a;font-size:.85em"> · ${esc(t.m.join(', '))}</span>` : '';
+            ? `<span style="color:#666;font-size:.85em"> · ${esc(t.m.join(', '))}</span>` : '';
         out.push('<div class="glossentry" style="margin:0 0 14px">');
         out.push(`<p style="margin:10px 0 2px"><b>${esc(t.n)}</b>${sym}${mods}</p>`);
         out.push(`<p style="margin:2px 0">${esc(t.b)}</p>`);
