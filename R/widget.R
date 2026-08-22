@@ -38,26 +38,41 @@ gb2_script_src_on <- function() {
 # before the replacement is finished.
 #
 # So each half is held behind its own switch, defaulting to "not yet".
-# Flip one to TRUE (and cut a release) once the jamovi-side replacement
-# has actually been seen working. They are separate because they arrive
-# separately: the resize handles are Damo's work, the native save comes
-# with the Svg element itself.
+# Flip one's ready_default to TRUE (and cut a release) once the
+# jamovi-side replacement has actually been seen working. They are
+# separate because they arrive separately: the resize handles are Damo's
+# work, the native save comes with the Svg element itself.
+#
+# Trying one BEFORE that release needs a switch that works in a real
+# installation, and an env var is not it - same reason gb2_script_src_on
+# above uses a file: jamovi strips inherited env at the Electron->server
+# spawn, so GB2_HANDOVER_* reaches harnesses and probes but never a
+# running jamovi. Without the flag file the only way to see the handover
+# against a live build is to edit this line and rebuild, which is not
+# something we can ask jamovi's own people to do when they want to test
+# their half against ours. So:
+#   touch ~/.plotstudio-handover-resize   # stand our grip down
+#   rm ~/.plotstudio-handover-resize      # take it back
+# The env var still wins when set, so a harness can force either state.
 #
 # The exact-size Sizing panel in Chart settings is deliberately NOT
 # behind either switch. It is the floor: whatever else stands down, a
 # user can always type a size.
-.gb2_handover_on <- function(env_var, ready_default) {
+.gb2_handover_on <- function(env_var, flag_file, ready_default) {
     v <- tolower(trimws(Sys.getenv(env_var)))
     if (v %in% c("1", "true", "yes", "on")) return(TRUE)
     if (v %in% c("0", "false", "no", "off")) return(FALSE)
+    if (file.exists(path.expand(flag_file))) return(TRUE)
     isTRUE(ready_default)
 }
 # Damo's resize handles replace our corner grip.
 gb2_handover_resize <- function()
-    .gb2_handover_on("GB2_HANDOVER_RESIZE", FALSE)
+    .gb2_handover_on("GB2_HANDOVER_RESIZE",
+                     "~/.plotstudio-handover-resize", FALSE)
 # jamovi's native right-click save replaces our Export button.
 gb2_handover_export <- function()
-    .gb2_handover_on("GB2_HANDOVER_EXPORT", FALSE)
+    .gb2_handover_on("GB2_HANDOVER_EXPORT",
+                     "~/.plotstudio-handover-export", FALSE)
 
 # Shared script-src wiring for every chart analysis. The raw binding is
 # intentional: jmvcore's setScripts() helper double-prefixes the package name

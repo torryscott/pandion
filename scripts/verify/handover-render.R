@@ -40,3 +40,39 @@ if (res || exp) {
     quit(status = 1)
 }
 cat("default: both handovers pending (module keeps its own controls)\n")
+
+# ---- The switch has to work where it will actually be thrown ----------
+# An env var reaches a harness but never a running jamovi (it strips
+# inherited env at the Electron->server spawn), so the flag file is the
+# only route a person can use to try the handover against a live build.
+# HOME is redirected first: this probe must never touch the real one.
+real_home <- Sys.getenv("HOME")
+tmp_home <- file.path(tempdir(), "handover-home")
+dir.create(tmp_home, showWarnings = FALSE, recursive = TRUE)
+on.exit(Sys.setenv(HOME = real_home), add = TRUE)
+Sys.setenv(HOME = tmp_home)
+stopifnot(identical(path.expand("~"), tmp_home))   # else we would write to the real home
+for (v in c("GB2_HANDOVER_RESIZE", "GB2_HANDOVER_EXPORT")) Sys.unsetenv(v)
+
+rz <- file.path(tmp_home, ".plotstudio-handover-resize")
+ex <- file.path(tmp_home, ".plotstudio-handover-export")
+say <- function(label, ok) {
+    cat(if (ok) "  ok   " else "  FAIL ", label, "\n", sep = "")
+    if (!ok) quit(status = 1)
+}
+say("clean home: both pending",
+    !gb2_handover_resize() && !gb2_handover_export())
+invisible(file.create(rz))
+say("resize flag stands the grip down, on its own",
+    gb2_handover_resize() && !gb2_handover_export())
+invisible(file.create(ex))
+say("export flag stands the button down too", gb2_handover_export())
+# The env var still wins, so a harness can force either state back.
+Sys.setenv(GB2_HANDOVER_RESIZE = "0")
+say("an explicit env off beats the flag file", !gb2_handover_resize())
+Sys.unsetenv("GB2_HANDOVER_RESIZE")
+unlink(c(rz, ex))
+say("removing the flags takes both controls back",
+    !gb2_handover_resize() && !gb2_handover_export())
+Sys.setenv(HOME = real_home)
+cat("handover switches: reachable in a real installation, off by default\n")
