@@ -5282,6 +5282,7 @@
     var xml = new XMLSerializer();
     var chartClone = chart.cloneNode(true);
     stripHoverFromClone(chartClone);
+    stripEditorChromeFromClone(chartClone);
     chartClone.removeAttribute("tabindex");
     chartClone.removeAttribute("aria-label");
     chartClone.setAttribute("x", "0");
@@ -5474,6 +5475,21 @@
   // throughout the engine; persistent styling uses the SVG filter ATTRIBUTE
   // instead, so removing inline brightness is exact and touches nothing
   // else. Done on the CLONE, so the live chart is never disturbed.
+  // Kept-picture scrub (t4-230): a page kept while a chart part was
+  // SELECTED baked the dashed selection box (and any drag handles) into
+  // the page image. Strip the transient editor chrome; the stats rings
+  // ride in [data-role="stats-link-halo"], which is not in the transient
+  // list, so "the chart, rings and statistics as one page" is untouched.
+  function stripEditorChromeFromClone(clone) {
+    try {
+      var kill = clone.querySelectorAll(SNAP_STRIP_TRANSIENT);
+      for (var i = 0; i < kill.length; i++)
+        if (kill[i].parentNode) kill[i].parentNode.removeChild(kill[i]);
+      snapParkChrome(clone);
+      snapRestoreHover(clone);
+      snapNormalizeAxes(clone);
+    } catch (e) {}
+  }
   function stripHoverFromClone(clone) {
     try {
       var hot = clone.querySelectorAll('[style*="brightness"]');
@@ -5933,6 +5949,7 @@
                        chart.getBoundingClientRect().height);
     var clone = chart.cloneNode(true);
     stripHoverFromClone(clone);
+    stripEditorChromeFromClone(clone);
     clone.removeAttribute("tabindex");
     clone.removeAttribute("aria-label");
     if (!clone.getAttribute("viewBox"))
@@ -8711,6 +8728,125 @@
   var SNAP_STRIP = '[data-ov],[data-role^="sel-halo"],' +
     '[data-role="stats-link-halo"],[data-role="anatomy-overlay"],' +
     '[data-role="anatomy-capture"],[data-role="draw-capture"],.gb2-halo-union';
+  // Editor chrome that exists ONLY while something is selected or mid-
+  // gesture (t4-230, Torry's "kept page says the chart changed when I only
+  // clicked around panels"): the engine's five indicator groups are
+  // per-render FIXTURES (always in the svg, empty at rest), so the rule
+  // strips their CHILDREN and keeps the group nodes - an at-rest capture
+  // serializes byte-for-byte as it always did, which is what keeps every
+  // healthy already-kept page reading "unchanged". The element roles below
+  // the groups are absent at rest, so whole-element removal is equally
+  // byte-neutral. The list mirrors the engine's own export strip
+  // (_gb2HarvestClone) minus the always-present nodes.
+  // Audited against the engine's creation sites (not its export list -
+  // that list also strips PERSISTENT affordances like the pie's per-seam
+  // grab lines, which the snapshot must keep for byte-compatibility):
+  // the five indicator groups and alignment-guides are per-render
+  // fixtures (children-strip), refline/ann-rot handles and the
+  // data-point ring exist only while selected (whole-strip), and the
+  // shape rotate-handle is a hidden fixture whose children persist
+  // (parked below, never stripped).
+  var SNAP_STRIP_TRANSIENT =
+    '[data-role="inspector-indicator"] > *,' +
+    '[data-role="inspector-indicator-back"] > *,' +
+    '[data-role="inspector-indicator-under"] > *,' +
+    '[data-role="inspector-bar-glow"] > *,' +
+    '[data-role="selection-group"] > *,' +
+    '[data-role="alignment-guides"] > *,' +
+    '[data-role="data-point-selected"],' +
+    '[data-role="refline-halo"],[data-role="refline-handle"],' +
+    '[data-role="ann-rot-line"],[data-role="ann-rot-handle"]';
+  // Always-present chrome a PAST hover leaves fingerprints on: the shared
+  // text-hover rect and the marquee are repositioned via x/y/width/height
+  // and then merely display:none-d, and the fast-layer halo keeps its last
+  // cx/cy - so a chart that was EVER hovered serialized differently from
+  // one that never was. Reset them to their as-created shape.
+  function snapParkChrome(clone) {
+    var roles = ["hover-highlight", "marquee", "xy-fast-halo"];
+    for (var i = 0; i < roles.length; i++) {
+      var els = clone.querySelectorAll('[data-role="' + roles[i] + '"]');
+      for (var j = 0; j < els.length; j++) {
+        var el = els[j];
+        el.removeAttribute("x"); el.removeAttribute("y");
+        el.removeAttribute("width"); el.removeAttribute("height");
+        el.removeAttribute("cx"); el.removeAttribute("cy");
+        el.removeAttribute("transform");
+        el.style.display = "none";
+      }
+    }
+    // The shape rotate-handle is a hidden fixture whose rh-line/rh-circle
+    // children keep their last position after a use; reset them to their
+    // as-created attribute set.
+    var rh = clone.querySelectorAll('[data-role="rotate-handle"]');
+    for (var r = 0; r < rh.length; r++) {
+      rh[r].removeAttribute("transform");
+      rh[r].style.display = "none";
+      var kids = rh[r].querySelectorAll("*");
+      for (var q = 0; q < kids.length; q++) {
+        var kd = kids[q];
+        kd.removeAttribute("x1"); kd.removeAttribute("y1");
+        kd.removeAttribute("x2"); kd.removeAttribute("y2");
+        kd.removeAttribute("cx"); kd.removeAttribute("cy");
+        kd.removeAttribute("transform");
+      }
+    }
+  }
+  // Attribute-based hover mutations (line thicken, rug tick growth, the
+  // raised fill-opacity) stash their pre-hover value in data-hover-* /
+  // data-base-* attributes; restore from the stash and drop it, exactly
+  // as the engine's own export harvest does. At rest no stash exists, so
+  // this is byte-neutral too.
+  var SNAP_HOVER_PAIRS = [
+    ["data-hover-base-width", "stroke-width"],
+    ["data-hover-base-op", "stroke-opacity"],
+    ["data-hover-base-x2", "x2"],
+    ["data-hover-base-y2", "y2"],
+    ["data-hover-fill0", "fill"],
+    ["data-base-fill-opacity", "fill-opacity"],
+    ["data-orig-stroke-width", "stroke-width"]
+  ];
+  // The axis-line hover thicken writes stroke-width directly (rest x 2,
+  // no stash), so a capture taken with the pointer parked on an axis -
+  // exactly where it rests after clicking the axis to style it - baked
+  // the doubled width in. The rest width is fully determined by the
+  // payload (the chartSpec key, else the engine default 1.5), so the
+  // clone is normalized to it unconditionally: a no-op on unhovered
+  // captures, the exact heal on hovered ones.
+  function snapNormalizeAxes(clone) {
+    var pay = LAST_RENDER_PAYLOAD || {};
+    var spec = parseSpec(pay.chartSpec);
+    function restW(key) {
+      // The engine's exact resolution rule (graphbuilder2.js ~32824):
+      // a number >= 0 is honored - zero means a deliberately hidden
+      // stroke and must survive - anything else falls to 1.5.
+      var v = (typeof spec[key] === "number") ? spec[key]
+        : (typeof pay[key] === "number" ? pay[key] : null);
+      return (typeof v === "number" && isFinite(v) && v >= 0) ? v : 1.5;
+    }
+    var yW = restW("yAxisThickness"), xW = restW("xAxisThickness");
+    var ys = clone.querySelectorAll('[data-role="y-axis-line"]');
+    for (var i = 0; i < ys.length; i++)
+      ys[i].setAttribute("stroke-width", String(yW));
+    var xs = clone.querySelectorAll('[data-role="x-axis-line"]');
+    for (var j = 0; j < xs.length; j++)
+      xs[j].setAttribute("stroke-width", String(xW));
+  }
+  function snapRestoreHover(clone) {
+    var sel = SNAP_HOVER_PAIRS.map(function (p) {
+      return "[" + p[0] + "]";
+    }).join(",");
+    var els = clone.querySelectorAll(sel);
+    for (var i = 0; i < els.length; i++) {
+      for (var k = 0; k < SNAP_HOVER_PAIRS.length; k++) {
+        var stash = SNAP_HOVER_PAIRS[k][0], attr = SNAP_HOVER_PAIRS[k][1];
+        if (!els[i].hasAttribute(stash)) continue;
+        var was = els[i].getAttribute(stash);
+        if (was === "" || was === null) els[i].removeAttribute(attr);
+        else els[i].setAttribute(attr, was);
+        els[i].removeAttribute(stash);
+      }
+    }
+  }
   // Shared by snapshots and the t4-33 card previews: a chrome-stripped,
   // SELF-CONTAINED svg clone. The id prefixing is load-bearing - the engine
   // stamps the SAME ids on every render, and url(#id) resolves
@@ -8719,9 +8855,12 @@
   function svgSelfContainedClone(best, pre) {
     var w = best.clientWidth, hgt = best.clientHeight;
     var clone = best.cloneNode(true);
-    var kill = clone.querySelectorAll(SNAP_STRIP);
+    var kill = clone.querySelectorAll(SNAP_STRIP + "," + SNAP_STRIP_TRANSIENT);
     for (var k = 0; k < kill.length; k++)
-      kill[k].parentNode.removeChild(kill[k]);
+      if (kill[k].parentNode) kill[k].parentNode.removeChild(kill[k]);
+    snapParkChrome(clone);
+    snapRestoreHover(clone);
+    snapNormalizeAxes(clone);
     clone.removeAttribute("tabindex");
     clone.removeAttribute("aria-label");
     // The snapshot has to hash the same whether the pointer is on the
@@ -8742,16 +8881,40 @@
       if (css) styled[sv].setAttribute("style", css);
       else styled[sv].removeAttribute("style");
     }
-    var based = clone.querySelectorAll("[data-base-fill-opacity]");
-    for (var bv = 0; bv < based.length; bv++)
-      based[bv].removeAttribute("data-base-fill-opacity");
+    // (data-base-fill-opacity is restored-then-dropped by
+    // snapRestoreHover above - the old remove-the-stash-only pass left
+    // the hover-raised fill-opacity itself baked into the capture.)
     // Same growth rule as the chart export: a part dragged outside the
     // canvas belongs to the figure, so the layout panel carries it too.
     // Measured on the LIVE element (`best`) - the clone is detached and has
     // no layout. Identical to the old "0 0 w h" whenever nothing is
     // outside, which keeps every ordinary snapshot byte-for-byte the same.
-    var snapBox = exportContentBox(best, best.getAttribute("viewBox"),
-                                   w, hgt);
+    // Editor chrome is HIDDEN for the measurement (t4-230): getBBox unions
+    // everything rendered, so a selection box poking past the canvas grew
+    // the recorded viewBox even though the box itself was stripped from
+    // the clone - the capture's geometry then disagreed with an at-rest
+    // capture of the identical chart. display:none excludes an element
+    // from getBBox; the prior inline value is put back exactly.
+    var hideSel = SNAP_STRIP + "," + SNAP_STRIP_TRANSIENT +
+      ',[data-role="hover-highlight"],[data-role="marquee"],' +
+      '[data-role="xy-fast-halo"]';
+    var hid = [], hidWas = [];
+    try {
+      var toHide = best.querySelectorAll(hideSel);
+      for (var hv = 0; hv < toHide.length; hv++) {
+        hid.push(toHide[hv]);
+        hidWas.push(toHide[hv].style.display);
+        toHide[hv].style.display = "none";
+      }
+    } catch (eHide) {}
+    var snapBox;
+    try {
+      snapBox = exportContentBox(best, best.getAttribute("viewBox"),
+                                 w, hgt);
+    } finally {
+      for (var hr = 0; hr < hid.length; hr++)
+        hid[hr].style.display = hidWas[hr];
+    }
     clone.setAttribute("viewBox", snapBox.x + " " + snapBox.y + " " +
                        snapBox.w + " " + snapBox.h);
     w = snapBox.w; hgt = snapBox.h;
