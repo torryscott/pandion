@@ -27621,6 +27621,14 @@
   // discipline: the newest entry's version must equal APP_VERSION, so shipping
   // a release without a note here fails the suite.
   var RELEASE_NOTES = [
+    { version: "3.1.1", date: "August 2026", notes: [
+      "Nothing changes for you here. Saved palettes and styles are held " +
+        "back in the jamovi module at jamovi's request, until they add a " +
+        "home for settings that live outside a single file. The browser " +
+        "and desktop apps keep them.",
+      "The desktop app picks up a security update in one of the libraries " +
+        "it is built on."
+    ] },
     { version: "3.1.0", date: "August 2026", notes: [
       "Opening a project someone else made is safer. Colors, annotations " +
         "and saved palettes are now checked before they reach the page, so " +
