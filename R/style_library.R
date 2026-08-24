@@ -40,8 +40,6 @@
 }
 
 .gb_style_lib_read <- function(machineId) {
-    # Held back at jamovi's request; see gb2_libraries_on() in widget.R.
-    if (!isTRUE(gb2_libraries_on())) return(.gb_style_lib_empty(machineId))
     f <- .gb_style_lib_file()
     if (!file.exists(f)) {
         lib <- .gb_style_lib_empty(machineId)
@@ -113,8 +111,6 @@
 # savedefault combo (the option carries ONE action per commit, so a
 # save that should also become the default rides in a single action).
 .gb_style_lib_apply <- function(lib, action_json) {
-    # Held back at jamovi's request; see gb2_libraries_on() in widget.R.
-    if (!isTRUE(gb2_libraries_on())) return(lib)
     if (!is.character(action_json) || length(action_json) == 0 || nchar(action_json) == 0) {
         return(lib)
     }

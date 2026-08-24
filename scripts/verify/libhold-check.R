@@ -54,11 +54,14 @@ ok(grepl('"styleLibrary":{}', h, fixed = TRUE) ||
    grepl('"styleLibrary":\\[\\]', h),
    "no saved styles ship")
 
-# A save action from a shared .omv must not reach the disk.
+# A save action carried by a shared .omv must not reach the disk. Drive the
+# REAL path: the gate lives at widget.R's call site, so calling the library
+# function directly would bypass it and prove nothing about production.
 before <- list.files(home, recursive = TRUE)
-invisible(.gb_palette_lib_apply(.gb_palette_lib_read(), SAVE))
+invisible(plotbuilder(data = df, xvar = "x", yvar = "y", groupVar = NULL,
+                      facetVar = NULL, paletteLibrary = SAVE)$widget$content)
 after <- list.files(home, recursive = TRUE)
-ok(identical(before, after), "a save action writes nothing to disk")
+ok(identical(before, after), "a save action carried by a file writes nothing to disk")
 
 # The machineId has to be STABLE or the payload hash churns every render.
 mid <- function(x) regmatches(x, regexpr('"paletteLibraryMachineId":"[^"]*"', x))

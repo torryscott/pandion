@@ -1470,8 +1470,15 @@ graphbuilder2_html <- function(bars,
     # Apply any pending palette-library action (save / delete / replace)
     # to the user-level library on disk, then send the current state
     # (and this machine's ID) along with the rest of the payload.
-    palette_lib <- .gb_palette_lib_read()
-    palette_lib <- .gb_palette_lib_apply(palette_lib, as.character(palette_action))
+    # Held back for jamovi: see gb2_libraries_on() above. Gated HERE, at the
+    # only call site, so palette_library.R and style_library.R stay free of
+    # any knowledge of the switch (they are sourced without widget.R by some
+    # probes). An empty library with a STABLE id keeps the payload steady.
+    libs_on <- isTRUE(gb2_libraries_on())
+    palette_lib <- if (libs_on) .gb_palette_lib_read()
+                   else .gb_palette_lib_empty("m_libraries_off")
+    if (libs_on)
+        palette_lib <- .gb_palette_lib_apply(palette_lib, as.character(palette_action))
 
     # "Default palette for new charts": an EMPTY chartPalette option
     # means the user never picked one for this analysis, so resolve it
@@ -1495,8 +1502,10 @@ graphbuilder2_html <- function(bars,
     # action applied per render, current state shipped back down).
     # Shares the palette library's machineId - the widget stamps every
     # action with the ONE id it receives in the payload.
-    style_lib <- .gb_style_lib_read(as.character(palette_lib$machineId))
-    style_lib <- .gb_style_lib_apply(style_lib, as.character(style_action))
+    style_lib <- if (libs_on) .gb_style_lib_read(as.character(palette_lib$machineId))
+                 else .gb_style_lib_empty(as.character(palette_lib$machineId))
+    if (libs_on)
+        style_lib <- .gb_style_lib_apply(style_lib, as.character(style_action))
     style_default_id <- as.character(style_lib$defaultStyle %||% "")
 
     # "Default style for new charts": auto-apply fires ONLY on an
