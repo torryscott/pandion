@@ -65472,7 +65472,7 @@
                         try { _hideColorPicker(); } catch (_eHp) {}
                     } else {
                         var activeStrip;
-                        if (id === "border") activeStrip = window.__gb2_bsActiveStripBorder || "border-color";
+                        if (id === "border") activeStrip = window.__gb2_bsActiveStripBorder || _bsBorderFallback || "border-color";
                         else if (id === "whiskers") activeStrip = window.__gb2_bsActiveStripWhiskers || "whisker-color";
                         else if (id === "median") activeStrip = window.__gb2_bsActiveStripMedian || "median-color";
                         else if (id === "outliers") activeStrip = window.__gb2_bsActiveStripOutliers || "outlier-color";
@@ -65527,7 +65527,17 @@
                 return fallback;
             }
             var _bsBarInitial = _bsResolveInitialStrip("bar", "bar-color");
-            var _bsBorderInitial = _bsResolveInitialStrip("border", "border-color");
+            // An invisible border answers a click with silence: with the
+            // resolved width at 0, a color / style / opacity edit paints
+            // nothing. So the Border tab LANDS on Width when the clicked
+            // target's effective border width is 0 - the user sees the 0
+            // and the missing step - and keeps Color-first once a border
+            // is actually drawn (Torry, Aug 2026; the eb Type-first rule:
+            // open on the question the click most likely asks). The
+            // session sticky still wins once any strip is visited.
+            var _bsBorderFallback = ((groupName ? borderWidthFor(groupName)
+                : _chartBorderWidth()) > 0) ? "border-color" : "border-width";
+            var _bsBorderInitial = _bsResolveInitialStrip("border", _bsBorderFallback);
             _bsShowStripInTab("bar", _bsBarInitial);
             _bsShowStripInTab("border", _bsBorderInitial);
             // (The initial Error bars render is deferred to AFTER the title
@@ -80527,7 +80537,10 @@
                     _distRangeHtml("dh-outw", 0, 5, 0.25, outW, "px")) +
                 _distStripHtml("outstyle", _distStyleSegHtml("dh-outs", "solid", "Solid", outS) + _distStyleSegHtml("dh-outs", "dashed", "Dashed", outS) + _distStyleSegHtml("dh-outs", "longdash", "Long dash", outS) + _distStyleSegHtml("dh-outs", "dotted", "Dotted", outS)) +
                 _distStripHtml("outopacity", _distRangeHtml("dh-outo", 0, 1, 0.05, outO) + '<span style="color:#666;">opacity</span>');
-            _distWireStrips(pane, "outcolor");
+            // Width-first when no border is drawn (see the bar panel's
+            // _bsBorderFallback note); outW is the value the Width
+            // slider will show, resolved at the panel's own scope.
+            _distWireStrips(pane, outW > 0 ? "outcolor" : "outwidth");
             _distWireColor(pane, "dh-outc", function () { var _c = (hasGroups && g && !_distScopeAllFor("outcolor")) ? _histOutlineColorFor(g) : ((typeof data.histOutlineColor === "string" && data.histOutlineColor.length) ? data.histOutlineColor : "#ffffff"); return (_c === "transparent") ? "#ffffff" : _c; }, function (c) { _distHistApplyBorder(g, "color", "histOutlineColor", c, true); _distSetBtnSwatch(pane, "outcolor", c); });
             (function () {
                 var pal = pane.querySelectorAll('[data-dho-palette][data-dho-palette-target="outcolor"]');
@@ -82419,7 +82432,7 @@
                 _distStripHtml("fqslbwidth", _renderWidthPresets(_bd.width, "fqb-w", [0, 0.75, 1.5, 2.5, 4]) + '<div style="flex-basis:100%;height:0;"></div>' + _distRangeHtml("fqb-w", 0, 8, 0.25, _bd.width, "px") + '<span style="color:#666;">0 removes the separators</span>') +
                 _distStripHtml("fqslbstyle", _distStyleSegHtml("fqb-st", "solid", "Solid", _bd.style) + _distStyleSegHtml("fqb-st", "dashed", "Dashed", _bd.style) + _distStyleSegHtml("fqb-st", "longdash", "Long dash", _bd.style) + _distStyleSegHtml("fqb-st", "dotted", "Dotted", _bd.style)) +
                 _distStripHtml("fqslbopacity", _distRangeHtml("fqb-op", 0, 1, 0.05, _bd.opacity) + '<span style="color:#666;">opacity</span>');
-            _distWireStrips(pane, "fqslbcolor");
+            _distWireStrips(pane, _bd.width > 0 ? "fqslbcolor" : "fqslbwidth");
             _distWireColor(pane, "fqb-color",
                 function () { var _c = _fqSliceBorderResolved(g).color; return (_c === "transparent") ? "#ffffff" : _c; },
                 function (c) { _fqSliceApplyBorder(g, "color", "sliceBorderColor", c, true); _distSetBtnSwatch(pane, "fqslbcolor", c); });
@@ -82726,7 +82739,7 @@
                     _renderWidthPresets(_mkOutW, "fpo-outw", [0, 0.5, 1, 2]) +
                     '<div style="flex-basis:100%;height:0;"></div>' +
                     _distRangeHtml("fpo-outw", 0, 6, 0.25, _mkOutW, "px") + '<span style="color:#666;">0 = no outline</span>');
-            _distWireStrips(pane, "outcolor");
+            _distWireStrips(pane, _mkOutW > 0 ? "outcolor" : "outwidth");
             _distWireColor(pane, "fpo-outc",
                 function () { return (typeof data.paretoMarkerOutlineColor === "string" && data.paretoMarkerOutlineColor.length > 0) ? data.paretoMarkerOutlineColor : "#ffffff"; },
                 function (c) { _distCommit("paretoMarkerOutlineColor", c); _distSetBtnSwatch(pane, "outcolor", c); });
@@ -84227,7 +84240,7 @@
                     _distStyleSegHtml("lkb-style", "longdash", "Long dash", bd.style) +
                     _distStyleSegHtml("lkb-style", "dotted", "Dotted", bd.style)) +
                 _distStripHtml("lkbopacity", _distRangeHtml("lkb-op", 0, 1, 0.05, bd.opacity) + '<span style="color:#666;">opacity</span>');
-            _distWireStrips(pane, "lkbcolor");
+            _distWireStrips(pane, bd.width > 0 ? "lkbcolor" : "lkbwidth");
             _distWireColor(pane, "lkb-color",
                 function () { var c = _lkBorderResolved(lv).color; return (c === "transparent") ? "#ffffff" : c; },
                 function (c) { _lkLevelApplyBorder(lv, "color", "barBorderColor", c, true); _distSetBtnSwatch(pane, "lkbcolor", c); });
