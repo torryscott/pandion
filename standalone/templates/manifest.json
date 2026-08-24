@@ -31,6 +31,6 @@
     "marshalMd5": "2fed58ead6c46a50a754b505467c03fc",
     "marshalFiles": ["R/widget.R", "R/spec_explode.R", "R/utils.R", "R/plotbuilder.b.R", "R/distplotbuilder.b.R", "R/freqplotbuilder.b.R", "R/xyplotbuilder.b.R", "R/rmplotbuilder.b.R", "R/corrplotbuilder.b.R", "R/likertplotbuilder.b.R"],
     "engineMd5": "c0e63c05d50f6571fdfb13e2c0aed7f7",
-    "generated": "2026-08-23"
+    "generated": "2026-08-24"
   }
 }
