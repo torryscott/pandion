@@ -103,6 +103,8 @@
 }
 
 .gb_palette_lib_read <- function() {
+    # Held back at jamovi's request; see gb2_libraries_on() in widget.R.
+    if (!isTRUE(gb2_libraries_on())) return(.gb_palette_lib_empty("m_libraries_off"))
     f <- .gb_palette_lib_file()
     if (!file.exists(f)) {
         lib <- .gb_palette_lib_empty()
@@ -164,6 +166,8 @@
 # Apply a single action JSON (from the `paletteLibrary` option) if it's
 # eligible. Returns the (possibly updated) library.
 .gb_palette_lib_apply <- function(lib, action_json) {
+    # Held back at jamovi's request; see gb2_libraries_on() in widget.R.
+    if (!isTRUE(gb2_libraries_on())) return(lib)
     if (!is.character(action_json) || length(action_json) == 0 || nchar(action_json) == 0) {
         return(lib)
     }

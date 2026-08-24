@@ -30,6 +30,12 @@ node "$HERE/release-pipeline-check.mjs"
 # that real analysis wrappers use script-src by default, then separately
 # verifies this rollback path.
 export GB2_INLINE_BUNDLE=1
+# The saved palette / style libraries are held back for jamovi
+# (gb2_libraries_on in widget.R), but they are not deleted and they have to
+# still work the day jamovi ships global options. So the battery renders
+# with them ON and keeps testing them; libhold-check.R unsets this itself
+# and is the probe that pins the shipping default.
+export GB2_LIBRARIES=1
 
 BUNDLE=source
 EXTRAS=0
@@ -132,6 +138,14 @@ fi
 
 echo "== the left-panel tip is found by its marker, not a copied string"
 if Rscript "$HERE/paneltip-check.R"; then :; else exit $?; fi
+
+echo "== the saved palette/style libraries are held back for jamovi, and come back"
+if GB2_LIBHOLD_OUT="$OUT-libhold" GB2_BUNDLE="$BUNDLE" Rscript "$HERE/libhold-check.R"; then
+    GB2_LIBHOLD_OUT="$OUT-libhold" GB2_BUNDLE="$BUNDLE" node "$HERE/libhold-check.mjs"
+else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then echo "   skipped: jmvcore not available"; else exit "$rc"; fi
+fi
 
 echo "== the Svg-element handover waits for our switch, not jamovi's schedule"
 if GB2_HANDOVER_OUT="$OUT-handover" GB2_BUNDLE="$BUNDLE" Rscript "$HERE/handover-render.R"; then

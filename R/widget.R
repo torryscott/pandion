@@ -74,6 +74,24 @@ gb2_handover_export <- function()
     .gb2_handover_on("GB2_HANDOVER_EXPORT",
                      "~/.plotstudio-handover-export", FALSE)
 
+# ---- Saved palette / style libraries ----------------------------------
+# Held back at jamovi's request (Aug 2026). These write palettes.json and
+# styles.json under the user's config dir: state that outlives the .omv,
+# which jamovi wants to own through a per-module "global options" facility
+# it has not built yet. The feature is not deleted, only switched off, and
+# ONLY here - the standalone has its own browser-side store and supplies
+# both libraries itself, so it is untouched.
+#
+# To put it back: flip ready_default to TRUE and cut a release. Nothing
+# else needs editing. With it off the library readers return an empty
+# library and the writers no-op, so the default-palette and default-style
+# resolution below already falls through to stock behaviour on its own,
+# and the payload carries chartLibrariesOff so the widget hides the three
+# surfaces that would otherwise offer to save.
+#   touch ~/.plotstudio-libraries   # try them in a live session
+gb2_libraries_on <- function()
+    .gb2_handover_on("GB2_LIBRARIES", "~/.plotstudio-libraries", FALSE)
+
 # Shared script-src wiring for every chart analysis. The raw binding is
 # intentional: jmvcore's setScripts() helper double-prefixes the package name
 # on the jamovi 2.7.x versions this prototype targets.
@@ -2164,6 +2182,7 @@ graphbuilder2_html <- function(bars,
     # the switches existed and the echo still hash-skips.
     if (isTRUE(gb2_handover_resize())) payload$svgHandoverResize <- TRUE
     if (isTRUE(gb2_handover_export())) payload$svgHandoverExport <- TRUE
+    if (!isTRUE(gb2_libraries_on())) payload$chartLibrariesOff <- TRUE
     if (!is.null(summary_func))
         payload$summaryFunc <- as.character(summary_func)
     if (!is.null(error_bar_type))

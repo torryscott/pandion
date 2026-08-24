@@ -70897,9 +70897,12 @@
             var _gsTabs = [
                 { id: "appearance",    label: "Appearance"    },
                 { id: "sizing",        label: "Sizing"        },
-                { id: "styles",        label: "Chart styles"  },
+                // Dropped while the libraries are held back for jamovi
+                // (gb2_libraries_on in widget.R); the pane below goes with it.
+                (data.chartLibrariesOff === true ? null
+                    : { id: "styles",        label: "Chart styles"  }),
                 { id: "accessibility", label: "Accessibility" }
-            ];
+            ].filter(Boolean);
             if (!_gsHidePaletteTab) {
                 _gsTabs.splice(2, 0, { id: "palette", label: "Palette" });
             }
@@ -71688,6 +71691,7 @@
                 // starts with. Shown once the colors are settled (a fix
                 // is active, or everything already passes).
                 if (st || !worst)
+                    if (data.chartLibrariesOff !== true)
                     btns += '<button type="button" data-cvd-fix="mkdefault" title="Saves these exact colors to your palette library as &quot;My accessible palette&quot; and uses it as the default palette for every new chart" style="' + btnCss + '">Make these my default palette</button>';
                 if (btns) out += '<div style="display:flex;gap:6px;flex-wrap:wrap;padding:2px 2px 0 2px;">' + btns + '</div>';
                 return out;
@@ -72006,7 +72010,8 @@
             // Chart styles pane: delegated to the shared renderer (the
             // same content the palette flyout's Manage link opens onto).
             try {
-                var _gsStylesPane = body.querySelector('[data-tab-pane="styles"]');
+                var _gsStylesPane = (data.chartLibrariesOff === true) ? null
+                    : body.querySelector('[data-tab-pane="styles"]');
                 if (_gsStylesPane) renderInspectorChartStyles(_gsStylesPane);
             } catch (_eGsSty) {}
 
@@ -96475,6 +96480,7 @@
             add("chart.sizing.height", "Plot height", "Chart settings \u203a Sizing \u203a Height", "chart size vertical inches", "global", prepMap({__gb2_globalActiveTab:"sizing"}), '[data-field="plot-h"]');
             add("chart.sizing.aspect", "Aspect ratio", "Chart settings \u203a Sizing \u203a Aspect ratio", "square portrait landscape dimensions", "global", prepMap({__gb2_globalActiveTab:"sizing"}), '[data-field="aspect-presets"]');
             if (mk !== "corr" && mk !== "likert") add("chart.palette", "Chart palette", "Chart settings \u203a Palette", "colors colour theme swatches", "global", prepMap({__gb2_globalActiveTab:"palette"}), '[data-gs-tab="palette"]');
+            if (data.chartLibrariesOff !== true)
             add("chart.styles", "Chart style preset", "Chart settings \u203a Chart styles", "theme template look", "global", prepMap({__gb2_globalActiveTab:"styles"}), '[data-gs-tab="styles"]');
             add("chart.accessibility.vision", "Color-vision check", "Chart settings \u203a Accessibility", "colour blind colorblind cvd separation distinguish easy to tell apart", "global", prepMap({__gb2_globalActiveTab:"accessibility"}), '[data-gs-tab="accessibility"]');
             add("chart.stats", "Statistics", "Toolbar \u203a Statistics", "sigma numerical summary test confidence", "stats", null, '[data-role="inspector-title"]', true);
@@ -98676,6 +98682,8 @@
                     stylesLink.type = "button";
                     stylesLink.style.cssText = "display:block;width:100%;box-sizing:border-box;text-align:center;padding:5px;border:0;border-top:1px solid #eee;background:transparent;color:#378ADD;font-size:11.5px;cursor:pointer;";
                     stylesLink.textContent = "Manage chart styles\u2026";
+                    // Nothing to manage while the libraries are held back.
+                    if (data.chartLibrariesOff === true) stylesLink.style.display = "none";
                     stylesLink.title = "Save this chart's look, set a default for new charts, or edit saved styles";
                     stylesLink.addEventListener("click", function (e) {
                         try { e.preventDefault(); e.stopPropagation(); } catch (_ep) {}

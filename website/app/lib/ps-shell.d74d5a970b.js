@@ -6809,7 +6809,12 @@
     // unpinned chartPalette against the default palette, and let a
     // brand-new chart auto-apply the default style exactly once.
     // Cloned so the engine's window-side copies never alias the store.
-    payload.paletteLibrary = JSON.parse(JSON.stringify(PS_LIBS.palette.palettes));
+    // The standalone keeps its palette and style libraries: they live in
+  // this browser, not in a jamovi config dir, so the hold-back the R
+  // side applies for jamovi does not apply here. Drop the flag in case
+  // a regenerated template carried it in.
+  delete payload.chartLibrariesOff;
+  payload.paletteLibrary = JSON.parse(JSON.stringify(PS_LIBS.palette.palettes));
     payload.paletteLibraryMachineId = PS_LIBS.machineId;
     payload.paletteDefaultId = paletteDefaultIdResolved();
     payload.styleLibrary = JSON.parse(JSON.stringify(PS_LIBS.style.styles));
