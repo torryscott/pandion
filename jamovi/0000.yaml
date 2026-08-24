@@ -1,12 +1,12 @@
 ---
 title: Pandion Plots
 name: pandion
-version: 3.1.0
+version: 3.1.1
 jms: '1.0'
 authors:
   - Torry Scott Dennis, PhD
 maintainer: Torry Scott Dennis, PhD <tsdennis@smcm.edu>
-date: '2026-08-22'
+date: '2026-08-24'
 type: R
 description: >-
   An interactive statistical graph-building module for jamovi with analyses for

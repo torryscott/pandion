@@ -516,7 +516,7 @@
   function pageSizeText(page) {
     return pxToUnit(page.w) + " \u00d7 " + pxToUnit(page.h) + " " + unitLabel();
   }
-  var APP_VERSION = "3.1.0";
+  var APP_VERSION = "3.1.1";
   var AUTOSAVE_HEALTH = "ok";
   var AUTOSAVE_DETAIL = "Local recovery is current";
   var AUTOSAVE_FAILS = 0;          // B14: evidence survives a lucky write

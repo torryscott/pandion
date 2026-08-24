@@ -1,7 +1,7 @@
 Package: pandion
 Type: Package
 Title: Pandion Plots
-Version: 3.1.0
+Version: 3.1.1
 Author: Torry Scott Dennis, PhD
 Maintainer: Torry Scott Dennis, PhD <tsdennis@smcm.edu>
 Description: An interactive statistical graph-building module for jamovi with
