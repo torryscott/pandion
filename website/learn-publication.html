@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Make it publication-ready - Pandion Plots</title>
+<meta name="description" content="The finishing pass for a Pandion Plots figure: labels, the graph checker, the color-vision check, and clean exports.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<meta name="theme-color" content="#192E49">
+<link rel="canonical" href="https://pandionplots.com/learn-publication.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Pandion Plots">
+<meta property="og:title" content="Make it publication-ready - Pandion Plots">
+<meta property="og:description" content="The finishing pass for a Pandion Plots figure: labels, the graph checker, the color-vision check, and clean exports.">
+<meta property="og:url" content="https://pandionplots.com/learn-publication.html">
+<meta property="og:image" content="https://pandionplots.com/assets/share-card-copy-refresh.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+  :root {
+    --navy: #192E49;
+    --cobalt: #375CA0;
+    --ink: #22364d;
+    --muted: #5f6f80;
+    --line: #dde5ee;
+    --wash: #f4f7fb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      Helvetica, Arial, sans-serif;
+    margin: 0; color: var(--ink); background: #fff;
+    font-size: 16px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 24px; }
+  a { color: var(--cobalt); }
+
+  .intro { padding: 56px 0 34px; }
+  .kicker {
+    color: #8a6414; font-size: 13px; font-weight: 800;
+    letter-spacing: 0.12em; text-transform: uppercase; margin: 0 0 8px;
+  }
+  h1 {
+    margin: 0 0 12px; color: var(--navy);
+    font-size: clamp(28px, 4vw, 38px); letter-spacing: -0.015em;
+    line-height: 1.15;
+  }
+  .lede { margin: 0; max-width: 46em; color: var(--muted); font-size: 17px; }
+
+  section.tut { padding: 34px 0 10px; border-top: 1px solid var(--line); margin-top: 34px; }
+  h2 {
+    margin: 0 0 6px; color: var(--navy);
+    font-size: clamp(22px, 3vw, 27px); letter-spacing: -0.01em;
+  }
+  .sec-lede { margin: 0 0 26px; color: var(--muted); max-width: 46em; }
+
+  .step { display: grid; grid-template-columns: 40px 1fr; gap: 14px; margin: 0 0 34px; }
+  .step-n {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: var(--navy); color: #fff; font-weight: 700; font-size: 15px;
+    display: flex; align-items: center; justify-content: center; margin-top: 2px;
+  }
+  .step h3 { margin: 2px 0 8px; color: var(--navy); font-size: 18px; }
+  .step p { margin: 0 0 14px; max-width: 44em; }
+  .step p:last-child { margin-bottom: 0; }
+  kbd, .ui {
+    font-family: inherit; font-weight: 700; color: var(--navy);
+    background: var(--wash); border: 1px solid var(--line);
+    border-radius: 6px; padding: 1px 7px; font-size: 14.5px; white-space: nowrap;
+  }
+
+  figure.fig { margin: 16px 0 6px; }
+  figure.fig img {
+    display: block; width: 100%; height: auto;
+    border: 1px solid var(--line); border-radius: 12px;
+    box-shadow: 0 10px 28px rgba(25, 46, 73, 0.10);
+    background: #fff;
+  }
+  figure.fig.fig-narrow { max-width: 400px; }
+  figure.fig.fig-mid { max-width: 660px; }
+  figure.fig figcaption {
+    margin-top: 10px; color: var(--muted); font-size: 13.5px; max-width: 44em;
+  }
+
+  .note {
+    margin: 6px 0 14px; padding: 12px 16px; max-width: 44em;
+    background: var(--wash); border: 1px solid var(--line);
+    border-left: 3px solid var(--cobalt); border-radius: 8px;
+    color: var(--ink); font-size: 14.5px;
+  }
+  .closer { padding: 34px 0 64px; border-top: 1px solid var(--line); margin-top: 34px; }
+  .closer p { max-width: 46em; }
+
+  @media (max-width: 560px) {
+    .step { grid-template-columns: 30px 1fr; gap: 10px; }
+  }
+  @media print {
+    header, footer, .skip-link { display: none; }
+    body { background: #fff; }
+    figure.fig img { box-shadow: none; border-color: #999; }
+    .step, figure.fig { break-inside: avoid; }
+    section.tut { border-top-color: #999; }
+    a { color: inherit; text-decoration: none; }
+  }
+
+  /* ---- shared header + footer, lifted from about.html ---- */
+  /* Anchor targets must clear the sticky header. */
+  html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+  header {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(255,255,255,0.92); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav { display: flex; align-items: center; gap: 10px; height: 60px; }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    color: var(--navy); text-decoration: none;
+    font-weight: 800; font-size: 18px; letter-spacing: -0.01em;
+  }
+  .brand img { width: 34px; height: 34px; }
+  .nav-links { margin-left: auto; display: flex; gap: 4px; }
+  .nav-links a {
+    color: var(--ink); text-decoration: none; font-size: 14.5px;
+    font-weight: 600; padding: 7px 12px; border-radius: 7px;
+  }
+  .nav-links a:hover { background: var(--wash); color: var(--navy); }
+  .nav-links a[aria-current="page"] { color: var(--cobalt); }
+  .nav-links a.nav-cta { color: #fff; background: var(--navy); margin-left: 6px; }
+  .nav-links a.nav-cta:hover { background: #24405f; }
+
+  footer { border-top: 1px solid var(--line); padding: 36px 0 48px; margin-top: 48px; }
+  .foot {
+    display: flex; flex-wrap: wrap; gap: 18px; align-items: center;
+    color: var(--muted); font-size: 13.5px;
+  }
+  .foot .brand { font-size: 15px; }
+  .foot .brand img { width: 26px; height: 26px; }
+  .foot-links { margin-left: auto; display: flex; flex-wrap: wrap; gap: 10px 18px; }
+  .foot-links a { color: var(--muted); text-decoration: none; }
+  .foot-links a:hover { color: var(--cobalt); }
+
+  /* ---- platform toggle (browser/desktop vs jamovi) ---- */
+  .pf-toggle {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    margin: 20px 0 0;
+  }
+  .pf-toggle .pf-label {
+    color: var(--muted); font-size: 13px; font-weight: 700;
+    letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .pf-toggle button {
+    font: inherit; font-size: 14.5px; font-weight: 600;
+    color: var(--ink); background: #fff;
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 6px 16px; cursor: pointer;
+  }
+  .pf-toggle button:hover { border-color: var(--cobalt); color: var(--navy); }
+  .pf-toggle button[aria-pressed="true"] {
+    color: #fff; background: var(--navy); border-color: var(--navy);
+  }
+  body:not([data-pf="jamovi"]) .only-jamovi { display: none; }
+  body[data-pf="jamovi"] .only-standalone { display: none; }
+</style>
+<link rel="stylesheet" href="assets/site-nav.css">
+<script src="assets/site-nav.js" defer></script>
+</head>
+<body>
+<script>
+try {
+  if (localStorage.getItem('pandion.learn.platform') === 'jamovi')
+    document.body.setAttribute('data-pf', 'jamovi');
+} catch (e) {}
+</script>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="index.html">
+      <img src="assets/pandion-wing.svg" alt=""
+           data-image-kind="decorative">
+      Pandion Plots
+    </a>
+    <button class="nav-toggle" type="button" aria-expanded="false"
+      aria-controls="site-nav">
+      <span class="nav-toggle-icon" aria-hidden="true"></span>
+      <span>Menu</span>
+    </button>
+    <nav class="nav-links" id="site-nav" aria-label="Site">
+      <a href="gallery.html">Gallery</a>
+      <a href="learn.html">Learn</a>
+      <a href="docs/">Docs</a>
+      <a href="index.html#downloads">Downloads</a>
+      <a href="about.html">About</a>
+      <a href="support.html">Support</a>
+      <a class="nav-cta" href="app/">Try it now</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main-content" tabindex="-1">
+  <div class="wrap">
+
+    <div class="intro">
+      <p class="kicker">Learn &middot; Finishing</p>
+      <h1>Make it publication-ready.</h1>
+      <p class="lede">
+        A finished figure needs more than good bars: labels that say what
+        things are, a note that says what the error bars mean, colors
+        that survive printing and color-blind readers, and the right file
+        format. This is the pass to make before a figure leaves the app.
+        The finishing tools live in the chart itself, so nearly all of
+        this is the same in jamovi; the toggle below covers the spots
+        that differ.
+      </p>
+      <div class="pf-toggle" data-role="pf-toggle" hidden
+           role="group" aria-label="Which version of Pandion Plots to show">
+        <span class="pf-label">Showing</span>
+        <button type="button" data-pf-choice="standalone"
+          aria-pressed="true">Browser &amp; desktop app</button>
+        <button type="button" data-pf-choice="jamovi"
+          aria-pressed="false">jamovi module</button>
+      </div>
+    </div>
+
+    <section class="tut" id="labels">
+      <h2>1. Say what everything is</h2>
+      <p class="sec-lede">
+        Rename the axes by clicking their titles (column names like
+        <span class="ui">score</span> rarely read well), then open the
+        <span class="ui">+</span> menu for the finishing furniture.
+      </p>
+      <figure class="fig fig-mid">
+  <img src="assets/tutorial/pub-add.png"
+       data-image-kind="illustrative"
+       alt="The + menu open on the chart toolbar with its button ringed, listing Text annotation, Figure note, Error bars, Sig. bracket, Reference line, Draw shapes, Grid lines, Outliers, Data points, Value labels and N labels">
+  <figcaption>The <span class="ui">+</span> menu. For a finished figure the usual picks are <span class="ui">N labels</span> (how many per group), <span class="ui">Value labels</span>, and a <span class="ui">Figure note</span>.</figcaption>
+</figure>
+      <p class="note">
+        The figure note is the right home for what the error bars show
+        (&ldquo;Error bars show &plusmn;1 SE.&rdquo;). If you write a note
+        and it does not say, the graph checker below will remind you; if
+        you place asterisk brackets, it will suggest the standard key.
+      </p>
+    </section>
+
+    <section class="tut" id="check">
+      <h2>2. Let the app review it</h2>
+      <p class="sec-lede only-standalone">
+        The <span class="ui">Checks passed</span> chip in the corner of
+        the app (or the <span class="ui">?</span> panel&rsquo;s
+        <span class="ui">Check graph</span> tab) runs the chart against a
+        rubric for its graph type: axis honesty, missing labels, color
+        risks, unreadable choices.
+      </p>
+      <p class="sec-lede only-jamovi">
+        The <span class="ui">?</span> button on the chart toolbar opens
+        the help panel; its <span class="ui">Check graph</span> tab runs
+        the chart against a rubric for its graph type: axis honesty,
+        missing labels, color risks, unreadable choices.
+      </p>
+      <figure class="fig">
+  <img src="assets/tutorial/pub-check.png"
+       data-image-kind="illustrative"
+       alt="The Check my graph tab: a header reading this chart was run against 16 checks for its graph type, 1 to note, 15 passed; an amber note card titled Colors that merge in black and white naming East and West; and fifteen green passed pills such as Zero baseline, Uncertainty shown, and Colors have a key">
+  <figcaption>A near-clean bill: fifteen checks passed, one printing concern noted, with the fix spelled out. Warnings come with one-click fixes where one exists.</figcaption>
+</figure>
+      <p class="note">
+        The checks are heuristics, not laws: each card explains WHY it
+        fired so you can decide. A figure that passes clean is hard to
+        embarrass in review.
+      </p>
+    </section>
+
+    <section class="tut" id="vision">
+      <h2>3. Check it for every reader</h2>
+      <p class="sec-lede">
+        <span class="ui">Chart settings &rarr; Accessibility</span> is
+        the Vision check: five tiles preview your exact colors under
+        red-blind, green-blind, blue-blind, and grayscale vision, each
+        with a pass or warn dot.
+      </p>
+      <figure class="fig">
+  <img src="assets/tutorial/pub-vision.png"
+       data-image-kind="illustrative"
+       alt="The Accessibility tab: five tiles labelled Normal vision, Protan., Deutan., Tritan. and No color, the first four with green check dots and the grayscale tile with an amber dot; a status line reading under grayscale vision East and West are hard to tell apart; Adjust a color swatches; and a Fix all colors button">
+  <figcaption>This palette passes every color-vision check and fails only grayscale printing. <span class="ui">Fix all colors</span> re-spreads lightness while keeping every hue recognizably itself.</figcaption>
+</figure>
+      <p class="note">
+        You can lock a color you must keep (a brand blue, say) and fix
+        only the rest, adjust any single series by hand from the same
+        row, and save the result as your default palette for every new
+        chart.
+      </p>
+    </section>
+
+    <section class="tut" id="export">
+      <h2>4. Export the right file</h2>
+      <div class="only-standalone">
+        <p class="sec-lede">
+          <span class="ui">Export chart</span> is the last stop. The
+          format does matter: SVG and PDF are vector, so they stay sharp
+          at any size in a manuscript; PNG at the default print
+          resolution is the safe choice for slides, documents, and
+          assignments.
+        </p>
+        <figure class="fig fig-mid">
+          <img src="assets/tutorial/export-dialog.png"
+               data-image-kind="illustrative"
+               alt="The Export chart dialog: format choices SVG, PDF, PNG and JPG, a filename box, a caption box, an image description for accessibility, resolution and background controls, and an Export button">
+          <figcaption>The export dialog. The caption and the accessibility
+          description travel with the file; SVG embeds the description
+          directly.</figcaption>
+        </figure>
+        <p class="note">
+          <span class="ui">Save project</span> keeps the editable
+          <span class="ui">.pand</span> file alongside the exported
+          image, so you can always come back and re-export.
+        </p>
+      </div>
+      <div class="only-jamovi">
+        <p class="sec-lede">
+          The download button on the chart toolbar opens
+          <span class="ui">Export plot</span>, the last stop. The format
+          does matter: SVG and PDF are vector, so they stay sharp at any
+          size in a manuscript; PNG at print resolution is the safe
+          choice for slides, documents, and assignments.
+        </p>
+        <figure class="fig">
+          <img src="assets/tutorial/j-export.png"
+               data-image-kind="illustrative"
+               alt="The chart&#39;s Export plot panel inside jamovi results:
+                    format buttons for SVG, PDF, PNG and JPG, a filename
+                    box, a save-to menu, and a Save button, with the export
+                    toolbar button highlighted above the chart">
+          <figcaption>The ringed download button opens
+          <span class="ui">Export plot</span>: SVG or PDF for
+          manuscripts, PNG or JPG for slides and documents.</figcaption>
+        </figure>
+        <p class="note">
+          The <span class="ui">.omv</span> file itself keeps every edit,
+          so you can always come back and re-export.
+        </p>
+      </div>
+    </section>
+
+    <div class="closer">
+      <p>
+        Last in the series:
+        <a href="learn-data.html">get your data ready</a>, the Data
+        workspace of the browser and desktop app. All the guides live on
+        the <a href="learn.html">Learn page</a>.
+      </p>
+    </div>
+
+  </div>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <a class="brand" href="index.html">
+      <img src="assets/pandion-wing.svg" alt=""
+           data-image-kind="decorative">
+      Pandion Plots
+    </a>
+    <span>Made by Torry Scott Dennis, PhD.</span>
+    <span data-role="foot-meta">Version 3.1.0 &middot;
+      <a href="https://github.com/torryscott/pandion/blob/main/LICENSE">GPL-3.0</a>
+    </span>
+    <nav class="foot-links" aria-label="Footer">
+      <a href="app/">Try it</a>
+      <a href="gallery.html">Gallery</a>
+      <a href="learn.html">Learn</a>
+      <a href="docs/">Docs</a>
+      <a href="about.html#cite">How to cite</a>
+      <a href="about.html">About</a>
+      <a href="support.html">Support</a>
+      <a href="accessibility.html">Accessibility</a>
+      <a href="https://github.com/torryscott/pandion">GitHub</a>
+    </nav>
+  </div>
+</footer>
+<script>
+(function () {
+  var KEY = 'pandion.learn.platform';
+  var wrap = document.querySelector('[data-role="pf-toggle"]');
+  if (!wrap) return;
+  wrap.hidden = false;
+  var btns = wrap.querySelectorAll('[data-pf-choice]');
+  function apply(pf) {
+    if (pf === 'jamovi') document.body.setAttribute('data-pf', 'jamovi');
+    else document.body.removeAttribute('data-pf');
+    for (var i = 0; i < btns.length; i++)
+      btns[i].setAttribute('aria-pressed',
+        btns[i].getAttribute('data-pf-choice') === pf ? 'true' : 'false');
+    try { localStorage.setItem(KEY, pf); } catch (e) {}
+  }
+  var pf = 'standalone';
+  try { if (localStorage.getItem(KEY) === 'jamovi') pf = 'jamovi'; } catch (e) {}
+  apply(pf);
+  for (var i = 0; i < btns.length; i++)
+    btns[i].addEventListener('click', function () {
+      apply(this.getAttribute('data-pf-choice'));
+    });
+})();
+</script>
+</body>
+</html>

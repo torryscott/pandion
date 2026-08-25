@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Running the orientation - Pandion Plots</title>
+<meta name="description" content="The facilitator companion to the Pandion Plots workshop: the 60-minute clock, live demos, stuck-point rescues, and the pre-session email.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<meta name="theme-color" content="#192E49">
+<link rel="canonical" href="https://pandionplots.com/workshop-guide.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Pandion Plots">
+<meta property="og:title" content="Running the orientation - Pandion Plots">
+<meta property="og:description" content="The facilitator companion to the Pandion Plots workshop: the 60-minute clock, live demos, stuck-point rescues, and the pre-session email.">
+<meta property="og:url" content="https://pandionplots.com/workshop-guide.html">
+<meta property="og:image" content="https://pandionplots.com/assets/share-card-copy-refresh.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+  :root {
+    --navy: #192E49;
+    --cobalt: #375CA0;
+    --ink: #22364d;
+    --muted: #5f6f80;
+    --line: #dde5ee;
+    --wash: #f4f7fb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      Helvetica, Arial, sans-serif;
+    margin: 0; color: var(--ink); background: #fff;
+    font-size: 16px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 24px; }
+  a { color: var(--cobalt); }
+
+  .intro { padding: 56px 0 34px; }
+  .kicker {
+    color: #8a6414; font-size: 13px; font-weight: 800;
+    letter-spacing: 0.12em; text-transform: uppercase; margin: 0 0 8px;
+  }
+  h1 {
+    margin: 0 0 12px; color: var(--navy);
+    font-size: clamp(28px, 4vw, 38px); letter-spacing: -0.015em;
+    line-height: 1.15;
+  }
+  .lede { margin: 0; max-width: 46em; color: var(--muted); font-size: 17px; }
+
+  section.tut { padding: 34px 0 10px; border-top: 1px solid var(--line); margin-top: 34px; }
+  h2 {
+    margin: 0 0 6px; color: var(--navy);
+    font-size: clamp(22px, 3vw, 27px); letter-spacing: -0.01em;
+  }
+  .sec-lede { margin: 0 0 26px; color: var(--muted); max-width: 46em; }
+
+  .step { display: grid; grid-template-columns: 40px 1fr; gap: 14px; margin: 0 0 34px; }
+  .step-n {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: var(--navy); color: #fff; font-weight: 700; font-size: 15px;
+    display: flex; align-items: center; justify-content: center; margin-top: 2px;
+  }
+  .step h3 { margin: 2px 0 8px; color: var(--navy); font-size: 18px; }
+  .step p { margin: 0 0 14px; max-width: 44em; }
+  .step p:last-child { margin-bottom: 0; }
+  kbd, .ui {
+    font-family: inherit; font-weight: 700; color: var(--navy);
+    background: var(--wash); border: 1px solid var(--line);
+    border-radius: 6px; padding: 1px 7px; font-size: 14.5px; white-space: nowrap;
+  }
+
+  figure.fig { margin: 16px 0 6px; }
+  figure.fig img {
+    display: block; width: 100%; height: auto;
+    border: 1px solid var(--line); border-radius: 12px;
+    box-shadow: 0 10px 28px rgba(25, 46, 73, 0.10);
+    background: #fff;
+  }
+  figure.fig.fig-narrow { max-width: 400px; }
+  figure.fig.fig-mid { max-width: 660px; }
+  figure.fig figcaption {
+    margin-top: 10px; color: var(--muted); font-size: 13.5px; max-width: 44em;
+  }
+
+  .note {
+    margin: 6px 0 14px; padding: 12px 16px; max-width: 44em;
+    background: var(--wash); border: 1px solid var(--line);
+    border-left: 3px solid var(--cobalt); border-radius: 8px;
+    color: var(--ink); font-size: 14.5px;
+  }
+  .closer { padding: 34px 0 64px; border-top: 1px solid var(--line); margin-top: 34px; }
+  .closer p { max-width: 46em; }
+
+  @media (max-width: 560px) {
+    .step { grid-template-columns: 30px 1fr; gap: 10px; }
+  }
+  @media print {
+    header, footer, .skip-link { display: none; }
+    body { background: #fff; }
+    figure.fig img { box-shadow: none; border-color: #999; }
+    .step, figure.fig { break-inside: avoid; }
+    section.tut { border-top-color: #999; }
+    a { color: inherit; text-decoration: none; }
+  }
+
+  /* ---- shared header + footer, lifted from about.html ---- */
+  /* Anchor targets must clear the sticky header. */
+  html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+  header {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(255,255,255,0.92); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav { display: flex; align-items: center; gap: 10px; height: 60px; }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    color: var(--navy); text-decoration: none;
+    font-weight: 800; font-size: 18px; letter-spacing: -0.01em;
+  }
+  .brand img { width: 34px; height: 34px; }
+  .nav-links { margin-left: auto; display: flex; gap: 4px; }
+  .nav-links a {
+    color: var(--ink); text-decoration: none; font-size: 14.5px;
+    font-weight: 600; padding: 7px 12px; border-radius: 7px;
+  }
+  .nav-links a:hover { background: var(--wash); color: var(--navy); }
+  .nav-links a[aria-current="page"] { color: var(--cobalt); }
+  .nav-links a.nav-cta { color: #fff; background: var(--navy); margin-left: 6px; }
+  .nav-links a.nav-cta:hover { background: #24405f; }
+
+  footer { border-top: 1px solid var(--line); padding: 36px 0 48px; margin-top: 48px; }
+  .foot {
+    display: flex; flex-wrap: wrap; gap: 18px; align-items: center;
+    color: var(--muted); font-size: 13.5px;
+  }
+  .foot .brand { font-size: 15px; }
+  .foot .brand img { width: 26px; height: 26px; }
+  .foot-links { margin-left: auto; display: flex; flex-wrap: wrap; gap: 10px 18px; }
+  .foot-links a { color: var(--muted); text-decoration: none; }
+  .foot-links a:hover { color: var(--cobalt); }
+
+  /* ---- workshop chrome ---- */
+  .ws-time {
+    display: inline-block; margin-left: 10px; vertical-align: middle;
+    color: var(--cobalt); background: var(--wash);
+    border: 1px solid var(--line); border-radius: 999px;
+    font-size: 12.5px; font-weight: 700; padding: 2px 10px;
+    letter-spacing: 0.04em;
+  }
+  .ws-check {
+    margin: 10px 0 14px; padding: 11px 15px; max-width: 44em;
+    background: #f0f7ef; border: 1px solid #cfe3cd;
+    border-left: 3px solid #4c8b47; border-radius: 8px;
+    color: #274425; font-size: 14.5px;
+  }
+  .ws-check strong { color: #2e5d2a; }
+  .ws-copy {
+    margin: 12px 0 18px; padding: 14px 18px; max-width: 46em;
+    background: var(--wash); border: 1px solid var(--line);
+    border-radius: 8px; font-size: 14.5px; white-space: pre-wrap;
+  }
+  table.ws-clock {
+    border-collapse: collapse; margin: 14px 0 8px; font-size: 14.5px;
+    width: 100%; max-width: 46em;
+  }
+  table.ws-clock th, table.ws-clock td {
+    text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  table.ws-clock th {
+    color: var(--muted); font-size: 12.5px; letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  table.ws-clock td:first-child { white-space: nowrap; font-weight: 700; color: var(--navy); }
+  /* ---- platform toggle (browser/desktop vs jamovi) ---- */
+  .pf-toggle {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    margin: 20px 0 0;
+  }
+  .pf-toggle .pf-label {
+    color: var(--muted); font-size: 13px; font-weight: 700;
+    letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .pf-toggle button {
+    font: inherit; font-size: 14.5px; font-weight: 600;
+    color: var(--ink); background: #fff;
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 6px 16px; cursor: pointer;
+  }
+  .pf-toggle button:hover { border-color: var(--cobalt); color: var(--navy); }
+  .pf-toggle button[aria-pressed="true"] {
+    color: #fff; background: var(--navy); border-color: var(--navy);
+  }
+  body:not([data-pf="jamovi"]) .only-jamovi { display: none; }
+  body[data-pf="jamovi"] .only-standalone { display: none; }
+</style>
+<link rel="stylesheet" href="assets/site-nav.css">
+<script src="assets/site-nav.js" defer></script>
+</head>
+<body>
+<script>
+try {
+  if (localStorage.getItem('pandion.learn.platform') === 'jamovi')
+    document.body.setAttribute('data-pf', 'jamovi');
+} catch (e) {}
+</script>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="index.html">
+      <img src="assets/pandion-wing.svg" alt=""
+           data-image-kind="decorative">
+      Pandion Plots
+    </a>
+    <button class="nav-toggle" type="button" aria-expanded="false"
+      aria-controls="site-nav">
+      <span class="nav-toggle-icon" aria-hidden="true"></span>
+      <span>Menu</span>
+    </button>
+    <nav class="nav-links" id="site-nav" aria-label="Site">
+      <a href="gallery.html">Gallery</a>
+      <a href="learn.html">Learn</a>
+      <a href="docs/">Docs</a>
+      <a href="index.html#downloads">Downloads</a>
+      <a href="about.html">About</a>
+      <a href="support.html">Support</a>
+      <a class="nav-cta" href="app/">Try it now</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main-content" tabindex="-1">
+  <div class="wrap">
+
+    <div class="intro">
+      <p class="kicker">Workshop &middot; Facilitator</p>
+      <h1>Running the orientation.</h1>
+      <p class="lede">
+        The companion to the <a href="workshop.html">participant task
+        sheet</a>: the clock, the three live demos, the known stuck
+        points with their rescues, and the pre-session email. The
+        session teaches by doing; your job is mostly to start it, keep
+        time, and rescue quickly. It works the same whether the room
+        holds colleagues at an orientation or students in a course;
+        pick the platform below, and the task sheet follows the same
+        choice.
+      </p>
+      <div class="pf-toggle" data-role="pf-toggle" hidden
+           role="group" aria-label="Which version of Pandion Plots the session uses">
+        <span class="pf-label">Session platform</span>
+        <button type="button" data-pf-choice="standalone"
+          aria-pressed="true">Browser &amp; desktop app</button>
+        <button type="button" data-pf-choice="jamovi"
+          aria-pressed="false">jamovi module</button>
+      </div>
+    </div>
+
+    <section class="tut" id="before">
+      <h2>Before the session</h2>
+      <p class="sec-lede only-jamovi">
+        The whole risk of a jamovi session is the first ten minutes, so
+        setup happens by email, days ahead. The readiness check is the
+        load-bearing sentence: anyone who cannot see the module button
+        gets fixed before the day, and anyone you cannot fix uses the
+        browser app and loses nothing.
+      </p>
+      <p class="sec-lede only-standalone">
+        A browser-app session has almost no setup risk: nothing
+        installs, so the email is short and the readiness check is just
+        opening a link. Locked-down lab machines and Chromebooks are
+        fine; the app runs entirely in the browser and uploads nothing.
+      </p>
+      <div class="only-jamovi"><div class="ws-copy">Subject: Before Friday&rsquo;s Pandion Plots session (5 minutes of setup)
+
+Three things before the session, so we can spend it making
+charts rather than installing software:
+
+1. Install jamovi (current version) from jamovi.org if you do not
+   have it.
+2. Install the Pandion Plots module: download the module file for
+   your machine from pandionplots.com/download.html, then in jamovi
+   open Modules (top right), choose jamovi library, and use the
+   sideload arrow to add the downloaded .jmo file.
+3. Readiness check: open jamovi and confirm a Pandion Plots button
+   appears on the Plots ribbon tab. If it does not, reply to this
+   email and we will sort it before the session.
+
+Also download the practice dataset we will use:
+pandionplots.com/assets/tutorial/sample-student-wellbeing.csv
+
+No jamovi on your machine? No problem: the browser version at
+pandionplots.com/app needs no install, and everything in the session
+works there too.</div></div>
+      <div class="only-standalone"><div class="ws-copy">Subject: Before Friday&rsquo;s Pandion Plots session (2 minutes of prep)
+
+Nothing to install for this one. Two things before the session:
+
+1. We will use the browser version: pandionplots.com/app
+   Open it once so you know it loads on your machine; you should see
+   a welcome screen. Any current browser works.
+2. Download the practice dataset we will use (or use the built-in
+   Student wellbeing survey example on the welcome screen):
+   pandionplots.com/assets/tutorial/sample-student-wellbeing.csv
+
+Bring a laptop if you can; pairs are fine. Your data never leaves
+your machine, so locked-down or shared computers are not a problem.</div></div>
+      <p class="note">
+        Day-of checklist: the workshop URL on the board or in chat (one
+        task per page with a Next button; the overview lists them all,
+        so latecomers can jump in), the target figure ready to project
+        during task 4, and one machine of yours with BOTH jamovi and
+        the browser app open. Any page prints cleanly if you want paper
+        copies of a task.
+      </p>
+    </section>
+
+    <section class="tut" id="clock">
+      <h2>The 60-minute clock</h2>
+      <table class="ws-clock">
+        <tr><th>When</th><th>What</th><th>You</th></tr>
+        <tr><td>0&ndash;5</td>
+          <td>Frame it; everyone opens the CSV.</td>
+          <td>One sentence of pitch, then demo 1 (below). Resist the
+              tour; the tasks are the tour.</td></tr>
+        <tr><td>5&ndash;10</td>
+          <td><span class="only-jamovi">Task 1: fix the exam_score
+              column&rsquo;s measure type.</span>
+              <span class="only-standalone">Task 1: open the example and
+              inspect the exam_score variable.</span></td>
+          <td><span class="only-jamovi">Say out loud WHY it imported as
+              Nominal: this is the stumble their students will
+              hit.</span>
+              <span class="only-standalone">Show the Measure type menu
+              in the inspector: their own data will not always import
+              this cleanly.</span></td></tr>
+        <tr><td>10&ndash;14</td>
+          <td>Task 2: Help me choose reads the two variables.</td>
+          <td>Let the wizard do the talking. The beat to land: it
+              names Compare Groups and says WHY.</td></tr>
+        <tr><td>14&ndash;19</td>
+          <td>Task 3: first chart.</td>
+          <td>Circulate. Anyone without bars by minute 18 gets rescued,
+              not narrated to.</td></tr>
+        <tr><td>19&ndash;34</td>
+          <td>Task 4: recreate the target figure.</td>
+          <td>Project the target. Give the room the first two rules
+              when energy dips: click the thing you want to change,
+              drag the thing you want to move.</td></tr>
+        <tr><td>34&ndash;45</td>
+          <td>Task 5: omnibus and brackets.</td>
+          <td>Demo 2 as the segment opens. The brackets-landing-on-the-figure
+              moment is the one that sells; let it land.</td></tr>
+        <tr><td>45&ndash;52</td>
+          <td>Task 6: truncate the axis, get caught, fix it.</td>
+          <td>Frame it: the checker is on their students&rsquo; charts
+              too.</td></tr>
+        <tr><td>52&ndash;58</td>
+          <td>Task 7 stretch items for fast finishers.</td>
+          <td>Use the slack to finish rescues.</td></tr>
+        <tr><td>58&ndash;60</td>
+          <td>Close.</td>
+          <td>Demo 3: the Learn pages and their platform toggle. State
+              the take-home: one honest figure from their own data.</td></tr>
+      </table>
+    </section>
+
+    <section class="tut" id="demos">
+      <h2>The three live demos, two minutes each</h2>
+      <p class="sec-lede">
+        Everything else is their hands, not yours.
+      </p>
+      <p>
+        <strong>1. The three rules (minute 3).</strong> On a drawn
+        chart, say each rule as you perform it. Click a bar, then the
+        y-axis title (want to change it? click it). Drag a bar into a new spot
+        (want to move it? drag it). Press <span class="ui">+</span> and flick
+        <span class="ui">Data points</span> on and off (is something missing?
+        press +). Close with the point of it all: there is no settings maze;
+        the chart is the menu.
+      </p>
+      <p>
+        <strong>2. The &Sigma; panel (minute 34).</strong> Open it,
+        hover a comparison row so the chart rings the bars it refers to,
+        and point at the green p chips. Ten seconds on the
+        <span class="ui">Matches the chart</span> badge: these numbers
+        recompute whenever the chart changes.
+      </p>
+      <p>
+        <strong>3. Where help lives (minute 58).</strong> The
+        <a href="learn.html">Learn page</a>, the platform toggle on the
+        guides, and the glossary popovers (click any statistic anywhere).
+      </p>
+    </section>
+
+    <section class="tut" id="rescues">
+      <h2>Stuck points and rescues</h2>
+      <p class="sec-lede">
+        In rough order of likelihood. Rescue with one sentence and move
+        on; the sheet does the rest.
+      </p>
+      <p class="only-jamovi"><strong>No Pandion button in
+        jamovi.</strong> Module not installed or old jamovi. Do not
+        debug live: switch them to the browser app and have them flip
+        the sheet&rsquo;s toggle.</p>
+      <p class="only-jamovi"><strong>exam_score refuses the value
+        axis.</strong> They skipped task 1; the column is still
+        Nominal. Double-click the column heading, Measure type,
+        Continuous.</p>
+      <p class="only-standalone"><strong>A variable refuses a
+        role.</strong> Its measure type is wrong for the slot (usually
+        numbers that came in as text, in their own data). Click the
+        column heading; the inspector&rsquo;s Measure type menu fixes
+        it.</p>
+      <p class="only-standalone"><strong>&ldquo;Is this uploading our
+        data?&rdquo;</strong> No: the app runs entirely in the browser
+        and the data stays on the machine. Worth saying out loud once
+        in any room with IT anxieties.</p>
+      <p><strong>&ldquo;Where is the setting for X?&rdquo;</strong>
+        The universal answer: click X itself. Titles, bars, error bars,
+        the legend, axis numbers, all of it.</p>
+      <p><strong>Styling changed one bar, not all of them.</strong> The
+        <span class="ui">Applies to</span> switch at the panel&rsquo;s
+        top right chooses the clicked bar versus all bars.</p>
+      <p><strong>Place brackets does nothing.</strong> Nothing was
+        ticked. The checkboxes choose which comparisons get placed.</p>
+      <p><strong>A panel seems stuck open.</strong> Esc steps out one
+        layer at a time; a click on empty chart space also settles
+        things.</p>
+      <p><strong>The data points are missing (task 4).</strong>
+        Nudge toward the <span class="ui">+</span> menu without naming
+        the item: &ldquo;anything not on the chart yet gets added from
+        there.&rdquo;</p>
+    </section>
+
+    <section class="tut" id="choices">
+      <h2>Choices made on purpose</h2>
+      <p class="sec-lede">
+        For when a colleague asks why the session runs this way.
+      </p>
+      <p class="only-jamovi">
+        jamovi-first because that is the teaching platform, and the
+        jamovi-specific steps (module install, measure types, the
+        options panel) are exactly the ones worth doing once with help
+        in the room; the chart editor itself is identical everywhere.
+        Pairs because exploration stalls less with two people guessing.
+        No bring-your-own-data inside the session: it would crowd the
+        recreation task, and as the take-home it gives the session a
+        follow-up instead of an ending.
+      </p>
+      <p class="only-standalone">
+        Browser-first because it removes every install risk from a room
+        you may not control, and the chart editor is identical to the
+        jamovi module, so nothing taught here needs relearning if they
+        move to jamovi later. Pairs because exploration stalls less
+        with two people guessing. No bring-your-own-data inside the
+        session: it would crowd the recreation task, and as the take-home
+        it gives the session a follow-up instead of an ending.
+      </p>
+    </section>
+
+    <div class="closer">
+      <p>
+        Afterwards: send the <a href="learn.html">Learn page</a> and the
+        take-home prompt, and collect what people got stuck on; the
+        rescue list above grows from real sessions.
+      </p>
+    </div>
+
+  </div>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <a class="brand" href="index.html">
+      <img src="assets/pandion-wing.svg" alt=""
+           data-image-kind="decorative">
+      Pandion Plots
+    </a>
+    <span>Made by Torry Scott Dennis, PhD.</span>
+    <span data-role="foot-meta">Version 3.1.0 &middot;
+      <a href="https://github.com/torryscott/pandion/blob/main/LICENSE">GPL-3.0</a>
+    </span>
+    <nav class="foot-links" aria-label="Footer">
+      <a href="app/">Try it</a>
+      <a href="gallery.html">Gallery</a>
+      <a href="learn.html">Learn</a>
+      <a href="docs/">Docs</a>
+      <a href="about.html#cite">How to cite</a>
+      <a href="about.html">About</a>
+      <a href="support.html">Support</a>
+      <a href="accessibility.html">Accessibility</a>
+      <a href="https://github.com/torryscott/pandion">GitHub</a>
+    </nav>
+  </div>
+</footer>
+<script>
+(function () {
+  var KEY = 'pandion.learn.platform';
+  var wrap = document.querySelector('[data-role="pf-toggle"]');
+  if (!wrap) return;
+  wrap.hidden = false;
+  var btns = wrap.querySelectorAll('[data-pf-choice]');
+  function apply(pf) {
+    if (pf === 'jamovi') document.body.setAttribute('data-pf', 'jamovi');
+    else document.body.removeAttribute('data-pf');
+    for (var i = 0; i < btns.length; i++)
+      btns[i].setAttribute('aria-pressed',
+        btns[i].getAttribute('data-pf-choice') === pf ? 'true' : 'false');
+    try { localStorage.setItem(KEY, pf); } catch (e) {}
+  }
+  var pf = 'standalone';
+  try { if (localStorage.getItem(KEY) === 'jamovi') pf = 'jamovi'; } catch (e) {}
+  apply(pf);
+  for (var i = 0; i < btns.length; i++)
+    btns[i].addEventListener('click', function () {
+      apply(this.getAttribute('data-pf-choice'));
+    });
+})();
+</script>
+</body>
+</html>

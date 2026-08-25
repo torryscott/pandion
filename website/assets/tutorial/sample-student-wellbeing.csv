@@ -1,0 +1,164 @@
+student_id,class_year,residence,chronotype,study_method,study_spot,caffeine,exam_score,sleep_hours,screen_hours,gpa,stress_wk1,stress_wk6,stress_wk12,q1_belonging,q2_support,q3_workload,q4_facilities,q5_recommend
+S001,First-year,On campus,Early bird,Cramming,Library,0 cups,79,8.1,4.7,3.27,5.9,9.0,4.3,4,3,2,4.0,3
+S002,Sophomore,On campus,Somewhere between,Cramming,Dorm room,1 cup,50,6.6,4.9,2.66,2.2,4.3,7.0,1,1,5,1.0,2
+S003,Sophomore,Off campus,Night owl,Mixed,Coffee shop,1 cup,77,5.6,7.2,2.84,2.4,3.9,5.5,4,4,2,4.0,3
+S004,Junior,On campus,Night owl,Spaced,Outdoors,1 cup,62,7.2,8.6,2.65,6.3,4.1,5.8,3,4,2,5.0,3
+S005,Senior,On campus,Early bird,Mixed,Dorm room,2-3 cups,84,6.2,2.3,3.23,3.9,4.9,7.0,4,5,3,2.0,3
+S006,First-year,On campus,Somewhere between,Mixed,Dorm room,4+ cups,49,5.2,7.9,3.15,2.1,3.2,5.6,3,4,1,4.0,4
+S007,Sophomore,On campus,Somewhere between,Spaced,Dorm room,1 cup,70,6.7,7.6,3.16,3.7,4.3,7.9,4,5,3,4.0,3
+S008,Sophomore,On campus,Night owl,Mixed,Coffee shop,0 cups,65,7.4,5.8,2.42,2.6,4.7,4.0,5,5,3,5.0,3
+S009,First-year,Off campus,Early bird,Cramming,Library,0 cups,53,7.8,2.5,3.24,4.6,2.7,4.9,5,5,2,4.0,5
+S010,First-year,On campus,Somewhere between,Mixed,Dorm room,0 cups,51,6.5,6.6,1.96,3.0,4.0,4.9,4,3,2,2.0,4
+S011,First-year,On campus,Night owl,Mixed,Library,2-3 cups,73,8.2,4.3,2.62,7.0,5.2,6.5,3,2,5,3.0,1
+S012,Senior,Off campus,Somewhere between,Spaced,Coffee shop,1 cup,59,6.8,14.0,1.94,7.3,7.2,9.1,2,5,5,2.0,1
+S013,Junior,On campus,Night owl,Cramming,Dorm room,1 cup,58,6.3,4.7,2.72,5.3,5.8,,3,4,2,3.0,2
+S014,Senior,On campus,Night owl,Mixed,Library,2-3 cups,71,7.3,3.6,3.56,2.5,5.1,2.8,4,3,3,4.0,4
+S015,First-year,On campus,Somewhere between,Spaced,Coffee shop,2-3 cups,83,6.8,4.1,3.9,4.3,7.8,7.2,3,3,4,1.0,1
+S016,Senior,Off campus,Somewhere between,Cramming,Library,2-3 cups,73,6.2,3.4,2.54,2.7,5.4,7.7,3,3,4,,2
+S017,First-year,On campus,Early bird,Spaced,Library,0 cups,82,8.2,2.5,3.08,6.3,5.5,8.2,5,5,3,3.0,3
+S018,Junior,Off campus,Night owl,Cramming,Outdoors,4+ cups,62,6.5,7.4,2.87,7.3,4.0,5.3,1,2,5,2.0,1
+S019,Senior,Off campus,Somewhere between,Mixed,Coffee shop,0 cups,59,7.2,8.3,3.05,2.7,1.9,4.9,5,5,3,3.0,4
+S020,First-year,On campus,Night owl,Cramming,Library,1 cup,56,7.0,3.9,2.98,4.0,5.8,5.1,5,4,1,5.0,3
+S021,Junior,On campus,Somewhere between,Mixed,Library,0 cups,78,7.9,5.7,2.9,3.0,3.7,5.8,3,4,5,4.0,1
+S022,Senior,Off campus,Somewhere between,Spaced,Dorm room,0 cups,78,9.3,4.7,3.94,2.7,4.0,5.8,4,5,2,5.0,4
+S023,Sophomore,Off campus,Somewhere between,Mixed,Outdoors,1 cup,60,7.8,3.1,3.12,4.7,4.3,5.1,3,4,4,1.0,1
+S024,Sophomore,On campus,Somewhere between,Cramming,Library,1 cup,55,,7.3,2.38,4.9,5.8,5.1,4,4,4,2.0,3
+S025,First-year,On campus,Night owl,Mixed,Coffee shop,0 cups,78,7.6,3.9,3.61,3.2,4.9,7.7,4,5,1,3.0,4
+S026,First-year,On campus,Somewhere between,Spaced,Dorm room,2-3 cups,76,7.3,5.0,2.94,6.2,5.5,5.7,2,3,2,3.0,3
+S027,First-year,On campus,Early bird,Cramming,Coffee shop,0 cups,75,9.6,5.0,3.32,2.1,4.3,5.9,5,5,2,3.0,4
+S028,Sophomore,On campus,Somewhere between,Mixed,Library,0 cups,91,8.5,3.2,3.09,2.9,0.0,2.7,5,5,2,5.0,3
+S029,Sophomore,Off campus,Early bird,Cramming,Library,0 cups,62,7.1,2.2,2.56,7.1,4.3,6.5,1,3,3,5.0,3
+S030,First-year,On campus,Night owl,Cramming,Coffee shop,2-3 cups,57,5.5,4.4,3.13,5.9,4.7,7.8,2,4,3,1.0,3
+S031,Sophomore,On campus,Somewhere between,Spaced,Dorm room,0 cups,76,8.1,7.4,2.85,6.7,6.7,8.0,4,5,2,5.0,5
+S032,First-year,On campus,Somewhere between,Mixed,Coffee shop,0 cups,72,9.2,7.0,3.74,5.9,5.3,7.6,4,2,2,5.0,4
+S033,Sophomore,Off campus,Night owl,Spaced,Coffee shop,1 cup,61,6.4,5.4,3.45,4.7,4.0,3.6,5,4,3,5.0,4
+S034,Sophomore,Off campus,Somewhere between,Cramming,Coffee shop,2-3 cups,77,6.9,4.4,2.47,2.9,6.7,5.6,5,4,3,5.0,3
+S035,First-year,On campus,Night owl,Mixed,Dorm room,4+ cups,52,5.3,4.5,2.59,4.3,8.4,9.8,2,3,2,4.0,4
+S036,Sophomore,Off campus,Early bird,Mixed,Outdoors,1 cup,68,6.2,2.5,2.95,6.1,5.5,8.9,3,4,4,3.0,3
+S037,Junior,Off campus,Early bird,Mixed,Library,0 cups,61,6.8,3.6,2.59,3.6,5.4,6.0,5,4,2,4.0,3
+S038,First-year,On campus,Night owl,Mixed,Dorm room,2-3 cups,56,7.6,4.0,2.94,6.4,5.3,8.4,4,4,3,4.0,3
+S039,First-year,On campus,Early bird,Mixed,Library,1 cup,74,7.5,5.0,2.85,6.2,4.4,8.4,4,4,2,4.0,3
+S040,Junior,Off campus,Somewhere between,Cramming,Dorm room,2-3 cups,47,7.0,4.5,2.03,7.8,5.0,6.9,3,4,3,3.0,3
+S041,Senior,Off campus,Somewhere between,Mixed,Dorm room,2-3 cups,76,8.0,6.2,3.62,3.6,4.2,5.4,5,3,2,4.0,4
+S042,First-year,On campus,Somewhere between,Mixed,Outdoors,2-3 cups,67,5.7,4.8,3.41,7.2,4.9,10.0,3,2,3,3.0,4
+S043,First-year,On campus,Night owl,Cramming,Outdoors,2-3 cups,76,8.2,4.6,3.88,3.7,6.9,6.7,4,3,3,4.0,4
+S044,Sophomore,On campus,Night owl,Spaced,Outdoors,2-3 cups,74,5.3,4.9,2.77,6.9,7.4,9.4,3,2,4,2.0,1
+S045,Sophomore,On campus,Night owl,Cramming,Coffee shop,1 cup,62,7.2,6.7,3.27,4.3,5.0,6.5,5,4,3,4.0,4
+S046,Senior,Off campus,Early bird,Cramming,Dorm room,1 cup,56,8.6,6.6,3.78,5.3,6.2,6.4,2,5,3,2.0,4
+S047,Senior,Off campus,Night owl,Spaced,Dorm room,0 cups,52,7.1,8.3,2.5,7.1,7.9,6.4,2,2,2,1.0,3
+S048,First-year,On campus,Somewhere between,Spaced,Dorm room,0 cups,85,7.6,6.4,3.83,3.7,3.9,4.9,5,3,4,3.0,5
+S049,Sophomore,On campus,Early bird,Mixed,Library,2-3 cups,61,6.8,5.5,2.6,5.3,5.6,4.9,2,2,4,2.0,3
+S050,Junior,Off campus,Somewhere between,Spaced,Outdoors,4+ cups,67,6.0,7.8,2.1,4.4,4.5,4.4,4,2,2,2.0,3
+S051,Sophomore,Off campus,Early bird,Cramming,Library,2-3 cups,62,7.0,5.2,3.0,3.8,3.2,6.8,2,1,5,3.0,2
+S052,Sophomore,Off campus,Somewhere between,Mixed,Coffee shop,1 cup,65,8.5,6.3,3.47,3.1,5.2,7.1,4,5,2,5.0,4
+S053,Sophomore,On campus,Somewhere between,Mixed,Coffee shop,1 cup,73,6.5,7.5,3.65,8.3,5.8,8.5,4,4,5,3.0,5
+S054,Junior,Off campus,Somewhere between,Spaced,Dorm room,2-3 cups,99,7.0,2.6,3.96,7.8,5.9,8.2,4,5,3,4.0,3
+S055,Sophomore,Off campus,Somewhere between,Spaced,Library,2-3 cups,100,6.9,3.7,3.22,3.4,5.6,4.5,5,4,3,5.0,4
+S056,Sophomore,Off campus,Somewhere between,Cramming,Coffee shop,1 cup,82,7.4,2.9,4.0,4.4,2.5,5.3,3,4,3,4.0,3
+S057,Senior,Off campus,Early bird,Mixed,Coffee shop,2-3 cups,52,5.7,10.2,2.43,3.9,7.6,7.7,3,3,3,2.0,3
+S058,Junior,On campus,Somewhere between,Spaced,Dorm room,1 cup,79,7.8,3.4,3.08,2.2,4.2,8.3,3,2,2,4.0,3
+S059,Senior,Off campus,Night owl,Spaced,Dorm room,2-3 cups,60,7.3,3.8,2.74,4.6,,4.2,5,5,4,3.0,5
+S060,Sophomore,On campus,Somewhere between,Cramming,Coffee shop,1 cup,57,6.5,10.5,2.88,5.9,5.4,5.5,3,3,2,3.0,2
+S061,Junior,Off campus,Somewhere between,Spaced,Coffee shop,1 cup,55,6.9,5.2,3.33,5.5,4.7,4.6,4,4,2,3.0,3
+S062,Sophomore,On campus,Somewhere between,Spaced,Library,2-3 cups,59,4.5,7.4,2.48,6.7,7.5,,2,3,5,2.0,2
+S063,Junior,Off campus,Night owl,Mixed,Library,0 cups,67,7.2,14.0,3.06,2.8,2.3,3.9,5,5,3,4.0,4
+S064,Sophomore,Off campus,Somewhere between,Spaced,Dorm room,1 cup,68,5.4,6.1,2.91,5.8,7.1,7.6,2,4,3,3.0,3
+S065,First-year,On campus,Night owl,Spaced,Dorm room,1 cup,65,6.3,6.6,2.31,6.3,4.1,9.4,2,2,5,3.0,2
+S066,First-year,On campus,Somewhere between,Spaced,Library,4+ cups,77,5.8,3.4,3.55,4.5,6.9,7.1,4,3,2,4.0,2
+S067,Junior,Off campus,Early bird,Cramming,Coffee shop,2-3 cups,60,7.2,5.1,3.1,3.4,4.3,2.1,4,3,4,4.0,5
+S068,Junior,On campus,Somewhere between,Cramming,Library,0 cups,55,5.0,7.1,2.84,3.7,6.3,8.4,3,3,5,2.0,2
+S069,First-year,On campus,Night owl,Spaced,Dorm room,0 cups,71,6.2,11.8,2.71,4.3,4.8,8.4,3,4,4,4.0,4
+S070,Sophomore,On campus,Somewhere between,Spaced,Dorm room,2-3 cups,81,8.4,2.1,4.0,4.7,4.0,6.9,4,5,2,3.0,5
+S071,Junior,On campus,Somewhere between,Cramming,Outdoors,1 cup,68,7.2,3.2,3.39,6.0,6.7,5.7,5,4,2,5.0,4
+S072,Senior,Off campus,Night owl,Spaced,Library,0 cups,75,6.5,6.0,3.47,3.0,6.3,8.7,4,4,3,4.0,4
+S073,Senior,Off campus,Somewhere between,Spaced,Library,1 cup,92,7.5,3.8,4.0,2.1,4.3,7.6,3,5,2,4.0,4
+S074,Sophomore,Off campus,Somewhere between,Cramming,Dorm room,2-3 cups,62,6.5,4.8,3.37,3.8,1.6,4.1,3,4,3,2.0,4
+S075,Senior,Off campus,Night owl,Cramming,Library,1 cup,64,6.9,4.5,2.74,4.5,6.5,4.5,3,4,3,3.0,4
+S076,First-year,On campus,Somewhere between,Mixed,Dorm room,2-3 cups,56,6.6,11.8,3.13,4.6,7.4,8.2,3,4,4,1.0,3
+S077,Senior,Off campus,Somewhere between,Mixed,Library,0 cups,77,8.5,5.4,3.38,5.0,4.0,7.1,4,5,2,3.0,5
+S078,First-year,Off campus,Early bird,Mixed,Coffee shop,4+ cups,58,6.9,,3.24,7.4,9.3,8.1,3,3,4,2.0,5
+S079,First-year,On campus,Early bird,Cramming,Coffee shop,1 cup,55,6.2,6.9,3.32,4.1,3.5,5.1,2,4,5,4.0,5
+S080,Sophomore,Off campus,Somewhere between,Mixed,Library,2-3 cups,57,6.5,8.4,2.86,3.3,4.8,7.1,4,2,3,5.0,3
+S081,Sophomore,On campus,Night owl,Mixed,Outdoors,2-3 cups,84,6.2,4.4,3.25,5.5,4.1,5.5,4,3,4,5.0,4
+S082,Senior,On campus,Early bird,Mixed,Library,1 cup,85,6.9,3.5,2.95,8.0,7.2,8.8,2,4,3,2.0,3
+S083,First-year,Off campus,Early bird,Spaced,Library,0 cups,83,8.3,3.0,3.35,4.6,2.9,2.9,4,5,2,4.0,4
+S084,First-year,On campus,Somewhere between,Mixed,Coffee shop,1 cup,47,6.6,4.6,2.65,3.9,4.1,4.3,4,4,3,2.0,4
+S085,Junior,Off campus,Early bird,Spaced,Library,2-3 cups,78,6.1,6.0,2.5,8.1,8.3,6.7,3,3,3,4.0,2
+S086,Junior,On campus,Night owl,Spaced,Coffee shop,1 cup,78,6.1,7.4,3.28,4.4,6.2,4.3,3,4,4,4.0,3
+S087,First-year,On campus,Night owl,Cramming,Coffee shop,1 cup,65,8.2,5.6,3.86,3.7,3.8,5.0,5,4,4,5.0,3
+S088,Sophomore,On campus,Somewhere between,Spaced,Dorm room,1 cup,68,5.2,6.1,2.74,4.1,6.2,5.1,5,3,2,4.0,2
+S089,Senior,On campus,Night owl,Mixed,Coffee shop,1 cup,62,6.6,9.2,3.48,3.6,4.2,7.3,5,4,4,4.0,4
+S090,Sophomore,On campus,Early bird,Mixed,Dorm room,0 cups,61,8.6,7.6,2.89,2.9,4.9,4.8,5,4,3,5.0,4
+S091,Senior,Off campus,Somewhere between,Cramming,Coffee shop,2-3 cups,68,7.0,6.1,3.44,1.5,2.6,5.9,5,5,1,4.0,5
+S092,Junior,On campus,Early bird,Mixed,Library,0 cups,59,9.7,3.2,3.31,4.6,3.4,4.5,5,5,4,5.0,5
+S093,Senior,Off campus,Early bird,Cramming,Library,0 cups,75,9.0,4.5,3.39,3.8,4.5,5.0,4,4,3,5.0,5
+S094,Sophomore,On campus,Night owl,Cramming,Library,2-3 cups,94,6.5,8.0,3.1,7.2,8.2,9.4,5,5,3,5.0,4
+S095,Junior,Off campus,Early bird,Spaced,Library,2-3 cups,75,7.1,2.8,2.99,9.2,7.5,9.1,4,4,1,3.0,4
+S096,Sophomore,Off campus,Somewhere between,Mixed,Outdoors,1 cup,79,7.1,7.4,3.22,4.6,2.3,4.6,5,5,2,2.0,5
+S097,Junior,On campus,Night owl,Cramming,Coffee shop,1 cup,81,6.3,5.7,2.9,8.5,5.4,,3,1,4,2.0,3
+S098,Junior,Off campus,Night owl,Cramming,Coffee shop,0 cups,61,7.5,4.4,3.02,3.9,6.9,5.8,3,4,4,2.0,3
+S099,Junior,On campus,Early bird,Cramming,Library,1 cup,69,9.5,6.5,2.67,4.7,3.9,6.1,1,4,4,2.0,1
+S100,Junior,On campus,Night owl,Cramming,Coffee shop,2-3 cups,52,5.6,6.7,2.86,3.7,6.5,4.5,4,4,3,3.0,4
+S101,First-year,On campus,Somewhere between,Cramming,Library,0 cups,45,7.1,7.9,2.32,3.9,4.8,6.2,4,5,2,3.0,4
+S102,First-year,On campus,Early bird,Spaced,Library,1 cup,74,8.0,2.7,3.12,5.6,4.8,7.8,3,4,2,4.0,3
+S103,Junior,On campus,Somewhere between,Spaced,Dorm room,2-3 cups,72,6.4,2.8,,5.7,6.5,7.3,5,3,2,3.0,3
+S104,First-year,On campus,Somewhere between,Mixed,Outdoors,1 cup,58,7.3,5.4,2.64,5.6,4.4,5.6,2,4,1,3.0,4
+S105,Senior,Off campus,Early bird,Spaced,Dorm room,1 cup,64,7.0,2.9,3.18,3.2,2.0,3.1,3,4,1,3.0,4
+S106,First-year,On campus,Somewhere between,Mixed,Library,0 cups,55,7.8,3.6,2.83,6.0,2.5,3.2,4,3,3,3.0,5
+S107,Sophomore,On campus,Night owl,Mixed,Outdoors,2-3 cups,50,7.0,5.1,2.29,5.8,4.0,6.2,5,4,2,4.0,3
+S108,Sophomore,On campus,Early bird,Spaced,Dorm room,1 cup,77,8.5,6.8,3.81,4.2,0.4,2.3,5,4,3,4.0,3
+S109,Sophomore,Off campus,Early bird,Mixed,Coffee shop,1 cup,63,8.1,3.0,3.66,3.2,5.5,6.4,5,5,2,5.0,5
+S110,Sophomore,On campus,Somewhere between,Mixed,Library,0 cups,89,8.0,4.0,3.16,2.4,1.3,4.0,4,4,2,3.0,3
+S111,First-year,On campus,Night owl,Mixed,Dorm room,2-3 cups,61,5.5,6.5,2.5,2.8,4.9,6.6,2,5,4,3.0,4
+S112,Sophomore,Off campus,Early bird,Cramming,Coffee shop,0 cups,71,6.8,5.2,3.19,3.9,6.5,6.6,4,5,4,4.0,4
+S113,Sophomore,On campus,Early bird,Cramming,Dorm room,1 cup,66,6.1,6.5,2.95,6.2,8.7,7.6,2,3,4,2.0,3
+S114,Sophomore,Off campus,Somewhere between,Mixed,Coffee shop,0 cups,70,5.9,6.8,2.61,4.2,3.9,6.9,4,2,4,3.0,4
+S115,Senior,Off campus,Somewhere between,Spaced,Library,1 cup,96,8.5,3.8,3.69,5.1,4.1,8.1,4,3,2,3.0,3
+S116,Senior,Off campus,Night owl,Mixed,Library,1 cup,83,5.1,7.4,3.44,6.5,7.9,10.0,4,5,3,3.0,4
+S117,Senior,On campus,Somewhere between,Spaced,Coffee shop,0 cups,61,8.5,5.0,2.89,5.6,5.1,7.1,4,4,3,3.0,3
+S118,First-year,On campus,Early bird,Cramming,Library,1 cup,69,7.6,4.5,3.99,3.0,1.3,5.4,5,3,2,4.0,4
+S119,Senior,Off campus,Early bird,Mixed,Coffee shop,2-3 cups,68,7.2,5.9,3.11,3.0,5.5,5.4,2,4,3,4.0,4
+S120,Senior,Off campus,Early bird,Cramming,Coffee shop,1 cup,61,8.4,4.5,3.16,1.7,3.4,6.8,4,5,4,3.0,4
+S121,Sophomore,Off campus,Somewhere between,Mixed,Coffee shop,2-3 cups,69,6.9,7.7,2.82,6.1,6.7,10.0,2,4,5,2.0,1
+S122,First-year,On campus,Somewhere between,Cramming,Coffee shop,1 cup,65,6.7,4.7,2.95,4.2,6.1,2.7,5,4,3,4.0,2
+S123,Senior,Off campus,Somewhere between,Spaced,Dorm room,2-3 cups,85,7.2,7.1,3.58,4.6,6.0,5.8,5,5,5,5.0,5
+S124,Senior,Off campus,Somewhere between,Mixed,Coffee shop,4+ cups,57,6.4,8.0,2.53,6.3,1.4,8.8,4,5,2,4.0,4
+S125,Junior,On campus,Night owl,Cramming,Library,1 cup,61,7.5,7.9,2.42,3.7,4.4,7.2,2,4,4,3.0,3
+S126,First-year,On campus,Somewhere between,Mixed,Library,0 cups,67,7.9,3.6,2.35,3.3,3.3,7.7,5,3,2,3.0,4
+S127,First-year,On campus,Night owl,Cramming,Coffee shop,2-3 cups,64,5.8,5.6,2.57,7.0,5.7,6.9,2,2,3,3.0,5
+S128,Sophomore,Off campus,Somewhere between,Spaced,Dorm room,1 cup,59,6.7,3.2,3.75,1.8,4.3,6.7,5,4,3,3.0,5
+S129,Senior,On campus,Night owl,Cramming,Coffee shop,2-3 cups,70,6.4,4.7,2.95,4.1,4.6,5.6,5,4,4,3.0,3
+S130,Junior,Off campus,Early bird,Spaced,Library,1 cup,78,7.0,3.8,2.86,7.6,4.6,8.9,4,4,1,4.0,4
+S131,Junior,On campus,Early bird,Cramming,Dorm room,1 cup,58,8.2,7.1,2.91,1.6,5.2,7.5,3,5,2,,3
+S132,First-year,On campus,Somewhere between,Cramming,Coffee shop,1 cup,47,5.8,9.6,2.86,6.7,5.6,7.9,2,4,4,3.0,4
+S133,Junior,On campus,Early bird,Spaced,Coffee shop,1 cup,71,7.4,11.1,3.28,5.9,4.9,7.6,3,4,3,3.0,3
+S134,Sophomore,On campus,Somewhere between,Cramming,Library,2-3 cups,75,6.2,4.7,3.13,3.9,10.0,6.3,3,3,3,4.0,4
+S135,Sophomore,On campus,Somewhere between,Cramming,Coffee shop,2-3 cups,60,6.4,4.9,2.72,3.5,4.0,4.0,3,1,3,3.0,3
+S136,Senior,On campus,Somewhere between,Spaced,Coffee shop,4+ cups,61,5.8,4.9,2.65,7.3,6.0,7.9,1,2,5,2.0,4
+S137,Junior,On campus,Night owl,Cramming,Outdoors,0 cups,42,4.9,9.5,1.9,3.3,6.2,9.3,3,3,4,3.0,2
+S138,Sophomore,Off campus,Early bird,Mixed,Library,0 cups,67,7.7,9.1,2.59,4.5,4.8,4.5,5,5,3,4.0,5
+S139,Senior,Off campus,Somewhere between,Cramming,Dorm room,1 cup,62,8.9,6.0,3.05,4.0,2.8,3.3,4,3,3,3.0,3
+S140,Junior,On campus,Night owl,Mixed,Dorm room,2-3 cups,58,6.0,5.6,3.28,5.4,7.3,7.3,3,2,4,2.0,3
+S141,First-year,On campus,Night owl,Cramming,Library,4+ cups,48,6.1,6.6,2.12,6.0,5.5,7.5,3,2,3,1.0,2
+S142,Senior,Off campus,Night owl,Cramming,Dorm room,1 cup,52,,7.0,2.06,6.8,4.5,8.4,1,3,4,1.0,3
+S143,Junior,Off campus,Night owl,Spaced,Outdoors,0 cups,80,6.2,5.6,2.89,0.3,1.5,4.8,5,5,2,5.0,5
+S144,First-year,On campus,Early bird,Mixed,Dorm room,1 cup,71,8.2,6.1,3.45,3.6,4.0,7.5,4,5,4,3.0,4
+S145,Sophomore,On campus,Night owl,Mixed,Dorm room,0 cups,61,7.9,4.8,2.9,3.9,3.8,3.0,5,5,3,5.0,5
+S146,First-year,On campus,Early bird,Cramming,Library,2-3 cups,73,5.9,2.5,3.14,8.9,8.8,7.8,3,3,3,4.0,4
+S147,Junior,Off campus,Night owl,Cramming,Dorm room,1 cup,59,6.9,7.1,2.41,5.5,6.3,6.8,4,3,4,1.0,2
+S148,Sophomore,Off campus,Somewhere between,Spaced,Coffee shop,2-3 cups,69,7.6,6.9,2.32,1.7,8.0,5.8,4,4,5,1.0,3
+S149,First-year,On campus,Night owl,Mixed,Coffee shop,0 cups,64,8.7,3.6,2.53,3.3,6.9,4.6,3,4,1,5.0,3
+S150,Junior,Off campus,Early bird,Cramming,Library,1 cup,47,8.8,3.3,2.81,6.1,3.2,,4,5,1,3.0,3
+S151,First-year,Off campus,Somewhere between,Cramming,Dorm room,0 cups,57,7.5,3.7,3.06,2.3,2.8,3.5,4,5,3,3.0,4
+S152,Senior,Off campus,Somewhere between,Mixed,Dorm room,0 cups,70,6.5,4.6,2.56,1.8,2.8,4.3,5,5,3,4.0,4
+S153,Sophomore,On campus,Somewhere between,Spaced,Coffee shop,4+ cups,56,5.1,8.9,2.67,4.0,9.1,5.9,3,4,3,4.0,4
+S154,Sophomore,Off campus,Somewhere between,Cramming,Dorm room,0 cups,63,6.2,4.6,3.14,5.2,4.3,4.3,4,5,3,5.0,5
+S155,Sophomore,On campus,Night owl,Mixed,Coffee shop,4+ cups,67,6.5,8.2,3.12,6.4,3.9,6.5,5,5,2,3.0,5
+S156,First-year,On campus,Somewhere between,Cramming,Coffee shop,2-3 cups,57,7.2,4.8,2.64,4.3,6.7,7.0,5,4,3,3.0,4
+S157,Sophomore,On campus,Night owl,Mixed,Coffee shop,4+ cups,79,7.2,5.2,2.52,4.1,6.2,5.9,2,3,2,3.0,4
+S158,Junior,On campus,Somewhere between,Cramming,Outdoors,1 cup,63,5.9,5.9,2.79,6.2,2.7,5.2,4,5,2,1.0,5
+S159,Sophomore,On campus,Early bird,Spaced,Library,1 cup,76,8.5,8.4,2.54,3.9,4.4,7.1,4,4,4,3.0,4
+S160,Sophomore,Off campus,Early bird,Mixed,Coffee shop,0 cups,54,8.5,5.0,3.45,1.2,2.3,3.2,5,3,5,2.0,2
+S161,Senior,Off campus,Somewhere between,Spaced,Library,4+ cups,71,7.9,4.8,3.06,3.2,6.8,7.1,4,5,3,2.0,5
+S162,First-year,On campus,Night owl,Spaced,Library,2-3 cups,70,7.6,6.4,3.09,5.7,7.5,5.3,3,3,5,2.0,2
+S163,Sophomore,On campus,Night owl,Mixed,Dorm room,4+ cups,47,6.3,5.1,3.04,8.7,5.1,8.1,1,3,5,2.0,2

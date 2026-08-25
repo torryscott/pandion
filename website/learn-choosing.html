@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Which chart for which data? - Pandion Plots</title>
+<meta name="description" content="A tour of Pandion Plots&#39; seven analyses, matched to the shape of your data, using the app&#39;s built-in examples.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<meta name="theme-color" content="#192E49">
+<link rel="canonical" href="https://pandionplots.com/learn-choosing.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Pandion Plots">
+<meta property="og:title" content="Which chart for which data? - Pandion Plots">
+<meta property="og:description" content="A tour of Pandion Plots&#39; seven analyses, matched to the shape of your data, using the app&#39;s built-in examples.">
+<meta property="og:url" content="https://pandionplots.com/learn-choosing.html">
+<meta property="og:image" content="https://pandionplots.com/assets/share-card-copy-refresh.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+  :root {
+    --navy: #192E49;
+    --cobalt: #375CA0;
+    --ink: #22364d;
+    --muted: #5f6f80;
+    --line: #dde5ee;
+    --wash: #f4f7fb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      Helvetica, Arial, sans-serif;
+    margin: 0; color: var(--ink); background: #fff;
+    font-size: 16px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 24px; }
+  a { color: var(--cobalt); }
+
+  .intro { padding: 56px 0 34px; }
+  .kicker {
+    color: #8a6414; font-size: 13px; font-weight: 800;
+    letter-spacing: 0.12em; text-transform: uppercase; margin: 0 0 8px;
+  }
+  h1 {
+    margin: 0 0 12px; color: var(--navy);
+    font-size: clamp(28px, 4vw, 38px); letter-spacing: -0.015em;
+    line-height: 1.15;
+  }
+  .lede { margin: 0; max-width: 46em; color: var(--muted); font-size: 17px; }
+
+  section.tut { padding: 34px 0 10px; border-top: 1px solid var(--line); margin-top: 34px; }
+  h2 {
+    margin: 0 0 6px; color: var(--navy);
+    font-size: clamp(22px, 3vw, 27px); letter-spacing: -0.01em;
+  }
+  .sec-lede { margin: 0 0 26px; color: var(--muted); max-width: 46em; }
+
+  .step { display: grid; grid-template-columns: 40px 1fr; gap: 14px; margin: 0 0 34px; }
+  .step-n {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: var(--navy); color: #fff; font-weight: 700; font-size: 15px;
+    display: flex; align-items: center; justify-content: center; margin-top: 2px;
+  }
+  .step h3 { margin: 2px 0 8px; color: var(--navy); font-size: 18px; }
+  .step p { margin: 0 0 14px; max-width: 44em; }
+  .step p:last-child { margin-bottom: 0; }
+  kbd, .ui {
+    font-family: inherit; font-weight: 700; color: var(--navy);
+    background: var(--wash); border: 1px solid var(--line);
+    border-radius: 6px; padding: 1px 7px; font-size: 14.5px; white-space: nowrap;
+  }
+
+  figure.fig { margin: 16px 0 6px; }
+  figure.fig img {
+    display: block; width: 100%; height: auto;
+    border: 1px solid var(--line); border-radius: 12px;
+    box-shadow: 0 10px 28px rgba(25, 46, 73, 0.10);
+    background: #fff;
+  }
+  figure.fig.fig-narrow { max-width: 400px; }
+  figure.fig.fig-mid { max-width: 660px; }
+  figure.fig figcaption {
+    margin-top: 10px; color: var(--muted); font-size: 13.5px; max-width: 44em;
+  }
+
+  .note {
+    margin: 6px 0 14px; padding: 12px 16px; max-width: 44em;
+    background: var(--wash); border: 1px solid var(--line);
+    border-left: 3px solid var(--cobalt); border-radius: 8px;
+    color: var(--ink); font-size: 14.5px;
+  }
+  .closer { padding: 34px 0 64px; border-top: 1px solid var(--line); margin-top: 34px; }
+  .closer p { max-width: 46em; }
+
+  @media (max-width: 560px) {
+    .step { grid-template-columns: 30px 1fr; gap: 10px; }
+  }
+  @media print {
+    header, footer, .skip-link { display: none; }
+    body { background: #fff; }
+    figure.fig img { box-shadow: none; border-color: #999; }
+    .step, figure.fig { break-inside: avoid; }
+    section.tut { border-top-color: #999; }
+    a { color: inherit; text-decoration: none; }
+  }
+
+  /* ---- shared header + footer, lifted from about.html ---- */
+  /* Anchor targets must clear the sticky header. */
+  html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+  header {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(255,255,255,0.92); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav { display: flex; align-items: center; gap: 10px; height: 60px; }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    color: var(--navy); text-decoration: none;
+    font-weight: 800; font-size: 18px; letter-spacing: -0.01em;
+  }
+  .brand img { width: 34px; height: 34px; }
+  .nav-links { margin-left: auto; display: flex; gap: 4px; }
+  .nav-links a {
+    color: var(--ink); text-decoration: none; font-size: 14.5px;
+    font-weight: 600; padding: 7px 12px; border-radius: 7px;
+  }
+  .nav-links a:hover { background: var(--wash); color: var(--navy); }
+  .nav-links a[aria-current="page"] { color: var(--cobalt); }
+  .nav-links a.nav-cta { color: #fff; background: var(--navy); margin-left: 6px; }
+  .nav-links a.nav-cta:hover { background: #24405f; }
+
+  footer { border-top: 1px solid var(--line); padding: 36px 0 48px; margin-top: 48px; }
+  .foot {
+    display: flex; flex-wrap: wrap; gap: 18px; align-items: center;
+    color: var(--muted); font-size: 13.5px;
+  }
+  .foot .brand { font-size: 15px; }
+  .foot .brand img { width: 26px; height: 26px; }
+  .foot-links { margin-left: auto; display: flex; flex-wrap: wrap; gap: 10px 18px; }
+  .foot-links a { color: var(--muted); text-decoration: none; }
+  .foot-links a:hover { color: var(--cobalt); }
+
+  /* ---- platform toggle (browser/desktop vs jamovi) ---- */
+  .pf-toggle {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    margin: 20px 0 0;
+  }
+  .pf-toggle .pf-label {
+    color: var(--muted); font-size: 13px; font-weight: 700;
+    letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .pf-toggle button {
+    font: inherit; font-size: 14.5px; font-weight: 600;
+    color: var(--ink); background: #fff;
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 6px 16px; cursor: pointer;
+  }
+  .pf-toggle button:hover { border-color: var(--cobalt); color: var(--navy); }
+  .pf-toggle button[aria-pressed="true"] {
+    color: #fff; background: var(--navy); border-color: var(--navy);
+  }
+  body:not([data-pf="jamovi"]) .only-jamovi { display: none; }
+  body[data-pf="jamovi"] .only-standalone { display: none; }
+</style>
+<link rel="stylesheet" href="assets/site-nav.css">
+<script src="assets/site-nav.js" defer></script>
+</head>
+<body>
+<script>
+try {
+  if (localStorage.getItem('pandion.learn.platform') === 'jamovi')
+    document.body.setAttribute('data-pf', 'jamovi');
+} catch (e) {}
+</script>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="index.html">
+      <img src="assets/pandion-wing.svg" alt=""
+           data-image-kind="decorative">
+      Pandion Plots
+    </a>
+    <button class="nav-toggle" type="button" aria-expanded="false"
+      aria-controls="site-nav">
+      <span class="nav-toggle-icon" aria-hidden="true"></span>
+      <span>Menu</span>
+    </button>
+    <nav class="nav-links" id="site-nav" aria-label="Site">
+      <a href="gallery.html">Gallery</a>
+      <a href="learn.html">Learn</a>
+      <a href="docs/">Docs</a>
+      <a href="index.html#downloads">Downloads</a>
+      <a href="about.html">About</a>
+      <a href="support.html">Support</a>
+      <a class="nav-cta" href="app/">Try it now</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main-content" tabindex="-1">
+  <div class="wrap">
+
+    <div class="intro">
+      <p class="kicker">Learn &middot; Choosing</p>
+      <h1>Which chart for which data?</h1>
+      <p class="lede">
+        Pandion&rsquo;s seven analyses cover the charts research data
+        usually needs, and the right one follows from the shape of your
+        data: how many columns are involved, and what kind. This tour uses
+        the app&rsquo;s built-in examples, so you can open any of them
+        from the welcome screen and follow along. The same seven analyses
+        live in the jamovi module; the toggle below adapts the directions
+        to your platform.
+      </p>
+      <div class="pf-toggle" data-role="pf-toggle" hidden
+           role="group" aria-label="Which version of Pandion Plots to show">
+        <span class="pf-label">Showing</span>
+        <button type="button" data-pf-choice="standalone"
+          aria-pressed="true">Browser &amp; desktop app</button>
+        <button type="button" data-pf-choice="jamovi"
+          aria-pressed="false">jamovi module</button>
+      </div>
+    </div>
+
+    <section class="tut" id="shapes">
+      <h2>1. Match the shape of your data</h2>
+      <div class="only-standalone">
+        <p class="sec-lede">
+          Seven shapes, seven analyses. Pick yours from the
+          <span class="ui">Analysis</span> menu at the top of the Chart
+          setup panel; every entry carries a one-line description of what
+          it is for.
+        </p>
+        <figure class="fig fig-narrow">
+          <img src="assets/tutorial/pick-analysis.png"
+               data-image-kind="illustrative"
+               alt="The Chart setup panel with the Analysis menu
+                    highlighted, reading Compare Groups, above two empty
+                    role cards labelled Category axis and Value axis">
+          <figcaption>
+            The <span class="ui">Analysis</span> menu at the top of the
+            setup panel is where the choice lands.
+          </figcaption>
+        </figure>
+      </div>
+      <div class="only-jamovi">
+        <p class="sec-lede">
+          Seven shapes, seven analyses. Pick yours from the
+          <span class="ui">Pandion Plots</span> menu on the
+          <span class="ui">Plots</span> ribbon tab.
+        </p>
+        <figure class="fig fig-mid">
+          <img src="assets/tutorial/j-menu.png"
+               data-image-kind="illustrative"
+               alt="The Pandion Plots menu open on jamovi&#39;s Plots ribbon
+                    tab, listing Distribution, Frequencies, Compare Groups,
+                    Repeated Measures, Scatter, Correlation Matrix and
+                    Likert / Survey, plus Help Me Choose under a Guide
+                    heading">
+          <figcaption>
+            The module&rsquo;s menu, with all seven analyses and
+            <span class="ui">Help Me Choose</span> at the bottom for when
+            you are not sure.
+          </figcaption>
+        </figure>
+      </div>
+
+      <div class="step">
+        <div class="step-n">1</div>
+        <div class="step-body">
+          <h3>One numeric column: Distribution</h3>
+          <p>A single measured variable (<span class="ui">score</span> alone) is a question about shape and spread. <span class="ui">Distribution</span> draws it as a histogram, density curve, box plot, violin, raincloud, Q-Q plot, or ECDF.</p>
+          <figure class="fig fig-mid">
+  <img src="assets/tutorial/ch-dist.png"
+       data-image-kind="illustrative"
+       alt="A histogram of score: bars over a continuous score axis showing a roughly symmetric distribution">
+  <figcaption>The example&rsquo;s scores as a histogram.</figcaption>
+</figure>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-n">2</div>
+        <div class="step-body">
+          <h3>Categories you count: Frequencies</h3>
+          <p>When the data is category labels and the question is how many of each, <span class="ui">Frequencies</span> counts them: bar, pie, donut, or pareto, as counts, percents, or proportions.</p>
+          <figure class="fig fig-mid">
+  <img src="assets/tutorial/ch-freq.png"
+       data-image-kind="illustrative"
+       alt="A bar chart of counts per condition: Control, Low dose and High dose, eight observations each">
+  <figcaption>Counts per condition. The bars answer how many, not how much.</figcaption>
+</figure>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-n">3</div>
+        <div class="step-body">
+          <h3>A numeric outcome across categories: Compare Groups</h3>
+          <p>One numeric outcome, one categorical predictor: the classic experiment shape, and the one the <a href="start.html">getting-started guide</a> builds. Bars, lines, dots, boxes, violins, or rainclouds.</p>
+          <figure class="fig fig-mid">
+  <img src="assets/tutorial/ch-cg.png"
+       data-image-kind="illustrative"
+       alt="A bar chart of mean score by condition with error bars">
+  <figcaption>Mean score by condition: one bar per group, error bars included.</figcaption>
+</figure>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-n">4</div>
+        <div class="step-body">
+          <h3>Two numeric columns: Scatter</h3>
+          <p>Two measured variables (<span class="ui">hours</span> and <span class="ui">score</span>) make a relationship question. <span class="ui">Scatter</span> plots the points and can add fit lines, confidence bands, ellipses, marginal distributions, and the correlation itself.</p>
+          <figure class="fig fig-mid">
+  <img src="assets/tutorial/ch-xy.png"
+       data-image-kind="illustrative"
+       alt="A scatter plot of score against hours: one point per participant, rising to the right">
+  <figcaption>Score against study hours: each point is one participant.</figcaption>
+</figure>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-n">5</div>
+        <div class="step-body">
+          <h3>Several numeric columns: Correlation Matrix</h3>
+          <p>With three or more numeric variables, pairwise scatter plots stop scaling. <span class="ui">Correlation Matrix</span> shows every pairwise r at once, as a heatmap, circles, numbers, or a mix.</p>
+          <figure class="fig fig-mid">
+  <img src="assets/tutorial/ch-corr.png"
+       data-image-kind="illustrative"
+       alt="A correlation heatmap of session1 through session4: blue cells with correlation values from .60 to 1.00">
+  <figcaption>The practice example&rsquo;s four sessions, all correlations at a glance.</figcaption>
+</figure>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-n">6</div>
+        <div class="step-body">
+          <h3>The same people measured repeatedly: Repeated Measures</h3>
+          <p>When the numeric columns are the SAME measurement taken again and again (sessions, timepoints), they are not separate variables: they are occasions. <span class="ui">Repeated Measures</span> connects them properly and corrects the error bars for the design. It gets <a href="learn-repeated-measures.html">its own guide</a>.</p>
+          <figure class="fig fig-mid">
+  <img src="assets/tutorial/ch-rm.png"
+       data-image-kind="illustrative"
+       alt="A line chart of reaction time across session1 to session4 for two groups, Massed and Spaced, both falling across sessions">
+  <figcaption>The practice example: four sessions, two training groups.</figcaption>
+</figure>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-n">7</div>
+        <div class="step-body">
+          <h3>Survey items on a shared scale: Likert / Survey</h3>
+          <p>A battery of items answered on one response scale (1 to 5 agreement, say) is its own shape. <span class="ui">Likert / Survey</span> draws diverging or stacked response bars per item, or item means with confidence intervals.</p>
+          <figure class="fig fig-mid">
+  <img src="assets/tutorial/ch-likert.png"
+       data-image-kind="illustrative"
+       alt="A diverging stacked bar chart of five survey items (clear, paced, useful, supported, recommend) with response percentages colored from red disagreement to blue agreement around a center line">
+  <figcaption>The course-feedback example: five items on one 1-to-5 scale.</figcaption>
+</figure>
+        </div>
+      </div>
+    </section>
+
+    <section class="tut" id="unsure">
+      <h2>2. When you are still unsure</h2>
+      <p class="sec-lede">
+        Two helpers narrow it down from inside the app.
+      </p>
+      <p>
+        Once variables are assigned, the chart&rsquo;s
+        <span class="ui">?</span> panel has a
+        <span class="ui">Which graph?</span> tab: it lists the graph types
+        that fit YOUR variables, highlights the current one, states each
+        type&rsquo;s honest trade-off, and switches instantly with
+        <span class="ui">Use this</span>, styling intact.
+      </p>
+      <figure class="fig">
+  <img src="assets/tutorial/ch-whichgraph.png"
+       data-image-kind="illustrative"
+       alt="The Which graph? tab: cards for Bar (marked current, with a trade-off line saying it hides the spread), Line, Dot and Box, each with a small preview icon, a plain-language description, and a Use this button">
+  <figcaption>The in-chart chooser. Every card says what the type is best for and what it hides.</figcaption>
+</figure>
+      <p class="note only-jamovi">
+        The second helper is <span class="ui">Help Me Choose</span>, at
+        the bottom of the module&rsquo;s menu: a short question wizard
+        that recommends an analysis, and can read the variables you drop
+        in to explain which chart fits them and why.
+      </p>
+      <p class="note only-standalone">
+        The second helper is <span class="ui">Help me choose</span>, on
+        the <span class="ui">New chart</span> dialog (the
+        <span class="ui">+</span> beside the chart tabs): answer a few
+        plain-language questions, or hand it the exact variables from
+        your project, and it recommends the analysis that fits them and
+        says why.
+      </p>
+    </section>
+
+    <div class="closer">
+      <p>
+        Next in the series:
+        <a href="learn-repeated-measures.html">repeated measures</a>, the
+        one shape whose data layout genuinely trips people up. All the
+        guides live on the <a href="learn.html">Learn page</a>.
+      </p>
+    </div>
+
+  </div>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <a class="brand" href="index.html">
+      <img src="assets/pandion-wing.svg" alt=""
+           data-image-kind="decorative">
+      Pandion Plots
+    </a>
+    <span>Made by Torry Scott Dennis, PhD.</span>
+    <span data-role="foot-meta">Version 3.1.0 &middot;
+      <a href="https://github.com/torryscott/pandion/blob/main/LICENSE">GPL-3.0</a>
+    </span>
+    <nav class="foot-links" aria-label="Footer">
+      <a href="app/">Try it</a>
+      <a href="gallery.html">Gallery</a>
+      <a href="learn.html">Learn</a>
+      <a href="docs/">Docs</a>
+      <a href="about.html#cite">How to cite</a>
+      <a href="about.html">About</a>
+      <a href="support.html">Support</a>
+      <a href="accessibility.html">Accessibility</a>
+      <a href="https://github.com/torryscott/pandion">GitHub</a>
+    </nav>
+  </div>
+</footer>
+<script>
+(function () {
+  var KEY = 'pandion.learn.platform';
+  var wrap = document.querySelector('[data-role="pf-toggle"]');
+  if (!wrap) return;
+  wrap.hidden = false;
+  var btns = wrap.querySelectorAll('[data-pf-choice]');
+  function apply(pf) {
+    if (pf === 'jamovi') document.body.setAttribute('data-pf', 'jamovi');
+    else document.body.removeAttribute('data-pf');
+    for (var i = 0; i < btns.length; i++)
+      btns[i].setAttribute('aria-pressed',
+        btns[i].getAttribute('data-pf-choice') === pf ? 'true' : 'false');
+    try { localStorage.setItem(KEY, pf); } catch (e) {}
+  }
+  var pf = 'standalone';
+  try { if (localStorage.getItem(KEY) === 'jamovi') pf = 'jamovi'; } catch (e) {}
+  apply(pf);
+  for (var i = 0; i < btns.length; i++)
+    btns[i].addEventListener('click', function () {
+      apply(this.getAttribute('data-pf-choice'));
+    });
+})();
+</script>
+</body>
+</html>

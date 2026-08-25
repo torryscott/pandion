@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Repeated measures - Pandion Plots</title>
+<meta name="description" content="Wide data, within-subject error bars, subject lines, and the right tests for repeated-measures charts in Pandion Plots.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<meta name="theme-color" content="#192E49">
+<link rel="canonical" href="https://pandionplots.com/learn-repeated-measures.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Pandion Plots">
+<meta property="og:title" content="Repeated measures - Pandion Plots">
+<meta property="og:description" content="Wide data, within-subject error bars, subject lines, and the right tests for repeated-measures charts in Pandion Plots.">
+<meta property="og:url" content="https://pandionplots.com/learn-repeated-measures.html">
+<meta property="og:image" content="https://pandionplots.com/assets/share-card-copy-refresh.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+  :root {
+    --navy: #192E49;
+    --cobalt: #375CA0;
+    --ink: #22364d;
+    --muted: #5f6f80;
+    --line: #dde5ee;
+    --wash: #f4f7fb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      Helvetica, Arial, sans-serif;
+    margin: 0; color: var(--ink); background: #fff;
+    font-size: 16px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 24px; }
+  a { color: var(--cobalt); }
+
+  .intro { padding: 56px 0 34px; }
+  .kicker {
+    color: #8a6414; font-size: 13px; font-weight: 800;
+    letter-spacing: 0.12em; text-transform: uppercase; margin: 0 0 8px;
+  }
+  h1 {
+    margin: 0 0 12px; color: var(--navy);
+    font-size: clamp(28px, 4vw, 38px); letter-spacing: -0.015em;
+    line-height: 1.15;
+  }
+  .lede { margin: 0; max-width: 46em; color: var(--muted); font-size: 17px; }
+
+  section.tut { padding: 34px 0 10px; border-top: 1px solid var(--line); margin-top: 34px; }
+  h2 {
+    margin: 0 0 6px; color: var(--navy);
+    font-size: clamp(22px, 3vw, 27px); letter-spacing: -0.01em;
+  }
+  .sec-lede { margin: 0 0 26px; color: var(--muted); max-width: 46em; }
+
+  .step { display: grid; grid-template-columns: 40px 1fr; gap: 14px; margin: 0 0 34px; }
+  .step-n {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: var(--navy); color: #fff; font-weight: 700; font-size: 15px;
+    display: flex; align-items: center; justify-content: center; margin-top: 2px;
+  }
+  .step h3 { margin: 2px 0 8px; color: var(--navy); font-size: 18px; }
+  .step p { margin: 0 0 14px; max-width: 44em; }
+  .step p:last-child { margin-bottom: 0; }
+  kbd, .ui {
+    font-family: inherit; font-weight: 700; color: var(--navy);
+    background: var(--wash); border: 1px solid var(--line);
+    border-radius: 6px; padding: 1px 7px; font-size: 14.5px; white-space: nowrap;
+  }
+
+  figure.fig { margin: 16px 0 6px; }
+  figure.fig img {
+    display: block; width: 100%; height: auto;
+    border: 1px solid var(--line); border-radius: 12px;
+    box-shadow: 0 10px 28px rgba(25, 46, 73, 0.10);
+    background: #fff;
+  }
+  figure.fig.fig-narrow { max-width: 400px; }
+  figure.fig.fig-mid { max-width: 660px; }
+  figure.fig figcaption {
+    margin-top: 10px; color: var(--muted); font-size: 13.5px; max-width: 44em;
+  }
+
+  .note {
+    margin: 6px 0 14px; padding: 12px 16px; max-width: 44em;
+    background: var(--wash); border: 1px solid var(--line);
+    border-left: 3px solid var(--cobalt); border-radius: 8px;
+    color: var(--ink); font-size: 14.5px;
+  }
+  .closer { padding: 34px 0 64px; border-top: 1px solid var(--line); margin-top: 34px; }
+  .closer p { max-width: 46em; }
+
+  @media (max-width: 560px) {
+    .step { grid-template-columns: 30px 1fr; gap: 10px; }
+  }
+  @media print {
+    header, footer, .skip-link { display: none; }
+    body { background: #fff; }
+    figure.fig img { box-shadow: none; border-color: #999; }
+    .step, figure.fig { break-inside: avoid; }
+    section.tut { border-top-color: #999; }
+    a { color: inherit; text-decoration: none; }
+  }
+
+  /* ---- shared header + footer, lifted from about.html ---- */
+  /* Anchor targets must clear the sticky header. */
+  html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+  header {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(255,255,255,0.92); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav { display: flex; align-items: center; gap: 10px; height: 60px; }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    color: var(--navy); text-decoration: none;
+    font-weight: 800; font-size: 18px; letter-spacing: -0.01em;
+  }
+  .brand img { width: 34px; height: 34px; }
+  .nav-links { margin-left: auto; display: flex; gap: 4px; }
+  .nav-links a {
+    color: var(--ink); text-decoration: none; font-size: 14.5px;
+    font-weight: 600; padding: 7px 12px; border-radius: 7px;
+  }
+  .nav-links a:hover { background: var(--wash); color: var(--navy); }
+  .nav-links a[aria-current="page"] { color: var(--cobalt); }
+  .nav-links a.nav-cta { color: #fff; background: var(--navy); margin-left: 6px; }
+  .nav-links a.nav-cta:hover { background: #24405f; }
+
+  footer { border-top: 1px solid var(--line); padding: 36px 0 48px; margin-top: 48px; }
+  .foot {
+    display: flex; flex-wrap: wrap; gap: 18px; align-items: center;
+    color: var(--muted); font-size: 13.5px;
+  }
+  .foot .brand { font-size: 15px; }
+  .foot .brand img { width: 26px; height: 26px; }
+  .foot-links { margin-left: auto; display: flex; flex-wrap: wrap; gap: 10px 18px; }
+  .foot-links a { color: var(--muted); text-decoration: none; }
+  .foot-links a:hover { color: var(--cobalt); }
+
+  /* ---- platform toggle (browser/desktop vs jamovi) ---- */
+  .pf-toggle {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    margin: 20px 0 0;
+  }
+  .pf-toggle .pf-label {
+    color: var(--muted); font-size: 13px; font-weight: 700;
+    letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .pf-toggle button {
+    font: inherit; font-size: 14.5px; font-weight: 600;
+    color: var(--ink); background: #fff;
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 6px 16px; cursor: pointer;
+  }
+  .pf-toggle button:hover { border-color: var(--cobalt); color: var(--navy); }
+  .pf-toggle button[aria-pressed="true"] {
+    color: #fff; background: var(--navy); border-color: var(--navy);
+  }
+  body:not([data-pf="jamovi"]) .only-jamovi { display: none; }
+  body[data-pf="jamovi"] .only-standalone { display: none; }
+</style>
+<link rel="stylesheet" href="assets/site-nav.css">
+<script src="assets/site-nav.js" defer></script>
+</head>
+<body>
+<script>
+try {
+  if (localStorage.getItem('pandion.learn.platform') === 'jamovi')
+    document.body.setAttribute('data-pf', 'jamovi');
+} catch (e) {}
+</script>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="index.html">
+      <img src="assets/pandion-wing.svg" alt=""
+           data-image-kind="decorative">
+      Pandion Plots
+    </a>
+    <button class="nav-toggle" type="button" aria-expanded="false"
+      aria-controls="site-nav">
+      <span class="nav-toggle-icon" aria-hidden="true"></span>
+      <span>Menu</span>
+    </button>
+    <nav class="nav-links" id="site-nav" aria-label="Site">
+      <a href="gallery.html">Gallery</a>
+      <a href="learn.html">Learn</a>
+      <a href="docs/">Docs</a>
+      <a href="index.html#downloads">Downloads</a>
+      <a href="about.html">About</a>
+      <a href="support.html">Support</a>
+      <a class="nav-cta" href="app/">Try it now</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main-content" tabindex="-1">
+  <div class="wrap">
+
+    <div class="intro">
+      <p class="kicker">Learn &middot; Repeated measures</p>
+      <h1>Repeated measures, done right.</h1>
+      <p class="lede">
+        When the same people are measured more than once, the chart has to
+        know which scores belong to the same person; that changes the
+        layout of the data, the meaning of the error bars, and the tests.
+        This guide uses the built-in
+        <span class="ui">Reaction time practice</span> example: sixteen
+        people timed on four practice sessions, in two training groups.
+        The chart editor is the same everywhere; the toggle below adapts
+        the data and setup steps to your platform.
+      </p>
+      <div class="pf-toggle" data-role="pf-toggle" hidden
+           role="group" aria-label="Which version of Pandion Plots to show">
+        <span class="pf-label">Showing</span>
+        <button type="button" data-pf-choice="standalone"
+          aria-pressed="true">Browser &amp; desktop app</button>
+        <button type="button" data-pf-choice="jamovi"
+          aria-pressed="false">jamovi module</button>
+      </div>
+    </div>
+
+    <section class="tut" id="wide">
+      <h2>1. The data shape: one row per person</h2>
+      <p class="sec-lede">
+        Repeated-measures data goes in WIDE: one row per person, one
+        column per occasion. The occasions are columns
+        <span class="ui">session1</span> through
+        <span class="ui">session4</span>, not a single
+        &ldquo;session&rdquo; column with a session-number code.
+      </p>
+      <div class="only-standalone">
+        <figure class="fig">
+          <img src="assets/tutorial/rm-data.png"
+               data-image-kind="illustrative"
+               alt="The Data workspace showing the practice dataset: one row per person, columns person, group, and session1 through session4, with group tagged Between groups">
+          <figcaption>Sixteen rows, one per person: open the
+          <span class="ui">Reaction time practice</span> example from the
+          welcome screen. Each person&rsquo;s four sessions sit in the
+          same row, which is how the app knows they belong
+          together.</figcaption>
+        </figure>
+        <p class="note">
+          If your data is long instead (one row per measurement), pivot
+          it wide before charting.
+        </p>
+      </div>
+      <div class="only-jamovi">
+        <figure class="fig">
+          <img src="assets/tutorial/j-rm-data.png"
+               data-image-kind="illustrative"
+               alt="The practice dataset in jamovi&#39;s spreadsheet: one row
+                    per person, columns person, group, and session1 through
+                    session4">
+          <figcaption>Sixteen rows, one per person.
+          <a href="assets/tutorial/sample-practice-sessions.csv" download>Download
+          the practice CSV</a> and open it in jamovi to follow along.
+          Each person&rsquo;s four sessions sit in the same row, which is
+          how the module knows they belong together.</figcaption>
+        </figure>
+        <p class="note">
+          If your data is long instead (one row per measurement), pivot
+          it wide before charting. And check that the session columns
+          imported as <span class="ui">Continuous</span>: integer scores
+          often arrive as <span class="ui">Nominal</span>, the
+          measure-type fix from the
+          <a href="start-jamovi.html#jtype">getting-started guide</a>.
+        </p>
+      </div>
+    </section>
+
+    <section class="tut" id="build">
+      <h2>2. Build the chart</h2>
+      <div class="only-standalone">
+        <p class="sec-lede">
+          Set <span class="ui">Analysis</span> to
+          <span class="ui">Repeated Measures</span>. Drop the four session
+          columns into <span class="ui">Repeated measures</span> (it takes
+          as many as you have) and <span class="ui">group</span> into
+          <span class="ui">Between-groups variable</span>.
+        </p>
+        <figure class="fig">
+          <img src="assets/tutorial/rm-chart.png"
+               data-image-kind="illustrative"
+               alt="The working view: the Repeated measures role card ringed in the setup panel holding session1 through session4, group assigned as the between-groups variable, and a line chart of both groups falling across the four sessions">
+          <figcaption>One line per group, one point per occasion. Reaction
+          times fall with practice, and faster for the Spaced
+          group.</figcaption>
+        </figure>
+      </div>
+      <div class="only-jamovi">
+        <p class="sec-lede">
+          On the <span class="ui">Plots</span> tab, choose
+          <span class="ui">Pandion Plots</span>, then
+          <span class="ui">Repeated Measures</span>. The options panel
+          asks for the DESIGN: define one repeated-measures factor (name
+          it <span class="ui">Session</span> and give it four levels),
+          drop each session column into its cell under
+          <span class="ui">Repeated Measures Cells</span>, and put
+          <span class="ui">group</span> under
+          <span class="ui">Between Subject Factors</span>.
+        </p>
+        <figure class="fig">
+          <img src="assets/tutorial/j-rm-roles.png"
+               data-image-kind="illustrative"
+               alt="The jamovi working view: the Repeated Measures options
+                    panel with a Session factor of four levels, the session
+                    columns filled into the ringed Repeated Measures Cells
+                    box, group under Between Subject Factors, and the drawn
+                    line chart of both groups in the results pane">
+          <figcaption>The filled design: one within-subjects factor with
+          four cells, one between-subjects factor, and the chart drawn in
+          the results.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="tut" id="within">
+      <h2>3. Error bars that respect the design</h2>
+      <p class="sec-lede">
+        On a repeated-measures chart the interesting variation is WITHIN
+        each person: how their scores change across occasions. Ordinary
+        error bars mix that up with how much people differ overall, and
+        overstate the uncertainty of the changes.
+      </p>
+      <p>
+        So the default here is the within-subject correction
+        (Cousineau-Morey): each person&rsquo;s overall level is set aside,
+        and the bars show how consistent the CHANGES are. Click any line
+        marker, open the <span class="ui">Error bars</span> tab, and the
+        <span class="ui">Method</span> control under the Type strip lets
+        you switch between the corrected and the plain between-subjects
+        bars.
+      </p>
+      <figure class="fig">
+  <img src="assets/tutorial/rm-method.png"
+       data-image-kind="illustrative"
+       alt="The line panel open on the Error bars tab: the Changes band ringed, containing the Type choices SE, SD, 95% CI, 99% CI, Difference-adjusted, None, and below them a Method section with Within-subjects (Cousineau-Morey) selected and Between-subjects (uncorrected) beside it">
+  <figcaption>Type and Method together: what the whiskers show, and how they are computed for a repeated-measures design.</figcaption>
+</figure>
+    </section>
+
+    <section class="tut" id="people">
+      <h2>4. See every person</h2>
+      <p class="sec-lede">
+        Group means can hide individuals. The <span class="ui">+</span>
+        menu&rsquo;s <span class="ui">Data points</span> and
+        <span class="ui">Connect subjects</span> overlays draw each
+        person&rsquo;s own trajectory behind the means.
+      </p>
+      <figure class="fig">
+  <img src="assets/tutorial/rm-subjects.png"
+       data-image-kind="illustrative"
+       alt="The same line chart with faint per-person lines behind the two group means: each of the sixteen participants drawn as a thin line falling across the sessions">
+  <figcaption>Every participant&rsquo;s own four sessions. The group story holds person by person, which is exactly what this view is for checking.</figcaption>
+</figure>
+    </section>
+
+    <section class="tut" id="test">
+      <h2>5. Test it</h2>
+      <p class="sec-lede">
+        The statistics follow the design automatically. A significance
+        bracket between two occasions defaults to a paired test, because
+        the module knows the same people sit at both occasions. The
+        <span class="ui">&Sigma; Stats</span> panel&rsquo;s Omnibus tab
+        runs the repeated-measures ANOVA (Greenhouse-Geisser corrected),
+        and with a between-groups variable on the chart it becomes the
+        full mixed ANOVA: group, occasion, and their interaction. The
+        <a href="learn-statistics.html">statistics guide</a> covers
+        reading and reporting all of it.
+      </p>
+    </section>
+
+    <div class="closer">
+      <p>
+        Next in the series:
+        <a href="learn-publication.html">make it publication-ready</a>,
+        the finishing pass before a figure ships. All the guides live on
+        the <a href="learn.html">Learn page</a>.
+      </p>
+    </div>
+
+  </div>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <a class="brand" href="index.html">
+      <img src="assets/pandion-wing.svg" alt=""
+           data-image-kind="decorative">
+      Pandion Plots
+    </a>
+    <span>Made by Torry Scott Dennis, PhD.</span>
+    <span data-role="foot-meta">Version 3.1.0 &middot;
+      <a href="https://github.com/torryscott/pandion/blob/main/LICENSE">GPL-3.0</a>
+    </span>
+    <nav class="foot-links" aria-label="Footer">
+      <a href="app/">Try it</a>
+      <a href="gallery.html">Gallery</a>
+      <a href="learn.html">Learn</a>
+      <a href="docs/">Docs</a>
+      <a href="about.html#cite">How to cite</a>
+      <a href="about.html">About</a>
+      <a href="support.html">Support</a>
+      <a href="accessibility.html">Accessibility</a>
+      <a href="https://github.com/torryscott/pandion">GitHub</a>
+    </nav>
+  </div>
+</footer>
+<script>
+(function () {
+  var KEY = 'pandion.learn.platform';
+  var wrap = document.querySelector('[data-role="pf-toggle"]');
+  if (!wrap) return;
+  wrap.hidden = false;
+  var btns = wrap.querySelectorAll('[data-pf-choice]');
+  function apply(pf) {
+    if (pf === 'jamovi') document.body.setAttribute('data-pf', 'jamovi');
+    else document.body.removeAttribute('data-pf');
+    for (var i = 0; i < btns.length; i++)
+      btns[i].setAttribute('aria-pressed',
+        btns[i].getAttribute('data-pf-choice') === pf ? 'true' : 'false');
+    try { localStorage.setItem(KEY, pf); } catch (e) {}
+  }
+  var pf = 'standalone';
+  try { if (localStorage.getItem(KEY) === 'jamovi') pf = 'jamovi'; } catch (e) {}
+  apply(pf);
+  for (var i = 0; i < btns.length; i++)
+    btns[i].addEventListener('click', function () {
+      apply(this.getAttribute('data-pf-choice'));
+    });
+})();
+</script>
+</body>
+</html>

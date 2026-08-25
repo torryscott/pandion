@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Get your data ready - Pandion Plots</title>
+<meta name="description" content="The Pandion Plots Data workspace: paste from a spreadsheet, fix measure types, exclude outliers honestly, and filter rows.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<meta name="theme-color" content="#192E49">
+<link rel="canonical" href="https://pandionplots.com/learn-data.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Pandion Plots">
+<meta property="og:title" content="Get your data ready - Pandion Plots">
+<meta property="og:description" content="The Pandion Plots Data workspace: paste from a spreadsheet, fix measure types, exclude outliers honestly, and filter rows.">
+<meta property="og:url" content="https://pandionplots.com/learn-data.html">
+<meta property="og:image" content="https://pandionplots.com/assets/share-card-copy-refresh.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+  :root {
+    --navy: #192E49;
+    --cobalt: #375CA0;
+    --ink: #22364d;
+    --muted: #5f6f80;
+    --line: #dde5ee;
+    --wash: #f4f7fb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      Helvetica, Arial, sans-serif;
+    margin: 0; color: var(--ink); background: #fff;
+    font-size: 16px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 24px; }
+  a { color: var(--cobalt); }
+
+  .intro { padding: 56px 0 34px; }
+  .kicker {
+    color: #8a6414; font-size: 13px; font-weight: 800;
+    letter-spacing: 0.12em; text-transform: uppercase; margin: 0 0 8px;
+  }
+  h1 {
+    margin: 0 0 12px; color: var(--navy);
+    font-size: clamp(28px, 4vw, 38px); letter-spacing: -0.015em;
+    line-height: 1.15;
+  }
+  .lede { margin: 0; max-width: 46em; color: var(--muted); font-size: 17px; }
+
+  section.tut { padding: 34px 0 10px; border-top: 1px solid var(--line); margin-top: 34px; }
+  h2 {
+    margin: 0 0 6px; color: var(--navy);
+    font-size: clamp(22px, 3vw, 27px); letter-spacing: -0.01em;
+  }
+  .sec-lede { margin: 0 0 26px; color: var(--muted); max-width: 46em; }
+
+  .step { display: grid; grid-template-columns: 40px 1fr; gap: 14px; margin: 0 0 34px; }
+  .step-n {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: var(--navy); color: #fff; font-weight: 700; font-size: 15px;
+    display: flex; align-items: center; justify-content: center; margin-top: 2px;
+  }
+  .step h3 { margin: 2px 0 8px; color: var(--navy); font-size: 18px; }
+  .step p { margin: 0 0 14px; max-width: 44em; }
+  .step p:last-child { margin-bottom: 0; }
+  kbd, .ui {
+    font-family: inherit; font-weight: 700; color: var(--navy);
+    background: var(--wash); border: 1px solid var(--line);
+    border-radius: 6px; padding: 1px 7px; font-size: 14.5px; white-space: nowrap;
+  }
+
+  figure.fig { margin: 16px 0 6px; }
+  figure.fig img {
+    display: block; width: 100%; height: auto;
+    border: 1px solid var(--line); border-radius: 12px;
+    box-shadow: 0 10px 28px rgba(25, 46, 73, 0.10);
+    background: #fff;
+  }
+  figure.fig.fig-narrow { max-width: 400px; }
+  figure.fig.fig-mid { max-width: 660px; }
+  figure.fig figcaption {
+    margin-top: 10px; color: var(--muted); font-size: 13.5px; max-width: 44em;
+  }
+
+  .note {
+    margin: 6px 0 14px; padding: 12px 16px; max-width: 44em;
+    background: var(--wash); border: 1px solid var(--line);
+    border-left: 3px solid var(--cobalt); border-radius: 8px;
+    color: var(--ink); font-size: 14.5px;
+  }
+  .closer { padding: 34px 0 64px; border-top: 1px solid var(--line); margin-top: 34px; }
+  .closer p { max-width: 46em; }
+
+  @media (max-width: 560px) {
+    .step { grid-template-columns: 30px 1fr; gap: 10px; }
+  }
+  @media print {
+    header, footer, .skip-link { display: none; }
+    body { background: #fff; }
+    figure.fig img { box-shadow: none; border-color: #999; }
+    .step, figure.fig { break-inside: avoid; }
+    section.tut { border-top-color: #999; }
+    a { color: inherit; text-decoration: none; }
+  }
+
+  /* ---- shared header + footer, lifted from about.html ---- */
+  /* Anchor targets must clear the sticky header. */
+  html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+  header {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(255,255,255,0.92); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav { display: flex; align-items: center; gap: 10px; height: 60px; }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    color: var(--navy); text-decoration: none;
+    font-weight: 800; font-size: 18px; letter-spacing: -0.01em;
+  }
+  .brand img { width: 34px; height: 34px; }
+  .nav-links { margin-left: auto; display: flex; gap: 4px; }
+  .nav-links a {
+    color: var(--ink); text-decoration: none; font-size: 14.5px;
+    font-weight: 600; padding: 7px 12px; border-radius: 7px;
+  }
+  .nav-links a:hover { background: var(--wash); color: var(--navy); }
+  .nav-links a[aria-current="page"] { color: var(--cobalt); }
+  .nav-links a.nav-cta { color: #fff; background: var(--navy); margin-left: 6px; }
+  .nav-links a.nav-cta:hover { background: #24405f; }
+
+  footer { border-top: 1px solid var(--line); padding: 36px 0 48px; margin-top: 48px; }
+  .foot {
+    display: flex; flex-wrap: wrap; gap: 18px; align-items: center;
+    color: var(--muted); font-size: 13.5px;
+  }
+  .foot .brand { font-size: 15px; }
+  .foot .brand img { width: 26px; height: 26px; }
+  .foot-links { margin-left: auto; display: flex; flex-wrap: wrap; gap: 10px 18px; }
+  .foot-links a { color: var(--muted); text-decoration: none; }
+  .foot-links a:hover { color: var(--cobalt); }
+</style>
+<link rel="stylesheet" href="assets/site-nav.css">
+<script src="assets/site-nav.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="index.html">
+      <img src="assets/pandion-wing.svg" alt=""
+           data-image-kind="decorative">
+      Pandion Plots
+    </a>
+    <button class="nav-toggle" type="button" aria-expanded="false"
+      aria-controls="site-nav">
+      <span class="nav-toggle-icon" aria-hidden="true"></span>
+      <span>Menu</span>
+    </button>
+    <nav class="nav-links" id="site-nav" aria-label="Site">
+      <a href="gallery.html">Gallery</a>
+      <a href="learn.html">Learn</a>
+      <a href="docs/">Docs</a>
+      <a href="index.html#downloads">Downloads</a>
+      <a href="about.html">About</a>
+      <a href="support.html">Support</a>
+      <a class="nav-cta" href="app/">Try it now</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main-content" tabindex="-1">
+  <div class="wrap">
+
+    <div class="intro">
+      <p class="kicker">Learn &middot; Data</p>
+      <h1>Get your data ready.</h1>
+      <p class="lede">
+        The browser and desktop app include a full Data workspace:
+        paste, inspect, fix, exclude, and filter without leaving the
+        chart. This guide is specific to the standalone app; in jamovi
+        you prepare data with jamovi&rsquo;s own spreadsheet, as the
+        <a href="start-jamovi.html">jamovi guide</a> shows.
+      </p>
+    </div>
+
+    <section class="tut" id="paste">
+      <h2>1. Paste straight from a spreadsheet</h2>
+      <p class="sec-lede">
+        <span class="ui">Paste data</span> on the welcome screen (or the
+        <span class="ui">Open</span> button any time) opens the
+        <span class="ui">Load data</span> dialog. Copy rows in Excel or
+        Sheets, paste them in, and <span class="ui">Preview data</span>
+        shows what the app understood before anything is committed.
+      </p>
+      <figure class="fig">
+  <img src="assets/tutorial/dat-paste.png"
+       data-image-kind="illustrative"
+       alt="The Load data dialog: a file picker, a paste box holding tab-separated rows of condition and score data, selects for delimiter, first row and file encoding, and buttons Preview data, Use sample data, and Start with a blank sheet">
+  <figcaption>The Load data dialog. The delimiter is detected automatically; the first row becomes your variable names.</figcaption>
+</figure>
+      <p class="note">
+        Nothing is uploaded. Files and pasted rows are read in your
+        browser and stay on your machine.
+      </p>
+    </section>
+
+    <section class="tut" id="types">
+      <h2>2. Check every variable&rsquo;s type</h2>
+      <p class="sec-lede">
+        Click a column heading and the inspector opens:
+        <span class="ui">Measure type</span> plus a live summary (rows,
+        valid, missing, distinct, mean, SD). Chart roles accept variables
+        by type, so a number that imported as text is the single most
+        common reason a variable refuses to land on a value axis; this
+        menu is where you fix it.
+      </p>
+      <figure class="fig">
+  <img src="assets/tutorial/dat-type.png"
+       data-image-kind="illustrative"
+       alt="The Data workspace with the score column selected: the variable inspector on the right shows the name, a ringed Measure type menu reading Continuous, and a summary card with rows, valid, missing, distinct, mean and SD">
+  <figcaption>The inspector for <span class="ui">score</span>. Continuous means numbers you can measure and average, which is what value axes expect.</figcaption>
+</figure>
+    </section>
+
+    <section class="tut" id="exclude">
+      <h2>3. Exclude a point, honestly</h2>
+      <p class="sec-lede">
+        Sometimes one observation should sit out: a typo, an aborted
+        trial. With <span class="ui">Data points</span> shown on the
+        chart, right-click the point and choose
+        <span class="ui">Exclude this value from the dataset</span>
+        (the same menu&rsquo;s <span class="ui">Reveal in Data</span>
+        jumps to its row).
+      </p>
+      <figure class="fig">
+  <img src="assets/tutorial/dat-exclude.png"
+       data-image-kind="illustrative"
+       alt="The bar chart with raw data points shown and the right-click menu open on one point, its Exclude this value from the dataset entry ringed">
+  <figcaption>Right-click any raw point. Excluding recomputes the mean, the error bars, and every statistic instantly.</figcaption>
+</figure>
+      <figure class="fig">
+  <img src="assets/tutorial/dat-ghost.png"
+       data-image-kind="illustrative"
+       alt="The chart after excluding: a slashed ghost marker ringed where the point was, and a pill in the corner reading 1 point hidden">
+  <figcaption>Nothing vanishes silently: the excluded point stays visible as a slashed ghost, a pill counts the exclusions, and the ghost ships in exports. Clicking the ghost offers to include it again.</figcaption>
+</figure>
+      <p class="note">
+        The exclusion is recorded in the data itself (the
+        <span class="ui">Excluded</span> counter in the Data toolbar
+        lists them all), so a saved project remembers exactly what was
+        set aside, and why the numbers are what they are.
+      </p>
+    </section>
+
+    <section class="tut" id="filter">
+      <h2>4. Filter rows</h2>
+      <p class="sec-lede">
+        <span class="ui">Filter</span> in the Data toolbar keeps only the
+        rows matching your conditions (equals, not equal, greater, less,
+        is missing, is not missing). Filtered-out rows dim rather than
+        disappear, and every chart follows the filter.
+      </p>
+      <figure class="fig">
+  <img src="assets/tutorial/dat-filter.png"
+       data-image-kind="illustrative"
+       alt="The Data workspace with the Filter button ringed, reading Filter 12 of 24: rows where site is West are dimmed, and the variable inspector notes that the chart is showing 12 of 24 rows because a row filter is on">
+  <figcaption>A filter keeping site&nbsp;=&nbsp;East: 12 of 24 rows pass, the rest dim in place, and the inspector says exactly what the chart is currently showing.</figcaption>
+</figure>
+    </section>
+
+    <div class="closer">
+      <p>
+        That completes the series. Back to the
+        <a href="learn.html">Learn page</a> for the full list, or the
+        <a href="docs/">user guide</a> for the reference treatment of
+        every control.
+      </p>
+    </div>
+
+  </div>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <a class="brand" href="index.html">
+      <img src="assets/pandion-wing.svg" alt=""
+           data-image-kind="decorative">
+      Pandion Plots
+    </a>
+    <span>Made by Torry Scott Dennis, PhD.</span>
+    <span data-role="foot-meta">Version 3.1.0 &middot;
+      <a href="https://github.com/torryscott/pandion/blob/main/LICENSE">GPL-3.0</a>
+    </span>
+    <nav class="foot-links" aria-label="Footer">
+      <a href="app/">Try it</a>
+      <a href="gallery.html">Gallery</a>
+      <a href="learn.html">Learn</a>
+      <a href="docs/">Docs</a>
+      <a href="about.html#cite">How to cite</a>
+      <a href="about.html">About</a>
+      <a href="support.html">Support</a>
+      <a href="accessibility.html">Accessibility</a>
+      <a href="https://github.com/torryscott/pandion">GitHub</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

@@ -1,0 +1,25 @@
+condition,score,hours,site
+Control,61,3.1,East
+Control,55,2.2,West
+Control,68,4.6,East
+Control,58,2.9,West
+Control,64,3.8,East
+Control,52,1.8,West
+Control,59,3.0,East
+Control,66,4.1,West
+Low dose,70,4.4,East
+Low dose,74,5.1,West
+Low dose,66,3.6,East
+Low dose,79,5.8,West
+Low dose,72,4.7,East
+Low dose,68,3.9,West
+Low dose,77,5.5,East
+Low dose,71,4.5,West
+High dose,82,6.1,East
+High dose,88,7.2,West
+High dose,79,5.7,East
+High dose,91,7.8,West
+High dose,84,6.4,East
+High dose,77,5.3,West
+High dose,86,6.8,East
+High dose,90,7.5,West

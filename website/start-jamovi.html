@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Getting started in jamovi - Pandion Plots</title>
+<meta name="description" content="A short, illustrated guide to Pandion Plots inside jamovi: install the module, open your data, fix measure types, and build a publication-ready figure.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<meta name="theme-color" content="#192E49">
+<link rel="canonical" href="https://pandionplots.com/start-jamovi.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Pandion Plots">
+<meta property="og:title" content="Getting started in jamovi - Pandion Plots">
+<meta property="og:description" content="Your first Pandion chart inside jamovi, from module install to export.">
+<meta property="og:url" content="https://pandionplots.com/start-jamovi.html">
+<meta property="og:image" content="https://pandionplots.com/assets/share-card-copy-refresh.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+  :root {
+    --navy: #192E49;
+    --cobalt: #375CA0;
+    --ink: #22364d;
+    --muted: #5f6f80;
+    --line: #dde5ee;
+    --wash: #f4f7fb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      Helvetica, Arial, sans-serif;
+    margin: 0; color: var(--ink); background: #fff;
+    font-size: 16px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 24px; }
+  a { color: var(--cobalt); }
+
+  .intro { padding: 56px 0 34px; }
+  .kicker {
+    color: #8a6414; font-size: 13px; font-weight: 800;
+    letter-spacing: 0.12em; text-transform: uppercase; margin: 0 0 8px;
+  }
+  h1 {
+    margin: 0 0 12px; color: var(--navy);
+    font-size: clamp(28px, 4vw, 38px); letter-spacing: -0.015em;
+    line-height: 1.15;
+  }
+  .lede { margin: 0; max-width: 46em; color: var(--muted); font-size: 17px; }
+
+  section.tut { padding: 34px 0 10px; border-top: 1px solid var(--line); margin-top: 34px; }
+  h2 {
+    margin: 0 0 6px; color: var(--navy);
+    font-size: clamp(22px, 3vw, 27px); letter-spacing: -0.01em;
+  }
+  .sec-lede { margin: 0 0 26px; color: var(--muted); max-width: 46em; }
+
+  .step { display: grid; grid-template-columns: 40px 1fr; gap: 14px; margin: 0 0 34px; }
+  .step-n {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: var(--navy); color: #fff; font-weight: 700; font-size: 15px;
+    display: flex; align-items: center; justify-content: center; margin-top: 2px;
+  }
+  .step h3 { margin: 2px 0 8px; color: var(--navy); font-size: 18px; }
+  .step p { margin: 0 0 14px; max-width: 44em; }
+  .step p:last-child { margin-bottom: 0; }
+  kbd, .ui {
+    font-family: inherit; font-weight: 700; color: var(--navy);
+    background: var(--wash); border: 1px solid var(--line);
+    border-radius: 6px; padding: 1px 7px; font-size: 14.5px; white-space: nowrap;
+  }
+
+  figure.fig { margin: 16px 0 6px; }
+  figure.fig img {
+    display: block; width: 100%; height: auto;
+    border: 1px solid var(--line); border-radius: 12px;
+    box-shadow: 0 10px 28px rgba(25, 46, 73, 0.10);
+    background: #fff;
+  }
+  figure.fig.fig-narrow { max-width: 400px; }
+  figure.fig.fig-mid { max-width: 660px; }
+  figure.fig figcaption {
+    margin-top: 10px; color: var(--muted); font-size: 13.5px; max-width: 44em;
+  }
+
+  .note {
+    margin: 6px 0 14px; padding: 12px 16px; max-width: 44em;
+    background: var(--wash); border: 1px solid var(--line);
+    border-left: 3px solid var(--cobalt); border-radius: 8px;
+    color: var(--ink); font-size: 14.5px;
+  }
+  .closer { padding: 34px 0 64px; border-top: 1px solid var(--line); margin-top: 34px; }
+  .closer p { max-width: 46em; }
+
+  @media (max-width: 560px) {
+    .step { grid-template-columns: 30px 1fr; gap: 10px; }
+  }
+  @media print {
+    header, footer, .skip-link { display: none; }
+    body { background: #fff; }
+    figure.fig img { box-shadow: none; border-color: #999; }
+    .step, figure.fig { break-inside: avoid; }
+    section.tut { border-top-color: #999; }
+    a { color: inherit; text-decoration: none; }
+  }
+
+  /* ---- shared header + footer, lifted from about.html ---- */
+  /* Anchor targets must clear the sticky header. */
+  html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+  header {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(255,255,255,0.92); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav { display: flex; align-items: center; gap: 10px; height: 60px; }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    color: var(--navy); text-decoration: none;
+    font-weight: 800; font-size: 18px; letter-spacing: -0.01em;
+  }
+  .brand img { width: 34px; height: 34px; }
+  .nav-links { margin-left: auto; display: flex; gap: 4px; }
+  .nav-links a {
+    color: var(--ink); text-decoration: none; font-size: 14.5px;
+    font-weight: 600; padding: 7px 12px; border-radius: 7px;
+  }
+  .nav-links a:hover { background: var(--wash); color: var(--navy); }
+  .nav-links a[aria-current="page"] { color: var(--cobalt); }
+  .nav-links a.nav-cta { color: #fff; background: var(--navy); margin-left: 6px; }
+  .nav-links a.nav-cta:hover { background: #24405f; }
+
+  footer { border-top: 1px solid var(--line); padding: 36px 0 48px; margin-top: 48px; }
+  .foot {
+    display: flex; flex-wrap: wrap; gap: 18px; align-items: center;
+    color: var(--muted); font-size: 13.5px;
+  }
+  .foot .brand { font-size: 15px; }
+  .foot .brand img { width: 26px; height: 26px; }
+  .foot-links { margin-left: auto; display: flex; flex-wrap: wrap; gap: 10px 18px; }
+  .foot-links a { color: var(--muted); text-decoration: none; }
+  .foot-links a:hover { color: var(--cobalt); }
+</style>
+<link rel="stylesheet" href="assets/site-nav.css">
+<script src="assets/site-nav.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="index.html">
+      <img src="assets/pandion-wing.svg" alt=""
+           data-image-kind="decorative">
+      Pandion Plots
+    </a>
+    <button class="nav-toggle" type="button" aria-expanded="false"
+      aria-controls="site-nav">
+      <span class="nav-toggle-icon" aria-hidden="true"></span>
+      <span>Menu</span>
+    </button>
+    <nav class="nav-links" id="site-nav" aria-label="Site">
+      <a href="gallery.html">Gallery</a>
+      <a href="learn.html">Learn</a>
+      <a href="docs/">Docs</a>
+      <a href="index.html#downloads">Downloads</a>
+      <a href="about.html">About</a>
+      <a href="support.html">Support</a>
+      <a class="nav-cta" href="app/">Try it now</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main-content" tabindex="-1">
+  <div class="wrap">
+
+    <div class="intro">
+      <p class="kicker">Get started &middot; jamovi</p>
+      <h1>Your first chart in jamovi.</h1>
+      <p class="lede">
+        This guide walks you from a fresh jamovi window to a finished
+        Pandion Plots figure. Every picture below is real jamovi with the
+        module installed, and the highlighted control is the one the step
+        is about. Using the browser or desktop app instead? That version
+        of this guide is <a href="start.html">over here</a>, and the chart
+        editor works identically in both.
+      </p>
+    </div>
+
+    <section class="tut" id="install">
+      <h2>1. Install the module</h2>
+      <p class="sec-lede">
+        Download the module file from the
+        <a href="download.html">downloads page</a>, then in jamovi open
+        the <span class="ui">Modules</span> menu (the plus at the top
+        right), choose <span class="ui">jamovi library</span>, and use the
+        sideload arrow at the top of that panel to install the downloaded
+        <span class="ui">.jmo</span> file. A new
+        <span class="ui">Pandion Plots</span> button appears on the
+        <span class="ui">Plots</span> ribbon tab, and it stays after you
+        restart jamovi.
+      </p>
+    </section>
+
+    <section class="tut" id="jdata">
+      <h2>2. Open your data</h2>
+      <p class="sec-lede">
+        Open a CSV, Excel file, or
+        <span class="ui">.omv</span> exactly as you always do in jamovi
+        (the &#9776; menu, then <span class="ui">Open</span>). This guide
+        uses a small dose-response study;
+        <a href="assets/tutorial/sample-dose-response.csv" download>download
+        the same CSV</a> if you want to follow along click for click.
+      </p>
+      <figure class="fig">
+        <img src="assets/tutorial/j-data.png"
+             data-image-kind="illustrative"
+             alt="A jamovi spreadsheet with the sample data loaded: columns
+                  condition, score, hours and site, with rows for Control,
+                  Low dose and High dose participants">
+        <figcaption>
+          The sample data in jamovi: one row per participant, a
+          <span class="ui">condition</span> for each, and a
+          <span class="ui">score</span>.
+        </figcaption>
+      </figure>
+    </section>
+
+    <section class="tut" id="jtype">
+      <h2>3. Check your measure types</h2>
+      <p class="sec-lede">
+        The one jamovi habit worth knowing: columns of whole numbers, like
+        a test score, often import as <span class="ui">Nominal</span>
+        rather than <span class="ui">Continuous</span>, and a chart cannot
+        treat a nominal column as numbers. Double-click the column heading
+        and set <span class="ui">Measure type</span> to
+        <span class="ui">Continuous</span>.
+      </p>
+      <figure class="fig">
+        <img src="assets/tutorial/j-type.png"
+             data-image-kind="illustrative"
+             alt="jamovi's variable editor for the score column, with the
+                  Measure type menu highlighted, currently reading Nominal">
+        <figcaption>
+          The variable editor after double-clicking the
+          <span class="ui">score</span> heading. jamovi imported these
+          integer scores as <span class="ui">Nominal</span>; switch the
+          ringed menu to <span class="ui">Continuous</span> before
+          charting.
+        </figcaption>
+      </figure>
+    </section>
+
+    <section class="tut" id="jchart">
+      <h2>4. Make your first chart</h2>
+      <p class="sec-lede">
+        The module lives on the <span class="ui">Plots</span> ribbon tab.
+      </p>
+
+      <div class="step">
+        <div class="step-n">1</div>
+        <div class="step-body">
+          <h3>Pick the analysis</h3>
+          <p>
+            On the <span class="ui">Plots</span> tab, click
+            <span class="ui">Pandion Plots</span> and choose
+            <span class="ui">Compare Groups</span>: a numeric outcome
+            across categories. The menu lists all seven chart analyses,
+            and <span class="ui">Help Me Choose</span> at the bottom asks
+            a few questions and recommends one when you are not sure.
+          </p>
+          <figure class="fig">
+            <img src="assets/tutorial/j-menu.png"
+                 data-image-kind="illustrative"
+                 alt="The Pandion Plots menu open on jamovi's Plots ribbon
+                      tab, listing Distribution, Frequencies, Compare
+                      Groups, Repeated Measures, Scatter, Correlation
+                      Matrix and Likert / Survey, plus Help Me Choose under
+                      a Guide heading, with Compare Groups highlighted">
+            <figcaption>
+              The module's menu on the <span class="ui">Plots</span> tab,
+              with the ringed <span class="ui">Compare Groups</span> as
+              this guide&rsquo;s choice.
+            </figcaption>
+          </figure>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-n">2</div>
+        <div class="step-body">
+          <h3>Assign the variables</h3>
+          <p>
+            The options panel opens on the left, jamovi style: move
+            <span class="ui">condition</span> to
+            <span class="ui">X-Axis Variable</span> and
+            <span class="ui">score</span> to
+            <span class="ui">Y-Axis Variable</span>. The chart draws in
+            the results as soon as both are set: group means with
+            standard-error bars, labelled axes, no settings touched.
+          </p>
+          <figure class="fig">
+            <img src="assets/tutorial/j-roles.png"
+                 data-image-kind="illustrative"
+                 alt="The classic jamovi working view: the Compare Groups
+                      options panel with condition assigned to the X axis
+                      and score to the Y axis, and the drawn bar chart with
+                      error bars in the results pane">
+            <figcaption>
+              Options on the left, living figure on the right. The chart
+              toolbar above it is the Pandion editor, the same one the
+              browser app shows.
+            </figcaption>
+          </figure>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-n">3</div>
+        <div class="step-body">
+          <h3>Split it by a second variable</h3>
+          <p>
+            Move <span class="ui">site</span> into
+            <span class="ui">Group By (optional)</span>. Each condition
+            splits into colored bars, one per site, with a legend.
+          </p>
+          <figure class="fig">
+            <img src="assets/tutorial/j-grouped.png"
+                 data-image-kind="illustrative"
+                 alt="The Compare Groups options panel with site assigned
+                      to Group By, highlighted by a blue ring, and the
+                      redrawn chart in the results pane: two colored bars
+                      per condition with a legend">
+            <figcaption>
+              The grouped chart. <span class="ui">Panels
+              (optional)</span> works the same way but draws side-by-side
+              mini charts instead of colors.
+            </figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section class="tut" id="jrefine">
+      <h2>5. Make it yours</h2>
+      <p class="sec-lede">
+        There is no settings maze. Click the thing you want to change,
+        right in the results, and its controls appear.
+      </p>
+
+      <div class="step">
+        <div class="step-n">1</div>
+        <div class="step-body">
+          <h3>Click any part of the chart</h3>
+          <p>
+            Click a bar and the bar panel opens beneath the chart: color,
+            border, pattern, error bars, spacing, order. The
+            <span class="ui">Applies to</span> switch chooses between
+            styling just the bar you clicked or all of them. The same
+            rule covers axes, titles, error bars, the legend, and every
+            other part: click it, edit it.
+          </p>
+          <figure class="fig">
+            <img src="assets/tutorial/j-edit.png"
+                 data-image-kind="illustrative"
+                 alt="Inside jamovi's results, the Control bar selected
+                      with a highlight ring and the Bars style panel open
+                      beneath the chart, with tabs for Bars, Border, Error
+                      bars, Gap and Order and an Applies to switch">
+            <figcaption>
+              After clicking the <span class="ui">Control</span> bar
+              inside the jamovi results.
+            </figcaption>
+          </figure>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-n">2</div>
+        <div class="step-body">
+          <h3>Rename an axis by clicking its title</h3>
+          <p>
+            Click the y-axis title and a text panel opens: retype the
+            name, resize it, make it bold. Column names like
+            <span class="ui">score</span> rarely read well on a finished
+            figure, so this is usually the first edit worth making.
+          </p>
+          <figure class="fig">
+            <img src="assets/tutorial/j-retitle.png"
+                 data-image-kind="illustrative"
+                 alt="The chart in jamovi results with the y-axis title
+                      score selected, and the Y-axis title panel open
+                      below: a text box containing the word score, size
+                      and bold controls, a color row, and a rotate slider">
+            <figcaption>
+              The <span class="ui">Y-axis title</span> panel. Type the
+              name you want and the chart updates as you type.
+            </figcaption>
+          </figure>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-n">3</div>
+        <div class="step-body">
+          <h3>Change every color at once</h3>
+          <p>
+            The <span class="ui">Theme</span> button above the chart
+            swaps the whole palette: the built-in Pandion colors, two
+            colorblind-safe sets, classic qualitative palettes, and
+            sequential ramps.
+          </p>
+          <figure class="fig fig-mid">
+            <img src="assets/tutorial/j-theme.png"
+                 data-image-kind="illustrative"
+                 alt="The Theme button highlighted above the chart in
+                      jamovi results with its flyout open, listing the
+                      built-in Pandion palette, colorblind-safe and
+                      qualitative palettes, and sequential color ramps">
+            <figcaption>
+              One click recolors the figure; your other edits stay put.
+              The editor is identical in the
+              <a href="start.html">standalone app</a>, so nothing here
+              needs relearning if you use both.
+            </figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section class="tut" id="jsave">
+      <h2>6. Save and export</h2>
+      <p class="sec-lede">
+        Saving the jamovi file keeps everything: your
+        <span class="ui">.omv</span> stores the data, the analysis, and
+        every chart edit, and reopens ready to keep working, even on a
+        machine without the module for viewing.
+      </p>
+      <figure class="fig">
+        <img src="assets/tutorial/j-export.png"
+             data-image-kind="illustrative"
+             alt="The chart's Export plot panel inside jamovi results:
+                  format buttons for SVG, PDF, PNG and JPG, a filename
+                  box, a save-to menu, and a Save button, with the export
+                  toolbar button highlighted above the chart">
+        <figcaption>
+          The ringed download button on the chart toolbar opens
+          <span class="ui">Export plot</span>: SVG or PDF for manuscripts,
+          PNG or JPG for slides and documents.
+        </figcaption>
+      </figure>
+    </section>
+
+    <div class="closer">
+      <p>
+        That is the whole loop in jamovi: install once, open data, check
+        types, pick an analysis, and refine by clicking. The natural next
+        step is <a href="learn-statistics.html">From chart to
+        conclusion</a> (the chart editor is the same one, so it applies
+        in jamovi as written); the other <a href="learn.html">guides</a>
+        go deeper still. The <a href="docs/">user guide</a> covers every
+        control in depth, the <a href="gallery.html">gallery</a> shows
+        the defaults across all seven analyses, and
+        <a href="start.html">the standalone version of this guide</a>
+        covers the browser and desktop app.
+      </p>
+      <p>
+        Teaching with jamovi? Link this page from your assignment; it
+        prints cleanly if you want a paper handout.
+      </p>
+    </div>
+
+  </div>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <a class="brand" href="index.html">
+      <img src="assets/pandion-wing.svg" alt=""
+           data-image-kind="decorative">
+      Pandion Plots
+    </a>
+    <span>Made by Torry Scott Dennis, PhD.</span>
+    <span data-role="foot-meta">Version 3.1.0 &middot;
+      <a href="https://github.com/torryscott/pandion/blob/main/LICENSE">GPL-3.0</a>
+    </span>
+    <nav class="foot-links" aria-label="Footer">
+      <a href="app/">Try it</a>
+      <a href="gallery.html">Gallery</a>
+      <a href="learn.html">Learn</a>
+      <a href="docs/">Docs</a>
+      <a href="about.html#cite">How to cite</a>
+      <a href="about.html">About</a>
+      <a href="support.html">Support</a>
+      <a href="accessibility.html">Accessibility</a>
+      <a href="https://github.com/torryscott/pandion">GitHub</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

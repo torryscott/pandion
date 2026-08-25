@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Workshop task 1: Open the data, check a type - Pandion Plots</title>
+<meta name="description" content="Workshop task 1: open the sample data and check the score variable&#39;s measure type.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<meta name="theme-color" content="#192E49">
+<link rel="canonical" href="https://pandionplots.com/workshop-1.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Pandion Plots">
+<meta property="og:title" content="Workshop task 1: Open the data, check a type - Pandion Plots">
+<meta property="og:description" content="Workshop task 1: open the sample data and check the score variable&#39;s measure type.">
+<meta property="og:url" content="https://pandionplots.com/workshop-1.html">
+<meta property="og:image" content="https://pandionplots.com/assets/share-card-copy-refresh.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+  :root {
+    --navy: #192E49;
+    --cobalt: #375CA0;
+    --ink: #22364d;
+    --muted: #5f6f80;
+    --line: #dde5ee;
+    --wash: #f4f7fb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      Helvetica, Arial, sans-serif;
+    margin: 0; color: var(--ink); background: #fff;
+    font-size: 16px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 24px; }
+  a { color: var(--cobalt); }
+
+  .intro { padding: 56px 0 34px; }
+  .kicker {
+    color: #8a6414; font-size: 13px; font-weight: 800;
+    letter-spacing: 0.12em; text-transform: uppercase; margin: 0 0 8px;
+  }
+  h1 {
+    margin: 0 0 12px; color: var(--navy);
+    font-size: clamp(28px, 4vw, 38px); letter-spacing: -0.015em;
+    line-height: 1.15;
+  }
+  .lede { margin: 0; max-width: 46em; color: var(--muted); font-size: 17px; }
+
+  section.tut { padding: 34px 0 10px; border-top: 1px solid var(--line); margin-top: 34px; }
+  h2 {
+    margin: 0 0 6px; color: var(--navy);
+    font-size: clamp(22px, 3vw, 27px); letter-spacing: -0.01em;
+  }
+  .sec-lede { margin: 0 0 26px; color: var(--muted); max-width: 46em; }
+
+  .step { display: grid; grid-template-columns: 40px 1fr; gap: 14px; margin: 0 0 34px; }
+  .step-n {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: var(--navy); color: #fff; font-weight: 700; font-size: 15px;
+    display: flex; align-items: center; justify-content: center; margin-top: 2px;
+  }
+  .step h3 { margin: 2px 0 8px; color: var(--navy); font-size: 18px; }
+  .step p { margin: 0 0 14px; max-width: 44em; }
+  .step p:last-child { margin-bottom: 0; }
+  kbd, .ui {
+    font-family: inherit; font-weight: 700; color: var(--navy);
+    background: var(--wash); border: 1px solid var(--line);
+    border-radius: 6px; padding: 1px 7px; font-size: 14.5px; white-space: nowrap;
+  }
+
+  figure.fig { margin: 16px 0 6px; }
+  figure.fig img {
+    display: block; width: 100%; height: auto;
+    border: 1px solid var(--line); border-radius: 12px;
+    box-shadow: 0 10px 28px rgba(25, 46, 73, 0.10);
+    background: #fff;
+  }
+  figure.fig.fig-narrow { max-width: 400px; }
+  figure.fig.fig-mid { max-width: 660px; }
+  figure.fig figcaption {
+    margin-top: 10px; color: var(--muted); font-size: 13.5px; max-width: 44em;
+  }
+
+  .note {
+    margin: 6px 0 14px; padding: 12px 16px; max-width: 44em;
+    background: var(--wash); border: 1px solid var(--line);
+    border-left: 3px solid var(--cobalt); border-radius: 8px;
+    color: var(--ink); font-size: 14.5px;
+  }
+  .closer { padding: 34px 0 64px; border-top: 1px solid var(--line); margin-top: 34px; }
+  .closer p { max-width: 46em; }
+
+  @media (max-width: 560px) {
+    .step { grid-template-columns: 30px 1fr; gap: 10px; }
+  }
+  @media print {
+    header, footer, .skip-link { display: none; }
+    body { background: #fff; }
+    figure.fig img { box-shadow: none; border-color: #999; }
+    .step, figure.fig { break-inside: avoid; }
+    section.tut { border-top-color: #999; }
+    a { color: inherit; text-decoration: none; }
+  }
+
+  /* ---- shared header + footer, lifted from about.html ---- */
+  /* Anchor targets must clear the sticky header. */
+  html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+  header {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(255,255,255,0.92); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav { display: flex; align-items: center; gap: 10px; height: 60px; }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    color: var(--navy); text-decoration: none;
+    font-weight: 800; font-size: 18px; letter-spacing: -0.01em;
+  }
+  .brand img { width: 34px; height: 34px; }
+  .nav-links { margin-left: auto; display: flex; gap: 4px; }
+  .nav-links a {
+    color: var(--ink); text-decoration: none; font-size: 14.5px;
+    font-weight: 600; padding: 7px 12px; border-radius: 7px;
+  }
+  .nav-links a:hover { background: var(--wash); color: var(--navy); }
+  .nav-links a[aria-current="page"] { color: var(--cobalt); }
+  .nav-links a.nav-cta { color: #fff; background: var(--navy); margin-left: 6px; }
+  .nav-links a.nav-cta:hover { background: #24405f; }
+
+  footer { border-top: 1px solid var(--line); padding: 36px 0 48px; margin-top: 48px; }
+  .foot {
+    display: flex; flex-wrap: wrap; gap: 18px; align-items: center;
+    color: var(--muted); font-size: 13.5px;
+  }
+  .foot .brand { font-size: 15px; }
+  .foot .brand img { width: 26px; height: 26px; }
+  .foot-links { margin-left: auto; display: flex; flex-wrap: wrap; gap: 10px 18px; }
+  .foot-links a { color: var(--muted); text-decoration: none; }
+  .foot-links a:hover { color: var(--cobalt); }
+
+  /* ---- workshop chrome ---- */
+  .ws-time {
+    display: inline-block; margin-left: 10px; vertical-align: middle;
+    color: var(--cobalt); background: var(--wash);
+    border: 1px solid var(--line); border-radius: 999px;
+    font-size: 12.5px; font-weight: 700; padding: 2px 10px;
+    letter-spacing: 0.04em;
+  }
+  .ws-check {
+    margin: 10px 0 14px; padding: 11px 15px; max-width: 44em;
+    background: #f0f7ef; border: 1px solid #cfe3cd;
+    border-left: 3px solid #4c8b47; border-radius: 8px;
+    color: #274425; font-size: 14.5px;
+  }
+  .ws-check strong { color: #2e5d2a; }
+  .ws-copy {
+    margin: 12px 0 18px; padding: 14px 18px; max-width: 46em;
+    background: var(--wash); border: 1px solid var(--line);
+    border-radius: 8px; font-size: 14.5px; white-space: pre-wrap;
+  }
+  table.ws-clock {
+    border-collapse: collapse; margin: 14px 0 8px; font-size: 14.5px;
+    width: 100%; max-width: 46em;
+  }
+  table.ws-clock th, table.ws-clock td {
+    text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  table.ws-clock th {
+    color: var(--muted); font-size: 12.5px; letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  table.ws-clock td:first-child { white-space: nowrap; font-weight: 700; color: var(--navy); }
+  ol.ws-plan { margin: 0 0 8px; padding-left: 22px; max-width: 44em; }
+  ol.ws-plan li { margin: 0 0 8px; }
+  ol.ws-plan .ws-time { margin-left: 8px; }
+  .ws-start {
+    display: inline-block; margin: 18px 0 6px; padding: 13px 26px;
+    background: var(--navy); color: #fff; text-decoration: none;
+    font-weight: 700; font-size: 16px; border-radius: 10px;
+  }
+  .ws-start:hover { background: #24405f; }
+  .ws-pager {
+    display: flex; justify-content: space-between; align-items: center;
+    gap: 12px; flex-wrap: wrap; margin: 38px 0 12px;
+    border-top: 1px solid var(--line); padding-top: 22px;
+  }
+  .ws-pager a { text-decoration: none; }
+  .ws-next {
+    background: var(--navy); color: #fff; padding: 12px 22px;
+    border-radius: 10px; font-weight: 700; margin-left: auto;
+  }
+  .ws-next:hover { background: #24405f; color: #fff; }
+  .ws-prev { color: var(--muted); font-size: 14.5px; }
+  .ws-prev:hover { color: var(--cobalt); }
+  details.ws-hints {
+    margin: 14px 0; padding: 12px 16px; max-width: 44em;
+    border: 1px dashed #c3d0df; border-radius: 10px; background: #fbfcfe;
+    font-size: 14.5px;
+  }
+  details.ws-hints summary {
+    cursor: pointer; font-weight: 700; color: var(--navy);
+  }
+  details.ws-hints ol { margin: 10px 0 2px; padding-left: 20px; }
+  details.ws-hints li { margin: 0 0 6px; }
+  ol.ws-steps { margin: 0 0 14px; padding-left: 22px; max-width: 44em; }
+  ol.ws-steps li { margin: 0 0 10px; }
+  /* ---- platform toggle (browser/desktop vs jamovi) ---- */
+  .pf-toggle {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    margin: 20px 0 0;
+  }
+  .pf-toggle .pf-label {
+    color: var(--muted); font-size: 13px; font-weight: 700;
+    letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .pf-toggle button {
+    font: inherit; font-size: 14.5px; font-weight: 600;
+    color: var(--ink); background: #fff;
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 6px 16px; cursor: pointer;
+  }
+  .pf-toggle button:hover { border-color: var(--cobalt); color: var(--navy); }
+  .pf-toggle button[aria-pressed="true"] {
+    color: #fff; background: var(--navy); border-color: var(--navy);
+  }
+  body:not([data-pf="jamovi"]) .only-jamovi { display: none; }
+  body[data-pf="jamovi"] .only-standalone { display: none; }
+</style>
+<link rel="stylesheet" href="assets/site-nav.css">
+<script src="assets/site-nav.js" defer></script>
+</head>
+<body>
+<script>
+try {
+  if (localStorage.getItem('pandion.learn.platform') === 'jamovi')
+    document.body.setAttribute('data-pf', 'jamovi');
+} catch (e) {}
+</script>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="index.html">
+      <img src="assets/pandion-wing.svg" alt=""
+           data-image-kind="decorative">
+      Pandion Plots
+    </a>
+    <button class="nav-toggle" type="button" aria-expanded="false"
+      aria-controls="site-nav">
+      <span class="nav-toggle-icon" aria-hidden="true"></span>
+      <span>Menu</span>
+    </button>
+    <nav class="nav-links" id="site-nav" aria-label="Site">
+      <a href="gallery.html">Gallery</a>
+      <a href="learn.html">Learn</a>
+      <a href="docs/">Docs</a>
+      <a href="index.html#downloads">Downloads</a>
+      <a href="about.html">About</a>
+      <a href="support.html">Support</a>
+      <a class="nav-cta" href="app/">Try it now</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main-content" tabindex="-1">
+  <div class="wrap">
+
+    <div class="intro">
+      <p class="kicker">Workshop &middot; Task 1 of 7</p>
+      <h1>Open the data, check a type.</h1>
+      <div class="pf-toggle" data-role="pf-toggle" hidden
+           role="group" aria-label="Which version of Pandion Plots to show">
+        <span class="pf-label">Showing</span>
+        <button type="button" data-pf-choice="standalone"
+          aria-pressed="true">Browser &amp; desktop app</button>
+        <button type="button" data-pf-choice="jamovi"
+          aria-pressed="false">jamovi module</button>
+      </div>
+    </div>
+
+    <section class="tut" id="task">
+      <p class="sec-lede">
+        Charts rely on the data they are given, so the workshop starts
+        where every real analysis starts: making sure that the
+        measurement type matches the contents of the column.
+      </p>
+      <div class="only-jamovi">
+        <ol class="ws-steps">
+          <li>Open the CSV in jamovi the usual way (the &#9776; menu,
+            then <span class="ui">Open</span>, or drag the file in).</li>
+          <li>Look at the <span class="ui">exam_score</span> column. The
+            values are numbers, but jamovi imported them as
+            <span class="ui">Nominal</span> (the three-circles icon),
+            and a chart cannot put a nominal column on a value axis.</li>
+          <li>Double-click the <span class="ui">exam_score</span> column
+            heading, set <span class="ui">Measure type</span> to
+            <span class="ui">Continuous</span>, and close the editor
+            with the arrow at its top right.</li>
+          <li>Explore other columns to verify the correct measure
+            type.</li>
+        </ol>
+        <figure class="fig fig-mid">
+          <img src="assets/tutorial/j-ws-type.png"
+               data-image-kind="illustrative"
+               alt="jamovi&#39;s variable editor for the exam_score
+                    column, with the Measure type menu highlighted,
+                    currently reading Nominal">
+          <figcaption>The variable editor; the ringed menu is the
+            fix.</figcaption>
+        </figure>
+        <p class="ws-check"><strong>Checkpoint:</strong>
+          <span class="ui">exam_score</span> wears the ruler icon
+          (Continuous), and <span class="ui">Pandion Plots</span> sits
+          on the <span class="ui">Plots</span> tab.</p>
+        <p class="note">
+          This is the single most common stumble your own students will
+          hit with their own data, which is why it is task one.
+        </p>
+      </div>
+      <div class="only-standalone">
+        <ol class="ws-steps">
+          <li>On the welcome screen, click the
+            <span class="ui">Student wellbeing survey</span> example
+            (or open the downloaded CSV with the
+            <span class="ui">Open</span> button).</li>
+          <li>In the <span class="ui">Data</span> workspace, click the
+            <span class="ui">exam_score</span> column heading.</li>
+          <li>Read the inspector on the right:
+            <span class="ui">Measure type</span> should say
+            <span class="ui">Continuous</span>, with a live summary
+            (rows, mean, SD) below it.</li>
+          <li>Explore other columns to verify the correct measure
+            type.</li>
+        </ol>
+        <figure class="fig">
+          <img src="assets/tutorial/ws-type.png"
+               data-image-kind="illustrative"
+               alt="The Data workspace with the exam_score column
+                    selected: the variable inspector on the right shows a
+                    ringed Measure type menu reading Continuous and a
+                    summary with rows, valid, missing, mean and SD">
+          <figcaption>The inspector; its ringed menu is where a wrong
+            type gets fixed.</figcaption>
+        </figure>
+        <p class="ws-check"><strong>Checkpoint:</strong> the inspector
+          shows <span class="ui">Continuous</span>, a mean, and 163
+          rows.</p>
+        <p class="note">
+          It imported cleanly this time. With your own data, numbers
+          can sometimes arrive as text, for example, and this menu is
+          the place to fix it.
+        </p>
+      </div>
+    </section>
+
+    <div class="ws-pager">
+      <a class="ws-prev" href="workshop.html">&larr; Back to the overview</a>
+      <a class="ws-next" href="workshop-2.html">Next: Help me choose &rarr;</a>
+    </div>
+
+  </div>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <a class="brand" href="index.html">
+      <img src="assets/pandion-wing.svg" alt=""
+           data-image-kind="decorative">
+      Pandion Plots
+    </a>
+    <span>Made by Torry Scott Dennis, PhD.</span>
+    <span data-role="foot-meta">Version 3.1.0 &middot;
+      <a href="https://github.com/torryscott/pandion/blob/main/LICENSE">GPL-3.0</a>
+    </span>
+    <nav class="foot-links" aria-label="Footer">
+      <a href="app/">Try it</a>
+      <a href="gallery.html">Gallery</a>
+      <a href="learn.html">Learn</a>
+      <a href="docs/">Docs</a>
+      <a href="about.html#cite">How to cite</a>
+      <a href="about.html">About</a>
+      <a href="support.html">Support</a>
+      <a href="accessibility.html">Accessibility</a>
+      <a href="https://github.com/torryscott/pandion">GitHub</a>
+    </nav>
+  </div>
+</footer>
+<script>
+(function () {
+  var KEY = 'pandion.learn.platform';
+  var wrap = document.querySelector('[data-role="pf-toggle"]');
+  if (!wrap) return;
+  wrap.hidden = false;
+  var btns = wrap.querySelectorAll('[data-pf-choice]');
+  function apply(pf) {
+    if (pf === 'jamovi') document.body.setAttribute('data-pf', 'jamovi');
+    else document.body.removeAttribute('data-pf');
+    for (var i = 0; i < btns.length; i++)
+      btns[i].setAttribute('aria-pressed',
+        btns[i].getAttribute('data-pf-choice') === pf ? 'true' : 'false');
+    try { localStorage.setItem(KEY, pf); } catch (e) {}
+  }
+  var pf = 'standalone';
+  try { if (localStorage.getItem(KEY) === 'jamovi') pf = 'jamovi'; } catch (e) {}
+  apply(pf);
+  for (var i = 0; i < btns.length; i++)
+    btns[i].addEventListener('click', function () {
+      apply(this.getAttribute('data-pf-choice'));
+    });
+})();
+</script>
+</body>
+</html>
