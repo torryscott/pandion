@@ -113,9 +113,14 @@ const anns = await page.evaluate(() =>
     JSON.parse(window.PS_SHELL.optionStore().annotationsJson || '[]')
         .map(a => ({ kind: a.kind, text: a.text, autoP: a.autoPValue === true,
                      anchored: !!(a.anchorLeftCat && a.anchorRightCat) })));
+// Since Aug 25 2026 (the bracket-adoption round) a hand-added bracket
+// starts with auto-compute ON - symmetric with Sigma-placed brackets.
+// Unanchored it still DRAWS the "*" placeholder (auto falls back to
+// ann.text), which is exactly the un-earned mark this lint exists for;
+// the lint skips only auto-AND-anchored brackets, so it still fires.
 ok(anns.length === 1 && anns[0].kind === 'bracket' && anns[0].text === '*' &&
-   !anns[0].autoP && !anns[0].anchored,
-   'the Add menu really does drop an unanchored "*" with auto-p off');
+   anns[0].autoP && !anns[0].anchored,
+   'the Add menu drops an unanchored bracket whose "*" is only a placeholder');
 const svgStar = await page.evaluate(async () => {
     const s = await window.PS_SHELL.exportSource();
     return s ? />\*</.test(s.svg) : false;

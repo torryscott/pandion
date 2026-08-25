@@ -12,6 +12,7 @@
 # gb_spec_args() reads spec[[opt]] %||% default, applies isTRUE when bool.
 .plotbuilderSpecTable <- list(
     list(arg = "facet_strip_position", opt = "facetStripPosition", bool = FALSE, default = "top"),
+    list(arg = "stats_alpha", opt = "statsAlpha", bool = FALSE, default = NULL),
     list(arg = "facet_strip_labels", opt = "facetStripLabels", bool = FALSE, default = list()),
     list(arg = "facet_strip_underline_color", opt = "facetStripUnderlineColor", bool = FALSE, default = "#888888"),
     list(arg = "facet_strip_underline_width", opt = "facetStripUnderlineWidth", bool = FALSE, default = 1),

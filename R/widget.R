@@ -158,6 +158,7 @@ graphbuilder2_html <- function(bars,
                                # module doesn't, and the payload omits them so
                                # the JS fold gate skips those keys).
                                summary_func = NULL,
+                               stats_alpha = NULL,
                                error_bar_type = NULL,
                                error_bar_method = NULL,
                                xy_points = list(),
@@ -2194,6 +2195,12 @@ graphbuilder2_html <- function(bars,
     if (!isTRUE(gb2_libraries_on())) payload$chartLibrariesOff <- TRUE
     if (!is.null(summary_func))
         payload$summaryFunc <- as.character(summary_func)
+    # The chart's significance cutoff (statsAlpha, Aug 2026): chartSpec-
+    # routed from cg/rm, absent everywhere else and in every pre-existing
+    # file, so all other payloads stay byte-identical. The JS resolves an
+    # absent key to .05.
+    if (!is.null(stats_alpha))
+        payload$statsAlpha <- as.numeric(stats_alpha)
     if (!is.null(error_bar_type))
         payload$errorBarType <- as.character(error_bar_type)
     # errorBarMethod (RM only): lets the Label-parts copy say truthfully

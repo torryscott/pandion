@@ -1767,10 +1767,19 @@
             opts = opts || {};
             var t = opts.thresholds || [0.001, 0.01, 0.05];
             var showNs = opts.showNs !== false;
+            // The chosen alpha GATES the marks; the APA ladder itself is
+            // fixed (the correlation matrix precedent). p at or above the
+            // gate reads n.s. even when it would have earned a ladder
+            // star; below the gate but above the ladder's first rung -
+            // only possible at alpha = .10 - earns the marginal dagger.
+            var gate = (typeof opts.gate === "number" &&
+                        isFinite(opts.gate) && opts.gate > 0 && opts.gate < 1)
+                ? opts.gate : t[2];
+            if (p >= gate) return showNs ? "n.s." : "";
             if (p < t[0]) return "***";
             if (p < t[1]) return "**";
             if (p < t[2]) return "*";
-            return showNs ? "n.s." : "";
+            return "\u2020";
         },
         // APA-style result string: "t(28) = 2.45, p = .017, d = 0.84"
         formatAPA: function (res, effect, sym, effectCi, tailNote) {
@@ -15674,6 +15683,15 @@
         // visible label needs to use the CORRECTED p, while the
         // res object still carries the raw p in res.p (we don't
         // mutate the raw result). Returns the displayed string.
+        // The chart's significance cutoff (Torry's option A, Aug 25 2026):
+        // a PERSISTED per-chart value (chartSpec key statsAlpha; the Sigma
+        // Alpha select commits it), defaulting to .05. It gates which
+        // on-chart marks show - the APA star ladder itself never moves.
+        function _gb2StatsAlpha() {
+            var v = data.statsAlpha;
+            return (typeof v === "number" && isFinite(v) && v > 0 && v < 1)
+                ? v : 0.05;
+        }
         function _autoPFormatLabel(raw, ann, displayP, corrStat) {
             if (!raw || !raw.ok) return "—";
             var fmt = ann.autoPFormat || "asterisks";
@@ -15743,7 +15761,8 @@
                     }
                     return _mePfx + _gb2Stats.formatANOVA(resForFmt, raw.effect);
                 }
-                return _gb2Stats.formatAsterisks(displayP);
+                return _gb2Stats.formatAsterisks(displayP,
+                    { gate: _gb2StatsAlpha() });
             }
             // Frequencies proportion brackets: a z-line APA and the
             // proportion difference as the effect (APA-stripped, it
@@ -15765,7 +15784,8 @@
                            _gb2Stats.formatP(displayP) +
                            (_tn ? ", " + _tn : "") + _pEff;
                 }
-                return _gb2Stats.formatAsterisks(displayP) +
+                return _gb2Stats.formatAsterisks(displayP,
+                        { gate: _gb2StatsAlpha() }) +
                        (_tn ? " (" + _tn + ")" : "");
             }
             if (fmt === "p") {
@@ -15784,7 +15804,8 @@
                 }
                 return _gb2Stats.formatAPA(resForFmt, raw.effect, raw.effectSym, raw.effectCi, _tn);
             }
-            return _gb2Stats.formatAsterisks(displayP) +
+            return _gb2Stats.formatAsterisks(displayP,
+                    { gate: _gb2StatsAlpha() }) +
                    (_tn ? " (" + _tn + ")" : "");
         }
 
@@ -16049,6 +16070,16 @@
                 }
                 def.text = "*";
                 def.fontSize = 13;
+                // Symmetric with Sigma-placed brackets (Torry, Aug 25
+                // 2026): a hand-added bracket starts AUTO-computed, so
+                // the moment its legs land on two real bars (the draw
+                // pass auto-anchors legs sitting on bar centers) it
+                // shows true statistics instead of a decorative star.
+                // Unanchored, the computed label falls back to ann.text
+                // ("*"), so a decoration-only bracket looks as before -
+                // and typing custom text flips auto off in the same act.
+                def.autoPValue = true;
+                def.autoPFormat = window.__gb2_cmpLabelStyle || "asterisks";
             } else if (kind === "refLine") {
                 // RefLine "orientation" describes the LINE'S visual
                 // direction. To mark a VALUE on the value axis, the
@@ -18546,6 +18577,30 @@
         function _attachAnnotationInlineEdit(textEl, ann, dragId) {
             editableElsByDragId[dragId] = textEl;
             textEditOnCommit[dragId] = function (v) {
+                // Typing takes the wheel here too (Torry, Aug 25 2026):
+                // the inline editor seeds from the VISIBLE label, so on
+                // an auto-computed bracket a commit that CHANGED it is a
+                // custom relabel - flip auto off in the same act (and
+                // clear autoGen: adopted means yours, Sigma Place/Clear
+                // leave it alone). An unchanged commit is a no-op that
+                // must not overwrite the preserved manual text with the
+                // computed string.
+                if (ann.autoPValue === true) {
+                    // Compare against the COMPUTED label, never the SVG
+                    // text: the editor teardown has already written the
+                    // typed value into the element before this commit
+                    // runs, so a textContent comparison always matches
+                    // and swallowed every inline adoption.
+                    var _curLbl;
+                    try {
+                        var _cB = computeAutoPForBracket(ann);
+                        _curLbl = (_cB && _cB.ok) ? _cB.label
+                            : ((ann.text && ann.text.length) ? ann.text : "\u2014");
+                    } catch (_eB) { _curLbl = ann.text || ""; }
+                    if (v === _curLbl) { redraw(); return; }
+                    ann.autoPValue = false;
+                    if (ann.autoGen === true) ann.autoGen = false;
+                }
                 ann.text = v;
                 persistAnnotations();
                 redraw();
@@ -46444,8 +46499,19 @@
                         var bandEl2 = inspectorPanel.querySelector("[data-cmp-band]");
                         if (bandEl2) {
                             var _owr = bandEl2.style.flexWrap;
+                            var _obw = bandEl2.style.width;
                             bandEl2.style.flexWrap = "nowrap";
+                            // width:max-content for the read (Aug 25 2026,
+                            // Torry's tick-by-tick report): scrollWidth of a
+                            // block-level flex container FLOORS at its
+                            // clientWidth, so a band NARROWER than the panel
+                            // measured the CONTAINER, the +36 pad was re-added,
+                            // and the remembered width ratcheted +8 on every
+                            // interaction. Shrink-wrapped, the probe reads the
+                            // band's true one-row content width.
+                            bandEl2.style.width = "max-content";
                             var bw2 = bandEl2.scrollWidth || 0;
+                            bandEl2.style.width = _obw;
                             bandEl2.style.flexWrap = _owr;
                             if (bw2 > needW) needW = bw2;
                         }
@@ -50501,7 +50567,7 @@
             {g:0,n:"Error-bar type (SE / SD / CI)",y:"",m:["Compare", "RM", "Likert"],s:["error bar", "error bars", "se vs sd", "error bar type", "what error bars show"],b:"SD bars show how spread out the observed values are. SE bars show how precisely a mean is estimated. Confidence-interval bars extend an SE using the selected confidence level. These mean-based bars are not drawn for median summaries.",r:"Always state which type is shown. For repeated measures, also state whether the bars use within-subject Cousineau-Morey normalization or ordinary between-subject spread.",w:"Overlap or non-overlap of separate error bars is not a general pairwise significance test. Use the appropriate comparison and its interval or p value."},
             {g:0,n:"Two-tailed vs one-tailed test",y:"",m:["Compare", "RM", "Freq"],s:["tails", "one-tailed", "two-tailed", "directional", "one sided"],b:"A two-sided test allows differences in either direction. A one-sided test is set up for one direction chosen before seeing the data. A result in that direction is evaluated in that tail; a result in the opposite direction receives a large one-sided p value.",r:"Use a one-sided test only when the direction was specified in advance and a result in the opposite direction would not support the claim. Pandion Plots labels one-tailed results explicitly.",w:"Choosing the direction after seeing the estimate or switching tails to cross alpha invalidates the advertised error rate."},
             {g:0,n:"Significance bracket",y:"",m:["Compare", "RM", "Freq"],s:["bracket", "sig bracket", "comparison bracket", "p bracket"],b:"A significance bracket is an added bracket that spans two bars and labels the comparison between them. You can type the label yourself, or tick 'Auto-compute p-value from raw data' on its Stats tab to run a real test live and show the p-value, stars, or a full APA line. Drag each bracket leg onto a bar to pick the two groups.",r:"A bracket means that the two groups were selected for comparison. If its label was computed automatically, read the p value or stars using the stated test and alpha; a typed label is only an annotation.",w:"A bracket reports only the pair it spans. No bracket between two groups does not show that they are equal, and a bracket by itself does not show a large or important effect."},
-            {g:0,n:"n.s. / significance asterisks",y:"",m:["Compare", "RM", "Freq"],s:["ns", "n.s.", "asterisks", "stars", "star ladder", "not significant"],b:"This is the star shorthand for p thresholds: * for p < .05, ** for p < .01, *** for p < .001, and 'n.s.' for not significant. It is a compact way to label a bracket without printing the exact p.",r:"Read more stars as a smaller p, and 'n.s.' as 'the difference did not reach the .05 cutoff.'",w:"More stars mean a smaller p, not a bigger or more important effect, significance and effect size are different things."},
+            {g:0,n:"n.s. / significance asterisks",y:"",m:["Compare", "RM", "Freq"],s:["ns", "n.s.", "asterisks", "stars", "star ladder", "not significant"],b:"This is the star shorthand for p thresholds: * for p < .05, ** for p < .01, *** for p < .001, and 'n.s.' for not significant. The chart's chosen alpha decides which marks SHOW: at alpha .01 a p of .03 reads n.s. even though it clears .05, and at alpha .10 a p between .05 and .10 earns a dagger (\u2020) for marginal significance. The ladder itself never moves.",r:"Read more stars as a smaller p, and 'n.s.' as 'the difference did not reach this chart's cutoff' (alpha .05 unless it was changed).",w:"More stars mean a smaller p, not a bigger or more important effect, significance and effect size are different things."},
             {g:0,n:"Confidence / coverage level (Level %)",y:"",m:["Compare", "RM", "Dist", "Scatter", "Likert"],s:["level", "coverage", "confidence level", "90% 95% 99%"],b:"The level is the long-run target for how often an interval method captures the fixed population value, assuming the method's model is correct. With the same data and method, a 99% interval is wider than a 90% interval because it uses a larger margin.",r:"The level describes the method across repeated samples; the interval's width shows the precision obtained from this dataset.",w:"It is not the probability that the fixed value lies in this one interval. Except for displays specifically designed to cover data, it is also not the percentage of raw observations inside."},
             {g:7,n:"Kendall tau (tau-b)",y:"tau",m:["Scatter", "Corr"],s:["kendall", "tau", "tau-b", "rank correlation", "concordant"],b:"Kendall's tau is a rank-based correlation from -1 to +1 that measures how often two variables' orderings agree. It compares every pair of cases: pairs ordered the same way on both variables (concordant) count for it, pairs ordered opposite ways (discordant) count against it. Pandion Plots computes the tau-b variant, which adjusts for tied values, and it is an alternative to Pearson and Spearman.",r:"Read tau near +1 as 'when one goes up the other almost always does too,' near 0 as no consistent ordering, near -1 as reliably opposite.",w:"Tau is usually smaller than Spearman's rho on the same data, that is a scale difference, not a weaker relationship."},
             {g:7,n:"Diverging color scale",y:"",m:["Corr"],s:["diverging", "color scale", "red blue", "two-ended scale"],b:"A diverging color scale uses two hues that meet at a neutral midpoint, here white at r = 0. It encodes both the sign and the strength of a correlation, unlike a one-hue sequential ramp that only shows magnitude.",r:"Read the hue for direction (one color for positive, the other for negative) and the depth of color for strength.",w:"A pale cell means a correlation near zero, not missing data, and the two ends are opposite signs, not just 'more' and 'less.'"},
@@ -51455,8 +51521,10 @@
             })();
             var _snApp = _snStars > 0 && _ebnNote.replace(/\s/g, "").length > 0;
             if (_snApp) {
-                if (!/(\*\s*,?\s*p\b)|(p\s*<\s*\.?0?5)/i.test(_ebnNote)) {
-                    out.push({ id: "starnote", sev: "tip", title: "The note does not define the asterisks", why: "The brackets mark significance with stars, but the figure note never says what a star means. A key like '* p < .05, ** p < .01, *** p < .001.' completes it.", fixGt: null });
+                if (!/(\*\s*,?\s*p\b)|(p\s*<\s*\.?0?5)|(\u2020\s*,?\s*p\b)/i.test(_ebnNote)) {
+                    var _snKey = "'* p < .05, ** p < .01, *** p < .001." +
+                        (_gb2StatsAlpha() === 0.1 ? " \u2020 p < .10." : "") + "'";
+                    out.push({ id: "starnote", sev: "tip", title: "The note does not define the asterisks", why: "The brackets mark significance with stars, but the figure note never says what a star means. A key like " + _snKey + " completes it.", fixGt: null });
                 }
             }
             // Median chart carrying mean-based brackets: the label and
@@ -53836,9 +53904,7 @@
             // drives the green chips, the "significant at" tally, the
             // auto-seeded Place selection, and the omnibus/chi-square/pairwise
             // chips. (Correlation keeps its own persisted corrSigLevel.)
-            var stAlpha = (typeof window.__gb2_statsAlpha === "number" &&
-                window.__gb2_statsAlpha > 0 && window.__gb2_statsAlpha < 1)
-                ? window.__gb2_statsAlpha : 0.05;
+            var stAlpha = _gb2StatsAlpha();
             var stAlphaLbl = stAlpha.toFixed(stAlpha < 0.01 ? 3 : 2).replace(/^0/, "");
             function _stAlphaBand() {
                 var o = [["0.1", ".10"], ["0.05", ".05"], ["0.01", ".01"], ["0.001", ".001"]];
@@ -55992,7 +56058,16 @@
             for (var _ai = 0; _ai < _aSel.length; _ai++) {
                 _aSel[_ai].addEventListener("change", function (ev) {
                     var av = parseFloat(ev.target.value);
-                    if (isFinite(av) && av > 0 && av < 1) window.__gb2_statsAlpha = av;
+                    if (isFinite(av) && av > 0 && av < 1) {
+                        // Persisted per chart (chartSpec-routed), so the
+                        // marks it gates survive save and reload - a
+                        // session-only alpha driving on-chart ink would
+                        // relabel a saved chart on reopen.
+                        data.statsAlpha = av;
+                        if (typeof _setOption === "function")
+                            _setOption("statsAlpha", av);
+                        try { redraw(); } catch (_eA) {}
+                    }
                     renderInspectorStats(body);
                 });
             }
@@ -92618,7 +92693,17 @@
             var iBold = body.querySelector('[data-field="bold"]');
             var iItalic = body.querySelector('[data-field="italic"]');
 
+            // Start from what is ON SCREEN: an auto bracket's Text field
+            // edits the computed label the user is looking at, not the
+            // stale manual placeholder stored beneath it (Torry, Aug 25
+            // 2026 - typing takes the wheel).
             iText.value = ann.text || "";
+            if (ann.autoPValue === true) {
+                try {
+                    var _pf0 = computeAutoPForBracket(ann);
+                    if (_pf0 && _pf0.ok) iText.value = _pf0.label;
+                } catch (_ePf) {}
+            }
             var initialWidth = Math.abs(ann.x2 - ann.x);
             iWidth.value = initialWidth;
             iWidthVal.textContent = Math.round(initialWidth);
@@ -92645,13 +92730,41 @@
                 iText.style.height = "auto";
                 iText.style.height = Math.max(28, iText.scrollHeight) + "px";
             }
+            // Typing takes the wheel (Torry, Aug 25 2026): editing the
+            // label of an auto-computed bracket switches it to custom
+            // text in the same act - the flag flips with the edit, and
+            // clearing autoGen makes an adopted bracket the user's own,
+            // so Sigma Place/Clear leave it alone from then on. The
+            // Stats-tab checkbox stays the road back, and ann.text is
+            // never overwritten by the computed label.
+            function _baTextPatch(val) {
+                var patch = { text: val };
+                if (ann.autoPValue === true) {
+                    var _curLbl;
+                    try {
+                        var _cA = computeAutoPForBracket(ann);
+                        _curLbl = (_cA && _cA.ok) ? _cA.label
+                            : ((ann.text && ann.text.length) ? ann.text : "\u2014");
+                    } catch (_eC) { _curLbl = ann.text || ""; }
+                    if (val !== _curLbl) {
+                        patch.autoPValue = false;
+                        if (ann.autoGen === true) patch.autoGen = false;
+                    } else {
+                        // Unchanged: keep the preserved manual text
+                        // instead of overwriting the stash with the
+                        // computed string.
+                        patch.text = ann.text;
+                    }
+                }
+                return patch;
+            }
             setTimeout(_autoSizeBracketText, 0);
             iText.addEventListener("input", function () {
-                applyAnnotationChange(ann.id, { text: iText.value });
+                applyAnnotationChange(ann.id, _baTextPatch(iText.value));
                 _autoSizeBracketText();
             });
             iText.addEventListener("change", function () {
-                commitAnnotationChange(ann.id, { text: iText.value });
+                commitAnnotationChange(ann.id, _baTextPatch(iText.value));
             });
             iText.addEventListener("keydown", function (e) {
                 // Shift+Enter = newline; defensive setTimeout to
@@ -92659,13 +92772,13 @@
                 // webview drops the input event for that keypress.
                 if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
-                    commitAnnotationChange(ann.id, { text: iText.value });
+                    commitAnnotationChange(ann.id, _baTextPatch(iText.value));
                     iText.blur();
                 } else if (e.key === "Enter" && e.shiftKey) {
                     setTimeout(_autoSizeBracketText, 0);
                 } else if (e.key === "Escape") {
                     e.preventDefault();
-                    commitAnnotationChange(ann.id, { text: iText.value });
+                    commitAnnotationChange(ann.id, _baTextPatch(iText.value));
                     iText.blur();
                 }
             });
