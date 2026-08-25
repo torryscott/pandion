@@ -36,17 +36,28 @@ function ok(cond, msg) {
 await page.goto(pageUrl);
 await page.waitForTimeout(500);
 
-console.log('case 1: three examples are offered, each saying what it suits');
+console.log('case 1: four examples are offered, the all-seven sample first');
 const cards = await page.evaluate(() =>
     Array.from(document.querySelectorAll('[data-example]')).map(b => ({
         id: b.getAttribute('data-example'),
         title: (b.querySelector('strong') || {}).textContent,
         suits: (b.querySelectorAll('.ps-template-copy span')[0] || {}).textContent
     })));
-ok(cards.length === 3,
-   `the start centre offers three example datasets (${cards.length})`);
-ok(cards[0].id === 'dose',
-   'the dose-response study is still first, so every existing path is unmoved');
+ok(cards.length === 4,
+   `the start centre offers four example datasets (${cards.length})`);
+// Torry's ruling (Aug 24 2026): the all-seven wellbeing sample LEADS the
+// list. Existing paths are unmoved anyway, because they are id-keyed:
+// #ps-welcome-sample stays on the dose card and loadSample() still
+// defaults to "dose".
+ok(cards[0].id === 'wellbeing',
+   'the student wellbeing survey leads the list');
+const sampleBtn = await page.evaluate(() => {
+    const b = document.getElementById('ps-welcome-sample');
+    return b ? b.getAttribute('data-example') : null;
+});
+ok(sampleBtn === 'dose',
+   '#ps-welcome-sample still means the dose study, so every existing ' +
+   'path is unmoved');
 ok(cards.some(c => /Repeated Measures/.test(c.suits || '')) &&
    cards.some(c => /Likert/.test(c.suits || '')),
    `and between them they name the two analyses the old one could not show ` +
@@ -172,7 +183,7 @@ console.log('case 5: an example never demonstrates what it cannot');
 const audit = await page.evaluate(async () => {
     const sleep = ms => new Promise(r => setTimeout(r, ms));
     const out = [];
-    for (const id of ['dose', 'practice', 'feedback']) {
+    for (const id of ['dose', 'practice', 'feedback', 'wellbeing']) {
         window.PS_SHELL.loadSample(id);
         await sleep(400);
         const roles = window.PS_SHELL.chart().roles || {};
@@ -229,6 +240,88 @@ const scale = await page.evaluate(async () => {
 ok(scale && scale.join(',') === '1,2,3,4,5',
    `the shared scale ascends even when the first item does not span it ` +
    `(${JSON.stringify(scale)})`);
+
+console.log('case 7: the wellbeing sample honestly drives all seven');
+const wb = await page.evaluate(async () => {
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    window.PS_SHELL.loadSample('wellbeing');
+    // Poll rather than one fixed sleep: after five cases of loads and
+    // restores the first build can land a beat later, and a transient
+    // null here must not read as a broken sample. A REAL placeholder
+    // is surfaced in the assertion message below.
+    let p = null, raw = null;
+    for (let tries = 0; tries < 12 && !p; tries++) {
+        await sleep(400);
+        raw = window.PS_SHELL.buildRaw();
+        p = raw && raw.payload ? raw.payload : null;
+    }
+    if (!p) {
+        const c0 = window.PS_SHELL.chart();
+        const t0 = window.PS_SHELL.project.table;
+        return { placeholder: String((raw || {}).placeholder || 'no build') +
+            ' | module=' + c0.module +
+            ' | roles.plotbuilder=' + JSON.stringify((c0.roles || {}).plotbuilder) +
+            ' | table=' + t0.name + '(' + t0.order.length + ' cols)' +
+            ' | has study_method=' + (t0.order.indexOf('study_method') !== -1) };
+    }
+    const t = window.PS_SHELL.project.table;
+    const c = window.PS_SHELL.chart();
+    const firstSeen = col => {
+        const seen = [];
+        for (const v of t.raw[col])
+            if (v !== '' && seen.indexOf(v) === -1) seen.push(v);
+        return seen;
+    };
+    return {
+        cols: t.order.length, rows: t.raw[t.order[0]].length,
+        module: c.module, roleMods: Object.keys(c.roles || {}).length,
+        caffeineOrder: firstSeen('caffeine'),
+        cgCells: (p.bars || []).length,
+        ses: (p.bars || []).map(b => +b.se.toFixed(2)),
+        svg: !!document.querySelector('#psroot svg')
+    };
+});
+ok(!wb.placeholder,
+   `the sample builds a chart, not a placeholder (${wb.placeholder || 'built'})`);
+ok(wb.cols === 19 && wb.rows === 163,
+   `163 students x 19 variables (${wb.rows} x ${wb.cols})`);
+ok(wb.module === 'plotbuilder' && wb.cgCells === 6 && wb.svg,
+   `lands on Compare Groups with 6 cells drawn (method x residence)`);
+ok(wb.roleMods === 7,
+   `every one of the seven analyses has honest pre-assigned roles ` +
+   `(${wb.roleMods})`);
+ok(Math.min(...wb.ses) > 1.0 && Math.max(...wb.ses) < 3.5,
+   `error bars are classroom-realistic, never razor-thin ` +
+   `(SE ${Math.min(...wb.ses)}..${Math.max(...wb.ses)})`);
+ok(wb.caffeineOrder.join('|') === '0 cups|1 cup|2-3 cups|4+ cups',
+   `caffeine introduces its levels in natural order ` +
+   `(${JSON.stringify(wb.caffeineOrder)})`);
+
+console.log('case 8: importing your own data cannot poison the registry');
+// The bug this pins (found Aug 24 2026): loadSample handed out the
+// EXAMPLES registry's role objects by reference; loading any other table
+// then ran validateRoles over them and nulled every unmatched role IN THE
+// REGISTRY, so reopening that example for the rest of the session showed
+// a placeholder. Control: against the pre-fix shell this fails with
+// roles.plotbuilder = {xvar: null, ...}.
+const immune = await page.evaluate(async () => {
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    window.PS_SHELL.loadSample('wellbeing');
+    await sleep(500);
+    window.PS_SHELL.loadTable('mydata', ['a', 'b'],
+        [['1', '2'], ['3', '4']], { a: 'continuous', b: 'continuous' });
+    await sleep(500);
+    window.PS_SHELL.loadSample('wellbeing');
+    await sleep(900);
+    const c = window.PS_SHELL.chart();
+    const raw = window.PS_SHELL.buildRaw();
+    return { roles: JSON.stringify((c.roles || {}).plotbuilder),
+             built: !!(raw && raw.payload) };
+});
+ok(immune.built &&
+   /"xvar":"study_method"/.test(immune.roles),
+   `the example survives a user import and reopens intact ` +
+   `(${immune.roles})`);
 
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('EXAMPLES CHECK PASS');
