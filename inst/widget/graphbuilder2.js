@@ -11198,7 +11198,8 @@
                 '[data-role="refline-handle"], [data-role="ann-rot-line"],' +
                 '[data-role="ann-rot-handle"],' +
                 '[data-role="freq-pie-seam-glow"], [data-role="freq-donut-hole-glow"],' +
-                '[data-role="data-point-selected"], [data-role="freq-pie-rotate-handle"]'
+                '[data-role="data-point-selected"], [data-role="freq-pie-rotate-handle"],' +
+                '[data-role="gap-seam-chrome"]'
             );
             for (var hi = 0; hi < halos.length; hi++) {
                 if (halos[hi].parentNode) halos[hi].parentNode.removeChild(halos[hi]);
@@ -11242,17 +11243,29 @@
                         _he.removeAttribute(_stash);
                     }
                 }
-                // Hover and lift chrome rides an inline style filter, in more
-                // flavours than one: brightness(1.15) to lift a dark mark,
-                // brightness(0.85) to darken a light one, and drop-shadow()
-                // when a group is picked up. Matching only "brightness" left
-                // the darkened and shadowed variants baked into copies. The
-                // chart's own rendering never sets an inline filter (there is
-                // not a single setAttribute("filter") in the bundle), so clear
-                // every one rather than pattern-match and miss the next.
+                // Hover and lift chrome rides SVG filter REFERENCES now
+                // (gb2-hb-* defs via _gb2HoverFx - WebKit never rendered
+                // the old CSS filter functions on SVG elements), with a
+                // CSS-filter fallback for degenerate-bbox elements. Scrub
+                // BOTH forms from the copy, plus the hover-filter defs
+                // themselves, so copies, exports and snapshot clones
+                // carry neither hover state nor hover HISTORY (the
+                // Notebook drift verdicts compare snapshot bytes, and a
+                // defs block left by a past hover would read as drift).
                 var _fl = copy.querySelectorAll('[style*="filter"]');
                 for (var _fk = 0; _fk < _fl.length; _fk++) {
                     try { _fl[_fk].style.filter = ""; } catch (_ef) {}
+                }
+                var _fa = copy.querySelectorAll("[filter]");
+                for (var _fk2 = 0; _fk2 < _fa.length; _fk2++) {
+                    try {
+                        var _fv = _fa[_fk2].getAttribute("filter") || "";
+                        if (_fv.indexOf("url(#gb2-hb-") === 0) _fa[_fk2].removeAttribute("filter");
+                    } catch (_ef2) {}
+                }
+                var _fd = copy.querySelectorAll('defs[data-role="gb2-hover-filters"]');
+                for (var _fk3 = 0; _fk3 < _fd.length; _fk3++) {
+                    try { _fd[_fk3].parentNode.removeChild(_fd[_fk3]); } catch (_ef3) {}
                 }
             } catch (_eHoverRevert) {}
             // Reverting an inline style leaves style="" behind. It paints
@@ -22017,8 +22030,15 @@
                 // Gap tab: shade the spacing the tab controls (chosen with
                 // the user) rather than highlighting one bar. Bright bands =
                 // bar gaps, lighter band + dimension arrow = category gaps;
-                // they resize live as the gap sliders move.
-                if (data.graphType !== "line" && window.__gb2_bsActiveTab === "gap") {
+                // they resize live as the gap sliders move. SUPERSEDED where
+                // gap seams ship (Torry, Aug 24 2026): with the on-chart
+                // drag handle as the affordance, the bands read as noise -
+                // the gap tab then falls through to the ordinary bar halo,
+                // the Order tab's exact behavior. jamovi (no gapSeams key)
+                // keeps the bands: there they are still the only gap
+                // visualization.
+                if (data.graphType !== "line" && window.__gb2_bsActiveTab === "gap" &&
+                    data.gapSeams !== true) {
                     var _gapBars = svg.querySelectorAll('[data-bar-cat]:not([data-role])');
                     if (_gapBars.length >= 2) _drawGapShading(_gapBars, chartTop, chartTop + innerH);
                     else addIndicatorBox(chartLeft, chartTop, innerW, innerH);
@@ -25377,7 +25397,7 @@
                         el.setAttribute("data-hover-base-width", _w0raw == null ? "" : _w0raw);
                     }
                     el.setAttribute("stroke-width", String(_w0 + 2));
-                    el.style.filter = "brightness(1.15)";
+                    _gb2HoverFx(el, "brightness(1.15)");
                 });
                 el.addEventListener("mouseleave", function () {
                     var _b = el.getAttribute("data-hover-base-width");
@@ -25386,7 +25406,7 @@
                         else el.setAttribute("stroke-width", _b);
                         el.removeAttribute("data-hover-base-width");
                     }
-                    el.style.filter = "";
+                    _gb2HoverFxOff(el);
                 });
                 el.addEventListener("click", function (e) {
                     if (Date.now() < (window.__gb2_boxPartDragSwallowUntil || 0)) {
@@ -33864,6 +33884,106 @@
             // vertical band.
             var y0Px = Math.max(chartTop, Math.min(toPxY(0), chartBottom));
 
+            // ---- Gap-seam layout accessor (Aug 24 2026; standalone-only
+            // via the gapSeams payload key). Reassigned every redraw like
+            // __gb2_valAxis; callers re-fetch per event. BOTH orientations
+            // (horizontal charts transpose the same virtual-x slot math
+            // by the draw's own linear map, so seams transpose with it);
+            // the categorical modules (cg, rm, dist box family, freq
+            // bars) - the bar family always, GROUPED line/dot too -
+            // UNGROUPED line/dot marks sit at fixed slot centers no
+            // option moves, so they stay seamless by design. Freq
+            // stack/fill arrangements keep BETWEEN seams only; dist's
+            // single empty slot yields no between seams naturally. The
+            // likert row-gap seam has its OWN accessor site inside the
+            // likert draw. Anything else leaves the accessor null.
+            window.__gb2_gapSeamLayout = null;
+            var _gsMk = (typeof _gbModuleKind === "function") ? _gbModuleKind() : "";
+            if (data.gapSeams === true &&
+                (_gsMk === "cg" || _gsMk === "rm" || _gsMk === "dist" ||
+                 _gsMk === "freq") &&
+                (data.graphType === "bar" || data.graphType === "box" ||
+                 data.graphType === "violin" || data.graphType === "raincloud" ||
+                 ((data.graphType === "line" || data.graphType === "dot") &&
+                  hasGroups))) {
+                (function () {
+                    var horiz = (data.chartOrientation === "horizontal");
+                    var kScale = horiz ? (innerH / Math.max(1, innerW)) : 1;
+                    function mapPos(vx) {
+                        return horiz
+                            ? chartTop + ((vx - chartLeft) / Math.max(1, innerW)) * innerH
+                            : vx;
+                    }
+                    var isLineFam = (data.graphType === "line" ||
+                                     data.graphType === "dot");
+                    var spread = (typeof data.lineMarkerSpread === "number" &&
+                                  data.lineMarkerSpread >= 0 &&
+                                  data.lineMarkerSpread <= 1)
+                        ? data.lineMarkerSpread : 0.35;
+                    var between = [];
+                    if (!isLineFam) {
+                        for (var bi = 1; bi < visibleXCats.length; bi++) {
+                            var cA = visibleXCats[bi - 1], cB = visibleXCats[bi];
+                            var fA = "", fB = "";
+                            try {
+                                if (typeof _facetOf === "function") {
+                                    fA = _facetOf(cA) || ""; fB = _facetOf(cB) || "";
+                                }
+                            } catch (_eGf) {}
+                            if (fA !== fB) continue; // panel boundary, not a category gap
+                            var exA = (cumExtraGap && cumExtraGap[bi - 1]) || 0;
+                            var exB = (cumExtraGap && cumExtraGap[bi]) || 0;
+                            var cenA = chartLeft + exA + (bi - 0.5) * catWidth;
+                            var cenB = chartLeft + exB + (bi + 0.5) * catWidth;
+                            between.push({ pos: mapPos((cenA + cenB) / 2),
+                                           gapPx: Math.max(0, ((cenB - cenA) - availW)) * kScale,
+                                           unit: catWidth * kScale });
+                        }
+                    }
+                    var within = [];
+                    var _gsNoWithin = (_gsMk === "freq" &&
+                        (data.freqPosition === "stack" ||
+                         data.freqPosition === "fill"));
+                    if (hasGroups && !_gsNoWithin) {
+                        for (var ci = 0; ci < visibleXCats.length; ci++) {
+                            var cn = visibleXCats[ci];
+                            var vg = visGroupsPerCat[cn] || [];
+                            var bwv = barWFor(cn);
+                            var exC = (cumExtraGap && cumExtraGap[ci]) || 0;
+                            var cenSlot = chartLeft + exC + (ci + 0.5) * catWidth;
+                            for (var gi = 1; gi < vg.length; gi++) {
+                                var xL = barXFor(cn, vg[gi - 1]);
+                                var xR = barXFor(cn, vg[gi]);
+                                if (xL == null || xR == null) continue;
+                                if (isLineFam) {
+                                    var mA = cenSlot + spread * ((xL + bwv / 2) - cenSlot);
+                                    var mB = cenSlot + spread * ((xR + bwv / 2) - cenSlot);
+                                    within.push({ pos: mapPos((mA + mB) / 2),
+                                                  gapPx: Math.max(0, (mB - mA) - 12) * kScale,
+                                                  unit: Math.max(8, xR - xL) * kScale });
+                                } else {
+                                    within.push({ pos: mapPos((xL + bwv + xR) / 2),
+                                                  gapPx: Math.max(0, xR - (xL + bwv)) * kScale,
+                                                  unit: catWidth * kScale });
+                                }
+                            }
+                        }
+                    }
+                    window.__gb2_gapSeamLayout = {
+                        axis: horiz ? "y" : "x",
+                        crossLo: horiz ? chartLeft : chartTop,
+                        crossHi: horiz ? (chartLeft + innerW) : chartBottom,
+                        catGap: catGap, barGap: bGap, spread: spread,
+                        family: isLineFam ? "line" : "bar",
+                        hasGroups: hasGroups, svg: svg,
+                        between: between, within: within, rows: []
+                    };
+                })();
+                try {
+                    if (typeof _gapSeamAfterRedraw === "function") _gapSeamAfterRedraw();
+                } catch (_eGs) {}
+            }
+
             // --- Data point rendering helpers ---------------------------
             function pointShapeEl(shape, cx, cy, sizePx, fill, outlineColor, outlineWidth, fillOpacity) {
                 var s = sizePx;
@@ -37359,11 +37479,11 @@
                                 var _rgb = hexToRgb(_mf);
                                 if (_rgb) { var _lum = 0.299 * _rgb.r + 0.587 * _rgb.g + 0.114 * _rgb.b; _light = (_lum >= 225); }
                             }
-                            el.style.filter = _light ? "brightness(0.85)" : "brightness(1.2)";
+                            _gb2HoverFx(el, _light ? "brightness(0.85)" : "brightness(1.2)");
                         });
                         el.addEventListener("mouseleave", function () {
                             if (_mgOp0 != null) el.setAttribute("fill-opacity", _mgOp0);
-                            el.style.filter = "";
+                            _gb2HoverFxOff(el);
                         });
                         el.addEventListener("click", function (e) {
                             e.stopPropagation();
@@ -38986,7 +39106,7 @@
                                     moved = true;
                                     try { document.body.style.cursor = "grabbing"; } catch (_e1) {}
                                     var ge = _zEls(g);
-                                    for (var i = 0; i < ge.length; i++) ge[i].style.filter = "drop-shadow(0 1px 4px rgba(0,0,0,0.5))";
+                                    for (var i = 0; i < ge.length; i++) _gb2HoverFx(ge[i], "drop-shadow(0 1px 4px rgba(0,0,0,0.5))");
                                     try { inspectorIndicatorGroup.style.display = "none"; } catch (_e2) {}
                                 }
                                 // The grabbed curve FOLLOWS the cursor (a
@@ -39021,7 +39141,7 @@
                                 try { _xyTooltipHide(); } catch (_eZh) {}
                                 if (!moved) return;
                                 var ge2 = _zEls(g);
-                                for (var i = 0; i < ge2.length; i++) ge2[i].style.filter = "";
+                                for (var i = 0; i < ge2.length; i++) _gb2HoverFxOff(ge2[i]);
                                 try { inspectorIndicatorGroup.style.display = ""; } catch (_e4) {}
                                 _distSwallowNextClick();
                                 var changed = preview.join("\u0001") !== committed.join("\u0001");
@@ -39091,14 +39211,14 @@
                                                 var _rgb = hexToRgb(_vf);
                                                 if (_rgb) { var _lum = 0.299 * _rgb.r + 0.587 * _rgb.g + 0.114 * _rgb.b; _light = (_lum >= 225); }
                                             }
-                                            el.style.filter = _light ? "brightness(0.85)" : "brightness(1.25)";
+                                            _gb2HoverFx(el, _light ? "brightness(0.85)" : "brightness(1.25)");
                                         } else {
-                                            el.style.filter = "brightness(1.25)";
+                                            _gb2HoverFx(el, "brightness(1.25)");
                                         }
                                     };
                                     _hoverLeave = function () {
                                         if (_op0 != null) el.setAttribute("fill-opacity", _op0);
-                                        el.style.filter = "";
+                                        _gb2HoverFxOff(el);
                                     };
                                     }
                                     // Optional hover tooltip (histogram bins: the
@@ -39319,7 +39439,7 @@
                                     if (grp === g) { gSegs.push(el); try { var _gr = el.getBoundingClientRect(); gH[bin] = distHoriz ? _gr.width : _gr.height; } catch (_e2) {} }
                                 }
                             })();
-                            function liftOn() { for (var i = 0; i < gSegs.length; i++) { gSegs[i].setAttribute("fill-opacity", "1"); gSegs[i].style.filter = "drop-shadow(0 1px 4px rgba(0,0,0,0.5))"; } try { inspectorIndicatorGroup.style.display = "none"; } catch (_eIg) {} }
+                            function liftOn() { for (var i = 0; i < gSegs.length; i++) { gSegs[i].setAttribute("fill-opacity", "1"); _gb2HoverFx(gSegs[i], "drop-shadow(0 1px 4px rgba(0,0,0,0.5))"); } try { inspectorIndicatorGroup.style.display = "none"; } catch (_eIg) {} }
                             function followG(dScreen) {
                                 var i;
                                 if (distHoriz) {
@@ -39403,7 +39523,7 @@
                                 if (!moved) return;
                                 var i, changed = preview.join("\u0001") !== committed.join("\u0001");
                                 if (!changed) {
-                                    for (i = 0; i < gSegs.length; i++) gSegs[i].style.filter = "";
+                                    for (i = 0; i < gSegs.length; i++) _gb2HoverFxOff(gSegs[i]);
                                     clearTransforms(true);
                                     setTimeout(function () { clearTransforms(false); }, 220);
                                     try { inspectorIndicatorGroup.style.display = ""; } catch (_eIg2) {}
@@ -39414,7 +39534,7 @@
                                 // its dragged position to its natural new slot.
                                 var oldR = {};
                                 for (i = 0; i < allSegs.length; i++) { try { oldR[allSegs[i].group + "::" + allSegs[i].bin] = allSegs[i].el.getBoundingClientRect(); } catch (_e6) {} }
-                                for (i = 0; i < allSegs.length; i++) { allSegs[i].el.style.transition = ""; allSegs[i].el.style.transform = ""; allSegs[i].el.style.filter = ""; }
+                                for (i = 0; i < allSegs.length; i++) { allSegs[i].el.style.transition = ""; allSegs[i].el.style.transform = ""; _gb2HoverFxOff(allSegs[i].el); }
                                 groupCats.length = 0; for (i = 0; i < preview.length; i++) groupCats.push(preview[i]);
                                 data.groupOrder = preview.slice();
                                 if (hasSetOption) { try { _setOption("groupOrder", data.groupOrder); } catch (_e7) {} }
@@ -40070,7 +40190,7 @@
                                     visuals[i].setAttribute("data-hover-fill0", _vf);
                                 }
                                 visuals[i].setAttribute("fill", "rgba(0,0,0,0.12)");
-                                visuals[i].style.filter = "";
+                                _gb2HoverFxOff(visuals[i]);
                             } else {
                                 // Lighten dark / mid fills, but DARKEN
                                 // near-white fills — lightening white is
@@ -40084,8 +40204,8 @@
                                         _light = (_lum >= 225);
                                     }
                                 }
-                                visuals[i].style.filter = _light
-                                    ? "brightness(0.85)" : "brightness(1.25)";
+                                _gb2HoverFx(visuals[i], _light
+                                    ? "brightness(0.85)" : "brightness(1.25)");
                             }
                         }
                     });
@@ -40103,7 +40223,7 @@
                         var cur = opacityFor(hasGroups ? grp : bx);
                         for (var i = 0; i < visuals.length; i++) {
                             visuals[i].setAttribute("fill-opacity", cur);
-                            visuals[i].style.filter = "";
+                            _gb2HoverFxOff(visuals[i]);
                             // Restore a fill we swapped for the transparent
                             // hover tint.
                             var _f0 = visuals[i].getAttribute("data-hover-fill0");
@@ -40955,7 +41075,7 @@
                             pathEl.setAttribute("stroke-width", baseLineWidth + 2);
                             pathEl.setAttribute("stroke-opacity",
                                 Math.min(1, baseOpacity + 0.2));
-                            pathEl.style.filter = "brightness(1.15)";
+                            _gb2HoverFx(pathEl, "brightness(1.15)");
                         });
                         hitPath.addEventListener("mouseleave", function () {
                             var stash = pathEl.getAttribute("data-hover-base-width");
@@ -40966,7 +41086,7 @@
                                 pathEl.setAttribute("stroke-width", baseLineWidth);
                             }
                             pathEl.setAttribute("stroke-opacity", baseOpacity);
-                            pathEl.style.filter = "";
+                            _gb2HoverFxOff(pathEl);
                         });
                     })(P[0].group, _lineOpacity, _lineWidth);
                     // Insert ORDER: hitPath first (so it ends up on
@@ -41202,7 +41322,7 @@
                             // stash the pre-hover value so the harvest clone can put it back; without this the raised opacity bakes into copies and saves
                             if (el.getAttribute("data-base-fill-opacity") == null) el.setAttribute("data-base-fill-opacity", el.getAttribute("fill-opacity") || "");
                             el.setAttribute("fill-opacity", "1");
-                            el.style.filter = "brightness(1.12)";
+                            _gb2HoverFx(el, "brightness(1.12)");
                         });
                         el.addEventListener("mousemove", function (ev) {
                             if (window.__gb2_fqPieDragging) return;
@@ -41216,7 +41336,7 @@
                         });
                         el.addEventListener("mouseleave", function () {
                             el.setAttribute("fill-opacity", String(opacityFor(catName)));
-                            el.style.filter = "";
+                            _gb2HoverFxOff(el);
                             _xyTooltipHide();
                         });
                         el.addEventListener("click", function (ev) {
@@ -41443,7 +41563,7 @@
                                     if (_leaderByCat[cat]) dataGroup.appendChild(_leaderByCat[cat]);
                                     if (_labelByCat[cat]) dataGroup.appendChild(_labelByCat[cat]);
                                 } catch (_e6) {}
-                                el.style.filter = "brightness(1.1)";
+                                _gb2HoverFx(el, "brightness(1.1)");
                             }
                             mv.preventDefault();
                             var cur = _fqPtPolar(mv);
@@ -42515,7 +42635,7 @@
                             }
                             hit.addEventListener("mouseenter", function () {
                                 for (var e2 = 0; e2 < els.length; e2++) {
-                                    els[e2].style.filter = "brightness(1.13)";
+                                    _gb2HoverFx(els[e2], "brightness(1.13)");
                                 }
                             });
                             hit.addEventListener("mousemove", function (ev) {
@@ -42533,7 +42653,7 @@
                             });
                             hit.addEventListener("mouseleave", function () {
                                 for (var e3 = 0; e3 < els.length; e3++) {
-                                    els[e3].style.filter = "";
+                                    _gb2HoverFxOff(els[e3]);
                                 }
                                 _xyTooltipHide();
                             });
@@ -42664,7 +42784,7 @@
                         try { inspectorIndicatorGroup.style.display = "none"; } catch (_ec2) {}
                         for (var i = 0; i < cellGs.length; i++) {
                             var R = +cellGs[i].getAttribute("data-row"), C = +cellGs[i].getAttribute("data-col");
-                            if (R === g || C === g) cellGs[i].style.filter = "drop-shadow(0 1px 4px rgba(0,0,0,0.4))";
+                            if (R === g || C === g) _gb2HoverFx(cellGs[i], "drop-shadow(0 1px 4px rgba(0,0,0,0.4))");
                         }
                     }
                     function computeOff(liveDy) {
@@ -42711,7 +42831,7 @@
                             try { dataGroup.getBoundingClientRect(); } catch (_ec3) {}
                             for (i = 0; i < all.length; i++) all[i].style.transform = "";
                         } else {
-                            for (i = 0; i < all.length; i++) { all[i].style.transition = ""; all[i].style.transform = ""; all[i].style.filter = ""; }
+                            for (i = 0; i < all.length; i++) { all[i].style.transition = ""; all[i].style.transform = ""; _gb2HoverFxOff(all[i]); }
                         }
                     }
                     function onMove(ev) {
@@ -42907,8 +43027,8 @@
                     _clTip.textContent = "Drag to move - click to customize the color scale";
                     _clG.appendChild(_clTip);
                     var _clDragged = false;
-                    _clG.addEventListener("mouseenter", function () { _clBar.style.filter = "brightness(1.12)"; });
-                    _clG.addEventListener("mouseleave", function () { _clBar.style.filter = ""; });
+                    _clG.addEventListener("mouseenter", function () { _gb2HoverFx(_clBar, "brightness(1.12)"); });
+                    _clG.addEventListener("mouseleave", function () { _gb2HoverFxOff(_clBar); });
                     _clG.addEventListener("pointerdown", function (e) {
                         if (e.button !== 0) return;
                         e.stopPropagation();
@@ -43309,6 +43429,32 @@
                     && data.likertRowGap >= 0 && data.likertRowGap <= 0.7)
                     ? data.likertRowGap : 0.3;
                 var barH = Math.max(4, rowSlotH * (1 - rowGapFrac));
+
+                // ---- Gap-seam layout accessor, likert edition (Aug 24
+                // 2026): row-gap seams between item rows, editing
+                // likertRowGap (the Level panel's Bars > Row gap strip).
+                // Diverging + stacked only - means mode draws dots at
+                // row centers and the gap has no visual there.
+                window.__gb2_gapSeamLayout = null;
+                if (data.gapSeams === true && !isMeans && nItems > 1) {
+                    (function () {
+                        var rows = [];
+                        for (var ri = 1; ri < nItems; ri++) {
+                            rows.push({ pos: y0 + ri * rowSlotH,
+                                        gapPx: rowSlotH * rowGapFrac,
+                                        unit: rowSlotH });
+                        }
+                        window.__gb2_gapSeamLayout = {
+                            axis: "y", crossLo: x0, crossHi: x1,
+                            family: "likert", hasGroups: false,
+                            rowGap: rowGapFrac, svg: svg,
+                            between: [], within: [], rows: rows
+                        };
+                    })();
+                    try {
+                        if (typeof _gapSeamAfterRedraw === "function") _gapSeamAfterRedraw();
+                    } catch (_eGsL) {}
+                }
                 // ---- x scale
                 var xmin, xmax;
                 if (isMeans && _lkCont) {
@@ -43711,7 +43857,7 @@
                                 _lkWireRowDrag(el, itL);
                                 el.addEventListener("mouseenter", function () {
                                     if (window.__gb2_lkRowDrag) return;
-                                    el.style.filter = "brightness(1.12)";
+                                    _gb2HoverFx(el, "brightness(1.12)");
                                 });
                                 el.addEventListener("mousemove", function (ev) {
                                     if (window.__gb2_lkRowDrag) return;
@@ -43723,7 +43869,7 @@
                                 });
                                 el.addEventListener("mouseleave", function () {
                                     if (window.__gb2_lkRowDrag) return;
-                                    el.style.filter = "";
+                                    _gb2HoverFxOff(el);
                                     _xyTooltipHide();
                                 });
                                 el.addEventListener("click", function (ev) {
@@ -43865,8 +44011,8 @@
                             // legend (chip or gap) opens the Legend panel via
                             // the group pointerup handler below.
                             (function (chipEl) {
-                                g2.addEventListener("mouseenter", function () { chipEl.style.filter = "brightness(1.15)"; });
-                                g2.addEventListener("mouseleave", function () { chipEl.style.filter = ""; });
+                                g2.addEventListener("mouseenter", function () { _gb2HoverFx(chipEl, "brightness(1.15)"); });
+                                g2.addEventListener("mouseleave", function () { _gb2HoverFxOff(chipEl); });
                             })(chip);
                             _lkLegG.appendChild(g2);
                         }
@@ -44004,7 +44150,7 @@
                             ge[i].style.transition = "none";
                             var r = ge[i].getAttribute("data-role");
                             if (r === "likert-seg" || r === "likert-dot")
-                                ge[i].style.filter = "drop-shadow(0 1px 4px rgba(0,0,0,0.45))";
+                                _gb2HoverFx(ge[i], "drop-shadow(0 1px 4px rgba(0,0,0,0.45))");
                         }
                     }
                     function applyPart(slot) {
@@ -44064,7 +44210,7 @@
                                 for (var j = 0; j < a2.length; j++) {
                                     a2[j].style.transition = "";
                                     a2[j].style.transform = "";
-                                    a2[j].style.filter = "";
+                                    _gb2HoverFxOff(a2[j]);
                                 }
                                 try { inspectorIndicatorGroup.style.display = ""; } catch (_e6) {}
                             }, 220);
@@ -44080,7 +44226,7 @@
                         for (i = 0; i < keys.length; i++) {
                             keys[i].el.style.transition = "";
                             keys[i].el.style.transform = "";
-                            keys[i].el.style.filter = "";
+                            _gb2HoverFxOff(keys[i].el);
                         }
                         var visNew = others.slice();
                         visNew.splice(curSlot, 0, grabbed);
@@ -45429,8 +45575,8 @@
                         if (!_annH || _annH.kind === "bracket"
                             || _annH.kind === "refLine" || _annH.kind === "text") return;
                         w.__gb2HoverWired = true;
-                        w.addEventListener("mouseenter", function () { w.style.filter = "brightness(1.15)"; });
-                        w.addEventListener("mouseleave", function () { w.style.filter = ""; });
+                        w.addEventListener("mouseenter", function () { _gb2HoverFx(w, "brightness(1.15)"); });
+                        w.addEventListener("mouseleave", function () { _gb2HoverFxOff(w); });
                     })(_shpWraps[_shw]);
                 }
             } catch (_eShHov) {}
@@ -47438,6 +47584,560 @@
             redrawSelectionIndicators();
         }
 
+        // ---- Gap seams (Aug 24 2026, Torry's playground ruling set,
+        // standalone-only via data.gapSeams): hover the space between
+        // marks; after a 350ms dwell (IDENTICAL every time - no chain)
+        // a dashed seam + grip arms; dragging edits the spacing option
+        // LIVE (2x pointer travel = 1:1 flanking-edge tracking),
+        // release commits (spec-routed, undo free). AXIS-AWARE since
+        // the horizontal + likert round: the layout accessor declares
+        // axis "x" (vertical charts: vertical seams, horizontal drag)
+        // or "y" (horizontal charts + likert rows: horizontal seams,
+        // vertical drag; drag DOWN widens - the direction of
+        // increasing categories). One seam at a time; the seam just
+        // DRAGGED stays armed for re-grab; Esc dismisses + suppresses
+        // until the pointer leaves the band; band half-width floors at
+        // 6px so touching marks stay recoverable; unarmed presses fall
+        // through; marks/annotations/text win the hover; stats /
+        // anatomy / draw modes disarm. Drag start OPENS the owning
+        // panel (Gap tab, or likert's Bars > Row gap strip) and its
+        // sliders track every frame. jamovi never ships the key.
+        var _GS_DWELL = 350, _GS_BANDMIN = 6;
+        function _gsState() {
+            if (!window.__gb2_gapSeam) window.__gb2_gapSeam = {
+                key: null, at: 0, timer: null, suppress: null,
+                armed: null, drag: null, raf: 0
+            };
+            return window.__gb2_gapSeam;
+        }
+        function _gsFind(px, py) {
+            var L = window.__gb2_gapSeamLayout;
+            if (!L) return null;
+            // Stale-layout guard: a type switch to a seamless chart may
+            // skip both accessor sites; the svg identity changes on
+            // every re-render, so an old layout can never arm here.
+            if (L.svg !== svg) return null;
+            var main = (L.axis === "y") ? py : px;
+            var cross = (L.axis === "y") ? px : py;
+            if (cross < L.crossLo || cross > L.crossHi) return null;
+            var i, half;
+            if (L.family === "likert") {
+                for (i = 0; i < L.rows.length; i++) {
+                    half = Math.max(L.rows[i].gapPx * 0.35, _GS_BANDMIN);
+                    if (Math.abs(main - L.rows[i].pos) <= half) {
+                        return { kind: "row", pos: L.rows[i].pos,
+                                 key: "r" + Math.round(L.rows[i].pos),
+                                 label: "Row gap", opt: "likertRowGap",
+                                 val: L.rowGap, max: 0.7, unit: L.rows[i].unit };
+                    }
+                }
+                return null;
+            }
+            var isLineFam = (L.family === "line");
+            if (L.hasGroups) {
+                for (i = 0; i < L.within.length; i++) {
+                    half = Math.max(L.within[i].gapPx * 0.35 + 2, _GS_BANDMIN);
+                    if (Math.abs(main - L.within[i].pos) <= half) {
+                        return isLineFam
+                            ? { kind: "within", pos: L.within[i].pos,
+                                key: "w" + Math.round(L.within[i].pos),
+                                label: "Marker spread", opt: "lineMarkerSpread",
+                                val: L.spread, max: 1, unit: L.within[i].unit }
+                            : { kind: "within", pos: L.within[i].pos,
+                                key: "w" + Math.round(L.within[i].pos),
+                                label: "Gap within a group", opt: "barGap",
+                                val: L.barGap, max: 0.15, unit: L.within[i].unit };
+                    }
+                }
+            }
+            for (i = 0; i < L.between.length; i++) {
+                half = Math.max(L.between[i].gapPx * 0.35, _GS_BANDMIN);
+                if (Math.abs(main - L.between[i].pos) <= half) {
+                    return { kind: "between", pos: L.between[i].pos,
+                             key: "b" + Math.round(L.between[i].pos),
+                             label: "Gap between categories", opt: "categoryGap",
+                             val: L.catGap, max: 0.5, unit: L.between[i].unit };
+                }
+            }
+            return null;
+        }
+        function _gsChromeClear() {
+            try {
+                var g = svg.querySelector('[data-role="gap-seam-chrome"]');
+                if (g && g.parentNode) g.parentNode.removeChild(g);
+            } catch (_eGc) {}
+            try { svg.style.cursor = ""; } catch (_eGc2) {}
+        }
+        function _gsChromeDraw(a, cross, dragVal) {
+            _gsChromeClear();
+            var L = window.__gb2_gapSeamLayout;
+            if (!L) return;
+            var yAxis = (L.axis === "y");
+            var NSs = "http://www.w3.org/2000/svg";
+            function mk(tag, attrs, parent, textStr) {
+                var n = document.createElementNS(NSs, tag);
+                for (var k in attrs) n.setAttribute(k, attrs[k]);
+                if (textStr != null) n.textContent = textStr;
+                if (parent) parent.appendChild(n);
+                return n;
+            }
+            var g = mk("g", { "data-role": "gap-seam-chrome",
+                              "pointer-events": "none" }, null);
+            if (yAxis) {
+                mk("line", { x1: L.crossLo + 3, x2: L.crossHi - 3,
+                             y1: a.pos, y2: a.pos, stroke: "#1a5fb4",
+                             "stroke-width": 1.8, "stroke-dasharray": "6 5",
+                             opacity: dragVal != null ? 1 : 0.95 }, g);
+            } else {
+                mk("line", { x1: a.pos, x2: a.pos,
+                             y1: L.crossLo + 3, y2: L.crossHi - 3,
+                             stroke: "#1a5fb4", "stroke-width": 1.8,
+                             "stroke-dasharray": "6 5",
+                             opacity: dragVal != null ? 1 : 0.95 }, g);
+            }
+            var gx = yAxis ? cross : a.pos;
+            var gyv = yAxis ? a.pos : cross;
+            var gp = mk("g", { transform: "translate(" + gx + "," + gyv + ")" +
+                               (yAxis ? " rotate(90)" : "") }, g);
+            mk("rect", { x: -14, y: -8.5, width: 28, height: 17, rx: 8.5,
+                         fill: "#1a5fb4" }, gp);
+            mk("path", { d: "M-9.5,0 L-4.5,-3.4 L-4.5,3.4 Z M9.5,0 L4.5,-3.4 L4.5,3.4 Z",
+                         fill: "#ffffff" }, gp);
+            var svgW = parseFloat(svg.getAttribute("width")) || 640;
+            var svgH = parseFloat(svg.getAttribute("height")) || 480;
+            if (dragVal != null) {
+                var pct = Math.round(dragVal * 100);
+                var lbl = (a.opt === "lineMarkerSpread" ? "Marker spread "
+                    : a.opt === "likertRowGap" ? "Row gap "
+                    : a.kind === "within" ? "Within-group gap "
+                    : "Category gap ") + pct + "%";
+                var w = Math.max(110, lbl.length * 6.4 + 22);
+                var pxx = Math.max(8, Math.min(gx - w / 2, svgW - w - 8));
+                var pyy = Math.max(8, Math.min(gyv - 38, svgH - 30));
+                mk("rect", { x: pxx, y: pyy, width: w, height: 22, rx: 11,
+                             fill: "#1a5fb4" }, g);
+                mk("text", { x: pxx + w / 2, y: pyy + 15, "text-anchor": "middle",
+                             "font-size": 11, "font-weight": 600,
+                             fill: "#ffffff" }, g, lbl);
+            } else {
+                var tw = 226, th = 40;
+                var tx = gx + 18;
+                if (tx + tw > svgW - 6) tx = gx - 18 - tw;
+                var ty = Math.max(8, Math.min(gyv - 46, svgH - th - 8));
+                mk("rect", { x: tx, y: ty, width: tw, height: th, rx: 7,
+                             fill: "#ffffff", stroke: "#c9ced6" }, g);
+                mk("text", { x: tx + 11, y: ty + 17, "font-size": 11,
+                             "font-weight": 600, fill: "#222222" }, g, a.label);
+                mk("text", { x: tx + 11, y: ty + 32, "font-size": 10,
+                             fill: "#666666" }, g,
+                   a.opt === "likertRowGap"
+                       ? "Drag to adjust; all rows move together"
+                       : "Drag to adjust; all gaps move together");
+            }
+            svg.appendChild(g);
+            try {
+                svg.style.cursor = yAxis ? "row-resize" : "col-resize";
+            } catch (_eGd) {}
+        }
+        function _gapSeamAfterRedraw() {
+            var st = _gsState();
+            var L = window.__gb2_gapSeamLayout;
+            if (!L) return;
+            if (st.drag) {
+                _gsChromeDraw(st.drag.a, st.drag.cross, st.drag.cur);
+                return;
+            }
+            if (st.armed) {
+                var cr = Math.max(L.crossLo + 1,
+                    Math.min(st.armed.cross, L.crossHi - 1));
+                var a = (L.axis === "y") ? _gsFind(cr, st.armed.pos)
+                                         : _gsFind(st.armed.pos, cr);
+                if (a && a.key === st.armed.key) _gsChromeDraw(a, st.armed.cross, null);
+                else { st.armed = null; _gsChromeClear(); }
+            }
+        }
+        function _gsModesBlock() {
+            try {
+                if (window.__gb2_anatomyOn) return true;
+                if (window.__gb2_drawState && window.__gb2_drawState.kind) return true;
+                if (inspector && inspector.selection &&
+                    inspector.selection.length === 1 &&
+                    inspector.selection[0] === "stats") return true;
+            } catch (_eGm) {}
+            return false;
+        }
+        function _gsPt(e) {
+            var r = svg.getBoundingClientRect();
+            var vw = parseFloat(svg.getAttribute("width")) || r.width;
+            var vh = parseFloat(svg.getAttribute("height")) || r.height;
+            return { x: (e.clientX - r.left) * (vw / (r.width || 1)),
+                     y: (e.clientY - r.top) * (vh / (r.height || 1)) };
+        }
+        function _gsCrossOf(p) {
+            var L = window.__gb2_gapSeamLayout;
+            return (L && L.axis === "y") ? p.x : p.y;
+        }
+        function _gsMainOf(p) {
+            var L = window.__gb2_gapSeamLayout;
+            return (L && L.axis === "y") ? p.y : p.x;
+        }
+        function _gsStep(a, p) {
+            var st = _gsState();
+            var now = Date.now();
+            if (!a) {
+                st.key = null; st.suppress = null;
+                if (st.timer) { clearTimeout(st.timer); st.timer = null; }
+                if (st.armed) { st.armed = null; _gsChromeClear(); }
+                return;
+            }
+            var L = window.__gb2_gapSeamLayout;
+            var cross = Math.max(L.crossLo + 16,
+                Math.min(_gsCrossOf(p), L.crossHi - 16));
+            if (st.suppress === a.key) {
+                if (st.armed) { st.armed = null; _gsChromeClear(); }
+                return;
+            }
+            st.suppress = null;
+            if (st.armed && st.armed.key === a.key) {
+                st.armed.cross = cross; st.armed.pos = a.pos;
+                _gsChromeDraw(a, cross, null);
+                return;
+            }
+            if (st.key !== a.key) {
+                st.key = a.key; st.at = now;
+                if (st.timer) clearTimeout(st.timer);
+                var pend = { a: a, cross: cross };
+                st.timer = setTimeout(function () {
+                    var s2 = _gsState();
+                    s2.timer = null;
+                    if (s2.key === pend.a.key && !s2.drag &&
+                        (!s2.armed || s2.armed.key !== pend.a.key)) {
+                        s2.armed = { key: pend.a.key, pos: pend.a.pos,
+                                     cross: pend.cross };
+                        _gsChromeDraw(pend.a, pend.cross, null);
+                    }
+                }, _GS_DWELL + 15);
+                if (st.armed) { st.armed = null; }
+                _gsChromeClear();
+                return;
+            }
+            if (now - st.at >= _GS_DWELL) {
+                if (st.timer) { clearTimeout(st.timer); st.timer = null; }
+                st.armed = { key: a.key, pos: a.pos, cross: cross };
+                _gsChromeDraw(a, cross, null);
+            }
+        }
+        function _gsOpenGapTab(a) {
+            try {
+                var L = window.__gb2_gapSeamLayout;
+                if (L && L.family === "likert") {
+                    // The find-index recipe for the Row-gap strip.
+                    window.__gb2_likertLevelTab = "bars";
+                    window.__gb2_distActiveStrip = "lkrowgap";
+                    var seg = svg.querySelector('[data-role="likert-seg"]');
+                    var lv = seg ? (seg.getAttribute("data-level") || "") : "";
+                    if (typeof setInspectorSelection === "function") {
+                        setInspectorSelection("likertLevel:" + lv);
+                    }
+                    return;
+                }
+                window.__gb2_bsActiveTab = "gap";
+                window.__gb2_lsActiveTab = "gap";
+                var el0 = svg.querySelector("[data-bar-cat]");
+                var tgt = el0 ? (el0.getAttribute("data-bar-group") ||
+                                 el0.getAttribute("data-bar-cat") || "") : "";
+                if (typeof setInspectorSelection === "function") {
+                    setInspectorSelection("bars:" + tgt);
+                }
+            } catch (_eGt) {}
+        }
+        function _gsSyncGapTab() {
+            try {
+                if (typeof inspectorPanel === "undefined" || !inspectorPanel) return;
+                var cg = data.categoryGap, bgv = data.barGap;
+                var rCat = inspectorPanel.querySelector('input[data-field="cat"]');
+                if (rCat && typeof cg === "number") rCat.value = String(cg);
+                var vCat = inspectorPanel.querySelector('[data-field="cat-val"]');
+                if (vCat && typeof cg === "number") vCat.textContent = Math.round(cg * 100) + "%";
+                var rBar = inspectorPanel.querySelector('input[data-field="bar"]');
+                if (rBar && typeof bgv === "number") rBar.value = String(bgv);
+                var vBar = inspectorPanel.querySelector('[data-field="bar-val"]');
+                if (vBar && typeof bgv === "number") vBar.textContent = Math.round(bgv * 100) + "%";
+                var sp = data.lineMarkerSpread;
+                var rSp = inspectorPanel.querySelector('input[data-field="marker-spread"]');
+                if (rSp && typeof sp === "number") rSp.value = String(sp);
+                var vSp = inspectorPanel.querySelector('[data-field="marker-spread-val"]');
+                if (vSp && typeof sp === "number") vSp.textContent = Math.round(sp * 100) + "%";
+                var rg = data.likertRowGap;
+                var rRg = inspectorPanel.querySelector('input[data-field="lk-rowgap"]');
+                if (rRg && typeof rg === "number") rRg.value = String(Math.round(rg * 100));
+                var vRg = inspectorPanel.querySelector('[data-field="lk-rowgap-val"]');
+                if (vRg && typeof rg === "number") vRg.textContent = Math.round(rg * 100);
+            } catch (_eGy) {}
+        }
+        function _gsHover(e) {
+            var st = _gsState();
+            if (st.drag) return;
+            if (!window.__gb2_gapSeamLayout) return;
+            if (_gsModesBlock() || e.buttons) { _gsStep(null); return; }
+            var t = e.target;
+            if (t && t.closest && t.closest(
+                '[data-bar-cat],[data-ann-id],[data-role="data-point"],' +
+                '[data-role="data-point-hidden"],[data-role="line-series"],' +
+                '[data-role="line-series-hit"],[data-role="subject-connector"],' +
+                '[data-role="likert-seg"],[data-role="likert-dot"],' +
+                '[data-role="likert-dot-hit"],text')) {
+                _gsStep(null);
+                return;
+            }
+            var p = _gsPt(e);
+            _gsStep(_gsFind(p.x, p.y), p);
+        }
+        function _gsMove(e) {
+            var st = _gsState();
+            if (!st.drag) { _gsHover(e); return; }
+            var L = window.__gb2_gapSeamLayout;
+            if (!L) return;
+            var p = _gsPt(e);
+            var v = st.drag.v0 + 2 * (_gsMainOf(p) - st.drag.m0) / st.drag.unit;
+            st.drag.cur = Math.max(0, Math.min(v, st.drag.max));
+            if (!st.raf) {
+                st.raf = requestAnimationFrame(function () {
+                    var s2 = _gsState();
+                    s2.raf = 0;
+                    if (!s2.drag) return;
+                    data[s2.drag.opt] = s2.drag.cur;
+                    try { redraw(); } catch (_eGr) {}
+                    _gsSyncGapTab();
+                });
+            }
+            e.stopPropagation();
+        }
+        function _gsDown(e) {
+            var st = _gsState();
+            if (!window.__gb2_gapSeamLayout || !st.armed) return;
+            if (e.button !== 0) return;
+            var p = _gsPt(e);
+            var a = _gsFind(p.x, p.y);
+            if (!a || a.key !== st.armed.key) return;
+            st.drag = { a: a, m0: _gsMainOf(p), v0: a.val, cur: a.val,
+                        cross: st.armed.cross, opt: a.opt, max: a.max,
+                        unit: (a.unit && a.unit > 0) ? a.unit : 100 };
+            e.stopPropagation();
+            e.preventDefault();
+            try { svg.setPointerCapture(e.pointerId); } catch (_eGp) {}
+            _gsOpenGapTab(a);
+            _gsSyncGapTab();
+        }
+        function _gsUp(e) {
+            var st = _gsState();
+            if (!st.drag) return;
+            var d = st.drag;
+            st.drag = null;
+            if (st.raf) { try { cancelAnimationFrame(st.raf); } catch (_eGa) {} st.raf = 0; }
+            data[d.opt] = d.cur;
+            try { redraw(); } catch (_eGr2) {}
+            _gsSyncGapTab();
+            try { if (typeof _setOption === "function") _setOption(d.opt, d.cur); } catch (_eGo) {}
+            window.__gb2_gapSeamSwallowUntil = Date.now() + 300;
+            var p = _gsPt(e);
+            var a = _gsFind(p.x, p.y);
+            if (a && a.key === d.a.key) {
+                var s3 = _gsState();
+                s3.armed = { key: a.key, pos: a.pos, cross: d.cross };
+                _gsChromeDraw(a, d.cross, null);
+            } else { _gsState().armed = null; _gsChromeClear(); }
+            e.stopPropagation();
+        }
+        if (data.gapSeams === true && svg && !svg.__gb2GapSeamWired) {
+            svg.__gb2GapSeamWired = true;
+            svg.addEventListener("pointermove", _gsMove);
+            svg.addEventListener("pointerleave", function () {
+                if (!_gsState().drag) _gsStep(null);
+            });
+            svg.addEventListener("pointerdown", _gsDown, true);
+            svg.addEventListener("pointerup", _gsUp);
+        }
+        if (data.gapSeams === true && !window.__gb2_gapSeamEscWired) {
+            window.__gb2_gapSeamEscWired = true;
+            window.addEventListener("keydown", function (e) {
+                if (e.key !== "Escape") return;
+                var st = window.__gb2_gapSeam;
+                if (st && st.armed && !st.drag) {
+                    st.suppress = st.armed.key;
+                    st.armed = null;
+                    try {
+                        var gc = document.querySelector(
+                            '.graphbuilder2-host [data-role="gap-seam-chrome"]');
+                        if (gc && gc.parentNode) gc.parentNode.removeChild(gc);
+                    } catch (_eGe) {}
+                }
+            }, true);
+        }
+        if (data.gapSeams === true && !window.__gb2_gapSeamClickWired) {
+            window.__gb2_gapSeamClickWired = true;
+            document.addEventListener("click", function (e) {
+                if (e.isTrusted &&
+                    Date.now() < (window.__gb2_gapSeamSwallowUntil || 0)) {
+                    e.stopPropagation(); e.preventDefault();
+                    window.__gb2_gapSeamSwallowUntil = 0;
+                }
+            }, true);
+        }
+        // ---- Hover/lift effects as SVG filter primitives (Aug 24
+        // 2026, Torry's Safari report). WebKit accepts CSS filter
+        // functions on individual SVG elements into the cascade but
+        // does NOT render them - getComputedStyle reports
+        // brightness(1.25) while zero pixels change (pixel-probed
+        // chromium vs webkit). Every hover brighten and drag-lift
+        // drop-shadow therefore rides a real <defs><filter> reference:
+        // feComponentTransfer with linear slope IS brightness() and
+        // feDropShadow IS drop-shadow(), and color-interpolation-
+        // filters sRGB makes them pixel-equivalent to the CSS
+        // functions in chromium. Defs are created lazily in the chart
+        // svg and PERSIST (removing them on mouseleave would strand
+        // the harvest's attribute-snapshot restore pointing at a
+        // missing filter, which un-renders the element); the harvest
+        // scrubs the attributes AND the defs from every clone, so
+        // copies, exports and the Notebook snapshot byte contract
+        // never see hover state or hover history. Elements with a
+        // degenerate bbox (thin lines) fall back to the old CSS
+        // filter: a filter region computed from a zero-area bbox
+        // blanks the element, and those sites pair the brighten with
+        // a stroke thicken that reads everywhere anyway.
+        function _gb2HoverFxDef(svg, spec) {
+            var m = /^brightness\(([\d.]+)\)$/.exec(spec);
+            var d = null, key = "";
+            if (m) { key = "b" + Math.round(parseFloat(m[1]) * 100); }
+            else {
+                d = /^drop-shadow\(0 1px 4px rgba\(0,0,0,([\d.]+)\)\)$/.exec(spec);
+                if (d) { key = "ds" + Math.round(parseFloat(d[1]) * 100); }
+                else return null;
+            }
+            if (!svg.__gb2HbUid) {
+                window.__gb2_hbUid = (window.__gb2_hbUid || 0) + 1;
+                svg.__gb2HbUid = "u" + window.__gb2_hbUid;
+            }
+            var id = "gb2-hb-" + svg.__gb2HbUid + "-" + key;
+            var have = null;
+            try { have = svg.querySelector("#" + id); } catch (_eQ) {}
+            if (have) return id;
+            var NS = "http://www.w3.org/2000/svg";
+            var defs = svg.querySelector('defs[data-role="gb2-hover-filters"]');
+            if (!defs) {
+                defs = document.createElementNS(NS, "defs");
+                defs.setAttribute("data-role", "gb2-hover-filters");
+                svg.insertBefore(defs, svg.firstChild);
+            }
+            var f = document.createElementNS(NS, "filter");
+            f.setAttribute("id", id);
+            f.setAttribute("color-interpolation-filters", "sRGB");
+            if (m) {
+                var slope = String(parseFloat(m[1]));
+                var ct = document.createElementNS(NS, "feComponentTransfer");
+                var fns = ["feFuncR", "feFuncG", "feFuncB"];
+                for (var fi = 0; fi < fns.length; fi++) {
+                    var fn = document.createElementNS(NS, fns[fi]);
+                    fn.setAttribute("type", "linear");
+                    fn.setAttribute("slope", slope);
+                    ct.appendChild(fn);
+                }
+                f.appendChild(ct);
+            } else {
+                // Region headroom so the shadow is not clipped at the
+                // element's own bounds.
+                f.setAttribute("x", "-30%"); f.setAttribute("y", "-30%");
+                f.setAttribute("width", "160%"); f.setAttribute("height", "160%");
+                var ds = document.createElementNS(NS, "feDropShadow");
+                ds.setAttribute("dx", "0"); ds.setAttribute("dy", "1");
+                ds.setAttribute("stdDeviation", "2");
+                ds.setAttribute("flood-color", "#000000");
+                ds.setAttribute("flood-opacity", d[1]);
+                f.appendChild(ds);
+            }
+            defs.appendChild(f);
+            return id;
+        }
+        function _gb2HoverFx(el, spec) {
+            try {
+                var svg = el.ownerSVGElement;
+                var bb = null;
+                try { bb = el.getBBox(); } catch (_eBb) {}
+                if (!svg || !bb || bb.width < 0.5 || bb.height < 0.5) {
+                    el.style.filter = spec;
+                    return;
+                }
+                var id = _gb2HoverFxDef(svg, spec);
+                if (!id) { el.style.filter = spec; return; }
+                el.style.filter = "";
+                el.setAttribute("filter", "url(#" + id + ")");
+            } catch (_eFx) { try { el.style.filter = spec; } catch (_eF2) {} }
+        }
+        function _gb2HoverFxOff(el) {
+            try {
+                var f = el.getAttribute("filter");
+                if (f && f.indexOf("url(#gb2-hb-") === 0) el.removeAttribute("filter");
+            } catch (_eFo) {}
+            try { el.style.filter = ""; } catch (_eFo2) {}
+        }
+        // ---- Host-declared panel height budget (Aug 24 2026, the
+        // standalone's small-screen pass). When the payload carries
+        // panelMaxVh (a percent of the window height), the inspector
+        // panel caps at that height and scrolls INSIDE itself, so a
+        // long panel (Statistics, the pattern editor) can never push
+        // the chart off a short screen - the Sigma tables' 320px
+        // [data-st-scroll] windows, promoted to the panel shell. The
+        // expand/collapse slides clamp their measured height to the
+        // same cap, so the animations and the resting state agree.
+        // jamovi never ships the key: every site resolves cap 0 there
+        // and the panel behaves exactly as before.
+        function _gb2PanelCapPx() {
+            var vh = (data && typeof data.panelMaxVh === "number" &&
+                isFinite(data.panelMaxVh)) ? data.panelMaxVh : 0;
+            if (!(vh > 0)) return 0;
+            var H = 0;
+            try { H = window.innerHeight || 0; } catch (_eCapH) {}
+            if (!(H > 0)) return 0;
+            return Math.max(240, Math.round(H * Math.min(vh, 95) / 100));
+        }
+        // Bottom "more content" cue: the workspace pane-scroll-cue
+        // recipe (inset shadow while there is more below, absent at
+        // the end - a cue that is always on stops being a cue).
+        function _gb2PanelCapSyncCue() {
+            if (!_gb2PanelCapPx()) return;
+            var can = inspectorPanel.scrollHeight >
+                inspectorPanel.clientHeight + 2;
+            var atEnd = inspectorPanel.scrollTop +
+                inspectorPanel.clientHeight >=
+                inspectorPanel.scrollHeight - 2;
+            inspectorPanel.style.boxShadow = (can && !atEnd)
+                ? "inset 0 -10px 8px -8px rgba(0,0,0,0.22)" : "";
+        }
+        function _gb2PanelCapApply() {
+            var cap = _gb2PanelCapPx();
+            if (!cap) return;
+            inspectorPanel.style.maxHeight = cap + "px";
+            inspectorPanel.style.overflowY = "auto";
+            // A NEW selection starts reading from the top; same-panel
+            // rebuilds (echo restores, expand settles) keep the
+            // user's place.
+            try {
+                var _sk = (inspector && inspector.selection ?
+                    inspector.selection : []).join("\u001f");
+                if (inspectorPanel.__gb2CapSelKey !== _sk) {
+                    inspectorPanel.__gb2CapSelKey = _sk;
+                    if (inspectorPanel.scrollTop) inspectorPanel.scrollTop = 0;
+                }
+            } catch (_eCapSk) {}
+            if (!inspectorPanel.__gb2CapWire) {
+                inspectorPanel.__gb2CapWire = true;
+                inspectorPanel.addEventListener("scroll", _gb2PanelCapSyncCue);
+            }
+            _gb2PanelCapSyncCue();
+            // Content is often still being built when this runs; one
+            // deferred re-measure settles the cue on the final height.
+            try { setTimeout(_gb2PanelCapSyncCue, 0); } catch (_eCapT) {}
+        }
         // Panel show/hide animation: max-height transition so the
         // chart doesn't appear to "jump" when the panel suddenly takes
         // up vertical space (jamovi's results pane reacts to the
@@ -47457,12 +48157,17 @@
             // starting frame before we set the target height.
             inspectorPanel.offsetHeight;
             var h = inspectorPanel.scrollHeight;
+            // Height budget: the slide stops at the cap; the interior
+            // scrolls from there (_gb2PanelCapPx, 0 = uncapped).
+            var _capX = _gb2PanelCapPx();
+            if (_capX && h > _capX) h = _capX;
             inspectorPanel.style.maxHeight = h + "px";
             _panelAnimTimer = setTimeout(function () {
                 inspectorPanel.style.maxHeight = "";
                 inspectorPanel.style.minHeight = "";
                 inspectorPanel.style.overflow = "";
                 inspectorPanel.style.transition = "";
+                try { _gb2PanelCapApply(); } catch (_eCapA) {}
                 _panelAnimTimer = null;
             }, 170);
         }
@@ -47473,6 +48178,11 @@
             // starts from the actual rendered height, not a post-picker-
             // removal smaller height.
             var h = inspectorPanel.scrollHeight;
+            // Height budget: a capped panel RENDERS at the cap while
+            // scrollHeight reports the full content - rolling down
+            // from scrollHeight would flash it open first.
+            var _capC = _gb2PanelCapPx();
+            if (_capC && h > _capC) h = _capC;
             inspectorPanel.style.overflow = "hidden";
             inspectorPanel.style.maxHeight = h + "px";
             // Override base CSS min-height (48px) so max-height: 0 can
@@ -57969,6 +58679,10 @@
                 inspectorPanel.style.overflow = "";
                 inspectorPanel.style.transition = "";
             }
+            // Height budget: re-assert the cap on every panel rebuild
+            // (content swaps keep it; the cancel branch above may just
+            // have wiped it; no-op when the host ships no cap).
+            try { _gb2PanelCapApply(); } catch (_eCapR) {}
             // Scope-toggle accent: default blue, but for a per-entity
             // selection give it the clicked entity's own color so the
             // active "this" button matches the element (the Compare-

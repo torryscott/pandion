@@ -62,9 +62,11 @@ const box = await page.evaluate(() => {
 await page.mouse.move(box.x, box.y);
 await page.waitForTimeout(500);
 ok(await page.evaluate(() =>
-       document.querySelectorAll('.graphbuilder2-host [style*="brightness"]')
+       document.querySelectorAll('.graphbuilder2-host [style*="brightness"], ' +
+           '.graphbuilder2-host [filter^="url(#gb2-hb-"]')
            .length) >= 1,
-   'setup: the mark under the pointer is genuinely hovered');
+   'setup: the mark under the pointer is genuinely hovered ' +
+   '(style filter or the Aug 24 2026 gb2-hb defs-filter attribute)');
 
 // synthetic click: the pointer never leaves the mark, which is the path
 // a keyboard user takes and the one that actually bakes the highlight in
@@ -76,12 +78,14 @@ const kept = await page.evaluate(() => {
     const pin = pins[pins.length - 1];
     const txt = decodeURIComponent(pin.src.slice(pin.src.indexOf(',') + 1));
     return { n: pins.length, hasChart: txt.indexOf('data-bar-cat') >= 0,
-             brightness: (txt.match(/brightness\(/g) || []).length };
+             brightness: (txt.match(/brightness\(/g) || []).length +
+                         (txt.match(/gb2-hb-/g) || []).length };
 });
 ok(kept.n >= 1 && kept.hasChart, 'the Keep landed a page carrying the chart');
 ok(kept.brightness === 0,
-   `and the page carries NO hover highlight: the record shows the chart ` +
-   `at rest (${kept.brightness} brightness filters stored)`);
+   `and the page carries NO hover highlight in either form, style filter ` +
+   `or gb2-hb defs reference: the record shows the chart at rest ` +
+   `(${kept.brightness} hover residues stored)`);
 ok(await page.evaluate(() =>
        document.querySelectorAll('.graphbuilder2-host [data-bar-cat]').length) > 0,
    'and the live chart is undamaged: the strip runs on the copy only');
@@ -110,7 +114,8 @@ ok(await page.evaluate(() => {
     const pins = (window.PS_SHELL.project.pinboards || []).flatMap(b => b.pins);
     const txt = decodeURIComponent(pins[pins.length - 1].src
         .slice(pins[pins.length - 1].src.indexOf(',') + 1));
-    return (txt.match(/brightness\(/g) || []).length === 0;
+    return (txt.match(/brightness\(/g) || []).length === 0 &&
+           (txt.match(/gb2-hb-/g) || []).length === 0;
 }), 'a chart pinned from the right-click carries no hover state either');
 
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));

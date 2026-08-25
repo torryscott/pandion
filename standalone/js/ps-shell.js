@@ -5471,10 +5471,12 @@
   // The engine strips hover from its own export harvest, but these two Keep
   // paths take a plain cloneNode of the LIVE svg, so a pointer resting on a
   // mark baked its hover highlight into the page (found on the live site,
-  // Aug 4 2026). Hover is expressed as an inline brightness() filter
-  // throughout the engine; persistent styling uses the SVG filter ATTRIBUTE
-  // instead, so removing inline brightness is exact and touches nothing
-  // else. Done on the CLONE, so the live chart is never disturbed.
+  // Aug 4 2026). Since the Aug 24 2026 Safari fix, hover rides SVG filter
+  // REFERENCES (the engine's _gb2HoverFx gb2-hb-* defs) with the inline
+  // brightness() form surviving only as the degenerate-bbox fallback -
+  // so the strip removes BOTH forms plus the hover-filter defs, and only
+  // those (the gb2-hb- prefix is exact). Done on the CLONE, so the live
+  // chart is never disturbed.
   // Kept-picture scrub (t4-230): a page kept while a chart part was
   // SELECTED baked the dashed selection box (and any drag handles) into
   // the page image. Strip the transient editor chrome; the stats rings
@@ -5497,7 +5499,16 @@
         var st = hot[i].style;
         if (st && /brightness\(/.test(st.filter || "")) st.removeProperty("filter");
       }
-      return hot.length;
+      var n = hot.length;
+      var fa = clone.querySelectorAll("[filter]");
+      for (var j = 0; j < fa.length; j++) {
+        var fv = fa[j].getAttribute("filter") || "";
+        if (fv.indexOf("gb2-hb-") !== -1) { fa[j].removeAttribute("filter"); n++; }
+      }
+      var fd = clone.querySelectorAll('defs[data-role="gb2-hover-filters"]');
+      for (var k = 0; k < fd.length; k++)
+        if (fd[k].parentNode) { fd[k].parentNode.removeChild(fd[k]); n++; }
+      return n;
     } catch (e) { return 0; }
   }
   function pinSvgSrc(svgText) {
@@ -6684,6 +6695,19 @@
     // beside the five panel-opener icons when the host asks. jamovi
     // never ships this key.
     payload.toolbarLabels = true;
+    // Panel height budget (Torry, Aug 24 2026): the engine caps its
+    // lower panel at this percent of the window height and scrolls it
+    // INSIDE itself, so a long panel (Statistics, the pattern editor)
+    // never pushes the chart off a short screen - and the click
+    // reveal's scroll shrinks to match, since the panel bottom it
+    // shows is never further than the cap. jamovi never ships this
+    // key. One constant; 240px floor lives engine-side.
+    payload.panelMaxVh = 42;
+    // Gap seams (Torry, Aug 24 2026): hover-drag editing of the space
+    // between bars (categoryGap / barGap) on the cg bar family, built
+    // from the playground ruling set (350ms dwell, no chain, one seam
+    // at a time, no floor). jamovi never ships this key.
+    payload.gapSeams = true;
     // Scatter-overlay re-ship: harvested engine-computed arrays return
     // to the payload while the data fingerprint still matches (R
     // parity - jamovi recomputes and ships them every run). A stale
@@ -8760,7 +8784,8 @@
     '[data-role="alignment-guides"] > *,' +
     '[data-role="data-point-selected"],' +
     '[data-role="refline-halo"],[data-role="refline-handle"],' +
-    '[data-role="ann-rot-line"],[data-role="ann-rot-handle"]';
+    '[data-role="ann-rot-line"],[data-role="ann-rot-handle"],' +
+    '[data-role="gap-seam-chrome"]';
   // Always-present chrome a PAST hover leaves fingerprints on: the shared
   // text-hover rect and the marquee are repositioned via x/y/width/height
   // and then merely display:none-d, and the fast-layer halo keeps its last
@@ -8865,6 +8890,20 @@
       if (kill[k].parentNode) kill[k].parentNode.removeChild(kill[k]);
     snapParkChrome(clone);
     snapRestoreHover(clone);
+    // Hover brighten/lift rides SVG filter REFERENCES now (the engine's
+    // _gb2HoverFx defs - the Aug 24 2026 Safari fix): the style.filter
+    // sweep below never sees them, so scrub the attribute form and the
+    // defs here, or a chart hovered at capture time (the parked-cursor
+    // law) reads as drift forever after. At rest both queries match
+    // nothing, so never-hovered captures stay byte-identical.
+    var hbAttr = clone.querySelectorAll("[filter]");
+    for (var hb = 0; hb < hbAttr.length; hb++) {
+      var hbv = hbAttr[hb].getAttribute("filter") || "";
+      if (hbv.indexOf("gb2-hb-") !== -1) hbAttr[hb].removeAttribute("filter");
+    }
+    var hbDefs = clone.querySelectorAll('defs[data-role="gb2-hover-filters"]');
+    for (var hd = 0; hd < hbDefs.length; hd++)
+      if (hbDefs[hd].parentNode) hbDefs[hd].parentNode.removeChild(hbDefs[hd]);
     snapNormalizeAxes(clone);
     clone.removeAttribute("tabindex");
     clone.removeAttribute("aria-label");

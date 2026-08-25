@@ -32,7 +32,7 @@ help-me-choose-check import-errors-check layout-image-check modal-accessibility-
 layout-arrange-check layout-clipboard-check layout-orientation-check layout-rail-check layout-selectall-check layout-reuse-check layout-undo-check library-bridge-check \
 layout-accessibility-check layout-text-check layout-figure-check \
 linked-selection-check motion-check narrow-check novice-affordances-check \
-overlay-reload-check overlay-restore-check pane-debusy-check panel-reveal-check percol-missing-check \
+overlay-reload-check overlay-restore-check pane-debusy-check panel-reveal-check panelcap-check hover-webkit-check gap-seam-check percol-missing-check \
 pane-scroll-cue-check perf-check picker-persistence-check pinboard-check polish-check preferences-check \
 notebook-record-check notebook-pages-check notebook-undo-check notebook-drift-check \
   guide-formulas-check keep-fidelity-check copyformat-check \
