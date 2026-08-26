@@ -169,7 +169,7 @@ window.PSData = (function () {
     var gs = roles.groupVar ? table.columns[roles.groupVar] : null;
     var fs = roles.facetVar ? table.columns[roles.facetVar] : null;
     var gtype = opts.graphType || "histogram";
-    var isCategorical = gtype === "box" || gtype === "violin" || gtype === "raincloud";
+    var isCategorical = gtype === "box" || gtype === "violin" || gtype === "raincloud" || gtype === "dot";
     var nTotal = vs.length;
 
     var nMissing = 0, vFinite = [], i;
