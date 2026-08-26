@@ -71322,9 +71322,16 @@
             // Grid is display:none on axis-less types (pie/donut, corr,
             // likert), so the generic toggle would be inert there - but
             // likert draws its OWN grid under its own id, and that row
-            // belongs here, not in the Items tab.
+            // belongs here, not in the Items tab. The generic row lists
+            // only while a grid is actually drawn or eye-hidden (the
+            // chart-title convention): chartGrid defaults to "none", so
+            // the always-on row offered a toggle that did nothing; the
+            // "+" menu's Grid lines item is the add path.
             if (!(_gbFreqPie || _gbCorrMode || _gbLikertMode)) {
-                _otherItems.push({ kind: "el", id: "grid", label: "Grid" });
+                if ((typeof data.chartGrid === "string" && data.chartGrid !== "none")
+                    || _isElementHidden("grid")) {
+                    _otherItems.push({ kind: "el", id: "grid", label: "Grid" });
+                }
             } else if (_gbLikertMode) {
                 _otherItems.push({ kind: "el", id: "likertGrid", label: "Grid lines" });
                 if (Array.isArray(data.hiddenElements)) {
