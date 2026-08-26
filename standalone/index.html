@@ -426,18 +426,6 @@
   .ps-inspector-field.ps-fit-field input {
     margin: 0; width: auto; height: auto;
   }
-  #ps-preview-host {
-    position: absolute; left: -20000px; top: 0; width: 640px;
-    visibility: hidden; pointer-events: none;
-  }
-  .ps-analysis-preview {
-    grid-column: 1 / -1; height: 128px; margin-bottom: 4px;
-    background: var(--ps-s0); border: 1px solid var(--ps-l2);
-    border-radius: var(--ps-r-sm); overflow: hidden;
-    opacity: 0; transition: opacity 240ms ease;
-  }
-  .ps-analysis-preview.ps-preview-in { opacity: 1; }
-  .ps-analysis-preview svg { display: block; width: 100%; height: 100%; }
   /* View-zoom isolation (Torry, Jul 27 2026): the zoom scales the CHART;
      the engine's own chrome renders at true size. CSS zoom composes
      multiplicatively, so the toolbar strip (the wrap's first child) and
@@ -5794,10 +5782,6 @@
     </div>
   </div>
 </div>
-<!-- t4-33: offscreen host for armed-card previews. The engine renders each
-     candidate mapping here, the svg is cloned self-contained, and the REAL
-     chart re-renders in the same task, so engine context never dangles. -->
-<div id="ps-preview-host" aria-hidden="true"></div>
 <div id="ps-cellmenu">
   <button type="button" id="ps-cellmenu-toggle"></button>
   <button type="button" id="ps-cellmenu-row"></button>

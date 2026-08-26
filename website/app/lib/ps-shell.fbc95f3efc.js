@@ -17409,76 +17409,6 @@
       out.text += " " + list(skipped) + " stays out.";
     return out;
   }
-  // ---- t4-33: live previews on the armed cards (Torry-approved). ----
-  // Each fitting card renders the user's ACTUAL data as that analysis, at
-  // stock look, into the offscreen preview host; the svg is cloned
-  // self-contained and dropped into the card. Everything runs in ONE task
-  // and ends by re-rendering the real chart, so the engine's window-side
-  // context (listeners, undo baselines, render hash) can never be left
-  // pointing at a preview - the t4-31 lesson applied in advance.
-  function armPreviewPayload(moduleKey, roles) {
-    var tpl = window.PS_TEMPLATES && window.PS_TEMPLATES[moduleKey];
-    if (!tpl || !PROJECT.table) return null;
-    var payload = JSON.parse(JSON.stringify(tpl.payload));
-    var opts = MODULES[moduleKey].optsFrom({}, tpl.payload);
-    opts.spec = parseSpec(tpl.payload.chartSpec);
-    var res = MODULES[moduleKey].build(PROJECT.table, roles, opts);
-    if (!res || res.error) return null;
-    for (var c in res.channels)
-      if (Object.prototype.hasOwnProperty.call(res.channels, c))
-        payload[c] = res.channels[c];
-    // A small real canvas: text stays at its true point size, so the mini
-    // render is honestly a shrunken figure, not a redesigned one.
-    payload.plotWidth = 4.2;
-    payload.plotHeight = 2.8;
-    return payload;
-  }
-  function armRenderPreviews(token) {
-    if (CHART_ARM !== token || !token) return;
-    if (!window.GraphBuilder2 || !window.GraphBuilder2.render) return;
-    var t = PROJECT.table;
-    if (!t || nRows(t) > 50000) return;   // keep dialog-open cost bounded
-    var host = el("ps-preview-host");
-    var gallery = el("ps-analysis-gallery");
-    if (!host || !gallery || gallery.style.display === "none") return;
-    var made = {};
-    for (var i = 0; i < MODULE_ORDER.length; i++) {
-      var key = MODULE_ORDER[i];
-      try {
-        var reading = armReadingFor(key, token.summary);
-        if (!reading || !reading.fits) continue;
-        var payload = armPreviewPayload(key, reading.roles);
-        if (!payload) continue;
-        window.GraphBuilder2.render("ps-preview-host", payload);
-        var svgs = host.querySelectorAll("svg");
-        var best = null, bestA = 0;
-        for (var v = 0; v < svgs.length; v++) {
-          var a = svgs[v].clientWidth * svgs[v].clientHeight;
-          if (a > bestA) { bestA = a; best = svgs[v]; }
-        }
-        if (!best || best.clientWidth < 60) continue;
-        made[key] = svgSelfContainedClone(best, "prev-" + key + "-").html;
-      } catch (e) { /* a failed preview keeps the glyph, never breaks the dialog */ }
-    }
-    host.innerHTML = "";
-    // Restore the engine's context to the REAL document in the same task:
-    // no paint, no user event, can interleave with the preview renders.
-    try { renderChartIntoHost(); } catch (e) {}
-    if (CHART_ARM !== token) return;   // closed while we worked
-    for (var m = 0; m < MODULE_ORDER.length; m++) {
-      var mk = MODULE_ORDER[m];
-      if (!made[mk]) continue;
-      var card = document.querySelector(
-        '#ps-analysis-grid [data-analysis-module="' + mk + '"]');
-      if (!card || card.querySelector(".ps-analysis-preview")) continue;
-      var box = mkEl("span", "ps-analysis-preview");
-      box.innerHTML = made[mk];
-      card.insertBefore(box, card.firstChild);
-      window.requestAnimationFrame(function (el2) {
-        return function () { el2.classList.add("ps-preview-in"); };
-      }(box));
-    }
-  }
   function selectionChartColumns() {
     var t = PROJECT.table, r = gridSelectionRect();
     if (!t || !r) return [];
@@ -17531,12 +17461,10 @@
       } else armBox.hidden = true;
     }
     renderAnalysisGalleryCards();
-    if (CHART_ARM) {
-      // The dialog paints text-first, instantly; the previews land a beat
-      // later in one atomic batch. The token guards a close-in-between.
-      var token = CHART_ARM;
-      window.setTimeout(function () { armRenderPreviews(token); }, 30);
-    }
+    // Previews REMOVED (backlog item, Aug 25 2026, Torry: "I don't think
+    // we need the previews"): the armed cards' per-card readings carry the
+    // information; the live mini-renders read as clutter. Reverses t4-33
+    // by his explicit call; chart-from-selection-check pins the ABSENCE.
   }
   function renderAnalysisGalleryCards() {
     var root = el("ps-analysis-grid");

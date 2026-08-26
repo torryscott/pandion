@@ -116,32 +116,20 @@ ok(/t1 vs t2/.test(trio.xy) && /cond as color groups/.test(trio.xy),
 ok(/numeric variables only/.test(trio.corr) && /cond stays out/.test(trio.corr),
    `Correlation names what it would leave out ("${trio.corr}")`);
 
-console.log('case 2b: fitting cards grow LIVE previews of the actual data');
-// t4-33. Each fitting card renders the user's own data as that analysis -
-// real marks, not glyphs - while refusing cards keep the generic thumbnail,
-// so the contrast teaches. Generated in one atomic task that ends by
-// re-rendering the real chart, so engine context never dangles (proven
-// implicitly below: creating the chart after previews still works).
-await page.waitForFunction(() =>
-    document.querySelectorAll('.ps-analysis-preview svg').length >= 3,
-    { timeout: 8000 });
-const previews = await page.evaluate(() => {
-    const marks = k => {
-        const p = document.querySelector(
-            '[data-analysis-module="' + k + '"] .ps-analysis-preview svg');
-        return p ? p.querySelectorAll('path, circle, rect, line').length : 0;
-    };
-    return { rm: marks('rmplotbuilder'), xy: marks('xyplotbuilder'),
-             corr: marks('corrplotbuilder'),
-             cgHasPreview: !!document.querySelector(
-                 '[data-analysis-module="plotbuilder"] .ps-analysis-preview') };
-});
-ok(previews.rm > 10 && previews.xy > 10 && previews.corr > 10,
-   `the three fitting cards carry real renders with real marks ` +
-   `(rm ${previews.rm}, xy ${previews.xy}, corr ${previews.corr} elements)`);
-ok(!previews.cgHasPreview,
-   'while the refusing Compare Groups card keeps its stated refusal and ' +
-   'generic thumbnail: the contrast is the lesson');
+console.log('case 2b: the armed cards carry NO live previews');
+// Previews were t4-33 and were REMOVED by the Aug 25 2026 backlog ruling
+// (Torry: "I don't think we need the previews"). The per-card readings are
+// the information; this pins the absence so the renders cannot creep back.
+await page.waitForTimeout(700);   // past the old 30ms preview batch window
+const previews = await page.evaluate(() => ({
+    boxes: document.querySelectorAll('.ps-analysis-preview').length,
+    host: !!document.getElementById('ps-preview-host'),
+    glyphs: document.querySelectorAll('#ps-analysis-grid .ps-analysis-icon').length
+}));
+ok(previews.boxes === 0 && !previews.host,
+   'no preview boxes and no offscreen preview host exist');
+ok(previews.glyphs >= 7,
+   `every card keeps its generic glyph (${previews.glyphs} icons)`);
 await page.click('[data-analysis-module="xyplotbuilder"]');
 await page.waitForTimeout(1200);
 const xy = await page.evaluate(() => window.PS_SHELL.rolesStore());
