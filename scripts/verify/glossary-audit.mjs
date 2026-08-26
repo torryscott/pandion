@@ -40,7 +40,7 @@ const glossary = Function('return ' +
 const terms = Function('return ' +
     literalAfter('var _GB_STAT_TERMS = {', '{', '}'))();
 
-check('glossary inventory remains 131 entries', glossary.length === 131);
+check('glossary inventory remains 132 entries', glossary.length === 132);
 check('linked Sigma inventory remains 104 terms', Object.keys(terms).length === 104);
 check('glossary names are unique', new Set(glossary.map(e => e.n)).size === glossary.length);
 
