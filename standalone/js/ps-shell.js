@@ -434,10 +434,13 @@
   // to be made again for every file.
   var APP_PREFS_DEFAULTS = { density: "comfortable", motion: "system",
                              startup: "center", missingTokens: "NA",
-                             units: "in", updateCheck: "off" };
+                             units: "in", updateCheck: "off",
+                             defErrorBars: "", defRmMethod: "",
+                             defAlpha: "" };
   var APP_PREFS = { density: "comfortable", motion: "system",
                     startup: "center", missingTokens: "NA",
-                    units: "in", updateCheck: "off" };
+                    units: "in", updateCheck: "off",
+                    defErrorBars: "", defRmMethod: "", defAlpha: "" };
   // MEASUREMENT UNITS (Torry, Jul 27 2026: "I see these really large
   // numbers... I think it might be more useful to have these in inches,
   // and maybe an option for metric"). 816 x 1056 is Letter in CSS pixels,
@@ -878,6 +881,15 @@
         APP_PREFS.startup = saved.startup;
       if (typeof saved.missingTokens === "string")
         APP_PREFS.missingTokens = saved.missingTokens;
+      // Statistics defaults (backlog, Aug 2026): validated against the
+      // exact value sets the chart options accept, so a hand-edited
+      // store can never seed a nonsense option.
+      if (saved && /^(se|sd|ci95|ci99|ci95c|none)$/.test(saved.defErrorBars || ""))
+        APP_PREFS.defErrorBars = saved.defErrorBars;
+      if (saved && /^(within|between)$/.test(saved.defRmMethod || ""))
+        APP_PREFS.defRmMethod = saved.defRmMethod;
+      if (saved && /^(0\.1|0\.05|0\.01|0\.001)$/.test(saved.defAlpha || ""))
+        APP_PREFS.defAlpha = saved.defAlpha;
       if (saved && /^(in|cm|px)$/.test(saved.units))
         APP_PREFS.units = saved.units;
       if (saved && /^(on|off)$/.test(saved.updateCheck))
@@ -3341,18 +3353,65 @@
     }
     return word + " " + (mx + 1);
   }
+  // Statistics preferences seed NEW chart documents at creation time
+  // (backlog, Aug 2026). Creation-time seeding is what makes the promise
+  // "existing charts never change when a preference does" structural:
+  // there is no later apply pass to gate. Every seeded value is an
+  // ordinary per-chart option the user can change on the chart.
+  function seedStatPrefs(c) {
+    try {
+      if (!c || !c.options) return c;
+      var eb = APP_PREFS.defErrorBars || "";
+      var rm = APP_PREFS.defRmMethod || "";
+      var al = parseFloat(APP_PREFS.defAlpha || "");
+      var alOk = isFinite(al) && al > 0 && al < 1;
+      if (!eb && !rm && !alOk) return c;
+      function mod(m) { return c.options[m] || (c.options[m] = {}); }
+      if (eb) {
+        mod("plotbuilder").errorBarType = eb;
+        mod("rmplotbuilder").errorBarType = eb;
+      }
+      if (rm) mod("rmplotbuilder").errorBarMethod = rm;
+      if (alOk) {
+        // statsAlpha rides the chartSpec blob (the engine's persisted
+        // per-chart cutoff); merge rather than replace in case a caller
+        // ever pre-seeds other spec keys.
+        var mods = ["plotbuilder", "rmplotbuilder"];
+        for (var i = 0; i < mods.length; i++) {
+          var o = mod(mods[i]);
+          var spec = {};
+          try { spec = o.chartSpec ? JSON.parse(o.chartSpec) : {}; }
+          catch (e2) { spec = {}; }
+          spec.statsAlpha = al;
+          o.chartSpec = JSON.stringify(spec);
+        }
+        // The correlation matrix's ladder supports .05/.01/.001 only;
+        // an alpha of .10 leaves corr at its own default rather than
+        // seeding a value its select cannot show.
+        if (al === 0.05 || al === 0.01 || al === 0.001) {
+          var oc = mod("corrplotbuilder");
+          var spec2 = {};
+          try { spec2 = oc.chartSpec ? JSON.parse(oc.chartSpec) : {}; }
+          catch (e3) { spec2 = {}; }
+          spec2.corrSigLevel = al;
+          oc.chartSpec = JSON.stringify(spec2);
+        }
+      }
+    } catch (e) {}
+    return c;
+  }
   function newChart(name) {
     var maxId = 0;
     for (var i = 0; i < PROJECT.charts.length; i++) {
       var m = /^c(\d+)$/.exec(PROJECT.charts[i].id || "");
       if (m) maxId = Math.max(maxId, Number(m[1]));
     }
-    return { id: "c" + (maxId + 1),
+    return seedStatPrefs({ id: "c" + (maxId + 1),
              name: name || nextDocName("Chart", false),
              module: "plotbuilder", roles: {}, options: {},
              // Never auto-restyled until the engine's one-shot
              // default-style application stamps it (library bridge).
-             styleStamp: false };
+             styleStamp: false });
   }
   function newLayout() {
     var maxId = 0;
@@ -6620,12 +6679,12 @@
         // a placeholder instead of its chart (found Aug 24 2026 by the
         // wellbeing probe's sequencing; affected all examples).
         roles[k] = JSON.parse(JSON.stringify(ex.roles[k]));
-    PROJECT.charts = [{ id: "c1", name: "Chart 1",
+    PROJECT.charts = [seedStatPrefs({ id: "c1", name: "Chart 1",
       module: ex.fits[0] || "plotbuilder",
       // Brand new, so the default style may apply once - the same stamp
       // newChart() sets. Its ABSENCE means "an older saved document, do
       // not restyle it", which is why migrateSnapshot must not set it.
-      roles: roles, options: {}, styleStamp: false }];
+      roles: roles, options: {}, styleStamp: false })];
     PROJECT.activeChart = "c1";
     PROJECT.ui = { dataOpen: false, workspace: "chart",
                    lastChart: "c1", lastLayout: null, columnWidths: {} };
@@ -25373,8 +25432,8 @@
     PROJECT.pins = [];   // the Pinboard is project evidence; new data, new record
     PROJECT.pinboards = [];
     if (PROJECT.ui) PROJECT.ui.activeBoard = null;
-    PROJECT.charts = [{ id: "c1", name: "Chart 1",
-      module: "plotbuilder", roles: {}, options: {}, styleStamp: false }];
+    PROJECT.charts = [seedStatPrefs({ id: "c1", name: "Chart 1",
+      module: "plotbuilder", roles: {}, options: {}, styleStamp: false })];
     PROJECT.activeChart = "c1";
     PROJECT.ui.lastChart = "c1";
     PROJECT.ui.lastLayout = null;
@@ -26682,6 +26741,10 @@
     el("ps-pref-export-dpi").value = String(exp.dpi);
     el("ps-pref-missing").value = APP_PREFS.missingTokens;
     if (el("ps-pref-updates")) el("ps-pref-updates").value = APP_PREFS.updateCheck;
+    if (el("ps-pref-def-eb")) el("ps-pref-def-eb").value = APP_PREFS.defErrorBars;
+    if (el("ps-pref-def-rmm")) el("ps-pref-def-rmm").value = APP_PREFS.defRmMethod;
+    if (el("ps-pref-def-alpha")) el("ps-pref-def-alpha").value = APP_PREFS.defAlpha;
+    prefShowTab("general");
     populatePrefStyleSelect();
     refreshPrefStorage();
     openShellDialog("ps-preferences");
@@ -26792,6 +26855,9 @@
     el("ps-pref-units").value = APP_PREFS_DEFAULTS.units;
     el("ps-pref-missing").value = APP_PREFS_DEFAULTS.missingTokens;
     if (el("ps-pref-updates")) el("ps-pref-updates").value = APP_PREFS_DEFAULTS.updateCheck;
+    if (el("ps-pref-def-eb")) el("ps-pref-def-eb").value = "";
+    if (el("ps-pref-def-rmm")) el("ps-pref-def-rmm").value = "";
+    if (el("ps-pref-def-alpha")) el("ps-pref-def-alpha").value = "";
     el("ps-pref-export-format").value = "svg";
     el("ps-pref-export-dpi").value = "300";
     if (el("ps-pref-style")) el("ps-pref-style").value = "";
@@ -26804,6 +26870,18 @@
     APP_PREFS.units = el("ps-pref-units").value;
     APP_PREFS.missingTokens = String(el("ps-pref-missing").value || "NA").trim()
       || "NA";
+    if (el("ps-pref-def-eb"))
+      APP_PREFS.defErrorBars =
+        /^(se|sd|ci95|ci99|ci95c|none)$/.test(el("ps-pref-def-eb").value)
+          ? el("ps-pref-def-eb").value : "";
+    if (el("ps-pref-def-rmm"))
+      APP_PREFS.defRmMethod =
+        /^(within|between)$/.test(el("ps-pref-def-rmm").value)
+          ? el("ps-pref-def-rmm").value : "";
+    if (el("ps-pref-def-alpha"))
+      APP_PREFS.defAlpha =
+        /^(0\.1|0\.05|0\.01|0\.001)$/.test(el("ps-pref-def-alpha").value)
+          ? el("ps-pref-def-alpha").value : "";
     if (el("ps-pref-updates")) {
       APP_PREFS.updateCheck = el("ps-pref-updates").value === "on" ? "on" : "off";
       // Just turned on: run the standard (stamp-respecting) check now
@@ -27371,6 +27449,45 @@
       closeShellDialog("ps-preferences");
     });
     el("ps-preferences-save").addEventListener("click", savePreferences);
+    // Preferences tabs (backlog, Aug 2026): the WAI tabs pattern - roving
+    // tabindex, arrow keys, aria-selected - kept tiny because there are
+    // exactly two tabs.
+    (function () {
+      var ids = ["general", "stats"];
+      function tabEl(k) { return el("ps-pref-tab-" + k); }
+      function paneEl(k) { return el("ps-pref-pane-" + k); }
+      window.prefShowTab = function (key) {
+        for (var i = 0; i < ids.length; i++) {
+          var on = ids[i] === key;
+          var t = tabEl(ids[i]), p = paneEl(ids[i]);
+          if (!t || !p) return;
+          t.setAttribute("aria-selected", on ? "true" : "false");
+          t.tabIndex = on ? 0 : -1;
+          t.classList.toggle("ps-primary", on);
+          if (on) p.removeAttribute("hidden");
+          else p.setAttribute("hidden", "");
+        }
+      };
+      for (var i = 0; i < ids.length; i++) {
+        (function (key, idx) {
+          var t = tabEl(key);
+          if (!t) return;
+          t.addEventListener("click", function () { prefShowTab(key); });
+          t.addEventListener("keydown", function (e) {
+            var go = null;
+            if (e.key === "ArrowRight" || e.key === "ArrowDown") go = ids[(idx + 1) % ids.length];
+            else if (e.key === "ArrowLeft" || e.key === "ArrowUp") go = ids[(idx + ids.length - 1) % ids.length];
+            else if (e.key === "Home") go = ids[0];
+            else if (e.key === "End") go = ids[ids.length - 1];
+            if (go) {
+              e.preventDefault();
+              prefShowTab(go);
+              tabEl(go).focus();
+            }
+          });
+        })(ids[i], i);
+      }
+    })();
     el("ps-pref-clear").addEventListener("click", clearLocalData);
     el("ps-pref-reset").addEventListener("click", restorePrefDefaults);
     el("ps-shortcuts-close").addEventListener("click", function () {
