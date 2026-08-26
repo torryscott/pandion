@@ -5609,6 +5609,18 @@
           <option value="600">600</option>
         </select>
       </label>
+      <!-- Update check (backlog, Aug 2026): OFF by default on purpose. The
+           About dialog promises "nothing is sent anywhere", so even this
+           version-number request is opt-in; Help > Check for updates is the
+           always-available manual path. -->
+      <label class="ps-inspector-field"
+             data-tip="Asks pandionplots.com for the newest version number, at most once a day. Nothing about you or your data is sent. Useful for the saved portable file and the desktop apps; the browser app is always current.">
+        Check for updates automatically
+        <select id="ps-pref-updates">
+          <option value="off">Off (default)</option>
+          <option value="on">On</option>
+        </select>
+      </label>
       <!-- t3-53: the dataset default every import starts from. It was
            settable only AFTER an import, per project, so the same correction
            had to be made again for every file. -->
@@ -5677,6 +5689,31 @@
      copy had no way to tell, and nobody could find out what changed without
      the site. Content comes from RELEASE_NOTES in ps-shell.js, whose newest
      entry a probe pins to APP_VERSION so it cannot drift in silence. -->
+<!-- Update check (backlog, Aug 2026): result dialog for Help > Check for
+     updates and the Help-menu update badge. Body text is set via
+     textContent in ps-shell (the manifest is remote data, never HTML). -->
+<div id="ps-update-dialog" class="ps-dialog-overlay" role="dialog"
+     aria-modal="true" aria-labelledby="ps-update-title">
+  <div class="ps-dialog-card" style="max-width:480px;">
+    <div class="ps-dialog-head">
+      <div>
+        <h2 id="ps-update-title">Check for updates</h2>
+        <p>The saved and desktop apps do not update themselves; a new
+           version is a fresh download you keep.</p>
+      </div>
+      <button type="button" class="ps-btn ps-dialog-close"
+              id="ps-update-close">Close</button>
+    </div>
+    <div class="ps-dialog-body">
+      <p id="ps-update-body" style="margin:0 0 12px;"></p>
+      <div class="ps-inspector-actions">
+        <button type="button" class="ps-btn ps-primary" id="ps-update-open"
+                hidden>Open the download page</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="ps-whatsnew-dialog" class="ps-dialog-overlay" role="dialog"
      aria-modal="true" aria-labelledby="ps-whatsnew-title">
   <div class="ps-dialog-card" style="max-width:560px;">

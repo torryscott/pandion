@@ -434,10 +434,10 @@
   // to be made again for every file.
   var APP_PREFS_DEFAULTS = { density: "comfortable", motion: "system",
                              startup: "center", missingTokens: "NA",
-                             units: "in" };
+                             units: "in", updateCheck: "off" };
   var APP_PREFS = { density: "comfortable", motion: "system",
                     startup: "center", missingTokens: "NA",
-                    units: "in" };
+                    units: "in", updateCheck: "off" };
   // MEASUREMENT UNITS (Torry, Jul 27 2026: "I see these really large
   // numbers... I think it might be more useful to have these in inches,
   // and maybe an option for metric"). 816 x 1056 is Letter in CSS pixels,
@@ -880,6 +880,8 @@
         APP_PREFS.missingTokens = saved.missingTokens;
       if (saved && /^(in|cm|px)$/.test(saved.units))
         APP_PREFS.units = saved.units;
+      if (saved && /^(on|off)$/.test(saved.updateCheck))
+        APP_PREFS.updateCheck = saved.updateCheck;
     } catch (e) {}
   }
   loadAppPrefs();
@@ -26751,6 +26753,7 @@
     el("ps-pref-export-format").value = exp.format;
     el("ps-pref-export-dpi").value = String(exp.dpi);
     el("ps-pref-missing").value = APP_PREFS.missingTokens;
+    if (el("ps-pref-updates")) el("ps-pref-updates").value = APP_PREFS.updateCheck;
     populatePrefStyleSelect();
     refreshPrefStorage();
     openShellDialog("ps-preferences");
@@ -26860,6 +26863,7 @@
     el("ps-pref-startup").value = APP_PREFS_DEFAULTS.startup;
     el("ps-pref-units").value = APP_PREFS_DEFAULTS.units;
     el("ps-pref-missing").value = APP_PREFS_DEFAULTS.missingTokens;
+    if (el("ps-pref-updates")) el("ps-pref-updates").value = APP_PREFS_DEFAULTS.updateCheck;
     el("ps-pref-export-format").value = "svg";
     el("ps-pref-export-dpi").value = "300";
     if (el("ps-pref-style")) el("ps-pref-style").value = "";
@@ -26872,6 +26876,12 @@
     APP_PREFS.units = el("ps-pref-units").value;
     APP_PREFS.missingTokens = String(el("ps-pref-missing").value || "NA").trim()
       || "NA";
+    if (el("ps-pref-updates")) {
+      APP_PREFS.updateCheck = el("ps-pref-updates").value === "on" ? "on" : "off";
+      // Just turned on: run the standard (stamp-respecting) check now
+      // rather than on the next launch.
+      setTimeout(function () { try { psUpdateAutoCheck(); } catch (e) {} }, 500);
+    }
     try {
       window.localStorage.setItem(PS_PREF_KEY, JSON.stringify(APP_PREFS));
       var oldExport = exportPrefs();
@@ -27438,6 +27448,17 @@
     el("ps-shortcuts-close").addEventListener("click", function () {
       closeShellDialog("ps-shortcuts-dialog");
     });
+    if (el("ps-update-close"))
+      el("ps-update-close").addEventListener("click", function () {
+        closeShellDialog("ps-update-dialog");
+      });
+    if (el("ps-update-open"))
+      el("ps-update-open").addEventListener("click", function () {
+        var target = psUpdatePageUrl(psUpdateState());
+        showToast("Opening " + target.replace(/^https:\/\//, "") + " in a new tab");
+        try { window.open(target, "_blank", "noopener"); }
+        catch (e) { showToast("Could not open " + target, true); }
+      });
     el("ps-whatsnew-close").addEventListener("click", function () {
       closeShellDialog("ps-whatsnew-dialog");
     });
@@ -27647,6 +27668,7 @@
       { label: "Chart gallery (online)", command: "site-gallery" },
       { label: "Pandion Plots on the web (online)", command: "site-home" },
       "separator",
+      { label: "Check for updates\u2026", command: "check-updates" },
       { label: "What's new", command: "whats-new" },
       { label: "About Pandion Plots", command: "about" }
     ]
@@ -27916,6 +27938,152 @@
       body.appendChild(box);
     }
   }
+  // ---- Check for updates (backlog item, Aug 2026) ----
+  // The hosted app updates itself on every deploy; the saved portable file
+  // and the desktop apps do not, and APP_VERSION is baked into them. This
+  // asks the site for the newest version number and, when it is newer,
+  // badges the Help menu and points at the download page. Never a
+  // self-update: a new version is a fresh download the user keeps.
+  // PRIVACY: the automatic check is OFF by default because the About
+  // dialog promises "nothing is sent anywhere"; Help > Check for updates
+  // is the manual path, and Preferences can turn the daily check on.
+  var PS_UPDATE_KEY = "psstandalone.updatecheck.v1";
+  var PS_UPDATE_PAGE = "https://pandionplots.com/download.html";
+  var PS_UPDATE_MANIFEST = "https://pandionplots.com/app/version.json";
+  var PS_UPDATE_EVERY_MS = 24 * 60 * 60 * 1000;
+  function psUpdateHosted() {
+    try { return /(^|\.)pandionplots\.com$/i.test(location.hostname); }
+    catch (e) { return false; }
+  }
+  function psUpdateState() {
+    try {
+      var st = JSON.parse(window.localStorage.getItem(PS_UPDATE_KEY) || "null");
+      return (st && typeof st === "object") ? st : {};
+    } catch (e) { return {}; }
+  }
+  function psUpdateSaveState(st) {
+    try { window.localStorage.setItem(PS_UPDATE_KEY, JSON.stringify(st)); }
+    catch (e) {}
+  }
+  function psUpdateCmp(a, b) {
+    // dotted numeric compare: 1 when a > b
+    var pa = String(a).split("."), pb = String(b).split(".");
+    for (var i = 0; i < Math.max(pa.length, pb.length); i++) {
+      var na = parseInt(pa[i] || "0", 10) || 0, nb = parseInt(pb[i] || "0", 10) || 0;
+      if (na !== nb) return na > nb ? 1 : -1;
+    }
+    return 0;
+  }
+  function psUpdatePageUrl(st) {
+    // The manifest is remote data: only its OWN site may be a target.
+    var page = st && typeof st.page === "string" ? st.page : "";
+    return page.indexOf("https://pandionplots.com/") === 0 ? page : PS_UPDATE_PAGE;
+  }
+  function psUpdateNewer() {
+    var st = psUpdateState();
+    return (typeof st.latest === "string" && psUpdateCmp(st.latest, APP_VERSION) > 0)
+      ? st.latest : "";
+  }
+  function psUpdateSyncBadge() {
+    var latest = psUpdateNewer();
+    var defs = APP_MENU_DEFS.help || [];
+    for (var i = 0; i < defs.length; i++) {
+      if (defs[i] && defs[i].command === "check-updates") {
+        defs[i].label = latest
+          ? "Update available (" + latest + ")\u2026"
+          : "Check for updates\u2026";
+      }
+    }
+    var btn = document.querySelector('[data-ps-menu="help"]');
+    if (!btn) return;
+    var dot = document.getElementById("ps-update-dot");
+    if (latest && !dot) {
+      dot = document.createElement("span");
+      dot.id = "ps-update-dot";
+      dot.setAttribute("aria-hidden", "true");
+      dot.style.cssText = "display:inline-block;width:7px;height:7px;" +
+        "border-radius:50%;background:#3573bd;margin-left:5px;" +
+        "vertical-align:6px;";
+      btn.appendChild(dot);
+      btn.setAttribute("aria-label", "Help - update available");
+    } else if (!latest && dot) {
+      dot.remove();
+      btn.removeAttribute("aria-label");
+    }
+  }
+  function psUpdateShowDialog(text, showOpen) {
+    var body = el("ps-update-body"), open = el("ps-update-open");
+    if (!body) return;
+    body.textContent = text;  // manifest content is data, never HTML
+    if (open) {
+      if (showOpen) open.removeAttribute("hidden");
+      else open.setAttribute("hidden", "");
+    }
+    openShellDialog("ps-update-dialog");
+  }
+  function psUpdateCheck(manual) {
+    if (psUpdateHosted()) {
+      if (manual) psUpdateShowDialog(
+        "You are using the browser app, which always runs the latest " +
+        "version (" + APP_VERSION + "). Nothing to update.", false);
+      return;
+    }
+    var url = (typeof window.__ps_updateManifestUrl === "string" &&
+               window.__ps_updateManifestUrl) || PS_UPDATE_MANIFEST;
+    var ctrl = null, timer = null;
+    try { ctrl = new AbortController(); } catch (e) {}
+    if (ctrl) timer = setTimeout(function () { try { ctrl.abort(); } catch (e) {} }, 6000);
+    fetch(url, ctrl ? { signal: ctrl.signal, cache: "no-store" } : { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (m) {
+        if (timer) clearTimeout(timer);
+        var ver = m && typeof m.version === "string" ? m.version.trim() : "";
+        if (!/^\d+(\.\d+){0,3}$/.test(ver)) throw new Error("bad manifest");
+        var st = { lastCheckAt: Date.now(), latest: ver,
+                   page: m && typeof m.page === "string" ? m.page : "" };
+        psUpdateSaveState(st);
+        psUpdateSyncBadge();
+        if (!manual) return;
+        if (psUpdateCmp(ver, APP_VERSION) > 0) {
+          psUpdateShowDialog(
+            "Version " + ver + " is available (you are on " + APP_VERSION +
+            "). Download the new copy from the download page and replace " +
+            "this file; your saved projects are separate and are not " +
+            "affected.", true);
+        } else {
+          psUpdateShowDialog(
+            "You are up to date (" + APP_VERSION + ").", false);
+        }
+      })
+      .catch(function () {
+        if (timer) clearTimeout(timer);
+        // A stamp even on failure keeps the automatic path from retrying
+        // in a tight loop on a machine that is simply offline.
+        if (!manual) {
+          var st = psUpdateState();
+          st.lastCheckAt = Date.now();
+          psUpdateSaveState(st);
+          return;  // silent by design
+        }
+        psUpdateShowDialog(
+          "Could not reach pandionplots.com to check. If you are online, " +
+          "try again later, or visit the download page directly.", true);
+      });
+  }
+  function psUpdateAutoCheck() {
+    if (APP_PREFS.updateCheck !== "on") return;
+    if (psUpdateHosted()) return;
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+    var st = psUpdateState();
+    if (st.lastCheckAt && (Date.now() - st.lastCheckAt) < PS_UPDATE_EVERY_MS) return;
+    psUpdateCheck(false);
+  }
+  // Boot: show a badge already known from an earlier session, then maybe
+  // check. Deferred so startup work owns the first seconds.
+  setTimeout(function () {
+    try { psUpdateSyncBadge(); psUpdateAutoCheck(); } catch (e) {}
+  }, 3500);
+
   function showWhatsNew() {
     renderWhatsNew();
     openShellDialog("ps-whatsnew-dialog");
@@ -28269,6 +28437,7 @@
     else if (command.indexOf("data-") === 0) runDataCommand(command);
     else if (command === "site-home") openSiteLink("site");
     else if (command === "site-gallery") openSiteLink("gallery");
+    else if (command === "check-updates") psUpdateCheck(true);
     else if (command === "whats-new") showWhatsNew();
     else if (command === "about") showAbout();
   }

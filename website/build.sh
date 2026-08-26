@@ -308,6 +308,16 @@ echo "website/docs refreshed ($(du -sh website/docs | cut -f1))"
 # Version-drift guard: the site advertises a release number in several
 # places. Warn loudly rather than quietly serving a stale one.
 VERSION=$(grep '^Version:' DESCRIPTION | awk '{print $2}')
+
+# The update manifest (backlog, Aug 2026): saved portable copies and the
+# desktop apps ask this file whether a newer version exists (Help > Check
+# for updates; ps-shell's psUpdateCheck). Generated from the SAME version
+# the drift checks below pin, so it can never disagree with the app.
+# Served with open CORS via website/_headers - a saved copy runs from a
+# file:// origin and the desktop apps from their own, so without that
+# header the fetch is blocked and the check silently does nothing.
+printf '{"version":"%s","page":"https://pandionplots.com/download.html"}\n' "$VERSION" > website/app/version.json
+echo "wrote website/app/version.json ($VERSION)"
 DRIFT=0
 for page in website/index.html website/about.html website/download.html; do
     grep -q "$VERSION" "$page" || { echo "WARN: $page does not mention version $VERSION" >&2; DRIFT=1; }

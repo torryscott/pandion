@@ -23,6 +23,14 @@
 /app/lib/*
   Cache-Control: public, max-age=86400
 
+# The update manifest is fetched cross-origin by saved portable copies
+# (file:// origins) and the desktop apps (Help > Check for updates), so
+# it must answer with open CORS or the check silently does nothing.
+# Short cache: a stale version number defeats the file's whole purpose.
+/app/version.json
+  Access-Control-Allow-Origin: *
+  Cache-Control: public, max-age=300
+
 # The shell must never be cached hard, or a visitor keeps an old page
 # pointing at script names that a later deploy has already pruned.
 /app/
