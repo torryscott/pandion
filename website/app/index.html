@@ -427,6 +427,18 @@
   .ps-inspector-field.ps-fit-field input {
     margin: 0; width: auto; height: auto;
   }
+  #ps-preview-host {
+    position: absolute; left: -20000px; top: 0; width: 640px;
+    visibility: hidden; pointer-events: none;
+  }
+  .ps-analysis-preview {
+    grid-column: 1 / -1; height: 128px; margin-bottom: 4px;
+    background: var(--ps-s0); border: 1px solid var(--ps-l2);
+    border-radius: var(--ps-r-sm); overflow: hidden;
+    opacity: 0; transition: opacity 240ms ease;
+  }
+  .ps-analysis-preview.ps-preview-in { opacity: 1; }
+  .ps-analysis-preview svg { display: block; width: 100%; height: 100%; }
   /* View-zoom isolation (Torry, Jul 27 2026): the zoom scales the CHART;
      the engine's own chrome renders at true size. CSS zoom composes
      multiplicatively, so the toolbar strip (the wrap's first child) and
@@ -5547,6 +5559,20 @@
       <button type="button" class="ps-btn ps-dialog-close"
               id="ps-preferences-close">Close</button>
     </div>
+    <!-- Statistics preferences (backlog, Aug 2026): defaults that change
+         what a chart's NUMBERS claim get their own tab, never a style,
+         so a look can never silently change someone's statistics. -->
+    <div role="tablist" aria-label="Preference sections"
+         style="display:flex;gap:6px;padding:10px 20px 0;">
+      <button type="button" role="tab" id="ps-pref-tab-general"
+              class="ps-btn" aria-selected="true"
+              aria-controls="ps-pref-pane-general">General</button>
+      <button type="button" role="tab" id="ps-pref-tab-stats"
+              class="ps-btn" aria-selected="false" tabindex="-1"
+              aria-controls="ps-pref-pane-stats">Statistics</button>
+    </div>
+    <div id="ps-pref-pane-general" role="tabpanel"
+         aria-labelledby="ps-pref-tab-general">
     <div class="ps-dialog-body ps-pref-grid">
       <label class="ps-inspector-field">Interface density
         <select id="ps-pref-density">
@@ -5628,6 +5654,57 @@
       <div class="ps-inspector-actions">
         <button type="button" class="ps-btn" id="ps-pref-clear">Clear local data…</button>
         <button type="button" class="ps-btn" id="ps-pref-reset">Restore defaults</button>
+      </div>
+    </div>
+    </div>
+    <div id="ps-pref-pane-stats" role="tabpanel"
+         aria-labelledby="ps-pref-tab-stats" hidden>
+      <div class="ps-dialog-body">
+        <p style="margin:0 0 12px;color:#556;">These apply to charts you
+          create from now on. Each chart can still be changed individually;
+          these only set the starting point, and existing charts never
+          change when a preference does.</p>
+        <div class="ps-pref-grid">
+          <label class="ps-inspector-field"
+                 style="background:#f2f6fb;border:1px solid #cfe0f5;border-left:3px solid #3573bd;border-radius:4px;padding:8px 10px;"
+                 data-tip="Seeds the error bar type on new Compare Groups and Repeated Measures charts.">
+            Error bars
+            <select id="ps-pref-def-eb">
+              <option value="">App default (standard error)</option>
+              <option value="se">Standard error</option>
+              <option value="sd">Standard deviation</option>
+              <option value="ci95">95% confidence interval</option>
+              <option value="ci99">99% confidence interval</option>
+              <option value="ci95c">Difference-adjusted 95%</option>
+              <option value="none">None</option>
+            </select>
+          </label>
+          <label class="ps-inspector-field"
+                 style="background:#f2f6fb;border:1px solid #cfe0f5;border-left:3px solid #3573bd;border-radius:4px;padding:8px 10px;"
+                 data-tip="Seeds the error bar method on new Repeated Measures charts.">
+            Repeated measures method
+            <select id="ps-pref-def-rmm">
+              <option value="">App default (within-subject)</option>
+              <option value="within">Within-subject (Cousineau-Morey)</option>
+              <option value="between">Between-subjects</option>
+            </select>
+          </label>
+          <label class="ps-inspector-field"
+                 style="background:#f2f6fb;border:1px solid #cfe0f5;border-left:3px solid #3573bd;border-radius:4px;padding:8px 10px;"
+                 data-tip="Seeds the significance cutoff on new charts: the Statistics panel, bracket marks, and the correlation matrix (which supports .05, .01 and .001).">
+            Alpha
+            <select id="ps-pref-def-alpha">
+              <option value="">App default (.05)</option>
+              <option value="0.1">.10</option>
+              <option value="0.05">.05</option>
+              <option value="0.01">.01</option>
+              <option value="0.001">.001</option>
+            </select>
+          </label>
+        </div>
+        <p style="margin:12px 0 0;color:#8a99a8;font-size:12.5px;">The
+          highlighted rows change what a new chart's numbers claim, the
+          same distinction the blue bands mark on the chart panels.</p>
       </div>
     </div>
     <div class="ps-dialog-actions">
@@ -5783,6 +5860,10 @@
     </div>
   </div>
 </div>
+<!-- t4-33: offscreen host for armed-card previews. The engine renders each
+     candidate mapping here, the svg is cloned self-contained, and the REAL
+     chart re-renders in the same task, so engine context never dangles. -->
+<div id="ps-preview-host" aria-hidden="true"></div>
 <div id="ps-cellmenu">
   <button type="button" id="ps-cellmenu-toggle"></button>
   <button type="button" id="ps-cellmenu-row"></button>
@@ -6107,7 +6188,7 @@
 <script src="lib/jspdf.umd.min.979a2ef514.js"></script>
 <script src="lib/svg2pdf.umd.min.4ada250f50.js"></script>
 <script src="lib/graphbuilder2.min.3261977ccc.js"></script>
-<script src="lib/ps-shell.fbc95f3efc.js"></script>
+<script src="lib/ps-shell.347bd21357.js"></script>
 <script src="lib/ps-tour.fe1b2fd3ed.js"></script>
 </body>
 </html>
