@@ -22589,7 +22589,28 @@
                 // we leave those alone here.
                 var annId = sel.substring(11);
                 var ann = (typeof findAnnotation === "function") ? findAnnotation(annId) : null;
-                if (ann && ann.kind === "text") {
+                if (ann && ann.kind === "bracket") {
+                    // The bracket's own render-time chrome marks the
+                    // selection; under All-brackets scope the OTHER
+                    // brackets get a light dashed box so the edit's
+                    // reach is visible (scope-follows-halo rule).
+                    if (window.__gb2_baScopeAll === true) {
+                        try {
+                            var _bkEls = svg.querySelectorAll('[data-ann-id]');
+                            for (var _bkHi = 0; _bkHi < _bkEls.length; _bkHi++) {
+                                var _bkHel = _bkEls[_bkHi];
+                                var _bkHid = _bkHel.getAttribute("data-ann-id");
+                                if (_bkHid === annId) continue;
+                                var _bkHann = (typeof findAnnotation === "function")
+                                    ? findAnnotation(_bkHid) : null;
+                                if (!_bkHann || _bkHann.kind !== "bracket") continue;
+                                addIndicatorBoxForEl(_bkHel, { pad: 3, strokeWidth: 1.25,
+                                    strokeOpacity: 0.55, dashArray: "4,3",
+                                    "class": "gb2-halo-union" });
+                            }
+                        } catch (_eBkHalo) {}
+                    }
+                } else if (ann && ann.kind === "text") {
                     var annDragId = "annText:" + annId;
                     // Suppress while inline editing this annotation.
                     if (_inlineTextEditor && _inlineTextEditor.dragId === annDragId) return;
@@ -92313,6 +92334,28 @@
             }
             var _baSwatchStyle = "width:28px;height:28px;padding:0;border:1px solid #888;border-radius:4px;cursor:pointer;flex-shrink:0;";
             var _baVal = "width:32px;text-align:right;color:#555;font-size:11px;";
+            // This bracket / All brackets scope (backlog item, Aug 2026):
+            // STYLE commits route through here. In All scope the patch
+            // lands on every bracket annotation - siblings are patched
+            // directly (no per-sibling redraw), then the ordinary commit
+            // on the edited bracket does the one redraw + one persist
+            // (persistAnnotations serializes ALL annotations, so the
+            // whole batch rides one option write and one undo step).
+            // The label text, the span, and the Stats settings stay
+            // per-bracket ALWAYS - those are semantics, not style.
+            function _baApplyScoped(patch) {
+                if (window.__gb2_baScopeAll === true) {
+                    var _bsAnns = Array.isArray(data.annotations) ? data.annotations : [];
+                    for (var _bsI = 0; _bsI < _bsAnns.length; _bsI++) {
+                        var _bsA = _bsAnns[_bsI];
+                        if (!_bsA || _bsA.kind !== "bracket" || _bsA.id === ann.id) continue;
+                        for (var _bsK in patch) {
+                            if (Object.prototype.hasOwnProperty.call(patch, _bsK)) _bsA[_bsK] = patch[_bsK];
+                        }
+                    }
+                }
+                commitAnnotationChange(ann.id, patch);
+            }
             // Resolve initial values (used by both strip HTML and
             // the wiring block below).
             var _baInitWidth = Math.abs(ann.x2 - ann.x);
@@ -92943,7 +92986,7 @@
             });
             iCapLeft.addEventListener("change", function () {
                 var v = parseFloat(iCapLeft.value);
-                if (isFinite(v)) commitAnnotationChange(ann.id, { capLeft: v });
+                if (isFinite(v)) _baApplyScoped({ capLeft: v });
             });
             iCapRight.addEventListener("input", function () {
                 var v = parseFloat(iCapRight.value);
@@ -92953,7 +92996,7 @@
             });
             iCapRight.addEventListener("change", function () {
                 var v = parseFloat(iCapRight.value);
-                if (isFinite(v)) commitAnnotationChange(ann.id, { capRight: v });
+                if (isFinite(v)) _baApplyScoped({ capRight: v });
             });
             iLineColor.addEventListener("click", function (e) {
                 e.preventDefault();
@@ -92963,7 +93006,7 @@
                         applyAnnotationChange(ann.id, { lineColor: newColor });
                         _refreshPaletteRowHighlight(body, "line-color-btn", "ba2", newColor);
                     },
-                    function (newColor) { commitAnnotationChange(ann.id, { lineColor: newColor }); }
+                    function (newColor) { _baApplyScoped({ lineColor: newColor }); }
                 );
             });
             // Line color palette swatch wiring (namespace "ba2" so
@@ -92976,7 +93019,7 @@
                     btn.addEventListener("click", function (e) {
                         e.preventDefault(); e.stopPropagation();
                         iLineColor.style.background = color;
-                        commitAnnotationChange(ann.id, { lineColor: color });
+                        _baApplyScoped({ lineColor: color });
                         try { _pushRecentColor(color); } catch (_e) {}
                         _refreshPaletteRowHighlight(body, "line-color-btn", "ba2", color);
                         _syncDockedPickerHex(color);
@@ -92994,7 +93037,7 @@
             });
             iLineW.addEventListener("change", function () {
                 var v = parseFloat(iLineW.value);
-                if (isFinite(v) && v > 0) commitAnnotationChange(ann.id, { lineWidth: v });
+                if (isFinite(v) && v > 0) _baApplyScoped({ lineWidth: v });
             });
             // Bracket annotation line-width num input (typed can
             // exceed slider's 4 px cap).
@@ -93010,7 +93053,7 @@
                 });
                 iBaLineWNum.addEventListener("change", function () {
                     var v = parseFloat(iBaLineWNum.value);
-                    if (isFinite(v) && v > 0) commitAnnotationChange(ann.id, { lineWidth: v });
+                    if (isFinite(v) && v > 0) _baApplyScoped({ lineWidth: v });
                 });
             }
             // Bracket annotation width preset wiring.
@@ -93025,7 +93068,7 @@
             });
             iSize.addEventListener("change", function () {
                 var v = parseFloat(iSize.value);
-                if (isFinite(v) && v > 0) commitAnnotationChange(ann.id, { fontSize: _gb2PxFromPt(v) });
+                if (isFinite(v) && v > 0) _baApplyScoped({ fontSize: _gb2PxFromPt(v) });
             });
             // Size num input (new in the tabbed layout). Typed value
             // can exceed the slider's 27 pt cap.
@@ -93040,7 +93083,7 @@
                 });
                 iBaSizeNum.addEventListener("change", function () {
                     var v = parseFloat(iBaSizeNum.value);
-                    if (isFinite(v) && v > 0) commitAnnotationChange(ann.id, { fontSize: _gb2PxFromPt(v) });
+                    if (isFinite(v) && v > 0) _baApplyScoped({ fontSize: _gb2PxFromPt(v) });
                 });
             }
             iTextOff.addEventListener("input", function () {
@@ -93053,7 +93096,7 @@
             });
             iTextOff.addEventListener("change", function () {
                 var v = parseFloat(iTextOff.value);
-                if (isFinite(v) && v >= 0) commitAnnotationChange(ann.id, { textOffset: v });
+                if (isFinite(v) && v >= 0) _baApplyScoped({ textOffset: v });
             });
             // textOffset num input (new in the icon-led card layout).
             // Typed value can exceed the slider's 40 px cap.
@@ -93068,7 +93111,7 @@
                 });
                 iBaTextOffNum.addEventListener("change", function () {
                     var v = parseFloat(iBaTextOffNum.value);
-                    if (isFinite(v) && v >= 0) commitAnnotationChange(ann.id, { textOffset: v });
+                    if (isFinite(v) && v >= 0) _baApplyScoped({ textOffset: v });
                 });
             }
             iColor.addEventListener("click", function (e) {
@@ -93079,7 +93122,7 @@
                         applyAnnotationChange(ann.id, { color: newColor });
                         _refreshPaletteRowHighlight(body, "color-btn", "ba", newColor);
                     },
-                    function (newColor) { commitAnnotationChange(ann.id, { color: newColor }); }
+                    function (newColor) { _baApplyScoped({ color: newColor }); }
                 );
             });
             // Compact palette swatch wiring (bracket-annotation
@@ -93091,7 +93134,7 @@
                     btn.addEventListener("click", function (e) {
                         e.preventDefault(); e.stopPropagation();
                         iColor.style.background = color;
-                        commitAnnotationChange(ann.id, { color: color });
+                        _baApplyScoped({ color: color });
                         try { _pushRecentColor(color); } catch (_e) {}
                         _refreshPaletteRowHighlight(body, "color-btn", "ba", color);
                         _syncDockedPickerHex(color);
@@ -93103,14 +93146,14 @@
                 var v = !ann.bold;
                 iBold.style.background = v ? "#1a5fb4" : "white";
                 iBold.style.color = v ? "white" : "#222";
-                commitAnnotationChange(ann.id, { bold: v });
+                _baApplyScoped({ bold: v });
             });
             iItalic.addEventListener("click", function (e) {
                 e.preventDefault();
                 var v = !ann.italic;
                 iItalic.style.background = v ? "#1a5fb4" : "white";
                 iItalic.style.color = v ? "white" : "#222";
-                commitAnnotationChange(ann.id, { italic: v });
+                _baApplyScoped({ italic: v });
             });
             // No auto-focus on the text field for brackets - the
             // label is optional / decorative, and grabbing focus
@@ -93144,6 +93187,37 @@
             // each time so the result reflects whatever the user
             // just toggled — without this, the readout would stay
             // stale until the next setOption / R round-trip.
+                        // ---- This bracket / All brackets scope row (title bar) ----
+            (function () {
+                var _bkN = 0;
+                var _bkAnns = Array.isArray(data.annotations) ? data.annotations : [];
+                for (var _bkC = 0; _bkC < _bkAnns.length; _bkC++)
+                    if (_bkAnns[_bkC] && _bkAnns[_bkC].kind === "bracket") _bkN++;
+                if (typeof _mountScopeRowInTitle !== "function") return;
+                if (_bkN < 2) { _mountScopeRowInTitle(""); return; }
+                var _bkAll = window.__gb2_baScopeAll === true;
+                var _bkRow = _mountScopeRowInTitle(
+                    '<div data-field="ba-scope-row" style="display:flex;align-items:center;gap:0;margin-left:auto;align-self:flex-end;padding-bottom:4px;flex-shrink:0;">' +
+                    '<button type="button" data-ba-scope="this" style="' + _distScopeBtnCss(!_bkAll, "this") + '" title="Style changes apply only to this bracket">This bracket</button>' +
+                    '<button type="button" data-ba-scope="all" style="' + _distScopeBtnCss(_bkAll, "all") + '" title="Style changes (line, caps, text size, color, distance) apply to every significance bracket - ' + _bkN + ' on this chart. The label text, the span, and the Stats settings stay per-bracket.">All brackets</button>' +
+                    '</div>');
+                if (!_bkRow) return;
+                var _bkBtns = _bkRow.querySelectorAll("[data-ba-scope]");
+                for (var _bkB = 0; _bkB < _bkBtns.length; _bkB++) {
+                    (function (btn) {
+                        btn.addEventListener("click", function () {
+                            window.__gb2_baScopeAll = btn.getAttribute("data-ba-scope") === "all";
+                            var _on = window.__gb2_baScopeAll;
+                            for (var _bk2 = 0; _bk2 < _bkBtns.length; _bk2++) {
+                                var _isAll = _bkBtns[_bk2].getAttribute("data-ba-scope") === "all";
+                                _bkBtns[_bk2].setAttribute("style",
+                                    _distScopeBtnCss(_isAll === _on, _isAll ? "all" : "this"));
+                            }
+                            try { redrawInspectorIndicator(); } catch (_eBkR) {}
+                        });
+                    })(_bkBtns[_bkB]);
+                }
+            })();
             var _baStatsResultEl = body.querySelector('[data-role="autoP-result"]');
             var _baStatsBodyEl = body.querySelector('[data-role="autoP-body"]');
             function _baPaintStatsResult() {
