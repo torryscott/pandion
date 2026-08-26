@@ -48900,7 +48900,7 @@
                 // rules (single empty x-category), wiping the categories.
                 // Module-gated, RM/CG take the plain graphTypeInstant path
                 // (their payload is shared across the whole family).
-                var _DISTGT = { histogram: 1, density: 1, histdensity: 1, box: 1, violin: 1, raincloud: 1, qq: 1, ecdf: 1 };
+                var _DISTGT = { histogram: 1, density: 1, histdensity: 1, box: 1, violin: 1, raincloud: 1, dot: 1, qq: 1, ecdf: 1 };
                 var _distHop = (opt === "graphType")
                     && (typeof _gbModuleKind === "function" && _gbModuleKind() === "dist")
                     && !!_DISTGT[String(cur)] && !!_DISTGT[String(val)];
@@ -48919,6 +48919,14 @@
                 var _xyBinHop2 = (opt === "xyBin");
                 var _doInstant = (data.graphTypeInstant === true) || _distHop || _freqHop || _xyBinHop2;
                 _setOption(opt, val);
+                // Distribution "Mean + points": the raw dots ARE the point
+                // of the type, so switching to it turns the data-points
+                // overlay on (the user can hide it afterwards). Poked
+                // before the snapshot clone so the instant preview shows
+                // the dots too.
+                if (_distHop && String(val) === "dot" && data.showDataPoints !== true) {
+                    try { data.showDataPoints = true; _setOption("showDataPoints", true); } catch (_edp0) {}
+                }
                 if (_doInstant && window.GraphBuilder2 && window.GraphBuilder2.render) {
                     try {
                         var snap = JSON.parse(JSON.stringify(data));
@@ -50262,6 +50270,7 @@
                 if (name === "box") return "Your variable's distribution (split by group if you add one): median, spread, and outliers.";
                 if (name === "violin") return "Your variable's full distribution shape.";
                 if (name === "raincloud") return "Your variable's distribution plus every raw value.";
+                if (name === "dot") return "Every raw value as a dot beside the mean and its error bar (split by group if you add one).";
             }
             return _GB_TYPE_BLURB[name] || "";
         }
@@ -98907,7 +98916,7 @@
                     // RM/CG hop between them was misclassified as a dist
                     // hop and the fold wiped the categories - empty chart
                     // until the echo (Torry's "delayed" RM switches).
-                    var _DISTGT = { histogram: 1, density: 1, histdensity: 1, box: 1, violin: 1, raincloud: 1, qq: 1, ecdf: 1 };
+                    var _DISTGT = { histogram: 1, density: 1, histdensity: 1, box: 1, violin: 1, raincloud: 1, dot: 1, qq: 1, ecdf: 1 };
                     var _distHop = (optName === "graphType")
                         && (typeof _gbModuleKind === "function" && _gbModuleKind() === "dist")
                         && !!_DISTGT[String(cur)] && !!_DISTGT[String(val)];
@@ -98934,6 +98943,14 @@
                     // only skips keys we've locally committed) instead of
                     // folding the stale panel value back over it.
                     if (hasSetOption) { try { _setOption(optName, val); } catch (_es) {} }
+                    // Distribution "Mean + points": switching to it turns
+                    // the data-points overlay on (the dots are the point).
+                    if (_distHop && String(val) === "dot" && data.showDataPoints !== true) {
+                        try {
+                            data.showDataPoints = true;
+                            if (hasSetOption) _setOption("showDataPoints", true);
+                        } catch (_edp1) {}
+                    }
                     if (_doInstant && window.GraphBuilder2 && window.GraphBuilder2.render) {
                         try {
                             var snap = JSON.parse(JSON.stringify(data));
@@ -105581,7 +105598,7 @@
         try {
             gt = String(gt || (data && data.graphType) || "");
             var CONT = { histogram: 1, density: 1, histdensity: 1, qq: 1, ecdf: 1 };
-            var CAT = { box: 1, violin: 1, raincloud: 1 };
+            var CAT = { box: 1, violin: 1, raincloud: 1, dot: 1 };
             var SEP = (typeof data.facetSeparator === "string" && data.facetSeparator.length > 0)
                 ? data.facetSeparator : null;
             if (CONT[gt]) {
@@ -105868,7 +105885,7 @@
             // their empty slot label (x === "" or "<facet><sep>").
             var gt = String(data.graphType || "");
             var CONT = { histogram: 1, density: 1, histdensity: 1, qq: 1, ecdf: 1 };
-            var CAT = { box: 1, violin: 1, raincloud: 1 };
+            var CAT = { box: 1, violin: 1, raincloud: 1, dot: 1 };
             var SEP = (typeof data.facetSeparator === "string" && data.facetSeparator.length > 0)
                 ? data.facetSeparator : null;
             var isDistBars = Array.isArray(data.bars) && data.bars.length > 0;

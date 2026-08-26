@@ -100,6 +100,7 @@ const CASES = [
     { name: 'dist_qq_band',     svg: true, roles: { 'dist-qq-band': 2, 'dist-qq-line': 2, 'dist-qq-point': 100 } },
     { name: 'dist_ecdf',        svg: true, roles: { 'dist-ecdf-line': 2, 'dist-ecdf-outline-all': 1 } },
     { name: 'dist_box',         svg: true, roles: { 'box-fill': 2, 'box-median': 2, 'box-whisker': 4, 'box-whisker-cap': 4 } },
+    { name: 'dist_dot',         svg: true, roles: { 'line-marker': 2, 'error-bar': 2, 'data-point': 180, 'legend-swatch': 2 } },
     { name: 'freq_bar_stack',    svg: true, roles: { 'bar-value-label': 6 } },
     { name: 'freq_bar_fill_facet', svg: true, texts: ['100'] },
     // The fill layout's only role-shaped evidence: 3 responses x 2 cohorts.

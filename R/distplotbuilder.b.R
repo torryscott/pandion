@@ -303,7 +303,7 @@ distplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6C
             # box / violin / raincloud render on the shared categorical
             # path (value on Y, groups dodged on X). Everything else is a
             # continuous-X distribution type (value on X).
-            is_categorical <- gtype %in% c("box", "violin", "raincloud")
+            is_categorical <- gtype %in% c("box", "violin", "raincloud", "dot")
 
             if (is.null(data) || nrow(data) == 0 ||
                 gb_family_is_missing(valvar)) {
@@ -388,6 +388,7 @@ distplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6C
                         "sd" = sd_val,
                         "ci95" = se_val * stats::qt(0.975, n - 1),
                         "ci99" = se_val * stats::qt(0.995, n - 1),
+                        "ci95c" = se_val * stats::qt(0.975, n - 1) * sqrt(2),
                         se_val
                     )
                 }
@@ -564,7 +565,7 @@ distplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6C
                 script_src_ready = TRUE,
                 bars = bars,
                 graph_type = self$options$graphType,
-                graph_type_choices = list( list(name = "histogram", label = "Histogram"), list(name = "density", label = "Density"), list(name = "histdensity", label = "Hist+Density"), list(name = "box", label = "Box"), list(name = "violin", label = "Violin"), list(name = "raincloud", label = "Raincloud"), list(name = "qq", label = "Q-Q"), list(name = "ecdf", label = "ECDF") ),
+                graph_type_choices = list( list(name = "histogram", label = "Histogram"), list(name = "density", label = "Density"), list(name = "histdensity", label = "Hist+Density"), list(name = "box", label = "Box"), list(name = "violin", label = "Violin"), list(name = "raincloud", label = "Raincloud"), list(name = "dot", label = "Mean + Points"), list(name = "qq", label = "Q-Q"), list(name = "ecdf", label = "ECDF") ),
                 graph_type_instant = FALSE,
                 x_label = x_title,
                 y_label = y_title,
@@ -585,6 +586,12 @@ distplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6C
                 missing_note = missing_note,
                 annotations = gb_resolve_annotations(self$options$annotationsJson, list()),
                 show_data_points = isTRUE(self$options$showDataPoints),
+                # Mean + Points (Jul-approved backlog item): the on-chart
+                # Summary seg + error-bar Type strip gate on these payload
+                # keys being strings, and the client stat fold recomputes
+                # from bar.values exactly like Compare Groups.
+                summary_func = summary_func,
+                error_bar_type = error_type,
                 hist_bins = self$options$histBins,
                 hist_stat = self$options$histStat,
                 hist_position = self$options$histPosition,
