@@ -51829,6 +51829,62 @@
                         why: "Printed or photocopied without color these become nearly the same shade: " + grayListed + (grayPairs.length > 3 ? ", and more" : "") + ". This is a print concern rather than a color-vision one, so it is a note and not a fault. Chart settings > Accessibility can re-spread the lightness for you; past about six series, patterns, direct labels or different marker shapes are the reliable answer.",
                         fixGt: null });
                 })();
+                // Red WITH green at all (backlog item, Aug 2026, Torry:
+                // "doesn't have to be an outright flag, maybe just a note
+                // like we used elsewhere" - the graypair idiom: sev tip,
+                // applies:false, information rather than fault). The cvd
+                // rule tests simulated dichromacy; this notes the HUE
+                // PAIRING itself, which stays risky even when the
+                // simulation passes: displays and printers shift hues,
+                // and mild red-green weakness is far more common than
+                // the full deficiency the simulation models. Pairs the
+                // coldist/cvd rules already flagged are skipped - one
+                // finding per pair, strongest rule wins. Fires on stock
+                // palettes too (the cvd rule's Jul 2026 ruling).
+                (function () {
+                    function hueOf(c) {
+                        var m = /^#?([0-9a-f]{6})$/i.exec(String(c).trim());
+                        if (!m) {
+                            var m3 = /^#?([0-9a-f]{3})$/i.exec(String(c).trim());
+                            if (!m3) return null;
+                            m = [null, m3[1].split("").map(function (ch) { return ch + ch; }).join("")];
+                        }
+                        var n = parseInt(m[1], 16);
+                        var r = (n >> 16 & 255) / 255, g = (n >> 8 & 255) / 255, b = (n & 255) / 255;
+                        var mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+                        if (d < 0.12) return null;                      // near-neutral
+                        var l = (mx + mn) / 2;
+                        if (l < 0.12 || l > 0.92) return null;          // near-black/white
+                        var sat = d / (1 - Math.abs(2 * l - 1));
+                        if (sat < 0.25) return null;                    // too muted to read as the hue
+                        var h;
+                        if (mx === r) h = ((g - b) / d + 6) % 6;
+                        else if (mx === g) h = (b - r) / d + 2;
+                        else h = (r - g) / d + 4;
+                        h = h * 60;
+                        if (h < 15 || h >= 345) return "red";
+                        if (h >= 80 && h <= 170) return "green";
+                        return null;
+                    }
+                    var skip = {};
+                    var si; for (si = 0; si < pairs.length; si++) skip[pairs[si].a + "\u0001" + pairs[si].b] = 1;
+                    for (si = 0; si < cvdPairs.length; si++) skip[cvdPairs[si].a + "\u0001" + cvdPairs[si].b] = 1;
+                    var rg = [], ra, rb;
+                    for (ra = 0; ra < labs.length; ra++) for (rb = ra + 1; rb < labs.length; rb++) {
+                        if (skip[labs[ra] + "\u0001" + labs[rb]]) continue;
+                        var hA = hueOf(col[labs[ra]]), hB = hueOf(col[labs[rb]]);
+                        if ((hA === "red" && hB === "green") || (hA === "green" && hB === "red"))
+                            rg.push({ a: labs[ra], b: labs[rb] });
+                    }
+                    if (!rg.length) return;
+                    var rgListed = rg.slice(0, 3).map(function (pr) {
+                        return '"' + pr.a + '" and "' + pr.b + '"';
+                    }).join("; ");
+                    out.push({ id: "redgreen", sev: "tip",
+                        title: "Red and green in the same chart",
+                        why: "These series pair a red shade with a green shade: " + rgListed + (rg.length > 3 ? ", and more" : "") + ". The simulated color checks pass for them, but red with green is the riskiest hue pairing in practice: screens and printers shift hues, and mild red-green color weakness is far more common than the full deficiency the simulation tests. A different hue for one of them, or a second cue such as patterns or direct labels, removes the risk entirely.",
+                        fixGt: null });
+                })();
             })();
             // ---- The full checklist (registry): every check that APPLIES
             // to this chart, by id. The panel shows fired findings as cards
@@ -51906,7 +51962,8 @@
                 { id: "hiddendata", name: "No hidden data", tip: "Parts hidden with the eye tool should be shown, or disclosed in the figure note.", applies: true },
                 { id: "coldist", name: "Distinguishable colors", tip: "Series colors should be easy to tell apart.", applies: _colApp },
                 { id: "cvd", name: "Red-green color safety", tip: "Color pairs are re-tested under simulated protanopia and deuteranopia, the red-green family. Black-and-white legibility is reported separately, and the Vision check in Chart settings judges more vision types than this.", applies: _colApp },
-                { id: "graypair", name: "Black-and-white legibility", tip: "Whether the series stay distinguishable with the color removed, as in a photocopy.", applies: false }
+                { id: "graypair", name: "Black-and-white legibility", tip: "Whether the series stay distinguishable with the color removed, as in a photocopy.", applies: false },
+                { id: "redgreen", name: "Red and green together", tip: "Whether the chart pairs a red shade with a green shade at all - the riskiest hue combination in practice, noted even when the simulated checks pass.", applies: false }
             ];
             var firedIds = {};
             for (var _fo = 0; _fo < out.length; _fo++) if (out[_fo] && out[_fo].id) firedIds[out[_fo].id] = 1;
