@@ -50482,6 +50482,7 @@
             {g:2,n:"paired t-test",y:"t",m:["RM"],s:["paired","dependent t","repeated t","before after"],b:"A test of whether the population's average paired difference is zero,for example, when the same people are measured before and after. It works on each matched pair's difference score.",r:"t is the mean difference divided by its SE. The sign shows direction; report the mean difference, confidence interval, and p value rather than t alone.",w:"Pairs must be correctly matched and independent of other pairs, and the difference-score mean needs an adequate normal or large-sample approximation. Significance does not mean every unit changed or that change was large."},
             {g:2,n:"Mann-Whitney U",y:"U",m:["Compare"],s:["u test","mann whitney","wilcoxon rank sum","nonparametric","rank test"],b:"A test for two independent groups that works with ranked values rather than means. In general, it asks whether values from the two groups tend to occupy different ranks; it is not automatically a test of medians.",r:"Use the p value to assess the rank-distribution difference and report both groups' distributions plus a rank-based effect size. If the group distributions have similar shapes, the result can be interpreted as a location shift; if their shapes differ, the test can respond to those differences too.",w:"Skewness alone does not make Mann-Whitney preferable to Welch's t-test. Different shapes can produce significance even when medians are equal."},
             {g:2,n:"Wilcoxon signed-rank",y:"V",m:["RM"],s:["signed rank","wilcoxon","nonparametric paired","rank test"],b:"A paired test that ranks the sizes of nonzero differences, then compares ranks attached to positive and negative differences. Its usual null assumes the difference distribution is symmetric around zero; under that assumption, it tests whether the distribution is centered at zero,technically, whether its pseudomedian is zero.",r:"Pandion Plots reports V as the sum of positive ranks. Use its p value to assess the signed-rank imbalance, and also report the paired differences and a rank-based effect size.",w:"The test uses both signs and ranked magnitudes, so it is not assumption-free and is not generally justified by saying the scores are merely ordinal or skewed."},
+            {g:2,n:"Which test?",y:"",m:["Compare","RM"],s:["which test","choose a test","welch or student","t test or mann whitney","test selection","equal variances","levene"],b:"Welch's t is the default for comparing two independent group means: it does not assume equal spread, and when spreads happen to be equal it gives nearly the same answer as Student's t, so it costs almost nothing. Testing for equal variances first and then choosing a test is worse than either test used alone (the pretest misses trouble in small samples and distorts the overall error rate), so Pandion Plots never does it. Student's t stays available for teaching or matching a textbook. Mann-Whitney U answers a different question (whether one group's values tend to be larger, not whether means differ), so reach for it when the outcome is ordinal or when the mean is not the summary you care about.",r:"Leave Test on Auto: it picks a paired test when the two cells are the same subjects and Welch's t otherwise, and the readout always names what ran.",w:"Skewed or non-normal data alone is not a reason to switch to Mann-Whitney: at moderate sample sizes the t family handles it, and under unequal spreads Mann-Whitney has error problems of its own that Welch's t does not."},
             {g:2,n:"the t statistic",y:"t",m:["Compare","RM"],s:["t","t value","signal to noise"],b:"A single number that scales the size of a difference by the noise around it, so bigger differences and less noise both push it away from 0. It feeds into the p value; on its own it is a signal-to-noise ratio, not a probability.",r:"Look at how far t sits from 0: further out (in either direction) means a stronger difference relative to noise, and the sign just shows which group or direction is higher.",w:"t by itself is not a p value and not an effect size; a large t can come from a tiny difference measured very precisely."},
             {g:2,n:"the U statistic",y:"U",m:["Compare"],s:["u"],b:"A Mann-Whitney statistic equivalent to counting pairwise orderings between groups, with tied pairs contributing half. Pandion Plots displays the smaller of the two complementary U values, while rank-biserial sign follows jamovi's first-sample convention.",r:"Interpret U through the group sizes and its null distribution; report the group distributions and rank-biserial effect.",w:"U is not itself a difference in means or medians, and software may display U for a particular group rather than the smaller U."},
             {g:2,n:"the V statistic",y:"V",m:["RM"],s:["v"],b:"Pandion Plots removes zero paired differences, ranks the absolute nonzero differences, and reports V as the sum of ranks attached to positive differences, matching R's convention.",r:"Interpret V through its null distribution and p value; report the paired-difference distribution and rank-biserial effect size.",w:"V is not a median and different software can report a different signed-rank sum, so always name the convention when comparing output."},
@@ -51546,6 +51547,35 @@
                 if (meanBased > 0)
                     out.push({ id: "medmean", sev: "warn", title: (data.summaryFunc === "median" ? "Bracket compares means on a median chart" : "Bracket compares means on a distribution chart"), why: "The chart emphasizes " + (data.summaryFunc === "median" ? "MEDIANS (Summary statistic: Median)" : "the DISTRIBUTION (box/violin/raincloud show the median and spread)") + ", but " + (meanBased === 1 ? "a bracket runs a t-test, which tests MEANS" : meanBased + " brackets run t-tests, which test MEANS") + ". That can be intentional, but the caption must make the estimand clear. Mann-Whitney U and Wilcoxon signed-rank are alternatives only for rank-based questions; they are not tests of medians. Pandion Plots does not provide a direct median-difference test.", fixGt: null });
             })();
+            // --- Student's t on unequal spreads (the Welch teaching
+            // slice, Aug 2026; informational, never a failed check - the
+            // red-green idiom). Fires only on an EXPLICIT Student pick:
+            // Auto resolves Welch, which needs no equal-spread assumption.
+            (function () {
+                if (_mk !== "cg" && _mk !== "rm") return;
+                var anns = Array.isArray(data.annotations) ? data.annotations : [];
+                var _seWorst = 0, _seN = 0;
+                for (var si6 = 0; si6 < anns.length; si6++) {
+                    var a7 = anns[si6]; if (!a7) continue;
+                    if (a7.kind !== "bracket" || a7.autoPValue !== true) continue;
+                    if (a7.autoPTest !== "studentT") continue;
+                    var rr7 = null;
+                    try { rr7 = computeAutoPForBracket(a7); } catch (_eSt7) {}
+                    if (!rr7 || !rr7.ok || rr7.testKind !== "studentT" || !rr7.res) continue;
+                    var _ss1 = rr7.res.sd1, _ss2 = rr7.res.sd2;
+                    if (!isFinite(_ss1) || !isFinite(_ss2) || _ss1 <= 0 || _ss2 <= 0) continue;
+                    var _srt = Math.max(_ss1, _ss2) / Math.min(_ss1, _ss2);
+                    if (_srt >= 2) { _seN++; if (_srt > _seWorst) _seWorst = _srt; }
+                }
+                if (_seN > 0) {
+                    var _seTxt = (Math.round(_seWorst * 10) / 10) + "x";
+                    out.push({ id: "studenteq", sev: "tip",
+                        title: (_seN === 1 ? "A Student's t bracket sits on unequal spreads"
+                                           : _seN + " Student's t brackets sit on unequal spreads"),
+                        why: "Student's t assumes the two groups spread about equally, but here one group's SD is about " + _seTxt + " the other's" + (_seN > 1 ? " (the widest pair)" : "") + ". With unequal group sizes that can inflate false positives. Welch's t (the bracket Test dropdown's Auto default) makes no equal-spread assumption and gives nearly the same answer when spreads are in fact equal.",
+                        fixGt: null });
+                }
+            })();
             // --- Tier-2 additions (Jul 2026): group-size imbalance, fragile
             // fit lines, skew-vs-mean, unflagged log axes. The skewness gate
             // (|g1| >= 1.5 at n >= 25) is deliberately conservative and a
@@ -51926,6 +51956,7 @@
                 { id: "pcorrnote", name: "P-value correction in the note", tip: "When bracket p values are adjusted for multiple comparisons and a figure note is used, the note should name the correction.", applies: _pcnApp },
                 { id: "starnote", name: "Asterisk key in the note", tip: "When brackets show significance stars and a figure note is used, the note should define them (e.g. * p < .05).", applies: _snApp },
                 { id: "medmean", name: "Bracket test matches the stated estimand", tip: "A median-centered chart can carry a mean test only when the caption makes that choice clear. Rank tests address rank distributions, not medians themselves.", applies: _mmApp },
+                { id: "studenteq", name: "Student's t and unequal spreads", tip: "Whether an explicitly chosen Student's t bracket sits on groups whose spreads differ substantially (SD ratio 2x or more) - Welch's t, the Auto default, makes no equal-spread assumption.", applies: false },
                 { id: "ebvis", name: "Error bars visible", tip: "Markers should not be so large that they cover their own error bars.", applies: (gt === "line" || gt === "dot") && (_mk === "cg" || _mk === "rm") && q('[data-role="error-bar"]').length > 0 && q('[data-role="line-marker"]').length > 0 },
                 { id: "lineorder", name: "Ordered X for a line", tip: "A line implies the X axis has an order (time, dose); unordered categories suit a bar or dot plot.", applies: gt === "line" && !data.isRepeatedMeasures && data.freqMode !== true },
                 { id: "groupcount", name: "Readable group count", tip: "Past about 7 to 8 colored groups, colors become harder to tell apart.", applies: nGroups >= 2 && gt !== "pie" && gt !== "donut" },
@@ -53782,6 +53813,25 @@
             // wrapping - the eyebrow ellipsizes if it must), row 2 = the
             // title on its OWN line, free to wrap. Same shape on every
             // module's card, long title or short.
+            // Unequal-spread note (the Welch teaching slice): rows stamp
+            // data-sd-ratio when a t-family pair's SDs differ by 2x+.
+            var _sdrNote = "";
+            try {
+                var _sdrV = row.getAttribute("data-sd-ratio");
+                if (_sdrV) {
+                    var _sdrT = row.getAttribute("data-sd-test") || "welch";
+                    _sdrNote = '<div data-st-fsdnote style="font-size:10.5px;' +
+                        'color:#5d7391;margin:5px 0 0;">' +
+                        (_sdrT === "welch"
+                            ? "One group's spread (SD) is about " + _stEsc(_sdrV) +
+                              "x the other's. Welch's t handles unequal spread, " +
+                              "so this comparison already accounts for it."
+                            : "One group's spread (SD) is about " + _stEsc(_sdrV) +
+                              "x the other's. Student's t assumes equal spread; " +
+                              "Welch's t (the Auto default) makes no such assumption.") +
+                        '</div>';
+                }
+            } catch (_eSdN) {}
             card.innerHTML =
                 '<div style="display:flex;align-items:center;gap:10px;">' +
                 (secTxt ? '<span style="font-size:9px;text-transform:uppercase;' +
@@ -53805,7 +53855,7 @@
                           'column-gap:14px;row-gap:4px;margin:6px 0 0;">' + chips + '</div>' +
                           (chipsCI ? '<div style="display:flex;flex-wrap:wrap;align-items:baseline;' +
                           'column-gap:14px;row-gap:4px;margin:4px 0 0;">' + chipsCI + '</div>' : '')
-                        : ''));
+                        : '')) + _sdrNote;
             var wrapF = tbl.parentElement;
             var anchorEl = tbl.closest('[data-st-tablecard]') ||
                 ((wrapF && wrapF !== row.closest("[data-st-pane]")) ? wrapF : tbl);
@@ -54123,6 +54173,21 @@
                     if (rank) return m < 0.1 ? "negligible" : m < 0.3 ? "small" : m < 0.5 ? "medium" : "large";
                     return m < 0.2 ? "negligible" : m < 0.5 ? "small" : m < 0.8 ? "medium" : "large";
                 };
+                // Unequal-spread marker for the focus card (the Welch
+                // teaching slice): a t-family pair whose SDs differ by 2x
+                // or more stamps the ratio on its row.
+                var _sdrAttr = function (raw) {
+                    try {
+                        if (!raw || !raw.res) return "";
+                        if (raw.testKind !== "welch" && raw.testKind !== "studentT") return "";
+                        var _s1 = raw.res.sd1, _s2 = raw.res.sd2;
+                        if (!isFinite(_s1) || !isFinite(_s2) || _s1 <= 0 || _s2 <= 0) return "";
+                        var _rt = Math.max(_s1, _s2) / Math.min(_s1, _s2);
+                        if (_rt < 2) return "";
+                        return ' data-sd-ratio="' + (Math.round(_rt * 10) / 10) +
+                               '" data-sd-test="' + raw.testKind + '"';
+                    } catch (_eSdA) { return ""; }
+                };
                 var cmpHere = function (cp, which) {
                     var lbl = cmpPlainLbl(cp), raw = cp.raw, res = raw.res;
                     var _cs = cp.corrStat;
@@ -54340,7 +54405,7 @@
                             _stLinkAttr([[cp2.left.cat, cp2.left.group],
                                          [cp2.right.cat, cp2.right.group]]) +
                             ' data-cmp-sec="' + secAttr(secOf[cr]) + '"' +
-                            ' data-cmp-apa="' + cr + '"' +
+                            ' data-cmp-apa="' + cr + '"' + _sdrAttr(cp2.raw) +
                             ' style="' + (secFolded && secHdr[secOf[cr]] ? 'display:none;' : '') + '">' +
                             '<td style="padding:4px 6px;border-bottom:1px solid #eee;">' +
                             '<input type="checkbox" data-cmp-cb data-key="' +
@@ -93286,6 +93351,31 @@
                                     r.effectCi.hi.toFixed(2) + "]";
                     }
                     lines.push(_effLine);
+                }
+                // Unequal-spread assumption note (the Welch teaching
+                // slice, Aug 2026): when one group's SD is at least twice
+                // the other's, say so - reassurance under Welch (which
+                // handles it), a pointer under Student (which assumes it
+                // away). Threshold = SD ratio 2 (variance ratio 4).
+                if ((r.testKind === "welch" || r.testKind === "studentT")
+                    && r.res && isFinite(r.res.sd1) && isFinite(r.res.sd2)
+                    && r.res.sd1 > 0 && r.res.sd2 > 0) {
+                    var _sdrR = Math.max(r.res.sd1, r.res.sd2) /
+                                Math.min(r.res.sd1, r.res.sd2);
+                    if (_sdrR >= 2) {
+                        var _sdrTxt = (Math.round(_sdrR * 10) / 10) + "x";
+                        lines.push("");
+                        if (r.testKind === "welch") {
+                            lines.push("Note: one group's spread (SD) is about");
+                            lines.push(_sdrTxt + " the other's. Welch's t handles");
+                            lines.push("unequal spread, so this is covered.");
+                        } else {
+                            lines.push("Note: one group's spread (SD) is about");
+                            lines.push(_sdrTxt + " the other's. Student's t assumes");
+                            lines.push("equal spread; Welch's t (the Auto");
+                            lines.push("default) makes no such assumption.");
+                        }
+                    }
                 }
                 // Hidden-data rule disclosure (Jul 2026): say which
                 // side of the rule this test sits on whenever hides are

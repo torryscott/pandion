@@ -1111,6 +1111,12 @@ control, is identical in both.</div>
 <p style="margin:2px 0"><b>Common misread.</b> The test uses both signs and ranked magnitudes, so it is not assumption-free and is not generally justified by saying the scores are merely ordinal or skewed.</p>
 </div>
 <div class="glossentry" style="margin:0 0 14px">
+<p style="margin:10px 0 2px"><b>Which test?</b><span style="color:#666;font-size:.85em"> · Compare, RM</span></p>
+<p style="margin:2px 0">Welch's t is the default for comparing two independent group means: it does not assume equal spread, and when spreads happen to be equal it gives nearly the same answer as Student's t, so it costs almost nothing. Testing for equal variances first and then choosing a test is worse than either test used alone (the pretest misses trouble in small samples and distorts the overall error rate), so Pandion Plots never does it. Student's t stays available for teaching or matching a textbook. Mann-Whitney U answers a different question (whether one group's values tend to be larger, not whether means differ), so reach for it when the outcome is ordinal or when the mean is not the summary you care about.</p>
+<p style="margin:2px 0"><b>How to read it.</b> Leave Test on Auto: it picks a paired test when the two cells are the same subjects and Welch's t otherwise, and the readout always names what ran.</p>
+<p style="margin:2px 0"><b>Common misread.</b> Skewed or non-normal data alone is not a reason to switch to Mann-Whitney: at moderate sample sizes the t family handles it, and under unequal spreads Mann-Whitney has error problems of its own that Welch's t does not.</p>
+</div>
+<div class="glossentry" style="margin:0 0 14px">
 <p style="margin:10px 0 2px"><b>the t statistic</b> <span style="color:#666;font-weight:400">(t)</span><span style="color:#666;font-size:.85em"> · Compare, RM</span></p>
 <p style="margin:2px 0">A single number that scales the size of a difference by the noise around it, so bigger differences and less noise both push it away from 0. It feeds into the p value; on its own it is a signal-to-noise ratio, not a probability.</p>
 <p style="margin:2px 0"><b>How to read it.</b> Look at how far t sits from 0: further out (in either direction) means a stronger difference relative to noise, and the sign just shows which group or direction is higher.</p>
