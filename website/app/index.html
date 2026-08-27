@@ -3767,22 +3767,21 @@
     border: 1px solid rgba(255,255,255,0.42); border-radius: var(--ps-r-sm);
     font-size: 11px; font-weight: 600;
   }
-  /* Measure type as icon rows (the rail's words gained the type menu's
-     icons; a native select cannot draw them in its options). */
-  #ps-variable-type-group { display: flex; flex-direction: column; gap: 2px; margin-top: 3px; }
-  .ps-vt-row {
+  /* Measure type as a dropdown with the type's icon (round 2, Aug 27:
+     keep it a drop down). Opens the same icon menu the grid header
+     uses; a native select cannot draw icons in its options. */
+  #ps-variable-type-group { display: flex; flex-direction: column; margin-top: 3px; }
+  .ps-vt-dd {
     -webkit-appearance: none; appearance: none;
     display: flex; align-items: center; gap: 7px; width: 100%;
-    padding: 4px 8px; border: 1px solid var(--ps-l2b);
+    padding: 5px 8px; border: 1px solid var(--ps-l2b);
     border-radius: var(--ps-r-sm); background: var(--ps-s0);
     cursor: pointer; font-size: 11.5px; color: var(--ps-ink-2);
     text-align: left; font-family: inherit;
   }
-  .ps-vt-row:hover { border-color: #b9cde6; }
-  .ps-vt-row[aria-checked="true"] {
-    border-color: #3573bd; background: #eef4fc; color: #1a3c66; font-weight: 600;
-  }
-  .ps-vt-row .ps-ticon { flex-shrink: 0; }
+  .ps-vt-dd:hover { border-color: #b9cde6; }
+  .ps-vt-dd .ps-ticon { flex-shrink: 0; }
+  .ps-vt-chev { margin-left: auto; color: var(--ps-muted); font-size: 10px; }
   body.ps-density-compact .ps-commandbar { min-height: 36px; }
   body.ps-density-compact .ps-grid-table th { padding-top: 4px; padding-bottom: 3px; }
   body.ps-density-compact .ps-grid-table td { padding-top: 2px; padding-bottom: 2px; }
@@ -6193,8 +6192,8 @@
 <script src="lib/ps-data.769925dda9.js"></script>
 <script src="lib/jspdf.umd.min.979a2ef514.js"></script>
 <script src="lib/svg2pdf.umd.min.4ada250f50.js"></script>
-<script src="lib/graphbuilder2.min.25d422641f.js"></script>
-<script src="lib/ps-shell.d82966371e.js"></script>
+<script src="lib/graphbuilder2.min.a15f139bc4.js"></script>
+<script src="lib/ps-shell.41e161a0b5.js"></script>
 <script src="lib/ps-tour.fe1b2fd3ed.js"></script>
 </body>
 </html>

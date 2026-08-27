@@ -24077,23 +24077,24 @@
       typeSelect.appendChild(opt);
     }
     typeSelect.value = t.types[col];
-    // The visible control: one row per measure type, the type menu's own
-    // icon beside each word (the ask that retired the bare select - its
-    // options cannot draw icons). Radio semantics; the hidden select
-    // above mirrors the value for anything that reads it.
+    // The visible control: a DROPDOWN showing the current type with its
+    // icon (round 2, Aug 27: keep it a drop down). It opens the house
+    // type menu - the same icon + gloss + example menu the grid header
+    // uses, so the two surfaces can never drift. A native select cannot
+    // draw icons in its options, which is why the control is custom;
+    // the hidden select above mirrors the value for anything that
+    // reads it.
     var vtGroup = el("ps-variable-type-group");
     if (vtGroup) {
-      var vtH = [];
-      for (i = 0; i < VAR_TYPES.length; i++) {
-        var vt = VAR_TYPES[i], vtOn = vt.key === t.types[col];
-        vtH.push('<button type="button" class="ps-vt-row" role="radio"' +
-          ' data-vt="' + vt.key + '"' +
-          ' aria-checked="' + (vtOn ? "true" : "false") + '"' +
-          ' tabindex="' + (vtOn ? "0" : "-1") + '"' +
-          ' data-tip="' + escHtml(vt.gloss) + '">' +
-          psTypeIcon(vt.key) + '<span>' + escHtml(vt.label) + '</span></button>');
-      }
-      vtGroup.innerHTML = vtH.join("");
+      var vtCur = null;
+      for (i = 0; i < VAR_TYPES.length; i++)
+        if (VAR_TYPES[i].key === t.types[col]) vtCur = VAR_TYPES[i];
+      vtGroup.innerHTML = vtCur
+        ? '<button type="button" class="ps-vt-dd" aria-haspopup="menu"' +
+          ' data-tip="' + escHtml(vtCur.gloss) + '">' +
+          psTypeIcon(vtCur.key) + '<span>' + escHtml(vtCur.label) + '</span>' +
+          '<span class="ps-vt-chev" aria-hidden="true">\u25be</span></button>'
+        : "";
     }
     // 19: say what the chosen type MEANS, right where it is chosen. The note
     // is the part that answers "why will this not drop on the value axis".
@@ -25240,27 +25241,22 @@
     el("ps-variable-type").addEventListener("change", function () {
       if (INSPECTOR_VAR) setColType(INSPECTOR_VAR, this.value);
     });
-    // The icon-row radiogroup: click picks; arrows move and pick (the
-    // WAI radio pattern). setColType re-syncs the inspector, which
-    // rebuilds the rows with the new checked state.
+    // The dropdown opens the SAME type menu the grid header uses (its
+    // pick path commits the type and re-syncs this inspector). Enter
+    // and Space are the button's own click; ArrowDown also opens.
     el("ps-variable-type-group").addEventListener("click", function (e) {
-      var row = e.target && e.target.closest ? e.target.closest(".ps-vt-row") : null;
-      if (row && INSPECTOR_VAR) setColType(INSPECTOR_VAR, row.getAttribute("data-vt"));
+      var dd = e.target && e.target.closest ? e.target.closest(".ps-vt-dd") : null;
+      if (!dd || !INSPECTOR_VAR) return;
+      var r = dd.getBoundingClientRect();
+      showTypeMenu(r.left, r.bottom + 2, INSPECTOR_VAR);
     });
     el("ps-variable-type-group").addEventListener("keydown", function (e) {
-      if (["ArrowDown", "ArrowRight", "ArrowUp", "ArrowLeft"].indexOf(e.key) === -1) return;
-      var rows = [].slice.call(this.querySelectorAll(".ps-vt-row"));
-      var cur = rows.indexOf(document.activeElement);
-      if (cur === -1) return;
+      if (e.key !== "ArrowDown") return;
+      var dd = this.querySelector(".ps-vt-dd");
+      if (!dd || !INSPECTOR_VAR) return;
       e.preventDefault();
-      var dir = (e.key === "ArrowDown" || e.key === "ArrowRight") ? 1 : -1;
-      var nxt = rows[(cur + dir + rows.length) % rows.length];
-      if (nxt && INSPECTOR_VAR) {
-        setColType(INSPECTOR_VAR, nxt.getAttribute("data-vt"));
-        var again = el("ps-variable-type-group")
-          .querySelector('.ps-vt-row[data-vt="' + nxt.getAttribute("data-vt") + '"]');
-        if (again) again.focus();
-      }
+      var r = dd.getBoundingClientRect();
+      showTypeMenu(r.left, r.bottom + 2, INSPECTOR_VAR);
     });
     el("ps-variable-missing").addEventListener("change", function () {
       setMissingTokens(this.value);
