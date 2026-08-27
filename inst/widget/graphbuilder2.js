@@ -53853,20 +53853,35 @@
                         '</div>';
                 }
             } catch (_eSdN) {}
-            card.innerHTML =
-                '<div style="display:flex;align-items:center;gap:10px;">' +
-                (secTxt ? '<span style="font-size:9px;text-transform:uppercase;' +
-                    'letter-spacing:.06em;color:#8aa0bd;font-weight:600;' +
-                    'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;">' +
-                    _stEsc(secTxt) + '</span>' : '') +
+            // The stepper cluster, shared by both header layouts.
+            var _fStep =
                 '<span style="display:inline-flex;align-items:center;gap:4px;margin-left:auto;flex-shrink:0;">' +
                 '<span data-st-fpos style="font-size:9.5px;color:#8aa0bd;">' +
                 (idxF + 1) + ' of ' + listF.length + '</span>' +
                 stepBtn("ffprev", "&#8249;", idxF > 0) +
                 stepBtn("ffnext", "&#8250;", idxF >= 0 && idxF < listF.length - 1) +
-                '</span></div>' +
-                '<div data-st-ftitle style="font-size:11.5px;font-weight:600;color:#1a3c66;' +
-                'margin:2px 0 0;line-height:1.35;">' + title + '</div>' +
+                '</span>';
+            // With a section eyebrow: the two-row layout (eyebrow +
+            // steppers, then the title free to wrap - the Jul 10 rule).
+            // WITHOUT one, the old layout left a mostly-empty first row
+            // (steppers right, nothing left) that read as a blank gap
+            // above the comparison (Torry, Aug 26). The title takes the
+            // steppers' row instead: it wraps INSIDE its flex cell
+            // (flex:1, min-width:0, container never wraps), so the
+            // cluster stays pinned top-right on any title length.
+            card.innerHTML =
+                (secTxt
+                    ? '<div style="display:flex;align-items:center;gap:10px;">' +
+                      '<span style="font-size:9px;text-transform:uppercase;' +
+                      'letter-spacing:.06em;color:#8aa0bd;font-weight:600;' +
+                      'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;">' +
+                      _stEsc(secTxt) + '</span>' + _fStep + '</div>' +
+                      '<div data-st-ftitle style="font-size:11.5px;font-weight:600;color:#1a3c66;' +
+                      'margin:2px 0 0;line-height:1.35;">' + title + '</div>'
+                    : '<div style="display:flex;align-items:flex-start;gap:10px;">' +
+                      '<div data-st-ftitle style="font-size:11.5px;font-weight:600;color:#1a3c66;' +
+                      'line-height:1.35;flex:1 1 auto;min-width:0;">' + title + '</div>' +
+                      _fStep + '</div>') +
                 (sentence
                     ? '<div style="display:flex;align-items:baseline;gap:8px;margin:5px 0 0;">' +
                       '<span data-st-fsentence style="font-size:11px;color:#33475e;">' +
