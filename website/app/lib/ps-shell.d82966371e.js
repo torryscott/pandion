@@ -24090,7 +24090,7 @@
           ' data-vt="' + vt.key + '"' +
           ' aria-checked="' + (vtOn ? "true" : "false") + '"' +
           ' tabindex="' + (vtOn ? "0" : "-1") + '"' +
-          ' title="' + escHtml(vt.gloss) + '">' +
+          ' data-tip="' + escHtml(vt.gloss) + '">' +
           psTypeIcon(vt.key) + '<span>' + escHtml(vt.label) + '</span></button>');
       }
       vtGroup.innerHTML = vtH.join("");
