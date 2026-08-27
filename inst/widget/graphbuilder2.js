@@ -92356,6 +92356,25 @@
                 }
                 commitAnnotationChange(ann.id, patch);
             }
+            // LIVE variant for slider input events (Torry's field report,
+            // Aug 26: under All the drag moved only the selected bracket,
+            // the rest snapped on release). Patches siblings directly with
+            // no persist, then the selected bracket's applyAnnotationChange
+            // does the one redraw; the change event's _baApplyScoped commit
+            // still persists the settled values.
+            function _baPokeScoped(patch) {
+                if (window.__gb2_baScopeAll === true) {
+                    var _bpAnns = Array.isArray(data.annotations) ? data.annotations : [];
+                    for (var _bpI = 0; _bpI < _bpAnns.length; _bpI++) {
+                        var _bpA = _bpAnns[_bpI];
+                        if (!_bpA || _bpA.kind !== "bracket" || _bpA.id === ann.id) continue;
+                        for (var _bpK in patch) {
+                            if (Object.prototype.hasOwnProperty.call(patch, _bpK)) _bpA[_bpK] = patch[_bpK];
+                        }
+                    }
+                }
+                applyAnnotationChange(ann.id, patch);
+            }
             // Resolve initial values (used by both strip HTML and
             // the wiring block below).
             var _baInitWidth = Math.abs(ann.x2 - ann.x);
@@ -92797,6 +92816,13 @@
                     b.style.color = active ? "#1a5fb4" : "#666";
                     b.style.fontWeight = active ? "600" : "400";
                 }
+                // Shape has no fanning controls (span + caps stay
+                // per-bracket by ruling), so the This/All toggle hides
+                // there instead of promising nothing (Torry, Aug 26).
+                try {
+                    var _bkScRow = inspectorPanel.querySelector('[data-field="ba-scope-row"]');
+                    if (_bkScRow) _bkScRow.style.display = (id === "shape") ? "none" : "flex";
+                } catch (_eBkSv) {}
                 // Text tab always docks the picker to the text-color
                 // chip - the canonical text panels keep the picker up
                 // whenever a text panel is showing.
@@ -92986,7 +93012,7 @@
             });
             iCapLeft.addEventListener("change", function () {
                 var v = parseFloat(iCapLeft.value);
-                if (isFinite(v)) _baApplyScoped({ capLeft: v });
+                if (isFinite(v)) commitAnnotationChange(ann.id, { capLeft: v });
             });
             iCapRight.addEventListener("input", function () {
                 var v = parseFloat(iCapRight.value);
@@ -92996,14 +93022,14 @@
             });
             iCapRight.addEventListener("change", function () {
                 var v = parseFloat(iCapRight.value);
-                if (isFinite(v)) _baApplyScoped({ capRight: v });
+                if (isFinite(v)) commitAnnotationChange(ann.id, { capRight: v });
             });
             iLineColor.addEventListener("click", function (e) {
                 e.preventDefault();
                 openColorPicker(ann.lineColor || "#222",
                     function (newColor) {
                         iLineColor.style.background = newColor;
-                        applyAnnotationChange(ann.id, { lineColor: newColor });
+                        _baPokeScoped({ lineColor: newColor });
                         _refreshPaletteRowHighlight(body, "line-color-btn", "ba2", newColor);
                     },
                     function (newColor) { _baApplyScoped({ lineColor: newColor }); }
@@ -93032,7 +93058,7 @@
                 iLineWVal.textContent = v.toFixed(2).replace(/\.?0+$/, "");
                 var iLineWNum = body.querySelector('[data-field="line-width-num"]');
                 if (iLineWNum && document.activeElement !== iLineWNum) iLineWNum.value = v;
-                applyAnnotationChange(ann.id, { lineWidth: v });
+                _baPokeScoped({ lineWidth: v });
                 _refreshWidthPresets(body, "line-width", v);
             });
             iLineW.addEventListener("change", function () {
@@ -93048,7 +93074,7 @@
                     if (!isFinite(v) || v <= 0) return;
                     iLineW.value = v;
                     iLineWVal.textContent = v.toFixed(2).replace(/\.?0+$/, "");
-                    applyAnnotationChange(ann.id, { lineWidth: v });
+                    _baPokeScoped({ lineWidth: v });
                     _refreshWidthPresets(body, "line-width", v);
                 });
                 iBaLineWNum.addEventListener("change", function () {
@@ -93064,7 +93090,7 @@
                 iSizeVal.textContent = v;
                 var iSzNum = body.querySelector('[data-field="size-num"]');
                 if (iSzNum && document.activeElement !== iSzNum) iSzNum.value = v;
-                applyAnnotationChange(ann.id, { fontSize: _gb2PxFromPt(v) });
+                _baPokeScoped({ fontSize: _gb2PxFromPt(v) });
             });
             iSize.addEventListener("change", function () {
                 var v = parseFloat(iSize.value);
@@ -93079,7 +93105,7 @@
                     if (!isFinite(v) || v <= 0) return;
                     iSize.value = v;
                     iSizeVal.textContent = v;
-                    applyAnnotationChange(ann.id, { fontSize: _gb2PxFromPt(v) });
+                    _baPokeScoped({ fontSize: _gb2PxFromPt(v) });
                 });
                 iBaSizeNum.addEventListener("change", function () {
                     var v = parseFloat(iBaSizeNum.value);
@@ -93092,7 +93118,7 @@
                 iTextOffVal.textContent = Math.round(v);
                 var iToNum = body.querySelector('[data-field="textOffset-num"]');
                 if (iToNum && document.activeElement !== iToNum) iToNum.value = Math.round(v);
-                applyAnnotationChange(ann.id, { textOffset: v });
+                _baPokeScoped({ textOffset: v });
             });
             iTextOff.addEventListener("change", function () {
                 var v = parseFloat(iTextOff.value);
@@ -93107,7 +93133,7 @@
                     if (!isFinite(v) || v < 0) return;
                     iTextOff.value = v;
                     iTextOffVal.textContent = Math.round(v);
-                    applyAnnotationChange(ann.id, { textOffset: v });
+                    _baPokeScoped({ textOffset: v });
                 });
                 iBaTextOffNum.addEventListener("change", function () {
                     var v = parseFloat(iBaTextOffNum.value);
@@ -93119,7 +93145,7 @@
                 openColorPicker(ann.color || "#000",
                     function (newColor) {
                         iColor.style.background = newColor;
-                        applyAnnotationChange(ann.id, { color: newColor });
+                        _baPokeScoped({ color: newColor });
                         _refreshPaletteRowHighlight(body, "color-btn", "ba", newColor);
                     },
                     function (newColor) { _baApplyScoped({ color: newColor }); }
@@ -93199,9 +93225,14 @@
                 var _bkRow = _mountScopeRowInTitle(
                     '<div data-field="ba-scope-row" style="display:flex;align-items:center;gap:0;margin-left:auto;align-self:flex-end;padding-bottom:4px;flex-shrink:0;">' +
                     '<button type="button" data-ba-scope="this" style="' + _distScopeBtnCss(!_bkAll, "this") + '" title="Style changes apply only to this bracket">This bracket</button>' +
-                    '<button type="button" data-ba-scope="all" style="' + _distScopeBtnCss(_bkAll, "all") + '" title="Style changes (line, caps, text size, color, distance) apply to every significance bracket - ' + _bkN + ' on this chart. The label text, the span, and the Stats settings stay per-bracket.">All brackets</button>' +
+                    '<button type="button" data-ba-scope="all" style="' + _distScopeBtnCss(_bkAll, "all") + '" title="Style and Stats changes (line, text size, color, distance, test settings) apply to every significance bracket - ' + _bkN + ' on this chart. The label text, the span, and the caps stay per-bracket.">All brackets</button>' +
                     '</div>');
                 if (!_bkRow) return;
+                try {
+                    var _bkPane0 = body.querySelector('[data-ba-tab-pane="shape"]');
+                    if (_bkPane0 && _bkPane0.style.display !== "none")
+                        _bkRow.style.display = "none";
+                } catch (_eBk0) {}
                 var _bkBtns = _bkRow.querySelectorAll("[data-ba-scope]");
                 for (var _bkB = 0; _bkB < _bkBtns.length; _bkB++) {
                     (function (btn) {
@@ -93478,7 +93509,7 @@
             var _baAutoPChk = body.querySelector('[data-field="autoPValue"]');
             if (_baAutoPChk) {
                 _baAutoPChk.addEventListener("change", function () {
-                    commitAnnotationChange(ann.id, { autoPValue: _baAutoPChk.checked });
+                    _baApplyScoped({ autoPValue: _baAutoPChk.checked });
                     if (_baStatsBodyEl) {
                         _baStatsBodyEl.style.opacity = _baAutoPChk.checked ? "" : "0.45";
                     }
@@ -93494,7 +93525,7 @@
                 el.addEventListener("change", function () {
                     var partial = {};
                     partial[fieldName] = el.value;
-                    commitAnnotationChange(ann.id, partial);
+                    _baApplyScoped(partial);
                     // The LABEL FORMAT is a property of the figure, not of
                     // one bracket (a colleague, Aug 2026: they should all
                     // change together, the way the correction does). A
@@ -93630,7 +93661,7 @@
                     var wasAnova = (ann.autoPTest === "anovaX" ||
                                     ann.autoPTest === "anovaGroup" ||
                                     ann.autoPTest === "rmAnova");
-                    commitAnnotationChange(ann.id, { autoPTest: _teEl.value });
+                    _baApplyScoped({ autoPTest: _teEl.value });
                     var isAnova = (_teEl.value === "anovaX" ||
                                    _teEl.value === "anovaGroup" ||
                                    _teEl.value === "rmAnova");
