@@ -128,7 +128,7 @@ if (JSON.stringify(await order()) !==
     throw new Error('Data undo did not restore the category order');
 console.log('  ok  keyboard reordering is accessible and undoable');
 
-await page.selectOption('#ps-variable-type', 'ordinal');
+await page.click('#ps-variable-type-group .ps-vt-row[data-vt="ordinal"]');
 await page.waitForTimeout(120);
 if (await page.locator('#ps-variable-level-title').textContent() !==
     'Ordered levels (3)')
