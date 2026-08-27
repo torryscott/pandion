@@ -3767,6 +3767,22 @@
     border: 1px solid rgba(255,255,255,0.42); border-radius: var(--ps-r-sm);
     font-size: 11px; font-weight: 600;
   }
+  /* Measure type as icon rows (the rail's words gained the type menu's
+     icons; a native select cannot draw them in its options). */
+  #ps-variable-type-group { display: flex; flex-direction: column; gap: 2px; margin-top: 3px; }
+  .ps-vt-row {
+    -webkit-appearance: none; appearance: none;
+    display: flex; align-items: center; gap: 7px; width: 100%;
+    padding: 4px 8px; border: 1px solid var(--ps-l2b);
+    border-radius: var(--ps-r-sm); background: var(--ps-s0);
+    cursor: pointer; font-size: 11.5px; color: var(--ps-ink-2);
+    text-align: left; font-family: inherit;
+  }
+  .ps-vt-row:hover { border-color: #b9cde6; }
+  .ps-vt-row[aria-checked="true"] {
+    border-color: #3573bd; background: #eef4fc; color: #1a3c66; font-weight: 600;
+  }
+  .ps-vt-row .ps-ticon { flex-shrink: 0; }
   body.ps-density-compact .ps-commandbar { min-height: 36px; }
   body.ps-density-compact .ps-grid-table th { padding-top: 4px; padding-bottom: 3px; }
   body.ps-density-compact .ps-grid-table td { padding-top: 2px; padding-bottom: 2px; }
@@ -4511,10 +4527,16 @@
             Variable name
             <input id="ps-variable-name" type="text" maxlength="100">
           </label>
-          <label class="ps-inspector-field">
+          <div class="ps-inspector-field">
             Measure type
-            <select id="ps-variable-type"></select>
-          </label>
+            <div id="ps-variable-type-group" role="radiogroup"
+                 aria-label="Measure type"></div>
+            <!-- Hidden mirror: probes and integrations read/write its value;
+                 the radiogroup above is the real control (the type words
+                 needed their icons - a native select cannot draw them). -->
+            <select id="ps-variable-type" hidden tabindex="-1"
+                    aria-hidden="true"></select>
+          </div>
           <div class="ps-loader-hint" id="ps-variable-type-hint"></div>
         </div>
         <div class="ps-inspector-section" id="ps-variable-advice-section"
@@ -6171,8 +6193,8 @@
 <script src="lib/ps-data.769925dda9.js"></script>
 <script src="lib/jspdf.umd.min.979a2ef514.js"></script>
 <script src="lib/svg2pdf.umd.min.4ada250f50.js"></script>
-<script src="lib/graphbuilder2.min.a15f139bc4.js"></script>
-<script src="lib/ps-shell.cd548a89db.js"></script>
+<script src="lib/graphbuilder2.min.25d422641f.js"></script>
+<script src="lib/ps-shell.a7880b28c3.js"></script>
 <script src="lib/ps-tour.fe1b2fd3ed.js"></script>
 </body>
 </html>

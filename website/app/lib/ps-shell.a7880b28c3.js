@@ -24077,6 +24077,24 @@
       typeSelect.appendChild(opt);
     }
     typeSelect.value = t.types[col];
+    // The visible control: one row per measure type, the type menu's own
+    // icon beside each word (the ask that retired the bare select - its
+    // options cannot draw icons). Radio semantics; the hidden select
+    // above mirrors the value for anything that reads it.
+    var vtGroup = el("ps-variable-type-group");
+    if (vtGroup) {
+      var vtH = [];
+      for (i = 0; i < VAR_TYPES.length; i++) {
+        var vt = VAR_TYPES[i], vtOn = vt.key === t.types[col];
+        vtH.push('<button type="button" class="ps-vt-row" role="radio"' +
+          ' data-vt="' + vt.key + '"' +
+          ' aria-checked="' + (vtOn ? "true" : "false") + '"' +
+          ' tabindex="' + (vtOn ? "0" : "-1") + '"' +
+          ' title="' + escHtml(vt.gloss) + '">' +
+          psTypeIcon(vt.key) + '<span>' + escHtml(vt.label) + '</span></button>');
+      }
+      vtGroup.innerHTML = vtH.join("");
+    }
     // 19: say what the chosen type MEANS, right where it is chosen. The note
     // is the part that answers "why will this not drop on the value axis".
     var tinfo = typeInfo(t.types[col]);
@@ -25221,6 +25239,28 @@
     });
     el("ps-variable-type").addEventListener("change", function () {
       if (INSPECTOR_VAR) setColType(INSPECTOR_VAR, this.value);
+    });
+    // The icon-row radiogroup: click picks; arrows move and pick (the
+    // WAI radio pattern). setColType re-syncs the inspector, which
+    // rebuilds the rows with the new checked state.
+    el("ps-variable-type-group").addEventListener("click", function (e) {
+      var row = e.target && e.target.closest ? e.target.closest(".ps-vt-row") : null;
+      if (row && INSPECTOR_VAR) setColType(INSPECTOR_VAR, row.getAttribute("data-vt"));
+    });
+    el("ps-variable-type-group").addEventListener("keydown", function (e) {
+      if (["ArrowDown", "ArrowRight", "ArrowUp", "ArrowLeft"].indexOf(e.key) === -1) return;
+      var rows = [].slice.call(this.querySelectorAll(".ps-vt-row"));
+      var cur = rows.indexOf(document.activeElement);
+      if (cur === -1) return;
+      e.preventDefault();
+      var dir = (e.key === "ArrowDown" || e.key === "ArrowRight") ? 1 : -1;
+      var nxt = rows[(cur + dir + rows.length) % rows.length];
+      if (nxt && INSPECTOR_VAR) {
+        setColType(INSPECTOR_VAR, nxt.getAttribute("data-vt"));
+        var again = el("ps-variable-type-group")
+          .querySelector('.ps-vt-row[data-vt="' + nxt.getAttribute("data-vt") + '"]');
+        if (again) again.focus();
+      }
     });
     el("ps-variable-missing").addEventListener("change", function () {
       setMissingTokens(this.value);

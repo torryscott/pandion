@@ -3767,6 +3767,22 @@
     border: 1px solid rgba(255,255,255,0.42); border-radius: var(--ps-r-sm);
     font-size: 11px; font-weight: 600;
   }
+  /* Measure type as icon rows (the rail's words gained the type menu's
+     icons; a native select cannot draw them in its options). */
+  #ps-variable-type-group { display: flex; flex-direction: column; gap: 2px; margin-top: 3px; }
+  .ps-vt-row {
+    -webkit-appearance: none; appearance: none;
+    display: flex; align-items: center; gap: 7px; width: 100%;
+    padding: 4px 8px; border: 1px solid var(--ps-l2b);
+    border-radius: var(--ps-r-sm); background: var(--ps-s0);
+    cursor: pointer; font-size: 11.5px; color: var(--ps-ink-2);
+    text-align: left; font-family: inherit;
+  }
+  .ps-vt-row:hover { border-color: #b9cde6; }
+  .ps-vt-row[aria-checked="true"] {
+    border-color: #3573bd; background: #eef4fc; color: #1a3c66; font-weight: 600;
+  }
+  .ps-vt-row .ps-ticon { flex-shrink: 0; }
   body.ps-density-compact .ps-commandbar { min-height: 36px; }
   body.ps-density-compact .ps-grid-table th { padding-top: 4px; padding-bottom: 3px; }
   body.ps-density-compact .ps-grid-table td { padding-top: 2px; padding-bottom: 2px; }
@@ -4511,10 +4527,16 @@
             Variable name
             <input id="ps-variable-name" type="text" maxlength="100">
           </label>
-          <label class="ps-inspector-field">
+          <div class="ps-inspector-field">
             Measure type
-            <select id="ps-variable-type"></select>
-          </label>
+            <div id="ps-variable-type-group" role="radiogroup"
+                 aria-label="Measure type"></div>
+            <!-- Hidden mirror: probes and integrations read/write its value;
+                 the radiogroup above is the real control (the type words
+                 needed their icons - a native select cannot draw them). -->
+            <select id="ps-variable-type" hidden tabindex="-1"
+                    aria-hidden="true"></select>
+          </div>
           <div class="ps-loader-hint" id="ps-variable-type-hint"></div>
         </div>
         <div class="ps-inspector-section" id="ps-variable-advice-section"
@@ -34087,6 +34109,24 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       typeSelect.appendChild(opt);
     }
     typeSelect.value = t.types[col];
+    // The visible control: one row per measure type, the type menu's own
+    // icon beside each word (the ask that retired the bare select - its
+    // options cannot draw icons). Radio semantics; the hidden select
+    // above mirrors the value for anything that reads it.
+    var vtGroup = el("ps-variable-type-group");
+    if (vtGroup) {
+      var vtH = [];
+      for (i = 0; i < VAR_TYPES.length; i++) {
+        var vt = VAR_TYPES[i], vtOn = vt.key === t.types[col];
+        vtH.push('<button type="button" class="ps-vt-row" role="radio"' +
+          ' data-vt="' + vt.key + '"' +
+          ' aria-checked="' + (vtOn ? "true" : "false") + '"' +
+          ' tabindex="' + (vtOn ? "0" : "-1") + '"' +
+          ' title="' + escHtml(vt.gloss) + '">' +
+          psTypeIcon(vt.key) + '<span>' + escHtml(vt.label) + '</span></button>');
+      }
+      vtGroup.innerHTML = vtH.join("");
+    }
     // 19: say what the chosen type MEANS, right where it is chosen. The note
     // is the part that answers "why will this not drop on the value axis".
     var tinfo = typeInfo(t.types[col]);
@@ -35231,6 +35271,28 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     });
     el("ps-variable-type").addEventListener("change", function () {
       if (INSPECTOR_VAR) setColType(INSPECTOR_VAR, this.value);
+    });
+    // The icon-row radiogroup: click picks; arrows move and pick (the
+    // WAI radio pattern). setColType re-syncs the inspector, which
+    // rebuilds the rows with the new checked state.
+    el("ps-variable-type-group").addEventListener("click", function (e) {
+      var row = e.target && e.target.closest ? e.target.closest(".ps-vt-row") : null;
+      if (row && INSPECTOR_VAR) setColType(INSPECTOR_VAR, row.getAttribute("data-vt"));
+    });
+    el("ps-variable-type-group").addEventListener("keydown", function (e) {
+      if (["ArrowDown", "ArrowRight", "ArrowUp", "ArrowLeft"].indexOf(e.key) === -1) return;
+      var rows = [].slice.call(this.querySelectorAll(".ps-vt-row"));
+      var cur = rows.indexOf(document.activeElement);
+      if (cur === -1) return;
+      e.preventDefault();
+      var dir = (e.key === "ArrowDown" || e.key === "ArrowRight") ? 1 : -1;
+      var nxt = rows[(cur + dir + rows.length) % rows.length];
+      if (nxt && INSPECTOR_VAR) {
+        setColType(INSPECTOR_VAR, nxt.getAttribute("data-vt"));
+        var again = el("ps-variable-type-group")
+          .querySelector('.ps-vt-row[data-vt="' + nxt.getAttribute("data-vt") + '"]');
+        if (again) again.focus();
+      }
     });
     el("ps-variable-missing").addEventListener("change", function () {
       setMissingTokens(this.value);
