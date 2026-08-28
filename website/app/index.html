@@ -3782,10 +3782,26 @@
   .ps-vt-dd:hover { border-color: #b9cde6; }
   .ps-vt-dd .ps-ticon { flex-shrink: 0; }
   .ps-vt-chev { margin-left: auto; color: var(--ps-muted); font-size: 10px; }
-  body.ps-density-compact .ps-commandbar { min-height: 36px; }
-  body.ps-density-compact .ps-grid-table th { padding-top: 4px; padding-bottom: 3px; }
-  body.ps-density-compact .ps-grid-table td { padding-top: 2px; padding-bottom: 2px; }
-  body.ps-density-compact .ps-project-item { min-height: 24px; }
+  /* Interface density: a three-point scale (Aug 26-27). The old compact
+     rules never visibly bit: min-heights that did not bind (the command
+     bar is content-box, so min-height 36 computed to the comfortable 43)
+     and grid paddings that live on the Data workspace only. Compact now
+     tightens the chrome frame itself and stops exactly at the 24px
+     target floor the accessibility gates enforce; Spacious is the
+     projector / teaching end of the scale. */
+  body.ps-density-compact .ps-page { grid-template-rows: 28px 32px minmax(0, 1fr) 21px; }
+  body.ps-density-compact .ps-commandbar { padding-top: 3px; padding-bottom: 3px; min-height: 0; }
+  body.ps-density-compact .ps-command { height: 24px; padding: 0 7px; }
+  body.ps-density-compact .ps-grid-table th { padding-top: 3px; padding-bottom: 2px; }
+  body.ps-density-compact .ps-grid-table td { padding-top: 1px; padding-bottom: 1px; }
+  body.ps-density-compact .ps-project-item { min-height: 24px; padding-top: 2px; padding-bottom: 2px; }
+  body.ps-density-spacious .ps-page { grid-template-rows: 40px 52px minmax(0, 1fr) 29px; }
+  body.ps-density-spacious .ps-commandbar { padding-top: 8px; padding-bottom: 8px; }
+  body.ps-density-spacious .ps-command { height: 34px; padding: 0 13px; font-size: 12.5px; }
+  body.ps-density-spacious .ps-grid-table th { padding-top: 9px; padding-bottom: 8px; }
+  body.ps-density-spacious .ps-grid-table td { padding-top: 6px; padding-bottom: 6px; }
+  body.ps-density-spacious .ps-project-item { min-height: 34px; padding-top: 8px; padding-bottom: 8px; }
+  body.ps-density-spacious .ps-statusbar { font-size: 11.5px; }
 
   /* ---- Press states and hover timing -----------------------------------
      Punch list item 29. Every button in the app had a hover and no :active,
@@ -5585,8 +5601,9 @@
     <div class="ps-dialog-body ps-pref-grid">
       <label class="ps-inspector-field">Interface density
         <select id="ps-pref-density">
-          <option value="comfortable">Comfortable</option>
           <option value="compact">Compact</option>
+          <option value="comfortable">Comfortable</option>
+          <option value="spacious">Spacious</option>
         </select>
       </label>
       <label class="ps-inspector-field">Motion
@@ -6193,7 +6210,7 @@
 <script src="lib/jspdf.umd.min.979a2ef514.js"></script>
 <script src="lib/svg2pdf.umd.min.4ada250f50.js"></script>
 <script src="lib/graphbuilder2.min.a15f139bc4.js"></script>
-<script src="lib/ps-shell.41e161a0b5.js"></script>
+<script src="lib/ps-shell.d20e9f86df.js"></script>
 <script src="lib/ps-tour.fe1b2fd3ed.js"></script>
 </body>
 </html>

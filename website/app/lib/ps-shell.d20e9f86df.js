@@ -873,7 +873,7 @@
   function loadAppPrefs() {
     try {
       var saved = JSON.parse(window.localStorage.getItem(PS_PREF_KEY) || "null");
-      if (saved && /^(comfortable|compact)$/.test(saved.density))
+      if (saved && /^(comfortable|compact|spacious)$/.test(saved.density))
         APP_PREFS.density = saved.density;
       if (saved && /^(system|reduce)$/.test(saved.motion))
         APP_PREFS.motion = saved.motion;
@@ -26755,6 +26755,8 @@
   function applyAppPrefs() {
     document.body.classList.toggle("ps-density-compact",
       APP_PREFS.density === "compact");
+    document.body.classList.toggle("ps-density-spacious",
+      APP_PREFS.density === "spacious");
     document.body.classList.toggle("ps-reduce-motion",
       APP_PREFS.motion === "reduce");
     // A unit change has to reach the fields that are already on screen.

@@ -39,7 +39,7 @@ notebook-record-check notebook-pages-check notebook-undo-check notebook-drift-ch
 probed-bugs-check provenance-check rail-icons-check punchlist-check swatch-row-check reachability-check recents-check reshape-check \
 reflow-accessibility-check \
 row-filters-check \
-shape-plural-check statusbar-check stats-prefs-check \
+shape-plural-check statusbar-check stats-prefs-check density-check \
 textscale-check \
 safety-check \
 silent-failure-check selection-menus-check spreadsheet-gaps-check teaching-check \
