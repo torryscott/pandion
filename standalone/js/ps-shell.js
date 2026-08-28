@@ -21109,21 +21109,42 @@
   }
   function layMiniBar(item) {
     var bar = mkEl("div", "ps-lbar");
-    bar.style.left = item.kind === "text" ? "0" : "50%";
-    bar.style.transform = item.kind === "text" ? "" : "translateX(-50%)";
     // TEXT items park the bar BELOW the box (Torry's screenshot, Aug 6
     // 2026): the rotate grip owns the top-centre, and on a narrow box
     // the bar's first button sat exactly under the knob. Below, the two
     // can never meet at any width or rotation; sized items keep the bar
     // above (they have no grip, and the resize handle owns the bottom).
-    // A sized item's bar is CENTRED on its top edge. The top-LEFT is where
-    // the figure's own panel letter sits and the bar covered it exactly
-    // (measured, a 19x24 label under a 33x24 bar at the same x), so selecting
-    // panel A hid the A. The letter is content and ships in the export, the
-    // bar is chrome, so the chrome moves. Centre rather than below, because
-    // below is the NEXT row's letter in a labelled grid, and rather than
-    // right, which is the Live badge. Text items keep the bar below them:
-    // their rotate grip owns the top centre.
+    // A sized item's bar sits at the item's top-LEFT (Torry, Aug 27 -
+    // supersedes the Aug 6 centre placement). The reason centre was
+    // chosen then still holds as a CONSTRAINT: the figure's panel
+    // letter - a text item parked at that corner - must never hide
+    // under chrome (the letter is content and ships in the export).
+    // So the bar starts at the corner and, when any text item's box
+    // overlaps where it would land, slides right just past it; if the
+    // slide would run off the item, it falls back to the corner (the
+    // letter case at extreme widths is rarer than the daily X reach).
+    var lbLeft = 0;
+    if (item.kind !== "text") {
+      try {
+        var BAR_W = 36, BAR_H = 30, GAP = 6;
+        var others = layItems() || [];
+        for (var pass = 0; pass < 2; pass++) {
+          for (var li = 0; li < others.length; li++) {
+            var ot = others[li];
+            if (!ot || ot.id === item.id || ot.kind !== "text") continue;
+            if (!(ot.w > 0) || !(ot.h > 0)) continue;
+            var bx0 = item.x + lbLeft, bx1 = bx0 + BAR_W;
+            var by0 = item.y - 34, by1 = by0 + BAR_H;
+            if (ot.x < bx1 && ot.x + ot.w > bx0 &&
+                ot.y < by1 && ot.y + ot.h > by0)
+              lbLeft = Math.max(lbLeft, (ot.x + ot.w - item.x) + GAP);
+          }
+        }
+        if (lbLeft > Math.max(0, (item.w || 0) - BAR_W)) lbLeft = 0;
+      } catch (_eLb) { lbLeft = 0; }
+    }
+    bar.style.left = item.kind === "text" ? "0" : lbLeft + "px";
+    bar.style.transform = "";
     bar.style.top = item.kind === "text" ? "calc(100% + 6px)" : "-34px";
     bar.setAttribute("aria-hidden", "true");
     if (item.kind === "text") {
