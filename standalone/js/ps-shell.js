@@ -21123,27 +21123,74 @@
     // overlaps where it would land, slides right just past it; if the
     // slide would run off the item, it falls back to the corner (the
     // letter case at extreme widths is rarer than the daily X reach).
-    var lbLeft = 0;
     if (item.kind !== "text") {
-      try {
-        var BAR_W = 36, BAR_H = 30, GAP = 6;
-        var others = layItems() || [];
-        for (var pass = 0; pass < 2; pass++) {
-          for (var li = 0; li < others.length; li++) {
-            var ot = others[li];
-            if (!ot || ot.id === item.id || ot.kind !== "text") continue;
-            if (!(ot.w > 0) || !(ot.h > 0)) continue;
-            var bx0 = item.x + lbLeft, bx1 = bx0 + BAR_W;
-            var by0 = item.y - 34, by1 = by0 + BAR_H;
-            if (ot.x < bx1 && ot.x + ot.w > bx0 &&
-                ot.y < by1 && ot.y + ot.h > by0)
-              lbLeft = Math.max(lbLeft, (ot.x + ot.w - item.x) + GAP);
+      // Deferred one tick: by then every item node (the letters
+      // included) is in the DOM, and SCREEN rects are the truth the
+      // layout-figure guard measures - text items auto-size, so their
+      // stored w/h cannot be trusted for this. Slide right past any
+      // overlapping text box; if the slide runs off the panel, fall
+      // back to the historical centre (never cover the letter).
+      setTimeout(function () {
+        try {
+          if (!bar.isConnected) return;
+          var GAP = 6, slid = false;
+          for (var pass = 0; pass < 3; pass++) {
+            var b = bar.getBoundingClientRect();
+            var moved = false;
+            var texts = document.querySelectorAll(
+              '#ps-lcanvas .ps-litem[data-kind="text"]');
+            for (var ti = 0; ti < texts.length; ti++) {
+              var r = texts[ti].getBoundingClientRect();
+              if (!(r.width > 0)) continue;
+              if (!(b.right < r.left || b.left > r.right ||
+                    b.bottom < r.top || b.top > r.bottom)) {
+                // Screen delta -> layout px: the canvas renders under a
+                // zoom scale, so style.left (layout units) must divide
+                // the measured overlap by the bar's own rendered scale.
+                var scl = bar.offsetWidth > 0 ? (b.width / bar.offsetWidth) : 1;
+                if (!(scl > 0)) scl = 1;
+                var cur = parseFloat(bar.style.left) || 0;
+                bar.style.left = (cur + (r.right - b.left) / scl + GAP) + "px";
+                moved = true; slid = true;
+                b = bar.getBoundingClientRect();
+              }
+            }
+            if (!moved) break;
           }
-        }
-        if (lbLeft > Math.max(0, (item.w || 0) - BAR_W)) lbLeft = 0;
-      } catch (_eLb) { lbLeft = 0; }
+          if (slid) {
+            var host = bar.parentNode;
+            if (host) {
+              var hb = host.getBoundingClientRect();
+              var bb = bar.getBoundingClientRect();
+              if (bb.right > hb.right + 1) {
+                // Slid off the panel (tiny panels - the Aug 6 measured
+                // case). Try BELOW-left: the resize handle owns the
+                // bottom-right and nothing else claims that corner.
+                // If a text box overlaps even there, the historical
+                // centre is the last resort.
+                bar.style.left = "0px";
+                bar.style.top = "calc(100% + 6px)";
+                var bb2 = bar.getBoundingClientRect();
+                var texts2 = document.querySelectorAll(
+                  '#ps-lcanvas .ps-litem[data-kind="text"]');
+                for (var tj = 0; tj < texts2.length; tj++) {
+                  var r2 = texts2[tj].getBoundingClientRect();
+                  if (!(r2.width > 0)) continue;
+                  if (!(bb2.right < r2.left || bb2.left > r2.right ||
+                        bb2.bottom < r2.top || bb2.top > r2.bottom)) {
+                    bar.style.top = "-34px";
+                    bar.style.left = "50%";
+                    bar.style.transform = "translateX(-50%)";
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        } catch (_eLb2) {}
+      }, 0);
     }
-    bar.style.left = item.kind === "text" ? "0" : lbLeft + "px";
+    bar.style.left = "0";
     bar.style.transform = "";
     bar.style.top = item.kind === "text" ? "calc(100% + 6px)" : "-34px";
     bar.setAttribute("aria-hidden", "true");
