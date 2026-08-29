@@ -72,6 +72,12 @@
         { "target": "zip", "arch": ["universal"] }
       ],
       "artifactName": "Pandion-Plots-macOS.${ext}",
+      "extraResources": [
+        {
+          "from": "mac-sampler/out/pandion-color-sampler",
+          "to": "pandion-color-sampler"
+        }
+      ],
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "entitlements.mac.plist",
