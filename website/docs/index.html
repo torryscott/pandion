@@ -818,6 +818,7 @@ control, is identical in both.</div>
 <h2 id="editing">Editing the appearance</h2>
 
 <h3 id="click-to-edit">Click-to-edit basics</h3>
+<p>One rule runs the whole editor: if you want to change something, click on it; if you want to move something, drag it; if you want to add something that is not there, press the <b>+</b> button. The rest is detail:</p>
 <ul>
 <li><b>Click any part of the chart</b> (a bar, point, line, slice, axis, tick label, legend, title) and its style panel opens directly below the chart, titled after what you clicked (e.g. "Bars - F", "Y axis", "Legend").</li>
 <li><b>Double-click any text</b> (titles, category names, tick labels) to edit it in place.</li>
@@ -952,11 +953,11 @@ control, is identical in both.</div>
 <p><b>Panel-wide behaviors:</b></p>
 <ul>
 <li><b>Linked to the chart, both ways.</b> Hover a table row → a dashed ring previews the matching bars on the chart. Click the row → the ring pins with a marching-ants animation; hover a bar → every row mentioning it highlights. Click panel whitespace to release the pin.</li>
-<li><b>The focus card.</b> Pinning a row shows a reading card above the table: section context, the row's APA sentence (or its values), a Copy button, and ‹ › steppers that walk the pin row by row while the chart rings follow.</li>
+<li><b>The focus card.</b> Pinning a row shows a reading card above the table: section context, the row's APA sentence (or its values), and ‹ › steppers that walk the pin row by row while the chart rings follow.</li>
 <li><b>Sticky stats mode.</b> While the panel is open, plain chart clicks drive the panel instead of opening style editors: click a bar to see its numbers, click two bars (Compare pairs tab) to pin their test. Click open space to clear; the Σ button or <kbd>Esc</kbd> exits. With the panel closed, clicks are ordinary click-to-edit again.</li>
 <li><b><kbd>Cmd/Ctrl</kbd>+click any bar</b>, from anywhere, to jump straight into the panel with that cell's numbers pinned.</li>
 <li><b>Tap-a-term definitions.</b> Column headers and many value cells are tappable: a popover gives a plain-language definition plus an <b>"In this table"</b> reading computed from that row's own numbers ("Here t(11.7) = 2.77 for A vs B: the two group means sit about 2.77 standard errors apart…"). <kbd>Esc</kbd> closes it.</li>
-<li><b>Copy everywhere:</b> per-row APA sentences, Copy APA on omnibus cards, and Copy table buttons that paste straight into Excel or Word.</li>
+<li><b>Numbers you can take with you:</b> APA-style sentences appear in the readouts and the focus card, and Copy table buttons paste whole tables straight into Excel or Word.</li>
 <li><b>Alpha</b> is a reading lens (.10 / .05 / .01 / .001): it recolors the green significance highlights and tallies without changing anything saved.</li>
 </ul>
 
@@ -975,7 +976,7 @@ control, is identical in both.</div>
 <ul>
 <li><b>Test:</b> Auto (recommended) resolves to a paired test for two occasions of the same subjects and Welch's otherwise; or pick Welch's t, Student's t, Paired t, Mann-Whitney U, Wilcoxon signed-rank, or an omnibus: One-way ANOVA (X-axis or grouping factor), or One-way RM-ANOVA (occasions) on Repeated Measures. Frequencies bars use a Proportion z-test.</li>
 <li><b>Label:</b> Asterisks / p-value / p + effect size / full APA; one figure uses one format, so changing it re-labels every bracket on the chart. <b>Effect:</b> Cohen's d or Hedges' g (the right effect size is forced for rank, paired, ANOVA, and proportion tests). <b>Tails:</b> two- or one-tailed.</li>
-<li><b>Correct:</b> the chart-wide multiple-comparison correction (None / Bonferroni / Holm / FDR / Tukey / Games-Howell / Dunnett). A live monospace readout shows the test, statistic, raw and adjusted p, CI, effect size, and exactly what the label will say; <b>Copy APA</b> copies the sentence.</li>
+<li><b>Correct:</b> the chart-wide multiple-comparison correction (None / Bonferroni / Holm / FDR / Tukey / Games-Howell / Dunnett). A live monospace readout shows the test, statistic, raw and adjusted p, CI, effect size, and exactly what the label will say.</li>
 <li><b>Honesty built in:</b> if a correction cannot apply to a bracket's test (e.g. Tukey on repeated measures), the raw p is shown <i>with a disclosure line saying so</i>. Tests that do not fit the data are refused with an explanation in plain language, never computed wrong.</li>
 </ul>
 
