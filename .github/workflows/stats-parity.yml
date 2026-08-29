@@ -23,7 +23,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      # Pinned to the 4.5 series: the widget mirrors the wilcox.test
+      # semantics of R <= 4.5 (jamovi's bundled R), which uses the normal
+      # approximation whenever ties exist. R 4.6.0 switched to exact
+      # conditional inference with ties, so an unpinned "release" R makes
+      # every tied Mann-Whitney reference disagree with the widget (the
+      # first CI run failed 13 fuzzer cases exactly this way). The canary
+      # carries a with-ties pin naming this seam; revisit both together
+      # when jamovi moves to R 4.6.
       - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: '4.5'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'

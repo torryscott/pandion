@@ -27,6 +27,17 @@ chk("student p", s$p.value,            0.004412296008365)
 m <- wilcox.test(a, b)
 chk("wilcox W", unname(m$statistic), 3)
 chk("wilcox p", m$p.value, 0.00815850815850816)
+# With TIES, R <= 4.5 defaults to the normal approximation (this pin);
+# R 4.6.0 switched to exact conditional inference given the observed
+# ranks and prints 5/11 = 0.454545... for this pair. The widget
+# implements the <= 4.5 rule (jamovi parity; jamovi bundles R 4.5), and
+# CI pins r-version '4.5' to match. If this pin fires, the installed R
+# carries the 4.6 semantics: the reference has moved, not the widget -
+# re-pin CI and decide the widget's tie rule before trusting any tied
+# Mann-Whitney parity failure.
+xt <- c(1, 2, 3, 4, 5, 6); yt <- c(2, 3, 4, 5, 6, 7)
+mt <- suppressWarnings(wilcox.test(xt, yt))
+chk("wilcox ties p (<= 4.5 approx rule)", mt$p.value, 0.419244590218924)
 y <- c(a, b); g <- factor(rep(1:2, c(6, 7))); av <- anova(aov(y ~ g))
 chk("aov F", av$`F value`[1], 12.7289755230325)
 chk("aov p", av$`Pr(>F)`[1],  0.00441229600836501)

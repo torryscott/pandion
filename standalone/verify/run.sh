@@ -78,6 +78,18 @@ for p in $FEATURE_PROBES; do
     node "standalone/verify/$p.mjs"
 done
 
+echo "== R reference canary (pinned known answers)"
+# Runs BEFORE the fuzzer on purpose: if the installed R's answers have
+# moved (the wilcox.test tie rule changed in R 4.6), the canary names
+# the drift in one line instead of the fuzzer spraying a dozen
+# mysterious tied-case failures against a moved reference.
+if Rscript standalone/verify/stats-canary.R; then :; else
+    st=$?
+    if [ "${PS_REQUIRE_R_PARITY:-0}" = "1" ] || [ "$st" != "127" ]; then
+        exit "$st"
+    fi
+    echo "WARN: Rscript unavailable - canary skipped"
+fi
 echo "== stats parity fuzzer (seeded R references vs the rendered widget)"
 # Base R only (no jmvcore). The seed rotates daily; GB2_FUZZ_SEED replays
 # a failure, GB2_FUZZ_N deepens a release run. Skipping is allowed only
@@ -93,14 +105,6 @@ else
 fi
 echo "== stats formatting seam (pure unit)"
 node standalone/verify/stats-format-unit.mjs
-echo "== R reference canary (pinned known answers)"
-if Rscript standalone/verify/stats-canary.R; then :; else
-    st=$?
-    if [ "${PS_REQUIRE_R_PARITY:-0}" = "1" ] || [ "$st" != "127" ]; then
-        exit "$st"
-    fi
-    echo "WARN: Rscript unavailable - canary skipped"
-fi
 echo "== third statistical reference (scipy, optional locally)"
 if python3 standalone/verify/stats-thirdref.py /tmp/gb2-stats-fuzz.json; then :; else
     st=$?
