@@ -147,6 +147,21 @@ HEAD = M0 + """
 [data-theme="dark"]{
   --accent:#7fb0ea; --accent2:#9cc3f0; --accent-soft:#1d2c40;
 }
+/* On-site blending. The module copy keeps its full self-branding; here
+   the site header already carries the brand, so the rail keeps only a
+   quiet role label, headings take the site navy (light theme only),
+   and the cover drops its marketing pills - selling the app is the
+   site's job, not the manual's. */
+/* !important because the guide styles these via nav#sidebar selectors
+   that outrank this earlier-in-head block. */
+#sidebar .brand svg,#sidebar .brand b,#sidebar .brand .homelink{display:none!important}
+#sidebar .brand span{display:block;font-weight:700;letter-spacing:.07em;text-transform:uppercase}
+:root:not([data-theme="dark"]) main h1,
+:root:not([data-theme="dark"]) main h2,
+:root:not([data-theme="dark"]) main h3,
+:root:not([data-theme="dark"]) header.hero h1{color:#192E49}
+header.hero .pillrow{display:none}
+header.hero{padding:24px 28px 22px}
 /* The site header (same markup + behavior as gallery.html; styles scoped
    under .site-header so nothing leaks into the guide's classes). */
 .site-header{position:sticky;top:0;z-index:60;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border-bottom:1px solid #dde5ee}
