@@ -96,6 +96,9 @@ echo "== stats parity fuzzer (seeded R references vs the rendered widget)"
 # off release runs, mirroring the m1-parity rule.
 if Rscript standalone/verify/stats-fuzz.R /tmp/gb2-stats-fuzz.json; then
     node standalone/verify/stats-fuzz-check.mjs /tmp/gb2-stats-fuzz.json
+    # Shape statistics (box quartiles/whiskers, KDE, kde2d) against the
+    # same R references, extracted straight from the engine source.
+    node standalone/verify/stats-unit-parity.mjs /tmp/gb2-stats-fuzz.json
 else
     if [ "${PS_REQUIRE_R_PARITY:-0}" = "1" ]; then
         echo "ERROR: stats-fuzz.R is required for a release" >&2

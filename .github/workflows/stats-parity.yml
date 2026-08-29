@@ -53,5 +53,6 @@ jobs:
         run: |
           Rscript standalone/verify/stats-fuzz.R /tmp/gb2-stats-fuzz.json
           node standalone/verify/stats-fuzz-check.mjs /tmp/gb2-stats-fuzz.json
+          node standalone/verify/stats-unit-parity.mjs /tmp/gb2-stats-fuzz.json
       - name: Third statistical reference (scipy vs R)
         run: python3 standalone/verify/stats-thirdref.py /tmp/gb2-stats-fuzz.json
