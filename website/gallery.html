@@ -178,12 +178,15 @@
         aria-describedby="gallery-raincloud-desc"
         alt="Raincloud plot of score for control, low-dose, and high-dose conditions"></div>
       <figcaption id="gallery-raincloud-desc"><b>Raincloud</b>
-        Scores rise across the three conditions: the medians are about
+        Every raw observation, the box summary, and the shape of the
+        distribution in one figure. The red ring flags a potential
+        outlier.
+        <span class="sr-only">Scores rise across the three conditions: the medians are about
         56 for control, 68 for low dose, and 80 for high dose. The
         high-dose group also spans the highest values, and a red ring
         identifies a low-dose score near 53 as a potential outlier.
         Raw points, box plots, and half-density shapes show the
-        observations and distributions together.</figcaption>
+        observations and distributions together.</span></figcaption>
     </figure>
     <figure class="g">
       <div class="g-frame"><img src="assets/gallery/rm-line.png"
@@ -191,11 +194,13 @@
         aria-describedby="gallery-rm-desc"
         alt="Repeated-measures chart for placebo and treatment groups across baseline, week four, and week eight"></div>
       <figcaption id="gallery-rm-desc"><b>Repeated measures</b>
-        Both groups improve over time, but treatment rises more: from
+        The same people measured across time: group means joined by
+        lines, with error bars corrected for the within-subject design.
+        <span class="sr-only">Both groups improve over time, but treatment rises more: from
         about 58 at baseline to 74 at week eight, compared with roughly
         61 to 67 for placebo. Treatment begins below placebo, crosses
         it by week four, and finishes about seven points higher.
-        Points are means with Cousineau-Morey-corrected error bars.</figcaption>
+        Points are means with Cousineau-Morey-corrected error bars.</span></figcaption>
     </figure>
     <figure class="g">
       <div class="g-frame"><img src="assets/gallery/scatter-marginals.png"
@@ -203,10 +208,12 @@
         aria-describedby="gallery-scatter-desc"
         alt="Scatterplot of stress and cortisol for adolescent and adult age groups"></div>
       <figcaption id="gallery-scatter-desc"><b>Scatter by group</b>
-        Cortisol generally increases as stress increases. Adult
+        The relationship between two measures, one point per
+        observation, colored by group.
+        <span class="sr-only">Cortisol generally increases as stress increases. Adult
         observations tend to occupy the higher cortisol range, while
         adolescent observations cluster more heavily around cortisol
-        values from the mid-30s to mid-60s.</figcaption>
+        values from the mid-30s to mid-60s.</span></figcaption>
     </figure>
     <figure class="g">
       <div class="g-frame"><img src="assets/gallery/corr-matrix.png"
@@ -214,13 +221,16 @@
         aria-describedby="gallery-corr-desc"
         alt="Correlation matrix for anxiety, stress, sleep, openness, and rumination"></div>
       <figcaption id="gallery-corr-desc"><b>Correlation matrix</b>
-        The strongest positive relationship is anxiety with stress
+        Every pairwise relationship at a glance: value, direction, and
+        strength, on a diverging scale that does not lean on color
+        alone.
+        <span class="sr-only">The strongest positive relationship is anxiety with stress
         (r = .64); the strongest negative is sleep with rumination
         (r = -.55). Anxiety is also negatively related to sleep
         (r = -.48), while openness has only weak relationships with
         the other variables (absolute r values from .08 to .21).
         Cell values and a diverging scale communicate direction and
-        strength without relying on color alone.</figcaption>
+        strength without relying on color alone.</span></figcaption>
     </figure>
     <figure class="g">
       <div class="g-frame"><img src="assets/gallery/likert.png"
@@ -228,12 +238,15 @@
         aria-describedby="gallery-likert-desc"
         alt="Diverging Likert chart for five survey items"></div>
       <figcaption id="gallery-likert-desc"><b>Likert battery</b>
-        “Would recommend” has the strongest favorable response:
+        The response mix for each item, centered on neutral:
+        disagreement grows to the left, agreement to the right, so
+        items compare at a glance.
+        <span class="sr-only">“Would recommend” has the strongest favorable response:
         26% agree and 48% strongly agree. “Too fast paced” leans in
         the opposite direction, with 18% strongly disagreeing and 35%
         disagreeing. The five response categories are centered on
         neutral, with negative responses to the left and positive
-        responses to the right.</figcaption>
+        responses to the right.</span></figcaption>
     </figure>
     <figure class="g">
       <div class="g-frame"><img src="assets/gallery/grouped-bar.png"
@@ -241,11 +254,13 @@
         aria-describedby="gallery-bars-desc"
         alt="Grouped bar chart of recall by test time and practice condition"></div>
       <figcaption id="gallery-bars-desc"><b>Grouped bars</b>
-        Spaced practice produces higher recall than massed practice
+        Means side by side with error bars, so a second factor can be
+        compared within each category.
+        <span class="sr-only">Spaced practice produces higher recall than massed practice
         both immediately (about 69 versus 59) and after one week
         (about 65 versus 48). Recall declines for both conditions, but
         the decline is much larger after massed practice. Bars show
-        condition means with standard-error bars.</figcaption>
+        condition means with standard-error bars.</span></figcaption>
     </figure>
     <figure class="g">
       <div class="g-frame"><img src="assets/gallery/histdensity.png"
@@ -253,11 +268,13 @@
         aria-describedby="gallery-hist-desc"
         alt="Histogram and density curve of reaction time"></div>
       <figcaption id="gallery-hist-desc"><b>Histogram + density</b>
-        Most reaction times fall between about 60 and 90, with the
+        The shape of a single variable: binned counts with a smoothed
+        curve over them.
+        <span class="sr-only">Most reaction times fall between about 60 and 90, with the
         highest concentration in the low-to-mid 70s. A sparse lower
         tail reaches into the 20s and 30s, while the upper tail extends
         just past 100. Bars show counts and the overlaid curve shows
-        the estimated distribution shape.</figcaption>
+        the estimated distribution shape.</span></figcaption>
     </figure>
     <figure class="g">
       <div class="g-frame"><img src="assets/gallery/donut.png"
@@ -265,10 +282,12 @@
         aria-describedby="gallery-donut-desc"
         alt="Donut chart of student majors"></div>
       <figcaption id="gallery-donut-desc"><b>Donut</b>
-        Psychology is the largest major at 34%, followed by biology at
+        Category shares of a whole, with direct percentage labels so the
+        legend never needs decoding.
+        <span class="sr-only">Psychology is the largest major at 34%, followed by biology at
         26%, nursing at 18%, education at 12%, and other majors at 10%.
         Direct percentage labels and a coordinated legend provide both
-        values and category names.</figcaption>
+        values and category names.</span></figcaption>
     </figure>
   </div>
 
