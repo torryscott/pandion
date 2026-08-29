@@ -245,10 +245,6 @@
   .pillar .feature:last-child { margin-bottom: 0; }
   .pillar:nth-child(1) .feature .dot { background: var(--cobalt); }
   .pillar:nth-child(2) .feature .dot { background: var(--amber); }
-  .both-note {
-    margin: 34px 0 0; padding-top: 20px; border-top: 1px solid var(--line);
-    color: var(--muted); font-size: 15px; max-width: 46em;
-  }
   .feature h3 {
     margin: 0 0 6px; color: var(--navy); font-size: 16.5px;
     display: flex; align-items: center; gap: 9px;
@@ -362,7 +358,7 @@
         <figcaption>
           A grouped bar chart with error bars and every observation drawn
           on top, created from the built-in sample data in a few clicks.
-          Each chart is its own document, and related charts collect into
+          Each chart lives in its own tab, and related charts collect into
           named groups in the left rail.
         </figcaption>
       </figure>
@@ -397,14 +393,14 @@
       <p class="kicker">Beyond the chart</p>
       <h2>A chart is only part of the work.</h2>
       <p class="section-lede">
-        Pandion supports what comes before and after it. Organize and
+        Pandion supports what comes before and after the chart. Organize and
         understand your data before you plot, keep a record of what you
         find as you go, then arrange finished charts into a polished
         figure for a paper, poster, or presentation.
       </p>
 
       <div class="shot-block">
-        <h3>A data workspace that knows what your variables are</h3>
+        <h3>A data workspace that knows nominal from numeric</h3>
         <p>
           Give each variable a measure type and the rest follows: which
           roles it can fill, which charts get suggested, and how its
@@ -441,10 +437,10 @@
           lands as a page: the chart, its selection rings, and the
           statistics as one image. Each page carries when it was kept,
           your notes, and an honest verdict on whether its source chart
-          has changed since. Kept pages never update themselves, which is
-          the point. Organize them into sections, place one in a layout,
-          or export the Notebook as a PDF, one page per kept
-          moment.
+          has changed since. Kept pages act as snapshots and never update
+          themselves, which is the point. Organize them into sections,
+          place one in a layout, or export the Notebook, one page per
+          kept moment, in the same formats as a chart.
         </p>
         <figure>
           <div class="shot-frame">
@@ -467,8 +463,9 @@
         <h3>Layouts for multi-panel figures</h3>
         <p>
           Arrange several charts on one page, label the panels, and add
-          titles, notes, or images. Panels stay linked to the charts they
-          came from, so an edit to a chart updates the figure. Snapping,
+          titles, notes, or images. Panels placed from your charts stay
+          linked, so an edit to a chart updates the figure; pages placed
+          from the Notebook stay the snapshots they were. Snapping,
           smart guides, and page presets keep the arrangement tidy, and
           the finished figure exports as SVG, PNG, JPG, or vector PDF.
         </p>
@@ -564,8 +561,8 @@
           <h3>In your browser</h3>
           <p>Start immediately. Bring in data from a CSV, an Excel
              sheet, or a jamovi file and build charts without installing
-             anything. Your current project is saved locally in your
-             browser.</p>
+             anything. The browser keeps an autosave between visits, and
+             Save writes a project file to your computer.</p>
           <a class="btn btn-primary" href="app/">Open the browser app</a>
           <div class="fine">Works in current desktop browsers</div>
         </div>
@@ -591,8 +588,8 @@
           <div class="feature">
             <h3><span class="dot"></span>Statistics you can check</h3>
             <p>Comparisons, multiple-comparison corrections, and effect
-               sizes are verified against R, with APA-style results
-               ready to copy.</p>
+               sizes are verified against R, with results stated in
+               APA style.</p>
           </div>
           <div class="feature">
             <h3><span class="dot"></span>Figures ready to share</h3>
@@ -626,11 +623,6 @@
           </div>
         </div>
       </div>
-      <p class="both-note">
-        Both experiences share the same foundation: considered
-        defaults, direct-on-chart editing, and data imports from CSV,
-        Excel, and jamovi files.
-      </p>
     </div>
   </section>
 </main>
