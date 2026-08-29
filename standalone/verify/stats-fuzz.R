@@ -76,6 +76,12 @@ anova_ref <- function(groups) {
     y <- unlist(groups)
     g <- factor(rep(seq_along(groups), vapply(groups, length, 1L)))
     if (nlevels(droplevels(g)) < 2) return(NULL)
+    # A zero-variance outcome makes F a 0/0 artifact: R's aov emits F = 1
+    # with its own 'essentially perfect fit is unreliable' warning, scipy
+    # refuses with NaN, and the widget refuses too. An unreliable number
+    # is not a reference - emit none (the third reference surfaced this
+    # seam on its first local run, Aug 29 2026).
+    if (!isTRUE(sd(y) > 0)) return(NULL)
     a <- safe(anova(aov(y ~ g)))
     if (is.null(a)) return(NULL)
     list(F = num_or_null(a$`F value`[1]),

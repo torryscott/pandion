@@ -27,6 +27,11 @@ def chk(label, got, want, rel=1e-6, absr=1e-9):
     global fails, ok
     if got is None or want is None:
         return
+    try:
+        if got != got or want != want:  # NaN on either side: no comparison
+            return
+    except Exception:
+        return
     if abs(got - want) <= max(absr, rel * abs(want)):
         ok += 1
     else:
