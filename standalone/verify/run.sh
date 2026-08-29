@@ -104,9 +104,10 @@ fi
 echo "== third statistical reference (scipy, optional locally)"
 if python3 standalone/verify/stats-thirdref.py /tmp/gb2-stats-fuzz.json; then :; else
     st=$?
-    if [ "$st" = "2" ]; then
+    if [ "$st" = "2" ] && [ "${PS_REQUIRE_R_PARITY:-0}" != "1" ]; then
         echo "WARN: scipy unavailable - third reference skipped"
     else
+        echo "ERROR: the third statistical reference is required for a release" >&2
         exit "$st"
     fi
 fi

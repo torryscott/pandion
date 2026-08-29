@@ -99,11 +99,13 @@ ok(read('.gitignore').includes('/.release/'),
     'prepared bundles are excluded from source control');
 
 const standaloneRun = read('standalone/verify/run.sh');
-// Four since Jul 29 2026: the three optional R-parity checks, plus the
-// linkedom guard on hardening-dom-check - a missing helper library skips
-// that probe with a warning on a dev run but must FAIL a release run,
-// where a silent skip is the dangerous outcome.
-ok((standaloneRun.match(/PS_REQUIRE_R_PARITY/g) || []).length === 4,
+// Seven since Aug 29 2026: the three original optional R-parity checks,
+// the linkedom guard on hardening-dom-check, and the statistics
+// hardening tier's three (the parity fuzzer, the R canary, and the
+// scipy third reference) - a missing helper skips with a warning on a
+// dev run but must FAIL a release run, where a silent skip is the
+// dangerous outcome.
+ok((standaloneRun.match(/PS_REQUIRE_R_PARITY/g) || []).length === 7,
     'all optional standalone checks become mandatory for a release');
 ok(!read('standalone/verify/polish-check.mjs')
         .includes("about.version === '3.0.0'") &&
