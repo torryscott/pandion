@@ -2172,35 +2172,62 @@
         // number of arrangements giving U = u (partitions of u into <= m
         // parts each <= n). Total = C(m+n, m). Backs the exact small-n
         // p below.
-        _mwExactCounts: function (m, n) {
-            var max = m * n, dp = new Array(max + 1), z0;
-            for (z0 = 0; z0 <= max; z0++) dp[z0] = 0;
-            dp[0] = 1;
+        // Exact null distribution of U as PROBABILITIES via the standard
+        // recurrence P(u; i, j) = i/(i+j) P(u-j; i-1, j) + j/(i+j) P(u; i, j-1).
+        // The old integer generating-function DP overflowed double-integer
+        // precision near choose(m+n, m) > 2^53 (48 vs 24 already breaks it)
+        // and its subtraction pass cancelled catastrophically - the stats
+        // fuzzer's first catch (Aug 2026): p displayed .032 where R's exact
+        // p was 2.5e-19. Probabilities stay in [0, 1], every operation is
+        // an addition of nonnegatives, and n! never appears - the same
+        // lesson _kendallExactP already encoded.
+        _mwExactProbs: function (m, n) {
+            var max = m * n, j, u;
+            // rows over j = 0..n for the current i and the previous i.
+            var prev = new Array(n + 1), cur = new Array(n + 1);
+            for (j = 0; j <= n; j++) {
+                prev[j] = new Float64Array(max + 1);
+                prev[j][0] = 1; // P(u; 0, j) = [u == 0]
+                cur[j] = new Float64Array(max + 1);
+            }
             for (var i = 1; i <= m; i++) {
-                for (var a = i; a <= max; a++) dp[a] += dp[a - i];
+                cur[0].fill(0); cur[0][0] = 1; // P(u; i, 0) = [u == 0]
+                for (j = 1; j <= n; j++) {
+                    var w1 = i / (i + j), w2 = j / (i + j);
+                    var pj = prev[j], cj1 = cur[j - 1], cj = cur[j];
+                    for (u = 0; u <= i * j; u++) {
+                        cj[u] = (u >= j ? w1 * pj[u - j] : 0) + w2 * cj1[u];
+                    }
+                    for (u = i * j + 1; u <= max; u++) cj[u] = 0;
+                }
+                var tmp = prev; prev = cur; cur = tmp;
             }
-            for (var i2 = 1; i2 <= m; i2++) {
-                var sh = n + i2;
-                for (var b = max; b >= sh; b--) dp[b] -= dp[b - sh];
-            }
-            return dp;
+            return prev[n];
         },
         // Exact two-sided Mann-Whitney p (R's wilcox.test convention):
         // p = min(1, 2 * tail), tail chosen by which side U1 falls.
         mannWhitneyExactP: function (U1, m, n, tail) {
-            var cnt = this._mwExactCounts(m, n), total = 0, c;
-            for (c = 0; c < cnt.length; c++) total += cnt[c];
-            if (!(total > 0)) return NaN;
+            var prob = this._mwExactProbs(m, n);
+            // Each tail is summed DIRECTLY from its own end: computing the
+            // upper tail as 1 - lowerTail cancels catastrophically when the
+            // tail is smaller than double epsilon (the 48 vs 24 complete
+            // separation came back 1.8e-15 instead of R's 2.5e-19).
             var pLE = function (q) {
                 if (q < 0) return 0;
-                if (q >= cnt.length - 1) return 1;
-                var s = 0; for (var k = 0; k <= q; k++) s += cnt[k];
-                return s / total;
+                if (q >= prob.length - 1) return 1;
+                var s = 0; for (var k = 0; k <= q; k++) s += prob[k];
+                return Math.min(1, s);
+            };
+            var pGE = function (q) {
+                if (q <= 0) return 1;
+                if (q > prob.length - 1) return 0;
+                var s = 0; for (var k = prob.length - 1; k >= q; k--) s += prob[k];
+                return Math.min(1, s);
             };
             var u = m * n;
-            if (tail === "greater") return 1 - pLE(U1 - 1);
+            if (tail === "greater") return pGE(U1);
             if (tail === "less") return pLE(U1);
-            var p1 = (U1 > u / 2) ? (1 - pLE(U1 - 1)) : pLE(U1);
+            var p1 = (U1 > u / 2) ? pGE(U1) : pLE(U1);
             return Math.min(1, 2 * p1);
         },
         // Exact null distribution of the Wilcoxon signed-rank V (sum of
@@ -3507,6 +3534,30 @@
                     }
                 }
             } catch (_eStatsGuard) {}
+            // Corr matrix method guard: corrCells are computed by R (or
+            // the standalone data layer), so a stale / out-of-order echo
+            // can carry the PREVIOUS method's cells after the Sigma
+            // method select already switched - the stats fuzzer caught
+            // kendall displaying spearman's numbers (Aug 2026). Same
+            // idiom as the scatter stats guard: within a grace window
+            // after a method commit, recompute the cells client-side
+            // from corrRaw so no echo can revert them; self-heals once
+            // matching cells arrive and the window lapses.
+            try {
+                if (data && Array.isArray(data.corrCells) && data.corrCells.length > 0
+                    && data.corrRaw
+                    && typeof _corrComputeCellsClient === "function") {
+                    var _cgG = window.__gb2_corrMethGuard;
+                    var _cgNow = (typeof Date !== "undefined" && Date.now) ? Date.now() : 0;
+                    var _cgActive = !!(_cgG && _cgNow && (_cgNow - _cgG.t) < 4000);
+                    if (_cgG && _cgNow && (_cgNow - _cgG.t) >= 4000) { try { delete window.__gb2_corrMethGuard; } catch (_eCgP) {} _cgG = null; }
+                    if (_cgActive && _cgG.method) {
+                        data.corrMethod = _cgG.method;
+                        var _ccG = _corrComputeCellsClient(_cgG.method);
+                        if (_ccG) data.corrCells = _ccG;
+                    }
+                }
+            } catch (_eCorrGuard) {}
             // __gb2_textData: per-data-field overrides for in-progress
             // text edits. Pending/recentCommits are keyed by *option*
             // name (what flushes to R), but for some text fields the
@@ -27200,6 +27251,60 @@
             var p1 = (q > mid) ? (1 - cum(q - 1)) : cum(q);
             return Math.min(1, 2 * p1);
         }
+        // Spearman AS 89 machinery (R's cor.test spearman branch + prho.c),
+        // the same faithful port ps-stat carries: exact permutation
+        // distribution of S = sum d^2 for n <= 9, Edgeworth expansion for
+        // tie-free n <= 1290. The stats fuzzer (Aug 2026) caught the plain
+        // t-approximation drifting from R in the third decimal of p at
+        // moderate n, which is visible at label precision.
+        var _gb2SpearDistCache = {};
+        function _gb2SpearDist(n) {
+            if (_gb2SpearDistCache[n]) return _gb2SpearDistCache[n];
+            var counts = {}, used = new Array(n + 1);
+            function rec(pos, s) {
+                if (pos > n) { counts[s] = (counts[s] || 0) + 1; return; }
+                for (var v = 1; v <= n; v++) {
+                    if (used[v]) continue;
+                    used[v] = 1;
+                    var d = pos - v;
+                    rec(pos + 1, s + d * d);
+                    used[v] = 0;
+                }
+            }
+            rec(1, 0);
+            _gb2SpearDistCache[n] = counts;
+            return counts;
+        }
+        function _gb2PRho(is, n, lower) {
+            var pv = lower ? 0 : 1;
+            if (n <= 1) return NaN;
+            if (is <= 0) return pv;
+            var n3 = n * (n * n - 1) / 3;
+            if (is > n3) return 1 - pv;
+            if (n <= 9) {
+                var counts = _gb2SpearDist(n), nfac = 1, i;
+                for (i = 2; i <= n; i++) nfac *= i;
+                var ifr = 0, k;
+                for (k in counts) {
+                    if (!Object.prototype.hasOwnProperty.call(counts, k)) continue;
+                    if (Number(k) >= is) ifr += counts[k];
+                }
+                return (lower ? nfac - ifr : ifr) / nfac;
+            }
+            var c1 = 0.2274, c2 = 0.2531, c3 = 0.1745, c4 = 0.0758, c5 = 0.1033,
+                c6 = 0.3932, c7 = 0.0879, c8 = 0.0151, c9 = 0.0072, c10 = 0.0831,
+                c11 = 0.0131, c12 = 4.6e-4;
+            var y = n, b = 1 / y;
+            var x = (6 * (is - 1) * b / (y * y - 1) - 1) * Math.sqrt(y - 1);
+            var y2 = x * x;
+            var u = x * b * (c1 + b * (c2 + c3 * b) +
+                y2 * (-c4 + b * (c5 + c6 * b) -
+                      y2 * b * (c7 + c8 * b -
+                                y2 * (c9 - c10 * b + y2 * b * (c11 - c12 * y2)))));
+            var yv = u / Math.exp(y2 / 2);
+            pv = (lower ? -yv : yv) + (lower ? _pnorm(x) : _pnorm(-x));
+            return Math.max(0, Math.min(1, pv));
+        }
         function _xyCorrClient(xs, ys, method) {
             var n = xs.length; if (n < 3) return null;
             if (method === "kendall") {
@@ -27257,6 +27362,25 @@
             if (r == null || !isFinite(r)) return null;
             if (Math.abs(r) >= 1) return { r: r, p: 0 };
             var df = n - 2; if (df < 1) return { r: r, p: NaN };
+            if (method === "spearman") {
+                // Tie-free spearman takes R's AS 89 route (exact n <= 9,
+                // Edgeworth to n = 1290); ties keep the t approximation,
+                // exactly like cor.test.
+                var _spHasTies = function (a) {
+                    var seen = {}, q4;
+                    for (q4 = 0; q4 < a.length; q4++) {
+                        if (seen[a[q4]]) return true;
+                        seen[a[q4]] = 1;
+                    }
+                    return false;
+                };
+                if (n <= 1290 && !_spHasTies(xs) && !_spHasTies(ys)) {
+                    var qS = (n * n * n - n) * (1 - r) / 6;
+                    var lowerS = !(qS > (n * n * n - n) / 6);
+                    var p1S = _gb2PRho(Math.round(qS) + 2 * (lowerS ? 1 : 0), n, lowerS);
+                    return { r: r, p: Math.max(0, Math.min(1, Math.min(2 * p1S, 1))) };
+                }
+            }
             var t = r * Math.sqrt(df / (1 - r * r));
             var p = 2 * (1 - _gb2Stats._tCDF(Math.abs(t), df));
             return { r: r, p: Math.max(0, Math.min(1, p)) };
@@ -56003,6 +56127,7 @@
                             var nc2 = _corrComputeCellsClient(v);
                             if (nc2) data.corrCells = nc2;
                         } catch (_eC4) {}
+                        try { window.__gb2_corrMethGuard = { t: Date.now(), method: v }; } catch (_eG5) {}
                         data.corrMethod = v;
                         if (hasSetOption) { try { _setOption("corrMethod", v); } catch (_e) {} }
                         try { redraw(); } catch (_e2) {}

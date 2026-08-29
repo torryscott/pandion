@@ -1,0 +1,47 @@
+# Statistics parity in CI (hardening item 4): the R-reference fuzzer,
+# the formatting seam, the R canary, and the scipy third reference run
+# on every push that could move a statistic - so the parity net runs on
+# a machine, not on a session remembering to run it. The full jamovi
+# --extras tier stays local until the jmvcore-runner question from the
+# deferred backlog is settled; everything here needs only base R.
+name: stats-parity
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'inst/widget/graphbuilder2.js'
+      - 'standalone/js/**'
+      - 'standalone/verify/stats-*'
+      - 'R/**'
+  workflow_dispatch:
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: r-lib/actions/setup-r@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Probe dependencies (the /private/tmp resolution base the probes use)
+        run: |
+          sudo mkdir -p /private/tmp
+          sudo chown "$USER" /private/tmp
+          touch /private/tmp/x.js
+          cd /private/tmp && npm install playwright axe-core
+          npx --yes playwright@$(node -e "console.log(require('/private/tmp/node_modules/playwright/package.json').version)") install --with-deps chromium
+          pip install scipy
+      - name: R reference canary (pinned answers)
+        run: Rscript standalone/verify/stats-canary.R
+      - name: Formatting seam (pure unit)
+        run: node standalone/verify/stats-format-unit.mjs
+      - name: Stats parity fuzzer (seeded)
+        run: |
+          Rscript standalone/verify/stats-fuzz.R /tmp/gb2-stats-fuzz.json
+          node standalone/verify/stats-fuzz-check.mjs /tmp/gb2-stats-fuzz.json
+      - name: Third statistical reference (scipy vs R)
+        run: python3 standalone/verify/stats-thirdref.py /tmp/gb2-stats-fuzz.json

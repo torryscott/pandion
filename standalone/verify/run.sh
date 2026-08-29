@@ -78,6 +78,39 @@ for p in $FEATURE_PROBES; do
     node "standalone/verify/$p.mjs"
 done
 
+echo "== stats parity fuzzer (seeded R references vs the rendered widget)"
+# Base R only (no jmvcore). The seed rotates daily; GB2_FUZZ_SEED replays
+# a failure, GB2_FUZZ_N deepens a release run. Skipping is allowed only
+# off release runs, mirroring the m1-parity rule.
+if Rscript standalone/verify/stats-fuzz.R /tmp/gb2-stats-fuzz.json; then
+    node standalone/verify/stats-fuzz-check.mjs /tmp/gb2-stats-fuzz.json
+else
+    if [ "${PS_REQUIRE_R_PARITY:-0}" = "1" ]; then
+        echo "ERROR: stats-fuzz.R is required for a release" >&2
+        exit 1
+    fi
+    echo "WARN: Rscript unavailable - stats parity fuzzer skipped"
+fi
+echo "== stats formatting seam (pure unit)"
+node standalone/verify/stats-format-unit.mjs
+echo "== R reference canary (pinned known answers)"
+if Rscript standalone/verify/stats-canary.R; then :; else
+    st=$?
+    if [ "${PS_REQUIRE_R_PARITY:-0}" = "1" ] || [ "$st" != "127" ]; then
+        exit "$st"
+    fi
+    echo "WARN: Rscript unavailable - canary skipped"
+fi
+echo "== third statistical reference (scipy, optional locally)"
+if python3 standalone/verify/stats-thirdref.py /tmp/gb2-stats-fuzz.json; then :; else
+    st=$?
+    if [ "$st" = "2" ]; then
+        echo "WARN: scipy unavailable - third reference skipped"
+    else
+        exit "$st"
+    fi
+fi
+
 echo "== dist build + probes (single-file pandion-plots.html)"
 bash standalone/build-dist.sh
 echo "== artifact-parity-check (dist / hosted app / portable download)"
