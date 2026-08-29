@@ -185,6 +185,11 @@
     margin: 10px 0 0 !important; min-height: 1.2em;
     font-size: 14px; color: #2f6b2f; font-weight: 650;
   }
+  /* The status line is the "Link copied" announcement slot. Empty, it
+     must take no room, or the card shows a phantom gap under its
+     buttons; it stays in-flow (not display:none) so the live region
+     still announces when text lands. */
+  .way-status:empty { margin: 0 !important; min-height: 0; }
   @media (max-width: 560px) {
     .way { padding: 18px 16px 16px 52px; }
     .way::before { left: 14px; top: 18px; }
@@ -315,9 +320,9 @@
           <h3>Report a bug</h3>
           <p>
             Genuinely valuable, and often more useful than money. A clear
-            report is the difference between a problem I can fix in an
-            evening and one I never see. Say what you did, what happened,
-            and where you were running Pandion.
+            report is the difference between a problem that gets fixed in
+            an evening and one that never surfaces. Say what you did, what
+            happened, and where you were running Pandion.
           </p>
           <p class="way-do">
             <a class="way-link" href="https://github.com/torryscott/pandion/issues/new">Report a bug</a>
