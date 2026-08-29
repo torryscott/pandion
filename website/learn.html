@@ -158,6 +158,15 @@
     display: block; color: var(--navy); font-size: 17px; margin: 0 0 3px;
   }
   .guides span { color: var(--muted); font-size: 14.5px; }
+  .learn-jumps {
+    display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0 4px;
+  }
+  .learn-jumps a {
+    border: 1px solid var(--line); border-radius: 20px; padding: 6px 15px;
+    text-decoration: none; color: var(--navy); font-size: 14px;
+    font-weight: 600; transition: border-color 0.15s, color 0.15s;
+  }
+  .learn-jumps a:hover { border-color: var(--cobalt); color: var(--cobalt); }
 </style>
 <link rel="stylesheet" href="assets/site-nav.css">
 <script src="assets/site-nav.js" defer></script>
@@ -180,7 +189,6 @@
     <nav class="nav-links" id="site-nav" aria-label="Site">
       <a href="gallery.html">Gallery</a>
       <a href="learn.html" aria-current="page">Learn</a>
-      <a href="docs/">Docs</a>
       <a href="index.html#downloads">Downloads</a>
       <a href="about.html">About</a>
       <a href="support.html">Support</a>
@@ -202,6 +210,13 @@
         points.
       </p>
     </div>
+
+    <nav class="learn-jumps" aria-label="Sections on this page">
+      <a href="#start-here">Start here</a>
+      <a href="#workshop">Workshops</a>
+      <a href="#deeper">Go deeper</a>
+      <a href="#guide">User guide</a>
+    </nav>
 
     <section class="tut" id="start-here">
       <h2>Start here</h2>
@@ -278,12 +293,32 @@
       </ul>
     </section>
 
+    <section class="tut" id="guide">
+      <h2>The user guide</h2>
+      <p class="sec-lede">
+        The reference: every chart type, panel, control, and statistic,
+        explained in one place. Reach for it when you want to look
+        something up rather than follow a path.
+      </p>
+      <ul class="guides">
+        <li><a href="docs/">
+          <strong>Pandion Plots user guide</strong>
+          <span>The complete manual: the seven analyses, click-to-edit
+          styling, the statistics panel, exporting, and
+          troubleshooting.</span>
+        </a></li>
+        <li><a href="docs/#glossary">
+          <strong>Statistics glossary</strong>
+          <span>131 plain-language definitions, each with how to read it
+          and the common misread.</span>
+        </a></li>
+      </ul>
+    </section>
     <div class="closer">
       <p>
-        Prefer reference over narrative? The
-        <a href="docs/">user guide</a> documents every chart type and
-        control, and the <a href="gallery.html">gallery</a> shows the
-        defaults across all seven analyses.
+        Want to see the output before the lessons? The
+        <a href="gallery.html">gallery</a> shows the default look across
+        all seven analyses.
       </p>
     </div>
 
@@ -305,7 +340,7 @@
       <a href="app/">Try it</a>
       <a href="gallery.html">Gallery</a>
       <a href="learn.html">Learn</a>
-      <a href="docs/">Docs</a>
+      <a href="docs/">User guide</a>
       <a href="about.html#cite">How to cite</a>
       <a href="about.html">About</a>
       <a href="support.html">Support</a>

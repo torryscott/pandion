@@ -158,7 +158,7 @@ HEAD = M0 + """
 .site-header .nav-links{margin-left:auto;display:flex;gap:4px}
 .site-header .nav-links a{color:#22364d;text-decoration:none;font-size:14.5px;font-weight:600;padding:7px 12px;border-radius:7px}
 .site-header .nav-links a:hover{background:#f4f7fb;color:#192E49}
-.site-header .nav-links a[aria-current="page"]{color:#375CA0}
+.site-header .nav-links a[aria-current]{color:#375CA0}
 .site-header .nav-links a.nav-cta{color:#fff;background:#192E49;margin-left:6px}
 .site-header .nav-links a.nav-cta:hover{background:#24405f}
 .site-header .nav-toggle{display:none;align-items:center;justify-content:center;gap:8px;min-width:44px;min-height:44px;margin-left:auto;padding:8px 10px;border:1px solid #c3d0df;border-radius:8px;color:#192E49;background:#fff;font:inherit;font-size:14px;font-weight:700;cursor:pointer}
@@ -247,7 +247,7 @@ HEADER = M0 + """
     </button>
     <nav class="nav-links" id="site-nav" aria-label="Site">
       <a href="../gallery.html">Gallery</a>
-      <a href="./" aria-current="page">Docs</a>
+      <a href="../learn.html" aria-current="true">Learn</a>
       <a href="../index.html#downloads">Downloads</a>
       <a href="../about.html">About</a>
       <a href="../support.html">Support</a>
