@@ -12,6 +12,7 @@ on:
       - 'inst/widget/graphbuilder2.js'
       - 'standalone/js/**'
       - 'standalone/verify/stats-*'
+      - 'standalone/verify/formula-*'
       - 'R/**'
   workflow_dispatch:
 jobs:
@@ -54,5 +55,9 @@ jobs:
           Rscript standalone/verify/stats-fuzz.R /tmp/gb2-stats-fuzz.json
           node standalone/verify/stats-fuzz-check.mjs /tmp/gb2-stats-fuzz.json
           node standalone/verify/stats-unit-parity.mjs /tmp/gb2-stats-fuzz.json
+      - name: Formula parity (computed variables vs R)
+        run: |
+          Rscript standalone/verify/formula-fuzz.R /tmp/gb2-formula-fuzz.json
+          node standalone/verify/formula-fuzz-check.mjs /tmp/gb2-formula-fuzz.json
       - name: Third statistical reference (scipy vs R)
         run: python3 standalone/verify/stats-thirdref.py /tmp/gb2-stats-fuzz.json

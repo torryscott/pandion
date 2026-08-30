@@ -99,6 +99,10 @@ if Rscript standalone/verify/stats-fuzz.R /tmp/gb2-stats-fuzz.json; then
     # Shape statistics (box quartiles/whiskers, KDE, kde2d) against the
     # same R references, extracted straight from the engine source.
     node standalone/verify/stats-unit-parity.mjs /tmp/gb2-stats-fuzz.json
+    # Computed-variable formula parity: every function in the formula
+    # language against base R (ROUND matches R by ruling, Aug 2026).
+    Rscript standalone/verify/formula-fuzz.R /tmp/gb2-formula-fuzz.json
+    node standalone/verify/formula-fuzz-check.mjs /tmp/gb2-formula-fuzz.json
 else
     if [ "${PS_REQUIRE_R_PARITY:-0}" = "1" ]; then
         echo "ERROR: stats-fuzz.R is required for a release" >&2
