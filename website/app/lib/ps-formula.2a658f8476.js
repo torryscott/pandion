@@ -385,6 +385,26 @@ window.PSFormula = (function () {
   function toNum(v) {
     return (typeof v === "number" && isFinite(v)) ? v : null;
   }
+  // R-consistent rounding (Torry's ruling, Aug 2026: same formula, same
+  // number in Pandion and jamovi). R >= 4.0 rounds to whichever of the
+  // two representable candidates at the requested digit is CLOSER, with
+  // an exact tie going to the even scaled value - which is also why
+  // round(2.675, 2) is 2.67 there: 2.675 is stored a hair below the
+  // true half. The old Math.round was half-up, and on negatives rounds
+  // half toward +infinity, which matched neither R nor Excel
+  // (Math.round(-1.5) = -1; both of them say -2).
+  function rRound(x, d) {
+    var p = Math.pow(10, d);
+    if (!isFinite(p) || p === 0) return x;
+    var f = Math.floor(x * p);
+    var lo = f / p, hi = (f + 1) / p;
+    if (!isFinite(lo) || !isFinite(hi)) return x;
+    if (lo === hi || x === lo) return lo;
+    var dl = x - lo, dh = hi - x;
+    if (dl < dh) return lo;
+    if (dh < dl) return hi;
+    return (f % 2 === 0) ? lo : hi;   // exact tie: even scaled candidate
+  }
   // Text form of a value, for the string functions. A number uses the
   // same 10-significant-digit rounding the shell writes into a cell, so
   // LEN and UPPER read the number the grid is showing rather than a
@@ -522,8 +542,8 @@ window.PSFormula = (function () {
     if (fn === "ROUND") {
       var d = ast.args[1] ? toNum(evalNode(ast.args[1], row, env)) : 0;
       if (d == null) return null;
-      var p = Math.pow(10, Math.round(d));
-      return Math.round(a * p) / p;
+      var rr = rRound(a, Math.round(d));
+      return isFinite(rr) ? rr : null;
     }
     return null;
   }

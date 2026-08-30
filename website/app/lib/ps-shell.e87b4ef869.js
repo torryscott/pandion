@@ -21109,21 +21109,89 @@
   }
   function layMiniBar(item) {
     var bar = mkEl("div", "ps-lbar");
-    bar.style.left = item.kind === "text" ? "0" : "50%";
-    bar.style.transform = item.kind === "text" ? "" : "translateX(-50%)";
     // TEXT items park the bar BELOW the box (Torry's screenshot, Aug 6
     // 2026): the rotate grip owns the top-centre, and on a narrow box
     // the bar's first button sat exactly under the knob. Below, the two
     // can never meet at any width or rotation; sized items keep the bar
     // above (they have no grip, and the resize handle owns the bottom).
-    // A sized item's bar is CENTRED on its top edge. The top-LEFT is where
-    // the figure's own panel letter sits and the bar covered it exactly
-    // (measured, a 19x24 label under a 33x24 bar at the same x), so selecting
-    // panel A hid the A. The letter is content and ships in the export, the
-    // bar is chrome, so the chrome moves. Centre rather than below, because
-    // below is the NEXT row's letter in a labelled grid, and rather than
-    // right, which is the Live badge. Text items keep the bar below them:
-    // their rotate grip owns the top centre.
+    // A sized item's bar sits at the item's top-LEFT (Torry, Aug 27 -
+    // supersedes the Aug 6 centre placement). The reason centre was
+    // chosen then still holds as a CONSTRAINT: the figure's panel
+    // letter - a text item parked at that corner - must never hide
+    // under chrome (the letter is content and ships in the export).
+    // So the bar starts at the corner and, when any text item's box
+    // overlaps where it would land, slides right just past it; if the
+    // slide would run off the item, it falls back to the corner (the
+    // letter case at extreme widths is rarer than the daily X reach).
+    if (item.kind !== "text") {
+      // Deferred one tick: by then every item node (the letters
+      // included) is in the DOM, and SCREEN rects are the truth the
+      // layout-figure guard measures - text items auto-size, so their
+      // stored w/h cannot be trusted for this. Slide right past any
+      // overlapping text box; if the slide runs off the panel, fall
+      // back to the historical centre (never cover the letter).
+      setTimeout(function () {
+        try {
+          if (!bar.isConnected) return;
+          var GAP = 6, slid = false;
+          for (var pass = 0; pass < 3; pass++) {
+            var b = bar.getBoundingClientRect();
+            var moved = false;
+            var texts = document.querySelectorAll(
+              '#ps-lcanvas .ps-litem[data-kind="text"]');
+            for (var ti = 0; ti < texts.length; ti++) {
+              var r = texts[ti].getBoundingClientRect();
+              if (!(r.width > 0)) continue;
+              if (!(b.right < r.left || b.left > r.right ||
+                    b.bottom < r.top || b.top > r.bottom)) {
+                // Screen delta -> layout px: the canvas renders under a
+                // zoom scale, so style.left (layout units) must divide
+                // the measured overlap by the bar's own rendered scale.
+                var scl = bar.offsetWidth > 0 ? (b.width / bar.offsetWidth) : 1;
+                if (!(scl > 0)) scl = 1;
+                var cur = parseFloat(bar.style.left) || 0;
+                bar.style.left = (cur + (r.right - b.left) / scl + GAP) + "px";
+                moved = true; slid = true;
+                b = bar.getBoundingClientRect();
+              }
+            }
+            if (!moved) break;
+          }
+          if (slid) {
+            var host = bar.parentNode;
+            if (host) {
+              var hb = host.getBoundingClientRect();
+              var bb = bar.getBoundingClientRect();
+              if (bb.right > hb.right + 1) {
+                // Slid off the panel (tiny panels - the Aug 6 measured
+                // case). Try BELOW-left: the resize handle owns the
+                // bottom-right and nothing else claims that corner.
+                // If a text box overlaps even there, the historical
+                // centre is the last resort.
+                bar.style.left = "0px";
+                bar.style.top = "calc(100% + 6px)";
+                var bb2 = bar.getBoundingClientRect();
+                var texts2 = document.querySelectorAll(
+                  '#ps-lcanvas .ps-litem[data-kind="text"]');
+                for (var tj = 0; tj < texts2.length; tj++) {
+                  var r2 = texts2[tj].getBoundingClientRect();
+                  if (!(r2.width > 0)) continue;
+                  if (!(bb2.right < r2.left || bb2.left > r2.right ||
+                        bb2.bottom < r2.top || bb2.top > r2.bottom)) {
+                    bar.style.top = "-34px";
+                    bar.style.left = "50%";
+                    bar.style.transform = "translateX(-50%)";
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        } catch (_eLb2) {}
+      }, 0);
+    }
+    bar.style.left = "0";
+    bar.style.transform = "";
     bar.style.top = item.kind === "text" ? "calc(100% + 6px)" : "-34px";
     bar.setAttribute("aria-hidden", "true");
     if (item.kind === "text") {
