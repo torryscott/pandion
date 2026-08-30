@@ -485,11 +485,24 @@ for (const [name, cs] of Object.entries(refs.corrs)) {
       const nP = pts.length - 1;
       for (let i = 0; i < nP; i++) { cx += pts[i].x; cy += pts[i].y; }
       cx /= nP; cy /= nP;
-      let rmax = 0, rmin = 1 / 0, area = 0;
-      for (let i = 0; i < pts.length; i++) {
+      // Axis lengths via the SECOND-MOMENT matrix of the uniform-t
+      // samples: over one full period the mean outer product is exactly
+      // (aa' + bb')/2, so its eigenvalues are a^2/2 and b^2/2 with NO
+      // sampling error. (Min/max over sampled distances was tried first
+      // and overshoots the semi-minor axis on a highly eccentric
+      // ellipse - the daily seed rotation found that estimator bias on
+      // 20260830; the engine's points were exact all along.)
+      let sxx = 0, sxy = 0, syy = 0, area = 0;
+      for (let i = 0; i < nP; i++) {
         const dx = pts[i].x - cx, dy = pts[i].y - cy;
-        const r = Math.hypot(dx, dy);
-        if (r > rmax) rmax = r; if (r < rmin) rmin = r;
+        sxx += dx * dx; sxy += dx * dy; syy += dy * dy;
+      }
+      sxx /= nP; sxy /= nP; syy /= nP;
+      const tr = sxx + syy, det = sxx * syy - sxy * sxy;
+      const disc = Math.sqrt(Math.max(0, tr * tr / 4 - det));
+      const rmax = Math.sqrt(2 * (tr / 2 + disc));
+      const rmin = Math.sqrt(2 * Math.max(0, tr / 2 - disc));
+      for (let i = 0; i < pts.length; i++) {
         const q = pts[(i + 1) % pts.length];
         area += (pts[i].x * q.y - q.x * pts[i].y) / 2;
       }
@@ -498,10 +511,11 @@ for (const [name, cs] of Object.entries(refs.corrs)) {
     ok(!!got, name + ': ellipse ships in the payload');
     if (got) {
       const rel = (a, b) => Math.abs(a - b) <= 2e-3 * Math.max(1e-9, Math.abs(b));
+      const relTight = (a, b) => Math.abs(a - b) <= 1e-6 * Math.max(1e-9, Math.abs(b));
       ok(Math.abs(got.cx - cs.ell.cx) < 1e-6 && Math.abs(got.cy - cs.ell.cy) < 1e-6,
         name + ' ellipse center: (' + got.cx + ',' + got.cy + ') vs R (' + cs.ell.cx + ',' + cs.ell.cy + ')');
-      ok(rel(got.rmax, cs.ell.rmax), name + ' ellipse major axis: ' + got.rmax + ' vs R ' + cs.ell.rmax);
-      ok(rel(got.rmin, cs.ell.rmin), name + ' ellipse minor axis: ' + got.rmin + ' vs R ' + cs.ell.rmin);
+      ok(relTight(got.rmax, cs.ell.rmax), name + ' ellipse major axis: ' + got.rmax + ' vs R ' + cs.ell.rmax);
+      ok(relTight(got.rmin, cs.ell.rmin), name + ' ellipse minor axis: ' + got.rmin + ' vs R ' + cs.ell.rmin);
       ok(rel(got.area, cs.ell.area), name + ' ellipse area: ' + got.area + ' vs R ' + cs.ell.area);
     }
   }
