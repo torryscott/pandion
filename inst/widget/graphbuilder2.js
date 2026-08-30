@@ -105781,6 +105781,11 @@
         return '<span aria-hidden="true" data-role="chip-div" style="width:1px;height:28px;' +
                'background:#d7d7d7;align-self:center;flex-shrink:0;margin:0 2px;"></span>';
     }
+    // Probe surface (the gb2_undo precedent): stash-guard-check drives
+    // the fold directly with a poked payload - the fold's stash
+    // write/restore semantics are what it verifies, not UI routing.
+    try { window.__gb2_statFold = function (d, k, o) { return _gb2StatFold(d, k, o); }; }
+    catch (_eXsf) {}
     function _gb2StatFold(data, diffs, oldErrType) {
         try {
             if (!data || data.freqMode === true) return;
@@ -105815,7 +105820,7 @@
                     // error bars): before a hop ZEROES a positive RM
                     // half-width (to median, or to type "none"), remember
                     // it + its type basis in a window-side store keyed by
-                    // cell and fingerprinted by n + first raw value. The
+                    // cell and fingerprinted by the FULL value list. The
                     // way BACK has no client basis (the Cousineau-Morey
                     // recompute needs the subject matrix), and an A->B->A
                     // flip inside one debounce window commits a NO-OP
@@ -105832,7 +105837,13 @@
                         try { stStore = (window.__gb2_rmSeStash = window.__gb2_rmSeStash || {}); }
                         catch (_eSt) { stStore = null; }
                     }
-                    var stF = (vals && vals.length) ? vals[0] : null;
+                    // Full-content fingerprint (the MEMO-LAW tightening,
+                    // Aug 2026): n + FIRST value let a stale stash survive
+                    // any edit preserving both. Joining every raw value
+                    // makes staleness impossible by construction; a cell's
+                    // values are one subject list, so the string is cheap.
+                    var stF = (vals && vals.length)
+                        ? vals.length + "\u001F" + vals.join("\u001F") : null;
                     if (et === "none" || n < 2 || sf === "median") {
                         // Median charts ship zero half-widths (SE/SD/CI
                         // describe the mean) - mirrors cell_stat.
@@ -106108,7 +106119,16 @@
                 var _fqStash = window.__gb2_freqBarStash;
                 // the pooled counts must still match the stash - any data
                 // or category edit while in the pooled view invalidates it
-                // and the hop waits for R instead
+                // and the hop waits for R instead. KNOWN BOUND (Aug 2026
+                // review): pooled totals are ALL a pooled payload carries,
+                // so a distribution-only edit (same totals, different
+                // group/facet split) is client-invisible here - it is
+                // healed by the graphType commit's own re-run in every
+                // reachable delivery order. Cross-DOCUMENT reuse (the
+                // standalone shares one window across chart documents;
+                // jamovi is one iframe per analysis) is closed at the
+                // shell: ps-shell clears this stash and __gb2_rmSeStash
+                // whenever a table is built or the chart document changes.
                 if (!_fqStash || _fqStash.sig !== _fqSig) return false;
                 try {
                     data.bars = JSON.parse(JSON.stringify(_fqStash.bars));
