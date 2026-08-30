@@ -1450,9 +1450,23 @@
         dups.map(function (r) { return r.from + " \u2192 " + r.to; }).join(", ") + ")");
     return parts.join("; ");
   }
+  // The engine keeps two window-side optimistic-restore stashes (RM
+  // error-bar halves, the frequency bar payload for pooled-type hops).
+  // They are keyed by cell/category names, NOT by document, and this
+  // shell runs every chart document in ONE window - so any event that
+  // changes which data those names describe must drop them, or a stash
+  // written by one document could restore into another whose names and
+  // counts coincide (two yes/no variables with equal counts is enough).
+  // jamovi is immune (one iframe per analysis); this is the standalone's
+  // half of the Aug 2026 stash-staleness review.
+  function clearEngineStashes() {
+    try { delete window.__gb2_rmSeStash; } catch (e) {}
+    try { delete window.__gb2_freqBarStash; } catch (e) {}
+  }
   function buildTable(name, header, rows, types, declaredLevels, excluded,
                       missingTokens, caseIds, excludedRows,
                       levelOrderDefaults) {
+    clearEngineStashes();
     var raw = {}, i, j;
     var resolved = resolveHeader(header);
     var order = resolved.names;
@@ -17275,6 +17289,7 @@
   function switchChart(id) {
     var next = chartById(id);
     if (!next) return;
+    clearEngineStashes();
     PROJECT.ui.workspace = isLayoutTab(next) ? "layout" : "chart";
     PROJECT.ui.dataOpen = false;
     rememberDocument(next);
@@ -18651,6 +18666,7 @@
   }
   function hideLayoutGallery() { closeShellDialog("ps-layout-gallery"); }
   function closeChart(id, opts) {
+    clearEngineStashes();
     // The last document CAN be closed (Torry, Aug 2026: "no way to
     // delete the chart if there's only one remaining"): the workspace
     // falls back to the existing No-charts-yet card, whose Create
@@ -30132,6 +30148,7 @@
     },
     parseCSV: parseCSV,
     parseTableText: parseTableText,
+    tableToCsv: tableToCsv,
     libraries: function () { return PS_LIBS; },
     saveComputedColumn: saveComputedColumn,
     openFormulaDialog: openFormulaDialog,
