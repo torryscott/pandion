@@ -103,6 +103,14 @@ bash website/build.sh
 echo "== verify generated artifact parity"
 node standalone/verify/artifact-parity-check.mjs
 
+echo "== freeze this release's persistence-corpus entry"
+# Append-only: the frozen files are the real old bytes the corpus
+# compatibility gate opens forever; the freeze refuses to overwrite an
+# existing entry, so re-preparing the same version the same day is a
+# no-op rather than a regeneration.
+node standalone/verify/corpus-freeze.mjs core || true
+node standalone/verify/corpus-compat-check.mjs
+
 # Generated public files are committed deliberately. A release prepared from a
 # tree that silently changed during its own build is not reproducible from HEAD.
 if ! git diff --quiet || ! git diff --cached --quiet; then

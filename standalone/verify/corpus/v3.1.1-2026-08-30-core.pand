@@ -1,0 +1,272 @@
+{
+ "kind": "pandion-plots-project",
+ "formatVersion": 2,
+ "savedAt": "2026-08-30T18:14:52.799Z",
+ "app": "pandion-plots-standalone",
+ "appVersion": "3.1.1",
+ "libraries": {
+  "palettes": {},
+  "styles": {}
+ },
+ "project": {
+  "version": 4,
+  "savedAt": "2026-08-30T18:14:52.799Z",
+  "id": "pmtg4pvfhhi9bmb",
+  "name": "Dose response study",
+  "charts": [
+   {
+    "id": "c1",
+    "name": "Chart 1",
+    "module": "plotbuilder",
+    "roles": {
+     "plotbuilder": {
+      "xvar": "group",
+      "yvar": "a"
+     },
+     "distplotbuilder": {
+      "var": null
+     },
+     "xyplotbuilder": {
+      "xvar": null,
+      "yvar": null
+     },
+     "freqplotbuilder": {
+      "var": null
+     },
+     "corrplotbuilder": {
+      "vars": []
+     }
+    },
+    "options": {
+     "plotbuilder": {
+      "barCornerRadius": 30,
+      "chartTitle": "Frozen bar"
+     }
+    },
+    "styleStamp": false
+   },
+   {
+    "id": "c2",
+    "name": "Chart 2",
+    "module": "xyplotbuilder",
+    "roles": {
+     "plotbuilder": {},
+     "xyplotbuilder": {
+      "xvar": "a",
+      "yvar": "b"
+     }
+    },
+    "options": {
+     "xyplotbuilder": {
+      "xyShowEllipse": true
+     }
+    },
+    "styleStamp": false
+   },
+   {
+    "id": "c3",
+    "name": "Chart 3",
+    "module": "likertplotbuilder",
+    "roles": {
+     "plotbuilder": {},
+     "likertplotbuilder": {
+      "items": [
+       "q1",
+       "q2",
+       "q3"
+      ]
+     }
+    },
+    "options": {
+     "likertplotbuilder": {}
+    },
+    "styleStamp": false
+   }
+  ],
+  "pinboards": [
+   {
+    "id": "b1",
+    "name": "Section 1",
+    "pins": []
+   }
+  ],
+  "activeChart": "c3",
+  "ui": {
+   "dataOpen": false,
+   "workspace": "chart",
+   "lastChart": "c3",
+   "lastLayout": null,
+   "columnWidths": {},
+   "paneWidths": {},
+   "collapsedBoards": {}
+  },
+  "table": {
+   "name": "corpus",
+   "order": [
+    "group",
+    "a",
+    "b",
+    "q1",
+    "q2",
+    "q3",
+    "zsc",
+    "rnd",
+    "m"
+   ],
+   "raw": {
+    "group": [
+     "ctrl",
+     "ctrl",
+     "ctrl",
+     "ctrl",
+     "treat",
+     "treat",
+     "treat",
+     "treat",
+     "treat",
+     "treat"
+    ],
+    "a": [
+     "2.5",
+     "-1.5",
+     "4.25",
+     "0.35",
+     "2.675",
+     "6.5",
+     "3.125",
+     "5.75",
+     "1.5",
+     "7.25"
+    ],
+    "b": [
+     "3",
+     "0",
+     "-7",
+     "12",
+     "5",
+     "8",
+     "-2",
+     "9",
+     "4",
+     "6"
+    ],
+    "q1": [
+     "1",
+     "2",
+     "3",
+     "4",
+     "5",
+     "1",
+     "2",
+     "3",
+     "4",
+     "5"
+    ],
+    "q2": [
+     "2",
+     "3",
+     "1",
+     "5",
+     "4",
+     "2",
+     "3",
+     "4",
+     "5",
+     "1"
+    ],
+    "q3": [
+     "3",
+     "2",
+     "4",
+     "5",
+     "1",
+     "2",
+     "3",
+     "4",
+     "5",
+     "1"
+    ],
+    "zsc": [
+     "-0.2159272982",
+     "-1.591747251",
+     "",
+     "-0.9554305228",
+     "-0.1557351752",
+     "1.159892655",
+     "-0.0009554305228",
+     "0.9019264136",
+     "-0.5598822864",
+     "1.417858896"
+    ],
+    "rnd": [
+     "2.5",
+     "-1.5",
+     "",
+     "0.3",
+     "2.7",
+     "6.5",
+     "3.1",
+     "5.8",
+     "1.5",
+     "7.2"
+    ],
+    "m": [
+     "2.75",
+     "-0.75",
+     "-7",
+     "6.175",
+     "3.8375",
+     "7.25",
+     "0.5625",
+     "7.375",
+     "2.75",
+     "6.625"
+    ]
+   },
+   "types": {
+    "group": "nominal",
+    "a": "continuous",
+    "b": "continuous",
+    "q1": "nominal",
+    "q2": "nominal",
+    "q3": "nominal",
+    "zsc": "continuous",
+    "rnd": "continuous",
+    "m": "continuous"
+   },
+   "declaredLevels": null,
+   "edited": true,
+   "levelOrderDefaults": {},
+   "excluded": {
+    "a": {
+     "2": 1
+    }
+   },
+   "caseIds": [
+    "case-mtg4pwcv-p",
+    "case-mtg4pwcv-q",
+    "case-mtg4pwcv-r",
+    "case-mtg4pwcv-s",
+    "case-mtg4pwcv-t",
+    "case-mtg4pwcv-u",
+    "case-mtg4pwcv-v",
+    "case-mtg4pwcv-w",
+    "case-mtg4pwcv-x",
+    "case-mtg4pwcv-y"
+   ],
+   "excludedRows": {},
+   "filters": [],
+   "computed": {
+    "zsc": "(a - VMEAN(a)) / VSD(a)",
+    "rnd": "ROUND(a, 1)",
+    "m": "MEAN(a, b, ignore_missing = 1)"
+   },
+   "importedFormulas": {},
+   "importedFilters": [],
+   "missingTokens": [
+    "NA"
+   ],
+   "missingTokensByCol": {}
+  }
+ }
+}

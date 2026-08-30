@@ -108,6 +108,15 @@ ok(standaloneSvg.role === 'img' &&
    standaloneSvg.description === custom,
    'standalone SVG embeds the edited companion description',
    JSON.stringify(standaloneSvg));
+const versionStamp = await page.evaluate(async () => {
+    const source = await window.PS_SHELL.exportSource('white');
+    const m = String(source.svg).match(/<!--\s*Pandion Plots ([0-9.]+)\s*-->/);
+    return m ? m[1] : null;
+});
+ok(/^\d+\.\d+\.\d+$/.test(versionStamp || ''),
+   'exported SVG carries the producing app version as a comment ' +
+   '(the numerical-changes ledger traceability stamp)',
+   String(versionStamp));
 
 const pdf = await page.evaluate(async () => {
     const blob = await window.PS_SHELL.exportBlob('pdf', 96, 'white');

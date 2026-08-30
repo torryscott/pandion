@@ -520,6 +520,46 @@
     return pxToUnit(page.w) + " \u00d7 " + pxToUnit(page.h) + " " + unitLabel();
   }
   var APP_VERSION = "3.1.1";
+  // The numerical-changes ledger (NUMERICAL-CHANGES.md is the full
+  // record). Each entry names a release that changed a DISPLAYED
+  // number; opening a project saved before an entry that is live in
+  // this build shows a one-time notice. The check is a pure function
+  // of (file version, app version) so the gate can probe it directly.
+  var NUMERICAL_CHANGES = [
+    { since: "3.2.0",
+      label: "ROUND now matches R at exact halves (2.5 rounds to 2, " +
+             "ties go to the even neighbor)" },
+    { since: "3.2.0",
+      label: "Mann-Whitney exact p values are correct at larger samples" },
+    { since: "3.2.0",
+      label: "Spearman p values use R's exact algorithm" }
+  ];
+  function _verParts(v) {
+    return String(v || "").split(".").map(function (x) {
+      var n = parseInt(x, 10); return isFinite(n) ? n : 0;
+    });
+  }
+  function _cmpVer(a, b) {
+    var A = _verParts(a), B = _verParts(b);
+    for (var i = 0; i < 3; i++) {
+      if ((A[i] || 0) !== (B[i] || 0)) return (A[i] || 0) < (B[i] || 0) ? -1 : 1;
+    }
+    return 0;
+  }
+  function _numericalNoticeFor(fileVer, appVer) {
+    var hits = [];
+    for (var i = 0; i < NUMERICAL_CHANGES.length; i++) {
+      var c = NUMERICAL_CHANGES[i];
+      if (_cmpVer(c.since, appVer) > 0) continue;       // not in this build yet
+      if (fileVer && _cmpVer(fileVer, c.since) >= 0) continue; // file already knew
+      hits.push(c.label);
+    }
+    if (!hits.length) return null;
+    return "This project was saved by an older Pandion Plots and has " +
+      "been recomputed under version " + appVer + ". What changed: " +
+      hits.join("; ") + ". The full record is the numerical-changes " +
+      "ledger published with each release.";
+  }
   var AUTOSAVE_HEALTH = "ok";
   var AUTOSAVE_DETAIL = "Local recovery is current";
   var AUTOSAVE_FAILS = 0;          // B14: evidence survives a lucky write
@@ -3962,6 +4002,7 @@
       formatVersion: 2,
       savedAt: new Date().toISOString(),
       app: "pandion-plots-standalone",
+      appVersion: APP_VERSION,
       // Machine-library snapshot so saved styles/palettes travel with
       // the project; on open, names missing from the recipient's
       // library import (existing names are never clobbered).
@@ -4280,6 +4321,8 @@
       "Statistical figure created with Pandion Plots.");
     root.insertBefore(desc, root.firstChild);
     root.insertBefore(title, root.firstChild);
+    root.insertBefore(doc.createComment(" Pandion Plots " + APP_VERSION + " "),
+      root.firstChild);
     root.setAttribute("role", "img");
     root.setAttribute("aria-labelledby",
       "pandion-export-title pandion-export-description");
@@ -5435,7 +5478,7 @@
         pdf.setProperties({
           title: pdfTitle,
           subject: pdfDescription.substring(0, 2000),
-          creator: "Pandion Plots"
+          creator: "Pandion Plots " + APP_VERSION
         });
       } catch (e) {
         reject(new Error("The vector PDF document could not be created."));
@@ -5579,6 +5622,7 @@
     var composed =
       '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + totalH +
       '" viewBox="0 0 ' + w + " " + totalH + '">' +
+      "<!-- Pandion Plots " + APP_VERSION + " -->" +
       '<rect x="0" y="0" width="' + w + '" height="' + totalH + '" fill="#ffffff"/>' +
       xml.serializeToString(chartClone) +
       '<g transform="translate(' + pad + "," + (h + pad) + ')" font-family="' +
@@ -6631,7 +6675,8 @@
     if (o.formatVersion > 2)
       return { error: "This project was saved by a newer version - " +
                       "update this page to open it." };
-    return { snapshot: o.project, libraries: o.libraries };
+    return { snapshot: o.project, libraries: o.libraries,
+             fileAppVersion: typeof o.appVersion === "string" ? o.appVersion : null };
   }
   function adoptProject(parsed, fileName) {
     PROJECT_CHOSEN = true;
@@ -6643,6 +6688,8 @@
         "Could not read that project file (unrecognized contents).");
       return;
     }
+    var numNote = _numericalNoticeFor(parsed.fileAppVersion, APP_VERSION);
+    if (numNote) showToast(numNote);
     PROJECT_REV = 0;
     FILE_SAVED_REV = fileName ? 0 : null;
     FILE_LABEL = fileName || null;
@@ -8241,7 +8288,7 @@
             compress: true, putOnlyUsedFonts: true });
           pdf.setProperties({
             title: (PROJECT.name || "Pandion Plots") + " - Notebook",
-            creator: "Pandion Plots" });
+            creator: "Pandion Plots " + APP_VERSION });
         } else {
           pdf.addPage([d.w, d.h], d.w >= d.h ? "landscape" : "portrait");
         }
@@ -30228,6 +30275,14 @@
     parseCSV: parseCSV,
     parseTableText: parseTableText,
     tableToCsv: tableToCsv,
+    projectText: projectFileText,
+    openProjectText: function (text) {
+      var parsed = parseProjectFile(text);
+      if (!parsed || parsed.error) return parsed || { error: "unreadable" };
+      adoptProject(parsed, "corpus.pand");
+      return { ok: true };
+    },
+    numericalNoticeFor: _numericalNoticeFor,
     libraries: function () { return PS_LIBS; },
     saveComputedColumn: saveComputedColumn,
     openFormulaDialog: openFormulaDialog,
