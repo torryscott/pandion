@@ -2075,7 +2075,7 @@
       ["SQRT(x)", "Square root.", "num1"],
       ["ABS(x)", "Absolute value.", "num1"],
       ["EXP(x)", "e raised to the value.", "num1"],
-      ["ROUND(x, digits)", "Round to a number of decimal places.", "round"],
+      ["ROUND(x, digits)", "Round to a number of decimal places. Exact halves go to the even neighbor, as in R.", "round"],
       ["FLOOR(x)", "Round down.", "num1"],
       ["CEILING(x)", "Round up.", "num1"],
       ["BIN(column, k)", "Cut a column into k equal-width groups.", "bin"]]],
@@ -2469,6 +2469,17 @@
       r2.appendChild(mkEl("span", "",
         isBin ? "equal-width groups" : "decimal places"));
       host.appendChild(r2);
+      if (!isBin) {
+        // Torry, Aug 2026: say what actually happens at a tie, at the
+        // moment the user is choosing. Half-up would drift every total
+        // upward; even-neighbor ties are the R and jamovi rule.
+        host.appendChild(mkEl("div", "ps-fpk-hint",
+          "A value exactly halfway rounds to the even neighbor: " +
+          "ROUND(2.5) is 2 and ROUND(3.5) is 4, the same rule R and " +
+          "jamovi use, so rounded totals do not drift upward. " +
+          "Anything not exactly halfway rounds to whichever value is " +
+          "nearer, as usual."));
+      }
       ib2 = mkEl("button", "ps-fn-insert", "Insert");
       ib2.type = "button";
       ib2.disabled = true;
@@ -2543,7 +2554,7 @@
     "SQRT": "square root",
     "ABS": "absolute magnitude",
     "EXP": "exponential",
-    "ROUND": "decimals digits",
+    "ROUND": "decimals digits half even ties banker",
     "FLOOR": "round down integer",
     "CEILING": "round up integer ceil",
     "BIN": "bins groups cut quartiles equal width",
