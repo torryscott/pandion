@@ -27257,9 +27257,19 @@
         // tie-free n <= 1290. The stats fuzzer (Aug 2026) caught the plain
         // t-approximation drifting from R in the third decimal of p at
         // moderate n, which is visible at label precision.
-        var _gb2SpearDistCache = {};
+        // The permutation-count cache lives on window, not in a var of
+        // render()'s scope: the corr method guard at render ENTRY reaches
+        // this through _corrComputeCellsClient before any var initializer
+        // in render()'s body has run, so a render-scope cache was hoisted
+        // but undefined there, threw inside the guard's try/catch, and
+        // every Spearman echo dropped r and p from every cell (Sep 2026,
+        // the stats fuzzer at seed 20260901; Pearson and Kendall touch no
+        // such cache). Window scope also keeps the n = 9 enumeration
+        // (362,880 permutations) across renders.
         function _gb2SpearDist(n) {
-            if (_gb2SpearDistCache[n]) return _gb2SpearDistCache[n];
+            var cache = window.__gb2_spearDistCache ||
+                (window.__gb2_spearDistCache = {});
+            if (cache[n]) return cache[n];
             var counts = {}, used = new Array(n + 1);
             function rec(pos, s) {
                 if (pos > n) { counts[s] = (counts[s] || 0) + 1; return; }
@@ -27272,7 +27282,7 @@
                 }
             }
             rec(1, 0);
-            _gb2SpearDistCache[n] = counts;
+            cache[n] = counts;
             return counts;
         }
         function _gb2PRho(is, n, lower) {
