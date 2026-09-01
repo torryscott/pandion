@@ -112,13 +112,21 @@ ok(standaloneSvg.role === 'img' &&
    JSON.stringify(standaloneSvg));
 const versionStamp = await page.evaluate(async () => {
     const source = await window.PS_SHELL.exportSource('white');
-    const m = String(source.svg).match(/<!--\s*Pandion Plots ([0-9.]+)\s*-->/);
-    return m ? m[1] : null;
+    // "<!-- Pandion Plots 3.1.1 -->" on the dev page; the built pages
+    // append " (build <stamp>)" from <meta name="pandion-build">.
+    const m = String(source.svg)
+        .match(/<!--\s*Pandion Plots (\d+\.\d+\.\d+)(?: \(build ([^)]+)\))?\s*-->/);
+    const meta = document.querySelector('meta[name="pandion-build"]');
+    return { version: m ? m[1] : null, build: m ? (m[2] || '') : null,
+             pageBuild: meta ? (meta.getAttribute('content') || '') : '' };
 });
-ok(/^\d+\.\d+\.\d+$/.test(versionStamp || ''),
+ok(/^\d+\.\d+\.\d+$/.test(versionStamp.version || ''),
    'exported SVG carries the producing app version as a comment ' +
    '(the numerical-changes ledger traceability stamp)',
-   String(versionStamp));
+   String(versionStamp.version));
+ok(versionStamp.build === versionStamp.pageBuild,
+   'the SVG stamp carries exactly the build the page declares',
+   JSON.stringify(versionStamp));
 
 const pdf = await page.evaluate(async () => {
     const blob = await window.PS_SHELL.exportBlob('pdf', 96, 'white');

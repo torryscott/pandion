@@ -14,11 +14,33 @@ const text = rel => read(rel).toString('utf8');
 const dist = read('standalone/dist/pandion-plots.html');
 const portable = read('website/pandion-plots.html');
 
-ok(Buffer.compare(dist, portable) === 0,
-   'website portable download is byte-identical to standalone dist');
+// The build stamp names the CODE (scripts/build-stamp.sh: last source
+// commit, "*" if built from uncommitted sources), so two artifacts built
+// from identical sources at different moments can legitimately differ in
+// this one attribute and nothing else. Compare the code bytes with the
+// stamp blanked, and require every shell to carry a well-formed stamp.
+const STAMP_META = /<meta name="pandion-build" content="([^"]*)">/;
+const STAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z [0-9a-f]{7,}\*?$/;
+function stampOf(html, label) {
+    const m = html.match(STAMP_META);
+    ok(m && STAMP.test(m[1]),
+       `${label} carries a well-formed build stamp (${m ? m[1] : 'none'})`);
+    return m[1];
+}
+const unstamp = buf => Buffer.from(
+    buf.toString('utf8').replace(STAMP_META, '<meta name="pandion-build" content="">'));
+
+const distStamp = stampOf(dist.toString('utf8'), 'portable dist');
+const portableStamp = stampOf(portable.toString('utf8'), 'website portable download');
+ok(Buffer.compare(unstamp(dist), unstamp(portable)) === 0,
+   'website portable download is byte-identical to standalone dist (build stamp aside)');
+if (distStamp !== portableStamp)
+    console.log(`  note: build stamps differ (dist ${distStamp}, website ${portableStamp}); ` +
+                'the code is identical - rebuild the website artifacts from this tree before a release');
 
 const sourceHtml = text('standalone/index.html');
 const appHtml = text('website/app/index.html');
+stampOf(appHtml, 'hosted app shell');
 ok(sourceHtml.includes('<link rel="manifest" href="manifest.json">') &&
    appHtml.includes('<link rel="manifest" href="manifest.json">'),
    'source and hosted shells link their local application manifest');

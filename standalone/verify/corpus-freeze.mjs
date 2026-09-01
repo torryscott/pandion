@@ -86,6 +86,8 @@ const built = await page.evaluate(async () => {
   }
   return {
     text: S.projectText(),
+    build: S.appBuild(),
+    numericalChanges: S.numericalChangeIds(),
     expect: {
       types: Object.assign({}, t.types),
       rnd: col('rnd'), zsc: col('zsc'), m: col('m'),
@@ -115,8 +117,12 @@ if (fs.existsSync(pandPath) || fs.existsSync(expectPath)) {
   process.exit(0);
 }
 fs.writeFileSync(pandPath, built.text, { flag: 'wx' });
+// build + numericalChanges: the stamp of the page that froze the entry
+// (empty on the dev page) and the ledger ids it computed under, so the
+// frozen values are traceable to a row of NUMERICAL-CHANGES.md.
 fs.writeFileSync(expectPath, JSON.stringify({
   frozenAt: new Date().toISOString(), app: appVersion, gitSha: sha,
+  build: built.build, numericalChanges: built.numericalChanges,
   expect: built.expect
 }, null, 2), { flag: 'wx' });
 console.log('froze ' + base + ' (' + built.text.length + ' bytes, ' +

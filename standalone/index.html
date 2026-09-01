@@ -3,6 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Build stamp: EMPTY on this dev page, filled by standalone/build-dist.sh
+     and website/build.sh from scripts/build-stamp.sh (commit date + sha of
+     the last commit that touched the shipped sources). ps-shell reads it
+     into APP_BUILD for exports, saved projects, and the About dialog. -->
+<meta name="pandion-build" content="">
 <title>Pandion Plots</title>
 <meta name="description" content="Create clear, customizable statistical figures without code. Free, open source, and private by design: your data never leaves your machine.">
 <!-- Installable app. Chrome's install criteria need HTTPS plus a manifest with
@@ -5795,6 +5800,7 @@
     <div class="ps-dialog-body">
       <div class="ps-about-grid">
         <span>Version</span><strong id="ps-about-version">3.1.1</strong>
+        <span>Build</span><strong id="ps-about-build"></strong>
         <span>Licence</span><strong>GPL-3.0</strong>
         <span>Copyright</span><strong>&copy; 2026 Torry Scott Dennis</strong>
         <!-- t3-56: this read as inert text beside a Version and a Licence,

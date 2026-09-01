@@ -22,7 +22,7 @@ FEATURE_PROBES="branding-check axe-state-check bypass-accessibility-check busy-c
 computed-variables-check computed-grid-refresh-check case-count-check control-focus-check bar-choice-accessibility-check character-shortcut-check coverage-gaps-check chart-accessibility-check export-accessibility-check pdf-accessibility-check \
 chart-check-check compare-pairs-apa-check chart-from-selection-check chart-groups-check chart-size-check bracket-orientation-check \
 default-style-routes-check column-gestures-check chrome-check clipboard-check copy-image-check copy-moment-check correctness-check \
-data-integrity-check workspace-sequence-check data-commandbar-check data-menu-check data-roundtrip-fuzz stash-guard-check corpus-compat-check separator-accessibility-check \
+data-integrity-check workspace-sequence-check data-commandbar-check data-menu-check data-roundtrip-fuzz stash-guard-check corpus-compat-check build-stamp-check separator-accessibility-check \
 data-undo-check dates-check eyedropper-check doclifecycle-check tab-accessibility-check drag-feel-check \
 drag-selection-check outside-canvas-check hmc-list-check hidden-vars-check sigma-freshness-check \
 empty-states-check engine-stamp-check flyout-align-check filter-honesty-check examples-check exclusion-bridge-check \
@@ -81,6 +81,9 @@ fi
 
 echo "== accessibility-source-check (bypass routes / instructions)"
 node standalone/verify/accessibility-source-check.mjs
+
+echo "== numerical-ledger-check (ledger <-> code table <-> version state)"
+node standalone/verify/numerical-ledger-check.mjs
 
 a11y_evidence_root="${PS_A11Y_OUT:-planning/accessibility-standalone}"
 export PS_A11Y_OUT="$a11y_evidence_root/source"

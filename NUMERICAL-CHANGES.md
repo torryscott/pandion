@@ -4,18 +4,33 @@ Every release of Pandion Plots that changes a number the program
 displays - a statistic, a computed value, a rounding - is recorded
 here, newest first. A chart or table exported before the fix keeps the
 old number forever; this ledger is how you find out whether a given
-output could be affected. Exported SVG and PDF files carry the app
-version that produced them, and every `.pand` project records the
-version that saved it, so outputs are traceable to rows in this table.
+output could be affected.
+
+How an output is traced to a row of this table:
+
+- Exported SVG and PDF files carry the app version and a build stamp,
+  for example `Pandion Plots 3.1.1 (build 2026-08-30T18:16Z 8efa502)`:
+  the commit date and short sha of the code that produced them (an
+  invisible leading comment in the SVG, the Creator property in the
+  PDF). Compare the stamp's date with an entry's "live" date, or look
+  the commit up in the repository.
+- Every `.pand` project records the version and build that saved it
+  and lists the ids of the entries below that the saving app already
+  contained (`numericalChanges`). Opening a project in a newer app
+  shows a one-time notice naming exactly the entries it has not seen,
+  whatever the version numbers say.
 
 The hosted app at pandionplots.com deploys ahead of tagged releases,
 so a fix can be live there before the version number below ships to
-the desktop app and jamovi module. The "live on the web app" date is
-when the fix reached the hosted page.
+the desktop app and jamovi module. That is why the version alone is
+not the identity: two files saved under the same version can differ
+in what they computed, and the build stamp and id list are what tell
+them apart. The "live on the web app" date is when the fix reached
+the hosted page.
 
 ## v3.1.2 (unreleased; deployment dates noted per change)
 
-**Factorial and repeated-measures ANOVA preserve small residual variation.**
+**Factorial and repeated-measures ANOVA preserve small residual variation.** <!-- ledger: anova-residual-stability -->
 Subtraction of large fitted, subject or occasion sums could erase small real
 error variance, refusing valid tests or changing F statistics and corrected
 p-values. The shared renderer now computes factorial error within cells and
@@ -23,17 +38,17 @@ repeated-measures error from occasion differences and directly centered residual
 Greenhouse–Geisser epsilon uses normalized residual cross-products. Two-/three-
 factor Type III, pure repeated-measures, and mixed models with one/two between
 factors are covered by independent `car::Anova` and 80-digit reference calculations.
-Applies to standalone and Jamovi output. Implemented 2026-09-06; not deployed.
+Applies to standalone and Jamovi output. Implemented 2026-09-06; not deployed. Not yet live on the web app.
 
-**Crossed repeated-measures input retains numeric precision in R.** The R reshape
+**Crossed repeated-measures input retains numeric precision in R.** <!-- ledger: rm-crossed-numeric-precision --> The R reshape
 converted numeric observations to text and back, rounding values before they
 reached the chart. Around a large response origin this changed the differences
 used by mixed ANOVA. Numeric columns now bypass text formatting; factor labels
 still parse as before. Exact original-observation checks cover the real R analysis
 path. Implemented 2026-09-06; not deployed. Verification scope and tolerances are
-recorded in [ANOVA validation](docs/ANOVA-VALIDATION.md).
+recorded in [ANOVA validation](docs/ANOVA-VALIDATION.md). Not yet live on the web app.
 
-**Faceted scatter models use each panel's own observations.** Fits and bands
+**Faceted scatter models use each panel's own observations.** <!-- ledger: facet-fit-populations --> Fits and bands
 previously pooled groups across panels while the displayed correlations and
 linear equations used facet × group cells. With y = x in North and y = −x
 in South, both panels could draw a pooled horizontal fit despite reporting
@@ -44,18 +59,18 @@ edge extensions use the same cells. Legacy untagged pooled fit records are
 recomputed before display; unscoped ellipses/statistics cannot bleed into a
 panel. Missing facet values and unavailable fits do not borrow another panel's
 model. Literal facet/group names use collision-safe identities. Implemented
-2026-09-06; not deployed.
+2026-09-06; not deployed. Not yet live on the web app.
 
-**Undefined scatter statistics remain unavailable.** R can send null r/p values
+**Undefined scatter statistics remain unavailable.** <!-- ledger: scatter-stats-unavailable --> R can send null r/p values
 for a panel with a constant predictor. JavaScript's coercing `isFinite(null)`
 allowed a null r to crash formatting and a null p to display as `p < .001`.
 The scatter statistics formatter now requires finite numbers and displays a
 dash for unavailable r or p. With a polynomial or LOESS curve selected, the
 exported linear equation and linear R² are explicitly labeled as linear
 statistics. Their underlying estimates remain linear. Implemented 2026-09-06;
-not deployed.
+not deployed. Not yet live on the web app.
 
-**Extended regression curves and confidence bands now evaluate the fitted model.**
+**Extended regression curves and confidence bands now evaluate the fitted model.** <!-- ledger: fit-extension-evaluates-model -->
 “Extend to plot edges” previously prolonged the first and last polyline slopes.
 That drew straight tails for quadratic/cubic curves and extrapolated interval
 edges without evaluating the fitted-mean uncertainty. The shared renderer now
@@ -65,24 +80,24 @@ must match the recomputed model before extension; stale or unsupported fits
 retain their supplied range. Missing confidence bands are never invented.
 The geometry is clipped before serialization so invisible vertices cannot
 inflate PDF/PNG export dimensions; separate visible curve segments are retained.
-Affects both standalone and Jamovi rendering. Implemented 2026-09-05; not deployed.
+Affects both standalone and Jamovi rendering. Implemented 2026-09-05; not deployed. Not yet live on the web app.
 
-**Literal scatter group names remain visible.** Names such as `constructor`,
+**Literal scatter group names remain visible.** <!-- ledger: literal-group-names --> Names such as `constructor`,
 `__proto__` and `toString` could collide with inherited JavaScript properties
 in the renderer's hidden-group lookups, suppressing observations or fits.
 Those lookups now have no inherited properties. Independent rendered/exported
 regression fixtures verify that these groups' observations and fits remain
-present. Implemented 2026-09-05; not deployed.
+present. Implemented 2026-09-05; not deployed. Not yet live on the web app.
 
-**Very narrow axes no longer loop forever when a tick increment rounds away.**
+**Very narrow axes no longer loop forever when a tick increment rounds away.** <!-- ledger: axis-tick-loop-guard -->
 At a nonzero offset, a positive increment smaller than floating-point spacing
 can satisfy `value + step === value`. Tick generation now stops on that
 condition and rejects invalid/non-finite inputs. This prevents the reproduced
 hang around y = 7 with a step of 1e-16; it does not certify all extreme-axis
 label formatting or every possible custom tick density. Implemented 2026-09-05;
-not deployed.
+not deployed. Not yet live on the web app.
 
-**Standalone LOESS curves now follow R's direct-surface convention.**
+**Standalone LOESS curves now follow R's direct-surface convention.** <!-- ledger: loess-direct-surface -->
 The old calculation rounded the neighbor count, over-inflated the radius at
 spans above one, and used unscaled normal equations. A 31-point fixture at
 span 0.5 differed from R's direct curve by as much as 0.00608951; changing x
@@ -96,9 +111,9 @@ labels such as `__proto__`. Approximate confidence bands have been removed
 from the preview helpers; standalone LOESS remains curve-only. Jamovi's final
 R-generated curve and interval still use its default interpolated surface,
 which can differ from the direct curve. Independent references cover 75 cases
-and observed-range SVG geometry. Implemented 2026-09-05; not yet deployed.
+and observed-range SVG geometry. Implemented 2026-09-05; not yet deployed. Not yet live on the web app.
 
-**Small t-test and ANOVA probabilities no longer round prematurely to zero.**
+**Small t-test and ANOVA probabilities no longer round prematurely to zero.** <!-- ledger: direct-tail-probabilities -->
 Subtracting a CDF rounded to one erased representable small probabilities.
 For example, the two-sided probability at t = 100 with 30 degrees of freedom
 was zero instead of approximately 1.9846118e-39. Welch, Student and paired
@@ -110,9 +125,9 @@ tightly. Tail-specific R and SciPy comparisons use relative tolerances so an
 incorrect zero cannot pass merely because p is small. This verifies the tail
 calculation; it does not settle each ANOVA design's separate methodological
 review. Affects: shared client-side statistics in both hosts. Implemented
-2026-09-05; not yet deployed.
+2026-09-05; not yet deployed. Not yet live on the web app.
 
-**Jamovi LOESS confidence bands use residual degrees of freedom.** The band
+**Jamovi LOESS confidence bands use residual degrees of freedom.** <!-- ledger: loess-band-residual-df --> The band
 previously used the fitted smoother's equivalent number of parameters
 (`enp`) in its t critical value. It now uses `predict.loess(..., se = TRUE)$df`,
 the residual degrees of freedom intended for that interval. On the permanent
@@ -120,9 +135,9 @@ the residual degrees of freedom intended for that interval. On the permanent
 was approximately 35% wider. The fitted Jamovi curve is unchanged. Standalone
 LOESS continues to omit confidence bands. Earlier comparisons of standalone
 band approximations against the incorrect R-side band are superseded.
-Implemented 2026-09-05; not yet deployed.
+Implemented 2026-09-05; not yet deployed. Not yet live on the web app.
 
-**Polynomial fits preserve their meaning when measurement units change.**
+**Polynomial fits preserve their meaning when measurement units change.** <!-- ledger: polynomial-scaled-qr -->
 The standalone and shared preview now fit a scaled QR basis instead of raw
 normal equations. Quadratic and cubic curves could previously disappear
 when x values were rescaled to units around 1e-6. Independent R comparisons
@@ -131,9 +146,9 @@ rank deficiency and prediction grids within and beyond the observed range.
 At exactly degree + 1 observations, the curve is retained but its undefined
 confidence band is omitted in both hosts. Standalone previously invented
 one residual degree of freedom; Jamovi supplied non-finite endpoints and
-the shared preview dropped the curve. Implemented 2026-09-05; not deployed.
+the shared preview dropped the curve. Implemented 2026-09-05; not deployed. Not yet live on the web app.
 
-**Constant observations no longer acquire artificial variance.** Repeated
+**Constant observations no longer acquire artificial variance.** <!-- ledger: constant-sample-zero-variance --> Repeated
 floating-point addition could give identical observations slightly different
 means at different sample sizes. For example, groups of 47 and 31 copies of
 `0.000001` incorrectly produced Welch `t(60.32) = -8.36` despite containing
@@ -142,7 +157,7 @@ variance, and undefined Welch, Student and paired t tests are unavailable.
 Affects: shared client-side statistics in standalone and Jamovi, and the
 standalone numeric core. Small real differences are preserved; this uses exact
 equality, not an arbitrary near-zero cutoff. Implemented 2026-09-05;
-not yet deployed.
+not yet deployed. Not yet live on the web app.
 
 The standalone formula engine had the same issue independently: `VSD` on a
 constant column could produce an artificial nonzero result, and
@@ -151,7 +166,7 @@ constant column could produce an artificial nonzero result, and
 undefined constant-column z scores remain missing. Existing computed columns
 recalculate on reopen under the precision migration described below.
 
-**Charts and statistics preserve source-data precision in both hosts.**
+**Charts and statistics preserve source-data precision in both hosts.** <!-- ledger: full-precision -->
 The R-to-widget JSON transport, standalone payload builders and immediate
 chart previews previously rounded numbers to ten significant digits. Values
 such as `10000000001, 10000000002, 10000000003` became indistinguishable,
@@ -164,9 +179,9 @@ Jamovi when data required more than ten significant digits. Reopened charts
 recompute; previously exported figures and tables retain their old values.
 Regression checks cover exact R-to-JS doubles, offset and scale variants,
 multiple analyses and preview/echo behavior. Implemented 2026-09-05;
-not yet deployed.
+not yet deployed. Not yet live on the web app.
 
-**Standalone computed columns retain full numeric precision.** Previously,
+**Standalone computed columns retain full numeric precision.** <!-- ledger: computed-columns-full-precision --> Previously,
 results were stored at ten significant digits before another formula read
 them. With `x = 10000000000`, `a = x + 1`, and `b = a - x`, that made
 `b` zero; it is now one, matching the direct expression `(x + 1) - x`.
@@ -177,26 +192,26 @@ change Jamovi's computed-column engine. The separate transport correction
 is described above. Older projects recalculate with a notice; saved
 files are untouched until saved again. New `.pand` files use wrapper
 format 3 / snapshot 5 so older readers refuse them. Implemented 2026-09-05;
-not yet deployed.
+not yet deployed. Not yet live on the web app.
 
-**Standalone ROUND handles extreme decimal places.** For example,
+**Standalone ROUND handles extreme decimal places.** <!-- ledger: round-extreme-decimals --> For example,
 `ROUND(1, -309)` is now zero instead of one. Small numbers can be rounded
 to more than 308 decimal places without overflowing the scaling factor.
 The regression roster compares these cases, negative values, subnormals,
 and fractional digit arguments against base R. Implemented 2026-09-05;
-not yet deployed.
+not yet deployed. Not yet live on the web app.
 
-**ROUND ties now match R (half to even).** `ROUND(2.5)` is 2,
-`ROUND(3.5)` is 4, `ROUND(-1.5)` is -2, and `ROUND(2.675, 2)` is
-2.67, exactly as R and jamovi print them. The old behavior rounded
-halves up (and toward positive infinity on negatives, matching
-neither R nor Excel). Affects: computed variables using ROUND on
-values that are exact halves at the requested digit; reopened
+**ROUND ties now match R (half to even).** <!-- ledger: round-half-even -->
+`ROUND(2.5)` is 2, `ROUND(3.5)` is 4, `ROUND(-1.5)` is -2, and
+`ROUND(2.675, 2)` is 2.67, exactly as R and jamovi print them. The old
+behavior rounded halves up (and toward positive infinity on negatives,
+matching neither R nor Excel). Affects: computed variables using ROUND
+on values that are exact halves at the requested digit; reopened
 projects recompute, so such a column can shift by one final digit.
 Live on the web app 2026-08-30.
 
-**Mann-Whitney exact p-values are correct at larger samples.** The
-exact-p computation overflowed past roughly 30 observations per
+**Mann-Whitney exact p-values are correct at larger samples.** <!-- ledger: mwu-exact-large-n -->
+The exact-p computation overflowed past roughly 30 observations per
 group; in strongly separated groups the displayed p could be wrong
 by many orders of magnitude (for example, 2.5e-19 displayed as a
 much larger value). Rebuilt on a probability-space recurrence and
@@ -205,18 +220,30 @@ p-values in Compare pairs and significance brackets when both groups
 were larger than about 30 and the separation was extreme. Live on
 the web app 2026-08-29.
 
-**Spearman p-values use R's exact algorithm.** The client
-computation used a t approximation where R uses the AS 89 algorithm
-(exact permutation to n = 9, Edgeworth expansion beyond); some
-p-values differed at display precision (for example .504 vs .503).
-Affects: Spearman p in the Scatter and Correlation Matrix statistics
-panels. Live on the web app 2026-08-29.
+**Spearman p-values use R's exact algorithm.** <!-- ledger: spearman-as89 -->
+The client computation used a t approximation where R uses the AS 89
+algorithm (exact permutation to n = 9, Edgeworth expansion beyond);
+some p-values differed at display precision (for example .504 vs
+.503). Affects: Spearman p in the Scatter and Correlation Matrix
+statistics panels. Live on the web app 2026-08-29.
 
 ## How this ledger is maintained
 
 A change lands here in the same commit that changes the number, with
-the affected surfaces named and the fix verified against base R by
-the statistics parity net (which compares its covered statistical results
-against R on gate runs and relevant pushes). When a project saved
-under an older version is opened after a change on this ledger, the
-app shows a one-time notice naming what was recomputed.
+the affected surfaces named, a stable id (the `<!-- ledger: ... -->`
+comment on its first line, which is the name the app records in every
+saved project), the date it went live on the web app, and the fix
+verified against base R by the statistics parity net (which compares
+its covered statistical results against R on gate runs and relevant
+pushes).
+The same entry is added to `NUMERICAL_CHANGES` in
+`standalone/js/ps-shell.js`, and
+`standalone/verify/numerical-ledger-check.mjs` holds the two in
+agreement: same ids, each entry's `since` equal to its section's
+version. A section newer than the shipped version is marked
+"(unreleased; ...)" and there is only ever one such section, the next
+version bump; a release cannot be cut while the ledger still calls
+its version pending (`scripts/release-version.mjs set` flips the
+marker to "released"). When a project saved by an older build is
+opened after a change on this ledger, the app shows a one-time notice
+naming what was recomputed.
