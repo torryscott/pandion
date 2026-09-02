@@ -2791,6 +2791,25 @@
     border-top: 0;
   }
   #ps-engine-dock [data-role="inspector-title"] { flex-wrap: wrap; }
+  /* Wrapping alone still lets a long level name run off: the title cell's
+     flex base is its own max-content (set inline by the engine) and the
+     crumb inside it is inline-flex, so it floors at the width of its
+     nowrap title line and paints straight through the panel border. With
+     a real level name ("Students living on campus in university halls of
+     residence") that measured 101px outside the panel and pushed the eye
+     onto its own line. Give the cell a zero base so it takes the room
+     that is actually there, clamp the crumb to it, and the ellipsis the
+     engine already declares on the title line finally engages. The
+     eyebrow needs the clamp too, or it wraps and grows the bar instead.
+     Both are inert wherever the name fits: an unsqueezed cell is exactly
+     the crumb's max-content, so 100% of it changes nothing. */
+  #ps-engine-dock [data-role="inspector-title"] > span:first-child:not([data-role]) {
+    flex: 1 1 0 !important; min-width: 0;
+  }
+  #ps-engine-dock [data-role="gb2-crumb"] { max-width: 100%; overflow: hidden; }
+  #ps-engine-dock [data-role="gb2-crumb"] > span {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
   #ps-engine-dock [data-role="inspector-title"] [data-role="scope-title-host"],
   #ps-engine-dock [data-role="inspector-title"] [data-role="bs-title-scope"] {
     flex-basis: 100%; margin-left: 0 !important; margin-right: 0 !important;

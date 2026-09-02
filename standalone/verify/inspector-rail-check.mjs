@@ -192,6 +192,197 @@ st = await panelState();
 ok(st.shown && st.inHost && !st.inDock && st.dockMode === 'below' && st.dockCount === 0,
   'preference off again: panel under the chart, dock empty (' + JSON.stringify({ inHost: st.inHost, inDock: st.inDock, dockCount: st.dockCount }) + ')');
 
+// ---------------------------------------------------------------- round 2
+// Cases 1 to 7 are about PLACEMENT (does the panel go to the rail). These
+// are about what the rail does to a panel once it is there, from the two
+// things Torry hit on the first build: a title bar that overlapped itself,
+// and a column that made him scroll past the whole chart setup to reach
+// the panel.
+//
+// CONTROL: delete the four #ps-engine-dock rules in standalone/index.html
+// (title flex-wrap, the scope-host flex-basis, the title-cell flex base,
+// the crumb clamp) and cases 8 and 9 go red - 8 with crumbScope true on
+// every strip that offers a this/all switch, 9 with the crumb painting
+// about 100px outside the panel and the eye knocked onto its own line.
+const loadGrouped = (level) => page.evaluate(async (lv) => {
+  const s = ms => new Promise(r => setTimeout(r, ms));
+  const S = window.PS_SHELL, rows = [];
+  const gs = ['Lecture', 'Reading', 'Practice'], res = [lv, 'Off campus'];
+  for (const g of gs) for (const r of res) for (let i = 0; i < 6; i++)
+    rows.push([g, r, 50 + i * 3 + gs.indexOf(g) * 5 + res.indexOf(r) * 4]);
+  S.loadTable('grp', ['study_method', 'residence', 'exam_score'], rows,
+    { study_method: 'nominal', residence: 'nominal', exam_score: 'continuous' });
+  S.setModule('plotbuilder');
+  S.setRoles('plotbuilder', { xvar: 'study_method', yvar: 'exam_score', groupVar: 'residence' });
+  S.setWorkspace('chart');
+  await s(1900);
+}, level);
+// Real gestures: a bare dispatchEvent click carries detail 0 and is
+// swallowed by the engine's phantom-click guard.
+const clickAt = async (sel, name) => {
+  const box = await page.evaluate(([s2, n]) => {
+    const el2 = [...document.querySelectorAll(s2)].find(x => x.textContent.trim() === n);
+    if (!el2) return null;
+    const r = el2.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  }, [sel, name]);
+  if (!box) return false;
+  await page.mouse.click(box.x, box.y);
+  await page.waitForTimeout(650);
+  return true;
+};
+// The collision the fix is about was a title CELL squeezed to 26px around
+// a crumb still painting 120px, so measure the CRUMB, which is what the
+// reader sees. And count a hit only when the rects meet on BOTH axes: the
+// fix drops the scope cluster onto its own line, directly under the title,
+// where a horizontal-only test would be permanently and wrongly red.
+const titleGeom = () => page.evaluate(() => {
+  const t = document.querySelector('#ps-engine-dock [data-role="inspector-title"]');
+  if (!t) return null;
+  const shown = el => !!el && getComputedStyle(el).display !== 'none' &&
+    el.getBoundingClientRect().width > 0;
+  const R = el => { const b = el.getBoundingClientRect();
+    return { l: b.left, r: b.right, t: b.top, b: b.bottom }; };
+  const hit = (a, c) => !!(a && c) &&
+    (Math.min(a.r, c.r) - Math.max(a.l, c.l) > 1) &&
+    (Math.min(a.b, c.b) - Math.max(a.t, c.t) > 1);
+  const crumb = t.querySelector('[data-role="gb2-crumb"]');
+  const scope = t.querySelector('[data-role="scope-title-host"], [data-role="bs-title-scope"]');
+  const acts = t.querySelector('[data-role="title-actions"]');
+  const panel = document.querySelector('#ps-engine-dock [data-gb2-inspector]');
+  const tt = crumb ? crumb.lastElementChild : null;
+  const tR = R(t), cR = crumb ? R(crumb) : null;
+  const sR = shown(scope) ? R(scope) : null, aR = shown(acts) ? R(acts) : null;
+  return {
+    crumbScope: hit(cR, sR), crumbActs: hit(cR, aR), scopeActs: hit(sR, aR),
+    spillPastPanel: (cR && panel) ? Math.round(cR.r - R(panel).r) : 0,
+    ellipsised: tt ? tt.scrollWidth > tt.clientWidth + 1 : false,
+    actsLine: aR ? Math.round(aR.t - tR.t) : null,
+    scopeShown: !!sR,
+    title: crumb ? crumb.innerText.replace(/\n/g, ' / ') : ''
+  };
+});
+
+console.log('case 8: the docked title bar never overlaps itself, on any tab');
+await setDockPref('rail');
+await loadGrouped('On campus');
+await clickBar();
+{
+  let seen = 0, withScope = 0, bad = [];
+  for (const tab of ['Bars', 'Border', 'Error bars', 'Gap', 'Order', 'Border']) {
+    if (!(await clickAt('[data-bs-tab]', tab))) continue;
+    const g = await titleGeom();
+    if (!g) continue;
+    seen++;
+    if (g.scopeShown) withScope++;
+    if (g.crumbScope || g.crumbActs || g.scopeActs)
+      bad.push(tab + ' ' + JSON.stringify(g));
+  }
+  ok(seen >= 5, 'walked the panel tabs in the rail (' + seen + ')');
+  ok(withScope >= 1, 'at least one tab offers a this/all switch, so the ' +
+    'collision case is actually exercised (' + withScope + ')');
+  ok(bad.length === 0,
+    'no two title-bar parts share screen space on any tab: this is the ' +
+    'reported jumbling, where the title cell was squeezed to 26px and its ' +
+    'crumb painted straight through "Applies to" (' + bad.join(' ; ') + ')');
+}
+
+console.log('case 9: a long level name stays inside the panel and keeps the eye in place');
+await loadGrouped('Students living on campus in university halls of residence');
+await clickBar();
+await clickAt('[data-bs-tab]', 'Border');
+{
+  const g = await titleGeom();
+  ok(!!g && g.spillPastPanel <= 0,
+    'the title does not paint outside the panel: unclamped it ran about ' +
+    '100px past the border and into the page (' + (g && g.spillPastPanel) + 'px)');
+  ok(!!g && g.ellipsised,
+    'it ellipsises instead, which is what the engine already asks for and ' +
+    'never got, because nothing clamped the crumb to its cell');
+  ok(!!g && g.actsLine !== null && g.actsLine < 30,
+    'and the eye stays on the first line rather than being pushed below ' +
+    'the title (top offset ' + (g && g.actsLine) + 'px)');
+  ok(!!g && !g.crumbScope && !g.crumbActs,
+    'still no overlap with a name this long (' + JSON.stringify(g) + ')');
+}
+
+console.log('case 10: the panel takes the column, and the switch is the way back');
+await loadGrouped('On campus');
+const colState = () => page.evaluate(() => {
+  const pane = document.getElementById('ps-inspector-chart');
+  const sw = pane.querySelector('.ps-dock-switch');
+  const dock = document.getElementById('ps-engine-dock');
+  const panel = dock.querySelector('[data-gb2-inspector]');
+  const setupVisible = [...pane.children].some(c =>
+    c !== sw && c !== dock && getComputedStyle(c).display !== 'none');
+  return {
+    live: pane.classList.contains('ps-dock-live'),
+    editing: pane.classList.contains('ps-dock-editing'),
+    switchShown: !!sw && getComputedStyle(sw).display !== 'none',
+    setupVisible,
+    panelInDock: !!panel,
+    panelShowing: !!panel && getComputedStyle(panel).display !== 'none',
+    dockH: Math.round(dock.getBoundingClientRect().height),
+    panelW: panel ? Math.round(panel.getBoundingClientRect().width) : 0,
+    heading: (document.getElementById('ps-inspector-title') || {}).textContent || ''
+  };
+});
+{
+  let st2 = await colState();
+  ok(!st2.switchShown && st2.setupVisible && st2.dockH === 0,
+    'with nothing selected the column is the chart setup, with no switch ' +
+    'and no empty dock strip (' + JSON.stringify(st2) + ')');
+  await clickBar();
+  st2 = await colState();
+  const editW = st2.panelW;
+  ok(st2.editing && !st2.setupVisible && st2.switchShown && st2.panelShowing,
+    'selecting a part hands the column to the panel: this is the ask, ' +
+    'since the panel used to sit below the whole setup (' + JSON.stringify(st2) + ')');
+  ok(/editing/i.test(st2.heading), 'and the column heading says so ("' + st2.heading + '")');
+  await page.click('#ps-dock-switch-setup');
+  await page.waitForTimeout(450);
+  st2 = await colState();
+  ok(st2.setupVisible && !st2.editing && st2.switchShown,
+    'the switch goes back to the setup and stays on offer');
+  ok(st2.panelInDock && st2.live,
+    'and the part stays SELECTED, so this is a toggle and not a close ' +
+    'button: the engine closes its panel on any click outside it, which ' +
+    'ate the selection until the switch stopped its own click');
+  ok(st2.panelW === editW,
+    'the panel keeps its width while stood down, so a re-render on the ' +
+    'setup view cannot size it to a wider box (' + st2.panelW + ' vs ' + editW + ')');
+  await page.click('#ps-dock-switch-edit');
+  await page.waitForTimeout(450);
+  ok((await colState()).editing, 'and back again');
+  await page.click('#ps-dock-switch-setup');
+  await page.waitForTimeout(350);
+  await clickBar();
+  ok((await colState()).editing,
+    'clicking a chart part while on the setup view returns to the panel, ' +
+    'so a click is never swallowed by the view you happen to be on');
+  await page.evaluate(() => window.PS_SHELL.addChart('plotbuilder'));
+  await page.waitForTimeout(2200);
+  st2 = await colState();
+  ok(!st2.editing && st2.setupVisible && !st2.panelInDock,
+    'a NEW chart starts on its own setup with an empty dock: measured ' +
+    'before the guard, it arrived wearing the previous chart\'s panel ' +
+    'with its own role slots hidden behind it (' + JSON.stringify(st2) + ')');
+}
+await setDockPref('below');
+{
+  const belowState = await page.evaluate(() => {
+    const pane = document.getElementById('ps-inspector-chart');
+    const sw = pane.querySelector('.ps-dock-switch');
+    return { switchShown: !!sw && getComputedStyle(sw).display !== 'none',
+             editing: pane.classList.contains('ps-dock-editing'),
+             setupVisible: [...pane.children].some(c => c !== sw &&
+               c.id !== 'ps-engine-dock' && getComputedStyle(c).display !== 'none') };
+  });
+  ok(!belowState.switchShown && !belowState.editing && belowState.setupVisible,
+    'with the preference off none of this exists: no switch, no hidden ' +
+    'setup, which is also jamovi\'s path (' + JSON.stringify(belowState) + ')');
+}
+
 ok(pageErrors.length === 0, 'no page errors (' + pageErrors.slice(0, 2).join(' | ') + ')');
 console.log((fail === 0 ? 'INSPECTOR RAIL CHECK PASS' : 'INSPECTOR RAIL CHECK FAIL') +
   ' (' + pass + ' ok, ' + fail + ' failing)');

@@ -967,6 +967,8 @@
   // ONE set of controls: this only decides which of the two the column
   // shows. Nothing here runs in the default below-the-chart mode.
   var DOCK_EDITING = true, DOCK_EDIT_WAS = false, DOCK_SYNC_QUEUED = false;
+  // Which chart the column is currently showing a panel for.
+  var DOCK_DOC = null;
   // The column has two views now, so it has two headings. Defined once and
   // used by both the render that sets the head and the switch that changes
   // which view is on.
@@ -24993,6 +24995,26 @@
     var ws = appWorkspace(), chartPane = el("ps-inspector-chart");
     var dataPane = el("ps-inspector-data"), layoutPane = el("ps-inspector-layout");
     var doc = workspaceDocument(ws);
+    // A DIFFERENT chart starts on its own setup. Measured before this
+    // guard: adding a chart while the panel owned the column left the new,
+    // empty chart wearing the old chart's panel ("Bars - On campus") with
+    // its own role slots hidden behind it. The engine only replaces the
+    // docked panel when the new chart renders one of its own, so the stale
+    // one is cleared here too. Every path that changes the active document
+    // syncs through this function - add, switch, tab drag, delete, undo -
+    // so one guard covers them all; a workspace bounce is not a document
+    // change and keeps the view you left.
+    if (ws === "chart") {
+      var dockDocId = doc ? doc.id : null;
+      if (dockDocId !== DOCK_DOC) {
+        DOCK_DOC = dockDocId;
+        DOCK_EDITING = false;
+        try {
+          var dk0 = el("ps-engine-dock");
+          while (dk0 && dk0.firstChild) dk0.removeChild(dk0.firstChild);
+        } catch (eDd) {}
+      }
+    }
     chartPane.classList.toggle("ps-inspector-active", ws === "chart" && !!doc);
     dataPane.classList.toggle("ps-inspector-active", ws === "data");
     layoutPane.classList.toggle("ps-inspector-active", ws === "layout" && !!doc);
