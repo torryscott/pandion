@@ -28,6 +28,41 @@
     function _gb2PtFromPx(px) { return Math.round(px * 75) / 100; }
     function _gb2PxFromPt(pt) { return pt * 4 / 3; }
 
+    // VISUAL pixels vs LOGICAL pixels. The standalone shell scales the chart
+    // with a CSS zoom on the engine host (its view zoom), so the two differ
+    // by a constant factor: pointer clientX/clientY and every
+    // getBoundingClientRect report VISUAL px, while an SVG user coordinate,
+    // or a px length written on a chart-surface element, is LOGICAL and
+    // paints at that factor times its value. A pointer delta applied
+    // straight to a position therefore drifts by the factor: the dragged
+    // thing outruns the cursor at 150% and lags it at 50%, worse the further
+    // you drag, and a hover tooltip lands further from its point the further
+    // that point sits from the chart's corner (Torry, Sep 2026).
+    // This returns the factor for the space el lives in, measured the way
+    // _ensureChartRoomFor already measures it: the element's visual rect over
+    // its own logical width. Pass the chart svg where you can, since its
+    // width ATTRIBUTE is the engine's own logical size and an exact number
+    // where offsetWidth is rounded. Never pass a group inside the chart: a
+    // chart-internal transform would poison the reading.
+    // Off the standalone this is EXACTLY 1. jamovi applies no zoom, and
+    // Electron page zoom and retina scaling move both sides together, so
+    // every call site divides by 1, which is exact, and behaves as before.
+    function _gb2ViewScale(el) {
+        try {
+            if (!el || !el.getBoundingClientRect) return 1;
+            var node = el.ownerSVGElement || el;
+            var r = node.getBoundingClientRect();
+            if (!r || !(r.width > 0)) return 1;
+            var logical = 0;
+            if (node.getAttribute) logical = Number(node.getAttribute("width")) || 0;
+            if (!(logical > 0)) logical = node.offsetWidth || node.clientWidth || 0;
+            if (!(logical > 0)) return 1;
+            var s = r.width / logical;
+            if (!isFinite(s) || s <= 0 || Math.abs(s - 1) < 0.001) return 1;
+            return s;
+        } catch (_e) { return 1; }
+    }
+
     // A faceted category key is built server-side as
     // "<facet level><separator><category>". Splitting it on the FIRST
     // separator is right when a CATEGORY label contains one, and wrong
@@ -5437,8 +5472,13 @@
             var wrapRect;
             try { wrapRect = wrap.getBoundingClientRect(); }
             catch (_e) { return; }
-            var menuLeft = clientX - wrapRect.left + 2;
-            var menuTop = clientY - wrapRect.top + 2;
+            // clientX/Y and the wrap rect are VISUAL pixels, while left/top
+            // on this wrap child are LOGICAL, so the measured offset is
+            // divided back to logical and the menu lands on the cursor at
+            // any view zoom. One-shot placement, so the read is free.
+            var _pmS = _gb2ViewScale(svg);
+            var menuLeft = (clientX - wrapRect.left) / _pmS + 2;
+            var menuTop = (clientY - wrapRect.top) / _pmS + 2;
             menu.style.cssText = [
                 "position:absolute",
                 "left:" + menuLeft + "px",
@@ -9469,7 +9509,7 @@
         // Position the tooltip near (clientX, clientY). Flips to
         // the left of the cursor when the natural right-anchor
         // would extend past the wrap's right edge.
-        var _xyWrapRect = null, _xyWrapRectAt = 0;
+        var _xyWrapRect = null, _xyWrapRectAt = 0, _xyWrapScale = 1;
         function _xyTooltipPosition(clientX, clientY) {
             // Both reads below force a layout flush and this runs per
             // pointermove (60 Hz): cache the wrap rect briefly (150 ms
@@ -9479,14 +9519,29 @@
             if (!_xyWrapRect || (_nowT - _xyWrapRectAt) > 150) {
                 _xyWrapRect = wrap.getBoundingClientRect();
                 _xyWrapRectAt = _nowT;
+                // Taken in the same layout read as the rect, so the two
+                // can never describe different moments: a rect held for
+                // its 150 ms is always paired with the scale that was
+                // true when it was measured.
+                _xyWrapScale = _gb2ViewScale(svg);
             }
             var rect = _xyWrapRect;
-            var x = clientX - rect.left + 12;
-            var y = clientY - rect.top  + 12;
+            // The pointer and the wrap rect are VISUAL pixels, while a
+            // left/top written on this wrap child is LOGICAL and paints at
+            // scale times its value. Divide the measured offset back to
+            // logical first; the 12 px gap and the 4 px edge clamps below
+            // are logical constants and stay as they are. Exactly 1 off
+            // the standalone's view zoom.
+            var _vs = _xyWrapScale;
+            var _relX = (clientX - rect.left) / _vs;
+            var _relY = (clientY - rect.top) / _vs;
+            var _wrapW = rect.width / _vs, _wrapH = rect.height / _vs;
+            var x = _relX + 12;
+            var y = _relY + 12;
             var w = _xyTooltip.__gb2w || (_xyTooltip.__gb2w = _xyTooltip.offsetWidth || 120);
             var h = _xyTooltip.__gb2h || (_xyTooltip.__gb2h = _xyTooltip.offsetHeight || 40);
-            if (x + w > rect.width - 4) x = clientX - rect.left - w - 12;
-            if (y + h > rect.height - 4) y = clientY - rect.top - h - 12;
+            if (x + w > _wrapW - 4) x = _relX - w - 12;
+            if (y + h > _wrapH - 4) y = _relY - h - 12;
             if (x < 4) x = 4;
             if (y < 4) y = 4;
             _xyTooltip.style.left = x + "px";
@@ -12382,7 +12437,11 @@
                     if (_maxR > 0) {
                         var _scs = getComputedStyle(_col);
                         var _rp = (parseFloat(_scs.paddingRight) || 0) + (parseFloat(_scs.borderRightWidth) || 0);
-                        var _snug = (Math.ceil(_maxR) + _rp + 1) + "px";
+                        // _maxR came from client rects (VISUAL px) while the
+                        // padding and the width written below are LOGICAL, so
+                        // the column was sized by that factor under the
+                        // standalone view zoom.
+                        var _snug = (Math.ceil(_maxR / _gb2ViewScale(svg)) + _rp + 1) + "px";
                         _col.style.width = _snug;
                         _col.style.minWidth = _snug;
                     }
@@ -12495,7 +12554,12 @@
                     // short at a 2000px window, Torry's screenshot). In
                     // jamovi toolbar and wrap share a width, so the value
                     // is never negative and the clamp was inert.
-                    addAnnMenu.style.right = Math.round(_opR.right - _btR.right) + "px";
+                    // Both rects are VISUAL pixels; this menu hangs in the
+                    // zoomed chart wrap and is NOT counter-zoomed, so its
+                    // right inset is LOGICAL and paints at scale times its
+                    // value. Divide the measured gap so the menu's right
+                    // edge still lands on the button's at any view zoom.
+                    addAnnMenu.style.right = Math.round((_opR.right - _btR.right) / _gb2ViewScale(svg)) + "px";
                 }
             } catch (_ePos) {}
             _snugAddMenuColumns();
@@ -13739,6 +13803,12 @@
             var pointerDown = false;
             var startClientX = 0, startClientY = 0;
             var startDx = 0, startDy = 0;
+            // A pointer delta is measured in VISUAL px, but a text offset
+            // is a LOGICAL length written into the chart. The standalone
+            // shell's view zoom is the only thing that separates the two,
+            // so the drag divides by the factor captured at press and the
+            // label tracks the cursor at every zoom. Exactly 1 in jamovi.
+            var startViewScale = 1;
             var moved = false;
             var shiftHeld = false;
             // Populated in onDown when the dragged element is part of a
@@ -13767,6 +13837,9 @@
                 shiftHeld = !!(e.ctrlKey || e.metaKey);
                 startClientX = e.clientX;
                 startClientY = e.clientY;
+                // Once per gesture: a client rect forces layout, and
+                // onMove runs at pointer rate.
+                startViewScale = _gb2ViewScale(svg);
                 var off = (dragId && textOffsets[dragId]) || { dx: 0, dy: 0 };
                 startDx = off.dx;
                 startDy = off.dy;
@@ -13799,8 +13872,8 @@
             }
             function onMove(e) {
                 if (!pointerDown) return;
-                var dx = e.clientX - startClientX;
-                var dy = e.clientY - startClientY;
+                var dx = (e.clientX - startClientX) / startViewScale;
+                var dy = (e.clientY - startClientY) / startViewScale;
                 if (!moved && (Math.abs(dx) > DRAG_TEXT_THRESHOLD_PX || Math.abs(dy) > DRAG_TEXT_THRESHOLD_PX)) {
                     moved = true;
                     svgText.style.cursor = "move";
@@ -13884,8 +13957,10 @@
                 svgText.style.cursor = _meComputed ? "move" : "text";
                 if (moved) {
                     if (dragId) {
-                        var dx = e.clientX - startClientX;
-                        var dy = e.clientY - startClientY;
+                        // Same conversion as onMove, or the committed
+                        // offset would not be where the label was drawn.
+                        var dx = (e.clientX - startClientX) / startViewScale;
+                        var dy = (e.clientY - startClientY) / startViewScale;
                         if (multiDragStart) {
                             // Update every selected element's offset
                             // in-place, then persist with a single
@@ -16478,6 +16553,11 @@
             (function () {
                 var down = false, moved = false;
                 var sx = 0, sy = 0, ox = 0, oy = 0;
+                // The pointer delta is VISUAL px while both the live
+                // translate and the committed ann.x / ann.y are LOGICAL,
+                // so the drag divides by the view scale. Exactly 1 off
+                // the standalone shell.
+                var vScale = 1;
                 g.style.cursor = "grab";
                 g.addEventListener("click", function (ce) { ce.stopPropagation(); });
                 g.addEventListener("pointerdown", function (e) {
@@ -16485,12 +16565,13 @@
                     e.preventDefault(); e.stopPropagation();
                     down = true; moved = false;
                     sx = e.clientX; sy = e.clientY;
+                    vScale = _gb2ViewScale(svg);
                     ox = ax; oy = ay;
                     try { g.setPointerCapture(e.pointerId); } catch (_eP) {}
                 });
                 g.addEventListener("pointermove", function (e) {
                     if (!down) return;
-                    var dx = e.clientX - sx, dy = e.clientY - sy;
+                    var dx = (e.clientX - sx) / vScale, dy = (e.clientY - sy) / vScale;
                     if (!moved && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) moved = true;
                     if (moved) {
                         g.setAttribute("transform",
@@ -16503,8 +16584,8 @@
                     try { g.releasePointerCapture(e.pointerId); } catch (_eR) {}
                     if (moved) {
                         commitAnnotationChange(ann.id, {
-                            x: ox + (e.clientX - sx),
-                            y: oy + (e.clientY - sy)
+                            x: ox + (e.clientX - sx) / vScale,
+                            y: oy + (e.clientY - sy) / vScale
                         });
                     } else {
                         try {
@@ -17073,6 +17154,12 @@
                 // past tolerance from a bar center - no stickiness.
                 var startMouseX = e.clientX;
                 var startMouseY = e.clientY;
+                // The cursor deltas are VISUAL px while ann.x / ann.x2,
+                // the caps and the snap targets are LOGICAL SVG coords,
+                // so the gesture is divided by the view scale before it
+                // becomes a bracket coordinate. Exactly 1 off the
+                // standalone shell.
+                var vScale = _gb2ViewScale(svg);
                 var startAnnX = ann.x || 0;
                 var startAnnX2 = ann.x2 || 0;
                 var startAnnY = ann.y || 0;
@@ -17101,8 +17188,8 @@
                 var bodyMode = null;
 
                 function onMove(ev) {
-                    var dx = ev.clientX - startMouseX;
-                    var dy = ev.clientY - startMouseY;
+                    var dx = (ev.clientX - startMouseX) / vScale;
+                    var dy = (ev.clientY - startMouseY) / vScale;
                     // Orientation-aware: in vertical mode legs sit
                     // along X and the spine along Y, so leg drag
                     // updates ann.x via dx (and capL via dy). In
@@ -17626,6 +17713,11 @@
                 var chartLeft = M.left;
                 var chartTop = M.top;
                 var svgRect = svg.getBoundingClientRect();
+                // svgRect is VISUAL px while innerW / innerH / chartLeft
+                // are LOGICAL, so the cursor offset below is divided by
+                // the view scale before it becomes a fraction of the
+                // axis. Exactly 1 off the standalone shell.
+                var vScale = _gb2ViewScale(svg);
                 var moved = false;
                 var sx = e.clientX, sy = e.clientY;
                 function onMove(ev) {
@@ -17640,10 +17732,10 @@
                     // to a fraction along the main axis.
                     var frac;
                     if (orientation === "horizontal") {
-                        var pxX = ev.clientX - svgRect.left - chartLeft;
+                        var pxX = (ev.clientX - svgRect.left) / vScale - chartLeft;
                         frac = pxX / Math.max(1, innerW);
                     } else {
-                        var pxY = ev.clientY - svgRect.top - chartTop;
+                        var pxY = (ev.clientY - svgRect.top) / vScale - chartTop;
                         frac = pxY / Math.max(1, innerH);
                     }
                     frac = Math.max(0, Math.min(1, frac));
@@ -17836,9 +17928,14 @@
                 // a wall-clock watchdog and a graph-type carve-out.
                 var sx = e.clientX, sy = e.clientY;
                 var moved = false;
+                // The pointer delta is VISUAL px and ann.x / ann.y are
+                // LOGICAL SVG coords; this drag re-bases sx / sy on
+                // every move, so an unscaled delta compounds as it goes.
+                // Exactly 1 off the standalone shell.
+                var vScale = _gb2ViewScale(svg);
                 function onMove(ev) {
-                    var dx = ev.clientX - sx;
-                    var dy = ev.clientY - sy;
+                    var dx = (ev.clientX - sx) / vScale;
+                    var dy = (ev.clientY - sy) / vScale;
                     if (!moved && (Math.abs(dx) > ANN_DRAG_THRESHOLD_PX ||
                                    Math.abs(dy) > ANN_DRAG_THRESHOLD_PX)) {
                         moved = true;
@@ -18680,6 +18777,13 @@
         // capture, freezing the drag). Full redraw runs on pointerup.
         function attachAnnotationDrag(el, ann, onMove, applyLive) {
             var down = false, sx = 0, sy = 0, moved = false;
+            // The pointer deltas below are VISUAL px while ann.x / ann.y
+            // are LOGICAL SVG user coords: under the standalone shell's
+            // view zoom the annotation would outrun the cursor without
+            // this factor. Measured once per gesture at pointerdown (a
+            // per-move read would force layout at 60Hz), and exactly 1
+            // wherever nothing zooms.
+            var vScale = 1;
             // Gesture-total / applied-total trackers for the Shift
             // axis lock (onMove consumers are incremental, so the
             // lock must be computed on totals and re-emitted as
@@ -18696,6 +18800,7 @@
                 e.preventDefault(); e.stopPropagation();
                 down = true; moved = false;
                 sx = e.clientX; sy = e.clientY;
+                vScale = _gb2ViewScale(svg);
                 totX = 0; totY = 0; appX = 0; appY = 0;
                 multiTargets = null;
                 // Multi-drag: only when the inspector selection
@@ -18722,8 +18827,8 @@
             });
             el.addEventListener("pointermove", function (e) {
                 if (!down) return;
-                var dx = e.clientX - sx;
-                var dy = e.clientY - sy;
+                var dx = (e.clientX - sx) / vScale;
+                var dy = (e.clientY - sy) / vScale;
                 if (!moved && (Math.abs(dx) > ANN_DRAG_THRESHOLD_PX ||
                                Math.abs(dy) > ANN_DRAG_THRESHOLD_PX)) {
                     moved = true;
@@ -19336,10 +19441,15 @@
                     // and the position is remembered for the session via
                     // window.__gb2_cvdBadgePos so it survives re-renders. Position
                     // is clamped to the chart container so it can't be lost.
-                    var _bd = { down: false, moved: false, sx: 0, sy: 0, sl: 0, st: 0 };
+                    // vs: the pointer delta is VISUAL px while style.left
+                    // and the wrap.clientWidth clamp below are LOGICAL, so
+                    // the badge ran ahead of the cursor under the standalone
+                    // shell's view zoom. Exactly 1 in jamovi.
+                    var _bd = { down: false, moved: false, sx: 0, sy: 0, sl: 0, st: 0, vs: 1 };
                     _cvdBadgeEl.addEventListener("pointerdown", function (ev) {
                         ev.preventDefault(); ev.stopPropagation();
                         _bd.down = true; _bd.moved = false;
+                        _bd.vs = _gb2ViewScale(svg || wrap);
                         _bd.sx = ev.clientX; _bd.sy = ev.clientY;
                         _bd.sl = parseFloat(_cvdBadgeEl.style.left) || 0;
                         _bd.st = parseFloat(_cvdBadgeEl.style.top) || 0;
@@ -19352,8 +19462,8 @@
                         if (!_bd.moved) return;
                         var ww = wrap.clientWidth || 0, wh = wrap.clientHeight || 0;
                         var bw = _cvdBadgeEl.offsetWidth, bh = _cvdBadgeEl.offsetHeight;
-                        var nl = Math.max(0, Math.min(_bd.sl + dx, Math.max(0, ww - bw)));
-                        var nt = Math.max(0, Math.min(_bd.st + dy, Math.max(0, wh - bh)));
+                        var nl = Math.max(0, Math.min(_bd.sl + dx / _bd.vs, Math.max(0, ww - bw)));
+                        var nt = Math.max(0, Math.min(_bd.st + dy / _bd.vs, Math.max(0, wh - bh)));
                         _cvdBadgeEl.style.left = nl + "px";
                         _cvdBadgeEl.style.top = nt + "px";
                         try { window.__gb2_cvdBadgePos = { left: nl, top: nt }; } catch (_e) {}
@@ -19570,8 +19680,13 @@
             // annotation as a persistent zero-size shape.
             if (_drawDragState) return;
             var st = _drawState();
-            var sx = downEvt.clientX - svgRect.left;
-            var sy = downEvt.clientY - svgRect.top;
+            // svgRect is VISUAL px while the shape coords and the snap
+            // targets (getBBox based) are LOGICAL, so the creation point
+            // is scaled into logical space before it is snapped. Exactly
+            // 1 off the standalone shell.
+            var vScale = _gb2ViewScale(svg);
+            var sx = (downEvt.clientX - svgRect.left) / vScale;
+            var sy = (downEvt.clientY - svgRect.top) / vScale;
             var snap = _gatherSnapTargets();
             var snapped = _snapPoint(sx, sy, snap);
             // Create the annotation in the data model now so live
@@ -19613,6 +19728,9 @@
             _drawDragState = {
                 ann: def,
                 pointerId: downEvt.pointerId,
+                // Carried so the rubber-band move divides by the same
+                // factor without re-measuring on every pointermove.
+                vScale: vScale,
                 startX: snapped.x, startY: snapped.y,
                 startClientX: downEvt.clientX,
                 startClientY: downEvt.clientY,
@@ -19625,8 +19743,9 @@
             if (!_drawDragState) return;
             if (e.pointerId !== _drawDragState.pointerId) return;
             var rect = svg.getBoundingClientRect();
-            var px = e.clientX - rect.left;
-            var py = e.clientY - rect.top;
+            var _vs = _drawDragState.vScale || 1;
+            var px = (e.clientX - rect.left) / _vs;
+            var py = (e.clientY - rect.top) / _vs;
             var snapped = _snapPoint(px, py, _drawDragState.snap);
             // Shift constrains to a square (rect/ellipse) or an
             // axis-aligned line (line/arrow). The constraint is
@@ -19820,7 +19939,13 @@
                 // marqueed items to it.
                 shift: !!(e.ctrlKey || e.metaKey),
                 moved: false,
-                pointerId: e.pointerId
+                pointerId: e.pointerId,
+                // startX / startY stay VISUAL px because _selectInBox
+                // compares them against client rects, but the rect that
+                // draws the marquee is an SVG child whose lengths are
+                // LOGICAL, so the drawing divides by this factor.
+                // Exactly 1 off the standalone shell.
+                vScale: _gb2ViewScale(svg)
             };
             try { svg.setPointerCapture(e.pointerId); } catch (_e) {}
         });
@@ -19837,10 +19962,11 @@
                 marqueeState.moved = true;
                 marqueeRect.style.display = "";
             }
-            marqueeRect.setAttribute("x", Math.min(x1, x2));
-            marqueeRect.setAttribute("y", Math.min(y1, y2));
-            marqueeRect.setAttribute("width", dx);
-            marqueeRect.setAttribute("height", dy);
+            var _mvs = marqueeState.vScale || 1;
+            marqueeRect.setAttribute("x", Math.min(x1, x2) / _mvs);
+            marqueeRect.setAttribute("y", Math.min(y1, y2) / _mvs);
+            marqueeRect.setAttribute("width", dx / _mvs);
+            marqueeRect.setAttribute("height", dy / _mvs);
         });
         function _endMarquee(e) {
             if (_drawDragState) { _shapeDragEnd(e); return; }
@@ -21585,9 +21711,13 @@
                     try {
                         var _fcHSvgR = svg.getBoundingClientRect();
                         var _fcHR = _fcHGrp.getBoundingClientRect();
+                        // Client rects are VISUAL px while addIndicatorBox
+                        // takes SVG user units, so under the standalone view
+                        // zoom the halo landed wide of the plate it outlines.
+                        var _fcHVs = _gb2ViewScale(svg);
                         if (_fcHSvgR.width && _fcHR.width && _fcHR.height) {
-                            addIndicatorBox(_fcHR.left - _fcHSvgR.left, _fcHR.top - _fcHSvgR.top,
-                                _fcHR.width, _fcHR.height, { "class": "gb2-halo-union" });
+                            addIndicatorBox((_fcHR.left - _fcHSvgR.left) / _fcHVs, (_fcHR.top - _fcHSvgR.top) / _fcHVs,
+                                _fcHR.width / _fcHVs, _fcHR.height / _fcHVs, { "class": "gb2-halo-union" });
                         }
                     } catch (_eFcH) {}
                 }
@@ -21982,8 +22112,11 @@
                             // gets a congruent halo.
                             var _svgR = svg.getBoundingClientRect();
                             var _xsR = _xsGrp.getBoundingClientRect();
+                            // Client rects are VISUAL px; addIndicatorBox
+                            // takes SVG user units (see the chi-square halo).
+                            var _xsVs = _gb2ViewScale(svg);
                             if (_svgR.width && _xsR.width && _xsR.height) {
-                                addIndicatorBox(_xsR.left - _svgR.left, _xsR.top - _svgR.top, _xsR.width, _xsR.height,
+                                addIndicatorBox((_xsR.left - _svgR.left) / _xsVs, (_xsR.top - _svgR.top) / _xsVs, _xsR.width / _xsVs, _xsR.height / _xsVs,
                                     { "class": "gb2-halo-union" });
                                 _xfAny = true;
                             }
@@ -22605,15 +22738,18 @@
                 }
                 try {
                     var svgRectL = svg.getBoundingClientRect();
+                    // Client rects are VISUAL px; addIndicatorBox takes SVG
+                    // user units (see the chi-square halo).
+                    var _lgVs = _gb2ViewScale(svg);
                     for (var _ti = 0; _ti < targetEls.length; _ti++) {
                         var _tEl = targetEls[_ti];
                         var clientBbL = _tEl.getBoundingClientRect();
                         if (svgRectL.width && clientBbL.width && clientBbL.height) {
                             addIndicatorBox(
-                                clientBbL.left - svgRectL.left,
-                                clientBbL.top - svgRectL.top,
-                                clientBbL.width,
-                                clientBbL.height
+                                (clientBbL.left - svgRectL.left) / _lgVs,
+                                (clientBbL.top - svgRectL.top) / _lgVs,
+                                clientBbL.width / _lgVs,
+                                clientBbL.height / _lgVs
                             );
                         }
                     }
@@ -24347,11 +24483,17 @@
                     line.style.visibility = "visible";
                 } catch (_v) {}
                 var ptrId = e.pointerId;
+                // The cursor point is VISUAL px while the rotation
+                // centre cx / cy comes from the annotation's LOGICAL
+                // coords: mixing the two skews the angle itself, so the
+                // point is scaled into logical space first. Exactly 1
+                // off the standalone shell.
+                var vScale = _gb2ViewScale(svg);
                 function onMove(ev) {
                     if (ev.pointerId !== ptrId) return;
                     var rect = svg.getBoundingClientRect();
-                    var px = ev.clientX - rect.left;
-                    var py = ev.clientY - rect.top;
+                    var px = (ev.clientX - rect.left) / vScale;
+                    var py = (ev.clientY - rect.top) / vScale;
                     var dx = px - cx;
                     var dy = py - cy;
                     if (dx === 0 && dy === 0) return;
@@ -24544,9 +24686,15 @@
         }
         function _attachShapeHandleDrag(handle, ann, which) {
             var down = false, ptrId = null, aspW = 0, aspH = 0;
+            // The cursor is measured in VISUAL px while ann.x / ann.y /
+            // ann.x2 / ann.y2 and the snap targets are LOGICAL, so it is
+            // scaled into logical space once per gesture. Exactly 1 off
+            // the standalone shell.
+            var vScale = 1;
             handle.addEventListener("pointerdown", function (e) {
                 e.preventDefault(); e.stopPropagation();
                 down = true; ptrId = e.pointerId;
+                vScale = _gb2ViewScale(svg);
                 // Shift = keep-aspect for bbox corner drags; the ratio is
                 // captured at grab time so the lock holds the shape's
                 // CURRENT proportions.
@@ -24569,8 +24717,8 @@
             handle.addEventListener("pointermove", function (e) {
                 if (!down || e.pointerId !== ptrId) return;
                 var rect = svg.getBoundingClientRect();
-                var px = e.clientX - rect.left;
-                var py = e.clientY - rect.top;
+                var px = (e.clientX - rect.left) / vScale;
+                var py = (e.clientY - rect.top) / vScale;
                 // For rotated bbox shapes (rect / ellipse / triangle /
                 // polygon / diamond / star), ann.x / ann.y / ann.x2 /
                 // ann.y2 live in the shape's UNROTATED coord system,
@@ -32805,6 +32953,13 @@
                             var pointerId = downEvt.pointerId;
                             var moved = false;
                             var ghostEl = null;
+                            // The cursor delta is VISUAL px while the ghost's
+                            // translate is a LOGICAL SVG length, so the ghost
+                            // drifted off the pointer under the standalone
+                            // shell's view zoom. Exactly 1 in jamovi. The
+                            // drop-slot maths below compares client rect
+                            // against client rect and needs none of this.
+                            var ghostVS = 1;
                             var dropIndicator = null;
                             var dropTargetIdx = -1;
                             // Snapshot current order from the
@@ -32851,6 +33006,7 @@
                                     // Dim the source strip, make a
                                     // visual ghost that follows the
                                     // cursor.
+                                    ghostVS = _gb2ViewScale(svg || _stripEl);
                                     _stripEl.style.opacity = "0.3";
                                     ghostEl = _stripEl.cloneNode(true);
                                     ghostEl.removeAttribute("data-facet-strip");
@@ -32871,7 +33027,7 @@
                                 // Move ghost with cursor.
                                 if (ghostEl) {
                                     ghostEl.setAttribute("transform",
-                                        "translate(" + dx + "," + dy + ")");
+                                        "translate(" + (dx / ghostVS) + "," + (dy / ghostVS) + ")");
                                 }
                                 // Compute target index by nearest
                                 // strip center to cursor X.
@@ -38226,6 +38382,10 @@
                             var startX = 0, startY = 0;
                             var startOffX = 0, startOffY = 0;
                             var moved = false;
+                            // The pointer delta is VISUAL px while the
+                            // overlay offset is a LOGICAL SVG length.
+                            // Measured once per gesture; exactly 1 in jamovi.
+                            var statsVS = 1;
                             // Swallow the browser-synthesized
                             // click that fires after pointerup.
                             // Without this, the click bubbles to
@@ -38243,6 +38403,7 @@
                                 e.stopPropagation();
                                 down = true;
                                 moved = false;
+                                statsVS = _gb2ViewScale(svg || el);
                                 startX = e.clientX;
                                 startY = e.clientY;
                                 // Read CURRENT offsets at drag-start
@@ -38268,8 +38429,8 @@
                                 }
                                 if (moved) {
                                     _statsG.setAttribute("transform",
-                                        "translate(" + (startOffX + dx) +
-                                        "," + (startOffY + dy) + ")");
+                                        "translate(" + (startOffX + dx / statsVS) +
+                                        "," + (startOffY + dy / statsVS) + ")");
                                 }
                             });
                             function _endDrag(e) {
@@ -38280,8 +38441,8 @@
                                 if (moved) {
                                     var dx = e.clientX - startX;
                                     var dy = e.clientY - startY;
-                                    var newX = Math.round(startOffX + dx);
-                                    var newY = Math.round(startOffY + dy);
+                                    var newX = Math.round(startOffX + dx / statsVS);
+                                    var newY = Math.round(startOffY + dy / statsVS);
                                     data.xyStatsOffsetX = newX;
                                     data.xyStatsOffsetY = newY;
                                     if (hasSetOption) {
@@ -38438,6 +38599,12 @@
                                 el.setAttribute("pointer-events", "all");
                                 var rzDown = false, rzMoved = false;
                                 var rzX = 0, rzY = 0, rzW = 0, rzH = 0;
+                                // The pointer delta is VISUAL px while the
+                                // box dimensions committed below are LOGICAL,
+                                // so the plate outgrew the handle under the
+                                // standalone shell's view zoom. Measured once
+                                // per gesture; exactly 1 in jamovi.
+                                var rzVS = 1;
                                 el.addEventListener("mouseenter", function () {
                                     if (!rzDown) el.setAttribute("fill-opacity", "0.22");
                                 });
@@ -38453,6 +38620,7 @@
                                     e.stopPropagation();
                                     rzDown = true;
                                     rzMoved = false;
+                                    rzVS = _gb2ViewScale(svg || el);
                                     rzX = e.clientX; rzY = e.clientY;
                                     rzW = _curW; rzH = _curH;
                                     el.setAttribute("fill-opacity", "0.35");
@@ -38469,11 +38637,11 @@
                                     }
                                     var _mn = _statsMinSize();
                                     if (axis === "w" || axis === "c") {
-                                        var nw = rzW + _wSign * ddx;
+                                        var nw = rzW + _wSign * ddx / rzVS;
                                         _curW = Math.max(_mn.w, Math.min(nw, _rszMaxW));
                                     }
                                     if (axis === "h" || axis === "c") {
-                                        var nh = rzH + _hSign * ddy;
+                                        var nh = rzH + _hSign * ddy / rzVS;
                                         _curH = Math.max(_mn.h, Math.min(nh, _rszMaxH));
                                     }
                                     _layoutStats(_curW, _curH);
@@ -44621,6 +44789,10 @@
                     try { el.style.cursor = "grab"; } catch (_eC) {}
                     var down = false, moved = false;
                     var startX = 0, startY = 0, startDX = 0, startDY = 0;
+                    // The pointer delta is VISUAL px while the plate offset
+                    // is a LOGICAL SVG length. Measured once per gesture;
+                    // exactly 1 in jamovi.
+                    var fcVS = 1;
                     // Swallow the browser-synthesized click after
                     // pointerup so the document-level outside-click
                     // handler can't tear the freshly-opened panel down
@@ -44630,6 +44802,7 @@
                         if (e.button !== 0) return;
                         e.preventDefault(); e.stopPropagation();
                         down = true; moved = false; _fcDragging = false;
+                        fcVS = _gb2ViewScale(svg || el);
                         startX = e.clientX; startY = e.clientY;
                         startDX = (typeof data.freqChisqDX === "number" && isFinite(data.freqChisqDX)) ? data.freqChisqDX : 0;
                         startDY = (typeof data.freqChisqDY === "number" && isFinite(data.freqChisqDY)) ? data.freqChisqDY : 0;
@@ -44645,7 +44818,7 @@
                         }
                         if (moved) {
                             _fcG.setAttribute("transform",
-                                "translate(" + (startDX + dx) + "," + (startDY + dy) + ")");
+                                "translate(" + (startDX + dx / fcVS) + "," + (startDY + dy / fcVS) + ")");
                         }
                     });
                     function _fcEnd(e) {
@@ -44654,8 +44827,8 @@
                         try { el.releasePointerCapture(e.pointerId); } catch (_eR) {}
                         try { el.style.cursor = "grab"; } catch (_eC3) {}
                         if (moved) {
-                            var ndx = Math.round(startDX + (e.clientX - startX));
-                            var ndy = Math.round(startDY + (e.clientY - startY));
+                            var ndx = Math.round(startDX + (e.clientX - startX) / fcVS);
+                            var ndy = Math.round(startDY + (e.clientY - startY) / fcVS);
                             data.freqChisqDX = ndx;
                             data.freqChisqDY = ndy;
                             if (hasSetOption) {
@@ -44869,10 +45042,16 @@
                     var startCX = 0, startCY = 0;
                     var startOffX = 0, startOffY = 0;
                     var moved = false;
+                    // The pointer delta is VISUAL px while the legend offset
+                    // is a LOGICAL SVG length, so under the standalone
+                    // shell's view zoom the legend outran the cursor.
+                    // Measured once per gesture; exactly 1 in jamovi.
+                    var legVS = 1;
                     legBgRect.addEventListener("pointerdown", function (e) {
                         e.preventDefault(); e.stopPropagation();
                         legDraggingFlag.v = true;
                         moved = false;
+                        legVS = _gb2ViewScale(svg || legBgRect);
                         startCX = e.clientX; startCY = e.clientY;
                         startOffX = (typeof data.legendOffsetX === "number") ? data.legendOffsetX : 0;
                         startOffY = (typeof data.legendOffsetY === "number") ? data.legendOffsetY : 0;
@@ -44886,8 +45065,8 @@
                             moved = true;
                         }
                         if (!moved) return;
-                        var nx = snapDrag(startOffX + dx);
-                        var ny = snapDrag(startOffY + dy);
+                        var nx = snapDrag(startOffX + dx / legVS);
+                        var ny = snapDrag(startOffY + dy / legVS);
                         data.legendOffsetX = nx;
                         data.legendOffsetY = ny;
                         // Apply the persisted offset PLUS the chrome
@@ -45214,6 +45393,11 @@
                         var pdown = false;
                         var moved = false;
                         var sx = 0, sy = 0;
+                        // The pointer delta is VISUAL px while
+                        // legendItemOffsets are LOGICAL SVG lengths. One
+                        // measurement per gesture keeps the rows under the
+                        // cursor at any view zoom; exactly 1 in jamovi.
+                        var rowVS = 1;
                         var pdMulti = false;
                         var pdAlt = false;
                         // Snapshot of every row participating in this
@@ -45229,6 +45413,7 @@
                             moved = false;
                             pdMulti = !!(e.ctrlKey || e.metaKey);
                             pdAlt = !!e.altKey;
+                            rowVS = _gb2ViewScale(svg || rect);
                             sx = e.clientX; sy = e.clientY;
                             try { rect.setPointerCapture(e.pointerId); } catch (_e) {}
                             // If the user pressed without the modifier
@@ -45312,8 +45497,8 @@
                                         primary = dragItems[_pi]; break;
                                     }
                                 }
-                                var rawDx = primary.startDx + ddx;
-                                var rawDy = primary.startDy + ddy;
+                                var rawDx = primary.startDx + ddx / rowVS;
+                                var rawDy = primary.startDy + ddy / rowVS;
                                 // Pass the SWATCH rect to the snap
                                 // helper, not the row's <g>. Snap
                                 // peers are also other swatches, so
@@ -46306,6 +46491,11 @@
                 try { rect = badge.getBoundingClientRect(); } catch (_e) { return; }
                 var wrapRect;
                 try { wrapRect = wrap.getBoundingClientRect(); } catch (_e) { return; }
+                // Those rects and the cursor are VISUAL px while
+                // badge.style.left is LOGICAL, so the badge outran the
+                // cursor under the standalone shell's view zoom. Measured
+                // once per gesture; exactly 1 in jamovi.
+                var hpVS = _gb2ViewScale(svg || wrap);
                 // Cursor offset from badge top-left, in wrap coords.
                 var grabOffsetX = e.clientX - rect.left;
                 var grabOffsetY = e.clientY - rect.top;
@@ -46325,12 +46515,12 @@
                         badge.style.right = "auto";
                         badge.style.transition = "none";
                     }
-                    var newLeft = ev.clientX - wrapRect.left - grabOffsetX;
-                    var newTop  = ev.clientY - wrapRect.top  - grabOffsetY;
+                    var newLeft = (ev.clientX - wrapRect.left - grabOffsetX) / hpVS;
+                    var newTop  = (ev.clientY - wrapRect.top  - grabOffsetY) / hpVS;
                     // Clamp roughly inside the wrap so the badge
                     // can't be dragged completely out of view.
-                    var maxLeft = Math.max(0, wrapRect.width  - rect.width);
-                    var maxTop  = Math.max(0, wrapRect.height - rect.height);
+                    var maxLeft = Math.max(0, (wrapRect.width  - rect.width)  / hpVS);
+                    var maxTop  = Math.max(0, (wrapRect.height - rect.height) / hpVS);
                     if (newLeft < 0) newLeft = 0;
                     if (newLeft > maxLeft) newLeft = maxLeft;
                     if (newTop  < 0) newTop  = 0;
@@ -47415,7 +47605,13 @@
         // pixels relative to svg's content area).
         function _clientToSvg(clientX, clientY) {
             var rect = svg.getBoundingClientRect();
-            return { x: clientX - rect.left, y: clientY - rect.top };
+            // The rect is VISUAL px while the promise above is LOGICAL:
+            // callers compare this point against a centre measured
+            // through getCTM. Only the standalone shell's view zoom
+            // separates the two spaces, and it resolves to exactly 1
+            // everywhere else, so this divide is a no-op there.
+            var vs = _gb2ViewScale(svg);
+            return { x: (clientX - rect.left) / vs, y: (clientY - rect.top) / vs };
         }
 
         rhCircle.addEventListener("pointerdown", function (e) {
@@ -47487,11 +47683,18 @@
             pt.y = localBb.y + localBb.height / 2;
             var screen = pt.matrixTransform(screenCtm);
             var wrapBb = wrap.getBoundingClientRect();
+            // Two spaces meet here: localWidth / localHeight come from
+            // getBBox and are LOGICAL, while the screen point and the
+            // wrap rect are both VISUAL. The editor is an absolutely
+            // positioned child of the zoomed wrap, so its left / top are
+            // LOGICAL too - bring the centre into that same space or the
+            // box drifts off the label it edits. Exactly 1 in jamovi.
+            var vs = _gb2ViewScale(svg);
             return {
                 localWidth: localBb.width,
                 localHeight: localBb.height,
-                centerX: screen.x - wrapBb.left,
-                centerY: screen.y - wrapBb.top
+                centerX: (screen.x - wrapBb.left) / vs,
+                centerY: (screen.y - wrapBb.top) / vs
             };
         }
         function showInlineTextEditor(dragId, fallbackAnchor) {
@@ -47512,14 +47715,19 @@
                     var wrapBb = wrap.getBoundingClientRect();
                     var styleId0 = textStyleIdFor(dragId);
                     var s0 = getEffectiveTextStyle(styleId0);
+                    // Both rects are VISUAL, and everything below is fed
+                    // to the editor as a LOGICAL length inside the zoomed
+                    // wrap - the same conversion _measureInlineTextTarget
+                    // makes for the ordinary path. Exactly 1 in jamovi.
+                    var vs0 = _gb2ViewScale(svg);
                     meas = {
                         // Use the style's own font size as the bbox
                         // height so the editor's vertical size matches
                         // what the rendered title will look like.
-                        localWidth: Math.max(60, fbb.width * 0.6),
+                        localWidth: Math.max(60, (fbb.width / vs0) * 0.6),
                         localHeight: Math.max(s0.fontSize, 16),
-                        centerX: fbb.left - wrapBb.left + fbb.width / 2,
-                        centerY: fbb.top - wrapBb.top + fbb.height / 2
+                        centerX: (fbb.left - wrapBb.left + fbb.width / 2) / vs0,
+                        centerY: (fbb.top - wrapBb.top + fbb.height / 2) / vs0
                     };
                 }
             }
@@ -98163,16 +98371,26 @@
                 var op = findMenu.offsetParent;
                 if (!op) return;
                 var or = op.getBoundingClientRect(), br = findBtn.getBoundingClientRect();
-                var vw = window.innerWidth || document.documentElement.clientWidth || 800;
-                var width = Math.min(360, Math.max(260, Math.min(vw - 16, or.width > 0 ? or.width - 12 : 360)));
+                // Every rect here, and the viewport size, is in VISUAL
+                // pixels, while the width / left / max-height written below
+                // are LOGICAL: this menu hangs in the zoomed chart wrap, not
+                // in the counter-zoomed toolbar. Convert the measurements
+                // once so the whole calculation happens in one space and the
+                // px constants keep meaning what they say. Exactly 1 in
+                // jamovi, which applies no zoom.
+                var _fpS = _gb2ViewScale(svg);
+                var _orW = or.width / _fpS, _orL = or.left / _fpS;
+                var _brR = br.right / _fpS, _orT = or.top / _fpS;
+                var vw = (window.innerWidth || document.documentElement.clientWidth || 800) / _fpS;
+                var width = Math.min(360, Math.max(260, Math.min(vw - 16, _orW > 0 ? _orW - 12 : 360)));
                 findMenu.style.width = width + "px";
-                var viewportLeft = Math.max(8, Math.min(vw - width - 8, br.right - width));
-                findMenu.style.left = Math.round(viewportLeft - or.left) + "px";
+                var viewportLeft = Math.max(8, Math.min(vw - width - 8, _brR - width));
+                findMenu.style.left = Math.round(viewportLeft - _orL) + "px";
                 findMenu.style.right = "auto";
                 var gtFly = wrap.querySelector('[data-role="graphtype-flyout"]');
                 findMenu.style.top = (gtFly && gtFly.style && gtFly.style.top) ? gtFly.style.top : "6px";
-                var vh = window.innerHeight || document.documentElement.clientHeight || 700;
-                var topV = or.top + (parseFloat(findMenu.style.top) || 6);
+                var vh = (window.innerHeight || document.documentElement.clientHeight || 700) / _fpS;
+                var topV = _orT + (parseFloat(findMenu.style.top) || 6);
                 findResults.style.maxHeight = Math.max(150, Math.min(300, vh - topV - 72)) + "px";
             } catch (_e) {}
         }
@@ -98593,15 +98811,21 @@
             note.title = note.title + " -- drag to move.";
             (function () {
                 var down = false, moved = false, sx = 0, sy = 0, sLeft = 0, sTop = 0;
+                // Both rects and the cursor are VISUAL px while
+                // note.style.left is LOGICAL, so the pill ran ahead of the
+                // cursor under the standalone shell's view zoom. Measured
+                // once per gesture; exactly 1 in jamovi.
+                var fpnVS = 1;
                 note.addEventListener("pointerdown", function (e) {
                     if (e.button !== 0) return;
                     if (e.target && e.target.closest && e.target.closest("button")) return;
                     e.preventDefault(); e.stopPropagation();
                     down = true; moved = false;
+                    fpnVS = _gb2ViewScale(svg || wrap);
                     sx = e.clientX; sy = e.clientY;
                     var r = note.getBoundingClientRect();
                     var wr0 = wrap.getBoundingClientRect();
-                    sLeft = r.left - wr0.left; sTop = r.top - wr0.top;
+                    sLeft = (r.left - wr0.left) / fpnVS; sTop = (r.top - wr0.top) / fpnVS;
                     note.style.cursor = "grabbing";
                     try { note.setPointerCapture(e.pointerId); } catch (_eC) {}
                 });
@@ -98611,9 +98835,9 @@
                     if (!moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
                     moved = true;
                     var wr1 = wrap.getBoundingClientRect();
-                    var nl = sLeft + dx, nt = sTop + dy;
-                    nl = Math.max(0, Math.min(nl, Math.max(0, wr1.width - note.offsetWidth)));
-                    nt = Math.max(0, Math.min(nt, Math.max(0, wr1.height - note.offsetHeight)));
+                    var nl = sLeft + dx / fpnVS, nt = sTop + dy / fpnVS;
+                    nl = Math.max(0, Math.min(nl, Math.max(0, wr1.width / fpnVS - note.offsetWidth)));
+                    nt = Math.max(0, Math.min(nt, Math.max(0, wr1.height / fpnVS - note.offsetHeight)));
                     note.style.left = nl + "px"; note.style.top = nt + "px";
                 });
                 function _fpnUp() {
@@ -102987,6 +103211,11 @@
         var startMouseX = 0, startMouseY = 0;
         var startInchesW = inchesW, startInchesH = inchesH;
         var startRatioXY = 0; // inchesH / inchesW captured at drag start
+        // The pointer delta is VISUAL px while PX_PER_INCH is the chart's
+        // LOGICAL px per inch, so the figure grew faster than the corner the
+        // hand was holding under the standalone shell's view zoom. Measured
+        // once per gesture; exactly 1 in jamovi.
+        var gripVS = 1;
         function _sizeTagShow() {
             if (sizeTagHide) { clearTimeout(sizeTagHide); sizeTagHide = null; }
             // inches on top (continuity with the Sizing panel, where the
@@ -103009,6 +103238,7 @@
         function onPointerDownXY(e) {
             e.preventDefault(); e.stopPropagation();
             draggingXY = true;
+            gripVS = _gb2ViewScale(svg || wrap);
             startMouseX = e.clientX; startMouseY = e.clientY;
             startInchesW = inchesW; startInchesH = inchesH;
             startRatioXY = (inchesW > 0) ? (inchesH / inchesW) : 1;
@@ -103021,8 +103251,8 @@
             if (!draggingXY) return;
             var dx = e.clientX - startMouseX;
             var dy = e.clientY - startMouseY;
-            var newW = clamp(startInchesW + dx / PX_PER_INCH, MIN_W_IN, MAX_W_IN);
-            var newH = clamp(startInchesH + dy / PX_PER_INCH, MIN_H_IN, MAX_H_IN);
+            var newW = clamp(startInchesW + dx / gripVS / PX_PER_INCH, MIN_W_IN, MAX_W_IN);
+            var newH = clamp(startInchesH + dy / gripVS / PX_PER_INCH, MIN_H_IN, MAX_H_IN);
             // Shift = momentary aspect lock (same math as the Sizing
             // panel's persistent chartAspectLock checkbox): the dominant
             // pointer axis drives, the other follows the grab-time ratio.
