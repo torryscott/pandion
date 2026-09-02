@@ -2754,6 +2754,68 @@
   .ps-engine-dock:not(:empty) {
     display: block; padding: 10px 10px 12px; border-top: 1px solid var(--ps-l2);
   }
+  /* The panel title bar is one nowrap flex row: identity left, the
+     "Applies to" scope cluster and the eye right. That fits the 700px
+     lower panel and does not fit a 360px rail: flexbox squeezed the title
+     cell to 26px while its crumb still painted 120px, so "Border - On
+     campus" ran under "APPLIES TO" (Torry's screenshot, Sep 2 2026).
+     Nothing can be dropped, so in the dock the row wraps and the scope
+     cluster takes its own line under the title. Scoped to the dock, so
+     the lower panel and jamovi keep the single row they have room for;
+     the !important beats the engine's inline auto-margin, which is what
+     anchors the cluster beside the eye when the two do share a line. */
+  /* The switch itself: the house two-button idiom (.ps-btn, the active one
+     .ps-primary), the same language the Preferences tabs use. */
+  .ps-dock-switch { display: none; }
+  body.ps-dock-rail #ps-inspector-chart.ps-dock-live .ps-dock-switch {
+    display: flex; gap: 6px; padding: 10px 12px 2px;
+  }
+  .ps-dock-switch .ps-btn { flex: 1 1 0; min-width: 0; padding: 5px 8px; font-size: 12px; }
+  /* Editing owns the column: the setup rows stand down; the switch and the
+     panel stay. Everything is still one set of controls, just relocated. */
+  body.ps-dock-rail #ps-inspector-chart.ps-dock-editing
+    > :not(#ps-engine-dock):not(.ps-dock-switch) { display: none; }
+  body.ps-dock-rail #ps-inspector-chart.ps-dock-editing #ps-engine-dock {
+    border-top: 0; padding-top: 6px;
+  }
+  /* Between selections the engine HIDES its panel but leaves the element in
+     the dock, so :empty never fires and the dock's own padding and rule
+     drew an empty strip at the foot of the column. Collapse the box, but
+     never display:none the dock: the engine measures it to size the panel,
+     and a hidden dock measures zero. */
+  body.ps-dock-rail #ps-inspector-chart:not(.ps-dock-live) #ps-engine-dock,
+  body.ps-dock-rail #ps-inspector-chart.ps-dock-live:not(.ps-dock-editing) #ps-engine-dock {
+    /* Vertical only: the engine sizes the panel to the dock's WIDTH, so
+       dropping the side padding here would hand it a 20px-wider box to
+       render into the moment anything re-rendered on the setup view. */
+    max-height: 0; overflow: hidden; padding-top: 0; padding-bottom: 0;
+    border-top: 0;
+  }
+  #ps-engine-dock [data-role="inspector-title"] { flex-wrap: wrap; }
+  /* Wrapping alone still lets a long level name run off: the title cell's
+     flex base is its own max-content (set inline by the engine) and the
+     crumb inside it is inline-flex, so it floors at the width of its
+     nowrap title line and paints straight through the panel border. With
+     a real level name ("Students living on campus in university halls of
+     residence") that measured 101px outside the panel and pushed the eye
+     onto its own line. Give the cell a zero base so it takes the room
+     that is actually there, clamp the crumb to it, and the ellipsis the
+     engine already declares on the title line finally engages. The
+     eyebrow needs the clamp too, or it wraps and grows the bar instead.
+     Both are inert wherever the name fits: an unsqueezed cell is exactly
+     the crumb's max-content, so 100% of it changes nothing. */
+  #ps-engine-dock [data-role="inspector-title"] > span:first-child:not([data-role]) {
+    flex: 1 1 0 !important; min-width: 0;
+  }
+  #ps-engine-dock [data-role="gb2-crumb"] { max-width: 100%; overflow: hidden; }
+  #ps-engine-dock [data-role="gb2-crumb"] > span {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #ps-engine-dock [data-role="inspector-title"] [data-role="scope-title-host"],
+  #ps-engine-dock [data-role="inspector-title"] [data-role="bs-title-scope"] {
+    flex-basis: 100%; margin-left: 0 !important; margin-right: 0 !important;
+    margin-top: 6px; order: 3;
+  }
   /* A wider default column while the panel lives here; a width the user
      dragged is set inline by the splitter and wins over this. */
   body.ps-dock-rail .ps-app-body { --ps-insp-w: 360px; }
@@ -4483,6 +4545,18 @@
       <span id="ps-inspector-subtitle">Variables and roles</span>
     </div>
     <div id="ps-inspector-chart" class="ps-inspector-pane">
+      <!-- The column's two views while the editing panel is docked here
+           (Torry, Sep 2 2026: "I'd like it to be in its own space ... toggle
+           between the chart setup and the panels that pop up"). Selecting a
+           chart part hands the column to the panel; this is the way back.
+           Hidden unless the rail actually holds a panel, so the default
+           column is exactly as it was. -->
+      <div class="ps-dock-switch" role="tablist" aria-label="Settings column view">
+        <button type="button" class="ps-btn" role="tab" id="ps-dock-switch-setup"
+                aria-selected="false" aria-controls="ps-inspector-chart">Chart setup</button>
+        <button type="button" class="ps-btn ps-primary" role="tab" id="ps-dock-switch-edit"
+                aria-selected="true" aria-controls="ps-engine-dock">Editing</button>
+      </div>
       <div class="ps-controls-row">
         <span class="ps-role">
           <label class="ps-role-label" for="ps-module">Analysis</label>
@@ -11052,7 +11126,107 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       try { var dk = el("ps-engine-dock"); while (dk && dk.firstChild) dk.removeChild(dk.firstChild); } catch (e4) {}
     }
     if (rerender) { try { render(); } catch (e3) {} }
+    try { syncDockSwitch(); } catch (e5) {}
   }
+  // The column's two views while the panel is docked here (Torry, Sep 2
+  // 2026). Stacked, the setup sat above the panel, so reaching the panel
+  // meant scrolling past every role slot; selecting a chart part now hands
+  // the column to the panel and the switch is the way back. There is still
+  // ONE set of controls: this only decides which of the two the column
+  // shows. Nothing here runs in the default below-the-chart mode.
+  var DOCK_EDITING = true, DOCK_EDIT_WAS = false, DOCK_SYNC_QUEUED = false;
+  // Which chart the column is currently showing a panel for.
+  var DOCK_DOC = null;
+  // The column has two views now, so it has two headings. Defined once and
+  // used by both the render that sets the head and the switch that changes
+  // which view is on.
+  var DOCK_HEAD_SETUP = { title: "Chart setup",
+                          sub: "Data roles; select chart parts to style below" };
+  var DOCK_HEAD_EDIT = { title: "Chart editing",
+                         sub: "The part you selected; switch back for data roles" };
+  // "Is a panel showing" is a VISIBILITY question, never an :empty one: the
+  // engine leaves its panel element in the dock between selections and just
+  // hides it (measured Sep 2 2026). Read the child's OWN computed display,
+  // which an ancestor's display cannot change - reading geometry instead
+  // would deadlock, since the class this feeds is what gives the dock a box.
+  function dockPanelShowing() {
+    if (!panelDockIsRail()) return false;
+    var dk = el("ps-engine-dock");
+    if (!dk) return false;
+    for (var i = 0; i < dk.children.length; i++) {
+      try {
+        if (window.getComputedStyle(dk.children[i]).display !== "none") return true;
+      } catch (eD) {}
+    }
+    return false;
+  }
+  function syncDockSwitch() {
+    var pane = el("ps-inspector-chart");
+    if (!pane) return;
+    var live = dockPanelShowing();
+    var editing = live && DOCK_EDITING;
+    pane.classList.toggle("ps-dock-live", live);
+    pane.classList.toggle("ps-dock-editing", editing);
+    var setup = el("ps-dock-switch-setup"), edit = el("ps-dock-switch-edit");
+    if (setup && edit) {
+      setup.classList.toggle("ps-primary", !editing);
+      edit.classList.toggle("ps-primary", editing);
+      setup.setAttribute("aria-selected", editing ? "false" : "true");
+      edit.setAttribute("aria-selected", editing ? "true" : "false");
+    }
+    // The heading names the view on show. Chart-workspace only, and only
+    // while a chart document is open: the no-document branch writes its
+    // own copy ("Create a chart to begin") and must keep it.
+    try {
+      if (panelDockIsRail() && appWorkspace() === "chart" && workspaceDocument("chart")) {
+        var head = editing ? DOCK_HEAD_EDIT : DOCK_HEAD_SETUP;
+        var ht = el("ps-inspector-title"), hs = el("ps-inspector-subtitle");
+        if (ht) ht.textContent = head.title;
+        if (hs) hs.textContent = head.sub;
+      }
+    } catch (eH) {}
+    // Arriving at the panel, start at its top: the setup rows that were
+    // above it have just stood down, so an inherited scroll offset would
+    // open the panel mid-body.
+    if (editing && !DOCK_EDIT_WAS) {
+      try { var col = document.querySelector(".ps-controls"); if (col) col.scrollTop = 0; } catch (eS) {}
+    }
+    DOCK_EDIT_WAS = editing;
+  }
+  function queueDockSync() {
+    if (DOCK_SYNC_QUEUED) return;
+    DOCK_SYNC_QUEUED = true;
+    try {
+      window.requestAnimationFrame(function () { DOCK_SYNC_QUEUED = false; syncDockSwitch(); });
+    } catch (eQ) { DOCK_SYNC_QUEUED = false; syncDockSwitch(); }
+  }
+  (function wireDockSwitch() {
+    var dk = el("ps-engine-dock");
+    if (!dk) return;
+    // The panel is shown and hidden by the engine, inside its own render,
+    // so the shell watches rather than being told. Coalesced to one pass
+    // per frame: a panel rebuild is many mutations.
+    try {
+      new window.MutationObserver(queueDockSync).observe(dk, {
+        childList: true, subtree: true, attributes: true,
+        attributeFilter: ["style", "class"] });
+    } catch (eO) {}
+    // The engine closes its panel on any document click outside it, so a
+    // bare switch click would ALSO deselect the chart part - the panel
+    // would vanish and take the way back with it (measured Sep 2 2026).
+    // Stopping the click here keeps the selection alive, which is what
+    // makes this a toggle rather than a close button: the part stays
+    // selected (and haloed on the chart) while the setup is on view.
+    var setup = el("ps-dock-switch-setup"), edit = el("ps-dock-switch-edit");
+    if (setup) setup.addEventListener("click", function (ev) {
+      try { ev.stopPropagation(); } catch (eP) {}
+      DOCK_EDITING = false; syncDockSwitch();
+    });
+    if (edit) edit.addEventListener("click", function (ev) {
+      try { ev.stopPropagation(); } catch (eP2) {}
+      DOCK_EDITING = true; syncDockSwitch();
+    });
+  })();
   applyPanelDock(false);   // the hook and the class must precede the first render
 
   // ================================================================ table
@@ -21067,6 +21241,10 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     var host = e.target && e.target.closest &&
       e.target.closest(".graphbuilder2-host");
     if (!host) return;
+    // A click on the chart is a request to edit that part, so the column
+    // goes back to the panel even if the user had stepped over to the
+    // setup view. Rail mode only; below the chart nothing moves.
+    if (panelDockIsRail()) { DOCK_EDITING = true; queueDockSync(); }
     var stamp = { at: Date.now(), y: e.clientY };
     PANEL_REVEAL_STAMP = stamp;
     // Settle-watch: the panel slides open over ~150ms and its content can
@@ -34985,12 +35163,33 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     var ws = appWorkspace(), chartPane = el("ps-inspector-chart");
     var dataPane = el("ps-inspector-data"), layoutPane = el("ps-inspector-layout");
     var doc = workspaceDocument(ws);
+    // A DIFFERENT chart starts on its own setup. Measured before this
+    // guard: adding a chart while the panel owned the column left the new,
+    // empty chart wearing the old chart's panel ("Bars - On campus") with
+    // its own role slots hidden behind it. The engine only replaces the
+    // docked panel when the new chart renders one of its own, so the stale
+    // one is cleared here too. Every path that changes the active document
+    // syncs through this function - add, switch, tab drag, delete, undo -
+    // so one guard covers them all; a workspace bounce is not a document
+    // change and keeps the view you left.
+    if (ws === "chart") {
+      var dockDocId = doc ? doc.id : null;
+      if (dockDocId !== DOCK_DOC) {
+        DOCK_DOC = dockDocId;
+        DOCK_EDITING = false;
+        try {
+          var dk0 = el("ps-engine-dock");
+          while (dk0 && dk0.firstChild) dk0.removeChild(dk0.firstChild);
+        } catch (eDd) {}
+      }
+    }
     chartPane.classList.toggle("ps-inspector-active", ws === "chart" && !!doc);
     dataPane.classList.toggle("ps-inspector-active", ws === "data");
     layoutPane.classList.toggle("ps-inspector-active", ws === "layout" && !!doc);
     el("ps-inspector-pinboard").classList.toggle("ps-inspector-active",
       ws === "pinboard");
     syncSizeviewDisclosure();
+    try { syncDockSwitch(); } catch (eDS) {}
     var fitBox = el("ps-fit-pane");
     if (fitBox) {
       var fitDoc = workspaceDocument(ws);
@@ -35133,9 +35332,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       elOrSink("ps-workspace-title").textContent = c.name;
       elOrSink("ps-workspace-subtitle").textContent =
         MODULES[c.module] ? MODULES[c.module].label : "Chart";
-      el("ps-inspector-title").textContent = "Chart setup";
-      el("ps-inspector-subtitle").textContent =
-        "Data roles; select chart parts to style below";
+      el("ps-inspector-title").textContent = DOCK_HEAD_SETUP.title;
+      el("ps-inspector-subtitle").textContent = DOCK_HEAD_SETUP.sub;
       // The chart's own shape, from the payload the shell already builds:
       // what is plotted and how much of it. An instruction is not a status.
       el("ps-status-context").textContent = chartStatusText(c);
