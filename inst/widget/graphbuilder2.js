@@ -16649,8 +16649,7 @@
             // draw, so nothing moves on load. Horizontal mode keeps
             // absolute coords (ann.y is the spine X there); main-effect
             // brackets join via their full-factor span.
-            if ((data && data.chartOrientation) !== "horizontal" &&
-                ((ann.anchorLeftCat && ann.anchorRightCat) ||
+            if (((ann.anchorLeftCat && ann.anchorRightCat) ||
                  _isMainEffectAnn(ann)) &&
                 typeof window.__gb2_valAxis === "function") {
                 try {
@@ -16659,12 +16658,13 @@
                         Math.min(ann.x, ann.x2), Math.max(ann.x, ann.x2),
                         _vaRel);
                     if (isFinite(_ceilRel)) {
+                        var _outR = (_vaRel && _vaRel.outward) || -1;
                         if (typeof ann.yRel === "number" &&
                             isFinite(ann.yRel)) {
-                            ann.y = _ceilRel - ann.yRel;
+                            ann.y = _ceilRel + _outR * ann.yRel;
                         } else if (typeof ann.y === "number" &&
                                    isFinite(ann.y)) {
-                            ann.yRel = _ceilRel - ann.y;
+                            ann.yRel = _outR * (ann.y - _ceilRel);
                             // first capture on a LEGACY bracket: flag for
                             // the one-shot persist below, or the very next
                             // authoritative rebuild re-bases it at
@@ -31033,6 +31033,19 @@
             window.__gb2_valAxis = function () {
                 return {
                     toPxY: toPxY,
+                    // The VALUE axis, whichever way the chart runs: Y when
+                    // vertical, X when horizontal. A bracket's height is
+                    // stored relative to the data it spans, and that needed
+                    // the value axis - without these three fields the
+                    // relative height could only be computed in vertical
+                    // mode, so flipping a chart to horizontal left every
+                    // bracket's spine at its old pixel coordinate, which the
+                    // horizontal renderer reads as an X (Torry, Sep 2026).
+                    // outward = the direction "beyond the data": up (smaller
+                    // pixel) vertically, right (larger pixel) horizontally.
+                    horizontal: horizontal,
+                    toPxVal: function (v2) { return valuePx(v2); },
+                    outward: horizontal ? 1 : -1,
                     yMin: yMin, yMax: yMax,
                     chartTop: chartTop,
                     setYMax: function (v2) { yMax = v2; }
@@ -52358,7 +52371,13 @@
             var useMax = (gt === "box" || gt === "violin" || gt === "raincloud" ||
                           data.showDataPoints === true);
             var lo = Math.min(x1, x2) - 1, hi = Math.max(x1, x2) + 1;
-            var top = Infinity;
+            // "Ceiling" = the pixel just beyond the data. Vertically that is
+            // the SMALLEST y (the top); horizontally it is the LARGEST x (the
+            // right-hand end of the bars), so the comparison follows the axis.
+            var _hz = va && va.horizontal === true;
+            var _vpx = (va && typeof va.toPxVal === "function")
+                ? va.toPxVal : function (v2) { return va.toPxY(v2); };
+            var top = _hz ? -Infinity : Infinity;
             for (var i = 0; i < cells.length; i++) {
                 var cx = findBarCenterX({ cat: cells[i].cat, group: cells[i].group });
                 if (cx == null || cx < lo || cx > hi) continue;
@@ -52372,10 +52391,10 @@
                     v = b.mean + ((typeof b.se === "number" && isFinite(b.se)) ? b.se : 0);
                 }
                 if (!isFinite(v)) v = (typeof b.mean === "number") ? b.mean : 0;
-                var py = va.toPxY(v);
-                if (py < top) top = py;
+                var py = _vpx(v);
+                if (_hz ? (py > top) : (py < top)) top = py;
             }
-            return isFinite(top) ? top : va.toPxY(va.yMax);
+            return isFinite(top) ? top : _vpx(va.yMax);
         }
         // Re-capture a bracket's RELATIVE height from its current absolute
         // y (Torry, Aug 2 2026). Called wherever a gesture finishes moving
@@ -52384,7 +52403,6 @@
         function _bracketSyncYRel(ann) {
             try {
                 if (!ann || ann.kind !== "bracket") return;
-                if (data && data.chartOrientation === "horizontal") return;
                 var anchored = (ann.anchorLeftCat && ann.anchorRightCat) ||
                     _isMainEffectAnn(ann);
                 if (!anchored) return;
@@ -52393,7 +52411,8 @@
                 var c = _cmpCeilPx(_cmpVisibleCells(),
                     Math.min(ann.x, ann.x2), Math.max(ann.x, ann.x2), va);
                 if (isFinite(c) && typeof ann.y === "number" &&
-                    isFinite(ann.y)) ann.yRel = c - ann.y;
+                    isFinite(ann.y))
+                    ann.yRel = ((va && va.outward) || -1) * (ann.y - c);
             } catch (_eSyr) {}
         }
         // Remove placed (autoGen) brackets. restoreAxis = the USER
