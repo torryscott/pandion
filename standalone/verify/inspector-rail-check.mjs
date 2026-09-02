@@ -368,6 +368,56 @@ const colState = () => page.evaluate(() => {
     'before the guard, it arrived wearing the previous chart\'s panel ' +
     'with its own role slots hidden behind it (' + JSON.stringify(st2) + ')');
 }
+console.log('case 11: nothing escapes the panel, down to the splitter minimum');
+// The rail is draggable, and the panel has to hold at any width the user
+// can reach. Poking the same custom property splitApply writes is the
+// cheapest way to stand at a width without driving the splitter.
+await setDockPref('rail');
+await loadGrouped('On campus residence hall');
+await clickBar();
+const escapees = () => page.evaluate(() => {
+  const panel = document.querySelector('#ps-engine-dock [data-gb2-inspector]');
+  if (!panel) return null;
+  const pr = panel.getBoundingClientRect();
+  const out = [];
+  panel.querySelectorAll('*').forEach(el => {
+    const r = el.getBoundingClientRect();
+    if (r.width > 0 && r.right > pr.right + 1)
+      out.push((el.getAttribute('data-field') || el.getAttribute('data-role') ||
+        el.tagName) + '+' + Math.round(r.right - pr.right));
+  });
+  return { past: out.slice(0, 6), n: out.length,
+           scrollX: panel.scrollWidth - panel.clientWidth,
+           colW: Math.round(document.querySelector('.ps-controls').getBoundingClientRect().width) };
+});
+{
+  const wide = await page.evaluate(() => Math.round(
+    document.querySelector('.ps-controls').getBoundingClientRect().width));
+  ok(wide >= 355,
+    'the rail column really is the wider default: the stylesheet rule that ' +
+    'used to set it never took effect, because splitApply writes the same ' +
+    'custom property inline and an inline value wins (' + wide + 'px)');
+  const widths = [360, 240];
+  for (const w of widths) {
+    await page.evaluate((px) => { document.querySelector('.ps-app-body')
+      .style.setProperty('--ps-insp-w', px + 'px'); }, w);
+    await page.waitForTimeout(400);
+    for (const tab of ['Border', 'Gap']) {
+      await clickAt('[data-bs-tab]', tab);
+      const e2 = await escapees();
+      ok(!!e2 && e2.n === 0 && e2.scrollX === 0,
+        'at ' + w + 'px, the ' + tab + ' tab keeps every control inside the ' +
+        'panel and the panel does not scroll sideways: the Gap tab rows ' +
+        'painted their "px" suffix past the edge, and at the minimum width ' +
+        'the scope cluster ran 32px out (' + JSON.stringify(e2) + ')');
+    }
+  }
+  // Hand the width back to the app's own splitter rather than leaving the
+  // poke in place for the cases that follow.
+  await setDockPref('rail');
+  await page.waitForTimeout(300);
+}
+
 await setDockPref('below');
 {
   const belowState = await page.evaluate(() => {

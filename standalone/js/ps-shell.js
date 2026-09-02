@@ -957,6 +957,10 @@
     if (!rail) {
       try { var dk = el("ps-engine-dock"); while (dk && dk.firstChild) dk.removeChild(dk.firstChild); } catch (e4) {}
     }
+    // The column's default width depends on the dock (see splitMetrics), so
+    // re-apply it: nothing else recomputes the splitter on a preference
+    // change, and the rail would keep the setup column's 330px.
+    try { splitApply(); } catch (e6) {}
     if (rerender) { try { render(); } catch (e3) {} }
     try { syncDockSwitch(); } catch (e5) {}
   }
@@ -10442,7 +10446,14 @@
     var otherKey = key === "rail" ? "inspector" : "rail";
     var other = Number(splitWidths()[otherKey]) || SPLIT_DEFAULT[otherKey];
     var max = Math.max(b[0], Math.min(b[1], total - other - 320));
-    var preferred = Number(splitWidths()[key]) || SPLIT_DEFAULT[key];
+    // The docked panel wants more room than the setup column alone does,
+    // so the rail raises the DEFAULT (a width the user has dragged still
+    // wins: it is the value in splitWidths). Doing it here rather than in
+    // CSS because splitApply writes this variable inline on .ps-app-body,
+    // and an inline custom property beats any stylesheet rule - the rule
+    // this replaces never took effect, and the rail shipped at 330.
+    var preferred = Number(splitWidths()[key]) ||
+      ((key === "inspector" && panelDockIsRail()) ? 360 : SPLIT_DEFAULT[key]);
     return {
       min: b[0],
       max: Math.round(max),

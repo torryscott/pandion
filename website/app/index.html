@@ -2811,14 +2811,26 @@
   #ps-engine-dock [data-role="gb2-crumb"] > span {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  /* The Gap tab's per-category rows are nowrap flex lines built for the
+     wide panel: label, slider, number, "px" needs about 340px and the
+     rail body has 313, so the suffix painted past the panel edge and the
+     panel itself scrolled sideways. Let those rows wrap instead; every
+     module with per-category or per-group gaps shares these two hosts. */
+  #ps-engine-dock [data-field="cat-gaps"] > div,
+  #ps-engine-dock [data-field="grp-gaps"] > div { flex-wrap: wrap; }
   #ps-engine-dock [data-role="inspector-title"] [data-role="scope-title-host"],
   #ps-engine-dock [data-role="inspector-title"] [data-role="bs-title-scope"] {
+    /* Its own line, under the title. It wraps internally too: dragged to
+       the splitter's 240px minimum the cluster is wider than the column,
+       and without this it ran 32px past the panel and made the whole
+       panel scroll sideways. Wrapped, the buttons drop under the label. */
     flex-basis: 100%; margin-left: 0 !important; margin-right: 0 !important;
-    margin-top: 6px; order: 3;
+    margin-top: 6px; order: 3; flex-wrap: wrap;
   }
-  /* A wider default column while the panel lives here; a width the user
-     dragged is set inline by the splitter and wins over this. */
-  body.ps-dock-rail .ps-app-body { --ps-insp-w: 360px; }
+  /* The wider default column for the docked panel is set in splitMetrics,
+     not here: splitApply writes --ps-insp-w inline on .ps-app-body, and an
+     inline custom property beats a stylesheet rule, so the rule that used
+     to sit here never took effect and the rail shipped at 330px. */
   .ps-controls .ps-assign {
     flex-direction: column; flex-wrap: nowrap; gap: 12px; margin: 0; padding: 9px 12px 16px;
   }
@@ -6310,7 +6322,7 @@
 <script src="lib/jspdf.umd.min.979a2ef514.js"></script>
 <script src="lib/svg2pdf.umd.min.4ada250f50.js"></script>
 <script src="lib/graphbuilder2.min.a84f2a7692.js"></script>
-<script src="lib/ps-shell.7d8445dfec.js"></script>
+<script src="lib/ps-shell.528dbe97d5.js"></script>
 <script src="lib/ps-tour.fe1b2fd3ed.js"></script>
 </body>
 </html>
