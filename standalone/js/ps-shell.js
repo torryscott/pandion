@@ -958,7 +958,105 @@
       try { var dk = el("ps-engine-dock"); while (dk && dk.firstChild) dk.removeChild(dk.firstChild); } catch (e4) {}
     }
     if (rerender) { try { render(); } catch (e3) {} }
+    try { syncDockSwitch(); } catch (e5) {}
   }
+  // The column's two views while the panel is docked here (Torry, Sep 2
+  // 2026). Stacked, the setup sat above the panel, so reaching the panel
+  // meant scrolling past every role slot; selecting a chart part now hands
+  // the column to the panel and the switch is the way back. There is still
+  // ONE set of controls: this only decides which of the two the column
+  // shows. Nothing here runs in the default below-the-chart mode.
+  var DOCK_EDITING = true, DOCK_EDIT_WAS = false, DOCK_SYNC_QUEUED = false;
+  // The column has two views now, so it has two headings. Defined once and
+  // used by both the render that sets the head and the switch that changes
+  // which view is on.
+  var DOCK_HEAD_SETUP = { title: "Chart setup",
+                          sub: "Data roles; select chart parts to style below" };
+  var DOCK_HEAD_EDIT = { title: "Chart editing",
+                         sub: "The part you selected; switch back for data roles" };
+  // "Is a panel showing" is a VISIBILITY question, never an :empty one: the
+  // engine leaves its panel element in the dock between selections and just
+  // hides it (measured Sep 2 2026). Read the child's OWN computed display,
+  // which an ancestor's display cannot change - reading geometry instead
+  // would deadlock, since the class this feeds is what gives the dock a box.
+  function dockPanelShowing() {
+    if (!panelDockIsRail()) return false;
+    var dk = el("ps-engine-dock");
+    if (!dk) return false;
+    for (var i = 0; i < dk.children.length; i++) {
+      try {
+        if (window.getComputedStyle(dk.children[i]).display !== "none") return true;
+      } catch (eD) {}
+    }
+    return false;
+  }
+  function syncDockSwitch() {
+    var pane = el("ps-inspector-chart");
+    if (!pane) return;
+    var live = dockPanelShowing();
+    var editing = live && DOCK_EDITING;
+    pane.classList.toggle("ps-dock-live", live);
+    pane.classList.toggle("ps-dock-editing", editing);
+    var setup = el("ps-dock-switch-setup"), edit = el("ps-dock-switch-edit");
+    if (setup && edit) {
+      setup.classList.toggle("ps-primary", !editing);
+      edit.classList.toggle("ps-primary", editing);
+      setup.setAttribute("aria-selected", editing ? "false" : "true");
+      edit.setAttribute("aria-selected", editing ? "true" : "false");
+    }
+    // The heading names the view on show. Chart-workspace only, and only
+    // while a chart document is open: the no-document branch writes its
+    // own copy ("Create a chart to begin") and must keep it.
+    try {
+      if (panelDockIsRail() && appWorkspace() === "chart" && workspaceDocument("chart")) {
+        var head = editing ? DOCK_HEAD_EDIT : DOCK_HEAD_SETUP;
+        var ht = el("ps-inspector-title"), hs = el("ps-inspector-subtitle");
+        if (ht) ht.textContent = head.title;
+        if (hs) hs.textContent = head.sub;
+      }
+    } catch (eH) {}
+    // Arriving at the panel, start at its top: the setup rows that were
+    // above it have just stood down, so an inherited scroll offset would
+    // open the panel mid-body.
+    if (editing && !DOCK_EDIT_WAS) {
+      try { var col = document.querySelector(".ps-controls"); if (col) col.scrollTop = 0; } catch (eS) {}
+    }
+    DOCK_EDIT_WAS = editing;
+  }
+  function queueDockSync() {
+    if (DOCK_SYNC_QUEUED) return;
+    DOCK_SYNC_QUEUED = true;
+    try {
+      window.requestAnimationFrame(function () { DOCK_SYNC_QUEUED = false; syncDockSwitch(); });
+    } catch (eQ) { DOCK_SYNC_QUEUED = false; syncDockSwitch(); }
+  }
+  (function wireDockSwitch() {
+    var dk = el("ps-engine-dock");
+    if (!dk) return;
+    // The panel is shown and hidden by the engine, inside its own render,
+    // so the shell watches rather than being told. Coalesced to one pass
+    // per frame: a panel rebuild is many mutations.
+    try {
+      new window.MutationObserver(queueDockSync).observe(dk, {
+        childList: true, subtree: true, attributes: true,
+        attributeFilter: ["style", "class"] });
+    } catch (eO) {}
+    // The engine closes its panel on any document click outside it, so a
+    // bare switch click would ALSO deselect the chart part - the panel
+    // would vanish and take the way back with it (measured Sep 2 2026).
+    // Stopping the click here keeps the selection alive, which is what
+    // makes this a toggle rather than a close button: the part stays
+    // selected (and haloed on the chart) while the setup is on view.
+    var setup = el("ps-dock-switch-setup"), edit = el("ps-dock-switch-edit");
+    if (setup) setup.addEventListener("click", function (ev) {
+      try { ev.stopPropagation(); } catch (eP) {}
+      DOCK_EDITING = false; syncDockSwitch();
+    });
+    if (edit) edit.addEventListener("click", function (ev) {
+      try { ev.stopPropagation(); } catch (eP2) {}
+      DOCK_EDITING = true; syncDockSwitch();
+    });
+  })();
   applyPanelDock(false);   // the hook and the class must precede the first render
 
   // ================================================================ table
@@ -10973,6 +11071,10 @@
     var host = e.target && e.target.closest &&
       e.target.closest(".graphbuilder2-host");
     if (!host) return;
+    // A click on the chart is a request to edit that part, so the column
+    // goes back to the panel even if the user had stepped over to the
+    // setup view. Rail mode only; below the chart nothing moves.
+    if (panelDockIsRail()) { DOCK_EDITING = true; queueDockSync(); }
     var stamp = { at: Date.now(), y: e.clientY };
     PANEL_REVEAL_STAMP = stamp;
     // Settle-watch: the panel slides open over ~150ms and its content can
@@ -24897,6 +24999,7 @@
     el("ps-inspector-pinboard").classList.toggle("ps-inspector-active",
       ws === "pinboard");
     syncSizeviewDisclosure();
+    try { syncDockSwitch(); } catch (eDS) {}
     var fitBox = el("ps-fit-pane");
     if (fitBox) {
       var fitDoc = workspaceDocument(ws);
@@ -25039,9 +25142,8 @@
       elOrSink("ps-workspace-title").textContent = c.name;
       elOrSink("ps-workspace-subtitle").textContent =
         MODULES[c.module] ? MODULES[c.module].label : "Chart";
-      el("ps-inspector-title").textContent = "Chart setup";
-      el("ps-inspector-subtitle").textContent =
-        "Data roles; select chart parts to style below";
+      el("ps-inspector-title").textContent = DOCK_HEAD_SETUP.title;
+      el("ps-inspector-subtitle").textContent = DOCK_HEAD_SETUP.sub;
       // The chart's own shape, from the payload the shell already builds:
       // what is plotted and how much of it. An instruction is not a status.
       el("ps-status-context").textContent = chartStatusText(c);
