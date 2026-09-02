@@ -2746,91 +2746,6 @@
   .ps-inspector-head strong { color: var(--ps-ink-2); font-size: 12px; }
   .ps-inspector-head span { color: var(--ps-muted); font-size: 10px; }
   .ps-controls .ps-controls-row { padding: 11px 12px 3px; }
-  /* The engine's editing panel, docked in this column when the preference
-     says so. Empty (the default) it takes no room. The engine sizes the
-     panel to this box, wraps its tab rows, and stacks the color picker
-     under the controls; the column itself scrolls. */
-  .ps-engine-dock { display: none; }
-  .ps-engine-dock:not(:empty) {
-    display: block; padding: 10px 10px 12px; border-top: 1px solid var(--ps-l2);
-  }
-  /* The panel title bar is one nowrap flex row: identity left, the
-     "Applies to" scope cluster and the eye right. That fits the 700px
-     lower panel and does not fit a 360px rail: flexbox squeezed the title
-     cell to 26px while its crumb still painted 120px, so "Border - On
-     campus" ran under "APPLIES TO" (Torry's screenshot, Sep 2 2026).
-     Nothing can be dropped, so in the dock the row wraps and the scope
-     cluster takes its own line under the title. Scoped to the dock, so
-     the lower panel and jamovi keep the single row they have room for;
-     the !important beats the engine's inline auto-margin, which is what
-     anchors the cluster beside the eye when the two do share a line. */
-  /* The switch itself: the house two-button idiom (.ps-btn, the active one
-     .ps-primary), the same language the Preferences tabs use. */
-  .ps-dock-switch { display: none; }
-  body.ps-dock-rail #ps-inspector-chart.ps-dock-live .ps-dock-switch {
-    display: flex; gap: 6px; padding: 10px 12px 2px;
-  }
-  .ps-dock-switch .ps-btn { flex: 1 1 0; min-width: 0; padding: 5px 8px; font-size: 12px; }
-  /* Editing owns the column: the setup rows stand down; the switch and the
-     panel stay. Everything is still one set of controls, just relocated. */
-  body.ps-dock-rail #ps-inspector-chart.ps-dock-editing
-    > :not(#ps-engine-dock):not(.ps-dock-switch) { display: none; }
-  body.ps-dock-rail #ps-inspector-chart.ps-dock-editing #ps-engine-dock {
-    border-top: 0; padding-top: 6px;
-  }
-  /* Between selections the engine HIDES its panel but leaves the element in
-     the dock, so :empty never fires and the dock's own padding and rule
-     drew an empty strip at the foot of the column. Collapse the box, but
-     never display:none the dock: the engine measures it to size the panel,
-     and a hidden dock measures zero. */
-  body.ps-dock-rail #ps-inspector-chart:not(.ps-dock-live) #ps-engine-dock,
-  body.ps-dock-rail #ps-inspector-chart.ps-dock-live:not(.ps-dock-editing) #ps-engine-dock {
-    /* Vertical only: the engine sizes the panel to the dock's WIDTH, so
-       dropping the side padding here would hand it a 20px-wider box to
-       render into the moment anything re-rendered on the setup view. */
-    max-height: 0; overflow: hidden; padding-top: 0; padding-bottom: 0;
-    border-top: 0;
-  }
-  #ps-engine-dock [data-role="inspector-title"] { flex-wrap: wrap; }
-  /* Wrapping alone still lets a long level name run off: the title cell's
-     flex base is its own max-content (set inline by the engine) and the
-     crumb inside it is inline-flex, so it floors at the width of its
-     nowrap title line and paints straight through the panel border. With
-     a real level name ("Students living on campus in university halls of
-     residence") that measured 101px outside the panel and pushed the eye
-     onto its own line. Give the cell a zero base so it takes the room
-     that is actually there, clamp the crumb to it, and the ellipsis the
-     engine already declares on the title line finally engages. The
-     eyebrow needs the clamp too, or it wraps and grows the bar instead.
-     Both are inert wherever the name fits: an unsqueezed cell is exactly
-     the crumb's max-content, so 100% of it changes nothing. */
-  #ps-engine-dock [data-role="inspector-title"] > span:first-child:not([data-role]) {
-    flex: 1 1 0 !important; min-width: 0;
-  }
-  #ps-engine-dock [data-role="gb2-crumb"] { max-width: 100%; overflow: hidden; }
-  #ps-engine-dock [data-role="gb2-crumb"] > span {
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  }
-  /* The Gap tab's per-category rows are nowrap flex lines built for the
-     wide panel: label, slider, number, "px" needs about 340px and the
-     rail body has 313, so the suffix painted past the panel edge and the
-     panel itself scrolled sideways. Let those rows wrap instead; every
-     module with per-category or per-group gaps shares these two hosts. */
-  #ps-engine-dock [data-field="cat-gaps"] > div,
-  #ps-engine-dock [data-field="grp-gaps"] > div { flex-wrap: wrap; }
-  #ps-engine-dock [data-role="inspector-title"] [data-role="scope-title-host"],
-  #ps-engine-dock [data-role="inspector-title"] [data-role="bs-title-scope"] {
-    /* Its own line, under the title. It wraps internally too: dragged to
-       the splitter's 240px minimum the cluster is wider than the column,
-       and without this it ran 32px past the panel and made the whole
-       panel scroll sideways. Wrapped, the buttons drop under the label. */
-    flex-basis: 100%; margin-left: 0 !important; margin-right: 0 !important;
-    margin-top: 6px; order: 3; flex-wrap: wrap;
-  }
-  /* The wider default column for the docked panel is set in splitMetrics,
-     not here: splitApply writes --ps-insp-w inline on .ps-app-body, and an
-     inline custom property beats a stylesheet rule, so the rule that used
-     to sit here never took effect and the rail shipped at 330px. */
   .ps-controls .ps-assign {
     flex-direction: column; flex-wrap: nowrap; gap: 12px; margin: 0; padding: 9px 12px 16px;
   }
@@ -4557,18 +4472,6 @@
       <span id="ps-inspector-subtitle">Variables and roles</span>
     </div>
     <div id="ps-inspector-chart" class="ps-inspector-pane">
-      <!-- The column's two views while the editing panel is docked here
-           (Torry, Sep 2 2026: "I'd like it to be in its own space ... toggle
-           between the chart setup and the panels that pop up"). Selecting a
-           chart part hands the column to the panel; this is the way back.
-           Hidden unless the rail actually holds a panel, so the default
-           column is exactly as it was. -->
-      <div class="ps-dock-switch" role="tablist" aria-label="Settings column view">
-        <button type="button" class="ps-btn" role="tab" id="ps-dock-switch-setup"
-                aria-selected="false" aria-controls="ps-inspector-chart">Chart setup</button>
-        <button type="button" class="ps-btn ps-primary" role="tab" id="ps-dock-switch-edit"
-                aria-selected="true" aria-controls="ps-engine-dock">Editing</button>
-      </div>
       <div class="ps-controls-row">
         <span class="ps-role">
           <label class="ps-role-label" for="ps-module">Analysis</label>
@@ -4628,11 +4531,6 @@
            size (standard vs a size the user committed), the select owns the
            VIEW. Zoom scales the display only; exports always leave at the
            logical size, so what you see is the figure, scaled. -->
-      <!-- Right-rail dock for the engine's editing panel (Torry, Sep 2026):
-           an opt-in preference moves the panel here instead of under the
-           chart. Empty by default, so it takes no room; the engine appends
-           the SAME panel element it would otherwise put under the chart. -->
-      <div id="ps-engine-dock" class="ps-engine-dock"></div>
     </div>
     <div id="ps-inspector-data" class="ps-inspector-pane">
       <div id="ps-variable-empty" class="ps-inspector-empty">
@@ -5764,16 +5662,6 @@
           <option value="on">On</option>
         </select>
       </label>
-      <!-- Right-rail dock (Torry, Sep 2026): the same editing panel, just
-           placed beside the chart instead of under it. -->
-      <label class="ps-inspector-field"
-             data-tip="Where the chart's editing panel opens when you click a part of the chart. Below the chart is the default; the right rail keeps the chart still and puts the controls beside it. The Statistics panel stays below the chart either way, because its tables need the width.">
-        Chart editing panel
-        <select id="ps-pref-dock">
-          <option value="below">Below the chart (default)</option>
-          <option value="rail">In the right rail</option>
-        </select>
-      </label>
       <!-- t3-53: the dataset default every import starts from. It was
            settable only AFTER an import, per project, so the same correction
            had to be made again for every file. -->
@@ -6321,8 +6209,8 @@
 <script src="lib/ps-data.769925dda9.js"></script>
 <script src="lib/jspdf.umd.min.979a2ef514.js"></script>
 <script src="lib/svg2pdf.umd.min.4ada250f50.js"></script>
-<script src="lib/graphbuilder2.min.a84f2a7692.js"></script>
-<script src="lib/ps-shell.528dbe97d5.js"></script>
+<script src="lib/graphbuilder2.min.1cc95b2f51.js"></script>
+<script src="lib/ps-shell.ff03b3955b.js"></script>
 <script src="lib/ps-tour.fe1b2fd3ed.js"></script>
 </body>
 </html>
