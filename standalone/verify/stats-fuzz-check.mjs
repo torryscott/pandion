@@ -305,8 +305,9 @@ for (const [name, ds] of Object.entries(refs.datasets)) {
 // with the committed method), and the engine's guard recomputes the
 // cells at that render's entry. The read must come AFTER the echo or a
 // broken recompute hides behind timing: a fixed 1500 ms read passed for
-// three days while every Spearman echo blanked the cells (the em-dash
-// failure at seed 20260901 only showed on a slow run). So the renders
+// three days while every Spearman echo blanked the cells of small
+// tie-free pairs (the em-dash failure at seed 20260901, n = 8, only
+// showed on a slow run). So the renders
 // are intercepted once and each switch waits for the render carrying
 // its method (see corr-method-echo-check.mjs for the dedicated probe).
 await page.evaluate(() => {

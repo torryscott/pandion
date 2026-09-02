@@ -4,8 +4,11 @@
 // cannot revert them); if that recompute fails, the echo render ships
 // the pairs with no coefficient and the matrix plus the Sigma All-pairs
 // table read em dashes. That is exactly what happened to Spearman for
-// three days (Sep 2026): its permutation cache was a render-scope var,
-// hoisted but uninitialized at guard time. The fuzzer only caught it
+// three days (Sep 2026) on pairs with 9 or fewer complete, tie-free
+// cases (the exact-permutation branch): its permutation cache was a
+// render-scope var, hoisted but uninitialized at guard time. Larger or
+// tied pairs never touch the cache, so a normal-sized matrix looked
+// fine and only a tiny table showed it. The fuzzer only caught it
 // when the echo beat its fixed 1500 ms read, so this probe never sleeps
 // through the echo: it intercepts GraphBuilder2.render, waits for the
 // render that carries the switched method, lets the panel restore, and

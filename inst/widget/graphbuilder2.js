@@ -27261,11 +27261,13 @@
         // render()'s scope: the corr method guard at render ENTRY reaches
         // this through _corrComputeCellsClient before any var initializer
         // in render()'s body has run, so a render-scope cache was hoisted
-        // but undefined there, threw inside the guard's try/catch, and
-        // every Spearman echo dropped r and p from every cell (Sep 2026,
-        // the stats fuzzer at seed 20260901; Pearson and Kendall touch no
-        // such cache). Window scope also keeps the n = 9 enumeration
-        // (362,880 permutations) across renders.
+        // but undefined there and threw inside the guard's try/catch:
+        // every pair on this exact branch (n <= 9 complete cases, no
+        // ties) lost its r and p on the Spearman echo (Sep 2026, the
+        // stats fuzzer at seed 20260901). Larger or tied pairs take the
+        // Edgeworth or t path and never touch the cache, which is why a
+        // classroom-sized matrix looked fine. Window scope also keeps the
+        // n = 9 enumeration (362,880 permutations) across renders.
         function _gb2SpearDist(n) {
             var cache = window.__gb2_spearDistCache ||
                 (window.__gb2_spearDistCache = {});
