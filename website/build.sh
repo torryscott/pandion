@@ -383,9 +383,25 @@ grep -q ">$LICENSE_ID<" standalone/index.html || {
 grep -q "^License: GPL-3$" DESCRIPTION || {
     echo "WARN: DESCRIPTION does not declare License: GPL-3" >&2; DRIFT=1; }
 
+# Release-asset links. The page advertised "Version 3.1.1" while all four
+# installer links still pointed at the v3.1.0 tag: both releases carry the
+# same asset names, so the links WORKED and quietly handed out the older
+# build (Sep 2026 audit). The version-string check above passed vacuously
+# because it never looked inside a URL. Links now use
+# releases/latest/download/, which cannot go stale; a tag-pinned link is
+# still allowed as long as the tag is this version.
+STALE_TAGS=$(grep -oE 'releases/download/v[0-9]+\.[0-9]+\.[0-9]+/' website/*.html 2>/dev/null \
+    | grep -v "releases/download/v${VERSION}/" | sort -u || true)
+if [ -n "$STALE_TAGS" ]; then
+    echo "WARN: site pages link release tags other than v$VERSION:" >&2
+    echo "$STALE_TAGS" >&2
+    DRIFT=1
+fi
+
 if [ "$DRIFT" = "0" ]; then
     echo "version $VERSION consistent across the site + CITATION.cff"
     echo "license $LICENSE_ID consistent across the desktop app, citation, About and DESCRIPTION"
+    echo "release links point at the current build (no stale tags)"
 else
     echo "ERROR: public version or license references are inconsistent" >&2
     exit 1
