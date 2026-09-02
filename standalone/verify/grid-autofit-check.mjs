@@ -136,6 +136,45 @@ ok(Number(big.v) > Number(big.k) + 100,
   'the trailing long value set the width (' + big.k + ' vs ' + big.v + ')');
 ok(big.ms < 8000, 'a 60k-row table still loads promptly (' + big.ms + ' ms)');
 
+console.log('case 6: Reset all widths is the way back to the stretch layout');
+// Reset must NOT be re-fitted on the next render (the marker), must survive
+// a save and reopen, and Auto-fit all must be the way back to fitted. The
+// two menu commands stay distinct. Driven through the real overflow menu.
+const state = () => page.evaluate(() => ({
+  sized: document.querySelector('.ps-grid-table').classList.contains('ps-grid-sized'),
+  n: Object.keys(window.PS_SHELL.project.ui.columnWidths).length,
+  cols: window.PS_SHELL.project.table.order.length,
+  layout: window.PS_SHELL.project.ui.columnLayout || null
+}));
+await page.click('#ps-data-more');
+await page.click('#ps-datamenu-resetwidths');
+await page.waitForTimeout(300);
+const afterReset = await state();
+ok(!afterReset.sized && afterReset.n === 0 && afterReset.layout === 'stretch',
+  'Reset all widths returns to the stretch layout (' + JSON.stringify(afterReset) + ')');
+await page.evaluate(async () => {
+  window.PS_SHELL.setModule('plotbuilder'); window.PS_SHELL.setWorkspace('data');
+  await new Promise(r => setTimeout(r, 500));
+});
+const afterRender = await state();
+ok(!afterRender.sized && afterRender.n === 0,
+  'and later renders do not fit the columns straight back');
+await page.evaluate(async () => {
+  const S = window.PS_SHELL;
+  const text = S.projectText();
+  S.openProjectText(text); S.setWorkspace('data');
+  await new Promise(r => setTimeout(r, 1200));
+});
+const afterReopen = await state();
+ok(!afterReopen.sized && afterReopen.layout === 'stretch',
+  'the stretch layout survives save and reopen (' + JSON.stringify(afterReopen) + ')');
+await page.click('#ps-data-more');
+await page.click('#ps-datamenu-fitall');
+await page.waitForTimeout(400);
+const afterFit = await state();
+ok(afterFit.sized && afterFit.n === afterFit.cols && !afterFit.layout,
+  'Auto-fit all is the way back to fitted (' + JSON.stringify(afterFit) + ')');
+
 ok(pageErrors.length === 0, 'no page errors (' + pageErrors.slice(0, 2).join(' | ') + ')');
 console.log((fail === 0 ? 'GRID AUTOFIT CHECK PASS' : 'GRID AUTOFIT CHECK FAIL') +
   ' (' + pass + ' ok, ' + fail + ' failing)');

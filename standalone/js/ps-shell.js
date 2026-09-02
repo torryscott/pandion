@@ -3937,6 +3937,7 @@
               Math.max(72, Math.min(600, Math.round(savedWidth)));
         }
       }
+      if (s.ui.columnLayout === "stretch") PROJECT.ui.columnLayout = "stretch";
     } else PROJECT.ui = {
       dataOpen: false,
       workspace: isLayoutTab(activeChart()) ? "layout" : "chart",
@@ -13485,6 +13486,7 @@
   }
   function gridCaptureCurrentWidths() {
     var widths = gridColumnWidths(true);
+    delete PROJECT.ui.columnLayout;   // a set width ends the stretch layout
     var heads = el("ps-datagrid").querySelectorAll("th[data-grid-col]");
     for (var i = 0; i < heads.length; i++) {
       var col = heads[i].getAttribute("data-grid-col");
@@ -13559,6 +13561,7 @@
   function gridAutoFitDefaults() {
     var t = PROJECT.table;
     if (!t || !Array.isArray(t.order) || !t.order.length) return 0;
+    if (PROJECT.ui && PROJECT.ui.columnLayout === "stretch") return 0;
     var widths = gridColumnWidths(true), filled = 0;
     for (var i = 0; i < t.order.length; i++) {
       var col = t.order[i];
@@ -13622,6 +13625,7 @@
   function gridAutoFitAll() {
     var t = PROJECT.table;
     if (!t) return;
+    delete PROJECT.ui.columnLayout;
     var widths = gridColumnWidths(true);
     for (var i = 0; i < t.order.length; i++)
       widths[t.order[i]] = gridNaturalColumnWidth(t.order[i]);
@@ -13639,6 +13643,14 @@
   function gridResetAllWidths() {
     if (!PROJECT.ui) PROJECT.ui = {};
     PROJECT.ui.columnWidths = {};
+    // "Reset all widths" is the browser's stretch-to-fill layout, the
+    // one way back from fitted columns (Auto-fit all is the other
+    // command in the same menu, so a reset that re-fitted would be a
+    // duplicate). The marker is what keeps the default fit from filling
+    // the widths straight back on the next render; it rides in the
+    // project like columnWidths and is dropped by any width-setting
+    // action.
+    PROJECT.ui.columnLayout = "stretch";
     persist(false);
     syncDataGrid();
     showToast("Reset all column widths");
