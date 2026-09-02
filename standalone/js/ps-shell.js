@@ -28580,7 +28580,9 @@
       if (command === "data-restore-excl") return "Nothing is excluded";
       if (command === "data-show-all") return "No columns are hidden";
       if (command === "data-resetwidths")
-        return "All columns are at their default widths";
+        // Disabled only in the stretch layout (nothing set to reset);
+        // a fitted grid, the default, always has widths to clear.
+        return "Columns already fill the pane; Auto-fit all columns sizes them to their contents";
     }
     if (command === "help-basics" || command === "help-lint" ||
         command === "help-anatomy" || command === "help-glossary")
