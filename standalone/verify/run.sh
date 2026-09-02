@@ -14,7 +14,7 @@ cd "$(dirname "$0")/../.."
 # self-contained and honors PS_PAGE (except hardening-dom-check, which
 # reads index.html source directly and runs once).
 FEATURE_PROBES="branding-check axe-state-check bypass-accessibility-check busy-check column-sizing-check \
-computed-variables-check coverage-gaps-check chart-accessibility-check export-accessibility-check \
+computed-variables-check coverage-gaps-check chart-accessibility-check export-accessibility-check grid-autofit-check \
 chart-check-check compare-pairs-apa-check chart-from-selection-check chart-groups-check chart-size-check \
 default-style-routes-check column-gestures-check chrome-check clipboard-check copy-image-check copy-moment-check correctness-check \
 data-commandbar-check data-menu-check data-roundtrip-fuzz stash-guard-check corpus-compat-check separator-accessibility-check \

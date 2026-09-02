@@ -13507,7 +13507,7 @@
     }
     return width;
   }
-  function gridNaturalColumnWidth(col) {
+  function gridNaturalColumnWidth(col, scanCap) {
     var t = PROJECT.table;
     if (!t || !t.raw[col]) return 160;
     var widest = gridApproxTextWidth(col) + 56;
@@ -13520,9 +13520,43 @@
           gridApproxTextWidth(ROLE_TAGS[defs[d].key] ||
                               defs[d].key.toUpperCase()) + 28);
     }
-    for (var i = 0; i < t.raw[col].length; i++)
-      widest = Math.max(widest, gridApproxTextWidth(t.raw[col][i]) + 28);
+    // scanCap caps how many cells are measured. The explicit Auto-fit
+    // action passes nothing and still measures EVERY row (exact, and the
+    // user asked for it); the automatic fit below passes a cap, because
+    // measuring is ~27 ms per 100k rows per column and a wide table would
+    // otherwise pay that on every load. A capped scan strides evenly and
+    // always includes the last row, so a long value has to hide between
+    // stride steps to be missed - and the exact action is one click away.
+    var vals = t.raw[col], nv = vals.length;
+    var step = (scanCap > 0 && nv > scanCap) ? Math.ceil(nv / scanCap) : 1;
+    for (var i = 0; i < nv; i += step)
+      widest = Math.max(widest, gridApproxTextWidth(vals[i]) + 28);
+    if (step > 1 && nv)
+      widest = Math.max(widest, gridApproxTextWidth(vals[nv - 1]) + 28);
     return gridClampColumnWidth(widest);
+  }
+  // Auto-fit is the DEFAULT for every column (Torry, Sep 2026). Rather
+  // than a new render mode, this FILLS the width each column is missing,
+  // so the grid's existing explicit-width path draws it: the colgroup
+  // carries per-column widths and the table is content-sized, the way a
+  // spreadsheet is. Consequences worth knowing: a width the user dragged
+  // or a .pand carries is never touched (only absent ones are filled), a
+  // newly created column is fitted the first time it renders, and
+  // "Reset all column widths" now means "fit to content again" rather
+  // than "stretch to fill the pane". The stretch path remains for a grid
+  // with no table.
+  var GRID_AUTOFIT_SCAN = 20000;
+  function gridAutoFitDefaults() {
+    var t = PROJECT.table;
+    if (!t || !Array.isArray(t.order) || !t.order.length) return 0;
+    var widths = gridColumnWidths(true), filled = 0;
+    for (var i = 0; i < t.order.length; i++) {
+      var col = t.order[i];
+      if (!t.raw[col] || isFinite(Number(widths[col]))) continue;
+      widths[col] = gridNaturalColumnWidth(col, GRID_AUTOFIT_SCAN);
+      filled++;
+    }
+    return filled;
   }
   function gridWidthTotal(widths, columns) {
     var t = PROJECT.table, total = 46;
@@ -14148,6 +14182,10 @@
     var end = virtualized ? Math.min(n, start + GRID_WINDOW_ROWS) : n;
     GRID_WINDOW_START = start;
     GRID_WINDOW_END = end;
+    // Every column carries a fitted width unless the user or the file
+    // set one, so `sized` is normally true and the grid renders
+    // content-sized (see gridAutoFitDefaults).
+    gridAutoFitDefaults();
     var sized = gridHasColumnWidths(), widths = gridColumnWidths(false);
     // Hiding columns must not resize the ones that remain (a colleague,
     // Aug 2026, on chart-variable focus: "I wish it didn't change the
