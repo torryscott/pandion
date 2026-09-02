@@ -26554,11 +26554,10 @@
             ns = ns || "ya";
             var sz = (typeof size === "number" && size > 0) ? size : 22;
             if (sz < 22) sz = 22;
-            // Insets scale to swatch size: at 20 px we use a 3 px
-            // outset; smaller swatches use a proportionally tighter
-            // outset so the highlight ring doesn't collide with the
-            // adjacent swatch.
-            var outOff = Math.max(2, Math.round(sz * 0.15));
+            // The ring inset scales with the chip, and BOTH this markup
+            // and _refreshPaletteRowHighlight take it from
+            // _gb2ChipOutOff, so the two can never land a pixel apart.
+            var outOff = _gb2ChipOutOff();
             // Swatch rows stay DENSE with LARGE chips (Aug 3 2026
             // ruling: "closer together but actually larger" - supersedes
             // both the Jul 4 compact-small look and the wide-gap a11y
@@ -26582,7 +26581,7 @@
                 html += '<button type="button" data-' + ns + '-palette="transparent" ' +
                     'data-' + ns + '-palette-target="' + target + '" ' +
                     'title="Transparent (no fill)" aria-label="Transparent" ' +
-                    'style="width:' + sz + 'px;height:' + sz + 'px;padding:0;border:' +
+                    'style="width:var(--gb2-chip, ' + sz + 'px);height:var(--gb2-chip, ' + sz + 'px);padding:0;border:' +
                     (_tOn ? "2px solid #1a5fb4" : "1px solid #888") + ';' +
                     'border-radius:3px;cursor:pointer;flex-shrink:0;background-color:#fff;' +
                     'background-image:linear-gradient(45deg,#cfcfcf 25%,transparent 25%),linear-gradient(-45deg,#cfcfcf 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#cfcfcf 75%),linear-gradient(-45deg,transparent 75%,#cfcfcf 75%);' +
@@ -26601,7 +26600,7 @@
                     'data-' + ns + '-palette="' + c + '" ' +
                     'data-' + ns + '-palette-target="' + target + '" ' +
                     'title="' + c + '" ' +
-                    'style="width:' + sz + 'px;height:' + sz + 'px;padding:0;border:' + border + ';' +
+                    'style="width:var(--gb2-chip, ' + sz + 'px);height:var(--gb2-chip, ' + sz + 'px);padding:0;border:' + border + ';' +
                     'border-radius:3px;cursor:pointer;background:' + c + ';flex-shrink:0;' +
                     (isActive ? "outline:1px solid white;outline-offset:-" + outOff + "px;" : "") +
                     '"></button>';
@@ -26629,12 +26628,14 @@
                     ? "2px solid #1a5fb4"
                     : (c === "#ffffff" ? "1px solid #ccc" : "1px solid #888");
                 b.style.border = border;
-                // Recover the outline-offset from the swatch's actual
-                // rendered width so the compact (18 px) variant in
-                // text panels doesn't reuse the larger 3 px offset
-                // and clip the highlight ring against the swatch edge.
-                var w = parseFloat(b.style.width) || b.offsetWidth || 20;
-                var outOff = Math.max(2, Math.round(w * 0.15));
+                // From the SAME rule the markup used. Measuring the
+                // rendered box instead read the chip PLUS its border and
+                // rounded a pixel wider once the rail grew the chip, so
+                // the ring jumped on the first refresh after a color
+                // change. (The 18px variant the old note describes no
+                // longer exists: every caller's size is floored to the
+                // chip size above.)
+                var outOff = _gb2ChipOutOff();
                 b.style.outline = active ? "1px solid white" : "";
                 b.style.outlineOffset = active ? ("-" + outOff + "px") : "";
             }
@@ -27804,8 +27805,8 @@
                 "padding:5px 7px 7px 7px",
                 "font-size:11px",
                 "font-family:var(--gb2-ui-font)",
-                "width:184px",
-                "flex:0 0 184px",
+                "width:var(--gb2-pkr-w, 184px)",
+                "flex:0 0 var(--gb2-pkr-basis, 184px)",
                 "box-sizing:border-box"
             ].join(";");
             pop.innerHTML =
@@ -27830,11 +27831,11 @@
                 '</div>' +
                 // HSV panel: SV square + hue strip
                 '<div data-panel="hsv">' +
-                  '<div data-role="sv" style="position:relative;width:100%;height:96px;border-radius:3px;cursor:crosshair;background:linear-gradient(to bottom,rgba(0,0,0,0),#000),linear-gradient(to right,#fff,rgba(255,255,255,0));background-color:#f00;margin-bottom:5px;">' +
+                  '<div data-role="sv" style="position:relative;width:100%;height:var(--gb2-pkr-sv, 96px);border-radius:3px;cursor:crosshair;background:linear-gradient(to bottom,rgba(0,0,0,0),#000),linear-gradient(to right,#fff,rgba(255,255,255,0));background-color:#f00;margin-bottom:5px;">' +
                     '<div data-role="sv-marker" style="position:absolute;width:10px;height:10px;border:2px solid #fff;border-radius:50%;box-shadow:0 0 0 1px rgba(0,0,0,0.4);transform:translate(-50%,-50%);pointer-events:none;left:50%;top:50%;"></div>' +
                   '</div>' +
-                  '<div data-role="hue" style="position:relative;width:100%;height:11px;border-radius:3px;cursor:ew-resize;background:linear-gradient(to right,#f00 0%,#ff0 17%,#0f0 33%,#0ff 50%,#00f 67%,#f0f 83%,#f00 100%);">' +
-                    '<div data-role="hue-marker" style="position:absolute;top:-2px;width:4px;height:15px;border:1px solid #fff;border-radius:2px;background:rgba(0,0,0,0.3);transform:translateX(-50%);pointer-events:none;left:0;"></div>' +
+                  '<div data-role="hue" style="position:relative;width:100%;height:var(--gb2-pkr-strip, 11px);border-radius:3px;cursor:ew-resize;background:linear-gradient(to right,#f00 0%,#ff0 17%,#0f0 33%,#0ff 50%,#00f 67%,#f0f 83%,#f00 100%);">' +
+                    '<div data-role="hue-marker" style="position:absolute;top:-2px;width:4px;height:calc(var(--gb2-pkr-strip, 11px) + 4px);border:1px solid #fff;border-radius:2px;background:rgba(0,0,0,0.3);transform:translateX(-50%);pointer-events:none;left:0;"></div>' +
                   '</div>' +
                   // Lightness strip: black → pure hue at L=0.5 → white.
                   // Lets users nudge brightness without fighting the
@@ -27842,8 +27843,8 @@
                   // lightness while keeping the current HSL hue and
                   // saturation; HSV state is recomputed from the new
                   // RGB so every other control stays consistent.
-                  '<div data-role="lightness" style="position:relative;width:100%;height:11px;border-radius:3px;cursor:ew-resize;margin-top:5px;background:linear-gradient(to right,#000,#f00 50%,#fff);">' +
-                    '<div data-role="lightness-marker" style="position:absolute;top:-2px;width:4px;height:15px;border:1px solid #fff;border-radius:2px;background:rgba(0,0,0,0.3);transform:translateX(-50%);pointer-events:none;left:50%;"></div>' +
+                  '<div data-role="lightness" style="position:relative;width:100%;height:var(--gb2-pkr-strip, 11px);border-radius:3px;cursor:ew-resize;margin-top:5px;background:linear-gradient(to right,#000,#f00 50%,#fff);">' +
+                    '<div data-role="lightness-marker" style="position:absolute;top:-2px;width:4px;height:calc(var(--gb2-pkr-strip, 11px) + 4px);border:1px solid #fff;border-radius:2px;background:rgba(0,0,0,0.3);transform:translateX(-50%);pointer-events:none;left:50%;"></div>' +
                   '</div>' +
                 '</div>' +
                 // Swatches panel: recent (conditional) + palette + hue
@@ -27941,7 +27942,7 @@
                 btn.type = "button";
                 btn.title = c;
                 btn.style.cssText =
-                    "width:100%;height:13px;padding:0;border:1px solid #ccc;border-radius:2px;cursor:pointer;background:" + c + ";";
+                    "width:100%;height:var(--gb2-pkr-cell, 13px);padding:0;border:1px solid #ccc;border-radius:2px;cursor:pointer;background:" + c + ";";
                 btn.addEventListener("click", function (e) {
                     e.preventDefault();
                     _setPickerHex(refs, c, true);
@@ -28338,7 +28339,7 @@
                 btn.type = "button";
                 btn.title = c;
                 btn.style.cssText =
-                    "width:100%;height:13px;padding:0;border:1px solid #ccc;border-radius:2px;cursor:pointer;background:" + c + ";";
+                    "width:100%;height:var(--gb2-pkr-cell, 13px);padding:0;border:1px solid #ccc;border-radius:2px;cursor:pointer;background:" + c + ";";
                 (function (col) {
                     btn.addEventListener("click", function (e) {
                         e.preventDefault();
@@ -28403,18 +28404,35 @@
                 pop.style.padding = "6px 0 6px 0";
                 pop.style.alignSelf = "stretch";
                 pop.style.borderLeft = "1px solid #ddd";
+                // Clear the rail divider the expanded branch may have
+                // set; the collapsed strip is an edge, so its rule is
+                // the left one it has always drawn.
+                pop.style.borderTop = "0";
                 pop.style.background = "#fafafa";
                 pop.style.cursor = "pointer";
             } else {
-                pop.style.flex = "0 0 184px";
-                pop.style.width = "184px";
+                // Width and basis are handed over to the panel's custom
+                // properties, whose fallbacks are the literals this
+                // branch used to write. Writing the numbers here is what
+                // defeated the properties: a CSSOM write replaces what
+                // cssText declared, and this runs on EVERY picker open,
+                // before anything has a chance to measure the dock.
+                pop.style.flex = "0 0 var(--gb2-pkr-basis, 184px)";
+                pop.style.width = "var(--gb2-pkr-w, 184px)";
                 pop.style.padding = "5px 7px 7px 7px";
                 // Stretch to the bodyRow's full height so the left
                 // divider line runs all the way to the bottom of the
                 // inspector panel - even when the section body on the
                 // left is taller than the picker's natural content.
                 pop.style.alignSelf = "stretch";
-                pop.style.borderLeft = "1px solid #eee";
+                // The divider separates the picker from the controls, so
+                // it follows them: beside them below the chart, above it
+                // in the rail, where the picker is stacked underneath and
+                // now fills the panel (a left rule there would only
+                // double up on the panel's own border).
+                var _pkRail = _gb2RailActive();
+                pop.style.borderLeft = _pkRail ? "0" : "1px solid #eee";
+                pop.style.borderTop = _pkRail ? "1px solid #eee" : "0";
                 pop.style.background = "#fff";
                 pop.style.cursor = "";
             }
@@ -28580,6 +28598,10 @@
             var host = (inspector.pickerHost && inspector.pickerHost.isConnected)
                 ? inspector.pickerHost : (inspector.bodyRow || inspectorPanel);
             host.appendChild(_picker.pop);
+            // Mounted, so the properties it inherits are the ones for the
+            // dock it landed in. Harmless below the chart, where the fit
+            // clears them and the markup's own fallbacks stand.
+            try { _gb2RailFitDock(); } catch (_eRfp) {}
             _picker.pop.style.display = "block";
             // Reset any dimming from a previous panel (Error Bars
             // dims the picker when "Match bar color" is on).
@@ -46500,6 +46522,154 @@
                 return !!(rh && inspectorPanel && inspectorPanel.parentElement === rh);
             } catch (_eRa) { return false; }
         }
+        // ---- Rail growth: the picker and the quick-pick chips --------
+        // Docked in the rail the picker is stacked UNDER the controls in
+        // a column as wide as the whole panel, so the 184px it was drawn
+        // for beside them leaves it marooned in a wide box. Every size
+        // the rail changes travels as a CSS custom property on the panel
+        // whose markup FALLBACK is the constant it replaced, so a surface
+        // that never receives one (jamovi, the below-chart standalone,
+        // and Statistics even in rail mode) renders exactly what it
+        // always did.
+        //
+        // The chip size is published as a NUMBER as well. The swatch rows
+        // compute their active-ring outline-offset in JS, and the two
+        // places that do it have to agree: reading it back off the
+        // RENDERED box measures the chip PLUS its border, which rounds a
+        // pixel wider than the markup once the chip grows, so the ring
+        // twitched on the first refresh after a color change.
+        function _gb2ChipPx() {
+            var n = window.__gb2_railChipPx;
+            // The ceiling mirrors the cap in _gb2RailFitDock; a value
+            // from anywhere else is not to be trusted.
+            return (typeof n === "number" && n >= 22 && n <= 24) ? n : 22;
+        }
+        function _gb2ChipOutOff() {
+            return Math.max(2, Math.round(_gb2ChipPx() * 0.15));
+        }
+        // Recompute the rail sizes from the dock's current width and
+        // publish them. Idempotent and cheap: called when the panel is
+        // placed, when the picker mounts, and by the dock observer while
+        // the user drags the splitter.
+        function _gb2RailFitDock() {
+            var st = null;
+            try { st = inspectorPanel && inspectorPanel.style; } catch (_eFs) {}
+            if (!st) return;
+            if (!_gb2RailActive()) {
+                // Not in the rail. Drop the properties so the markup's
+                // own fallbacks stand, and take the chip number with
+                // them: a below-chart panel must not keep rail chips
+                // after the preference is switched off, and Statistics
+                // stays below the chart even while rail mode is on.
+                st.removeProperty("--gb2-pkr-w");
+                st.removeProperty("--gb2-pkr-basis");
+                st.removeProperty("--gb2-pkr-sv");
+                st.removeProperty("--gb2-pkr-strip");
+                st.removeProperty("--gb2-pkr-cell");
+                st.removeProperty("--gb2-chip");
+                window.__gb2_railChipPx = 0;
+                inspectorPanel.__gb2FitSig = "";
+                return;
+            }
+            var railH = _gb2RailHost();
+            var padX = 0;
+            try {
+                var cs = window.getComputedStyle(railH);
+                padX = (parseFloat(cs.paddingLeft) || 0) +
+                       (parseFloat(cs.paddingRight) || 0);
+            } catch (_eFc) {}
+            // What a full-width child of the panel actually gets: the
+            // dock's content box less the panel's own 1px borders. The
+            // panel cannot be measured here - renderInspectorPanel places
+            // it while it is still display:none - so the dock is the
+            // authority, which is also the box the observer watches.
+            var avail = Math.floor((railH.clientWidth || 0) - padX - 2);
+            // A column in a hidden workspace measures zero. Keep the last
+            // good fit rather than collapsing to the base sizes.
+            if (!(avail > 0)) return;
+            var W0 = 184, SV0 = 96, STRIP0 = 11, CELL0 = 13, CHIP0 = 22;
+            // The picker FILLS the panel at every splitter position. A
+            // width cap stops it tracking for the last stretch of travel
+            // and strands a bordered picker in a band of empty panel,
+            // which is the one width where the layout reads as broken.
+            // What has to stay bounded is the SV square's HEIGHT, and
+            // that is bounded on its own below.
+            var w = Math.max(W0, avail);
+            var r = w / W0;
+            // The SV square earns precision by AREA, and past about 160px
+            // tall it stops buying any while pushing the hex row out of a
+            // column that scrolls. The strips and the grid cells stop for
+            // the same reason; past their caps all three simply get
+            // wider, which is a shape a color picker is allowed to have.
+            var sv = Math.min(160, Math.round(SV0 * r));
+            var strip = Math.min(16, Math.round(STRIP0 * r));
+            var cell = Math.min(20, Math.round(CELL0 * r));
+            // A quick pick must never outgrow the current-color swatch it
+            // edits, and the SMALLEST of those in the suite is 24px (the
+            // box outlier strips; every other strip's is 28px). The rail
+            // is wide enough to reach that cap at its narrowest, so in
+            // practice this is 22px below the chart and 24px in the rail:
+            // a step, with no stretch of travel to be discontinuous in.
+            var chip = Math.max(CHIP0, Math.min(24, Math.round(CHIP0 * r)));
+            // Nothing changed: leave the DOM alone, so the observer that
+            // called us cannot start a resize feedback loop. The stamp
+            // lives on the panel ELEMENT, not on window, because render()
+            // builds a fresh panel whose style block starts empty.
+            var sig = w + ":" + sv + ":" + strip + ":" + cell + ":" + chip;
+            if (inspectorPanel.__gb2FitSig === sig) return;
+            inspectorPanel.__gb2FitSig = sig;
+            st.setProperty("--gb2-pkr-w", w + "px");
+            // Stacked in the rail the bodyRow is a COLUMN, where a flex
+            // basis sizes the HEIGHT, not the width - so in the rail the
+            // basis stands down and the picker's content decides its
+            // height. Below the chart the row is horizontal and the
+            // fallback basis IS the width, exactly as before.
+            st.setProperty("--gb2-pkr-basis", "auto");
+            st.setProperty("--gb2-pkr-sv", sv + "px");
+            st.setProperty("--gb2-pkr-strip", strip + "px");
+            st.setProperty("--gb2-pkr-cell", cell + "px");
+            st.setProperty("--gb2-chip", chip + "px");
+            window.__gb2_railChipPx = chip;
+        }
+        // One dock observer per document, parked on window because
+        // render() rebuilds this scope on every echo: a closure-scoped
+        // observer would be abandoned - still firing into a dead render -
+        // once per run. Arming RELEASES first, which is what makes
+        // turning the preference off leave nothing behind and makes
+        // toggling it back on impossible to double up.
+        function _gb2RailUnwatchDock() {
+            try {
+                var ro = window.__gb2_railRO;
+                if (ro && typeof ro.disconnect === "function") ro.disconnect();
+            } catch (_eRu) {}
+            window.__gb2_railRO = null;
+            try {
+                if (window.__gb2_railWinFit) {
+                    window.removeEventListener("resize", window.__gb2_railWinFit);
+                }
+            } catch (_eRw) {}
+            window.__gb2_railWinFit = null;
+        }
+        function _gb2RailWatchDock() {
+            _gb2RailUnwatchDock();
+            var railH = _gb2RailHost();
+            if (!railH) return;
+            var fit = function () { try { _gb2RailFitDock(); } catch (_eRf) {} };
+            try {
+                if (typeof ResizeObserver === "function") {
+                    var ro = new ResizeObserver(fit);
+                    ro.observe(railH);
+                    window.__gb2_railRO = ro;
+                }
+            } catch (_eRo) {}
+            // Fallback only. The splitter resizes the dock without
+            // resizing the window, so this catches nothing an observer
+            // would have caught; it is here for engines without one.
+            if (!window.__gb2_railRO) {
+                window.__gb2_railWinFit = fit;
+                try { window.addEventListener("resize", fit); } catch (_eRl) {}
+            }
+        }
         function _gb2PlaceInspectorPanel() {
             var railH = _gb2RailHost();
             var sel = (typeof inspector !== "undefined" && inspector && inspector.selection) || [];
@@ -46533,6 +46703,12 @@
             // In the rail the panel is a card of its own, not the chart's
             // skirt; under the chart it keeps the flush top edge.
             inspectorPanel.style.borderRadius = inRail ? "4px" : "0 0 4px 4px";
+            // Sizes first: the panel body is built immediately after this
+            // returns and reads the chip size while composing its markup.
+            // Then the observer, which is also the ONLY path that
+            // releases itself when the preference is turned back off.
+            _gb2RailFitDock();
+            _gb2RailWatchDock();
         }
         var inspectorPanel = document.createElement("div");
         inspectorPanel.setAttribute("data-gb2-inspector", "1");
@@ -64929,12 +65105,12 @@
                     html += '<button type="button" data-bs-palette="transparent" ' +
                         'data-bs-palette-target="' + target + '" ' +
                         'title="Transparent (hollow bar – no fill)" aria-label="Transparent" ' +
-                        'style="width:22px;height:22px;padding:0;border:' +
+                        'style="width:var(--gb2-chip, 22px);height:var(--gb2-chip, 22px);padding:0;border:' +
                         (_tbOn ? "2px solid #1a5fb4" : "1px solid #888") + ';' +
                         'border-radius:3px;cursor:pointer;flex-shrink:0;background-color:#fff;' +
                         'background-image:linear-gradient(45deg,#cfcfcf 25%,transparent 25%),linear-gradient(-45deg,#cfcfcf 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#cfcfcf 75%),linear-gradient(-45deg,transparent 75%,#cfcfcf 75%);' +
                         'background-size:8px 8px;background-position:0 0,0 4px,4px -4px,-4px 0;' +
-                        (_tbOn ? "outline:1px solid white;outline-offset:-3px;" : "") +
+                        (_tbOn ? "outline:1px solid white;outline-offset:-" + _gb2ChipOutOff() + "px;" : "") +
                         '"></button>';
                 }
                 // Series-identity rows (the FILL color) use the hybrid
@@ -64954,9 +65130,9 @@
                         'data-bs-palette="' + c + '" ' +
                         'data-bs-palette-target="' + target + '" ' +
                         'title="' + c + '" ' +
-                        'style="width:22px;height:22px;padding:0;border:' + border + ';' +
+                        'style="width:var(--gb2-chip, 22px);height:var(--gb2-chip, 22px);padding:0;border:' + border + ';' +
                         'border-radius:3px;cursor:pointer;background:' + c + ';flex-shrink:0;' +
-                        (isActive ? "outline:1px solid white;outline-offset:-3px;" : "") +
+                        (isActive ? "outline:1px solid white;outline-offset:-" + _gb2ChipOutOff() + "px;" : "") +
                         '"></button>';
                 }
                 html += '</span>';
@@ -67083,7 +67259,7 @@
                         : (c === "#ffffff" ? "1px solid #ccc" : "1px solid #888");
                     b.style.border = border;
                     b.style.outline = active ? "1px solid white" : "";
-                    b.style.outlineOffset = active ? "-3px" : "";
+                    b.style.outlineOffset = active ? ("-" + _gb2ChipOutOff() + "px") : "";
                 }
             }
             // Wire palette swatch clicks. Two flavors: fill-chip
@@ -76765,7 +76941,7 @@
                     html += '<button type="button" data-ps-palette="transparent" ' +
                         'data-ps-palette-target="' + target + '" ' +
                         'title="Transparent (hollow marker – no fill)" aria-label="Transparent" ' +
-                        'style="width:22px;height:22px;padding:0;border:' +
+                        'style="width:var(--gb2-chip, 22px);height:var(--gb2-chip, 22px);padding:0;border:' +
                         (_tOn ? "2px solid #1a5fb4" : "1px solid #888") + ';' +
                         'border-radius:3px;cursor:pointer;flex-shrink:0;background-color:#fff;' +
                         // Universal "transparent" checkerboard (gray/white),
@@ -76777,7 +76953,7 @@
                           'linear-gradient(-45deg,transparent 75%,#cfcfcf 75%);' +
                         'background-size:8px 8px;' +
                         'background-position:0 0,0 4px,4px -4px,-4px 0;' +
-                        (_tOn ? "outline:1px solid white;outline-offset:-3px;" : "") +
+                        (_tOn ? "outline:1px solid white;outline-offset:-" + _gb2ChipOutOff() + "px;" : "") +
                         '"></button>';
                 }
                 var _rowCols = (target === "p-color") ? _hybridPaletteCols() : PICKER_PALETTE;
@@ -76791,9 +76967,9 @@
                         'data-ps-palette="' + c + '" ' +
                         'data-ps-palette-target="' + target + '" ' +
                         'title="' + c + '" ' +
-                        'style="width:22px;height:22px;padding:0;border:' + border + ';' +
+                        'style="width:var(--gb2-chip, 22px);height:var(--gb2-chip, 22px);padding:0;border:' + border + ';' +
                         'border-radius:3px;cursor:pointer;background:' + c + ';flex-shrink:0;' +
-                        (isActive ? "outline:1px solid white;outline-offset:-3px;" : "") +
+                        (isActive ? "outline:1px solid white;outline-offset:-" + _gb2ChipOutOff() + "px;" : "") +
                         '"></button>';
                 }
                 html += '</span>';
@@ -76812,7 +76988,7 @@
                         : (c === "#ffffff" ? "1px solid #ccc" : "1px solid #888");
                     b.style.border = border;
                     b.style.outline = active ? "1px solid white" : "";
-                    b.style.outlineOffset = active ? "-3px" : "";
+                    b.style.outlineOffset = active ? ("-" + _gb2ChipOutOff() + "px") : "";
                 }
             }
 
@@ -77875,9 +78051,9 @@
                     html += '<button type="button" ' +
                         'data-fl-palette="' + c + '" ' +
                         'title="' + c + '" ' +
-                        'style="width:22px;height:22px;padding:0;border:' + border + ';' +
+                        'style="width:var(--gb2-chip, 22px);height:var(--gb2-chip, 22px);padding:0;border:' + border + ';' +
                         'border-radius:3px;cursor:pointer;background:' + c + ';flex-shrink:0;' +
-                        (isActive ? "outline:1px solid white;outline-offset:-3px;" : "") +
+                        (isActive ? "outline:1px solid white;outline-offset:-" + _gb2ChipOutOff() + "px;" : "") +
                         '"></button>';
                 }
                 html += '</span>';
@@ -77895,7 +78071,7 @@
                         : (c === "#ffffff" ? "1px solid #ccc" : "1px solid #888");
                     b.style.border = border;
                     b.style.outline = active ? "1px solid white" : "";
-                    b.style.outlineOffset = active ? "-3px" : "";
+                    b.style.outlineOffset = active ? ("-" + _gb2ChipOutOff() + "px") : "";
                 }
             }
 
