@@ -971,6 +971,22 @@
   // ONE set of controls: this only decides which of the two the column
   // shows. Nothing here runs in the default below-the-chart mode.
   var DOCK_EDITING = true, DOCK_EDIT_WAS = false, DOCK_SYNC_QUEUED = false;
+  // The four facts the "hand the column to Editing" rule reads, all of them
+  // fed from outside syncDockSwitch, which is where the rule itself lives:
+  // when the user last acted on the chart, whether that act landed on the
+  // chart DRAWING or on the chrome around it, whether the current view was
+  // named by their own press of the switch, and what the selection was the
+  // last time we looked.
+  var DOCK_ACT_AT = 0, DOCK_ACT_MS = 700, DOCK_SWITCH_PRESS = false;
+  var DOCK_ACT_CHART = false, DOCK_SEL_WAS = "";
+  function dockActStamp(onChart) {
+    DOCK_ACT_AT = Date.now();
+    DOCK_ACT_CHART = !!onChart;
+  }
+  // Anything that names the view outright - a switch press, a change of
+  // document - retires a pending chart act, which would otherwise still be
+  // inside its window and flip the view straight back.
+  function dockActClear() { DOCK_ACT_AT = 0; }
   // Which chart the column is currently showing a panel for.
   var DOCK_DOC = null;
   // The column has two views now, so it has two headings. Defined once and
@@ -978,8 +994,73 @@
   // which view is on.
   var DOCK_HEAD_SETUP = { title: "Chart setup",
                           sub: "Data roles; select chart parts to style below" };
+  // In the rail the panel is not below anything: a selected part opens in
+  // the other view, so the setup heading names that view instead. The
+  // below-the-chart copy above is left exactly as it was, because there
+  // the panel really does open under the chart.
+  var DOCK_HEAD_SETUP_RAIL = { title: "Chart setup",
+                          sub: "Data roles; select a chart part to style it in Editing" };
   var DOCK_HEAD_EDIT = { title: "Chart editing",
                          sub: "The part you selected; switch back for data roles" };
+  // The engine's own selection, as the shell can read it: the engine
+  // persists it to this key on every change, in the same task as the click
+  // that made it (measured Sep 2 2026 - the key is already REMOVED on the
+  // first frame after a click on bare plot space clears the selection).
+  // "" means nothing is selected.
+  var DOCK_SEL_LS = "graphbuilder2.inspector.v1";
+  function dockSelection() {
+    try {
+      var raw = window.localStorage.getItem(DOCK_SEL_LS);
+      if (!raw) return "";
+      var arr = JSON.parse(raw);
+      return (Array.isArray(arr) && arr.length) ? arr.join(",") : "";
+    } catch (eSl) { return ""; }
+  }
+  // Statistics is the one selection the engine deliberately keeps UNDER the
+  // chart (its tables want the width), so it is a selection that never
+  // fills the rail. The engine publishes its live help-family panel on this
+  // global; the selection key answers the same question if the global is
+  // ever missing, so a stale engine degrades to the honest reading rather
+  // than to a confident wrong one.
+  function dockStatsLive() {
+    try { if (window.__gb2_helpPanelLive === "stats") return true; } catch (eG) {}
+    return dockSelection() === "stats";
+  }
+  // What the Editing view says when it holds nothing. Three cases, because
+  // one line cannot be true of all of them. The line this replaced ("Bars,
+  // axes, labels and the legend each open their own controls here") named
+  // parts that half the modules do not draw - measured: a scatter has zero
+  // [data-bar-cat] elements, and a correlation matrix has neither bars nor
+  // axes. So the copy names no part at all, and the two cases where the
+  // instruction could not be followed say what is true instead.
+  function dockEmptyState() {
+    var host = null;
+    try { host = hostEl(); } catch (eH0) {}
+    // Still on its "needs variables" card: there is nothing drawn to click.
+    if (host && host.querySelector(".ps-guided-empty"))
+      return { sub: "Nothing to edit yet; switch back for data roles",
+               body: "This chart needs its variables before there is " +
+                     "anything to select. Switch to Chart setup to choose them." };
+    // Statistics is open below the chart. Asking for a click here would be
+    // worse than unhelpful: while that panel is up a click on a chart part
+    // pins a row in it and never opens an editor.
+    if (dockStatsLive())
+      return { sub: "The Statistics panel is below the chart",
+               body: "The Statistics panel is open below the chart, where " +
+                     "its tables have room. Close it there to go back to " +
+                     "editing chart parts here." };
+    return { sub: "Nothing selected; switch back for data roles",
+             body: "Select a part of the chart to edit it here." };
+  }
+  // When the heading is ours to write: any other workspace, or no document,
+  // and the pane's own copy ("Create a chart to begin") stands.
+  function dockAtChart() {
+    try {
+      return appWorkspace() === "chart" && !!workspaceDocument("chart");
+    } catch (eR) { return false; }
+  }
+  // And when the switch belongs there: the same column, docked in the rail.
+  function dockRailChart() { return panelDockIsRail() && dockAtChart(); }
   // "Is a panel showing" is a VISIBILITY question, never an :empty one: the
   // engine leaves its panel element in the dock between selections and just
   // hides it (measured Sep 2 2026). Read the child's OWN computed display,
@@ -999,8 +1080,42 @@
   function syncDockSwitch() {
     var pane = el("ps-inspector-chart");
     if (!pane) return;
+    var on = dockRailChart();
     var live = dockPanelShowing();
-    var editing = live && DOCK_EDITING;
+    // Which view is on is the user's choice, not a consequence of a panel
+    // being up (Torry, Sep 2 2026: "even after you click off of an element,
+    // you can still reach the editing menu"). Editing with no panel shows
+    // its empty state; ps-dock-live still says whether a panel is there,
+    // which is what collapses the dock and what the empty state keys on.
+    //
+    // SELECTING a part is what hands the column over - not merely clicking
+    // the chart. Measured Sep 2 2026 against the flip that used to sit in
+    // the pointerup handler: one real click on bare plot space gave
+    // {editing: true, rolesVisible: false}, so a click that chose nothing
+    // swapped the column to an empty Editing view. Two facts have to agree
+    // here: the user just acted on the chart, and something is selected
+    // now. Empty space satisfies only the first. Reading the selection
+    // rather than watching the panel appear is what makes re-clicking the
+    // already-selected part work too: measured, the panel never dips out
+    // of view when the selection moves from one bar to another, and the
+    // key does not change at all when the same bar is clicked twice.
+    //
+    // How much the act has to prove depends on where it landed. On the
+    // chart DRAWING any live selection counts, which is what carries the
+    // re-click case. On the chrome around it - the toolbar, a flyout, the
+    // card's own margin - the selection has to actually CHANGE, so the
+    // Show / hide button (which opens its own panel in the rail) brings
+    // the column across while the palette flyout, which opens no panel at
+    // all, leaves it alone. Measured Sep 2 2026: without that split, the
+    // flyout button swapped the column out from under a user who had
+    // stepped over to the roles.
+    var sel = dockSelection(), statsSel = dockStatsLive();
+    var fresh = Date.now() - DOCK_ACT_AT < DOCK_ACT_MS;
+    if (on && sel && !statsSel && fresh && (DOCK_ACT_CHART || sel !== DOCK_SEL_WAS))
+      DOCK_EDITING = true;
+    DOCK_SEL_WAS = sel;
+    var editing = on && DOCK_EDITING;
+    pane.classList.toggle("ps-dock-on", on);
     pane.classList.toggle("ps-dock-live", live);
     pane.classList.toggle("ps-dock-editing", editing);
     var setup = el("ps-dock-switch-setup"), edit = el("ps-dock-switch-edit");
@@ -1009,21 +1124,54 @@
       edit.classList.toggle("ps-primary", editing);
       setup.setAttribute("aria-selected", editing ? "false" : "true");
       edit.setAttribute("aria-selected", editing ? "true" : "false");
+      // Name the element that is actually on screen. With nothing selected
+      // the dock is collapsed to nothing, and display:none outright when it
+      // holds no panel at all (measured with Statistics open, which takes
+      // the panel out of the rail), so pointing the tab at it described
+      // something the user cannot reach. Both candidates carry
+      // role="tabpanel"; only one is ever in the accessibility tree,
+      // because display:none takes the other out of it.
+      edit.setAttribute("aria-controls", live ? "ps-engine-dock" : "ps-dock-empty");
     }
-    // The heading names the view on show. Chart-workspace only, and only
-    // while a chart document is open: the no-document branch writes its
-    // own copy ("Create a chart to begin") and must keep it.
+    // What the empty Editing view says depends on why it is empty, so its
+    // copy is written here rather than sitting static in the markup.
+    var es = (editing && !live) ? dockEmptyState() : null;
+    var eb = el("ps-dock-empty");
+    if (eb && es) eb.textContent = es.body;
+    // The heading names the view on show, and on the Editing view it says
+    // whether there is anything in it: the view no longer implies a panel,
+    // so one heading for both states would misdescribe half of them. The
+    // below-the-chart line is written here too, because this function is
+    // what put the rail copy up and the pref can be switched off with a
+    // part still selected - measured Sep 2 2026, the heading stayed on
+    // "the part you selected" over a panel that had moved under the chart.
     try {
-      if (panelDockIsRail() && appWorkspace() === "chart" && workspaceDocument("chart")) {
-        var head = editing ? DOCK_HEAD_EDIT : DOCK_HEAD_SETUP;
+      if (dockAtChart()) {
+        var head = !panelDockIsRail() ? DOCK_HEAD_SETUP
+                 : editing ? (live ? DOCK_HEAD_EDIT
+                                   : { title: "Chart editing", sub: es.sub })
+                 : DOCK_HEAD_SETUP_RAIL;
         var ht = el("ps-inspector-title"), hs = el("ps-inspector-subtitle");
         if (ht) ht.textContent = head.title;
         if (hs) hs.textContent = head.sub;
       }
     } catch (eH) {}
-    // Arriving at the panel, start at its top: the setup rows that were
-    // above it have just stood down, so an inherited scroll offset would
-    // open the panel mid-body.
+    // Say the view changed. The tabs report themselves when the user
+    // presses one, but this view also changes from a click on the CHART,
+    // where a screen reader is handed nothing to notice - the column's
+    // whole content swaps in silence. Skipped for a switch press, which
+    // would otherwise be announced twice.
+    if (on && editing !== DOCK_EDIT_WAS && !DOCK_SWITCH_PRESS) {
+      var lv = el("ps-dock-view-live");
+      if (lv) lv.textContent = editing
+        ? (live ? "Chart editing" : "Chart editing, nothing selected")
+        : "Chart setup";
+    }
+    DOCK_SWITCH_PRESS = false;
+    // Arriving at the Editing view, start at its top: the setup rows that
+    // were above it have just stood down, so an inherited scroll offset
+    // would open the panel mid-body. This now fires on the view change
+    // alone, which is the moment the column's content actually swaps.
     if (editing && !DOCK_EDIT_WAS) {
       try { var col = document.querySelector(".ps-controls"); if (col) col.scrollTop = 0; } catch (eS) {}
     }
@@ -1054,12 +1202,19 @@
     // makes this a toggle rather than a close button: the part stays
     // selected (and haloed on the chart) while the setup is on view.
     var setup = el("ps-dock-switch-setup"), edit = el("ps-dock-switch-edit");
+    // dockActClear on both: a press is the user naming the view they want,
+    // and it must outrank a chart click they made a moment earlier -
+    // otherwise pressing Chart setup inside that window flips straight
+    // back. DOCK_SWITCH_PRESS keeps the live region quiet for a change the
+    // button itself already reports through aria-selected.
     if (setup) setup.addEventListener("click", function (ev) {
       try { ev.stopPropagation(); } catch (eP) {}
+      dockActClear(); DOCK_SWITCH_PRESS = true;
       DOCK_EDITING = false; syncDockSwitch();
     });
     if (edit) edit.addEventListener("click", function (ev) {
       try { ev.stopPropagation(); } catch (eP2) {}
+      dockActClear(); DOCK_SWITCH_PRESS = true;
       DOCK_EDITING = true; syncDockSwitch();
     });
   })();
@@ -11084,10 +11239,28 @@
     var host = e.target && e.target.closest &&
       e.target.closest(".graphbuilder2-host");
     if (!host) return;
-    // A click on the chart is a request to edit that part, so the column
-    // goes back to the panel even if the user had stepped over to the
-    // setup view. Rail mode only; below the chart nothing moves.
-    if (panelDockIsRail()) { DOCK_EDITING = true; queueDockSync(); }
+    // A click on the chart is the user ACTING on it. Whether the act
+    // SELECTED anything is the engine's answer, so this only stamps and
+    // asks on the next frame (syncDockSwitch decides). Switching here
+    // instead was the bug: the host includes bare plot space and the
+    // card's white margin, so a click that chose nothing still swapped the
+    // column and the data roles vanished. Rail mode only; below the chart
+    // nothing moves.
+    if (panelDockIsRail()) {
+      // On the chart drawing, or on the chrome around it? The drawing is
+      // the biggest svg in the host, the same rule every reader of this
+      // DOM uses - a toolbar button's icon is an svg too.
+      var art = null, artA = 0;
+      try {
+        var svgs = host.querySelectorAll("svg");
+        for (var vi = 0; vi < svgs.length; vi++) {
+          var rr = svgs[vi].getBoundingClientRect(), ra = rr.width * rr.height;
+          if (ra > artA) { artA = ra; art = svgs[vi]; }
+        }
+      } catch (eA) {}
+      dockActStamp(!!art && (e.target === art || art.contains(e.target)));
+      queueDockSync();
+    }
     var stamp = { at: Date.now(), y: e.clientY };
     PANEL_REVEAL_STAMP = stamp;
     // Settle-watch: the panel slides open over ~150ms and its content can
@@ -11120,6 +11293,16 @@
       if (++frames < 90) window.requestAnimationFrame(watch);
     })();
   }, true);
+  // NOT stamped from the keyboard, deliberately. The chart is one tab stop
+  // with arrow-key navigation inside it, so a keyboard user CAN move the
+  // selection with no pointer act at all, and the column does not follow
+  // them - the same gap the old code had. Stamping on keydown was tried
+  // and taken out (measured Sep 2 2026): the engine's selection reaches
+  // localStorage after the frame the key lands in, so the flip raced and
+  // fired one keystroke late, and Escape does not clear a chart-part
+  // selection here, so every key press with a part selected - a dismissal
+  // included - swapped the view. A correct version needs a selection
+  // signal the shell can read the moment it changes.
 
   // ---- height reserve (t4-203 part two; final ruling Aug 19 2026:
   // NO automatic scroll-back, ever - Torry: "I'd like to control that
@@ -25020,6 +25203,12 @@
       if (dockDocId !== DOCK_DOC) {
         DOCK_DOC = dockDocId;
         DOCK_EDITING = false;
+        // And retire any chart act still inside its window, the way a
+        // switch press does: without this, adding a chart within a moment
+        // of clicking a part re-flipped the new, empty chart to Editing
+        // (measured Sep 2 2026) - the act was still fresh and the outgoing
+        // chart's selection had not been swapped out from under it yet.
+        dockActClear();
         try {
           var dk0 = el("ps-engine-dock");
           while (dk0 && dk0.firstChild) dk0.removeChild(dk0.firstChild);

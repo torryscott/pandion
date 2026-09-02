@@ -106,6 +106,29 @@ const clickBar = async () => {
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   await page.waitForTimeout(600);
 };
+// Clicking off a part, which is how the engine closes its panel. Scan the
+// upper plot area for a spot whose topmost element is the chart svg itself
+// rather than a mark or a label; a fixed coordinate would land on a bar
+// the moment a fixture's heights change.
+const clickEmptyChart = async () => {
+  const pt = await page.evaluate(() => {
+    const host = document.querySelector('.graphbuilder2-host');
+    const svg = [...host.querySelectorAll('svg')]
+      .sort((a, b) => (b.clientWidth * b.clientHeight) - (a.clientWidth * a.clientHeight))[0];
+    const r = svg.getBoundingClientRect();
+    for (let fy = 0.10; fy < 0.45; fy += 0.05)
+      for (let fx = 0.18; fx < 0.80; fx += 0.04) {
+        const x = r.x + r.width * fx, y = r.y + r.height * fy;
+        const e = document.elementFromPoint(x, y);
+        if (e === svg) return { x, y };
+      }
+    return null;
+  });
+  if (!pt) return false;
+  await page.mouse.click(pt.x, pt.y);
+  await page.waitForTimeout(700);
+  return true;
+};
 
 console.log('case 1: the default is the panel under the chart, dock empty');
 await loadChart();
@@ -312,26 +335,59 @@ const colState = () => page.evaluate(() => {
   const pane = document.getElementById('ps-inspector-chart');
   const sw = pane.querySelector('.ps-dock-switch');
   const dock = document.getElementById('ps-engine-dock');
+  const empty = document.getElementById('ps-dock-empty');
   const panel = dock.querySelector('[data-gb2-inspector]');
+  // The Editing view's empty state is a child of the pane and belongs to
+  // that view, so it is not evidence that the setup is on show.
   const setupVisible = [...pane.children].some(c =>
-    c !== sw && c !== dock && getComputedStyle(c).display !== 'none');
+    c !== sw && c !== dock && c !== empty && getComputedStyle(c).display !== 'none');
   return {
     live: pane.classList.contains('ps-dock-live'),
     editing: pane.classList.contains('ps-dock-editing'),
     switchShown: !!sw && getComputedStyle(sw).display !== 'none',
     setupVisible,
+    emptyShown: !!empty && getComputedStyle(empty).display !== 'none',
+    emptyH: empty ? Math.round(empty.getBoundingClientRect().height) : -1,
+    emptyText: empty ? empty.textContent.replace(/\s+/g, ' ').trim() : '',
+    // What the Editing tab claims to control, and whether that thing is
+    // really on screen with a panel role on it.
+    editControls: (() => {
+      const t = document.getElementById('ps-dock-switch-edit');
+      return t ? t.getAttribute('aria-controls') : null;
+    })(),
+    editControlsShown: (() => {
+      const t = document.getElementById('ps-dock-switch-edit');
+      const tgt = t && document.getElementById(t.getAttribute('aria-controls'));
+      return !!tgt && getComputedStyle(tgt).display !== 'none';
+    })(),
+    editControlsRole: (() => {
+      const t = document.getElementById('ps-dock-switch-edit');
+      const tgt = t && document.getElementById(t.getAttribute('aria-controls'));
+      return tgt ? tgt.getAttribute('role') : null;
+    })(),
     panelInDock: !!panel,
     panelShowing: !!panel && getComputedStyle(panel).display !== 'none',
     dockH: Math.round(dock.getBoundingClientRect().height),
+    dockW: Math.round(dock.getBoundingClientRect().width),
+    dockDisplay: getComputedStyle(dock).display,
     panelW: panel ? Math.round(panel.getBoundingClientRect().width) : 0,
-    heading: (document.getElementById('ps-inspector-title') || {}).textContent || ''
+    heading: (document.getElementById('ps-inspector-title') || {}).textContent || '',
+    sub: (document.getElementById('ps-inspector-subtitle') || {}).textContent || ''
   };
 });
 {
   let st2 = await colState();
-  ok(!st2.switchShown && st2.setupVisible && st2.dockH === 0,
-    'with nothing selected the column is the chart setup, with no switch ' +
-    'and no empty dock strip (' + JSON.stringify(st2) + ')');
+  // The view the column is on here is whatever case 9 left it on: a data
+  // reload is not a document change and keeps the view you chose. What
+  // matters with nothing selected is that the switch is there at all.
+  ok(st2.switchShown && !st2.panelShowing,
+    'the switch is on offer with nothing selected (' + JSON.stringify(st2) + ')');
+  await page.click('#ps-dock-switch-setup');
+  await page.waitForTimeout(350);
+  st2 = await colState();
+  ok(st2.setupVisible && !st2.emptyShown && st2.dockH === 0,
+    'and Chart setup is the roles, with no empty dock strip at their foot ' +
+    '(' + JSON.stringify(st2) + ')');
   await clickBar();
   st2 = await colState();
   const editW = st2.panelW;
@@ -360,6 +416,95 @@ const colState = () => page.evaluate(() => {
   ok((await colState()).editing,
     'clicking a chart part while on the setup view returns to the panel, ' +
     'so a click is never swallowed by the view you happen to be on');
+  // Torry, Sep 2 2026: "even after you click off of an element, you can
+  // still reach the editing menu". The switch used to be gated on a live
+  // panel, so deselecting took the way back with it.
+  ok(await clickEmptyChart(), 'found empty chart space to click off onto');
+  st2 = await colState();
+  ok(st2.switchShown && st2.editing && !st2.live && !st2.panelShowing,
+    'clicking off a part keeps the switch and the Editing view, rather ' +
+    'than hiding the way back along with the panel (' + JSON.stringify(st2) + ')');
+  ok(st2.emptyShown && st2.emptyH > 20 && !st2.setupVisible,
+    'and the view says what to do instead of showing an empty column ' +
+    '(' + st2.emptyH + 'px)');
+  ok(/editing/i.test(st2.heading) && /nothing selected/i.test(st2.sub),
+    'the heading stays honest with no panel ("' + st2.heading + '" / "' +
+    st2.sub + '")');
+  // The dock still HOLDS the (hidden) panel here, so it collapses rather
+  // than going away, which is what keeps its width measurable for the
+  // engine. A dock holding nothing at all is a different case and does go
+  // to display:none - see the Statistics case below.
+  ok(st2.dockH === 0 && st2.dockDisplay !== 'none' && st2.dockW > 200,
+    'with a panel parked in it the dock collapses to nothing without ' +
+    'going away: the engine measures its WIDTH to size the panel (' +
+    JSON.stringify({ h: st2.dockH, display: st2.dockDisplay, w: st2.dockW }) + ')');
+  ok(!/\b(bars?|axes|axis|legend)\b/i.test(st2.emptyText),
+    'and the copy names no chart part, because half the modules do not ' +
+    'draw the ones it used to name - a scatter has no bars, a correlation ' +
+    'matrix has neither bars nor axes ("' + st2.emptyText + '")');
+  await clickBar();
+  st2 = await colState();
+  ok(st2.panelShowing && !st2.emptyShown && st2.panelW === editW,
+    'selecting again fills the same view at the same width (' +
+    st2.panelW + ' vs ' + editW + ')');
+  // The defect the permanent switch introduced, and the rule that fixes
+  // it: SELECTING a part hands the column over, not merely clicking the
+  // chart. Measured against the flip that used to sit in the pointerup
+  // handler, one real click on bare plot space gave editing:true with the
+  // data roles gone.
+  await page.click('#ps-dock-switch-setup');
+  await page.waitForTimeout(350);
+  ok(await clickEmptyChart(), 'found empty chart space to click off onto');
+  st2 = await colState();
+  ok(!st2.editing && st2.setupVisible && !st2.emptyShown,
+    'a click that selects NOTHING leaves the setup view alone: the host ' +
+    'includes bare plot space and the card margin, so flipping on the ' +
+    'click itself hid the data roles behind an empty Editing view (' +
+    JSON.stringify(st2) + ')');
+  await clickBar();
+  ok((await colState()).editing,
+    'while a click that does select a part still lands on Editing');
+  // Statistics is the one selection the engine keeps under the chart, so
+  // the rail cannot fill and a click on a part would only pin a stats row.
+  // The empty state has to say where the controls actually are.
+  await page.evaluate(() => {
+    const b = [...document.querySelectorAll(
+      '.graphbuilder2-host [data-role="chart-toolbar"] button')]
+      .find(x => /statistic/i.test(x.getAttribute('aria-label') || x.title || ''));
+    if (b) b.click();
+  });
+  await page.waitForTimeout(1400);
+  st2 = await colState();
+  ok(st2.editing && !st2.panelShowing && st2.emptyShown &&
+     /statistics panel/i.test(st2.emptyText) && !/click a part/i.test(st2.emptyText),
+    'with Statistics open the empty Editing view names where the controls ' +
+    'are instead of asking for a click that cannot open an editor ("' +
+    st2.emptyText + '")');
+  ok(/statistics/i.test(st2.sub),
+    'and the heading says the same ("' + st2.sub + '")');
+  ok(st2.dockDisplay === 'none',
+    'the dock really is display:none here - it holds nothing, because the ' +
+    'Statistics panel went under the chart (' + st2.dockDisplay + ')');
+  await page.evaluate(() => {
+    const b = [...document.querySelectorAll(
+      '.graphbuilder2-host [data-role="chart-toolbar"] button')]
+      .find(x => /statistic/i.test(x.getAttribute('aria-label') || x.title || ''));
+    if (b) b.click();
+  });
+  await page.waitForTimeout(900);
+  // The Editing tab has to name the thing that is on screen, and that is
+  // not always the dock.
+  st2 = await colState();
+  ok(st2.editControls === 'ps-dock-empty' && st2.editControlsShown &&
+     st2.editControlsRole === 'tabpanel',
+    'the Editing tab points at the panel actually on screen: with nothing ' +
+    'selected that is the empty state, not the collapsed dock (' +
+    JSON.stringify({ c: st2.editControls, shown: st2.editControlsShown,
+                     role: st2.editControlsRole }) + ')');
+  await clickBar();
+  st2 = await colState();
+  ok(st2.editControls === 'ps-engine-dock' && st2.editControlsShown,
+    'and at the dock once the dock holds the panel (' + st2.editControls + ')');
   await page.evaluate(() => window.PS_SHELL.addChart('plotbuilder'));
   await page.waitForTimeout(2200);
   st2 = await colState();
@@ -423,14 +568,23 @@ await setDockPref('below');
   const belowState = await page.evaluate(() => {
     const pane = document.getElementById('ps-inspector-chart');
     const sw = pane.querySelector('.ps-dock-switch');
+    const empty = document.getElementById('ps-dock-empty');
     return { switchShown: !!sw && getComputedStyle(sw).display !== 'none',
              editing: pane.classList.contains('ps-dock-editing'),
-             setupVisible: [...pane.children].some(c => c !== sw &&
+             emptyShown: !!empty && getComputedStyle(empty).display !== 'none',
+             sub: document.getElementById('ps-inspector-subtitle').textContent,
+             setupVisible: [...pane.children].some(c => c !== sw && c !== empty &&
                c.id !== 'ps-engine-dock' && getComputedStyle(c).display !== 'none') };
   });
-  ok(!belowState.switchShown && !belowState.editing && belowState.setupVisible,
-    'with the preference off none of this exists: no switch, no hidden ' +
-    'setup, which is also jamovi\'s path (' + JSON.stringify(belowState) + ')');
+  ok(!belowState.switchShown && !belowState.editing && belowState.setupVisible &&
+     !belowState.emptyShown,
+    'with the preference off none of this exists: no switch, no empty ' +
+    'state, no hidden setup, which is also jamovi\'s path (' +
+    JSON.stringify(belowState) + ')');
+  ok(/select chart parts to style below/i.test(belowState.sub),
+    'and the heading goes back to the below-the-chart copy: switching the ' +
+    'preference off with a part selected left it reading "the part you ' +
+    'selected" over a panel that had moved (' + belowState.sub + ')');
 }
 
 ok(pageErrors.length === 0, 'no page errors (' + pageErrors.slice(0, 2).join(' | ') + ')');
