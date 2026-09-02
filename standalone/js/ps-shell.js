@@ -436,11 +436,12 @@
                              startup: "center", missingTokens: "NA",
                              units: "in", updateCheck: "off",
                              defErrorBars: "", defRmMethod: "",
-                             defAlpha: "" };
+                             defAlpha: "", panelDock: "below" };
   var APP_PREFS = { density: "comfortable", motion: "system",
                     startup: "center", missingTokens: "NA",
                     units: "in", updateCheck: "off",
-                    defErrorBars: "", defRmMethod: "", defAlpha: "" };
+                    defErrorBars: "", defRmMethod: "", defAlpha: "",
+                    panelDock: "below" };
   // MEASUREMENT UNITS (Torry, Jul 27 2026: "I see these really large
   // numbers... I think it might be more useful to have these in inches,
   // and maybe an option for metric"). 816 x 1056 is Letter in CSS pixels,
@@ -934,9 +935,31 @@
         APP_PREFS.units = saved.units;
       if (saved && /^(on|off)$/.test(saved.updateCheck))
         APP_PREFS.updateCheck = saved.updateCheck;
+      if (saved && /^(below|rail)$/.test(saved.panelDock))
+        APP_PREFS.panelDock = saved.panelDock;
     } catch (e) {}
   }
   loadAppPrefs();
+  // Right-rail dock (Torry, Sep 2026). The preference decides where the
+  // engine's editing panel lives: under the chart (the engine's own
+  // default) or in the settings column's dock slot. The body class widens
+  // the column, the window hook hands the engine the slot, and the
+  // payload key (buildPayload) tells it to use it; absent the key the
+  // engine behaves exactly as before, which is also jamovi's path.
+  function panelDockIsRail() { return APP_PREFS.panelDock === "rail"; }
+  function applyPanelDock(rerender) {
+    var rail = panelDockIsRail();
+    try { document.body.classList.toggle("ps-dock-rail", rail); } catch (e) {}
+    try { window.__gb2_inspectorDockHost = rail ? el("ps-engine-dock") : null; } catch (e2) {}
+    // Switching OFF: the engine cannot reach a dock it no longer knows
+    // about, so the slot is emptied here before the re-render puts the
+    // new panel under the chart (otherwise the old one lingered).
+    if (!rail) {
+      try { var dk = el("ps-engine-dock"); while (dk && dk.firstChild) dk.removeChild(dk.firstChild); } catch (e4) {}
+    }
+    if (rerender) { try { render(); } catch (e3) {} }
+  }
+  applyPanelDock(false);   // the hook and the class must precede the first render
 
   // ================================================================ table
   // Raw string cells + per-column declared type; the typed view (numbers /
@@ -7044,6 +7067,12 @@
     // shows is never further than the cap. jamovi never ships this
     // key. One constant; 240px floor lives engine-side.
     payload.panelMaxVh = 42;
+    // Right-rail dock (Torry, Sep 2026): the panel moves into the settings
+    // column, which scrolls on its own, so the height budget comes off.
+    if (panelDockIsRail()) {
+      payload.inspectorDock = "rail";
+      delete payload.panelMaxVh;
+    }
     // Gap seams (Torry, Aug 24 2026): hover-drag editing of the space
     // between bars (categoryGap / barGap) on the cg bar family, built
     // from the playground ruling set (350ms dwell, no chain, one seam
@@ -10897,6 +10926,9 @@
   function revealPanelAfterClick(panel, clickY) {
     var scroller = el("ps-main-workspace");
     if (!scroller || !panel) return 0;
+    // A rail-docked panel is beside the chart, not below it: nothing to
+    // scroll the workspace toward, and its rect is not in this scroller.
+    if (panel.closest && panel.closest("#ps-engine-dock")) return 0;
     var sr = scroller.getBoundingClientRect();
     var pr = panel.getBoundingClientRect();
     if (pr.height < 40) return 0;
@@ -26921,6 +26953,7 @@
     el("ps-pref-export-dpi").value = String(exp.dpi);
     el("ps-pref-missing").value = APP_PREFS.missingTokens;
     if (el("ps-pref-updates")) el("ps-pref-updates").value = APP_PREFS.updateCheck;
+    if (el("ps-pref-dock")) el("ps-pref-dock").value = APP_PREFS.panelDock;
     if (el("ps-pref-def-eb")) el("ps-pref-def-eb").value = APP_PREFS.defErrorBars;
     if (el("ps-pref-def-rmm")) el("ps-pref-def-rmm").value = APP_PREFS.defRmMethod;
     if (el("ps-pref-def-alpha")) el("ps-pref-def-alpha").value = APP_PREFS.defAlpha;
@@ -27062,6 +27095,11 @@
       APP_PREFS.defAlpha =
         /^(0\.1|0\.05|0\.01|0\.001)$/.test(el("ps-pref-def-alpha").value)
           ? el("ps-pref-def-alpha").value : "";
+    if (el("ps-pref-dock")) {
+      var dockWas = APP_PREFS.panelDock;
+      APP_PREFS.panelDock = el("ps-pref-dock").value === "rail" ? "rail" : "below";
+      if (APP_PREFS.panelDock !== dockWas) applyPanelDock(true);
+    }
     if (el("ps-pref-updates")) {
       APP_PREFS.updateCheck = el("ps-pref-updates").value === "on" ? "on" : "off";
       // Just turned on: run the standard (stamp-respecting) check now

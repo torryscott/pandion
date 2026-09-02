@@ -46462,7 +46462,67 @@
         // the user has selected. One element selectable at a time. Empty
         // state when nothing's selected. The text-edit popover and the
         // export popover stay popovers - the rest are migrated here.
+        // Right-rail dock (Sep 2026, Torry's ask; a standalone
+        // preference). When the payload says inspectorDock: "rail" AND the
+        // host has published a connected element in
+        // window.__gb2_inspectorDockHost, the panel is appended THERE
+        // instead of under the chart, sized to that box, with its tab rows
+        // free to wrap and the color picker stacked under the controls.
+        // The Statistics panel is the one exception and stays under the
+        // chart (its tables want the width), which is why placement runs
+        // per selection rather than once. Absent the key (jamovi, the
+        // default standalone) none of this runs and the panel is the
+        // chart's skirt exactly as before.
+        function _gb2RailHost() {
+            try {
+                if (!data || data.inspectorDock !== "rail") return null;
+                var h = window.__gb2_inspectorDockHost;
+                if (typeof h === "function") h = h();
+                return (h && h.nodeType === 1 && h.isConnected) ? h : null;
+            } catch (_eRh) { return null; }
+        }
+        function _gb2RailActive() {
+            try {
+                var rh = _gb2RailHost();
+                return !!(rh && inspectorPanel && inspectorPanel.parentElement === rh);
+            } catch (_eRa) { return false; }
+        }
+        function _gb2PlaceInspectorPanel() {
+            var railH = _gb2RailHost();
+            var sel = (typeof inspector !== "undefined" && inspector && inspector.selection) || [];
+            var wantRail = !!railH && !(sel.length === 1 && sel[0] === "stats");
+            var target = wantRail ? railH
+                : ((typeof chartCard !== "undefined" && chartCard) ? chartCard : host);
+            // One panel in the dock. render() rebuilds the widget's own
+            // DOM, but the dock lives outside it, so a previous render's
+            // panel would otherwise stack under this one. Swept off the RAW
+            // hook too, so a host that turns the key off while still
+            // pointing at the slot leaves nothing behind.
+            var sweep = railH;
+            if (!sweep) {
+                try {
+                    var rawH = window.__gb2_inspectorDockHost;
+                    if (typeof rawH === "function") rawH = rawH();
+                    if (rawH && rawH.nodeType === 1) sweep = rawH;
+                } catch (_eSw) {}
+            }
+            if (sweep) {
+                var olds = sweep.querySelectorAll("[data-gb2-inspector]");
+                for (var _oi = 0; _oi < olds.length; _oi++) {
+                    if (olds[_oi] !== inspectorPanel && olds[_oi].parentNode) {
+                        olds[_oi].parentNode.removeChild(olds[_oi]);
+                    }
+                }
+            }
+            if (inspectorPanel.parentElement !== target) target.appendChild(inspectorPanel);
+            var inRail = (target === railH);
+            inspectorPanel.setAttribute("data-gb2-dock", inRail ? "rail" : "below");
+            // In the rail the panel is a card of its own, not the chart's
+            // skirt; under the chart it keeps the flush top edge.
+            inspectorPanel.style.borderRadius = inRail ? "4px" : "0 0 4px 4px";
+        }
         var inspectorPanel = document.createElement("div");
+        inspectorPanel.setAttribute("data-gb2-inspector", "1");
         inspectorPanel.style.cssText = [
             // Flush with the chart's bottom border (no gap, no top border)
             // so the chart + panel read as one continuous container.
@@ -46484,11 +46544,7 @@
         // Append to the chart card (flex-column container) instead of
         // host, so wrap / toolbar / panel share the same left edge by
         // virtue of flex align-items:flex-start.
-        if (typeof chartCard !== "undefined" && chartCard) {
-            chartCard.appendChild(inspectorPanel);
-        } else {
-            host.appendChild(inspectorPanel);
-        }
+        _gb2PlaceInspectorPanel();
         // Hidden initially so the chart sits clean until the user
         // makes a selection. renderInspectorPanel() handles the
         // animated reveal/hide on selection state changes.
@@ -46595,6 +46651,19 @@
         }
         function _syncInspectorPanelGeometry() {
             if (!inspectorPanel || !wrap) return;
+            if (_gb2RailActive()) {
+                // The dock is the width authority: the panel fills it and
+                // the chart's width has no say. The Statistics width-hold
+                // never applies here because Statistics stays under the
+                // chart (see _gb2PlaceInspectorPanel).
+                inspectorPanel.style.width = "auto";
+                inspectorPanel.style.minWidth = "0";
+                inspectorPanel.style.maxWidth = "100%";
+                inspectorPanel.style.boxSizing = "border-box";
+                inspectorPanel.style.marginLeft = "0";
+                inspectorPanel.style.marginRight = "0";
+                return;
+            }
             try {
                 var W = parseFloat(svg.getAttribute("width"));
                 if (!isFinite(W) || W <= 0) W = inchesW * PX_PER_INCH;
@@ -48902,7 +48971,10 @@
                 }
                 tabBarEl.setAttribute("data-gb2-promoted-tabbar", "1");
                 tabBarEl.style.marginBottom = "0";
-                if (!(opts && opts.allowWrap)) {
+                // In the right-rail dock a six-tab row cannot fit on one
+                // line, so the bar keeps its wrap (two rows of short words,
+                // Torry's first-cut ruling, Sep 2026).
+                if (!(opts && opts.allowWrap) && !_gb2RailActive()) {
                     tabBarEl.style.flexWrap = "nowrap";
                 }
                 row.parentElement.insertBefore(tabBarEl, row);
@@ -59081,6 +59153,9 @@
             while (inspectorPanel.firstChild) {
                 inspectorPanel.removeChild(inspectorPanel.firstChild);
             }
+            // Where this selection lives: the rail, or under the chart
+            // (Statistics always; everything when no dock is declared).
+            try { _gb2PlaceInspectorPanel(); } catch (_ePl) {}
             inspectorPanel.style.display = "";
             // Inline section title - no popup header bar, no × button.
             // Press Escape, click outside, or click another element to
@@ -59108,7 +59183,14 @@
             // active. Both stay visible together so opening the picker
             // doesn't blank the section's other controls.
             var bodyRow = document.createElement("div");
+            bodyRow.setAttribute("data-role", "inspector-bodyrow");
             bodyRow.style.cssText = "display:flex;align-items:flex-start;";
+            // In the rail the picker cannot sit beside the controls (the
+            // dock is about as wide as the picker), so the row stacks.
+            if (_gb2RailActive()) {
+                bodyRow.style.flexDirection = "column";
+                bodyRow.style.alignItems = "stretch";
+            }
             inspectorPanel.appendChild(bodyRow);
             var body = document.createElement("div");
             body.style.cssText = "padding:9px 12px 11px 12px;flex:1;min-width:0;box-sizing:border-box;";
@@ -66097,7 +66179,8 @@
                 var _bsTabBarEl = _bsFirstTabBtn ? _bsFirstTabBtn.parentElement : null;
                 if (_bsTabBarEl && _bsTabBarEl.parentElement === body) {
                     _bsTabBarEl.style.marginBottom = "0";
-                    _bsTabBarEl.style.flexWrap = "nowrap";
+                    // Rail dock: the row may wrap (see _promoteTabBarToFullWidth).
+                    if (!_gb2RailActive()) _bsTabBarEl.style.flexWrap = "nowrap";
                     var _bsBodyRow = inspector.bodyRow;
                     if (_bsBodyRow && _bsBodyRow.parentElement) {
                         _bsBodyRow.parentElement.insertBefore(_bsTabBarEl, _bsBodyRow);
