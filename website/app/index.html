@@ -2746,6 +2746,17 @@
   .ps-inspector-head strong { color: var(--ps-ink-2); font-size: 12px; }
   .ps-inspector-head span { color: var(--ps-muted); font-size: 10px; }
   .ps-controls .ps-controls-row { padding: 11px 12px 3px; }
+  /* The engine's editing panel, docked in this column when the preference
+     says so. Empty (the default) it takes no room. The engine sizes the
+     panel to this box, wraps its tab rows, and stacks the color picker
+     under the controls; the column itself scrolls. */
+  .ps-engine-dock { display: none; }
+  .ps-engine-dock:not(:empty) {
+    display: block; padding: 10px 10px 12px; border-top: 1px solid var(--ps-l2);
+  }
+  /* A wider default column while the panel lives here; a width the user
+     dragged is set inline by the splitter and wins over this. */
+  body.ps-dock-rail .ps-app-body { --ps-insp-w: 360px; }
   .ps-controls .ps-assign {
     flex-direction: column; flex-wrap: nowrap; gap: 12px; margin: 0; padding: 9px 12px 16px;
   }
@@ -4531,6 +4542,11 @@
            size (standard vs a size the user committed), the select owns the
            VIEW. Zoom scales the display only; exports always leave at the
            logical size, so what you see is the figure, scaled. -->
+      <!-- Right-rail dock for the engine's editing panel (Torry, Sep 2026):
+           an opt-in preference moves the panel here instead of under the
+           chart. Empty by default, so it takes no room; the engine appends
+           the SAME panel element it would otherwise put under the chart. -->
+      <div id="ps-engine-dock" class="ps-engine-dock"></div>
     </div>
     <div id="ps-inspector-data" class="ps-inspector-pane">
       <div id="ps-variable-empty" class="ps-inspector-empty">
@@ -5662,6 +5678,16 @@
           <option value="on">On</option>
         </select>
       </label>
+      <!-- Right-rail dock (Torry, Sep 2026): the same editing panel, just
+           placed beside the chart instead of under it. -->
+      <label class="ps-inspector-field"
+             data-tip="Where the chart's editing panel opens when you click a part of the chart. Below the chart is the default; the right rail keeps the chart still and puts the controls beside it. The Statistics panel stays below the chart either way, because its tables need the width.">
+        Chart editing panel
+        <select id="ps-pref-dock">
+          <option value="below">Below the chart (default)</option>
+          <option value="rail">In the right rail</option>
+        </select>
+      </label>
       <!-- t3-53: the dataset default every import starts from. It was
            settable only AFTER an import, per project, so the same correction
            had to be made again for every file. -->
@@ -6209,8 +6235,8 @@
 <script src="lib/ps-data.769925dda9.js"></script>
 <script src="lib/jspdf.umd.min.979a2ef514.js"></script>
 <script src="lib/svg2pdf.umd.min.4ada250f50.js"></script>
-<script src="lib/graphbuilder2.min.580ed56ab9.js"></script>
-<script src="lib/ps-shell.ff03b3955b.js"></script>
+<script src="lib/graphbuilder2.min.a84f2a7692.js"></script>
+<script src="lib/ps-shell.6f79310dc3.js"></script>
 <script src="lib/ps-tour.fe1b2fd3ed.js"></script>
 </body>
 </html>
