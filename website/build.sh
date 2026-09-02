@@ -356,11 +356,38 @@ SIZE_MB=$(python3 -c "import os;print(f'{os.path.getsize(\"website/pandion-plots
 grep -q "One file, about ${SIZE_MB} MB" website/index.html || {
     echo "WARN: the downloads card does not say ${SIZE_MB} MB (portable file size)" >&2
     DRIFT=1; }
+# License drift. The desktop app declares its own license in
+# standalone/electron/package.json, and electron-builder writes that into
+# the packaged app's metadata - so it is a PUBLISHED statement, and a
+# binary cannot be un-published. It read AGPL-3.0 for the life of the
+# desktop build while the repo LICENSE, DESCRIPTION, CITATION.cff, the
+# site footers and the app's own About dialog all said GPL-3.0 (found in
+# the Sep 2026 pre-release audit). Checked against the JSON fields
+# themselves, not a grep: a lockfile mentions dozens of dependency
+# licenses and a bare grep would pass off any of them.
+LICENSE_ID="GPL-3.0"
+node -e '
+  const want = process.argv[1];
+  const pkg = require("./standalone/electron/package.json");
+  const lock = require("./standalone/electron/package-lock.json");
+  const root = (lock.packages && lock.packages[""]) || {};
+  const bad = [];
+  if (pkg.license !== want) bad.push("package.json says " + pkg.license);
+  if (root.license !== want) bad.push("package-lock.json root says " + root.license);
+  if (bad.length) { console.error("WARN: desktop app license drift (" + bad.join("; ") + "), expected " + want); process.exit(1); }
+' "$LICENSE_ID" || DRIFT=1
+grep -q "^license: $LICENSE_ID$" CITATION.cff || {
+    echo "WARN: CITATION.cff does not declare license $LICENSE_ID" >&2; DRIFT=1; }
+grep -q ">$LICENSE_ID<" standalone/index.html || {
+    echo "WARN: the app's About dialog does not state $LICENSE_ID" >&2; DRIFT=1; }
+grep -q "^License: GPL-3$" DESCRIPTION || {
+    echo "WARN: DESCRIPTION does not declare License: GPL-3" >&2; DRIFT=1; }
 
 if [ "$DRIFT" = "0" ]; then
     echo "version $VERSION consistent across the site + CITATION.cff"
+    echo "license $LICENSE_ID consistent across the desktop app, citation, About and DESCRIPTION"
 else
-    echo "ERROR: public version references are inconsistent" >&2
+    echo "ERROR: public version or license references are inconsistent" >&2
     exit 1
 fi
 
