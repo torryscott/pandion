@@ -13507,6 +13507,16 @@
     }
     return width;
   }
+  // The narrowest NATURAL (auto-fitted) width. The header's chrome is
+  // about 48 px (padding, the 14 px type badge, its gap, the 8 px
+  // resizer) and the widest role tag the app prints under a name
+  // ("GROUP BY", "MEASURES") needs ~60 more; a fit below that would have
+  // to be re-fitted the moment a role is assigned, and a 72 px header
+  // leaves almost nothing to click on. The user's own drag can still go
+  // down to gridClampColumnWidth's 72; this floor is for what the app
+  // chooses. Shared by every auto-fit path (default, double-click,
+  // Auto-fit all, Reset) so they agree to the pixel.
+  var GRID_NATURAL_MIN = 96;
   function gridNaturalColumnWidth(col, scanCap) {
     var t = PROJECT.table;
     if (!t || !t.raw[col]) return 160;
@@ -13533,7 +13543,7 @@
       widest = Math.max(widest, gridApproxTextWidth(vals[i]) + 28);
     if (step > 1 && nv)
       widest = Math.max(widest, gridApproxTextWidth(vals[nv - 1]) + 28);
-    return gridClampColumnWidth(widest);
+    return gridClampColumnWidth(Math.max(GRID_NATURAL_MIN, widest));
   }
   // Auto-fit is the DEFAULT for every column (Torry, Sep 2026). Rather
   // than a new render mode, this FILLS the width each column is missing,
@@ -14241,9 +14251,14 @@
              ' data-grid-col="' + escHtml(col) + '"' +
              (col === INSPECTOR_VAR ? ' class="ps-grid-col-active"' : "") +
              ' data-tip="' + escHtml(typeLabel(kind)) + ' variable">' +
-             escHtml(col) +
+             // The type badge leads the name (jamovi's convention). It is
+             // its own control (the type menu), excluded from click-to-select
+             // and header drags, so it must never sit where a header click
+             // naturally lands; trailing the name it reached the centre of a
+             // fitted column once columns fit their content by default.
              '<span class="ps-grid-badge" data-grid-type data-tip="Change measure type">' +
              psTypeIcon(kind) + "</span>" +
+             escHtml(col) +
              (isComputedColumn(t, col)
               ? '<span class="ps-grid-fx" data-tip="' +
                 escHtml(t.computedErrors && t.computedErrors[col]
