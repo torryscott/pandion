@@ -135,11 +135,16 @@ ok(mt.pickerW <= Math.round(mt.panelW * 0.5),
   mt.pickerW + ' of ' + mt.panelW + ')');
 await tall.ctx.close();
 
-console.log('case 3: chips only grow, and keep their target spacing');
+console.log('case 3: the chips keep their settled density at every size');
 const narrow = await open(1180, 780, false);
 const mn = await measure(narrow.page);
 for (const [label, x] of [['default', m], ['tall', mt], ['narrow', mn]]) {
-  ok(x.chipW >= 22, 'chips never shrink below 22px at ' + label + ' (' + x.chipW + ')');
+  // 21.9, not 22: a 22px chip measures 21.98 under sub-pixel layout.
+  // The chips deliberately do NOT grow with the panel - their 22px edge
+  // and 25px centre spacing are a settled ruling that swatch-row-check
+  // pins, and growing them measured as a regression there.
+  ok(x.chipW >= 21.9 && x.chipW < 23,
+    'chips hold their settled 22px at ' + label + ' (' + x.chipW + ')');
   ok(x.chipPitch >= 24, 'adjacent chip centres stay 24px apart at ' + label + ' (' + x.chipPitch + ')');
 }
 await narrow.ctx.close();

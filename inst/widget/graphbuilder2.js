@@ -46775,8 +46775,17 @@
         // Idempotent and cheap: called when a selection renders, when the
         // picker mounts, and by the panel observer.
         function _gb2FitPanelControls() {
+            // Published on the HOST, not the panel. render() builds a
+            // fresh panel whose inline style starts empty, so a panel
+            // that owned these grew into them a frame after it appeared:
+            // the picker drew at its fallback size, the fit widened it,
+            // and the reveal's settle-watch read that growth as a reason
+            // to scroll (measured 31px of gratuitous motion on a second
+            // bar click). The host outlives every rebuild, and custom
+            // properties inherit, so the new panel starts at the right
+            // size and the fit below finds nothing to change.
             var st = null;
-            try { st = inspectorPanel && inspectorPanel.style; } catch (_eFs) {}
+            try { st = host && host.style; } catch (_eFs) {}
             if (!st) return;
             if (!_gb2PanelFitOn()) {
                 // No key. Drop the properties so the markup's own
@@ -46790,7 +46799,7 @@
                 st.removeProperty("--gb2-pkr-cell");
                 st.removeProperty("--gb2-chip");
                 window.__gb2_pfcChipPx = 0;
-                inspectorPanel.__gb2FitSig = "";
+                host.__gb2FitSig = "";
                 return;
             }
             // Measured off the BORDER box, less the panel's own 1px
@@ -46803,7 +46812,20 @@
             // _syncInspectorPanelGeometry wrote from the chart, which
             // nothing inside the panel can move.
             var avail = 0;
-            try { avail = Math.floor((inspectorPanel.offsetWidth || 0) - 2); } catch (_eFc) {}
+            try {
+                // The width the panel is GIVEN, taken from the style
+                // _syncInspectorPanelGeometry just wrote, falling back to
+                // its measured box. Reading the panel's own offsetWidth
+                // alone meant the sizes could not be computed until a
+                // panel had been displayed, so the FIRST one opened at
+                // the fallback sizes and then grew into these, and the
+                // reveal's settle-watch scrolled to the taller box on the
+                // next click (measured 31px). Sizing from the width it is
+                // about to be given lets this run before anything opens.
+                var _pw = parseFloat(inspectorPanel.style.width) || 0;
+                if (!(_pw > 0)) _pw = inspectorPanel.offsetWidth || 0;
+                avail = Math.floor(_pw - 2);
+            } catch (_eFc) {}
             // A hidden panel measures zero. Write nothing rather than a
             // size computed from it: on a panel that has never been
             // fitted the markup's own fallbacks are already standing, and
@@ -46813,14 +46835,21 @@
             var W0 = 184, SV0 = 96, STRIP0 = 11, CELL0 = 13, CHIP0 = 22;
             // The picker is docked BESIDE the controls, not under them,
             // so every pixel it takes comes out of them: it gets a fixed
-            // 38% SHARE and the controls keep the remaining majority.
+            // 34% SHARE and the controls keep the remaining majority.
+            // The share is bounded by what the CONTROLS need, not by what
+            // the picker could use. Past about a third, their chip rows
+            // wrap onto an extra line, which makes the panel taller,
+            // which on a short window pushes it to its height cap and
+            // scrolls the workspace on the next click (measured at 38%:
+            // a 31px jump for no reason). 34 is the most the picker can
+            // take without moving anything else.
             // The floor is the 184px it has always been drawn at, so this
             // can only grow it - and on a panel too narrow for the share
             // to reach that, the floor wins and the split is exactly what
             // it is today. The 320px ceiling is the gradient's 160px
             // height cap doubled: past 2:1 the SV square stops being a
             // square, and area is what it trades in.
-            var w = Math.max(W0, Math.min(320, Math.round(avail * 0.38)));
+            var w = Math.max(W0, Math.min(320, Math.round(avail * 0.34)));
             var r = w / W0;
             // The room that is spare in this dock is HEIGHT, so the
             // gradient grows with the panel's height budget rather than
@@ -46835,25 +46864,36 @@
             var sv = (budget > 0)
                 ? Math.max(SV0, Math.min(160, Math.round(budget * 0.32)))
                 : SV0;
-            // The strips and the swatch-grid cells span the column, so
-            // they follow its WIDTH: a wider column can carry a chunkier
-            // one. Past their caps all three simply get wider, which is a
-            // shape a color picker is allowed to have.
-            var strip = Math.min(16, Math.round(STRIP0 * r));
-            var cell = Math.min(20, Math.round(CELL0 * r));
-            // A quick pick must never outgrow the current-color swatch it
-            // edits, and the SMALLEST of those in the suite is 24px (the
-            // box outlier strips; every other strip's is 28px). Growing
-            // only, so the 22px edge and 3px gap that carry the
-            // target-size guidance by spacing remain the floor.
-            var chip = Math.max(CHIP0, Math.min(24, Math.round(CHIP0 * r)));
+            // The strips and the swatch-grid cells span the column, so a
+            // wider column can carry chunkier ones - but they add HEIGHT,
+            // and height is the dimension the panel has a budget for. So
+            // they grow with the gradient's growth, not with the width:
+            // where the budget is tight the gradient does not grow and
+            // neither do these, and the picker's height is left alone.
+            // Growing them on width was measured pushing the picker past
+            // the panel's cap on a short window, which raised the host,
+            // raised the scroll reserve under it, and made a second bar
+            // click scroll the workspace 31px for no reason.
+            var hgrow = sv / SV0;
+            var strip = Math.min(16, Math.round(STRIP0 * hgrow));
+            var cell = Math.min(20, Math.round(CELL0 * hgrow));
+            // The chips do NOT grow. Their 22px edge and 3px gap are a
+            // settled ruling (Torry, Aug 3 2026: closer together but
+            // actually larger), the 25px centre spacing is what carries
+            // the target-size guidance, and swatch-row-check pins both.
+            // Growing them to 24 measured as a real regression there, and
+            // it bought nothing the picker itself does not: it is the
+            // gradient that was cramped. Kept as a value rather than
+            // removed so the property stays one dial if that ruling ever
+            // changes.
+            var chip = CHIP0;
             // Nothing changed: leave the DOM alone, so the observer that
             // called us cannot start a resize feedback loop. The stamp
             // lives on the panel ELEMENT, not on window, because render()
             // builds a fresh panel whose style block starts empty.
             var sig = w + ":" + sv + ":" + strip + ":" + cell + ":" + chip;
-            if (inspectorPanel.__gb2FitSig === sig) return;
-            inspectorPanel.__gb2FitSig = sig;
+            if (host.__gb2FitSig === sig) return;
+            host.__gb2FitSig = sig;
             st.setProperty("--gb2-pkr-w", w + "px");
             // The bodyRow is a horizontal flex row, so the basis IS the
             // width and the two have to agree.
@@ -47144,8 +47184,14 @@
             } catch (_e) {}
         }
         _syncInspectorPanelGeometry();
+        // Sizes before any panel opens, so the first one is built at its
+        // final size instead of growing into it a frame later.
+        try { _gb2FitPanelControls(); } catch (_eFp0) {}
         if (typeof requestAnimationFrame === "function") {
-            requestAnimationFrame(_syncInspectorPanelGeometry);
+            requestAnimationFrame(function () {
+                _syncInspectorPanelGeometry();
+                try { _gb2FitPanelControls(); } catch (_eFp1) {}
+            });
         }
         var _panelAnimTimer = null;
 
