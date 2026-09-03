@@ -47,6 +47,37 @@
     // Off the standalone this is EXACTLY 1. jamovi applies no zoom, and
     // Electron page zoom and retina scaling move both sides together, so
     // every call site divides by 1, which is exact, and behaves as before.
+    // How many VISUAL px one CSS px written into an svg child's
+    // style.transform paints as. Chromium: the zoom, a CSS length inside a
+    // zoomed subtree being a logical px. Safari: the zoom SQUARED. It
+    // inflates the length once at style time and then paints the svg zoomed
+    // again (Torry's Safari 26 readout, Sep 2026: translateX(243.9px) moved
+    // the bar 451px at zoom 1.359). Safari also leaves the zoom out of
+    // getScreenCTM() entirely, so the matrix the drag code divided by read
+    // 1.000 there and the bar outran the cursor by the zoom squared, while
+    // Chrome tracked perfectly. Neither the matrix nor an assumption serves,
+    // so measure: a throwaway rect, one known translate, two synchronous
+    // reads with no paint between them. Wherever nothing zooms this never
+    // even builds the probe and returns exactly 1, so jamovi divides by 1.
+    function _gb2CssPxScale(svg) {
+        try {
+            if (!svg || !svg.getBoundingClientRect) return 1;
+            var vs = _gb2ViewScale(svg);
+            if (vs === 1) return 1;
+            var p = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+            p.setAttribute("x", "0"); p.setAttribute("y", "0");
+            p.setAttribute("width", "10"); p.setAttribute("height", "10");
+            p.setAttribute("fill", "none"); p.setAttribute("pointer-events", "none");
+            p.style.transition = "none";
+            svg.appendChild(p);
+            var a = p.getBoundingClientRect().left;
+            p.style.transform = "translateX(100px)";
+            var b = p.getBoundingClientRect().left;
+            svg.removeChild(p);
+            var sc = (b - a) / 100;
+            return (isFinite(sc) && sc > 0.01) ? sc : vs;
+        } catch (_e) { return 1; }
+    }
     function _gb2ViewScale(el) {
         try {
             if (!el || !el.getBoundingClientRect) return 1;
@@ -8413,17 +8444,12 @@
         }
         function _playBarFlip(oldRects) {
             if (typeof dataGroup === "undefined" || !dataGroup) return;
-            // CTM scale: 1 user unit = (ctm.a) screen pixels in X,
-            // (ctm.d) in Y. Divide a screen-pixel delta by these to
-            // get the equivalent translate in user space (which is
-            // what CSS transform on an SVG element uses).
+            // Screen-px delta -> CSS px for style.transform: MEASURED, not
+            // getScreenCTM (Safari leaves the host zoom out of the matrix
+            // and paints CSS px on svg children zoom-squared).
             var sx = 1, sy = 1;
             try {
-                if (svg && svg.getScreenCTM) {
-                    var ctm = svg.getScreenCTM();
-                    if (ctm && ctm.a) sx = ctm.a;
-                    if (ctm && ctm.d) sy = ctm.d;
-                }
+                if (svg) { sx = sy = _gb2CssPxScale(svg); }
             } catch (_e) {}
             var newBars = svg ? svg.querySelectorAll("[data-bar-cat], [data-ann-id]") : [];
             for (var i = 0; i < newBars.length; i++) {
@@ -8564,6 +8590,9 @@
                 var s = 0, newStart = {};
                 for (var i = 0; i < ctx.order.length; i++) { newStart[ctx.order[i]] = s; s += 360 * (ctx.frac[ctx.order[i]] || 0); }
                 function _sd(a, b) { return ((a - b + 540) % 360 + 360) % 360 - 180; }
+                // transform-origin is CSS px but cx/cy are user units; Safari
+                // paints CSS px on svg children zoom-squared (1:1 in Chrome).
+                var _u2c = 1; try { _u2c = _gb2ViewScale(svg) / _gb2CssPxScale(svg); } catch (_eU) {}
                 var fresh = [];
                 for (var c in oldStartByCat) {
                     if (!Object.prototype.hasOwnProperty.call(oldStartByCat, c)) continue;
@@ -8572,7 +8601,7 @@
                     if (Math.abs(inv) < 0.5) continue;
                     var wEl = svg.querySelector('[data-role="freq-slice"][data-cat="' + (window.CSS && CSS.escape ? CSS.escape(c) : c) + '"]');
                     if (!wEl) continue;
-                    wEl.style.transformOrigin = ctx.cx + "px " + ctx.cy + "px";
+                    wEl.style.transformOrigin = (ctx.cx * _u2c) + "px " + (ctx.cy * _u2c) + "px";
                     wEl.style.transition = "none";
                     wEl.style.transform = "rotate(" + inv + "deg)";
                     fresh.push(wEl);
@@ -16426,11 +16455,11 @@
                     try { hit.setPointerCapture(e.pointerId); } catch (_pc) {}
                     hit.style.cursor = "grabbing";
                     function svgPoint(clientX, clientY) {
-                        var pt = svg.createSVGPoint();
-                        pt.x = clientX; pt.y = clientY;
-                        var ctm = svg.getScreenCTM();
-                        if (!ctm) return null;
-                        return pt.matrixTransform(ctm.inverse());
+                        // No viewBox: user space = (client - svg rect) / view scale.
+                        // Not getScreenCTM, which omits the host zoom in Safari.
+                        var r = svg.getBoundingClientRect(), vs = _gb2ViewScale(svg);
+                        if (!r) return null;
+                        return { x: (clientX - r.left) / vs, y: (clientY - r.top) / vs };
                     }
                     function onMove(ev) {
                         var p = svgPoint(ev.clientX, ev.clientY);
@@ -30278,13 +30307,17 @@
                 : { clientX: clamped, clientY: crossClient };
             var startClient = horizDrag ? st.startY : st.startX;
             var dDragClient = clamped - startClient;
-            var sScale = 1;
-            try {
-                if (svg && svg.getScreenCTM) {
-                    var ctm = svg.getScreenCTM();
-                    if (ctm) sScale = horizDrag ? (ctm.d || 1) : (ctm.a || 1);
-                }
-            } catch (_e2) {}
+            // Calibrated once per gesture, not read off getScreenCTM: Safari
+            // leaves the CSS zoom out of that matrix and paints a CSS px
+            // translate zoom-squared, so dividing by the matrix let the bar
+            // outrun the cursor there while Chrome tracked (see
+            // _gb2CssPxScale). viewS is what a USER unit paints as; the
+            // parting shifts below are user units and need that ratio.
+            if (!(st.cssPx > 0)) {
+                st.cssPx = _gb2CssPxScale(svg);
+                st.viewS = _gb2ViewScale(svg);
+            }
+            var sScale = st.cssPx;
             var dDragUser = dDragClient / sScale;
             if (st.draggedBars) {
                 var translateAxis = horizDrag ? "translateY" : "translateX";
@@ -30314,7 +30347,9 @@
                     if (shift === 0) {
                         nb.style.transform = "";
                     } else {
-                        nb.style.transform = translateAxis2 + "(" + shift + "px)";
+                        // shift is user units; a CSS px paints as cssPx and a
+                        // user unit as viewS, so convert (1:1 in Chrome).
+                        nb.style.transform = translateAxis2 + "(" + (shift * (st.viewS || 1) / (st.cssPx || 1)) + "px)";
                     }
                 }
                 // Line-plot extension: each non-dragged GROUP shifts
@@ -30341,8 +30376,10 @@
                             if (_lnShift === 0) {
                                 _lnNode.style.transform = "";
                             } else {
+                                // User units into a CSS px transform: the
+                                // same conversion as the bars above.
                                 _lnNode.style.transform =
-                                    translateAxis2 + "(" + _lnShift + "px)";
+                                    translateAxis2 + "(" + (_lnShift * (st.viewS || 1) / (st.cssPx || 1)) + "px)";
                             }
                         }
                     }
@@ -31679,7 +31716,9 @@
                             curOrder = slots.map(function (s) { return s.lvl; });
                             if (curOrder.indexOf(lvl) < 0) return;
                             inlineRow = slots.every(function (s) { return Math.abs(s.cy - slots[0].cy) < Math.max(8, 0.4 * (s.bottom - s.top)); });
-                            try { var m = (dataGroup || svg).getScreenCTM(); if (m && m.a) scale = m.a; } catch (_eS) {}
+                            // client px per CSS px written to style.transform (measured;
+                            // Safari omits the host zoom from getScreenCTM)
+                            try { scale = _gb2CssPxScale(svg); } catch (_eS) {}
                             if (!scale) scale = 1;
                             sets = {};
                             for (var i = 0; i < slots.length; i++) sets[slots[i].lvl] = collectFacet(slots[i]);
@@ -33070,9 +33109,13 @@
                                 var indicatorX = (cursorX < tgt.cx) ? tgt.left - 4 : tgt.right + 4;
                                 // Convert client X to axisGroup-local X.
                                 try {
+                                    // client -> svg user space via the rect + view scale
+                                    // (Safari omits the host zoom from getScreenCTM), then
+                                    // into axisGroup space via getCTM (pure user space).
                                     var pt = svg.createSVGPoint();
-                                    pt.x = indicatorX; pt.y = chartTop;
-                                    var ctm = axisGroup.getScreenCTM();
+                                    var _sr = svg.getBoundingClientRect();
+                                    pt.x = (indicatorX - _sr.left) / (ghostVS || 1); pt.y = chartTop;
+                                    var ctm = axisGroup.getCTM();
                                     if (ctm) {
                                         var loc = pt.matrixTransform(ctm.inverse());
                                         dropIndicator.setAttribute("x1", loc.x);
@@ -36385,7 +36428,8 @@
                                 if (e.button !== 0) return;
                                 e.stopPropagation();
                                 var sx = e.clientX, sy = e.clientY, odx = _hlDX, ody = _hlDY, moved = false;
-                                var _scl = 1; try { var ctm = svg.getScreenCTM(); if (ctm && ctm.a) _scl = ctm.a; } catch (_e0) {}
+                                // attribute translate = user units; Safari omits the host zoom from getScreenCTM
+                                var _scl = 1; try { _scl = _gb2ViewScale(svg); } catch (_e0) {}
                                 function mv(ev) {
                                     if (!moved && (Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy)) < 4) return;
                                     moved = true; _dragged = true;
@@ -38127,7 +38171,8 @@
                                 e.preventDefault(); e.stopPropagation();
                                 var startC = (orient === "x") ? e.clientY : e.clientX;
                                 var start = _mgSize, moved = false;
-                                var sc = 1; try { var ctm = svg.getScreenCTM(); if (ctm) sc = (orient === "x") ? (ctm.d || 1) : (ctm.a || 1); } catch (_e0) {}
+                                // xyMarginalSize is user units; Safari omits the host zoom from getScreenCTM
+                                var sc = 1; try { sc = _gb2ViewScale(svg); } catch (_e0) {}
                                 function mv(ev) {
                                     var d = ((orient === "x") ? (ev.clientY - startC) : (startC - ev.clientX)) / sc;
                                     if (!moved && Math.abs(d) < 2) return;
@@ -39463,9 +39508,11 @@
                             var committed = groupCats.slice(), preview = groupCats.slice();
                             var lastSlots = 0;
                             var SLOT_PX = 44;
-                            // Screen->SVG scale for the follow transform.
+                            // Screen px -> CSS px for the follow transform (measured:
+                            // Safari paints CSS px on svg children zoom-squared and
+                            // leaves the host zoom out of getScreenCTM).
                             var _zSy = 1;
-                            try { var _zCtm = svg.getScreenCTM(); if (_zCtm && _zCtm.d) _zSy = _zCtm.d; } catch (_eZc) {}
+                            try { _zSy = _gb2CssPxScale(svg); } catch (_eZc) {}
                             function _zEsc(s) {
                                 if (window.CSS && typeof CSS.escape === "function") return CSS.escape(String(s));
                                 return String(s)
@@ -39829,8 +39876,12 @@
                             e.stopPropagation();
                             var startX = e.clientX, startY = e.clientY, pid = e.pointerId, moved = false;
                             var committed = groupCats.slice(), preview = groupCats.slice();
+                            // every write here is a CSS translate from a VISUAL px
+                            // delta (client delta or bounding-rect height), so one
+                            // measured cssPx serves both axes; getScreenCTM omits the
+                            // host zoom in Safari.
                             var sx = 1, sy = 1;
-                            try { var ctm = svg.getScreenCTM(); if (ctm) { if (ctm.a) sx = ctm.a; if (ctm.d) sy = ctm.d; } } catch (_e) {}
+                            try { sx = sy = _gb2CssPxScale(svg); } catch (_e) {}
                             // Segments are stable during the drag (no redraw), so
                             // cache them + the grabbed group's per-bin heights.
                             var allSegs = [], gSegs = [], gH = {};
@@ -41923,10 +41974,14 @@
                         "rotate(" + d.toFixed(3) + " " + _cx + " " + _cy + ")"
                         + " rotate(" + (-d).toFixed(3) + " " + lx + " " + ly + ")");
                 }
+                // _fqU2C: user units -> CSS px for the transform-origin (Safari
+                // paints CSS px on svg children zoom-squared); measured ONCE per
+                // drag when the reorder gesture engages, never per frame.
+                var _fqU2C = 1;
                 function _fqWedgeTransform(cat, d, animate) {
                     var wd = _wedgeByCat[cat];
                     if (!wd) return;
-                    wd.style.transformOrigin = _cx + "px " + _cy + "px";
+                    wd.style.transformOrigin = (_cx * _fqU2C) + "px " + (_cy * _fqU2C) + "px";
                     wd.style.transition = animate ? "transform 0.12s ease" : "none";
                     wd.style.transform = d ? ("rotate(" + d + "deg)") : "";
                     _fqLabelTransform(cat, d || 0);
@@ -41947,6 +42002,7 @@
                                 if (Math.abs(mv.clientX - sx)
                                     + Math.abs(mv.clientY - sy) < 6) return;
                                 engaged = true;
+                                try { _fqU2C = _gb2ViewScale(svg) / _gb2CssPxScale(svg); } catch (_eU) { _fqU2C = 1; }
                                 try {
                                     window.__gb2_fqPieDragging = true;
                                     window.__gb2_fqPieDragKind = "reorder";
@@ -42067,7 +42123,7 @@
                                     if (!wEl) continue;
                                     var inv = _fqSignedDiff(liveStart[c4], finalLay[c4].start);
                                     if (Math.abs(inv) < 0.5) continue;
-                                    wEl.style.transformOrigin = _cx + "px " + _cy + "px";
+                                    wEl.style.transformOrigin = (_cx * _fqU2C) + "px " + (_cy * _fqU2C) + "px";
                                     wEl.style.transition = "none";
                                     wEl.style.transform = "rotate(" + inv + "deg)";
                                     fresh.push(wEl);
@@ -42111,11 +42167,11 @@
                 // path the panel's Hole / Rotation sliders already use.
                 function _fqPtPolar(ev) {
                     try {
-                        var pt = svg.createSVGPoint();
-                        pt.x = ev.clientX; pt.y = ev.clientY;
-                        var m = svg.getScreenCTM();
-                        if (!m) return null;
-                        var pp = pt.matrixTransform(m.inverse());
+                        // No viewBox: user space = (client - svg rect) / view scale.
+                        // Not getScreenCTM, which omits the host zoom in Safari.
+                        var r = svg.getBoundingClientRect(), vs = _gb2ViewScale(svg);
+                        if (!r) return null;
+                        var pp = { x: (ev.clientX - r.left) / vs, y: (ev.clientY - r.top) / vs };
                         return {
                             deg: Math.atan2(pp.y - _cy, pp.x - _cx) * 180 / Math.PI,
                             dist: Math.sqrt((pp.x - _cx) * (pp.x - _cx)
@@ -42453,7 +42509,8 @@
                             _hit5.addEventListener("mouseleave", function () { _lineEl.setAttribute("stroke-width", String(_lw)); _xyTooltipHide(); });
                             _hit5.addEventListener("mousemove", function (ev) {
                                 var best = null, bd = Infinity;
-                                var pt = svg.createSVGPoint ? (function () { var q = svg.createSVGPoint(); q.x = ev.clientX; q.y = ev.clientY; try { return q.matrixTransform(svg.getScreenCTM().inverse()); } catch (_e) { return null; } })() : null;
+                                // rect + view scale, not getScreenCTM (Safari omits the host zoom from it)
+                                var pt = (function () { try { var _r = svg.getBoundingClientRect(), _vs = _gb2ViewScale(svg); return { x: (ev.clientX - _r.left) / _vs, y: (ev.clientY - _r.top) / _vs }; } catch (_e) { return null; } })();
                                 if (pt) { for (var z = 0; z < _pts.length; z++) { var dd = Math.abs((horizontal ? _pts[z][1] : _pts[z][0]) - (horizontal ? pt.y : pt.x)); if (dd < bd) { bd = dd; best = z; } } }
                                 if (best != null) {
                                     _xyTooltipShow("<div style='font-weight:600;margin-bottom:2px;'>" + _fqEsc(displayCategory(visibleXCats[_pts[best][3]])) + "</div><div>cumulative " + (Math.round(_pts[best][2] * 10) / 10) + "%</div>", ev.clientX, ev.clientY);
@@ -43064,11 +43121,10 @@
                                 ev.stopPropagation(); ev.preventDefault();
                                 if (_vEls.length) {
                                     try {
-                                        var _pt6 = svg.createSVGPoint();
-                                        _pt6.x = ev.clientX; _pt6.y = ev.clientY;
-                                        var _m6 = svg.getScreenCTM();
-                                        if (_m6) {
-                                            var _sp6 = _pt6.matrixTransform(_m6.inverse());
+                                        // rect + view scale, not getScreenCTM (Safari omits the host zoom)
+                                        var _r6 = svg.getBoundingClientRect(), _vs6 = _gb2ViewScale(svg);
+                                        if (_r6) {
+                                            var _sp6 = { x: (ev.clientX - _r6.left) / _vs6, y: (ev.clientY - _r6.top) / _vs6 };
                                             for (var _vq = 0; _vq < _vEls.length; _vq++) {
                                                 var _vb6 = _vEls[_vq].getBBox();
                                                 if (_sp6.x >= _vb6.x - 2 && _sp6.x <= _vb6.x + _vb6.width + 2
@@ -43162,8 +43218,12 @@
                     if (n < 2) return;
                     e.stopPropagation();
                     var startX = e.clientX, startY = e.clientY, pid = e.pointerId, moved = false;
-                    var sx = 1, sy = 1;
-                    try { var ctm = svg.getScreenCTM(); if (ctm) { if (ctm.a) sx = ctm.a; if (ctm.d) sy = ctm.d; } } catch (_ec0) {}
+                    // sx/sy: client px per USER unit (the slot math); u2c: user
+                    // units -> CSS px for style.transform; cssPx: client px per CSS
+                    // px (the FLIP glide). Measured once per gesture, not read off
+                    // getScreenCTM (Safari leaves the host zoom out of it).
+                    var sx = 1, sy = 1, cssPx = 1, u2c = 1;
+                    try { sx = sy = _gb2ViewScale(svg); cssPx = _gb2CssPxScale(svg); u2c = sx / cssPx; } catch (_ec0) {}
                     var committed = vars.slice();
                     // The drag AXIS (decided on first movement) selects which
                     // variable reorders: a vertical drag reorders the grabbed
@@ -43211,7 +43271,7 @@
                             var R = +cg.getAttribute("data-row"), C = +cg.getAttribute("data-col");
                             cg.style.transition = (R === g || C === g) ? "none" : "transform 170ms ease-out";
                             var ox = off[C] || 0, oy = off[R] || 0;
-                            cg.style.transform = (ox || oy) ? ("translate(" + ox + "px," + oy + "px)") : "";
+                            cg.style.transform = (ox || oy) ? ("translate(" + (ox * u2c) + "px," + (oy * u2c) + "px)") : "";
                         }
                         for (i = 0; i < labelGs.length; i++) {
                             var lg = labelGs[i];
@@ -43219,9 +43279,9 @@
                             lg.style.transition = (K === g) ? "none" : "transform 170ms ease-out";
                             var d = off[K] || 0;
                             if (lg.getAttribute("data-axis") === "row")
-                                lg.style.transform = d ? ("translate(0px," + d + "px)") : "";
+                                lg.style.transform = d ? ("translate(0px," + (d * u2c) + "px)") : "";
                             else
-                                lg.style.transform = d ? ("translate(" + d + "px,0px)") : "";
+                                lg.style.transform = d ? ("translate(" + (d * u2c) + "px,0px)") : "";
                         }
                         return rr.slot;
                     }
@@ -43290,7 +43350,7 @@
                                 var o = oldR[prefix + el.getAttribute(a0) + "::" + el.getAttribute(a1)];
                                 if (!o) continue;
                                 var nr; try { nr = el.getBoundingClientRect(); } catch (_ecc) { continue; }
-                                var ddx = (o.left - nr.left) / sx, ddy = (o.top - nr.top) / sy;
+                                var ddx = (o.left - nr.left) / cssPx, ddy = (o.top - nr.top) / cssPx;
                                 if (Math.abs(ddx) < 0.5 && Math.abs(ddy) < 0.5) continue;
                                 el.style.transition = "none";
                                 el.style.transform = "translate(" + ddx + "px," + ddy + "px)";
@@ -43436,7 +43496,8 @@
                         if (e.button !== 0) return;
                         e.stopPropagation();
                         var sx0 = e.clientX, sy0 = e.clientY, odx = _clDX, ody = _clDY, moved = false;
-                        var _scl = 1; try { var ctm = svg.getScreenCTM(); if (ctm && ctm.a) _scl = ctm.a; } catch (_e0) {}
+                        // attribute translate = user units; Safari omits the host zoom from getScreenCTM
+                        var _scl = 1; try { _scl = _gb2ViewScale(svg); } catch (_e0) {}
                         function mv(ev) {
                             if (!moved && (Math.abs(ev.clientX - sx0) + Math.abs(ev.clientY - sy0)) < 4) return;
                             moved = true; _clDragged = true;
@@ -44279,11 +44340,10 @@
                                     ev.stopPropagation(); ev.preventDefault();
                                     if (lbl) {
                                         try {
-                                            var pt7 = svg.createSVGPoint();
-                                            pt7.x = ev.clientX; pt7.y = ev.clientY;
-                                            var m7 = svg.getScreenCTM();
-                                            if (m7) {
-                                                var sp7 = pt7.matrixTransform(m7.inverse());
+                                            // rect + view scale, not getScreenCTM (Safari omits the host zoom)
+                                            var r7 = svg.getBoundingClientRect(), vs7 = _gb2ViewScale(svg);
+                                            if (r7) {
+                                                var sp7 = { x: (ev.clientX - r7.left) / vs7, y: (ev.clientY - r7.top) / vs7 };
                                                 var vb7 = lbl.getBBox();
                                                 if (sp7.x >= vb7.x - 2 && sp7.x <= vb7.x + vb7.width + 2
                                                     && sp7.y >= vb7.y - 2 && sp7.y <= vb7.y + vb7.height + 2) {
@@ -44446,7 +44506,8 @@
                                 odx = (typeof data.likertLegendDX === "number") ? data.likertLegendDX : 0,
                                 ody = (typeof data.likertLegendDY === "number") ? data.likertLegendDY : 0,
                                 moved = false;
-                            var _scl = 1; try { var ctm = svg.getScreenCTM(); if (ctm && ctm.a) _scl = ctm.a; } catch (_e0) {}
+                            // attribute translate = user units; Safari omits the host zoom from getScreenCTM
+                            var _scl = 1; try { _scl = _gb2ViewScale(svg); } catch (_e0) {}
                             window.__gb2_lkLegDragged = false;
                             function mv(ev) {
                                 if (!moved && (Math.abs(ev.clientX - sx0) + Math.abs(ev.clientY - sy0)) < 4) return;
@@ -44538,8 +44599,12 @@
                     if (grabbedIdx < 0 || items.length < 2) return;
                     e.stopPropagation();
                     var startY = e.clientY, pid = e.pointerId, moved = false;
-                    var sy = 1;
-                    try { var ctm = svg.getScreenCTM(); if (ctm && ctm.d) sy = ctm.d; } catch (_e0) {}
+                    // sy: client px per USER unit (the slot math); u2c: user units
+                    // -> CSS px for style.transform; cssPx: client px per CSS px
+                    // (the FLIP). Measured once per gesture, not read off
+                    // getScreenCTM (Safari leaves the host zoom out of it).
+                    var sy = 1, cssPx = 1, u2c = 1;
+                    try { sy = _gb2ViewScale(svg); cssPx = _gb2CssPxScale(svg); u2c = sy / cssPx; } catch (_e0) {}
                     var rowEls = null, others = [], curSlot = grabbedIdx;
                     for (var i0 = 0; i0 < items.length; i0++)
                         if (items[i0] !== grabbed) others.push(items[i0]);
@@ -44565,7 +44630,7 @@
                             for (var q = 0; q < els.length; q++) {
                                 els[q].style.transition = "transform 170ms ease-out";
                                 els[q].style.transform = dy
-                                    ? "translate(0px," + dy + "px)" : "";
+                                    ? "translate(0px," + (dy * u2c) + "px)" : "";
                             }
                         }
                     }
@@ -44585,7 +44650,7 @@
                         if (dy > maxDy) dy = maxDy;
                         var ge = rowEls[grabbed] || [];
                         for (var i = 0; i < ge.length; i++)
-                            ge[i].style.transform = "translate(0px," + dy + "px)";
+                            ge[i].style.transform = "translate(0px," + (dy * u2c) + "px)";
                         var slot = grabbedIdx + Math.round(dy / rowSlotH);
                         if (slot < 0) slot = 0;
                         if (slot > items.length - 1) slot = items.length - 1;
@@ -44662,7 +44727,7 @@
                             if (!o) continue;
                             var nr;
                             try { nr = news[i].el.getBoundingClientRect(); } catch (_e12) { continue; }
-                            var ddy = (o.top - nr.top) / sy;
+                            var ddy = (o.top - nr.top) / cssPx;
                             if (Math.abs(ddy) < 0.5) continue;
                             var nb = news[i].el;
                             nb.style.transition = "none";
@@ -58027,7 +58092,8 @@
             }
             if (skipPos) return null;
             var px = clientX, py = clientY;
-            try { var m = svg.getScreenCTM(); if (m) { var inv = m.inverse(); px = inv.a * clientX + inv.c * clientY + inv.e; py = inv.b * clientX + inv.d * clientY + inv.f; } } catch (_z) {}
+            // rect + view scale, not getScreenCTM (Safari omits the host zoom from it)
+            try { var _sr = svg.getBoundingClientRect(), _svs = _gb2ViewScale(svg); px = (clientX - _sr.left) / _svs; py = (clientY - _sr.top) / _svs; } catch (_z) {}
             var best = null, bestA = Infinity;
             for (i = 0; i < items.length; i++) { var bb = items[i].bb; if (!bb) continue; if (px >= bb.x && px <= bb.x + bb.w && py >= bb.y && py <= bb.y + bb.h) { var a = (bb.w || 1) * (bb.h || 1); if (a < bestA) { bestA = a; best = items[i].spec; } } }
             return best;
@@ -58870,9 +58936,11 @@
             g.addEventListener("pointerdown", function (e) {
                 if (e.button !== 0) return;
                 e.stopPropagation();
-                var m = null; try { m = svg.getScreenCTM(); } catch (_e) {}
+                // chip x/y are user units: client delta / view scale (Safari
+                // omits the host zoom from getScreenCTM)
+                var _vs = 1; try { _vs = _gb2ViewScale(svg); } catch (_e) {}
                 st = { cx: e.clientX, cy: e.clientY, ox: it.x, oy: it.y, moved: false,
-                       sa: (m && m.a) || 1, sd: (m && m.d) || 1, pid: e.pointerId };
+                       sa: _vs, sd: _vs, pid: e.pointerId };
                 try { g.setPointerCapture(e.pointerId); } catch (_e2) {}
                 try { g.style.cursor = "grabbing"; } catch (_e3) {}
             });
@@ -85555,7 +85623,8 @@
                 sx = e.clientX; sy = e.clientY;
                 var off = textOffsets[dragId] || { dx: 0, dy: 0 };
                 odx = off.dx; ody = off.dy;
-                scl = 1; try { var ctm = svg.getScreenCTM(); if (ctm && ctm.a) scl = ctm.a; } catch (_e0) {}
+                // textOffsets are user units; Safari omits the host zoom from getScreenCTM
+                scl = 1; try { scl = _gb2ViewScale(svg); } catch (_e0) {}
                 try { el.setPointerCapture(e.pointerId); } catch (_e1) {}
             });
             el.addEventListener("pointermove", function (e) {
@@ -86410,8 +86479,10 @@
                 var _rm = false;
                 try { _rm = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches); } catch (_eRm) {}
                 if (_rm) return;
+                // client px per CSS px written to style.transform (measured;
+                // Safari omits the host zoom from getScreenCTM)
                 var sy = 1;
-                try { if (svg && svg.getScreenCTM) { var ctm = svg.getScreenCTM(); if (ctm && ctm.d) sy = ctm.d; } } catch (_e) {}
+                try { if (svg) sy = _gb2CssPxScale(svg); } catch (_e) {}
                 var seen = {}, els = dataGroup.querySelectorAll("[data-item]"), fresh = [];
                 for (var i = 0; i < els.length; i++) {
                     var el = els[i];
