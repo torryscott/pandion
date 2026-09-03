@@ -2744,6 +2744,23 @@
   }
   .ps-inspector-head strong { color: var(--ps-ink-2); font-size: 12px; }
   .ps-inspector-head span { color: var(--ps-muted); font-size: 10px; }
+  /* On the rail's Editing view the column carried TWO headings: this one
+     ("Chart editing" / "The part you selected; switch back for data roles")
+     directly above a button labelled Chart setup that already gives the way
+     back, and then the panel's own header block ("BAR CHART / Bars - On
+     campus") under that. Ours is the one that says least, so it goes.
+     VISUALLY hidden, never display:none: #ps-settings-panel is
+     aria-labelledby the title inside here, and taking the title out of the
+     tree would leave the region with no accessible name at all. The tab
+     row names the view on screen; with nothing selected #ps-dock-empty
+     says why the view is empty, in fuller words than the subtitle did.
+     The setup view keeps its heading untouched, and so does every other
+     workspace: the class is only ever set on the rail's Editing view,
+     where the panel's own header takes over the naming. */
+  #ps-settings-panel.ps-dock-head-off .ps-inspector-head {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
   .ps-controls .ps-controls-row { padding: 11px 12px 3px; }
   /* The engine's editing panel, docked in this column when the preference
      says so. Empty (the default) it takes no room. The engine sizes the
