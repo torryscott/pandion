@@ -971,6 +971,43 @@
   // ONE set of controls: this only decides which of the two the column
   // shows. Nothing here runs in the default below-the-chart mode.
   var DOCK_EDITING = true, DOCK_EDIT_WAS = false, DOCK_SYNC_QUEUED = false;
+  // Whether anything was under the chart last time Fit looked. Fit magnifies
+  // only when nothing is, so this changing is a reason to recompute.
+  var DOCK_STATS_WAS = false, DOCK_FIT_T = null;
+  // Debounced, because the sync that notices a panel leaving fires on the
+  // FIRST mutation of its removal, when the panel is still in the document:
+  // asking then reads the state we are leaving, and nothing fires later to
+  // correct it (measured Sep 2026, the chart stayed small after closing
+  // Statistics). Waiting for the DOM to settle asks once, about the state
+  // we ended in.
+  function dockFitRecheck() {
+    if (DOCK_FIT_T) clearTimeout(DOCK_FIT_T);
+    DOCK_FIT_T = setTimeout(function () {
+      DOCK_FIT_T = null;
+      try {
+        var now = dockPanelBelow();
+        if (now === DOCK_STATS_WAS) return;
+        DOCK_STATS_WAS = now;
+        fitSchedule();
+      } catch (eR) {}
+    }, 180);
+  }
+  // The four facts the "hand the column to Editing" rule reads, all of them
+  // fed from outside syncDockSwitch, which is where the rule itself lives:
+  // when the user last acted on the chart, whether that act landed on the
+  // chart DRAWING or on the chrome around it, whether the current view was
+  // named by their own press of the switch, and what the selection was the
+  // last time we looked.
+  var DOCK_ACT_AT = 0, DOCK_ACT_MS = 700, DOCK_SWITCH_PRESS = false;
+  var DOCK_ACT_CHART = false, DOCK_SEL_WAS = "";
+  function dockActStamp(onChart) {
+    DOCK_ACT_AT = Date.now();
+    DOCK_ACT_CHART = !!onChart;
+  }
+  // Anything that names the view outright - a switch press, a change of
+  // document - retires a pending chart act, which would otherwise still be
+  // inside its window and flip the view straight back.
+  function dockActClear() { DOCK_ACT_AT = 0; }
   // Which chart the column is currently showing a panel for.
   var DOCK_DOC = null;
   // The column has two views now, so it has two headings. Defined once and
@@ -978,8 +1015,94 @@
   // which view is on.
   var DOCK_HEAD_SETUP = { title: "Chart setup",
                           sub: "Data roles; select chart parts to style below" };
+  // In the rail the panel is not below anything: a selected part opens in
+  // the other view, so the setup heading names that view instead. The
+  // below-the-chart copy above is left exactly as it was, because there
+  // the panel really does open under the chart.
+  var DOCK_HEAD_SETUP_RAIL = { title: "Chart setup",
+                          sub: "Data roles; select a chart part to style it in Editing" };
   var DOCK_HEAD_EDIT = { title: "Chart editing",
                          sub: "The part you selected; switch back for data roles" };
+  // The engine's own selection, as the shell can read it: the engine
+  // persists it to this key on every change, in the same task as the click
+  // that made it (measured Sep 2 2026 - the key is already REMOVED on the
+  // first frame after a click on bare plot space clears the selection).
+  // "" means nothing is selected.
+  var DOCK_SEL_LS = "graphbuilder2.inspector.v1";
+  function dockSelection() {
+    try {
+      var raw = window.localStorage.getItem(DOCK_SEL_LS);
+      if (!raw) return "";
+      var arr = JSON.parse(raw);
+      return (Array.isArray(arr) && arr.length) ? arr.join(",") : "";
+    } catch (eSl) { return ""; }
+  }
+  // Statistics is the one selection the engine deliberately keeps UNDER the
+  // chart (its tables want the width), so it is a selection that never
+  // fills the rail. The engine publishes its live help-family panel on this
+  // global; the selection key answers the same question if the global is
+  // ever missing, so a stale engine degrades to the honest reading rather
+  // than to a confident wrong one.
+  // Is a panel actually sitting UNDER the chart right now? That is a layout
+  // question, so it is answered by measuring the layout, not by asking what
+  // the user last opened: __gb2_helpPanelLive is deliberately sticky across
+  // re-renders, so reusing it here would leave the chart refusing to
+  // magnify for the rest of the session after one look at Statistics
+  // (measured Sep 2026). The engine tags each panel with where it docked.
+  function dockPanelBelow() {
+    try {
+      var host = hostEl();
+      if (!host) return false;
+      var ps = host.querySelectorAll('[data-gb2-inspector]');
+      for (var i = 0; i < ps.length; i++) {
+        var p = ps[i];
+        if (p.getAttribute("data-gb2-dock") === "rail") continue;
+        if (window.getComputedStyle(p).display === "none") continue;
+        if (p.getBoundingClientRect().height < 2) continue;
+        return true;
+      }
+    } catch (eB) {}
+    return false;
+  }
+  function dockStatsLive() {
+    try { if (window.__gb2_helpPanelLive === "stats") return true; } catch (eG) {}
+    return dockSelection() === "stats";
+  }
+  // What the Editing view says when it holds nothing. Three cases, because
+  // one line cannot be true of all of them. The line this replaced ("Bars,
+  // axes, labels and the legend each open their own controls here") named
+  // parts that half the modules do not draw - measured: a scatter has zero
+  // [data-bar-cat] elements, and a correlation matrix has neither bars nor
+  // axes. So the copy names no part at all, and the two cases where the
+  // instruction could not be followed say what is true instead.
+  function dockEmptyState() {
+    var host = null;
+    try { host = hostEl(); } catch (eH0) {}
+    // Still on its "needs variables" card: there is nothing drawn to click.
+    if (host && host.querySelector(".ps-guided-empty"))
+      return { sub: "Nothing to edit yet; switch back for data roles",
+               body: "This chart needs its variables before there is " +
+                     "anything to select. Switch to Chart setup to choose them." };
+    // Statistics is open below the chart. Asking for a click here would be
+    // worse than unhelpful: while that panel is up a click on a chart part
+    // pins a row in it and never opens an editor.
+    if (dockStatsLive())
+      return { sub: "The Statistics panel is below the chart",
+               body: "The Statistics panel is open below the chart, where " +
+                     "its tables have room. Close it there to go back to " +
+                     "editing chart parts here." };
+    return { sub: "Nothing selected; switch back for data roles",
+             body: "Select a part of the chart to edit it here." };
+  }
+  // When the heading is ours to write: any other workspace, or no document,
+  // and the pane's own copy ("Create a chart to begin") stands.
+  function dockAtChart() {
+    try {
+      return appWorkspace() === "chart" && !!workspaceDocument("chart");
+    } catch (eR) { return false; }
+  }
+  // And when the switch belongs there: the same column, docked in the rail.
+  function dockRailChart() { return panelDockIsRail() && dockAtChart(); }
   // "Is a panel showing" is a VISIBILITY question, never an :empty one: the
   // engine leaves its panel element in the dock between selections and just
   // hides it (measured Sep 2 2026). Read the child's OWN computed display,
@@ -999,31 +1122,123 @@
   function syncDockSwitch() {
     var pane = el("ps-inspector-chart");
     if (!pane) return;
+    var on = dockRailChart();
     var live = dockPanelShowing();
-    var editing = live && DOCK_EDITING;
+    // Which view is on is the user's choice, not a consequence of a panel
+    // being up (Torry, Sep 2 2026: "even after you click off of an element,
+    // you can still reach the editing menu"). Editing with no panel shows
+    // its empty state; ps-dock-live still says whether a panel is there,
+    // which is what collapses the dock and what the empty state keys on.
+    //
+    // SELECTING a part is what hands the column over - not merely clicking
+    // the chart. Measured Sep 2 2026 against the flip that used to sit in
+    // the pointerup handler: one real click on bare plot space gave
+    // {editing: true, rolesVisible: false}, so a click that chose nothing
+    // swapped the column to an empty Editing view. Two facts have to agree
+    // here: the user just acted on the chart, and something is selected
+    // now. Empty space satisfies only the first. Reading the selection
+    // rather than watching the panel appear is what makes re-clicking the
+    // already-selected part work too: measured, the panel never dips out
+    // of view when the selection moves from one bar to another, and the
+    // key does not change at all when the same bar is clicked twice.
+    //
+    // How much the act has to prove depends on where it landed. On the
+    // chart DRAWING any live selection counts, which is what carries the
+    // re-click case. On the chrome around it - the toolbar, a flyout, the
+    // card's own margin - the selection has to actually CHANGE, so the
+    // Show / hide button (which opens its own panel in the rail) brings
+    // the column across while the palette flyout, which opens no panel at
+    // all, leaves it alone. Measured Sep 2 2026: without that split, the
+    // flyout button swapped the column out from under a user who had
+    // stepped over to the roles.
+    var sel = dockSelection(), statsSel = dockStatsLive();
+    var fresh = Date.now() - DOCK_ACT_AT < DOCK_ACT_MS;
+    if (on && sel && !statsSel && fresh && (DOCK_ACT_CHART || sel !== DOCK_SEL_WAS))
+      DOCK_EDITING = true;
+    DOCK_SEL_WAS = sel;
+    var editing = on && DOCK_EDITING;
+    pane.classList.toggle("ps-dock-on", on);
     pane.classList.toggle("ps-dock-live", live);
     pane.classList.toggle("ps-dock-editing", editing);
+    // The column's own heading stands down on the Editing view (Torry, Sep
+    // 2026: two header blocks and an instruction the button under it already
+    // gives). It lives on the CARD, above this pane, so the class that hides
+    // it has to go there too. Tied to the VIEW and not to whether a panel is
+    // in the dock: gated on the panel it would appear and disappear as parts
+    // are selected and dropped, moving the whole column 50px each time.
+    try {
+      var card = el("ps-settings-panel");
+      if (card) card.classList.toggle("ps-dock-head-off", editing);
+      // Hiding the heading visually left its subtitle in the accessibility
+      // tree, so the instruction we removed from the screen was still
+      // announced (measured Sep 2026). The title stays exposed either way:
+      // it is what aria-labelledby names the region with.
+      var hs2 = el("ps-inspector-subtitle");
+      if (hs2) {
+        if (editing) hs2.setAttribute("aria-hidden", "true");
+        else hs2.removeAttribute("aria-hidden");
+      }
+    } catch (eHd) {}
     var setup = el("ps-dock-switch-setup"), edit = el("ps-dock-switch-edit");
     if (setup && edit) {
       setup.classList.toggle("ps-primary", !editing);
       edit.classList.toggle("ps-primary", editing);
       setup.setAttribute("aria-selected", editing ? "false" : "true");
       edit.setAttribute("aria-selected", editing ? "true" : "false");
+      // Name the element that is actually on screen. With nothing selected
+      // the dock is collapsed to nothing, and display:none outright when it
+      // holds no panel at all (measured with Statistics open, which takes
+      // the panel out of the rail), so pointing the tab at it described
+      // something the user cannot reach. Both candidates carry
+      // role="tabpanel"; only one is ever in the accessibility tree,
+      // because display:none takes the other out of it.
+      edit.setAttribute("aria-controls", live ? "ps-engine-dock" : "ps-dock-empty");
     }
-    // The heading names the view on show. Chart-workspace only, and only
-    // while a chart document is open: the no-document branch writes its
-    // own copy ("Create a chart to begin") and must keep it.
+    // Fit's answer depends on whether anything is still under the chart, and
+    // the Statistics panel arriving or leaving is exactly that changing. The
+    // zoom is not otherwise recomputed on a selection, so ask for it here,
+    // and only when the answer would actually differ, so an ordinary
+    // selection never disturbs the view.
+    try { if (panelDockIsRail()) dockFitRecheck(); } catch (eF) {}
+    // What the empty Editing view says depends on why it is empty, so its
+    // copy is written here rather than sitting static in the markup.
+    var es = (editing && !live) ? dockEmptyState() : null;
+    var eb = el("ps-dock-empty");
+    if (eb && es) eb.textContent = es.body;
+    // The heading names the view on show, and on the Editing view it says
+    // whether there is anything in it: the view no longer implies a panel,
+    // so one heading for both states would misdescribe half of them. The
+    // below-the-chart line is written here too, because this function is
+    // what put the rail copy up and the pref can be switched off with a
+    // part still selected - measured Sep 2 2026, the heading stayed on
+    // "the part you selected" over a panel that had moved under the chart.
     try {
-      if (panelDockIsRail() && appWorkspace() === "chart" && workspaceDocument("chart")) {
-        var head = editing ? DOCK_HEAD_EDIT : DOCK_HEAD_SETUP;
+      if (dockAtChart()) {
+        var head = !panelDockIsRail() ? DOCK_HEAD_SETUP
+                 : editing ? (live ? DOCK_HEAD_EDIT
+                                   : { title: "Chart editing", sub: es.sub })
+                 : DOCK_HEAD_SETUP_RAIL;
         var ht = el("ps-inspector-title"), hs = el("ps-inspector-subtitle");
         if (ht) ht.textContent = head.title;
         if (hs) hs.textContent = head.sub;
       }
     } catch (eH) {}
-    // Arriving at the panel, start at its top: the setup rows that were
-    // above it have just stood down, so an inherited scroll offset would
-    // open the panel mid-body.
+    // Say the view changed. The tabs report themselves when the user
+    // presses one, but this view also changes from a click on the CHART,
+    // where a screen reader is handed nothing to notice - the column's
+    // whole content swaps in silence. Skipped for a switch press, which
+    // would otherwise be announced twice.
+    if (on && editing !== DOCK_EDIT_WAS && !DOCK_SWITCH_PRESS) {
+      var lv = el("ps-dock-view-live");
+      if (lv) lv.textContent = editing
+        ? (live ? "Chart editing" : "Chart editing, nothing selected")
+        : "Chart setup";
+    }
+    DOCK_SWITCH_PRESS = false;
+    // Arriving at the Editing view, start at its top: the setup rows that
+    // were above it have just stood down, so an inherited scroll offset
+    // would open the panel mid-body. This now fires on the view change
+    // alone, which is the moment the column's content actually swaps.
     if (editing && !DOCK_EDIT_WAS) {
       try { var col = document.querySelector(".ps-controls"); if (col) col.scrollTop = 0; } catch (eS) {}
     }
@@ -1047,6 +1262,18 @@
         childList: true, subtree: true, attributes: true,
         attributeFilter: ["style", "class"] });
     } catch (eO) {}
+    // The dock is only half the story: the Statistics panel docks UNDER the
+    // chart, inside the host, so its arrival and departure never touch the
+    // dock and this sync would miss them. That matters because Fit's answer
+    // depends on whether anything is under the chart. childList only, and
+    // deliberately no attribute filter: a panel appearing or leaving is a
+    // childList event, while a drag is a storm of attribute writes we have
+    // no reason to hear.
+    try {
+      var hostW = hostEl();
+      if (hostW) new window.MutationObserver(queueDockSync)
+        .observe(hostW, { childList: true, subtree: true });
+    } catch (eO2) {}
     // The engine closes its panel on any document click outside it, so a
     // bare switch click would ALSO deselect the chart part - the panel
     // would vanish and take the way back with it (measured Sep 2 2026).
@@ -1054,12 +1281,19 @@
     // makes this a toggle rather than a close button: the part stays
     // selected (and haloed on the chart) while the setup is on view.
     var setup = el("ps-dock-switch-setup"), edit = el("ps-dock-switch-edit");
+    // dockActClear on both: a press is the user naming the view they want,
+    // and it must outrank a chart click they made a moment earlier -
+    // otherwise pressing Chart setup inside that window flips straight
+    // back. DOCK_SWITCH_PRESS keeps the live region quiet for a change the
+    // button itself already reports through aria-selected.
     if (setup) setup.addEventListener("click", function (ev) {
       try { ev.stopPropagation(); } catch (eP) {}
+      dockActClear(); DOCK_SWITCH_PRESS = true;
       DOCK_EDITING = false; syncDockSwitch();
     });
     if (edit) edit.addEventListener("click", function (ev) {
       try { ev.stopPropagation(); } catch (eP2) {}
+      dockActClear(); DOCK_SWITCH_PRESS = true;
       DOCK_EDITING = true; syncDockSwitch();
     });
   })();
@@ -10631,9 +10865,13 @@
     doc.fitPane = false;
     syncAll();
   }
-  function chartLogicalWidthPx() {
+  // The chart's own svg: the biggest one the engine drew, measured by the
+  // size IT committed to (the width/height attributes) rather than by what
+  // the current view zoom happens to be showing. One picker, so the width
+  // and height helpers below can never end up reading different elements.
+  function chartLogicalSvg() {
     var host = hostEl();
-    if (!host) return 0;
+    if (!host) return null;
     var svgs = host.querySelectorAll("svg");
     var best = null, bestA = 0;
     for (var i = 0; i < svgs.length; i++) {
@@ -10641,7 +10879,15 @@
               (Number(svgs[i].getAttribute("height")) || 0);
       if (a > bestA) { bestA = a; best = svgs[i]; }
     }
+    return best;
+  }
+  function chartLogicalWidthPx() {
+    var best = chartLogicalSvg();
     return best ? Number(best.getAttribute("width")) || 0 : 0;
+  }
+  function chartLogicalHeightPx() {
+    var best = chartLogicalSvg();
+    return best ? Number(best.getAttribute("height")) || 0 : 0;
   }
   // TOOLBAR ALIGNMENT (Torry's report, Jul 27 2026: the graph-type and
   // palette dropdowns open far to the right of the buttons that summon
@@ -10721,20 +10967,62 @@
     }
     var mode = doc.viewZoom == null ? "fit" : doc.viewZoom;
     var S = 1;
+    var fitGrew = false;
     if (mode === "fit") {
       var pane = document.querySelector(".ps-main-workspace");
       var availW = pane ? pane.clientWidth - 4 : 0;
       var logical = chartLogicalWidthPx();
-      // Fit means "make it visible", never "make it bigger": auto-scaling
-      // up would re-create the huge-monitor problem the standard size
-      // exists to prevent.
-      S = (availW > 40 && logical > 0) ? Math.min(1, availW / logical) : 1;
+      if (!panelDockIsRail()) {
+        // Fit means "make it visible", never "make it bigger": auto-scaling
+        // up would re-create the huge-monitor problem the standard size
+        // exists to prevent.
+        S = (availW > 40 && logical > 0) ? Math.min(1, availW / logical) : 1;
+      } else {
+        // In the rail the panel is BESIDE the chart, not under it, so the
+        // reason for the never-magnify rule above does not survive the move
+        // (Torry, Sep 2026). Below the chart, growing the figure pushes the
+        // panel off screen and makes the user scroll to reach their own
+        // controls; here it cannot, and the height the panel used to take
+        // is simply white space - measured 277px of it at 1512x900.
+        // TWO axes, not one. Width alone is right when the pane scrolls
+        // vertically anyway; here it does not, and a chart magnified to the
+        // pane's width would run off the bottom. A pane that scrolls is a
+        // worse outcome than the white space this removes.
+        var availH = pane ? pane.clientHeight - 4 : 0;
+        var logicalH = chartLogicalHeightPx();
+        // No usable height measurement (a parked or unlaid-out pane) falls
+        // back to 1, which is the old never-magnify answer: better a stale
+        // small chart than one grown against a number we did not read.
+        var fitS = (availW > 40 && logical > 0)
+          ? Math.min(availW / logical,
+                     (availH > 40 && logicalH > 0) ? availH / logicalH : 1)
+          : 1;
+        // The ceiling is 1.5, half again actual size. Without one, "fill the
+        // pane" IS the huge-monitor problem the rule above was written
+        // against: a 2560px display asks for 2.7x, and the outer clamp would
+        // hand back 2x. At zoom 1 the figure is drawn at about its printed
+        // size, so the screen is an honest preview of the export, and that is
+        // what a magnified view spends: past roughly half again, type that
+        // will be 10pt on the page reads as 15pt or more here and the user
+        // sizes their labels against a picture they will not get. 1.5 is
+        // where that is still recoverable. It is deliberately NOT the
+        // select's top preset (200%): 175 and 200 stay reachable by hand,
+        // because choosing them is a decision, and this is a default.
+        // One thing still sits under the chart in the rail: the Statistics
+        // panel, which the engine keeps there because its tables want the
+        // width. Magnifying then buys nothing and costs a scroll to reach
+        // the tables (measured 470px), so while it is open Fit behaves the
+        // way it does below the chart.
+        S = dockPanelBelow() ? Math.min(1, fitS) : Math.min(1.5, fitS);
+        fitGrew = S > 1;
+      }
     } else {
       S = Number(mode) || 1;
     }
-    // Fit never magnifies (the huge-monitor rule); the explicit 125/150
-    // choices may (engine fix approved Jul 28 2026 - _ensureChartRoomFor
-    // measures in logical units now, so magnified redraws hold the canvas).
+    // Fit magnifies only in the rail, and only to 1.5 (above); the explicit
+    // 125 to 200 choices always may (engine fix approved Jul 28 2026 -
+    // _ensureChartRoomFor measures in logical units now, so magnified
+    // redraws hold the canvas). This stays the outer bound of both.
     S = Math.max(0.35, Math.min(2, S));
     host.style.zoom = Math.abs(S - 1) < 0.005
       ? "" : String(Math.round(S * 1000) / 1000);
@@ -10752,6 +11040,85 @@
             (paneEl.clientWidth + over)) - 0.004);
           host.style.zoom = String(Math.round(S * 1000) / 1000);
         }
+      }
+    } else if (mode === "fit" && fitGrew) {
+      // The same measure-do-not-model idea for the rail's magnified Fit,
+      // with two differences. It watches BOTH axes, because here the point
+      // of magnifying was to use the height, and it corrects by SUBTRACTING
+      // the overflow in logical units instead of scaling S proportionally.
+      // The proportional form under-corrects when part of the height is
+      // fixed: the engine toolbar counter-zooms back to true size, so only
+      // the chart itself grows with S, and N visual px of overflow is
+      // exactly N / logical px of zoom. Measured at 1.5x that left about
+      // 3px still overflowing, which is a scrollbar.
+      // Bounded and monotone: at most three strictly shrinking passes, so
+      // it settles rather than hunting, and each pass is one style write
+      // and one synchronous layout read.
+      // The floor of 1 is load-bearing, not caution. Some things still sit
+      // UNDER the chart in the rail - Statistics is the standing one, which
+      // the engine keeps there for its tables' width - and their height is
+      // vertical overflow this loop must not chase, or the chart would
+      // collapse to make room for a panel. Measured with Statistics open at
+      // 1512x900: 382px of overflow, which unfloored asks for 0.47. Stopping
+      // at 1 means the worst case is exactly the pre-rail answer, and the
+      // 12px a short window (1512x700) overflows at 1:1 is left alone - it
+      // overflows the same 12px below the chart, so it is not ours.
+      // Measure the pane's real overflow, but only keep a correction that
+      // actually reduces it. Not all overflow is the chart's to fix: the
+      // host stays roughly 590px taller than its chart after the Statistics
+      // panel leaves it (measured Sep 2026), and a loop that blames the
+      // chart for that shrinks it to the floor, so one visit to Statistics
+      // left the chart refusing to magnify for the rest of the session.
+      // Measuring the chart alone instead was worse in the other direction:
+      // it missed an 11px horizontal scrollbar that shrinking DID fix.
+      // So: cut, look, and if the cut did not help, put it back and stop.
+      var grewPane = document.querySelector(".ps-main-workspace");
+      var gw = chartLogicalWidthPx(), gh = chartLogicalHeightPx();
+      var overOf = function (xOnly, yOnly) {
+        var ox = (yOnly === true) ? 0 : grewPane.scrollWidth - grewPane.clientWidth;
+        var oy = (xOnly === true) ? 0 : grewPane.scrollHeight - grewPane.clientHeight;
+        return Math.max(ox, oy);
+      };
+      var setZ = function (v) {
+        host.style.zoom = Math.abs(v - 1) < 0.005
+          ? "" : String(Math.round(v * 1000) / 1000);
+      };
+      // Only give the magnification back for a scroll that giving it back
+      // would actually remove. Ask the decisive question first: at 1:1, the
+      // most this loop could ever concede, is the pane still overflowing?
+      // If it is, the overflow is not the chart's - the host stays roughly
+      // 590px taller than its chart after the Statistics panel leaves it
+      // (measured Sep 2026) - and shrinking only trades the chart away for
+      // a scrollbar that stays. Every incremental cut "helped" a little, so
+      // a keep-what-helps rule ate the whole magnification and still
+      // scrolled; one visit to Statistics left the chart small for the rest
+      // of the session.
+      // Per axis, because the two can have different owners: after a visit
+      // to Statistics the pane overflows vertically for a reason the chart
+      // cannot fix, while a horizontal overflow at the same moment is the
+      // chart's own and is worth a cut.
+      var fixX = true, fixY = true;
+      if (grewPane && S > 1 && overOf() > 1) {
+        var magS = S;
+        setZ(1);
+        fixX = (grewPane.scrollWidth - grewPane.clientWidth) <= 1;
+        fixY = (grewPane.scrollHeight - grewPane.clientHeight) <= 1;
+        setZ(magS);
+        if (!fixX && !fixY) grewPane = null;   // neither is ours to fix
+      }
+      for (var gp = 0; grewPane && gp < 3 && S > 1; gp++) {
+        var before = overOf(fixX && !fixY, fixY && !fixX);
+        if (before <= 1) break;
+        var oX = fixX ? (grewPane.scrollWidth - grewPane.clientWidth) : 0;
+        var oY = fixY ? (grewPane.scrollHeight - grewPane.clientHeight) : 0;
+        var cut = Math.max(oX > 1 && gw > 0 ? (oX + 2) / gw : 0,
+                           oY > 1 && gh > 0 ? (oY + 2) / gh : 0);
+        if (!(cut > 0)) break;
+        var trialS = Math.max(1, S - cut);
+        if (trialS >= S) break;
+        setZ(trialS);
+        if (overOf(fixX && !fixY, fixY && !fixX) >= before - 0.5) { setZ(S); break; }
+        S = trialS;
       }
     }
     // Chrome isolation (Torry, Jul 27 2026): the engine toolbar and panels
@@ -11084,10 +11451,28 @@
     var host = e.target && e.target.closest &&
       e.target.closest(".graphbuilder2-host");
     if (!host) return;
-    // A click on the chart is a request to edit that part, so the column
-    // goes back to the panel even if the user had stepped over to the
-    // setup view. Rail mode only; below the chart nothing moves.
-    if (panelDockIsRail()) { DOCK_EDITING = true; queueDockSync(); }
+    // A click on the chart is the user ACTING on it. Whether the act
+    // SELECTED anything is the engine's answer, so this only stamps and
+    // asks on the next frame (syncDockSwitch decides). Switching here
+    // instead was the bug: the host includes bare plot space and the
+    // card's white margin, so a click that chose nothing still swapped the
+    // column and the data roles vanished. Rail mode only; below the chart
+    // nothing moves.
+    if (panelDockIsRail()) {
+      // On the chart drawing, or on the chrome around it? The drawing is
+      // the biggest svg in the host, the same rule every reader of this
+      // DOM uses - a toolbar button's icon is an svg too.
+      var art = null, artA = 0;
+      try {
+        var svgs = host.querySelectorAll("svg");
+        for (var vi = 0; vi < svgs.length; vi++) {
+          var rr = svgs[vi].getBoundingClientRect(), ra = rr.width * rr.height;
+          if (ra > artA) { artA = ra; art = svgs[vi]; }
+        }
+      } catch (eA) {}
+      dockActStamp(!!art && (e.target === art || art.contains(e.target)));
+      queueDockSync();
+    }
     var stamp = { at: Date.now(), y: e.clientY };
     PANEL_REVEAL_STAMP = stamp;
     // Settle-watch: the panel slides open over ~150ms and its content can
@@ -11120,6 +11505,16 @@
       if (++frames < 90) window.requestAnimationFrame(watch);
     })();
   }, true);
+  // NOT stamped from the keyboard, deliberately. The chart is one tab stop
+  // with arrow-key navigation inside it, so a keyboard user CAN move the
+  // selection with no pointer act at all, and the column does not follow
+  // them - the same gap the old code had. Stamping on keydown was tried
+  // and taken out (measured Sep 2 2026): the engine's selection reaches
+  // localStorage after the frame the key lands in, so the flip raced and
+  // fired one keystroke late, and Escape does not clear a chart-part
+  // selection here, so every key press with a part selected - a dismissal
+  // included - swapped the view. A correct version needs a selection
+  // signal the shell can read the moment it changes.
 
   // ---- height reserve (t4-203 part two; final ruling Aug 19 2026:
   // NO automatic scroll-back, ever - Torry: "I'd like to control that
@@ -25020,6 +25415,12 @@
       if (dockDocId !== DOCK_DOC) {
         DOCK_DOC = dockDocId;
         DOCK_EDITING = false;
+        // And retire any chart act still inside its window, the way a
+        // switch press does: without this, adding a chart within a moment
+        // of clicking a part re-flipped the new, empty chart to Editing
+        // (measured Sep 2 2026) - the act was still fresh and the outgoing
+        // chart's selection had not been swapped out from under it yet.
+        dockActClear();
         try {
           var dk0 = el("ps-engine-dock");
           while (dk0 && dk0.firstChild) dk0.removeChild(dk0.firstChild);
