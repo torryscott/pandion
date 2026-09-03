@@ -46835,21 +46835,22 @@
             var W0 = 184, SV0 = 96, STRIP0 = 11, CELL0 = 13, CHIP0 = 22;
             // The picker is docked BESIDE the controls, not under them,
             // so every pixel it takes comes out of them: it gets a fixed
-            // 34% SHARE and the controls keep the remaining majority.
+            // 29% SHARE and the controls keep the remaining majority.
             // The share is bounded by what the CONTROLS need, not by what
             // the picker could use. Past about a third, their chip rows
             // wrap onto an extra line, which makes the panel taller,
             // which on a short window pushes it to its height cap and
             // scrolls the workspace on the next click (measured at 38%:
-            // a 31px jump for no reason). 34 is the most the picker can
-            // take without moving anything else.
+            // a 31px jump for no reason). 34 was the most it could take
+            // without moving anything else, and 29 is where Torry settled
+            // it by eye: a third of the growth rather than all of it.
             // The floor is the 184px it has always been drawn at, so this
             // can only grow it - and on a panel too narrow for the share
             // to reach that, the floor wins and the split is exactly what
             // it is today. The 320px ceiling is the gradient's 160px
             // height cap doubled: past 2:1 the SV square stops being a
             // square, and area is what it trades in.
-            var w = Math.max(W0, Math.min(320, Math.round(avail * 0.34)));
+            var w = Math.max(W0, Math.min(320, Math.round(avail * 0.29)));
             var r = w / W0;
             // The room that is spare in this dock is HEIGHT, so the
             // gradient grows with the panel's height budget rather than
@@ -46862,7 +46863,7 @@
             // historical 96px, which is the honest answer.
             var budget = _gb2PanelCapPx();
             var sv = (budget > 0)
-                ? Math.max(SV0, Math.min(160, Math.round(budget * 0.32)))
+                ? Math.max(SV0, Math.min(160, Math.round(budget * 0.28)))
                 : SV0;
             // The strips and the swatch-grid cells span the column, so a
             // wider column can carry chunkier ones - but they add HEIGHT,
