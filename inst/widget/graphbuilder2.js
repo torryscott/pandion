@@ -26807,7 +26807,7 @@
                 b.style.border = border;
                 // From the SAME rule the markup used. Measuring the
                 // rendered box instead read the chip PLUS its border and
-                // rounded a pixel wider once the rail grew the chip, so
+                // rounded a pixel wider once the fit grew the chip, so
                 // the ring jumped on the first refresh after a color
                 // change. (The 18px variant the old note describes no
                 // longer exists: every caller's size is floored to the
@@ -28581,10 +28581,6 @@
                 pop.style.padding = "6px 0 6px 0";
                 pop.style.alignSelf = "stretch";
                 pop.style.borderLeft = "1px solid #ddd";
-                // Clear the rail divider the expanded branch may have
-                // set; the collapsed strip is an edge, so its rule is
-                // the left one it has always drawn.
-                pop.style.borderTop = "0";
                 pop.style.background = "#fafafa";
                 pop.style.cursor = "pointer";
             } else {
@@ -28602,14 +28598,7 @@
                 // inspector panel - even when the section body on the
                 // left is taller than the picker's natural content.
                 pop.style.alignSelf = "stretch";
-                // The divider separates the picker from the controls, so
-                // it follows them: beside them below the chart, above it
-                // in the rail, where the picker is stacked underneath and
-                // now fills the panel (a left rule there would only
-                // double up on the panel's own border).
-                var _pkRail = _gb2RailActive();
-                pop.style.borderLeft = _pkRail ? "0" : "1px solid #eee";
-                pop.style.borderTop = _pkRail ? "1px solid #eee" : "0";
+                pop.style.borderLeft = "1px solid #eee";
                 pop.style.background = "#fff";
                 pop.style.cursor = "";
             }
@@ -28775,10 +28764,10 @@
             var host = (inspector.pickerHost && inspector.pickerHost.isConnected)
                 ? inspector.pickerHost : (inspector.bodyRow || inspectorPanel);
             host.appendChild(_picker.pop);
-            // Mounted, so the properties it inherits are the ones for the
-            // dock it landed in. Harmless below the chart, where the fit
-            // clears them and the markup's own fallbacks stand.
-            try { _gb2RailFitDock(); } catch (_eRfp) {}
+            // Mounted, so a re-fit publishes sizes for the box it landed
+            // in. Absent the key the fit clears the properties and the
+            // markup's own fallbacks stand.
+            try { _gb2FitPanelControls(); } catch (_eRfp) {}
             _picker.pop.style.display = "block";
             // Reset any dimming from a previous panel (Error Bars
             // dims the picker when "Match bar color" is on).
@@ -46752,40 +46741,16 @@
         // the user has selected. One element selectable at a time. Empty
         // state when nothing's selected. The text-edit popover and the
         // export popover stay popovers - the rest are migrated here.
-        // Right-rail dock (Sep 2026, Torry's ask; a standalone
-        // preference). When the payload says inspectorDock: "rail" AND the
-        // host has published a connected element in
-        // window.__gb2_inspectorDockHost, the panel is appended THERE
-        // instead of under the chart, sized to that box, with its tab rows
-        // free to wrap and the color picker stacked under the controls.
-        // The Statistics panel is the one exception and stays under the
-        // chart (its tables want the width), which is why placement runs
-        // per selection rather than once. Absent the key (jamovi, the
-        // default standalone) none of this runs and the panel is the
-        // chart's skirt exactly as before.
-        function _gb2RailHost() {
-            try {
-                if (!data || data.inspectorDock !== "rail") return null;
-                var h = window.__gb2_inspectorDockHost;
-                if (typeof h === "function") h = h();
-                return (h && h.nodeType === 1 && h.isConnected) ? h : null;
-            } catch (_eRh) { return null; }
-        }
-        function _gb2RailActive() {
-            try {
-                var rh = _gb2RailHost();
-                return !!(rh && inspectorPanel && inspectorPanel.parentElement === rh);
-            } catch (_eRa) { return false; }
-        }
-        // ---- Rail growth: the picker and the quick-pick chips --------
-        // Docked in the rail the picker is stacked UNDER the controls in
-        // a column as wide as the whole panel, so the 184px it was drawn
-        // for beside them leaves it marooned in a wide box. Every size
-        // the rail changes travels as a CSS custom property on the panel
-        // whose markup FALLBACK is the constant it replaced, so a surface
-        // that never receives one (jamovi, the below-chart standalone,
-        // and Statistics even in rail mode) renders exactly what it
-        // always did.
+        // ---- Colour-control sizing (Sep 2026, Torry's standalone ask).
+        // The HSV picker is drawn as a fixed 184px column with a 96px
+        // gradient and the quick-pick chips are floored at 22px, all of
+        // which read as cramped inside a panel several times that wide.
+        // With the payload key panelFitControls the engine measures the
+        // panel the controls are actually in and gives them a bounded
+        // share of it. Every size travels as a CSS custom property whose
+        // markup FALLBACK is the constant it replaced, so a surface that
+        // never receives one (jamovi, which does not ship the key)
+        // renders exactly what it always did.
         //
         // The chip size is published as a NUMBER as well. The swatch rows
         // compute their active-ring outline-offset in JS, and the two
@@ -46794,77 +46759,93 @@
         // pixel wider than the markup once the chip grows, so the ring
         // twitched on the first refresh after a color change.
         function _gb2ChipPx() {
-            var n = window.__gb2_railChipPx;
-            // The ceiling mirrors the cap in _gb2RailFitDock; a value
-            // from anywhere else is not to be trusted.
+            var n = window.__gb2_pfcChipPx;
+            // The ceiling mirrors the cap in _gb2FitPanelControls; a
+            // value from anywhere else is not to be trusted.
             return (typeof n === "number" && n >= 22 && n <= 24) ? n : 22;
         }
         function _gb2ChipOutOff() {
             return Math.max(2, Math.round(_gb2ChipPx() * 0.15));
         }
-        // Recompute the rail sizes from the dock's current width and
-        // publish them. Idempotent and cheap: called when the panel is
-        // placed, when the picker mounts, and by the dock observer while
-        // the user drags the splitter.
-        function _gb2RailFitDock() {
+        function _gb2PanelFitOn() {
+            try { return !!(data && data.panelFitControls === true); }
+            catch (_ePf) { return false; }
+        }
+        // Recompute the sizes from the panel's own box and publish them.
+        // Idempotent and cheap: called when a selection renders, when the
+        // picker mounts, and by the panel observer.
+        function _gb2FitPanelControls() {
             var st = null;
             try { st = inspectorPanel && inspectorPanel.style; } catch (_eFs) {}
             if (!st) return;
-            if (!_gb2RailActive()) {
-                // Not in the rail. Drop the properties so the markup's
-                // own fallbacks stand, and take the chip number with
-                // them: a below-chart panel must not keep rail chips
-                // after the preference is switched off, and Statistics
-                // stays below the chart even while rail mode is on.
+            if (!_gb2PanelFitOn()) {
+                // No key. Drop the properties so the markup's own
+                // fallbacks stand, and take the chip number with them, so
+                // a host that stops shipping the key is left with exactly
+                // the sizes it had before.
                 st.removeProperty("--gb2-pkr-w");
                 st.removeProperty("--gb2-pkr-basis");
                 st.removeProperty("--gb2-pkr-sv");
                 st.removeProperty("--gb2-pkr-strip");
                 st.removeProperty("--gb2-pkr-cell");
                 st.removeProperty("--gb2-chip");
-                window.__gb2_railChipPx = 0;
+                window.__gb2_pfcChipPx = 0;
                 inspectorPanel.__gb2FitSig = "";
                 return;
             }
-            var railH = _gb2RailHost();
-            var padX = 0;
-            try {
-                var cs = window.getComputedStyle(railH);
-                padX = (parseFloat(cs.paddingLeft) || 0) +
-                       (parseFloat(cs.paddingRight) || 0);
-            } catch (_eFc) {}
-            // What a full-width child of the panel actually gets: the
-            // dock's content box less the panel's own 1px borders. The
-            // panel cannot be measured here - renderInspectorPanel places
-            // it while it is still display:none - so the dock is the
-            // authority, which is also the box the observer watches.
-            var avail = Math.floor((railH.clientWidth || 0) - padX - 2);
-            // A column in a hidden workspace measures zero. Keep the last
-            // good fit rather than collapsing to the base sizes.
+            // Measured off the BORDER box, less the panel's own 1px
+            // rules, because the panel is border-box with no padding of
+            // its own. Deliberately not clientWidth: that one drops by
+            // the width of a vertical scrollbar, and the panel scrolls
+            // inside itself under a height budget, so a taller picker
+            // could summon the bar, narrow the measurement, shrink the
+            // picker, dismiss the bar again. offsetWidth is the width
+            // _syncInspectorPanelGeometry wrote from the chart, which
+            // nothing inside the panel can move.
+            var avail = 0;
+            try { avail = Math.floor((inspectorPanel.offsetWidth || 0) - 2); } catch (_eFc) {}
+            // A hidden panel measures zero. Write nothing rather than a
+            // size computed from it: on a panel that has never been
+            // fitted the markup's own fallbacks are already standing, and
+            // on one that has, the last good fit beats a flicker down to
+            // the base sizes and back.
             if (!(avail > 0)) return;
             var W0 = 184, SV0 = 96, STRIP0 = 11, CELL0 = 13, CHIP0 = 22;
-            // The picker FILLS the panel at every splitter position. A
-            // width cap stops it tracking for the last stretch of travel
-            // and strands a bordered picker in a band of empty panel,
-            // which is the one width where the layout reads as broken.
-            // What has to stay bounded is the SV square's HEIGHT, and
-            // that is bounded on its own below.
-            var w = Math.max(W0, avail);
+            // The picker is docked BESIDE the controls, not under them,
+            // so every pixel it takes comes out of them: it gets a fixed
+            // 38% SHARE and the controls keep the remaining majority.
+            // The floor is the 184px it has always been drawn at, so this
+            // can only grow it - and on a panel too narrow for the share
+            // to reach that, the floor wins and the split is exactly what
+            // it is today. The 320px ceiling is the gradient's 160px
+            // height cap doubled: past 2:1 the SV square stops being a
+            // square, and area is what it trades in.
+            var w = Math.max(W0, Math.min(320, Math.round(avail * 0.38)));
             var r = w / W0;
-            // The SV square earns precision by AREA, and past about 160px
-            // tall it stops buying any while pushing the hex row out of a
-            // column that scrolls. The strips and the grid cells stop for
-            // the same reason; past their caps all three simply get
-            // wider, which is a shape a color picker is allowed to have.
-            var sv = Math.min(160, Math.round(SV0 * r));
+            // The room that is spare in this dock is HEIGHT, so the
+            // gradient grows with the panel's height budget rather than
+            // with its width. About a third of it: the rest of the picker
+            // column (tabs, strips, hex row, swatch grids) wants the
+            // remainder. The budget is the DECLARED cap, a share of the
+            // window - never the panel's rendered height, which the
+            // gradient is inside of and would feed back from. A host that
+            // asks for the fit without declaring a budget keeps the
+            // historical 96px, which is the honest answer.
+            var budget = _gb2PanelCapPx();
+            var sv = (budget > 0)
+                ? Math.max(SV0, Math.min(160, Math.round(budget * 0.32)))
+                : SV0;
+            // The strips and the swatch-grid cells span the column, so
+            // they follow its WIDTH: a wider column can carry a chunkier
+            // one. Past their caps all three simply get wider, which is a
+            // shape a color picker is allowed to have.
             var strip = Math.min(16, Math.round(STRIP0 * r));
             var cell = Math.min(20, Math.round(CELL0 * r));
             // A quick pick must never outgrow the current-color swatch it
             // edits, and the SMALLEST of those in the suite is 24px (the
-            // box outlier strips; every other strip's is 28px). The rail
-            // is wide enough to reach that cap at its narrowest, so in
-            // practice this is 22px below the chart and 24px in the rail:
-            // a step, with no stretch of travel to be discontinuous in.
+            // box outlier strips; every other strip's is 28px). Growing
+            // only, so the 22px edge and 3px gap that carry the
+            // target-size guidance by spacing remain the floor.
             var chip = Math.max(CHIP0, Math.min(24, Math.round(CHIP0 * r)));
             // Nothing changed: leave the DOM alone, so the observer that
             // called us cannot start a resize feedback loop. The stamp
@@ -46874,99 +46855,61 @@
             if (inspectorPanel.__gb2FitSig === sig) return;
             inspectorPanel.__gb2FitSig = sig;
             st.setProperty("--gb2-pkr-w", w + "px");
-            // Stacked in the rail the bodyRow is a COLUMN, where a flex
-            // basis sizes the HEIGHT, not the width - so in the rail the
-            // basis stands down and the picker's content decides its
-            // height. Below the chart the row is horizontal and the
-            // fallback basis IS the width, exactly as before.
-            st.setProperty("--gb2-pkr-basis", "auto");
+            // The bodyRow is a horizontal flex row, so the basis IS the
+            // width and the two have to agree.
+            st.setProperty("--gb2-pkr-basis", w + "px");
             st.setProperty("--gb2-pkr-sv", sv + "px");
             st.setProperty("--gb2-pkr-strip", strip + "px");
             st.setProperty("--gb2-pkr-cell", cell + "px");
             st.setProperty("--gb2-chip", chip + "px");
-            window.__gb2_railChipPx = chip;
+            window.__gb2_pfcChipPx = chip;
         }
-        // One dock observer per document, parked on window because
+        // One panel observer per document, parked on window because
         // render() rebuilds this scope on every echo: a closure-scoped
         // observer would be abandoned - still firing into a dead render -
-        // once per run. Arming RELEASES first, which is what makes
-        // turning the preference off leave nothing behind and makes
-        // toggling it back on impossible to double up.
-        function _gb2RailUnwatchDock() {
+        // once per run. Arming RELEASES first, which is what makes a host
+        // that stops shipping the key leave nothing behind.
+        //
+        // Observing the panel cannot run away, on two counts. Its inputs
+        // are the panel's border-box width, which
+        // _syncInspectorPanelGeometry writes in explicit pixels from the
+        // chart, and window.innerHeight; neither is something the picker
+        // sizes written here can move. And a resize we DO cause - the
+        // gradient changing the panel's content height - re-enters,
+        // recomputes the same numbers, and the signature guard returns
+        // without touching the DOM, so it settles in one pass.
+        //
+        // The window listener is not a fallback: the height budget is a
+        // share of the window, so it moves when the window does even if
+        // the panel's own box does not.
+        function _gb2UnwatchPanelControls() {
             try {
-                var ro = window.__gb2_railRO;
+                var ro = window.__gb2_pfcRO;
                 if (ro && typeof ro.disconnect === "function") ro.disconnect();
             } catch (_eRu) {}
-            window.__gb2_railRO = null;
+            window.__gb2_pfcRO = null;
             try {
-                if (window.__gb2_railWinFit) {
-                    window.removeEventListener("resize", window.__gb2_railWinFit);
+                if (window.__gb2_pfcWinFit) {
+                    window.removeEventListener("resize", window.__gb2_pfcWinFit);
                 }
             } catch (_eRw) {}
-            window.__gb2_railWinFit = null;
+            window.__gb2_pfcWinFit = null;
         }
-        function _gb2RailWatchDock() {
-            _gb2RailUnwatchDock();
-            var railH = _gb2RailHost();
-            if (!railH) return;
-            var fit = function () { try { _gb2RailFitDock(); } catch (_eRf) {} };
+        function _gb2WatchPanelControls() {
+            _gb2UnwatchPanelControls();
+            if (!_gb2PanelFitOn() || !inspectorPanel) return;
+            var fit = function () { try { _gb2FitPanelControls(); } catch (_eRf) {} };
             try {
                 if (typeof ResizeObserver === "function") {
                     var ro = new ResizeObserver(fit);
-                    ro.observe(railH);
-                    window.__gb2_railRO = ro;
+                    ro.observe(inspectorPanel);
+                    window.__gb2_pfcRO = ro;
                 }
             } catch (_eRo) {}
-            // Fallback only. The splitter resizes the dock without
-            // resizing the window, so this catches nothing an observer
-            // would have caught; it is here for engines without one.
-            if (!window.__gb2_railRO) {
-                window.__gb2_railWinFit = fit;
-                try { window.addEventListener("resize", fit); } catch (_eRl) {}
-            }
-        }
-        function _gb2PlaceInspectorPanel() {
-            var railH = _gb2RailHost();
-            var sel = (typeof inspector !== "undefined" && inspector && inspector.selection) || [];
-            var wantRail = !!railH && !(sel.length === 1 && sel[0] === "stats");
-            var target = wantRail ? railH
-                : ((typeof chartCard !== "undefined" && chartCard) ? chartCard : host);
-            // One panel in the dock. render() rebuilds the widget's own
-            // DOM, but the dock lives outside it, so a previous render's
-            // panel would otherwise stack under this one. Swept off the RAW
-            // hook too, so a host that turns the key off while still
-            // pointing at the slot leaves nothing behind.
-            var sweep = railH;
-            if (!sweep) {
-                try {
-                    var rawH = window.__gb2_inspectorDockHost;
-                    if (typeof rawH === "function") rawH = rawH();
-                    if (rawH && rawH.nodeType === 1) sweep = rawH;
-                } catch (_eSw) {}
-            }
-            if (sweep) {
-                var olds = sweep.querySelectorAll("[data-gb2-inspector]");
-                for (var _oi = 0; _oi < olds.length; _oi++) {
-                    if (olds[_oi] !== inspectorPanel && olds[_oi].parentNode) {
-                        olds[_oi].parentNode.removeChild(olds[_oi]);
-                    }
-                }
-            }
-            if (inspectorPanel.parentElement !== target) target.appendChild(inspectorPanel);
-            var inRail = (target === railH);
-            inspectorPanel.setAttribute("data-gb2-dock", inRail ? "rail" : "below");
-            // In the rail the panel is a card of its own, not the chart's
-            // skirt; under the chart it keeps the flush top edge.
-            inspectorPanel.style.borderRadius = inRail ? "4px" : "0 0 4px 4px";
-            // Sizes first: the panel body is built immediately after this
-            // returns and reads the chip size while composing its markup.
-            // Then the observer, which is also the ONLY path that
-            // releases itself when the preference is turned back off.
-            _gb2RailFitDock();
-            _gb2RailWatchDock();
+            window.__gb2_pfcWinFit = fit;
+            try { window.addEventListener("resize", fit); } catch (_eRl) {}
         }
         var inspectorPanel = document.createElement("div");
-        inspectorPanel.setAttribute("data-gb2-inspector", "1");
         inspectorPanel.style.cssText = [
             // Flush with the chart's bottom border (no gap, no top border)
             // so the chart + panel read as one continuous container.
@@ -46988,7 +46931,15 @@
         // Append to the chart card (flex-column container) instead of
         // host, so wrap / toolbar / panel share the same left edge by
         // virtue of flex align-items:flex-start.
-        _gb2PlaceInspectorPanel();
+        if (typeof chartCard !== "undefined" && chartCard) {
+            chartCard.appendChild(inspectorPanel);
+        } else {
+            host.appendChild(inspectorPanel);
+        }
+        // Arm (or release) the observer that keeps the colour controls
+        // sized to the panel, once per render on the panel this render
+        // built.
+        _gb2WatchPanelControls();
         // Hidden initially so the chart sits clean until the user
         // makes a selection. renderInspectorPanel() handles the
         // animated reveal/hide on selection state changes.
@@ -47095,19 +47046,6 @@
         }
         function _syncInspectorPanelGeometry() {
             if (!inspectorPanel || !wrap) return;
-            if (_gb2RailActive()) {
-                // The dock is the width authority: the panel fills it and
-                // the chart's width has no say. The Statistics width-hold
-                // never applies here because Statistics stays under the
-                // chart (see _gb2PlaceInspectorPanel).
-                inspectorPanel.style.width = "auto";
-                inspectorPanel.style.minWidth = "0";
-                inspectorPanel.style.maxWidth = "100%";
-                inspectorPanel.style.boxSizing = "border-box";
-                inspectorPanel.style.marginLeft = "0";
-                inspectorPanel.style.marginRight = "0";
-                return;
-            }
             try {
                 var W = parseFloat(svg.getAttribute("width"));
                 if (!isFinite(W) || W <= 0) W = inchesW * PX_PER_INCH;
@@ -49433,10 +49371,7 @@
                 }
                 tabBarEl.setAttribute("data-gb2-promoted-tabbar", "1");
                 tabBarEl.style.marginBottom = "0";
-                // In the right-rail dock a six-tab row cannot fit on one
-                // line, so the bar keeps its wrap (two rows of short words,
-                // Torry's first-cut ruling, Sep 2026).
-                if (!(opts && opts.allowWrap) && !_gb2RailActive()) {
+                if (!(opts && opts.allowWrap)) {
                     tabBarEl.style.flexWrap = "nowrap";
                 }
                 row.parentElement.insertBefore(tabBarEl, row);
@@ -59624,10 +59559,11 @@
             while (inspectorPanel.firstChild) {
                 inspectorPanel.removeChild(inspectorPanel.firstChild);
             }
-            // Where this selection lives: the rail, or under the chart
-            // (Statistics always; everything when no dock is declared).
-            try { _gb2PlaceInspectorPanel(); } catch (_ePl) {}
             inspectorPanel.style.display = "";
+            // Displayed, so the panel can be measured: size the colour
+            // controls BEFORE the section markup below is composed, since
+            // the swatch rows read the chip size while building it.
+            try { _gb2FitPanelControls(); } catch (_ePfc) {}
             // Inline section title - no popup header bar, no × button.
             // Press Escape, click outside, or click another element to
             // close. The title sits above a thin underline; controls
@@ -59654,14 +59590,7 @@
             // active. Both stay visible together so opening the picker
             // doesn't blank the section's other controls.
             var bodyRow = document.createElement("div");
-            bodyRow.setAttribute("data-role", "inspector-bodyrow");
             bodyRow.style.cssText = "display:flex;align-items:flex-start;";
-            // In the rail the picker cannot sit beside the controls (the
-            // dock is about as wide as the picker), so the row stacks.
-            if (_gb2RailActive()) {
-                bodyRow.style.flexDirection = "column";
-                bodyRow.style.alignItems = "stretch";
-            }
             inspectorPanel.appendChild(bodyRow);
             var body = document.createElement("div");
             body.style.cssText = "padding:9px 12px 11px 12px;flex:1;min-width:0;box-sizing:border-box;";
@@ -66650,8 +66579,7 @@
                 var _bsTabBarEl = _bsFirstTabBtn ? _bsFirstTabBtn.parentElement : null;
                 if (_bsTabBarEl && _bsTabBarEl.parentElement === body) {
                     _bsTabBarEl.style.marginBottom = "0";
-                    // Rail dock: the row may wrap (see _promoteTabBarToFullWidth).
-                    if (!_gb2RailActive()) _bsTabBarEl.style.flexWrap = "nowrap";
+                    _bsTabBarEl.style.flexWrap = "nowrap";
                     var _bsBodyRow = inspector.bodyRow;
                     if (_bsBodyRow && _bsBodyRow.parentElement) {
                         _bsBodyRow.parentElement.insertBefore(_bsTabBarEl, _bsBodyRow);

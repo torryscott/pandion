@@ -15,7 +15,7 @@ cd "$(dirname "$0")/../.."
 # reads index.html source directly and runs once).
 FEATURE_PROBES="branding-check axe-state-check bypass-accessibility-check busy-check column-sizing-check \
 computed-variables-check coverage-gaps-check chart-accessibility-check export-accessibility-check \
-chart-check-check compare-pairs-apa-check chart-from-selection-check chart-groups-check chart-size-check inspector-rail-check bracket-orientation-check \
+chart-check-check compare-pairs-apa-check chart-from-selection-check chart-groups-check chart-size-check bracket-orientation-check \
 default-style-routes-check column-gestures-check chrome-check clipboard-check copy-image-check copy-moment-check correctness-check \
 data-commandbar-check data-menu-check data-roundtrip-fuzz stash-guard-check corpus-compat-check separator-accessibility-check \
 data-undo-check dates-check eyedropper-check doclifecycle-check tab-accessibility-check drag-feel-check \
@@ -24,6 +24,7 @@ empty-states-check engine-stamp-check flyout-align-check filter-honesty-check ex
 find-scope-check findpop-check finish-five-check fitpanes-check formula-unit-check formula-vocab-check formula-recipes-check \
 grid-keys-check help-check hierarchy-check hidden-selection-check \
 identifier-advice-check inspector-freshness-check menu-selection-check \
+panel-controls-size-check \
 view-zoom-drag-check \
 missing-codes-check header-row-check level-variants-check typechange-cost-check \
 missing-filter-check omv-missing-rules-check autosave-honesty-check \
