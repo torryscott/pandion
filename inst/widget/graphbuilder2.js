@@ -28,6 +28,72 @@
     function _gb2PtFromPx(px) { return Math.round(px * 75) / 100; }
     function _gb2PxFromPt(pt) { return pt * 4 / 3; }
 
+    // VISUAL pixels vs LOGICAL pixels. The standalone shell scales the chart
+    // with a CSS zoom on the engine host (its view zoom), so the two differ
+    // by a constant factor: pointer clientX/clientY and every
+    // getBoundingClientRect report VISUAL px, while an SVG user coordinate,
+    // or a px length written on a chart-surface element, is LOGICAL and
+    // paints at that factor times its value. A pointer delta applied
+    // straight to a position therefore drifts by the factor: the dragged
+    // thing outruns the cursor at 150% and lags it at 50%, worse the further
+    // you drag, and a hover tooltip lands further from its point the further
+    // that point sits from the chart's corner (Torry, Sep 2026).
+    // This returns the factor for the space el lives in, measured the way
+    // _ensureChartRoomFor already measures it: the element's visual rect over
+    // its own logical width. Pass the chart svg where you can, since its
+    // width ATTRIBUTE is the engine's own logical size and an exact number
+    // where offsetWidth is rounded. Never pass a group inside the chart: a
+    // chart-internal transform would poison the reading.
+    // Off the standalone this is EXACTLY 1. jamovi applies no zoom, and
+    // Electron page zoom and retina scaling move both sides together, so
+    // every call site divides by 1, which is exact, and behaves as before.
+    // How many VISUAL px one CSS px written into an svg child's
+    // style.transform paints as. Chromium: the zoom, a CSS length inside a
+    // zoomed subtree being a logical px. Safari: the zoom SQUARED. It
+    // inflates the length once at style time and then paints the svg zoomed
+    // again (Torry's Safari 26 readout, Sep 2026: translateX(243.9px) moved
+    // the bar 451px at zoom 1.359). Safari also leaves the zoom out of
+    // getScreenCTM() entirely, so the matrix the drag code divided by read
+    // 1.000 there and the bar outran the cursor by the zoom squared, while
+    // Chrome tracked perfectly. Neither the matrix nor an assumption serves,
+    // so measure: a throwaway rect, one known translate, two synchronous
+    // reads with no paint between them. Wherever nothing zooms this never
+    // even builds the probe and returns exactly 1, so jamovi divides by 1.
+    function _gb2CssPxScale(svg) {
+        try {
+            if (!svg || !svg.getBoundingClientRect) return 1;
+            var vs = _gb2ViewScale(svg);
+            if (vs === 1) return 1;
+            var p = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+            p.setAttribute("x", "0"); p.setAttribute("y", "0");
+            p.setAttribute("width", "10"); p.setAttribute("height", "10");
+            p.setAttribute("fill", "none"); p.setAttribute("pointer-events", "none");
+            p.style.transition = "none";
+            svg.appendChild(p);
+            var a = p.getBoundingClientRect().left;
+            p.style.transform = "translateX(100px)";
+            var b = p.getBoundingClientRect().left;
+            svg.removeChild(p);
+            var sc = (b - a) / 100;
+            return (isFinite(sc) && sc > 0.01) ? sc : vs;
+        } catch (_e) { return 1; }
+    }
+    function _gb2ViewScale(el) {
+        try {
+            if (!el || !el.getBoundingClientRect) return 1;
+            var node = el.ownerSVGElement || el;
+            var r = node.getBoundingClientRect();
+            if (!r || !(r.width > 0)) return 1;
+            var logical = 0;
+            if (node.getAttribute) logical = Number(node.getAttribute("width")) || 0;
+            if (!(logical > 0)) logical = node.offsetWidth || node.clientWidth || 0;
+            if (!(logical > 0)) return 1;
+            var s = r.width / logical;
+            if (!isFinite(s) || s <= 0 || Math.abs(s - 1) < 0.001) return 1;
+            return s;
+        } catch (_e) { return 1; }
+    }
+
     // A faceted category key is built server-side as
     // "<facet level><separator><category>". Splitting it on the FIRST
     // separator is right when a CATEGORY label contains one, and wrong
@@ -5437,8 +5503,13 @@
             var wrapRect;
             try { wrapRect = wrap.getBoundingClientRect(); }
             catch (_e) { return; }
-            var menuLeft = clientX - wrapRect.left + 2;
-            var menuTop = clientY - wrapRect.top + 2;
+            // clientX/Y and the wrap rect are VISUAL pixels, while left/top
+            // on this wrap child are LOGICAL, so the measured offset is
+            // divided back to logical and the menu lands on the cursor at
+            // any view zoom. One-shot placement, so the read is free.
+            var _pmS = _gb2ViewScale(svg);
+            var menuLeft = (clientX - wrapRect.left) / _pmS + 2;
+            var menuTop = (clientY - wrapRect.top) / _pmS + 2;
             menu.style.cssText = [
                 "position:absolute",
                 "left:" + menuLeft + "px",
@@ -8373,17 +8444,12 @@
         }
         function _playBarFlip(oldRects) {
             if (typeof dataGroup === "undefined" || !dataGroup) return;
-            // CTM scale: 1 user unit = (ctm.a) screen pixels in X,
-            // (ctm.d) in Y. Divide a screen-pixel delta by these to
-            // get the equivalent translate in user space (which is
-            // what CSS transform on an SVG element uses).
+            // Screen-px delta -> CSS px for style.transform: MEASURED, not
+            // getScreenCTM (Safari leaves the host zoom out of the matrix
+            // and paints CSS px on svg children zoom-squared).
             var sx = 1, sy = 1;
             try {
-                if (svg && svg.getScreenCTM) {
-                    var ctm = svg.getScreenCTM();
-                    if (ctm && ctm.a) sx = ctm.a;
-                    if (ctm && ctm.d) sy = ctm.d;
-                }
+                if (svg) { sx = sy = _gb2CssPxScale(svg); }
             } catch (_e) {}
             var newBars = svg ? svg.querySelectorAll("[data-bar-cat], [data-ann-id]") : [];
             for (var i = 0; i < newBars.length; i++) {
@@ -8524,6 +8590,9 @@
                 var s = 0, newStart = {};
                 for (var i = 0; i < ctx.order.length; i++) { newStart[ctx.order[i]] = s; s += 360 * (ctx.frac[ctx.order[i]] || 0); }
                 function _sd(a, b) { return ((a - b + 540) % 360 + 360) % 360 - 180; }
+                // transform-origin is CSS px but cx/cy are user units; Safari
+                // paints CSS px on svg children zoom-squared (1:1 in Chrome).
+                var _u2c = 1; try { _u2c = _gb2ViewScale(svg) / _gb2CssPxScale(svg); } catch (_eU) {}
                 var fresh = [];
                 for (var c in oldStartByCat) {
                     if (!Object.prototype.hasOwnProperty.call(oldStartByCat, c)) continue;
@@ -8532,7 +8601,7 @@
                     if (Math.abs(inv) < 0.5) continue;
                     var wEl = svg.querySelector('[data-role="freq-slice"][data-cat="' + (window.CSS && CSS.escape ? CSS.escape(c) : c) + '"]');
                     if (!wEl) continue;
-                    wEl.style.transformOrigin = ctx.cx + "px " + ctx.cy + "px";
+                    wEl.style.transformOrigin = (ctx.cx * _u2c) + "px " + (ctx.cy * _u2c) + "px";
                     wEl.style.transition = "none";
                     wEl.style.transform = "rotate(" + inv + "deg)";
                     fresh.push(wEl);
@@ -9469,7 +9538,7 @@
         // Position the tooltip near (clientX, clientY). Flips to
         // the left of the cursor when the natural right-anchor
         // would extend past the wrap's right edge.
-        var _xyWrapRect = null, _xyWrapRectAt = 0;
+        var _xyWrapRect = null, _xyWrapRectAt = 0, _xyWrapScale = 1;
         function _xyTooltipPosition(clientX, clientY) {
             // Both reads below force a layout flush and this runs per
             // pointermove (60 Hz): cache the wrap rect briefly (150 ms
@@ -9479,14 +9548,29 @@
             if (!_xyWrapRect || (_nowT - _xyWrapRectAt) > 150) {
                 _xyWrapRect = wrap.getBoundingClientRect();
                 _xyWrapRectAt = _nowT;
+                // Taken in the same layout read as the rect, so the two
+                // can never describe different moments: a rect held for
+                // its 150 ms is always paired with the scale that was
+                // true when it was measured.
+                _xyWrapScale = _gb2ViewScale(svg);
             }
             var rect = _xyWrapRect;
-            var x = clientX - rect.left + 12;
-            var y = clientY - rect.top  + 12;
+            // The pointer and the wrap rect are VISUAL pixels, while a
+            // left/top written on this wrap child is LOGICAL and paints at
+            // scale times its value. Divide the measured offset back to
+            // logical first; the 12 px gap and the 4 px edge clamps below
+            // are logical constants and stay as they are. Exactly 1 off
+            // the standalone's view zoom.
+            var _vs = _xyWrapScale;
+            var _relX = (clientX - rect.left) / _vs;
+            var _relY = (clientY - rect.top) / _vs;
+            var _wrapW = rect.width / _vs, _wrapH = rect.height / _vs;
+            var x = _relX + 12;
+            var y = _relY + 12;
             var w = _xyTooltip.__gb2w || (_xyTooltip.__gb2w = _xyTooltip.offsetWidth || 120);
             var h = _xyTooltip.__gb2h || (_xyTooltip.__gb2h = _xyTooltip.offsetHeight || 40);
-            if (x + w > rect.width - 4) x = clientX - rect.left - w - 12;
-            if (y + h > rect.height - 4) y = clientY - rect.top - h - 12;
+            if (x + w > _wrapW - 4) x = _relX - w - 12;
+            if (y + h > _wrapH - 4) y = _relY - h - 12;
             if (x < 4) x = 4;
             if (y < 4) y = 4;
             _xyTooltip.style.left = x + "px";
@@ -12382,7 +12466,11 @@
                     if (_maxR > 0) {
                         var _scs = getComputedStyle(_col);
                         var _rp = (parseFloat(_scs.paddingRight) || 0) + (parseFloat(_scs.borderRightWidth) || 0);
-                        var _snug = (Math.ceil(_maxR) + _rp + 1) + "px";
+                        // _maxR came from client rects (VISUAL px) while the
+                        // padding and the width written below are LOGICAL, so
+                        // the column was sized by that factor under the
+                        // standalone view zoom.
+                        var _snug = (Math.ceil(_maxR / _gb2ViewScale(svg)) + _rp + 1) + "px";
                         _col.style.width = _snug;
                         _col.style.minWidth = _snug;
                     }
@@ -12495,7 +12583,12 @@
                     // short at a 2000px window, Torry's screenshot). In
                     // jamovi toolbar and wrap share a width, so the value
                     // is never negative and the clamp was inert.
-                    addAnnMenu.style.right = Math.round(_opR.right - _btR.right) + "px";
+                    // Both rects are VISUAL pixels; this menu hangs in the
+                    // zoomed chart wrap and is NOT counter-zoomed, so its
+                    // right inset is LOGICAL and paints at scale times its
+                    // value. Divide the measured gap so the menu's right
+                    // edge still lands on the button's at any view zoom.
+                    addAnnMenu.style.right = Math.round((_opR.right - _btR.right) / _gb2ViewScale(svg)) + "px";
                 }
             } catch (_ePos) {}
             _snugAddMenuColumns();
@@ -13739,6 +13832,12 @@
             var pointerDown = false;
             var startClientX = 0, startClientY = 0;
             var startDx = 0, startDy = 0;
+            // A pointer delta is measured in VISUAL px, but a text offset
+            // is a LOGICAL length written into the chart. The standalone
+            // shell's view zoom is the only thing that separates the two,
+            // so the drag divides by the factor captured at press and the
+            // label tracks the cursor at every zoom. Exactly 1 in jamovi.
+            var startViewScale = 1;
             var moved = false;
             var shiftHeld = false;
             // Populated in onDown when the dragged element is part of a
@@ -13767,6 +13866,9 @@
                 shiftHeld = !!(e.ctrlKey || e.metaKey);
                 startClientX = e.clientX;
                 startClientY = e.clientY;
+                // Once per gesture: a client rect forces layout, and
+                // onMove runs at pointer rate.
+                startViewScale = _gb2ViewScale(svg);
                 var off = (dragId && textOffsets[dragId]) || { dx: 0, dy: 0 };
                 startDx = off.dx;
                 startDy = off.dy;
@@ -13799,8 +13901,8 @@
             }
             function onMove(e) {
                 if (!pointerDown) return;
-                var dx = e.clientX - startClientX;
-                var dy = e.clientY - startClientY;
+                var dx = (e.clientX - startClientX) / startViewScale;
+                var dy = (e.clientY - startClientY) / startViewScale;
                 if (!moved && (Math.abs(dx) > DRAG_TEXT_THRESHOLD_PX || Math.abs(dy) > DRAG_TEXT_THRESHOLD_PX)) {
                     moved = true;
                     svgText.style.cursor = "move";
@@ -13884,8 +13986,10 @@
                 svgText.style.cursor = _meComputed ? "move" : "text";
                 if (moved) {
                     if (dragId) {
-                        var dx = e.clientX - startClientX;
-                        var dy = e.clientY - startClientY;
+                        // Same conversion as onMove, or the committed
+                        // offset would not be where the label was drawn.
+                        var dx = (e.clientX - startClientX) / startViewScale;
+                        var dy = (e.clientY - startClientY) / startViewScale;
                         if (multiDragStart) {
                             // Update every selected element's offset
                             // in-place, then persist with a single
@@ -16351,11 +16455,11 @@
                     try { hit.setPointerCapture(e.pointerId); } catch (_pc) {}
                     hit.style.cursor = "grabbing";
                     function svgPoint(clientX, clientY) {
-                        var pt = svg.createSVGPoint();
-                        pt.x = clientX; pt.y = clientY;
-                        var ctm = svg.getScreenCTM();
-                        if (!ctm) return null;
-                        return pt.matrixTransform(ctm.inverse());
+                        // No viewBox: user space = (client - svg rect) / view scale.
+                        // Not getScreenCTM, which omits the host zoom in Safari.
+                        var r = svg.getBoundingClientRect(), vs = _gb2ViewScale(svg);
+                        if (!r) return null;
+                        return { x: (clientX - r.left) / vs, y: (clientY - r.top) / vs };
                     }
                     function onMove(ev) {
                         var p = svgPoint(ev.clientX, ev.clientY);
@@ -16478,6 +16582,11 @@
             (function () {
                 var down = false, moved = false;
                 var sx = 0, sy = 0, ox = 0, oy = 0;
+                // The pointer delta is VISUAL px while both the live
+                // translate and the committed ann.x / ann.y are LOGICAL,
+                // so the drag divides by the view scale. Exactly 1 off
+                // the standalone shell.
+                var vScale = 1;
                 g.style.cursor = "grab";
                 g.addEventListener("click", function (ce) { ce.stopPropagation(); });
                 g.addEventListener("pointerdown", function (e) {
@@ -16485,12 +16594,13 @@
                     e.preventDefault(); e.stopPropagation();
                     down = true; moved = false;
                     sx = e.clientX; sy = e.clientY;
+                    vScale = _gb2ViewScale(svg);
                     ox = ax; oy = ay;
                     try { g.setPointerCapture(e.pointerId); } catch (_eP) {}
                 });
                 g.addEventListener("pointermove", function (e) {
                     if (!down) return;
-                    var dx = e.clientX - sx, dy = e.clientY - sy;
+                    var dx = (e.clientX - sx) / vScale, dy = (e.clientY - sy) / vScale;
                     if (!moved && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) moved = true;
                     if (moved) {
                         g.setAttribute("transform",
@@ -16503,8 +16613,8 @@
                     try { g.releasePointerCapture(e.pointerId); } catch (_eR) {}
                     if (moved) {
                         commitAnnotationChange(ann.id, {
-                            x: ox + (e.clientX - sx),
-                            y: oy + (e.clientY - sy)
+                            x: ox + (e.clientX - sx) / vScale,
+                            y: oy + (e.clientY - sy) / vScale
                         });
                     } else {
                         try {
@@ -17073,6 +17183,12 @@
                 // past tolerance from a bar center - no stickiness.
                 var startMouseX = e.clientX;
                 var startMouseY = e.clientY;
+                // The cursor deltas are VISUAL px while ann.x / ann.x2,
+                // the caps and the snap targets are LOGICAL SVG coords,
+                // so the gesture is divided by the view scale before it
+                // becomes a bracket coordinate. Exactly 1 off the
+                // standalone shell.
+                var vScale = _gb2ViewScale(svg);
                 var startAnnX = ann.x || 0;
                 var startAnnX2 = ann.x2 || 0;
                 var startAnnY = ann.y || 0;
@@ -17101,8 +17217,8 @@
                 var bodyMode = null;
 
                 function onMove(ev) {
-                    var dx = ev.clientX - startMouseX;
-                    var dy = ev.clientY - startMouseY;
+                    var dx = (ev.clientX - startMouseX) / vScale;
+                    var dy = (ev.clientY - startMouseY) / vScale;
                     // Orientation-aware: in vertical mode legs sit
                     // along X and the spine along Y, so leg drag
                     // updates ann.x via dx (and capL via dy). In
@@ -17626,6 +17742,11 @@
                 var chartLeft = M.left;
                 var chartTop = M.top;
                 var svgRect = svg.getBoundingClientRect();
+                // svgRect is VISUAL px while innerW / innerH / chartLeft
+                // are LOGICAL, so the cursor offset below is divided by
+                // the view scale before it becomes a fraction of the
+                // axis. Exactly 1 off the standalone shell.
+                var vScale = _gb2ViewScale(svg);
                 var moved = false;
                 var sx = e.clientX, sy = e.clientY;
                 function onMove(ev) {
@@ -17640,10 +17761,10 @@
                     // to a fraction along the main axis.
                     var frac;
                     if (orientation === "horizontal") {
-                        var pxX = ev.clientX - svgRect.left - chartLeft;
+                        var pxX = (ev.clientX - svgRect.left) / vScale - chartLeft;
                         frac = pxX / Math.max(1, innerW);
                     } else {
-                        var pxY = ev.clientY - svgRect.top - chartTop;
+                        var pxY = (ev.clientY - svgRect.top) / vScale - chartTop;
                         frac = pxY / Math.max(1, innerH);
                     }
                     frac = Math.max(0, Math.min(1, frac));
@@ -17836,9 +17957,14 @@
                 // a wall-clock watchdog and a graph-type carve-out.
                 var sx = e.clientX, sy = e.clientY;
                 var moved = false;
+                // The pointer delta is VISUAL px and ann.x / ann.y are
+                // LOGICAL SVG coords; this drag re-bases sx / sy on
+                // every move, so an unscaled delta compounds as it goes.
+                // Exactly 1 off the standalone shell.
+                var vScale = _gb2ViewScale(svg);
                 function onMove(ev) {
-                    var dx = ev.clientX - sx;
-                    var dy = ev.clientY - sy;
+                    var dx = (ev.clientX - sx) / vScale;
+                    var dy = (ev.clientY - sy) / vScale;
                     if (!moved && (Math.abs(dx) > ANN_DRAG_THRESHOLD_PX ||
                                    Math.abs(dy) > ANN_DRAG_THRESHOLD_PX)) {
                         moved = true;
@@ -18680,6 +18806,13 @@
         // capture, freezing the drag). Full redraw runs on pointerup.
         function attachAnnotationDrag(el, ann, onMove, applyLive) {
             var down = false, sx = 0, sy = 0, moved = false;
+            // The pointer deltas below are VISUAL px while ann.x / ann.y
+            // are LOGICAL SVG user coords: under the standalone shell's
+            // view zoom the annotation would outrun the cursor without
+            // this factor. Measured once per gesture at pointerdown (a
+            // per-move read would force layout at 60Hz), and exactly 1
+            // wherever nothing zooms.
+            var vScale = 1;
             // Gesture-total / applied-total trackers for the Shift
             // axis lock (onMove consumers are incremental, so the
             // lock must be computed on totals and re-emitted as
@@ -18696,6 +18829,7 @@
                 e.preventDefault(); e.stopPropagation();
                 down = true; moved = false;
                 sx = e.clientX; sy = e.clientY;
+                vScale = _gb2ViewScale(svg);
                 totX = 0; totY = 0; appX = 0; appY = 0;
                 multiTargets = null;
                 // Multi-drag: only when the inspector selection
@@ -18722,8 +18856,8 @@
             });
             el.addEventListener("pointermove", function (e) {
                 if (!down) return;
-                var dx = e.clientX - sx;
-                var dy = e.clientY - sy;
+                var dx = (e.clientX - sx) / vScale;
+                var dy = (e.clientY - sy) / vScale;
                 if (!moved && (Math.abs(dx) > ANN_DRAG_THRESHOLD_PX ||
                                Math.abs(dy) > ANN_DRAG_THRESHOLD_PX)) {
                     moved = true;
@@ -19336,10 +19470,15 @@
                     // and the position is remembered for the session via
                     // window.__gb2_cvdBadgePos so it survives re-renders. Position
                     // is clamped to the chart container so it can't be lost.
-                    var _bd = { down: false, moved: false, sx: 0, sy: 0, sl: 0, st: 0 };
+                    // vs: the pointer delta is VISUAL px while style.left
+                    // and the wrap.clientWidth clamp below are LOGICAL, so
+                    // the badge ran ahead of the cursor under the standalone
+                    // shell's view zoom. Exactly 1 in jamovi.
+                    var _bd = { down: false, moved: false, sx: 0, sy: 0, sl: 0, st: 0, vs: 1 };
                     _cvdBadgeEl.addEventListener("pointerdown", function (ev) {
                         ev.preventDefault(); ev.stopPropagation();
                         _bd.down = true; _bd.moved = false;
+                        _bd.vs = _gb2ViewScale(svg || wrap);
                         _bd.sx = ev.clientX; _bd.sy = ev.clientY;
                         _bd.sl = parseFloat(_cvdBadgeEl.style.left) || 0;
                         _bd.st = parseFloat(_cvdBadgeEl.style.top) || 0;
@@ -19352,8 +19491,8 @@
                         if (!_bd.moved) return;
                         var ww = wrap.clientWidth || 0, wh = wrap.clientHeight || 0;
                         var bw = _cvdBadgeEl.offsetWidth, bh = _cvdBadgeEl.offsetHeight;
-                        var nl = Math.max(0, Math.min(_bd.sl + dx, Math.max(0, ww - bw)));
-                        var nt = Math.max(0, Math.min(_bd.st + dy, Math.max(0, wh - bh)));
+                        var nl = Math.max(0, Math.min(_bd.sl + dx / _bd.vs, Math.max(0, ww - bw)));
+                        var nt = Math.max(0, Math.min(_bd.st + dy / _bd.vs, Math.max(0, wh - bh)));
                         _cvdBadgeEl.style.left = nl + "px";
                         _cvdBadgeEl.style.top = nt + "px";
                         try { window.__gb2_cvdBadgePos = { left: nl, top: nt }; } catch (_e) {}
@@ -19570,8 +19709,13 @@
             // annotation as a persistent zero-size shape.
             if (_drawDragState) return;
             var st = _drawState();
-            var sx = downEvt.clientX - svgRect.left;
-            var sy = downEvt.clientY - svgRect.top;
+            // svgRect is VISUAL px while the shape coords and the snap
+            // targets (getBBox based) are LOGICAL, so the creation point
+            // is scaled into logical space before it is snapped. Exactly
+            // 1 off the standalone shell.
+            var vScale = _gb2ViewScale(svg);
+            var sx = (downEvt.clientX - svgRect.left) / vScale;
+            var sy = (downEvt.clientY - svgRect.top) / vScale;
             var snap = _gatherSnapTargets();
             var snapped = _snapPoint(sx, sy, snap);
             // Create the annotation in the data model now so live
@@ -19613,6 +19757,9 @@
             _drawDragState = {
                 ann: def,
                 pointerId: downEvt.pointerId,
+                // Carried so the rubber-band move divides by the same
+                // factor without re-measuring on every pointermove.
+                vScale: vScale,
                 startX: snapped.x, startY: snapped.y,
                 startClientX: downEvt.clientX,
                 startClientY: downEvt.clientY,
@@ -19625,8 +19772,9 @@
             if (!_drawDragState) return;
             if (e.pointerId !== _drawDragState.pointerId) return;
             var rect = svg.getBoundingClientRect();
-            var px = e.clientX - rect.left;
-            var py = e.clientY - rect.top;
+            var _vs = _drawDragState.vScale || 1;
+            var px = (e.clientX - rect.left) / _vs;
+            var py = (e.clientY - rect.top) / _vs;
             var snapped = _snapPoint(px, py, _drawDragState.snap);
             // Shift constrains to a square (rect/ellipse) or an
             // axis-aligned line (line/arrow). The constraint is
@@ -19820,7 +19968,13 @@
                 // marqueed items to it.
                 shift: !!(e.ctrlKey || e.metaKey),
                 moved: false,
-                pointerId: e.pointerId
+                pointerId: e.pointerId,
+                // startX / startY stay VISUAL px because _selectInBox
+                // compares them against client rects, but the rect that
+                // draws the marquee is an SVG child whose lengths are
+                // LOGICAL, so the drawing divides by this factor.
+                // Exactly 1 off the standalone shell.
+                vScale: _gb2ViewScale(svg)
             };
             try { svg.setPointerCapture(e.pointerId); } catch (_e) {}
         });
@@ -19837,10 +19991,11 @@
                 marqueeState.moved = true;
                 marqueeRect.style.display = "";
             }
-            marqueeRect.setAttribute("x", Math.min(x1, x2));
-            marqueeRect.setAttribute("y", Math.min(y1, y2));
-            marqueeRect.setAttribute("width", dx);
-            marqueeRect.setAttribute("height", dy);
+            var _mvs = marqueeState.vScale || 1;
+            marqueeRect.setAttribute("x", Math.min(x1, x2) / _mvs);
+            marqueeRect.setAttribute("y", Math.min(y1, y2) / _mvs);
+            marqueeRect.setAttribute("width", dx / _mvs);
+            marqueeRect.setAttribute("height", dy / _mvs);
         });
         function _endMarquee(e) {
             if (_drawDragState) { _shapeDragEnd(e); return; }
@@ -21585,9 +21740,13 @@
                     try {
                         var _fcHSvgR = svg.getBoundingClientRect();
                         var _fcHR = _fcHGrp.getBoundingClientRect();
+                        // Client rects are VISUAL px while addIndicatorBox
+                        // takes SVG user units, so under the standalone view
+                        // zoom the halo landed wide of the plate it outlines.
+                        var _fcHVs = _gb2ViewScale(svg);
                         if (_fcHSvgR.width && _fcHR.width && _fcHR.height) {
-                            addIndicatorBox(_fcHR.left - _fcHSvgR.left, _fcHR.top - _fcHSvgR.top,
-                                _fcHR.width, _fcHR.height, { "class": "gb2-halo-union" });
+                            addIndicatorBox((_fcHR.left - _fcHSvgR.left) / _fcHVs, (_fcHR.top - _fcHSvgR.top) / _fcHVs,
+                                _fcHR.width / _fcHVs, _fcHR.height / _fcHVs, { "class": "gb2-halo-union" });
                         }
                     } catch (_eFcH) {}
                 }
@@ -21982,8 +22141,11 @@
                             // gets a congruent halo.
                             var _svgR = svg.getBoundingClientRect();
                             var _xsR = _xsGrp.getBoundingClientRect();
+                            // Client rects are VISUAL px; addIndicatorBox
+                            // takes SVG user units (see the chi-square halo).
+                            var _xsVs = _gb2ViewScale(svg);
                             if (_svgR.width && _xsR.width && _xsR.height) {
-                                addIndicatorBox(_xsR.left - _svgR.left, _xsR.top - _svgR.top, _xsR.width, _xsR.height,
+                                addIndicatorBox((_xsR.left - _svgR.left) / _xsVs, (_xsR.top - _svgR.top) / _xsVs, _xsR.width / _xsVs, _xsR.height / _xsVs,
                                     { "class": "gb2-halo-union" });
                                 _xfAny = true;
                             }
@@ -22605,15 +22767,18 @@
                 }
                 try {
                     var svgRectL = svg.getBoundingClientRect();
+                    // Client rects are VISUAL px; addIndicatorBox takes SVG
+                    // user units (see the chi-square halo).
+                    var _lgVs = _gb2ViewScale(svg);
                     for (var _ti = 0; _ti < targetEls.length; _ti++) {
                         var _tEl = targetEls[_ti];
                         var clientBbL = _tEl.getBoundingClientRect();
                         if (svgRectL.width && clientBbL.width && clientBbL.height) {
                             addIndicatorBox(
-                                clientBbL.left - svgRectL.left,
-                                clientBbL.top - svgRectL.top,
-                                clientBbL.width,
-                                clientBbL.height
+                                (clientBbL.left - svgRectL.left) / _lgVs,
+                                (clientBbL.top - svgRectL.top) / _lgVs,
+                                clientBbL.width / _lgVs,
+                                clientBbL.height / _lgVs
                             );
                         }
                     }
@@ -24347,11 +24512,17 @@
                     line.style.visibility = "visible";
                 } catch (_v) {}
                 var ptrId = e.pointerId;
+                // The cursor point is VISUAL px while the rotation
+                // centre cx / cy comes from the annotation's LOGICAL
+                // coords: mixing the two skews the angle itself, so the
+                // point is scaled into logical space first. Exactly 1
+                // off the standalone shell.
+                var vScale = _gb2ViewScale(svg);
                 function onMove(ev) {
                     if (ev.pointerId !== ptrId) return;
                     var rect = svg.getBoundingClientRect();
-                    var px = ev.clientX - rect.left;
-                    var py = ev.clientY - rect.top;
+                    var px = (ev.clientX - rect.left) / vScale;
+                    var py = (ev.clientY - rect.top) / vScale;
                     var dx = px - cx;
                     var dy = py - cy;
                     if (dx === 0 && dy === 0) return;
@@ -24544,9 +24715,15 @@
         }
         function _attachShapeHandleDrag(handle, ann, which) {
             var down = false, ptrId = null, aspW = 0, aspH = 0;
+            // The cursor is measured in VISUAL px while ann.x / ann.y /
+            // ann.x2 / ann.y2 and the snap targets are LOGICAL, so it is
+            // scaled into logical space once per gesture. Exactly 1 off
+            // the standalone shell.
+            var vScale = 1;
             handle.addEventListener("pointerdown", function (e) {
                 e.preventDefault(); e.stopPropagation();
                 down = true; ptrId = e.pointerId;
+                vScale = _gb2ViewScale(svg);
                 // Shift = keep-aspect for bbox corner drags; the ratio is
                 // captured at grab time so the lock holds the shape's
                 // CURRENT proportions.
@@ -24569,8 +24746,8 @@
             handle.addEventListener("pointermove", function (e) {
                 if (!down || e.pointerId !== ptrId) return;
                 var rect = svg.getBoundingClientRect();
-                var px = e.clientX - rect.left;
-                var py = e.clientY - rect.top;
+                var px = (e.clientX - rect.left) / vScale;
+                var py = (e.clientY - rect.top) / vScale;
                 // For rotated bbox shapes (rect / ellipse / triangle /
                 // polygon / diamond / star), ann.x / ann.y / ann.x2 /
                 // ann.y2 live in the shape's UNROTATED coord system,
@@ -26554,11 +26731,10 @@
             ns = ns || "ya";
             var sz = (typeof size === "number" && size > 0) ? size : 22;
             if (sz < 22) sz = 22;
-            // Insets scale to swatch size: at 20 px we use a 3 px
-            // outset; smaller swatches use a proportionally tighter
-            // outset so the highlight ring doesn't collide with the
-            // adjacent swatch.
-            var outOff = Math.max(2, Math.round(sz * 0.15));
+            // The ring inset scales with the chip, and BOTH this markup
+            // and _refreshPaletteRowHighlight take it from
+            // _gb2ChipOutOff, so the two can never land a pixel apart.
+            var outOff = _gb2ChipOutOff();
             // Swatch rows stay DENSE with LARGE chips (Aug 3 2026
             // ruling: "closer together but actually larger" - supersedes
             // both the Jul 4 compact-small look and the wide-gap a11y
@@ -26582,7 +26758,7 @@
                 html += '<button type="button" data-' + ns + '-palette="transparent" ' +
                     'data-' + ns + '-palette-target="' + target + '" ' +
                     'title="Transparent (no fill)" aria-label="Transparent" ' +
-                    'style="width:' + sz + 'px;height:' + sz + 'px;padding:0;border:' +
+                    'style="width:var(--gb2-chip, ' + sz + 'px);height:var(--gb2-chip, ' + sz + 'px);padding:0;border:' +
                     (_tOn ? "2px solid #1a5fb4" : "1px solid #888") + ';' +
                     'border-radius:3px;cursor:pointer;flex-shrink:0;background-color:#fff;' +
                     'background-image:linear-gradient(45deg,#cfcfcf 25%,transparent 25%),linear-gradient(-45deg,#cfcfcf 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#cfcfcf 75%),linear-gradient(-45deg,transparent 75%,#cfcfcf 75%);' +
@@ -26601,7 +26777,7 @@
                     'data-' + ns + '-palette="' + c + '" ' +
                     'data-' + ns + '-palette-target="' + target + '" ' +
                     'title="' + c + '" ' +
-                    'style="width:' + sz + 'px;height:' + sz + 'px;padding:0;border:' + border + ';' +
+                    'style="width:var(--gb2-chip, ' + sz + 'px);height:var(--gb2-chip, ' + sz + 'px);padding:0;border:' + border + ';' +
                     'border-radius:3px;cursor:pointer;background:' + c + ';flex-shrink:0;' +
                     (isActive ? "outline:1px solid white;outline-offset:-" + outOff + "px;" : "") +
                     '"></button>';
@@ -26629,12 +26805,14 @@
                     ? "2px solid #1a5fb4"
                     : (c === "#ffffff" ? "1px solid #ccc" : "1px solid #888");
                 b.style.border = border;
-                // Recover the outline-offset from the swatch's actual
-                // rendered width so the compact (18 px) variant in
-                // text panels doesn't reuse the larger 3 px offset
-                // and clip the highlight ring against the swatch edge.
-                var w = parseFloat(b.style.width) || b.offsetWidth || 20;
-                var outOff = Math.max(2, Math.round(w * 0.15));
+                // From the SAME rule the markup used. Measuring the
+                // rendered box instead read the chip PLUS its border and
+                // rounded a pixel wider once the fit grew the chip, so
+                // the ring jumped on the first refresh after a color
+                // change. (The 18px variant the old note describes no
+                // longer exists: every caller's size is floored to the
+                // chip size above.)
+                var outOff = _gb2ChipOutOff();
                 b.style.outline = active ? "1px solid white" : "";
                 b.style.outlineOffset = active ? ("-" + outOff + "px") : "";
             }
@@ -27804,8 +27982,8 @@
                 "padding:5px 7px 7px 7px",
                 "font-size:11px",
                 "font-family:var(--gb2-ui-font)",
-                "width:184px",
-                "flex:0 0 184px",
+                "width:var(--gb2-pkr-w, 184px)",
+                "flex:0 0 var(--gb2-pkr-basis, 184px)",
                 "box-sizing:border-box"
             ].join(";");
             pop.innerHTML =
@@ -27830,11 +28008,11 @@
                 '</div>' +
                 // HSV panel: SV square + hue strip
                 '<div data-panel="hsv">' +
-                  '<div data-role="sv" style="position:relative;width:100%;height:96px;border-radius:3px;cursor:crosshair;background:linear-gradient(to bottom,rgba(0,0,0,0),#000),linear-gradient(to right,#fff,rgba(255,255,255,0));background-color:#f00;margin-bottom:5px;">' +
+                  '<div data-role="sv" style="position:relative;width:100%;height:var(--gb2-pkr-sv, 96px);border-radius:3px;cursor:crosshair;background:linear-gradient(to bottom,rgba(0,0,0,0),#000),linear-gradient(to right,#fff,rgba(255,255,255,0));background-color:#f00;margin-bottom:5px;">' +
                     '<div data-role="sv-marker" style="position:absolute;width:10px;height:10px;border:2px solid #fff;border-radius:50%;box-shadow:0 0 0 1px rgba(0,0,0,0.4);transform:translate(-50%,-50%);pointer-events:none;left:50%;top:50%;"></div>' +
                   '</div>' +
-                  '<div data-role="hue" style="position:relative;width:100%;height:11px;border-radius:3px;cursor:ew-resize;background:linear-gradient(to right,#f00 0%,#ff0 17%,#0f0 33%,#0ff 50%,#00f 67%,#f0f 83%,#f00 100%);">' +
-                    '<div data-role="hue-marker" style="position:absolute;top:-2px;width:4px;height:15px;border:1px solid #fff;border-radius:2px;background:rgba(0,0,0,0.3);transform:translateX(-50%);pointer-events:none;left:0;"></div>' +
+                  '<div data-role="hue" style="position:relative;width:100%;height:var(--gb2-pkr-strip, 11px);border-radius:3px;cursor:ew-resize;background:linear-gradient(to right,#f00 0%,#ff0 17%,#0f0 33%,#0ff 50%,#00f 67%,#f0f 83%,#f00 100%);">' +
+                    '<div data-role="hue-marker" style="position:absolute;top:-2px;width:4px;height:calc(var(--gb2-pkr-strip, 11px) + 4px);border:1px solid #fff;border-radius:2px;background:rgba(0,0,0,0.3);transform:translateX(-50%);pointer-events:none;left:0;"></div>' +
                   '</div>' +
                   // Lightness strip: black → pure hue at L=0.5 → white.
                   // Lets users nudge brightness without fighting the
@@ -27842,8 +28020,8 @@
                   // lightness while keeping the current HSL hue and
                   // saturation; HSV state is recomputed from the new
                   // RGB so every other control stays consistent.
-                  '<div data-role="lightness" style="position:relative;width:100%;height:11px;border-radius:3px;cursor:ew-resize;margin-top:5px;background:linear-gradient(to right,#000,#f00 50%,#fff);">' +
-                    '<div data-role="lightness-marker" style="position:absolute;top:-2px;width:4px;height:15px;border:1px solid #fff;border-radius:2px;background:rgba(0,0,0,0.3);transform:translateX(-50%);pointer-events:none;left:50%;"></div>' +
+                  '<div data-role="lightness" style="position:relative;width:100%;height:var(--gb2-pkr-strip, 11px);border-radius:3px;cursor:ew-resize;margin-top:5px;background:linear-gradient(to right,#000,#f00 50%,#fff);">' +
+                    '<div data-role="lightness-marker" style="position:absolute;top:-2px;width:4px;height:calc(var(--gb2-pkr-strip, 11px) + 4px);border:1px solid #fff;border-radius:2px;background:rgba(0,0,0,0.3);transform:translateX(-50%);pointer-events:none;left:50%;"></div>' +
                   '</div>' +
                 '</div>' +
                 // Swatches panel: recent (conditional) + palette + hue
@@ -27941,7 +28119,7 @@
                 btn.type = "button";
                 btn.title = c;
                 btn.style.cssText =
-                    "width:100%;height:13px;padding:0;border:1px solid #ccc;border-radius:2px;cursor:pointer;background:" + c + ";";
+                    "width:100%;height:var(--gb2-pkr-cell, 13px);padding:0;border:1px solid #ccc;border-radius:2px;cursor:pointer;background:" + c + ";";
                 btn.addEventListener("click", function (e) {
                     e.preventDefault();
                     _setPickerHex(refs, c, true);
@@ -28338,7 +28516,7 @@
                 btn.type = "button";
                 btn.title = c;
                 btn.style.cssText =
-                    "width:100%;height:13px;padding:0;border:1px solid #ccc;border-radius:2px;cursor:pointer;background:" + c + ";";
+                    "width:100%;height:var(--gb2-pkr-cell, 13px);padding:0;border:1px solid #ccc;border-radius:2px;cursor:pointer;background:" + c + ";";
                 (function (col) {
                     btn.addEventListener("click", function (e) {
                         e.preventDefault();
@@ -28406,8 +28584,14 @@
                 pop.style.background = "#fafafa";
                 pop.style.cursor = "pointer";
             } else {
-                pop.style.flex = "0 0 184px";
-                pop.style.width = "184px";
+                // Width and basis are handed over to the panel's custom
+                // properties, whose fallbacks are the literals this
+                // branch used to write. Writing the numbers here is what
+                // defeated the properties: a CSSOM write replaces what
+                // cssText declared, and this runs on EVERY picker open,
+                // before anything has a chance to measure the dock.
+                pop.style.flex = "0 0 var(--gb2-pkr-basis, 184px)";
+                pop.style.width = "var(--gb2-pkr-w, 184px)";
                 pop.style.padding = "5px 7px 7px 7px";
                 // Stretch to the bodyRow's full height so the left
                 // divider line runs all the way to the bottom of the
@@ -28580,6 +28764,10 @@
             var host = (inspector.pickerHost && inspector.pickerHost.isConnected)
                 ? inspector.pickerHost : (inspector.bodyRow || inspectorPanel);
             host.appendChild(_picker.pop);
+            // Mounted, so a re-fit publishes sizes for the box it landed
+            // in. Absent the key the fit clears the properties and the
+            // markup's own fallbacks stand.
+            try { _gb2FitPanelControls(); } catch (_eRfp) {}
             _picker.pop.style.display = "block";
             // Reset any dimming from a previous panel (Error Bars
             // dims the picker when "Match bar color" is on).
@@ -30108,13 +30296,17 @@
                 : { clientX: clamped, clientY: crossClient };
             var startClient = horizDrag ? st.startY : st.startX;
             var dDragClient = clamped - startClient;
-            var sScale = 1;
-            try {
-                if (svg && svg.getScreenCTM) {
-                    var ctm = svg.getScreenCTM();
-                    if (ctm) sScale = horizDrag ? (ctm.d || 1) : (ctm.a || 1);
-                }
-            } catch (_e2) {}
+            // Calibrated once per gesture, not read off getScreenCTM: Safari
+            // leaves the CSS zoom out of that matrix and paints a CSS px
+            // translate zoom-squared, so dividing by the matrix let the bar
+            // outrun the cursor there while Chrome tracked (see
+            // _gb2CssPxScale). viewS is what a USER unit paints as; the
+            // parting shifts below are user units and need that ratio.
+            if (!(st.cssPx > 0)) {
+                st.cssPx = _gb2CssPxScale(svg);
+                st.viewS = _gb2ViewScale(svg);
+            }
+            var sScale = st.cssPx;
             var dDragUser = dDragClient / sScale;
             if (st.draggedBars) {
                 var translateAxis = horizDrag ? "translateY" : "translateX";
@@ -30144,7 +30336,9 @@
                     if (shift === 0) {
                         nb.style.transform = "";
                     } else {
-                        nb.style.transform = translateAxis2 + "(" + shift + "px)";
+                        // shift is user units; a CSS px paints as cssPx and a
+                        // user unit as viewS, so convert (1:1 in Chrome).
+                        nb.style.transform = translateAxis2 + "(" + (shift * (st.viewS || 1) / (st.cssPx || 1)) + "px)";
                     }
                 }
                 // Line-plot extension: each non-dragged GROUP shifts
@@ -30171,8 +30365,10 @@
                             if (_lnShift === 0) {
                                 _lnNode.style.transform = "";
                             } else {
+                                // User units into a CSS px transform: the
+                                // same conversion as the bars above.
                                 _lnNode.style.transform =
-                                    translateAxis2 + "(" + _lnShift + "px)";
+                                    translateAxis2 + "(" + (_lnShift * (st.viewS || 1) / (st.cssPx || 1)) + "px)";
                             }
                         }
                     }
@@ -31509,7 +31705,9 @@
                             curOrder = slots.map(function (s) { return s.lvl; });
                             if (curOrder.indexOf(lvl) < 0) return;
                             inlineRow = slots.every(function (s) { return Math.abs(s.cy - slots[0].cy) < Math.max(8, 0.4 * (s.bottom - s.top)); });
-                            try { var m = (dataGroup || svg).getScreenCTM(); if (m && m.a) scale = m.a; } catch (_eS) {}
+                            // client px per CSS px written to style.transform (measured;
+                            // Safari omits the host zoom from getScreenCTM)
+                            try { scale = _gb2CssPxScale(svg); } catch (_eS) {}
                             if (!scale) scale = 1;
                             sets = {};
                             for (var i = 0; i < slots.length; i++) sets[slots[i].lvl] = collectFacet(slots[i]);
@@ -32805,6 +33003,13 @@
                             var pointerId = downEvt.pointerId;
                             var moved = false;
                             var ghostEl = null;
+                            // The cursor delta is VISUAL px while the ghost's
+                            // translate is a LOGICAL SVG length, so the ghost
+                            // drifted off the pointer under the standalone
+                            // shell's view zoom. Exactly 1 in jamovi. The
+                            // drop-slot maths below compares client rect
+                            // against client rect and needs none of this.
+                            var ghostVS = 1;
                             var dropIndicator = null;
                             var dropTargetIdx = -1;
                             // Snapshot current order from the
@@ -32851,6 +33056,7 @@
                                     // Dim the source strip, make a
                                     // visual ghost that follows the
                                     // cursor.
+                                    ghostVS = _gb2ViewScale(svg || _stripEl);
                                     _stripEl.style.opacity = "0.3";
                                     ghostEl = _stripEl.cloneNode(true);
                                     ghostEl.removeAttribute("data-facet-strip");
@@ -32871,7 +33077,7 @@
                                 // Move ghost with cursor.
                                 if (ghostEl) {
                                     ghostEl.setAttribute("transform",
-                                        "translate(" + dx + "," + dy + ")");
+                                        "translate(" + (dx / ghostVS) + "," + (dy / ghostVS) + ")");
                                 }
                                 // Compute target index by nearest
                                 // strip center to cursor X.
@@ -32892,9 +33098,13 @@
                                 var indicatorX = (cursorX < tgt.cx) ? tgt.left - 4 : tgt.right + 4;
                                 // Convert client X to axisGroup-local X.
                                 try {
+                                    // client -> svg user space via the rect + view scale
+                                    // (Safari omits the host zoom from getScreenCTM), then
+                                    // into axisGroup space via getCTM (pure user space).
                                     var pt = svg.createSVGPoint();
-                                    pt.x = indicatorX; pt.y = chartTop;
-                                    var ctm = axisGroup.getScreenCTM();
+                                    var _sr = svg.getBoundingClientRect();
+                                    pt.x = (indicatorX - _sr.left) / (ghostVS || 1); pt.y = chartTop;
+                                    var ctm = axisGroup.getCTM();
                                     if (ctm) {
                                         var loc = pt.matrixTransform(ctm.inverse());
                                         dropIndicator.setAttribute("x1", loc.x);
@@ -36207,7 +36417,8 @@
                                 if (e.button !== 0) return;
                                 e.stopPropagation();
                                 var sx = e.clientX, sy = e.clientY, odx = _hlDX, ody = _hlDY, moved = false;
-                                var _scl = 1; try { var ctm = svg.getScreenCTM(); if (ctm && ctm.a) _scl = ctm.a; } catch (_e0) {}
+                                // attribute translate = user units; Safari omits the host zoom from getScreenCTM
+                                var _scl = 1; try { _scl = _gb2ViewScale(svg); } catch (_e0) {}
                                 function mv(ev) {
                                     if (!moved && (Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy)) < 4) return;
                                     moved = true; _dragged = true;
@@ -37949,7 +38160,8 @@
                                 e.preventDefault(); e.stopPropagation();
                                 var startC = (orient === "x") ? e.clientY : e.clientX;
                                 var start = _mgSize, moved = false;
-                                var sc = 1; try { var ctm = svg.getScreenCTM(); if (ctm) sc = (orient === "x") ? (ctm.d || 1) : (ctm.a || 1); } catch (_e0) {}
+                                // xyMarginalSize is user units; Safari omits the host zoom from getScreenCTM
+                                var sc = 1; try { sc = _gb2ViewScale(svg); } catch (_e0) {}
                                 function mv(ev) {
                                     var d = ((orient === "x") ? (ev.clientY - startC) : (startC - ev.clientX)) / sc;
                                     if (!moved && Math.abs(d) < 2) return;
@@ -38226,6 +38438,10 @@
                             var startX = 0, startY = 0;
                             var startOffX = 0, startOffY = 0;
                             var moved = false;
+                            // The pointer delta is VISUAL px while the
+                            // overlay offset is a LOGICAL SVG length.
+                            // Measured once per gesture; exactly 1 in jamovi.
+                            var statsVS = 1;
                             // Swallow the browser-synthesized
                             // click that fires after pointerup.
                             // Without this, the click bubbles to
@@ -38243,6 +38459,7 @@
                                 e.stopPropagation();
                                 down = true;
                                 moved = false;
+                                statsVS = _gb2ViewScale(svg || el);
                                 startX = e.clientX;
                                 startY = e.clientY;
                                 // Read CURRENT offsets at drag-start
@@ -38268,8 +38485,8 @@
                                 }
                                 if (moved) {
                                     _statsG.setAttribute("transform",
-                                        "translate(" + (startOffX + dx) +
-                                        "," + (startOffY + dy) + ")");
+                                        "translate(" + (startOffX + dx / statsVS) +
+                                        "," + (startOffY + dy / statsVS) + ")");
                                 }
                             });
                             function _endDrag(e) {
@@ -38280,8 +38497,8 @@
                                 if (moved) {
                                     var dx = e.clientX - startX;
                                     var dy = e.clientY - startY;
-                                    var newX = Math.round(startOffX + dx);
-                                    var newY = Math.round(startOffY + dy);
+                                    var newX = Math.round(startOffX + dx / statsVS);
+                                    var newY = Math.round(startOffY + dy / statsVS);
                                     data.xyStatsOffsetX = newX;
                                     data.xyStatsOffsetY = newY;
                                     if (hasSetOption) {
@@ -38438,6 +38655,12 @@
                                 el.setAttribute("pointer-events", "all");
                                 var rzDown = false, rzMoved = false;
                                 var rzX = 0, rzY = 0, rzW = 0, rzH = 0;
+                                // The pointer delta is VISUAL px while the
+                                // box dimensions committed below are LOGICAL,
+                                // so the plate outgrew the handle under the
+                                // standalone shell's view zoom. Measured once
+                                // per gesture; exactly 1 in jamovi.
+                                var rzVS = 1;
                                 el.addEventListener("mouseenter", function () {
                                     if (!rzDown) el.setAttribute("fill-opacity", "0.22");
                                 });
@@ -38453,6 +38676,7 @@
                                     e.stopPropagation();
                                     rzDown = true;
                                     rzMoved = false;
+                                    rzVS = _gb2ViewScale(svg || el);
                                     rzX = e.clientX; rzY = e.clientY;
                                     rzW = _curW; rzH = _curH;
                                     el.setAttribute("fill-opacity", "0.35");
@@ -38469,11 +38693,11 @@
                                     }
                                     var _mn = _statsMinSize();
                                     if (axis === "w" || axis === "c") {
-                                        var nw = rzW + _wSign * ddx;
+                                        var nw = rzW + _wSign * ddx / rzVS;
                                         _curW = Math.max(_mn.w, Math.min(nw, _rszMaxW));
                                     }
                                     if (axis === "h" || axis === "c") {
-                                        var nh = rzH + _hSign * ddy;
+                                        var nh = rzH + _hSign * ddy / rzVS;
                                         _curH = Math.max(_mn.h, Math.min(nh, _rszMaxH));
                                     }
                                     _layoutStats(_curW, _curH);
@@ -39273,9 +39497,11 @@
                             var committed = groupCats.slice(), preview = groupCats.slice();
                             var lastSlots = 0;
                             var SLOT_PX = 44;
-                            // Screen->SVG scale for the follow transform.
+                            // Screen px -> CSS px for the follow transform (measured:
+                            // Safari paints CSS px on svg children zoom-squared and
+                            // leaves the host zoom out of getScreenCTM).
                             var _zSy = 1;
-                            try { var _zCtm = svg.getScreenCTM(); if (_zCtm && _zCtm.d) _zSy = _zCtm.d; } catch (_eZc) {}
+                            try { _zSy = _gb2CssPxScale(svg); } catch (_eZc) {}
                             function _zEsc(s) {
                                 if (window.CSS && typeof CSS.escape === "function") return CSS.escape(String(s));
                                 return String(s)
@@ -39639,8 +39865,12 @@
                             e.stopPropagation();
                             var startX = e.clientX, startY = e.clientY, pid = e.pointerId, moved = false;
                             var committed = groupCats.slice(), preview = groupCats.slice();
+                            // every write here is a CSS translate from a VISUAL px
+                            // delta (client delta or bounding-rect height), so one
+                            // measured cssPx serves both axes; getScreenCTM omits the
+                            // host zoom in Safari.
                             var sx = 1, sy = 1;
-                            try { var ctm = svg.getScreenCTM(); if (ctm) { if (ctm.a) sx = ctm.a; if (ctm.d) sy = ctm.d; } } catch (_e) {}
+                            try { sx = sy = _gb2CssPxScale(svg); } catch (_e) {}
                             // Segments are stable during the drag (no redraw), so
                             // cache them + the grabbed group's per-bin heights.
                             var allSegs = [], gSegs = [], gH = {};
@@ -41733,10 +41963,14 @@
                         "rotate(" + d.toFixed(3) + " " + _cx + " " + _cy + ")"
                         + " rotate(" + (-d).toFixed(3) + " " + lx + " " + ly + ")");
                 }
+                // _fqU2C: user units -> CSS px for the transform-origin (Safari
+                // paints CSS px on svg children zoom-squared); measured ONCE per
+                // drag when the reorder gesture engages, never per frame.
+                var _fqU2C = 1;
                 function _fqWedgeTransform(cat, d, animate) {
                     var wd = _wedgeByCat[cat];
                     if (!wd) return;
-                    wd.style.transformOrigin = _cx + "px " + _cy + "px";
+                    wd.style.transformOrigin = (_cx * _fqU2C) + "px " + (_cy * _fqU2C) + "px";
                     wd.style.transition = animate ? "transform 0.12s ease" : "none";
                     wd.style.transform = d ? ("rotate(" + d + "deg)") : "";
                     _fqLabelTransform(cat, d || 0);
@@ -41757,6 +41991,7 @@
                                 if (Math.abs(mv.clientX - sx)
                                     + Math.abs(mv.clientY - sy) < 6) return;
                                 engaged = true;
+                                try { _fqU2C = _gb2ViewScale(svg) / _gb2CssPxScale(svg); } catch (_eU) { _fqU2C = 1; }
                                 try {
                                     window.__gb2_fqPieDragging = true;
                                     window.__gb2_fqPieDragKind = "reorder";
@@ -41877,7 +42112,7 @@
                                     if (!wEl) continue;
                                     var inv = _fqSignedDiff(liveStart[c4], finalLay[c4].start);
                                     if (Math.abs(inv) < 0.5) continue;
-                                    wEl.style.transformOrigin = _cx + "px " + _cy + "px";
+                                    wEl.style.transformOrigin = (_cx * _fqU2C) + "px " + (_cy * _fqU2C) + "px";
                                     wEl.style.transition = "none";
                                     wEl.style.transform = "rotate(" + inv + "deg)";
                                     fresh.push(wEl);
@@ -41921,11 +42156,11 @@
                 // path the panel's Hole / Rotation sliders already use.
                 function _fqPtPolar(ev) {
                     try {
-                        var pt = svg.createSVGPoint();
-                        pt.x = ev.clientX; pt.y = ev.clientY;
-                        var m = svg.getScreenCTM();
-                        if (!m) return null;
-                        var pp = pt.matrixTransform(m.inverse());
+                        // No viewBox: user space = (client - svg rect) / view scale.
+                        // Not getScreenCTM, which omits the host zoom in Safari.
+                        var r = svg.getBoundingClientRect(), vs = _gb2ViewScale(svg);
+                        if (!r) return null;
+                        var pp = { x: (ev.clientX - r.left) / vs, y: (ev.clientY - r.top) / vs };
                         return {
                             deg: Math.atan2(pp.y - _cy, pp.x - _cx) * 180 / Math.PI,
                             dist: Math.sqrt((pp.x - _cx) * (pp.x - _cx)
@@ -42263,7 +42498,8 @@
                             _hit5.addEventListener("mouseleave", function () { _lineEl.setAttribute("stroke-width", String(_lw)); _xyTooltipHide(); });
                             _hit5.addEventListener("mousemove", function (ev) {
                                 var best = null, bd = Infinity;
-                                var pt = svg.createSVGPoint ? (function () { var q = svg.createSVGPoint(); q.x = ev.clientX; q.y = ev.clientY; try { return q.matrixTransform(svg.getScreenCTM().inverse()); } catch (_e) { return null; } })() : null;
+                                // rect + view scale, not getScreenCTM (Safari omits the host zoom from it)
+                                var pt = (function () { try { var _r = svg.getBoundingClientRect(), _vs = _gb2ViewScale(svg); return { x: (ev.clientX - _r.left) / _vs, y: (ev.clientY - _r.top) / _vs }; } catch (_e) { return null; } })();
                                 if (pt) { for (var z = 0; z < _pts.length; z++) { var dd = Math.abs((horizontal ? _pts[z][1] : _pts[z][0]) - (horizontal ? pt.y : pt.x)); if (dd < bd) { bd = dd; best = z; } } }
                                 if (best != null) {
                                     _xyTooltipShow("<div style='font-weight:600;margin-bottom:2px;'>" + _fqEsc(displayCategory(visibleXCats[_pts[best][3]])) + "</div><div>cumulative " + (Math.round(_pts[best][2] * 10) / 10) + "%</div>", ev.clientX, ev.clientY);
@@ -42874,11 +43110,10 @@
                                 ev.stopPropagation(); ev.preventDefault();
                                 if (_vEls.length) {
                                     try {
-                                        var _pt6 = svg.createSVGPoint();
-                                        _pt6.x = ev.clientX; _pt6.y = ev.clientY;
-                                        var _m6 = svg.getScreenCTM();
-                                        if (_m6) {
-                                            var _sp6 = _pt6.matrixTransform(_m6.inverse());
+                                        // rect + view scale, not getScreenCTM (Safari omits the host zoom)
+                                        var _r6 = svg.getBoundingClientRect(), _vs6 = _gb2ViewScale(svg);
+                                        if (_r6) {
+                                            var _sp6 = { x: (ev.clientX - _r6.left) / _vs6, y: (ev.clientY - _r6.top) / _vs6 };
                                             for (var _vq = 0; _vq < _vEls.length; _vq++) {
                                                 var _vb6 = _vEls[_vq].getBBox();
                                                 if (_sp6.x >= _vb6.x - 2 && _sp6.x <= _vb6.x + _vb6.width + 2
@@ -42972,8 +43207,12 @@
                     if (n < 2) return;
                     e.stopPropagation();
                     var startX = e.clientX, startY = e.clientY, pid = e.pointerId, moved = false;
-                    var sx = 1, sy = 1;
-                    try { var ctm = svg.getScreenCTM(); if (ctm) { if (ctm.a) sx = ctm.a; if (ctm.d) sy = ctm.d; } } catch (_ec0) {}
+                    // sx/sy: client px per USER unit (the slot math); u2c: user
+                    // units -> CSS px for style.transform; cssPx: client px per CSS
+                    // px (the FLIP glide). Measured once per gesture, not read off
+                    // getScreenCTM (Safari leaves the host zoom out of it).
+                    var sx = 1, sy = 1, cssPx = 1, u2c = 1;
+                    try { sx = sy = _gb2ViewScale(svg); cssPx = _gb2CssPxScale(svg); u2c = sx / cssPx; } catch (_ec0) {}
                     var committed = vars.slice();
                     // The drag AXIS (decided on first movement) selects which
                     // variable reorders: a vertical drag reorders the grabbed
@@ -43021,7 +43260,7 @@
                             var R = +cg.getAttribute("data-row"), C = +cg.getAttribute("data-col");
                             cg.style.transition = (R === g || C === g) ? "none" : "transform 170ms ease-out";
                             var ox = off[C] || 0, oy = off[R] || 0;
-                            cg.style.transform = (ox || oy) ? ("translate(" + ox + "px," + oy + "px)") : "";
+                            cg.style.transform = (ox || oy) ? ("translate(" + (ox * u2c) + "px," + (oy * u2c) + "px)") : "";
                         }
                         for (i = 0; i < labelGs.length; i++) {
                             var lg = labelGs[i];
@@ -43029,9 +43268,9 @@
                             lg.style.transition = (K === g) ? "none" : "transform 170ms ease-out";
                             var d = off[K] || 0;
                             if (lg.getAttribute("data-axis") === "row")
-                                lg.style.transform = d ? ("translate(0px," + d + "px)") : "";
+                                lg.style.transform = d ? ("translate(0px," + (d * u2c) + "px)") : "";
                             else
-                                lg.style.transform = d ? ("translate(" + d + "px,0px)") : "";
+                                lg.style.transform = d ? ("translate(" + (d * u2c) + "px,0px)") : "";
                         }
                         return rr.slot;
                     }
@@ -43100,7 +43339,7 @@
                                 var o = oldR[prefix + el.getAttribute(a0) + "::" + el.getAttribute(a1)];
                                 if (!o) continue;
                                 var nr; try { nr = el.getBoundingClientRect(); } catch (_ecc) { continue; }
-                                var ddx = (o.left - nr.left) / sx, ddy = (o.top - nr.top) / sy;
+                                var ddx = (o.left - nr.left) / cssPx, ddy = (o.top - nr.top) / cssPx;
                                 if (Math.abs(ddx) < 0.5 && Math.abs(ddy) < 0.5) continue;
                                 el.style.transition = "none";
                                 el.style.transform = "translate(" + ddx + "px," + ddy + "px)";
@@ -43246,7 +43485,8 @@
                         if (e.button !== 0) return;
                         e.stopPropagation();
                         var sx0 = e.clientX, sy0 = e.clientY, odx = _clDX, ody = _clDY, moved = false;
-                        var _scl = 1; try { var ctm = svg.getScreenCTM(); if (ctm && ctm.a) _scl = ctm.a; } catch (_e0) {}
+                        // attribute translate = user units; Safari omits the host zoom from getScreenCTM
+                        var _scl = 1; try { _scl = _gb2ViewScale(svg); } catch (_e0) {}
                         function mv(ev) {
                             if (!moved && (Math.abs(ev.clientX - sx0) + Math.abs(ev.clientY - sy0)) < 4) return;
                             moved = true; _clDragged = true;
@@ -44089,11 +44329,10 @@
                                     ev.stopPropagation(); ev.preventDefault();
                                     if (lbl) {
                                         try {
-                                            var pt7 = svg.createSVGPoint();
-                                            pt7.x = ev.clientX; pt7.y = ev.clientY;
-                                            var m7 = svg.getScreenCTM();
-                                            if (m7) {
-                                                var sp7 = pt7.matrixTransform(m7.inverse());
+                                            // rect + view scale, not getScreenCTM (Safari omits the host zoom)
+                                            var r7 = svg.getBoundingClientRect(), vs7 = _gb2ViewScale(svg);
+                                            if (r7) {
+                                                var sp7 = { x: (ev.clientX - r7.left) / vs7, y: (ev.clientY - r7.top) / vs7 };
                                                 var vb7 = lbl.getBBox();
                                                 if (sp7.x >= vb7.x - 2 && sp7.x <= vb7.x + vb7.width + 2
                                                     && sp7.y >= vb7.y - 2 && sp7.y <= vb7.y + vb7.height + 2) {
@@ -44256,7 +44495,8 @@
                                 odx = (typeof data.likertLegendDX === "number") ? data.likertLegendDX : 0,
                                 ody = (typeof data.likertLegendDY === "number") ? data.likertLegendDY : 0,
                                 moved = false;
-                            var _scl = 1; try { var ctm = svg.getScreenCTM(); if (ctm && ctm.a) _scl = ctm.a; } catch (_e0) {}
+                            // attribute translate = user units; Safari omits the host zoom from getScreenCTM
+                            var _scl = 1; try { _scl = _gb2ViewScale(svg); } catch (_e0) {}
                             window.__gb2_lkLegDragged = false;
                             function mv(ev) {
                                 if (!moved && (Math.abs(ev.clientX - sx0) + Math.abs(ev.clientY - sy0)) < 4) return;
@@ -44348,8 +44588,12 @@
                     if (grabbedIdx < 0 || items.length < 2) return;
                     e.stopPropagation();
                     var startY = e.clientY, pid = e.pointerId, moved = false;
-                    var sy = 1;
-                    try { var ctm = svg.getScreenCTM(); if (ctm && ctm.d) sy = ctm.d; } catch (_e0) {}
+                    // sy: client px per USER unit (the slot math); u2c: user units
+                    // -> CSS px for style.transform; cssPx: client px per CSS px
+                    // (the FLIP). Measured once per gesture, not read off
+                    // getScreenCTM (Safari leaves the host zoom out of it).
+                    var sy = 1, cssPx = 1, u2c = 1;
+                    try { sy = _gb2ViewScale(svg); cssPx = _gb2CssPxScale(svg); u2c = sy / cssPx; } catch (_e0) {}
                     var rowEls = null, others = [], curSlot = grabbedIdx;
                     for (var i0 = 0; i0 < items.length; i0++)
                         if (items[i0] !== grabbed) others.push(items[i0]);
@@ -44375,7 +44619,7 @@
                             for (var q = 0; q < els.length; q++) {
                                 els[q].style.transition = "transform 170ms ease-out";
                                 els[q].style.transform = dy
-                                    ? "translate(0px," + dy + "px)" : "";
+                                    ? "translate(0px," + (dy * u2c) + "px)" : "";
                             }
                         }
                     }
@@ -44395,7 +44639,7 @@
                         if (dy > maxDy) dy = maxDy;
                         var ge = rowEls[grabbed] || [];
                         for (var i = 0; i < ge.length; i++)
-                            ge[i].style.transform = "translate(0px," + dy + "px)";
+                            ge[i].style.transform = "translate(0px," + (dy * u2c) + "px)";
                         var slot = grabbedIdx + Math.round(dy / rowSlotH);
                         if (slot < 0) slot = 0;
                         if (slot > items.length - 1) slot = items.length - 1;
@@ -44472,7 +44716,7 @@
                             if (!o) continue;
                             var nr;
                             try { nr = news[i].el.getBoundingClientRect(); } catch (_e12) { continue; }
-                            var ddy = (o.top - nr.top) / sy;
+                            var ddy = (o.top - nr.top) / cssPx;
                             if (Math.abs(ddy) < 0.5) continue;
                             var nb = news[i].el;
                             nb.style.transition = "none";
@@ -44621,6 +44865,10 @@
                     try { el.style.cursor = "grab"; } catch (_eC) {}
                     var down = false, moved = false;
                     var startX = 0, startY = 0, startDX = 0, startDY = 0;
+                    // The pointer delta is VISUAL px while the plate offset
+                    // is a LOGICAL SVG length. Measured once per gesture;
+                    // exactly 1 in jamovi.
+                    var fcVS = 1;
                     // Swallow the browser-synthesized click after
                     // pointerup so the document-level outside-click
                     // handler can't tear the freshly-opened panel down
@@ -44630,6 +44878,7 @@
                         if (e.button !== 0) return;
                         e.preventDefault(); e.stopPropagation();
                         down = true; moved = false; _fcDragging = false;
+                        fcVS = _gb2ViewScale(svg || el);
                         startX = e.clientX; startY = e.clientY;
                         startDX = (typeof data.freqChisqDX === "number" && isFinite(data.freqChisqDX)) ? data.freqChisqDX : 0;
                         startDY = (typeof data.freqChisqDY === "number" && isFinite(data.freqChisqDY)) ? data.freqChisqDY : 0;
@@ -44645,7 +44894,7 @@
                         }
                         if (moved) {
                             _fcG.setAttribute("transform",
-                                "translate(" + (startDX + dx) + "," + (startDY + dy) + ")");
+                                "translate(" + (startDX + dx / fcVS) + "," + (startDY + dy / fcVS) + ")");
                         }
                     });
                     function _fcEnd(e) {
@@ -44654,8 +44903,8 @@
                         try { el.releasePointerCapture(e.pointerId); } catch (_eR) {}
                         try { el.style.cursor = "grab"; } catch (_eC3) {}
                         if (moved) {
-                            var ndx = Math.round(startDX + (e.clientX - startX));
-                            var ndy = Math.round(startDY + (e.clientY - startY));
+                            var ndx = Math.round(startDX + (e.clientX - startX) / fcVS);
+                            var ndy = Math.round(startDY + (e.clientY - startY) / fcVS);
                             data.freqChisqDX = ndx;
                             data.freqChisqDY = ndy;
                             if (hasSetOption) {
@@ -44869,10 +45118,16 @@
                     var startCX = 0, startCY = 0;
                     var startOffX = 0, startOffY = 0;
                     var moved = false;
+                    // The pointer delta is VISUAL px while the legend offset
+                    // is a LOGICAL SVG length, so under the standalone
+                    // shell's view zoom the legend outran the cursor.
+                    // Measured once per gesture; exactly 1 in jamovi.
+                    var legVS = 1;
                     legBgRect.addEventListener("pointerdown", function (e) {
                         e.preventDefault(); e.stopPropagation();
                         legDraggingFlag.v = true;
                         moved = false;
+                        legVS = _gb2ViewScale(svg || legBgRect);
                         startCX = e.clientX; startCY = e.clientY;
                         startOffX = (typeof data.legendOffsetX === "number") ? data.legendOffsetX : 0;
                         startOffY = (typeof data.legendOffsetY === "number") ? data.legendOffsetY : 0;
@@ -44886,8 +45141,8 @@
                             moved = true;
                         }
                         if (!moved) return;
-                        var nx = snapDrag(startOffX + dx);
-                        var ny = snapDrag(startOffY + dy);
+                        var nx = snapDrag(startOffX + dx / legVS);
+                        var ny = snapDrag(startOffY + dy / legVS);
                         data.legendOffsetX = nx;
                         data.legendOffsetY = ny;
                         // Apply the persisted offset PLUS the chrome
@@ -45214,6 +45469,11 @@
                         var pdown = false;
                         var moved = false;
                         var sx = 0, sy = 0;
+                        // The pointer delta is VISUAL px while
+                        // legendItemOffsets are LOGICAL SVG lengths. One
+                        // measurement per gesture keeps the rows under the
+                        // cursor at any view zoom; exactly 1 in jamovi.
+                        var rowVS = 1;
                         var pdMulti = false;
                         var pdAlt = false;
                         // Snapshot of every row participating in this
@@ -45229,6 +45489,7 @@
                             moved = false;
                             pdMulti = !!(e.ctrlKey || e.metaKey);
                             pdAlt = !!e.altKey;
+                            rowVS = _gb2ViewScale(svg || rect);
                             sx = e.clientX; sy = e.clientY;
                             try { rect.setPointerCapture(e.pointerId); } catch (_e) {}
                             // If the user pressed without the modifier
@@ -45312,8 +45573,8 @@
                                         primary = dragItems[_pi]; break;
                                     }
                                 }
-                                var rawDx = primary.startDx + ddx;
-                                var rawDy = primary.startDy + ddy;
+                                var rawDx = primary.startDx + ddx / rowVS;
+                                var rawDy = primary.startDy + ddy / rowVS;
                                 // Pass the SWATCH rect to the snap
                                 // helper, not the row's <g>. Snap
                                 // peers are also other swatches, so
@@ -46306,6 +46567,11 @@
                 try { rect = badge.getBoundingClientRect(); } catch (_e) { return; }
                 var wrapRect;
                 try { wrapRect = wrap.getBoundingClientRect(); } catch (_e) { return; }
+                // Those rects and the cursor are VISUAL px while
+                // badge.style.left is LOGICAL, so the badge outran the
+                // cursor under the standalone shell's view zoom. Measured
+                // once per gesture; exactly 1 in jamovi.
+                var hpVS = _gb2ViewScale(svg || wrap);
                 // Cursor offset from badge top-left, in wrap coords.
                 var grabOffsetX = e.clientX - rect.left;
                 var grabOffsetY = e.clientY - rect.top;
@@ -46325,12 +46591,12 @@
                         badge.style.right = "auto";
                         badge.style.transition = "none";
                     }
-                    var newLeft = ev.clientX - wrapRect.left - grabOffsetX;
-                    var newTop  = ev.clientY - wrapRect.top  - grabOffsetY;
+                    var newLeft = (ev.clientX - wrapRect.left - grabOffsetX) / hpVS;
+                    var newTop  = (ev.clientY - wrapRect.top  - grabOffsetY) / hpVS;
                     // Clamp roughly inside the wrap so the badge
                     // can't be dragged completely out of view.
-                    var maxLeft = Math.max(0, wrapRect.width  - rect.width);
-                    var maxTop  = Math.max(0, wrapRect.height - rect.height);
+                    var maxLeft = Math.max(0, (wrapRect.width  - rect.width)  / hpVS);
+                    var maxTop  = Math.max(0, (wrapRect.height - rect.height) / hpVS);
                     if (newLeft < 0) newLeft = 0;
                     if (newLeft > maxLeft) newLeft = maxLeft;
                     if (newTop  < 0) newTop  = 0;
@@ -46475,6 +46741,215 @@
         // the user has selected. One element selectable at a time. Empty
         // state when nothing's selected. The text-edit popover and the
         // export popover stay popovers - the rest are migrated here.
+        // ---- Colour-control sizing (Sep 2026, Torry's standalone ask).
+        // The HSV picker is drawn as a fixed 184px column with a 96px
+        // gradient and the quick-pick chips are floored at 22px, all of
+        // which read as cramped inside a panel several times that wide.
+        // With the payload key panelFitControls the engine measures the
+        // panel the controls are actually in and gives them a bounded
+        // share of it. Every size travels as a CSS custom property whose
+        // markup FALLBACK is the constant it replaced, so a surface that
+        // never receives one (jamovi, which does not ship the key)
+        // renders exactly what it always did.
+        //
+        // The chip size is published as a NUMBER as well. The swatch rows
+        // compute their active-ring outline-offset in JS, and the two
+        // places that do it have to agree: reading it back off the
+        // RENDERED box measures the chip PLUS its border, which rounds a
+        // pixel wider than the markup once the chip grows, so the ring
+        // twitched on the first refresh after a color change.
+        function _gb2ChipPx() {
+            var n = window.__gb2_pfcChipPx;
+            // The ceiling mirrors the cap in _gb2FitPanelControls; a
+            // value from anywhere else is not to be trusted.
+            return (typeof n === "number" && n >= 22 && n <= 24) ? n : 22;
+        }
+        function _gb2ChipOutOff() {
+            return Math.max(2, Math.round(_gb2ChipPx() * 0.15));
+        }
+        function _gb2PanelFitOn() {
+            try { return !!(data && data.panelFitControls === true); }
+            catch (_ePf) { return false; }
+        }
+        // Recompute the sizes from the panel's own box and publish them.
+        // Idempotent and cheap: called when a selection renders, when the
+        // picker mounts, and by the panel observer.
+        function _gb2FitPanelControls() {
+            // Published on the HOST, not the panel. render() builds a
+            // fresh panel whose inline style starts empty, so a panel
+            // that owned these grew into them a frame after it appeared:
+            // the picker drew at its fallback size, the fit widened it,
+            // and the reveal's settle-watch read that growth as a reason
+            // to scroll (measured 31px of gratuitous motion on a second
+            // bar click). The host outlives every rebuild, and custom
+            // properties inherit, so the new panel starts at the right
+            // size and the fit below finds nothing to change.
+            var st = null;
+            try { st = host && host.style; } catch (_eFs) {}
+            if (!st) return;
+            if (!_gb2PanelFitOn()) {
+                // No key. Drop the properties so the markup's own
+                // fallbacks stand, and take the chip number with them, so
+                // a host that stops shipping the key is left with exactly
+                // the sizes it had before.
+                st.removeProperty("--gb2-pkr-w");
+                st.removeProperty("--gb2-pkr-basis");
+                st.removeProperty("--gb2-pkr-sv");
+                st.removeProperty("--gb2-pkr-strip");
+                st.removeProperty("--gb2-pkr-cell");
+                st.removeProperty("--gb2-chip");
+                window.__gb2_pfcChipPx = 0;
+                host.__gb2FitSig = "";
+                return;
+            }
+            // Measured off the BORDER box, less the panel's own 1px
+            // rules, because the panel is border-box with no padding of
+            // its own. Deliberately not clientWidth: that one drops by
+            // the width of a vertical scrollbar, and the panel scrolls
+            // inside itself under a height budget, so a taller picker
+            // could summon the bar, narrow the measurement, shrink the
+            // picker, dismiss the bar again. offsetWidth is the width
+            // _syncInspectorPanelGeometry wrote from the chart, which
+            // nothing inside the panel can move.
+            var avail = 0;
+            try {
+                // The width the panel is GIVEN, taken from the style
+                // _syncInspectorPanelGeometry just wrote, falling back to
+                // its measured box. Reading the panel's own offsetWidth
+                // alone meant the sizes could not be computed until a
+                // panel had been displayed, so the FIRST one opened at
+                // the fallback sizes and then grew into these, and the
+                // reveal's settle-watch scrolled to the taller box on the
+                // next click (measured 31px). Sizing from the width it is
+                // about to be given lets this run before anything opens.
+                var _pw = parseFloat(inspectorPanel.style.width) || 0;
+                if (!(_pw > 0)) _pw = inspectorPanel.offsetWidth || 0;
+                avail = Math.floor(_pw - 2);
+            } catch (_eFc) {}
+            // A hidden panel measures zero. Write nothing rather than a
+            // size computed from it: on a panel that has never been
+            // fitted the markup's own fallbacks are already standing, and
+            // on one that has, the last good fit beats a flicker down to
+            // the base sizes and back.
+            if (!(avail > 0)) return;
+            var W0 = 184, SV0 = 96, STRIP0 = 11, CELL0 = 13, CHIP0 = 22;
+            // The picker is docked BESIDE the controls, not under them,
+            // so every pixel it takes comes out of them: it gets a fixed
+            // 29% SHARE and the controls keep the remaining majority.
+            // The share is bounded by what the CONTROLS need, not by what
+            // the picker could use. Past about a third, their chip rows
+            // wrap onto an extra line, which makes the panel taller,
+            // which on a short window pushes it to its height cap and
+            // scrolls the workspace on the next click (measured at 38%:
+            // a 31px jump for no reason). 34 was the most it could take
+            // without moving anything else, and 29 is where Torry settled
+            // it by eye: a third of the growth rather than all of it.
+            // The floor is the 184px it has always been drawn at, so this
+            // can only grow it - and on a panel too narrow for the share
+            // to reach that, the floor wins and the split is exactly what
+            // it is today. The 320px ceiling is the gradient's 160px
+            // height cap doubled: past 2:1 the SV square stops being a
+            // square, and area is what it trades in.
+            var w = Math.max(W0, Math.min(320, Math.round(avail * 0.29)));
+            var r = w / W0;
+            // The room that is spare in this dock is HEIGHT, so the
+            // gradient grows with the panel's height budget rather than
+            // with its width. About a third of it: the rest of the picker
+            // column (tabs, strips, hex row, swatch grids) wants the
+            // remainder. The budget is the DECLARED cap, a share of the
+            // window - never the panel's rendered height, which the
+            // gradient is inside of and would feed back from. A host that
+            // asks for the fit without declaring a budget keeps the
+            // historical 96px, which is the honest answer.
+            var budget = _gb2PanelCapPx();
+            var sv = (budget > 0)
+                ? Math.max(SV0, Math.min(160, Math.round(budget * 0.28)))
+                : SV0;
+            // The strips and the swatch-grid cells span the column, so a
+            // wider column can carry chunkier ones - but they add HEIGHT,
+            // and height is the dimension the panel has a budget for. So
+            // they grow with the gradient's growth, not with the width:
+            // where the budget is tight the gradient does not grow and
+            // neither do these, and the picker's height is left alone.
+            // Growing them on width was measured pushing the picker past
+            // the panel's cap on a short window, which raised the host,
+            // raised the scroll reserve under it, and made a second bar
+            // click scroll the workspace 31px for no reason.
+            var hgrow = sv / SV0;
+            var strip = Math.min(16, Math.round(STRIP0 * hgrow));
+            var cell = Math.min(20, Math.round(CELL0 * hgrow));
+            // The chips do NOT grow. Their 22px edge and 3px gap are a
+            // settled ruling (Torry, Aug 3 2026: closer together but
+            // actually larger), the 25px centre spacing is what carries
+            // the target-size guidance, and swatch-row-check pins both.
+            // Growing them to 24 measured as a real regression there, and
+            // it bought nothing the picker itself does not: it is the
+            // gradient that was cramped. Kept as a value rather than
+            // removed so the property stays one dial if that ruling ever
+            // changes.
+            var chip = CHIP0;
+            // Nothing changed: leave the DOM alone, so the observer that
+            // called us cannot start a resize feedback loop. The stamp
+            // lives on the panel ELEMENT, not on window, because render()
+            // builds a fresh panel whose style block starts empty.
+            var sig = w + ":" + sv + ":" + strip + ":" + cell + ":" + chip;
+            if (host.__gb2FitSig === sig) return;
+            host.__gb2FitSig = sig;
+            st.setProperty("--gb2-pkr-w", w + "px");
+            // The bodyRow is a horizontal flex row, so the basis IS the
+            // width and the two have to agree.
+            st.setProperty("--gb2-pkr-basis", w + "px");
+            st.setProperty("--gb2-pkr-sv", sv + "px");
+            st.setProperty("--gb2-pkr-strip", strip + "px");
+            st.setProperty("--gb2-pkr-cell", cell + "px");
+            st.setProperty("--gb2-chip", chip + "px");
+            window.__gb2_pfcChipPx = chip;
+        }
+        // One panel observer per document, parked on window because
+        // render() rebuilds this scope on every echo: a closure-scoped
+        // observer would be abandoned - still firing into a dead render -
+        // once per run. Arming RELEASES first, which is what makes a host
+        // that stops shipping the key leave nothing behind.
+        //
+        // Observing the panel cannot run away, on two counts. Its inputs
+        // are the panel's border-box width, which
+        // _syncInspectorPanelGeometry writes in explicit pixels from the
+        // chart, and window.innerHeight; neither is something the picker
+        // sizes written here can move. And a resize we DO cause - the
+        // gradient changing the panel's content height - re-enters,
+        // recomputes the same numbers, and the signature guard returns
+        // without touching the DOM, so it settles in one pass.
+        //
+        // The window listener is not a fallback: the height budget is a
+        // share of the window, so it moves when the window does even if
+        // the panel's own box does not.
+        function _gb2UnwatchPanelControls() {
+            try {
+                var ro = window.__gb2_pfcRO;
+                if (ro && typeof ro.disconnect === "function") ro.disconnect();
+            } catch (_eRu) {}
+            window.__gb2_pfcRO = null;
+            try {
+                if (window.__gb2_pfcWinFit) {
+                    window.removeEventListener("resize", window.__gb2_pfcWinFit);
+                }
+            } catch (_eRw) {}
+            window.__gb2_pfcWinFit = null;
+        }
+        function _gb2WatchPanelControls() {
+            _gb2UnwatchPanelControls();
+            if (!_gb2PanelFitOn() || !inspectorPanel) return;
+            var fit = function () { try { _gb2FitPanelControls(); } catch (_eRf) {} };
+            try {
+                if (typeof ResizeObserver === "function") {
+                    var ro = new ResizeObserver(fit);
+                    ro.observe(inspectorPanel);
+                    window.__gb2_pfcRO = ro;
+                }
+            } catch (_eRo) {}
+            window.__gb2_pfcWinFit = fit;
+            try { window.addEventListener("resize", fit); } catch (_eRl) {}
+        }
         var inspectorPanel = document.createElement("div");
         inspectorPanel.style.cssText = [
             // Flush with the chart's bottom border (no gap, no top border)
@@ -46502,6 +46977,10 @@
         } else {
             host.appendChild(inspectorPanel);
         }
+        // Arm (or release) the observer that keeps the colour controls
+        // sized to the panel, once per render on the panel this render
+        // built.
+        _gb2WatchPanelControls();
         // Hidden initially so the chart sits clean until the user
         // makes a selection. renderInspectorPanel() handles the
         // animated reveal/hide on selection state changes.
@@ -46706,8 +47185,14 @@
             } catch (_e) {}
         }
         _syncInspectorPanelGeometry();
+        // Sizes before any panel opens, so the first one is built at its
+        // final size instead of growing into it a frame later.
+        try { _gb2FitPanelControls(); } catch (_eFp0) {}
         if (typeof requestAnimationFrame === "function") {
-            requestAnimationFrame(_syncInspectorPanelGeometry);
+            requestAnimationFrame(function () {
+                _syncInspectorPanelGeometry();
+                try { _gb2FitPanelControls(); } catch (_eFp1) {}
+            });
         }
         var _panelAnimTimer = null;
 
@@ -47415,7 +47900,13 @@
         // pixels relative to svg's content area).
         function _clientToSvg(clientX, clientY) {
             var rect = svg.getBoundingClientRect();
-            return { x: clientX - rect.left, y: clientY - rect.top };
+            // The rect is VISUAL px while the promise above is LOGICAL:
+            // callers compare this point against a centre measured
+            // through getCTM. Only the standalone shell's view zoom
+            // separates the two spaces, and it resolves to exactly 1
+            // everywhere else, so this divide is a no-op there.
+            var vs = _gb2ViewScale(svg);
+            return { x: (clientX - rect.left) / vs, y: (clientY - rect.top) / vs };
         }
 
         rhCircle.addEventListener("pointerdown", function (e) {
@@ -47487,11 +47978,18 @@
             pt.y = localBb.y + localBb.height / 2;
             var screen = pt.matrixTransform(screenCtm);
             var wrapBb = wrap.getBoundingClientRect();
+            // Two spaces meet here: localWidth / localHeight come from
+            // getBBox and are LOGICAL, while the screen point and the
+            // wrap rect are both VISUAL. The editor is an absolutely
+            // positioned child of the zoomed wrap, so its left / top are
+            // LOGICAL too - bring the centre into that same space or the
+            // box drifts off the label it edits. Exactly 1 in jamovi.
+            var vs = _gb2ViewScale(svg);
             return {
                 localWidth: localBb.width,
                 localHeight: localBb.height,
-                centerX: screen.x - wrapBb.left,
-                centerY: screen.y - wrapBb.top
+                centerX: (screen.x - wrapBb.left) / vs,
+                centerY: (screen.y - wrapBb.top) / vs
             };
         }
         function showInlineTextEditor(dragId, fallbackAnchor) {
@@ -47512,14 +48010,19 @@
                     var wrapBb = wrap.getBoundingClientRect();
                     var styleId0 = textStyleIdFor(dragId);
                     var s0 = getEffectiveTextStyle(styleId0);
+                    // Both rects are VISUAL, and everything below is fed
+                    // to the editor as a LOGICAL length inside the zoomed
+                    // wrap - the same conversion _measureInlineTextTarget
+                    // makes for the ordinary path. Exactly 1 in jamovi.
+                    var vs0 = _gb2ViewScale(svg);
                     meas = {
                         // Use the style's own font size as the bbox
                         // height so the editor's vertical size matches
                         // what the rendered title will look like.
-                        localWidth: Math.max(60, fbb.width * 0.6),
+                        localWidth: Math.max(60, (fbb.width / vs0) * 0.6),
                         localHeight: Math.max(s0.fontSize, 16),
-                        centerX: fbb.left - wrapBb.left + fbb.width / 2,
-                        centerY: fbb.top - wrapBb.top + fbb.height / 2
+                        centerX: (fbb.left - wrapBb.left + fbb.width / 2) / vs0,
+                        centerY: (fbb.top - wrapBb.top + fbb.height / 2) / vs0
                     };
                 }
             }
@@ -57571,7 +58074,8 @@
             }
             if (skipPos) return null;
             var px = clientX, py = clientY;
-            try { var m = svg.getScreenCTM(); if (m) { var inv = m.inverse(); px = inv.a * clientX + inv.c * clientY + inv.e; py = inv.b * clientX + inv.d * clientY + inv.f; } } catch (_z) {}
+            // rect + view scale, not getScreenCTM (Safari omits the host zoom from it)
+            try { var _sr = svg.getBoundingClientRect(), _svs = _gb2ViewScale(svg); px = (clientX - _sr.left) / _svs; py = (clientY - _sr.top) / _svs; } catch (_z) {}
             var best = null, bestA = Infinity;
             for (i = 0; i < items.length; i++) { var bb = items[i].bb; if (!bb) continue; if (px >= bb.x && px <= bb.x + bb.w && py >= bb.y && py <= bb.y + bb.h) { var a = (bb.w || 1) * (bb.h || 1); if (a < bestA) { bestA = a; best = items[i].spec; } } }
             return best;
@@ -58414,9 +58918,11 @@
             g.addEventListener("pointerdown", function (e) {
                 if (e.button !== 0) return;
                 e.stopPropagation();
-                var m = null; try { m = svg.getScreenCTM(); } catch (_e) {}
+                // chip x/y are user units: client delta / view scale (Safari
+                // omits the host zoom from getScreenCTM)
+                var _vs = 1; try { _vs = _gb2ViewScale(svg); } catch (_e) {}
                 st = { cx: e.clientX, cy: e.clientY, ox: it.x, oy: it.y, moved: false,
-                       sa: (m && m.a) || 1, sd: (m && m.d) || 1, pid: e.pointerId };
+                       sa: _vs, sd: _vs, pid: e.pointerId };
                 try { g.setPointerCapture(e.pointerId); } catch (_e2) {}
                 try { g.style.cursor = "grabbing"; } catch (_e3) {}
             });
@@ -59101,6 +59607,10 @@
                 inspectorPanel.removeChild(inspectorPanel.firstChild);
             }
             inspectorPanel.style.display = "";
+            // Displayed, so the panel can be measured: size the colour
+            // controls BEFORE the section markup below is composed, since
+            // the swatch rows read the chip size while building it.
+            try { _gb2FitPanelControls(); } catch (_ePfc) {}
             // Inline section title - no popup header bar, no × button.
             // Press Escape, click outside, or click another element to
             // close. The title sits above a thin underline; controls
@@ -64847,12 +65357,12 @@
                     html += '<button type="button" data-bs-palette="transparent" ' +
                         'data-bs-palette-target="' + target + '" ' +
                         'title="Transparent (hollow bar – no fill)" aria-label="Transparent" ' +
-                        'style="width:22px;height:22px;padding:0;border:' +
+                        'style="width:var(--gb2-chip, 22px);height:var(--gb2-chip, 22px);padding:0;border:' +
                         (_tbOn ? "2px solid #1a5fb4" : "1px solid #888") + ';' +
                         'border-radius:3px;cursor:pointer;flex-shrink:0;background-color:#fff;' +
                         'background-image:linear-gradient(45deg,#cfcfcf 25%,transparent 25%),linear-gradient(-45deg,#cfcfcf 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#cfcfcf 75%),linear-gradient(-45deg,transparent 75%,#cfcfcf 75%);' +
                         'background-size:8px 8px;background-position:0 0,0 4px,4px -4px,-4px 0;' +
-                        (_tbOn ? "outline:1px solid white;outline-offset:-3px;" : "") +
+                        (_tbOn ? "outline:1px solid white;outline-offset:-" + _gb2ChipOutOff() + "px;" : "") +
                         '"></button>';
                 }
                 // Series-identity rows (the FILL color) use the hybrid
@@ -64872,9 +65382,9 @@
                         'data-bs-palette="' + c + '" ' +
                         'data-bs-palette-target="' + target + '" ' +
                         'title="' + c + '" ' +
-                        'style="width:22px;height:22px;padding:0;border:' + border + ';' +
+                        'style="width:var(--gb2-chip, 22px);height:var(--gb2-chip, 22px);padding:0;border:' + border + ';' +
                         'border-radius:3px;cursor:pointer;background:' + c + ';flex-shrink:0;' +
-                        (isActive ? "outline:1px solid white;outline-offset:-3px;" : "") +
+                        (isActive ? "outline:1px solid white;outline-offset:-" + _gb2ChipOutOff() + "px;" : "") +
                         '"></button>';
                 }
                 html += '</span>';
@@ -67000,7 +67510,7 @@
                         : (c === "#ffffff" ? "1px solid #ccc" : "1px solid #888");
                     b.style.border = border;
                     b.style.outline = active ? "1px solid white" : "";
-                    b.style.outlineOffset = active ? "-3px" : "";
+                    b.style.outlineOffset = active ? ("-" + _gb2ChipOutOff() + "px") : "";
                 }
             }
             // Wire palette swatch clicks. Two flavors: fill-chip
@@ -76682,7 +77192,7 @@
                     html += '<button type="button" data-ps-palette="transparent" ' +
                         'data-ps-palette-target="' + target + '" ' +
                         'title="Transparent (hollow marker – no fill)" aria-label="Transparent" ' +
-                        'style="width:22px;height:22px;padding:0;border:' +
+                        'style="width:var(--gb2-chip, 22px);height:var(--gb2-chip, 22px);padding:0;border:' +
                         (_tOn ? "2px solid #1a5fb4" : "1px solid #888") + ';' +
                         'border-radius:3px;cursor:pointer;flex-shrink:0;background-color:#fff;' +
                         // Universal "transparent" checkerboard (gray/white),
@@ -76694,7 +77204,7 @@
                           'linear-gradient(-45deg,transparent 75%,#cfcfcf 75%);' +
                         'background-size:8px 8px;' +
                         'background-position:0 0,0 4px,4px -4px,-4px 0;' +
-                        (_tOn ? "outline:1px solid white;outline-offset:-3px;" : "") +
+                        (_tOn ? "outline:1px solid white;outline-offset:-" + _gb2ChipOutOff() + "px;" : "") +
                         '"></button>';
                 }
                 var _rowCols = (target === "p-color") ? _hybridPaletteCols() : PICKER_PALETTE;
@@ -76708,9 +77218,9 @@
                         'data-ps-palette="' + c + '" ' +
                         'data-ps-palette-target="' + target + '" ' +
                         'title="' + c + '" ' +
-                        'style="width:22px;height:22px;padding:0;border:' + border + ';' +
+                        'style="width:var(--gb2-chip, 22px);height:var(--gb2-chip, 22px);padding:0;border:' + border + ';' +
                         'border-radius:3px;cursor:pointer;background:' + c + ';flex-shrink:0;' +
-                        (isActive ? "outline:1px solid white;outline-offset:-3px;" : "") +
+                        (isActive ? "outline:1px solid white;outline-offset:-" + _gb2ChipOutOff() + "px;" : "") +
                         '"></button>';
                 }
                 html += '</span>';
@@ -76729,7 +77239,7 @@
                         : (c === "#ffffff" ? "1px solid #ccc" : "1px solid #888");
                     b.style.border = border;
                     b.style.outline = active ? "1px solid white" : "";
-                    b.style.outlineOffset = active ? "-3px" : "";
+                    b.style.outlineOffset = active ? ("-" + _gb2ChipOutOff() + "px") : "";
                 }
             }
 
@@ -77792,9 +78302,9 @@
                     html += '<button type="button" ' +
                         'data-fl-palette="' + c + '" ' +
                         'title="' + c + '" ' +
-                        'style="width:22px;height:22px;padding:0;border:' + border + ';' +
+                        'style="width:var(--gb2-chip, 22px);height:var(--gb2-chip, 22px);padding:0;border:' + border + ';' +
                         'border-radius:3px;cursor:pointer;background:' + c + ';flex-shrink:0;' +
-                        (isActive ? "outline:1px solid white;outline-offset:-3px;" : "") +
+                        (isActive ? "outline:1px solid white;outline-offset:-" + _gb2ChipOutOff() + "px;" : "") +
                         '"></button>';
                 }
                 html += '</span>';
@@ -77812,7 +78322,7 @@
                         : (c === "#ffffff" ? "1px solid #ccc" : "1px solid #888");
                     b.style.border = border;
                     b.style.outline = active ? "1px solid white" : "";
-                    b.style.outlineOffset = active ? "-3px" : "";
+                    b.style.outlineOffset = active ? ("-" + _gb2ChipOutOff() + "px") : "";
                 }
             }
 
@@ -85088,7 +85598,8 @@
                 sx = e.clientX; sy = e.clientY;
                 var off = textOffsets[dragId] || { dx: 0, dy: 0 };
                 odx = off.dx; ody = off.dy;
-                scl = 1; try { var ctm = svg.getScreenCTM(); if (ctm && ctm.a) scl = ctm.a; } catch (_e0) {}
+                // textOffsets are user units; Safari omits the host zoom from getScreenCTM
+                scl = 1; try { scl = _gb2ViewScale(svg); } catch (_e0) {}
                 try { el.setPointerCapture(e.pointerId); } catch (_e1) {}
             });
             el.addEventListener("pointermove", function (e) {
@@ -85943,8 +86454,10 @@
                 var _rm = false;
                 try { _rm = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches); } catch (_eRm) {}
                 if (_rm) return;
+                // client px per CSS px written to style.transform (measured;
+                // Safari omits the host zoom from getScreenCTM)
                 var sy = 1;
-                try { if (svg && svg.getScreenCTM) { var ctm = svg.getScreenCTM(); if (ctm && ctm.d) sy = ctm.d; } } catch (_e) {}
+                try { if (svg) sy = _gb2CssPxScale(svg); } catch (_e) {}
                 var seen = {}, els = dataGroup.querySelectorAll("[data-item]"), fresh = [];
                 for (var i = 0; i < els.length; i++) {
                     var el = els[i];
@@ -98163,16 +98676,26 @@
                 var op = findMenu.offsetParent;
                 if (!op) return;
                 var or = op.getBoundingClientRect(), br = findBtn.getBoundingClientRect();
-                var vw = window.innerWidth || document.documentElement.clientWidth || 800;
-                var width = Math.min(360, Math.max(260, Math.min(vw - 16, or.width > 0 ? or.width - 12 : 360)));
+                // Every rect here, and the viewport size, is in VISUAL
+                // pixels, while the width / left / max-height written below
+                // are LOGICAL: this menu hangs in the zoomed chart wrap, not
+                // in the counter-zoomed toolbar. Convert the measurements
+                // once so the whole calculation happens in one space and the
+                // px constants keep meaning what they say. Exactly 1 in
+                // jamovi, which applies no zoom.
+                var _fpS = _gb2ViewScale(svg);
+                var _orW = or.width / _fpS, _orL = or.left / _fpS;
+                var _brR = br.right / _fpS, _orT = or.top / _fpS;
+                var vw = (window.innerWidth || document.documentElement.clientWidth || 800) / _fpS;
+                var width = Math.min(360, Math.max(260, Math.min(vw - 16, _orW > 0 ? _orW - 12 : 360)));
                 findMenu.style.width = width + "px";
-                var viewportLeft = Math.max(8, Math.min(vw - width - 8, br.right - width));
-                findMenu.style.left = Math.round(viewportLeft - or.left) + "px";
+                var viewportLeft = Math.max(8, Math.min(vw - width - 8, _brR - width));
+                findMenu.style.left = Math.round(viewportLeft - _orL) + "px";
                 findMenu.style.right = "auto";
                 var gtFly = wrap.querySelector('[data-role="graphtype-flyout"]');
                 findMenu.style.top = (gtFly && gtFly.style && gtFly.style.top) ? gtFly.style.top : "6px";
-                var vh = window.innerHeight || document.documentElement.clientHeight || 700;
-                var topV = or.top + (parseFloat(findMenu.style.top) || 6);
+                var vh = (window.innerHeight || document.documentElement.clientHeight || 700) / _fpS;
+                var topV = _orT + (parseFloat(findMenu.style.top) || 6);
                 findResults.style.maxHeight = Math.max(150, Math.min(300, vh - topV - 72)) + "px";
             } catch (_e) {}
         }
@@ -98593,15 +99116,21 @@
             note.title = note.title + " -- drag to move.";
             (function () {
                 var down = false, moved = false, sx = 0, sy = 0, sLeft = 0, sTop = 0;
+                // Both rects and the cursor are VISUAL px while
+                // note.style.left is LOGICAL, so the pill ran ahead of the
+                // cursor under the standalone shell's view zoom. Measured
+                // once per gesture; exactly 1 in jamovi.
+                var fpnVS = 1;
                 note.addEventListener("pointerdown", function (e) {
                     if (e.button !== 0) return;
                     if (e.target && e.target.closest && e.target.closest("button")) return;
                     e.preventDefault(); e.stopPropagation();
                     down = true; moved = false;
+                    fpnVS = _gb2ViewScale(svg || wrap);
                     sx = e.clientX; sy = e.clientY;
                     var r = note.getBoundingClientRect();
                     var wr0 = wrap.getBoundingClientRect();
-                    sLeft = r.left - wr0.left; sTop = r.top - wr0.top;
+                    sLeft = (r.left - wr0.left) / fpnVS; sTop = (r.top - wr0.top) / fpnVS;
                     note.style.cursor = "grabbing";
                     try { note.setPointerCapture(e.pointerId); } catch (_eC) {}
                 });
@@ -98611,9 +99140,9 @@
                     if (!moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
                     moved = true;
                     var wr1 = wrap.getBoundingClientRect();
-                    var nl = sLeft + dx, nt = sTop + dy;
-                    nl = Math.max(0, Math.min(nl, Math.max(0, wr1.width - note.offsetWidth)));
-                    nt = Math.max(0, Math.min(nt, Math.max(0, wr1.height - note.offsetHeight)));
+                    var nl = sLeft + dx / fpnVS, nt = sTop + dy / fpnVS;
+                    nl = Math.max(0, Math.min(nl, Math.max(0, wr1.width / fpnVS - note.offsetWidth)));
+                    nt = Math.max(0, Math.min(nt, Math.max(0, wr1.height / fpnVS - note.offsetHeight)));
                     note.style.left = nl + "px"; note.style.top = nt + "px";
                 });
                 function _fpnUp() {
@@ -102987,6 +103516,11 @@
         var startMouseX = 0, startMouseY = 0;
         var startInchesW = inchesW, startInchesH = inchesH;
         var startRatioXY = 0; // inchesH / inchesW captured at drag start
+        // The pointer delta is VISUAL px while PX_PER_INCH is the chart's
+        // LOGICAL px per inch, so the figure grew faster than the corner the
+        // hand was holding under the standalone shell's view zoom. Measured
+        // once per gesture; exactly 1 in jamovi.
+        var gripVS = 1;
         function _sizeTagShow() {
             if (sizeTagHide) { clearTimeout(sizeTagHide); sizeTagHide = null; }
             // inches on top (continuity with the Sizing panel, where the
@@ -103009,6 +103543,7 @@
         function onPointerDownXY(e) {
             e.preventDefault(); e.stopPropagation();
             draggingXY = true;
+            gripVS = _gb2ViewScale(svg || wrap);
             startMouseX = e.clientX; startMouseY = e.clientY;
             startInchesW = inchesW; startInchesH = inchesH;
             startRatioXY = (inchesW > 0) ? (inchesH / inchesW) : 1;
@@ -103021,8 +103556,8 @@
             if (!draggingXY) return;
             var dx = e.clientX - startMouseX;
             var dy = e.clientY - startMouseY;
-            var newW = clamp(startInchesW + dx / PX_PER_INCH, MIN_W_IN, MAX_W_IN);
-            var newH = clamp(startInchesH + dy / PX_PER_INCH, MIN_H_IN, MAX_H_IN);
+            var newW = clamp(startInchesW + dx / gripVS / PX_PER_INCH, MIN_W_IN, MAX_W_IN);
+            var newH = clamp(startInchesH + dy / gripVS / PX_PER_INCH, MIN_H_IN, MAX_H_IN);
             // Shift = momentary aspect lock (same math as the Sizing
             // panel's persistent chartAspectLock checkbox): the dominant
             // pointer axis drives, the other follows the grab-time ratio.

@@ -24,6 +24,8 @@ empty-states-check engine-stamp-check flyout-align-check filter-honesty-check ex
 find-scope-check findpop-check finish-five-check fitpanes-check formula-unit-check formula-vocab-check formula-recipes-check \
 grid-keys-check help-check hierarchy-check hidden-selection-check \
 identifier-advice-check inspector-freshness-check menu-selection-check \
+panel-controls-size-check \
+view-zoom-drag-check \
 missing-codes-check header-row-check level-variants-check typechange-cost-check \
 missing-filter-check omv-missing-rules-check autosave-honesty-check \
 data-papercuts-check data-disclosure-check grid-wide-perf-check omv-derived-check \

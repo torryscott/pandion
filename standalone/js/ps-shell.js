@@ -7049,6 +7049,17 @@
     // from the playground ruling set (350ms dwell, no chain, one seam
     // at a time, no floor). jamovi never ships this key.
     payload.gapSeams = true;
+    // Colour controls sized from the panel's own box (Torry, Sep 3 2026).
+    // The HSV picker is a fixed 184px column with a 96px gradient, which
+    // is cramped inside a panel several times that wide, and the swatch
+    // chips are floored at 22px for the same reason. With this key the
+    // engine measures the panel it is actually in and gives them a
+    // bounded share of it, growing only, so the target spacing the
+    // accessibility check relies on can never shrink. jamovi never ships
+    // this key: its panel is chart-width too, so the same rule would
+    // change its appearance, and that is a call to make deliberately
+    // rather than as a side effect of a standalone fix.
+    payload.panelFitControls = true;
     // Scatter-overlay re-ship: harvested engine-computed arrays return
     // to the payload while the data fingerprint still matches (R
     // parity - jamovi recomputes and ships them every run). A stale
