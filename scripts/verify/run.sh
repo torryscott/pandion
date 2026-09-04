@@ -202,6 +202,18 @@ else
     fi
 fi
 
+echo "== axis titles survive the chartSpec round trip (every module)"
+if GB2_AXISTITLE_OUT="$OUT-axistitle" GB2_BUNDLE="$BUNDLE" GB2_INLINE_BUNDLE=1 Rscript "$HERE/axistitle-render.R"; then
+    GB2_AXISTITLE_OUT="$OUT-axistitle" node "$HERE/axistitle-check.mjs"
+else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then
+        echo "   skipped: jmvcore not available in this R library"
+    else
+        exit "$rc"
+    fi
+fi
+
 echo "== chartSpec migration (route style commits -> one blob; explode; per-key undo)"
 if GB2_CHARTSPEC_OUT="$OUT-chartspec" GB2_BUNDLE="$BUNDLE" Rscript "$HERE/chartspec-render.R"; then
     GB2_CHARTSPEC_OUT="$OUT-chartspec" node "$HERE/chartspec-check.mjs"
