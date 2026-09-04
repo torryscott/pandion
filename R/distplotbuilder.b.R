@@ -554,8 +554,15 @@ distplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6C
                 "paletteLibrary", "styleLibrary", "styleStamp",
                 "annotationsJson", "chartSnapshot", "chartSpec"
             )
-            spec_keys <- vapply(.distplotbuilderSpecTable, function(r) r$opt,
-                                character(1))
+            # The hidden-points badge remembers where the user dragged it in
+            # two client-only keys that ride inside the blob. They are not
+            # spec-table rows (R never reads them), so they have to be named
+            # here or the client's allowlist drops the position and the next
+            # style commit writes the blob back without it.
+            spec_keys <- c(
+                vapply(.distplotbuilderSpecTable, function(r) r$opt, character(1)),
+                "hpBadgeLeft", "hpBadgeTop"
+            )
 
             fixed_args <- list(
                 # Static-snapshot fallback: raw pass-through of the JS-committed

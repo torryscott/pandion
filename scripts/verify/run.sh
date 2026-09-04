@@ -202,6 +202,18 @@ else
     fi
 fi
 
+echo "== hidden-points badge position survives the chartSpec allowlist"
+if GB2_HPBADGE_OUT="$OUT-hpbadge" GB2_BUNDLE="$BUNDLE" Rscript "$HERE/hpbadge-render.R"; then
+    GB2_HPBADGE_OUT="$OUT-hpbadge" node "$HERE/hpbadge-check.mjs"
+else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then
+        echo "   skipped: jmvcore not available in this R library"
+    else
+        exit "$rc"
+    fi
+fi
+
 echo "== chartSpec migration (route style commits -> one blob; explode; per-key undo)"
 if GB2_CHARTSPEC_OUT="$OUT-chartspec" GB2_BUNDLE="$BUNDLE" Rscript "$HERE/chartspec-render.R"; then
     GB2_CHARTSPEC_OUT="$OUT-chartspec" node "$HERE/chartspec-check.mjs"
