@@ -48967,6 +48967,15 @@
             // is harmless.
             var _scopeHostKeep = titleNode.querySelector('[data-role="scope-title-host"]');
             if (_scopeHostKeep && _scopeHostKeep.parentNode) _scopeHostKeep.parentNode.removeChild(_scopeHostKeep);
+            // A breadcrumb title is a two-line ELEMENT, not text. Reading it
+            // back through textContent flattens the eyebrow and the title
+            // onto one line, and the title bar's own uppercase styling then
+            // makes it read "BAR CHARTDATA POINTS" (Torry, Sep 2026). Panels
+            // that re-attach title chrome AFTER the render tail built the
+            // crumb - the Data points tabs call this on every switch - must
+            // carry the crumb element across, the way the scope host is.
+            var _crumbKeep = titleNode.querySelector('[data-role="gb2-crumb"]');
+            if (_crumbKeep && _crumbKeep.parentNode) _crumbKeep.parentNode.removeChild(_crumbKeep);
             var existingTitle = titleNode.textContent;
             titleNode.style.display = "flex";
             titleNode.style.alignItems = "center";
@@ -48974,7 +48983,11 @@
             titleNode.style.gap = "12px";
             titleNode.innerHTML = "";
             var titleText = document.createElement("span");
-            titleText.textContent = existingTitle;
+            // Rebuild the exact shape _gb2CrumbApply leaves behind: the crumb
+            // wrapper INSIDE the bare title span, so a later re-apply and the
+            // tab-click renamer both still find what they expect.
+            if (_crumbKeep) titleText.appendChild(_crumbKeep);
+            else titleText.textContent = existingTitle;
             titleNode.appendChild(titleText);
             if (_scopeHostKeep) titleNode.appendChild(_scopeHostKeep);
 

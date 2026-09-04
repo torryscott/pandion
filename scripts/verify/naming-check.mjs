@@ -170,6 +170,55 @@ await withPage('cg_violin', async page => {
     await checkCompact(page, '[data-bs-tab]', 'Violin');
 });
 
+// The Data points panel re-attaches its title eye + trash on EVERY tab
+// switch, which used to read the title back through textContent and rebuild
+// it as one flat span - flattening the two-line crumb onto a single
+// uppercase line ("BAR CHARTDATA POINTS", Torry Sep 2026). The crumb has to
+// survive as an ELEMENT across that re-attach, on either tab.
+await withPage('cg_raincloud', async page => {
+    const pt = await page.evaluate(() => {
+        const p = document.querySelector('[data-role="data-point"]');
+        const r = p.getBoundingClientRect();
+        return { cx: r.x + r.width / 2, cy: r.y + r.height / 2 };
+    });
+    await page.mouse.click(pt.cx, pt.cy);
+    await page.waitForSelector('[data-role="gb2-crumb"]', { timeout: 5000 });
+    const read = () => page.evaluate(() => {
+        const c = document.querySelector('[data-role="gb2-crumb"]');
+        const ti = document.querySelector('[data-role="inspector-title"]');
+        // Chrome is reported whether or not the crumb survived, so the two
+        // assertions below fail independently of one another.
+        const chrome = ti ? [...ti.querySelectorAll('button')]
+            .map(b => b.title).filter(Boolean).join('|') : '';
+        if (!c) return { present: false, chrome: chrome };
+        const kids = [...c.children];
+        return {
+            present: true, kids: kids.length, chrome: chrome,
+            eyebrow: (kids[0] || {}).textContent ? kids[0].textContent.trim() : '',
+            title: (kids[1] || {}).textContent ? kids[1].textContent.trim() : '',
+            stacked: getComputedStyle(c).flexDirection === 'column'
+        };
+    });
+    const open = await read();
+    ok('Data points opens with a stacked crumb',
+        open.present && open.kids === 2 && open.stacked &&
+        open.eyebrow === 'Raincloud plot' && open.title === 'Data points',
+        JSON.stringify(open));
+    const dpTabs = await page.locator('[data-dp-tab]').evaluateAll(
+        els => els.map(e => e.getAttribute('data-dp-tab')));
+    for (const k of dpTabs.concat(dpTabs[0])) {
+        await page.evaluate(kk => document.querySelector('[data-dp-tab="' + kk + '"]').click(), k);
+        await page.waitForTimeout(120);
+        const after = await read();
+        ok('Data points crumb survives the ' + k + ' tab',
+            after.present && after.kids === 2 && after.stacked &&
+            after.eyebrow === open.eyebrow && after.title === open.title,
+            JSON.stringify(after));
+        ok('Data points title chrome survives the ' + k + ' tab',
+            /Hide |Show /.test(after.chrome) && /Delete /.test(after.chrome), after.chrome);
+    }
+});
+
 await withPage('freq_pie', async page => {
     await clickFirst(page, '[data-role="freq-slice"]');
     const t = await tabs(page);
