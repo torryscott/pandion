@@ -59493,11 +59493,23 @@
 
             var wrap = document.createElement("span");
             wrap.setAttribute("data-role", "gb2-crumb");
-            wrap.style.cssText = "display:inline-flex;flex-direction:column;gap:1px;min-width:0;";
+            // The title bar is one no-wrap row: name left, the Applies-to
+            // cluster and the eye right. Flexbox squeezes this cell when the
+            // panel narrows, but an unclamped inline-flex box keeps painting
+            // at its natural width, so a long level name ran straight through
+            // the cluster (Torry, Sep 2026: 38px of overlap at a 900px
+            // window). Clamping to the cell is what finally engages the
+            // ellipsis the title line below already declares. Inert wherever
+            // there is room: an unsqueezed cell IS the name's natural width.
+            wrap.style.cssText = "display:inline-flex;flex-direction:column;gap:1px;" +
+                "min-width:0;max-width:100%;overflow:hidden;";
             var eb = document.createElement("span");
             eb.textContent = eyebrow;
+            // Clip the eyebrow too: left free it wraps to a second line under
+            // the clamp and grows the bar instead of truncating.
             eb.style.cssText = "font:700 9px var(--gb2-ui-font);letter-spacing:.12em;" +
-                "text-transform:uppercase;color:#626d7b;";
+                "text-transform:uppercase;color:#626d7b;" +
+                "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
             var tt = document.createElement("span");
             tt.textContent = titleText;
             tt.style.cssText = "font:600 12.5px var(--gb2-ui-font);letter-spacing:0;" +
