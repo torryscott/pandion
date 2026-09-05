@@ -49001,15 +49001,40 @@
             // is harmless.
             var _scopeHostKeep = titleNode.querySelector('[data-role="scope-title-host"]');
             if (_scopeHostKeep && _scopeHostKeep.parentNode) _scopeHostKeep.parentNode.removeChild(_scopeHostKeep);
+            // A breadcrumb title is a two-line ELEMENT, not text. Reading it
+            // back through textContent flattens the eyebrow and the title
+            // onto one line, and the title bar's own uppercase styling then
+            // makes it read "BAR CHARTDATA POINTS" (Torry, Sep 2026). Panels
+            // that re-attach title chrome AFTER the render tail built the
+            // crumb - the Data points tabs call this on every switch - must
+            // carry the crumb element across, the way the scope host is.
+            // Carry the whole title CELL (the direct child holding the crumb),
+            // not just the crumb: the builder also styles that cell to
+            // shrink first and keep a 16px gap from the Applies-to cluster,
+            // and a fresh span would lose both - the gap would close and a
+            // squeezed panel could overflow again after a tab switch.
+            var _crumbKeep = titleNode.querySelector('[data-role="gb2-crumb"]');
+            var _crumbCell = null;
+            if (_crumbKeep) {
+                _crumbCell = _crumbKeep;
+                while (_crumbCell.parentNode && _crumbCell.parentNode !== titleNode)
+                    _crumbCell = _crumbCell.parentNode;
+                if (_crumbCell.parentNode !== titleNode) _crumbCell = null;
+            }
+            if (_crumbCell) titleNode.removeChild(_crumbCell);
             var existingTitle = titleNode.textContent;
             titleNode.style.display = "flex";
             titleNode.style.alignItems = "center";
             titleNode.style.justifyContent = "space-between";
             titleNode.style.gap = "12px";
             titleNode.innerHTML = "";
-            var titleText = document.createElement("span");
-            titleText.textContent = existingTitle;
-            titleNode.appendChild(titleText);
+            if (_crumbCell) {
+                titleNode.appendChild(_crumbCell);
+            } else {
+                var titleText = document.createElement("span");
+                titleText.textContent = existingTitle;
+                titleNode.appendChild(titleText);
+            }
             if (_scopeHostKeep) titleNode.appendChild(_scopeHostKeep);
 
             var tint = opts.color || "#666";
