@@ -46146,12 +46146,11 @@
                     _wBadge.setAttribute("data-role", "gb2-range-warning");
                     var _wBadgeCss = [
                         "position:absolute",
-                        // Sits ~12 px from wrap's top-right. Wrap's
-                        // top is below the external toolbar (which
-                        // is wrap's sibling, not a child), so this
+                        // Sits ~12 px from wrap's top-right until the user
+                        // drags it. Wrap's top is below the external toolbar
+                        // (which is wrap's sibling, not a child), so this
                         // lands inside the chart's top margin.
-                        "top:12px",
-                        "right:12px",
+                    ].concat(_gb2RangeBadgePosCss()).concat([
                         "background:#fff3cd",
                         "border:1px solid #ffd97a",
                         "border-radius:" + (_wMini ? "999px" : "3px"),
@@ -46170,7 +46169,7 @@
                         "padding:" + (_wMini ? "2px 8px 2px 8px" : "3px 4px 3px 9px"),
                         "transition:padding 120ms ease, border-radius 120ms ease",
                         "white-space:nowrap"
-                    ].join(";");
+                    ]).join(";");
                     _wBadge.style.cssText = _wBadgeCss;
                     if (_wMini) {
                         // Compact: pill with "⚠ N", click anywhere
@@ -46226,6 +46225,7 @@
                         _wBadge.appendChild(_wMinBtn);
                     }
                     wrap.appendChild(_wBadge);
+                    _gb2WireRangeBadgeDrag(_wBadge);
                 }
             } catch (_obe) {}
 
@@ -46545,8 +46545,13 @@
         // collapse / pill expand) working — pointerup without
         // crossing the threshold falls through to whatever click
         // handler the original element had.
-        function _hpAttachBadgeDrag(badge, handle) {
+        function _hpAttachBadgeDrag(badge, handle, opts) {
             var DRAG_PX = 4;
+            // Defaults keep the hidden-points call byte-identical; the range
+            // warning passes its own window key and option names.
+            var _bdPosKey = (opts && opts.posKey) || "__gb2_hpBadgePos";
+            var _bdLeftOpt = (opts && opts.leftOpt) || "hpBadgeLeft";
+            var _bdTopOpt = (opts && opts.topOpt) || "hpBadgeTop";
             handle.addEventListener("pointerdown", function (e) {
                 if (e.button !== 0) return; // left button only
                 // Skip drag init when the user pressed a real
@@ -46603,7 +46608,7 @@
                     if (newTop  > maxTop)  newTop  = maxTop;
                     badge.style.left = newLeft + "px";
                     badge.style.top  = newTop + "px";
-                    window.__gb2_hpBadgePos = { left: newLeft, top: newTop };
+                    window[_bdPosKey] = { left: newLeft, top: newTop };
                 }
                 function _onUp(ev) {
                     document.removeEventListener("pointermove", _onMove, true);
@@ -46629,12 +46634,10 @@
                         // where the user left it. Goes through
                         // _setOption which the IIFE has access
                         // to; reuses the existing debounce window.
-                        if (window.__gb2_hpBadgePos && hasSetOption) {
+                        if (window[_bdPosKey] && hasSetOption) {
                             try {
-                                _setOption("hpBadgeLeft",
-                                    window.__gb2_hpBadgePos.left);
-                                _setOption("hpBadgeTop",
-                                    window.__gb2_hpBadgePos.top);
+                                _setOption(_bdLeftOpt, window[_bdPosKey].left);
+                                _setOption(_bdTopOpt, window[_bdPosKey].top);
                             } catch (_eSO) {}
                         }
                     }
@@ -46666,6 +46669,35 @@
         // click handlers. Defined here (outside redraw) so closures
         // captured at click time still resolve after subsequent
         // redraws have replaced the DOM.
+        // The out-of-range warning can land right on top of the data it is
+        // warning about, so it is draggable like the hidden-points badge and
+        // remembers where it was put (Torry, Sep 2026: "collapse it and then
+        // move it out of the way"). Both the render-time build and the
+        // collapse/expand refresh go through these, so the two copies of the
+        // badge cannot drift apart.
+        function _gb2RangeBadgePosCss() {
+            if (window.__gb2_rangeBadgePos === undefined) {
+                var _rl = (typeof data.rangeBadgeLeft === "number")
+                            ? data.rangeBadgeLeft : -1;
+                var _rt = (typeof data.rangeBadgeTop === "number")
+                            ? data.rangeBadgeTop : -1;
+                window.__gb2_rangeBadgePos = (_rl >= 0 && _rt >= 0)
+                    ? { left: _rl, top: _rt } : null;
+            }
+            var pos = window.__gb2_rangeBadgePos;
+            if (pos && typeof pos.left === "number" && typeof pos.top === "number")
+                return ["top:" + pos.top + "px", "left:" + pos.left + "px"];
+            return ["top:12px", "right:12px"];
+        }
+        function _gb2WireRangeBadgeDrag(badge) {
+            try {
+                _hpAttachBadgeDrag(badge, badge, {
+                    posKey: "__gb2_rangeBadgePos",
+                    leftOpt: "rangeBadgeLeft",
+                    topOpt: "rangeBadgeTop"
+                });
+            } catch (_eRd) {}
+        }
         function _gb2RefreshRangeWarning(count) {
             var oldB = wrap.querySelector('[data-role="gb2-range-warning"]');
             if (oldB && oldB.parentNode) oldB.parentNode.removeChild(oldB);
@@ -46678,7 +46710,8 @@
             var b = document.createElement("div");
             b.setAttribute("data-role", "gb2-range-warning");
             b.style.cssText = [
-                "position:absolute","top:12px","right:12px",
+                "position:absolute"
+            ].concat(_gb2RangeBadgePosCss()).concat([
                 "background:#fff3cd","border:1px solid #ffd97a",
                 "border-radius:" + (mini ? "999px" : "3px"),
                 "color:#856404","font:11px sans-serif",
@@ -46689,7 +46722,7 @@
                 "padding:" + (mini ? "2px 8px 2px 8px" : "3px 4px 3px 9px"),
                 "transition:padding 120ms ease, border-radius 120ms ease",
                 "white-space:nowrap"
-            ].join(";");
+            ]).join(";");
             if (mini) {
                 b.style.cursor = "pointer";
                 b.title = tipFull + " (Click to expand.)";
@@ -46732,6 +46765,7 @@
                 b.appendChild(btn);
             }
             wrap.appendChild(b);
+            _gb2WireRangeBadgeDrag(b);
         }
 
         applySize();

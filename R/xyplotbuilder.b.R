@@ -1332,7 +1332,8 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
             spec_keys <- c(
                 vapply(.xyplotbuilderSpecTable, function(r) r$opt, character(1)),
                 "xTitle", "xTitleOverride", "yTitle", "yTitleOverride",
-                "groupTitle", "groupTitleOverride"
+                "groupTitle", "groupTitleOverride",
+                "rangeBadgeLeft", "rangeBadgeTop"
             )
 
             fixed_args <- list(

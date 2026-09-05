@@ -568,7 +568,8 @@ distplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6C
                 vapply(.distplotbuilderSpecTable, function(r) r$opt, character(1)),
                 "xTitle", "xTitleOverride", "yTitle", "yTitleOverride",
                 "groupTitle", "groupTitleOverride",
-                "hpBadgeLeft", "hpBadgeTop"
+                "hpBadgeLeft", "hpBadgeTop",
+                "rangeBadgeLeft", "rangeBadgeTop"
             )
 
             fixed_args <- list(

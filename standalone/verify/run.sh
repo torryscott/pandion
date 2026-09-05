@@ -39,6 +39,7 @@ pane-scroll-cue-check perf-check picker-persistence-check pinboard-check polish-
  title-squeeze-check \
 notebook-record-check notebook-pages-check notebook-undo-check notebook-drift-check \
   guide-formulas-check keep-fidelity-check copyformat-check \
+range-badge-drag-check \
 probed-bugs-check provenance-check rail-icons-check punchlist-check swatch-row-check reachability-check recents-check reshape-check \
 reflow-accessibility-check \
 row-filters-check \
