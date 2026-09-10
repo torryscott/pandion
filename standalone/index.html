@@ -4058,11 +4058,37 @@
   }
   #ps-narrow-scrim[hidden] { display: none; }
   @media (max-width: 760px) {
+    /* Let user text spacing grow the chrome instead of overlapping a fixed
+       row. Keep each density's usual minimum heights. */
+    .ps-page {
+      grid-template-rows: minmax(34px, auto) minmax(43px, auto) minmax(0, 1fr) minmax(25px, auto);
+    }
+    body.ps-density-compact .ps-page {
+      grid-template-rows: minmax(28px, auto) minmax(32px, auto) minmax(0, 1fr) minmax(21px, auto);
+    }
+    body.ps-density-spacious .ps-page {
+      grid-template-rows: minmax(40px, auto) minmax(52px, auto) minmax(0, 1fr) minmax(29px, auto);
+    }
     .ps-app-body, .ps-app-body.ps-no-inspector {
       grid-template-columns: minmax(0, 1fr);
       grid-template-areas: "main";
     }
-    .ps-project-panel, .ps-controls { display: none; }
+    /* The rails are drawers here, so their desktop resize handles have no
+       target. Leaving the handles in the grid creates implicit tracks and
+       three pixels of overflow that WebKit can scroll into view. */
+    .ps-project-panel, .ps-controls, .ps-splitter { display: none; }
+    /* The header may now take more than one row. Allocate the grid the
+       remaining workspace height, keeping its toolbar and summary in view
+       when keyboard navigation scrolls to a distant cell. */
+    .ps-datagrid-card {
+      display: flex; flex-direction: column; height: 100%; min-height: 0;
+    }
+    .ps-datagrid-card > .ps-data-commandbar,
+    .ps-datagrid-card > .ps-grid-note { flex-shrink: 0; }
+    .ps-data-commandbar { flex-wrap: wrap; overflow-x: visible; }
+    .ps-main-workspace .ps-datagrid {
+      flex: 1 1 auto; min-height: 0; max-height: none;
+    }
     .ps-narrow-btn { display: inline-flex; }
     /* Revealed in place: the menu bar drops under the app bar rather than
        becoming a second, separately maintained list of commands. */
@@ -4126,6 +4152,23 @@
       flex: 1 0 100% !important; border-left: 0 !important;
       border-top: 1px solid var(--ps-l2) !important;
     }
+  }
+  @media (max-width: 560px) {
+    /* Keep the project details and save status in a second row, leaving
+       all three drawer buttons visible without widening the document. */
+    .ps-appbar {
+      grid-template-columns: minmax(0, 1fr) auto auto auto;
+      grid-template-areas: "brand menu nav settings" "document document save save";
+      gap: 4px 6px; padding-top: 4px; padding-bottom: 4px;
+    }
+    .ps-brand { grid-area: brand; min-width: 0; padding-right: 0; }
+    .ps-brand strong { white-space: normal; }
+    #ps-narrow-menu { grid-area: menu; }
+    #ps-narrow-nav { grid-area: nav; }
+    #ps-narrow-inspector { grid-area: settings; }
+    .ps-document-title { grid-area: document; padding-left: 0; }
+    .ps-document-title span { max-width: 100%; overflow-wrap: anywhere; }
+    .ps-appbar-state { grid-area: save; white-space: normal; text-align: right; }
   }
   @keyframes ps-drawer-left {
     from { transform: translateX(-100%); } to { transform: translateX(0); }
@@ -4372,7 +4415,7 @@
 </div>
 <div class="ps-page">
   <header class="ps-appbar">
-    <div class="ps-brand" aria-label="Pandion Plots">
+    <div class="ps-brand">
       <svg class="ps-brand-logo" aria-hidden="true">
         <use href="#ps-pandion-wing"></use>
       </svg>
@@ -5109,7 +5152,7 @@
     <div id="ps-layout" role="tabpanel" style="display:none;">
       <div id="ps-ltoolbar">
         <div class="ps-ltoolbar-row">
-          <div class="ps-ltool-group" aria-label="Layout history">
+          <div class="ps-ltool-group" role="group" aria-label="Layout history">
             <button type="button" class="ps-command ps-command-icon" id="ps-lundo"
                     aria-label="Undo" data-tip="Undo the last layout change (Cmd/Ctrl+Z)">
               <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -5128,21 +5171,21 @@
             </button>
           </div>
           <span class="ps-ltool-sep"></span>
-          <div class="ps-ltool-group">
-            <!-- Icons beside the words (Torry, Aug 6 2026): Add chart
-                 and From Notebook REUSE the workspace switcher's exact
-                 glyphs (one icon per idea, the rail-icons rule); the
-                 other three get glyphs in the same 24-box stroke voice. -->
-            <button type="button" class="ps-command" id="ps-laddchart"><svg class="ps-icn" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V4"/><path d="M4 20h16"/><rect x="7" y="11" width="3.2" height="6" rx="0.6" fill="currentColor" stroke="none"/><rect x="13" y="7" width="3.2" height="10" rx="0.6" fill="currentColor" stroke="none"/></svg> Add chart</button>
-            <button type="button" class="ps-command" id="ps-laddtext"><svg class="ps-icn" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 6V4h14v2"/><path d="M12 4v16"/><path d="M9 20h6"/></svg> Add text</button>
-            <button type="button" class="ps-command" id="ps-laddpin"
-                    aria-haspopup="menu"
-                    data-tip="Place a kept Notebook page in this layout"><svg class="ps-icn" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="3.5" width="13.5" height="17" rx="2"/><path d="M4 8h4M4 12h4M4 16h4"/></svg> From Notebook</button>
-            <button type="button" class="ps-command" id="ps-laddlabel"><svg class="ps-icn" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9.2 16l2.8-8 2.8 8M10.3 13.4h4.6" stroke-width="1.6"/></svg> Panel label</button>
-            <button type="button" class="ps-command" id="ps-laddimage"><svg class="ps-icn" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.6" fill="currentColor" stroke="none"/><path d="M4.5 17.5l4.5-4 3 2.5 4-4.5 3.5 4"/></svg> Add image</button>
-            <input type="file" id="ps-laddimage-file" accept="image/*,.svg"
-                   style="display:none;" aria-hidden="true">
-          </div>
+          <!-- Keep actions in the wrapping toolbar row so each command
+               stays visible when the workspace narrows. -->
+          <!-- Icons beside the words (Torry, Aug 6 2026): Add chart
+               and From Notebook REUSE the workspace switcher's exact
+               glyphs (one icon per idea, the rail-icons rule); the
+               other three get glyphs in the same 24-box stroke voice. -->
+          <button type="button" class="ps-command" id="ps-laddchart"><svg class="ps-icn" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V4"/><path d="M4 20h16"/><rect x="7" y="11" width="3.2" height="6" rx="0.6" fill="currentColor" stroke="none"/><rect x="13" y="7" width="3.2" height="10" rx="0.6" fill="currentColor" stroke="none"/></svg> Add chart</button>
+          <button type="button" class="ps-command" id="ps-laddtext"><svg class="ps-icn" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 6V4h14v2"/><path d="M12 4v16"/><path d="M9 20h6"/></svg> Add text</button>
+          <button type="button" class="ps-command" id="ps-laddpin"
+                  aria-haspopup="menu"
+                  data-tip="Place a kept Notebook page in this layout"><svg class="ps-icn" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="3.5" width="13.5" height="17" rx="2"/><path d="M4 8h4M4 12h4M4 16h4"/></svg> From Notebook</button>
+          <button type="button" class="ps-command" id="ps-laddlabel"><svg class="ps-icn" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9.2 16l2.8-8 2.8 8M10.3 13.4h4.6" stroke-width="1.6"/></svg> Panel label</button>
+          <button type="button" class="ps-command" id="ps-laddimage"><svg class="ps-icn" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.6" fill="currentColor" stroke="none"/><path d="M4.5 17.5l4.5-4 3 2.5 4-4.5 3.5 4"/></svg> Add image</button>
+          <input type="file" id="ps-laddimage-file" accept="image/*,.svg"
+                 style="display:none;" aria-hidden="true">
           <!-- Page size moved to the rail's PAGE section (launch-eval bug,
                Jul 28 2026: the row overflowed and wrapped ZOOM onto its own
                line even at 1500px - 976px needed, 909 available). Page
@@ -6121,7 +6164,9 @@
         </label>
         <p class="ps-export-note" id="ps-export-record-note">
           Adds the page number, the date it was kept, the analysis it came
-          from, and anything you wrote about it.
+          from, and anything you wrote about it. PDF includes figure tags and
+          each page's saved description. Review older pages and use their notes
+          to explain the finding, especially for pages kept as bitmap images.
         </p>
       </div>
       <div class="ps-export-field" id="ps-export-description-field">
@@ -6132,8 +6177,10 @@
                   maxlength="2000" spellcheck="true"
                   aria-describedby="ps-export-description-help"></textarea>
         <p class="ps-export-a11y-note" id="ps-export-description-help">
-          SVG embeds this description. PDF receives document metadata, but is
-          not a tagged data table. For PNG or JPG, copy this text and attach it
+          SVG embeds this description. PDF embeds it as the figure's alternative
+          text in a tagged document. Review it to explain the finding and any
+          important values; supply a separate data table when readers need exact
+          values. For PNG or JPG, copy this text and attach it
           as alt text or a long description wherever you publish the image.
         </p>
         <div class="ps-export-a11y-actions">

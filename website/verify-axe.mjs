@@ -1,16 +1,18 @@
 // Whole-page axe gate for every public marketing page and the deployed guide.
 //
-// Serious/critical WCAG A/AA violations and every WCAG 2.2 target-size
-// result block release preparation. Interactive guide and mobile-navigation
+// All selected A/AA violations block release preparation, at any impact.
+// Full violation and incomplete evidence is retained in PS_A11Y_OUT. Interactive guide and mobile-navigation
 // states are opened before scanning; these states are not represented by
 // source-only contracts.
+import { websiteInventory } from './accessibility-inventory.mjs';
+import { createAxeReport } from '../scripts/verify/axe-report.mjs';
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 function resolveFrom(name) {
-    for (const base of [process.cwd(), new URL('.', import.meta.url).pathname,
-                        '/private/tmp', '/tmp']) {
+    for (const base of [process.env.GB2_NODE_BASE, process.cwd(), new URL('.', import.meta.url).pathname,
+                        '/private/tmp', '/tmp'].filter(Boolean)) {
         try { return createRequire(path.join(base, 'x.js')).resolve(name); }
         catch { /* try the next shared dependency location */ }
     }
@@ -29,69 +31,57 @@ const axeSource = readFileSync(
     path.join(path.dirname(axePath), 'axe.min.js'), 'utf8');
 const root = path.resolve(new URL('.', import.meta.url).pathname, '..');
 const fileUrl = relative => 'file://' + path.join(root, relative);
-const tags = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
+const inventory = websiteInventory(path.join(root, 'website'));
+const evidence = createAxeReport({ suite: 'website', artifact: path.join(root, 'website'), inventory });
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 const pageErrors = [];
-const blockers = [];
 page.on('pageerror', error => pageErrors.push(String(error)));
 
 async function audit(label) {
     if (!await page.evaluate(() => !!window.axe))
         await page.addScriptTag({ content: axeSource });
-    const violations = await page.evaluate(async axeTags => {
-        const result = await window.axe.run(document, {
-            runOnly: { type: 'tag', values: axeTags },
-            resultTypes: ['violations'],
-        });
-        return result.violations.map(violation => ({
-            id: violation.id,
-            impact: violation.impact || 'unknown',
-            nodes: violation.nodes.length,
-            targets: violation.nodes.slice(0, 4).map(node =>
-                node.target.join(' ')),
-        }));
-    }, tags);
-    const stateBlockers = violations.filter(violation =>
-        violation.id === 'target-size' ||
-        violation.impact === 'critical' || violation.impact === 'serious');
-    blockers.push(...stateBlockers.map(violation => ({
-        ...violation, state: label,
-    })));
-    if (!violations.length) {
-        console.log('  ok  ' + label + ': no A/AA violations');
-        return;
+    await evidence.scan(page, label);
+}
+async function auditDisclosures(label) {
+    let visible = 0;
+    for (const details of await page.locator('details').all()) {
+        if (!await details.isVisible()) continue;
+        visible++;
+        if (await details.getAttribute('open') === null)
+            await details.locator('summary').click();
     }
-    if (!stateBlockers.length) {
-        console.log('  ok  ' + label + ': no blocking violations (' +
-            violations.map(item => item.id + ' x' + item.nodes).join(', ') +
-            ')');
-        return;
-    }
-    console.log('  FAIL ' + label);
-    for (const violation of stateBlockers)
-        console.log('       [' + violation.impact + '] ' + violation.id +
-            ' x' + violation.nodes + ' — ' +
-            violation.targets.join(', '));
+    if (visible) await audit(label + ' disclosures open');
 }
 
-const publicPages = [
-    ['Home', 'website/index.html'],
-    ['Gallery', 'website/gallery.html'],
-    ['Downloads', 'website/download.html'],
-    ['About', 'website/about.html'],
-    ['Support', 'website/support.html'],
-    ['Accessibility', 'website/accessibility.html'],
-    ['Not found', 'website/404.html'],
-];
+const publicPages = inventory.filter(entry => entry.surface !== 'application')
+    .map(entry => [entry.file, 'website/' + entry.file]);
 
 console.log('case 1: every public page at desktop and reflow widths');
 for (const [label, relative] of publicPages) {
     for (const width of [1440, 320]) {
         await page.setViewportSize({ width, height: 800 });
         await page.goto(fileUrl(relative));
+        // Platform choice persists across teaching pages. Start from a known
+        // edition so a prior page cannot hide this page's default content.
+        if (await page.locator('[data-pf-choice="standalone"]').count())
+            await page.locator('[data-pf-choice="standalone"]').click();
         await page.waitForTimeout(80);
         await audit(label + ' at ' + width + 'px');
+        await auditDisclosures(label + ' standalone at ' + width + 'px');
+        if (await page.locator('[data-pf-choice="jamovi"]').count()) {
+            await page.locator('[data-pf-choice="jamovi"]').click();
+            if (await page.locator('[data-pf-choice="jamovi"]').getAttribute('aria-pressed') !== 'true')
+                throw new Error(label + ': the jamovi instructions did not activate');
+            await audit(label + ' jamovi instructions at ' + width + 'px');
+            await auditDisclosures(label + ' jamovi at ' + width + 'px');
+        }
+        if (width === 320 && await page.locator('.nav-toggle').isVisible()) {
+            await page.locator('.nav-toggle').click();
+            if (await page.locator('.nav-toggle').getAttribute('aria-expanded') !== 'true')
+                throw new Error(label + ': the mobile navigation did not open');
+            await audit(label + ' mobile navigation open');
+        }
     }
 }
 
@@ -134,9 +124,10 @@ await audit('Guide at 320px');
 if (pageErrors.length)
     console.log('  FAIL page errors: ' + pageErrors.join(' | '));
 await browser.close();
-if (blockers.length || pageErrors.length) {
+const summary = evidence.finish(pageErrors);
+if (summary.failed) {
     console.log('\nWEBSITE AXE CHECK: ' +
-        (blockers.length + pageErrors.length) + ' BLOCKING FAILURE(S)');
+        (summary.blockingRules + summary.errors) + ' BLOCKING FAILURE(S)');
     process.exit(1);
 }
 console.log('\nWEBSITE AXE CHECK: PASS');

@@ -2,16 +2,16 @@
 //
 // Unlike the shared-widget audit, this opens the real start center, every
 // workspace, all six application menus, the command palette, and the major
-// modal families. Serious and critical WCAG A/AA violations block the run.
-// WCAG 2.2 target-size also blocks at any impact level so the 24px document
-// controls and valid spacing exceptions cannot silently regress.
+// modal families. All selected A/AA violations block, regardless of impact.
+// Full violation and incomplete evidence is retained in PS_A11Y_OUT.
+import { createAxeReport } from '../../scripts/verify/axe-report.mjs';
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 function resolveFrom(name) {
-    for (const base of [process.cwd(), new URL('.', import.meta.url).pathname,
-                        '/private/tmp', '/tmp']) {
+    for (const base of [process.env.GB2_NODE_BASE, process.cwd(), new URL('.', import.meta.url).pathname,
+                        '/private/tmp', '/tmp'].filter(Boolean)) {
         try { return createRequire(path.join(base, 'x.js')).resolve(name); }
         catch { /* try the next shared dependency location */ }
     }
@@ -33,75 +33,18 @@ const pageUrl = 'file://' + (process.env.PS_PAGE
     : path.resolve(new URL('.', import.meta.url).pathname, '..', 'index.html'));
 const imageFixture = path.resolve(new URL('.', import.meta.url).pathname,
     'fixtures', 'probe-image.png');
-const tags = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
 const pageErrors = [];
-const findings = [];
 const contractFailures = [];
 page.on('pageerror', error => pageErrors.push(String(error)));
 await page.goto(pageUrl);
 await page.waitForTimeout(700);
 await page.addScriptTag({ content: axeSource });
 
-async function audit(label, {
-    targetSizeBlocking = true,
-    impactsBlocking = true,
-} = {}) {
-    const violations = await page.evaluate(async axeTags => {
-        const result = await window.axe.run(document, {
-            runOnly: { type: 'tag', values: axeTags },
-            resultTypes: ['violations'],
-        });
-        return result.violations.map(violation => ({
-            id: violation.id,
-            impact: violation.impact || 'unknown',
-            help: violation.help,
-            nodes: violation.nodes.length,
-            targets: violation.nodes.slice(0, 3).map(node =>
-                node.target.join(' ')),
-            styles: violation.nodes.slice(0, 3).map(node => {
-                const element = document.querySelector(node.target[0]);
-                if (!element) return 'unresolved';
-                const style = getComputedStyle(element);
-                const parentStyle = element.parentElement
-                    ? getComputedStyle(element.parentElement) : null;
-                return style.color + ' on ' + style.backgroundColor +
-                    ' (parent ' +
-                    (parentStyle ? parentStyle.backgroundColor : 'none') +
-                    '; opacity ' + style.opacity + '/' +
-                    (parentStyle ? parentStyle.opacity : 'none') + '; ' +
-                    node.failureSummary.replace(/\s+/g, ' ') + ')';
-            }),
-        }));
-    }, tags);
-    const blocking = violations.filter(violation =>
-        violation.id === 'target-size'
-            ? targetSizeBlocking
-            : impactsBlocking && (violation.impact === 'critical' ||
-                                  violation.impact === 'serious'));
-    const advisory = violations.filter(violation =>
-        !blocking.includes(violation));
-    findings.push({ label, blocking, advisory });
-    if (!violations.length) {
-        console.log('  ok  ' + label + ': no A/AA violations');
-        return;
-    }
-    if (!blocking.length) {
-        console.log('  ok  ' + label + ': no blocking violations (' +
-            advisory.map(item => item.id + ' x' + item.nodes).join(', ') + ')');
-        for (const violation of advisory)
-            console.log('       advisory [' + violation.impact + '] ' +
-                violation.id + ' — ' + violation.targets.join(', ') + ' — ' +
-                violation.styles.join(', '));
-        return;
-    }
-    console.log('  FAIL ' + label);
-    for (const violation of blocking)
-        console.log('       [' + violation.impact + '] ' + violation.id +
-            ' x' + violation.nodes + ' — ' +
-            violation.targets.join(', ') + ' — ' +
-            violation.styles.join(', '));
+const evidence = createAxeReport({ suite: 'shell', artifact: pageUrl });
+async function audit(label) {
+    await evidence.scan(page, label);
 }
 async function auditShellDialog(label, id, open) {
     await page.focus('#ps-load');
@@ -172,6 +115,17 @@ await page.waitForTimeout(100);
 contract(await page.locator('#ps-slots .ps-role-picker').isVisible(),
     'the filled-role Change control opens its picker from the keyboard');
 await audit('Charts role picker');
+contract(await page.evaluate(() => {
+    const covered = document.querySelector('#ps-slots button[data-role-key="groupVar"]');
+    if (!covered) return false;
+    covered.focus();
+    return document.activeElement !== covered;
+}), 'covered role controls cannot receive keyboard focus behind the picker');
+await page.keyboard.press('Escape');
+await page.locator('#ps-slots button[data-role-key="groupVar"]').focus();
+await page.keyboard.press('Enter');
+contract(await page.locator('#ps-slots .ps-role-card[data-role-key="groupVar"] .ps-role-picker').isVisible(),
+    'closing the picker restores keyboard access to the next role');
 await page.keyboard.press('Escape');
 await page.evaluate(() => window.PS_SHELL.setWorkspace('data'));
 await page.waitForTimeout(350);
@@ -297,14 +251,13 @@ contract(editorOpened && await page.locator('.gb2-panel').isVisible(),
 // and ordinary A/AA findings are release blocking here.
 await audit('Shared lower chart editor');
 
-const blockers = findings.flatMap(entry =>
-    entry.blocking.map(violation => ({ ...violation, state: entry.label })));
 if (pageErrors.length)
     console.log('  FAIL page errors: ' + pageErrors.join(' | '));
 await browser.close();
-if (blockers.length || pageErrors.length || contractFailures.length) {
+const summary = evidence.finish([...pageErrors, ...contractFailures]);
+if (summary.failed) {
     console.log('\nSTANDALONE AXE STATE CHECK: ' +
-        (blockers.length + pageErrors.length + contractFailures.length) +
+        (summary.blockingRules + summary.errors) +
         ' BLOCKING FAILURE(S)');
     process.exit(1);
 }

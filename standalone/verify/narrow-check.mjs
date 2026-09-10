@@ -162,6 +162,11 @@ ok(opened.shown && opened.items > 3,
 console.log('case 5: it puts itself away');
 await page.keyboard.press('Escape');
 await page.waitForTimeout(200);
+ok(!(await vis('#ps-appmenu')).shown, 'Escape closes the command popup first');
+ok((await vis('.ps-menubar')).shown, 'the containing menu drawer stays open');
+await page.keyboard.press('Escape');
+await page.waitForTimeout(200);
+ok(!(await vis('.ps-menubar')).shown, 'a second Escape closes the menu drawer');
 await page.click('#ps-narrow-nav');
 await page.waitForTimeout(250);
 ok((await vis('.ps-project-panel')).shown, 'setup: a drawer is open');

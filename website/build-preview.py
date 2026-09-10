@@ -3,9 +3,9 @@
 
     python3 website/build-preview.py
 
-Writes website/pandion-site-preview.html - every page, every design
-variant, and every asset inlined as a data URI, so it can be opened from
-disk (or emailed) with no web server and no repo around it. The five
+Writes prototypes/website/pandion-site-preview.html - selected current pages,
+archived design variants, and every asset inlined as a data URI, so it can be
+opened from disk with no web server and no repo around it. The
 pages keep conflicting CSS (.brand, .hero) so each is rendered in its own
 iframe via a Blob URL rather than concatenated into one document.
 
@@ -17,6 +17,7 @@ import pathlib
 import re
 
 ROOT = pathlib.Path(__file__).resolve().parent
+REFERENCES = ROOT.parent / 'prototypes' / 'website'
 MIME = {'.svg': 'image/svg+xml', '.png': 'image/png',
         '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg'}
 
@@ -136,7 +137,8 @@ def prepare(html):
 
 docs = {}
 for key, fname, _label in PAGES:
-    src = (ROOT / fname).read_text(encoding='utf-8')
+    page_root = REFERENCES if key in ('v2', 'v3') else ROOT
+    src = (page_root / fname).read_text(encoding='utf-8')
     out, n = prepare(src)
     docs[key] = base64.b64encode(out.encode('utf-8')).decode('ascii')
     print('%-9s %2d assets inlined, %d KB' % (fname, n, len(out) // 1024))
@@ -234,6 +236,7 @@ shell = shell.replace('__FAVICON__', data_uri('assets/favicon.svg'))
 shell = shell.replace('__DOCS__', '{%s}' % ','.join(
     '"%s":"%s"' % (k, v) for k, v in docs.items()))
 
-out = ROOT / 'pandion-site-preview.html'
+REFERENCES.mkdir(parents=True, exist_ok=True)
+out = REFERENCES / 'pandion-site-preview.html'
 out.write_text(shell, encoding='utf-8')
 print('\nwrote %s - %.1f MB' % (out, out.stat().st_size / 1048576))

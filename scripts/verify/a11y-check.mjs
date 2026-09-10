@@ -4,7 +4,7 @@
 // tabindex, the injected :focus-visible stylesheet, the live region).
 // Baselined fully CLEAN on 2026-07-03 - any new violation fails.
 //
-// Deliberately ignored wrapper-only rules:
+// Wrapper-only findings retained as open host responsibilities:
 //   document-title, html-has-lang - the battery writes raw widget
 //   fragments with no <html> wrapper; in production that document
 //   belongs to jamovi's results iframe (upstream), not the module.
@@ -14,10 +14,12 @@
 // Usage:  node scripts/verify/a11y-check.mjs
 // Env:    GB2_VERIFY_OUT  dir holding the *.html files (default /tmp/gb2-verify)
 //         GB2_NODE_BASE   a dir whose node_modules has playwright + axe-core
-// Exit:   0 = clean, 1 = violations/contract failures, 2 = deps missing (skip)
+// Exit:   0 = automatic checks pass (review may remain), 1 = failure, 2 = missing dependencies
 
+import { createAxeReport } from './axe-report.mjs';
+import { checkStatisticsNames } from './statistics-names.mjs';
 import { createRequire } from 'node:module';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 function resolveFrom(name) {
@@ -47,53 +49,29 @@ if (!pwPath || !axePath) {
 const { chromium } = createRequire(pwPath)('playwright');
 const axeSource = readFileSync(path.join(path.dirname(axePath), 'axe.min.js'), 'utf8');
 
-const OUT = process.env.GB2_VERIFY_OUT || '/tmp/gb2-verify';
-const IGNORE = new Set(['document-title', 'html-has-lang']);
-const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
+const OUT = path.resolve(process.env.GB2_VERIFY_OUT || '/tmp/gb2-verify');
+const evidence = createAxeReport({ suite: 'jamovi-host', artifact: OUT });
+const statisticsNames = [];
 
-// Pages: one rich chart per interaction family + the wizard when the
-// harness rendered it (run.sh --extras writes wizard_a11y.html; a
-// standalone invocation without it just audits the battery pages).
+// One representative of every analysis family, plus the chooser fragment.
+// The regular verification runner renders all required fixtures.
 const PAGES = [
     { name: 'cg_bar_labels', openPanel: true, openFind: true, contract: true },
     { name: 'corr_heat' },
     { name: 'freq_pie_callout', contract: true },
-    { name: 'wizard_a11y', optional: true },
+    { name: 'rm_line' },
+    { name: 'xy_fit_ci' },
+    { name: 'dist_hist' },
+    { name: 'likert_div' },
+    { name: 'wizard_a11y' },
 ];
 
-async function runAxe(page) {
-    const res = await page.evaluate(async (tags) => {
-        const r = await window.axe.run(document, {
-            runOnly: { type: 'tag', values: tags },
-            resultTypes: ['violations'],
-        });
-        return r.violations.map(v => ({
-            id: v.id, impact: v.impact, nodes: v.nodes.length,
-            sample: v.nodes[0] ? v.nodes[0].html.slice(0, 110) : '',
-        }));
-    }, AXE_TAGS);
-    return res.filter(v => !IGNORE.has(v.id));
-}
-
 let failures = 0;
-function report(label, violations) {
-    if (violations.length === 0) {
-        console.log('  ok   ' + label);
-        return;
-    }
-    failures += violations.length;
-    console.log('  FAIL ' + label);
-    for (const v of violations) {
-        console.log('       [' + (v.impact || '?') + '] ' + v.id + ' x' + v.nodes +
-            (v.sample ? '  e.g. ' + v.sample : ''));
-    }
-}
 
 const browser = await chromium.launch();
 for (const p of PAGES) {
     const file = path.join(OUT, p.name + '.html');
     if (!existsSync(file)) {
-        if (p.optional) { console.log('  --   ' + p.name + ' (not rendered, skipped)'); continue; }
         console.log('  FAIL ' + p.name + ' (file missing: ' + file + ')');
         failures++;
         continue;
@@ -106,7 +84,7 @@ for (const p of PAGES) {
         await page.goto('file://' + file, { waitUntil: 'load' });
         await page.waitForTimeout(2500);
         await page.addScriptTag({ content: axeSource });
-        report(p.name + ' (default)', await runAxe(page));
+        await evidence.scan(page, p.name + ' (default)', { jamoviFragment: true });
 
         if (p.contract) {
             const c = await page.evaluate(() => {
@@ -150,7 +128,7 @@ for (const p of PAGES) {
             });
             if (clicked) {
                 await page.waitForTimeout(1200);
-                report(p.name + ' (panel open)', await runAxe(page));
+                await evidence.scan(page, p.name + ' (panel open)', { jamoviFragment: true });
             } else {
                 failures++;
                 console.log('  FAIL ' + p.name + ' (panel open): no [data-bar-cat] to click');
@@ -160,7 +138,7 @@ for (const p of PAGES) {
             await page.locator('[data-role="setting-search-trigger"]').click();
             await page.locator('[data-role="setting-search-input"]').fill('color');
             await page.waitForTimeout(50);
-            report(p.name + ' (Find open)', await runAxe(page));
+            await evidence.scan(page, p.name + ' (Find open)', { jamoviFragment: true });
             const findContract = await page.evaluate(() => {
                 const bad = [];
                 const trigger = document.querySelector('[data-role="setting-search-trigger"]');
@@ -180,6 +158,13 @@ for (const p of PAGES) {
             else { failures += findContract.length; console.log('  FAIL ' + p.name + ' (Find a11y contract): ' + findContract.join('; ')); }
             await page.keyboard.press('Escape');
         }
+        if (p.name !== 'wizard_a11y') {
+            await page.locator('button[aria-label="Statistics"]').first().click();
+            statisticsNames.push(...await checkStatisticsNames(page, p.name));
+            writeFileSync(path.join(path.dirname(evidence.reportPath), 'host-statistics-names.json'),
+                JSON.stringify(statisticsNames, null, 2) + '\n');
+            console.log('  ok   ' + p.name + ' (visible statistical values retained in accessible names)');
+        }
         if (pageErrors.length) {
             failures++;
             console.log('  FAIL ' + p.name + ' (page errors): ' + pageErrors.join(' | '));
@@ -192,8 +177,9 @@ for (const p of PAGES) {
 }
 await browser.close();
 
-if (failures > 0) {
-    console.log('\nA11Y CHECK: ' + failures + ' FAILURE(S) (' + OUT + ')');
+const summary = evidence.finish(failures ? [failures + ' fixture/contract failure(s)'] : []);
+if (summary.failed) {
+    console.log('\nA11Y CHECK: ' + (failures + summary.blockingRules) + ' FAILURE(S) (' + OUT + ')');
     process.exit(1);
 }
 console.log('\nA11Y CHECK PASSED (' + OUT + ')');

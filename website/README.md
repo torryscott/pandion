@@ -27,10 +27,6 @@ framework, no build step. The `website/` folder IS the deployable site.
 - `pandion-plots.html` - the portable single-file app, copied verbatim
   from `standalone/dist/pandion-plots.html`, served by the "Download
   HTML app" button from our own origin.
-- `v2.html` / `v3.html` - alternate DESIGN prototypes of the landing
-  page (dark-hero and editorial-serif). Style references only; the
-  gallery/about pages are styled to match `index.html`. To adopt a
-  variant, rename it to `index.html` and restyle the two subpages.
 - `assets/` - brand marks, hero art, product screenshot, gallery.
 - `docs/index.html` - the user guide, built from the canonical
   `docs/user-guide.html` (plus `docs/img/`) by `build.sh`, which INJECTS
@@ -49,6 +45,19 @@ framework, no build step. The `website/` folder IS the deployable site.
   enough that the site would be advertising a UI that no longer
   exists.
 
+The retired dark-hero and editorial-serif landing designs are preserved in
+[`prototypes/website/`](../prototypes/website/README.md), outside this deployable
+folder. They are internal references with known accessibility gaps and frozen
+release copy. Do not copy them or the generated review preview into `website/`.
+
+`node website/verify-axe.mjs` discovers all public HTML pages and scans desktop,
+narrow, teaching-edition, hint, mobile-navigation and guide states. All selected
+A/AA violations block, regardless of impact; unresolved scanner results remain
+in an explicit review queue. Run `bash scripts/verify/accessibility-run.sh`
+after building to include source, portable, hosted and R-host application
+checks plus tagged PDF exports. See [accessibility regression and review
+evidence](../docs/ACCESSIBILITY-REGRESSION.md) for dependencies and report status.
+
 Note: `app/` only resolves through a real web server (any host serves
 `app/index.html` for it). Opening `website/index.html` from disk works
 for everything EXCEPT that link, which needs
@@ -63,9 +72,9 @@ for large showcase art only.
 | --- | --- |
 | `favicon.svg` | The browser tab icon on all pages. Favicon ONLY: it carries a `prefers-color-scheme: dark` rule so the mark stays visible on a dark tab strip. |
 | `pandion-wing.svg` | The nav + footer lockups on light surfaces. Deliberately has NO dark-mode rule: it is drawn on permanently white chrome, where a dark-mode swap would turn it white on white. |
-| `pandion-wing-light.svg` | The same mark inverted (white + sky blue) for DARK surfaces. Used by `v2.html`, whose header and footer are navy. |
+| `pandion-wing-light.svg` | The same mark inverted (white + sky blue) for DARK surfaces, including the archived dark landing prototype. |
 | `icon-180.png` | `apple-touch-icon` (iOS home screen). Opaque white tile, since iOS composites transparency onto black. |
-| `pandion-mark.svg` | The diving osprey. LARGE showcase art only: the about-page developer card, and the v2/v3 hero art. |
+| `pandion-mark.svg` | The diving osprey. LARGE showcase art only: the about-page developer card and the archived prototypes' hero art. |
 | `hero-osprey.png` | The full-color osprey render in the `index.html` hero. |
 
 The wing paths in `favicon.svg`, `pandion-wing.svg`, and
@@ -149,14 +158,21 @@ Also fixed: the mobile nav used to hide every link except the CTA below
 print 3.0:1, the amber kicker 2.2:1), and the About kicker never showed
 its colour at all because `.prose p` outranked `.kicker`.
 
-Added: `robots.txt`, `sitemap.xml`, a branded `404.html`, `_headers`
-(noindex on the v2/v3 prototypes), canonical + Open Graph + Twitter tags
+Added: `robots.txt`, `sitemap.xml`, a branded `404.html`, `_headers`,
+canonical + Open Graph + Twitter tags
 on all three pages, and `assets/share-card.png`, a purpose-built
 1200x630 share image. The previous og:image was the whole 3040px app
 screenshot, unreadable as a thumbnail.
 
-NOT deployed: `pandion-site-preview.html` is a local review artifact and
-is now gitignored.
+The prototypes and bundled review preview were moved outside `website/` on
+September 10, 2026 (A11Y-04). Their former `noindex` headers and robots exclusions
+were removed along with the pages. After deployment, confirm that `/v2.html`,
+`/v3.html` and `/pandion-site-preview.html` no longer serve those artifacts.
+
+To review the retained designs locally, run `python3 website/build-preview.py`
+and open `prototypes/website/pandion-site-preview.html`. The generated preview
+is gitignored and remains outside the deployment folder, including for manual
+folder uploads.
 
 ## Release facts the site states
 

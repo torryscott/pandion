@@ -133,7 +133,14 @@ dist/
 
 # dev-only: project instructions + prototypes/experiments (kept local, not public)
 /CLAUDE.md
-/prototypes/
+/prototypes/*
+# Preserve the retired public landing designs used by the local preview builder.
+# All other prototype experiments and generated files stay local.
+!/prototypes/website/
+/prototypes/website/*
+!/prototypes/website/README.md
+!/prototypes/website/v2.html
+!/prototypes/website/v3.html
 
 # reference copies of upstream source dropped in for local study (jmv /
 # jamovi app code) - NEVER commit into this repo (AGPL upstream + bloat;
@@ -142,6 +149,8 @@ dist/
 /Jamovi Source Code/
 
 # Local review artifact: regenerate with website/build-preview.py
+prototypes/website/pandion-site-preview.html
+# Legacy output path must also stay untracked; never include it in deployment.
 website/pandion-site-preview.html
 
 # Superseded brand art parked by the t4-13 tidy-up (11 MB of PNGs that were

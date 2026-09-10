@@ -77,8 +77,14 @@ for (const f of entries) {
   for (const c of Object.keys(exp.types))
     ok(got.types[c] === exp.types[c],
       base + ' type ' + c + ': ' + got.types[c] + ' vs frozen ' + exp.types[c]);
+  // v5 intentionally removes intermediate rounding. Keep the frozen bytes;
+  // these v4 formulas are independent (no chains), so compare them at the
+  // recorded ten-digit precision. New full-precision chains have separate
+  // exact-value assertions in data-integrity-check.
+  const legacyPrecision = JSON.parse(text).project.version < 5;
   for (const c of ['rnd', 'zsc', 'm'])
-    ok(JSON.stringify(got[c]) === JSON.stringify(exp[c]),
+    ok(JSON.stringify(legacyPrecision ? got[c].map(v => v == null || v === ''
+      ? v : String(Number(Number(v).toPrecision(10)))) : got[c]) === JSON.stringify(exp[c]),
       base + ' computed ' + c + ': ' + JSON.stringify(got[c]) +
       ' vs frozen ' + JSON.stringify(exp[c]));
   ok(got.chartCount === exp.chartCount,

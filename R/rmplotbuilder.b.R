@@ -808,12 +808,18 @@ rmplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
             n   <- nrow(data)
             sid <- seq_len(n)
 
+            # Preserve numeric observations directly. as.character() rounds
+            # doubles before parsing, which changes small differences around
+            # a large response origin. Factors still parse their labels.
+            numericMeasure <- function(v) {
+                if (is.numeric(v)) return(as.numeric(v))
+                suppressWarnings(as.numeric(as.character(v)))
+            }
             # ---- missing-data disclosure (subjects missing >=1 within
             # value or an NA between), mirroring the simple path ----------
             anymiss <- rep(FALSE, n)
             for (c_ in assigned)
-                anymiss <- anymiss | !is.finite(suppressWarnings(
-                    as.numeric(as.character(data[[c_$measure]]))))
+                anymiss <- anymiss | !is.finite(numericMeasure(data[[c_$measure]]))
             for (bv in bsCols) anymiss <- anymiss | is.na(data[[bv]])
             n_miss <- sum(anymiss)
             missing_note <- if (n_miss > 0)
@@ -823,7 +829,7 @@ rmplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
             # ---- reshape wide -> long (subject x assigned cell) ---------
             pieces <- list()
             for (c_ in assigned) {
-                y <- suppressWarnings(as.numeric(as.character(data[[c_$measure]])))
+                y <- numericMeasure(data[[c_$measure]])
                 row <- data.frame(.subject = sid, .value = y,
                                   stringsAsFactors = FALSE, check.names = FALSE)
                 for (k in seq_along(factors)) {

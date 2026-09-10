@@ -2,8 +2,9 @@
 // export workflow.
 //
 // SVG must remain a named/described image outside Pandion. PDF receives the
-// same title/description as document metadata, while raster users receive
+// same description as tagged figure alternative text, while raster users receive
 // copyable companion text plus honest attachment guidance.
+// pdf-accessibility-check.mjs independently parses the full PDF structure.
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
@@ -74,7 +75,8 @@ ok(dialog.description.length > 40 && /chart|plot/i.test(dialog.description),
    'the export dialog starts with a useful generated description',
    dialog.description);
 ok(dialog.describedby === 'ps-export-description-help' &&
-   /SVG embeds/i.test(dialog.help) && /PDF/i.test(dialog.help) &&
+   /SVG embeds/i.test(dialog.help) && /PDF.*embeds/i.test(dialog.help) &&
+   /tagged document/i.test(dialog.help) && /separate data table/i.test(dialog.help) &&
    /PNG or JPG/i.test(dialog.help) && /alt text|long description/i.test(dialog.help),
    'the dialog explains vector, PDF, and raster accessibility behavior');
 ok(/Copy description/i.test(dialog.copyName),

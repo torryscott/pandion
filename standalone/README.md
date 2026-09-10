@@ -8,6 +8,40 @@ punch lists are maintainer-local and not published with this repo.
 
 ## Status
 
+- Final usability follow-up (Sep 9, 2026): bar-style choices expose selected
+  states and retain keyboard focus. Help me choose completes the pristine
+  chart it was opened from (UX-06); explicit New chart still creates one.
+  Menus and submenus stay open after a hover-then-click, with reliable Escape
+  navigation (UX-07). See [validation and pending hands-on acceptance](../docs/UX-FINAL-VALIDATION.md).
+
+- UX-05 (Sep 9, 2026): layout actions wrap individually in narrow workspaces,
+  keeping Panel label and Add image visible beside resized side panels.
+  Verified by mouse and keyboard in source, portable, and web builds, plus
+  the existing layout and reflow probes. See
+  [validation](../docs/UX-05-VALIDATION.md).
+
+- UX-04 (Sep 9, 2026): error-bar Type and repeated-measures Method buttons
+  expose the current choice through `aria-pressed`, including after redraws
+  and host updates. The `control-focus-check` regression checks the browser
+  accessibility tree as well as keyboard focus. See
+  [validation and remaining screen-reader acceptance](../docs/UX-04-VALIDATION.md).
+
+- UX-03 (Sep 9, 2026): error-bar Type and Method choices keep their keyboard
+  position after redraws. Filter-variable and comparison changes restore
+  the same control; adding or removing a condition focuses the next useful
+  variable selector. Regression: `control-focus-check`, also exercised on
+  R-generated charts by the shared renderer suite. See
+  [validation and host limitations](../docs/UX-03-VALIDATION.md).
+
+- Usability follow-up (Sep 7, 2026): computed grid cells refresh immediately
+  after source edits and cell exclusions, including formula chains,
+  whole-column formulas, and changes to filter state. Repeated-measures
+  status distinguishes cases from measurements, accounts for exclusions,
+  and reports complete cases when fewer cases have every selected measure.
+  Regression probes: `computed-grid-refresh-check` and `case-count-check`,
+  included in the source/dist feature suite. See
+  [the validation receipt](../docs/USABILITY-FIXES-2026-09-07.md).
+
 - SWEEP FIXES DONE (Jul 25 2026): first pass on a 125-item audit tracked in
   the maintainer-local punch list. FORTY-FIVE fixed, ONE rejected. THE BUG
   TIER (B1-B24) IS CLEAR.
@@ -935,6 +969,19 @@ punch lists are maintainer-local and not published with this repo.
   picker; other browsers download normally. The probe byte-checks real
   SVG, PNG, JPG and PDF output, asserts that ordinary chart PDFs do not
   contain image objects, and covers a two-panel labelled layout.
+- PDF figure accessibility (September 9, 2026): chart, layout and Notebook
+  exports now contain a Document/Figure structure tree, a full Unicode figure
+  alternative linked to each page's marked drawing, English document language,
+  and page reading order. Newly kept Notebook pages retain their description
+  with the capture; included record notes and comparison text travel in the
+  alternative. Older vector pages fall back to their retained labels, and old
+  bitmap pages use their recorded source and note. Review descriptions before
+  publishing, especially for older pages and multi-panel figures. These are
+  figure exports, not structured data tables or a PDF/UA certification.
+  `pdf-accessibility-check.mjs` drives the export routes and checks actual PDF
+  objects/content with `pypdf==6.10.0` in `python3` (override with `PS_PYTHON`).
+  Institutional PDF-reader/screen-reader acceptance remains necessary; see
+  [A11Y-01 validation](../docs/A11Y-01-VALIDATION.md).
 - M2m DONE (Jul 22 2026): Cmd/Ctrl+S SAVES the project (window-capture
   keydown beats the browser's save-page dialog). Where the File System
   Access API exists (Chrome/Edge), the FIRST save picks the .pand file
@@ -1159,21 +1206,20 @@ most misleading page in the repo. What actually still holds:
   older wording here said so long after it stopped being true.
 - **LOESS draws a curve and no confidence band** (Torry, Aug 10 2026). This
   replaces the old "the band is approximate, and says so" treatment.
-  The CURVE is exact-R and always was: measured against `stats::loess` on
-  three shapes (n = 40, 60, 200; span 0.75, degree 2) the maximum difference
-  was `0.0000`. The BAND ran 3 to 4.5% NARROW, because `loessFit` estimates
-  the effective degrees of freedom as `1.2 * (n / q)` instead of tracing the
-  smoother, which floors `pEff` at 2 where R's `enp` is about 4.35. The error
-  was a constant scalar rather than a shape error, and it erred toward
-  overconfidence. Substituting R's own `enp` closes it to 0.2 to 1.2%, so the
-  arithmetic is fixable; the call was that a band which is quietly too tight
-  is worse than no band, and that a curve matching R exactly should not be
-  withdrawn over it.
-  Mechanism: `buildXY` omits `lwrs`/`uprs` from a loess fit's points. The
-  engine gates the band on `_fit.points[0].lwr !== undefined`
-  (`graphbuilder2.js` ~35084), so this needs NO engine change, and the jamovi
-  module keeps drawing its own bands, which come from R's `loess` and are
-  exact. Linear and polynomial fits are exact-R and keep theirs.
+  The curve targets R's direct Gaussian quadratic smoother; Jamovi's final
+  curve uses R's default interpolated surface, so the two can differ.
+  Permanent independent references cover 75 cases, including unit changes,
+  tied/irregular x, span boundaries and singular local designs. The curve is
+  withheld with an explanation when any requested neighborhood cannot fit a
+  quadratic. See the [regression contract](../docs/REGRESSION-VALIDATION.md).
+  Approximate bands have also been removed from the shared preview. Earlier band-error
+  estimates compared against an R-side calculation that itself used the
+  wrong degrees of freedom; they should not be used as accuracy evidence.
+  Jamovi keeps its R-computed intervals, now using the residual degrees of
+  freedom supplied by `predict.loess` (see the numerical change ledger).
+  Linear and polynomial fits use scaled QR and are checked against R within
+  numerical tolerances. At exactly degree + 1 observations, their fitted
+  curve is available but the confidence band is undefined and omitted.
   The Confidence band control belongs to the shared engine and stays
   tickable, so ticking it on a loess chart appends "LOESS is drawn without a
   confidence band" to the `missingNote` pill: an explanation on screen, and
@@ -1272,8 +1318,19 @@ moved standalone/ folder shows "chart engine failed to load" - the data and
 roles UI still render because those files live inside standalone/).
 
 ```
-bash standalone/verify/run.sh          # all probes incl. dist (parity needs jmvcore)
+bash standalone/verify/run.sh          # all probes incl. dist (R parity needs jmvcore + car; Python scipy)
 ```
+
+Release coverage, independent references, current evidence and remaining
+acceptance work are recorded in [docs/RELEASE-VALIDATION.md](../docs/RELEASE-VALIDATION.md).
+The statistics workflow is also a required job of the tag-release workflow.
+The SciPy checker fails on incomplete references or unexpected calculation
+errors; its negative controls and the workspace sequence model run in CI.
+The regression boundary and small-probability suites also run in the release
+gate. The compiled-core tail check needs `acorn@8` alongside the probe's Node
+dependencies (or set `GB2_PARSE_BASE` to a directory containing its
+`node_modules`). It checks unformatted probabilities in the actual minified
+engine; a displayed `p < .001` is insufficient evidence for a tiny tail.
 
 ```
 Rscript standalone/build-templates.R   # regenerate templates (needs jmvcore)
@@ -1331,5 +1388,15 @@ Rscript standalone/build-templates.R   # regenerate templates (needs jmvcore)
 - Set `window.__gb2_authoritativeRender = true` before every shell-initiated
   render.
 - Never persist underscore-prefixed keys; keep source ASCII (escapes only).
-- Shell numerics round to 10 significant digits (`toPrecision(10)`) to match
-  jsonlite's `digits = I(10)` so echoes hash-match the engine's folds.
+- Workspace data, chart payloads and preview intermediates retain full IEEE-754
+  double precision. R serializes with `digits = I(17)`; `digits = NA` still
+  limits jsonlite to 15 digits. `PSStat.sigR` and `_gb2SigR` are legacy
+  identity helpers. Never round observations to force preview/echo hashes to
+  match: the authoritative render corrects ordinary R/JS floating-point
+  differences. Formatting is applied only to displayed labels.
+- Project snapshot v5 / `.pand` wrapper v3 marks full computed precision.
+  Older projects recalculate with a notice; older readers refuse new files.
+  Validate table shape and metadata before adopting a snapshot. Prepare its
+  typed table before replacing live data, then clear history and import
+  libraries only after successful adoption. `data-integrity-check.mjs`
+  pins precision, unusual names, and damaged-file refusal.

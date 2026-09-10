@@ -1372,6 +1372,65 @@
         };
     }
 
+    // XML 1.0 cannot represent C0 controls (except TAB/LF/CR), lone
+    // UTF-16 surrogates, or U+FFFE/U+FFFF. Escape only those code units
+    // for display; valid Unicode, including supplementary pairs, is intact.
+    // This is a presentation boundary, NEVER a data/group-key normalizer.
+    function _gb2XmlSafeText(value) {
+        return String(value == null ? "" : value).replace(
+            /[\u0000-\u0008\u000b\u000c\u000e-\u001f\ud800-\udfff\ufffe\uffff]/g,
+            function (ch, at, text) {
+                var c = ch.charCodeAt(0);
+                if (c >= 0xd800 && c <= 0xdbff && at + 1 < text.length) {
+                    var next = text.charCodeAt(at + 1);
+                    if (next >= 0xdc00 && next <= 0xdfff) return ch;
+                }
+                if (c >= 0xdc00 && c <= 0xdfff && at > 0) {
+                    var prev = text.charCodeAt(at - 1);
+                    if (prev >= 0xd800 && prev <= 0xdbff) return ch;
+                }
+                return "\\u" + ("0000" + c.toString(16).toUpperCase()).slice(-4);
+            });
+    }
+    function _gb2SetSvgTextContent(el, value) {
+        var raw = String(value == null ? "" : value);
+        var safe = _gb2XmlSafeText(raw);
+        // JSON is lossless even when a literal label spells the same escape.
+        // Keep it on the element so clones retain it and editors read the
+        // original, rather than committing a displayed escape back to data.
+        if (safe !== raw)
+            el.setAttribute("data-gb2-raw-text", _gb2XmlSafeText(JSON.stringify(raw)));
+        else el.removeAttribute("data-gb2-raw-text");
+        el.textContent = safe;
+        return safe;
+    }
+    function _gb2PrepareSvgForExport(copy) {
+        // Mutate an export clone only. Live data-* values still identify
+        // exact groups/facets for interactions and statistical selection.
+        var nodes = [copy], all = copy.querySelectorAll("*");
+        for (var i = 0; i < all.length; i++) nodes.push(all[i]);
+        for (var j = 0; j < nodes.length; j++) {
+            var el = nodes[j], rawAttrs = null;
+            for (var a = 0; a < el.attributes.length; a++) {
+                var attr = el.attributes[a], safe = _gb2XmlSafeText(attr.value);
+                if (safe === attr.value) continue;
+                if (!rawAttrs) rawAttrs = Object.create(null);
+                rawAttrs[attr.name] = attr.value;
+                attr.value = safe;
+            }
+            if (rawAttrs) el.setAttribute("data-gb2-raw-attributes",
+                _gb2XmlSafeText(JSON.stringify(rawAttrs)));
+            // Backstop for metadata, shell captions, and future SVG text
+            // paths. Normal chart labels are escaped BEFORE measurement.
+            for (var child = el.firstChild; child; child = child.nextSibling) {
+                if (child.nodeType !== 3 && child.nodeType !== 4 && child.nodeType !== 8) continue;
+                var text = _gb2XmlSafeText(child.nodeValue);
+                if (text !== child.nodeValue) child.nodeValue = text;
+            }
+        }
+        return copy;
+    }
+
     function svgEl(tag, attrs) {
         var el = document.createElementNS(SVGNS, tag);
         if (attrs) for (var k in attrs) el.setAttribute(k, attrs[k]);
@@ -1537,24 +1596,33 @@
     var _gb2Stats = {
         mean: function (a) {
             if (!a || a.length === 0) return NaN;
-            var s = 0, k = 0;
+            var s = 0, k = 0, first, same = true;
             for (var i = 0; i < a.length; i++) {
-                if (isFinite(a[i])) { s += a[i]; k++; }
+                if (isFinite(a[i])) {
+                    if (k === 0) first = a[i];
+                    else if (a[i] !== first) same = false;
+                    s += a[i]; k++;
+                }
             }
-            return k > 0 ? s / k : NaN;
+            // Repeated addition can move the mean of identical doubles by
+            // several ulps (and by different amounts at different n). That
+            // must never invent variation or a significant group difference.
+            return k > 0 ? (same ? first : s / k) : NaN;
         },
         // Sample variance (Bessel-corrected, n-1 denominator).
         variance: function (a, m) {
             if (!a || a.length < 2) return NaN;
             if (m === undefined) m = this.mean(a);
-            var s = 0, k = 0;
+            var s = 0, k = 0, first, same = true;
             for (var i = 0; i < a.length; i++) {
                 if (isFinite(a[i])) {
+                    if (k === 0) first = a[i];
+                    else if (a[i] !== first) same = false;
                     var d = a[i] - m;
                     s += d * d; k++;
                 }
             }
-            return k > 1 ? s / (k - 1) : NaN;
+            return k > 1 ? (same ? 0 : s / (k - 1)) : NaN;
         },
         sd: function (a, m) { return Math.sqrt(this.variance(a, m)); },
         // Welch's two-sample t (unequal variances) — the canonical
@@ -1867,12 +1935,21 @@
             return s;
         },
         // F-distribution CDF: Pr(F <= f) for df1, df2 > 0, via the
-        // same regularized incomplete beta that backs _tCDF. The upper
-        // tail (1 - this) is the ANOVA omnibus p-value.
+        // same regularized incomplete beta that backs _tCDF. Use fSurvival
+        // directly for p values: subtracting this CDF from 1 loses tiny tails.
         fCDF: function (f, df1, df2) {
             if (!isFinite(f) || f <= 0 || !(df1 > 0) || !(df2 > 0)) return 0;
             var x = (df1 * f) / (df1 * f + df2);
             return this._incompleteBeta(x, df1 / 2, df2 / 2);
+        },
+        // R pf(f, df1, df2, lower.tail = FALSE), using the complementary
+        // beta identity rather than 1 - a rounded-to-one CDF.
+        fSurvival: function (f, df1, df2) {
+            if (!(df1 > 0) || !(df2 > 0) || isNaN(f)) return NaN;
+            if (f <= 0) return 1;
+            if (f === Infinity) return 0;
+            var x = 1 / (1 + (df1 / df2) * f);
+            return this._incompleteBeta(x, df2 / 2, df1 / 2);
         },
         // One-way ANOVA across k level-arrays (each an array of raw
         // values; non-finite entries dropped). Returns the omnibus
@@ -1908,7 +1985,7 @@
             if (df2 < 1 || !(ssw > 0)) return null;
             var msb = ssb / df1, msw = ssw / df2;
             var F = msb / msw;
-            var p = 1 - this.fCDF(F, df1, df2);
+            var p = this.fSurvival(F, df1, df2);
             var sst = ssb + ssw;
             var etaSq = sst > 0 ? ssb / sst : NaN;
             return { F: F, df1: df1, df2: df2, p: p,
@@ -1944,6 +2021,87 @@
             }
             return beta;
         },
+        // Repeated-measures error, computed on occasion differences before
+        // removing cell and subject means. This avoids subtracting large
+        // subject/treatment sums of squares to recover a tiny residual.
+        _repeatedAnovaMoments: function (rows, groups) {
+            var N = rows.length, k = rows[0].length, origin = rows[0][0];
+            var centered = [], differences = [], z = [], cells = {}, i, j;
+            for (i = 0; i < N; i++) {
+                var cr = [], dr = [];
+                for (j = 0; j < k; j++) {
+                    cr.push(rows[i][j] - origin);
+                    dr.push(rows[i][j] - rows[i][0]);
+                }
+                centered.push(cr); differences.push(dr);
+                var dm = this.mean(dr);
+                z.push(dr.map(function (v) { return v - dm; }));
+                var group = groups ? groups[i] : 0;
+                if (!cells[group]) cells[group] = [];
+                cells[group].push(i);
+            }
+            var errorRows = [], cellMeans = {}, sse = 0, maxError = 0;
+            for (var key in cells) {
+                if (!Object.prototype.hasOwnProperty.call(cells, key)) continue;
+                var ids = cells[key], base = differences[ids[0]], means = [], actualMeans = [];
+                for (j = 0; j < k; j++) {
+                    var deviations = [];
+                    for (i = 0; i < ids.length; i++) deviations.push(differences[ids[i]][j] - base[j]);
+                    means.push(this.mean(deviations));
+                    actualMeans.push(base[j] + means[j]);
+                }
+                cellMeans[key] = actualMeans;
+                for (i = 0; i < ids.length; i++) {
+                    var dr2 = differences[ids[i]], e = [];
+                    for (j = 0; j < k; j++) e.push((dr2[j] - base[j]) - means[j]);
+                    var em = this.mean(e);
+                    for (j = 0; j < k; j++) {
+                        e[j] -= em;
+                        sse += e[j] * e[j]; maxError = Math.max(maxError, Math.abs(e[j]));
+                    }
+                    errorRows.push(e);
+                }
+            }
+            // These residual vectors already have zero occasion/subject
+            // means. Their cross-product is the GG covariance numerator;
+            // its common scaling cancels from epsilon. Normalize first to
+            // avoid squaring very large or very small covariance entries.
+            var tr = 0, ss = 0;
+            if (maxError > 0) for (var a = 0; a < k; a++) for (var b = 0; b < k; b++) {
+                var cross = 0;
+                for (i = 0; i < errorRows.length; i++)
+                    cross += (errorRows[i][a] / maxError) * (errorRows[i][b] / maxError);
+                if (a === b) tr += cross;
+                ss += cross * cross;
+            }
+            var eps = k === 2 ? 1 : (ss > 0 ? tr * tr / ((k - 1) * ss) : 1);
+            eps = Math.min(1, Math.max(1 / (k - 1), eps));
+            return { rows: centered, z: z, cellMeans: cellMeans, sse: sse, eps: eps };
+        },
+        // Full factorial residual SS is within-cell variation. Subtract a
+        // cell observation before averaging, so tiny real residuals survive
+        // beside a large cell mean and constant cells stay exactly constant.
+        _factorialResidualSS: function (obs, dimensions) {
+            var cells = {}, keys = ["ai", "bi", "ci"], i, j;
+            for (i = 0; i < obs.length; i++) {
+                var key = 0;
+                for (j = 0; j < dimensions.length; j++) key = key * dimensions[j] + obs[i][keys[j]];
+                if (!cells[key]) cells[key] = [];
+                cells[key].push(obs[i].y);
+            }
+            var rss = 0;
+            for (var ck in cells) {
+                if (!Object.prototype.hasOwnProperty.call(cells, ck)) continue;
+                var values = cells[ck], origin = values[0], centered = [];
+                for (i = 0; i < values.length; i++) centered.push(values[i] - origin);
+                var mean = this.mean(centered);
+                for (i = 0; i < centered.length; i++) {
+                    var residual = centered[i] - mean;
+                    rss += residual * residual;
+                }
+            }
+            return rss;
+        },
         // Two-way ANOVA with interaction — Type III sums of squares via
         // sum-to-zero contrasts (jamovi's ANOVA defaults): each term's
         // SS = RSS(model without the term) - RSS(full model), with the
@@ -1954,6 +2112,11 @@
         // sum-coded model matrices (unbalanced data, where the SS types
         // genuinely differ).
         twoWayANOVA: function (obs, a, b) {
+            if (!obs || !obs.length) return null;
+            var origin = obs[0].y;
+            obs = obs.map(function (o) {
+                return { ai: o.ai, bi: o.bi, y: o.y - origin };
+            });
             if (!(a >= 2) || !(b >= 2)) return null;
             var N = obs.length, i;
             var dfe = N - a * b;
@@ -2000,7 +2163,7 @@
                     if (keep[asgn[c]]) cols.push(c);
                 }
                 var p = cols.length;
-                var XtX = [], Xty = [], yty = 0, r2;
+                var XtX = [], Xty = [], r2;
                 for (r2 = 0; r2 < p; r2++) {
                     XtX.push(new Array(p).fill ? new Array(p) : []);
                     for (var c2 = 0; c2 < p; c2++) XtX[r2][c2] = 0;
@@ -2009,7 +2172,6 @@
                 for (var o2 = 0; o2 < N; o2++) {
                     var full = xrow(obs[o2].ai, obs[o2].bi);
                     var yc = obs[o2].y - gm;   // centered for conditioning
-                    yty += yc * yc;
                     for (var u2 = 0; u2 < p; u2++) {
                         var xu = full[cols[u2]];
                         if (xu === 0) continue;
@@ -2024,11 +2186,16 @@
                 }
                 var beta = self2._solveLS(XtX, Xty, p);
                 if (!beta) return NaN;
-                var fit = 0;
-                for (var u4 = 0; u4 < p; u4++) fit += beta[u4] * Xty[u4];
-                return Math.max(0, yty - fit);
+                var rss = 0;
+                for (var o3 = 0; o3 < N; o3++) {
+                    var full3 = xrow(obs[o3].ai, obs[o3].bi), fitted = 0;
+                    for (var u4 = 0; u4 < p; u4++) fitted += beta[u4] * full3[cols[u4]];
+                    var residual = (obs[o3].y - gm) - fitted;
+                    rss += residual * residual;
+                }
+                return rss;
             }
-            var rssFull = rssFor({ 0: 1, 1: 1, 2: 1, 3: 1 });
+            var rssFull = this._factorialResidualSS(obs, [a, b]);
             var rssA   = rssFor({ 0: 1, 2: 1, 3: 1 });
             var rssB   = rssFor({ 0: 1, 1: 1, 3: 1 });
             var rssAB  = rssFor({ 0: 1, 1: 1, 2: 1 });
@@ -2041,7 +2208,7 @@
                 var ss = Math.max(0, rssRed - rssFull);
                 var F = (ss / df) / mse;
                 return { ss: ss, df: df, F: F,
-                         p: 1 - self3.fCDF(F, df, dfe) };
+                         p: self3.fSurvival(F, df, dfe) };
             }
             return {
                 A: term(rssA, pA), B: term(rssB, pB), AB: term(rssAB, pAB),
@@ -2055,6 +2222,11 @@
         // Verified against R sum-coded model comparisons on unbalanced
         // 2x2x3 data (all 7 SS + F match to 1e-3).
         threeWayANOVA: function (obs, a, b, c) {
+            if (!obs || !obs.length) return null;
+            var origin = obs[0].y;
+            obs = obs.map(function (o) {
+                return { ai: o.ai, bi: o.bi, ci: o.ci, y: o.y - origin };
+            });
             if (!(a >= 2) || !(b >= 2) || !(c >= 2)) return null;
             var N = obs.length, i;
             var dfe = N - a * b * c;
@@ -2099,12 +2271,11 @@
             function rssFor(keep) {
                 var cols = [];
                 for (var cc = 0; cc < asgn.length; cc++) if (keep[asgn[cc]]) cols.push(cc);
-                var p = cols.length, XtX = [], Xty = [], yty = 0, r2, c2;
+                var p = cols.length, XtX = [], Xty = [], r2, c2;
                 for (r2 = 0; r2 < p; r2++) { XtX.push(new Array(p)); for (c2 = 0; c2 < p; c2++) XtX[r2][c2] = 0; Xty.push(0); }
                 for (var o2 = 0; o2 < N; o2++) {
                     var full = xrow(obs[o2].ai, obs[o2].bi, obs[o2].ci);
                     var yc = obs[o2].y - gm;
-                    yty += yc * yc;
                     for (var u2 = 0; u2 < p; u2++) {
                         var xu = full[cols[u2]];
                         if (xu === 0) continue;
@@ -2115,12 +2286,17 @@
                 for (var u3 = 0; u3 < p; u3++) for (var v4 = 0; v4 < u3; v4++) XtX[u3][v4] = XtX[v4][u3];
                 var beta = self2._solveLS(XtX, Xty, p);
                 if (!beta) return NaN;
-                var fit = 0;
-                for (var u4 = 0; u4 < p; u4++) fit += beta[u4] * Xty[u4];
-                return Math.max(0, yty - fit);
+                var rss = 0;
+                for (var o3 = 0; o3 < N; o3++) {
+                    var full3 = xrow(obs[o3].ai, obs[o3].bi, obs[o3].ci), fitted = 0;
+                    for (var u4 = 0; u4 < p; u4++) fitted += beta[u4] * full3[cols[u4]];
+                    var residual = (obs[o3].y - gm) - fitted;
+                    rss += residual * residual;
+                }
+                return rss;
             }
             var FULL = { 0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1 };
-            var rssFull = rssFor(FULL);
+            var rssFull = this._factorialResidualSS(obs, [a, b, c]);
             function drop(term) { var k = {}; for (var kk in FULL) k[kk] = FULL[kk]; k[term] = 0; return rssFor(k); }
             var rssA = drop(1), rssB = drop(2), rssC = drop(3),
                 rssAB = drop(4), rssAC = drop(5), rssBC = drop(6), rssABC = drop(7);
@@ -2132,7 +2308,7 @@
             function term(rssRed, df) {
                 var ss = Math.max(0, rssRed - rssFull);
                 var F = (ss / df) / mse;
-                return { ss: ss, df: df, F: F, p: 1 - self3.fCDF(F, df, dfe) };
+                return { ss: ss, df: df, F: F, p: self3.fSurvival(F, df, dfe) };
             }
             return {
                 A: term(rssA, pA), B: term(rssB, pB), C: term(rssC, pC),
@@ -2171,7 +2347,7 @@
             return this._logGamma(a) + this._logGamma(b) - this._logGamma(a + b);
         },
         _incompleteBetaCF: function (x, a, b) {
-            var MAXIT = 200, EPS = 3e-7, FPMIN = 1e-30;
+            var MAXIT = 500, EPS = 3e-14, FPMIN = 1e-300;
             var qab = a + b, qap = a + 1, qam = a - 1;
             var c = 1, d = 1 - qab * x / qap;
             if (Math.abs(d) < FPMIN) d = FPMIN;
@@ -2217,10 +2393,11 @@
         // "greater" = upper tail (sample1 predicted above sample2).
         _tTailP: function (t, df, tail) {
             if (!isFinite(t) || !(df > 0)) return NaN;
-            var lower = (t >= 0) ? this._tCDF(t, df) : 1 - this._tCDF(t, df);
-            if (tail === "greater") return 1 - lower;
-            if (tail === "less") return lower;
-            return 2 * (1 - this._tCDF(Math.abs(t), df));
+            var x = df / (df + t * t);
+            var small = 0.5 * this._incompleteBeta(x, df / 2, 0.5);
+            if (tail === "greater") return t >= 0 ? small : 1 - small;
+            if (tail === "less") return t <= 0 ? small : 1 - small;
+            return 2 * small;
         },
         // ---- Non-parametric tests --------------------------------
         //
@@ -2797,9 +2974,13 @@
     // - the axis line still extends visually to 95 but no "95" label is drawn.
     function buildTicks(yMin, yMax, step) {
         var ticks = [];
+        if (!isFinite(yMin) || !isFinite(yMax) || !isFinite(step) || step <= 0 || yMax < yMin) return ticks;
         var first = Math.ceil(yMin / step) * step;
-        for (var v = first; v <= yMax + step * 1e-6; v += step) {
+        for (var v = first; isFinite(v) && v <= yMax + step * 1e-6; v += step) {
             ticks.push(v);
+            // At very narrow ranges around a nonzero offset, a positive
+            // step can round away entirely. Never append that tick forever.
+            if (!(v + step > v)) break;
         }
         return ticks;
     }
@@ -3125,7 +3306,7 @@
             measureText._ctx = canvas.getContext("2d");
         }
         measureText._ctx.font = (fontWeight || "normal") + " " + fontSize + "px sans-serif";
-        return measureText._ctx.measureText(text || "").width;
+        return measureText._ctx.measureText(_gb2XmlSafeText(text || "")).width;
     }
 
     function render(elementId, data) {
@@ -3551,12 +3732,16 @@
                     var _wantFitType = (typeof data.xyFitType === "string" && data.xyFitType.length) ? data.xyFitType : "linear";
                     var _haveFitType = data.xyFits[0] && data.xyFits[0].fit_type;
                     var _typeStale = !!(_haveFitType && _haveFitType !== _wantFitType);
-                    if (_fgActive || _typeStale) {
+                    // Older saved/host payloads may carry pooled fits with
+                    // no facet tag. Recompute per cell before painting them.
+                    var _facetStale = (!!data.facetLabel || (Array.isArray(data.facetLevels) && data.facetLevels.length > 0))
+                        && data.xyFits.some(function (fit) { return fit && fit.facet == null; });
+                    if (_fgActive || _typeStale || _facetStale) {
                         var _gT = _fgActive ? _fg.fitType : _wantFitType;
                         var _gC = _fgActive ? _fg.ciLevel : ((typeof data.xyCILevel === "number" && data.xyCILevel > 0 && data.xyCILevel < 1) ? data.xyCILevel : 0.95);
                         var _gS = _fgActive ? _fg.loessSpan : ((typeof data.xyLoessSpan === "number" && data.xyLoessSpan > 0) ? data.xyLoessSpan : 0.75);
                         var _cfGuard = _xyComputeFitsClient(_gT, _gC, _gS);
-                        if (_cfGuard) data.xyFits = _cfGuard;
+                        data.xyFits = _cfGuard || [];
                     }
                 }
             } catch (_eFitGuard) {}
@@ -6658,7 +6843,7 @@
         } else if (!Array.isArray(data.hiddenFacets)) {
             data.hiddenFacets = [];
         }
-        var _hiddenFacets = {};
+        var _hiddenFacets = Object.create(null);
         if (Array.isArray(data.hiddenFacets)) {
             for (var _hfi = 0; _hfi < data.hiddenFacets.length; _hfi++) {
                 _hiddenFacets[data.hiddenFacets[_hfi]] = true;
@@ -7017,12 +7202,9 @@
                 el.setAttribute("xml:space", "preserve");
                 el.style.whiteSpace = "pre";
             } catch (_eXs) {}
+            var s = _gb2SetSvgTextContent(el, content);
+            if (s.indexOf("\n") < 0) return;
             while (el.firstChild) el.removeChild(el.firstChild);
-            var s = String(content == null ? "" : content);
-            if (s.indexOf("\n") < 0) {
-                el.textContent = s;
-                return;
-            }
             var lines = s.split("\n");
             // The tspans inherit x from the parent <text>, but we set
             // it explicitly so each line shares the same horizontal
@@ -8842,8 +9024,24 @@
         }
         function _ensureChartRoomFor(el) {
             if (!el || !svg) return;
-            var bb;
-            try { bb = el.getBoundingClientRect(); } catch (e) { return; }
+            var bb, legendHit = null, legendHitStyle = null;
+            try {
+                // The transparent legend drag target is sized on a later
+                // animation frame. Its four-pixel padding must not grow the
+                // figure between two otherwise identical renders.
+                legendHit = el.querySelector && el.querySelector('[data-role="legend-bg"]');
+                if (legendHit) {
+                    legendHitStyle = legendHit.getAttribute("style");
+                    legendHit.style.setProperty("display", "none", "important");
+                }
+                bb = el.getBoundingClientRect();
+            } catch (e) { return; }
+            finally {
+                if (legendHit) {
+                    if (legendHitStyle === null) legendHit.removeAttribute("style");
+                    else legendHit.setAttribute("style", legendHitStyle);
+                }
+            }
             if (!bb || (bb.width === 0 && bb.height === 0)) return;
             var svgBb = svg.getBoundingClientRect();
             var elLeft = bb.left - svgBb.left;
@@ -9137,7 +9335,7 @@
         // array of wrapped lines; empty text returns [].
         function _wrapChartNote(text, maxW, style) {
             var out = [];
-            var raw = String(text == null ? "" : text);
+            var raw = _gb2XmlSafeText(text);
             if (raw.length === 0) return out;
             var fs = (style && style.fontSize) || 11;
             var wt = (style && style.bold) ? "600" : "400";
@@ -11340,7 +11538,7 @@
                 '[data-role="anatomy-overlay"], [data-role="anatomy-capture"],' +
                 '[data-role="stats-link-halo"], [data-role="alignment-guides"],' +
                 '[data-role="refline-handle"], [data-role="ann-rot-line"],' +
-                '[data-role="ann-rot-handle"],' +
+                '[data-role="ann-rot-handle"], [data-role="legend-bg"],' +
                 '[data-role="freq-pie-seam-glow"], [data-role="freq-donut-hole-glow"],' +
                 '[data-role="data-point-selected"], [data-role="freq-pie-rotate-handle"],' +
                 '[data-role="gap-seam-chrome"]'
@@ -11521,7 +11719,7 @@
                     t.setAttribute("font-style", "normal");
                 }
             }
-            return copy;
+            return _gb2PrepareSvgForExport(copy);
         }
 
         function serializeSvgForExport() {
@@ -14704,73 +14902,17 @@
             }
             var n = rows.length;
             if (n < 2) return { ok: false, reason: "rm-too-few-subjects" };
-            var gm = 0, ri, cj;
-            for (ri = 0; ri < n; ri++)
-                for (cj = 0; cj < k; cj++) gm += rows[ri][cj];
-            gm /= (n * k);
-            var rowM = [], colM = [];
-            for (ri = 0; ri < n; ri++) {
-                var rs = 0;
-                for (cj = 0; cj < k; cj++) rs += rows[ri][cj];
-                rowM.push(rs / k);
+            var moments = _gb2Stats._repeatedAnovaMoments(rows);
+            var means = moments.cellMeans[0], gm = _gb2Stats.mean(means), sstr = 0;
+            for (var cj = 0; cj < k; cj++) {
+                var dt = means[cj] - gm; sstr += n * dt * dt;
             }
-            for (cj = 0; cj < k; cj++) {
-                var cs = 0;
-                for (ri = 0; ri < n; ri++) cs += rows[ri][cj];
-                colM.push(cs / n);
-            }
-            var sst = 0, sss = 0, sstr = 0;
-            for (ri = 0; ri < n; ri++) for (cj = 0; cj < k; cj++) {
-                var dd = rows[ri][cj] - gm; sst += dd * dd;
-            }
-            for (ri = 0; ri < n; ri++) {
-                var ds = rowM[ri] - gm; sss += ds * ds;
-            }
-            sss *= k;
-            for (cj = 0; cj < k; cj++) {
-                var dt = colM[cj] - gm; sstr += dt * dt;
-            }
-            sstr *= n;
-            var sse = sst - sss - sstr;
-            var df1 = k - 1, df2 = (k - 1) * (n - 1);
-            if (!(sse > 0) || df2 < 1) {
+            var sse = moments.sse, df1 = k - 1, df2 = (k - 1) * (n - 1);
+            if (!(sse > 0) || !isFinite(sse) || df2 < 1)
                 return { ok: false, reason: "anova-degenerate" };
-            }
-            var F = (sstr / df1) / (sse / df2);
-            // Greenhouse-Geisser epsilon: double-center the occasion
-            // covariance matrix S (B = CSC), then
-            // eps = tr(B)^2 / ((k-1) * sum(B_ij^2)), clamped to
-            // [1/(k-1), 1].
-            var S = [];
-            for (ri = 0; ri < k; ri++) {
-                S.push([]);
-                for (cj = 0; cj < k; cj++) {
-                    var cv = 0;
-                    for (var r2 = 0; r2 < n; r2++) {
-                        cv += (rows[r2][ri] - colM[ri]) *
-                              (rows[r2][cj] - colM[cj]);
-                    }
-                    S[ri].push(cv / (n - 1));
-                }
-            }
-            var sRowM = [], sGm = 0;
-            for (ri = 0; ri < k; ri++) {
-                var sr = 0;
-                for (cj = 0; cj < k; cj++) sr += S[ri][cj];
-                sRowM.push(sr / k); sGm += sr;
-            }
-            sGm /= (k * k);
-            var trB = 0, ssB = 0;
-            for (ri = 0; ri < k; ri++) for (cj = 0; cj < k; cj++) {
-                var bij = S[ri][cj] - sRowM[ri] - sRowM[cj] + sGm;
-                if (ri === cj) trB += bij;
-                ssB += bij * bij;
-            }
-            var eps = (ssB > 0) ? (trB * trB) / ((k - 1) * ssB) : 1;
-            if (!isFinite(eps)) eps = 1;
-            eps = Math.min(1, Math.max(eps, 1 / (k - 1)));
+            var F = (sstr / df1) / (sse / df2), eps = moments.eps;
             var df1c = eps * df1, df2c = eps * df2;
-            var p = 1 - _gb2Stats.fCDF(F, df1c, df2c);
+            var p = _gb2Stats.fSurvival(F, df1c, df2c);
             return {
                 ok: true,
                 testKind: "rmAnova",
@@ -14803,8 +14945,8 @@
         // (occasion identity = the facet-stripped category, the CG
         // omnibus convention). Within-level SS via the EXISTING Type III
         // twoWayANOVA on subject-centered data (grp is absorbed by the
-        // centering; with complete subjects the design is proportional,
-        // so all SS types agree) with the split-plot dfs substituted.
+        // centering; sum contrasts retain the Type III equal-marginal
+        // hypothesis when group sizes differ), with split-plot dfs.
         // eta-p per effect uses that effect's OWN error term. Verified
         // against R aov(y ~ grp*occ + Error(subj/occ)) + a hand pooled-
         // covariance GG on balanced AND unbalanced groups (mixedanova
@@ -14876,6 +15018,12 @@
             for (gi = 0; gi < G; gi++) {
                 if (nG[gi] < 2) return { ok: false, reason: "mixed-too-few-subjects" };
             }
+            var moments = _gb2Stats._repeatedAnovaMoments(
+                rows.map(function (r) { return r.y; }),
+                rows.map(function (r) { return r.g; }));
+            if (!(moments.sse > 0) || !isFinite(moments.sse))
+                return { ok: false, reason: "anova-degenerate" };
+            for (i = 0; i < N; i++) rows[i].y = moments.rows[i];
             // between level (one-way on subject means, scaled by k)
             var gm = 0;
             for (i = 0; i < N; i++) for (j = 0; j < k; j++) gm += rows[i].y[j];
@@ -14903,17 +15051,18 @@
                 return { ok: false, reason: "anova-degenerate" };
             }
             var Fgrp = (ssGrp / dfGrp) / (ssSubj / dfSubj);
-            var pGrp = 1 - _gb2Stats.fCDF(Fgrp, dfGrp, dfSubj);
+            var pGrp = _gb2Stats.fSurvival(Fgrp, dfGrp, dfSubj);
             // within level on subject-centered z
             var obsZ = [];
             for (i = 0; i < N; i++) for (j = 0; j < k; j++) {
-                obsZ.push({ ai: j, bi: rows[i].g, y: rows[i].y[j] - mSubj[i] });
+                obsZ.push({ ai: j, bi: rows[i].g, y: moments.z[i][j] });
             }
             var tw = null;
             try { tw = _gb2Stats.twoWayANOVA(obsZ, k, G); } catch (_eTw) {}
             if (!tw || tw.emptyCells || !tw.A) {
                 return { ok: false, reason: "anova-degenerate" };
             }
+            tw.sse = moments.sse;
             var dfOcc = k - 1, dfInt = (G - 1) * (k - 1), dfErr = (N - G) * (k - 1);
             if (dfErr < 1 || !(tw.sse > 0)) {
                 return { ok: false, reason: "anova-degenerate" };
@@ -14922,37 +15071,9 @@
             var Focc = (tw.A.ss / dfOcc) / msErr;
             var Fint = (tw.AB.ss / dfInt) / msErr;
             // GG eps from the POOLED within-group occasion covariance
-            var S = [], r2, c2;
-            for (r2 = 0; r2 < k; r2++) { S.push([]); for (c2 = 0; c2 < k; c2++) S[r2].push(0); }
-            var mGj = [];
-            for (gi = 0; gi < G; gi++) { mGj.push([]); for (j = 0; j < k; j++) mGj[gi].push(0); }
-            for (i = 0; i < N; i++) for (j = 0; j < k; j++) mGj[rows[i].g][j] += rows[i].y[j];
-            for (gi = 0; gi < G; gi++) for (j = 0; j < k; j++) mGj[gi][j] /= nG[gi];
-            for (i = 0; i < N; i++) {
-                for (r2 = 0; r2 < k; r2++) for (c2 = 0; c2 < k; c2++) {
-                    S[r2][c2] += (rows[i].y[r2] - mGj[rows[i].g][r2]) *
-                                 (rows[i].y[c2] - mGj[rows[i].g][c2]);
-                }
-            }
-            for (r2 = 0; r2 < k; r2++) for (c2 = 0; c2 < k; c2++) S[r2][c2] /= (N - G);
-            var sRowM = [], sGm = 0;
-            for (r2 = 0; r2 < k; r2++) {
-                var sr = 0;
-                for (c2 = 0; c2 < k; c2++) sr += S[r2][c2];
-                sRowM.push(sr / k); sGm += sr;
-            }
-            sGm /= (k * k);
-            var trB = 0, ssB = 0;
-            for (r2 = 0; r2 < k; r2++) for (c2 = 0; c2 < k; c2++) {
-                var bij = S[r2][c2] - sRowM[r2] - sRowM[c2] + sGm;
-                if (r2 === c2) trB += bij;
-                ssB += bij * bij;
-            }
-            var eps = (ssB > 0) ? (trB * trB) / ((k - 1) * ssB) : 1;
-            if (!isFinite(eps)) eps = 1;
-            eps = Math.min(1, Math.max(eps, 1 / (k - 1)));
-            var pOcc = 1 - _gb2Stats.fCDF(Focc, eps * dfOcc, eps * dfErr);
-            var pInt = 1 - _gb2Stats.fCDF(Fint, eps * dfInt, eps * dfErr);
+            var eps = moments.eps;
+            var pOcc = _gb2Stats.fSurvival(Focc, eps * dfOcc, eps * dfErr);
+            var pInt = _gb2Stats.fSurvival(Fint, eps * dfInt, eps * dfErr);
             return {
                 ok: true,
                 testKind: "mixedAnova",
@@ -15056,6 +15177,12 @@
                 if (nck === 0) return { ok: false, reason: "mixed-empty-cell" };
                 if (nck < 2) return { ok: false, reason: "mixed-too-few-subjects" };
             }
+            var moments = _gb2Stats._repeatedAnovaMoments(
+                rows.map(function (r) { return r.y; }),
+                rows.map(function (r) { return r.g * Fc + r.f; }));
+            if (!(moments.sse > 0) || !isFinite(moments.sse))
+                return { ok: false, reason: "anova-degenerate" };
+            for (i = 0; i < N; i++) rows[i].y = moments.rows[i];
             // between part: Type III two-way over subject means
             var mSubj = [], obsB = [];
             for (i = 0; i < N; i++) {
@@ -15072,10 +15199,11 @@
             // within part: Type III three-way on subject-centered data
             var obsZ = [];
             for (i = 0; i < N; i++) for (j = 0; j < k; j++)
-                obsZ.push({ ai: j, bi: rows[i].g, ci: rows[i].f, y: rows[i].y[j] - mSubj[i] });
+                obsZ.push({ ai: j, bi: rows[i].g, ci: rows[i].f, y: moments.z[i][j] });
             var thw = null;
             try { thw = _gb2Stats.threeWayANOVA(obsZ, k, G, Fc); } catch (_eW) {}
             if (!thw || thw.emptyCells || !thw.A) return { ok: false, reason: "anova-degenerate" };
+            thw.sse = moments.sse;
             var dfOcc = k - 1,
                 dfOG = (G - 1) * (k - 1),
                 dfOF = (Fc - 1) * (k - 1),
@@ -15083,46 +15211,12 @@
                 dfErr = (N - nBC) * (k - 1);
             if (dfErr < 1 || !(thw.sse > 0)) return { ok: false, reason: "anova-degenerate" };
             var msErr = thw.sse / dfErr;
-            // GG eps from the pooled within-cell occasion covariance
-            var S = [], r2, c2;
-            for (r2 = 0; r2 < k; r2++) { S.push([]); for (c2 = 0; c2 < k; c2++) S[r2].push(0); }
-            var mCj = {};
-            for (i = 0; i < N; i++) {
-                var ck2 = rows[i].g + "|" + rows[i].f;
-                if (!mCj[ck2]) { mCj[ck2] = []; for (j = 0; j < k; j++) mCj[ck2].push(0); }
-                for (j = 0; j < k; j++) mCj[ck2][j] += rows[i].y[j];
-            }
-            for (var ckk in mCj) {
-                if (!Object.prototype.hasOwnProperty.call(mCj, ckk)) continue;
-                for (j = 0; j < k; j++) mCj[ckk][j] /= nCell[ckk];
-            }
-            for (i = 0; i < N; i++) {
-                var mm = mCj[rows[i].g + "|" + rows[i].f];
-                for (r2 = 0; r2 < k; r2++) for (c2 = 0; c2 < k; c2++)
-                    S[r2][c2] += (rows[i].y[r2] - mm[r2]) * (rows[i].y[c2] - mm[c2]);
-            }
-            for (r2 = 0; r2 < k; r2++) for (c2 = 0; c2 < k; c2++) S[r2][c2] /= dfSw;
-            var sRowM = [], sGm = 0;
-            for (r2 = 0; r2 < k; r2++) {
-                var sr = 0;
-                for (c2 = 0; c2 < k; c2++) sr += S[r2][c2];
-                sRowM.push(sr / k); sGm += sr;
-            }
-            sGm /= (k * k);
-            var trB2 = 0, ssB2 = 0;
-            for (r2 = 0; r2 < k; r2++) for (c2 = 0; c2 < k; c2++) {
-                var bij = S[r2][c2] - sRowM[r2] - sRowM[c2] + sGm;
-                if (r2 === c2) trB2 += bij;
-                ssB2 += bij * bij;
-            }
-            var eps = (ssB2 > 0) ? (trB2 * trB2) / ((k - 1) * ssB2) : 1;
-            if (!isFinite(eps)) eps = 1;
-            eps = Math.min(1, Math.max(eps, 1 / (k - 1)));
+            var eps = moments.eps;
             var wTerm = function (tm, dfN) {
                 var F = (tm.ss / dfN) / msErr;
                 return { F: F, df1: eps * dfN, df2: eps * dfErr,
                          df1u: dfN, df2u: dfErr,
-                         p: 1 - _gb2Stats.fCDF(F, eps * dfN, eps * dfErr),
+                         p: _gb2Stats.fSurvival(F, eps * dfN, eps * dfErr),
                          eta: tm.ss / (tm.ss + thw.sse) };
             };
             var bTerm = function (tm) {
@@ -16552,7 +16646,8 @@
             var ay = auto ? (M.top + 16 + fs) : ann.y;
             var maxLen = 0;
             for (var li = 0; li < lines.length; li++) {
-                if (lines[li].length > maxLen) maxLen = lines[li].length;
+                var lineLength = _gb2XmlSafeText(lines[li]).length;
+                if (lineLength > maxLen) maxLen = lineLength;
             }
             var bgW = maxLen * fs * 0.56 + 16;
             var bgH = lh * lines.length + 8;
@@ -16574,7 +16669,7 @@
                     fill: ann.color || "#333",
                     "data-role": "stat-box-line"
                 });
-                t.textContent = lines[li2];
+                _gb2SetSvgTextContent(t, lines[li2]);
                 g.appendChild(t);
             }
             // Drag (threshold keeps a plain click as click-to-edit) —
@@ -27263,23 +27358,33 @@
         // centered raw monomials for conditioning; an approximate but
         // sensibly-shaped preview for loess). Same idiom as
         // _xyComputeBinsClient. Returns the array-of-objects xyFits form
-        // the draw path consumes, or null to keep R's fits unchanged.
+        // the draw path consumes. An unavailable preview clears stale fits.
+        function _xyFitCellKey(group, facet) {
+            return JSON.stringify([facet == null ? null : String(facet), group == null ? null : String(group)]);
+        }
         function _xyPointsGroupedForFit() {
-            var pp = data.xyPoints, byG = {}, order = [], hasG = false, rows = [], i, j;
+            var pp = data.xyPoints, byG = Object.create(null), order = [], rows = [], i;
+            var hasG = !!data.groupLabelDefault, hasF = !!data.facetLabel || (Array.isArray(data.facetLevels) && data.facetLevels.length > 0);
             if (pp && pp.parallel === true && Array.isArray(pp.xs)) {
-                hasG = Array.isArray(pp.groups);
-                for (i = 0; i < pp.xs.length; i++) rows.push({ x: pp.xs[i], y: pp.ys[i], g: hasG ? pp.groups[i] : null });
+                hasG = hasG || Array.isArray(pp.groups); hasF = hasF || Array.isArray(pp.facets);
+                for (i = 0; i < pp.xs.length; i++) rows.push({ x: pp.xs[i], y: pp.ys[i], g: hasG && pp.groups ? pp.groups[i] : null, f: hasF && pp.facets ? pp.facets[i] : null });
             } else if (Array.isArray(pp)) {
-                for (j = 0; j < pp.length; j++) { var p = pp[j]; if (!p) continue; if (p.group != null) hasG = true; rows.push({ x: p.x, y: p.y, g: (p.group != null ? p.group : null) }); }
+                for (i = 0; i < pp.length; i++) {
+                    var p = pp[i]; if (!p) continue;
+                    if (p.group != null) hasG = true; if (p.facet != null) hasF = true;
+                    rows.push({ x: p.x, y: p.y, g: p.group == null ? null : p.group, f: p.facet == null ? null : p.facet });
+                }
             }
-            for (var r = 0; r < rows.length; r++) {
-                var x = rows[r].x, y = rows[r].y;
+            for (i = 0; i < rows.length; i++) {
+                var row = rows[i], x = row.x, y = row.y;
                 if (typeof x !== "number" || !isFinite(x) || typeof y !== "number" || !isFinite(y)) continue;
-                var k = hasG ? String(rows[r].g) : "__all__";
-                if (!byG[k]) { byG[k] = { group: hasG ? rows[r].g : null, xs: [], ys: [] }; order.push(k); }
+                // Missing grouping/facet values are not model populations.
+                if ((hasG && row.g == null) || (hasF && row.f == null)) continue;
+                var k = _xyFitCellKey(hasG ? row.g : null, hasF ? row.f : null);
+                if (!byG[k]) { byG[k] = { group: hasG ? row.g : null, facet: hasF ? row.f : null, xs: [], ys: [] }; order.push(k); }
                 byG[k].xs.push(x); byG[k].ys.push(y);
             }
-            return { byG: byG, order: order, hasGroups: hasG };
+            return { byG: byG, order: order, hasGroups: hasG, hasFacets: hasF };
         }
         function _xyMatInv(M, p) {
             var A = [], i, j, k;
@@ -27302,56 +27407,254 @@
             return 0.5 * (lo + hi);
         }
         function _xyFitOLS(xs, ys, deg, level, xseq) {
-            var n = xs.length, p = deg + 1, i, j, k;
-            if (n < p + 1) return null;
-            var xbar = 0; for (i = 0; i < n; i++) xbar += xs[i]; xbar /= n;
-            function basis(xc) { var b = [1], v = 1; for (var d = 1; d <= deg; d++) { v *= xc; b.push(v); } return b; }
-            var XtX = [], Xty = []; for (i = 0; i < p; i++) { XtX[i] = []; for (j = 0; j < p; j++) XtX[i][j] = 0; Xty[i] = 0; }
-            for (k = 0; k < n; k++) { var b = basis(xs[k] - xbar), yk = ys[k]; for (i = 0; i < p; i++) { Xty[i] += b[i] * yk; for (j = 0; j < p; j++) XtX[i][j] += b[i] * b[j]; } }
-            var Inv = _xyMatInv(XtX, p); if (!Inv) return null;
-            var beta = []; for (i = 0; i < p; i++) { var sb = 0; for (j = 0; j < p; j++) sb += Inv[i][j] * Xty[j]; beta[i] = sb; }
-            var rss = 0; for (k = 0; k < n; k++) { var b2 = basis(xs[k] - xbar), yh = 0; for (i = 0; i < p; i++) yh += beta[i] * b2[i]; var e = ys[k] - yh; rss += e * e; }
-            var dfres = n - p; if (dfres < 1) dfres = 1; var s2 = rss / dfres; var tcrit = _xyTCrit(level, dfres);
-            var pts = [];
-            for (var q = 0; q < xseq.length; q++) {
-                var v = basis(xseq[q] - xbar), yh2 = 0; for (i = 0; i < p; i++) yh2 += beta[i] * v[i];
-                var qf = 0; for (i = 0; i < p; i++) { var iv = 0; for (j = 0; j < p; j++) iv += Inv[i][j] * v[j]; qf += v[i] * iv; }
-                var se = Math.sqrt(Math.max(0, s2 * qf));
-                pts.push({ x: xseq[q], y: yh2, lwr: yh2 - tcrit * se, upr: yh2 + tcrit * se });
+          var n = xs.length, p = deg + 1, i, j, k;
+          if (n < p || ys.length !== n || deg < 1 || deg > 3) return null;
+          // Normalize both coordinates before fitting. Raw powers and normal
+          // equations lose rank merely by changing units, and square the design's
+          // condition number. Twice-orthogonalized QR avoids both problems for
+          // the at-most-four columns used here.
+          var x0 = xs[0], y0 = ys[0], xscale = 0, yscale = 0;
+          for (i = 0; i < n; i++) {
+            if (!isFinite(xs[i]) || !isFinite(ys[i])) return null;
+            xscale = Math.max(xscale, Math.abs(xs[i] - x0));
+            yscale = Math.max(yscale, Math.abs(ys[i] - y0));
+          }
+          if (!(xscale > 0) || !isFinite(xscale) || !isFinite(yscale)) return null;
+          if (yscale === 0) yscale = 1;
+          var z = [], response = [], Q = [], R = [], qty = [];
+          for (i = 0; i < n; i++) { z[i] = (xs[i] - x0) / xscale; response[i] = (ys[i] - y0) / yscale; }
+          for (j = 0; j < p; j++) {
+            R[j] = []; for (k = 0; k < p; k++) R[j][k] = 0;
+            var col = []; for (i = 0; i < n; i++) col[i] = Math.pow(z[i], j);
+            for (var pass = 0; pass < 2; pass++) {
+              for (k = 0; k < j; k++) {
+                var dot = 0; for (i = 0; i < n; i++) dot += Q[k][i] * col[i];
+                R[k][j] += dot;
+                for (i = 0; i < n; i++) col[i] -= dot * Q[k][i];
+              }
             }
-            return pts;
+            var norm2 = 0; for (i = 0; i < n; i++) norm2 += col[i] * col[i];
+            var norm = Math.sqrt(norm2);
+            // This is a relative rank check in the normalized design, independent
+            // of x/y units. Refuse a singular fit instead of inventing coefficients.
+            if (!(norm > 1e-12 * Math.sqrt(n))) return null;
+            R[j][j] = norm; Q[j] = []; qty[j] = 0;
+            for (i = 0; i < n; i++) { Q[j][i] = col[i] / norm; qty[j] += Q[j][i] * response[i]; }
+          }
+          var beta = [];
+          for (j = p - 1; j >= 0; j--) {
+            var value = qty[j]; for (k = j + 1; k < p; k++) value -= R[j][k] * beta[k];
+            beta[j] = value / R[j][j];
+          }
+          function fitted(t) {
+            var value = beta[p - 1];
+            for (var d = p - 2; d >= 0; d--) value = value * t + beta[d];
+            return value;
+          }
+          var rss = 0;
+          for (i = 0; i < n; i++) { var e = response[i] - fitted(z[i]); rss += e * e; }
+          var dfres = n - p, hasCI = dfres > 0;
+          var sigma = hasCI ? Math.sqrt(rss / dfres) : 0;
+          var tcrit = hasCI ? _xyTCrit(level, dfres) : 0;
+          var out = { xs: [], ys: [] };
+          if (hasCI) { out.lwrs = []; out.uprs = []; }
+          for (i = 0; i < xseq.length; i++) {
+            var t = (xseq[i] - x0) / xscale, yh = y0 + yscale * fitted(t);
+            if (!isFinite(xseq[i]) || !isFinite(yh)) return null;
+            out.xs.push(xseq[i]); out.ys.push(yh);
+            if (hasCI) {
+              // ||R^-T b|| gives prediction leverage without forming (X'X)^-1.
+              var v = [], power = 1, leverage = 0;
+              for (j = 0; j < p; j++) {
+                var a = power; power *= t;
+                for (k = 0; k < j; k++) a -= R[k][j] * v[k];
+                v[j] = a / R[j][j]; leverage += v[j] * v[j];
+              }
+              var half = yscale * (tcrit * sigma * Math.sqrt(leverage));
+              if (!isFinite(half) || !isFinite(yh - half) || !isFinite(yh + half)) return null;
+              out.lwrs.push(yh - half); out.uprs.push(yh + half);
+            }
+          }
+          return out.xs.map(function (x, index) {
+            var point = { x: x, y: out.ys[index] };
+            if (hasCI) { point.lwr = out.lwrs[index]; point.upr = out.uprs[index]; }
+            return point;
+          });
+        }
+        // Evaluate polynomial extensions from the group's observations. The
+        // stored vertices stay authoritative inside the data range. Never use
+        // endpoint slopes to invent a polynomial or confidence-band tail.
+        function _xyExtendOLSFit(fit, observations, xlo, xhi, level, fitType) {
+            var points = fit.points;
+            var type = fit.fit_type || fitType || "linear";
+            var degree = type === "linear" ? 1 : type === "poly2" ? 2 : type === "poly3" ? 3 : 0;
+            if (!degree || !observations || !points || points.length < 2) return points;
+            var first = points[0].x, last = points[points.length - 1].x;
+            var grid = [], leftCount = 0, rightCount = 0, i;
+            if (xlo < first) for (i = 0; i < 100; i++) { grid.push(xlo + (first - xlo) * i / 100); leftCount++; }
+            if (xhi > last) for (i = 1; i <= 100; i++) { grid.push(last + (xhi - last) * i / 100); rightCount++; }
+            if (!grid.length) return points;
+            var count = grid.length;
+            if (!(level > 0 && level < 1)) level = 0.95;
+            for (i = 0; i < points.length; i++) grid.push(points[i].x);
+            var predictions = _xyFitOLS(observations.xs, observations.ys, degree, level, grid);
+            if (!predictions || predictions.length !== grid.length) return points;
+            var hasCI = points.every(function (p) { return typeof p.lwr === "number" && isFinite(p.lwr) && typeof p.upr === "number" && isFinite(p.upr); });
+            var scale = 0;
+            for (i = 0; i < observations.ys.length; i++) scale = Math.max(scale, Math.abs(observations.ys[i]));
+            var tolerance = 2e-8 * Math.max(scale, Number.MIN_VALUE);
+            // If a host supplied another model or stale fit, stop at its data
+            // range instead of silently splicing a different model onto it.
+            for (i = 0; i < points.length; i++) {
+                var original = points[i], predicted = predictions[count + i];
+                if (Math.abs(original.y - predicted.y) > tolerance) return points;
+                if (hasCI && (!isFinite(predicted.lwr) || !isFinite(predicted.upr)
+                    || Math.abs(original.lwr - predicted.lwr) > tolerance
+                    || Math.abs(original.upr - predicted.upr) > tolerance)) return points;
+            }
+            predictions = predictions.slice(0, count);
+            if (!hasCI) predictions = predictions.map(function (p) { return { x: p.x, y: p.y }; });
+            return predictions.slice(0, leftCount).concat(points, predictions.slice(leftCount, leftCount + rightCount));
+        }
+        // Clip stored geometry as well as SVG ink. SVG getBBox() includes
+        // vertices hidden by clipPath, which otherwise inflates export canvases.
+        function _xyClipFitGeometry(points, xlo, xhi, ylo, yhi, closed) {
+            var bounds = [xlo, xhi, ylo, yhi];
+            function inside(p, side) {
+                return side === 0 ? p.x >= xlo : side === 1 ? p.x <= xhi
+                    : side === 2 ? p.y >= ylo : p.y <= yhi;
+            }
+            function cross(a, b, side) {
+                var axis = side < 2 ? "x" : "y", other = side < 2 ? "y" : "x";
+                var bound = bounds[side], delta = b[axis] - a[axis];
+                var t = (bound - a[axis]) / delta;
+                if (!isFinite(delta)) {
+                    var scale = Math.max(Math.abs(a[axis]), Math.abs(b[axis]), Math.abs(bound));
+                    t = (bound / scale - a[axis] / scale) / (b[axis] / scale - a[axis] / scale);
+                }
+                t = Math.max(0, Math.min(1, t));
+                var p = {};
+                p[axis] = bound;
+                p[other] = (1 - t) * a[other] + t * b[other];
+                return p;
+            }
+            var out = [], i, side;
+            if (!points.length || !points.every(function (p) { return isFinite(p.x) && isFinite(p.y); })) return out;
+            if (closed) {
+                // Sutherland-Hodgman: preserve the band interior, including
+                // separate visible lobes connected only along the clip border.
+                out = points.slice();
+                for (side = 0; side < 4 && out.length; side++) {
+                    var input = out; out = [];
+                    var a = input[input.length - 1];
+                    for (i = 0; i < input.length; i++) {
+                        var b = input[i], ai = inside(a, side), bi = inside(b, side);
+                        if (ai !== bi) out.push(cross(a, b, side));
+                        if (bi) out.push(b);
+                        a = b;
+                    }
+                }
+            } else {
+                // Clip each segment independently. A curve leaving and later
+                // re-entering the panel must start a new subpath, not a bridge.
+                function code(p) { var n = 0; for (var k = 0; k < 4; k++) if (!inside(p, k)) n |= 1 << k; return n; }
+                for (i = 1; i < points.length; i++) {
+                    var a = points[i - 1], b = points[i], ca = code(a), cb = code(b);
+                    for (var step = 0; (ca | cb) && !(ca & cb) && step < 8; step++) {
+                        var c = ca || cb;
+                        for (side = 0; !(c & (1 << side)); side++) {}
+                        var p = cross(a, b, side);
+                        if (ca) { a = p; ca = code(a); } else { b = p; cb = code(b); }
+                    }
+                    if (ca | cb) continue;
+                    var last = out[out.length - 1];
+                    if (!last || last.x !== a.x || last.y !== a.y)
+                        out.push({ x: a.x, y: a.y, move: true });
+                    out.push({ x: b.x, y: b.y });
+                }
+            }
+            return out;
         }
         function _xyFitLoess(xs, ys, span, level, xseq) {
-            var n = xs.length, i; if (n < 4) return null;
-            var idx = []; for (i = 0; i < n; i++) idx.push(i); idx.sort(function (a, b) { return xs[a] - xs[b]; });
-            var sx = [], sy = []; for (i = 0; i < n; i++) { sx.push(xs[idx[i]]); sy.push(ys[idx[i]]); }
-            if (!(span > 0)) span = 0.75;
-            var q = Math.max(3, Math.min(n, Math.floor(span * n + 0.5)));
-            function localFit(x0, withVar) {
-                var lo2 = 0, hi2 = n; while (lo2 < hi2) { var md = (lo2 + hi2) >> 1; if (sx[md] < x0) lo2 = md + 1; else hi2 = md; }
-                var L = lo2, R = lo2;
-                while (R - L < q && (L > 0 || R < n)) { if (L === 0) R++; else if (R === n) L--; else if ((x0 - sx[L - 1]) <= (sx[R] - x0)) L--; else R++; }
-                var h = Math.max(x0 - sx[L], sx[R - 1] - x0); if (span > 1) h *= span; if (!(h > 0)) h = 1e-9;
-                var P = 3, XtX = [[0,0,0],[0,0,0],[0,0,0]], Xty = [0,0,0], used = [], a, c2;
-                for (var u = L; u < R; u++) {
-                    var dd = Math.abs(sx[u] - x0) / h; if (dd >= 1) continue;
-                    var w = Math.pow(1 - dd * dd * dd, 3), dxc = sx[u] - x0, bb = [1, dxc, dxc * dxc];
-                    used.push({ w: w, b: bb, u: u });
-                    for (a = 0; a < P; a++) { Xty[a] += w * bb[a] * sy[u]; for (c2 = 0; c2 < P; c2++) XtX[a][c2] += w * bb[a] * bb[c2]; }
-                }
-                if (used.length < 3) { var sw = 0, swy = 0; for (var m = 0; m < used.length; m++) { sw += used[m].w; swy += used[m].w * sy[used[m].u]; } return { yhat: sw > 0 ? swy / sw : NaN, l2: NaN }; }
-                var Inv = _xyMatInv(XtX, P); if (!Inv) return { yhat: NaN, l2: NaN };
-                var beta = [0,0,0]; for (a = 0; a < P; a++) { var sa = 0; for (c2 = 0; c2 < P; c2++) sa += Inv[a][c2] * Xty[c2]; beta[a] = sa; }
-                var yhat = beta[0], l2 = NaN;
-                if (withVar) { l2 = 0; for (var m2 = 0; m2 < used.length; m2++) { var bi = used[m2].b, wi = used[m2].w, r0 = Inv[0][0] * bi[0] + Inv[0][1] * bi[1] + Inv[0][2] * bi[2], li = wi * r0; l2 += li * li; } }
-                return { yhat: yhat, l2: l2 };
+          // Direct Gaussian local quadratic LOESS, curve only. Neighborhood sizing
+          // follows stats::loess (floor(n * span + 1e-5)), not its default interpolated
+          // surface. See docs/REGRESSION-VALIDATION.md for the reference contract.
+          var n = xs.length, i;
+          if (n < 4 || ys.length !== n || xseq.length < 2) return null;
+          for (i = 0; i < n; i++) if (!isFinite(xs[i]) || !isFinite(ys[i])) return null;
+          if (!(span > 0)) span = 0.75;
+          if (!isFinite(span)) return null;
+          var q = Math.min(n, Math.floor(n * span + 1e-5));
+          if (q < 4) return null;
+          var idx = []; for (i = 0; i < n; i++) idx.push(i);
+          idx.sort(function (a, b) { return xs[a] - xs[b]; });
+          var sx = [], sy = [];
+          for (i = 0; i < n; i++) { sx.push(xs[idx[i]]); sy.push(ys[idx[i]]); }
+          function localFit(x0) {
+            var lo = 0, hi = n;
+            while (lo < hi) { var md = (lo + hi) >> 1; if (sx[md] < x0) lo = md + 1; else hi = md; }
+            var L = lo, H = lo;
+            while (H - L < q && (L > 0 || H < n)) {
+              if (L === 0) H++;
+              else if (H === n) L--;
+              else if (x0 - sx[L - 1] <= sx[H] - x0) L--;
+              else H++;
             }
-            var rss = 0, cnt = 0;
-            for (i = 0; i < n; i++) { var f0 = localFit(sx[i], false); if (isFinite(f0.yhat)) { var e = sy[i] - f0.yhat; rss += e * e; cnt++; } }
-            var pEff = Math.max(2, Math.min(n - 1, 1.2 * (n / q))), dfres = Math.max(1, cnt - pEff);
-            var s2 = (cnt > 0) ? rss / dfres : 0, tcrit = _xyTCrit(level, dfres), pts = [];
-            for (var kk = 0; kk < xseq.length; kk++) { var f = localFit(xseq[kk], true); if (!isFinite(f.yhat)) continue; var se = isFinite(f.l2) ? Math.sqrt(Math.max(0, s2 * f.l2)) : 0; pts.push({ x: xseq[kk], y: f.yhat, lwr: f.yhat - tcrit * se, upr: f.yhat + tcrit * se }); }
-            return pts.length >= 2 ? pts : null;
+            var radius = Math.max(x0 - sx[L], sx[H - 1] - x0) * Math.sqrt(Math.max(1, span));
+            if (!(radius > 0) || !isFinite(radius)) return NaN;
+            var columns = [[], [], []], target = [], anchor = sy[L], scale = 0;
+            var j, k, u, t, rootWeight;
+            for (u = L; u < H; u++) scale = Math.max(scale, Math.abs(sy[u] - anchor));
+            if (!isFinite(scale)) return NaN;
+            if (scale === 0) scale = 1;
+            for (u = L; u < H; u++) {
+              t = (sx[u] - x0) / radius;
+              if (Math.abs(t) >= 1) continue;
+              rootWeight = Math.pow(1 - Math.pow(Math.abs(t), 3), 1.5);
+              columns[0].push(rootWeight);
+              columns[1].push(rootWeight * t);
+              columns[2].push(rootWeight * t * t);
+              target.push(rootWeight * ((sy[u] - anchor) / scale));
+            }
+            if (target.length < 3) return NaN;
+            // Twice-orthogonalized weighted QR on dimensionless local predictors.
+            // Avoid normal equations, whose conditioning changes with axis units.
+            var Q = [], R = [[0,0,0],[0,0,0],[0,0,0]], rhs = [], beta = [];
+            for (j = 0; j < 3; j++) {
+              var v = columns[j].slice(), originalNorm = 0;
+              for (u = 0; u < v.length; u++) originalNorm += v[u] * v[u];
+              originalNorm = Math.sqrt(originalNorm);
+              for (var pass = 0; pass < 2; pass++) for (k = 0; k < j; k++) {
+                var dot = 0;
+                for (u = 0; u < v.length; u++) dot += Q[k][u] * v[u];
+                R[k][j] += dot;
+                for (u = 0; u < v.length; u++) v[u] -= dot * Q[k][u];
+              }
+              var norm = 0;
+              for (u = 0; u < v.length; u++) norm += v[u] * v[u];
+              norm = Math.sqrt(norm);
+              if (!(norm > 1e-12 * originalNorm)) return NaN;
+              R[j][j] = norm; rhs[j] = 0;
+              for (u = 0; u < v.length; u++) { v[u] /= norm; rhs[j] += v[u] * target[u]; }
+              Q.push(v);
+            }
+            for (j = 2; j >= 0; j--) {
+              var value = rhs[j];
+              for (k = j + 1; k < 3; k++) value -= R[j][k] * beta[k];
+              beta[j] = value / R[j][j];
+            }
+            return anchor + scale * beta[0];
+          }
+          var out = { xs: [], ys: [] };
+          for (i = 0; i < xseq.length; i++) {
+            if (!isFinite(xseq[i])) return null;
+            var fitted = localFit(xseq[i]);
+            // Refuse the whole group if any requested neighborhood is singular.
+            // Skipping bad points would silently bridge them with a plausible curve.
+            if (!isFinite(fitted)) return null;
+            out.xs.push(xseq[i]); out.ys.push(fitted);
+          }
+          return out.xs.map(function (x, index) { return { x: x, y: out.ys[index] }; });
         }
         function _xyComputeFitsClient(fitType, level, loessSpan) {
             if (!fitType) fitType = "linear";
@@ -27370,7 +27673,9 @@
                 if (fitType === "loess") { if (nn > 8000) return null; pts = _xyFitLoess(xs, ys, loessSpan, level, xseq); }
                 else { pts = _xyFitOLS(xs, ys, deg, level, xseq); }
                 if (!pts || pts.length < 2) continue;
-                out.push({ group: ge.group, fit_type: fitType, points: pts });
+                var entry = { group: ge.group, fit_type: fitType, points: pts };
+                if (grouped.hasFacets) entry.facet = ge.facet;
+                out.push(entry);
             }
             return out.length ? out : null;
         }
@@ -27560,7 +27865,7 @@
                 }
             }
             var t = r * Math.sqrt(df / (1 - r * r));
-            var p = 2 * (1 - _gb2Stats._tCDF(Math.abs(t), df));
+            var p = _gb2Stats._tTailP(t, df, "two");
             return { r: r, p: Math.max(0, Math.min(1, p)) };
         }
         function _xyComputeStatsClient(method) {
@@ -27573,8 +27878,8 @@
             } else if (Array.isArray(pp)) {
                 for (j = 0; j < pp.length; j++) { var p = pp[j]; if (!p) continue; rows.push({ x: p.x, y: p.y, g: (p.group != null ? p.group : null), f: (p.facet != null ? p.facet : null) }); }
             }
-            function ck(g, f) { return (g == null ? "\u0000" : String(g)) + "\u0001" + (f == null ? "\u0000" : String(f)); }
-            var cells = {};
+            function ck(g, f) { return _xyFitCellKey(g, f); }
+            var cells = Object.create(null);
             for (var r = 0; r < rows.length; r++) {
                 var x = rows[r].x, y = rows[r].y;
                 if (typeof x !== "number" || !isFinite(x) || typeof y !== "number" || !isFinite(y)) continue;
@@ -32750,7 +33055,7 @@
                     var _bgPadY = 4;
                     var _bgHeight = _stripFontSize + _bgPadY * 2;
                     var _bgWidth = Math.max(_stripFontSize * 2,
-                        (_stripLabel.length * _stripFontSize * 0.6) + _bgPadX * 2);
+                        (_gb2XmlSafeText(_stripLabel).length * _stripFontSize * 0.6) + _bgPadX * 2);
                     var _textVisualCy = _stripY - _stripFontSize * 0.35;
                     var _bgY = _textVisualCy - _bgHeight / 2;
                     var _bgIsFill = (_stripBgLive === "fill");
@@ -32966,7 +33271,7 @@
                     if (_stripTfParts.length) {
                         _stripEl.setAttribute("transform", _stripTfParts.join(" "));
                     }
-                    _stripEl.textContent = _stripLabel;
+                    _gb2SetSvgTextContent(_stripEl, _stripLabel);
                     // Register the strip's text element under its
                     // text-inspector id so the dedicated text panel
                     // (renderInspectorText) can find it via
@@ -35549,18 +35854,17 @@
                 // whole series" toggle from the Point Style panel.
                 // Used by every subsequent loop (rug marks read
                 // _panelPoints directly).
-                var _hiddenGroupMap = {};
+                var _hiddenGroupMap = Object.create(null);
                 if (Array.isArray(data.xyHiddenGroups)) {
                     for (var _hgi = 0; _hgi < data.xyHiddenGroups.length; _hgi++) {
                         _hiddenGroupMap[String(data.xyHiddenGroups[_hgi])] = true;
                     }
                 }
-                var _panelPoints = xyPoints;
-                if (_panel.facet) {
-                    _panelPoints = xyPoints.filter(function (p) {
-                        return p && p.facet === _panel.facet;
-                    });
-                }
+                var _xyPanelFacet = _facetLevels.length === 1 ? _facetLevels[0]
+                    : _facetLevels.length > 1 ? _panel.facet : null;
+                var _panelPoints = xyPoints.filter(function (p) {
+                    return p && (_xyPanelFacet != null ? p.facet === _xyPanelFacet : !data.facetLabel);
+                });
                 _panelPoints = _panelPoints.filter(function (p) {
                     return p && !_hiddenGroupMap[String(p.group || "")];
                 });
@@ -35625,7 +35929,7 @@
                             var _scsBgPadX = 8, _scsBgPadY = 4;
                             var _scsBgH = _scsSize + _scsBgPadY * 2;
                             var _scsBgW = Math.max(_scsSize * 2,
-                                (_scsLabel.length * _scsSize * 0.6) + _scsBgPadX * 2);
+                                (_gb2XmlSafeText(_scsLabel).length * _scsSize * 0.6) + _scsBgPadX * 2);
                             var _scsTextCy = _scsY - _scsSize * 0.35;
                             var _scsBgRect = svgEl("rect", {
                                 x: _scsMidX - _scsBgW / 2, y: _scsTextCy - _scsBgH / 2,
@@ -35647,7 +35951,7 @@
                             "font-style": (_scsStyle && _scsStyle.italic) ? "italic" : "normal",
                             fill: _scsFill
                         });
-                        _scsEl.textContent = _scsLabel;
+                        _gb2SetSvgTextContent(_scsEl, _scsLabel);
                         if (_scsRot !== 0) _scsEl.setAttribute("transform",
                             "rotate(" + _scsRot + " " + _scsMidX + " " + _scsY + ")");
                         // Interactive like the categorical strips: click
@@ -36469,18 +36773,20 @@
                         ? Math.max(0, Math.min(1, data.xyCIOpacity)) : 0.2;
                     // Hidden-fit-groups lookup. Built once per
                     // render pass; cheap O(n) check per fit row.
-                    var _hiddenFitGroupsMap = {};
+                    var _hiddenFitGroupsMap = Object.create(null);
                     if (Array.isArray(data.xyHiddenFitGroups)) {
                         for (var _hfi = 0; _hfi < data.xyHiddenFitGroups.length; _hfi++) {
                             _hiddenFitGroupsMap[String(data.xyHiddenFitGroups[_hfi])] = true;
                         }
                     }
+                    var _fitInputs = _xyPointsGroupedForFit();
                     var _fStyle = data.xyFitStyle || "solid";
                     var _fitDash = dashArrayFor(_fStyle);
                     for (var _fi2 = 0; _fi2 < xyFits.length; _fi2++) {
                         var _fit = xyFits[_fi2];
                         if (!_fit || !Array.isArray(_fit.points)
                             || _fit.points.length < 2) continue;
+                        if (_xyPanelFacet != null ? _fit.facet !== _xyPanelFacet : _fit.facet != null) continue;
                         var _fitGroup = _fit.group || "";
                         // Skip groups the user has hidden via the
                         // Fit Line panel's Groups strip (fit only)
@@ -36501,140 +36807,41 @@
                         var _gCIOpacity = fitCIOpacityFor(_fitGroup);
                         var _gFitStyle = fitStyleFor(_fitGroup);
                         var _gFitDash = dashArrayFor(_gFitStyle);
-                        // Generalized endpoint-extension helper:
-                        // projects a polyline out to the chart's
-                        // X axis bounds using the local slope at
-                        // each end, clipped to Y bounds. Same
-                        // logic _extendFitEndpoints uses below,
-                        // but here parameterized by a y-getter so
-                        // it works on the fit line (y), upper CI
-                        // bound (upr), and lower CI bound (lwr).
-                        // walkToEdge = true: when extrapolation
-                        // exits the chart's y range, continue along
-                        // the y-bound out to the chart's x edge so a
-                        // filled polygon (CI band) closes flush at
-                        // the corner. walkToEdge = false: stop at
-                        // the y-bound intersection — used for the
-                        // fit line itself so it doesn't ride the
-                        // chart's top/bottom edge after exiting.
-                        function _extendEdge(pts, getY, walkToEdge) {
-                            if (!pts || pts.length < 2) return [];
-                            var out = [];
-                            for (var _eei = 0; _eei < pts.length; _eei++) {
-                                out.push({ x: pts[_eei].x, y: getY(pts[_eei]) });
-                            }
-                            // --- Left side ---
-                            var p0 = pts[0], p1 = pts[1];
-                            var dx0 = p1.x - p0.x;
-                            if (dx0 > 0 && p0.x > xMin) {
-                                var y0 = getY(p0), y1 = getY(p1);
-                                var sL = (y1 - y0) / dx0;
-                                var yL = y0 + sL * (xMin - p0.x);
-                                if (yL >= yMin && yL <= yMax) {
-                                    out.unshift({ x: xMin, y: yL });
-                                } else if (sL !== 0) {
-                                    var yB = (yL < yMin) ? yMin : yMax;
-                                    var xB = p0.x + (yB - y0) / sL;
-                                    if (xB > xMin && xB < p0.x) {
-                                        out.unshift({ x: xB, y: yB });
-                                        if (walkToEdge) {
-                                            out.unshift({ x: xMin, y: yB });
-                                        }
-                                    } else if (walkToEdge) {
-                                        out.unshift({ x: xMin, y: yB });
-                                    }
-                                } else if (walkToEdge) {
-                                    out.unshift({ x: xMin, y: y0 });
-                                }
-                            }
-                            // --- Right side ---
-                            var pn = pts[pts.length - 1];
-                            var pm = pts[pts.length - 2];
-                            var dx1 = pn.x - pm.x;
-                            if (dx1 > 0 && pn.x < xMax) {
-                                var yn = getY(pn), ym = getY(pm);
-                                var sR = (yn - ym) / dx1;
-                                var yR = yn + sR * (xMax - pn.x);
-                                if (yR >= yMin && yR <= yMax) {
-                                    out.push({ x: xMax, y: yR });
-                                } else if (sR !== 0) {
-                                    var yB2 = (yR < yMin) ? yMin : yMax;
-                                    var xB2 = pn.x + (yB2 - yn) / sR;
-                                    if (xB2 > pn.x && xB2 < xMax) {
-                                        out.push({ x: xB2, y: yB2 });
-                                        if (walkToEdge) {
-                                            out.push({ x: xMax, y: yB2 });
-                                        }
-                                    } else if (walkToEdge) {
-                                        out.push({ x: xMax, y: yB2 });
-                                    }
-                                } else if (walkToEdge) {
-                                    out.push({ x: xMax, y: yn });
-                                }
-                            }
-                            return out;
+                        // Fit the requested X positions using the actual observations.
+                        // Geometry clipping preserves exits/re-entry at the Y limits
+                        // without inflating the bounds measured by SVG export.
+                        var _drawFitPoints = _fit.points;
+                        if (_fit.fit_type !== "loess" && data.xyFitFullRange !== false) {
+                            var _inputKey = _xyFitCellKey(_fit.group, _fit.facet);
+                            _drawFitPoints = _xyExtendOLSFit(_fit, _fitInputs.byG[_inputKey],
+                                xMin, xMax, data.xyCILevel, data.xyFitType);
                         }
-                        // CI band (drawn first, behind the fit
-                        // line). Top edge = upr extended to axes;
-                        // bottom edge = lwr extended to axes. Each
-                        // is projected separately so the polygon
-                        // tracks the actual local slope of each
-                        // bound (the CI generally widens away
-                        // from the data center, but the local
-                        // boundary slope is good enough for the
-                        // visual extension).
+                        // Pointwise confidence band for the fitted mean.
                         if (data.xyShowCI
                             && !_isElementHidden("xyCI")
                             && _fit.points[0].lwr !== undefined) {
-                            // Loess is only valid inside the data's
-                            // convex hull — extending it can produce
-                            // wild slopes at low span. Match ggplot's
-                            // geom_smooth() and stop the band at the
-                            // data range. Linear / polynomial fits
-                            // extrapolate cleanly so the band still
-                            // walks to the chart corners.
-                            var _isLoess = _fit.fit_type === "loess";
-                            // Stop the band at the data range for loess,
-                            // OR when "Extend to plot edges"
-                            // (xyFitFullRange) is off. Default extends.
-                            var _ciStopAtData = _isLoess
-                                || data.xyFitFullRange === false;
-                            var _ciTop = _ciStopAtData
-                                ? _fit.points.map(function (p) {
-                                    return { x: p.x, y: p.upr }; })
-                                : _extendEdge(_fit.points,
-                                    function (p) { return p.upr; }, true);
-                            var _ciBot = _ciStopAtData
-                                ? _fit.points.map(function (p) {
-                                    return { x: p.x, y: p.lwr }; })
-                                : _extendEdge(_fit.points,
-                                    function (p) { return p.lwr; }, true);
+                            var _ciPolygon = _drawFitPoints.map(function (p) { return { x: p.x, y: p.upr }; })
+                                .concat(_drawFitPoints.map(function (p) { return { x: p.x, y: p.lwr }; }).reverse());
+                            _ciPolygon = _xyClipFitGeometry(_ciPolygon, xMin, xMax, yMin, yMax, true);
                             var _ciD = "";
-                            for (var _ci1 = 0; _ci1 < _ciTop.length; _ci1++) {
+                            for (var _ci1 = 0; _ci1 < _ciPolygon.length; _ci1++) {
                                 _ciD += (_ci1 === 0 ? "M" : " L")
-                                    + toPxX(_ciTop[_ci1].x) + ","
-                                    + toPxY(_ciTop[_ci1].y);
+                                    + toPxX(_ciPolygon[_ci1].x) + ","
+                                    + toPxY(_ciPolygon[_ci1].y);
                             }
-                            // Bottom edge traversed in reverse so
-                            // the polygon closes correctly.
-                            for (var _ci2 = _ciBot.length - 1; _ci2 >= 0; _ci2--) {
-                                _ciD += " L"
-                                    + toPxX(_ciBot[_ci2].x) + ","
-                                    + toPxY(_ciBot[_ci2].y);
-                            }
-                            _ciD += " Z";
+                            if (_ciPolygon.length) _ciD += " Z";
                             var _ciEl = svgEl("path", {
                                 d: _ciD,
                                 fill: _fitColor,
                                 "fill-opacity": _gCIOpacity,
                                 stroke: "none",
                                 "data-role": "xy-ci",
+                                "data-facet": _fit.facet == null ? "" : _fit.facet,
                                 "data-bar-group": _fitGroup,
                                 // Clip to chart area so the band
                                 // doesn't bleed past xMin/xMax or
                                 // above/below yMin/yMax when the
-                                // underlying linear extension
-                                // crosses the axis bounds.
+                                // model predictions cross the axis bounds.
                                 "clip-path": "url(#" + _xyClipId + ")"
                             });
                             // Click the CI band → open Fit Line
@@ -36672,40 +36879,13 @@
                             })(_fitGroup);
                             dataGroup.appendChild(_ciEl);
                         }
-                        // Fit line: extended to the chart's X
-                        // axis bounds via the same _extendEdge
-                        // helper used by the CI band above. Linear
-                        // fits extrapolate exactly (constant
-                        // slope); LOESS fits use the local
-                        // boundary slope for a "natural
-                        // continuation" look. Y values are clipped
-                        // to the chart's Y range so the line
-                        // can't escape the plot area.
-                        // Same loess gate as the CI band above:
-                        // don't extrapolate a loess curve past its
-                        // data range, since the local endpoint slope
-                        // is meaningless for spline-style smoothers
-                        // (especially at low span).
-                        // Gated by xyShowFit (independent of
-                        // xyShowCI) so the CI band can render
-                        // alone — outer block runs whenever EITHER
-                        // overlay is on, but the line itself only
-                        // paints when the user wants it.
+                        // The line and its band use the same prediction grid.
                         if (data.xyShowFit && !_isElementHidden("xyFit")) {
-                        // Stop the line at the data range for loess, OR
-                        // when "Extend to plot edges" (xyFitFullRange) is
-                        // off. Default (true) extrapolates to the edges.
-                        var _fitStopAtData = (_fit.fit_type === "loess")
-                            || data.xyFitFullRange === false;
-                        var _fitPts = _fitStopAtData
-                            ? _fit.points.map(function (p) {
-                                return { x: p.x, y: p.y }; })
-                            : _extendEdge(_fit.points,
-                                function (p) { return p.y; }, false);
+                        var _fitPts = _xyClipFitGeometry(_drawFitPoints, xMin, xMax, yMin, yMax, false);
                         var _fitD = "";
                         for (var _fp = 0; _fp < _fitPts.length; _fp++) {
                             var _fpp = _fitPts[_fp];
-                            _fitD += (_fp === 0 ? "M" : " L")
+                            _fitD += (_fp === 0 || _fpp.move ? " M" : " L")
                                 + toPxX(_fpp.x) + "," + toPxY(_fpp.y);
                         }
                         var _fitAttrs = {
@@ -36715,6 +36895,7 @@
                             "stroke-width": _gFitWidth,
                             "stroke-linecap": "round",
                             "data-role": "xy-fit",
+                            "data-facet": _fit.facet == null ? "" : _fit.facet,
                             "data-bar-group": _fitGroup,
                             // Same clip as the CI band: the line's
                             // extended endpoints (or raw LOESS
@@ -36930,7 +37111,7 @@
                         ? data.xyEllipseWidth : 1.5;
                     var _ellStyle = data.xyEllipseStyle || "solid";
                     var _ellDash = dashArrayFor(_ellStyle);
-                    var _hiddenEllMap = {};
+                    var _hiddenEllMap = Object.create(null);
                     if (Array.isArray(data.xyHiddenEllipseGroups)) {
                         for (var _heI = 0; _heI < data.xyHiddenEllipseGroups.length; _heI++) {
                             _hiddenEllMap[String(data.xyHiddenEllipseGroups[_heI])] = true;
@@ -36940,6 +37121,7 @@
                         var _ell = data.xyEllipses[_eI];
                         if (!_ell || !Array.isArray(_ell.points)
                             || _ell.points.length < 3) continue;
+                        if (_xyPanelFacet != null ? _ell.facet !== _xyPanelFacet : _ell.facet != null) continue;
                         var _ellGroup = _ell.group || "";
                         if (_hiddenEllMap[_ellGroup]) continue;
                         if (_hiddenGroupMap[_ellGroup]) continue;
@@ -36973,6 +37155,7 @@
                             "stroke-width": _ellWnow,
                             "stroke-linejoin": "round",
                             "data-role": "xy-ellipse",
+                            "data-facet": _ell.facet == null ? "" : _ell.facet,
                             "data-bar-group": _ellGroup,
                             // Clip to the inner data rect (axis lines +
                             // the [xMin,xMax] x [yMin,yMax] range) so a
@@ -37581,8 +37764,8 @@
                         "font-weight": 600, fill: "#666",
                         "font-family": "sans-serif"
                     });
-                    _slTitleEl.textContent = (typeof data.xySizeVar === "string"
-                        && data.xySizeVar.length > 0) ? data.xySizeVar : "Size";
+                    _gb2SetSvgTextContent(_slTitleEl, (typeof data.xySizeVar === "string"
+                        && data.xySizeVar.length > 0) ? data.xySizeVar : "Size");
                     _slG.appendChild(_slTitleEl);
                     for (var _slj = 0; _slj < _slCenters.length; _slj++) {
                         var _slc = _slCenters[_slj];
@@ -38202,11 +38385,9 @@
                     // facet's stats. Untagged rows (non-faceted data)
                     // show in every panel as before.
                     var _statsRows = data.xyStats;
-                    if (_panel.facet) {
-                        _statsRows = _statsRows.filter(function (r) {
-                            return r && (r.facet == null || r.facet === _panel.facet);
-                        });
-                    }
+                    _statsRows = _statsRows.filter(function (r) {
+                        return r && (_xyPanelFacet != null ? r.facet === _xyPanelFacet : r.facet == null);
+                    });
                     var _statsPos = (typeof data.xyStatsPosition === "string"
                                       && data.xyStatsPosition.length > 0)
                         ? data.xyStatsPosition : "topright";
@@ -38245,7 +38426,7 @@
                         var sym = (row.method === "spearman") ? "ρ"
                             : (row.method === "kendall") ? "τ" : "r";
                         function _fixed(v) {
-                            if (!isFinite(v)) return "\u2014";
+                            if (typeof v !== "number" || !isFinite(v)) return "\u2014";
                             var s = v.toFixed(_statsDec);
                             // APA convention: drop leading zero on
                             // values bounded between -1 and 1.
@@ -38255,7 +38436,7 @@
                             // Slope / intercept aren't bounded to
                             // [-1, 1], so keep the leading zero
                             // (e.g. "0.45" not ".45").
-                            if (!isFinite(v)) return "\u2014";
+                            if (typeof v !== "number" || !isFinite(v)) return "\u2014";
                             return v.toFixed(_statsDec);
                         }
                         function _fmtEquation(slope, intercept) {
@@ -38280,7 +38461,7 @@
                             // p is fixed APA 3 dp on every surface;
                             // xyStatsDecimals governs r / R² / the
                             // equation only.
-                            if (!isFinite(row.p)) {
+                            if (typeof row.p !== "number" || !isFinite(row.p)) {
                                 parts.push("p = \u2014");
                             } else if (row.p < 0.001) {
                                 parts.push("p < .001");
@@ -38292,12 +38473,12 @@
                             parts.push("n = " + row.n);
                         }
                         if (_statsShowR2 && typeof row.r2 === "number") {
-                            parts.push("R² = " + _fixed(row.r2));
+                            parts.push((data.xyFitType && data.xyFitType !== "linear" ? "Linear R² = " : "R² = ") + _fixed(row.r2));
                         }
                         if (_statsShowEqn
                             && typeof row.slope === "number"
                             && typeof row.intercept === "number") {
-                            parts.push(_fmtEquation(row.slope, row.intercept));
+                            parts.push((data.xyFitType && data.xyFitType !== "linear" ? "Linear fit: " : "") + _fmtEquation(row.slope, row.intercept));
                         }
                         return parts.join(", ");
                     }
@@ -38563,9 +38744,11 @@
                                 "font-size": _statsFontSize,
                                 "font-style": "italic",
                                 fill: _grpColor,
-                                "data-role": "xy-stats"
+                                "data-role": "xy-stats",
+                                "data-facet": _xyPanelFacet == null ? "" : _xyPanelFacet,
+                                "data-bar-group": _it.group || ""
                             });
-                            _statsEl.textContent = _txt;
+                            _gb2SetSvgTextContent(_statsEl, _txt);
                             _wireStatsDrag(_statsEl);
                             _statsTextEls.push(_statsEl);
                             _statsG.appendChild(_statsEl);
@@ -43997,7 +44180,7 @@
                         height: isHoriz ? 9 : Math.abs(y2h - y1h),
                         fill: "transparent", style: "cursor:pointer;", "data-role": "likert-line-hit"
                     });
-                    var _hTip = svgEl("title", {}); _hTip.textContent = tipTxt; hit.appendChild(_hTip);
+                    var _hTip = svgEl("title", {}); _gb2SetSvgTextContent(_hTip, tipTxt); hit.appendChild(_hTip);
                     hit.addEventListener("mouseenter", function () {
                         lineEl.setAttribute("stroke", _gridHoverDarken(baseC));
                         lineEl.setAttribute("stroke-width", String(baseW + 0.6));
@@ -44849,8 +45032,8 @@
                     : (chartTop + _fcPadY + _fcFont);
                 var _fcMaxLen = 0;
                 for (var _fcm = 0; _fcm < _fcItems.length; _fcm++) {
-                    var _fcLen = _fcItems[_fcm].text.length
-                        + (_fcItems[_fcm].prefix ? _fcItems[_fcm].prefix.length + 2 : 0);
+                    var _fcLen = _gb2XmlSafeText(_fcItems[_fcm].text).length
+                        + (_fcItems[_fcm].prefix ? _gb2XmlSafeText(_fcItems[_fcm].prefix).length + 2 : 0);
                     if (_fcLen > _fcMaxLen) _fcMaxLen = _fcLen;
                 }
                 var _fcBgW = _fcMaxLen * _fcFont * 0.56 + 14;
@@ -45007,7 +45190,7 @@
                         fill: "#333",
                         "data-role": "freq-chisq"
                     });
-                    _fcTxt.textContent = (_fcIt.prefix ? _fcIt.prefix + ": " : "") + _fcIt.text;
+                    _gb2SetSvgTextContent(_fcTxt, (_fcIt.prefix ? _fcIt.prefix + ": " : "") + _fcIt.text);
                     _fcWireDrag(_fcTxt);
                     _fcWireTip(_fcTxt, _fcIt.test);
                     _fcG.appendChild(_fcTxt);
@@ -48083,6 +48266,10 @@
                     return;
                 }
                 if (!textEl) { input.value = ""; return; }
+                if (textEl.hasAttribute("data-gb2-raw-text")) {
+                    input.value = JSON.parse(textEl.getAttribute("data-gb2-raw-text"));
+                    return;
+                }
                 var tspans = textEl.querySelectorAll("tspan");
                 if (tspans.length > 1) {
                     var out = [];
@@ -49814,6 +50001,15 @@
             if (/^p \(/.test(s)) return "pAdj";
             return null;
         }
+        // A definition action must retain its visible label/value in the
+        // accessible name. Naming a numeric result only by its glossary term
+        // hides the result from screen readers and speech-input users.
+        function _stTermName(label, term) {
+            var visible = String(label == null ? "" : label).replace(/\s+/g, " ").trim();
+            var name = term.name;
+            return (visible && visible.toLowerCase() !== name.toLowerCase()
+                ? visible + ", " + name : (visible || name)) + ", definition";
+        }
         // Auto-wrap a plain-string _stTable header as a tap-to-define term when
         // its label matches a known concept; otherwise return the escaped label.
         function _stHeaderTerm(label) {
@@ -49824,7 +50020,7 @@
             if (!t) return _stEsc(s);
             var tip = t.name + (t.sym ? " (" + t.sym + ")" : "") + ": " + t.body;
             return '<span class="gb2-stterm" data-stterm="' + key + '" tabindex="0" role="button" aria-expanded="false" aria-label="' +
-                _stEsc(t.name).replace(/"/g, "&quot;") + ', definition" title="' +
+                _stEsc(_stTermName(s, t)).replace(/"/g, "&quot;") + '" title="' +
                 _stEsc(tip).replace(/"/g, "&quot;") + '">' + _stEsc(s) + '</span>';
         }
         var _GB_TYPE_BLURB = {
@@ -54728,7 +54924,7 @@
                 var tip = t.name + (t.sym ? " (" + t.sym + ")" : "") + ": " + t.body;
                 return '<span class="gb2-stterm" data-stterm="' + key +
                     '" tabindex="0" role="button" aria-expanded="false" aria-label="' +
-                    _stEsc(t.name).replace(/"/g, "&quot;") + ', definition" title="' +
+                    _stEsc(_stTermName(label, t)).replace(/"/g, "&quot;") + '" title="' +
                     _stEsc(tip).replace(/"/g, "&quot;") + '">' + esc + '</span>';
             }
             // Per-cell data-aware term: wraps an already-built value cell
@@ -54739,10 +54935,16 @@
                 if (!t) return displayHtml;
                 var tip = t.name + (t.sym ? " (" + t.sym + ")" : "") + ": " + t.body +
                     (hereText ? "  " + hereText : "");
+                // displayHtml already contains the formatted result. Read its
+                // text in an inert template so markup/entities are not spoken
+                // and the accessible value uses the same rounding as the UI.
+                var valueTemplate = document.createElement("template");
+                valueTemplate.innerHTML = displayHtml;
+                var valueLabel = valueTemplate.content.textContent || "";
                 return '<span class="gb2-stterm gb2-stcellterm" data-stterm="' + key + '"' +
                     (hereText ? ' data-sthere="' + _stEsc(hereText).replace(/"/g, "&quot;") + '"' : '') +
                     ' tabindex="0" role="button" aria-expanded="false" aria-label="' +
-                    _stEsc(t.name).replace(/"/g, "&quot;") + ', definition" title="' +
+                    _stEsc(_stTermName(valueLabel, t)).replace(/"/g, "&quot;") + '" title="' +
                     _stEsc(tip).replace(/"/g, "&quot;") + '">' + displayHtml + '</span>';
             }
             var html = "";
@@ -57292,7 +57494,7 @@
                     krow(mod + "+&#8592;&#8593;&#8595;&#8594;", "Move the selected bar, slice, item or series one step in its order.") +
                     krow(mod + "+A", "Select every annotation (then nudge, hide or duplicate them together).") +
                     krow(mod + "+F", "Open Find a setting; type a control, concept or statistical term, then use the arrow keys and Enter to open the result.") +
-                    krow("?", "Open this help panel.") +
+                    krow("?", "Open or close Help while the chart is focused.") +
                     krow("Tab &nbsp;/&nbsp; Shift+Tab", "Move between the toolbar buttons, the chart, and an open editor's controls.") +
                     krow("&#8592;&#8594; on the chart", "Step between sibling parts: bar series to bar series, slice to slice. A dashed outline marks the current one, and a screen reader announces it.") +
                     krow("&#8593;&#8595; or Tab on the chart", "Step between kinds of part: bars, axes, legend. Tab past the last kind moves on to the editor and toolbar.") +
@@ -57306,7 +57508,7 @@
                     ((host.closest && host.closest("jmv-results-svg") && data.svgHandoverExport === true)
                         ? dot('Right-click the chart to copy or export it; jamovi handles saving natively here.')
                         : dot('The <strong>export</strong> button in the toolbar saves the chart as SVG, PDF, PNG or JPG.')) +
-                    dot(kchip(mod + "+Z") + ' undoes any styling change; ' + kchip("Delete") + ' hides the selected element; ' + kchip("?") + ' opens this help panel.') +
+                    dot(kchip(mod + "+Z") + ' undoes any styling change; ' + kchip("Delete") + ' hides the selected element; ' + kchip("?") + ' opens this help panel while the chart is focused.') +
                   '</ul>';
             }
             // "Open the user guide" (Jul 2026): rendered only when the
@@ -59281,7 +59483,7 @@
                     span.setAttribute("tabindex", "0");
                     span.setAttribute("role", "button");
                     span.setAttribute("aria-expanded", "false");
-                    span.setAttribute("aria-label", term.name + ", definition");
+                    span.setAttribute("aria-label", _stTermName(word, term));
                     span.textContent = word;
                     mid.parentNode.replaceChild(span, mid);
                     done[rule.key] = true;
@@ -64513,7 +64715,11 @@
             var _ebIsMedian = (String(data.summaryFunc) === "median");
             function _ebChoiceBtn(attr, val, label, cur, tip) {
                 var on = (String(cur) === String(val));
-                return '<button type="button" ' + attr + '="' + val + '" title="' + tip + '" style="' + [
+                // Stable identity lets the existing focus keeper restore the
+                // exact choice after both local redraws and jamovi HTML echoes.
+                return '<button type="button" data-field="' + attr.slice(5) + '-' + val +
+                    '" aria-pressed="' + (on ? "true" : "false") +
+                    '" ' + attr + '="' + val + '" title="' + tip + '" style="' + [
                     "display:inline-flex", "align-items:center", "padding:4px 10px",
                     "background:" + (on ? "#e8f0fb" : "white"),
                     "color:" + (on ? "#1a5fb4" : "#333"),
@@ -64773,6 +64979,7 @@
                 function repaint(v) {
                     for (var j = 0; j < btns.length; j++) {
                         var on = btns[j].getAttribute(attr) === v;
+                        btns[j].setAttribute("aria-pressed", on ? "true" : "false");
                         btns[j].style.background = on ? "#e8f0fb" : "white";
                         btns[j].style.color = on ? "#1a5fb4" : "#333";
                         btns[j].style.borderColor = on ? "#1a5fb4" : "#ccc";
@@ -66473,7 +66680,9 @@
                 && data.graphType === "bar" && hasGroups;
             function _bsChoiceBtn(attr, val, label, cur, tip) {
                 var on = (String(cur) === String(val));
-                return '<button type="button" ' + attr + '="' + val + '" title="' + tip + '" style="' + [
+                return '<button type="button" data-field="' + attr.slice(5) + '-' + val +
+                    '" aria-pressed="' + (on ? "true" : "false") +
+                    '" ' + attr + '="' + val + '" title="' + tip + '" style="' + [
                     "display:inline-flex", "align-items:center", "padding:4px 10px",
                     "background:" + (on ? "#e8f0fb" : "white"),
                     "color:" + (on ? "#1a5fb4" : "#333"),
@@ -66823,7 +67032,19 @@
                     (function (btn) {
                         btn.addEventListener("click", function (e) {
                             e.preventDefault();
+                            var hadFocus = document.activeElement === btn;
                             apply(btn.getAttribute(attr));
+                            // Orientation rebuilds this panel synchronously;
+                            // other choices use the render-entry focus keeper.
+                            var active = document.activeElement;
+                            if (hadFocus && !btn.isConnected &&
+                                (!active || active === document.body || active === document.documentElement)) {
+                                var replacement = inspectorPanel.querySelector(
+                                    '[data-field="' + btn.getAttribute("data-field") + '"]');
+                                if (replacement) {
+                                    try { replacement.focus({ preventScroll: true }); } catch (_eFocus) {}
+                                }
+                            }
                         });
                     })(btns[i]);
                 }
@@ -71913,7 +72134,7 @@
                     // Keep the renderer's closure lookup in sync so the
                     // shared redraw() below reflects the change at once
                     // (mirrors _commitHiddenFacets).
-                    _hiddenFacets = {};
+                    _hiddenFacets = Object.create(null);
                     for (var _hf2 = 0; _hf2 < farr.length; _hf2++) _hiddenFacets[farr[_hf2]] = true;
                     if (hasSetOption) {
                         try { _setOption("hiddenFacets", farr); } catch (_e) {}
@@ -76786,7 +77007,7 @@
                     // hidden (or unhidden) — without this the eye
                     // click only took effect 1.5–10 s later when
                     // R round-tripped and the panel rebuilt.
-                    _hiddenFacets = {};
+                    _hiddenFacets = Object.create(null);
                     for (var i = 0; i < newHidden.length; i++) {
                         _hiddenFacets[newHidden[i]] = true;
                     }
@@ -78686,7 +78907,7 @@
                     var cl = (typeof data.xyCILevel === "number" && data.xyCILevel > 0 && data.xyCILevel < 1) ? data.xyCILevel : 0.95;
                     var ls = (typeof data.xyLoessSpan === "number" && data.xyLoessSpan > 0) ? data.xyLoessSpan : 0.75;
                     var cf = _xyComputeFitsClient(ft, cl, ls);
-                    if (cf) data.xyFits = cf;
+                    data.xyFits = cf || [];
                     // Stamp the time-window guard so the render-entry
                     // guard holds this fit over any out-of-order stale
                     // echo until R catches up (kills the revert flash).
@@ -96577,6 +96798,10 @@
                 }
                 var textEl = editableElsByDragId[id];
                 if (!textEl) { iTextContent.value = ""; return; }
+                if (textEl.hasAttribute("data-gb2-raw-text")) {
+                    iTextContent.value = JSON.parse(textEl.getAttribute("data-gb2-raw-text"));
+                    return;
+                }
                 var tspans = textEl.querySelectorAll("tspan");
                 if (tspans.length > 1) {
                     var out = [];
@@ -103134,15 +103359,19 @@
             e.stopPropagation();
             setInspectorSelection(selsAll.length === 1 ? selsAll[0] : selsAll);
         }, true);
-        // "?" toggles the Help cheat sheet (the toolbar "?" button's
-        // panel) - the Gmail/GitHub convention. Typing "?" in any text
-        // field is untouched.
+        // "?" toggles Help only while this chart component has focus.
+        // The document listener also sees the standalone shell and other
+        // results controls; neither may activate a character-only shortcut.
+        // Composition and native text/selection input remain untouched.
         onDoc("keydown", function (e) {
             if (e.key !== "?") return;
-            if (e.ctrlKey || e.metaKey || e.altKey) return;
+            if (e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented ||
+                e.isComposing || e.keyCode === 229) return;
             var t = e.target;
-            if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" ||
-                      t.tagName === "SELECT" || t.isContentEditable)) return;
+            if (!t || !host.contains(t) ||
+                !host.contains(document.activeElement)) return;
+            if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" ||
+                t.tagName === "SELECT" || t.isContentEditable) return;
             e.preventDefault();
             e.stopPropagation();
             var curH = (inspector && inspector.selection) || [];
@@ -106052,14 +106281,12 @@
     // that render simply rebuilds - self-correcting by construction.
     // Kill switch: localStorage["graphbuilder2.panelPreview"]="off".
     // ---- Client-side stat mirrors for the summaryFunc / errorBarType
-    // panel preview (Compare Groups + Repeated Measures). The payload's
-    // numerics arrive rounded to 10 SIGNIFICANT digits (widget.R ships
-    // jsonlite digits = I(10)), so predictions are re-rounded the same
-    // way: the R echo then usually hashes identical and is skipped, and
-    // when a boundary case rounds differently the echo just re-renders
-    // under the instant hard-cut mask (self-correcting, sub-pixel
-    // difference).
-    function _gb2SigR(x) { return (typeof x === "number" && isFinite(x)) ? Number(x.toPrecision(10)) : x; }
+    // panel preview (Compare Groups + Repeated Measures). Preserve the full
+    // double in observations AND derived values, just as widget.R does.
+    // Independent R/JS calculations may differ by a few floating-point bits;
+    // the authoritative echo then performs its normal corrective render.
+    // Never quantize statistical input merely to force an echo hash match.
+    function _gb2SigR(x) { return x; } // legacy internal call sites
     function _gb2MedianOf(v) {
         // R stats::median semantics: even n averages the two middles.
         var a = v.slice().sort(function (x, y) { return x - y; });
@@ -106122,7 +106349,6 @@
     function _gb2RmMean(a){ var s=0,n=a.length,i=0; for(;i<n;i++) s+=a[i]; return n?s/n:0; }
     function _gb2RmSd(a){ var n=a.length; if(n<2) return 0; var m=_gb2RmMean(a),s=0,i=0; for(;i<n;i++){var d=a[i]-m; s+=d*d;} return Math.sqrt(s/(n-1)); }
     function _gb2RmMedian(a){ var b=a.slice().sort(function(x,y){return x-y;}),n=b.length; if(!n) return 0; return (n%2)?b[(n-1)/2]:(b[n/2-1]+b[n/2])/2; }
-    function _gb2SigR(x){ return (typeof x==="number"&&isFinite(x))?Number(x.toPrecision(10)):x; }
     function _gb2RmRepivot(data, roleMap) {
         try {
             var pf = data.pivotFactors, obs = data.pivotObs;
@@ -107422,5 +107648,7 @@
         });
     }
 
-    root.GraphBuilder2 = { render: render };
+    root.GraphBuilder2 = { render: render,
+        xmlSafeText: _gb2XmlSafeText,
+        prepareSvgForExport: _gb2PrepareSvgForExport };
 })(typeof window !== "undefined" ? window : this);

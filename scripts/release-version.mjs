@@ -119,9 +119,7 @@ function setVersion() {
         'website/about.html',
         'website/download.html',
         'website/gallery.html',
-        'website/support.html',
-        'website/v2.html',
-        'website/v3.html'
+        'website/support.html'
     ];
     for (const rel of allProductVersionPages) {
         const before = read(rel);
@@ -180,9 +178,7 @@ function checkVersion() {
         'website/about.html',
         'website/download.html',
         'website/gallery.html',
-        'website/support.html',
-        'website/v2.html',
-        'website/v3.html'
+        'website/support.html'
     ];
     for (const rel of allProductVersionPages) {
         expectAll(rel,
