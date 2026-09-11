@@ -3,7 +3,11 @@
 // the module's allowlist both when seeding its own copy and when exploding it,
 // so a key the module does not name is dropped on the echo: the edit draws,
 // then snaps back (Torry, Sep 11 2026: the group gap reverted in a second).
-// This probe commits each key and asserts the ECHO payload still carries it.
+// The shell passes the blob through and the ENGINE explodes it at render
+// entry, so the payload handed to render() still shows the defaults; the
+// honest observable is the engine's own data after the echo has settled,
+// plus the drawn marker gap for the spread. This probe commits each key and
+// asserts that post-echo state still carries it.
 import { createRequire } from 'node:module';
 import path from 'node:path';
 function loadPlaywright() {
@@ -35,23 +39,30 @@ const res = await page.evaluate(async (CASES) => {
     S.setModule('distplotbuilder'); S.setRoles('distplotbuilder', { var: 'y', groupVar: 'g' });
     S.setWorkspace('chart'); await s(2400);
     window.__gb2_setOption('graphType', 'dot'); await s(2500);
-    const out = { keys: window.gb2_undo.getData().specKeys || [] };
+    const gap = () => {
+        const xs = [...document.querySelectorAll('#psroot svg [data-role="line-marker"]')]
+            .map(m => m.getBoundingClientRect().x);
+        return xs.length ? Math.round(Math.max(...xs) - Math.min(...xs)) : null;
+    };
+    const out = { keys: window.gb2_undo.getData().specKeys || [], gapBefore: gap() };
     for (const [k, v] of CASES) {
-        const renders = []; const orig = window.GraphBuilder2.render;
-        window.GraphBuilder2.render = function (id, payload) { renders.push(payload[k]); return orig.apply(this, arguments); };
-        const t0 = Date.now();
+        let echoes = 0; const orig = window.GraphBuilder2.render;
+        window.GraphBuilder2.render = function () { echoes++; return orig.apply(this, arguments); };
         window.__gb2_setOption(k, v);
-        for (let i = 0; i < 80 && !renders.length; i++) await s(100);   // the echo render
-        await s(300);
+        for (let i = 0; i < 80 && !echoes; i++) await s(100);   // wait for the ECHO render
+        await s(500);
         window.GraphBuilder2.render = orig;
-        out[k] = { echoed: renders.length ? renders[renders.length - 1] : 'no-echo', want: v, ms: Date.now() - t0 };
+        out[k] = { echoed: echoes ? window.gb2_undo.getData()[k] : 'no-echo', want: v };
+        if (k === 'lineMarkerSpread') out.gapAfterEcho = gap();
     }
     return out;
 }, CASES);
 ok(Array.isArray(res.keys) && res.keys.includes('lineMarkerSpread') && res.keys.includes('barOutlierWidth'),
    'the Distribution allowlist names the line-family and outlier keys');
 for (const [k, v] of CASES)
-    ok(res[k].echoed === v, k + ': the echo payload carries the committed value (' + JSON.stringify(res[k].echoed) + ' vs ' + JSON.stringify(v) + ')');
+    ok(res[k].echoed === v, k + ': the value survives the echo (' + JSON.stringify(res[k].echoed) + ' vs ' + JSON.stringify(v) + ')');
+ok(res.gapAfterEcho !== null && res.gapBefore !== null && res.gapAfterEcho > res.gapBefore + 40,
+   'the drawn group gap stays widened after the echo (' + res.gapBefore + 'px -> ' + res.gapAfterEcho + 'px)');
 ok(errors.length === 0, 'no page errors');
 console.log(fails ? 'DIST DOT ALLOWLIST CHECK: ' + fails + ' FAILED' : 'DIST DOT ALLOWLIST CHECK PASS');
 await browser.close(); process.exit(fails ? 1 : 0);
