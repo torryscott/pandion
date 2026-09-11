@@ -35,8 +35,14 @@ for f in standalone/index.html inst/widget/graphbuilder2.min.js; do
     [ -f "$f" ] || { echo "$f missing" >&2; exit 1; }
 done
 
+# The build stamp (see scripts/build-stamp.sh and standalone/build-dist.sh)
+# goes into the shell, which is served uncached, so the hashed scripts
+# keep their names across artifact-only rebuilds.
+PS_BUILD_STAMP="$(bash scripts/build-stamp.sh)"
+export PS_BUILD_STAMP
+
 python3 - <<'EOF'
-import hashlib, pathlib, re
+import hashlib, os, pathlib, re
 
 root = pathlib.Path(".")
 src_dir = root / "standalone"
@@ -45,6 +51,11 @@ lib = app / "lib"
 lib.mkdir(parents=True, exist_ok=True)
 
 html = (src_dir / "index.html").read_text(encoding="utf-8")
+
+META = '<meta name="pandion-build" content="">'
+assert html.count(META) == 1, "expected exactly one empty pandion-build meta"
+html = html.replace(META, '<meta name="pandion-build" content="%s">'
+                    % os.environ["PS_BUILD_STAMP"])
 
 # The eleven <script src> tags, in load order. Everything else the app
 # needs is inline, so this list plus the manifest and icons IS the app.
@@ -349,6 +360,13 @@ grep -rq "APP_VERSION = \"$VERSION\"" website/app/lib || {
     echo "WARN: the web app does not declare APP_VERSION = $VERSION" >&2; DRIFT=1; }
 grep -q "APP_VERSION = \"$VERSION\"" website/pandion-plots.html || {
     echo "WARN: the portable download does not declare APP_VERSION = $VERSION" >&2; DRIFT=1; }
+# Both shells must carry a well-formed build stamp: it is what makes an
+# exported figure or a saved project traceable to the code that made it
+# (the version alone is not, since this site deploys ahead of tags).
+for shell in website/app/index.html website/pandion-plots.html; do
+    grep -Eq '<meta name="pandion-build" content="[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z [0-9a-f]{7,}\*?">' "$shell" || {
+        echo "WARN: $shell carries no well-formed build stamp" >&2; DRIFT=1; }
+done
 # The downloads card states the portable file's size. It grew from 3.9 MB to
 # 4.5 MB without anyone noticing, so check it here rather than trusting a
 # number typed once. Decimal MB, which is what a browser reports on download.
@@ -356,11 +374,54 @@ SIZE_MB=$(python3 -c "import os;print(f'{os.path.getsize(\"website/pandion-plots
 grep -q "One file, about ${SIZE_MB} MB" website/index.html || {
     echo "WARN: the downloads card does not say ${SIZE_MB} MB (portable file size)" >&2
     DRIFT=1; }
+# License drift. The desktop app declares its own license in
+# standalone/electron/package.json, and electron-builder writes that into
+# the packaged app's metadata - so it is a PUBLISHED statement, and a
+# binary cannot be un-published. It read AGPL-3.0 for the life of the
+# desktop build while the repo LICENSE, DESCRIPTION, CITATION.cff, the
+# site footers and the app's own About dialog all said GPL-3.0 (found in
+# the Sep 2026 pre-release audit). Checked against the JSON fields
+# themselves, not a grep: a lockfile mentions dozens of dependency
+# licenses and a bare grep would pass off any of them.
+LICENSE_ID="GPL-3.0"
+node -e '
+  const want = process.argv[1];
+  const pkg = require("./standalone/electron/package.json");
+  const lock = require("./standalone/electron/package-lock.json");
+  const root = (lock.packages && lock.packages[""]) || {};
+  const bad = [];
+  if (pkg.license !== want) bad.push("package.json says " + pkg.license);
+  if (root.license !== want) bad.push("package-lock.json root says " + root.license);
+  if (bad.length) { console.error("WARN: desktop app license drift (" + bad.join("; ") + "), expected " + want); process.exit(1); }
+' "$LICENSE_ID" || DRIFT=1
+grep -q "^license: $LICENSE_ID$" CITATION.cff || {
+    echo "WARN: CITATION.cff does not declare license $LICENSE_ID" >&2; DRIFT=1; }
+grep -q ">$LICENSE_ID<" standalone/index.html || {
+    echo "WARN: the app's About dialog does not state $LICENSE_ID" >&2; DRIFT=1; }
+grep -q "^License: GPL-3$" DESCRIPTION || {
+    echo "WARN: DESCRIPTION does not declare License: GPL-3" >&2; DRIFT=1; }
+
+# Release-asset links. The page advertised "Version 3.1.1" while all four
+# installer links still pointed at the v3.1.0 tag: both releases carry the
+# same asset names, so the links WORKED and quietly handed out the older
+# build (Sep 2026 audit). The version-string check above passed vacuously
+# because it never looked inside a URL. Links now use
+# releases/latest/download/, which cannot go stale; a tag-pinned link is
+# still allowed as long as the tag is this version.
+STALE_TAGS=$(grep -oE 'releases/download/v[0-9]+\.[0-9]+\.[0-9]+/' website/*.html 2>/dev/null \
+    | grep -v "releases/download/v${VERSION}/" | sort -u || true)
+if [ -n "$STALE_TAGS" ]; then
+    echo "WARN: site pages link release tags other than v$VERSION:" >&2
+    echo "$STALE_TAGS" >&2
+    DRIFT=1
+fi
 
 if [ "$DRIFT" = "0" ]; then
     echo "version $VERSION consistent across the site + CITATION.cff"
+    echo "license $LICENSE_ID consistent across the desktop app, citation, About and DESCRIPTION"
+    echo "release links point at the current build (no stale tags)"
 else
-    echo "ERROR: public version references are inconsistent" >&2
+    echo "ERROR: public version or license references are inconsistent" >&2
     exit 1
 fi
 

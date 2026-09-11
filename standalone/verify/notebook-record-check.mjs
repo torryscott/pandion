@@ -129,20 +129,38 @@ async function exportAndRead(format, scopeMatch, opts) {
         let m;
         while ((m = re.exec(s))) {
             const start = m.index + m[0].length;
-            let end = s.indexOf('endstream', start);
+            const end = s.indexOf('endstream', start);
             if (end === -1) break;
-            // Trim the newline PDF writes before the keyword: node's inflate
-            // tolerates trailing bytes, DecompressionStream rejects them.
-            while (end > start && (s[end - 1] === '\n' || s[end - 1] === '\r')) end--;
-            const bytes = buf.subarray(start, end);
-            for (const kind of ['deflate', 'deflate-raw']) {
-                try {
-                    const ab = await new Response(new Blob([bytes]).stream()
-                        .pipeThrough(new DecompressionStream(kind))).arrayBuffer();
-                    out += '\n' + new TextDecoder('latin1').decode(ab);
-                    break;
-                } catch (e) { /* try the next encoding, else skip */ }
+            // The writer puts a newline between the data and the keyword,
+            // and DecompressionStream rejects trailing bytes, so that
+            // separator has to go. But it must NOT be found by byte class:
+            // the last byte of a Flate stream is an Adler-32 checksum byte,
+            // which is itself 0x0A or 0x0D about 1 run in 128 per stream.
+            // Stripping "all trailing newlines" ate it, the stream failed to
+            // inflate, the skip below swallowed that silently, and exactly
+            // that page's record vanished from the text - an intermittent
+            // case-4 miss that clustered in time because the plaintext
+            // differs across runs only by the kept hh:mm, so the checksum
+            // drifted slowly through the day. Try the candidate ends in
+            // order - end-1 (jsPDF's one "\n"), end-2 (CRLF writers), end
+            // (none) - and keep the first that inflates. Self-verifying:
+            // a wrong candidate is junk or a truncated stream, and both
+            // fail to decode rather than passing wrongly.
+            let text = null;
+            for (const cut of [end - 1, end - 2, end]) {
+                if (cut <= start) continue;
+                const bytes = buf.subarray(start, cut);
+                for (const kind of ['deflate', 'deflate-raw']) {
+                    try {
+                        const ab = await new Response(new Blob([bytes]).stream()
+                            .pipeThrough(new DecompressionStream(kind))).arrayBuffer();
+                        text = new TextDecoder('latin1').decode(ab);
+                        break;
+                    } catch (e) { /* next encoding, then the next candidate */ }
+                }
+                if (text !== null) break;
             }
+            if (text !== null) out += '\n' + text;
         }
         // PDF text operators split a run into (chunk)Tj pieces; join the
         // parenthesised literals so a sentence reads back as a sentence.

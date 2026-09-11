@@ -1300,7 +1300,22 @@ async function sbClick(page, act) {
     // Copy table: a pasteable TSV of the table AS DISPLAYED
     const tsv = await page.evaluate(() => {
         const btn = document.querySelector('[data-st-act="copybins"]');
-        const txt = (btn && btn.__gb2ApaFn) ? btn.__gb2ApaFn() : '';
+        // Exercise the real copy action and capture its clipboard boundary.
+        // Reading the private __gb2ApaFn property bypassed the click handler
+        // and failed on the minified bundle, which legitimately renames it.
+        let txt = '';
+        const original = document.execCommand;
+        document.execCommand = function (command, ...args) {
+            if (command !== 'copy') return original.call(this, command, ...args);
+            const data = new DataTransfer();
+            document.dispatchEvent(new ClipboardEvent('copy', {
+                clipboardData: data, bubbles: true, cancelable: true
+            }));
+            txt = data.getData('text/plain') || (document.activeElement || {}).value || '';
+            return true;
+        };
+        try { if (btn) btn.click(); }
+        finally { document.execCommand = original; }
         const lines = txt.split('\n');
         return { n: lines.length, head: lines[0] || '',
                  tabs: lines.length > 1 ? lines[1].split('\t').length : 0,

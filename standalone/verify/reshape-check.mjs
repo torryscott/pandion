@@ -171,6 +171,31 @@ if (!/s1 has 2 rows for pre/.test(reset))
     throw new Error('remedies did not reset on re-pick: ' + reset);
 console.log('  ok  changing a column resets accepted remedies (each refusal re-confronted)');
 
+// Precision regression: averaging trials must not round the workspace data.
+await page.click('#ps-reshape-close');
+await page.evaluate(() => {
+    const S = window.PS_SHELL;
+    S.loadTable('precise trials', ['subject', 'session', 'rt'], [
+        ['s1', 'pre', '10000000001'], ['s1', 'pre', '10000000003'],
+        ['s1', 'post', '10000000005'], ['s1', 'post', '10000000007']
+    ], { subject: 'id', session: 'nominal', rt: 'continuous' });
+    S.runCommand('data-reshape');
+});
+await page.click('[data-reshape-remedy="aggregateMean"]');
+await page.click('#ps-reshape-apply');
+const precise = await page.evaluate(() => {
+    const S = window.PS_SHELL;
+    const mean = S.project.table.raw.rt_pre[0];
+    S.dataUndo(); const restoredLong = S.project.table.order.includes('rt');
+    S.dataRedo();
+    const opened = S.openProjectText(S.projectFileText());
+    return { mean, restoredLong, opened, reopened: S.project.table.raw.rt_pre[0] };
+});
+if (precise.mean !== '10000000002' || !precise.restoredLong ||
+    !precise.opened.ok || precise.reopened !== precise.mean)
+    throw new Error('reshape lost intermediate precision: ' + JSON.stringify(precise));
+console.log('  ok  reshape means retain full precision through undo/redo and reopening');
+
 if (errors.length) throw new Error(errors[0]);
 await browser.close();
 console.log('RESHAPE CHECK: ALL GREEN');

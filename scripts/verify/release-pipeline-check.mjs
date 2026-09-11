@@ -62,7 +62,10 @@ try {
         'standalone/electron/package.json',
         'docs/user-guide.html', 'website/index.html', 'website/about.html',
         'website/download.html', 'website/gallery.html', 'website/support.html',
-        'website/v2.html', 'website/v3.html'
+        // release-version flips the ledger's unreleased marker at release
+        // time, so the isolated copy must carry the ledger too (Sep 2026:
+        // without it the sync died on a missing file and this check went red).
+        'NUMERICAL-CHANGES.md'
     ];
     for (const rel of versionFiles) {
         const target = path.join(versionTemp, rel);
@@ -99,14 +102,77 @@ ok(read('.gitignore').includes('/.release/'),
     'prepared bundles are excluded from source control');
 
 const standaloneRun = read('standalone/verify/run.sh');
-// Seven since Aug 29 2026: the three original optional R-parity checks,
+const buildWorkflow = read('.github/workflows/build-jmo.yml');
+const validationWorkflow = read('.github/workflows/stats-parity.yml');
+const desktopJob = buildWorkflow.match(/^  desktop:\n([\s\S]*?)(?=^  \w+:|$(?![\s\S]))/m)?.[1];
+const desktopNodeMajor = Number(desktopJob?.match(/node-version: '(\d+)'/)?.[1]);
+const desktopLock = JSON.parse(read('standalone/electron/package-lock.json'));
+const electronNodeMinimum = desktopLock.packages['node_modules/electron'].engines.node;
+const electronNodeMajor = Number(electronNodeMinimum.match(/^>=\s*(\d+)\./)?.[1]);
+ok(desktopNodeMajor > 0 && electronNodeMajor > 0 && desktopNodeMajor >= electronNodeMajor,
+    'desktop CI selects a Node major meeting the locked Electron minimum (' +
+    electronNodeMinimum + ')');
+ok(desktopJob.includes('npm ci --engine-strict'),
+    'desktop dependency installation refuses unsupported Node engines');
+ok(/^  validation:\n    uses: \.\/\.github\/workflows\/stats-parity\.yml$/m.test(buildWorkflow) &&
+   /^  accessibility:\n    uses: \.\/\.github\/workflows\/accessibility\.yml$/m.test(buildWorkflow) &&
+   /^  release:\n    needs: \[build, desktop, validation, accessibility\]$/m.test(buildWorkflow),
+    'tag publishing requires statistics and accessibility validation in the same workflow');
+const accessibilityWorkflow = read('.github/workflows/accessibility.yml');
+const accessibilityRun = read('scripts/verify/accessibility-run.sh');
+ok(accessibilityWorkflow.includes('run: bash scripts/verify/accessibility-run.sh') &&
+   !accessibilityWorkflow.includes('continue-on-error:'),
+    'CI requires the accessibility runner and cannot ignore its failure');
+ok(accessibilityWorkflow.includes('if: always()') &&
+   accessibilityWorkflow.includes('name: accessibility-evidence'),
+    'CI retains accessibility evidence even when a check fails');
+ok(buildWorkflow.includes('pattern: jmo-*') && buildWorkflow.includes('pattern: desktop-*') &&
+   !buildWorkflow.includes('name: Download all artifacts'),
+    'review evidence is not mixed into public release downloads');
+for (const probe of ['axe-state-check.mjs', 'chart-accessibility-check.mjs',
+    'reflow-accessibility-check.mjs', 'pdf-accessibility-check.mjs',
+    'export-accessibility-check.mjs', 'accessibility-policy-check.mjs', 'website/verify-axe.mjs', 'a11y-check.mjs'])
+    ok(accessibilityRun.includes(probe), 'required accessibility runner includes ' + probe);
+ok(accessibilityRun.includes('for surface in source portable hosted') &&
+   accessibilityRun.includes('for bundle in source min') &&
+   prepare.includes('bash scripts/verify/accessibility-run.sh'),
+    'local release preparation covers all application artifacts and both shared bundles');
+const sharedRun = read('scripts/verify/run.sh');
+const hostScanPosition = sharedRun.indexOf('node "$HERE/a11y-check.mjs"');
+ok(hostScanPosition >= 0 && hostScanPosition < sharedRun.indexOf('if [ "$EXTRAS" = "1" ]') &&
+   !sharedRun.includes('skipped: axe-core'),
+    'the shared accessibility scan is mandatory, including dependency failures');
+ok(/^  workflow_call:$/m.test(validationWorkflow) &&
+   /^  pull_request:$/m.test(validationWorkflow) &&
+   !/continue-on-error:|if:.*always\(/.test(validationWorkflow),
+    'statistical validation is reusable, runs on pull requests, and cannot ignore failures');
+ok(validationWorkflow.includes('python3 standalone/verify/stats-thirdref-guard.py') &&
+   standaloneRun.includes('python3 standalone/verify/stats-thirdref-guard.py'),
+    'CI and local verification both exercise negative controls for the independent checker');
+// Nine: the three original optional R-parity checks,
 // the linkedom guard on hardening-dom-check, and the statistics
 // hardening tier's three (the parity fuzzer, the R canary, and the
-// scipy third reference) - a missing helper skips with a warning on a
+// scipy third reference), plus the R and SciPy tail references. A missing helper skips with a warning on a
 // dev run but must FAIL a release run, where a silent skip is the
 // dangerous outcome.
-ok((standaloneRun.match(/PS_REQUIRE_R_PARITY/g) || []).length === 7,
-    'all optional standalone checks become mandatory for a release');
+ok((standaloneRun.match(/PS_REQUIRE_R_PARITY/g) || []).length === 9,
+    'the optional R/SciPy and DOM dependency checks become mandatory for a release');
+for (const probe of ['fit-boundary-guard.mjs', 'fit-boundary-check.mjs', 'loess-direct-guard.mjs', 'loess-direct-check.mjs', 'fit-export-unit.mjs', 'fit-export-check.mjs', 'facet-fit-check.mjs', 'xml-export-check.mjs', 'stats-tail-check.mjs', 'stats-tail-thirdref.py']) {
+    ok(standaloneRun.includes('standalone/verify/' + probe) && validationWorkflow.includes('standalone/verify/' + probe),
+        probe + ' is included in local and CI validation');
+}
+ok(standaloneRun.includes('bash standalone/verify/anova-run.sh') &&
+   validationWorkflow.includes('bash standalone/verify/anova-run.sh') &&
+   validationWorkflow.includes('"car"'),
+    'ANOVA package, precision and delivery verification is mandatory locally and in CI');
+const anovaGate = read('standalone/verify/anova-run.sh');
+for (const required of ['set -euo pipefail', 'anova-reference.R', 'anova-precision.py', '--guard-selftest',
+    'anova-host.R', 'for bundle in source min', 'PS_ANOVA_HOST_DIR=', 'PS_PAGE=standalone/dist/pandion-plots.html']) {
+    ok(anovaGate.includes(required), 'ANOVA release gate requires ' + required);
+}
+ok(standaloneRun.includes('stats-tail-check.mjs /tmp/pandion-stats-tail.json --min') &&
+   validationWorkflow.includes('stats-tail-check.mjs /tmp/pandion-stats-tail.json --min'),
+    'raw tail probabilities are also checked in the compiled numerical core');
 ok(!read('standalone/verify/polish-check.mjs')
         .includes("about.version === '3.0.0'") &&
    !read('standalone/verify/hardening-dom-check.mjs')

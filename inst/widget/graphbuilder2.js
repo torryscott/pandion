@@ -28,6 +28,72 @@
     function _gb2PtFromPx(px) { return Math.round(px * 75) / 100; }
     function _gb2PxFromPt(pt) { return pt * 4 / 3; }
 
+    // VISUAL pixels vs LOGICAL pixels. The standalone shell scales the chart
+    // with a CSS zoom on the engine host (its view zoom), so the two differ
+    // by a constant factor: pointer clientX/clientY and every
+    // getBoundingClientRect report VISUAL px, while an SVG user coordinate,
+    // or a px length written on a chart-surface element, is LOGICAL and
+    // paints at that factor times its value. A pointer delta applied
+    // straight to a position therefore drifts by the factor: the dragged
+    // thing outruns the cursor at 150% and lags it at 50%, worse the further
+    // you drag, and a hover tooltip lands further from its point the further
+    // that point sits from the chart's corner (Torry, Sep 2026).
+    // This returns the factor for the space el lives in, measured the way
+    // _ensureChartRoomFor already measures it: the element's visual rect over
+    // its own logical width. Pass the chart svg where you can, since its
+    // width ATTRIBUTE is the engine's own logical size and an exact number
+    // where offsetWidth is rounded. Never pass a group inside the chart: a
+    // chart-internal transform would poison the reading.
+    // Off the standalone this is EXACTLY 1. jamovi applies no zoom, and
+    // Electron page zoom and retina scaling move both sides together, so
+    // every call site divides by 1, which is exact, and behaves as before.
+    // How many VISUAL px one CSS px written into an svg child's
+    // style.transform paints as. Chromium: the zoom, a CSS length inside a
+    // zoomed subtree being a logical px. Safari: the zoom SQUARED. It
+    // inflates the length once at style time and then paints the svg zoomed
+    // again (Torry's Safari 26 readout, Sep 2026: translateX(243.9px) moved
+    // the bar 451px at zoom 1.359). Safari also leaves the zoom out of
+    // getScreenCTM() entirely, so the matrix the drag code divided by read
+    // 1.000 there and the bar outran the cursor by the zoom squared, while
+    // Chrome tracked perfectly. Neither the matrix nor an assumption serves,
+    // so measure: a throwaway rect, one known translate, two synchronous
+    // reads with no paint between them. Wherever nothing zooms this never
+    // even builds the probe and returns exactly 1, so jamovi divides by 1.
+    function _gb2CssPxScale(svg) {
+        try {
+            if (!svg || !svg.getBoundingClientRect) return 1;
+            var vs = _gb2ViewScale(svg);
+            if (vs === 1) return 1;
+            var p = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+            p.setAttribute("x", "0"); p.setAttribute("y", "0");
+            p.setAttribute("width", "10"); p.setAttribute("height", "10");
+            p.setAttribute("fill", "none"); p.setAttribute("pointer-events", "none");
+            p.style.transition = "none";
+            svg.appendChild(p);
+            var a = p.getBoundingClientRect().left;
+            p.style.transform = "translateX(100px)";
+            var b = p.getBoundingClientRect().left;
+            svg.removeChild(p);
+            var sc = (b - a) / 100;
+            return (isFinite(sc) && sc > 0.01) ? sc : vs;
+        } catch (_e) { return 1; }
+    }
+    function _gb2ViewScale(el) {
+        try {
+            if (!el || !el.getBoundingClientRect) return 1;
+            var node = el.ownerSVGElement || el;
+            var r = node.getBoundingClientRect();
+            if (!r || !(r.width > 0)) return 1;
+            var logical = 0;
+            if (node.getAttribute) logical = Number(node.getAttribute("width")) || 0;
+            if (!(logical > 0)) logical = node.offsetWidth || node.clientWidth || 0;
+            if (!(logical > 0)) return 1;
+            var s = r.width / logical;
+            if (!isFinite(s) || s <= 0 || Math.abs(s - 1) < 0.001) return 1;
+            return s;
+        } catch (_e) { return 1; }
+    }
+
     // A faceted category key is built server-side as
     // "<facet level><separator><category>". Splitting it on the FIRST
     // separator is right when a CATEGORY label contains one, and wrong
@@ -1306,6 +1372,65 @@
         };
     }
 
+    // XML 1.0 cannot represent C0 controls (except TAB/LF/CR), lone
+    // UTF-16 surrogates, or U+FFFE/U+FFFF. Escape only those code units
+    // for display; valid Unicode, including supplementary pairs, is intact.
+    // This is a presentation boundary, NEVER a data/group-key normalizer.
+    function _gb2XmlSafeText(value) {
+        return String(value == null ? "" : value).replace(
+            /[\u0000-\u0008\u000b\u000c\u000e-\u001f\ud800-\udfff\ufffe\uffff]/g,
+            function (ch, at, text) {
+                var c = ch.charCodeAt(0);
+                if (c >= 0xd800 && c <= 0xdbff && at + 1 < text.length) {
+                    var next = text.charCodeAt(at + 1);
+                    if (next >= 0xdc00 && next <= 0xdfff) return ch;
+                }
+                if (c >= 0xdc00 && c <= 0xdfff && at > 0) {
+                    var prev = text.charCodeAt(at - 1);
+                    if (prev >= 0xd800 && prev <= 0xdbff) return ch;
+                }
+                return "\\u" + ("0000" + c.toString(16).toUpperCase()).slice(-4);
+            });
+    }
+    function _gb2SetSvgTextContent(el, value) {
+        var raw = String(value == null ? "" : value);
+        var safe = _gb2XmlSafeText(raw);
+        // JSON is lossless even when a literal label spells the same escape.
+        // Keep it on the element so clones retain it and editors read the
+        // original, rather than committing a displayed escape back to data.
+        if (safe !== raw)
+            el.setAttribute("data-gb2-raw-text", _gb2XmlSafeText(JSON.stringify(raw)));
+        else el.removeAttribute("data-gb2-raw-text");
+        el.textContent = safe;
+        return safe;
+    }
+    function _gb2PrepareSvgForExport(copy) {
+        // Mutate an export clone only. Live data-* values still identify
+        // exact groups/facets for interactions and statistical selection.
+        var nodes = [copy], all = copy.querySelectorAll("*");
+        for (var i = 0; i < all.length; i++) nodes.push(all[i]);
+        for (var j = 0; j < nodes.length; j++) {
+            var el = nodes[j], rawAttrs = null;
+            for (var a = 0; a < el.attributes.length; a++) {
+                var attr = el.attributes[a], safe = _gb2XmlSafeText(attr.value);
+                if (safe === attr.value) continue;
+                if (!rawAttrs) rawAttrs = Object.create(null);
+                rawAttrs[attr.name] = attr.value;
+                attr.value = safe;
+            }
+            if (rawAttrs) el.setAttribute("data-gb2-raw-attributes",
+                _gb2XmlSafeText(JSON.stringify(rawAttrs)));
+            // Backstop for metadata, shell captions, and future SVG text
+            // paths. Normal chart labels are escaped BEFORE measurement.
+            for (var child = el.firstChild; child; child = child.nextSibling) {
+                if (child.nodeType !== 3 && child.nodeType !== 4 && child.nodeType !== 8) continue;
+                var text = _gb2XmlSafeText(child.nodeValue);
+                if (text !== child.nodeValue) child.nodeValue = text;
+            }
+        }
+        return copy;
+    }
+
     function svgEl(tag, attrs) {
         var el = document.createElementNS(SVGNS, tag);
         if (attrs) for (var k in attrs) el.setAttribute(k, attrs[k]);
@@ -1471,24 +1596,33 @@
     var _gb2Stats = {
         mean: function (a) {
             if (!a || a.length === 0) return NaN;
-            var s = 0, k = 0;
+            var s = 0, k = 0, first, same = true;
             for (var i = 0; i < a.length; i++) {
-                if (isFinite(a[i])) { s += a[i]; k++; }
+                if (isFinite(a[i])) {
+                    if (k === 0) first = a[i];
+                    else if (a[i] !== first) same = false;
+                    s += a[i]; k++;
+                }
             }
-            return k > 0 ? s / k : NaN;
+            // Repeated addition can move the mean of identical doubles by
+            // several ulps (and by different amounts at different n). That
+            // must never invent variation or a significant group difference.
+            return k > 0 ? (same ? first : s / k) : NaN;
         },
         // Sample variance (Bessel-corrected, n-1 denominator).
         variance: function (a, m) {
             if (!a || a.length < 2) return NaN;
             if (m === undefined) m = this.mean(a);
-            var s = 0, k = 0;
+            var s = 0, k = 0, first, same = true;
             for (var i = 0; i < a.length; i++) {
                 if (isFinite(a[i])) {
+                    if (k === 0) first = a[i];
+                    else if (a[i] !== first) same = false;
                     var d = a[i] - m;
                     s += d * d; k++;
                 }
             }
-            return k > 1 ? s / (k - 1) : NaN;
+            return k > 1 ? (same ? 0 : s / (k - 1)) : NaN;
         },
         sd: function (a, m) { return Math.sqrt(this.variance(a, m)); },
         // Welch's two-sample t (unequal variances) — the canonical
@@ -1801,12 +1935,21 @@
             return s;
         },
         // F-distribution CDF: Pr(F <= f) for df1, df2 > 0, via the
-        // same regularized incomplete beta that backs _tCDF. The upper
-        // tail (1 - this) is the ANOVA omnibus p-value.
+        // same regularized incomplete beta that backs _tCDF. Use fSurvival
+        // directly for p values: subtracting this CDF from 1 loses tiny tails.
         fCDF: function (f, df1, df2) {
             if (!isFinite(f) || f <= 0 || !(df1 > 0) || !(df2 > 0)) return 0;
             var x = (df1 * f) / (df1 * f + df2);
             return this._incompleteBeta(x, df1 / 2, df2 / 2);
+        },
+        // R pf(f, df1, df2, lower.tail = FALSE), using the complementary
+        // beta identity rather than 1 - a rounded-to-one CDF.
+        fSurvival: function (f, df1, df2) {
+            if (!(df1 > 0) || !(df2 > 0) || isNaN(f)) return NaN;
+            if (f <= 0) return 1;
+            if (f === Infinity) return 0;
+            var x = 1 / (1 + (df1 / df2) * f);
+            return this._incompleteBeta(x, df2 / 2, df1 / 2);
         },
         // One-way ANOVA across k level-arrays (each an array of raw
         // values; non-finite entries dropped). Returns the omnibus
@@ -1842,7 +1985,7 @@
             if (df2 < 1 || !(ssw > 0)) return null;
             var msb = ssb / df1, msw = ssw / df2;
             var F = msb / msw;
-            var p = 1 - this.fCDF(F, df1, df2);
+            var p = this.fSurvival(F, df1, df2);
             var sst = ssb + ssw;
             var etaSq = sst > 0 ? ssb / sst : NaN;
             return { F: F, df1: df1, df2: df2, p: p,
@@ -1878,6 +2021,87 @@
             }
             return beta;
         },
+        // Repeated-measures error, computed on occasion differences before
+        // removing cell and subject means. This avoids subtracting large
+        // subject/treatment sums of squares to recover a tiny residual.
+        _repeatedAnovaMoments: function (rows, groups) {
+            var N = rows.length, k = rows[0].length, origin = rows[0][0];
+            var centered = [], differences = [], z = [], cells = {}, i, j;
+            for (i = 0; i < N; i++) {
+                var cr = [], dr = [];
+                for (j = 0; j < k; j++) {
+                    cr.push(rows[i][j] - origin);
+                    dr.push(rows[i][j] - rows[i][0]);
+                }
+                centered.push(cr); differences.push(dr);
+                var dm = this.mean(dr);
+                z.push(dr.map(function (v) { return v - dm; }));
+                var group = groups ? groups[i] : 0;
+                if (!cells[group]) cells[group] = [];
+                cells[group].push(i);
+            }
+            var errorRows = [], cellMeans = {}, sse = 0, maxError = 0;
+            for (var key in cells) {
+                if (!Object.prototype.hasOwnProperty.call(cells, key)) continue;
+                var ids = cells[key], base = differences[ids[0]], means = [], actualMeans = [];
+                for (j = 0; j < k; j++) {
+                    var deviations = [];
+                    for (i = 0; i < ids.length; i++) deviations.push(differences[ids[i]][j] - base[j]);
+                    means.push(this.mean(deviations));
+                    actualMeans.push(base[j] + means[j]);
+                }
+                cellMeans[key] = actualMeans;
+                for (i = 0; i < ids.length; i++) {
+                    var dr2 = differences[ids[i]], e = [];
+                    for (j = 0; j < k; j++) e.push((dr2[j] - base[j]) - means[j]);
+                    var em = this.mean(e);
+                    for (j = 0; j < k; j++) {
+                        e[j] -= em;
+                        sse += e[j] * e[j]; maxError = Math.max(maxError, Math.abs(e[j]));
+                    }
+                    errorRows.push(e);
+                }
+            }
+            // These residual vectors already have zero occasion/subject
+            // means. Their cross-product is the GG covariance numerator;
+            // its common scaling cancels from epsilon. Normalize first to
+            // avoid squaring very large or very small covariance entries.
+            var tr = 0, ss = 0;
+            if (maxError > 0) for (var a = 0; a < k; a++) for (var b = 0; b < k; b++) {
+                var cross = 0;
+                for (i = 0; i < errorRows.length; i++)
+                    cross += (errorRows[i][a] / maxError) * (errorRows[i][b] / maxError);
+                if (a === b) tr += cross;
+                ss += cross * cross;
+            }
+            var eps = k === 2 ? 1 : (ss > 0 ? tr * tr / ((k - 1) * ss) : 1);
+            eps = Math.min(1, Math.max(1 / (k - 1), eps));
+            return { rows: centered, z: z, cellMeans: cellMeans, sse: sse, eps: eps };
+        },
+        // Full factorial residual SS is within-cell variation. Subtract a
+        // cell observation before averaging, so tiny real residuals survive
+        // beside a large cell mean and constant cells stay exactly constant.
+        _factorialResidualSS: function (obs, dimensions) {
+            var cells = {}, keys = ["ai", "bi", "ci"], i, j;
+            for (i = 0; i < obs.length; i++) {
+                var key = 0;
+                for (j = 0; j < dimensions.length; j++) key = key * dimensions[j] + obs[i][keys[j]];
+                if (!cells[key]) cells[key] = [];
+                cells[key].push(obs[i].y);
+            }
+            var rss = 0;
+            for (var ck in cells) {
+                if (!Object.prototype.hasOwnProperty.call(cells, ck)) continue;
+                var values = cells[ck], origin = values[0], centered = [];
+                for (i = 0; i < values.length; i++) centered.push(values[i] - origin);
+                var mean = this.mean(centered);
+                for (i = 0; i < centered.length; i++) {
+                    var residual = centered[i] - mean;
+                    rss += residual * residual;
+                }
+            }
+            return rss;
+        },
         // Two-way ANOVA with interaction — Type III sums of squares via
         // sum-to-zero contrasts (jamovi's ANOVA defaults): each term's
         // SS = RSS(model without the term) - RSS(full model), with the
@@ -1888,6 +2112,11 @@
         // sum-coded model matrices (unbalanced data, where the SS types
         // genuinely differ).
         twoWayANOVA: function (obs, a, b) {
+            if (!obs || !obs.length) return null;
+            var origin = obs[0].y;
+            obs = obs.map(function (o) {
+                return { ai: o.ai, bi: o.bi, y: o.y - origin };
+            });
             if (!(a >= 2) || !(b >= 2)) return null;
             var N = obs.length, i;
             var dfe = N - a * b;
@@ -1934,7 +2163,7 @@
                     if (keep[asgn[c]]) cols.push(c);
                 }
                 var p = cols.length;
-                var XtX = [], Xty = [], yty = 0, r2;
+                var XtX = [], Xty = [], r2;
                 for (r2 = 0; r2 < p; r2++) {
                     XtX.push(new Array(p).fill ? new Array(p) : []);
                     for (var c2 = 0; c2 < p; c2++) XtX[r2][c2] = 0;
@@ -1943,7 +2172,6 @@
                 for (var o2 = 0; o2 < N; o2++) {
                     var full = xrow(obs[o2].ai, obs[o2].bi);
                     var yc = obs[o2].y - gm;   // centered for conditioning
-                    yty += yc * yc;
                     for (var u2 = 0; u2 < p; u2++) {
                         var xu = full[cols[u2]];
                         if (xu === 0) continue;
@@ -1958,11 +2186,16 @@
                 }
                 var beta = self2._solveLS(XtX, Xty, p);
                 if (!beta) return NaN;
-                var fit = 0;
-                for (var u4 = 0; u4 < p; u4++) fit += beta[u4] * Xty[u4];
-                return Math.max(0, yty - fit);
+                var rss = 0;
+                for (var o3 = 0; o3 < N; o3++) {
+                    var full3 = xrow(obs[o3].ai, obs[o3].bi), fitted = 0;
+                    for (var u4 = 0; u4 < p; u4++) fitted += beta[u4] * full3[cols[u4]];
+                    var residual = (obs[o3].y - gm) - fitted;
+                    rss += residual * residual;
+                }
+                return rss;
             }
-            var rssFull = rssFor({ 0: 1, 1: 1, 2: 1, 3: 1 });
+            var rssFull = this._factorialResidualSS(obs, [a, b]);
             var rssA   = rssFor({ 0: 1, 2: 1, 3: 1 });
             var rssB   = rssFor({ 0: 1, 1: 1, 3: 1 });
             var rssAB  = rssFor({ 0: 1, 1: 1, 2: 1 });
@@ -1975,7 +2208,7 @@
                 var ss = Math.max(0, rssRed - rssFull);
                 var F = (ss / df) / mse;
                 return { ss: ss, df: df, F: F,
-                         p: 1 - self3.fCDF(F, df, dfe) };
+                         p: self3.fSurvival(F, df, dfe) };
             }
             return {
                 A: term(rssA, pA), B: term(rssB, pB), AB: term(rssAB, pAB),
@@ -1989,6 +2222,11 @@
         // Verified against R sum-coded model comparisons on unbalanced
         // 2x2x3 data (all 7 SS + F match to 1e-3).
         threeWayANOVA: function (obs, a, b, c) {
+            if (!obs || !obs.length) return null;
+            var origin = obs[0].y;
+            obs = obs.map(function (o) {
+                return { ai: o.ai, bi: o.bi, ci: o.ci, y: o.y - origin };
+            });
             if (!(a >= 2) || !(b >= 2) || !(c >= 2)) return null;
             var N = obs.length, i;
             var dfe = N - a * b * c;
@@ -2033,12 +2271,11 @@
             function rssFor(keep) {
                 var cols = [];
                 for (var cc = 0; cc < asgn.length; cc++) if (keep[asgn[cc]]) cols.push(cc);
-                var p = cols.length, XtX = [], Xty = [], yty = 0, r2, c2;
+                var p = cols.length, XtX = [], Xty = [], r2, c2;
                 for (r2 = 0; r2 < p; r2++) { XtX.push(new Array(p)); for (c2 = 0; c2 < p; c2++) XtX[r2][c2] = 0; Xty.push(0); }
                 for (var o2 = 0; o2 < N; o2++) {
                     var full = xrow(obs[o2].ai, obs[o2].bi, obs[o2].ci);
                     var yc = obs[o2].y - gm;
-                    yty += yc * yc;
                     for (var u2 = 0; u2 < p; u2++) {
                         var xu = full[cols[u2]];
                         if (xu === 0) continue;
@@ -2049,12 +2286,17 @@
                 for (var u3 = 0; u3 < p; u3++) for (var v4 = 0; v4 < u3; v4++) XtX[u3][v4] = XtX[v4][u3];
                 var beta = self2._solveLS(XtX, Xty, p);
                 if (!beta) return NaN;
-                var fit = 0;
-                for (var u4 = 0; u4 < p; u4++) fit += beta[u4] * Xty[u4];
-                return Math.max(0, yty - fit);
+                var rss = 0;
+                for (var o3 = 0; o3 < N; o3++) {
+                    var full3 = xrow(obs[o3].ai, obs[o3].bi, obs[o3].ci), fitted = 0;
+                    for (var u4 = 0; u4 < p; u4++) fitted += beta[u4] * full3[cols[u4]];
+                    var residual = (obs[o3].y - gm) - fitted;
+                    rss += residual * residual;
+                }
+                return rss;
             }
             var FULL = { 0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1 };
-            var rssFull = rssFor(FULL);
+            var rssFull = this._factorialResidualSS(obs, [a, b, c]);
             function drop(term) { var k = {}; for (var kk in FULL) k[kk] = FULL[kk]; k[term] = 0; return rssFor(k); }
             var rssA = drop(1), rssB = drop(2), rssC = drop(3),
                 rssAB = drop(4), rssAC = drop(5), rssBC = drop(6), rssABC = drop(7);
@@ -2066,7 +2308,7 @@
             function term(rssRed, df) {
                 var ss = Math.max(0, rssRed - rssFull);
                 var F = (ss / df) / mse;
-                return { ss: ss, df: df, F: F, p: 1 - self3.fCDF(F, df, dfe) };
+                return { ss: ss, df: df, F: F, p: self3.fSurvival(F, df, dfe) };
             }
             return {
                 A: term(rssA, pA), B: term(rssB, pB), C: term(rssC, pC),
@@ -2105,7 +2347,7 @@
             return this._logGamma(a) + this._logGamma(b) - this._logGamma(a + b);
         },
         _incompleteBetaCF: function (x, a, b) {
-            var MAXIT = 200, EPS = 3e-7, FPMIN = 1e-30;
+            var MAXIT = 500, EPS = 3e-14, FPMIN = 1e-300;
             var qab = a + b, qap = a + 1, qam = a - 1;
             var c = 1, d = 1 - qab * x / qap;
             if (Math.abs(d) < FPMIN) d = FPMIN;
@@ -2151,10 +2393,11 @@
         // "greater" = upper tail (sample1 predicted above sample2).
         _tTailP: function (t, df, tail) {
             if (!isFinite(t) || !(df > 0)) return NaN;
-            var lower = (t >= 0) ? this._tCDF(t, df) : 1 - this._tCDF(t, df);
-            if (tail === "greater") return 1 - lower;
-            if (tail === "less") return lower;
-            return 2 * (1 - this._tCDF(Math.abs(t), df));
+            var x = df / (df + t * t);
+            var small = 0.5 * this._incompleteBeta(x, df / 2, 0.5);
+            if (tail === "greater") return t >= 0 ? small : 1 - small;
+            if (tail === "less") return t <= 0 ? small : 1 - small;
+            return 2 * small;
         },
         // ---- Non-parametric tests --------------------------------
         //
@@ -2731,9 +2974,13 @@
     // - the axis line still extends visually to 95 but no "95" label is drawn.
     function buildTicks(yMin, yMax, step) {
         var ticks = [];
+        if (!isFinite(yMin) || !isFinite(yMax) || !isFinite(step) || step <= 0 || yMax < yMin) return ticks;
         var first = Math.ceil(yMin / step) * step;
-        for (var v = first; v <= yMax + step * 1e-6; v += step) {
+        for (var v = first; isFinite(v) && v <= yMax + step * 1e-6; v += step) {
             ticks.push(v);
+            // At very narrow ranges around a nonzero offset, a positive
+            // step can round away entirely. Never append that tick forever.
+            if (!(v + step > v)) break;
         }
         return ticks;
     }
@@ -3059,7 +3306,7 @@
             measureText._ctx = canvas.getContext("2d");
         }
         measureText._ctx.font = (fontWeight || "normal") + " " + fontSize + "px sans-serif";
-        return measureText._ctx.measureText(text || "").width;
+        return measureText._ctx.measureText(_gb2XmlSafeText(text || "")).width;
     }
 
     function render(elementId, data) {
@@ -3485,12 +3732,16 @@
                     var _wantFitType = (typeof data.xyFitType === "string" && data.xyFitType.length) ? data.xyFitType : "linear";
                     var _haveFitType = data.xyFits[0] && data.xyFits[0].fit_type;
                     var _typeStale = !!(_haveFitType && _haveFitType !== _wantFitType);
-                    if (_fgActive || _typeStale) {
+                    // Older saved/host payloads may carry pooled fits with
+                    // no facet tag. Recompute per cell before painting them.
+                    var _facetStale = (!!data.facetLabel || (Array.isArray(data.facetLevels) && data.facetLevels.length > 0))
+                        && data.xyFits.some(function (fit) { return fit && fit.facet == null; });
+                    if (_fgActive || _typeStale || _facetStale) {
                         var _gT = _fgActive ? _fg.fitType : _wantFitType;
                         var _gC = _fgActive ? _fg.ciLevel : ((typeof data.xyCILevel === "number" && data.xyCILevel > 0 && data.xyCILevel < 1) ? data.xyCILevel : 0.95);
                         var _gS = _fgActive ? _fg.loessSpan : ((typeof data.xyLoessSpan === "number" && data.xyLoessSpan > 0) ? data.xyLoessSpan : 0.75);
                         var _cfGuard = _xyComputeFitsClient(_gT, _gC, _gS);
-                        if (_cfGuard) data.xyFits = _cfGuard;
+                        data.xyFits = _cfGuard || [];
                     }
                 }
             } catch (_eFitGuard) {}
@@ -5437,8 +5688,13 @@
             var wrapRect;
             try { wrapRect = wrap.getBoundingClientRect(); }
             catch (_e) { return; }
-            var menuLeft = clientX - wrapRect.left + 2;
-            var menuTop = clientY - wrapRect.top + 2;
+            // clientX/Y and the wrap rect are VISUAL pixels, while left/top
+            // on this wrap child are LOGICAL, so the measured offset is
+            // divided back to logical and the menu lands on the cursor at
+            // any view zoom. One-shot placement, so the read is free.
+            var _pmS = _gb2ViewScale(svg);
+            var menuLeft = (clientX - wrapRect.left) / _pmS + 2;
+            var menuTop = (clientY - wrapRect.top) / _pmS + 2;
             menu.style.cssText = [
                 "position:absolute",
                 "left:" + menuLeft + "px",
@@ -6587,7 +6843,7 @@
         } else if (!Array.isArray(data.hiddenFacets)) {
             data.hiddenFacets = [];
         }
-        var _hiddenFacets = {};
+        var _hiddenFacets = Object.create(null);
         if (Array.isArray(data.hiddenFacets)) {
             for (var _hfi = 0; _hfi < data.hiddenFacets.length; _hfi++) {
                 _hiddenFacets[data.hiddenFacets[_hfi]] = true;
@@ -6946,12 +7202,9 @@
                 el.setAttribute("xml:space", "preserve");
                 el.style.whiteSpace = "pre";
             } catch (_eXs) {}
+            var s = _gb2SetSvgTextContent(el, content);
+            if (s.indexOf("\n") < 0) return;
             while (el.firstChild) el.removeChild(el.firstChild);
-            var s = String(content == null ? "" : content);
-            if (s.indexOf("\n") < 0) {
-                el.textContent = s;
-                return;
-            }
             var lines = s.split("\n");
             // The tspans inherit x from the parent <text>, but we set
             // it explicitly so each line shares the same horizontal
@@ -8373,17 +8626,12 @@
         }
         function _playBarFlip(oldRects) {
             if (typeof dataGroup === "undefined" || !dataGroup) return;
-            // CTM scale: 1 user unit = (ctm.a) screen pixels in X,
-            // (ctm.d) in Y. Divide a screen-pixel delta by these to
-            // get the equivalent translate in user space (which is
-            // what CSS transform on an SVG element uses).
+            // Screen-px delta -> CSS px for style.transform: MEASURED, not
+            // getScreenCTM (Safari leaves the host zoom out of the matrix
+            // and paints CSS px on svg children zoom-squared).
             var sx = 1, sy = 1;
             try {
-                if (svg && svg.getScreenCTM) {
-                    var ctm = svg.getScreenCTM();
-                    if (ctm && ctm.a) sx = ctm.a;
-                    if (ctm && ctm.d) sy = ctm.d;
-                }
+                if (svg) { sx = sy = _gb2CssPxScale(svg); }
             } catch (_e) {}
             var newBars = svg ? svg.querySelectorAll("[data-bar-cat], [data-ann-id]") : [];
             for (var i = 0; i < newBars.length; i++) {
@@ -8524,6 +8772,9 @@
                 var s = 0, newStart = {};
                 for (var i = 0; i < ctx.order.length; i++) { newStart[ctx.order[i]] = s; s += 360 * (ctx.frac[ctx.order[i]] || 0); }
                 function _sd(a, b) { return ((a - b + 540) % 360 + 360) % 360 - 180; }
+                // transform-origin is CSS px but cx/cy are user units; Safari
+                // paints CSS px on svg children zoom-squared (1:1 in Chrome).
+                var _u2c = 1; try { _u2c = _gb2ViewScale(svg) / _gb2CssPxScale(svg); } catch (_eU) {}
                 var fresh = [];
                 for (var c in oldStartByCat) {
                     if (!Object.prototype.hasOwnProperty.call(oldStartByCat, c)) continue;
@@ -8532,7 +8783,7 @@
                     if (Math.abs(inv) < 0.5) continue;
                     var wEl = svg.querySelector('[data-role="freq-slice"][data-cat="' + (window.CSS && CSS.escape ? CSS.escape(c) : c) + '"]');
                     if (!wEl) continue;
-                    wEl.style.transformOrigin = ctx.cx + "px " + ctx.cy + "px";
+                    wEl.style.transformOrigin = (ctx.cx * _u2c) + "px " + (ctx.cy * _u2c) + "px";
                     wEl.style.transition = "none";
                     wEl.style.transform = "rotate(" + inv + "deg)";
                     fresh.push(wEl);
@@ -8773,8 +9024,24 @@
         }
         function _ensureChartRoomFor(el) {
             if (!el || !svg) return;
-            var bb;
-            try { bb = el.getBoundingClientRect(); } catch (e) { return; }
+            var bb, legendHit = null, legendHitStyle = null;
+            try {
+                // The transparent legend drag target is sized on a later
+                // animation frame. Its four-pixel padding must not grow the
+                // figure between two otherwise identical renders.
+                legendHit = el.querySelector && el.querySelector('[data-role="legend-bg"]');
+                if (legendHit) {
+                    legendHitStyle = legendHit.getAttribute("style");
+                    legendHit.style.setProperty("display", "none", "important");
+                }
+                bb = el.getBoundingClientRect();
+            } catch (e) { return; }
+            finally {
+                if (legendHit) {
+                    if (legendHitStyle === null) legendHit.removeAttribute("style");
+                    else legendHit.setAttribute("style", legendHitStyle);
+                }
+            }
             if (!bb || (bb.width === 0 && bb.height === 0)) return;
             var svgBb = svg.getBoundingClientRect();
             var elLeft = bb.left - svgBb.left;
@@ -9068,7 +9335,7 @@
         // array of wrapped lines; empty text returns [].
         function _wrapChartNote(text, maxW, style) {
             var out = [];
-            var raw = String(text == null ? "" : text);
+            var raw = _gb2XmlSafeText(text);
             if (raw.length === 0) return out;
             var fs = (style && style.fontSize) || 11;
             var wt = (style && style.bold) ? "600" : "400";
@@ -9469,7 +9736,7 @@
         // Position the tooltip near (clientX, clientY). Flips to
         // the left of the cursor when the natural right-anchor
         // would extend past the wrap's right edge.
-        var _xyWrapRect = null, _xyWrapRectAt = 0;
+        var _xyWrapRect = null, _xyWrapRectAt = 0, _xyWrapScale = 1;
         function _xyTooltipPosition(clientX, clientY) {
             // Both reads below force a layout flush and this runs per
             // pointermove (60 Hz): cache the wrap rect briefly (150 ms
@@ -9479,14 +9746,29 @@
             if (!_xyWrapRect || (_nowT - _xyWrapRectAt) > 150) {
                 _xyWrapRect = wrap.getBoundingClientRect();
                 _xyWrapRectAt = _nowT;
+                // Taken in the same layout read as the rect, so the two
+                // can never describe different moments: a rect held for
+                // its 150 ms is always paired with the scale that was
+                // true when it was measured.
+                _xyWrapScale = _gb2ViewScale(svg);
             }
             var rect = _xyWrapRect;
-            var x = clientX - rect.left + 12;
-            var y = clientY - rect.top  + 12;
+            // The pointer and the wrap rect are VISUAL pixels, while a
+            // left/top written on this wrap child is LOGICAL and paints at
+            // scale times its value. Divide the measured offset back to
+            // logical first; the 12 px gap and the 4 px edge clamps below
+            // are logical constants and stay as they are. Exactly 1 off
+            // the standalone's view zoom.
+            var _vs = _xyWrapScale;
+            var _relX = (clientX - rect.left) / _vs;
+            var _relY = (clientY - rect.top) / _vs;
+            var _wrapW = rect.width / _vs, _wrapH = rect.height / _vs;
+            var x = _relX + 12;
+            var y = _relY + 12;
             var w = _xyTooltip.__gb2w || (_xyTooltip.__gb2w = _xyTooltip.offsetWidth || 120);
             var h = _xyTooltip.__gb2h || (_xyTooltip.__gb2h = _xyTooltip.offsetHeight || 40);
-            if (x + w > rect.width - 4) x = clientX - rect.left - w - 12;
-            if (y + h > rect.height - 4) y = clientY - rect.top - h - 12;
+            if (x + w > _wrapW - 4) x = _relX - w - 12;
+            if (y + h > _wrapH - 4) y = _relY - h - 12;
             if (x < 4) x = 4;
             if (y < 4) y = 4;
             _xyTooltip.style.left = x + "px";
@@ -11256,7 +11538,7 @@
                 '[data-role="anatomy-overlay"], [data-role="anatomy-capture"],' +
                 '[data-role="stats-link-halo"], [data-role="alignment-guides"],' +
                 '[data-role="refline-handle"], [data-role="ann-rot-line"],' +
-                '[data-role="ann-rot-handle"],' +
+                '[data-role="ann-rot-handle"], [data-role="legend-bg"],' +
                 '[data-role="freq-pie-seam-glow"], [data-role="freq-donut-hole-glow"],' +
                 '[data-role="data-point-selected"], [data-role="freq-pie-rotate-handle"],' +
                 '[data-role="gap-seam-chrome"]'
@@ -11437,7 +11719,7 @@
                     t.setAttribute("font-style", "normal");
                 }
             }
-            return copy;
+            return _gb2PrepareSvgForExport(copy);
         }
 
         function serializeSvgForExport() {
@@ -12382,7 +12664,11 @@
                     if (_maxR > 0) {
                         var _scs = getComputedStyle(_col);
                         var _rp = (parseFloat(_scs.paddingRight) || 0) + (parseFloat(_scs.borderRightWidth) || 0);
-                        var _snug = (Math.ceil(_maxR) + _rp + 1) + "px";
+                        // _maxR came from client rects (VISUAL px) while the
+                        // padding and the width written below are LOGICAL, so
+                        // the column was sized by that factor under the
+                        // standalone view zoom.
+                        var _snug = (Math.ceil(_maxR / _gb2ViewScale(svg)) + _rp + 1) + "px";
                         _col.style.width = _snug;
                         _col.style.minWidth = _snug;
                     }
@@ -12495,7 +12781,12 @@
                     // short at a 2000px window, Torry's screenshot). In
                     // jamovi toolbar and wrap share a width, so the value
                     // is never negative and the clamp was inert.
-                    addAnnMenu.style.right = Math.round(_opR.right - _btR.right) + "px";
+                    // Both rects are VISUAL pixels; this menu hangs in the
+                    // zoomed chart wrap and is NOT counter-zoomed, so its
+                    // right inset is LOGICAL and paints at scale times its
+                    // value. Divide the measured gap so the menu's right
+                    // edge still lands on the button's at any view zoom.
+                    addAnnMenu.style.right = Math.round((_opR.right - _btR.right) / _gb2ViewScale(svg)) + "px";
                 }
             } catch (_ePos) {}
             _snugAddMenuColumns();
@@ -13739,6 +14030,12 @@
             var pointerDown = false;
             var startClientX = 0, startClientY = 0;
             var startDx = 0, startDy = 0;
+            // A pointer delta is measured in VISUAL px, but a text offset
+            // is a LOGICAL length written into the chart. The standalone
+            // shell's view zoom is the only thing that separates the two,
+            // so the drag divides by the factor captured at press and the
+            // label tracks the cursor at every zoom. Exactly 1 in jamovi.
+            var startViewScale = 1;
             var moved = false;
             var shiftHeld = false;
             // Populated in onDown when the dragged element is part of a
@@ -13767,6 +14064,9 @@
                 shiftHeld = !!(e.ctrlKey || e.metaKey);
                 startClientX = e.clientX;
                 startClientY = e.clientY;
+                // Once per gesture: a client rect forces layout, and
+                // onMove runs at pointer rate.
+                startViewScale = _gb2ViewScale(svg);
                 var off = (dragId && textOffsets[dragId]) || { dx: 0, dy: 0 };
                 startDx = off.dx;
                 startDy = off.dy;
@@ -13799,8 +14099,8 @@
             }
             function onMove(e) {
                 if (!pointerDown) return;
-                var dx = e.clientX - startClientX;
-                var dy = e.clientY - startClientY;
+                var dx = (e.clientX - startClientX) / startViewScale;
+                var dy = (e.clientY - startClientY) / startViewScale;
                 if (!moved && (Math.abs(dx) > DRAG_TEXT_THRESHOLD_PX || Math.abs(dy) > DRAG_TEXT_THRESHOLD_PX)) {
                     moved = true;
                     svgText.style.cursor = "move";
@@ -13884,8 +14184,10 @@
                 svgText.style.cursor = _meComputed ? "move" : "text";
                 if (moved) {
                     if (dragId) {
-                        var dx = e.clientX - startClientX;
-                        var dy = e.clientY - startClientY;
+                        // Same conversion as onMove, or the committed
+                        // offset would not be where the label was drawn.
+                        var dx = (e.clientX - startClientX) / startViewScale;
+                        var dy = (e.clientY - startClientY) / startViewScale;
                         if (multiDragStart) {
                             // Update every selected element's offset
                             // in-place, then persist with a single
@@ -14600,73 +14902,17 @@
             }
             var n = rows.length;
             if (n < 2) return { ok: false, reason: "rm-too-few-subjects" };
-            var gm = 0, ri, cj;
-            for (ri = 0; ri < n; ri++)
-                for (cj = 0; cj < k; cj++) gm += rows[ri][cj];
-            gm /= (n * k);
-            var rowM = [], colM = [];
-            for (ri = 0; ri < n; ri++) {
-                var rs = 0;
-                for (cj = 0; cj < k; cj++) rs += rows[ri][cj];
-                rowM.push(rs / k);
+            var moments = _gb2Stats._repeatedAnovaMoments(rows);
+            var means = moments.cellMeans[0], gm = _gb2Stats.mean(means), sstr = 0;
+            for (var cj = 0; cj < k; cj++) {
+                var dt = means[cj] - gm; sstr += n * dt * dt;
             }
-            for (cj = 0; cj < k; cj++) {
-                var cs = 0;
-                for (ri = 0; ri < n; ri++) cs += rows[ri][cj];
-                colM.push(cs / n);
-            }
-            var sst = 0, sss = 0, sstr = 0;
-            for (ri = 0; ri < n; ri++) for (cj = 0; cj < k; cj++) {
-                var dd = rows[ri][cj] - gm; sst += dd * dd;
-            }
-            for (ri = 0; ri < n; ri++) {
-                var ds = rowM[ri] - gm; sss += ds * ds;
-            }
-            sss *= k;
-            for (cj = 0; cj < k; cj++) {
-                var dt = colM[cj] - gm; sstr += dt * dt;
-            }
-            sstr *= n;
-            var sse = sst - sss - sstr;
-            var df1 = k - 1, df2 = (k - 1) * (n - 1);
-            if (!(sse > 0) || df2 < 1) {
+            var sse = moments.sse, df1 = k - 1, df2 = (k - 1) * (n - 1);
+            if (!(sse > 0) || !isFinite(sse) || df2 < 1)
                 return { ok: false, reason: "anova-degenerate" };
-            }
-            var F = (sstr / df1) / (sse / df2);
-            // Greenhouse-Geisser epsilon: double-center the occasion
-            // covariance matrix S (B = CSC), then
-            // eps = tr(B)^2 / ((k-1) * sum(B_ij^2)), clamped to
-            // [1/(k-1), 1].
-            var S = [];
-            for (ri = 0; ri < k; ri++) {
-                S.push([]);
-                for (cj = 0; cj < k; cj++) {
-                    var cv = 0;
-                    for (var r2 = 0; r2 < n; r2++) {
-                        cv += (rows[r2][ri] - colM[ri]) *
-                              (rows[r2][cj] - colM[cj]);
-                    }
-                    S[ri].push(cv / (n - 1));
-                }
-            }
-            var sRowM = [], sGm = 0;
-            for (ri = 0; ri < k; ri++) {
-                var sr = 0;
-                for (cj = 0; cj < k; cj++) sr += S[ri][cj];
-                sRowM.push(sr / k); sGm += sr;
-            }
-            sGm /= (k * k);
-            var trB = 0, ssB = 0;
-            for (ri = 0; ri < k; ri++) for (cj = 0; cj < k; cj++) {
-                var bij = S[ri][cj] - sRowM[ri] - sRowM[cj] + sGm;
-                if (ri === cj) trB += bij;
-                ssB += bij * bij;
-            }
-            var eps = (ssB > 0) ? (trB * trB) / ((k - 1) * ssB) : 1;
-            if (!isFinite(eps)) eps = 1;
-            eps = Math.min(1, Math.max(eps, 1 / (k - 1)));
+            var F = (sstr / df1) / (sse / df2), eps = moments.eps;
             var df1c = eps * df1, df2c = eps * df2;
-            var p = 1 - _gb2Stats.fCDF(F, df1c, df2c);
+            var p = _gb2Stats.fSurvival(F, df1c, df2c);
             return {
                 ok: true,
                 testKind: "rmAnova",
@@ -14699,8 +14945,8 @@
         // (occasion identity = the facet-stripped category, the CG
         // omnibus convention). Within-level SS via the EXISTING Type III
         // twoWayANOVA on subject-centered data (grp is absorbed by the
-        // centering; with complete subjects the design is proportional,
-        // so all SS types agree) with the split-plot dfs substituted.
+        // centering; sum contrasts retain the Type III equal-marginal
+        // hypothesis when group sizes differ), with split-plot dfs.
         // eta-p per effect uses that effect's OWN error term. Verified
         // against R aov(y ~ grp*occ + Error(subj/occ)) + a hand pooled-
         // covariance GG on balanced AND unbalanced groups (mixedanova
@@ -14772,6 +15018,12 @@
             for (gi = 0; gi < G; gi++) {
                 if (nG[gi] < 2) return { ok: false, reason: "mixed-too-few-subjects" };
             }
+            var moments = _gb2Stats._repeatedAnovaMoments(
+                rows.map(function (r) { return r.y; }),
+                rows.map(function (r) { return r.g; }));
+            if (!(moments.sse > 0) || !isFinite(moments.sse))
+                return { ok: false, reason: "anova-degenerate" };
+            for (i = 0; i < N; i++) rows[i].y = moments.rows[i];
             // between level (one-way on subject means, scaled by k)
             var gm = 0;
             for (i = 0; i < N; i++) for (j = 0; j < k; j++) gm += rows[i].y[j];
@@ -14799,17 +15051,18 @@
                 return { ok: false, reason: "anova-degenerate" };
             }
             var Fgrp = (ssGrp / dfGrp) / (ssSubj / dfSubj);
-            var pGrp = 1 - _gb2Stats.fCDF(Fgrp, dfGrp, dfSubj);
+            var pGrp = _gb2Stats.fSurvival(Fgrp, dfGrp, dfSubj);
             // within level on subject-centered z
             var obsZ = [];
             for (i = 0; i < N; i++) for (j = 0; j < k; j++) {
-                obsZ.push({ ai: j, bi: rows[i].g, y: rows[i].y[j] - mSubj[i] });
+                obsZ.push({ ai: j, bi: rows[i].g, y: moments.z[i][j] });
             }
             var tw = null;
             try { tw = _gb2Stats.twoWayANOVA(obsZ, k, G); } catch (_eTw) {}
             if (!tw || tw.emptyCells || !tw.A) {
                 return { ok: false, reason: "anova-degenerate" };
             }
+            tw.sse = moments.sse;
             var dfOcc = k - 1, dfInt = (G - 1) * (k - 1), dfErr = (N - G) * (k - 1);
             if (dfErr < 1 || !(tw.sse > 0)) {
                 return { ok: false, reason: "anova-degenerate" };
@@ -14818,37 +15071,9 @@
             var Focc = (tw.A.ss / dfOcc) / msErr;
             var Fint = (tw.AB.ss / dfInt) / msErr;
             // GG eps from the POOLED within-group occasion covariance
-            var S = [], r2, c2;
-            for (r2 = 0; r2 < k; r2++) { S.push([]); for (c2 = 0; c2 < k; c2++) S[r2].push(0); }
-            var mGj = [];
-            for (gi = 0; gi < G; gi++) { mGj.push([]); for (j = 0; j < k; j++) mGj[gi].push(0); }
-            for (i = 0; i < N; i++) for (j = 0; j < k; j++) mGj[rows[i].g][j] += rows[i].y[j];
-            for (gi = 0; gi < G; gi++) for (j = 0; j < k; j++) mGj[gi][j] /= nG[gi];
-            for (i = 0; i < N; i++) {
-                for (r2 = 0; r2 < k; r2++) for (c2 = 0; c2 < k; c2++) {
-                    S[r2][c2] += (rows[i].y[r2] - mGj[rows[i].g][r2]) *
-                                 (rows[i].y[c2] - mGj[rows[i].g][c2]);
-                }
-            }
-            for (r2 = 0; r2 < k; r2++) for (c2 = 0; c2 < k; c2++) S[r2][c2] /= (N - G);
-            var sRowM = [], sGm = 0;
-            for (r2 = 0; r2 < k; r2++) {
-                var sr = 0;
-                for (c2 = 0; c2 < k; c2++) sr += S[r2][c2];
-                sRowM.push(sr / k); sGm += sr;
-            }
-            sGm /= (k * k);
-            var trB = 0, ssB = 0;
-            for (r2 = 0; r2 < k; r2++) for (c2 = 0; c2 < k; c2++) {
-                var bij = S[r2][c2] - sRowM[r2] - sRowM[c2] + sGm;
-                if (r2 === c2) trB += bij;
-                ssB += bij * bij;
-            }
-            var eps = (ssB > 0) ? (trB * trB) / ((k - 1) * ssB) : 1;
-            if (!isFinite(eps)) eps = 1;
-            eps = Math.min(1, Math.max(eps, 1 / (k - 1)));
-            var pOcc = 1 - _gb2Stats.fCDF(Focc, eps * dfOcc, eps * dfErr);
-            var pInt = 1 - _gb2Stats.fCDF(Fint, eps * dfInt, eps * dfErr);
+            var eps = moments.eps;
+            var pOcc = _gb2Stats.fSurvival(Focc, eps * dfOcc, eps * dfErr);
+            var pInt = _gb2Stats.fSurvival(Fint, eps * dfInt, eps * dfErr);
             return {
                 ok: true,
                 testKind: "mixedAnova",
@@ -14952,6 +15177,12 @@
                 if (nck === 0) return { ok: false, reason: "mixed-empty-cell" };
                 if (nck < 2) return { ok: false, reason: "mixed-too-few-subjects" };
             }
+            var moments = _gb2Stats._repeatedAnovaMoments(
+                rows.map(function (r) { return r.y; }),
+                rows.map(function (r) { return r.g * Fc + r.f; }));
+            if (!(moments.sse > 0) || !isFinite(moments.sse))
+                return { ok: false, reason: "anova-degenerate" };
+            for (i = 0; i < N; i++) rows[i].y = moments.rows[i];
             // between part: Type III two-way over subject means
             var mSubj = [], obsB = [];
             for (i = 0; i < N; i++) {
@@ -14968,10 +15199,11 @@
             // within part: Type III three-way on subject-centered data
             var obsZ = [];
             for (i = 0; i < N; i++) for (j = 0; j < k; j++)
-                obsZ.push({ ai: j, bi: rows[i].g, ci: rows[i].f, y: rows[i].y[j] - mSubj[i] });
+                obsZ.push({ ai: j, bi: rows[i].g, ci: rows[i].f, y: moments.z[i][j] });
             var thw = null;
             try { thw = _gb2Stats.threeWayANOVA(obsZ, k, G, Fc); } catch (_eW) {}
             if (!thw || thw.emptyCells || !thw.A) return { ok: false, reason: "anova-degenerate" };
+            thw.sse = moments.sse;
             var dfOcc = k - 1,
                 dfOG = (G - 1) * (k - 1),
                 dfOF = (Fc - 1) * (k - 1),
@@ -14979,46 +15211,12 @@
                 dfErr = (N - nBC) * (k - 1);
             if (dfErr < 1 || !(thw.sse > 0)) return { ok: false, reason: "anova-degenerate" };
             var msErr = thw.sse / dfErr;
-            // GG eps from the pooled within-cell occasion covariance
-            var S = [], r2, c2;
-            for (r2 = 0; r2 < k; r2++) { S.push([]); for (c2 = 0; c2 < k; c2++) S[r2].push(0); }
-            var mCj = {};
-            for (i = 0; i < N; i++) {
-                var ck2 = rows[i].g + "|" + rows[i].f;
-                if (!mCj[ck2]) { mCj[ck2] = []; for (j = 0; j < k; j++) mCj[ck2].push(0); }
-                for (j = 0; j < k; j++) mCj[ck2][j] += rows[i].y[j];
-            }
-            for (var ckk in mCj) {
-                if (!Object.prototype.hasOwnProperty.call(mCj, ckk)) continue;
-                for (j = 0; j < k; j++) mCj[ckk][j] /= nCell[ckk];
-            }
-            for (i = 0; i < N; i++) {
-                var mm = mCj[rows[i].g + "|" + rows[i].f];
-                for (r2 = 0; r2 < k; r2++) for (c2 = 0; c2 < k; c2++)
-                    S[r2][c2] += (rows[i].y[r2] - mm[r2]) * (rows[i].y[c2] - mm[c2]);
-            }
-            for (r2 = 0; r2 < k; r2++) for (c2 = 0; c2 < k; c2++) S[r2][c2] /= dfSw;
-            var sRowM = [], sGm = 0;
-            for (r2 = 0; r2 < k; r2++) {
-                var sr = 0;
-                for (c2 = 0; c2 < k; c2++) sr += S[r2][c2];
-                sRowM.push(sr / k); sGm += sr;
-            }
-            sGm /= (k * k);
-            var trB2 = 0, ssB2 = 0;
-            for (r2 = 0; r2 < k; r2++) for (c2 = 0; c2 < k; c2++) {
-                var bij = S[r2][c2] - sRowM[r2] - sRowM[c2] + sGm;
-                if (r2 === c2) trB2 += bij;
-                ssB2 += bij * bij;
-            }
-            var eps = (ssB2 > 0) ? (trB2 * trB2) / ((k - 1) * ssB2) : 1;
-            if (!isFinite(eps)) eps = 1;
-            eps = Math.min(1, Math.max(eps, 1 / (k - 1)));
+            var eps = moments.eps;
             var wTerm = function (tm, dfN) {
                 var F = (tm.ss / dfN) / msErr;
                 return { F: F, df1: eps * dfN, df2: eps * dfErr,
                          df1u: dfN, df2u: dfErr,
-                         p: 1 - _gb2Stats.fCDF(F, eps * dfN, eps * dfErr),
+                         p: _gb2Stats.fSurvival(F, eps * dfN, eps * dfErr),
                          eta: tm.ss / (tm.ss + thw.sse) };
             };
             var bTerm = function (tm) {
@@ -16351,11 +16549,11 @@
                     try { hit.setPointerCapture(e.pointerId); } catch (_pc) {}
                     hit.style.cursor = "grabbing";
                     function svgPoint(clientX, clientY) {
-                        var pt = svg.createSVGPoint();
-                        pt.x = clientX; pt.y = clientY;
-                        var ctm = svg.getScreenCTM();
-                        if (!ctm) return null;
-                        return pt.matrixTransform(ctm.inverse());
+                        // No viewBox: user space = (client - svg rect) / view scale.
+                        // Not getScreenCTM, which omits the host zoom in Safari.
+                        var r = svg.getBoundingClientRect(), vs = _gb2ViewScale(svg);
+                        if (!r) return null;
+                        return { x: (clientX - r.left) / vs, y: (clientY - r.top) / vs };
                     }
                     function onMove(ev) {
                         var p = svgPoint(ev.clientX, ev.clientY);
@@ -16448,7 +16646,8 @@
             var ay = auto ? (M.top + 16 + fs) : ann.y;
             var maxLen = 0;
             for (var li = 0; li < lines.length; li++) {
-                if (lines[li].length > maxLen) maxLen = lines[li].length;
+                var lineLength = _gb2XmlSafeText(lines[li]).length;
+                if (lineLength > maxLen) maxLen = lineLength;
             }
             var bgW = maxLen * fs * 0.56 + 16;
             var bgH = lh * lines.length + 8;
@@ -16470,7 +16669,7 @@
                     fill: ann.color || "#333",
                     "data-role": "stat-box-line"
                 });
-                t.textContent = lines[li2];
+                _gb2SetSvgTextContent(t, lines[li2]);
                 g.appendChild(t);
             }
             // Drag (threshold keeps a plain click as click-to-edit) —
@@ -16478,6 +16677,11 @@
             (function () {
                 var down = false, moved = false;
                 var sx = 0, sy = 0, ox = 0, oy = 0;
+                // The pointer delta is VISUAL px while both the live
+                // translate and the committed ann.x / ann.y are LOGICAL,
+                // so the drag divides by the view scale. Exactly 1 off
+                // the standalone shell.
+                var vScale = 1;
                 g.style.cursor = "grab";
                 g.addEventListener("click", function (ce) { ce.stopPropagation(); });
                 g.addEventListener("pointerdown", function (e) {
@@ -16485,12 +16689,13 @@
                     e.preventDefault(); e.stopPropagation();
                     down = true; moved = false;
                     sx = e.clientX; sy = e.clientY;
+                    vScale = _gb2ViewScale(svg);
                     ox = ax; oy = ay;
                     try { g.setPointerCapture(e.pointerId); } catch (_eP) {}
                 });
                 g.addEventListener("pointermove", function (e) {
                     if (!down) return;
-                    var dx = e.clientX - sx, dy = e.clientY - sy;
+                    var dx = (e.clientX - sx) / vScale, dy = (e.clientY - sy) / vScale;
                     if (!moved && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) moved = true;
                     if (moved) {
                         g.setAttribute("transform",
@@ -16503,8 +16708,8 @@
                     try { g.releasePointerCapture(e.pointerId); } catch (_eR) {}
                     if (moved) {
                         commitAnnotationChange(ann.id, {
-                            x: ox + (e.clientX - sx),
-                            y: oy + (e.clientY - sy)
+                            x: ox + (e.clientX - sx) / vScale,
+                            y: oy + (e.clientY - sy) / vScale
                         });
                     } else {
                         try {
@@ -16649,8 +16854,7 @@
             // draw, so nothing moves on load. Horizontal mode keeps
             // absolute coords (ann.y is the spine X there); main-effect
             // brackets join via their full-factor span.
-            if ((data && data.chartOrientation) !== "horizontal" &&
-                ((ann.anchorLeftCat && ann.anchorRightCat) ||
+            if (((ann.anchorLeftCat && ann.anchorRightCat) ||
                  _isMainEffectAnn(ann)) &&
                 typeof window.__gb2_valAxis === "function") {
                 try {
@@ -16659,12 +16863,13 @@
                         Math.min(ann.x, ann.x2), Math.max(ann.x, ann.x2),
                         _vaRel);
                     if (isFinite(_ceilRel)) {
+                        var _outR = (_vaRel && _vaRel.outward) || -1;
                         if (typeof ann.yRel === "number" &&
                             isFinite(ann.yRel)) {
-                            ann.y = _ceilRel - ann.yRel;
+                            ann.y = _ceilRel + _outR * ann.yRel;
                         } else if (typeof ann.y === "number" &&
                                    isFinite(ann.y)) {
-                            ann.yRel = _ceilRel - ann.y;
+                            ann.yRel = _outR * (ann.y - _ceilRel);
                             // first capture on a LEGACY bracket: flag for
                             // the one-shot persist below, or the very next
                             // authoritative rebuild re-bases it at
@@ -17073,6 +17278,12 @@
                 // past tolerance from a bar center - no stickiness.
                 var startMouseX = e.clientX;
                 var startMouseY = e.clientY;
+                // The cursor deltas are VISUAL px while ann.x / ann.x2,
+                // the caps and the snap targets are LOGICAL SVG coords,
+                // so the gesture is divided by the view scale before it
+                // becomes a bracket coordinate. Exactly 1 off the
+                // standalone shell.
+                var vScale = _gb2ViewScale(svg);
                 var startAnnX = ann.x || 0;
                 var startAnnX2 = ann.x2 || 0;
                 var startAnnY = ann.y || 0;
@@ -17101,8 +17312,8 @@
                 var bodyMode = null;
 
                 function onMove(ev) {
-                    var dx = ev.clientX - startMouseX;
-                    var dy = ev.clientY - startMouseY;
+                    var dx = (ev.clientX - startMouseX) / vScale;
+                    var dy = (ev.clientY - startMouseY) / vScale;
                     // Orientation-aware: in vertical mode legs sit
                     // along X and the spine along Y, so leg drag
                     // updates ann.x via dx (and capL via dy). In
@@ -17626,6 +17837,11 @@
                 var chartLeft = M.left;
                 var chartTop = M.top;
                 var svgRect = svg.getBoundingClientRect();
+                // svgRect is VISUAL px while innerW / innerH / chartLeft
+                // are LOGICAL, so the cursor offset below is divided by
+                // the view scale before it becomes a fraction of the
+                // axis. Exactly 1 off the standalone shell.
+                var vScale = _gb2ViewScale(svg);
                 var moved = false;
                 var sx = e.clientX, sy = e.clientY;
                 function onMove(ev) {
@@ -17640,10 +17856,10 @@
                     // to a fraction along the main axis.
                     var frac;
                     if (orientation === "horizontal") {
-                        var pxX = ev.clientX - svgRect.left - chartLeft;
+                        var pxX = (ev.clientX - svgRect.left) / vScale - chartLeft;
                         frac = pxX / Math.max(1, innerW);
                     } else {
-                        var pxY = ev.clientY - svgRect.top - chartTop;
+                        var pxY = (ev.clientY - svgRect.top) / vScale - chartTop;
                         frac = pxY / Math.max(1, innerH);
                     }
                     frac = Math.max(0, Math.min(1, frac));
@@ -17836,9 +18052,14 @@
                 // a wall-clock watchdog and a graph-type carve-out.
                 var sx = e.clientX, sy = e.clientY;
                 var moved = false;
+                // The pointer delta is VISUAL px and ann.x / ann.y are
+                // LOGICAL SVG coords; this drag re-bases sx / sy on
+                // every move, so an unscaled delta compounds as it goes.
+                // Exactly 1 off the standalone shell.
+                var vScale = _gb2ViewScale(svg);
                 function onMove(ev) {
-                    var dx = ev.clientX - sx;
-                    var dy = ev.clientY - sy;
+                    var dx = (ev.clientX - sx) / vScale;
+                    var dy = (ev.clientY - sy) / vScale;
                     if (!moved && (Math.abs(dx) > ANN_DRAG_THRESHOLD_PX ||
                                    Math.abs(dy) > ANN_DRAG_THRESHOLD_PX)) {
                         moved = true;
@@ -18680,6 +18901,13 @@
         // capture, freezing the drag). Full redraw runs on pointerup.
         function attachAnnotationDrag(el, ann, onMove, applyLive) {
             var down = false, sx = 0, sy = 0, moved = false;
+            // The pointer deltas below are VISUAL px while ann.x / ann.y
+            // are LOGICAL SVG user coords: under the standalone shell's
+            // view zoom the annotation would outrun the cursor without
+            // this factor. Measured once per gesture at pointerdown (a
+            // per-move read would force layout at 60Hz), and exactly 1
+            // wherever nothing zooms.
+            var vScale = 1;
             // Gesture-total / applied-total trackers for the Shift
             // axis lock (onMove consumers are incremental, so the
             // lock must be computed on totals and re-emitted as
@@ -18696,6 +18924,7 @@
                 e.preventDefault(); e.stopPropagation();
                 down = true; moved = false;
                 sx = e.clientX; sy = e.clientY;
+                vScale = _gb2ViewScale(svg);
                 totX = 0; totY = 0; appX = 0; appY = 0;
                 multiTargets = null;
                 // Multi-drag: only when the inspector selection
@@ -18722,8 +18951,8 @@
             });
             el.addEventListener("pointermove", function (e) {
                 if (!down) return;
-                var dx = e.clientX - sx;
-                var dy = e.clientY - sy;
+                var dx = (e.clientX - sx) / vScale;
+                var dy = (e.clientY - sy) / vScale;
                 if (!moved && (Math.abs(dx) > ANN_DRAG_THRESHOLD_PX ||
                                Math.abs(dy) > ANN_DRAG_THRESHOLD_PX)) {
                     moved = true;
@@ -19336,10 +19565,15 @@
                     // and the position is remembered for the session via
                     // window.__gb2_cvdBadgePos so it survives re-renders. Position
                     // is clamped to the chart container so it can't be lost.
-                    var _bd = { down: false, moved: false, sx: 0, sy: 0, sl: 0, st: 0 };
+                    // vs: the pointer delta is VISUAL px while style.left
+                    // and the wrap.clientWidth clamp below are LOGICAL, so
+                    // the badge ran ahead of the cursor under the standalone
+                    // shell's view zoom. Exactly 1 in jamovi.
+                    var _bd = { down: false, moved: false, sx: 0, sy: 0, sl: 0, st: 0, vs: 1 };
                     _cvdBadgeEl.addEventListener("pointerdown", function (ev) {
                         ev.preventDefault(); ev.stopPropagation();
                         _bd.down = true; _bd.moved = false;
+                        _bd.vs = _gb2ViewScale(svg || wrap);
                         _bd.sx = ev.clientX; _bd.sy = ev.clientY;
                         _bd.sl = parseFloat(_cvdBadgeEl.style.left) || 0;
                         _bd.st = parseFloat(_cvdBadgeEl.style.top) || 0;
@@ -19352,8 +19586,8 @@
                         if (!_bd.moved) return;
                         var ww = wrap.clientWidth || 0, wh = wrap.clientHeight || 0;
                         var bw = _cvdBadgeEl.offsetWidth, bh = _cvdBadgeEl.offsetHeight;
-                        var nl = Math.max(0, Math.min(_bd.sl + dx, Math.max(0, ww - bw)));
-                        var nt = Math.max(0, Math.min(_bd.st + dy, Math.max(0, wh - bh)));
+                        var nl = Math.max(0, Math.min(_bd.sl + dx / _bd.vs, Math.max(0, ww - bw)));
+                        var nt = Math.max(0, Math.min(_bd.st + dy / _bd.vs, Math.max(0, wh - bh)));
                         _cvdBadgeEl.style.left = nl + "px";
                         _cvdBadgeEl.style.top = nt + "px";
                         try { window.__gb2_cvdBadgePos = { left: nl, top: nt }; } catch (_e) {}
@@ -19570,8 +19804,13 @@
             // annotation as a persistent zero-size shape.
             if (_drawDragState) return;
             var st = _drawState();
-            var sx = downEvt.clientX - svgRect.left;
-            var sy = downEvt.clientY - svgRect.top;
+            // svgRect is VISUAL px while the shape coords and the snap
+            // targets (getBBox based) are LOGICAL, so the creation point
+            // is scaled into logical space before it is snapped. Exactly
+            // 1 off the standalone shell.
+            var vScale = _gb2ViewScale(svg);
+            var sx = (downEvt.clientX - svgRect.left) / vScale;
+            var sy = (downEvt.clientY - svgRect.top) / vScale;
             var snap = _gatherSnapTargets();
             var snapped = _snapPoint(sx, sy, snap);
             // Create the annotation in the data model now so live
@@ -19613,6 +19852,9 @@
             _drawDragState = {
                 ann: def,
                 pointerId: downEvt.pointerId,
+                // Carried so the rubber-band move divides by the same
+                // factor without re-measuring on every pointermove.
+                vScale: vScale,
                 startX: snapped.x, startY: snapped.y,
                 startClientX: downEvt.clientX,
                 startClientY: downEvt.clientY,
@@ -19625,8 +19867,9 @@
             if (!_drawDragState) return;
             if (e.pointerId !== _drawDragState.pointerId) return;
             var rect = svg.getBoundingClientRect();
-            var px = e.clientX - rect.left;
-            var py = e.clientY - rect.top;
+            var _vs = _drawDragState.vScale || 1;
+            var px = (e.clientX - rect.left) / _vs;
+            var py = (e.clientY - rect.top) / _vs;
             var snapped = _snapPoint(px, py, _drawDragState.snap);
             // Shift constrains to a square (rect/ellipse) or an
             // axis-aligned line (line/arrow). The constraint is
@@ -19820,7 +20063,13 @@
                 // marqueed items to it.
                 shift: !!(e.ctrlKey || e.metaKey),
                 moved: false,
-                pointerId: e.pointerId
+                pointerId: e.pointerId,
+                // startX / startY stay VISUAL px because _selectInBox
+                // compares them against client rects, but the rect that
+                // draws the marquee is an SVG child whose lengths are
+                // LOGICAL, so the drawing divides by this factor.
+                // Exactly 1 off the standalone shell.
+                vScale: _gb2ViewScale(svg)
             };
             try { svg.setPointerCapture(e.pointerId); } catch (_e) {}
         });
@@ -19837,10 +20086,11 @@
                 marqueeState.moved = true;
                 marqueeRect.style.display = "";
             }
-            marqueeRect.setAttribute("x", Math.min(x1, x2));
-            marqueeRect.setAttribute("y", Math.min(y1, y2));
-            marqueeRect.setAttribute("width", dx);
-            marqueeRect.setAttribute("height", dy);
+            var _mvs = marqueeState.vScale || 1;
+            marqueeRect.setAttribute("x", Math.min(x1, x2) / _mvs);
+            marqueeRect.setAttribute("y", Math.min(y1, y2) / _mvs);
+            marqueeRect.setAttribute("width", dx / _mvs);
+            marqueeRect.setAttribute("height", dy / _mvs);
         });
         function _endMarquee(e) {
             if (_drawDragState) { _shapeDragEnd(e); return; }
@@ -21585,9 +21835,13 @@
                     try {
                         var _fcHSvgR = svg.getBoundingClientRect();
                         var _fcHR = _fcHGrp.getBoundingClientRect();
+                        // Client rects are VISUAL px while addIndicatorBox
+                        // takes SVG user units, so under the standalone view
+                        // zoom the halo landed wide of the plate it outlines.
+                        var _fcHVs = _gb2ViewScale(svg);
                         if (_fcHSvgR.width && _fcHR.width && _fcHR.height) {
-                            addIndicatorBox(_fcHR.left - _fcHSvgR.left, _fcHR.top - _fcHSvgR.top,
-                                _fcHR.width, _fcHR.height, { "class": "gb2-halo-union" });
+                            addIndicatorBox((_fcHR.left - _fcHSvgR.left) / _fcHVs, (_fcHR.top - _fcHSvgR.top) / _fcHVs,
+                                _fcHR.width / _fcHVs, _fcHR.height / _fcHVs, { "class": "gb2-halo-union" });
                         }
                     } catch (_eFcH) {}
                 }
@@ -21982,8 +22236,11 @@
                             // gets a congruent halo.
                             var _svgR = svg.getBoundingClientRect();
                             var _xsR = _xsGrp.getBoundingClientRect();
+                            // Client rects are VISUAL px; addIndicatorBox
+                            // takes SVG user units (see the chi-square halo).
+                            var _xsVs = _gb2ViewScale(svg);
                             if (_svgR.width && _xsR.width && _xsR.height) {
-                                addIndicatorBox(_xsR.left - _svgR.left, _xsR.top - _svgR.top, _xsR.width, _xsR.height,
+                                addIndicatorBox((_xsR.left - _svgR.left) / _xsVs, (_xsR.top - _svgR.top) / _xsVs, _xsR.width / _xsVs, _xsR.height / _xsVs,
                                     { "class": "gb2-halo-union" });
                                 _xfAny = true;
                             }
@@ -22605,15 +22862,18 @@
                 }
                 try {
                     var svgRectL = svg.getBoundingClientRect();
+                    // Client rects are VISUAL px; addIndicatorBox takes SVG
+                    // user units (see the chi-square halo).
+                    var _lgVs = _gb2ViewScale(svg);
                     for (var _ti = 0; _ti < targetEls.length; _ti++) {
                         var _tEl = targetEls[_ti];
                         var clientBbL = _tEl.getBoundingClientRect();
                         if (svgRectL.width && clientBbL.width && clientBbL.height) {
                             addIndicatorBox(
-                                clientBbL.left - svgRectL.left,
-                                clientBbL.top - svgRectL.top,
-                                clientBbL.width,
-                                clientBbL.height
+                                (clientBbL.left - svgRectL.left) / _lgVs,
+                                (clientBbL.top - svgRectL.top) / _lgVs,
+                                clientBbL.width / _lgVs,
+                                clientBbL.height / _lgVs
                             );
                         }
                     }
@@ -24347,11 +24607,17 @@
                     line.style.visibility = "visible";
                 } catch (_v) {}
                 var ptrId = e.pointerId;
+                // The cursor point is VISUAL px while the rotation
+                // centre cx / cy comes from the annotation's LOGICAL
+                // coords: mixing the two skews the angle itself, so the
+                // point is scaled into logical space first. Exactly 1
+                // off the standalone shell.
+                var vScale = _gb2ViewScale(svg);
                 function onMove(ev) {
                     if (ev.pointerId !== ptrId) return;
                     var rect = svg.getBoundingClientRect();
-                    var px = ev.clientX - rect.left;
-                    var py = ev.clientY - rect.top;
+                    var px = (ev.clientX - rect.left) / vScale;
+                    var py = (ev.clientY - rect.top) / vScale;
                     var dx = px - cx;
                     var dy = py - cy;
                     if (dx === 0 && dy === 0) return;
@@ -24544,9 +24810,15 @@
         }
         function _attachShapeHandleDrag(handle, ann, which) {
             var down = false, ptrId = null, aspW = 0, aspH = 0;
+            // The cursor is measured in VISUAL px while ann.x / ann.y /
+            // ann.x2 / ann.y2 and the snap targets are LOGICAL, so it is
+            // scaled into logical space once per gesture. Exactly 1 off
+            // the standalone shell.
+            var vScale = 1;
             handle.addEventListener("pointerdown", function (e) {
                 e.preventDefault(); e.stopPropagation();
                 down = true; ptrId = e.pointerId;
+                vScale = _gb2ViewScale(svg);
                 // Shift = keep-aspect for bbox corner drags; the ratio is
                 // captured at grab time so the lock holds the shape's
                 // CURRENT proportions.
@@ -24569,8 +24841,8 @@
             handle.addEventListener("pointermove", function (e) {
                 if (!down || e.pointerId !== ptrId) return;
                 var rect = svg.getBoundingClientRect();
-                var px = e.clientX - rect.left;
-                var py = e.clientY - rect.top;
+                var px = (e.clientX - rect.left) / vScale;
+                var py = (e.clientY - rect.top) / vScale;
                 // For rotated bbox shapes (rect / ellipse / triangle /
                 // polygon / diamond / star), ann.x / ann.y / ann.x2 /
                 // ann.y2 live in the shape's UNROTATED coord system,
@@ -26554,11 +26826,10 @@
             ns = ns || "ya";
             var sz = (typeof size === "number" && size > 0) ? size : 22;
             if (sz < 22) sz = 22;
-            // Insets scale to swatch size: at 20 px we use a 3 px
-            // outset; smaller swatches use a proportionally tighter
-            // outset so the highlight ring doesn't collide with the
-            // adjacent swatch.
-            var outOff = Math.max(2, Math.round(sz * 0.15));
+            // The ring inset scales with the chip, and BOTH this markup
+            // and _refreshPaletteRowHighlight take it from
+            // _gb2ChipOutOff, so the two can never land a pixel apart.
+            var outOff = _gb2ChipOutOff();
             // Swatch rows stay DENSE with LARGE chips (Aug 3 2026
             // ruling: "closer together but actually larger" - supersedes
             // both the Jul 4 compact-small look and the wide-gap a11y
@@ -26582,7 +26853,7 @@
                 html += '<button type="button" data-' + ns + '-palette="transparent" ' +
                     'data-' + ns + '-palette-target="' + target + '" ' +
                     'title="Transparent (no fill)" aria-label="Transparent" ' +
-                    'style="width:' + sz + 'px;height:' + sz + 'px;padding:0;border:' +
+                    'style="width:var(--gb2-chip, ' + sz + 'px);height:var(--gb2-chip, ' + sz + 'px);padding:0;border:' +
                     (_tOn ? "2px solid #1a5fb4" : "1px solid #888") + ';' +
                     'border-radius:3px;cursor:pointer;flex-shrink:0;background-color:#fff;' +
                     'background-image:linear-gradient(45deg,#cfcfcf 25%,transparent 25%),linear-gradient(-45deg,#cfcfcf 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#cfcfcf 75%),linear-gradient(-45deg,transparent 75%,#cfcfcf 75%);' +
@@ -26601,7 +26872,7 @@
                     'data-' + ns + '-palette="' + c + '" ' +
                     'data-' + ns + '-palette-target="' + target + '" ' +
                     'title="' + c + '" ' +
-                    'style="width:' + sz + 'px;height:' + sz + 'px;padding:0;border:' + border + ';' +
+                    'style="width:var(--gb2-chip, ' + sz + 'px);height:var(--gb2-chip, ' + sz + 'px);padding:0;border:' + border + ';' +
                     'border-radius:3px;cursor:pointer;background:' + c + ';flex-shrink:0;' +
                     (isActive ? "outline:1px solid white;outline-offset:-" + outOff + "px;" : "") +
                     '"></button>';
@@ -26629,12 +26900,14 @@
                     ? "2px solid #1a5fb4"
                     : (c === "#ffffff" ? "1px solid #ccc" : "1px solid #888");
                 b.style.border = border;
-                // Recover the outline-offset from the swatch's actual
-                // rendered width so the compact (18 px) variant in
-                // text panels doesn't reuse the larger 3 px offset
-                // and clip the highlight ring against the swatch edge.
-                var w = parseFloat(b.style.width) || b.offsetWidth || 20;
-                var outOff = Math.max(2, Math.round(w * 0.15));
+                // From the SAME rule the markup used. Measuring the
+                // rendered box instead read the chip PLUS its border and
+                // rounded a pixel wider once the fit grew the chip, so
+                // the ring jumped on the first refresh after a color
+                // change. (The 18px variant the old note describes no
+                // longer exists: every caller's size is floored to the
+                // chip size above.)
+                var outOff = _gb2ChipOutOff();
                 b.style.outline = active ? "1px solid white" : "";
                 b.style.outlineOffset = active ? ("-" + outOff + "px") : "";
             }
@@ -27085,23 +27358,33 @@
         // centered raw monomials for conditioning; an approximate but
         // sensibly-shaped preview for loess). Same idiom as
         // _xyComputeBinsClient. Returns the array-of-objects xyFits form
-        // the draw path consumes, or null to keep R's fits unchanged.
+        // the draw path consumes. An unavailable preview clears stale fits.
+        function _xyFitCellKey(group, facet) {
+            return JSON.stringify([facet == null ? null : String(facet), group == null ? null : String(group)]);
+        }
         function _xyPointsGroupedForFit() {
-            var pp = data.xyPoints, byG = {}, order = [], hasG = false, rows = [], i, j;
+            var pp = data.xyPoints, byG = Object.create(null), order = [], rows = [], i;
+            var hasG = !!data.groupLabelDefault, hasF = !!data.facetLabel || (Array.isArray(data.facetLevels) && data.facetLevels.length > 0);
             if (pp && pp.parallel === true && Array.isArray(pp.xs)) {
-                hasG = Array.isArray(pp.groups);
-                for (i = 0; i < pp.xs.length; i++) rows.push({ x: pp.xs[i], y: pp.ys[i], g: hasG ? pp.groups[i] : null });
+                hasG = hasG || Array.isArray(pp.groups); hasF = hasF || Array.isArray(pp.facets);
+                for (i = 0; i < pp.xs.length; i++) rows.push({ x: pp.xs[i], y: pp.ys[i], g: hasG && pp.groups ? pp.groups[i] : null, f: hasF && pp.facets ? pp.facets[i] : null });
             } else if (Array.isArray(pp)) {
-                for (j = 0; j < pp.length; j++) { var p = pp[j]; if (!p) continue; if (p.group != null) hasG = true; rows.push({ x: p.x, y: p.y, g: (p.group != null ? p.group : null) }); }
+                for (i = 0; i < pp.length; i++) {
+                    var p = pp[i]; if (!p) continue;
+                    if (p.group != null) hasG = true; if (p.facet != null) hasF = true;
+                    rows.push({ x: p.x, y: p.y, g: p.group == null ? null : p.group, f: p.facet == null ? null : p.facet });
+                }
             }
-            for (var r = 0; r < rows.length; r++) {
-                var x = rows[r].x, y = rows[r].y;
+            for (i = 0; i < rows.length; i++) {
+                var row = rows[i], x = row.x, y = row.y;
                 if (typeof x !== "number" || !isFinite(x) || typeof y !== "number" || !isFinite(y)) continue;
-                var k = hasG ? String(rows[r].g) : "__all__";
-                if (!byG[k]) { byG[k] = { group: hasG ? rows[r].g : null, xs: [], ys: [] }; order.push(k); }
+                // Missing grouping/facet values are not model populations.
+                if ((hasG && row.g == null) || (hasF && row.f == null)) continue;
+                var k = _xyFitCellKey(hasG ? row.g : null, hasF ? row.f : null);
+                if (!byG[k]) { byG[k] = { group: hasG ? row.g : null, facet: hasF ? row.f : null, xs: [], ys: [] }; order.push(k); }
                 byG[k].xs.push(x); byG[k].ys.push(y);
             }
-            return { byG: byG, order: order, hasGroups: hasG };
+            return { byG: byG, order: order, hasGroups: hasG, hasFacets: hasF };
         }
         function _xyMatInv(M, p) {
             var A = [], i, j, k;
@@ -27124,56 +27407,254 @@
             return 0.5 * (lo + hi);
         }
         function _xyFitOLS(xs, ys, deg, level, xseq) {
-            var n = xs.length, p = deg + 1, i, j, k;
-            if (n < p + 1) return null;
-            var xbar = 0; for (i = 0; i < n; i++) xbar += xs[i]; xbar /= n;
-            function basis(xc) { var b = [1], v = 1; for (var d = 1; d <= deg; d++) { v *= xc; b.push(v); } return b; }
-            var XtX = [], Xty = []; for (i = 0; i < p; i++) { XtX[i] = []; for (j = 0; j < p; j++) XtX[i][j] = 0; Xty[i] = 0; }
-            for (k = 0; k < n; k++) { var b = basis(xs[k] - xbar), yk = ys[k]; for (i = 0; i < p; i++) { Xty[i] += b[i] * yk; for (j = 0; j < p; j++) XtX[i][j] += b[i] * b[j]; } }
-            var Inv = _xyMatInv(XtX, p); if (!Inv) return null;
-            var beta = []; for (i = 0; i < p; i++) { var sb = 0; for (j = 0; j < p; j++) sb += Inv[i][j] * Xty[j]; beta[i] = sb; }
-            var rss = 0; for (k = 0; k < n; k++) { var b2 = basis(xs[k] - xbar), yh = 0; for (i = 0; i < p; i++) yh += beta[i] * b2[i]; var e = ys[k] - yh; rss += e * e; }
-            var dfres = n - p; if (dfres < 1) dfres = 1; var s2 = rss / dfres; var tcrit = _xyTCrit(level, dfres);
-            var pts = [];
-            for (var q = 0; q < xseq.length; q++) {
-                var v = basis(xseq[q] - xbar), yh2 = 0; for (i = 0; i < p; i++) yh2 += beta[i] * v[i];
-                var qf = 0; for (i = 0; i < p; i++) { var iv = 0; for (j = 0; j < p; j++) iv += Inv[i][j] * v[j]; qf += v[i] * iv; }
-                var se = Math.sqrt(Math.max(0, s2 * qf));
-                pts.push({ x: xseq[q], y: yh2, lwr: yh2 - tcrit * se, upr: yh2 + tcrit * se });
+          var n = xs.length, p = deg + 1, i, j, k;
+          if (n < p || ys.length !== n || deg < 1 || deg > 3) return null;
+          // Normalize both coordinates before fitting. Raw powers and normal
+          // equations lose rank merely by changing units, and square the design's
+          // condition number. Twice-orthogonalized QR avoids both problems for
+          // the at-most-four columns used here.
+          var x0 = xs[0], y0 = ys[0], xscale = 0, yscale = 0;
+          for (i = 0; i < n; i++) {
+            if (!isFinite(xs[i]) || !isFinite(ys[i])) return null;
+            xscale = Math.max(xscale, Math.abs(xs[i] - x0));
+            yscale = Math.max(yscale, Math.abs(ys[i] - y0));
+          }
+          if (!(xscale > 0) || !isFinite(xscale) || !isFinite(yscale)) return null;
+          if (yscale === 0) yscale = 1;
+          var z = [], response = [], Q = [], R = [], qty = [];
+          for (i = 0; i < n; i++) { z[i] = (xs[i] - x0) / xscale; response[i] = (ys[i] - y0) / yscale; }
+          for (j = 0; j < p; j++) {
+            R[j] = []; for (k = 0; k < p; k++) R[j][k] = 0;
+            var col = []; for (i = 0; i < n; i++) col[i] = Math.pow(z[i], j);
+            for (var pass = 0; pass < 2; pass++) {
+              for (k = 0; k < j; k++) {
+                var dot = 0; for (i = 0; i < n; i++) dot += Q[k][i] * col[i];
+                R[k][j] += dot;
+                for (i = 0; i < n; i++) col[i] -= dot * Q[k][i];
+              }
             }
-            return pts;
+            var norm2 = 0; for (i = 0; i < n; i++) norm2 += col[i] * col[i];
+            var norm = Math.sqrt(norm2);
+            // This is a relative rank check in the normalized design, independent
+            // of x/y units. Refuse a singular fit instead of inventing coefficients.
+            if (!(norm > 1e-12 * Math.sqrt(n))) return null;
+            R[j][j] = norm; Q[j] = []; qty[j] = 0;
+            for (i = 0; i < n; i++) { Q[j][i] = col[i] / norm; qty[j] += Q[j][i] * response[i]; }
+          }
+          var beta = [];
+          for (j = p - 1; j >= 0; j--) {
+            var value = qty[j]; for (k = j + 1; k < p; k++) value -= R[j][k] * beta[k];
+            beta[j] = value / R[j][j];
+          }
+          function fitted(t) {
+            var value = beta[p - 1];
+            for (var d = p - 2; d >= 0; d--) value = value * t + beta[d];
+            return value;
+          }
+          var rss = 0;
+          for (i = 0; i < n; i++) { var e = response[i] - fitted(z[i]); rss += e * e; }
+          var dfres = n - p, hasCI = dfres > 0;
+          var sigma = hasCI ? Math.sqrt(rss / dfres) : 0;
+          var tcrit = hasCI ? _xyTCrit(level, dfres) : 0;
+          var out = { xs: [], ys: [] };
+          if (hasCI) { out.lwrs = []; out.uprs = []; }
+          for (i = 0; i < xseq.length; i++) {
+            var t = (xseq[i] - x0) / xscale, yh = y0 + yscale * fitted(t);
+            if (!isFinite(xseq[i]) || !isFinite(yh)) return null;
+            out.xs.push(xseq[i]); out.ys.push(yh);
+            if (hasCI) {
+              // ||R^-T b|| gives prediction leverage without forming (X'X)^-1.
+              var v = [], power = 1, leverage = 0;
+              for (j = 0; j < p; j++) {
+                var a = power; power *= t;
+                for (k = 0; k < j; k++) a -= R[k][j] * v[k];
+                v[j] = a / R[j][j]; leverage += v[j] * v[j];
+              }
+              var half = yscale * (tcrit * sigma * Math.sqrt(leverage));
+              if (!isFinite(half) || !isFinite(yh - half) || !isFinite(yh + half)) return null;
+              out.lwrs.push(yh - half); out.uprs.push(yh + half);
+            }
+          }
+          return out.xs.map(function (x, index) {
+            var point = { x: x, y: out.ys[index] };
+            if (hasCI) { point.lwr = out.lwrs[index]; point.upr = out.uprs[index]; }
+            return point;
+          });
+        }
+        // Evaluate polynomial extensions from the group's observations. The
+        // stored vertices stay authoritative inside the data range. Never use
+        // endpoint slopes to invent a polynomial or confidence-band tail.
+        function _xyExtendOLSFit(fit, observations, xlo, xhi, level, fitType) {
+            var points = fit.points;
+            var type = fit.fit_type || fitType || "linear";
+            var degree = type === "linear" ? 1 : type === "poly2" ? 2 : type === "poly3" ? 3 : 0;
+            if (!degree || !observations || !points || points.length < 2) return points;
+            var first = points[0].x, last = points[points.length - 1].x;
+            var grid = [], leftCount = 0, rightCount = 0, i;
+            if (xlo < first) for (i = 0; i < 100; i++) { grid.push(xlo + (first - xlo) * i / 100); leftCount++; }
+            if (xhi > last) for (i = 1; i <= 100; i++) { grid.push(last + (xhi - last) * i / 100); rightCount++; }
+            if (!grid.length) return points;
+            var count = grid.length;
+            if (!(level > 0 && level < 1)) level = 0.95;
+            for (i = 0; i < points.length; i++) grid.push(points[i].x);
+            var predictions = _xyFitOLS(observations.xs, observations.ys, degree, level, grid);
+            if (!predictions || predictions.length !== grid.length) return points;
+            var hasCI = points.every(function (p) { return typeof p.lwr === "number" && isFinite(p.lwr) && typeof p.upr === "number" && isFinite(p.upr); });
+            var scale = 0;
+            for (i = 0; i < observations.ys.length; i++) scale = Math.max(scale, Math.abs(observations.ys[i]));
+            var tolerance = 2e-8 * Math.max(scale, Number.MIN_VALUE);
+            // If a host supplied another model or stale fit, stop at its data
+            // range instead of silently splicing a different model onto it.
+            for (i = 0; i < points.length; i++) {
+                var original = points[i], predicted = predictions[count + i];
+                if (Math.abs(original.y - predicted.y) > tolerance) return points;
+                if (hasCI && (!isFinite(predicted.lwr) || !isFinite(predicted.upr)
+                    || Math.abs(original.lwr - predicted.lwr) > tolerance
+                    || Math.abs(original.upr - predicted.upr) > tolerance)) return points;
+            }
+            predictions = predictions.slice(0, count);
+            if (!hasCI) predictions = predictions.map(function (p) { return { x: p.x, y: p.y }; });
+            return predictions.slice(0, leftCount).concat(points, predictions.slice(leftCount, leftCount + rightCount));
+        }
+        // Clip stored geometry as well as SVG ink. SVG getBBox() includes
+        // vertices hidden by clipPath, which otherwise inflates export canvases.
+        function _xyClipFitGeometry(points, xlo, xhi, ylo, yhi, closed) {
+            var bounds = [xlo, xhi, ylo, yhi];
+            function inside(p, side) {
+                return side === 0 ? p.x >= xlo : side === 1 ? p.x <= xhi
+                    : side === 2 ? p.y >= ylo : p.y <= yhi;
+            }
+            function cross(a, b, side) {
+                var axis = side < 2 ? "x" : "y", other = side < 2 ? "y" : "x";
+                var bound = bounds[side], delta = b[axis] - a[axis];
+                var t = (bound - a[axis]) / delta;
+                if (!isFinite(delta)) {
+                    var scale = Math.max(Math.abs(a[axis]), Math.abs(b[axis]), Math.abs(bound));
+                    t = (bound / scale - a[axis] / scale) / (b[axis] / scale - a[axis] / scale);
+                }
+                t = Math.max(0, Math.min(1, t));
+                var p = {};
+                p[axis] = bound;
+                p[other] = (1 - t) * a[other] + t * b[other];
+                return p;
+            }
+            var out = [], i, side;
+            if (!points.length || !points.every(function (p) { return isFinite(p.x) && isFinite(p.y); })) return out;
+            if (closed) {
+                // Sutherland-Hodgman: preserve the band interior, including
+                // separate visible lobes connected only along the clip border.
+                out = points.slice();
+                for (side = 0; side < 4 && out.length; side++) {
+                    var input = out; out = [];
+                    var a = input[input.length - 1];
+                    for (i = 0; i < input.length; i++) {
+                        var b = input[i], ai = inside(a, side), bi = inside(b, side);
+                        if (ai !== bi) out.push(cross(a, b, side));
+                        if (bi) out.push(b);
+                        a = b;
+                    }
+                }
+            } else {
+                // Clip each segment independently. A curve leaving and later
+                // re-entering the panel must start a new subpath, not a bridge.
+                function code(p) { var n = 0; for (var k = 0; k < 4; k++) if (!inside(p, k)) n |= 1 << k; return n; }
+                for (i = 1; i < points.length; i++) {
+                    var a = points[i - 1], b = points[i], ca = code(a), cb = code(b);
+                    for (var step = 0; (ca | cb) && !(ca & cb) && step < 8; step++) {
+                        var c = ca || cb;
+                        for (side = 0; !(c & (1 << side)); side++) {}
+                        var p = cross(a, b, side);
+                        if (ca) { a = p; ca = code(a); } else { b = p; cb = code(b); }
+                    }
+                    if (ca | cb) continue;
+                    var last = out[out.length - 1];
+                    if (!last || last.x !== a.x || last.y !== a.y)
+                        out.push({ x: a.x, y: a.y, move: true });
+                    out.push({ x: b.x, y: b.y });
+                }
+            }
+            return out;
         }
         function _xyFitLoess(xs, ys, span, level, xseq) {
-            var n = xs.length, i; if (n < 4) return null;
-            var idx = []; for (i = 0; i < n; i++) idx.push(i); idx.sort(function (a, b) { return xs[a] - xs[b]; });
-            var sx = [], sy = []; for (i = 0; i < n; i++) { sx.push(xs[idx[i]]); sy.push(ys[idx[i]]); }
-            if (!(span > 0)) span = 0.75;
-            var q = Math.max(3, Math.min(n, Math.floor(span * n + 0.5)));
-            function localFit(x0, withVar) {
-                var lo2 = 0, hi2 = n; while (lo2 < hi2) { var md = (lo2 + hi2) >> 1; if (sx[md] < x0) lo2 = md + 1; else hi2 = md; }
-                var L = lo2, R = lo2;
-                while (R - L < q && (L > 0 || R < n)) { if (L === 0) R++; else if (R === n) L--; else if ((x0 - sx[L - 1]) <= (sx[R] - x0)) L--; else R++; }
-                var h = Math.max(x0 - sx[L], sx[R - 1] - x0); if (span > 1) h *= span; if (!(h > 0)) h = 1e-9;
-                var P = 3, XtX = [[0,0,0],[0,0,0],[0,0,0]], Xty = [0,0,0], used = [], a, c2;
-                for (var u = L; u < R; u++) {
-                    var dd = Math.abs(sx[u] - x0) / h; if (dd >= 1) continue;
-                    var w = Math.pow(1 - dd * dd * dd, 3), dxc = sx[u] - x0, bb = [1, dxc, dxc * dxc];
-                    used.push({ w: w, b: bb, u: u });
-                    for (a = 0; a < P; a++) { Xty[a] += w * bb[a] * sy[u]; for (c2 = 0; c2 < P; c2++) XtX[a][c2] += w * bb[a] * bb[c2]; }
-                }
-                if (used.length < 3) { var sw = 0, swy = 0; for (var m = 0; m < used.length; m++) { sw += used[m].w; swy += used[m].w * sy[used[m].u]; } return { yhat: sw > 0 ? swy / sw : NaN, l2: NaN }; }
-                var Inv = _xyMatInv(XtX, P); if (!Inv) return { yhat: NaN, l2: NaN };
-                var beta = [0,0,0]; for (a = 0; a < P; a++) { var sa = 0; for (c2 = 0; c2 < P; c2++) sa += Inv[a][c2] * Xty[c2]; beta[a] = sa; }
-                var yhat = beta[0], l2 = NaN;
-                if (withVar) { l2 = 0; for (var m2 = 0; m2 < used.length; m2++) { var bi = used[m2].b, wi = used[m2].w, r0 = Inv[0][0] * bi[0] + Inv[0][1] * bi[1] + Inv[0][2] * bi[2], li = wi * r0; l2 += li * li; } }
-                return { yhat: yhat, l2: l2 };
+          // Direct Gaussian local quadratic LOESS, curve only. Neighborhood sizing
+          // follows stats::loess (floor(n * span + 1e-5)), not its default interpolated
+          // surface. See docs/REGRESSION-VALIDATION.md for the reference contract.
+          var n = xs.length, i;
+          if (n < 4 || ys.length !== n || xseq.length < 2) return null;
+          for (i = 0; i < n; i++) if (!isFinite(xs[i]) || !isFinite(ys[i])) return null;
+          if (!(span > 0)) span = 0.75;
+          if (!isFinite(span)) return null;
+          var q = Math.min(n, Math.floor(n * span + 1e-5));
+          if (q < 4) return null;
+          var idx = []; for (i = 0; i < n; i++) idx.push(i);
+          idx.sort(function (a, b) { return xs[a] - xs[b]; });
+          var sx = [], sy = [];
+          for (i = 0; i < n; i++) { sx.push(xs[idx[i]]); sy.push(ys[idx[i]]); }
+          function localFit(x0) {
+            var lo = 0, hi = n;
+            while (lo < hi) { var md = (lo + hi) >> 1; if (sx[md] < x0) lo = md + 1; else hi = md; }
+            var L = lo, H = lo;
+            while (H - L < q && (L > 0 || H < n)) {
+              if (L === 0) H++;
+              else if (H === n) L--;
+              else if (x0 - sx[L - 1] <= sx[H] - x0) L--;
+              else H++;
             }
-            var rss = 0, cnt = 0;
-            for (i = 0; i < n; i++) { var f0 = localFit(sx[i], false); if (isFinite(f0.yhat)) { var e = sy[i] - f0.yhat; rss += e * e; cnt++; } }
-            var pEff = Math.max(2, Math.min(n - 1, 1.2 * (n / q))), dfres = Math.max(1, cnt - pEff);
-            var s2 = (cnt > 0) ? rss / dfres : 0, tcrit = _xyTCrit(level, dfres), pts = [];
-            for (var kk = 0; kk < xseq.length; kk++) { var f = localFit(xseq[kk], true); if (!isFinite(f.yhat)) continue; var se = isFinite(f.l2) ? Math.sqrt(Math.max(0, s2 * f.l2)) : 0; pts.push({ x: xseq[kk], y: f.yhat, lwr: f.yhat - tcrit * se, upr: f.yhat + tcrit * se }); }
-            return pts.length >= 2 ? pts : null;
+            var radius = Math.max(x0 - sx[L], sx[H - 1] - x0) * Math.sqrt(Math.max(1, span));
+            if (!(radius > 0) || !isFinite(radius)) return NaN;
+            var columns = [[], [], []], target = [], anchor = sy[L], scale = 0;
+            var j, k, u, t, rootWeight;
+            for (u = L; u < H; u++) scale = Math.max(scale, Math.abs(sy[u] - anchor));
+            if (!isFinite(scale)) return NaN;
+            if (scale === 0) scale = 1;
+            for (u = L; u < H; u++) {
+              t = (sx[u] - x0) / radius;
+              if (Math.abs(t) >= 1) continue;
+              rootWeight = Math.pow(1 - Math.pow(Math.abs(t), 3), 1.5);
+              columns[0].push(rootWeight);
+              columns[1].push(rootWeight * t);
+              columns[2].push(rootWeight * t * t);
+              target.push(rootWeight * ((sy[u] - anchor) / scale));
+            }
+            if (target.length < 3) return NaN;
+            // Twice-orthogonalized weighted QR on dimensionless local predictors.
+            // Avoid normal equations, whose conditioning changes with axis units.
+            var Q = [], R = [[0,0,0],[0,0,0],[0,0,0]], rhs = [], beta = [];
+            for (j = 0; j < 3; j++) {
+              var v = columns[j].slice(), originalNorm = 0;
+              for (u = 0; u < v.length; u++) originalNorm += v[u] * v[u];
+              originalNorm = Math.sqrt(originalNorm);
+              for (var pass = 0; pass < 2; pass++) for (k = 0; k < j; k++) {
+                var dot = 0;
+                for (u = 0; u < v.length; u++) dot += Q[k][u] * v[u];
+                R[k][j] += dot;
+                for (u = 0; u < v.length; u++) v[u] -= dot * Q[k][u];
+              }
+              var norm = 0;
+              for (u = 0; u < v.length; u++) norm += v[u] * v[u];
+              norm = Math.sqrt(norm);
+              if (!(norm > 1e-12 * originalNorm)) return NaN;
+              R[j][j] = norm; rhs[j] = 0;
+              for (u = 0; u < v.length; u++) { v[u] /= norm; rhs[j] += v[u] * target[u]; }
+              Q.push(v);
+            }
+            for (j = 2; j >= 0; j--) {
+              var value = rhs[j];
+              for (k = j + 1; k < 3; k++) value -= R[j][k] * beta[k];
+              beta[j] = value / R[j][j];
+            }
+            return anchor + scale * beta[0];
+          }
+          var out = { xs: [], ys: [] };
+          for (i = 0; i < xseq.length; i++) {
+            if (!isFinite(xseq[i])) return null;
+            var fitted = localFit(xseq[i]);
+            // Refuse the whole group if any requested neighborhood is singular.
+            // Skipping bad points would silently bridge them with a plausible curve.
+            if (!isFinite(fitted)) return null;
+            out.xs.push(xseq[i]); out.ys.push(fitted);
+          }
+          return out.xs.map(function (x, index) { return { x: x, y: out.ys[index] }; });
         }
         function _xyComputeFitsClient(fitType, level, loessSpan) {
             if (!fitType) fitType = "linear";
@@ -27192,7 +27673,9 @@
                 if (fitType === "loess") { if (nn > 8000) return null; pts = _xyFitLoess(xs, ys, loessSpan, level, xseq); }
                 else { pts = _xyFitOLS(xs, ys, deg, level, xseq); }
                 if (!pts || pts.length < 2) continue;
-                out.push({ group: ge.group, fit_type: fitType, points: pts });
+                var entry = { group: ge.group, fit_type: fitType, points: pts };
+                if (grouped.hasFacets) entry.facet = ge.facet;
+                out.push(entry);
             }
             return out.length ? out : null;
         }
@@ -27257,9 +27740,21 @@
         // tie-free n <= 1290. The stats fuzzer (Aug 2026) caught the plain
         // t-approximation drifting from R in the third decimal of p at
         // moderate n, which is visible at label precision.
-        var _gb2SpearDistCache = {};
+        // The permutation-count cache lives on window, not in a var of
+        // render()'s scope: the corr method guard at render ENTRY reaches
+        // this through _corrComputeCellsClient before any var initializer
+        // in render()'s body has run, so a render-scope cache was hoisted
+        // but undefined there and threw inside the guard's try/catch:
+        // every pair on this exact branch (n <= 9 complete cases, no
+        // ties) lost its r and p on the Spearman echo (Sep 2026, the
+        // stats fuzzer at seed 20260901). Larger or tied pairs take the
+        // Edgeworth or t path and never touch the cache, which is why a
+        // classroom-sized matrix looked fine. Window scope also keeps the
+        // n = 9 enumeration (362,880 permutations) across renders.
         function _gb2SpearDist(n) {
-            if (_gb2SpearDistCache[n]) return _gb2SpearDistCache[n];
+            var cache = window.__gb2_spearDistCache ||
+                (window.__gb2_spearDistCache = {});
+            if (cache[n]) return cache[n];
             var counts = {}, used = new Array(n + 1);
             function rec(pos, s) {
                 if (pos > n) { counts[s] = (counts[s] || 0) + 1; return; }
@@ -27272,7 +27767,7 @@
                 }
             }
             rec(1, 0);
-            _gb2SpearDistCache[n] = counts;
+            cache[n] = counts;
             return counts;
         }
         function _gb2PRho(is, n, lower) {
@@ -27382,7 +27877,7 @@
                 }
             }
             var t = r * Math.sqrt(df / (1 - r * r));
-            var p = 2 * (1 - _gb2Stats._tCDF(Math.abs(t), df));
+            var p = _gb2Stats._tTailP(t, df, "two");
             return { r: r, p: Math.max(0, Math.min(1, p)) };
         }
         function _xyComputeStatsClient(method) {
@@ -27395,8 +27890,8 @@
             } else if (Array.isArray(pp)) {
                 for (j = 0; j < pp.length; j++) { var p = pp[j]; if (!p) continue; rows.push({ x: p.x, y: p.y, g: (p.group != null ? p.group : null), f: (p.facet != null ? p.facet : null) }); }
             }
-            function ck(g, f) { return (g == null ? "\u0000" : String(g)) + "\u0001" + (f == null ? "\u0000" : String(f)); }
-            var cells = {};
+            function ck(g, f) { return _xyFitCellKey(g, f); }
+            var cells = Object.create(null);
             for (var r = 0; r < rows.length; r++) {
                 var x = rows[r].x, y = rows[r].y;
                 if (typeof x !== "number" || !isFinite(x) || typeof y !== "number" || !isFinite(y)) continue;
@@ -27804,8 +28299,8 @@
                 "padding:5px 7px 7px 7px",
                 "font-size:11px",
                 "font-family:var(--gb2-ui-font)",
-                "width:184px",
-                "flex:0 0 184px",
+                "width:var(--gb2-pkr-w, 184px)",
+                "flex:0 0 var(--gb2-pkr-basis, 184px)",
                 "box-sizing:border-box"
             ].join(";");
             pop.innerHTML =
@@ -27830,11 +28325,11 @@
                 '</div>' +
                 // HSV panel: SV square + hue strip
                 '<div data-panel="hsv">' +
-                  '<div data-role="sv" style="position:relative;width:100%;height:96px;border-radius:3px;cursor:crosshair;background:linear-gradient(to bottom,rgba(0,0,0,0),#000),linear-gradient(to right,#fff,rgba(255,255,255,0));background-color:#f00;margin-bottom:5px;">' +
+                  '<div data-role="sv" style="position:relative;width:100%;height:var(--gb2-pkr-sv, 96px);border-radius:3px;cursor:crosshair;background:linear-gradient(to bottom,rgba(0,0,0,0),#000),linear-gradient(to right,#fff,rgba(255,255,255,0));background-color:#f00;margin-bottom:5px;">' +
                     '<div data-role="sv-marker" style="position:absolute;width:10px;height:10px;border:2px solid #fff;border-radius:50%;box-shadow:0 0 0 1px rgba(0,0,0,0.4);transform:translate(-50%,-50%);pointer-events:none;left:50%;top:50%;"></div>' +
                   '</div>' +
-                  '<div data-role="hue" style="position:relative;width:100%;height:11px;border-radius:3px;cursor:ew-resize;background:linear-gradient(to right,#f00 0%,#ff0 17%,#0f0 33%,#0ff 50%,#00f 67%,#f0f 83%,#f00 100%);">' +
-                    '<div data-role="hue-marker" style="position:absolute;top:-2px;width:4px;height:15px;border:1px solid #fff;border-radius:2px;background:rgba(0,0,0,0.3);transform:translateX(-50%);pointer-events:none;left:0;"></div>' +
+                  '<div data-role="hue" style="position:relative;width:100%;height:var(--gb2-pkr-strip, 11px);border-radius:3px;cursor:ew-resize;background:linear-gradient(to right,#f00 0%,#ff0 17%,#0f0 33%,#0ff 50%,#00f 67%,#f0f 83%,#f00 100%);">' +
+                    '<div data-role="hue-marker" style="position:absolute;top:-2px;width:4px;height:calc(var(--gb2-pkr-strip, 11px) + 4px);border:1px solid #fff;border-radius:2px;background:rgba(0,0,0,0.3);transform:translateX(-50%);pointer-events:none;left:0;"></div>' +
                   '</div>' +
                   // Lightness strip: black → pure hue at L=0.5 → white.
                   // Lets users nudge brightness without fighting the
@@ -27842,8 +28337,8 @@
                   // lightness while keeping the current HSL hue and
                   // saturation; HSV state is recomputed from the new
                   // RGB so every other control stays consistent.
-                  '<div data-role="lightness" style="position:relative;width:100%;height:11px;border-radius:3px;cursor:ew-resize;margin-top:5px;background:linear-gradient(to right,#000,#f00 50%,#fff);">' +
-                    '<div data-role="lightness-marker" style="position:absolute;top:-2px;width:4px;height:15px;border:1px solid #fff;border-radius:2px;background:rgba(0,0,0,0.3);transform:translateX(-50%);pointer-events:none;left:50%;"></div>' +
+                  '<div data-role="lightness" style="position:relative;width:100%;height:var(--gb2-pkr-strip, 11px);border-radius:3px;cursor:ew-resize;margin-top:5px;background:linear-gradient(to right,#000,#f00 50%,#fff);">' +
+                    '<div data-role="lightness-marker" style="position:absolute;top:-2px;width:4px;height:calc(var(--gb2-pkr-strip, 11px) + 4px);border:1px solid #fff;border-radius:2px;background:rgba(0,0,0,0.3);transform:translateX(-50%);pointer-events:none;left:50%;"></div>' +
                   '</div>' +
                 '</div>' +
                 // Swatches panel: recent (conditional) + palette + hue
@@ -27941,7 +28436,7 @@
                 btn.type = "button";
                 btn.title = c;
                 btn.style.cssText =
-                    "width:100%;height:13px;padding:0;border:1px solid #ccc;border-radius:2px;cursor:pointer;background:" + c + ";";
+                    "width:100%;height:var(--gb2-pkr-cell, 13px);padding:0;border:1px solid #ccc;border-radius:2px;cursor:pointer;background:" + c + ";";
                 btn.addEventListener("click", function (e) {
                     e.preventDefault();
                     _setPickerHex(refs, c, true);
@@ -28338,7 +28833,7 @@
                 btn.type = "button";
                 btn.title = c;
                 btn.style.cssText =
-                    "width:100%;height:13px;padding:0;border:1px solid #ccc;border-radius:2px;cursor:pointer;background:" + c + ";";
+                    "width:100%;height:var(--gb2-pkr-cell, 13px);padding:0;border:1px solid #ccc;border-radius:2px;cursor:pointer;background:" + c + ";";
                 (function (col) {
                     btn.addEventListener("click", function (e) {
                         e.preventDefault();
@@ -28406,8 +28901,14 @@
                 pop.style.background = "#fafafa";
                 pop.style.cursor = "pointer";
             } else {
-                pop.style.flex = "0 0 184px";
-                pop.style.width = "184px";
+                // Width and basis are handed over to the panel's custom
+                // properties, whose fallbacks are the literals this
+                // branch used to write. Writing the numbers here is what
+                // defeated the properties: a CSSOM write replaces what
+                // cssText declared, and this runs on EVERY picker open,
+                // before anything has a chance to measure the dock.
+                pop.style.flex = "0 0 var(--gb2-pkr-basis, 184px)";
+                pop.style.width = "var(--gb2-pkr-w, 184px)";
                 pop.style.padding = "5px 7px 7px 7px";
                 // Stretch to the bodyRow's full height so the left
                 // divider line runs all the way to the bottom of the
@@ -28580,6 +29081,10 @@
             var host = (inspector.pickerHost && inspector.pickerHost.isConnected)
                 ? inspector.pickerHost : (inspector.bodyRow || inspectorPanel);
             host.appendChild(_picker.pop);
+            // Mounted, so a re-fit publishes sizes for the box it landed
+            // in. Absent the key the fit clears the properties and the
+            // markup's own fallbacks stand.
+            try { _gb2FitPanelControls(); } catch (_eRfp) {}
             _picker.pop.style.display = "block";
             // Reset any dimming from a previous panel (Error Bars
             // dims the picker when "Match bar color" is on).
@@ -30108,13 +30613,17 @@
                 : { clientX: clamped, clientY: crossClient };
             var startClient = horizDrag ? st.startY : st.startX;
             var dDragClient = clamped - startClient;
-            var sScale = 1;
-            try {
-                if (svg && svg.getScreenCTM) {
-                    var ctm = svg.getScreenCTM();
-                    if (ctm) sScale = horizDrag ? (ctm.d || 1) : (ctm.a || 1);
-                }
-            } catch (_e2) {}
+            // Calibrated once per gesture, not read off getScreenCTM: Safari
+            // leaves the CSS zoom out of that matrix and paints a CSS px
+            // translate zoom-squared, so dividing by the matrix let the bar
+            // outrun the cursor there while Chrome tracked (see
+            // _gb2CssPxScale). viewS is what a USER unit paints as; the
+            // parting shifts below are user units and need that ratio.
+            if (!(st.cssPx > 0)) {
+                st.cssPx = _gb2CssPxScale(svg);
+                st.viewS = _gb2ViewScale(svg);
+            }
+            var sScale = st.cssPx;
             var dDragUser = dDragClient / sScale;
             if (st.draggedBars) {
                 var translateAxis = horizDrag ? "translateY" : "translateX";
@@ -30144,7 +30653,9 @@
                     if (shift === 0) {
                         nb.style.transform = "";
                     } else {
-                        nb.style.transform = translateAxis2 + "(" + shift + "px)";
+                        // shift is user units; a CSS px paints as cssPx and a
+                        // user unit as viewS, so convert (1:1 in Chrome).
+                        nb.style.transform = translateAxis2 + "(" + (shift * (st.viewS || 1) / (st.cssPx || 1)) + "px)";
                     }
                 }
                 // Line-plot extension: each non-dragged GROUP shifts
@@ -30171,8 +30682,10 @@
                             if (_lnShift === 0) {
                                 _lnNode.style.transform = "";
                             } else {
+                                // User units into a CSS px transform: the
+                                // same conversion as the bars above.
                                 _lnNode.style.transform =
-                                    translateAxis2 + "(" + _lnShift + "px)";
+                                    translateAxis2 + "(" + (_lnShift * (st.viewS || 1) / (st.cssPx || 1)) + "px)";
                             }
                         }
                     }
@@ -31033,6 +31546,19 @@
             window.__gb2_valAxis = function () {
                 return {
                     toPxY: toPxY,
+                    // The VALUE axis, whichever way the chart runs: Y when
+                    // vertical, X when horizontal. A bracket's height is
+                    // stored relative to the data it spans, and that needed
+                    // the value axis - without these three fields the
+                    // relative height could only be computed in vertical
+                    // mode, so flipping a chart to horizontal left every
+                    // bracket's spine at its old pixel coordinate, which the
+                    // horizontal renderer reads as an X (Torry, Sep 2026).
+                    // outward = the direction "beyond the data": up (smaller
+                    // pixel) vertically, right (larger pixel) horizontally.
+                    horizontal: horizontal,
+                    toPxVal: function (v2) { return valuePx(v2); },
+                    outward: horizontal ? 1 : -1,
                     yMin: yMin, yMax: yMax,
                     chartTop: chartTop,
                     setYMax: function (v2) { yMax = v2; }
@@ -31496,7 +32022,9 @@
                             curOrder = slots.map(function (s) { return s.lvl; });
                             if (curOrder.indexOf(lvl) < 0) return;
                             inlineRow = slots.every(function (s) { return Math.abs(s.cy - slots[0].cy) < Math.max(8, 0.4 * (s.bottom - s.top)); });
-                            try { var m = (dataGroup || svg).getScreenCTM(); if (m && m.a) scale = m.a; } catch (_eS) {}
+                            // client px per CSS px written to style.transform (measured;
+                            // Safari omits the host zoom from getScreenCTM)
+                            try { scale = _gb2CssPxScale(svg); } catch (_eS) {}
                             if (!scale) scale = 1;
                             sets = {};
                             for (var i = 0; i < slots.length; i++) sets[slots[i].lvl] = collectFacet(slots[i]);
@@ -32539,7 +33067,7 @@
                     var _bgPadY = 4;
                     var _bgHeight = _stripFontSize + _bgPadY * 2;
                     var _bgWidth = Math.max(_stripFontSize * 2,
-                        (_stripLabel.length * _stripFontSize * 0.6) + _bgPadX * 2);
+                        (_gb2XmlSafeText(_stripLabel).length * _stripFontSize * 0.6) + _bgPadX * 2);
                     var _textVisualCy = _stripY - _stripFontSize * 0.35;
                     var _bgY = _textVisualCy - _bgHeight / 2;
                     var _bgIsFill = (_stripBgLive === "fill");
@@ -32755,7 +33283,7 @@
                     if (_stripTfParts.length) {
                         _stripEl.setAttribute("transform", _stripTfParts.join(" "));
                     }
-                    _stripEl.textContent = _stripLabel;
+                    _gb2SetSvgTextContent(_stripEl, _stripLabel);
                     // Register the strip's text element under its
                     // text-inspector id so the dedicated text panel
                     // (renderInspectorText) can find it via
@@ -32792,6 +33320,13 @@
                             var pointerId = downEvt.pointerId;
                             var moved = false;
                             var ghostEl = null;
+                            // The cursor delta is VISUAL px while the ghost's
+                            // translate is a LOGICAL SVG length, so the ghost
+                            // drifted off the pointer under the standalone
+                            // shell's view zoom. Exactly 1 in jamovi. The
+                            // drop-slot maths below compares client rect
+                            // against client rect and needs none of this.
+                            var ghostVS = 1;
                             var dropIndicator = null;
                             var dropTargetIdx = -1;
                             // Snapshot current order from the
@@ -32838,6 +33373,7 @@
                                     // Dim the source strip, make a
                                     // visual ghost that follows the
                                     // cursor.
+                                    ghostVS = _gb2ViewScale(svg || _stripEl);
                                     _stripEl.style.opacity = "0.3";
                                     ghostEl = _stripEl.cloneNode(true);
                                     ghostEl.removeAttribute("data-facet-strip");
@@ -32858,7 +33394,7 @@
                                 // Move ghost with cursor.
                                 if (ghostEl) {
                                     ghostEl.setAttribute("transform",
-                                        "translate(" + dx + "," + dy + ")");
+                                        "translate(" + (dx / ghostVS) + "," + (dy / ghostVS) + ")");
                                 }
                                 // Compute target index by nearest
                                 // strip center to cursor X.
@@ -32879,9 +33415,13 @@
                                 var indicatorX = (cursorX < tgt.cx) ? tgt.left - 4 : tgt.right + 4;
                                 // Convert client X to axisGroup-local X.
                                 try {
+                                    // client -> svg user space via the rect + view scale
+                                    // (Safari omits the host zoom from getScreenCTM), then
+                                    // into axisGroup space via getCTM (pure user space).
                                     var pt = svg.createSVGPoint();
-                                    pt.x = indicatorX; pt.y = chartTop;
-                                    var ctm = axisGroup.getScreenCTM();
+                                    var _sr = svg.getBoundingClientRect();
+                                    pt.x = (indicatorX - _sr.left) / (ghostVS || 1); pt.y = chartTop;
+                                    var ctm = axisGroup.getCTM();
                                     if (ctm) {
                                         var loc = pt.matrixTransform(ctm.inverse());
                                         dropIndicator.setAttribute("x1", loc.x);
@@ -35326,18 +35866,17 @@
                 // whole series" toggle from the Point Style panel.
                 // Used by every subsequent loop (rug marks read
                 // _panelPoints directly).
-                var _hiddenGroupMap = {};
+                var _hiddenGroupMap = Object.create(null);
                 if (Array.isArray(data.xyHiddenGroups)) {
                     for (var _hgi = 0; _hgi < data.xyHiddenGroups.length; _hgi++) {
                         _hiddenGroupMap[String(data.xyHiddenGroups[_hgi])] = true;
                     }
                 }
-                var _panelPoints = xyPoints;
-                if (_panel.facet) {
-                    _panelPoints = xyPoints.filter(function (p) {
-                        return p && p.facet === _panel.facet;
-                    });
-                }
+                var _xyPanelFacet = _facetLevels.length === 1 ? _facetLevels[0]
+                    : _facetLevels.length > 1 ? _panel.facet : null;
+                var _panelPoints = xyPoints.filter(function (p) {
+                    return p && (_xyPanelFacet != null ? p.facet === _xyPanelFacet : !data.facetLabel);
+                });
                 _panelPoints = _panelPoints.filter(function (p) {
                     return p && !_hiddenGroupMap[String(p.group || "")];
                 });
@@ -35402,7 +35941,7 @@
                             var _scsBgPadX = 8, _scsBgPadY = 4;
                             var _scsBgH = _scsSize + _scsBgPadY * 2;
                             var _scsBgW = Math.max(_scsSize * 2,
-                                (_scsLabel.length * _scsSize * 0.6) + _scsBgPadX * 2);
+                                (_gb2XmlSafeText(_scsLabel).length * _scsSize * 0.6) + _scsBgPadX * 2);
                             var _scsTextCy = _scsY - _scsSize * 0.35;
                             var _scsBgRect = svgEl("rect", {
                                 x: _scsMidX - _scsBgW / 2, y: _scsTextCy - _scsBgH / 2,
@@ -35424,7 +35963,7 @@
                             "font-style": (_scsStyle && _scsStyle.italic) ? "italic" : "normal",
                             fill: _scsFill
                         });
-                        _scsEl.textContent = _scsLabel;
+                        _gb2SetSvgTextContent(_scsEl, _scsLabel);
                         if (_scsRot !== 0) _scsEl.setAttribute("transform",
                             "rotate(" + _scsRot + " " + _scsMidX + " " + _scsY + ")");
                         // Interactive like the categorical strips: click
@@ -36194,7 +36733,8 @@
                                 if (e.button !== 0) return;
                                 e.stopPropagation();
                                 var sx = e.clientX, sy = e.clientY, odx = _hlDX, ody = _hlDY, moved = false;
-                                var _scl = 1; try { var ctm = svg.getScreenCTM(); if (ctm && ctm.a) _scl = ctm.a; } catch (_e0) {}
+                                // attribute translate = user units; Safari omits the host zoom from getScreenCTM
+                                var _scl = 1; try { _scl = _gb2ViewScale(svg); } catch (_e0) {}
                                 function mv(ev) {
                                     if (!moved && (Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy)) < 4) return;
                                     moved = true; _dragged = true;
@@ -36245,18 +36785,20 @@
                         ? Math.max(0, Math.min(1, data.xyCIOpacity)) : 0.2;
                     // Hidden-fit-groups lookup. Built once per
                     // render pass; cheap O(n) check per fit row.
-                    var _hiddenFitGroupsMap = {};
+                    var _hiddenFitGroupsMap = Object.create(null);
                     if (Array.isArray(data.xyHiddenFitGroups)) {
                         for (var _hfi = 0; _hfi < data.xyHiddenFitGroups.length; _hfi++) {
                             _hiddenFitGroupsMap[String(data.xyHiddenFitGroups[_hfi])] = true;
                         }
                     }
+                    var _fitInputs = _xyPointsGroupedForFit();
                     var _fStyle = data.xyFitStyle || "solid";
                     var _fitDash = dashArrayFor(_fStyle);
                     for (var _fi2 = 0; _fi2 < xyFits.length; _fi2++) {
                         var _fit = xyFits[_fi2];
                         if (!_fit || !Array.isArray(_fit.points)
                             || _fit.points.length < 2) continue;
+                        if (_xyPanelFacet != null ? _fit.facet !== _xyPanelFacet : _fit.facet != null) continue;
                         var _fitGroup = _fit.group || "";
                         // Skip groups the user has hidden via the
                         // Fit Line panel's Groups strip (fit only)
@@ -36277,140 +36819,41 @@
                         var _gCIOpacity = fitCIOpacityFor(_fitGroup);
                         var _gFitStyle = fitStyleFor(_fitGroup);
                         var _gFitDash = dashArrayFor(_gFitStyle);
-                        // Generalized endpoint-extension helper:
-                        // projects a polyline out to the chart's
-                        // X axis bounds using the local slope at
-                        // each end, clipped to Y bounds. Same
-                        // logic _extendFitEndpoints uses below,
-                        // but here parameterized by a y-getter so
-                        // it works on the fit line (y), upper CI
-                        // bound (upr), and lower CI bound (lwr).
-                        // walkToEdge = true: when extrapolation
-                        // exits the chart's y range, continue along
-                        // the y-bound out to the chart's x edge so a
-                        // filled polygon (CI band) closes flush at
-                        // the corner. walkToEdge = false: stop at
-                        // the y-bound intersection — used for the
-                        // fit line itself so it doesn't ride the
-                        // chart's top/bottom edge after exiting.
-                        function _extendEdge(pts, getY, walkToEdge) {
-                            if (!pts || pts.length < 2) return [];
-                            var out = [];
-                            for (var _eei = 0; _eei < pts.length; _eei++) {
-                                out.push({ x: pts[_eei].x, y: getY(pts[_eei]) });
-                            }
-                            // --- Left side ---
-                            var p0 = pts[0], p1 = pts[1];
-                            var dx0 = p1.x - p0.x;
-                            if (dx0 > 0 && p0.x > xMin) {
-                                var y0 = getY(p0), y1 = getY(p1);
-                                var sL = (y1 - y0) / dx0;
-                                var yL = y0 + sL * (xMin - p0.x);
-                                if (yL >= yMin && yL <= yMax) {
-                                    out.unshift({ x: xMin, y: yL });
-                                } else if (sL !== 0) {
-                                    var yB = (yL < yMin) ? yMin : yMax;
-                                    var xB = p0.x + (yB - y0) / sL;
-                                    if (xB > xMin && xB < p0.x) {
-                                        out.unshift({ x: xB, y: yB });
-                                        if (walkToEdge) {
-                                            out.unshift({ x: xMin, y: yB });
-                                        }
-                                    } else if (walkToEdge) {
-                                        out.unshift({ x: xMin, y: yB });
-                                    }
-                                } else if (walkToEdge) {
-                                    out.unshift({ x: xMin, y: y0 });
-                                }
-                            }
-                            // --- Right side ---
-                            var pn = pts[pts.length - 1];
-                            var pm = pts[pts.length - 2];
-                            var dx1 = pn.x - pm.x;
-                            if (dx1 > 0 && pn.x < xMax) {
-                                var yn = getY(pn), ym = getY(pm);
-                                var sR = (yn - ym) / dx1;
-                                var yR = yn + sR * (xMax - pn.x);
-                                if (yR >= yMin && yR <= yMax) {
-                                    out.push({ x: xMax, y: yR });
-                                } else if (sR !== 0) {
-                                    var yB2 = (yR < yMin) ? yMin : yMax;
-                                    var xB2 = pn.x + (yB2 - yn) / sR;
-                                    if (xB2 > pn.x && xB2 < xMax) {
-                                        out.push({ x: xB2, y: yB2 });
-                                        if (walkToEdge) {
-                                            out.push({ x: xMax, y: yB2 });
-                                        }
-                                    } else if (walkToEdge) {
-                                        out.push({ x: xMax, y: yB2 });
-                                    }
-                                } else if (walkToEdge) {
-                                    out.push({ x: xMax, y: yn });
-                                }
-                            }
-                            return out;
+                        // Fit the requested X positions using the actual observations.
+                        // Geometry clipping preserves exits/re-entry at the Y limits
+                        // without inflating the bounds measured by SVG export.
+                        var _drawFitPoints = _fit.points;
+                        if (_fit.fit_type !== "loess" && data.xyFitFullRange !== false) {
+                            var _inputKey = _xyFitCellKey(_fit.group, _fit.facet);
+                            _drawFitPoints = _xyExtendOLSFit(_fit, _fitInputs.byG[_inputKey],
+                                xMin, xMax, data.xyCILevel, data.xyFitType);
                         }
-                        // CI band (drawn first, behind the fit
-                        // line). Top edge = upr extended to axes;
-                        // bottom edge = lwr extended to axes. Each
-                        // is projected separately so the polygon
-                        // tracks the actual local slope of each
-                        // bound (the CI generally widens away
-                        // from the data center, but the local
-                        // boundary slope is good enough for the
-                        // visual extension).
+                        // Pointwise confidence band for the fitted mean.
                         if (data.xyShowCI
                             && !_isElementHidden("xyCI")
                             && _fit.points[0].lwr !== undefined) {
-                            // Loess is only valid inside the data's
-                            // convex hull — extending it can produce
-                            // wild slopes at low span. Match ggplot's
-                            // geom_smooth() and stop the band at the
-                            // data range. Linear / polynomial fits
-                            // extrapolate cleanly so the band still
-                            // walks to the chart corners.
-                            var _isLoess = _fit.fit_type === "loess";
-                            // Stop the band at the data range for loess,
-                            // OR when "Extend to plot edges"
-                            // (xyFitFullRange) is off. Default extends.
-                            var _ciStopAtData = _isLoess
-                                || data.xyFitFullRange === false;
-                            var _ciTop = _ciStopAtData
-                                ? _fit.points.map(function (p) {
-                                    return { x: p.x, y: p.upr }; })
-                                : _extendEdge(_fit.points,
-                                    function (p) { return p.upr; }, true);
-                            var _ciBot = _ciStopAtData
-                                ? _fit.points.map(function (p) {
-                                    return { x: p.x, y: p.lwr }; })
-                                : _extendEdge(_fit.points,
-                                    function (p) { return p.lwr; }, true);
+                            var _ciPolygon = _drawFitPoints.map(function (p) { return { x: p.x, y: p.upr }; })
+                                .concat(_drawFitPoints.map(function (p) { return { x: p.x, y: p.lwr }; }).reverse());
+                            _ciPolygon = _xyClipFitGeometry(_ciPolygon, xMin, xMax, yMin, yMax, true);
                             var _ciD = "";
-                            for (var _ci1 = 0; _ci1 < _ciTop.length; _ci1++) {
+                            for (var _ci1 = 0; _ci1 < _ciPolygon.length; _ci1++) {
                                 _ciD += (_ci1 === 0 ? "M" : " L")
-                                    + toPxX(_ciTop[_ci1].x) + ","
-                                    + toPxY(_ciTop[_ci1].y);
+                                    + toPxX(_ciPolygon[_ci1].x) + ","
+                                    + toPxY(_ciPolygon[_ci1].y);
                             }
-                            // Bottom edge traversed in reverse so
-                            // the polygon closes correctly.
-                            for (var _ci2 = _ciBot.length - 1; _ci2 >= 0; _ci2--) {
-                                _ciD += " L"
-                                    + toPxX(_ciBot[_ci2].x) + ","
-                                    + toPxY(_ciBot[_ci2].y);
-                            }
-                            _ciD += " Z";
+                            if (_ciPolygon.length) _ciD += " Z";
                             var _ciEl = svgEl("path", {
                                 d: _ciD,
                                 fill: _fitColor,
                                 "fill-opacity": _gCIOpacity,
                                 stroke: "none",
                                 "data-role": "xy-ci",
+                                "data-facet": _fit.facet == null ? "" : _fit.facet,
                                 "data-bar-group": _fitGroup,
                                 // Clip to chart area so the band
                                 // doesn't bleed past xMin/xMax or
                                 // above/below yMin/yMax when the
-                                // underlying linear extension
-                                // crosses the axis bounds.
+                                // model predictions cross the axis bounds.
                                 "clip-path": "url(#" + _xyClipId + ")"
                             });
                             // Click the CI band → open Fit Line
@@ -36448,40 +36891,13 @@
                             })(_fitGroup);
                             dataGroup.appendChild(_ciEl);
                         }
-                        // Fit line: extended to the chart's X
-                        // axis bounds via the same _extendEdge
-                        // helper used by the CI band above. Linear
-                        // fits extrapolate exactly (constant
-                        // slope); LOESS fits use the local
-                        // boundary slope for a "natural
-                        // continuation" look. Y values are clipped
-                        // to the chart's Y range so the line
-                        // can't escape the plot area.
-                        // Same loess gate as the CI band above:
-                        // don't extrapolate a loess curve past its
-                        // data range, since the local endpoint slope
-                        // is meaningless for spline-style smoothers
-                        // (especially at low span).
-                        // Gated by xyShowFit (independent of
-                        // xyShowCI) so the CI band can render
-                        // alone — outer block runs whenever EITHER
-                        // overlay is on, but the line itself only
-                        // paints when the user wants it.
+                        // The line and its band use the same prediction grid.
                         if (data.xyShowFit && !_isElementHidden("xyFit")) {
-                        // Stop the line at the data range for loess, OR
-                        // when "Extend to plot edges" (xyFitFullRange) is
-                        // off. Default (true) extrapolates to the edges.
-                        var _fitStopAtData = (_fit.fit_type === "loess")
-                            || data.xyFitFullRange === false;
-                        var _fitPts = _fitStopAtData
-                            ? _fit.points.map(function (p) {
-                                return { x: p.x, y: p.y }; })
-                            : _extendEdge(_fit.points,
-                                function (p) { return p.y; }, false);
+                        var _fitPts = _xyClipFitGeometry(_drawFitPoints, xMin, xMax, yMin, yMax, false);
                         var _fitD = "";
                         for (var _fp = 0; _fp < _fitPts.length; _fp++) {
                             var _fpp = _fitPts[_fp];
-                            _fitD += (_fp === 0 ? "M" : " L")
+                            _fitD += (_fp === 0 || _fpp.move ? " M" : " L")
                                 + toPxX(_fpp.x) + "," + toPxY(_fpp.y);
                         }
                         var _fitAttrs = {
@@ -36491,6 +36907,7 @@
                             "stroke-width": _gFitWidth,
                             "stroke-linecap": "round",
                             "data-role": "xy-fit",
+                            "data-facet": _fit.facet == null ? "" : _fit.facet,
                             "data-bar-group": _fitGroup,
                             // Same clip as the CI band: the line's
                             // extended endpoints (or raw LOESS
@@ -36706,7 +37123,7 @@
                         ? data.xyEllipseWidth : 1.5;
                     var _ellStyle = data.xyEllipseStyle || "solid";
                     var _ellDash = dashArrayFor(_ellStyle);
-                    var _hiddenEllMap = {};
+                    var _hiddenEllMap = Object.create(null);
                     if (Array.isArray(data.xyHiddenEllipseGroups)) {
                         for (var _heI = 0; _heI < data.xyHiddenEllipseGroups.length; _heI++) {
                             _hiddenEllMap[String(data.xyHiddenEllipseGroups[_heI])] = true;
@@ -36716,6 +37133,7 @@
                         var _ell = data.xyEllipses[_eI];
                         if (!_ell || !Array.isArray(_ell.points)
                             || _ell.points.length < 3) continue;
+                        if (_xyPanelFacet != null ? _ell.facet !== _xyPanelFacet : _ell.facet != null) continue;
                         var _ellGroup = _ell.group || "";
                         if (_hiddenEllMap[_ellGroup]) continue;
                         if (_hiddenGroupMap[_ellGroup]) continue;
@@ -36749,6 +37167,7 @@
                             "stroke-width": _ellWnow,
                             "stroke-linejoin": "round",
                             "data-role": "xy-ellipse",
+                            "data-facet": _ell.facet == null ? "" : _ell.facet,
                             "data-bar-group": _ellGroup,
                             // Clip to the inner data rect (axis lines +
                             // the [xMin,xMax] x [yMin,yMax] range) so a
@@ -37357,8 +37776,8 @@
                         "font-weight": 600, fill: "#666",
                         "font-family": "sans-serif"
                     });
-                    _slTitleEl.textContent = (typeof data.xySizeVar === "string"
-                        && data.xySizeVar.length > 0) ? data.xySizeVar : "Size";
+                    _gb2SetSvgTextContent(_slTitleEl, (typeof data.xySizeVar === "string"
+                        && data.xySizeVar.length > 0) ? data.xySizeVar : "Size");
                     _slG.appendChild(_slTitleEl);
                     for (var _slj = 0; _slj < _slCenters.length; _slj++) {
                         var _slc = _slCenters[_slj];
@@ -37936,7 +38355,8 @@
                                 e.preventDefault(); e.stopPropagation();
                                 var startC = (orient === "x") ? e.clientY : e.clientX;
                                 var start = _mgSize, moved = false;
-                                var sc = 1; try { var ctm = svg.getScreenCTM(); if (ctm) sc = (orient === "x") ? (ctm.d || 1) : (ctm.a || 1); } catch (_e0) {}
+                                // xyMarginalSize is user units; Safari omits the host zoom from getScreenCTM
+                                var sc = 1; try { sc = _gb2ViewScale(svg); } catch (_e0) {}
                                 function mv(ev) {
                                     var d = ((orient === "x") ? (ev.clientY - startC) : (startC - ev.clientX)) / sc;
                                     if (!moved && Math.abs(d) < 2) return;
@@ -37977,11 +38397,9 @@
                     // facet's stats. Untagged rows (non-faceted data)
                     // show in every panel as before.
                     var _statsRows = data.xyStats;
-                    if (_panel.facet) {
-                        _statsRows = _statsRows.filter(function (r) {
-                            return r && (r.facet == null || r.facet === _panel.facet);
-                        });
-                    }
+                    _statsRows = _statsRows.filter(function (r) {
+                        return r && (_xyPanelFacet != null ? r.facet === _xyPanelFacet : r.facet == null);
+                    });
                     var _statsPos = (typeof data.xyStatsPosition === "string"
                                       && data.xyStatsPosition.length > 0)
                         ? data.xyStatsPosition : "topright";
@@ -38020,7 +38438,7 @@
                         var sym = (row.method === "spearman") ? "ρ"
                             : (row.method === "kendall") ? "τ" : "r";
                         function _fixed(v) {
-                            if (!isFinite(v)) return "\u2014";
+                            if (typeof v !== "number" || !isFinite(v)) return "\u2014";
                             var s = v.toFixed(_statsDec);
                             // APA convention: drop leading zero on
                             // values bounded between -1 and 1.
@@ -38030,7 +38448,7 @@
                             // Slope / intercept aren't bounded to
                             // [-1, 1], so keep the leading zero
                             // (e.g. "0.45" not ".45").
-                            if (!isFinite(v)) return "\u2014";
+                            if (typeof v !== "number" || !isFinite(v)) return "\u2014";
                             return v.toFixed(_statsDec);
                         }
                         function _fmtEquation(slope, intercept) {
@@ -38055,7 +38473,7 @@
                             // p is fixed APA 3 dp on every surface;
                             // xyStatsDecimals governs r / R² / the
                             // equation only.
-                            if (!isFinite(row.p)) {
+                            if (typeof row.p !== "number" || !isFinite(row.p)) {
                                 parts.push("p = \u2014");
                             } else if (row.p < 0.001) {
                                 parts.push("p < .001");
@@ -38067,12 +38485,12 @@
                             parts.push("n = " + row.n);
                         }
                         if (_statsShowR2 && typeof row.r2 === "number") {
-                            parts.push("R² = " + _fixed(row.r2));
+                            parts.push((data.xyFitType && data.xyFitType !== "linear" ? "Linear R² = " : "R² = ") + _fixed(row.r2));
                         }
                         if (_statsShowEqn
                             && typeof row.slope === "number"
                             && typeof row.intercept === "number") {
-                            parts.push(_fmtEquation(row.slope, row.intercept));
+                            parts.push((data.xyFitType && data.xyFitType !== "linear" ? "Linear fit: " : "") + _fmtEquation(row.slope, row.intercept));
                         }
                         return parts.join(", ");
                     }
@@ -38213,6 +38631,10 @@
                             var startX = 0, startY = 0;
                             var startOffX = 0, startOffY = 0;
                             var moved = false;
+                            // The pointer delta is VISUAL px while the
+                            // overlay offset is a LOGICAL SVG length.
+                            // Measured once per gesture; exactly 1 in jamovi.
+                            var statsVS = 1;
                             // Swallow the browser-synthesized
                             // click that fires after pointerup.
                             // Without this, the click bubbles to
@@ -38230,6 +38652,7 @@
                                 e.stopPropagation();
                                 down = true;
                                 moved = false;
+                                statsVS = _gb2ViewScale(svg || el);
                                 startX = e.clientX;
                                 startY = e.clientY;
                                 // Read CURRENT offsets at drag-start
@@ -38255,8 +38678,8 @@
                                 }
                                 if (moved) {
                                     _statsG.setAttribute("transform",
-                                        "translate(" + (startOffX + dx) +
-                                        "," + (startOffY + dy) + ")");
+                                        "translate(" + (startOffX + dx / statsVS) +
+                                        "," + (startOffY + dy / statsVS) + ")");
                                 }
                             });
                             function _endDrag(e) {
@@ -38267,8 +38690,8 @@
                                 if (moved) {
                                     var dx = e.clientX - startX;
                                     var dy = e.clientY - startY;
-                                    var newX = Math.round(startOffX + dx);
-                                    var newY = Math.round(startOffY + dy);
+                                    var newX = Math.round(startOffX + dx / statsVS);
+                                    var newY = Math.round(startOffY + dy / statsVS);
                                     data.xyStatsOffsetX = newX;
                                     data.xyStatsOffsetY = newY;
                                     if (hasSetOption) {
@@ -38333,9 +38756,11 @@
                                 "font-size": _statsFontSize,
                                 "font-style": "italic",
                                 fill: _grpColor,
-                                "data-role": "xy-stats"
+                                "data-role": "xy-stats",
+                                "data-facet": _xyPanelFacet == null ? "" : _xyPanelFacet,
+                                "data-bar-group": _it.group || ""
                             });
-                            _statsEl.textContent = _txt;
+                            _gb2SetSvgTextContent(_statsEl, _txt);
                             _wireStatsDrag(_statsEl);
                             _statsTextEls.push(_statsEl);
                             _statsG.appendChild(_statsEl);
@@ -38425,6 +38850,12 @@
                                 el.setAttribute("pointer-events", "all");
                                 var rzDown = false, rzMoved = false;
                                 var rzX = 0, rzY = 0, rzW = 0, rzH = 0;
+                                // The pointer delta is VISUAL px while the
+                                // box dimensions committed below are LOGICAL,
+                                // so the plate outgrew the handle under the
+                                // standalone shell's view zoom. Measured once
+                                // per gesture; exactly 1 in jamovi.
+                                var rzVS = 1;
                                 el.addEventListener("mouseenter", function () {
                                     if (!rzDown) el.setAttribute("fill-opacity", "0.22");
                                 });
@@ -38440,6 +38871,7 @@
                                     e.stopPropagation();
                                     rzDown = true;
                                     rzMoved = false;
+                                    rzVS = _gb2ViewScale(svg || el);
                                     rzX = e.clientX; rzY = e.clientY;
                                     rzW = _curW; rzH = _curH;
                                     el.setAttribute("fill-opacity", "0.35");
@@ -38456,11 +38888,11 @@
                                     }
                                     var _mn = _statsMinSize();
                                     if (axis === "w" || axis === "c") {
-                                        var nw = rzW + _wSign * ddx;
+                                        var nw = rzW + _wSign * ddx / rzVS;
                                         _curW = Math.max(_mn.w, Math.min(nw, _rszMaxW));
                                     }
                                     if (axis === "h" || axis === "c") {
-                                        var nh = rzH + _hSign * ddy;
+                                        var nh = rzH + _hSign * ddy / rzVS;
                                         _curH = Math.max(_mn.h, Math.min(nh, _rszMaxH));
                                     }
                                     _layoutStats(_curW, _curH);
@@ -39260,9 +39692,11 @@
                             var committed = groupCats.slice(), preview = groupCats.slice();
                             var lastSlots = 0;
                             var SLOT_PX = 44;
-                            // Screen->SVG scale for the follow transform.
+                            // Screen px -> CSS px for the follow transform (measured:
+                            // Safari paints CSS px on svg children zoom-squared and
+                            // leaves the host zoom out of getScreenCTM).
                             var _zSy = 1;
-                            try { var _zCtm = svg.getScreenCTM(); if (_zCtm && _zCtm.d) _zSy = _zCtm.d; } catch (_eZc) {}
+                            try { _zSy = _gb2CssPxScale(svg); } catch (_eZc) {}
                             function _zEsc(s) {
                                 if (window.CSS && typeof CSS.escape === "function") return CSS.escape(String(s));
                                 return String(s)
@@ -39626,8 +40060,12 @@
                             e.stopPropagation();
                             var startX = e.clientX, startY = e.clientY, pid = e.pointerId, moved = false;
                             var committed = groupCats.slice(), preview = groupCats.slice();
+                            // every write here is a CSS translate from a VISUAL px
+                            // delta (client delta or bounding-rect height), so one
+                            // measured cssPx serves both axes; getScreenCTM omits the
+                            // host zoom in Safari.
                             var sx = 1, sy = 1;
-                            try { var ctm = svg.getScreenCTM(); if (ctm) { if (ctm.a) sx = ctm.a; if (ctm.d) sy = ctm.d; } } catch (_e) {}
+                            try { sx = sy = _gb2CssPxScale(svg); } catch (_e) {}
                             // Segments are stable during the drag (no redraw), so
                             // cache them + the grabbed group's per-bin heights.
                             var allSegs = [], gSegs = [], gH = {};
@@ -41720,10 +42158,14 @@
                         "rotate(" + d.toFixed(3) + " " + _cx + " " + _cy + ")"
                         + " rotate(" + (-d).toFixed(3) + " " + lx + " " + ly + ")");
                 }
+                // _fqU2C: user units -> CSS px for the transform-origin (Safari
+                // paints CSS px on svg children zoom-squared); measured ONCE per
+                // drag when the reorder gesture engages, never per frame.
+                var _fqU2C = 1;
                 function _fqWedgeTransform(cat, d, animate) {
                     var wd = _wedgeByCat[cat];
                     if (!wd) return;
-                    wd.style.transformOrigin = _cx + "px " + _cy + "px";
+                    wd.style.transformOrigin = (_cx * _fqU2C) + "px " + (_cy * _fqU2C) + "px";
                     wd.style.transition = animate ? "transform 0.12s ease" : "none";
                     wd.style.transform = d ? ("rotate(" + d + "deg)") : "";
                     _fqLabelTransform(cat, d || 0);
@@ -41744,6 +42186,7 @@
                                 if (Math.abs(mv.clientX - sx)
                                     + Math.abs(mv.clientY - sy) < 6) return;
                                 engaged = true;
+                                try { _fqU2C = _gb2ViewScale(svg) / _gb2CssPxScale(svg); } catch (_eU) { _fqU2C = 1; }
                                 try {
                                     window.__gb2_fqPieDragging = true;
                                     window.__gb2_fqPieDragKind = "reorder";
@@ -41864,7 +42307,7 @@
                                     if (!wEl) continue;
                                     var inv = _fqSignedDiff(liveStart[c4], finalLay[c4].start);
                                     if (Math.abs(inv) < 0.5) continue;
-                                    wEl.style.transformOrigin = _cx + "px " + _cy + "px";
+                                    wEl.style.transformOrigin = (_cx * _fqU2C) + "px " + (_cy * _fqU2C) + "px";
                                     wEl.style.transition = "none";
                                     wEl.style.transform = "rotate(" + inv + "deg)";
                                     fresh.push(wEl);
@@ -41908,11 +42351,11 @@
                 // path the panel's Hole / Rotation sliders already use.
                 function _fqPtPolar(ev) {
                     try {
-                        var pt = svg.createSVGPoint();
-                        pt.x = ev.clientX; pt.y = ev.clientY;
-                        var m = svg.getScreenCTM();
-                        if (!m) return null;
-                        var pp = pt.matrixTransform(m.inverse());
+                        // No viewBox: user space = (client - svg rect) / view scale.
+                        // Not getScreenCTM, which omits the host zoom in Safari.
+                        var r = svg.getBoundingClientRect(), vs = _gb2ViewScale(svg);
+                        if (!r) return null;
+                        var pp = { x: (ev.clientX - r.left) / vs, y: (ev.clientY - r.top) / vs };
                         return {
                             deg: Math.atan2(pp.y - _cy, pp.x - _cx) * 180 / Math.PI,
                             dist: Math.sqrt((pp.x - _cx) * (pp.x - _cx)
@@ -42250,7 +42693,8 @@
                             _hit5.addEventListener("mouseleave", function () { _lineEl.setAttribute("stroke-width", String(_lw)); _xyTooltipHide(); });
                             _hit5.addEventListener("mousemove", function (ev) {
                                 var best = null, bd = Infinity;
-                                var pt = svg.createSVGPoint ? (function () { var q = svg.createSVGPoint(); q.x = ev.clientX; q.y = ev.clientY; try { return q.matrixTransform(svg.getScreenCTM().inverse()); } catch (_e) { return null; } })() : null;
+                                // rect + view scale, not getScreenCTM (Safari omits the host zoom from it)
+                                var pt = (function () { try { var _r = svg.getBoundingClientRect(), _vs = _gb2ViewScale(svg); return { x: (ev.clientX - _r.left) / _vs, y: (ev.clientY - _r.top) / _vs }; } catch (_e) { return null; } })();
                                 if (pt) { for (var z = 0; z < _pts.length; z++) { var dd = Math.abs((horizontal ? _pts[z][1] : _pts[z][0]) - (horizontal ? pt.y : pt.x)); if (dd < bd) { bd = dd; best = z; } } }
                                 if (best != null) {
                                     _xyTooltipShow("<div style='font-weight:600;margin-bottom:2px;'>" + _fqEsc(displayCategory(visibleXCats[_pts[best][3]])) + "</div><div>cumulative " + (Math.round(_pts[best][2] * 10) / 10) + "%</div>", ev.clientX, ev.clientY);
@@ -42861,11 +43305,10 @@
                                 ev.stopPropagation(); ev.preventDefault();
                                 if (_vEls.length) {
                                     try {
-                                        var _pt6 = svg.createSVGPoint();
-                                        _pt6.x = ev.clientX; _pt6.y = ev.clientY;
-                                        var _m6 = svg.getScreenCTM();
-                                        if (_m6) {
-                                            var _sp6 = _pt6.matrixTransform(_m6.inverse());
+                                        // rect + view scale, not getScreenCTM (Safari omits the host zoom)
+                                        var _r6 = svg.getBoundingClientRect(), _vs6 = _gb2ViewScale(svg);
+                                        if (_r6) {
+                                            var _sp6 = { x: (ev.clientX - _r6.left) / _vs6, y: (ev.clientY - _r6.top) / _vs6 };
                                             for (var _vq = 0; _vq < _vEls.length; _vq++) {
                                                 var _vb6 = _vEls[_vq].getBBox();
                                                 if (_sp6.x >= _vb6.x - 2 && _sp6.x <= _vb6.x + _vb6.width + 2
@@ -42959,8 +43402,12 @@
                     if (n < 2) return;
                     e.stopPropagation();
                     var startX = e.clientX, startY = e.clientY, pid = e.pointerId, moved = false;
-                    var sx = 1, sy = 1;
-                    try { var ctm = svg.getScreenCTM(); if (ctm) { if (ctm.a) sx = ctm.a; if (ctm.d) sy = ctm.d; } } catch (_ec0) {}
+                    // sx/sy: client px per USER unit (the slot math); u2c: user
+                    // units -> CSS px for style.transform; cssPx: client px per CSS
+                    // px (the FLIP glide). Measured once per gesture, not read off
+                    // getScreenCTM (Safari leaves the host zoom out of it).
+                    var sx = 1, sy = 1, cssPx = 1, u2c = 1;
+                    try { sx = sy = _gb2ViewScale(svg); cssPx = _gb2CssPxScale(svg); u2c = sx / cssPx; } catch (_ec0) {}
                     var committed = vars.slice();
                     // The drag AXIS (decided on first movement) selects which
                     // variable reorders: a vertical drag reorders the grabbed
@@ -43008,7 +43455,7 @@
                             var R = +cg.getAttribute("data-row"), C = +cg.getAttribute("data-col");
                             cg.style.transition = (R === g || C === g) ? "none" : "transform 170ms ease-out";
                             var ox = off[C] || 0, oy = off[R] || 0;
-                            cg.style.transform = (ox || oy) ? ("translate(" + ox + "px," + oy + "px)") : "";
+                            cg.style.transform = (ox || oy) ? ("translate(" + (ox * u2c) + "px," + (oy * u2c) + "px)") : "";
                         }
                         for (i = 0; i < labelGs.length; i++) {
                             var lg = labelGs[i];
@@ -43016,9 +43463,9 @@
                             lg.style.transition = (K === g) ? "none" : "transform 170ms ease-out";
                             var d = off[K] || 0;
                             if (lg.getAttribute("data-axis") === "row")
-                                lg.style.transform = d ? ("translate(0px," + d + "px)") : "";
+                                lg.style.transform = d ? ("translate(0px," + (d * u2c) + "px)") : "";
                             else
-                                lg.style.transform = d ? ("translate(" + d + "px,0px)") : "";
+                                lg.style.transform = d ? ("translate(" + (d * u2c) + "px,0px)") : "";
                         }
                         return rr.slot;
                     }
@@ -43087,7 +43534,7 @@
                                 var o = oldR[prefix + el.getAttribute(a0) + "::" + el.getAttribute(a1)];
                                 if (!o) continue;
                                 var nr; try { nr = el.getBoundingClientRect(); } catch (_ecc) { continue; }
-                                var ddx = (o.left - nr.left) / sx, ddy = (o.top - nr.top) / sy;
+                                var ddx = (o.left - nr.left) / cssPx, ddy = (o.top - nr.top) / cssPx;
                                 if (Math.abs(ddx) < 0.5 && Math.abs(ddy) < 0.5) continue;
                                 el.style.transition = "none";
                                 el.style.transform = "translate(" + ddx + "px," + ddy + "px)";
@@ -43233,7 +43680,8 @@
                         if (e.button !== 0) return;
                         e.stopPropagation();
                         var sx0 = e.clientX, sy0 = e.clientY, odx = _clDX, ody = _clDY, moved = false;
-                        var _scl = 1; try { var ctm = svg.getScreenCTM(); if (ctm && ctm.a) _scl = ctm.a; } catch (_e0) {}
+                        // attribute translate = user units; Safari omits the host zoom from getScreenCTM
+                        var _scl = 1; try { _scl = _gb2ViewScale(svg); } catch (_e0) {}
                         function mv(ev) {
                             if (!moved && (Math.abs(ev.clientX - sx0) + Math.abs(ev.clientY - sy0)) < 4) return;
                             moved = true; _clDragged = true;
@@ -43744,7 +44192,7 @@
                         height: isHoriz ? 9 : Math.abs(y2h - y1h),
                         fill: "transparent", style: "cursor:pointer;", "data-role": "likert-line-hit"
                     });
-                    var _hTip = svgEl("title", {}); _hTip.textContent = tipTxt; hit.appendChild(_hTip);
+                    var _hTip = svgEl("title", {}); _gb2SetSvgTextContent(_hTip, tipTxt); hit.appendChild(_hTip);
                     hit.addEventListener("mouseenter", function () {
                         lineEl.setAttribute("stroke", _gridHoverDarken(baseC));
                         lineEl.setAttribute("stroke-width", String(baseW + 0.6));
@@ -44076,11 +44524,10 @@
                                     ev.stopPropagation(); ev.preventDefault();
                                     if (lbl) {
                                         try {
-                                            var pt7 = svg.createSVGPoint();
-                                            pt7.x = ev.clientX; pt7.y = ev.clientY;
-                                            var m7 = svg.getScreenCTM();
-                                            if (m7) {
-                                                var sp7 = pt7.matrixTransform(m7.inverse());
+                                            // rect + view scale, not getScreenCTM (Safari omits the host zoom)
+                                            var r7 = svg.getBoundingClientRect(), vs7 = _gb2ViewScale(svg);
+                                            if (r7) {
+                                                var sp7 = { x: (ev.clientX - r7.left) / vs7, y: (ev.clientY - r7.top) / vs7 };
                                                 var vb7 = lbl.getBBox();
                                                 if (sp7.x >= vb7.x - 2 && sp7.x <= vb7.x + vb7.width + 2
                                                     && sp7.y >= vb7.y - 2 && sp7.y <= vb7.y + vb7.height + 2) {
@@ -44243,7 +44690,8 @@
                                 odx = (typeof data.likertLegendDX === "number") ? data.likertLegendDX : 0,
                                 ody = (typeof data.likertLegendDY === "number") ? data.likertLegendDY : 0,
                                 moved = false;
-                            var _scl = 1; try { var ctm = svg.getScreenCTM(); if (ctm && ctm.a) _scl = ctm.a; } catch (_e0) {}
+                            // attribute translate = user units; Safari omits the host zoom from getScreenCTM
+                            var _scl = 1; try { _scl = _gb2ViewScale(svg); } catch (_e0) {}
                             window.__gb2_lkLegDragged = false;
                             function mv(ev) {
                                 if (!moved && (Math.abs(ev.clientX - sx0) + Math.abs(ev.clientY - sy0)) < 4) return;
@@ -44335,8 +44783,12 @@
                     if (grabbedIdx < 0 || items.length < 2) return;
                     e.stopPropagation();
                     var startY = e.clientY, pid = e.pointerId, moved = false;
-                    var sy = 1;
-                    try { var ctm = svg.getScreenCTM(); if (ctm && ctm.d) sy = ctm.d; } catch (_e0) {}
+                    // sy: client px per USER unit (the slot math); u2c: user units
+                    // -> CSS px for style.transform; cssPx: client px per CSS px
+                    // (the FLIP). Measured once per gesture, not read off
+                    // getScreenCTM (Safari leaves the host zoom out of it).
+                    var sy = 1, cssPx = 1, u2c = 1;
+                    try { sy = _gb2ViewScale(svg); cssPx = _gb2CssPxScale(svg); u2c = sy / cssPx; } catch (_e0) {}
                     var rowEls = null, others = [], curSlot = grabbedIdx;
                     for (var i0 = 0; i0 < items.length; i0++)
                         if (items[i0] !== grabbed) others.push(items[i0]);
@@ -44362,7 +44814,7 @@
                             for (var q = 0; q < els.length; q++) {
                                 els[q].style.transition = "transform 170ms ease-out";
                                 els[q].style.transform = dy
-                                    ? "translate(0px," + dy + "px)" : "";
+                                    ? "translate(0px," + (dy * u2c) + "px)" : "";
                             }
                         }
                     }
@@ -44382,7 +44834,7 @@
                         if (dy > maxDy) dy = maxDy;
                         var ge = rowEls[grabbed] || [];
                         for (var i = 0; i < ge.length; i++)
-                            ge[i].style.transform = "translate(0px," + dy + "px)";
+                            ge[i].style.transform = "translate(0px," + (dy * u2c) + "px)";
                         var slot = grabbedIdx + Math.round(dy / rowSlotH);
                         if (slot < 0) slot = 0;
                         if (slot > items.length - 1) slot = items.length - 1;
@@ -44459,7 +44911,7 @@
                             if (!o) continue;
                             var nr;
                             try { nr = news[i].el.getBoundingClientRect(); } catch (_e12) { continue; }
-                            var ddy = (o.top - nr.top) / sy;
+                            var ddy = (o.top - nr.top) / cssPx;
                             if (Math.abs(ddy) < 0.5) continue;
                             var nb = news[i].el;
                             nb.style.transition = "none";
@@ -44592,8 +45044,8 @@
                     : (chartTop + _fcPadY + _fcFont);
                 var _fcMaxLen = 0;
                 for (var _fcm = 0; _fcm < _fcItems.length; _fcm++) {
-                    var _fcLen = _fcItems[_fcm].text.length
-                        + (_fcItems[_fcm].prefix ? _fcItems[_fcm].prefix.length + 2 : 0);
+                    var _fcLen = _gb2XmlSafeText(_fcItems[_fcm].text).length
+                        + (_fcItems[_fcm].prefix ? _gb2XmlSafeText(_fcItems[_fcm].prefix).length + 2 : 0);
                     if (_fcLen > _fcMaxLen) _fcMaxLen = _fcLen;
                 }
                 var _fcBgW = _fcMaxLen * _fcFont * 0.56 + 14;
@@ -44608,6 +45060,10 @@
                     try { el.style.cursor = "grab"; } catch (_eC) {}
                     var down = false, moved = false;
                     var startX = 0, startY = 0, startDX = 0, startDY = 0;
+                    // The pointer delta is VISUAL px while the plate offset
+                    // is a LOGICAL SVG length. Measured once per gesture;
+                    // exactly 1 in jamovi.
+                    var fcVS = 1;
                     // Swallow the browser-synthesized click after
                     // pointerup so the document-level outside-click
                     // handler can't tear the freshly-opened panel down
@@ -44617,6 +45073,7 @@
                         if (e.button !== 0) return;
                         e.preventDefault(); e.stopPropagation();
                         down = true; moved = false; _fcDragging = false;
+                        fcVS = _gb2ViewScale(svg || el);
                         startX = e.clientX; startY = e.clientY;
                         startDX = (typeof data.freqChisqDX === "number" && isFinite(data.freqChisqDX)) ? data.freqChisqDX : 0;
                         startDY = (typeof data.freqChisqDY === "number" && isFinite(data.freqChisqDY)) ? data.freqChisqDY : 0;
@@ -44632,7 +45089,7 @@
                         }
                         if (moved) {
                             _fcG.setAttribute("transform",
-                                "translate(" + (startDX + dx) + "," + (startDY + dy) + ")");
+                                "translate(" + (startDX + dx / fcVS) + "," + (startDY + dy / fcVS) + ")");
                         }
                     });
                     function _fcEnd(e) {
@@ -44641,8 +45098,8 @@
                         try { el.releasePointerCapture(e.pointerId); } catch (_eR) {}
                         try { el.style.cursor = "grab"; } catch (_eC3) {}
                         if (moved) {
-                            var ndx = Math.round(startDX + (e.clientX - startX));
-                            var ndy = Math.round(startDY + (e.clientY - startY));
+                            var ndx = Math.round(startDX + (e.clientX - startX) / fcVS);
+                            var ndy = Math.round(startDY + (e.clientY - startY) / fcVS);
                             data.freqChisqDX = ndx;
                             data.freqChisqDY = ndy;
                             if (hasSetOption) {
@@ -44745,7 +45202,7 @@
                         fill: "#333",
                         "data-role": "freq-chisq"
                     });
-                    _fcTxt.textContent = (_fcIt.prefix ? _fcIt.prefix + ": " : "") + _fcIt.text;
+                    _gb2SetSvgTextContent(_fcTxt, (_fcIt.prefix ? _fcIt.prefix + ": " : "") + _fcIt.text);
                     _fcWireDrag(_fcTxt);
                     _fcWireTip(_fcTxt, _fcIt.test);
                     _fcG.appendChild(_fcTxt);
@@ -44856,10 +45313,16 @@
                     var startCX = 0, startCY = 0;
                     var startOffX = 0, startOffY = 0;
                     var moved = false;
+                    // The pointer delta is VISUAL px while the legend offset
+                    // is a LOGICAL SVG length, so under the standalone
+                    // shell's view zoom the legend outran the cursor.
+                    // Measured once per gesture; exactly 1 in jamovi.
+                    var legVS = 1;
                     legBgRect.addEventListener("pointerdown", function (e) {
                         e.preventDefault(); e.stopPropagation();
                         legDraggingFlag.v = true;
                         moved = false;
+                        legVS = _gb2ViewScale(svg || legBgRect);
                         startCX = e.clientX; startCY = e.clientY;
                         startOffX = (typeof data.legendOffsetX === "number") ? data.legendOffsetX : 0;
                         startOffY = (typeof data.legendOffsetY === "number") ? data.legendOffsetY : 0;
@@ -44873,8 +45336,8 @@
                             moved = true;
                         }
                         if (!moved) return;
-                        var nx = snapDrag(startOffX + dx);
-                        var ny = snapDrag(startOffY + dy);
+                        var nx = snapDrag(startOffX + dx / legVS);
+                        var ny = snapDrag(startOffY + dy / legVS);
                         data.legendOffsetX = nx;
                         data.legendOffsetY = ny;
                         // Apply the persisted offset PLUS the chrome
@@ -45201,6 +45664,11 @@
                         var pdown = false;
                         var moved = false;
                         var sx = 0, sy = 0;
+                        // The pointer delta is VISUAL px while
+                        // legendItemOffsets are LOGICAL SVG lengths. One
+                        // measurement per gesture keeps the rows under the
+                        // cursor at any view zoom; exactly 1 in jamovi.
+                        var rowVS = 1;
                         var pdMulti = false;
                         var pdAlt = false;
                         // Snapshot of every row participating in this
@@ -45216,6 +45684,7 @@
                             moved = false;
                             pdMulti = !!(e.ctrlKey || e.metaKey);
                             pdAlt = !!e.altKey;
+                            rowVS = _gb2ViewScale(svg || rect);
                             sx = e.clientX; sy = e.clientY;
                             try { rect.setPointerCapture(e.pointerId); } catch (_e) {}
                             // If the user pressed without the modifier
@@ -45299,8 +45768,8 @@
                                         primary = dragItems[_pi]; break;
                                     }
                                 }
-                                var rawDx = primary.startDx + ddx;
-                                var rawDy = primary.startDy + ddy;
+                                var rawDx = primary.startDx + ddx / rowVS;
+                                var rawDy = primary.startDy + ddy / rowVS;
                                 // Pass the SWATCH rect to the snap
                                 // helper, not the row's <g>. Snap
                                 // peers are also other swatches, so
@@ -45872,12 +46341,11 @@
                     _wBadge.setAttribute("data-role", "gb2-range-warning");
                     var _wBadgeCss = [
                         "position:absolute",
-                        // Sits ~12 px from wrap's top-right. Wrap's
-                        // top is below the external toolbar (which
-                        // is wrap's sibling, not a child), so this
+                        // Sits ~12 px from wrap's top-right until the user
+                        // drags it. Wrap's top is below the external toolbar
+                        // (which is wrap's sibling, not a child), so this
                         // lands inside the chart's top margin.
-                        "top:12px",
-                        "right:12px",
+                    ].concat(_gb2RangeBadgePosCss()).concat([
                         "background:#fff3cd",
                         "border:1px solid #ffd97a",
                         "border-radius:" + (_wMini ? "999px" : "3px"),
@@ -45896,7 +46364,7 @@
                         "padding:" + (_wMini ? "2px 8px 2px 8px" : "3px 4px 3px 9px"),
                         "transition:padding 120ms ease, border-radius 120ms ease",
                         "white-space:nowrap"
-                    ].join(";");
+                    ]).join(";");
                     _wBadge.style.cssText = _wBadgeCss;
                     if (_wMini) {
                         // Compact: pill with "⚠ N", click anywhere
@@ -45952,6 +46420,7 @@
                         _wBadge.appendChild(_wMinBtn);
                     }
                     wrap.appendChild(_wBadge);
+                    _gb2WireRangeBadgeDrag(_wBadge);
                 }
             } catch (_obe) {}
 
@@ -46271,8 +46740,13 @@
         // collapse / pill expand) working — pointerup without
         // crossing the threshold falls through to whatever click
         // handler the original element had.
-        function _hpAttachBadgeDrag(badge, handle) {
+        function _hpAttachBadgeDrag(badge, handle, opts) {
             var DRAG_PX = 4;
+            // Defaults keep the hidden-points call byte-identical; the range
+            // warning passes its own window key and option names.
+            var _bdPosKey = (opts && opts.posKey) || "__gb2_hpBadgePos";
+            var _bdLeftOpt = (opts && opts.leftOpt) || "hpBadgeLeft";
+            var _bdTopOpt = (opts && opts.topOpt) || "hpBadgeTop";
             handle.addEventListener("pointerdown", function (e) {
                 if (e.button !== 0) return; // left button only
                 // Skip drag init when the user pressed a real
@@ -46293,6 +46767,11 @@
                 try { rect = badge.getBoundingClientRect(); } catch (_e) { return; }
                 var wrapRect;
                 try { wrapRect = wrap.getBoundingClientRect(); } catch (_e) { return; }
+                // Those rects and the cursor are VISUAL px while
+                // badge.style.left is LOGICAL, so the badge outran the
+                // cursor under the standalone shell's view zoom. Measured
+                // once per gesture; exactly 1 in jamovi.
+                var hpVS = _gb2ViewScale(svg || wrap);
                 // Cursor offset from badge top-left, in wrap coords.
                 var grabOffsetX = e.clientX - rect.left;
                 var grabOffsetY = e.clientY - rect.top;
@@ -46312,19 +46791,19 @@
                         badge.style.right = "auto";
                         badge.style.transition = "none";
                     }
-                    var newLeft = ev.clientX - wrapRect.left - grabOffsetX;
-                    var newTop  = ev.clientY - wrapRect.top  - grabOffsetY;
+                    var newLeft = (ev.clientX - wrapRect.left - grabOffsetX) / hpVS;
+                    var newTop  = (ev.clientY - wrapRect.top  - grabOffsetY) / hpVS;
                     // Clamp roughly inside the wrap so the badge
                     // can't be dragged completely out of view.
-                    var maxLeft = Math.max(0, wrapRect.width  - rect.width);
-                    var maxTop  = Math.max(0, wrapRect.height - rect.height);
+                    var maxLeft = Math.max(0, (wrapRect.width  - rect.width)  / hpVS);
+                    var maxTop  = Math.max(0, (wrapRect.height - rect.height) / hpVS);
                     if (newLeft < 0) newLeft = 0;
                     if (newLeft > maxLeft) newLeft = maxLeft;
                     if (newTop  < 0) newTop  = 0;
                     if (newTop  > maxTop)  newTop  = maxTop;
                     badge.style.left = newLeft + "px";
                     badge.style.top  = newTop + "px";
-                    window.__gb2_hpBadgePos = { left: newLeft, top: newTop };
+                    window[_bdPosKey] = { left: newLeft, top: newTop };
                 }
                 function _onUp(ev) {
                     document.removeEventListener("pointermove", _onMove, true);
@@ -46350,12 +46829,10 @@
                         // where the user left it. Goes through
                         // _setOption which the IIFE has access
                         // to; reuses the existing debounce window.
-                        if (window.__gb2_hpBadgePos && hasSetOption) {
+                        if (window[_bdPosKey] && hasSetOption) {
                             try {
-                                _setOption("hpBadgeLeft",
-                                    window.__gb2_hpBadgePos.left);
-                                _setOption("hpBadgeTop",
-                                    window.__gb2_hpBadgePos.top);
+                                _setOption(_bdLeftOpt, window[_bdPosKey].left);
+                                _setOption(_bdTopOpt, window[_bdPosKey].top);
                             } catch (_eSO) {}
                         }
                     }
@@ -46387,6 +46864,35 @@
         // click handlers. Defined here (outside redraw) so closures
         // captured at click time still resolve after subsequent
         // redraws have replaced the DOM.
+        // The out-of-range warning can land right on top of the data it is
+        // warning about, so it is draggable like the hidden-points badge and
+        // remembers where it was put (Torry, Sep 2026: "collapse it and then
+        // move it out of the way"). Both the render-time build and the
+        // collapse/expand refresh go through these, so the two copies of the
+        // badge cannot drift apart.
+        function _gb2RangeBadgePosCss() {
+            if (window.__gb2_rangeBadgePos === undefined) {
+                var _rl = (typeof data.rangeBadgeLeft === "number")
+                            ? data.rangeBadgeLeft : -1;
+                var _rt = (typeof data.rangeBadgeTop === "number")
+                            ? data.rangeBadgeTop : -1;
+                window.__gb2_rangeBadgePos = (_rl >= 0 && _rt >= 0)
+                    ? { left: _rl, top: _rt } : null;
+            }
+            var pos = window.__gb2_rangeBadgePos;
+            if (pos && typeof pos.left === "number" && typeof pos.top === "number")
+                return ["top:" + pos.top + "px", "left:" + pos.left + "px"];
+            return ["top:12px", "right:12px"];
+        }
+        function _gb2WireRangeBadgeDrag(badge) {
+            try {
+                _hpAttachBadgeDrag(badge, badge, {
+                    posKey: "__gb2_rangeBadgePos",
+                    leftOpt: "rangeBadgeLeft",
+                    topOpt: "rangeBadgeTop"
+                });
+            } catch (_eRd) {}
+        }
         function _gb2RefreshRangeWarning(count) {
             var oldB = wrap.querySelector('[data-role="gb2-range-warning"]');
             if (oldB && oldB.parentNode) oldB.parentNode.removeChild(oldB);
@@ -46399,7 +46905,8 @@
             var b = document.createElement("div");
             b.setAttribute("data-role", "gb2-range-warning");
             b.style.cssText = [
-                "position:absolute","top:12px","right:12px",
+                "position:absolute"
+            ].concat(_gb2RangeBadgePosCss()).concat([
                 "background:#fff3cd","border:1px solid #ffd97a",
                 "border-radius:" + (mini ? "999px" : "3px"),
                 "color:#856404","font:11px sans-serif",
@@ -46410,7 +46917,7 @@
                 "padding:" + (mini ? "2px 8px 2px 8px" : "3px 4px 3px 9px"),
                 "transition:padding 120ms ease, border-radius 120ms ease",
                 "white-space:nowrap"
-            ].join(";");
+            ]).join(";");
             if (mini) {
                 b.style.cursor = "pointer";
                 b.title = tipFull + " (Click to expand.)";
@@ -46453,6 +46960,7 @@
                 b.appendChild(btn);
             }
             wrap.appendChild(b);
+            _gb2WireRangeBadgeDrag(b);
         }
 
         applySize();
@@ -46462,6 +46970,215 @@
         // the user has selected. One element selectable at a time. Empty
         // state when nothing's selected. The text-edit popover and the
         // export popover stay popovers - the rest are migrated here.
+        // ---- Colour-control sizing (Sep 2026, Torry's standalone ask).
+        // The HSV picker is drawn as a fixed 184px column with a 96px
+        // gradient and the quick-pick chips are floored at 22px, all of
+        // which read as cramped inside a panel several times that wide.
+        // With the payload key panelFitControls the engine measures the
+        // panel the controls are actually in and gives them a bounded
+        // share of it. Every size travels as a CSS custom property whose
+        // markup FALLBACK is the constant it replaced, so a surface that
+        // never receives one (jamovi, which does not ship the key)
+        // renders exactly what it always did.
+        //
+        // The chip size is published as a NUMBER as well. The swatch rows
+        // compute their active-ring outline-offset in JS, and the two
+        // places that do it have to agree: reading it back off the
+        // RENDERED box measures the chip PLUS its border, which rounds a
+        // pixel wider than the markup once the chip grows, so the ring
+        // twitched on the first refresh after a color change.
+        function _gb2ChipPx() {
+            var n = window.__gb2_pfcChipPx;
+            // The ceiling mirrors the cap in _gb2FitPanelControls; a
+            // value from anywhere else is not to be trusted.
+            return (typeof n === "number" && n >= 22 && n <= 24) ? n : 22;
+        }
+        function _gb2ChipOutOff() {
+            return Math.max(2, Math.round(_gb2ChipPx() * 0.15));
+        }
+        function _gb2PanelFitOn() {
+            try { return !!(data && data.panelFitControls === true); }
+            catch (_ePf) { return false; }
+        }
+        // Recompute the sizes from the panel's own box and publish them.
+        // Idempotent and cheap: called when a selection renders, when the
+        // picker mounts, and by the panel observer.
+        function _gb2FitPanelControls() {
+            // Published on the HOST, not the panel. render() builds a
+            // fresh panel whose inline style starts empty, so a panel
+            // that owned these grew into them a frame after it appeared:
+            // the picker drew at its fallback size, the fit widened it,
+            // and the reveal's settle-watch read that growth as a reason
+            // to scroll (measured 31px of gratuitous motion on a second
+            // bar click). The host outlives every rebuild, and custom
+            // properties inherit, so the new panel starts at the right
+            // size and the fit below finds nothing to change.
+            var st = null;
+            try { st = host && host.style; } catch (_eFs) {}
+            if (!st) return;
+            if (!_gb2PanelFitOn()) {
+                // No key. Drop the properties so the markup's own
+                // fallbacks stand, and take the chip number with them, so
+                // a host that stops shipping the key is left with exactly
+                // the sizes it had before.
+                st.removeProperty("--gb2-pkr-w");
+                st.removeProperty("--gb2-pkr-basis");
+                st.removeProperty("--gb2-pkr-sv");
+                st.removeProperty("--gb2-pkr-strip");
+                st.removeProperty("--gb2-pkr-cell");
+                st.removeProperty("--gb2-chip");
+                window.__gb2_pfcChipPx = 0;
+                host.__gb2FitSig = "";
+                return;
+            }
+            // Measured off the BORDER box, less the panel's own 1px
+            // rules, because the panel is border-box with no padding of
+            // its own. Deliberately not clientWidth: that one drops by
+            // the width of a vertical scrollbar, and the panel scrolls
+            // inside itself under a height budget, so a taller picker
+            // could summon the bar, narrow the measurement, shrink the
+            // picker, dismiss the bar again. offsetWidth is the width
+            // _syncInspectorPanelGeometry wrote from the chart, which
+            // nothing inside the panel can move.
+            var avail = 0;
+            try {
+                // The width the panel is GIVEN, taken from the style
+                // _syncInspectorPanelGeometry just wrote, falling back to
+                // its measured box. Reading the panel's own offsetWidth
+                // alone meant the sizes could not be computed until a
+                // panel had been displayed, so the FIRST one opened at
+                // the fallback sizes and then grew into these, and the
+                // reveal's settle-watch scrolled to the taller box on the
+                // next click (measured 31px). Sizing from the width it is
+                // about to be given lets this run before anything opens.
+                var _pw = parseFloat(inspectorPanel.style.width) || 0;
+                if (!(_pw > 0)) _pw = inspectorPanel.offsetWidth || 0;
+                avail = Math.floor(_pw - 2);
+            } catch (_eFc) {}
+            // A hidden panel measures zero. Write nothing rather than a
+            // size computed from it: on a panel that has never been
+            // fitted the markup's own fallbacks are already standing, and
+            // on one that has, the last good fit beats a flicker down to
+            // the base sizes and back.
+            if (!(avail > 0)) return;
+            var W0 = 184, SV0 = 96, STRIP0 = 11, CELL0 = 13, CHIP0 = 22;
+            // The picker is docked BESIDE the controls, not under them,
+            // so every pixel it takes comes out of them: it gets a fixed
+            // 29% SHARE and the controls keep the remaining majority.
+            // The share is bounded by what the CONTROLS need, not by what
+            // the picker could use. Past about a third, their chip rows
+            // wrap onto an extra line, which makes the panel taller,
+            // which on a short window pushes it to its height cap and
+            // scrolls the workspace on the next click (measured at 38%:
+            // a 31px jump for no reason). 34 was the most it could take
+            // without moving anything else, and 29 is where Torry settled
+            // it by eye: a third of the growth rather than all of it.
+            // The floor is the 184px it has always been drawn at, so this
+            // can only grow it - and on a panel too narrow for the share
+            // to reach that, the floor wins and the split is exactly what
+            // it is today. The 320px ceiling is the gradient's 160px
+            // height cap doubled: past 2:1 the SV square stops being a
+            // square, and area is what it trades in.
+            var w = Math.max(W0, Math.min(320, Math.round(avail * 0.29)));
+            var r = w / W0;
+            // The room that is spare in this dock is HEIGHT, so the
+            // gradient grows with the panel's height budget rather than
+            // with its width. About a third of it: the rest of the picker
+            // column (tabs, strips, hex row, swatch grids) wants the
+            // remainder. The budget is the DECLARED cap, a share of the
+            // window - never the panel's rendered height, which the
+            // gradient is inside of and would feed back from. A host that
+            // asks for the fit without declaring a budget keeps the
+            // historical 96px, which is the honest answer.
+            var budget = _gb2PanelCapPx();
+            var sv = (budget > 0)
+                ? Math.max(SV0, Math.min(160, Math.round(budget * 0.28)))
+                : SV0;
+            // The strips and the swatch-grid cells span the column, so a
+            // wider column can carry chunkier ones - but they add HEIGHT,
+            // and height is the dimension the panel has a budget for. So
+            // they grow with the gradient's growth, not with the width:
+            // where the budget is tight the gradient does not grow and
+            // neither do these, and the picker's height is left alone.
+            // Growing them on width was measured pushing the picker past
+            // the panel's cap on a short window, which raised the host,
+            // raised the scroll reserve under it, and made a second bar
+            // click scroll the workspace 31px for no reason.
+            var hgrow = sv / SV0;
+            var strip = Math.min(16, Math.round(STRIP0 * hgrow));
+            var cell = Math.min(20, Math.round(CELL0 * hgrow));
+            // The chips do NOT grow. Their 22px edge and 3px gap are a
+            // settled ruling (Torry, Aug 3 2026: closer together but
+            // actually larger), the 25px centre spacing is what carries
+            // the target-size guidance, and swatch-row-check pins both.
+            // Growing them to 24 measured as a real regression there, and
+            // it bought nothing the picker itself does not: it is the
+            // gradient that was cramped. Kept as a value rather than
+            // removed so the property stays one dial if that ruling ever
+            // changes.
+            var chip = CHIP0;
+            // Nothing changed: leave the DOM alone, so the observer that
+            // called us cannot start a resize feedback loop. The stamp
+            // lives on the panel ELEMENT, not on window, because render()
+            // builds a fresh panel whose style block starts empty.
+            var sig = w + ":" + sv + ":" + strip + ":" + cell + ":" + chip;
+            if (host.__gb2FitSig === sig) return;
+            host.__gb2FitSig = sig;
+            st.setProperty("--gb2-pkr-w", w + "px");
+            // The bodyRow is a horizontal flex row, so the basis IS the
+            // width and the two have to agree.
+            st.setProperty("--gb2-pkr-basis", w + "px");
+            st.setProperty("--gb2-pkr-sv", sv + "px");
+            st.setProperty("--gb2-pkr-strip", strip + "px");
+            st.setProperty("--gb2-pkr-cell", cell + "px");
+            st.setProperty("--gb2-chip", chip + "px");
+            window.__gb2_pfcChipPx = chip;
+        }
+        // One panel observer per document, parked on window because
+        // render() rebuilds this scope on every echo: a closure-scoped
+        // observer would be abandoned - still firing into a dead render -
+        // once per run. Arming RELEASES first, which is what makes a host
+        // that stops shipping the key leave nothing behind.
+        //
+        // Observing the panel cannot run away, on two counts. Its inputs
+        // are the panel's border-box width, which
+        // _syncInspectorPanelGeometry writes in explicit pixels from the
+        // chart, and window.innerHeight; neither is something the picker
+        // sizes written here can move. And a resize we DO cause - the
+        // gradient changing the panel's content height - re-enters,
+        // recomputes the same numbers, and the signature guard returns
+        // without touching the DOM, so it settles in one pass.
+        //
+        // The window listener is not a fallback: the height budget is a
+        // share of the window, so it moves when the window does even if
+        // the panel's own box does not.
+        function _gb2UnwatchPanelControls() {
+            try {
+                var ro = window.__gb2_pfcRO;
+                if (ro && typeof ro.disconnect === "function") ro.disconnect();
+            } catch (_eRu) {}
+            window.__gb2_pfcRO = null;
+            try {
+                if (window.__gb2_pfcWinFit) {
+                    window.removeEventListener("resize", window.__gb2_pfcWinFit);
+                }
+            } catch (_eRw) {}
+            window.__gb2_pfcWinFit = null;
+        }
+        function _gb2WatchPanelControls() {
+            _gb2UnwatchPanelControls();
+            if (!_gb2PanelFitOn() || !inspectorPanel) return;
+            var fit = function () { try { _gb2FitPanelControls(); } catch (_eRf) {} };
+            try {
+                if (typeof ResizeObserver === "function") {
+                    var ro = new ResizeObserver(fit);
+                    ro.observe(inspectorPanel);
+                    window.__gb2_pfcRO = ro;
+                }
+            } catch (_eRo) {}
+            window.__gb2_pfcWinFit = fit;
+            try { window.addEventListener("resize", fit); } catch (_eRl) {}
+        }
         var inspectorPanel = document.createElement("div");
         inspectorPanel.style.cssText = [
             // Flush with the chart's bottom border (no gap, no top border)
@@ -46489,6 +47206,10 @@
         } else {
             host.appendChild(inspectorPanel);
         }
+        // Arm (or release) the observer that keeps the colour controls
+        // sized to the panel, once per render on the panel this render
+        // built.
+        _gb2WatchPanelControls();
         // Hidden initially so the chart sits clean until the user
         // makes a selection. renderInspectorPanel() handles the
         // animated reveal/hide on selection state changes.
@@ -46693,8 +47414,14 @@
             } catch (_e) {}
         }
         _syncInspectorPanelGeometry();
+        // Sizes before any panel opens, so the first one is built at its
+        // final size instead of growing into it a frame later.
+        try { _gb2FitPanelControls(); } catch (_eFp0) {}
         if (typeof requestAnimationFrame === "function") {
-            requestAnimationFrame(_syncInspectorPanelGeometry);
+            requestAnimationFrame(function () {
+                _syncInspectorPanelGeometry();
+                try { _gb2FitPanelControls(); } catch (_eFp1) {}
+            });
         }
         var _panelAnimTimer = null;
 
@@ -47402,7 +48129,13 @@
         // pixels relative to svg's content area).
         function _clientToSvg(clientX, clientY) {
             var rect = svg.getBoundingClientRect();
-            return { x: clientX - rect.left, y: clientY - rect.top };
+            // The rect is VISUAL px while the promise above is LOGICAL:
+            // callers compare this point against a centre measured
+            // through getCTM. Only the standalone shell's view zoom
+            // separates the two spaces, and it resolves to exactly 1
+            // everywhere else, so this divide is a no-op there.
+            var vs = _gb2ViewScale(svg);
+            return { x: (clientX - rect.left) / vs, y: (clientY - rect.top) / vs };
         }
 
         rhCircle.addEventListener("pointerdown", function (e) {
@@ -47474,11 +48207,18 @@
             pt.y = localBb.y + localBb.height / 2;
             var screen = pt.matrixTransform(screenCtm);
             var wrapBb = wrap.getBoundingClientRect();
+            // Two spaces meet here: localWidth / localHeight come from
+            // getBBox and are LOGICAL, while the screen point and the
+            // wrap rect are both VISUAL. The editor is an absolutely
+            // positioned child of the zoomed wrap, so its left / top are
+            // LOGICAL too - bring the centre into that same space or the
+            // box drifts off the label it edits. Exactly 1 in jamovi.
+            var vs = _gb2ViewScale(svg);
             return {
                 localWidth: localBb.width,
                 localHeight: localBb.height,
-                centerX: screen.x - wrapBb.left,
-                centerY: screen.y - wrapBb.top
+                centerX: (screen.x - wrapBb.left) / vs,
+                centerY: (screen.y - wrapBb.top) / vs
             };
         }
         function showInlineTextEditor(dragId, fallbackAnchor) {
@@ -47499,14 +48239,19 @@
                     var wrapBb = wrap.getBoundingClientRect();
                     var styleId0 = textStyleIdFor(dragId);
                     var s0 = getEffectiveTextStyle(styleId0);
+                    // Both rects are VISUAL, and everything below is fed
+                    // to the editor as a LOGICAL length inside the zoomed
+                    // wrap - the same conversion _measureInlineTextTarget
+                    // makes for the ordinary path. Exactly 1 in jamovi.
+                    var vs0 = _gb2ViewScale(svg);
                     meas = {
                         // Use the style's own font size as the bbox
                         // height so the editor's vertical size matches
                         // what the rendered title will look like.
-                        localWidth: Math.max(60, fbb.width * 0.6),
+                        localWidth: Math.max(60, (fbb.width / vs0) * 0.6),
                         localHeight: Math.max(s0.fontSize, 16),
-                        centerX: fbb.left - wrapBb.left + fbb.width / 2,
-                        centerY: fbb.top - wrapBb.top + fbb.height / 2
+                        centerX: (fbb.left - wrapBb.left + fbb.width / 2) / vs0,
+                        centerY: (fbb.top - wrapBb.top + fbb.height / 2) / vs0
                     };
                 }
             }
@@ -47533,6 +48278,10 @@
                     return;
                 }
                 if (!textEl) { input.value = ""; return; }
+                if (textEl.hasAttribute("data-gb2-raw-text")) {
+                    input.value = JSON.parse(textEl.getAttribute("data-gb2-raw-text"));
+                    return;
+                }
                 var tspans = textEl.querySelectorAll("tspan");
                 if (tspans.length > 1) {
                     var out = [];
@@ -48451,15 +49200,40 @@
             // is harmless.
             var _scopeHostKeep = titleNode.querySelector('[data-role="scope-title-host"]');
             if (_scopeHostKeep && _scopeHostKeep.parentNode) _scopeHostKeep.parentNode.removeChild(_scopeHostKeep);
+            // A breadcrumb title is a two-line ELEMENT, not text. Reading it
+            // back through textContent flattens the eyebrow and the title
+            // onto one line, and the title bar's own uppercase styling then
+            // makes it read "BAR CHARTDATA POINTS" (Torry, Sep 2026). Panels
+            // that re-attach title chrome AFTER the render tail built the
+            // crumb - the Data points tabs call this on every switch - must
+            // carry the crumb element across, the way the scope host is.
+            // Carry the whole title CELL (the direct child holding the crumb),
+            // not just the crumb: the builder also styles that cell to
+            // shrink first and keep a 16px gap from the Applies-to cluster,
+            // and a fresh span would lose both - the gap would close and a
+            // squeezed panel could overflow again after a tab switch.
+            var _crumbKeep = titleNode.querySelector('[data-role="gb2-crumb"]');
+            var _crumbCell = null;
+            if (_crumbKeep) {
+                _crumbCell = _crumbKeep;
+                while (_crumbCell.parentNode && _crumbCell.parentNode !== titleNode)
+                    _crumbCell = _crumbCell.parentNode;
+                if (_crumbCell.parentNode !== titleNode) _crumbCell = null;
+            }
+            if (_crumbCell) titleNode.removeChild(_crumbCell);
             var existingTitle = titleNode.textContent;
             titleNode.style.display = "flex";
             titleNode.style.alignItems = "center";
             titleNode.style.justifyContent = "space-between";
             titleNode.style.gap = "12px";
             titleNode.innerHTML = "";
-            var titleText = document.createElement("span");
-            titleText.textContent = existingTitle;
-            titleNode.appendChild(titleText);
+            if (_crumbCell) {
+                titleNode.appendChild(_crumbCell);
+            } else {
+                var titleText = document.createElement("span");
+                titleText.textContent = existingTitle;
+                titleNode.appendChild(titleText);
+            }
             if (_scopeHostKeep) titleNode.appendChild(_scopeHostKeep);
 
             var tint = opts.color || "#666";
@@ -49239,6 +50013,15 @@
             if (/^p \(/.test(s)) return "pAdj";
             return null;
         }
+        // A definition action must retain its visible label/value in the
+        // accessible name. Naming a numeric result only by its glossary term
+        // hides the result from screen readers and speech-input users.
+        function _stTermName(label, term) {
+            var visible = String(label == null ? "" : label).replace(/\s+/g, " ").trim();
+            var name = term.name;
+            return (visible && visible.toLowerCase() !== name.toLowerCase()
+                ? visible + ", " + name : (visible || name)) + ", definition";
+        }
         // Auto-wrap a plain-string _stTable header as a tap-to-define term when
         // its label matches a known concept; otherwise return the escaped label.
         function _stHeaderTerm(label) {
@@ -49249,7 +50032,7 @@
             if (!t) return _stEsc(s);
             var tip = t.name + (t.sym ? " (" + t.sym + ")" : "") + ": " + t.body;
             return '<span class="gb2-stterm" data-stterm="' + key + '" tabindex="0" role="button" aria-expanded="false" aria-label="' +
-                _stEsc(t.name).replace(/"/g, "&quot;") + ', definition" title="' +
+                _stEsc(_stTermName(s, t)).replace(/"/g, "&quot;") + '" title="' +
                 _stEsc(tip).replace(/"/g, "&quot;") + '">' + _stEsc(s) + '</span>';
         }
         var _GB_TYPE_BLURB = {
@@ -52358,7 +53141,13 @@
             var useMax = (gt === "box" || gt === "violin" || gt === "raincloud" ||
                           data.showDataPoints === true);
             var lo = Math.min(x1, x2) - 1, hi = Math.max(x1, x2) + 1;
-            var top = Infinity;
+            // "Ceiling" = the pixel just beyond the data. Vertically that is
+            // the SMALLEST y (the top); horizontally it is the LARGEST x (the
+            // right-hand end of the bars), so the comparison follows the axis.
+            var _hz = va && va.horizontal === true;
+            var _vpx = (va && typeof va.toPxVal === "function")
+                ? va.toPxVal : function (v2) { return va.toPxY(v2); };
+            var top = _hz ? -Infinity : Infinity;
             for (var i = 0; i < cells.length; i++) {
                 var cx = findBarCenterX({ cat: cells[i].cat, group: cells[i].group });
                 if (cx == null || cx < lo || cx > hi) continue;
@@ -52372,10 +53161,10 @@
                     v = b.mean + ((typeof b.se === "number" && isFinite(b.se)) ? b.se : 0);
                 }
                 if (!isFinite(v)) v = (typeof b.mean === "number") ? b.mean : 0;
-                var py = va.toPxY(v);
-                if (py < top) top = py;
+                var py = _vpx(v);
+                if (_hz ? (py > top) : (py < top)) top = py;
             }
-            return isFinite(top) ? top : va.toPxY(va.yMax);
+            return isFinite(top) ? top : _vpx(va.yMax);
         }
         // Re-capture a bracket's RELATIVE height from its current absolute
         // y (Torry, Aug 2 2026). Called wherever a gesture finishes moving
@@ -52384,7 +53173,6 @@
         function _bracketSyncYRel(ann) {
             try {
                 if (!ann || ann.kind !== "bracket") return;
-                if (data && data.chartOrientation === "horizontal") return;
                 var anchored = (ann.anchorLeftCat && ann.anchorRightCat) ||
                     _isMainEffectAnn(ann);
                 if (!anchored) return;
@@ -52393,7 +53181,8 @@
                 var c = _cmpCeilPx(_cmpVisibleCells(),
                     Math.min(ann.x, ann.x2), Math.max(ann.x, ann.x2), va);
                 if (isFinite(c) && typeof ann.y === "number" &&
-                    isFinite(ann.y)) ann.yRel = c - ann.y;
+                    isFinite(ann.y))
+                    ann.yRel = ((va && va.outward) || -1) * (ann.y - c);
             } catch (_eSyr) {}
         }
         // Remove placed (autoGen) brackets. restoreAxis = the USER
@@ -54147,7 +54936,7 @@
                 var tip = t.name + (t.sym ? " (" + t.sym + ")" : "") + ": " + t.body;
                 return '<span class="gb2-stterm" data-stterm="' + key +
                     '" tabindex="0" role="button" aria-expanded="false" aria-label="' +
-                    _stEsc(t.name).replace(/"/g, "&quot;") + ', definition" title="' +
+                    _stEsc(_stTermName(label, t)).replace(/"/g, "&quot;") + '" title="' +
                     _stEsc(tip).replace(/"/g, "&quot;") + '">' + esc + '</span>';
             }
             // Per-cell data-aware term: wraps an already-built value cell
@@ -54158,10 +54947,16 @@
                 if (!t) return displayHtml;
                 var tip = t.name + (t.sym ? " (" + t.sym + ")" : "") + ": " + t.body +
                     (hereText ? "  " + hereText : "");
+                // displayHtml already contains the formatted result. Read its
+                // text in an inert template so markup/entities are not spoken
+                // and the accessible value uses the same rounding as the UI.
+                var valueTemplate = document.createElement("template");
+                valueTemplate.innerHTML = displayHtml;
+                var valueLabel = valueTemplate.content.textContent || "";
                 return '<span class="gb2-stterm gb2-stcellterm" data-stterm="' + key + '"' +
                     (hereText ? ' data-sthere="' + _stEsc(hereText).replace(/"/g, "&quot;") + '"' : '') +
                     ' tabindex="0" role="button" aria-expanded="false" aria-label="' +
-                    _stEsc(t.name).replace(/"/g, "&quot;") + ', definition" title="' +
+                    _stEsc(_stTermName(valueLabel, t)).replace(/"/g, "&quot;") + '" title="' +
                     _stEsc(tip).replace(/"/g, "&quot;") + '">' + displayHtml + '</span>';
             }
             var html = "";
@@ -56711,7 +57506,7 @@
                     krow(mod + "+&#8592;&#8593;&#8595;&#8594;", "Move the selected bar, slice, item or series one step in its order.") +
                     krow(mod + "+A", "Select every annotation (then nudge, hide or duplicate them together).") +
                     krow(mod + "+F", "Open Find a setting; type a control, concept or statistical term, then use the arrow keys and Enter to open the result.") +
-                    krow("?", "Open this help panel.") +
+                    krow("?", "Open or close Help while the chart is focused.") +
                     krow("Tab &nbsp;/&nbsp; Shift+Tab", "Move between the toolbar buttons, the chart, and an open editor's controls.") +
                     krow("&#8592;&#8594; on the chart", "Step between sibling parts: bar series to bar series, slice to slice. A dashed outline marks the current one, and a screen reader announces it.") +
                     krow("&#8593;&#8595; or Tab on the chart", "Step between kinds of part: bars, axes, legend. Tab past the last kind moves on to the editor and toolbar.") +
@@ -56725,7 +57520,7 @@
                     ((host.closest && host.closest("jmv-results-svg") && data.svgHandoverExport === true)
                         ? dot('Right-click the chart to copy or export it; jamovi handles saving natively here.')
                         : dot('The <strong>export</strong> button in the toolbar saves the chart as SVG, PDF, PNG or JPG.')) +
-                    dot(kchip(mod + "+Z") + ' undoes any styling change; ' + kchip("Delete") + ' hides the selected element; ' + kchip("?") + ' opens this help panel.') +
+                    dot(kchip(mod + "+Z") + ' undoes any styling change; ' + kchip("Delete") + ' hides the selected element; ' + kchip("?") + ' opens this help panel while the chart is focused.') +
                   '</ul>';
             }
             // "Open the user guide" (Jul 2026): rendered only when the
@@ -57552,7 +58347,8 @@
             }
             if (skipPos) return null;
             var px = clientX, py = clientY;
-            try { var m = svg.getScreenCTM(); if (m) { var inv = m.inverse(); px = inv.a * clientX + inv.c * clientY + inv.e; py = inv.b * clientX + inv.d * clientY + inv.f; } } catch (_z) {}
+            // rect + view scale, not getScreenCTM (Safari omits the host zoom from it)
+            try { var _sr = svg.getBoundingClientRect(), _svs = _gb2ViewScale(svg); px = (clientX - _sr.left) / _svs; py = (clientY - _sr.top) / _svs; } catch (_z) {}
             var best = null, bestA = Infinity;
             for (i = 0; i < items.length; i++) { var bb = items[i].bb; if (!bb) continue; if (px >= bb.x && px <= bb.x + bb.w && py >= bb.y && py <= bb.y + bb.h) { var a = (bb.w || 1) * (bb.h || 1); if (a < bestA) { bestA = a; best = items[i].spec; } } }
             return best;
@@ -58395,9 +59191,11 @@
             g.addEventListener("pointerdown", function (e) {
                 if (e.button !== 0) return;
                 e.stopPropagation();
-                var m = null; try { m = svg.getScreenCTM(); } catch (_e) {}
+                // chip x/y are user units: client delta / view scale (Safari
+                // omits the host zoom from getScreenCTM)
+                var _vs = 1; try { _vs = _gb2ViewScale(svg); } catch (_e) {}
                 st = { cx: e.clientX, cy: e.clientY, ox: it.x, oy: it.y, moved: false,
-                       sa: (m && m.a) || 1, sd: (m && m.d) || 1, pid: e.pointerId };
+                       sa: _vs, sd: _vs, pid: e.pointerId };
                 try { g.setPointerCapture(e.pointerId); } catch (_e2) {}
                 try { g.style.cursor = "grabbing"; } catch (_e3) {}
             });
@@ -58697,7 +59495,7 @@
                     span.setAttribute("tabindex", "0");
                     span.setAttribute("role", "button");
                     span.setAttribute("aria-expanded", "false");
-                    span.setAttribute("aria-label", term.name + ", definition");
+                    span.setAttribute("aria-label", _stTermName(word, term));
                     span.textContent = word;
                     mid.parentNode.replaceChild(span, mid);
                     done[rule.key] = true;
@@ -58968,11 +59766,23 @@
 
             var wrap = document.createElement("span");
             wrap.setAttribute("data-role", "gb2-crumb");
-            wrap.style.cssText = "display:inline-flex;flex-direction:column;gap:1px;min-width:0;";
+            // The title bar is one no-wrap row: name left, the Applies-to
+            // cluster and the eye right. Flexbox squeezes this cell when the
+            // panel narrows, but an unclamped inline-flex box keeps painting
+            // at its natural width, so a long level name ran straight through
+            // the cluster (Torry, Sep 2026: 38px of overlap at a 900px
+            // window). Clamping to the cell is what finally engages the
+            // ellipsis the title line below already declares. Inert wherever
+            // there is room: an unsqueezed cell IS the name's natural width.
+            wrap.style.cssText = "display:inline-flex;flex-direction:column;gap:1px;" +
+                "min-width:0;max-width:100%;overflow:hidden;";
             var eb = document.createElement("span");
             eb.textContent = eyebrow;
+            // Clip the eyebrow too: left free it wraps to a second line under
+            // the clamp and grows the bar instead of truncating.
             eb.style.cssText = "font:700 9px var(--gb2-ui-font);letter-spacing:.12em;" +
-                "text-transform:uppercase;color:#626d7b;";
+                "text-transform:uppercase;color:#626d7b;" +
+                "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
             var tt = document.createElement("span");
             tt.textContent = titleText;
             tt.style.cssText = "font:600 12.5px var(--gb2-ui-font);letter-spacing:0;" +
@@ -59082,6 +59892,10 @@
                 inspectorPanel.removeChild(inspectorPanel.firstChild);
             }
             inspectorPanel.style.display = "";
+            // Displayed, so the panel can be measured: size the colour
+            // controls BEFORE the section markup below is composed, since
+            // the swatch rows read the chip size while building it.
+            try { _gb2FitPanelControls(); } catch (_ePfc) {}
             // Inline section title - no popup header bar, no × button.
             // Press Escape, click outside, or click another element to
             // close. The title sits above a thin underline; controls
@@ -63913,7 +64727,11 @@
             var _ebIsMedian = (String(data.summaryFunc) === "median");
             function _ebChoiceBtn(attr, val, label, cur, tip) {
                 var on = (String(cur) === String(val));
-                return '<button type="button" ' + attr + '="' + val + '" title="' + tip + '" style="' + [
+                // Stable identity lets the existing focus keeper restore the
+                // exact choice after both local redraws and jamovi HTML echoes.
+                return '<button type="button" data-field="' + attr.slice(5) + '-' + val +
+                    '" aria-pressed="' + (on ? "true" : "false") +
+                    '" ' + attr + '="' + val + '" title="' + tip + '" style="' + [
                     "display:inline-flex", "align-items:center", "padding:4px 10px",
                     "background:" + (on ? "#e8f0fb" : "white"),
                     "color:" + (on ? "#1a5fb4" : "#333"),
@@ -64173,6 +64991,7 @@
                 function repaint(v) {
                     for (var j = 0; j < btns.length; j++) {
                         var on = btns[j].getAttribute(attr) === v;
+                        btns[j].setAttribute("aria-pressed", on ? "true" : "false");
                         btns[j].style.background = on ? "#e8f0fb" : "white";
                         btns[j].style.color = on ? "#1a5fb4" : "#333";
                         btns[j].style.borderColor = on ? "#1a5fb4" : "#ccc";
@@ -64828,12 +65647,12 @@
                     html += '<button type="button" data-bs-palette="transparent" ' +
                         'data-bs-palette-target="' + target + '" ' +
                         'title="Transparent (hollow bar – no fill)" aria-label="Transparent" ' +
-                        'style="width:22px;height:22px;padding:0;border:' +
+                        'style="width:var(--gb2-chip, 22px);height:var(--gb2-chip, 22px);padding:0;border:' +
                         (_tbOn ? "2px solid #1a5fb4" : "1px solid #888") + ';' +
                         'border-radius:3px;cursor:pointer;flex-shrink:0;background-color:#fff;' +
                         'background-image:linear-gradient(45deg,#cfcfcf 25%,transparent 25%),linear-gradient(-45deg,#cfcfcf 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#cfcfcf 75%),linear-gradient(-45deg,transparent 75%,#cfcfcf 75%);' +
                         'background-size:8px 8px;background-position:0 0,0 4px,4px -4px,-4px 0;' +
-                        (_tbOn ? "outline:1px solid white;outline-offset:-3px;" : "") +
+                        (_tbOn ? "outline:1px solid white;outline-offset:-" + _gb2ChipOutOff() + "px;" : "") +
                         '"></button>';
                 }
                 // Series-identity rows (the FILL color) use the hybrid
@@ -64853,9 +65672,9 @@
                         'data-bs-palette="' + c + '" ' +
                         'data-bs-palette-target="' + target + '" ' +
                         'title="' + c + '" ' +
-                        'style="width:22px;height:22px;padding:0;border:' + border + ';' +
+                        'style="width:var(--gb2-chip, 22px);height:var(--gb2-chip, 22px);padding:0;border:' + border + ';' +
                         'border-radius:3px;cursor:pointer;background:' + c + ';flex-shrink:0;' +
-                        (isActive ? "outline:1px solid white;outline-offset:-3px;" : "") +
+                        (isActive ? "outline:1px solid white;outline-offset:-" + _gb2ChipOutOff() + "px;" : "") +
                         '"></button>';
                 }
                 html += '</span>';
@@ -65873,7 +66692,9 @@
                 && data.graphType === "bar" && hasGroups;
             function _bsChoiceBtn(attr, val, label, cur, tip) {
                 var on = (String(cur) === String(val));
-                return '<button type="button" ' + attr + '="' + val + '" title="' + tip + '" style="' + [
+                return '<button type="button" data-field="' + attr.slice(5) + '-' + val +
+                    '" aria-pressed="' + (on ? "true" : "false") +
+                    '" ' + attr + '="' + val + '" title="' + tip + '" style="' + [
                     "display:inline-flex", "align-items:center", "padding:4px 10px",
                     "background:" + (on ? "#e8f0fb" : "white"),
                     "color:" + (on ? "#1a5fb4" : "#333"),
@@ -66223,7 +67044,19 @@
                     (function (btn) {
                         btn.addEventListener("click", function (e) {
                             e.preventDefault();
+                            var hadFocus = document.activeElement === btn;
                             apply(btn.getAttribute(attr));
+                            // Orientation rebuilds this panel synchronously;
+                            // other choices use the render-entry focus keeper.
+                            var active = document.activeElement;
+                            if (hadFocus && !btn.isConnected &&
+                                (!active || active === document.body || active === document.documentElement)) {
+                                var replacement = inspectorPanel.querySelector(
+                                    '[data-field="' + btn.getAttribute("data-field") + '"]');
+                                if (replacement) {
+                                    try { replacement.focus({ preventScroll: true }); } catch (_eFocus) {}
+                                }
+                            }
                         });
                     })(btns[i]);
                 }
@@ -66981,7 +67814,7 @@
                         : (c === "#ffffff" ? "1px solid #ccc" : "1px solid #888");
                     b.style.border = border;
                     b.style.outline = active ? "1px solid white" : "";
-                    b.style.outlineOffset = active ? "-3px" : "";
+                    b.style.outlineOffset = active ? ("-" + _gb2ChipOutOff() + "px") : "";
                 }
             }
             // Wire palette swatch clicks. Two flavors: fill-chip
@@ -71313,7 +72146,7 @@
                     // Keep the renderer's closure lookup in sync so the
                     // shared redraw() below reflects the change at once
                     // (mirrors _commitHiddenFacets).
-                    _hiddenFacets = {};
+                    _hiddenFacets = Object.create(null);
                     for (var _hf2 = 0; _hf2 < farr.length; _hf2++) _hiddenFacets[farr[_hf2]] = true;
                     if (hasSetOption) {
                         try { _setOption("hiddenFacets", farr); } catch (_e) {}
@@ -76186,7 +77019,7 @@
                     // hidden (or unhidden) — without this the eye
                     // click only took effect 1.5–10 s later when
                     // R round-tripped and the panel rebuilt.
-                    _hiddenFacets = {};
+                    _hiddenFacets = Object.create(null);
                     for (var i = 0; i < newHidden.length; i++) {
                         _hiddenFacets[newHidden[i]] = true;
                     }
@@ -76663,7 +77496,7 @@
                     html += '<button type="button" data-ps-palette="transparent" ' +
                         'data-ps-palette-target="' + target + '" ' +
                         'title="Transparent (hollow marker – no fill)" aria-label="Transparent" ' +
-                        'style="width:22px;height:22px;padding:0;border:' +
+                        'style="width:var(--gb2-chip, 22px);height:var(--gb2-chip, 22px);padding:0;border:' +
                         (_tOn ? "2px solid #1a5fb4" : "1px solid #888") + ';' +
                         'border-radius:3px;cursor:pointer;flex-shrink:0;background-color:#fff;' +
                         // Universal "transparent" checkerboard (gray/white),
@@ -76675,7 +77508,7 @@
                           'linear-gradient(-45deg,transparent 75%,#cfcfcf 75%);' +
                         'background-size:8px 8px;' +
                         'background-position:0 0,0 4px,4px -4px,-4px 0;' +
-                        (_tOn ? "outline:1px solid white;outline-offset:-3px;" : "") +
+                        (_tOn ? "outline:1px solid white;outline-offset:-" + _gb2ChipOutOff() + "px;" : "") +
                         '"></button>';
                 }
                 var _rowCols = (target === "p-color") ? _hybridPaletteCols() : PICKER_PALETTE;
@@ -76689,9 +77522,9 @@
                         'data-ps-palette="' + c + '" ' +
                         'data-ps-palette-target="' + target + '" ' +
                         'title="' + c + '" ' +
-                        'style="width:22px;height:22px;padding:0;border:' + border + ';' +
+                        'style="width:var(--gb2-chip, 22px);height:var(--gb2-chip, 22px);padding:0;border:' + border + ';' +
                         'border-radius:3px;cursor:pointer;background:' + c + ';flex-shrink:0;' +
-                        (isActive ? "outline:1px solid white;outline-offset:-3px;" : "") +
+                        (isActive ? "outline:1px solid white;outline-offset:-" + _gb2ChipOutOff() + "px;" : "") +
                         '"></button>';
                 }
                 html += '</span>';
@@ -76710,7 +77543,7 @@
                         : (c === "#ffffff" ? "1px solid #ccc" : "1px solid #888");
                     b.style.border = border;
                     b.style.outline = active ? "1px solid white" : "";
-                    b.style.outlineOffset = active ? "-3px" : "";
+                    b.style.outlineOffset = active ? ("-" + _gb2ChipOutOff() + "px") : "";
                 }
             }
 
@@ -77773,9 +78606,9 @@
                     html += '<button type="button" ' +
                         'data-fl-palette="' + c + '" ' +
                         'title="' + c + '" ' +
-                        'style="width:22px;height:22px;padding:0;border:' + border + ';' +
+                        'style="width:var(--gb2-chip, 22px);height:var(--gb2-chip, 22px);padding:0;border:' + border + ';' +
                         'border-radius:3px;cursor:pointer;background:' + c + ';flex-shrink:0;' +
-                        (isActive ? "outline:1px solid white;outline-offset:-3px;" : "") +
+                        (isActive ? "outline:1px solid white;outline-offset:-" + _gb2ChipOutOff() + "px;" : "") +
                         '"></button>';
                 }
                 html += '</span>';
@@ -77793,7 +78626,7 @@
                         : (c === "#ffffff" ? "1px solid #ccc" : "1px solid #888");
                     b.style.border = border;
                     b.style.outline = active ? "1px solid white" : "";
-                    b.style.outlineOffset = active ? "-3px" : "";
+                    b.style.outlineOffset = active ? ("-" + _gb2ChipOutOff() + "px") : "";
                 }
             }
 
@@ -78086,7 +78919,7 @@
                     var cl = (typeof data.xyCILevel === "number" && data.xyCILevel > 0 && data.xyCILevel < 1) ? data.xyCILevel : 0.95;
                     var ls = (typeof data.xyLoessSpan === "number" && data.xyLoessSpan > 0) ? data.xyLoessSpan : 0.75;
                     var cf = _xyComputeFitsClient(ft, cl, ls);
-                    if (cf) data.xyFits = cf;
+                    data.xyFits = cf || [];
                     // Stamp the time-window guard so the render-entry
                     // guard holds this fit over any out-of-order stale
                     // echo until R catches up (kills the revert flash).
@@ -85074,7 +85907,8 @@
                 sx = e.clientX; sy = e.clientY;
                 var off = textOffsets[dragId] || { dx: 0, dy: 0 };
                 odx = off.dx; ody = off.dy;
-                scl = 1; try { var ctm = svg.getScreenCTM(); if (ctm && ctm.a) scl = ctm.a; } catch (_e0) {}
+                // textOffsets are user units; Safari omits the host zoom from getScreenCTM
+                scl = 1; try { scl = _gb2ViewScale(svg); } catch (_e0) {}
                 try { el.setPointerCapture(e.pointerId); } catch (_e1) {}
             });
             el.addEventListener("pointermove", function (e) {
@@ -85929,8 +86763,10 @@
                 var _rm = false;
                 try { _rm = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches); } catch (_eRm) {}
                 if (_rm) return;
+                // client px per CSS px written to style.transform (measured;
+                // Safari omits the host zoom from getScreenCTM)
                 var sy = 1;
-                try { if (svg && svg.getScreenCTM) { var ctm = svg.getScreenCTM(); if (ctm && ctm.d) sy = ctm.d; } } catch (_e) {}
+                try { if (svg) sy = _gb2CssPxScale(svg); } catch (_e) {}
                 var seen = {}, els = dataGroup.querySelectorAll("[data-item]"), fresh = [];
                 for (var i = 0; i < els.length; i++) {
                     var el = els[i];
@@ -95979,6 +96815,10 @@
                 }
                 var textEl = editableElsByDragId[id];
                 if (!textEl) { iTextContent.value = ""; return; }
+                if (textEl.hasAttribute("data-gb2-raw-text")) {
+                    iTextContent.value = JSON.parse(textEl.getAttribute("data-gb2-raw-text"));
+                    return;
+                }
                 var tspans = textEl.querySelectorAll("tspan");
                 if (tspans.length > 1) {
                     var out = [];
@@ -98149,16 +98989,26 @@
                 var op = findMenu.offsetParent;
                 if (!op) return;
                 var or = op.getBoundingClientRect(), br = findBtn.getBoundingClientRect();
-                var vw = window.innerWidth || document.documentElement.clientWidth || 800;
-                var width = Math.min(360, Math.max(260, Math.min(vw - 16, or.width > 0 ? or.width - 12 : 360)));
+                // Every rect here, and the viewport size, is in VISUAL
+                // pixels, while the width / left / max-height written below
+                // are LOGICAL: this menu hangs in the zoomed chart wrap, not
+                // in the counter-zoomed toolbar. Convert the measurements
+                // once so the whole calculation happens in one space and the
+                // px constants keep meaning what they say. Exactly 1 in
+                // jamovi, which applies no zoom.
+                var _fpS = _gb2ViewScale(svg);
+                var _orW = or.width / _fpS, _orL = or.left / _fpS;
+                var _brR = br.right / _fpS, _orT = or.top / _fpS;
+                var vw = (window.innerWidth || document.documentElement.clientWidth || 800) / _fpS;
+                var width = Math.min(360, Math.max(260, Math.min(vw - 16, _orW > 0 ? _orW - 12 : 360)));
                 findMenu.style.width = width + "px";
-                var viewportLeft = Math.max(8, Math.min(vw - width - 8, br.right - width));
-                findMenu.style.left = Math.round(viewportLeft - or.left) + "px";
+                var viewportLeft = Math.max(8, Math.min(vw - width - 8, _brR - width));
+                findMenu.style.left = Math.round(viewportLeft - _orL) + "px";
                 findMenu.style.right = "auto";
                 var gtFly = wrap.querySelector('[data-role="graphtype-flyout"]');
                 findMenu.style.top = (gtFly && gtFly.style && gtFly.style.top) ? gtFly.style.top : "6px";
-                var vh = window.innerHeight || document.documentElement.clientHeight || 700;
-                var topV = or.top + (parseFloat(findMenu.style.top) || 6);
+                var vh = (window.innerHeight || document.documentElement.clientHeight || 700) / _fpS;
+                var topV = _orT + (parseFloat(findMenu.style.top) || 6);
                 findResults.style.maxHeight = Math.max(150, Math.min(300, vh - topV - 72)) + "px";
             } catch (_e) {}
         }
@@ -98579,15 +99429,21 @@
             note.title = note.title + " -- drag to move.";
             (function () {
                 var down = false, moved = false, sx = 0, sy = 0, sLeft = 0, sTop = 0;
+                // Both rects and the cursor are VISUAL px while
+                // note.style.left is LOGICAL, so the pill ran ahead of the
+                // cursor under the standalone shell's view zoom. Measured
+                // once per gesture; exactly 1 in jamovi.
+                var fpnVS = 1;
                 note.addEventListener("pointerdown", function (e) {
                     if (e.button !== 0) return;
                     if (e.target && e.target.closest && e.target.closest("button")) return;
                     e.preventDefault(); e.stopPropagation();
                     down = true; moved = false;
+                    fpnVS = _gb2ViewScale(svg || wrap);
                     sx = e.clientX; sy = e.clientY;
                     var r = note.getBoundingClientRect();
                     var wr0 = wrap.getBoundingClientRect();
-                    sLeft = r.left - wr0.left; sTop = r.top - wr0.top;
+                    sLeft = (r.left - wr0.left) / fpnVS; sTop = (r.top - wr0.top) / fpnVS;
                     note.style.cursor = "grabbing";
                     try { note.setPointerCapture(e.pointerId); } catch (_eC) {}
                 });
@@ -98597,9 +99453,9 @@
                     if (!moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
                     moved = true;
                     var wr1 = wrap.getBoundingClientRect();
-                    var nl = sLeft + dx, nt = sTop + dy;
-                    nl = Math.max(0, Math.min(nl, Math.max(0, wr1.width - note.offsetWidth)));
-                    nt = Math.max(0, Math.min(nt, Math.max(0, wr1.height - note.offsetHeight)));
+                    var nl = sLeft + dx / fpnVS, nt = sTop + dy / fpnVS;
+                    nl = Math.max(0, Math.min(nl, Math.max(0, wr1.width / fpnVS - note.offsetWidth)));
+                    nt = Math.max(0, Math.min(nt, Math.max(0, wr1.height / fpnVS - note.offsetHeight)));
                     note.style.left = nl + "px"; note.style.top = nt + "px";
                 });
                 function _fpnUp() {
@@ -102520,15 +103376,19 @@
             e.stopPropagation();
             setInspectorSelection(selsAll.length === 1 ? selsAll[0] : selsAll);
         }, true);
-        // "?" toggles the Help cheat sheet (the toolbar "?" button's
-        // panel) - the Gmail/GitHub convention. Typing "?" in any text
-        // field is untouched.
+        // "?" toggles Help only while this chart component has focus.
+        // The document listener also sees the standalone shell and other
+        // results controls; neither may activate a character-only shortcut.
+        // Composition and native text/selection input remain untouched.
         onDoc("keydown", function (e) {
             if (e.key !== "?") return;
-            if (e.ctrlKey || e.metaKey || e.altKey) return;
+            if (e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented ||
+                e.isComposing || e.keyCode === 229) return;
             var t = e.target;
-            if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" ||
-                      t.tagName === "SELECT" || t.isContentEditable)) return;
+            if (!t || !host.contains(t) ||
+                !host.contains(document.activeElement)) return;
+            if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" ||
+                t.tagName === "SELECT" || t.isContentEditable) return;
             e.preventDefault();
             e.stopPropagation();
             var curH = (inspector && inspector.selection) || [];
@@ -102973,6 +103833,11 @@
         var startMouseX = 0, startMouseY = 0;
         var startInchesW = inchesW, startInchesH = inchesH;
         var startRatioXY = 0; // inchesH / inchesW captured at drag start
+        // The pointer delta is VISUAL px while PX_PER_INCH is the chart's
+        // LOGICAL px per inch, so the figure grew faster than the corner the
+        // hand was holding under the standalone shell's view zoom. Measured
+        // once per gesture; exactly 1 in jamovi.
+        var gripVS = 1;
         function _sizeTagShow() {
             if (sizeTagHide) { clearTimeout(sizeTagHide); sizeTagHide = null; }
             // inches on top (continuity with the Sizing panel, where the
@@ -102995,6 +103860,7 @@
         function onPointerDownXY(e) {
             e.preventDefault(); e.stopPropagation();
             draggingXY = true;
+            gripVS = _gb2ViewScale(svg || wrap);
             startMouseX = e.clientX; startMouseY = e.clientY;
             startInchesW = inchesW; startInchesH = inchesH;
             startRatioXY = (inchesW > 0) ? (inchesH / inchesW) : 1;
@@ -103007,8 +103873,8 @@
             if (!draggingXY) return;
             var dx = e.clientX - startMouseX;
             var dy = e.clientY - startMouseY;
-            var newW = clamp(startInchesW + dx / PX_PER_INCH, MIN_W_IN, MAX_W_IN);
-            var newH = clamp(startInchesH + dy / PX_PER_INCH, MIN_H_IN, MAX_H_IN);
+            var newW = clamp(startInchesW + dx / gripVS / PX_PER_INCH, MIN_W_IN, MAX_W_IN);
+            var newH = clamp(startInchesH + dy / gripVS / PX_PER_INCH, MIN_H_IN, MAX_H_IN);
             // Shift = momentary aspect lock (same math as the Sizing
             // panel's persistent chartAspectLock checkbox): the dominant
             // pointer axis drives, the other follows the grab-time ratio.
@@ -105432,14 +106298,12 @@
     // that render simply rebuilds - self-correcting by construction.
     // Kill switch: localStorage["graphbuilder2.panelPreview"]="off".
     // ---- Client-side stat mirrors for the summaryFunc / errorBarType
-    // panel preview (Compare Groups + Repeated Measures). The payload's
-    // numerics arrive rounded to 10 SIGNIFICANT digits (widget.R ships
-    // jsonlite digits = I(10)), so predictions are re-rounded the same
-    // way: the R echo then usually hashes identical and is skipped, and
-    // when a boundary case rounds differently the echo just re-renders
-    // under the instant hard-cut mask (self-correcting, sub-pixel
-    // difference).
-    function _gb2SigR(x) { return (typeof x === "number" && isFinite(x)) ? Number(x.toPrecision(10)) : x; }
+    // panel preview (Compare Groups + Repeated Measures). Preserve the full
+    // double in observations AND derived values, just as widget.R does.
+    // Independent R/JS calculations may differ by a few floating-point bits;
+    // the authoritative echo then performs its normal corrective render.
+    // Never quantize statistical input merely to force an echo hash match.
+    function _gb2SigR(x) { return x; } // legacy internal call sites
     function _gb2MedianOf(v) {
         // R stats::median semantics: even n averages the two middles.
         var a = v.slice().sort(function (x, y) { return x - y; });
@@ -105502,7 +106366,6 @@
     function _gb2RmMean(a){ var s=0,n=a.length,i=0; for(;i<n;i++) s+=a[i]; return n?s/n:0; }
     function _gb2RmSd(a){ var n=a.length; if(n<2) return 0; var m=_gb2RmMean(a),s=0,i=0; for(;i<n;i++){var d=a[i]-m; s+=d*d;} return Math.sqrt(s/(n-1)); }
     function _gb2RmMedian(a){ var b=a.slice().sort(function(x,y){return x-y;}),n=b.length; if(!n) return 0; return (n%2)?b[(n-1)/2]:(b[n/2-1]+b[n/2])/2; }
-    function _gb2SigR(x){ return (typeof x==="number"&&isFinite(x))?Number(x.toPrecision(10)):x; }
     function _gb2RmRepivot(data, roleMap) {
         try {
             var pf = data.pivotFactors, obs = data.pivotObs;
@@ -106802,5 +107665,7 @@
         });
     }
 
-    root.GraphBuilder2 = { render: render };
+    root.GraphBuilder2 = { render: render,
+        xmlSafeText: _gb2XmlSafeText,
+        prepareSvgForExport: _gb2PrepareSvgForExport };
 })(typeof window !== "undefined" ? window : this);

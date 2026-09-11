@@ -36,11 +36,15 @@ t_ <- rep(c("café", "  padded  text ", "naïve", "A,B", "NA", "plain"),
 t2 <- rep(c("Mixed Case", "abc", "XYZ", "NA", "lower UPPER", "x"),
           length.out = length(a))
 n <- length(a)
+tiny <- rep(1e-6, n)
+# Stay within R's usable covariance range: sd(rep(double.xmax, n)) itself
+# overflows on this runtime. The exact maximum is checked analytically in
+# formula-unit-check through the constant-sample identity instead.
+huge <- rep(1e306, n)
 stopifnot(length(b) == n, length(c_) == n)
 
-# Values pass through the app's grid as text and back; keep them at the
-# 10-significant-digit precision the payload convention ships.
-a <- signif(a, 10); b <- signif(b, 10); c_ <- signif(c_, 10)
+# Preserve source doubles in the reference file; computed columns retain
+# their full precision, independent of chart payload/display rounding.
 
 fin <- function(v) ifelse(is.finite(v), v, NA_real_)
 num_or_na <- function(v) ifelse(is.na(v), NA_real_, v)
@@ -159,6 +163,32 @@ cases <- list(
 # the placeholder above kept list order readable).
 cases[[5]] <- list(f = "EXP(b / 4)", e = fin(exp(b / 4)))
 
+# Constant columns must have zero spread, including the z-score's undefined
+# denominator. An amplified row-mean residual catches repeated-addition drift.
+for (column in c("tiny", "huge")) {
+    v <- get(column)
+    row_mean <- paste0("MEAN(", paste(rep(column, 47), collapse = ","), ")")
+    cases <- c(cases, list(
+        list(f = paste0("VMEAN(", column, ")"), e = rep(mean(v), n)),
+        list(f = paste0("VSD(", column, ")"), e = rep(sd(v), n)),
+        list(f = paste0("(", column, " - VMEAN(", column, ")) / VSD(", column, ")"),
+             e = fin((v - mean(v)) / sd(v))),
+        list(f = row_mean, e = rep(mean(rep(v[[1]], 47)), n)),
+        list(f = paste0("(", row_mean, " - ", column, ") * 1e20"), e = rep(0, n))
+    ))
+}
+
+# Extreme ROUND inputs must not turn underflow/overflow into a plausible
+# unchanged number. Constants are spelled exactly as their formula inputs.
+for (xtext in c("1", "-1", "2.675", "-2.675", "1e-310", "-1.23456789e-310",
+                "5e-324", "1e308", "-1e308", "1.2345678901234567")) {
+    for (d in c(-310, -309, -308.5, -308, -307, -1.5, -1, 0, 2, 15, 307, 308, 309, 310, 322, 323, 324)) {
+        cases[[length(cases) + 1L]] <- list(
+            f = sprintf("ROUND(%s, %s)", xtext, format(d, scientific = FALSE)),
+            e = rep(round(as.numeric(xtext), d), n))
+    }
+}
+
 # Negative cases: the compiler must refuse, creating no column.
 errors <- c("MEAN(a)", "NOPESUCHFN(a)", "VMEAN(a + b)", "a +")
 
@@ -168,7 +198,8 @@ esc <- function(s) {
 }
 jnum <- function(v) {
     vapply(v, function(x) {
-        if (is.na(x)) "null" else sprintf("%.15g", as.numeric(x))
+        if (is.infinite(x)) stop("infinite reference requires an explicit non-finite/missing rule")
+        if (is.na(x)) "null" else sprintf("%.17g", as.numeric(x))
     }, "")
 }
 jstr <- function(v) {
@@ -189,11 +220,11 @@ case_json <- vapply(seq_along(cases), function(i) {
 }, "")
 json <- sprintf(paste0(
     '{"seed":%d,"n":%d,',
-    '"columns":{"a":%s,"b":%s,"c":%s,"t":%s,"t2":%s},',
+    '"columns":{"a":%s,"b":%s,"c":%s,"t":%s,"t2":%s,"tiny":%s,"huge":%s},',
     '"cases":[%s],"errors":[%s]}'),
     seed, n,
     jarr(a), jarr(b), jarr(c_),
-    jarr(t_), jarr(t2),
+    jarr(t_), jarr(t2), jarr(tiny), jarr(huge),
     paste(case_json, collapse = ","),
     paste(sprintf('"%s"', vapply(errors, esc, "")), collapse = ","))
 con <- file(out_path, open = "wb")

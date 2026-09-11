@@ -14,8 +14,8 @@
 //          in every copy of a 3.4 MB download.
 //   t4-16  Chart settings > Diagnostics wrote a localStorage flag and called a
 //          function defined only in the jamovi module: live, persisted, inert.
-//   t4-17  the LOESS confidence band approximates R's degrees of freedom, so
-//          the curve matches and the band does not. Disclosed only in a README.
+//   t4-17  standalone LOESS is curve-only; requesting its confidence band
+//          must explain the absence in the app. Numerical parity is separate.
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -150,17 +150,10 @@ ok(dbg.offAgain, 'and switching it off removes it');
 
 console.log('case 6: LOESS draws its curve and no band (t4-17, revised Aug 10 2026)');
 // The old case asserted the band DISCLOSED that it was approximate. Torry's
-// call: drop the band instead. loessFit's curve is exact-R (max difference
-// 0.0000 against stats::loess at n = 40 / 60 / 200), but its band ran 3 to
-// 4.5% narrow because the effective df were estimated rather than traced, and
-// a band that is quietly too confident is worse than no band.
-//
-// The old case also drove window.setOption, which writes the option store's
-// TOP LEVEL. The engine writes these two keys inside chartSpec, so the probe
-// was exercising a path the app itself can no longer produce - which is
-// exactly why the disclosure could rot without any probe noticing. This case
-// drives __gb2_setOption, the engine's own setter, and asserts the DRAWN
-// result rather than only the payload.
+// call: drop the band instead. The local curve and R's default interpolated
+// LOESS use different smoothing conventions; this probe verifies the UI
+// contract, not general R curve parity. The band stays absent and the user
+// gets an explanation when asking for it.
 const loess = await page.evaluate(async () => {
     const sleep = ms => new Promise(r => setTimeout(r, ms));
     const set = (k, v) => window.__gb2_setOption(k, v);
