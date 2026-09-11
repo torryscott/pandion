@@ -51,6 +51,8 @@ options:
           title: 95% Confidence Interval
         - name: ci99
           title: 99% Confidence Interval
+        - name: ci95c
+          title: Comparison-adjusted 95% Interval
         - name: none
           title: None
       default: se
@@ -94,6 +96,8 @@ options:
           title: Violin Plot
         - name: raincloud
           title: Raincloud Plot
+        - name: dot
+          title: Dot Plot
         - name: qq
           title: Q-Q Plot
         - name: ecdf

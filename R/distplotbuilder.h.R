@@ -55,6 +55,7 @@ distplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6C
                     "sd",
                     "ci95",
                     "ci99",
+                    "ci95c",
                     "none"),
                 default="se",
                 hidden=TRUE)
@@ -87,6 +88,7 @@ distplotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6C
                     "box",
                     "violin",
                     "raincloud",
+                    "dot",
                     "qq",
                     "ecdf"),
                 default="histogram")

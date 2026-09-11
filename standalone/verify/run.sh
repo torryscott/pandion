@@ -33,7 +33,7 @@ panel-controls-size-check \
 view-zoom-drag-check \
 missing-codes-check header-row-check level-variants-check typechange-cost-check \
 missing-filter-check omv-missing-rules-check autosave-honesty-check \
-data-papercuts-check data-disclosure-check grid-wide-perf-check omv-derived-check \
+data-papercuts-check dist-dot-allowlist-check data-disclosure-check grid-wide-perf-check omv-derived-check \
 grid-accessibility-check \
 help-me-choose-check chooser-target-check menu-pointer-check import-errors-check layout-image-check modal-accessibility-check \
 layout-arrange-check layout-clipboard-check layout-orientation-check layout-rail-check layout-selectall-check layout-reuse-check layout-undo-check library-bridge-check \

@@ -240,6 +240,8 @@ wr(distplotbuilder(data = dd, var = "y", groupVar = "grp", facetVar = NULL,
                    graphType = "ecdf"), "dist_ecdf")
 wr(distplotbuilder(data = dd, var = "y", groupVar = "grp", facetVar = NULL,
                    graphType = "box"), "dist_box")
+wr(distplotbuilder(data = dd, var = "y", groupVar = "grp", facetVar = NULL,
+                   graphType = "dot", showDataPoints = TRUE), "dist_dot")
 
 # --- Frequencies ------------------------------------------------------
 set.seed(13)
