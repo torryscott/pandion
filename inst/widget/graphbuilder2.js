@@ -48919,7 +48919,7 @@
                 var _xyBinHop2 = (opt === "xyBin");
                 var _doInstant = (data.graphTypeInstant === true) || _distHop || _freqHop || _xyBinHop2;
                 _setOption(opt, val);
-                // Distribution "Mean + points": the raw dots ARE the point
+                // Distribution "Dot plot": the raw dots ARE the point
                 // of the type, so switching to it turns the data-points
                 // overlay on (the user can hide it afterwards). Poked
                 // before the snapshot clone so the instant preview shows
@@ -98943,7 +98943,7 @@
                     // only skips keys we've locally committed) instead of
                     // folding the stale panel value back over it.
                     if (hasSetOption) { try { _setOption(optName, val); } catch (_es) {} }
-                    // Distribution "Mean + points": switching to it turns
+                    // Distribution "Dot plot": switching to it turns
                     // the data-points overlay on (the dots are the point).
                     if (_distHop && String(val) === "dot" && data.showDataPoints !== true) {
                         try {

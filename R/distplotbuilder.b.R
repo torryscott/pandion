@@ -565,7 +565,7 @@ distplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6C
                 script_src_ready = TRUE,
                 bars = bars,
                 graph_type = self$options$graphType,
-                graph_type_choices = list( list(name = "histogram", label = "Histogram"), list(name = "density", label = "Density"), list(name = "histdensity", label = "Hist+Density"), list(name = "box", label = "Box"), list(name = "violin", label = "Violin"), list(name = "raincloud", label = "Raincloud"), list(name = "dot", label = "Mean + Points"), list(name = "qq", label = "Q-Q"), list(name = "ecdf", label = "ECDF") ),
+                graph_type_choices = list( list(name = "histogram", label = "Histogram"), list(name = "density", label = "Density"), list(name = "histdensity", label = "Hist+Density"), list(name = "box", label = "Box"), list(name = "violin", label = "Violin"), list(name = "raincloud", label = "Raincloud"), list(name = "dot", label = "Dot plot"), list(name = "qq", label = "Q-Q"), list(name = "ecdf", label = "ECDF") ),
                 graph_type_instant = FALSE,
                 x_label = x_title,
                 y_label = y_title,
@@ -586,7 +586,7 @@ distplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6C
                 missing_note = missing_note,
                 annotations = gb_resolve_annotations(self$options$annotationsJson, list()),
                 show_data_points = isTRUE(self$options$showDataPoints),
-                # Mean + Points (Jul-approved backlog item): the on-chart
+                # Dot plot in Distribution (the CG dot type, points overlay on): the on-chart
                 # Summary seg + error-bar Type strip gate on these payload
                 # keys being strings, and the client stat fold recomputes
                 # from bar.values exactly like Compare Groups.

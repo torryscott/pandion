@@ -97,7 +97,7 @@ options:
         - name: raincloud
           title: Raincloud Plot
         - name: dot
-          title: Mean + Points
+          title: Dot plot
         - name: qq
           title: Q-Q Plot
         - name: ecdf
