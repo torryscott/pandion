@@ -4,12 +4,15 @@
 // Two-dimensional chart, data-grid, and layout surfaces may scroll. The
 // application frame, its command bars, dialogs, drawers, and lower editor may
 // not create page-level overflow, clip their controls, or hide keyboard focus.
+// PS_REFLOW_BROWSER selects chromium (default), firefox, or webkit.
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import { mkdirSync } from 'node:fs';
 
 function loadPlaywright() {
-    for (const base of [process.cwd(), new URL('.', import.meta.url).pathname,
-                        '/private/tmp', '/tmp']) {
+    for (const base of [process.env.GB2_NODE_BASE, process.cwd(),
+                        new URL('.', import.meta.url).pathname,
+                        '/private/tmp', '/tmp'].filter(Boolean)) {
         try { return createRequire(path.join(base, 'x.js'))('playwright'); }
         catch { /* try the next shared dependency location */ }
     }
@@ -21,11 +24,14 @@ function ok(condition, message) {
     console.log('  ok  ' + message);
 }
 
-const { chromium } = loadPlaywright();
+const browserName = process.env.PS_REFLOW_BROWSER || 'chromium';
+const browserType = loadPlaywright()[browserName];
 const pageUrl = 'file://' + (process.env.PS_PAGE
     ? path.resolve(process.env.PS_PAGE)
     : path.resolve(new URL('.', import.meta.url).pathname, '..', 'index.html'));
-const browser = await chromium.launch();
+const browser = await browserType.launch();
+const evidenceDir = process.env.PS_REFLOW_OUT;
+if (evidenceDir) mkdirSync(evidenceDir, { recursive: true });
 const page = await browser.newPage({ viewport: { width: 640, height: 720 } });
 const pageErrors = [];
 page.on('pageerror', error => pageErrors.push(String(error)));
@@ -78,9 +84,29 @@ async function frameGeometry(label) {
           })).slice(0, 12);
         return {
             viewport,
-            pageWidth: document.documentElement.scrollWidth,
+            // WebKit can scroll the overflow:hidden body without widening
+            // documentElement. Check both, including the inner page grid.
+            pageWidth: Math.max(document.documentElement.scrollWidth,
+                document.body.scrollWidth,
+                document.querySelector('.ps-page').scrollWidth),
             topLevel,
             clippedControls,
+            frameScroll: ['html', 'body', '.ps-app-body'].map(selector => {
+                const n = document.querySelector(selector);
+                return { selector, x: n.scrollLeft, y: n.scrollTop };
+            }),
+            header: (() => {
+                const bar = document.querySelector('.ps-appbar');
+                const b = bar.getBoundingClientRect();
+                return Array.from(bar.children).filter(n => {
+                    const r = n.getBoundingClientRect();
+                    return r.width > 0 && r.height > 0;
+                }).filter(n => {
+                    const r = n.getBoundingClientRect();
+                    return r.left < b.left - 1 || r.right > b.right + 1 ||
+                        r.top < b.top - 1 || r.bottom > b.bottom + 1;
+                }).map(n => n.id || n.className);
+            })(),
         };
     });
     ok(report.pageWidth <= report.viewport.width + 1,
@@ -94,6 +120,12 @@ async function frameGeometry(label) {
     ok(report.clippedControls.length === 0,
        `${label} has no clipped controls outside its intentional 2-D scrollers ` +
        `(${JSON.stringify(report.clippedControls)})`);
+    ok(report.header.length === 0,
+       `${label} keeps header controls and status text inside their row ` +
+       `(${JSON.stringify(report.header)})`);
+    ok(report.frameScroll.every(n => Math.abs(n.x) <= 1 && Math.abs(n.y) <= 1),
+       `${label} scrolls content without scrolling the application frame ` +
+       `(${JSON.stringify(report.frameScroll)})`);
 }
 
 async function focusVisibility(label, rootSelector = 'body') {
@@ -204,6 +236,9 @@ for (const width of [640, 320]) {
         await setWorkspace(workspace);
         await frameGeometry(`${workspace} workspace at ${width}px`);
         await focusVisibility(`${workspace} workspace at ${width}px`);
+        await frameGeometry(`${workspace} workspace at ${width}px after focus traversal`);
+        if (evidenceDir && width === 320 && workspace === 'data')
+            await page.screenshot({ path: path.join(evidenceDir, 'data-320.png') });
     }
     await page.evaluate(async () => {
         if (!window.PS_SHELL.charts().some(chart => chart.type === 'layout'))
@@ -213,6 +248,7 @@ for (const width of [640, 320]) {
     await page.waitForTimeout(500);
     await frameGeometry(`layout workspace at ${width}px`);
     await focusVisibility(`layout workspace at ${width}px`);
+    await frameGeometry(`layout workspace at ${width}px after focus traversal`);
 }
 
 console.log('case 2: complete WCAG text-spacing override at 320px');
@@ -226,6 +262,7 @@ for (const workspace of ['chart', 'data', 'layout']) {
     await setWorkspace(workspace);
     await frameGeometry(`${workspace} workspace with text spacing`);
     await focusVisibility(`${workspace} workspace with text spacing`);
+    await frameGeometry(`${workspace} workspace with text spacing after focus traversal`);
 }
 
 async function inspectDialog(label, id, open) {
@@ -390,8 +427,76 @@ ok(lowerOpened && await page.locator('.gb2-panel').isVisible(),
 await frameGeometry('chart with lower editor and text spacing');
 await focusVisibility('shared lower chart editor focus', '.gb2-panel');
 
+console.log('case 5: real Tab and grid navigation across narrow widths and densities');
+const MOD = process.platform === 'darwin' ? 'Meta' : 'Control';
+for (const density of ['comfortable', 'compact', 'spacious']) {
+    await page.evaluate(() => window.PS_SHELL.showPreferences());
+    await page.selectOption('#ps-pref-density', density);
+    await page.click('#ps-preferences-save');
+    for (const width of [320, 640]) {
+        await page.setViewportSize({ width, height: 640 });
+        await setWorkspace('chart');
+        await page.focus('#ps-export');
+        let reachedChart = false;
+        for (let i = 0; i < 60; i++) {
+            await page.keyboard.press('Tab');
+            reachedChart = await page.evaluate(() =>
+                document.activeElement.matches('svg[data-role="gb2-chart-svg"]'));
+            if (reachedChart) break;
+        }
+        ok(reachedChart, `${density} at ${width}px: Tab reaches the chart`);
+        await frameGeometry(`${density} at ${width}px after native chart focus`);
+        await setWorkspace('data');
+        await page.focus('#ps-datagrid');
+        await page.keyboard.press(`${MOD}+ArrowDown`);
+        await page.keyboard.press(`${MOD}+ArrowRight`);
+        await page.waitForTimeout(120);
+        const data = await page.evaluate(() => {
+            const g = document.getElementById('ps-datagrid');
+            const t = window.PS_SHELL.project.table;
+            const workspace = document.querySelector('.ps-main-workspace');
+            const pane = workspace.getBoundingClientRect();
+            const toolbar = document.querySelector('.ps-data-commandbar');
+            const bar = toolbar.getBoundingClientRect();
+            const foot = document.getElementById('ps-gridfoot').getBoundingClientRect();
+            return {
+                selection: window.PS_SHELL.gridSelection(),
+                lastRow: t.caseIds.length - 1, lastCol: t.order[t.order.length - 1],
+                x: g.scrollLeft, y: g.scrollTop,
+                maxX: g.scrollWidth - g.clientWidth, maxY: g.scrollHeight - g.clientHeight,
+                workspaceY: workspace.scrollTop,
+                dataChromeVisible: bar.top >= pane.top - 1 && bar.bottom <= pane.bottom + 1 &&
+                    foot.top >= pane.top - 1 && foot.bottom <= pane.bottom + 1,
+                toolbarClipped: Array.from(toolbar.querySelectorAll('button')).filter(b => {
+                    const r = b.getBoundingClientRect();
+                    return r.width > 0 && r.height > 0 &&
+                        (r.left < pane.left - 1 || r.right > pane.right + 1 ||
+                         r.top < bar.top - 1 || r.bottom > bar.bottom + 1);
+                }).map(b => b.id),
+            };
+        });
+        ok(data.selection.focusRow === data.lastRow && data.selection.focusCol === data.lastCol,
+           `${density} at ${width}px: grid keys reach the final row and column`);
+        ok((data.maxX <= 1 || data.x > 0) && (data.maxY <= 1 || data.y > 0),
+           `${density} at ${width}px: the data grid retains independent scrolling ` +
+           `(${JSON.stringify(data)})`);
+        ok(data.workspaceY <= 1 && data.dataChromeVisible,
+           `${density} at ${width}px: Data toolbar and summary stay visible after grid scrolling`);
+        ok(data.toolbarClipped.length === 0,
+           `${density} at ${width}px: Data commands fit without horizontal toolbar scrolling ` +
+           `(${JSON.stringify(data.toolbarClipped)})`);
+        await frameGeometry(`${density} at ${width}px after grid navigation`);
+        if (evidenceDir && width === 320 && density === 'comfortable') {
+            await page.waitForFunction(() => !document.querySelector('#ps-toast.ps-toast-show'));
+            await page.mouse.move(0, 0);
+            await page.waitForTimeout(200);
+            await page.screenshot({ path: path.join(evidenceDir, 'data-320-textspacing.png') });
+        }
+    }
+}
+
 ok(pageErrors.length === 0,
    `the reflow matrix produced no page errors ` +
    `(${pageErrors.join(' | ') || 'none'})`);
 await browser.close();
-console.log('\nSTANDALONE REFLOW ACCESSIBILITY: PASS');
+console.log('\nSTANDALONE REFLOW ACCESSIBILITY: PASS (' + browserName + ')');

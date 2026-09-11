@@ -6,12 +6,14 @@
 # Place brackets, table<->chart linking, sticky stats mode, the
 # Cmd/Ctrl+click gesture, focus card + steppers, folds, windowed
 # tables, the dist Frequency-table tab, and the picker handoff.
-# Run via scripts/verify/run.sh --extras. Exit 2 = jmvcore missing.
+# Run via scripts/verify/run.sh. Exit 2 = jmvcore missing (a gate failure).
 .self <- gsub("~+~", " ", sub("--file=", "", grep("--file=", commandArgs(FALSE), value = TRUE)[1]), fixed = TRUE)
 ROOT <- normalizePath(file.path(dirname(.self), "..", ".."))
 setwd(ROOT)
 OUT <- Sys.getenv("GB2_STATS_PROBE_OUT", "/tmp/gb2-stats-probe")
 dir.create(OUT, showWarnings = FALSE, recursive = TRUE)
+Sys.setenv(GB2_INLINE_BUNDLE = "1", GB2_NO_BUNDLE_CACHE = "1",
+           R_USER_CONFIG_DIR = file.path(OUT, "config"))
 if (!requireNamespace("jmvcore", quietly = TRUE)) {
     message("stats-probe: jmvcore not installed in this R library - skipping")
     quit(status = 2)
@@ -27,7 +29,8 @@ suppressWarnings(suppressMessages({
 }))
 
 .gb2_widget_js <- function() {
-    paste(readLines("inst/widget/graphbuilder2.js", warn = FALSE, encoding = "UTF-8"),
+    bundle <- if (Sys.getenv("GB2_BUNDLE") == "min") "inst/widget/graphbuilder2.min.js" else "inst/widget/graphbuilder2.js"
+    paste(readLines(bundle, warn = FALSE, encoding = "UTF-8"),
           collapse = "\n")
 }
 environment(graphbuilder2_html) <- globalenv()

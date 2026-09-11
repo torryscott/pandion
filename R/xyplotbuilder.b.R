@@ -475,13 +475,9 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
             # group when groupVar is set. Empty array when data has
             # no finite (x, y) pairs.
             #
-            # Shared per-group linear lm pool. Fit one lm(y ~ x)
-            # per group up-front; downstream blocks (linear fit
-            # line, stats-overlay slope/intercept/R², outlier
-            # residuals) all read from this pool instead of
-            # re-fitting. Cuts ~2/3 of the lm() calls that used
-            # to happen on every render. Key is as.character(g)
-            # so factor levels stable across the call.
+            # One linear model per facet × group cell. Fits, residuals
+            # and ellipses must use the same population as panel statistics.
+            # Store cells as records, avoiding delimiter-based label keys.
             #
             # IMPORTANT: the predictor name in the formula must
             # match the column name in the newdata passed to
@@ -491,25 +487,22 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
             # ignores newdata and returns the training fitted
             # values, which is N rows instead of length(x_seq).
             group_lm_pool <- list()
-            pool_groups <- if (has_group) group_levels else list("__all__")
-            for (pg in pool_groups) {
-                pg_mask <- if (has_group) df[[groupVar]] == pg
-                           else rep(TRUE, nrow(df))
-                pg_idx <- which(pg_mask
-                                & is.finite(df[[xvar]])
-                                & is.finite(df[[yvar]]))
-                if (length(pg_idx) < 2) next
-                g_x <- df[[xvar]][pg_idx]
-                g_y <- df[[yvar]][pg_idx]
-                pg_fit <- tryCatch(stats::lm(g_y ~ g_x),
-                                   error = function(e) NULL)
-                pg_x_lo <- min(g_x); pg_x_hi <- max(g_x)
-                group_lm_pool[[as.character(pg)]] <- list(
-                    fit = pg_fit,
-                    idx = pg_idx,
-                    x = g_x, y = g_y,
-                    x_lo = pg_x_lo, x_hi = pg_x_hi,
-                    n = length(g_x)
+            pool_groups <- if (has_group) group_levels else list(NULL)
+            pool_facets <- if (has_facet) facet_levels else list(NULL)
+            for (pf in pool_facets) for (pg in pool_groups) {
+                pg_mask <- if (has_group) df[[groupVar]] == pg else rep(TRUE, nrow(df))
+                pf_mask <- if (has_facet) df[[facetVar]] == pf else rep(TRUE, nrow(df))
+                pg_idx <- which(pg_mask & pf_mask
+                                & is.finite(df[[xvar]]) & is.finite(df[[yvar]]))
+                if (!length(pg_idx)) next
+                g_x <- df[[xvar]][pg_idx]; g_y <- df[[yvar]][pg_idx]
+                pg_fit <- tryCatch(stats::lm(g_y ~ g_x), error = function(e) NULL)
+                if (!is.null(pg_fit) && pg_fit$rank < 2L) pg_fit <- NULL
+                group_lm_pool[[length(group_lm_pool) + 1L]] <- list(
+                    group = if (has_group) as.character(pg) else NULL,
+                    facet = if (has_facet) as.character(pf) else NULL,
+                    fit = pg_fit, idx = pg_idx, x = g_x, y = g_y,
+                    x_lo = min(g_x), x_hi = max(g_x), n = length(g_x)
                 )
             }
 
@@ -521,8 +514,7 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
             # the values just sit in the payload until the user wants them.
             residuals_by_row <- rep(NA_real_, nrow(df))
             if (TRUE) {
-                for (rg_key in names(group_lm_pool)) {
-                    rg_entry <- group_lm_pool[[rg_key]]
+                for (rg_entry in group_lm_pool) {
                     if (is.null(rg_entry) || is.null(rg_entry$fit)) next
                     if (rg_entry$n < 3) next
                     rg_res <- as.numeric(stats::residuals(rg_entry$fit))
@@ -605,7 +597,6 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
             # cost (a couple hundred predict() rows total).
             xy_fits <- list()
             if (nrow(df) >= 2) {
-                fit_groups <- if (has_group) group_levels else list("__all__")
                 show_ci   <- TRUE
                 fit_type  <- self$options$xyFitType
                 if (!nzchar(fit_type)) fit_type <- "linear"
@@ -615,21 +606,13 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
                 ci_level <- self$options$xyCILevel
                 if (!is.numeric(ci_level) || !is.finite(ci_level)
                     || ci_level <= 0 || ci_level >= 1) ci_level <- 0.95
-                for (g in fit_groups) {
-                    # Reuse the shared linear fit + cached x/y
-                    # vectors from group_lm_pool. Loess and the
-                    # polynomial branches still fit their own
-                    # model (lm with poly() / loess) since their
-                    # structure differs from the baseline lm.
-                    pool_entry <- group_lm_pool[[as.character(g)]]
-                    if (is.null(pool_entry)) next
+                for (pool_entry in group_lm_pool) {
                     g_x <- pool_entry$x
                     g_y <- pool_entry$y
                     # Minimum N per fit type:
-                    #   linear: 2 (CI prefers 3+ but ok)
-                    #   poly2:  3 (need at least one degree of
-                    #     freedom for the residual variance)
-                    #   poly3:  4 (same logic)
+                    #   linear: 2; poly2: 3; poly3: 4 for the curve.
+                    #   The CI requires one additional observation:
+                    #   residual variance is undefined at zero residual df.
                     #   loess:  4 (span fit needs neighbors)
                     min_n <- if (fit_type == "loess") 4L
                              else if (fit_type == "poly3") 4L
@@ -645,7 +628,7 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
                     x_seq <- seq(x_lo, x_hi, length.out = 100)
 
                     fit_entry <- list(
-                        group = if (has_group) g else NULL,
+                        group = pool_entry$group,
                         # Widget reads this to decide whether to
                         # extrapolate the line / CI band out to the
                         # chart's x edges. Loess is only valid inside
@@ -654,6 +637,7 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
                         # at the data range.
                         fit_type = fit_type
                     )
+                    if (has_facet) fit_entry$facet <- pool_entry$facet
                     branch_ok <- FALSE
 
                     if (fit_type == "loess") {
@@ -687,14 +671,13 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
                         if (show_ci && is.list(pred)
                             && !is.null(pred$fit)
                             && !is.null(pred$se.fit)) {
-                            # Student-t critical value with the
-                            # effective residual df from loess.
-                            tcrit <- tryCatch(
-                                stats::qt(1 - (1 - ci_level) / 2,
-                                          df = fit$enp),
-                                error = function(e) 1.96
-                            )
-                            if (!is.finite(tcrit)) tcrit <- 1.96
+                            # predict.loess supplies the residual df intended
+                            # for t intervals. fit$enp is the equivalent number
+                            # of parameters, not residual degrees of freedom.
+                            # https://stat.ethz.ch/R-manual/R-patched/library/stats/html/predict.loess.html
+                            tcrit <- if (is.finite(pred$df) && pred$df > 0)
+                                stats::qt(1 - (1 - ci_level) / 2, df = pred$df)
+                                else NA_real_
                             yhat <- as.numeric(pred$fit)
                             yse  <- as.numeric(pred$se.fit)
                             lwr  <- yhat - tcrit * yse
@@ -711,6 +694,10 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
                                 lwrs = as.numeric(lwr),
                                 uprs = as.numeric(upr)
                             )
+                            if (!is.finite(tcrit) || any(!is.finite(lwr)) || any(!is.finite(upr))) {
+                                fit_entry$points$lwrs <- NULL
+                                fit_entry$points$uprs <- NULL
+                            }
                         } else {
                             yhat <- as.numeric(if (is.list(pred)) pred$fit else pred)
                             fit_entry$points <- list(
@@ -744,7 +731,8 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
                         }
                         if (is.null(fit)) next
                         nd <- data.frame(g_x = x_seq)
-                        pred <- if (show_ci) {
+                        model_ci <- show_ci && stats::df.residual(fit) > 0
+                        pred <- if (model_ci) {
                             tryCatch(
                                 stats::predict(fit, newdata = nd,
                                                interval = "confidence",
@@ -758,7 +746,7 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
                             )
                         }
                         if (is.null(pred)) next
-                        if (show_ci && is.matrix(pred)) {
+                        if (model_ci && is.matrix(pred)) {
                             fit_entry$points <- list(
                                 parallel = TRUE,
                                 xs   = as.numeric(x_seq),
@@ -804,9 +792,8 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
                 # with `facet`; the widget filters by panel. When
                 # ungrouped/unfaceted this collapses to the original
                 # single per-group pass. The lm() is fit fresh per
-                # cell (group_lm_pool pools facets, so it can't be
-                # reused here) — for the non-faceted case that yields
-                # the same R²/equation as before (same data).
+                # cell, using the same facet × group population as the
+                # fit/ellipse pool above.
                 stat_facets <- if (has_facet) facet_levels else list(NA)
                 for (fl in stat_facets) {
                     facet_mask <- if (has_facet)
@@ -1009,14 +996,8 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
                                 error = function(e) 5.991)
                 if (!is.finite(chi) || chi <= 0) chi <- 5.991
                 t_seq <- seq(0, 2 * pi, length.out = 100)
-                ell_groups <- if (has_group) group_levels else list("__all__")
-                for (eg in ell_groups) {
-                    eg_mask <- if (has_group) df[[groupVar]] == eg
-                               else rep(TRUE, nrow(df))
-                    ex <- df[[xvar]][eg_mask]
-                    ey <- df[[yvar]][eg_mask]
-                    ok <- is.finite(ex) & is.finite(ey)
-                    ex <- ex[ok]; ey <- ey[ok]
+                for (ell_cell in group_lm_pool) {
+                    ex <- ell_cell$x; ey <- ell_cell$y
                     if (length(ex) < 3) next
                     mx <- mean(ex); my <- mean(ey)
                     S  <- tryCatch(stats::cov(cbind(ex, ey)),
@@ -1041,7 +1022,8 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
                         )
                     }
                     entry <- list(points = pts)
-                    if (has_group) entry$group <- as.character(eg)
+                    if (has_group) entry$group <- ell_cell$group
+                    if (has_facet) entry$facet <- ell_cell$facet
                     xy_ellipses[[length(xy_ellipses) + 1L]] <- entry
                 }
             }
@@ -1319,8 +1301,22 @@ xyplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
                 "clientBundleHash", "paletteLibrary", "styleLibrary",
                 "styleStamp", "annotationsJson", "chartSnapshot", "chartSpec"
             )
-            spec_keys <- vapply(.xyplotbuilderSpecTable, function(r) r$opt,
-                                character(1))
+            # The axis titles are spec keys that the TABLE does not carry
+            # (they are read straight off spec above, not passed as args), so
+            # they have to be named here or the engine's allowlist rejects
+            # them. It filters BOTH the explode into data.* and the client's
+            # own copy of the blob, so a title survived the round trip but
+            # vanished from that copy, and the next style commit
+            # re-serialized the blob WITHOUT it: R then computed the default
+            # and the label reverted to the variable name a beat later, with
+            # nothing clicked (Torry, Sep 2026, on scatter). Compare Groups
+            # was immune only because its list already named them.
+            spec_keys <- c(
+                vapply(.xyplotbuilderSpecTable, function(r) r$opt, character(1)),
+                "xTitle", "xTitleOverride", "yTitle", "yTitleOverride",
+                "groupTitle", "groupTitleOverride",
+                "rangeBadgeLeft", "rangeBadgeTop"
+            )
 
             fixed_args <- list(
                 # Static-snapshot fallback: raw pass-through of the JS-committed

@@ -11,9 +11,12 @@ stale dist ships stale bytes.
 
 ## Develop
 
+Use Node 22 (22.12 or later). Install from the lockfile so local desktop
+tests use the same Electron version as release packaging.
+
 ```
 cd standalone/electron
-npm install
+npm ci --engine-strict
 npm start
 ```
 

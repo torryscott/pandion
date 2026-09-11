@@ -2,10 +2,12 @@
 # the formatting seam, the R canary, and the scipy third reference run
 # on every push that could move a statistic - so the parity net runs on
 # a machine, not on a session remembering to run it. The full jamovi
-# --extras tier stays local until the jmvcore-runner question from the
-# deferred backlog is settled; everything here needs only base R.
+# statistical methods probe runs on source and minified Jamovi-host output.
+# This is also a required tag-build job, on the caller's exact release commit.
 name: stats-parity
 on:
+  workflow_call:
+  pull_request:
   push:
     branches: [main]
     paths:
@@ -13,14 +15,39 @@ on:
       - 'standalone/js/**'
       - 'standalone/verify/stats-*'
       - 'standalone/verify/formula-*'
+      - 'standalone/verify/transport-*'
+      - 'standalone/verify/data-integrity-check.mjs'
+      - 'standalone/verify/workspace-sequence-check.mjs'
+      - 'standalone/verify/corpus-compat-check.mjs'
+      - 'standalone/verify/m1-parity*'
+      - 'standalone/verify/fit-boundary*'
+      - 'standalone/verify/fit-export*'
+      - 'standalone/verify/facet-fit*'
+      - 'standalone/verify/xml-export*'
+      - 'standalone/verify/pdf-*'
+      - 'standalone/verify/export-accessibility-check.mjs'
+      - 'standalone/index.html'
+      - 'standalone/verify/loess-direct*'
+      - 'standalone/verify/anova-*'
+      - 'scripts/verify/stats-probe.*'
+      - '.github/workflows/stats-parity.yml'
+      - 'standalone/verify/numerical-ledger-check.mjs'
+      - 'NUMERICAL-CHANGES.md'
+      - 'DESCRIPTION'
       - 'R/**'
   workflow_dispatch:
+permissions:
+  contents: read
 jobs:
   parity:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - name: Record the validated commit
+        run: |
+          git rev-parse HEAD
+          bash scripts/minify-widget.sh --check
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -43,21 +70,103 @@ jobs:
           sudo mkdir -p /private/tmp
           sudo chown "$USER" /private/tmp
           touch /private/tmp/x.js
-          cd /private/tmp && npm install playwright axe-core
+          cd /private/tmp && npm install playwright axe-core acorn@8
           npx --yes playwright@$(node -e "console.log(require('/private/tmp/node_modules/playwright/package.json').version)") install --with-deps chromium
-          pip install scipy
+          pip install scipy pypdf==6.10.0
+      - name: Jamovi-host test dependencies
+        run: Rscript -e 'install.packages(c("jmvcore", "R6", "jsonlite", "mvtnorm", "car"))'
       - name: R reference canary (pinned answers)
         run: Rscript standalone/verify/stats-canary.R
       - name: Formatting seam (pure unit)
         run: node standalone/verify/stats-format-unit.mjs
+      # The ledger contract: NUMERICAL-CHANGES.md, the NUMERICAL_CHANGES
+      # table the app carries, and the shipped version must agree, so a
+      # numerical change can never land without the record that lets a
+      # saved file learn about it (pure text; needs neither R nor a browser).
+      - name: Numerical ledger contract
+        run: node standalone/verify/numerical-ledger-check.mjs
       - name: Stats parity fuzzer (seeded)
         run: |
           Rscript standalone/verify/stats-fuzz.R /tmp/gb2-stats-fuzz.json
           node standalone/verify/stats-fuzz-check.mjs /tmp/gb2-stats-fuzz.json
+          node standalone/verify/stats-fuzz-guard-check.mjs /tmp/gb2-stats-fuzz.json
           node standalone/verify/stats-unit-parity.mjs /tmp/gb2-stats-fuzz.json
       - name: Formula parity (computed variables vs R)
         run: |
           Rscript standalone/verify/formula-fuzz.R /tmp/gb2-formula-fuzz.json
           node standalone/verify/formula-fuzz-check.mjs /tmp/gb2-formula-fuzz.json
+      - name: Data integrity and project compatibility (source and portable build)
+        run: |
+          node standalone/verify/data-integrity-check.mjs
+          node standalone/verify/workspace-sequence-check.mjs
+          node standalone/verify/corpus-compat-check.mjs
+          bash standalone/build-dist.sh
+          PS_PAGE=standalone/dist/pandion-plots.html node standalone/verify/data-integrity-check.mjs
+          PS_PAGE=standalone/dist/pandion-plots.html node standalone/verify/workspace-sequence-check.mjs
+          PS_PAGE=standalone/dist/pandion-plots.html node standalone/verify/corpus-compat-check.mjs
+          PS_PAGE=standalone/dist/pandion-plots.html node standalone/verify/stats-fuzz-check.mjs /tmp/gb2-stats-fuzz.json
+      - name: XML-safe labels and SVG/PNG/PDF exports
+        run: |
+          node standalone/verify/xml-export-check.mjs
+          PS_PAGE=standalone/dist/pandion-plots.html node standalone/verify/xml-export-check.mjs
+      - name: Tagged chart, layout and Notebook PDF exports
+        run: |
+          node standalone/verify/export-accessibility-check.mjs
+          node standalone/verify/pdf-accessibility-check.mjs
+          PS_PAGE=standalone/dist/pandion-plots.html node standalone/verify/pdf-accessibility-check.mjs
+      - name: Original-data precision (standalone and real Jamovi-host output)
+        run: |
+          Rscript standalone/verify/transport-precision.R /tmp/pandion-transport-precision
+          node standalone/verify/transport-precision-check.mjs /tmp/pandion-transport-precision
+          PS_PAGE=standalone/dist/pandion-plots.html node standalone/verify/transport-precision-check.mjs /tmp/pandion-transport-precision
+          PS_TRANSPORT_HOST=jamovi node standalone/verify/transport-precision-check.mjs /tmp/pandion-transport-precision
+          GB2_BUNDLE=min Rscript standalone/verify/transport-precision.R /tmp/pandion-transport-min
+          PS_TRANSPORT_HOST=jamovi node standalone/verify/transport-precision-check.mjs /tmp/pandion-transport-min
+      - name: All seven module payloads (standalone source and portable build vs R)
+        run: |
+          Rscript standalone/verify/m1-parity.R
+          node standalone/verify/m1-parity-check.mjs
+          PS_PAGE=standalone/dist/pandion-plots.html node standalone/verify/m1-parity-check.mjs
+      - name: Regression boundaries and LOESS intervals (independent R and real host payloads)
+        run: |
+          Rscript standalone/verify/fit-boundary.R
+          node standalone/verify/fit-boundary-guard.mjs
+          node standalone/verify/fit-boundary-check.mjs
+          PS_PAGE=standalone/dist/pandion-plots.html node standalone/verify/fit-boundary-check.mjs
+      - name: Direct LOESS curves, singular neighborhoods and compiled previews
+        run: |
+          Rscript standalone/verify/loess-direct.R
+          node standalone/verify/loess-direct-guard.mjs
+          node standalone/verify/loess-direct-check.mjs
+          PS_PAGE=standalone/dist/pandion-plots.html node standalone/verify/loess-direct-check.mjs
+      - name: Panel-specific scatter populations and exported geometry
+        run: |
+          Rscript standalone/verify/facet-fit.R
+          node standalone/verify/facet-fit-check.mjs --guard-selftest
+          node standalone/verify/facet-fit-check.mjs
+          PS_PAGE=standalone/dist/pandion-plots.html node standalone/verify/facet-fit-check.mjs
+      - name: Regression extensions and actual SVG exports
+        run: |
+          Rscript standalone/verify/fit-export.R
+          node standalone/verify/fit-export-unit.mjs
+          node standalone/verify/fit-export-check.mjs /tmp/pandion-fit-export.json --guard-selftest
+          node standalone/verify/fit-export-check.mjs
+          PS_PAGE=standalone/dist/pandion-plots.html node standalone/verify/fit-export-check.mjs
+      - name: Factorial and repeated-measures ANOVA (car, 80-digit arithmetic and displayed tables)
+        run: bash standalone/verify/anova-run.sh
+      - name: Statistical methods and rendered tables (Jamovi source and minified bundles)
+        run: |
+          for bundle in source min; do
+            GB2_BUNDLE="$bundle" GB2_STATS_PROBE_OUT="/tmp/pandion-stats-$bundle" Rscript scripts/verify/stats-probe.R
+            GB2_STATS_PROBE_OUT="/tmp/pandion-stats-$bundle" node scripts/verify/stats-probe.mjs
+          done
       - name: Third statistical reference (scipy vs R)
-        run: python3 standalone/verify/stats-thirdref.py /tmp/gb2-stats-fuzz.json
+        run: |
+          python3 standalone/verify/stats-thirdref.py /tmp/gb2-stats-fuzz.json
+          python3 standalone/verify/stats-thirdref-guard.py /tmp/gb2-stats-fuzz.json
+      - name: Small probabilities and directional tests (relative error, R and SciPy)
+        run: |
+          Rscript standalone/verify/stats-tail.R
+          node standalone/verify/stats-tail-check.mjs
+          node standalone/verify/stats-tail-check.mjs /tmp/pandion-stats-tail.json --min
+          python3 standalone/verify/stats-tail-thirdref.py

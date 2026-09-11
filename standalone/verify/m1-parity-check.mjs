@@ -1,7 +1,8 @@
 // M1 parity probe (JS side): load the SAME fixture table m1-parity.R used
 // into the standalone shell, build each case's payload through the JS data
 // layer, and compare every channel against the R-extracted expectation at
-// 10-significant-digit precision. Ellipses compare via phase-invariant
+// full precision with numerical tolerances. Original observations also have
+// exact-double checks in transport-precision-check. Ellipses compare via phase-invariant
 // moments because eigenvector sign is arbitrary on both sides.
 //
 // Run AFTER:  Rscript standalone/verify/m1-parity.R
@@ -10,6 +11,8 @@
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import assert from 'node:assert/strict';
 
 function loadPlaywright() {
     const bases = [];
@@ -23,7 +26,8 @@ function loadPlaywright() {
     process.exit(2);
 }
 const { chromium } = loadPlaywright();
-const PAGE = 'file://' + path.resolve(new URL('.', import.meta.url).pathname, '..', 'index.html');
+const PAGE = pathToFileURL(process.env.PS_PAGE ? path.resolve(process.env.PS_PAGE) :
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'index.html')).href;
 
 let EXP;
 try { EXP = JSON.parse(readFileSync('/tmp/ps-standalone-parity/expected.json', 'utf8')); }
@@ -31,6 +35,14 @@ catch (e) {
     console.error('expected.json missing - run: Rscript standalone/verify/m1-parity.R');
     process.exit(2);
 }
+const requiredCases = [
+    'cg_basic', 'cg_median', 'cg_ci95', 'dist_hist', 'dist_box',
+    'freq_ind', 'freq_gof', 'freq_pie', 'freq_par', 'xy_lin', 'xy_poly2k',
+    'xy_poly3', 'xy_poly3_grouped80', 'xy_ties', 'rm_within', 'rm_between',
+    'rm_median', 'corr_p', 'corr_k', 'corr_s', 'lk_factor', 'lk_num', 'lk_cont'
+];
+assert.deepEqual(Object.keys(EXP.cases || {}).sort(), requiredCases.slice().sort(),
+    'the complete declared module/reference case roster is required');
 
 let failures = 0, checks = 0;
 function fail(msg) { console.log('  FAIL ' + msg); failures++; }
@@ -77,7 +89,10 @@ function cmp(exp, got, where) {
 // samplings of the same ellipse compare exactly, while any real geometry
 // difference shows up.
 function ellipseShape(entry) {
-    const all = entry.points || [];
+    const all = entry.points;
+    if (!Array.isArray(all) || all.length < 4 ||
+        all.some(p => !p || !Number.isFinite(p.x) || !Number.isFinite(p.y)))
+        throw new Error('invalid ellipse reference/output: expected finite point coordinates');
     const pts = all.slice(0, Math.max(0, all.length - 1));
     let sx = 0, sy = 0, area = 0;
     for (let i = 0; i < pts.length; i++) {
@@ -105,11 +120,21 @@ function cmpEllipses(exp, got, where) {
             fail(where + '[' + i + '].group: ' + exp[i].group + ' vs ' + got[i].group);
         for (const k of ['n', 'cx', 'cy', 'area', 'mxx', 'mxy', 'myy']) {
             const tol = Math.max(1e-6, 1e-6 * Math.max(Math.abs(a[k]), Math.abs(b[k])));
-            if (Math.abs(a[k] - b[k]) > tol)
+            if (!Number.isFinite(a[k]) || !Number.isFinite(b[k]) || Math.abs(a[k] - b[k]) > tol)
                 fail(where + '[' + i + '].' + k + ': ' + a[k] + ' vs ' + b[k]);
         }
     }
 }
+
+// A missing/NaN ellipse must not pass through comparisons such as NaN > tol.
+const diamond = [{ x: 2, y: 0 }, { x: 0, y: 2 }, { x: -2, y: 0 },
+                 { x: 0, y: -2 }, { x: 2, y: 0 }];
+assert.deepEqual(ellipseShape({ points: diamond }),
+    { n: 5, cx: 0, cy: 0, area: 8, mxx: 2, mxy: 0, myy: 2, group: undefined });
+for (const points of [undefined, [], diamond.map(p => ({ ...p, x: NaN })),
+                      diamond.map(p => ({ ...p, y: Infinity }))])
+    assert.throws(() => ellipseShape({ points }), /invalid ellipse/);
+console.log('  ok  ellipse comparison guards (one known shape, four invalid inputs)');
 
 const browser = await chromium.launch();
 const ctx = await browser.newContext();
@@ -147,6 +172,18 @@ for (const [name, c] of Object.entries(EXP.cases)) {
     const before = failures;
     if (!got.drew) fail(name + ': chart did not draw');
     const expPayload = JSON.parse(readFileSync('/tmp/ps-standalone-parity/' + name + '.payload.json', 'utf8'));
+    if (name.startsWith('xy_')) {
+        assert(Array.isArray(expPayload.xyFits) && expPayload.xyFits.length > 0,
+            name + ': fitted-value references must not be omitted');
+        for (const fit of expPayload.xyFits) {
+            const points = fit.points;
+            assert(points && Array.isArray(points.xs) && points.xs.length >= 2,
+                name + ': fitted-value grid is required');
+            for (const field of ['xs', 'ys', 'lwrs', 'uprs'])
+                assert(Array.isArray(points[field]) && points[field].length === points.xs.length &&
+                    points[field].every(Number.isFinite), name + ': complete finite ' + field + ' references are required');
+        }
+    }
     for (const k of c.channelKeys) {
         if (k === 'xyEllipses') cmpEllipses(expPayload[k], got.payload[k], name + '.' + k);
         else cmp(expPayload[k], got.payload[k], name + '.' + k);

@@ -3,39 +3,48 @@
 # R-parity battery, run on the dev page AND the built single-file dist.
 #
 # Usage: bash standalone/verify/run.sh
+# PDF structure probes require pypdf==6.10.0 in python3 (or PS_PYTHON).
 #
 # The parity step needs R + jmvcore (it drives the real jamovi marshalling
 # to produce expectations); when R is unavailable the shell probes still
 # run and the parity step is skipped with a warning.
 set -e
 cd "$(dirname "$0")/../.."
+if [ "${PS_PDF_BASELINE:-0}" != "0" ]; then
+    echo "ERROR: PDF capture-only mode cannot be used for full verification." >&2
+    exit 2
+fi
 
 # Feature probes added by the M4 application-frame work. Each is
 # self-contained and honors PS_PAGE (except hardening-dom-check, which
 # reads index.html source directly and runs once).
 FEATURE_PROBES="branding-check axe-state-check bypass-accessibility-check busy-check column-sizing-check \
-computed-variables-check coverage-gaps-check chart-accessibility-check export-accessibility-check \
-chart-check-check compare-pairs-apa-check chart-from-selection-check chart-groups-check chart-size-check corr-method-echo-check \
+computed-variables-check computed-grid-refresh-check case-count-check control-focus-check bar-choice-accessibility-check character-shortcut-check coverage-gaps-check chart-accessibility-check export-accessibility-check pdf-accessibility-check \
+chart-check-check compare-pairs-apa-check chart-from-selection-check chart-groups-check chart-size-check corr-method-echo-check bracket-orientation-check \
 default-style-routes-check column-gestures-check chrome-check clipboard-check copy-image-check copy-moment-check correctness-check \
-data-commandbar-check data-menu-check data-roundtrip-fuzz stash-guard-check corpus-compat-check separator-accessibility-check \
+data-integrity-check workspace-sequence-check data-commandbar-check data-menu-check data-roundtrip-fuzz stash-guard-check corpus-compat-check build-stamp-check separator-accessibility-check \
 data-undo-check dates-check eyedropper-check doclifecycle-check tab-accessibility-check drag-feel-check \
 drag-selection-check outside-canvas-check hmc-list-check hidden-vars-check sigma-freshness-check \
 empty-states-check engine-stamp-check flyout-align-check filter-honesty-check examples-check exclusion-bridge-check \
 find-scope-check findpop-check finish-five-check fitpanes-check formula-unit-check formula-vocab-check formula-recipes-check \
 grid-keys-check help-check hierarchy-check hidden-selection-check \
 identifier-advice-check inspector-freshness-check menu-selection-check \
+panel-controls-size-check \
+view-zoom-drag-check \
 missing-codes-check header-row-check level-variants-check typechange-cost-check \
 missing-filter-check omv-missing-rules-check autosave-honesty-check \
 data-papercuts-check data-disclosure-check grid-wide-perf-check omv-derived-check \
 grid-accessibility-check \
-help-me-choose-check import-errors-check layout-image-check modal-accessibility-check \
+help-me-choose-check chooser-target-check menu-pointer-check import-errors-check layout-image-check modal-accessibility-check \
 layout-arrange-check layout-clipboard-check layout-orientation-check layout-rail-check layout-selectall-check layout-reuse-check layout-undo-check library-bridge-check \
-layout-accessibility-check layout-text-check layout-figure-check \
+layout-accessibility-check layout-text-check layout-font-check layout-figure-check \
 linked-selection-check motion-check narrow-check novice-affordances-check \
 overlay-reload-check overlay-restore-check pane-debusy-check panel-reveal-check panelcap-check hover-webkit-check gap-seam-check percol-missing-check \
 pane-scroll-cue-check perf-check picker-persistence-check pinboard-check polish-check preferences-check \
+ title-squeeze-check \
 notebook-record-check notebook-pages-check notebook-undo-check notebook-drift-check \
   guide-formulas-check keep-fidelity-check copyformat-check \
+range-badge-drag-check \
 probed-bugs-check provenance-check rail-icons-check punchlist-check swatch-row-check reachability-check recents-check reshape-check \
 reflow-accessibility-check \
 row-filters-check \
@@ -73,6 +82,11 @@ fi
 echo "== accessibility-source-check (bypass routes / instructions)"
 node standalone/verify/accessibility-source-check.mjs
 
+echo "== numerical-ledger-check (ledger <-> code table <-> version state)"
+node standalone/verify/numerical-ledger-check.mjs
+
+a11y_evidence_root="${PS_A11Y_OUT:-planning/accessibility-standalone}"
+export PS_A11Y_OUT="$a11y_evidence_root/source"
 for p in $FEATURE_PROBES; do
     echo "== $p"
     node "standalone/verify/$p.mjs"
@@ -96,6 +110,7 @@ echo "== stats parity fuzzer (seeded R references vs the rendered widget)"
 # off release runs, mirroring the m1-parity rule.
 if Rscript standalone/verify/stats-fuzz.R /tmp/gb2-stats-fuzz.json; then
     node standalone/verify/stats-fuzz-check.mjs /tmp/gb2-stats-fuzz.json
+    node standalone/verify/stats-fuzz-guard-check.mjs /tmp/gb2-stats-fuzz.json
     # Shape statistics (box quartiles/whiskers, KDE, kde2d) against the
     # same R references, extracted straight from the engine source.
     node standalone/verify/stats-unit-parity.mjs /tmp/gb2-stats-fuzz.json
@@ -112,8 +127,29 @@ else
 fi
 echo "== stats formatting seam (pure unit)"
 node standalone/verify/stats-format-unit.mjs
+echo "== small probabilities and directional tests"
+if command -v Rscript >/dev/null 2>&1; then
+    Rscript standalone/verify/stats-tail.R
+    node standalone/verify/stats-tail-check.mjs
+    node standalone/verify/stats-tail-check.mjs /tmp/pandion-stats-tail.json --min
+    if python3 standalone/verify/stats-tail-thirdref.py; then :; else
+        st=$?
+        if [ "$st" = "2" ] && [ "${PS_REQUIRE_R_PARITY:-0}" != "1" ]; then
+            echo "WARN: scipy unavailable - tail third reference skipped"
+        else
+            exit "$st"
+        fi
+    fi
+elif [ "${PS_REQUIRE_R_PARITY:-0}" = "1" ]; then
+    echo "ERROR: R is required for tail validation" >&2
+    exit 1
+else
+    echo "WARN: R unavailable - tail validation skipped"
+fi
 echo "== third statistical reference (scipy, optional locally)"
-if python3 standalone/verify/stats-thirdref.py /tmp/gb2-stats-fuzz.json; then :; else
+if python3 standalone/verify/stats-thirdref.py /tmp/gb2-stats-fuzz.json; then
+    python3 standalone/verify/stats-thirdref-guard.py /tmp/gb2-stats-fuzz.json
+else
     st=$?
     if [ "$st" = "2" ] && [ "${PS_REQUIRE_R_PARITY:-0}" != "1" ]; then
         echo "WARN: scipy unavailable - third reference skipped"
@@ -125,6 +161,9 @@ fi
 
 echo "== dist build + probes (single-file pandion-plots.html)"
 bash standalone/build-dist.sh
+echo "== XML-safe labels, editor round trips and SVG/PNG/PDF exports"
+node standalone/verify/xml-export-check.mjs
+PS_PAGE=standalone/dist/pandion-plots.html node standalone/verify/xml-export-check.mjs
 echo "== artifact-parity-check (dist / hosted app / portable download)"
 node standalone/verify/artifact-parity-check.mjs
 echo "== electron-check (desktop wrapper around the dist artifact)"
@@ -151,6 +190,7 @@ if bash standalone/verify/run-eyedrop-electron.sh; then :; else
 fi
 PS_PAGE=standalone/dist/pandion-plots.html node standalone/verify/m0-check.mjs
 PS_PAGE=standalone/dist/pandion-plots.html node standalone/verify/m1-shell-check.mjs
+export PS_A11Y_OUT="$a11y_evidence_root/portable"
 for p in $FEATURE_PROBES; do
     echo "== dist: $p"
     PS_PAGE=standalone/dist/pandion-plots.html node "standalone/verify/$p.mjs"
@@ -160,6 +200,36 @@ echo "== m1-parity (R expectations)"
 if Rscript standalone/verify/m1-parity.R; then
     echo "== m1-parity-check (JS vs R channels)"
     node standalone/verify/m1-parity-check.mjs
+    PS_PAGE=standalone/dist/pandion-plots.html node standalone/verify/m1-parity-check.mjs
+    echo "== independent ANOVA package and precision references, all delivery paths"
+    bash standalone/verify/anova-run.sh
+    echo "== regression boundary references and interval guards"
+    Rscript standalone/verify/fit-boundary.R
+    node standalone/verify/fit-boundary-guard.mjs
+    node standalone/verify/fit-boundary-check.mjs
+    PS_PAGE=standalone/dist/pandion-plots.html node standalone/verify/fit-boundary-check.mjs
+    echo "== direct LOESS curves, singular neighborhoods and compiled previews"
+    Rscript standalone/verify/loess-direct.R
+    node standalone/verify/loess-direct-guard.mjs
+    node standalone/verify/loess-direct-check.mjs
+    PS_PAGE=standalone/dist/pandion-plots.html node standalone/verify/loess-direct-check.mjs
+    echo "== regression extensions and actual SVG exports"
+    echo "== panel-specific scatter models, previews and exports"
+    Rscript standalone/verify/facet-fit.R
+    node standalone/verify/facet-fit-check.mjs --guard-selftest
+    node standalone/verify/facet-fit-check.mjs
+    PS_PAGE=standalone/dist/pandion-plots.html node standalone/verify/facet-fit-check.mjs
+
+    Rscript standalone/verify/fit-export.R
+    node standalone/verify/fit-export-unit.mjs
+    node standalone/verify/fit-export-check.mjs /tmp/pandion-fit-export.json --guard-selftest
+    node standalone/verify/fit-export-check.mjs
+    PS_PAGE=standalone/dist/pandion-plots.html node standalone/verify/fit-export-check.mjs
+    echo "== original-data precision (source, portable and Jamovi host)"
+    Rscript standalone/verify/transport-precision.R /tmp/pandion-transport-precision
+    node standalone/verify/transport-precision-check.mjs /tmp/pandion-transport-precision
+    PS_PAGE=standalone/dist/pandion-plots.html node standalone/verify/transport-precision-check.mjs /tmp/pandion-transport-precision
+    PS_TRANSPORT_HOST=jamovi node standalone/verify/transport-precision-check.mjs /tmp/pandion-transport-precision
 else
     if [ "${PS_REQUIRE_R_PARITY:-0}" = "1" ]; then
         echo "ERROR: m1-parity.R is required for a release" >&2

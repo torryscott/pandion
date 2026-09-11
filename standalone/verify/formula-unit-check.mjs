@@ -289,5 +289,22 @@ ok(PSFormula.renameRef('LEN(group) + LEN', 'LEN', 'width') ===
 ok(PSFormula.renameRef('CONTAINS(g, "score")', 'score', 'points') ===
    'CONTAINS(g, "score")', 'a string literal is never rewritten');
 
+console.log('case 9: identical observations retain zero spread');
+for (const value of [1e-6, .1, 1e10, Number.MAX_VALUE, -Number.MAX_VALUE]) {
+    for (const n of [2, 31, 47, 50]) {
+        const x = Array(n).fill(value);
+        const evaluate = formula => PSFormula.compile(formula, ['x']).run({ x }, n);
+        ok(evaluate('VMEAN(x)').every(v => v === value), `VMEAN preserves ${n} identical ${value} values`);
+        ok(evaluate('VSD(x)').every(v => v === 0), `VSD is zero for ${n} identical ${value} values`);
+        ok(evaluate('(x - VMEAN(x)) / VSD(x)').every(v => v === null),
+           `constant z scores are missing (${n} x ${value})`);
+        ok(evaluate('MEAN(' + Array(n).fill('x').join(',') + ')').every(v => v === value),
+           `row MEAN preserves ${n} identical ${value} arguments`);
+    }
+}
+const varying = [1e10 + 1, 1e10 + 2, 1e10 + 3];
+ok(PSFormula.compile('VSD(x)', ['x']).run({ x: varying }, 3).every(v => v === 1),
+   'small real differences at a large offset are retained');
+
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nFORMULA UNIT CHECK PASS');
 process.exit(failures ? 1 : 0);

@@ -14,11 +14,56 @@ const text = rel => read(rel).toString('utf8');
 const dist = read('standalone/dist/pandion-plots.html');
 const portable = read('website/pandion-plots.html');
 
-ok(Buffer.compare(dist, portable) === 0,
-   'website portable download is byte-identical to standalone dist');
+// The build stamp names the CODE (scripts/build-stamp.sh: last source
+// commit, "*" if built from uncommitted sources), so two artifacts built
+// from identical sources at different moments can legitimately differ in
+// this one attribute and nothing else. Compare the code bytes with the
+// stamp blanked, and require every shell to carry a well-formed stamp.
+const STAMP_META = /<meta name="pandion-build" content="([^"]*)">/;
+const STAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z [0-9a-f]{7,}\*?$/;
+function stampOf(html, label) {
+    const m = html.match(STAMP_META);
+    ok(m && STAMP.test(m[1]),
+       `${label} carries a well-formed build stamp (${m ? m[1] : 'none'})`);
+    return m[1];
+}
+const unstamp = buf => Buffer.from(
+    buf.toString('utf8').replace(STAMP_META, '<meta name="pandion-build" content="">'));
+
+const distStamp = stampOf(dist.toString('utf8'), 'portable dist');
+const portableStamp = stampOf(portable.toString('utf8'), 'website portable download');
+ok(Buffer.compare(unstamp(dist), unstamp(portable)) === 0,
+   'website portable download is byte-identical to standalone dist (build stamp aside)');
+if (distStamp !== portableStamp)
+    console.log(`  note: build stamps differ (dist ${distStamp}, website ${portableStamp}); ` +
+                'the code is identical - rebuild the website artifacts from this tree before a release');
 
 const sourceHtml = text('standalone/index.html');
 const appHtml = text('website/app/index.html');
+stampOf(appHtml, 'hosted app shell');
+ok(sourceHtml.includes('<link rel="manifest" href="manifest.json">') &&
+   appHtml.includes('<link rel="manifest" href="manifest.json">'),
+   'source and hosted shells link their local application manifest');
+ok(Buffer.compare(read('standalone/manifest.json'), read('website/app/manifest.json')) === 0,
+   'hosted application manifest matches its source bytes');
+const manifest = JSON.parse(text('standalone/manifest.json'));
+ok(manifest.name === 'Pandion Plots' && manifest.start_url === '.' &&
+   manifest.scope === '.' && manifest.display === 'standalone',
+   'application manifest names the app and opens within its own directory');
+ok(Array.isArray(manifest.icons) && manifest.icons.length === 2,
+   'application manifest declares both required icon sizes');
+for (const size of [192, 512]) {
+    const src = `icons/pandion-${size}.png`;
+    ok(manifest.icons.some(icon => icon.src === src && icon.type === 'image/png' &&
+       icon.sizes === `${size}x${size}`), `manifest declares its ${size}px PNG icon`);
+    const png = read('standalone/' + src);
+    ok(Buffer.compare(png, read('website/app/' + src)) === 0,
+       `hosted ${size}px icon matches its source bytes`);
+    ok(png.length >= 24 && png.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex')) &&
+       png.toString('ascii', 12, 16) === 'IHDR' &&
+       png.readUInt32BE(16) === size && png.readUInt32BE(20) === size,
+       `${size}px icon dimensions match the manifest declaration`);
+}
 const srcs = [...sourceHtml.matchAll(/<script src="([^"]+\.js)"><\/script>/g)]
     .map(m => m[1]);
 ok(srcs.length > 0, `standalone declares ${srcs.length} script assets`);

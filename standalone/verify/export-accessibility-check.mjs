@@ -2,8 +2,9 @@
 // export workflow.
 //
 // SVG must remain a named/described image outside Pandion. PDF receives the
-// same title/description as document metadata, while raster users receive
+// same description as tagged figure alternative text, while raster users receive
 // copyable companion text plus honest attachment guidance.
+// pdf-accessibility-check.mjs independently parses the full PDF structure.
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
@@ -74,7 +75,8 @@ ok(dialog.description.length > 40 && /chart|plot/i.test(dialog.description),
    'the export dialog starts with a useful generated description',
    dialog.description);
 ok(dialog.describedby === 'ps-export-description-help' &&
-   /SVG embeds/i.test(dialog.help) && /PDF/i.test(dialog.help) &&
+   /SVG embeds/i.test(dialog.help) && /PDF.*embeds/i.test(dialog.help) &&
+   /tagged document/i.test(dialog.help) && /separate data table/i.test(dialog.help) &&
    /PNG or JPG/i.test(dialog.help) && /alt text|long description/i.test(dialog.help),
    'the dialog explains vector, PDF, and raster accessibility behavior');
 ok(/Copy description/i.test(dialog.copyName),
@@ -110,13 +112,21 @@ ok(standaloneSvg.role === 'img' &&
    JSON.stringify(standaloneSvg));
 const versionStamp = await page.evaluate(async () => {
     const source = await window.PS_SHELL.exportSource('white');
-    const m = String(source.svg).match(/<!--\s*Pandion Plots ([0-9.]+)\s*-->/);
-    return m ? m[1] : null;
+    // "<!-- Pandion Plots 3.1.1 -->" on the dev page; the built pages
+    // append " (build <stamp>)" from <meta name="pandion-build">.
+    const m = String(source.svg)
+        .match(/<!--\s*Pandion Plots (\d+\.\d+\.\d+)(?: \(build ([^)]+)\))?\s*-->/);
+    const meta = document.querySelector('meta[name="pandion-build"]');
+    return { version: m ? m[1] : null, build: m ? (m[2] || '') : null,
+             pageBuild: meta ? (meta.getAttribute('content') || '') : '' };
 });
-ok(/^\d+\.\d+\.\d+$/.test(versionStamp || ''),
+ok(/^\d+\.\d+\.\d+$/.test(versionStamp.version || ''),
    'exported SVG carries the producing app version as a comment ' +
    '(the numerical-changes ledger traceability stamp)',
-   String(versionStamp));
+   String(versionStamp.version));
+ok(versionStamp.build === versionStamp.pageBuild,
+   'the SVG stamp carries exactly the build the page declares',
+   JSON.stringify(versionStamp));
 
 const pdf = await page.evaluate(async () => {
     const blob = await window.PS_SHELL.exportBlob('pdf', 96, 'white');

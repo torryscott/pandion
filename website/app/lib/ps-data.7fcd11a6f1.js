@@ -3,9 +3,9 @@
 // module notes in CLAUDE.md and STANDALONE-BRIEF.md). Each builder takes
 // (table, roles, opts) and returns { channels: {...} } or { error: html }.
 //
-// Numbers are rounded to 10 significant digits (PSStat.sigR) to match
-// jsonlite's digits = I(10), so shell echoes hash-match the engine's own
-// optimistic folds. Parity probes: standalone/verify/m1-parity-*.
+// Numbers retain full double precision. PSStat.sigR is a legacy identity
+// helper; R payloads use jsonlite digits = I(17). Any final formatting belongs
+// in labels. Parity probes: standalone/verify/m1-parity-*.
 // Keep this file ASCII (escapes only).
 
 window.PSData = (function () {
@@ -577,8 +577,8 @@ window.PSData = (function () {
 
     var gLevels = gs ? levelsOf(table, roles.groupVar, rowsIdx) : [];
     var fLevels = fs ? levelsOf(table, roles.facetVar, rowsIdx) : [];
-    var hasGroup = !!gs && gLevels.length > 0;
-    var hasFacet = !!fs && fLevels.length > 0;
+    var hasGroup = !!gs;
+    var hasFacet = !!fs;
 
     var xs = rowsIdx.map(function (idx) { return xv.vals[idx]; });
     var ys2 = rowsIdx.map(function (idx) { return yv.vals[idx]; });
@@ -590,30 +590,30 @@ window.PSData = (function () {
     }) : null;
     var N = xs.length;
 
-    // Per-group linear pool (fits + residual standardization).
-    var poolGroups = hasGroup ? gLevels : ["__all__"];
-    var pool = {};
-    for (var pg = 0; pg < poolGroups.length; pg++) {
-      var key = poolGroups[pg], px = [], py = [], pidx = [];
+    // Fit populations are facet × group cells, matching panel statistics.
+    // Records avoid collisions between literal labels and composite keys.
+    var poolGroups = hasGroup ? gLevels : [null];
+    var poolFacets = hasFacet ? fLevels : [null];
+    var pool = [];
+    for (var pf = 0; pf < poolFacets.length; pf++) for (var pg = 0; pg < poolGroups.length; pg++) {
+      var key = poolGroups[pg], facet = poolFacets[pf], px = [], py = [], pidx = [];
       for (i = 0; i < N; i++) {
         if (hasGroup && groups[i] !== key) continue;
+        if (hasFacet && facets[i] !== facet) continue;
         px.push(xs[i]); py.push(ys2[i]); pidx.push(i);
       }
-      if (px.length < 2) continue;
-      pool[key] = { x: px, y: py, idx: pidx, n: px.length,
-                    xLo: Math.min.apply(null, px), xHi: Math.max.apply(null, px),
-                    fit: S.linReg(px, py) };
+      if (!px.length) continue;
+      pool.push({ group: key, facet: facet, x: px, y: py, idx: pidx, n: px.length,
+                  xLo: Math.min.apply(null, px), xHi: Math.max.apply(null, px), fit: S.linReg(px, py) });
     }
-
     var residualStds = new Array(N);
     for (i = 0; i < N; i++) residualStds[i] = null;
-    for (var rk = 0; rk < poolGroups.length; rk++) {
-      var pe = pool[poolGroups[rk]];
-      if (!pe || !pe.fit || pe.n < 3) continue;
+    for (var rk = 0; rk < pool.length; rk++) {
+      var pe = pool[rk];
+      if (!pe.fit || pe.n < 3) continue;
       var sd = S.sdSample(pe.fit.residuals);
       if (!isFinite(sd) || sd <= 0) continue;
-      for (var q = 0; q < pe.idx.length; q++)
-        residualStds[pe.idx[q]] = S.sigR(pe.fit.residuals[q] / sd);
+      for (var q = 0; q < pe.idx.length; q++) residualStds[pe.idx[q]] = S.sigR(pe.fit.residuals[q] / sd);
     }
 
     var xyPoints = {
@@ -645,8 +645,8 @@ window.PSData = (function () {
     if (N >= 2) {
       var minN = (fitType === "loess" || fitType === "poly3") ? 4
                : (fitType === "poly2") ? 3 : 2;
-      for (var fg = 0; fg < poolGroups.length; fg++) {
-        var fe = pool[poolGroups[fg]];
+      for (var fg = 0; fg < pool.length; fg++) {
+        var fe = pool[fg];
         if (!fe || fe.n < minN) continue;
         if (!(fe.xHi > fe.xLo)) continue;
         var xseq = [];
@@ -659,33 +659,21 @@ window.PSData = (function () {
           pts = S.olsFit(fe.x, fe.y, deg, ciLevel, xseq);
         }
         if (!pts || pts.xs.length < 2) continue;
-        // LOESS ships the CURVE ONLY (Torry, Aug 10 2026). loessFit's curve is
-        // exact-R: measured against stats::loess on three shapes (n = 40, 60,
-        // 200, span 0.75, degree 2) the maximum difference was 0.0000. Its
-        // BAND is 3 to 4.5% narrow, because the effective degrees of freedom
-        // are estimated as 1.2 * (n / q) rather than computed from the trace
-        // of the smoother, so pEff floors at 2 where R's enp is about 4.35.
-        // The error is a constant scalar, not a shape error, and it errs
-        // toward overconfidence. A band that is quietly too tight is worse
-        // than no band, so the fit types that CAN draw an exact one keep it
-        // and loess does not.
-        // Omitting the two arrays is the whole mechanism: the engine gates the
-        // band on `_fit.points[0].lwr !== undefined` (graphbuilder2.js ~35084)
-        // and its parallel-array decompression already guards
-        // `Array.isArray(_xfP.lwrs)` (~2946). So this needs NO engine change,
-        // which also leaves the jamovi module alone - its bands come from R's
-        // own loess and are exact, and must keep drawing.
+        // LOESS ships the CURVE ONLY (Torry, Aug 10 2026). This local quadratic
+        // smoother targets R's direct surface; Jamovi uses R's default
+        // interpolated surface. The two conventions can produce different
+        // curves. Neither this builder nor the preview invents a local band.
+        // Jamovi supplies its own R interval using predict.loess residual df.
+        // OLS bands are also omitted when the fitted model has no residual df.
         var fitPts = { parallel: true,
                        xs: pts.xs.map(S.sigR), ys: pts.ys.map(S.sigR) };
-        if (fitType !== "loess") {
+        if (fitType !== "loess" && pts.lwrs && pts.uprs) {
           fitPts.lwrs = pts.lwrs.map(S.sigR);
           fitPts.uprs = pts.uprs.map(S.sigR);
         }
-        xyFits.push({
-          group: hasGroup ? poolGroups[fg] : null,
-          fit_type: fitType,
-          points: fitPts
-        });
+        var fitEntry = { group: fe.group, fit_type: fitType, points: fitPts };
+        if (hasFacet) fitEntry.facet = fe.facet;
+        xyFits.push(fitEntry);
       }
     }
 
@@ -730,8 +718,8 @@ window.PSData = (function () {
     var xyEllipses = [];
     if (N >= 3) {
       var chi = S.qchisq2(ellLevel);
-      for (var eg = 0; eg < poolGroups.length; eg++) {
-        var ee = pool[poolGroups[eg]];
+      for (var eg = 0; eg < pool.length; eg++) {
+        var ee = pool[eg];
         if (!ee || ee.n < 3) continue;
         var cv = S.cov2(ee.x, ee.y);
         if (!cv) continue;
@@ -749,7 +737,8 @@ window.PSData = (function () {
                       y: S.sigR(cv.my + Math.cos(t) * aVec[1] + Math.sin(t) * bVec[1]) });
         }
         var ent2 = { points: pts2 };
-        if (hasGroup) ent2.group = poolGroups[eg];
+        if (hasGroup) ent2.group = ee.group;
+        if (hasFacet) ent2.facet = ee.facet;
         xyEllipses.push(ent2);
       }
     }
@@ -795,6 +784,10 @@ window.PSData = (function () {
       // fire from the app's own UI - the reason the disclosure was silently
       // dead. Top level and template are kept as fallbacks for old projects.
       missingNote: [missingNoteFor(nMissing, nTotal),
+        (fitType === "loess" && specFlag("xyShowFit")
+         && (!xyFits.length || xyFits.length < pool.length))
+          ? "LOESS unavailable for one or more panel/group cells: increase the span or supply more distinct x values"
+          : "",
         (fitType === "loess" && xyFits.length
          && specFlag("xyShowFit") && specFlag("xyShowCI"))
           ? "LOESS is drawn without a confidence band"

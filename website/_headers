@@ -37,10 +37,3 @@
   Cache-Control: public, max-age=0, must-revalidate
 /app/index.html
   Cache-Control: public, max-age=0, must-revalidate
-
-# Cloudflare Pages: keep review-only artifacts out of search results.
-# They are still reachable by URL; they simply should not be indexed.
-/v2.html
-  X-Robots-Tag: noindex
-/v3.html
-  X-Robots-Tag: noindex

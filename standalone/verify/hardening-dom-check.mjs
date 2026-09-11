@@ -81,6 +81,10 @@ Object.assign(window, {
     // drives every one of them.
     MutationObserver: class { observe() {} disconnect() {} takeRecords() { return []; } },
     GraphBuilder2: {
+        // This smoke harness uses ordinary labels and stubs the renderer.
+        // xml-export-check covers the real Unicode/serialization boundary.
+        xmlSafeText: value => String(value == null ? '' : value),
+        prepareSvgForExport: root => root,
         render(id) {
             const host = document.getElementById(id);
             host.innerHTML =
@@ -154,7 +158,7 @@ const migrated = window.PS_SHELL.migrateSnapshot({
 });
 // v4 since Aug 2026 (the formula vocabulary rewrite): a v2 snapshot
 // walks the whole chain, v2 -> v3 shape -> v4 vocabulary.
-ok(migrated && migrated.version === 4 && migrated.charts.length === 1,
+ok(migrated && migrated.version === 5 && migrated.charts.length === 1,
     'v2 becomes a current single-document project');
 ok(migrated.charts[0].module === 'freqplotbuilder',
     'migration preserves the analysis type');

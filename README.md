@@ -1,12 +1,22 @@
-# Pandion Plots: a jamovi module
+# Pandion Plots
 
-Customizable statistical graphics for [jamovi](https://www.jamovi.org), built
-around one idea: **drop in a variable or two and get a polished,
-publication-ready plot with zero configuration**, then click any part of the
-chart to customize it, right on the chart itself.
+Graphing software for statistics, built around one idea: **drop in a variable
+or two and get a polished, publication-ready plot with zero configuration**,
+then click any part of the chart to customize it, right on the chart itself.
 
-Pandion Plots provides seven main chart analyses plus the **Help Me Choose**
-guide:
+One chart engine drives every way of running it, so a chart looks and behaves
+the same wherever you build it:
+
+- **[In your browser](https://pandionplots.com/app/)**: the full application,
+  with your own data files. Nothing to install, and nothing leaves your
+  machine.
+- **[As a desktop app](https://pandionplots.com/download.html)**: the same
+  application for macOS and Windows.
+- **As a [jamovi](https://www.jamovi.org) module**: the same charts as
+  analyses inside jamovi, driven by jamovi's own data.
+
+Whichever you use, Pandion Plots provides seven main chart analyses plus the
+**Help Me Choose** guide:
 
 | Analysis | For | Chart types |
 | --- | --- | --- |
@@ -20,9 +30,8 @@ guide:
 
 ## How it works
 
-Unlike most jamovi modules, almost nothing lives in the options panel: just
-the variable boxes and a short data tip. Everything else is edited
-**directly on the chart**:
+Almost nothing lives in a settings sidebar: you choose the variables, and
+everything else is edited **directly on the chart**:
 
 - **Click any element** (a bar, an axis, the title, a legend entry, or a fit
   line) to open its lower style panel for colors, patterns, sizes, ordering,
@@ -35,8 +44,8 @@ the variable boxes and a short data tip. Everything else is edited
   (`Cmd/Ctrl+F`), the add menu, export, and the five-part **?** help family.
 - **Export** produces SVG, PNG, JPG, or vector PDF.
 
-Edits persist with the analysis, so a saved `.omv` file reopens with every
-customization intact.
+Edits persist with the chart, so a saved project or `.omv` file reopens with
+every customization intact.
 
 ## Feature highlights
 
@@ -62,7 +71,33 @@ customization intact.
   drag, value/N labels on bars, axis ranges/steps/breaks, rotated tick
   labels, legend placement.
 
-## Installation
+## The application
+
+The browser and desktop application is the full program: it brings its own
+data workspace, so it does not need jamovi or any other host.
+
+- **Data**: open CSV, Excel, or jamovi `.omv` files, or type straight into a
+  virtualized grid that stays responsive on large tables. Measure types are
+  set wherever they are chosen, and a role slot that refuses a variable says
+  why and offers the one change that would work.
+- **Projects**: project files, local autosave with last-known-good recovery,
+  and explicit project-format migration.
+- **Beyond single charts**: arrange finished charts into multi-panel layouts,
+  and keep a notebook of charts and notes alongside the data.
+- **Export**: vector PDF and SVG, plus PNG and JPG.
+- **Teaching layer**: **Help** carries the user guide, Which graph should I
+  use?, Check my chart, Label the chart parts, and the glossary, and the
+  command palette finds all of them. Three example datasets ship, each
+  pointed at the analyses it can honestly demonstrate.
+
+Run it at [pandionplots.com/app](https://pandionplots.com/app/), or download
+the macOS or Windows build from the
+[download page](https://pandionplots.com/download.html). Your data stays on
+your own machine either way.
+
+## The jamovi module
+
+The same charts appear as analyses inside jamovi, reading jamovi's data.
 
 For review or testing before Pandion Plots is listed in the jamovi library:
 
@@ -74,6 +109,9 @@ For review or testing before Pandion Plots is listed in the jamovi library:
 
 Once Pandion Plots is listed in the jamovi library, choose **Modules → jamovi
 library**, find **Pandion Plots**, and click **Install**.
+
+In jamovi the options panel holds just the variable boxes and a short data
+tip, because the chart itself is the editor.
 
 ## Quick start
 
@@ -101,26 +139,18 @@ Then click anything on the chart you want to change.
 
 ## Development
 
-Rendering happens in a custom HTML/SVG widget (`inst/widget/graphbuilder2.js`),
-not in R graphics. The R side (`R/*.b.R`) aggregates the data and ships one
-JSON payload per render.
+The chart engine is a custom HTML/SVG widget
+(`inst/widget/graphbuilder2.js`), shared verbatim by the application and the
+jamovi module; rendering never happens in R graphics. Each host does the same
+job around it: aggregate the data and ship one JSON payload per render. In the
+jamovi module that host is the R side (`R/*.b.R`); in the application it is
+`standalone/js/ps-shell.js`.
 
-### Standalone application
+### Building the application
 
-The browser-based application in `standalone/` uses the same chart engine and
-customization model as the jamovi module. Its release-candidate shell includes
-project files, local autosave with last-known-good recovery, explicit project
-format migration, vector PDF/SVG export, a virtualized large-data grid, and a
-copyable diagnostics panel under **Help → Diagnostics**.
-
-The teaching layer is reachable from the application rather than only from the
-chart toolbar: **Help** carries the user guide, Which graph should I use?, Check
-my chart, Label the chart parts and the glossary, and the command palette finds
-all of them. Three example datasets ship, each pointed at the analyses it can
-honestly demonstrate. Measure types are defined wherever they are chosen, and a
-role slot that refuses a variable says why and offers the one change that would
-work. Presentation runs on a token layer (`:root` in `standalone/index.html`);
-add a token when a role is missing rather than a hex literal.
+The application source is in `standalone/`. Presentation runs on a token layer
+(`:root` in `standalone/index.html`); add a token when a role is missing rather
+than a hex literal.
 
 Build the distributable single-file application with:
 
@@ -153,7 +183,7 @@ live chart is about 0.011%, so anything at or under that is identical.
 > before `jmc --build .`. **Why it matters:** without a current
 > `graphbuilder2.min.js`, the module still builds and installs cleanly, but
 > at runtime it falls back to inlining the full ~6 MB un-minified source into
-> the results HTML on every render — which can freeze jamovi's results view
+> the results HTML on every render, which can freeze jamovi's results view
 > so the chart never draws, while everything else looks fine. (A module built
 > that way shows a "built without its minified chart bundle" note under the
 > chart area.) Release preparation and CI verify the committed source hash and
@@ -167,7 +197,7 @@ jmvtools::prepare()   # regenerate headers + validate the yaml (fast)
 ```bash
 # build + side-load into a local jamovi
 # (NOT jmvtools::install()/build(); they hang or are not exported under
-# jamovi 2.7.32 — this helper drives the jamovi-compiler's --build mode)
+# jamovi 2.7.32; this helper drives the jamovi-compiler's --build mode)
 bash scripts/jmv-build-install.sh
 ```
 
