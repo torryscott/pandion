@@ -39,9 +39,11 @@ console.log('  ok  start screen uses the supplied Pandion wing vector mark');
 
 await page.click('#ps-welcome-sample');
 await page.waitForTimeout(180);
+// The brand block is a generic container: its name is the visible text, and
+// an aria-label on it is prohibited (A11Y-07, axe aria-prohibited-attr). The
+// probe used to demand that label, so the accessibility fix turned it red.
 if (await page.locator('.ps-brand strong').textContent() !== 'Pandion Plots' ||
-    await page.locator('.ps-brand').getAttribute('aria-label') !==
-        'Pandion Plots' ||
+    await page.locator('.ps-brand').getAttribute('aria-label') !== null ||
     await page.locator('.ps-brand .ps-brand-logo use').getAttribute('href') !==
         '#ps-pandion-wing')
     throw new Error('application header branding is incomplete');
