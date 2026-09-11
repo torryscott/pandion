@@ -551,24 +551,41 @@
   // Files from before the id list fall back to the version compare.
   // The check is a pure function so the gate can probe it directly.
   var NUMERICAL_CHANGES = [
-<<<<<<<< HEAD:website/app/lib/ps-shell.8f76c55198.js
-    { since: "3.1.2",
-      label: "charts and statistics retain the full precision of source data, " +
-             "including small differences between large values" },
-    { since: "3.1.2",
-      label: "ROUND now matches R at exact halves (2.5 rounds to 2, " +
-             "ties go to the even neighbor)" },
-    { since: "3.1.2",
+    { id: "anova-residual-stability", since: "3.1.2",
+      label: "factorial, repeated-measures and mixed ANOVA keep small residual variance instead of erasing it" },
+    { id: "rm-crossed-numeric-precision", since: "3.1.2",
+      label: "crossed repeated-measures data reach the chart at full numeric precision" },
+    { id: "facet-fit-populations", since: "3.1.2",
+      label: "scatter fits, bands and ellipses use each panel's own observations" },
+    { id: "scatter-stats-unavailable", since: "3.1.2",
+      label: "undefined scatter correlations show as unavailable instead of p < .001" },
+    { id: "fit-extension-evaluates-model", since: "3.1.2",
+      label: "extended regression curves and bands evaluate the fitted model" },
+    { id: "literal-group-names", since: "3.1.2",
+      label: "group names such as constructor or toString no longer hide points or fits" },
+    { id: "axis-tick-loop-guard", since: "3.1.2",
+      label: "very narrow axes no longer hang when a tick step rounds away" },
+    { id: "loess-direct-surface", since: "3.1.2",
+      label: "LOESS curves follow R's direct-surface calculation" },
+    { id: "direct-tail-probabilities", since: "3.1.2",
+      label: "very small t-test and ANOVA p values are no longer rounded to zero" },
+    { id: "loess-band-residual-df", since: "3.1.2",
+      label: "jamovi LOESS confidence bands use residual degrees of freedom" },
+    { id: "polynomial-scaled-qr", since: "3.1.2",
+      label: "quadratic and cubic fits survive a change of measurement units" },
+    { id: "constant-sample-zero-variance", since: "3.1.2",
+      label: "constant samples keep an exact mean and zero variance" },
+    { id: "full-precision", since: "3.1.2",
+      label: "charts and statistics retain the full precision of source data, including small differences between large values" },
+    { id: "computed-columns-full-precision", since: "3.1.2",
+      label: "computed columns keep full numeric precision" },
+    { id: "round-extreme-decimals", since: "3.1.2",
+      label: "ROUND handles extreme decimal places" },
+    { id: "round-half-even", since: "3.1.2",
+      label: "ROUND now matches R at exact halves (2.5 rounds to 2, ties go to the even neighbor)" },
+    { id: "mwu-exact-large-n", since: "3.1.2",
       label: "Mann-Whitney exact p values are correct at larger samples" },
-    { since: "3.1.2",
-========
-    { id: "round-half-even", since: "3.2.0",
-      label: "ROUND now matches R at exact halves (2.5 rounds to 2, " +
-             "ties go to the even neighbor)" },
-    { id: "mwu-exact-large-n", since: "3.2.0",
-      label: "Mann-Whitney exact p values are correct at larger samples" },
-    { id: "spearman-as89", since: "3.2.0",
->>>>>>>> 94c9fe6 (Artifacts regenerated with the build stamp):website/app/lib/ps-shell.c0526f8c5f.js
+    { id: "spearman-as89", since: "3.1.2",
       label: "Spearman p values use R's exact algorithm" }
   ];
   function _verParts(v) {
@@ -7030,16 +7047,11 @@
         "Could not read that project file (unrecognized contents).");
       return { error: "Could not read that project file." };
     }
-<<<<<<<< HEAD:website/app/lib/ps-shell.8f76c55198.js
     PROJECT_CHOSEN = true;
     dataHistoryClear();
     importLibraries(parsed.libraries);
-    var numNote = _numericalNoticeFor(parsed.fileAppVersion, APP_VERSION);
-========
     var numNote = _numericalNoticeFor(parsed.fileAppVersion, APP_VERSION,
                                       parsed.fileNumericalChanges);
-    if (numNote) showToast(numNote);
->>>>>>>> 94c9fe6 (Artifacts regenerated with the build stamp):website/app/lib/ps-shell.c0526f8c5f.js
     PROJECT_REV = 0;
     FILE_SAVED_REV = fileName ? 0 : null;
     FILE_LABEL = fileName || null;
@@ -8651,12 +8663,8 @@
             compress: true, putOnlyUsedFonts: true });
           pdf.setProperties({
             title: (PROJECT.name || "Pandion Plots") + " - Notebook",
-<<<<<<<< HEAD:website/app/lib/ps-shell.8f76c55198.js
-            creator: "Pandion Plots " + APP_VERSION });
-          drawFigure = tagPdfFigures(pdf);
-========
             creator: appStamp() });
->>>>>>>> 94c9fe6 (Artifacts regenerated with the build stamp):website/app/lib/ps-shell.c0526f8c5f.js
+          drawFigure = tagPdfFigures(pdf);
         } else {
           pdf.addPage([d.w, d.h], d.w >= d.h ? "landscape" : "portrait");
         }
