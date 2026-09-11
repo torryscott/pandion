@@ -17,6 +17,28 @@
 
 # Auto-generated chartSpec spec table (speed pass Phase 2). See CLAUDE.md convention 22.
 .distplotbuilderSpecTable <- list(
+    # The dot type rides the line machinery, so its panel commits the line
+    # family's keys; without these rows the client allowlist dropped every
+    # such edit on the echo (Torry, Sep 11 2026: the group gap snapped back).
+    # Identical to the Compare Groups rows. The two outlier keys were a
+    # pre-existing gap on the box family's outlier overlay.
+    list(arg = "line_marker_spread", opt = "lineMarkerSpread", bool = FALSE, default = 0.35),
+    list(arg = "line_point_size", opt = "linePointSize", bool = FALSE, default = -1),
+    list(arg = "line_point_shape", opt = "linePointShape", bool = FALSE, default = "circle"),
+    list(arg = "line_point_color", opt = "linePointColor", bool = FALSE, default = ""),
+    list(arg = "line_point_outline_color", opt = "linePointOutlineColor", bool = FALSE, default = "#000000"),
+    list(arg = "line_point_outline_width", opt = "linePointOutlineWidth", bool = FALSE, default = 0),
+    list(arg = "line_group_overrides", opt = "lineGroupOverrides", bool = FALSE, default = list()),
+    list(arg = "line_width", opt = "lineWidth", bool = FALSE, default = 2),
+    list(arg = "line_style", opt = "lineStyle", bool = FALSE, default = "solid"),
+    list(arg = "line_opacity", opt = "lineOpacity", bool = FALSE, default = 1),
+    list(arg = "line_smooth", opt = "lineSmooth", bool = TRUE, default = FALSE),
+    list(arg = "show_line_points", opt = "showLinePoints", bool = TRUE, default = TRUE),
+    list(arg = "line_connect_facets", opt = "lineConnectFacets", bool = TRUE, default = FALSE),
+    list(arg = "line_color_match_marker", opt = "lineColorMatchMarker", bool = TRUE, default = TRUE),
+    list(arg = "error_bar_cap_size_line", opt = "errorBarCapSizeLine", bool = FALSE, default = 10),
+    list(arg = "bar_outlier_size", opt = "barOutlierSize", bool = FALSE, default = 1),
+    list(arg = "bar_outlier_width", opt = "barOutlierWidth", bool = FALSE, default = 1.6),
     list(arg = "facet_strip_position", opt = "facetStripPosition", bool = FALSE, default = "top"),
     list(arg = "facet_strip_labels", opt = "facetStripLabels", bool = FALSE, default = list()),
     list(arg = "facet_strip_underline_color", opt = "facetStripUnderlineColor", bool = FALSE, default = "#888888"),
