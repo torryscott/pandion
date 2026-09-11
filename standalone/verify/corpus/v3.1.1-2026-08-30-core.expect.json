@@ -1,0 +1,73 @@
+{
+  "frozenAt": "2026-08-30T18:14:52.903Z",
+  "app": "unknown",
+  "gitSha": "2a2ae2d",
+  "expect": {
+    "types": {
+      "group": "nominal",
+      "a": "continuous",
+      "b": "continuous",
+      "q1": "nominal",
+      "q2": "nominal",
+      "q3": "nominal",
+      "zsc": "continuous",
+      "rnd": "continuous",
+      "m": "continuous"
+    },
+    "rnd": [
+      "2.5",
+      "-1.5",
+      "",
+      "0.3",
+      "2.7",
+      "6.5"
+    ],
+    "zsc": [
+      "-0.2159272982",
+      "-1.591747251",
+      "",
+      "-0.9554305228",
+      "-0.1557351752",
+      "1.159892655"
+    ],
+    "m": [
+      "2.75",
+      "-0.75",
+      "-7",
+      "6.175",
+      "3.8375",
+      "7.25"
+    ],
+    "excluded_a2": true,
+    "chartCount": 3,
+    "charts": [
+      {
+        "module": "plotbuilder",
+        "graphType": "bar",
+        "probe": {
+          "barCornerRadius": 30,
+          "xyShowEllipse": false,
+          "chartTitle": "Frozen bar"
+        }
+      },
+      {
+        "module": "xyplotbuilder",
+        "graphType": "scatter",
+        "probe": {
+          "barCornerRadius": 0,
+          "xyShowEllipse": true,
+          "chartTitle": ""
+        }
+      },
+      {
+        "module": "likertplotbuilder",
+        "graphType": "likertdiverging",
+        "probe": {
+          "barCornerRadius": 0,
+          "xyShowEllipse": false,
+          "chartTitle": ""
+        }
+      }
+    ]
+  }
+}

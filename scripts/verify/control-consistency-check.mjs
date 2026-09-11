@@ -1,6 +1,7 @@
 // Regression checks for the July 2026 control-consistency pass.
 import { createRequire } from 'node:module';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import path from 'node:path';
 
 function loadPlaywright() {
@@ -17,7 +18,19 @@ const OUT = process.env.GB2_VERIFY_OUT || '/tmp/gb2-verify';
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../..');
 const source = readFileSync(path.join(ROOT, 'inst/widget/graphbuilder2.js'), 'utf8');
 const guide = readFileSync(path.join(ROOT, 'docs/user-guide.html'), 'utf8');
-const launchQa = readFileSync(path.join(ROOT, 'LAUNCH-QA-CHECKLIST.html'), 'utf8');
+// LAUNCH-QA-CHECKLIST.html is deliberately untracked (Torry's QA app
+// with its own saved state), so it exists only in the primary checkout
+// - a probe/* WORKTREE gate found nothing at its ROOT and died here
+// (Aug 29 2026). Fall back to the primary checkout this worktree
+// belongs to; `git worktree list` prints it first.
+function readMaybeWorktree(rel) {
+    const local = path.join(ROOT, rel);
+    if (existsSync(local)) return readFileSync(local, 'utf8');
+    const primary = execSync('git worktree list', { cwd: ROOT, encoding: 'utf8' })
+        .split('\n')[0].split(' ')[0];
+    return readFileSync(path.join(primary, rel), 'utf8');
+}
+const launchQa = readMaybeWorktree('LAUNCH-QA-CHECKLIST.html');
 const browser = await chromium.launch();
 let fails = 0;
 

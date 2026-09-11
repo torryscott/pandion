@@ -87,6 +87,9 @@ echo "version: $version"
 echo "branch:  $branch"
 echo "commit:  $(git rev-parse --short HEAD)"
 node scripts/release-version.mjs check "$version"
+# The ledger must own every numerical change this version ships and must
+# not still call the version pending (release-version.mjs set flips it).
+node standalone/verify/numerical-ledger-check.mjs
 
 echo "== verify committed minified shared engine"
 bash scripts/minify-widget.sh --check
@@ -103,10 +106,18 @@ bash website/build.sh
 echo "== verify generated artifact parity"
 node standalone/verify/artifact-parity-check.mjs
 
+echo "== freeze this release's persistence-corpus entry"
+# Append-only: the frozen files are the real old bytes the corpus
+# compatibility gate opens forever; the freeze refuses to overwrite an
+# existing entry, so re-preparing the same version the same day is a
+# no-op rather than a regeneration.
+node standalone/verify/corpus-freeze.mjs core
+node standalone/verify/corpus-compat-check.mjs
+
 # Generated public files are committed deliberately. A release prepared from a
 # tree that silently changed during its own build is not reproducible from HEAD.
-if ! git diff --quiet || ! git diff --cached --quiet; then
-    echo "Release builds changed committed files." >&2
+if [[ -n "$(git status --porcelain)" ]]; then
+    echo "Release builds changed or added source files (including frozen corpus entries)." >&2
     echo "Review and commit these deterministic updates, then rerun preparation:" >&2
     git status --short >&2
     exit 1
@@ -130,7 +141,8 @@ if [[ "$skip_tests" == "false" ]]; then
     node website/verify-interactions.mjs
     node website/verify-image-alternatives.mjs
     node website/verify-reflow.mjs
-    node website/verify-axe.mjs
+    echo "== required accessibility checks and review evidence"
+    bash scripts/verify/accessibility-run.sh
     node standalone/verify/artifact-parity-check.mjs
     gates+=(shared-engine-min standalone-source-and-dist website-images-interactions-reflow-and-axe)
 else

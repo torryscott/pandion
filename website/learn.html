@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Learn - Pandion Plots</title>
-<meta name="description" content="Short, illustrated, step-by-step guides to Pandion Plots: getting started, statistics, chart choice, repeated measures, finishing, and data preparation.">
+<meta name="description" content="Learn Pandion Plots from first chart to full reference: short, illustrated guides, a hands-on workshop, and the complete user guide.">
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
 <link rel="apple-touch-icon" href="assets/icon-180.png">
 <meta name="theme-color" content="#192E49">
@@ -12,7 +12,7 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Pandion Plots">
 <meta property="og:title" content="Learn - Pandion Plots">
-<meta property="og:description" content="Short, illustrated, step-by-step guides to Pandion Plots: getting started, statistics, chart choice, repeated measures, finishing, and data preparation.">
+<meta property="og:description" content="Learn Pandion Plots from first chart to full reference: short, illustrated guides, a hands-on workshop, and the complete user guide.">
 <meta property="og:url" content="https://pandionplots.com/learn.html">
 <meta property="og:image" content="https://pandionplots.com/assets/share-card-copy-refresh.png">
 <meta property="og:image:width" content="1200">
@@ -56,6 +56,7 @@
     font-size: clamp(22px, 3vw, 27px); letter-spacing: -0.01em;
   }
   .sec-lede { margin: 0 0 26px; color: var(--muted); max-width: 46em; }
+  .sec-aside { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
 
   .step { display: grid; grid-template-columns: 40px 1fr; gap: 14px; margin: 0 0 34px; }
   .step-n {
@@ -158,6 +159,15 @@
     display: block; color: var(--navy); font-size: 17px; margin: 0 0 3px;
   }
   .guides span { color: var(--muted); font-size: 14.5px; }
+  .learn-jumps {
+    display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0 4px;
+  }
+  .learn-jumps a {
+    border: 1px solid var(--line); border-radius: 20px; padding: 6px 15px;
+    text-decoration: none; color: var(--navy); font-size: 14px;
+    font-weight: 600; transition: border-color 0.15s, color 0.15s;
+  }
+  .learn-jumps a:hover { border-color: var(--cobalt); color: var(--cobalt); }
 </style>
 <link rel="stylesheet" href="assets/site-nav.css">
 <script src="assets/site-nav.js" defer></script>
@@ -180,7 +190,6 @@
     <nav class="nav-links" id="site-nav" aria-label="Site">
       <a href="gallery.html">Gallery</a>
       <a href="learn.html" aria-current="page">Learn</a>
-      <a href="docs/">Docs</a>
       <a href="index.html#downloads">Downloads</a>
       <a href="about.html">About</a>
       <a href="support.html">Support</a>
@@ -194,14 +203,22 @@
 
     <div class="intro">
       <p class="kicker">Learn</p>
-      <h1>Short, illustrated guides.</h1>
+      <h1>From first chart to full reference.</h1>
       <p class="lede">
-        Every guide is step by step, every picture is the real app, and
-        none of them need an account. Start with the getting-started
-        walkthrough for your platform, then go deeper wherever your work
-        points.
+        The short, illustrated guides come first: step by step, every
+        picture from the real app, and no account needed. Start with
+        the walkthrough for your platform, run the workshop for a
+        hands-on session, and keep the user guide for looking things
+        up.
       </p>
     </div>
+
+    <nav class="learn-jumps" aria-label="Sections on this page">
+      <a href="#start-here">Start here</a>
+      <a href="#workshop">Workshops</a>
+      <a href="#deeper">Go deeper</a>
+      <a href="#guide">User guide</a>
+    </nav>
 
     <section class="tut" id="start-here">
       <h2>Start here</h2>
@@ -209,13 +226,9 @@
       <ul class="guides">
         <li><a href="start.html">
           <strong>Getting started</strong>
-          <span>The browser and desktop app: open, load data, build a
-          grouped bar chart, export.</span>
-        </a></li>
-        <li><a href="start-jamovi.html">
-          <strong>Getting started in jamovi</strong>
-          <span>Install the module, fix measure types, and build the same
-          chart inside jamovi.</span>
+          <span>From a blank screen to a finished grouped bar chart:
+          load data, assign roles, and refine by clicking. One guide,
+          with a switch for the app or the jamovi module.</span>
         </a></li>
       </ul>
     </section>
@@ -223,22 +236,23 @@
     <section class="tut" id="workshop">
       <h2>Run it as a workshop</h2>
       <p class="sec-lede">
-        A hands-on session in seven paged tasks: open real data, let the
-        wizard pick the analysis, build and recreate a figure, test it,
-        and get caught by the graph checker. Works self-paced too.
+        Hands-on sessions in paged tasks: bring a group through
+        together, or work through one on your own.
       </p>
       <ul class="guides">
         <li><a href="workshop.html">
-          <strong>The workshop</strong>
-          <span>Seven tasks, one per page, on the Student wellbeing
-          survey. Start here as a participant or on your own.</span>
-        </a></li>
-        <li><a href="workshop-guide.html">
-          <strong>Facilitator guide</strong>
-          <span>A sample session clock, three live demos, and rescues
-          for the common stuck points.</span>
+          <strong>Orientation</strong>
+          <span>Seven tasks, one per page, on the Student Wellbeing
+          Survey: open real data, let the wizard pick the analysis,
+          build and recreate a figure, test it, and get caught by the
+          graph checker.</span>
         </a></li>
       </ul>
+      <p class="sec-aside">
+        Facilitating? The <a href="workshop-guide.html">facilitator
+        guide</a> has a sample session clock, three live demos, and
+        rescues for the common stuck points.
+      </p>
     </section>
 
     <section class="tut" id="deeper">
@@ -278,12 +292,32 @@
       </ul>
     </section>
 
+    <section class="tut" id="guide">
+      <h2>The user guide</h2>
+      <p class="sec-lede">
+        The reference: every chart type, panel, control, and statistic,
+        explained in one place. Reach for it when you want to look
+        something up rather than follow a path.
+      </p>
+      <ul class="guides">
+        <li><a href="docs/">
+          <strong>Pandion Plots user guide</strong>
+          <span>The complete manual: the seven analyses, click-to-edit
+          styling, the statistics panel, exporting, and
+          troubleshooting.</span>
+        </a></li>
+        <li><a href="docs/#glossary">
+          <strong>Statistics glossary</strong>
+          <span>131 plain-language definitions, each with how to read it
+          and the common misread.</span>
+        </a></li>
+      </ul>
+    </section>
     <div class="closer">
       <p>
-        Prefer reference over narrative? The
-        <a href="docs/">user guide</a> documents every chart type and
-        control, and the <a href="gallery.html">gallery</a> shows the
-        defaults across all seven analyses.
+        Want to see the output before the lessons? The
+        <a href="gallery.html">gallery</a> shows the default look across
+        all seven analyses.
       </p>
     </div>
 
@@ -298,14 +332,14 @@
       Pandion Plots
     </a>
     <span>Made by Torry Scott Dennis, PhD.</span>
-    <span data-role="foot-meta">Version 3.1.0 &middot;
+    <span data-role="foot-meta">Version 3.1.1 &middot;
       <a href="https://github.com/torryscott/pandion/blob/main/LICENSE">GPL-3.0</a>
     </span>
     <nav class="foot-links" aria-label="Footer">
       <a href="app/">Try it</a>
       <a href="gallery.html">Gallery</a>
       <a href="learn.html">Learn</a>
-      <a href="docs/">Docs</a>
+      <a href="docs/">User guide</a>
       <a href="about.html#cite">How to cite</a>
       <a href="about.html">About</a>
       <a href="support.html">Support</a>

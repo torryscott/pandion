@@ -27,7 +27,7 @@ function loadPlaywright() {
     process.exit(2);
 }
 const { chromium } = loadPlaywright();
-const PAGE = 'file://' + (process.env.PS_PAGE
+const PAGE = process.env.PS_URL || 'file://' + (process.env.PS_PAGE
     ? path.resolve(process.env.PS_PAGE)
     : path.resolve(new URL('.', import.meta.url).pathname, '..', 'index.html'));
 
@@ -144,7 +144,10 @@ async function sampleApp(opts) {
     });
     ok(m.present, 'a manifest is linked');
     // file:// cannot fetch a sibling manifest in every context; only assert the
-    // CONTENTS when it actually loaded (the hosted copy always can).
+    // CONTENTS when it actually loaded. An HTTP run must load it; otherwise
+    // a missing hosted manifest would silently pass this same check.
+    if (/^https?:/.test(PAGE))
+        ok(m.fetched, 'the hosted manifest is fetchable and valid JSON');
     if (m.fetched) {
         ok(m.name && m.start, 'manifest carries name and start_url');
         ok(m.display === 'standalone', `display is standalone (${m.display})`);

@@ -96,7 +96,7 @@ d <- data.frame(
 # Serialize the table for the JS side (strings; NA -> "NA").
 cellStr <- function(v) {
     if (is.na(v)) return("NA")
-    if (is.numeric(v)) return(format(v, digits = 15, trim = TRUE, scientific = FALSE))
+    if (is.numeric(v)) return(format(v, digits = 17, trim = TRUE, scientific = FALSE))
     as.character(v)
 }
 tab_rows <- lapply(seq_len(N), function(i)
@@ -220,6 +220,18 @@ addCase("xy_poly2k", "xyplotbuilder",
                       facetVar = NULL, sizeVar = NULL, labelVar = NULL,
                       xyFitType = "poly2", xyStatsCorrType = "kendall",
                       chartSpec = ""))
+addCase("xy_poly3", "xyplotbuilder",
+        list(xvar = "num2", yvar = "num3"),
+        list(xyFitType = "poly3"),
+        xyplotbuilder(data = d, xvar = "num2", yvar = "num3", groupVar = NULL,
+                      facetVar = NULL, sizeVar = NULL, labelVar = NULL,
+                      xyFitType = "poly3", chartSpec = ""))
+addCase("xy_poly3_grouped80", "xyplotbuilder",
+        list(xvar = "num2", yvar = "num3", groupVar = "g2", facetVar = "site"),
+        list(xyFitType = "poly3", xyCILevel = 0.80),
+        xyplotbuilder(data = d, xvar = "num2", yvar = "num3", groupVar = "g2",
+                      facetVar = "site", sizeVar = NULL, labelVar = NULL,
+                      xyFitType = "poly3", xyCILevel = 0.80, chartSpec = ""))
 addCase("xy_ties", "xyplotbuilder",
         list(xvar = "num1", yvar = "num3"),
         list(),
@@ -279,7 +291,7 @@ addCase("lk_cont", "likertplotbuilder",
 
 out <- list(table = tab, cases = runs)
 con <- file(file.path(OUT, "expected.json"), open = "wb")
-writeLines(as.character(jsonlite::toJSON(out, auto_unbox = TRUE, digits = I(10),
+writeLines(as.character(jsonlite::toJSON(out, auto_unbox = TRUE, digits = I(17),
                                          null = "null")), con, useBytes = TRUE)
 close(con)
 cat("wrote", file.path(OUT, "expected.json"), "-", length(runs), "cases\n")

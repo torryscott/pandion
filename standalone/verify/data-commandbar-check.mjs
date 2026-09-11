@@ -72,7 +72,7 @@ if (await page.locator(
 await page.click('#ps-datagrid th[data-grid-col="condition"]');
 await page.waitForTimeout(80);
 if (!(await page.locator('#ps-variable-name').isVisible()) ||
-    !(await page.locator('#ps-variable-type').isVisible()) ||
+    !(await page.locator('#ps-variable-type-group').isVisible()) ||
     !(await page.locator('#ps-variable-stats').isVisible()))
     throw new Error('inspector cleanup removed variable properties or summary');
 console.log('  ok  Data opens with the exact Chart Undo, Redo, and Search icons');

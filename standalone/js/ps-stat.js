@@ -1,6 +1,6 @@
 // Pandion Plots standalone - numeric core (R-parity stat mirrors).
 // Everything here mirrors the R functions the jamovi .b.R files call, at
-// the 10-significant-digit precision jsonlite ships (digits = I(10)).
+// full double precision (R payloads serialize with digits = I(17)).
 // Ported/adapted where noted from graphbuilder2.js's own client mirrors
 // (which are R-parity-verified in the repo's probe fleet).
 // Keep this file ASCII (escapes only) and never persist _-prefixed keys.
@@ -9,12 +9,18 @@ window.PSStat = (function () {
   "use strict";
 
   function sigR(x) {
-    return (typeof x === "number" && isFinite(x)) ? Number(x.toPrecision(10)) : x;
+    // Legacy public helper: payload numbers now retain the original double.
+    // Formatting belongs in labels, never in observations or intermediates.
+    return x;
   }
   function mean(v) {
-    var s = 0;
-    for (var i = 0; i < v.length; i++) s += v[i];
-    return s / v.length;
+    var s = 0, same = true;
+    for (var i = 0; i < v.length; i++) {
+      if (v[i] !== v[0]) same = false;
+      s += v[i];
+    }
+    // Identical observations have this exact mean, independent of sample n.
+    return v.length && same ? v[0] : s / v.length;
   }
   function median(v) {
     var s = v.slice().sort(function (a, b) { return a - b; });
@@ -24,9 +30,12 @@ window.PSStat = (function () {
   function sdSample(v) {
     var n = v.length;
     if (n < 2) return NaN;
-    var m = mean(v), ss = 0;
-    for (var i = 0; i < n; i++) ss += (v[i] - m) * (v[i] - m);
-    return Math.sqrt(ss / (n - 1));
+    var m = mean(v), ss = 0, same = true;
+    for (var i = 0; i < n; i++) {
+      if (v[i] !== v[0]) same = false;
+      ss += (v[i] - m) * (v[i] - m);
+    }
+    return same ? 0 : Math.sqrt(ss / (n - 1));
   }
 
   // ---- gamma / beta machinery (Lanczos + Lentz continued fractions) ----
@@ -501,8 +510,8 @@ window.PSStat = (function () {
   }
 
   // ---- least squares fits with CI (graphbuilder2 _xyFitOLS port; the
-  // centered-basis normal equations span the same column space as R's
-  // poly() fit, so fitted values + CI match lm/predict analytically) ----
+  // scaled QR basis spans the same column space as R's poly() fit;
+  // confidence intervals require positive residual degrees of freedom) ----
   function matInv(M, p) {
     var A = [], i, j;
     for (i = 0; i < p; i++) {
@@ -529,40 +538,72 @@ window.PSStat = (function () {
   }
   function olsFit(xs, ys, deg, level, xseq) {
     var n = xs.length, p = deg + 1, i, j, k;
-    if (n < p) return null;
-    var xbar = 0; for (i = 0; i < n; i++) xbar += xs[i]; xbar /= n;
-    function basis(xc) {
-      var b = [1], v = 1;
-      for (var d = 1; d <= deg; d++) { v *= xc; b.push(v); }
-      return b;
+    if (n < p || ys.length !== n || deg < 1 || deg > 3) return null;
+    // Normalize both coordinates before fitting. Raw powers and normal
+    // equations lose rank merely by changing units, and square the design's
+    // condition number. Twice-orthogonalized QR avoids both problems for
+    // the at-most-four columns used here.
+    var x0 = xs[0], y0 = ys[0], xscale = 0, yscale = 0;
+    for (i = 0; i < n; i++) {
+      if (!isFinite(xs[i]) || !isFinite(ys[i])) return null;
+      xscale = Math.max(xscale, Math.abs(xs[i] - x0));
+      yscale = Math.max(yscale, Math.abs(ys[i] - y0));
     }
-    var XtX = [], Xty = [];
-    for (i = 0; i < p; i++) { XtX[i] = []; for (j = 0; j < p; j++) XtX[i][j] = 0; Xty[i] = 0; }
-    for (k = 0; k < n; k++) {
-      var b = basis(xs[k] - xbar), yk = ys[k];
-      for (i = 0; i < p; i++) { Xty[i] += b[i] * yk; for (j = 0; j < p; j++) XtX[i][j] += b[i] * b[j]; }
+    if (!(xscale > 0) || !isFinite(xscale) || !isFinite(yscale)) return null;
+    if (yscale === 0) yscale = 1;
+    var z = [], response = [], Q = [], R = [], qty = [];
+    for (i = 0; i < n; i++) { z[i] = (xs[i] - x0) / xscale; response[i] = (ys[i] - y0) / yscale; }
+    for (j = 0; j < p; j++) {
+      R[j] = []; for (k = 0; k < p; k++) R[j][k] = 0;
+      var col = []; for (i = 0; i < n; i++) col[i] = Math.pow(z[i], j);
+      for (var pass = 0; pass < 2; pass++) {
+        for (k = 0; k < j; k++) {
+          var dot = 0; for (i = 0; i < n; i++) dot += Q[k][i] * col[i];
+          R[k][j] += dot;
+          for (i = 0; i < n; i++) col[i] -= dot * Q[k][i];
+        }
+      }
+      var norm2 = 0; for (i = 0; i < n; i++) norm2 += col[i] * col[i];
+      var norm = Math.sqrt(norm2);
+      // This is a relative rank check in the normalized design, independent
+      // of x/y units. Refuse a singular fit instead of inventing coefficients.
+      if (!(norm > 1e-12 * Math.sqrt(n))) return null;
+      R[j][j] = norm; Q[j] = []; qty[j] = 0;
+      for (i = 0; i < n; i++) { Q[j][i] = col[i] / norm; qty[j] += Q[j][i] * response[i]; }
     }
-    var Inv = matInv(XtX, p); if (!Inv) return null;
     var beta = [];
-    for (i = 0; i < p; i++) { var sb = 0; for (j = 0; j < p; j++) sb += Inv[i][j] * Xty[j]; beta[i] = sb; }
-    var rss = 0;
-    for (k = 0; k < n; k++) {
-      var b2 = basis(xs[k] - xbar), yh = 0;
-      for (i = 0; i < p; i++) yh += beta[i] * b2[i];
-      var e = ys[k] - yh; rss += e * e;
+    for (j = p - 1; j >= 0; j--) {
+      var value = qty[j]; for (k = j + 1; k < p; k++) value -= R[j][k] * beta[k];
+      beta[j] = value / R[j][j];
     }
-    var dfres = n - p; if (dfres < 1) dfres = 1;
-    var s2 = rss / dfres;
-    var tcrit = qt(1 - (1 - level) / 2, dfres);
-    var out = { xs: [], ys: [], lwrs: [], uprs: [] };
-    for (var q = 0; q < xseq.length; q++) {
-      var v = basis(xseq[q] - xbar), yh2 = 0;
-      for (i = 0; i < p; i++) yh2 += beta[i] * v[i];
-      var qf = 0;
-      for (i = 0; i < p; i++) { var iv = 0; for (j = 0; j < p; j++) iv += Inv[i][j] * v[j]; qf += v[i] * iv; }
-      var se = Math.sqrt(Math.max(0, s2 * qf));
-      out.xs.push(xseq[q]); out.ys.push(yh2);
-      out.lwrs.push(yh2 - tcrit * se); out.uprs.push(yh2 + tcrit * se);
+    function fitted(t) {
+      var value = beta[p - 1];
+      for (var d = p - 2; d >= 0; d--) value = value * t + beta[d];
+      return value;
+    }
+    var rss = 0;
+    for (i = 0; i < n; i++) { var e = response[i] - fitted(z[i]); rss += e * e; }
+    var dfres = n - p, hasCI = dfres > 0;
+    var sigma = hasCI ? Math.sqrt(rss / dfres) : 0;
+    var tcrit = hasCI ? qt(1 - (1 - level) / 2, dfres) : 0;
+    var out = { xs: [], ys: [] };
+    if (hasCI) { out.lwrs = []; out.uprs = []; }
+    for (i = 0; i < xseq.length; i++) {
+      var t = (xseq[i] - x0) / xscale, yh = y0 + yscale * fitted(t);
+      if (!isFinite(xseq[i]) || !isFinite(yh)) return null;
+      out.xs.push(xseq[i]); out.ys.push(yh);
+      if (hasCI) {
+        // ||R^-T b|| gives prediction leverage without forming (X'X)^-1.
+        var v = [], power = 1, leverage = 0;
+        for (j = 0; j < p; j++) {
+          var a = power; power *= t;
+          for (k = 0; k < j; k++) a -= R[k][j] * v[k];
+          v[j] = a / R[j][j]; leverage += v[j] * v[j];
+        }
+        var half = yscale * (tcrit * sigma * Math.sqrt(leverage));
+        if (!isFinite(half) || !isFinite(yh - half) || !isFinite(yh + half)) return null;
+        out.lwrs.push(yh - half); out.uprs.push(yh + half);
+      }
     }
     return out;
   }
@@ -583,71 +624,86 @@ window.PSStat = (function () {
              r2: tss > 0 ? 1 - rss / tss : NaN, rss: rss,
              residuals: xs.map(function (x, i2) { return ys[i2] - (intercept + slope * x); }) };
   }
-  // Loess port (graphbuilder2 _xyFitLoess): APPROXIMATE vs stats::loess
-  // (documented preview-grade math; the standalone has no R to correct it).
   function loessFit(xs, ys, span, level, xseq) {
-    var n = xs.length, i; if (n < 4) return null;
+    // Direct Gaussian local quadratic LOESS, curve only. Neighborhood sizing
+    // follows stats::loess (floor(n * span + 1e-5)), not its default interpolated
+    // surface. See docs/REGRESSION-VALIDATION.md for the reference contract.
+    var n = xs.length, i;
+    if (n < 4 || ys.length !== n || xseq.length < 2) return null;
+    for (i = 0; i < n; i++) if (!isFinite(xs[i]) || !isFinite(ys[i])) return null;
+    if (!(span > 0)) span = 0.75;
+    if (!isFinite(span)) return null;
+    var q = Math.min(n, Math.floor(n * span + 1e-5));
+    if (q < 4) return null;
     var idx = []; for (i = 0; i < n; i++) idx.push(i);
     idx.sort(function (a, b) { return xs[a] - xs[b]; });
     var sx = [], sy = [];
     for (i = 0; i < n; i++) { sx.push(xs[idx[i]]); sy.push(ys[idx[i]]); }
-    if (!(span > 0)) span = 0.75;
-    var q = Math.max(3, Math.min(n, Math.floor(span * n + 0.5)));
-    function localFit(x0, withVar) {
-      var lo2 = 0, hi2 = n;
-      while (lo2 < hi2) { var md = (lo2 + hi2) >> 1; if (sx[md] < x0) lo2 = md + 1; else hi2 = md; }
-      var L = lo2, R = lo2;
-      while (R - L < q && (L > 0 || R < n)) {
-        if (L === 0) R++;
-        else if (R === n) L--;
-        else if ((x0 - sx[L - 1]) <= (sx[R] - x0)) L--;
-        else R++;
+    function localFit(x0) {
+      var lo = 0, hi = n;
+      while (lo < hi) { var md = (lo + hi) >> 1; if (sx[md] < x0) lo = md + 1; else hi = md; }
+      var L = lo, H = lo;
+      while (H - L < q && (L > 0 || H < n)) {
+        if (L === 0) H++;
+        else if (H === n) L--;
+        else if (x0 - sx[L - 1] <= sx[H] - x0) L--;
+        else H++;
       }
-      var h = Math.max(x0 - sx[L], sx[R - 1] - x0);
-      if (span > 1) h *= span;
-      if (!(h > 0)) h = 1e-9;
-      var P = 3, XtX = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], Xty = [0, 0, 0], used = [], a, c2;
-      for (var u = L; u < R; u++) {
-        var dd = Math.abs(sx[u] - x0) / h; if (dd >= 1) continue;
-        var w = Math.pow(1 - dd * dd * dd, 3), dxc = sx[u] - x0, bb = [1, dxc, dxc * dxc];
-        used.push({ w: w, b: bb, u: u });
-        for (a = 0; a < P; a++) { Xty[a] += w * bb[a] * sy[u]; for (c2 = 0; c2 < P; c2++) XtX[a][c2] += w * bb[a] * bb[c2]; }
+      var radius = Math.max(x0 - sx[L], sx[H - 1] - x0) * Math.sqrt(Math.max(1, span));
+      if (!(radius > 0) || !isFinite(radius)) return NaN;
+      var columns = [[], [], []], target = [], anchor = sy[L], scale = 0;
+      var j, k, u, t, rootWeight;
+      for (u = L; u < H; u++) scale = Math.max(scale, Math.abs(sy[u] - anchor));
+      if (!isFinite(scale)) return NaN;
+      if (scale === 0) scale = 1;
+      for (u = L; u < H; u++) {
+        t = (sx[u] - x0) / radius;
+        if (Math.abs(t) >= 1) continue;
+        rootWeight = Math.pow(1 - Math.pow(Math.abs(t), 3), 1.5);
+        columns[0].push(rootWeight);
+        columns[1].push(rootWeight * t);
+        columns[2].push(rootWeight * t * t);
+        target.push(rootWeight * ((sy[u] - anchor) / scale));
       }
-      if (used.length < 3) {
-        var sw = 0, swy = 0;
-        for (var m = 0; m < used.length; m++) { sw += used[m].w; swy += used[m].w * sy[used[m].u]; }
-        return { yhat: sw > 0 ? swy / sw : NaN, l2: NaN };
-      }
-      var Inv = matInv(XtX, P); if (!Inv) return { yhat: NaN, l2: NaN };
-      var beta = [0, 0, 0];
-      for (a = 0; a < P; a++) { var sa = 0; for (c2 = 0; c2 < P; c2++) sa += Inv[a][c2] * Xty[c2]; beta[a] = sa; }
-      var yhat = beta[0], l2 = NaN;
-      if (withVar) {
-        l2 = 0;
-        for (var m2 = 0; m2 < used.length; m2++) {
-          var bi = used[m2].b, wi = used[m2].w;
-          var r0 = Inv[0][0] * bi[0] + Inv[0][1] * bi[1] + Inv[0][2] * bi[2], li = wi * r0;
-          l2 += li * li;
+      if (target.length < 3) return NaN;
+      // Twice-orthogonalized weighted QR on dimensionless local predictors.
+      // Avoid normal equations, whose conditioning changes with axis units.
+      var Q = [], R = [[0,0,0],[0,0,0],[0,0,0]], rhs = [], beta = [];
+      for (j = 0; j < 3; j++) {
+        var v = columns[j].slice(), originalNorm = 0;
+        for (u = 0; u < v.length; u++) originalNorm += v[u] * v[u];
+        originalNorm = Math.sqrt(originalNorm);
+        for (var pass = 0; pass < 2; pass++) for (k = 0; k < j; k++) {
+          var dot = 0;
+          for (u = 0; u < v.length; u++) dot += Q[k][u] * v[u];
+          R[k][j] += dot;
+          for (u = 0; u < v.length; u++) v[u] -= dot * Q[k][u];
         }
+        var norm = 0;
+        for (u = 0; u < v.length; u++) norm += v[u] * v[u];
+        norm = Math.sqrt(norm);
+        if (!(norm > 1e-12 * originalNorm)) return NaN;
+        R[j][j] = norm; rhs[j] = 0;
+        for (u = 0; u < v.length; u++) { v[u] /= norm; rhs[j] += v[u] * target[u]; }
+        Q.push(v);
       }
-      return { yhat: yhat, l2: l2 };
+      for (j = 2; j >= 0; j--) {
+        var value = rhs[j];
+        for (k = j + 1; k < 3; k++) value -= R[j][k] * beta[k];
+        beta[j] = value / R[j][j];
+      }
+      return anchor + scale * beta[0];
     }
-    var rss = 0, cnt = 0;
-    for (i = 0; i < n; i++) {
-      var f0 = localFit(sx[i], false);
-      if (isFinite(f0.yhat)) { var e = sy[i] - f0.yhat; rss += e * e; cnt++; }
+    var out = { xs: [], ys: [] };
+    for (i = 0; i < xseq.length; i++) {
+      if (!isFinite(xseq[i])) return null;
+      var fitted = localFit(xseq[i]);
+      // Refuse the whole group if any requested neighborhood is singular.
+      // Skipping bad points would silently bridge them with a plausible curve.
+      if (!isFinite(fitted)) return null;
+      out.xs.push(xseq[i]); out.ys.push(fitted);
     }
-    var pEff = Math.max(2, Math.min(n - 1, 1.2 * (n / q))), dfres = Math.max(1, cnt - pEff);
-    var s2 = (cnt > 0) ? rss / dfres : 0, tcrit = qt(1 - (1 - level) / 2, dfres);
-    var out = { xs: [], ys: [], lwrs: [], uprs: [] };
-    for (var kk = 0; kk < xseq.length; kk++) {
-      var f = localFit(xseq[kk], true);
-      if (!isFinite(f.yhat)) continue;
-      var se = isFinite(f.l2) ? Math.sqrt(Math.max(0, s2 * f.l2)) : 0;
-      out.xs.push(xseq[kk]); out.ys.push(f.yhat);
-      out.lwrs.push(f.yhat - tcrit * se); out.uprs.push(f.yhat + tcrit * se);
-    }
-    return out.xs.length >= 2 ? out : null;
+    return out;
   }
 
   // 2x2 symmetric covariance + eigen (closed form) for the ellipses.

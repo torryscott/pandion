@@ -359,12 +359,21 @@ window.PSFormula = (function () {
         out.push(values[i]);
     return out;
   }
+  function numericMean(v) {
+    var s = 0, same = true;
+    for (var i = 0; i < v.length; i++) {
+      if (v[i] !== v[0]) same = false;
+      s += v[i];
+    }
+    // Constant data must not gain spread from repeated-addition rounding.
+    return v.length && same ? v[0] : s / v.length;
+  }
   function aggregate(fn, values) {
     var v = validNumbers(values), n = v.length, i, s;
     if (fn === "N") return n;
     if (!n) return null;
     if (fn === "VSUM") { s = 0; for (i = 0; i < n; i++) s += v[i]; return s; }
-    if (fn === "VMEAN") { s = 0; for (i = 0; i < n; i++) s += v[i]; return s / n; }
+    if (fn === "VMEAN") return numericMean(v);
     if (fn === "VMIN") return Math.min.apply(null, v);
     if (fn === "VMAX") return Math.max.apply(null, v);
     if (fn === "VMEDIAN") {
@@ -374,8 +383,7 @@ window.PSFormula = (function () {
     }
     if (fn === "VSD") {
       if (n < 2) return null;
-      var m = 0; for (i = 0; i < n; i++) m += v[i];
-      m /= n;
+      var m = numericMean(v);
       var ss = 0; for (i = 0; i < n; i++) ss += (v[i] - m) * (v[i] - m);
       return Math.sqrt(ss / (n - 1));
     }
@@ -385,14 +393,39 @@ window.PSFormula = (function () {
   function toNum(v) {
     return (typeof v === "number" && isFinite(v)) ? v : null;
   }
-  // Text form of a value, for the string functions. A number uses the
-  // same 10-significant-digit rounding the shell writes into a cell, so
-  // LEN and UPPER read the number the grid is showing rather than a
-  // longer float that only ever existed inside the engine.
+  // R-consistent rounding (Torry's ruling, Aug 2026: same formula, same
+  // number in Pandion and jamovi). R >= 4.0 rounds to whichever of the
+  // two representable candidates at the requested digit is CLOSER, with
+  // an exact tie going to the even scaled value - which is also why
+  // round(2.675, 2) is 2.67 there: 2.675 is stored a hair below the
+  // true half. The old Math.round was half-up, and on negatives rounds
+  // half toward +infinity, which matched neither R nor Excel
+  // (Math.round(-1.5) = -1; both of them say -2).
+  function rRound(x, d) {
+    // Range handling and split scaling follow R's fround.c, R Core Team
+    // (C) 2000-2020 / Ross Ihaka (C) 1998, GPL-2.0-or-later:
+    // https://svn.r-project.org/R/trunk/src/nmath/fround.c
+    // 10^309 overflows, but rounding a subnormal to 309 places is valid.
+    if (x === 0 || d > 323) return x;
+    if (d < -308) return 0;
+    d = Math.floor(d + 0.5);
+    var sign = x < 0 ? -1 : 1, a = Math.abs(x);
+    if (Math.LOG10E * Math.LN2 * (0.5 + Math.floor(Math.log2(a))) + d > 15)
+      return x;
+    var p = Math.pow(10, Math.min(d, 308));
+    var extra = Math.pow(10, Math.max(0, d - 308));
+    var scaled = (a * p) * extra;
+    if (!isFinite(scaled)) return x; // requested places exceed its precision
+    var f = Math.floor(scaled);
+    var lo = (f / p) / extra, hi = (Math.ceil(scaled) / p) / extra;
+    var dl = a - lo, dh = hi - a;
+    return sign * ((dh < dl || (dh === dl && f % 2 !== 0)) ? hi : lo);
+  }
+  // String functions read the same full-precision text stored in the grid.
   function toStr(v) {
     if (v == null) return null;
     if (typeof v === "number")
-      return isFinite(v) ? String(Number(v.toPrecision(10))) : null;
+      return isFinite(v) ? String(v) : null;
     return String(v);
   }
   // TRIM in the spreadsheet sense, both ends and the runs inside.
@@ -499,13 +532,14 @@ window.PSFormula = (function () {
         else vals.push(vv);
       }
       if (!vals.length) return null;
+      if (fn === "MEAN") return numericMean(vals);
       var acc = vals[0];
       for (vi = 1; vi < vals.length; vi++) {
         if (fn === "MIN") acc = Math.min(acc, vals[vi]);
         else if (fn === "MAX") acc = Math.max(acc, vals[vi]);
         else acc += vals[vi];
       }
-      return fn === "MEAN" ? acc / vals.length : acc;
+      return acc;
     }
     // Everything from here down null-propagates by construction, so the
     // functions that must not go through toNum are dispatched first.
@@ -522,8 +556,8 @@ window.PSFormula = (function () {
     if (fn === "ROUND") {
       var d = ast.args[1] ? toNum(evalNode(ast.args[1], row, env)) : 0;
       if (d == null) return null;
-      var p = Math.pow(10, Math.round(d));
-      return Math.round(a * p) / p;
+      var rr = rRound(a, d);
+      return isFinite(rr) ? rr : null;
     }
     return null;
   }
@@ -587,13 +621,13 @@ window.PSFormula = (function () {
     var ast;
     try { ast = parseTokens(tokenize(src)); }
     catch (e) { return { ok: false, error: String(e && e.message || e) }; }
-    var refs = Object.keys(collectRefs(ast, {}));
+    var refs = Object.keys(collectRefs(ast, Object.create(null)));
     for (var i = 0; i < refs.length; i++) {
       if (knownColumns.indexOf(refs[i]) === -1)
         return { ok: false, error: "unknown variable \"" + refs[i] + "\"" +
           didYouMeanVar(refs[i], knownColumns) };
     }
-    var aggNeeds = collectAggNeeds(ast, {});
+    var aggNeeds = collectAggNeeds(ast, Object.create(null));
     return {
       ok: true,
       refs: refs,

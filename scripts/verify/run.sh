@@ -3,8 +3,7 @@
 #
 # Usage:  scripts/verify/run.sh [--min] [--extras]
 #   --min     verify the minified bundle (default: the source bundle)
-#   --extras  after the battery, also run the accessibility audit
-#             (axe-core; skipped if not installed), the
+#   --extras  after the battery, also run the
 #             aggregation-cache behavioral test (needs jmvcore;
 #             skipped if missing), the summary-table smoke suites,
 #             the pedagogy panel probe (chooser/lint/anatomy/wizard
@@ -13,7 +12,8 @@
 # Env:
 #   GB2_VERIFY_OUT  output dir (default /tmp/gb2-verify, or
 #                   /tmp/gb2-verify-min with --min)
-#   GB2_NODE_BASE   a directory whose node_modules contains playwright
+#   GB2_NODE_BASE   a directory whose node_modules contains playwright + axe-core
+#   PS_A11Y_OUT     accessibility evidence (default: $GB2_VERIFY_OUT/accessibility)
 #
 # One-time setup for the checker:
 #   cd /tmp && npm i playwright axe-core && npx playwright install chromium
@@ -73,8 +73,24 @@ fi
 echo "== render ($BUNDLE bundle) -> $OUT"
 GB2_VERIFY_OUT="$OUT" GB2_BUNDLE="$BUNDLE" Rscript "$HERE/render.R"
 
+echo "== accessibility (all A/AA violations; incomplete results retained)"
+GB2_A11Y_ROOT="$HERE/../.." GB2_VERIFY_OUT="$OUT" Rscript -e 'source(file.path(Sys.getenv("GB2_A11Y_ROOT"), "R/helpmechoose_wizard.R")); writeLines(helpmechoose_html(), file.path(Sys.getenv("GB2_VERIFY_OUT"), "wizard_a11y.html"), useBytes=TRUE)'
+PS_A11Y_OUT="${PS_A11Y_OUT:-$OUT/accessibility}" GB2_VERIFY_OUT="$OUT" node "$HERE/a11y-check.mjs"
+
 echo "== check"
 GB2_VERIFY_OUT="$OUT" node "$HERE/check.mjs"
+
+echo "== XML-safe exports through real R-analysis hosts ($BUNDLE bundle)"
+GB2_BUNDLE="$BUNDLE" Rscript "$HERE/../../standalone/verify/xml-export-host.R" "$OUT-xml"
+node "$HERE/../../standalone/verify/xml-export-host-check.mjs" "$OUT-xml"
+
+echo "== original-data precision through the real Jamovi host"
+GB2_BUNDLE="$BUNDLE" Rscript "$HERE/../../standalone/verify/transport-precision.R" "$OUT-precision"
+PS_TRANSPORT_HOST=jamovi node "$HERE/../../standalone/verify/transport-precision-check.mjs" "$OUT-precision"
+
+echo "== statistical methods, brackets and Sigma tables ($BUNDLE bundle)"
+GB2_STATS_PROBE_OUT="$OUT-stats" GB2_BUNDLE="$BUNDLE" Rscript "$HERE/stats-probe.R" > /dev/null
+GB2_STATS_PROBE_OUT="$OUT-stats" node "$HERE/stats-probe.mjs"
 
 echo "== independent-width X/Y axis junction"
 GB2_VERIFY_OUT="$OUT" node "$HERE/axis-junction-check.mjs"
@@ -87,6 +103,15 @@ GB2_VERIFY_OUT="$OUT" node "$HERE/naming-check.mjs"
 
 echo "== control consistency (Order / RM nesting / shapes / line styles)"
 GB2_VERIFY_OUT="$OUT" node "$HERE/control-consistency-check.mjs"
+
+echo "== keyboard focus and accessible error choices in R-generated charts"
+GB2_FOCUS_HOST_DIR="$OUT" node "$HERE/../../standalone/verify/control-focus-check.mjs"
+
+echo "== accessible bar-style choices and keyboard continuity"
+GB2_BAR_HOST_DIR="$OUT" node "$HERE/../../standalone/verify/bar-choice-accessibility-check.mjs"
+
+echo "== character-only shortcut scope in R-generated charts"
+GB2_SHORTCUT_HOST_DIR="$OUT" node "$HERE/../../standalone/verify/character-shortcut-check.mjs"
 
 echo "== color inheritance, reset, picker-target, and swatch parity"
 GB2_VERIFY_OUT="$OUT" node "$HERE/color-consistency-check.mjs"
@@ -202,6 +227,30 @@ else
     fi
 fi
 
+echo "== axis titles survive the chartSpec round trip (every module)"
+if GB2_AXISTITLE_OUT="$OUT-axistitle" GB2_BUNDLE="$BUNDLE" GB2_INLINE_BUNDLE=1 Rscript "$HERE/axistitle-render.R"; then
+    GB2_AXISTITLE_OUT="$OUT-axistitle" node "$HERE/axistitle-check.mjs"
+else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then
+        echo "   skipped: jmvcore not available in this R library"
+    else
+        exit "$rc"
+    fi
+fi
+
+echo "== hidden-points badge position survives the chartSpec allowlist"
+if GB2_HPBADGE_OUT="$OUT-hpbadge" GB2_BUNDLE="$BUNDLE" Rscript "$HERE/hpbadge-render.R"; then
+    GB2_HPBADGE_OUT="$OUT-hpbadge" node "$HERE/hpbadge-check.mjs"
+else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then
+        echo "   skipped: jmvcore not available in this R library"
+    else
+        exit "$rc"
+    fi
+fi
+
 echo "== chartSpec migration (route style commits -> one blob; explode; per-key undo)"
 if GB2_CHARTSPEC_OUT="$OUT-chartspec" GB2_BUNDLE="$BUNDLE" Rscript "$HERE/chartspec-render.R"; then
     GB2_CHARTSPEC_OUT="$OUT-chartspec" node "$HERE/chartspec-check.mjs"
@@ -275,20 +324,6 @@ else
 fi
 
 if [ "$EXTRAS" = "1" ]; then
-    echo "== extras: accessibility audit (axe-core, WCAG A/AA)"
-    # The wizard is not a battery page (helpmechoose has no chart);
-    # render it here so the audit covers it too.
-    Rscript -e "source('$HERE/../../R/helpmechoose_wizard.R'); con <- file('$OUT/wizard_a11y.html', open='wb'); writeLines(helpmechoose_html(), con, useBytes=TRUE); close(con)"
-    if GB2_VERIFY_OUT="$OUT" node "$HERE/a11y-check.mjs"; then
-        :
-    else
-        rc=$?
-        if [ "$rc" -eq 2 ]; then
-            echo "   skipped: axe-core not installed (cd /tmp && npm i axe-core)"
-        else
-            exit "$rc"
-        fi
-    fi
     echo "== extras: aggregation-cache behavioral test"
     if GB2_BUNDLE="$BUNDLE" Rscript "$HERE/aggcache-test.R"; then
         :
@@ -328,17 +363,6 @@ if [ "$EXTRAS" = "1" ]; then
     fi
     echo "== extras: glossary accuracy contract"
     node "$HERE/glossary-audit.mjs"
-    echo "== extras: stats-suite probe (brackets + Sigma panel, ~240 checks)"
-    if Rscript "$HERE/stats-probe.R" > /dev/null; then
-        node "$HERE/stats-probe.mjs"
-    else
-        rc=$?
-        if [ "$rc" -eq 2 ]; then
-            echo "   skipped: jmvcore not available in this R library"
-        else
-            exit "$rc"
-        fi
-    fi
     echo "== extras: chart-styles library probe"
     GB2_VERIFY_OUT="$OUT" node "$HERE/styles-check.mjs"
     echo "== extras: Small Wins fix probe (corr count, sort, labels)"

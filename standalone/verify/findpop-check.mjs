@@ -63,11 +63,29 @@ await page.waitForTimeout(500);
 const count1 = await page.evaluate(() =>
     document.getElementById('ps-data-find-count').textContent);
 ok(/of \d+/.test(count1), `matches found (${count1})`);
-await page.click('#ps-datagrid td[data-gc="site"][data-gr="1"]');
+// Any data cell will do, as long as the popup (position: fixed, 380px
+// wide) is not covering it: columns open fitted now (Sep 2026), so the
+// grid is narrower and the cell this used to name sits under the popup.
+// Pick the first visible cell that does not intersect it.
+const cellSpot = await page.evaluate(() => {
+    const pop = document.getElementById('ps-findpop').getBoundingClientRect();
+    const hits = c => !(c.right < pop.left || c.left > pop.right ||
+                        c.bottom < pop.top || c.top > pop.bottom);
+    for (const td of document.querySelectorAll('#ps-datagrid td[data-gc]')) {
+        const r = td.getBoundingClientRect();
+        if (r.width > 8 && r.height > 8 && !hits(r))
+            return { x: r.left + r.width / 2, y: r.top + r.height / 2,
+                     col: td.getAttribute('data-gc'), row: td.getAttribute('data-gr') };
+    }
+    return null;
+});
+ok(!!cellSpot, 'a grid cell clear of the popup exists to click');
+await page.mouse.click(cellSpot.x, cellSpot.y);
 await page.waitForTimeout(300);
 ok(await popOpen(),
    'a grid click leaves the popup open - the deliberate difference from ' +
-   'Filter and Excluded, which dismiss on outside clicks');
+   'Filter and Excluded, which dismiss on outside clicks (' +
+   JSON.stringify(cellSpot) + ')');
 
 console.log('case 3: the closed button still reports the sticky query');
 await page.click('#ps-findpop-close');

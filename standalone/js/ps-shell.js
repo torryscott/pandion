@@ -434,10 +434,13 @@
   // to be made again for every file.
   var APP_PREFS_DEFAULTS = { density: "comfortable", motion: "system",
                              startup: "center", missingTokens: "NA",
-                             units: "in", updateCheck: "off" };
+                             units: "in", updateCheck: "off",
+                             defErrorBars: "", defRmMethod: "",
+                             defAlpha: "" };
   var APP_PREFS = { density: "comfortable", motion: "system",
                     startup: "center", missingTokens: "NA",
-                    units: "in", updateCheck: "off" };
+                    units: "in", updateCheck: "off",
+                    defErrorBars: "", defRmMethod: "", defAlpha: "" };
   // MEASUREMENT UNITS (Torry, Jul 27 2026: "I see these really large
   // numbers... I think it might be more useful to have these in inches,
   // and maybe an option for metric"). 816 x 1056 is Letter in CSS pixels,
@@ -517,6 +520,115 @@
     return pxToUnit(page.w) + " \u00d7 " + pxToUnit(page.h) + " " + unitLabel();
   }
   var APP_VERSION = "3.1.1";
+  // The build stamp. The version alone cannot identify the code that
+  // drew a figure: the hosted app deploys from main ahead of tagged
+  // releases, so one version number covers weeks of builds, and a
+  // numerical fix can be live under a version whose tag predates it.
+  // The builders (standalone/build-dist.sh, website/build.sh) write
+  // scripts/build-stamp.sh's answer into <meta name="pandion-build">:
+  // the commit date and short sha of the last commit that touched the
+  // shipped sources, "*" when those sources had uncommitted changes.
+  // The dev page leaves it empty, and every surface that prints the
+  // stamp falls back to the bare version, so dev output is unchanged.
+  var APP_BUILD = (function () {
+    try {
+      var m = document.querySelector('meta[name="pandion-build"]');
+      return m ? String(m.getAttribute("content") || "").trim() : "";
+    } catch (e) { return ""; }
+  })();
+  function appStamp() {
+    return "Pandion Plots " + APP_VERSION +
+      (APP_BUILD ? " (build " + APP_BUILD + ")" : "");
+  }
+  // The numerical-changes ledger (NUMERICAL-CHANGES.md is the full
+  // record; numerical-ledger-check.mjs holds the two in agreement).
+  // Each entry names a release that changed a DISPLAYED number and
+  // carries a stable id. Every saved project lists the ids of the
+  // entries the saving build contained, so opening it later shows a
+  // one-time notice naming exactly the changes it has NOT seen - not
+  // a guess from version numbers, which mislabel every file the web
+  // app saved between a fix going live and its version being tagged.
+  // Files from before the id list fall back to the version compare.
+  // The check is a pure function so the gate can probe it directly.
+  var NUMERICAL_CHANGES = [
+    { id: "anova-residual-stability", since: "3.1.2",
+      label: "factorial, repeated-measures and mixed ANOVA keep small residual variance instead of erasing it" },
+    { id: "rm-crossed-numeric-precision", since: "3.1.2",
+      label: "crossed repeated-measures data reach the chart at full numeric precision" },
+    { id: "facet-fit-populations", since: "3.1.2",
+      label: "scatter fits, bands and ellipses use each panel's own observations" },
+    { id: "scatter-stats-unavailable", since: "3.1.2",
+      label: "undefined scatter correlations show as unavailable instead of p < .001" },
+    { id: "fit-extension-evaluates-model", since: "3.1.2",
+      label: "extended regression curves and bands evaluate the fitted model" },
+    { id: "literal-group-names", since: "3.1.2",
+      label: "group names such as constructor or toString no longer hide points or fits" },
+    { id: "axis-tick-loop-guard", since: "3.1.2",
+      label: "very narrow axes no longer hang when a tick step rounds away" },
+    { id: "loess-direct-surface", since: "3.1.2",
+      label: "LOESS curves follow R's direct-surface calculation" },
+    { id: "direct-tail-probabilities", since: "3.1.2",
+      label: "very small t-test and ANOVA p values are no longer rounded to zero" },
+    { id: "loess-band-residual-df", since: "3.1.2",
+      label: "jamovi LOESS confidence bands use residual degrees of freedom" },
+    { id: "polynomial-scaled-qr", since: "3.1.2",
+      label: "quadratic and cubic fits survive a change of measurement units" },
+    { id: "constant-sample-zero-variance", since: "3.1.2",
+      label: "constant samples keep an exact mean and zero variance" },
+    { id: "full-precision", since: "3.1.2",
+      label: "charts and statistics retain the full precision of source data, including small differences between large values" },
+    { id: "computed-columns-full-precision", since: "3.1.2",
+      label: "computed columns keep full numeric precision" },
+    { id: "round-extreme-decimals", since: "3.1.2",
+      label: "ROUND handles extreme decimal places" },
+    { id: "round-half-even", since: "3.1.2",
+      label: "ROUND now matches R at exact halves (2.5 rounds to 2, ties go to the even neighbor)" },
+    { id: "mwu-exact-large-n", since: "3.1.2",
+      label: "Mann-Whitney exact p values are correct at larger samples" },
+    { id: "spearman-as89", since: "3.1.2",
+      label: "Spearman p values use R's exact algorithm" }
+  ];
+  function _verParts(v) {
+    return String(v || "").split(".").map(function (x) {
+      var n = parseInt(x, 10); return isFinite(n) ? n : 0;
+    });
+  }
+  function _cmpVer(a, b) {
+    var A = _verParts(a), B = _verParts(b);
+    for (var i = 0; i < 3; i++) {
+      if ((A[i] || 0) !== (B[i] || 0)) return (A[i] || 0) < (B[i] || 0) ? -1 : 1;
+    }
+    return 0;
+  }
+  // The ids live in THIS build: what a project saved now was computed
+  // under. Entries not yet released (since > APP_VERSION) still count,
+  // because the hosted app runs them before the version is tagged.
+  function _numericalChangeIds() {
+    var ids = [];
+    for (var i = 0; i < NUMERICAL_CHANGES.length; i++)
+      ids.push(NUMERICAL_CHANGES[i].id);
+    return ids;
+  }
+  function _numericalNoticeFor(fileVer, appVer, fileIds) {
+    var byId = Array.isArray(fileIds), known = {}, i;
+    if (byId) for (i = 0; i < fileIds.length; i++) known[String(fileIds[i])] = 1;
+    var hits = [];
+    for (i = 0; i < NUMERICAL_CHANGES.length; i++) {
+      var c = NUMERICAL_CHANGES[i];
+      if (_cmpVer(c.since, appVer) > 0) continue;       // not in this build yet
+      if (byId) {
+        if (known[c.id]) continue;                       // file was computed under it
+      } else if (fileVer && _cmpVer(fileVer, c.since) >= 0) {
+        continue;                                        // pre-id file: version says it knew
+      }
+      hits.push(c.label);
+    }
+    if (!hits.length) return null;
+    return "This project was saved by an older Pandion Plots and has " +
+      "been recomputed under version " + appVer + ". What changed: " +
+      hits.join("; ") + ". The full record is the numerical-changes " +
+      "ledger published with each release.";
+  }
   var AUTOSAVE_HEALTH = "ok";
   var AUTOSAVE_DETAIL = "Local recovery is current";
   var AUTOSAVE_FAILS = 0;          // B14: evidence survives a lucky write
@@ -870,7 +982,7 @@
   function loadAppPrefs() {
     try {
       var saved = JSON.parse(window.localStorage.getItem(PS_PREF_KEY) || "null");
-      if (saved && /^(comfortable|compact)$/.test(saved.density))
+      if (saved && /^(comfortable|compact|spacious)$/.test(saved.density))
         APP_PREFS.density = saved.density;
       if (saved && /^(system|reduce)$/.test(saved.motion))
         APP_PREFS.motion = saved.motion;
@@ -878,6 +990,15 @@
         APP_PREFS.startup = saved.startup;
       if (typeof saved.missingTokens === "string")
         APP_PREFS.missingTokens = saved.missingTokens;
+      // Statistics defaults (backlog, Aug 2026): validated against the
+      // exact value sets the chart options accept, so a hand-edited
+      // store can never seed a nonsense option.
+      if (saved && /^(se|sd|ci95|ci99|ci95c|none)$/.test(saved.defErrorBars || ""))
+        APP_PREFS.defErrorBars = saved.defErrorBars;
+      if (saved && /^(within|between)$/.test(saved.defRmMethod || ""))
+        APP_PREFS.defRmMethod = saved.defRmMethod;
+      if (saved && /^(0\.1|0\.05|0\.01|0\.001)$/.test(saved.defAlpha || ""))
+        APP_PREFS.defAlpha = saved.defAlpha;
       if (saved && /^(in|cm|px)$/.test(saved.units))
         APP_PREFS.units = saved.units;
       if (saved && /^(on|off)$/.test(saved.updateCheck))
@@ -1438,10 +1559,41 @@
         dups.map(function (r) { return r.from + " \u2192 " + r.to; }).join(", ") + ")");
     return parts.join("; ");
   }
+  // The engine keeps two window-side optimistic-restore stashes (RM
+  // error-bar halves, the frequency bar payload for pooled-type hops).
+  // They are keyed by cell/category names, NOT by document, and this
+  // shell runs every chart document in ONE window - so any event that
+  // changes which data those names describe must drop them, or a stash
+  // written by one document could restore into another whose names and
+  // counts coincide (two yes/no variables with equal counts is enough).
+  // jamovi is immune (one iframe per analysis); this is the standalone's
+  // half of the Aug 2026 stash-staleness review.
+  function clearEngineStashes() {
+    try { delete window.__gb2_rmSeStash; } catch (e) {}
+    try { delete window.__gb2_freqBarStash; } catch (e) {}
+  }
+  // Column names are data, including Object.prototype property names.
+  // JSON preserves own keys but does not preserve null prototypes, so redo
+  // and project loading restore these dictionaries before any mutation.
+  function dataMap(source) {
+    if (source && Object.getPrototypeOf(source) === null) return source;
+    var out = Object.create(null);
+    if (source && typeof source === "object")
+      Object.keys(source).forEach(function (key) { out[key] = source[key]; });
+    return out;
+  }
+  function normalizeTableMaps(t) {
+    ["raw", "types", "declaredLevels", "levelOrderDefaults", "excluded",
+     "excludedRows", "missingTokensByCol", "computed", "importedFormulas",
+     "dateColumns"].forEach(function (key) {
+      if (t[key] != null) t[key] = dataMap(t[key]);
+    });
+  }
   function buildTable(name, header, rows, types, declaredLevels, excluded,
                       missingTokens, caseIds, excludedRows,
-                      levelOrderDefaults) {
-    var raw = {}, i, j;
+                      levelOrderDefaults, preparingSnapshot) {
+    if (!preparingSnapshot) clearEngineStashes();
+    var raw = dataMap(), i, j;
     var resolved = resolveHeader(header);
     var order = resolved.names;
     for (j = 0; j < order.length; j++) {
@@ -1452,15 +1604,15 @@
         raw[nm].push(cell == null ? "" : String(cell));
       }
     }
-    var t = { name: name, order: order, raw: raw, types: {}, columns: {},
-              levels: {}, declaredLevels: declaredLevels || null,
+    var t = { name: name, order: order, raw: raw, types: dataMap(), columns: dataMap(),
+              levels: dataMap(), declaredLevels: declaredLevels || null,
               levelOrderDefaults: levelOrderDefaults || {},
               excluded: excluded || {},
               caseIds: [],
               excludedRows: excludedRows || {},
               missingTokens: Array.isArray(missingTokens)
                 ? missingTokens.slice() : prefMissingTokens() };
-    var seenCaseIds = {};
+    var seenCaseIds = dataMap();
     for (i = 0; i < rows.length; i++) {
       var suppliedId = Array.isArray(caseIds) ? String(caseIds[i] || "") : "";
       var caseId = suppliedId && !seenCaseIds[suppliedId]
@@ -1469,7 +1621,7 @@
       t.caseIds.push(caseId);
     }
     if (declaredLevels && typeof declaredLevels === "object") {
-      var mappedLevels = {};
+      var mappedLevels = dataMap();
       for (j = 0; j < order.length; j++) {
         var lc = order[j], ls = resolved.supplied[j];
         var lv = Object.prototype.hasOwnProperty.call(declaredLevels, lc)
@@ -1482,13 +1634,13 @@
     }
     for (j = 0; j < order.length; j++) {
       var col = order[j], src = resolved.supplied[j];
-      var supplied = types && (types[col] !== undefined ? types[col]
-        : (src ? types[src] : undefined));
+      var supplied = types && (Object.prototype.hasOwnProperty.call(types, col) ? types[col]
+        : (src && Object.prototype.hasOwnProperty.call(types, src) ? types[src] : undefined));
       t.types[col] = normType(supplied) ||
         inferType(raw[col], tableMissingTokens(t, col));
     }
     t.renamedColumns = resolved.renamed;
-    retype(t);
+    retype(t, preparingSnapshot);
     return t;
   }
   function isRowExcluded(t, i) {
@@ -1554,7 +1706,7 @@
     for (var i = 0; i < mask.length; i++) if (mask[i]) k++;
     return k;
   }
-  function computeFilterState(t) {
+  function computeFilterState(t, preparingSnapshot) {
     var fs = validFilters(t);
     if (!fs.length) {
       t.filterMask = null; t.filteredView = null;
@@ -1629,14 +1781,14 @@
     // already-computed subsetted raw values instead of re-evaluating.
     view.computed = null;
     view.computedErrors = null;
-    view.raw = {};
+    view.raw = dataMap();
     for (var c = 0; c < t.order.length; c++) {
       var col = t.order[c], src = t.raw[col], outv = new Array(keep.length);
       for (i = 0; i < keep.length; i++) outv[i] = src[keep[i]];
       view.raw[col] = outv;
     }
     view.caseIds = keep.map(function (r) { return t.caseIds[r]; });
-    view.excluded = {};
+    view.excluded = dataMap();
     if (t.excluded) {
       var pos = {};
       for (i = 0; i < keep.length; i++) pos[keep[i]] = i;
@@ -1650,7 +1802,7 @@
         if (Object.keys(nm).length) view.excluded[ec] = nm;
       }
     }
-    retype(view);
+    retype(view, preparingSnapshot);
     t.filteredView = view;
   }
   // What the ANALYSIS side reads: the filtered row-subset when filters
@@ -1675,7 +1827,7 @@
     var compiled = window.PSFormula.compile(formula, known);
     if (!compiled.ok) return { error: compiled.error };
     dataMark("the computed variable");
-    if (!t.computed) t.computed = {};
+    if (!t.computed) t.computed = dataMap();
     t.computed[name] = String(formula);
     if (t.order.indexOf(name) === -1) {
       var at = afterCol ? t.order.indexOf(afterCol) : -1;
@@ -1725,7 +1877,7 @@
         text: occCol + " has " + occLevels.length + " levels - that would " +
           "create " + occLevels.length + " columns. Pick the occasions " +
           "column (sessions, timepoints), not a measurement." } };
-    var ids = [], idIndex = {}, skipped = 0;
+    var ids = [], idIndex = dataMap(), skipped = 0;
     var cells = {};   // id  occ -> [typed values]
     var idOf = t.columns[idCol], occOf = t.columns[occCol],
         valOf = t.columns[valCol];
@@ -1771,9 +1923,9 @@
     var carried = t.order.filter(function (c) {
       return c !== idCol && c !== occCol && c !== valCol;
     });
-    var carriedValues = {}, conflict = null;
+    var carriedValues = dataMap(), conflict = null;
     for (var c0 = 0; c0 < carried.length && !conflict; c0++) {
-      var col = carried[c0], perId = {};
+      var col = carried[c0], perId = dataMap();
       for (i = 0; i < n; i++) {
         var idv2 = idOf[i];
         if (idv2 == null) continue;
@@ -1821,7 +1973,7 @@
         else if (nums.length) {
           var sum = 0;
           for (var q = 0; q < nums.length; q++) sum += nums[q];
-          out = String(Number((sum / nums.length).toPrecision(10)));
+          out = String(sum / nums.length);
         } else out = vs[0] == null ? "" : String(vs[0]);
         row.push(out);
       }
@@ -1943,7 +2095,7 @@
     var name = t.name;
     PROJECT.table = buildTable(name, res.header, res.rows, null);
     PROJECT.table.edited = true;
-    GRID_NATURAL_WIDTHS = {};
+    GRID_NATURAL_WIDTHS = dataMap();
     gridResetColumnView();
     gridClearSelection(false);
     validateRoles();
@@ -2049,7 +2201,7 @@
       ["SQRT(x)", "Square root.", "num1"],
       ["ABS(x)", "Absolute value.", "num1"],
       ["EXP(x)", "e raised to the value.", "num1"],
-      ["ROUND(x, digits)", "Round to a number of decimal places.", "round"],
+      ["ROUND(x, digits)", "Round to a number of decimal places. Exact halves go to the even neighbor, as in R.", "round"],
       ["FLOOR(x)", "Round down.", "num1"],
       ["CEILING(x)", "Round up.", "num1"],
       ["BIN(column, k)", "Cut a column into k equal-width groups.", "bin"]]],
@@ -2443,6 +2595,17 @@
       r2.appendChild(mkEl("span", "",
         isBin ? "equal-width groups" : "decimal places"));
       host.appendChild(r2);
+      if (!isBin) {
+        // Torry, Aug 2026: say what actually happens at a tie, at the
+        // moment the user is choosing. Half-up would drift every total
+        // upward; even-neighbor ties are the R and jamovi rule.
+        host.appendChild(mkEl("div", "ps-fpk-hint",
+          "A value exactly halfway rounds to the even neighbor: " +
+          "ROUND(2.5) is 2 and ROUND(3.5) is 4, the same rule R and " +
+          "jamovi use, so rounded totals do not drift upward. " +
+          "Anything not exactly halfway rounds to whichever value is " +
+          "nearer, as usual."));
+      }
       ib2 = mkEl("button", "ps-fn-insert", "Insert");
       ib2.type = "button";
       ib2.disabled = true;
@@ -2517,7 +2680,7 @@
     "SQRT": "square root",
     "ABS": "absolute magnitude",
     "EXP": "exponential",
-    "ROUND": "decimals digits",
+    "ROUND": "decimals digits half even ties banker",
     "FLOOR": "round down integer",
     "CEILING": "round up integer ceil",
     "BIN": "bins groups cut quartiles equal width",
@@ -2755,14 +2918,15 @@
   function exclCount(t) {
     return rowExclCount(t) + valueExclCount(t);
   }
-  function retype(t) {
-    bumpSnapEpoch();   // every data mutation and every load path lands here
+  function retype(t, preparingSnapshot) {
+    normalizeTableMaps(t);
+    if (!preparingSnapshot) bumpSnapEpoch(); // commit, not candidate preparation
     retypeColumns(t);
     // Computed columns (Tier 1): every stored formula re-evaluates from
-    // the freshly typed source values (chains work left-to-right), then
+    // the freshly typed source values (chains follow dependency order), then
     // ONE more typing pass derives levels/types for the results.
     if (recomputeFormulas(t)) retypeColumns(t);
-    computeFilterState(t);
+    computeFilterState(t, preparingSnapshot);
   }
   function isComputedColumn(t, col) {
     return !!(t && t.computed && t.computed[col] != null);
@@ -2772,7 +2936,7 @@
     var names = t.order.filter(function (c) { return t.computed[c] != null; });
     if (!names.length) { t.computedErrors = null; return false; }
     var n = nRows(t), wrote = false;
-    t.computedErrors = {};
+    t.computedErrors = dataMap();
     // B10. knownColumns includes every OTHER computed column, including ones
     // defined later, and this loop used to evaluate in t.order order writing
     // as it went. So "A = B + 1" and "B = A + 1" both compiled clean and
@@ -2780,14 +2944,14 @@
     // reference silently used the PREVIOUS value - a computed column reading
     // one edit behind. Compile everything first (compile() already returns
     // refs), then evaluate in dependency order and refuse the cycles.
-    var byName = {}, isComputed = {}, i;
+    var byName = dataMap(), isComputed = dataMap(), i;
     for (i = 0; i < names.length; i++) isComputed[names[i]] = true;
     for (i = 0; i < names.length; i++) {
       var cn = names[i];
       byName[cn] = window.PSFormula.compile(t.computed[cn],
         t.order.filter(function (c) { return c !== cn; }));
     }
-    var mark = {}, evalOrder = [], cyclic = {};
+    var mark = dataMap(), evalOrder = [], cyclic = dataMap();
     function visit(cn, stack) {
       if (mark[cn] === 2) return;
       if (mark[cn] === 1) {                       // back edge: a cycle
@@ -2831,8 +2995,9 @@
         var v = values[r];
         if (v == null) { raw[r] = ""; typed[r] = null; }
         else if (typeof v === "number") {
-          var num = Number(v.toPrecision(10));
-          raw[r] = String(num); typed[r] = num;
+          // Preserve the IEEE-754 value through chains, undo and files.
+          // Payload/display rounding belongs at the chart boundary.
+          raw[r] = String(v); typed[r] = v;
         } else { raw[r] = String(v); typed[r] = String(v); }
       }
       t.raw[col] = raw;
@@ -2842,11 +3007,11 @@
     return wrote;
   }
   function retypeColumns(t) {
-    t.columns = {}; t.levels = {}; t.numericish = {};
+    t.columns = dataMap(); t.levels = dataMap(); t.numericish = dataMap();
     // t.typeAudit is what the variable inspector reads to name the values
     // that decided each type (18b/18c). It is derived state: rebuilt on
     // every retype and deliberately absent from every serialization list.
-    t.typeAudit = {};
+    t.typeAudit = dataMap();
     // The token map was rebuilt per CELL by isMissingRaw, which is 720k
     // object allocations on a 120k x 6 import. Built once per COLUMN now
     // (t3-58a gave columns their own token lists), which is still O(columns)
@@ -3158,14 +3323,14 @@
   // switching analysis type within a tab keeps that tab's memory - the
   // same semantics the single-chart shell had.
   var PROJECT = {
-    version: 4,
+    version: 5,
     id: null,
     name: "Untitled project",
     table: null,
     charts: [],
     activeChart: null,
     ui: { dataOpen: false, workspace: "chart",
-          lastChart: null, lastLayout: null, columnWidths: {} }
+          lastChart: null, lastLayout: null, columnWidths: dataMap() }
   };
   function newProjectId() {
     return "p" + Date.now().toString(36) +
@@ -3341,18 +3506,65 @@
     }
     return word + " " + (mx + 1);
   }
+  // Statistics preferences seed NEW chart documents at creation time
+  // (backlog, Aug 2026). Creation-time seeding is what makes the promise
+  // "existing charts never change when a preference does" structural:
+  // there is no later apply pass to gate. Every seeded value is an
+  // ordinary per-chart option the user can change on the chart.
+  function seedStatPrefs(c) {
+    try {
+      if (!c || !c.options) return c;
+      var eb = APP_PREFS.defErrorBars || "";
+      var rm = APP_PREFS.defRmMethod || "";
+      var al = parseFloat(APP_PREFS.defAlpha || "");
+      var alOk = isFinite(al) && al > 0 && al < 1;
+      if (!eb && !rm && !alOk) return c;
+      function mod(m) { return c.options[m] || (c.options[m] = {}); }
+      if (eb) {
+        mod("plotbuilder").errorBarType = eb;
+        mod("rmplotbuilder").errorBarType = eb;
+      }
+      if (rm) mod("rmplotbuilder").errorBarMethod = rm;
+      if (alOk) {
+        // statsAlpha rides the chartSpec blob (the engine's persisted
+        // per-chart cutoff); merge rather than replace in case a caller
+        // ever pre-seeds other spec keys.
+        var mods = ["plotbuilder", "rmplotbuilder"];
+        for (var i = 0; i < mods.length; i++) {
+          var o = mod(mods[i]);
+          var spec = {};
+          try { spec = o.chartSpec ? JSON.parse(o.chartSpec) : {}; }
+          catch (e2) { spec = {}; }
+          spec.statsAlpha = al;
+          o.chartSpec = JSON.stringify(spec);
+        }
+        // The correlation matrix's ladder supports .05/.01/.001 only;
+        // an alpha of .10 leaves corr at its own default rather than
+        // seeding a value its select cannot show.
+        if (al === 0.05 || al === 0.01 || al === 0.001) {
+          var oc = mod("corrplotbuilder");
+          var spec2 = {};
+          try { spec2 = oc.chartSpec ? JSON.parse(oc.chartSpec) : {}; }
+          catch (e3) { spec2 = {}; }
+          spec2.corrSigLevel = al;
+          oc.chartSpec = JSON.stringify(spec2);
+        }
+      }
+    } catch (e) {}
+    return c;
+  }
   function newChart(name) {
     var maxId = 0;
     for (var i = 0; i < PROJECT.charts.length; i++) {
       var m = /^c(\d+)$/.exec(PROJECT.charts[i].id || "");
       if (m) maxId = Math.max(maxId, Number(m[1]));
     }
-    return { id: "c" + (maxId + 1),
+    return seedStatPrefs({ id: "c" + (maxId + 1),
              name: name || nextDocName("Chart", false),
              module: "plotbuilder", roles: {}, options: {},
              // Never auto-restyled until the engine's one-shot
              // default-style application stamps it (library bridge).
-             styleStamp: false };
+             styleStamp: false });
   }
   function newLayout() {
     var maxId = 0;
@@ -3407,7 +3619,7 @@
   function projectSnapshot() {
     var t = PROJECT.table;
     return {
-      version: 4,
+      version: 5,
       savedAt: new Date().toISOString(),
       id: PROJECT.id,
       name: PROJECT.name,
@@ -3677,7 +3889,7 @@
   }
   function migrateSnapshot(input) {
     if (!input || typeof input !== "object") return null;
-    if (input.version === 4) return input;
+    if (input.version === 5) return input;
     if (input.version === 2) {
       input = {
         version: 3,
@@ -3706,47 +3918,163 @@
             comp[cn] = window.PSFormula.migrateVocabulary(comp[cn]);
       }
       input.version = 4;
-      return input;
+    }
+    // v5 keeps full computed values, instead of rounding every intermediate
+    // to ten significant digits. Formulas are recalculated on restoration.
+    if (input.version === 4) { input.version = 5; return input; }
+    return null;
+  }
+  function precisionMigrationNotice(s) {
+    if (!s || s.version >= 5 || !s.table) return "";
+    var computed = s.table.computed && Object.keys(s.table.computed).length;
+    return "Charts and statistics now use the full precision of the source data. " +
+      (computed ? "Computed columns were also recalculated with full numeric precision. " : "") +
+      "Results may differ from older versions. Saved .pand files have not been changed.";
+  }
+  function projectValidationError(s) {
+    function record(v) { return !!v && typeof v === "object" && !Array.isArray(v); }
+    function own(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
+    function scalar(v) {
+      return v === null || typeof v === "string" || typeof v === "boolean" ||
+        (typeof v === "number" && isFinite(v));
+    }
+    if (!record(s)) return "The project contents are missing.";
+    if ([2, 3, 4, 5].indexOf(s.version) === -1)
+      return s.version > 5 ? "This project needs a newer version of Pandion Plots."
+        : "The project version is not recognized.";
+    var t = s.table;
+    if ((s.name != null && typeof s.name !== "string") ||
+        (s.id != null && typeof s.id !== "string"))
+      return "The project's name or identifier is damaged.";
+    if (!record(t) || !Array.isArray(t.order) || !record(t.raw))
+      return "The project's data table is missing or damaged.";
+    if (t.name != null && typeof t.name !== "string")
+      return "The data table's name is damaged.";
+    var names = dataMap(), count = null;
+    for (var i = 0; i < t.order.length; i++) {
+      var col = t.order[i];
+      if (typeof col !== "string" || !col.trim() || col !== col.trim() || names[col])
+        return "The project has invalid or duplicate column names.";
+      names[col] = true;
+      if (!own(t.raw, col) || !Array.isArray(t.raw[col]))
+        return "The project is missing the data for a column.";
+      if (count === null) count = t.raw[col].length;
+      if (t.raw[col].length !== count)
+        return "The project's columns have different numbers of rows.";
+      for (var r = 0; r < count; r++)
+        if (!own(t.raw[col], r) || !scalar(t.raw[col][r]))
+          return "The project contains an invalid cell value.";
+    }
+    if (Object.keys(t.raw).some(function (c) { return !names[c]; }))
+      return "The project contains data without a corresponding column.";
+    var maps = ["types", "declaredLevels", "levelOrderDefaults", "excluded",
+      "excludedRows", "missingTokensByCol", "computed", "importedFormulas"];
+    for (var m = 0; m < maps.length; m++)
+      if (t[maps[m]] != null && !record(t[maps[m]]))
+        return "The project's variable properties are damaged.";
+    if (t.types && Object.keys(t.types).some(function (c) {
+      return names[c] && !normType(t.types[c]);
+    })) return "The project contains an unrecognized variable type.";
+    if (t.computed && Object.keys(t.computed).some(function (c) {
+      return !names[c] || typeof t.computed[c] !== "string";
+    })) return "The project's computed-variable definitions are damaged.";
+    for (var a = 0; a < 3; a++) {
+      var key = ["declaredLevels", "missingTokensByCol", "levelOrderDefaults"][a];
+      if (t[key] && Object.keys(t[key]).some(function (c) {
+        return !Array.isArray(t[key][c]) || !t[key][c].every(scalar);
+      })) return "The project's variable levels or missing-value labels are damaged.";
+    }
+    if (t.caseIds != null && (!Array.isArray(t.caseIds) ||
+        (t.caseIds.length !== 0 && t.caseIds.length !== (count || 0))))
+      return "The project's row identifiers do not match its data.";
+    var rowIds = dataMap();
+    if (t.caseIds && t.caseIds.some(function (id) {
+      if (typeof id !== "string" || !id || rowIds[id]) return true;
+      rowIds[id] = true; return false;
+    })) return "The project has invalid or duplicate row identifiers.";
+    if (t.missingTokens != null && (!Array.isArray(t.missingTokens) ||
+        !t.missingTokens.every(scalar)))
+      return "The project's missing-value labels are damaged.";
+    if (t.excluded && Object.keys(t.excluded).some(function (col) {
+      return !names[col] || !record(t.excluded[col]) ||
+        Object.keys(t.excluded[col]).some(function (r) {
+          return !/^(0|[1-9][0-9]*)$/.test(r) || Number(r) >= (count || 0) ||
+            (t.excluded[col][r] !== true && t.excluded[col][r] !== 1);
+        });
+    })) return "The project's excluded-cell records are damaged.";
+    if (t.excludedRows && Object.keys(t.excludedRows).some(function (id) {
+      return !rowIds[id] || (t.excludedRows[id] !== true && t.excludedRows[id] !== 1);
+    })) return "The project's excluded-row records are damaged.";
+    if (t.filters != null && (!Array.isArray(t.filters) || t.filters.some(function (f) {
+      return !record(f) || !names[f.col] || !own(FILTER_OPS, f.op) ||
+        (filterNeedsValue(f.op) && (!scalar(f.value) || f.value == null || String(f.value) === ""));
+    }))) return "The project's row filters are damaged.";
+    if (s.version !== 2) {
+      if (!Array.isArray(s.charts)) return "The project's documents are damaged.";
+      var ids = dataMap();
+      for (var d = 0; d < s.charts.length; d++) {
+        var c = s.charts[d];
+        if (!record(c) || typeof c.id !== "string" || !c.id || ids[c.id] ||
+            (isLayoutTab(c) ? !Array.isArray(c.items) : !own(MODULES, c.module)) ||
+            (!isLayoutTab(c) && (!record(c.roles) || !record(c.options))))
+          return "The project contains an invalid document.";
+        if (c.name != null && typeof c.name !== "string")
+          return "The project contains an invalid document name.";
+        for (var mapIndex = 0; mapIndex < 2; mapIndex++) {
+          var settings = c[["roles", "options"][mapIndex]];
+          if (settings && Object.keys(settings).some(function (mod) {
+            return !own(MODULES, mod) || !record(settings[mod]);
+          })) return "The project's document settings are damaged.";
+        }
+        ids[c.id] = true;
+      }
     }
     return null;
   }
   function applySnapshot(s) {
+    // Validate before changing project, histories, view state or recovery.
+    if (projectValidationError(s)) return false;
     s = migrateSnapshot(s);
     if (!s) return false;
-    PIN_MIGRATE_PENDING = true;   // run after charts land (below)
-    GRID_NATURAL_WIDTHS = {};
-    gridResetColumnView();
-    GRID_FIND_QUERY = ""; GRID_FIND_RESULTS = []; GRID_FIND_INDEX = -1;
-    if (s.table && s.table.order && s.table.raw) {
+    var preparedTable;
+    try {
       var rows = [];
       var n = s.table.order.length ? s.table.raw[s.table.order[0]].length : 0;
       for (var i = 0; i < n; i++)
         rows.push(s.table.order.map(function (col) { return s.table.raw[col][i]; }));
-      PROJECT.table = buildTable(s.table.name, s.table.order, rows, s.table.types,
+      preparedTable = buildTable(s.table.name, s.table.order, rows, s.table.types,
                                  s.table.declaredLevels || null,
                                  s.table.excluded || null,
                                  s.table.missingTokens || null,
                                  s.table.caseIds || null,
                                  s.table.excludedRows || null,
-                                 s.table.levelOrderDefaults || null);
+                                 s.table.levelOrderDefaults || null, true);
       // Restored BEFORE the retype below, or the first pass reads the
       // dataset list for a column that has its own.
-      PROJECT.table.missingTokensByCol =
+      preparedTable.missingTokensByCol =
         (s.table.missingTokensByCol &&
          typeof s.table.missingTokensByCol === "object")
           ? s.table.missingTokensByCol : {};
-      PROJECT.table.edited = !!s.table.edited;
-      PROJECT.table.filters = Array.isArray(s.table.filters)
+      preparedTable.edited = !!s.table.edited;
+      preparedTable.filters = Array.isArray(s.table.filters)
         ? s.table.filters : [];
-      PROJECT.table.computed = (s.table.computed &&
+      preparedTable.computed = (s.table.computed &&
         typeof s.table.computed === "object") ? s.table.computed : {};
-      PROJECT.table.importedFormulas = (s.table.importedFormulas &&
+      preparedTable.importedFormulas = (s.table.importedFormulas &&
         typeof s.table.importedFormulas === "object")
           ? s.table.importedFormulas : {};
-      PROJECT.table.importedFilters = Array.isArray(s.table.importedFilters)
+      preparedTable.importedFilters = Array.isArray(s.table.importedFilters)
         ? s.table.importedFilters : [];
-      retype(PROJECT.table);
-    }
+      retype(preparedTable, true);
+    } catch (prepareError) { return false; }
+    // Only now may this snapshot replace the user's live data.
+    clearEngineStashes();
+    PROJECT.table = preparedTable;
+    bumpSnapEpoch();
+    PIN_MIGRATE_PENDING = true;   // run after charts land (below)
+    GRID_NATURAL_WIDTHS = dataMap();
+    gridResetColumnView();
+    GRID_FIND_QUERY = ""; GRID_FIND_RESULTS = []; GRID_FIND_INDEX = -1;
     PROJECT.id = s.id || newProjectId();
     PROJECT.name = s.name || (PROJECT.table && PROJECT.table.name) ||
       "Untitled project";
@@ -3789,7 +4117,7 @@
           !isLayoutTab(chartById(s.ui.lastChart)) ? s.ui.lastChart : null,
         lastLayout: chartById(s.ui.lastLayout) &&
           isLayoutTab(chartById(s.ui.lastLayout)) ? s.ui.lastLayout : null,
-        columnWidths: {},
+        columnWidths: dataMap(),
         paneWidths: splitSanitizeWidths(s.ui.paneWidths),
         varboxOpen: s.ui.varboxOpen === true,
         sizeviewOpen: s.ui.sizeviewOpen === true,
@@ -3813,12 +4141,13 @@
               Math.max(72, Math.min(600, Math.round(savedWidth)));
         }
       }
+      if (s.ui.columnLayout === "stretch") PROJECT.ui.columnLayout = "stretch";
     } else PROJECT.ui = {
       dataOpen: false,
       workspace: isLayoutTab(activeChart()) ? "layout" : "chart",
       lastChart: null,
       lastLayout: null,
-      columnWidths: {},
+      columnWidths: dataMap(),
       paneWidths: {}
     };
     rememberDocument(activeChart());
@@ -3830,8 +4159,10 @@
     try {
       raw = window.localStorage.getItem(PS_SAVE_KEY);
       var s = JSON.parse(raw || "null");
+      var precisionNote = precisionMigrationNotice(s);
       var ok = applySnapshot(s);
       if (ok) {
+        RECOVERY_NOTE = precisionNote;
         BOOT_RESTORED = true;
         BOOT_SAVED_AT = s && s.savedAt ? s.savedAt : null;
         LAST_PROJECT_BYTES = raw ? raw.length : 0;
@@ -3843,10 +4174,12 @@
       try {
         var backupRaw = window.localStorage.getItem(PS_BACKUP_KEY);
         var backup = JSON.parse(backupRaw || "null");
+        var backupPrecisionNote = precisionMigrationNotice(backup);
         if (applySnapshot(backup)) {
           BOOT_RESTORED = true;
           BOOT_SAVED_AT = backup && backup.savedAt ? backup.savedAt : null;
-          RECOVERY_NOTE = "The newest autosave was unreadable. Pandion Plots recovered the previous local backup.";
+          RECOVERY_NOTE = "The newest autosave was unreadable. Pandion Plots recovered the previous local backup." +
+            (backupPrecisionNote ? " " + backupPrecisionNote : "");
           AUTOSAVE_HEALTH = "recovered";
           AUTOSAVE_DETAIL = "Recovered from the previous autosave";
           LAST_PROJECT_BYTES = backupRaw.length;
@@ -3875,9 +4208,15 @@
     var body = projectSnapshot();
     return JSON.stringify({
       kind: "pandion-plots-project",
-      formatVersion: 2,
+      formatVersion: 3,
       savedAt: new Date().toISOString(),
       app: "pandion-plots-standalone",
+      appVersion: APP_VERSION,
+      // The exact code that computed this file: the build stamp for
+      // people, the ledger ids for the reopen notice (see
+      // NUMERICAL_CHANGES). Both additive; old readers ignore them.
+      appBuild: APP_BUILD,
+      numericalChanges: _numericalChangeIds(),
       // Machine-library snapshot so saved styles/palettes travel with
       // the project; on open, names missing from the recipient's
       // library import (existing names are never clobbered).
@@ -4196,6 +4535,8 @@
       "Statistical figure created with Pandion Plots.");
     root.insertBefore(desc, root.firstChild);
     root.insertBefore(title, root.firstChild);
+    root.insertBefore(doc.createComment(" " + appStamp() + " "),
+      root.firstChild);
     root.setAttribute("role", "img");
     root.setAttribute("aria-labelledby",
       "pandion-export-title pandion-export-description");
@@ -4603,6 +4944,27 @@
     var n = parseFloat(String(v || "").replace(/px$/i, ""));
     return isFinite(n) && n > 0 ? n : 0;
   }
+  // Shared with the Jamovi renderer: display and wrap the exact text that
+  // XML/PDF/PNG will receive. Stored data and editable strings stay raw.
+  function exportSafeText(value) {
+    return window.GraphBuilder2.xmlSafeText(value);
+  }
+  // The legend's transparent drag target is sized in a later animation
+  // frame. Its geometry and hover outline are editor state, not figure
+  // content. Keep its empty fixture node for existing snapshot compatibility.
+  function normalizeLegendCapture(root) {
+    var targets = root.querySelectorAll('[data-role="legend-bg"]');
+    var attrs = ["x", "y", "width", "height", "stroke", "stroke-width",
+                 "stroke-dasharray", "stroke-opacity"];
+    for (var i = 0; i < targets.length; i++)
+      for (var j = 0; j < attrs.length; j++)
+        targets[i].removeAttribute(attrs[j]);
+  }
+  function serializeExportSvg(root) {
+    normalizeLegendCapture(root);
+    return new XMLSerializer().serializeToString(
+      window.GraphBuilder2.prepareSvgForExport(root));
+  }
   function parseExportSvg(svgText) {
     var doc = new DOMParser().parseFromString(svgText, "image/svg+xml");
     if (!doc || !doc.documentElement ||
@@ -4623,13 +4985,28 @@
   // getBBox on the root svg unions its children INCLUDING their drag
   // transforms, which is exactly the drawn extent.
   function svgContentBox(svgEl) {
+    var targets = [], styles = [];
     try {
       if (!svgEl || typeof svgEl.getBBox !== "function") return null;
+      // Exclude the invisible legend hit area from all export/snapshot
+      // bounds. A delayed sizing callback otherwise adds four pixels and
+      // makes a Notebook page report drift without any chart edit.
+      targets = svgEl.querySelectorAll('[data-role="legend-bg"]');
+      for (var i = 0; i < targets.length; i++) {
+        styles.push(targets[i].getAttribute("style"));
+        targets[i].style.setProperty("display", "none", "important");
+      }
       var bb = svgEl.getBBox();
       if (!bb || !isFinite(bb.width) || !isFinite(bb.height) ||
           bb.width <= 0 || bb.height <= 0) return null;
       return { x: bb.x, y: bb.y, w: bb.width, h: bb.height };
     } catch (e) { return null; }
+    finally {
+      for (var j = 0; j < styles.length; j++) {
+        if (styles[j] === null) targets[j].removeAttribute("style");
+        else targets[j].setAttribute("style", styles[j]);
+      }
+    }
   }
   function liveChartSvg() {
     var host = hostEl();
@@ -4850,7 +5227,7 @@
     var caption = String((activeChartTab() || {}).caption || "").trim();
     if (!caption) {
       return {
-        svg: new XMLSerializer().serializeToString(doc.documentElement),
+        svg: serializeExportSvg(doc.documentElement),
         w: size.w, h: size.h
       };
     }
@@ -4898,11 +5275,12 @@
     root.appendChild(t);
     applySvgAccessibility(outer, accessibleTitle, accessibleDescription);
     return {
-      svg: new XMLSerializer().serializeToString(root),
+      svg: serializeExportSvg(root),
       w: size.w, h: size.h + capH
     };
   }
   function wrapCaptionLines(textStr, maxW, fontSize, font) {
+    textStr = exportSafeText(textStr);
     var cv = document.createElement("canvas");
     var ctx = cv.getContext ? cv.getContext("2d") : null;
     // A hardened or headless DOM can decline a 2d context, and without
@@ -5075,12 +5453,13 @@
       nested.removeAttribute("role");
       nested.removeAttribute("aria-labelledby");
       nested.removeAttribute("style");
+      stampSnapshotFonts(nested, snap);
       root.appendChild(nested);
     }
     applySvgAccessibility(doc, exportAccessibleTitle(),
       exportAccessibleDescription());
     return {
-      svg: new XMLSerializer().serializeToString(root),
+      svg: serializeExportSvg(root),
       w: page.w, h: page.h
     };
   }
@@ -5314,6 +5693,71 @@
       );
     }
   }
+  // Figure PDFs use one logical Figure per page. The vector drawing is
+  // marked content, linked BOTH ways through the structure and parent trees.
+  // Keep this at the PDF boundary: SVG geometry and statistics are untouched.
+  // jsPDF 3.0.4 exposes these serialization events; pdf-structure-check.py
+  // independently follows the emitted references and parses the operators.
+  function tagPdfFigures(pdf) {
+    var api = pdf.internal, pages = [], rootId;
+    pdf.__private__.setPdfVersion("1.7");
+    pdf.setLanguage("en");
+    pdf.viewerPreferences({ DisplayDocTitle: true });
+    // PDF text strings are UTF-16BE with a BOM. Hex avoids delimiter and
+    // backslash injection, and preserves non-Latin text and surrogate pairs.
+    function textString(value) {
+      // Use the same explicit escapes as visible exports for malformed
+      // UTF-16/control characters, while retaining the original stored text.
+      var s = exportSafeText(value), hex = "FEFF";
+      for (var i = 0; i < s.length; i++)
+        hex += ("0000" + s.charCodeAt(i).toString(16)).slice(-4);
+      return "<" + hex + ">";
+    }
+    api.events.subscribe("putPage", function (page) {
+      var entry = pages[page.pageNumber - 1];
+      entry.pageId = page.objId;
+      api.write("/StructParents " + (page.pageNumber - 1));
+      api.write("/Tabs /S");
+    });
+    api.events.subscribe("postPutResources", function () {
+      // Allocate afresh on every serialization, after jsPDF has assigned
+      // page IDs. Never predict IDs or leave them from a previous output().
+      rootId = api.newObjectDeferred();
+      var docId = api.newObjectDeferred();
+      var parentId = api.newObjectDeferred();
+      var ids = pages.map(function () { return api.newObjectDeferred(); });
+      function object(id, body) {
+        api.newObjectDeferredBegin(id, true);
+        api.write("<< " + body + " >>");
+        api.write("endobj");
+      }
+      object(rootId, "/Type /StructTreeRoot /K [" + docId + " 0 R]" +
+        " /ParentTree " + parentId + " 0 R /ParentTreeNextKey " + pages.length);
+      object(docId, "/Type /StructElem /S /Document /P " + rootId +
+        " 0 R /K [" + ids.map(function (id) { return id + " 0 R"; }).join(" ") + "]");
+      var nums = [];
+      pages.forEach(function (entry, i) {
+        object(ids[i], "/Type /StructElem /S /Figure /P " + docId +
+          " 0 R /Pg " + entry.pageId + " 0 R /K 0 /Alt " + textString(entry.alt));
+        nums.push(i + " [" + ids[i] + " 0 R]");
+      });
+      object(parentId, "/Nums [" + nums.join(" ") + "]");
+    });
+    api.events.subscribe("putCatalog", function () {
+      api.write("/MarkInfo << /Marked true >>");
+      api.write("/StructTreeRoot " + rootId + " 0 R");
+    });
+    return function (description, draw) {
+      var index = api.getCurrentPageInfo().pageNumber - 1;
+      if (pages[index] || !String(description || "").trim())
+        return Promise.reject(new Error("The PDF figure description could not be prepared."));
+      pages[index] = { alt: String(description).trim() };
+      api.write("/Figure << /MCID 0 >> BDC");
+      return Promise.resolve().then(draw).then(function () {
+        api.write("EMC");
+      });
+    };
+  }
   function vectorPdfBlob(source) {
     return new Promise(function (resolve, reject) {
       var JsPDF = window.jspdf && window.jspdf.jsPDF;
@@ -5332,6 +5776,15 @@
           pdfTitle = String(svgTitle.textContent).trim();
         if (svgDesc && String(svgDesc.textContent || "").trim())
           pdfDescription = String(svgDesc.textContent).trim();
+        var caption = svgDoc.documentElement.querySelector('[data-role="export-caption"]');
+        if (caption) {
+          var captionLines = caption.querySelectorAll("tspan");
+          var words = [];
+          for (var ci = 0; ci < captionLines.length; ci++)
+            words.push(captionLines[ci].textContent);
+          pdfDescription += "\nCaption: " + (words.length
+            ? words.join(" ") : caption.textContent);
+        }
         normalizePdfFonts(svgDoc.documentElement);
       } catch (e) {
         reject(e);
@@ -5351,15 +5804,17 @@
         pdf.setProperties({
           title: pdfTitle,
           subject: pdfDescription.substring(0, 2000),
-          creator: "Pandion Plots"
+          creator: appStamp()
         });
       } catch (e) {
         reject(new Error("The vector PDF document could not be created."));
         return;
       }
-      pdf.svg(svgDoc.documentElement, {
-        x: 0, y: 0, width: pageW, height: pageH,
-        loadExternalStyleSheets: false
+      tagPdfFigures(pdf)(pdfDescription, function () {
+        return pdf.svg(svgDoc.documentElement, {
+          x: 0, y: 0, width: pageW, height: pageH,
+          loadExternalStyleSheets: false
+        });
       }).then(function () {
         try {
           resolve(pdf.output("blob"));
@@ -5427,7 +5882,7 @@
       '[data-role="stats-link-halo"] rect, [data-role="stats-link-halo"] circle').length;
     // Mine the card's three pieces; the buttons are controls, not finding.
     function textOf(node) {
-      return node ? String(node.textContent || "").replace(/\s+/g, " ").trim() : "";
+      return node ? exportSafeText(node.textContent || "").replace(/\s+/g, " ").trim() : "";
     }
     var title = textOf(card.querySelector("[data-st-ftitle]"));
     var eyebrow = "", body = "";
@@ -5456,6 +5911,7 @@
     var FONT = "-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
     function wrapText(text, font, maxW) {
       if (!text) return [];
+      text = exportSafeText(text);
       mctx.font = font;
       var words = text.split(" "), lines = [], cur = "";
       for (var wi = 0; wi < words.length; wi++) {
@@ -5482,7 +5938,6 @@
     for (var b1 = 0; b1 < bodyLines.length; b1++, ty += 16)
       parts.push('<text x="14" y="' + ty + '" font-size="12" fill="#22364d">' + esc(bodyLines[b1]) + "</text>");
     var cardH = ty + 2;
-    var xml = new XMLSerializer();
     var chartClone = chart.cloneNode(true);
     stripHoverFromClone(chartClone);
     stripEditorChromeFromClone(chartClone);
@@ -5495,8 +5950,9 @@
     var composed =
       '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + totalH +
       '" viewBox="0 0 ' + w + " " + totalH + '">' +
+      "<!-- " + appStamp() + " -->" +
       '<rect x="0" y="0" width="' + w + '" height="' + totalH + '" fill="#ffffff"/>' +
-      xml.serializeToString(chartClone) +
+      serializeExportSvg(chartClone) +
       '<g transform="translate(' + pad + "," + (h + pad) + ')" font-family="' +
       FONT.replace(/"/g, "&quot;") + '">' +
       '<rect x="0" y="0" width="' + cardW + '" height="' + cardH +
@@ -5663,6 +6119,18 @@
         texts[i].setAttribute("font-family", fam);
     return fam;
   }
+  // Snapshots retain their historical SVG bytes for Notebook signatures.
+  // Fonts inherited from the renderer host travel separately, then become
+  // explicit on each displayed/exported panel. A user-selected chart font
+  // overrides presentation attributes just as the renderer's scoped rule does.
+  function stampSnapshotFonts(root, snap) {
+    var family = snap.fontFamily || "sans-serif";
+    root.setAttribute("font-family", family);
+    var texts = root.querySelectorAll("text,tspan");
+    for (var i = 0; i < texts.length; i++)
+      if (snap.fontOverride || !texts[i].hasAttribute("font-family"))
+        texts[i].setAttribute("font-family", family);
+  }
   // A pin's src is an SVG data URL, not a PNG (Torry, Aug 1 2026: "does
   // it lose its vector-based resolution?"): the composed moment IS pure
   // vector, the PDF pipeline is svg2pdf (genuinely vector), and the layout
@@ -5744,7 +6212,7 @@
         for (var t = 0; t < texts.length; t++)
           if (!texts[t].getAttribute("font-family"))
             texts[t].setAttribute("font-family", "sans-serif");
-        pin.src = pinSvgSrc(new XMLSerializer().serializeToString(root));
+        pin.src = pinSvgSrc(serializeExportSvg(root));
         changed = true;
       } catch (e) {}
     }
@@ -5894,7 +6362,16 @@
         vars = desc.indexOf(": ") !== -1
           ? desc.slice(desc.indexOf(": ") + 2) : "";
       } catch (eK) {}
-      return { srcChart: id, srcName: c.name, srcSig: pinSig(html),
+      // Freeze the description with the figure, never derive an old page's
+      // alternative from today's live chart during a later PDF export.
+      var alt = String(c.exportDescription || "").trim();
+      if (!alt && !forId) alt = generatedExportDescription();
+      if (!alt) {
+        var sd = parseExportSvg(html).documentElement;
+        var dd = sd.querySelector(":scope > desc");
+        alt = dd ? dd.textContent : (sd.getAttribute("aria-label") || "");
+      }
+      return { srcChart: id, srcName: c.name, srcSig: pinSig(html), srcAlt: alt,
                srcDesc: desc, srcType: kind || undefined,
                srcVars: vars || undefined };
     } catch (e) { return null; }
@@ -6169,7 +6646,7 @@
     if (!clone.getAttribute("viewBox"))
       clone.setAttribute("viewBox", "0 0 " + w + " " + h);
     stampPinFonts(clone, chart);
-    pushPin(new XMLSerializer().serializeToString(clone), w, h, "the chart",
+    pushPin(serializeExportSvg(clone), w, h, "the chart",
             boardId, pinProvenance(chart));
   }
   // Inject the button whenever a focus card exists without one: the card
@@ -6544,21 +7021,38 @@
     if (!o || !o.project ||
         o.kind !== "pandion-plots-project")
       return null;
-    if (o.formatVersion > 2)
+    if (o.formatVersion > 3)
       return { error: "This project was saved by a newer version - " +
                       "update this page to open it." };
-    return { snapshot: o.project, libraries: o.libraries };
+    if ([1, 2, 3].indexOf(o.formatVersion) === -1)
+      return { error: "The project file format is not recognized. Your open project has not been changed." };
+    var invalid = projectValidationError(o.project);
+    if (invalid) return { error: invalid + " Your open project has not been changed." };
+    return { snapshot: o.project, libraries: o.libraries,
+             fileAppVersion: typeof o.appVersion === "string" ? o.appVersion : null,
+             // null (not []) when absent: a pre-id file is judged by its
+             // version, an id-carrying file by exactly what it lists.
+             fileNumericalChanges: Array.isArray(o.numericalChanges)
+               ? o.numericalChanges.map(String) : null };
   }
   function adoptProject(parsed, fileName) {
-    PROJECT_CHOSEN = true;
+    var invalid = projectValidationError(parsed.snapshot);
+    if (invalid) {
+      showLoaderMessage(invalid + " Your open project has not been changed.");
+      return { error: invalid };
+    }
+    var precisionNote = precisionMigrationNotice(parsed.snapshot);
     var replaced = captureReplacedProject();      // item 13
-    dataHistoryClear();
-    importLibraries(parsed.libraries);
     if (!applySnapshot(parsed.snapshot)) {
       showLoaderMessage(
         "Could not read that project file (unrecognized contents).");
-      return;
+      return { error: "Could not read that project file." };
     }
+    PROJECT_CHOSEN = true;
+    dataHistoryClear();
+    importLibraries(parsed.libraries);
+    var numNote = _numericalNoticeFor(parsed.fileAppVersion, APP_VERSION,
+                                      parsed.fileNumericalChanges);
     PROJECT_REV = 0;
     FILE_SAVED_REV = fileName ? 0 : null;
     FILE_LABEL = fileName || null;
@@ -6570,7 +7064,9 @@
     updateDocumentState();
     hideWelcome();
     closeLoader();
-    offerReplacedProjectBack(replaced, fileName || "that project");
+    offerReplacedProjectBack(replaced, fileName || "that project",
+      [numNote, precisionNote].filter(Boolean).join(" "));
+    return { ok: true };
   }
   // Punch list 20. Offered ONLY while the user is still on one of our own
   // examples: once they have imported their own data, telling them to open a
@@ -6603,7 +7099,7 @@
     FILE_HANDLE = null;
     PROJECT.table = buildTable(ex.table.name, ex.table.header, ex.table.rows,
                                ex.types || null);
-    GRID_NATURAL_WIDTHS = {};
+    GRID_NATURAL_WIDTHS = dataMap();
     gridResetColumnView();
     GRID_FIND_QUERY = ""; GRID_FIND_RESULTS = []; GRID_FIND_INDEX = -1;
     // Only the modules this dataset can honestly show get roles. An analysis
@@ -6620,15 +7116,15 @@
         // a placeholder instead of its chart (found Aug 24 2026 by the
         // wellbeing probe's sequencing; affected all examples).
         roles[k] = JSON.parse(JSON.stringify(ex.roles[k]));
-    PROJECT.charts = [{ id: "c1", name: "Chart 1",
+    PROJECT.charts = [seedStatPrefs({ id: "c1", name: "Chart 1",
       module: ex.fits[0] || "plotbuilder",
       // Brand new, so the default style may apply once - the same stamp
       // newChart() sets. Its ABSENCE means "an older saved document, do
       // not restyle it", which is why migrateSnapshot must not set it.
-      roles: roles, options: {}, styleStamp: false }];
+      roles: roles, options: {}, styleStamp: false })];
     PROJECT.activeChart = "c1";
     PROJECT.ui = { dataOpen: false, workspace: "chart",
-                   lastChart: "c1", lastLayout: null, columnWidths: {} };
+                   lastChart: "c1", lastLayout: null, columnWidths: dataMap() };
   }
   // Drop role assignments that no longer match the table.
   function validateRoles() {
@@ -6918,6 +7414,17 @@
     // from the playground ruling set (350ms dwell, no chain, one seam
     // at a time, no floor). jamovi never ships this key.
     payload.gapSeams = true;
+    // Colour controls sized from the panel's own box (Torry, Sep 3 2026).
+    // The HSV picker is a fixed 184px column with a 96px gradient, which
+    // is cramped inside a panel several times that wide, and the swatch
+    // chips are floored at 22px for the same reason. With this key the
+    // engine measures the panel it is actually in and gives them a
+    // bounded share of it, growing only, so the target spacing the
+    // accessibility check relies on can never shrink. jamovi never ships
+    // this key: its panel is chart-width too, so the same rule would
+    // change its appearance, and that is a call to make deliberately
+    // rather than as a side effect of a standalone fix.
+    payload.panelFitControls = true;
     // Scatter-overlay re-ship: harvested engine-computed arrays return
     // to the payload while the data fingerprint still matches (R
     // parity - jamovi recomputes and ships them every run). A stale
@@ -7119,7 +7626,7 @@
                 run: openChartSetup });
     acts.push({ id: "ps-empty-hmc", link: true,
                 label: "Not sure? Help me choose",
-                run: function () { showHelpMeChoose(); } });
+                run: function () { showHelpMeChoose(null, activeChart().id); } });
     return acts;
   }
   function inspectColumnFromEmptyState(col) {
@@ -7168,7 +7675,7 @@
               run: openChartSetup },
             { id: "ps-empty-hmc", link: true,
               label: "Not sure? Help me choose",
-              run: function () { showHelpMeChoose(); } }])
+              run: function () { showHelpMeChoose(null, activeChart().id); } }])
       : messageActions(fix);
     var tail = assignment
       ? (fix && fix.kind === "example"
@@ -8077,7 +8584,7 @@
       t.textContent = r.text;
       root.appendChild(t);
     }
-    return { svg: new XMLSerializer().serializeToString(root),
+    return { svg: serializeExportSvg(root),
              w: w, h: h + lay.h };
   }
   // The page as it should export, with its record when the dialog asks for
@@ -8140,7 +8647,7 @@
     if (!JsPDF || !JsPDF.API || typeof JsPDF.API.svg !== "function")
       return Promise.reject(new Error(
         "The PDF exporter did not load. Reload and try again."));
-    var pdf = null;
+    var pdf = null, drawFigure;
     var chain = Promise.resolve();
     pins.forEach(function (pin, i) {
       chain = chain.then(function () {
@@ -8157,19 +8664,46 @@
             compress: true, putOnlyUsedFonts: true });
           pdf.setProperties({
             title: (PROJECT.name || "Pandion Plots") + " - Notebook",
-            creator: "Pandion Plots" });
+            creator: appStamp() });
+          drawFigure = tagPdfFigures(pdf);
         } else {
           pdf.addPage([d.w, d.h], d.w >= d.h ? "landscape" : "portrait");
         }
-        if (made) {
-          var sdoc = parseExportSvg(made.svg);
-          normalizePdfFonts(sdoc.documentElement);
-          return pdf.svg(sdoc.documentElement,
-            { x: 0, y: 0, width: d.w, height: d.h,
-              loadExternalStyleSheets: false });
+        var sdoc = made ? parseExportSvg(made.svg) : null;
+        var description = String(pin.srcAlt || "").trim();
+        if (!description && sdoc) {
+          var desc = sdoc.querySelector("desc");
+          description = desc ? String(desc.textContent || "").trim() : "";
         }
-        pdf.addImage(pin.src, "PNG", 0, 0, d.w, d.h);
-        return null;
+        if (!description) {
+          description = [pin.srcType, pin.srcDesc, pin.srcName].filter(Boolean).join(". ") ||
+            "Figure kept in the Notebook.";
+          // Older vector captures predate saved descriptions. Preserve their
+          // visible labels without guessing data or consulting the live chart.
+          if (sdoc) {
+            var labels = [], texts = sdoc.querySelectorAll('text:not([data-role="pin-record"])');
+            for (var ti = 0; ti < texts.length; ti++)
+              if (String(texts[ti].textContent || "").trim()) labels.push(texts[ti].textContent);
+            if (labels.length) description += " Visible text: " + labels.join("; ") + ".";
+          }
+        }
+        if (pin.momTitle || pin.momText)
+          description += "\n" + [pin.momEyebrow, pin.momTitle, pin.momText].filter(Boolean).join(". ");
+        // Only describe the record when it is actually included visually.
+        if (made && rec) description += "\n" + pinRecordBlocks(pin, rec).map(function (b) {
+          return b.text;
+        }).join("\n");
+        else if (!made && pin.note) description += "\n" + pin.note;
+        return drawFigure(description, function () {
+          if (sdoc) {
+            normalizePdfFonts(sdoc.documentElement);
+            return pdf.svg(sdoc.documentElement,
+              { x: 0, y: 0, width: d.w, height: d.h,
+                loadExternalStyleSheets: false });
+          }
+          pdf.addImage(pin.src, "PNG", 0, 0, d.w, d.h);
+          return null;
+        });
       });
     });
     return chain.then(function () { return pdf.output("blob"); });
@@ -8505,7 +9039,7 @@
       var copy = mkEl("button", "ps-btn", "Copy details");
       copy.type = "button";
       copy.addEventListener("click", function () {
-        var text = "Pandion Plots " + APP_VERSION + "\n" +
+        var text = appStamp() + "\n" +
           String((err && err.stack) || (err && err.message) || err) + "\n" +
           "module: " + curModule();
         try {
@@ -8927,7 +9461,7 @@
 
   // ---- chart snapshots for layouts (session cache, chrome-stripped) ----
   var LAST_RENDER_PAYLOAD = null;
-  var CHART_SNAPS = {};   // chartId -> { svg, w, h, rev }
+  var CHART_SNAPS = {};   // chartId -> { svg, w, h, fontFamily, fontOverride, rev }
   // Punch list B1. Layout panels other than the active chart are drawn from
   // these cached SVGs, and invalidation used to be a hand-maintained list of
   // resets at mutation sites. Eight sites had one and eight did not, so a cell
@@ -9002,6 +9536,7 @@
   // cx/cy - so a chart that was EVER hovered serialized differently from
   // one that never was. Reset them to their as-created shape.
   function snapParkChrome(clone) {
+    normalizeLegendCapture(clone);
     var roles = ["hover-highlight", "marquee", "xy-fast-halo"];
     for (var i = 0; i < roles.length; i++) {
       var els = clone.querySelectorAll('[data-role="' + roles[i] + '"]');
@@ -9177,6 +9712,7 @@
     clone.setAttribute("preserveAspectRatio", "xMidYMid meet");
     clone.style.position = "static";
     clone.style.zIndex = "auto";
+    window.GraphBuilder2.prepareSvgForExport(clone);
     var html = clone.outerHTML;
     var idEls = clone.querySelectorAll("[id]");
     for (var j = 0; j < idEls.length; j++) {
@@ -9212,7 +9748,10 @@
         if (Math.abs(best.clientWidth - authSz.w * 96) > 12) return;
       }
       var snap = svgSelfContainedClone(best, "snap-" + chartId + "-");
+      var fontStyle = hostEl().querySelector('style[data-role="gb2-font-style"]');
       CHART_SNAPS[chartId] = { svg: snap.html, w: snap.w, h: snap.h,
+                               fontFamily: getComputedStyle(best).fontFamily,
+                               fontOverride: !!(fontStyle && fontStyle.textContent.trim()),
                                rev: snapRev() };
     } catch (e) {}
   }
@@ -9494,7 +10033,7 @@
     PROJECT.activeChart = activeId;
     var cellKeys = Object.keys(cells);
     if (!cellKeys.length && !changedOptions) return;
-    if (!PROJECT.table.excluded) PROJECT.table.excluded = {};
+    if (!PROJECT.table.excluded) PROJECT.table.excluded = dataMap();
     for (var ri = 0; ri < cellKeys.length; ri++) {
       var cellAt = cells[cellKeys[ri]];
       if (!PROJECT.table.excluded[cellAt.col])
@@ -11218,7 +11757,7 @@
     if (onPick) {
       chip.type = "button";
       chip.setAttribute("data-hmc-start", String(label));
-      setTip(chip, "Create this chart as a " + String(label).toLowerCase());
+      setTip(chip, "Start with a " + String(label).toLowerCase() + " chart");
       chip.addEventListener("click", function () { onPick(label); });
     }
     var art = startThumb(label, mod);
@@ -11958,6 +12497,15 @@
         wrap.appendChild(slot);
       })(defs[i]);
     }
+    // The picker overlays neighboring role controls. Keep those controls out
+    // of pointer/keyboard navigation until it closes: a partially exposed
+    // button is otherwise an undersized target behind the picker. Clicking
+    // outside the active card still dismisses it via the document handler.
+    if (ROLE_PICKER_OPEN != null) {
+      var pickerCards = wrap.querySelectorAll(".ps-role-card");
+      for (var pc = 0; pc < pickerCards.length; pc++)
+        pickerCards[pc].inert = pickerCards[pc].getAttribute("data-role-key") !== ROLE_PICKER_OPEN;
+    }
     syncEligibilityHints();
     if (keepFocusKey) {
       // Role keys are internal identifiers (xvar, groupVar...), never
@@ -12261,10 +12809,10 @@
   var INSPECTOR_VAR = null;
   var GRID_DRAG = null;      // pointer gesture armed on a data cell
   var GRID_COLUMN_DRAG = null; // active header-divider resize gesture
-  var GRID_NATURAL_WIDTHS = {};
+  var GRID_NATURAL_WIDTHS = dataMap();
   // Data-workspace presentation state only. These values are deliberately
   // excluded from PROJECT, snapshots, autosave, export, and chart payloads.
-  var GRID_HIDDEN_COLUMNS = {};
+  var GRID_HIDDEN_COLUMNS = dataMap();
   var GRID_FOCUS_CHART_COLUMNS = false;
   var COLUMN_MENU = null;
   var ROW_MENU = null;
@@ -12313,7 +12861,7 @@
        rows * Math.max(1, cols) > GRID_VIRTUAL_CELL_LIMIT);
   }
   function gridResetColumnView() {
-    GRID_HIDDEN_COLUMNS = {};
+    GRID_HIDDEN_COLUMNS = dataMap();
     GRID_FOCUS_CHART_COLUMNS = false;
     COLUMN_VIEW_MENU_OPEN = false;
   }
@@ -12450,7 +12998,7 @@
   function gridShowAllColumns() {
     var changed = gridHiddenColumnCount(PROJECT.table) > 0 ||
       GRID_FOCUS_CHART_COLUMNS;
-    GRID_HIDDEN_COLUMNS = {};
+    GRID_HIDDEN_COLUMNS = dataMap();
     GRID_FOCUS_CHART_COLUMNS = false;
     gridClearSelection(false);
     syncDataGrid();
@@ -12637,8 +13185,8 @@
     var current = t.levels[col] || [];
     if (JSON.stringify(levels) === JSON.stringify(current)) return;
     dataMark("the level order");
-    if (!t.declaredLevels) t.declaredLevels = {};
-    if (!t.levelOrderDefaults) t.levelOrderDefaults = {};
+    if (!t.declaredLevels) t.declaredLevels = dataMap();
+    if (!t.levelOrderDefaults) t.levelOrderDefaults = dataMap();
     if (!t.levelOrderDefaults[col])
       t.levelOrderDefaults[col] = current.slice();
     t.declaredLevels[col] = levels;
@@ -12688,7 +13236,7 @@
       t.levelOrderDefaults[col];
     if (!t || !original) return;
     dataMark("resetting the level order");
-    if (!t.declaredLevels) t.declaredLevels = {};
+    if (!t.declaredLevels) t.declaredLevels = dataMap();
     t.declaredLevels[col] = original.slice();
     delete t.levelOrderDefaults[col];
     t.edited = true;
@@ -12780,7 +13328,7 @@
     if (had && list && JSON.stringify(before) === JSON.stringify(list)) return;
     dataMark("the missing-value labels for " + col);
     var prevTokens = tableMissingTokens(t, col);
-    if (!t.missingTokensByCol) t.missingTokensByCol = {};
+    if (!t.missingTokensByCol) t.missingTokensByCol = dataMap();
     if (list === null) delete t.missingTokensByCol[col];
     else t.missingTokensByCol[col] = list;
     t.edited = true;
@@ -13145,7 +13693,7 @@
       ? t.raw[sourceCol].slice() : Array(nRows(t)).fill("");
     t.types[name] = sourceCol && t.types[sourceCol] ? t.types[sourceCol] : "nominal";
     if (sourceCol && t.declaredLevels && t.declaredLevels[sourceCol]) {
-      if (!t.declaredLevels) t.declaredLevels = {};
+      if (!t.declaredLevels) t.declaredLevels = dataMap();
       t.declaredLevels[name] = t.declaredLevels[sourceCol].slice();
     }
     if (sourceCol && t.levelOrderDefaults &&
@@ -13304,7 +13852,7 @@
     if (!PROJECT.ui) PROJECT.ui = {};
     var widths = PROJECT.ui.columnWidths;
     if ((!widths || typeof widths !== "object") && create)
-      widths = PROJECT.ui.columnWidths = {};
+      widths = PROJECT.ui.columnWidths = dataMap();
     return widths && typeof widths === "object" ? widths : {};
   }
   function gridClampColumnWidth(width) {
@@ -13354,6 +13902,7 @@
   }
   function gridCaptureCurrentWidths() {
     var widths = gridColumnWidths(true);
+    delete PROJECT.ui.columnLayout;   // a set width ends the stretch layout
     var heads = el("ps-datagrid").querySelectorAll("th[data-grid-col]");
     for (var i = 0; i < heads.length; i++) {
       var col = heads[i].getAttribute("data-grid-col");
@@ -13376,7 +13925,17 @@
     }
     return width;
   }
-  function gridNaturalColumnWidth(col) {
+  // The narrowest NATURAL (auto-fitted) width. The header's chrome is
+  // about 48 px (padding, the 14 px type badge, its gap, the 8 px
+  // resizer) and the widest role tag the app prints under a name
+  // ("GROUP BY", "MEASURES") needs ~60 more; a fit below that would have
+  // to be re-fitted the moment a role is assigned, and a 72 px header
+  // leaves almost nothing to click on. The user's own drag can still go
+  // down to gridClampColumnWidth's 72; this floor is for what the app
+  // chooses. Shared by every auto-fit path (default, double-click,
+  // Auto-fit all, Reset) so they agree to the pixel.
+  var GRID_NATURAL_MIN = 96;
+  function gridNaturalColumnWidth(col, scanCap) {
     var t = PROJECT.table;
     if (!t || !t.raw[col]) return 160;
     var widest = gridApproxTextWidth(col) + 56;
@@ -13389,9 +13948,44 @@
           gridApproxTextWidth(ROLE_TAGS[defs[d].key] ||
                               defs[d].key.toUpperCase()) + 28);
     }
-    for (var i = 0; i < t.raw[col].length; i++)
-      widest = Math.max(widest, gridApproxTextWidth(t.raw[col][i]) + 28);
-    return gridClampColumnWidth(widest);
+    // scanCap caps how many cells are measured. The explicit Auto-fit
+    // action passes nothing and still measures EVERY row (exact, and the
+    // user asked for it); the automatic fit below passes a cap, because
+    // measuring is ~27 ms per 100k rows per column and a wide table would
+    // otherwise pay that on every load. A capped scan strides evenly and
+    // always includes the last row, so a long value has to hide between
+    // stride steps to be missed - and the exact action is one click away.
+    var vals = t.raw[col], nv = vals.length;
+    var step = (scanCap > 0 && nv > scanCap) ? Math.ceil(nv / scanCap) : 1;
+    for (var i = 0; i < nv; i += step)
+      widest = Math.max(widest, gridApproxTextWidth(vals[i]) + 28);
+    if (step > 1 && nv)
+      widest = Math.max(widest, gridApproxTextWidth(vals[nv - 1]) + 28);
+    return gridClampColumnWidth(Math.max(GRID_NATURAL_MIN, widest));
+  }
+  // Auto-fit is the DEFAULT for every column (Torry, Sep 2026). Rather
+  // than a new render mode, this FILLS the width each column is missing,
+  // so the grid's existing explicit-width path draws it: the colgroup
+  // carries per-column widths and the table is content-sized, the way a
+  // spreadsheet is. Consequences worth knowing: a width the user dragged
+  // or a .pand carries is never touched (only absent ones are filled), a
+  // newly created column is fitted the first time it renders, and
+  // "Reset all column widths" now means "fit to content again" rather
+  // than "stretch to fill the pane". The stretch path remains for a grid
+  // with no table.
+  var GRID_AUTOFIT_SCAN = 20000;
+  function gridAutoFitDefaults() {
+    var t = PROJECT.table;
+    if (!t || !Array.isArray(t.order) || !t.order.length) return 0;
+    if (PROJECT.ui && PROJECT.ui.columnLayout === "stretch") return 0;
+    var widths = gridColumnWidths(true), filled = 0;
+    for (var i = 0; i < t.order.length; i++) {
+      var col = t.order[i];
+      if (!t.raw[col] || isFinite(Number(widths[col]))) continue;
+      widths[col] = gridNaturalColumnWidth(col, GRID_AUTOFIT_SCAN);
+      filled++;
+    }
+    return filled;
   }
   function gridWidthTotal(widths, columns) {
     var t = PROJECT.table, total = 46;
@@ -13447,6 +14041,7 @@
   function gridAutoFitAll() {
     var t = PROJECT.table;
     if (!t) return;
+    delete PROJECT.ui.columnLayout;
     var widths = gridColumnWidths(true);
     for (var i = 0; i < t.order.length; i++)
       widths[t.order[i]] = gridNaturalColumnWidth(t.order[i]);
@@ -13463,7 +14058,15 @@
   }
   function gridResetAllWidths() {
     if (!PROJECT.ui) PROJECT.ui = {};
-    PROJECT.ui.columnWidths = {};
+    PROJECT.ui.columnWidths = dataMap();
+    // "Reset all widths" is the browser's stretch-to-fill layout, the
+    // one way back from fitted columns (Auto-fit all is the other
+    // command in the same menu, so a reset that re-fitted would be a
+    // duplicate). The marker is what keeps the default fit from filling
+    // the widths straight back on the next render; it rides in the
+    // project like columnWidths and is dropped by any width-setting
+    // action.
+    PROJECT.ui.columnLayout = "stretch";
     persist(false);
     syncDataGrid();
     showToast("Reset all column widths");
@@ -13978,7 +14581,8 @@
     var priorScrollTop = Number(grid.scrollTop) || 0;
     var priorScrollLeft = Number(grid.scrollLeft) || 0;
     var open = !!(PROJECT.ui && PROJECT.ui.dataOpen);
-    card.style.display = open ? "block" : "none";
+    // CSS chooses block or flex for the available workspace width.
+    card.style.display = open ? "" : "none";
     if (!open) {
       grid.innerHTML = "";
       grid.removeAttribute("aria-rowcount");
@@ -14001,7 +14605,7 @@
       visibleCols = gridVisibleColumns(t);
     }
     // Role tags for the ACTIVE analysis: which column feeds which slot.
-    var rr = rolesFor(curModule()), roleOf = {}, k;
+    var rr = rolesFor(curModule()), roleOf = dataMap(), k;
     var defs = MODULES[curModule()].roles;
     for (var di = 0; di < defs.length; di++) {
       k = defs[di].key;
@@ -14017,6 +14621,10 @@
     var end = virtualized ? Math.min(n, start + GRID_WINDOW_ROWS) : n;
     GRID_WINDOW_START = start;
     GRID_WINDOW_END = end;
+    // Every column carries a fitted width unless the user or the file
+    // set one, so `sized` is normally true and the grid renders
+    // content-sized (see gridAutoFitDefaults).
+    gridAutoFitDefaults();
     var sized = gridHasColumnWidths(), widths = gridColumnWidths(false);
     // Hiding columns must not resize the ones that remain (a colleague,
     // Aug 2026, on chart-variable focus: "I wish it didn't change the
@@ -14072,9 +14680,14 @@
              ' data-grid-col="' + escHtml(col) + '"' +
              (col === INSPECTOR_VAR ? ' class="ps-grid-col-active"' : "") +
              ' data-tip="' + escHtml(typeLabel(kind)) + ' variable">' +
-             escHtml(col) +
+             // The type badge leads the name (jamovi's convention). It is
+             // its own control (the type menu), excluded from click-to-select
+             // and header drags, so it must never sit where a header click
+             // naturally lands; trailing the name it reached the centre of a
+             // fitted column once columns fit their content by default.
              '<span class="ps-grid-badge" data-grid-type data-tip="Change measure type">' +
              psTypeIcon(kind) + "</span>" +
+             escHtml(col) +
              (isComputedColumn(t, col)
               ? '<span class="ps-grid-fx" data-tip="' +
                 escHtml(t.computedErrors && t.computedErrors[col]
@@ -14726,6 +15339,27 @@
       if (tds[i].getAttribute("data-gc") === col) return tds[i];
     return null;
   }
+  function gridRefreshComputedCells(previousFilterMask) {
+    var t = PROJECT.table;
+    if (!t) return;
+    var computed = t.computed && Object.keys(t.computed).length;
+    if (!computed && !previousFilterMask && !t.filterMask) return;
+    // A source edit can change a formula on EVERY row (column means,
+    // z-scores, and chains), or change which rows a formula filter keeps.
+    // Repaint mounted cells in place so Enter/Tab can keep their next
+    // editor and a virtual grid keeps its scroll window. Offscreen cells
+    // read the recalculated table when they are mounted.
+    var cells = el("ps-datagrid").querySelectorAll("td[data-gc]");
+    for (var i = 0; i < cells.length; i++) {
+      var td = cells[i], col = td.getAttribute("data-gc");
+      var row = Number(td.getAttribute("data-gr"));
+      var filterChanged = !!(previousFilterMask && previousFilterMask[row])
+        !== !!(t.filterMask && t.filterMask[row]);
+      if ((isComputedColumn(t, col) || filterChanged) &&
+          !(GRID_EDIT && GRID_EDIT.td === td))
+        gridPaintCell(td, col, row);
+    }
+  }
   function gridEditTarget(col, row) {
     return col + ", row " + (row + 1);
   }
@@ -14771,6 +15405,7 @@
     dataMark("the cell edit");
     t.raw[ge.col][ge.row] = newRaw;
     t.edited = true;
+    var previousFilterMask = t.filterMask;
     retype(t);
     // The typed value is what every chart and statistic downstream will see.
     // When nothing could read the text, the cell is missing, and announcing
@@ -14779,6 +15414,9 @@
     // because that is what decides it.
     var voided = unreadReason(t, ge.col, ge.row);
     gridPaintCell(ge.td, ge.col, ge.row);
+    gridRefreshComputedCells(previousFilterMask);
+    gridRefreshFindResults();
+    syncDataCommandBar();
     gridApplySelection();
     persist();
     syncDataRow();
@@ -15122,7 +15760,7 @@
     }
     if (!changedCells.length) return false;
     dataMark("the exclusion");
-    if (!t.excluded) t.excluded = {};
+    if (!t.excluded) t.excluded = dataMap();
     for (var i = 0; i < changedCells.length; i++) {
       var col = changedCells[i].col, row = changedCells[i].row;
       if (on) {
@@ -15134,12 +15772,15 @@
       }
     }
     t.edited = true;
+    var previousFilterMask = t.filterMask;
     retype(t);
     CHART_SNAPS = {};
     for (i = 0; i < changedCells.length; i++) {
       var td = gridFindTd(changedCells[i].col, changedCells[i].row);
       if (td) gridPaintCell(td, changedCells[i].col, changedCells[i].row);
     }
+    gridRefreshComputedCells(previousFilterMask);
+    gridRefreshFindResults();
     el("ps-gridfoot").innerHTML = gridFootHtml(t);
     syncDataCommandBar();
     gridApplySelection();
@@ -15177,7 +15818,7 @@
     }
     if (!changed) return false;
     dataMark("the row exclusion");
-    if (!t.excludedRows) t.excludedRows = {};
+    if (!t.excludedRows) t.excludedRows = dataMap();
     for (i = 0; i < validRows.length; i++) {
       var id = t.caseIds[validRows[i]];
       if (on) t.excludedRows[id] = 1;
@@ -15202,8 +15843,8 @@
     var had = exclCount(t);
     if (!t || !had) return;
     dataMark("restoring the exclusions");
-    t.excluded = {};
-    t.excludedRows = {};
+    t.excluded = dataMap();
+    t.excludedRows = dataMap();
     for (var ci = 0; ci < PROJECT.charts.length; ci++) {
       var chartOptions = PROJECT.charts[ci].options || {};
       for (var mod in chartOptions) {
@@ -15295,8 +15936,21 @@
     for (var i = 0; i < n; i++) if (!mask[i]) kept++;
     return kept;
   }
-  function renderFilterMenu() {
+  function renderFilterMenu(focusTarget) {
     var t = PROJECT.table, m = el("ps-filtermenu");
+    var active = document.activeElement, hadFocus = m.contains(active);
+    var scrollTop = m.scrollTop;
+    // Replacing a select destroys its keyboard position. Capture the
+    // control's role and row before rebuilding, then restore only when
+    // focus belonged to this menu. Add/remove supply their next row.
+    if (hadFocus && !focusTarget) {
+      ["col", "op", "value"].some(function (field) {
+        var row = active.getAttribute("data-filter-" + field);
+        if (row === null) return false;
+        focusTarget = { field: field, row: Number(row) };
+        return true;
+      });
+    }
     m.innerHTML = "";
     m.appendChild(mkEl("h3", "", "Row filters"));
     m.appendChild(mkEl("p", "ps-filter-hint",
@@ -15416,7 +16070,7 @@
         rm.addEventListener("click", function () {
           FILTER_DRAFT.splice(idx, 1);
           if (!FILTER_DRAFT.length) filterDraftAdd();
-          renderFilterMenu();
+          renderFilterMenu({ field: "col", row: Math.min(idx, FILTER_DRAFT.length - 1) });
         });
         row.appendChild(rm);
         m.appendChild(row);
@@ -15425,7 +16079,8 @@
     var add = mkEl("button", "ps-btn", "+ Add condition");
     add.type = "button";
     add.addEventListener("click", function () {
-      filterDraftAdd(); renderFilterMenu();
+      filterDraftAdd();
+      renderFilterMenu({ field: "col", row: FILTER_DRAFT.length - 1 });
     });
     m.appendChild(add);
     var actions = mkEl("div", "ps-filter-actions");
@@ -15451,6 +16106,13 @@
     actions.appendChild(count);
     m.appendChild(actions);
     refreshFilterCount();
+    if (hadFocus && focusTarget) {
+      var target = m.querySelector('[data-filter-' + focusTarget.field +
+        '="' + focusTarget.row + '"]');
+      if (target && target.offsetParent !== null)
+        target.focus({ preventScroll: true });
+      m.scrollTop = scrollTop;
+    }
   }
   function refreshFilterCount() {
     var count = el("ps-filtermenu").querySelector("[data-filter-count]");
@@ -17216,6 +17878,7 @@
   function switchChart(id) {
     var next = chartById(id);
     if (!next) return;
+    clearEngineStashes();
     PROJECT.ui.workspace = isLayoutTab(next) ? "layout" : "chart";
     PROJECT.ui.dataOpen = false;
     rememberDocument(next);
@@ -17409,76 +18072,6 @@
       out.text += " " + list(skipped) + " stays out.";
     return out;
   }
-  // ---- t4-33: live previews on the armed cards (Torry-approved). ----
-  // Each fitting card renders the user's ACTUAL data as that analysis, at
-  // stock look, into the offscreen preview host; the svg is cloned
-  // self-contained and dropped into the card. Everything runs in ONE task
-  // and ends by re-rendering the real chart, so the engine's window-side
-  // context (listeners, undo baselines, render hash) can never be left
-  // pointing at a preview - the t4-31 lesson applied in advance.
-  function armPreviewPayload(moduleKey, roles) {
-    var tpl = window.PS_TEMPLATES && window.PS_TEMPLATES[moduleKey];
-    if (!tpl || !PROJECT.table) return null;
-    var payload = JSON.parse(JSON.stringify(tpl.payload));
-    var opts = MODULES[moduleKey].optsFrom({}, tpl.payload);
-    opts.spec = parseSpec(tpl.payload.chartSpec);
-    var res = MODULES[moduleKey].build(PROJECT.table, roles, opts);
-    if (!res || res.error) return null;
-    for (var c in res.channels)
-      if (Object.prototype.hasOwnProperty.call(res.channels, c))
-        payload[c] = res.channels[c];
-    // A small real canvas: text stays at its true point size, so the mini
-    // render is honestly a shrunken figure, not a redesigned one.
-    payload.plotWidth = 4.2;
-    payload.plotHeight = 2.8;
-    return payload;
-  }
-  function armRenderPreviews(token) {
-    if (CHART_ARM !== token || !token) return;
-    if (!window.GraphBuilder2 || !window.GraphBuilder2.render) return;
-    var t = PROJECT.table;
-    if (!t || nRows(t) > 50000) return;   // keep dialog-open cost bounded
-    var host = el("ps-preview-host");
-    var gallery = el("ps-analysis-gallery");
-    if (!host || !gallery || gallery.style.display === "none") return;
-    var made = {};
-    for (var i = 0; i < MODULE_ORDER.length; i++) {
-      var key = MODULE_ORDER[i];
-      try {
-        var reading = armReadingFor(key, token.summary);
-        if (!reading || !reading.fits) continue;
-        var payload = armPreviewPayload(key, reading.roles);
-        if (!payload) continue;
-        window.GraphBuilder2.render("ps-preview-host", payload);
-        var svgs = host.querySelectorAll("svg");
-        var best = null, bestA = 0;
-        for (var v = 0; v < svgs.length; v++) {
-          var a = svgs[v].clientWidth * svgs[v].clientHeight;
-          if (a > bestA) { bestA = a; best = svgs[v]; }
-        }
-        if (!best || best.clientWidth < 60) continue;
-        made[key] = svgSelfContainedClone(best, "prev-" + key + "-").html;
-      } catch (e) { /* a failed preview keeps the glyph, never breaks the dialog */ }
-    }
-    host.innerHTML = "";
-    // Restore the engine's context to the REAL document in the same task:
-    // no paint, no user event, can interleave with the preview renders.
-    try { renderChartIntoHost(); } catch (e) {}
-    if (CHART_ARM !== token) return;   // closed while we worked
-    for (var m = 0; m < MODULE_ORDER.length; m++) {
-      var mk = MODULE_ORDER[m];
-      if (!made[mk]) continue;
-      var card = document.querySelector(
-        '#ps-analysis-grid [data-analysis-module="' + mk + '"]');
-      if (!card || card.querySelector(".ps-analysis-preview")) continue;
-      var box = mkEl("span", "ps-analysis-preview");
-      box.innerHTML = made[mk];
-      card.insertBefore(box, card.firstChild);
-      window.requestAnimationFrame(function (el2) {
-        return function () { el2.classList.add("ps-preview-in"); };
-      }(box));
-    }
-  }
   function selectionChartColumns() {
     var t = PROJECT.table, r = gridSelectionRect();
     if (!t || !r) return [];
@@ -17531,12 +18124,10 @@
       } else armBox.hidden = true;
     }
     renderAnalysisGalleryCards();
-    if (CHART_ARM) {
-      // The dialog paints text-first, instantly; the previews land a beat
-      // later in one atomic batch. The token guards a close-in-between.
-      var token = CHART_ARM;
-      window.setTimeout(function () { armRenderPreviews(token); }, 30);
-    }
+    // Previews REMOVED (backlog item, Aug 25 2026, Torry: "I don't think
+    // we need the previews"): the armed cards' per-card readings carry the
+    // information; the live mini-renders read as clutter. Reverses t4-33
+    // by his explicit call; chart-from-selection-check pins the ABSENCE.
   }
   function renderAnalysisGalleryCards() {
     var root = el("ps-analysis-grid");
@@ -17617,6 +18208,31 @@
   // Help Me Choose is a standalone guidance flow, not an eighth chart
   // engine. It mirrors the jamovi module's question route and creates one of
   // the same seven chart documents only after the user accepts the result.
+  var HMC_TARGET_ID = null;
+  // Only a chart without assignments, custom options, or a rendered
+  // snapshot can be completed in place. Keep its identity and name.
+  function hmcPristineChart(chart) {
+    if (!chart || isLayoutTab(chart) || chart.styleStamp === true || CHART_SNAPS[chart.id]) return false;
+    var roles = chart.roles || {};
+    if (!Object.keys(roles).every(function (mod) {
+      var rr = roles[mod];
+      return rr && typeof rr === "object" && Object.keys(rr).every(function (key) {
+        var value = rr[key];
+        return value == null || value === "" || (Array.isArray(value) && value.length === 0);
+      });
+    })) return false;
+    var defaults = seedStatPrefs({ options: {} }).options;
+    return Object.keys(chart.options || {}).every(function (mod) {
+      var opts = chart.options[mod];
+      return opts && typeof opts === "object" && Object.keys(opts).every(function (key) {
+        return Object.prototype.hasOwnProperty.call(defaults[mod] || {}, key) &&
+          JSON.stringify(opts[key]) === JSON.stringify(defaults[mod][key]);
+      });
+    });
+  }
+  function hmcActionLabel(result) {
+    return HMC_TARGET_ID ? "Use for this chart" : "Create " + result.label + " chart";
+  }
   var HMC_PATH = ["root"];
   var HMC_MODE = "questions";
   var HMC_SELECTED = [];
@@ -18077,10 +18693,24 @@
     return {};
   }
   function hmcOpenRecommendation(result, summary, recommendation, startLabel) {
+    if (PS_FLUSH_PENDING_OPTS) PS_FLUSH_PENDING_OPTS();
+    var target = HMC_TARGET_ID ? chartById(HMC_TARGET_ID) : null;
+    if (HMC_TARGET_ID && (!hmcPristineChart(target) ||
+        PROJECT.activeChart !== HMC_TARGET_ID || appWorkspace() !== "chart")) {
+      // An asynchronous change must not turn "Use for this chart" into
+      // an unannounced replacement or a different document action.
+      HMC_TARGET_ID = null;
+      renderHelpMeChoose();
+      showToast("This chart changed while the guide was open. Review the updated action.");
+      return;
+    }
     hideHelpMeChoose();
-    addChart(result.module);
-    var chart = activeChart();
-    var dirty = false;
+    if (target) {
+      target.module = result.module;
+      bumpSnapEpoch();
+    } else addChart(result.module);
+    var chart = target || activeChart();
+    var dirty = !!target;
     if (summary && summary.vars && summary.vars.length) {
       chart.roles[result.module] =
         hmcRolesForRecommendation(result.module, summary, recommendation);
@@ -18231,8 +18861,7 @@
         "You dropped in more than one categorical variable, so ");
       if (gp) content.appendChild(gp);
     }
-    var create = mkEl("button", "ps-btn ps-primary",
-      "Create " + result.label + " chart");
+    var create = mkEl("button", "ps-btn ps-primary", hmcActionLabel(result));
     create.type = "button";
     create.setAttribute("data-hmc-data-create", result.module);
     create.addEventListener("click", function () {
@@ -18476,8 +19105,7 @@
       HMC_PATH = ["root"]; renderHelpMeChoose();
     });
     actions.appendChild(restart);
-    var create = mkEl("button", "ps-btn ps-primary",
-      "Create " + result.label + " chart");
+    var create = mkEl("button", "ps-btn ps-primary", hmcActionLabel(result));
     create.type = "button";
     create.setAttribute("data-hmc-create", result.module);
     create.addEventListener("click", function () {
@@ -18487,7 +19115,11 @@
     body.appendChild(actions);
     hmcRestoreFocus();
   }
-  function showHelpMeChoose(seedCols) {
+  function showHelpMeChoose(seedCols, targetChartId) {
+    if (PS_FLUSH_PENDING_OPTS) PS_FLUSH_PENDING_OPTS();
+    var target = targetChartId ? chartById(targetChartId) : null;
+    HMC_TARGET_ID = appWorkspace() === "chart" &&
+      PROJECT.activeChart === targetChartId && hmcPristineChart(target) ? targetChartId : null;
     HMC_PATH = ["root"];
     HMC_FILTER = "";
     if (seedCols && seedCols.length) {
@@ -18504,7 +19136,10 @@
     renderHelpMeChoose();
     openShellDialog("ps-help-choose");
   }
-  function hideHelpMeChoose() { closeShellDialog("ps-help-choose"); }
+  function hideHelpMeChoose() {
+    HMC_TARGET_ID = null;
+    closeShellDialog("ps-help-choose");
+  }
 
   var LAYOUT_TEMPLATE_KEY = "blank";
   var LAYOUT_TEMPLATE_ORIENTATION = "landscape";
@@ -18664,6 +19299,7 @@
   }
   function hideLayoutGallery() { closeShellDialog("ps-layout-gallery"); }
   function closeChart(id, opts) {
+    clearEngineStashes();
     // The last document CAN be closed (Torry, Aug 2026: "no way to
     // delete the chart if there's only one remaining"): the workspace
     // falls back to the existing No-charts-yet card, whose Create
@@ -20975,8 +21611,10 @@
       elI.style.height = (Number(item.h) || 320) + "px";
       var snap = validSnap(item.chartId);
       var c = chartById(item.chartId);
-      if (snap && c) elI.innerHTML = snap.svg;
-      else elI.innerHTML = '<div class="ps-lmissing">' +
+      if (snap && c) {
+        elI.innerHTML = snap.svg;
+        stampSnapshotFonts(elI.querySelector("svg"), snap);
+      } else elI.innerHTML = '<div class="ps-lmissing">' +
         layMissingCopy(c) + "</div>";
       setTip(elI, c ? c.name : "");
       if (poolKey) LAY_NODE_POOL.nodes[item.id] = { key: poolKey, el: elI };
@@ -20991,7 +21629,7 @@
       elI.appendChild(pic);
       setTip(elI, "Image");
     } else {
-      var txt = mkEl("div", "ps-ltext", item.text || "Text");
+      var txt = mkEl("div", "ps-ltext", exportSafeText(item.text || "Text"));
       txt.style.fontSize = (item.fontSize || 14) + "px";
       txt.style.fontWeight = item.bold ? "700" : "400";
       txt.style.fontStyle = item.italic ? "italic" : "normal";
@@ -21095,21 +21733,89 @@
   }
   function layMiniBar(item) {
     var bar = mkEl("div", "ps-lbar");
-    bar.style.left = item.kind === "text" ? "0" : "50%";
-    bar.style.transform = item.kind === "text" ? "" : "translateX(-50%)";
     // TEXT items park the bar BELOW the box (Torry's screenshot, Aug 6
     // 2026): the rotate grip owns the top-centre, and on a narrow box
     // the bar's first button sat exactly under the knob. Below, the two
     // can never meet at any width or rotation; sized items keep the bar
     // above (they have no grip, and the resize handle owns the bottom).
-    // A sized item's bar is CENTRED on its top edge. The top-LEFT is where
-    // the figure's own panel letter sits and the bar covered it exactly
-    // (measured, a 19x24 label under a 33x24 bar at the same x), so selecting
-    // panel A hid the A. The letter is content and ships in the export, the
-    // bar is chrome, so the chrome moves. Centre rather than below, because
-    // below is the NEXT row's letter in a labelled grid, and rather than
-    // right, which is the Live badge. Text items keep the bar below them:
-    // their rotate grip owns the top centre.
+    // A sized item's bar sits at the item's top-LEFT (Torry, Aug 27 -
+    // supersedes the Aug 6 centre placement). The reason centre was
+    // chosen then still holds as a CONSTRAINT: the figure's panel
+    // letter - a text item parked at that corner - must never hide
+    // under chrome (the letter is content and ships in the export).
+    // So the bar starts at the corner and, when any text item's box
+    // overlaps where it would land, slides right just past it; if the
+    // slide would run off the item, it falls back to the corner (the
+    // letter case at extreme widths is rarer than the daily X reach).
+    if (item.kind !== "text") {
+      // Deferred one tick: by then every item node (the letters
+      // included) is in the DOM, and SCREEN rects are the truth the
+      // layout-figure guard measures - text items auto-size, so their
+      // stored w/h cannot be trusted for this. Slide right past any
+      // overlapping text box; if the slide runs off the panel, fall
+      // back to the historical centre (never cover the letter).
+      setTimeout(function () {
+        try {
+          if (!bar.isConnected) return;
+          var GAP = 6, slid = false;
+          for (var pass = 0; pass < 3; pass++) {
+            var b = bar.getBoundingClientRect();
+            var moved = false;
+            var texts = document.querySelectorAll(
+              '#ps-lcanvas .ps-litem[data-kind="text"]');
+            for (var ti = 0; ti < texts.length; ti++) {
+              var r = texts[ti].getBoundingClientRect();
+              if (!(r.width > 0)) continue;
+              if (!(b.right < r.left || b.left > r.right ||
+                    b.bottom < r.top || b.top > r.bottom)) {
+                // Screen delta -> layout px: the canvas renders under a
+                // zoom scale, so style.left (layout units) must divide
+                // the measured overlap by the bar's own rendered scale.
+                var scl = bar.offsetWidth > 0 ? (b.width / bar.offsetWidth) : 1;
+                if (!(scl > 0)) scl = 1;
+                var cur = parseFloat(bar.style.left) || 0;
+                bar.style.left = (cur + (r.right - b.left) / scl + GAP) + "px";
+                moved = true; slid = true;
+                b = bar.getBoundingClientRect();
+              }
+            }
+            if (!moved) break;
+          }
+          if (slid) {
+            var host = bar.parentNode;
+            if (host) {
+              var hb = host.getBoundingClientRect();
+              var bb = bar.getBoundingClientRect();
+              if (bb.right > hb.right + 1) {
+                // Slid off the panel (tiny panels - the Aug 6 measured
+                // case). Try BELOW-left: the resize handle owns the
+                // bottom-right and nothing else claims that corner.
+                // If a text box overlaps even there, the historical
+                // centre is the last resort.
+                bar.style.left = "0px";
+                bar.style.top = "calc(100% + 6px)";
+                var bb2 = bar.getBoundingClientRect();
+                var texts2 = document.querySelectorAll(
+                  '#ps-lcanvas .ps-litem[data-kind="text"]');
+                for (var tj = 0; tj < texts2.length; tj++) {
+                  var r2 = texts2[tj].getBoundingClientRect();
+                  if (!(r2.width > 0)) continue;
+                  if (!(bb2.right < r2.left || bb2.left > r2.right ||
+                        bb2.bottom < r2.top || bb2.top > r2.bottom)) {
+                    bar.style.top = "-34px";
+                    bar.style.left = "50%";
+                    bar.style.transform = "translateX(-50%)";
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        } catch (_eLb2) {}
+      }, 0);
+    }
+    bar.style.left = "0";
+    bar.style.transform = "";
     bar.style.top = item.kind === "text" ? "calc(100% + 6px)" : "-34px";
     bar.setAttribute("aria-hidden", "true");
     if (item.kind === "text") {
@@ -23887,7 +24593,7 @@
     // this item is about repeated one level up.
     t.types[name] = part === "year" ? "continuous" : "nominal";
     if (part === "month") {
-      if (!t.declaredLevels) t.declaredLevels = {};
+      if (!t.declaredLevels) t.declaredLevels = dataMap();
       t.declaredLevels[name] = MONTH_NAMES.slice();
     }
     t.edited = true;
@@ -24090,6 +24796,25 @@
       typeSelect.appendChild(opt);
     }
     typeSelect.value = t.types[col];
+    // The visible control: a DROPDOWN showing the current type with its
+    // icon (round 2, Aug 27: keep it a drop down). It opens the house
+    // type menu - the same icon + gloss + example menu the grid header
+    // uses, so the two surfaces can never drift. A native select cannot
+    // draw icons in its options, which is why the control is custom;
+    // the hidden select above mirrors the value for anything that
+    // reads it.
+    var vtGroup = el("ps-variable-type-group");
+    if (vtGroup) {
+      var vtCur = null;
+      for (i = 0; i < VAR_TYPES.length; i++)
+        if (VAR_TYPES[i].key === t.types[col]) vtCur = VAR_TYPES[i];
+      vtGroup.innerHTML = vtCur
+        ? '<button type="button" class="ps-vt-dd" aria-haspopup="menu"' +
+          ' data-tip="' + escHtml(vtCur.gloss) + '">' +
+          psTypeIcon(vtCur.key) + '<span>' + escHtml(vtCur.label) + '</span>' +
+          '<span class="ps-vt-chev" aria-hidden="true">\u25be</span></button>'
+        : "";
+    }
     // 19: say what the chosen type MEANS, right where it is chosen. The note
     // is the part that answers "why will this not drop on the value axis".
     var tinfo = typeInfo(t.types[col]);
@@ -25033,6 +25758,40 @@
       ? p.groupCategories.length : 0;
     return { cats: cats, groups: gs };
   }
+  function repeatedCaseCounts(p, measures) {
+    var byCase = dataMap(), bars = p.bars || [], measurements = 0;
+    var excluded = dataMap(), hidden = p.hiddenPoints || [];
+    // The render payload retains excluded values for crossed-out points.
+    // They are not measurements contributing to the chart's statistics.
+    for (var h = 0; h < hidden.length; h++)
+      excluded[JSON.stringify([hidden[h].cat, hidden[h].group,
+        hidden[h].idx])] = true;
+    for (var i = 0; i < bars.length; i++) {
+      var bar = bars[i], ids = bar.caseIds, cols = bar.sourceColumns;
+      var cat = bar.x == null ? "" : String(bar.x);
+      var group = bar.group == null ? "" : String(bar.group);
+      // Never infer participants by dividing measurements. A future
+      // payload without identities can still report measurements honestly.
+      if (!Array.isArray(ids) || ids.length !== bar.n ||
+          !Array.isArray(cols) || cols.length !== ids.length) return null;
+      for (var j = 0; j < ids.length; j++) {
+        if (hidden.length && excluded[JSON.stringify([cat, group, j])]) continue;
+        if (ids[j] == null || String(ids[j]) === "") return null;
+        measurements++;
+        var id = String(ids[j]);
+        if (!byCase[id]) byCase[id] = dataMap();
+        byCase[id][cols[j]] = true;
+      }
+    }
+    var names = Object.keys(byCase), complete = 0;
+    for (var k = 0; k < names.length; k++) {
+      var seen = byCase[names[k]];
+      if (measures.length && measures.every(function (m) {
+        return seen[m] === true;
+      })) complete++;
+    }
+    return { cases: names.length, complete: complete, measurements: measurements };
+  }
   function chartCaseText(c) {
     try {
       var built = buildPayload();
@@ -25044,7 +25803,15 @@
         n += Number(p.bars[i].n) || 0;
       else if (Array.isArray(p.xyPoints)) { cells = 0; n = p.xyPoints.length; }
       var bits = [];
-      if (n) bits.push(n.toLocaleString() + " case" + (n === 1 ? "" : "s"));
+      var repeated = c.module === "rmplotbuilder";
+      var measures = repeated ? (rolesFor(c.module).measures || []) : [];
+      var rmCounts = repeated ? repeatedCaseCounts(p, measures) : null;
+      if (rmCounts)
+        bits.push(rmCounts.cases.toLocaleString() + " case" +
+          (rmCounts.cases === 1 ? "" : "s"));
+      else if (n)
+        bits.push(n.toLocaleString() + (repeated ? " measurement" : " case") +
+          (n === 1 ? "" : "s"));
       if (cells) {
         // Plurals are declared, not derived. Adding "s" to "category" was
         // printing "2 categorys" under every grouped frequency chart.
@@ -25082,6 +25849,13 @@
         bits.push(axis.cats + " " + noun[axis.cats === 1 ? 0 : 1]);
         if (axis.groups > 1)
           bits.push(axis.groups + " group" + (axis.groups === 1 ? "" : "s"));
+      }
+      if (rmCounts) {
+        bits.push(rmCounts.measurements.toLocaleString() + " measurement" +
+          (rmCounts.measurements === 1 ? "" : "s"));
+        if (measures.length > 1 && rmCounts.complete < rmCounts.cases)
+          bits.push(rmCounts.complete.toLocaleString() + " complete case" +
+            (rmCounts.complete === 1 ? "" : "s"));
       }
       if (p.missingNote) bits.push(p.missingNote);
       return bits.length ? bits.join(" \u00b7 ") : "Ready";
@@ -25234,6 +26008,23 @@
     });
     el("ps-variable-type").addEventListener("change", function () {
       if (INSPECTOR_VAR) setColType(INSPECTOR_VAR, this.value);
+    });
+    // The dropdown opens the SAME type menu the grid header uses (its
+    // pick path commits the type and re-syncs this inspector). Enter
+    // and Space are the button's own click; ArrowDown also opens.
+    el("ps-variable-type-group").addEventListener("click", function (e) {
+      var dd = e.target && e.target.closest ? e.target.closest(".ps-vt-dd") : null;
+      if (!dd || !INSPECTOR_VAR) return;
+      var r = dd.getBoundingClientRect();
+      showTypeMenu(r.left, r.bottom + 2, INSPECTOR_VAR);
+    });
+    el("ps-variable-type-group").addEventListener("keydown", function (e) {
+      if (e.key !== "ArrowDown") return;
+      var dd = this.querySelector(".ps-vt-dd");
+      if (!dd || !INSPECTOR_VAR) return;
+      e.preventDefault();
+      var r = dd.getBoundingClientRect();
+      showTypeMenu(r.left, r.bottom + 2, INSPECTOR_VAR);
     });
     el("ps-variable-missing").addEventListener("change", function () {
       setMissingTokens(this.value);
@@ -25445,8 +26236,8 @@
     PROJECT.pins = [];   // the Pinboard is project evidence; new data, new record
     PROJECT.pinboards = [];
     if (PROJECT.ui) PROJECT.ui.activeBoard = null;
-    PROJECT.charts = [{ id: "c1", name: "Chart 1",
-      module: "plotbuilder", roles: {}, options: {}, styleStamp: false }];
+    PROJECT.charts = [seedStatPrefs({ id: "c1", name: "Chart 1",
+      module: "plotbuilder", roles: {}, options: {}, styleStamp: false })];
     PROJECT.activeChart = "c1";
     PROJECT.ui.lastChart = "c1";
     PROJECT.ui.lastLayout = null;
@@ -25466,8 +26257,8 @@
     FILE_HANDLE = null;
     PROJECT.table = buildTable(name, parsed.header, parsed.rows, null);
     resetDocumentsForNewData();
-    PROJECT.ui.columnWidths = {};
-    GRID_NATURAL_WIDTHS = {};
+    PROJECT.ui.columnWidths = dataMap();
+    GRID_NATURAL_WIDTHS = dataMap();
     gridResetColumnView();
     GRID_FIND_QUERY = ""; GRID_FIND_RESULTS = []; GRID_FIND_INDEX = -1;
     if (Array.isArray(parsed.typeList)) {
@@ -25546,8 +26337,8 @@
       retype(PROJECT.table);
     }
     resetDocumentsForNewData();
-    PROJECT.ui.columnWidths = {};
-    GRID_NATURAL_WIDTHS = {};
+    PROJECT.ui.columnWidths = dataMap();
+    GRID_NATURAL_WIDTHS = dataMap();
     gridResetColumnView();
     GRID_FIND_QUERY = ""; GRID_FIND_RESULTS = []; GRID_FIND_INDEX = -1;
     validateRoles();
@@ -26020,8 +26811,8 @@
     PROJECT.table = buildTable("Untitled project",
       ["A", "B", "C"], blankRows, null);
     resetDocumentsForNewData();
-    PROJECT.ui.columnWidths = {};
-    GRID_NATURAL_WIDTHS = {};
+    PROJECT.ui.columnWidths = dataMap();
+    GRID_NATURAL_WIDTHS = dataMap();
     gridResetColumnView();
     GRID_FIND_QUERY = ""; GRID_FIND_RESULTS = []; GRID_FIND_INDEX = -1;
     validateRoles();
@@ -26305,8 +27096,8 @@
                charts: PROJECT.charts.length };
     } catch (e) { return null; }
   }
-  function offerReplacedProjectBack(prev, whatOpened) {
-    if (!prev) return;
+  function offerReplacedProjectBack(prev, whatOpened, note) {
+    if (!prev) { if (note) showToast(note, true); return; }
     var noun = prev.charts === 1 ? " document" : " documents";
     // The toast expires and the toolbar Undo does not cover this, so it read
     // as the only way back. There usually IS a second one, because the
@@ -26325,7 +27116,7 @@
                   (inRecents
                     ? " It is in Recent projects on the start screen if you " +
                       "want it later."
-                    : ""),
+                    : "") + (note ? " " + note : ""),
       function () {
         var snap = null;
         try { snap = JSON.parse(prev.json); } catch (e) { snap = null; }
@@ -26369,7 +27160,11 @@
       reopenRecentFromFile(item);
       return;
     }
-    if (!applySnapshot(item.snapshot)) return;
+    var precisionNote = precisionMigrationNotice(item.snapshot);
+    if (!applySnapshot(item.snapshot)) {
+      showToast("That recent project is damaged and could not be opened. Your open project has not been changed.", true);
+      return;
+    }
     dataHistoryClear();
     PROJECT_REV = 0;
     FILE_SAVED_REV = null;
@@ -26382,9 +27177,11 @@
     // the next Save writes back to the same file. Before this, every reopen
     // silently became a Save As.
     reconnectRecentFile(item);
+    if (precisionNote && !outgoing) showToast(precisionNote, true);
     if (outgoing) {
       showUndoToast("Opened " + (item.name || "project") + ". " +
-                    outgoingName + " was not saved to a file.", function () {
+                    outgoingName + " was not saved to a file." +
+                    (precisionNote ? " " + precisionNote : ""), function () {
         var snap = null;
         try { snap = JSON.parse(outgoing); } catch (e) { snap = null; }
         if (!snap || !applySnapshot(snap)) {
@@ -26732,6 +27529,8 @@
   function applyAppPrefs() {
     document.body.classList.toggle("ps-density-compact",
       APP_PREFS.density === "compact");
+    document.body.classList.toggle("ps-density-spacious",
+      APP_PREFS.density === "spacious");
     document.body.classList.toggle("ps-reduce-motion",
       APP_PREFS.motion === "reduce");
     // A unit change has to reach the fields that are already on screen.
@@ -26754,6 +27553,10 @@
     el("ps-pref-export-dpi").value = String(exp.dpi);
     el("ps-pref-missing").value = APP_PREFS.missingTokens;
     if (el("ps-pref-updates")) el("ps-pref-updates").value = APP_PREFS.updateCheck;
+    if (el("ps-pref-def-eb")) el("ps-pref-def-eb").value = APP_PREFS.defErrorBars;
+    if (el("ps-pref-def-rmm")) el("ps-pref-def-rmm").value = APP_PREFS.defRmMethod;
+    if (el("ps-pref-def-alpha")) el("ps-pref-def-alpha").value = APP_PREFS.defAlpha;
+    prefShowTab("general");
     populatePrefStyleSelect();
     refreshPrefStorage();
     openShellDialog("ps-preferences");
@@ -26864,6 +27667,9 @@
     el("ps-pref-units").value = APP_PREFS_DEFAULTS.units;
     el("ps-pref-missing").value = APP_PREFS_DEFAULTS.missingTokens;
     if (el("ps-pref-updates")) el("ps-pref-updates").value = APP_PREFS_DEFAULTS.updateCheck;
+    if (el("ps-pref-def-eb")) el("ps-pref-def-eb").value = "";
+    if (el("ps-pref-def-rmm")) el("ps-pref-def-rmm").value = "";
+    if (el("ps-pref-def-alpha")) el("ps-pref-def-alpha").value = "";
     el("ps-pref-export-format").value = "svg";
     el("ps-pref-export-dpi").value = "300";
     if (el("ps-pref-style")) el("ps-pref-style").value = "";
@@ -26876,6 +27682,18 @@
     APP_PREFS.units = el("ps-pref-units").value;
     APP_PREFS.missingTokens = String(el("ps-pref-missing").value || "NA").trim()
       || "NA";
+    if (el("ps-pref-def-eb"))
+      APP_PREFS.defErrorBars =
+        /^(se|sd|ci95|ci99|ci95c|none)$/.test(el("ps-pref-def-eb").value)
+          ? el("ps-pref-def-eb").value : "";
+    if (el("ps-pref-def-rmm"))
+      APP_PREFS.defRmMethod =
+        /^(within|between)$/.test(el("ps-pref-def-rmm").value)
+          ? el("ps-pref-def-rmm").value : "";
+    if (el("ps-pref-def-alpha"))
+      APP_PREFS.defAlpha =
+        /^(0\.1|0\.05|0\.01|0\.001)$/.test(el("ps-pref-def-alpha").value)
+          ? el("ps-pref-def-alpha").value : "";
     if (el("ps-pref-updates")) {
       APP_PREFS.updateCheck = el("ps-pref-updates").value === "on" ? "on" : "off";
       // Just turned on: run the standard (stamp-respecting) check now
@@ -27069,7 +27887,7 @@
         // These are the ENGINE's keys, and it already documents them properly.
         // Copying that table here would be a second copy to keep in step, so
         // the sheet names the way IN and points at the real one.
-        rows: [["Open the chart's own help panel", "?"]],
+        rows: [["Open the chart's own help panel (while the chart is focused)", "?"]],
         note: "The rest of the chart editing keys - hiding a part, copying a " +
               "style, stepping between chart elements - belong to the chart " +
               "itself and are listed in that panel.",
@@ -27138,6 +27956,10 @@
   function showAbout() {
     var v = el("ps-about-version");
     if (v) v.textContent = APP_VERSION;
+    // The build is what a support thread or a ledger lookup needs; the
+    // dev page has none and says so rather than showing a blank cell.
+    var bld = el("ps-about-build");
+    if (bld) bld.textContent = APP_BUILD || "development page (unstamped)";
     var apa = el("ps-about-apa");
     if (apa) apa.textContent = citationAPA();
     openShellDialog("ps-about-dialog");
@@ -27443,6 +28265,45 @@
       closeShellDialog("ps-preferences");
     });
     el("ps-preferences-save").addEventListener("click", savePreferences);
+    // Preferences tabs (backlog, Aug 2026): the WAI tabs pattern - roving
+    // tabindex, arrow keys, aria-selected - kept tiny because there are
+    // exactly two tabs.
+    (function () {
+      var ids = ["general", "stats"];
+      function tabEl(k) { return el("ps-pref-tab-" + k); }
+      function paneEl(k) { return el("ps-pref-pane-" + k); }
+      window.prefShowTab = function (key) {
+        for (var i = 0; i < ids.length; i++) {
+          var on = ids[i] === key;
+          var t = tabEl(ids[i]), p = paneEl(ids[i]);
+          if (!t || !p) return;
+          t.setAttribute("aria-selected", on ? "true" : "false");
+          t.tabIndex = on ? 0 : -1;
+          t.classList.toggle("ps-primary", on);
+          if (on) p.removeAttribute("hidden");
+          else p.setAttribute("hidden", "");
+        }
+      };
+      for (var i = 0; i < ids.length; i++) {
+        (function (key, idx) {
+          var t = tabEl(key);
+          if (!t) return;
+          t.addEventListener("click", function () { prefShowTab(key); });
+          t.addEventListener("keydown", function (e) {
+            var go = null;
+            if (e.key === "ArrowRight" || e.key === "ArrowDown") go = ids[(idx + 1) % ids.length];
+            else if (e.key === "ArrowLeft" || e.key === "ArrowUp") go = ids[(idx + ids.length - 1) % ids.length];
+            else if (e.key === "Home") go = ids[0];
+            else if (e.key === "End") go = ids[ids.length - 1];
+            if (go) {
+              e.preventDefault();
+              prefShowTab(go);
+              tabEl(go).focus();
+            }
+          });
+        })(ids[i], i);
+      }
+    })();
     el("ps-pref-clear").addEventListener("click", clearLocalData);
     el("ps-pref-reset").addEventListener("click", restorePrefDefaults);
     el("ps-shortcuts-close").addEventListener("click", function () {
@@ -27520,6 +28381,7 @@
     return (IS_MAC ? "Ctrl+" : "Cmd/Ctrl+Shift+") + n;
   }
   var APP_MENU_OWNER = null;
+  var APP_MENU_HOVER_OWNER = null;
   var CONTEXT_DOC_ID = null;
   var APP_MENU_DEFS = {
     file: [
@@ -27679,6 +28541,7 @@
     m.style.display = "none";
     var owner = APP_MENU_OWNER;
     APP_MENU_OWNER = null;
+    APP_MENU_HOVER_OWNER = null;
     var buttons = document.querySelectorAll("[data-ps-menu]");
     for (var i = 0; i < buttons.length; i++)
       buttons[i].setAttribute("aria-expanded", "false");
@@ -28290,7 +29153,9 @@
       if (command === "data-restore-excl") return "Nothing is excluded";
       if (command === "data-show-all") return "No columns are hidden";
       if (command === "data-resetwidths")
-        return "All columns are at their default widths";
+        // Disabled only in the stretch layout (nothing set to reset);
+        // a fitted grid, the default, always has widths to clear.
+        return "Columns already fill the pane; Auto-fit all columns sizes them to their contents";
     }
     if (command === "help-basics" || command === "help-lint" ||
         command === "help-anatomy" || command === "help-glossary")
@@ -28417,7 +29282,7 @@
       // answers before a chart exists: reroute rather than dead-end
       // (Torry's ruling, Jul 29 2026).
       if (chartHelpState() === "ready") openEngineHelp("graphChooser");
-      else showHelpMeChoose();
+      else showHelpMeChoose(null, appWorkspace() === "chart" ? PROJECT.activeChart : null);
     }
     else if (command === "help-basics") openEngineHelp("help");
     else if (command === "help-lint") openEngineHelp("graphLint");
@@ -28520,6 +29385,8 @@
   }
   function showRecentSubmenu(trigger, focusFirst, kind) {
     cancelHideSubmenu();
+    if (SUBMENU_TRIGGER && SUBMENU_TRIGGER !== trigger)
+      SUBMENU_TRIGGER.setAttribute("aria-expanded", "false");
     SUBMENU_TRIGGER = trigger;
     var s = el("ps-appsubmenu");
     s.innerHTML = "";
@@ -28616,6 +29483,7 @@
     var defs = APP_MENU_DEFS[name] || [], m = el("ps-appmenu");
     m.innerHTML = "";
     APP_MENU_OWNER = owner;
+    APP_MENU_HOVER_OWNER = null;
     var menuButtons = document.querySelectorAll("[data-ps-menu]");
     for (var i = 0; i < menuButtons.length; i++)
       menuButtons[i].setAttribute("aria-expanded",
@@ -28654,9 +29522,9 @@
             });
             tr.addEventListener("click", function (e) {
               e.stopPropagation();
-              var s = el("ps-appsubmenu");
-              if (s && s.style.display === "block") hideRecentSubmenu();
-              else showRecentSubmenu(tr, true, kind);
+              // Hover may already have opened this destination. A
+              // deliberate click enters it, just like Right Arrow.
+              showRecentSubmenu(tr, true, kind);
             });
             tr.addEventListener("keydown", function (e) {
               if (e.key === "ArrowRight" || e.key === "Enter" ||
@@ -29306,6 +30174,17 @@
     wireFitToPane();
     wireSplitters();
     wireAbout();
+    // Application menus own Escape while open. Route it before the
+    // chart's capture listeners so they cannot swallow a submenu exit.
+    window.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape" || el("ps-appmenu").style.display !== "block") return;
+      e.preventDefault(); e.stopImmediatePropagation(); e.stopPropagation();
+      var submenu = el("ps-appsubmenu");
+      if (submenu.style.display && submenu.style.display !== "none") {
+        hideRecentSubmenu();
+        if (SUBMENU_TRIGGER) SUBMENU_TRIGGER.focus();
+      } else hideAppMenu(true);
+    }, true);
     var menuButtons = document.querySelectorAll("[data-ps-menu]");
     for (var i = 0; i < menuButtons.length; i++) {
       menuButtons[i].setAttribute("aria-haspopup", "menu");
@@ -29313,13 +30192,16 @@
       menuButtons[i].addEventListener("click", function (e) {
         e.stopPropagation();
         var name = this.getAttribute("data-ps-menu");
-        if (APP_MENU_OWNER === this && el("ps-appmenu").style.display === "block")
+        if (APP_MENU_OWNER === this && APP_MENU_HOVER_OWNER !== this &&
+            el("ps-appmenu").style.display === "block")
           hideAppMenu(false);
         else showAppMenu(this, name, false);
       });
       menuButtons[i].addEventListener("mouseenter", function () {
-        if (el("ps-appmenu").style.display === "block")
+        if (el("ps-appmenu").style.display === "block" && APP_MENU_OWNER !== this) {
           showAppMenu(this, this.getAttribute("data-ps-menu"), false);
+          APP_MENU_HOVER_OWNER = this;
+        }
       });
       menuButtons[i].addEventListener("keydown", function (e) {
         if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
@@ -30033,8 +30915,8 @@
     loadTable: function (name, header, rows, types, levels) {
       dataHistoryClear();
       PROJECT.table = buildTable(name, header, rows, types || null, levels || null);
-      PROJECT.ui.columnWidths = {};
-      GRID_NATURAL_WIDTHS = {};
+      PROJECT.ui.columnWidths = dataMap();
+      GRID_NATURAL_WIDTHS = dataMap();
       gridResetColumnView();
       GRID_FIND_QUERY = ""; GRID_FIND_RESULTS = []; GRID_FIND_INDEX = -1;
       validateRoles(); persist(); syncAll(); render();
@@ -30049,6 +30931,16 @@
     },
     parseCSV: parseCSV,
     parseTableText: parseTableText,
+    tableToCsv: tableToCsv,
+    projectText: projectFileText,
+    openProjectText: function (text) {
+      var parsed = parseProjectFile(text);
+      if (!parsed || parsed.error) return parsed || { error: "unreadable" };
+      return adoptProject(parsed, "corpus.pand");
+    },
+    numericalNoticeFor: _numericalNoticeFor,
+    numericalChangeIds: _numericalChangeIds,
+    appBuild: function () { return APP_BUILD; },
     libraries: function () { return PS_LIBS; },
     saveComputedColumn: saveComputedColumn,
     openFormulaDialog: openFormulaDialog,

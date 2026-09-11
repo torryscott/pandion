@@ -102,7 +102,6 @@
     <nav class="nav-links" id="site-nav" aria-label="Site">
       <a href="gallery.html">Gallery</a>
       <a href="learn.html">Learn</a>
-      <a href="docs/">Docs</a>
       <a href="index.html#downloads">Downloads</a>
       <a href="about.html">About</a>
       <a href="support.html">Support</a>
@@ -122,18 +121,25 @@
 
     <h2>Current strengths</h2>
     <ul>
-      <li>The chart itself is keyboard navigable, exposes a screen-reader summary, and directs users to semantic statistical results.</li>
+      <li>All seven chart families expose named, focusable charts and direct users to semantic statistical results.</li>
+      <li>The Data grid supports keyboard navigation and editing, with row and column relationships, missing-value descriptions, and edit status messages.</li>
+      <li>Layouts supports keyboard selection, movement, resizing, and text editing. Notebook supports keyboard selection, reordering, and page navigation.</li>
       <li>The interface respects reduced-motion preferences and includes visible keyboard focus.</li>
       <li>The public website and guide provide bypass links, responsive layouts, descriptive image alternatives, and keyboard-accessible navigation.</li>
+      <li>In the standalone editions, chart, Layouts, and Notebook PDFs include tagged figures, figure descriptions, document language, and page-order structure. Authors still need to review descriptions and provide exact values in an accessible companion table when needed.</li>
     </ul>
+
+    <h2>What has been tested</h2>
+    <p>As of September 10, 2026, local automated checks cover the standalone source, portable file, hosted-app build, public site and guide, and R-generated chart hosts. These checks include all seven chart families, major dialogs, keyboard and focus behavior, and exported PDF structure. Sampled grid, dialog, reflow, and text-spacing checks also run in Firefox and WebKit, in addition to Chromium.</p>
+    <p>These are development test results, not acceptance of complete workflows with assistive technology. Playwright WebKit testing does not establish Safari and VoiceOver support. The installed jamovi and Electron interfaces, live deployment, and downloaded files in the user's PDF reader need separate checks.</p>
 
     <h2>Known limitations</h2>
     <ul>
-      <li>Screen-reader navigation in the standalone Data grid is being improved, particularly for virtualized rows and active-cell announcements.</li>
-      <li>Some Layouts workspace selection, resizing, and editing workflows still require additional keyboard support.</li>
-      <li>The Notebook workspace supports keyboard selection, reordering, and page navigation, but has not yet had a full screen-reader audit.</li>
-      <li>Exported charts may require a companion caption, long description, or data table; raster images cannot carry reliable web alternative text by themselves.</li>
-      <li>Testing with NVDA, JAWS, VoiceOver, magnification, voice control, and disabled users is ongoing.</li>
+      <li>Complete workflows with NVDA, JAWS, VoiceOver, magnification, voice control, and disabled users have not yet been accepted in the current test record. Grid announcements, chart comprehension, Layouts and Notebook authoring, and saving and reopening files remain part of that work.</li>
+      <li>Installed jamovi needs testing of its data editor, analysis navigation, results frame, and file dialogs as well as Pandion's chart controls. Browser-based chart-host tests do not establish access through jamovi's surrounding interface.</li>
+      <li>Some default chart fills have insufficient contrast against white when used without outlines. Palette choice alone does not establish accessibility; required shapes, labels, and group distinctions need review in the final figure.</li>
+      <li>Gradient backgrounds, SVG text, and some native controls still have unresolved contrast review items. Actual browser zoom, high-contrast settings, and assistive-technology workflows need acceptance on supported platforms.</li>
+      <li>Exported figures may require a companion caption, long description, or data table. Tagged PDF structure does not by itself establish useful reading order or description quality in a screen reader; raster images need alternative text in the document or webpage where they are used.</li>
     </ul>
 
     <div class="contact">
@@ -142,7 +148,7 @@
       <p>You may also request an accessible description, data table, documentation format, or help identifying an accessible route through a Pandion workflow. We will reply with the available workaround or remediation status.</p>
     </div>
 
-    <p class="updated">Last updated July 28, 2026.</p>
+    <p class="updated">Last updated September 10, 2026.</p>
   </div>
 </main>
 
@@ -156,7 +162,7 @@
     <span>Made by Torry Scott Dennis, PhD.</span>
     <nav class="foot-links" aria-label="Footer">
       <a href="app/">Try it</a>
-      <a href="docs/">Docs</a>
+      <a href="docs/">User guide</a>
       <a href="about.html">About</a>
       <a href="support.html">Support</a>
       <a href="accessibility.html" aria-current="page">Accessibility</a>

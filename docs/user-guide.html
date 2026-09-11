@@ -147,7 +147,7 @@ body[data-channel="app"] [data-channel="jamovi"]{display:none !important}
 <nav id="sidebar" aria-label="Guide contents">
   <div class="brand">
     <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"><path d="M3 3v18h18"/><rect x="6.5" y="11" width="3" height="7" fill="var(--accent)" stroke="none"/><rect x="11.5" y="6" width="3" height="12" fill="var(--accent)" stroke="none" opacity=".72"/><rect x="16.5" y="9" width="3" height="9" fill="var(--accent)" stroke="none" opacity=".45"/></svg>
-    <div><b>Pandion Plots</b><span>User Guide · v3.0.0</span><a class="homelink" href="https://pandionplots.com/">pandionplots.com</a></div>
+    <div><b>Pandion Plots</b><span>User Guide · 3.1.1</span><a class="homelink" href="https://pandionplots.com/">pandionplots.com</a></div>
   </div>
   <input id="navsearch" type="search" placeholder="Search this guide…" autocomplete="off"
     aria-label="Search this guide" aria-controls="searchhits"
@@ -696,6 +696,7 @@ control, is identical in both.</div>
 <h2 id="editing">Editing the appearance</h2>
 
 <h3 id="click-to-edit">Click-to-edit basics</h3>
+<p>One rule runs the whole editor: if you want to change something, click on it; if you want to move something, drag it; if you want to add something that is not there, press the <b>+</b> button. The rest is detail:</p>
 <ul>
 <li><b>Click any part of the chart</b> (a bar, point, line, slice, axis, tick label, legend, title) and its style panel opens directly below the chart, titled after what you clicked (e.g. "Bars - F", "Y axis", "Legend").</li>
 <li><b>Double-click any text</b> (titles, category names, tick labels) to edit it in place.</li>
@@ -830,11 +831,11 @@ control, is identical in both.</div>
 <p><b>Panel-wide behaviors:</b></p>
 <ul>
 <li><b>Linked to the chart, both ways.</b> Hover a table row → a dashed ring previews the matching bars on the chart. Click the row → the ring pins with a marching-ants animation; hover a bar → every row mentioning it highlights. Click panel whitespace to release the pin.</li>
-<li><b>The focus card.</b> Pinning a row shows a reading card above the table: section context, the row's APA sentence (or its values), a Copy button, and ‹ › steppers that walk the pin row by row while the chart rings follow.</li>
+<li><b>The focus card.</b> Pinning a row shows a reading card above the table: section context, the row's APA sentence (or its values), and ‹ › steppers that walk the pin row by row while the chart rings follow.</li>
 <li><b>Sticky stats mode.</b> While the panel is open, plain chart clicks drive the panel instead of opening style editors: click a bar to see its numbers, click two bars (Compare pairs tab) to pin their test. Click open space to clear; the Σ button or <kbd>Esc</kbd> exits. With the panel closed, clicks are ordinary click-to-edit again.</li>
 <li><b><kbd>Cmd/Ctrl</kbd>+click any bar</b>, from anywhere, to jump straight into the panel with that cell's numbers pinned.</li>
 <li><b>Tap-a-term definitions.</b> Column headers and many value cells are tappable: a popover gives a plain-language definition plus an <b>"In this table"</b> reading computed from that row's own numbers ("Here t(11.7) = 2.77 for A vs B: the two group means sit about 2.77 standard errors apart…"). <kbd>Esc</kbd> closes it.</li>
-<li><b>Copy everywhere:</b> per-row APA sentences, Copy APA on omnibus cards, and Copy table buttons that paste straight into Excel or Word.</li>
+<li><b>Numbers you can take with you:</b> APA-style sentences appear in the readouts and the focus card, and Copy table buttons paste whole tables straight into Excel or Word.</li>
 <li><b>Alpha</b> is a reading lens (.10 / .05 / .01 / .001): it recolors the green significance highlights and tallies without changing anything saved.</li>
 </ul>
 
@@ -853,7 +854,7 @@ control, is identical in both.</div>
 <ul>
 <li><b>Test:</b> Auto (recommended) resolves to a paired test for two occasions of the same subjects and Welch's otherwise; or pick Welch's t, Student's t, Paired t, Mann-Whitney U, Wilcoxon signed-rank, or an omnibus: One-way ANOVA (X-axis or grouping factor), or One-way RM-ANOVA (occasions) on Repeated Measures. Frequencies bars use a Proportion z-test.</li>
 <li><b>Label:</b> Asterisks / p-value / p + effect size / full APA; one figure uses one format, so changing it re-labels every bracket on the chart. <b>Effect:</b> Cohen's d or Hedges' g (the right effect size is forced for rank, paired, ANOVA, and proportion tests). <b>Tails:</b> two- or one-tailed.</li>
-<li><b>Correct:</b> the chart-wide multiple-comparison correction (None / Bonferroni / Holm / FDR / Tukey / Games-Howell / Dunnett). A live monospace readout shows the test, statistic, raw and adjusted p, CI, effect size, and exactly what the label will say; <b>Copy APA</b> copies the sentence.</li>
+<li><b>Correct:</b> the chart-wide multiple-comparison correction (None / Bonferroni / Holm / FDR / Tukey / Games-Howell / Dunnett). A live monospace readout shows the test, statistic, raw and adjusted p, CI, effect size, and exactly what the label will say.</li>
 <li><b>Honesty built in:</b> if a correction cannot apply to a bracket's test (e.g. Tukey on repeated measures), the raw p is shown <i>with a disclosure line saying so</i>. Tests that do not fit the data are refused with an explanation in plain language, never computed wrong.</li>
 </ul>
 
@@ -1109,6 +1110,12 @@ control, is identical in both.</div>
 <p style="margin:2px 0">A paired test that ranks the sizes of nonzero differences, then compares ranks attached to positive and negative differences. Its usual null assumes the difference distribution is symmetric around zero; under that assumption, it tests whether the distribution is centered at zero,technically, whether its pseudomedian is zero.</p>
 <p style="margin:2px 0"><b>How to read it.</b> Pandion Plots reports V as the sum of positive ranks. Use its p value to assess the signed-rank imbalance, and also report the paired differences and a rank-based effect size.</p>
 <p style="margin:2px 0"><b>Common misread.</b> The test uses both signs and ranked magnitudes, so it is not assumption-free and is not generally justified by saying the scores are merely ordinal or skewed.</p>
+</div>
+<div class="glossentry" style="margin:0 0 14px">
+<p style="margin:10px 0 2px"><b>Which test?</b><span style="color:#666;font-size:.85em"> · Compare, RM</span></p>
+<p style="margin:2px 0">Welch's t is the default for comparing two independent group means: it does not assume equal spread, and when spreads happen to be equal it gives nearly the same answer as Student's t, so it costs almost nothing. Testing for equal variances first and then choosing a test is worse than either test used alone (the pretest misses trouble in small samples and distorts the overall error rate), so Pandion Plots never does it. Student's t stays available for teaching or matching a textbook. Mann-Whitney U answers a different question (whether one group's values tend to be larger, not whether means differ), so reach for it when the outcome is ordinal or when the mean is not the summary you care about.</p>
+<p style="margin:2px 0"><b>How to read it.</b> Leave Test on Auto: it picks a paired test when the two cells are the same subjects and Welch's t otherwise, and the readout always names what ran.</p>
+<p style="margin:2px 0"><b>Common misread.</b> Skewed or non-normal data alone is not a reason to switch to Mann-Whitney: at moderate sample sizes the t family handles it, and under unequal spreads Mann-Whitney has error problems of its own that Welch's t does not.</p>
 </div>
 <div class="glossentry" style="margin:0 0 14px">
 <p style="margin:10px 0 2px"><b>the t statistic</b> <span style="color:#666;font-weight:400">(t)</span><span style="color:#666;font-size:.85em"> · Compare, RM</span></p>

@@ -344,6 +344,19 @@ await page.click('.ps-fn-args .ps-fn-insert');
 await page.waitForTimeout(200);
 ok((await read()).formula === 'BIN(q1, 4)',
    'BIN takes its column and its group count from the picker');
+ok(await page.evaluate(() => {
+    const h = document.querySelector('.ps-fn-args .ps-fpk-hint');
+    return !h || !/even neighbor/.test(h.textContent);
+}), 'BIN does not carry the rounding tie note');
+await clickRow('ROUND(');
+await page.waitForTimeout(200);
+ok(await page.evaluate(() => {
+    const h = document.querySelector('.ps-fn-args .ps-fpk-hint');
+    return !!h && /even neighbor/.test(h.textContent) &&
+           /ROUND\(2\.5\) is 2/.test(h.textContent) &&
+           /jamovi/.test(h.textContent);
+}), 'the ROUND picker teaches the tie rule at the moment of choice ' +
+   '(Torry, Aug 2026)');
 await clickRow('LOWER');
 await page.waitForTimeout(200);
 ok(await page.evaluate(() =>
