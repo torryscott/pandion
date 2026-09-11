@@ -211,8 +211,11 @@ const readTrio = () => page.evaluate(async () => {
        `("${clean.excl.tip}")`);
     ok(clean.show.off && /No columns are hidden/.test(clean.show.tip),
        `Show all columns is off and says why ("${clean.show.tip}")`);
-    ok(clean.widths.off && /default widths/.test(clean.widths.tip),
-       `Reset all column widths is off and says why ("${clean.widths.tip}")`);
+    // Columns open FITTED now (Sep 2026), so a pristine table has widths
+    // and Reset all column widths is live: it is the way back to the
+    // stretch layout. It goes quiet after it runs, asserted below.
+    ok(!clean.widths.off,
+       `Reset all column widths is available on a fitted table (off=${clean.widths.off})`);
 
     // Give each one something to act on, watch it come alive, run it
     // through the MENU route, and watch it go quiet again - proving both
