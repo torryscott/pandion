@@ -13,7 +13,7 @@ so a fix can be live there before the version number below ships to
 the desktop app and jamovi module. The "live on the web app" date is
 when the fix reached the hosted page.
 
-## v3.2.0 (unreleased; deployment dates noted per change)
+## v3.1.2 (unreleased; deployment dates noted per change)
 
 **Factorial and repeated-measures ANOVA preserve small residual variation.**
 Subtraction of large fitted, subject or occasion sums could erase small real

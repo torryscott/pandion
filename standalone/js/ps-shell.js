@@ -526,15 +526,15 @@
   // this build shows a one-time notice. The check is a pure function
   // of (file version, app version) so the gate can probe it directly.
   var NUMERICAL_CHANGES = [
-    { since: "3.2.0",
+    { since: "3.1.2",
       label: "charts and statistics retain the full precision of source data, " +
              "including small differences between large values" },
-    { since: "3.2.0",
+    { since: "3.1.2",
       label: "ROUND now matches R at exact halves (2.5 rounds to 2, " +
              "ties go to the even neighbor)" },
-    { since: "3.2.0",
+    { since: "3.1.2",
       label: "Mann-Whitney exact p values are correct at larger samples" },
-    { since: "3.2.0",
+    { since: "3.1.2",
       label: "Spearman p values use R's exact algorithm" }
   ];
   function _verParts(v) {
