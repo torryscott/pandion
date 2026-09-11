@@ -1,14 +1,22 @@
 # Pandion Plots: cross-browser launch checklist
 
-Every automated probe in this project runs Chromium, so Chrome and Edge are
-continuously covered. This is the manual pass for **Safari** and **Firefox**,
-about 15 minutes per browser. Run it once on the HOSTED app and once on the
+Most automated browser probes in this project run Playwright Chromium;
+targeted grid, modal and reflow probes also run Firefox and WebKit. These do not certify installed
+Chrome, Edge, Safari, or Firefox. This is the manual pass for each supported
+browser, about 15 minutes per browser. Record its exact version and the tested
+artifact's checksum. Run it once on the HOSTED app and once on the
 PORTABLE file (double-clicked from Finder/Explorer), because the two differ
 in exactly the places browsers disagree: storage, file access, and the
 clipboard.
 
 Mark each line pass/fail. Anything that fails, note what you saw; the wording
 of an error matters as much as the failure.
+
+For required coursework, use the [classroom acceptance pack](../docs/accessibility-classroom/README.md)
+alongside this browser checklist. It includes the same assignment for browser
+and jamovi, a synthetic dataset and answer key, platform-specific records and
+criteria for accepting a browser fallback. No human session has been accepted
+in that pack yet; automated browser/host checks do not fill in those results.
 
 ## A. Boot and storage (the paths most likely to differ)
 
@@ -35,6 +43,13 @@ of an error matters as much as the failure.
 
 11. Save project (Cmd/Ctrl+S). A .pand downloads. Reopen it: intact.
 12. Export chart as SVG, PNG, and PDF. Each downloads and opens.
+    For PDF accessibility acceptance, open chart, two-panel layout and Notebook
+    files in the institution's supported PDF reader with its screen reader.
+    Check the figure description, Unicode text, caption, page order, and
+    included notes. Repeat with an older saved Notebook page. Review the
+    description's meaning and supply an accessible data table for assignments
+    requiring exact values. Tagged structure checks alone do not complete this
+    acceptance. See [A11Y-01 validation](../docs/A11Y-01-VALIDATION.md).
     PDF is the one to eyeball: text should be selectable (vector), not a
     picture of text.
 13. Export data as CSV from the Data workspace.
@@ -56,8 +71,18 @@ of an error matters as much as the failure.
     stay normal size; export afterwards is still identical.
 19. Layouts: add a chart panel and a text item, drag them around, snap
     lines appear, Cmd/Ctrl+A selects all, arrows nudge.
-20. Resize the window narrow (~900px). No sideways scrolling of the app
-    chrome; panes stay usable.
+20. Resize the window through 900px, 640px and 320px, then return to desktop
+    width. Repeat with actual browser zoom at 200% and 400%, including Safari.
+    Check comfortable, compact and spacious density. Apply the text-spacing
+    overrides used by the reflow probe (1.5 line height, 2em paragraph spacing,
+    .12em letter spacing and .16em word spacing). Header buttons, project and
+    save status, and Data commands must remain visible without sideways
+    scrolling of application chrome. Tab to the chart, switch to Data and use
+    Cmd/Ctrl+Down and Cmd/Ctrl+Right to reach the last cell: only the grid should
+    scroll, while its toolbar and summary remain visible. Verify useful focus
+    indicators, all three narrow drawers, and restoration of the desktop panels
+    and resize handles after widening. Record the zoom, viewport, browser
+    version and any clipping; see [A11Y-05 validation](../docs/A11Y-05-VALIDATION.md).
 
 ## F. Recovery honesty
 

@@ -635,8 +635,23 @@ rmplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
                 "paletteLibrary", "styleLibrary", "styleStamp",
                 "annotationsJson", "chartSnapshot", "chartSpec"
             )
-            spec_keys <- vapply(.rmplotbuilderSpecTable, function(r) r$opt,
-                                character(1))
+            # The axis titles are spec keys that the TABLE does not carry
+            # (they are read straight off spec above, not passed as args), so
+            # they have to be named here or the engine's allowlist rejects
+            # them. It filters BOTH the explode into data.* and the client's
+            # own copy of the blob, so a title survived the round trip but
+            # vanished from that copy, and the next style commit
+            # re-serialized the blob WITHOUT it: R then computed the default
+            # and the label reverted to the variable name a beat later, with
+            # nothing clicked (Torry, Sep 2026, on scatter). Compare Groups
+            # was immune only because its list already named them.
+            spec_keys <- c(
+                vapply(.rmplotbuilderSpecTable, function(r) r$opt, character(1)),
+                "xTitle", "xTitleOverride", "yTitle", "yTitleOverride",
+                "groupTitle", "groupTitleOverride",
+                "hpBadgeLeft", "hpBadgeTop",
+                "rangeBadgeLeft", "rangeBadgeTop"
+            )
 
             fixed_args <- list(
                 # Static-snapshot fallback: raw pass-through of the JS-committed
@@ -793,12 +808,18 @@ rmplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
             n   <- nrow(data)
             sid <- seq_len(n)
 
+            # Preserve numeric observations directly. as.character() rounds
+            # doubles before parsing, which changes small differences around
+            # a large response origin. Factors still parse their labels.
+            numericMeasure <- function(v) {
+                if (is.numeric(v)) return(as.numeric(v))
+                suppressWarnings(as.numeric(as.character(v)))
+            }
             # ---- missing-data disclosure (subjects missing >=1 within
             # value or an NA between), mirroring the simple path ----------
             anymiss <- rep(FALSE, n)
             for (c_ in assigned)
-                anymiss <- anymiss | !is.finite(suppressWarnings(
-                    as.numeric(as.character(data[[c_$measure]]))))
+                anymiss <- anymiss | !is.finite(numericMeasure(data[[c_$measure]]))
             for (bv in bsCols) anymiss <- anymiss | is.na(data[[bv]])
             n_miss <- sum(anymiss)
             missing_note <- if (n_miss > 0)
@@ -808,7 +829,7 @@ rmplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Cla
             # ---- reshape wide -> long (subject x assigned cell) ---------
             pieces <- list()
             for (c_ in assigned) {
-                y <- suppressWarnings(as.numeric(as.character(data[[c_$measure]])))
+                y <- numericMeasure(data[[c_$measure]])
                 row <- data.frame(.subject = sid, .value = y,
                                   stringsAsFactors = FALSE, check.names = FALSE)
                 for (k in seq_along(factors)) {

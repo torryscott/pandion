@@ -47,6 +47,31 @@ const close = (a, b, tol, label) =>
 const relClose = (a, b, rel, label) =>
   close(a, b, rel * Math.max(1e-12, Math.abs(b)), label);
 
+// Constant observations have exact mean c and exact variance zero. Unequal
+// sample sizes must never turn summation noise into a finite t statistic.
+// Exercise the actual shared statistics object as well as the standalone core.
+const statsAt = src.indexOf('    var _gb2Stats = {');
+const statsEnd = src.indexOf('\n    };', statsAt);
+if (statsAt < 0 || statsEnd < 0) throw new Error('shared statistics object not found');
+const sharedStats = new Function(src.slice(statsAt, statsEnd + 7) + '\nreturn _gb2Stats;')();
+const statSrc = fs.readFileSync(path.resolve(path.dirname(SRC), '../../standalone/js/ps-stat.js'), 'utf8');
+const standaloneStats = new Function('var window = {};\n' + statSrc + '\nreturn window.PSStat;')();
+for (const value of [1e-6, 0.1, 1e10, Number.MAX_VALUE, -Number.MAX_VALUE]) {
+  for (const n of [2, 31, 47, 50]) {
+    const values = Array(n).fill(value);
+    ok(sharedStats.mean(values) === value, 'shared exact constant mean ' + value + ' n=' + n);
+    ok(sharedStats.variance(values) === 0, 'shared zero constant variance ' + value + ' n=' + n);
+    ok(standaloneStats.mean(values) === value, 'standalone exact constant mean ' + value + ' n=' + n);
+    ok(standaloneStats.sdSample(values) === 0, 'standalone zero constant SD ' + value + ' n=' + n);
+  }
+}
+const equalA = Array(47).fill(1e-6), equalB = Array(31).fill(1e-6);
+ok(sharedStats.welchT(equalA, equalB) === null, 'constant unequal-n Welch is unavailable');
+ok(sharedStats.studentT(equalA, equalB) === null, 'constant unequal-n Student is unavailable');
+ok(sharedStats.pairedT(equalA, Array(47).fill(0)) === null, 'constant paired difference is unavailable');
+ok(sharedStats.variance([1e10 + 1, 1e10 + 2, 1e10 + 3]) === 1,
+  'small real variation at a large offset is retained');
+
 // ---- box stats vs quantile(type=7) + clamped Tukey whiskers -------------
 let boxCells = 0, kdeCells = 0;
 for (const [name, ds] of Object.entries(refs.datasets)) {

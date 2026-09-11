@@ -51,7 +51,16 @@ const RECIPES = [
   { name: 'negzero', type: 'continuous', gen: () => pick(['-0', '0', '0.0', '-0.0']) },
   { name: 'idcoded', type: 'nominal', gen: () => '00' + Math.floor(rnd() * 900 + 100) },
   { name: 'levels', type: 'nominal', gen: () => pick(['low', 'mid', 'high']) },
-  { name: 'mixed', type: 'nominal', gen: () => rnd() < 0.7 ? String(Math.floor(rnd() * 50)) : pick(['x', 'unknown', '?']) },
+  // Content-dependent: only 30% of cells draw a word, so a short column can
+  // come out entirely numeric, and then "nominal" is the WRONG expectation -
+  // the app is right to call it continuous. Seed 20260904 drew exactly that
+  // and failed the suite on every branch, including a clean main. A recipe
+  // whose type depends on what it happened to generate states that with
+  // `expect`, which is consulted instead of the static type.
+  { name: 'mixed', type: 'nominal',
+    gen: () => rnd() < 0.7 ? String(Math.floor(rnd() * 50)) : pick(['x', 'unknown', '?']),
+    expect: vals => vals.every(v => v !== '' && isFinite(Number(v)))
+        ? 'continuous' : 'nominal' },
   { name: 'deccomma', type: 'nominal', gen: () => Math.floor(rnd() * 9) + ',' + Math.floor(rnd() * 90) },
   { name: 'thousands', type: 'nominal', gen: () => '1,' + String(100 + Math.floor(rnd() * 900)) },
   { name: 'quoty', type: 'nominal', gen: () => pick(['say "hi"', 'a,b', 'line1\nline2', 'tail\r\nwind', 'mac\rline', 'plain']) },
@@ -78,7 +87,13 @@ function genTable(t) {
   let text = [header, ...rows].map(rw => rw.map(v => wr(v, delim)).join(delim)).join(eol) + eol;
   let bom = false;
   if (t % 5 === 4) { text = '﻿' + text; bom = true; }
-  return { header, rows, types: cols.map(r => r.type), text, delim, bom };
+  // `missing` is content-dependent in the same way (30% NA/empty), but an
+  // all-missing column has no correct answer to assert, so it keeps its
+  // static type; if it ever flakes it needs a ruling, not an expect().
+  const types = cols.map((r, c) => r.expect
+    ? r.expect(rows.map(rw => rw[c]))
+    : r.type);
+  return { header, rows, types: types, text, delim, bom };
 }
 
 let pass = 0, fail = 0;

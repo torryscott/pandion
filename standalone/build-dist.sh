@@ -12,11 +12,24 @@
 set -e
 cd "$(dirname "$0")"
 
+# The build stamp (commit date + short sha of the last commit that touched
+# the shipped sources, "*" if they are uncommitted) rides
+# <meta name="pandion-build">; ps-shell reads it for exports, saved
+# projects, and About. Deterministic for a given source tree, so
+# rebuilding artifacts without a source change reproduces the same bytes.
+PS_BUILD_STAMP="$(bash ../scripts/build-stamp.sh)"
+export PS_BUILD_STAMP
+
 python3 - <<'EOF'
 import re, os, pathlib
 
 root = pathlib.Path(".")
 html = (root / "index.html").read_text(encoding="utf-8")
+
+META = '<meta name="pandion-build" content="">'
+assert html.count(META) == 1, "expected exactly one empty pandion-build meta"
+html = html.replace(META, '<meta name="pandion-build" content="%s">'
+                    % os.environ["PS_BUILD_STAMP"])
 
 def inline(src_attr, path):
     global html

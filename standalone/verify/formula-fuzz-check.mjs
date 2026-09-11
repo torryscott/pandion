@@ -2,7 +2,7 @@
 // REAL computed-variable path: load the hostile columns into the app,
 // create each formula through PS_SHELL.saveComputedColumn (the exact
 // function the dialog commits through), and compare the stored column
-// cell for cell with base R at 10-significant-digit precision. Missing
+// cell for cell with base R using full stored precision. Missing
 // must match missing; strings must match exactly; the negative roster
 // must be refused with an error and create no column. CONTROL: with the
 // pre-fix ROUND (Math.round), the ROUND rows over half-values go red.
@@ -76,7 +76,7 @@ const results = await page.evaluate((refs) => {
 
 const relClose = (g, w) => {
   if (!isFinite(g) || !isFinite(w)) return false;
-  const tol = 5e-10 * Math.max(1, Math.abs(w));
+  const tol = 2e-13 * Math.abs(w) + Number.MIN_VALUE;
   return Math.abs(g - w) <= tol;
 };
 for (const r of results.out) {
@@ -93,10 +93,9 @@ for (const r of results.out) {
     }
     if (got === null) { bad = 'row ' + row + ': got missing, want ' + JSON.stringify(want); break; }
     if (typeof want === 'number') {
-      const g = parseFloat(got);
-      // The grid stores 10 significant digits; the reference carries
-      // full precision - compare at half that last digit.
-      if (!relClose(g, Number(Number(want).toPrecision(10)))) {
+      const g = Number(got);
+      // No display-rounding allowance on stored values.
+      if (!relClose(g, want)) {
         bad = 'row ' + row + ': got ' + got + ', R says ' + want; break;
       }
     } else if (String(got) !== String(want)) {

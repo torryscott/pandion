@@ -32,6 +32,7 @@
 // A/B stash diff), so the compat gate in case 1 is meaningful.
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import fs from 'node:fs';
 
 function loadPlaywright() {
     for (const base of [process.cwd(), new URL('.', import.meta.url).pathname,
@@ -271,20 +272,28 @@ ok(Array.isArray(keptPic.chrome) && keptPic.chrome.length === 0,
    JSON.stringify(keptPic.chrome) + ')');
 
 console.log('case 5: every module re-captures byte-identically across an echo');
-const mods = await page.evaluate(() => Object.keys(window.PS_TEMPLATES || {}));
+// The dose example cannot exercise RM or Likert. Use the real all-seven
+// example and require every declared module instead of treating missing
+// roles, missing captures, or new untested modules as successful skips.
+await page.evaluate(() => window.PS_SHELL.loadSample('wellbeing'));
+await page.waitForTimeout(1400);
+const mods = await page.evaluate(() => Object.keys(window.PS_TEMPLATES || {})
+    .filter(key => key !== '__stamp')); // build metadata, not an analysis
 const roleSets = {
-    plotbuilder: { xvar: 'condition', yvar: 'score' },
-    freqplotbuilder: { var: 'condition' },
-    distplotbuilder: { var: 'score' },
-    xyplotbuilder: { xvar: 'hours', yvar: 'score' },
-    corrplotbuilder: { vars: ['score', 'hours'] },
-    likertplotbuilder: null,   // sample table has no battery; skipped
-    rmplotbuilder: null        // no wide measures in the sample; skipped
+    plotbuilder: { xvar: 'study_method', yvar: 'exam_score', groupVar: 'residence' },
+    freqplotbuilder: { var: 'class_year', groupVar: 'residence' },
+    distplotbuilder: { var: 'screen_hours', groupVar: 'chronotype' },
+    xyplotbuilder: { xvar: 'sleep_hours', yvar: 'gpa', groupVar: 'residence' },
+    corrplotbuilder: { vars: ['sleep_hours', 'screen_hours', 'gpa', 'exam_score'] },
+    likertplotbuilder: { items: ['q1_belonging', 'q2_support', 'q3_workload',
+                                'q4_facilities', 'q5_recommend'] },
+    rmplotbuilder: { measures: ['stress_wk1', 'stress_wk6', 'stress_wk12'],
+                     betweenVar: 'residence' }
 };
+ok(JSON.stringify([...mods].sort()) === JSON.stringify(Object.keys(roleSets).sort()),
+   'the capture roster covers all seven declared modules (' + mods.join(', ') + ')');
 for (const mod of mods) {
-    if (!(mod in roleSets)) continue;
     const rr = roleSets[mod];
-    if (!rr) { console.log(`  ..  ${mod}: no fitting sample columns, skipped`); continue; }
     const okRoles = await page.evaluate(({ mod, rr }) => {
         const cols = window.PS_SHELL.project.table.order;
         for (const k of Object.keys(rr)) {
@@ -296,14 +305,129 @@ for (const mod of mods) {
         window.PS_SHELL.setRoles(mod, rr);
         return true;
     }, { mod, rr });
-    if (!okRoles) { console.log(`  ..  ${mod}: sample columns missing, skipped`); continue; }
+    ok(okRoles, `${mod}: all required fixture columns exist`);
     await page.waitForTimeout(1400);
+    ok(await page.evaluate(() => {
+        const raw = window.PS_SHELL.buildRaw();
+        return !!raw && !raw.placeholder;
+    }), `${mod}: the fixture builds a real chart`);
     const a = await snapSvg();
-    if (!a) { console.log(`  ..  ${mod}: no capture (placeholder?), skipped`); continue; }
+    ok(typeof a === 'string' && a.includes('<svg'), `${mod}: a nonempty SVG was captured`);
+    const revisionBefore = await page.evaluate(() => {
+        const snap = window.PS_SHELL.snapshotOf(window.PS_SHELL.project.activeChart);
+        return snap && snap.valid ? snap.rev : null;
+    });
+    ok(revisionBefore !== null, `${mod}: the capture is valid for the current chart state`);
+    const tableBefore = await page.evaluate(() => JSON.stringify(window.PS_SHELL.project.table));
     await echo();
     const b = await snapSvg();
+    ok(await page.evaluate(before => {
+        const snap = window.PS_SHELL.snapshotOf(window.PS_SHELL.project.activeChart);
+        return !!snap && snap.valid && snap.rev > before;
+    }, revisionBefore), `${mod}: the echo produced a fresh valid capture`);
+    if (a !== b || process.env.PS_NOTEBOOK_OUT) {
+        const out = process.env.PS_NOTEBOOK_OUT || '/tmp/pandion-notebook-drift';
+        fs.mkdirSync(out, { recursive: true });
+        fs.writeFileSync(path.join(out, mod + '-before.svg'), a);
+        fs.writeFileSync(path.join(out, mod + '-after.svg'), b || '');
+        console.log('  diagnostic captures: ' + out);
+    }
     ok(a === b, `${mod}: echo re-capture is byte-identical`);
+    ok(tableBefore === await page.evaluate(() => JSON.stringify(window.PS_SHELL.project.table)),
+       `${mod}: recapture preserves the complete data table`);
+    const legend = await page.evaluate(svgText => {
+        const doc = new DOMParser().parseFromString(svgText, 'image/svg+xml');
+        const saved = [...doc.querySelectorAll('[data-role="legend-bg"]')];
+        const live = [...document.querySelectorAll('.graphbuilder2-host [data-role="legend-bg"]')];
+        const attrs = ['x', 'y', 'width', 'height', 'stroke', 'stroke-width',
+                       'stroke-dasharray', 'stroke-opacity'];
+        return {
+            validXml: !doc.querySelector('parsererror'),
+            liveCount: live.length, savedCount: saved.length,
+            emptyTargets: saved.every(el => attrs.every(attr => !el.hasAttribute(attr))),
+            liveUsable: live.every(el => Number(el.getAttribute('width')) > 0 &&
+                Number(el.getAttribute('height')) > 0 && getComputedStyle(el).display !== 'none'),
+        };
+    }, b);
+    ok(legend.validXml && legend.emptyTargets && legend.liveCount === legend.savedCount,
+       `${mod}: saved legend fixtures contain no drag geometry or hover outline`);
+    ok(legend.liveUsable && (mod !== 'rmplotbuilder' || legend.liveCount > 0),
+       `${mod}: live legend drag targets remain sized and usable`);
 }
+
+console.log('case 6: a legend moved outside the canvas remains in captures and exports');
+await page.evaluate(rr => {
+    window.PS_SHELL.setModule('rmplotbuilder');
+    window.PS_SHELL.setRoles('rmplotbuilder', rr);
+}, roleSets.rmplotbuilder);
+// Let the new analysis mount before using its style-control closure.
+await page.waitForTimeout(1400);
+await page.evaluate(() => window.__gb2_setOption('legendOffsetX', 260));
+await page.waitForFunction(() => {
+    const pending = window.__gb2_pendingOpts;
+    return !pending || Object.keys(pending).length === 0;
+}, null, { timeout: 9000 });
+await page.waitForTimeout(1400);
+const dataBeforeExport = await page.evaluate(() => JSON.stringify(window.PS_SHELL.project.table));
+const sourceChartId = await page.evaluate(() => window.PS_SHELL.project.activeChart);
+const exported = await page.evaluate(() => window.PS_SHELL.exportSource('white'));
+// Oversized live charts intentionally defer capture to the layout's
+// authoritative-size pass. Exercise that real workflow, not its stale cache.
+await page.evaluate(() => window.PS_SHELL.addLayout());
+await page.click('#ps-laddchart');
+await page.click('#ps-lchartmenu button[data-chart="' + sourceChartId + '"]');
+await page.waitForFunction(id => {
+    const snap = window.PS_SHELL.snapshotOf(id);
+    return !!snap && snap.valid;
+}, sourceChartId, { timeout: 9000 });
+const movedSnapshot = await page.evaluate(id => window.PS_SHELL.snapshotOf(id).svg, sourceChartId);
+const layoutExport = await page.evaluate(() => window.PS_SHELL.exportSource('white'));
+if (process.env.PS_NOTEBOOK_OUT)
+    await page.screenshot({ path: path.join(process.env.PS_NOTEBOOK_OUT, 'layout-workspace.png') });
+const svgPage = await browser.newPage();
+for (const [label, svgText] of [['layout snapshot', movedSnapshot], ['chart export', exported.svg],
+                               ['layout export', layoutExport.svg]]) {
+    await svgPage.goto('data:image/svg+xml,' + encodeURIComponent(svgText));
+    const extent = await svgPage.evaluate(() => {
+        const root = document.documentElement;
+        const vb = root.viewBox.baseVal;
+        const names = ['residence', 'On campus', 'Off campus'];
+        const texts = [...root.querySelectorAll('text')];
+        const legend = names.map(name => texts.find(el => el.textContent.trim() === name));
+        if (legend.some(el => !el)) return { missing: true,
+            texts: texts.map(el => el.textContent.trim()).slice(-20) };
+        const inverse = root.getScreenCTM().inverse();
+        const boxes = legend.map(el => {
+            const b = el.getBBox(), matrix = el.getScreenCTM();
+            const points = [[b.x, b.y], [b.x + b.width, b.y],
+                            [b.x, b.y + b.height], [b.x + b.width, b.y + b.height]]
+                .map(([x, y]) => new DOMPoint(x, y).matrixTransform(matrix).matrixTransform(inverse));
+            return { left: Math.min(...points.map(p => p.x)),
+                     right: Math.max(...points.map(p => p.x)),
+                     top: Math.min(...points.map(p => p.y)),
+                     bottom: Math.max(...points.map(p => p.y)) };
+        });
+        return { missing: false, right: Math.max(...boxes.map(b => b.right)),
+            width: vb.width,
+            contained: boxes.every(b => b.left >= vb.x - 0.5 &&
+                b.right <= vb.x + vb.width + 0.5 && b.top >= vb.y - 0.5 &&
+                b.bottom <= vb.y + vb.height + 0.5) };
+    });
+    console.log('  ' + label + ' legend geometry: ' + JSON.stringify(extent));
+    if (process.env.PS_NOTEBOOK_OUT) {
+        const base = path.join(process.env.PS_NOTEBOOK_OUT, label.toLowerCase().replaceAll(' ', '-'));
+        fs.writeFileSync(base + '.svg', svgText);
+        await svgPage.screenshot({ path: base + '.png' });
+    }
+    ok(!extent.missing, `${label}: all visible legend labels are present`);
+    if (label !== 'layout export')
+        ok(extent.right > 900 && extent.width > 720,
+           `${label}: the real legend is beyond the original canvas`);
+    ok(extent.contained, `${label}: every visible legend label fits within the saved viewBox`);
+}
+await svgPage.close();
+ok(dataBeforeExport === await page.evaluate(() => JSON.stringify(window.PS_SHELL.project.table)),
+   'moved-legend capture/export preserves the complete data table');
 
 ok(errors.length === 0, 'zero page errors (' + errors.length + ')');
 console.log('NOTEBOOK DRIFT CHECK PASS');

@@ -139,6 +139,7 @@ const measure = () => page.evaluate(() => {
         return acc;
     }
     const bad = [];
+    let checked = 0;
     const nodes = document.querySelectorAll(
         '.ps-page *, #ps-welcome *, .ps-shell-dialog *, #ps-coach *');
     for (const el of nodes) {
@@ -152,31 +153,68 @@ const measure = () => page.evaluate(() => {
         if (!r.width || !r.height) continue;
         const fg = parse(cs.color);
         if (!fg) continue;
+        checked++;
         const bg = bgOf(el);
         const composed = fg.a < 1 ? over(fg, bg) : fg;
         const L1 = lum(composed), L2 = lum(bg);
         const ratio = (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
         const px = parseFloat(cs.fontSize);
         const bold = parseInt(cs.fontWeight, 10) >= 700;
-        // WCAG large text: 18.66px, or 14px bold.
-        const need = (px >= 18.66 || (bold && px >= 14)) ? 3 : 4.5;
-        if (ratio < need - 0.05)
+        // WCAG uses points: 18pt = 24 CSS px; 14pt bold = 56/3 CSS px.
+        // https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html
+        const need = (px >= 24 || (bold && px >= 56 / 3)) ? 3 : 4.5;
+        if (ratio < need)
             bad.push({ text: text.slice(0, 34), ratio: +ratio.toFixed(2),
                        px, need, color: cs.color,
                        cls: (el.className || '').toString().slice(0, 34) });
     }
-    return bad;
+    return { bad, checked };
 });
 
+// Known contrast cases must distinguish CSS pixels from typographic points.
+// #888 on white is about 3.54:1; #777 is about 4.48:1 and must not round up.
+await page.evaluate(() => {
+    const fixture = document.createElement('div');
+    fixture.className = 'ps-shell-dialog';
+    fixture.id = 'contrast-calibration';
+    const text = document.createElement('span');
+    text.textContent = 'contrast calibration';
+    text.style.cssText = 'display:block;position:fixed;top:0;left:0;background:#fff;color:#888;font:400 14px Arial';
+    fixture.append(text);
+    document.body.append(fixture);
+});
+for (const [px, weight, color, shouldFail] of [
+    [14, 700, '#888', true],
+    [20, 400, '#888', true],
+    [24, 400, '#888', false],
+    [19, 700, '#888', false],
+    [14, 400, '#777', true]
+]) {
+    await page.evaluate(({ px, weight, color }) => {
+        Object.assign(document.querySelector('#contrast-calibration span').style,
+            { fontSize: px + 'px', fontWeight: String(weight), color });
+    }, { px, weight, color });
+    const found = (await measure()).bad.some(b => b.text === 'contrast calibration');
+    ok(found === shouldFail,
+       `contrast calibration: ${px}px / ${weight} / ${color} ${shouldFail ? 'fails' : 'passes'}`);
+}
+await page.evaluate(() => document.querySelector('#contrast-calibration').remove());
+
 // Measure the surfaces a student actually meets.
-let all = [];
-all = all.concat((await measure()).map(b => ({ ...b, where: 'start centre' })));
+let all = [], checked = 0;
+async function measureState(where) {
+    const result = await measure();
+    ok(result.checked > 0, `${where}: contrast measurements are not empty (${result.checked} text elements)`);
+    checked += result.checked;
+    all = all.concat(result.bad.map(b => ({ ...b, where })));
+}
+await measureState('start centre');
 await page.click('#ps-welcome-sample');
 await page.waitForTimeout(1200);
-all = all.concat((await measure()).map(b => ({ ...b, where: 'chart' })));
+await measureState('chart');
 await page.evaluate(() => window.PS_SHELL.setWorkspace('data'));
 await page.waitForTimeout(600);
-all = all.concat((await measure()).map(b => ({ ...b, where: 'data' })));
+await measureState('data');
 
 // Dedupe by the colour and class that produced it: one CSS rule, one finding.
 const seen = new Set(), uniq = [];
@@ -192,8 +230,8 @@ if (uniq.length)
         `      ${String(b.ratio).padStart(5)}:1 need ${b.need} at ${b.px}px  ` +
         `${b.color}  ${b.cls}  "${b.text}"`).join('\n'));
 ok(uniq.length === 0,
-   `every text node in the app meets its WCAG AA ratio on its REAL ` +
-   `background (${uniq.length} failures across ${seen.size} rules)`);
+   `sampled text colors meet their contrast thresholds on the composed ` +
+   `background (${uniq.length} failing styles across ${checked} measurements)`);
 
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 console.log('TOKENS CHECK PASS');
