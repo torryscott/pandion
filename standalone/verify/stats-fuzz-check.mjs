@@ -324,6 +324,24 @@ for (const [name, ds] of Object.entries(refs.datasets)) {
 }
 
 // ---- the correlation sets ----------------------------------------------
+// A method switch is answered by an ECHO render (the shell re-marshals
+// with the committed method), and the engine's guard recomputes the
+// cells at that render's entry. The read must come AFTER the echo or a
+// broken recompute hides behind timing: a fixed 1500 ms read passed for
+// three days while every Spearman echo blanked the cells of small
+// tie-free pairs (the em-dash failure at seed 20260901, n = 8, only
+// showed on a slow run). So the renders
+// are intercepted once and each switch waits for the render carrying
+// its method (see corr-method-echo-check.mjs for the dedicated probe).
+await page.evaluate(() => {
+  if (window.__fzRenderLog) return;
+  window.__fzRenderLog = [];
+  const G = window.GraphBuilder2, orig = G.render;
+  G.render = function (id, payload) {
+    try { window.__fzRenderLog.push({ t: Date.now(), method: payload && payload.corrMethod }); } catch (e) {}
+    return orig.apply(this, arguments);
+  };
+});
 for (const [name, cs] of Object.entries(refs.corrs)) {
   await page.evaluate(async (cs) => {
     const s = ms => new Promise(r => setTimeout(r, ms));
@@ -338,18 +356,24 @@ for (const [name, cs] of Object.entries(refs.corrs)) {
   for (const meth of ['pearson', 'spearman', 'kendall']) {
     const ref = cs[meth];
     if (!ref || ref.r === null) continue;
-    const methodSelected = await page.evaluate(async (meth) => {
+    const echoed = await page.evaluate(async (meth) => {
       const s = ms => new Promise(r => setTimeout(r, ms));
       const sels = [...document.querySelectorAll('.graphbuilder2-host select')];
       const sel = sels.find(x => [...x.options].some(o => o.value === meth));
-      if (sel && sel.value !== meth) {
-        sel.value = meth;
-        sel.dispatchEvent(new Event('change', { bubbles: true }));
-        await s(1500);
+      if (!sel || sel.value === meth) return 'unchanged';
+      const mark = Date.now();
+      sel.value = meth;
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      for (let i = 0; i < 160; i++) {          // up to 8 s for the echo
+        await s(50);
+        if (window.__fzRenderLog.some(e => e.t >= mark && e.method === meth)) {
+          await s(400);                          // panel restore after the echo
+          return 'echoed';
+        }
       }
-      return !!sel && sel.value === meth;
+      return 'no-echo';
     }, meth);
-    ok(methodSelected, name + " " + meth + ": correlation method selected");
+    ok(echoed !== 'no-echo', name + ' ' + meth + ': the method switch was echoed by a render');
     // The card is a TABLE: "x × y | .85 | < .001 | 57" under an
     // All-pairs (or Strongest-pair) header.
     const cells = await page.evaluate(() => {

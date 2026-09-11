@@ -20,7 +20,7 @@ fi
 # reads index.html source directly and runs once).
 FEATURE_PROBES="branding-check axe-state-check bypass-accessibility-check busy-check column-sizing-check \
 computed-variables-check computed-grid-refresh-check case-count-check control-focus-check bar-choice-accessibility-check character-shortcut-check coverage-gaps-check chart-accessibility-check export-accessibility-check pdf-accessibility-check \
-chart-check-check compare-pairs-apa-check chart-from-selection-check chart-groups-check chart-size-check bracket-orientation-check \
+chart-check-check compare-pairs-apa-check chart-from-selection-check chart-groups-check chart-size-check corr-method-echo-check bracket-orientation-check \
 default-style-routes-check column-gestures-check chrome-check clipboard-check copy-image-check copy-moment-check correctness-check \
 data-integrity-check workspace-sequence-check data-commandbar-check data-menu-check data-roundtrip-fuzz stash-guard-check corpus-compat-check build-stamp-check separator-accessibility-check \
 data-undo-check dates-check eyedropper-check doclifecycle-check tab-accessibility-check drag-feel-check \
