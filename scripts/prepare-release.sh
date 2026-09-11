@@ -108,13 +108,13 @@ echo "== freeze this release's persistence-corpus entry"
 # compatibility gate opens forever; the freeze refuses to overwrite an
 # existing entry, so re-preparing the same version the same day is a
 # no-op rather than a regeneration.
-node standalone/verify/corpus-freeze.mjs core || true
+node standalone/verify/corpus-freeze.mjs core
 node standalone/verify/corpus-compat-check.mjs
 
 # Generated public files are committed deliberately. A release prepared from a
 # tree that silently changed during its own build is not reproducible from HEAD.
-if ! git diff --quiet || ! git diff --cached --quiet; then
-    echo "Release builds changed committed files." >&2
+if [[ -n "$(git status --porcelain)" ]]; then
+    echo "Release builds changed or added source files (including frozen corpus entries)." >&2
     echo "Review and commit these deterministic updates, then rerun preparation:" >&2
     git status --short >&2
     exit 1
@@ -138,7 +138,8 @@ if [[ "$skip_tests" == "false" ]]; then
     node website/verify-interactions.mjs
     node website/verify-image-alternatives.mjs
     node website/verify-reflow.mjs
-    node website/verify-axe.mjs
+    echo "== required accessibility checks and review evidence"
+    bash scripts/verify/accessibility-run.sh
     node standalone/verify/artifact-parity-check.mjs
     gates+=(shared-engine-min standalone-source-and-dist website-images-interactions-reflow-and-axe)
 else

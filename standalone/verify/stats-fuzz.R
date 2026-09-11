@@ -51,12 +51,18 @@ g1_skew <- function(v) {
 }
 
 pair_refs <- function(a, b) {
-    out <- list()
-    w <- safe(t.test(a, b, var.equal = FALSE))
+    # Explicit nulls distinguish an unavailable result from omitted coverage.
+    out <- list(welch = NULL, student = NULL, mwu = NULL)
+    # A common translation leaves t/df/p unchanged. Remove the location
+    # before calling t.test so R's relative-to-mean "essentially constant"
+    # guard does not reject small, exactly representable spreads at 1e10.
+    # The fixture still ships the original observations to the application.
+    origin <- a[[1]]
+    w <- safe(t.test(a - origin, b - origin, var.equal = FALSE))
     if (!is.null(w)) out$welch <- list(t = num_or_null(unname(w$statistic)),
                                        df = num_or_null(unname(w$parameter)),
                                        p = num_or_null(w$p.value))
-    s <- safe(t.test(a, b, var.equal = TRUE))
+    s <- safe(t.test(a - origin, b - origin, var.equal = TRUE))
     if (!is.null(s)) out$student <- list(t = num_or_null(unname(s$statistic)),
                                          df = num_or_null(unname(s$parameter)),
                                          p = num_or_null(s$p.value))
@@ -163,6 +169,7 @@ anova_ref <- function(groups) {
     # is not a reference - emit none (the third reference surfaced this
     # seam on its first local run, Aug 29 2026).
     if (!isTRUE(sd(y) > 0)) return(NULL)
+    y <- y - y[[1]] # common translation; avoid an ill-conditioned intercept
     a <- safe(anova(aov(y ~ g)))
     if (is.null(a)) return(NULL)
     list(F = num_or_null(a$`F value`[1]),
@@ -171,10 +178,9 @@ anova_ref <- function(groups) {
 }
 
 dataset_refs <- function(groups) {
-    # The payload ships numerics at 10 significant digits (jsonlite
-    # digits = I(10); the standalone mirrors it), so the references are
-    # computed on EXACTLY the values the widget receives.
-    groups <- lapply(groups, function(v) signif(as.numeric(v), 10))
+    # References use the ORIGINAL doubles, before any application transport.
+    # R and JS must agree on these inputs, not on a pre-rounded substitute.
+    groups <- lapply(groups, as.numeric)
     names(groups) <- paste0("G", seq_along(groups))
     pairs <- list()
     ks <- names(groups)
@@ -227,8 +233,9 @@ dataset_refs <- function(groups) {
 }
 
 corr_refs <- function(x, y) {
-    x <- signif(as.numeric(x), 10); y <- signif(as.numeric(y), 10)
-    out <- list(x = x, y = y, n = length(x))
+    x <- as.numeric(x); y <- as.numeric(y)
+    out <- list(x = x, y = y, n = length(x),
+                pearson = NULL, spearman = NULL, kendall = NULL)
     for (meth in c("pearson", "spearman", "kendall")) {
         ct <- safe(suppressWarnings(cor.test(x, y, method = meth)))
         if (!is.null(ct)) out[[meth]] <- list(r = num_or_null(unname(ct$estimate)),
@@ -265,7 +272,7 @@ rm_refs <- function(mat) {
     # Wide within-subjects data: paired t and Wilcoxon signed-rank per
     # occasion pair, R defaults (exact iff small, tie-free, and no
     # dropped zero differences - the rule the engine mirrors).
-    mat <- lapply(mat, function(v) signif(as.numeric(v), 10))
+    mat <- lapply(mat, as.numeric)
     occ <- names(mat)
     pairs <- list()
     for (i in seq_along(occ)) for (j in seq_along(occ)) {
@@ -349,11 +356,18 @@ for (d in seq_len(n_random)) {
 # Cases the fixtures never covered: gates, ties, degenerate variance,
 # extreme magnitudes, tied p values inside the corrections.
 fixed <- list(
+    b_offset    = list(1e10 + 1:3, 1e10 + 4:6),
+    b_offset_neg = list(-1e10 + 1:3, -1e10 + 4:6),
+    b_offset_scaled = list(1e10 + (1:3)*8, 1e10 + (4:6)*8),
     b_n2        = list(c(3.1, 4.9), c(7.2, 9.8)),
     b_n2_vs_40  = list(c(3.1, 4.9), round(rnorm(40, 8, 2), 4)),
     b_ties_all  = list(rep(c(2, 3), 8), rep(c(2, 4), 8)),
     b_const_a   = list(rep(5, 12), round(rnorm(12, 7, 2), 4)),
     b_const_ab  = list(rep(5, 10), rep(5, 10)),
+    # Identical non-binary decimals at unequal n formerly acquired artificial
+    # variance and a spurious significant t statistic from summation error.
+    # A varying third group keeps the pairwise controls available too.
+    b_const_tiny_unequal = list(rep(1e-6, 47), rep(1e-6, 31), c(-1, 1, 2)),
     b_huge      = list(round(rnorm(15, 1e9, 1e7), 2), round(rnorm(15, 1.02e9, 1e7), 2)),
     b_tiny      = list(round(rnorm(15, 1e-6, 1e-7), 12), round(rnorm(15, 1.4e-6, 1e-7), 12)),
     b_negative  = list(round(rnorm(14, -50, 5), 4), round(rnorm(14, -44, 5), 4)),
@@ -408,7 +422,7 @@ lksets <- list(lk_basic = lk_refs(list(
     q4 = mk_item(c(1, 1, 2, 3, 4)))))
 
 # ---- Q-Q band reference (one clean fixed dataset) ------------------------
-qqset <- list(values = as.numeric(signif(fixed$b_negative[[1]], 10)))
+qqset <- list(values = as.numeric(fixed$b_negative[[1]]))
 qqset$band <- qq_ref(qqset$values)
 
 # ---- write ---------------------------------------------------------------
@@ -425,14 +439,15 @@ to_json <- function(x) {
         if (length(x) > 1)
             return(paste0("[", paste(vapply(as.list(x), to_json, ""), collapse = ","), "]"))
         if (!is.finite(x)) return("null")
-        return(sprintf("%.15g", x))
+        return(sprintf("%.17g", x))
     }
     if (is.character(x)) return(sprintf('"%s"', x))
     if (is.logical(x)) return(tolower(as.character(x)))
     stop("unhandled type")
 }
 
-payload <- list(seed = seed, datasets = datasets, corrs = corrs,
+payload <- list(schemaVersion = 1, seed = seed, n_random = n_random,
+                datasets = datasets, corrs = corrs,
                 rmsets = rmsets, lksets = lksets, qqset = qqset)
 con <- file(out_path, open = "wb")
 writeLines(to_json(payload), con, useBytes = TRUE)

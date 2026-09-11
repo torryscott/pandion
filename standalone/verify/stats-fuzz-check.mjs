@@ -105,9 +105,9 @@ async function openStats(tabRe) {
            (document.querySelector('.graphbuilder2-host') || {}).innerText || '');
   }, tabRe.source);
 }
-async function setBand(field, value) {
+async function setBand(field, value, refusalExpected = false) {
   // The Test / Correct selects in the Compare-pairs control band.
-  return page.evaluate(async ({ field, value }) => {
+  const selected = await page.evaluate(async ({ field, value }) => {
     const s = ms => new Promise(r => setTimeout(r, ms));
     const sels = [...document.querySelectorAll('[data-cmp-band] select, [data-st-pane="pairs"] select')];
     const sel = sels.find(x => [...x.options].some(o => o.value === value));
@@ -117,6 +117,23 @@ async function setBand(field, value) {
     await s(600);
     return true;
   }, { field, value });
+  if (!selected && refusalExpected) {
+    const text = await page.locator('.graphbuilder2-host').innerText();
+    ok(/Not available for this chart/i.test(text),
+      "Undefined comparison has a visible unavailable-result explanation");
+  } else ok(selected, "Compare-pairs " + field + " control offers " + value);
+  // Negative-control mode: erase rendered adjusted p-values AFTER the
+  // genuine UI change. A small fixture must then exit nonzero. Normal CI
+  // runs leave this unset; the guard check below verifies the verifier.
+  if (process.env.PS_FUZZ_NEGATIVE_CONTROL === value) {
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-st-pane="pairs"] tr[data-link]').forEach(tr => {
+        const td = tr.querySelectorAll('td')[5];
+        if (td) td.textContent = '';
+      });
+    });
+  }
+  return selected;
 }
 async function readPairsRows() {
   return page.evaluate(() => {
@@ -150,10 +167,15 @@ for (const [name, ds] of Object.entries(refs.datasets)) {
   ok(await openStats(/Compare pairs/), name + ': stats panel open');
 
   const pairKeys = Object.keys(ds.pairs);
+  // Constant data can legitimately offer no comparison controls. This is
+  // allowed only when R has no defined p-value for ANY comparison method,
+  // and the panel must explicitly say that the result is unavailable.
+  const noNumericalPairs = pairKeys.every(pk =>
+    Object.values(ds.pairs[pk]).every(ref => !ref || !Number.isFinite(ref.p)));
   const parseStat = c => { const m = c.match(/([tUz])\s*\(?\s*([\d.]+)?\s*\)?\s*=\s*(-?[\d.]+)/); return m; };
 
   // Welch (the default Test)
-  await setBand('test', 'welch');
+  await setBand('test', 'welch', noNumericalPairs);
   let rows = await readPairsRows();
   for (const pk of pairKeys) {
     const [ga, gb] = pk.split('|');
@@ -191,9 +213,8 @@ for (const [name, ds] of Object.entries(refs.datasets)) {
       if (refAdj === undefined || refAdj === null) continue;
       const [ga, gb] = pk.split('|');
       const row = rowFor(rows, ga, gb);
-      if (!row) continue;
+      if (!row) { ok(false, name + " " + pk + ": expected comparison row missing"); continue; }
       const adjCell = row.cells[5] || '';
-      if (/—/.test(adjCell) || adjCell === '') continue; // no-adj disclosure paths
       pClose(adjCell, refAdj, name + ' ' + pk + ' holm p(adj)');
     }
     await setBand('correct', 'none');
@@ -209,9 +230,8 @@ for (const [name, ds] of Object.entries(refs.datasets)) {
       if (refGh === undefined || refGh === null) continue;
       const [ga, gb] = pk.split('|');
       const row = rowFor(rows, ga, gb);
-      if (!row) continue;
+      if (!row) { ok(false, name + " " + pk + ": expected comparison row missing"); continue; }
       const adjCell = row.cells[5] || '';
-      if (/—/.test(adjCell) || adjCell === '') continue; // disclosure path
       pClose(adjCell, refGh, name + ' ' + pk + ' games-howell p(adj)');
     }
     await setBand('correct', 'none');
@@ -226,9 +246,10 @@ for (const [name, ds] of Object.entries(refs.datasets)) {
       if (!ref || ref.t === null) continue;
       const [ga, gb] = pk.split('|');
       const row = rowFor(rows, ga, gb);
-      if (!row) continue;
+      if (!row) { ok(false, name + " " + pk + ": expected comparison row missing"); continue; }
       const statCell = row.cells.find(c => /t\s*\(/.test(c)) || '';
       const m = statCell.match(/t\s*\(([\d.]+)\)\s*=\s*(-?[\d.]+)/);
+      ok(!!m, name + " " + pk + ": student t renders");
       if (m) {
         closeTo(m[2], ref.t, name + ' ' + pk + ' student t');
         closeTo(m[1], ref.df, name + ' ' + pk + ' student df');
@@ -246,14 +267,15 @@ for (const [name, ds] of Object.entries(refs.datasets)) {
       if (!ref || ref.p === null) continue;
       const [ga, gb] = pk.split('|');
       const row = rowFor(rows, ga, gb);
-      if (!row) continue;
+      if (!row) { ok(false, name + " " + pk + ": expected comparison row missing"); continue; }
       const statCell = row.cells.find(c => /U\s*=/.test(c)) || '';
       const m = statCell.match(/U\s*=\s*(-?[\d.]+)/);
+      ok(!!m, name + " " + pk + ": Mann-Whitney U renders");
       if (m) closeTo(m[1], ref.Umin, name + ' ' + pk + ' U(min)');
       pClose(row.cells[4] || '', ref.p, name + ' ' + pk + ' mwu p');
     }
   }
-  await setBand('test', 'welch');
+  await setBand('test', 'welch', noNumericalPairs);
 
   // Omnibus (one-way over the category factor). The card is a TABLE
   // (Effect | F | df | p | effect size), not a sentence.
@@ -274,7 +296,7 @@ for (const [name, ds] of Object.entries(refs.datasets)) {
         matched = true;
         closeTo(fCell, ds.anova.F, name + ' omnibus F');
         const pCell = r.find(c => /^(<\s*\.001|\.\d+|1\.000)$/.test(c.replace(/\s+/g, ' ')));
-        if (pCell) pClose(pCell, ds.anova.p, name + ' omnibus p');
+        pClose(pCell || "", ds.anova.p, name + ' omnibus p');
         break;
       }
     }
@@ -285,6 +307,7 @@ for (const [name, ds] of Object.entries(refs.datasets)) {
   // Descriptives: mean / SD / SE per cell
   await openStats(/Descriptives/);
   const desc = await readVisiblePaneTable();
+  ok(!!desc, name + ": descriptives table renders");
   if (desc) {
     for (const [g, cell] of Object.entries(ds.cells)) {
       const row = desc.rows.find(r => r[0] === g || r.some(c => c === g));
@@ -292,9 +315,9 @@ for (const [name, ds] of Object.entries(refs.datasets)) {
       const header = desc.rows[0].map(h => h.toUpperCase());
       const at = lbl => { const i = header.findIndex(h => h === lbl); return i >= 0 ? row[i] : null; };
       const meanCell = at('MEAN'), sdCell = at('SD'), seCell = at('SE');
-      if (meanCell && cell.mean !== null) closeTo(meanCell, cell.mean, name + ' ' + g + ' mean');
-      if (sdCell && cell.sd !== null && !/—/.test(sdCell)) closeTo(sdCell, cell.sd, name + ' ' + g + ' sd');
-      if (seCell && cell.se !== null && !/—/.test(seCell)) closeTo(seCell, cell.se, name + ' ' + g + ' se');
+      if (cell.mean !== null) closeTo(meanCell, cell.mean, name + ' ' + g + ' mean');
+      if (cell.sd !== null) closeTo(sdCell, cell.sd, name + ' ' + g + ' sd');
+      if (cell.se !== null) closeTo(seCell, cell.se, name + ' ' + g + ' se');
     }
   }
   await openStats(/Compare pairs/);
@@ -315,7 +338,7 @@ for (const [name, cs] of Object.entries(refs.corrs)) {
   for (const meth of ['pearson', 'spearman', 'kendall']) {
     const ref = cs[meth];
     if (!ref || ref.r === null) continue;
-    await page.evaluate(async (meth) => {
+    const methodSelected = await page.evaluate(async (meth) => {
       const s = ms => new Promise(r => setTimeout(r, ms));
       const sels = [...document.querySelectorAll('.graphbuilder2-host select')];
       const sel = sels.find(x => [...x.options].some(o => o.value === meth));
@@ -324,7 +347,9 @@ for (const [name, cs] of Object.entries(refs.corrs)) {
         sel.dispatchEvent(new Event('change', { bubbles: true }));
         await s(1500);
       }
+      return !!sel && sel.value === meth;
     }, meth);
+    ok(methodSelected, name + " " + meth + ": correlation method selected");
     // The card is a TABLE: "x × y | .85 | < .001 | 57" under an
     // All-pairs (or Strongest-pair) header.
     const cells = await page.evaluate(() => {
@@ -335,8 +360,8 @@ for (const [name, cs] of Object.entries(refs.corrs)) {
     ok(!!cells && cells.length >= 3, name + ' ' + meth + ': coefficient renders');
     if (cells && cells.length >= 3) {
       closeTo(cells[1], ref.r, name + ' ' + meth + ' r');
-      if (!/…/.test(cells[2])) pClose(cells[2], ref.p, name + ' ' + meth + ' p');
-      if (cells[3]) closeTo(cells[3], cs.n, name + ' ' + meth + ' n');
+      pClose(cells[2], ref.p, name + ' ' + meth + ' p');
+      closeTo(cells[3], cs.n, name + ' ' + meth + ' n');
     }
   }
 }
@@ -385,6 +410,7 @@ for (const [name, rs] of Object.entries(refs.rmsets || {})) {
     if (!row) { ok(false, name + ' ' + pk + ': signed-rank row missing'); continue; }
     const statCell = row.cells.find(c => /[VW]\s*=/.test(c)) || '';
     const m = statCell.match(/[VW]\s*=\s*([\d.]+)/);
+    ok(!!m, name + " " + pk + ": signed-rank V renders");
     if (m) closeTo(m[1], ref.V, name + ' ' + pk + ' signed-rank V');
     pClose(row.cells[4] || '', ref.p, name + ' ' + pk + ' signed-rank p');
   }
@@ -406,6 +432,7 @@ for (const [name, lk] of Object.entries(refs.lksets || {})) {
   }, lk);
   ok(await openStats(/Item means/), name + ': likert stats open');
   const tbl = await readVisiblePaneTable();
+  ok(!!tbl, name + ": item means table renders");
   if (tbl) {
     const header = tbl.rows[0] || [];
     const meanAt = header.findIndex(h => /^Mean$/i.test(h));
@@ -463,8 +490,8 @@ for (const [name, cs] of Object.entries(refs.corrs)) {
   if (xt && xt.cells) {
     const at = re => { const i = xt.headers.findIndex(h => re.test(h)); return i >= 0 ? xt.cells[i] : null; };
     const sl = at(/Linear slope/i), r2 = at(/R²|R2/i);
-    if (sl) closeTo(sl, cs.fit.slope, name + ' linear slope');
-    if (r2 && cs.fit.r2 !== null) closeTo(r2, cs.fit.r2, name + ' linear R2');
+    closeTo(sl, cs.fit.slope, name + ' linear slope');
+    if (cs.fit.r2 !== null) closeTo(r2, cs.fit.r2, name + ' linear R2');
   }
   // Confidence ellipse: enable, then read the payload's data-unit points
   // and compare rotation-invariant quantities against R's eigen route.

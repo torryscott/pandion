@@ -138,7 +138,7 @@ await page.waitForTimeout(400);
     await page.waitForTimeout(100);
     const dataMode = await page.evaluate(() => ({
         workspace: window.PS_SHELL.workspace(),
-        grid: document.getElementById('ps-datacard').style.display,
+        grid: getComputedStyle(document.getElementById('ps-datacard')).display,
         parked: document.getElementById('ps-workcard').classList.contains(
             'ps-pane-parked'),
         active: document.querySelector(
@@ -1226,7 +1226,7 @@ await page.waitForTimeout(400);
             .replace(/\.pand$/i, '').replace(/[^\w.-]+/g, '_') + '.pand');
     ok(fname === expectName, 'file name from the project name (.pand)');
     const head = JSON.parse(fileText);
-    ok(head.kind === 'pandion-plots-project' && head.formatVersion === 2 &&
+    ok(head.kind === 'pandion-plots-project' && head.formatVersion === 3 &&
        !!head.savedAt && !!head.project, 'versioned self-identifying format');
     // A real Save click produces a download with that name. (Headless
     // Chromium EXPOSES showSaveFilePicker but cannot show its dialog -

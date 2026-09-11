@@ -2251,18 +2251,17 @@ graphbuilder2_html <- function(bars,
         payload$userGuidePath <- "docs/user-guide.html"
 
     .gb2_timings$t_payload_built <- as.numeric(Sys.time())
-    # digits = I(10): 10 SIGNIFICANT digits (I() = signif, not round).
-    # jsonlite's default round(x, 4) flattened any p below 5e-5 to a
-    # literal 0 and quantized the raw values arrays that feed every
-    # JS-side test. The client preview mirrors round their predictions
-    # the same way for echo hash parity (_gb2SigR in graphbuilder2.js).
+    # Preserve double precision across the R -> JavaScript boundary. These
+    # observations feed client-side statistics, so display rounding here
+    # changes variances, ranks and paired differences. Seventeen significant
+    # digits round-trip a double; digits = NA in jsonlite still uses 15.
     payload_json <- jsonlite::toJSON(
         payload,
         dataframe = "rows",
         na = "null",
         null = "null",
         auto_unbox = TRUE,
-        digits = I(10)
+        digits = I(17)
     )
     .gb2_timings$t_json_done <- as.numeric(Sys.time())
 

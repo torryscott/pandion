@@ -104,14 +104,20 @@ const label = process.argv[2] || 'core';
 const stamp = new Date().toISOString().slice(0, 10);
 const base = 'v' + appVersion + '-' + stamp + '-' + label;
 const pandPath = path.join(CORPUS, base + '.pand');
-if (fs.existsSync(pandPath)) {
-  console.log('corpus entry already exists, refusing to overwrite: ' + base);
-  process.exit(1);
+const expectPath = path.join(CORPUS, base + '.expect.json');
+if (fs.existsSync(pandPath) || fs.existsSync(expectPath)) {
+  if (!fs.existsSync(pandPath) || !fs.existsSync(expectPath)) {
+    throw new Error('incomplete frozen corpus entry: ' + base);
+  }
+  // The compatibility gate validates these original bytes next. An existing
+  // complete entry is the only permitted no-op; other failures must propagate.
+  console.log('corpus entry already exists, preserving original bytes: ' + base);
+  process.exit(0);
 }
-fs.writeFileSync(pandPath, built.text);
-fs.writeFileSync(path.join(CORPUS, base + '.expect.json'), JSON.stringify({
+fs.writeFileSync(pandPath, built.text, { flag: 'wx' });
+fs.writeFileSync(expectPath, JSON.stringify({
   frozenAt: new Date().toISOString(), app: appVersion, gitSha: sha,
   expect: built.expect
-}, null, 2));
+}, null, 2), { flag: 'wx' });
 console.log('froze ' + base + ' (' + built.text.length + ' bytes, ' +
   built.expect.chartCount + ' charts, sha ' + sha + ')');

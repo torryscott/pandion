@@ -19,6 +19,29 @@ ok(Buffer.compare(dist, portable) === 0,
 
 const sourceHtml = text('standalone/index.html');
 const appHtml = text('website/app/index.html');
+ok(sourceHtml.includes('<link rel="manifest" href="manifest.json">') &&
+   appHtml.includes('<link rel="manifest" href="manifest.json">'),
+   'source and hosted shells link their local application manifest');
+ok(Buffer.compare(read('standalone/manifest.json'), read('website/app/manifest.json')) === 0,
+   'hosted application manifest matches its source bytes');
+const manifest = JSON.parse(text('standalone/manifest.json'));
+ok(manifest.name === 'Pandion Plots' && manifest.start_url === '.' &&
+   manifest.scope === '.' && manifest.display === 'standalone',
+   'application manifest names the app and opens within its own directory');
+ok(Array.isArray(manifest.icons) && manifest.icons.length === 2,
+   'application manifest declares both required icon sizes');
+for (const size of [192, 512]) {
+    const src = `icons/pandion-${size}.png`;
+    ok(manifest.icons.some(icon => icon.src === src && icon.type === 'image/png' &&
+       icon.sizes === `${size}x${size}`), `manifest declares its ${size}px PNG icon`);
+    const png = read('standalone/' + src);
+    ok(Buffer.compare(png, read('website/app/' + src)) === 0,
+       `hosted ${size}px icon matches its source bytes`);
+    ok(png.length >= 24 && png.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex')) &&
+       png.toString('ascii', 12, 16) === 'IHDR' &&
+       png.readUInt32BE(16) === size && png.readUInt32BE(20) === size,
+       `${size}px icon dimensions match the manifest declaration`);
+}
 const srcs = [...sourceHtml.matchAll(/<script src="([^"]+\.js)"><\/script>/g)]
     .map(m => m[1]);
 ok(srcs.length > 0, `standalone declares ${srcs.length} script assets`);

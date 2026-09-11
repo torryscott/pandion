@@ -3,13 +3,15 @@
 // Each analysis must expose a focusable named chart, point readers to the
 // Statistics panel, and provide substantive values in semantic tables/text.
 // Faceted, uncertainty, excluded-data, and missing-role states are included.
+import { createAxeReport } from '../../scripts/verify/axe-report.mjs';
+import { checkStatisticsNames } from '../../scripts/verify/statistics-names.mjs';
 import { createRequire } from 'node:module';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 function resolveFrom(name) {
-    for (const base of [process.cwd(), new URL('.', import.meta.url).pathname,
-                        '/private/tmp', '/tmp']) {
+    for (const base of [process.env.GB2_NODE_BASE, process.cwd(), new URL('.', import.meta.url).pathname,
+                        '/private/tmp', '/tmp'].filter(Boolean)) {
         try { return createRequire(path.join(base, 'x.js')).resolve(name); }
         catch { /* try the next shared dependency location */ }
     }
@@ -37,25 +39,10 @@ function ok(condition, message, detail = '') {
         throw new Error(message + (detail ? ': ' + detail : ''));
     console.log('  ok  ' + message);
 }
+const evidence = createAxeReport({ suite: 'charts', artifact: pageUrl });
+const statisticsNames = [];
 async function audit(label) {
-    const violations = await page.evaluate(async () => {
-        const result = await window.axe.run('#psroot', {
-            runOnly: {
-                type: 'tag',
-                values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa',
-                         'wcag22aa'],
-            },
-            resultTypes: ['violations'],
-        });
-        return result.violations
-            .filter(item => item.id === 'target-size' ||
-                item.impact === 'serious' || item.impact === 'critical')
-            .map(item => item.id + ' x' + item.nodes.length + ' (' +
-                item.nodes.slice(0, 3).map(node => node.target.join(' ')).
-                    join(', ') + ')');
-    });
-    ok(violations.length === 0, label + ' is axe-clean',
-        violations.join(' | '));
+    await evidence.scan(page, label, { context: '#psroot' });
 }
 
 await page.goto(pageUrl);
@@ -229,6 +216,9 @@ for (const family of families) {
             family.label + ' alternatives define the uncertainty display',
             (chart.name + ' ' + stats.text).slice(0, 1200));
     await audit(family.label + ' Statistics panel');
+    statisticsNames.push(...await checkStatisticsNames(page, family.label));
+    writeFileSync(path.join(path.dirname(evidence.reportPath), 'chart-statistics-names.json'),
+        JSON.stringify(statisticsNames, null, 2) + '\n');
 }
 
 console.log('case 2: excluded observations and uncertainty are disclosed');
@@ -282,6 +272,7 @@ for (const family of families) {
 }
 
 await browser.close();
-if (pageErrors.length)
-    throw new Error('page errors: ' + pageErrors.join(' | '));
+const summary = evidence.finish(pageErrors);
+if (summary.failed)
+    throw new Error('Chart accessibility violations or page errors; see evidence report.');
 console.log('CHART ACCESSIBILITY CHECK: PASS');

@@ -55,10 +55,17 @@ ok(await page.evaluate(() =>
        getComputedStyle(document.getElementById('ps-shortcuts-dialog'))
            .display === 'none'),
    'and Escape closes it');
-// Bare ? was the obvious second key, and the ENGINE already binds it at
-// capture phase to open the chart's own help panel. Taking it would have been
-// a steal, and the engine's panel is the better answer when a chart is what
-// you are looking at - so this asserts the key still does the engine's job.
+// A11Y-03 scopes the engine's character shortcut to its focused component.
+// The shell's Open button must leave both Help surfaces closed.
+await page.locator('#ps-load').focus();
+await page.keyboard.press('Shift+Slash');
+await page.waitForTimeout(300);
+ok(await page.evaluate(() =>
+       getComputedStyle(document.getElementById('ps-shortcuts-dialog'))
+           .display === 'none' &&
+       document.querySelectorAll('.graphbuilder2-host [data-helpnav]').length === 0),
+   'bare ? on a shell control does not activate either Help surface');
+await page.locator('.graphbuilder2-host svg[data-role="gb2-chart-svg"]').focus();
 await page.keyboard.press('Shift+Slash');
 await page.waitForTimeout(700);
 const qKey = await page.evaluate(() => ({
@@ -68,7 +75,7 @@ const qKey = await page.evaluate(() => ({
         '.graphbuilder2-host [data-helpnav]')).length
 }));
 ok(!qKey.sheet && qKey.engine > 0,
-   `bare ? still opens the chart's own help panel rather than being stolen ` +
+   `bare ? with chart focus opens the chart's own help panel ` +
    `(${qKey.engine} tabs)`);
 await page.keyboard.press('Escape');
 await page.waitForTimeout(300);
@@ -120,7 +127,7 @@ ok(/in Data/.test(sheet.text) && /Layouts/.test(sheet.text) &&
 console.log('case 3: the chart keys are pointed at, not copied');
 ok(/Editing a chart/.test(sheet.heads.join('|')),
    `there is a section for them (${JSON.stringify(sheet.heads)})`);
-ok(sheet.rows.some(r => /chart's own help panel/i.test(r[0]) && r[1] === '?'),
+ok(sheet.rows.some(r => /chart's own help panel.*while the chart is focused/i.test(r[0]) && r[1] === '?'),
    `and it names the engine's key, which is what the item was about: the ` +
    `chart keys lived ONLY in the engine's own table`);
 const hasBtn = await page.evaluate(() => {
