@@ -123,7 +123,10 @@ const notice = await page.evaluate(() => {
     // the previous version number before the version is tagged.
     listedAll: S.numericalNoticeFor('3.1.1', '3.2.0', ids),
     listedNone: S.numericalNoticeFor('3.1.1', '3.2.0', []),
-    listedSome: S.numericalNoticeFor('3.1.1', '3.2.0', ids.slice(1)),
+    // Lists every id EXCEPT the ROUND change, whatever position the table
+    // keeps it in; the notice must then name ROUND and nothing else.
+    listedSome: S.numericalNoticeFor('3.1.1', '3.2.0',
+      ids.filter(id => id !== 'round-half-even')),
     listOutranksVersion: S.numericalNoticeFor('3.2.5', '3.2.0', [])
   };
 });
@@ -136,8 +139,11 @@ ok(notice.notLiveYet === null,
   'a change not yet in this build never fires (' + notice.notLiveYet + ')');
 ok(!!notice.unversionedOld,
   'a pre-stamp file (no version recorded) counts as old');
-ok(notice.ids.length >= 3 && notice.ids[0] === 'round-half-even',
-  'the build lists its ledger ids (' + notice.ids.join(', ') + ')');
+ok(notice.ids.length >= 3 &&
+   ['round-half-even', 'mwu-exact-large-n', 'spearman-as89']
+     .every(id => notice.ids.includes(id)),
+  'the build lists its ledger ids, the three August ones included (' +
+  notice.ids.join(', ') + ')');
 ok(notice.listedAll === null,
   'a 3.1.1 file that lists every id gets NO notice under 3.2.0 ' +
   '(the web app saved it after the fixes were live)');
