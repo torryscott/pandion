@@ -35,8 +35,14 @@ for f in standalone/index.html inst/widget/graphbuilder2.min.js; do
     [ -f "$f" ] || { echo "$f missing" >&2; exit 1; }
 done
 
+# The build stamp (see scripts/build-stamp.sh and standalone/build-dist.sh)
+# goes into the shell, which is served uncached, so the hashed scripts
+# keep their names across artifact-only rebuilds.
+PS_BUILD_STAMP="$(bash scripts/build-stamp.sh)"
+export PS_BUILD_STAMP
+
 python3 - <<'EOF'
-import hashlib, pathlib, re
+import hashlib, os, pathlib, re
 
 root = pathlib.Path(".")
 src_dir = root / "standalone"
@@ -45,6 +51,11 @@ lib = app / "lib"
 lib.mkdir(parents=True, exist_ok=True)
 
 html = (src_dir / "index.html").read_text(encoding="utf-8")
+
+META = '<meta name="pandion-build" content="">'
+assert html.count(META) == 1, "expected exactly one empty pandion-build meta"
+html = html.replace(META, '<meta name="pandion-build" content="%s">'
+                    % os.environ["PS_BUILD_STAMP"])
 
 # The eleven <script src> tags, in load order. Everything else the app
 # needs is inline, so this list plus the manifest and icons IS the app.
@@ -349,6 +360,13 @@ grep -rq "APP_VERSION = \"$VERSION\"" website/app/lib || {
     echo "WARN: the web app does not declare APP_VERSION = $VERSION" >&2; DRIFT=1; }
 grep -q "APP_VERSION = \"$VERSION\"" website/pandion-plots.html || {
     echo "WARN: the portable download does not declare APP_VERSION = $VERSION" >&2; DRIFT=1; }
+# Both shells must carry a well-formed build stamp: it is what makes an
+# exported figure or a saved project traceable to the code that made it
+# (the version alone is not, since this site deploys ahead of tags).
+for shell in website/app/index.html website/pandion-plots.html; do
+    grep -Eq '<meta name="pandion-build" content="[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z [0-9a-f]{7,}\*?">' "$shell" || {
+        echo "WARN: $shell carries no well-formed build stamp" >&2; DRIFT=1; }
+done
 # The downloads card states the portable file's size. It grew from 3.9 MB to
 # 4.5 MB without anyone noticing, so check it here rather than trusting a
 # number typed once. Decimal MB, which is what a browser reports on download.

@@ -87,6 +87,9 @@ echo "version: $version"
 echo "branch:  $branch"
 echo "commit:  $(git rev-parse --short HEAD)"
 node scripts/release-version.mjs check "$version"
+# The ledger must own every numerical change this version ships and must
+# not still call the version pending (release-version.mjs set flips it).
+node standalone/verify/numerical-ledger-check.mjs
 
 echo "== verify committed minified shared engine"
 bash scripts/minify-widget.sh --check

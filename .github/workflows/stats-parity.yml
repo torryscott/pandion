@@ -31,6 +31,9 @@ on:
       - 'standalone/verify/anova-*'
       - 'scripts/verify/stats-probe.*'
       - '.github/workflows/stats-parity.yml'
+      - 'standalone/verify/numerical-ledger-check.mjs'
+      - 'NUMERICAL-CHANGES.md'
+      - 'DESCRIPTION'
       - 'R/**'
   workflow_dispatch:
 permissions:
@@ -76,6 +79,12 @@ jobs:
         run: Rscript standalone/verify/stats-canary.R
       - name: Formatting seam (pure unit)
         run: node standalone/verify/stats-format-unit.mjs
+      # The ledger contract: NUMERICAL-CHANGES.md, the NUMERICAL_CHANGES
+      # table the app carries, and the shipped version must agree, so a
+      # numerical change can never land without the record that lets a
+      # saved file learn about it (pure text; needs neither R nor a browser).
+      - name: Numerical ledger contract
+        run: node standalone/verify/numerical-ledger-check.mjs
       - name: Stats parity fuzzer (seeded)
         run: |
           Rscript standalone/verify/stats-fuzz.R /tmp/gb2-stats-fuzz.json

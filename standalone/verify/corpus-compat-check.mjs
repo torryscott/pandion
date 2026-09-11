@@ -107,11 +107,27 @@ for (const f of entries) {
 console.log('reopen notice (pure logic + the real toast path)');
 const notice = await page.evaluate(() => {
   const S = window.PS_SHELL;
+  // The fallback list keeps this a CONTROL against a shell that predates
+  // the id list (it ignores the third argument and fails listedAll).
+  const ids = S.numericalChangeIds ? S.numericalChangeIds()
+    : ['round-half-even', 'mwu-exact-large-n', 'spearman-as89'];
   return {
+    ids,
+    // pre-id files (no numericalChanges list): judged by version
     oldFileFutureApp: S.numericalNoticeFor('3.1.1', '3.2.0'),
     knownFile: S.numericalNoticeFor('3.2.0', '3.2.5'),
     notLiveYet: S.numericalNoticeFor('3.1.0', '3.1.1'),
-    unversionedOld: S.numericalNoticeFor(null, '3.2.0')
+    unversionedOld: S.numericalNoticeFor(null, '3.2.0'),
+    // id-carrying files: judged by exactly what they list. This is the
+    // fix for the false notice: the web app runs a fix for weeks under
+    // the previous version number before the version is tagged.
+    listedAll: S.numericalNoticeFor('3.1.1', '3.2.0', ids),
+    listedNone: S.numericalNoticeFor('3.1.1', '3.2.0', []),
+    // Lists every id EXCEPT the ROUND change, whatever position the table
+    // keeps it in; the notice must then name ROUND and nothing else.
+    listedSome: S.numericalNoticeFor('3.1.1', '3.2.0',
+      ids.filter(id => id !== 'round-half-even')),
+    listOutranksVersion: S.numericalNoticeFor('3.2.5', '3.2.0', [])
   };
 });
 ok(!!notice.oldFileFutureApp && /ROUND/.test(notice.oldFileFutureApp) &&
@@ -123,6 +139,23 @@ ok(notice.notLiveYet === null,
   'a change not yet in this build never fires (' + notice.notLiveYet + ')');
 ok(!!notice.unversionedOld,
   'a pre-stamp file (no version recorded) counts as old');
+ok(notice.ids.length >= 3 &&
+   ['round-half-even', 'mwu-exact-large-n', 'spearman-as89']
+     .every(id => notice.ids.includes(id)),
+  'the build lists its ledger ids, the three August ones included (' +
+  notice.ids.join(', ') + ')');
+ok(notice.listedAll === null,
+  'a 3.1.1 file that lists every id gets NO notice under 3.2.0 ' +
+  '(the web app saved it after the fixes were live)');
+ok(!!notice.listedNone && /ROUND/.test(notice.listedNone) &&
+   /Mann-Whitney/.test(notice.listedNone) && /Spearman/.test(notice.listedNone),
+  'a file that lists no ids is told about every change');
+ok(!!notice.listedSome && /ROUND/.test(notice.listedSome) &&
+   !/Mann-Whitney/.test(notice.listedSome) && !/Spearman/.test(notice.listedSome),
+  'a file that lists some ids is told only about the ones it lacks');
+ok(!!notice.listOutranksVersion,
+  'the id list outranks the version: a newer-versioned file listing ' +
+  'nothing still gets the notice');
 
 // ---- forward refusal: a newer format is refused, never misread ----------
 const fwd = await page.evaluate(() => {

@@ -98,6 +98,17 @@ function setVersion() {
         /("version":\s*")[^"]+(")/,
         `$1${version}$2`, 1, 'desktop app version');
 
+    // The numerical-changes ledger: the section for this version stops
+    // being "unreleased" the moment the version ships (the ledger check
+    // refuses a release whose ledger still calls it pending, and refuses
+    // an unreleased marker on a version at or below the shipped one).
+    const ledger = read('NUMERICAL-CHANGES.md');
+    const pending = new RegExp(
+        '^(## v' + version.replace(/\./g, '\\.') + ' \\()unreleased;\\s*', 'm');
+    if (pending.test(ledger))
+        write('NUMERICAL-CHANGES.md',
+              ledger.replace(pending, `$1released ${releaseDate}; `));
+
     let shell = read('standalone/js/ps-shell.js');
     const appMatches = [...shell.matchAll(/var APP_VERSION = "[^"]+";/g)];
     if (appMatches.length !== 1)
