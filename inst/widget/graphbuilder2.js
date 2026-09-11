@@ -85409,7 +85409,12 @@
                 html += '<span style="display:inline-flex;align-items:center;gap:6px;">';
             }
             var decCur = String((typeof data.corrDecimals === "number") ? Math.round(data.corrDecimals) : 2);
-            html += '<span style="color:#666;">Decimals</span>'
+            // "(r)" in the label because the cells can print p beside r and
+            // p never follows this control: it prints at three decimals with
+            // "< .001" below that, the APA and jamovi convention, on every
+            // surface (matrix, Sigma tables, Copy APA). Torry read the bare
+            // word as a control that did nothing for p (Sep 2026).
+            html += '<span style="color:#666;" title="How many decimals the correlation r prints, in the cells and the Statistics panel. p values always print to three decimals (< .001 below that), the APA convention, so they do not follow this control.">Decimals (r)</span>'
                 + _distSegHtml("cr-dec", "1", "1", decCur)
                 + _distSegHtml("cr-dec", "2", "2", decCur)
                 + _distSegHtml("cr-dec", "3", "3", decCur)
