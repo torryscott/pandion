@@ -426,3 +426,4 @@ else
 fi
 
 node website/verify-accessibility.mjs
+node website/verify-anchors.mjs
