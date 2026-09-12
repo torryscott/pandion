@@ -17,6 +17,7 @@
 
 # Auto-generated chartSpec spec table (speed pass Phase 2). See CLAUDE.md convention 22.
 .distplotbuilderSpecTable <- list(
+    list(arg = "stats_alpha", opt = "statsAlpha", bool = FALSE, default = NULL),
     # The dot type rides the line machinery, so its panel commits the line
     # family's keys; without these rows the client allowlist dropped every
     # such edit on the echo (Torry, Sep 11 2026: the group gap snapped back).

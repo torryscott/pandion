@@ -4,6 +4,7 @@
 # renders with dual continuous axes.
 
 .xyplotbuilderSpecTable <- list(
+    list(arg = "stats_alpha", opt = "statsAlpha", bool = FALSE, default = NULL),
     list(arg = "xy_point_size", opt = "xyPointSize", bool = FALSE, default = 5),
     list(arg = "xy_point_shape", opt = "xyPointShape", bool = FALSE, default = "circle"),
     list(arg = "xy_point_opacity", opt = "xyPointOpacity", bool = FALSE, default = 0.7),

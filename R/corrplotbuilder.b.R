@@ -15,6 +15,7 @@
 # list(arg=<snake graphbuilder2_html arg>, opt=<camel former option>,
 #      bool=<TRUE if the call wrapped isTRUE()>, default=<former a.yaml default>).
 .corrplotbuilderSpecTable <- list(
+    list(arg = "stats_alpha", opt = "statsAlpha", bool = FALSE, default = NULL),
     list(arg = "chart_title", opt = "chartTitle", bool = FALSE, default = ""),
     list(arg = "chart_note", opt = "chartNote", bool = FALSE, default = ""),
     list(arg = "chart_alt_text", opt = "chartAltText", bool = FALSE, default = ""),

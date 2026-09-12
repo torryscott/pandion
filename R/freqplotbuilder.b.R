@@ -28,6 +28,7 @@
 
 # Auto-generated chartSpec spec table (speed pass Phase 2). See CLAUDE.md convention 22.
 .freqplotbuilderSpecTable <- list(
+    list(arg = "stats_alpha", opt = "statsAlpha", bool = FALSE, default = NULL),
     list(arg = "facet_strip_position", opt = "facetStripPosition", bool = FALSE, default = "top"),
     list(arg = "facet_strip_labels", opt = "facetStripLabels", bool = FALSE, default = list()),
     list(arg = "facet_strip_underline_color", opt = "facetStripUnderlineColor", bool = FALSE, default = "#888888"),
