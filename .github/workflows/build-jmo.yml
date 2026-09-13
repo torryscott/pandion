@@ -342,7 +342,14 @@ jobs:
       # Checkout FIRST: actions/checkout cleans untracked files out of the
       # workspace, so artifacts downloaded before it are silently deleted
       # and the release would publish without them.
+      # FULL history: the rebuild below must reproduce the committed site
+      # artifacts byte for byte, and their build stamp is the last commit
+      # that touched the shipped sources (scripts/build-stamp.sh). A shallow
+      # checkout makes that commit look like HEAD, so a tag on a commit that
+      # touched only CI or docs failed the parity diff (v3.1.2, 2026-09-13).
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Download Jamovi release artifacts
         uses: actions/download-artifact@v4

@@ -18,6 +18,12 @@ set -e
 cd "$(dirname "$0")/.."
 SRC=(standalone/index.html standalone/js standalone/templates
      standalone/vendor inst/widget/graphbuilder2.min.js)
+# The stamp is the last commit that touched these paths, which a shallow
+# clone cannot know (it reports HEAD instead): refuse rather than mis-stamp.
+if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+    echo "build-stamp: shallow clone; fetch full history (fetch-depth: 0)" >&2
+    exit 1
+fi
 stamp="$(TZ=UTC git log -1 --date=format-local:%Y-%m-%dT%H:%MZ \
              --format='%cd %h' -- "${SRC[@]}")"
 [ -n "$stamp" ] || {
