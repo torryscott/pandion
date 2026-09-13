@@ -10,7 +10,10 @@ import { spawnSync } from 'node:child_process';
 // keeps a leading slash before the drive letter (/D:/a/...), which
 // path.resolve reads as drive-relative and turns into D:\D:\a\...
 const root = path.resolve(fileURLToPath(new URL('.', import.meta.url)), '..', '..');
-const read = rel => fs.readFileSync(path.join(root, rel), 'utf8');
+// Windows checkouts arrive with CRLF line endings; every pattern below is
+// written against LF, so normalise on read (the Windows module build failed
+// its own contract on 2026-09-13 because the desktop job could not be found).
+const read = rel => fs.readFileSync(path.join(root, rel), 'utf8').replace(/\r\n/g, '\n');
 function ok(cond, message, result) {
     if (!cond) {
         // Say WHY. These run on runners we cannot attach to, and an
