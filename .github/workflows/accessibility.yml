@@ -26,6 +26,9 @@ jobs:
       GB2_NODE_BASE: /private/tmp
     steps:
       - uses: actions/checkout@v4
+        with:
+          # build-stamp.sh needs the real history (see the release job)
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -43,7 +46,7 @@ jobs:
           npm install playwright@1.62.1 axe-core@4.11.0
           npx playwright install --with-deps chromium
           pip install pypdf==6.10.0
-          Rscript -e 'install.packages(c("jmvcore", "R6", "jsonlite"))'
+          Rscript -e 'install.packages(c("jmvcore", "R6", "jsonlite", "htmltools"))'
       - name: Build the artifacts under review
         run: |
           git rev-parse HEAD

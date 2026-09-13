@@ -27,6 +27,23 @@ Release sign-off still requires the remaining acceptance matrix and final
 release artifacts. This correction does not certify every statistical method,
 installed host, browser or possible data magnitude.
 
+## Games–Howell reference corrected (2026-09-13)
+
+The 3.1.2 release preparation stopped on one fuzz case (seed 20260913,
+rand11 G2|G3: q = 24.29 at Welch df = 3.17), where the application printed
+"< .001" and R's `ptukey` gave .00102. Two independent references agree with
+the application and not with R: SciPy's `studentized_range.sf` and R's own
+adaptive `integrate()` over the chi mixture of the exact df = Inf range CDF
+both give .000969 (to ten figures), and the application's converged integral
+gives the same. R's finite-df `ptukey` misreports extreme tails at small df
+(further out it returns 0 or NaN where the true tail is 2e-5 or 3e-2). The
+fuzzer's Games–Howell reference is now that integrated tail, which matches
+`ptukey` wherever `ptukey` is accurate. No application numerics changed. A
+separate finding from the same investigation: the application's fixed
+80-node Simpson integral is itself 0.7% low at that input and worse at more
+extreme q with tiny df (below the display floor in every checked case); it is
+filed in the backlog for an adaptive grid and is not part of this release.
+
 ## Validation process changes
 
 - The SciPy checker requires the declared random-fixture count, replay seed,
@@ -99,7 +116,7 @@ that implement a formula by hand are not a third independent library.
 | One-way ANOVA | R `aov`, SciPy `f_oneway`, rendered omnibus table; `stats-tail` adds direct F survival and very small test probabilities | Additional imbalance/extreme-scale and undefined-input cases |
 | Two-/three-factor Type III ANOVA and interactions | `stats-probe` plus `anova-run`: `car::Anova` and 80-digit Wald references; imbalance, missing/empty cells, tiny errors, unit/offset and factor-order variants; actual Sigma tables in five delivery paths | Independent methodology review; larger designs and broader ill-conditioning/estimability cases |
 | Repeated-measures and mixed ANOVA | `stats-probe` plus `anova-run`: independent `car`/80-digit references; 2/3/4 occasions, listwise missingness, unbalanced groups, GG epsilon/dfs/p and partial eta squared; exact observations through real R crossed-factor output | Independent review of design/sphericity restrictions; multiple within factors, larger designs and installed-host acceptance |
-| Holm, Bonferroni, BH, Games–Howell | `stats-fuzz`: R `p.adjust`, `ptukey`; missing-result negative control | More partial/selected comparison families and tail regimes; verify family disclosure |
+| Holm, Bonferroni, BH, Games–Howell | `stats-fuzz`: R `p.adjust`; for Games–Howell the studentized-range tail integrated from R's exact df = Inf `ptukey` (see the 2026-09-13 note); missing-result negative control | More partial/selected comparison families and tail regimes; verify family disclosure |
 | Tukey and Dunnett | `stats-probe`: R `ptukey`, `mvtnorm::pmvt`; invalid-family disclosure | Broaden unequal n, shared-control and extreme-tail cases |
 | Cohen d, rank r, eta squared, partial eta squared, omega squared | `stats-probe`: specified formulas and convention pins | Inventory every selectable effect/interval and verify each independently |
 | Chi-square, counts, percentages, standardized residuals | `m1-parity`, `stats-probe`: R `chisq.test`, independence/goodness-of-fit fixtures | Sparse/zero margins, denominator changes, missing-data cases and caveat review |

@@ -1,0 +1,94 @@
+{
+  "frozenAt": "2026-09-13T16:29:56.975Z",
+  "app": "3.1.2",
+  "gitSha": "320c079",
+  "build": "",
+  "numericalChanges": [
+    "anova-residual-stability",
+    "rm-crossed-numeric-precision",
+    "facet-fit-populations",
+    "scatter-stats-unavailable",
+    "fit-extension-evaluates-model",
+    "literal-group-names",
+    "axis-tick-loop-guard",
+    "loess-direct-surface",
+    "direct-tail-probabilities",
+    "loess-band-residual-df",
+    "polynomial-scaled-qr",
+    "constant-sample-zero-variance",
+    "full-precision",
+    "computed-columns-full-precision",
+    "round-extreme-decimals",
+    "round-half-even",
+    "mwu-exact-large-n",
+    "spearman-as89"
+  ],
+  "expect": {
+    "types": {
+      "group": "nominal",
+      "a": "continuous",
+      "b": "continuous",
+      "q1": "nominal",
+      "q2": "nominal",
+      "q3": "nominal",
+      "zsc": "continuous",
+      "rnd": "continuous",
+      "m": "continuous"
+    },
+    "rnd": [
+      "2.5",
+      "-1.5",
+      "",
+      "0.3",
+      "2.7",
+      "6.5"
+    ],
+    "zsc": [
+      "-0.21592729815928485",
+      "-1.5917472510326045",
+      "",
+      "-0.955430522828694",
+      "-0.1557351752210772",
+      "1.1598926547140347"
+    ],
+    "m": [
+      "2.75",
+      "-0.75",
+      "-7",
+      "6.175",
+      "3.8375",
+      "7.25"
+    ],
+    "excluded_a2": true,
+    "chartCount": 3,
+    "charts": [
+      {
+        "module": "plotbuilder",
+        "graphType": "bar",
+        "probe": {
+          "barCornerRadius": 30,
+          "xyShowEllipse": false,
+          "chartTitle": "Frozen bar"
+        }
+      },
+      {
+        "module": "xyplotbuilder",
+        "graphType": "scatter",
+        "probe": {
+          "barCornerRadius": 0,
+          "xyShowEllipse": true,
+          "chartTitle": ""
+        }
+      },
+      {
+        "module": "likertplotbuilder",
+        "graphType": "likertdiverging",
+        "probe": {
+          "barCornerRadius": 0,
+          "xyShowEllipse": false,
+          "chartTitle": ""
+        }
+      }
+    ]
+  }
+}

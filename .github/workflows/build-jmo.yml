@@ -65,8 +65,35 @@ jobs:
       - name: Install jamovi (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install --cask jamovi
-          test -d /Applications/jamovi.app || { echo "ERROR: jamovi.app missing after cask install"; exit 1; }
+          # Build against the jamovi LINE this module targets, like the
+          # Windows job below: the Homebrew cask moved to the 28 line
+          # (28.2.0.0 on 2026-09-13) and jmc then refuses the build with
+          # "a newer version of the jamovi-compiler is required".
+          # archives.jamovi.org keeps every version as
+          # jamovi-<ver>-macos-<arch>.dmg; it is bot-blocked without a
+          # browser user agent, so one is sent.
+          line="2.7"
+          ver="2.7.34.0"
+          api="$(curl -fsSL --max-time 30 https://formulae.brew.sh/api/cask/jamovi.json | python3 -c 'import json,sys; print(json.load(sys.stdin).get("version",""))' 2>/dev/null || true)"
+          case "$api" in "$line".*) ver="$api" ;; esac
+          arch="$(uname -m)"; [ "$arch" = "arm64" ] || arch="x64"
+          ua='Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36'
+          get() {
+            curl -fsSL --max-time 900 -A "$ua" -o jamovi.dmg "https://archives.jamovi.org/jamovi-$1-macos-$arch.dmg" \
+              && [ "$(stat -f %z jamovi.dmg)" -gt 5000000 ]
+          }
+          if ! get "$ver"; then
+            ok=0
+            for p in $(seq 45 -1 20); do
+              if get "$line.$p.0"; then ver="$line.$p.0"; ok=1; break; fi
+            done
+            [ "$ok" = 1 ] || { echo "ERROR: no hosted jamovi macOS installer on archives.jamovi.org"; exit 1; }
+          fi
+          echo "Using jamovi $ver ($(stat -f %z jamovi.dmg) bytes, $arch)"
+          mnt="$(hdiutil attach -nobrowse -readonly jamovi.dmg | awk -F'\t' '/\/Volumes\//{print $NF}' | tail -1)"
+          cp -R "$mnt/jamovi.app" /Applications/jamovi.app
+          hdiutil detach "$mnt" -quiet || true
+          test -d /Applications/jamovi.app || { echo "ERROR: jamovi.app missing after install"; exit 1; }
           echo "JAMOVI_HOME=/Applications/jamovi.app" >> "$GITHUB_ENV"
           echo "=== jamovi bundled R ==="
           "/Applications/jamovi.app/Contents/Frameworks/R.framework/Versions/Current/Resources/bin/R" --version | head -1
@@ -214,6 +241,9 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          # build-stamp.sh needs the real history (see the release job)
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -264,6 +294,13 @@ jobs:
       # Apple's notary service and staples the ticket (adds ~5-15 min).
       # Unsigned/unnotarized mac apps are blocked by Gatekeeper and cannot
       # self-update, so this job is only as useful as those secrets.
+      # The signed build lists mac-sampler/out/pandion-color-sampler among
+      # its binaries (the OS-wide color dropper helper); it is a Swift
+      # program compiled at build time and gitignored, so compile it here
+      # or codesign fails on the missing file.
+      - name: Build the macOS color sampler helper
+        if: runner.os == 'macOS'
+        run: cd standalone/electron && bash build-mac-sampler.sh
       - name: Build installer (macOS, signed + notarized)
         if: runner.os == 'macOS'
         shell: bash
@@ -308,7 +345,14 @@ jobs:
       # Checkout FIRST: actions/checkout cleans untracked files out of the
       # workspace, so artifacts downloaded before it are silently deleted
       # and the release would publish without them.
+      # FULL history: the rebuild below must reproduce the committed site
+      # artifacts byte for byte, and their build stamp is the last commit
+      # that touched the shipped sources (scripts/build-stamp.sh). A shallow
+      # checkout makes that commit look like HEAD, so a tag on a commit that
+      # touched only CI or docs failed the parity diff (v3.1.2, 2026-09-13).
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Download Jamovi release artifacts
         uses: actions/download-artifact@v4

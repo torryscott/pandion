@@ -1,0 +1,293 @@
+{
+ "kind": "pandion-plots-project",
+ "formatVersion": 3,
+ "savedAt": "2026-09-13T16:29:56.901Z",
+ "app": "pandion-plots-standalone",
+ "appVersion": "3.1.2",
+ "appBuild": "",
+ "numericalChanges": [
+  "anova-residual-stability",
+  "rm-crossed-numeric-precision",
+  "facet-fit-populations",
+  "scatter-stats-unavailable",
+  "fit-extension-evaluates-model",
+  "literal-group-names",
+  "axis-tick-loop-guard",
+  "loess-direct-surface",
+  "direct-tail-probabilities",
+  "loess-band-residual-df",
+  "polynomial-scaled-qr",
+  "constant-sample-zero-variance",
+  "full-precision",
+  "computed-columns-full-precision",
+  "round-extreme-decimals",
+  "round-half-even",
+  "mwu-exact-large-n",
+  "spearman-as89"
+ ],
+ "libraries": {
+  "palettes": {},
+  "styles": {}
+ },
+ "project": {
+  "version": 5,
+  "savedAt": "2026-09-13T16:29:56.901Z",
+  "id": "pmu014uu29shfph",
+  "name": "Dose response study",
+  "charts": [
+   {
+    "id": "c1",
+    "name": "Chart 1",
+    "module": "plotbuilder",
+    "roles": {
+     "plotbuilder": {
+      "xvar": "group",
+      "yvar": "a"
+     },
+     "distplotbuilder": {
+      "var": null
+     },
+     "xyplotbuilder": {
+      "xvar": null,
+      "yvar": null
+     },
+     "freqplotbuilder": {
+      "var": null
+     },
+     "corrplotbuilder": {
+      "vars": []
+     }
+    },
+    "options": {
+     "plotbuilder": {
+      "barCornerRadius": 30,
+      "chartTitle": "Frozen bar"
+     }
+    },
+    "styleStamp": false
+   },
+   {
+    "id": "c2",
+    "name": "Chart 2",
+    "module": "xyplotbuilder",
+    "roles": {
+     "plotbuilder": {},
+     "xyplotbuilder": {
+      "xvar": "a",
+      "yvar": "b"
+     }
+    },
+    "options": {
+     "xyplotbuilder": {
+      "xyShowEllipse": true
+     }
+    },
+    "styleStamp": false
+   },
+   {
+    "id": "c3",
+    "name": "Chart 3",
+    "module": "likertplotbuilder",
+    "roles": {
+     "plotbuilder": {},
+     "likertplotbuilder": {
+      "items": [
+       "q1",
+       "q2",
+       "q3"
+      ]
+     }
+    },
+    "options": {
+     "likertplotbuilder": {}
+    },
+    "styleStamp": false
+   }
+  ],
+  "pinboards": [
+   {
+    "id": "b1",
+    "name": "Section 1",
+    "pins": []
+   }
+  ],
+  "activeChart": "c3",
+  "ui": {
+   "dataOpen": false,
+   "workspace": "chart",
+   "lastChart": "c3",
+   "lastLayout": null,
+   "columnWidths": {},
+   "paneWidths": {},
+   "collapsedBoards": {}
+  },
+  "table": {
+   "name": "corpus",
+   "order": [
+    "group",
+    "a",
+    "b",
+    "q1",
+    "q2",
+    "q3",
+    "zsc",
+    "rnd",
+    "m"
+   ],
+   "raw": {
+    "group": [
+     "ctrl",
+     "ctrl",
+     "ctrl",
+     "ctrl",
+     "treat",
+     "treat",
+     "treat",
+     "treat",
+     "treat",
+     "treat"
+    ],
+    "a": [
+     "2.5",
+     "-1.5",
+     "4.25",
+     "0.35",
+     "2.675",
+     "6.5",
+     "3.125",
+     "5.75",
+     "1.5",
+     "7.25"
+    ],
+    "b": [
+     "3",
+     "0",
+     "-7",
+     "12",
+     "5",
+     "8",
+     "-2",
+     "9",
+     "4",
+     "6"
+    ],
+    "q1": [
+     "1",
+     "2",
+     "3",
+     "4",
+     "5",
+     "1",
+     "2",
+     "3",
+     "4",
+     "5"
+    ],
+    "q2": [
+     "2",
+     "3",
+     "1",
+     "5",
+     "4",
+     "2",
+     "3",
+     "4",
+     "5",
+     "1"
+    ],
+    "q3": [
+     "3",
+     "2",
+     "4",
+     "5",
+     "1",
+     "2",
+     "3",
+     "4",
+     "5",
+     "1"
+    ],
+    "zsc": [
+     "-0.21592729815928485",
+     "-1.5917472510326045",
+     "",
+     "-0.955430522828694",
+     "-0.1557351752210772",
+     "1.1598926547140347",
+     "-0.0009554305228286907",
+     "0.9019264135502872",
+     "-0.5598822863776147",
+     "1.4178588958777818"
+    ],
+    "rnd": [
+     "2.5",
+     "-1.5",
+     "",
+     "0.3",
+     "2.7",
+     "6.5",
+     "3.1",
+     "5.8",
+     "1.5",
+     "7.2"
+    ],
+    "m": [
+     "2.75",
+     "-0.75",
+     "-7",
+     "6.175",
+     "3.8375",
+     "7.25",
+     "0.5625",
+     "7.375",
+     "2.75",
+     "6.625"
+    ]
+   },
+   "types": {
+    "group": "nominal",
+    "a": "continuous",
+    "b": "continuous",
+    "q1": "nominal",
+    "q2": "nominal",
+    "q3": "nominal",
+    "zsc": "continuous",
+    "rnd": "continuous",
+    "m": "continuous"
+   },
+   "declaredLevels": null,
+   "edited": true,
+   "levelOrderDefaults": {},
+   "excluded": {
+    "a": {
+     "2": 1
+    }
+   },
+   "caseIds": [
+    "case-mu014vr6-p",
+    "case-mu014vr6-q",
+    "case-mu014vr6-r",
+    "case-mu014vr6-s",
+    "case-mu014vr6-t",
+    "case-mu014vr6-u",
+    "case-mu014vr6-v",
+    "case-mu014vr6-w",
+    "case-mu014vr6-x",
+    "case-mu014vr6-y"
+   ],
+   "excludedRows": {},
+   "filters": [],
+   "computed": {
+    "zsc": "(a - VMEAN(a)) / VSD(a)",
+    "rnd": "ROUND(a, 1)",
+    "m": "MEAN(a, b, ignore_missing = 1)"
+   },
+   "importedFormulas": {},
+   "importedFilters": [],
+   "missingTokens": [
+    "NA"
+   ],
+   "missingTokensByCol": {}
+  }
+ }
+}

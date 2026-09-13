@@ -201,9 +201,30 @@ dataset_refs <- function(groups) {
     }
     # Games-Howell: per-pair Welch t + Welch-Satterthwaite df under the
     # studentized range with k = the group count (the engine's
-    # _facetCells k). Independent route: R's own t.test + ptukey vs the
-    # engine's descriptive recompute + its JS ptukey port. Emitted only
-    # where the engine applies it (both n > 1, positive SE, k >= 2).
+    # _facetCells k). Independent route: R's own t.test + the studentized
+    # range tail vs the engine's descriptive recompute + its JS port.
+    # Emitted only where the engine applies it (both n > 1, positive SE,
+    # k >= 2).
+    #
+    # The tail is NOT taken from ptukey(q, k, df): R's finite-df ptukey
+    # misreports extreme tails (found 2026-09-13 by seed 20260913, rand11
+    # G2|G3: q = 24.29 at df = 3.17 gave .00102 where the true value is
+    # .000969; further out it returns 0 or NaN). ptukey at df = Inf is
+    # exact, so the tail is integrated as the chi mixture of that exact
+    # range CDF with R's adaptive integrate(); this matches SciPy's
+    # studentized_range.sf to ten figures at every checked point and
+    # ptukey itself wherever ptukey is accurate.
+    range_tail <- function(q, k, df) {
+        coef <- exp((df / 2) * log(df / 2) - lgamma(df / 2) + log(2))
+        f <- function(s) coef * s^(df - 1) * exp(-df * s * s / 2) *
+                         ptukey(q * s, nmeans = k, df = Inf, lower.tail = FALSE)
+        # rel 1e-8 with abs 1e-15: a tail below 1e-15 is zero for every
+        # display (the label floor is < .001), and demanding relative
+        # accuracy there made integrate() give up on ~20 of 300 pairs.
+        hi <- min(14 / q, 12)
+        integrate(f, 0, hi, rel.tol = 1e-8, abs.tol = 1e-15,
+                  subdivisions = 400L)$value
+    }
     k_cells <- length(groups)
     gh <- list()
     if (k_cells >= 2) {
@@ -215,9 +236,8 @@ dataset_refs <- function(groups) {
             if (length(a) < 2 || length(b) < 2) next
             se2 <- var(a) / length(a) + var(b) / length(b)
             if (!isTRUE(se2 > 0)) next
-            pv <- safe(suppressWarnings(ptukey(abs(pr$welch$t) * sqrt(2),
-                              nmeans = k_cells,
-                              df = pr$welch$df, lower.tail = FALSE)))
+            pv <- safe(suppressWarnings(range_tail(abs(pr$welch$t) * sqrt(2),
+                              k_cells, pr$welch$df)))
             if (!is.null(pv) && !is.finite(pv)) pv <- NULL
             if (!is.null(num_or_null(pv))) gh[[key]] <- as.numeric(pv)
         }
