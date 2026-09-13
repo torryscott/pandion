@@ -519,7 +519,7 @@
   function pageSizeText(page) {
     return pxToUnit(page.w) + " \u00d7 " + pxToUnit(page.h) + " " + unitLabel();
   }
-  var APP_VERSION = "3.1.1";
+  var APP_VERSION = "3.1.2";
   // The build stamp. The version alone cannot identify the code that
   // drew a figure: the hosted app deploys from main ahead of tagged
   // releases, so one version number covers weeks of builds, and a
@@ -28753,7 +28753,7 @@
   // discipline: the newest entry's version must equal APP_VERSION, so shipping
   // a release without a note here fails the suite.
   var RELEASE_NOTES = [
-    { version: "3.1.1", date: "August 2026", notes: [
+    { version: "3.1.2", date: "September 2026", notes: [
       "Nothing changes for you here. Saved palettes and styles are held " +
         "back in the jamovi module at jamovi's request, until they add a " +
         "home for settings that live outside a single file. The browser " +
