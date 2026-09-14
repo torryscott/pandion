@@ -9445,8 +9445,9 @@
     var orig = gb.render;
     var wrapped = function (id, payload) {
       var host = document.getElementById("psroot");
-      var had = host && (host.style.zoom ||
-        host.style.getPropertyValue("--ps-chrome-zoom"));
+      var hadZoom = host ? host.style.zoom : "";
+      var hadChrome = host ? host.style.getPropertyValue("--ps-chrome-zoom") : "";
+      var had = host && (hadZoom || hadChrome);
       if (had) {
         host.style.zoom = "";
         host.style.removeProperty("--ps-chrome-zoom");
@@ -9462,7 +9463,21 @@
           // restore was tried against the magnified case and did not hold:
           // the grow pass runs from arbitrarily late engine redraws, which
           // is exactly why the real fix belongs in the engine's own math.
-          try { applyViewZoom(); } catch (e) {}
+          //
+          // Restore the zoom that was in force VERBATIM and leave the
+          // recompute to the debounced settle (Sep 14 2026, Torry: the
+          // chart moved a couple of pixels about a second after every edit,
+          // then back). Recomputing here read the pane mid-rebuild (the
+          // docked panel is still being restored in this very task), so the
+          // Fit trim converged on a scale the settled DOM then corrected a
+          // frame or two later. The old value fits the old chart by
+          // construction, and a chart whose size really changed is refit
+          // 60ms later by fitSchedule, once.
+          try {
+            host.style.zoom = hadZoom;
+            if (hadChrome) host.style.setProperty("--ps-chrome-zoom", hadChrome);
+          } catch (e) {}
+          try { fitSchedule(); } catch (e2) {}
         }
       }
     };
@@ -9616,7 +9631,11 @@
       if (!SNAPSHOT_PASS) LAST_CHART_ID = c.id;
       captureChartSnapshot(c.id);
     }
-    applyViewZoom();
+    // Debounced, not synchronous: the wrapper above has just restored the
+    // zoom that was in force, and the settled recompute belongs to
+    // fitSchedule (scheduled before the render), so an echo refits ONCE on
+    // a settled DOM instead of three times on a changing one.
+    fitSchedule();
     // Re-adopt the zoom control into the bar the engine just rebuilt.
     // The observer below is the BACKSTOP for renders the shell does not
     // drive; doing it here as well means the control is never missing for
@@ -11016,6 +11035,9 @@
   // buildPayload deliberately ignores them for fit-managed docs.
   var FIT_MAX_W = 7.5, FIT_MAX_H = 5;   // the standard: 720 x 480 px
   var FIT_OBSERVER = null, FIT_TIMER = null;
+  // The beside-panel Fit scale in force, with the key it was computed for
+  // (see the hold inside applyViewZoom).
+  var FIT_HOLD = null;
   function fitEnabled() {
     var doc = activeChartTab();
     return !!doc && !isLayoutTab(doc) && doc.fitPane !== false;
@@ -11233,8 +11255,27 @@
         setZ(trialS);
         S = trialS;
       }
+      // Hold the scale across recomputes that land a hair ABOVE it (Sep 14
+      // 2026, Torry's wobble report). The pane's scroll height differs by a
+      // pixel or two between the click-time DOM and the echo-time DOM (the
+      // panel is rebuilt), so the loop above converges on 0.770 one time and
+      // 0.772 the next, and that paints as every mark jumping and jumping
+      // back. A candidate at or slightly above the scale in force means
+      // MORE room, so the old scale still fits and stays; a candidate below
+      // it means the chart no longer fits and shrinks at once; a candidate
+      // more than 2% above it is a real change (a taller pane, a closed
+      // strip) and wins. Keyed on the document, the logical size and the
+      // pane size, so none of those can inherit a stale hold.
+      var fitKey = String((doc && doc.id) || "") + "|" + gw + "x" + gh + "|" +
+        (grewPane ? grewPane.clientWidth + "x" + grewPane.clientHeight : "");
+      if (FIT_HOLD && FIT_HOLD.key === fitKey && S > FIT_HOLD.S &&
+          S <= FIT_HOLD.S * 1.02) {
+        setZ(FIT_HOLD.S);
+        S = FIT_HOLD.S;
+      }
+      FIT_HOLD = { key: fitKey, S: S };
       fitGrew = S > 1;
-    }
+    } else FIT_HOLD = null;
     if (mode === "fit" && S < 1) {
       // The engine wrap carries chrome (margins, padding) the width math
       // cannot see from the svg alone. Rather than model it, measure it:
