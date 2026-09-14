@@ -31,6 +31,13 @@ const pageUrl = 'file://' + (process.env.PS_PAGE
 const browser = await chromium.launch();
 // A deliberately SHORT window: the low-res laptop this feature is for.
 const page = await browser.newPage({ viewport: { width: 1366, height: 640 } });
+// The reveal scroll is the UNDER-CHART contract. At this viewport the
+// automatic placement (Sep 14 2026) docks the panel beside the chart,
+// where nothing is revealed by scrolling; pin the placement the probe
+// is about.
+await page.addInitScript(() => {
+    try { localStorage.setItem('psstandalone.preferences.v1', JSON.stringify({ panelDock: 'below' })); } catch (e) {}
+});
 const errors = [];
 page.on('pageerror', e => errors.push(String(e)));
 await page.goto(pageUrl);

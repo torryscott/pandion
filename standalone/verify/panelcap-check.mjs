@@ -36,6 +36,12 @@ const VW = 1280, VH = 620;
 const CAP = Math.max(240, Math.round(VH * 0.42));   // engine formula
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: VW, height: VH } });
+// The cap is the UNDER-CHART contract. At this viewport the automatic
+// placement (Sep 14 2026) would dock the panel beside the chart, where
+// there is no cap by design; pin the placement the probe is about.
+await page.addInitScript(() => {
+    try { localStorage.setItem('psstandalone.preferences.v1', JSON.stringify({ panelDock: 'below' })); } catch (e) {}
+});
 const errors = [];
 page.on('pageerror', e => errors.push(String(e)));
 await page.goto(pageUrl);
@@ -172,6 +178,7 @@ const page2 = await ctx2.newPage();
 const errors2 = [];
 page2.on('pageerror', e => errors2.push(String(e)));
 await page2.addInitScript(() => {
+    try { localStorage.setItem('psstandalone.preferences.v1', JSON.stringify({ panelDock: 'below' })); } catch (e) {}
     // Intercept at the ENGINE boundary: the shell calls its internal
     // buildPayload (the PS_SHELL reference is an exposed copy), so the
     // faithful strip wraps GraphBuilder2.render(elementId, payload) and
