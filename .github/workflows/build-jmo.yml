@@ -220,18 +220,52 @@ jobs:
             echo "node: $(node --version) | jmc: $(which jmc)"
             jmc --build . --home "$JAMOVI_HOME" 2>&1
           else
-            # jamovi's bundled Rscript installs jmvtools (pure R) plus the
-            # node package it drives its compiler with, from jamovi's repo.
+            # jamovi's bundled R installs jmvtools (pure R) and the node
+            # package that carries the node binary its compiler runs on, both
+            # from jamovi's repo. Neither compiles anything, so the source
+            # tarballs install on either runner. Three facts this step rests
+            # on, each learned from a failed run or its local rehearsal:
+            # the macOS Rscript carries a compiled-in R home under
+            # /Library/Frameworks that the runner lacks, and RHOME redirects
+            # it into the app bundle (the relocatable bin/R script the
+            # compiler itself runs does the same); jamovi keeps jmvcore, a
+            # jmvtools import the source install insists on, in its
+            # base-modules library rather than on R's default path; and on
+            # Windows RUNNER_TEMP holds backslashes, so the library path
+            # reaches R through the environment, never an interpolated string.
             if [ "$RUNNER_OS" = "Windows" ]; then
               RSCRIPT="$JAMOVI_HOME/Frameworks/R/bin/x64/Rscript.exe"
+              BASE_LIB="$JAMOVI_HOME/Resources/modules/base/R"
+              TMP_DIR="$(cygpath -m "$RUNNER_TEMP")"
+              LIB_SEP=";"
             else
-              RSCRIPT="$JAMOVI_HOME/Contents/Frameworks/R.framework/Versions/Current/Resources/bin/Rscript"
+              R_RES="$JAMOVI_HOME/Contents/Frameworks/R.framework/Versions/Current/Resources"
+              RSCRIPT="$R_RES/bin/Rscript"
+              BASE_LIB="$JAMOVI_HOME/Contents/Resources/modules/base/R"
+              TMP_DIR="$RUNNER_TEMP"
+              LIB_SEP=":"
+              export RHOME="$R_RES"
             fi
-            RLIB="$RUNNER_TEMP/jmvtools-lib"; mkdir -p "$RLIB"
-            "$RSCRIPT" -e "install.packages(c('node', 'jmvtools'), repos = 'https://repo.jamovi.org', lib = '$RLIB')"
-            JMC="$(R_LIBS="$RLIB" "$RSCRIPT" -e 'ns <- getNamespace("jmvtools"); cat(get("jmcPath", envir = ns)())' | tr -d '"')"
-            NODE_BIN="$(R_LIBS="$RLIB" "$RSCRIPT" -e 'ns <- getNamespace("jmvtools"); cat(get("node", envir = ns)())' | tr -d '"')"
-            echo "jmvtools compiler: $JMC | node: $NODE_BIN"
+            export JMV_RLIB="$TMP_DIR/jmvtools-lib"; mkdir -p "$JMV_RLIB"
+            export R_LIBS="$JMV_RLIB$LIB_SEP$BASE_LIB"
+            for pkg in node jmvtools; do
+              "$RSCRIPT" -e "install.packages('$pkg', repos = 'https://repo.jamovi.org', lib = Sys.getenv('JMV_RLIB'), type = 'source', dependencies = FALSE)"
+            done
+            JMC="$JMV_RLIB/jmvtools/node_modules/jamovi-compiler/index.js"
+            test -f "$JMC" || { echo "jmvtools did not install its compiler at $JMC"; exit 1; }
+            if [ "$RUNNER_OS" = "Windows" ]; then
+              NODE_BIN="$JMV_RLIB/node/node.exe"
+            else
+              NODE_BIN="$JMV_RLIB/node/node-darwin/bin/node"
+            fi
+            # The package's node is an x86_64 binary; if the runner cannot run
+            # it, the runner's own node built the 2.7 line's compiler of the
+            # same version.
+            if ! "$NODE_BIN" --version; then
+              echo "the node package's binary does not run here; using the runner's node"
+              NODE_BIN="node"
+            fi
+            echo "jmvtools compiler: $JMC | node: $NODE_BIN $("$NODE_BIN" --version)"
             "$NODE_BIN" "$JMC" --build . --home "$JAMOVI_HOME" 2>&1
           fi
           echo "--- .jmo produced ---"
