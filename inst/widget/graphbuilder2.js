@@ -28898,6 +28898,9 @@
                 pop.style.padding = "6px 0 6px 0";
                 pop.style.alignSelf = "stretch";
                 pop.style.borderLeft = "1px solid #ddd";
+                // Clear the dock divider the expanded branch may have set;
+                // the collapsed strip is an edge and its rule is the left one.
+                pop.style.borderTop = "0";
                 pop.style.background = "#fafafa";
                 pop.style.cursor = "pointer";
             } else {
@@ -28915,7 +28918,12 @@
                 // inspector panel - even when the section body on the
                 // left is taller than the picker's natural content.
                 pop.style.alignSelf = "stretch";
-                pop.style.borderLeft = "1px solid #eee";
+                // The divider separates the picker from the controls, so
+                // it follows them: beside them below the chart, above it
+                // in the dock, where the picker is stacked underneath.
+                var _pkDk = _gb2DockActive();
+                pop.style.borderLeft = _pkDk ? "0" : "1px solid #eee";
+                pop.style.borderTop = _pkDk ? "1px solid #eee" : "0";
                 pop.style.background = "#fff";
                 pop.style.cursor = "";
             }
@@ -47041,6 +47049,7 @@
             // _syncInspectorPanelGeometry wrote from the chart, which
             // nothing inside the panel can move.
             var avail = 0;
+            var _dkFit = _gb2DockActive() ? _gb2DockHost() : null;
             try {
                 // The width the panel is GIVEN, taken from the style
                 // _syncInspectorPanelGeometry just wrote, falling back to
@@ -47054,6 +47063,15 @@
                 var _pw = parseFloat(inspectorPanel.style.width) || 0;
                 if (!(_pw > 0)) _pw = inspectorPanel.offsetWidth || 0;
                 avail = Math.floor(_pw - 2);
+                // Docked, the panel is width:auto inside the host's box,
+                // so the box is the authority: the panel is placed while
+                // still display:none and would measure zero.
+                if (_dkFit) {
+                    var _dcs = window.getComputedStyle(_dkFit);
+                    avail = Math.floor((_dkFit.clientWidth || 0) -
+                        (parseFloat(_dcs.paddingLeft) || 0) -
+                        (parseFloat(_dcs.paddingRight) || 0) - 2);
+                }
             } catch (_eFc) {}
             // A hidden panel measures zero. Write nothing rather than a
             // size computed from it: on a panel that has never been
@@ -47079,7 +47097,13 @@
             // it is today. The 320px ceiling is the gradient's 160px
             // height cap doubled: past 2:1 the SV square stops being a
             // square, and area is what it trades in.
-            var w = Math.max(W0, Math.min(320, Math.round(avail * 0.29)));
+            var w = _dkFit
+                // Docked, the picker is stacked UNDER the controls in a
+                // column as wide as the panel, so it fills it: a width
+                // cap there strands a bordered picker in a band of empty
+                // panel, the one width where the layout reads as broken.
+                ? Math.max(W0, avail)
+                : Math.max(W0, Math.min(320, Math.round(avail * 0.29)));
             var r = w / W0;
             // The room that is spare in this dock is HEIGHT, so the
             // gradient grows with the panel's height budget rather than
@@ -47090,7 +47114,9 @@
             // gradient is inside of and would feed back from. A host that
             // asks for the fit without declaring a budget keeps the
             // historical 96px, which is the honest answer.
-            var budget = _gb2PanelCapPx();
+            // Docked there is no cap: the column is about as tall as the
+            // window, so the window is the budget.
+            var budget = _dkFit ? (window.innerHeight || 0) : _gb2PanelCapPx();
             var sv = (budget > 0)
                 ? Math.max(SV0, Math.min(160, Math.round(budget * 0.28)))
                 : SV0;
@@ -47121,13 +47147,15 @@
             // called us cannot start a resize feedback loop. The stamp
             // lives on the panel ELEMENT, not on window, because render()
             // builds a fresh panel whose style block starts empty.
-            var sig = w + ":" + sv + ":" + strip + ":" + cell + ":" + chip;
+            var sig = (_dkFit ? "d:" : "b:") + w + ":" + sv + ":" + strip + ":" + cell + ":" + chip;
             if (host.__gb2FitSig === sig) return;
             host.__gb2FitSig = sig;
             st.setProperty("--gb2-pkr-w", w + "px");
             // The bodyRow is a horizontal flex row, so the basis IS the
-            // width and the two have to agree.
-            st.setProperty("--gb2-pkr-basis", w + "px");
+            // width and the two have to agree. Docked the row is a COLUMN,
+            // where a basis would size the HEIGHT: it stands down and the
+            // picker's content decides.
+            st.setProperty("--gb2-pkr-basis", _dkFit ? "auto" : (w + "px"));
             st.setProperty("--gb2-pkr-sv", sv + "px");
             st.setProperty("--gb2-pkr-strip", strip + "px");
             st.setProperty("--gb2-pkr-cell", cell + "px");
@@ -47179,7 +47207,77 @@
             window.__gb2_pfcWinFit = fit;
             try { window.addEventListener("resize", fit); } catch (_eRl) {}
         }
+        // ---- Host dock (Sep 14 2026, Torry's revival of the right-rail
+        // idea on new evidence: a budget laptop at 125% scaling gives the
+        // page ~500px, and a bar click there scrolled half the chart away,
+        // so the panel could not be watched while it was driven). When
+        // the payload says inspectorDock: "host" AND the host has
+        // published a container in window.__gb2_inspectorDockHost - an
+        // element, or {el, active} where active() says whether to dock
+        // RIGHT NOW (the host decides from its window geometry, so a
+        // tall screen keeps the panel under the chart) - the panel is
+        // appended THERE instead of under the chart, sized to that box,
+        // with its tab rows free to wrap and the color picker stacked
+        // under the controls. The panel stays a consequence of a
+        // selection: it is the same element, shown for the same reasons,
+        // hidden for the same reasons; the host shows and hides the
+        // container by watching it. Nothing here holds a container open,
+        // which is what the Sep 3 removal was about. Absent the key
+        // (jamovi) none of this runs and the panel is the chart's skirt
+        // exactly as before.
+        function _gb2DockSlot() {
+            // The published container whether or not the host wants the
+            // panel there right now: the sweep below needs it either way.
+            try {
+                var h = window.__gb2_inspectorDockHost;
+                if (h && typeof h === "object" && h.nodeType !== 1 && h.el) h = h.el;
+                return (h && h.nodeType === 1) ? h : null;
+            } catch (_eDs) { return null; }
+        }
+        function _gb2DockHost() {
+            try {
+                if (!data || data.inspectorDock !== "host") return null;
+                var slot = _gb2DockSlot();
+                if (!slot || !slot.isConnected) return null;
+                var h = window.__gb2_inspectorDockHost;
+                if (h && typeof h === "object" && typeof h.active === "function" && !h.active()) return null;
+                return slot;
+            } catch (_eDh) { return null; }
+        }
+        function _gb2DockActive() {
+            try {
+                var dh = _gb2DockHost();
+                return !!(dh && inspectorPanel && inspectorPanel.parentElement === dh);
+            } catch (_eDa) { return false; }
+        }
+        function _gb2PlaceInspectorPanel() {
+            var dh = _gb2DockHost();
+            var target = dh ? dh
+                : ((typeof chartCard !== "undefined" && chartCard) ? chartCard : host);
+            // One panel in the dock. render() rebuilds the widget's own
+            // DOM, but the dock lives outside it, so a previous render's
+            // panel would otherwise stack under this one. Swept off the
+            // published slot whether or not it is active, so a host that
+            // stops docking while still pointing at the slot leaves
+            // nothing behind.
+            var sweep = _gb2DockSlot();
+            if (sweep) {
+                var olds = sweep.querySelectorAll("[data-gb2-inspector]");
+                for (var _oi = 0; _oi < olds.length; _oi++) {
+                    if (olds[_oi] !== inspectorPanel && olds[_oi].parentNode) {
+                        olds[_oi].parentNode.removeChild(olds[_oi]);
+                    }
+                }
+            }
+            if (inspectorPanel.parentElement !== target) target.appendChild(inspectorPanel);
+            var docked = (target === dh);
+            inspectorPanel.setAttribute("data-gb2-dock", docked ? "host" : "below");
+            // Docked the panel is a card of its own, not the chart's
+            // skirt; under the chart it keeps the flush top edge.
+            inspectorPanel.style.borderRadius = docked ? "4px" : "0 0 4px 4px";
+        }
         var inspectorPanel = document.createElement("div");
+        inspectorPanel.setAttribute("data-gb2-inspector", "1");
         inspectorPanel.style.cssText = [
             // Flush with the chart's bottom border (no gap, no top border)
             // so the chart + panel read as one continuous container.
@@ -47200,12 +47298,9 @@
         ].join(";");
         // Append to the chart card (flex-column container) instead of
         // host, so wrap / toolbar / panel share the same left edge by
-        // virtue of flex align-items:flex-start.
-        if (typeof chartCard !== "undefined" && chartCard) {
-            chartCard.appendChild(inspectorPanel);
-        } else {
-            host.appendChild(inspectorPanel);
-        }
+        // virtue of flex align-items:flex-start - or to the host's dock
+        // when one is declared and wanted (see _gb2PlaceInspectorPanel).
+        _gb2PlaceInspectorPanel();
         // Arm (or release) the observer that keeps the colour controls
         // sized to the panel, once per render on the panel this render
         // built.
@@ -47316,6 +47411,21 @@
         }
         function _syncInspectorPanelGeometry() {
             if (!inspectorPanel || !wrap) return;
+            if (_gb2DockActive()) {
+                // The dock is the width authority: the panel fills it and
+                // the chart's width has no say. Statistics too (Torry,
+                // Sep 14 2026: the panels that link to the chart are the
+                // ones that need it on screen): its tables scroll inside
+                // their own data-st-scroll boxes and the clip note says so.
+                inspectorPanel.style.width = "auto";
+                inspectorPanel.style.minWidth = "0";
+                inspectorPanel.style.maxWidth = "100%";
+                inspectorPanel.style.boxSizing = "border-box";
+                inspectorPanel.style.flexShrink = "";
+                inspectorPanel.style.marginLeft = "0";
+                inspectorPanel.style.marginRight = "0";
+                return;
+            }
             try {
                 var W = parseFloat(svg.getAttribute("width"));
                 if (!isFinite(W) || W <= 0) W = inchesW * PX_PER_INCH;
@@ -48031,6 +48141,22 @@
         }
 
         function clearInspectorSelection() { setInspectorSelection(null); }
+        // Host hooks for a docked panel: a Done control that clears the
+        // selection, and a re-placement after the host's answer changes
+        // (a window resize). Re-exposed per render like __gb2_setOption;
+        // harmless where nothing docks.
+        try {
+            window.__gb2_inspectorClear = clearInspectorSelection;
+            window.__gb2_inspectorDockSync = function () {
+                try {
+                    if (inspector && inspector.selection && inspector.selection.length) {
+                        renderInspectorPanel();
+                    } else {
+                        _gb2PlaceInspectorPanel();
+                    }
+                } catch (_eDs2) {}
+            };
+        } catch (_eHk) {}
         // Narrow shell bridge: analysis selection belongs to the standalone
         // shell, while chart-part selection belongs to this engine.
         try { window.__gb2_clearInspectorSelection = clearInspectorSelection; }
@@ -49052,6 +49178,10 @@
         // jamovi never ships the key: every site resolves cap 0 there
         // and the panel behaves exactly as before.
         function _gb2PanelCapPx() {
+            // Docked, the host's column is the scroller and the panel
+            // takes its natural height: no cap, and the expand/collapse
+            // slides measure the full panel (they clamp to this value).
+            if (_gb2DockActive()) return 0;
             var vh = (data && typeof data.panelMaxVh === "number" &&
                 isFinite(data.panelMaxVh)) ? data.panelMaxVh : 0;
             if (!(vh > 0)) return 0;
@@ -49075,7 +49205,19 @@
         }
         function _gb2PanelCapApply() {
             var cap = _gb2PanelCapPx();
-            if (!cap) return;
+            if (!cap) {
+                // No cap here (jamovi never has one; a docked panel has
+                // none): a cap this same element took under the chart
+                // must not ride along with it into the dock.
+                if (inspectorPanel.__gb2CapApplied) {
+                    inspectorPanel.__gb2CapApplied = false;
+                    inspectorPanel.style.maxHeight = "";
+                    inspectorPanel.style.overflowY = "";
+                    inspectorPanel.style.boxShadow = "";
+                }
+                return;
+            }
+            inspectorPanel.__gb2CapApplied = true;
             inspectorPanel.style.maxHeight = cap + "px";
             inspectorPanel.style.overflowY = "auto";
             // A NEW selection starts reading from the top; same-panel
@@ -49676,7 +49818,9 @@
                 }
                 tabBarEl.setAttribute("data-gb2-promoted-tabbar", "1");
                 tabBarEl.style.marginBottom = "0";
-                if (!(opts && opts.allowWrap)) {
+                // In the dock a six-tab row cannot always fit on one
+                // line, so the bar keeps its wrap there.
+                if (!(opts && opts.allowWrap) && !_gb2DockActive()) {
                     tabBarEl.style.flexWrap = "nowrap";
                 }
                 row.parentElement.insertBefore(tabBarEl, row);
@@ -59900,6 +60044,10 @@
             while (inspectorPanel.firstChild) {
                 inspectorPanel.removeChild(inspectorPanel.firstChild);
             }
+            // Where this selection lives: the host's dock, or under the
+            // chart. Per selection, because the host may answer
+            // differently after a window resize.
+            try { _gb2PlaceInspectorPanel(); } catch (_ePl) {}
             inspectorPanel.style.display = "";
             // Displayed, so the panel can be measured: size the colour
             // controls BEFORE the section markup below is composed, since
@@ -59932,6 +60080,13 @@
             // doesn't blank the section's other controls.
             var bodyRow = document.createElement("div");
             bodyRow.style.cssText = "display:flex;align-items:flex-start;";
+            bodyRow.setAttribute("data-role", "inspector-bodyrow");
+            // Docked, the picker cannot sit beside the controls (the dock
+            // is about as wide as the picker), so the row stacks.
+            if (_gb2DockActive()) {
+                bodyRow.style.flexDirection = "column";
+                bodyRow.style.alignItems = "stretch";
+            }
             inspectorPanel.appendChild(bodyRow);
             var body = document.createElement("div");
             body.style.cssText = "padding:9px 12px 11px 12px;flex:1;min-width:0;box-sizing:border-box;";
@@ -66927,7 +67082,8 @@
                 var _bsTabBarEl = _bsFirstTabBtn ? _bsFirstTabBtn.parentElement : null;
                 if (_bsTabBarEl && _bsTabBarEl.parentElement === body) {
                     _bsTabBarEl.style.marginBottom = "0";
-                    _bsTabBarEl.style.flexWrap = "nowrap";
+                    // Dock: the row may wrap (see _promoteTabBarToFullWidth).
+                    if (!_gb2DockActive()) _bsTabBarEl.style.flexWrap = "nowrap";
                     var _bsBodyRow = inspector.bodyRow;
                     if (_bsBodyRow && _bsBodyRow.parentElement) {
                         _bsBodyRow.parentElement.insertBefore(_bsTabBarEl, _bsBodyRow);
