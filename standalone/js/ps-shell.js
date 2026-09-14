@@ -1072,7 +1072,7 @@
       if (!host) return false;
       var ps = host.querySelectorAll("[data-gb2-inspector]");
       for (var i = 0; i < ps.length; i++) {
-        if (window.getComputedStyle(ps[i]).display === "none") continue;
+        if (ps[i].style.display === "none") continue;
         if (ps[i].getBoundingClientRect().height < 2) continue;
         return true;
       }
@@ -1104,13 +1104,18 @@
   }
   // Live = the slot holds a SHOWN panel. Read from the DOM the engine
   // writes, never from a flag of our own, so the two cannot disagree.
+  // The INLINE display, not the computed one: the engine hides and shows
+  // its panel by writing style.display, and while the dock is hidden
+  // WebKit does not recompute styles inside it, so a computed read came
+  // back "none" from before and the dock could never reopen after Done
+  // (Torry's Safari report, Sep 14 2026).
   function syncDockLive() {
     var pane = el("ps-inspector-chart"), slot = dockSlot();
     if (!pane || !slot) return;
     var live = false;
     for (var i = 0; i < slot.children.length; i++) {
       try {
-        if (window.getComputedStyle(slot.children[i]).display !== "none") { live = true; break; }
+        if (slot.children[i].style.display !== "none") { live = true; break; }
       } catch (eD) {}
     }
     pane.classList.toggle("ps-dock-live", live);

@@ -174,5 +174,24 @@ console.log('case 6: render-boundary control: without the payload key the engine
 }
 ok(errors.length === 0, 'no page errors' + (errors.length ? ': ' + errors[0] : ''));
 await browser.close();
+console.log('case 7: WebKit reopens the dock after Done (Safari, Torry Sep 14 2026: styles inside a hidden column are not recomputed, so a computed-display read stayed "none")');
+{
+    let wk = null;
+    try { wk = await loadPlaywright().webkit.launch(); } catch (e) { wk = null; }
+    if (!wk) {
+        console.log('  skip  playwright webkit is not installed here');
+    } else {
+        const page = await wk.newPage({ viewport: { width: 1800, height: 1200 } });
+        await page.addInitScript((a) => { try { localStorage.setItem('psstandalone.coach.clickToEdit.v1', '1'); localStorage.setItem(a.k, JSON.stringify(a.p)); } catch (e) {} }, { k: PREF_KEY, p: { panelDock: 'beside' } });
+        await page.goto(pageUrl); await page.waitForTimeout(800); await page.click('#ps-welcome-sample'); await page.waitForTimeout(2500);
+        await clickBar(page); let st = await state(page); ok(!!st.panel && st.panel.inSlot && st.live, 'WebKit: first selection docks');
+        await page.click('#ps-dock-done'); await page.waitForTimeout(600);
+        st = await state(page); ok(!st.panel && !st.live, 'WebKit: Done hides the dock');
+        await clickBar(page); st = await state(page); ok(!!st.panel && st.panel.inSlot && st.live, 'WebKit: the next selection reopens it');
+        await page.keyboard.press('Escape'); await page.waitForTimeout(250); await page.keyboard.press('Escape'); await page.waitForTimeout(600);
+        await clickBar(page); st = await state(page); ok(!!st.panel && st.panel.inSlot && st.live, 'WebKit: and again after Escape');
+        await wk.close();
+    }
+}
 console.log(fails ? 'PANEL DOCK CHECK: ' + fails + ' FAILED' : 'PANEL DOCK CHECK PASS');
 process.exit(fails ? 1 : 0);
