@@ -199,7 +199,10 @@
   kbd, .ui {
     font-family: inherit; font-weight: 700; color: var(--navy);
     background: var(--wash); border: 1px solid var(--line);
-    border-radius: 6px; padding: 1px 7px; font-size: 14.5px; white-space: nowrap;
+    border-radius: 6px; padding: 1px 7px; font-size: 14.5px;
+    /* Labels wrap at spaces: one of them is a whole Safari setting, and a
+       nowrap label pushed the page past 320 px in the reflow check. */
+    overflow-wrap: anywhere;
   }
   figure.fig { margin: 16px 0 6px; }
   figure.fig img {
@@ -390,10 +393,9 @@
     <div class="wrap">
       <h2 id="install-title">Install it inside jamovi</h2>
       <p class="sec-lede">
-        jamovi adds modules from its own library window, using a
-        button called <span class="ui">Sideload</span> that reads the
-        file you just downloaded. You do this once; the module stays
-        installed.
+        jamovi adds modules from its own library window, which has a
+        <span class="ui">Sideload</span> tab for a file you downloaded
+        yourself. You do this once; the module stays installed.
       </p>
 
       <div class="step">
@@ -425,14 +427,14 @@
             ribbon, click <span class="ui">Modules</span>.
           </p>
           <figure class="fig">
-            <img src="assets/jamovi/step-modules.png"
+            <img src="assets/jamovi/step-modules.png" width="2560" height="1600"
                  data-image-kind="illustrative"
-                 alt="The jamovi window with a small data set open. The
+                 alt="The jamovi window with an empty spreadsheet. The
                       Modules button at the top-right of the ribbon is
                       highlighted">
             <figcaption>
               The Modules button sits at the top-right of jamovi's
-              ribbon, on the Analyses tab.
+              ribbon, on every tab.
             </figcaption>
           </figure>
         </div>
@@ -448,14 +450,14 @@
             install.
           </p>
           <figure class="fig">
-            <img src="assets/jamovi/step-library.png"
+            <img src="assets/jamovi/step-library.png" width="2560" height="1600"
                  data-image-kind="illustrative"
                  alt="The Modules menu open, showing the items jamovi
                       library and Manage installed. jamovi library is
                       highlighted">
             <figcaption>
-              The Modules menu. Pandion Plots is not in jamovi's own
-              library, so the next step brings the file in by hand.
+              The Modules menu. Pandion Plots is not in jamovi's online
+              library, so the next step brings in the file you downloaded.
             </figcaption>
           </figure>
         </div>
@@ -464,24 +466,28 @@
       <div class="step">
         <div class="step-n">4</div>
         <div class="step-body">
-          <h3>Click Sideload and pick the file</h3>
+          <h3>Click the Sideload tab, then the big arrow</h3>
           <p>
-            At the top-right of the library panel, click
-            <span class="ui">Sideload</span>: a small arrow icon. A file
-            window opens. Go to your Downloads folder, select
+            A window titled <span class="ui">jamovi</span> opens with
+            three tabs: <span class="ui">Installed</span>,
+            <span class="ui">Available</span> and
+            <span class="ui">Sideload</span>. Click
+            <span class="ui">Sideload</span>, then click the large arrow
+            in the middle of the window. A file window opens: go to your
+            Downloads folder, select
             <span class="ui">pandion-macos-arm64.jmo</span> or
             <span class="ui">pandion-win-x64.jmo</span>, and click
             <span class="ui">Open</span>.
           </p>
           <figure class="fig">
-            <img src="assets/jamovi/step-sideload.png"
+            <img src="assets/jamovi/step-sideload.png" width="2560" height="1600"
                  data-image-kind="illustrative"
-                 alt="The jamovi library panel. The Sideload button, a
-                      small arrow icon at the top-right of the panel, is
-                      highlighted">
+                 alt="The jamovi library window on its Sideload tab. The
+                      Sideload tab and the large upload arrow in the middle
+                      of the window are highlighted">
             <figcaption>
-              The Sideload button reads a module file from your computer
-              instead of from the online library.
+              The Sideload tab reads a module file from your own computer
+              instead of from jamovi's online library.
             </figcaption>
           </figure>
         </div>
@@ -490,20 +496,24 @@
       <div class="step">
         <div class="step-n">5</div>
         <div class="step-body">
-          <h3>Wait for the confirmation</h3>
+          <h3>Check the Installed tab</h3>
           <p>
             jamovi installs the module in a few seconds and shows
-            <span class="ui">Module installed successfully</span>.
-            Close the library panel with the arrow at its top-left.
+            <span class="ui">Module installed successfully</span>. Click
+            the <span class="ui">Installed</span> tab and scroll down:
+            <span class="ui">pandion - Plots</span> is listed with its
+            version number. Close the window with the round arrow button
+            at its top-right.
           </p>
           <figure class="fig">
-            <img src="assets/jamovi/step-installed.png"
+            <img src="assets/jamovi/step-installed.png" width="2560" height="1600"
                  data-image-kind="illustrative"
-                 alt="jamovi showing the message Module installed
-                      successfully, with Pandion Plots listed among the
-                      installed modules">
+                 alt="The library window's Installed tab, listing
+                      pandion - Plots 3.1.2 by Torry Scott Dennis with
+                      Hide and Remove buttons. The entry is highlighted">
             <figcaption>
-              Pandion Plots now appears in the list of installed modules.
+              The Installed tab after the install. The Remove button here
+              is also how you take the module out again later.
             </figcaption>
           </figure>
         </div>
@@ -512,28 +522,43 @@
       <div class="step">
         <div class="step-n">6</div>
         <div class="step-body">
-          <h3>Make your first chart</h3>
+          <h3>Find it on the Plots tab</h3>
           <p>
-            Click <span class="ui">Modules</span> again: Pandion Plots is
-            now listed there, with its seven chart types and the
+            Click the <span class="ui">Plots</span> tab at the top of the
+            ribbon. A <span class="ui">Pandion Plots</span> button is now
+            there, next to jamovi's own plots.
+          </p>
+          <figure class="fig">
+            <img src="assets/jamovi/step-plots-tab.png" width="2560" height="1600"
+                 data-image-kind="illustrative"
+                 alt="jamovi's ribbon on the Plots tab. The Plots tab and
+                      the new Pandion Plots button, which sits after Bar
+                      Plot, Box Plot, Histogram, Scatter Plot and Line
+                      Plot, are highlighted">
+            <figcaption>
+              After the install, the Plots tab has a Pandion Plots button.
+            </figcaption>
+          </figure>
+          <p>
+            Click it to see the seven chart types and the
             <span class="ui">Help Me Choose</span> guide. Pick one, drop a
             variable or two into the boxes, and the chart draws itself
             beside your analyses, saved in the same .omv file.
           </p>
           <figure class="fig">
-            <img src="assets/jamovi/step-menu.png"
+            <img src="assets/jamovi/step-analyses.png" width="2560" height="1600"
                  data-image-kind="illustrative"
-                 alt="The Modules menu after installing, listing Pandion
-                      Plots with its analyses: Compare Groups, Repeated
-                      Measures, Scatter, Distribution, Frequencies,
-                      Correlation Matrix, Likert / Survey, and Help Me
-                      Choose">
+                 alt="The Pandion Plots menu open on the Plots tab, listing
+                      Distribution, Frequencies, Compare Groups, Repeated
+                      Measures, Scatter, Correlation Matrix and Likert /
+                      Survey under Plots, and Help Me Choose under Guide">
             <figcaption>
-              Where the analyses live once the module is installed.
+              The Pandion Plots menu. Help Me Choose asks a few questions
+              and recommends a chart.
             </figcaption>
           </figure>
           <p>
-            If Pandion Plots does not show up right away, quit jamovi and
+            If the button does not show up right away, quit jamovi and
             open it again.
           </p>
         </div>
@@ -565,9 +590,9 @@
       <h3>Updating later</h3>
       <p>
         Download the new file from this page and repeat steps 2 to 4;
-        jamovi replaces the older version. To remove the module, choose
-        <span class="ui">Modules</span>, then <span class="ui">Manage
-        installed</span>, then <span class="ui">Remove</span>.
+        jamovi replaces the older version. To take the module out, open
+        the library window's <span class="ui">Installed</span> tab and
+        click <span class="ui">Remove</span> on the pandion entry.
       </p>
     </section>
     <section class="help-card">
