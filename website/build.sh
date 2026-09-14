@@ -345,7 +345,7 @@ VERSION=$(grep '^Version:' DESCRIPTION | awk '{print $2}')
 printf '{"version":"%s","page":"https://pandionplots.com/download.html"}\n' "$VERSION" > website/app/version.json
 echo "wrote website/app/version.json ($VERSION)"
 DRIFT=0
-for page in website/index.html website/about.html website/download.html; do
+for page in website/index.html website/about.html website/download.html website/download-jamovi.html; do
     grep -q "$VERSION" "$page" || { echo "WARN: $page does not mention version $VERSION" >&2; DRIFT=1; }
 done
 grep -q "version: \"$VERSION\"" CITATION.cff || {

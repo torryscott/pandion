@@ -32,6 +32,7 @@ const publicPages = [
     ['Home', 'website/index.html'],
     ['Gallery', 'website/gallery.html'],
     ['Downloads', 'website/download.html'],
+    ['jamovi module', 'website/download-jamovi.html'],
     ['About', 'website/about.html'],
     ['Support', 'website/support.html'],
     ['Accessibility', 'website/accessibility.html'],

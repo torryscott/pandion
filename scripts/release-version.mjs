@@ -129,6 +129,7 @@ function setVersion() {
         'website/index.html',
         'website/about.html',
         'website/download.html',
+        'website/download-jamovi.html',
         'website/gallery.html',
         'website/support.html'
     ];
@@ -188,6 +189,7 @@ function checkVersion() {
         'website/index.html',
         'website/about.html',
         'website/download.html',
+        'website/download-jamovi.html',
         'website/gallery.html',
         'website/support.html'
     ];

@@ -1,0 +1,693 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install Pandion Plots in jamovi</title>
+<meta name="description" content="Download the Pandion Plots module for macOS or Windows and install it inside jamovi in a few clicks, with screenshots of every step.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<meta name="theme-color" content="#192E49">
+<link rel="canonical" href="https://pandionplots.com/download-jamovi.html">
+<!-- The jamovi requirement is written 2.7&#46;32 on purpose: the release
+     tooling treats every x.y.z on this page as the product version and
+     rewrites it at release time, so the jamovi number must not look like one. -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Pandion Plots">
+<meta property="og:title" content="Install Pandion Plots in jamovi">
+<meta property="og:description" content="Download the module for your computer, then add it from inside jamovi. Every step with a screenshot.">
+<meta property="og:url" content="https://pandionplots.com/download-jamovi.html">
+<meta property="og:image" content="https://pandionplots.com/assets/share-card-copy-refresh.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Install Pandion Plots in jamovi">
+<meta name="twitter:description" content="Download the module for your computer, then add it from inside jamovi. Every step with a screenshot.">
+<meta name="twitter:image" content="https://pandionplots.com/assets/share-card-copy-refresh.png">
+<style>
+  :root {
+    --navy: #192E49;
+    --cobalt: #375CA0;
+    --amber: #E3A12E;
+    --ink: #22364d;
+    --muted: #5f6f80;
+    --line: #dde5ee;
+    --wash: #f4f7fb;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+  body {
+    margin: 0; color: var(--ink); background: #fff;
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--cobalt); }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+  header {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(255,255,255,0.92); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav { display: flex; align-items: center; gap: 10px; height: 60px; }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    color: var(--navy); text-decoration: none;
+    font-weight: 800; font-size: 18px; letter-spacing: -0.01em;
+  }
+  .brand img { width: 34px; height: 34px; }
+  .nav-links { margin-left: auto; display: flex; gap: 4px; }
+  .nav-links a {
+    color: var(--ink); text-decoration: none; font-size: 14.5px;
+    font-weight: 600; padding: 7px 12px; border-radius: 7px;
+  }
+  .nav-links a:hover { background: var(--wash); color: var(--navy); }
+  .nav-links a[aria-current="page"] { color: var(--cobalt); }
+  .nav-links a.nav-cta {
+    color: #fff; background: var(--navy); margin-left: 6px;
+  }
+  .nav-links a.nav-cta:hover { background: #24405f; }
+  main { min-height: 68vh; }
+  .download-hero {
+    padding: 52px 0 28px; text-align: center;
+    background: linear-gradient(180deg, var(--wash) 0%, #fff 100%);
+  }
+  .kicker {
+    margin: 0 0 9px; color: #8a6414; font-size: 13px;
+    font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  h1 {
+    margin: 0 0 12px; color: var(--navy);
+    font-size: clamp(34px, 5vw, 50px); line-height: 1.12;
+    letter-spacing: -0.025em;
+  }
+  .hero-lede {
+    max-width: 650px; margin: 0 auto; color: var(--muted);
+    font-size: 18px; line-height: 1.55;
+  }
+  .release-meta {
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 18px;
+    margin-top: 18px; color: var(--muted); font-size: 13.5px;
+  }
+  .release-meta b { color: var(--navy); }
+  .source-note { display: inline-flex; align-items: center; gap: 8px; }
+  .source-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #2f8b57; box-shadow: 0 0 0 4px rgba(47,139,87,0.11);
+  }
+  .download-area { padding: 28px 0 8px; }
+  .device-note {
+    margin: 0 0 14px; color: var(--muted); font-size: 14px;
+    text-align: center;
+  }
+  .platform-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 20px;
+    align-items: stretch;
+  }
+  .platform-card {
+    display: flex; flex-direction: column; padding: 24px;
+    border: 1px solid var(--line); border-radius: 14px;
+    background: #fff; box-shadow: 0 10px 30px rgba(25,46,73,0.07);
+    transition: border-color 140ms ease, box-shadow 140ms ease,
+      transform 140ms ease;
+  }
+  .platform-card:hover {
+    transform: translateY(-2px); border-color: #b9c9db;
+    box-shadow: 0 16px 38px rgba(25,46,73,0.11);
+  }
+  .platform-card.is-recommended {
+    border-color: var(--cobalt);
+    box-shadow: 0 14px 38px rgba(55,92,160,0.15);
+  }
+  .card-top {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; margin-bottom: 14px;
+  }
+  .platform-mark {
+    display: grid; place-items: center; min-width: 72px; height: 38px;
+    padding: 0 12px; border-radius: 9px; background: #e8f0fa;
+    color: var(--cobalt); font-size: 12px; font-weight: 800;
+    letter-spacing: 0.04em;
+  }
+  .recommended {
+    display: none; padding: 4px 9px; border-radius: 999px;
+    color: #205f3d; background: #e9f6ee; border: 1px solid #c8e6d4;
+    font-size: 11px; font-weight: 750;
+  }
+  .platform-card.is-recommended .recommended { display: inline-flex; }
+  .platform-card h2 {
+    margin: 0 0 6px; color: var(--navy); font-size: 24px;
+    letter-spacing: -0.015em;
+  }
+  .platform-card > p {
+    margin: 0 0 18px; color: var(--muted); font-size: 14.5px;
+  }
+  .download-list { display: grid; gap: 10px; margin-top: 0; }
+  .download-option {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 14px; padding: 12px 14px; border: 1px solid #c3d0df;
+    border-radius: 9px; color: var(--navy); background: #fff;
+    text-decoration: none; transition: border-color 120ms ease,
+      background 120ms ease, color 120ms ease;
+  }
+  .download-option:hover { border-color: var(--cobalt); background: #f7f9fd; }
+  .download-option.primary {
+    color: #fff; background: var(--navy); border-color: var(--navy);
+  }
+  .download-option.primary:hover {
+    color: #fff; background: #24405f; border-color: #24405f;
+  }
+  .download-option strong { display: block; font-size: 14.5px; }
+  .download-option small {
+    display: block; margin-top: 1px; color: var(--muted); font-size: 12px;
+  }
+  .download-option.primary small { color: #dbe6f2; }
+  .download-arrow { flex: 0 0 auto; font-weight: 800; }
+  .requirements { margin: 12px 0 0; color: #6b7887; font-size: 12.5px; }
+  .github-note {
+    display: flex; align-items: center; gap: 14px;
+    margin: 20px 0 0; padding: 16px 18px; border: 1px solid var(--line);
+    border-radius: 10px; background: var(--wash);
+    color: var(--muted); font-size: 13.5px;
+  }
+  .github-note b { color: var(--navy); }
+  .github-note p { margin: 0; }
+  .github-note .shield {
+    display: grid; place-items: center; flex: 0 0 auto;
+    width: 30px; height: 30px; border-radius: 50%;
+    color: #205f3d; background: #e3f2e9; font-weight: 850;
+  }
+
+  /* ---- the walkthrough ---- */
+  section.tut { padding: 34px 0 10px; border-top: 1px solid var(--line); margin-top: 34px; }
+  section.tut h2 {
+    margin: 0 0 8px; color: var(--navy); font-size: 28px;
+    letter-spacing: -0.02em;
+  }
+  .sec-lede { margin: 0 0 26px; color: var(--muted); max-width: 46em; }
+  .step { display: grid; grid-template-columns: 40px 1fr; gap: 14px; margin: 0 0 34px; }
+  .step-n {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: var(--navy); color: #fff; font-weight: 700; font-size: 15px;
+    display: flex; align-items: center; justify-content: center; margin-top: 2px;
+  }
+  .step h3 { margin: 2px 0 8px; color: var(--navy); font-size: 18px; }
+  .step p { margin: 0 0 14px; max-width: 44em; }
+  .step p:last-child { margin-bottom: 0; }
+  .step ul { margin: 0 0 14px; padding-left: 20px; max-width: 44em; }
+  .step li { margin: 4px 0; }
+  kbd, .ui {
+    font-family: inherit; font-weight: 700; color: var(--navy);
+    background: var(--wash); border: 1px solid var(--line);
+    border-radius: 6px; padding: 1px 7px; font-size: 14.5px;
+    /* Labels wrap at spaces: one of them is a whole Safari setting, and a
+       nowrap label pushed the page past 320 px in the reflow check. */
+    overflow-wrap: anywhere;
+  }
+  figure.fig { margin: 16px 0 6px; }
+  figure.fig img {
+    display: block; width: 100%; height: auto;
+    border: 1px solid var(--line); border-radius: 12px;
+    box-shadow: 0 10px 28px rgba(25, 46, 73, 0.10);
+    background: #fff;
+  }
+  figure.fig.fig-narrow { max-width: 400px; }
+  figure.fig.fig-mid { max-width: 660px; }
+  figure.fig figcaption {
+    margin-top: 10px; color: var(--muted); font-size: 13.5px; max-width: 44em;
+  }
+  .note {
+    margin: 6px 0 14px; padding: 12px 16px; max-width: 44em;
+    background: var(--wash); border: 1px solid var(--line);
+    border-left: 3px solid var(--cobalt); border-radius: 8px;
+    color: var(--ink); font-size: 14.5px;
+  }
+
+  .help-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 22px;
+    padding: 20px 0 56px;
+  }
+  .help-card {
+    padding: 24px; border: 1px solid var(--line); border-radius: 12px;
+    background: #fff;
+  }
+  .help-card h2 { margin: 0 0 12px; color: var(--navy); font-size: 19px; }
+  .help-card h3 { margin: 14px 0 4px; color: var(--navy); font-size: 15px; }
+  .help-card ol, .help-card ul { margin: 0; padding-left: 21px; color: var(--muted); }
+  .help-card li { margin: 8px 0; font-size: 14px; }
+  .help-card p { margin: 0; color: var(--muted); font-size: 14px; }
+  .help-card p + p { margin-top: 8px; }
+  .help-card .help-links {
+    display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 15px;
+  }
+  .help-card .help-links a { font-weight: 650; text-decoration: none; }
+  .help-card .help-links a:hover { text-decoration: underline; }
+  footer { border-top: 1px solid var(--line); padding: 36px 0 48px; }
+  .foot {
+    display: flex; flex-wrap: wrap; gap: 18px; align-items: center;
+    color: var(--muted); font-size: 13.5px;
+  }
+  .foot .brand { font-size: 15px; }
+  .foot .brand img { width: 26px; height: 26px; }
+  .foot-links { margin-left: auto; display: flex; flex-wrap: wrap; gap: 10px 18px; }
+  .foot-links a { color: var(--muted); text-decoration: none; }
+  .foot-links a:hover { color: var(--cobalt); }
+  @media (max-width: 760px) {
+    .platform-grid, .help-grid { grid-template-columns: 1fr; }
+    .download-hero { padding-top: 48px; }
+  }
+  @media (max-width: 560px) {
+    .nav { height: auto; flex-wrap: wrap; padding: 8px 0; row-gap: 4px; }
+    .nav-links { margin-left: 0; width: 100%; flex-wrap: wrap; gap: 2px; }
+    .nav-links a { padding: 6px 9px; font-size: 13.5px; }
+    .nav-links a.nav-cta { margin-left: auto; }
+    .platform-card { padding: 22px 18px; }
+    .card-top { align-items: flex-start; }
+    .step { grid-template-columns: 30px 1fr; gap: 10px; }
+  }
+  @media print {
+    header, footer, .skip-link { display: none; }
+    body { background: #fff; }
+    figure.fig img { box-shadow: none; border-color: #999; }
+    .step, figure.fig { break-inside: avoid; }
+    section.tut { border-top-color: #999; }
+  }
+</style>
+<link rel="stylesheet" href="assets/site-nav.css">
+<script src="assets/site-nav.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="index.html">
+      <img src="assets/pandion-wing.svg" alt=""
+           data-image-kind="decorative">
+      Pandion Plots
+    </a>
+    <button class="nav-toggle" type="button" aria-expanded="false"
+      aria-controls="site-nav">
+      <span class="nav-toggle-icon" aria-hidden="true"></span>
+      <span>Menu</span>
+    </button>
+    <nav class="nav-links" id="site-nav" aria-label="Site">
+      <a href="gallery.html">Gallery</a>
+      <a href="learn.html">Learn</a>
+      <a href="download.html" aria-current="page">Downloads</a>
+      <a href="about.html">About</a>
+      <a href="support.html">Support</a>
+      <a class="nav-cta" href="app/">Try it now</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main-content" tabindex="-1">
+  <section class="download-hero">
+    <div class="wrap">
+      <p class="kicker">jamovi module</p>
+      <h1>Add Pandion Plots to jamovi.</h1>
+      <p class="hero-lede">
+        Download the module for your computer, then add it from inside
+        jamovi. It takes about two minutes, and every step is shown
+        below.
+      </p>
+      <div class="release-meta">
+        <span>Current version <b>3.1.2</b></span>
+        <span>For jamovi 28 and jamovi 2.7</span>
+        <span class="source-note">
+          <span class="source-dot" aria-hidden="true"></span>
+          Served by GitHub Releases
+        </span>
+      </div>
+    </div>
+  </section>
+
+  <section class="download-area" aria-labelledby="module-options">
+    <div class="wrap">
+      <h2 id="module-options" hidden>Module download options</h2>
+      <p class="device-note" id="device-note" aria-live="polite">
+        Step 1: download the module for your computer and your jamovi.
+      </p>
+      <div class="platform-grid">
+        <article class="platform-card" data-platform="mac">
+          <div class="card-top">
+            <span class="platform-mark">macOS</span>
+            <span class="recommended">Recommended for this device</span>
+          </div>
+          <h2>Module for macOS</h2>
+          <p>For Macs with an Apple chip (M1 or later). Pick the file for
+             your jamovi version.</p>
+          <div class="download-list">
+            <a class="download-option primary"
+               href="https://github.com/torryscott/pandion/releases/latest/download/pandion-macos-arm64-jamovi28.jmo">
+              <span>
+                <strong>For jamovi 28 (the current jamovi)</strong>
+                <small>pandion-macos-arm64-jamovi28.jmo &middot; version 3.1.2 &middot; about 13 MB</small>
+              </span>
+              <span class="download-arrow" aria-hidden="true">&darr;</span>
+            </a>
+            <a class="download-option"
+               href="https://github.com/torryscott/pandion/releases/latest/download/pandion-macos-arm64.jmo">
+              <span>
+                <strong>For jamovi 2.7</strong>
+                <small>pandion-macos-arm64.jmo &middot; version 3.1.2 &middot; about 13 MB</small>
+              </span>
+              <span class="download-arrow" aria-hidden="true">&darr;</span>
+            </a>
+          </div>
+          <p class="requirements">
+            Not sure which Mac you have? Open the Apple menu, choose
+            <span class="ui">About This Mac</span>, and look for a chip
+            named Apple M1, M2, M3 or M4. On an Intel Mac, use the
+            <a href="download.html">desktop app</a> or the
+            <a href="app/">browser app</a> instead.
+          </p>
+        </article>
+        <article class="platform-card" data-platform="windows">
+          <div class="card-top">
+            <span class="platform-mark">Windows</span>
+            <span class="recommended">Recommended for this device</span>
+          </div>
+          <h2>Module for Windows</h2>
+          <p>For 64-bit Windows 10 and 11. Pick the file for your jamovi
+             version.</p>
+          <div class="download-list">
+            <a class="download-option primary"
+               href="https://github.com/torryscott/pandion/releases/latest/download/pandion-win-x64-jamovi28.jmo">
+              <span>
+                <strong>For jamovi 28 (the current jamovi)</strong>
+                <small>pandion-win-x64-jamovi28.jmo &middot; version 3.1.2 &middot; about 14 MB</small>
+              </span>
+              <span class="download-arrow" aria-hidden="true">&darr;</span>
+            </a>
+            <a class="download-option"
+               href="https://github.com/torryscott/pandion/releases/latest/download/pandion-win-x64.jmo">
+              <span>
+                <strong>For jamovi 2.7</strong>
+                <small>pandion-win-x64.jmo &middot; version 3.1.2 &middot; about 14 MB</small>
+              </span>
+              <span class="download-arrow" aria-hidden="true">&darr;</span>
+            </a>
+          </div>
+          <p class="requirements">
+            The file ends in <span class="ui">.jmo</span>. It is not a
+            program you run: jamovi reads it in step 4.
+          </p>
+        </article>
+      </div>
+      <div class="github-note">
+        <span class="shield" aria-hidden="true">?</span>
+        <p>
+          <b>Which jamovi do I have?</b> Open jamovi: with no analysis
+          running, the results panel on the right shows the version
+          under the jamovi logo (for example <span class="ui">version
+          28.2</span> or <span class="ui">version 2.7&#46;32</span>). If
+          you installed jamovi recently from jamovi.org, it is 28. The
+          module needs 2.7&#46;32 or later on the 2.7 line.
+        </p>
+      </div>
+      <div class="github-note">
+        <span class="shield" aria-hidden="true">&#10003;</span>
+        <p>
+          <b>Every file comes directly from the official Pandion Plots
+          GitHub repository.</b> The
+          <a href="https://github.com/torryscott/pandion/releases/latest">release page</a>
+          has the release notes and every file this release carries.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="tut" id="install" aria-labelledby="install-title">
+    <div class="wrap">
+      <h2 id="install-title">Install it inside jamovi</h2>
+      <p class="sec-lede">
+        jamovi adds modules from its own library window, which has a
+        <span class="ui">Sideload</span> tab for a file you downloaded
+        yourself. You do this once; the module stays installed. The
+        screenshots show jamovi 2.7; jamovi 28 looks the same at every
+        step.
+      </p>
+
+      <div class="step">
+        <div class="step-n">1</div>
+        <div class="step-body">
+          <h3>Find the file you downloaded</h3>
+          <p>
+            Your browser saves it in your <span class="ui">Downloads</span>
+            folder. Leave it there for now, and do not double-click it:
+            jamovi will open it for you.
+          </p>
+          <div class="note">
+            On a Mac, Safari sometimes unpacks downloads on its own. If you
+            see a folder called <span class="ui">pandion-macos-arm64</span>
+            instead of a single file, delete the folder and download again
+            with Chrome or Firefox, or turn off <span class="ui">Open
+            "safe" files after downloading</span> in Safari's General
+            settings and try once more.
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-n">2</div>
+        <div class="step-body">
+          <h3>Open jamovi and click Modules</h3>
+          <p>
+            Open jamovi (any data set, or none). At the far right of the
+            ribbon, click <span class="ui">Modules</span>.
+          </p>
+          <figure class="fig">
+            <img src="assets/jamovi/step-modules.png" width="2560" height="1600"
+                 data-image-kind="illustrative"
+                 alt="The jamovi window with an empty spreadsheet. The
+                      Modules button at the top-right of the ribbon is
+                      highlighted">
+            <figcaption>
+              The Modules button sits at the top-right of jamovi's
+              ribbon, on every tab.
+            </figcaption>
+          </figure>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-n">3</div>
+        <div class="step-body">
+          <h3>Choose jamovi library</h3>
+          <p>
+            A short menu opens. Click <span class="ui">jamovi library</span>.
+            A panel slides in from the right, listing modules jamovi can
+            install.
+          </p>
+          <figure class="fig">
+            <img src="assets/jamovi/step-library.png" width="2560" height="1600"
+                 data-image-kind="illustrative"
+                 alt="The Modules menu open, showing the items jamovi
+                      library and Manage installed. jamovi library is
+                      highlighted">
+            <figcaption>
+              The Modules menu. Pandion Plots is not in jamovi's online
+              library, so the next step brings in the file you downloaded.
+            </figcaption>
+          </figure>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-n">4</div>
+        <div class="step-body">
+          <h3>Click the Sideload tab, then the big arrow</h3>
+          <p>
+            A window titled <span class="ui">jamovi</span> opens with
+            three tabs: <span class="ui">Installed</span>,
+            <span class="ui">Available</span> and
+            <span class="ui">Sideload</span>. Click
+            <span class="ui">Sideload</span>, then click the large arrow
+            in the middle of the window. A file window opens: go to your
+            Downloads folder, select the file you downloaded (its name
+            starts with <span class="ui">pandion-</span> and ends in
+            <span class="ui">.jmo</span>), and click
+            <span class="ui">Open</span>.
+          </p>
+          <figure class="fig">
+            <img src="assets/jamovi/step-sideload.png" width="2560" height="1600"
+                 data-image-kind="illustrative"
+                 alt="The jamovi library window on its Sideload tab. The
+                      Sideload tab and the large upload arrow in the middle
+                      of the window are highlighted">
+            <figcaption>
+              The Sideload tab reads a module file from your own computer
+              instead of from jamovi's online library.
+            </figcaption>
+          </figure>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-n">5</div>
+        <div class="step-body">
+          <h3>Check the Installed tab</h3>
+          <p>
+            jamovi installs the module in a few seconds and shows
+            <span class="ui">Module installed successfully</span>. Click
+            the <span class="ui">Installed</span> tab and scroll down:
+            <span class="ui">pandion - Plots</span> is listed with its
+            version number. Close the window with the round arrow button
+            at its top-right.
+          </p>
+          <figure class="fig">
+            <img src="assets/jamovi/step-installed.png" width="2560" height="1600"
+                 data-image-kind="illustrative"
+                 alt="The library window's Installed tab, listing
+                      pandion - Plots 3.1.2 by Torry Scott Dennis with
+                      Hide and Remove buttons. The entry is highlighted">
+            <figcaption>
+              The Installed tab after the install. The Remove button here
+              is also how you take the module out again later.
+            </figcaption>
+          </figure>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-n">6</div>
+        <div class="step-body">
+          <h3>Find it on the Plots tab</h3>
+          <p>
+            Click the <span class="ui">Plots</span> tab at the top of the
+            ribbon. A <span class="ui">Pandion Plots</span> button is now
+            there, next to jamovi's own plots.
+          </p>
+          <figure class="fig">
+            <img src="assets/jamovi/step-plots-tab.png" width="2560" height="1600"
+                 data-image-kind="illustrative"
+                 alt="jamovi's ribbon on the Plots tab. The Plots tab and
+                      the new Pandion Plots button, which sits after Bar
+                      Plot, Box Plot, Histogram, Scatter Plot and Line
+                      Plot, are highlighted">
+            <figcaption>
+              After the install, the Plots tab has a Pandion Plots button.
+            </figcaption>
+          </figure>
+          <p>
+            Click it to see the seven chart types and the
+            <span class="ui">Help Me Choose</span> guide. Pick one, drop a
+            variable or two into the boxes, and the chart draws itself
+            beside your analyses, saved in the same .omv file.
+          </p>
+          <figure class="fig">
+            <img src="assets/jamovi/step-analyses.png" width="2560" height="1600"
+                 data-image-kind="illustrative"
+                 alt="The Pandion Plots menu open on the Plots tab, listing
+                      Distribution, Frequencies, Compare Groups, Repeated
+                      Measures, Scatter, Correlation Matrix and Likert /
+                      Survey under Plots, and Help Me Choose under Guide">
+            <figcaption>
+              The Pandion Plots menu. Help Me Choose asks a few questions
+              and recommends a chart.
+            </figcaption>
+          </figure>
+          <p>
+            If the button does not show up right away, quit jamovi and
+            open it again.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="wrap help-grid">
+    <section class="help-card">
+      <h2>If something goes wrong</h2>
+      <h3>Sideload is missing or greyed out</h3>
+      <p>
+        Sideloading needs the jamovi desktop app on your own computer.
+        jamovi Cloud and some managed installations do not allow it; use
+        the <a href="app/">browser app</a> there.
+      </p>
+      <h3>jamovi says the installed version needs to be updated</h3>
+      <p>
+        That message means the file does not match your jamovi line:
+        the jamovi 2.7 file in jamovi 28, or the other way round. Remove
+        it from the library's Installed tab, download the other file
+        above, and repeat step 4. On jamovi 2.7 you need 2.7&#46;32 or
+        later; older 2.7 releases can be updated from
+        <a href="https://www.jamovi.org/download.html">jamovi.org</a>.
+      </p>
+      <h3>The file will not open on a Mac</h3>
+      <p>
+        The macOS module is built for Apple chips (M1 or later). On an
+        Intel Mac, install the <a href="download.html">desktop app</a>
+        instead; it makes the same charts.
+      </p>
+      <h3>Updating later</h3>
+      <p>
+        Download the new file from this page and repeat steps 2 to 4;
+        jamovi replaces the older version. To take the module out, open
+        the library window's <span class="ui">Installed</span> tab and
+        click <span class="ui">Remove</span> on the pandion entry.
+      </p>
+    </section>
+    <section class="help-card">
+      <h2>Next steps</h2>
+      <p>
+        The user guide covers every chart type, the click-to-edit
+        controls, and the statistics panel. The Getting Started guide
+        walks through a first chart in jamovi with an example data set.
+      </p>
+      <div class="help-links">
+        <a href="start-jamovi.html">Getting started in jamovi</a>
+        <a href="docs/">Read the user guide</a>
+        <a href="support.html">Get help</a>
+        <a href="download.html">Desktop app instead</a>
+      </div>
+    </section>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <a class="brand" href="index.html">
+      <img src="assets/pandion-wing.svg" alt=""
+           data-image-kind="decorative">
+      Pandion Plots
+    </a>
+    <span>Made by Torry Scott Dennis, PhD.</span>
+    <span data-role="foot-meta">Version 3.1.2 &middot;
+      <a href="https://github.com/torryscott/pandion/blob/main/LICENSE">GPL-3.0</a>
+    </span>
+    <nav class="foot-links" aria-label="Footer">
+      <a href="app/">Try it</a>
+      <a href="gallery.html">Gallery</a>
+      <a href="learn.html">Learn</a>
+      <a href="docs/">User guide</a>
+      <a href="about.html#cite">How to cite</a>
+      <a href="about.html">About</a>
+      <a href="support.html">Support</a>
+      <a href="accessibility.html">Accessibility</a>
+      <a href="https://github.com/torryscott/pandion">GitHub</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+  // Mark the card for this computer, the way the desktop download page
+  // does. Nothing is hidden: both files stay one click away.
+  (function () {
+    var ua = navigator.userAgent || '';
+    var plat = (navigator.userAgentData && navigator.userAgentData.platform) ||
+               navigator.platform || '';
+    var which = /Mac/i.test(plat) || /Mac OS X/i.test(ua) ? 'mac'
+              : /Win/i.test(plat) || /Windows/i.test(ua) ? 'windows' : '';
+    if (!which) return;
+    var card = document.querySelector('.platform-card[data-platform="' + which + '"]');
+    if (card) card.classList.add('is-recommended');
+    var note = document.getElementById('device-note');
+    if (note) note.textContent = 'Step 1: download the module for your computer. ' +
+      'This looks like ' + (which === 'mac' ? 'a Mac' : 'a Windows PC') +
+      ', so that card is marked.';
+  })();
+</script>
+</body>
+</html>

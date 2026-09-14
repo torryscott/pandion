@@ -21,16 +21,29 @@ jobs:
   build:
     strategy:
       fail-fast: false
+      # One leg per jamovi LINE: a module is compiled against the R inside
+      # the jamovi it targets (2.7 ships R 4.5, 28 ships R 4.6), and jamovi
+      # 28 refuses a module built against any other R. Both lines are
+      # current for users (jamovi.org hands out 28; classrooms still run
+      # 2.7.32), so both ship, as separate files.
       matrix:
         include:
           - os: macos-14
             platform: macos-arm64
+            line: '2.7'
           - os: windows-latest
             platform: win-x64
+            line: '2.7'
+          - os: macos-14
+            platform: macos-arm64
+            line: '28'
+          - os: windows-latest
+            platform: win-x64
+            line: '28'
 
     runs-on: ${{ matrix.os }}
-    name: Build (${{ matrix.platform }})
-    timeout-minutes: 30
+    name: Build (${{ matrix.platform }}, jamovi ${{ matrix.line }})
+    timeout-minutes: 40
 
     steps:
       - name: Checkout
@@ -52,7 +65,13 @@ jobs:
           node scripts/release-version.mjs check "$VERSION"
           node scripts/verify/release-pipeline-check.mjs
 
+      # jamovi 2.7 builds with the jamovi-compiler from GitHub. That compiler
+      # refuses any jamovi newer than 2.7 (installer.js), and its master
+      # still does; jamovi's supported route for 28 is the jmvtools R package
+      # from repo.jamovi.org, which bundles a compiler that accepts 28. It is
+      # installed into jamovi's own bundled R once jamovi is on the runner.
       - name: Install jamovi-compiler
+        if: matrix.line == '2.7'
         run: npm install -g jamovi/jamovi-compiler
 
       # Install the CURRENT jamovi via a package manager that resolves the
@@ -72,8 +91,8 @@ jobs:
           # archives.jamovi.org keeps every version as
           # jamovi-<ver>-macos-<arch>.dmg; it is bot-blocked without a
           # browser user agent, so one is sent.
-          line="2.7"
-          ver="2.7.34.0"
+          line="${{ matrix.line }}"
+          case "$line" in 2.7) ver="2.7.34.0" ;; *) ver="28.2.0.0" ;; esac
           api="$(curl -fsSL --max-time 30 https://formulae.brew.sh/api/cask/jamovi.json | python3 -c 'import json,sys; print(json.load(sys.stdin).get("version",""))' 2>/dev/null || true)"
           case "$api" in "$line".*) ver="$api" ;; esac
           arch="$(uname -m)"; [ "$arch" = "arm64" ] || arch="x64"
@@ -84,7 +103,7 @@ jobs:
           }
           if ! get "$ver"; then
             ok=0
-            for p in $(seq 45 -1 20); do
+            for p in $(seq 45 -1 0); do
               if get "$line.$p.0"; then ver="$line.$p.0"; ok=1; break; fi
             done
             [ "$ok" = 1 ] || { echo "ERROR: no hosted jamovi macOS installer on archives.jamovi.org"; exit 1; }
@@ -126,15 +145,15 @@ jobs:
           # Windows noticed, with "a newer version of the jamovi-compiler is
           # required". Moving to the 28 line is a deliberate decision, not
           # something an API lookup should make for us.
-          $line = "2.7"
-          $ver = "2.7.34.0"
+          $line = "${{ matrix.line }}"
+          $ver = if ($line -eq "2.7") { "2.7.34.0" } else { "28.2.0.0" }
           try {
             $api = (Invoke-RestMethod -UseBasicParsing "https://formulae.brew.sh/api/cask/jamovi.json").version
             if ($api -like "$line.*") { $ver = $api }
           } catch {}
           $ok = Get-Jamovi $ver
           if (-not $ok) {
-            foreach ($p in 45..20) { if (Get-Jamovi "$line.$p.0") { $ver = "$line.$p.0"; $ok = $true; break } }
+            foreach ($p in 45..0) { if (Get-Jamovi "$line.$p.0") { $ver = "$line.$p.0"; $ok = $true; break } }
           }
           if (-not $ok) { Write-Error "No hosted jamovi Windows installer found on archives.jamovi.org"; exit 1 }
           Write-Host "Using jamovi $ver ($((Get-Item jamovi-setup.exe).Length) bytes)"
@@ -197,8 +216,58 @@ jobs:
         shell: bash
         run: |
           echo "JAMOVI_HOME=$JAMOVI_HOME"
-          echo "node: $(node --version) | jmc: $(which jmc)"
-          jmc --build . --home "$JAMOVI_HOME" 2>&1
+          if [ "${{ matrix.line }}" = "2.7" ]; then
+            echo "node: $(node --version) | jmc: $(which jmc)"
+            jmc --build . --home "$JAMOVI_HOME" 2>&1
+          else
+            # jamovi's bundled R installs jmvtools (pure R) and the node
+            # package that carries the node binary its compiler runs on, both
+            # from jamovi's repo. Neither compiles anything, so the source
+            # tarballs install on either runner. Three facts this step rests
+            # on, each learned from a failed run or its local rehearsal:
+            # the macOS Rscript carries a compiled-in R home under
+            # /Library/Frameworks that the runner lacks, and RHOME redirects
+            # it into the app bundle (the relocatable bin/R script the
+            # compiler itself runs does the same); jamovi keeps jmvcore, a
+            # jmvtools import the source install insists on, in its
+            # base-modules library rather than on R's default path; and on
+            # Windows RUNNER_TEMP holds backslashes, so the library path
+            # reaches R through the environment, never an interpolated string.
+            if [ "$RUNNER_OS" = "Windows" ]; then
+              RSCRIPT="$JAMOVI_HOME/Frameworks/R/bin/x64/Rscript.exe"
+              BASE_LIB="$JAMOVI_HOME/Resources/modules/base/R"
+              TMP_DIR="$(cygpath -m "$RUNNER_TEMP")"
+              LIB_SEP=";"
+            else
+              R_RES="$JAMOVI_HOME/Contents/Frameworks/R.framework/Versions/Current/Resources"
+              RSCRIPT="$R_RES/bin/Rscript"
+              BASE_LIB="$JAMOVI_HOME/Contents/Resources/modules/base/R"
+              TMP_DIR="$RUNNER_TEMP"
+              LIB_SEP=":"
+              export RHOME="$R_RES"
+            fi
+            export JMV_RLIB="$TMP_DIR/jmvtools-lib"; mkdir -p "$JMV_RLIB"
+            export R_LIBS="$JMV_RLIB$LIB_SEP$BASE_LIB"
+            for pkg in node jmvtools; do
+              "$RSCRIPT" -e "install.packages('$pkg', repos = 'https://repo.jamovi.org', lib = Sys.getenv('JMV_RLIB'), type = 'source', dependencies = FALSE)"
+            done
+            JMC="$JMV_RLIB/jmvtools/node_modules/jamovi-compiler/index.js"
+            test -f "$JMC" || { echo "jmvtools did not install its compiler at $JMC"; exit 1; }
+            if [ "$RUNNER_OS" = "Windows" ]; then
+              NODE_BIN="$JMV_RLIB/node/node.exe"
+            else
+              NODE_BIN="$JMV_RLIB/node/node-darwin/bin/node"
+            fi
+            # The package's node is an x86_64 binary; if the runner cannot run
+            # it, the runner's own node built the 2.7 line's compiler of the
+            # same version.
+            if ! "$NODE_BIN" --version; then
+              echo "the node package's binary does not run here; using the runner's node"
+              NODE_BIN="node"
+            fi
+            echo "jmvtools compiler: $JMC | node: $NODE_BIN $("$NODE_BIN" --version)"
+            "$NODE_BIN" "$JMC" --build . --home "$JAMOVI_HOME" 2>&1
+          fi
           echo "--- .jmo produced ---"
           find . -maxdepth 1 -name '*.jmo' -type f
 
@@ -223,13 +292,21 @@ jobs:
             echo "ERROR: graphbuilder2.min.js missing from the packaged .jmo"; exit 1
           fi
           echo "OK: minified bundle present in the .jmo"
-          mv "$JMO" "pandion-${{ matrix.platform }}.jmo"
+          # The 2.7 build keeps the historical file name (links in the wild
+          # point at releases/latest/download/pandion-<platform>.jmo); the
+          # 28 build carries a -jamovi28 suffix.
+          if [ "${{ matrix.line }}" = "2.7" ]; then
+            mv "$JMO" "pandion-${{ matrix.platform }}.jmo"
+          else
+            mv "$JMO" "pandion-${{ matrix.platform }}-jamovi28.jmo"
+          fi
+          ls -la pandion-*.jmo
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: jmo-${{ matrix.platform }}
-          path: 'pandion-${{ matrix.platform }}.jmo'
+          name: jmo-${{ matrix.platform }}-jamovi${{ matrix.line }}
+          path: 'pandion-${{ matrix.platform }}*.jmo'
 
   # ---- Desktop (Electron) installers ----
   # The desktop app embeds the SAME single-file build every other channel

@@ -64,7 +64,8 @@ try {
         // so release-version syncs it too (Jul 29 2026).
         'standalone/electron/package.json',
         'docs/user-guide.html', 'website/index.html', 'website/about.html',
-        'website/download.html', 'website/gallery.html', 'website/support.html',
+        'website/download.html', 'website/download-jamovi.html',
+        'website/gallery.html', 'website/support.html',
         // release-version flips the ledger's unreleased marker at release
         // time, so the isolated copy must carry the ledger too (Sep 2026:
         // without it the sync died on a missing file and this check went red).
