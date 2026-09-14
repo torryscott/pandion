@@ -28753,7 +28753,35 @@
   // discipline: the newest entry's version must equal APP_VERSION, so shipping
   // a release without a note here fails the suite.
   var RELEASE_NOTES = [
+    { version: "3.1.3", date: "September 2026", notes: [
+      "The jamovi module now installs on jamovi 28 as well as jamovi 2.7, " +
+        "and the website has a page that walks through installing it step " +
+        "by step, with a screenshot of each step and one download per " +
+        "jamovi version.",
+      "The website's Downloads link lands on the download options instead " +
+        "of a few scrolls above them."
+    ] },
     { version: "3.1.2", date: "September 2026", notes: [
+      "Numbers you can trust: charts and statistics keep the full precision " +
+        "of your data, very small p values no longer round to zero, and " +
+        "every statistic a chart shows is checked against R by a daily " +
+        "fuzzer. The numerical changes ledger lists each fix with the date " +
+        "it went live.",
+      "Distribution gains the Dot plot type. Significance brackets get a " +
+        "This bracket / All brackets scope and follow their bars when the " +
+        "chart flips orientation. The correlation matrix keeps every " +
+        "coefficient when you switch the method to Spearman.",
+      "Safari draws hover highlights and measures charts correctly under " +
+        "browser zoom. On small screens the editing panel keeps to a height " +
+        "budget and scrolls inside itself.",
+      "Projects saved by 3.1.2 need 3.1.2: the file format changed so an " +
+        "older version refuses a newer file instead of misreading it. Older " +
+        "projects still open and show a notice listing what changed.",
+      "Computed cells repaint after edits without losing your place, PDF " +
+        "exports carry tagged figures with text alternatives, and every " +
+        "accessibility violation now blocks a release build."
+    ] },
+    { version: "3.1.1", date: "August 2026", notes: [
       "Nothing changes for you here. Saved palettes and styles are held " +
         "back in the jamovi module at jamovi's request, until they add a " +
         "home for settings that live outside a single file. The browser " +
