@@ -449,6 +449,18 @@ jobs:
       # 404'd. Build it here so every tag carries it. Verify the committed
       # bundle first, so the portable build embeds the same fresh bytes as the
       # .jmo modules.
+      # website/build.sh runs the anchor-landing check, which drives a real
+      # browser; the site verifies resolve Playwright from /private/tmp, the
+      # same install the accessibility job makes. Without it the check exits
+      # 2 and the release is never created (the v3.1.3 tag build).
+      - name: Site verification dependencies
+        run: |
+          sudo mkdir -p /private/tmp
+          sudo chown "$USER" /private/tmp
+          cd /private/tmp
+          npm install playwright@1.62.1
+          npx playwright install --with-deps chromium
+
       - name: Build the portable single-file app
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
