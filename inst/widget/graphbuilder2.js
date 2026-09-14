@@ -48323,28 +48323,35 @@
         // appropriate for an HTML overlay that will be rotated by the
         // same angle as the underlying text. Returns null on failure.
         function _measureInlineTextTarget(textEl) {
-            var localBb, screenCtm;
+            var localBb, visBb;
             try { localBb = textEl.getBBox(); } catch (e) { return null; }
-            try { screenCtm = textEl.getScreenCTM(); } catch (e) { return null; }
-            if (!localBb || !screenCtm) return null;
+            if (!localBb) return null;
             if (!localBb.width || !localBb.height) return null;
-            var pt = svg.createSVGPoint();
-            pt.x = localBb.x + localBb.width / 2;
-            pt.y = localBb.y + localBb.height / 2;
-            var screen = pt.matrixTransform(screenCtm);
+            try { visBb = textEl.getBoundingClientRect(); } catch (e) { return null; }
+            if (!visBb || !(visBb.width > 0) || !(visBb.height > 0)) return null;
             var wrapBb = wrap.getBoundingClientRect();
             // Two spaces meet here: localWidth / localHeight come from
-            // getBBox and are LOGICAL, while the screen point and the
-            // wrap rect are both VISUAL. The editor is an absolutely
+            // getBBox and are LOGICAL, while the label's client rect and
+            // the wrap rect are both VISUAL. The editor is an absolutely
             // positioned child of the zoomed wrap, so its left / top are
             // LOGICAL too - bring the centre into that same space or the
             // box drifts off the label it edits. Exactly 1 in jamovi.
+            // The centre is read off the label's own client rect, never
+            // through getScreenCTM: Safari leaves an ancestor CSS zoom out
+            // of that matrix (the view-zoom drag fix, Sep 2026), so the
+            // matrix route handed back a centre already divided by the
+            // zoom, the division below divided it again, and the editor
+            // opened left of the label at 150 percent, right of and below
+            // it at 75, off the canvas at 50 (Chrome, which includes the
+            // zoom, was fine). A rotated label's client rect is the
+            // axis-aligned box of the rotated text, whose centre IS the
+            // text's centre, so rotation costs nothing here.
             var vs = _gb2ViewScale(svg);
             return {
                 localWidth: localBb.width,
                 localHeight: localBb.height,
-                centerX: (screen.x - wrapBb.left) / vs,
-                centerY: (screen.y - wrapBb.top) / vs
+                centerX: (visBb.left + visBb.width / 2 - wrapBb.left) / vs,
+                centerY: (visBb.top + visBb.height / 2 - wrapBb.top) / vs
             };
         }
         function showInlineTextEditor(dragId, fallbackAnchor) {
