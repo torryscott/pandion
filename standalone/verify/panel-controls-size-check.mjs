@@ -157,17 +157,17 @@ ok(mb.svH === 96, 'the gradient is exactly 96px (' + mb.svH + ')');
 ok(Math.round(mb.chipW) === 22, 'chips are exactly 22px (' + mb.chipW + ')');
 await bare.ctx.close();
 
-console.log('case 5: the removed right-rail leaves nothing behind');
+console.log('case 5: on a tall window the dock (Sep 14 2026) is inert and the Sep 3 rail scaffolding stays gone');
 const last = await open(1512, 900, false);
 const rail = await last.page.evaluate(() => ({
-  dock: !!document.getElementById('ps-engine-dock'),
-  pref: !!document.getElementById('ps-pref-dock'),
+  dockLive: document.getElementById('ps-inspector-chart').classList.contains('ps-dock-live'),
+  beside: document.body.classList.contains('ps-dock-beside'),
+  below: !!document.querySelector('.graphbuilder2-host [data-gb2-inspector][data-gb2-dock="below"]'),
   sw: !!document.querySelector('.ps-dock-switch'),
-  cls: document.body.className.indexOf('ps-dock-rail') !== -1,
-  marker: !!document.querySelector('[data-gb2-inspector]')
+  cls: document.body.className.indexOf('ps-dock-rail') !== -1
 }));
-ok(!rail.dock && !rail.pref && !rail.sw && !rail.cls && !rail.marker,
-  'no dock, preference, switch, body class or panel marker survives (' + JSON.stringify(rail) + ')');
+ok(!rail.dockLive && !rail.beside && rail.below && !rail.sw && !rail.cls,
+  'panel under the chart, no live dock, no switch, no rail class (' + JSON.stringify(rail) + ')');
 // Select something first: with nothing selected there is no panel to find.
 await measure(last.page);
 const below = await last.page.evaluate(() => {

@@ -436,11 +436,12 @@
                              startup: "center", missingTokens: "NA",
                              units: "in", updateCheck: "off",
                              defErrorBars: "", defRmMethod: "",
-                             defAlpha: "" };
+                             defAlpha: "", panelDock: "auto" };
   var APP_PREFS = { density: "comfortable", motion: "system",
                     startup: "center", missingTokens: "NA",
                     units: "in", updateCheck: "off",
-                    defErrorBars: "", defRmMethod: "", defAlpha: "" };
+                    defErrorBars: "", defRmMethod: "", defAlpha: "",
+                    panelDock: "auto" };
   // MEASUREMENT UNITS (Torry, Jul 27 2026: "I see these really large
   // numbers... I think it might be more useful to have these in inches,
   // and maybe an option for metric"). 816 x 1056 is Letter in CSS pixels,
@@ -1003,9 +1004,171 @@
         APP_PREFS.units = saved.units;
       if (saved && /^(on|off)$/.test(saved.updateCheck))
         APP_PREFS.updateCheck = saved.updateCheck;
+      // "rail", the Sep 2026 value the removed right rail stored, falls
+      // through to auto on purpose.
+      if (saved && /^(auto|below|beside)$/.test(saved.panelDock))
+        APP_PREFS.panelDock = saved.panelDock;
     } catch (e) {}
   }
   loadAppPrefs();
+
+  // ---- Editing panel placement (Torry, Sep 14 2026) ----
+  // The engine's editing panel is a consequence of a selection and lives
+  // under the chart. On a window too short to show the chart with a panel
+  // under it (a 1366x768 laptop at 125% scaling gives the page about
+  // 500px, and a bar click there scrolled half the chart away, so the
+  // live preview could not be watched while it was driven) the SAME panel
+  // opens beside the chart instead: in this column, in place of Chart
+  // setup, for exactly as long as something is selected. Nothing shows
+  // here while nothing is selected, and the setup returns the moment the
+  // selection clears. That is the difference from the Sep 3 right rail,
+  // which came out for being a container that had to be kept full (a
+  // mode switch, three empty states). Preference: auto (measured), below,
+  // beside. The engine takes the container through
+  // window.__gb2_inspectorDockHost = { el, active } and asks active() per
+  // placement; jamovi never ships the key and is untouched.
+  var DOCK_BESIDE = false, DOCK_LIVE_WAS = false, DOCK_SYNC_QUEUED = false;
+  function panelDockPref() {
+    return /^(auto|below|beside)$/.test(APP_PREFS.panelDock) ? APP_PREFS.panelDock : "auto";
+  }
+  // The automatic rule, measured rather than guessed from a screen size:
+  // beside when a panel under the chart would cover more than 40% of it.
+  // The panel is taken as 280px (a Bar panel with its picker; the cap
+  // floors at 240), the chart's rendered height as its logical height at
+  // the Fit scale the pane allows, plus the toolbar. A hysteresis band
+  // (55% to 65%) keeps the answer steady at the edge, where the column's
+  // own width change (330 vs 380) moves the pane and would flip it back.
+  // Tuned against five real laptop geometries (panel-dock-check): a
+  // 1366x768 laptop at 125% or 100% scaling goes beside; a 1080p laptop at
+  // 125% and a MacBook Air stay below.
+  function dockAutoBeside(cur) {
+    var pane = document.querySelector(".ps-main-workspace");
+    if (!pane) return cur;
+    var paneH = pane.clientHeight, paneW = pane.clientWidth;
+    var lw = chartLogicalWidthPx(), lh = chartLogicalHeightPx();
+    if (!(paneH > 0 && paneW > 0 && lw > 0 && lh > 0)) return cur;
+    var chartH = lh * Math.min(1, (paneW - 4) / lw) + 64;
+    var frac = (paneH - 280) / chartH;
+    if (frac < 0.55) return true;
+    if (frac > 0.65) return false;
+    return cur;
+  }
+  function dockModeRecompute() {
+    var pref = panelDockPref();
+    var want = pref === "beside" ? true
+             : pref === "below" ? false : dockAutoBeside(DOCK_BESIDE);
+    var changed = want !== DOCK_BESIDE;
+    DOCK_BESIDE = want;
+    try { document.body.classList.toggle("ps-dock-beside", want); } catch (e) {}
+    return changed;
+  }
+  function panelDockWanted() { return DOCK_BESIDE; }
+  function dockSlot() { return el("ps-engine-dock-slot"); }
+  // A panel showing under the chart right now (the engine keeps one
+  // there when the answer is below, or before the first placement).
+  function dockPanelBelow() {
+    try {
+      var host = hostEl();
+      if (!host) return false;
+      var ps = host.querySelectorAll("[data-gb2-inspector]");
+      for (var i = 0; i < ps.length; i++) {
+        if (ps[i].style.display === "none") continue;
+        if (ps[i].getBoundingClientRect().height < 2) continue;
+        return true;
+      }
+    } catch (eB) {}
+    return false;
+  }
+  function applyPanelDock(rerender) {
+    var slot = dockSlot();
+    try {
+      window.__gb2_inspectorDockHost = slot ? { el: slot, active: panelDockWanted } : null;
+    } catch (e0) {}
+    dockModeRecompute();
+    try { splitApply(); } catch (e1) {}
+    // Re-place an open panel through the engine's hook: a full render
+    // would hash-skip (the payload has not changed) and leave it put.
+    if (rerender) {
+      try { if (window.__gb2_inspectorDockSync) window.__gb2_inspectorDockSync(); } catch (e2) {}
+    }
+    syncDockLive();
+  }
+  // A window resize can change the automatic answer. The pane observer
+  // (wireFitToPane) debounces resizes for Fit and calls this first, so
+  // an open panel moves before Fit measures the pane.
+  function dockResizeCheck() {
+    if (!dockModeRecompute()) return;
+    try { splitApply(); } catch (e1) {}
+    try { if (window.__gb2_inspectorDockSync) window.__gb2_inspectorDockSync(); } catch (e2) {}
+    syncDockLive();
+  }
+  // Live = the slot holds a SHOWN panel. Read from the DOM the engine
+  // writes, never from a flag of our own, so the two cannot disagree.
+  // The INLINE display, not the computed one: the engine hides and shows
+  // its panel by writing style.display, and while the dock is hidden
+  // WebKit does not recompute styles inside it, so a computed read came
+  // back "none" from before and the dock could never reopen after Done
+  // (Torry's Safari report, Sep 14 2026).
+  function syncDockLive() {
+    var pane = el("ps-inspector-chart"), slot = dockSlot();
+    if (!pane || !slot) return;
+    var live = false;
+    for (var i = 0; i < slot.children.length; i++) {
+      try {
+        if (slot.children[i].style.display !== "none") { live = true; break; }
+      } catch (eD) {}
+    }
+    pane.classList.toggle("ps-dock-live", live);
+    var card = el("ps-settings-panel");
+    if (card) card.classList.toggle("ps-dock-head-off", live);
+    if (live !== DOCK_LIVE_WAS) {
+      if (live) {
+        try { var col = document.querySelector(".ps-controls"); if (col) col.scrollTop = 0; } catch (eS) {}
+        // Beside the chart nothing needs revealing: the height the reserve
+        // gave the host for scrolling to a panel under the chart would only
+        // leave the pane scrollable (and the Fit trim chasing an overflow
+        // the chart cannot shrink away), so it goes, and the chart sits at
+        // the top.
+        try {
+          var rh = hostEl();
+          if (rh) rh.style.minHeight = "";
+          RESERVE_HOST = null; reserveStopWatch();
+          var sc0 = el("ps-main-workspace"); if (sc0) sc0.scrollTop = 0;
+        } catch (eR) {}
+      }
+      // Fit may fill the pane's height while the panel is beside.
+      try { fitSchedule(); } catch (eF) {}
+      try {
+        var lv = el("ps-dock-live");
+        if (lv) lv.textContent = live
+          ? "Chart part editor open beside the chart; Done or Escape returns to Chart setup"
+          : "Chart setup";
+      } catch (eL) {}
+    }
+    DOCK_LIVE_WAS = live;
+  }
+  function queueDockSync() {
+    if (DOCK_SYNC_QUEUED) return;
+    DOCK_SYNC_QUEUED = true;
+    try {
+      window.requestAnimationFrame(function () { DOCK_SYNC_QUEUED = false; syncDockLive(); });
+    } catch (eQ) { DOCK_SYNC_QUEUED = false; syncDockLive(); }
+  }
+  (function wireDock() {
+    var slot = dockSlot();
+    if (!slot) return;
+    try {
+      new window.MutationObserver(queueDockSync).observe(slot, {
+        childList: true, subtree: true, attributes: true,
+        attributeFilter: ["style", "class"] });
+    } catch (eO) {}
+    var done = el("ps-dock-done");
+    if (done) done.addEventListener("click", function (ev) {
+      try { ev.stopPropagation(); } catch (eP) {}
+      try { if (window.__gb2_inspectorClear) window.__gb2_inspectorClear(); } catch (eC) {}
+    });
+  })();
+  applyPanelDock(false);   // the hook must precede the first render
 
   // ================================================================ table
   // Raw string cells + per-column declared type; the typed view (numbers /
@@ -7425,6 +7588,9 @@
     // change its appearance, and that is a call to make deliberately
     // rather than as a side effect of a standalone fix.
     payload.panelFitControls = true;
+    // The editing panel may dock beside the chart; the host published in
+    // __gb2_inspectorDockHost answers per placement (see applyPanelDock).
+    payload.inspectorDock = "host";
     // Scatter-overlay re-ship: harvested engine-computed arrays return
     // to the payload while the data fingerprint still matches (R
     // parity - jamovi recomputes and ships them every run). A stale
@@ -10721,7 +10887,11 @@
     var otherKey = key === "rail" ? "inspector" : "rail";
     var other = Number(splitWidths()[otherKey]) || SPLIT_DEFAULT[otherKey];
     var max = Math.max(b[0], Math.min(b[1], total - other - 320));
-    var preferred = Number(splitWidths()[key]) || SPLIT_DEFAULT[key];
+    // Beside the chart the editing panel wants 380px (Torry, Sep 14
+    // 2026); a width the user dragged still wins. Set here, not in the
+    // stylesheet: splitApply writes the custom property inline.
+    var preferred = Number(splitWidths()[key]) ||
+      ((key === "inspector" && panelDockWanted()) ? 380 : SPLIT_DEFAULT[key]);
     return {
       min: b[0],
       max: Math.round(max),
@@ -10899,9 +11069,9 @@
     doc.fitPane = false;
     syncAll();
   }
-  function chartLogicalWidthPx() {
+  function chartLogicalSvg() {
     var host = hostEl();
-    if (!host) return 0;
+    if (!host) return null;
     var svgs = host.querySelectorAll("svg");
     var best = null, bestA = 0;
     for (var i = 0; i < svgs.length; i++) {
@@ -10909,7 +11079,15 @@
               (Number(svgs[i].getAttribute("height")) || 0);
       if (a > bestA) { bestA = a; best = svgs[i]; }
     }
+    return best;
+  }
+  function chartLogicalWidthPx() {
+    var best = chartLogicalSvg();
     return best ? Number(best.getAttribute("width")) || 0 : 0;
+  }
+  function chartLogicalHeightPx() {
+    var best = chartLogicalSvg();
+    return best ? Number(best.getAttribute("height")) || 0 : 0;
   }
   // TOOLBAR ALIGNMENT (Torry's report, Jul 27 2026: the graph-type and
   // palette dropdowns open far to the right of the buttons that summon
@@ -10989,23 +11167,74 @@
     }
     var mode = doc.viewZoom == null ? "fit" : doc.viewZoom;
     var S = 1;
+    var fitGrew = false;
     if (mode === "fit") {
       var pane = document.querySelector(".ps-main-workspace");
       var availW = pane ? pane.clientWidth - 4 : 0;
       var logical = chartLogicalWidthPx();
-      // Fit means "make it visible", never "make it bigger": auto-scaling
-      // up would re-create the huge-monitor problem the standard size
-      // exists to prevent.
-      S = (availW > 40 && logical > 0) ? Math.min(1, availW / logical) : 1;
+      if (!panelDockWanted()) {
+        // Fit means "make it visible", never "make it bigger": auto-scaling
+        // up would re-create the huge-monitor problem the standard size
+        // exists to prevent.
+        S = (availW > 40 && logical > 0) ? Math.min(1, availW / logical) : 1;
+      } else {
+        // The one exception (Torry, Sep 2026): with the editing panel
+        // beside the chart the pane's HEIGHT is the chart's to use, and a
+        // short laptop pane is the opposite of a huge monitor. Fit may
+        // magnify to 1.5, bounded by both axes and trimmed below until
+        // nothing overflows; with a panel still under the chart it
+        // shrinks only, as ever.
+        var availH = pane ? pane.clientHeight - 4 : 0;
+        var logicalH = chartLogicalHeightPx();
+        var fitS = (availW > 40 && logical > 0)
+          ? Math.min(availW / logical,
+                     (availH > 40 && logicalH > 0) ? availH / logicalH : 1)
+          : 1;
+        S = dockPanelBelow() ? Math.min(1, fitS) : Math.min(1.5, fitS);
+        fitGrew = S > 1;
+      }
     } else {
       S = Number(mode) || 1;
     }
-    // Fit never magnifies (the huge-monitor rule); the explicit 125/150
-    // choices may (engine fix approved Jul 28 2026 - _ensureChartRoomFor
-    // measures in logical units now, so magnified redraws hold the canvas).
+    // Fit never magnifies (the huge-monitor rule) except beside a docked
+    // panel; the explicit 125/150 choices may (engine fix approved Jul 28
+    // 2026 - _ensureChartRoomFor measures in logical units now, so
+    // magnified redraws hold the canvas).
     S = Math.max(0.35, Math.min(2, S));
     host.style.zoom = Math.abs(S - 1) < 0.005
       ? "" : String(Math.round(S * 1000) / 1000);
+    if (mode === "fit" && panelDockWanted() && !dockPanelBelow()) {
+      // Beside the panel the whole chart has to stay on screen, and the
+      // chart's chrome (tab strip, toolbar, note) is not in the logical
+      // size: trim the scale until the pane holds it all in whichever
+      // axis overflows, magnified or not. The rendered overflow at the
+      // current scale is an underestimate of the logical cut, so this
+      // converges in a few steps rather than one. Layout reads after a
+      // style write are synchronous.
+      var grewPane = document.querySelector(".ps-main-workspace");
+      // A reserved minimum height (the scroll-to-panel allowance) is
+      // never wanted here and would read as overflow the scale cannot
+      // remove.
+      try { if (host.style.minHeight) host.style.minHeight = ""; } catch (eMh) {}
+      var gw = chartLogicalWidthPx(), gh = chartLogicalHeightPx();
+      var setZ = function (v) {
+        host.style.zoom = Math.abs(v - 1) < 0.005
+          ? "" : String(Math.round(v * 1000) / 1000);
+      };
+      for (var gp = 0; grewPane && gp < 6 && S > 0.35; gp++) {
+        var oX = grewPane.scrollWidth - grewPane.clientWidth;
+        var oY = grewPane.scrollHeight - grewPane.clientHeight;
+        if (oX <= 1 && oY <= 1) break;
+        var cut = Math.max(oX > 1 && gw > 0 ? (oX + 2) / gw : 0,
+                           oY > 1 && gh > 0 ? (oY + 2) / gh : 0);
+        if (!(cut > 0)) break;
+        var trialS = Math.max(0.35, S - cut);
+        if (trialS >= S) break;
+        setZ(trialS);
+        S = trialS;
+      }
+      fitGrew = S > 1;
+    }
     if (mode === "fit" && S < 1) {
       // The engine wrap carries chrome (margins, padding) the width math
       // cannot see from the svg alone. Rather than model it, measure it:
@@ -11227,6 +11456,7 @@
     if (FIT_TIMER) window.clearTimeout(FIT_TIMER);
     FIT_TIMER = window.setTimeout(function () {
       FIT_TIMER = null;
+      try { dockResizeCheck(); } catch (eDk) {}
       applyViewZoom();
     }, 60);
   }
@@ -11305,6 +11535,8 @@
   function revealPanelAfterClick(panel, clickY) {
     var scroller = el("ps-main-workspace");
     if (!scroller || !panel) return 0;
+    // Beside the chart there is nothing to scroll into view.
+    if (panel.closest && panel.closest("#ps-engine-dock")) return 0;
     var sr = scroller.getBoundingClientRect();
     var pr = panel.getBoundingClientRect();
     if (pr.height < 40) return 0;
@@ -25442,6 +25674,7 @@
     el("ps-inspector-pinboard").classList.toggle("ps-inspector-active",
       ws === "pinboard");
     syncSizeviewDisclosure();
+    try { dockModeRecompute(); syncDockLive(); } catch (eDk) {}
     var fitBox = el("ps-fit-pane");
     if (fitBox) {
       var fitDoc = workspaceDocument(ws);
@@ -27553,6 +27786,7 @@
     el("ps-pref-export-dpi").value = String(exp.dpi);
     el("ps-pref-missing").value = APP_PREFS.missingTokens;
     if (el("ps-pref-updates")) el("ps-pref-updates").value = APP_PREFS.updateCheck;
+    if (el("ps-pref-dock")) el("ps-pref-dock").value = panelDockPref();
     if (el("ps-pref-def-eb")) el("ps-pref-def-eb").value = APP_PREFS.defErrorBars;
     if (el("ps-pref-def-rmm")) el("ps-pref-def-rmm").value = APP_PREFS.defRmMethod;
     if (el("ps-pref-def-alpha")) el("ps-pref-def-alpha").value = APP_PREFS.defAlpha;
@@ -27667,6 +27901,7 @@
     el("ps-pref-units").value = APP_PREFS_DEFAULTS.units;
     el("ps-pref-missing").value = APP_PREFS_DEFAULTS.missingTokens;
     if (el("ps-pref-updates")) el("ps-pref-updates").value = APP_PREFS_DEFAULTS.updateCheck;
+    if (el("ps-pref-dock")) el("ps-pref-dock").value = APP_PREFS_DEFAULTS.panelDock;
     if (el("ps-pref-def-eb")) el("ps-pref-def-eb").value = "";
     if (el("ps-pref-def-rmm")) el("ps-pref-def-rmm").value = "";
     if (el("ps-pref-def-alpha")) el("ps-pref-def-alpha").value = "";
@@ -27694,6 +27929,12 @@
       APP_PREFS.defAlpha =
         /^(0\.1|0\.05|0\.01|0\.001)$/.test(el("ps-pref-def-alpha").value)
           ? el("ps-pref-def-alpha").value : "";
+    if (el("ps-pref-dock")) {
+      var dockWas = panelDockPref();
+      var dockNow = el("ps-pref-dock").value;
+      APP_PREFS.panelDock = /^(auto|below|beside)$/.test(dockNow) ? dockNow : "auto";
+      if (APP_PREFS.panelDock !== dockWas) applyPanelDock(true);
+    }
     if (el("ps-pref-updates")) {
       APP_PREFS.updateCheck = el("ps-pref-updates").value === "on" ? "on" : "off";
       // Just turned on: run the standard (stamp-respecting) check now
