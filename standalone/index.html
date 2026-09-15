@@ -1951,7 +1951,10 @@
     flex-wrap: nowrap !important;
     justify-content: flex-start !important;
     gap: 6px !important;
-    margin: 0 0 9px !important;
+    /* No margin on the strip itself: it carries the chrome counter-zoom,
+       and Safari resolved a margin on it at two sizes across a rebuild
+       (see the chart-wrap rule below). The 9px gap under it lives there. */
+    margin: 0 !important;
     padding: 6px 9px !important;
     color: var(--ps-ink-3) !important;
     background: var(--ps-s2) !important;
@@ -1968,6 +1971,23 @@
   }
   .graphbuilder2-host [data-role="chart-toolbar"]::-webkit-scrollbar {
     display: none;
+  }
+  /* The 9px gap between the toolbar and the chart lives on the chart wrap
+     (the card child that holds the chart svg; the strip sits above it by
+     flex order, and the engine may one day insert other chrome before it,
+     so the wrap is picked by what it contains, not by position). It used
+     to be the strip's margin-bottom, and in Safari a margin on an element
+     that carries its own zoom inside a zoomed host resolved at two sizes
+     across a rebuild: 9px x 1.299 x 0.77 = 9 in one frame, 9px x 0.77 =
+     6.9 in the next, so whenever Fit had shrunk the chart (the panel
+     beside it, or a laptop pane narrower than the chart with the panel
+     under it) the chart sat 2px higher from the local re-render until the
+     echo, then dropped back (Torry, Sep 14 2026; WebKit reproduces it,
+     Chromium never did). In the host's own space the gap is one zoom
+     level deep, and scaled by the chrome counter-zoom it stays 9 visual
+     px at every view zoom, exactly as the strip itself does. */
+  .graphbuilder2-host [data-role="chart-card"] > div:has(> svg[data-role="gb2-chart-svg"]) {
+    margin-top: calc(9px * var(--ps-chrome-zoom, 1)) !important;
   }
   .graphbuilder2-host [data-role="toolbar-make"],
   .graphbuilder2-host [data-role="toolbar-actions"] {
@@ -2742,6 +2762,13 @@
     grid-area: inspector; min-width: 0; min-height: 0; margin: 0; padding: 0;
     overflow: auto; border: 0; border-left: 1px solid var(--ps-l2b); border-radius: 0;
     background: var(--ps-s1); box-shadow: none;
+    /* This column is the scroller the docked editing panel rebuilds inside
+       on every edit, so it opts out of scroll anchoring for the same reason
+       the chart pane does (see .ps-main-workspace); the property only acts
+       on the scroll box it is set on, which is why the rule sits here and
+       not on the dock slot. Nothing else in the column changes height on
+       its own. */
+    overflow-anchor: none;
   }
   .ps-inspector-head {
     display: flex; flex-direction: column; gap: 2px; padding: 11px 13px 9px;
@@ -3058,6 +3085,22 @@
   .ps-main-workspace {
     grid-area: main; position: relative; min-width: 0; min-height: 0;
     overflow: auto; padding: 0;
+    /* No browser scroll anchoring in the chart pane (Torry, Sep 14 2026,
+       Safari: the chart jumped after an edit). An edit re-renders the
+       chart, which rebuilds the whole chart subtree in one task, and
+       Safari 27's scroll anchoring (Chromium and Firefox have had it for
+       years, Safari 26 and earlier never) picks an anchor node inside that
+       subtree, sees it displaced mid-rebuild, and moves the pane to "keep
+       it still": about 51px, clamped to whatever scroll room is left, so
+       31px in WebKit at 1470x720 once the panel had been revealed. It is
+       one-way and paints at the rebuild. Chromium's anchor choice nets to
+       zero, which is why no headless probe saw it. This pane's scrolling
+       is managed explicitly (the reveal after a click, the height reserve,
+       the no-scroll-back ruling of Aug 19 2026), so the browser's
+       adjustments only ever fought it. The other half of the report, the
+       chart returning a second later, is the toolbar margin; see the
+       chart-toolbar rules. */
+    overflow-anchor: none;
   }
   /* Punch list 45 and 26. A 48px sticky heading with a blurred translucent
      background - the marketing site's own header recipe - naming the active
