@@ -85,9 +85,10 @@ const wel = await page.evaluate(() => ({
     fakeBars: document.querySelectorAll('.ps-template-preview i').length,
     launchIcons: document.querySelectorAll('.ps-launch-icon svg').length
 }));
-// Four since Aug 24 2026: the student wellbeing survey leads the list
-// (examples-check case 1 owns the order and count contract).
-ok(wel.slots === 4 && wel.drawn === 4,
+// Three since Sep 14 2026: the course feedback survey was retired and the
+// student wellbeing survey is the Likert door (examples-check case 1 owns
+// the order and count contract; this only asks that every card draws).
+ok(wel.slots === 3 && wel.drawn === 3,
    `every example dataset carries the drawing of the analysis it suits ` +
    `(${wel.drawn} of ${wel.slots})`);
 ok(wel.fakeBars === 0,
