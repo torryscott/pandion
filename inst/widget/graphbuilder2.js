@@ -3555,6 +3555,19 @@
             _gb2AuthRender = !!window.__gb2_authoritativeRender;
             window.__gb2_authoritativeRender = false;
         } catch (_eAu) {}
+        // An OPEN color picker commits only when it closes, so a render
+        // that lands while it is open would rebuild the panel from data
+        // that has never seen the picked color and put the old one back
+        // (Torry, Sep 14 2026: recolor a bar, switch to another, pick its
+        // color; the first bar's commit flushes 1.5s later and its echo
+        // reverted the second). The previous render's picker registers
+        // its in-place commit on the window; calling it FIRST here queues
+        // the picked color like any other edit, so the overlay below
+        // carries it into this render and the flush persists it. A closed
+        // or untouched picker makes this a no-op.
+        try {
+            if (typeof window.__gb2_commitPickerInPlace === "function") window.__gb2_commitPickerInPlace();
+        } catch (_ePkC) {}
         // Override R's data with anything we know is more current.
         // Two sources, in DESCENDING age order:
         //   __gb2_recentCommits - flushed via _flushOpts but R may
@@ -26751,6 +26764,10 @@
         // preview swatch + the hex input, then fires onCommit so the
         // chart updates live.
         var _picker = null;  // lazily created on first openColorPicker call
+        // The next render commits this picker's uncommitted color at its
+        // entry through this hook (see the render-entry note); the hook
+        // always names the CURRENT render's picker.
+        try { window.__gb2_commitPickerInPlace = _commitColorPickerInPlace; } catch (_ePkH) {}
         var _pickerSkipNextDocClick = false;  // suppresses the opening-click bubble
         // When the picker is auto-opened by the inspector panel (so a
         // color control is "always visible" alongside its section), we

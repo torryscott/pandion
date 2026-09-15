@@ -10753,10 +10753,51 @@
   // nothing is lost. Only the echo timer routes through here - direct
   // render() calls (workspace switches) still tear down, because the
   // user asked to leave.
+  //
+  // Echoes ALSO hold while a pointer is down on the chart or on the
+  // docked editing panel (Torry, Sep 14 2026: "switch to a new bar,
+  // grab the HSV marker at once, and about a second later it is ripped
+  // from my mouse and put back where it was"). The previous bar's color
+  // commit flushes 1.5s after its last edit; the engine defers that
+  // flush while a pointer is down INSIDE ITS HOST, but the docked panel
+  // lives in the controls column, so a drag on the docked picker did not
+  // count, the flush fired mid-drag, this echo rebuilt the panel under
+  // the pointer (pointer capture lost, drag over), and the new bar's
+  // uncommitted color snapped back. A held echo replays 120ms after the
+  // release; the release's own commit is already pending by then, so the
+  // replayed render carries the dragged color forward. The 3s activity
+  // cap mirrors the jamovi delivery guard: a pointer that vanished
+  // without a release cannot hold echoes forever.
+  var GESTURE_DOWN = false, GESTURE_AT = 0;
+  function gestureLive() {
+    return GESTURE_DOWN && (Date.now() - GESTURE_AT) < 3000;
+  }
+  (function wireGestureHold() {
+    function end() { GESTURE_DOWN = false; }
+    document.addEventListener("pointerdown", function (e) {
+      if (!e.isTrusted) return;
+      var t = e.target;
+      if (t && t.closest &&
+          t.closest(".graphbuilder2-host, #ps-engine-dock-slot")) {
+        GESTURE_DOWN = true;
+        GESTURE_AT = Date.now();
+      }
+    }, true);
+    document.addEventListener("pointermove", function () {
+      if (GESTURE_DOWN) GESTURE_AT = Date.now();
+    }, true);
+    document.addEventListener("pointerup", end, true);
+    document.addEventListener("pointercancel", end, true);
+    window.addEventListener("blur", end);
+  })();
   function renderWhenEditorIdle() {
     if (document.querySelector(
           'textarea[data-role="inline-text-editor"]')) {
       echoTimer = window.setTimeout(renderWhenEditorIdle, 300);
+      return;
+    }
+    if (gestureLive()) {
+      echoTimer = window.setTimeout(renderWhenEditorIdle, 120);
       return;
     }
     render();
