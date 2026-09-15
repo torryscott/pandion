@@ -9452,6 +9452,20 @@
           } catch (e) {}
           try { fitSchedule(); } catch (e2) {}
         }
+        // Re-adopt the Zoom select into the strip the engine just rebuilt
+        // IN THIS TASK, before anything paints (Torry, Sep 14 2026: the
+        // toolbar "flashed and reset" on every stat change). The engine's
+        // rebuild discards the old strip, so the select is out of the
+        // document until it is re-appended; the two re-dock paths below
+        // (the post-render timer and the host observer) both run on a
+        // zero-delay timer, and the browser paints between the render
+        // task and that timer, so one or two frames showed the strip
+        // without the select and the right-hand cluster jumped by the
+        // select's width and back. Every engine render, the shell's own
+        // and the engine's local ones, passes through this wrapper, so
+        // this is the one place that covers them all; the timers stay as
+        // backstops and the re-dock is idempotent.
+        try { dockChartZoomInToolbar(); } catch (e3) {}
       }
     };
     wrapped.__psZoomWrapped = true;
