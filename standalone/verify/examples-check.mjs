@@ -36,15 +36,17 @@ function ok(cond, msg) {
 await page.goto(pageUrl);
 await page.waitForTimeout(500);
 
-console.log('case 1: four examples are offered, the all-seven sample first');
+console.log('case 1: three examples are offered, the all-seven sample first');
 const cards = await page.evaluate(() =>
     Array.from(document.querySelectorAll('[data-example]')).map(b => ({
         id: b.getAttribute('data-example'),
         title: (b.querySelector('strong') || {}).textContent,
         suits: (b.querySelectorAll('.ps-template-copy span')[0] || {}).textContent
     })));
-ok(cards.length === 4,
-   `the start centre offers four example datasets (${cards.length})`);
+// The Course feedback survey card was removed Sep 14 2026 (Torry); the
+// wellbeing sample is the Likert door now, so three cards remain.
+ok(cards.length === 3,
+   `the start centre offers three example datasets (${cards.length})`);
 // Torry's ruling (Aug 24 2026): the all-seven wellbeing sample LEADS the
 // list. Existing paths are unmoved anyway, because they are id-keyed:
 // #ps-welcome-sample stays on the dose card and loadSample() still
@@ -58,10 +60,14 @@ const sampleBtn = await page.evaluate(() => {
 ok(sampleBtn === 'dose',
    '#ps-welcome-sample still means the dose study, so every existing ' +
    'path is unmoved');
+const likertDoor = await page.evaluate(() =>
+    window.PS_SHELL.examples()
+        .filter(e => e.fits.indexOf('likertplotbuilder') !== -1)
+        .map(e => e.id));
 ok(cards.some(c => /Repeated Measures/.test(c.suits || '')) &&
-   cards.some(c => /Likert/.test(c.suits || '')),
-   `and between them they name the two analyses the old one could not show ` +
-   `(${JSON.stringify(cards.map(c => c.suits))})`);
+   likertDoor.length >= 1 && cards.some(c => c.id === likertDoor[0]),
+   `and between them they cover the two analyses the old one could not show ` +
+   `(RM named on a card; Likert via ${JSON.stringify(likertDoor)})`);
 
 if (await page.locator('#ps-welcome').isVisible()) {
     await page.click('#ps-welcome-sample');
@@ -145,7 +151,7 @@ const offered = await page.evaluate(async () => {
     return { offeredExample: true, pill: pill ? pill.textContent : '',
              name: window.PS_SHELL.project.name };
 });
-ok(offered.offeredExample && /Course feedback/.test(offered.pill || ''),
+ok(offered.offeredExample && /Student wellbeing/.test(offered.pill || ''),
    `replacing a project that HAS work offers it straight back ` +
    `("${(offered.pill || '').slice(0, 80)}")`);
 const restored = await page.evaluate(async () => {
@@ -157,10 +163,13 @@ const restored = await page.evaluate(async () => {
 ok(restored === 'My real analysis',
    `and taking it restores the work (${restored})`);
 
-console.log('case 4: the feedback survey can actually demonstrate Likert');
+console.log('case 4: the wellbeing survey can actually demonstrate Likert');
 const lk = await page.evaluate(async () => {
     const sleep = ms => new Promise(r => setTimeout(r, ms));
-    window.PS_SHELL.loadSample('feedback');
+    window.PS_SHELL.loadSample('wellbeing');
+    await sleep(600);
+    // it lands on Compare Groups; its Likert roles are pre-assigned
+    window.PS_SHELL.setModule('likertplotbuilder');
     await sleep(1000);
     const c = window.PS_SHELL.chart();
     const p = window.PS_SHELL.buildPayload();
@@ -183,7 +192,7 @@ console.log('case 5: an example never demonstrates what it cannot');
 const audit = await page.evaluate(async () => {
     const sleep = ms => new Promise(r => setTimeout(r, ms));
     const out = [];
-    for (const id of ['dose', 'practice', 'feedback', 'wellbeing']) {
+    for (const id of ['dose', 'practice', 'wellbeing']) {
         window.PS_SHELL.loadSample(id);
         await sleep(400);
         const roles = window.PS_SHELL.chart().roles || {};

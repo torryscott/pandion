@@ -307,7 +307,7 @@ if (want('stats')) {
 if (want('choose')) {
     // Chart-only shots, one per data shape. The dose sample covers five
     // analyses; the practice example covers RM + a 4-variable matrix;
-    // the feedback example covers Likert.
+    // the wellbeing example covers Likert.
     const chartOnly = async (page) =>
         clipAround(page, '#psroot svg[data-role="gb2-chart-svg"]', null,
             { left: 8, right: 8, top: 8, bottom: 8 });
@@ -365,12 +365,14 @@ if (want('choose')) {
         await ctx.close();
     }
 
-    {   // feedback example: Likert
+    {   // wellbeing example: Likert (its five q-items on one 1-5 scale)
         const { ctx, page } = await session({ welcome: true });
         await page.waitForSelector('#ps-welcome', { timeout: 10000 });
-        await page.click('[data-example="feedback"]');
+        await page.click('[data-example="wellbeing"]');
         await page.waitForTimeout(1200);
         await chartsReady(page);
+        await page.evaluate(() => window.PS_SHELL.setModule('likertplotbuilder'));
+        await waitChart(page);
         await shot(page, 'ch-likert.png', await chartOnly(page));
         await ctx.close();
     }

@@ -533,11 +533,15 @@ await pageL.goto(pageUrl);
 await pageL.waitForTimeout(1300);
 await pageL.evaluate(() => {
     const card = Array.from(document.querySelectorAll('button, [role="button"], div'))
-        .find(x => /Course feedback survey/.test(x.textContent || '') &&
+        .find(x => /Student wellbeing survey/.test(x.textContent || '') &&
                    x.getBoundingClientRect().height < 90 &&
                    x.getBoundingClientRect().height > 20);
     card.click();
 });
+await pageL.waitForTimeout(1600);
+// The wellbeing sample lands on Compare Groups; its Likert roles are
+// pre-assigned, so switching the analysis draws the battery.
+await pageL.evaluate(() => window.PS_SHELL.setModule('likertplotbuilder'));
 await pageL.waitForTimeout(2400);
 try {
     const gotL = pageL.locator('button', { hasText: 'Got it' }).first();

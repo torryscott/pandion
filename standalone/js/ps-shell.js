@@ -736,36 +736,9 @@
                                          "session4"] },
                distplotbuilder: { var: "session1", groupVar: "group" },
                plotbuilder: { xvar: "group", yvar: "session4" } } },
-    { id: "feedback", name: "Course feedback survey",
-      blurb: "Five agreement items on one 1-5 scale, plus year of study.",
-      good: "Likert, Frequencies, Compare Groups",
-      fits: ["likertplotbuilder", "freqplotbuilder"],
-      table: {
-        name: "sample-course-feedback",
-        header: ["year", "clear", "paced", "useful", "supported",
-                 "recommend"],
-        rows: [
-          ["First", "4", "3", "5", "4", "4"], ["First", "5", "4", "5", "5", "5"],
-          ["First", "3", "2", "4", "3", "3"], ["First", "4", "4", "4", "4", "4"],
-          ["First", "2", "1", "3", "2", "2"], ["First", "5", "4", "5", "4", "5"],
-          ["First", "4", "3", "4", "4", "4"], ["First", "3", "3", "4", "3", "3"],
-          ["Second", "5", "5", "5", "5", "5"], ["Second", "4", "4", "5", "4", "4"],
-          ["Second", "4", "3", "4", "5", "4"], ["Second", "3", "4", "4", "4", "3"],
-          ["Second", "5", "4", "5", "5", "5"], ["Second", "2", "3", "1", "3", "2"],
-          ["Second", "4", "4", "4", "4", "4"], ["Second", "5", "5", "4", "5", "5"],
-          ["Third", "3", "2", "4", "3", "3"], ["Third", "4", "3", "5", "4", "4"],
-          ["Third", "5", "4", "5", "5", "5"], ["Third", "2", "1", "2", "1", "2"],
-          ["Third", "4", "4", "4", "4", "4"], ["Third", "3", "3", "4", "4", "3"],
-          ["Third", "5", "5", "5", "4", "5"], ["Third", "4", "3", "4", "4", "4"]
-        ]
-      },
-      types: { year: "nominal", clear: "ordinal", paced: "ordinal",
-               useful: "ordinal", supported: "ordinal", recommend: "ordinal" },
-      roles: { likertplotbuilder: { items: ["clear", "paced", "useful",
-                                            "supported", "recommend"] },
-               freqplotbuilder: { var: "clear", groupVar: "year" },
-               plotbuilder: { xvar: "year", yvar: "recommend" },
-               distplotbuilder: { var: "recommend" } } },
+    // The Course feedback survey (a five-item Likert battery on one 1-5
+    // scale) was REMOVED Sep 14 2026 per Torry. The wellbeing sample
+    // below is the Likert door (exampleFor) now.
     // Torry's all-seven sample (Aug 24 2026): one table that honestly
     // drives every analysis, with classroom-realistic error bars, moderate
     // correlations, a right-skewed variable, a negatively keyed likert item
@@ -774,7 +747,7 @@
     // (session scratchpad make-wellbeing.py); the leading rows are chosen
     // so every ordered categorical introduces its levels in natural
     // first-seen order. Listed FIRST on the start centre; the array keeps
-    // it after the three tailored examples so the placeholder doors
+    // it after the two tailored examples so the placeholder doors
     // (exampleFor) still point at the focused introductions.
     { id: "wellbeing", name: "Student wellbeing survey",
       blurb: "163 students, one semester: sleep, screens, stress, grades and a five-item survey.",
