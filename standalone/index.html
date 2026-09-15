@@ -2467,6 +2467,13 @@
     grid-template-areas: "project split-a main split-b inspector";
     min-width: 0; min-height: 0; overflow: hidden;
   }
+  /* Statistics widening the rail slides the columns over the panel's own
+     150ms; the class is on only for that change, so splitter drags stay
+     instant, and a reduced-motion setting skips the slide. */
+  .ps-app-body.ps-stats-widening { transition: grid-template-columns 150ms ease-out; }
+  @media (prefers-reduced-motion: reduce) {
+    .ps-app-body.ps-stats-widening { transition: none; }
+  }
   .ps-app-body.ps-no-inspector {
     grid-template-columns: var(--ps-rail-w) 5px minmax(0, 1fr) 0 0;
   }

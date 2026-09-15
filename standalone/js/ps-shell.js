@@ -1028,8 +1028,13 @@
   }
   function dockModeRecompute() {
     var pref = panelDockPref();
+    // While Statistics holds the rail wide the pane is narrower than the
+    // automatic rule assumes; re-deciding on it could flip the panel
+    // below, which drops the width, which flips it back. Hold the answer
+    // until the width is given back.
     var want = pref === "beside" ? true
-             : pref === "below" ? false : dockAutoBeside(DOCK_BESIDE);
+             : pref === "below" ? false
+             : (STATS_WIDE != null ? DOCK_BESIDE : dockAutoBeside(DOCK_BESIDE));
     var changed = want !== DOCK_BESIDE;
     DOCK_BESIDE = want;
     try { document.body.classList.toggle("ps-dock-beside", want); } catch (e) {}
@@ -1119,6 +1124,83 @@
       } catch (eL) {}
     }
     DOCK_LIVE_WAS = live;
+    try { statsWidthSync(); } catch (eW) {}
+  }
+  // The docked Statistics panel, if one is showing in the slot.
+  function dockStatsPanel() {
+    var slot = dockSlot();
+    if (!slot || !DOCK_BESIDE) return null;
+    for (var i = 0; i < slot.children.length; i++) {
+      var ch = slot.children[i];
+      try {
+        if (ch.style.display === "none") continue;
+        if (ch.querySelector && ch.querySelector('[data-st-pane], [data-role="st-close-btn"]')) return ch;
+      } catch (eC) {}
+    }
+    return null;
+  }
+  // Runs on every dock sync (slot mutations, pref changes, resizes): a
+  // Statistics panel in the rail widens it to what its widest visible
+  // table needs; a tab switch can widen further, never narrow mid-read;
+  // anything else in the slot, or an empty slot, gives the width back.
+  function statsWidthSync() {
+    var statsEl = dockStatsPanel();
+    if (!statsEl) {
+      if (STATS_WIDE != null || STATS_WIDE_USER) {
+        STATS_WIDE = null; STATS_WIDE_USER = false;
+        statsWidthApply();
+      }
+      return;
+    }
+    if (STATS_WIDE_USER) return;
+    var col = document.querySelector(".ps-controls");
+    if (!col) return;
+    // Read-only on purpose: this runs from the slot's MutationObserver,
+    // so touching any style in here would queue the next sync and the
+    // two would chase each other forever. A wrapper that scrolls
+    // sideways has scrollWidth = its table's intrinsic width (the
+    // tables carry min-width:100%, so a fitting table reads as the
+    // wrapper and contributes nothing).
+    var need = 0, wrapW = 0;
+    var wraps = statsEl.querySelectorAll("[data-st-scroll]");
+    for (var j = 0; j < wraps.length; j++) {
+      var w = wraps[j];
+      if (!w.offsetParent) continue;
+      wrapW = Math.max(wrapW, w.clientWidth);
+      if (w.scrollWidth > w.clientWidth + 1) need = Math.max(need, w.scrollWidth);
+    }
+    if (!(need > 0) || !(wrapW > 0)) return;
+    var chrome = Math.max(0, Math.round(col.getBoundingClientRect().width) - wrapW);
+    var target = need + chrome + 2;
+    var saved = STATS_WIDE;
+    STATS_WIDE = null;
+    var base = splitMetrics("inspector");
+    STATS_WIDE = saved;
+    var cur = STATS_WIDE != null ? STATS_WIDE : base.now;
+    var want = Math.round(Math.min(base.max, Math.max(cur, target)));
+    if (want > cur + 1) {
+      STATS_WIDE = want;
+      statsWidthApply();
+      try {
+        var lv = el("ps-dock-live");
+        if (lv) lv.textContent = "Statistics panel widened to fit its tables; Close or Escape gives the width back";
+      } catch (eL) {}
+    }
+  }
+  // The column slides over 150ms (the panel's own slide); the class
+  // scopes the transition to this change so splitter drags stay instant.
+  function statsWidthApply() {
+    var body = document.querySelector(".ps-app-body");
+    if (body) {
+      body.classList.add("ps-stats-widening");
+      if (STATS_WIDE_T) clearTimeout(STATS_WIDE_T);
+      STATS_WIDE_T = window.setTimeout(function () {
+        STATS_WIDE_T = null;
+        body.classList.remove("ps-stats-widening");
+      }, 220);
+    }
+    splitApply();
+    fitSchedule();
   }
   function queueDockSync() {
     if (DOCK_SYNC_QUEUED) return;
@@ -10905,10 +10987,26 @@
   // .ps-no-inspector rule that would have hidden the rail entirely had its
   // class only ever REMOVED, never added. Widths persist with the project's UI
   // state, because a working width is a preference, not a per-session accident.
-  var SPLIT_BOUNDS = { rail: [150, 380], inspector: [240, 560] };
+  // The inspector's upper bound was 560 until Sep 15 2026: the Statistics
+  // reading width needs 585 for Compare pairs under WebKit's font metrics
+  // (534px table + 49px panel chrome), and a hand drag may as well reach
+  // the same width. splitMetrics still floors the chart pane at 320px.
+  var SPLIT_BOUNDS = { rail: [150, 380], inspector: [240, 640] };
   var SPLIT_DEFAULT = { rail: 205, inspector: 330 };
   var SPLIT_VAR = { rail: "--ps-rail-w", inspector: "--ps-insp-w" };
   var SPLIT_DRAG = null;
+  // Statistics gets reading width while it is open beside the chart
+  // (Torry, Sep 15 2026). The rail is 380 because it holds controls; the
+  // Statistics tables need up to 534px because they hold numbers, and in
+  // the rail the p columns fell off the right edge. While a Statistics
+  // panel is docked, STATS_WIDE holds the width its widest table needs
+  // (never narrower than the rail was, capped by the splitter's 640 and
+  // by the chart's own 320px floor), and splitMetrics prefers it. It goes
+  // back to null when the panel closes or a chart click replaces it, and
+  // a width the user drags while it is open wins for the rest of that
+  // session (STATS_WIDE_USER). Measured: on a 620px-tall pane the chart
+  // is height-bound, so at 1366x620 a 560 rail costs it nothing.
+  var STATS_WIDE = null, STATS_WIDE_USER = false, STATS_WIDE_T = null;
   function splitSanitizeWidths(input) {
     var out = {};
     if (!input || typeof input !== "object") return out;
@@ -10939,6 +11037,7 @@
     // stylesheet: splitApply writes the custom property inline.
     var preferred = Number(splitWidths()[key]) ||
       ((key === "inspector" && panelDockWanted()) ? 380 : SPLIT_DEFAULT[key]);
+    if (key === "inspector" && STATS_WIDE != null) preferred = Math.max(preferred, STATS_WIDE);
     return {
       min: b[0],
       max: Math.round(max),
@@ -10969,6 +11068,9 @@
   function splitSet(key, px, persistIt) {
     var b = SPLIT_BOUNDS[key];
     if (!b) return;
+    // A width the user sets while Statistics holds the rail wide is
+    // theirs: the automatic width steps aside until Statistics closes.
+    if (key === "inspector" && STATS_WIDE != null) { STATS_WIDE = null; STATS_WIDE_USER = true; }
     // Never let a drag take the chart pane below something usable: the point of
     // the splitter is to give the CHART room, so it cannot be used to erase it.
     var body = document.querySelector(".ps-app-body");
@@ -10995,8 +11097,18 @@
         bar.addEventListener("pointerdown", function (e) {
           if (e.button !== 0) return;
           var body = document.querySelector(".ps-app-body");
-          var start = Number(splitWidths()[key]) || SPLIT_DEFAULT[key];
+          // Start from the width on screen, not the stored one: the
+          // docked default (380) and the Statistics reading width both
+          // show without being stored, and a drag that started from the
+          // stored 330 jumped on its first move.
+          var start = splitMetrics(key).now;
           SPLIT_DRAG = { key: key, x: e.clientX, start: start };
+          // The engine closes an open editing panel on any click outside
+          // it, and a splitter press ends in one; resizing the rail while
+          // reading Statistics must not close Statistics. The engine
+          // keeps a suppression window for exactly this (a select popup
+          // closing synthesizes the same kind of click).
+          try { window.__gb2_suppressOutsideClickUntil = Date.now() + 600; } catch (eSp) {}
           document.body.classList.add("ps-splitting");
           try { bar.setPointerCapture(e.pointerId); } catch (err) {}
           e.preventDefault();
@@ -11010,6 +11122,7 @@
         function end() {
           if (!SPLIT_DRAG || SPLIT_DRAG.key !== key) return;
           SPLIT_DRAG = null;
+          try { window.__gb2_suppressOutsideClickUntil = Date.now() + 400; } catch (eSp) {}
           document.body.classList.remove("ps-splitting");
           persist(false);
           fitSchedule();
@@ -11021,7 +11134,7 @@
           var step = e.shiftKey ? 32 : 8;
           if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
             e.preventDefault();
-            var cur = Number(splitWidths()[key]) || SPLIT_DEFAULT[key];
+            var cur = splitMetrics(key).now;
             var dir = e.key === "ArrowRight" ? 1 : -1;
             splitSet(key, cur + dir * step * (key === "rail" ? 1 : -1), true);
           } else if (e.key === "Home") {

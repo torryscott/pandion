@@ -53587,19 +53587,32 @@
                 'font-size:11px;font-variant-numeric:tabular-nums;min-width:100%;">' +
                 '<tr>';
             var _thBg = card ? "#f7f8fa" : "white";
+            // In the docked rail a table wider than the panel keeps its
+            // first column (the row's identity: Cell, Comparison, Interval)
+            // in place while the numbers scroll under it (Torry, Sep 15
+            // 2026). The row carries an explicit white base so the sticky
+            // cell can inherit whatever the row is painted (pin, hover),
+            // and never lets scrolled content show through. Nowhere else.
+            var _stickyCol = _gb2DockActive();
             for (var c = 0; c < cols.length; c++) {
                 // sticky th: border-bottom scrolls away under
                 // border-collapse, so the rule is a box-shadow
                 h += '<th style="font-size:10px;text-transform:uppercase;' +
                     'letter-spacing:.05em;color:#666;text-align:left;font-weight:600;' +
                     'padding:3px 9px;box-shadow:0 1px 0 #ccc;white-space:nowrap;' +
-                    'position:sticky;top:0;background:' + _thBg + ';z-index:1;">' +
+                    'position:sticky;top:0;background:' + _thBg + ';z-index:1;' +
+                    ((_stickyCol && c === 0) ? 'left:0;z-index:2;' : '') + '">' +
                     ((cols[c] && cols[c].html != null) ? cols[c].html : _stHeaderTerm(cols[c])) +
                     '</th>';
             }
             h += '</tr>';
             for (var r = 0; r < rows.length; r++) {
-                h += '<tr' + ((rowAttrs && rowAttrs[r]) ? ' ' + rowAttrs[r] : '') + '>';
+                var _rAttr = (rowAttrs && rowAttrs[r]) ? ' ' + rowAttrs[r] : '';
+                if (_stickyCol) {
+                    if (_rAttr.indexOf('style="') < 0) _rAttr += ' style="background:#fff"';
+                    else if (_rAttr.indexOf('background') < 0) _rAttr = _rAttr.replace('style="', 'style="background:#fff;');
+                }
+                h += '<tr' + _rAttr + '>';
                 for (var c2 = 0; c2 < rows[r].length; c2++) {
                     // LONG texty cells WRAP (Jul 10 2026, Torry: mile-long
                     // cross-panel comparison labels forced the whole table
@@ -53609,7 +53622,9 @@
                     var _cRaw = rows[r][c2] == null ? "" : String(rows[r][c2]);
                     var _cWrap = _cRaw.replace(/<[^>]+>/g, "").length > 34;
                     h += '<td style="padding:4px 7px;border-bottom:1px solid #eee;' +
-                        'white-space:' + (_cWrap ? 'normal' : 'nowrap') + ';color:#333;">' + _cRaw + '</td>';
+                        'white-space:' + (_cWrap ? 'normal' : 'nowrap') + ';color:#333;' +
+                        ((_stickyCol && c2 === 0) ? 'position:sticky;left:0;background:inherit;z-index:1;box-shadow:inset -1px 0 0 #eee;' : '') +
+                        '">' + _cRaw + '</td>';
                 }
                 h += '</tr>';
             }
@@ -55106,14 +55121,18 @@
             // Wrap a Sigma header label as a tap-to-define term
             // (module-agnostic; unknown keys return the plain escaped
             // label).
-            function _stTerm(label, key) {
+            function _stTerm(label, key, fullName) {
                 var esc = _stEsc(label);
                 var t = _GB_STAT_TERMS[key];
                 if (!t) return esc;
-                var tip = t.name + (t.sym ? " (" + t.sym + ")" : "") + ": " + t.body;
+                // fullName: an abbreviated header's long name ("95% CI lower"
+                // behind "CI lo"), spoken in the aria-label and leading the
+                // title, so a short label never costs the reader its meaning.
+                var tip = (fullName ? fullName + ". " : "") +
+                    t.name + (t.sym ? " (" + t.sym + ")" : "") + ": " + t.body;
                 return '<span class="gb2-stterm" data-stterm="' + key +
                     '" tabindex="0" role="button" aria-expanded="false" aria-label="' +
-                    _stEsc(_stTermName(label, t)).replace(/"/g, "&quot;") + '" title="' +
+                    _stEsc(_stTermName(fullName || label, t)).replace(/"/g, "&quot;") + '" title="' +
                     _stEsc(tip).replace(/"/g, "&quot;") + '">' + esc + '</span>';
             }
             // Per-cell data-aware term: wraps an already-built value cell
@@ -56015,7 +56034,18 @@
                 }
                 var _descCols = [];
                 if (_dHasFacet) _descCols.push("Panel");
-                _descCols.push({ html: _stTerm("Cell", "cell") }, { html: _stTerm("N", "nSize") }, { html: _stTerm("Mean", "mean") }, { html: _stTerm("Median", "median") }, { html: _stTerm("SD", "sd") }, { html: _stTerm("SE", "se") }, _ciP + "% CI lower", _ciP + "% CI upper");
+                // Docked beside the chart the rail is narrow (Torry, Sep 15
+                // 2026): these two long headers were the 13px that kept
+                // Descriptives scrolling sideways even after the rail widened
+                // to its reading width. Short there, with the full name in the
+                // aria-label, the title and the popover; jamovi and the panel
+                // under the chart keep the long headers.
+                var _ciLoHdr = _ciP + "% CI lower", _ciHiHdr = _ciP + "% CI upper";
+                if (_gb2DockActive()) {
+                    _ciLoHdr = { html: _stTerm("CI lo", "ci95", _ciP + "% CI lower") };
+                    _ciHiHdr = { html: _stTerm("CI hi", "ci95", _ciP + "% CI upper") };
+                }
+                _descCols.push({ html: _stTerm("Cell", "cell") }, { html: _stTerm("N", "nSize") }, { html: _stTerm("Mean", "mean") }, { html: _stTerm("Median", "median") }, { html: _stTerm("SD", "sd") }, { html: _stTerm("SE", "se") }, _ciLoHdr, _ciHiHdr);
                 var descCardHtml = _stCard("",
                     _stTable(_descCols, dRows, dAttrs, true) +
                     _stBtnRow(_stBtn("copycgdesc", "Copy table", false)) +
@@ -57568,8 +57598,20 @@
                             var can = scEl.scrollHeight > scEl.clientHeight + 2;
                             var atEnd = scEl.scrollTop + scEl.clientHeight >=
                                 scEl.scrollHeight - 2;
-                            scEl.style.boxShadow = (can && !atEnd)
-                                ? "inset 0 -10px 8px -8px rgba(0,0,0,0.22)" : "";
+                            var parts = [];
+                            if (can && !atEnd) parts.push("inset 0 -10px 8px -8px rgba(0,0,0,0.22)");
+                            // Docked in the rail: the same cue on the RIGHT
+                            // edge while there is more to the right (Torry,
+                            // Sep 15 2026, "not obvious that you should
+                            // scroll sideways"). Only there: elsewhere the
+                            // panel grows to fit its widest table.
+                            try {
+                                if (_gb2DockActive() &&
+                                    scEl.scrollWidth > scEl.clientWidth + 2 &&
+                                    scEl.scrollLeft + scEl.clientWidth < scEl.scrollWidth - 2)
+                                    parts.push("inset -12px 0 10px -10px rgba(0,0,0,0.22)");
+                            } catch (_eSx) {}
+                            scEl.style.boxShadow = parts.join(", ");
                         };
                         scEl.addEventListener("scroll", updSh);
                         updSh();
@@ -57609,8 +57651,14 @@
                         var nte = document.createElement("div");
                         nte.setAttribute("data-role", "st-clip-note");
                         nte.style.cssText = "font-size:10.5px;color:#888;margin:6px 0 0;";
-                        nte.textContent = "This table is wider than the panel - scroll it sideways, " +
-                            "or drag the divider between the spreadsheet and the results to give it more room.";
+                        // The remedy is the host's: jamovi has a divider
+                        // between the spreadsheet and the results; the
+                        // standalone's docked rail has a draggable edge.
+                        nte.textContent = _gb2DockActive()
+                            ? "This table is wider than the panel: scroll it sideways, " +
+                              "or drag the panel's edge to widen it."
+                            : "This table is wider than the panel - scroll it sideways, " +
+                              "or drag the divider between the spreadsheet and the results to give it more room.";
                         body.appendChild(nte);
                     }
                 });
