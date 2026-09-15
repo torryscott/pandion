@@ -192,7 +192,13 @@ try {
       // Re-activating the current choice must not clear its selected state.
       await page.keyboard.press('Space');
       await selected(page, 'type', 'ci95', 'selected choice activated again');
+      // Like the keyboard path: a change rebuilds the panel on a zero-delay
+      // timer, so wait for the clicked control to be replaced before the
+      // two-step accessibility read (DOM node id, then its AX node), or the
+      // rebuild can land between the two calls and the id is gone.
+      await page.locator('[data-eb-type="sd"]').evaluate(el => { window.__focusOldControl = el; });
       await page.locator('[data-eb-type="sd"]').click();
+      await page.waitForFunction(() => !window.__focusOldControl.isConnected);
       await selected(page, 'type', 'sd', 'mouse activation');
       await page.waitForTimeout(1900);
       await selected(page, 'type', 'sd', 'mouse activation after echo/settling');
@@ -235,7 +241,11 @@ try {
         await selected(page, 'method', 'within', 'method keyboard return');
         await page.waitForTimeout(1900);
         await selected(page, 'method', 'within', 'method return after echo/settling');
+        // Re-activating the current choice may or may not rebuild: give a
+        // rebuild time to land, then read.
+        await page.locator('[data-eb-method="within"]').evaluate(el => { window.__focusOldControl = el; });
         await page.locator('[data-eb-method="within"]').click();
+        await page.waitForFunction(() => !window.__focusOldControl.isConnected, null, { timeout: 1500 }).catch(() => {});
         await selected(page, 'method', 'within', 'current method clicked again');
         await selected(page, 'type', hostDir ? 'sd' : 'se', 'method return preserves the type');
       }
