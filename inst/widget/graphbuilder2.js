@@ -2844,7 +2844,17 @@
             // Integration range for s: PDF peaks near 1 and drops
             // off by s = 3-4. Truncate at 4 for safety.
             var lo = 0.001, hi = 4;
-            var n = 80;
+            // The grid scales with q (Sep 16 2026): at a large q with
+            // tiny df the whole tail sits at s below about 14/q, where a
+            // fixed 80-node grid left only a few nodes and the p came
+            // out 26% high at (q 50, k 6, df 2.5) and 14x low at
+            // (100, 4, 3) against SciPy's studentized_range.sf. With
+            // n = 40 q the twelve checked inputs, ordinary ones included,
+            // match SciPy to four figures; the cost is under 20 ms at
+            // q = 100 (scratchpad rail2/tukey/compare.mjs).
+            var n = Math.max(80, Math.ceil(40 * q));
+            if (n % 2) n++;
+            if (n > 8000) n = 8000;
             var h = (hi - lo) / n;
             var sum = 0;
             for (var i = 0; i <= n; i++) {
