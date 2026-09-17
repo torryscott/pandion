@@ -31382,6 +31382,7 @@
     numericalNoticeFor: _numericalNoticeFor,
     numericalChangeIds: _numericalChangeIds,
     appBuild: function () { return APP_BUILD; },
+    tableToXlsxRows: tableToXlsxRows,
     libraries: function () { return PS_LIBS; },
     saveComputedColumn: saveComputedColumn,
     openFormulaDialog: openFormulaDialog,

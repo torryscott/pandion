@@ -275,6 +275,18 @@ else
     fi
 fi
 
+echo "== pixel truth (jamovi-rendered marks decode on their own axes)"
+if GB2_INLINE_BUNDLE=1 GB2_BUNDLE="${GB2_BUNDLE:-source}" Rscript "$HERE/pixel-truth-render.R"; then
+    node "$HERE/pixel-truth-jamovi-check.mjs"
+else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then
+        echo "   skipped: jmvcore not available"
+    else
+        exit "$rc"
+    fi
+fi
+
 echo "== engine-boot handshake (placeholder ships+stores bundle -> data render goes cached)"
 if GB2_BOOT_OUT="$OUT-boot" Rscript "$HERE/boot-probe.R"; then
     GB2_BOOT_OUT="$OUT-boot" node "$HERE/boot-check.mjs"

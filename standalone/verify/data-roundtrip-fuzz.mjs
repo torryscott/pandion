@@ -246,6 +246,66 @@ for (let t = 0; t < N; t++) {
   for (const [cond, label] of res) ok(cond, label);
 }
 
+// ---- xlsx export: the number/text rule + the full binary round trip ----
+// The xlsx writer's contract ("007 stays text"): a cell ships as a real
+// Excel NUMBER only when its text survives the conversion exactly, so
+// no written workbook can ever hold a lossy number; everything else is
+// the verbatim string. Verified independently per cell, then the whole
+// workbook is written by the app's writer and read back by the app's
+// reader, cell for cell.
+console.log('xlsx: the number rule and the binary round trip');
+{
+  const res = await page.evaluate(async () => {
+    const S = window.PS_SHELL;
+    S.loadTable('fx', ['n', 'id', 'txt', 'f'], [
+      ['1', '007', 'plain', '2.5'],
+      ['-3', '0042', 'a,b', '0.35'],
+      ['NA', '117', 'caf\u00e9', 'NA'],
+      ['250', '007', 'line1\nline2', '1e-3']
+    ], { n: 'continuous', id: 'nominal', txt: 'nominal', f: 'continuous' });
+    const t = S.project.table;
+    const xr = S.tableToXlsxRows(t);
+    const out = [];
+    // Independent rule check against the raw store.
+    let ruleOk = true, why = '';
+    for (let r = 1; r < xr.length && ruleOk; r++) {
+      for (let c = 0; c < t.order.length; c++) {
+        const raw = t.raw[t.order[c]][r - 1];
+        const cell = xr[r][c];
+        const str = raw == null ? '' : String(raw);
+        if (cell === null) {
+          if (str.trim() !== '') { ruleOk = false; why = 'blank for ' + JSON.stringify(str); }
+        } else if (typeof cell === 'number') {
+          if (String(cell) !== str.trim()) {
+            ruleOk = false; why = 'lossy number ' + cell + ' for ' + JSON.stringify(str);
+          }
+        } else if (String(cell) !== str) {
+          ruleOk = false; why = 'string mangled: ' + JSON.stringify(cell) + ' vs ' + JSON.stringify(str);
+        }
+      }
+    }
+    out.push([ruleOk, 'every xlsx cell is lossless (' + why + ')']);
+    out.push([typeof xr[1][0] === 'number' && typeof xr[1][3] === 'number',
+      'clean numeric cells ship as real numbers']);
+    out.push([typeof xr[1][1] === 'string' && xr[1][1] === '007',
+      'a leading-zero ID ships as text, exactly (got ' + JSON.stringify(xr[1][1]) + ')']);
+    // Binary round trip through the app's own reader.
+    const bytes = window.PSXlsx.write('roundtrip', xr);
+    const wb = await window.PSXlsx.parse(bytes.buffer ? bytes.buffer : bytes, 'rt.xlsx');
+    const rows2 = wb.sheets[0].rows;
+    let same = rows2.length === xr.length, bad = same ? '' : 'row count ' + rows2.length;
+    for (let r = 0; same && r < xr.length; r++)
+      for (let c = 0; c < xr[r].length; c++) {
+        const a = xr[r][c] == null ? '' : String(xr[r][c]);
+        const bcell = rows2[r][c] == null ? '' : String(rows2[r][c]);
+        if (a !== bcell) { same = false; bad = 'r' + r + 'c' + c + ': ' + JSON.stringify(bcell) + ' vs ' + JSON.stringify(a); break; }
+      }
+    out.push([same, 'write -> parse returns every cell identical (' + bad + ')']);
+    return out;
+  });
+  for (const [cond, label] of res) ok(cond, label);
+}
+
 ok(pageErrors.length === 0, 'no page errors (' + pageErrors.slice(0, 2).join(' | ') + ')');
 console.log((fail === 0 ? 'DATA ROUNDTRIP FUZZ PASS' : 'DATA ROUNDTRIP FUZZ FAIL') +
   ' (' + pass + ' ok, ' + fail + ' failing, seed ' + seed + ')');

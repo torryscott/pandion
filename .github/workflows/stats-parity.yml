@@ -98,6 +98,7 @@ jobs:
         run: |
           Rscript standalone/verify/formula-fuzz.R /tmp/gb2-formula-fuzz.json
           node standalone/verify/formula-fuzz-check.mjs /tmp/gb2-formula-fuzz.json
+<<<<<<< ours
       - name: Data integrity and project compatibility (source and portable build)
         run: |
           node standalone/verify/data-integrity-check.mjs
@@ -163,6 +164,10 @@ jobs:
             GB2_BUNDLE="$bundle" GB2_STATS_PROBE_OUT="/tmp/pandion-stats-$bundle" Rscript scripts/verify/stats-probe.R
             GB2_STATS_PROBE_OUT="/tmp/pandion-stats-$bundle" node scripts/verify/stats-probe.mjs
           done
+=======
+      - name: Pixel truth (marks decode on their own axes)
+        run: node standalone/verify/pixel-truth-check.mjs
+>>>>>>> theirs
       - name: Third statistical reference (scipy vs R)
         run: |
           python3 standalone/verify/stats-thirdref.py /tmp/gb2-stats-fuzz.json

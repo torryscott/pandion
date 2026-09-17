@@ -40,6 +40,18 @@ num_or_null <- function(x) {
 
 safe <- function(expr) tryCatch(expr, error = function(e) NULL)
 
+g2_kurt <- function(v) {
+    # Sample-adjusted SPSS G2 (excess kurtosis), the widget's Descriptives
+    # convention (jamovi parity).
+    n <- length(v)
+    if (n < 4) return(NULL)
+    s <- sd(v); if (!is.finite(s) || s == 0) return(NULL)
+    m <- mean(v)
+    m2 <- mean((v - m)^2); m4 <- mean((v - m)^4)
+    g2 <- m4 / m2^2 - 3
+    num_or_null(((n + 1) * g2 + 6) * (n - 1) / ((n - 2) * (n - 3)))
+}
+
 g1_skew <- function(v) {
     # Sample-adjusted SPSS G1 (the widget's Descriptives convention).
     n <- length(v)
@@ -82,7 +94,8 @@ cell_refs <- function(v) {
          mean = num_or_null(mean(v)),
          sd = if (n >= 2) num_or_null(sd(v)) else NULL,
          se = if (n >= 2) num_or_null(sd(v) / sqrt(n)) else NULL,
-         g1 = g1_skew(v))
+         g1 = g1_skew(v),
+         g2 = g2_kurt(v))
 }
 
 box_ref <- function(v) {
@@ -243,6 +256,27 @@ dataset_refs <- function(groups) {
         }
     }
     if (length(gh) > 0) adj$gh <- gh
+    # Tukey via R's own TukeyHSD on the one-way fit - fully independent
+    # of the engine's ptukey route. Keys are translated to our G|G form;
+    # TukeyHSD orders pairs as "later-earlier", matching j>i here.
+    tk <- safe({
+        y <- unlist(groups)
+        g <- factor(rep(names(groups), vapply(groups, length, 1L)),
+                    levels = names(groups))
+        if (nlevels(droplevels(g)) >= 2 && isTRUE(sd(y) > 0)
+            && all(vapply(groups, length, 1L) >= 2)) {
+            th <- TukeyHSD(aov(y ~ g))$g
+            out_tk <- list()
+            for (rn in rownames(th)) {
+                gs2 <- strsplit(rn, "-", fixed = TRUE)[[1]]
+                key2 <- paste0(gs2[2], "|", gs2[1])
+                pv2 <- th[rn, "p adj"]
+                if (is.finite(pv2)) out_tk[[key2]] <- as.numeric(pv2)
+            }
+            out_tk
+        } else NULL
+    })
+    if (!is.null(tk) && length(tk) > 0) adj$tukey <- tk
     list(groups = lapply(groups, function(v) as.numeric(v)),
          cells = lapply(groups, cell_refs),
          shapes = lapply(groups, function(v)
@@ -288,6 +322,35 @@ corr_refs <- function(x, y) {
     out
 }
 
+rm_omni_ref <- function(mat) {
+    # One-way repeated-measures ANOVA with Greenhouse-Geisser, computed
+    # from first principles: SS decomposition over the complete-case
+    # subject x occasion matrix, eps from the double-centered occasion
+    # covariance (clamped to [1/(k-1), 1]), corrected dfs and p, and
+    # partial eta squared - the widget's exact display contract.
+    X <- do.call(cbind, mat)
+    X <- X[stats::complete.cases(X), , drop = FALSE]
+    n <- nrow(X); k <- ncol(X)
+    if (n < 2 || k < 2) return(NULL)
+    gm <- mean(X)
+    occ_m <- colMeans(X); subj_m <- rowMeans(X)
+    ss_occ <- n * sum((occ_m - gm)^2)
+    ss_subj <- k * sum((subj_m - gm)^2)
+    ss_tot <- sum((X - gm)^2)
+    ss_err <- ss_tot - ss_occ - ss_subj
+    df1 <- k - 1; df2 <- (k - 1) * (n - 1)
+    if (!(ss_err > 0) || df2 < 1) return(NULL)
+    F_ <- (ss_occ / df1) / (ss_err / df2)
+    S <- stats::cov(X)
+    Sc <- sweep(sweep(S, 1, rowMeans(S)), 2, colMeans(S)) + mean(S)
+    eps <- sum(diag(Sc))^2 / ((k - 1) * sum(Sc^2))
+    eps <- min(1, max(eps, 1 / (k - 1)))
+    list(F = num_or_null(F_),
+         df1 = df1 * eps, df2 = df2 * eps, eps = eps,
+         p = num_or_null(stats::pf(F_, df1 * eps, df2 * eps, lower.tail = FALSE)),
+         etaP = num_or_null(ss_occ / (ss_occ + ss_err)))
+}
+
 rm_refs <- function(mat) {
     # Wide within-subjects data: paired t and Wilcoxon signed-rank per
     # occasion pair, R defaults (exact iff small, tie-free, and no
@@ -310,7 +373,7 @@ rm_refs <- function(mat) {
                 V = num_or_null(unname(sr$statistic)),
                 p = num_or_null(sr$p.value)))
     }
-    list(data = mat, pairs = pairs)
+    list(data = mat, pairs = pairs, omni = rm_omni_ref(mat))
 }
 
 lk_refs <- function(items) {
@@ -441,6 +504,88 @@ lksets <- list(lk_basic = lk_refs(list(
     q3 = mk_item(rep(1, 5)),
     q4 = mk_item(c(1, 1, 2, 3, 4)))))
 
+# ---- frequencies: chi-square, Cramer's V, pairwise proportions -----------
+fq_refs <- function(counts) {
+    # counts: named list category -> named vector of group counts (or a
+    # bare vector for the GOF case). Refs mirror the widget's contract:
+    # chisq.test parity, V = sqrt(X2/(N*(min(r,c)-1))), pairwise
+    # two-proportion z via prop.test(correct = FALSE) over group totals,
+    # Holm across the listed pairs.
+    if (is.null(names(counts[[1]]))) {
+        x <- unlist(counts)
+        ct <- suppressWarnings(chisq.test(x))
+        return(list(kind = "gof", cats = names(counts),
+                    n = as.list(lapply(counts, function(v) as.numeric(v))),
+                    chisq = num_or_null(unname(ct$statistic)),
+                    df = as.numeric(unname(ct$parameter)),
+                    p = num_or_null(ct$p.value),
+                    N = sum(x)))
+    }
+    m <- do.call(rbind, counts)
+    ct <- suppressWarnings(chisq.test(m))
+    N <- sum(m)
+    V <- sqrt(unname(ct$statistic) / (N * (min(dim(m)) - 1)))
+    grp_tot <- colSums(m)
+    pairsL <- list()
+    raw <- c(); keys <- c()
+    for (cat in rownames(m)) {
+        gs <- colnames(m)
+        for (i in seq_along(gs)) for (j in seq_along(gs)) {
+            if (j <= i) next
+            pt2 <- safe(suppressWarnings(prop.test(
+                c(m[cat, gs[i]], m[cat, gs[j]]),
+                c(grp_tot[gs[i]], grp_tot[gs[j]]), correct = FALSE)))
+            if (is.null(pt2)) next
+            key <- paste0(cat, "|", gs[i], "|", gs[j])
+            pairsL[[key]] <- list(p = num_or_null(pt2$p.value))
+            raw <- c(raw, pt2$p.value); keys <- c(keys, key)
+        }
+    }
+    holmv <- p.adjust(raw, method = "holm")
+    for (i in seq_along(keys)) pairsL[[keys[i]]]$holm <- as.numeric(holmv[i])
+    list(kind = "indep",
+         cats = rownames(m), groups = colnames(m),
+         counts = lapply(rownames(m), function(rn) as.numeric(m[rn, ])),
+         chisq = num_or_null(unname(ct$statistic)),
+         df = as.numeric(unname(ct$parameter)),
+         p = num_or_null(ct$p.value), N = N,
+         V = num_or_null(V), pairs = pairsL)
+}
+fqsets <- list(
+    fq_3x2 = fq_refs(list(
+        low  = c(g1 = 18, g2 = 7),
+        mid  = c(g1 = 11, g2 = 14),
+        high = c(g1 = 5, g2 = 21))),
+    fq_2x4 = fq_refs(list(
+        yes = c(a = 30, b = 12, c = 19, d = 4),
+        no  = c(a = 10, b = 25, c = 16, d = 22))),
+    fq_gof = fq_refs(list(red = 24, green = 11, blue = 17))
+)
+
+# ---- 4-variable correlation matrix (matrix-wide p adjustment) ------------
+c4 <- local({
+    n <- 40
+    x1 <- round(rnorm(n), 4)
+    x2 <- round(0.7 * x1 + rnorm(n, sd = 0.7), 4)
+    x3 <- round(rnorm(n), 4)
+    x4 <- round(-0.5 * x2 + rnorm(n, sd = 0.9), 4)
+    cols <- list(x1 = signif(x1, 10), x2 = signif(x2, 10),
+                 x3 = signif(x3, 10), x4 = signif(x4, 10))
+    nm <- names(cols)
+    prs <- list(); raw <- c(); keys <- c()
+    for (i in seq_along(nm)) for (j in seq_along(nm)) {
+        if (j <= i) next
+        ct <- cor.test(cols[[i]], cols[[j]])
+        key <- paste0(nm[i], "|", nm[j])
+        prs[[key]] <- list(r = num_or_null(unname(ct$estimate)),
+                           p = num_or_null(ct$p.value))
+        raw <- c(raw, ct$p.value); keys <- c(keys, key)
+    }
+    hv <- p.adjust(raw, method = "holm")
+    for (i in seq_along(keys)) prs[[keys[i]]]$holm <- as.numeric(hv[i])
+    list(cols = cols, pairs = prs, n = n)
+})
+
 # ---- Q-Q band reference (one clean fixed dataset) ------------------------
 qqset <- list(values = as.numeric(fixed$b_negative[[1]]))
 qqset$band <- qq_ref(qqset$values)
@@ -461,14 +606,19 @@ to_json <- function(x) {
         if (!is.finite(x)) return("null")
         return(sprintf("%.17g", x))
     }
-    if (is.character(x)) return(sprintf('"%s"', x))
+    if (is.character(x)) {
+        if (length(x) > 1)
+            return(paste0("[", paste(sprintf('"%s"', x), collapse = ","), "]"))
+        return(sprintf('"%s"', x))
+    }
     if (is.logical(x)) return(tolower(as.character(x)))
     stop("unhandled type")
 }
 
 payload <- list(schemaVersion = 1, seed = seed, n_random = n_random,
                 datasets = datasets, corrs = corrs,
-                rmsets = rmsets, lksets = lksets, qqset = qqset)
+                rmsets = rmsets, lksets = lksets, qqset = qqset,
+                fqsets = fqsets, corr4 = c4)
 con <- file(out_path, open = "wb")
 writeLines(to_json(payload), con, useBytes = TRUE)
 close(con)

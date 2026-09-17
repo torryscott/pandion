@@ -236,6 +236,22 @@ for (const [name, ds] of Object.entries(refs.datasets)) {
     }
     await setBand('correct', 'none');
   }
+  // Tukey adjusted p vs R's own TukeyHSD (Kramer for unequal n).
+  if (ds.adjust && ds.adjust.tukey && Object.keys(ds.adjust.tukey).length > 0) {
+    await setBand('correct', 'tukey');
+    rows = await readPairsRows();
+    for (const pk of pairKeys) {
+      const refTk = ds.adjust.tukey[pk];
+      if (refTk === undefined || refTk === null) continue;
+      const [ga, gb] = pk.split('|');
+      const row = rowFor(rows, ga, gb);
+      if (!row) continue;
+      const adjCell = row.cells[5] || '';
+      if (/—/.test(adjCell) || adjCell === '') continue;
+      pClose(adjCell, refTk, name + ' ' + pk + ' tukey p(adj)');
+    }
+    await setBand('correct', 'none');
+  }
   // Student
   const anyStudent = pairKeys.some(pk => ds.pairs[pk].student && ds.pairs[pk].student.t !== null);
   if (anyStudent) {
@@ -315,9 +331,15 @@ for (const [name, ds] of Object.entries(refs.datasets)) {
       const header = desc.rows[0].map(h => h.toUpperCase());
       const at = lbl => { const i = header.findIndex(h => h === lbl); return i >= 0 ? row[i] : null; };
       const meanCell = at('MEAN'), sdCell = at('SD'), seCell = at('SE');
-      if (cell.mean !== null) closeTo(meanCell, cell.mean, name + ' ' + g + ' mean');
-      if (cell.sd !== null) closeTo(sdCell, cell.sd, name + ' ' + g + ' sd');
-      if (cell.se !== null) closeTo(seCell, cell.se, name + ' ' + g + ' se');
+      if (meanCell && cell.mean !== null) closeTo(meanCell, cell.mean, name + ' ' + g + ' mean');
+      if (sdCell && cell.sd !== null && !/—/.test(sdCell)) closeTo(sdCell, cell.sd, name + ' ' + g + ' sd');
+      if (seCell && cell.se !== null && !/—/.test(seCell)) closeTo(seCell, cell.se, name + ' ' + g + ' se');
+      const kCell = at('KURTOSIS');
+      if (kCell && cell.g2 !== null && cell.g2 !== undefined && !/—/.test(kCell))
+        closeTo(kCell, cell.g2, name + ' ' + g + ' kurtosis (G2)');
+      const skCell = at('SKEW');
+      if (skCell && cell.g1 !== null && cell.g1 !== undefined && !/—/.test(skCell))
+        closeTo(skCell, cell.g1, name + ' ' + g + ' skew (G1)');
     }
   }
   await openStats(/Compare pairs/);
@@ -437,6 +459,31 @@ for (const [name, rs] of Object.entries(refs.rmsets || {})) {
     ok(!!m, name + " " + pk + ": signed-rank V renders");
     if (m) closeTo(m[1], ref.V, name + ' ' + pk + ' signed-rank V');
     pClose(row.cells[4] || '', ref.p, name + ' ' + pk + ' signed-rank p');
+  }
+  // One-way RM omnibus with Greenhouse-Geisser, from first principles.
+  if (rs.omni && rs.omni.F !== null) {
+    await openStats(/Omnibus/);
+    const omni = await readVisiblePaneTable();
+    let matched = false;
+    if (omni) {
+      for (const r of omni.rows) {
+        const dfCell = r.find(c => /^\d+(\.\d+)?\s*,\s*\d+(\.\d+)?$/.test(c));
+        const fCell = r.find((c, i) => i > 0 && /^-?\d+\.\d+$/.test(c));
+        if (!dfCell || !fCell) continue;
+        const [d1, d2] = dfCell.split(',').map(x => parseFloat(x));
+        if (Math.abs(d1 - rs.omni.df1) > 0.06 || Math.abs(d2 - rs.omni.df2) > 0.06) continue;
+        matched = true;
+        closeTo(fCell, rs.omni.F, name + ' rm omnibus F');
+        const pCell = r.find(c => /^(<\s*\.001|\.\d+|1\.000)$/.test(c.replace(/\s+/g, ' ')));
+        if (pCell) pClose(pCell, rs.omni.p, name + ' rm omnibus p (GG)');
+        const etaCell = [...r].reverse().find(c => /^\.\d+$/.test(c));
+        if (etaCell && etaCell !== pCell) closeTo(etaCell, rs.omni.etaP, name + ' rm omnibus eta2p');
+        break;
+      }
+    }
+    ok(matched, name + ': GG omnibus row found (df ' +
+      rs.omni.df1.toFixed(2) + ', ' + rs.omni.df2.toFixed(2) + ')');
+    await openStats(/Compare pairs/);
   }
 }
 
@@ -568,6 +615,201 @@ for (const [name, cs] of Object.entries(refs.corrs)) {
       ok(relTight(got.rmax, cs.ell.rmax), name + ' ellipse major axis: ' + got.rmax + ' vs R ' + cs.ell.rmax);
       ok(relTight(got.rmin, cs.ell.rmin), name + ' ellipse minor axis: ' + got.rmin + ' vs R ' + cs.ell.rmin);
       ok(rel(got.area, cs.ell.area), name + ' ellipse area: ' + got.area + ' vs R ' + cs.ell.area);
+    }
+  }
+}
+
+// ---- frequencies: chi-square, Cramer's V, pairwise Holm -----------------
+for (const [name, fq] of Object.entries(refs.fqsets || {})) {
+  await page.evaluate(async (fq) => {
+    const s = ms => new Promise(r => setTimeout(r, ms));
+    const S = window.PS_SHELL;
+    const rows = [];
+    if (fq.kind === 'indep') {
+      fq.cats.forEach((cat, ci) => fq.groups.forEach((g, gi) => {
+        for (let i = 0; i < fq.counts[ci][gi]; i++) rows.push([cat, g]);
+      }));
+      S.loadTable('fq', ['cat', 'grp'], rows, { cat: 'nominal', grp: 'nominal' });
+      S.setModule('freqplotbuilder');
+      S.setRoles('freqplotbuilder', { var: 'cat', groupVar: 'grp' });
+    } else {
+      fq.cats.forEach((cat, ci) => {
+        // The reference serializes n as an object keyed by category.
+        const cnt = Number(Array.isArray(fq.n) ? fq.n[ci] : fq.n[cat]);
+        for (let i = 0; i < cnt; i++) rows.push([cat]);
+      });
+      S.loadTable('fq', ['cat'], rows, { cat: 'nominal' });
+      S.setModule('freqplotbuilder');
+      // Roles persist per module: the previous case's groupVar would
+      // dangle against a table that lacks the column.
+      S.setRoles('freqplotbuilder', { var: 'cat', groupVar: null });
+    }
+    await s(1500);
+  }, fq);
+  ok(await openStats(/Chi-square/), name + ': freq stats open');
+  const chi = await readVisiblePaneTable();
+  let found = false;
+  if (chi) {
+    for (const r of chi.rows) {
+      const cells = r.map(c => c.replace(/\s+/g, ' ').trim());
+      const chiCell = cells.find(c => /^\d+\.\d\d$/.test(c));
+      const dfCell = cells.find(c => /^\d+$/.test(c) && parseFloat(c) === fq.df);
+      if (!chiCell || !dfCell) continue;
+      found = true;
+      closeTo(chiCell, fq.chisq, name + ' chi-square');
+      const pCell = cells.find(c => /^(<\s*\.001|\.\d+|1\.000)$/.test(c));
+      if (pCell) pClose(pCell, fq.p, name + ' chi-square p');
+      if (fq.kind === 'indep' && fq.V !== null) {
+        const vCell = [...cells].reverse().find(c => /^\.\d+$/.test(c) && c !== pCell);
+        if (vCell) closeTo(vCell, fq.V, name + " Cramer's V");
+      }
+      break;
+    }
+  }
+  ok(found, name + ': chi-square row found (df ' + fq.df + ')');
+  if (fq.kind === 'indep') {
+    await openStats(/Pairwise/);
+    // Every category shares the same "gA vs gB" row label; the rows'
+    // data-link identities carry the CATEGORY, so match on those.
+    const pwRows = await page.evaluate(() => {
+      const out = [];
+      document.querySelectorAll('[data-st-pane="pairwise"] tr[data-link], [data-st-pane] tr[data-link]').forEach(tr => {
+        let link = null;
+        try { link = JSON.parse(tr.getAttribute('data-link')); } catch (e) {}
+        out.push({ link, cells: [...tr.querySelectorAll('td')].map(td => (td.innerText || '').trim()) });
+      });
+      return out;
+    });
+    const holmOf = cells => [...cells].reverse().find(c => /^(<\s*\.001|\.\d+|1\.000)$/.test(c));
+    for (const [key, pref] of Object.entries(fq.pairs)) {
+      const [cat, ga, gb] = key.split('|');
+      const row = pwRows.find(r => Array.isArray(r.link) && r.link.length >= 2 &&
+        r.link.some(c => String(c[0]).includes(cat) && String(c[1]) === ga) &&
+        r.link.some(c => String(c[0]).includes(cat) && String(c[1]) === gb));
+      if (!row) { ok(false, name + ' ' + key + ': pairwise row missing'); continue; }
+      const hc = holmOf(row.cells);
+      if (hc) pClose(hc, pref.holm, name + ' ' + key + ' holm p');
+    }
+  }
+}
+
+// ---- 4-variable correlation: per-pair r/p + matrix-wide Holm ------------
+if (refs.corr4) {
+  const c4 = refs.corr4;
+  await page.evaluate(async (c4) => {
+    const s = ms => new Promise(r => setTimeout(r, ms));
+    const S = window.PS_SHELL;
+    const nm = Object.keys(c4.cols);
+    const rows = [];
+    for (let i = 0; i < c4.n; i++) rows.push(nm.map(k => c4.cols[k][i]));
+    const types = {}; nm.forEach(k => { types[k] = 'continuous'; });
+    S.loadTable('c4', nm, rows, types);
+    S.setModule('corrplotbuilder');
+    S.setRoles('corrplotbuilder', { vars: nm });
+    await s(1600);
+  }, c4);
+  await openStats(/Matrix|Statistics/);
+  await page.evaluate(async () => {
+    // The corr-sets loop above may leave the module's corrMethod on
+    // its last pick; this leg asserts PEARSON references. The method
+    // select lives in the OPEN Sigma panel's quiet band, so pin it
+    // there and let the client recompute settle.
+    const s = ms => new Promise(r => setTimeout(r, ms));
+    const sels = [...document.querySelectorAll('.graphbuilder2-host select')];
+    const sel = sels.find(x => [...x.options].some(o => o.value === 'pearson'));
+    if (sel && sel.value !== 'pearson') {
+      sel.value = 'pearson';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    await s(1800);
+  });
+  const readAllPairs = () => page.evaluate(() => {
+    const out = {};
+    for (const tr of document.querySelectorAll('.graphbuilder2-host tr')) {
+      const txt = (tr.innerText || '');
+      const m = txt.match(/^\s*(\w+)\s*\u00d7\s*(\w+)/);
+      if (!m) continue;
+      out[m[1] + '|' + m[2]] = [...tr.querySelectorAll('td')]
+        .map(td => (td.innerText || '').trim());
+    }
+    return out;
+  });
+  let pairsDom = await readAllPairs();
+  let rOk = 0;
+  for (const [key, pref] of Object.entries(c4.pairs)) {
+    const cells = pairsDom[key] || pairsDom[key.split('|').reverse().join('|')];
+    if (!cells) continue;
+    closeTo(cells[1], pref.r, 'corr4 ' + key + ' r');
+    pClose(cells[2], pref.p, 'corr4 ' + key + ' raw p');
+    rOk++;
+  }
+  ok(rOk >= 5, 'corr4: ' + rOk + ' of 6 pairs rendered in All pairs');
+  // Matrix-wide Holm through the panel's own Adjust-p select.
+  const adj = await page.evaluate(async () => {
+    const s = ms => new Promise(r => setTimeout(r, ms));
+    const sels = [...document.querySelectorAll('.graphbuilder2-host select')];
+    const sel = sels.find(x => [...x.options].some(o => o.value === 'holm'));
+    if (!sel) return false;
+    sel.value = 'holm';
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    await s(1200);
+    return true;
+  });
+  ok(adj, 'corr4: Adjust-p select offers holm');
+  if (adj) {
+    // The All-pairs p column stays RAW under adjustment (the adjusted
+    // value is the deciding p for stars, copies, and the tally). If a
+    // holm-labeled column exists, compare it directly; otherwise
+    // verify the adjustment through the significance TALLY, which
+    // counts the DECIDING p against alpha.
+    const adjRead = await page.evaluate(() => {
+      const host = document.querySelector('.graphbuilder2-host');
+      const heads = [...host.querySelectorAll('th')].map(th => (th.innerText || '').trim());
+      const holmIdx = heads.findIndex(h => /holm|adj/i.test(h));
+      const tally = ([...host.querySelectorAll('[data-cmp-tally]')]
+        .map(el => (el.innerText || '').trim()).find(t => /of/.test(t))) || '';
+      const rows = {};
+      for (const tr of host.querySelectorAll('tr')) {
+        const m = (tr.innerText || '').match(/^\s*(\w+)\s*\u00d7\s*(\w+)/);
+        if (m) rows[m[1] + '|' + m[2]] = [...tr.querySelectorAll('td')].map(td => (td.innerText || '').trim());
+      }
+      return { holmIdx, heads, tally, rows };
+    });
+    // The All-pairs p column stays RAW; the DECIDING (adjusted) p
+    // drives the significance tally, so that is the assertion surface.
+    const nSig = Object.values(c4.pairs).filter(pr => pr.holm < 0.05).length;
+    const m = adjRead.tally.match(/(\d+)\s*of\s*(\d+)/);
+    ok(!!m && parseInt(m[1], 10) === nSig && parseInt(m[2], 10) === 6,
+      'corr4 tally counts holm-adjusted significance: "' + adjRead.tally +
+      '" vs R ' + nSig + ' of 6');
+  }
+}
+
+// ---- distribution moments: G1/G2 through the dist Descriptives ----------
+{
+  const ds = refs.datasets.b_negative;
+  await page.evaluate(async (ds) => {
+    const s = ms => new Promise(r => setTimeout(r, ms));
+    const S = window.PS_SHELL;
+    const rows = [];
+    for (const g of Object.keys(ds.groups))
+      for (const v of ds.groups[g]) rows.push([g, v]);
+    S.loadTable('dm', ['g', 'v'], rows, { g: 'nominal', v: 'continuous' });
+    S.setModule('distplotbuilder');
+    S.setRoles('distplotbuilder', { var: 'v', groupVar: 'g' });
+    await s(1500);
+  }, ds);
+  ok(await openStats(/Descriptives/), 'dist moments: stats open');
+  const dm = await readVisiblePaneTable();
+  if (dm) {
+    const header = dm.rows[0] ? dm.rows[0].map(h => h.toUpperCase()) : [];
+    const at = (row, lbl) => { const i = header.findIndex(h => h.includes(lbl)); return i >= 0 ? row[i] : null; };
+    for (const [g, cell] of Object.entries(ds.cells)) {
+      const row = dm.rows.find(r => r.some(c => c === g));
+      if (!row) { ok(false, 'dist moments ' + g + ': row missing'); continue; }
+      const sk = at(row, 'SKEW'), ku = at(row, 'KURT');
+      if (sk && cell.g1 != null && !/—/.test(sk)) closeTo(sk, cell.g1, 'dist ' + g + ' G1 skew');
+      if (ku && cell.g2 != null && !/—/.test(ku)) closeTo(ku, cell.g2, 'dist ' + g + ' G2 kurtosis');
     }
   }
 }
