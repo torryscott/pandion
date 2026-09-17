@@ -29083,7 +29083,16 @@
   function engineHelpTab(key) {
     var host = hostEl();
     if (!host) return null;
-    return host.querySelector('[data-helpnav="' + key + '"]');
+    var sel = '[data-helpnav="' + key + '"]';
+    // The panel, and its nav tabs with it, live in the chart host under
+    // the chart or in the dock slot beside it (Sep 14 2026). Searching the
+    // host alone never found them beside, so openEngineHelp's poll clicked
+    // the "?" button on every step: the panel strobed open and shut on
+    // Basics and never reached the tab asked for (Torry, Sep 17 2026,
+    // from the status-line receipt).
+    var tab = host.querySelector(sel);
+    if (!tab) { var slot = dockSlot(); if (slot) tab = slot.querySelector(sel); }
+    return tab;
   }
   // Which of the chart-help panels can open right now. "ready" = the
   // active chart tab is drawn, so the engine toolbar exists to host them;
