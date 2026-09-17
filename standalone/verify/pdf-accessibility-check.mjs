@@ -22,6 +22,12 @@ const note = 'This note explains the first capture; its source may subsequently 
 const errors = [];
 try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    // PS_CPU_THROTTLE=<rate> slows the page the way a loaded CI runner does
+    // (the chart-caption case lost its caption about one run in ten there).
+    if (process.env.PS_CPU_THROTTLE) {
+        const cdp = await page.context().newCDPSession(page);
+        await cdp.send('Emulation.setCPUThrottlingRate', { rate: Number(process.env.PS_CPU_THROTTLE) });
+    }
     page.setDefaultTimeout(10000);
     page.on('pageerror', e => errors.push(String(e)));
     page.on('console', m => { if (/jsPDF PubSub Error/.test(m.text())) errors.push(m.text()); });
@@ -40,9 +46,35 @@ try {
     });
     await page.waitForTimeout(1500);
     if (await page.locator('#ps-coach-ok').isVisible()) await page.locator('#ps-coach-ok').click();
-    async function description(text) {
+    // The export dialog focuses and selects its name field on a zero-delay
+    // timer after opening. A fill that lands between the dialog opening and
+    // that timer firing has its text pulled into the name field by the
+    // deferred focus, so the field's input listener never stores it: that
+    // is the caption a loaded CI runner lost about one run in ten. Open,
+    // then wait for the dialog's own focus to settle, then write; and never
+    // export until the shell's state carries the text (a real loss still
+    // fails, with the state dumped so the failure explains itself).
+    async function openDialog() {
         await page.click('#ps-export');
-        await page.fill('#ps-export-description', text);
+        await page.waitForFunction(() => document.activeElement && document.activeElement.id === 'ps-export-name');
+    }
+    async function writeField(id, text, key) {
+        await page.fill('#' + id, text);
+        const stored = await page.waitForFunction(([k, v]) => {
+            const c = PS_SHELL.chart(); return !!(c && c[k] === v);
+        }, [key, text], { timeout: 5000 }).then(() => true, () => false);
+        if (!stored) {
+            const st = await page.evaluate(([k, i]) => ({
+                stored: (PS_SHELL.chart() || {})[k], field: document.getElementById(i).value,
+                name: document.getElementById('ps-export-name').value,
+                active: document.activeElement ? document.activeElement.id : null,
+                chart: (PS_SHELL.chart() || {}).id }), [key, id]);
+            throw new Error(id + ' was not stored on the chart: ' + JSON.stringify(st));
+        }
+    }
+    async function description(text) {
+        await openDialog();
+        await writeField('ps-export-description', text, 'exportDescription');
         await page.keyboard.press('Escape');
     }
     async function save(name, bytes, expected) {
@@ -55,7 +87,7 @@ try {
             await (await PS_SHELL.exportBlob('pdf', 96, 'white')).arrayBuffer())));
         await save(name, bytes, [expected]);
     }
-    await page.click('#ps-export');
+    await openDialog();
     const generated = await page.inputValue('#ps-export-description');
     assert(generated.length > 40);
     await page.keyboard.press('Escape');
@@ -64,8 +96,8 @@ try {
     await chartPdf('chart-unicode', { alt: custom, vector: true });
     // A second export must not duplicate tags or retain PDF object IDs.
     await chartPdf('chart-repeat', { alt: custom, vector: true });
-    await page.click('#ps-export');
-    await page.fill('#ps-export-caption', caption);
+    await openDialog();
+    await writeField('ps-export-caption', caption, 'caption');
     await page.keyboard.press('Escape');
     await chartPdf('chart-caption', { alt: custom + '\nCaption: ' + caption, vector: true });
 
