@@ -10909,6 +10909,17 @@
     // dropped at t+1600ms and the echo clamped the page at t+1642
     // (t4-203 part two, measured).
     RESERVE_LAST = Date.now();
+    // And when the floor has already dropped, raise it: a commit with no
+    // press behind it (keyboard edits, slider arrow keys, Enter in a
+    // number field, an undo shortcut) re-renders through the same wipe.
+    // Not while the panel is docked beside the chart, where the reserve
+    // is off by design (syncDockLive drops it: nothing there to reveal).
+    if (!RESERVE_HOST && !(DOCK_BESIDE && DOCK_LIVE_WAS)) {
+      try {
+        var rh = hostEl();
+        if (rh && rh.isConnected && appWorkspace() === "chart") reserveArm(rh);
+      } catch (eRa) {}
+    }
     // A genuine edit is the newest thing in the chart scope and, like any
     // new action after an undo, it invalidates the redo stack. Commits
     // replayed by the engine's own Undo are neither.
@@ -11883,6 +11894,16 @@
     var host = e.target && e.target.closest &&
       e.target.closest(".graphbuilder2-host");
     if (!host) return;
+    reserveArm(host);
+  }, true);
+  // Raise the floor on a host: called for every trusted press on the
+  // chart, and (Sep 16 2026) for an option commit that arrives after the
+  // floor has dropped - a keyboard edit in the panel, arrow keys on a
+  // slider, Enter in a number field, an undo shortcut. Those re-render
+  // through the same transient wipe a click does, and without a floor the
+  // wipe clamped a scrolled pane to 0 (removing a figure note sent it
+  // from 225 to 0, every browser).
+  function reserveArm(host) {
     if (RESERVE_HOST && RESERVE_HOST !== host) {
       try { RESERVE_HOST.style.minHeight = ""; } catch (e2) {}
       reserveStopWatch();
@@ -11914,7 +11935,7 @@
       } catch (e4) {}
     }
     reserveSchedule(1600);
-  }, true);
+  }
   // The user's own scroll is what makes a held drop silent - check on
   // scroll too (the quiet gate inside still applies).
   (function wireReserveScrollCheck() {
