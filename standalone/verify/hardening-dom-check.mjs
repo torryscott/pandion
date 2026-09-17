@@ -526,3 +526,8 @@ if (failures) {
     process.exit(1);
 }
 console.log('HARDENING DOM CHECK: ALL GREEN');
+// Exit explicitly: linkedom 0.18 keeps a handle alive after the checks,
+// and a green run then sat inside the standalone suite for four hours
+// (Sep 16 2026, the first suite after the tmp cleanup forced a fresh
+// install). The green path now exits 0 like the red path exits 1.
+process.exit(0);
