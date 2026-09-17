@@ -48642,8 +48642,14 @@
             redrawSelectionIndicators();
             try { _updateRotateHandle(); } catch (_e) {}
 
+            // preventScroll (Sep 16 2026): the editor sits over the label
+            // the user just double-clicked, which is on screen by
+            // construction, and a plain focus() also scrolls the nearest
+            // scrolling pane to reveal the textarea; when the label sat
+            // within a few pixels of the pane's bottom edge that reveal
+            // moved the chart the moment the editor opened.
             setTimeout(function () {
-                try { input.focus(); input.select(); } catch (_e) {}
+                try { input.focus({ preventScroll: true }); input.select(); } catch (_e) {}
             }, 0);
         }
         function hideInlineTextEditor(shouldCommit) {
