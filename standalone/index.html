@@ -199,7 +199,7 @@
   .ps-project-panel, .ps-controls, .ps-inspector-pane, #ps-appmenu,
   #ps-contextmenu, .ps-role-picker, .ps-level-list, .ps-dialog-body,
   .ps-welcome-card, .ps-import-table-wrap, .ps-diagnostics-grid,
-  #ps-lviewport, .ps-command-palette-list, .ps-tour-list, #ps-hmc-body {
+  #ps-lviewport, .ps-command-palette-list, #ps-hmc-body {
     scrollbar-width: thin;
     scrollbar-color: var(--ps-l3) transparent;
   }
@@ -211,7 +211,7 @@
   .ps-import-table-wrap::-webkit-scrollbar,
   .ps-diagnostics-grid::-webkit-scrollbar, #ps-lviewport::-webkit-scrollbar,
   .ps-command-palette-list::-webkit-scrollbar,
-  .ps-tour-list::-webkit-scrollbar, #ps-hmc-body::-webkit-scrollbar {
+  #ps-hmc-body::-webkit-scrollbar {
     width: 9px; height: 9px;
   }
   .ps-project-panel::-webkit-scrollbar-thumb,
@@ -227,7 +227,6 @@
   .ps-diagnostics-grid::-webkit-scrollbar-thumb,
   #ps-lviewport::-webkit-scrollbar-thumb,
   .ps-command-palette-list::-webkit-scrollbar-thumb,
-  .ps-tour-list::-webkit-scrollbar-thumb,
   #ps-hmc-body::-webkit-scrollbar-thumb {
     background: var(--ps-l3); border-radius: 5px;
     border: 2px solid transparent; background-clip: content-box;
@@ -3835,28 +3834,6 @@
   .ps-diagnostics-grid span:nth-child(odd) {
     color: var(--ps-muted); background: var(--ps-s2); font-weight: 650;
   }
-  .ps-tour-label {
-    display: block; margin: 0 0 6px; color: var(--ps-muted); font-size: 10.5px;
-    font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
-  }
-  .ps-tour-search {
-    width: 100%; box-sizing: border-box; padding: 8px 10px; font: inherit;
-    font-size: 13.5px; color: var(--ps-ink-2); border: 1px solid var(--ps-l3);
-    border-radius: var(--ps-r-md); outline: none;
-  }
-  .ps-tour-search:focus { border-color: var(--ps-accent); }
-  .ps-tour-list { margin-top: 8px; max-height: 300px; overflow: auto; }
-  .ps-tour-item {
-    display: block; width: 100%; padding: 9px 10px; text-align: left;
-    font: inherit; color: #1a2432; background: transparent; border: 0;
-    border-radius: var(--ps-r-md); cursor: pointer;
-  }
-  .ps-tour-item:hover, .ps-tour-item:focus-visible { background: var(--ps-tint-2); }
-  .ps-tour-item-name { display: block; font-size: 13.5px; font-weight: 600; }
-  .ps-tour-item-meta {
-    display: block; margin-top: 2px; color: var(--ps-muted); font-size: 11px;
-  }
-  .ps-tour-empty { margin: 14px 4px; color: var(--ps-muted); font-size: 12.5px; }
   .ps-guided-empty {
     display: flex; flex-direction: column; align-items: center;
     max-width: 520px; margin: 55px auto; padding: 32px 28px;
@@ -4436,7 +4413,7 @@
   .ps-level-order, [data-ps-menu], [data-advice], [data-example] {
     cursor: default;
   }
-  a, .ps-linklike, .ps-link, [data-tour-link] { cursor: pointer; }
+  a, .ps-linklike, .ps-link { cursor: pointer; }
   button:disabled, .ps-btn:disabled, .ps-command:disabled { cursor: default; }
   /* the two gestures that are genuinely drags keep their own cursors */
   .ps-grid-col-resize { cursor: col-resize; }
@@ -6050,25 +6027,6 @@
     </div>
   </div>
 </div>
-<div id="ps-tour-dialog" class="ps-dialog-overlay" role="dialog"
-     aria-modal="true" aria-labelledby="ps-tour-title">
-  <div class="ps-dialog-card" style="max-width:460px;">
-    <div class="ps-dialog-head">
-      <div>
-        <h2 id="ps-tour-title">Show me how</h2>
-        <p>A walkthrough runs on this chart and changes it. Undo puts it back.</p>
-      </div>
-      <button type="button" class="ps-btn ps-dialog-close"
-              id="ps-tour-close">Close</button>
-    </div>
-    <div class="ps-dialog-body">
-      <label class="ps-tour-label" for="ps-tour-search">What do you want to do?</label>
-      <input type="text" id="ps-tour-search" class="ps-tour-search"
-             placeholder="e.g. add error bars" autocomplete="off">
-      <div id="ps-tour-list" class="ps-tour-list"></div>
-    </div>
-  </div>
-</div>
 <div id="ps-cellmenu">
   <button type="button" id="ps-cellmenu-toggle"></button>
   <button type="button" id="ps-cellmenu-row"></button>
@@ -6368,7 +6326,6 @@
       part. Nothing here is fixed.</span>
     <div class="ps-coach-actions">
       <button type="button" class="ps-btn ps-primary" id="ps-coach-ok">Got it</button>
-      <button type="button" class="ps-btn" id="ps-coach-tour">Show me how</button>
     </div>
   </div>
 </div>
@@ -6398,6 +6355,5 @@
 <script src="vendor/svg2pdf.umd.min.js"></script>
 <script src="../inst/widget/graphbuilder2.min.js"></script>
 <script src="js/ps-shell.js"></script>
-<script src="js/ps-tour.js"></script>
 </body>
 </html>

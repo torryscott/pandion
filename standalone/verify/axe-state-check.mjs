@@ -193,8 +193,6 @@ await auditShellDialog('Keyboard shortcuts dialog', 'ps-shortcuts-dialog',
     () => page.evaluate(() => window.PS_SHELL.runCommand('shortcuts')));
 await auditShellDialog('Diagnostics dialog', 'ps-diagnostics',
     () => page.evaluate(() => window.PS_SHELL.runCommand('diagnostics')));
-await auditShellDialog('Show me how dialog', 'ps-tour-dialog',
-    () => page.evaluate(() => window.PS_SHELL.runCommand('show-me-how')));
 
 await page.evaluate(() => {
     window.PS_SHELL.setWorkspace('layout');

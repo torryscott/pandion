@@ -71,9 +71,9 @@ ok(/editable/i.test(coach.text) && /Click a bar/.test(coach.text),
    `("${coach.text.replace(/\n/g, ' ').slice(0, 100)}")`);
 ok(coach.onScreen && coach.nearChart,
    'anchored at the chart rather than floating somewhere else');
-ok(coach.buttons.length === 2 && /Show me how/.test(coach.buttons.join(' ')),
-   `with a way to dismiss it and a way to go deeper ` +
-   `(${JSON.stringify(coach.buttons)})`);
+// The second button (Show me how) left with the walkthroughs, Sep 16 2026.
+ok(coach.buttons.length === 1 && /Got it/.test(coach.buttons.join(' ')),
+   `with a way to dismiss it (${JSON.stringify(coach.buttons)})`);
 
 // Once dismissed it never returns, including across a reload. A cue that
 // reappears is a nag, which is what the disabled engine hint was avoiding.

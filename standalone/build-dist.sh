@@ -51,7 +51,6 @@ inline("vendor/jspdf.umd.min.js", "vendor/jspdf.umd.min.js")
 inline("vendor/svg2pdf.umd.min.js", "vendor/svg2pdf.umd.min.js")
 inline("../inst/widget/graphbuilder2.min.js", "../inst/widget/graphbuilder2.min.js")
 inline("js/ps-shell.js", "js/ps-shell.js")
-inline("js/ps-tour.js", "js/ps-tour.js")
 
 # Stamp the generated-file warning. Anchored on the TAG SHAPE, not the
 # product name: the old literal-string match silently no-opped after the

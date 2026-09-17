@@ -244,39 +244,16 @@ punch lists are maintainer-local and not published with this repo.
     code, which is why the bug survived), and a `:active` count must count
     SELECTORS, not rules, because the press states are grouped.
 
-- WALKTHROUGHS DONE (Jul 25 2026): "Show me how" (Help menu ->
-  `js/ps-tour.js`). A walkthrough moves a simulated cursor over the REAL
-  chart and performs the REAL interaction: the panels roll out and the
-  chart changes, so there is no video to re-record when the UI moves.
-  Four ship (add error bars, change an axis range, recolor one bar, check
-  the chart for problems); each is ~10 lines of data at the bottom of
-  ps-tour.js, gated by an `applies(ctx)` predicate so a walkthrough is only
-  offered on a chart it fits. The picker is a standard `.ps-dialog-overlay`
-  declared in index.html, which is what gives it backdrop-click, Escape and
-  focus-trap for free; ps-shell owns the dialog, ps-tour owns the list and
-  playback. WHY THIS IS CHEAPER THAN IT LOOKS: the engine already carries
-  the instruction set. `_findEntriesForContext()` (the Ctrl/Cmd+F "Find a
-  setting" registry, ~153 entries) records, per setting, its synonyms, the
-  panel to open, the tab/strip state to prepare, and the selector of the
-  exact control - `_findActivate` already replays that instantly. A
-  walkthrough is the same data played slowly with a cursor and a sentence,
-  so a `route:` step kind can delegate navigation to the registry instead
-  of hand-coding a click path. THREE ENGINE TRAPS, all now guarded by
-  `verify/tour-check.mjs`: synthetic clicks need real coordinates AND
-  `detail:1` (the engine drops synthesized clicks at (0,0) with
-  `detail===0`); aim via `document.elementFromPoint` and click the TRUE
-  geometric centre, because invisible HTML hit strips float above the SVG
-  and a zero-width axis line padded by 1px misses its strip entirely; and
-  resolve targets lazily to the first VISIBLE match, because every commit
-  rebuilds the panel DOM and retired chrome stays in the document (two
-  `[data-field="max"]` inputs exist and document order returns the hidden
-  legacy popover). PROBE LAW: `page.evaluate(k => window.PS_TOUR.play(k))`
-  AWAITS the walkthrough - use a block body so the poll loop, its timeout
-  and its miss reporting actually run. The probe asserts the CHART changed
-  (error bars drawn, axis 100 -> 140, one series recolored and not all),
-  never merely that a panel appeared, because a silent engine change is
-  exactly the failure mode. All tour chrome is `ignore-html`, so it never
-  rides an export or a copy.
+- WALKTHROUGHS PARKED (Sep 16 2026, Torry: buggy enough to mislead a
+  reader). The "Show me how" walkthroughs shipped Jul 25 2026 (Help menu,
+  `js/ps-tour.js`, four tours, probe `verify/tour-check.mjs`, a "Show me
+  how" button on the coach mark) and were removed from the app, the menu,
+  the coach mark, the dist bundle and the probes. Everything, including the
+  engine lessons the driver encoded (synthetic clicks need real coordinates
+  and `detail:1`; aim via `document.elementFromPoint`; resolve targets
+  lazily to the first VISIBLE match), is parked on branch `park/show-me-how`
+  (main as of 31face5); diff it against the removal commit to bring them
+  back.
 - M6e DONE (Jul 24 2026): ROLE-PICKER REDESIGN (Torry's "still a
   little clumsy" screenshot review; whole set approved). The empty
   slot IS the picker now: clicking a role card expands it IN PLACE
@@ -1270,27 +1247,8 @@ most misleading page in the repo. What actually still holds:
   jamovi .b.R aggregation row for row, plus the module/role registry.
 - `js/ps-shell.js` - project state, CSV import, roles UI, the setOption
   sink, the render/echo loop, chart tabs, and the layout canvas.
-- `js/ps-tour.js` - the "Show me how" walkthroughs (Help menu). A
-  walkthrough moves a simulated cursor over the REAL chart and performs the
-  real interaction, so the real panels roll out and the chart really
-  changes; there is no video to re-record when the UI moves. Tours are data
-  at the bottom of the file, and their targets are semantic
-  (`data-role` / `data-kind` / `data-field`), never coordinates. Three
-  engine facts constrain the driver, all of them learned the hard way and
-  all of them guarded by `verify/tour-check.mjs`:
-  (a) synthetic clicks need real coordinates AND `detail:1`, because the
-  engine drops synthesized clicks at (0,0) with `detail===0` (a Qt
-  WebEngine artefact it defends against);
-  (b) aim with `document.elementFromPoint`, not at the element itself - the
-  engine floats invisible HTML hit strips above the SVG, so an axis click
-  must land on the strip, not the zero-width `<line>` under it, and the
-  click point must be the TRUE geometric centre (padding a zero-width rect
-  by even 1px misses the strip);
-  (c) resolve targets lazily and take the first VISIBLE match - every
-  commit rebuilds the panel DOM, and the engine keeps retired chrome in the
-  document (there are two `[data-field="max"]` inputs and the first in
-  document order is a hidden legacy popover).
-  All tour chrome is `ignore-html`, so it never rides an export or a copy.
+- `js/ps-tour.js` - REMOVED Sep 16 2026; the "Show me how" walkthroughs are
+  parked on branch `park/show-me-how` (see the walkthroughs entry in Status).
 - `build-templates.R` - generates the committed payload templates by driving
   the real module marshalling headlessly and mechanically diffing payloads
   from dissimilar datasets to find the data-dependent keys ("channels").
@@ -1361,10 +1319,6 @@ Rscript standalone/build-templates.R   # regenerate templates (needs jmvcore)
   closes it on the second read and asserts against stale rows. Press Escape
   first and confirm the menu is closed by COMPUTED display, not the inline
   one, which is the empty string before the menu has ever opened.
-- **`PS_TOUR.play()` returns a promise that resolves when the tour ends**, so
-  `page.evaluate(() => PS_TOUR.play(k))` blocks for the whole walkthrough.
-  Fire it inside a block body to observe a tour while it runs.
-
 - Rscript runs in the C locale: force `Sys.setlocale("LC_ALL",
   "en_US.UTF-8")` BEFORE sourcing the b.R files or the multibyte facet
   separator degrades to ASCII "<c2><a6>" inside emitted payloads, and

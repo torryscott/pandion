@@ -345,8 +345,6 @@ await inspectDialog('Keyboard shortcuts', 'ps-shortcuts-dialog',
     () => page.evaluate(() => window.PS_SHELL.runCommand('shortcuts')));
 await inspectDialog('Diagnostics', 'ps-diagnostics',
     () => page.evaluate(() => window.PS_SHELL.runCommand('diagnostics')));
-await inspectDialog('Show me how', 'ps-tour-dialog',
-    () => page.evaluate(() => window.PS_SHELL.runCommand('show-me-how')));
 await inspectDialog('Command Palette', 'ps-command-palette',
     () => page.evaluate(() => window.PS_SHELL.runCommand('command-palette')));
 await inspectDialog('Load Data', 'ps-loader',

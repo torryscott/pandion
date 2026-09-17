@@ -9419,8 +9419,8 @@
   // ---- punch list 2: saying that the chart is clickable ----
   // The engine's own first-run hint is dead behind an early return and the
   // shell added no replacement, so the product's defining capability was
-  // announced nowhere passively. Help > Show me how covers it, but that is a
-  // path a student has to already think to open.
+  // announced nowhere passively. Help > Chart basics covers it, but that is
+  // a path a student has to already think to open.
   //
   // One shot, ever: shown after a chart has actually DRAWN (a placeholder has
   // nothing to point at), never over the start centre, and remembered in
@@ -9471,11 +9471,6 @@
   function wireCoach() {
     var ok = document.getElementById("ps-coach-ok");
     if (ok) ok.addEventListener("click", coachDismiss);
-    var tour = document.getElementById("ps-coach-tour");
-    if (tour) tour.addEventListener("click", function () {
-      coachDismiss();
-      showTours();
-    });
     // Any click ON the chart proves the point better than the note does.
     var host = hostEl();
     if (host) host.addEventListener("pointerdown", function () {
@@ -28476,15 +28471,9 @@
       }, function () { showToast("Could not copy", true); });
     } catch (e) { showToast("Could not copy", true); }
   }
-  // "Show me how": the walkthrough picker. ps-tour.js owns the list and the
-  // playback; the shell owns the dialog, so the walkthroughs inherit the
-  // standard backdrop-click, Escape and focus-trap behaviour for free.
-  function showTours() {
-    if (!window.PS_TOUR) return;
-    el("ps-tour-search").value = "";
-    window.PS_TOUR.renderList("");
-    openShellDialog("ps-tour-dialog");
-  }
+  // The "Show me how" walkthroughs (ps-tour.js, Jul 25 2026) were removed
+  // Sep 16 2026 (Torry: buggy enough to mislead). The code is parked on
+  // branch park/show-me-how for a later revisit.
   function formatBytes(bytes) {
     bytes = Number(bytes) || 0;
     // Trimmed, human numbers: "7.2 KB", "1.5 MB", "3 GB" - never
@@ -28760,23 +28749,6 @@
       } catch (e) {}
       buildDebugOverlay();
     });
-    el("ps-tour-close").addEventListener("click", function () {
-      closeShellDialog("ps-tour-dialog");
-    });
-    el("ps-tour-search").addEventListener("input", function () {
-      if (window.PS_TOUR) window.PS_TOUR.renderList(this.value);
-    });
-    el("ps-tour-search").addEventListener("keydown", function (e) {
-      if (e.key !== "Enter") return;
-      var first = el("ps-tour-list").querySelector("[data-tour]");
-      if (first) first.click();
-    });
-    el("ps-tour-list").addEventListener("click", function (e) {
-      var row = e.target.closest ? e.target.closest("[data-tour]") : null;
-      if (!row) return;
-      closeShellDialog("ps-tour-dialog");
-      if (window.PS_TOUR) window.PS_TOUR.play(row.getAttribute("data-tour"));
-    });
     var dialogs = document.querySelectorAll(".ps-dialog-overlay");
     for (var i = 0; i < dialogs.length; i++) {
       dialogs[i].addEventListener("pointerdown", function (e) {
@@ -28936,7 +28908,6 @@
     // keys and the shell can open them by driving the engine's own help nav -
     // no engine change, and no second copy of the teaching content.
     help: [
-      { label: "Show me how\u2026", command: "show-me-how" },
       { label: "User guide", command: "user-guide" },
       "separator",
       { label: "Chart basics", command: "help-basics" },
@@ -29703,8 +29674,6 @@
     else if (command === "layout-add-chart") el("ps-laddchart").click();
     else if (command === "layout-add-text") el("ps-laddtext").click();
     else if (command === "preferences") showPreferences();
-    else if (command === "show-me-how")
-      showTours();
     else if (command === "user-guide") openUserGuide();
     else if (command === "copy-cells") {
       if (isLayoutTab(activeChart()) && laySelectedIds().length)

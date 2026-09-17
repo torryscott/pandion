@@ -397,26 +397,42 @@ ok(Number(fwd.early) === Number(fwd.late) * 2,
 // window.setOption() call creates NO undo step by design - the engine
 // snapshots data[key], and its handlers poke that before committing - so an
 // earlier version of this test had no history to leak and passed vacuously.
-// The shell's own walkthrough driver performs a real recolour.
+// The recolour is made the way a reader makes it: a real click on the
+// biggest bar (the panel opens on Bars > Color) and a real click on the
+// quick-row orange swatch. (The Show me how walkthrough that used to
+// perform this was parked Sep 16 2026, branch park/show-me-how.)
 const MOD = process.platform === 'darwin' ? 'Meta' : 'Control';
-async function playTour(key, timeoutMs = 60000) {
-    // Tour cards hold until the reader advances (no reading timer), so
-    // this driver plays the reader: press Next until the tour finishes.
-    // A press during a card's action only pre-arms the advance - the
-    // action (the real recolour this test depends on) always runs.
-    await page.evaluate(k => { window.PS_TOUR.play(k); }, key);
-    const t0 = Date.now();
-    while (Date.now() - t0 < timeoutMs) {
-        await page.waitForTimeout(700);
-        if (!await page.evaluate(() => window.PS_TOUR.isRunning())) break;
-        await page.evaluate(() => {
-            const b = [...document.querySelectorAll('[data-role="ps-tour-layer"] button')]
-                .find(x => x.textContent.indexOf('Next') >= 0);
-            if (b) b.click();
-        });
-    }
-    if (await page.evaluate(() => window.PS_TOUR.isRunning()))
-        throw new Error(`walkthrough "${key}" did not finish`);
+async function recolorOneBar() {
+    await page.evaluate(() => {
+        // The bar panel remembers the tab and strip last used; land on
+        // Bars > Color so the swatch is not behind a collapsed strip.
+        try { window.__gb2_bsActiveTab = 'bar'; window.__gb2_bsActiveStripBar = 'bar-color'; } catch (e) {}
+    });
+    const bar = await page.evaluate(() => {
+        let best = null, bestA = 0;
+        for (const el of document.querySelectorAll('#psroot [data-bar-cat]')) {
+            const r = el.getBoundingClientRect(); const a = r.width * r.height;
+            if (a > bestA) { bestA = a; best = { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }
+        }
+        return best;
+    });
+    if (!bar) throw new Error('no bar to click');
+    const underBar = await page.evaluate(([x, y]) => { const e = document.elementFromPoint(x, y); return e ? e.tagName + ' role=' + (e.getAttribute('data-role') || '') + ' id=' + e.id : null; }, [bar.x, bar.y]);
+    await page.mouse.click(bar.x, bar.y);
+    const SW = '[data-bs-palette="#e18e4c"][data-bs-palette-target="fill-chip"]';
+    await page.waitForFunction(sel => { const b = document.querySelector(sel); return !!(b && b.offsetParent); }, SW, { timeout: 8000 });
+    // Playwright's actionability check: it scrolls the swatch into view
+    // and refuses to click through anything covering it, naming the
+    // element that does (a bare mouse click at the swatch's centre once
+    // landed on a stray overlay and recoloured nothing).
+    await page.locator(SW).first().click({ timeout: 8000 });
+    const sw = 'locator', underSw = 'actionable';
+    await page.waitForTimeout(1600);   // past the engine's commit flush
+    // Explain a miss (the house rule for a probe step that can race).
+    const fills = await page.evaluate(() => Array.from(document.querySelectorAll('#psroot [data-bar-cat]')).filter(n => n.tagName === 'path').map(n => n.getAttribute('fill') || ''));
+    if (!fills.some(f => /e18e4c/i.test(f)))
+        console.log('  diag recolorOneBar: bar at', JSON.stringify(bar), 'under', underBar, '| swatch at', JSON.stringify(sw), 'under', underSw, '| fills', JSON.stringify(fills),
+            '| panel', await page.evaluate(() => { const p = document.querySelector('[data-gb2-inspector]'); return p ? p.textContent.replace(/\s+/g, ' ').slice(0, 80) : null; }));
 }
 const barFills = () => page.evaluate(() => Array.from(
     document.querySelectorAll('#psroot [data-bar-cat]'))
@@ -430,7 +446,7 @@ const ids = await page.evaluate(() => {
     return { a };
 });
 await page.waitForTimeout(900);
-await playTour('one-bar-color');                 // a REAL engine-side edit on A
+await recolorOneBar();                           // a REAL engine-side edit on A
 await page.waitForTimeout(900);
 const aRecoloured = (await barFills()).filter(f => /e18e4c/i.test(f)).length;
 ok(aRecoloured >= 1, `chart A really was recoloured through the engine ` +
