@@ -32269,6 +32269,23 @@
             }
             var availableForSlots = Math.max(0, innerW - sumExtra);
             var catWidth = nCats > 0 ? Math.max(2, availableForSlots / nCats) : innerW;
+            // Category spacing on line and dot charts (Sep 16 2026, Torry):
+            // their category centres are evenly spaced by construction, so
+            // Gap between categories cannot move them. lineCategorySpacing
+            // (1 = the columns fill the width, down to 0.4) pads both ends
+            // of the category axis instead, so the columns move closer
+            // together and stay centred. Ticks, labels, markers and seams
+            // all follow because every category centre reads cumExtraGap
+            // and catWidth. Absent or 1 leaves every number untouched.
+            if ((data.graphType === "line" || data.graphType === "dot") &&
+                typeof data.lineCategorySpacing === "number" &&
+                data.lineCategorySpacing >= 0.4 && data.lineCategorySpacing < 1 &&
+                nCats > 0) {
+                var _csPad = (1 - data.lineCategorySpacing) * availableForSlots / 2;
+                availableForSlots = Math.max(0, availableForSlots - 2 * _csPad);
+                catWidth = Math.max(2, availableForSlots / nCats);
+                for (var _csi = 0; _csi < cumExtraGap.length; _csi++) cumExtraGap[_csi] += _csPad;
+            }
 
             // Facet runs: contiguous spans of visible cats that
             // share a facet prefix. Computed once and reused for
@@ -34686,7 +34703,11 @@
                                   data.lineMarkerSpread <= 1)
                         ? data.lineMarkerSpread : 0.35;
                     var between = [];
-                    if (!isLineFam) {
+                    // Between-category seams on the line family edit
+                    // lineCategorySpacing (Sep 16 2026); before that they
+                    // were dropped there, since Gap between categories had
+                    // no distance to edit on evenly spaced columns.
+                    {
                         for (var bi = 1; bi < visibleXCats.length; bi++) {
                             var cA = visibleXCats[bi - 1], cB = visibleXCats[bi];
                             var fA = "", fB = "";
@@ -34700,9 +34721,15 @@
                             var exB = (cumExtraGap && cumExtraGap[bi]) || 0;
                             var cenA = chartLeft + exA + (bi - 0.5) * catWidth;
                             var cenB = chartLeft + exB + (bi + 0.5) * catWidth;
+                            // Spacing moves every column about the block's
+                            // centre, so the seam's unit is two slots: the
+                            // value then changes by one slot-fraction per
+                            // pointer-slot (a 40px drag on a 150px slot moved
+                            // it half the scale at the bars' 2x rate).
                             between.push({ pos: mapPos((cenA + cenB) / 2),
-                                           gapPx: Math.max(0, ((cenB - cenA) - availW)) * kScale,
-                                           unit: catWidth * kScale });
+                                           gapPx: (isLineFam ? Math.max(0, (cenB - cenA) - 12)
+                                                             : Math.max(0, ((cenB - cenA) - availW))) * kScale,
+                                           unit: (isLineFam ? 2 : 1) * catWidth * kScale });
                         }
                     }
                     var within = [];
@@ -34739,6 +34766,10 @@
                         crossLo: horiz ? chartLeft : chartTop,
                         crossHi: horiz ? (chartLeft + innerW) : chartBottom,
                         catGap: catGap, barGap: bGap, spread: spread,
+                        catSpacing: (typeof data.lineCategorySpacing === "number" &&
+                                     data.lineCategorySpacing >= 0.4 &&
+                                     data.lineCategorySpacing <= 1)
+                            ? data.lineCategorySpacing : 1,
                         family: isLineFam ? "line" : "bar",
                         hasGroups: hasGroups, svg: svg,
                         between: between, within: within, rows: []
@@ -48763,10 +48794,15 @@
             for (i = 0; i < L.between.length; i++) {
                 half = Math.max(L.between[i].gapPx * 0.35, _GS_BANDMIN);
                 if (Math.abs(main - L.between[i].pos) <= half) {
-                    return { kind: "between", pos: L.between[i].pos,
-                             key: "b" + Math.round(L.between[i].pos),
-                             label: "Gap between categories", opt: "categoryGap",
-                             val: L.catGap, max: 0.5, unit: L.between[i].unit };
+                    return isLineFam
+                        ? { kind: "between", pos: L.between[i].pos,
+                            key: "b" + Math.round(L.between[i].pos),
+                            label: "Category spacing", opt: "lineCategorySpacing",
+                            val: L.catSpacing, max: 1, min: 0.4, unit: L.between[i].unit }
+                        : { kind: "between", pos: L.between[i].pos,
+                            key: "b" + Math.round(L.between[i].pos),
+                            label: "Gap between categories", opt: "categoryGap",
+                            val: L.catGap, max: 0.5, unit: L.between[i].unit };
                 }
             }
             return null;
@@ -48818,6 +48854,7 @@
             if (dragVal != null) {
                 var pct = Math.round(dragVal * 100);
                 var lbl = (a.opt === "lineMarkerSpread" ? "Marker spread "
+                    : a.opt === "lineCategorySpacing" ? "Category spacing "
                     : a.opt === "likertRowGap" ? "Row gap "
                     : a.kind === "within" ? "Within-group gap "
                     : "Category gap ") + pct + "%";
@@ -48978,6 +49015,11 @@
                 if (rSp && typeof sp === "number") rSp.value = String(sp);
                 var vSp = inspectorPanel.querySelector('[data-field="marker-spread-val"]');
                 if (vSp && typeof sp === "number") vSp.textContent = Math.round(sp * 100) + "%";
+                var cs = data.lineCategorySpacing;
+                var rCs = inspectorPanel.querySelector('input[data-field="cat-spacing"]');
+                if (rCs && typeof cs === "number") rCs.value = String(cs);
+                var vCs = inspectorPanel.querySelector('[data-field="cat-spacing-val"]');
+                if (vCs && typeof cs === "number") vCs.textContent = Math.round(cs * 100) + "%";
                 var rg = data.likertRowGap;
                 var rRg = inspectorPanel.querySelector('input[data-field="lk-rowgap"]');
                 if (rRg && typeof rg === "number") rRg.value = String(Math.round(rg * 100));
@@ -49010,7 +49052,7 @@
             if (!L) return;
             var p = _gsPt(e);
             var v = st.drag.v0 + 2 * (_gsMainOf(p) - st.drag.m0) / st.drag.unit;
-            st.drag.cur = Math.max(0, Math.min(v, st.drag.max));
+            st.drag.cur = Math.max(st.drag.min || 0, Math.min(v, st.drag.max));
             if (!st.raf) {
                 st.raf = requestAnimationFrame(function () {
                     var s2 = _gsState();
@@ -49032,6 +49074,7 @@
             if (!a || a.key !== st.armed.key) return;
             st.drag = { a: a, m0: _gsMainOf(p), v0: a.val, cur: a.val,
                         cross: st.armed.cross, opt: a.opt, max: a.max,
+                        min: (a.min > 0) ? a.min : 0,
                         unit: (a.unit && a.unit > 0) ? a.unit : 100 };
             e.stopPropagation();
             e.preventDefault();
@@ -63928,7 +63971,21 @@
                 // something precedes it (marker-spread and/or facet-gap
                 // rows) - avoids a stray leading rule on an ungrouped,
                 // unfaceted line chart.
-                var _catDivider = (_markerSpreadRow || _facetGapRow) ?
+                // Category spacing (Sep 16 2026, Torry): how close the
+                // category columns sit. 100% fills the plot width (the
+                // only layout before); lower values bring the columns
+                // together, centred. The between-category seam on the
+                // chart edits the same value.
+                var _csNow = (typeof data.lineCategorySpacing === "number" &&
+                              data.lineCategorySpacing >= 0.4 && data.lineCategorySpacing <= 1)
+                    ? data.lineCategorySpacing : 1;
+                var _catSpacingRow =
+                    '<div style="display:flex;align-items:center;gap:8px;padding:2px 4px;flex-wrap:wrap;">' +
+                      '<span style="color:#555;font-size:11px;width:120px;text-align:right;flex-shrink:0;" title="100% = the columns fill the plot width; lower values bring the categories closer together, centred">Category spacing</span>' +
+                      '<input type="range" data-field="cat-spacing" data-no-num="1" min="0.4" max="1" step="0.05" value="' + _csNow + '" style="width:140px;" title="How far apart the category columns sit" />' +
+                      '<span data-field="cat-spacing-val" style="width:42px;text-align:center;color:#555;font-size:11px;">' + Math.round(_csNow * 100) + '%</span>' +
+                    '</div>';
+                var _catDivider = (_catSpacingRow || _markerSpreadRow || _facetGapRow) ?
                     '<div style="border-top:1px solid #eee;margin:8px 0 6px 0;"></div>' : '';
                 // Value spacing: offered only where it can mean
                 // something - a line or dot chart, unfaceted, whose
@@ -63957,6 +64014,7 @@
                     : '';
                 return '<div data-tab-pane="spacing" style="' + _showFn("spacing") + '">' +
                     _vsRow +
+                    _catSpacingRow +
                     _markerSpreadRow +
                     _facetGapRow +
                     _catDivider +
@@ -64487,6 +64545,33 @@
                         var _rMs = _gb2SpecRoute("lineMarkerSpread", v);
                         if (_rMs) window.__gb2_pendingOpts[_rMs[0]] = _rMs[1];
                     } catch (_e) {}
+                });
+            }
+            // Category spacing: the same deferred-commit story as marker
+            // spread (live redraw per input, the value rides the next
+            // flush), plus an explicit commit on release so an undo step
+            // exists the moment the slider is let go.
+            var iCatSp = body.querySelector('[data-field="cat-spacing"]');
+            var iCatSpVal = body.querySelector('[data-field="cat-spacing-val"]');
+            if (iCatSp) {
+                iCatSp.addEventListener("input", function () {
+                    var v = parseFloat(iCatSp.value);
+                    if (!isFinite(v) || v < 0.4 || v > 1) return;
+                    if (iCatSpVal) iCatSpVal.textContent = Math.round(v * 100) + "%";
+                    try { _bumpInspectorSuppression(); } catch (_eBp2) { try { window.__gb2_inspectorInputAt = Date.now(); } catch (_e2) {} }
+                    data.lineCategorySpacing = v;
+                    redraw();
+                    try {
+                        if (!window.__gb2_pendingOpts) window.__gb2_pendingOpts = {};
+                        var _rCs = _gb2SpecRoute("lineCategorySpacing", v);
+                        if (_rCs) window.__gb2_pendingOpts[_rCs[0]] = _rCs[1];
+                    } catch (_e) {}
+                });
+                iCatSp.addEventListener("change", function () {
+                    var v = parseFloat(iCatSp.value);
+                    if (!isFinite(v) || v < 0.4 || v > 1) return;
+                    data.lineCategorySpacing = v;
+                    if (hasSetOption) { try { _setOption("lineCategorySpacing", v); } catch (_e) {} }
                 });
             }
 
