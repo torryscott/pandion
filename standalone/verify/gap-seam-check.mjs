@@ -314,8 +314,19 @@ await pageG.mouse.move(gm.within.x - 200, gm.within.y - 150);
 await pageG.waitForTimeout(150);
 await pageG.mouse.move(gm.between.x, gm.between.y);
 await pageG.waitForTimeout(650);
-ok(await chromeG() === 0,
-   'no between-cluster seam on line/dot: marker spread owns spacing there');
+// Until Sep 16 2026 this asserted NO between-cluster seam on line and dot
+// (marker spread owned their spacing). Torry's category-spacing call
+// reversed that: the between seam is back on line and dot and edits the
+// Gap tab's Category spacing (lineCategorySpacing), see
+// category-spacing-check.mjs for the full drag; here it just has to arm
+// and name itself.
+ok(await chromeG() === 1,
+   'the between-cluster seam arms on line/dot again (Sep 16 2026: Category spacing)');
+lblG = await pageG.evaluate(() => {
+    const g = document.querySelector('[data-role="gap-seam-chrome"]');
+    return g ? g.textContent : ''; });
+ok(/Category spacing/.test(lblG),
+   `and names it Category spacing, not Marker spread (${lblG.trim()})`);
 ok(errG.length === 0, 'no page errors on the grouped page (' + errG.join('|').slice(0, 160) + ')');
 await ctxG.close();
 
