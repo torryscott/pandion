@@ -294,9 +294,15 @@ ok(document.querySelectorAll('[data-analysis-module]').length === 7 &&
     document.querySelectorAll('[data-analysis-help]').length === 1,
     'adds Help Me Choose as the eighth gallery choice');
 document.querySelector('[data-analysis-help]').click();
+// Since Sep 18 2026 a project with columns opens on "Use my variables";
+// the seven questions sit one tab click away.
 ok(document.getElementById('ps-help-choose').style.display === 'flex' &&
-    document.querySelectorAll('#ps-help-choose [data-hmc-go]').length === 7,
-    'opens the seven-question guidance route without creating a chart');
+    document.querySelector('#ps-help-choose [data-hmc-mode="variables"]').getAttribute('aria-pressed') === 'true' &&
+    !!document.querySelector('#ps-help-choose .ps-hmc-variable-list'),
+    'opens on the variables route without creating a chart');
+document.querySelector('#ps-help-choose [data-hmc-mode="questions"]').click();
+ok(document.querySelectorAll('#ps-help-choose [data-hmc-go]').length === 7,
+    'and the questions tab shows the seven-question guidance route');
 document.querySelector('#ps-help-choose [data-hmc-go="compare"]').click();
 ok(document.querySelectorAll('#ps-help-choose [data-hmc-go]').length === 3,
     'uses progressive follow-up questions for an ambiguous goal');
