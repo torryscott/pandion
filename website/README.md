@@ -160,7 +160,7 @@ its colour at all because `.prose p` outranked `.kicker`.
 
 Added: `robots.txt`, `sitemap.xml`, a branded `404.html`, `_headers`,
 canonical + Open Graph + Twitter tags
-on all three pages, and `assets/share-card.png`, a purpose-built
+on all three pages, and `assets/share-card-2026-09.png` (regenerate it when the hero copy changes: it is a static render of the hero plus a crop of app-chart.png), a purpose-built
 1200x630 share image. The previous og:image was the whole 3040px app
 screenshot, unreadable as a thumbnail.
 
