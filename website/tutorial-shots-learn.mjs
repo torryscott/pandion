@@ -405,6 +405,28 @@ if (want('choose')) {
             { x: 270, y: top, width: 616, height: Math.min(876 - top, 616) });
         await ctx.close();
     }
+    {   // the standalone's Help me choose dialog on its Use my variables
+        // route (the default since Sep 18 2026), two columns picked so the
+        // recommendation pane is filled
+        const { ctx, page } = await session();
+        await chartsReady(page);
+        await page.evaluate(() => window.PS_SHELL.showHelpMeChoose());
+        await page.waitForTimeout(700);
+        for (const v of ['condition', 'score']) {
+            await page.click(`.ps-hmc-variable[data-hmc-variable="${v}"]`);
+            await page.waitForTimeout(400);
+        }
+        await page.waitForTimeout(600);
+        const box = await page.evaluate(() => {
+            const r = document.getElementById('ps-help-choose-body')
+                .parentElement.getBoundingClientRect();
+            return { x: r.left, y: r.top, width: r.width, height: r.height };
+        });
+        await shot(page, 'ch-hmc.png', {
+            x: Math.max(0, box.x - 8), y: Math.max(0, box.y - 8),
+            width: Math.min(1280, box.width + 16), height: Math.min(900, box.height + 16) });
+        await ctx.close();
+    }
 }
 
 // ====================================== learn-repeated-measures.html
