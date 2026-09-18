@@ -104130,15 +104130,24 @@
             var dy = e.clientY - startMouseY;
             var newW = clamp(startInchesW + dx / gripVS / PX_PER_INCH, MIN_W_IN, MAX_W_IN);
             var newH = clamp(startInchesH + dy / gripVS / PX_PER_INCH, MIN_H_IN, MAX_H_IN);
-            // Shift = momentary aspect lock (same math as the Sizing
-            // panel's persistent chartAspectLock checkbox): the dominant
-            // pointer axis drives, the other follows the grab-time ratio.
+            // Shift = momentary aspect lock (same ratio as the Sizing
+            // panel's persistent chartAspectLock checkbox). The pointer's
+            // travel is projected onto the locked diagonal, the least-
+            // squares fit to both axes, which is continuous in the pointer.
+            // Until Sep 16 2026 the larger of |dx| and |dy| drove and the
+            // other followed; along a diagonal drag the two trade places
+            // every event and give different sizes whenever the hand's
+            // slope is not the chart's ratio, so the chart alternated
+            // between two sizes as fast as the mouse reported (Torry:
+            // "jumps back and forth randomly"; 39 backward steps in 80
+            // moves, the largest 154px, in the probe).
             if (data.chartAspectLock === true || e.shiftKey) {
-                if (Math.abs(dx) >= Math.abs(dy)) {
-                    newH = clamp(newW * startRatioXY, MIN_H_IN, MAX_H_IN);
-                } else {
-                    newW = clamp((startRatioXY > 0) ? (newH / startRatioXY) : newH, MIN_W_IN, MAX_W_IN);
-                }
+                var r = startRatioXY > 0 ? startRatioXY : 1;
+                var dW = dx / gripVS / PX_PER_INCH, dH = dy / gripVS / PX_PER_INCH;
+                var t = (dW + r * dH) / (1 + r * r);
+                newW = clamp(startInchesW + t, MIN_W_IN, MAX_W_IN);
+                newH = clamp(newW * r, MIN_H_IN, MAX_H_IN);
+                if (newH !== newW * r) newW = clamp(newH / r, MIN_W_IN, MAX_W_IN);
             }
             if (newW === inchesW && newH === inchesH) return;
             inchesW = newW; inchesH = newH;
