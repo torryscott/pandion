@@ -21,7 +21,7 @@ async function run(name, action){
  }finally{await page.close();}
 }
 const snapshot=p=>p.evaluate(()=>({count:PS_SHELL.charts().length,chart:JSON.parse(JSON.stringify(PS_SHELL.chart()))}));
-async function compare(p){await p.locator('[data-hmc-go="compare"]').click();await p.locator('[data-hmc-go="compare-summary"]').click();}
+async function compare(p){await p.locator('[data-hmc-mode="questions"]').click();await p.locator('[data-hmc-go="compare"]').click();await p.locator('[data-hmc-go="compare-summary"]').click();}
 async function choose(p){await p.locator('#ps-empty-hmc').click();await compare(p);}
 async function kept(p,before,module){
  await p.waitForFunction(()=>!document.querySelector('#ps-help-choose').offsetHeight);
@@ -35,7 +35,7 @@ try{
   await p.locator('[data-hmc-create]').focus();await p.keyboard.press('Enter');await kept(p,before,'plotbuilder');
  });
  await run('a different analysis reuses the same document',async p=>{
-  const before=await snapshot(p);await p.locator('#ps-empty-hmc').click();await p.locator('[data-hmc-go="scatter"]').click();
+  const before=await snapshot(p);await p.locator('#ps-empty-hmc').click();await p.locator('[data-hmc-mode="questions"]').click();await p.locator('[data-hmc-go="scatter"]').click();
   assert.equal(await p.locator('[data-hmc-create]').innerText(),'Use for this chart');await p.locator('[data-hmc-create]').click();
   await kept(p,before,'xyplotbuilder');
  });

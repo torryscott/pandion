@@ -64,9 +64,16 @@ console.log('  ok  Help Me Choose occupies an equal-sized eighth gallery positio
 
 const initialCharts = await page.evaluate(() => window.PS_SHELL.charts().length);
 await page.click('[data-analysis-help]');
+// Since Sep 18 2026 (Torry) a project with columns opens on "Use my
+// variables"; the questions route is one click away and is exercised below.
 if (!(await page.locator('#ps-help-choose').isVisible()) ||
-    (await page.locator('#ps-help-choose [data-hmc-go]').count()) !== 7)
-    throw new Error('Help Me Choose did not open its complete first question');
+    (await page.locator('#ps-help-choose [data-hmc-mode="variables"][aria-pressed="true"]').count()) !== 1 ||
+    (await page.locator('#ps-help-choose .ps-hmc-variable-list').count()) !== 1)
+    throw new Error('Help Me Choose did not open on the variables route');
+console.log('  ok  guidance opens on Use my variables when the project has columns');
+await page.click('[data-hmc-mode="questions"]');
+if ((await page.locator('#ps-help-choose [data-hmc-go]').count()) !== 7)
+    throw new Error('Help Me Choose did not show its complete first question');
 if ((await page.evaluate(() => window.PS_SHELL.charts().length)) !== initialCharts)
     throw new Error('opening guidance created an unwanted chart document');
 console.log('  ok  guidance opens without adding a project document');
@@ -107,6 +114,7 @@ if (await page.locator('#ps-help-choose').isVisible())
 console.log('  ok  confirmation creates the recommended existing chart module');
 
 await page.evaluate(() => window.PS_SHELL.showHelpMeChoose());
+await page.click('[data-hmc-mode="questions"]');
 await page.click('[data-hmc-go="scatter"]');
 if (!(await page.locator('[data-hmc-create="xyplotbuilder"]').isVisible()) ||
     !(await page.locator('#ps-help-choose-body').textContent()).includes(
@@ -238,6 +246,7 @@ async function hmcState() {
 }
 await page.evaluate(() => window.PS_SHELL.showHelpMeChoose());
 await page.waitForTimeout(150);
+await page.click('[data-hmc-mode="questions"]');
 await page.click('.ps-hmc-option');       // enter step 2 of the questions
 await page.waitForTimeout(150);
 const trapped = await hmcState();

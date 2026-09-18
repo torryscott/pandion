@@ -19553,7 +19553,12 @@
       HMC_MODE = "variables";
       HMC_SELECTED = seedCols.slice();
     } else {
-      HMC_MODE = "questions";
+      // The variables route is the default (Torry, Sep 18 2026): a project
+      // with columns opens on "Use my variables"; only an empty project
+      // starts on the questions, since there is nothing to pick from.
+      var cols = PROJECT.table && Array.isArray(PROJECT.table.order) ?
+        PROJECT.table.order.length : 0;
+      HMC_MODE = cols > 0 ? "variables" : "questions";
       HMC_SELECTED = [];
     }
     renderHelpMeChoose();

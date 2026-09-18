@@ -46,7 +46,11 @@ await page.waitForTimeout(1400);
 const openWizard = () => page.evaluate(async () => {
     const s = ms => new Promise(r => setTimeout(r, ms));
     window.PS_SHELL.showHelpMeChoose();
-    await s(600);
+    await s(300);
+    // Since Sep 18 2026 a project with columns opens on the variables route;
+    // these cases exercise the questions, one tab click away.
+    document.querySelector('[data-hmc-mode="questions"]').click();
+    await s(300);
 });
 
 console.log('case 1: the question route teaches grouping versus panels');
