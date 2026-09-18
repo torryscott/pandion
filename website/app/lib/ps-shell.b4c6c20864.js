@@ -1028,8 +1028,13 @@
   }
   function dockModeRecompute() {
     var pref = panelDockPref();
+    // While Statistics holds the rail wide the pane is narrower than the
+    // automatic rule assumes; re-deciding on it could flip the panel
+    // below, which drops the width, which flips it back. Hold the answer
+    // until the width is given back.
     var want = pref === "beside" ? true
-             : pref === "below" ? false : dockAutoBeside(DOCK_BESIDE);
+             : pref === "below" ? false
+             : (STATS_WIDE != null ? DOCK_BESIDE : dockAutoBeside(DOCK_BESIDE));
     var changed = want !== DOCK_BESIDE;
     DOCK_BESIDE = want;
     try { document.body.classList.toggle("ps-dock-beside", want); } catch (e) {}
@@ -1119,6 +1124,83 @@
       } catch (eL) {}
     }
     DOCK_LIVE_WAS = live;
+    try { statsWidthSync(); } catch (eW) {}
+  }
+  // The docked Statistics panel, if one is showing in the slot.
+  function dockStatsPanel() {
+    var slot = dockSlot();
+    if (!slot || !DOCK_BESIDE) return null;
+    for (var i = 0; i < slot.children.length; i++) {
+      var ch = slot.children[i];
+      try {
+        if (ch.style.display === "none") continue;
+        if (ch.querySelector && ch.querySelector('[data-st-pane], [data-role="st-close-btn"]')) return ch;
+      } catch (eC) {}
+    }
+    return null;
+  }
+  // Runs on every dock sync (slot mutations, pref changes, resizes): a
+  // Statistics panel in the rail widens it to what its widest visible
+  // table needs; a tab switch can widen further, never narrow mid-read;
+  // anything else in the slot, or an empty slot, gives the width back.
+  function statsWidthSync() {
+    var statsEl = dockStatsPanel();
+    if (!statsEl) {
+      if (STATS_WIDE != null || STATS_WIDE_USER) {
+        STATS_WIDE = null; STATS_WIDE_USER = false;
+        statsWidthApply();
+      }
+      return;
+    }
+    if (STATS_WIDE_USER) return;
+    var col = document.querySelector(".ps-controls");
+    if (!col) return;
+    // Read-only on purpose: this runs from the slot's MutationObserver,
+    // so touching any style in here would queue the next sync and the
+    // two would chase each other forever. A wrapper that scrolls
+    // sideways has scrollWidth = its table's intrinsic width (the
+    // tables carry min-width:100%, so a fitting table reads as the
+    // wrapper and contributes nothing).
+    var need = 0, wrapW = 0;
+    var wraps = statsEl.querySelectorAll("[data-st-scroll]");
+    for (var j = 0; j < wraps.length; j++) {
+      var w = wraps[j];
+      if (!w.offsetParent) continue;
+      wrapW = Math.max(wrapW, w.clientWidth);
+      if (w.scrollWidth > w.clientWidth + 1) need = Math.max(need, w.scrollWidth);
+    }
+    if (!(need > 0) || !(wrapW > 0)) return;
+    var chrome = Math.max(0, Math.round(col.getBoundingClientRect().width) - wrapW);
+    var target = need + chrome + 2;
+    var saved = STATS_WIDE;
+    STATS_WIDE = null;
+    var base = splitMetrics("inspector");
+    STATS_WIDE = saved;
+    var cur = STATS_WIDE != null ? STATS_WIDE : base.now;
+    var want = Math.round(Math.min(base.max, Math.max(cur, target)));
+    if (want > cur + 1) {
+      STATS_WIDE = want;
+      statsWidthApply();
+      try {
+        var lv = el("ps-dock-live");
+        if (lv) lv.textContent = "Statistics panel widened to fit its tables; Close or Escape gives the width back";
+      } catch (eL) {}
+    }
+  }
+  // The column slides over 150ms (the panel's own slide); the class
+  // scopes the transition to this change so splitter drags stay instant.
+  function statsWidthApply() {
+    var body = document.querySelector(".ps-app-body");
+    if (body) {
+      body.classList.add("ps-stats-widening");
+      if (STATS_WIDE_T) clearTimeout(STATS_WIDE_T);
+      STATS_WIDE_T = window.setTimeout(function () {
+        STATS_WIDE_T = null;
+        body.classList.remove("ps-stats-widening");
+      }, 220);
+    }
+    splitApply();
+    fitSchedule();
   }
   function queueDockSync() {
     if (DOCK_SYNC_QUEUED) return;
@@ -9337,8 +9419,8 @@
   // ---- punch list 2: saying that the chart is clickable ----
   // The engine's own first-run hint is dead behind an early return and the
   // shell added no replacement, so the product's defining capability was
-  // announced nowhere passively. Help > Show me how covers it, but that is a
-  // path a student has to already think to open.
+  // announced nowhere passively. Help > Chart basics covers it, but that is
+  // a path a student has to already think to open.
   //
   // One shot, ever: shown after a chart has actually DRAWN (a placeholder has
   // nothing to point at), never over the start centre, and remembered in
@@ -9389,11 +9471,6 @@
   function wireCoach() {
     var ok = document.getElementById("ps-coach-ok");
     if (ok) ok.addEventListener("click", coachDismiss);
-    var tour = document.getElementById("ps-coach-tour");
-    if (tour) tour.addEventListener("click", function () {
-      coachDismiss();
-      showTours();
-    });
     // Any click ON the chart proves the point better than the note does.
     var host = hostEl();
     if (host) host.addEventListener("pointerdown", function () {
@@ -10832,6 +10909,17 @@
     // dropped at t+1600ms and the echo clamped the page at t+1642
     // (t4-203 part two, measured).
     RESERVE_LAST = Date.now();
+    // And when the floor has already dropped, raise it: a commit with no
+    // press behind it (keyboard edits, slider arrow keys, Enter in a
+    // number field, an undo shortcut) re-renders through the same wipe.
+    // Not while the panel is docked beside the chart, where the reserve
+    // is off by design (syncDockLive drops it: nothing there to reveal).
+    if (!RESERVE_HOST && !(DOCK_BESIDE && DOCK_LIVE_WAS)) {
+      try {
+        var rh = hostEl();
+        if (rh && rh.isConnected && appWorkspace() === "chart") reserveArm(rh);
+      } catch (eRa) {}
+    }
     // A genuine edit is the newest thing in the chart scope and, like any
     // new action after an undo, it invalidates the redo stack. Commits
     // replayed by the engine's own Undo are neither.
@@ -10905,10 +10993,26 @@
   // .ps-no-inspector rule that would have hidden the rail entirely had its
   // class only ever REMOVED, never added. Widths persist with the project's UI
   // state, because a working width is a preference, not a per-session accident.
-  var SPLIT_BOUNDS = { rail: [150, 380], inspector: [240, 560] };
+  // The inspector's upper bound was 560 until Sep 15 2026: the Statistics
+  // reading width needs 585 for Compare pairs under WebKit's font metrics
+  // (534px table + 49px panel chrome), and a hand drag may as well reach
+  // the same width. splitMetrics still floors the chart pane at 320px.
+  var SPLIT_BOUNDS = { rail: [150, 380], inspector: [240, 640] };
   var SPLIT_DEFAULT = { rail: 205, inspector: 330 };
   var SPLIT_VAR = { rail: "--ps-rail-w", inspector: "--ps-insp-w" };
   var SPLIT_DRAG = null;
+  // Statistics gets reading width while it is open beside the chart
+  // (Torry, Sep 15 2026). The rail is 380 because it holds controls; the
+  // Statistics tables need up to 534px because they hold numbers, and in
+  // the rail the p columns fell off the right edge. While a Statistics
+  // panel is docked, STATS_WIDE holds the width its widest table needs
+  // (never narrower than the rail was, capped by the splitter's 640 and
+  // by the chart's own 320px floor), and splitMetrics prefers it. It goes
+  // back to null when the panel closes or a chart click replaces it, and
+  // a width the user drags while it is open wins for the rest of that
+  // session (STATS_WIDE_USER). Measured: on a 620px-tall pane the chart
+  // is height-bound, so at 1366x620 a 560 rail costs it nothing.
+  var STATS_WIDE = null, STATS_WIDE_USER = false, STATS_WIDE_T = null;
   function splitSanitizeWidths(input) {
     var out = {};
     if (!input || typeof input !== "object") return out;
@@ -10939,6 +11043,7 @@
     // stylesheet: splitApply writes the custom property inline.
     var preferred = Number(splitWidths()[key]) ||
       ((key === "inspector" && panelDockWanted()) ? 380 : SPLIT_DEFAULT[key]);
+    if (key === "inspector" && STATS_WIDE != null) preferred = Math.max(preferred, STATS_WIDE);
     return {
       min: b[0],
       max: Math.round(max),
@@ -10969,6 +11074,9 @@
   function splitSet(key, px, persistIt) {
     var b = SPLIT_BOUNDS[key];
     if (!b) return;
+    // A width the user sets while Statistics holds the rail wide is
+    // theirs: the automatic width steps aside until Statistics closes.
+    if (key === "inspector" && STATS_WIDE != null) { STATS_WIDE = null; STATS_WIDE_USER = true; }
     // Never let a drag take the chart pane below something usable: the point of
     // the splitter is to give the CHART room, so it cannot be used to erase it.
     var body = document.querySelector(".ps-app-body");
@@ -10995,8 +11103,18 @@
         bar.addEventListener("pointerdown", function (e) {
           if (e.button !== 0) return;
           var body = document.querySelector(".ps-app-body");
-          var start = Number(splitWidths()[key]) || SPLIT_DEFAULT[key];
+          // Start from the width on screen, not the stored one: the
+          // docked default (380) and the Statistics reading width both
+          // show without being stored, and a drag that started from the
+          // stored 330 jumped on its first move.
+          var start = splitMetrics(key).now;
           SPLIT_DRAG = { key: key, x: e.clientX, start: start };
+          // The engine closes an open editing panel on any click outside
+          // it, and a splitter press ends in one; resizing the rail while
+          // reading Statistics must not close Statistics. The engine
+          // keeps a suppression window for exactly this (a select popup
+          // closing synthesizes the same kind of click).
+          try { window.__gb2_suppressOutsideClickUntil = Date.now() + 600; } catch (eSp) {}
           document.body.classList.add("ps-splitting");
           try { bar.setPointerCapture(e.pointerId); } catch (err) {}
           e.preventDefault();
@@ -11010,6 +11128,7 @@
         function end() {
           if (!SPLIT_DRAG || SPLIT_DRAG.key !== key) return;
           SPLIT_DRAG = null;
+          try { window.__gb2_suppressOutsideClickUntil = Date.now() + 400; } catch (eSp) {}
           document.body.classList.remove("ps-splitting");
           persist(false);
           fitSchedule();
@@ -11021,7 +11140,7 @@
           var step = e.shiftKey ? 32 : 8;
           if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
             e.preventDefault();
-            var cur = Number(splitWidths()[key]) || SPLIT_DEFAULT[key];
+            var cur = splitMetrics(key).now;
             var dir = e.key === "ArrowRight" ? 1 : -1;
             splitSet(key, cur + dir * step * (key === "rail" ? 1 : -1), true);
           } else if (e.key === "Home") {
@@ -11775,6 +11894,16 @@
     var host = e.target && e.target.closest &&
       e.target.closest(".graphbuilder2-host");
     if (!host) return;
+    reserveArm(host);
+  }, true);
+  // Raise the floor on a host: called for every trusted press on the
+  // chart, and (Sep 16 2026) for an option commit that arrives after the
+  // floor has dropped - a keyboard edit in the panel, arrow keys on a
+  // slider, Enter in a number field, an undo shortcut. Those re-render
+  // through the same transient wipe a click does, and without a floor the
+  // wipe clamped a scrolled pane to 0 (removing a figure note sent it
+  // from 225 to 0, every browser).
+  function reserveArm(host) {
     if (RESERVE_HOST && RESERVE_HOST !== host) {
       try { RESERVE_HOST.style.minHeight = ""; } catch (e2) {}
       reserveStopWatch();
@@ -11806,7 +11935,7 @@
       } catch (e4) {}
     }
     reserveSchedule(1600);
-  }, true);
+  }
   // The user's own scroll is what makes a held drop silent - check on
   // scroll too (the quiet gate inside still applies).
   (function wireReserveScrollCheck() {
@@ -28363,15 +28492,9 @@
       }, function () { showToast("Could not copy", true); });
     } catch (e) { showToast("Could not copy", true); }
   }
-  // "Show me how": the walkthrough picker. ps-tour.js owns the list and the
-  // playback; the shell owns the dialog, so the walkthroughs inherit the
-  // standard backdrop-click, Escape and focus-trap behaviour for free.
-  function showTours() {
-    if (!window.PS_TOUR) return;
-    el("ps-tour-search").value = "";
-    window.PS_TOUR.renderList("");
-    openShellDialog("ps-tour-dialog");
-  }
+  // The "Show me how" walkthroughs (ps-tour.js, Jul 25 2026) were removed
+  // Sep 16 2026 (Torry: buggy enough to mislead). The code is parked on
+  // branch park/show-me-how for a later revisit.
   function formatBytes(bytes) {
     bytes = Number(bytes) || 0;
     // Trimmed, human numbers: "7.2 KB", "1.5 MB", "3 GB" - never
@@ -28647,23 +28770,6 @@
       } catch (e) {}
       buildDebugOverlay();
     });
-    el("ps-tour-close").addEventListener("click", function () {
-      closeShellDialog("ps-tour-dialog");
-    });
-    el("ps-tour-search").addEventListener("input", function () {
-      if (window.PS_TOUR) window.PS_TOUR.renderList(this.value);
-    });
-    el("ps-tour-search").addEventListener("keydown", function (e) {
-      if (e.key !== "Enter") return;
-      var first = el("ps-tour-list").querySelector("[data-tour]");
-      if (first) first.click();
-    });
-    el("ps-tour-list").addEventListener("click", function (e) {
-      var row = e.target.closest ? e.target.closest("[data-tour]") : null;
-      if (!row) return;
-      closeShellDialog("ps-tour-dialog");
-      if (window.PS_TOUR) window.PS_TOUR.play(row.getAttribute("data-tour"));
-    });
     var dialogs = document.querySelectorAll(".ps-dialog-overlay");
     for (var i = 0; i < dialogs.length; i++) {
       dialogs[i].addEventListener("pointerdown", function (e) {
@@ -28823,7 +28929,6 @@
     // keys and the shell can open them by driving the engine's own help nav -
     // no engine change, and no second copy of the teaching content.
     help: [
-      { label: "Show me how\u2026", command: "show-me-how" },
       { label: "User guide", command: "user-guide" },
       "separator",
       { label: "Chart basics", command: "help-basics" },
@@ -28978,7 +29083,16 @@
   function engineHelpTab(key) {
     var host = hostEl();
     if (!host) return null;
-    return host.querySelector('[data-helpnav="' + key + '"]');
+    var sel = '[data-helpnav="' + key + '"]';
+    // The panel, and its nav tabs with it, live in the chart host under
+    // the chart or in the dock slot beside it (Sep 14 2026). Searching the
+    // host alone never found them beside, so openEngineHelp's poll clicked
+    // the "?" button on every step: the panel strobed open and shut on
+    // Basics and never reached the tab asked for (Torry, Sep 17 2026,
+    // from the status-line receipt).
+    var tab = host.querySelector(sel);
+    if (!tab) { var slot = dockSlot(); if (slot) tab = slot.querySelector(sel); }
+    return tab;
   }
   // Which of the chart-help panels can open right now. "ready" = the
   // active chart tab is drawn, so the engine toolbar exists to host them;
@@ -29590,8 +29704,6 @@
     else if (command === "layout-add-chart") el("ps-laddchart").click();
     else if (command === "layout-add-text") el("ps-laddtext").click();
     else if (command === "preferences") showPreferences();
-    else if (command === "show-me-how")
-      showTours();
     else if (command === "user-guide") openUserGuide();
     else if (command === "copy-cells") {
       if (isLayoutTab(activeChart()) && laySelectedIds().length)
@@ -31279,6 +31391,7 @@
     numericalNoticeFor: _numericalNoticeFor,
     numericalChangeIds: _numericalChangeIds,
     appBuild: function () { return APP_BUILD; },
+    tableToXlsxRows: tableToXlsxRows,
     libraries: function () { return PS_LIBS; },
     saveComputedColumn: saveComputedColumn,
     openFormulaDialog: openFormulaDialog,
