@@ -6064,6 +6064,17 @@
   // export pipeline; 192 DPI = 2x. The ClipboardItem takes the PROMISE
   // where supported so Safari's stay-inside-the-user-gesture rule holds.
   var COPY_IMAGE_DPI = 192;
+  // Why image copying is unavailable here, or "" when it is. Browsers only
+  // expose the async clipboard on secure pages (https, file on disk, or a
+  // loopback address), and older engines lack ClipboardItem; naming which
+  // one applies turns a field report into a diagnosis (Sep 18 2026).
+  function copyImageBlockedReason() {
+    if (navigator.clipboard && navigator.clipboard.write &&
+        typeof window.ClipboardItem !== "undefined") return "";
+    if (window.isSecureContext === false)
+      return "Image copying needs a secure page (https, or the app opened from a file on disk); this page is plain http, so use Export instead.";
+    return "This browser does not offer image copying (no clipboard image support) - use Export instead.";
+  }
   // ---- "Copy the moment" (Torry, Jul 31 2026: shape one of the findings
   // brainstorm). He was screenshotting the chart with two bars ringed plus
   // the Sigma panel's focus card so future-him knew which comparison the
@@ -6181,9 +6192,9 @@
   function copyComparisonMoment() {
     var made = composeComparisonMoment();
     if (typeof made === "string") return Promise.resolve(made);
-    if (!navigator.clipboard || !navigator.clipboard.write ||
-        typeof window.ClipboardItem === "undefined") {
-      showToast("This browser does not allow image copying - use Export instead.", true);
+    var blocked = copyImageBlockedReason();
+    if (blocked) {
+      showToast(blocked, true);
       return Promise.resolve("unsupported");
     }
     var blobPromise = rasterizeExport(
@@ -6922,9 +6933,9 @@
     var ws = appWorkspace();
     if (ws === "data" || !workspaceDocument(ws))
       return Promise.resolve("unavailable");
-    if (!navigator.clipboard || !navigator.clipboard.write ||
-        typeof window.ClipboardItem === "undefined") {
-      showToast("This browser does not allow image copying - use Export instead.", true);
+    var blocked = copyImageBlockedReason();
+    if (blocked) {
+      showToast(blocked, true);
       return Promise.resolve("unsupported");
     }
     var blobPromise = collectExportSource("shown").then(function (source) {
@@ -8484,10 +8495,10 @@
     showContextMenu(x, y, items, null);
   }
   function copyPinToClipboard(pin) {
-    if (!navigator.clipboard || !navigator.clipboard.write ||
-        typeof window.ClipboardItem === "undefined") {
-      showToast("This browser does not allow image copying.", true);
-      return;
+    var blocked = copyImageBlockedReason();
+    if (blocked) {
+      showToast(blocked, true);
+      return Promise.resolve("unsupported");
     }
     var svgText = pinSvgText(pin);
     var blobP = svgText
@@ -8495,15 +8506,29 @@
                         "image/png", COPY_IMAGE_DPI)
           .then(function (out) { return out.blob; })
       : fetch(pin.src).then(function (r) { return r.blob(); });
-    blobP.then(function (blob) {
-      return navigator.clipboard.write([
-        new window.ClipboardItem({ "image/png": blob })]);
-    }).then(function () {
+    function done() {
       showToast("Page copied - paste it into slides or a document.");
-    }, function (e) {
+      return "copied";
+    }
+    function failed(e) {
       showToast("Could not copy the page (" +
         String(e && e.message || e) + ").", true);
-    });
+      return "failed";
+    }
+    // The ClipboardItem takes the PROMISE and the write happens inside the
+    // click, the chart-workspace pattern: Safari drops the user gesture
+    // while the page rasterizes, and a write after that gap is refused
+    // (Sep 18 2026, Torry's Safari report). Engines without promise-valued
+    // items fall back to await-then-write.
+    try {
+      var item = new window.ClipboardItem({ "image/png": blobP });
+      return navigator.clipboard.write([item]).then(done, failed);
+    } catch (e) {
+      return blobP.then(function (blob) {
+        return navigator.clipboard.write([
+          new window.ClipboardItem({ "image/png": blob })]);
+      }).then(done, failed);
+    }
   }
   function addPinToLayout(pinId, layoutId) {
     // Across ALL boards: the layout picker may point anywhere.
@@ -29621,7 +29646,7 @@
     if (command === "copy-image")
       return appWorkspace() === "data"
         ? "Open a chart or layout to copy it as an image"
-        : "This browser does not allow image copying - use Export instead";
+        : copyImageBlockedReason();
     if (command === "rename-document" || command === "duplicate-document")
       return "No document is selected";
     if (command === "delete-document") return "A project must keep at least one document";
