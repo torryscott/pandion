@@ -1106,12 +1106,17 @@
         // gave the host for scrolling to a panel under the chart would only
         // leave the pane scrollable (and the Fit trim chasing an overflow
         // the chart cannot shrink away), so it goes, and the chart sits at
-        // the top.
+        // the top BY THE BROWSER'S OWN CLAMP, not by a scroll of ours: with
+        // Fit on the content is exactly pane-sized once the floor goes, so
+        // the clamp lands at 0 anyway, and a tall chart at 100% zoom keeps
+        // its place (Sep 16 2026: an explicit scrollTop = 0 here sent such
+        // a pane to the top on every double-click of a label, since the
+        // engine blanks and refills the slot for a beat while the inline
+        // text editor opens; the Aug 19 ruling is no automatic scroll-back).
         try {
           var rh = hostEl();
           if (rh) rh.style.minHeight = "";
           RESERVE_HOST = null; reserveStopWatch();
-          var sc0 = el("ps-main-workspace"); if (sc0) sc0.scrollTop = 0;
         } catch (eR) {}
       }
       // Fit may fill the pane's height while the panel is beside.
