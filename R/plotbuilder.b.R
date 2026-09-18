@@ -166,6 +166,7 @@
     list(arg = "line_style", opt = "lineStyle", bool = FALSE, default = "solid"),
     list(arg = "line_opacity", opt = "lineOpacity", bool = FALSE, default = 1),
     list(arg = "line_marker_spread", opt = "lineMarkerSpread", bool = FALSE, default = 0.35),
+    list(arg = "line_category_spacing", opt = "lineCategorySpacing", bool = FALSE, default = 1),
     list(arg = "line_point_size", opt = "linePointSize", bool = FALSE, default = -1),
     list(arg = "line_point_shape", opt = "linePointShape", bool = FALSE, default = "circle"),
     list(arg = "line_point_outline_width", opt = "linePointOutlineWidth", bool = FALSE, default = 0),
