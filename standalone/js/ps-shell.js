@@ -4147,13 +4147,6 @@
     if (input.version === 4) { input.version = 5; return input; }
     return null;
   }
-  function precisionMigrationNotice(s) {
-    if (!s || s.version >= 5 || !s.table) return "";
-    var computed = s.table.computed && Object.keys(s.table.computed).length;
-    return "Charts and statistics now use the full precision of the source data. " +
-      (computed ? "Computed columns were also recalculated with full numeric precision. " : "") +
-      "Results may differ from older versions. Saved .pand files have not been changed.";
-  }
   function projectValidationError(s) {
     function record(v) { return !!v && typeof v === "object" && !Array.isArray(v); }
     function own(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
@@ -4382,10 +4375,9 @@
     try {
       raw = window.localStorage.getItem(PS_SAVE_KEY);
       var s = JSON.parse(raw || "null");
-      var precisionNote = precisionMigrationNotice(s);
       var ok = applySnapshot(s);
       if (ok) {
-        RECOVERY_NOTE = precisionNote;
+        RECOVERY_NOTE = "";
         BOOT_RESTORED = true;
         BOOT_SAVED_AT = s && s.savedAt ? s.savedAt : null;
         LAST_PROJECT_BYTES = raw ? raw.length : 0;
@@ -4397,12 +4389,10 @@
       try {
         var backupRaw = window.localStorage.getItem(PS_BACKUP_KEY);
         var backup = JSON.parse(backupRaw || "null");
-        var backupPrecisionNote = precisionMigrationNotice(backup);
         if (applySnapshot(backup)) {
           BOOT_RESTORED = true;
           BOOT_SAVED_AT = backup && backup.savedAt ? backup.savedAt : null;
-          RECOVERY_NOTE = "The newest autosave was unreadable. Pandion Plots recovered the previous local backup." +
-            (backupPrecisionNote ? " " + backupPrecisionNote : "");
+          RECOVERY_NOTE = "The newest autosave was unreadable. Pandion Plots recovered the previous local backup.";
           AUTOSAVE_HEALTH = "recovered";
           AUTOSAVE_DETAIL = "Recovered from the previous autosave";
           LAST_PROJECT_BYTES = backupRaw.length;
@@ -7264,7 +7254,6 @@
       showLoaderMessage(invalid + " Your open project has not been changed.");
       return { error: invalid };
     }
-    var precisionNote = precisionMigrationNotice(parsed.snapshot);
     var replaced = captureReplacedProject();      // item 13
     if (!applySnapshot(parsed.snapshot)) {
       showLoaderMessage(
@@ -7287,8 +7276,7 @@
     updateDocumentState();
     hideWelcome();
     closeLoader();
-    offerReplacedProjectBack(replaced, fileName || "that project",
-      [numNote, precisionNote].filter(Boolean).join(" "));
+    offerReplacedProjectBack(replaced, fileName || "that project", numNote || "");
     return { ok: true };
   }
   // Punch list 20. Offered ONLY while the user is still on one of our own
@@ -27596,7 +27584,6 @@
       reopenRecentFromFile(item);
       return;
     }
-    var precisionNote = precisionMigrationNotice(item.snapshot);
     if (!applySnapshot(item.snapshot)) {
       showToast("That recent project is damaged and could not be opened. Your open project has not been changed.", true);
       return;
@@ -27613,11 +27600,9 @@
     // the next Save writes back to the same file. Before this, every reopen
     // silently became a Save As.
     reconnectRecentFile(item);
-    if (precisionNote && !outgoing) showToast(precisionNote, true);
     if (outgoing) {
       showUndoToast("Opened " + (item.name || "project") + ". " +
-                    outgoingName + " was not saved to a file." +
-                    (precisionNote ? " " + precisionNote : ""), function () {
+                    outgoingName + " was not saved to a file.", function () {
         var snap = null;
         try { snap = JSON.parse(outgoing); } catch (e) { snap = null; }
         if (!snap || !applySnapshot(snap)) {

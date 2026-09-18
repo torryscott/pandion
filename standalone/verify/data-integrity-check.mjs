@@ -129,6 +129,9 @@ try {
     return { result, b: S.project.table.raw.b, toast: document.getElementById('ps-toast').textContent };
   });
   check(legacy.result.ok && legacy.b[0] === '1', 'legacy files recalculate chains with full precision');
-  check(/precision|recalculat/i.test(legacy.toast), 'legacy precision migration is disclosed');
+  // The precision-migration notice was retired Sep 18 2026 (Torry: the app
+  // had not spread widely enough for the disclosure to matter); legacy files
+  // still recalculate at full precision, they just open quietly.
+  check(!/full precision of the source data/.test(legacy.toast), 'legacy files open without the precision migration notice');
   console.log('DATA INTEGRITY CHECK PASS (' + checks + ' assertions)');
 } finally { await browser.close(); }
