@@ -158,6 +158,10 @@ const wiz = await page.evaluate(async () => {
     const sleep = ms => new Promise(r => setTimeout(r, ms));
     window.PS_SHELL.showHelpMeChoose();
     await sleep(600);
+    // Since Sep 18 2026 a project with columns opens on "Use my variables";
+    // the recommended-type chips live on the questions route.
+    document.querySelector('[data-hmc-mode="questions"]').click();
+    await sleep(350);
     for (let i = 0; i < 5; i++) {
         const b = document.querySelector('.ps-hmc-option');
         if (!b) break;
