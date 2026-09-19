@@ -65122,7 +65122,7 @@
                         "Corrects each subject's overall shift out of the error bars - shows the consistency of the changes within each person") +
                     _ebChoiceBtn("data-eb-method", "between", "Between-subjects (uncorrected)", _ebCurMeth,
                         "Plain per-occasion variability, no within-subject correction") +
-                    '<span style="flex-basis:100%;color:#666;font-size:10.5px;">How the half-widths are computed on repeated measures. R recomputes them - the chart updates in a moment.</span>';
+                    '<span style="flex-basis:100%;color:#666;font-size:10.5px;">How the half-widths are computed on repeated measures. Recomputed from the raw data, so the chart updates in a moment.</span>';
                 if (_ebHasType) {
                     _ebTypeCtrl +=
                         '<div style="flex-basis:100%;border-top:1px solid #ddd;margin:4px 0 0;"></div>' +
