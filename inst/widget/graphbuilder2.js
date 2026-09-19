@@ -8393,18 +8393,41 @@
             redraw();
         }
         // Friendly labels for the restore-chip text in Chart Settings.
+        // Axis names by role where the flip bites (Sep 19 2026, Torry's
+        // "just do the correct thing when flipped"): x is ALWAYS the
+        // category axis and y the value axis, whatever direction they are
+        // drawn, so on the categorical charts the visible name carries the
+        // role, and a horizontal chart says where each axis now sits.
+        // Scatter and the continuous distribution types keep plain X / Y:
+        // they have no category axis. Everything underneath (option
+        // names, saved files, the Find index) is untouched.
+        function _axisRoleLabel(axis) {
+            var gt = String(data && data.graphType || "");
+            var cat = /^(bar|line|dot|box|violin|raincloud|pareto)$/.test(gt) &&
+                !(_gbFreqPie || _gbCorrMode || _gbLikertMode);
+            if (!cat) return axis === "x" ? "X axis" : "Y axis";
+            return axis === "x" ? "X axis (categories)" : "Y axis (values)";
+        }
+        function _axisSideNoteHtml() {
+            if (!(data && data.chartOrientation === "horizontal")) return "";
+            if (_axisRoleLabel("x") === "X axis") return "";
+            return '<div data-role="axis-side-note" style="margin:0 0 8px;padding:6px 9px;border-radius:6px;' +
+                'background:#eef4fc;border:1px solid #cfe0f5;color:#22364d;font-size:11.5px;line-height:1.4;">' +
+                'This chart is horizontal, so the X axis (categories) runs up the left side and the ' +
+                'Y axis (values) runs along the bottom. The names follow the data, not the position.</div>';
+        }
         function _hiddenElementLabel(id) {
             if (id === "legend") return "Legend";
             if (id === "barValueLabels") return "Value labels";
             if (id === "chartNote") return "Figure note";
-            if (id === "yAxisLine") return "Y axis line";
-            if (id === "yAxisTicks") return "Y axis ticks";
-            if (id === "yAxisTickLabels") return "Y axis tick labels";
-            if (id === "yAxisTitle") return "Y axis title";
-            if (id === "xAxisLine") return "X axis line";
-            if (id === "xAxisTicks") return "X axis ticks";
-            if (id === "xAxisTickLabels") return "X axis tick labels";
-            if (id === "xAxisTitle") return "X axis title";
+            if (id === "yAxisLine") return _axisRoleLabel("y") + " line";
+            if (id === "yAxisTicks") return _axisRoleLabel("y") + " ticks";
+            if (id === "yAxisTickLabels") return _axisRoleLabel("y") + " tick labels";
+            if (id === "yAxisTitle") return _axisRoleLabel("y") + " title";
+            if (id === "xAxisLine") return _axisRoleLabel("x") + " line";
+            if (id === "xAxisTicks") return _axisRoleLabel("x") + " ticks";
+            if (id === "xAxisTickLabels") return _axisRoleLabel("x") + " tick labels";
+            if (id === "xAxisTitle") return _axisRoleLabel("x") + " title";
             if (id === "errorBars") return "Error bars";
             if (id === "dataPoints") return "Data points";
             if (id === "subjectConnectors") return "Subject connectors";
@@ -60348,10 +60371,10 @@
                 }
             }
             if (sel === "yAxis") {
-                titleEl.textContent = "Y axis";
+                titleEl.textContent = _axisRoleLabel("y");
                 renderInspectorYAxis(body);
             } else if (sel === "xAxis") {
-                titleEl.textContent = "X axis";
+                titleEl.textContent = _axisRoleLabel("x");
                 renderInspectorXAxis(body);
             } else if (sel === "errorBars" || sel.indexOf("errorBars:") === 0) {
                 // Error bars are now a TAB inside the Bar / Line style
@@ -60928,8 +60951,8 @@
         function friendlyTextSectionName(id) {
             if (id === "chartTitle") return "Chart title";
             if (id === "chartNote") return "Figure note";
-            if (id === "xTitle") return "X-axis title";
-            if (id === "yTitle") return "Y-axis title";
+            if (id === "xTitle") return _axisRoleLabel("x") + " title";
+            if (id === "yTitle") return _axisRoleLabel("y") + " title";
             if (id === "groupTitle") return "Legend title";
             if (id === "xTickLabel") return "X tick labels";
             if (id === "yTickLabel") return "Y tick labels";
@@ -60980,7 +61003,7 @@
                 titleNode.style.gap = "12px";
                 titleNode.innerHTML = "";
                 var _titleText = document.createElement("span");
-                _titleText.textContent = "Y axis";
+                _titleText.textContent = _axisRoleLabel("y");
                 titleNode.appendChild(_titleText);
                 var _toggleBar = document.createElement("span");
                 _toggleBar.style.cssText = "display:inline-flex;align-items:center;gap:0;flex-shrink:0;";
@@ -61036,7 +61059,7 @@
                 return id === _yaActive ? '' : 'display:none;';
             };
 
-            body.innerHTML = _yaTabBar + (function () {
+            body.innerHTML = _axisSideNoteHtml() + _yaTabBar + (function () {
                 var _row = "display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap;";
                 var _lbl = "color:#555;font-size:11px;width:80px;text-align:right;flex-shrink:0;";
                 var _slider = "width:160px;";
@@ -62557,7 +62580,7 @@
                 titleNode.style.gap = "12px";
                 titleNode.innerHTML = "";
                 var _titleText = document.createElement("span");
-                _titleText.textContent = "X axis";
+                _titleText.textContent = _axisRoleLabel("x");
                 titleNode.appendChild(_titleText);
                 var _toggleBar = document.createElement("span");
                 _toggleBar.style.cssText = "display:inline-flex;align-items:center;gap:0;flex-shrink:0;";
@@ -62634,7 +62657,7 @@
             // Per-pane display: only the active one is visible.
             var _xaShow = function (id) { return id === _xaActive ? '' : 'display:none;'; };
 
-            body.innerHTML =
+            body.innerHTML = _axisSideNoteHtml() +
                 _xaTabBar +
                 // ===== LINE + TICKS TABS =====
                 // Button + strip layout mirroring the Y-axis panel.
@@ -72645,17 +72668,17 @@
             // display:none, so these eye-rows would be inert there (the
             // same axes-absent rule the "+" menu applies).
             if (!(_gbFreqPie || _gbCorrMode || _gbLikertMode)) {
-                tabs.push({ id: "yAxis", label: "Y axis", items: [
-                    { kind: "el", id: "yAxisLine", label: "Y axis line" },
-                    { kind: "el", id: "yAxisTicks", label: "Y axis ticks" },
-                    { kind: "el", id: "yAxisTickLabels", label: "Y axis tick labels" },
-                    { kind: "el", id: "yAxisTitle", label: "Y axis title" }
+                tabs.push({ id: "yAxis", label: _axisRoleLabel("y"), items: [
+                    { kind: "el", id: "yAxisLine", label: _hiddenElementLabel("yAxisLine") },
+                    { kind: "el", id: "yAxisTicks", label: _hiddenElementLabel("yAxisTicks") },
+                    { kind: "el", id: "yAxisTickLabels", label: _hiddenElementLabel("yAxisTickLabels") },
+                    { kind: "el", id: "yAxisTitle", label: _hiddenElementLabel("yAxisTitle") }
                 ]});
-                tabs.push({ id: "xAxis", label: "X axis", items: [
-                    { kind: "el", id: "xAxisLine", label: "X axis line" },
-                    { kind: "el", id: "xAxisTicks", label: "X axis ticks" },
-                    { kind: "el", id: "xAxisTickLabels", label: "X axis tick labels" },
-                    { kind: "el", id: "xAxisTitle", label: "X axis title" }
+                tabs.push({ id: "xAxis", label: _axisRoleLabel("x"), items: [
+                    { kind: "el", id: "xAxisLine", label: _hiddenElementLabel("xAxisLine") },
+                    { kind: "el", id: "xAxisTicks", label: _hiddenElementLabel("xAxisTicks") },
+                    { kind: "el", id: "xAxisTickLabels", label: _hiddenElementLabel("xAxisTickLabels") },
+                    { kind: "el", id: "xAxisTitle", label: _hiddenElementLabel("xAxisTitle") }
                 ]});
             }
             if (hasGroups) {
@@ -102264,8 +102287,8 @@
         // Friendly label for the selection (shown at the left of the
         // toolbar).
         function _quickToolbarLabelFor(sel) {
-            if (sel === "yAxis") return "Y axis";
-            if (sel === "xAxis") return "X axis";
+            if (sel === "yAxis") return _axisRoleLabel("y");
+            if (sel === "xAxis") return _axisRoleLabel("x");
             if (sel === "errorBars" || sel.indexOf("errorBars:") === 0) return "Error bars";
             if (sel === "legend" || sel === "likertLegend") return "Legend";
             if (sel === "dataPoints") return "Data points";
