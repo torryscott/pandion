@@ -50173,6 +50173,7 @@
             nSize: { name: "N", sym: "N", body: "The number of non-missing units contributing to this row or cell. A unit might be a person, trial, school, or something else, depending on the study.", read: "Check what the unit is and look at n for each cell, not just the total. Repeated or clustered observations are related, so the raw number of rows may overstate how much independent information you have." },
             mean: { name: "Mean", sym: "M", body: "The arithmetic average of the cell's values: add them up and divide by how many there are.", read: "A few extreme scores can pull the mean away from where most of the data sits." },
             median: { name: "Median", sym: "Mdn", body: "The 50th percentile of the sorted values: at least half the observations are at or below it and at least half are at or above it. With an even sample, Pandion Plots averages the two middle values.", read: "Unlike the mean, the median is resistant to a small number of extreme values. Mean-median differences can suggest asymmetry, but do not diagnose it by themselves." },
+            mode: { name: "Mode", sym: "Mo", body: "The value that occurs most often in the sample. When several values share the highest count, the smallest of them is reported and the cell carries an asterisk; when every value occurs exactly once there is no mode and the cell shows a dash.", read: "For measurements with many distinct values the mode says little; it is most useful for counts, ratings and other data with a small set of repeated values. Compare it with the mean and median to see where the bulk of the observations sits." },
             sd: { name: "SD (standard deviation)", sym: "SD", body: "How spread out individual values are around their mean, in the same units as the data. A larger SD means the values are more spread out.", read: "SD describes the spread of the observations, not the precision of the estimated mean; do not confuse it with SE." },
             se: { name: "SE (standard error)", sym: "SE", body: "How much the cell's mean would wobble from sample to sample. For an ordinary independent cell it is the SD divided by the square root of n. Repeated Measures instead uses the selected within-subject or between-subject method; the table footnote names which one.", read: "A smaller SE (a shorter error bar) means the mean is estimated more precisely. In a repeated-measures chart, interpret it using the method named below the table." },
             fStat: { name: "F statistic", sym: "F", body: "A ratio of effect-related variation to error variation. Larger F means the group or condition differences are large relative to the noise used for that test.", read: "A big F signals detectability, not importance; use an effect size to judge how large the difference is." },
@@ -50276,7 +50277,7 @@
         };
         var _GB_STAT_LABEL_KEY = {
             "Cell": "cell", "N": "nSize", "n": "nSize", "Complete N": "nSize",
-            "Mean": "mean", "Median": "median", "SD": "sd", "SE": "se",
+            "Mean": "mean", "Median": "median", "Mode": "mode", "SD": "sd", "SE": "se",
             "Min": "minMax", "Max": "minMax", "Skew": "skewness", "Kurtosis": "kurtosis",
             "W": "shapiroW", "df": "df", "F": "fStat", "p": "p", "p (Holm)": "pAdj",
             "Δp": "deltaP", "z": "zStat", "r": "pearsonR", "Pearson r": "pearsonR",
@@ -53659,12 +53660,33 @@
                 ? ((n * (n + 1)) / ((n - 1) * (n - 2) * (n - 3))) * (s4 / (vv * vv))
                   - (3 * (n - 1) * (n - 1)) / ((n - 2) * (n - 3))
                 : NaN;
+            // Mode (Sep 19 2026, Torry): the most frequent value, the smallest
+            // when several tie (jamovi's Descriptives convention); the tie
+            // count and the top count let the table say when it is not unique
+            // or when every value occurs once.
+            var counts = {}, mode = NaN, modeCount = 0, modeTies = 0;
+            for (i = 0; i < n; i++) counts[v[i]] = (counts[v[i]] || 0) + 1;
+            for (i = 0; i < n; i++) {
+                var c = counts[v[i]];
+                if (c > modeCount || (c === modeCount && v[i] < mode)) {
+                    if (c > modeCount) modeTies = 0;
+                    modeCount = c; mode = v[i];
+                }
+            }
+            for (var key in counts) if (counts[key] === modeCount) modeTies++;
             return {
                 n: n, mean: m, median: med,
                 sd: (n >= 2) ? Math.sqrt(vv) : NaN,
                 skew: skew,
-                kurt: kurt
+                kurt: kurt,
+                mode: mode, modeCount: modeCount, modeTies: modeTies
             };
+        }
+        // A dash when every value occurs once (there is no mode to report),
+        // an asterisk when several values tie for the top count.
+        function _stModeCell(mo) {
+            if (!mo || !(mo.modeCount > 1)) return "\u2014";
+            return _stNum(mo.mode) + (mo.modeTies > 1 ? "*" : "");
         }
         function _stCard(title, inner) {
             return '<div style="margin:0 0 14px;">' +
@@ -56131,7 +56153,7 @@
                         (b.group != null && String(b.group).length
                             ? " · " + _stEsc(String(b.group)) : ""));
                     _drow.push(String(mo.n), _stNum(mo.mean), _stNum(mo.median),
-                        _stNum(mo.sd), _seCell, _ciLo, _ciHi);
+                        _stModeCell(mo), _stNum(mo.sd), _seCell, _ciLo, _ciHi);
                     dRows.push(_drow);
                     dAttrs.push(_stLinkAttr([[
                         (typeof b.x === "string") ? b.x : "",
@@ -56150,11 +56172,12 @@
                     _ciLoHdr = { html: _stTerm("CI lo", "ci95", _ciP + "% CI lower") };
                     _ciHiHdr = { html: _stTerm("CI hi", "ci95", _ciP + "% CI upper") };
                 }
-                _descCols.push({ html: _stTerm("Cell", "cell") }, { html: _stTerm("N", "nSize") }, { html: _stTerm("Mean", "mean") }, { html: _stTerm("Median", "median") }, { html: _stTerm("SD", "sd") }, { html: _stTerm("SE", "se") }, _ciLoHdr, _ciHiHdr);
+                _descCols.push({ html: _stTerm("Cell", "cell") }, { html: _stTerm("N", "nSize") }, { html: _stTerm("Mean", "mean") }, { html: _stTerm("Median", "median") }, { html: _stTerm("Mode", "mode") }, { html: _stTerm("SD", "sd") }, { html: _stTerm("SE", "se") }, _ciLoHdr, _ciHiHdr);
                 var descCardHtml = _stCard("",
                     _stTable(_descCols, dRows, dAttrs, true) +
                     _stBtnRow(_stBtn("copycgdesc", "Copy table", false)) +
-                    _stFoot("Full data: hidden bars and points stay included in this Descriptives table." +
+                    _stFoot("Mode is the most frequent value: a dash means every value occurs once, an asterisk means several values tie and the smallest is shown. " +
+                        "Full data: hidden bars and points stay included in this Descriptives table." +
                         ((data.summaryFunc === "median")
                             ? " Error bars are hidden while Summary is Median: SD, SE, and CI describe the mean, so no bar draws around a median."
                             : "") +
@@ -56739,7 +56762,7 @@
                         if (xv2 > dmax) dmax = xv2;
                     }
                     dRows2.push([_stEsc(cellName), String(dm.n), _stNum(dm.mean),
-                        _stNum(dm.median), _stNum(dm.sd),
+                        _stNum(dm.median), _stModeCell(dm), _stNum(dm.sd),
                         (dm.n >= 2 && isFinite(dm.sd))
                             ? _stNum(dm.sd / Math.sqrt(dm.n)) : "—",
                         _stNum(dmin), _stNum(dmax),
@@ -56755,10 +56778,11 @@
                     _stBtnRow(_stBtn("copynorm", "Copy table", false)) +
                     _stFoot("Shapiro-Wilk flags departures it can see: with small samples real departures often pass unnoticed, and with very large samples tiny harmless ones get flagged. Read it together with the Q-Q plot."));
                 var distDescCard = _stCard("",
-                    _stTable(["Cell", "N", "Mean", "Median", "SD", "SE", "Min", "Max", "Skew", "Kurtosis"],
+                    _stTable(["Cell", "N", "Mean", "Median", "Mode", "SD", "SE", "Min", "Max", "Skew", "Kurtosis"],
                              dRows2, dLinks, true) +
                     _stBtnRow(_stBtn("copydistdesc", "Copy table", false)) +
-                    _stFoot("Skewness and kurtosis use jamovi's Descriptives formulas " +
+                    _stFoot("Mode is the most frequent value: a dash means every value occurs once, an asterisk means several values tie and the smallest is shown. " +
+                        "Skewness and kurtosis use jamovi's Descriptives formulas " +
                         "(sample-adjusted, SPSS-style); kurtosis is excess " +
                         "(normal = 0). Full data: hidden groups stay included."));
                 // ---- Frequency table (histogram class intervals): the

@@ -1219,7 +1219,7 @@ async function sbClick(page, act) {
                  cells: row ? Array.from(row.cells).map(c => c.textContent.trim()) : [] };
     });
     check('descriptives carry the full retired-Summary column set',
-          desc.heads === 'Cell,N,Mean,Median,SD,SE,Min,Max,Skew,Kurtosis',
+          desc.heads === 'Cell,N,Mean,Median,Mode,SD,SE,Min,Max,Skew,Kurtosis',
           desc.heads);
     const expDesc = [EXP.dMean, EXP.dMed, EXP.dSd, EXP.dSe, EXP.dMin,
                      EXP.dMax, EXP.dSkew, EXP.dKurt];
