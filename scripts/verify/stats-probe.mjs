@@ -1223,9 +1223,12 @@ async function sbClick(page, act) {
           desc.heads);
     const expDesc = [EXP.dMean, EXP.dMed, EXP.dSd, EXP.dSe, EXP.dMin,
                      EXP.dMax, EXP.dSkew, EXP.dKurt];
+    // Mode sits between Median and SD since Sep 19 2026; the R-checked
+    // columns are read around it.
+    const expIdx = [2, 3, 5, 6, 7, 8, 9, 10];
     check('descriptives values match R (mean/median/sd/se/min/max/skew/kurt)',
-          desc.cells.length === 10 && desc.cells[1] === '80' &&
-          expDesc.every((v, i) => desc.cells[i + 2] === v),
+          desc.cells.length === 11 && desc.cells[1] === '80' &&
+          expDesc.every((v, i) => desc.cells[expIdx[i]] === v),
           JSON.stringify({ got: desc.cells, want: expDesc }));
     // frequency table: low-to-high default, windowed, sortable
     // (open the tab first — hidden panes measure 0 for scroll metrics)
@@ -2401,7 +2404,10 @@ async function copyFlips(page, actKey) {
         const rows = pane ? Array.from(pane.querySelectorAll('table tr')).map(tr =>
             Array.from(tr.querySelectorAll('td,th')).map(c => c.textContent.trim())) : [];
         const se = {};
-        for (const row of rows) if (['t1', 't2', 't3'].includes(row[0])) se[row[0]] = row[5];
+        // SE by its header, not by position: Mode joined the table Sep 19 2026.
+        const head = rows[0] || [];
+        const seIdx = head.indexOf('SE') >= 0 ? head.indexOf('SE') : 6;
+        for (const row of rows) if (['t1', 't2', 't3'].includes(row[0])) se[row[0]] = row[seIdx];
         return { se, cm: /Cousineau-Morey within-subject value/i.test(pane ? pane.textContent : '') };
     });
     check('SE(t1) = CM ' + EXP.cmse1, r.se.t1 === EXP.cmse1, JSON.stringify(r.se));

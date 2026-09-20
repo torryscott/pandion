@@ -103,9 +103,11 @@ try {
         [...table.querySelectorAll('tr')].map(row => [...row.querySelectorAll('th,td')].map(cell => cell.textContent.trim()))));
     const descriptives = report.statisticsTables.find(t => t[0].includes('Mean') && t[0].includes('SD'));
     check(!!descriptives, 'Statistics exposes a descriptive table for the classroom dataset');
+    // Columns by header, not position: Mode joined the table Sep 19 2026.
+    const col = name => descriptives[0].indexOf(name);
     for (const [group, mean] of [['Control', '13.00'], ['Treatment', '17.00']]) {
         const row = descriptives.find(r => r[0] === group);
-        check(row?.[1] === '4' && row[2] === mean && row[4] === '2.58' && row[5] === '1.29',
+        check(row?.[col('N')] === '4' && row[col('Mean')] === mean && row[col('SD')] === '2.58' && row[col('SE')] === '1.29',
             group + ' descriptive table presents the expected N, mean, SD and SE to its two-decimal display precision');
     }
     report.statisticsSnapshot = await page.locator('#psroot .gb2-panel').ariaSnapshot();
