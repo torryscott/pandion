@@ -11421,7 +11421,7 @@
         // Same z:2 as the Y-axis hit zone so X-axis clicks reach this
         // div instead of falling through to the SVG below.
         xLayoutHit.style.cssText = "position:absolute;cursor:pointer;user-select:none;z-index:2;";
-        xLayoutHit.title = ("Click to open the " + _axisPosLabelLc("x", true) + " settings");
+        xLayoutHit.title = ("Click to open the " + _axisPosLabelLc("x", true) + " settings"); xLayoutHit.setAttribute("data-role", "x-axis-hit");
         wrap.appendChild(xLayoutHit);
 
         // --- Export utilities (SVG / PNG / JPG / vector PDF) -------------
@@ -29923,7 +29923,7 @@
             var _xHitTop = Math.min(_xHitGeomTop, _xHitBottom - 8);
             xLayoutHit.style.top = _xHitTop + "px";
             xLayoutHit.style.height = (_xHitBottom - _xHitTop) + "px";
-            xLayoutHit.title = ("Click to open the " + _axisPosLabelLc("x", true) + " settings");
+            xLayoutHit.title = ("Click to open the " + _axisPosLabelLc("x", true) + " settings"); xLayoutHit.setAttribute("data-role", "x-axis-hit");
 
             // Invisible click-to-add zones for title and subtitle. Only one
             // appears at a time, in this priority:
@@ -104398,8 +104398,8 @@
                 l.style.cssText = b.join(";"); _gripAddChevrons(l, orient); return l;
             }
             var set = {};
-            set.tickHit = document.createElement("div"); set.tickHit.style.cssText = "position:absolute;cursor:pointer;user-select:none;z-index:2;"; set.tickHit.title = ("Click to open the " + _axisPosLabelLc("y", true) + " settings"); wrap.appendChild(set.tickHit);
-            set.xHit = document.createElement("div"); set.xHit.style.cssText = "position:absolute;cursor:pointer;user-select:none;z-index:2;"; set.xHit.title = ("Click to open the " + _axisPosLabelLc("x", true) + " settings"); wrap.appendChild(set.xHit);
+            set.tickHit = document.createElement("div"); set.tickHit.style.cssText = "position:absolute;cursor:pointer;user-select:none;z-index:2;"; set.tickHit.title = ("Click to open the " + _axisPosLabelLc("y", true) + " settings"); set.tickHit.setAttribute("data-role", "y-axis-hit"); wrap.appendChild(set.tickHit);
+            set.xHit = document.createElement("div"); set.xHit.style.cssText = "position:absolute;cursor:pointer;user-select:none;z-index:2;"; set.xHit.title = ("Click to open the " + _axisPosLabelLc("x", true) + " settings"); set.xHit.setAttribute("data-role", "x-axis-hit"); wrap.appendChild(set.xHit);
             var yTick = null, yLine = false;
             set.tickHit.addEventListener("mousemove", function (e) {
                 if (typeof e.offsetY !== "number" || !set.panel || !set.yLineEl) return;

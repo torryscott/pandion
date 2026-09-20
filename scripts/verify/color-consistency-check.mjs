@@ -64,9 +64,8 @@ async function loadLatestWidget(page) {
 
 async function clickAxisLine(page, axis) {
     const probe = await page.evaluate(axisName => {
-        const title = axisName === 'x'
-            ? 'Click to open X-axis settings' : 'Click to open Y-axis settings';
-        const hit = [...document.querySelectorAll('div[title="' + title + '"]')]
+        const role = axisName === 'x' ? 'x-axis-hit' : 'y-axis-hit';
+        const hit = [...document.querySelectorAll('div[data-role="' + role + '"]')]
             .find(el => {
                 const r = el.getBoundingClientRect();
                 const cs = getComputedStyle(el);

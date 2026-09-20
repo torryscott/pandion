@@ -158,12 +158,15 @@ async function geometry(page) {
                     role: el.getAttribute('data-role') || '',
                 };
             });
-        function visibleHit(title, cursor) {
+        // The axis hit strips are found by their data-role handle (Sep 19
+        // 2026): their tooltip text now names the axis by drawn position.
+        function visibleHit(title, cursor, role) {
             const candidates = [...document.querySelectorAll('div')].filter(node => {
                 const cs = getComputedStyle(node);
                 const width = parseFloat(node.style.width);
                 const height = parseFloat(node.style.height);
                 return (!title || node.title === title) && (!cursor || cs.cursor === cursor) &&
+                    (!role || node.getAttribute('data-role') === role) &&
                     cs.display !== 'none' && cs.visibility !== 'hidden' &&
                     width > 0 && height > 0;
             });
@@ -190,7 +193,7 @@ async function geometry(page) {
             labels,
             hasZeroLabel: labels.some(label => label.text === '0'),
             hits: {
-                x: visibleHit('Click to open X-axis settings'),
+                x: visibleHit(null, null, 'x-axis-hit'),
                 y: visibleHit('', 'ns-resize'),
             },
         };
@@ -347,9 +350,8 @@ function checkXBreak(prefix, g) {
 
 async function clickFacetedAxisLine(page, axis) {
     const probe = await page.evaluate(axisName => {
-        const title = axisName === 'x'
-            ? 'Click to open X-axis settings' : 'Click to open Y-axis settings';
-        const candidates = [...document.querySelectorAll('div[title="' + title + '"]')]
+        const role = axisName === 'x' ? 'x-axis-hit' : 'y-axis-hit';
+        const candidates = [...document.querySelectorAll('div[data-role="' + role + '"]')]
             .filter(el => {
                 const cs = getComputedStyle(el);
                 const r = el.getBoundingClientRect();
