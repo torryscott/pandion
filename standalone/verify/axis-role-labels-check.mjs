@@ -1,19 +1,21 @@
-// Axis names carry their role where the orientation flip bites (Sep 19 2026,
-// Torry: "I just want it to do the correct thing when flipped"). x is always
-// the category axis and y the value axis, in both orientations; the field
-// bug was a horizontal bar chart whose "X axis" hide rows removed the LEFT
-// text, which read as the wrong axis vanishing. The small fix: on the
-// categorical charts the Show/hide rows, the axis panel titles, the text
-// panel's axis-title names and the quick toolbar read "X axis (categories)"
-// and "Y axis (values)", and a horizontal chart's axis panels open with a
-// note saying where each axis now sits. Scatter keeps plain X / Y.
+// Axis names follow the drawn position on the categorical charts (Sep 19
+// 2026, Torry: "I just want it to do the correct thing when flipped"). The
+// field bug: on a horizontal bar chart the Show/hide rows "X axis tick
+// labels" and "X axis title" removed the text on the LEFT. Measured: the
+// axis panels and the line/ticks hide ids are positional (x = bottom, y =
+// left), but the tick-label and title hide ids follow the data role, so the
+// old "X axis" tab mixed bottom-drawn rows with left-drawn ones. Now the
+// panels and tabs read "Bottom axis (values)" / "Left axis (categories)"
+// and every row sits under the axis it is drawn on; a horizontal chart's
+// axis panels open with a note saying so. Scatter keeps plain X / Y.
 //
-// Cases (chromium + webkit): (1) vertical bar: the rows and panel title carry
-// the role, no note; (2) horizontal: the note appears in both axis panels and
-// hiding "X axis (categories) tick labels" removes the labels drawn on the
-// LEFT, so the name and the behaviour agree; (3) scatter: plain names, no
-// note. CONTROL (main before the fix): every role-label and note assertion
-// fails; the hide behaviour was already correct.
+// Cases (chromium + webkit): (1) vertical bar: tabs and panel titles are
+// positional with the role, no note; (2) horizontal: the roles swap in the
+// names, the note appears, the Left axis tab's "tick labels" row removes the
+// labels drawn on the LEFT and the Bottom axis tab's removes the numbers at
+// the bottom; (3) scatter: plain X / Y, no note. CONTROL (main before the
+// fix): every naming and note assertion fails; the row-to-side pairing fails
+// on the horizontal tab.
 //
 // Usage: node standalone/verify/axis-role-labels-check.mjs
 
@@ -38,35 +40,43 @@ const PAGE = 'file://' + (process.env.PS_PAGE
 let failures = 0;
 function ok(cond, label) { if (cond) console.log('  ok  ' + label); else { console.log('  FAIL ' + label); failures++; } }
 
-const sleep = ms => new Promise(r => setTimeout(r, ms));
+const readState = () => {
+    const pnl = document.querySelector('[data-gb2-inspector]');
+    const title = pnl && pnl.querySelector('[data-role="inspector-title"]');
+    const btns = pnl ? Array.from(pnl.querySelectorAll('button')).map(b => (b.textContent || '').trim()) : [];
+    // Side classification uses the drawn axis lines as dividers: a label
+    // whose right edge ends before the left axis line is on the LEFT; one
+    // whose top starts below the bottom axis line is along the BOTTOM.
+    const lAxis = document.querySelector('#psroot svg [data-role="y-axis-line"]');
+    const bAxis = document.querySelector('#psroot svg [data-role="x-axis-line"]');
+    const axisX = lAxis ? lAxis.getBoundingClientRect().left : 0;
+    const axisY = bAxis ? bAxis.getBoundingClientRect().top : 0;
+    const side = (r) => (r.right <= axisX + 2) ? 'left' : (r.top >= axisY - 2 ? 'bottom' : 'other');
+    const texts = Array.from(document.querySelectorAll('#psroot svg text'));
+    return {
+        title: title ? title.textContent.trim() : '',
+        btns,
+        note: ((document.querySelector('[data-role="axis-side-note"]') || {}).textContent || '').trim(),
+        catLabels: texts.filter(t => t.getAttribute('data-role') === 'x-cat-label').map(t => side(t.getBoundingClientRect())),
+        numbers: texts.filter(t => /^\d+$/.test(t.textContent.trim())).map(t => side(t.getBoundingClientRect())),
+        strips: Array.from(document.querySelectorAll('#psroot [title*="axis"]')).map(e => e.title)
+    };
+};
 
-// Read the Show/hide panel's axis tab labels + rows, the axis panel title,
-// the note, and the category-label geometry, all from the live DOM.
-const readState = () => ({
-    visTabs: Array.from(document.querySelectorAll('[data-vis-tab], .gb2-vis-tab, button'))
-        .map(b => (b.textContent || '').trim()).filter(t => /axis/i.test(t) && t.length < 30),
-    note: (document.querySelector('[data-role="axis-side-note"]') || {}).textContent || '',
-    panelTitle: (document.querySelector('[data-gb2-inspector] [data-role="inspector-title"]') || {}).textContent || '',
-    catLabels: Array.from(document.querySelectorAll('#psroot svg text[data-role="x-cat-label"]'))
-        .map(t => { const r = t.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width }; }),
-    svgBox: (() => { const s = document.querySelector('#psroot svg[data-role="gb2-chart-svg"]'); const r = s ? s.getBoundingClientRect() : null; return r ? { left: r.left, right: r.right, top: r.top, bottom: r.bottom } : null; })()
-});
-
-async function openAxisPanel(page, which) {
-    // The axis line is the click-to-edit target for the axis panel.
-    await page.evaluate((which) => {
-        const el = document.querySelector('#psroot svg [data-role="' + which + '-axis-line"]');
-        if (el) el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1, clientX: 5, clientY: 5 }));
+async function clickStrip(page, which) {
+    // The bottom hit strip carries the tooltip; the left tick column has no
+    // tooltip, so aim 6px left of the left axis line.
+    const pt = await page.evaluate((which) => {
+        if (which === 'bottom') {
+            const e = Array.from(document.querySelectorAll('#psroot [title*="axis"]')).find(x => /bottom axis|X axis/.test(x.title));
+            if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        }
+        const l = document.querySelector('#psroot svg [data-role="y-axis-line"]');
+        if (!l) return null; const r = l.getBoundingClientRect(); return { x: r.left - 6, y: r.top + r.height / 2 };
     }, which);
-    await page.waitForTimeout(500);
-}
-
-async function openShowHide(page) {
-    await page.evaluate(() => {
-        const b = document.querySelector('#psroot button[aria-label="Show/hide"], #psroot button[aria-label="Visibility"], #psroot button[title*="Show/hide"]');
-        if (b) b.click();
-    });
-    await page.waitForTimeout(500);
+    if (!pt) return false;
+    await page.mouse.click(pt.x, pt.y); await page.waitForTimeout(600);
+    return true;
 }
 
 async function run(browser, name) {
@@ -83,53 +93,60 @@ async function run(browser, name) {
         PS_SHELL.setRoles('plotbuilder', { xvar: 'condition', yvar: 'score' });
         await s(1500);
     });
+    const eye = '#psroot button[aria-label="Show / hide elements"]';
+    const clickTab = (label) => page.evaluate((label) => { const t = Array.from(document.querySelectorAll('[data-gb2-inspector] button')).find(b => (b.textContent || '').trim() === label); if (t) { t.click(); return true; } return false; }, label);
 
-    // ---- 1. vertical bar: role labels, no note
-    await openShowHide(page);
+    // ---- 1. vertical bar
+    await page.click(eye); await page.waitForTimeout(600);
     let st = await page.evaluate(readState);
-    ok(st.visTabs.some(t => t === 'X axis (categories)') && st.visTabs.some(t => t === 'Y axis (values)'),
-       T('1: Show/hide names the axes by role on a bar chart (' + JSON.stringify(st.visTabs) + ')'));
-    await page.keyboard.press('Escape'); await page.waitForTimeout(300);
-    await openAxisPanel(page, 'x');
+    ok(st.btns.includes('Bottom axis (categories)') && st.btns.includes('Left axis (values)'),
+       T('1: Show/hide tabs read Bottom axis (categories) and Left axis (values) on a vertical bar chart'));
+    await clickTab('Bottom axis (categories)'); await page.waitForTimeout(300);
     st = await page.evaluate(readState);
-    ok(/X axis \(categories\)/.test(st.panelTitle), T('1: the X axis panel is titled by role (' + st.panelTitle.trim() + ')'));
+    ok(st.btns.includes('Bottom axis tick labels') && st.btns.includes('Bottom axis title'),
+       T('1: its rows are named by position (' + st.btns.filter(b => /Bottom axis/.test(b)).join(', ') + ')'));
+    await page.keyboard.press('Escape'); await page.waitForTimeout(300);
+    ok(await clickStrip(page, 'bottom'), T('1: the bottom hit strip exists'));
+    st = await page.evaluate(readState);
+    ok(/Bottom axis \(categories\)/.test(st.title), T('1: the bottom axis panel is titled by position and role (' + st.title + ')'));
     ok(st.note === '', T('1: no orientation note on a vertical chart'));
-    const vertLabels = st.catLabels;
-    ok(vertLabels.length === 3 && vertLabels.every(l => l.y > (st.svgBox.top + st.svgBox.bottom) / 2),
-       T('1: the category labels sit along the bottom (' + vertLabels.length + ')'));
+    ok(st.catLabels.length === 3 && st.catLabels.every(p => p === 'bottom'), T('1: the category labels are drawn along the bottom'));
     await page.keyboard.press('Escape'); await page.waitForTimeout(300);
 
-    // ---- 2. horizontal: the note, and the hide row removes the LEFT labels
+    // ---- 2. horizontal
     await page.evaluate(async () => { window.setOption('chartOrientation', 'horizontal'); await new Promise(r => setTimeout(r, 2500)); });
-    await openAxisPanel(page, 'x');
     st = await page.evaluate(readState);
-    ok(/runs up the left side/.test(st.note), T('2: the X axis panel says the categories now run up the left (' + st.note.slice(0, 60) + ')'));
-    ok(/X axis \(categories\)/.test(st.panelTitle), T('2: and keeps its role title (' + st.panelTitle.trim() + ')'));
-    const horizLabels = st.catLabels;
-    ok(horizLabels.length === 3 && horizLabels.every(l => l.x + l.w < (st.svgBox.left + st.svgBox.right) / 2),
-       T('2: the category labels are drawn on the LEFT (' + horizLabels.length + ')'));
-    await page.keyboard.press('Escape'); await page.waitForTimeout(300);
-    await openAxisPanel(page, 'y');
+    ok(st.catLabels.length === 3 && st.catLabels.every(p => p === 'left'), T('2: after the flip the category labels are drawn on the left'));
+    ok(st.strips.some(t => /bottom axis \(values\)/.test(t)), T('2: the bottom strip tooltip now names the values (' + st.strips.join(' | ') + ')'));
+    ok(await clickStrip(page, 'bottom'), T('2: bottom strip clickable'));
     st = await page.evaluate(readState);
-    ok(/along the bottom/.test(st.note), T('2: the Y axis panel carries the same note (' + st.note.slice(0, 40) + ')'));
-    ok(/Y axis \(values\)/.test(st.panelTitle), T('2: titled Y axis (values) (' + st.panelTitle.trim() + ')'));
+    ok(/Bottom axis \(values\)/.test(st.title), T('2: the bottom panel is now Bottom axis (values) (' + st.title + ')'));
+    ok(/bottom axis carries the values/.test(st.note), T('2: and carries the orientation note'));
     await page.keyboard.press('Escape'); await page.waitForTimeout(300);
-    // Hide the category tick labels through the Show/hide row that names them.
-    await openShowHide(page);
-    const hid = await page.evaluate(() => {
-        const rows = Array.from(document.querySelectorAll('#psroot button, #psroot label, #psroot [role="switch"], #psroot input[type="checkbox"]'));
-        const tab = Array.from(document.querySelectorAll('#psroot button')).find(b => (b.textContent || '').trim() === 'X axis (categories)');
-        if (tab) tab.click();
-        const row = Array.from(document.querySelectorAll('#psroot button, #psroot label, #psroot [role="switch"]')).find(b => /X axis \(categories\) tick labels/.test(b.textContent || ''));
-        if (!row) return { found: false };
-        const ctl = row.matches('input') ? row : (row.querySelector('input[type="checkbox"], button, [role="switch"]') || row);
-        ctl.click();
-        return { found: true };
-    });
+    ok(await clickStrip(page, 'left'), T('2: left tick column clickable'));
+    st = await page.evaluate(readState);
+    ok(/Left axis \(categories\)/.test(st.title), T('2: the left panel is Left axis (categories) (' + st.title + ')'));
+    ok(/left axis carries the/.test(st.note), T('2: with the same note'));
+    await page.keyboard.press('Escape'); await page.waitForTimeout(300);
+    // The Left axis tab's tick-labels row removes the LEFT text (the categories).
+    await page.click(eye); await page.waitForTimeout(600);
+    ok(await clickTab('Left axis (categories)'), T('2: Show/hide has a Left axis (categories) tab'));
+    await page.waitForTimeout(300);
+    st = await page.evaluate(readState);
+    ok(st.btns.includes('Left axis tick labels') && st.btns.includes('Left axis title'), T('2: its rows are the left-drawn ones (' + st.btns.filter(b => /Left axis/.test(b)).join(', ') + ')'));
+    ok(await clickTab('Left axis tick labels'), T('2: clicking Left axis tick labels'));
     await page.waitForTimeout(900);
     st = await page.evaluate(readState);
-    ok(hid.found, T('2: the Show/hide row "X axis (categories) tick labels" exists'));
-    ok(st.catLabels.length === 0, T('2: toggling it removes the labels on the left, so the name and the behaviour agree (' + st.catLabels.length + ' left)'));
+    ok(st.catLabels.length === 0, T('2: removes the category labels on the left (' + st.catLabels.length + ' left)'));
+    ok(st.numbers.filter(p => p === 'bottom').length >= 3, T('2: while the numbers along the bottom stay (' + st.numbers.filter(p => p === 'bottom').length + ')'));
+    await clickTab('Left axis tick labels'); await page.waitForTimeout(900);   // restore
+    ok(await clickTab('Bottom axis (values)'), T('2: and a Bottom axis (values) tab'));
+    await page.waitForTimeout(300);
+    ok(await clickTab('Bottom axis tick labels'), T('2: clicking Bottom axis tick labels'));
+    await page.waitForTimeout(900);
+    st = await page.evaluate(readState);
+    ok(st.numbers.filter(p => p === 'bottom').length === 0 && st.catLabels.length === 3, T('2: removes the numbers at the bottom and leaves the categories (' + st.numbers.filter(p => p === 'bottom').length + ' numbers, ' + st.catLabels.length + ' categories)'));
+    await clickTab('Bottom axis tick labels'); await page.waitForTimeout(600);
     await page.keyboard.press('Escape'); await page.waitForTimeout(300);
 
     // ---- 3. scatter keeps plain X / Y
@@ -139,11 +156,12 @@ async function run(browser, name) {
         PS_SHELL.setRoles('xyplotbuilder', { xvar: 'hours', yvar: 'score' });
         await s(1800);
     });
-    await openAxisPanel(page, 'x');
+    await page.click(eye); await page.waitForTimeout(600);
     st = await page.evaluate(readState);
-    ok(/^\s*(Scatter)?\s*X axis\s*$/.test(st.panelTitle.replace(/Scatter/, '')) || /X axis$/.test(st.panelTitle.trim()),
-       T('3: scatter keeps a plain X axis title (' + st.panelTitle.trim() + ')'));
+    ok(st.btns.includes('X axis') && st.btns.includes('Y axis') && !st.btns.some(b => /Bottom axis|Left axis/.test(b)),
+       T('3: scatter keeps plain X axis / Y axis tabs'));
     ok(st.note === '', T('3: and no orientation note'));
+    await page.keyboard.press('Escape');
     ok(errors.length === 0, T('no page errors' + (errors.length ? ' (' + errors[0] + ')' : '')));
     await page.close();
 }
