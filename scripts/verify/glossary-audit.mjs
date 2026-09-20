@@ -40,8 +40,10 @@ const glossary = Function('return ' +
 const terms = Function('return ' +
     literalAfter('var _GB_STAT_TERMS = {', '{', '}'))();
 
-check('glossary inventory remains 132 entries', glossary.length === 132);
-check('linked Sigma inventory remains 104 terms', Object.keys(terms).length === 104);
+// 133 since Sep 19 2026: the Mode entry joined beside Median.
+check('glossary inventory remains 133 entries', glossary.length === 133);
+// 105 since Sep 19 2026: the Mode term joined with the Mode column.
+check('linked Sigma inventory remains 105 terms', Object.keys(terms).length === 105);
 check('glossary names are unique', new Set(glossary.map(e => e.n)).size === glossary.length);
 
 const modules = new Set(['Compare', 'RM', 'Freq', 'Dist', 'Corr', 'Likert', 'Scatter']);
