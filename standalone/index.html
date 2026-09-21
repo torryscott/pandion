@@ -4294,6 +4294,68 @@
      with - was announced nowhere. A student saw a finished chart and six
      identical icon buttons and concluded the app draws one fixed chart.
      One-shot, anchored at the chart, dismissed for good. */
+  /* Workspace tours (js/ps-tours.js): a spotlight and a card, in the
+     coach mark's teaching colors. The spot's giant spread shadow IS the
+     scrim, so the landmark stays bright while everything else dims; with
+     no landmark (a narration card) the root paints the scrim instead. */
+  #ps-tour { position: fixed; inset: 0; z-index: 12700; }
+  #ps-tour[hidden] { display: none; }
+  #ps-tour.ps-tour-nospot { background: rgba(20, 32, 46, 0.42); }
+  .ps-tour-spot {
+    position: fixed; border-radius: 8px; pointer-events: none;
+    box-shadow: 0 0 0 100vmax rgba(20, 32, 46, 0.42),
+                0 0 0 2px var(--ps-accent), 0 0 0 6px rgba(53, 115, 189, 0.28);
+  }
+  .ps-tour-card {
+    position: fixed; width: 330px; max-width: calc(100vw - 20px);
+    padding: 11px 14px 12px; color: var(--ps-s2); background: #23405f;
+    border: 1px solid #33587e; border-radius: var(--ps-r-md);
+    box-shadow: var(--ps-e-3); font-size: 12.5px; line-height: 1.45;
+  }
+  .ps-tour-arrow {
+    position: absolute; width: 13px; height: 13px; background: #23405f;
+    transform: rotate(45deg); display: none;
+  }
+  .ps-tour-arrow[data-side="top"] { display: block; top: -7px;
+    border-left: 1px solid #33587e; border-top: 1px solid #33587e; }
+  .ps-tour-arrow[data-side="bottom"] { display: block; bottom: -7px;
+    border-right: 1px solid #33587e; border-bottom: 1px solid #33587e; }
+  .ps-tour-arrow[data-side="left"] { display: block; left: -7px;
+    border-left: 1px solid #33587e; border-bottom: 1px solid #33587e; }
+  .ps-tour-arrow[data-side="right"] { display: block; right: -7px;
+    border-right: 1px solid #33587e; border-top: 1px solid #33587e; }
+  .ps-tour-head { display: flex; align-items: center;
+    justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+  .ps-tour-eyebrow { font-size: 10.5px; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--ps-tint-line-1); }
+  .ps-tour-exit { background: none; border: 0; color: #dce8f4; font-size: 19px;
+    line-height: 1; padding: 0 4px; cursor: pointer; border-radius: 4px; }
+  .ps-tour-exit:hover { background: #2c4d70; }
+  .ps-tour-card strong { display: block; font-size: 13px; margin-bottom: 3px; }
+  .ps-tour-card p { margin: 0; color: var(--ps-tint-line-1); }
+  .ps-tour-note { margin-top: 6px !important; font-size: 11.5px; color: #9fb4cc; }
+  .ps-tour-note[hidden] { display: none; }
+  .ps-tour-foot { display: flex; align-items: center;
+    justify-content: space-between; gap: 10px; margin-top: 10px; }
+  .ps-tour-dots { display: flex; gap: 4px; }
+  .ps-tour-dots span { width: 6px; height: 6px; border-radius: 50%; background: #46688e; }
+  .ps-tour-dots span.ps-on { background: #dce8f4; }
+  .ps-tour-actions { display: flex; gap: 7px; }
+  .ps-tour-actions .ps-btn { font-size: 11.5px; padding: 4px 10px; }
+  .ps-tour-actions .ps-btn:not(.ps-primary) {
+    color: #dce8f4; background: transparent; border-color: #46688e;
+  }
+  .ps-tour-actions .ps-btn:not(.ps-primary):hover { background: #2c4d70; }
+  .ps-tour-actions .ps-btn:disabled { opacity: 0.45; cursor: default; }
+  .ps-tour-live { position: absolute; width: 1px; height: 1px; margin: -1px;
+    padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  @media (prefers-reduced-motion: no-preference) {
+    #ps-tour.ps-tour-anim .ps-tour-spot, #ps-tour.ps-tour-anim .ps-tour-card {
+      transition: left 220ms ease, top 220ms ease, width 220ms ease, height 220ms ease;
+    }
+  }
+  body.ps-reduce-motion #ps-tour .ps-tour-spot,
+  body.ps-reduce-motion #ps-tour .ps-tour-card { transition: none; }
   #ps-coach {
     position: fixed; z-index: 8800; max-width: 310px;
     pointer-events: auto;
@@ -6326,6 +6388,7 @@
       part. Nothing here is fixed.</span>
     <div class="ps-coach-actions">
       <button type="button" class="ps-btn ps-primary" id="ps-coach-ok">Got it</button>
+      <button type="button" class="ps-btn" id="ps-coach-tour">Tour this workspace</button>
     </div>
   </div>
 </div>
@@ -6354,6 +6417,7 @@
 <script src="vendor/jspdf.umd.min.js"></script>
 <script src="vendor/svg2pdf.umd.min.js"></script>
 <script src="../inst/widget/graphbuilder2.min.js"></script>
+<script src="js/ps-tours.js"></script>
 <script src="js/ps-shell.js"></script>
 </body>
 </html>

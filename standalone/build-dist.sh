@@ -50,6 +50,7 @@ inline("js/ps-data.js", "js/ps-data.js")
 inline("vendor/jspdf.umd.min.js", "vendor/jspdf.umd.min.js")
 inline("vendor/svg2pdf.umd.min.js", "vendor/svg2pdf.umd.min.js")
 inline("../inst/widget/graphbuilder2.min.js", "../inst/widget/graphbuilder2.min.js")
+inline("js/ps-tours.js", "js/ps-tours.js")
 inline("js/ps-shell.js", "js/ps-shell.js")
 
 # Stamp the generated-file warning. Anchored on the TAG SHAPE, not the

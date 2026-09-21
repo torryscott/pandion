@@ -71,9 +71,13 @@ ok(/editable/i.test(coach.text) && /Click a bar/.test(coach.text),
    `("${coach.text.replace(/\n/g, ' ').slice(0, 100)}")`);
 ok(coach.onScreen && coach.nearChart,
    'anchored at the chart rather than floating somewhere else');
-// The second button (Show me how) left with the walkthroughs, Sep 16 2026.
-ok(coach.buttons.length === 1 && /Got it/.test(coach.buttons.join(' ')),
-   `with a way to dismiss it (${JSON.stringify(coach.buttons)})`);
+// The second button is the Charts tour (js/ps-tours.js, Sep 20 2026): the
+// coach fires at exactly the moment the room looks daunting, so it also
+// offers the way in. (The old second button, Show me how, left with the
+// walkthroughs on Sep 16 2026.)
+ok(coach.buttons.length === 2 && /Got it/.test(coach.buttons[0]) &&
+   /Tour this workspace/.test(coach.buttons[1]),
+   `with a way to dismiss it and a way into the tour (${JSON.stringify(coach.buttons)})`);
 
 // Once dismissed it never returns, including across a reload. A cue that
 // reappears is a nag, which is what the disabled engine hint was avoiding.

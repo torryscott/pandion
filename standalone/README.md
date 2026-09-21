@@ -1243,6 +1243,17 @@ most misleading page in the repo. What actually still holds:
 - `index.html` - the shell page (dev form: loads the engine via
   `<script src="../inst/widget/graphbuilder2.min.js">`).
 - `js/ps-stat.js` - the numeric core (R-parity stat mirrors; see Status).
+- `js/ps-tours.js` - workspace tours (Help menu, and the chart's empty
+  state): a spotlight on one landmark at a time and a card that says what
+  it is for. Orientation only: it never clicks, never moves a cursor, and
+  never changes the chart, which is the whole difference from the "Show me
+  how" walkthroughs that were removed Sep 16 2026 for misleading people.
+  Targets are the engine's own data-role and aria-label handles, resolved
+  on every frame to the first visible match, so a rebuilt toolbar is
+  followed and a missing optional landmark (the inspector on a narrow
+  window) is skipped. Tours are data at the bottom of the file; the Charts
+  tour opens the built-in example when there is no data at all. Verified by
+  `verify/tours-check.mjs`.
 - `js/ps-data.js` - per-module payload channel builders mirroring each
   jamovi .b.R aggregation row for row, plus the module/role registry.
 - `js/ps-shell.js` - project state, CSV import, roles UI, the setOption

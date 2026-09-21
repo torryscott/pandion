@@ -7902,6 +7902,14 @@
               label: "Not sure? Help me choose",
               run: function () { showHelpMeChoose(null, activeChart().id); } }])
       : messageActions(fix);
+    // "New here?" lives in the assignment state only, and only while the
+    // tour can actually run (no data yet: it opens the example) and has
+    // not been taken. Once seen it steps aside; the Help menu keeps it.
+    if (assignment && window.PS_TOURS && !window.PS_TOURS.seen("charts") &&
+        chartsTourAvailable())
+      acts.push({ id: "ps-empty-tour", link: true,
+                  label: "New here? Tour this workspace",
+                  run: function () { startWorkspaceTour("charts"); } });
     var tail = assignment
       ? (fix && fix.kind === "example"
          ? " This example dataset has nothing that would suit it. " +
@@ -9489,6 +9497,15 @@
   function wireCoach() {
     var ok = document.getElementById("ps-coach-ok");
     if (ok) ok.addEventListener("click", coachDismiss);
+    // The coach fires at the first drawn chart, which is exactly where a
+    // new user finds the room daunting; its second button is the tour
+    // (js/ps-tours.js). The tour's first card restates the coach's point,
+    // so taking it counts as having read the coach.
+    var tour = document.getElementById("ps-coach-tour");
+    if (tour) tour.addEventListener("click", function () {
+      coachDismiss();
+      startWorkspaceTour("charts");
+    });
     // Any click ON the chart proves the point better than the note does.
     var host = hostEl();
     if (host) host.addEventListener("pointerdown", function () {
@@ -28958,6 +28975,9 @@
     help: [
       { label: "User guide", command: "user-guide" },
       "separator",
+      // Workspace tours (js/ps-tours.js): orientation, one per room.
+      { label: "Tour the Charts workspace", command: "tour-charts" },
+      "separator",
       { label: "Chart basics", command: "help-basics" },
       { label: "Which graph should I use?", command: "help-chooser" },
       { label: "Check my chart", command: "help-lint" },
@@ -29605,7 +29625,35 @@
     if (command === "help-basics" || command === "help-lint" ||
         command === "help-anatomy" || command === "help-glossary")
       return chartHelpState() === "ready";
+    if (command === "tour-charts") return chartsTourAvailable();
     return true;
+  }
+  // The Charts tour can run when a chart is drawn, or when there is no
+  // data at all (it opens the built-in example, the same thing the empty
+  // state offers). Data with no drawn chart is refused with a reason: the
+  // landmarks it points at are not on screen yet.
+  function chartsTourAvailable() {
+    if (!tableHasData(PROJECT.table)) return true;
+    if (chartHelpState() === "ready") return true;
+    // A layout or the Notebook in front, with a chart document elsewhere:
+    // the tour switches to it and checks again there.
+    return !workspaceDocument("chart") && !!appFirstDocument(false);
+  }
+  // "No data" means no VALUES: New project's blank starter table (three
+  // empty columns) counts as none, so the tour may open the example without
+  // losing anything, which is exactly when captureReplacedProject would
+  // find nothing worth offering back either.
+  function tableHasData(t) {
+    if (!t || !t.order || !t.order.length || !t.raw) return false;
+    for (var i = 0; i < t.order.length; i++) {
+      var col = t.raw[t.order[i]] || [];
+      for (var j = 0; j < col.length; j++)
+        if (col[j] !== "" && col[j] != null) return true;
+    }
+    return false;
+  }
+  function startWorkspaceTour(id) {
+    if (window.PS_TOURS && window.PS_TOURS.start) window.PS_TOURS.start(id);
   }
   function commandDisabledReason(command) {
     if (command === "undo" || command === "redo") {
@@ -29641,6 +29689,10 @@
       return chartHelpState() === "none"
         ? "Create a chart first"
         : "Assign variables to this chart first";
+    if (command === "tour-charts")
+      return chartHelpState() === "none"
+        ? "Create a chart first, then take the tour"
+        : "Assign variables so this chart draws, then take the tour";
     if (command.indexOf("data-") === 0)
       return (PROJECT.table && PROJECT.table.order.length)
         ? "Select a column in the Data workspace first"
@@ -29762,6 +29814,7 @@
       else showHelpMeChoose(null, appWorkspace() === "chart" ? PROJECT.activeChart : null);
     }
     else if (command === "help-basics") openEngineHelp("help");
+    else if (command === "tour-charts") startWorkspaceTour("charts");
     else if (command === "help-lint") openEngineHelp("graphLint");
     else if (command === "help-anatomy") openEngineHelp("anatomy");
     else if (command === "help-glossary") openEngineHelp("glossary");
@@ -31536,6 +31589,13 @@
     templateStamp: templateStamp,
     channelAudit: channelAudit,
     userGuideTarget: userGuideTarget,
+    // Workspace tours (js/ps-tours.js) read these to get a chart on screen
+    // before the first card.
+    toast: showToast,
+    chartHelpState: chartHelpState,
+    openExample: openExampleFromEmptyState,
+    tableHasData: function () { return tableHasData(PROJECT.table); },
+    coachDismiss: coachDismiss,
     coachReset: function () {
       try { window.localStorage.removeItem(PS_COACH_KEY); } catch (e) {}
       COACH_SHOWN = false;
