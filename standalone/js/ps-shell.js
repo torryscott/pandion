@@ -27917,6 +27917,10 @@
       openShellDialog("ps-linkopen-dialog");
       window.setTimeout(function () { try { el("ps-linkopen-url").focus(); } catch (ignore) {} }, 0);
     });
+    el("ps-welcome-find").addEventListener("click", function () {
+      hideWelcome();
+      openFindData();
+    });
     // Punch list 20: three cards, one handler. The first still carries
     // #ps-welcome-sample, so every existing path (and probe) that clicks it
     // keeps loading the dose-response study.
@@ -27963,6 +27967,7 @@
     setTip(el("ps-doc-name"), "Double-click to rename project");
     el("ps-doc-name").addEventListener("dblclick", renameProjectInline);
     wireOpenLinkDialog();
+    wireFindDataDialog();
     var linkReq = linkRequestFromLocation();
     if (linkReq) offerOpenLink(linkReq);
     else showWelcome(false);
@@ -28083,13 +28088,14 @@
   function openFromLink(req, prefix) {
     prefix = prefix || "ps-openlink";
     var status = el(prefix + "-status"), btn = el(prefix + "-open");
-    btn.disabled = true;
+    if (btn) btn.disabled = true;
     status.style.color = "#4a5a6a";
     status.textContent = "Fetching\u2026";
     function fail(msg) {
       status.style.color = "#7a2e2e";
       status.textContent = msg;
-      btn.disabled = false;
+      if (btn) btn.disabled = false;
+      if (typeof req.onFail === "function") req.onFail(msg);
     }
     var host = linkHost(req.url);
     fetch(req.url, { mode: "cors", cache: "no-store" }).then(function (r) {
@@ -28103,6 +28109,9 @@
         throw new Error("That file is " + Math.round(blob.size / 1048576) + " MB, too large to read in a browser tab. Save a smaller extract and link to that.");
       var name = "";
       try { name = decodeURIComponent(new URL(req.url).pathname.split("/").pop() || ""); } catch (e) {}
+      // A collection knows the file's real name where the link does not
+      // end in it (Zenodo's links end in /content).
+      if (req.name) name = String(req.name);
       if (req.kind === "project") {
         if (!/\.(pand|pnd|pandion|json)$/i.test(name)) name = (name || "project") + ".pand";
       } else if (!/\.[a-z0-9]{2,5}$/i.test(name)) name = (name || "data") + ".csv";
@@ -28119,6 +28128,314 @@
       if (/Failed to fetch|NetworkError|Load failed|TypeError/i.test(msg))
         msg = "Could not fetch it from " + host + ". The site may not allow other pages to read the file (no CORS header), or the link may be wrong.";
       fail(msg);
+    });
+  }
+
+  // ---- Find open data (Torry, Sep 21 2026) ----
+  // Two collections whose search AND file hosts both let a page on another
+  // origin read them (probed with a pandionplots.com origin the day this
+  // was built; Figshare, OSF, Dryad and Kaggle refuse one half or both, so
+  // they are not offered).
+  //   rdatasets: the data shipped with R packages, indexed as one CSV on
+  //     GitHub Pages. The index loads once per session and the search runs
+  //     in this browser, so nothing typed leaves the machine.
+  //   zenodo: research data behind DOIs. Each search is one request to
+  //     zenodo.org (30 a minute for anonymous callers, so it runs on Enter,
+  //     never per keystroke), filtered to records holding a file this app
+  //     can open.
+  // Every Open goes through openFromLink, so the fetch, the size guard, the
+  // import preview and the provenance line are the link path's, unchanged.
+  var FIND_SOURCES = {
+    rdatasets: {
+      note: "The list comes from vincentarelbundock.github.io (Rdatasets, the data shipped with R packages) and loads once. Searching happens in this browser; nothing you type is sent anywhere.",
+      index: "https://vincentarelbundock.github.io/Rdatasets/datasets.csv",
+      placeholder: "Search by name or topic"
+    },
+    zenodo: {
+      note: "Each search is sent to zenodo.org. Only records with a CSV, TSV, text or Excel file are listed. Opening one fetches the file into this browser; nothing is uploaded.",
+      api: "https://zenodo.org/api/records",
+      placeholder: "Type some words, then press Enter"
+    }
+  };
+  var FIND_READABLE = /\.(csv|tsv|txt|xlsx|xlsm|omv|pand|pnd|pandion)$/i;
+  // A .txt can be a tab-separated table, so the extension stays readable,
+  // but a file named README or LICENSE is prose and would only land in the
+  // import preview as one column of sentences.
+  var FIND_PROSE = /readme|licen[cs]e|changelog|codebook/i;
+  var FIND_SOURCE = "rdatasets";
+  var FIND_RD_ROWS = null;       // the parsed Rdatasets index, once loaded
+  var FIND_RD_PKGS = 0;
+  var FIND_RD_LOADING = null;    // its in-flight promise
+  var FIND_SEQ = 0;              // a search that lands after a newer one started is dropped
+  var FIND_TIMER = null;
+  var FIND_LIMIT = 60;
+  function findSafeUrl(u) {
+    var p = null;
+    try { p = new URL(String(u || "")); } catch (e) { return ""; }
+    return (p.protocol === "https:" || p.protocol === "http:") ? p.href : "";
+  }
+  function openFindData() {
+    if (!el("ps-finddata-dialog")) return;
+    el("ps-finddata-q").value = "";
+    findSetSource(FIND_SOURCE);
+    openShellDialog("ps-finddata-dialog");
+    window.setTimeout(function () { try { el("ps-finddata-q").focus(); } catch (ignore) {} }, 0);
+  }
+  function findSetSource(id) {
+    if (!FIND_SOURCES[id]) id = "rdatasets";
+    FIND_SOURCE = id;
+    var tabs = document.querySelectorAll("#ps-finddata-dialog [data-source]");
+    for (var i = 0; i < tabs.length; i++)
+      tabs[i].setAttribute("aria-selected", tabs[i].getAttribute("data-source") === id ? "true" : "false");
+    el("ps-finddata-note").textContent = FIND_SOURCES[id].note;
+    el("ps-finddata-q").placeholder = FIND_SOURCES[id].placeholder;
+    el("ps-finddata-go").style.display = id === "zenodo" ? "" : "none";
+    el("ps-finddata-results").innerHTML = "";
+    findStatus("", false);
+    findRun();
+  }
+  function findStatus(msg, isError) {
+    var s = el("ps-finddata-status");
+    s.style.color = isError ? "#7a2e2e" : "#4a5a6a";
+    s.textContent = msg || "";
+  }
+  function findLoadRdatasets() {
+    if (FIND_RD_ROWS) return Promise.resolve(FIND_RD_ROWS);
+    if (FIND_RD_LOADING) return FIND_RD_LOADING;
+    FIND_RD_LOADING = fetch(FIND_SOURCES.rdatasets.index, { mode: "cors" })
+      .then(function (r) {
+        if (!r.ok) throw new Error("The server answered " + r.status + ".");
+        return r.text();
+      }).then(function (text) {
+        var parsed = parseTableText(text, ",", true, 0);
+        if (!parsed || !parsed.rows.length) throw new Error("The list could not be read.");
+        var col = {};
+        for (var c = 0; c < parsed.header.length; c++) col[parsed.header[c]] = c;
+        var rows = [], pkgs = {};
+        for (var i = 0; i < parsed.rows.length; i++) {
+          var r = parsed.rows[i];
+          var g = function (k) { return col[k] == null ? "" : String(r[col[k]] || ""); };
+          var csv = findSafeUrl(g("CSV"));
+          if (!csv) continue;
+          pkgs[g("Package")] = true;
+          rows.push({
+            pkg: g("Package"), item: g("Item"), title: g("Title"),
+            rows: Number(g("Rows")) || 0, cols: Number(g("Cols")) || 0,
+            numeric: Number(g("n_numeric")) || 0, factor: Number(g("n_factor")) || 0,
+            character: Number(g("n_character")) || 0, logical: Number(g("n_logical")) || 0,
+            csv: csv, doc: findSafeUrl(g("Doc")),
+            hay: (g("Package") + " " + g("Item") + " " + g("Title")).toLowerCase()
+          });
+        }
+        FIND_RD_ROWS = rows;
+        FIND_RD_PKGS = Object.keys(pkgs).length;
+        return rows;
+      });
+    FIND_RD_LOADING.catch(function () { FIND_RD_LOADING = null; });
+    return FIND_RD_LOADING;
+  }
+  function findRun() {
+    var q = String(el("ps-finddata-q").value || "").trim();
+    if (FIND_SOURCE === "zenodo") findRunZenodo(q);
+    else findRunRdatasets(q);
+  }
+  function findTokens(q) {
+    return q.toLowerCase().split(/\s+/).filter(function (t) { return t; });
+  }
+  function findRunRdatasets(q) {
+    var seq = ++FIND_SEQ;
+    var toks = findTokens(q);
+    var box = el("ps-finddata-results");
+    if (!FIND_RD_ROWS) findStatus("Loading the list of datasets\u2026", false);
+    findLoadRdatasets().then(function (rows) {
+      if (seq !== FIND_SEQ) return;
+      if (!toks.length) {
+        box.innerHTML = "";
+        findStatus("Type to search " + rows.length.toLocaleString() + " datasets from " +
+          FIND_RD_PKGS + " R packages.", false);
+        return;
+      }
+      var hits = [];
+      for (var i = 0; i < rows.length; i++) {
+        var r = rows[i], all = true, t;
+        for (t = 0; t < toks.length; t++) if (r.hay.indexOf(toks[t]) < 0) { all = false; break; }
+        if (!all) continue;
+        var item = r.item.toLowerCase(), title = r.title.toLowerCase(), score = 0;
+        for (t = 0; t < toks.length; t++) {
+          if (item === toks[t]) score += 4;
+          else if (item.indexOf(toks[t]) === 0) score += 3;
+          else if (item.indexOf(toks[t]) >= 0) score += 2;
+          else if (title.indexOf(toks[t]) >= 0) score += 1;
+        }
+        hits.push({ r: r, score: score });
+      }
+      hits.sort(function (a, b) {
+        return b.score - a.score || a.r.item.localeCompare(b.r.item) || a.r.pkg.localeCompare(b.r.pkg);
+      });
+      if (!hits.length) { box.innerHTML = ""; findStatus("No datasets match those words.", false); return; }
+      var h = "";
+      for (i = 0; i < Math.min(hits.length, FIND_LIMIT); i++) h += findRdRowHtml(hits[i].r);
+      box.innerHTML = h;
+      box.scrollTop = 0;
+      findStatus(hits.length > FIND_LIMIT
+        ? "Showing the first " + FIND_LIMIT + " of " + hits.length.toLocaleString() + " matches. Add a word to narrow it."
+        : hits.length + (hits.length === 1 ? " dataset" : " datasets"), false);
+    }, function () {
+      if (seq !== FIND_SEQ) return;
+      findStatus("Could not load the list from vincentarelbundock.github.io. Check the connection and try again.", true);
+    });
+  }
+  function findTypeSummary(r) {
+    var parts = [];
+    if (r.numeric) parts.push(r.numeric + " numeric");
+    if (r.factor) parts.push(r.factor + " factor");
+    if (r.character) parts.push(r.character + " text");
+    if (r.logical) parts.push(r.logical + " logical");
+    return parts.join(", ");
+  }
+  function findOpenButtonHtml(url, name) {
+    return '<button type="button" class="ps-btn ps-primary" data-find-open="' + escHtml(url) +
+      '" data-find-name="' + escHtml(name) + '">Open</button>';
+  }
+  function findAboutHtml(url) {
+    return url ? '<a class="ps-btn ps-finddata-about" href="' + escHtml(url) +
+      '" target="_blank" rel="noopener">About</a>' : "";
+  }
+  function findRdRowHtml(r) {
+    var meta = escHtml(r.pkg) + " \u00b7 " + shapeText(r.rows, r.cols, "\u00d7", true);
+    var types = findTypeSummary(r);
+    if (types) meta += " \u00b7 " + escHtml(types);
+    return '<div class="ps-finddata-row" data-find-item="' + escHtml(r.pkg + "/" + r.item) + '">' +
+      '<div class="ps-finddata-copy"><div class="ps-finddata-title">' + escHtml(r.item) +
+      (r.title && r.title !== r.item ? ' <span class="ps-finddata-sub">' + escHtml(r.title) + "</span>" : "") +
+      '</div><div class="ps-finddata-meta">' + meta + "</div></div>" +
+      '<div class="ps-finddata-actions">' + findAboutHtml(r.doc) +
+      findOpenButtonHtml(r.csv, r.item + ".csv") + "</div></div>";
+  }
+  function findRunZenodo(q) {
+    var seq = ++FIND_SEQ;
+    var box = el("ps-finddata-results");
+    if (!q) { box.innerHTML = ""; findStatus("Type some words and press Enter to search Zenodo.", false); return; }
+    findStatus("Searching zenodo.org\u2026", false);
+    var url = FIND_SOURCES.zenodo.api + "?size=25&sort=bestmatch&q=" + encodeURIComponent(
+      "(" + q + ") AND metadata.resource_type.id:dataset AND files.types:(csv OR tsv OR txt OR xlsx OR xlsm)");
+    fetch(url, { mode: "cors", cache: "no-store", headers: { Accept: "application/json" } }).then(function (r) {
+      if (r.status === 429) throw new Error("rate");
+      if (!r.ok) throw new Error("zenodo.org answered " + r.status + ".");
+      return r.json();
+    }).then(function (j) {
+      if (seq !== FIND_SEQ) return;
+      var hits = (j && j.hits && j.hits.hits) || [];
+      var total = j && j.hits ? j.hits.total : 0;
+      if (total && typeof total === "object") total = total.value;
+      total = Number(total) || hits.length;
+      var h = "", shown = 0;
+      for (var i = 0; i < hits.length; i++) {
+        var rec = findZenodoRecord(hits[i]);
+        if (!rec || !rec.files.length) continue;
+        shown++;
+        h += findZenodoRowHtml(rec);
+      }
+      box.innerHTML = h;
+      box.scrollTop = 0;
+      if (!shown) {
+        findStatus(hits.length ? "The matching records hold no file this app can open. Try other words."
+          : "No datasets match those words.", false);
+        return;
+      }
+      findStatus(shown + (shown === 1 ? " record" : " records") + (total > hits.length
+        ? " shown of about " + total.toLocaleString() + " matches. Add a word to narrow it." : " found."), false);
+    }).catch(function (e) {
+      if (seq !== FIND_SEQ) return;
+      var msg = String(e && e.message || e);
+      if (msg === "rate") msg = "zenodo.org is limiting searches from this address for a minute. Wait a little and try again.";
+      else if (/Failed to fetch|NetworkError|Load failed|TypeError/i.test(msg))
+        msg = "Could not reach zenodo.org. Check the connection and try again.";
+      findStatus(msg, true);
+    });
+  }
+  function findZenodoRecord(hit) {
+    if (!hit || !hit.metadata) return null;
+    var m = hit.metadata, files = [], list = hit.files || [];
+    for (var i = 0; i < list.length; i++) {
+      var f = list[i], key = String(f.key || "");
+      var link = findSafeUrl(f.links && (f.links.self || f.links.download));
+      if (!FIND_READABLE.test(key) || !link) continue;
+      if (/\.txt$/i.test(key) && FIND_PROSE.test(key)) continue;
+      if (Number(f.size) > DATA_REFUSE_BYTES) continue;
+      files.push({ name: key, size: Number(f.size) || 0, url: link });
+    }
+    var who = [], cr = m.creators || [];
+    for (i = 0; i < cr.length && i < 3; i++)
+      who.push(String(cr[i].name || (cr[i].person_or_org && cr[i].person_or_org.name) || ""));
+    who = who.filter(Boolean);
+    if (cr.length > 3) who.push("and others");
+    return {
+      title: String(m.title || "Untitled"), who: who.join(", "),
+      year: String(m.publication_date || "").slice(0, 4), doi: String(hit.doi || m.doi || ""),
+      page: findSafeUrl(hit.links && hit.links.self_html) ||
+        ("https://zenodo.org/records/" + encodeURIComponent(String(hit.id || ""))),
+      files: files
+    };
+  }
+  function findZenodoRowHtml(rec) {
+    var meta = [rec.who, rec.year, rec.doi ? "DOI " + rec.doi : ""].filter(Boolean).map(escHtml).join(" \u00b7 ");
+    var files = "", max = 6;
+    for (var f = 0; f < rec.files.length && f < max; f++) {
+      var fl = rec.files[f];
+      files += '<div class="ps-finddata-file"><span class="ps-finddata-filename">' + escHtml(fl.name) +
+        '</span><span class="ps-finddata-meta">' + escHtml(formatBytes(fl.size)) + "</span>" +
+        findOpenButtonHtml(fl.url, fl.name) + "</div>";
+    }
+    if (rec.files.length > max)
+      files += '<div class="ps-finddata-meta">' + (rec.files.length - max) + " more on Zenodo</div>";
+    return '<div class="ps-finddata-row" data-find-record>' +
+      '<div class="ps-finddata-copy"><div class="ps-finddata-title">' + escHtml(rec.title) + "</div>" +
+      '<div class="ps-finddata-meta">' + meta + "</div>" + files + "</div>" +
+      '<div class="ps-finddata-actions">' + findAboutHtml(rec.page) + "</div></div>";
+  }
+  function wireFindDataDialog() {
+    var dlg = el("ps-finddata-dialog");
+    if (!dlg) return;
+    function dismiss() {
+      FIND_SEQ++;
+      closeShellDialog("ps-finddata-dialog");
+      showWelcome(true);
+    }
+    el("ps-finddata-cancel").addEventListener("click", dismiss);
+    dlg.addEventListener("pointerdown", function (e) { if (e.target === this) dismiss(); });
+    dlg.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") { e.preventDefault(); dismiss(); return; }
+      shellTrapTab(this, e);
+    });
+    var tabs = dlg.querySelectorAll("[data-source]");
+    for (var i = 0; i < tabs.length; i++)
+      tabs[i].addEventListener("click", function () {
+        findSetSource(this.getAttribute("data-source"));
+        try { el("ps-finddata-q").focus(); } catch (ignore) {}
+      });
+    el("ps-finddata-q").addEventListener("input", function () {
+      if (FIND_SOURCE !== "rdatasets") return;
+      window.clearTimeout(FIND_TIMER);
+      FIND_TIMER = window.setTimeout(findRun, 120);
+    });
+    el("ps-finddata-q").addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); window.clearTimeout(FIND_TIMER); findRun(); }
+    });
+    el("ps-finddata-go").addEventListener("click", function () { findRun(); });
+    el("ps-finddata-results").addEventListener("click", function (e) {
+      var b = e.target.closest ? e.target.closest("[data-find-open]") : null;
+      if (!b || b.disabled) return;
+      var url = findSafeUrl(b.getAttribute("data-find-open"));
+      if (!url) return;
+      var name = b.getAttribute("data-find-name") || "";
+      var label = b.textContent;
+      b.disabled = true; b.textContent = "Fetching\u2026";
+      openFromLink({
+        kind: /\.(pand|pnd|pandion)$/i.test(name) ? "project" : "data",
+        url: url, name: name,
+        onFail: function () { b.disabled = false; b.textContent = label; }
+      }, "ps-finddata");
     });
   }
 
@@ -31814,6 +32131,7 @@
     tableHasData: function () { return tableHasData(PROJECT.table); },
     coachDismiss: coachDismiss,
     pinChartForTest: function () { pinChartToPinboard(null); },
+    findOpenData: openFindData,
     coachReset: function () {
       try { window.localStorage.removeItem(PS_COACH_KEY); } catch (e) {}
       COACH_SHOWN = false;

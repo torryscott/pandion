@@ -3286,6 +3286,44 @@
     display: flex; justify-content: flex-end; gap: 7px; padding: 12px 19px 17px;
     border-top: 1px solid var(--ps-l1);
   }
+  /* Find open data (Sep 21 2026) */
+  .ps-finddata-sources { display: flex; gap: 8px; margin: 0 0 10px; }
+  .ps-finddata-source {
+    -webkit-appearance: none; appearance: none; flex: 1 1 0; display: flex;
+    flex-direction: column; gap: 2px; padding: 8px 11px; font: inherit;
+    text-align: left; color: var(--ps-ink-2); background: var(--ps-s0);
+    border: 1px solid var(--ps-l2b); border-radius: var(--ps-r-md); cursor: pointer;
+  }
+  .ps-finddata-source strong { font-size: 12.5px; }
+  .ps-finddata-source span { font-size: 11px; color: var(--ps-muted); }
+  .ps-finddata-source:hover { background: var(--ps-tint-1); border-color: #aec5df; }
+  .ps-finddata-source[aria-selected="true"] {
+    color: var(--ps-accent-ink); background: var(--ps-tint-1); border-color: var(--ps-accent);
+  }
+  .ps-finddata-search { display: flex; gap: 8px; }
+  .ps-finddata-search input {
+    flex: 1 1 auto; min-width: 0; box-sizing: border-box; font: inherit; padding: 7px 9px;
+    border: 1px solid var(--ps-tint-line-1); border-radius: 6px;
+  }
+  .ps-finddata-note { margin: 8px 0 0; font-size: 11.5px; color: var(--ps-muted); }
+  .ps-finddata-status { margin: 8px 0 0; min-height: 18px; font-size: 12px; }
+  .ps-finddata-results { max-height: min(46vh, 420px); overflow: auto; margin-top: 6px; }
+  .ps-finddata-row {
+    display: flex; align-items: flex-start; gap: 12px; padding: 9px 2px;
+    border-top: 1px solid var(--ps-l1);
+  }
+  .ps-finddata-row:first-child { border-top: 0; }
+  .ps-finddata-copy { flex: 1 1 auto; min-width: 0; }
+  .ps-finddata-title { font-weight: 600; font-size: 12.5px; }
+  .ps-finddata-sub { font-weight: 400; color: var(--ps-muted); }
+  .ps-finddata-meta { font-size: 11.5px; color: var(--ps-muted); margin-top: 2px; }
+  .ps-finddata-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+  .ps-finddata-about { text-decoration: none; display: inline-block; box-sizing: border-box; }
+  .ps-finddata-file { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+  .ps-finddata-file .ps-finddata-meta { margin-top: 0; }
+  .ps-finddata-filename { font-size: 12.5px; color: var(--ps-ink-2); word-break: break-all; }
+  .ps-finddata-file .ps-btn { margin-left: auto; }
+
   .ps-analysis-grid {
     display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px;
   }
@@ -5499,6 +5537,13 @@
               <span>A CSV, Excel, .omv or project file on the web</span>
             </span>
           </button>
+          <button type="button" class="ps-launch-action" id="ps-welcome-find">
+            <span class="ps-launch-icon"><svg class="ps-icn" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></svg></span>
+            <span class="ps-launch-copy">
+              <strong>Find open data</strong>
+              <span>Search teaching datasets or Zenodo, then open one</span>
+            </span>
+          </button>
         </div>
       </section>
       <div>
@@ -6023,6 +6068,39 @@
       <div class="ps-guided-empty-actions" style="justify-content:flex-start;margin-top:12px;">
         <button type="button" class="ps-btn ps-primary" id="ps-linkopen-open">Open</button>
       </div>
+    </div>
+  </div>
+</div>
+<!-- Find open data (Torry, Sep 21 2026): two collections whose search and
+     file hosts both let a page on another origin read them. Every Open here
+     goes through the same fetch as From a link. -->
+<div id="ps-finddata-dialog" class="ps-dialog-overlay" role="dialog"
+     aria-modal="true" aria-labelledby="ps-finddata-title">
+  <div class="ps-dialog-card" style="max-width:720px;">
+    <div class="ps-dialog-head">
+      <div>
+        <h2 id="ps-finddata-title">Find open data</h2>
+        <p>Search a collection and open a table straight into the app.</p>
+      </div>
+      <button type="button" class="ps-btn ps-dialog-close"
+              id="ps-finddata-cancel">Cancel</button>
+    </div>
+    <div class="ps-dialog-body">
+      <div class="ps-finddata-sources" role="tablist" aria-label="Collection">
+        <button type="button" class="ps-finddata-source" role="tab" data-source="rdatasets" aria-selected="true">
+          <strong>Teaching datasets</strong><span>The data shipped with R packages</span>
+        </button>
+        <button type="button" class="ps-finddata-source" role="tab" data-source="zenodo" aria-selected="false">
+          <strong>Research data</strong><span>Zenodo, each record behind a DOI</span>
+        </button>
+      </div>
+      <div class="ps-finddata-search">
+        <input type="search" id="ps-finddata-q" autocomplete="off" spellcheck="false" aria-label="Search">
+        <button type="button" class="ps-btn ps-primary" id="ps-finddata-go">Search</button>
+      </div>
+      <p id="ps-finddata-note" class="ps-finddata-note"></p>
+      <p id="ps-finddata-status" role="status" class="ps-finddata-status"></p>
+      <div id="ps-finddata-results" class="ps-finddata-results"></div>
     </div>
   </div>
 </div>
