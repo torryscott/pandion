@@ -27,6 +27,28 @@ window.PSStat = (function () {
     var n = s.length;
     return (n % 2) ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2;
   }
+  // The most frequent value, jamovi's Descriptives convention: when several
+  // values share the highest count the smallest is reported, and the caller
+  // is told how many tied (Sep 19 2026, Torry's Mode item). Returns null on
+  // an empty vector. A vector of all-distinct values has every value tied,
+  // which the caller may want to say rather than print a meaningless mode.
+  function mode(v) {
+    var counts = {}, order = [], i, k;
+    for (i = 0; i < v.length; i++) {
+      k = String(v[i]);
+      if (!Object.prototype.hasOwnProperty.call(counts, k)) { counts[k] = 0; order.push(v[i]); }
+      counts[k]++;
+    }
+    if (!order.length) return null;
+    var best = 0, ties = [];
+    for (i = 0; i < order.length; i++) {
+      var c = counts[String(order[i])];
+      if (c > best) { best = c; ties = [order[i]]; }
+      else if (c === best) ties.push(order[i]);
+    }
+    ties.sort(function (a, b) { return a - b; });
+    return { value: ties[0], count: best, ties: ties.length, distinct: order.length };
+  }
   function sdSample(v) {
     var n = v.length;
     if (n < 2) return NaN;
@@ -737,7 +759,7 @@ window.PSStat = (function () {
   }
 
   return {
-    sigR: sigR, mean: mean, median: median, sdSample: sdSample,
+    sigR: sigR, mean: mean, median: median, mode: mode, sdSample: sdSample,
     logGamma: logGamma, betaInc: betaInc,
     tCdf: tCdf, qt: qt, pnorm: pnorm,
     chisqUpperP: chisqUpperP, qchisq2: qchisq2,

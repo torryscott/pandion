@@ -25081,9 +25081,16 @@
     if (vals.length < 2) return "";
     var fmt = fmtStatValue;
     var S = window.PSStat;
+    // Mode (Sep 19 2026, Torry): the most frequent value, the smallest when
+    // several tie, said plainly when every value is distinct.
+    var mo = S.mode(vals);
+    var modeText = !mo ? "" :
+      (mo.count === 1 ? "none (every value is distinct)"
+        : fmt(mo.value) + (mo.ties > 1 ? " (" + mo.ties + " values tie)" : ""));
     return inspectorStat("Mean", fmt(S.mean(vals))) +
       inspectorStat("SD", fmt(S.sdSample(vals))) +
       inspectorStat("Median", fmt(S.median(vals))) +
+      inspectorStat("Mode", modeText) +
       inspectorStat("Min", fmt(Math.min.apply(null, vals))) +
       inspectorStat("Max", fmt(Math.max.apply(null, vals)));
   }
