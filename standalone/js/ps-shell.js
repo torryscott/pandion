@@ -661,6 +661,9 @@
   var FILE_SAVED_REV = null;
   var FILE_LABEL = null;
   var BOOT_RESTORED = false;
+  // Open by link: the source of the data the app was pointed at, set once
+  // the fetched file is adopted (see linkRequestFromLocation).
+  var PENDING_LINK_SOURCE = null;
   var PS_FLUSH_PENDING_OPTS = null;   // B12: set by wireHeader
   var BOOT_SAVED_AT = null;   // B14: age of the snapshot Continue would open
   var MODULES = window.PSData.MODULES;
@@ -3846,6 +3849,7 @@
       savedAt: new Date().toISOString(),
       id: PROJECT.id,
       name: PROJECT.name,
+      sourceUrl: PROJECT.sourceUrl || "",
       charts: PROJECT.charts,
       pinboards: PROJECT.pinboards || [],
       activeChart: PROJECT.activeChart,
@@ -4484,7 +4488,8 @@
     }
     if (detail) detail.textContent = FILE_LABEL ||
       (PROJECT.charts.length + (PROJECT.charts.length === 1
-       ? " document \u00b7 local project" : " documents \u00b7 local project"));
+       ? " document \u00b7 " : " documents \u00b7 ") +
+       (PROJECT.sourceUrl ? "from " + linkHost(PROJECT.sourceUrl) : "local project"));
   }
   function flashSaved() {
     var b = el("ps-save");
@@ -7272,13 +7277,17 @@
       return { error: "Could not read that project file." };
     }
     PROJECT_CHOSEN = true;
+    var fromLink = !!PENDING_LINK_SOURCE;
+    PROJECT.sourceUrl = takeLinkSource() || parsed.snapshot.sourceUrl || "";
     dataHistoryClear();
     importLibraries(parsed.libraries);
     var numNote = _numericalNoticeFor(parsed.fileAppVersion, APP_VERSION,
                                       parsed.fileNumericalChanges);
     PROJECT_REV = 0;
-    FILE_SAVED_REV = fileName ? 0 : null;
-    FILE_LABEL = fileName || null;
+    // A project fetched from a link is not a file on this machine: it is
+    // autosaved like any new project, and Save writes a fresh copy.
+    FILE_SAVED_REV = (fileName && !fromLink) ? 0 : null;
+    FILE_LABEL = fromLink ? null : (fileName || null);
     FILE_HANDLE = null;
     validateRoles();
     persist(false);
@@ -26754,6 +26763,7 @@
     dataHistoryClear();
     PROJECT.id = newProjectId();
     PROJECT.name = name || "Untitled project";
+    PROJECT.sourceUrl = takeLinkSource();
     PROJECT_REV = 0;
     FILE_SAVED_REV = null;
     FILE_LABEL = null;
@@ -26784,6 +26794,7 @@
     dataHistoryClear();
     PROJECT.id = newProjectId();
     PROJECT.name = parsed.name || "Untitled project";
+    PROJECT.sourceUrl = takeLinkSource();
     PROJECT_REV = 0;
     FILE_SAVED_REV = null;
     FILE_LABEL = null;
@@ -27276,6 +27287,7 @@
     }, 0);
   }
   function closeLoader() {
+    PENDING_LINK_SOURCE = null;   // a cancelled link import tags nothing later
     el("ps-loader").style.display = "none";
     shellRefreshPageModal();
     var prior = LOADER_LAST_FOCUS;
@@ -27940,7 +27952,131 @@
     });
     setTip(el("ps-doc-name"), "Double-click to rename project");
     el("ps-doc-name").addEventListener("dblclick", renameProjectInline);
-    showWelcome(false);
+    wireOpenLinkDialog();
+    var linkReq = linkRequestFromLocation();
+    if (linkReq) offerOpenLink(linkReq);
+    else showWelcome(false);
+  }
+  // ---- Open by link (Sep 21 2026, Torry's "pipeline into the program") ----
+  // The app can be pointed at data: ?data=<url> (CSV, TSV, Excel, .omv),
+  // ?project=<url> (a .pand file: data, charts, styling, Notebook) or
+  // ?example=<id> (a built-in example). A course page or an open-data
+  // portal can then link straight into a chart. The privacy stance holds:
+  // the fetch runs in the reader's own browser and nothing is uploaded. A
+  // confirmation card names the host first, so a link in an email cannot
+  // load anything on its own, and the fetched file rides the ordinary
+  // import path (formats, size gate, the replaced-project offer).
+  function linkRequestFromLocation() {
+    var params;
+    try { params = new URLSearchParams(window.location.search || ""); }
+    catch (e) { return null; }
+    var ex = params.get("example");
+    if (ex && exampleById(ex) && exampleById(ex).id === ex) return { kind: "example", id: ex };
+    var kinds = ["project", "data"];
+    for (var i = 0; i < kinds.length; i++) {
+      var raw = params.get(kinds[i]);
+      if (!raw) continue;
+      var u = null;
+      try { u = new URL(raw, window.location.href); } catch (e2) { u = null; }
+      if (!u || (u.protocol !== "https:" && u.protocol !== "http:")) continue;
+      return { kind: kinds[i], url: u.href };
+    }
+    return null;
+  }
+  function linkHost(url) {
+    try { return new URL(url).host; } catch (e) { return String(url || ""); }
+  }
+  function takeLinkSource() {
+    var src = PENDING_LINK_SOURCE; PENDING_LINK_SOURCE = null;
+    return src || "";
+  }
+  // The query is consumed once: a reload afterwards resumes the autosaved
+  // project instead of asking again.
+  function cleanLinkFromAddress() {
+    try {
+      window.history.replaceState(null, "", window.location.pathname + window.location.hash);
+    } catch (e) {}
+  }
+  var OPEN_LINK_REQ = null;
+  function offerOpenLink(req) {
+    if (req.kind === "example") {
+      cleanLinkFromAddress();
+      try { window.sessionStorage.setItem(PS_WELCOME_SESSION_KEY, "1"); } catch (e) {}
+      openExampleFromEmptyState(req.id);
+      return;
+    }
+    OPEN_LINK_REQ = req;
+    var isProject = req.kind === "project";
+    el("ps-openlink-title").textContent = isProject ? "Open a project from a link?" : "Open data from a link?";
+    el("ps-openlink-sub").textContent = isProject
+      ? "This link points at a Pandion Plots project file: data, charts and notebook."
+      : "This link points at a data file.";
+    el("ps-openlink-host").textContent = linkHost(req.url);
+    el("ps-openlink-url").textContent = req.url;
+    el("ps-openlink-replace").hidden = !projectHasWork();
+    el("ps-openlink-status").textContent = "";
+    el("ps-openlink-open").disabled = false;
+    try { window.sessionStorage.setItem(PS_WELCOME_SESSION_KEY, "1"); } catch (e) {}
+    openShellDialog("ps-openlink-dialog");
+  }
+  function wireOpenLinkDialog() {
+    var dlg = el("ps-openlink-dialog");
+    if (!dlg) return;
+    function dismiss() {
+      closeShellDialog("ps-openlink-dialog");
+      OPEN_LINK_REQ = null;
+      cleanLinkFromAddress();
+      showWelcome(true);
+    }
+    el("ps-openlink-cancel").addEventListener("click", dismiss);
+    dlg.addEventListener("pointerdown", function (e) { if (e.target === this) dismiss(); });
+    dlg.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") { e.preventDefault(); dismiss(); return; }
+      shellTrapTab(this, e);
+    });
+    el("ps-openlink-open").addEventListener("click", function () {
+      if (OPEN_LINK_REQ) openFromLink(OPEN_LINK_REQ);
+    });
+  }
+  function openFromLink(req) {
+    var status = el("ps-openlink-status"), btn = el("ps-openlink-open");
+    btn.disabled = true;
+    status.style.color = "#4a5a6a";
+    status.textContent = "Fetching\u2026";
+    function fail(msg) {
+      status.style.color = "#7a2e2e";
+      status.textContent = msg;
+      btn.disabled = false;
+    }
+    var host = linkHost(req.url);
+    fetch(req.url, { mode: "cors", cache: "no-store" }).then(function (r) {
+      if (!r.ok) throw new Error("The server at " + host + " answered " + r.status + ".");
+      var len = Number(r.headers.get("content-length") || 0);
+      if (len > DATA_REFUSE_BYTES)
+        throw new Error("That file is " + Math.round(len / 1048576) + " MB, too large to read in a browser tab. Save a smaller extract and link to that.");
+      return r.blob();
+    }).then(function (blob) {
+      if (blob.size > DATA_REFUSE_BYTES)
+        throw new Error("That file is " + Math.round(blob.size / 1048576) + " MB, too large to read in a browser tab. Save a smaller extract and link to that.");
+      var name = "";
+      try { name = decodeURIComponent(new URL(req.url).pathname.split("/").pop() || ""); } catch (e) {}
+      if (req.kind === "project") {
+        if (!/\.(pand|pnd|pandion|json)$/i.test(name)) name = (name || "project") + ".pand";
+      } else if (!/\.[a-z0-9]{2,5}$/i.test(name)) name = (name || "data") + ".csv";
+      var file;
+      try { file = new File([blob], name, { type: blob.type || "" }); }
+      catch (e) { file = blob; file.name = name; }
+      PENDING_LINK_SOURCE = req.url;
+      closeShellDialog("ps-openlink-dialog");
+      OPEN_LINK_REQ = null;
+      cleanLinkFromAddress();
+      readPickedFile(file);
+    }).catch(function (e) {
+      var msg = String(e && e.message || e);
+      if (/Failed to fetch|NetworkError|Load failed|TypeError/i.test(msg))
+        msg = "Could not fetch it from " + host + ". The site may not allow other pages to read the file (no CORS header), or the link may be wrong.";
+      fail(msg);
+    });
   }
 
   var SHELL_DIALOG_FOCUS = {};
