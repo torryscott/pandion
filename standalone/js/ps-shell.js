@@ -6319,10 +6319,14 @@
     if (!lines.length) { showToast("No ANOVA rows to keep"); return "unavailable"; }
     var foot = "", foots = pane.querySelectorAll('div[style*="color:#666"]');
     if (foots.length) foot = cellText(foots[foots.length - 1]);
+    // The card's title names the design (the footnote's first clause), so
+    // the footnote itself stays off the card (Torry, Sep 21 2026); the one
+    // thing worth carrying is a sphericity note on Repeated Measures.
     var title = foot ? foot.split(/[,.(]/)[0].trim() : "ANOVA";
+    var gg = foot ? (foot.match(/[^.]*Greenhouse-Geisser[^.]*\.?/) || [""])[0].trim() : "";
     var eyebrow = [statsPanelModuleName(), "Omnibus"].filter(Boolean).join(" \u00b7 ");
     return composeMomentCard(chart, { eyebrow: eyebrow, title: title || "ANOVA",
-                                      paragraphs: lines.concat(foot ? [foot] : []) });
+                                      paragraphs: lines.concat(gg ? [gg] : []) });
   }
   // The Compare pairs tab: the ticked rows, in display order, as one page.
   function tickedPairRows() {

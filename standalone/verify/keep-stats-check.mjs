@@ -70,7 +70,7 @@ ok(pin1 && pin1.eyebrow === 'Compare Groups \u00b7 Omnibus' && /ANOVA/.test(pin1
 const expectLines = omni.rows.map(r => { const p = /^[<>]/.test(r[3]) ? 'p ' + r[3] : 'p = ' + r[3]; return r[0] + ': F(' + r[2] + ') = ' + r[1] + ', ' + p + (r[4] && r[4] !== '—' ? ', ' + omni.heads[4] + ' = ' + r[4] : ''); });
 const textLines = pin1 ? pin1.text.split('\n') : [];
 ok(expectLines.every(l => textLines.includes(l)), '1: every effect row is kept verbatim from the table (' + expectLines[0] + ' ...)');
-ok(textLines.some(l => /Type III/.test(l)), '1: the model footnote rides along');
+ok(!textLines.some(l => /Type III|visible chart/.test(l)) && pin1.title === 'Two-way ANOVA with interaction', '1: the footnote stays off the card; the title names the design (' + pin1.title + ')');
 ok(pin1 && omni.sig >= 1 && pin1.chips === omni.sig, '1: the significance chip is drawn on the page for each significant effect (' + (pin1 && pin1.chips) + ' of ' + omni.sig + ')');
 ok(pin1 && pin1.svgStart === '<svg ' && pin1.srcHasCard && pin1.srcHasChart, '1: the page image is one svg carrying the chart and the card text');
 // ---- 2. Keep ticked on Compare pairs
