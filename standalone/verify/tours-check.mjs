@@ -93,10 +93,10 @@ const encloses = (spot, t, pad = 8) => !!(spot && t && spot.l <= t.l + 1 && spot
     });
     const started = await page.evaluate(() => window.PS_TOURS && window.PS_TOURS.start('charts'));
     await page.waitForTimeout(500);
-    let s = await page.evaluate(snap, '#psroot svg[data-role="gb2-chart-svg"]');
+    let s = await page.evaluate(snap, '#ps-slots');
     ok(started === true && s.open && s.active && s.active.id === 'charts' && s.active.step === 0, '1: the Charts tour opens on its first card (' + JSON.stringify(s.active) + ')');
-    ok(/^Charts tour . 1 of \d$/.test(s.eyebrow) && /click the thing/.test(s.body), '1: the first card is the click-the-thing rule (' + s.eyebrow + ')');
-    ok(s.spotShown && encloses(s.spot, s.target), '1: the spotlight encloses the chart');
+    ok(/^Charts tour . 1 of \d$/.test(s.eyebrow) && s.title === 'Chart setup', '1: the first card is the setup rail (' + s.eyebrow + ')');
+    ok(s.spotShown && encloses(s.spot, s.target), '1: the spotlight encloses the setup rail');
     ok(s.backOff === true && s.next === 'Next', '1: Back is off on the first card, Next reads Next');
     ok(s.focus === 'ps-tour-next', '1: focus lands on Next');
     // walk forward with the mouse, checking each landmark's spotlight
@@ -104,14 +104,14 @@ const encloses = (spot, t, pad = 8) => !!(spot && t && spot.l <= t.l + 1 && spot
     // the eye): the spotlight must enclose EVERY named element and hug the
     // union of them, not any one of them.
     const expect = [
-        { title: 'Chart setup', sels: ['#ps-slots'] },
-        { title: 'Type and colors', sels: ['[data-role="graphtype-trigger"]', '[data-role="palette-trigger"]'] },
+        { title: 'One rule runs this room', sels: ['#psroot svg[data-role="gb2-chart-svg"]'] },
+        { title: 'Type and theme', sels: ['[data-role="graphtype-trigger"]', '[data-role="palette-trigger"]'] },
         { title: 'The numbers', sels: ['button[aria-label="Statistics"]'] },
-        { title: 'Hide and restore', sels: ['button[aria-label$="hide elements"]'] },
-        { title: 'Settings, and finding one', sels: ['button[aria-label="Chart settings"]', '[data-role="setting-search-trigger"]'] },
+        { title: 'Hide, settings, find', sels: ['button[aria-label$="hide elements"]', 'button[aria-label="Chart settings"]', '[data-role="setting-search-trigger"]'] },
         { title: 'Add to the chart', sels: ['button[aria-label="Add to chart"]'] },
-        { title: 'The teaching corner', sels: ['[data-ps-menu="help"]'] },
-        { title: 'The other rooms', sels: ['.ps-workspace-switcher'] }
+        { title: 'Check my chart', sels: ['#ps-status-check'] },
+        { title: 'Export', sels: ['#ps-export'] },
+        { title: 'Which graph?', sels: ['[data-ps-menu="help"]'] }
     ];
     const union = (rs) => rs.reduce((u, r) => ({ l: Math.min(u.l, r.l), t: Math.min(u.t, r.t), r: Math.max(u.r, r.r), b: Math.max(u.b, r.b) }), { l: Infinity, t: Infinity, r: -Infinity, b: -Infinity });
     for (const e of expect) {
@@ -123,8 +123,8 @@ const encloses = (spot, t, pad = 8) => !!(spot && t && spot.l <= t.l + 1 && spot
     }
     ok(s.next === 'Done' && /9 of 9/.test(s.eyebrow), '2: the last card reads Done (' + s.eyebrow + ')');
     await page.click('#ps-tour-back'); await page.waitForTimeout(320);
-    s = await page.evaluate(snap, '[data-ps-menu="help"]');
-    ok(s.title === 'The teaching corner' && encloses(s.spot, s.target), '2: Back returns to the previous card with its spotlight');
+    s = await page.evaluate(snap, '#ps-export');
+    ok(s.title === 'Export' && encloses(s.spot, s.target), '2: Back returns to the previous card with its spotlight');
     // 4: rebuild the toolbar under the Sigma card and watch the spot follow
     for (let i = 0; i < 4; i++) await page.click('#ps-tour-back'); await page.waitForTimeout(320);
     const before = await page.evaluate(() => { const b = Array.from(document.querySelectorAll('button[aria-label="Statistics"]')).find(x => x.getBoundingClientRect().width > 0); b.__probeMark = 1; return document.getElementById('ps-tour-title').textContent; });
@@ -139,7 +139,7 @@ const encloses = (spot, t, pad = 8) => !!(spot && t && spot.l <= t.l + 1 && spot
     // 3: keyboard
     await page.keyboard.press('ArrowRight'); await page.waitForTimeout(250);
     s = await page.evaluate(snap, 'button[aria-label$="hide elements"]');
-    ok(s.title === 'Hide and restore', '3: Right arrow advances (' + s.title + ')');
+    ok(s.title === 'Hide, settings, find', '3: Right arrow advances (' + s.title + ')');
     await page.keyboard.press('ArrowLeft'); await page.waitForTimeout(250);
     s = await page.evaluate(snap, 'button[aria-label="Statistics"]');
     ok(s.title === 'The numbers', '3: Left arrow goes back (' + s.title + ')');

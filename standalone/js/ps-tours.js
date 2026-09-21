@@ -340,34 +340,37 @@
       fail(state === "none" ? "Create a chart first, then take the tour."
                             : "Assign variables so this chart draws, then take the tour.");
     },
+    // The stops follow the Sep 19 2026 write-up in the Craft item, in its
+    // order: the setup rail, the chart, the toolbar left to right, the
+    // receipt in the status line, Export, and the Help menu to close.
     steps: [
-      { target: ['#psroot svg[data-role="gb2-chart-svg"]', "#psroot svg"],
-        title: "One rule runs this room",
-        body: "To change a thing, click the thing. Bars, axes, titles, the legend: each opens its own small panel with only its settings." },
       { target: "#ps-slots", optional: true,
         title: "Chart setup",
-        body: "Variables go into roles here, and the chart redraws as you fill them. The analysis itself is chosen here too." },
+        body: "Pick an Analysis, then drop a variable on each role. The roles are named by what they do: Category axis, Value axis. The chart redraws as you fill them." },
+      { target: ['#psroot svg[data-role="gb2-chart-svg"]', "#psroot svg"],
+        title: "One rule runs this room",
+        body: "To change a thing, click the thing. A bar, a label, an axis, the legend: each opens its own small editor with only its settings." },
       { target: ['[data-role="graphtype-trigger"]', '[data-role="palette-trigger"]'],
-        title: "Type and colors",
-        body: "The toolbar's left end says what kind of chart this is. Click it to switch types. The palette chip beside it recolors everything at once." },
+        title: "Type and theme",
+        body: "The toolbar's left end says what kind of chart this is. Click it to switch types without losing your styling. Theme holds the palettes and any looks you have saved." },
       { target: 'button[aria-label="Statistics"]',
         title: "The numbers",
-        body: "Sigma opens the statistics panel: the numbers behind the chart, comparisons between groups, and a button that places significance brackets." },
-      { target: 'button[aria-label$="hide elements"]',
-        title: "Hide and restore",
-        body: "The eye hides parts of the chart and brings them back. Anything you hide is listed there, so nothing goes missing for good." },
-      { target: ['button[aria-label="Chart settings"]', '[data-role="setting-search-trigger"]'],
-        title: "Settings, and finding one",
-        body: "Chart settings holds the whole-chart options: fonts, background, the vision check. Find a setting searches every setting by name when you cannot remember where one lives." },
+        body: "Stats opens the statistics panel: the numbers behind the chart, comparisons between groups with brackets you can place, and Keep, which sends a result to the Notebook." },
+      { target: ['button[aria-label$="hide elements"]', 'button[aria-label="Chart settings"]', '[data-role="setting-search-trigger"]'],
+        title: "Hide, settings, find",
+        body: "The eye hides parts of the chart and brings them back. Settings holds the whole-chart options. Find searches every setting by name when you cannot remember where one lives." },
       { target: 'button[aria-label="Add to chart"]',
         title: "Add to the chart",
-        body: "Plus adds things: error bars, value labels, reference lines, brackets, shapes. Each one opens its own panel once it is on the chart." },
+        body: "Add puts things on the chart: error bars, data points, reference lines, brackets. Each opens its own panel once it is there." },
+      { target: "#ps-status-check", optional: true,
+        title: "Check my chart",
+        body: "The receipt at the bottom: every chart is checked for things that mislead, like a cut axis or colors that merge. Click it to read the list." },
+      { target: "#ps-export", optional: true,
+        title: "Export",
+        body: "Export gives PDF, PNG and SVG at the chart's real size. Fit window on the toolbar only changes how big it looks here; the grip at the chart's corner sets the size that exports." },
       { target: '[data-ps-menu="help"]', optional: true,
-        title: "The teaching corner",
-        body: "The Help menu is where the teaching lives: which graph fits your question, a check of this chart for problems, the glossary, and these tours." },
-      { target: ".ps-workspace-switcher", optional: true,
-        title: "The other rooms",
-        body: "Data, Notebook and Layouts are the other workspaces, on the left. The habit to take with you: click any part of the chart and read the panel that opens." }
+        title: "Which graph?",
+        body: "Not sure which chart fits your data? Which graph should I use? lives in the Help menu, with Check my chart, the glossary, and these tours." }
     ]
   };
 
