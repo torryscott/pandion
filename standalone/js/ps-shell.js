@@ -6092,24 +6092,87 @@
   // file:// is the portable app's whole life. Shell-only; the button is
   // injected into the engine's card by the observer below (the help-copy
   // retarget pattern) and the engine is untouched.
-  function composeComparisonMoment() {
-    var card = document.querySelector('[data-role="st-focus-card"]');
-    var host = document.querySelector(".graphbuilder2-host");
-    if (!card || !host) { showToast("Pin a comparison first"); return "unavailable"; }
-    var svgs = host.querySelectorAll("svg");
-    var chart = null, area = 0;
-    for (var i = 0; i < svgs.length; i++) {
-      var r = svgs[i].getBoundingClientRect();
-      if (r.width * r.height > area) { area = r.width * r.height; chart = svgs[i]; }
-    }
-    if (!chart) { showToast("No chart to copy"); return "unavailable"; }
+  // The chart on top, a statistics card underneath, one svg: the shape of
+  // every Notebook "moment". `text` is { eyebrow, title, paragraphs[] };
+  // paragraphs render as separate wrapped blocks (an ANOVA keeps one line
+  // per effect, a multi-row keep one per comparison), and the same text
+  // rides the page as DATA so the rail shows it readable (Sep 21 2026,
+  // Torry: keep the ANOVA and several comparisons with the chart).
+  function composeMomentCard(chart, text) {
     var w = Math.round(parseFloat(chart.getAttribute("width")) ||
                        chart.getBoundingClientRect().width);
     var h = Math.round(parseFloat(chart.getAttribute("height")) ||
                        chart.getBoundingClientRect().height);
     var rings = chart.querySelectorAll(
       '[data-role="stats-link-halo"] rect, [data-role="stats-link-halo"] circle').length;
-    // Mine the card's three pieces; the buttons are controls, not finding.
+    var eyebrow = exportSafeText(text.eyebrow || ""), title = exportSafeText(text.title || "");
+    var paragraphs = (text.paragraphs || []).map(function (t) {
+      return exportSafeText(String(t || "")).replace(/\s+/g, " ").trim();
+    }).filter(Boolean);
+    var pad = 12, cardW = Math.max(160, w - pad * 2), innerW = cardW - 26;
+    var mctx = document.createElement("canvas").getContext("2d");
+    var FONT = "-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+    function wrapText(t, font, maxW) {
+      if (!t) return [];
+      mctx.font = font;
+      var words = t.split(" "), lines = [], cur = "";
+      for (var wi = 0; wi < words.length; wi++) {
+        var probe = cur ? cur + " " + words[wi] : words[wi];
+        if (mctx.measureText(probe).width > maxW && cur) { lines.push(cur); cur = words[wi]; }
+        else cur = probe;
+      }
+      if (cur) lines.push(cur);
+      return lines;
+    }
+    function esc(t) {
+      return t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+    var eyeLines = wrapText(eyebrow.toUpperCase(), "10px " + FONT, innerW);
+    var titleLines = wrapText(title, "600 13px " + FONT, innerW);
+    var parts = [], ty = 18;
+    for (var e1 = 0; e1 < eyeLines.length; e1++, ty += 14)
+      parts.push('<text x="14" y="' + ty + '" font-size="10" fill="#5b6b7c" letter-spacing="0.4">' + esc(eyeLines[e1]) + "</text>");
+    ty += 3;
+    for (var t1 = 0; t1 < titleLines.length; t1++, ty += 17)
+      parts.push('<text x="14" y="' + ty + '" font-size="13" font-weight="600" fill="#1c2b3a">' + esc(titleLines[t1]) + "</text>");
+    ty += 4;
+    for (var pi = 0; pi < paragraphs.length; pi++) {
+      var bodyLines = wrapText(paragraphs[pi], "12px " + FONT, innerW);
+      for (var b1 = 0; b1 < bodyLines.length; b1++, ty += 16)
+        parts.push('<text x="14" y="' + ty + '" font-size="12" fill="#22364d">' + esc(bodyLines[b1]) + "</text>");
+      if (pi < paragraphs.length - 1) ty += 5;
+    }
+    var cardH = ty + 2;
+    var chartClone = chart.cloneNode(true);
+    stripHoverFromClone(chartClone);
+    stripEditorChromeFromClone(chartClone);
+    chartClone.removeAttribute("tabindex");
+    chartClone.removeAttribute("aria-label");
+    chartClone.setAttribute("x", "0");
+    chartClone.setAttribute("y", "0");
+    stampPinFonts(chartClone, chart);
+    var totalH = h + pad + cardH + pad;
+    var composed =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + totalH +
+      '" viewBox="0 0 ' + w + " " + totalH + '">' +
+      "<!-- " + appStamp() + " -->" +
+      '<rect x="0" y="0" width="' + w + '" height="' + totalH + '" fill="#ffffff"/>' +
+      serializeExportSvg(chartClone) +
+      '<g transform="translate(' + pad + "," + (h + pad) + ')" font-family="' +
+      FONT.replace(/"/g, "&quot;") + '">' +
+      '<rect x="0" y="0" width="' + cardW + '" height="' + cardH +
+      '" rx="6" fill="#eef4fc" stroke="#cfe0f5"/>' +
+      '<rect x="0" y="0" width="3" height="' + cardH + '" fill="#3573bd"/>' +
+      parts.join("") + "</g></svg>";
+    return { svg: composed, w: w, h: totalH, rings: rings,
+             prov: pinProvenance(chart),
+             text: { eyebrow: eyebrow, title: title, body: paragraphs.join("\n") } };
+  }
+  // The pinned comparison's focus card, mined into the card text.
+  function composeComparisonMoment() {
+    var card = document.querySelector('[data-role="st-focus-card"]');
+    var chart = liveChartSvg();
+    if (!card || !chart) { showToast("Pin a comparison first"); return "unavailable"; }
     function textOf(node) {
       return node ? exportSafeText(node.textContent || "").replace(/\s+/g, " ").trim() : "";
     }
@@ -6135,67 +6198,110 @@
       }
       body = textOf(clone);
     })();
-    var pad = 12, cardW = Math.max(160, w - pad * 2), innerW = cardW - 26;
-    var mctx = document.createElement("canvas").getContext("2d");
-    var FONT = "-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
-    function wrapText(text, font, maxW) {
-      if (!text) return [];
-      text = exportSafeText(text);
-      mctx.font = font;
-      var words = text.split(" "), lines = [], cur = "";
-      for (var wi = 0; wi < words.length; wi++) {
-        var probe = cur ? cur + " " + words[wi] : words[wi];
-        if (mctx.measureText(probe).width > maxW && cur) { lines.push(cur); cur = words[wi]; }
-        else cur = probe;
-      }
-      if (cur) lines.push(cur);
-      return lines;
-    }
-    function esc(s) {
-      return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    }
-    var eyeLines = wrapText(eyebrow.toUpperCase(), "10px " + FONT, innerW);
-    var titleLines = wrapText(title, "600 13px " + FONT, innerW);
-    var bodyLines = wrapText(body, "12px " + FONT, innerW);
-    var parts = [], ty = 18;
-    for (var e1 = 0; e1 < eyeLines.length; e1++, ty += 14)
-      parts.push('<text x="14" y="' + ty + '" font-size="10" fill="#5b6b7c" letter-spacing="0.4">' + esc(eyeLines[e1]) + "</text>");
-    ty += 3;
-    for (var t1 = 0; t1 < titleLines.length; t1++, ty += 17)
-      parts.push('<text x="14" y="' + ty + '" font-size="13" font-weight="600" fill="#1c2b3a">' + esc(titleLines[t1]) + "</text>");
-    ty += 4;
-    for (var b1 = 0; b1 < bodyLines.length; b1++, ty += 16)
-      parts.push('<text x="14" y="' + ty + '" font-size="12" fill="#22364d">' + esc(bodyLines[b1]) + "</text>");
-    var cardH = ty + 2;
-    var chartClone = chart.cloneNode(true);
-    stripHoverFromClone(chartClone);
-    stripEditorChromeFromClone(chartClone);
-    chartClone.removeAttribute("tabindex");
-    chartClone.removeAttribute("aria-label");
-    chartClone.setAttribute("x", "0");
-    chartClone.setAttribute("y", "0");
-    stampPinFonts(chartClone, chart);
-    var totalH = h + pad + cardH + pad;
-    var composed =
-      '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + totalH +
-      '" viewBox="0 0 ' + w + " " + totalH + '">' +
-      "<!-- " + appStamp() + " -->" +
-      '<rect x="0" y="0" width="' + w + '" height="' + totalH + '" fill="#ffffff"/>' +
-      serializeExportSvg(chartClone) +
-      '<g transform="translate(' + pad + "," + (h + pad) + ')" font-family="' +
-      FONT.replace(/"/g, "&quot;") + '">' +
-      '<rect x="0" y="0" width="' + cardW + '" height="' + cardH +
-      '" rx="6" fill="#eef4fc" stroke="#cfe0f5"/>' +
-      '<rect x="0" y="0" width="3" height="' + cardH + '" fill="#3573bd"/>' +
-      parts.join("") + "</g></svg>";
-    return { svg: composed, w: w, h: totalH, rings: rings,
-             prov: pinProvenance(chart),
-             // the mined card text rides as DATA so the rail can show the
-             // statistics READABLE, not just baked into the image
-             text: { eyebrow: eyebrow, title: title, body: body } };
+    return composeMomentCard(chart, { eyebrow: eyebrow, title: title, paragraphs: [body] });
   }
-  function copyComparisonMoment() {
-    var made = composeComparisonMoment();
+  // Shared by the Omnibus and multi-row keeps: what the Statistics panel
+  // calls this chart's analysis ("Compare Groups"), read off its title bar.
+  function statsPanelModuleName() {
+    // The title bar's crumb is "<module> / Statistics"; the module is its
+    // first span.
+    var crumb = document.querySelector('[data-gb2-inspector] [data-role="inspector-title"] [data-role="gb2-crumb"] > span');
+    var name = crumb ? (crumb.textContent || "").replace(/\s+/g, " ").trim() : "";
+    return name.length > 40 ? "" : name;
+  }
+  function cellText(node) {
+    return node ? (node.textContent || "").replace(/\s+/g, " ").trim() : "";
+  }
+  function pWord(cell) {
+    // ".202" -> "p = .202"; "< .001" -> "p < .001"
+    if (!cell) return "";
+    return /^[<>]/.test(cell) ? "p " + cell : "p = " + cell;
+  }
+  // The Omnibus tab: every effect row (main effects, the interaction) plus
+  // the model footnote (the design, Type III, a Greenhouse-Geisser note on
+  // Repeated Measures) become one page with the chart.
+  function composeOmnibusMoment() {
+    var pane = document.querySelector('[data-gb2-inspector] [data-st-pane="omnibus"]');
+    var table = pane && pane.querySelector("table");
+    var chart = liveChartSvg();
+    if (!table || !chart) { showToast("Open the Omnibus tab first"); return "unavailable"; }
+    var heads = Array.prototype.map.call(table.querySelectorAll("th"), cellText);
+    var effSym = heads[4] || "";
+    var lines = [];
+    var rows = table.querySelectorAll("tr");
+    for (var i = 0; i < rows.length; i++) {
+      var tds = rows[i].querySelectorAll("td");
+      if (tds.length < 4) continue;
+      var effect = cellText(tds[0]), F = cellText(tds[1]), df = cellText(tds[2]), pv = cellText(tds[3]);
+      var eff = tds.length > 4 ? cellText(tds[4]) : "";
+      if (!effect || !F) continue;
+      var line = effect + ": F(" + df + ") = " + F + ", " + pWord(pv);
+      if (eff && eff !== "\u2014" && effSym) line += ", " + effSym + " = " + eff;
+      lines.push(line);
+    }
+    if (!lines.length) { showToast("No ANOVA rows to keep"); return "unavailable"; }
+    var foot = "", foots = pane.querySelectorAll('div[style*="color:#666"]');
+    if (foots.length) foot = cellText(foots[foots.length - 1]);
+    var title = foot ? foot.split(/[,.(]/)[0].trim() : "ANOVA";
+    var eyebrow = [statsPanelModuleName(), "Omnibus"].filter(Boolean).join(" \u00b7 ");
+    return composeMomentCard(chart, { eyebrow: eyebrow, title: title || "ANOVA",
+                                      paragraphs: lines.concat(foot ? [foot] : []) });
+  }
+  // The Compare pairs tab: the ticked rows, in display order, as one page.
+  function tickedPairRows() {
+    var pane = document.querySelector('[data-gb2-inspector] [data-st-pane="pairs"]');
+    if (!pane) return [];
+    var out = [];
+    var cbs = pane.querySelectorAll("input[data-cmp-cb]");
+    for (var i = 0; i < cbs.length; i++) {
+      if (!cbs[i].checked) continue;
+      var tr = cbs[i].closest("tr");
+      if (tr) out.push(tr);
+    }
+    return out;
+  }
+  function pairRowLine(tr) {
+    var section = "";
+    for (var prev = tr.previousElementSibling; prev; prev = prev.previousElementSibling) {
+      var hdr = prev.querySelector("td[colspan]");
+      if (!hdr) continue;
+      var clone = hdr.cloneNode(true);
+      var strip = clone.querySelectorAll("[data-cmp-chev], [data-cmp-tally], button");
+      for (var k = strip.length - 1; k >= 0; k--)
+        if (strip[k].parentNode) strip[k].parentNode.removeChild(strip[k]);
+      section = cellText(clone).replace(/\s*\u00b7.*$/, "");
+      break;
+    }
+    var tds = tr.querySelectorAll("td"), c = [];
+    for (var i = 0; i < tds.length; i++) {
+      if (tds[i].querySelector("input[data-cmp-cb]")) continue;
+      c.push(cellText(tds[i]));
+    }
+    // [comparison, test, statistic, p, p(adj), effect]
+    var line = (section ? section + ": " : "") + (c[0] || "");
+    if (c[1]) line += ". " + c[1];
+    if (c[2]) line += ", " + c[2];
+    if (c[3]) line += ", " + pWord(c[3]);
+    if (c[4] && c[4] !== "\u2014") line += " (adjusted " + c[4] + ")";
+    if (c[5] && c[5] !== "\u2014") line += ", " + c[5];
+    return line;
+  }
+  function composeTickedMoment() {
+    var rows = tickedPairRows();
+    var chart = liveChartSvg();
+    if (!rows.length || !chart) { showToast("Tick the comparisons to keep first"); return "unavailable"; }
+    var lines = rows.map(pairRowLine);
+    var pane = document.querySelector('[data-gb2-inspector] [data-st-pane="pairs"]');
+    var tally = pane && pane.querySelector("[data-cmp-tally]");
+    var eyebrow = [statsPanelModuleName(), "Compare pairs"].filter(Boolean).join(" \u00b7 ");
+    var title = rows.length === 1 ? "1 comparison" : rows.length + " comparisons";
+    var paragraphs = lines.slice();
+    if (tally) paragraphs.push(cellText(tally));
+    return composeMomentCard(chart, { eyebrow: eyebrow, title: title, paragraphs: paragraphs });
+  }
+  function copyComparisonMoment() { return copyMomentMade(composeComparisonMoment()); }
+  function copyOmnibusMoment() { return copyMomentMade(composeOmnibusMoment()); }
+  function copyMomentMade(made) {
     if (typeof made === "string") return Promise.resolve(made);
     var blocked = copyImageBlockedReason();
     if (blocked) {
@@ -6844,13 +6950,21 @@
     showActionToast("Kept " + what + " to " + board.name, "Open",
       function () { setAppWorkspace("pinboard"); });
   }
-  function keepComparisonMoment() {
-    var made = composeComparisonMoment();
+  function keepMomentMade(made, what) {
     if (typeof made === "string") return Promise.resolve(made);
-    pushPin(made.svg, made.w, made.h, "the comparison", null, made.prov,
+    pushPin(made.svg, made.w, made.h, what, null, made.prov,
       { momEyebrow: made.text.eyebrow, momTitle: made.text.title,
         momText: made.text.body });
     return Promise.resolve("kept");
+  }
+  function keepComparisonMoment() {
+    return keepMomentMade(composeComparisonMoment(), "the comparison");
+  }
+  function keepOmnibusMoment() {
+    return keepMomentMade(composeOmnibusMoment(), "the ANOVA");
+  }
+  function keepTickedMoment() {
+    return keepMomentMade(composeTickedMoment(), "the comparisons");
   }
   // "Pin to Pinboard" on the chart's own right-click (Torry, Aug 1 2026):
   // just the graph, no stats card - whatever is on it, rings included.
@@ -6926,11 +7040,81 @@
       row.appendChild(btn);
       card.appendChild(row);
     }
+    function momentBtn(label, tip, primary, attr) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute(attr, "1");
+      b.textContent = label;
+      setTip(b, tip);
+      b.style.cssText = "-webkit-appearance:none;appearance:none;font:inherit;" +
+        "font-size:10.5px;border-radius:10px;cursor:pointer;margin-right:6px;" +
+        (primary ? "color:#fff;background:#3573bd;border:1px solid #3573bd;padding:1px 11px;"
+                 : "color:#3573bd;background:#fff;border:1px solid #cfe0f5;padding:1px 9px;");
+      return b;
+    }
+    // The Omnibus card has no focus card (its rows point at no chart cell,
+    // so nothing pins), which is why it could not be kept (Torry, Sep 21
+    // 2026). Its Keep takes the whole table: every effect plus the model
+    // footnote, with the chart, as one page.
+    function injectOmnibus() {
+      var pane = document.querySelector(
+        '[data-gb2-inspector] [data-st-pane="omnibus"]:not([data-ps-moment])');
+      if (!pane) return;
+      var table = pane.querySelector("table");
+      if (!table || !table.querySelector("td")) return;   // a refusal: nothing to keep
+      pane.setAttribute("data-ps-moment", "1");
+      var row = document.createElement("div");
+      row.style.cssText = "margin-top:8px;";
+      var keep = momentBtn("Keep", "Keep the ANOVA table with the chart in the " +
+        "Notebook - every effect and the model note as one page", true, "data-ps-moment-keep-omni");
+      keep.addEventListener("click", function (e) { e.stopPropagation(); keepOmnibusMoment(); });
+      var copy = momentBtn("Copy with chart", "Copy the ANOVA table and the chart as one image",
+        false, "data-ps-moment-copy-omni");
+      copy.addEventListener("click", function (e) { e.stopPropagation(); copyOmnibusMoment(); });
+      row.appendChild(keep); row.appendChild(copy);
+      pane.appendChild(row);
+    }
+    // Compare pairs: the checkboxes already say which rows matter (they
+    // feed Place brackets), so Keep ticked keeps exactly those, in table
+    // order, as one page - main effects and interactions of the same chart
+    // travel together.
+    function injectTicked() {
+      var pane = document.querySelector('[data-gb2-inspector] [data-st-pane="pairs"]');
+      if (!pane) return;
+      var copyBtn = pane.querySelector('[data-st-act="cmpcopy"]');
+      if (!copyBtn || !copyBtn.parentNode) return;
+      var rowEl = copyBtn.parentNode;
+      var keep = rowEl.querySelector("[data-ps-moment-keep-ticked]");
+      if (!keep) {
+        keep = momentBtn("Keep ticked", "", true, "data-ps-moment-keep-ticked");
+        keep.style.marginLeft = "6px";
+        keep.addEventListener("click", function (e) { e.stopPropagation(); keepTickedMoment(); });
+        rowEl.appendChild(keep);
+        pane.addEventListener("change", function (e) {
+          if (e.target && e.target.matches && e.target.matches("input[data-cmp-cb]")) sync();
+        });
+      }
+      function sync() {
+        var n = tickedPairRows().length;
+        keep.disabled = n === 0;
+        keep.style.opacity = n === 0 ? "0.5" : "1";
+        keep.textContent = n > 1 ? "Keep ticked (" + n + ")" : "Keep ticked";
+        setTip(keep, n === 0
+          ? "Tick the comparisons to keep, then press Keep ticked: they land in the Notebook as one page with the chart"
+          : "Keep the " + (n === 1 ? "ticked comparison" : n + " ticked comparisons") +
+            " with the chart in the Notebook as one page");
+      }
+      sync();
+    }
     var pending = false;
     var mo = new MutationObserver(function () {
       if (pending) return;
       pending = true;
-      window.setTimeout(function () { pending = false; inject(); }, 0);
+      window.setTimeout(function () {
+        pending = false;
+        inject();
+        try { injectOmnibus(); injectTicked(); } catch (ignore) {}
+      }, 0);
     });
     mo.observe(document.body, { childList: true, subtree: true });
   })();
