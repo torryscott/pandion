@@ -6106,23 +6106,79 @@
     var rings = chart.querySelectorAll(
       '[data-role="stats-link-halo"] rect, [data-role="stats-link-halo"] circle').length;
     var eyebrow = exportSafeText(text.eyebrow || ""), title = exportSafeText(text.title || "");
-    var paragraphs = (text.paragraphs || []).map(function (t) {
-      return exportSafeText(String(t || "")).replace(/\s+/g, " ").trim();
-    }).filter(Boolean);
+    // A paragraph is a string, or a list of runs [{ t, chip }]: a chip run
+    // is drawn on the small green box the Statistics panel puts on a
+    // deciding p below the alpha (Torry, Sep 21 2026: the significance
+    // chip belongs on the kept page too). Chip runs never wrap.
+    var paragraphs = (text.paragraphs || []).map(function (para) {
+      var runs = Array.isArray(para) ? para : [{ t: String(para == null ? "" : para) }];
+      return runs.map(function (r) {
+        return { t: exportSafeText(String(r.t || "")).replace(/\s+/g, " "), chip: !!r.chip };
+      }).filter(function (r) { return r.t; });
+    }).filter(function (runs) { return runs.length; });
     var pad = 12, cardW = Math.max(160, w - pad * 2), innerW = cardW - 26;
     var mctx = document.createElement("canvas").getContext("2d");
     var FONT = "-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
     function wrapText(t, font, maxW) {
-      if (!t) return [];
+      return wrapRuns([{ t: t }], font, maxW).map(function (line) {
+        return line.map(function (w) { return w.t; }).join(" ");
+      });
+    }
+    // Word-wrap a run list; a chip run is one unbreakable word. Returns
+    // lines of words [{ t, chip, glue }]; a glued word follows the previous
+    // one with no space (", " after a chip, "." after a name), so the run
+    // boundaries never leak stray spaces into the drawn line.
+    function wrapRuns(runs, font, maxW) {
       mctx.font = font;
-      var words = t.split(" "), lines = [], cur = "";
+      var words = [], prevEndsSpace = true;
+      for (var ri = 0; ri < runs.length; ri++) {
+        var t = runs[ri].t, startsSpace = /^\s/.test(t), endsSpace = /\s$/.test(t);
+        var parts = runs[ri].chip ? [t.trim()] : t.trim().split(/\s+/);
+        for (var pi = 0; pi < parts.length; pi++) {
+          if (!parts[pi]) continue;
+          words.push({ t: parts[pi], chip: !!runs[ri].chip,
+                       glue: pi === 0 && words.length > 0 && !startsSpace && !prevEndsSpace });
+        }
+        prevEndsSpace = endsSpace;
+      }
+      var lines = [], cur = [];
+      function widthOf(ws) {
+        var w = 0;
+        for (var i = 0; i < ws.length; i++) {
+          if (i && !ws[i].glue) w += mctx.measureText(" ").width;
+          w += mctx.measureText(ws[i].t).width + (ws[i].chip ? CHIP_PAD * 2 : 0);
+        }
+        return w;
+      }
       for (var wi = 0; wi < words.length; wi++) {
-        var probe = cur ? cur + " " + words[wi] : words[wi];
-        if (mctx.measureText(probe).width > maxW && cur) { lines.push(cur); cur = words[wi]; }
+        var probe = cur.concat([words[wi]]);
+        if (widthOf(probe) > maxW && cur.length) { lines.push(cur); cur = [words[wi]]; }
         else cur = probe;
       }
-      if (cur) lines.push(cur);
+      if (cur.length) lines.push(cur);
       return lines;
+    }
+    var CHIP_PAD = 4;
+    // One text line, with a rounded green box behind each chip word.
+    function lineSvg(words, y, font, fontPx, fill, extra) {
+      mctx.font = font;
+      var x = 14, out = [], tspans = [];
+      for (var wi = 0; wi < words.length; wi++) {
+        var w = words[wi], tw = mctx.measureText(w.t).width;
+        if (wi && !w.glue) x += mctx.measureText(" ").width;
+        if (w.chip) {
+          out.push('<rect data-role="sig-chip" x="' + (x - 0.5).toFixed(1) + '" y="' + (y - fontPx + 1).toFixed(1) +
+            '" width="' + (tw + CHIP_PAD * 2).toFixed(1) + '" height="' + (fontPx + 5).toFixed(1) +
+            '" rx="3" fill="#e9f4df" stroke="#c8e0b8"/>');
+          tspans.push('<tspan x="' + (x + CHIP_PAD).toFixed(1) + '">' + esc(w.t) + "</tspan>");
+          x += tw + CHIP_PAD * 2;
+        } else {
+          tspans.push('<tspan x="' + x.toFixed(1) + '">' + esc(w.t) + "</tspan>");
+          x += tw;
+        }
+      }
+      out.push('<text y="' + y + '" font-size="' + fontPx + '" fill="' + fill + '"' + (extra || "") + ">" + tspans.join("") + "</text>");
+      return out.join("");
     }
     function esc(t) {
       return t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -6137,9 +6193,9 @@
       parts.push('<text x="14" y="' + ty + '" font-size="13" font-weight="600" fill="#1c2b3a">' + esc(titleLines[t1]) + "</text>");
     ty += 4;
     for (var pi = 0; pi < paragraphs.length; pi++) {
-      var bodyLines = wrapText(paragraphs[pi], "12px " + FONT, innerW);
+      var bodyLines = wrapRuns(paragraphs[pi], "12px " + FONT, innerW);
       for (var b1 = 0; b1 < bodyLines.length; b1++, ty += 16)
-        parts.push('<text x="14" y="' + ty + '" font-size="12" fill="#22364d">' + esc(bodyLines[b1]) + "</text>");
+        parts.push(lineSvg(bodyLines[b1], ty, "12px " + FONT, 12, "#22364d"));
       if (pi < paragraphs.length - 1) ty += 5;
     }
     var cardH = ty + 2;
@@ -6166,7 +6222,10 @@
       parts.join("") + "</g></svg>";
     return { svg: composed, w: w, h: totalH, rings: rings,
              prov: pinProvenance(chart),
-             text: { eyebrow: eyebrow, title: title, body: paragraphs.join("\n") } };
+             text: { eyebrow: eyebrow, title: title,
+                     body: paragraphs.map(function (runs) {
+                       return runs.map(function (r) { return r.t; }).join("");
+                     }).join("\n") } };
   }
   // The pinned comparison's focus card, mined into the card text.
   function composeComparisonMoment() {
@@ -6198,7 +6257,24 @@
       }
       body = textOf(clone);
     })();
-    return composeMomentCard(chart, { eyebrow: eyebrow, title: title, paragraphs: [body] });
+    var para = [{ t: body }];
+    // The card's deciding p wears the panel's green inline (no marker
+    // attribute there), so recognise it by that green.
+    var chipEl = card.querySelector("[data-cmp-sig]");
+    if (!chipEl) {
+      var spans = card.querySelectorAll("[data-st-fsentence] span");
+      for (var si = 0; si < spans.length && !chipEl; si++) {
+        var st = spans[si].getAttribute("style") || "";
+        if (/e9f4df/i.test(st) ||
+            window.getComputedStyle(spans[si]).backgroundColor === "rgb(233, 244, 223)")
+          chipEl = spans[si];
+      }
+    }
+    var chipText = chipEl ? textOf(chipEl) : "";
+    var at = chipText ? body.indexOf(chipText) : -1;
+    if (at !== -1)
+      para = [{ t: body.slice(0, at) }, { t: chipText, chip: true }, { t: body.slice(at + chipText.length) }];
+    return composeMomentCard(chart, { eyebrow: eyebrow, title: title, paragraphs: [para] });
   }
   // Shared by the Omnibus and multi-row keeps: what the Statistics panel
   // calls this chart's analysis ("Compare Groups"), read off its title bar.
@@ -6235,9 +6311,10 @@
       var effect = cellText(tds[0]), F = cellText(tds[1]), df = cellText(tds[2]), pv = cellText(tds[3]);
       var eff = tds.length > 4 ? cellText(tds[4]) : "";
       if (!effect || !F) continue;
-      var line = effect + ": F(" + df + ") = " + F + ", " + pWord(pv);
-      if (eff && eff !== "\u2014" && effSym) line += ", " + effSym + " = " + eff;
-      lines.push(line);
+      var runs = [{ t: effect + ": F(" + df + ") = " + F + ", " },
+                  { t: pWord(pv), chip: !!tds[3].querySelector("[data-cmp-sig]") }];
+      if (eff && eff !== "\u2014" && effSym) runs.push({ t: ", " + effSym + " = " + eff });
+      lines.push(runs);
     }
     if (!lines.length) { showToast("No ANOVA rows to keep"); return "unavailable"; }
     var foot = "", foots = pane.querySelectorAll('div[style*="color:#666"]');
@@ -6272,25 +6349,26 @@
       section = cellText(clone).replace(/\s*\u00b7.*$/, "");
       break;
     }
-    var tds = tr.querySelectorAll("td"), c = [];
+    var tds = tr.querySelectorAll("td"), c = [], sig = [];
     for (var i = 0; i < tds.length; i++) {
       if (tds[i].querySelector("input[data-cmp-cb]")) continue;
       c.push(cellText(tds[i]));
+      sig.push(!!tds[i].querySelector("[data-cmp-sig]"));
     }
     // [comparison, test, statistic, p, p(adj), effect]
-    var line = (section ? section + ": " : "") + (c[0] || "");
-    if (c[1]) line += ". " + c[1];
-    if (c[2]) line += ", " + c[2];
-    if (c[3]) line += ", " + pWord(c[3]);
-    if (c[4] && c[4] !== "\u2014") line += " (adjusted " + c[4] + ")";
-    if (c[5] && c[5] !== "\u2014") line += ", " + c[5];
-    return line;
+    var runs = [{ t: (section ? section + ": " : "") + (c[0] || "") }];
+    if (c[1]) runs.push({ t: ". " + c[1] });
+    if (c[2]) runs.push({ t: ", " + c[2] });
+    if (c[3]) { runs.push({ t: ", " }); runs.push({ t: pWord(c[3]), chip: !!sig[3] }); }
+    if (c[4] && c[4] !== "\u2014") { runs.push({ t: ", " }); runs.push({ t: "adjusted " + pWord(c[4]), chip: !!sig[4] }); }
+    if (c[5] && c[5] !== "\u2014") runs.push({ t: ", " + c[5] });
+    return runs;
   }
   function composeTickedMoment() {
     var rows = tickedPairRows();
     var chart = liveChartSvg();
     if (!rows.length || !chart) { showToast("Tick the comparisons to keep first"); return "unavailable"; }
-    var lines = rows.map(pairRowLine);
+    var lines = rows.map(pairRowLine);   // each a run list
     var pane = document.querySelector('[data-gb2-inspector] [data-st-pane="pairs"]');
     var tally = pane && pane.querySelector("[data-cmp-tally]");
     var eyebrow = [statsPanelModuleName(), "Compare pairs"].filter(Boolean).join(" \u00b7 ");

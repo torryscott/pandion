@@ -42,7 +42,7 @@ const errors = []; page.on('pageerror', e => errors.push(String(e)));
 await page.addInitScript(() => { try { localStorage.clear(); localStorage.setItem('psstandalone.coach.clickToEdit.v1', '1'); sessionStorage.setItem('psstandalone.welcome.dismissed', '1'); } catch (e) {} });
 await page.goto(PAGE); await page.waitForTimeout(1200);
 const pinCount = () => page.evaluate(() => (window.PS_SHELL.project.pinboards || []).reduce((n, b) => n + (b.pins || []).length, 0));
-const lastPin = () => page.evaluate(() => { const all = []; (window.PS_SHELL.project.pinboards || []).forEach(b => (b.pins || []).forEach(p => all.push(p))); const p = all[all.length - 1]; if (!p) return null; const src = String(p.src || ''); const svg = src.indexOf('data:image/svg+xml') === 0 ? decodeURIComponent(src.slice(src.indexOf(',') + 1)) : src; return { eyebrow: p.momEyebrow, title: p.momTitle, text: p.momText, svgStart: svg.slice(0, 5), srcHasCard: /Main effect|comparison/i.test(svg), srcHasChart: /<rect|<path/.test(svg) }; });
+const lastPin = () => page.evaluate(() => { const all = []; (window.PS_SHELL.project.pinboards || []).forEach(b => (b.pins || []).forEach(p => all.push(p))); const p = all[all.length - 1]; if (!p) return null; const src = String(p.src || ''); const svg = src.indexOf('data:image/svg+xml') === 0 ? decodeURIComponent(src.slice(src.indexOf(',') + 1)) : src; return { eyebrow: p.momEyebrow, title: p.momTitle, text: p.momText, svgStart: svg.slice(0, 5), srcHasCard: /<tspan[^>]*>(Main|effect|comparison)/i.test(svg), srcHasChart: /<rect|<path/.test(svg), chips: (svg.match(/data-role="sig-chip"/g) || []).length }; });
 
 // ---- 1. the Omnibus keep
 await page.evaluate(async () => {
@@ -57,7 +57,7 @@ const omni = await page.evaluate(() => {
     const keep = pane && pane.querySelector('[data-ps-moment-keep-omni]');
     const rows = pane ? [...pane.querySelectorAll('table tr')].map(tr => [...tr.querySelectorAll('td')].map(td => td.textContent.trim())).filter(r => r.length >= 4) : [];
     const heads = pane ? [...pane.querySelectorAll('th')].map(t => t.textContent.trim()) : [];
-    return { keep: !!keep, copy: !!(pane && pane.querySelector('[data-ps-moment-copy-omni]')), rows, heads };
+    return { keep: !!keep, copy: !!(pane && pane.querySelector('[data-ps-moment-copy-omni]')), rows, heads, sig: pane ? pane.querySelectorAll('table [data-cmp-sig]').length : 0 };
 });
 ok(omni.keep && omni.copy, '1: the Omnibus card carries Keep and Copy with chart');
 ok(omni.rows.length >= 3, '1: the example chart yields a factorial table (' + omni.rows.length + ' effect rows: ' + omni.rows.map(r => r[0]).join(' / ') + ')');
@@ -71,6 +71,7 @@ const expectLines = omni.rows.map(r => { const p = /^[<>]/.test(r[3]) ? 'p ' + r
 const textLines = pin1 ? pin1.text.split('\n') : [];
 ok(expectLines.every(l => textLines.includes(l)), '1: every effect row is kept verbatim from the table (' + expectLines[0] + ' ...)');
 ok(textLines.some(l => /Type III/.test(l)), '1: the model footnote rides along');
+ok(pin1 && omni.sig >= 1 && pin1.chips === omni.sig, '1: the significance chip is drawn on the page for each significant effect (' + (pin1 && pin1.chips) + ' of ' + omni.sig + ')');
 ok(pin1 && pin1.svgStart === '<svg ' && pin1.srcHasCard && pin1.srcHasChart, '1: the page image is one svg carrying the chart and the card text');
 // ---- 2. Keep ticked on Compare pairs
 await page.evaluate(async () => { const s = ms => new Promise(r => setTimeout(r, ms)); document.querySelector('[data-gb2-inspector] [data-st-tab="pairs"]').click(); await s(600); });
@@ -79,7 +80,9 @@ ok(t0 && t0.disabled && t0.label === 'Keep ticked', '2: Keep ticked sits on the 
 const picked = await page.evaluate(() => {
     const pane = document.querySelector('[data-gb2-inspector] [data-st-pane="pairs"]');
     const cbs = [...pane.querySelectorAll('input[data-cmp-cb]')];
-    const chosen = [cbs[0], cbs[cbs.length - 1]];
+    const rows = cbs.map(cb => cb.closest('tr'));
+    const plain = rows.find(tr => !tr.querySelector('[data-cmp-sig]')), sig = rows.find(tr => tr.querySelector('[data-cmp-sig]'));
+    const chosen = [plain, sig].map(tr => tr.querySelector('input[data-cmp-cb]'));
     return chosen.map(cb => { cb.click(); const tr = cb.closest('tr'); const tds = [...tr.querySelectorAll('td')].filter(td => !td.querySelector('input')); return tds.map(td => td.textContent.trim()); });
 });
 await page.waitForTimeout(300);
@@ -95,6 +98,7 @@ const has = (row, line) => line.indexOf(row[0]) !== -1 && line.indexOf(row[1]) !
 ok(lines2.length >= 2 && has(picked[0], lines2[0]) && has(picked[1], lines2[1]), '2: the two lines carry each row\'s comparison, test, statistic and effect in table order (' + lines2[0] + ' | ' + lines2[1] + ')');
 ok(/^[A-Z][^:]*: /.test(lines2[0]), '2: each line leads with its section (' + lines2[0].split(':')[0] + ')');
 ok(lines2.some(l => /significant at/.test(l)), '2: the tally rides along as the last paragraph');
+ok(pin2 && pin2.chips === 1, '2: one chip on the page: the significant row gets it, the other does not (' + (pin2 && pin2.chips) + ')');
 // ---- 3. unticking disables and a click keeps nothing
 await page.evaluate(() => { document.querySelectorAll('[data-gb2-inspector] [data-st-pane="pairs"] input[data-cmp-cb]:checked').forEach(cb => cb.click()); });
 await page.waitForTimeout(300);
@@ -103,6 +107,20 @@ const before3 = await pinCount();
 await page.evaluate(() => { const b = document.querySelector('[data-gb2-inspector] [data-st-pane="pairs"] [data-ps-moment-keep-ticked]'); b.click(); });
 await page.waitForTimeout(300);
 ok(t2.disabled && (await pinCount()) === before3, '3: with nothing ticked the button is disabled and keeps nothing');
+// ---- 3b. the pinned-row keep (the focus card) carries the chip as well
+const pinnedKeep = await page.evaluate(async () => {
+    const s = ms => new Promise(r => setTimeout(r, ms));
+    const pane = document.querySelector('[data-gb2-inspector] [data-st-pane="pairs"]');
+    const tr = [...pane.querySelectorAll('tr[data-link]')].find(t => t.querySelector('[data-cmp-sig]'));
+    tr.querySelector('td:nth-child(2)').click(); await s(500);
+    const card = document.querySelector('[data-role="st-focus-card"]');
+    const keep = card && card.querySelector('[data-ps-moment-keep]');
+    if (!keep) return { card: !!card, keep: false };
+    keep.click(); await s(500);
+    return { card: true, keep: true };
+});
+const pin3 = await lastPin();
+ok(pinnedKeep.keep && pin3 && pin3.chips === 1 && !/comparisons/.test(pin3.title), '3b: keeping a pinned significant row from its focus card draws its chip (' + (pin3 && pin3.chips) + ')');
 // ---- 4. the kept ANOVA reads back in the Notebook rail
 const rail = await page.evaluate(async () => {
     const s = ms => new Promise(r => setTimeout(r, ms));
@@ -112,7 +130,7 @@ const rail = await page.evaluate(async () => {
     first.click(); await s(400);
     return { pages: pages.length, stat: (document.getElementById('ps-pininsp-stat') || {}).textContent || '' };
 });
-ok(rail.pages === 2 && /Main effect of condition/.test(rail.stat) && /Omnibus/.test(rail.stat), '4: the Notebook shows both pages and the ANOVA page\'s rail text is readable (' + rail.stat.slice(0, 60) + '...)');
+ok(rail.pages === 3 && /Main effect of condition/.test(rail.stat) && /Omnibus/.test(rail.stat), '4: the Notebook shows both pages and the ANOVA page\'s rail text is readable (' + rail.stat.slice(0, 60) + '...)');
 ok(errors.length === 0, 'no page errors' + (errors.length ? ' (' + errors[0] + ')' : ''));
 await browser.close();
 console.log(failures ? 'keep-stats: FAIL (' + failures + ')' : 'keep-stats: PASS');
