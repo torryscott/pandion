@@ -302,10 +302,10 @@ const allSpotted = (seen, expect) => seen.every(x => !expect[x.title] || !expect
 // ---- 12: the Data tour on the example (so a role badge exists)
 {
     const { ctx, page, errors } = await boot();
-    const exp = { 'Columns are variables': ['tr:has(#ps-grid-col-0)'], 'Roles on the sheet': ['.ps-grid-role'], 'Editing': ['#ps-data-undo', '#ps-data-addrow'], 'Find, Filter, Columns': ['#ps-data-filter-btn', '#ps-data-hidden-columns'], 'Variable properties': ['#ps-settings-panel'], 'Export data': ['#ps-export'], 'The source of truth': [] };
+    const exp = { 'Columns are variables': ['tr:has(#ps-grid-col-0)'], 'Roles on the sheet': ['.ps-grid-role'], 'Editing': ['#ps-data-undo', '#ps-data-addrow'], 'Find': ['#ps-data-find-btn'], 'Filter and Columns': ['#ps-data-filter-btn', '#ps-data-hidden-columns'], 'Variable properties': ['#ps-settings-panel'], 'Export data': ['#ps-export'], 'The source of truth': [] };
     const seen = await walk(page, 'data', exp);
     const ws = await page.evaluate(() => window.PS_SHELL.workspace());
-    ok(ws === 'data' && titles(seen) === Object.keys(exp).join(' | '), '12: the Data tour switches to Data and walks its seven cards (' + titles(seen) + ')');
+    ok(ws === 'data' && titles(seen) === Object.keys(exp).join(' | '), '12: the Data tour switches to Data and walks its eight cards (' + titles(seen) + ')');
     ok(allSpotted(seen, exp), '12: every Data card spotlights its landmark');
     ok(errors.length === 0, 'data: no page errors' + (errors.length ? ' (' + errors[0] + ')' : ''));
     await ctx.close();
