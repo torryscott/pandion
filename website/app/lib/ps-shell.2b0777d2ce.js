@@ -7817,6 +7817,23 @@
       : "Create a chart by choosing the analysis that matches your variables and research question.";
     el("ps-workspace-empty-create").textContent =
       layout ? "Create layout" : "Create chart";
+    // The tour line under the create button: Layouts always (the tour
+    // points at the empty state itself), Charts only while the tour can
+    // run; both step aside once taken.
+    var tl = el("ps-workspace-empty-tour");
+    if (tl) {
+      var tourId = layout ? "layouts" : "charts";
+      var want = !!(window.PS_TOURS && !window.PS_TOURS.seen(tourId) &&
+                    (layout || chartsTourAvailable()));
+      tl.hidden = !want;
+      tl.setAttribute("data-tour", tourId);
+      if (!tl.__psWired) {
+        tl.__psWired = true;
+        tl.addEventListener("click", function () {
+          startWorkspaceTour(tl.getAttribute("data-tour") || "charts");
+        });
+      }
+    }
   }
   // Punch list 23. Action buttons were built only when the message started
   // with "Assign ", so every module BUILD error - the HARDER failures - fell
@@ -8059,6 +8076,14 @@
         "comparison in the \u03a3 Statistics panel. Each lands here " +
         "as a page.");
       scroll.appendChild(empty);
+      // "New here?" under the empty state, until the tour has been taken.
+      if (window.PS_TOURS && !window.PS_TOURS.seen("notebook")) {
+        var tourLink = mkEl("button", "ps-tour-link", "New here? Tour this workspace");
+        tourLink.type = "button"; tourLink.id = "ps-empty-tour-notebook";
+        tourLink.addEventListener("click", function () { startWorkspaceTour("notebook"); });
+        empty.appendChild(document.createElement("br"));
+        empty.appendChild(tourLink);
+      }
       syncPinInspector();
       return;
     }
@@ -27897,6 +27922,10 @@
     // is false on a first visit. A student who just wants to look around had
     // no path. hideWelcome() is safe from here because a project is always
     // loaded behind the dialog.
+    el("ps-welcome-tour").addEventListener("click", function () {
+      hideWelcome();
+      startWorkspaceTour("app");
+    });
     el("ps-welcome-close").addEventListener("click", function () {
       persist(false); hideWelcome();
     });
@@ -28976,7 +29005,11 @@
       { label: "User guide", command: "user-guide" },
       "separator",
       // Workspace tours (js/ps-tours.js): orientation, one per room.
+      { label: "Tour the app", command: "tour-app" },
+      { label: "Tour the Data workspace", command: "tour-data" },
       { label: "Tour the Charts workspace", command: "tour-charts" },
+      { label: "Tour the Notebook", command: "tour-notebook" },
+      { label: "Tour the Layouts workspace", command: "tour-layouts" },
       "separator",
       { label: "Chart basics", command: "help-basics" },
       { label: "Which graph should I use?", command: "help-chooser" },
@@ -29626,6 +29659,7 @@
         command === "help-anatomy" || command === "help-glossary")
       return chartHelpState() === "ready";
     if (command === "tour-charts") return chartsTourAvailable();
+    if (command.indexOf("tour-") === 0) return true;   // the room tours point at chrome that is always there
     return true;
   }
   // The Charts tour can run when a chart is drawn, or when there is no
@@ -29815,6 +29849,10 @@
     }
     else if (command === "help-basics") openEngineHelp("help");
     else if (command === "tour-charts") startWorkspaceTour("charts");
+    else if (command === "tour-app") startWorkspaceTour("app");
+    else if (command === "tour-data") startWorkspaceTour("data");
+    else if (command === "tour-notebook") startWorkspaceTour("notebook");
+    else if (command === "tour-layouts") startWorkspaceTour("layouts");
     else if (command === "help-lint") openEngineHelp("graphLint");
     else if (command === "help-anatomy") openEngineHelp("anatomy");
     else if (command === "help-glossary") openEngineHelp("glossary");
@@ -31596,6 +31634,7 @@
     openExample: openExampleFromEmptyState,
     tableHasData: function () { return tableHasData(PROJECT.table); },
     coachDismiss: coachDismiss,
+    pinChartForTest: function () { pinChartToPinboard(null); },
     coachReset: function () {
       try { window.localStorage.removeItem(PS_COACH_KEY); } catch (e) {}
       COACH_SHOWN = false;
