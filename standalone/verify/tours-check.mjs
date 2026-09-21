@@ -78,6 +78,7 @@ const snap = (sel) => {
         focus: document.activeElement ? (document.activeElement.id || document.activeElement.tagName) : ''
     };
 };
+const union = (rs) => rs.reduce((u, r) => ({ l: Math.min(u.l, r.l), t: Math.min(u.t, r.t), r: Math.max(u.r, r.r), b: Math.max(u.b, r.b) }), { l: Infinity, t: Infinity, r: -Infinity, b: -Infinity });
 const encloses = (spot, t, pad = 8) => !!(spot && t && spot.l <= t.l + 1 && spot.t <= t.t + 1 && spot.r >= t.r - 1 && spot.b >= t.b - 1 && spot.l >= t.l - pad && spot.t >= t.t - pad);
 
 // ---- 1 + 2 + 3 + 4 + 8: the tour on a drawn chart
@@ -113,7 +114,6 @@ const encloses = (spot, t, pad = 8) => !!(spot && t && spot.l <= t.l + 1 && spot
         { title: 'Export', sels: ['#ps-export'] },
         { title: 'Which graph?', sels: ['[data-ps-menu="help"]'] }
     ];
-    const union = (rs) => rs.reduce((u, r) => ({ l: Math.min(u.l, r.l), t: Math.min(u.t, r.t), r: Math.max(u.r, r.r), b: Math.max(u.b, r.b) }), { l: Infinity, t: Infinity, r: -Infinity, b: -Infinity });
     for (const e of expect) {
         await page.click('#ps-tour-next'); await page.waitForTimeout(320);
         const rects = [];
@@ -261,6 +261,109 @@ const encloses = (spot, t, pad = 8) => !!(spot && t && spot.l <= t.l + 1 && spot
     await page.click('#ps-tour-next'); await page.waitForTimeout(250);
     ok(await page.evaluate(() => document.getElementById('ps-tour-note').hidden), '10: the note rides the first card only');
     ok(errors.length === 0, 'new-project: no page errors' + (errors.length ? ' (' + errors[0] + ')' : ''));
+    await ctx.close();
+}
+// ---- the room tours: a generic walk. Each card either spotlights the
+// landmark it names or is skipped because that landmark is not on screen.
+async function walk(page, id, expect) {
+    await page.evaluate((id) => window.PS_TOURS.start(id), id); await page.waitForTimeout(700);
+    const seen = [];
+    for (let guard = 0; guard < 20; guard++) {
+        const st = await page.evaluate(() => { const a = window.PS_TOURS.active(); if (!a) return null; const r = document.getElementById('ps-tour'); return { title: r.querySelector('#ps-tour-title').textContent, next: r.querySelector('#ps-tour-next').textContent, spotShown: r.querySelector('.ps-tour-spot').style.display !== 'none' }; });
+        if (!st) break;
+        const exp = expect[st.title];
+        let enc = null;
+        if (exp && exp.length) {
+            const rects = []; let s;
+            for (const sel of exp) { s = await page.evaluate(snap, sel); rects.push(s.target); }
+            enc = rects.every(Boolean) ? encloses(s.spot, union(rects), 8) : false;
+        }
+        seen.push({ title: st.title, spotShown: st.spotShown, enc });
+        if (st.next === 'Done') break;
+        await page.click('#ps-tour-next'); await page.waitForTimeout(300);
+    }
+    await page.evaluate(() => { window.PS_TOURS.exit(); window.PS_TOURS.forget(); });
+    return seen;
+}
+const titles = (seen) => seen.map(x => x.title).join(' | ');
+const allSpotted = (seen, expect) => seen.every(x => !expect[x.title] || !expect[x.title].length || x.enc === true);
+// ---- 11: the app tour, from the Data workspace, with a target-less closing card
+{
+    const { ctx, page, errors } = await boot();
+    await page.evaluate(() => window.PS_SHELL.setWorkspace('data')); await page.waitForTimeout(500);
+    const exp = { 'Four rooms, one project': ['.ps-workspace-switcher'], 'Your documents': ['#ps-project-nav', '#ps-project-add'], 'Open and Save project': ['#ps-load', '#ps-save'], 'Help': ['[data-ps-menu="help"]'], 'The whole trick': [] };
+    const seen = await walk(page, 'app', exp);
+    ok(titles(seen) === Object.keys(exp).join(' | '), '11: the app tour walks its five cards (' + titles(seen) + ')');
+    ok(allSpotted(seen, exp), '11: every app card spotlights its landmark');
+    ok(seen[4] && seen[4].spotShown === false, '11: the closing card has no spotlight, just the scrim');
+    ok(errors.length === 0, 'app: no page errors' + (errors.length ? ' (' + errors[0] + ')' : ''));
+    await ctx.close();
+}
+// ---- 12: the Data tour on the example (so a role badge exists)
+{
+    const { ctx, page, errors } = await boot();
+    const exp = { 'Columns are variables': ['tr:has(#ps-grid-col-0)'], 'Roles on the sheet': ['.ps-grid-role'], 'Editing': ['#ps-data-undo', '#ps-data-addrow'], 'Find, Filter, Columns': ['#ps-data-filter-btn', '#ps-data-hidden-columns'], 'Variable properties': ['#ps-settings-panel'], 'Export data': ['#ps-export'], 'The source of truth': [] };
+    const seen = await walk(page, 'data', exp);
+    const ws = await page.evaluate(() => window.PS_SHELL.workspace());
+    ok(ws === 'data' && titles(seen) === Object.keys(exp).join(' | '), '12: the Data tour switches to Data and walks its seven cards (' + titles(seen) + ')');
+    ok(allSpotted(seen, exp), '12: every Data card spotlights its landmark');
+    ok(errors.length === 0, 'data: no page errors' + (errors.length ? ' (' + errors[0] + ')' : ''));
+    await ctx.close();
+}
+// ---- 13: the Notebook tour, empty then with a kept page
+{
+    const { ctx, page, errors } = await boot();
+    await page.evaluate(() => window.PS_SHELL.setWorkspace('pinboard')); await page.waitForTimeout(500);
+    const link = await page.evaluate(() => { const l = document.getElementById('ps-empty-tour-notebook'); return l ? l.textContent : ''; });
+    ok(link === 'New here? Tour this workspace', '13: the empty Notebook offers the tour (' + link + ')');
+    const exp = { 'How a page arrives': ['#ps-pinscroll'], 'Sections': ['#ps-tabs'], "A page's verbs": ['.ps-pinpage-actions'], 'The page rail': ['#ps-inspector-pinboard'], 'Export Notebook': ['#ps-export'], 'Pages stay honest': [] };
+    let seen = await walk(page, 'notebook', exp);
+    ok(titles(seen) === "How a page arrives | Sections | The page rail | Export Notebook | Pages stay honest", '13: with nothing kept, the page-verbs card is skipped honestly (' + titles(seen) + ')');
+    ok(allSpotted(seen, exp), '13: every shown Notebook card spotlights its landmark');
+    await page.evaluate(async () => { const s = ms => new Promise(r => setTimeout(r, ms)); const S = window.PS_SHELL; S.setWorkspace('chart'); await s(400); S.pinChartForTest(); await s(500); });
+    seen = await walk(page, 'notebook', exp);
+    ok(titles(seen) === Object.keys(exp).join(' | ') && allSpotted(seen, exp), '13: with a kept page all six cards show and the verbs card spotlights the page bar (' + titles(seen) + ')');
+    ok(errors.length === 0, 'notebook: no page errors' + (errors.length ? ' (' + errors[0] + ')' : ''));
+    await ctx.close();
+}
+// ---- 14: the Layouts tour, empty then with a layout
+{
+    const { ctx, page, errors } = await boot();
+    await page.evaluate(() => window.PS_SHELL.setWorkspace('layout')); await page.waitForTimeout(500);
+    const link = await page.evaluate(() => { const l = document.getElementById('ps-workspace-empty-tour'); return l ? { hidden: l.hidden, tour: l.getAttribute('data-tour'), text: l.textContent } : null; });
+    ok(link && !link.hidden && link.tour === 'layouts', '14: the empty Layouts room offers its tour (' + JSON.stringify(link) + ')');
+    const empty = { 'Create a layout': ['#ps-workspace-empty-create'], 'Add chart, Add text': ['#ps-laddchart', '#ps-laddpin', '#ps-laddlabel'], 'The page': ['#ps-lcanvas'], 'Layout properties': ['#ps-inspector-layout'], 'Export layout': ['#ps-export'], 'Keep first, arrange later': [] };
+    let seen = await walk(page, 'layouts', empty);
+    ok(titles(seen) === 'Create a layout | Export layout | Keep first, arrange later' && allSpotted(seen, empty), '14: with no layout, only the create, export and closing cards show (' + titles(seen) + ')');
+    await page.click('#ps-workspace-empty-tour'); await page.waitForTimeout(500);
+    const fromLink = await page.evaluate(() => { const a = window.PS_TOURS.active(); window.PS_TOURS.exit(); window.PS_TOURS.forget(); return a; });
+    ok(fromLink && fromLink.id === 'layouts', '14: the empty-state link starts the Layouts tour');
+    await page.evaluate(async () => { const s = ms => new Promise(r => setTimeout(r, ms)); window.PS_SHELL.addLayout(); await s(700); });
+    const full = Object.assign({}, empty, { 'Create a layout': ['button[aria-label="New layout"]'] });
+    seen = await walk(page, 'layouts', full);
+    ok(titles(seen) === Object.keys(full).join(' | ') && allSpotted(seen, full), '14: with a layout all six cards show, the first on the New layout plus (' + titles(seen) + ')');
+    ok(errors.length === 0, 'layouts: no page errors' + (errors.length ? ' (' + errors[0] + ')' : ''));
+    await ctx.close();
+}
+// ---- 15 + 16: five Help entries, the palette, and the welcome link
+{
+    const { ctx, page, errors } = await boot();
+    const menu = await page.evaluate(async () => {
+        const s = ms => new Promise(r => setTimeout(r, ms));
+        document.querySelector('[data-ps-menu="help"]').click(); await s(300);
+        const items = ['tour-app', 'tour-data', 'tour-charts', 'tour-notebook', 'tour-layouts'].map(c => { const b = document.querySelector('#ps-appmenu [data-app-command="' + c + '"]'); return b ? { c, label: b.textContent.trim(), off: b.disabled } : { c, missing: true }; });
+        document.querySelector('[data-ps-menu="help"]').click(); await s(150);
+        const pal = window.PS_SHELL.runCommandCatalog().filter(x => /^tour-/.test(x.command)).length;
+        return { items, pal };
+    });
+    ok(menu.items.every(i => !i.missing && !i.off) && menu.pal === 5, '15: Help lists five tours, all enabled with a chart, and the palette has all five (' + menu.items.map(i => i.label).join(' / ') + ')');
+    await page.evaluate(async () => { const s = ms => new Promise(r => setTimeout(r, ms)); window.PS_SHELL.showWelcome(true); await s(300); });
+    const wl = await page.evaluate(() => { const l = document.getElementById('ps-welcome-tour'); const r = l && l.getBoundingClientRect(); return l ? { text: l.textContent, visible: r.width > 0 } : null; });
+    ok(wl && wl.visible && /two-minute tour/.test(wl.text), '16: the welcome dialog offers the app tour (' + (wl && wl.text) + ')');
+    await page.click('#ps-welcome-tour'); await page.waitForTimeout(600);
+    const after = await page.evaluate(() => ({ welcome: document.getElementById('ps-welcome').style.display, tour: window.PS_TOURS.active() }));
+    ok(after.welcome === 'none' && after.tour && after.tour.id === 'app' && after.tour.step === 0, '16: it closes the welcome and starts the app tour (' + JSON.stringify(after) + ')');
+    ok(errors.length === 0, 'menu+welcome: no page errors' + (errors.length ? ' (' + errors[0] + ')' : ''));
     await ctx.close();
 }
 await browser.close();

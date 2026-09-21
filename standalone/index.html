@@ -4298,6 +4298,13 @@
      coach mark's teaching colors. The spot's giant spread shadow IS the
      scrim, so the landmark stays bright while everything else dims; with
      no landmark (a narration card) the root paints the scrim instead. */
+  /* The quiet way into a tour, wherever a room is empty. */
+  .ps-tour-link { display: inline-block; padding: 0; margin-top: 10px; color: #3e719f;
+    background: none; border: 0; font: inherit; font-size: 11.5px;
+    text-decoration: underline; cursor: pointer; }
+  .ps-tour-link:hover { color: var(--ps-accent-hover); }
+  .ps-tour-link[hidden] { display: none; }
+  .ps-welcome-header .ps-tour-link, .ps-welcome-intro .ps-tour-link { margin-top: 6px; }
   #ps-tour { position: fixed; inset: 0; z-index: 12700; }
   #ps-tour[hidden] { display: none; }
   #ps-tour.ps-tour-nospot { background: rgba(20, 32, 46, 0.42); }
@@ -5304,6 +5311,7 @@
       <p id="ps-workspace-empty-copy"></p>
       <button type="button" class="ps-btn ps-primary"
               id="ps-workspace-empty-create"></button>
+      <button type="button" class="ps-tour-link" id="ps-workspace-empty-tour" hidden>New here? Tour this workspace</button>
     </div>
     <div id="psroot" class="graphbuilder2-host" role="tabpanel"
          style="width:100%;position:relative;--gb2-ui-font:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-family:var(--gb2-ui-font);"></div>
@@ -5441,6 +5449,7 @@
            Every part of a chart is editable by clicking it.</p>
         <p class="ps-welcome-privacy">No accounts and no uploads. Your data
            stays on this machine.</p>
+        <button type="button" class="ps-tour-link" id="ps-welcome-tour">New here? Take the two-minute tour</button>
       </div>
       <!-- t4-08. There was no X, no Close, no backdrop click, and Escape was
            gated on BOOT_RESTORED (false on a cold load), so on a first visit

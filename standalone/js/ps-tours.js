@@ -311,6 +311,114 @@
       window.setTimeout(poll, 60);
     })();
   }
+  // The first VISIBLE of several candidates (an empty state's button, or
+  // the tab-strip plus once a document exists), for the union resolver.
+  function firstOf() {
+    var sels = Array.prototype.slice.call(arguments);
+    return function () {
+      for (var i = 0; i < sels.length; i++) { var el = firstVisible(sels[i]); if (el) return el; }
+      return null;
+    };
+  }
+  // The room tours only need to be standing in their room.
+  function inWorkspace(ws) {
+    return function (go) {
+      var s = S();
+      if (s.workspace && s.setWorkspace && s.workspace() !== ws) s.setWorkspace(ws);
+      window.setTimeout(go, 120);
+    };
+  }
+  TOURS.app = {
+    title: "App tour",
+    steps: [
+      { target: ".ps-workspace-switcher", optional: true,
+        title: "Four rooms, one project",
+        body: "Data is the sheet. Charts is where figures are built. Notebook keeps the moments you decide to keep. Layouts arranges figures for print." },
+      { target: ["#ps-project-nav", "#ps-project-add"], optional: true,
+        title: "Your documents",
+        body: "Every chart, section and layout you make is listed here. Click one to switch to it; the plus makes a new chart or layout." },
+      { target: ["#ps-load", "#ps-save"], optional: true,
+        title: "Open and Save project",
+        body: "A .pand project file holds the data, every chart, the notebook and your saved palettes. Save project writes one; Open reads it back. Browser storage is only the autosave." },
+      { target: '[data-ps-menu="help"]', optional: true,
+        title: "Help",
+        body: "Help holds Chart basics, Which graph should I use, Check my chart, the glossary, and a tour of each room." },
+      { title: "The whole trick",
+        body: "Everything on a chart is edited by clicking it. Bars, axes, titles, the legend: click the thing to change the thing." }
+    ]
+  };
+  TOURS.data = {
+    title: "Data tour",
+    prepare: inWorkspace("data"),
+    steps: [
+      { target: function () { var h = document.getElementById("ps-grid-col-0"); return h && h.parentElement; },
+        title: "Columns are variables",
+        body: "The icon in each header is the measure type: nominal, ordinal, continuous or ID. Click a header to see the variable's properties and summary on the right." },
+      { target: ".ps-grid-role", optional: true,
+        title: "Roles on the sheet",
+        body: "A column already used by a chart wears its role. Change the column's type and the chart is retyped with it." },
+      { target: ["#ps-data-undo", "#ps-data-addrow"],
+        title: "Editing",
+        body: "Type straight into cells; Add row appends one. Every edit autosaves, and these arrows undo and redo." },
+      { target: ["#ps-data-filter-btn", "#ps-data-hidden-columns"],
+        title: "Find, Filter, Columns",
+        body: "Filter keeps rows out of every chart without deleting them. Columns hides and shows columns. Find, on the left, searches the sheet." },
+      { target: "#ps-settings-panel", optional: true,
+        title: "Variable properties",
+        body: "Select a column and this rail fills with its properties: type, levels, missing values, and a summary with the mean, median and mode." },
+      { target: "#ps-export", optional: true,
+        title: "Export data",
+        body: "Export writes the sheet out as a CSV or Excel file." },
+      { title: "The source of truth",
+        body: "The sheet is the source of truth: every chart redraws from it." }
+    ]
+  };
+  TOURS.notebook = {
+    title: "Notebook tour",
+    prepare: inWorkspace("pinboard"),
+    steps: [
+      { target: "#ps-pinscroll",
+        title: "How a page arrives",
+        body: "Right-click a chart and choose Keep, or press Keep on a comparison in the Statistics panel. Each becomes a page here, with its numbers and where it came from." },
+      { target: "#ps-tabs", optional: true,
+        title: "Sections",
+        body: "Sections group pages. Add one per question or chapter with the plus." },
+      { target: ".ps-pinpage-actions", optional: true,
+        title: "A page's verbs",
+        body: "Under each page: Send to layout, Copy image, Export, Delete." },
+      { target: "#ps-inspector-pinboard", optional: true,
+        title: "The page rail",
+        body: "Click a page and this rail says when it was kept and what it came from, and holds your notes about it." },
+      { target: "#ps-export", optional: true,
+        title: "Export Notebook",
+        body: "Export writes the notebook out as a document, pages in order." },
+      { title: "Pages stay honest",
+        body: "If the chart changes after you kept it, the page says so." }
+    ]
+  };
+  TOURS.layouts = {
+    title: "Layouts tour",
+    prepare: inWorkspace("layout"),
+    steps: [
+      { target: firstOf("#ps-workspace-empty-create", 'button[aria-label="New layout"]'), optional: true,
+        title: "Create a layout",
+        body: "A layout is a real page at print size: letter, a slide, or a custom size. Make one here; what you see is what exports." },
+      { target: ["#ps-laddchart", "#ps-laddpin", "#ps-laddlabel"], optional: true,
+        title: "Add chart, Add text",
+        body: "Add chart puts a live chart on the page and From Notebook drops in a kept one. Add text and Panel label give titles and letters." },
+      { target: "#ps-lcanvas", optional: true,
+        title: "The page",
+        body: "Drag an item to place it, its corners to resize it. Snap and Smart guides in the rail line things up." },
+      { target: "#ps-inspector-layout", optional: true,
+        title: "Layout properties",
+        body: "Page size, orientation, margins, the grid and snapping live here." },
+      { target: "#ps-export", optional: true,
+        title: "Export layout",
+        body: "Export writes a PDF or image at the exact page size." },
+      { title: "Keep first, arrange later",
+        body: "A layout follows its charts: change a chart and its panel updates." }
+    ]
+  };
   TOURS.charts = {
     title: "Charts tour",
     // Before the first card: be on the Charts workspace with a chart drawn.

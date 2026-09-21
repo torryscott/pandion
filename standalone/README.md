@@ -1251,9 +1251,11 @@ most misleading page in the repo. What actually still holds:
   Targets are the engine's own data-role and aria-label handles, resolved
   on every frame to the first visible match, so a rebuilt toolbar is
   followed and a missing optional landmark (the inspector on a narrow
-  window) is skipped. Tours are data at the bottom of the file; the Charts
-  tour opens the built-in example when there is no data at all. Verified by
-  `verify/tours-check.mjs`.
+  window) is skipped. Tours are data at the bottom of the file: the app,
+  Data, Charts, Notebook and Layouts, each in the Help menu, plus a quiet
+  "New here?" line in the welcome dialog and in each empty room, and a
+  second button on the coach mark. The Charts tour opens the built-in
+  example when there is no data at all. Verified by `verify/tours-check.mjs`.
 - `js/ps-data.js` - per-module payload channel builders mirroring each
   jamovi .b.R aggregation row for row, plus the module/role registry.
 - `js/ps-shell.js` - project state, CSV import, roles UI, the setOption
