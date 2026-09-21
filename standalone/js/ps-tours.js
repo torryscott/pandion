@@ -342,7 +342,7 @@
     },
     // The stops follow the Sep 19 2026 write-up in the Craft item, in its
     // order: the setup rail, the chart, the toolbar left to right, the
-    // receipt in the status line, Export, and the Help menu to close.
+    // checks in the status line, Export, and the Help menu to close.
     steps: [
       { target: "#ps-slots", optional: true,
         title: "Chart setup",
@@ -364,7 +364,7 @@
         body: "Add puts things on the chart: error bars, data points, reference lines, brackets. Each opens its own panel once it is there." },
       { target: "#ps-status-check", optional: true,
         title: "Check my chart",
-        body: "The receipt at the bottom: every chart is checked for things that mislead, like a cut axis or colors that merge. Click it to read the list." },
+        body: "The status line at the bottom: every chart is checked for things that mislead, like a cut axis or colors that merge. Click it to read the list." },
       { target: "#ps-export", optional: true,
         title: "Export",
         body: "Export gives PDF, PNG and SVG at the chart's real size. Fit window on the toolbar only changes how big it looks here; the grip at the chart's corner sets the size that exports." },
