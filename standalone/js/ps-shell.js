@@ -6322,8 +6322,16 @@
     // The card's title names the design (the footnote's first clause), so
     // the footnote itself stays off the card (Torry, Sep 21 2026); the one
     // thing worth carrying is a sphericity note on Repeated Measures.
-    var title = foot ? foot.split(/[,.(]/)[0].trim() : "ANOVA";
-    var gg = foot ? (foot.match(/[^.]*Greenhouse-Geisser[^.]*\.?/) || [""])[0].trim() : "";
+    // Sentences end at a period followed by a capital (so "eps = .34" does
+    // not split); the design is the first sentence's opening clause when it
+    // names an ANOVA, else the module says which model this is.
+    var sentences = foot ? (foot.match(/.+?\.(?=\s+[A-Z]|\s*$)/g) || [foot]) : [];
+    var clause = sentences.length ? sentences[0].split(/ over the visible chart|, | \(|: /)[0].trim() : "";
+    var title = /ANOVA/.test(clause) ? clause
+      : (statsPanelModuleName() === "Repeated Measures" ? "Repeated-measures ANOVA" : "ANOVA");
+    var gg = "";
+    for (var si = 0; si < sentences.length; si++)
+      if (sentences[si].indexOf("Greenhouse-Geisser") !== -1) gg = sentences[si].trim();
     var eyebrow = [statsPanelModuleName(), "Omnibus"].filter(Boolean).join(" \u00b7 ");
     return composeMomentCard(chart, { eyebrow: eyebrow, title: title || "ANOVA",
                                       paragraphs: lines.concat(gg ? [gg] : []) });
