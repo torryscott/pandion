@@ -56219,8 +56219,8 @@
                         }
                     } else if (data.hasGroups) {
                         omniFoot = omniFaceted
-                            ? "Three-way ANOVA with interaction (Type III sums of squares, sum-to-zero contrasts - the same convention as jamovi's ANOVA analysis) over the visible chart; the panels variable joins the model as a factor."
-                            : "Two-way ANOVA with interaction, Type III sums of squares (sum-to-zero contrasts - the same convention as jamovi's ANOVA analysis), over the visible chart.";
+                            ? "Three-way ANOVA with interaction (Type III sums of squares) over the visible chart; the panels variable joins the model as a factor."
+                            : "Two-way ANOVA with interaction, Type III sums of squares, over the visible chart.";
                     } else {
                         omniFoot = omniFaceted
                             ? "Two-way ANOVA with interaction (Type III sums of squares) over the visible chart; the panels variable joins the model as a factor."
