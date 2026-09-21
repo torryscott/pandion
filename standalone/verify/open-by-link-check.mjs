@@ -139,6 +139,36 @@ const state = () => page => page.evaluate(() => {
     ok(errors.length === 0, '7: no page errors' + (errors.length ? ' (' + errors[0] + ')' : ''));
     await ctx.close();
 }
+// ---- 8. the welcome's From a link (New project shows the welcome)
+{
+    const { ctx, page, errors } = await boot('', { '/lab/scores.csv': { body: CSV } });
+    let s = await state()(page);
+    const action = await page.evaluate(() => { const b = document.getElementById('ps-welcome-link'); const r = b && b.getBoundingClientRect(); return b ? { text: b.textContent.replace(/\s+/g, ' ').trim(), visible: r.width > 0 } : null; });
+    ok(s.welcome && action && action.visible && /From a link/.test(action.text), '8: the welcome offers From a link (' + (action && action.text.slice(0, 40)) + ')');
+    await page.click('#ps-welcome-link'); await page.waitForTimeout(400);
+    const dlg = await page.evaluate(() => ({ open: document.getElementById('ps-linkopen-dialog').style.display === 'flex', focused: document.activeElement && document.activeElement.id, welcome: document.getElementById('ps-welcome').style.display === 'flex' }));
+    ok(dlg.open && dlg.focused === 'ps-linkopen-url' && !dlg.welcome, '8: it opens the link dialog with the box focused and the welcome away');
+    await page.fill('#ps-linkopen-url', 'not a link'); await page.click('#ps-linkopen-open'); await page.waitForTimeout(300);
+    const bad = await page.evaluate(() => ({ status: document.getElementById('ps-linkopen-status').textContent, open: document.getElementById('ps-linkopen-dialog').style.display === 'flex' }));
+    ok(bad.open && /full link/.test(bad.status), '8: a non-link is refused in place (' + bad.status + ')');
+    await page.fill('#ps-linkopen-url', 'https://example.test/lab/scores.csv'); await page.keyboard.press('Enter'); await page.waitForTimeout(1200);
+    const prev = await page.evaluate(() => { const u = document.getElementById('ps-import-use'); return { open: document.getElementById('ps-linkopen-dialog').style.display === 'flex', use: !!u && u.style.display !== 'none' }; });
+    ok(!prev.open && prev.use, '8: Enter fetches the file into the import preview');
+    await page.click('#ps-import-use'); await page.waitForTimeout(900);
+    s = await state()(page);
+    ok(s.cols && s.cols.join(',') === 'group,score,hours' && /from example\.test/.test(s.detail), '8: and it becomes the table with its provenance (' + s.detail + ')');
+    ok(errors.length === 0, '8: no page errors' + (errors.length ? ' (' + errors[0] + ')' : ''));
+    await ctx.close();
+}
+// ---- 9. Cancel returns to the welcome
+{
+    const { ctx, page } = await boot('');
+    await page.click('#ps-welcome-link'); await page.waitForTimeout(300);
+    await page.click('#ps-linkopen-cancel'); await page.waitForTimeout(300);
+    const s = await state()(page);
+    ok(s.welcome && !(await page.evaluate(() => document.getElementById('ps-linkopen-dialog').style.display === 'flex')), '9: Cancel closes the dialog and brings the welcome back');
+    await ctx.close();
+}
 await browser.close();
 console.log(failures ? 'open-by-link: FAIL (' + failures + ')' : 'open-by-link: PASS');
 process.exit(failures ? 1 : 0);

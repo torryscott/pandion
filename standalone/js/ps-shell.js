@@ -27907,6 +27907,16 @@
         try { el("ps-paste").focus(); } catch (ignore) {}
       }, 0);
     });
+    // From a link (Torry, Sep 21 2026): the same fetch path as ?data=,
+    // with the link typed or pasted instead of arriving on the address.
+    el("ps-welcome-link").addEventListener("click", function () {
+      hideWelcome();
+      el("ps-linkopen-url").value = "";
+      el("ps-linkopen-status").textContent = "";
+      el("ps-linkopen-open").disabled = false;
+      openShellDialog("ps-linkopen-dialog");
+      window.setTimeout(function () { try { el("ps-linkopen-url").focus(); } catch (ignore) {} }, 0);
+    });
     // Punch list 20: three cards, one handler. The first still carries
     // #ps-welcome-sample, so every existing path (and probe) that clicks it
     // keeps loading the dose-response study.
@@ -28035,11 +28045,44 @@
       shellTrapTab(this, e);
     });
     el("ps-openlink-open").addEventListener("click", function () {
-      if (OPEN_LINK_REQ) openFromLink(OPEN_LINK_REQ);
+      if (OPEN_LINK_REQ) openFromLink(OPEN_LINK_REQ, "ps-openlink");
     });
+    // The typed-link dialog (the welcome's From a link).
+    var typed = el("ps-linkopen-dialog");
+    if (!typed) return;
+    function typedDismiss() {
+      closeShellDialog("ps-linkopen-dialog");
+      showWelcome(true);
+    }
+    function typedGo() {
+      var raw = String(el("ps-linkopen-url").value || "").trim();
+      var u = null;
+      try { u = new URL(raw); } catch (e) { u = null; }
+      if (!u || (u.protocol !== "https:" && u.protocol !== "http:")) {
+        el("ps-linkopen-status").style.color = "#7a2e2e";
+        el("ps-linkopen-status").textContent = "Enter a full link that starts with https://";
+        return;
+      }
+      var kind = /\.(pand|pnd|pandion|json)$/i.test(u.pathname) ? "project" : "data";
+      openFromLink({ kind: kind, url: u.href }, "ps-linkopen");
+    }
+    el("ps-linkopen-cancel").addEventListener("click", typedDismiss);
+    typed.addEventListener("pointerdown", function (e) { if (e.target === this) typedDismiss(); });
+    typed.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") { e.preventDefault(); typedDismiss(); return; }
+      shellTrapTab(this, e);
+    });
+    el("ps-linkopen-url").addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); typedGo(); }
+    });
+    el("ps-linkopen-open").addEventListener("click", typedGo);
   }
-  function openFromLink(req) {
-    var status = el("ps-openlink-status"), btn = el("ps-openlink-open");
+  // `prefix` names the dialog whose status line and Open button report the
+  // fetch: "ps-openlink" (a link the app arrived on) or "ps-linkopen" (a
+  // link typed into the welcome's From a link).
+  function openFromLink(req, prefix) {
+    prefix = prefix || "ps-openlink";
+    var status = el(prefix + "-status"), btn = el(prefix + "-open");
     btn.disabled = true;
     status.style.color = "#4a5a6a";
     status.textContent = "Fetching\u2026";
@@ -28067,7 +28110,7 @@
       try { file = new File([blob], name, { type: blob.type || "" }); }
       catch (e) { file = blob; file.name = name; }
       PENDING_LINK_SOURCE = req.url;
-      closeShellDialog("ps-openlink-dialog");
+      closeShellDialog(prefix + "-dialog");
       OPEN_LINK_REQ = null;
       cleanLinkFromAddress();
       readPickedFile(file);

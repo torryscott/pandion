@@ -5492,6 +5492,13 @@
               <span>Start from rows copied out of a spreadsheet</span>
             </span>
           </button>
+          <button type="button" class="ps-launch-action" id="ps-welcome-link">
+            <span class="ps-launch-icon"><svg class="ps-icn" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.1 0l2.8-2.8a5 5 0 0 0-7.1-7.1L11.5 4.4"/><path d="M14 11a5 5 0 0 0-7.1 0l-2.8 2.8a5 5 0 0 0 7.1 7.1l1.3-1.3"/></svg></span>
+            <span class="ps-launch-copy">
+              <strong>From a link</strong>
+              <span>A CSV, Excel, .omv or project file on the web</span>
+            </span>
+          </button>
         </div>
       </section>
       <div>
@@ -5992,6 +5999,29 @@
       <p id="ps-openlink-status" role="status" style="margin:8px 0 0;min-height:18px;color:#7a2e2e;"></p>
       <div class="ps-guided-empty-actions" style="justify-content:flex-start;margin-top:12px;">
         <button type="button" class="ps-btn ps-primary" id="ps-openlink-open">Open</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="ps-linkopen-dialog" class="ps-dialog-overlay" role="dialog"
+     aria-modal="true" aria-labelledby="ps-linkopen-title">
+  <div class="ps-dialog-card" style="max-width:560px;">
+    <div class="ps-dialog-head">
+      <div>
+        <h2 id="ps-linkopen-title">Open from a link</h2>
+        <p>A CSV, TSV, Excel, .omv or Pandion project file on the web.</p>
+      </div>
+      <button type="button" class="ps-btn ps-dialog-close"
+              id="ps-linkopen-cancel">Cancel</button>
+    </div>
+    <div class="ps-dialog-body">
+      <label for="ps-linkopen-url" style="display:block;margin:0 0 6px;font-weight:600;">Link</label>
+      <input type="url" id="ps-linkopen-url" placeholder="https://" autocomplete="off" spellcheck="false"
+             style="width:100%;box-sizing:border-box;font:inherit;padding:7px 9px;border:1px solid var(--ps-tint-line-1);border-radius:6px;">
+      <p style="margin:8px 0 0;">Your browser fetches the file and it stays on this machine; nothing is uploaded. The site has to allow other pages to read the file, which most open-data hosts do.</p>
+      <p id="ps-linkopen-status" role="status" style="margin:8px 0 0;min-height:18px;color:#7a2e2e;"></p>
+      <div class="ps-guided-empty-actions" style="justify-content:flex-start;margin-top:12px;">
+        <button type="button" class="ps-btn ps-primary" id="ps-linkopen-open">Open</button>
       </div>
     </div>
   </div>
