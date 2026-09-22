@@ -2190,6 +2190,7 @@
     height: 28px; color: var(--ps-ink-2); background: var(--ps-s0);
     border: 1px solid var(--ps-l3); border-radius: var(--ps-r-sm); font-size: 11px;
   }
+  .ps-import-source { font-weight: 600; }
   #ps-import-preview {
     display: none; margin-top: 10px; border: 1px solid var(--ps-l2b);
     border-radius: var(--ps-r-md); overflow: hidden;
@@ -6496,7 +6497,7 @@
         </label>
       </div>
       <div style="margin-top:6px;display:flex;gap:8px;">
-        <button type="button" class="ps-btn ps-primary" id="ps-paste-use">Preview data</button>
+        <button type="button" class="ps-btn ps-primary" id="ps-paste-use" style="display:none;">Preview pasted rows</button>
         <button type="button" class="ps-btn ps-primary" id="ps-import-use"
                 style="display:none;">Import data</button>
         <button type="button" class="ps-btn" id="ps-sample">Use sample data</button>

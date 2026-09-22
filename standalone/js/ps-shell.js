@@ -27116,7 +27116,14 @@
         '<button type="button" data-header-use>Use row ' +
         (parsed.headerGuess.index + 1) + " as the variable names</button></div>";
     }
+    // The line says where the rows came from (Torry, Sep 21 2026: a
+    // link-fetched file previewed beside "no file selected" looked like it
+    // came from nowhere).
+    var srcLabel = IMPORT_SOURCE_FILE ? String(IMPORT_SOURCE_FILE.name || "")
+      : (IMPORT_SOURCE_NAME === "pasted-data" ? "Pasted rows" : IMPORT_SOURCE_NAME);
+    if (PENDING_LINK_SOURCE) srcLabel += " from " + linkHost(PENDING_LINK_SOURCE);
     var h = guessHtml + '<div class="ps-import-summary">' +
+      '<span class="ps-import-source">' + escHtml(srcLabel) + "</span> \u00b7 " +
       shapeText(parsed.rows.length, parsed.header.length, "\u00d7") +
       notes + "</div><div class=\"ps-import-table-wrap\">" +
       '<table class="ps-import-table"><thead><tr>';
@@ -27280,11 +27287,19 @@
     hideWelcome();
     if (!keepImport) resetImportPreview();
     el("ps-loader").style.display = "flex";
+    syncPasteButton();
     shellSetPageModal(true);
     window.setTimeout(function () {
       var first = shellDialogTabbables(el("ps-loader"))[0];
       try { if (first) first.focus(); } catch (ignore) {}
     }, 0);
+  }
+  // The Preview button previews the paste box and nothing else, so it shows
+  // only while the box holds something (Torry, Sep 21 2026: with a file
+  // already previewed it repainted the same preview and read as broken).
+  function syncPasteButton() {
+    var has = !!String(el("ps-paste").value || "").trim();
+    el("ps-paste-use").style.display = has ? "" : "none";
   }
   function closeLoader() {
     PENDING_LINK_SOURCE = null;   // a cancelled link import tags nothing later
@@ -27367,6 +27382,7 @@
       if (!f) return;
       readPickedFile(f);
     });
+    el("ps-paste").addEventListener("input", syncPasteButton);
     el("ps-paste-use").addEventListener("click", function () {
       // An empty box used to fall through to the parser, which reported
       // "There is nothing to read in that file: it is empty" - a sentence
