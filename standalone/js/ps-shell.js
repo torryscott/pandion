@@ -4418,11 +4418,11 @@
   // can reload it. Plain JSON on purpose: transparent and future-proof.
   // The identity carries the product's real name (Pandion Plots); the
   // loader sniffs CONTENT, so .pand / .pnd / .pandion / .json all open.
-  function projectFileText() {
+  function projectFileText(snapOverride) {
     // Every .pand the app writes goes through here, so this is where a
     // pending colour has to be banked rather than at one call site.
     bankPendingColor();
-    var body = projectSnapshot();
+    var body = snapOverride || projectSnapshot();
     return JSON.stringify({
       kind: "pandion-plots-project",
       formatVersion: 3,
@@ -27968,6 +27968,7 @@
     el("ps-doc-name").addEventListener("dblclick", renameProjectInline);
     wireOpenLinkDialog();
     wireFindDataDialog();
+    wireShareDialog();
     var linkReq = linkRequestFromLocation();
     if (linkReq) offerOpenLink(linkReq);
     else showWelcome(false);
@@ -27982,9 +27983,15 @@
   // load anything on its own, and the fetched file rides the ordinary
   // import path (formats, size gate, the replaced-project offer).
   function linkRequestFromLocation() {
-    var params;
-    try { params = new URLSearchParams(window.location.search || ""); }
-    catch (e) { return null; }
+    var params, hashParams;
+    try {
+      params = new URLSearchParams(window.location.search || "");
+      hashParams = new URLSearchParams(String(window.location.hash || "").replace(/^#/, ""));
+    } catch (e) { return null; }
+    // Share a link: #pand=<packed project> carries the whole project after
+    // the #, and #key=<key> unlocks a locked ?project= file.
+    var pand = hashParams.get("pand");
+    if (pand) return { kind: "carried", blob: pand };
     var ex = params.get("example");
     if (ex && exampleById(ex) && exampleById(ex).id === ex) return { kind: "example", id: ex };
     var kinds = ["project", "data"];
@@ -27994,7 +28001,9 @@
       var u = null;
       try { u = new URL(raw, window.location.href); } catch (e2) { u = null; }
       if (!u || (u.protocol !== "https:" && u.protocol !== "http:")) continue;
-      return { kind: kinds[i], url: u.href };
+      var req = { kind: kinds[i], url: u.href };
+      if (kinds[i] === "project" && hashParams.get("key")) req.key = hashParams.get("key");
+      return req;
     }
     return null;
   }
@@ -28009,7 +28018,10 @@
   // project instead of asking again.
   function cleanLinkFromAddress() {
     try {
-      window.history.replaceState(null, "", window.location.pathname + window.location.hash);
+      var hp = new URLSearchParams(String(window.location.hash || "").replace(/^#/, ""));
+      hp.delete("pand"); hp.delete("key");
+      var rest = hp.toString();
+      window.history.replaceState(null, "", window.location.pathname + (rest ? "#" + rest : ""));
     } catch (e) {}
   }
   var OPEN_LINK_REQ = null;
@@ -28021,13 +28033,17 @@
       return;
     }
     OPEN_LINK_REQ = req;
-    var isProject = req.kind === "project";
-    el("ps-openlink-title").textContent = isProject ? "Open a project from a link?" : "Open data from a link?";
-    el("ps-openlink-sub").textContent = isProject
-      ? "This link points at a Pandion Plots project file: data, charts and notebook."
+    var isProject = req.kind === "project", carried = req.kind === "carried";
+    el("ps-openlink-title").textContent = carried ? "Open a shared project?"
+      : isProject ? "Open a project from a link?" : "Open data from a link?";
+    el("ps-openlink-sub").textContent = carried
+      ? "This link carries a Pandion Plots project inside it. Nothing is fetched from anywhere."
+      : req.key ? "This link points at a locked Pandion Plots project file. The key that opens it travels in the link."
+      : isProject ? "This link points at a Pandion Plots project file: data, charts and notebook."
       : "This link points at a data file.";
-    el("ps-openlink-host").textContent = linkHost(req.url);
-    el("ps-openlink-url").textContent = req.url;
+    el("ps-openlink-host").textContent = carried ? "this link itself" : linkHost(req.url);
+    el("ps-openlink-url").textContent = carried
+      ? String(req.blob).length.toLocaleString() + " characters of packed project" : req.url;
     el("ps-openlink-replace").hidden = !projectHasWork();
     el("ps-openlink-status").textContent = "";
     el("ps-openlink-open").disabled = false;
@@ -28050,7 +28066,9 @@
       shellTrapTab(this, e);
     });
     el("ps-openlink-open").addEventListener("click", function () {
-      if (OPEN_LINK_REQ) openFromLink(OPEN_LINK_REQ, "ps-openlink");
+      if (!OPEN_LINK_REQ) return;
+      if (OPEN_LINK_REQ.kind === "carried") openCarriedLink(OPEN_LINK_REQ, "ps-openlink");
+      else openFromLink(OPEN_LINK_REQ, "ps-openlink");
     });
     // The typed-link dialog (the welcome's From a link).
     var typed = el("ps-linkopen-dialog");
@@ -28107,11 +28125,22 @@
     }).then(function (blob) {
       if (blob.size > DATA_REFUSE_BYTES)
         throw new Error("That file is " + Math.round(blob.size / 1048576) + " MB, too large to read in a browser tab. Save a smaller extract and link to that.");
+      // A locked file (Share a link, Locked with the link) is text that
+      // opens only with the key riding after the # in the link.
+      if (req.key || /\.locked$/i.test(String(req.url).split(/[?#]/)[0]))
+        return blob.text().then(function (text) {
+          if (!isLockedText(text)) return blob;
+          if (!req.key) throw new Error("This file is locked, and the link carries no key. Ask for the link that was made when the file was locked.");
+          return unlockText(text, req.key).then(function (plain) { return new Blob([plain], { type: "application/json" }); });
+        });
+      return blob;
+    }).then(function (blob) {
       var name = "";
       try { name = decodeURIComponent(new URL(req.url).pathname.split("/").pop() || ""); } catch (e) {}
       // A collection knows the file's real name where the link does not
       // end in it (Zenodo's links end in /content).
       if (req.name) name = String(req.name);
+      name = name.replace(/\.locked$/i, "");
       if (req.kind === "project") {
         if (!/\.(pand|pnd|pandion|json)$/i.test(name)) name = (name || "project") + ".pand";
       } else if (!/\.[a-z0-9]{2,5}$/i.test(name)) name = (name || "data") + ".csv";
@@ -28294,7 +28323,9 @@
     return parts.join(", ");
   }
   function findOpenButtonHtml(url, name) {
-    return '<button type="button" class="ps-btn ps-primary" data-find-open="' + escHtml(url) +
+    return '<button type="button" class="ps-btn" data-find-copylink="' + escHtml(url) +
+      '" data-find-name="' + escHtml(name) + '" data-tip="Copy a link that opens this in Pandion Plots">Copy link</button>' +
+      '<button type="button" class="ps-btn ps-primary" data-find-open="' + escHtml(url) +
       '" data-find-name="' + escHtml(name) + '">Open</button>';
   }
   function findAboutHtml(url) {
@@ -28424,6 +28455,13 @@
     });
     el("ps-finddata-go").addEventListener("click", function () { findRun(); });
     el("ps-finddata-results").addEventListener("click", function (e) {
+      var c = e.target.closest ? e.target.closest("[data-find-copylink]") : null;
+      if (c) {
+        var cu = findSafeUrl(c.getAttribute("data-find-copylink"));
+        var ck = /\.(pand|pnd|pandion)$/i.test(c.getAttribute("data-find-name") || "") ? "project" : "data";
+        if (cu) copyLinkText(appLinkFor(ck, cu));
+        return;
+      }
       var b = e.target.closest ? e.target.closest("[data-find-open]") : null;
       if (!b || b.disabled) return;
       var url = findSafeUrl(b.getAttribute("data-find-open"));
@@ -28436,6 +28474,438 @@
         url: url, name: name,
         onFail: function () { b.disabled = false; b.textContent = label; }
       }, "ps-finddata");
+    });
+  }
+
+  // ---- Share a link (Torry, Sep 21 2026) ----
+  // Three kinds of link, none of them needing a server of ours:
+  //   carried: the project travels inside the address after the #, which
+  //     browsers never send to any server, compressed with deflate. The link
+  //     is the file; a frozen snapshot.
+  //   hosted: ?project=<address> of a file on GitHub (a repository file, a
+  //     gist, GitHub Pages), read through openFromLink. Public and Unlisted
+  //     are plain files; Locked with the link is the file scrambled here
+  //     with AES-GCM before it leaves the browser, the key riding after the
+  //     # so the host keeps only random bytes and our server never sees it.
+  //   collection: ?data=<address> of an open-data hit, offered beside Open.
+  var SHARE_MODE = "carry";
+  var SHARE_GH_TOKEN = "";        // session only, never persisted
+  var SHARE_LOCK = null;          // {text, key, name} of the last locked copy made here
+  var SHARE_GH_CHECKED = null;    // the last address that passed Check
+  var SHARE_FREEZE_SHA = null;    // {url, sha} from the commits API
+  var SHARE_LONG_CHARS = 10000;
+  var LOCK_MAGIC = "PANDION-LOCKED 1";
+  function appLinkBase() { return String(window.location.href).split(/[?#]/)[0]; }
+  function appLinkFor(kind, url) {
+    return appLinkBase() + "?" + kind + "=" +
+      encodeURIComponent(url).replace(/%2F/gi, "/").replace(/%3A/gi, ":");
+  }
+  function bytesToB64u(bytes) {
+    var s = "", chunk = 8192;
+    for (var i = 0; i < bytes.length; i += chunk)
+      s += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+  function b64uToBytes(s) {
+    s = String(s || "").replace(/-/g, "+").replace(/_/g, "/");
+    while (s.length % 4) s += "=";
+    var bin = atob(s), out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  function deflateText(text) {
+    if (typeof CompressionStream !== "function")
+      return Promise.reject(new Error("This browser cannot make a carried link (no compression support)."));
+    var stream = new Blob([text]).stream().pipeThrough(new CompressionStream("deflate-raw"));
+    return new Response(stream).arrayBuffer().then(function (buf) { return new Uint8Array(buf); });
+  }
+  function inflateBytes(bytes) {
+    if (typeof DecompressionStream !== "function")
+      return Promise.reject(new Error("This browser cannot open a carried link (no compression support)."));
+    var stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+    return new Response(stream).text();
+  }
+  function subtleOrRefuse() {
+    if (!window.crypto || !window.crypto.subtle)
+      return Promise.reject(new Error("Locking needs a secure page (https)."));
+    return Promise.resolve(window.crypto.subtle);
+  }
+  function lockText(text) {
+    var keyBytes = window.crypto.getRandomValues(new Uint8Array(16));
+    var iv = window.crypto.getRandomValues(new Uint8Array(12));
+    return subtleOrRefuse().then(function (subtle) {
+      return subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, ["encrypt"]).then(function (k) {
+        return subtle.encrypt({ name: "AES-GCM", iv: iv }, k, new TextEncoder().encode(text));
+      });
+    }).then(function (ct) {
+      return { text: LOCK_MAGIC + "\n" + bytesToB64u(iv) + "\n" + bytesToB64u(new Uint8Array(ct)) + "\n",
+               key: bytesToB64u(keyBytes) };
+    });
+  }
+  function isLockedText(text) { return String(text || "").slice(0, LOCK_MAGIC.length) === LOCK_MAGIC; }
+  function unlockText(text, keyB64u) {
+    var lines = String(text || "").split("\n");
+    if (lines[0] !== LOCK_MAGIC || lines.length < 3)
+      return Promise.reject(new Error("This is not a locked Pandion Plots file."));
+    var iv, ct, keyBytes;
+    try { iv = b64uToBytes(lines[1]); ct = b64uToBytes(lines[2]); keyBytes = b64uToBytes(keyB64u); }
+    catch (e) { return Promise.reject(new Error("The key in this link is damaged.")); }
+    if (keyBytes.length !== 16 || iv.length !== 12)
+      return Promise.reject(new Error("The key in this link is damaged."));
+    return subtleOrRefuse().then(function (subtle) {
+      return subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, ["decrypt"]).then(function (k) {
+        return subtle.decrypt({ name: "AES-GCM", iv: iv }, k, ct);
+      });
+    }).then(function (buf) { return new TextDecoder().decode(buf); }, function (e) {
+      if (e && /secure page/.test(String(e.message))) throw e;
+      throw new Error("The key in this link does not fit this file.");
+    });
+  }
+  function copyLinkText(text) {
+    function done() { showToast("Link copied"); }
+    function failed() { showToast("Could not copy the link; select it and copy by hand", true); }
+    if (window.navigator.clipboard && window.navigator.clipboard.writeText) {
+      window.navigator.clipboard.writeText(text).then(done, failed);
+      return;
+    }
+    var area = document.createElement("textarea");
+    area.value = text; area.style.position = "fixed"; area.style.left = "-9999px";
+    document.body.appendChild(area); area.select();
+    try { document.execCommand("copy"); done(); } catch (e) { failed(); }
+    document.body.removeChild(area);
+  }
+  function shareDownloadText(name, text) {
+    var blob = new Blob([text], { type: "text/plain" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    window.setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+  }
+  // The snapshot a share carries: the whole project, or just the active
+  // chart with the table (no Notebook, no other documents).
+  function shareSnapshot(chartOnly) {
+    var snap = projectSnapshot();
+    if (!chartOnly) return snap;
+    var ch = activeChart();
+    if (isLayoutTab(ch)) return snap;
+    var out = {};
+    for (var k in snap) if (Object.prototype.hasOwnProperty.call(snap, k)) out[k] = snap[k];
+    out.charts = [ch];
+    out.pinboards = [];
+    out.activeChart = ch.id;
+    return out;
+  }
+  function shareChartOnlyOffered() {
+    return PROJECT.charts.length > 1 && !isLayoutTab(activeChart());
+  }
+  function shareProjectName() {
+    return String(PROJECT.name || (PROJECT.table && PROJECT.table.name) || "project");
+  }
+  function openShareDialog() {
+    if (!el("ps-share-dialog")) return;
+    el("ps-share-chartonly").checked = false;
+    el("ps-share-chartonly-row").hidden = !shareChartOnlyOffered();
+    el("ps-share-token").value = SHARE_GH_TOKEN;
+    el("ps-share-addr").value = "";
+    el("ps-share-gh-link").value = "";
+    el("ps-share-gh-copy").disabled = true;
+    el("ps-share-freeze").checked = false;
+    el("ps-share-freeze-row").hidden = true;
+    SHARE_GH_CHECKED = null; SHARE_FREEZE_SHA = null;
+    shareStatus("", false);
+    var src = findSafeUrl(PROJECT.sourceUrl);
+    var srcLine = el("ps-share-source");
+    if (src) {
+      srcLine.hidden = false;
+      srcLine.innerHTML = "This project was opened from " + escHtml(linkHost(src)) +
+        '. <button type="button" class="ps-share-inline" id="ps-share-source-copy">Copy a link that opens that file</button>';
+    } else { srcLine.hidden = true; srcLine.innerHTML = ""; }
+    shareSetMode(SHARE_MODE);
+    openShellDialog("ps-share-dialog");
+  }
+  function shareSetMode(mode) {
+    SHARE_MODE = mode === "github" ? "github" : "carry";
+    var tabs = document.querySelectorAll("#ps-share-dialog [data-share-mode]");
+    for (var i = 0; i < tabs.length; i++)
+      tabs[i].setAttribute("aria-selected", tabs[i].getAttribute("data-share-mode") === SHARE_MODE ? "true" : "false");
+    el("ps-share-carry").hidden = SHARE_MODE !== "carry";
+    el("ps-share-github").hidden = SHARE_MODE !== "github";
+    if (SHARE_MODE === "carry") shareBuildCarried();
+    else shareSyncVisibility();
+  }
+  function shareStatus(msg, isError) {
+    var s = el("ps-share-gh-status");
+    s.style.color = isError ? "#7a2e2e" : "#4a5a6a";
+    s.textContent = msg || "";
+  }
+  var SHARE_CARRY_SEQ = 0;
+  function shareBuildCarried() {
+    var seq = ++SHARE_CARRY_SEQ;
+    var chartOnly = el("ps-share-chartonly").checked && shareChartOnlyOffered();
+    var snap = shareSnapshot(chartOnly);
+    var text = projectFileText(snap);
+    var link = el("ps-share-carry-link"), size = el("ps-share-carry-size"), warn = el("ps-share-carry-warn");
+    var copy = el("ps-share-carry-copy");
+    link.value = ""; copy.disabled = true; warn.hidden = true;
+    size.textContent = "Making the link\u2026";
+    deflateText(text).then(function (bytes) {
+      if (seq !== SHARE_CARRY_SEQ) return;
+      var href = appLinkBase() + "#pand=" + bytesToB64u(bytes);
+      link.value = href;
+      copy.disabled = false;
+      var t = snap.table, docs = snap.charts.length;
+      size.textContent = "Carries " + docs + (docs === 1 ? " document" : " documents") +
+        " and the data table (" + shapeText((t.raw[t.order[0]] || []).length, t.order.length, "\u00d7", true) +
+        "): " + href.length.toLocaleString() + " characters.";
+      if (href.length > SHARE_LONG_CHARS) {
+        warn.hidden = false;
+        warn.textContent = "A link this long breaks in some email programs. It works in a browser, a chat or a course page. For email, host the file on GitHub instead.";
+      }
+    }, function (e) {
+      if (seq !== SHARE_CARRY_SEQ) return;
+      size.textContent = String(e && e.message || e);
+    });
+  }
+  function shareVisibility() {
+    var r = document.querySelector('#ps-share-dialog input[name="ps-share-vis"]:checked');
+    return r ? r.value : "public";
+  }
+  function shareSyncVisibility() {
+    var vis = shareVisibility();
+    var hint = el("ps-share-manual-hint"), dl = el("ps-share-download"), create = el("ps-share-create");
+    create.textContent = vis === "public" ? "Create a public gist" : "Create a secret gist";
+    dl.hidden = vis !== "locked";
+    if (vis === "locked")
+      hint.textContent = "Save the locked copy, upload it to GitHub yourself (a secret gist, or a repository), then paste the file's address here. The key is added to the link, never to the file.";
+    else if (vis === "unlisted")
+      hint.textContent = "Make a secret gist of the saved project file yourself, click Raw there, and paste that address here.";
+    else
+      hint.textContent = "Add the saved project file to a public repository or gist yourself, then paste the file's address here; the page address works too.";
+    SHARE_GH_CHECKED = null;
+    el("ps-share-gh-link").value = "";
+    el("ps-share-gh-copy").disabled = true;
+    el("ps-share-freeze-row").hidden = true;
+    shareStatus("", false);
+  }
+  // github.com/<u>/<r>/blob/<ref>/<path> is a web page, not the file; the
+  // raw route serves the bytes and allows a browser on another origin.
+  function shareNormalizeAddress(raw) {
+    var u = null;
+    try { u = new URL(String(raw || "").trim()); } catch (e) { return ""; }
+    if (u.protocol !== "https:" && u.protocol !== "http:") return "";
+    if (u.host === "github.com") {
+      var m = u.pathname.match(/^\/([^\/]+)\/([^\/]+)\/(?:blob|raw)\/(.+)$/);
+      if (m) return "https://raw.githubusercontent.com/" + m[1] + "/" + m[2] + "/" + m[3];
+    }
+    return u.href;
+  }
+  function shareRawParts(url) {
+    var u = null;
+    try { u = new URL(url); } catch (e) { return null; }
+    if (u.host !== "raw.githubusercontent.com") return null;
+    var m = u.pathname.match(/^\/([^\/]+)\/([^\/]+)\/(?:refs\/heads\/)?([^\/]+)\/(.+)$/);
+    if (!m) return null;
+    return { user: m[1], repo: m[2], ref: m[3], path: m[4], pinned: /^[0-9a-f]{40}$/i.test(m[3]) };
+  }
+  function shareCheckAddress() {
+    var url = shareNormalizeAddress(el("ps-share-addr").value);
+    var vis = shareVisibility();
+    SHARE_GH_CHECKED = null; SHARE_FREEZE_SHA = null;
+    el("ps-share-gh-link").value = ""; el("ps-share-gh-copy").disabled = true;
+    el("ps-share-freeze-row").hidden = true;
+    if (!url) { shareStatus("Enter a full address that starts with https://", true); return; }
+    el("ps-share-addr").value = url;
+    shareStatus("Checking\u2026", false);
+    var host = linkHost(url);
+    fetch(url, { mode: "cors", cache: "no-store" }).then(function (r) {
+      if (!r.ok) throw new Error("The server at " + host + " answered " + r.status + ".");
+      var len = Number(r.headers.get("content-length") || 0);
+      if (len > DATA_REFUSE_BYTES) throw new Error("That file is too large to open in a browser tab.");
+      return r.text();
+    }).then(function (text) {
+      var locked = isLockedText(text);
+      var proj = locked ? null : parseProjectFile(text);
+      var kind = (locked || (proj && !proj.error)) ? "project" : "data";
+      if (vis === "locked" && !locked)
+        throw new Error("That file is not locked. Save the locked copy above and upload that instead.");
+      if (locked && !(SHARE_LOCK && SHARE_LOCK.text === text))
+        throw new Error("That file is locked, but this window does not hold its key. The key exists only in the link made when the file was locked.");
+      if (vis !== "locked" && locked)
+        throw new Error("That file is locked. Choose Locked with the link to share it.");
+      var what = locked ? "a locked project"
+        : (kind === "project" ? "a Pandion Plots project" : "a data file");
+      var link = appLinkFor(kind, url) + (locked ? "#key=" + SHARE_LOCK.key : "");
+      SHARE_GH_CHECKED = { url: url, kind: kind, locked: locked };
+      el("ps-share-gh-link").value = link;
+      el("ps-share-gh-copy").disabled = false;
+      var parts = shareRawParts(url);
+      el("ps-share-freeze-row").hidden = !parts || parts.pinned;
+      shareStatus("Reachable from a browser: " + what + " on " + host + "." +
+        (parts && !parts.pinned ? " The link follows the file as it changes on " + parts.ref + "." : ""), false);
+    }).catch(function (e) {
+      var msg = String(e && e.message || e);
+      if (/Failed to fetch|NetworkError|Load failed|TypeError/i.test(msg))
+        msg = "A browser cannot read that address from another site (" + host + " sends no CORS header). On GitHub, use a repository file, a gist or GitHub Pages; release assets refuse.";
+      shareStatus(msg, true);
+    });
+  }
+  function shareApplyFreeze() {
+    var c = SHARE_GH_CHECKED;
+    if (!c) return;
+    var parts = shareRawParts(c.url);
+    var keyTail = c.locked && SHARE_LOCK ? "#key=" + SHARE_LOCK.key : "";
+    if (!el("ps-share-freeze").checked || !parts) {
+      el("ps-share-gh-link").value = appLinkFor(c.kind, c.url) + keyTail;
+      return;
+    }
+    function apply(sha) {
+      var pinned = "https://raw.githubusercontent.com/" + parts.user + "/" + parts.repo + "/" + sha + "/" + parts.path;
+      el("ps-share-gh-link").value = appLinkFor(c.kind, pinned) + keyTail;
+      shareStatus("Frozen at " + sha.slice(0, 7) + ": the link opens this version of the file whatever changes later.", false);
+    }
+    if (SHARE_FREEZE_SHA && SHARE_FREEZE_SHA.url === c.url) { apply(SHARE_FREEZE_SHA.sha); return; }
+    shareStatus("Asking GitHub for the file's current version\u2026", false);
+    var api = "https://api.github.com/repos/" + encodeURIComponent(parts.user) + "/" + encodeURIComponent(parts.repo) +
+      "/commits?per_page=1&sha=" + encodeURIComponent(parts.ref) + "&path=" + encodeURIComponent(parts.path);
+    fetch(api, { mode: "cors", headers: { Accept: "application/vnd.github+json" } }).then(function (r) {
+      if (!r.ok) throw new Error("GitHub answered " + r.status + " when asked for the file's version.");
+      return r.json();
+    }).then(function (j) {
+      var sha = j && j[0] && j[0].sha;
+      if (!/^[0-9a-f]{40}$/i.test(String(sha || ""))) throw new Error("GitHub did not report a version for that file.");
+      SHARE_FREEZE_SHA = { url: c.url, sha: sha };
+      apply(sha);
+    }).catch(function (e) {
+      el("ps-share-freeze").checked = false;
+      shareStatus(String(e && e.message || e), true);
+    });
+  }
+  function shareMakeLocked() {
+    var text = projectFileText(shareSnapshot(false));
+    return lockText(text).then(function (r) {
+      SHARE_LOCK = { text: r.text, key: r.key, name: shareProjectName() };
+      return SHARE_LOCK;
+    });
+  }
+  function shareCreateGist() {
+    var token = String(el("ps-share-token").value || "").trim();
+    if (!token) { shareStatus("Paste a GitHub token first, or use a file you put there yourself.", true); return; }
+    SHARE_GH_TOKEN = token;
+    var vis = shareVisibility();
+    var btn = el("ps-share-create");
+    btn.disabled = true;
+    shareStatus("Creating the gist on GitHub\u2026", false);
+    var base = projectFileName().replace(/\.pand$/i, "");
+    var prep = vis === "locked"
+      ? shareMakeLocked().then(function (l) { return { name: base + ".pand.locked", content: l.text, key: l.key }; })
+      : Promise.resolve({ name: base + ".pand", content: projectFileText(shareSnapshot(false)), key: "" });
+    prep.then(function (f) {
+      var files = {}; files[f.name] = { content: f.content };
+      return fetch("https://api.github.com/gists", {
+        method: "POST", mode: "cors",
+        headers: { Authorization: "Bearer " + token, Accept: "application/vnd.github+json",
+                   "Content-Type": "application/json", "X-GitHub-Api-Version": "2022-11-28" },
+        body: JSON.stringify({ description: "Pandion Plots project: " + shareProjectName(),
+                               public: vis === "public", files: files })
+      }).then(function (r) {
+        if (r.status === 401) throw new Error("GitHub refused that token.");
+        if (r.status === 403 || r.status === 404) throw new Error("That token cannot create gists. It needs the Gists permission.");
+        if (!r.ok) throw new Error("GitHub answered " + r.status + ".");
+        return r.json();
+      }).then(function (j) {
+        var entry = j && j.files && j.files[f.name];
+        var raw = findSafeUrl(entry && entry.raw_url);
+        if (!raw) throw new Error("GitHub created the gist but reported no file address.");
+        // raw_url names the revision; dropping it makes the link follow
+        // later edits to the gist, the same as a repository file on a branch.
+        var live = raw.replace(/\/raw\/[0-9a-f]{40}\//i, "/raw/");
+        var link = appLinkFor("project", live) + (f.key ? "#key=" + f.key : "");
+        el("ps-share-gh-link").value = link;
+        el("ps-share-gh-copy").disabled = false;
+        el("ps-share-freeze-row").hidden = true;
+        SHARE_GH_CHECKED = { url: live, kind: "project", locked: !!f.key };
+        var page = findSafeUrl(j.html_url);
+        el("ps-share-gh-status").style.color = "#4a5a6a";
+        el("ps-share-gh-status").innerHTML = "Created " + (vis === "public" ? "a public" : "a secret") + " gist" +
+          (page ? ' (<a href="' + escHtml(page) + '" target="_blank" rel="noopener">open it on GitHub</a>)' : "") +
+          (f.key ? ". GitHub holds only the locked copy; the key is in the link." : ".");
+      });
+    }).catch(function (e) {
+      var msg = String(e && e.message || e);
+      if (/Failed to fetch|NetworkError|Load failed|TypeError/i.test(msg)) msg = "Could not reach api.github.com. Check the connection and try again.";
+      shareStatus(msg, true);
+    }).then(function () { btn.disabled = false; });
+  }
+  function wireShareDialog() {
+    var dlg = el("ps-share-dialog");
+    if (!dlg) return;
+    function dismiss() { closeShellDialog("ps-share-dialog"); }
+    el("ps-share-close").addEventListener("click", dismiss);
+    dlg.addEventListener("pointerdown", function (e) { if (e.target === this) dismiss(); });
+    dlg.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") { e.preventDefault(); dismiss(); return; }
+      shellTrapTab(this, e);
+    });
+    var tabs = dlg.querySelectorAll("[data-share-mode]");
+    for (var i = 0; i < tabs.length; i++)
+      tabs[i].addEventListener("click", function () { shareSetMode(this.getAttribute("data-share-mode")); });
+    el("ps-share-chartonly").addEventListener("change", shareBuildCarried);
+    el("ps-share-carry-copy").addEventListener("click", function () {
+      if (el("ps-share-carry-link").value) copyLinkText(el("ps-share-carry-link").value);
+    });
+    var radios = dlg.querySelectorAll('input[name="ps-share-vis"]');
+    for (i = 0; i < radios.length; i++) radios[i].addEventListener("change", shareSyncVisibility);
+    el("ps-share-create").addEventListener("click", shareCreateGist);
+    el("ps-share-download").addEventListener("click", function () {
+      var btn = this; btn.disabled = true;
+      shareMakeLocked().then(function (l) {
+        shareDownloadText(projectFileName().replace(/\.pand$/i, "") + ".pand.locked", l.text);
+        shareStatus("Saved the locked copy. Upload it to GitHub, then paste its address below and click Check.", false);
+      }, function (e) { shareStatus(String(e && e.message || e), true); })
+        .then(function () { btn.disabled = false; });
+    });
+    el("ps-share-check").addEventListener("click", shareCheckAddress);
+    el("ps-share-addr").addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); shareCheckAddress(); }
+    });
+    el("ps-share-freeze").addEventListener("change", shareApplyFreeze);
+    el("ps-share-gh-copy").addEventListener("click", function () {
+      if (el("ps-share-gh-link").value) copyLinkText(el("ps-share-gh-link").value);
+    });
+    el("ps-share-source").addEventListener("click", function (e) {
+      if (!(e.target && e.target.id === "ps-share-source-copy")) return;
+      var src = findSafeUrl(PROJECT.sourceUrl);
+      if (!src) return;
+      var kind = /\.(pand|pnd|pandion)(\.locked)?$/i.test(src) ? "project" : "data";
+      copyLinkText(appLinkFor(kind, src));
+    });
+  }
+  // The reading side of a carried link: #pand=<blob> after the address.
+  function openCarriedLink(req, prefix) {
+    prefix = prefix || "ps-openlink";
+    var status = el(prefix + "-status"), btn = el(prefix + "-open");
+    if (btn) btn.disabled = true;
+    status.style.color = "#4a5a6a";
+    status.textContent = "Unpacking\u2026";
+    var bytes;
+    try { bytes = b64uToBytes(req.blob); } catch (e) { bytes = null; }
+    // A cut-short link fails inside the decompression stream, which reports
+    // itself as a fetch failure; it is a damaged link either way.
+    (bytes ? inflateBytes(bytes).catch(function () { throw new Error("bad"); }) : Promise.reject(new Error("bad"))).then(function (text) {
+      var proj = parseProjectFile(text);
+      if (!proj) throw new Error("bad");
+      if (proj.error) throw new Error(proj.error);
+      closeShellDialog(prefix + "-dialog");
+      OPEN_LINK_REQ = null;
+      cleanLinkFromAddress();
+      PENDING_LINK_SOURCE = null;
+      adoptProject(proj, null);
+    }).catch(function (e) {
+      var msg = String(e && e.message || e);
+      if (msg === "bad") msg = "This link does not hold a readable Pandion Plots project. It may have been cut short when it was copied or sent.";
+      status.style.color = "#7a2e2e";
+      status.textContent = msg;
+      if (btn) btn.disabled = false;
     });
   }
 
@@ -29384,6 +29854,7 @@
       { label: "Rename project\u2026", command: "rename-project" },
       { label: "Save project", shortcut: "Cmd/Ctrl+S", command: "save" },
       { label: "Save project as\u2026", shortcut: "Cmd/Ctrl+Shift+S", command: "save-as" },
+      { label: "Share a link\u2026", command: "share-link" },
       "separator",
       { label: "Export\u2026", shortcut: "Cmd/Ctrl+Shift+E", command: "export" },
       { label: "Export data as CSV\u2026", command: "export-data" },
@@ -30274,6 +30745,7 @@
       FILE_HANDLE = null;
       saveProjectFile();
     }
+    else if (command === "share-link") openShareDialog();
     else if (command === "export") exportCurrentWorkspace();
     else if (command === "export-data") exportDataCsv();
     else if (command === "export-data-xlsx") exportDataXlsx();
@@ -32132,6 +32604,7 @@
     coachDismiss: coachDismiss,
     pinChartForTest: function () { pinChartToPinboard(null); },
     findOpenData: openFindData,
+    shareLink: openShareDialog,
     coachReset: function () {
       try { window.localStorage.removeItem(PS_COACH_KEY); } catch (e) {}
       COACH_SHOWN = false;

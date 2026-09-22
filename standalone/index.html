@@ -3323,6 +3323,29 @@
   .ps-finddata-file .ps-finddata-meta { margin-top: 0; }
   .ps-finddata-filename { font-size: 12.5px; color: var(--ps-ink-2); word-break: break-all; }
   .ps-finddata-file .ps-btn { margin-left: auto; }
+  .ps-finddata-file .ps-btn + .ps-btn { margin-left: 0; }
+  /* Share a link (Sep 21 2026) */
+  .ps-share-check { display: flex; align-items: flex-start; gap: 7px; margin: 0 0 8px; font-size: 12.5px; }
+  .ps-share-check input { margin: 2px 0 0; }
+  .ps-share-check[hidden] { display: none; }
+  .ps-share-warn { margin: 0 0 8px; font-size: 12px; color: #7a4d10; }
+  .ps-share-linkrow { display: flex; gap: 8px; margin-top: 8px; }
+  .ps-share-linkrow input {
+    flex: 1 1 auto; min-width: 0; box-sizing: border-box; font: inherit; padding: 7px 9px;
+    border: 1px solid var(--ps-tint-line-1); border-radius: 6px;
+  }
+  .ps-share-linkrow input[readonly] { color: var(--ps-ink-2); background: var(--ps-s3); font-size: 12px; }
+  .ps-share-vis { display: flex; flex-direction: column; gap: 6px; margin: 0 0 12px; }
+  .ps-share-vis label { display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; cursor: pointer; }
+  .ps-share-vis label input { margin: 3px 0 0; }
+  .ps-share-vis label strong { margin-right: 4px; }
+  .ps-share-block { padding: 10px 12px; margin: 0 0 10px; border: 1px solid var(--ps-l2); border-radius: var(--ps-r-md); }
+  .ps-share-blockhead { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ps-muted); margin: 0 0 4px; }
+  .ps-share-inline {
+    -webkit-appearance: none; appearance: none; font: inherit; padding: 0; margin: 0;
+    color: var(--ps-accent-ink); background: none; border: 0; text-decoration: underline; cursor: pointer;
+  }
+  .ps-share-foot { margin: 12px 0 0; font-size: 12px; color: var(--ps-ink-2); }
 
   .ps-analysis-grid {
     display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px;
@@ -6101,6 +6124,76 @@
       <p id="ps-finddata-note" class="ps-finddata-note"></p>
       <p id="ps-finddata-status" role="status" class="ps-finddata-status"></p>
       <div id="ps-finddata-results" class="ps-finddata-results"></div>
+    </div>
+  </div>
+</div>
+<!-- Share a link (Torry, Sep 21 2026): a link that carries the project after
+     the #, or a link to a file on GitHub, public, unlisted, or locked with a
+     key that rides in the link. See the ps-shell.js block of the same name. -->
+<div id="ps-share-dialog" class="ps-dialog-overlay" role="dialog"
+     aria-modal="true" aria-labelledby="ps-share-title">
+  <div class="ps-dialog-card" style="max-width:720px;">
+    <div class="ps-dialog-head">
+      <div>
+        <h2 id="ps-share-title">Share a link</h2>
+        <p>A link that opens this project in Pandion Plots.</p>
+      </div>
+      <button type="button" class="ps-btn ps-dialog-close" id="ps-share-close">Close</button>
+    </div>
+    <div class="ps-dialog-body">
+      <div class="ps-finddata-sources" role="tablist" aria-label="Kind of link">
+        <button type="button" class="ps-finddata-source" role="tab" data-share-mode="carry" aria-selected="true">
+          <strong>Carry it in the link</strong><span>Nothing is stored anywhere; the link is the file</span>
+        </button>
+        <button type="button" class="ps-finddata-source" role="tab" data-share-mode="github" aria-selected="false">
+          <strong>Host it on GitHub</strong><span>A file in a repository or a gist</span>
+        </button>
+      </div>
+      <div id="ps-share-carry">
+        <p class="ps-finddata-meta" style="margin:0 0 8px;">The project travels inside the address, after the # that browsers never send to any server. A frozen copy: later edits here do not change what the link opens.</p>
+        <label class="ps-share-check" id="ps-share-chartonly-row"><input type="checkbox" id="ps-share-chartonly"> Only the current chart with its data, without the Notebook and the other documents</label>
+        <p id="ps-share-carry-size" class="ps-finddata-meta" role="status"></p>
+        <p id="ps-share-carry-warn" class="ps-share-warn" hidden></p>
+        <div class="ps-share-linkrow">
+          <input type="text" id="ps-share-carry-link" readonly aria-label="Link" spellcheck="false">
+          <button type="button" class="ps-btn ps-primary" id="ps-share-carry-copy" disabled>Copy link</button>
+        </div>
+      </div>
+      <div id="ps-share-github" hidden>
+        <div class="ps-share-vis" role="radiogroup" aria-label="Visibility">
+          <label><input type="radio" name="ps-share-vis" value="public" checked><span><strong>Public</strong> A file in a public repository or a public gist. Anyone can find it.</span></label>
+          <label><input type="radio" name="ps-share-vis" value="unlisted"><span><strong>Unlisted</strong> A secret gist. Not searchable, but anyone holding the link can open it.</span></label>
+          <label><input type="radio" name="ps-share-vis" value="locked"><span><strong>Locked with the link</strong> The file is scrambled here before it leaves this browser, and the key travels in the link. GitHub holds only random bytes.</span></label>
+        </div>
+        <div class="ps-share-block">
+          <div class="ps-share-blockhead">Put it on GitHub from here</div>
+          <p class="ps-finddata-meta">Paste a GitHub token that has the Gists permission. It stays in this window and is forgotten when the page closes.
+            <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Create one on GitHub</a></p>
+          <div class="ps-share-linkrow">
+            <input type="password" id="ps-share-token" autocomplete="off" placeholder="github_pat_..." aria-label="GitHub token">
+            <button type="button" class="ps-btn ps-primary" id="ps-share-create">Create a public gist</button>
+          </div>
+        </div>
+        <div class="ps-share-block">
+          <div class="ps-share-blockhead">Or use a file you put there yourself</div>
+          <p id="ps-share-manual-hint" class="ps-finddata-meta"></p>
+          <div class="ps-share-linkrow" style="justify-content:flex-start;">
+            <button type="button" class="ps-btn" id="ps-share-download" hidden>Save the locked copy</button>
+          </div>
+          <div class="ps-share-linkrow">
+            <input type="url" id="ps-share-addr" placeholder="https://github.com/..." autocomplete="off" spellcheck="false" aria-label="Address of the file on GitHub">
+            <button type="button" class="ps-btn" id="ps-share-check">Check</button>
+          </div>
+          <label class="ps-share-check" id="ps-share-freeze-row" hidden><input type="checkbox" id="ps-share-freeze"> Freeze the link at the file's current version</label>
+        </div>
+        <p id="ps-share-gh-status" role="status" class="ps-finddata-status"></p>
+        <div class="ps-share-linkrow">
+          <input type="text" id="ps-share-gh-link" readonly aria-label="Link" spellcheck="false">
+          <button type="button" class="ps-btn ps-primary" id="ps-share-gh-copy" disabled>Copy link</button>
+        </div>
+      </div>
+      <p id="ps-share-source" class="ps-finddata-meta" hidden></p>
+      <p class="ps-share-foot">Anyone who has the link has the data.</p>
     </div>
   </div>
 </div>
