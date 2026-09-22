@@ -20,6 +20,7 @@ const report = {
 const browser = await chromium.launch();
 report.browserVersion = browser.version();
 const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+page.on('filechooser', () => {}); // Playwright dismisses an unhandled file chooser and Chromium reports that as cancel, which the app honours; a listener keeps the chooser open
 page.setDefaultTimeout(15000);
 page.on('pageerror', e => report.errors.push(String(e)));
 function check(condition, message) {

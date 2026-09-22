@@ -46,6 +46,7 @@ const browser = await chromium.launch();
 async function boot({ welcome = false } = {}) {
     const ctx = await browser.newContext();
     const page = await ctx.newPage({ viewport: { width: 1470, height: 900 } });
+    page.on('filechooser', () => {}); // Playwright dismisses an unhandled file chooser and Chromium reports that as cancel, which the app honours; a listener keeps the chooser open
     await page.addInitScript((welcome) => {
         try {
             localStorage.clear();
@@ -235,6 +236,7 @@ const encloses = (spot, t, pad = 8) => !!(spot && t && spot.l <= t.l + 1 && spot
 {
     const ctx = await browser.newContext();
     const page = await ctx.newPage({ viewport: { width: 1470, height: 900 } });
+    page.on('filechooser', () => {}); // Playwright dismisses an unhandled file chooser and Chromium reports that as cancel, which the app honours; a listener keeps the chooser open
     await page.addInitScript(() => { try { localStorage.clear(); sessionStorage.setItem('psstandalone.welcome.dismissed', '1'); } catch (e) {} });
     const errors = []; page.on('pageerror', e => errors.push(String(e)));
     await page.goto(PAGE); await page.waitForTimeout(1200);

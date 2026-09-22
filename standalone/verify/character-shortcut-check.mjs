@@ -18,6 +18,7 @@ const browser = await pw[browserName].launch();
 const errors = [];
 try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    page.on('filechooser', () => {}); // Playwright dismisses an unhandled file chooser and Chromium reports that as cancel, which the app honours; a listener keeps the chooser open
     page.setDefaultTimeout(12000);
     page.on('pageerror', e => errors.push(String(e)));
     if (!hostDir && process.env.PS_SHORTCUT_SOURCE) {

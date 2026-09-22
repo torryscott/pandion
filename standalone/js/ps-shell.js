@@ -27851,16 +27851,17 @@
     }
     var root = el("ps-recent-list"), list = recentProjects();
     root.innerHTML = "";
-    if (!list.length) {
-      root.appendChild(mkEl("div", "ps-recent-empty",
-        "Recent local projects will appear here as you work."));
-      return;
-    }
+    // Nothing to pick up, nothing to show: the examples take the space.
+    var section = el("ps-recent-section");
+    if (section) section.hidden = !BOOT_RESTORED && !list.length;
     for (var i = 0; i < list.length; i++) {
       (function (item) {
         var b = mkEl("button", "ps-recent-item");
         b.type = "button";
         b.setAttribute("data-recent-id", item.id);
+        // The Continue row above already offers this very project; its list
+        // entry stays in the DOM (probes count it) but is not drawn twice.
+        if (BOOT_RESTORED && item.id === PROJECT.id) b.classList.add("ps-recent-current");
         b.appendChild(mkEl("span", "ps-recent-dot", "\u25a5"));
         b.appendChild(mkEl("span", "ps-recent-name", item.name));
         var meta = item.rows +

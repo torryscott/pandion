@@ -33,6 +33,7 @@ const browser = await browserType.launch();
 const evidenceDir = process.env.PS_REFLOW_OUT;
 if (evidenceDir) mkdirSync(evidenceDir, { recursive: true });
 const page = await browser.newPage({ viewport: { width: 640, height: 720 } });
+page.on('filechooser', () => {}); // Playwright dismisses an unhandled file chooser and Chromium reports that as cancel, which the app honours; a listener keeps the chooser open
 const pageErrors = [];
 page.on('pageerror', error => pageErrors.push(String(error)));
 await page.goto(pageUrl);

@@ -35,6 +35,7 @@ const pageUrl = 'file://' + (process.env.PS_PAGE
     : path.resolve(new URL('.', import.meta.url).pathname, '..', 'index.html'));
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+page.on('filechooser', () => {}); // Playwright dismisses an unhandled file chooser and Chromium reports that as cancel, which the app honours; a listener keeps the chooser open
 const errors = [];
 page.on('pageerror', e => errors.push(String(e)));
 await page.goto(pageUrl);

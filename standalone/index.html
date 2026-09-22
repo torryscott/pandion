@@ -4129,7 +4129,20 @@
     color: var(--ps-muted); font-size: 10.5px;
   }
   .ps-launch-primary .ps-launch-copy span { color: rgba(255,255,255,0.78); }
-  .ps-recent-list { display: flex; flex-direction: column; gap: 5px; min-height: 76px; }
+  .ps-recent-list { display: flex; flex-direction: column; gap: 5px; }
+  .ps-welcome-section[hidden] { display: none; }
+  #ps-recent-section:not([hidden]) + #ps-examples-section { margin-top: 20px; }
+  /* The autosaved project: the same row shape as a recent entry, lifted */
+  .ps-recent-item.ps-recent-continue {
+    flex-wrap: wrap; gap: 0 8px; margin-bottom: 6px;
+    color: var(--ps-accent-ink); background: var(--ps-tint-1); border-color: var(--ps-accent);
+  }
+  .ps-recent-item.ps-recent-continue:hover { background: var(--ps-tint-1); border-color: var(--ps-accent-hover); }
+  .ps-recent-continue .ps-recent-dot { color: #245585; background: var(--ps-s0); }
+  .ps-recent-continue .ps-recent-name { font-size: 12.5px; }
+  .ps-recent-continue .ps-recent-meta { flex-basis: 100%; padding-left: 30px; white-space: normal; font-size: 10.5px; }
+  /* The list entry of the project the Continue row already offers */
+  .ps-recent-item.ps-recent-current { display: none; }
   .ps-recent-item {
     -webkit-appearance: none; appearance: none; display: grid;
     grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center;
@@ -4172,6 +4185,7 @@
   .ps-template-preview i:nth-child(2) { height: 22px; background: var(--ps-warn); }
   .ps-template-preview i:nth-child(3) { height: 17px; background: #6fb3ad; }
   .ps-template-copy { display: flex; flex-direction: column; gap: 2px; }
+  .ps-template-preview-icon { display: inline-flex; align-items: center; justify-content: center; color: #426889; }
   .ps-template-copy strong { font-size: 12px; }
   .ps-template-copy span { color: var(--ps-muted); font-size: 10.5px; }
   @media (max-width: 560px) {
@@ -5529,14 +5543,6 @@
       <section class="ps-welcome-section">
         <h2>Start</h2>
         <div class="ps-launch-actions">
-          <button type="button" class="ps-launch-action ps-launch-primary"
-                  id="ps-welcome-continue" style="display:none;">
-            <span class="ps-launch-icon"><svg class="ps-icn" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v4h-4"/></svg></span>
-            <span class="ps-launch-copy">
-              <strong>Continue autosaved project</strong>
-              <span id="ps-welcome-continue-meta">Recover your last session</span>
-            </span>
-          </button>
           <button type="button" class="ps-launch-action" id="ps-welcome-open">
             <span class="ps-launch-icon"><svg class="ps-icn" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V6a1 1 0 0 1 1-1h4.5l2 2H18a1 1 0 0 1 1 1v2"/><path d="M4 20l2.4-7.2A1 1 0 0 1 7.35 12H21l-2.4 7.2a1 1 0 0 1-.95.8z"/></svg></span>
             <span class="ps-launch-copy">
@@ -5565,26 +5571,28 @@
               <span>A CSV, Excel, .omv or project file on the web</span>
             </span>
           </button>
-          <button type="button" class="ps-launch-action" id="ps-welcome-find">
-            <span class="ps-launch-icon"><svg class="ps-icn" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></svg></span>
-            <span class="ps-launch-copy">
-              <strong>Find open data</strong>
-              <span>Search teaching datasets or Zenodo, then open one</span>
-            </span>
-          </button>
         </div>
       </section>
       <div>
-        <section class="ps-welcome-section">
+        <!-- The autosaved project heads this section (Torry's welcome audit,
+             Sep 22 2026): it is the most recent thing worked on, not a way to
+             start. The section hides when there is nothing to pick up. -->
+        <section class="ps-welcome-section" id="ps-recent-section">
           <h2>Recent projects</h2>
+          <button type="button" class="ps-recent-item ps-recent-continue"
+                  id="ps-welcome-continue" style="display:none;">
+            <span class="ps-recent-dot"><svg class="ps-icn" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v4h-4"/></svg></span>
+            <span class="ps-recent-name">Continue autosaved project</span>
+            <span id="ps-welcome-continue-meta" class="ps-recent-meta">Recover your last session</span>
+          </button>
           <div id="ps-recent-list" class="ps-recent-list"></div>
         </section>
-        <section class="ps-welcome-section" style="margin-top:20px;">
-          <h2>Example datasets</h2>
+        <section class="ps-welcome-section" id="ps-examples-section">
+          <h2>Datasets</h2>
           <!-- Punch list 20: one example cannot honestly demonstrate seven
                analyses, so there are three, each naming what it is good for.
                The first keeps the id every existing path already clicks. -->
-          <div class="ps-example-list">
+          <div class="ps-example-list" id="ps-example-list">
             <button type="button" class="ps-template-card"
                     data-example="wellbeing">
               <span class="ps-template-preview" aria-hidden="true"
@@ -5610,6 +5618,15 @@
               <span class="ps-template-copy">
                 <strong>Reaction time practice</strong>
                 <span>Repeated Measures, Correlation</span>
+              </span>
+            </button>
+            <!-- Find open data lives with the datasets (Torry, Sep 22 2026):
+                 it opens a dataset that already exists, like the examples. -->
+            <button type="button" class="ps-template-card" id="ps-welcome-find">
+              <span class="ps-template-preview ps-template-preview-icon" aria-hidden="true"><svg class="ps-icn" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></svg></span>
+              <span class="ps-template-copy">
+                <strong>Find open data</strong>
+                <span>Search teaching datasets or Zenodo, then open one</span>
               </span>
             </button>
           </div>

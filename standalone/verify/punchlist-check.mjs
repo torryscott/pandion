@@ -41,6 +41,7 @@ async function freshPage(opts) {
     const ctx = await browser.newContext(Object.assign(
         { viewport: { width: 1440, height: 900 } }, opts || {}));
     const page = await ctx.newPage();
+    page.on('filechooser', () => {}); // Playwright dismisses an unhandled file chooser and Chromium reports that as cancel, which the app honours; a listener keeps the chooser open
     page.on('pageerror', e => errors.push(String(e)));
     await page.goto(PAGE);
     return { ctx, page };

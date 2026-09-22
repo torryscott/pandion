@@ -68,6 +68,7 @@ const pageUrl = 'file://' + (process.env.PS_PAGE
     : path.resolve(here, '..', 'index.html'));
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1500, height: 960 } });
+page.on('filechooser', () => {}); // Playwright dismisses an unhandled file chooser and Chromium reports that as cancel, which the app honours; a listener keeps the chooser open
 const errors = [];
 page.on('pageerror', e => errors.push(String(e)));
 await page.goto(pageUrl);
@@ -194,6 +195,7 @@ ok(/\.ps-shortcut-list kbd \{[^}]*border-bottom-width/.test(src),
     const hc = await browser.newContext({ forcedColors: 'active',
                                           viewport: { width: 1400, height: 900 } });
     const hp = await hc.newPage();
+    hp.on('filechooser', () => {}); // Playwright dismisses an unhandled file chooser and Chromium reports that as cancel, which the app honours; a listener keeps the chooser open
     await hp.goto(pageUrl);
     await hp.waitForTimeout(700);
     if (await hp.locator('#ps-welcome').isVisible()) {
