@@ -27150,6 +27150,19 @@
     root.style.display = "block";
     el("ps-import-use").style.display = "";
     el("ps-loader-msg").textContent = "";
+    syncLoaderMode();
+  }
+  // The dialog shows what is being imported: the paste box while pasting,
+  // and only the file's preview once a file (opened, dropped or fetched
+  // from a link) is in hand.
+  var LOADER_INTRO_PASTE = "Paste rows copied from a spreadsheet, or drop a CSV, Excel, jamovi .omv or .pand project file anywhere on the page.";
+  var LOADER_INTRO_FILE = "Check what the app understood below, then import it.";
+  function syncLoaderMode() {
+    var fileMode = !!(IMPORT_SOURCE_FILE || XLSX_SHEETS);
+    var sec = el("ps-paste-section");
+    if (sec) sec.hidden = fileMode;
+    var intro = el("ps-loader-description");
+    if (intro) intro.textContent = fileMode ? LOADER_INTRO_FILE : LOADER_INTRO_PASTE;
   }
   // Item 9: the commit path re-parses and then builds/retypes the whole
   // table, which is the slowest synchronous step in the app for a big file.
@@ -27267,8 +27280,10 @@
     el("ps-import-preview").style.display = "none";
     el("ps-import-use").style.display = "none";
     el("ps-loader-msg").textContent = "";
+    syncLoaderMode();
   }
   var LOADER_LAST_FOCUS = null;
+  var LOADER_FROM_WELCOME = false;
   function openLoader(keepImport) {
     // Punch list item 1. The loader sits at z-index 9999 and the start centre
     // at 13000, so on a cold load EVERY path through here used to render
@@ -27285,9 +27300,11 @@
     if (el("ps-loader").style.display !== "flex")
       LOADER_LAST_FOCUS = document.activeElement;
     hideWelcome();
+    LOADER_FROM_WELCOME = false;
     if (!keepImport) resetImportPreview();
     el("ps-loader").style.display = "flex";
     syncPasteButton();
+    syncLoaderMode();
     shellSetPageModal(true);
     window.setTimeout(function () {
       var first = shellDialogTabbables(el("ps-loader"))[0];
@@ -27391,6 +27408,16 @@
       readPickedFile(f);
     });
     el("ps-paste").addEventListener("input", syncPasteButton);
+    // Cancelling the chooser with nothing in the dialog closes it, so Open
+    // behaves like a plain chooser; opened from the welcome, the welcome
+    // comes back.
+    el("ps-file").addEventListener("cancel", function () {
+      if (IMPORT_PENDING || String(el("ps-paste").value || "").trim() ||
+          el("ps-loader-msg").textContent) return;
+      var back = LOADER_FROM_WELCOME;
+      closeLoader();
+      if (back) showWelcome(true);
+    });
     el("ps-paste-use").addEventListener("click", function () {
       // An empty box used to fall through to the parser, which reported
       // "There is nothing to read in that file: it is empty" - a sentence
@@ -27912,7 +27939,10 @@
     el("ps-welcome-continue").addEventListener("click", function () {
       persist(false); hideWelcome();
     });
-    el("ps-welcome-open").addEventListener("click", openLoaderWithChooser);
+    el("ps-welcome-open").addEventListener("click", function () {
+      openLoaderWithChooser();
+      LOADER_FROM_WELCOME = true;
+    });
     el("ps-welcome-new").addEventListener("click", function () {
       adoptBlankProject();
     });

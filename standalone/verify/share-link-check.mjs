@@ -62,6 +62,7 @@ const lockedByHand = {};   // name -> content saved through the download button
 async function boot(query, opts) {
     const ctx = await browser.newContext({ acceptDownloads: true });
     const page = await ctx.newPage({ viewport: { width: 1440, height: 1000 } });
+    page.on('filechooser', () => {}); // Playwright dismisses an unhandled file chooser and Chromium reports that as cancel, which the app honours; a listener keeps the chooser open
     await page.addInitScript(() => {
         try { localStorage.clear(); localStorage.setItem('psstandalone.coach.clickToEdit.v1', '1'); sessionStorage.clear(); } catch (e) {}
         Object.defineProperty(navigator, 'clipboard', { value: { writeText: (t) => { window.__copied = t; return Promise.resolve(); } }, configurable: true });

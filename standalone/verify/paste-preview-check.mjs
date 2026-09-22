@@ -36,6 +36,7 @@ const browser = await chromium.launch();
 async function boot(query) {
     const ctx = await browser.newContext();
     const page = await ctx.newPage({ viewport: { width: 1440, height: 1000 } });
+    page.on('filechooser', () => {}); // Playwright dismisses an unhandled file chooser and Chromium reports that as cancel, which the app honours; a listener keeps the chooser open
     await page.addInitScript(() => { try { localStorage.clear(); localStorage.setItem('psstandalone.coach.clickToEdit.v1', '1'); sessionStorage.clear(); } catch (e) {} });
     await page.route('https://example.test/**', route => route.fulfill({ status: 200, headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'text/csv' }, body: CSV }));
     await page.goto(PAGE + (query || '')); await page.waitForTimeout(1100);
@@ -47,13 +48,17 @@ const state = page => page.evaluate(() => ({
     label: document.getElementById('ps-paste-use').textContent.trim(),
     box: document.getElementById('ps-paste').value,
     summary: (document.querySelector('#ps-import-preview .ps-import-summary') || { textContent: '' }).textContent.replace(/\s+/g, ' ').trim(),
-    importShown: document.getElementById('ps-import-use').style.display !== 'none'
+    importShown: document.getElementById('ps-import-use').style.display !== 'none',
+    pasteShown: document.getElementById('ps-paste-section').getClientRects().length > 0,
+    fileDrawn: document.getElementById('ps-file').getClientRects().length > 0,
+    welcome: document.getElementById('ps-welcome').style.display === 'flex',
+    intro: document.getElementById('ps-loader-description').textContent
 }));
 {
     const { ctx, page } = await boot('');
     await page.click('#ps-welcome-paste'); await page.waitForTimeout(400);
     let s = await state(page);
-    ok(s.loader && !s.button && s.box === '', '1: Paste data opens the loader with an empty box and no Preview button');
+    ok(s.loader && !s.button && s.box === '' && s.pasteShown && !s.fileDrawn && /^Paste rows/.test(s.intro), '1: Paste data opens the loader with an empty box, no Preview button, no file row, and an intro about pasting');
     await page.type('#ps-paste', 'condition,score\nControl,61\nDrug,70\n'); await page.waitForTimeout(200);
     s = await state(page);
     ok(s.button && s.label === 'Preview pasted rows', '2: typing rows shows the button, labelled for what it does (' + s.label + ')');
@@ -69,7 +74,31 @@ const state = page => page.evaluate(() => ({
     const { ctx, page } = await boot('?data=https://example.test/lab/scores.csv');
     await page.click('#ps-openlink-open'); await page.waitForTimeout(1200);
     const s = await state(page);
-    ok(s.loader && /^scores\.csv from example\.test · 3 rows × 3 columns/.test(s.summary) && !s.button && s.importShown, '3: a link-fetched file previews with its name and host, and no Preview button (' + s.summary + ')');
+    ok(s.loader && /^scores\.csv from example\.test · 3 rows × 3 columns/.test(s.summary) && !s.button && s.importShown && !s.pasteShown && /^Check what the app understood/.test(s.intro), '3: a link-fetched file previews with its name and host, no Preview button, no paste box, and an intro about the file (' + s.summary + ')');
+    await ctx.close();
+}
+// ---- 4. cancelling the chooser
+{
+    const { ctx, page } = await boot('');
+    await page.click('#ps-welcome-open'); await page.waitForTimeout(300);
+    let s = await state(page);
+    ok(s.loader && !s.welcome, '4: Open from the welcome shows the loader behind the chooser');
+    await page.evaluate(() => document.getElementById('ps-file').dispatchEvent(new Event('cancel')));
+    await page.waitForTimeout(300);
+    s = await state(page);
+    ok(!s.loader && s.welcome, '4: cancelling the chooser brings the welcome back');
+    await page.click('[data-example="dose"]'); await page.waitForTimeout(900);
+    await page.click('#ps-load'); await page.waitForTimeout(300);
+    await page.evaluate(() => document.getElementById('ps-file').dispatchEvent(new Event('cancel')));
+    await page.waitForTimeout(300);
+    s = await state(page);
+    ok(!s.loader && !s.welcome, '4: from the toolbar, cancelling simply closes the dialog');
+    await page.click('#ps-load'); await page.waitForTimeout(300);
+    await page.type('#ps-paste', 'a,b\n1,2\n');
+    await page.evaluate(() => document.getElementById('ps-file').dispatchEvent(new Event('cancel')));
+    await page.waitForTimeout(300);
+    s = await state(page);
+    ok(s.loader, '4: with rows already pasted, a cancelled chooser leaves the dialog alone');
     await ctx.close();
 }
 await browser.close();

@@ -35,6 +35,7 @@ const imageFixture = path.resolve(new URL('.', import.meta.url).pathname,
     'fixtures', 'probe-image.png');
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+page.on('filechooser', () => {}); // Playwright dismisses an unhandled file chooser and Chromium reports that as cancel, which the app honours; a listener keeps the chooser open
 const pageErrors = [];
 const contractFailures = [];
 page.on('pageerror', error => pageErrors.push(String(error)));

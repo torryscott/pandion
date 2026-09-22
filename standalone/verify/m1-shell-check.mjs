@@ -43,6 +43,7 @@ async function newTestContext() {
 }
 const ctx = await newTestContext();
 const page = await ctx.newPage();
+page.on('filechooser', () => {}); // Playwright dismisses an unhandled file chooser and Chromium reports that as cancel, which the app honours; a listener keeps the chooser open
 // Assign a variable to a role slot via the real click path: click the
 // slot's drop box (the card expands into an INLINE picker of eligible
 // variables), then pick the variable. Multi-role pickers stay open
@@ -1244,6 +1245,7 @@ await page.waitForTimeout(400);
     fs.writeFileSync(tmpPath, fileText);
     const ctx2 = await newTestContext();
     const page2 = await ctx2.newPage();
+    page2.on('filechooser', () => {}); // Playwright dismisses an unhandled file chooser and Chromium reports that as cancel, which the app honours; a listener keeps the chooser open
     const errors2 = [];
     page2.on('pageerror', e => errors2.push(String(e)));
     await page2.goto(PAGE);
@@ -1388,6 +1390,7 @@ await page.waitForTimeout(400);
     // The saved two-chart file restores both tabs in a fresh session.
     const ctx3 = await newTestContext();
     const page3 = await ctx3.newPage();
+    page3.on('filechooser', () => {}); // Playwright dismisses an unhandled file chooser and Chromium reports that as cancel, which the app honours; a listener keeps the chooser open
     await page3.goto(PAGE);
     await page3.waitForTimeout(400);
     await page3.click('#ps-welcome-new');
@@ -2161,6 +2164,7 @@ await page.waitForTimeout(400);
     // and the label counter keeps going (C next).
     const ctxL = await newTestContext();
     const pageL = await ctxL.newPage();
+    pageL.on('filechooser', () => {}); // Playwright dismisses an unhandled file chooser and Chromium reports that as cancel, which the app honours; a listener keeps the chooser open
     await pageL.goto(PAGE);
     await pageL.waitForTimeout(400);
     await pageL.click('#ps-welcome-new');
