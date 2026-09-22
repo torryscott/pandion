@@ -3341,6 +3341,9 @@
   .ps-share-vis label strong { margin-right: 4px; }
   .ps-share-block { padding: 10px 12px; margin: 0 0 10px; border: 1px solid var(--ps-l2); border-radius: var(--ps-r-md); }
   .ps-share-blockhead { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ps-muted); margin: 0 0 4px; }
+  .ps-share-details { margin: 4px 0 8px; }
+  .ps-share-details summary { font-size: 11.5px; color: var(--ps-accent-ink); cursor: pointer; }
+  .ps-share-details p { margin: 6px 0 0; }
   .ps-share-inline {
     -webkit-appearance: none; appearance: none; font: inherit; padding: 0; margin: 0;
     color: var(--ps-accent-ink); background: none; border: 0; text-decoration: underline; cursor: pointer;
@@ -6160,6 +6163,7 @@
         </div>
       </div>
       <div id="ps-share-github" hidden>
+        <p class="ps-finddata-meta" id="ps-share-gh-intro" style="margin:0 0 10px;">Putting a file on GitHub needs a GitHub account. The people who receive the link never need one. Whether the link is public, unlisted or locked is decided here, in Pandion Plots, not on GitHub.</p>
         <div class="ps-share-vis" role="radiogroup" aria-label="Visibility">
           <label><input type="radio" name="ps-share-vis" value="public" checked><span><strong>Public</strong> A file in a public repository or a public gist. Anyone can find it.</span></label>
           <label><input type="radio" name="ps-share-vis" value="unlisted"><span><strong>Unlisted</strong> A secret gist. Not searchable, but anyone holding the link can open it.</span></label>
@@ -6167,8 +6171,11 @@
         </div>
         <div class="ps-share-block">
           <div class="ps-share-blockhead">Put it on GitHub from here</div>
-          <p class="ps-finddata-meta">Paste a GitHub token that has the Gists permission. It stays in this window and is forgotten when the page closes.
-            <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Create one on GitHub</a></p>
+          <p class="ps-finddata-meta">Paste a GitHub token that can create gists. It stays in this window and is forgotten when the page closes.</p>
+          <details class="ps-share-details" id="ps-share-token-help">
+            <summary>How do I make a token?</summary>
+            <p class="ps-finddata-meta">On <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">GitHub's token page</a>, give the token a name, click Add permissions, choose Gists under Account permissions and set it to Read and write, then Generate token. Leave the rest of the page as it is. Copy the token GitHub shows you and paste it here; GitHub shows it only once.</p>
+          </details>
           <div class="ps-share-linkrow">
             <input type="password" id="ps-share-token" autocomplete="off" placeholder="github_pat_..." aria-label="GitHub token">
             <button type="button" class="ps-btn ps-primary" id="ps-share-create">Create a public gist</button>

@@ -200,6 +200,8 @@ let carried = '';
     const { ctx, page, seen, errors } = await boot('');
     await page.click('[data-example="dose"]'); await page.waitForTimeout(1000);
     await openShare(page); await githubTab(page, 'public');
+    const copy = await page.evaluate(() => ({ intro: document.getElementById('ps-share-gh-intro').textContent, help: document.getElementById('ps-share-token-help').textContent, open: document.getElementById('ps-share-token-help').open }));
+    ok(/never need one/.test(copy.intro) && /decided here/.test(copy.intro) && /Gists under Account permissions/.test(copy.help) && !/public/i.test(copy.help) && !copy.open, '4: the tab says readers need no account and visibility is decided here, and the folded token steps never mention public');
     await page.fill('#ps-share-addr', 'https://github.com/u/r/blob/main/data/week3.pand'); await page.click('#ps-share-check'); await page.waitForTimeout(900);
     let s = await state(page);
     ok(s.addr === RAW + 'week3.pand', '4: a github.com page address is rewritten to the raw route');
