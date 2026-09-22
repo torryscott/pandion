@@ -207,15 +207,13 @@ ok(special.role === 'dialog' && special.modal === 'true' &&
    'Load Data is a named, described modal dialog');
 ok(special.focused === 'ps-loader-close' && !special.hiddenImportRendered,
    'Load Data places focus on Close and leaves its conditional Import action out');
-await page.focus('#ps-sample');
-await page.keyboard.press('Tab');
-// t4-158 added the blank-sheet action after Use sample data; it is a
-// rendered control, so it belongs in the ring before the wrap.
-ok(await page.evaluate(() => document.activeElement.id) === 'ps-blank',
-   'the blank-sheet action joined the tab ring after Use sample data');
+// The encoding select is the last rendered control: Use sample data and
+// Start with a blank sheet left the dialog (Sep 21 2026), and the Preview
+// and Import buttons render only once there is something to preview.
+await page.focus('#ps-import-encoding');
 await page.keyboard.press('Tab');
 ok(await page.evaluate(() => document.activeElement.id) === 'ps-loader-close',
-   'Load Data wraps past its hidden conditional action');
+   'Load Data wraps past its hidden Preview and Import actions');
 await page.keyboard.press('Escape');
 await page.waitForTimeout(80);
 ok(await page.evaluate(() => document.activeElement.id) === 'ps-load',

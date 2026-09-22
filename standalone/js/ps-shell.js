@@ -27294,6 +27294,14 @@
       try { if (first) first.focus(); } catch (ignore) {}
     }, 0);
   }
+  // Every Open (welcome, toolbar, File menu) opens the file chooser with
+  // the Load data dialog behind it, so cancelling the chooser still leaves
+  // the paste box and the drop surface in reach (Torry's audit, Sep 21
+  // 2026: the welcome's Open fired the chooser and the other two did not).
+  function openLoaderWithChooser() {
+    openLoader();
+    try { el("ps-file").click(); } catch (ignore) {}
+  }
   // The Preview button previews the paste box and nothing else, so it shows
   // only while the box holds something (Torry, Sep 21 2026: with a file
   // already previewed it repainted the same preview and read as broken).
@@ -27355,7 +27363,7 @@
     offerReplacedProjectBack(replaced, "a blank project");
   }
   function wireLoader() {
-    el("ps-load").addEventListener("click", openLoader);
+    el("ps-load").addEventListener("click", openLoaderWithChooser);
     el("ps-loader-close").addEventListener("click", closeLoader);
     el("ps-loader").addEventListener("click", function (e) {
       if (e.target === el("ps-loader")) closeLoader();
@@ -27454,15 +27462,9 @@
     el("ps-import-delimiter").addEventListener("change", reparsePreview);
     el("ps-import-header").addEventListener("change", reparsePreview);
     el("ps-import-encoding").addEventListener("change", rereadImportFile);
-    el("ps-sample").addEventListener("click", function () {
-      dataHistoryClear();
-      loadSample();
-      persist();
-      syncAll();
-      render();
-      closeLoader();
-    });
-    el("ps-blank").addEventListener("click", adoptBlankProject);
+    // Use sample data and Start with a blank sheet left this dialog on
+    // Sep 21 2026 (Torry's audit): both are doors the welcome already has,
+    // and the dialog's one job is bringing in a file or pasted rows.
     // Whole-page drag-drop.
     // Punch list 21. The loader advertises "or drop one anywhere on the page"
     // and the page itself did nothing to show it: a bare dragover
@@ -27910,10 +27912,7 @@
     el("ps-welcome-continue").addEventListener("click", function () {
       persist(false); hideWelcome();
     });
-    el("ps-welcome-open").addEventListener("click", function () {
-      hideWelcome(); openLoader();
-      try { el("ps-file").click(); } catch (ignore) {}
-    });
+    el("ps-welcome-open").addEventListener("click", openLoaderWithChooser);
     el("ps-welcome-new").addEventListener("click", function () {
       adoptBlankProject();
     });
@@ -30749,7 +30748,7 @@
       showWelcome(true);
       window.setTimeout(function () { el("ps-welcome-new").focus(); }, 0);
     }
-    else if (command === "open") openLoader();
+    else if (command === "open") openLoaderWithChooser();
     else if (command === "welcome") showWelcome(true);
     else if (command === "reopen-closed") {
       var closedNow = closedDocsAvailable();

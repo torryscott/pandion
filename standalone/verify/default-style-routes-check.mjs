@@ -147,9 +147,7 @@ ok((await applied()).ink === STYLE_INK,
    'the first chart after replacing the data takes it');
 
 console.log('case 4: an example dataset');
-await openLoader();
-await page.waitForTimeout(500);
-await page.click('#ps-sample');
+await page.evaluate(() => window.PS_SHELL.openExample('dose'));
 await page.waitForTimeout(2000);
 ok((await applied()).ink === STYLE_INK,
    'the first chart of an example dataset takes it');

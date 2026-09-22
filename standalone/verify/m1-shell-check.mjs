@@ -1288,9 +1288,7 @@ await page.waitForTimeout(400);
     console.log('case 16: chart tabs');
     // Start clean on the sample.
     await page.evaluate(() => { localStorage.removeItem('psstandalone.project.v2'); });
-    await page.click('#ps-load');
-    await page.waitForTimeout(150);
-    await page.click('#ps-sample');
+    await page.evaluate(() => window.PS_SHELL.openExample('dose'));
     await page.waitForTimeout(400);
     // Give chart 1 a title, then add a second chart.
     await page.evaluate(() => {
@@ -1709,9 +1707,7 @@ await page.waitForTimeout(400);
     // Clean start: sample table -> chart 1 (CG, roles pre-assigned),
     // then a second chart tab running Frequencies.
     await page.evaluate(() => { localStorage.removeItem('psstandalone.project.v2'); });
-    await page.click('#ps-load');
-    await page.waitForTimeout(150);
-    await page.click('#ps-sample');
+    await page.evaluate(() => window.PS_SHELL.openExample('dose'));
     await page.waitForTimeout(500);
     await page.click('.ps-tab-add');
     await page.waitForTimeout(250);
