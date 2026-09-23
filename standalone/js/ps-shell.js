@@ -27953,16 +27953,6 @@
         try { el("ps-paste").focus(); } catch (ignore) {}
       }, 0);
     });
-    // From a link (Torry, Sep 21 2026): the same fetch path as ?data=,
-    // with the link typed or pasted instead of arriving on the address.
-    el("ps-welcome-link").addEventListener("click", function () {
-      hideWelcome();
-      el("ps-linkopen-url").value = "";
-      el("ps-linkopen-status").textContent = "";
-      el("ps-linkopen-open").disabled = false;
-      openShellDialog("ps-linkopen-dialog");
-      window.setTimeout(function () { try { el("ps-linkopen-url").focus(); } catch (ignore) {} }, 0);
-    });
     el("ps-welcome-find").addEventListener("click", function () {
       hideWelcome();
       openFindData();
@@ -28116,39 +28106,10 @@
       if (OPEN_LINK_REQ.kind === "carried") openCarriedLink(OPEN_LINK_REQ, "ps-openlink");
       else openFromLink(OPEN_LINK_REQ, "ps-openlink");
     });
-    // The typed-link dialog (the welcome's From a link).
-    var typed = el("ps-linkopen-dialog");
-    if (!typed) return;
-    function typedDismiss() {
-      closeShellDialog("ps-linkopen-dialog");
-      showWelcome(true);
-    }
-    function typedGo() {
-      var raw = String(el("ps-linkopen-url").value || "").trim();
-      var u = null;
-      try { u = new URL(raw); } catch (e) { u = null; }
-      if (!u || (u.protocol !== "https:" && u.protocol !== "http:")) {
-        el("ps-linkopen-status").style.color = "#7a2e2e";
-        el("ps-linkopen-status").textContent = "Enter a full link that starts with https://";
-        return;
-      }
-      var kind = /\.(pand|pnd|pandion|json)$/i.test(u.pathname) ? "project" : "data";
-      openFromLink({ kind: kind, url: u.href }, "ps-linkopen");
-    }
-    el("ps-linkopen-cancel").addEventListener("click", typedDismiss);
-    typed.addEventListener("pointerdown", function (e) { if (e.target === this) typedDismiss(); });
-    typed.addEventListener("keydown", function (e) {
-      if (e.key === "Escape") { e.preventDefault(); typedDismiss(); return; }
-      shellTrapTab(this, e);
-    });
-    el("ps-linkopen-url").addEventListener("keydown", function (e) {
-      if (e.key === "Enter") { e.preventDefault(); typedGo(); }
-    });
-    el("ps-linkopen-open").addEventListener("click", typedGo);
   }
   // `prefix` names the dialog whose status line and Open button report the
-  // fetch: "ps-openlink" (a link the app arrived on) or "ps-linkopen" (a
-  // link typed into the welcome's From a link).
+  // fetch: "ps-openlink" (a link the app arrived on) or "ps-finddata" (a
+  // hit or a typed link in the Open data from the web dialog).
   function openFromLink(req, prefix) {
     prefix = prefix || "ps-openlink";
     var status = el(prefix + "-status"), btn = el(prefix + "-open");
@@ -28230,6 +28191,12 @@
       note: "Each search is sent to zenodo.org. Only records with a CSV, TSV, text or Excel file are listed. Opening one fetches the file into this browser; nothing is uploaded.",
       api: "https://zenodo.org/api/records",
       placeholder: "Type some words, then press Enter"
+    },
+    // A link the person already has (Torry, Sep 22 2026: the welcome's From
+    // a link folded in here, beside the two sources that always allow it).
+    link: {
+      note: "Your browser fetches the file and it stays on this machine; nothing is uploaded. The site has to allow other pages to read the file, which most open-data hosts do.",
+      placeholder: "https://"
     }
   };
   var FIND_READABLE = /\.(csv|tsv|txt|xlsx|xlsm|omv|pand|pnd|pandion)$/i;
@@ -28252,9 +28219,10 @@
   function openFindData() {
     if (!el("ps-finddata-dialog")) return;
     el("ps-finddata-q").value = "";
+    el("ps-finddata-link-url").value = "";
     findSetSource(FIND_SOURCE);
     openShellDialog("ps-finddata-dialog");
-    window.setTimeout(function () { try { el("ps-finddata-q").focus(); } catch (ignore) {} }, 0);
+    window.setTimeout(function () { try { el(FIND_SOURCE === "link" ? "ps-finddata-link-url" : "ps-finddata-q").focus(); } catch (ignore) {} }, 0);
   }
   function findSetSource(id) {
     if (!FIND_SOURCES[id]) id = "rdatasets";
@@ -28263,11 +28231,31 @@
     for (var i = 0; i < tabs.length; i++)
       tabs[i].setAttribute("aria-selected", tabs[i].getAttribute("data-source") === id ? "true" : "false");
     el("ps-finddata-note").textContent = FIND_SOURCES[id].note;
-    el("ps-finddata-q").placeholder = FIND_SOURCES[id].placeholder;
-    el("ps-finddata-go").style.display = id === "zenodo" ? "" : "none";
+    var isLink = id === "link";
+    el("ps-finddata-searchrow").hidden = isLink;
+    el("ps-finddata-linkrow").hidden = !isLink;
     el("ps-finddata-results").innerHTML = "";
     findStatus("", false);
+    if (isLink) {
+      el("ps-finddata-link-open").disabled = false;
+      return;
+    }
+    el("ps-finddata-q").placeholder = FIND_SOURCES[id].placeholder;
+    el("ps-finddata-go").style.display = id === "zenodo" ? "" : "none";
     findRun();
+  }
+  function findLinkGo() {
+    var raw = String(el("ps-finddata-link-url").value || "").trim();
+    var u = null;
+    try { u = new URL(raw); } catch (e) { u = null; }
+    if (!u || (u.protocol !== "https:" && u.protocol !== "http:")) {
+      findStatus("Enter a full link that starts with https://", true);
+      return;
+    }
+    var kind = /\.(pand|pnd|pandion|json)$/i.test(u.pathname) ? "project" : "data";
+    var btn = el("ps-finddata-link-open");
+    btn.disabled = true;
+    openFromLink({ kind: kind, url: u.href, onFail: function () { btn.disabled = false; } }, "ps-finddata");
   }
   function findStatus(msg, isError) {
     var s = el("ps-finddata-status");
@@ -28489,8 +28477,12 @@
     for (var i = 0; i < tabs.length; i++)
       tabs[i].addEventListener("click", function () {
         findSetSource(this.getAttribute("data-source"));
-        try { el("ps-finddata-q").focus(); } catch (ignore) {}
+        try { el(FIND_SOURCE === "link" ? "ps-finddata-link-url" : "ps-finddata-q").focus(); } catch (ignore) {}
       });
+    el("ps-finddata-link-url").addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); findLinkGo(); }
+    });
+    el("ps-finddata-link-open").addEventListener("click", findLinkGo);
     el("ps-finddata-q").addEventListener("input", function () {
       if (FIND_SOURCE !== "rdatasets") return;
       window.clearTimeout(FIND_TIMER);

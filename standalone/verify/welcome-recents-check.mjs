@@ -1,8 +1,8 @@
 // The welcome's right column (Sep 22 2026, Torry's audit): the autosaved
 // project heads Recent projects instead of sitting in the Start list, and
 // the section hides when there is nothing to pick up. What this pins:
-//   1. a first visit: the Start list holds its four doors and no Continue
-//      card, Find open data sits with the datasets, the Recent section is
+//   1. a first visit: the Start list holds its three doors and no Continue
+//      card, Open data from the web sits with the datasets, the Recent section is
 //      not drawn, and the datasets sit where it was;
 //   2. after work and a reload: the Continue row is drawn inside the Recent
 //      section, names the project, the Start list is still five, the
@@ -53,7 +53,7 @@ const state = () => page.evaluate(() => {
 // ---- 1. first visit
 await page.goto(PAGE); await page.waitForTimeout(1100);
 let s = await state();
-ok(s.welcome && !s.sectionDrawn && !s.contDrawn && s.startCards.length === 4 && !s.startCards.includes('Continue autosaved project') && !s.startCards.includes('Find open data') && s.findWithDatasets, '1: a first visit draws four Start doors, Find open data among the datasets, no Continue card, and no Recent section (' + s.startCards.join(', ') + ')');
+ok(s.welcome && !s.sectionDrawn && !s.contDrawn && s.startCards.length === 3 && !s.startCards.includes('Continue autosaved project') && !s.startCards.includes('From a link') && s.findWithDatasets, '1: a first visit draws three Start doors, Open data from the web among the datasets, no Continue card, and no Recent section (' + s.startCards.join(', ') + ')');
 ok(Math.abs(s.examplesTop - s.startTop) < 30, '1: the examples sit level with the Start heading (' + Math.round(s.examplesTop) + ' vs ' + Math.round(s.startTop) + ')');
 // ---- 2. work, then a fresh session
 await page.click('[data-example="dose"]'); await page.waitForTimeout(1200);
@@ -62,7 +62,7 @@ await page.evaluate(() => sessionStorage.clear());
 await page.reload(); await page.waitForTimeout(1300);
 s = await state();
 ok(s.welcome && s.sectionDrawn && s.contDrawn && s.contInSection && /Dose response study/.test(s.contMeta) && /saved/.test(s.contMeta), '2: a new session draws Continue inside Recent projects, naming the project (' + s.contMeta + ')');
-ok(s.startCards.length === 4 && !s.startCards.includes('Continue autosaved project'), '2: the Start list is still four doors');
+ok(s.startCards.length === 3 && !s.startCards.includes('Continue autosaved project'), '2: the Start list is still three doors');
 ok(s.listedNames.includes('Dose response study') && !s.drawnNames.includes('Dose response study'), '2: the project is in the recent list but not drawn a second time under its own Continue row');
 await page.click('#ps-welcome-continue'); await page.waitForTimeout(400);
 s = await state();

@@ -112,7 +112,8 @@ const state = page => page.evaluate(() => {
 {
     const { ctx, page, errors } = await boot();
     const action = await page.evaluate(() => { const b = document.getElementById('ps-welcome-find'); const r = b && b.getBoundingClientRect(); return b ? { text: b.textContent.replace(/\s+/g, ' ').trim(), visible: r.width > 0 } : null; });
-    ok(action && action.visible && /Find open data/.test(action.text), '1: the welcome offers Find open data (' + (action && action.text) + ')');
+    const tabs = await page.evaluate(() => Array.from(document.querySelectorAll('#ps-finddata-dialog [data-source]')).map(b => b.getAttribute('data-source')));
+    ok(action && action.visible && /Open data from the web/.test(action.text) && tabs.join(',') === 'rdatasets,zenodo,link', '1: the welcome offers Open data from the web, a dialog with three sources (' + (action && action.text) + ')');
     await page.click('#ps-welcome-find'); await page.waitForTimeout(500);
     let s = await state(page);
     ok(s.open && !s.welcome && s.focused === 'ps-finddata-q' && s.source === 'rdatasets', '1: it opens the dialog on Teaching datasets with the search box focused and the welcome away');
