@@ -67384,6 +67384,12 @@
                     sel = '[data-bs-strip="median-color"] button[data-field="bx-m-color"]';
                 } else if (stripId === "outlier-color") {
                     sel = '[data-bs-strip="outlier-color"] button[data-field="bx-o-color"]';
+                } else if (stripId === "outlier-ring-color") {
+                    // Rainclouds, and box plots with their points shown,
+                    // ring outliers among the points and edit the RING
+                    // color on this strip. It had no entry here, so the
+                    // picker hid on its Color tab (Torry, Sep 23 2026).
+                    sel = '[data-bs-strip="outlier-ring-color"] button[data-field="bx-o-ring-color"]';
                 } else if (stripId === "vl-ib-color") {
                     sel = '[data-bs-strip="vl-ib-color"] button[data-field="vl-ib-color"]';
                 } else if (stripId === "vl-md-color") {
@@ -67789,7 +67795,10 @@
                         if (id === "border") activeStrip = window.__gb2_bsActiveStripBorder || _bsBorderFallback || "border-color";
                         else if (id === "whiskers") activeStrip = window.__gb2_bsActiveStripWhiskers || "whisker-color";
                         else if (id === "median") activeStrip = window.__gb2_bsActiveStripMedian || "median-color";
-                        else if (id === "outliers") activeStrip = window.__gb2_bsActiveStripOutliers || "outlier-color";
+                        // The pane's own strip, validated: the plain-box and
+                        // ring layouts carry different strips, and a stale or
+                        // missing sticky left the previous tab's picker up.
+                        else if (id === "outliers") activeStrip = _bsResolveInitialStrip("outliers", "outlier-show");
                         else if (id === "innerbox") activeStrip = window.__gb2_bsActiveStripInnerBox || "vl-ib-color";
                         else if (id === "innerwhisker") activeStrip = window.__gb2_bsActiveStripInnerWhisker || "vl-w-color";
                         else if (id === "innermedian") activeStrip = window.__gb2_bsActiveStripInnerMedian || "vl-md-color";
