@@ -30,6 +30,7 @@ const pageUrl = 'file://' + (process.env.PS_PAGE
     : path.resolve(new URL('.', import.meta.url).pathname, '..', 'index.html'));
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1500, height: 950 } });
+page.on('filechooser', () => {}); // Playwright dismisses an unhandled file chooser and Chromium reports that as cancel, which the app honours; a listener keeps the chooser open
 const errors = [];
 page.on('pageerror', e => errors.push(String(e)));
 await page.goto(pageUrl);
@@ -223,6 +224,7 @@ ok(await chrome() === 0, 'no seam arms on an ungrouped line (nothing the options
 console.log('case 8c: GROUPED dot gets the Marker-spread seam');
 const ctxG = await browser.newContext();
 const pageG = await ctxG.newPage({ viewport: { width: 1500, height: 1000 } });
+pageG.on('filechooser', () => {}); // Playwright dismisses an unhandled file chooser and Chromium reports that as cancel, which the app honours; a listener keeps the chooser open
 const errG = [];
 pageG.on('pageerror', e => errG.push(String(e)));
 await pageG.goto(pageUrl);
@@ -333,6 +335,7 @@ await ctxG.close();
 console.log('case 8d: Repeated Measures gets the seams too');
 const ctxR = await browser.newContext();
 const pageR = await ctxR.newPage({ viewport: { width: 1500, height: 1000 } });
+pageR.on('filechooser', () => {}); // Playwright dismisses an unhandled file chooser and Chromium reports that as cancel, which the app honours; a listener keeps the chooser open
 const errR = [];
 pageR.on('pageerror', e => errR.push(String(e)));
 await pageR.goto(pageUrl);
@@ -394,6 +397,7 @@ await ctxR.close();
 console.log('case 8e: Frequencies bars - between always, within only when dodged');
 const ctxF = await browser.newContext();
 const pageF = await ctxF.newPage({ viewport: { width: 1500, height: 1000 } });
+pageF.on('filechooser', () => {}); // Playwright dismisses an unhandled file chooser and Chromium reports that as cancel, which the app honours; a listener keeps the chooser open
 const errF = [];
 pageF.on('pageerror', e => errF.push(String(e)));
 await pageF.goto(pageUrl);
@@ -478,6 +482,7 @@ await ctxF.close();
 console.log('case 8f: HORIZONTAL bars get horizontal seams, drag down widens');
 const ctxH = await browser.newContext();
 const pageH = await ctxH.newPage({ viewport: { width: 1500, height: 1000 } });
+pageH.on('filechooser', () => {}); // Playwright dismisses an unhandled file chooser and Chromium reports that as cancel, which the app honours; a listener keeps the chooser open
 const errH = [];
 pageH.on('pageerror', e => errH.push(String(e)));
 await pageH.goto(pageUrl);
@@ -538,6 +543,7 @@ await ctxH.close();
 console.log('case 8g: Likert rows get the Row-gap seam');
 const ctxL = await browser.newContext();
 const pageL = await ctxL.newPage({ viewport: { width: 1500, height: 1000 } });
+pageL.on('filechooser', () => {}); // Playwright dismisses an unhandled file chooser and Chromium reports that as cancel, which the app honours; a listener keeps the chooser open
 const errL = [];
 pageL.on('pageerror', e => errL.push(String(e)));
 await pageL.goto(pageUrl);
@@ -615,6 +621,7 @@ await ctxL.close();
 console.log('case 9: inertness - a payload without the key');
 const ctx2 = await browser.newContext({ viewport: { width: 1500, height: 950 } });
 const page2 = await ctx2.newPage();
+page2.on('filechooser', () => {}); // Playwright dismisses an unhandled file chooser and Chromium reports that as cancel, which the app honours; a listener keeps the chooser open
 await page2.addInitScript(() => {
     const t = setInterval(() => {
         if (window.GraphBuilder2 && window.GraphBuilder2.render &&

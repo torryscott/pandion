@@ -68,6 +68,7 @@ const browser = await chromium.launch();
 async function boot() {
     const ctx = await browser.newContext();
     const page = await ctx.newPage({ viewport: { width: 1440, height: 1000 } });
+    page.on('filechooser', () => {}); // Playwright dismisses an unhandled file chooser and Chromium reports that as cancel, which the app honours; a listener keeps the chooser open
     await page.addInitScript(() => { try { localStorage.clear(); localStorage.setItem('psstandalone.coach.clickToEdit.v1', '1'); sessionStorage.clear(); } catch (e) {} });
     const errors = []; page.on('pageerror', e => errors.push(String(e)));
     const seen = { zenodo: [] };

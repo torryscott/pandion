@@ -47,6 +47,7 @@ const browser = await chromium.launch();
 const ctx = await browser.newContext({
     permissions: ['clipboard-read', 'clipboard-write'] });
 const page = await ctx.newPage({ viewport: { width: 1500, height: 1000 } });
+page.on('filechooser', () => {}); // Playwright dismisses an unhandled file chooser and Chromium reports that as cancel, which the app honours; a listener keeps the chooser open
 const errors = [];
 page.on('pageerror', e => errors.push(String(e)));
 await page.goto(pageUrl);
