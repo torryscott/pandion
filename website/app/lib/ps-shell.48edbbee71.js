@@ -661,6 +661,9 @@
   var FILE_SAVED_REV = null;
   var FILE_LABEL = null;
   var BOOT_RESTORED = false;
+  // Open by link: the source of the data the app was pointed at, set once
+  // the fetched file is adopted (see linkRequestFromLocation).
+  var PENDING_LINK_SOURCE = null;
   var PS_FLUSH_PENDING_OPTS = null;   // B12: set by wireHeader
   var BOOT_SAVED_AT = null;   // B14: age of the snapshot Continue would open
   var MODULES = window.PSData.MODULES;
@@ -3846,6 +3849,7 @@
       savedAt: new Date().toISOString(),
       id: PROJECT.id,
       name: PROJECT.name,
+      sourceUrl: PROJECT.sourceUrl || "",
       charts: PROJECT.charts,
       pinboards: PROJECT.pinboards || [],
       activeChart: PROJECT.activeChart,
@@ -4414,11 +4418,11 @@
   // can reload it. Plain JSON on purpose: transparent and future-proof.
   // The identity carries the product's real name (Pandion Plots); the
   // loader sniffs CONTENT, so .pand / .pnd / .pandion / .json all open.
-  function projectFileText() {
+  function projectFileText(snapOverride) {
     // Every .pand the app writes goes through here, so this is where a
     // pending colour has to be banked rather than at one call site.
     bankPendingColor();
-    var body = projectSnapshot();
+    var body = snapOverride || projectSnapshot();
     return JSON.stringify({
       kind: "pandion-plots-project",
       formatVersion: 3,
@@ -4484,7 +4488,8 @@
     }
     if (detail) detail.textContent = FILE_LABEL ||
       (PROJECT.charts.length + (PROJECT.charts.length === 1
-       ? " document \u00b7 local project" : " documents \u00b7 local project"));
+       ? " document \u00b7 " : " documents \u00b7 ") +
+       (PROJECT.sourceUrl ? "from " + linkHost(PROJECT.sourceUrl) : "local project"));
   }
   function flashSaved() {
     var b = el("ps-save");
@@ -6087,24 +6092,146 @@
   // file:// is the portable app's whole life. Shell-only; the button is
   // injected into the engine's card by the observer below (the help-copy
   // retarget pattern) and the engine is untouched.
-  function composeComparisonMoment() {
-    var card = document.querySelector('[data-role="st-focus-card"]');
-    var host = document.querySelector(".graphbuilder2-host");
-    if (!card || !host) { showToast("Pin a comparison first"); return "unavailable"; }
-    var svgs = host.querySelectorAll("svg");
-    var chart = null, area = 0;
-    for (var i = 0; i < svgs.length; i++) {
-      var r = svgs[i].getBoundingClientRect();
-      if (r.width * r.height > area) { area = r.width * r.height; chart = svgs[i]; }
-    }
-    if (!chart) { showToast("No chart to copy"); return "unavailable"; }
+  // The chart on top, a statistics card underneath, one svg: the shape of
+  // every Notebook "moment". `text` is { eyebrow, title, paragraphs[] };
+  // paragraphs render as separate wrapped blocks (an ANOVA keeps one line
+  // per effect, a multi-row keep one per comparison), and the same text
+  // rides the page as DATA so the rail shows it readable (Sep 21 2026,
+  // Torry: keep the ANOVA and several comparisons with the chart).
+  function composeMomentCard(chart, text) {
     var w = Math.round(parseFloat(chart.getAttribute("width")) ||
                        chart.getBoundingClientRect().width);
     var h = Math.round(parseFloat(chart.getAttribute("height")) ||
                        chart.getBoundingClientRect().height);
     var rings = chart.querySelectorAll(
       '[data-role="stats-link-halo"] rect, [data-role="stats-link-halo"] circle').length;
-    // Mine the card's three pieces; the buttons are controls, not finding.
+    var eyebrow = exportSafeText(text.eyebrow || ""), title = exportSafeText(text.title || "");
+    // A paragraph is a string, or a list of runs [{ t, chip }]: a chip run
+    // is drawn on the small green box the Statistics panel puts on a
+    // deciding p below the alpha (Torry, Sep 21 2026: the significance
+    // chip belongs on the kept page too). Chip runs never wrap.
+    var paragraphs = (text.paragraphs || []).map(function (para) {
+      var runs = Array.isArray(para) ? para : [{ t: String(para == null ? "" : para) }];
+      return runs.map(function (r) {
+        return { t: exportSafeText(String(r.t || "")).replace(/\s+/g, " "), chip: !!r.chip };
+      }).filter(function (r) { return r.t; });
+    }).filter(function (runs) { return runs.length; });
+    var pad = 12, cardW = Math.max(160, w - pad * 2), innerW = cardW - 26;
+    var mctx = document.createElement("canvas").getContext("2d");
+    var FONT = "-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+    function wrapText(t, font, maxW) {
+      return wrapRuns([{ t: t }], font, maxW).map(function (line) {
+        return line.map(function (w) { return w.t; }).join(" ");
+      });
+    }
+    // Word-wrap a run list; a chip run is one unbreakable word. Returns
+    // lines of words [{ t, chip, glue }]; a glued word follows the previous
+    // one with no space (", " after a chip, "." after a name), so the run
+    // boundaries never leak stray spaces into the drawn line.
+    function wrapRuns(runs, font, maxW) {
+      mctx.font = font;
+      var words = [], prevEndsSpace = true;
+      for (var ri = 0; ri < runs.length; ri++) {
+        var t = runs[ri].t, startsSpace = /^\s/.test(t), endsSpace = /\s$/.test(t);
+        var parts = runs[ri].chip ? [t.trim()] : t.trim().split(/\s+/);
+        for (var pi = 0; pi < parts.length; pi++) {
+          if (!parts[pi]) continue;
+          words.push({ t: parts[pi], chip: !!runs[ri].chip,
+                       glue: pi === 0 && words.length > 0 && !startsSpace && !prevEndsSpace });
+        }
+        prevEndsSpace = endsSpace;
+      }
+      var lines = [], cur = [];
+      function widthOf(ws) {
+        var w = 0;
+        for (var i = 0; i < ws.length; i++) {
+          if (i && !ws[i].glue) w += mctx.measureText(" ").width;
+          w += mctx.measureText(ws[i].t).width + (ws[i].chip ? CHIP_PAD * 2 : 0);
+        }
+        return w;
+      }
+      for (var wi = 0; wi < words.length; wi++) {
+        var probe = cur.concat([words[wi]]);
+        if (widthOf(probe) > maxW && cur.length) { lines.push(cur); cur = [words[wi]]; }
+        else cur = probe;
+      }
+      if (cur.length) lines.push(cur);
+      return lines;
+    }
+    var CHIP_PAD = 4;
+    // One text line, with a rounded green box behind each chip word.
+    function lineSvg(words, y, font, fontPx, fill, extra) {
+      mctx.font = font;
+      var x = 14, out = [], tspans = [];
+      for (var wi = 0; wi < words.length; wi++) {
+        var w = words[wi], tw = mctx.measureText(w.t).width;
+        if (wi && !w.glue) x += mctx.measureText(" ").width;
+        if (w.chip) {
+          out.push('<rect data-role="sig-chip" x="' + (x - 0.5).toFixed(1) + '" y="' + (y - fontPx + 1).toFixed(1) +
+            '" width="' + (tw + CHIP_PAD * 2).toFixed(1) + '" height="' + (fontPx + 5).toFixed(1) +
+            '" rx="3" fill="#e9f4df" stroke="#c8e0b8"/>');
+          tspans.push('<tspan x="' + (x + CHIP_PAD).toFixed(1) + '">' + esc(w.t) + "</tspan>");
+          x += tw + CHIP_PAD * 2;
+        } else {
+          tspans.push('<tspan x="' + x.toFixed(1) + '">' + esc(w.t) + "</tspan>");
+          x += tw;
+        }
+      }
+      out.push('<text y="' + y + '" font-size="' + fontPx + '" fill="' + fill + '"' + (extra || "") + ">" + tspans.join("") + "</text>");
+      return out.join("");
+    }
+    function esc(t) {
+      return t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+    var eyeLines = wrapText(eyebrow.toUpperCase(), "10px " + FONT, innerW);
+    var titleLines = wrapText(title, "600 13px " + FONT, innerW);
+    var parts = [], ty = 18;
+    for (var e1 = 0; e1 < eyeLines.length; e1++, ty += 14)
+      parts.push('<text x="14" y="' + ty + '" font-size="10" fill="#5b6b7c" letter-spacing="0.4">' + esc(eyeLines[e1]) + "</text>");
+    ty += 3;
+    for (var t1 = 0; t1 < titleLines.length; t1++, ty += 17)
+      parts.push('<text x="14" y="' + ty + '" font-size="13" font-weight="600" fill="#1c2b3a">' + esc(titleLines[t1]) + "</text>");
+    ty += 4;
+    for (var pi = 0; pi < paragraphs.length; pi++) {
+      var bodyLines = wrapRuns(paragraphs[pi], "12px " + FONT, innerW);
+      for (var b1 = 0; b1 < bodyLines.length; b1++, ty += 16)
+        parts.push(lineSvg(bodyLines[b1], ty, "12px " + FONT, 12, "#22364d"));
+      if (pi < paragraphs.length - 1) ty += 5;
+    }
+    var cardH = ty + 2;
+    var chartClone = chart.cloneNode(true);
+    stripHoverFromClone(chartClone);
+    stripEditorChromeFromClone(chartClone);
+    chartClone.removeAttribute("tabindex");
+    chartClone.removeAttribute("aria-label");
+    chartClone.setAttribute("x", "0");
+    chartClone.setAttribute("y", "0");
+    stampPinFonts(chartClone, chart);
+    var totalH = h + pad + cardH + pad;
+    var composed =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + totalH +
+      '" viewBox="0 0 ' + w + " " + totalH + '">' +
+      "<!-- " + appStamp() + " -->" +
+      '<rect x="0" y="0" width="' + w + '" height="' + totalH + '" fill="#ffffff"/>' +
+      serializeExportSvg(chartClone) +
+      '<g transform="translate(' + pad + "," + (h + pad) + ')" font-family="' +
+      FONT.replace(/"/g, "&quot;") + '">' +
+      '<rect x="0" y="0" width="' + cardW + '" height="' + cardH +
+      '" rx="6" fill="#eef4fc" stroke="#cfe0f5"/>' +
+      '<rect x="0" y="0" width="3" height="' + cardH + '" fill="#3573bd"/>' +
+      parts.join("") + "</g></svg>";
+    return { svg: composed, w: w, h: totalH, rings: rings,
+             prov: pinProvenance(chart),
+             text: { eyebrow: eyebrow, title: title,
+                     body: paragraphs.map(function (runs) {
+                       return runs.map(function (r) { return r.t; }).join("");
+                     }).join("\n") } };
+  }
+  // The pinned comparison's focus card, mined into the card text.
+  function composeComparisonMoment() {
+    var card = document.querySelector('[data-role="st-focus-card"]');
+    var chart = liveChartSvg();
+    if (!card || !chart) { showToast("Pin a comparison first"); return "unavailable"; }
     function textOf(node) {
       return node ? exportSafeText(node.textContent || "").replace(/\s+/g, " ").trim() : "";
     }
@@ -6130,67 +6257,141 @@
       }
       body = textOf(clone);
     })();
-    var pad = 12, cardW = Math.max(160, w - pad * 2), innerW = cardW - 26;
-    var mctx = document.createElement("canvas").getContext("2d");
-    var FONT = "-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
-    function wrapText(text, font, maxW) {
-      if (!text) return [];
-      text = exportSafeText(text);
-      mctx.font = font;
-      var words = text.split(" "), lines = [], cur = "";
-      for (var wi = 0; wi < words.length; wi++) {
-        var probe = cur ? cur + " " + words[wi] : words[wi];
-        if (mctx.measureText(probe).width > maxW && cur) { lines.push(cur); cur = words[wi]; }
-        else cur = probe;
+    var para = [{ t: body }];
+    // The card's deciding p wears the panel's green inline (no marker
+    // attribute there), so recognise it by that green.
+    var chipEl = card.querySelector("[data-cmp-sig]");
+    if (!chipEl) {
+      var spans = card.querySelectorAll("[data-st-fsentence] span");
+      for (var si = 0; si < spans.length && !chipEl; si++) {
+        var st = spans[si].getAttribute("style") || "";
+        if (/e9f4df/i.test(st) ||
+            window.getComputedStyle(spans[si]).backgroundColor === "rgb(233, 244, 223)")
+          chipEl = spans[si];
       }
-      if (cur) lines.push(cur);
-      return lines;
     }
-    function esc(s) {
-      return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    }
-    var eyeLines = wrapText(eyebrow.toUpperCase(), "10px " + FONT, innerW);
-    var titleLines = wrapText(title, "600 13px " + FONT, innerW);
-    var bodyLines = wrapText(body, "12px " + FONT, innerW);
-    var parts = [], ty = 18;
-    for (var e1 = 0; e1 < eyeLines.length; e1++, ty += 14)
-      parts.push('<text x="14" y="' + ty + '" font-size="10" fill="#5b6b7c" letter-spacing="0.4">' + esc(eyeLines[e1]) + "</text>");
-    ty += 3;
-    for (var t1 = 0; t1 < titleLines.length; t1++, ty += 17)
-      parts.push('<text x="14" y="' + ty + '" font-size="13" font-weight="600" fill="#1c2b3a">' + esc(titleLines[t1]) + "</text>");
-    ty += 4;
-    for (var b1 = 0; b1 < bodyLines.length; b1++, ty += 16)
-      parts.push('<text x="14" y="' + ty + '" font-size="12" fill="#22364d">' + esc(bodyLines[b1]) + "</text>");
-    var cardH = ty + 2;
-    var chartClone = chart.cloneNode(true);
-    stripHoverFromClone(chartClone);
-    stripEditorChromeFromClone(chartClone);
-    chartClone.removeAttribute("tabindex");
-    chartClone.removeAttribute("aria-label");
-    chartClone.setAttribute("x", "0");
-    chartClone.setAttribute("y", "0");
-    stampPinFonts(chartClone, chart);
-    var totalH = h + pad + cardH + pad;
-    var composed =
-      '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + totalH +
-      '" viewBox="0 0 ' + w + " " + totalH + '">' +
-      "<!-- " + appStamp() + " -->" +
-      '<rect x="0" y="0" width="' + w + '" height="' + totalH + '" fill="#ffffff"/>' +
-      serializeExportSvg(chartClone) +
-      '<g transform="translate(' + pad + "," + (h + pad) + ')" font-family="' +
-      FONT.replace(/"/g, "&quot;") + '">' +
-      '<rect x="0" y="0" width="' + cardW + '" height="' + cardH +
-      '" rx="6" fill="#eef4fc" stroke="#cfe0f5"/>' +
-      '<rect x="0" y="0" width="3" height="' + cardH + '" fill="#3573bd"/>' +
-      parts.join("") + "</g></svg>";
-    return { svg: composed, w: w, h: totalH, rings: rings,
-             prov: pinProvenance(chart),
-             // the mined card text rides as DATA so the rail can show the
-             // statistics READABLE, not just baked into the image
-             text: { eyebrow: eyebrow, title: title, body: body } };
+    var chipText = chipEl ? textOf(chipEl) : "";
+    var at = chipText ? body.indexOf(chipText) : -1;
+    if (at !== -1)
+      para = [{ t: body.slice(0, at) }, { t: chipText, chip: true }, { t: body.slice(at + chipText.length) }];
+    return composeMomentCard(chart, { eyebrow: eyebrow, title: title, paragraphs: [para] });
   }
-  function copyComparisonMoment() {
-    var made = composeComparisonMoment();
+  // Shared by the Omnibus and multi-row keeps: what the Statistics panel
+  // calls this chart's analysis ("Compare Groups"), read off its title bar.
+  function statsPanelModuleName() {
+    // The title bar's crumb is "<module> / Statistics"; the module is its
+    // first span.
+    var crumb = document.querySelector('[data-gb2-inspector] [data-role="inspector-title"] [data-role="gb2-crumb"] > span');
+    var name = crumb ? (crumb.textContent || "").replace(/\s+/g, " ").trim() : "";
+    return name.length > 40 ? "" : name;
+  }
+  function cellText(node) {
+    return node ? (node.textContent || "").replace(/\s+/g, " ").trim() : "";
+  }
+  function pWord(cell) {
+    // ".202" -> "p = .202"; "< .001" -> "p < .001"
+    if (!cell) return "";
+    return /^[<>]/.test(cell) ? "p " + cell : "p = " + cell;
+  }
+  // The Omnibus tab: every effect row (main effects, the interaction) plus
+  // the model footnote (the design, Type III, a Greenhouse-Geisser note on
+  // Repeated Measures) become one page with the chart.
+  function composeOmnibusMoment() {
+    var pane = document.querySelector('[data-gb2-inspector] [data-st-pane="omnibus"]');
+    var table = pane && pane.querySelector("table");
+    var chart = liveChartSvg();
+    if (!table || !chart) { showToast("Open the Omnibus tab first"); return "unavailable"; }
+    var heads = Array.prototype.map.call(table.querySelectorAll("th"), cellText);
+    var effSym = heads[4] || "";
+    var lines = [];
+    var rows = table.querySelectorAll("tr");
+    for (var i = 0; i < rows.length; i++) {
+      var tds = rows[i].querySelectorAll("td");
+      if (tds.length < 4) continue;
+      var effect = cellText(tds[0]), F = cellText(tds[1]), df = cellText(tds[2]), pv = cellText(tds[3]);
+      var eff = tds.length > 4 ? cellText(tds[4]) : "";
+      if (!effect || !F) continue;
+      var runs = [{ t: effect + ": F(" + df + ") = " + F + ", " },
+                  { t: pWord(pv), chip: !!tds[3].querySelector("[data-cmp-sig]") }];
+      if (eff && eff !== "\u2014" && effSym) runs.push({ t: ", " + effSym + " = " + eff });
+      lines.push(runs);
+    }
+    if (!lines.length) { showToast("No ANOVA rows to keep"); return "unavailable"; }
+    var foot = "", foots = pane.querySelectorAll('div[style*="color:#666"]');
+    if (foots.length) foot = cellText(foots[foots.length - 1]);
+    // The card's title names the design (the footnote's first clause), so
+    // the footnote itself stays off the card (Torry, Sep 21 2026); the one
+    // thing worth carrying is a sphericity note on Repeated Measures.
+    // Sentences end at a period followed by a capital (so "eps = .34" does
+    // not split); the design is the first sentence's opening clause when it
+    // names an ANOVA, else the module says which model this is.
+    var sentences = foot ? (foot.match(/.+?\.(?=\s+[A-Z]|\s*$)/g) || [foot]) : [];
+    var clause = sentences.length ? sentences[0].split(/ over the visible chart|, | \(|: /)[0].trim() : "";
+    var title = /ANOVA/.test(clause) ? clause
+      : (statsPanelModuleName() === "Repeated Measures" ? "Repeated-measures ANOVA" : "ANOVA");
+    var gg = "";
+    for (var si = 0; si < sentences.length; si++)
+      if (sentences[si].indexOf("Greenhouse-Geisser") !== -1) gg = sentences[si].trim();
+    var eyebrow = [statsPanelModuleName(), "Omnibus"].filter(Boolean).join(" \u00b7 ");
+    return composeMomentCard(chart, { eyebrow: eyebrow, title: title || "ANOVA",
+                                      paragraphs: lines.concat(gg ? [gg] : []) });
+  }
+  // The Compare pairs tab: the ticked rows, in display order, as one page.
+  function tickedPairRows() {
+    var pane = document.querySelector('[data-gb2-inspector] [data-st-pane="pairs"]');
+    if (!pane) return [];
+    var out = [];
+    var cbs = pane.querySelectorAll("input[data-cmp-cb]");
+    for (var i = 0; i < cbs.length; i++) {
+      if (!cbs[i].checked) continue;
+      var tr = cbs[i].closest("tr");
+      if (tr) out.push(tr);
+    }
+    return out;
+  }
+  function pairRowLine(tr) {
+    var section = "";
+    for (var prev = tr.previousElementSibling; prev; prev = prev.previousElementSibling) {
+      var hdr = prev.querySelector("td[colspan]");
+      if (!hdr) continue;
+      var clone = hdr.cloneNode(true);
+      var strip = clone.querySelectorAll("[data-cmp-chev], [data-cmp-tally], button");
+      for (var k = strip.length - 1; k >= 0; k--)
+        if (strip[k].parentNode) strip[k].parentNode.removeChild(strip[k]);
+      section = cellText(clone).replace(/\s*\u00b7.*$/, "");
+      break;
+    }
+    var tds = tr.querySelectorAll("td"), c = [], sig = [];
+    for (var i = 0; i < tds.length; i++) {
+      if (tds[i].querySelector("input[data-cmp-cb]")) continue;
+      c.push(cellText(tds[i]));
+      sig.push(!!tds[i].querySelector("[data-cmp-sig]"));
+    }
+    // [comparison, test, statistic, p, p(adj), effect]
+    var runs = [{ t: (section ? section + ": " : "") + (c[0] || "") }];
+    if (c[1]) runs.push({ t: ". " + c[1] });
+    if (c[2]) runs.push({ t: ", " + c[2] });
+    if (c[3]) { runs.push({ t: ", " }); runs.push({ t: pWord(c[3]), chip: !!sig[3] }); }
+    if (c[4] && c[4] !== "\u2014") { runs.push({ t: ", " }); runs.push({ t: "adjusted " + pWord(c[4]), chip: !!sig[4] }); }
+    if (c[5] && c[5] !== "\u2014") runs.push({ t: ", " + c[5] });
+    return runs;
+  }
+  function composeTickedMoment() {
+    var rows = tickedPairRows();
+    var chart = liveChartSvg();
+    if (!rows.length || !chart) { showToast("Tick the comparisons to keep first"); return "unavailable"; }
+    var lines = rows.map(pairRowLine);   // each a run list
+    var pane = document.querySelector('[data-gb2-inspector] [data-st-pane="pairs"]');
+    var tally = pane && pane.querySelector("[data-cmp-tally]");
+    var eyebrow = [statsPanelModuleName(), "Compare pairs"].filter(Boolean).join(" \u00b7 ");
+    var title = rows.length === 1 ? "1 comparison" : rows.length + " comparisons";
+    var paragraphs = lines.slice();
+    if (tally) paragraphs.push(cellText(tally));
+    return composeMomentCard(chart, { eyebrow: eyebrow, title: title, paragraphs: paragraphs });
+  }
+  function copyComparisonMoment() { return copyMomentMade(composeComparisonMoment()); }
+  function copyOmnibusMoment() { return copyMomentMade(composeOmnibusMoment()); }
+  function copyMomentMade(made) {
     if (typeof made === "string") return Promise.resolve(made);
     var blocked = copyImageBlockedReason();
     if (blocked) {
@@ -6839,13 +7040,21 @@
     showActionToast("Kept " + what + " to " + board.name, "Open",
       function () { setAppWorkspace("pinboard"); });
   }
-  function keepComparisonMoment() {
-    var made = composeComparisonMoment();
+  function keepMomentMade(made, what) {
     if (typeof made === "string") return Promise.resolve(made);
-    pushPin(made.svg, made.w, made.h, "the comparison", null, made.prov,
+    pushPin(made.svg, made.w, made.h, what, null, made.prov,
       { momEyebrow: made.text.eyebrow, momTitle: made.text.title,
         momText: made.text.body });
     return Promise.resolve("kept");
+  }
+  function keepComparisonMoment() {
+    return keepMomentMade(composeComparisonMoment(), "the comparison");
+  }
+  function keepOmnibusMoment() {
+    return keepMomentMade(composeOmnibusMoment(), "the ANOVA");
+  }
+  function keepTickedMoment() {
+    return keepMomentMade(composeTickedMoment(), "the comparisons");
   }
   // "Pin to Pinboard" on the chart's own right-click (Torry, Aug 1 2026):
   // just the graph, no stats card - whatever is on it, rings included.
@@ -6921,11 +7130,81 @@
       row.appendChild(btn);
       card.appendChild(row);
     }
+    function momentBtn(label, tip, primary, attr) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute(attr, "1");
+      b.textContent = label;
+      setTip(b, tip);
+      b.style.cssText = "-webkit-appearance:none;appearance:none;font:inherit;" +
+        "font-size:10.5px;border-radius:10px;cursor:pointer;margin-right:6px;" +
+        (primary ? "color:#fff;background:#3573bd;border:1px solid #3573bd;padding:1px 11px;"
+                 : "color:#3573bd;background:#fff;border:1px solid #cfe0f5;padding:1px 9px;");
+      return b;
+    }
+    // The Omnibus card has no focus card (its rows point at no chart cell,
+    // so nothing pins), which is why it could not be kept (Torry, Sep 21
+    // 2026). Its Keep takes the whole table: every effect plus the model
+    // footnote, with the chart, as one page.
+    function injectOmnibus() {
+      var pane = document.querySelector(
+        '[data-gb2-inspector] [data-st-pane="omnibus"]:not([data-ps-moment])');
+      if (!pane) return;
+      var table = pane.querySelector("table");
+      if (!table || !table.querySelector("td")) return;   // a refusal: nothing to keep
+      pane.setAttribute("data-ps-moment", "1");
+      var row = document.createElement("div");
+      row.style.cssText = "margin-top:8px;";
+      var keep = momentBtn("Keep", "Keep the ANOVA table with the chart in the " +
+        "Notebook - every effect and the model note as one page", true, "data-ps-moment-keep-omni");
+      keep.addEventListener("click", function (e) { e.stopPropagation(); keepOmnibusMoment(); });
+      var copy = momentBtn("Copy with chart", "Copy the ANOVA table and the chart as one image",
+        false, "data-ps-moment-copy-omni");
+      copy.addEventListener("click", function (e) { e.stopPropagation(); copyOmnibusMoment(); });
+      row.appendChild(keep); row.appendChild(copy);
+      pane.appendChild(row);
+    }
+    // Compare pairs: the checkboxes already say which rows matter (they
+    // feed Place brackets), so Keep ticked keeps exactly those, in table
+    // order, as one page - main effects and interactions of the same chart
+    // travel together.
+    function injectTicked() {
+      var pane = document.querySelector('[data-gb2-inspector] [data-st-pane="pairs"]');
+      if (!pane) return;
+      var copyBtn = pane.querySelector('[data-st-act="cmpcopy"]');
+      if (!copyBtn || !copyBtn.parentNode) return;
+      var rowEl = copyBtn.parentNode;
+      var keep = rowEl.querySelector("[data-ps-moment-keep-ticked]");
+      if (!keep) {
+        keep = momentBtn("Keep ticked", "", true, "data-ps-moment-keep-ticked");
+        keep.style.marginLeft = "6px";
+        keep.addEventListener("click", function (e) { e.stopPropagation(); keepTickedMoment(); });
+        rowEl.appendChild(keep);
+        pane.addEventListener("change", function (e) {
+          if (e.target && e.target.matches && e.target.matches("input[data-cmp-cb]")) sync();
+        });
+      }
+      function sync() {
+        var n = tickedPairRows().length;
+        keep.disabled = n === 0;
+        keep.style.opacity = n === 0 ? "0.5" : "1";
+        keep.textContent = n > 1 ? "Keep ticked (" + n + ")" : "Keep ticked";
+        setTip(keep, n === 0
+          ? "Tick the comparisons to keep, then press Keep ticked: they land in the Notebook as one page with the chart"
+          : "Keep the " + (n === 1 ? "ticked comparison" : n + " ticked comparisons") +
+            " with the chart in the Notebook as one page");
+      }
+      sync();
+    }
     var pending = false;
     var mo = new MutationObserver(function () {
       if (pending) return;
       pending = true;
-      window.setTimeout(function () { pending = false; inject(); }, 0);
+      window.setTimeout(function () {
+        pending = false;
+        inject();
+        try { injectOmnibus(); injectTicked(); } catch (ignore) {}
+      }, 0);
     });
     mo.observe(document.body, { childList: true, subtree: true });
   })();
@@ -7272,13 +7551,17 @@
       return { error: "Could not read that project file." };
     }
     PROJECT_CHOSEN = true;
+    var fromLink = !!PENDING_LINK_SOURCE;
+    PROJECT.sourceUrl = takeLinkSource() || parsed.snapshot.sourceUrl || "";
     dataHistoryClear();
     importLibraries(parsed.libraries);
     var numNote = _numericalNoticeFor(parsed.fileAppVersion, APP_VERSION,
                                       parsed.fileNumericalChanges);
     PROJECT_REV = 0;
-    FILE_SAVED_REV = fileName ? 0 : null;
-    FILE_LABEL = fileName || null;
+    // A project fetched from a link is not a file on this machine: it is
+    // autosaved like any new project, and Save writes a fresh copy.
+    FILE_SAVED_REV = (fileName && !fromLink) ? 0 : null;
+    FILE_LABEL = fromLink ? null : (fileName || null);
     FILE_HANDLE = null;
     validateRoles();
     persist(false);
@@ -26754,6 +27037,7 @@
     dataHistoryClear();
     PROJECT.id = newProjectId();
     PROJECT.name = name || "Untitled project";
+    PROJECT.sourceUrl = takeLinkSource();
     PROJECT_REV = 0;
     FILE_SAVED_REV = null;
     FILE_LABEL = null;
@@ -26784,6 +27068,7 @@
     dataHistoryClear();
     PROJECT.id = newProjectId();
     PROJECT.name = parsed.name || "Untitled project";
+    PROJECT.sourceUrl = takeLinkSource();
     PROJECT_REV = 0;
     FILE_SAVED_REV = null;
     FILE_LABEL = null;
@@ -27105,7 +27390,14 @@
         '<button type="button" data-header-use>Use row ' +
         (parsed.headerGuess.index + 1) + " as the variable names</button></div>";
     }
+    // The line says where the rows came from (Torry, Sep 21 2026: a
+    // link-fetched file previewed beside "no file selected" looked like it
+    // came from nowhere).
+    var srcLabel = IMPORT_SOURCE_FILE ? String(IMPORT_SOURCE_FILE.name || "")
+      : (IMPORT_SOURCE_NAME === "pasted-data" ? "Pasted rows" : IMPORT_SOURCE_NAME);
+    if (PENDING_LINK_SOURCE) srcLabel += " from " + linkHost(PENDING_LINK_SOURCE);
     var h = guessHtml + '<div class="ps-import-summary">' +
+      '<span class="ps-import-source">' + escHtml(srcLabel) + "</span> \u00b7 " +
       shapeText(parsed.rows.length, parsed.header.length, "\u00d7") +
       notes + "</div><div class=\"ps-import-table-wrap\">" +
       '<table class="ps-import-table"><thead><tr>';
@@ -27132,6 +27424,19 @@
     root.style.display = "block";
     el("ps-import-use").style.display = "";
     el("ps-loader-msg").textContent = "";
+    syncLoaderMode();
+  }
+  // The dialog shows what is being imported: the paste box while pasting,
+  // and only the file's preview once a file (opened, dropped or fetched
+  // from a link) is in hand.
+  var LOADER_INTRO_PASTE = "Paste rows copied from a spreadsheet, or drop a CSV, Excel, jamovi .omv or .pand project file anywhere on the page.";
+  var LOADER_INTRO_FILE = "Check what the app understood below, then import it.";
+  function syncLoaderMode() {
+    var fileMode = !!(IMPORT_SOURCE_FILE || XLSX_SHEETS);
+    var sec = el("ps-paste-section");
+    if (sec) sec.hidden = fileMode;
+    var intro = el("ps-loader-description");
+    if (intro) intro.textContent = fileMode ? LOADER_INTRO_FILE : LOADER_INTRO_PASTE;
   }
   // Item 9: the commit path re-parses and then builds/retypes the whole
   // table, which is the slowest synchronous step in the app for a big file.
@@ -27249,8 +27554,10 @@
     el("ps-import-preview").style.display = "none";
     el("ps-import-use").style.display = "none";
     el("ps-loader-msg").textContent = "";
+    syncLoaderMode();
   }
   var LOADER_LAST_FOCUS = null;
+  var LOADER_FROM_WELCOME = false;
   function openLoader(keepImport) {
     // Punch list item 1. The loader sits at z-index 9999 and the start centre
     // at 13000, so on a cold load EVERY path through here used to render
@@ -27267,15 +27574,34 @@
     if (el("ps-loader").style.display !== "flex")
       LOADER_LAST_FOCUS = document.activeElement;
     hideWelcome();
+    LOADER_FROM_WELCOME = false;
     if (!keepImport) resetImportPreview();
     el("ps-loader").style.display = "flex";
+    syncPasteButton();
+    syncLoaderMode();
     shellSetPageModal(true);
     window.setTimeout(function () {
       var first = shellDialogTabbables(el("ps-loader"))[0];
       try { if (first) first.focus(); } catch (ignore) {}
     }, 0);
   }
+  // Every Open (welcome, toolbar, File menu) opens the file chooser with
+  // the Load data dialog behind it, so cancelling the chooser still leaves
+  // the paste box and the drop surface in reach (Torry's audit, Sep 21
+  // 2026: the welcome's Open fired the chooser and the other two did not).
+  function openLoaderWithChooser() {
+    openLoader();
+    try { el("ps-file").click(); } catch (ignore) {}
+  }
+  // The Preview button previews the paste box and nothing else, so it shows
+  // only while the box holds something (Torry, Sep 21 2026: with a file
+  // already previewed it repainted the same preview and read as broken).
+  function syncPasteButton() {
+    var has = !!String(el("ps-paste").value || "").trim();
+    el("ps-paste-use").style.display = has ? "" : "none";
+  }
   function closeLoader() {
+    PENDING_LINK_SOURCE = null;   // a cancelled link import tags nothing later
     el("ps-loader").style.display = "none";
     shellRefreshPageModal();
     var prior = LOADER_LAST_FOCUS;
@@ -27328,7 +27654,7 @@
     offerReplacedProjectBack(replaced, "a blank project");
   }
   function wireLoader() {
-    el("ps-load").addEventListener("click", openLoader);
+    el("ps-load").addEventListener("click", openLoaderWithChooser);
     el("ps-loader-close").addEventListener("click", closeLoader);
     el("ps-loader").addEventListener("click", function (e) {
       if (e.target === el("ps-loader")) closeLoader();
@@ -27354,6 +27680,17 @@
       el("ps-file").value = "";
       if (!f) return;
       readPickedFile(f);
+    });
+    el("ps-paste").addEventListener("input", syncPasteButton);
+    // Cancelling the chooser with nothing in the dialog closes it, so Open
+    // behaves like a plain chooser; opened from the welcome, the welcome
+    // comes back.
+    el("ps-file").addEventListener("cancel", function () {
+      if (IMPORT_PENDING || String(el("ps-paste").value || "").trim() ||
+          el("ps-loader-msg").textContent) return;
+      var back = LOADER_FROM_WELCOME;
+      closeLoader();
+      if (back) showWelcome(true);
     });
     el("ps-paste-use").addEventListener("click", function () {
       // An empty box used to fall through to the parser, which reported
@@ -27426,15 +27763,9 @@
     el("ps-import-delimiter").addEventListener("change", reparsePreview);
     el("ps-import-header").addEventListener("change", reparsePreview);
     el("ps-import-encoding").addEventListener("change", rereadImportFile);
-    el("ps-sample").addEventListener("click", function () {
-      dataHistoryClear();
-      loadSample();
-      persist();
-      syncAll();
-      render();
-      closeLoader();
-    });
-    el("ps-blank").addEventListener("click", adoptBlankProject);
+    // Use sample data and Start with a blank sheet left this dialog on
+    // Sep 21 2026 (Torry's audit): both are doors the welcome already has,
+    // and the dialog's one job is bringing in a file or pasted rows.
     // Whole-page drag-drop.
     // Punch list 21. The loader advertises "or drop one anywhere on the page"
     // and the page itself did nothing to show it: a bare dragover
@@ -27794,16 +28125,17 @@
     }
     var root = el("ps-recent-list"), list = recentProjects();
     root.innerHTML = "";
-    if (!list.length) {
-      root.appendChild(mkEl("div", "ps-recent-empty",
-        "Recent local projects will appear here as you work."));
-      return;
-    }
+    // Nothing to pick up, nothing to show: the examples take the space.
+    var section = el("ps-recent-section");
+    if (section) section.hidden = !BOOT_RESTORED && !list.length;
     for (var i = 0; i < list.length; i++) {
       (function (item) {
         var b = mkEl("button", "ps-recent-item");
         b.type = "button";
         b.setAttribute("data-recent-id", item.id);
+        // The Continue row above already offers this very project; its list
+        // entry stays in the DOM (probes count it) but is not drawn twice.
+        if (BOOT_RESTORED && item.id === PROJECT.id) b.classList.add("ps-recent-current");
         b.appendChild(mkEl("span", "ps-recent-dot", "\u25a5"));
         b.appendChild(mkEl("span", "ps-recent-name", item.name));
         var meta = item.rows +
@@ -27883,8 +28215,8 @@
       persist(false); hideWelcome();
     });
     el("ps-welcome-open").addEventListener("click", function () {
-      hideWelcome(); openLoader();
-      try { el("ps-file").click(); } catch (ignore) {}
+      openLoaderWithChooser();
+      LOADER_FROM_WELCOME = true;
     });
     el("ps-welcome-new").addEventListener("click", function () {
       adoptBlankProject();
@@ -27894,6 +28226,10 @@
       window.setTimeout(function () {
         try { el("ps-paste").focus(); } catch (ignore) {}
       }, 0);
+    });
+    el("ps-welcome-find").addEventListener("click", function () {
+      hideWelcome();
+      openFindData();
     });
     // Punch list 20: three cards, one handler. The first still carries
     // #ps-welcome-sample, so every existing path (and probe) that clicks it
@@ -27940,7 +28276,949 @@
     });
     setTip(el("ps-doc-name"), "Double-click to rename project");
     el("ps-doc-name").addEventListener("dblclick", renameProjectInline);
-    showWelcome(false);
+    wireOpenLinkDialog();
+    wireFindDataDialog();
+    wireShareDialog();
+    var linkReq = linkRequestFromLocation();
+    if (linkReq) offerOpenLink(linkReq);
+    else showWelcome(false);
+  }
+  // ---- Open by link (Sep 21 2026, Torry's "pipeline into the program") ----
+  // The app can be pointed at data: ?data=<url> (CSV, TSV, Excel, .omv),
+  // ?project=<url> (a .pand file: data, charts, styling, Notebook) or
+  // ?example=<id> (a built-in example). A course page or an open-data
+  // portal can then link straight into a chart. The privacy stance holds:
+  // the fetch runs in the reader's own browser and nothing is uploaded. A
+  // confirmation card names the host first, so a link in an email cannot
+  // load anything on its own, and the fetched file rides the ordinary
+  // import path (formats, size gate, the replaced-project offer).
+  function linkRequestFromLocation() {
+    var params, hashParams;
+    try {
+      params = new URLSearchParams(window.location.search || "");
+      hashParams = new URLSearchParams(String(window.location.hash || "").replace(/^#/, ""));
+    } catch (e) { return null; }
+    // Share a link: #pand=<packed project> carries the whole project after
+    // the #, and #key=<key> unlocks a locked ?project= file.
+    var pand = hashParams.get("pand");
+    if (pand) return { kind: "carried", blob: pand };
+    var ex = params.get("example");
+    if (ex && exampleById(ex) && exampleById(ex).id === ex) return { kind: "example", id: ex };
+    var kinds = ["project", "data"];
+    for (var i = 0; i < kinds.length; i++) {
+      var raw = params.get(kinds[i]);
+      if (!raw) continue;
+      var u = null;
+      try { u = new URL(raw, window.location.href); } catch (e2) { u = null; }
+      if (!u || (u.protocol !== "https:" && u.protocol !== "http:")) continue;
+      var req = { kind: kinds[i], url: u.href };
+      if (kinds[i] === "project" && hashParams.get("key")) req.key = hashParams.get("key");
+      return req;
+    }
+    return null;
+  }
+  function linkHost(url) {
+    try { return new URL(url).host; } catch (e) { return String(url || ""); }
+  }
+  function takeLinkSource() {
+    var src = PENDING_LINK_SOURCE; PENDING_LINK_SOURCE = null;
+    return src || "";
+  }
+  // The query is consumed once: a reload afterwards resumes the autosaved
+  // project instead of asking again.
+  function cleanLinkFromAddress() {
+    try {
+      var hp = new URLSearchParams(String(window.location.hash || "").replace(/^#/, ""));
+      hp.delete("pand"); hp.delete("key");
+      var rest = hp.toString();
+      window.history.replaceState(null, "", window.location.pathname + (rest ? "#" + rest : ""));
+    } catch (e) {}
+  }
+  var OPEN_LINK_REQ = null;
+  function offerOpenLink(req) {
+    if (req.kind === "example") {
+      cleanLinkFromAddress();
+      try { window.sessionStorage.setItem(PS_WELCOME_SESSION_KEY, "1"); } catch (e) {}
+      openExampleFromEmptyState(req.id);
+      return;
+    }
+    OPEN_LINK_REQ = req;
+    var isProject = req.kind === "project", carried = req.kind === "carried";
+    el("ps-openlink-title").textContent = carried ? "Open a shared project?"
+      : isProject ? "Open a project from a link?" : "Open data from a link?";
+    el("ps-openlink-sub").textContent = carried
+      ? "This link carries a Pandion Plots project inside it. Nothing is fetched from anywhere."
+      : req.key ? "This link points at a locked Pandion Plots project file. The key that opens it travels in the link."
+      : isProject ? "This link points at a Pandion Plots project file: data, charts and notebook."
+      : "This link points at a data file.";
+    el("ps-openlink-host").textContent = carried ? "this link itself" : linkHost(req.url);
+    el("ps-openlink-url").textContent = carried
+      ? String(req.blob).length.toLocaleString() + " characters of packed project" : req.url;
+    el("ps-openlink-replace").hidden = !projectHasWork();
+    el("ps-openlink-status").textContent = "";
+    el("ps-openlink-open").disabled = false;
+    try { window.sessionStorage.setItem(PS_WELCOME_SESSION_KEY, "1"); } catch (e) {}
+    openShellDialog("ps-openlink-dialog");
+  }
+  function wireOpenLinkDialog() {
+    var dlg = el("ps-openlink-dialog");
+    if (!dlg) return;
+    function dismiss() {
+      closeShellDialog("ps-openlink-dialog");
+      OPEN_LINK_REQ = null;
+      cleanLinkFromAddress();
+      showWelcome(true);
+    }
+    el("ps-openlink-cancel").addEventListener("click", dismiss);
+    dlg.addEventListener("pointerdown", function (e) { if (e.target === this) dismiss(); });
+    dlg.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") { e.preventDefault(); dismiss(); return; }
+      shellTrapTab(this, e);
+    });
+    el("ps-openlink-open").addEventListener("click", function () {
+      if (!OPEN_LINK_REQ) return;
+      if (OPEN_LINK_REQ.kind === "carried") openCarriedLink(OPEN_LINK_REQ, "ps-openlink");
+      else openFromLink(OPEN_LINK_REQ, "ps-openlink");
+    });
+  }
+  // `prefix` names the dialog whose status line and Open button report the
+  // fetch: "ps-openlink" (a link the app arrived on) or "ps-finddata" (a
+  // hit or a typed link in the Open data from the web dialog).
+  function openFromLink(req, prefix) {
+    prefix = prefix || "ps-openlink";
+    var status = el(prefix + "-status"), btn = el(prefix + "-open");
+    if (btn) btn.disabled = true;
+    status.style.color = "#4a5a6a";
+    status.textContent = "Fetching\u2026";
+    function fail(msg) {
+      status.style.color = "#7a2e2e";
+      status.textContent = msg;
+      if (btn) btn.disabled = false;
+      if (typeof req.onFail === "function") req.onFail(msg);
+    }
+    var host = linkHost(req.url);
+    fetch(req.url, { mode: "cors", cache: "no-store" }).then(function (r) {
+      if (!r.ok) throw new Error("The server at " + host + " answered " + r.status + ".");
+      var len = Number(r.headers.get("content-length") || 0);
+      if (len > DATA_REFUSE_BYTES)
+        throw new Error("That file is " + Math.round(len / 1048576) + " MB, too large to read in a browser tab. Save a smaller extract and link to that.");
+      return r.blob();
+    }).then(function (blob) {
+      if (blob.size > DATA_REFUSE_BYTES)
+        throw new Error("That file is " + Math.round(blob.size / 1048576) + " MB, too large to read in a browser tab. Save a smaller extract and link to that.");
+      // A locked file (Share a link, Locked with the link) is text that
+      // opens only with the key riding after the # in the link.
+      if (req.key || /\.locked$/i.test(String(req.url).split(/[?#]/)[0]))
+        return blob.text().then(function (text) {
+          if (!isLockedText(text)) return blob;
+          if (!req.key) throw new Error("This file is locked, and the link carries no key. Ask for the link that was made when the file was locked.");
+          return unlockText(text, req.key).then(function (plain) { return new Blob([plain], { type: "application/json" }); });
+        });
+      return blob;
+    }).then(function (blob) {
+      var name = "";
+      try { name = decodeURIComponent(new URL(req.url).pathname.split("/").pop() || ""); } catch (e) {}
+      // A collection knows the file's real name where the link does not
+      // end in it (Zenodo's links end in /content).
+      if (req.name) name = String(req.name);
+      name = name.replace(/\.locked$/i, "");
+      if (req.kind === "project") {
+        if (!/\.(pand|pnd|pandion|json)$/i.test(name)) name = (name || "project") + ".pand";
+      } else if (!/\.[a-z0-9]{2,5}$/i.test(name)) name = (name || "data") + ".csv";
+      var file;
+      try { file = new File([blob], name, { type: blob.type || "" }); }
+      catch (e) { file = blob; file.name = name; }
+      PENDING_LINK_SOURCE = req.url;
+      closeShellDialog(prefix + "-dialog");
+      OPEN_LINK_REQ = null;
+      cleanLinkFromAddress();
+      readPickedFile(file);
+    }).catch(function (e) {
+      var msg = String(e && e.message || e);
+      if (/Failed to fetch|NetworkError|Load failed|TypeError/i.test(msg))
+        msg = "Could not fetch it from " + host + ". The site may not allow other pages to read the file (no CORS header), or the link may be wrong.";
+      fail(msg);
+    });
+  }
+
+  // ---- Find open data (Torry, Sep 21 2026) ----
+  // Two collections whose search AND file hosts both let a page on another
+  // origin read them (probed with a pandionplots.com origin the day this
+  // was built; Figshare, OSF, Dryad and Kaggle refuse one half or both, so
+  // they are not offered).
+  //   rdatasets: the data shipped with R packages, indexed as one CSV on
+  //     GitHub Pages. The index loads once per session and the search runs
+  //     in this browser, so nothing typed leaves the machine.
+  //   zenodo: research data behind DOIs. Each search is one request to
+  //     zenodo.org (30 a minute for anonymous callers, so it runs on Enter,
+  //     never per keystroke), filtered to records holding a file this app
+  //     can open.
+  // Every Open goes through openFromLink, so the fetch, the size guard, the
+  // import preview and the provenance line are the link path's, unchanged.
+  var FIND_SOURCES = {
+    rdatasets: {
+      note: "The list comes from vincentarelbundock.github.io (Rdatasets, the data shipped with R packages) and loads once. Searching happens in this browser; nothing you type is sent anywhere.",
+      index: "https://vincentarelbundock.github.io/Rdatasets/datasets.csv",
+      placeholder: "Search by name or topic"
+    },
+    zenodo: {
+      note: "Each search is sent to zenodo.org. Only records with a CSV, TSV, text or Excel file are listed. Opening one fetches the file into this browser; nothing is uploaded.",
+      api: "https://zenodo.org/api/records",
+      placeholder: "Type some words, then press Enter"
+    },
+    // A link the person already has (Torry, Sep 22 2026: the welcome's From
+    // a link folded in here, beside the two sources that always allow it).
+    link: {
+      note: "Your browser fetches the file and it stays on this machine; nothing is uploaded. The site has to allow other pages to read the file, which most open-data hosts do.",
+      placeholder: "https://"
+    }
+  };
+  var FIND_READABLE = /\.(csv|tsv|txt|xlsx|xlsm|omv|pand|pnd|pandion)$/i;
+  // A .txt can be a tab-separated table, so the extension stays readable,
+  // but a file named README or LICENSE is prose and would only land in the
+  // import preview as one column of sentences.
+  var FIND_PROSE = /readme|licen[cs]e|changelog|codebook/i;
+  var FIND_SOURCE = "rdatasets";
+  var FIND_RD_ROWS = null;       // the parsed Rdatasets index, once loaded
+  var FIND_RD_PKGS = 0;
+  var FIND_RD_LOADING = null;    // its in-flight promise
+  var FIND_SEQ = 0;              // a search that lands after a newer one started is dropped
+  var FIND_TIMER = null;
+  var FIND_LIMIT = 60;
+  function findSafeUrl(u) {
+    var p = null;
+    try { p = new URL(String(u || "")); } catch (e) { return ""; }
+    return (p.protocol === "https:" || p.protocol === "http:") ? p.href : "";
+  }
+  function openFindData() {
+    if (!el("ps-finddata-dialog")) return;
+    el("ps-finddata-q").value = "";
+    el("ps-finddata-link-url").value = "";
+    findSetSource(FIND_SOURCE);
+    openShellDialog("ps-finddata-dialog");
+    window.setTimeout(function () { try { el(FIND_SOURCE === "link" ? "ps-finddata-link-url" : "ps-finddata-q").focus(); } catch (ignore) {} }, 0);
+  }
+  function findSetSource(id) {
+    if (!FIND_SOURCES[id]) id = "rdatasets";
+    FIND_SOURCE = id;
+    var tabs = document.querySelectorAll("#ps-finddata-dialog [data-source]");
+    for (var i = 0; i < tabs.length; i++)
+      tabs[i].setAttribute("aria-selected", tabs[i].getAttribute("data-source") === id ? "true" : "false");
+    el("ps-finddata-note").textContent = FIND_SOURCES[id].note;
+    var isLink = id === "link";
+    el("ps-finddata-searchrow").hidden = isLink;
+    el("ps-finddata-linkrow").hidden = !isLink;
+    el("ps-finddata-results").innerHTML = "";
+    findStatus("", false);
+    if (isLink) {
+      el("ps-finddata-link-open").disabled = false;
+      return;
+    }
+    el("ps-finddata-q").placeholder = FIND_SOURCES[id].placeholder;
+    el("ps-finddata-go").style.display = id === "zenodo" ? "" : "none";
+    findRun();
+  }
+  function findLinkGo() {
+    var raw = String(el("ps-finddata-link-url").value || "").trim();
+    var u = null;
+    try { u = new URL(raw); } catch (e) { u = null; }
+    if (!u || (u.protocol !== "https:" && u.protocol !== "http:")) {
+      findStatus("Enter a full link that starts with https://", true);
+      return;
+    }
+    var kind = /\.(pand|pnd|pandion|json)$/i.test(u.pathname) ? "project" : "data";
+    var btn = el("ps-finddata-link-open");
+    btn.disabled = true;
+    openFromLink({ kind: kind, url: u.href, onFail: function () { btn.disabled = false; } }, "ps-finddata");
+  }
+  function findStatus(msg, isError) {
+    var s = el("ps-finddata-status");
+    s.style.color = isError ? "#7a2e2e" : "#4a5a6a";
+    s.textContent = msg || "";
+  }
+  function findLoadRdatasets() {
+    if (FIND_RD_ROWS) return Promise.resolve(FIND_RD_ROWS);
+    if (FIND_RD_LOADING) return FIND_RD_LOADING;
+    FIND_RD_LOADING = fetch(FIND_SOURCES.rdatasets.index, { mode: "cors" })
+      .then(function (r) {
+        if (!r.ok) throw new Error("The server answered " + r.status + ".");
+        return r.text();
+      }).then(function (text) {
+        var parsed = parseTableText(text, ",", true, 0);
+        if (!parsed || !parsed.rows.length) throw new Error("The list could not be read.");
+        var col = {};
+        for (var c = 0; c < parsed.header.length; c++) col[parsed.header[c]] = c;
+        var rows = [], pkgs = {};
+        for (var i = 0; i < parsed.rows.length; i++) {
+          var r = parsed.rows[i];
+          var g = function (k) { return col[k] == null ? "" : String(r[col[k]] || ""); };
+          var csv = findSafeUrl(g("CSV"));
+          if (!csv) continue;
+          pkgs[g("Package")] = true;
+          rows.push({
+            pkg: g("Package"), item: g("Item"), title: g("Title"),
+            rows: Number(g("Rows")) || 0, cols: Number(g("Cols")) || 0,
+            numeric: Number(g("n_numeric")) || 0, factor: Number(g("n_factor")) || 0,
+            character: Number(g("n_character")) || 0, logical: Number(g("n_logical")) || 0,
+            csv: csv, doc: findSafeUrl(g("Doc")),
+            hay: (g("Package") + " " + g("Item") + " " + g("Title")).toLowerCase()
+          });
+        }
+        FIND_RD_ROWS = rows;
+        FIND_RD_PKGS = Object.keys(pkgs).length;
+        return rows;
+      });
+    FIND_RD_LOADING.catch(function () { FIND_RD_LOADING = null; });
+    return FIND_RD_LOADING;
+  }
+  function findRun() {
+    var q = String(el("ps-finddata-q").value || "").trim();
+    if (FIND_SOURCE === "zenodo") findRunZenodo(q);
+    else findRunRdatasets(q);
+  }
+  function findTokens(q) {
+    return q.toLowerCase().split(/\s+/).filter(function (t) { return t; });
+  }
+  function findRunRdatasets(q) {
+    var seq = ++FIND_SEQ;
+    var toks = findTokens(q);
+    var box = el("ps-finddata-results");
+    if (!FIND_RD_ROWS) findStatus("Loading the list of datasets\u2026", false);
+    findLoadRdatasets().then(function (rows) {
+      if (seq !== FIND_SEQ) return;
+      if (!toks.length) {
+        box.innerHTML = "";
+        findStatus("Type to search " + rows.length.toLocaleString() + " datasets from " +
+          FIND_RD_PKGS + " R packages.", false);
+        return;
+      }
+      var hits = [];
+      for (var i = 0; i < rows.length; i++) {
+        var r = rows[i], all = true, t;
+        for (t = 0; t < toks.length; t++) if (r.hay.indexOf(toks[t]) < 0) { all = false; break; }
+        if (!all) continue;
+        var item = r.item.toLowerCase(), title = r.title.toLowerCase(), score = 0;
+        for (t = 0; t < toks.length; t++) {
+          if (item === toks[t]) score += 4;
+          else if (item.indexOf(toks[t]) === 0) score += 3;
+          else if (item.indexOf(toks[t]) >= 0) score += 2;
+          else if (title.indexOf(toks[t]) >= 0) score += 1;
+        }
+        hits.push({ r: r, score: score });
+      }
+      hits.sort(function (a, b) {
+        return b.score - a.score || a.r.item.localeCompare(b.r.item) || a.r.pkg.localeCompare(b.r.pkg);
+      });
+      if (!hits.length) { box.innerHTML = ""; findStatus("No datasets match those words.", false); return; }
+      var h = "";
+      for (i = 0; i < Math.min(hits.length, FIND_LIMIT); i++) h += findRdRowHtml(hits[i].r);
+      box.innerHTML = h;
+      box.scrollTop = 0;
+      findStatus(hits.length > FIND_LIMIT
+        ? "Showing the first " + FIND_LIMIT + " of " + hits.length.toLocaleString() + " matches. Add a word to narrow it."
+        : hits.length + (hits.length === 1 ? " dataset" : " datasets"), false);
+    }, function () {
+      if (seq !== FIND_SEQ) return;
+      findStatus("Could not load the list from vincentarelbundock.github.io. Check the connection and try again.", true);
+    });
+  }
+  function findTypeSummary(r) {
+    var parts = [];
+    if (r.numeric) parts.push(r.numeric + " numeric");
+    if (r.factor) parts.push(r.factor + " factor");
+    if (r.character) parts.push(r.character + " text");
+    if (r.logical) parts.push(r.logical + " logical");
+    return parts.join(", ");
+  }
+  function findOpenButtonHtml(url, name) {
+    return '<button type="button" class="ps-btn" data-find-copylink="' + escHtml(url) +
+      '" data-find-name="' + escHtml(name) + '" data-tip="Copy a link that opens this in Pandion Plots">Copy link</button>' +
+      '<button type="button" class="ps-btn ps-primary" data-find-open="' + escHtml(url) +
+      '" data-find-name="' + escHtml(name) + '">Open</button>';
+  }
+  function findAboutHtml(url) {
+    return url ? '<a class="ps-btn ps-finddata-about" href="' + escHtml(url) +
+      '" target="_blank" rel="noopener">About</a>' : "";
+  }
+  function findRdRowHtml(r) {
+    var meta = escHtml(r.pkg) + " \u00b7 " + shapeText(r.rows, r.cols, "\u00d7", true);
+    var types = findTypeSummary(r);
+    if (types) meta += " \u00b7 " + escHtml(types);
+    return '<div class="ps-finddata-row" data-find-item="' + escHtml(r.pkg + "/" + r.item) + '">' +
+      '<div class="ps-finddata-copy"><div class="ps-finddata-title">' + escHtml(r.item) +
+      (r.title && r.title !== r.item ? ' <span class="ps-finddata-sub">' + escHtml(r.title) + "</span>" : "") +
+      '</div><div class="ps-finddata-meta">' + meta + "</div></div>" +
+      '<div class="ps-finddata-actions">' + findAboutHtml(r.doc) +
+      findOpenButtonHtml(r.csv, r.item + ".csv") + "</div></div>";
+  }
+  function findRunZenodo(q) {
+    var seq = ++FIND_SEQ;
+    var box = el("ps-finddata-results");
+    if (!q) { box.innerHTML = ""; findStatus("Type some words and press Enter to search Zenodo.", false); return; }
+    findStatus("Searching zenodo.org\u2026", false);
+    var url = FIND_SOURCES.zenodo.api + "?size=25&sort=bestmatch&q=" + encodeURIComponent(
+      "(" + q + ") AND metadata.resource_type.id:dataset AND files.types:(csv OR tsv OR txt OR xlsx OR xlsm)");
+    fetch(url, { mode: "cors", cache: "no-store", headers: { Accept: "application/json" } }).then(function (r) {
+      if (r.status === 429) throw new Error("rate");
+      if (!r.ok) throw new Error("zenodo.org answered " + r.status + ".");
+      return r.json();
+    }).then(function (j) {
+      if (seq !== FIND_SEQ) return;
+      var hits = (j && j.hits && j.hits.hits) || [];
+      var total = j && j.hits ? j.hits.total : 0;
+      if (total && typeof total === "object") total = total.value;
+      total = Number(total) || hits.length;
+      var h = "", shown = 0;
+      for (var i = 0; i < hits.length; i++) {
+        var rec = findZenodoRecord(hits[i]);
+        if (!rec || !rec.files.length) continue;
+        shown++;
+        h += findZenodoRowHtml(rec);
+      }
+      box.innerHTML = h;
+      box.scrollTop = 0;
+      if (!shown) {
+        findStatus(hits.length ? "The matching records hold no file this app can open. Try other words."
+          : "No datasets match those words.", false);
+        return;
+      }
+      findStatus(shown + (shown === 1 ? " record" : " records") + (total > hits.length
+        ? " shown of about " + total.toLocaleString() + " matches. Add a word to narrow it." : " found."), false);
+    }).catch(function (e) {
+      if (seq !== FIND_SEQ) return;
+      var msg = String(e && e.message || e);
+      if (msg === "rate") msg = "zenodo.org is limiting searches from this address for a minute. Wait a little and try again.";
+      else if (/Failed to fetch|NetworkError|Load failed|TypeError/i.test(msg))
+        msg = "Could not reach zenodo.org. Check the connection and try again.";
+      findStatus(msg, true);
+    });
+  }
+  function findZenodoRecord(hit) {
+    if (!hit || !hit.metadata) return null;
+    var m = hit.metadata, files = [], list = hit.files || [];
+    for (var i = 0; i < list.length; i++) {
+      var f = list[i], key = String(f.key || "");
+      var link = findSafeUrl(f.links && (f.links.self || f.links.download));
+      if (!FIND_READABLE.test(key) || !link) continue;
+      if (/\.txt$/i.test(key) && FIND_PROSE.test(key)) continue;
+      if (Number(f.size) > DATA_REFUSE_BYTES) continue;
+      files.push({ name: key, size: Number(f.size) || 0, url: link });
+    }
+    var who = [], cr = m.creators || [];
+    for (i = 0; i < cr.length && i < 3; i++)
+      who.push(String(cr[i].name || (cr[i].person_or_org && cr[i].person_or_org.name) || ""));
+    who = who.filter(Boolean);
+    if (cr.length > 3) who.push("and others");
+    return {
+      title: String(m.title || "Untitled"), who: who.join(", "),
+      year: String(m.publication_date || "").slice(0, 4), doi: String(hit.doi || m.doi || ""),
+      page: findSafeUrl(hit.links && hit.links.self_html) ||
+        ("https://zenodo.org/records/" + encodeURIComponent(String(hit.id || ""))),
+      files: files
+    };
+  }
+  function findZenodoRowHtml(rec) {
+    var meta = [rec.who, rec.year, rec.doi ? "DOI " + rec.doi : ""].filter(Boolean).map(escHtml).join(" \u00b7 ");
+    var files = "", max = 6;
+    for (var f = 0; f < rec.files.length && f < max; f++) {
+      var fl = rec.files[f];
+      files += '<div class="ps-finddata-file"><span class="ps-finddata-filename">' + escHtml(fl.name) +
+        '</span><span class="ps-finddata-meta">' + escHtml(formatBytes(fl.size)) + "</span>" +
+        findOpenButtonHtml(fl.url, fl.name) + "</div>";
+    }
+    if (rec.files.length > max)
+      files += '<div class="ps-finddata-meta">' + (rec.files.length - max) + " more on Zenodo</div>";
+    return '<div class="ps-finddata-row" data-find-record>' +
+      '<div class="ps-finddata-copy"><div class="ps-finddata-title">' + escHtml(rec.title) + "</div>" +
+      '<div class="ps-finddata-meta">' + meta + "</div>" + files + "</div>" +
+      '<div class="ps-finddata-actions">' + findAboutHtml(rec.page) + "</div></div>";
+  }
+  function wireFindDataDialog() {
+    var dlg = el("ps-finddata-dialog");
+    if (!dlg) return;
+    function dismiss() {
+      FIND_SEQ++;
+      closeShellDialog("ps-finddata-dialog");
+      showWelcome(true);
+    }
+    el("ps-finddata-cancel").addEventListener("click", dismiss);
+    dlg.addEventListener("pointerdown", function (e) { if (e.target === this) dismiss(); });
+    dlg.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") { e.preventDefault(); dismiss(); return; }
+      shellTrapTab(this, e);
+    });
+    var tabs = dlg.querySelectorAll("[data-source]");
+    for (var i = 0; i < tabs.length; i++)
+      tabs[i].addEventListener("click", function () {
+        findSetSource(this.getAttribute("data-source"));
+        try { el(FIND_SOURCE === "link" ? "ps-finddata-link-url" : "ps-finddata-q").focus(); } catch (ignore) {}
+      });
+    el("ps-finddata-link-url").addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); findLinkGo(); }
+    });
+    el("ps-finddata-link-open").addEventListener("click", findLinkGo);
+    el("ps-finddata-q").addEventListener("input", function () {
+      if (FIND_SOURCE !== "rdatasets") return;
+      window.clearTimeout(FIND_TIMER);
+      FIND_TIMER = window.setTimeout(findRun, 120);
+    });
+    el("ps-finddata-q").addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); window.clearTimeout(FIND_TIMER); findRun(); }
+    });
+    el("ps-finddata-go").addEventListener("click", function () { findRun(); });
+    el("ps-finddata-results").addEventListener("click", function (e) {
+      var c = e.target.closest ? e.target.closest("[data-find-copylink]") : null;
+      if (c) {
+        var cu = findSafeUrl(c.getAttribute("data-find-copylink"));
+        var ck = /\.(pand|pnd|pandion)$/i.test(c.getAttribute("data-find-name") || "") ? "project" : "data";
+        if (cu) copyLinkText(appLinkFor(ck, cu));
+        return;
+      }
+      var b = e.target.closest ? e.target.closest("[data-find-open]") : null;
+      if (!b || b.disabled) return;
+      var url = findSafeUrl(b.getAttribute("data-find-open"));
+      if (!url) return;
+      var name = b.getAttribute("data-find-name") || "";
+      var label = b.textContent;
+      b.disabled = true; b.textContent = "Fetching\u2026";
+      openFromLink({
+        kind: /\.(pand|pnd|pandion)$/i.test(name) ? "project" : "data",
+        url: url, name: name,
+        onFail: function () { b.disabled = false; b.textContent = label; }
+      }, "ps-finddata");
+    });
+  }
+
+  // ---- Share a link (Torry, Sep 21 2026) ----
+  // Three kinds of link, none of them needing a server of ours:
+  //   carried: the project travels inside the address after the #, which
+  //     browsers never send to any server, compressed with deflate. The link
+  //     is the file; a frozen snapshot.
+  //   hosted: ?project=<address> of a file on GitHub (a repository file, a
+  //     gist, GitHub Pages), read through openFromLink. Public and Unlisted
+  //     are plain files; Locked with the link is the file scrambled here
+  //     with AES-GCM before it leaves the browser, the key riding after the
+  //     # so the host keeps only random bytes and our server never sees it.
+  //   collection: ?data=<address> of an open-data hit, offered beside Open.
+  var SHARE_MODE = "carry";
+  var SHARE_GH_TOKEN = "";        // session only, never persisted
+  var SHARE_LOCK = null;          // {text, key, name} of the last locked copy made here
+  var SHARE_GH_CHECKED = null;    // the last address that passed Check
+  var SHARE_FREEZE_SHA = null;    // {url, sha} from the commits API
+  var SHARE_LONG_CHARS = 10000;
+  var LOCK_MAGIC = "PANDION-LOCKED 1";
+  function appLinkBase() { return String(window.location.href).split(/[?#]/)[0]; }
+  function appLinkFor(kind, url) {
+    return appLinkBase() + "?" + kind + "=" +
+      encodeURIComponent(url).replace(/%2F/gi, "/").replace(/%3A/gi, ":");
+  }
+  function bytesToB64u(bytes) {
+    var s = "", chunk = 8192;
+    for (var i = 0; i < bytes.length; i += chunk)
+      s += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+  function b64uToBytes(s) {
+    s = String(s || "").replace(/-/g, "+").replace(/_/g, "/");
+    while (s.length % 4) s += "=";
+    var bin = atob(s), out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  function deflateText(text) {
+    if (typeof CompressionStream !== "function")
+      return Promise.reject(new Error("This browser cannot make a carried link (no compression support)."));
+    var stream = new Blob([text]).stream().pipeThrough(new CompressionStream("deflate-raw"));
+    return new Response(stream).arrayBuffer().then(function (buf) { return new Uint8Array(buf); });
+  }
+  function inflateBytes(bytes) {
+    if (typeof DecompressionStream !== "function")
+      return Promise.reject(new Error("This browser cannot open a carried link (no compression support)."));
+    var stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+    return new Response(stream).text();
+  }
+  function subtleOrRefuse() {
+    if (!window.crypto || !window.crypto.subtle)
+      return Promise.reject(new Error("Locking needs a secure page (https)."));
+    return Promise.resolve(window.crypto.subtle);
+  }
+  function lockText(text) {
+    var keyBytes = window.crypto.getRandomValues(new Uint8Array(16));
+    var iv = window.crypto.getRandomValues(new Uint8Array(12));
+    return subtleOrRefuse().then(function (subtle) {
+      return subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, ["encrypt"]).then(function (k) {
+        return subtle.encrypt({ name: "AES-GCM", iv: iv }, k, new TextEncoder().encode(text));
+      });
+    }).then(function (ct) {
+      return { text: LOCK_MAGIC + "\n" + bytesToB64u(iv) + "\n" + bytesToB64u(new Uint8Array(ct)) + "\n",
+               key: bytesToB64u(keyBytes) };
+    });
+  }
+  function isLockedText(text) { return String(text || "").slice(0, LOCK_MAGIC.length) === LOCK_MAGIC; }
+  function unlockText(text, keyB64u) {
+    var lines = String(text || "").split("\n");
+    if (lines[0] !== LOCK_MAGIC || lines.length < 3)
+      return Promise.reject(new Error("This is not a locked Pandion Plots file."));
+    var iv, ct, keyBytes;
+    try { iv = b64uToBytes(lines[1]); ct = b64uToBytes(lines[2]); keyBytes = b64uToBytes(keyB64u); }
+    catch (e) { return Promise.reject(new Error("The key in this link is damaged.")); }
+    if (keyBytes.length !== 16 || iv.length !== 12)
+      return Promise.reject(new Error("The key in this link is damaged."));
+    return subtleOrRefuse().then(function (subtle) {
+      return subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, ["decrypt"]).then(function (k) {
+        return subtle.decrypt({ name: "AES-GCM", iv: iv }, k, ct);
+      });
+    }).then(function (buf) { return new TextDecoder().decode(buf); }, function (e) {
+      if (e && /secure page/.test(String(e.message))) throw e;
+      throw new Error("The key in this link does not fit this file.");
+    });
+  }
+  function copyLinkText(text) {
+    function done() { showToast("Link copied"); }
+    function failed() { showToast("Could not copy the link; select it and copy by hand", true); }
+    if (window.navigator.clipboard && window.navigator.clipboard.writeText) {
+      window.navigator.clipboard.writeText(text).then(done, failed);
+      return;
+    }
+    var area = document.createElement("textarea");
+    area.value = text; area.style.position = "fixed"; area.style.left = "-9999px";
+    document.body.appendChild(area); area.select();
+    try { document.execCommand("copy"); done(); } catch (e) { failed(); }
+    document.body.removeChild(area);
+  }
+  function shareDownloadText(name, text) {
+    var blob = new Blob([text], { type: "text/plain" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    window.setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+  }
+  // The snapshot a share carries: the whole project, or just the active
+  // chart with the table (no Notebook, no other documents).
+  function shareSnapshot(chartOnly) {
+    var snap = projectSnapshot();
+    if (!chartOnly) return snap;
+    var ch = activeChart();
+    if (isLayoutTab(ch)) return snap;
+    var out = {};
+    for (var k in snap) if (Object.prototype.hasOwnProperty.call(snap, k)) out[k] = snap[k];
+    out.charts = [ch];
+    out.pinboards = [];
+    out.activeChart = ch.id;
+    return out;
+  }
+  function shareChartOnlyOffered() {
+    return PROJECT.charts.length > 1 && !isLayoutTab(activeChart());
+  }
+  function shareProjectName() {
+    return String(PROJECT.name || (PROJECT.table && PROJECT.table.name) || "project");
+  }
+  function openShareDialog() {
+    if (!el("ps-share-dialog")) return;
+    el("ps-share-chartonly").checked = false;
+    el("ps-share-chartonly-row").hidden = !shareChartOnlyOffered();
+    el("ps-share-token").value = SHARE_GH_TOKEN;
+    el("ps-share-addr").value = "";
+    el("ps-share-gh-link").value = "";
+    el("ps-share-gh-copy").disabled = true;
+    el("ps-share-freeze").checked = false;
+    el("ps-share-freeze-row").hidden = true;
+    SHARE_GH_CHECKED = null; SHARE_FREEZE_SHA = null;
+    shareStatus("", false);
+    var src = findSafeUrl(PROJECT.sourceUrl);
+    var srcLine = el("ps-share-source");
+    if (src) {
+      srcLine.hidden = false;
+      srcLine.innerHTML = "This project was opened from " + escHtml(linkHost(src)) +
+        '. <button type="button" class="ps-share-inline" id="ps-share-source-copy">Copy a link that opens that file</button>';
+    } else { srcLine.hidden = true; srcLine.innerHTML = ""; }
+    shareSetMode(SHARE_MODE);
+    openShellDialog("ps-share-dialog");
+  }
+  function shareSetMode(mode) {
+    SHARE_MODE = mode === "github" ? "github" : "carry";
+    var tabs = document.querySelectorAll("#ps-share-dialog [data-share-mode]");
+    for (var i = 0; i < tabs.length; i++)
+      tabs[i].setAttribute("aria-selected", tabs[i].getAttribute("data-share-mode") === SHARE_MODE ? "true" : "false");
+    el("ps-share-carry").hidden = SHARE_MODE !== "carry";
+    el("ps-share-github").hidden = SHARE_MODE !== "github";
+    if (SHARE_MODE === "carry") shareBuildCarried();
+    else shareSyncVisibility();
+  }
+  function shareStatus(msg, isError) {
+    var s = el("ps-share-gh-status");
+    s.style.color = isError ? "#7a2e2e" : "#4a5a6a";
+    s.textContent = msg || "";
+  }
+  var SHARE_CARRY_SEQ = 0;
+  function shareBuildCarried() {
+    var seq = ++SHARE_CARRY_SEQ;
+    var chartOnly = el("ps-share-chartonly").checked && shareChartOnlyOffered();
+    var snap = shareSnapshot(chartOnly);
+    var text = projectFileText(snap);
+    var link = el("ps-share-carry-link"), size = el("ps-share-carry-size"), warn = el("ps-share-carry-warn");
+    var copy = el("ps-share-carry-copy");
+    link.value = ""; copy.disabled = true; warn.hidden = true;
+    size.textContent = "Making the link\u2026";
+    deflateText(text).then(function (bytes) {
+      if (seq !== SHARE_CARRY_SEQ) return;
+      var href = appLinkBase() + "#pand=" + bytesToB64u(bytes);
+      link.value = href;
+      copy.disabled = false;
+      var t = snap.table, docs = snap.charts.length;
+      size.textContent = "Carries " + docs + (docs === 1 ? " document" : " documents") +
+        " and the data table (" + shapeText((t.raw[t.order[0]] || []).length, t.order.length, "\u00d7", true) +
+        "): " + href.length.toLocaleString() + " characters.";
+      if (href.length > SHARE_LONG_CHARS) {
+        warn.hidden = false;
+        warn.textContent = "A link this long breaks in some email programs. It works in a browser, a chat or a course page. For email, host the file on GitHub instead.";
+      }
+    }, function (e) {
+      if (seq !== SHARE_CARRY_SEQ) return;
+      size.textContent = String(e && e.message || e);
+    });
+  }
+  function shareVisibility() {
+    var r = document.querySelector('#ps-share-dialog input[name="ps-share-vis"]:checked');
+    return r ? r.value : "public";
+  }
+  function shareSyncVisibility() {
+    var vis = shareVisibility();
+    var hint = el("ps-share-manual-hint"), dl = el("ps-share-download"), create = el("ps-share-create");
+    create.textContent = vis === "public" ? "Create a public gist" : "Create a secret gist";
+    dl.hidden = vis !== "locked";
+    if (vis === "locked")
+      hint.textContent = "Save the locked copy, upload it to GitHub yourself (a secret gist, or a repository), then paste the file's address here. The key is added to the link, never to the file.";
+    else if (vis === "unlisted")
+      hint.textContent = "Make a secret gist of the saved project file yourself, click Raw there, and paste that address here.";
+    else
+      hint.textContent = "Add the saved project file to a public repository or gist yourself, then paste the file's address here; the page address works too.";
+    SHARE_GH_CHECKED = null;
+    el("ps-share-gh-link").value = "";
+    el("ps-share-gh-copy").disabled = true;
+    el("ps-share-freeze-row").hidden = true;
+    shareStatus("", false);
+  }
+  // github.com/<u>/<r>/blob/<ref>/<path> is a web page, not the file; the
+  // raw route serves the bytes and allows a browser on another origin.
+  function shareNormalizeAddress(raw) {
+    var u = null;
+    try { u = new URL(String(raw || "").trim()); } catch (e) { return ""; }
+    if (u.protocol !== "https:" && u.protocol !== "http:") return "";
+    if (u.host === "github.com") {
+      var m = u.pathname.match(/^\/([^\/]+)\/([^\/]+)\/(?:blob|raw)\/(.+)$/);
+      if (m) return "https://raw.githubusercontent.com/" + m[1] + "/" + m[2] + "/" + m[3];
+    }
+    return u.href;
+  }
+  function shareRawParts(url) {
+    var u = null;
+    try { u = new URL(url); } catch (e) { return null; }
+    if (u.host !== "raw.githubusercontent.com") return null;
+    var m = u.pathname.match(/^\/([^\/]+)\/([^\/]+)\/(?:refs\/heads\/)?([^\/]+)\/(.+)$/);
+    if (!m) return null;
+    return { user: m[1], repo: m[2], ref: m[3], path: m[4], pinned: /^[0-9a-f]{40}$/i.test(m[3]) };
+  }
+  function shareCheckAddress() {
+    var url = shareNormalizeAddress(el("ps-share-addr").value);
+    var vis = shareVisibility();
+    SHARE_GH_CHECKED = null; SHARE_FREEZE_SHA = null;
+    el("ps-share-gh-link").value = ""; el("ps-share-gh-copy").disabled = true;
+    el("ps-share-freeze-row").hidden = true;
+    if (!url) { shareStatus("Enter a full address that starts with https://", true); return; }
+    el("ps-share-addr").value = url;
+    shareStatus("Checking\u2026", false);
+    var host = linkHost(url);
+    fetch(url, { mode: "cors", cache: "no-store" }).then(function (r) {
+      if (!r.ok) throw new Error("The server at " + host + " answered " + r.status + ".");
+      var len = Number(r.headers.get("content-length") || 0);
+      if (len > DATA_REFUSE_BYTES) throw new Error("That file is too large to open in a browser tab.");
+      return r.text();
+    }).then(function (text) {
+      var locked = isLockedText(text);
+      var proj = locked ? null : parseProjectFile(text);
+      var kind = (locked || (proj && !proj.error)) ? "project" : "data";
+      if (vis === "locked" && !locked)
+        throw new Error("That file is not locked. Save the locked copy above and upload that instead.");
+      if (locked && !(SHARE_LOCK && SHARE_LOCK.text === text))
+        throw new Error("That file is locked, but this window does not hold its key. The key exists only in the link made when the file was locked.");
+      if (vis !== "locked" && locked)
+        throw new Error("That file is locked. Choose Locked with the link to share it.");
+      var what = locked ? "a locked project"
+        : (kind === "project" ? "a Pandion Plots project" : "a data file");
+      var link = appLinkFor(kind, url) + (locked ? "#key=" + SHARE_LOCK.key : "");
+      SHARE_GH_CHECKED = { url: url, kind: kind, locked: locked };
+      el("ps-share-gh-link").value = link;
+      el("ps-share-gh-copy").disabled = false;
+      var parts = shareRawParts(url);
+      el("ps-share-freeze-row").hidden = !parts || parts.pinned;
+      shareStatus("Reachable from a browser: " + what + " on " + host + "." +
+        (parts && !parts.pinned ? " The link follows the file as it changes on " + parts.ref + "." : ""), false);
+    }).catch(function (e) {
+      var msg = String(e && e.message || e);
+      if (/Failed to fetch|NetworkError|Load failed|TypeError/i.test(msg))
+        msg = "A browser cannot read that address from another site (" + host + " sends no CORS header). On GitHub, use a repository file, a gist or GitHub Pages; release assets refuse.";
+      shareStatus(msg, true);
+    });
+  }
+  function shareApplyFreeze() {
+    var c = SHARE_GH_CHECKED;
+    if (!c) return;
+    var parts = shareRawParts(c.url);
+    var keyTail = c.locked && SHARE_LOCK ? "#key=" + SHARE_LOCK.key : "";
+    if (!el("ps-share-freeze").checked || !parts) {
+      el("ps-share-gh-link").value = appLinkFor(c.kind, c.url) + keyTail;
+      return;
+    }
+    function apply(sha) {
+      var pinned = "https://raw.githubusercontent.com/" + parts.user + "/" + parts.repo + "/" + sha + "/" + parts.path;
+      el("ps-share-gh-link").value = appLinkFor(c.kind, pinned) + keyTail;
+      shareStatus("Frozen at " + sha.slice(0, 7) + ": the link opens this version of the file whatever changes later.", false);
+    }
+    if (SHARE_FREEZE_SHA && SHARE_FREEZE_SHA.url === c.url) { apply(SHARE_FREEZE_SHA.sha); return; }
+    shareStatus("Asking GitHub for the file's current version\u2026", false);
+    var api = "https://api.github.com/repos/" + encodeURIComponent(parts.user) + "/" + encodeURIComponent(parts.repo) +
+      "/commits?per_page=1&sha=" + encodeURIComponent(parts.ref) + "&path=" + encodeURIComponent(parts.path);
+    fetch(api, { mode: "cors", headers: { Accept: "application/vnd.github+json" } }).then(function (r) {
+      if (!r.ok) throw new Error("GitHub answered " + r.status + " when asked for the file's version.");
+      return r.json();
+    }).then(function (j) {
+      var sha = j && j[0] && j[0].sha;
+      if (!/^[0-9a-f]{40}$/i.test(String(sha || ""))) throw new Error("GitHub did not report a version for that file.");
+      SHARE_FREEZE_SHA = { url: c.url, sha: sha };
+      apply(sha);
+    }).catch(function (e) {
+      el("ps-share-freeze").checked = false;
+      shareStatus(String(e && e.message || e), true);
+    });
+  }
+  function shareMakeLocked() {
+    var text = projectFileText(shareSnapshot(false));
+    return lockText(text).then(function (r) {
+      SHARE_LOCK = { text: r.text, key: r.key, name: shareProjectName() };
+      return SHARE_LOCK;
+    });
+  }
+  function shareCreateGist() {
+    var token = String(el("ps-share-token").value || "").trim();
+    if (!token) { shareStatus("Paste a GitHub token first, or use a file you put there yourself.", true); return; }
+    SHARE_GH_TOKEN = token;
+    var vis = shareVisibility();
+    var btn = el("ps-share-create");
+    btn.disabled = true;
+    shareStatus("Creating the gist on GitHub\u2026", false);
+    var base = projectFileName().replace(/\.pand$/i, "");
+    var prep = vis === "locked"
+      ? shareMakeLocked().then(function (l) { return { name: base + ".pand.locked", content: l.text, key: l.key }; })
+      : Promise.resolve({ name: base + ".pand", content: projectFileText(shareSnapshot(false)), key: "" });
+    prep.then(function (f) {
+      var files = {}; files[f.name] = { content: f.content };
+      return fetch("https://api.github.com/gists", {
+        method: "POST", mode: "cors",
+        headers: { Authorization: "Bearer " + token, Accept: "application/vnd.github+json",
+                   "Content-Type": "application/json", "X-GitHub-Api-Version": "2022-11-28" },
+        body: JSON.stringify({ description: "Pandion Plots project: " + shareProjectName(),
+                               public: vis === "public", files: files })
+      }).then(function (r) {
+        if (r.status === 401) throw new Error("GitHub refused that token.");
+        if (r.status === 403 || r.status === 404) throw new Error("That token cannot create gists. It needs the Gists permission.");
+        if (!r.ok) throw new Error("GitHub answered " + r.status + ".");
+        return r.json();
+      }).then(function (j) {
+        var entry = j && j.files && j.files[f.name];
+        var raw = findSafeUrl(entry && entry.raw_url);
+        if (!raw) throw new Error("GitHub created the gist but reported no file address.");
+        // raw_url names the revision; dropping it makes the link follow
+        // later edits to the gist, the same as a repository file on a branch.
+        var live = raw.replace(/\/raw\/[0-9a-f]{40}\//i, "/raw/");
+        var link = appLinkFor("project", live) + (f.key ? "#key=" + f.key : "");
+        el("ps-share-gh-link").value = link;
+        el("ps-share-gh-copy").disabled = false;
+        el("ps-share-freeze-row").hidden = true;
+        SHARE_GH_CHECKED = { url: live, kind: "project", locked: !!f.key };
+        var page = findSafeUrl(j.html_url);
+        el("ps-share-gh-status").style.color = "#4a5a6a";
+        el("ps-share-gh-status").innerHTML = "Created " + (vis === "public" ? "a public" : "a secret") + " gist" +
+          (page ? ' (<a href="' + escHtml(page) + '" target="_blank" rel="noopener">open it on GitHub</a>)' : "") +
+          (f.key ? ". GitHub holds only the locked copy; the key is in the link." : ".");
+      });
+    }).catch(function (e) {
+      var msg = String(e && e.message || e);
+      if (/Failed to fetch|NetworkError|Load failed|TypeError/i.test(msg)) msg = "Could not reach api.github.com. Check the connection and try again.";
+      shareStatus(msg, true);
+    }).then(function () { btn.disabled = false; });
+  }
+  function wireShareDialog() {
+    var dlg = el("ps-share-dialog");
+    if (!dlg) return;
+    function dismiss() { closeShellDialog("ps-share-dialog"); }
+    el("ps-share-close").addEventListener("click", dismiss);
+    dlg.addEventListener("pointerdown", function (e) { if (e.target === this) dismiss(); });
+    dlg.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") { e.preventDefault(); dismiss(); return; }
+      shellTrapTab(this, e);
+    });
+    var tabs = dlg.querySelectorAll("[data-share-mode]");
+    for (var i = 0; i < tabs.length; i++)
+      tabs[i].addEventListener("click", function () { shareSetMode(this.getAttribute("data-share-mode")); });
+    el("ps-share-chartonly").addEventListener("change", shareBuildCarried);
+    el("ps-share-carry-copy").addEventListener("click", function () {
+      if (el("ps-share-carry-link").value) copyLinkText(el("ps-share-carry-link").value);
+    });
+    var radios = dlg.querySelectorAll('input[name="ps-share-vis"]');
+    for (i = 0; i < radios.length; i++) radios[i].addEventListener("change", shareSyncVisibility);
+    el("ps-share-create").addEventListener("click", shareCreateGist);
+    el("ps-share-download").addEventListener("click", function () {
+      var btn = this; btn.disabled = true;
+      shareMakeLocked().then(function (l) {
+        shareDownloadText(projectFileName().replace(/\.pand$/i, "") + ".pand.locked", l.text);
+        shareStatus("Saved the locked copy. Upload it to GitHub, then paste its address below and click Check.", false);
+      }, function (e) { shareStatus(String(e && e.message || e), true); })
+        .then(function () { btn.disabled = false; });
+    });
+    el("ps-share-check").addEventListener("click", shareCheckAddress);
+    el("ps-share-addr").addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); shareCheckAddress(); }
+    });
+    el("ps-share-freeze").addEventListener("change", shareApplyFreeze);
+    el("ps-share-gh-copy").addEventListener("click", function () {
+      if (el("ps-share-gh-link").value) copyLinkText(el("ps-share-gh-link").value);
+    });
+    el("ps-share-source").addEventListener("click", function (e) {
+      if (!(e.target && e.target.id === "ps-share-source-copy")) return;
+      var src = findSafeUrl(PROJECT.sourceUrl);
+      if (!src) return;
+      var kind = /\.(pand|pnd|pandion)(\.locked)?$/i.test(src) ? "project" : "data";
+      copyLinkText(appLinkFor(kind, src));
+    });
+  }
+  // The reading side of a carried link: #pand=<blob> after the address.
+  function openCarriedLink(req, prefix) {
+    prefix = prefix || "ps-openlink";
+    var status = el(prefix + "-status"), btn = el(prefix + "-open");
+    if (btn) btn.disabled = true;
+    status.style.color = "#4a5a6a";
+    status.textContent = "Unpacking\u2026";
+    var bytes;
+    try { bytes = b64uToBytes(req.blob); } catch (e) { bytes = null; }
+    // A cut-short link fails inside the decompression stream, which reports
+    // itself as a fetch failure; it is a damaged link either way.
+    (bytes ? inflateBytes(bytes).catch(function () { throw new Error("bad"); }) : Promise.reject(new Error("bad"))).then(function (text) {
+      var proj = parseProjectFile(text);
+      if (!proj) throw new Error("bad");
+      if (proj.error) throw new Error(proj.error);
+      closeShellDialog(prefix + "-dialog");
+      OPEN_LINK_REQ = null;
+      cleanLinkFromAddress();
+      PENDING_LINK_SOURCE = null;
+      adoptProject(proj, null);
+    }).catch(function (e) {
+      var msg = String(e && e.message || e);
+      if (msg === "bad") msg = "This link does not hold a readable Pandion Plots project. It may have been cut short when it was copied or sent.";
+      status.style.color = "#7a2e2e";
+      status.textContent = msg;
+      if (btn) btn.disabled = false;
+    });
   }
 
   var SHELL_DIALOG_FOCUS = {};
@@ -28888,6 +30166,7 @@
       { label: "Rename project\u2026", command: "rename-project" },
       { label: "Save project", shortcut: "Cmd/Ctrl+S", command: "save" },
       { label: "Save project as\u2026", shortcut: "Cmd/Ctrl+Shift+S", command: "save-as" },
+      { label: "Share a link\u2026", command: "share-link" },
       "separator",
       { label: "Export\u2026", shortcut: "Cmd/Ctrl+Shift+E", command: "export" },
       { label: "Export data as CSV\u2026", command: "export-data" },
@@ -29766,7 +31045,7 @@
       showWelcome(true);
       window.setTimeout(function () { el("ps-welcome-new").focus(); }, 0);
     }
-    else if (command === "open") openLoader();
+    else if (command === "open") openLoaderWithChooser();
     else if (command === "welcome") showWelcome(true);
     else if (command === "reopen-closed") {
       var closedNow = closedDocsAvailable();
@@ -29778,6 +31057,7 @@
       FILE_HANDLE = null;
       saveProjectFile();
     }
+    else if (command === "share-link") openShareDialog();
     else if (command === "export") exportCurrentWorkspace();
     else if (command === "export-data") exportDataCsv();
     else if (command === "export-data-xlsx") exportDataXlsx();
@@ -31635,6 +32915,8 @@
     tableHasData: function () { return tableHasData(PROJECT.table); },
     coachDismiss: coachDismiss,
     pinChartForTest: function () { pinChartToPinboard(null); },
+    findOpenData: openFindData,
+    shareLink: openShareDialog,
     coachReset: function () {
       try { window.localStorage.removeItem(PS_COACH_KEY); } catch (e) {}
       COACH_SHOWN = false;
