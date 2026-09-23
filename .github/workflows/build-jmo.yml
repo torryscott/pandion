@@ -26,16 +26,30 @@ jobs:
       # 28 refuses a module built against any other R. Both lines are
       # current for users (jamovi.org hands out 28; classrooms still run
       # 2.7.32), so both ship, as separate files.
+      # And one leg per Mac CHIP: jamovi compares the module's R stamp with
+      # its own exactly, and the stamp names the chip (4.5.0-arm64 against an
+      # Intel jamovi's 4.5.0-x64), so an Apple-chip file installs on an Intel
+      # Mac but is listed as needing an update and loads nothing (a student's
+      # MacBook Air, Sep 2026). An Intel runner installs the Intel jamovi (the
+      # install step picks the installer by uname -m) and so builds the Intel
+      # file. GitHub has said its Intel Macs end around August 2027; after
+      # that the same leg can build under Rosetta on an Apple-chip runner.
       matrix:
         include:
           - os: macos-14
             platform: macos-arm64
+            line: '2.7'
+          - os: macos-15-intel
+            platform: macos-x64
             line: '2.7'
           - os: windows-latest
             platform: win-x64
             line: '2.7'
           - os: macos-14
             platform: macos-arm64
+            line: '28'
+          - os: macos-15-intel
+            platform: macos-x64
             line: '28'
           - os: windows-latest
             platform: win-x64
@@ -301,6 +315,17 @@ jobs:
             mv "$JMO" "pandion-${{ matrix.platform }}-jamovi28.jmo"
           fi
           ls -la pandion-*.jmo
+
+      # The file must load in the jamovi it was built for: its R stamp equals
+      # that jamovi's own, its one compiled library matches the chip, and
+      # that jamovi's R loads it and renders a PDF (scripts/check-jmo-fits.sh
+      # says why each matters).
+      - name: Check the module fits its jamovi (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          JMO="$(ls pandion-${{ matrix.platform }}*.jmo | head -1)"
+          bash scripts/check-jmo-fits.sh "$JMO" "$JAMOVI_HOME" "${{ matrix.platform }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
