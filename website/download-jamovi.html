@@ -164,6 +164,11 @@
   .download-option.primary small { color: #dbe6f2; }
   .download-arrow { flex: 0 0 auto; font-weight: 800; }
   .requirements { margin: 12px 0 0; color: #6b7887; font-size: 12.5px; }
+  .chip-group + .chip-group { margin-top: 16px; }
+  .chip-label {
+    margin: 0 0 8px; color: var(--navy); font-size: 13px; font-weight: 750;
+    letter-spacing: 0.01em;
+  }
   .github-note {
     display: flex; align-items: center; gap: 14px;
     margin: 20px 0 0; padding: 16px 18px; border: 1px solid var(--line);
@@ -335,32 +340,56 @@
             <span class="recommended">Recommended for this device</span>
           </div>
           <h2>Module for macOS</h2>
-          <p>For Macs with an Apple chip (M1 or later). Pick the file for
-             your jamovi version.</p>
-          <div class="download-list">
-            <a class="download-option primary"
-               href="https://github.com/torryscott/pandion/releases/latest/download/pandion-macos-arm64-jamovi28.jmo">
-              <span>
-                <strong>For jamovi 28 (the current jamovi)</strong>
-                <small>pandion-macos-arm64-jamovi28.jmo &middot; version 3.1.3 &middot; about 13 MB</small>
-              </span>
-              <span class="download-arrow" aria-hidden="true">&darr;</span>
-            </a>
-            <a class="download-option"
-               href="https://github.com/torryscott/pandion/releases/latest/download/pandion-macos-arm64.jmo">
-              <span>
-                <strong>For jamovi 2.7</strong>
-                <small>pandion-macos-arm64.jmo &middot; version 3.1.3 &middot; about 13 MB</small>
-              </span>
-              <span class="download-arrow" aria-hidden="true">&darr;</span>
-            </a>
+          <p>Pick the file for your Mac's chip and your jamovi
+             version.</p>
+          <div class="chip-group">
+            <h3 class="chip-label" id="chip-apple">Apple chip (M1 or later)</h3>
+            <div class="download-list" role="group" aria-labelledby="chip-apple">
+              <a class="download-option primary"
+                 href="https://github.com/torryscott/pandion/releases/latest/download/pandion-macos-arm64-jamovi28.jmo">
+                <span>
+                  <strong>For jamovi 28 (the current jamovi)</strong>
+                  <small>pandion-macos-arm64-jamovi28.jmo &middot; version 3.1.3 &middot; about 13 MB</small>
+                </span>
+                <span class="download-arrow" aria-hidden="true">&darr;</span>
+              </a>
+              <a class="download-option"
+                 href="https://github.com/torryscott/pandion/releases/latest/download/pandion-macos-arm64.jmo">
+                <span>
+                  <strong>For jamovi 2.7</strong>
+                  <small>pandion-macos-arm64.jmo &middot; version 3.1.3 &middot; about 13 MB</small>
+                </span>
+                <span class="download-arrow" aria-hidden="true">&darr;</span>
+              </a>
+            </div>
+          </div>
+          <div class="chip-group">
+            <h3 class="chip-label" id="chip-intel">Intel chip</h3>
+            <div class="download-list" role="group" aria-labelledby="chip-intel">
+              <a class="download-option primary"
+                 href="https://github.com/torryscott/pandion/releases/latest/download/pandion-macos-x64-jamovi28.jmo">
+                <span>
+                  <strong>For jamovi 28 (the current jamovi)</strong>
+                  <small>pandion-macos-x64-jamovi28.jmo &middot; version 3.1.3 &middot; about 13 MB</small>
+                </span>
+                <span class="download-arrow" aria-hidden="true">&darr;</span>
+              </a>
+              <a class="download-option"
+                 href="https://github.com/torryscott/pandion/releases/latest/download/pandion-macos-x64.jmo">
+                <span>
+                  <strong>For jamovi 2.7</strong>
+                  <small>pandion-macos-x64.jmo &middot; version 3.1.3 &middot; about 13 MB</small>
+                </span>
+                <span class="download-arrow" aria-hidden="true">&darr;</span>
+              </a>
+            </div>
           </div>
           <p class="requirements">
-            Not sure which Mac you have? Open the Apple menu, choose
-            <span class="ui">About This Mac</span>, and look for a chip
-            named Apple M1, M2, M3 or M4. On an Intel Mac, use the
-            <a href="download.html">desktop app</a> or the
-            <a href="app/">browser app</a> instead.
+            Not sure which chip your Mac has? Open the Apple menu and
+            choose <span class="ui">About This Mac</span>. A
+            <span class="ui">Chip</span> line naming Apple M1, M2, M3 or
+            M4 means an Apple chip; a <span class="ui">Processor</span>
+            line naming Intel means an Intel chip.
           </p>
         </article>
         <article class="platform-card" data-platform="windows">
@@ -441,7 +470,8 @@
           <div class="note">
             On a Mac, Safari sometimes unpacks downloads on its own. If you
             see a folder called <span class="ui">pandion-macos-arm64</span>
-            instead of a single file, delete the folder and download again
+            or <span class="ui">pandion-macos-x64</span> instead of a
+            single file, delete the folder and download again
             with Chrome or Firefox, or turn off <span class="ui">Open
             "safe" files after downloading</span> in Safari's General
             settings and try once more.
@@ -608,18 +638,14 @@
       </p>
       <h3>jamovi says the installed version needs to be updated</h3>
       <p>
-        That message means the file does not match your jamovi line:
-        the jamovi 2.7 file in jamovi 28, or the other way round. Remove
-        it from the library's Installed tab, download the other file
-        above, and repeat step 4. On jamovi 2.7 you need 2.7&#46;32 or
-        later; older 2.7 releases can be updated from
+        That message means the file does not match your jamovi or your
+        Mac: the jamovi 2.7 file in jamovi 28 or the other way round, or
+        a Mac file for the other type of chip. Updating jamovi does not
+        change it. Remove the module from the library's Installed tab,
+        download the matching file above, and repeat step 4. On jamovi
+        2.7 you need 2.7&#46;32 or later; older 2.7 releases can be
+        updated from
         <a href="https://www.jamovi.org/download.html">jamovi.org</a>.
-      </p>
-      <h3>The file will not open on a Mac</h3>
-      <p>
-        The macOS module is built for Apple chips (M1 or later). On an
-        Intel Mac, install the <a href="download.html">desktop app</a>
-        instead; it makes the same charts.
       </p>
       <h3>Updating later</h3>
       <p>
@@ -685,8 +711,10 @@
     if (card) card.classList.add('is-recommended');
     var note = document.getElementById('device-note');
     if (note) note.textContent = 'Step 1: download the module for your computer. ' +
-      'This looks like ' + (which === 'mac' ? 'a Mac' : 'a Windows PC') +
-      ', so that card is marked.';
+      (which === 'mac'
+        ? 'This looks like a Mac, so that card is marked. Mac files come ' +
+          'in two kinds, one for each type of chip.'
+        : 'This looks like a Windows PC, so that card is marked.');
   })();
 </script>
 </body>
