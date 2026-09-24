@@ -270,7 +270,7 @@ await page.waitForTimeout(400);
         document.querySelectorAll('#ps-slots [data-role-key]').length);
     ok(slots === 5, 'five role entries for CG (cards + collapsed rows)');
     ok(await page.evaluate(() => !!document.querySelector('#ps-slots [data-role-key="markVar"]')),
-       'CG offers the Distinguish by role');
+       'CG offers the Data points role');
     await assignRole('xvar', 'treat');
     await assignRole('yvar', 'value');
     const drew = await page.evaluate(() => {

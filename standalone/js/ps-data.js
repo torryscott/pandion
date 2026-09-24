@@ -1248,7 +1248,7 @@ window.PSData = (function () {
         { key: "yvar", label: "Y (values)", accepts: ["continuous", "ordinal"], required: true },
         { key: "groupVar", label: "Group By", accepts: ["nominal", "ordinal"], required: false },
         { key: "facetVar", label: "Panels", accepts: ["nominal", "ordinal"], required: false },
-        { key: "markVar", label: "Distinguish by", accepts: ["nominal", "ordinal"], required: false }
+        { key: "markVar", label: "Data points", accepts: ["nominal", "ordinal"], required: false }
       ],
       optsFrom: function (st, tpl) {
         return {
