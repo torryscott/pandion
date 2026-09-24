@@ -81,6 +81,11 @@ window.PSData = (function () {
     var ys = table.columns[roles.yvar];
     var gs = roles.groupVar ? table.columns[roles.groupVar] : null;
     var fs = roles.facetVar ? table.columns[roles.facetVar] : null;
+    // "Mark points by": colors and shapes each point by a second variable
+    // while the mean pools every point. A missing mark keeps its point
+    // ("" = unmarked), so it never changes a mean or the missing count.
+    // Mirrors plotbuilder.b.R cell_marks().
+    var ms = roles.markVar ? table.columns[roles.markVar] : null;
     var nTotal = ys.length;
 
     var nMissing = 0, yFinite = [], i;
@@ -105,7 +110,7 @@ window.PSData = (function () {
     } else synthX = xLevels.slice();
 
     function cellData(fl, xl, gl) {
-      var out = [], rowIds = [];
+      var out = [], rowIds = [], marks = [];
       for (var r = 0; r < yFinite.length; r++) {
         var idx = yFinite[r];
         if (isMissing(xs[idx]) || String(xs[idx]) !== xl) continue;
@@ -114,8 +119,9 @@ window.PSData = (function () {
         out.push(ys[idx]);
         rowIds.push(table.caseIds && table.caseIds[idx]
           ? table.caseIds[idx] : String(idx + 1));
+        if (ms) marks.push(isMissing(ms[idx]) ? "" : String(ms[idx]));
       }
-      return { values: out, rowIds: rowIds };
+      return { values: out, rowIds: rowIds, marks: marks };
     }
 
     var bars = [];
@@ -131,19 +137,21 @@ window.PSData = (function () {
           var st = cellStat(cell.values,
                             opts.summaryFunc, opts.errorBarType);
           if (!st) continue;
-          bars.push({ x: mkx, group: gIter[g2],
+          var cgBar = { x: mkx, group: gIter[g2],
                       mean: S.sigR(st.center), se: S.sigR(st.err),
                       n: st.n, values: st.values.map(S.sigR),
                       caseIds: cell.rowIds,
                       sourceColumns: cell.rowIds.map(function () {
                         return roles.yvar;
-                      }) });
+                      }) };
+          if (ms) cgBar.marks = cell.marks;
+          bars.push(cgBar);
         }
       }
     }
 
     var spec = opts.spec || {};
-    return { channels: {
+    var channels = {
       bars: bars,
       xCategories: synthX,
       groupCategories: gLevels,
@@ -160,7 +168,20 @@ window.PSData = (function () {
       facetLevels: fLevels,
       facetSeparator: hasFacet ? FACET_SEP : "",
       missingNote: missingNoteFor(nMissing, nTotal)
-    } };
+    };
+    if (ms) {
+      // The levels the chart draws, in the column's level order: a level
+      // whose every row lacks x, group or panel ships no point (R keeps
+      // exactly the levels its marks use).
+      var used = {};
+      for (var b3 = 0; b3 < bars.length; b3++)
+        for (var m3 = 0; m3 < bars[b3].marks.length; m3++)
+          if (bars[b3].marks[m3] !== "") used[bars[b3].marks[m3]] = true;
+      channels.markLevels = levelsOf(table, roles.markVar, yFinite)
+        .filter(function (l) { return used[l]; });
+      channels.markLabel = roles.markVar;
+    }
+    return { channels: channels };
   }
 
   // ================================================================ dist
@@ -1226,7 +1247,8 @@ window.PSData = (function () {
         { key: "xvar", label: "X (categories)", accepts: ["nominal", "ordinal"], required: true },
         { key: "yvar", label: "Y (values)", accepts: ["continuous", "ordinal"], required: true },
         { key: "groupVar", label: "Group By", accepts: ["nominal", "ordinal"], required: false },
-        { key: "facetVar", label: "Panels", accepts: ["nominal", "ordinal"], required: false }
+        { key: "facetVar", label: "Panels", accepts: ["nominal", "ordinal"], required: false },
+        { key: "markVar", label: "Distinguish by", accepts: ["nominal", "ordinal"], required: false }
       ],
       optsFrom: function (st, tpl) {
         return {
