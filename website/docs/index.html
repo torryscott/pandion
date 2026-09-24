@@ -27,6 +27,8 @@ main a{text-decoration:underline;text-underline-offset:2px}
 .skip-link:focus{transform:none}
 .sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
 code{background:var(--code);border-radius:4px;padding:1px 5px;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+pre{background:var(--code);border-radius:6px;padding:10px 12px;margin:0 0 14px;overflow-x:auto}
+pre code{background:none;padding:0;font-size:12.5px}
 kbd{background:var(--bg3);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;font:12px/1.7 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:nowrap}
 h1,h2,h3,h4{line-height:1.25;scroll-margin-top:16px}
 h2{font-size:26px;margin:56px 0 8px;padding-top:26px;border-top:1px solid var(--line)}
@@ -465,7 +467,9 @@ on this machine, and a copy of that library is written into every
 file. Opening a project adds any palettes or styles it carries that you do
 not already have; entries you already own are never overwritten. The
 <b>File</b> menu also keeps <b>Open recent</b>, <b>Restore</b> (reopen a
-document you closed), and <b>Rename project...</b>.</p>
+document you closed), and <b>Rename project...</b>. <b>Share a link...</b>
+and <b>Save chart setup...</b> are covered under
+<a href="#links">Links: opening and sharing</a>.</p>
 <h3 id="app-prefs">Preferences, the command palette, and updates</h3>
 <p><b>Edit &gt; Preferences...</b> (<kbd>Cmd/Ctrl+,</kbd>) holds the settings
 that follow you rather than any one project, in two tabs. <b>General</b>:
@@ -2072,6 +2076,126 @@ chart and its styling, layouts, and the Notebook. Your saved palettes and
 chart styles stay in your own library on your machine, so opening someone
 else's project can never rewrite your defaults.</li>
 </ul>
+</div>
+
+<div data-channel="app">
+<h3 id="links">Links: opening and sharing</h3>
+<p>The app opens straight from a link. Your browser fetches whatever the
+link points at, and it stays on your machine; nothing is uploaded. Before
+anything opens, a card names the site it comes from, so a link someone sent
+you cannot load anything without your say. The site holding a file has to
+let other pages read it. Most open-data hosts do, and so do GitHub Pages and
+gists.</p>
+<ul>
+<li><b>Open data from the web</b>, on the start screen, searches two open
+collections (Rdatasets and Zenodo) or opens a link you already have.</li>
+<li><b>A link to a data file</b> is
+<code>https://pandionplots.com/app/?data=</code> followed by the file's
+address. It opens a CSV, TSV, Excel or jamovi file as a new project, after a
+preview.</li>
+<li><b>A link to a project</b> uses <code>?project=</code> and the address of
+a <code>.pand</code> file, and opens the whole project.</li>
+<li><b>Share a link...</b> in the File menu makes a link to the project you
+have open. <b>Carry it in the link</b> packs the whole project into the
+address after the <code>#</code>, which browsers never send to any server,
+so nothing is stored anywhere; later edits do not change what the link
+opens. <b>Host it on GitHub</b> puts the project file in a repository or a
+gist: public, unlisted, or locked with a key that travels in the link.</li>
+<li><b>Copy as a hyperlink</b>, beside Copy link, copies words with the link
+behind them, for email, documents and chat. Places that take only plain
+text get the bare link.</li>
+</ul>
+
+<h3 id="chart-setups">Chart setups</h3>
+<p>A chart setup is a project with the rows taken out. It holds the charts
+and their styling, plus how to read the data: column names, types, the order
+of categories, missing-value codes, computed columns and filters. It is a
+small <code>.setup.json</code> text file. Pair it with a data file in one
+link and the data opens straight onto the finished charts, so a course page
+or a data site can offer one link per dataset with nothing to download or
+upload.</p>
+<ol>
+<li>Open the data, build the charts, then choose <b>File &gt; Save chart
+setup</b>.</li>
+<li>Put the <code>.setup.json</code> file online next to the data.</li>
+<li>Share <code>https://pandionplots.com/app/?config=</code><i>setup
+address</i><code>&amp;data=</code><i>data address</i>.</li>
+</ol>
+<ul>
+<li>When the project's data came from a link, the saved setup records that
+address, and <code>?config=</code> alone is enough. A <code>&amp;data=</code>
+in the link always wins, so one setup can serve this term's data and next
+term's.</li>
+<li><b>Share a link...</b> offers <b>Carry only the charts and settings</b>
+for a project whose data came from a link. The link carries the setup and
+fetches the data from where it came from, so it stays short however large
+the data is.</li>
+<li>Opening a <code>.setup.json</code> file directly applies it to the data
+you have open. If the setup names its data, the app fetches that
+instead.</li>
+<li>When the data lacks a column the charts need, a dialog asks which column
+holds it, with a close match already picked, or lets you leave it out. A
+chart part whose column you leave out stays empty.</li>
+</ul>
+
+<p><b>Writing a setup by hand or from a script.</b> A setup is plain JSON.
+This one renames a column, marks a missing-value code, fixes the order of
+two categories, keeps accurate trials only, and draws one box plot:</p>
+<pre><code>{
+  "kind": "pandion-plots-setup",
+  "formatVersion": 1,
+  "name": "Stroop effect",
+  "data": "https://example.org/stroop.csv",
+  "columns": [
+    { "name": "Reaction time", "from": "rt_ms", "type": "continuous", "missing": ["-1"] },
+    { "name": "condition", "type": "nominal", "levels": ["congruent", "incongruent"] }
+  ],
+  "filters": [ { "column": "accuracy", "op": "&gt;=", "value": 0.8 } ],
+  "charts": [
+    { "analysis": "Compare Groups",
+      "roles": { "xvar": "condition", "yvar": "Reaction time" },
+      "type": "box", "title": "Stroop interference" }
+  ]
+}</code></pre>
+<ul>
+<li><code>columns</code> names each column as the charts use it.
+<code>from</code> is the column's name in the data file, when it differs.
+<code>type</code> is <code>nominal</code>, <code>ordinal</code>,
+<code>continuous</code> or <code>id</code>. <code>levels</code> sets the
+order of categories. <code>missing</code> lists codes that mean "no value"
+in that column, on top of the codes that mean it everywhere;
+<code>notMissing</code> lists codes that are real values in that column even
+though they mean "no value" elsewhere. <code>formula</code> makes a computed column, written
+as in <a href="#computed">Computed variables</a>; without a
+<code>type</code> it takes the type of its results. Columns the setup does
+not list are read as usual.</li>
+<li><code>read</code> is optional: <code>delimiter</code> (<code>,</code>,
+<code>;</code> or <code>tab</code>), <code>skipRows</code>,
+<code>sheet</code> for Excel files, and <code>missing</code> for codes that
+mean "no value" in every column. Without it, the codes set in Preferences
+apply (<code>NA</code> to start with). Empty cells always mean "no
+value".</li>
+<li><code>filters</code> each give a <code>column</code>, an <code>op</code>
+(<code>=</code>, <code>!=</code>, <code>&gt;</code>, <code>&gt;=</code>,
+<code>&lt;</code>, <code>&lt;=</code>, <code>is missing</code> or
+<code>is not missing</code>) and a <code>value</code>. Rows that fail a
+filter stay out of every chart.</li>
+<li><code>charts</code> each name an <code>analysis</code> and its
+<code>roles</code>, with an optional <code>type</code> and
+<code>title</code>. A type may also be given by its menu name, such as
+<code>Q-Q</code>. A setup saved from the app stores each chart in full, with
+every style setting.</li>
+</ul>
+<div class="tablewrap"><table>
+<tr><th>Analysis</th><th>Roles</th><th>Types</th></tr>
+<tr><td><b>Compare Groups</b></td><td><code>xvar</code>, <code>yvar</code>, <code>groupVar</code>, <code>facetVar</code></td><td>bar, line, dot, box, violin, raincloud</td></tr>
+<tr><td><b>Repeated Measures</b></td><td><code>measures</code> (a list), <code>betweenVar</code>, <code>facetVar</code></td><td>bar, line, dot, box, violin, raincloud</td></tr>
+<tr><td><b>Scatter</b></td><td><code>xvar</code>, <code>yvar</code>, <code>groupVar</code>, <code>facetVar</code></td><td>scatter, heatmap</td></tr>
+<tr><td><b>Distribution</b></td><td><code>var</code>, <code>groupVar</code>, <code>facetVar</code></td><td>histogram, density, histdensity, box, violin, raincloud, dot, qq, ecdf</td></tr>
+<tr><td><b>Frequencies</b></td><td><code>var</code>, <code>groupVar</code>, <code>facetVar</code></td><td>bar, pie, donut, pareto</td></tr>
+<tr><td><b>Correlation Matrix</b></td><td><code>vars</code> (a list)</td><td>corrheatmap, corrcircles, corrnumbers, corrmixed</td></tr>
+<tr><td><b>Likert / Survey</b></td><td><code>items</code> (a list)</td><td>likertdiverging, likertstacked, likertmeans</td></tr>
+</table></div>
 </div>
 
 <!-- ============================================================ -->

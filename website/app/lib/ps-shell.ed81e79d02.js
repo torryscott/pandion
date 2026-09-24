@@ -1810,7 +1810,7 @@
   }
   function normalizeTableMaps(t) {
     ["raw", "types", "declaredLevels", "levelOrderDefaults", "excluded",
-     "excludedRows", "missingTokensByCol", "computed", "importedFormulas",
+     "excludedRows", "missingTokensByCol", "computed", "importedFormulas", "sourceNames",
      "dateColumns"].forEach(function (key) {
       if (t[key] != null) t[key] = dataMap(t[key]);
     });
@@ -1837,7 +1837,8 @@
               caseIds: [],
               excludedRows: excludedRows || {},
               missingTokens: Array.isArray(missingTokens)
-                ? missingTokens.slice() : prefMissingTokens() };
+                ? missingTokens.slice() : prefMissingTokens(),
+              sourceNames: dataMap() };
     var seenCaseIds = dataMap();
     for (i = 0; i < rows.length; i++) {
       var suppliedId = Array.isArray(caseIds) ? String(caseIds[i] || "") : "";
@@ -3850,6 +3851,7 @@
       id: PROJECT.id,
       name: PROJECT.name,
       sourceUrl: PROJECT.sourceUrl || "",
+      setupUrl: PROJECT.setupUrl || "",
       charts: PROJECT.charts,
       pinboards: PROJECT.pinboards || [],
       activeChart: PROJECT.activeChart,
@@ -3867,7 +3869,10 @@
                importedFormulas: t.importedFormulas || {},
                importedFilters: t.importedFilters || [],
                missingTokens: t.missingTokens || ["NA"],
-               missingTokensByCol: t.missingTokensByCol || {} }
+               missingTokensByCol: t.missingTokensByCol || {},
+               // Each renamed column's name in the file it came from, so a
+               // chart setup saved later can still find it there.
+               sourceNames: t.sourceNames || {} }
     };
   }
   function recentProjects() {
@@ -4188,7 +4193,7 @@
     if (Object.keys(t.raw).some(function (c) { return !names[c]; }))
       return "The project contains data without a corresponding column.";
     var maps = ["types", "declaredLevels", "levelOrderDefaults", "excluded",
-      "excludedRows", "missingTokensByCol", "computed", "importedFormulas"];
+      "excludedRows", "missingTokensByCol", "computed", "importedFormulas", "sourceNames"];
     for (var m = 0; m < maps.length; m++)
       if (t[maps[m]] != null && !record(t[maps[m]]))
         return "The project's variable properties are damaged.";
@@ -4198,6 +4203,9 @@
     if (t.computed && Object.keys(t.computed).some(function (c) {
       return !names[c] || typeof t.computed[c] !== "string";
     })) return "The project's computed-variable definitions are damaged.";
+    if (t.sourceNames && Object.keys(t.sourceNames).some(function (c) {
+      return typeof t.sourceNames[c] !== "string";
+    })) return "The project's record of column source names is damaged.";
     for (var a = 0; a < 3; a++) {
       var key = ["declaredLevels", "missingTokensByCol", "levelOrderDefaults"][a];
       if (t[key] && Object.keys(t[key]).some(function (c) {
@@ -4285,6 +4293,8 @@
           ? s.table.importedFormulas : {};
       preparedTable.importedFilters = Array.isArray(s.table.importedFilters)
         ? s.table.importedFilters : [];
+      preparedTable.sourceNames = (s.table.sourceNames &&
+        typeof s.table.sourceNames === "object") ? s.table.sourceNames : {};
       retype(preparedTable, true);
     } catch (prepareError) { return false; }
     // Only now may this snapshot replace the user's live data.
@@ -4298,6 +4308,11 @@
     PROJECT.id = s.id || newProjectId();
     PROJECT.name = s.name || (PROJECT.table && PROJECT.table.name) ||
       "Untitled project";
+    // Where the project came from travels with it: autosave, recents and
+    // the replaced-project offer all restore through here, and a project
+    // that forgot its source lost its provenance line on reload.
+    PROJECT.sourceUrl = typeof s.sourceUrl === "string" ? s.sourceUrl : "";
+    PROJECT.setupUrl = typeof s.setupUrl === "string" ? s.setupUrl : "";
     var charts = Array.isArray(s.charts) ? s.charts.filter(function (c) {
       return c && c.id && (isLayoutTab(c) ? Array.isArray(c.items)
                                           : MODULES[c.module]);
@@ -7589,6 +7604,7 @@
   }
   function loadSample(id) {
     var ex = exampleById(id || "dose");
+    PROJECT.sourceUrl = ""; PROJECT.setupUrl = "";
     PROJECT_CHOSEN = true;
     PROJECT.id = newProjectId();
     PROJECT.pins = [];   // new project identity, new evidence record
@@ -13843,6 +13859,13 @@
     // to the dataset labels, so a code that WAS missing comes back as real
     // data. Measured on a 12 row column with -99 declared missing for it,
     // renaming took valid from 11 to 12 and the sentinel re-entered the mean.
+    // The column's name in the file it came from, so a chart setup saved
+    // later can still find it there (Sep 23 2026).
+    if (!t.sourceNames) t.sourceNames = dataMap();
+    var srcName = t.sourceNames[oldName] || oldName;
+    delete t.sourceNames[oldName];
+    if (srcName !== next && !(t.computed && (t.computed[oldName] != null || t.computed[next] != null)))
+      t.sourceNames[next] = srcName;
     if (t.missingTokensByCol && t.missingTokensByCol[oldName]) {
       t.missingTokensByCol[next] = t.missingTokensByCol[oldName];
       delete t.missingTokensByCol[oldName];
@@ -13932,6 +13955,7 @@
       if (t.excluded) delete t.excluded[col];
       if (t.computed) delete t.computed[col];
       if (t.importedFormulas) delete t.importedFormulas[col];
+      if (t.sourceNames) delete t.sourceNames[col];
       // The per-column missing list would otherwise outlive the column, ride
       // every saved project, and quietly re-attach to any future column that
       // happens to take the same name, declaring codes the user never
@@ -15876,6 +15900,7 @@
                             computed: t.computed || {},
                             importedFormulas: t.importedFormulas || {},
                             importedFilters: t.importedFilters || [],
+                            sourceNames: t.sourceNames || {},
                             chartRoles: PROJECT.charts.map(function (c) {
                               return { id: c.id, roles: c.roles || {} };
                             }) });
@@ -15923,6 +15948,8 @@
     // label as well as the values.
     t.importedFormulas = (s.importedFormulas &&
       typeof s.importedFormulas === "object") ? s.importedFormulas : {};
+    t.sourceNames = (s.sourceNames && typeof s.sourceNames === "object")
+      ? s.sourceNames : {};
     t.importedFilters = Array.isArray(s.importedFilters)
       ? s.importedFilters : [];
     if (Object.prototype.hasOwnProperty.call(s, "declaredLevels"))
@@ -27038,6 +27065,7 @@
     PROJECT.id = newProjectId();
     PROJECT.name = name || "Untitled project";
     PROJECT.sourceUrl = takeLinkSource();
+    PROJECT.setupUrl = "";
     PROJECT_REV = 0;
     FILE_SAVED_REV = null;
     FILE_LABEL = null;
@@ -27069,6 +27097,7 @@
     PROJECT.id = newProjectId();
     PROJECT.name = parsed.name || "Untitled project";
     PROJECT.sourceUrl = takeLinkSource();
+    PROJECT.setupUrl = "";
     PROJECT_REV = 0;
     FILE_SAVED_REV = null;
     FILE_LABEL = null;
@@ -27508,6 +27537,21 @@
     reader.onload = function () {
       var text = String(reader.result);
       if (looksBinary(text)) { refuseNonDataFile(f.name, null); return; }
+      // A chart setup (charts and settings without data) names its kind the
+      // way a project file does.
+      if (/^\s*\{/.test(text)) {
+        var setupObj = null;
+        try {
+          var so = JSON.parse(text);
+          if (so && so.kind === SETUP_KIND) setupObj = so;
+        } catch (eSo) {}
+        if (setupObj) {
+          var viaUrl = PENDING_LINK_SOURCE;
+          PENDING_LINK_SOURCE = null;
+          openSetupFromFile(setupObj, f.name, viaUrl);
+          return;
+        }
+      }
       // Project files identify themselves by content, whatever the
       // extension (.pand recommended; .pnd / .pandion / .json load too).
       var claimsProject = /\.(pand|pnd|pandion)$/i.test(f.name || "");
@@ -27631,6 +27675,7 @@
     dataHistoryClear();
     PROJECT.id = newProjectId();
     PROJECT.name = "Untitled project";
+    PROJECT.sourceUrl = ""; PROJECT.setupUrl = "";
     PROJECT_REV = 0;
     FILE_SAVED_REV = null;
     FILE_LABEL = null;
@@ -28279,6 +28324,7 @@
     wireOpenLinkDialog();
     wireFindDataDialog();
     wireShareDialog();
+    wireSetupMapDialog();
     var linkReq = linkRequestFromLocation();
     if (linkReq) offerOpenLink(linkReq);
     else showWelcome(false);
@@ -28302,6 +28348,15 @@
     // the #, and #key=<key> unlocks a locked ?project= file.
     var pand = hashParams.get("pand");
     if (pand) return { kind: "carried", blob: pand };
+    // Chart setups: ?config=<setup>&data=<file>, or a setup carried after
+    // the # as #setup=<packed> beside ?data=<file>.
+    var setupHash = hashParams.get("setup"), cfg = params.get("config");
+    if (setupHash || cfg) {
+      var dataU = safeLinkUrl(params.get("data"));
+      if (setupHash) return { kind: "setup", inline: setupHash, dataUrl: dataU };
+      var cfgU = safeLinkUrl(cfg);
+      if (cfgU) return { kind: "setup", setupUrl: cfgU, dataUrl: dataU };
+    }
     var ex = params.get("example");
     if (ex && exampleById(ex) && exampleById(ex).id === ex) return { kind: "example", id: ex };
     var kinds = ["project", "data"];
@@ -28329,7 +28384,7 @@
   function cleanLinkFromAddress() {
     try {
       var hp = new URLSearchParams(String(window.location.hash || "").replace(/^#/, ""));
-      hp.delete("pand"); hp.delete("key");
+      hp.delete("pand"); hp.delete("key"); hp.delete("setup");
       var rest = hp.toString();
       window.history.replaceState(null, "", window.location.pathname + (rest ? "#" + rest : ""));
     } catch (e) {}
@@ -28344,6 +28399,25 @@
     }
     OPEN_LINK_REQ = req;
     var isProject = req.kind === "project", carried = req.kind === "carried";
+    var urlLine = el("ps-openlink-url");
+    urlLine.style.whiteSpace = "";
+    if (req.kind === "setup") {
+      var dataShown = req.dataUrl || (req.setupObj && safeLinkUrl(req.setupObj.data)) || "";
+      var hosts = [];
+      if (req.setupUrl) hosts.push(linkHost(req.setupUrl));
+      if (dataShown && hosts.indexOf(linkHost(dataShown)) === -1) hosts.push(linkHost(dataShown));
+      el("ps-openlink-title").textContent = "Open data with a chart setup?";
+      el("ps-openlink-sub").textContent = "A chart setup is charts and settings without any data. This link pairs one with a data file, so the data opens straight onto the charts.";
+      el("ps-openlink-host").textContent = hosts.length ? hosts.join(" and ") : "the address inside the setup";
+      urlLine.style.whiteSpace = "pre-line";
+      urlLine.textContent = "Setup: " + (req.setupUrl || (req.setupObj
+          ? (req.setupLabel || "the file you opened")
+          : "carried in this link (" + String(req.inline || "").length.toLocaleString() + " characters)")) +
+        "\nData: " + (dataShown || "named inside the setup");
+      el("ps-openlink-privacy").textContent = req.setupUrl
+        ? "Your browser fetches both files and they stay on this machine; nothing is uploaded anywhere."
+        : "Your browser fetches the data file and it stays on this machine; nothing is uploaded anywhere.";
+    } else {
     el("ps-openlink-title").textContent = carried ? "Open a shared project?"
       : isProject ? "Open a project from a link?" : "Open data from a link?";
     el("ps-openlink-sub").textContent = carried
@@ -28354,6 +28428,10 @@
     el("ps-openlink-host").textContent = carried ? "this link itself" : linkHost(req.url);
     el("ps-openlink-url").textContent = carried
       ? String(req.blob).length.toLocaleString() + " characters of packed project" : req.url;
+    el("ps-openlink-privacy").textContent = carried
+      ? "The project opens from the link itself and stays on this machine; nothing is uploaded anywhere."
+      : "Your browser fetches the file and it stays on this machine; nothing is uploaded anywhere.";
+    }
     el("ps-openlink-replace").hidden = !projectHasWork();
     el("ps-openlink-status").textContent = "";
     el("ps-openlink-open").disabled = false;
@@ -28378,6 +28456,7 @@
     el("ps-openlink-open").addEventListener("click", function () {
       if (!OPEN_LINK_REQ) return;
       if (OPEN_LINK_REQ.kind === "carried") openCarriedLink(OPEN_LINK_REQ, "ps-openlink");
+      else if (OPEN_LINK_REQ.kind === "setup") openSetupLink(OPEN_LINK_REQ, "ps-openlink");
       else openFromLink(OPEN_LINK_REQ, "ps-openlink");
     });
   }
@@ -28917,6 +28996,11 @@
     if (!el("ps-share-dialog")) return;
     el("ps-share-chartonly").checked = false;
     el("ps-share-chartonly-row").hidden = !shareChartOnlyOffered();
+    el("ps-share-setuponly").checked = false;
+    el("ps-share-setuponly-row").hidden = !shareSetupOnlyOffered();
+    if (shareSetupOnlyOffered())
+      el("ps-share-setuponly-text").textContent = "Carry only the charts and settings, and fetch the data from " +
+        linkHost(findSafeUrl(PROJECT.sourceUrl)) + " when the link is opened";
     el("ps-share-token").value = SHARE_GH_TOKEN;
     el("ps-share-addr").value = "";
     el("ps-share-gh-link").value = "";
@@ -28927,13 +29011,27 @@
     shareStatus("", false);
     var src = findSafeUrl(PROJECT.sourceUrl);
     var srcLine = el("ps-share-source");
+    var setupSrc = findSafeUrl(PROJECT.setupUrl);
     if (src) {
       srcLine.hidden = false;
-      srcLine.innerHTML = "This project was opened from " + escHtml(linkHost(src)) +
-        '. <button type="button" class="ps-share-inline" id="ps-share-source-copy">Copy a link that opens that file</button>';
+      srcLine.innerHTML = setupSrc
+        ? "This project was opened with a chart setup from " + escHtml(linkHost(setupSrc)) +
+          " and data from " + escHtml(linkHost(src)) +
+          '. <button type="button" class="ps-share-inline" id="ps-share-source-copy">Copy the link that opens both</button>'
+        : "This project was opened from " + escHtml(linkHost(src)) +
+          '. <button type="button" class="ps-share-inline" id="ps-share-source-copy">Copy a link that opens that file</button>';
     } else { srcLine.hidden = true; srcLine.innerHTML = ""; }
     shareSetMode(SHARE_MODE);
     openShellDialog("ps-share-dialog");
+  }
+  function shareSyncFoot() {
+    var foot = el("ps-share-foot");
+    if (!foot) return;
+    var setupOnly = SHARE_MODE === "carry" && el("ps-share-setuponly").checked && shareSetupOnlyOffered();
+    foot.textContent = setupOnly
+      ? "The link carries no rows. Whoever opens it fetches the data from " +
+        linkHost(findSafeUrl(PROJECT.sourceUrl)) + "."
+      : "Anyone who has the link has the data.";
   }
   function shareSetMode(mode) {
     SHARE_MODE = mode === "github" ? "github" : "carry";
@@ -28944,6 +29042,7 @@
     el("ps-share-github").hidden = SHARE_MODE !== "github";
     if (SHARE_MODE === "carry") shareBuildCarried();
     else shareSyncVisibility();
+    shareSyncFoot();
   }
   function shareStatus(msg, isError) {
     var s = el("ps-share-gh-status");
@@ -28955,18 +29054,26 @@
     var seq = ++SHARE_CARRY_SEQ;
     var chartOnly = el("ps-share-chartonly").checked && shareChartOnlyOffered();
     var snap = shareSnapshot(chartOnly);
-    var text = projectFileText(snap);
+    var setupOnly = el("ps-share-setuponly").checked && shareSetupOnlyOffered();
+    shareSyncFoot();
+    var text = setupOnly ? JSON.stringify(setupForProject(chartOnly)) : projectFileText(snap);
     var link = el("ps-share-carry-link"), size = el("ps-share-carry-size"), warn = el("ps-share-carry-warn");
     var copy = el("ps-share-carry-copy");
     link.value = ""; copy.disabled = true; warn.hidden = true;
     size.textContent = "Making the link\u2026";
     deflateText(text).then(function (bytes) {
       if (seq !== SHARE_CARRY_SEQ) return;
-      var href = appLinkBase() + "#pand=" + bytesToB64u(bytes);
+      var href = setupOnly
+        ? appLinkFor("data", findSafeUrl(PROJECT.sourceUrl)) + "#setup=" + bytesToB64u(bytes)
+        : appLinkBase() + "#pand=" + bytesToB64u(bytes);
       link.value = href;
       copy.disabled = false;
       var t = snap.table, docs = snap.charts.length;
-      size.textContent = "Carries " + docs + (docs === 1 ? " document" : " documents") +
+      size.textContent = setupOnly
+        ? "Carries the charts and settings for " + docs + (docs === 1 ? " document" : " documents") +
+          "; the data stays at " + linkHost(findSafeUrl(PROJECT.sourceUrl)) + ": " +
+          href.length.toLocaleString() + " characters."
+        : "Carries " + docs + (docs === 1 ? " document" : " documents") +
         " and the data table (" + shapeText((t.raw[t.order[0]] || []).length, t.order.length, "\u00d7", true) +
         "): " + href.length.toLocaleString() + " characters.";
       if (href.length > SHARE_LONG_CHARS) {
@@ -29162,6 +29269,24 @@
     for (var i = 0; i < tabs.length; i++)
       tabs[i].addEventListener("click", function () { shareSetMode(this.getAttribute("data-share-mode")); });
     el("ps-share-chartonly").addEventListener("change", shareBuildCarried);
+    el("ps-share-setuponly").addEventListener("change", shareBuildCarried);
+    el("ps-share-carry-copyhl").addEventListener("click", function () {
+      var v = el("ps-share-carry-link").value;
+      if (v) copyLinkAsHyperlink(v, shareHyperlinkLabel());
+    });
+    el("ps-share-gh-copyhl").addEventListener("click", function () {
+      var v = el("ps-share-gh-link").value;
+      if (v) copyLinkAsHyperlink(v, shareHyperlinkLabel());
+    });
+    // The hyperlink buttons follow their Copy link buttons, whichever code
+    // path enables or disables those.
+    [["ps-share-carry-copy", "ps-share-carry-copyhl"], ["ps-share-gh-copy", "ps-share-gh-copyhl"]].forEach(function (pair) {
+      var a = el(pair[0]), b = el(pair[1]);
+      if (!a || !b || typeof MutationObserver !== "function") return;
+      b.disabled = a.disabled;
+      new MutationObserver(function () { b.disabled = a.disabled; })
+        .observe(a, { attributes: true, attributeFilter: ["disabled"] });
+    });
     el("ps-share-carry-copy").addEventListener("click", function () {
       if (el("ps-share-carry-link").value) copyLinkText(el("ps-share-carry-link").value);
     });
@@ -29188,6 +29313,11 @@
       if (!(e.target && e.target.id === "ps-share-source-copy")) return;
       var src = findSafeUrl(PROJECT.sourceUrl);
       if (!src) return;
+      var setupSrc = findSafeUrl(PROJECT.setupUrl);
+      if (setupSrc) {
+        copyLinkText(appLinkBase() + "?config=" + linkParam(setupSrc) + "&data=" + linkParam(src));
+        return;
+      }
       var kind = /\.(pand|pnd|pandion)(\.locked)?$/i.test(src) ? "project" : "data";
       copyLinkText(appLinkFor(kind, src));
     });
@@ -29219,6 +29349,775 @@
       status.textContent = msg;
       if (btn) btn.disabled = false;
     });
+  }
+
+  // ---- Chart setups (Sep 23 2026; asked for by a site builder who wants
+  // "config + data" links) ----
+  // A chart setup is a project with the rows taken out: how to read a data
+  // file, what each column is, cleaning steps (computed columns, filters),
+  // the charts and layouts, and the house style. Three ways in:
+  //   ?config=<setup address>&data=<data address>  both fetched by the reader
+  //   ?config=<setup address>                      the setup names its data
+  //   ?data=<data address>#setup=<packed setup>    the setup rides in the link
+  // and opening a setup file directly, which applies it to the data it names
+  // or, failing that, to the data already open. The data's columns are
+  // matched to the setup by name; a setup column's "from" names its column in
+  // the file when the app renamed it. Columns the charts, filters or formulas
+  // need but the file lacks are offered for matching by hand before anything
+  // opens, so a renamed column never silently empties a chart.
+  var SETUP_KIND = "pandion-plots-setup";
+  var SETUP_MAX_BYTES = 5 * 1024 * 1024;
+  var SETUP_FILTER_OPS = { "=": "eq", "==": "eq", "!=": "ne", "<>": "ne",
+    ">": "gt", ">=": "ge", "<": "lt", "<=": "le",
+    "is missing": "nul", "is not missing": "nnul" };
+  function safeLinkUrl(raw) {
+    if (!raw) return "";
+    var u = null;
+    try { u = new URL(String(raw), window.location.href); } catch (e) { return ""; }
+    return (u.protocol === "https:" || u.protocol === "http:") ? u.href : "";
+  }
+  function linkParam(url) {
+    return encodeURIComponent(url).replace(/%2F/gi, "/").replace(/%3A/gi, ":");
+  }
+  function setupStrList(v) {
+    if (!Array.isArray(v)) return null;
+    var out = [];
+    for (var i = 0; i < v.length; i++)
+      if (typeof v[i] === "string" || typeof v[i] === "number" || typeof v[i] === "boolean")
+        out.push(String(v[i]));
+    return out;
+  }
+  // An analysis by its id ("plotbuilder") or its name ("Compare Groups",
+  // "scatter", "likert"), so a setup written by hand or by a script reads.
+  function setupModuleFor(name) {
+    if (typeof name !== "string" || !name) return null;
+    if (Object.prototype.hasOwnProperty.call(MODULES, name)) return name;
+    var want = name.toLowerCase().replace(/[^a-z]/g, "");
+    if (want.length < 4) return null;
+    for (var k in MODULES) {
+      if (!Object.prototype.hasOwnProperty.call(MODULES, k)) continue;
+      var lab = String(MODULES[k].label || "").toLowerCase().replace(/[^a-z]/g, "");
+      if (lab === want || lab.indexOf(want) === 0) return k;
+    }
+    return null;
+  }
+  // A chart type by the name or label the analysis offers; a scatter
+  // heatmap is its own option, not a graph type.
+  function setupTypeFor(mod, type) {
+    var tpl = window.PS_TEMPLATES && window.PS_TEMPLATES[mod];
+    var choices = (tpl && tpl.payload && tpl.payload.graphTypeChoices) || [];
+    var want = String(type == null ? "" : type).toLowerCase();
+    for (var i = 0; i < choices.length; i++) {
+      var c = choices[i];
+      if (String(c.name).toLowerCase() === want ||
+          String(c.label || "").toLowerCase() === want) {
+        if (mod === "xyplotbuilder") return { graphType: "scatter", xyBin: c.value || "none" };
+        return { graphType: String(c.name) };
+      }
+    }
+    return null;
+  }
+  function setupNextId(used) {
+    for (var n = 1; ; n++) if (!used["c" + n]) return "c" + n;
+  }
+  // A chart is either the app's own record (what Save chart setup writes)
+  // or the short form a script can write:
+  //   { "analysis": "Compare Groups", "roles": { "xvar": "condition",
+  //     "yvar": "rt_ms" }, "type": "box", "title": "...", "name": "..." }
+  function setupChart(c, index, used, notes) {
+    if (!c || typeof c !== "object" || Array.isArray(c)) return null;
+    var layout = c.type === "layout" && Array.isArray(c.items);
+    var full = typeof c.module === "string" && c.roles && typeof c.roles === "object" &&
+      c.roles[c.module] && typeof c.roles[c.module] === "object";
+    if (layout || full) {
+      var copy = JSON.parse(JSON.stringify(c));
+      if (typeof copy.id !== "string" || !copy.id || used[copy.id]) copy.id = setupNextId(used);
+      used[copy.id] = true;
+      if (!layout && (!copy.options || typeof copy.options !== "object" || Array.isArray(copy.options)))
+        copy.options = {};
+      return copy;
+    }
+    var mod = setupModuleFor(c.analysis || c.module);
+    if (!mod) {
+      notes.push("One chart asked for an analysis this app does not have (" +
+        String(c.analysis || c.module || "none given") + "), so it was left out.");
+      return null;
+    }
+    var defs = MODULES[mod].roles || [], roles = {};
+    var given = (c.roles && typeof c.roles === "object") ? c.roles : {};
+    for (var r = 0; r < defs.length; r++) {
+      var key = defs[r].key, v = given[key];
+      if (v == null) continue;
+      if (defs[r].multi) {
+        var list = setupStrList(Array.isArray(v) ? v : [v]);
+        if (list && list.length) roles[key] = list;
+      } else if (typeof v === "string" && v) roles[key] = v;
+    }
+    var opts = {};
+    if (c.type != null && c.type !== "") {
+      var gt = setupTypeFor(mod, c.type);
+      if (gt) {
+        opts.graphType = gt.graphType;
+        if (gt.xyBin) opts.xyBin = gt.xyBin;
+      } else notes.push(MODULES[mod].label + " has no chart type called " +
+        String(c.type) + ", so that chart opens as its usual type.");
+    }
+    if (typeof c.title === "string" && c.title)
+      opts.chartSpec = JSON.stringify({ chartTitle: c.title });
+    var id = (typeof c.id === "string" && c.id && !used[c.id]) ? c.id : setupNextId(used);
+    used[id] = true;
+    var rec = { id: id, name: (typeof c.name === "string" && c.name) ? c.name : "Chart " + (index + 1),
+                module: mod, roles: {}, options: {}, styleStamp: false };
+    rec.roles[mod] = roles;
+    rec.options[mod] = opts;
+    return rec;
+  }
+  function parseSetup(o) {
+    if (!o || typeof o !== "object" || Array.isArray(o) || o.kind !== SETUP_KIND)
+      return { error: "This file is not a Pandion Plots chart setup." };
+    if (typeof o.formatVersion === "number" && o.formatVersion > 1)
+      return { error: "This chart setup was made by a newer version of Pandion Plots. Update this page to open it." };
+    var notes = [];
+    var s = { name: typeof o.name === "string" ? o.name : "", data: safeLinkUrl(o.data),
+              read: {}, columns: [], filters: [], charts: [],
+              activeChart: typeof o.activeChart === "string" ? o.activeChart : "",
+              ui: {}, notes: notes,
+              libraries: (o.libraries && typeof o.libraries === "object" && !Array.isArray(o.libraries))
+                ? o.libraries : undefined,
+              appVersion: typeof o.appVersion === "string" ? o.appVersion : null,
+              numericalChanges: Array.isArray(o.numericalChanges) ? o.numericalChanges.map(String) : null };
+    var rd = (o.read && typeof o.read === "object") ? o.read : {};
+    var delims = { ",": ",", ";": ";", "\t": "\t", tab: "\t", comma: ",", semicolon: ";" };
+    s.read.delimiter = delims[rd.delimiter] || "auto";
+    s.read.skipRows = Math.max(0, Math.floor(Number(rd.skipRows) || 0));
+    s.read.sheet = typeof rd.sheet === "string" ? rd.sheet : "";
+    s.read.encoding = typeof rd.encoding === "string" && rd.encoding ? rd.encoding : "utf-8";
+    s.read.missing = setupStrList(rd.missing);
+    var seen = dataMap();
+    (Array.isArray(o.columns) ? o.columns : []).forEach(function (c) {
+      if (!c || typeof c !== "object") return;
+      var name = typeof c.name === "string" ? c.name.trim() : "";
+      if (!name || seen[name]) return;
+      seen[name] = true;
+      var e = { name: name };
+      if (typeof c.from === "string" && c.from.trim() && c.from.trim() !== name) e.from = c.from.trim();
+      var ty = normType(c.type);
+      if (ty) e.type = ty;
+      var lv = setupStrList(c.levels);
+      if (lv && lv.length) e.levels = lv;
+      var ms = setupStrList(c.missing);
+      if (ms && ms.length) e.missing = ms;
+      var nms = setupStrList(c.notMissing);
+      if (nms && nms.length) e.notMissing = nms;
+      if (typeof c.formula === "string" && c.formula.trim()) e.formula = c.formula.trim();
+      s.columns.push(e);
+    });
+    (Array.isArray(o.filters) ? o.filters : []).forEach(function (f) {
+      if (!f || typeof f !== "object") return;
+      var col = typeof f.column === "string" ? f.column : (typeof f.col === "string" ? f.col : "");
+      var op = Object.prototype.hasOwnProperty.call(FILTER_OPS, f.op) ? f.op
+        : SETUP_FILTER_OPS[String(f.op || "").toLowerCase()];
+      if (!col || !op) return;
+      var ff = { col: col, op: op, value: "" };
+      if (filterNeedsValue(op)) {
+        if (f.value == null || typeof f.value === "object" || String(f.value) === "") return;
+        ff.value = f.value;
+      }
+      s.filters.push(ff);
+    });
+    var used = dataMap();
+    (Array.isArray(o.charts) ? o.charts : []).forEach(function (c, i) {
+      var rec = setupChart(c, i, used, notes);
+      if (rec) s.charts.push(rec);
+    });
+    var ui = (o.ui && typeof o.ui === "object") ? o.ui : {};
+    ["workspace", "lastChart", "lastLayout"].forEach(function (k) {
+      if (typeof ui[k] === "string") s.ui[k] = ui[k];
+    });
+    return { setup: s };
+  }
+  // What the setup NEEDS from the file: the columns its charts' active roles,
+  // its filters and its formulas name. Other listed columns are typed when
+  // the file has them and quietly skipped when it does not.
+  function setupRequired(s) {
+    var need = dataMap(), listed = [], computed = dataMap();
+    s.columns.forEach(function (c) {
+      if (c.formula) computed[c.name] = true; else listed.push(c.name);
+    });
+    function add(n) { if (typeof n === "string" && n && !computed[n]) need[n] = true; }
+    s.charts.forEach(function (c) {
+      if (isLayoutTab(c) || !c.roles || !c.module) return;
+      var rr = c.roles[c.module];
+      if (!rr || typeof rr !== "object") return;
+      for (var k in rr) {
+        if (!Object.prototype.hasOwnProperty.call(rr, k)) continue;
+        if (Array.isArray(rr[k])) rr[k].forEach(add); else add(rr[k]);
+      }
+    });
+    s.filters.forEach(function (f) { add(f.col); });
+    if (window.PSFormula) {
+      var known = s.columns.map(function (c) { return c.name; });
+      s.columns.forEach(function (c) {
+        if (!c.formula) return;
+        var cc = null;
+        try { cc = window.PSFormula.compile(c.formula, known.filter(function (k) { return k !== c.name; })); } catch (e) {}
+        if (cc && cc.ok && cc.refs) cc.refs.forEach(add);
+      });
+    }
+    return need;
+  }
+  function setupPlan(s, header) {
+    var inFile = dataMap(), i;
+    for (i = 0; i < header.length; i++) inFile[header[i]] = true;
+    var need = setupRequired(s), entries = [], listed = dataMap();
+    s.columns.forEach(function (c) {
+      if (c.formula) return;
+      listed[c.name] = true;
+      entries.push({ name: c.name, from: c.from || "", type: c.type || "" });
+    });
+    for (var n in need)
+      if (!listed[n]) entries.push({ name: n, from: "", type: "" });
+    var taken = dataMap(), map = dataMap(), missing = [];
+    entries.forEach(function (e) {
+      var pick = "";
+      if (e.from && inFile[e.from] && !taken[e.from]) pick = e.from;
+      else if (inFile[e.name] && !taken[e.name]) pick = e.name;
+      if (pick) { map[e.name] = pick; taken[pick] = true; }
+      else if (need[e.name]) missing.push(e);
+    });
+    return { map: map, missing: missing,
+             unused: header.filter(function (h) { return !taken[h]; }) };
+  }
+  function setupNorm(x) { return String(x || "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
+  // A likely file column for a missing setup column: the same name once case,
+  // spaces and punctuation are ignored, or the one column that contains it.
+  function setupSuggest(e, unused, picked) {
+    var wants = [setupNorm(e.name)];
+    if (e.from) wants.push(setupNorm(e.from));
+    var free = unused.filter(function (h) { return !picked[h]; });
+    for (var i = 0; i < free.length; i++)
+      if (wants.indexOf(setupNorm(free[i])) !== -1) return free[i];
+    var hits = free.filter(function (h) {
+      var hn = setupNorm(h);
+      return hn.length >= 3 && wants.some(function (w) {
+        return w.length >= 3 && (hn.indexOf(w) !== -1 || w.indexOf(hn) !== -1);
+      });
+    });
+    return hits.length === 1 ? hits[0] : "";
+  }
+  function linkFileName(url) {
+    var parts = [];
+    try { parts = new URL(url).pathname.split("/").filter(Boolean).map(function (p) { return decodeURIComponent(p); }); }
+    catch (e) {}
+    var last = parts.length ? parts[parts.length - 1] : "";
+    if (/^(content|download|raw)$/i.test(last) && parts.length > 1) last = parts[parts.length - 2];
+    return last || "data";
+  }
+  function linkFetchBlob(url, limit, what) {
+    var host = linkHost(url);
+    return fetch(url, { mode: "cors", cache: "no-store" }).then(function (r) {
+      if (!r.ok) throw new Error("The server at " + host + " answered " + r.status + " for the " + what + ".");
+      var len = Number(r.headers.get("content-length") || 0);
+      if (len > limit)
+        throw new Error("The " + what + " is " + Math.round(len / 1048576) + " MB, too large to read in a browser tab.");
+      return r.blob();
+    }, function () {
+      throw new Error("Could not fetch the " + what + " from " + host + ". The site may not allow other pages to read the file (no CORS header), or the link may be wrong.");
+    }).then(function (blob) {
+      if (blob.size > limit)
+        throw new Error("The " + what + " is " + Math.round(blob.size / 1048576) + " MB, too large to read in a browser tab.");
+      return blob;
+    });
+  }
+  function setupFromText(s, text) {
+    if (looksBinary(text)) throw new Error("The data file is not a text table, an Excel workbook or a jamovi file.");
+    var parsed = parseTableText(text, s.read.delimiter, true, s.read.skipRows);
+    if (!parsed || !parsed.rows.length)
+      throw new Error(parseIssue() || "The data file could not be read as a table.");
+    return { header: parsed.header, rows: parsed.rows };
+  }
+  // The data file, read the way the setup says: CSV, TSV and text through
+  // the table parser; Excel through the workbook reader (a named sheet, else
+  // the first); a jamovi .omv through its reader, whose own types and levels
+  // stand wherever the setup is silent.
+  function setupReadData(s, blob, fileName) {
+    var lower = String(fileName || "").toLowerCase();
+    if (/\.(pand|pnd|pandion)$/.test(lower))
+      return Promise.reject(new Error("The data link points at a Pandion Plots project, not a data file."));
+    return blob.arrayBuffer().then(function (ab) {
+      var b = new Uint8Array(ab.slice(0, 4));
+      var zip = b.length > 1 && b[0] === 0x50 && b[1] === 0x4b;
+      function fromXlsx() {
+        return window.PSXlsx.parse(ab, fileName).then(function (wb) {
+          var sheets = wb.sheets || [], pick = sheets[0], found = false;
+          for (var i = 0; i < sheets.length; i++)
+            if (s.read.sheet && sheets[i].name === s.read.sheet) { pick = sheets[i]; found = true; }
+          if (!pick) throw new Error("The workbook has no sheets.");
+          if (s.read.sheet && !found && s.notes)
+            s.notes.push("The setup asks for a sheet called " + s.read.sheet +
+              ", which this workbook does not have, so its first sheet was used.");
+          return setupFromText({ read: { delimiter: "\t", skipRows: s.read.skipRows } },
+                               window.PSXlsx.sheetToTsv(pick));
+        });
+      }
+      function fromOmv() {
+        return window.PSOmv.parse(ab, fileName).then(function (p) {
+          return { header: p.header, rows: p.rows, types: p.types || null,
+                   levels: p.levels || null, missingByCol: p.missingByCol || null };
+        });
+      }
+      if (/\.omv$/.test(lower)) return fromOmv();
+      if (/\.(xlsx|xlsm)$/.test(lower)) return fromXlsx();
+      if (zip) return fromXlsx().catch(function () { return fromOmv(); });
+      var text;
+      try { text = new TextDecoder(s.read.encoding).decode(ab); }
+      catch (e) { text = new TextDecoder("utf-8").decode(ab); }
+      return setupFromText(s, text);
+    });
+  }
+  // The snapshot a setup and a data file make together: the file's rows
+  // under the setup's names, types, level orders, missing codes, formulas
+  // and filters, with the setup's charts. It then opens through
+  // adoptProject exactly like a project file, validation included.
+  function setupBuild(s, prepared, map, ctx) {
+    var rename = dataMap(), reserved = dataMap(), taken = dataMap();
+    var order = [], src = [], sourceNames = dataMap(), k;
+    for (k in map) { rename[map[k]] = k; reserved[k] = true; }
+    prepared.header.forEach(function (h, j) {
+      var nm;
+      if (rename[h] != null) nm = rename[h];
+      else {
+        nm = h;
+        if (reserved[nm] || taken[nm]) {
+          var n = 2, alt;
+          do { alt = h + " (" + n + ")"; n++; } while (reserved[alt] || taken[alt]);
+          nm = alt;
+        }
+      }
+      taken[nm] = true;
+      order.push(nm); src.push(j);
+      if (nm !== h) sourceNames[nm] = h;
+    });
+    var rows = prepared.rows, nrows = rows.length, raw = dataMap();
+    order.forEach(function (nm, oi) {
+      var j = src[oi], col = new Array(nrows);
+      for (var r = 0; r < nrows; r++) {
+        var v = rows[r][j];
+        col[r] = v == null ? "" : String(v);
+      }
+      raw[nm] = col;
+    });
+    var computed = dataMap(), blank = new Array(nrows);
+    for (var bi = 0; bi < nrows; bi++) blank[bi] = "";
+    s.columns.forEach(function (c) {
+      if (!c.formula || taken[c.name]) return;   // a file column of that name wins
+      computed[c.name] = c.formula;
+      taken[c.name] = true;
+      order.push(c.name);
+      raw[c.name] = blank.slice();
+    });
+    function fileKeyed(obj) {
+      var out = dataMap();
+      if (!obj || typeof obj !== "object") return out;
+      prepared.header.forEach(function (h) {
+        var nm = rename[h] != null ? rename[h] : h;
+        if (Object.prototype.hasOwnProperty.call(obj, h) && taken[nm]) out[nm] = obj[h];
+      });
+      return out;
+    }
+    var types = fileKeyed(prepared.types), levels = fileKeyed(prepared.levels);
+    for (var tk in types) if (!normType(types[tk])) delete types[tk];
+    for (var lk in levels) if (!Array.isArray(levels[lk])) delete levels[lk];
+    // Missing-value codes. The dataset list is the setup's read.missing, else
+    // the open table's own, else the default set in Preferences (what
+    // buildTable would use). A column's list in this
+    // app REPLACES the dataset list for that column (columnTokenList), so
+    // every per-column list here is built whole: an .omv's rules and a
+    // setup's column codes ADD to the dataset list (as adoptOMV does, so NA
+    // stays missing beside them), notMissing takes dataset codes back out,
+    // and the open table's own lists are already whole.
+    var dsMissing = s.read.missing || (Array.isArray(prepared.missing) ? prepared.missing : null);
+    var dsList = dsMissing || prefMissingTokens();
+    function codeUnion(a, b) {
+      var out = a.map(String);
+      b.forEach(function (v) { v = String(v); if (out.indexOf(v) === -1) out.push(v); });
+      return out;
+    }
+    var byCol = dataMap(), fileByCol = fileKeyed(prepared.missingByCol);
+    for (var mk in fileByCol) {
+      if (!Array.isArray(fileByCol[mk])) continue;
+      byCol[mk] = prepared.missingByColWhole ? fileByCol[mk].map(String)
+                                             : codeUnion(dsList, fileByCol[mk]);
+    }
+    s.columns.forEach(function (c) {
+      if (!taken[c.name]) return;
+      if (c.type) types[c.name] = c.type;
+      if (c.levels) levels[c.name] = c.levels.slice();
+      if (c.missing || c.notMissing) {
+        var drop = (c.notMissing || []).map(String);
+        byCol[c.name] = codeUnion(dsList, c.missing || []).filter(function (v) {
+          return drop.indexOf(v) === -1;
+        });
+      }
+    });
+    var dropped = [];
+    var filters = s.filters.filter(function (f) {
+      if (taken[f.col]) return true;
+      dropped.push(f.col);
+      return false;
+    });
+    if (dropped.length)
+      s.notes.push("A filter on " + dropped.join(", ") + " was left out, because the data has no such column.");
+    // A formula with no stated type takes the type its results have, the way
+    // the formula dialog types a new computed column. That needs the values,
+    // so the table is built once here as a dry run.
+    var untyped = Object.keys(computed).filter(function (c) { return !types[c]; });
+    if (untyped.length) {
+      try {
+        var rowsT = [];
+        for (var ti = 0; ti < nrows; ti++) rowsT.push(order.map(function (c) { return raw[c][ti]; }));
+        var trial = buildTable("setup", order, rowsT, types, levels, null, dsMissing, null, null, null, true);
+        trial.missingTokensByCol = byCol;
+        trial.computed = computed;
+        retype(trial, true);
+        untyped.forEach(function (c) {
+          types[c] = inferType(trial.raw[c] || [], tableMissingTokens(trial, c));
+        });
+      } catch (e) {}
+    }
+    var ws = s.ui.workspace;
+    if (["data", "chart", "layout"].indexOf(ws) === -1) ws = s.charts.length ? "chart" : "data";
+    var active = s.charts.some(function (c) { return c.id === s.activeChart; })
+      ? s.activeChart : (s.charts[0] ? s.charts[0].id : null);
+    var table = { name: s.name || prepared.name || "data", order: order, raw: raw,
+                  types: types, declaredLevels: levels, levelOrderDefaults: {},
+                  excluded: {}, caseIds: [], excludedRows: {}, filters: filters,
+                  computed: computed, importedFormulas: {}, importedFilters: [],
+                  missingTokensByCol: byCol, sourceNames: sourceNames, edited: false };
+    if (dsMissing) table.missingTokens = dsMissing;
+    return { version: 5, id: newProjectId(),
+             name: s.name || prepared.name || "Untitled project",
+             sourceUrl: ctx.dataUrl || "", setupUrl: ctx.setupUrl || "",
+             charts: s.charts, pinboards: [], activeChart: active,
+             ui: { workspace: ws, lastChart: s.ui.lastChart || null,
+                   lastLayout: s.ui.lastLayout || null },
+             table: table };
+  }
+  function setupRun(s, prepared, ctx) {
+    var plan = setupPlan(s, prepared.header);
+    function finish(map) {
+      var snap = setupBuild(s, prepared, map, ctx);
+      var bad = projectValidationError(snap);
+      if (bad) {
+        showLoaderMessage("This chart setup could not be applied to the data: " + bad);
+        return;
+      }
+      PENDING_LINK_SOURCE = ctx.dataUrl || null;
+      // A setup that says what it was computed under is judged the way a
+      // project file is, so one saved by an older version names what has
+      // changed since. One that says nothing (written by hand) has no
+      // earlier numbers to differ from, so it counts as current.
+      var stated = !!(s.numericalChanges || s.appVersion);
+      var res = adoptProject({ snapshot: snap, libraries: s.libraries,
+        fileAppVersion: stated ? s.appVersion : APP_VERSION,
+        fileNumericalChanges: stated ? s.numericalChanges : _numericalChangeIds() }, null);
+      if (res && res.error) { PENDING_LINK_SOURCE = null; return; }
+      if (s.notes.length) showToast(s.notes.join(" "));
+    }
+    if (!plan.missing.length) { finish(plan.map); return; }
+    showSetupMapDialog(plan, prepared, finish, ctx.onCancel);
+  }
+  var SETUP_MAP_PENDING = null;
+  function showSetupMapDialog(plan, prepared, finish, onCancel) {
+    SETUP_MAP_PENDING = { plan: plan, finish: finish, onCancel: onCancel || null };
+    var box = el("ps-setup-map-rows");
+    box.innerHTML = "";
+    var sample = dataMap();
+    prepared.header.forEach(function (h, j) {
+      for (var r = 0; r < prepared.rows.length && r < 200; r++) {
+        var v = prepared.rows[r][j];
+        if (v != null && String(v).trim() !== "") { sample[h] = String(v).trim().slice(0, 24); break; }
+      }
+    });
+    var picked = dataMap();
+    plan.missing.forEach(function (e, i) {
+      var row = mkEl("div", "ps-setup-map-row");
+      var lab = document.createElement("label");
+      lab.htmlFor = "ps-setup-map-" + i;
+      var strong = document.createElement("strong");
+      strong.textContent = e.name;
+      lab.appendChild(strong);
+      var meta = [];
+      if (e.type) meta.push(typeLabel(e.type));
+      if (e.from) meta.push("the setup looks for " + e.from);
+      if (meta.length) lab.appendChild(mkEl("span", "ps-finddata-meta", " " + meta.join(" \u00b7 ")));
+      var sel = document.createElement("select");
+      sel.id = "ps-setup-map-" + i;
+      sel.setAttribute("data-setup-expected", e.name);
+      var none = document.createElement("option");
+      none.value = ""; none.textContent = "Leave it out";
+      sel.appendChild(none);
+      plan.unused.forEach(function (h) {
+        var o = document.createElement("option");
+        o.value = h;
+        o.textContent = sample[h] != null ? h + " (for example " + sample[h] + ")" : h;
+        sel.appendChild(o);
+      });
+      var sug = setupSuggest(e, plan.unused, picked);
+      if (sug) { sel.value = sug; picked[sug] = true; }
+      row.appendChild(lab);
+      row.appendChild(sel);
+      box.appendChild(row);
+    });
+    var n = plan.missing.length;
+    el("ps-setup-map-sub").textContent = (n === 1
+      ? "The setup needs a column this data file does not have."
+      : "The setup needs " + n + " columns this data file does not have.") +
+      " Pick the column that holds each one, or leave it out; a chart part that needs a column you leave out stays empty.";
+    el("ps-setup-map-status").textContent = "";
+    openShellDialog("ps-setup-map-dialog");
+  }
+  function wireSetupMapDialog() {
+    var dlg = el("ps-setup-map-dialog");
+    if (!dlg) return;
+    function cancel() {
+      var p = SETUP_MAP_PENDING;
+      SETUP_MAP_PENDING = null;
+      closeShellDialog("ps-setup-map-dialog");
+      if (p && typeof p.onCancel === "function") p.onCancel();
+    }
+    el("ps-setup-map-cancel").addEventListener("click", cancel);
+    dlg.addEventListener("pointerdown", function (e) { if (e.target === this) cancel(); });
+    dlg.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") { e.preventDefault(); cancel(); return; }
+      shellTrapTab(this, e);
+    });
+    el("ps-setup-map-open").addEventListener("click", function () {
+      var p = SETUP_MAP_PENDING;
+      if (!p) return;
+      var map = dataMap(), k, seen = dataMap();
+      for (k in p.plan.map) map[k] = p.plan.map[k];
+      var sels = dlg.querySelectorAll("select[data-setup-expected]");
+      for (var i = 0; i < sels.length; i++) {
+        var v = sels[i].value;
+        if (!v) continue;
+        if (seen[v]) {
+          var st = el("ps-setup-map-status");
+          st.style.color = "#7a2e2e";
+          st.textContent = "One column of the file can stand in for only one column of the setup, and " + v + " is picked twice.";
+          return;
+        }
+        seen[v] = true;
+        map[sels[i].getAttribute("data-setup-expected")] = v;
+      }
+      SETUP_MAP_PENDING = null;
+      closeShellDialog("ps-setup-map-dialog");
+      p.finish(map);
+    });
+  }
+  // Open a setup from a link (the card's Open) or from a file that names its
+  // data (the same card, so the fetch is always announced first).
+  function openSetupLink(req, prefix) {
+    prefix = prefix || "ps-openlink";
+    var status = el(prefix + "-status"), btn = el(prefix + "-open");
+    if (btn) btn.disabled = true;
+    function say(msg) { status.style.color = "#4a5a6a"; status.textContent = msg; }
+    function fail(msg) {
+      status.style.color = "#7a2e2e";
+      status.textContent = msg;
+      if (btn) btn.disabled = false;
+    }
+    say("Reading the chart setup\u2026");
+    var got;
+    if (req.setupObj) got = Promise.resolve(req.setupObj);
+    else if (req.inline) {
+      var bytes = null;
+      try { bytes = b64uToBytes(req.inline); } catch (e) { bytes = null; }
+      got = (bytes ? inflateBytes(bytes) : Promise.reject(new Error("x")))
+        .then(function (t) { return JSON.parse(t); })
+        .catch(function () { throw new Error("The chart setup in this link could not be read. It may have been cut short when it was copied or sent."); });
+    } else {
+      got = linkFetchBlob(req.setupUrl, SETUP_MAX_BYTES, "chart setup")
+        .then(function (b) { return b.text(); })
+        .then(function (t) {
+          try { return JSON.parse(t); }
+          catch (e) { throw new Error("The setup address does not point at a Pandion Plots chart setup."); }
+        });
+    }
+    got.then(function (obj) {
+      var parsed = parseSetup(obj);
+      if (parsed.error) throw new Error(parsed.error);
+      var s = parsed.setup;
+      var dataUrl = req.dataUrl || s.data;
+      if (!dataUrl)
+        throw new Error("This chart setup does not name a data file, and the link carries none. Add &data= and the data file's address to the link.");
+      say("Fetching the data\u2026");
+      return linkFetchBlob(dataUrl, DATA_REFUSE_BYTES, "data file").then(function (blob) {
+        var name = linkFileName(dataUrl);
+        return setupReadData(s, blob, name).then(function (prepared) {
+          prepared.name = name.replace(/\.[^.]+$/, "");
+          return { s: s, prepared: prepared, dataUrl: dataUrl };
+        });
+      });
+    }).then(function (r) {
+      closeShellDialog(prefix + "-dialog");
+      OPEN_LINK_REQ = null;
+      cleanLinkFromAddress();
+      setupRun(r.s, r.prepared, { dataUrl: r.dataUrl, setupUrl: req.setupUrl || "",
+                                  onCancel: function () { showWelcome(true); } });
+    }).catch(function (e) { fail(String(e && e.message || e)); });
+  }
+  // A setup file opened from disk or a typed link: with a data address it
+  // goes through the card like a link; without one it is applied to the data
+  // already open.
+  function openSetupFromFile(obj, fileName, viaUrl) {
+    var parsed = parseSetup(obj);
+    if (parsed.error) { showLoaderMessage(parsed.error); return; }
+    var s = parsed.setup;
+    if (s.data) {
+      closeLoader();
+      offerOpenLink({ kind: "setup", setupObj: obj, setupUrl: viaUrl || "",
+                      setupLabel: fileName, dataUrl: "" });
+      return;
+    }
+    var t = PROJECT.table;
+    if (!t || !tableHasData(t)) {
+      showLoaderMessage(escFileName(fileName) + " is a chart setup: charts and " +
+        "settings without data. It names no data file, so open your data " +
+        "first, then open the setup again to apply it.");
+      return;
+    }
+    var header = t.order.filter(function (c) { return !isComputedColumn(t, c); });
+    var rows = [], n = nRows(t);
+    for (var i = 0; i < n; i++)
+      rows.push(header.map(function (c) { return t.raw[c][i]; }));
+    closeLoader();
+    // The open table's own types, level orders and missing codes carry over
+    // for every column the setup does not restate, the way an .omv file's do.
+    setupRun(s, { header: header, rows: rows, name: t.name,
+                  types: t.types, levels: t.declaredLevels,
+                  missingByCol: t.missingTokensByCol, missingByColWhole: true,
+                  missing: Array.isArray(t.missingTokens) ? t.missingTokens.slice() : null },
+             { dataUrl: PROJECT.sourceUrl || "", setupUrl: viaUrl || "" });
+  }
+  // The setup this project makes: everything but the rows.
+  function setupForProject(chartOnly) {
+    bankPendingColor();
+    var t = PROJECT.table, snap = shareSnapshot(!!chartOnly);
+    var src = findSafeUrl(PROJECT.sourceUrl);
+    var dataUrl = (src && !/\.(pand|pnd|pandion)(\.locked)?$/i.test(src.split(/[?#]/)[0])) ? src : "";
+    var dsList = (Array.isArray(t.missingTokens) ? t.missingTokens : prefMissingTokens()).map(String);
+    var cols = t.order.map(function (col) {
+      var e = { name: col }, comp = isComputedColumn(t, col);
+      var from = t.sourceNames && t.sourceNames[col];
+      if (!comp && typeof from === "string" && from && from !== col) e.from = from;
+      if (t.types[col]) e.type = t.types[col];
+      if (comp) e.formula = String(t.computed[col]);
+      if (t.declaredLevels && Array.isArray(t.declaredLevels[col]))
+        e.levels = t.declaredLevels[col].map(String);
+      if (t.missingTokensByCol && Array.isArray(t.missingTokensByCol[col])) {
+        var per = t.missingTokensByCol[col].map(String);
+        var add = per.filter(function (v) { return dsList.indexOf(v) === -1; });
+        var back = dsList.filter(function (v) { return per.indexOf(v) === -1; });
+        if (add.length) e.missing = add;
+        if (back.length) e.notMissing = back;
+      }
+      return e;
+    });
+    var out = { kind: SETUP_KIND, formatVersion: 1,
+                app: "pandion-plots-standalone", appVersion: APP_VERSION,
+                numericalChanges: _numericalChangeIds(),
+                savedAt: new Date().toISOString(), name: PROJECT.name || "" };
+    if (dataUrl) out.data = dataUrl;
+    out.read = {};
+    if (Array.isArray(t.missingTokens)) out.read.missing = t.missingTokens.map(String);
+    out.columns = cols;
+    out.filters = validFilters(t).map(function (f) {
+      var o = { column: f.col, op: f.op };
+      if (filterNeedsValue(f.op)) o.value = f.value;
+      return o;
+    });
+    out.charts = JSON.parse(JSON.stringify(snap.charts));
+    out.activeChart = snap.activeChart;
+    out.ui = { workspace: (PROJECT.ui && PROJECT.ui.workspace) || "chart" };
+    out.libraries = { palettes: PS_LIBS.palette.palettes, styles: PS_LIBS.style.styles };
+    return out;
+  }
+  function setupFileName() {
+    return projectFileName().replace(/\.pand$/i, "") + ".setup.json";
+  }
+  function saveSetupDownload(name, text) {
+    try {
+      var blob = new Blob([text], { type: "application/json" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      window.setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+      showToast("Chart setup saved as " + name);
+    } catch (e) { showToast("Could not save the chart setup", true); }
+  }
+  function saveSetupFile() {
+    if (!PROJECT.table) return;
+    var text = JSON.stringify(setupForProject(false), null, 1);
+    var name = setupFileName();
+    if (nativeSaveAvailable()) {
+      window.showSaveFilePicker({ suggestedName: name,
+        types: [{ description: "Pandion Plots chart setup",
+                  accept: { "application/json": [".json"] } }] })
+        .then(function (h) {
+          return h.createWritable().then(function (w) {
+            return w.write(text).then(function () { return w.close(); });
+          });
+        }).then(function () { showToast("Chart setup saved"); }, function (e) {
+          if (e && e.name === "AbortError") return;
+          saveSetupDownload(name, text);
+        });
+      return;
+    }
+    saveSetupDownload(name, text);
+  }
+  // Copy a link as a hyperlink: rich text with words in front and the address
+  // behind for editors that take it (mail, Word, Docs, Slack, course pages),
+  // and the bare address for everything that only takes plain text.
+  function copyLinkAsHyperlink(href, label) {
+    var html = '<a href="' + escHtml(href) + '">' + escHtml(label) + "</a>";
+    function done() { showToast("Hyperlink copied"); }
+    function fallback() {
+      var box = document.createElement("div");
+      box.contentEditable = "true";
+      box.style.position = "fixed"; box.style.left = "-9999px"; box.style.top = "0";
+      box.innerHTML = html;
+      document.body.appendChild(box);
+      var range = document.createRange();
+      range.selectNodeContents(box);
+      var sel = window.getSelection();
+      sel.removeAllRanges(); sel.addRange(range);
+      var ok = false;
+      try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+      sel.removeAllRanges();
+      document.body.removeChild(box);
+      if (ok) done(); else showToast("Could not copy the hyperlink; use Copy link instead", true);
+    }
+    if (window.ClipboardItem && window.navigator.clipboard && window.navigator.clipboard.write) {
+      var item;
+      try {
+        item = new window.ClipboardItem({
+          "text/html": new Blob([html], { type: "text/html" }),
+          "text/plain": new Blob([href], { type: "text/plain" })
+        });
+      } catch (e) { item = null; }
+      if (item) { window.navigator.clipboard.write([item]).then(done, fallback); return; }
+    }
+    fallback();
+  }
+  function shareHyperlinkLabel() {
+    var nm = String(PROJECT.name || "").trim();
+    return nm ? "Open " + nm + " in Pandion Plots" : "Open in Pandion Plots";
+  }
+  function shareSetupOnlyOffered() {
+    var src = findSafeUrl(PROJECT.sourceUrl);
+    return !!(src && PROJECT.table && !/\.(pand|pnd|pandion)(\.locked)?$/i.test(src.split(/[?#]/)[0]));
   }
 
   var SHELL_DIALOG_FOCUS = {};
@@ -30167,6 +31066,7 @@
       { label: "Save project", shortcut: "Cmd/Ctrl+S", command: "save" },
       { label: "Save project as\u2026", shortcut: "Cmd/Ctrl+Shift+S", command: "save-as" },
       { label: "Share a link\u2026", command: "share-link" },
+      { label: "Save chart setup\u2026", command: "save-setup" },
       "separator",
       { label: "Export\u2026", shortcut: "Cmd/Ctrl+Shift+E", command: "export" },
       { label: "Export data as CSV\u2026", command: "export-data" },
@@ -31058,6 +31958,7 @@
       saveProjectFile();
     }
     else if (command === "share-link") openShareDialog();
+    else if (command === "save-setup") saveSetupFile();
     else if (command === "export") exportCurrentWorkspace();
     else if (command === "export-data") exportDataCsv();
     else if (command === "export-data-xlsx") exportDataXlsx();
