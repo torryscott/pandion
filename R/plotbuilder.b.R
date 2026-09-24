@@ -169,6 +169,8 @@
     list(arg = "line_category_spacing", opt = "lineCategorySpacing", bool = FALSE, default = 1),
     list(arg = "line_point_size", opt = "linePointSize", bool = FALSE, default = -1),
     list(arg = "line_point_shape", opt = "linePointShape", bool = FALSE, default = "circle"),
+    # Mean line marker (dot charts): its length as a fraction of the slot.
+    list(arg = "line_marker_length", opt = "lineMarkerLength", bool = FALSE, default = 0.5),
     list(arg = "line_point_outline_width", opt = "linePointOutlineWidth", bool = FALSE, default = 0),
     list(arg = "line_point_outline_color", opt = "linePointOutlineColor", bool = FALSE, default = "#000000"),
     list(arg = "line_point_color", opt = "linePointColor", bool = FALSE, default = ""),

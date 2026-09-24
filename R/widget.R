@@ -532,6 +532,10 @@ graphbuilder2_html <- function(bars,
                                show_line_points = TRUE,
                                line_point_size = -1,
                                line_point_shape = "circle",
+                               # Mean line marker length (dot charts), a
+                               # fraction of the slot; only read when the
+                               # marker shape is "line".
+                               line_marker_length = 0.5,
                                line_point_outline_width = 0,
                                line_point_outline_color = "#000000",
                                line_point_color = "",
@@ -1930,6 +1934,10 @@ graphbuilder2_html <- function(bars,
         showLinePoints = isTRUE(show_line_points),
         linePointSize = as.numeric(line_point_size),
         linePointShape = as.character(line_point_shape),
+        lineMarkerLength = if (is.numeric(line_marker_length) &&
+                               length(line_marker_length) == 1L &&
+                               is.finite(line_marker_length))
+            min(1, max(0.05, as.numeric(line_marker_length))) else 0.5,
         linePointOutlineWidth = as.numeric(line_point_outline_width),
         linePointOutlineColor = as.character(line_point_outline_color),
         linePointColor = as.character(line_point_color),

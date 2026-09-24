@@ -24141,7 +24141,11 @@
                 else if (cfg.color && String(cfg.color).charAt(0) === "#") _mColor = cfg.color;
                 else _mColor = "#1a5fb4";
                 var _mBord = _gb2ElBorderW(ptEl) / 2;
-                var _mRing = svgEl("circle", { cx: cx, cy: cy, r: rad + 3 + _mw + _mDist + _mBord, "data-role": "sel-halo-ring", "pointer-events": "none" });
+                var _mPad = 3 + _mw + _mDist + _mBord;
+                var _mRing = (ptEl.getAttribute && ptEl.getAttribute("data-marker-shape") === "line")
+                    ? svgEl("rect", { x: bb.x - _mPad, y: bb.y - _mPad, width: bb.width + 2 * _mPad, height: bb.height + 2 * _mPad,
+                        rx: Math.min(Math.min(bb.width, bb.height) / 2 + _mPad, 8), "data-role": "sel-halo-ring", "pointer-events": "none" })
+                    : svgEl("circle", { cx: cx, cy: cy, r: rad + _mPad, "data-role": "sel-halo-ring", "pointer-events": "none" });
                 if (clipv) _mRing.setAttribute("clip-path", clipv);
                 if (tf) _mRing.setAttribute("transform", tf);
                 _gb2LabApplyMarch([_mRing], cfg, _mColor);
@@ -34876,6 +34880,49 @@
                 return svgEl("circle", attrs);
             }
 
+            // Mean line marker (Sep 2026): a short line ACROSS the slot
+            // at the summary value, the classic "mean with error bars"
+            // look. Drawn as a rect so it fills and outlines like the other
+            // marker shapes; the marker Size sets its thickness and the
+            // chart-wide lineMarkerLength sets how much of the slot it
+            // spans. alongY = the category axis runs vertically
+            // (horizontal chart), so the line stands upright.
+            function meanLineEl(cx, cy, len, thick, alongY, fill, outlineColor, outlineWidth, fillOpacity) {
+                var w = alongY ? thick : len;
+                var h = alongY ? len : thick;
+                var el = svgEl("rect", {
+                    x: cx - w / 2, y: cy - h / 2, width: w, height: h,
+                    fill: fill,
+                    "fill-opacity": (fillOpacity != null ? fillOpacity : 1),
+                    stroke: outlineColor,
+                    "stroke-width": outlineWidth || 0
+                });
+                el.setAttribute("data-marker-shape", "line");
+                return el;
+            }
+            function _gb2MeanLineThick(sizePx) {
+                var s = (typeof sizePx === "number" && isFinite(sizePx) && sizePx > 0) ? sizePx : 10;
+                return Math.max(1.5, s * 0.3);
+            }
+            // Length along the category axis in screen px: a share of the
+            // width a bar would take in this slot. On a grouped chart it
+            // also stays inside the spacing between neighboring groups'
+            // markers, so two lines never run into each other.
+            function _gb2MeanLineLen(catName, slotW) {
+                var frac = (typeof data.lineMarkerLength === "number" && isFinite(data.lineMarkerLength))
+                    ? Math.max(0.05, Math.min(1, data.lineMarkerLength)) : 0.5;
+                var avail = Math.max(0, slotW - 1);
+                if (hasGroups && visGroupCount(catName) >= 2) {
+                    var sp = (typeof data.lineMarkerSpread === "number" &&
+                              data.lineMarkerSpread >= 0 && data.lineMarkerSpread <= 1)
+                        ? data.lineMarkerSpread : 0.35;
+                    avail = Math.min(avail, 0.85 * sp * (slotW + catWidth * bGap));
+                }
+                var len = frac * avail;
+                if (horizontal) len = len * (innerH / innerW);
+                return Math.max(6, len);
+            }
+
             // Catmull-Rom -> Bezier converter: produces an SVG path
             // string that smoothly passes through every point in `pts`
             // (where each pt is {x, y, ...}). Tension 0.5 is the
@@ -40890,8 +40937,13 @@
                         var _moW = linePointOutlineWidthFor(_grpKey);
                         var _moC = linePointOutlineColorFor(_grpKey);
                         var _mFill = linePointColorFor(_grpKey, colorFor(_grpKey));
-                        var _marker = pointShapeEl(_ptShape, meanCx, meanCy, _ptSize,
-                            _mFill, _moC, _moW, 1);
+                        var _marker = (_ptShape === "line")
+                            ? meanLineEl(meanCx, meanCy,
+                                _gb2MeanLineLen(catName, thisBarW),
+                                _gb2MeanLineThick(_ptSize), horizontal,
+                                _mFill, _moC, _moW, 1)
+                            : pointShapeEl(_ptShape, meanCx, meanCy, _ptSize,
+                                _mFill, _moC, _moW, 1);
                         // Tag the visible marker so the inspector
                         // indicator can outline JUST the markers (not
                         // the wrapping <g>'s bigger hit-circle bbox)
@@ -40904,12 +40956,29 @@
                         _markerVisuals.push(_marker);
                     }
                     var _hitR = Math.max(_ptSize + 4, 10);
-                    var _hit = svgEl("circle", {
-                        cx: meanCx, cy: meanCy, r: _hitR,
-                        fill: "transparent",
-                        "pointer-events": "all",
-                        style: "cursor:pointer;"
-                    });
+                    var _hit;
+                    if (_ptShape === "line" && _ptSize > 0) {
+                        // A line marker is long and thin: its hit target
+                        // is a padded rect along the line, not a disc.
+                        var _hlLen = _gb2MeanLineLen(catName, thisBarW) + 8;
+                        var _hlTh = Math.max(_gb2MeanLineThick(_ptSize) + 12, 16);
+                        var _hlW = horizontal ? _hlTh : _hlLen;
+                        var _hlH = horizontal ? _hlLen : _hlTh;
+                        _hit = svgEl("rect", {
+                            x: meanCx - _hlW / 2, y: meanCy - _hlH / 2,
+                            width: _hlW, height: _hlH,
+                            fill: "transparent",
+                            "pointer-events": "all",
+                            style: "cursor:pointer;"
+                        });
+                    } else {
+                        _hit = svgEl("circle", {
+                            cx: meanCx, cy: meanCy, r: _hitR,
+                            fill: "transparent",
+                            "pointer-events": "all",
+                            style: "cursor:pointer;"
+                        });
+                    }
                     _mgrp.appendChild(_hit);
                     built = { primary: _mgrp, visuals: _markerVisuals };
                 }
@@ -45699,7 +45768,17 @@
                             // a true preview.
                             var _legMoW = linePointOutlineWidthFor(_grpKeyLeg);
                             var _legMoC = linePointOutlineColorFor(_grpKeyLeg);
-                            swatch.appendChild(pointShapeEl(
+                            swatch.appendChild(_mkShapeLeg === "line"
+                                ? meanLineEl(
+                                    legX + legendSwatchSize / 2, _midY,
+                                    Math.max(4, legendSwatchSize - 2),
+                                    Math.min(_gb2MeanLineThick(_mkSizeLeg), legendSwatchSize / 2),
+                                    horizontal,
+                                    linePointColorFor(_grpKeyLeg, colorFor(_grpKeyLeg)),
+                                    _legMoC,
+                                    _legMoW,
+                                    opacityFor(origGroup))
+                                : pointShapeEl(
                                 _mkShapeLeg,
                                 legX + legendSwatchSize / 2, _midY,
                                 _mkSizeCap,
@@ -58193,7 +58272,8 @@
                 if (lineSeries) add("Data line", "Joins each group's summary value so you can read the trend from one category to the next.", lineSeries, "bars:" + pgrp(lineSeries), { anchor: "line" });
                 var lmEl = biggest('[data-role="line-marker"]');
                 if (lmEl) {
-                    if (gt === "dot") add("Dot", "Marks one group's summary (the mean or median). Read its height against the Y axis; the dot shows only the summary, not the spread.", lmEl, "bars:" + pgrp(lmEl), { body: true });
+                    if (lmEl.getAttribute("data-marker-shape") === "line") add(data.summaryFunc === "median" ? "Median line" : "Mean line", "A short line at one group's " + (data.summaryFunc === "median" ? "median" : "mean") + ". Read its position against the value axis; the line shows only the summary, not the spread.", lmEl, "bars:" + pgrp(lmEl), { body: true });
+                    else if (gt === "dot") add("Dot", "Marks one group's summary (the mean or median). Read its height against the Y axis; the dot shows only the summary, not the spread.", lmEl, "bars:" + pgrp(lmEl), { body: true });
                     else add("Marker", "Marks the group's summary value at each category; the line joins these markers into the trend.", lmEl, "bars:" + pgrp(lmEl), { body: true });
                 }
             } else if (barEl && !isHeat) {
@@ -71073,6 +71153,22 @@
                     _mksLbl + (_mksId.indexOf("Open") > 0 ? " (open)" : "") + '">' +
                     _shapeIconSvg(_mksId) + '<span>' + _mksLbl + '</span></button>';
             }
+            // The Line shape (Sep 2026): a short line across the slot at
+            // the summary value. Offered on dot charts, and shown wherever
+            // it is already the current shape so a switched chart still
+            // names what it draws. Its own full-width row: it is a
+            // different kind of marker, with a Length the point shapes
+            // do not have.
+            if (_lsIsDot || _mkCurShape === "line") {
+                var _mklOn = (_mkCurShape === "line");
+                _mkShapeBtnsHtml += '<button type="button" data-preset-marker-shape="line" ' +
+                    'title="Line: a short line across the slot at the summary value" ' +
+                    'style="grid-column:1 / -1;display:flex;flex-direction:row;align-items:center;justify-content:center;gap:8px;' +
+                    'height:30px;padding:3px 6px;width:100%;box-sizing:border-box;' +
+                    'background:' + (_mklOn ? "#e8f0fb" : "white") + ';color:' + (_mklOn ? "#1a5fb4" : "#333") + ';' +
+                    'border:1px solid ' + (_mklOn ? "#1a5fb4" : "#ccc") + ';border-radius:4px;cursor:pointer;font:11px sans-serif;" aria-label="Line">' +
+                    _shapeIconSvg("line") + '<span>Line</span></button>';
+            }
             var _mkShapeCtrl =
                 '<div style="' + _GB2_COMPACT_SHAPE_GRID_CSS + '">' + _mkShapeBtnsHtml + '</div>' +
                 '<select data-field="marker-shape" title="' + (_lsIsDot ? "Dot shape" : "Marker shape") + '" style="display:none;">' +
@@ -71084,10 +71180,19 @@
                   '<option value="squareOpen">Square (open)</option>' +
                   '<option value="triangleOpen">Triangle (open)</option>' +
                   '<option value="diamondOpen">Diamond (open)</option>' +
+                  '<option value="line">Line</option>' +
                 '</select>';
             var _mkSizeCtrl =
                 '<input type="range" data-field="marker-size" data-unit="px" min="1" max="20" step="0.5" value="7" style="' + _slider + '" title="' + (_lsIsDot ? "Dot size" : "Marker size") + '" aria-label="' + (_lsIsDot ? "Dot size" : "Marker size") + '" />' +
                 '<span data-field="marker-size-val" style="' + _val + '">7</span>';
+            // Line marker length: chart-wide, as a percent of the width a
+            // bar would take in the slot (lineMarkerLength, 0.05..1).
+            var _mkLenPct = Math.round(100 * ((typeof data.lineMarkerLength === "number" && isFinite(data.lineMarkerLength))
+                ? Math.max(0.05, Math.min(1, data.lineMarkerLength)) : 0.5));
+            var _mkLenCtrl =
+                '<input type="range" data-field="marker-length" data-unit="%" min="10" max="100" step="5" value="' + _mkLenPct + '" style="' + _slider + '" title="Line length" aria-label="Line length" />' +
+                '<span data-field="marker-length-val" style="' + _val + '">' + _mkLenPct + '</span>' +
+                '<span style="flex-basis:100%;font-size:11px;color:#666;">Share of the width a bar would take here. Size sets the thickness.</span>';
             // Visible swatch for the Line tab's "Color" sub-strip. Sets
             // the line / series color (the same color the markers inherit
             // unless given their own fill). In category (ungrouped) mode
@@ -71274,11 +71379,14 @@
                      _lsBtn("marker-color", "color", "Color") +
                      _lsBtn("marker-shape", "shape", "Shape") +
                      _lsBtn("marker-size",  "size",  "Size")  +
+                     '<span data-field="marker-length-wrap" style="display:' + (_mkCurShape === "line" ? "contents" : "none") + ';">' +
+                        _lsBtn("marker-length", "length", "Length") + '</span>' +
                      _lsBtn("marker-orient", "rotation", "Direction") +
                   '</div>' +
                   _lsStrip("marker-color", _mkColorCtrl) +
                   _lsStrip("marker-shape", _mkShapeCtrl) +
                   _lsStrip("marker-size",  _mkSizeCtrl)  +
+                  _lsStrip("marker-length", _mkLenCtrl) +
                   _lsStrip("marker-orient", _lsOrientCtrl) +
                   (_lsShowSummary ? _lsStrip("marker-summary", _lsSummaryCtrl, { stat: "what each " + _lsSfNoun + "'s height means" }) : "") +
                 '</div>' +
@@ -71485,6 +71593,8 @@
                 if (tabName === "markers")      stored = window.__gb2_lsActiveStripMarkers;
                 else if (tabName === "outline") stored = window.__gb2_lsActiveStripOutline;
                 else                            stored = window.__gb2_lsActiveStripLine;
+                // Length belongs to the Line shape only.
+                if (stored === "marker-length" && _mkCurShape !== "line") stored = null;
                 if (typeof stored === "string" &&
                     body.querySelector('[data-tab-pane="' + tabName + '"] [data-ls-strip="' + stored + '"]')) {
                     return stored;
@@ -71627,7 +71737,8 @@
                 // opacity/smoothing where broadcasting works.
                 var _activeStrip = _noScope ? "" : _lsActiveStripFor(id);
                 var _isColorStrip = (_activeStrip === "line-color" || _activeStrip === "marker-color");
-                if (_activeStrip === "marker-summary" || _activeStrip === "marker-orient") {
+                if (_activeStrip === "marker-summary" || _activeStrip === "marker-orient" ||
+                    _activeStrip === "marker-length") {
                     // Chart-wide strips (Summary ported from the native
                     // panel; Orientation) - no per-series scope to toggle.
                     _lsScopeRow.style.display = "none";
@@ -72281,11 +72392,38 @@
             // Marker shape.
             iMkShape.addEventListener("change", function () {
                 _setLineField("linePointShape", iMkShape.value);
+                // A line marker needs room across its slot. On a grouped
+                // chart the markers start packed toward the category
+                // center, which leaves each line a short dash, so choosing
+                // Line spreads them to their own slots (the Gap tab's
+                // Marker spread) unless they already are.
+                if (iMkShape.value === "line" && hasGroups &&
+                    !(typeof data.lineMarkerSpread === "number" && data.lineMarkerSpread >= 0.9)) {
+                    data.lineMarkerSpread = 1;
+                    if (hasSetOption) { try { _setOption("lineMarkerSpread", 1); } catch (_eSp) {} }
+                }
                 redraw();
                 _persistLineField("linePointShape", iMkShape.value);
             });
             // Marker-shape buttons -> drive the hidden <select>.
+            // The Length button shows only for the Line shape; leaving
+            // Line while its strip is open falls back to the Shape strip.
+            function _mkSyncLengthBtn(shape) {
+                var wrap = body.querySelector('[data-field="marker-length-wrap"]');
+                if (!wrap) return;
+                var isLn = (shape === "line");
+                wrap.style.display = isLn ? "contents" : "none";
+                if (!isLn) {
+                    var strip = body.querySelector('[data-ls-strip="marker-length"]');
+                    if (strip && strip.style.display !== "none") {
+                        try { window.__gb2_lsActiveStripMarkers = "marker-shape"; } catch (_e0) {}
+                        try { _lsShowStripInTab("markers", "marker-shape"); } catch (_e1) {}
+                    }
+                }
+            }
             function _mkRefreshShapeBtns(shape) {
+                _mkCurShape = shape;
+                try { _mkSyncLengthBtn(shape); } catch (_eMl) {}
                 var _sb = body.querySelectorAll('[data-preset-marker-shape]');
                 for (var _i = 0; _i < _sb.length; _i++) {
                     var _on = (_sb[_i].getAttribute("data-preset-marker-shape") === shape);
@@ -72320,6 +72458,25 @@
                 var v = parseFloat(iMkSize.value);
                 if (isFinite(v) && v >= 1 && v <= 20) _persistLineField("linePointSize", v);
             });
+
+            // Line marker length (chart-wide percent of the slot).
+            var iMkLen = body.querySelector('[data-field="marker-length"]');
+            var iMkLenVal = body.querySelector('[data-field="marker-length-val"]');
+            if (iMkLen) {
+                iMkLen.addEventListener("input", function () {
+                    var v = parseFloat(iMkLen.value);
+                    if (!isFinite(v) || v < 5 || v > 100) return;
+                    if (iMkLenVal) iMkLenVal.textContent = String(Math.round(v));
+                    data.lineMarkerLength = v / 100;
+                    redraw();
+                });
+                iMkLen.addEventListener("change", function () {
+                    var v = parseFloat(iMkLen.value);
+                    if (!isFinite(v) || v < 5 || v > 100) return;
+                    data.lineMarkerLength = v / 100;
+                    if (hasSetOption) { try { _setOption("lineMarkerLength", v / 100); } catch (_eMl2) {} }
+                });
+            }
 
             // Marker outline: width slider + color swatch.
             // (Variable lookups hoisted up next to the other marker
@@ -81225,6 +81382,8 @@
                 glyph = '<polygon points="' + cx + ',' + (cy - s / 2) + ' ' + (cx - s / 2) + ',' + (cy + s / 2) + ' ' + (cx + s / 2) + ',' + (cy + s / 2) + '" fill="' + fill + '" stroke="currentColor" stroke-width="' + sw + '" stroke-linejoin="round"/>';
             } else if (base === "diamond") {
                 glyph = '<polygon points="' + cx + ',' + (cy - s / 2) + ' ' + (cx + s / 2) + ',' + cy + ' ' + cx + ',' + (cy + s / 2) + ' ' + (cx - s / 2) + ',' + cy + '" fill="' + fill + '" stroke="currentColor" stroke-width="' + sw + '" stroke-linejoin="round"/>';
+            } else if (base === "line") {
+                glyph = '<rect x="3" y="' + (cy - 1.5) + '" width="' + (W - 6) + '" height="3" rx="0.75" fill="currentColor"/>';
             } else {
                 glyph = '<circle cx="' + cx + '" cy="' + cy + '" r="' + (s / 2) + '" fill="' + fill + '" stroke="currentColor" stroke-width="' + sw + '"/>';
             }

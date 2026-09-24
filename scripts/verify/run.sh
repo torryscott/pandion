@@ -323,6 +323,18 @@ else
     fi
 fi
 
+echo "== mean line marker (the Line marker shape on dot charts)"
+if GB2_MEANLINE_OUT="$OUT-meanline" GB2_BUNDLE="$BUNDLE" Rscript "$HERE/meanline-render.R"; then
+    GB2_MEANLINE_OUT="$OUT-meanline" node "$HERE/meanline-check.mjs"
+else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then
+        echo "   skipped: jmvcore not available"
+    else
+        exit "$rc"
+    fi
+fi
+
 echo "== fresh-analysis delivery stability (Group By -> first snapshot -> native Image)"
 if GB2_SNAPCHURN_OUT="$OUT-snapchurn" GB2_BUNDLE="$BUNDLE" Rscript "$HERE/snapchurn-render.R"; then
     GB2_SNAPCHURN_OUT="$OUT-snapchurn" node "$HERE/snapchurn-check.mjs"

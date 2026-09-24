@@ -282,12 +282,27 @@ await withPage('rm_dot', async page => {
     check('RM dot Dots > Color omits Match line',
         await page.locator('[data-field="marker-color-match"]').count() === 0);
     await page.locator('[data-ls-btn="marker-shape"]').click();
-    const geom = await shapeGeometry(page, '[data-preset-marker-shape]');
+    // The eight point shapes keep the canonical 4 x 2 grid; dot charts add
+    // the Line shape (the mean line marker) as its own full-width row
+    // under it, inside the same fixed-width grid.
+    const geom = await shapeGeometry(page, '[data-preset-marker-shape]:not([data-preset-marker-shape="line"])');
     check('Marker shape menu is a compact 4 x 2 grid', !!geom && geom.count === 8 &&
         JSON.stringify(geom.rowCounts) === JSON.stringify([4, 4]) && geom.width <= 277 && !geom.overflow,
         JSON.stringify(geom));
     check('Open marker shapes have distinct accessible names', !!geom &&
         geom.names.slice(4).every(name => /open/i.test(name)), JSON.stringify(geom?.names));
+    const lineRow = await page.evaluate(() => {
+        const b = document.querySelector('[data-preset-marker-shape="line"]');
+        if (!b) return null;
+        const pts = [...b.parentElement.querySelectorAll('[data-preset-marker-shape]:not([data-preset-marker-shape="line"])')];
+        const g = b.parentElement.getBoundingClientRect(), r = b.getBoundingClientRect();
+        const bottom = Math.max(...pts.map(p => p.getBoundingClientRect().bottom));
+        return { fullWidth: Math.abs(r.width - g.width) < 2, below: r.top >= bottom - 1,
+                 gridWidth: g.width, name: b.getAttribute('aria-label') };
+    });
+    check('Dot charts add the Line shape as one full-width row under the grid',
+        !!lineRow && lineRow.fullWidth && lineRow.below && lineRow.gridWidth <= 277 && lineRow.name === 'Line',
+        JSON.stringify(lineRow));
     await page.locator('[data-ls-tab="order"]').click();
     const order = await page.evaluate(() => ({
         sort: document.querySelectorAll('[data-field="cat-sort"], [data-role="sort-asc"], [data-role="sort-desc"]').length,
