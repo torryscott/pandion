@@ -177,6 +177,25 @@ normalize_point_mark_styles <- function(x) {
     out
 }
 
+# The point marks key's relabels ({original, relabel}). Unlike
+# normalize_relabels the "" original is KEPT: it names the points with no
+# recorded value ("Not recorded" by default).
+normalize_mark_relabels <- function(x) {
+    if (is.null(x) || !is.list(x) || length(x) == 0L) return(list())
+    one <- function(v) if (!is.null(v) && is.atomic(v) && length(v) == 1L &&
+                           !is.na(v)) as.character(v) else NULL
+    out <- list()
+    for (r in x) {
+        if (!is.list(r)) next
+        orig <- one(r$original)
+        if (is.null(orig)) next
+        rel <- one(r$relabel)
+        out[[length(out) + 1L]] <- list(original = orig,
+                                         relabel = if (is.null(rel)) "" else rel)
+    }
+    out
+}
+
 graphbuilder2_html <- function(bars,
                                script_src_ready = FALSE,
                                # Native-panel preview keys (Compare Groups /
@@ -571,6 +590,13 @@ graphbuilder2_html <- function(bars,
                                # and the one-time auto-show flag.
                                point_mark_styles = list(),
                                mark_auto_shown = FALSE,
+                               # The point marks key: its title override,
+                               # per-level relabels and the whole-key drag
+                               # offset (the legend's offset idiom).
+                               mark_title = "",
+                               mark_relabels = list(),
+                               mark_legend_offset_x = 0,
+                               mark_legend_offset_y = 0,
                                line_point_outline_width = 0,
                                line_point_outline_color = "#000000",
                                line_point_color = "",
@@ -1975,6 +2001,17 @@ graphbuilder2_html <- function(bars,
             min(1, max(0.05, as.numeric(line_marker_length))) else 0.5,
         pointMarkStyles = normalize_point_mark_styles(point_mark_styles),
         markAutoShown = isTRUE(mark_auto_shown),
+        markTitle = if (is.character(mark_title) && length(mark_title) == 1L &&
+                        !is.na(mark_title)) mark_title else "",
+        markRelabels = normalize_mark_relabels(mark_relabels),
+        markLegendOffsetX = if (is.numeric(mark_legend_offset_x) &&
+                                length(mark_legend_offset_x) == 1L &&
+                                is.finite(mark_legend_offset_x))
+            as.numeric(mark_legend_offset_x) else 0,
+        markLegendOffsetY = if (is.numeric(mark_legend_offset_y) &&
+                                length(mark_legend_offset_y) == 1L &&
+                                is.finite(mark_legend_offset_y))
+            as.numeric(mark_legend_offset_y) else 0,
         linePointOutlineWidth = as.numeric(line_point_outline_width),
         linePointOutlineColor = as.character(line_point_outline_color),
         linePointColor = as.character(line_point_color),

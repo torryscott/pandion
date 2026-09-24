@@ -335,7 +335,7 @@ else
     fi
 fi
 
-echo "== point marks (Mark points by)"
+echo "== point marks (Distinguish points by)"
 if GB2_MARKS_OUT="$OUT-marks" GB2_BUNDLE="$BUNDLE" Rscript "$HERE/marks-render.R"; then
     GB2_MARKS_OUT="$OUT-marks" node "$HERE/marks-check.mjs"
 else

@@ -117,7 +117,7 @@ const fold = await page.evaluate(() => {
              limit: window.innerHeight,
              count: cards.length };
 });
-// Five since Sep 2026: Point marks joined X, Y, Color / group and Panels.
+// Five since Sep 2026: Distinguish by joined X, Y, Color / group and Panels.
 ok(fold.count === 5,
    `setup: a fresh Compare Groups chart offers five roles (${fold.count})`);
 ok(fold.bottom <= fold.limit,

@@ -5,11 +5,14 @@
 //
 // "Mark points by" colors and shapes each data point by a second
 // variable while the bars, boxes and means keep pooling every point.
-// Real mouse gestures for everything the user clicks on the chart
-// (synthetic clicks are blind to the pointer routing), and a mock
-// window.setOption to read what the chart commits. Each section catches
-// its own error, so a control run against an engine without the feature
-// still exercises every section.
+// The marks are edited through the ordinary Data points panel (Color and
+// Shape scoped over the mark levels), and the key beside the chart is a
+// chart part like the legend: draggable, its title and labels renamable,
+// hidden from the Legend panel. Real mouse gestures for everything the
+// user clicks on the chart (synthetic clicks are blind to the pointer
+// routing), and a mock window.setOption to read what the chart commits.
+// Each section catches its own error, so a control run against an engine
+// without the feature still exercises every section.
 
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
@@ -94,6 +97,34 @@ async function clickSel(page, selector, frac = 0.5) {
     await clickAt(page, c.x, c.y);
     return true;
 }
+const visible = (page, sel) => page.evaluate(s => {
+    const el = document.querySelector(s);
+    return !!el && el.getClientRects().length > 0;
+}, sel);
+const text = (page, sel) => page.evaluate(s => {
+    const el = document.querySelector(s);
+    return el ? el.textContent.trim() : null;
+}, sel);
+const panelTitle = page => page.evaluate(() => {
+    const t = document.querySelector('[data-role="inspector-title"]');
+    return t ? t.textContent.replace(/\s+/g, ' ').trim() : null;
+});
+// Type into the text panel's box and commit with Enter.
+async function rename(page, value) {
+    const box = page.locator('textarea[data-field="text-content"]');
+    await box.click();
+    await box.fill(value);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(500);
+}
+const lower = s => String(s || '').toLowerCase();
+// A color as the browser reads an inline style back: "rgb(r, g, b)".
+function asRgb(c) {
+    const m = /^#([0-9a-f]{6})$/i.exec(String(c || '').trim());
+    if (!m) return lower(c);
+    const n = parseInt(m[1], 16);
+    return 'rgb(' + (n >> 16) + ', ' + ((n >> 8) & 255) + ', ' + (n & 255) + ')';
+}
 
 // Per point: its mark, tag and fill.
 async function pointsInfo(page) {
@@ -113,9 +144,11 @@ async function keyInfo(page) {
         const g = document.querySelector('[data-role="mark-legend"]');
         if (!g) return null;
         const title = g.querySelector('[data-role="mark-legend-title"]');
+        const m = /translate\(\s*([-\d.]+)[ ,]+([-\d.]+)/.exec(g.getAttribute('transform') || '');
         return {
             title: title ? title.textContent : null,
             titleTop: title ? title.getBoundingClientRect().top : null,
+            tx: m ? Number(m[1]) : 0, ty: m ? Number(m[2]) : 0,
             rows: Array.from(g.querySelectorAll('[data-role="mark-legend-row"]')).map(r => ({
                 level: r.getAttribute('data-mark-level'),
                 label: r.querySelector('[data-role="mark-legend-label"]').textContent,
@@ -141,6 +174,15 @@ async function pointTarget(page, mark) {
         }
         return null;
     }, mark);
+}
+// The scope toggle as the user reads it (null when not offered).
+async function scopeRow(page) {
+    return page.evaluate(() => {
+        const g = document.querySelector('[data-dp-scope="group"]');
+        const a = document.querySelector('[data-dp-scope="all"]');
+        if (!g || !a || !g.getClientRects().length) return null;
+        return { group: g.textContent.trim(), all: a.textContent.trim() };
+    });
 }
 
 // ------------------------------------------------------------ marks
@@ -186,37 +228,31 @@ try {
     expect('an unmarked chart draws no key', (await keyInfo(other.page)) === null);
     await other.ctx.close();
 
-    console.log('== point marks: the Marks tab edits a level');
+    console.log('== point marks: the Data points panel edits the clicked level');
     const mPt = await pointTarget(page, 'M');
     expect('an M point is clickable', !!mPt);
     await clickAt(page, mPt.x, mPt.y);
     await page.waitForTimeout(300);
     const tabs = await page.evaluate(() => Array.from(document.querySelectorAll('[data-dp-tab]')).map(b => b.textContent.trim()));
-    expect('the Data points panel has a Marks tab', tabs.includes('Marks'), JSON.stringify(tabs));
-    const onMarks = await page.evaluate(() => {
-        const pane = document.querySelector('[data-dp-tab-pane="marks"]');
-        return !!pane && pane.style.display !== 'none';
+    expect('the Data points panel opens on its Points tab, no Marks tab',
+        tabs.length > 0 && !tabs.includes('Marks') && (await visible(page, '[data-dp-tab-pane="point"]')), JSON.stringify(tabs));
+    let sc = await scopeRow(page);
+    expect('the Color strip scopes over the mark levels: M / All levels',
+        !!sc && sc.group === 'M' && sc.all === 'All levels', JSON.stringify(sc));
+    expect('"Follow graph colors" is not offered while the points are marked',
+        !(await page.evaluate(() => !!document.querySelector('[data-field="color-auto"]'))));
+    const chip = await page.evaluate(() => {
+        const b = document.querySelector('[data-dp-strip="point-color"] [data-field="color-btn"]');
+        return b ? b.style.background : null;
     });
-    expect('clicking a marked point opens the Marks tab', onMarks);
-    const cur = await page.evaluate(() => {
-        const b = document.querySelector('[data-dp-tab-pane="marks"] [data-field="mark-color"][data-mark-cur="1"]');
-        if (!b) return null;
-        const row = b.closest('[data-mark-row]');
-        return row.querySelector('span').textContent;
-    });
-    expect('the clicked level (M) is the current row', cur === 'M', String(cur));
-    const scopeShown = () => page.evaluate(() => Array.from(document.querySelectorAll('[data-dp-scope]'))
-        .some(b => b.getClientRects().length > 0));
-    expect('the Marks tab has no This/All scope toggle', !(await scopeShown()));
-    await clickSel(page, '[data-dp-tab="point"]');
-    expect('the Points tab brings the toggle back', await scopeShown());
-    const note = await page.evaluate(() => {
-        const n = document.querySelector('[data-field="dp-marks-note"]');
-        return n ? n.textContent : null;
-    });
-    expect('the Points tab says where the colors and shapes come from', !!note && /Marks tab/.test(note), String(note));
-    await clickSel(page, '[data-dp-tab="marks"]');
-    await clickSel(page, '[data-dp-tab-pane="marks"] [data-field="mark-shape"][data-mark-i="1"][data-val="diamond"]');
+    expect('the Color chip shows the M color', asRgb(chip) === asRgb(M[0].fill), String(chip) + ' vs ' + M[0].fill);
+    const hint = await text(page, '[data-field="dp-marks-hint"]');
+    expect('the Color strip says what the colors mark', !!hint && /sex/.test(hint) && /Reset/.test(hint), String(hint));
+
+    await clickSel(page, '[data-dp-btn="point-shape"]');
+    sc = await scopeRow(page);
+    expect('the Shape strip scopes over the mark levels too', !!sc && sc.group === 'M' && sc.all === 'All levels', JSON.stringify(sc));
+    await clickSel(page, '[data-preset-shape="diamond"]');
     const afterShape = await pointsInfo(page);
     const M2 = afterShape.filter(p => p.mark === 'M');
     expect('M points redraw as diamonds', M2.length > 0 && M2.every(p => p.tag === 'polygon' && p.pts === 4));
@@ -226,18 +262,65 @@ try {
     const c2 = await flush(page);
     const st = (c2.spec.pointMarkStyles || []).find(e => e.level === 'M');
     expect('commits pointMarkStyles for M', st && st.shape === 'diamond', JSON.stringify(c2.spec.pointMarkStyles));
+    expect('the chart-wide point shape is left alone', c2.spec.pointShape === undefined && c2.real.pointShape === undefined,
+        JSON.stringify({ spec: c2.spec.pointShape, real: c2.real.pointShape }));
 
-    await clickSel(page, '[data-dp-tab-pane="marks"] [data-field="mark-legend-show"]');
-    await page.waitForTimeout(400);
-    expect('unchecking "Show the key" removes the key', (await keyInfo(page)) === null);
+    await clickSel(page, '[data-dp-scope="all"]');
+    await clickSel(page, '[data-preset-shape="square"]');
+    const afterAll = await pointsInfo(page);
+    expect('All levels: every point takes the shape', afterAll.every(p => p.tag === 'rect'));
     const c3 = await flush(page);
-    expect('commits the key as hidden', Array.isArray(c3.spec.hiddenElements) && c3.spec.hiddenElements.includes('markLegend'),
-        JSON.stringify(c3.spec.hiddenElements));
+    const stAll = c3.spec.pointMarkStyles || [];
+    expect('commits every level', ['F', 'M', ''].every(l => (stAll.find(e => e.level === l) || {}).shape === 'square'),
+        JSON.stringify(stAll));
+
+    await clickSel(page, '[data-dp-btn="point-size"]');
+    sc = await scopeRow(page);
+    expect('the Size strip keeps the ordinary bar scope', !!sc && sc.all === 'All bars', JSON.stringify(sc));
+
+    // The panel reopens on the strip the Points tab remembers (Size, just
+    // clicked): the row follows the strip in view.
+    const uPt = await pointTarget(page, '');
+    expect('the Not recorded point is clickable', !!uPt);
+    await clickAt(page, uPt.x, uPt.y);
+    await page.waitForTimeout(300);
+    sc = await scopeRow(page);
+    expect('reopened on the remembered Size strip: the bar scope', !!sc && sc.all === 'All bars', JSON.stringify(sc));
+    await clickSel(page, '[data-dp-btn="point-color"]');
+    sc = await scopeRow(page);
+    expect('back on Color: the Not recorded level scopes as Not recorded / All levels',
+        !!sc && sc.group === 'Not recorded' && sc.all === 'All levels', JSON.stringify(sc));
+    await clickAt(page, mPt.x, mPt.y);
+    await page.waitForTimeout(300);
+    await clickSel(page, '[data-dp-btn="point-color"]');
+    // The link sits inside a wrapping sentence: click its own line box.
+    await page.locator('[data-field="mark-reset"]').click();
+    await page.waitForTimeout(300);
+    const afterReset = await pointsInfo(page);
+    expect('Reset restores the default colors and shapes',
+        afterReset.filter(p => p.mark === 'F').every(p => p.tag === 'circle') &&
+        afterReset.filter(p => p.mark === 'M').every(p => p.tag === 'rect'));
+    const c4 = await flush(page);
+    expect('commits the empty store', Array.isArray(c4.spec.pointMarkStyles) && c4.spec.pointMarkStyles.length === 0,
+        JSON.stringify(c4.spec.pointMarkStyles));
+
+    console.log('== point marks: the key is hidden from the Legend panel');
+    await clickSel(page, '[data-role="mark-legend-row"][data-mark-level="M"] [data-role="mark-legend-swatch"]');
+    await page.waitForTimeout(300);
+    expect('a key swatch opens the Legend panel', /legend/i.test(await panelTitle(page) || ''), String(await panelTitle(page)));
+    const eye = 'button[aria-label="Hide Points key"]';
+    expect('the panel offers the key\'s eye', await visible(page, eye));
+    await clickSel(page, eye);
+    await page.waitForTimeout(500);
+    expect('the eye hides the key', (await keyInfo(page)) === null);
+    const c5 = await flush(page);
+    expect('commits the key as hidden', Array.isArray(c5.spec.hiddenElements) && c5.spec.hiddenElements.includes('markLegend'),
+        JSON.stringify(c5.spec.hiddenElements));
     expect('no page errors after editing', page.__errors.length === 0, page.__errors.join(' | '));
     await ctx.close();
 } catch (e) { expect('section ran to the end', false, String((e && e.message) || e)); }
 
-console.log('== point marks: stored colors and shapes');
+console.log('== point marks: stored colors and shapes; the key is a chart part');
 try {
     const { ctx, page } = await open('mk_bar_styled');
     const pts = await pointsInfo(page);
@@ -246,16 +329,75 @@ try {
     const c = await flush(page);
     expect('an already-stamped chart does not re-adjust anything', c.spec.markAutoShown === undefined && c.real.showDataPoints === undefined,
         JSON.stringify(c));
-    // The key opens the Marks tab on its row.
+    // A label opens its text panel and renames the level in the key.
     await clickSel(page, '[data-role="mark-legend-row"][data-mark-level="F"] [data-role="mark-legend-label"]');
     await page.waitForTimeout(300);
-    const cur = await page.evaluate(() => {
-        const pane = document.querySelector('[data-dp-tab-pane="marks"]');
-        if (!pane || pane.style.display === 'none') return null;
-        const b = pane.querySelector('[data-field="mark-color"][data-mark-cur="1"]');
-        return b ? b.closest('[data-mark-row]').querySelector('span').textContent : null;
+    expect('clicking a key label opens its text panel', /points key label/i.test(await panelTitle(page) || ''), String(await panelTitle(page)));
+    await rename(page, 'Female');
+    let k = await keyInfo(page);
+    expect('the label reads the new name', k && k.rows[0].label === 'Female', JSON.stringify(k && k.rows.map(r => r.label)));
+    let cc = await flush(page);
+    expect('commits markRelabels', JSON.stringify(cc.spec.markRelabels) === JSON.stringify([{ original: 'F', relabel: 'Female' }]),
+        JSON.stringify(cc.spec.markRelabels));
+    // The title too.
+    await clickSel(page, '[data-role="mark-legend-title"]');
+    await page.waitForTimeout(300);
+    expect('clicking the key title opens its text panel', /points key title/i.test(await panelTitle(page) || ''), String(await panelTitle(page)));
+    await rename(page, 'Sex of mouse');
+    k = await keyInfo(page);
+    expect('the title reads the new name', k && k.title === 'Sex of mouse', String(k && k.title));
+    cc = await flush(page);
+    expect('commits markTitle', cc.spec.markTitle === 'Sex of mouse', String(cc.spec.markTitle));
+    // Drag the key by its empty space.
+    const bg = await page.evaluate(() => {
+        const r = document.querySelector('[data-role="mark-legend-bg"]');
+        if (!r) return null;
+        const b = r.getBoundingClientRect();
+        return { x: b.left + 2, y: b.top + 2, w: b.width, h: b.height };
     });
-    expect('clicking the key opens the Marks tab on that level', cur === 'F', String(cur));
+    expect('the key has a drag target behind it', !!bg && bg.w > 20 && bg.h > 20, JSON.stringify(bg));
+    const before = await keyInfo(page);
+    await page.mouse.move(bg.x, bg.y);
+    await page.mouse.down();
+    await page.mouse.move(bg.x - 20, bg.y + 20, { steps: 6 });
+    await page.mouse.move(bg.x - 40, bg.y + 40, { steps: 6 });
+    await page.mouse.up();
+    await page.waitForTimeout(400);
+    const after = await keyInfo(page);
+    expect('the key follows the drag', !!after && after.tx < before.tx - 20 && after.ty > before.ty + 20,
+        JSON.stringify([before && [before.tx, before.ty], after && [after.tx, after.ty]]));
+    cc = await flush(page);
+    expect('commits the key offset', typeof cc.spec.markLegendOffsetX === 'number' && cc.spec.markLegendOffsetX <= -20 &&
+        typeof cc.spec.markLegendOffsetY === 'number' && cc.spec.markLegendOffsetY >= 20,
+        JSON.stringify([cc.spec.markLegendOffsetX, cc.spec.markLegendOffsetY]));
+    expect('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
+    await ctx.close();
+} catch (e) { expect('section ran to the end', false, String((e && e.message) || e)); }
+
+console.log('== point marks: a saved key title, relabel and offset render');
+try {
+    const { ctx, page } = await open('mk_bar_named');
+    const k = await keyInfo(page);
+    expect('the saved title shows', k && k.title === 'Sex of mouse', String(k && k.title));
+    expect('the saved relabel shows, the rest keep their names',
+        k && JSON.stringify(k.rows.map(r => r.label)) === JSON.stringify(['Female', 'M', 'Not recorded']),
+        JSON.stringify(k && k.rows.map(r => r.label)));
+    expect('the saved offset moves the key', k && k.tx === 20 && k.ty >= 10, JSON.stringify(k && [k.tx, k.ty]));
+    await ctx.close();
+} catch (e) { expect('section ran to the end', false, String((e && e.message) || e)); }
+
+console.log('== point marks: points already on keep their size');
+try {
+    const { ctx, page } = await open('mk_bar_ptson');
+    const pts = await pointsInfo(page);
+    expect('marked, at the size the user had', pts.length === 31 && pts.every(p => p.mark !== null && p.size < 5.5),
+        '(' + Math.max(...pts.map(p => p.size)).toFixed(1) + 'px)');
+    const c = await flush(page);
+    // The chartSpec blob is cumulative: pointSize 4 is the fixture's own
+    // value, still 4 (not raised to 6), and no opacity was written.
+    expect('stamps markAutoShown without touching size or opacity',
+        c.spec.markAutoShown === true && c.spec.pointSize === 4 && c.spec.pointOpacity === undefined &&
+        c.real.showDataPoints === undefined, JSON.stringify(c));
     await ctx.close();
 } catch (e) { expect('section ran to the end', false, String((e && e.message) || e)); }
 
@@ -284,6 +426,10 @@ try {
     expect('box plot: marked points', (await pointsInfo(c.page)).every(p => p.mark !== null));
     expect('the key sits under the group legend', kc && lastGroupRow != null && kc.titleTop > lastGroupRow,
         JSON.stringify([kc && kc.titleTop, lastGroupRow]));
+    await clickSel(c.page, '[data-role="mark-legend-row"][data-mark-level="F"] [data-role="mark-legend-swatch"]');
+    await c.page.waitForTimeout(300);
+    expect('grouped: the Legend panel offers both eyes',
+        (await visible(c.page, 'button[aria-label="Hide Legend"]')) && (await visible(c.page, 'button[aria-label="Hide Points key"]')));
     await c.ctx.close();
 
     const d = await open('mk_rain');
@@ -298,9 +444,57 @@ try {
     const pt0 = await pointTarget(e.page, null);
     await clickAt(e.page, pt0.x, pt0.y);
     await e.page.waitForTimeout(300);
-    const tabs = await e.page.evaluate(() => Array.from(document.querySelectorAll('[data-dp-tab]')).map(t => t.textContent.trim()));
-    expect('no mark variable: no Marks tab', tabs.length > 0 && !tabs.includes('Marks'), JSON.stringify(tabs));
+    const sc0 = await scopeRow(e.page);
+    expect('no mark variable: the ordinary scope toggle and "Follow graph colors"',
+        !!sc0 && sc0.all === 'All bars' && (await visible(e.page, '[data-field="color-auto"]')), JSON.stringify(sc0));
     await e.ctx.close();
+} catch (e) { expect('section ran to the end', false, String((e && e.message) || e)); }
+
+console.log('== a first click on the open-shape level: the row reads that level');
+try {
+    // The Not recorded level's default shape is open, which makes the
+    // Outline tab land on Width (a programmatic click) while the panel
+    // opens; the Points tab's scope row must still read the Color strip
+    // it shows, not the strip that click touched.
+    const { ctx, page } = await open('mk_bar');
+    const uPt = await pointTarget(page, '');
+    await clickAt(page, uPt.x, uPt.y);
+    await page.waitForTimeout(300);
+    const sc = await scopeRow(page);
+    expect('fresh panel on the Not recorded point: Not recorded / All levels',
+        !!sc && sc.group === 'Not recorded' && sc.all === 'All levels', JSON.stringify(sc));
+    const shown = await page.evaluate(() => { const s = document.querySelector('[data-dp-strip="point-color"]'); return !!s && s.style.display !== 'none'; });
+    expect('and the Color strip is the one in view', shown);
+    await ctx.close();
+} catch (e) { expect('section ran to the end', false, String((e && e.message) || e)); }
+
+console.log('== the point menu: dismissing it clears the selection ring');
+try {
+    const { ctx, page } = await open('mk_bar_styled');
+    const ring = () => page.evaluate(() => document.querySelectorAll('[data-role="data-point-selected"]').length);
+    const menu = () => page.evaluate(() => !!document.querySelector('[data-role="gb2-point-menu"]'));
+    const pt = await pointTarget(page, 'M');
+    await page.mouse.click(pt.x, pt.y, { button: 'right' });
+    await page.waitForTimeout(300);
+    expect('a right-click opens the point menu with the ring', (await menu()) && (await ring()) === 1);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    expect('Escape closes the menu and the ring goes with it', !(await menu()) && (await ring()) === 0, 'ring ' + (await ring()));
+    await page.mouse.click(pt.x, pt.y, { button: 'right' });
+    await page.waitForTimeout(300);
+    const c = await center(page, '[data-role="gb2-chart-svg"]', 0.5);
+    await clickAt(page, c.x, c.y - c.h * 0.3);
+    expect('an outside click closes the menu and the ring goes with it', !(await menu()) && (await ring()) === 0, 'ring ' + (await ring()));
+    // With the Data points panel open the ring is the live selection's.
+    await clickAt(page, pt.x, pt.y);
+    await page.waitForTimeout(300);
+    await page.mouse.click(pt.x, pt.y, { button: 'right' });
+    await page.waitForTimeout(300);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    expect('with the panel open the selected point keeps its ring', (await ring()) === 1);
+    expect('no page errors', page.__errors.length === 0, page.__errors.join(' | '));
+    await ctx.close();
 } catch (e) { expect('section ran to the end', false, String((e && e.message) || e)); }
 
 console.log('== point marks with the Line marker shape');

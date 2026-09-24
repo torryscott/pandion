@@ -175,6 +175,11 @@
     # and the one-time flag that data points were switched on for marks.
     list(arg = "point_mark_styles", opt = "pointMarkStyles", bool = FALSE, default = list()),
     list(arg = "mark_auto_shown", opt = "markAutoShown", bool = TRUE, default = FALSE),
+    # The point marks key: title override, per-level relabels, drag offset.
+    list(arg = "mark_title", opt = "markTitle", bool = FALSE, default = ""),
+    list(arg = "mark_relabels", opt = "markRelabels", bool = FALSE, default = list()),
+    list(arg = "mark_legend_offset_x", opt = "markLegendOffsetX", bool = FALSE, default = 0),
+    list(arg = "mark_legend_offset_y", opt = "markLegendOffsetY", bool = FALSE, default = 0),
     list(arg = "line_point_outline_width", opt = "linePointOutlineWidth", bool = FALSE, default = 0),
     list(arg = "line_point_outline_color", opt = "linePointOutlineColor", bool = FALSE, default = "#000000"),
     list(arg = "line_point_color", opt = "linePointColor", bool = FALSE, default = ""),

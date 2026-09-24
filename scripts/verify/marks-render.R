@@ -131,5 +131,18 @@ wr(plain, "mk_none")
 wr(pb(graphType = "bar", showDataPoints = TRUE), "mk_none_points")
 wr(pb(graphType = "dot", markVar = "sex", showDataPoints = TRUE,
       chartSpec = cspec(linePointShape = "line", markAutoShown = TRUE)), "ml_dot_marks")
+# Points the user already had on keep their size (no bump).
+wr(pb(graphType = "bar", markVar = "sex", showDataPoints = TRUE,
+      chartSpec = cspec(pointSize = 4)), "mk_bar_ptson")
+# The key as a chart part: renamed title + label, dragged offset.
+nm <- pb(graphType = "bar", markVar = "sex", showDataPoints = TRUE,
+      chartSpec = cspec(markAutoShown = TRUE, markTitle = "Sex of mouse",
+          markRelabels = list(list(original = "F", relabel = "Female")),
+          markLegendOffsetX = 20, markLegendOffsetY = 10))
+check("payload carries the key title, relabels and offset",
+      grepl('"markTitle":"Sex of mouse"', getHtml(nm$res), fixed = TRUE) &&
+      grepl('"markRelabels":[{"original":"F","relabel":"Female"}]', getHtml(nm$res), fixed = TRUE) &&
+      grepl('"markLegendOffsetX":20', getHtml(nm$res), fixed = TRUE))
+wr(nm, "mk_bar_named")
 cat("wrote fixtures to", OUT, "\n")
 if (fails > 0) { cat(fails, "data check(s) failed\n"); quit(status = 1) }

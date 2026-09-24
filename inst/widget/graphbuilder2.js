@@ -4136,7 +4136,7 @@
         // is assigned the routing chokepoint sees undefined and would
         // commit a migrated module's style keys under their RAW names
         // instead of folding them into the chartSpec blob (t4-150).
-        // "Mark points by" needs the points it marks: the first render
+        // "Distinguish points by" needs the points it marks: the first render
         // after a mark variable arrives turns the data points on, once,
         // stamped by markAutoShown so a user who later hides them is
         // respected. Removing the variable clears the stamp, so a new
@@ -4155,21 +4155,38 @@
                     _removeHiddenElement("dataPoints");
                 }
                 // Shapes have to be big enough and solid enough to tell
-                // apart: raise small or faint points, once.
-                var _mkAsSz = !(typeof data.pointSize === "number" && data.pointSize >= 6);
+                // apart: raise small or faint points, once - but only
+                // when this fold is what switched the points on. Points
+                // the user already had showing keep their size.
+                var _mkAsSz = _mkAsPts && !(typeof data.pointSize === "number" && data.pointSize >= 6);
                 if (_mkAsSz) data.pointSize = 6;
-                var _mkAsOp = !(typeof data.pointOpacity === "number" && data.pointOpacity >= 0.9);
+                var _mkAsOp = _mkAsPts && !(typeof data.pointOpacity === "number" && data.pointOpacity >= 0.9);
                 if (_mkAsOp) data.pointOpacity = 0.9;
+                // The commits go out AFTER this render, never from its
+                // entry: _setOption pre-stamps __gb2_lastRenderedHash
+                // with the post-fold payload so the echo can hash-skip,
+                // and stamped here it made THIS render's own hash check
+                // see its payload as already drawn - so a chart that
+                // already sat in the host (the app reuses its host;
+                // jamovi swaps the DOM per delivery) skipped the render
+                // that should have shown the marks, and the echo then
+                // matched the same stamp (Torry, Sep 24 2026). Deferred,
+                // the stamp lands after the draw with the same bytes.
                 if (_mkAsCan) {
-                    if (_mkAsPts) _setOption("showDataPoints", true);
-                    if (_mkAsHid) _setOption("hiddenElements", data.hiddenElements);
-                    if (_mkAsSz) _setOption("pointSize", 6);
-                    if (_mkAsOp) _setOption("pointOpacity", 0.9);
-                    _setOption("markAutoShown", true);
+                    var _mkAsHidArr = _mkAsHid ? data.hiddenElements : null;
+                    setTimeout(function () {
+                        try {
+                            if (_mkAsPts) _setOption("showDataPoints", true);
+                            if (_mkAsHidArr) _setOption("hiddenElements", _mkAsHidArr);
+                            if (_mkAsSz) _setOption("pointSize", 6);
+                            if (_mkAsOp) _setOption("pointOpacity", 0.9);
+                            _setOption("markAutoShown", true);
+                        } catch (_eMkC) {}
+                    }, 0);
                 }
             } else if (!_mkAsOn && data.markAutoShown === true) {
                 data.markAutoShown = false;
-                if (_mkAsCan) _setOption("markAutoShown", false);
+                if (_mkAsCan) setTimeout(function () { try { _setOption("markAutoShown", false); } catch (_eMkR) {} }, 0);
             }
         } catch (_eMkAs) {}
         var _STYLE_KEYED_STORES = {
@@ -5795,14 +5812,27 @@
                 document.removeEventListener("mousedown", _outsideHandler, true);
                 document.removeEventListener("keydown", _escHandler, true);
             }
+            // Escape / outside click: the open menu counted as a live
+            // selection for the point's dashed ring, so once it is gone
+            // with no Data points panel open the ring goes too - it used
+            // to linger until the next redraw (Torry, Sep 24 2026).
+            function _dismissMenu() {
+                _closeMenu();
+                try {
+                    var _live = (inspector.selection.length === 1 && inspector.selection[0] === "dataPoints");
+                    var _had = !!window.__gb2_selectedPointKey;
+                    if (!_live) window.__gb2_selectedPointKey = null;
+                    if (_had) redraw();
+                } catch (_eDm) {}
+            }
             function _outsideHandler(ev) {
                 if (menu.contains(ev.target)) return;
-                _closeMenu();
+                _dismissMenu();
             }
             function _escHandler(ev) {
                 if (ev.key === "Escape") {
                     ev.preventDefault();
-                    _closeMenu();
+                    _dismissMenu();
                 }
             }
             btn.addEventListener("click", function (e) {
@@ -7111,6 +7141,10 @@
             if (id === "groupTitle") {
                 return { fontSize: 13, color: "#000", bold: true, italic: false, rotation: 0 };
             }
+            // The point marks key's title: the legend title's look.
+            if (id === "markTitle") {
+                return { fontSize: 13, color: "#000", bold: true, italic: false, rotation: 0 };
+            }
             // Tick-label defaults: x-axis is bumped to 14 pt
             // (categorical labels are the chart's "anchors" and
             // benefit from being slightly larger than the y-axis
@@ -7312,6 +7346,10 @@
             // typed on one propagates to every value label (the axis-tick
             // idiom). The per-cell id is used only for the drag offset + halo.
             if (typeof id === "string" && id.indexOf("barValueLabel:") === 0) return "barValueLabel";
+            // The point marks key's labels (markItem:<level>) share one
+            // style (the legend-item idiom); the per-level id keeps the
+            // rename box, drag offset and halo per label.
+            if (typeof id === "string" && id.indexOf("markItem:") === 0) return "markItem";
             return id;
         }
 
@@ -8507,6 +8545,9 @@
             if (id === "distRug") return "Rug marks";
             if (id === "distNormal") return "Normal curve";
             if (id === "corrLegend") return "Color scale";
+            if (id === "markLegend") return "Points key";
+            if (id === "markLegendTitle") return "Points key title";
+            if (id.indexOf("markItemLabel:") === 0) return "Points key label: " + (id.substring("markItemLabel:".length) || "Not recorded");
             if (id === "qqBand") return "Confidence band";
             if (id === "freqChisq") return "Chi-square test";
             // Per-label hides set via Backspace on a tick / category /
@@ -9134,7 +9175,7 @@
                 // The transparent legend drag target is sized on a later
                 // animation frame. Its four-pixel padding must not grow the
                 // figure between two otherwise identical renders.
-                legendHit = el.querySelector && el.querySelector('[data-role="legend-bg"]');
+                legendHit = el.querySelector && el.querySelector('[data-role="legend-bg"], [data-role="mark-legend-bg"]');
                 if (legendHit) {
                     legendHitStyle = legendHit.getAttribute("style");
                     legendHit.style.setProperty("display", "none", "important");
@@ -9435,9 +9476,9 @@
         // Point marks key: it shares the right gutter (under the group
         // legend, or alone at the top when the chart is ungrouped).
         if (_gb2MarksShown() && !_isElementHidden("markLegend")) {
-            var _mkTitleSt = getEffectiveTextStyle("groupTitle");
+            var _mkTitleSt = getEffectiveTextStyle("markTitle");
             var _mkItemSt = getEffectiveTextStyle("markItem");
-            var _mkWidest = measureText(String(data.markLabel || ""),
+            var _mkWidest = _isElementHidden("markLegendTitle") ? 0 : measureText(_gb2MarkTitleText(),
                 _mkTitleSt.fontSize, _mkTitleSt.bold ? "600" : "400");
             var _mkEnts = _gb2MarkLegendEntries();
             for (var _mkI = 0; _mkI < _mkEnts.length; _mkI++) {
@@ -11661,7 +11702,7 @@
                 '[data-role="anatomy-overlay"], [data-role="anatomy-capture"],' +
                 '[data-role="stats-link-halo"], [data-role="alignment-guides"],' +
                 '[data-role="refline-handle"], [data-role="ann-rot-line"],' +
-                '[data-role="ann-rot-handle"], [data-role="legend-bg"],' +
+                '[data-role="ann-rot-handle"], [data-role="legend-bg"], [data-role="mark-legend-bg"],' +
                 '[data-role="freq-pie-seam-glow"], [data-role="freq-donut-hole-glow"],' +
                 '[data-role="data-point-selected"], [data-role="freq-pie-rotate-handle"],' +
                 '[data-role="gap-seam-chrome"]'
@@ -14694,6 +14735,10 @@
                 delete td.xCategoryRelabels;
             } else if (id.indexOf("groupItem:") === 0) {
                 delete td.groupItemRelabels;
+            } else if (id === "markTitle") {
+                delete td.markTitle;
+            } else if (id.indexOf("markItem:") === 0) {
+                delete td.markRelabels;
             }
         }
         function _applyTypedTextToData(id, v) {
@@ -14737,6 +14782,14 @@
                 groupRelabels = buildRelabelLookup(gArr);
                 data.groupItemRelabels = gArr;
                 _setTextOverride("groupItemRelabels", gArr);
+            } else if (id === "markTitle") {
+                data.markTitle = v;
+                _setTextOverride("markTitle", v);
+            } else if (id.indexOf("markItem:") === 0) {
+                var mkKey = id.substring(9);
+                var mkArr = setRelabel(data.markRelabels || [], mkKey, v);
+                data.markRelabels = mkArr;
+                _setTextOverride("markRelabels", mkArr);
             } else if (id.indexOf("facetStrip:") === 0) {
                 // Per-facet rename. Writes directly to
                 // data.facetStripLabels using the same array shape
@@ -19499,6 +19552,9 @@
         annotationsBackGroup.setAttribute("data-role", "annotations-back");
         var annotationsGroup = svgEl("g");
         var legendGroup = svgEl("g");
+        // The point marks key ("Distinguish points by"): its own layer beside the
+        // legend, so the two keep separate drag targets and outlines.
+        var markKeyGroup = svgEl("g");
         // Selection indicator overlay (drawn last so dashed boxes are on top).
         var selectionGroup = svgEl("g");
         selectionGroup.setAttribute("pointer-events", "none");
@@ -19611,6 +19667,7 @@
         chartShiftGroup.appendChild(guidesGroup);
         chartShiftGroup.appendChild(annotationsGroup);
         chartShiftGroup.appendChild(legendGroup);
+        chartShiftGroup.appendChild(markKeyGroup);
         // inspectorIndicatorGroup uses chart-local coords (e.g.
         // chartLeft, chartTop) when it draws indicator boxes for
         // axes/bars/etc., so it has to live INSIDE chartShiftGroup
@@ -20849,7 +20906,7 @@
                         "point-scatter": "dpscatter",
                         "outline-color": "dpoutcolor", "outline-width": "dpoutwidth"
                     };
-                    var _dpScCtrl = _dpScMap[window.__gb2_dpActiveStrip || ""];
+                    var _dpScCtrl = _dpScMap[_gb2DpActiveStripId()];
                     if (!_dpScCtrl) {
                         _dpScCtrl = ((window.__gb2_dpActiveTab || "point") === "outline") ? "dpoutcolor" : "dpcolor";
                     }
@@ -21651,16 +21708,23 @@
                 //   - rx/ry sized to the outer dim so circular points
                 //     get a circular ring (looks much cleaner than a
                 //     square dashed box on a small dot).
-                // Marks tab: glow the points of the level being edited.
-                if (_dpcTab === "marks" && _gb2MarksActive()) {
-                    var _mkLvSel = (typeof window.__gb2_dpMarkLevel === "string") ? window.__gb2_dpMarkLevel : null;
-                    var _mkAllPts = svg.querySelectorAll('[data-role="data-point"][data-point-mark]');
-                    var _mkGlow = [];
-                    for (var _mgi = 0; _mgi < _mkAllPts.length; _mgi++) {
-                        if (_mkLvSel == null || _mkAllPts[_mgi].getAttribute("data-point-mark") === _mkLvSel)
-                            _mkGlow.push(_mkAllPts[_mgi]);
+                // Marked points: on the Points tab's Color and Shape strips
+                // the edit lands on a mark LEVEL (this level / all levels),
+                // so the glow follows that scope instead of the group one.
+                if (_gb2MarksActive() && (_dpcTab === "" || _dpcTab === "point")) {
+                    var _mkStrip = _gb2DpActiveStripId();
+                    if (_mkStrip === "point-color" || _mkStrip === "point-shape") {
+                        var _mkScAll = true;
+                        try { _mkScAll = _distScopeAllFor(_mkStrip === "point-color" ? "mkcolor" : "mkshape"); } catch (_eMs) {}
+                        var _mkLvSel = _mkScAll ? null : _gb2MarkTarget();
+                        var _mkAllPts = svg.querySelectorAll('[data-role="data-point"][data-point-mark]');
+                        var _mkGlow = [];
+                        for (var _mgi = 0; _mgi < _mkAllPts.length; _mgi++) {
+                            if (_mkLvSel == null || _mkAllPts[_mgi].getAttribute("data-point-mark") === _mkLvSel)
+                                _mkGlow.push(_mkAllPts[_mgi]);
+                        }
+                        if (_mkGlow.length && _gb2DrawCloudGlow(_mkGlow, data.graphType === "bar", true)) return;
                     }
-                    if (_mkGlow.length && _gb2DrawCloudGlow(_mkGlow, data.graphType === "bar", true)) return;
                 }
                 var pts = svg.querySelectorAll('[data-role="data-point"]');
                 // Scope-aware: "This group/bar" outlines only the
@@ -22992,6 +23056,8 @@
                         } catch (_e) { rowEl = null; }
                     }
                     if (rowEl) targetEls.push(rowEl);
+                    // A click on the point marks key haloes the key.
+                    else if (rowMark === "\u0000markKey" && markKeyGroup && markKeyGroup.firstChild) targetEls.push(markKeyGroup);
                     else if (legendGroup) targetEls.push(legendGroup);
                 }
                 try {
@@ -26352,7 +26418,7 @@
         }
 
         // ---- Point marks (Sep 2026) ---------------------------------
-        // "Mark points by" colors and shapes each data point by a second
+        // "Distinguish points by" colors and shapes each data point by a second
         // categorical variable while the summary and error bars keep
         // pooling every point. R (and the app) ship bar.marks parallel to
         // the ORIGINAL bar.values ("" = not recorded), data.markLevels
@@ -26476,10 +26542,64 @@
             data.pointMarkStyles = store;
             return store;
         }
+        // A level's label in the key: its relabel when one is stored
+        // (markRelabels, the legend-item idiom), else the level itself,
+        // and "Not recorded" for the points with no value.
+        function _gb2MarkDisplayLabel(level) {
+            var lv = (level == null) ? "" : String(level);
+            var arr = Array.isArray(data.markRelabels) ? data.markRelabels : [];
+            for (var i = 0; i < arr.length; i++) {
+                var e = arr[i];
+                if (e && typeof e.original === "string" && e.original === lv &&
+                    typeof e.relabel === "string" && e.relabel.length > 0) return e.relabel;
+            }
+            return lv === "" ? "Not recorded" : lv;
+        }
+        // The key's title: the override when set, else the variable's name.
+        function _gb2MarkTitleText() {
+            if (typeof data.markTitle === "string" && data.markTitle.trim().length > 0) return data.markTitle;
+            return String(data.markLabel || "");
+        }
+        // The level the Data points panel edits: named by the last marked
+        // point clicked; null when none, or no longer a level of the chart.
+        function _gb2MarkTarget() {
+            var lv = window.__gb2_dpMarkLevel;
+            if (typeof lv !== "string") return null;
+            var ents = _gb2MarkLegendEntries();
+            for (var i = 0; i < ents.length; i++) if (ents[i].level === lv) return lv;
+            return null;
+        }
         function _gb2MarkLegendEntries() {
-            var out = _gb2MarkLevels().map(function (lv) { return { level: lv, label: lv }; });
-            if (_gb2MarkHasMissing()) out.push({ level: "", label: "Not recorded" });
+            var out = _gb2MarkLevels().map(function (lv) { return { level: lv, label: _gb2MarkDisplayLabel(lv) }; });
+            if (_gb2MarkHasMissing()) out.push({ level: "", label: _gb2MarkDisplayLabel("") });
             return out;
+        }
+        // Key text commits. The key's gutter is laid out at render entry,
+        // so each schedules a local re-render after the redraw.
+        function _commitMarkRelabel(level, value) {
+            var lv = (level == null) ? "" : String(level);
+            var arr = setRelabel(data.markRelabels || [], lv, value);
+            data.markRelabels = arr;
+            redraw();
+            if (hasSetOption) { try { _setOption("markRelabels", arr); } catch (_e) {} }
+            try { _gb2RerenderSoon(); } catch (_e2) {}
+        }
+        function _markRelabelRevert(level) {
+            var lv = (level == null) ? "" : String(level);
+            var arr = (Array.isArray(data.markRelabels) ? data.markRelabels : []).filter(function (e) {
+                return !(e && String(e.original) === lv);
+            });
+            data.markRelabels = arr;
+            redraw();
+            if (hasSetOption) { try { _setOption("markRelabels", arr); } catch (_e) {} }
+            try { _gb2RerenderSoon(); } catch (_e2) {}
+        }
+        function _commitMarkTitle(value) {
+            var t = (value || "").trim();
+            data.markTitle = t;
+            try { redraw(); } catch (_e0) {}
+            if (hasSetOption) { try { _setOption("markTitle", t); } catch (_e) {} }
+            try { _gb2RerenderSoon(); } catch (_e2) {}
         }
 
         function colorFor(group) {
@@ -29906,6 +30026,24 @@
             // color overrides ride the color field).
             var _dpG = window.__gb2_dpClickedGroup || "";
             function _dpScoped(ctrl, storeField, value, chartFn) {
+                // Marked points ("Distinguish points by"): Color and Shape belong
+                // to the mark LEVELS (pointMarkStyles), this level or all
+                // of them; the chart-wide point color / shape and the
+                // per-group store are left alone.
+                if (_gb2MarksActive() && (ctrl === "dpcolor" || ctrl === "dpshape")) {
+                    var _mkCtrl = (ctrl === "dpcolor") ? "mkcolor" : "mkshape";
+                    var _mkAll = true;
+                    try { _mkAll = _distScopeAllFor(_mkCtrl); } catch (_eMs) {}
+                    var _mkLv = _gb2MarkTarget();
+                    if (!_mkAll && _mkLv != null) {
+                        _gb2MarkStyleSet(_mkLv, storeField, value);
+                    } else {
+                        var _mkEnts = _gb2MarkLegendEntries();
+                        for (var _mi = 0; _mi < _mkEnts.length; _mi++) _gb2MarkStyleSet(_mkEnts[_mi].level, storeField, value);
+                    }
+                    if (hasSetOption) { try { _setOption("pointMarkStyles", data.pointMarkStyles || []); } catch (_eMp) {} }
+                    return;
+                }
                 var _all = true;
                 try { _all = _distScopeAllFor(ctrl); } catch (_eS) {}
                 if (!_all && _dpG) {
@@ -29936,7 +30074,23 @@
         // override (groupDataPoints), so also committing the chart-wide option
         // would repaint EVERY group on the R round-trip (the reported bug).
         // Mirrors _dpScoped's own per-group vs chart-wide branch condition.
+        // The Data points strip the user is looking at: the active tab's
+        // own memory (every tab remembers its strip; a fresh tab shows its
+        // first). Never the single click-tracking global: a programmatic
+        // click on ANOTHER tab's button while the panel opens (the Outline
+        // tab landing on Width for an open shape) poisoned it, and the
+        // Points tab's scope toggle then targeted the outline-width scope
+        // (Sep 24 2026; visible once the marks made Color per level).
+        function _gb2DpActiveStripId() {
+            var t = window.__gb2_dpActiveTab || "point";
+            if (t === "outline") return window.__gb2_dpActiveStripOutline || "outline-color";
+            if (t === "connectors") return window.__gb2_dpActiveStripConnectors || "conn-color";
+            return window.__gb2_dpActiveStripPoint || "point-color";
+        }
         function _dpChartWideOK(ctrl) {
+            // Marked points: Color and Shape never write the chart-wide
+            // point color / shape (they live in pointMarkStyles).
+            if (_gb2MarksActive() && (ctrl === "dpcolor" || ctrl === "dpshape")) return false;
             var all = true;
             try { all = _distScopeAllFor(ctrl); } catch (_e) {}
             return all || !window.__gb2_dpClickedGroup;
@@ -31546,6 +31700,10 @@
             while (axisGroup.firstChild) axisGroup.removeChild(axisGroup.firstChild);
             while (dataGroup.firstChild) dataGroup.removeChild(dataGroup.firstChild);
             while (legendGroup.firstChild) legendGroup.removeChild(legendGroup.firstChild);
+            while (markKeyGroup.firstChild) markKeyGroup.removeChild(markKeyGroup.firstChild);
+            markKeyGroup.removeAttribute("transform");
+            markKeyGroup.removeAttribute("data-role");
+            markKeyGroup.__gb2Follow = null;
             while (annotationsGroup.firstChild) annotationsGroup.removeChild(annotationsGroup.firstChild);
             while (annotationsBackGroup.firstChild) annotationsBackGroup.removeChild(annotationsBackGroup.firstChild);
             while (gridGroup.firstChild) gridGroup.removeChild(gridGroup.firstChild);
@@ -35378,7 +35536,7 @@
                 outlineW = _dataPointStore.resolve(_dpKey, "outlineWidth", outlineW);
                 outlineC = _dataPointStore.resolve(_dpKey, "outlineColor", outlineC);
                 // Point marks: each point's color and shape come from its
-                // level of the "Mark points by" variable. bar.marks runs
+                // level of the "Distinguish points by" variable. bar.marks runs
                 // parallel to the ORIGINAL values, which is what this loop
                 // walks (the hide filter never touches marks).
                 var _mkArr = (_gb2MarksActive() && Array.isArray(bar.marks) && bar.marks.length === n)
@@ -35748,15 +35906,11 @@
                             // Connectors routing), no matter which
                             // tab is currently active.
                             try {
-                                // A marked point's color and shape live on
-                                // the Marks tab: land there, on its level.
+                                // A marked point names the level the
+                                // panel's Color and Shape strips edit.
                                 var _clkMk = el.getAttribute("data-point-mark");
-                                if (_clkMk != null && _gb2MarksActive()) {
-                                    window.__gb2_dpActiveTab = "marks";
-                                    window.__gb2_dpMarkLevel = _clkMk;
-                                } else {
-                                    window.__gb2_dpActiveTab = "point";
-                                }
+                                if (_clkMk != null && _gb2MarksActive()) window.__gb2_dpMarkLevel = _clkMk;
+                                window.__gb2_dpActiveTab = "point";
                             } catch (_eTab) {}
                             var _dpWasSel = (inspector.selection.length === 1 && inspector.selection[0] === "dataPoints");
                             setInspectorSelection("dataPoints");
@@ -45750,10 +45904,13 @@
                         // drag and snap back down on release.
                         legendGroup.setAttribute("transform",
                             "translate(" + nx + "," + (ny + legChromeShift) + ")");
+                        // The point marks key under this legend rides along.
+                        try { if (markKeyGroup.__gb2Follow) markKeyGroup.__gb2Follow(nx, ny + legChromeShift); } catch (_eMkF) {}
                         // Auto-grow the canvas if the legend escapes
                         // the right/bottom edges.
                         if (typeof _ensureChartRoomFor === "function") {
                             _ensureChartRoomFor(legendGroup);
+                            if (markKeyGroup.__gb2Follow) _ensureChartRoomFor(markKeyGroup);
                         }
                     });
                     function endDrag(e) {
@@ -45769,6 +45926,9 @@
                         // advertises the whole legend as a target. Swatch
                         // clicks instead open the per-series style panel.
                         if (!moved && (!e || e.type === "pointerup")) {
+                            // A key click leaves its halo marker behind;
+                            // the legend body means the whole legend.
+                            try { if (window.__gb2_lastClickedLegendRow === "\u0000markKey") window.__gb2_lastClickedLegendRow = null; } catch (_eMk) {}
                             try { setInspectorSelection("legend"); } catch (_eLb) {}
                         }
                         // Hide outline if cursor has already left the legend.
@@ -46378,11 +46538,16 @@
             }
 
             // ---- Point marks key (Sep 2026) ------------------------
-            // Names what each point color and shape stands for. It sits
-            // under the group legend when one is drawn (inside the same
-            // layer, so it moves with that legend's drag), else at the top
-            // of the right gutter. A click opens the Data points panel on
-            // its Marks tab, where the colors and shapes are edited.
+            // Names what each point color and shape stands for. A chart
+            // part like the legend: its own layer beside legendGroup,
+            // placed under the group legend when one is drawn (carrying
+            // that legend's offset so it rides its drag) else at the top
+            // of the right gutter; draggable by its empty space with a
+            // persisted offset; its title and labels renamable through
+            // the text panel; sized by the Legend panel, whose eye hides
+            // it. A swatch or the body opens the Legend panel (the legend
+            // rule); the colors and shapes themselves are edited by
+            // clicking the marked points.
             if (_gb2MarksShown() && !_isElementHidden("markLegend")) {
                 (function () {
                     var mlSw = (typeof data.legendSwatchSize === "number" && data.legendSwatchSize > 0)
@@ -46392,9 +46557,11 @@
                     var mlGap = (typeof data.legendSwatchGap === "number" && data.legendSwatchGap >= 0)
                         ? data.legendSwatchGap : 6;
                     var mlX = chartRight + 16;
-                    var mg = svgEl("g", { "data-role": "mark-legend", style: "cursor:pointer;" });
+                    var mg = markKeyGroup;
+                    mg.setAttribute("data-role", "mark-legend");
                     var baseY = chartTop + 4;
                     var underGroups = false;
+                    var baseTx = 0, baseTy = 0;
                     if (hasGroups && !_isElementHidden("legend") && !_binNoPointsLegend) {
                         // Measure the drawn group legend without its
                         // background rect (sized later, in a frame).
@@ -46407,22 +46574,55 @@
                         if (gbb && (gbb.width > 0 || gbb.height > 0)) {
                             baseY = gbb.y + gbb.height + 22;
                             underGroups = true;
+                            // The legend's own offset (and chrome shift),
+                            // so the key sits under it wherever it was
+                            // dragged to.
+                            baseTx = (typeof data.legendOffsetX === "number") ? data.legendOffsetX : 0;
+                            baseTy = ((typeof data.legendOffsetY === "number") ? data.legendOffsetY : 0) + legChromeShift;
                         }
                     }
                     if (!underGroups) {
                         // Clear the toolbar band at the top of the chart
                         // (the group legend's minimum-baseline rule).
-                        var shift = Math.max(0, 44 - baseY);
-                        if (shift > 0) mg.setAttribute("transform", "translate(0," + shift + ")");
+                        baseTy = Math.max(0, 44 - baseY);
                     }
-                    var titleTxt = String(data.markLabel || "");
+                    var offX = (typeof data.markLegendOffsetX === "number" && isFinite(data.markLegendOffsetX)) ? data.markLegendOffsetX : 0;
+                    var offY = (typeof data.markLegendOffsetY === "number" && isFinite(data.markLegendOffsetY)) ? data.markLegendOffsetY : 0;
+                    function applyKeyTransform() {
+                        var tx = baseTx + offX, ty = baseTy + offY;
+                        if (tx !== 0 || ty !== 0) mg.setAttribute("transform", "translate(" + tx + "," + ty + ")");
+                        else mg.removeAttribute("transform");
+                    }
+                    applyKeyTransform();
+                    if (underGroups) {
+                        // Called by the group legend's live drag.
+                        mg.__gb2Follow = function (lx, ly) { baseTx = lx; baseTy = ly; applyKeyTransform(); };
+                    }
+                    // Drag target + hover outline, behind the content
+                    // (the legend-bg idiom; sized in a frame).
+                    var mkBg = svgEl("rect", { fill: "transparent", style: "cursor:move;", "data-role": "mark-legend-bg" });
+                    mg.appendChild(mkBg);
+                    var titleTxt = _gb2MarkTitleText();
                     var rowsTop = baseY - 8;
-                    if (titleTxt) {
+                    if (titleTxt && !_isElementHidden("markLegendTitle")) {
                         var tEl = svgEl("text", { x: mlX, y: baseY, "data-role": "mark-legend-title" });
                         setSvgText(tEl, titleTxt);
-                        applyTextStyleToElement(tEl, "groupTitle");
+                        applyTextStyleToElement(tEl, "markTitle");
+                        makeEditableText(
+                            tEl, getEffectiveTextStyle("markTitle").color,
+                            function () { return { left: mlX, top: baseY - 12, width: 110 }; },
+                            function (v) { _commitMarkTitle(v); },
+                            { dragId: "markTitle" }
+                        );
                         mg.appendChild(tEl);
                         rowsTop = baseY + 14;
+                    }
+                    function openKeyPanel(ev) {
+                        if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+                        try { window.__gb2_legendSelectedRows = null; } catch (_e0) {}
+                        try { window.__gb2_lastClickedLegendRow = "\u0000markKey"; } catch (_e1) {}
+                        setInspectorSelection("legend");
+                        try { redrawInspectorIndicator(); } catch (_e2) {}
                     }
                     var itemSt = getEffectiveTextStyle("markItem");
                     var ents = _gb2MarkLegendEntries();
@@ -46434,34 +46634,103 @@
                         var st = _gb2MarkStyleFor(ents[i].level);
                         var rowY = rowsTop + i * mlRow;
                         var row = svgEl("g", { "data-role": "mark-legend-row", "data-mark-level": ents[i].level });
-                        row.appendChild(svgEl("rect", {
+                        var hitR = svgEl("rect", {
                             x: mlX - 2, y: rowY - 2, width: mlSw + mlGap + 4, height: mlSw + 4,
-                            fill: "transparent", "pointer-events": "all"
-                        }));
+                            fill: "transparent", "pointer-events": "all", style: "cursor:pointer;"
+                        });
+                        row.appendChild(hitR);
                         var mk = pointShapeEl(st.shape, mlX + mlSw / 2, rowY + mlSw / 2, mkSz, st.color, oC, oW, 1);
                         mk.setAttribute("data-role", "mark-legend-swatch");
+                        try { mk.style.cursor = "pointer"; } catch (_eCu) {}
                         row.appendChild(mk);
-                        var lab = svgEl("text", {
-                            x: mlX + mlSw + mlGap,
-                            y: rowY + mlSw / 2 + itemSt.fontSize * 0.32,
-                            "data-role": "mark-legend-label"
-                        });
-                        setSvgText(lab, ents[i].label);
-                        applyTextStyleToElement(lab, "markItem");
-                        row.appendChild(lab);
+                        hitR.addEventListener("click", openKeyPanel);
+                        mk.addEventListener("click", openKeyPanel);
+                        if (!_isElementHidden("markItemLabel:" + ents[i].level)) {
+                            var lab = svgEl("text", {
+                                x: mlX + mlSw + mlGap,
+                                y: rowY + mlSw / 2 + itemSt.fontSize * 0.32,
+                                "data-role": "mark-legend-label"
+                            });
+                            setSvgText(lab, ents[i].label);
+                            applyTextStyleToElement(lab, "markItem");
+                            (function (el, lv, tx, ty) {
+                                makeEditableText(
+                                    el, itemSt.color,
+                                    function () { return { left: tx, top: ty, width: 110 }; },
+                                    function (v) { _commitMarkRelabel(lv, v); },
+                                    { dragId: "markItem:" + lv }
+                                );
+                            })(lab, ents[i].level, mlX + mlSw + mlGap, rowY);
+                            row.appendChild(lab);
+                        }
                         mg.appendChild(row);
                     }
-                    mg.addEventListener("click", function (ev) {
-                        ev.preventDefault(); ev.stopPropagation();
-                        var r = (ev.target && ev.target.closest)
-                            ? ev.target.closest('[data-role="mark-legend-row"]') : null;
-                        if (r) window.__gb2_dpMarkLevel = r.getAttribute("data-mark-level");
-                        window.__gb2_dpActiveTab = "marks";
-                        var was = (inspector.selection.length === 1 && inspector.selection[0] === "dataPoints");
-                        setInspectorSelection("dataPoints");
-                        if (was) { try { renderInspectorPanel(); } catch (_eRp) {} }
-                    });
-                    legendGroup.appendChild(mg);
+                    function sizeKeyBg() {
+                        var bb;
+                        try { bb = mg.getBBox(); } catch (e) { return; }
+                        if (!bb || bb.width === 0 || bb.height === 0) return;
+                        mkBg.setAttribute("x", bb.x - 4);
+                        mkBg.setAttribute("y", bb.y - 4);
+                        mkBg.setAttribute("width", bb.width + 8);
+                        mkBg.setAttribute("height", bb.height + 8);
+                    }
+                    if (typeof requestAnimationFrame === "function") requestAnimationFrame(sizeKeyBg);
+                    else setTimeout(sizeKeyBg, 0);
+                    function showKeyOutline(on) {
+                        if (on) {
+                            mkBg.setAttribute("stroke", "#4a90e2");
+                            mkBg.setAttribute("stroke-width", "1");
+                            mkBg.setAttribute("stroke-dasharray", "3,3");
+                            mkBg.setAttribute("stroke-opacity", "0.55");
+                        } else {
+                            mkBg.removeAttribute("stroke");
+                            mkBg.removeAttribute("stroke-width");
+                            mkBg.removeAttribute("stroke-dasharray");
+                            mkBg.removeAttribute("stroke-opacity");
+                        }
+                    }
+                    var mkDrag = { v: false };
+                    mg.addEventListener("mouseenter", function () { showKeyOutline(true); });
+                    mg.addEventListener("mouseleave", function () { if (!mkDrag.v) showKeyOutline(false); });
+                    // Whole-key drag on the empty space (children stop
+                    // their own clicks); a still click opens the panel.
+                    (function () {
+                        var sx = 0, sy = 0, ox0 = 0, oy0 = 0, moved = false, vs = 1;
+                        mkBg.addEventListener("pointerdown", function (e) {
+                            e.preventDefault(); e.stopPropagation();
+                            mkDrag.v = true; moved = false;
+                            vs = _gb2ViewScale(svg || mkBg);
+                            sx = e.clientX; sy = e.clientY;
+                            ox0 = offX; oy0 = offY;
+                            try { mkBg.setPointerCapture(e.pointerId); } catch (err) {}
+                        });
+                        mkBg.addEventListener("pointermove", function (e) {
+                            if (!mkDrag.v) return;
+                            var dx = e.clientX - sx, dy = e.clientY - sy;
+                            if (!moved && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) moved = true;
+                            if (!moved) return;
+                            offX = snapDrag(ox0 + dx / vs);
+                            offY = snapDrag(oy0 + dy / vs);
+                            data.markLegendOffsetX = offX;
+                            data.markLegendOffsetY = offY;
+                            applyKeyTransform();
+                            if (typeof _ensureChartRoomFor === "function") _ensureChartRoomFor(mg);
+                        });
+                        function endDrag(e) {
+                            if (!mkDrag.v) return;
+                            mkDrag.v = false;
+                            if (moved && hasSetOption) {
+                                try { _setOption("markLegendOffsetX", data.markLegendOffsetX); } catch (err) {}
+                                try { _setOption("markLegendOffsetY", data.markLegendOffsetY); } catch (err) {}
+                            }
+                            if (!moved && (!e || e.type === "pointerup")) openKeyPanel(null);
+                            showKeyOutline(false);
+                        }
+                        mkBg.addEventListener("pointerup", endDrag);
+                        mkBg.addEventListener("pointercancel", endDrag);
+                        mkBg.addEventListener("lostpointercapture", endDrag);
+                        mkBg.addEventListener("click", function (e) { e.preventDefault(); e.stopPropagation(); });
+                    })();
                 })();
             }
 
@@ -49951,6 +50220,51 @@
             });
             titleNode.appendChild(hideBtn);
             _refreshUi();
+            // Extra eyes (the Legend panel's point marks key): the same
+            // look and behavior, each on its own element id. `rerender`
+            // schedules a local re-render for parts laid out at render
+            // entry (the key's gutter).
+            if (Array.isArray(opts.extra)) {
+                for (var _xi = 0; _xi < opts.extra.length; _xi++) {
+                    (function (o) {
+                        if (!o || !o.elementId) return;
+                        var b = document.createElement("button");
+                        b.type = "button";
+                        b.style.cssText = hideBtn.style.cssText;
+                        b.addEventListener("mouseenter", function () { b.style.background = "rgba(0,0,0,0.05)"; });
+                        b.addEventListener("mouseleave", function () { b.style.background = "transparent"; });
+                        function _refreshX() {
+                            var h = _isElementHidden(o.elementId);
+                            b.innerHTML = _eyeIconSvg(h);
+                            var tip = (h ? "Show " : "Hide ") + o.label;
+                            b.title = tip;
+                            b.setAttribute("aria-label", tip);
+                        }
+                        b.addEventListener("click", function (e) {
+                            e.preventDefault(); e.stopPropagation();
+                            try { _commitColorPickerInPlace(); } catch (_e) {}
+                            if (_isElementHidden(o.elementId)) _removeHiddenElement(o.elementId);
+                            else _addHiddenElement(o.elementId);
+                            if (hasSetOption) {
+                                try { _setOption("hiddenElements", data.hiddenElements); } catch (_e) {}
+                            }
+                            if (typeof window.__gb2_updateVisBtnIcon === "function") {
+                                window.__gb2_updateVisBtnIcon();
+                            }
+                            redraw();
+                            _refreshX();
+                            if (o.rerender) { try { _gb2RerenderSoon(); } catch (_e) {} }
+                        });
+                        titleNode.appendChild(b);
+                        _refreshX();
+                    })(opts.extra[_xi]);
+                }
+            }
+            if (opts.rerender && !Array.isArray(opts.extra)) {
+                hideBtn.addEventListener("click", function () {
+                    try { _gb2RerenderSoon(); } catch (_e) {}
+                });
+            }
         }
 
         // Mounts a "reset to defaults" affordance into the panel's
@@ -61179,11 +61493,7 @@
                        // previously-empty pattern-strip case gains a target,
                        // making the round-trip dock synchronous + haloed.
                        _firstVis('[data-field="dh-patc"]') ||
-                       _firstVis('[data-field="patcolor-chip"]') ||
-                       // The Data points Marks tab's per-level chips (Sep
-                       // 2026): ranked last, like the pattern chips.
-                       _firstVis('[data-field="mark-color"][data-mark-cur="1"]') ||
-                       _firstVis('[data-field="mark-color"]');
+                       _firstVis('[data-field="patcolor-chip"]');
             }
             if (_panes.length > 0) {
                 for (var _pi = 0; _pi < _panes.length; _pi++) {
@@ -61415,6 +61725,9 @@
             if (id === "likertItemLabel") return "Item labels";
             if (id.indexOf("xCat:") === 0) return "X label: " + id.substring(5);
             if (id.indexOf("groupItem:") === 0) return "Legend label: " + id.substring(10);
+            if (id === "markTitle") return "Points key title";
+            if (id === "markItem") return "Points key labels";
+            if (id.indexOf("markItem:") === 0) return "Points key label: " + (id.substring(9) || "Not recorded");
             if (id.indexOf("yTick:") === 0) return "Y tick: " + id.substring(6);
             if (id.indexOf("xTick:") === 0) return "X tick: " + id.substring(6);
             if (id.indexOf("facetStrip:") === 0) return "Facet: " + id.substring(11);
@@ -71479,14 +71792,20 @@
                 var _mklOn = (_mkCurShape === "line");
                 _mkShapeBtnsHtml += '<button type="button" data-preset-marker-shape="line" ' +
                     'title="Line: a short line across the slot at the summary value" ' +
-                    'style="grid-column:1 / -1;display:flex;flex-direction:row;align-items:center;justify-content:center;gap:8px;' +
-                    'height:30px;padding:3px 6px;width:100%;box-sizing:border-box;' +
+                    'style="grid-column:1 / -1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;' +
+                    'height:44px;padding:3px 6px;width:100%;box-sizing:border-box;' +
                     'background:' + (_mklOn ? "#e8f0fb" : "white") + ';color:' + (_mklOn ? "#1a5fb4" : "#333") + ';' +
                     'border:1px solid ' + (_mklOn ? "#1a5fb4" : "#ccc") + ';border-radius:4px;cursor:pointer;font:11px sans-serif;" aria-label="Line">' +
                     _shapeIconSvg("line") + '<span>Line</span></button>';
             }
+            // Picking Line on a grouped chart also spreads the groups (the
+            // marker-shape change handler); said here, where it happens.
+            var _mkLineNote = hasGroups
+                ? '<span data-field="marker-line-note" style="flex-basis:100%;font-size:11px;color:#666;display:' +
+                  (_mkCurShape === "line" ? "block" : "none") + ';">Line spreads the groups to their own slots so each line has room (Gap tab, Marker spread).</span>'
+                : '';
             var _mkShapeCtrl =
-                '<div style="' + _GB2_COMPACT_SHAPE_GRID_CSS + '">' + _mkShapeBtnsHtml + '</div>' +
+                '<div style="' + _GB2_COMPACT_SHAPE_GRID_CSS + '">' + _mkShapeBtnsHtml + '</div>' + _mkLineNote +
                 '<select data-field="marker-shape" title="' + (_lsIsDot ? "Dot shape" : "Marker shape") + '" style="display:none;">' +
                   '<option value="circle">Circle</option>' +
                   '<option value="square">Square</option>' +
@@ -71508,7 +71827,7 @@
             var _mkLenCtrl =
                 '<input type="range" data-field="marker-length" data-unit="%" min="10" max="100" step="5" value="' + _mkLenPct + '" style="' + _slider + '" title="Line length" aria-label="Line length" />' +
                 '<span data-field="marker-length-val" style="' + _val + '">' + _mkLenPct + '</span>' +
-                '<span style="flex-basis:100%;font-size:11px;color:#666;">Share of the width a bar would take here. Size sets the thickness.</span>';
+                '<span style="flex-basis:100%;font-size:11px;color:#666;">Share of the slot a bar would take. Size sets the thickness. On a grouped chart the room comes from the marker spread (Gap tab).</span>';
             // Visible swatch for the Line tab's "Color" sub-strip. Sets
             // the line / series color (the same color the markers inherit
             // unless given their own fill). In category (ungrouped) mode
@@ -72729,6 +73048,8 @@
                 if (!wrap) return;
                 var isLn = (shape === "line");
                 wrap.style.display = isLn ? "contents" : "none";
+                var note = body.querySelector('[data-field="marker-line-note"]');
+                if (note) note.style.display = isLn ? "block" : "none";
                 if (!isLn) {
                     var strip = body.querySelector('[data-ls-strip="marker-length"]');
                     if (strip && strip.style.display !== "none") {
@@ -73372,6 +73693,13 @@
                 || _isElementHidden("chartTitle")) {
                 _otherItems.push({ kind: "el", id: "chartTitle", label: "Chart title" });
             }
+            // The point marks key: listed while marks are drawn, or while
+            // the key is hidden (the row is the restore path).
+            try {
+                if (_gb2MarksActive() && (_gb2MarksShown() || _isElementHidden("markLegend"))) {
+                    _otherItems.push({ kind: "el", id: "markLegend", label: "Points key" });
+                }
+            } catch (_eMkV) {}
             tabs.push({ id: "other", label: "Other", items: _otherItems });
             if (allAnnItems.length > 0) {
                 tabs.push({ id: "annotations", label: "Annotations", items: allAnnItems });
@@ -82567,6 +82895,7 @@
                 '">' + _tabIconWrap(oo.id, oo.label) + '<span>' + oo.label + '</span></button>';
         }
         var _DIST_SCOPE_DEFAULTS = {
+            mkcolor: false, mkshape: false,
             dpcolor: true, dpshape: true, dpsize: true, dpopacity: true,
             dpscatter: true, dpoutcolor: true, dpoutwidth: true,
             qqshape: true, qqsize: true, qqopacity: true, qqoutline: true,
@@ -92298,9 +92627,17 @@
                       '<span style="color:#666;font-size:11px;flex:1;">Custom layout active - bar reorders won\'t affect legend.</span>' +
                       '<button data-field="reset-layout" type="button" title="Restore automatic layout" style="font-family:var(--gb2-ui-font);font-size:11px;padding:3px 10px;border:1px solid #aaa;border-radius:3px;background:#f7f7f7;cursor:pointer;">Auto</button>' +
                     '</div>' : '');
-            _attachPanelHideToggle({
+            // The point marks key takes this panel's sizing and a click on
+            // it lands here (the legend rule), so its eye sits here too:
+            // beside the legend's, or alone when no group legend is drawn.
+            var _lgHasRows = !!(legendGroup && legendGroup.querySelector('[data-legend-row]')) || _isElementHidden("legend");
+            var _lgHasKey = false;
+            try { _lgHasKey = _gb2MarksActive() && (_gb2MarksShown() || _isElementHidden("markLegend")); } catch (_eLk) {}
+            var _lgKeyEye = { elementId: "markLegend", label: "Points key", rerender: true };
+            _attachPanelHideToggle((_lgHasKey && !_lgHasRows) ? _lgKeyEye : {
                 elementId: "legend",
-                label: "Legend"
+                label: "Legend",
+                extra: (_lgHasKey && _lgHasRows) ? [_lgKeyEye] : null
             });
             var iReset = body.querySelector('[data-field="reset-layout"]');
             if (iReset) {
@@ -92503,10 +92840,28 @@
                 : ((typeof singleBarColor === "string" && singleBarColor.length > 0)
                     ? singleBarColor
                     : (PALETTE[0] || "#2d5c94"));
+            // Marked points ("Distinguish points by"): the Color and Shape strips
+            // edit the mark level the user clicked (or every level), so
+            // the chip, palette highlight and shape grid seed from that
+            // level's style, and "Follow graph colors" has nothing to
+            // follow.
+            var _dpMarksOn = _gb2MarksActive();
+            var _dpMkLv = _dpMarksOn ? _gb2MarkTarget() : null;
+            function _dpMkLiveColor() {
+                var lv = _gb2MarkTarget();
+                if (lv == null) { var e0 = _gb2MarkLegendEntries(); lv = e0.length ? e0[0].level : ""; }
+                return _gb2MarkStyleFor(lv).color;
+            }
+            var _dpMkSeed = null;
+            if (_dpMarksOn) {
+                var _dpMkEnts0 = _gb2MarkLegendEntries();
+                _dpMkSeed = _gb2MarkStyleFor(_dpMkLv != null ? _dpMkLv : (_dpMkEnts0.length ? _dpMkEnts0[0].level : ""));
+                _dpResolvedColor = _dpMkSeed.color;
+            }
             var _dpInitColor = _dpResolvedColor;
             var _dpInitOutline = (typeof data.pointOutlineColor === "string" && data.pointOutlineColor.length > 0)
                 ? data.pointOutlineColor : "#000000";
-            var _dpMatch = data.pointColorMatch !== false;
+            var _dpMatch = _dpMarksOn ? false : (data.pointColorMatch !== false);
             // ============================================
             // BUTTON + STRIP LAYOUT (Point + Outline tabs)
             // ============================================
@@ -92568,7 +92923,7 @@
             // — the medium-blue (#4a90e2) we used before had
             // marginal contrast with white text.
             var _dpColorCtrl =
-                '<button type="button" data-field="color-auto" ' +
+                (_dpMarksOn ? '' : '<button type="button" data-field="color-auto" ' +
                     'style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;font-size:11px;font-family:var(--gb2-ui-font);' +
                     'background:' + (_dpMatch ? "#1a5fb4" : "white") + ';' +
                     'color:' + (_dpMatch ? "#ffffff" : "#333") + ';' +
@@ -92577,7 +92932,7 @@
                     'title="When on, each point uses its bar\'s color. Turn off to pick a single custom color for all points.">' +
                     '<span data-role="match-indicator" style="font-size:12px;line-height:1;width:12px;display:inline-flex;justify-content:center;">' + (_dpMatch ? '✓' : '○') + '</span>' +
                     '<span>Follow graph colors</span>' +
-                '</button>' +
+                '</button>') +
                 '<div data-field="custom-color-row" style="' +
                     'flex-basis:100%;' +
                     'display:flex;' +
@@ -92585,6 +92940,9 @@
                   '<button type="button" data-field="color-btn" style="' + _dpSwatchStyle + 'background:' + _dpInitColor + ';' + (_dpMatch ? "opacity:0.5;" : "") + '" aria-label="Color" title="Custom point color"></button>' +
                   _renderPaletteRowHtml(_dpMatch ? "" : _dpInitColor, "color-btn", "dp", 18, true) +
                 '</div>' +
+                (_dpMarksOn ? '<span data-field="dp-marks-hint" style="flex-basis:100%;font-size:11px;color:#666;">Color and shape distinguish <b>' +
+                    _nmEsc(String(data.markLabel || "")) + '</b>. Click a point to pick its level. ' +
+                    '<a href="#" data-field="mark-reset" style="color:#1a5fb4;text-decoration:none;white-space:nowrap;">Reset colors and shapes</a></span>' : '') +
                 '<input type="checkbox" data-field="match" style="display:none;" />';
             // Shape strip: 8 preset buttons in a 4-column grid (two
             // rows: filled / open). Same visual idiom as the Bar
@@ -92680,7 +93038,7 @@
                           '<span>' + sh.label + '</span>' +
                        '</button>';
             }
-            var _dpCurShape = data.pointShape || "circle";
+            var _dpCurShape = _dpMkSeed ? _dpMkSeed.shape : (data.pointShape || "circle");
             var _dpShapePresets = "";
             for (var _dsi = 0; _dsi < _dpShapePresetList.length; _dsi++) {
                 _dpShapePresets += _dpShapePresetBtn(
@@ -92857,164 +93215,18 @@
                   '<option value="dotted">Dotted</option>' +
                 '</select>';
             // ============== Marks tab (Sep 2026) ===============
-            // Shown while a "Mark points by" variable is assigned: one row
-            // per level with its color and shape. They are chart-wide per
-            // level (the pointMarkStyles store), so this tab has no
-            // This/All scope.
-            var _dpMarksOn = _gb2MarksActive();
-            var _MK_SHAPE_NAMES = { circle: "Circle", square: "Square", triangle: "Triangle", diamond: "Diamond" };
-            function _dpMarksPaneHtml() {
-                var ents = _gb2MarkLegendEntries();
-                var curLv = (typeof window.__gb2_dpMarkLevel === "string") ? window.__gb2_dpMarkLevel : null;
-                var hasCur = false;
-                for (var q = 0; q < ents.length; q++) if (ents[q].level === curLv) hasCur = true;
-                if (!hasCur) curLv = ents.length ? ents[0].level : null;
-                var lbl = String(data.markLabel || "the mark variable");
-                var sumWord = (data.summaryFunc === "median") ? "median" : "mean";
-                var shapes = _gb2MarkShapeList();
-                var h = '<div data-dp-marks style="display:flex;flex-direction:column;gap:4px;">' +
-                    '<div style="font-size:11px;color:#555;line-height:1.45;max-width:460px;margin-bottom:2px;">Each point takes its color and shape from <b>' +
-                    _nmEsc(lbl) + '</b>. The ' + sumWord + ' and error bars still use every point.</div>';
-                for (var i = 0; i < ents.length; i++) {
-                    var e = ents[i];
-                    var st = _gb2MarkStyleFor(e.level);
-                    var on = (e.level === curLv);
-                    var colSafe = _gb2CssColSafe(st.color) || "#888888";
-                    h += '<div data-mark-row="' + i + '" style="display:flex;align-items:center;gap:8px;padding:4px 6px;border:1px solid ' +
-                        (on ? "#cfe0f5" : "transparent") + ';border-radius:4px;background:' + (on ? "#eef4fc" : "transparent") + ';">' +
-                        '<span style="font-size:12px;color:#222;min-width:70px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' +
-                        _nmEsc(e.label) + '">' + _nmEsc(e.label) + '</span>' +
-                        '<button type="button" data-field="mark-color" data-mark-i="' + i + '"' + (on ? ' data-mark-cur="1"' : '') +
-                        ' title="Color for ' + _nmEsc(e.label) + '" aria-label="Color for ' + _nmEsc(e.label) + '"' +
-                        ' style="width:24px;height:24px;padding:0;border:1px solid #888;border-radius:3px;cursor:pointer;background:' + colSafe + ';flex-shrink:0;"></button>' +
-                        '<span style="display:flex;gap:3px;flex-wrap:wrap;">';
-                    for (var s = 0; s < shapes.length; s++) {
-                        var sh = shapes[s];
-                        var shOn = (sh === st.shape);
-                        var shOpen = sh.indexOf("Open") > 0;
-                        var shName = _MK_SHAPE_NAMES[shOpen ? sh.replace("Open", "") : sh] + (shOpen ? " (open)" : "");
-                        h += '<button type="button" data-field="mark-shape" data-mark-i="' + i + '" data-val="' + sh + '"' +
-                            ' title="' + shName + '" aria-label="' + _nmEsc(e.label) + ': ' + shName + '" aria-pressed="' + (shOn ? "true" : "false") + '"' +
-                            ' style="width:28px;height:24px;padding:0;display:inline-flex;align-items:center;justify-content:center;border:1px solid ' +
-                            (shOn ? "#1a5fb4" : "#ccc") + ';border-radius:4px;background:' + (shOn ? "#e8f0fb" : "white") + ';color:' +
-                            (shOn ? "#1a5fb4" : "#555") + ';cursor:pointer;">' + _shapeIconSvg(sh) + '</button>';
-                    }
-                    h += '</span></div>';
-                }
-                h += '<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:6px;">' +
-                    '<label style="display:flex;align-items:center;gap:6px;font-size:11px;color:#555;cursor:pointer;">' +
-                      '<input type="checkbox" data-field="mark-legend-show" style="margin:0;"' + (_isElementHidden("markLegend") ? '' : ' checked') + ' /> Show the key beside the chart' +
-                    '</label>' +
-                    '<button type="button" data-field="mark-reset" style="padding:3px 10px;font-size:11px;border:1px solid #aaa;border-radius:4px;background:white;color:#333;cursor:pointer;">Reset colors and shapes</button>' +
-                  '</div>' +
-                '</div>';
-                return h;
-            }
-            function _dpWireMarks() {
-                var pane = body.querySelector('[data-dp-tab-pane="marks"]');
-                if (!pane) return;
-                var ents = _gb2MarkLegendEntries();
-                function lvOf(btn) {
-                    var i = parseInt(btn.getAttribute("data-mark-i"), 10);
-                    return (isFinite(i) && ents[i]) ? ents[i].level : null;
-                }
-                function markCur(i) {
-                    var rows = pane.querySelectorAll('[data-mark-row]');
-                    for (var r = 0; r < rows.length; r++) {
-                        var on = (rows[r].getAttribute("data-mark-row") === String(i));
-                        rows[r].style.background = on ? "#eef4fc" : "transparent";
-                        rows[r].style.borderColor = on ? "#cfe0f5" : "transparent";
-                        var cb = rows[r].querySelector('[data-field="mark-color"]');
-                        if (cb) { if (on) cb.setAttribute("data-mark-cur", "1"); else cb.removeAttribute("data-mark-cur"); }
-                    }
-                }
-                function commit() {
-                    if (hasSetOption) { try { _setOption("pointMarkStyles", data.pointMarkStyles || []); } catch (_eC) {} }
-                }
-                var cbs = pane.querySelectorAll('[data-field="mark-color"]');
-                for (var c = 0; c < cbs.length; c++) (function (btn) {
-                    btn.addEventListener("click", function (ev) {
-                        ev.preventDefault();
-                        var lv = lvOf(btn);
-                        if (lv == null) return;
-                        window.__gb2_dpMarkLevel = lv;
-                        markCur(btn.getAttribute("data-mark-i"));
-                        try { redrawInspectorIndicator(); } catch (_eRi) {}
-                        try { _highlightActiveColorSwatch(btn); } catch (_eHl) {}
-                        openColorPicker(_gb2MarkStyleFor(lv).color,
-                            function (nc) {  // onChange: live preview
-                                btn.style.background = nc;
-                                _gb2MarkStyleSet(lv, "color", nc);
-                                redraw();
-                            },
-                            function (nc) {  // onCommit
-                                _gb2MarkStyleSet(lv, "color", nc);
-                                commit();
-                            });
-                    });
-                })(cbs[c]);
-                var sbs = pane.querySelectorAll('[data-field="mark-shape"]');
-                for (var s = 0; s < sbs.length; s++) (function (btn) {
-                    btn.addEventListener("click", function (ev) {
-                        ev.preventDefault();
-                        var lv = lvOf(btn);
-                        if (lv == null) return;
-                        var i = btn.getAttribute("data-mark-i");
-                        window.__gb2_dpMarkLevel = lv;
-                        markCur(i);
-                        _gb2MarkStyleSet(lv, "shape", btn.getAttribute("data-val"));
-                        var sib = pane.querySelectorAll('[data-field="mark-shape"]');
-                        for (var k = 0; k < sib.length; k++) {
-                            if (sib[k].getAttribute("data-mark-i") !== i) continue;
-                            var on = (sib[k] === btn);
-                            sib[k].style.borderColor = on ? "#1a5fb4" : "#ccc";
-                            sib[k].style.background = on ? "#e8f0fb" : "white";
-                            sib[k].style.color = on ? "#1a5fb4" : "#555";
-                            sib[k].setAttribute("aria-pressed", on ? "true" : "false");
-                        }
-                        redraw();
-                        try { redrawInspectorIndicator(); } catch (_eRi2) {}
-                        commit();
-                    });
-                })(sbs[s]);
-                var show = pane.querySelector('[data-field="mark-legend-show"]');
-                if (show) show.addEventListener("change", function () {
-                    // The key's gutter width is laid out at render entry,
-                    // so this re-renders (the edit-time undo law: track
-                    // before the poke, take right after it).
-                    try { _undoTrackKey("hiddenElements"); } catch (_eU) {}
-                    data.hiddenElements = Array.isArray(data.hiddenElements) ? data.hiddenElements.slice() : [];
-                    if (show.checked) _removeHiddenElement("markLegend"); else _addHiddenElement("markLegend");
-                    if (hasSetOption) { try { _setOption("hiddenElements", data.hiddenElements); } catch (_eH) {} }
-                    try { _undoTake(); } catch (_eU1) {}
-                    try { _gb2RerenderSoon(); } catch (_eRr) {}
-                });
-                var rst = pane.querySelector('[data-field="mark-reset"]');
-                if (rst) rst.addEventListener("click", function (ev) {
-                    ev.preventDefault();
-                    data.pointMarkStyles = [];
-                    commit();
-                    redraw();
-                    try { renderInspectorPanel(); } catch (_eRp) {}
-                });
-            }
             // ============== Tab bar ===============
             var _dpTabs = [
                 { id: "point",   label: "Points"  },
                 { id: "outline", label: "Outline" }
             ];
-            if (_dpMarksOn) _dpTabs.push({ id: "marks", label: "Marks" });
             if (_dpShowConnTab) _dpTabs.push({ id: "connectors", label: "Connectors" });
-            if (window.__gb2_dpActiveTab === "marks" && !_dpMarksOn) {
-                try { window.__gb2_dpActiveTab = "point"; } catch (_eMt) {}
-            }
             var _dpActiveTab = window.__gb2_dpActiveTab || "point";
             // "connectors" is only a valid active tab when the
             // feature is currently visible; otherwise fall back to
             // point so we don't render an empty pane.
             if (_dpActiveTab === "connectors" && !_dpShowConnTab) _dpActiveTab = "point";
-            if (_dpActiveTab !== "point" && _dpActiveTab !== "outline" && _dpActiveTab !== "connectors" &&
-                !(_dpActiveTab === "marks" && _dpMarksOn)) _dpActiveTab = "point";
+            if (_dpActiveTab !== "point" && _dpActiveTab !== "outline" && _dpActiveTab !== "connectors") _dpActiveTab = "point";
             function _dpTabBtnHtml(t) {
                 var active = t.id === _dpActiveTab;
                 return _tabBtnHtmlGeneric({ id: t.id, label: t.label, active: active, dataAttr: "data-dp-tab" });
@@ -93026,6 +93238,13 @@
             var _dpScopeTarget = window.__gb2_dpClickedGroup || "";
             var _dpScopeThisLbl = (function(){ var _t = window.__gb2_dpClickedGroup || ""; var _n = String((hasGroups ? displayGroup(_t) : _t) || ""); return _n.length ? (_n.length > 18 ? _n.slice(0,17) + "\u2026" : _n) : (hasGroups ? "This group" : "This bar"); })();
             var _dpScopeAllLbl = hasGroups ? "All groups" : "All bars";
+            var _dpTgtName = _dpScopeTarget ? String((hasGroups ? displayGroup(_dpScopeTarget) : _dpScopeTarget) || "") : "";
+            // The mark level's name for the scope toggle (Color / Shape
+            // strips while marks are on).
+            function _dpMkLbl(lv) {
+                var n = String(_gb2MarkDisplayLabel(lv));
+                return n.length > 18 ? n.slice(0, 17) + "\u2026" : n;
+            }
             var _DP_SCOPE_MAP = {
                 "point-color": "dpcolor", "point-shape": "dpshape",
                 "point-size": "dpsize", "point-opacity": "dpopacity",
@@ -93033,15 +93252,17 @@
                 "outline-color": "dpoutcolor", "outline-width": "dpoutwidth"
             };
             function _dpActiveScopeCtrl() {
-                // Marks are chart-wide per level: nothing to scope there.
-                if ((window.__gb2_dpActiveTab || "point") === "marks") return null;
-                var s = window.__gb2_dpActiveStrip || "";
+                var s = _gb2DpActiveStripId();
                 if (!_DP_SCOPE_MAP[s]) {
                     // Default strip per tab when none clicked yet.
                     var t = window.__gb2_dpActiveTab || "point";
                     s = (t === "outline") ? "outline-color" : "point-color";
                 }
-                return _DP_SCOPE_MAP[s] || null;
+                var c = _DP_SCOPE_MAP[s] || null;
+                // Marked points: Color and Shape scope over the mark levels.
+                if (_dpMarksOn && c === "dpcolor") c = "mkcolor";
+                else if (_dpMarksOn && c === "dpshape") c = "mkshape";
+                return c;
             }
             var _dpTabBar = (function () {
                 var html = '<div style="display:flex;flex-wrap:wrap;gap:2px;padding:0 4px;margin-bottom:8px;border-bottom:1px solid #ccc;align-items:flex-end;">';
@@ -93049,8 +93270,8 @@
                     if (_dti > 0) html += _TAB_DIVIDER_HTML;
                     html += _dpTabBtnHtml(_dpTabs[_dti]);
                 }
-                if (_dpScopeTarget) {
-                    var _dpTgtLbl = hasGroups ? displayGroup(_dpScopeTarget) : _dpScopeTarget;
+                if (_dpScopeTarget || (_dpMarksOn && _dpMkLv != null)) {
+                    var _dpTgtLbl = _dpScopeTarget ? (hasGroups ? displayGroup(_dpScopeTarget) : _dpScopeTarget) : "";
                     html += '<div data-field="dp-scope-row" style="margin-left:auto;display:flex;align-items:center;gap:0;padding-bottom:4px;flex-shrink:0;">' +
                         '<button type="button" data-dp-scope="group" style="padding:2px 8px;font-size:10px;border:1px solid #aaa;background:white;color:#333;cursor:pointer;font-family:var(--gb2-ui-font);border-radius:3px 0 0 3px;white-space:nowrap;flex-shrink:0;" title="Apply changes only to ' + String(_dpTgtLbl).replace(/"/g, "&quot;") + '\'s points">' + _nmEsc(_dpScopeThisLbl) + '</button>' +
                         '<button type="button" data-dp-scope="all" style="padding:2px 8px;font-size:10px;border:1px solid #aaa;border-left:none;background:white;color:#333;cursor:pointer;font-family:var(--gb2-ui-font);border-radius:0 3px 3px 0;white-space:nowrap;flex-shrink:0;" title="Apply changes to every point">' + _dpScopeAllLbl + '</button>' +
@@ -93063,8 +93284,6 @@
                 _dpTabBar +
                 // ===== POINT TAB =====
                 '<div data-dp-tab-pane="point" style="' + _dpPaneShow("point") + '">' +
-                  (_dpMarksOn ? '<div data-field="dp-marks-note" style="font-size:11px;color:#555;margin:0 0 8px;">While the points are marked by <b>' +
-                      _nmEsc(String(data.markLabel || "a variable")) + '</b>, their colors and shapes come from the Marks tab.</div>' : '') +
                   '<div data-dp-btns style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
                      _dpBtn("point-color",   "color",   "Color") +
                      _dpBtn("point-shape",   "shape",   "Shape") +
@@ -93087,8 +93306,6 @@
                   _dpStrip("outline-color", _dpOutlineColorCtrl) +
                   _dpStrip("outline-width", _dpOutlineWidthCtrl) +
                 '</div>' +
-                // ===== MARKS TAB =====
-                (_dpMarksOn ? '<div data-dp-tab-pane="marks" style="' + _dpPaneShow("marks") + '">' + _dpMarksPaneHtml() + '</div>' : '') +
                 // ===== LAB TAB =====
                 '<div data-dp-tab-pane="lab" style="' + _dpPaneShow("lab") + '"><div data-dpl-lab-pane></div></div>' +
                 // ===== CONNECTORS TAB (RM only) =====
@@ -93106,7 +93323,19 @@
                   _dpStrip("conn-style",   _connStyleCtrl)   +
                 '</div>' : '');
 
-            if (_dpMarksOn) { try { _dpWireMarks(); } catch (_eWm) {} }
+            // "Reset colors and shapes" (marked points): drop every stored
+            // per-level style so the defaults return.
+            (function () {
+                var rst = body.querySelector('[data-field="mark-reset"]');
+                if (!rst) return;
+                rst.addEventListener("click", function (ev) {
+                    ev.preventDefault(); ev.stopPropagation();
+                    data.pointMarkStyles = [];
+                    if (hasSetOption) { try { _setOption("pointMarkStyles", []); } catch (_e) {} }
+                    redraw();
+                    try { renderInspectorPanel(); } catch (_eRp) {}
+                });
+            })();
             // --- Scope row wiring + active-strip tracking ---
             (function () {
                 var row = body.querySelector('[data-field="dp-scope-row"]');
@@ -93121,14 +93350,28 @@
                 function _dpRefreshScopeRow() {
                     if (!row) return;
                     var ctrl = _dpActiveScopeCtrl();
-                    if (!ctrl) { row.style.display = "none"; return; }
+                    // Color / Shape on a marked chart scope over the mark
+                    // levels (the clicked level / All levels); the other
+                    // strips keep the clicked group or bar.
+                    var isMk = (ctrl === "mkcolor" || ctrl === "mkshape");
+                    var mkLv = isMk ? _gb2MarkTarget() : null;
+                    if (!ctrl || (isMk ? mkLv == null : !_dpScopeTarget)) { row.style.display = "none"; return; }
                     row.style.display = "flex";
                     var all = true;
                     try { all = _distScopeAllFor(ctrl); } catch (_e) {}
                     var gb = row.querySelector('[data-dp-scope="group"]');
                     var ab = row.querySelector('[data-dp-scope="all"]');
-                    if (gb) gb.style.cssText = _dpScopeBtnCss(!all, "group");
-                    if (ab) ab.style.cssText = _dpScopeBtnCss(all, "all");
+                    if (gb) {
+                        gb.style.cssText = _dpScopeBtnCss(!all, "group");
+                        gb.textContent = isMk ? _dpMkLbl(mkLv) : _dpScopeThisLbl;
+                        gb.title = isMk ? ("Apply changes only to the " + _gb2MarkDisplayLabel(mkLv) + " points")
+                                        : ("Apply changes only to " + _dpTgtName + "'s points");
+                    }
+                    if (ab) {
+                        ab.style.cssText = _dpScopeBtnCss(all, "all");
+                        ab.textContent = isMk ? "All levels" : _dpScopeAllLbl;
+                        ab.title = isMk ? "Apply changes to every level's points" : "Apply changes to every point";
+                    }
                 }
                 if (row) {
                     var sbtns = row.querySelectorAll("[data-dp-scope]");
@@ -93189,7 +93432,7 @@
             var iOutWVal = body.querySelector('[data-field="outline-w-val"]');
 
             iScatter.value = data.pointScatter || "jitter";
-            iShape.value = data.pointShape || "circle";
+            iShape.value = _dpMkSeed ? _dpMkSeed.shape : (data.pointShape || "circle");
             var sz = (typeof data.pointSize === "number" && data.pointSize > 0) ? data.pointSize : 3;
             iSize.value = sz; iSizeVal.textContent = sz;
             var sp = (typeof data.pointSpreadWidth === "number" && data.pointSpreadWidth >= 0) ? data.pointSpreadWidth : 0.15;
@@ -93225,7 +93468,7 @@
             // Defer once so the auto-attached number input picks up
             // the same disabled state on initial render.
             setTimeout(_refreshSpreadEnabled, 0);
-            var match = data.pointColorMatch !== false;
+            var match = _dpMatch;
             iMatch.checked = match;
             // Sync chip background to the same resolved color the
             // strip-build logic used. Falls back to a representative
@@ -93245,6 +93488,8 @@
                         : ((typeof singleBarColor === "string" && singleBarColor.length > 0)
                             ? singleBarColor
                             : (PALETTE[0] || "#2d5c94"));
+                    // Marked points: the chip shows the edited level's color.
+                    try { if (_gb2MarksActive()) _pcLive = _dpMkLiveColor(); } catch (_eMc) {}
                     var _ocLive = (typeof data.pointOutlineColor === "string" && data.pointOutlineColor.length > 0)
                         ? data.pointOutlineColor : "#000000";
                     var _pcBtn = body.querySelector('[data-dp-btn="point-color"]');
@@ -93365,7 +93610,7 @@
                 // Open the picker regardless of match state. Picking a
                 // color is the user's intent to override, so flip match
                 // off the first time they commit a value.
-                openColorPicker(data.pointColor || "#222222",
+                openColorPicker(_dpMarksOn ? _dpMkLiveColor() : (data.pointColor || "#222222"),
                     function (newColor) {  // onChange
                         iColor.style.background = newColor;
                         if (iMatch.checked) {
@@ -93567,10 +93812,6 @@
                     sel = '[data-dp-strip="point-color"] button[data-field="color-btn"]';
                 } else if (stripId === "outline-color") {
                     sel = '[data-dp-strip="outline-color"] button[data-field="outline-btn"]';
-                } else if (stripId === "marks") {
-                    sel = body.querySelector('[data-dp-tab-pane="marks"] button[data-field="mark-color"][data-mark-cur="1"]')
-                        ? '[data-dp-tab-pane="marks"] button[data-field="mark-color"][data-mark-cur="1"]'
-                        : '[data-dp-tab-pane="marks"] button[data-field="mark-color"]';
                 } else if (stripId === "conn-color") {
                     sel = '[data-dp-strip="conn-color"] button[data-field="conn-color-btn"]';
                 } else {
@@ -93615,12 +93856,6 @@
                 return _b ? _b.parentElement : null;
             })());
             var _dpTabBtns = (_dpTabBarEl || inspectorPanel).querySelectorAll('[data-dp-tab]');
-            if (_dpActiveTab === "marks") {
-                try {
-                    var _dpSr0 = inspectorPanel.querySelector('[data-field="dp-scope-row"]');
-                    if (_dpSr0) _dpSr0.style.display = "none";
-                } catch (_eSr0) {}
-            }
             // Ring-family Lab for the data points (mirrors the scatter point
             // Lab; own data-dpl-* namespace + _gb2LabDp* config).
             function _dpRenderLabPane() {
@@ -93682,18 +93917,8 @@
                 if (id === "lab") { try { _dpRenderLabPane(); } catch (_e) {} return; }
                 // Dock the picker to whichever strip is active in
                 // the freshly-opened tab.
-                // Marks are chart-wide per level: no This/All scope there.
-                try {
-                    // The row may already live in the panel title.
-                    var _dpSr = inspectorPanel.querySelector('[data-field="dp-scope-row"]');
-                    if (_dpSr) _dpSr.style.display = (id === "marks") ? "none" : "flex";
-                    var _dpTn = inspectorPanel.querySelector('[data-role="inspector-title"]');
-                    if (_dpTn) _gb2CrumbScopeSync(_dpTn);
-                } catch (_eSr) {}
                 var activeStrip;
-                if (id === "marks") {
-                    activeStrip = "marks";
-                } else if (id === "outline") {
+                if (id === "outline") {
                     activeStrip = window.__gb2_dpActiveStripOutline || "outline-color";
                 } else if (id === "connectors") {
                     activeStrip = window.__gb2_dpActiveStripConnectors || "conn-color";
@@ -97343,7 +97568,8 @@
                 ["facetStrip:",   "facetStripLabels",    function (k) { commitFacetStripRelabel(k, k); }],
                 ["corrVar:",      "corrVarRelabels",     function (k) { _corrSetVarRelabel(k, ""); }],
                 ["likertItem:",   "likertItemRelabels",  function (k) { _lkSetItemRelabel(k, ""); }],
-                ["likertXTick:",  "likertXTickRelabels", function (k) { _lkSetXTickRelabel(k, k); }]
+                ["likertXTick:",  "likertXTickRelabels", function (k) { _lkSetXTickRelabel(k, k); }],
+                ["markItem:",     "markRelabels",        function (k) { _markRelabelRevert(k); }]
             ];
             for (var i = 0; i < specs.length; i++) {
                 if (id.indexOf(specs[i][0]) === 0) {
@@ -97381,6 +97607,7 @@
             if (id === "xTitle")     return (typeof data.xLabelDefault === "string") ? data.xLabelDefault : null;
             if (id === "yTitle")     return (typeof data.yLabelDefault === "string") ? data.yLabelDefault : null;
             if (id === "groupTitle") return (typeof data.groupLabelDefault === "string") ? data.groupLabelDefault : null;
+            if (id === "markTitle")  return (typeof data.markLabel === "string") ? data.markLabel : null;
             return null;
         }
         function _textCurrentTitle(id) {
@@ -97389,6 +97616,7 @@
             if (id === "xTitle")     return (typeof data.xLabel === "string") ? data.xLabel : "";
             if (id === "yTitle")     return (typeof data.yLabel === "string") ? data.yLabel : "";
             if (id === "groupTitle") return (typeof data.groupLabel === "string") ? data.groupLabel : "";
+            if (id === "markTitle")  return _gb2MarkTitleText();
             return "";
         }
         // True when `id`'s text has been renamed away from its original.
@@ -97401,7 +97629,7 @@
                 // non-empty note is an override.
                 return typeof data.chartNote === "string" && data.chartNote.trim().length > 0;
             }
-            if (id === "xTitle" || id === "yTitle" || id === "groupTitle") {
+            if (id === "xTitle" || id === "yTitle" || id === "groupTitle" || id === "markTitle") {
                 var def = _textTitleDefault(id);
                 if (def == null) return false;
                 return _textCurrentTitle(id) !== def;
@@ -97430,6 +97658,15 @@
                 if (hasSetOption) { try { _setOption("chartNote", ""); } catch (_e) {} }
                 try { _gb2RerenderSoon(); } catch (_e) {}
                 return "";
+            }
+            if (id === "markTitle") {
+                // An empty override means "the variable's name".
+                data.markTitle = "";
+                try { _clearTextOverrideForId("markTitle"); } catch (_e) {}
+                try { redraw(); } catch (_e) {}
+                if (hasSetOption) { try { _setOption("markTitle", ""); } catch (_e) {} }
+                try { _gb2RerenderSoon(); } catch (_e) {}
+                return _textTitleDefault("markTitle") || "";
             }
             if (id === "xTitle" || id === "yTitle" || id === "groupTitle") {
                 var def = _textTitleDefault(id);
@@ -97597,6 +97834,10 @@
                 if (tid === "xTitle") return { elementId: "xAxisTitle", label: "Title" };
                 if (tid === "yTitle") return { elementId: "yAxisTitle", label: "Title" };
                 if (tid === "groupTitle") return { elementId: "legendTitle", label: "Title" };
+                if (tid === "markTitle") return { elementId: "markLegendTitle", label: "Title" };
+                if (typeof tid === "string" && tid.indexOf("markItem:") === 0) {
+                    return { elementId: "markItemLabel:" + tid.substring(9), label: "Label" };
+                }
                 if (typeof tid === "string" && tid.indexOf("xCat:") === 0) {
                     return { elementId: "xCatLabel:" + tid.substring(5), label: "Label" };
                 }

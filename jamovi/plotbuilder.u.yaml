@@ -36,7 +36,7 @@ children:
             maxItemCount: 1
             isTarget: true
       - type: TargetLayoutBox
-        label: Mark points by (optional)
+        label: Distinguish points by (optional)
         children:
           - type: VariablesListBox
             name: markVar

@@ -57,7 +57,7 @@ options:
         - factor
 
     - name: markVar
-      title: Mark points by (optional)
+      title: Distinguish points by (optional)
       type: Variable
       default: null
       suggested:
