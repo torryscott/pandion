@@ -36,7 +36,7 @@ catch (e) {
     process.exit(2);
 }
 const requiredCases = [
-    'cg_basic', 'cg_median', 'cg_ci95', 'dist_hist', 'dist_box',
+    'cg_basic', 'cg_median', 'cg_ci95', 'cg_marks', 'dist_hist', 'dist_box',
     'freq_ind', 'freq_gof', 'freq_pie', 'freq_par', 'xy_lin', 'xy_poly2k',
     'xy_poly3', 'xy_poly3_grouped80', 'xy_ties', 'rm_within', 'rm_between',
     'rm_median', 'corr_p', 'corr_k', 'corr_s', 'lk_factor', 'lk_num', 'lk_cont'

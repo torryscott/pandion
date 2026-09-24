@@ -335,6 +335,18 @@ else
     fi
 fi
 
+echo "== point marks (Mark points by)"
+if GB2_MARKS_OUT="$OUT-marks" GB2_BUNDLE="$BUNDLE" Rscript "$HERE/marks-render.R"; then
+    GB2_MARKS_OUT="$OUT-marks" node "$HERE/marks-check.mjs"
+else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then
+        echo "   skipped: jmvcore not available"
+    else
+        exit "$rc"
+    fi
+fi
+
 echo "== fresh-analysis delivery stability (Group By -> first snapshot -> native Image)"
 if GB2_SNAPCHURN_OUT="$OUT-snapchurn" GB2_BUNDLE="$BUNDLE" Rscript "$HERE/snapchurn-render.R"; then
     GB2_SNAPCHURN_OUT="$OUT-snapchurn" node "$HERE/snapchurn-check.mjs"

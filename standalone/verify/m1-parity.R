@@ -121,7 +121,8 @@ CH_COMMON <- c("xLabel", "yLabel", "groupLabel", "facetLabel",
                "xLabelDefault", "yLabelDefault", "groupLabelDefault",
                "facetLevels", "missingNote", "groupCategories", "hasGroups")
 CH <- list(
-    plotbuilder    = c("bars", "xCategories", "facetSeparator", CH_COMMON),
+    plotbuilder    = c("bars", "xCategories", "facetSeparator",
+                       "markLevels", "markLabel", CH_COMMON),
     distplotbuilder = c("bars", "xCategories", "facetSeparator",
                         "distNormality", CH_COMMON),
     freqplotbuilder = c("bars", "xCategories", "facetSeparator",
@@ -177,6 +178,15 @@ addCase("cg_ci95", "plotbuilder",
         plotbuilder(data = d, xvar = "grp3", yvar = "num1", groupVar = "g2",
                     facetVar = NULL, graphType = "bar",
                     errorBarType = "ci95", chartSpec = ""))
+# Point marks: a grouped chart marked by a variable with a missing value
+# (row 8 keeps its point, marked ""), so per-bar marks and markLevels are
+# compared cell by cell.
+addCase("cg_marks", "plotbuilder",
+        list(xvar = "grp3", yvar = "num1", groupVar = "site", markVar = "g2"),
+        list(),
+        plotbuilder(data = d, xvar = "grp3", yvar = "num1", groupVar = "site",
+                    facetVar = NULL, markVar = "g2", graphType = "bar",
+                    chartSpec = ""))
 addCase("dist_hist", "distplotbuilder",
         list(var = "num1", groupVar = "g2", facetVar = "site"),
         list(),

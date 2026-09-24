@@ -171,6 +171,10 @@
     list(arg = "line_point_shape", opt = "linePointShape", bool = FALSE, default = "circle"),
     # Mean line marker (dot charts): its length as a fraction of the slot.
     list(arg = "line_marker_length", opt = "lineMarkerLength", bool = FALSE, default = 0.5),
+    # "Mark points by": per-level color + shape ({level, color, shape}),
+    # and the one-time flag that data points were switched on for marks.
+    list(arg = "point_mark_styles", opt = "pointMarkStyles", bool = FALSE, default = list()),
+    list(arg = "mark_auto_shown", opt = "markAutoShown", bool = TRUE, default = FALSE),
     list(arg = "line_point_outline_width", opt = "linePointOutlineWidth", bool = FALSE, default = 0),
     list(arg = "line_point_outline_color", opt = "linePointOutlineColor", bool = FALSE, default = "#000000"),
     list(arg = "line_point_color", opt = "linePointColor", bool = FALSE, default = ""),
@@ -268,8 +272,14 @@ plotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Class
             yvar <- self$options$yvar
             groupVar <- self$options$groupVar
             facetVar <- self$options$facetVar
+            markVar <- self$options$markVar
             has_group <- !gb_family_is_missing(groupVar)
             has_facet <- !gb_family_is_missing(facetVar)
+            # "Mark points by": a second categorical variable that colors
+            # and shapes each data point while the cell's mean still pools
+            # every point. A missing mark keeps its point (drawn unmarked),
+            # so it never changes a mean or the missing-values count.
+            has_mark <- !gb_family_is_missing(markVar)
             error_type <- self$options$errorBarType
             summary_func <- self$options$summaryFunc
 
@@ -295,6 +305,8 @@ plotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Class
                 df[[groupVar]] <- as.factor(df[[groupVar]])
             if (has_facet)
                 df[[facetVar]] <- as.factor(df[[facetVar]])
+            if (has_mark)
+                df[[markVar]] <- as.factor(df[[markVar]])
             # Missing-data disclosure: a row is shown only when every
             # consumed role is observed (NA x/group/facet rows fall out
             # at aggregation even though only y is filtered here).
@@ -392,6 +404,16 @@ plotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Class
                 if (include_values) out$values <- I(as.numeric(vals))
                 out
             }
+            # The mark level of each value cell_stat keeps, cut from the SAME
+            # rows in the same order (its finite filter drops exactly the
+            # rows whose x, group or panel is missing, since df already holds
+            # only finite y), so marks[i] always belongs to values[i]. A
+            # missing mark ships as "" and draws unmarked.
+            cell_marks <- function(mask) {
+                m <- as.character(df[[markVar]][mask])[is.finite(df[[yvar]][mask])]
+                m[is.na(m)] <- ""
+                I(m)
+            }
 
             # ---- Aggregation cache: bars derive only from the plotted
             # columns + these shaping options. Style-only commits (the
@@ -407,6 +429,8 @@ plotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Class
                 y = df[[yvar]],
                 g = if (has_group) df[[groupVar]] else NULL,
                 f = if (has_facet) df[[facetVar]] else NULL,
+                m = if (has_mark) df[[markVar]] else NULL,
+                mv = if (has_mark) markVar else "",
                 opts = c(error_type, summary_func)
             )
             if (!is.null(private$.aggCache)
@@ -424,10 +448,9 @@ plotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Class
                 if (has_group) {
                     for (xl in x_levels) {
                         for (gl in group_levels) {
-                            vals <- df[[yvar]][
-                                facet_mask
-                                & df[[xvar]] == xl
-                                & df[[groupVar]] == gl]
+                            cell_mask <- facet_mask & df[[xvar]] == xl &
+                                df[[groupVar]] == gl
+                            vals <- df[[yvar]][cell_mask]
                             st <- cell_stat(vals)
                             if (is.null(st))
                                 next
@@ -436,12 +459,14 @@ plotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Class
                                 mean = st$center, se = st$err, n = st$n
                             )
                             if (!is.null(st$values)) entry$values <- st$values
+                            if (has_mark) entry$marks <- cell_marks(cell_mask)
                             bars[[length(bars) + 1L]] <- entry
                         }
                     }
                 } else {
                     for (xl in x_levels) {
-                        vals <- df[[yvar]][facet_mask & df[[xvar]] == xl]
+                        cell_mask <- facet_mask & df[[xvar]] == xl
+                        vals <- df[[yvar]][cell_mask]
                         st <- cell_stat(vals)
                         if (is.null(st))
                             next
@@ -450,6 +475,7 @@ plotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Class
                             mean = st$center, se = st$err, n = st$n
                         )
                         if (!is.null(st$values)) entry$values <- st$values
+                        if (has_mark) entry$marks <- cell_marks(cell_mask)
                         bars[[length(bars) + 1L]] <- entry
                     }
                 }
@@ -457,6 +483,14 @@ plotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Class
 
             }
             private$.aggCache <- list(sig = agg_sig, bars = bars)
+            # The mark levels the chart actually draws, in the variable's
+            # own level order (a level whose every row lacks x, group or
+            # panel ships no point, so it earns no legend entry).
+            mark_levels <- NULL
+            if (has_mark) {
+                used <- unique(unlist(lapply(bars, function(b) as.character(b$marks))))
+                mark_levels <- intersect(levels(df[[markVar]]), used)
+            }
 
             # chartSpec migration (speed pass Phase 2): the ~200 on-chart
             # style options are gone from a.yaml; their values live in the
@@ -479,7 +513,7 @@ plotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Class
             # setOption wrapper routes every committed key NOT in this list
             # into the chartSpec blob instead of committing it directly.
             spec_real_keys <- list(
-                "data", "xvar", "yvar", "groupVar", "facetVar",
+                "data", "xvar", "yvar", "groupVar", "facetVar", "markVar",
                 "graphType", "summaryFunc", "errorBarType", "showDataPoints",
                 "exportRequest", "exportPath", "clientBundleHash",
                 "paletteLibrary", "styleLibrary", "styleStamp",
@@ -535,6 +569,8 @@ plotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R6Class
                 facet_separator = if (has_facet) FACET_SEP else "",
                 facet_levels = facet_levels,
                 facet_label = if (has_facet) facetVar else "",
+                mark_levels = mark_levels,
+                mark_label = if (has_mark) markVar else NULL,
                 palette_action = self$options$paletteLibrary,
                 client_bundle_hash = self$options$clientBundleHash,
                 run_t0 = run_t0,

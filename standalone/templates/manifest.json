@@ -1,36 +1,36 @@
 {
   "plotbuilder": {
-    "keys": 568,
+    "keys": 570,
     "channels": ["bars", "facetLabel", "facetLevels", "facetSeparator", "groupCategories", "groupLabel", "groupLabelDefault", "hasGroups", "missingNote", "xCategories", "xLabel", "xLabelDefault", "yLabel", "yLabelDefault"]
   },
   "distplotbuilder": {
-    "keys": 569,
+    "keys": 571,
     "channels": ["bars", "distNormality", "facetLabel", "facetLevels", "facetSeparator", "groupCategories", "groupLabel", "groupLabelDefault", "hasGroups", "missingNote", "xLabel", "xLabelDefault"]
   },
   "freqplotbuilder": {
-    "keys": 567,
+    "keys": 569,
     "channels": ["bars", "facetLabel", "facetLevels", "facetSeparator", "freqTests", "groupCategories", "groupLabel", "groupLabelDefault", "hasGroups", "missingNote", "xCategories", "xLabel", "xLabelDefault"]
   },
   "xyplotbuilder": {
-    "keys": 568,
+    "keys": 570,
     "channels": ["facetLabel", "facetLevels", "groupCategories", "groupLabel", "groupLabelDefault", "hasGroups", "missingNote", "xLabel", "xLabelDefault", "xyEllipses", "xyFits", "xyPoints", "xyStats", "yLabel", "yLabelDefault"]
   },
   "rmplotbuilder": {
-    "keys": 569,
+    "keys": 571,
     "channels": ["bars", "groupCategories", "groupLabel", "groupLabelDefault", "hasGroups", "missingNote", "xCategories"]
   },
   "corrplotbuilder": {
-    "keys": 566,
+    "keys": 568,
     "channels": ["corrCells", "corrRaw", "corrVars", "missingNote"]
   },
   "likertplotbuilder": {
-    "keys": 567,
+    "keys": 569,
     "channels": ["likertAlpha", "likertCells", "likertItems", "likertLevels", "likertMeans", "missingNote"]
   },
   "__stamp": {
-    "marshalMd5": "6d88e2630a75f65b45bed91faf0821ae",
+    "marshalMd5": "634313452dfe1023b0477f1aed781b2f",
     "marshalFiles": ["R/widget.R", "R/spec_explode.R", "R/utils.R", "R/plotbuilder.b.R", "R/distplotbuilder.b.R", "R/freqplotbuilder.b.R", "R/xyplotbuilder.b.R", "R/rmplotbuilder.b.R", "R/corrplotbuilder.b.R", "R/likertplotbuilder.b.R"],
-    "engineMd5": "b3b33e81190d367b73dc1d312208f547",
+    "engineMd5": "9a93890e5d5ada3b6860042bef0393a9",
     "generated": "2026-09-23"
   }
 }

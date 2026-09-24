@@ -10,6 +10,7 @@ plotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Class
             yvar = NULL,
             groupVar = NULL,
             facetVar = NULL,
+            markVar = NULL,
             graphType = "bar",
             summaryFunc = "mean",
             errorBarType = "se",
@@ -56,6 +57,15 @@ plotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Class
             private$..facetVar <- jmvcore::OptionVariable$new(
                 "facetVar",
                 facetVar,
+                suggested=list(
+                    "nominal",
+                    "ordinal"),
+                permitted=list(
+                    "factor"))
+            private$..markVar <- jmvcore::OptionVariable$new(
+                "markVar",
+                markVar,
+                default=NULL,
                 suggested=list(
                     "nominal",
                     "ordinal"),
@@ -148,6 +158,7 @@ plotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Class
             self$.addOption(private$..yvar)
             self$.addOption(private$..groupVar)
             self$.addOption(private$..facetVar)
+            self$.addOption(private$..markVar)
             self$.addOption(private$..graphType)
             self$.addOption(private$..summaryFunc)
             self$.addOption(private$..errorBarType)
@@ -167,6 +178,7 @@ plotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Class
         yvar = function() private$..yvar$value,
         groupVar = function() private$..groupVar$value,
         facetVar = function() private$..facetVar$value,
+        markVar = function() private$..markVar$value,
         graphType = function() private$..graphType$value,
         summaryFunc = function() private$..summaryFunc$value,
         errorBarType = function() private$..errorBarType$value,
@@ -185,6 +197,7 @@ plotbuilderOptions <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Class
         ..yvar = NA,
         ..groupVar = NA,
         ..facetVar = NA,
+        ..markVar = NA,
         ..graphType = NA,
         ..summaryFunc = NA,
         ..errorBarType = NA,
@@ -269,6 +282,7 @@ plotbuilderBase <- if (requireNamespace("jmvcore", quietly=TRUE)) R6::R6Class(
 #' @param yvar .
 #' @param groupVar .
 #' @param facetVar .
+#' @param markVar .
 #' @param graphType .
 #' @param summaryFunc .
 #' @param errorBarType .
@@ -296,6 +310,7 @@ plotbuilder <- function(
     yvar,
     groupVar,
     facetVar,
+    markVar = NULL,
     graphType = "bar",
     summaryFunc = "mean",
     errorBarType = "se",
@@ -317,23 +332,27 @@ plotbuilder <- function(
     if ( ! missing(yvar)) yvar <- jmvcore::resolveQuo(jmvcore::enquo(yvar))
     if ( ! missing(groupVar)) groupVar <- jmvcore::resolveQuo(jmvcore::enquo(groupVar))
     if ( ! missing(facetVar)) facetVar <- jmvcore::resolveQuo(jmvcore::enquo(facetVar))
+    if ( ! missing(markVar)) markVar <- jmvcore::resolveQuo(jmvcore::enquo(markVar))
     if (missing(data))
         data <- jmvcore::marshalData(
             parent.frame(),
             `if`( ! missing(xvar), xvar, NULL),
             `if`( ! missing(yvar), yvar, NULL),
             `if`( ! missing(groupVar), groupVar, NULL),
-            `if`( ! missing(facetVar), facetVar, NULL))
+            `if`( ! missing(facetVar), facetVar, NULL),
+            `if`( ! missing(markVar), markVar, NULL))
 
     for (v in xvar) if (v %in% names(data)) data[[v]] <- as.factor(data[[v]])
     for (v in groupVar) if (v %in% names(data)) data[[v]] <- as.factor(data[[v]])
     for (v in facetVar) if (v %in% names(data)) data[[v]] <- as.factor(data[[v]])
+    for (v in markVar) if (v %in% names(data)) data[[v]] <- as.factor(data[[v]])
 
     options <- plotbuilderOptions$new(
         xvar = xvar,
         yvar = yvar,
         groupVar = groupVar,
         facetVar = facetVar,
+        markVar = markVar,
         graphType = graphType,
         summaryFunc = summaryFunc,
         errorBarType = errorBarType,

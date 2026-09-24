@@ -268,7 +268,9 @@ await page.waitForTimeout(400);
     // 2026): count role ENTRIES, whichever form each takes.
     const slots = await page.evaluate(() =>
         document.querySelectorAll('#ps-slots [data-role-key]').length);
-    ok(slots === 4, 'four role entries for CG (cards + collapsed rows)');
+    ok(slots === 5, 'five role entries for CG (cards + collapsed rows)');
+    ok(await page.evaluate(() => !!document.querySelector('#ps-slots [data-role-key="markVar"]')),
+       'CG offers the Point marks role');
     await assignRole('xvar', 'treat');
     await assignRole('yvar', 'value');
     const drew = await page.evaluate(() => {

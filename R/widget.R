@@ -151,6 +151,32 @@ gb2_engine_placeholder_html <- function(message_html,
         gb2_engine_boot_html(message_html, client_bundle_hash)
 }
 
+# "Mark points by" styles: a list of {level, color, shape}. The color is
+# charset-gated like every color (gb_safe_color) and the shape must be one
+# of the eight point shapes, so a crafted .omv can place neither markup nor
+# an unknown shape. SHAPE rule: every field must be a single atomic value,
+# since jsonlite simplifies arrays and a vector here would be malformed.
+normalize_point_mark_styles <- function(x) {
+    if (is.null(x) || !is.list(x) || length(x) == 0) return(list())
+    shapes <- c("circle", "square", "triangle", "diamond",
+                "circleOpen", "squareOpen", "triangleOpen", "diamondOpen")
+    one <- function(v) if (!is.null(v) && is.atomic(v) && length(v) == 1L &&
+                           !is.na(v)) as.character(v) else NULL
+    out <- list()
+    for (e in x) {
+        if (!is.list(e)) next
+        lv <- one(e$level)
+        if (is.null(lv)) next
+        col <- one(e$color)
+        shp <- one(e$shape)
+        out[[length(out) + 1L]] <- list(
+            level = lv,
+            color = if (is.null(col)) "" else gb_safe_color(col),
+            shape = if (!is.null(shp) && shp %in% shapes) shp else "")
+    }
+    out
+}
+
 graphbuilder2_html <- function(bars,
                                script_src_ready = FALSE,
                                # Native-panel preview keys (Compare Groups /
@@ -161,6 +187,11 @@ graphbuilder2_html <- function(bars,
                                stats_alpha = NULL,
                                error_bar_type = NULL,
                                error_bar_method = NULL,
+                               # "Mark points by" (Compare Groups): the mark
+                               # levels drawn and the variable's name. NULL =
+                               # no marks, and the payload omits both keys.
+                               mark_levels = NULL,
+                               mark_label = NULL,
                                xy_points = list(),
                                xy_fits = list(),
                                xy_x_levels = character(0),
@@ -536,6 +567,10 @@ graphbuilder2_html <- function(bars,
                                # fraction of the slot; only read when the
                                # marker shape is "line".
                                line_marker_length = 0.5,
+                               # "Mark points by": per-level color + shape,
+                               # and the one-time auto-show flag.
+                               point_mark_styles = list(),
+                               mark_auto_shown = FALSE,
                                line_point_outline_width = 0,
                                line_point_outline_color = "#000000",
                                line_point_color = "",
@@ -1938,6 +1973,8 @@ graphbuilder2_html <- function(bars,
                                length(line_marker_length) == 1L &&
                                is.finite(line_marker_length))
             min(1, max(0.05, as.numeric(line_marker_length))) else 0.5,
+        pointMarkStyles = normalize_point_mark_styles(point_mark_styles),
+        markAutoShown = isTRUE(mark_auto_shown),
         linePointOutlineWidth = as.numeric(line_point_outline_width),
         linePointOutlineColor = as.character(line_point_outline_color),
         linePointColor = as.character(line_point_color),
@@ -2205,6 +2242,14 @@ graphbuilder2_html <- function(bars,
     if (!isTRUE(gb2_libraries_on())) payload$chartLibrariesOff <- TRUE
     if (!is.null(summary_func))
         payload$summaryFunc <- as.character(summary_func)
+    # "Mark points by": each cell in `bars` then carries a parallel `marks`
+    # array (one level per value); these name the levels in legend order and
+    # the variable. Absent everywhere a chart has no mark variable, so every
+    # other payload stays byte-identical.
+    if (!is.null(mark_levels)) {
+        payload$markLevels <- I(as.character(mark_levels))
+        payload$markLabel <- as.character(mark_label %||% "")
+    }
     # The chart's significance cutoff (statsAlpha, Aug 2026): chartSpec-
     # routed from cg/rm, absent everywhere else and in every pre-existing
     # file, so all other payloads stay byte-identical. The JS resolves an

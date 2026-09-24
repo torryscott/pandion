@@ -117,8 +117,9 @@ const fold = await page.evaluate(() => {
              limit: window.innerHeight,
              count: cards.length };
 });
-ok(fold.count === 4,
-   `setup: a fresh Compare Groups chart offers four roles (${fold.count})`);
+// Five since Sep 2026: Point marks joined X, Y, Color / group and Panels.
+ok(fold.count === 5,
+   `setup: a fresh Compare Groups chart offers five roles (${fold.count})`);
 ok(fold.bottom <= fold.limit,
    `and the LAST of them fits on a 1366x768 Chromebook without scrolling ` +
    `(${fold.key} ends at ${fold.bottom} of ${fold.limit})`);

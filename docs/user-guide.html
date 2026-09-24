@@ -498,6 +498,7 @@ same slots plainer names, so translate as you read:
 <tr><td>Y-Axis Variable</td><td><b>Value axis</b>, or <b>Y axis</b> on Scatter</td></tr>
 <tr><td>Group By</td><td><b>Color / group</b></td></tr>
 <tr><td>Panels</td><td><b>Panels</b></td></tr>
+<tr><td>Mark points by</td><td><b>Point marks</b></td></tr>
 <tr><td>Variable (Distribution)</td><td><b>Measure</b></td></tr>
 <tr><td>Variable (Frequencies)</td><td><b>Category variable</b></td></tr>
 <tr><td>Repeated Measures Cells</td><td><b>Repeated measures</b></td></tr>
@@ -525,6 +526,7 @@ control, is identical in both.</div>
 <tr><td><b>Y-Axis Variable</b></td><td>one numeric variable (the outcome)</td><td>Yes</td></tr>
 <tr><td><b>Group By (optional)</b></td><td>one categorical variable → colored side-by-side series</td><td>No</td></tr>
 <tr><td><b>Panels (optional)</b></td><td>one categorical variable → one mini-chart per level</td><td>No</td></tr>
+<tr><td><b>Mark points by (optional)</b></td><td>one categorical variable → a color and shape for each data point; the summaries still pool every point</td><td>No</td></tr>
 </table></div>
 <p><b>On-chart controls:</b> Bar, Line, and Dot can summarize with a Mean or Median. Mean summaries can show Standard Error, Standard Deviation, a 95% or 99% Confidence Interval, a <b>Difference-adjusted</b> interval (scaled for comparison: when one group's mean falls <i>outside</i> another group's interval, the two differ at p &lt; .05 on a two-sample t test), or no error bars; median summaries draw no SE / SD / CI bars. Box, Violin, and Raincloud show the distribution itself.</p>
 <div class="gallery">
@@ -540,6 +542,7 @@ control, is identical in both.</div>
 <li><b>Significance brackets</b> with real tests computed from your raw data (see <a href="#brackets">Significance brackets</a>), plus a full pairwise-comparison and ANOVA suite in the <a href="#stats-panel">Σ Statistics panel</a>.</li>
 <li><b>Value labels and N labels</b> on bars ("+" menu). N labels also work on box / violin / raincloud.</li>
 <li><b>Individual data points</b> and <b>outlier markers</b> as overlays ("+" menu).</li>
+<li><b>Point marks:</b> a variable in <b>Mark points by</b> (sex, say) gives each data point that variable's color and shape, with a key beside the chart, while every bar, box, mean, and error bar still pools all the points. Assigning it turns the data points on. Click a point or the key to reach the Data points panel's <b>Marks</b> tab, where each level gets its own color and shape. A point with no recorded value for that variable stays in the chart as an open gray circle, listed in the key as "Not recorded".</li>
 <li><b>Mean line</b> (dot charts, here and in Repeated Measures): the Markers tab's <b>Line</b> shape draws each summary as a short line across its slot, the classic mean-with-error-bars look. <b>Size</b> sets the line's thickness and <b>Length</b> how much of the slot it spans. On a grouped chart, choosing Line also spreads the groups to their own slots so each line has room.</li>
 <li><b>Ordering:</b> drag categories or series directly on the chart, use the Order tab's compact up / down controls for an exact one-step move, or use that tab's <b>Order</b> select to sort the categories by their values (lowest or highest first).</li>
 <li><b>Value spacing</b> (line and dot charts): when every category name is a number (doses of 0, 10, 40), the panel's Gap tab offers <b>"Space categories by their value"</b>, so the categories sit at their real distances apart instead of in equal slots. Repeated Measures keeps the same toggle.</li>

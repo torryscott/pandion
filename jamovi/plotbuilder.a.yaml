@@ -56,6 +56,16 @@ options:
       permitted:
         - factor
 
+    - name: markVar
+      title: Mark points by (optional)
+      type: Variable
+      default: null
+      suggested:
+        - nominal
+        - ordinal
+      permitted:
+        - factor
+
     - name: graphType
       title: Graph Type
       type: List

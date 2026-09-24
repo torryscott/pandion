@@ -12732,6 +12732,10 @@
       return { label: "Panels",
         description: "Creates a separate small chart for each category.",
         empty: "Choose a categorical panel variable" };
+    if (key === "markVar")
+      return { label: "Point marks",
+        description: "Colors and shapes each data point by this variable. The mean and error bars still pool every point.",
+        empty: "Choose a categorical variable to mark the points" };
     if (key === "var") return mod === "freqplotbuilder"
       ? { label: "Category variable",
           description: "Its categories determine the bars or frequency groups.",
@@ -13001,11 +13005,15 @@
     var section = null;
     for (var i = 0; i < defs.length; i++) {
       (function (def) {
-        var nextSection = def.required ? "required" : "optional";
+        // Point marks color the points without splitting anything, so they
+        // get their own heading rather than sitting under "Split the chart".
+        var nextSection = def.required ? "required"
+          : def.key === "markVar" ? "marks" : "optional";
         if (section !== nextSection) {
           section = nextSection;
           wrap.appendChild(mkEl("div", "ps-role-section-heading",
-            def.required ? requiredRoleSection(defs) : "Split the chart"));
+            def.required ? requiredRoleSection(defs)
+              : nextSection === "marks" ? "Mark the points" : "Split the chart"));
         }
         var presentation = rolePresentation(def);
         var members = Array.isArray(rr[def.key]) ? rr[def.key]
@@ -13542,6 +13550,7 @@
   }
   var ROLE_TAGS = { xvar: "X AXIS", yvar: "Y AXIS", var: "VARIABLE",
                     groupVar: "COLOR / GROUP", facetVar: "PANELS",
+                    markVar: "POINT MARKS",
                     measures: "MEASURES", betweenVar: "BETWEEN GROUPS",
                     vars: "MATRIX", items: "ITEMS" };
   var GRID_WINDOW_ROWS = 140;

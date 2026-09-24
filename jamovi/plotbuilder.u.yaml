@@ -35,6 +35,13 @@ children:
             name: facetVar
             maxItemCount: 1
             isTarget: true
+      - type: TargetLayoutBox
+        label: Mark points by (optional)
+        children:
+          - type: VariablesListBox
+            name: markVar
+            maxItemCount: 1
+            isTarget: true
   # Styled muted-italic by the shared gbPanelTip helper, which finds it
   # by the zero-width marker at the start of the label below. Keep the
   # marker when editing the wording; losing it only means the tip
