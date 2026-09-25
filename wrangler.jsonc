@@ -1,21 +1,23 @@
 {
-  "name": "pandion",
-  "compatibility_date": "2026-07-25",
-  // The usage counters (worker/README.md). Static files are still served
-  // first, exactly as before; the Worker answers only the paths that are
-  // not files: POST /api/hit/<kind> and GET /api/counts.
-  "main": "worker/index.js",
-  "assets": {
-    "directory": "./website",
-    "not_found_handling": "404-page",
-    "binding": "ASSETS"
-  }
-  // The counter database. Create it once with
-  //   npx wrangler d1 create pandion-counts
-  // paste the id it prints here, and run the schema (worker/README.md).
-  // Until this block is live the pings are dropped and the pages hide
-  // their counters; nothing else changes.
-  // ,"d1_databases": [
-  //   { "binding": "DB", "database_name": "pandion-counts", "database_id": "<paste the id here>" }
-  // ]
+	"name": "pandion",
+	"compatibility_date": "2026-07-25",
+	// The usage counters (worker/README.md). Static files are still served
+	// first, exactly as before; the Worker answers only the paths that are
+	// not files: POST /api/hit/<kind> and GET /api/counts.
+	"main": "worker/index.js",
+	"assets": {
+		"directory": "./website",
+		"not_found_handling": "404-page",
+		"binding": "ASSETS"
+	},
+	// The counter database (worker/README.md): created once with
+	// npx wrangler d1 create pandion-counts; the Worker reads it under
+	// this binding name.
+	"d1_databases": [
+		{
+			"binding": "pandion_counts",
+			"database_name": "pandion-counts",
+			"database_id": "59b66b38-a062-494d-a5a1-d5ad1623b838"
+		}
+	]
 }
