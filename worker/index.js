@@ -6,7 +6,10 @@
 //
 //   POST /api/hit/<kind>   one empty ping; kind is launch, launch-day or
 //                          portable. No body, no cookie, no identifier is
-//                          read or stored. Same-site requests only.
+//                          read or stored. Same-site requests from what
+//                          looks like a person's browser only (crawlers,
+//                          HTTP libraries and Cloudflare's verified bots
+//                          are dropped; see isCountable).
 //   GET  /api/counts       {"launch": {"count": n, "since": "YYYY-MM-DD"},
 //                          ...} for the footer line and the About table.
 //
@@ -31,6 +34,32 @@ function sameSite(req) {
   } catch (e) { return false; }
 }
 
+// Crawlers and scripts announce themselves in the User-Agent; this is the
+// well-behaved majority (search engines, link previewers, AI crawlers,
+// monitors, HTTP libraries). A scraper pretending to be Chrome gets past
+// it, as it gets past every counter.
+const BOT_UA = /bot|crawl|spider|slurp|scan|monitor|headless|lighthouse|pagespeed|python-requests|python-urllib|curl\/|wget\/|httpclient|java\/|go-http-client|libwww|okhttp|axios\/|node-fetch|undici|phantomjs|facebookexternalhit|embedly|whatsapp|telegrambot|skypeuripreview|discordbot|pinterest|linkedinbot|twitterbot|applebot|gptbot|claudebot|anthropic|ccbot|bytespider|petalbot|semrush|ahrefs|mj12|yandex|baidu|duckduck|bingpreview|ia_archiver|archive\.org|feedfetcher|validator|uptime|pingdom|datadog|newrelic|siteimprove/i;
+
+// Would a person's browser have sent this? Three tests, each free:
+//   1. the User-Agent does not name a crawler or an HTTP library;
+//   2. the Sec-Fetch headers, when the browser sends them (every current
+//      browser does), say a same-origin page made the request. Absent
+//      headers pass: Safari before 16.4 sent none, and the Origin check
+//      in sameSite still applies;
+//   3. Cloudflare does not flag the request as a verified bot.
+function isCountable(req) {
+  const ua = req.headers.get("User-Agent") || "";
+  if (!ua || BOT_UA.test(ua)) return false;
+  const site = req.headers.get("Sec-Fetch-Site");
+  if (site && site !== "same-origin") return false;
+  const mode = req.headers.get("Sec-Fetch-Mode");
+  if (mode && mode !== "no-cors" && mode !== "cors" && mode !== "same-origin") return false;
+  const cf = req.cf || {};
+  if (cf.verifiedBotCategory) return false;
+  if (cf.botManagement && cf.botManagement.verifiedBot) return false;
+  return true;
+}
+
 // The D1 binding as wrangler.jsonc names it (pandion_counts; DB is
 // accepted too, the name the README first suggested).
 function db(env) { return env.pandion_counts || env.DB || null; }
@@ -44,6 +73,8 @@ async function bump(env, kind) {
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
+export { sameSite, isCountable };
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
@@ -51,7 +82,7 @@ export default {
     if (url.pathname.startsWith("/api/hit/")) {
       if (req.method !== "POST") return new Response(null, { status: 405, headers: NO_STORE });
       const kind = url.pathname.slice("/api/hit/".length);
-      if (db(env) && KINDS.has(kind) && sameSite(req)) {
+      if (db(env) && KINDS.has(kind) && sameSite(req) && isCountable(req)) {
         try { await bump(env, kind); } catch (e) { /* a full day quota or a hiccup: an undercount, never an error to the visitor */ }
       }
       return new Response(null, { status: 204, headers: NO_STORE });

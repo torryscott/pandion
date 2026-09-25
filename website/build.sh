@@ -428,3 +428,4 @@ fi
 node website/verify-accessibility.mjs
 node website/verify-anchors.mjs
 node website/verify-counts.mjs
+node worker/verify-worker.mjs

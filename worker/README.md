@@ -18,6 +18,14 @@ the portable file, every file:// probe and every headless run send
 nothing, by construction. A ping carries no body, no cookie and no
 identifier; the Worker stores `(day, kind, count)` and nothing else.
 
+Bots are kept out of the launch count three ways (Sep 25 2026, Torry's
+ask): the Worker drops a ping whose User-Agent names a crawler or an HTTP
+library, whose Sec-Fetch headers say another site made it, or which
+Cloudflare flags as a verified bot (`isCountable` in worker/index.js;
+`worker/verify-worker.mjs` pins the rules and build.sh runs it). A
+scraper impersonating a browser still gets through, as everywhere.
+GitHub's download counts cannot be filtered; the table says so.
+
 The footer line on the home page and the "How much it is used" table on
 About fetch `GET /api/counts` after the page loads and stay hidden (or
 show dashes) when it fails, so the site never depends on the counter.
