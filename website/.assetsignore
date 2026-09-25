@@ -7,6 +7,7 @@ verify-axe.mjs
 verify-image-alternatives.mjs
 verify-interactions.mjs
 verify-reflow.mjs
+verify-counts.mjs
 pandion-site-preview.html
 v2.html
 v3.html

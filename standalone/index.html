@@ -6256,8 +6256,15 @@
           href="mailto:contact@pandionplots.com">contact@pandionplots.com</a></strong>
       </div>
       <p class="ps-about-privacy">No accounts and no uploads. Your data stays
-         on this machine: everything here runs in the browser, and nothing is
-         sent anywhere.</p>
+         on this machine: everything here runs in the browser, and none of it
+         is sent anywhere.</p>
+      <!-- Shown only by the copy served from pandionplots.com (ps-shell's
+           boot ping unhides it): the one thing that copy sends. -->
+      <p class="ps-about-privacy" id="ps-about-hosted-note" hidden>This copy,
+         served from pandionplots.com, sends one empty "launched" ping when it
+         starts so the site can count how often the browser app is used. The
+         ping carries no data, no identifier and no cookie; the desktop app
+         and the portable file send nothing.</p>
       <div class="ps-about-cite">
         <div class="ps-inspector-section-title">Citing Pandion Plots</div>
         <p id="ps-about-apa"></p>

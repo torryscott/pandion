@@ -276,3 +276,24 @@ binaries:
 3. Commit on the dev branch as usual. Pushing to `main` is the release
    act itself (see the section above) - do it deliberately, after
    stating what will change on the live site.
+
+## Usage counters (Sep 2026)
+
+The home page footer carries one settled line ("Opened in the browser N
+times since <date>") and `about.html#usage` a table of launches and
+downloads. `assets/usage.js` fills both after the page loads: launches
+and portable-file clicks from `GET /api/counts` (our Cloudflare Worker in
+`worker/`, a D1 table of per-day integers), installer and .jmo downloads
+straight from GitHub's public Releases API. Either source failing leaves
+the footer hidden and the table on dashes; the pages never wait on them.
+
+The hosted app sends one empty `POST /api/hit/launch` when it boots (and
+`launch-day` once per browser per day), gated on the pandionplots.com
+hostname and `navigator.webdriver` being false, so the desktop app, the
+portable file and every probe send nothing. The privacy copy on
+index.html, about.html and support.html says exactly this; keep it true.
+
+Switching the counter on is a one-time Cloudflare step (login, create the
+D1 database, bind it in `wrangler.jsonc`, run the schema): `worker/README.md`.
+`verify-counts.mjs` (run by build.sh) routes both sources to fixtures and
+checks the fill and the degrade.

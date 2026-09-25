@@ -33903,6 +33903,27 @@
     // recovery ladder. Counter-intuitive direction, deliberately: the number
     // is a budget knob, not a measurement.
     try { window.__gb2_bundleBytes = 3600000; } catch (e) {}
+    // Usage counter (Sep 2026, worker/README.md): the copy served from
+    // pandionplots.com sends one empty ping when it starts so the site can
+    // count launches, and a second one the first time each day, so the
+    // About table can show days as well as starts. No body, no cookie, no
+    // identifier. The desktop app and the portable file never send it
+    // (psUpdateHosted is false there), nor does any headless browser (the
+    // probes and screenshot scripts), and the About dialog says so on the
+    // one copy that does.
+    try {
+      if (psUpdateHosted() && !navigator.webdriver && navigator.sendBeacon) {
+        navigator.sendBeacon("/api/hit/launch");
+        var pingDayKey = "psstandalone.launchDay.v1";
+        var pingToday = new Date().toISOString().slice(0, 10);
+        if (localStorage.getItem(pingDayKey) !== pingToday) {
+          localStorage.setItem(pingDayKey, pingToday);
+          navigator.sendBeacon("/api/hit/launch-day");
+        }
+        var hostedNote = document.getElementById("ps-about-hosted-note");
+        if (hostedNote) hostedNote.hidden = false;
+      }
+    } catch (ePing) {}
     bootDone();          // item 9: the frame is live now, not merely painted
   });
 })();
