@@ -1,7 +1,7 @@
 // The usage counters on the site (Sep 2026, worker/README.md).
 //
 // The home page footer carries one settled line ("Opened in the browser N
-// times since <date>") and About carries the "How much it is used" table.
+// times since <date>") and About carries the "Usage" table.
 // Both fill in after the page loads from GET /api/counts (launches and
 // the portable file, our Worker) and from GitHub's Releases API (every
 // installer and .jmo, summed across releases, earliest asset date as
