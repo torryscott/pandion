@@ -31,18 +31,19 @@ assets: static files are still served first, and the Worker only sees
 paths that are not files, which is exactly `/api/hit/*` and `/api/counts`.
 
 1. `npx wrangler login` (once per machine).
-2. `npx wrangler d1 create pandion-counts` and copy the `database_id` it
-   prints.
-3. In `wrangler.jsonc`, uncomment the `d1_databases` block and paste the
-   id.
+2. `npx wrangler d1 create pandion-counts`; let wrangler add the binding
+   to `wrangler.jsonc` (its default name `pandion_counts` is what the
+   Worker reads; `DB` works too).
+3. Commit the config and push `main` (the git deploy binds the database).
 4. `npx wrangler d1 execute pandion-counts --remote --file worker/schema.sql`
 5. Deploy: either push `main` (if the project builds from git) or
    `npx wrangler deploy` from the repo root.
 6. Check: `curl -s https://pandionplots.com/api/counts` answers JSON, and
    after opening the app once, `launch` is 1.
 
-Until step 3 is done the Worker runs without a database: pings are
-dropped, `/api/counts` answers 503, the pages hide their counters.
+Until the binding is deployed the Worker runs without a database: pings
+are dropped, `/api/counts` answers 503, the pages hide their counters.
+Done Sep 25 2026 (database 59b66b38..., binding `pandion_counts`).
 
 If the dashboard shows the project is Cloudflare Pages rather than
 Workers, the same three handlers belong in `functions/api/hit/[kind].js`

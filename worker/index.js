@@ -31,8 +31,12 @@ function sameSite(req) {
   } catch (e) { return false; }
 }
 
+// The D1 binding as wrangler.jsonc names it (pandion_counts; DB is
+// accepted too, the name the README first suggested).
+function db(env) { return env.pandion_counts || env.DB || null; }
+
 async function bump(env, kind) {
-  await env.DB.prepare(
+  await db(env).prepare(
     "INSERT INTO hits (day, kind, n) VALUES (date('now'), ?, 1) " +
     "ON CONFLICT(day, kind) DO UPDATE SET n = n + 1"
   ).bind(kind).run();
@@ -47,7 +51,7 @@ export default {
     if (url.pathname.startsWith("/api/hit/")) {
       if (req.method !== "POST") return new Response(null, { status: 405, headers: NO_STORE });
       const kind = url.pathname.slice("/api/hit/".length);
-      if (env.DB && KINDS.has(kind) && sameSite(req)) {
+      if (db(env) && KINDS.has(kind) && sameSite(req)) {
         try { await bump(env, kind); } catch (e) { /* a full day quota or a hiccup: an undercount, never an error to the visitor */ }
       }
       return new Response(null, { status: 204, headers: NO_STORE });
@@ -55,13 +59,13 @@ export default {
 
     if (url.pathname === "/api/counts") {
       const cors = { "Access-Control-Allow-Origin": "*" };
-      if (!env.DB) {
+      if (!db(env)) {
         return Response.json({ error: "counter database not configured" },
           { status: 503, headers: Object.assign({}, cors, NO_STORE) });
       }
       let results = [];
       try {
-        results = (await env.DB.prepare(
+        results = (await db(env).prepare(
           "SELECT kind, SUM(n) AS n, MIN(day) AS since FROM hits GROUP BY kind"
         ).all()).results || [];
       } catch (e) {
