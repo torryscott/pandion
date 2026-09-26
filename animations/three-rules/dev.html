@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Three rules - dev</title>
+<style>
+  html,body{margin:0;background:#1d232b;color:#ddd;font:13px -apple-system,system-ui,sans-serif}
+  #wrap{width:min(100vw,1600px);margin:0 auto}
+  canvas{display:block;width:100%;height:auto;background:#fff}
+  #bar{display:flex;gap:10px;align-items:center;padding:8px}
+  input[type=range]{flex:1}
+</style></head>
+<body>
+<div id="wrap"><canvas id="c" width="1920" height="1080"></canvas>
+<div id="bar"><button id="pp">play</button><input id="scrub" type="range" min="0" max="50.4" step="0.01" value="0"><span id="tt">0.00</span></div></div>
+<script src="src/00-core.js"></script>
+<script src="src/05-brand.js"></script>
+<script src="src/10-assets.js"></script>
+<script src="src/20-app.js"></script>
+<script src="src/30-chart.js"></script>
+<script src="src/40-panels.js"></script>
+<script src="src/50-story.js"></script>
+<script src="src/60-overlay.js"></script>
+<script src="src/70-render.js"></script>
+<script src="src/80-audio.js"></script>
+<script>
+  var cv = document.getElementById('c'), ctx = cv.getContext('2d');
+  var q = new URLSearchParams(location.search);
+  var scale = +(q.get('scale') || 1);
+  cv.width = 1920 * scale; cv.height = 1080 * scale;
+  var t = +(q.get('t') || 0), playing = false, t0 = 0, p0 = 0;
+  window.__render = function (tt) { t = tt; return renderFrame(ctx, tt, scale); };
+  function frame(now) {
+    if (playing) { t = p0 + (now - t0) / 1000; if (t > DURATION) { t = DURATION; playing = false; } }
+    renderFrame(ctx, t, scale);
+    document.getElementById('scrub').value = t; document.getElementById('tt').textContent = t.toFixed(2);
+    requestAnimationFrame(frame);
+  }
+  document.getElementById('pp').onclick = function () { playing = !playing; t0 = performance.now(); p0 = t >= DURATION ? 0 : t; };
+  document.getElementById('scrub').oninput = function (e) { t = +e.target.value; playing = false; };
+  if (!q.has('static')) requestAnimationFrame(frame); else renderFrame(ctx, t, scale);
+</script>
+</body></html>

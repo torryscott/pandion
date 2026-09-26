@@ -28,6 +28,11 @@ framework, no build step. The `website/` folder IS the deployable site.
   from `standalone/dist/pandion-plots.html`, served by the "Download
   HTML app" button from our own origin.
 - `assets/` - brand marks, hero art, product screenshot, gallery.
+- `assets/three-rules/` - the animation at the top of `learn.html`
+  (click to change, drag to move, click + to add): a minified canvas
+  player plus its no-JavaScript poster. Built from
+  [`animations/three-rules`](../animations/three-rules/README.md) with
+  `npm run build` there; never hand-edit the minified file.
 - `docs/index.html` - the user guide, built from the canonical
   `docs/user-guide.html` (plus `docs/img/`) by `build.sh`, which INJECTS
   the site's header/footer/nav chrome and re-hues the guide's teal

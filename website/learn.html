@@ -168,9 +168,34 @@
     font-weight: 600; transition: border-color 0.15s, color 0.15s;
   }
   .learn-jumps a:hover { border-color: var(--cobalt); color: var(--cobalt); }
+
+  /* ---- the three-rules animation at the top of the page ----
+     assets/three-rules/pandion-three-rules.min.js replaces the poster with
+     a canvas player (source: animations/three-rules). Until it mounts, and
+     without JavaScript, the poster stands in at the same size. */
+  .rules-film { margin: 0 0 8px; }
+  .rules-film-frame {
+    border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+    background: #fff; box-shadow: 0 10px 28px rgba(25, 46, 73, 0.10);
+  }
+  .rules-film-frame img { display: block; width: 100%; height: auto; }
+  .rules-film-bar { height: 59px; border-top: 1px solid var(--line); }
+  .rules-film-frame.ptr-host-live {
+    border: 0; border-radius: 0; box-shadow: none; overflow: visible;
+    background: none;
+  }
+  .rules-film figcaption {
+    margin-top: 12px; color: var(--muted); font-size: 14px; max-width: 46em;
+  }
+  .rules-transcript { margin: 6px 0 0; max-width: 46em; }
+  .rules-transcript summary {
+    cursor: pointer; color: var(--cobalt); font-weight: 600; font-size: 14px;
+  }
+  .rules-transcript p { margin: 8px 0 0; font-size: 14.5px; }
 </style>
 <link rel="stylesheet" href="assets/site-nav.css">
 <script src="assets/site-nav.js" defer></script>
+<script src="assets/three-rules/pandion-three-rules.min.js" defer></script>
 </head>
 <body>
 <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -212,6 +237,40 @@
         up.
       </p>
     </div>
+
+    <figure class="rules-film">
+      <div class="rules-film-frame" data-pandion-three-rules
+           data-describedby="rules-transcript-text"
+           data-label="Animation: Pandion Plots in three rules">
+        <img width="1280" height="720" src="assets/three-rules/poster.jpg"
+             data-image-kind="illustrative"
+             alt="The three rules of Pandion Plots beside the osprey mark: click to
+                  change, drag to move, click plus to add.">
+        <div class="rules-film-bar" aria-hidden="true"></div>
+      </div>
+      <figcaption>
+        Three rules run every chart: click a part to change it, drag it to
+        move it, and use + Add to put something new on it.
+      </figcaption>
+      <details class="rules-transcript">
+        <summary>What the animation shows</summary>
+        <div id="rules-transcript-text">
+          <p>Rule 1: to change something, click it. Clicking a bar opens its
+          settings under the chart, and picking a color recolors every bar in
+          that series. Clicking the axis title lets you type a new one, and
+          legends, error bars, and labels open their own settings the same
+          way.</p>
+          <p>Rule 2: to move something, drag it. Dragging a pair of bars puts
+          the categories in order, and the legend can be dragged to wherever
+          it fits.</p>
+          <p>Rule 3: to add something, click + Add. The Add menu holds
+          everything you can put on a chart. The animation adds the data
+          points, then a significance bracket; dragging its ends onto two bars
+          makes it run the test and show the result.</p>
+          <p>Click to change. Drag to move. Click + to add.</p>
+        </div>
+      </details>
+    </figure>
 
     <nav class="learn-jumps" aria-label="Sections on this page">
       <a href="#start-here">Start here</a>
