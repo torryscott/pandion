@@ -22,6 +22,7 @@ const publicPages = [
     'website/download.html',
     'website/download-jamovi.html',
     'website/about.html',
+    'website/usage.html',
     'website/support.html',
     'website/accessibility.html',
 ];

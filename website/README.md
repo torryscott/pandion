@@ -280,7 +280,7 @@ binaries:
 ## Usage counters (Sep 2026)
 
 The home page footer carries one settled line ("Opened in the browser N
-times since <date>") and `about.html#usage` a table of launches and
+times since <date>") and `usage.html` (its own page, no nav entry) a table of launches and
 downloads. `assets/usage.js` fills both after the page loads: launches
 and portable-file clicks from `GET /api/counts` (our Cloudflare Worker in
 `worker/`, a D1 table of per-day integers), installer and .jmo downloads

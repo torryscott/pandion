@@ -107,21 +107,6 @@
   .why-pandion { display: flex; align-items: center; gap: 22px; }
   .why-pandion img { width: 142px; height: auto; flex: 0 0 auto; }
   .why-pandion p { margin: 0; }
-  .prose table.usage {
-    width: 100%; border-collapse: collapse; margin: 0 0 12px;
-    font-size: 14.5px; color: #3d4a58;
-  }
-  .prose table.usage th, .prose table.usage td {
-    text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line);
-    vertical-align: top;
-  }
-  .prose table.usage th { font-weight: 600; color: var(--ink); }
-  .prose table.usage td:last-child, .prose table.usage th:last-child {
-    text-align: right; font-variant-numeric: tabular-nums;
-  }
-  /* The item column takes the slack; a source, a date and a count never wrap. */
-  .prose table.usage td + td, .prose table.usage th + th { white-space: nowrap; }
-  .prose p.usage-note { font-size: 13px; color: #6b7887; }
   .prose p.cite-version {
     margin: -6px 0 12px; color: var(--muted); font-size: 13.5px;
   }
@@ -215,7 +200,6 @@
 </style>
 <link rel="stylesheet" href="assets/site-nav.css">
 <script src="assets/site-nav.js" defer></script>
-<script src="assets/usage.js" defer></script>
 </head>
 <body>
 <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -297,7 +281,7 @@
         <p>
           Pandion Plots runs entirely on your device: no accounts, no
           uploads, no tracking. Your data is never sent anywhere. The one
-          thing the site counts is <a href="#usage">how often it is used</a>,
+          thing the site counts is <a href="usage.html">how often it is used</a>,
           with a single anonymous ping from the browser app. Privacy is
           part of the design, not an add-on. The project is open source
           and developed
@@ -424,33 +408,6 @@ ER  -</pre>
           the app carries its own test batteries, and why the judgment
           stays human.
         </p>
-        <h2 id="usage">Usage</h2>
-        <p>
-          These numbers are the only thing Pandion Plots counts. The
-          browser app at pandionplots.com sends one empty "launched" ping
-          when it starts; it carries no data, no identifier and no cookie,
-          and the desktop app and the portable file send nothing at all.
-          Download counts for the installers and the jamovi module come
-          from GitHub, which serves those files. The table fills in as the
-          page loads.
-        </p>
-        <table class="usage" data-role="usage-table">
-          <thead>
-            <tr><th scope="col">Item</th><th scope="col">Served by</th><th scope="col">Since</th><th scope="col">Count</th></tr>
-          </thead>
-          <tbody>
-            <tr data-kind="launch-day"><td>Browser app, days it was opened (one per browser per day)</td><td>pandionplots.com</td><td>-</td><td>-</td></tr>
-            <tr data-kind="launch"><td>Browser app, every start (reloads included)</td><td>pandionplots.com</td><td>-</td><td>-</td></tr>
-            <tr data-kind="portable"><td>Portable HTML file, download clicks</td><td>pandionplots.com</td><td>-</td><td>-</td></tr>
-            <tr data-asset="Pandion-Plots-macOS.dmg"><td>Desktop app for macOS (.dmg)</td><td>GitHub Releases</td><td>-</td><td>-</td></tr>
-            <tr data-asset="Pandion-Plots-Windows-x64.exe"><td>Desktop app for Windows (.exe)</td><td>GitHub Releases</td><td>-</td><td>-</td></tr>
-            <tr data-asset="pandion-macos-arm64-jamovi28.jmo"><td>jamovi module, macOS (Apple silicon), jamovi 28</td><td>GitHub Releases</td><td>-</td><td>-</td></tr>
-            <tr data-asset="pandion-macos-arm64.jmo"><td>jamovi module, macOS (Apple silicon), jamovi 2.7</td><td>GitHub Releases</td><td>-</td><td>-</td></tr>
-            <tr data-asset="pandion-win-x64-jamovi28.jmo"><td>jamovi module, Windows, jamovi 28</td><td>GitHub Releases</td><td>-</td><td>-</td></tr>
-            <tr data-asset="pandion-win-x64.jmo"><td>jamovi module, Windows, jamovi 2.7</td><td>GitHub Releases</td><td>-</td><td>-</td></tr>
-          </tbody>
-        </table>
-        <p class="usage-note" data-role="usage-status" hidden>The counts could not be loaded right now.</p>
       </div>
       <aside class="aside">
         <div class="dev-card">

@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Usage - Pandion Plots</title>
+<meta name="description" content="How often Pandion Plots is used: browser launches counted by the site and installer downloads counted by GitHub, updated as the page loads.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<meta name="theme-color" content="#192E49">
+<link rel="canonical" href="https://pandionplots.com/usage.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Pandion Plots">
+<meta property="og:title" content="Usage - Pandion Plots">
+<meta property="og:description" content="How often Pandion Plots is used: browser launches and installer downloads, updated as the page loads.">
+<meta property="og:url" content="https://pandionplots.com/usage.html">
+<meta property="og:image" content="https://pandionplots.com/assets/share-card-2026-09.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Usage - Pandion Plots">
+<meta name="twitter:description" content="How often Pandion Plots is used: browser launches and installer downloads, updated as the page loads.">
+<meta name="twitter:image" content="https://pandionplots.com/assets/share-card-2026-09.png">
+<style>
+  :root {
+    --navy: #192E49;
+    --cobalt: #375CA0;
+    --amber: #E3A12E;
+    --ink: #22364d;
+    --muted: #5f6f80;
+    --line: #dde5ee;
+    --wash: #f4f7fb;
+  }
+  * { box-sizing: border-box; }
+  /* Anchor targets must clear the sticky header. */
+  html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+  body {
+    margin: 0; color: var(--ink); background: #fff;
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--cobalt); }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+  header {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(255,255,255,0.92); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav { display: flex; align-items: center; gap: 10px; height: 60px; }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    color: var(--navy); text-decoration: none;
+    font-weight: 800; font-size: 18px; letter-spacing: -0.01em;
+  }
+  .brand img { width: 34px; height: 34px; }
+  .nav-links { margin-left: auto; display: flex; gap: 4px; }
+  .nav-links a {
+    color: var(--ink); text-decoration: none; font-size: 14.5px;
+    font-weight: 600; padding: 7px 12px; border-radius: 7px;
+  }
+  .nav-links a:hover { background: var(--wash); color: var(--navy); }
+  .nav-links a[aria-current="page"] { color: var(--cobalt); }
+  .nav-links a.nav-cta { color: #fff; background: var(--navy); margin-left: 6px; }
+  .nav-links a.nav-cta:hover { background: #24405f; }
+
+  .page { padding: 60px 0 40px; }
+  .about-grid {
+    display: grid; grid-template-columns: 1fr 300px; gap: 56px;
+    align-items: start;
+  }
+  .about-grid > *, .prose { min-width: 0; }
+  .kicker {
+    color: #8a6414; font-size: 13px; font-weight: 800;
+    letter-spacing: 0.12em; text-transform: uppercase; margin: 0 0 8px;
+  }
+  h1 {
+    margin: 0 0 22px; color: var(--navy);
+    font-size: clamp(30px, 4vw, 40px); letter-spacing: -0.015em;
+  }
+  .prose p { margin: 0 0 18px; color: #3d4a58; }
+  .prose p.kicker { color: #8a6414; }
+  .prose p.first { font-size: 18px; color: var(--ink); }
+  h2 {
+    margin: 34px 0 10px; color: var(--navy); font-size: 21px;
+    letter-spacing: -0.01em;
+  }
+  .aside { position: sticky; top: 84px; }
+  .dev-card {
+    border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+    background: #fff; box-shadow: 0 8px 26px rgba(25, 46, 73, 0.07);
+  }
+  .dev-card .art { background: var(--wash); padding: 26px; text-align: center; }
+  .dev-card .art img.avatar {
+    width: 132px; height: 132px; border-radius: 50%;
+    object-fit: cover; border: 3px solid #fff;
+    box-shadow: 0 5px 16px rgba(25, 46, 73, 0.20);
+  }
+  .dev-card .body { padding: 18px 20px 20px; }
+  .dev-card h3 { margin: 0 0 3px; color: var(--navy); font-size: 17px; }
+  .dev-card .role { margin: 0 0 14px; color: var(--muted); font-size: 13.5px; }
+  .dev-card ul { list-style: none; margin: 0; padding: 0; }
+  .dev-card li { margin: 7px 0; font-size: 14px; }
+  .dev-card li a { text-decoration: none; font-weight: 600; }
+  .dev-card li a:hover { text-decoration: underline; }
+  /* The osprey sits beside the paragraph that explains it. */
+  .why-pandion { display: flex; align-items: center; gap: 22px; }
+  .why-pandion img { width: 142px; height: auto; flex: 0 0 auto; }
+  .why-pandion p { margin: 0; }
+  .prose table.usage {
+    width: 100%; border-collapse: collapse; margin: 0 0 12px;
+    font-size: 14.5px; color: #3d4a58;
+  }
+  .prose table.usage th, .prose table.usage td {
+    text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  .prose table.usage th { font-weight: 600; color: var(--ink); }
+  .prose table.usage td:last-child, .prose table.usage th:last-child {
+    text-align: right; font-variant-numeric: tabular-nums;
+  }
+  /* The item column takes the slack; a source, a date and a count never wrap. */
+  .prose table.usage td + td, .prose table.usage th + th { white-space: nowrap; }
+  .prose p.usage-note { font-size: 13px; color: #6b7887; }
+  .usage-page { max-width: 780px; }
+  .usage-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 0 12px; }
+  .usage-scroll table.usage { margin: 0; }
+  .prose p.cite-version {
+    margin: -6px 0 12px; color: var(--muted); font-size: 13.5px;
+  }
+  .cite-card {
+    margin: 0 0 14px; border: 1px solid var(--line); border-radius: 10px;
+    overflow: hidden; background: #fbfcfe;
+  }
+  .cite-toolbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px;
+    padding: 8px 10px; background: var(--wash);
+    border-bottom: 1px solid var(--line);
+  }
+  .cite-format-control {
+    display: flex; align-items: center; gap: 8px;
+  }
+  .cite-format-label {
+    color: var(--muted); font-size: 11px; font-weight: 700;
+    letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .cite-select {
+    min-width: 152px; padding: 6px 30px 6px 10px;
+    color: var(--navy); background: #fff; border: 1px solid #c3d0df;
+    border-radius: 6px; font: inherit; font-size: 13px; font-weight: 650;
+  }
+  .cite-actions {
+    display: flex; align-items: center; gap: 7px; margin-left: auto;
+  }
+  .cite-select:focus-visible, .cite-copy:focus-visible,
+  .cite-download:focus-visible {
+    outline: 3px solid rgba(55, 92, 160, 0.24); outline-offset: 2px;
+  }
+  .cite-copy, .cite-download {
+    -webkit-appearance: none; appearance: none;
+    font: inherit; font-size: 12px; font-weight: 650;
+    color: var(--navy); background: #fff; border: 1px solid #c3d0df;
+    border-radius: 6px; padding: 6px 12px; cursor: pointer;
+  }
+  .cite-copy:hover, .cite-download:hover {
+    border-color: var(--cobalt); color: var(--cobalt);
+  }
+  .cite-panel { padding: 17px 18px; }
+  .cite-panel[hidden] { display: none; }
+  .prose .cite-panel p {
+    margin: 0; color: #2c3a49; font-size: 15px; line-height: 1.65;
+  }
+  .cite-panel cite { font-style: italic; }
+  .cite-panel pre {
+    margin: 0; overflow-x: auto;
+    font: 12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: #2c3a49; white-space: pre-wrap; word-break: break-word;
+  }
+  .principles {
+    margin: 26px 0 0; padding: 20px 22px; background: var(--wash);
+    border: 1px solid var(--line); border-radius: 12px;
+  }
+  .principles h3 {
+    margin: 0 0 10px; color: var(--navy); font-size: 14px;
+    letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .principles ul { margin: 0; padding: 0 0 0 18px; color: var(--muted); }
+  .principles li { margin: 7px 0; font-size: 14px; }
+
+  footer { border-top: 1px solid var(--line); padding: 36px 0 48px; margin-top: 48px; }
+  .foot {
+    display: flex; flex-wrap: wrap; gap: 18px; align-items: center;
+    color: var(--muted); font-size: 13.5px;
+  }
+  .foot .brand { font-size: 15px; }
+  .foot .brand img { width: 26px; height: 26px; }
+  .foot-links { margin-left: auto; display: flex; flex-wrap: wrap; gap: 10px 18px; }
+  .foot-links a { color: var(--muted); text-decoration: none; }
+  .foot-links a:hover { color: var(--cobalt); }
+
+  @media (max-width: 860px) {
+    .why-pandion { flex-direction: column; align-items: flex-start; gap: 14px; }
+    .about-grid { grid-template-columns: 1fr; }
+    .aside { position: static; order: -1; max-width: 340px; }
+    /* Do NOT hide the nav on phones: it used to leave only the
+       CTA, stranding Gallery/Docs/About. Wrap it under the brand. */
+    .nav { height: auto; flex-wrap: wrap; padding: 8px 0; row-gap: 4px; }
+    .nav-links { margin-left: 0; width: 100%; flex-wrap: wrap; gap: 2px; }
+    .nav-links a { padding: 6px 9px; font-size: 13.5px; }
+    .nav-links a.nav-cta { margin-left: auto; }
+  }
+  @media (max-width: 520px) {
+    .cite-format-control, .cite-actions {
+      width: 100%; flex-wrap: wrap; margin-left: 0;
+    }
+    .cite-select { min-width: 0; max-width: 100%; }
+  }
+</style>
+<link rel="stylesheet" href="assets/site-nav.css">
+<script src="assets/site-nav.js" defer></script>
+<script src="assets/usage.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="index.html">
+      <img width="131" height="131" src="assets/pandion-wing.svg" alt=""
+           data-image-kind="decorative">
+      Pandion Plots
+    </a>
+    <button class="nav-toggle" type="button" aria-expanded="false"
+      aria-controls="site-nav">
+      <span class="nav-toggle-icon" aria-hidden="true"></span>
+      <span>Menu</span>
+    </button>
+    <nav class="nav-links" id="site-nav" aria-label="Site">
+      <a href="gallery.html">Gallery</a>
+      <a href="learn.html">Learn</a>
+      <a href="index.html#downloads">Downloads</a>
+      <a href="about.html">About</a>
+      <a href="support.html">Support</a>
+      <a class="nav-cta" href="app/">Try it now</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main-content" tabindex="-1">
+  <div class="wrap page">
+    <div class="prose usage-page">
+      <p class="kicker">Usage</p>
+      <h1>How much Pandion Plots is used.</h1>
+      <p class="first">
+        These numbers are the only thing Pandion Plots counts. The
+        browser app at pandionplots.com sends one empty "launched" ping
+        when it starts; it carries no data, no identifier and no cookie,
+        and the desktop app and the portable file send nothing at all.
+        Download counts for the installers and the jamovi module come
+        from GitHub, which serves those files. The table fills in as the
+        page loads.
+      </p>
+      <!-- The four columns do not fit a phone; the table scrolls
+           sideways inside its own box rather than the page. -->
+      <div class="usage-scroll">
+      <table class="usage" data-role="usage-table">
+      <thead>
+      <tr><th scope="col">Item</th><th scope="col">Served by</th><th scope="col">Since</th><th scope="col">Count</th></tr>
+      </thead>
+      <tbody>
+      <tr data-kind="launch-day"><td>Browser app, days it was opened (one per browser per day)</td><td>pandionplots.com</td><td>-</td><td>-</td></tr>
+      <tr data-kind="launch"><td>Browser app, every start (reloads included)</td><td>pandionplots.com</td><td>-</td><td>-</td></tr>
+      <tr data-kind="portable"><td>Portable HTML file, download clicks</td><td>pandionplots.com</td><td>-</td><td>-</td></tr>
+      <tr data-asset="Pandion-Plots-macOS.dmg"><td>Desktop app for macOS (.dmg)</td><td>GitHub Releases</td><td>-</td><td>-</td></tr>
+      <tr data-asset="Pandion-Plots-Windows-x64.exe"><td>Desktop app for Windows (.exe)</td><td>GitHub Releases</td><td>-</td><td>-</td></tr>
+      <tr data-asset="pandion-macos-arm64-jamovi28.jmo"><td>jamovi module, macOS (Apple silicon), jamovi 28</td><td>GitHub Releases</td><td>-</td><td>-</td></tr>
+      <tr data-asset="pandion-macos-arm64.jmo"><td>jamovi module, macOS (Apple silicon), jamovi 2.7</td><td>GitHub Releases</td><td>-</td><td>-</td></tr>
+      <tr data-asset="pandion-win-x64-jamovi28.jmo"><td>jamovi module, Windows, jamovi 28</td><td>GitHub Releases</td><td>-</td><td>-</td></tr>
+      <tr data-asset="pandion-win-x64.jmo"><td>jamovi module, Windows, jamovi 2.7</td><td>GitHub Releases</td><td>-</td><td>-</td></tr>
+      </tbody>
+      </table>
+      </div>
+      <p class="usage-note" data-role="usage-status" hidden>The counts could not be loaded right now.</p>
+      <p class="usage-note">
+        What the app does and does not send is on the
+        <a href="about.html">About</a> page.
+      </p>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <a class="brand" href="index.html">
+      <img width="131" height="131" src="assets/pandion-wing.svg" alt=""
+           data-image-kind="decorative">
+      Pandion Plots
+    </a>
+    <span>Made by Torry Scott Dennis, PhD.</span>
+    <span data-role="foot-meta">Version 3.1.3 &middot;
+      <a href="https://github.com/torryscott/pandion/blob/main/LICENSE">GPL-3.0</a>
+    </span>
+    <nav class="foot-links" aria-label="Footer">
+      <a href="app/">Try it</a>
+      <a href="gallery.html">Gallery</a>
+      <a href="learn.html">Learn</a>
+      <a href="docs/">User guide</a>
+      <a href="about.html#cite">How to cite</a>
+      <a href="about.html">About</a>
+      <a href="support.html">Support</a>
+      <a href="accessibility.html">Accessibility</a>
+      <a href="https://github.com/torryscott/pandion">GitHub</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

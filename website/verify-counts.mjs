@@ -1,7 +1,8 @@
 // The usage counters on the site (Sep 2026, worker/README.md).
 //
 // The home page footer carries one settled line ("Opened in the browser N
-// times since <date>") and About carries the "Usage" table.
+// times since <date>") and usage.html (its own page since Sep 25 2026, so
+// Torry can open it directly; no nav entry) carries the "Usage" table.
 // Both fill in after the page loads from GET /api/counts (launches and
 // the portable file, our Worker) and from GitHub's Releases API (every
 // installer and .jmo, summed across releases, earliest asset date as
@@ -11,12 +12,12 @@
 // (a file:// page cannot fetch at all).
 //
 // Cases:
-//   1. About with both sources routed to fixtures: every row fills with
+//   1. The usage page with both sources routed to fixtures: every row fills with
 //      the right sums and dates, old plotstudio-*.jmo names fold into the
 //      jamovi 2.7 rows, an asset the fixture lists but the page has no row
 //      for is added from the label map, feeds and archives are left out,
 //      the status line stays hidden.
-//   2. About with both sources failing: dashes stay, the status line
+//   2. The usage page with both sources failing: dashes stay, the status line
 //      shows, no page error.
 //   3. Home: the footer line shows the launch count and date; hidden when
 //      the API fails; the portable buttons (home and Download page) send
@@ -102,31 +103,31 @@ const browser = await chromium.launch();
 try {
     // Case 1: About, both sources answer.
     {
-        const { ctx, page, errors } = await open(browser, 'about.html', { counts: COUNTS, releases: RELEASES });
+        const { ctx, page, errors } = await open(browser, 'usage.html', { counts: COUNTS, releases: RELEASES });
         const r = await rowsOf(page);
         const g = k => r.rows[k] || {};
-        ok(g('launch').count === '1,234' && g('launch').since === '25 Sep 2026', 'About: the launch row shows the count and its since date (' + JSON.stringify(g('launch')) + ')');
-        ok(g('launch-day').count === '321', 'About: the launch-day row fills (' + g('launch-day').count + ')');
-        ok(g('portable').count === '45' && g('portable').since === '26 Sep 2026', 'About: the portable row fills from our counter (' + JSON.stringify(g('portable')) + ')');
-        ok(g('Pandion-Plots-macOS.dmg').count === '29' && g('Pandion-Plots-macOS.dmg').since === '23 Aug 2026', 'About: the macOS installer sums across releases with the earliest date (' + JSON.stringify(g('Pandion-Plots-macOS.dmg')) + ')');
-        ok(g('Pandion-Plots-Windows-x64.exe').count === '36', 'About: the Windows installer sums (' + g('Pandion-Plots-Windows-x64.exe').count + ')');
-        ok(g('pandion-macos-arm64.jmo').count === '49' && g('pandion-macos-arm64.jmo').since === '25 Jul 2026', 'About: the jamovi 2.7 macOS row folds the old plotstudio name in (' + JSON.stringify(g('pandion-macos-arm64.jmo')) + ')');
-        ok(g('pandion-win-x64.jmo').count === '48', 'About: the jamovi 2.7 Windows row folds the old name in (' + g('pandion-win-x64.jmo').count + ')');
-        ok(g('pandion-macos-arm64-jamovi28.jmo').count === '18' && g('pandion-win-x64-jamovi28.jmo').count === '17', 'About: the jamovi 28 rows fill');
-        ok(g('pandion-macos-x64.jmo').count === '4' && /Intel/.test(g('pandion-macos-x64.jmo').item || ''), 'About: an asset the page had no row for is added from the label map (' + JSON.stringify(g('pandion-macos-x64.jmo')) + ')');
-        ok(!r.rows['latest.yml'] && !r.rows['Pandion-Plots-macOS.zip'], 'About: update feeds and the auto-update archive are left out');
-        ok(r.status === null, 'About: the status line stays hidden when both sources answer');
-        ok(errors.length === 0, 'About: no page errors' + (errors.length ? ': ' + errors[0] : ''));
+        ok(g('launch').count === '1,234' && g('launch').since === '25 Sep 2026', 'Usage page: the launch row shows the count and its since date (' + JSON.stringify(g('launch')) + ')');
+        ok(g('launch-day').count === '321', 'Usage page: the launch-day row fills (' + g('launch-day').count + ')');
+        ok(g('portable').count === '45' && g('portable').since === '26 Sep 2026', 'Usage page: the portable row fills from our counter (' + JSON.stringify(g('portable')) + ')');
+        ok(g('Pandion-Plots-macOS.dmg').count === '29' && g('Pandion-Plots-macOS.dmg').since === '23 Aug 2026', 'Usage page: the macOS installer sums across releases with the earliest date (' + JSON.stringify(g('Pandion-Plots-macOS.dmg')) + ')');
+        ok(g('Pandion-Plots-Windows-x64.exe').count === '36', 'Usage page: the Windows installer sums (' + g('Pandion-Plots-Windows-x64.exe').count + ')');
+        ok(g('pandion-macos-arm64.jmo').count === '49' && g('pandion-macos-arm64.jmo').since === '25 Jul 2026', 'Usage page: the jamovi 2.7 macOS row folds the old plotstudio name in (' + JSON.stringify(g('pandion-macos-arm64.jmo')) + ')');
+        ok(g('pandion-win-x64.jmo').count === '48', 'Usage page: the jamovi 2.7 Windows row folds the old name in (' + g('pandion-win-x64.jmo').count + ')');
+        ok(g('pandion-macos-arm64-jamovi28.jmo').count === '18' && g('pandion-win-x64-jamovi28.jmo').count === '17', 'Usage page: the jamovi 28 rows fill');
+        ok(g('pandion-macos-x64.jmo').count === '4' && /Intel/.test(g('pandion-macos-x64.jmo').item || ''), 'Usage page: an asset the page had no row for is added from the label map (' + JSON.stringify(g('pandion-macos-x64.jmo')) + ')');
+        ok(!r.rows['latest.yml'] && !r.rows['Pandion-Plots-macOS.zip'], 'Usage page: update feeds and the auto-update archive are left out');
+        ok(r.status === null, 'Usage page: the status line stays hidden when both sources answer');
+        ok(errors.length === 0, 'Usage page: no page errors' + (errors.length ? ': ' + errors[0] : ''));
         await ctx.close();
     }
     // Case 2: About, both sources fail.
     {
-        const { ctx, page, errors } = await open(browser, 'about.html', {});
+        const { ctx, page, errors } = await open(browser, 'usage.html', {});
         const r = await rowsOf(page);
         const allDash = Object.values(r.rows).every(x => x.count === '-' && x.since === '-');
-        ok(Object.keys(r.rows).length >= 9 && allDash, 'About: with both sources down every row keeps its dashes (' + Object.keys(r.rows).length + ' rows)');
-        ok(typeof r.status === 'string' && /could not be loaded/i.test(r.status), 'About: and the status line says so (' + r.status + ')');
-        ok(errors.length === 0, 'About: no page errors when the sources fail' + (errors.length ? ': ' + errors[0] : ''));
+        ok(Object.keys(r.rows).length >= 9 && allDash, 'Usage page: with both sources down every row keeps its dashes (' + Object.keys(r.rows).length + ' rows)');
+        ok(typeof r.status === 'string' && /could not be loaded/i.test(r.status), 'Usage page: and the status line says so (' + r.status + ')');
+        ok(errors.length === 0, 'Usage page: no page errors when the sources fail' + (errors.length ? ': ' + errors[0] : ''));
         await ctx.close();
     }
     // Case 3: the home page footer and the portable click ping.
