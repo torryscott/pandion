@@ -279,7 +279,7 @@ binaries:
 
 ## Usage counters (Sep 2026)
 
-The home page footer carries one settled line ("Opened in the browser N
+The home page footer carries one settled line ("Browser app used N
 times since <date>") and `usage.html` (its own page, no nav entry) a table of launches and
 downloads. `assets/usage.js` fills both after the page loads: launches
 and portable-file clicks from `GET /api/counts` (our Cloudflare Worker in

@@ -4,7 +4,8 @@
 //   1. a[data-count="<kind>"]: the download buttons send one empty ping on
 //      click (POST /api/hit/<kind>), so the portable file served from this
 //      site can be counted like the GitHub-served installers are.
-//   2. [data-role="foot-count"]: the home page's settled footer line, filled
+//   2. [data-role="foot-count"]: the home page's settled footer line ("Browser
+//      app used N times since <date>"), filled
 //      from GET /api/counts and shown only once it has a number.
 //   3. [data-role="usage-table"]: the About table, filled from /api/counts
 //      (launches, the portable file) and from GitHub's Releases API (every

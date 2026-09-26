@@ -1,6 +1,6 @@
 // The usage counters on the site (Sep 2026, worker/README.md).
 //
-// The home page footer carries one settled line ("Opened in the browser N
+// The home page footer carries one settled line ("Browser app used N
 // times since <date>") and usage.html (its own page since Sep 25 2026, so
 // Torry can open it directly; no nav entry) carries the "Usage" table.
 // Both fill in after the page loads from GET /api/counts (launches and
