@@ -433,7 +433,7 @@ function renderScoreAsync(sr, cb) {
 
 var TRANSCRIPT_SHORT = 'Pandion Plots works by three rules. Rule 1: to change something, click it. ' +
   'Clicking a bar opens its settings under the chart; picking a color recolors that series, and clicking the ' +
-  'axis title lets you type a new one. Rule 2: to move something, drag it. Dragging a pair of bars reorders the ' +
-  'categories, and dragging the legend places it anywhere. Rule 3: to add something, click the Add button. The ' +
+  'axis title lets you type a new one. Rule 2: to move something, drag it. Dragging a bar past its neighbor ' +
+  'swaps the two groups in every category, and dragging the legend places it anywhere. Rule 3: to add something, click the Add button. The ' +
   'Add menu puts data points on the chart, and a significance bracket dragged onto two bars computes its own test. ' +
   'Click to change, drag to move, click plus to add.';

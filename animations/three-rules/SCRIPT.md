@@ -17,8 +17,8 @@ one: the mark completes itself.
 Everything inside the app is real: the replica's geometry, type sizes and
 colors were measured from the live app, the chart is the app's own built-in
 sample data (`sample-dose-response.csv`), and every behavior shown is what
-the app does. The bracket's `***` is the Welch test the app runs for West
-Control against West High dose (p = .00064, checked in R).
+the app does. The bracket's `***` is the Welch test the app runs for East
+Control against East High dose (p = .00028, checked in R).
 
 ## Beat sheet
 
@@ -37,7 +37,7 @@ rule's title gets its note, and all three return when the osprey lands.
 | 12.2 | | Click the y-axis title; the Left axis title panel opens; select the text and type "Test score". The axis updates as you type. | Click a title, then type a new one. | Clicks, key ticks. |
 | 15.5 | | Montage: legend, error bars, category label, each opening its own panel. Click empty space to close. | Legends, error bars, labels: click anything. | Clicks. |
 | 19.2 | 9 | **Rule 2 title.** A hand grabs the displaced word "it." and drags it into place. | RULE 2 / Want to move something? / **Drag it.** | Riser, hit, A bell. |
-| 21.6 | 10 | Drag the Low dose pair left; High dose slides aside; the chart becomes a staircase. | Pill: Drag to move / Drag bars to put them in order. | Grab, drop. |
+| 21.6 | 10 | Grab the teal Control bar (the one clicked in Rule 1) and drag it right. Every teal bar travels with it, dimmed as in the app; when the pointer passes the red bar's center, the red bars step aside; on release every pair has swapped and the legend reads West, East. This is a plain drag. (Shift+drag moves a whole category, which a first-time user would not know, so the film does not show it.) | Pill: Drag to move / Drag a bar past its neighbor. Every pair swaps. | Grab, slide, drop. |
 | 25.2 | | Drag the legend into the empty top-left of the plot. | Drag the legend to wherever it fits. | Grab, drop. |
 | 28.8 | 13 | **Rule 3 title.** The cursor clicks a big + Add button; tiles of things you can add burst out. | RULE 3 / Want to add something? / **Click [+ Add]** | Riser, hit, D bell, sparkle. |
 | 31.2 | 14 | Open the Add menu (the app's own icons), choose Data points: every observation drops onto its bar. | Pill: Click + to add / Everything you can add lives under + Add. / Add the data points. | Pop, a pentatonic plink per point. |
@@ -58,7 +58,7 @@ All on-screen copy, in order. No em dashes (house style).
   - Click a title, then type a new one.
   - Legends, error bars, labels: click anything.
 - Rule 2: Want to move something? Drag it.
-  - Drag bars to put them in order.
+  - Drag a bar past its neighbor. Every pair swaps.
   - Drag the legend to wherever it fits.
 - Rule 3: Want to add something? Click + Add.
   - Everything you can add lives under + Add.

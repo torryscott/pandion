@@ -473,7 +473,7 @@ var CAPTIONS = [
   [T.d1 + 3.2, T.d1 + 4.85, 'Pick a color. Every East bar follows.'],
   [T.d1 + 4.85, T.d1 + 7.5, 'Click a title, then type a new one.'],
   [T.d1 + 7.5, T.d1 + 11.6, 'Legends, error bars, labels: click anything.'],
-  [T.d2 + 0.1, T.d2 + 2.7, 'Drag bars to put them in order.'],
+  [T.d2 + 0.1, T.d2 + 2.7, 'Drag a bar past its neighbor. Every pair swaps.'],
   [T.d2 + 2.7, T.d2 + 6.2, 'Drag the legend to wherever it fits.'],
   [T.d3 + 0.1, T.d3 + 2.05, 'Everything you can add lives under + Add.'],
   [T.d3 + 2.05, T.d3 + 4.8, 'Add the data points.'],

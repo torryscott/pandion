@@ -332,7 +332,7 @@ function panelErrorBars(ctx, S, P) {
 }
 
 function panelCatLabels(ctx, S, P) {
-  panelHead(ctx, 'BAR CHART', 'X label: High dose', { x: 562, active: 0, items: [{ label: 'This text', w: 58 }, { label: 'All text', w: 50 }] });
+  panelHead(ctx, 'BAR CHART', 'X label: Low dose', { x: 562, active: 0, items: [{ label: 'This text', w: 58 }, { label: 'All text', w: 50 }] });
   rowCard(ctx, 12, 62, 486, 34);
   ctx.fillStyle = '#555'; ctx.beginPath(); ctx.arc(29, 79, 2.4, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.arc(36.5, 79, 3.8, 0, Math.PI * 2); ctx.fill();
   pText(ctx, 'Size', 128, 83.5, 12, 400, '#444444', 'right');

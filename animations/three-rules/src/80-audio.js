@@ -365,6 +365,7 @@ function renderSoundtrack(opts) {
       case 'snap': uiClick(ct, 0.9, 0.1); popSound(ct, 0.4, 1400, 1900); break;
       case 'chime': bell(ct, 81, 0.5, -0.1, 0.7, 'sfx'); bell(ct + 0.09, 86, 0.45, 0.1, 0.7, 'sfx'); break;
       case 'whoosh': sweep(ct, 0.5, 400, 2400, 0.25, 'swell', -0.5, 0.5, 0.2); break;
+      case 'slide': sweep(ct, 0.2, 800, 2400, 0.14, 'swell', 0.3, -0.3, 0); break;
       case 'burst':
         for (var bi = 0; bi < 5; bi++) bell(ct + bi * 0.035, 76 + [0, 2, 5, 7, 9][bi] + 12, 0.16, -0.4 + bi * 0.2, 0.6, 'sfx');
         break;

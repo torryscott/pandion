@@ -103,6 +103,21 @@ function ctype(t, k) { CTYPE.push([t, k]); }
 function cue(t, k, v) { SFX.push({ t: t, k: k, v: v }); }
 
 /* Geometry the cursor aims at. */
+/* Rule 2's drag: a plain drag on a bar reorders the GROUPS (Shift+drag
+ * would move a whole category). Grab the teal Control bar and pull it
+ * right past its red neighbour; every pair swaps. */
+var DRAG = { x0: 127.4, dx: 80, y: 300 };
+DRAG.t0 = T.d2 + 1.17; DRAG.t1 = T.d2 + 2.38;   /* pointer path */
+DRAG.down = T.d2 + 1.1; DRAG.up = T.d2 + 2.45;  /* button held */
+/* The engine flips the drop slot when the pointer passes the centre of
+ * the red bar in the grabbed cluster (x = 203.3). Solve for that moment
+ * on the same easing the pointer uses, so bars and pointer agree. */
+DRAG.flip = (function () {
+  var target = (203.2667 - DRAG.x0) / DRAG.dx, lo = 0, hi = 1;
+  for (var i = 0; i < 40; i++) { var m = (lo + hi) / 2; if (Ease.inOutCubic(m) < target) lo = m; else hi = m; }
+  return DRAG.t0 + (lo + hi) / 2 * (DRAG.t1 - DRAG.t0);
+})();
+var CSS_EASE_OUT = cubicBezier(0, 0, 0.58, 1);
 var TGT = {
   itWord1: STP(0, 0), /* resolved at runtime from the title layout */
   eastBar: SV(127.4, 300),
@@ -114,7 +129,7 @@ var TGT = {
   errBar: SV(127.4, 170),
   catLabel: SV(355.5, 436),
   empty: SV(252, 96),
-  lowDoseGrab: SV(522, 250),
+  eastGrab: SV(DRAG.x0, DRAG.y),
   legendGrab: SV(664, 64),
   addBtn: WP(TB.add.x + 29, TB.add.y + 15),
   tilePoints: null,
@@ -122,7 +137,10 @@ var TGT = {
 };
 
 /* Bracket geometry (svg coords). */
-var BR = { x1: 300, x2: 420, y: 59.5, westCtl: 165.8333 + 37.4333, westHigh: 165.8333 + 2 * 189.6667 + 37.4333 };
+/* After Rule 2's swap the teal (East) bar is the right-hand bar of each
+ * pair; the bracket compares East Control with East High dose
+ * (Welch t, p = .00028, so ***). */
+var BR = { x1: 300, x2: 420, y: 59.5, barL: 165.8333 + 37.4333, barR: 165.8333 + 2 * 189.6667 + 37.4333 };
 
 /* ---------- the script ---------- */
 (function script() {
@@ -165,10 +183,10 @@ var BR = { x1: 300, x2: 420, y: 59.5, westCtl: 165.8333 + 37.4333, westHigh: 165
   way(r2 + 1.33, r2 + 1.83, { s: 'title', id: 'r2itEnd' }, -0.1, 'inOutCubic');
   /* Demo 2 */
   ctype(d2 - 0.05, 'arrow');
-  way(d2 + 0.2, d2 + 1.0, TGT.lowDoseGrab, 0.08);
+  way(d2 + 0.2, d2 + 1.0, TGT.eastGrab, 0.08);
   ctype(d2 + 1.03, 'hand');
-  press(d2 + 1.1, d2 + 2.45);
-  way(d2 + 1.17, d2 + 2.38, SV(522 - 189.6667, 250), 0.0, 'inOutCubic');
+  press(DRAG.down, DRAG.up);
+  way(DRAG.t0, DRAG.t1, SV(DRAG.x0 + DRAG.dx, DRAG.y), 0.0, 'inOutCubic');
   ctype(d2 + 2.6, 'arrow');
   way(d2 + 2.75, d2 + 3.5, TGT.legendGrab, -0.1);
   ctype(d2 + 3.53, 'hand');
@@ -196,12 +214,12 @@ var BR = { x1: 300, x2: 420, y: 59.5, westCtl: 165.8333 + 37.4333, westHigh: 165
   way(d3 + 5.25, d3 + 5.75, SV(BR.x1, BR.y + 5), 0.08);
   ctype(d3 + 5.78, 'hand');
   press(d3 + 5.85, d3 + 6.62);
-  way(d3 + 5.9, d3 + 6.55, SV(BR.westCtl, BR.y + 5), 0.0, 'inOutCubic');
+  way(d3 + 5.9, d3 + 6.55, SV(BR.barL, BR.y + 5), 0.0, 'inOutCubic');
   ctype(d3 + 6.75, 'arrow');
   way(d3 + 6.85, d3 + 7.35, SV(BR.x2, BR.y + 5), -0.08);
   ctype(d3 + 7.38, 'hand');
   press(d3 + 7.45, d3 + 8.3);
-  way(d3 + 7.5, d3 + 8.22, SV(BR.westHigh, BR.y + 5), 0.0, 'inOutCubic');
+  way(d3 + 7.5, d3 + 8.22, SV(BR.barR, BR.y + 5), 0.0, 'inOutCubic');
   ctype(d3 + 8.45, 'arrow');
   way(d3 + 8.7, T.recap + 0.6, STP(2150, 1250), 0.05, 'inOutCubic');
   CVIS.push([T.recap + 0.2, T.recap + 0.55, 1, 0]);
@@ -320,8 +338,8 @@ function stateAt(t) {
 
   /* ---- chart ---- */
   var ch = S.chart = {
-    pos: { 'Control': 0, 'High dose': 1, 'Low dose': 2 },
-    dragCat: null, dragX: null, dragLift: 0,
+    pos: { 'Control': 0, 'Low dose': 1, 'High dose': 2 },
+    gpos: { East: 0, West: 1 }, gdrag: null, legendK: 0,
     eastColor: C.east, westColor: C.west,
     hover: null, halos: [],
     yTitle: 'score',
@@ -354,7 +372,7 @@ function stateAt(t) {
   ch.halos.push({ type: 'ytitle', k: haloK(t, d1 + 5.0, d1 + 8.35) });
   ch.halos.push({ type: 'legend', k: haloK(t, d1 + 8.35, d1 + 9.27) });
   ch.halos.push({ type: 'errorbars', grp: 'East', k: haloK(t, d1 + 9.27, d1 + 10.17) });
-  ch.halos.push({ type: 'catlabels', k: haloK(t, d1 + 10.17, d1 + 11.07) });
+  ch.halos.push({ type: 'catlabels', cat: 'Low dose', k: haloK(t, d1 + 10.17, d1 + 11.07) });
   ch.focusRing = haloK(t, d1 + 5.0, d1 + 8.35) * 0.9;
 
   /* panel */
@@ -382,30 +400,23 @@ function stateAt(t) {
   S.app.pstate.errorbars = {};
   S.app.pstate.catlabels = {};
 
-  /* ---- demo 2: reorder + legend ---- */
-  var gA = d2 + 1.1, gB = d2 + 2.45;
-  if (t >= gA - 0.02) {
-    var lifted = seg(t, gA, gA + 0.14) * (1 - seg(t, gB, gB + 0.22));
-    var grabOff = 522 - 545.1667;
-    if (t < gB) {
-      ch.dragCat = 'Low dose';
-      ch.dragX = S.curWorld[0] - APP.svg.x - grabOff;
-      ch.dragLift = lifted;
+  /* ---- demo 2: drag a bar to reorder the groups, then the legend ---- */
+  if (t >= DRAG.down) {
+    var slotW = CH.barW + 1;
+    if (t < DRAG.up) {
+      /* every teal bar rides the pointer (the engine dims them to 0.85) */
+      ch.gdrag = { grp: 'East', dx: (S.curWorld[0] - APP.svg.x) - DRAG.x0, alpha: 0.85 };
+      /* once the pointer passes the red bar's centre, the red bars glide
+       * aside (150 ms ease-out, as in the engine) */
+      ch.gpos.West = 1 - CSS_EASE_OUT(seg(t, DRAG.flip, DRAG.flip + 0.15));
     } else {
-      /* settle into slot 1 */
-      var st = t - gB;
-      var from = 522 - 189.6667 - grabOff;
-      var sp = spring(st, 3.2, 0.62);
-      ch.dragCat = st < 0.6 ? 'Low dose' : null;
-      ch.dragX = lerp(from, slotX(1), sp);
-      if (st >= 0.6) ch.dragX = null;
-      ch.dragLift = lifted;
+      /* dropped: the new order commits and the teal bars glide home */
+      var fk = CSS_EASE_OUT(seg(t, DRAG.up, DRAG.up + 0.26));
+      ch.gpos = { East: 1, West: 0 };
+      var releaseOff = -slotW + DRAG.dx;
+      ch.gdrag = fk < 1 ? { grp: 'East', dx: releaseOff * (1 - fk), alpha: lerp(0.85, 1, fk) } : null;
+      ch.legendK = CSS_EASE_OUT(seg(t, DRAG.up, DRAG.up + 0.26));
     }
-    /* High dose parts to make room once the dragged pair passes the midpoint */
-    /* the neighbour slides aside as the dragged pair travels over it */
-    var travel = t >= gB ? 1 : clamp((545.1667 - (ch.dragX == null ? slotX(1) : ch.dragX)) / 189.6667, 0, 1);
-    ch.pos['High dose'] = 1 + smoother(clamp((travel - 0.05) / 0.5, 0, 1));
-    ch.pos['Low dose'] = t >= gB ? 1 : 2;
   }
   var lA = d2 + 3.6, lB = d2 + 4.85;
   if (t >= lA - 0.02) {
@@ -450,22 +461,22 @@ function stateAt(t) {
     if (t >= L0) {
       if (t < L1) {
         var lx = S.curWorld[0] - APP.svg.x;
-        if (Math.abs(lx - BR.westCtl) < 6) { lx = BR.westCtl; }
+        if (Math.abs(lx - BR.barL) < 6) { lx = BR.barL; }
         b.x1 = lx;
-      } else b.x1 = BR.westCtl;
-      var near = 1 - clamp(Math.abs(b.x1 - BR.westCtl) / 30, 0, 1);
-      b.snapX = BR.westCtl;
+      } else b.x1 = BR.barL;
+      var near = 1 - clamp(Math.abs(b.x1 - BR.barL) / 30, 0, 1);
+      b.snapX = BR.barL;
       b.snapK = (t < L1 + 0.35) ? Math.pow(near, 2) * (1 - seg(t, L1 + 0.05, L1 + 0.35)) : 0;
     }
     var R0 = d3 + 7.45, R1 = d3 + 8.3;
     if (t >= R0) {
       if (t < R1) {
         var rx = S.curWorld[0] - APP.svg.x;
-        if (Math.abs(rx - BR.westHigh) < 6) rx = BR.westHigh;
+        if (Math.abs(rx - BR.barR) < 6) rx = BR.barR;
         b.x2 = rx;
-      } else b.x2 = BR.westHigh;
-      var near2 = 1 - clamp(Math.abs(b.x2 - BR.westHigh) / 30, 0, 1);
-      b.snapX = BR.westHigh;
+      } else b.x2 = BR.barR;
+      var near2 = 1 - clamp(Math.abs(b.x2 - BR.barR) / 30, 0, 1);
+      b.snapX = BR.barR;
       b.snapK = (t < R1 + 0.35) ? Math.pow(near2, 2) * (1 - seg(t, R1 + 0.05, R1 + 0.35)) : 0;
     }
     /* once both legs sit on bars, the engine computes the test */
@@ -491,6 +502,7 @@ function stateAt(t) {
     cue(tt, 'key', i);
   }
   cue(d1 + 11.07, 'panelClose');
+  cue(DRAG.flip, 'slide');
   cue(d3 + 1.02, 'menuOpen');
   cue(d3 + 3.97, 'menuOpen');
   /* data points: a plink per observation, in landing order */

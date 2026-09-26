@@ -31,15 +31,31 @@ var CH = {
 };
 function yOf(v) { return CH.baseY - v * CH.pxPerUnit; }
 function slotX(p) { return CH.slot0 + p * CH.slotW; }
-function barRect(cx, grp, v) {
-  var x = grp === 'East' ? cx - CH.barW - 1 : cx;
+/* Where a category cluster sits. */
+function catCenter(S, cat) { return slotX(S.chart.pos[cat]); }
+/* Horizontal offset of a group's bar inside its cluster. Slot 0 is the
+ * left bar, slot 1 the right one (1 px apart, as the engine draws them).
+ * A group being dragged also carries the pointer's offset, the way the
+ * engine translates every bar of the dragged group together. */
+function groupOffset(S, grp) {
+  var ch = S.chart, slot = ch.gpos[grp];
+  var off = (slot - 1) * (CH.barW + 1);
+  if (ch.gdrag && ch.gdrag.grp === grp) off += ch.gdrag.dx;
+  return off;
+}
+function barGeom(S, cat, grp) {
+  var v = STATS[cat][grp].mean, x = catCenter(S, cat) + groupOffset(S, grp);
   return { x: x, y: yOf(v), w: CH.barW, h: CH.baseY - yOf(v), cx: x + CH.barW / 2 };
 }
-/* Where a category currently sits (drag + reorder aware). */
-function catCenter(S, cat) {
-  var ch = S.chart;
-  if (ch.dragCat === cat && ch.dragX != null) return ch.dragX;
-  return slotX(ch.pos[cat]);
+/* Paint order: a dragged group paints last, over its neighbours. */
+function groupPaintOrder(S) {
+  var g = S.chart.gdrag;
+  if (!g) return GROUPS;
+  return GROUPS.filter(function (x) { return x !== g.grp; }).concat([g.grp]);
+}
+function groupAlpha(S, grp) {
+  var g = S.chart.gdrag;
+  return g && g.grp === grp ? g.alpha : 1;
 }
 function cellColor(S, grp, cat) {
   if (grp === 'East') return (cat && S.chart.eastByCat && S.chart.eastByCat[cat]) || S.chart.eastColor;
@@ -52,47 +68,44 @@ function drawChart(ctx, S) {
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, APP.svg.w, APP.svg.h);
 
-  /* ---- bars (dragged category last so it floats above) ---- */
-  var order = CATS.slice().sort(function (a, b) {
-    return (a === ch.dragCat ? 1 : 0) - (b === ch.dragCat ? 1 : 0);
-  });
+  /* ---- bars (a dragged group paints last, slightly see-through) ---- */
+  var gorder = groupPaintOrder(S);
   var i, j, k;
-  for (i = 0; i < order.length; i++) {
-    var cat = order[i], cx = catCenter(S, cat), lifted = cat === ch.dragCat ? ch.dragLift : 0;
-    if (lifted > 0.001) {
-      ctx.save();
-      ctx.shadowColor = 'rgba(25,46,73,' + (0.28 * lifted).toFixed(3) + ')';
-      ctx.shadowBlur = 18 * lifted * (ctx.__pxScale || 1);
-      ctx.shadowOffsetY = 8 * lifted * (ctx.__pxScale || 1);
-    }
-    for (j = 0; j < GROUPS.length; j++) {
-      var grp = GROUPS[j], st = STATS[cat][grp], r = barRect(cx, grp, st.mean);
+  for (j = 0; j < gorder.length; j++) {
+    var grp = gorder[j], ga = groupAlpha(S, grp);
+    ctx.save();
+    ctx.globalAlpha *= ga;
+    for (i = 0; i < CATS.length; i++) {
+      var cat = CATS[i], r = barGeom(S, cat, grp);
       var col = cellColor(S, grp, cat);
       var hov = (ch.hover && ch.hover.grp === grp && (ch.hover.cat === cat || ch.hover.cat === '*')) ? ch.hover.k : 0;
       if (hov > 0) col = mixOk(col, '#ffffff', 0.13 * hov);
       ctx.fillStyle = col;
-      ctx.fillRect(r.x, r.y - lifted * 5, r.w, r.h + lifted * 5 * 0);
+      ctx.fillRect(r.x, r.y, r.w, r.h);
     }
-    if (lifted > 0.001) ctx.restore();
+    ctx.restore();
   }
 
   /* ---- data points ---- */
   if (ch.pointsT > 0) drawDataPoints(ctx, S);
 
-  /* ---- error bars ---- */
+  /* ---- error bars (they belong to their bars and travel with them) ---- */
   ctx.strokeStyle = '#000000';
   ctx.lineWidth = 1.4;
-  for (i = 0; i < CATS.length; i++) {
-    var c2 = CATS[i], cx2 = catCenter(S, c2), lf = c2 === ch.dragCat ? ch.dragLift : 0;
-    for (j = 0; j < GROUPS.length; j++) {
-      var st2 = STATS[c2][GROUPS[j]], r2 = barRect(cx2, GROUPS[j], st2.mean);
-      var top = yOf(st2.mean + st2.se) - lf * 5, bot = yOf(st2.mean - st2.se) - lf * 5;
+  for (j = 0; j < gorder.length; j++) {
+    var g2 = gorder[j];
+    ctx.save();
+    ctx.globalAlpha *= groupAlpha(S, g2);
+    for (i = 0; i < CATS.length; i++) {
+      var c2 = CATS[i], st2 = STATS[c2][g2], r2 = barGeom(S, c2, g2);
+      var top = yOf(st2.mean + st2.se), bot = yOf(st2.mean - st2.se);
       ctx.beginPath();
       ctx.moveTo(r2.cx, top); ctx.lineTo(r2.cx, bot);
       ctx.moveTo(r2.cx - 3.793, top); ctx.lineTo(r2.cx + 3.793, top);
       ctx.moveTo(r2.cx - 3.793, bot); ctx.lineTo(r2.cx + 3.793, bot);
       ctx.stroke();
     }
+    ctx.restore();
   }
 
   /* ---- axes ---- */
@@ -110,7 +123,7 @@ function drawChart(ctx, S) {
   ctx.font = fnt(CH.tickFont, 400, CHART_FONT);
   ctx.textAlign = 'right';
   for (k = 0; k <= 100; k += 20) ctx.fillText(String(k), 61.25, yOf(k) + 5.25);
-  /* category ticks + labels travel with their bars */
+  /* category ticks + labels (a group drag leaves them where they are) */
   ctx.textAlign = 'center';
   ctx.font = fnt(CH.catFont, 400, CHART_FONT);
   for (i = 0; i < CATS.length; i++) {
@@ -162,9 +175,9 @@ var POINT_JIT = {};
 function drawDataPoints(ctx, S) {
   var ch = S.chart, T = ch.pointsT, idx = 0;
   for (var i = 0; i < CATS.length; i++) {
-    var cat = CATS[i], cx = catCenter(S, cat);
+    var cat = CATS[i];
     for (var j = 0; j < GROUPS.length; j++) {
-      var grp = GROUPS[j], vals = DATA[cat][grp], r = barRect(cx, grp, STATS[cat][grp].mean);
+      var grp = GROUPS[j], vals = DATA[cat][grp], r = barGeom(S, cat, grp);
       var col = darken(cellColor(S, grp, cat), 0.42);
       var slot = ch.pos[cat];
       for (var k = 0; k < vals.length; k++, idx++) {
@@ -206,12 +219,14 @@ function drawLegend(ctx, S) {
   ctx.fillStyle = '#000000';
   ctx.font = fnt(15, 600, CHART_FONT);
   ctx.fillText('site', 656 + dx, 44 + dy);
-  ctx.fillStyle = S.chart.eastColor; ctx.fillRect(656 + dx, 58 + dy, 12, 12);
-  ctx.fillStyle = S.chart.westColor; ctx.fillRect(656 + dx, 76 + dy, 12, 12);
+  /* rows follow the group order: when the groups swap, so do the rows */
+  var lk = S.chart.legendK || 0, eY = 18 * lk, wY = -18 * lk;
+  ctx.fillStyle = S.chart.eastColor; ctx.fillRect(656 + dx, 58 + dy + eY, 12, 12);
+  ctx.fillStyle = S.chart.westColor; ctx.fillRect(656 + dx, 76 + dy + wY, 12, 12);
   ctx.fillStyle = '#000000';
   ctx.font = fnt(13.8, 400, CHART_FONT);
-  ctx.fillText('East', 674 + dx, 68.42 + dy);
-  ctx.fillText('West', 674 + dx, 86.42 + dy);
+  ctx.fillText('East', 674 + dx, 68.42 + dy + eY);
+  ctx.fillText('West', 674 + dx, 86.42 + dy + wY);
   ctx.restore();
 }
 
@@ -277,7 +292,7 @@ function drawHalos(ctx, S) {
     if (h.k <= 0.001) continue;
     if (h.type === 'bars') {
       for (var c = 0; c < CATS.length; c++) {
-        var r = barRect(catCenter(S, CATS[c]), h.grp, STATS[CATS[c]][h.grp].mean);
+        var r = barGeom(S, CATS[c], h.grp);
         haloRect(ctx, S, r.x - 2, r.y - 2, r.w + 4, r.h + 4, h.k);
       }
     } else if (h.type === 'ytitle') {
@@ -300,13 +315,13 @@ function drawHalos(ctx, S) {
       haloRect(ctx, S, lb.x - 2, lb.y + 12, lb.w + 6, lb.h - 10, h.k, { width: 2, alpha: 0.95, dash: [5, 3], r: 3 });
     } else if (h.type === 'errorbars') {
       for (var c2 = 0; c2 < CATS.length; c2++) {
-        var st = STATS[CATS[c2]][h.grp], r2 = barRect(catCenter(S, CATS[c2]), h.grp, st.mean);
+        var st = STATS[CATS[c2]][h.grp], r2 = barGeom(S, CATS[c2], h.grp);
         var t = yOf(st.mean + st.se), bt = yOf(st.mean - st.se);
         haloRect(ctx, S, r2.cx - 8, t - 5, 16, bt - t + 10, h.k);
       }
     } else if (h.type === 'catlabels') {
       ctx.font = fnt(CH.catFont, 400, CHART_FONT);
-      var lblC = h.cat || 'High dose';
+      var lblC = h.cat || 'Low dose';
       var w = textW(ctx, lblC, ctx.font), cx = catCenter(S, lblC);
       haloRect(ctx, S, cx - w / 2 - 4, 426, w + 8, 20, h.k, { width: 2, alpha: 1, dash: [5, 3], r: 2 });
     } else if (h.type === 'hovertext') {
