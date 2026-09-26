@@ -141,6 +141,26 @@ var TGT = {
  * pair; the bracket compares East Control with East High dose
  * (Welch t, p = .00028, so ***). */
 var BR = { x1: 300, x2: 420, y: 59.5, barL: 165.8333 + 37.4333, barR: 165.8333 + 2 * 189.6667 + 37.4333 };
+/* The two leg drags (pointer paths, button held). */
+BR.L = { from: BR.x1, to: BR.barL, t0: T.d3 + 5.9, t1: T.d3 + 6.55, down: T.d3 + 5.85, up: T.d3 + 6.62, cat: 'Control', grp: 'East' };
+BR.R = { from: BR.x2, to: BR.barR, t0: T.d3 + 7.5, t1: T.d3 + 8.22, down: T.d3 + 7.45, up: T.d3 + 8.3, cat: 'High dose', grp: 'East' };
+/* A leg snaps when it comes within 6 px of a bar centre (the engine's
+ * snapBracketX tolerance). Solve for that moment on the pointer's easing. */
+(function () {
+  [BR.L, BR.R].forEach(function (L) {
+    var need = 1 - 6 / Math.abs(L.to - L.from), lo = 0, hi = 1;
+    for (var i = 0; i < 40; i++) { var m = (lo + hi) / 2; if (Ease.inOutCubic(m) < need) lo = m; else hi = m; }
+    L.snap = L.t0 + (lo + hi) / 2 * (L.t1 - L.t0);
+  });
+})();
+/* The engine's auto-cap (_bracketAutoCapFor): the moment a leg snaps onto
+ * a bar, its length is reset so the tip sits 6 px above the top of that
+ * bar's own elements. The error bar's hit area reaches 4 px above its
+ * cap, so the tip lands 10 px above the error bar. */
+function bracketAutoCap(cat, grp) {
+  var st = STATS[cat][grp];
+  return (yOf(st.mean + st.se) - 4) - 6 - BR.y;
+}
 
 /* ---------- the script ---------- */
 (function script() {
@@ -213,13 +233,13 @@ var BR = { x1: 300, x2: 420, y: 59.5, barL: 165.8333 + 37.4333, barR: 165.8333 +
   click(d3 + 4.75);
   way(d3 + 5.25, d3 + 5.75, SV(BR.x1, BR.y + 5), 0.08);
   ctype(d3 + 5.78, 'hand');
-  press(d3 + 5.85, d3 + 6.62);
-  way(d3 + 5.9, d3 + 6.55, SV(BR.barL, BR.y + 5), 0.0, 'inOutCubic');
+  press(BR.L.down, BR.L.up);
+  way(BR.L.t0, BR.L.t1, SV(BR.barL, BR.y + 5), 0.0, 'inOutCubic');
   ctype(d3 + 6.75, 'arrow');
   way(d3 + 6.85, d3 + 7.35, SV(BR.x2, BR.y + 5), -0.08);
   ctype(d3 + 7.38, 'hand');
-  press(d3 + 7.45, d3 + 8.3);
-  way(d3 + 7.5, d3 + 8.22, SV(BR.barR, BR.y + 5), 0.0, 'inOutCubic');
+  press(BR.R.down, BR.R.up);
+  way(BR.R.t0, BR.R.t1, SV(BR.barR, BR.y + 5), 0.0, 'inOutCubic');
   ctype(d3 + 8.45, 'arrow');
   way(d3 + 8.7, T.recap + 0.6, STP(2150, 1250), 0.05, 'inOutCubic');
   CVIS.push([T.recap + 0.2, T.recap + 0.55, 1, 0]);
@@ -293,7 +313,7 @@ function haloK(t, on, off, fin, fout) {
   return seg(t, on, on + fin) * (1 - seg(t, off, off + fout));
 }
 
-var TYPED = 'Test score';
+var TYPED = 'Test Score';
 function typedValue(t) {
   var t0 = T.d1 + 6.55, s = '', i;
   if (t < t0) return null;
@@ -342,7 +362,7 @@ function stateAt(t) {
     gpos: { East: 0, West: 1 }, gdrag: null, legendK: 0,
     eastColor: C.east, westColor: C.west,
     hover: null, halos: [],
-    yTitle: 'score',
+    yTitle: 'Score',
     legend: { dx: 0, dy: 0, lift: 0 },
     pointsT: 0,
     bracket: null,
@@ -360,7 +380,7 @@ function stateAt(t) {
   /* y title */
   var tv = typedValue(t);
   if (tv !== null && tv.length) ch.yTitle = tv;
-  else if (tv !== null && t > d1 + 6.55) ch.yTitle = 'score';
+  else if (tv !== null && t > d1 + 6.55) ch.yTitle = 'Score';
 
   /* hovers */
   var hb = seg(t, d1 + 1.55, d1 + 1.72) * (1 - seg(t, d1 + 2.4, d1 + 2.6));
@@ -395,7 +415,7 @@ function stateAt(t) {
   var selAll = seg(t, d1 + 6.2, d1 + 6.32) * (tvp && tvp.length ? 0 : 1);
   var done = typingDone();
   var caretOn = focus > 0.5 && (t < done + 0.1 || Math.floor((t - done) / 0.53) % 2 === 1);
-  S.app.pstate.ytitle = { value: tvp && tvp.length ? tvp : 'score', selAll: selAll, focus: focus, caret: caretOn && !(selAll > 0.5) };
+  S.app.pstate.ytitle = { value: tvp && tvp.length ? tvp : 'Score', selAll: selAll, focus: focus, caret: caretOn && !(selAll > 0.5) };
   S.app.pstate.legend = {};
   S.app.pstate.errorbars = {};
   S.app.pstate.catlabels = {};
@@ -454,36 +474,30 @@ function stateAt(t) {
     var b = ch.bracket = {
       k: Ease.outCubic(seg(t, bA, bA + 0.3)),
       x1: BR.x1, x2: BR.x2, y: BR.y, legL: 6, legR: 6,
-      label0: '*', label1: '***', labelMix: 0, labelPop: 0, snapX: null, snapK: 0
+      label0: '*', label1: '***', labelMix: 0, labelPop: 0, snapX: null, snapK: 0, sel: 0
     };
-    /* left leg drag */
-    var L0 = d3 + 5.85, L1 = d3 + 6.62;
-    if (t >= L0) {
-      if (t < L1) {
-        var lx = S.curWorld[0] - APP.svg.x;
-        if (Math.abs(lx - BR.barL) < 6) { lx = BR.barL; }
-        b.x1 = lx;
-      } else b.x1 = BR.barL;
-      var near = 1 - clamp(Math.abs(b.x1 - BR.barL) / 30, 0, 1);
-      b.snapX = BR.barL;
-      b.snapK = (t < L1 + 0.35) ? Math.pow(near, 2) * (1 - seg(t, L1 + 0.05, L1 + 0.35)) : 0;
-    }
-    var R0 = d3 + 7.45, R1 = d3 + 8.3;
-    if (t >= R0) {
-      if (t < R1) {
-        var rx = S.curWorld[0] - APP.svg.x;
-        if (Math.abs(rx - BR.barR) < 6) rx = BR.barR;
-        b.x2 = rx;
-      } else b.x2 = BR.barR;
-      var near2 = 1 - clamp(Math.abs(b.x2 - BR.barR) / 30, 0, 1);
-      b.snapX = BR.barR;
-      b.snapK = (t < R1 + 0.35) ? Math.pow(near2, 2) * (1 - seg(t, R1 + 0.05, R1 + 0.35)) : 0;
+    var legs = [['x1', 'legL', BR.L], ['x2', 'legR', BR.R]];
+    for (var li = 0; li < 2; li++) {
+      var key = legs[li][0], capKey = legs[li][1], L = legs[li][2];
+      if (t < L.down) continue;
+      if (t < L.up) {
+        var px = S.curWorld[0] - APP.svg.x;
+        b[key] = Math.abs(px - L.to) < 6 ? L.to : px;
+      } else b[key] = L.to;
+      /* snapped: the leg drops to sit just above its bar (a quick pop) */
+      if (t >= L.snap) b[capKey] = lerp(6, bracketAutoCap(L.cat, L.grp), Ease.outCubic(seg(t, L.snap, L.snap + 0.1)));
+      /* the engine's pink snap guide shows while the leg is snapped */
+      if (t >= L.snap && t < L.up + 0.35) {
+        b.snapX = L.to;
+        b.snapK = seg(t, L.snap, L.snap + 0.05) * (1 - seg(t, L.up + 0.05, L.up + 0.35));
+      }
     }
     /* once both legs sit on bars, the engine computes the test */
-    var lab = R1 + 0.08;
+    var lab = BR.R.up + 0.08;
     b.labelMix = seg(t, lab, lab + 0.12);
     b.labelPop = seg(t, lab, lab + 0.45);
-    ch.halos.push({ type: 'bracket', k: haloK(t, bA + 0.05, d3 + 9.3) * 0.9 });
+    /* a freshly added bracket is selected: the app's blue glow hugs it */
+    b.sel = haloK(t, bA + 0.05, d3 + 9.3);
   }
   return S;
 }
@@ -515,7 +529,7 @@ function stateAt(t) {
   order.sort(function (a, b) { return a.t - b.t; });
   for (var q = 0; q < order.length; q++) cue(order[q].t, 'plink', { i: q, v: order[q].v });
   cue(d3 + 4.95, 'pop');
-  cue(d3 + 6.62 - 0.02, 'snap');
-  cue(d3 + 8.3 - 0.02, 'snap');
+  cue(BR.L.snap, 'snap');
+  cue(BR.R.snap, 'snap');
   cue(d3 + 8.38, 'chime');
 })();

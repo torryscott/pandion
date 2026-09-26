@@ -133,7 +133,7 @@ function drawChart(ctx, S) {
   }
   /* axis titles */
   ctx.font = fnt(CH.titleFont, 600, CHART_FONT);
-  ctx.fillText('condition', 355.5, 473.75);
+  ctx.fillText('Condition', 355.5, 473.75);
   ctx.save();
   ctx.translate(18, 225);
   ctx.rotate(-Math.PI / 2);
@@ -171,6 +171,9 @@ var POINT_JIT = {};
       POINT_JIT[key] = arr;
     }
   }
+  /* jitter is random in the app too; keep the tallest teal Control point
+   * clear of the bracket leg that later drops onto that bar's centre */
+  POINT_JIT['Control|East'][1] = -11.5;
 })();
 function drawDataPoints(ctx, S) {
   var ch = S.chart, T = ch.pointsT, idx = 0;
@@ -218,7 +221,7 @@ function drawLegend(ctx, S) {
   }
   ctx.fillStyle = '#000000';
   ctx.font = fnt(15, 600, CHART_FONT);
-  ctx.fillText('site', 656 + dx, 44 + dy);
+  ctx.fillText('Site', 656 + dx, 44 + dy);
   /* rows follow the group order: when the groups swap, so do the rows */
   var lk = S.chart.legendK || 0, eY = 18 * lk, wY = -18 * lk;
   ctx.fillStyle = S.chart.eastColor; ctx.fillRect(656 + dx, 58 + dy + eY, 12, 12);
@@ -238,8 +241,22 @@ function drawBracket(ctx, S) {
   var sc = lerp(0.9, 1, Ease.outBack(Math.min(1, a)));
   var mx = (x1 + x2) / 2;
   ctx.translate(mx, y); ctx.scale(sc, sc); ctx.translate(-mx, -y);
+  /* selected: the app's glow, three soft #42a5f5 bands hugging the lines */
+  if (b.sel > 0.001) {
+    var bands = [[10, 0.15], [6, 0.32], [3, 0.5]];
+    ctx.save();
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (var bi = 0; bi < bands.length; bi++) {
+      ctx.strokeStyle = rgba('#42a5f5', bands[bi][1] * b.sel);
+      ctx.lineWidth = 1.2 + bands[bi][0];
+      ctx.beginPath();
+      ctx.moveTo(x1, y + b.legL); ctx.lineTo(x1, y); ctx.lineTo(x2, y); ctx.lineTo(x2, y + b.legR);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
   ctx.strokeStyle = '#222222';
-  ctx.lineWidth = 1.25;
+  ctx.lineWidth = 1.2;
   ctx.beginPath();
   ctx.moveTo(x1, y + b.legL); ctx.lineTo(x1, y); ctx.lineTo(x2, y); ctx.lineTo(x2, y + b.legR);
   ctx.stroke();
