@@ -151,3 +151,13 @@
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
 }
+
+/* Footer rows (Sep 2026): the brand at the left and the links at the right
+   share the first row; the credit, the version and (on the home page) the
+   usage counter read together on a line beneath. Flex order does the
+   arranging, so every page's footer markup stays as it is; the links keep
+   their auto margin, and on a narrow screen everything still wraps in
+   reading order. */
+.foot .brand { order: 0; }
+.foot .foot-links { order: 1; }
+.foot > span { order: 2; }
