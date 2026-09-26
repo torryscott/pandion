@@ -11,6 +11,9 @@ function renderSoundtrack(opts) {
   'use strict';
   var SR = opts.sampleRate || 44100;
   var DUR = opts.duration;
+  /* the hands-on tour stops and starts at every step, so it plays the
+   * sound effects alone (music: false); the film keeps its score */
+  var MUSIC = opts.music !== false, SFX_NORM = 1.18;
   var cues = opts.cues || [];
   var BAR = 2.4, BEAT = 0.6;
   var N = Math.ceil((DUR + 2.5) * SR);
@@ -256,6 +259,7 @@ function renderSoundtrack(opts) {
     }
   }
 
+  if (MUSIC) {
   /* ---- the score ---- */
   /* chords as MIDI note sets (pad voicing, mid register) */
   var CH = {
@@ -340,6 +344,7 @@ function renderSoundtrack(opts) {
   bell(fin.land, 74 + 12, 0.85, 0.1, 0.8, 'keys');
   bell(fin.land, 66 + 12, 0.5, -0.15, 0.8, 'keys');
   bell(fin.land + 0.02, 69, 0.55, 0.2, 0.8, 'keys');
+  }
 
   /* ---- sound effects from the film's cue sheet ---- */
   var PENTA = [62, 64, 66, 69, 71, 74, 76, 78, 81, 83];
@@ -457,7 +462,8 @@ function renderSoundtrack(opts) {
     var pk = Math.max(Math.abs(outL[m]), Math.abs(outR[m]));
     if (pk > peak) peak = pk;
   }
-  var norm = peak > 0 ? 0.84 / peak : 1;
+  /* the effects alone keep the level they have in the full mix */
+  var norm = MUSIC ? (peak > 0 ? 0.84 / peak : 1) : (opts.sfxNorm || SFX_NORM);
   for (var o = 0; o < N; o++) {
     outL[o] = Math.tanh(outL[o] * norm * 1.08) * 0.93;
     outR[o] = Math.tanh(outR[o] * norm * 1.08) * 0.93;
@@ -468,5 +474,5 @@ function renderSoundtrack(opts) {
     var gg = f2 >= endN ? 0 : 1 - (f2 - (endN - fadeN)) / fadeN;
     if (f2 >= 0) { outL[f2] *= gg; outR[f2] *= gg; }
   }
-  return { sampleRate: SR, left: outL, right: outR };
+  return { sampleRate: SR, left: outL, right: outR, norm: norm };
 }

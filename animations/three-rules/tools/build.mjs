@@ -16,7 +16,13 @@ var api = {
   renderFrame: renderFrame,
   duration: DURATION,
   chapters: CHAPTERS,
-  renderSoundtrack: function (sr) { return renderSoundtrack({ sampleRate: sr || 48000, duration: DURATION, cues: SFX, finale: FINALE }); }
+  renderSoundtrack: function (sr, music) { return renderSoundtrack({ sampleRate: sr || 48000, duration: DURATION, cues: SFX, finale: FINALE, music: music !== false }); },
+  /* for tests: the hands-on gates and where their targets sit (stage px) */
+  guide: {
+    gates: GATES.map(function (g) { return { id: g.id, kind: g.kind, t: g.t, text: g.text || '' }; }),
+    shape: function (id) { var g = gateById(id); return g && g.tgt ? gateShape(g, stateAt(g.t)) : null; },
+    hubDots: INTRO_DOTS
+  }
 };
 window.PandionThreeRules = api;
 function autoMount() {

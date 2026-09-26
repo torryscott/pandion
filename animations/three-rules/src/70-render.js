@@ -19,6 +19,7 @@ function worldToStage(cam, x, y) {
 function renderFrame(ctx, t, pxScale) {
   computeTitleLayout(ctx);
   var S = stateAt(t);
+  if (GUIDE.on) guideDecorate(S);
   ctx.setTransform(pxScale, 0, 0, pxScale, 0, 0);
   ctx.__pxScale = pxScale;
   ctx.globalAlpha = 1;
@@ -36,6 +37,7 @@ function renderFrame(ctx, t, pxScale) {
     ctx.__pxScale = pxScale;
   }
   drawOverlays(ctx, S, pxScale);
+  if (GUIDE.on) drawGuide(ctx, S);
   drawCursor(ctx, S, pxScale);
   drawEndLayer(ctx, S, pxScale);
   return S;

@@ -1,22 +1,46 @@
-# Three rules: the Learn-page animation
+# Three rules: the Learn-page tour
 
 A pure-JavaScript animated explainer (no video file, no dependencies) that
 teaches the three rules of Pandion Plots: click to change, drag to move,
 click + to add. The script and beat sheet are in [SCRIPT.md](SCRIPT.md).
+
+It is a hands-on tour (Torry, Sep 26 2026): the intro plays and stops on a
+start card (**Try it yourself**, **Just watch**, or click one of the three
+points to start at that rule). In hands-on mode the film stops at nine
+steps and hands each one to the viewer: each rule's title is a door opened
+with that rule's gesture (click "it.", drag "it." home, click + Add), then
+click a bar, pick the teal swatch, type your own axis title (it stays on the
+chart), drag a bar past its neighbor, choose Data points, and drag the
+bracket's right end onto its bar so it runs the test. The steps between play
+on their own with the film's cursor showing. Clicks are hit-tested against
+the replica's own geometry and the film continues from its scripted press;
+drags map the pointer's travel along the film's drag path to story time, so
+the dragged part follows the hand (let go early and it springs back). Show
+me (or Enter) does any step. The Hands-on switch in the control bar flips to
+Watch, which is the film exactly as before (frames and soundtrack
+identical). Sound in hands-on mode plays the sound effects alone.
 
 - Canvas renderer: every frame is a pure function of time, drawn on a
   1920 x 1080 stage and scaled to the container at device resolution.
 - Soundtrack: synthesized in JavaScript (score and every sound effect, from
   the same cue sheet as the picture), rendered in a Web Worker only when the
   viewer turns sound on. Nothing is downloaded but the script.
-- Size: about 105 KB minified, about 39 KB gzipped.
+- Size: about 137 KB minified, about 49 KB gzipped.
+- Code for the tour: `src/85-guide.js` (the stops, their targets, hit tests,
+  drag mapping, the hint layer) and `src/90-player.js` (the state machine,
+  pointer handling, the coach card, start and end cards). Checks:
+  `node tools/tour-check.mjs <url> [outDir] [chromium|webkit] [width]` walks
+  every stop like a visitor; `node tools/tour-behavior.mjs <url> [engine]`
+  covers picking a rule, an early release, Show me, a miss, Enter, Watch
+  mode and sound. `node tools/single-file.mjs` makes a self-contained page,
+  `node tools/record-demo.mjs` a recorded walkthrough.
 
 ## On the page
 
 ```html
 <div data-pandion-three-rules
      data-describedby="id-of-a-transcript"
-     data-label="Animation: Pandion Plots in three rules">
+     data-label="Interactive tour: Pandion Plots in three rules">
   <img src="assets/three-rules/poster.jpg" ...>   <!-- no-JS fallback -->
 </div>
 <script src="assets/three-rules/pandion-three-rules.min.js" defer></script>
@@ -25,20 +49,27 @@ click + to add. The script and beat sheet are in [SCRIPT.md](SCRIPT.md).
 The script mounts every `[data-pandion-three-rules]` element. The poster
 inside is replaced by the player. Options: `data-autoplay="false"`,
 `data-describedby`, `data-label`. Or call
-`window.PandionThreeRules.mount(element, { autoplay: true })`.
+`window.PandionThreeRules.mount(element, { autoplay: true, mode: 'try' | 'watch' })`.
 
 Player behavior:
 
-- Plays muted once it is mostly in view; pauses when scrolled away or when
-  the tab is hidden; resumes where it left off.
-- Never autoplays under `prefers-reduced-motion`: those viewers see the
-  final frame (the three rules beside the mark) and a Play button.
-- Before the first play it shows the finished title frame, then dissolves
+- Plays muted once it is mostly in view (the intro, then the start card);
+  pauses when scrolled away or when the tab is hidden; resumes where it
+  left off.
+- Never autoplays under `prefers-reduced-motion`: those viewers open on the
+  start card and go at their own pace.
+- Before the first play it shows the start card's frame, then dissolves
   into playback.
+- Hands-on mode: the coach card sits beside each target (under the picture
+  on phones), every target is at least 32 CSS px to tap, keyboard users
+  land on Show me, the coach text is announced, and the typing step is a
+  real text field over the drawn one.
 - Chapter bar (Intro, Click, Drag, Add, Recap): click a chapter to seek into
-  it. Sound toggle renders the score on first use (under a second).
-- Keyboard, with the player focused: Space or K play and pause, arrows seek
-  5 s, Home and End, M toggles sound.
+  it. Sound toggle renders the score (or, hands-on, the effects alone) on
+  first use (under a second). The Hands-on switch flips to Watch and back.
+- Keyboard, with the player focused: Space or K play and pause (at a stop,
+  Enter or Space shows the step), arrows seek 5 s, Home and End, M toggles
+  sound.
 - Under 700 px wide the in-picture captions move to a real text line under
   the picture, so phones can read them.
 - The picture is `aria-hidden`; the region is labelled and described by the
@@ -60,6 +91,7 @@ Player behavior:
 | `60-overlay.js` | background, intro, rule titles, chapter pill, finale, cursor |
 | `70-render.js` | the frame renderer |
 | `80-audio.js` | the DSP synthesizer (score + sound effects) |
+| `85-guide.js` | the hands-on tour: stops, targets, hit tests, drag mapping, hints |
 | `90-player.js` | the player (controls, autoplay, sound, accessibility) |
 
 The replica's positions, colors and type sizes were measured from the live

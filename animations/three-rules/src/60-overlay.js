@@ -231,7 +231,8 @@ function drawIntroLayer(ctx, S) {
     var icon = Ease.outBack(seg(t, 1.5 + i * 0.14, 1.9 + i * 0.14));
     if (i === 0) continue; /* dot 1 is drawn by the flying badge */
     var fade = 1 - Ease.inOutCubic(seg(t, 4.0 + i * 0.06, 4.4 + i * 0.06));
-    drawBadge(ctx, d[0], d[1] + (1 - fade) * 20, INTRO_RING, i, icon, sc * fade, 0.6 * fade);
+    var hv = S.hubHover === i ? 1.08 : 1;
+    drawBadge(ctx, d[0], d[1] + (1 - fade) * 20, INTRO_RING, i, icon, sc * fade * hv, (0.6 + 0.3 * (hv - 1) / 0.08) * fade);
   }
   /* one word per point, so the poster frame explains itself */
   var words = ['Click', 'Drag', 'Add'];
@@ -243,8 +244,8 @@ function drawIntroLayer(ctx, S) {
     ctx.save();
     ctx.globalAlpha *= wp * wf;
     ctx.font = fnt(40, HEAVY);
-    ctx.fillStyle = C.navy;
-    fillSpaced(ctx, words[wi], dd[0] + INTRO_RING + 22 + (1 - wp) * 18, dd[1] + 14, -0.4);
+    ctx.fillStyle = S.hubHover === wi ? C.cobalt : C.navy;
+    fillSpaced(ctx, words[wi], dd[0] + INTRO_RING + 22 + (1 - wp) * 18 + (S.hubHover === wi ? 6 : 0), dd[1] + 14, -0.4);
     ctx.restore();
   }
   /* type */
@@ -276,7 +277,7 @@ function drawIntroLayer(ctx, S) {
   ctx.globalAlpha *= sp;
   ctx.fillStyle = C.muted;
   ctx.font = fnt(38, 500);
-  ctx.fillText('Learn them in under a minute.', x, 772 + (1 - sp) * 16);
+  ctx.fillText(RENDER_OPTS.promise || 'Learn them in under a minute.', x, 772 + (1 - sp) * 16);
   ctx.restore();
 }
 
@@ -412,7 +413,7 @@ function drawTitleAddButton(ctx, S, L, R0) {
   var t = S.time, b = L.btn;
   var pv = spring(t - (R0 + 0.72), 2.4, 0.5);
   if (pv <= 0.001) return;
-  var hov = seg(t, R0 + 1.15, R0 + 1.3);
+  var hov = S.guideHover && S.guideHover.titleAdd != null ? S.guideHover.titleAdd : seg(t, R0 + 1.15, R0 + 1.3);
   var act = seg(t, R0 + 1.4, R0 + 1.47);
   var press = pulse(t, R0 + 1.38, R0 + 1.42, R0 + 1.48, R0 + 1.6);
   ctx.save();
@@ -488,7 +489,7 @@ function chipWindow(r) {
 }
 var PILL_FONT_LABEL = null, PILL_FONT_CAP = null;
 function drawChipAndCaption(ctx, S) {
-  var t = S.time;
+  var t = S.captionT != null ? S.captionT : S.time;
   if (RENDER_OPTS.compact) return;
   var labelF = fnt(29, 700), capF = fnt(29, 500);
   for (var r = 0; r < 3; r++) {
@@ -572,6 +573,7 @@ function drawTitleBadges(ctx, S) {
       var pt = arcPoint(d[0], d[1], tx, ty, f, -0.22);
       x = pt[0]; y = pt[1]; rad = lerp(INTRO_RING, 44, f);
       sh = lerp(0.6, 0.9, f);
+      if (S.hubHover === 0 && f === 0) { sc *= 1.08; sh = 0.9; }
     } else {
       if (r > 0) sc = spring(t - R0, 2.5, 0.48);
       x = tx; y = ty; rad = 44;
