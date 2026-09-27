@@ -32,6 +32,7 @@ var GUIDE = {
   miss: -10,          /* page time of the last click that missed */
   hubHover: -1,       /* intro dot under the pointer at the start card */
   capFloor: -1,       /* story time the caption pill shows at least (a stop's settled caption) */
+  capFrom: 0,         /* story time of the stop that set it; earlier times ignore it (a replay) */
   reduce: false
 };
 
@@ -384,7 +385,7 @@ function guideDecorate(S) {
   if (GUIDE.gate && GUIDE.gate.kind === 'hub') S.hubHover = GUIDE.hubHover;
   /* captions: a stop shows its caption settled, never caught mid-fade, and
    * holds it after the viewer acts until the film catches up */
-  if (GUIDE.capFloor > t) S.captionT = GUIDE.capFloor;
+  if (GUIDE.capFloor > t && t >= GUIDE.capFrom - 0.01) S.captionT = GUIDE.capFloor;
   return S;
 }
 

@@ -32,7 +32,9 @@ identical). Sound in hands-on mode plays the sound effects alone.
   `node tools/tour-check.mjs <url> [outDir] [chromium|webkit] [width]` walks
   every stop like a visitor; `node tools/tour-behavior.mjs <url> [engine]`
   covers picking a rule, an early release, Show me, a miss, Enter, Watch
-  mode and sound. `node tools/single-file.mjs` makes a self-contained page,
+  mode and sound; `node tools/tour-replay-check.mjs <url> [engine]` walks the
+  tour, presses Replay and checks the start card carries nothing over from
+  the last run. `node tools/single-file.mjs` makes a self-contained page,
   `node tools/record-demo.mjs` a recorded walkthrough.
 
 ## On the page

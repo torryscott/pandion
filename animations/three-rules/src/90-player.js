@@ -423,7 +423,7 @@ function mountThreeRules(host, options) {
     if (state.playing) return;
     if (state.waiting) { showMe(state.waiting); return; }
     hideCards();
-    if (state.ended || state.t >= DURATION) { state.t = 0; state.ended = false; GUIDE.typed = null; GUIDE.typedAt = Infinity; }
+    if (state.ended || state.t >= DURATION) { state.t = 0; state.ended = false; GUIDE.typed = null; GUIDE.typedAt = Infinity; GUIDE.capFloor = -1; }
     if (!state.started && state.posterValid) state.posterFade = performance.now() / 1000;
     state.playing = true; state.started = true; state.userPaused = false; state.autoPaused = false;
     rebase();
@@ -475,7 +475,7 @@ function mountThreeRules(host, options) {
     state.waiting = g;
     GUIDE.gate = g;
     GUIDE.since = performance.now() / 1000;
-    if (g.capT) GUIDE.capFloor = g.capT;
+    if (g.capT) { GUIDE.capFloor = g.capT; GUIDE.capFrom = g.t; }
     if (g.kind === 'hub') { showHub(); kick(); return; }
     var sn = stepNumber(g);
     coachT.textContent = g.text;
