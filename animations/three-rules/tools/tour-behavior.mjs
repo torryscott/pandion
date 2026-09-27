@@ -18,7 +18,8 @@ const ok = (c, m) => { console.log((c ? '  ok   ' : '  FAIL ') + m); if (!c) fai
 await page.goto(url);
 await page.evaluate(() => document.querySelector('[data-pandion-three-rules]').scrollIntoView({ block: 'center' }));
 const st = () => page.evaluate(() => { const a = document.querySelector('[data-pandion-three-rules]').__ptr; return { t: a.time, waiting: a.waiting, playing: a.playing, mode: a.mode }; });
-const waitFor = (id, timeout = 15000) => page.waitForFunction((id) => document.querySelector('[data-pandion-three-rules]').__ptr.waiting === id, id, { timeout }).then(() => true, () => false);
+/* narrated (picking a rule turns the sound on), the film between stops runs through its pauses */
+const waitFor = (id, timeout = 40000) => page.waitForFunction((id) => document.querySelector('[data-pandion-three-rules]').__ptr.waiting === id, id, { timeout }).then(() => true, () => false);
 const box = () => page.evaluate(() => { const r = document.querySelector('.ptr-stage').getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; });
 const P = (b, p) => [b.x + p[0] / 1920 * b.w, b.y + p[1] / 1080 * b.h];
 const shape = (id) => page.evaluate((id) => window.PandionThreeRules.guide.shape(id), id);

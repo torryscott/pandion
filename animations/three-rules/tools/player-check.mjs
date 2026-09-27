@@ -22,7 +22,8 @@ await page.waitForTimeout(400);
 const s3 = await page.evaluate(() => document.querySelector('[data-pandion-three-rules]').__ptr.time);
 // seek near the end and let it finish
 await page.evaluate(() => document.querySelector('[data-pandion-three-rules]').__ptr.seek(47.8));
-await page.waitForTimeout(1500);
+/* narrated (sound is on), the last frame holds until she finishes the tagline */
+await page.waitForFunction(() => document.querySelector('[data-pandion-three-rules]').__ptr.ended, null, { timeout: 8000 }).catch(() => {});
 const s4 = await page.evaluate(() => { const p = document.querySelector('[data-pandion-three-rules]').__ptr; return { t: p.time, playing: p.playing, btn: document.querySelector('.ptr-main').getAttribute('aria-label'), cover: document.querySelector('.ptr-cover').hidden }; });
 // keyboard: focus region, space toggles
 await page.focus('.ptr');

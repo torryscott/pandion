@@ -24,6 +24,7 @@ function renderFrame(ctx, t, pxScale) {
    * Hands-on mode and the MP4 export run in story time (WARP.on false). */
   var S = stateAt(WARP.on ? storyTime(t) : t);
   if (WARP.on) S.wall = t;
+  else if (WARP.ambient) S.wall = filmTime(t);
   if (GUIDE.on) guideDecorate(S);
   ctx.setTransform(pxScale, 0, 0, pxScale, 0, 0);
   ctx.__pxScale = pxScale;

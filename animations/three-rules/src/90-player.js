@@ -117,11 +117,11 @@ var PLAYER_CSS = [
   '.ptr-btn.ptr-snd{width:auto;gap:7px;padding:0 15px 0 11px;border-radius:19px}',
   '.ptr-snd-t{font-size:13px;font-weight:700;letter-spacing:.01em;white-space:nowrap}',
   '.ptr-btn.ptr-ccb{display:none;font-size:12px;font-weight:800;letter-spacing:.04em}',
-  '.ptr.ptr-watch .ptr-btn.ptr-ccb{display:inline-flex}',
+  '.ptr.ptr-watch .ptr-btn.ptr-ccb,.ptr.ptr-hn .ptr-btn.ptr-ccb{display:inline-flex}',
   '.ptr.ptr-narr .ptr-cap{display:block;font-size:15px}',
   '@media (max-width:560px){.ptr-btn.ptr-snd{width:34px;padding:0;border-radius:50%}.ptr-snd-t{display:none}}',
   /* the narrowest phones: the chapters need the room (captions stay on; C toggles them) */
-  '@media (max-width:360px){.ptr.ptr-watch .ptr-btn.ptr-ccb{display:none}}'
+  '@media (max-width:360px){.ptr.ptr-watch .ptr-btn.ptr-ccb,.ptr.ptr-hn .ptr-btn.ptr-ccb{display:none}}'
 ].join('');
 
 var ICONS = {
@@ -161,6 +161,9 @@ var VOICE_MIX = { gain: 1.26, bedDb: -5.5 };
 /* a spoken prompt starts a beat after its coach card lands (the card's
  * entrance takes 0.3 s) */
 var PROMPT_DELAY = 0.3;
+/* narrated hands-on: the least pause between two of her sentences when one
+ * has to wait for the other (the film's own gaps are 0.3 to 0.6 s) */
+var NARR_GAP = 0.3;
 function voiceUrls(attr, files) {
   var list = attr ? attr.split(',') : (files || VOICE_FILES);
   return list.map(function (u) {
@@ -194,6 +197,40 @@ function narrationCueAt(t) {
   }
   return -1;
 }
+
+/* ---- narration in hands-on mode ---- */
+/* With sound on, the hands-on tour is narrated too (Torry, Sep 27 2026: the
+ * prompts alone left out the context around them). Its story clock then
+ * runs through the narrated film's pauses, so every sentence gets the room
+ * it has in Just watch, and she speaks sentence by sentence, each one when
+ * the picture reaches it. At a stop she finishes the sentence she is in,
+ * then says the prompt. Some sentences change for a viewer who does the
+ * steps (matched by their opening words; the cues are generated):
+ *   skip      the stop's prompt says it (the step the viewer is about to do)
+ *   <clip id> a replacement read from the prompts file (she no longer tells
+ *             the viewer to do what they have just done)
+ * After the three title questions ("Want to ...? Just ... it.") the prompt
+ * shrinks to "Your turn." (PROMPT_CLIPS' third number). */
+var HO_NARR_RULES = [
+  ['Click any bar', 'skip'],
+  ['Pick a new color', 'recolor'],
+  ['Click one, and type', 'skip'],
+  ['Grab a bar and drag', 'skip'],
+  ['Add the data points', 'landed']
+];
+/* the narration's sentences as the hands-on tour uses them: film-time span
+ * and what to play (a span of the voice track, or a clip) */
+var HO_CUES = NARRATION_CUES.map(function (c, i) {
+  var rule = null;
+  for (var r = 0; r < HO_NARR_RULES.length; r++) if (c[2].indexOf(HO_NARR_RULES[r][0]) === 0) rule = HO_NARR_RULES[r][1];
+  var nx = NARRATION_CUES[i + 1];
+  return {
+    f0: c[0], f1: c[1], text: c[2], skip: rule === 'skip', clip: rule && rule !== 'skip' ? rule : null,
+    /* the voice track from just before the first word to the end of the
+     * last word's decay (never into the next sentence) */
+    a: Math.max(0, c[0] - 0.04), b: nx ? Math.min(nx[0] - 0.05, c[1] + 0.35) : c[1] + 0.5
+  };
+});
 
 function mountThreeRules(host, options) {
   options = options || {};
@@ -366,10 +403,18 @@ function mountThreeRules(host, options) {
     /* the viewer turned the sound off themselves: Try it yourself leaves it off */
     userMuted: false,
     /* the spoken prompt asked for and not yet played ({id, at}) */
-    promptWant: null
+    promptWant: null,
+    /* narrated hands-on: the story clock runs through the film's pauses
+     * (f0: film time at the last rebase); the next sentence to say, whether
+     * sentences the picture has already passed may still be said (after a
+     * stop or a pause), and when her last scheduled words end (audio time) */
+    hoWarp: false, f0: 0, narrNext: 0, narrCatch: false, narrBusyUntil: 0
   };
-  /* for tests: every prompt Harper has started, in order */
-  var spoken = [];
+  /* for tests: every prompt Harper has started, in order, and every
+   * narration sentence (by NARRATION_CUES index) she has started */
+  var spoken = [], narrLog = [];
+  /* what she is saying (for the captions): the last few things started */
+  var said = [];
   GUIDE.reduce = reduce;
   /* the length of the current mode's timeline: story time in hands-on mode,
    * the narrated film (with its pauses) in Watch mode */
@@ -377,6 +422,8 @@ function mountThreeRules(host, options) {
   function setMode(m) {
     var was = WARP.on;
     if (state.playing && !state.fast) state.t = now();
+    /* leaving hands-on: its narration stops, its clock goes back to plain story time */
+    if (state.hoWarp && m !== 'try') { narrStop(); state.hoWarp = false; WARP.ambient = false; root.classList.remove('ptr-hn'); }
     state.mode = m;
     GUIDE.on = m === 'try';
     WARP.on = !GUIDE.on;
@@ -395,6 +442,27 @@ function mountThreeRules(host, options) {
     if (!GUIDE.on) leaveGate();
     setSoundUi();
     if (state.sound) ensureAudio(function () { if (state.playing && !state.fast) { state.t = now(); rebase(); startAudio(); } });
+    syncHoWarp();
+  }
+  /* Narrated hands-on is on while hands-on sound is on and its narration is
+   * loaded (the voice and the effects in film time). Switching keeps the
+   * picture where it is; she starts at the next sentence, or at one begun a
+   * moment ago when it switches on mid-play (the voice arrived late). */
+  function syncHoWarp() {
+    var A = state.audio;
+    var want = !!(GUIDE.on && state.sound && A && A.voiceBuf && A.sfxFilm);
+    if (want === state.hoWarp) return;
+    var live = state.playing && !state.fast && !state.drag;
+    if (live) state.t = now();
+    stopAudio();
+    if (!want) narrStop();
+    state.hoWarp = want;
+    WARP.ambient = want;
+    root.classList.toggle('ptr-hn', want);
+    rebase();
+    if (want) narrReset(live ? 1.5 : 0);
+    if (live && state.sound) startAudio();
+    delete ui.cap;
   }
   /* with narration, start (or rejoin) at the beginning of a sentence */
   function alignToSentence() {
@@ -412,7 +480,7 @@ function mountThreeRules(host, options) {
       var ac = new AC(), gain = ac.createGain();
       gain.gain.value = 0.9;
       gain.connect(ac.destination);
-      state.audio = { ctx: ac, gain: gain, narr: null, sfx: null, src: null, prompts: null, prompt: null };
+      state.audio = { ctx: ac, gain: gain, narr: null, sfx: null, src: null, prompts: null, prompt: null, voiceBuf: null, sfxFilm: null, narrSrcs: [] };
     }
     if (state.audio.ctx.state === 'suspended') state.audio.ctx.resume();
   }
@@ -507,9 +575,14 @@ function mountThreeRules(host, options) {
     setOnce('time', fmt(t), function (v) { timeEl.textContent = v; });
     var guiding = !!(!coach.hidden || !hub.hidden || !endCard.hidden);
     root.classList.toggle('ptr-guiding', guiding && !!state.compact);
-    var narrCap = WARP.on && state.cc;
+    var narrCap = (WARP.on || state.hoWarp) && state.cc;
     root.classList.toggle('ptr-narr', narrCap);
-    if (narrCap) {
+    if (narrCap && state.hoWarp) {
+      /* narrated hands-on: whatever she is actually saying (sentences queue
+       * behind the viewer's own pace, so film time alone cannot tell) */
+      var st = sayingNow();
+      setOnce('cap', 'h' + st, function () { capEl.textContent = st; });
+    } else if (narrCap) {
       var qi = narrationCueAt(t);
       setOnce('cap', 'n' + qi, function () { capEl.textContent = qi >= 0 ? NARRATION_CUES[qi][2] : ''; });
     } else if (state.compact && !guiding) {
@@ -540,13 +613,17 @@ function mountThreeRules(host, options) {
 
   /* ---- the clock ---- */
   /* one clock at a time: the audio clock while sound plays (so picture
-   * and sound cannot drift), the page clock otherwise */
+   * and sound cannot drift), the page clock otherwise. Narrated hands-on
+   * keeps its time in story time but advances it through the film's pauses:
+   * the clock runs in film time (the effects and her words are in film time)
+   * and maps back. */
   function now() {
-    if (state.clock === 'audio' && state.audio && state.audio.ctx)
-      return state.t0 + Math.max(0, state.audio.ctx.currentTime - state.clock0);
-    return state.t0 + (performance.now() / 1000 - state.clock0);
+    var el = state.clock === 'audio' && state.audio && state.audio.ctx
+      ? Math.max(0, state.audio.ctx.currentTime - state.clock0)
+      : performance.now() / 1000 - state.clock0;
+    return state.hoWarp ? storyTime(state.f0 + el) : state.t0 + el;
   }
-  function rebase() { state.t0 = state.t; state.clock0 = performance.now() / 1000; state.clock = 'perf'; }
+  function rebase() { state.t0 = state.t; state.f0 = filmTime(state.t); state.clock0 = performance.now() / 1000; state.clock = 'perf'; }
   function kick() { if (!state.raf) state.raf = requestAnimationFrame(loop); }
   function loop() {
     state.raf = 0;
@@ -569,9 +646,13 @@ function mountThreeRules(host, options) {
       state.t = tn;
       if (g) arrive(g);
       if (GUIDE.showUntil > 0 && state.t > GUIDE.showUntil + 0.4) GUIDE.showUntil = -1;
+      if (state.playing) narrTick();
       var narrated = WARP.on && state.sound && state.audio && state.audio.voiceEnd && state.audio.src;
       var endT = narrated ? Math.max(dur(), state.audio.voiceEnd) : dur();
-      if (state.t >= endT) {
+      /* narrated hands-on: the last frame holds until she finishes */
+      var hoHold = state.hoWarp && state.audio && state.narrBusyUntil > state.audio.ctx.currentTime;
+      if (state.t >= endT && hoHold) state.t = dur();
+      else if (state.t >= endT) {
         state.t = dur(); state.playing = false; state.ended = true;
         if (!narrated) stopAudio();   /* with narration the closing chord rings on */
         rebase();
@@ -586,7 +667,7 @@ function mountThreeRules(host, options) {
     if (state.playing) return;
     if (state.waiting) { showMe(state.waiting); return; }
     hideCards();
-    if (state.ended || state.t >= dur()) { state.t = 0; state.ended = false; GUIDE.typed = null; GUIDE.typedAt = Infinity; GUIDE.capFloor = -1; }
+    if (state.ended || state.t >= dur()) { state.t = 0; state.ended = false; GUIDE.typed = null; GUIDE.typedAt = Infinity; GUIDE.capFloor = -1; narrReset(0); }
     if (!state.started && state.posterValid) state.posterFade = performance.now() / 1000;
     state.playing = true; state.started = true; state.userPaused = false; state.autoPaused = false;
     rebase();
@@ -601,6 +682,7 @@ function mountThreeRules(host, options) {
     state.playing = false;
     if (user) { state.userPaused = true; state.coverReady = true; }
     stopAudio();
+    narrHalt();
     rebase();
     draw();
   }
@@ -614,6 +696,7 @@ function mountThreeRules(host, options) {
     state.ended = state.t >= dur();
     GUIDE.capFloor = -1;
     if (state.t < GUIDE.typedAt) { GUIDE.typed = null; GUIDE.typedAt = Infinity; }
+    narrReset(0);
     rebase();
     if (was && state.sound) startAudio();
     draw();
@@ -636,6 +719,9 @@ function mountThreeRules(host, options) {
     var again = state.waiting === g;
     state.playing = false;
     stopAudio();
+    /* she finishes the sentence she is in; nothing new starts until the
+     * viewer acts (then she catches up on what the picture passed) */
+    narrCancelFuture();
     state.t = g.t;
     rebase();
     state.waiting = g;
@@ -775,6 +861,7 @@ function mountThreeRules(host, options) {
       state.jumpFade = performance.now() / 1000;
       state.t = GUIDE_CHAPTERS[i].t;
     }
+    narrReset(0);
     state.playing = true; state.started = true; state.userPaused = false;
     rebase();
     /* the effects may still be loading (sound only just came on): they join
@@ -1031,7 +1118,7 @@ function mountThreeRules(host, options) {
   }
   function currentBuffer() {
     var A = state.audio;
-    return A ? (GUIDE.on ? A.sfx : A.narr) : null;
+    return A ? (GUIDE.on ? (state.hoWarp ? A.sfxFilm : A.sfx) : A.narr) : null;
   }
   function startAudio() {
     var A = state.audio, buf = currentBuffer();
@@ -1046,8 +1133,9 @@ function mountThreeRules(host, options) {
     /* start the buffer a hair early and fade in over that lead, so a sound
      * right at the resume point (the click the viewer just made) plays at
      * full strength; the picture's clock starts where the buffer reaches it */
-    var off = Math.max(0, state.t), pre = Math.min(0.03, off), start = A.ctx.currentTime + 0.03;
+    var off = Math.max(0, state.hoWarp ? filmTime(state.t) : state.t), pre = Math.min(0.03, off), start = A.ctx.currentTime + 0.03;
     state.t0 = state.t;
+    if (state.hoWarp) state.f0 = off;
     state.clock0 = start + pre;
     state.clock = 'audio';
     g.gain.setValueAtTime(0, start);
@@ -1071,6 +1159,150 @@ function mountThreeRules(host, options) {
     g.gain.setValueAtTime(1, t0 + len - 0.03);
     g.gain.linearRampToValueAtTime(0, t0 + len);
     src.start(t0, Math.max(0, t - 0.005), len);
+  }
+  /* ---- narrated hands-on: her sentences ---- */
+  /* the voice track, fetched once and shared with Watch mode's mix */
+  function getVoice(cb) {
+    var A = state.audio;
+    if (A.voiceData !== undefined) { cb(A.voiceData); return; }
+    if (A.voiceWait) { A.voiceWait.push(cb); return; }
+    A.voiceWait = [cb];
+    loadVoice(A.ctx, voiceUrls(options.voiceSrc), function (v) {
+      A.voiceData = v || null;
+      if (v) {
+        var b = A.ctx.createBuffer(1, v.length, A.ctx.sampleRate);
+        if (b.copyToChannel) b.copyToChannel(v, 0); else b.getChannelData(0).set(v);
+        A.voiceBuf = b;
+      } else if (window.console) console.warn('Pandion three rules: the narration could not be loaded; the tour carries on without it.');
+      var w = A.voiceWait; A.voiceWait = null;
+      for (var i = 0; i < w.length; i++) w[i](A.voiceData);
+    });
+  }
+  /* hands-on narration needs her voice and the effects in film time */
+  function loadHandsOnNarration() {
+    var A = state.audio;
+    if (!A || A.hoLoading || (A.voiceBuf && A.sfxFilm)) return;
+    A.hoLoading = true;
+    var left = 2, done = function () { if (--left) return; A.hoLoading = false; syncHoWarp(); };
+    getVoice(function () { done(); });
+    if (A.sfxFilm) done();
+    else renderScoreAsync(A.ctx.sampleRate, 'sfxfilm', null, function (res) {
+      var b = A.ctx.createBuffer(2, res.left.length, res.sampleRate);
+      if (b.copyToChannel) { b.copyToChannel(res.left, 0); b.copyToChannel(res.right, 1); }
+      else { b.getChannelData(0).set(res.left); b.getChannelData(1).set(res.right); }
+      A.sfxFilm = b;
+      done();
+    });
+  }
+  /* one sentence (a span of the voice track, or its replacement clip), at
+   * the narration's gain, starting at audio time `at` */
+  function narrPlay(k, at) {
+    var A = state.audio, c = HO_CUES[k], buf, off, len, text;
+    if (c.clip) {
+      var pc = PROMPT_CLIPS[c.clip];
+      if (!pc || !A.prompts) return;   /* no replacement loaded: the sentence is left out */
+      buf = A.prompts; off = pc[0]; len = pc[1] - pc[0]; text = PROMPT_WORDS[c.clip] || c.text;
+    } else { buf = A.voiceBuf; off = c.a; len = c.b - c.a; text = c.text; }
+    var src = A.ctx.createBufferSource(), g = A.ctx.createGain();
+    src.buffer = buf;
+    g.gain.value = VOICE_MIX.gain;
+    src.connect(g); g.connect(A.gain);
+    src.start(at, off, len);
+    var r = { src: src, g: g, k: k, t0: at, t1: at + len, text: text };
+    A.narrSrcs.push(r);
+    said.push(r); if (said.length > 6) said.shift();
+    state.narrBusyUntil = Math.max(state.narrBusyUntil, r.t1);
+    narrLog.push(k);
+    src.onended = function () {
+      var i = A.narrSrcs.indexOf(r);
+      if (i >= 0) A.narrSrcs.splice(i, 1);
+      try { src.disconnect(); g.disconnect(); } catch (e) {}
+    };
+  }
+  /* every frame while the picture plays: start the sentences it has reached,
+   * on the audio clock, one after another (never over each other). A
+   * sentence the picture passed without her (a seek, a late start) is left
+   * out, never joined halfway, unless she is catching up after a stop or a
+   * pause. */
+  function narrTick() {
+    var A = state.audio;
+    if (!state.hoWarp || state.fast || state.drag || !A || !A.voiceBuf) return;
+    var f = filmTime(state.t), ct = A.ctx.currentTime;
+    while (state.narrNext < HO_CUES.length) {
+      var c = HO_CUES[state.narrNext];
+      if (c.skip) { state.narrNext++; continue; }
+      if (c.f0 > f + 0.15) break;
+      if (f - c.f0 > 0.3 && !state.narrCatch) { state.narrNext++; continue; }
+      narrPlay(state.narrNext, Math.max(ct + Math.max(0, c.f0 - f), state.narrBusyUntil + NARR_GAP, ct + 0.02));
+      state.narrNext++;
+    }
+    if (state.narrCatch && (state.narrNext >= HO_CUES.length || HO_CUES[state.narrNext].f0 > f)) state.narrCatch = false;
+  }
+  function narrFade(r, ct) {
+    r.t1 = Math.min(r.t1, ct + 0.1);
+    try {
+      r.g.gain.cancelScheduledValues(ct);
+      r.g.gain.setValueAtTime(r.g.gain.value, ct);
+      r.g.gain.linearRampToValueAtTime(0, ct + 0.1);
+      r.src.stop(ct + 0.11);
+    } catch (e) { try { r.src.stop(); } catch (e2) {} }
+  }
+  /* she stops (a seek, sound off, leaving hands-on) */
+  function narrStop() {
+    var A = state.audio;
+    if (!A || !A.narrSrcs) return;
+    var ct = A.ctx.currentTime;
+    for (var i = 0; i < A.narrSrcs.length; i++) narrFade(A.narrSrcs[i], ct);
+    A.narrSrcs = [];
+    state.narrBusyUntil = 0;
+  }
+  /* start again from the picture: at the next sentence or, with `win`, at
+   * one begun at most `win` seconds ago (from its start) */
+  function narrReset(win) {
+    narrStop();
+    var f = filmTime(state.t), k = 0;
+    while (k < HO_CUES.length && HO_CUES[k].f0 < f - Math.max(0.05, win || 0)) k++;
+    state.narrNext = k;
+    state.narrCatch = !!win;
+  }
+  /* the picture pauses: she stops too, and says the interrupted sentence
+   * again from its start when it plays on */
+  function narrHalt() {
+    var A = state.audio;
+    if (!A || !A.narrSrcs || !A.narrSrcs.length) return;
+    var first = Infinity;
+    for (var i = 0; i < A.narrSrcs.length; i++) first = Math.min(first, A.narrSrcs[i].k);
+    narrStop();
+    state.narrNext = Math.min(state.narrNext, first);
+    state.narrCatch = true;
+  }
+  /* a stop: the sentence she is in plays out; anything queued after it
+   * waits for the viewer, and she catches up on it when the tour moves on */
+  function narrCancelFuture() {
+    var A = state.audio;
+    if (!A || !A.narrSrcs) return;
+    var ct = A.ctx.currentTime, keep = [], first = Infinity, busy = 0;
+    for (var i = 0; i < A.narrSrcs.length; i++) {
+      var r = A.narrSrcs[i];
+      if (r.t0 > ct + 0.01) { try { r.src.stop(); } catch (e) {} r.t1 = ct; first = Math.min(first, r.k); }
+      else { keep.push(r); busy = Math.max(busy, r.t1); }
+    }
+    A.narrSrcs = keep;
+    state.narrBusyUntil = busy;
+    if (first < Infinity) state.narrNext = Math.min(state.narrNext, first);
+    state.narrCatch = true;
+  }
+  /* what she is saying now, for the captions: the latest thing started,
+   * until a moment after it ends */
+  function sayingNow() {
+    var A = state.audio;
+    if (!A) return '';
+    var ct = A.ctx.currentTime, best = null;
+    for (var i = 0; i < said.length; i++) {
+      var r = said[i];
+      if (ct >= r.t0 - 0.1 && ct < r.t1 + 0.9 && (!best || r.t0 > best.t0)) best = r;
+    }
+    return best ? best.text : '';
   }
   /* Harper's hands-on prompts: one file, fetched once, alongside the effects */
   function loadPrompts() {
@@ -1102,16 +1334,24 @@ function mountThreeRules(host, options) {
     if (!w || !state.sound || !GUIDE.on || !A || !A.prompts) return;
     state.promptWant = null;
     var c = PROMPT_CLIPS[w.id], waited = performance.now() / 1000 - w.at;
-    if (!c || waited > 5) return;
+    if (!c || waited > 8) return;
     stopPrompt();
     if (A.ctx.state === 'suspended') A.ctx.resume();
+    /* narrated, a title stop's prompt is just "Your turn." when her question
+     * ("Want to ...? Just ... it.") has just said the rest */
+    var ct = A.ctx.currentTime, last = said[said.length - 1];
+    var asked = !!(last && last.k != null && /^Want to/.test(last.text) && last.t1 > ct - 4);
+    var end = state.hoWarp && c[2] && asked ? c[2] : c[1];
+    /* a beat after the coach card lands, and after she finishes her sentence */
+    var at = Math.max(ct + Math.max(0.02, PROMPT_DELAY - waited), state.narrBusyUntil + 0.3);
     var src = A.ctx.createBufferSource(), g = A.ctx.createGain();
     src.buffer = A.prompts;
     g.gain.value = VOICE_MIX.gain;
     src.connect(g); g.connect(A.gain);
-    src.start(A.ctx.currentTime + Math.max(0.02, PROMPT_DELAY - waited), c[0], c[1] - c[0]);
-    var P = { src: src, g: g, id: w.id };
+    src.start(at, c[0], end - c[0]);
+    var P = { src: src, g: g, id: w.id, t0: at, t1: at + end - c[0], text: end < c[1] ? 'Your turn.' : (PROMPT_WORDS[w.id] || '') };
     A.prompt = P;
+    said.push(P); if (said.length > 6) said.shift();
     spoken.push(w.id);
     src.onended = function () {
       if (A.prompt === P) A.prompt = null;
@@ -1125,6 +1365,9 @@ function mountThreeRules(host, options) {
     if (!P) return;
     A.prompt = null;
     var tNow = A.ctx.currentTime;
+    P.t1 = Math.min(P.t1, tNow + 0.13);
+    /* her next sentence waits for the fade */
+    if (P.t0 < tNow + 0.13) state.narrBusyUntil = Math.max(state.narrBusyUntil, tNow + 0.13);
     try {
       P.g.gain.cancelScheduledValues(tNow);
       P.g.gain.setValueAtTime(P.g.gain.value, tNow);
@@ -1141,19 +1384,20 @@ function mountThreeRules(host, options) {
       (narr ? '<span class="ptr-snd-t" aria-hidden="true">Narration</span>' : '');
     soundBtn.setAttribute('aria-label', narr ? 'Narration and sound' : 'Sound');
     soundBtn.title = narr ? (state.audioBusy ? 'Loading the narration' : state.sound ? 'Narration and sound on' : 'Turn on narration and sound')
-      : (state.sound ? 'Sound on' : 'Sound off');
+      : (state.sound ? 'Sound and narration on' : 'Turn on sound and narration');
   }
-  /* hands-on mode plays the sound effects alone (story time); Watch mode plays
-   * the narrated film: the voice over the score with its extra bars (film time) */
+  /* hands-on mode plays the sound effects (story time, or film time once her
+   * narration is loaded: see syncHoWarp); Watch mode plays the narrated film:
+   * the voice over the score with its extra bars (film time) */
   function ensureAudio(cb) {
     var need = GUIDE.on ? 'sfx' : 'narr';
-    if (need === 'sfx') loadPrompts();
+    if (need === 'sfx' && state.audio) { loadPrompts(); loadHandsOnNarration(); }
     if (state.audio && state.audio[need]) { cb(); return; }
     var AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
     unlockAudio();
     var A = state.audio;
-    if (need === 'sfx') loadPrompts();
+    if (need === 'sfx') { loadPrompts(); loadHandsOnNarration(); }
     A.waiting = A.waiting || {};
     if (A.waiting[need]) { A.waiting[need].push(cb); return; }
     A.waiting[need] = [cb];
@@ -1169,9 +1413,8 @@ function mountThreeRules(host, options) {
       for (var i = 0; i < w.length; i++) w[i]();
     };
     if (need === 'sfx') { renderScoreAsync(A.ctx.sampleRate, 'sfx', null, finish); return; }
-    loadVoice(A.ctx, voiceUrls(options.voiceSrc), function (voice) {
+    getVoice(function (voice) {
       var vEnd = 0;
-      if (!voice && window.console) console.warn('Pandion three rules: the narration could not be loaded; playing the score alone.');
       if (voice) {
         /* the picture holds its last frame until the last word */
         var last = voice.length - 1;
@@ -1188,13 +1431,15 @@ function mountThreeRules(host, options) {
     state.sound = !state.sound;
     state.userMuted = !state.sound;
     setSoundUi();
-    if (!state.sound) { stopAudio(); stopPrompt(); return; }
+    if (!state.sound) { stopAudio(); stopPrompt(); narrStop(); syncHoWarp(); return; }
     unlockAudio();
     ensureAudio(function () {
       if (!state.sound) return;
       if (state.audio.ctx.state === 'suspended') state.audio.ctx.resume();
+      /* hands-on: back to the narrated clock if her narration is loaded */
+      syncHoWarp();
       /* narration rejoins at the start of the sentence under way */
-      if (state.playing && !state.fast) { state.t = now(); alignToSentence(); rebase(); startAudio(); }
+      if (state.playing && !state.fast && !state.audio.src) { state.t = now(); alignToSentence(); rebase(); startAudio(); }
       /* waiting at a stop: Harper says what to do (sound just came on) */
       if (GUIDE.on && state.waiting && state.waiting.kind !== 'hub' && !state.drag) wantPrompt(state.waiting.id);
     });
@@ -1235,7 +1480,7 @@ function mountThreeRules(host, options) {
     else if (k === 'ArrowLeft') { e.preventDefault(); seek(state.t - 5); }
     else if (k === 'Home') { e.preventDefault(); seek(0); }
     else if (k === 'End') { e.preventDefault(); seek(dur()); }
-    else if ((k === 'c' || k === 'C') && WARP.on) { e.preventDefault(); ccBtn.click(); }
+    else if ((k === 'c' || k === 'C') && (WARP.on || state.hoWarp)) { e.preventDefault(); ccBtn.click(); }
     else if (k === 'm' || k === 'M') { e.preventDefault(); soundBtn.click(); }
   });
 
@@ -1273,10 +1518,10 @@ function mountThreeRules(host, options) {
     var wctx = wc.getContext('2d'), stops = [8, 12.3, 16, 20.5, 24, 30.3, 33.5, 38.5, 45.5], i = 0;
     var idle = window.requestIdleCallback || function (f) { return setTimeout(function () { f({ timeRemaining: function () { return 8; } }); }, 60); };
     function step(dl) {
-      var was = GUIDE.on, wasW = WARP.on;
-      GUIDE.on = false; WARP.on = false;
+      var was = GUIDE.on, wasW = WARP.on, wasA = WARP.ambient;
+      GUIDE.on = false; WARP.on = false; WARP.ambient = false;
       while (i < stops.length && dl.timeRemaining() > 4) { try { renderFrame(wctx, stops[i++], 0.1); } catch (e) { i = stops.length; } }
-      GUIDE.on = was; WARP.on = wasW;
+      GUIDE.on = was; WARP.on = wasW; WARP.ambient = wasA;
       if (i < stops.length) idle(step);
     }
     idle(step);
@@ -1295,7 +1540,14 @@ function mountThreeRules(host, options) {
     /* for tests: Harper's hands-on prompts (loaded?, the one playing, all started so far) */
     get promptsReady() { return !!(state.audio && state.audio.prompts); },
     get prompt() { return state.audio && state.audio.prompt ? state.audio.prompt.id : null; },
-    get spoken() { return spoken.slice(); }
+    get spoken() { return spoken.slice(); },
+    /* for tests: narrated hands-on (on?, the sentences started by NARRATION_CUES
+     * index, what she is saying now, when her queued words end, the audio clock) */
+    get narrated() { return state.hoWarp; },
+    get narrLog() { return narrLog.slice(); },
+    get saying() { return sayingNow(); },
+    get narrBusyUntil() { return state.narrBusyUntil; },
+    get audioTime() { return state.audio ? state.audio.ctx.currentTime : 0; }
   };
   host.__ptr = api;
   return api;
@@ -1308,6 +1560,8 @@ function renderScoreAsync(sr, kind, voice, cb) {
   if (_scoreCache[key]) { cb(_scoreCache[key]); return; }
   function payloadWith(v) {
     if (kind === 'sfx') return { sampleRate: sr, duration: DURATION, cues: SFX, finale: FINALE, music: false };
+    /* narrated hands-on: the effects in film time (the tour runs through the film's pauses) */
+    if (kind === 'sfxfilm') return { sampleRate: sr, duration: FILM_AUDIO_DURATION, cues: FILM_SFX, finale: FILM_FINALE, music: false };
     var p = { sampleRate: sr, duration: FILM_AUDIO_DURATION, cues: FILM_SFX, finale: FILM_FINALE, plan: FILM_PLAN, titleTimes: FILM_TITLES };
     if (v) p.voice = { data: v, gain: VOICE_MIX.gain, bedDb: VOICE_MIX.bedDb };
     return p;

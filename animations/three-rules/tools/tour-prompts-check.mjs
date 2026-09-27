@@ -1,4 +1,7 @@
-// Harper's spoken prompts in hands-on mode, on the Learn page itself: nothing
+// Harper's spoken prompts in the PLAIN hands-on tour: her narration's voice
+// file is blocked here, so this is the fallback when the narration cannot
+// load (prompts only, story clock; tools/tour-narration-check.mjs covers the
+// narrated tour). On the Learn page itself: nothing
 // is fetched before Try it yourself; that click turns the sound on and loads
 // the prompts file; at every stop she starts that stop's clip (the right span
 // of the file, a beat after the coach card, at the narration's gain) and she
@@ -15,7 +18,9 @@ const browser = await engine.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 const errors = [], promptReq = [];
 page.on('pageerror', e => errors.push(e.message));
-page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') errors.push(m.type() + ': ' + m.text()); });
+/* expected: the blocked voice files, and the player's warning about them */
+page.on('console', m => { if ((m.type() === 'error' || m.type() === 'warning') && !/narration could not be loaded|Failed to load resource/.test(m.text())) errors.push(m.type() + ': ' + m.text()); });
+await page.route(/pandion-three-rules-voice\.(webm|flac)/, r => r.abort());
 page.on('response', r => { if (r.url().includes('pandion-three-rules-prompts')) promptReq.push(r.url().split('/').pop() + ' ' + r.status()); });
 /* log every buffer source that plays the prompts file (mono, about 29 s):
  * when (relative to now), offset, duration, its gain, and when it is stopped */

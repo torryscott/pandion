@@ -15,7 +15,7 @@ const ok = (c, m) => { console.log((c ? '  ok   ' : '  FAIL ') + m); if (!c) fai
 await page.goto(url);
 await page.evaluate(() => document.querySelector('[data-pandion-three-rules]').scrollIntoView({ block: 'center' }));
 const st = () => page.evaluate(() => { const a = document.querySelector('[data-pandion-three-rules]').__ptr; return { t: a.time, waiting: a.waiting }; });
-const waitFor = (id, timeout = 20000) => page.waitForFunction((id) => document.querySelector('[data-pandion-three-rules]').__ptr.waiting === id, id, { timeout }).then(() => true, () => false);
+const waitFor = (id, timeout = 45000) => page.waitForFunction((id) => document.querySelector('[data-pandion-three-rules]').__ptr.waiting === id, id, { timeout }).then(() => true, () => false);
 const stageBox = () => page.evaluate(() => { const r = document.querySelector('.ptr-stage').getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; });
 const toPage = (b, p) => [b.x + p[0] / 1920 * b.w, b.y + p[1] / 1080 * b.h];
 const center = r => [r[0] + r[2] / 2, r[1] + r[3] / 2];
@@ -41,7 +41,7 @@ ok(fresh > 150, `fresh start card: no caption in the corner (darkest ${fresh.toF
 await page.click('.ptr-hub-go');
 let prev = 'hub';
 for (;;) {
-  await page.waitForFunction((prev) => { const a = document.querySelector('[data-pandion-three-rules]').__ptr; const e = document.querySelector('.ptr-end'); return (a.waiting && a.waiting !== prev) || (e && !e.hidden); }, prev, { timeout: 30000 });
+  await page.waitForFunction((prev) => { const a = document.querySelector('[data-pandion-three-rules]').__ptr; const e = document.querySelector('.ptr-end'); return (a.waiting && a.waiting !== prev) || (e && !e.hidden); }, prev, { timeout: 45000 });
   if (await page.evaluate(() => !document.querySelector('.ptr-end').hidden)) break;
   const id = (await st()).waiting;
   await page.waitForTimeout(300);

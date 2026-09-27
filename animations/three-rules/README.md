@@ -16,13 +16,29 @@ on their own with the film's cursor showing. Clicks are hit-tested against
 the replica's own geometry and the film continues from its scripted press;
 drags map the pointer's travel along the film's drag path to story time, so
 the dragged part follows the hand (let go early and it springs back). Show
-me (or Enter) does any step. Sound in hands-on mode plays the sound effects,
-and Harper Lawson (the narration's voice) reads each stop's instruction a
-beat after its card appears, then the end card's line; she fades out the
-moment the viewer acts, and does not repeat herself when a drag springs
-back. Try it yourself (or a rule on the start card) turns the sound on, the
-way Just watch turns on the narration, unless the viewer turned it off
-themselves.
+me (or Enter) does any step. Try it yourself (or a rule on the start card)
+turns the sound on, the way Just watch turns on the narration, unless the
+viewer turned it off themselves.
+
+**Hands-on is narrated too** (Sep 27 2026, Torry: the prompts alone left out
+the context around them). With sound on and her narration loaded, the
+hands-on tour keeps its story clock but runs it through the narrated film's
+pauses (`syncHoWarp`: the clock advances in film time and maps back, so
+every gate stays in story time), over the effects in film time (no music:
+the stops would keep cutting it off). Harper speaks sentence by sentence
+from the narration track, each when the picture reaches it and never over
+another (`narrTick`); a sentence the picture passed without her (a seek) is
+left out, never joined halfway. At a stop she finishes the sentence she is
+in, then says the prompt; after the viewer acts she catches up on what the
+picture passed. `HO_NARR_RULES` (player) adapts the film's narration for a
+viewer who does the steps: three instructions are left to the prompts, two
+sentences are replaced by clips from the prompts file ("Every outlined bar
+follows...", "Every observation lands on its bar."), and after the title
+questions the prompt is just "Your turn.". A pause mid-sentence says that
+sentence again from its start; the last frame holds for the tagline. Sound
+off (or a narration that cannot load) is the plain tour: story time, effects,
+and the prompts. She fades out the moment the viewer acts on a prompt, and
+does not repeat herself when a drag springs back.
 
 **Watch mode is the narrated film** (Sep 26 2026): Just watch (on the start
 card, the phone step card, or the end card) turns narration on and plays the
@@ -41,10 +57,11 @@ film (the warp is off unless the player is in Watch mode).
 - Soundtrack: synthesized in JavaScript (score and every sound effect, from
   the same cue sheet as the picture), rendered in a Web Worker only when the
   viewer turns sound on. Nothing is downloaded but the script.
-- Size: about 149 KB minified, about 54 KB gzipped, plus the narration
+- Size: about 155 KB minified, about 56 KB gzipped, plus the narration
   (Opus 476 KB, FLAC fallback 1.9 MB), fetched only when narration is wanted,
-  and the hands-on prompts (Opus 157 KB, FLAC 606 KB), fetched with the
-  sound effects the first time hands-on sound is on.
+  and the hands-on prompts (Opus about 200 KB, FLAC fallback), fetched with the
+  sound effects the first time hands-on sound is on (the narration's voice
+  loads then too, for the narrated hands-on tour).
 - Code for the tour: `src/85-guide.js` (the stops, their targets, hit tests,
   drag mapping, the hint layer) and `src/90-player.js` (the state machine,
   pointer handling, the coach card, start and end cards). Checks:
@@ -58,11 +75,15 @@ film (the warp is off unless the player is in Watch mode).
   before Just watch, narration and captions, the held last frame, the clock
   trade both ways, the phone step card) and, given the narration pipeline's
   `out/vo/mix-48k.wav`, checks the player's mix against it;
+  `node tools/tour-narration-check.mjs <learn page url> [engine]` covers the
+  narrated hands-on tour (every sentence in order with the hands-on rules,
+  no overlaps, prompts after her sentences, "Your turn." at the titles,
+  captions, the held last frame, pause, sound off and on);
   `node tools/tour-prompts-check.mjs <learn page url> [engine]` covers the
-  spoken prompts (nothing fetched before Try it yourself, the right clip at
-  every stop at the narration's gain, fading out on the viewer's action,
-  no repeat after an early release, muting, the end card, none in Watch
-  mode, and Try it yourself leaving an explicit mute alone).
+  prompts in the plain tour (the voice file is blocked, the fallback: the
+  right clip at every stop at the narration's gain, fading out on the
+  viewer's action, no repeat after an early release, muting, the end card,
+  none in Watch mode, and Try it yourself leaving an explicit mute alone).
   `node tools/single-file.mjs` makes a self-contained page,
   `node tools/record-demo.mjs` a recorded walkthrough.
 

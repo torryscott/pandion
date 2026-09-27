@@ -21,7 +21,8 @@ page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
 await page.goto(url);
 await page.evaluate(() => document.querySelector('[data-pandion-three-rules]').scrollIntoView({ block: 'center' }));
 const api = () => page.evaluate(() => { const a = document.querySelector('[data-pandion-three-rules]').__ptr; return { t: a.time, waiting: a.waiting, playing: a.playing, dragging: a.dragging }; });
-const waitGate = async (prev, timeout = 20000) => {
+/* Try it yourself turns the sound on: the narrated tour runs through the film's pauses */
+const waitGate = async (prev, timeout = 45000) => {
   const t0 = Date.now();
   for (;;) {
     const s = await api();

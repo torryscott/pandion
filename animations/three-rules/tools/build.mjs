@@ -17,6 +17,9 @@ var api = {
   duration: DURATION,
   filmDuration: FILM_DURATION,   /* Watch mode: the narrated film, with its pauses */
   chapters: CHAPTERS,
+  /* for tests: the narration's sentences (film-time captions) and the
+   * hands-on rules applied to them (skip, or a replacement clip id) */
+  narration: HO_CUES.map(function (c) { return { text: c.text, f0: c.f0, skip: c.skip, clip: c.clip }; }),
   renderSoundtrack: function (sr, music) { return renderSoundtrack({ sampleRate: sr || 48000, duration: DURATION, cues: SFX, finale: FINALE, music: music !== false }); },
   /* for tests: the hands-on gates and where their targets sit (stage px) */
   guide: {

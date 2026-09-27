@@ -18,7 +18,9 @@
  * (2.4 s) so every title hit and the osprey's landing stay on a downbeat;
  * the music gets the same number of extra bars (FILM_PLAN). */
 
-var WARP = { on: false };
+/* ambient: narrated hands-on keeps story time but runs through the pauses;
+ * its ambient motion (marching outlines, drift) follows film time too */
+var WARP = { on: false, ambient: false };
 function _warpP5(x) { x = x < 0 ? 0 : x > 1 ? 1 : x; return x * x * x * (x * (x * 6 - 15) + 10); }
 var WARP_TOTAL = 0;
 for (var _wi = 0; _wi < WARP_HOLDS.length; _wi++) WARP_TOTAL += WARP_HOLDS[_wi].dur;
