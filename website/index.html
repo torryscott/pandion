@@ -139,6 +139,21 @@
     color: var(--muted); font-size: 14px;
   }
 
+  /* ---- the one-minute story film, under the product shot ---- */
+  section.story { padding: 0 0 72px; }
+  .story-film { margin: 0; }
+  .story-film video {
+    display: block; width: 100%; height: auto; background: #eef2f7;
+  }
+  .story-film figcaption {
+    margin-top: 12px; color: var(--muted); font-size: 14px; max-width: 46em;
+  }
+  .story-transcript { margin: 8px 0 0; max-width: 46em; }
+  .story-transcript summary {
+    cursor: pointer; color: var(--cobalt); font-weight: 600; font-size: 14px;
+  }
+  .story-transcript p { margin: 8px 0 0; font-size: 14.5px; }
+
   /* ---- the three workspaces a chart tool usually leaves out ---- */
   .workspaces .shot-block { margin-top: 44px; }
   .workspaces .shot-block:first-of-type { margin-top: 0; }
@@ -365,6 +380,52 @@
       </figure>
     </div>
   </div>
+
+  <section class="story">
+    <div class="wrap">
+      <p class="kicker">The story</p>
+      <h2>Pandion Plots in under a minute.</h2>
+      <figure class="story-film">
+        <div class="shot-frame">
+          <video controls preload="none" playsinline width="1920" height="1080"
+                 poster="assets/brand-story/poster.jpg"
+                 aria-describedby="story-transcript-text">
+            <source src="assets/brand-story/pandion-plots-brand-story.mp4" type="video/mp4">
+            <track kind="captions" src="assets/brand-story/pandion-plots-brand-story.vtt"
+                   srclang="en" label="English" default>
+          </video>
+        </div>
+        <figcaption>
+          Why Pandion Plots exists and what it does, narrated with
+          captions. The app scenes are the real app.
+        </figcaption>
+        <details class="story-transcript">
+          <summary>Read the transcript</summary>
+          <div id="story-transcript-text">
+            <p>Every dataset has a story in it. But getting it onto the
+            page? That's the struggle. Some tools are easy, but only go so
+            far. Others can do anything, once you learn to code. So a
+            professor built something in between.</p>
+            <p>Pandion Plots. Drop in your variables, and your first draft
+            is already presentable. Want to change something? Just click
+            it. The statistics sit right beside it, explained in plain
+            language. It even checks your graph for common mistakes.</p>
+            <p>Free, open source, and private. Your data never leaves your
+            computer. Built for research. Designed to teach.</p>
+            <p>Pandion Plots. Clear statistical figures, without the
+            struggle.</p>
+            <p>On screen: a hand-drawn collage of paper, pencil and code
+            leads to the real app. Variables are dragged into the chart
+            setup and a grouped bar chart draws itself; clicking the bars
+            opens their settings and recolors them; the Statistics panel
+            explains a p value in plain language; and Check my graph
+            passes all fifteen of its checks. The film ends with the
+            osprey diving along a straight line to its final point.</p>
+          </div>
+        </details>
+      </figure>
+    </div>
+  </section>
 
   <section class="gallery-teaser">
     <div class="wrap">
