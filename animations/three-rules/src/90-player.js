@@ -146,14 +146,23 @@ var PROMISE_WATCH = 'Explore them in under two minutes.';
  * Opus. It is fetched only when narration is wanted (Just watch, or sound on
  * in Watch mode), then mixed with the narrated score in the worker (the score
  * ducks under the voice). The picture holds its final frame until the last
- * word, then the closing chord rings out. */
+ * word, then the closing chord rings out.
+ * In hands-on mode Harper reads each stop's instruction (and the end card's
+ * line): pandion-three-rules-prompts.{webm,flac}, one file with the clips
+ * 0.6 s apart (PROMPT_CLIPS says where each sits), fetched with the sound
+ * effects the first time hands-on sound is on, and played at the narration's
+ * own gain so she sounds the same in both modes. */
 var PTR_SCRIPT_SRC = (function () {
   try { var s = document.currentScript; return s && s.src ? s.src : ''; } catch (e) { return ''; }
 })();
 var VOICE_FILES = ['pandion-three-rules-voice.webm', 'pandion-three-rules-voice.flac'];
+var PROMPT_FILES = ['pandion-three-rules-prompts.webm', 'pandion-three-rules-prompts.flac'];
 var VOICE_MIX = { gain: 1.26, bedDb: -5.5 };
-function voiceUrls(attr) {
-  var list = attr ? attr.split(',') : VOICE_FILES;
+/* a spoken prompt starts a beat after its coach card lands (the card's
+ * entrance takes 0.3 s) */
+var PROMPT_DELAY = 0.3;
+function voiceUrls(attr, files) {
+  var list = attr ? attr.split(',') : (files || VOICE_FILES);
   return list.map(function (u) {
     u = u.trim();
     try { return new URL(u, attr ? document.baseURI : (PTR_SCRIPT_SRC || document.baseURI)).href; } catch (e) { return u; }
@@ -353,8 +362,14 @@ function mountThreeRules(host, options) {
     t: 0, playing: false, ended: false, userPaused: false, autoPaused: false, reduce: reduce,
     clock0: 0, t0: 0, visible: false, sound: false, audio: null, audioBusy: false, raf: 0, dpr: 1, w: 0,
     mode: options.mode === 'watch' ? 'watch' : 'try', waiting: null, drag: null, skip: null, fast: null, jumpFade: null,
-    cc: true
+    cc: true,
+    /* the viewer turned the sound off themselves: Try it yourself leaves it off */
+    userMuted: false,
+    /* the spoken prompt asked for and not yet played ({id, at}) */
+    promptWant: null
   };
+  /* for tests: every prompt Harper has started, in order */
+  var spoken = [];
   GUIDE.reduce = reduce;
   /* the length of the current mode's timeline: story time in hands-on mode,
    * the narrated film (with its pauses) in Watch mode */
@@ -397,7 +412,7 @@ function mountThreeRules(host, options) {
       var ac = new AC(), gain = ac.createGain();
       gain.gain.value = 0.9;
       gain.connect(ac.destination);
-      state.audio = { ctx: ac, gain: gain, narr: null, sfx: null, src: null };
+      state.audio = { ctx: ac, gain: gain, narr: null, sfx: null, src: null, prompts: null, prompt: null };
     }
     if (state.audio.ctx.state === 'suspended') state.audio.ctx.resume();
   }
@@ -409,6 +424,7 @@ function mountThreeRules(host, options) {
     hideCards();
     if (state.playing) pause(false);
     state.sound = true;
+    state.userMuted = false;
     unlockAudio();
     setMode('watch');   /* converts the clock and, with sound on, starts at a sentence */
     if (fromStart) { state.t = 0; state.ended = false; }
@@ -615,6 +631,9 @@ function mountThreeRules(host, options) {
     return { n: n, tot: tot };
   }
   function arrive(g) {
+    /* the same stop again (a drag let go too early springs back to it):
+     * the coach returns, but Harper does not repeat herself */
+    var again = state.waiting === g;
     state.playing = false;
     stopAudio();
     state.t = g.t;
@@ -634,12 +653,14 @@ function mountThreeRules(host, options) {
     placeCoach(g);
     stage.classList.toggle('ptr-touchlock', g.kind === 'drag');
     announce('Your turn. ' + g.text + (g.kind === 'type' ? '' : ' Or press Enter to see it done.'));
+    if (!again) wantPrompt(g.id);
     if (g.kind === 'type') beginTyping(g);
     /* keyboard users land on the coach, so Show me is one key away */
     else if (root.contains(document.activeElement) && document.activeElement !== root) showBtn.focus({ preventScroll: true });
     kick();
   }
   function leaveGate() {
+    stopPrompt();
     state.waiting = null;
     state.drag = null;
     GUIDE.gate = null;
@@ -738,6 +759,10 @@ function mountThreeRules(host, options) {
   function startRule(i) {
     var g = state.waiting;
     var focusIn = root.contains(document.activeElement);
+    /* Try it yourself (or a rule) is a click, so the tour may speak: the sound
+     * comes on, the way Just watch turns on the narration, unless the viewer
+     * turned it off themselves */
+    if (!state.sound && !state.userMuted) { state.sound = true; unlockAudio(); setSoundUi(); }
     leaveGate();
     hideCards();
     if (!GUIDE.on) setMode('try');
@@ -752,12 +777,15 @@ function mountThreeRules(host, options) {
     }
     state.playing = true; state.started = true; state.userPaused = false;
     rebase();
-    if (state.sound) startAudio();
+    /* the effects may still be loading (sound only just came on): they join
+     * the picture where it is when they are ready */
+    if (state.sound) ensureAudio(function () { if (state.playing && !state.fast && !state.audio.src) { state.t = now(); rebase(); startAudio(); } });
     keepFocus(focusIn);
     kick();
   }
   function showEnd() {
     endCard.hidden = false;
+    wantPrompt('end');
     announce('Nice work. That is all three rules. Open Pandion Plots, try the tour again, or watch it narrated.');
     if (root.contains(document.activeElement) && document.activeElement !== root) endCard.querySelector('.ptr-end-app').focus({ preventScroll: true });
   }
@@ -1044,6 +1072,66 @@ function mountThreeRules(host, options) {
     g.gain.linearRampToValueAtTime(0, t0 + len);
     src.start(t0, Math.max(0, t - 0.005), len);
   }
+  /* Harper's hands-on prompts: one file, fetched once, alongside the effects */
+  function loadPrompts() {
+    var A = state.audio;
+    if (!A || A.prompts || A.promptsLoading || A.promptsFailed) return;
+    A.promptsLoading = true;
+    loadVoice(A.ctx, voiceUrls(options.promptSrc, PROMPT_FILES), function (mono) {
+      A.promptsLoading = false;
+      if (!mono) {
+        A.promptsFailed = true;
+        if (window.console) console.warn('Pandion three rules: the spoken prompts could not be loaded; the tour carries on without them.');
+        return;
+      }
+      var b = A.ctx.createBuffer(1, mono.length, A.ctx.sampleRate);
+      if (b.copyToChannel) b.copyToChannel(mono, 0); else b.getChannelData(0).set(mono);
+      A.prompts = b;
+      sayPrompt();
+    });
+  }
+  /* ask for a prompt (a stop just reached, or the end card); it plays as soon
+   * as the prompts are loaded, unless the viewer has moved on or has been
+   * there a while by then */
+  function wantPrompt(id) {
+    state.promptWant = { id: id, at: performance.now() / 1000 };
+    sayPrompt();
+  }
+  function sayPrompt() {
+    var A = state.audio, w = state.promptWant;
+    if (!w || !state.sound || !GUIDE.on || !A || !A.prompts) return;
+    state.promptWant = null;
+    var c = PROMPT_CLIPS[w.id], waited = performance.now() / 1000 - w.at;
+    if (!c || waited > 5) return;
+    stopPrompt();
+    if (A.ctx.state === 'suspended') A.ctx.resume();
+    var src = A.ctx.createBufferSource(), g = A.ctx.createGain();
+    src.buffer = A.prompts;
+    g.gain.value = VOICE_MIX.gain;
+    src.connect(g); g.connect(A.gain);
+    src.start(A.ctx.currentTime + Math.max(0.02, PROMPT_DELAY - waited), c[0], c[1] - c[0]);
+    var P = { src: src, g: g, id: w.id };
+    A.prompt = P;
+    spoken.push(w.id);
+    src.onended = function () {
+      if (A.prompt === P) A.prompt = null;
+      try { src.disconnect(); g.disconnect(); } catch (e) {}
+    };
+  }
+  /* the viewer acted, or moved on: she fades out rather than stopping mid-word */
+  function stopPrompt() {
+    state.promptWant = null;
+    var A = state.audio, P = A && A.prompt;
+    if (!P) return;
+    A.prompt = null;
+    var tNow = A.ctx.currentTime;
+    try {
+      P.g.gain.cancelScheduledValues(tNow);
+      P.g.gain.setValueAtTime(P.g.gain.value, tNow);
+      P.g.gain.linearRampToValueAtTime(0, tNow + 0.12);
+      P.src.stop(tNow + 0.13);
+    } catch (e) { try { P.src.stop(); } catch (e2) {} }
+  }
   function setSoundUi() {
     var narr = WARP.on;
     soundBtn.setAttribute('aria-pressed', state.sound ? 'true' : 'false');
@@ -1059,11 +1147,13 @@ function mountThreeRules(host, options) {
    * the narrated film: the voice over the score with its extra bars (film time) */
   function ensureAudio(cb) {
     var need = GUIDE.on ? 'sfx' : 'narr';
+    if (need === 'sfx') loadPrompts();
     if (state.audio && state.audio[need]) { cb(); return; }
     var AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
     unlockAudio();
     var A = state.audio;
+    if (need === 'sfx') loadPrompts();
     A.waiting = A.waiting || {};
     if (A.waiting[need]) { A.waiting[need].push(cb); return; }
     A.waiting[need] = [cb];
@@ -1096,14 +1186,17 @@ function mountThreeRules(host, options) {
     if (state.audioBusy) return;
     if (state.playing && !state.fast) { state.t = now(); stopAudio(); rebase(); }
     state.sound = !state.sound;
+    state.userMuted = !state.sound;
     setSoundUi();
-    if (!state.sound) { stopAudio(); return; }
+    if (!state.sound) { stopAudio(); stopPrompt(); return; }
     unlockAudio();
     ensureAudio(function () {
       if (!state.sound) return;
       if (state.audio.ctx.state === 'suspended') state.audio.ctx.resume();
       /* narration rejoins at the start of the sentence under way */
       if (state.playing && !state.fast) { state.t = now(); alignToSentence(); rebase(); startAudio(); }
+      /* waiting at a stop: Harper says what to do (sound just came on) */
+      if (GUIDE.on && state.waiting && state.waiting.kind !== 'hub' && !state.drag) wantPrompt(state.waiting.id);
     });
     /* resume inside the gesture so Safari unlocks audio */
     if (state.audio && state.audio.ctx && state.audio.ctx.state === 'suspended') state.audio.ctx.resume();
@@ -1160,6 +1253,7 @@ function mountThreeRules(host, options) {
     io.observe(root);
   }
   document.addEventListener('visibilitychange', function () {
+    if (document.hidden) stopPrompt();
     if (document.hidden && state.playing) { pause(false); state.autoPaused = true; }
   });
   setMode(state.mode);
@@ -1197,7 +1291,11 @@ function mountThreeRules(host, options) {
     /* for tests: the narrated mix the player built (an AudioBuffer), once ready */
     get narrationMix() { return state.audio && state.audio.narr || null; },
     get waiting() { return state.waiting ? state.waiting.id : null; },
-    get dragging() { return !!state.drag; }
+    get dragging() { return !!state.drag; },
+    /* for tests: Harper's hands-on prompts (loaded?, the one playing, all started so far) */
+    get promptsReady() { return !!(state.audio && state.audio.prompts); },
+    get prompt() { return state.audio && state.audio.prompt ? state.audio.prompt.id : null; },
+    get spoken() { return spoken.slice(); }
   };
   host.__ptr = api;
   return api;

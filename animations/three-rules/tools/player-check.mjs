@@ -10,12 +10,12 @@ page.on('console', m => { if (m.type() === 'error') errs.push(m.text()); });
 await page.goto(url);
 await page.waitForTimeout(1500);
 const s1 = await page.evaluate(() => { const p = document.querySelector('[data-pandion-three-rules]').__ptr; return { t: p.time, playing: p.playing }; });
-await page.click('.ptr-btn[aria-pressed]');
+await page.click('.ptr-btn[aria-label="Sound"]');
 const t0 = Date.now();
-await page.waitForFunction(() => !document.querySelector('.ptr-btn[aria-pressed]').classList.contains('ptr-busy'), null, { timeout: 15000 });
+await page.waitForFunction(() => !document.querySelector('.ptr-btn[aria-label="Sound"]').classList.contains('ptr-busy'), null, { timeout: 15000 });
 const renderMs = Date.now() - t0;
 await page.waitForTimeout(800);
-const s2 = await page.evaluate(() => { const p = document.querySelector('[data-pandion-three-rules]').__ptr; return { t: p.time, playing: p.playing, pressed: document.querySelector('.ptr-btn[aria-pressed]').getAttribute('aria-pressed') }; });
+const s2 = await page.evaluate(() => { const p = document.querySelector('[data-pandion-three-rules]').__ptr; return { t: p.time, playing: p.playing, pressed: document.querySelector('.ptr-btn[aria-label="Sound"]').getAttribute('aria-pressed') }; });
 // jump to Add chapter
 await page.click('.ptr-chap:nth-child(4)');
 await page.waitForTimeout(400);

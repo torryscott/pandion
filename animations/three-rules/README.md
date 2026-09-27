@@ -16,8 +16,13 @@ on their own with the film's cursor showing. Clicks are hit-tested against
 the replica's own geometry and the film continues from its scripted press;
 drags map the pointer's travel along the film's drag path to story time, so
 the dragged part follows the hand (let go early and it springs back). Show
-me (or Enter) does any step. Sound in hands-on mode plays the sound effects
-alone.
+me (or Enter) does any step. Sound in hands-on mode plays the sound effects,
+and Harper Lawson (the narration's voice) reads each stop's instruction a
+beat after its card appears, then the end card's line; she fades out the
+moment the viewer acts, and does not repeat herself when a drag springs
+back. Try it yourself (or a rule on the start card) turns the sound on, the
+way Just watch turns on the narration, unless the viewer turned it off
+themselves.
 
 **Watch mode is the narrated film** (Sep 26 2026): Just watch (on the start
 card, the phone step card, or the end card) turns narration on and plays the
@@ -36,8 +41,10 @@ film (the warp is off unless the player is in Watch mode).
 - Soundtrack: synthesized in JavaScript (score and every sound effect, from
   the same cue sheet as the picture), rendered in a Web Worker only when the
   viewer turns sound on. Nothing is downloaded but the script.
-- Size: about 147 KB minified, about 53 KB gzipped, plus the narration
-  (Opus 476 KB, FLAC fallback 1.9 MB), fetched only when narration is wanted.
+- Size: about 149 KB minified, about 54 KB gzipped, plus the narration
+  (Opus 476 KB, FLAC fallback 1.9 MB), fetched only when narration is wanted,
+  and the hands-on prompts (Opus 157 KB, FLAC 606 KB), fetched with the
+  sound effects the first time hands-on sound is on.
 - Code for the tour: `src/85-guide.js` (the stops, their targets, hit tests,
   drag mapping, the hint layer) and `src/90-player.js` (the state machine,
   pointer handling, the coach card, start and end cards). Checks:
@@ -50,7 +57,12 @@ film (the warp is off unless the player is in Watch mode).
   [offline mix]` covers Watch mode on the Learn page itself (no voice fetch
   before Just watch, narration and captions, the held last frame, the clock
   trade both ways, the phone step card) and, given the narration pipeline's
-  `out/vo/mix-48k.wav`, checks the player's mix against it.
+  `out/vo/mix-48k.wav`, checks the player's mix against it;
+  `node tools/tour-prompts-check.mjs <learn page url> [engine]` covers the
+  spoken prompts (nothing fetched before Try it yourself, the right clip at
+  every stop at the narration's gain, fading out on the viewer's action,
+  no repeat after an early release, muting, the end card, none in Watch
+  mode, and Try it yourself leaving an explicit mute alone).
   `node tools/single-file.mjs` makes a self-contained page,
   `node tools/record-demo.mjs` a recorded walkthrough.
 
@@ -110,6 +122,7 @@ Player behavior:
 | `54-warp-data.js` | GENERATED: the narrated film's pauses (story time, window, added seconds) |
 | `55-warp.js` | Watch mode's film clock: story time to film time and back, the narrated score plan |
 | `56-narration-cues.js` | GENERATED: the narration's caption cues in film time |
+| `57-prompt-clips.js` | GENERATED: where each hands-on prompt sits in the prompts file |
 | `60-overlay.js` | background, intro, rule titles, chapter pill, finale, cursor |
 | `70-render.js` | the frame renderer |
 | `80-audio.js` | the DSP synthesizer (score + sound effects) |
@@ -123,6 +136,13 @@ and packaged. After a re-voice, copy its `src/54-warp-data.js`, regenerate the
 cues (`tools/vo/cues_js.py vo/script.json out/vo/placement.json
 <this folder>/src/56-narration-cues.js`) and copy
 `dist/pandion-three-rules-voice.{webm,flac}` to `website/assets/three-rules/`.
+The hands-on prompts come from the same pipeline: `vo/prompts.json` names
+each stop's take, `tools/vo/prompts.py vo/prompts.json
+<this folder>/src/57-prompt-clips.js` trims, masters and packages them, and
+`tools/vo/prompts_verify.py` checks every clip through the web encodings;
+copy `dist/pandion-three-rules-prompts.{webm,flac}` to
+`website/assets/three-rules/`. A new stop needs a prompt keyed by its gate
+id (a stop without one is simply silent).
 
 The replica's positions, colors and type sizes were measured from the live
 app (`website/app/`) on 26 Sep 2026 with `tools/capture-app.mjs`,

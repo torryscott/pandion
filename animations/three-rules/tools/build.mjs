@@ -30,7 +30,7 @@ function autoMount() {
   var els = document.querySelectorAll('[data-pandion-three-rules]');
   for (var i = 0; i < els.length; i++) {
     var el = els[i];
-    mountThreeRules(el, { autoplay: el.getAttribute('data-autoplay') !== 'false', describedBy: el.getAttribute('data-describedby') || null, label: el.getAttribute('data-label') || null, voiceSrc: el.getAttribute('data-voice-src') || null });
+    mountThreeRules(el, { autoplay: el.getAttribute('data-autoplay') !== 'false', describedBy: el.getAttribute('data-describedby') || null, label: el.getAttribute('data-label') || null, voiceSrc: el.getAttribute('data-voice-src') || null, promptSrc: el.getAttribute('data-prompt-src') || null });
   }
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', autoMount); else autoMount();
@@ -38,6 +38,13 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 `;
 fs.mkdirSync(path.join(ROOT, 'dist'), { recursive: true });
 fs.writeFileSync(path.join(ROOT, 'dist/pandion-three-rules.js'), out);
+/* the narration and the hands-on prompts load from beside the script: copy the
+ * site's files next to the dev build too, so the dev pages (player-test.html)
+ * play them */
+const assetDir = path.resolve(ROOT, '../../website/assets/three-rules');
+for (const f of ['voice.webm', 'voice.flac', 'prompts.webm', 'prompts.flac'].map(x => 'pandion-three-rules-' + x)) {
+  if (fs.existsSync(path.join(assetDir, f))) fs.copyFileSync(path.join(assetDir, f), path.join(ROOT, 'dist', f));
+}
 console.log('dist/pandion-three-rules.js', (out.length / 1024).toFixed(1) + ' KB');
 // optional: --site <dir> also writes the minified build there
 const siteIdx = process.argv.indexOf('--site');

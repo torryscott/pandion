@@ -2,7 +2,8 @@
 // (tools/tour-check.mjs): pick a rule on the start card, let go of a drag
 // too early (it springs back and waits), "Show me", a missed click (the
 // coach nudges, the tour waits), Enter as "Show me", switching to Watch
-// mode (no more stops, no end card), sound in hands-on mode.
+// mode (no more stops, no end card), sound in hands-on mode (picking a rule
+// turns it on; Harper's spoken prompts are checked in tour-prompts-check.mjs).
 // usage: node tools/tour-behavior.mjs [url] [chromium|webkit]
 import { chromium, webkit } from 'playwright';
 const url = process.argv[2] || 'http://127.0.0.1:8883/player-test.html';
@@ -31,6 +32,7 @@ await page.waitForTimeout(150);
 ok(await page.evaluate(() => document.querySelector('.ptr-stage').classList.contains('ptr-over')), 'the Drag point shows it can be clicked');
 await page.mouse.down(); await page.mouse.up();
 ok(await waitFor('r2it'), 'clicking the Drag point starts Rule 2');
+ok(await page.evaluate(() => document.querySelector('[data-pandion-three-rules]').__ptr.sound), 'picking a rule turns the sound on');
 
 /* let go too early: springs back, still waiting */
 let s = await shape('r2it');
@@ -85,13 +87,17 @@ ok(!s.playing && s.t >= D - 0.05, `watching runs to the end without stopping (t=
 ok(await page.evaluate(() => document.querySelector('.ptr-end').hidden), 'no end card when just watching');
 ok(await page.evaluate(() => document.querySelector('.ptr-main').getAttribute('aria-label')) === 'Replay', 'the play button offers Replay');
 
-/* hands-on again, from the Add chapter, with sound */
+/* hands-on again, from the Add chapter, with sound: off, then on again */
+await page.waitForFunction(() => !document.querySelector('.ptr-bar .ptr-busy'), null, { timeout: 30000 }).catch(() => {});
 await page.click('.ptr-mode');
 await page.evaluate(() => { const a = document.querySelector('[data-pandion-three-rules]').__ptr; a.seek(28.3); a.play(); });
 await page.click('.ptr-btn[aria-label="Sound"]');
+ok(await page.evaluate(() => document.querySelector('.ptr-btn[aria-label="Sound"]').getAttribute('aria-pressed')) === 'false', 'the sound button turns hands-on sound off');
+await page.click('.ptr-btn[aria-label="Sound"]');
 await page.waitForFunction(() => !document.querySelector('.ptr-btn[aria-label="Sound"]').classList.contains('ptr-busy'), null, { timeout: 20000 }).catch(() => {});
-ok(await page.evaluate(() => document.querySelector('.ptr-btn[aria-label="Sound"]').getAttribute('aria-pressed')) === 'true', 'sound turns on in hands-on mode (effects only)');
+ok(await page.evaluate(() => document.querySelector('.ptr-btn[aria-label="Sound"]').getAttribute('aria-pressed')) === 'true', 'and on again (effects and spoken prompts)');
 ok(await waitFor('r3btn'), 'hands-on again: the tour stops at + Add');
+ok(await page.waitForFunction(() => document.querySelector('[data-pandion-three-rules]').__ptr.prompt === 'r3btn', null, { timeout: 3000 }).then(() => true, () => false), 'and Harper says the + Add step');
 
 console.log(errors.length ? 'ERRORS:\n' + errors.join('\n') : 'no console errors or warnings');
 console.log(fails ? fails + ' FAILED' : 'all passed');
