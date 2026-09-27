@@ -292,7 +292,7 @@ function haloRect(ctx, S, x, y, w, h, k, opts) {
   ctx.strokeStyle = rgba(opts.color || C.selBlue, opts.alpha == null ? 0.6 : opts.alpha);
   ctx.lineWidth = opts.width || 1.5;
   ctx.setLineDash(opts.dash || [4.5, 3]);
-  ctx.lineDashOffset = -(S.time * 12.5) % 7.5;
+  ctx.lineDashOffset = -((S.wall != null ? S.wall : S.time) * 12.5) % 7.5;   /* keeps marching through pauses */
   ctx.lineCap = 'round';
   roundRect(ctx, x, y, w, h, opts.r == null ? 4 : opts.r);
   ctx.stroke();

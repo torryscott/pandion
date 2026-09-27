@@ -268,7 +268,7 @@ function renderSoundtrack(opts) {
   };
   var ROOT = { Dmaj9: 38, D: 38, Bm7: 35, Gmaj7: 43, A: 45, A7sus: 45, Bm9: 35, Gmaj9: 43 };
   /* bar-by-bar plan: chord, section flags */
-  var PLAN = [
+  var PLAN = opts.plan || [
     ['Dmaj9', 'intro'], ['Bm9', 'intro2'],
     ['D', 'title'], ['Bm7', 'groove'], ['Gmaj7', 'groove'], ['A7sus', 'groove'], ['Gmaj7', 'groove'], ['A', 'groove'],
     ['D', 'title'], ['Bm7', 'groove'], ['Gmaj7', 'groove'], ['A', 'groove'],
@@ -329,7 +329,7 @@ function renderSoundtrack(opts) {
   /* intro: the three dots */
   motif([0.6, 0.9, 1.2], 0.85, 0.55);
   /* rule titles: each rule gets its own note of the motif, over a soft boom */
-  var titleT = [2 * BAR, 8 * BAR, 12 * BAR];
+  var titleT = opts.titleTimes || [2 * BAR, 8 * BAR, 12 * BAR];
   for (var q = 0; q < 3; q++) {
     bell(titleT[q], MOTIF[q] + 12, 0.95, 0, 0.7, 'keys');
     bell(titleT[q], MOTIF[q], 0.45, 0, 0.7, 'keys');
@@ -467,6 +467,79 @@ function renderSoundtrack(opts) {
   for (var o = 0; o < N; o++) {
     outL[o] = Math.tanh(outL[o] * norm * 1.08) * 0.93;
     outR[o] = Math.tanh(outR[o] * norm * 1.08) * 0.93;
+  }
+  /* ---- narration ---- */
+  /* With a voice stem (mono, at SR, already finished offline) the score
+   * becomes a bed: turned down overall, then ducked further in three bands
+   * while the voice speaks (most in the 250 Hz to 4.5 kHz speech band, so
+   * clicks and bells stay bright). The duck starts just before each phrase
+   * (look-ahead) and lets go slowly; gaps under 0.35 s stay ducked so the
+   * bed does not pump between phrases. Without a voice this block is
+   * skipped and the soundtrack is exactly the unnarrated one. */
+  if (opts.voice && opts.voice.data) {
+    var vd = opts.voice.data, vg = opts.voice.gain != null ? opts.voice.gain : 1;
+    var bedDb = opts.voice.bedDb != null ? opts.voice.bedDb : -4;
+    var duckDb = opts.voice.duckDb || { low: -4, mid: -7, high: -4 };
+    /* voice activity, 10 ms frames */
+    var FR = Math.floor(0.01 * SR), nF = Math.ceil(N / FR), act = new Uint8Array(nF), rmsF = new Float32Array(nF), vmax = 0;
+    for (var fi = 0; fi < nF; fi++) {
+      var s0 = fi * FR, s1 = Math.min(vd.length, s0 + FR), acc = 0;
+      for (var si = s0; si < s1; si++) acc += vd[si] * vd[si];
+      rmsF[fi] = s1 > s0 ? Math.sqrt(acc / (s1 - s0)) : 0;
+      if (rmsF[fi] > vmax) vmax = rmsF[fi];
+    }
+    var vThr = vmax * Math.pow(10, -34 / 20);
+    for (fi = 0; fi < nF; fi++) act[fi] = rmsF[fi] > vThr ? 1 : 0;
+    /* bridge short gaps, then widen: 120 ms before, 220 ms after */
+    var lastOn = -1e9;
+    for (fi = 0; fi < nF; fi++) {
+      if (act[fi]) { if (fi - lastOn > 1 && fi - lastOn <= 35) for (var gi = lastOn + 1; gi < fi; gi++) act[gi] = 1; lastOn = fi; }
+    }
+    var wide = new Uint8Array(nF);
+    for (fi = 0; fi < nF; fi++) if (act[fi]) for (var wi = Math.max(0, fi - 12); wi <= Math.min(nF - 1, fi + 22); wi++) wide[wi] = 1;
+    /* smoothed duck depth (0..1): 70 ms in, 450 ms out */
+    var dA = Math.exp(-1 / (0.07 * SR)), dR = Math.exp(-1 / (0.45 * SR)), dk = 0;
+    function dbg(db) { return Math.pow(10, db / 20); }
+    var gBed = dbg(bedDb), gLo = dbg(duckDb.low), gMid = dbg(duckDb.mid), gHi = dbg(duckDb.high);
+    /* band split: 2 x 2nd-order Butterworth (4th-order Linkwitz-Riley) low
+     * and high; the mid band is the remainder, so unity gains rebuild the
+     * input exactly */
+    var bLoL = [new Biquad(), new Biquad()], bLoR = [new Biquad(), new Biquad()], bHiL = [new Biquad(), new Biquad()], bHiR = [new Biquad(), new Biquad()];
+    for (var bq = 0; bq < 2; bq++) { bLoL[bq].set('lp', 250, 0.7071); bLoR[bq].set('lp', 250, 0.7071); bHiL[bq].set('hp', 4500, 0.7071); bHiR[bq].set('hp', 4500, 0.7071); }
+    for (var n2 = 0; n2 < N; n2++) {
+      var want = wide[Math.min(nF - 1, Math.floor(n2 / FR))];
+      dk = want > dk ? dA * dk + (1 - dA) * want : dR * dk + (1 - dR) * want;
+      var xl = outL[n2], xr = outR[n2];
+      var lol = bLoL[1].run(bLoL[0].run(xl)), lor = bLoR[1].run(bLoR[0].run(xr));
+      var hil = bHiL[1].run(bHiL[0].run(xl)), hir = bHiR[1].run(bHiR[0].run(xr));
+      var mdl = xl - lol - hil, mdr = xr - lor - hir;
+      var kl = 1 + (gLo - 1) * dk, km = 1 + (gMid - 1) * dk, kh = 1 + (gHi - 1) * dk;
+      var v = n2 < vd.length ? vd[n2] * vg : 0;
+      outL[n2] = (lol * kl + mdl * km + hil * kh) * gBed + v;
+      outR[n2] = (lor * kl + mdr * km + hir * kh) * gBed + v;
+    }
+    /* look-ahead peak limiter at -1 dBFS: the required gain is min-held
+     * over +-4 ms and box-smoothed over 4 ms (so every sample gets at most
+     * the gain it needs), then released over 60 ms */
+    var ceil = dbg(-1), H = Math.max(2, Math.floor(0.004 * SR)), need = new Float32Array(N);
+    for (var q2 = 0; q2 < N; q2++) { var pk2 = Math.max(Math.abs(outL[q2]), Math.abs(outR[q2])); need[q2] = pk2 > ceil ? ceil / pk2 : 1; }
+    /* held[c] = min(need[c-H .. c+H]) by a monotonic deque, O(N) */
+    var held = new Float32Array(N), dq = new Int32Array(N), qh = 0, qt = 0;
+    for (var q3 = 0; q3 < N + H; q3++) {
+      if (q3 < N) { while (qt > qh && need[dq[qt - 1]] >= need[q3]) qt--; dq[qt++] = q3; }
+      var c3 = q3 - H;
+      if (c3 >= 0) { while (dq[qh] < c3 - H) qh++; held[c3] = need[dq[qh]]; }
+    }
+    /* box over [n-H/2, n+H/2): every value in it is a min over a window
+     * that contains n, so the average never exceeds need[n] */
+    var W = H, half = W >> 1, rel2 = Math.exp(-1 / (0.06 * SR)), gL = 1, bsum = 0;
+    function hAt(k) { return held[k < 0 ? 0 : k >= N ? N - 1 : k]; }
+    for (var q4 = 0; q4 < W; q4++) bsum += hAt(q4 - half);
+    for (var q5 = 0; q5 < N; q5++) {
+      gL = Math.min(bsum / W, 1 - (1 - gL) * rel2);
+      outL[q5] *= gL; outR[q5] *= gL;
+      bsum += hAt(q5 - half + W) - hAt(q5 - half);
+    }
   }
   /* fade the tail to silence */
   var fadeN = Math.floor(1.2 * SR), endN = Math.min(N, Math.floor((DUR + 2.3) * SR));

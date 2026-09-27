@@ -18,7 +18,12 @@ function worldToStage(cam, x, y) {
 
 function renderFrame(ctx, t, pxScale) {
   computeTitleLayout(ctx);
-  var S = stateAt(t);
+  /* Watch mode plays the narrated film: t is FILM time and the choreography
+   * runs in story time (src/55-warp.js), while ambient motion follows the
+   * film clock so nothing freezes while the picture waits for the voice.
+   * Hands-on mode and the MP4 export run in story time (WARP.on false). */
+  var S = stateAt(WARP.on ? storyTime(t) : t);
+  if (WARP.on) S.wall = t;
   if (GUIDE.on) guideDecorate(S);
   ctx.setTransform(pxScale, 0, 0, pxScale, 0, 0);
   ctx.__pxScale = pxScale;

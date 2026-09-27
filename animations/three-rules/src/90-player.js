@@ -111,7 +111,17 @@ var PLAYER_CSS = [
   '.ptr.ptr-compact .ptr-watchrest{display:inline}',
   '@media (max-width:420px){.ptr-mode{display:none}}',
   '@media (max-width:560px){.ptr-bar{gap:10px;padding:8px 10px}.ptr-lbl{font-size:11.5px}.ptr-time{display:none}',
-  '.ptr-chap:not([aria-current="true"]) .ptr-lbl{visibility:hidden}.ptr-btn{width:34px;height:34px}.ptr-mode{height:34px;padding:0 9px}.ptr-mode span{display:none}}'
+  '.ptr-chap:not([aria-current="true"]) .ptr-lbl{visibility:hidden}.ptr-btn{width:34px;height:34px}.ptr-mode{height:34px;padding:0 9px}.ptr-mode span{display:none}}',
+  /* Watch mode is the narrated film: the sound button names the narration,
+   * a CC button shows the words in the caption band under the picture */
+  '.ptr-btn.ptr-snd{width:auto;gap:7px;padding:0 15px 0 11px;border-radius:19px}',
+  '.ptr-snd-t{font-size:13px;font-weight:700;letter-spacing:.01em;white-space:nowrap}',
+  '.ptr-btn.ptr-ccb{display:none;font-size:12px;font-weight:800;letter-spacing:.04em}',
+  '.ptr.ptr-watch .ptr-btn.ptr-ccb{display:inline-flex}',
+  '.ptr.ptr-narr .ptr-cap{display:block;font-size:15px}',
+  '@media (max-width:560px){.ptr-btn.ptr-snd{width:34px;padding:0;border-radius:50%}.ptr-snd-t{display:none}}',
+  /* the narrowest phones: the chapters need the room (captions stay on; C toggles them) */
+  '@media (max-width:360px){.ptr.ptr-watch .ptr-btn.ptr-ccb{display:none}}'
 ].join('');
 
 var ICONS = {
@@ -127,6 +137,54 @@ var ICONS = {
 var POSTER_T = 3.4;
 var PROMISE_TRY = 'Try each one yourself, right here.';
 var APP_URL = 'https://pandionplots.com/app/';
+var PROMISE_WATCH = 'Explore them in under two minutes.';
+
+/* ---- narration (Watch mode) ---- */
+/* The voice (ElevenLabs v3, Harper Lawson; made in the narration pipeline,
+ * ~/Desktop/Pandion Learn Animation ElevenLabs) ships beside this script as
+ * Opus in WebM, with FLAC as the fallback for browsers that cannot decode
+ * Opus. It is fetched only when narration is wanted (Just watch, or sound on
+ * in Watch mode), then mixed with the narrated score in the worker (the score
+ * ducks under the voice). The picture holds its final frame until the last
+ * word, then the closing chord rings out. */
+var PTR_SCRIPT_SRC = (function () {
+  try { var s = document.currentScript; return s && s.src ? s.src : ''; } catch (e) { return ''; }
+})();
+var VOICE_FILES = ['pandion-three-rules-voice.webm', 'pandion-three-rules-voice.flac'];
+var VOICE_MIX = { gain: 1.26, bedDb: -5.5 };
+function voiceUrls(attr) {
+  var list = attr ? attr.split(',') : VOICE_FILES;
+  return list.map(function (u) {
+    u = u.trim();
+    try { return new URL(u, attr ? document.baseURI : (PTR_SCRIPT_SRC || document.baseURI)).href; } catch (e) { return u; }
+  });
+}
+function loadVoice(ac, urls, cb) {
+  var i = 0;
+  function next() {
+    if (i >= urls.length) { cb(null); return; }
+    var url = urls[i++];
+    fetch(url).then(function (r) { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); }).then(function (ab) {
+      return new Promise(function (ok, bad) { var p = ac.decodeAudioData(ab, ok, bad); if (p && p.then) p.then(ok, bad); });
+    }).then(function (buf) {
+      var n = buf.length, out = new Float32Array(n), c, k;
+      for (c = 0; c < buf.numberOfChannels; c++) { var ch = buf.getChannelData(c); for (k = 0; k < n; k++) out[k] += ch[k] / buf.numberOfChannels; }
+      cb(out);
+    }).catch(function () { next(); });
+  }
+  next();
+}
+/* the caption to show at film time t: from just before a sentence's first
+ * word until the next one starts (or a moment after its last word) */
+function narrationCueAt(t) {
+  for (var i = NARRATION_CUES.length - 1; i >= 0; i--) {
+    var c = NARRATION_CUES[i];
+    if (t < c[0] - 0.12) continue;
+    var nx = NARRATION_CUES[i + 1], until = nx ? Math.min(nx[0] - 0.12, c[1] + 1.2) : c[1] + 1.5;
+    return t < until ? i : -1;
+  }
+  return -1;
+}
 
 function mountThreeRules(host, options) {
   options = options || {};
@@ -192,7 +250,7 @@ function mountThreeRules(host, options) {
   endCard.innerHTML = '<b>Nice work. That\u2019s all three rules.</b><span class="ptr-card-row">' +
     '<a class="ptr-go ptr-end-app" href="' + APP_URL + '" target="_blank" rel="noopener">Open Pandion Plots</a>' +
     '<button type="button" class="ptr-alt ptr-end-again">' + ICONS.replay + 'Try it again</button></span>' +
-    '<span class="ptr-note">Or <button type="button" class="ptr-link ptr-end-watch">watch the film</button> without stopping.</span>';
+    '<span class="ptr-note">Or <button type="button" class="ptr-link ptr-end-watch">watch it narrated</button> without stopping.</span>';
   var typeIn = document.createElement('input');
   typeIn.type = 'text';
   typeIn.className = 'ptr-type';
@@ -228,9 +286,12 @@ function mountThreeRules(host, options) {
     b.style.flexGrow = String(end - c.t);
     b.innerHTML = '<span class="ptr-track"><span class="ptr-fill"></span></span><span class="ptr-lbl">' + c.label + '</span>';
     b.setAttribute('aria-label', 'Jump to ' + c.label);
-    (function (tt, t1, btn) {
+    /* s0/s1 are story times; t0/t1 follow the current mode's clock (layoutChapters) */
+    var entry = { el: b, fill: b.querySelector('.ptr-fill'), s0: c.t, s1: end, t0: c.t, t1: end };
+    (function (en, btn) {
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
+        var tt = en.t0, t1 = en.t1;
         /* pointer clicks seek to that spot in the chapter; keyboard jumps to its start */
         var to = tt;
         if (e.detail > 0 && e.clientX) {
@@ -242,9 +303,24 @@ function mountThreeRules(host, options) {
         if (GUIDE.on && tt > 0 && to - tt < 0.5) to = Math.max(0, tt - 0.45);
         seek(to); play();
       });
-    })(c.t, end, b);
+    })(entry, b);
     chaps.appendChild(b);
-    chapEls.push({ el: b, fill: b.querySelector('.ptr-fill'), t0: c.t, t1: end });
+    chapEls.push(entry);
+  }
+  function layoutChapters() {
+    for (var i = 0; i < chapEls.length; i++) {
+      var c = chapEls[i];
+      c.t0 = WARP.on ? filmTime(c.s0) : c.s0;
+      c.t1 = WARP.on ? (i === chapEls.length - 1 ? FILM_DURATION : filmTime(c.s1)) : c.s1;
+    }
+    /* the narrated film spends most of its time in the demos, so in Watch mode
+     * every chapter keeps at least 11% of the bar (its label stays readable;
+     * a click still maps exactly within the chapter's own span) */
+    var total = chapEls.length ? chapEls[chapEls.length - 1].t1 - chapEls[0].t0 : 1;
+    for (var j = 0; j < chapEls.length; j++) {
+      var span = chapEls[j].t1 - chapEls[j].t0;
+      chapEls[j].el.style.flexGrow = String(WARP.on ? Math.max(span, 0.11 * total) : span);
+    }
   }
   var timeEl = document.createElement('span');
   timeEl.className = 'ptr-time';
@@ -261,7 +337,14 @@ function mountThreeRules(host, options) {
   soundBtn.setAttribute('aria-label', 'Sound');
   soundBtn.title = 'Sound';
   soundBtn.innerHTML = ICONS.soundOff;
-  bar.appendChild(playBtn); bar.appendChild(chaps); bar.appendChild(timeEl); bar.appendChild(modeBtn); bar.appendChild(soundBtn);
+  var ccBtn = document.createElement('button');
+  ccBtn.type = 'button';
+  ccBtn.className = 'ptr-btn ptr-ccb';
+  ccBtn.textContent = 'CC';
+  ccBtn.setAttribute('aria-label', 'Captions');
+  ccBtn.setAttribute('aria-pressed', 'true');
+  ccBtn.title = 'Captions (C)';
+  bar.appendChild(playBtn); bar.appendChild(chaps); bar.appendChild(timeEl); bar.appendChild(modeBtn); bar.appendChild(ccBtn); bar.appendChild(soundBtn);
   root.appendChild(bar);
   host.appendChild(root);
 
@@ -269,17 +352,72 @@ function mountThreeRules(host, options) {
   var state = {
     t: 0, playing: false, ended: false, userPaused: false, autoPaused: false, reduce: reduce,
     clock0: 0, t0: 0, visible: false, sound: false, audio: null, audioBusy: false, raf: 0, dpr: 1, w: 0,
-    mode: options.mode === 'watch' ? 'watch' : 'try', waiting: null, drag: null, skip: null, fast: null, jumpFade: null
+    mode: options.mode === 'watch' ? 'watch' : 'try', waiting: null, drag: null, skip: null, fast: null, jumpFade: null,
+    cc: true
   };
   GUIDE.reduce = reduce;
+  /* the length of the current mode's timeline: story time in hands-on mode,
+   * the narrated film (with its pauses) in Watch mode */
+  function dur() { return WARP.on ? FILM_DURATION : DURATION; }
   function setMode(m) {
+    var was = WARP.on;
+    if (state.playing && !state.fast) state.t = now();
     state.mode = m;
     GUIDE.on = m === 'try';
-    RENDER_OPTS.promise = GUIDE.on ? PROMISE_TRY : null;
+    WARP.on = !GUIDE.on;
+    /* the same moment of the film on the other clock */
+    if (was !== WARP.on) {
+      state.t = WARP.on ? filmTime(state.t) : storyTime(state.t);
+      state.fast = null;
+      if (WARP.on && state.sound) alignToSentence();
+      if (state.playing) { stopAudio(); rebase(); }
+    }
+    RENDER_OPTS.promise = GUIDE.on ? PROMISE_TRY : PROMISE_WATCH;
     modeBtn.setAttribute('aria-pressed', GUIDE.on ? 'true' : 'false');
     stage.classList.toggle('ptr-try', GUIDE.on);
+    root.classList.toggle('ptr-watch', !GUIDE.on);
+    layoutChapters();
     if (!GUIDE.on) leaveGate();
+    setSoundUi();
     if (state.sound) ensureAudio(function () { if (state.playing && !state.fast) { state.t = now(); rebase(); startAudio(); } });
+  }
+  /* with narration, start (or rejoin) at the beginning of a sentence */
+  function alignToSentence() {
+    if (!WARP.on) return;
+    for (var i = 0; i < NARRATION_CUES.length; i++) {
+      var c = NARRATION_CUES[i];
+      if (state.t > c[0] - 0.05 && state.t < c[1]) { state.t = Math.max(0, c[0] - 0.3); return; }
+    }
+  }
+  /* inside a click: make (or wake) the audio context so the browser lets it play */
+  function unlockAudio() {
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    if (!state.audio) {
+      var ac = new AC(), gain = ac.createGain();
+      gain.gain.value = 0.9;
+      gain.connect(ac.destination);
+      state.audio = { ctx: ac, gain: gain, narr: null, sfx: null, src: null };
+    }
+    if (state.audio.ctx.state === 'suspended') state.audio.ctx.resume();
+  }
+  /* Just watch: the narrated film with the voice on. fromStart plays it from
+   * the top; otherwise it carries on from here, at a sentence boundary. */
+  function startWatching(fromStart) {
+    var focusIn = root.contains(document.activeElement);
+    leaveGate();
+    hideCards();
+    if (state.playing) pause(false);
+    state.sound = true;
+    unlockAudio();
+    setMode('watch');   /* converts the clock and, with sound on, starts at a sentence */
+    if (fromStart) { state.t = 0; state.ended = false; }
+    setSoundUi();
+    state.pendingPlay = true;
+    var go = function () { if (state.pendingPlay) { state.pendingPlay = false; play(); } };
+    if (!state.audio) go(); else ensureAudio(go);
+    draw();
+    keepFocus(focusIn);
   }
 
   /* ---- layout ---- */
@@ -309,8 +447,8 @@ function mountThreeRules(host, options) {
     GUIDE.rt = performance.now() / 1000;
     /* before the first play, show the start card's frame instead of a blank one */
     var idle = !state.playing && !state.started && !state.waiting;
-    var tt = (idle && state.t < 0.05) ? POSTER_T : Math.min(state.t, DURATION);
-    if (idle && state.reduce && !GUIDE.on) tt = DURATION;
+    var tt = (idle && state.t < 0.05) ? (WARP.on ? filmTime(POSTER_T) : POSTER_T) : Math.min(state.t, dur());
+    if (idle && state.reduce && !GUIDE.on) tt = dur();
     renderFrame(ctx, tt, canvas.width / STAGE_W);
     if (idle) {
       /* keep a copy so the first play can dissolve out of it */
@@ -353,8 +491,13 @@ function mountThreeRules(host, options) {
     setOnce('time', fmt(t), function (v) { timeEl.textContent = v; });
     var guiding = !!(!coach.hidden || !hub.hidden || !endCard.hidden);
     root.classList.toggle('ptr-guiding', guiding && !!state.compact);
-    if (state.compact && !guiding) {
-      var cp = captionForTime(t);
+    var narrCap = WARP.on && state.cc;
+    root.classList.toggle('ptr-narr', narrCap);
+    if (narrCap) {
+      var qi = narrationCueAt(t);
+      setOnce('cap', 'n' + qi, function () { capEl.textContent = qi >= 0 ? NARRATION_CUES[qi][2] : ''; });
+    } else if (state.compact && !guiding) {
+      var cp = captionForTime(WARP.on ? storyTime(t) : t);
       setOnce('cap', cp.lead + '|' + cp.text, function () {
         capEl.textContent = '';
         var b = document.createElement('b'); b.textContent = cp.lead + (cp.text ? '.' : '');
@@ -410,8 +553,12 @@ function mountThreeRules(host, options) {
       state.t = tn;
       if (g) arrive(g);
       if (GUIDE.showUntil > 0 && state.t > GUIDE.showUntil + 0.4) GUIDE.showUntil = -1;
-      if (state.t >= DURATION) {
-        state.t = DURATION; state.playing = false; state.ended = true; stopAudio(); rebase();
+      var narrated = WARP.on && state.sound && state.audio && state.audio.voiceEnd && state.audio.src;
+      var endT = narrated ? Math.max(dur(), state.audio.voiceEnd) : dur();
+      if (state.t >= endT) {
+        state.t = dur(); state.playing = false; state.ended = true;
+        if (!narrated) stopAudio();   /* with narration the closing chord rings on */
+        rebase();
         if (GUIDE.on) showEnd();
       }
     }
@@ -423,7 +570,7 @@ function mountThreeRules(host, options) {
     if (state.playing) return;
     if (state.waiting) { showMe(state.waiting); return; }
     hideCards();
-    if (state.ended || state.t >= DURATION) { state.t = 0; state.ended = false; GUIDE.typed = null; GUIDE.typedAt = Infinity; GUIDE.capFloor = -1; }
+    if (state.ended || state.t >= dur()) { state.t = 0; state.ended = false; GUIDE.typed = null; GUIDE.typedAt = Infinity; GUIDE.capFloor = -1; }
     if (!state.started && state.posterValid) state.posterFade = performance.now() / 1000;
     state.playing = true; state.started = true; state.userPaused = false; state.autoPaused = false;
     rebase();
@@ -447,8 +594,8 @@ function mountThreeRules(host, options) {
     leaveGate();
     hideCards();
     state.fast = null;
-    state.t = clamp(t, 0, DURATION);
-    state.ended = state.t >= DURATION;
+    state.t = clamp(t, 0, dur());
+    state.ended = state.t >= dur();
     GUIDE.capFloor = -1;
     if (state.t < GUIDE.typedAt) { GUIDE.typed = null; GUIDE.typedAt = Infinity; }
     rebase();
@@ -611,15 +758,13 @@ function mountThreeRules(host, options) {
   }
   function showEnd() {
     endCard.hidden = false;
-    announce('Nice work. That is all three rules. Open Pandion Plots, try the tour again, or watch the film.');
+    announce('Nice work. That is all three rules. Open Pandion Plots, try the tour again, or watch it narrated.');
     if (root.contains(document.activeElement) && document.activeElement !== root) endCard.querySelector('.ptr-end-app').focus({ preventScroll: true });
   }
   hub.querySelector('.ptr-hub-go').addEventListener('click', function (e) { e.stopPropagation(); startRule(0); });
   hub.querySelector('.ptr-hub-watch').addEventListener('click', function (e) {
     e.stopPropagation();
-    leaveGate();
-    setMode('watch');
-    play();
+    startWatching(true);
     root.focus({ preventScroll: true });
   });
   endCard.querySelector('.ptr-end-again').addEventListener('click', function (e) {
@@ -633,15 +778,12 @@ function mountThreeRules(host, options) {
   endCard.querySelector('.ptr-end-watch').addEventListener('click', function (e) {
     e.stopPropagation();
     endCard.hidden = true;
-    setMode('watch');
-    seek(0);
-    play();
+    startWatching(true);
   });
   showBtn.addEventListener('click', function (e) { e.stopPropagation(); if (state.waiting) showMe(state.waiting); });
   coach.querySelector('.ptr-watchrest').addEventListener('click', function (e) {
     e.stopPropagation();
-    setMode('watch');
-    play();
+    startWatching(false);
     root.focus({ preventScroll: true });
   });
   doneBtn.addEventListener('click', function (e) { e.stopPropagation(); commitTyping(); });
@@ -861,7 +1003,7 @@ function mountThreeRules(host, options) {
   }
   function currentBuffer() {
     var A = state.audio;
-    return A ? (GUIDE.on ? A.sfx : A.buffer) : null;
+    return A ? (GUIDE.on ? A.sfx : A.narr) : null;
   }
   function startAudio() {
     var A = state.audio, buf = currentBuffer();
@@ -903,32 +1045,50 @@ function mountThreeRules(host, options) {
     src.start(t0, Math.max(0, t - 0.005), len);
   }
   function setSoundUi() {
+    var narr = WARP.on;
     soundBtn.setAttribute('aria-pressed', state.sound ? 'true' : 'false');
-    soundBtn.classList.toggle('ptr-busy', state.audioBusy);
-    soundBtn.innerHTML = state.audioBusy ? ICONS.busy : state.sound ? ICONS.soundOn : ICONS.soundOff;
-    soundBtn.title = state.sound ? 'Sound on' : 'Sound off';
+    soundBtn.classList.toggle('ptr-busy', !!state.audioBusy);
+    soundBtn.classList.toggle('ptr-snd', narr);
+    soundBtn.innerHTML = (state.audioBusy ? ICONS.busy : state.sound ? ICONS.soundOn : ICONS.soundOff) +
+      (narr ? '<span class="ptr-snd-t" aria-hidden="true">Narration</span>' : '');
+    soundBtn.setAttribute('aria-label', narr ? 'Narration and sound' : 'Sound');
+    soundBtn.title = narr ? (state.audioBusy ? 'Loading the narration' : state.sound ? 'Narration and sound on' : 'Turn on narration and sound')
+      : (state.sound ? 'Sound on' : 'Sound off');
   }
+  /* hands-on mode plays the sound effects alone (story time); Watch mode plays
+   * the narrated film: the voice over the score with its extra bars (film time) */
   function ensureAudio(cb) {
-    var need = GUIDE.on ? 'sfx' : 'buffer';
+    var need = GUIDE.on ? 'sfx' : 'narr';
     if (state.audio && state.audio[need]) { cb(); return; }
     var AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
-    if (!state.audio) {
-      var ac = new AC();
-      var gain = ac.createGain();
-      gain.gain.value = 0.9;
-      gain.connect(ac.destination);
-      state.audio = { ctx: ac, gain: gain, buffer: null, sfx: null, src: null };
-    }
+    unlockAudio();
     var A = state.audio;
+    A.waiting = A.waiting || {};
+    if (A.waiting[need]) { A.waiting[need].push(cb); return; }
+    A.waiting[need] = [cb];
     state.audioBusy = true; setSoundUi();
-    renderScoreAsync(A.ctx.sampleRate, need === 'buffer', function (res) {
+    var finish = function (res, voiceEnd) {
       var bufr = A.ctx.createBuffer(2, res.left.length, res.sampleRate);
       bufr.copyToChannel ? bufr.copyToChannel(res.left, 0) : bufr.getChannelData(0).set(res.left);
       bufr.copyToChannel ? bufr.copyToChannel(res.right, 1) : bufr.getChannelData(1).set(res.right);
       A[need] = bufr;
+      if (need === 'narr') A.voiceEnd = voiceEnd || 0;
       state.audioBusy = false; setSoundUi();
-      cb();
+      var w = A.waiting[need]; A.waiting[need] = null;
+      for (var i = 0; i < w.length; i++) w[i]();
+    };
+    if (need === 'sfx') { renderScoreAsync(A.ctx.sampleRate, 'sfx', null, finish); return; }
+    loadVoice(A.ctx, voiceUrls(options.voiceSrc), function (voice) {
+      var vEnd = 0;
+      if (!voice && window.console) console.warn('Pandion three rules: the narration could not be loaded; playing the score alone.');
+      if (voice) {
+        /* the picture holds its last frame until the last word */
+        var last = voice.length - 1;
+        while (last > 0 && Math.abs(voice[last]) < 0.003) last--;
+        vEnd = last / A.ctx.sampleRate + 0.3;
+      }
+      renderScoreAsync(A.ctx.sampleRate, 'narr', voice, function (res) { finish(res, vEnd); });
     });
   }
   soundBtn.addEventListener('click', function (e) {
@@ -938,10 +1098,12 @@ function mountThreeRules(host, options) {
     state.sound = !state.sound;
     setSoundUi();
     if (!state.sound) { stopAudio(); return; }
+    unlockAudio();
     ensureAudio(function () {
       if (!state.sound) return;
       if (state.audio.ctx.state === 'suspended') state.audio.ctx.resume();
-      if (state.playing && !state.fast) { state.t = now(); rebase(); startAudio(); }
+      /* narration rejoins at the start of the sentence under way */
+      if (state.playing && !state.fast) { state.t = now(); alignToSentence(); rebase(); startAudio(); }
     });
     /* resume inside the gesture so Safari unlocks audio */
     if (state.audio && state.audio.ctx && state.audio.ctx.state === 'suspended') state.audio.ctx.resume();
@@ -953,8 +1115,16 @@ function mountThreeRules(host, options) {
     var wasWaiting = !!state.waiting;
     setMode(GUIDE.on ? 'watch' : 'try');
     if (!GUIDE.on && wasWaiting) play();
-    announce(GUIDE.on ? 'Hands-on: the tour stops so you can do each step yourself.' : 'Watching: the tour plays straight through.');
+    announce(GUIDE.on ? 'Hands-on: the tour stops so you can do each step yourself.' : 'Watching: the tour plays straight through. Turn on Narration to hear it explained.');
     draw();
+  });
+  ccBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    state.cc = !state.cc;
+    ccBtn.setAttribute('aria-pressed', state.cc ? 'true' : 'false');
+    announce(state.cc ? 'Captions on.' : 'Captions off.');
+    delete ui.cap;
+    updateUi();
   });
   cover.addEventListener('click', function (e) { e.stopPropagation(); play(); root.focus({ preventScroll: true }); });
   stage.addEventListener('click', function () {
@@ -971,7 +1141,8 @@ function mountThreeRules(host, options) {
     else if (k === 'ArrowRight') { e.preventDefault(); seek(state.t + 5); }
     else if (k === 'ArrowLeft') { e.preventDefault(); seek(state.t - 5); }
     else if (k === 'Home') { e.preventDefault(); seek(0); }
-    else if (k === 'End') { e.preventDefault(); seek(DURATION); }
+    else if (k === 'End') { e.preventDefault(); seek(dur()); }
+    else if ((k === 'c' || k === 'C') && WARP.on) { e.preventDefault(); ccBtn.click(); }
     else if (k === 'm' || k === 'M') { e.preventDefault(); soundBtn.click(); }
   });
 
@@ -997,7 +1168,7 @@ function mountThreeRules(host, options) {
   resize();
   /* no autoplay (reduced motion, or asked for): open on the start card */
   if (GUIDE.on && (reduce || options.autoplay === false)) { state.started = true; arrive(GATES[0]); }
-  else if (!GUIDE.on && reduce) state.t = DURATION;
+  else if (!GUIDE.on && reduce) state.t = dur();
   updateUi();
   setTimeout(function () { state.coverReady = true; updateUi(); }, 700);
   /* warm caches (text metrics, paths, font fallbacks) while the page is idle,
@@ -1008,10 +1179,10 @@ function mountThreeRules(host, options) {
     var wctx = wc.getContext('2d'), stops = [8, 12.3, 16, 20.5, 24, 30.3, 33.5, 38.5, 45.5], i = 0;
     var idle = window.requestIdleCallback || function (f) { return setTimeout(function () { f({ timeRemaining: function () { return 8; } }); }, 60); };
     function step(dl) {
-      var was = GUIDE.on;
-      GUIDE.on = false;
+      var was = GUIDE.on, wasW = WARP.on;
+      GUIDE.on = false; WARP.on = false;
       while (i < stops.length && dl.timeRemaining() > 4) { try { renderFrame(wctx, stops[i++], 0.1); } catch (e) { i = stops.length; } }
-      GUIDE.on = was;
+      GUIDE.on = was; WARP.on = wasW;
       if (i < stops.length) idle(step);
     }
     idle(step);
@@ -1020,6 +1191,11 @@ function mountThreeRules(host, options) {
     play: play, pause: function () { pause(true); }, seek: seek, showMe: function () { if (state.waiting) showMe(state.waiting); },
     setMode: setMode, get mode() { return state.mode; },
     get time() { return state.t; }, get playing() { return state.playing; },
+    get duration() { return dur(); }, get filmDuration() { return FILM_DURATION; }, get ended() { return state.ended; },
+    get sound() { return state.sound; }, get captions() { return state.cc; },
+    get voiceEnd() { return state.audio && state.audio.voiceEnd || 0; },
+    /* for tests: the narrated mix the player built (an AudioBuffer), once ready */
+    get narrationMix() { return state.audio && state.audio.narr || null; },
     get waiting() { return state.waiting ? state.waiting.id : null; },
     get dragging() { return !!state.drag; }
   };
@@ -1029,10 +1205,16 @@ function mountThreeRules(host, options) {
 
 /* ---- score rendering off the main thread ---- */
 var _scoreCache = {};
-function renderScoreAsync(sr, music, cb) {
-  var key = sr + (music ? 'm' : 's');
+function renderScoreAsync(sr, kind, voice, cb) {
+  var key = sr + ':' + kind + (voice ? ':voice' : '');
   if (_scoreCache[key]) { cb(_scoreCache[key]); return; }
-  var payload = { sampleRate: sr, duration: DURATION, cues: SFX, finale: FINALE, music: music };
+  function payloadWith(v) {
+    if (kind === 'sfx') return { sampleRate: sr, duration: DURATION, cues: SFX, finale: FINALE, music: false };
+    var p = { sampleRate: sr, duration: FILM_AUDIO_DURATION, cues: FILM_SFX, finale: FILM_FINALE, plan: FILM_PLAN, titleTimes: FILM_TITLES };
+    if (v) p.voice = { data: v, gain: VOICE_MIX.gain, bedDb: VOICE_MIX.bedDb };
+    return p;
+  }
+  var payload = payloadWith(voice);
   var done = function (res) { _scoreCache[key] = res; cb(res); };
   try {
     var src = 'self.onmessage=function(e){var r=(' + renderSoundtrack.toString() + ')(e.data);' +
@@ -1041,14 +1223,16 @@ function renderScoreAsync(sr, music, cb) {
     var w = new Worker(url);
     w.onmessage = function (e) { URL.revokeObjectURL(url); w.terminate(); done(e.data); };
     w.onerror = function () { URL.revokeObjectURL(url); w.terminate(); setTimeout(function () { done(renderSoundtrack(payload)); }, 0); };
-    w.postMessage(payload);
+    /* hand the worker its own copy of the voice, keep ours for the fallback */
+    var vcopy = voice ? voice.slice(0) : null;
+    w.postMessage(payloadWith(vcopy), vcopy ? [vcopy.buffer] : []);
   } catch (err) {
     setTimeout(function () { done(renderSoundtrack(payload)); }, 0);
   }
 }
 
 var TRANSCRIPT_SHORT = 'An interactive tour of Pandion Plots, which works by three rules. It stops at each step so you can do it ' +
-  'yourself, or show you. Rule 1: to change something, click it. ' +
+  'yourself, or show you; Just watch plays it straight through, narrated, with captions. Rule 1: to change something, click it. ' +
   'Clicking a bar opens its settings under the chart; picking a color recolors that series, and clicking the ' +
   'axis title lets you type a new one. Rule 2: to move something, drag it. Dragging a bar past its neighbor ' +
   'swaps the two groups in every category, and dragging the legend places it anywhere. Rule 3: to add something, click the Add button. The ' +

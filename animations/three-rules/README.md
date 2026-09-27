@@ -16,16 +16,28 @@ on their own with the film's cursor showing. Clicks are hit-tested against
 the replica's own geometry and the film continues from its scripted press;
 drags map the pointer's travel along the film's drag path to story time, so
 the dragged part follows the hand (let go early and it springs back). Show
-me (or Enter) does any step. The Hands-on switch in the control bar flips to
-Watch, which is the film exactly as before (frames and soundtrack
-identical). Sound in hands-on mode plays the sound effects alone.
+me (or Enter) does any step. Sound in hands-on mode plays the sound effects
+alone.
+
+**Watch mode is the narrated film** (Sep 26 2026): Just watch (on the start
+card, the phone step card, or the end card) turns narration on and plays the
+tour straight through, voiced by Harper Lawson (ElevenLabs v3). The picture
+runs on a film clock with pauses where she speaks (`src/55-warp.js`, 87 s
+instead of 48.6 s; the choreography itself is untouched and runs in story
+time), over the score with the same extra bars, and her words show in the
+caption band under the picture (CC toggles them, on by default; the C key
+too). From the start card it plays from the top; from a step it carries on
+from the start of the sentence under way. The Hands-on switch trades the two
+clocks at the same moment of the film. The MP4 export stays the unnarrated
+film (the warp is off unless the player is in Watch mode).
 
 - Canvas renderer: every frame is a pure function of time, drawn on a
   1920 x 1080 stage and scaled to the container at device resolution.
 - Soundtrack: synthesized in JavaScript (score and every sound effect, from
   the same cue sheet as the picture), rendered in a Web Worker only when the
   viewer turns sound on. Nothing is downloaded but the script.
-- Size: about 137 KB minified, about 49 KB gzipped.
+- Size: about 147 KB minified, about 53 KB gzipped, plus the narration
+  (Opus 476 KB, FLAC fallback 1.9 MB), fetched only when narration is wanted.
 - Code for the tour: `src/85-guide.js` (the stops, their targets, hit tests,
   drag mapping, the hint layer) and `src/90-player.js` (the state machine,
   pointer handling, the coach card, start and end cards). Checks:
@@ -34,7 +46,12 @@ identical). Sound in hands-on mode plays the sound effects alone.
   covers picking a rule, an early release, Show me, a miss, Enter, Watch
   mode and sound; `node tools/tour-replay-check.mjs <url> [engine]` walks the
   tour, presses Replay and checks the start card carries nothing over from
-  the last run. `node tools/single-file.mjs` makes a self-contained page,
+  the last run; `node tools/tour-watch-check.mjs <learn page url> [engine]
+  [offline mix]` covers Watch mode on the Learn page itself (no voice fetch
+  before Just watch, narration and captions, the held last frame, the clock
+  trade both ways, the phone step card) and, given the narration pipeline's
+  `out/vo/mix-48k.wav`, checks the player's mix against it.
+  `node tools/single-file.mjs` makes a self-contained page,
   `node tools/record-demo.mjs` a recorded walkthrough.
 
 ## On the page
@@ -90,11 +107,22 @@ Player behavior:
 | `30-chart.js` | the grouped bar chart, halos, legend, data points, bracket |
 | `40-panels.js` | inspector panels, HSV picker, Add menu |
 | `50-story.js` | the script: cue times, camera, cursor, all UI state as f(t) |
+| `54-warp-data.js` | GENERATED: the narrated film's pauses (story time, window, added seconds) |
+| `55-warp.js` | Watch mode's film clock: story time to film time and back, the narrated score plan |
+| `56-narration-cues.js` | GENERATED: the narration's caption cues in film time |
 | `60-overlay.js` | background, intro, rule titles, chapter pill, finale, cursor |
 | `70-render.js` | the frame renderer |
 | `80-audio.js` | the DSP synthesizer (score + sound effects) |
 | `85-guide.js` | the hands-on tour: stops, targets, hit tests, drag mapping, hints |
 | `90-player.js` | the player (controls, autoplay, sound, accessibility) |
+
+The narration comes from the pipeline in `~/Desktop/Pandion Learn Animation
+ElevenLabs` (its README and `tools/vo/`): takes are generated in ElevenLabs,
+fitted to the picture (`tools/vo/fit.py`, which writes the pauses), mastered,
+and packaged. After a re-voice, copy its `src/54-warp-data.js`, regenerate the
+cues (`tools/vo/cues_js.py vo/script.json out/vo/placement.json
+<this folder>/src/56-narration-cues.js`) and copy
+`dist/pandion-three-rules-voice.{webm,flac}` to `website/assets/three-rules/`.
 
 The replica's positions, colors and type sizes were measured from the live
 app (`website/app/`) on 26 Sep 2026 with `tools/capture-app.mjs`,

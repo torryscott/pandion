@@ -75,10 +75,13 @@ await page.click('.ptr-mode');
 await page.waitForTimeout(300);
 s = await st();
 ok(s.mode === 'watch' && s.playing && !s.waiting, 'Hands-on off: the tour plays on');
-await page.evaluate(() => document.querySelector('[data-pandion-three-rules]').__ptr.seek(47.6));
+/* Watch mode is the narrated film (film time, with its pauses): its length comes from the player */
+const D = await page.evaluate(() => document.querySelector('[data-pandion-three-rules]').__ptr.duration);
+ok(D > 80, `Watch mode runs the narrated film (${D.toFixed(2)} s)`);
+await page.evaluate((D) => document.querySelector('[data-pandion-three-rules]').__ptr.seek(D - 1), D);
 await page.waitForTimeout(1600);
 s = await st();
-ok(!s.playing && s.t >= 48.5, `watching runs to the end without stopping (t=${s.t.toFixed(2)})`);
+ok(!s.playing && s.t >= D - 0.05, `watching runs to the end without stopping (t=${s.t.toFixed(2)} of ${D.toFixed(2)})`);
 ok(await page.evaluate(() => document.querySelector('.ptr-end').hidden), 'no end card when just watching');
 ok(await page.evaluate(() => document.querySelector('.ptr-main').getAttribute('aria-label')) === 'Replay', 'the play button offers Replay');
 

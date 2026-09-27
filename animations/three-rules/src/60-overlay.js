@@ -38,7 +38,8 @@ function drawBackground(ctx, S) {
   ctx.restore();
   /* graph-paper texture, faint, drifting slowly with the camera */
   var z = S.cam ? Math.pow(S.cam.z, 0.12) : 1;
-  var step = 64 * z, ox = ((S.time || 0) * 6) % step, oy = ((S.time || 0) * 3.5) % step;
+  var tw = S.wall != null ? S.wall : (S.time || 0);   /* drifts on through pauses */
+  var step = 64 * z, ox = (tw * 6) % step, oy = (tw * 3.5) % step;
   ctx.save();
   ctx.strokeStyle = 'rgba(55,92,160,0.045)';
   ctx.lineWidth = 1;

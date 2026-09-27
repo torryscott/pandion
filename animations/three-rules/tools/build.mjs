@@ -15,6 +15,7 @@ var api = {
   mount: mountThreeRules,
   renderFrame: renderFrame,
   duration: DURATION,
+  filmDuration: FILM_DURATION,   /* Watch mode: the narrated film, with its pauses */
   chapters: CHAPTERS,
   renderSoundtrack: function (sr, music) { return renderSoundtrack({ sampleRate: sr || 48000, duration: DURATION, cues: SFX, finale: FINALE, music: music !== false }); },
   /* for tests: the hands-on gates and where their targets sit (stage px) */
@@ -29,7 +30,7 @@ function autoMount() {
   var els = document.querySelectorAll('[data-pandion-three-rules]');
   for (var i = 0; i < els.length; i++) {
     var el = els[i];
-    mountThreeRules(el, { autoplay: el.getAttribute('data-autoplay') !== 'false', describedBy: el.getAttribute('data-describedby') || null, label: el.getAttribute('data-label') || null });
+    mountThreeRules(el, { autoplay: el.getAttribute('data-autoplay') !== 'false', describedBy: el.getAttribute('data-describedby') || null, label: el.getAttribute('data-label') || null, voiceSrc: el.getAttribute('data-voice-src') || null });
   }
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', autoMount); else autoMount();
