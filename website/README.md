@@ -5,9 +5,13 @@ framework, no build step. The `website/` folder IS the deployable site.
 
 ## Layout
 
-- `index.html` - the landing page (hero, product shot, downloads,
-  gallery teaser, and the "lab / classroom" pillars that carry the
-  professional-tool-that-teaches positioning).
+- `index.html` - the landing page, in the order a first-time visitor's
+  questions come up: the hero; the product shot, whose three numbered dots
+  illustrate the three rules of the editor listed under it; "Why Pandion"
+  (the one-minute film beside a line of its narration, then the
+  "lab / classroom" pillars that carry the professional-tool-that-teaches
+  positioning); the gallery teaser; one card per workspace beyond the
+  chart; and the downloads, browser first.
 - `download.html` - the desktop download chooser. It detects macOS or
   Windows, highlights the matching card, and links directly to the
   installer assets hosted by GitHub Releases. Linux and ChromeOS
@@ -48,7 +52,10 @@ framework, no build step. The `website/` folder IS the deployable site.
 - `shots.mjs` - regenerates the product screenshots in `assets/` by
   driving the real app headlessly. Run it whenever the app UI changes
   enough that the site would be advertising a UI that no longer
-  exists.
+  exists. It also cuts the home page's three workspace cards
+  (`assets/home-*.png`) from the same frames, and measures where the
+  hero shot's three numbered dots belong (a bar, the legend, the Add
+  button), writing their positions back into `index.html`.
 
 The retired dark-hero and editorial-serif landing designs are preserved in
 [`prototypes/website/`](../prototypes/website/README.md), outside this deployable

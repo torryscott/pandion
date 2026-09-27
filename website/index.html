@@ -34,6 +34,10 @@
     --muted: #5f6f80;
     --line: #dde5ee;
     --wash: #f4f7fb;
+    /* The mark's own line and dots (diving-straight.svg). They number the
+       three rules, so the rules read as the osprey's three points. */
+    --slate: #646e76;
+    --dot: #814850;
   }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; scroll-padding-top: 76px; }
@@ -117,9 +121,24 @@
     box-shadow: 0 18px 40px rgba(25, 46, 73, 0.16);
   }
 
-  /* ---- product shot ---- */
-  .shot { padding: 64px 0 72px; }
-  .shot figure { margin: 0; }
+  /* ---- sections ---- */
+  section { padding: 72px 0; }
+  .band {
+    background: var(--wash);
+    border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  }
+  .kicker {
+    color: #8a6414; font-size: 13px; font-weight: 800;
+    letter-spacing: 0.12em; text-transform: uppercase; margin: 0 0 8px;
+  }
+  h2 {
+    margin: 0 0 12px; color: var(--navy);
+    font-size: clamp(26px, 3.4vw, 34px); letter-spacing: -0.015em;
+  }
+  .section-lede { margin: 0 0 40px; max-width: 44em; color: var(--muted); }
+  .more-link { font-weight: 700; font-size: 15px; text-decoration: none; }
+  .more-link:hover { text-decoration: underline; }
+
   .shot-frame {
     border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
     box-shadow: 0 24px 60px rgba(25, 46, 73, 0.16);
@@ -133,123 +152,89 @@
     width: 10px; height: 10px; border-radius: 50%;
     background: #cdd7e2; display: block;
   }
-  .shot img { display: block; width: 100%; height: auto; }
-  .shot figcaption {
+
+  /* ---- the product shot, and the three rules it illustrates ---- */
+  section.show { padding: 64px 0 76px; }
+  .show figure { margin: 0; }
+  .shot-img { position: relative; }
+  .shot-img img { display: block; width: 100%; height: auto; }
+  .show figcaption {
     margin-top: 14px; text-align: center;
     color: var(--muted); font-size: 14px;
   }
+  /* Numbered dots on the screenshot, one per rule. Their percentages are
+     positions in assets/app-chart.png; website/shots.mjs measures the
+     bar, legend and Add button when it retakes that image and rewrites
+     them, so a new screenshot cannot leave a dot pointing at nothing. */
+  .shot-marker {
+    position: absolute; transform: translate(-50%, -50%);
+    width: clamp(20px, 2.5vw, 28px); height: clamp(20px, 2.5vw, 28px);
+    border-radius: 50%; background: var(--dot); color: #fff;
+    display: grid; place-items: center;
+    font-weight: 800; font-size: clamp(11px, 1.15vw, 13.5px); line-height: 1;
+    box-shadow: 0 0 0 3px #fff, 0 6px 14px rgba(25, 46, 73, 0.35);
+  }
+  .rules-head {
+    display: flex; flex-wrap: wrap; align-items: baseline;
+    justify-content: space-between; gap: 6px 24px; margin: 56px 0 26px;
+  }
+  .rules-head .kicker { flex-basis: 100%; margin: 0; }
+  .rules-head h2 { margin: 0; }
+  ol.rules {
+    list-style: none; margin: 0; padding: 0;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 0 40px;
+  }
+  ol.rules li { position: relative; }
+  /* The slate line from each dot to the next, as in the mark. A real
+     element rather than ::after: axe cannot judge the contrast of a dot
+     whose list item carries a painted pseudo-element, and every such dot
+     became one more manual-review item in the accessibility evidence. */
+  .rule-line {
+    position: absolute; top: 12.5px; left: 34px;
+    width: 100%; height: 3px; border-radius: 2px;
+    background: var(--slate); opacity: 0.55;
+  }
+  .rule-dot {
+    position: relative; z-index: 1;
+    width: 28px; height: 28px; border-radius: 50%; margin: 0 0 16px;
+    background: var(--dot); color: #fff; display: grid; place-items: center;
+    font-weight: 800; font-size: 13.5px; line-height: 1;
+    box-shadow: 0 0 0 3px #fff, 0 0 0 4px #e3d7d9;
+  }
+  ol.rules h3 {
+    margin: 0 0 6px; color: var(--navy); font-size: 20px;
+    letter-spacing: -0.01em;
+  }
+  ol.rules p { margin: 0; color: var(--muted); font-size: 15px; }
 
-  /* ---- the one-minute story film, under the product shot ---- */
-  section.story { padding: 0 0 72px; }
-  .story-film { margin: 0; }
-  .story-film video {
+  /* ---- why: the one-minute film beside its own words, then the pillars ---- */
+  .why-row {
+    display: grid; grid-template-columns: 1.15fr 1fr; gap: 44px;
+    align-items: center; margin: 30px 0 56px;
+  }
+  .why-film { margin: 0; }
+  .why-film video {
     display: block; width: 100%; height: auto; background: #eef2f7;
   }
-  .story-film figcaption {
-    margin-top: 12px; color: var(--muted); font-size: 14px; max-width: 46em;
+  .why-film figcaption {
+    margin-top: 10px; color: var(--muted); font-size: 13.5px;
   }
-  .story-transcript { margin: 8px 0 0; max-width: 46em; }
+  .pullquote {
+    margin: 0 0 8px; color: var(--navy);
+    font-size: clamp(21px, 2.3vw, 26px); line-height: 1.3;
+    font-weight: 800; letter-spacing: -0.015em;
+  }
+  .pullquote em { font-style: normal; color: var(--wing); }
+  .pullquote-src { margin: 0 0 22px; color: var(--muted); font-size: 13.5px; }
+  .why-text > p.why-lede { margin: 0 0 14px; color: var(--muted); }
   .story-transcript summary {
     cursor: pointer; color: var(--cobalt); font-weight: 600; font-size: 14px;
   }
   .story-transcript p { margin: 8px 0 0; font-size: 14.5px; }
-
-  /* ---- the three workspaces a chart tool usually leaves out ---- */
-  .workspaces .shot-block { margin-top: 44px; }
-  .workspaces .shot-block:first-of-type { margin-top: 0; }
-  .workspaces h3 {
-    margin: 0 0 8px; color: var(--navy); font-size: 20px;
-    letter-spacing: -0.01em;
-  }
-  .workspaces .shot-block > p {
-    margin: 0 0 20px; max-width: 46em; color: var(--muted);
-    font-size: 15.5px;
-  }
-  .workspaces figure { margin: 0; }
-  /* .shot-frame clips its overflow, so without this the 3040px shots
-     render at native size and the frame shows only their top-left corner. */
-  .workspaces img { display: block; width: 100%; height: auto; }
-  .workspaces figcaption {
-    margin-top: 12px; color: var(--muted); font-size: 13.5px;
-  }
-
-  /* ---- sections ---- */
-  section { padding: 72px 0; }
-  .kicker {
-    color: #8a6414; font-size: 13px; font-weight: 800;
-    letter-spacing: 0.12em; text-transform: uppercase; margin: 0 0 8px;
-  }
-  h2 {
-    margin: 0 0 12px; color: var(--navy);
-    font-size: clamp(26px, 3.4vw, 34px); letter-spacing: -0.015em;
-  }
-  .section-lede { margin: 0 0 40px; max-width: 44em; color: var(--muted); }
-
-  .release-line {
-    margin: -26px 0 34px; color: var(--muted); font-size: 14px;
-  }
-  .release-line b { color: var(--navy); }
-  /* ---- download cards ---- */
-  #downloads {
-    background: var(--wash);
-    border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
-  }
-  .cards {
-    display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px;
-  }
-  .card {
-    display: flex; flex-direction: column;
-    border: 1px solid var(--line); border-radius: 12px;
-    padding: 24px 22px; background: #fff;
-    transition: transform 120ms ease, box-shadow 120ms ease,
-      border-color 120ms ease;
-  }
-  .card:hover {
-    transform: translateY(-3px); border-color: #b9c9db;
-    box-shadow: 0 14px 34px rgba(25, 46, 73, 0.10);
-  }
-  .card-icon {
-    width: 44px; height: 44px; border-radius: 10px;
-    display: grid; place-items: center; margin-bottom: 16px;
-    background: #e8f0fa; color: var(--cobalt);
-  }
-  .card h3 { margin: 0 0 6px; color: var(--navy); font-size: 18px; }
-  .card p { margin: 0 0 18px; color: var(--muted); font-size: 14px; flex: 1; }
-  .card .btn {
-    justify-content: center; padding: 10px 16px; white-space: nowrap;
-    font-size: 14.5px;
-  }
-  .card .fine {
-    margin-top: 10px; color: #6b7887; font-size: 12px; text-align: center;
-  }
-  /* ---- gallery teaser ---- */
-  .gallery-teaser {
-    background: var(--wash);
-    border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
-  }
-  .tease-grid {
-    display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px;
-  }
-  .tease-grid a {
-    display: block; border: 1px solid var(--line); border-radius: 10px;
-    overflow: hidden; background: #fff;
-    box-shadow: 0 6px 20px rgba(25, 46, 73, 0.06);
-    transition: transform 120ms ease, box-shadow 120ms ease;
-  }
-  .tease-grid a:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 14px 32px rgba(25, 46, 73, 0.12);
-  }
-  .tease-grid img { display: block; width: 100%; height: auto; }
-  .tease-more { margin: 18px 0 0; font-size: 15px; }
-  .tease-more a { font-weight: 700; text-decoration: none; }
-  .tease-more a:hover { text-decoration: underline; }
-
-  /* ---- features: the lab / classroom pillars ---- */
-  .features { background: #fff; }
   .pillars {
     display: grid; grid-template-columns: 1fr 1fr; gap: 26px 44px;
   }
+  .pillar { display: flex; flex-direction: column; }
   .pillar-title {
     margin: 0 0 16px; padding-bottom: 9px; font-size: 13px;
     font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase;
@@ -257,7 +242,6 @@
   }
   .pillar-title.classroom { border-bottom-color: var(--amber); }
   .pillar .feature { margin-bottom: 22px; }
-  .pillar .feature:last-child { margin-bottom: 0; }
   .pillar:nth-child(1) .feature .dot { background: var(--cobalt); }
   .pillar:nth-child(2) .feature .dot { background: var(--amber); }
   .feature h3 {
@@ -269,6 +253,101 @@
     background: var(--amber); flex: 0 0 auto;
   }
   .feature p { margin: 0; color: var(--muted); font-size: 14.5px; }
+  /* each pillar ends on its next step, level across both columns */
+  .pillar-more { margin: auto 0 0; padding-top: 4px; }
+
+  /* ---- gallery teaser ---- */
+  .tease-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px;
+  }
+  .tease-grid a {
+    display: block; border: 1px solid var(--line); border-radius: 10px;
+    overflow: hidden; background: #fff; text-decoration: none;
+    box-shadow: 0 6px 20px rgba(25, 46, 73, 0.06);
+    transition: transform 120ms ease, box-shadow 120ms ease;
+  }
+  .tease-grid a:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 14px 32px rgba(25, 46, 73, 0.12);
+  }
+  .tease-grid img { display: block; width: 100%; height: auto; }
+  .tease-name {
+    display: block; padding: 9px 14px; border-top: 1px solid var(--line);
+    color: var(--navy); font-weight: 700; font-size: 14px;
+  }
+  .tease-more { margin: 18px 0 0; font-size: 15px; }
+  .tease-more a { font-weight: 700; text-decoration: none; }
+  .tease-more a:hover { text-decoration: underline; }
+
+  /* ---- beyond the chart: one card per workspace ---- */
+  section.beyond { border-top: 1px solid var(--line); }
+  .bcards {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px;
+  }
+  .bcard {
+    display: flex; flex-direction: column; overflow: hidden;
+    border: 1px solid var(--line); border-radius: 12px; background: #fff;
+    box-shadow: 0 6px 20px rgba(25, 46, 73, 0.06);
+  }
+  /* The crops are cut from the full workspace shots by website/shots.mjs. */
+  .bcard img {
+    display: block; width: 100%; height: auto;
+    border-bottom: 1px solid var(--line);
+  }
+  .bbody { display: flex; flex-direction: column; flex: 1; padding: 18px 20px 20px; }
+  .bcard h3 {
+    margin: 0 0 8px; color: var(--navy); font-size: 17.5px;
+    line-height: 1.3; letter-spacing: -0.01em;
+  }
+  .bcard p { margin: 0 0 14px; color: var(--muted); font-size: 14.5px; flex: 1; }
+  .bcard .more-link { font-size: 14px; }
+
+  /* ---- get Pandion: the browser first, then the other three ways in ---- */
+  .release-line {
+    margin: -26px 0 30px; color: var(--muted); font-size: 14px;
+  }
+  .release-line b { color: var(--navy); }
+  .card-icon {
+    width: 44px; height: 44px; border-radius: 10px; flex: 0 0 auto;
+    display: grid; place-items: center;
+    background: #e8f0fa; color: var(--cobalt);
+  }
+  .get-featured {
+    display: grid; grid-template-columns: auto 1fr auto; gap: 22px;
+    align-items: center; padding: 24px 26px; margin-bottom: 18px;
+    border: 1px solid #b8cbe3; border-radius: 14px; background: #fff;
+    box-shadow: 0 14px 34px rgba(25, 46, 73, 0.10);
+  }
+  .get-featured h3 { margin: 0 0 4px; color: var(--navy); font-size: 20px; }
+  .get-featured p { margin: 0; color: var(--muted); font-size: 14.5px; max-width: 40em; }
+  .get-featured .act { text-align: center; }
+  .fine {
+    margin-top: 10px; color: #6b7887; font-size: 12px;
+    line-height: 1.45; text-align: center;
+  }
+  .cards {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px;
+  }
+  .card {
+    display: flex; flex-direction: column;
+    border: 1px solid var(--line); border-radius: 12px;
+    padding: 22px; background: #fff;
+    transition: transform 120ms ease, box-shadow 120ms ease,
+      border-color 120ms ease;
+  }
+  .card:hover {
+    transform: translateY(-3px); border-color: #b9c9db;
+    box-shadow: 0 14px 34px rgba(25, 46, 73, 0.10);
+  }
+  .card .card-icon { margin-bottom: 14px; }
+  .card h3 { margin: 0 0 6px; color: var(--navy); font-size: 18px; }
+  .card p { margin: 0 0 18px; color: var(--muted); font-size: 14px; flex: 1; }
+  .card .btn, .get-featured .btn {
+    justify-content: center; padding: 10px 16px; white-space: nowrap;
+    font-size: 14.5px;
+  }
+  /* two-line fine print on one card must not lift its button */
+  .card .fine { min-height: 2.9em; }
 
   /* ---- footer ---- */
   footer { padding: 44px 0 56px; border-top: 1px solid var(--line); }
@@ -287,12 +366,37 @@
     .hero-grid { grid-template-columns: 1fr; padding: 48px 0 44px; }
     .hero-art { order: -1; }
     .hero-art img { width: min(52vw, 260px); }
-    .cards { grid-template-columns: repeat(2, 1fr); }
-    .feature-grid { grid-template-columns: 1fr 1fr; }
+    .why-row { grid-template-columns: 1fr; gap: 26px; }
+    .bcards { grid-template-columns: 1fr; }
+    .bcard { flex-direction: row; }
+    .bcard img {
+      width: 44%; object-fit: cover; object-position: left top;
+      border-bottom: 0; border-right: 1px solid var(--line);
+    }
+  }
+  @media (max-width: 760px) {
+    ol.rules { grid-template-columns: 1fr; gap: 22px; }
+    ol.rules li { padding-left: 46px; }
+    ol.rules .rule-dot { position: absolute; left: 0; top: 0; margin: 0; }
+    .rule-line { top: 34px; left: 12.5px; width: 3px; height: calc(100% - 18px); }
+    .get-featured { grid-template-columns: 1fr; }
+    .get-featured .act, .get-featured .fine { text-align: left; }
+    .cards { grid-template-columns: 1fr; }
+    .pillars { grid-template-columns: 1fr; }
   }
   @media (max-width: 560px) {
-    .cards { grid-template-columns: 1fr; }
-    .feature-grid { grid-template-columns: 1fr; }
+    .tease-grid { gap: 10px; }
+    .tease-name { padding: 7px 8px; font-size: 12px; line-height: 1.3; }
+    .bcard { flex-direction: column; }
+    .bcard img {
+      width: 100%; aspect-ratio: 2 / 1; object-fit: cover;
+      object-position: left top;
+      border-right: 0; border-bottom: 1px solid var(--line);
+    }
+    .card { padding: 18px; }
+    .card .card-icon { width: 36px; height: 36px; margin-bottom: 10px; }
+    .card p { margin-bottom: 14px; }
+    .card .fine { min-height: 0; }
     /* Do NOT hide the nav on phones: it used to leave only the
        CTA, stranding Gallery/Docs/About. Wrap it under the brand. */
     .nav { height: auto; flex-wrap: wrap; padding: 8px 0; row-gap: 4px; }
@@ -340,9 +444,8 @@
           Pandion Plots is a free, open-source graphing app for
           researchers, instructors, and students. Import your data,
           assign variables, and create a polished statistical figure
-          without code. Click the chart to refine its labels, colors,
-          axes, annotations, and layout. Everything runs locally, so
-          your data stays on your computer.
+          without code. Everything runs locally, so your data stays on
+          your computer.
         </p>
         <div class="cta-row">
           <a class="btn btn-primary" href="app/">Open the browser app</a>
@@ -359,72 +462,165 @@
     </div>
   </div>
 
-  <div class="shot">
+  <section class="show">
     <div class="wrap">
       <figure>
         <div class="shot-frame">
           <div class="shot-bar" aria-hidden="true"><i></i><i></i><i></i></div>
-          <img width="3040" height="1900" src="assets/app-chart.png"
-               data-image-kind="illustrative"
-               alt="The Pandion Plots chart workspace: a grouped bar chart of
-                    score by condition and site, with error bars and every
-                    observation drawn on top, beside a chart setup panel
-                    listing the variables and their analysis roles">
+          <div class="shot-img">
+            <img width="3040" height="1900" src="assets/app-chart.png"
+                 data-image-kind="illustrative"
+                 alt="The Pandion Plots chart workspace: a grouped bar chart of
+                      score by condition and site, with error bars and every
+                      observation drawn on top, beside a chart setup panel
+                      listing the variables and their analysis roles">
+            <!-- One dot per rule below: a bar, the legend, the Add button.
+                 website/shots.mjs rewrites these positions. -->
+            <span class="shot-marker" data-shot-marker="1" style="left:30.3%;top:52.6%" aria-hidden="true">1</span>
+            <span class="shot-marker" data-shot-marker="2" style="left:71.4%;top:26.9%" aria-hidden="true">2</span>
+            <span class="shot-marker" data-shot-marker="3" style="left:65.6%;top:20.1%" aria-hidden="true">3</span>
+          </div>
         </div>
         <figcaption>
           A grouped bar chart with error bars and every observation drawn
           on top, created from the built-in sample data in a few clicks.
-          Each chart lives in its own tab, and related charts collect into
-          named groups in the left rail.
         </figcaption>
       </figure>
-    </div>
-  </div>
 
-  <section class="story">
+      <div class="rules-head">
+        <p class="kicker">How it works</p>
+        <h2>Three rules run every chart.</h2>
+        <a class="more-link" href="learn.html">Take the hands-on tour</a>
+      </div>
+      <ol class="rules">
+        <li>
+          <span class="rule-dot" aria-hidden="true">1</span>
+          <span class="rule-line" aria-hidden="true"></span>
+          <h3>Click to change.</h3>
+          <p>Clicking a bar opens its settings under the chart, and
+             legends, error bars, and labels open their own settings the
+             same way.</p>
+        </li>
+        <li>
+          <span class="rule-dot" aria-hidden="true">2</span>
+          <span class="rule-line" aria-hidden="true"></span>
+          <h3>Drag to move.</h3>
+          <p>Dragging one bar past its neighbor swaps the two groups in
+             every category, and the legend can be dragged to wherever it
+             fits.</p>
+        </li>
+        <li>
+          <span class="rule-dot" aria-hidden="true">3</span>
+          <h3>Click + to add.</h3>
+          <p>The Add menu holds everything you can put on a chart.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="why band" id="features">
     <div class="wrap">
-      <p class="kicker">The story</p>
-      <h2>Pandion Plots in under a minute.</h2>
-      <figure class="story-film">
-        <div class="shot-frame">
-          <video controls preload="none" playsinline width="1920" height="1080"
-                 poster="assets/brand-story/poster.jpg"
-                 aria-describedby="story-transcript-text">
-            <source src="assets/brand-story/hls/index.m3u8" type="application/vnd.apple.mpegurl">
-            <source src="assets/brand-story/pandion-plots-brand-story.mp4" type="video/mp4">
-            <track kind="captions" src="assets/brand-story/pandion-plots-brand-story.vtt"
-                   srclang="en" label="English" default>
-          </video>
-        </div>
-        <figcaption>
-          Why Pandion Plots exists and what it does, narrated with
-          captions. The app scenes are the real app.
-        </figcaption>
-        <details class="story-transcript">
-          <summary>Read the transcript</summary>
-          <div id="story-transcript-text">
-            <p>Every dataset has a story in it. But getting it onto the
-            page? That's the struggle. Some tools are easy, but only go so
-            far. Others can do anything, once you learn to code. So a
-            professor built something in between.</p>
-            <p>Pandion Plots. Drop in your variables, and your first draft
-            is already presentable. Want to change something? Just click
-            it. The statistics sit right beside it, explained in plain
-            language. It even checks your graph for common mistakes.</p>
-            <p>Free, open source, and private. Your data never leaves your
-            computer. Built for research. Designed to teach.</p>
-            <p>Pandion Plots. Clear statistical figures, without the
-            struggle.</p>
-            <p>On screen: a hand-drawn collage of paper, pencil and code
-            leads to the real app. Variables are dragged into the chart
-            setup and a grouped bar chart draws itself; clicking the bars
-            opens their settings and recolors them; the Statistics panel
-            explains a p value in plain language; and Check my graph
-            passes all fifteen of its checks. The film ends with the
-            osprey diving along a straight line to its final point.</p>
+      <p class="kicker">Why Pandion</p>
+      <h2>Built for research. Designed to teach.</h2>
+      <div class="why-row">
+        <figure class="why-film">
+          <div class="shot-frame">
+            <video controls preload="none" playsinline width="1920" height="1080"
+                   poster="assets/brand-story/poster.jpg"
+                   aria-describedby="story-transcript-text">
+              <source src="assets/brand-story/hls/index.m3u8" type="application/vnd.apple.mpegurl">
+              <source src="assets/brand-story/pandion-plots-brand-story.mp4" type="video/mp4">
+              <track kind="captions" src="assets/brand-story/pandion-plots-brand-story.vtt"
+                     srclang="en" label="English" default>
+            </video>
           </div>
-        </details>
-      </figure>
+          <figcaption>
+            Why Pandion Plots exists and what it does, narrated with
+            captions. The app scenes are the real app.
+          </figcaption>
+        </figure>
+        <div class="why-text">
+          <p class="pullquote">Some tools are easy, but only go so far.
+            Others can do anything, once you learn to code.
+            <em>So a professor built something in between.</em></p>
+          <p class="pullquote-src">From the one-minute story</p>
+          <p class="why-lede">
+            When you want help, it explains results and design choices in
+            plain language. Experienced users can stay focused on the work;
+            newer users can follow the guidance.
+          </p>
+          <details class="story-transcript">
+            <summary>Read the transcript</summary>
+            <div id="story-transcript-text">
+              <p>Every dataset has a story in it. But getting it onto the
+              page? That's the struggle. Some tools are easy, but only go so
+              far. Others can do anything, once you learn to code. So a
+              professor built something in between.</p>
+              <p>Pandion Plots. Drop in your variables, and your first draft
+              is already presentable. Want to change something? Just click
+              it. The statistics sit right beside it, explained in plain
+              language. It even checks your graph for common mistakes.</p>
+              <p>Free, open source, and private. Your data never leaves your
+              computer. Built for research. Designed to teach.</p>
+              <p>Pandion Plots. Clear statistical figures, without the
+              struggle.</p>
+              <p>On screen: a hand-drawn collage of paper, pencil and code
+              leads to the real app. Variables are dragged into the chart
+              setup and a grouped bar chart draws itself; clicking the bars
+              opens their settings and recolors them; the Statistics panel
+              explains a p value in plain language; and Check my graph
+              passes all fifteen of its checks. The film ends with the
+              osprey diving along a straight line to its final point.</p>
+            </div>
+          </details>
+        </div>
+      </div>
+
+      <div class="pillars">
+        <div class="pillar">
+          <h3 class="pillar-title lab">In the lab</h3>
+          <div class="feature">
+            <h3><span class="dot"></span>Statistics you can check</h3>
+            <p>Comparisons, multiple-comparison corrections, and effect
+               sizes are verified against R, with results stated in
+               APA style.</p>
+          </div>
+          <div class="feature">
+            <h3><span class="dot"></span>Figures ready to share</h3>
+            <p>Build multi-panel layouts and export SVG, PNG, JPG, or
+               vector PDF files, with captions included.</p>
+          </div>
+          <div class="feature">
+            <h3><span class="dot"></span>Private by design</h3>
+            <p>Everything runs on your computer. No accounts, uploads,
+               or cloud processing, and your data never leaves your
+               device. The only thing counted is how often the browser
+               app is used, with one anonymous ping at launch.</p>
+          </div>
+          <p class="pillar-more"><a class="more-link" href="about.html#cite">How to cite</a></p>
+        </div>
+        <div class="pillar">
+          <h3 class="pillar-title classroom">In the classroom</h3>
+          <div class="feature">
+            <h3><span class="dot"></span>Explanations when you need them</h3>
+            <p>Get plain-language interpretations of tests, estimates,
+               and intervals, with definitions in the built-in
+               glossary.</p>
+          </div>
+          <div class="feature">
+            <h3><span class="dot"></span>Checks for common graph problems</h3>
+            <p>Built-in checks flag truncated axes, difficult color
+               choices, and other issues before you share a figure.</p>
+          </div>
+          <div class="feature">
+            <h3><span class="dot"></span>Help Me Choose</h3>
+            <p>Select your variables and answer a few questions.
+               Pandion recommends suitable chart types and explains why
+               they fit.</p>
+          </div>
+          <p class="pillar-more"><a class="more-link" href="learn.html#workshop">Run it as a workshop</a></p>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -439,19 +635,19 @@
       <div class="tease-grid">
         <a href="gallery.html"><img width="1460" height="974" src="assets/gallery/raincloud.png"
           data-image-kind="illustrative"
-          alt="Raincloud chart of three dose groups"></a>
+          alt="Raincloud chart of three dose groups"><span class="tease-name">Raincloud</span></a>
         <a href="gallery.html"><img width="1168" height="784" src="assets/gallery/likert.png"
           data-image-kind="illustrative"
-          alt="Diverging stacked Likert chart of five survey items"></a>
+          alt="Diverging stacked Likert chart of five survey items"><span class="tease-name">Likert battery</span></a>
         <a href="gallery.html"><img width="1475" height="976" src="assets/gallery/scatter-marginals.png"
           data-image-kind="illustrative"
-          alt="Scatter chart of two numeric variables, colored by group"></a>
+          alt="Scatter chart of two numeric variables, colored by group"><span class="tease-name">Scatter by group</span></a>
       </div>
       <p class="tease-more"><a href="gallery.html">Browse the full gallery</a></p>
     </div>
   </section>
 
-  <section class="workspaces">
+  <section class="beyond">
     <div class="wrap">
       <p class="kicker">Beyond the chart</p>
       <h2>A chart is only part of the work.</h2>
@@ -461,110 +657,84 @@
         find as you go, then arrange finished charts into a polished
         figure for a paper, poster, or presentation.
       </p>
-
-      <div class="shot-block">
-        <h3>A data workspace that knows nominal from numeric</h3>
-        <p>
-          Give each variable a measure type and the rest follows: which
-          roles it can fill, which charts get suggested, and how its
-          levels are ordered. Row counts, missing values, distinct
-          values, and the roles a variable is currently used in stay
-          visible while you work. Drag to reorder categories, exclude
-          rows, or filter. A computed variable adds a formula column that
-          recalculates whenever the data changes, and the quick-transform
-          options write the common ones for you: log10, ln, z-score,
-          center, bin into 4, and recode.
-        </p>
-        <figure>
-          <div class="shot-frame">
-            <div class="shot-bar" aria-hidden="true"><i></i><i></i><i></i></div>
-            <img width="3040" height="1900" src="assets/app-data.png" loading="lazy"
-                 data-image-kind="illustrative"
-                 alt="The Pandion Plots data workspace: a spreadsheet of the
-                      sample data beside a variable inspector showing the
-                      measure type, a summary of rows and missing values, and
-                      a draggable list of category levels">
+      <div class="bcards">
+        <article class="bcard">
+          <img width="960" height="600" src="assets/home-data.png" loading="lazy"
+               data-image-kind="illustrative"
+               alt="The data workspace inspecting a nominal variable: its
+                    measure type, a summary of rows and missing values, and a
+                    draggable list of category levels">
+          <div class="bbody">
+            <h3>A data workspace that knows nominal from numeric</h3>
+            <p>Give each variable a measure type and the rest follows:
+               which roles it can fill, which charts get suggested, and how
+               its levels are ordered.</p>
+            <a class="more-link" href="docs/#app-data">In the user guide</a>
           </div>
-          <figcaption>
-            The data workspace, inspecting a nominal variable and its
-            category order.
-          </figcaption>
-        </figure>
-      </div>
-
-      <div class="shot-block">
-        <h3>A Notebook that keeps what you found</h3>
-        <p>
-          Right-click a chart and choose Keep to Notebook, or press Keep
-          on a pinned comparison in the Statistics panel, and the moment
-          lands as a page: the chart, its selection rings, and the
-          statistics as one image. Each page carries when it was kept,
-          your notes, and an honest verdict on whether its source chart
-          has changed since. Kept pages act as snapshots and never update
-          themselves, which is the point. Organize them into sections,
-          place one in a layout, or export the Notebook, one page per
-          kept moment, in the same formats as a chart.
-        </p>
-        <figure>
-          <div class="shot-frame">
-            <div class="shot-bar" aria-hidden="true"><i></i><i></i><i></i></div>
-            <img width="3040" height="1900" src="assets/app-notebook.png" loading="lazy"
-                 data-image-kind="illustrative"
-                 alt="The Pandion Plots Notebook workspace: a kept page
-                      holding a chart with its selection rings and the
-                      statistics that went with it, beside the date it was
-                      kept and the note written on it">
+        </article>
+        <article class="bcard">
+          <img width="1296" height="810" src="assets/home-notebook.png" loading="lazy"
+               data-image-kind="illustrative"
+               alt="A kept Notebook page: a chart with its selection rings and
+                    the statistics that went with it, beside the date it was
+                    kept">
+          <div class="bbody">
+            <h3>A Notebook that keeps what you found</h3>
+            <p>Each page carries when it was kept, your notes, and an
+               honest verdict on whether its source chart has changed
+               since. Kept pages act as snapshots and never update
+               themselves, which is the point.</p>
+            <a class="more-link" href="docs/#app-notebook">In the user guide</a>
           </div>
-          <figcaption>
-            A kept page: the chart, the statistics that went with it, and
-            the note you wrote at the time.
-          </figcaption>
-        </figure>
-      </div>
-
-      <div class="shot-block">
-        <h3>Layouts for multi-panel figures</h3>
-        <p>
-          Arrange several charts on one page, label the panels, and add
-          titles, notes, or images. Panels placed from your charts stay
-          linked, so an edit to a chart updates the figure; pages placed
-          from the Notebook stay the snapshots they were. Snapping,
-          smart guides, and page presets keep the arrangement tidy, and
-          the finished figure exports as SVG, PNG, JPG, or vector PDF.
-        </p>
-        <figure>
-          <div class="shot-frame">
-            <div class="shot-bar" aria-hidden="true"><i></i><i></i><i></i></div>
-            <img width="3040" height="1900" src="assets/app-layout.png" loading="lazy"
-                 data-image-kind="illustrative"
-                 alt="The Pandion Plots Layouts workspace: a bar chart and a
-                      scatterplot placed side by side as panels A and B on a
-                      canvas page, with snapping and page controls above">
+        </article>
+        <article class="bcard">
+          <img width="960" height="600" src="assets/home-layout.png" loading="lazy"
+               data-image-kind="illustrative"
+               alt="Two charts composed as panels A and B on a layout page">
+          <div class="bbody">
+            <h3>Layouts for multi-panel figures</h3>
+            <p>Arrange several charts on one page, label the panels, and
+               add titles, notes, or images. Panels placed from your charts
+               stay linked, so an edit to a chart updates the figure.</p>
+            <a class="more-link" href="docs/#app-layouts">In the user guide</a>
           </div>
-          <figcaption>
-            Two charts composed as panels A and B on a canvas page.
-          </figcaption>
-        </figure>
+        </article>
       </div>
     </div>
   </section>
 
-  <section id="downloads">
+  <section id="downloads" class="band">
     <div class="wrap">
       <p class="kicker">Get Pandion Plots</p>
       <h2>Use Pandion in the browser, on your desktop, or inside jamovi.</h2>
       <p class="section-lede">
         The browser, desktop, and portable versions share the same
         charting workflow and project format, so you can move your work
-        between them. Inside jamovi, the same chart engine keeps plots
-        alongside your analyses in the .omv file.
+        between them.
       </p>
       <p class="release-line">
         Current release <b>3.1.3</b>, GPL-3.0.
         <a href="https://github.com/torryscott/pandion/releases">Release notes</a>
-        &middot; <a href="docs/">User guide</a>
-        &middot; <a href="about.html#cite">How to cite</a>
       </p>
+      <div class="get-featured">
+        <div class="card-icon" aria-hidden="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+            <circle cx="12" cy="12" r="9"/>
+            <path d="M3.5 12h17M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>
+          </svg>
+        </div>
+        <div>
+          <h3>In your browser</h3>
+          <p>Start immediately. Bring in data from a CSV, an Excel
+             sheet, or a jamovi file and build charts without installing
+             anything. The browser keeps an autosave between visits, and
+             Save writes a project file to your computer.</p>
+        </div>
+        <div class="act">
+          <a class="btn btn-primary" href="app/">Open the browser app</a>
+          <div class="fine">Works in current desktop browsers</div>
+        </div>
+      </div>
       <div class="cards">
         <div class="card">
           <div class="card-icon" aria-hidden="true">
@@ -592,9 +762,7 @@
           </div>
           <h3>Inside jamovi</h3>
           <p>Use the same chart engine beside your jamovi analyses, with
-             plots stored in the same .omv file. Opening an .omv in the
-             browser or desktop app brings the data across (values,
-             measure types, and category orders), not the analyses.</p>
+             plots stored in the same .omv file.</p>
           <a class="btn btn-secondary"
              href="download-jamovi.html">Get the module</a>
           <div class="fine">Direct downloads for Mac and Windows, with install steps</div>
@@ -614,79 +782,6 @@
              href="pandion-plots.html" download="pandion-plots.html"
              data-count="portable">Download HTML app</a>
           <div class="fine">One file, about 5.0 MB</div>
-        </div>
-        <div class="card">
-          <div class="card-icon" aria-hidden="true">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-              <circle cx="12" cy="12" r="9"/>
-              <path d="M3.5 12h17M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>
-            </svg>
-          </div>
-          <h3>In your browser</h3>
-          <p>Start immediately. Bring in data from a CSV, an Excel
-             sheet, or a jamovi file and build charts without installing
-             anything. The browser keeps an autosave between visits, and
-             Save writes a project file to your computer.</p>
-          <a class="btn btn-primary" href="app/">Open the browser app</a>
-          <div class="fine">Works in current desktop browsers</div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="features" id="features">
-    <div class="wrap">
-      <p class="kicker">Why Pandion</p>
-      <h2>Built for research. Designed to teach.</h2>
-      <p class="section-lede">
-        Pandion Plots supports the full figure-making process: explore
-        your data, check assumptions, run relevant statistics, and
-        prepare a chart for a paper or presentation. When you want
-        help, it explains results and design choices in plain language.
-        Experienced users can stay focused on the work; newer users can
-        follow the guidance.
-      </p>
-      <div class="pillars">
-        <div class="pillar">
-          <h3 class="pillar-title lab">In the lab</h3>
-          <div class="feature">
-            <h3><span class="dot"></span>Statistics you can check</h3>
-            <p>Comparisons, multiple-comparison corrections, and effect
-               sizes are verified against R, with results stated in
-               APA style.</p>
-          </div>
-          <div class="feature">
-            <h3><span class="dot"></span>Figures ready to share</h3>
-            <p>Build multi-panel layouts and export SVG, PNG, JPG, or
-               vector PDF files, with captions included.</p>
-          </div>
-          <div class="feature">
-            <h3><span class="dot"></span>Private by design</h3>
-            <p>Everything runs on your computer. No accounts, uploads,
-               or cloud processing, and your data never leaves your
-               device. The only thing counted is how often the browser
-               app is used, with one anonymous ping at launch.</p>
-          </div>
-        </div>
-        <div class="pillar">
-          <h3 class="pillar-title classroom">In the classroom</h3>
-          <div class="feature">
-            <h3><span class="dot"></span>Explanations when you need them</h3>
-            <p>Get plain-language interpretations of tests, estimates,
-               and intervals, with definitions in the built-in
-               glossary.</p>
-          </div>
-          <div class="feature">
-            <h3><span class="dot"></span>Checks for common graph problems</h3>
-            <p>Built-in checks flag truncated axes, difficult color
-               choices, and other issues before you share a figure.</p>
-          </div>
-          <div class="feature">
-            <h3><span class="dot"></span>Help Me Choose</h3>
-            <p>Select your variables and answer a few questions.
-               Pandion recommends suitable chart types and explains why
-               they fit.</p>
-          </div>
         </div>
       </div>
     </div>

@@ -14,6 +14,19 @@
 // The other three exist because the site otherwise showed only a chart, and
 // a chart is the part of this app that a dozen other tools also have.
 //
+// The home page shows those three as cards, so each also gets a crop of
+// the part worth seeing at card size, cut from the same frame:
+//
+//   assets/home-data.png     the grid's right edge and the variable inspector
+//   assets/home-notebook.png the kept page and its rail
+//   assets/home-layout.png   the layout toolbar and the two-panel canvas
+//
+// And the hero shot carries three numbered dots on the home page, one per
+// rule of the editor (a bar, the legend, the Add button). Their positions
+// are measured here from the live elements and written back into
+// website/index.html, so a retaken hero can never leave a dot pointing at
+// empty space.
+//
 // Framing is 1520x950 CSS at deviceScaleFactor 2, i.e. 3040x1900 PNGs, the
 // same as the shots they replace. The page renders them at ~1030px wide,
 // so they stay crisp on retina displays.
@@ -61,6 +74,63 @@ async function session() {
     const ok = await page.$('#ps-coach-ok');
     if (ok) { await ok.click(); await page.waitForTimeout(400); }
     return { ctx, page };
+}
+
+// A card crop from the frame just shot. Clips are CSS px of the 1520x950
+// frame, kept at 16:10 so the three cards line up, and saved at CSS scale
+// because a card shows them at about a third of the page width.
+async function crop(page, name, clip) {
+    await page.screenshot({ path: path.join(OUT, name), clip, scale: 'css' });
+    const kb = Math.round(fs.statSync(path.join(OUT, name)).size / 1024);
+    console.log(`  ${name}  ${kb} KB`);
+}
+
+// Measure the three things the home page's dots point at, as percentages
+// of the frame, and rewrite the dots in website/index.html to match.
+async function syncHeroMarkers(page) {
+    const at = await page.evaluate(() => {
+        const box = el => el.getBoundingClientRect();
+        // 1: the leftmost bar (first category, first group), at its body.
+        const bars = [...document.querySelectorAll(
+            '.graphbuilder2-host svg [data-bar-cat][data-bar-group]')]
+            .map(el => ({ el, r: box(el) }))
+            .filter(b => b.r.width > 4 && b.r.height > 4);
+        if (!bars.length) return 'no bars';
+        const left = Math.min(...bars.map(b => b.r.left));
+        const first = bars.filter(b => b.r.left - left < 2)
+            .sort((a, b) => b.r.width * b.r.height - a.r.width * a.r.height)[0].r;
+        // 2: just right of the legend's rows, at their middle.
+        const rows = [...document.querySelectorAll(
+            '.graphbuilder2-host svg [data-legend-row]')].map(box)
+            .filter(r => r.width > 0);
+        if (!rows.length) return 'no legend rows';
+        const lr = Math.max(...rows.map(r => r.right));
+        const lt = Math.min(...rows.map(r => r.top));
+        const lb = Math.max(...rows.map(r => r.bottom));
+        // 3: hanging just under the chart's Add button.
+        const add = document.querySelector('[aria-label="Add to chart"]');
+        if (!add) return 'no Add button';
+        const a = box(add);
+        return [
+            [first.left + first.width / 2, first.top + first.height * 0.58],
+            [lr + 48, (lt + lb) / 2],
+            [a.left + a.width / 2, a.bottom + 23],
+        ];
+    });
+    if (typeof at === 'string') {
+        problems.push('hero dots: ' + at + ', so website/index.html was left as it was');
+        return;
+    }
+    const home = path.resolve(OUT, '..', 'index.html');
+    let html = fs.readFileSync(home, 'utf8');
+    at.forEach(([x, y], i) => {
+        const pos = `left:${(x / 1520 * 100).toFixed(1)}%;top:${(y / 950 * 100).toFixed(1)}%`;
+        const re = new RegExp(`(data-shot-marker="${i + 1}" style=")[^"]*(")`);
+        if (!re.test(html)) { problems.push(`hero dots: dot ${i + 1} is missing from index.html`); return; }
+        html = html.replace(re, `$1${pos}$2`);
+        console.log(`  hero dot ${i + 1}  ${pos}`);
+    });
+    fs.writeFileSync(home, html);
 }
 
 async function shot(page, name) {
@@ -172,6 +242,7 @@ async function shot(page, name) {
     else console.log('  hero: Check graph raised nothing');
 
     await shot(page, 'app-chart.png');
+    await syncHeroMarkers(page);
     await ctx.close();
 }
 
@@ -184,6 +255,7 @@ async function shot(page, name) {
     // the exclusion controls. That inspector is the point of the shot.
     await page.evaluate(() => window.PS_SHELL.selectVariable('condition'));
     await shot(page, 'app-data.png');
+    await crop(page, 'home-data.png', { x: 560, y: 78, width: 960, height: 600 });
     await ctx.close();
 }
 
@@ -229,6 +301,7 @@ async function shot(page, name) {
     await page.click('.ps-pinpage');
     await page.waitForTimeout(500);
     await shot(page, 'app-notebook.png');
+    await crop(page, 'home-notebook.png', { x: 224, y: 78, width: 1296, height: 810 });
     await ctx.close();
 }
 
@@ -264,6 +337,7 @@ async function shot(page, name) {
     await page.click('#ps-layout-gallery-create');
     await page.waitForTimeout(2200);
     await shot(page, 'app-layout.png');
+    await crop(page, 'home-layout.png', { x: 223, y: 131, width: 960, height: 600 });
     await ctx.close();
 }
 
@@ -273,4 +347,4 @@ if (problems.length) {
     console.error([...new Set(problems)].slice(0, 12).join('\n'));
     process.exit(1);
 }
-console.log('\nall four shots clean: no console errors, no failed requests');
+console.log('\nall four shots and three crops clean: no console errors, no failed requests');
