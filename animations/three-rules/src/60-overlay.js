@@ -181,10 +181,15 @@ function computeTitleLayout(ctx) {
 }
 
 /* ---------- intro ---------- */
-function drawMarkLine(ctx, progress, alpha, intro) {
+function drawMarkLine(ctx, progress, alpha, intro, toDot) {
   if (progress <= 0 || alpha <= 0) return;
   var P = intro ? introPt : markPt, sc = intro ? INTRO.s : MARKPOS.s;
-  var a = P(MARK.line[0], MARK.line[1]), b = P(MARK.line[2], MARK.line[3]);
+  /* toDot 1: the line runs to the last dot's centre, under its ring, so it
+   * meets the last dot the way it meets the other two (the intro, and the
+   * recap before the landing). toDot 0: the brand SVG's own end, short of
+   * the dot, where the osprey's talons cover it (the recap once landed). */
+  var k = toDot == null ? (intro ? 1 : 0) : toDot;
+  var a = P(MARK.line[0], MARK.line[1]), b = P(lerp(MARK.line[2], MARK.dots[2][0], k), lerp(MARK.line[3], MARK.dots[2][1], k));
   ctx.save();
   ctx.globalAlpha *= alpha;
   ctx.strokeStyle = C.slate;
@@ -603,7 +608,9 @@ function drawEndLayer(ctx, S) {
   var pops = F.dots;
   if (t < pops[0] - 0.1) return;
   /* the line connects the dots as they appear, like a trend being plotted */
-  var U2 = 0.507;
+  /* the share of the line up to the middle dot (it reaches that dot as it pops) */
+  var U2 = Math.hypot(MARK.dots[1][0] - MARK.dots[0][0], MARK.dots[1][1] - MARK.dots[0][1]) /
+    Math.hypot(MARK.dots[2][0] - MARK.dots[0][0], MARK.dots[2][1] - MARK.dots[0][1]);
   var lineP = t < pops[1] ? U2 * Ease.inOutCubic(seg(t, pops[0] + 0.05, pops[1])) : U2 + (1 - U2) * Ease.inOutCubic(seg(t, pops[1] + 0.02, pops[2]));
   var shadowK = 0.5 * (1 - seg(t, F.land, F.land + 0.6));
   var sc = [], i;
@@ -612,7 +619,7 @@ function drawEndLayer(ctx, S) {
   /* the line first, then the white rings over it, as in the brand mark:
    * every dot keeps its white ring where the line meets it (drawn the
    * other way round, the line cut through the first two dots' rings) */
-  drawMarkLine(ctx, lineP, 1);
+  drawMarkLine(ctx, lineP, 1, false, 1 - Ease.inOutCubic(seg(t, F.land - 0.06, F.land + 0.2)));
   for (i = 0; i < 3; i++) drawBadgeRing(ctx, DOT_STAGE[i][0], DOT_STAGE[i][1], RING_R, sc[i], shadowK);
   var iconFade = function (j) { return 1 - Ease.inOutCubic(seg(t, F.land + 0.3 + j * 0.06, F.land + 0.75 + j * 0.06)); };
   drawBadgeDot(ctx, DOT_STAGE[2][0], DOT_STAGE[2][1], RING_R, 2, iconFade(2), sc[2]);
