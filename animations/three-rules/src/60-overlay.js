@@ -609,8 +609,11 @@ function drawEndLayer(ctx, S) {
   var sc = [], i;
   for (i = 0; i < 3; i++) sc.push(spring(t - pops[i], 2.6, 0.45));
   /* white rings sit under everything, like the SVG */
-  for (i = 0; i < 3; i++) drawBadgeRing(ctx, DOT_STAGE[i][0], DOT_STAGE[i][1], RING_R, sc[i], shadowK);
+  /* the line first, then the white rings over it, as in the brand mark:
+   * every dot keeps its white ring where the line meets it (drawn the
+   * other way round, the line cut through the first two dots' rings) */
   drawMarkLine(ctx, lineP, 1);
+  for (i = 0; i < 3; i++) drawBadgeRing(ctx, DOT_STAGE[i][0], DOT_STAGE[i][1], RING_R, sc[i], shadowK);
   var iconFade = function (j) { return 1 - Ease.inOutCubic(seg(t, F.land + 0.3 + j * 0.06, F.land + 0.75 + j * 0.06)); };
   drawBadgeDot(ctx, DOT_STAGE[2][0], DOT_STAGE[2][1], RING_R, 2, iconFade(2), sc[2]);
   /* the osprey dives along the line and seizes the final point */
