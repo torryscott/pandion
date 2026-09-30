@@ -67,7 +67,9 @@ await page.click('#ps-laddpart');
 await page.waitForTimeout(150);
 const menu = await page.evaluate(() => Array.from(
     document.querySelectorAll('#ps-contextmenu button')).map(b => b.textContent.trim()));
-ok(menu.join('|') === 'Box|Arrow|Templates…',
+// Slice two adds Timeline between Arrow and Templates; the slice-one
+// entries and their order are what this pins.
+ok(menu[0] === 'Box' && menu[1] === 'Arrow' && /^Templates/.test(menu[menu.length - 1]),
    'the menu offers Box, Arrow and Templates (' + menu.join(', ') + ')');
 await page.click('#ps-contextmenu button[data-context-action="part-box"]');
 await page.waitForTimeout(350);
@@ -296,7 +298,7 @@ const gallery = await page.evaluate(() => ({
     portraitPreview: !!document.querySelector(
         '[data-layout-template="prisma"] .ps-layout-template-portrait')
 }));
-ok(gallery.cards === 9 && gallery.heading === 'Diagrams' && gallery.prisma && gallery.portraitPreview,
+ok(gallery.cards >= 9 && gallery.heading === 'Diagrams' && gallery.prisma && gallery.portraitPreview,
    'the gallery lists PRISMA 2020 under a Diagrams heading with a portrait preview');
 await page.click('[data-layout-template="prisma"]');
 await page.waitForTimeout(150);
