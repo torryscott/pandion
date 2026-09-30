@@ -8,6 +8,16 @@ punch lists are maintainer-local and not published with this repo.
 
 ## Status
 
+- Figure parts (Sep 29, 2026): Layouts gains two item kinds, Box (the text
+  item with fill, border and corners) and Arrow (two ends, each free or
+  attached to a box; attached ends follow their box and leave from the side
+  facing the other end), one Add part toolbar menu, Box and Arrow rail
+  sections, and a PRISMA 2020 template under a Diagrams heading in the New
+  layout gallery. Boxes and arrows ride undo, duplicate, paste, the .pand
+  file and every export. Verified by `layout-parts-check` (12 cases, control
+  red against a tree without the feature). Timelines and the other diagram
+  templates are the next slice.
+
 - Final usability follow-up (Sep 9, 2026): bar-style choices expose selected
   states and retain keyboard focus. Help me choose completes the pristine
   chart it was opened from (UX-06); explicit New chart still creates one.

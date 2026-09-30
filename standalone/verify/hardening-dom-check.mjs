@@ -325,8 +325,8 @@ ok(document.querySelector('#psroot .ps-guided-empty') &&
 
 console.log('case 8: layout template gallery');
 window.PS_SHELL.showLayoutGallery();
-ok(document.querySelectorAll('[data-layout-template]').length === 8,
-    'offers eight visual starting arrangements');
+ok(document.querySelectorAll('[data-layout-template]').length === 9,
+    'offers nine starting arrangements (eight figures and the PRISMA diagram)');
 ok(document.querySelectorAll('[data-layout-orientation]').length === 2,
     'offers Landscape and Portrait without duplicating the template list');
 document.querySelector('[data-layout-orientation="portrait"]').click();

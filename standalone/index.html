@@ -1178,6 +1178,41 @@
     background: var(--ps-s0); border: 2px solid var(--ps-accent); border-radius: var(--ps-r-sm);
     cursor: nwse-resize; z-index: 3;
   }
+  /* Figure parts (Sep 2026): boxes and arrows. The arrow's item box is
+     pointer-inert so only its stroke (and its chrome) can be grabbed:
+     a diagonal arrow's box would otherwise cover whatever sits inside it. */
+  .ps-litem[data-kind="box"] { cursor: grab; }
+  .ps-lbox {
+    box-sizing: border-box; width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    padding: 4px 8px; overflow: visible;
+    font-family: sans-serif; line-height: 1.25; text-align: center;
+    white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+  .ps-lbox > span { display: block; max-width: 100%; }
+  .ps-litem[data-kind="arrow"] { pointer-events: none; }
+  .ps-litem[data-kind="arrow"] > svg {
+    display: block; overflow: visible; width: 100%; height: 100%;
+  }
+  .ps-larrow-hit { pointer-events: stroke; cursor: grab; fill: none; stroke: transparent; }
+  .ps-larrow-halo { stroke: var(--ps-accent); stroke-opacity: 0.35; }
+  .ps-litem[data-kind="arrow"].ps-litem-sel { outline: none; }
+  .ps-litem[data-kind="arrow"].ps-litem-primary { box-shadow: none; }
+  .ps-litem[data-kind="arrow"] > .ps-lbar,
+  .ps-litem[data-kind="arrow"] > .ps-lhandle-end { pointer-events: auto; }
+  .ps-lhandle-end {
+    position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px;
+    box-sizing: border-box; background: var(--ps-s0);
+    border: 2px solid var(--ps-accent); border-radius: 50%;
+    cursor: crosshair; z-index: 5;
+  }
+  .ps-lhandle-end.ps-lhandle-end-attached { background: var(--ps-accent); }
+  .ps-litem-droptarget { outline: 2px dashed var(--ps-accent); outline-offset: 2px; }
+  .ps-layout-template-heading {
+    grid-column: 1 / -1; margin: 6px 0 -2px; color: var(--ps-muted);
+    font-size: 10px; font-weight: 700; letter-spacing: 0.45px;
+    text-transform: uppercase;
+  }
   .ps-lbar {
     position: absolute; display: flex; gap: 4px; align-items: center;
     background: var(--ps-s0); border: 1px solid var(--ps-l3); border-radius: var(--ps-r-md);
@@ -5277,6 +5312,74 @@
                    step="1" aria-label="Rotation in degrees">
           </div>
         </div>
+        <!-- Figure parts (Sep 2026). A box is a text item with a fill, a
+             border and corners; its text is styled by the Text section
+             above. An arrow joins two boxes, or two free points. Each
+             section appears only when the selection holds that kind. -->
+        <div class="ps-inspector-section" id="ps-layout-box-section"
+             style="display:none;">
+          <span class="ps-inspector-section-title">Box</span>
+          <div class="ps-inspector-field ps-ltx-row">
+            <span class="ps-layout-field-label">Fill</span>
+            <div id="ps-lbox-fills" class="ps-ltx-swatches"></div>
+          </div>
+          <div class="ps-inspector-field ps-ltx-row">
+            <span class="ps-layout-field-label" id="ps-lbox-border-label">Border</span>
+            <div class="ps-lunit-seg" role="group" aria-labelledby="ps-lbox-border-label">
+              <button type="button" data-lbox-border="none" aria-pressed="false">None</button>
+              <button type="button" data-lbox-border="thin" aria-pressed="false">Thin</button>
+              <button type="button" data-lbox-border="thick" aria-pressed="false">Thick</button>
+            </div>
+          </div>
+          <div class="ps-inspector-field ps-ltx-row">
+            <span class="ps-layout-field-label" id="ps-lbox-corner-label">Corner</span>
+            <input id="ps-lbox-corner" type="range" min="0" max="24" step="1"
+                   aria-labelledby="ps-lbox-corner-label">
+            <input id="ps-lbox-corner-num" type="number" min="0" max="24"
+                   step="1" aria-label="Corner radius in pixels">
+          </div>
+        </div>
+        <div class="ps-inspector-section" id="ps-layout-arrow-section"
+             style="display:none;">
+          <span class="ps-inspector-section-title">Arrow</span>
+          <div class="ps-inspector-field ps-ltx-row">
+            <span class="ps-layout-field-label" id="ps-larrow-route-label">Route</span>
+            <div class="ps-lunit-seg" role="group" aria-labelledby="ps-larrow-route-label">
+              <button type="button" data-larrow-route="straight" aria-pressed="false">Straight</button>
+              <button type="button" data-larrow-route="elbow" aria-pressed="false">Elbow</button>
+            </div>
+          </div>
+          <div class="ps-inspector-field ps-ltx-row">
+            <span class="ps-layout-field-label" id="ps-larrow-heads-label">Heads</span>
+            <div class="ps-lunit-seg" role="group" aria-labelledby="ps-larrow-heads-label">
+              <button type="button" data-larrow-heads="none" aria-pressed="false">None</button>
+              <button type="button" data-larrow-heads="end" aria-pressed="false">End</button>
+              <button type="button" data-larrow-heads="both" aria-pressed="false">Both</button>
+            </div>
+          </div>
+          <div class="ps-inspector-field ps-ltx-row">
+            <span class="ps-layout-field-label" id="ps-larrow-width-label">Width</span>
+            <input id="ps-larrow-width" type="range" min="0.5" max="6" step="0.5"
+                   aria-labelledby="ps-larrow-width-label">
+            <input id="ps-larrow-width-num" type="number" min="0.5" max="6"
+                   step="0.5" aria-label="Arrow width in pixels">
+          </div>
+          <div class="ps-inspector-field ps-ltx-row">
+            <span class="ps-layout-field-label">Color</span>
+            <div id="ps-larrow-colors" class="ps-ltx-swatches"></div>
+          </div>
+          <label class="ps-inspector-field">
+            From
+            <select id="ps-larrow-from"></select>
+          </label>
+          <label class="ps-inspector-field">
+            To
+            <select id="ps-larrow-to"></select>
+          </label>
+          <div class="ps-loader-hint">
+            Drag an arrow's end onto a box to attach it. An attached end follows its box.
+          </div>
+        </div>
       </div>
     </div>
     <!-- Punch list 46. Document administration is used once per document and
@@ -5458,6 +5561,11 @@
                   data-tip="Place a kept Notebook page in this layout"><svg class="ps-icn" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="3.5" width="13.5" height="17" rx="2"/><path d="M4 8h4M4 12h4M4 16h4"/></svg> From Notebook</button>
           <button type="button" class="ps-command" id="ps-laddlabel"><svg class="ps-icn" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9.2 16l2.8-8 2.8 8M10.3 13.4h4.6" stroke-width="1.6"/></svg> Panel label</button>
           <button type="button" class="ps-command" id="ps-laddimage"><svg class="ps-icn" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.6" fill="currentColor" stroke="none"/><path d="M4.5 17.5l4.5-4 3 2.5 4-4.5 3.5 4"/></svg> Add image</button>
+          <!-- Figure parts (Sep 2026): boxes, arrows and the diagram
+               templates share ONE menu, so the bar stays a single row. -->
+          <button type="button" class="ps-command" id="ps-laddpart"
+                  aria-haspopup="menu"
+                  data-tip="Add a box or an arrow, or open the diagram templates"><svg class="ps-icn" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="9" height="7" rx="1.2"/><path d="M12.5 8h7M16.5 5l3 3-3 3"/><rect x="11.5" y="13.5" width="9" height="6" rx="1.2"/></svg> Add part</button>
           <input type="file" id="ps-laddimage-file" accept="image/*,.svg"
                  style="display:none;" aria-hidden="true">
           <!-- Page size moved to the rail's PAGE section (launch-eval bug,

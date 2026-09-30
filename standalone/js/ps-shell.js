@@ -4689,10 +4689,15 @@
     if (!c || !isLayoutTab(c)) return "";
     var items = c.items || [];
     if (!items.length) return "Figure canvas with no placed items.";
-    var charts = [], text = [], images = 0;
+    var charts = [], text = [], images = 0, boxes = 0, arrows = 0;
     for (var i = 0; i < items.length; i++) {
       var item = items[i] || {};
-      if (item.kind === "chart") {
+      if (item.kind === "box") {
+        boxes++;
+        var boxWords = String(item.text || "").replace(/\s+/g, " ").trim();
+        if (boxWords) text.push(boxWords.substring(0, 120));
+      } else if (item.kind === "arrow") arrows++;
+      else if (item.kind === "chart") {
         var linked = chartById(item.chartId);
         charts.push(linked && linked.name ? linked.name : "chart panel");
       } else if (item.kind === "text") {
@@ -4710,6 +4715,9 @@
         (text.length > 5 ? "; and more" : ""));
     if (images)
       parts.push(images + (images === 1 ? " added image" : " added images"));
+    if (boxes || arrows)
+      parts.push("Diagram parts: " + boxes + (boxes === 1 ? " box" : " boxes") +
+        " and " + arrows + (arrows === 1 ? " arrow" : " arrows"));
     return parts.join(". ") + ".";
   }
   function generatedExportDescription() {
@@ -5596,6 +5604,77 @@
     }
     return t;
   }
+
+  // ---- figure parts in the file (see the Figure parts block). The
+  // box is a rect with its text wrapped and centred, the arrow a path
+  // and its head triangles; both from the item model, like text.
+  function layoutBoxNode(doc, item) {
+    var ns = "http://www.w3.org/2000/svg", st = layBoxStyle(item);
+    var g = doc.createElementNS(ns, "g");
+    var x = Number(item.x) || 0, y = Number(item.y) || 0;
+    var w = Math.max(1, Number(item.w) || 150), h = Math.max(1, Number(item.h) || 44);
+    var bw = st.borderW;
+    var r = doc.createElementNS(ns, "rect");
+    // The canvas border is INSIDE the box (border-box); a stroke sits
+    // centred on the edge, so the rect is inset by half the stroke.
+    r.setAttribute("x", layNum2(x + bw / 2)); r.setAttribute("y", layNum2(y + bw / 2));
+    r.setAttribute("width", layNum2(Math.max(0.5, w - bw)));
+    r.setAttribute("height", layNum2(Math.max(0.5, h - bw)));
+    if (st.corner) r.setAttribute("rx", layNum2(Math.max(0, st.corner - bw / 2)));
+    r.setAttribute("fill", st.fill === "none" ? "none" : st.fill);
+    if (bw) {
+      r.setAttribute("stroke", st.borderColor);
+      r.setAttribute("stroke-width", String(bw));
+    }
+    g.appendChild(r);
+    var fs = st.fs, rot = layTextRotate(item);
+    var font = (item.italic ? "italic " : "") + (item.bold ? "700" : "400") +
+      " " + fs + "px sans-serif";
+    var inner = (layBoxTextRotated(item) ? h : w) - LAY_BOX_PAD_X * 2 - bw * 2;
+    var lines = wrapCaptionLines(String(item.text || "Box"),
+      Math.max(8, inner), fs, font);
+    var t = doc.createElementNS(ns, "text");
+    var cx = x + w / 2, cy = y + h / 2, lineH = fs * LAY_TEXT_LINE;
+    var top = cy - lines.length * lineH / 2;
+    t.setAttribute("x", layNum2(cx));
+    t.setAttribute("y", layNum2(top + fs * 0.9));
+    t.setAttribute("text-anchor", "middle");
+    t.setAttribute("fill", layTextColor(item));
+    t.setAttribute("font-size", String(fs));
+    t.setAttribute("font-family", "sans-serif");
+    t.setAttribute("font-weight", item.bold ? "700" : "400");
+    if (item.italic) t.setAttribute("font-style", "italic");
+    if (rot) t.setAttribute("transform", "rotate(" + rot + " " +
+      layNum2(cx) + " " + layNum2(cy) + ")");
+    for (var i = 0; i < lines.length; i++) {
+      var sp = doc.createElementNS(ns, "tspan");
+      sp.setAttribute("x", layNum2(cx));
+      if (i > 0) sp.setAttribute("dy", LAY_TEXT_LINE + "em");
+      sp.textContent = lines[i] || " ";
+      t.appendChild(sp);
+    }
+    g.appendChild(t);
+    return g;
+  }
+  function layoutArrowNode(doc, item) {
+    var ns = "http://www.w3.org/2000/svg", r = layArrowRender(item), st = r.style;
+    var g = doc.createElementNS(ns, "g");
+    var ox = Number(item.x) || 0, oy = Number(item.y) || 0;
+    var p = doc.createElementNS(ns, "path");
+    p.setAttribute("d", layArrowD(r.line, ox, oy));
+    p.setAttribute("fill", "none");
+    p.setAttribute("stroke", st.color);
+    p.setAttribute("stroke-width", String(st.width));
+    p.setAttribute("stroke-linejoin", "round");
+    g.appendChild(p);
+    for (var i = 0; i < r.heads.length; i++) {
+      var poly = doc.createElementNS(ns, "polygon");
+      poly.setAttribute("points", layArrowPoly(r.heads[i], ox, oy));
+      poly.setAttribute("fill", st.color);
+      g.appendChild(poly);
+    }
+    return g;
+  }
   function layoutExportSource(mode) {
     var ns = "http://www.w3.org/2000/svg";
     var doc = document.implementation.createDocument(ns, "svg", null);
@@ -5630,6 +5709,14 @@
       var item = items[i];
       if (item.kind === "chart" ||
           (item.kind === "image" && item.srcPin)) panelRect(item);
+      if (item.kind === "box") {
+        root.appendChild(layoutBoxNode(doc, item));
+        continue;
+      }
+      if (item.kind === "arrow") {
+        root.appendChild(layoutArrowNode(doc, item));
+        continue;
+      }
       if (item.kind === "text") {
         root.appendChild(layoutTextNode(doc, item));
         continue;
@@ -18454,6 +18541,22 @@
       c.nextLabel = n + 1;
       persist();
     });
+    // ONE menu for the figure parts (Sep 2026): three more commands would
+    // wrap the bar onto a second row at 1440 px, which was fixed once
+    // before, so Box, Arrow and the templates share a drop-down beside
+    // Add image.
+    el("ps-laddpart").addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (!isLayoutTab(activeChart())) return;
+      var r = e.currentTarget.getBoundingClientRect();
+      showContextMenu(r.left, r.bottom + 4, [
+        { label: "Box", key: "part-box", action: function () { layAddBox(); } },
+        { label: "Arrow", key: "part-arrow", action: function () { layAddArrow(); } },
+        "separator",
+        { label: "Templates\u2026", key: "part-templates",
+          action: function () { showLayoutGallery(); } }
+      ], null);
+    });
     document.addEventListener("pointerdown", function (e) {
       // The menus ACT ON the selection, so pressing one is not clicking away.
       // Without the menu bar and the grid's own command bar on this list the
@@ -19996,7 +20099,18 @@
         "A portrait report page with a title area and a large chart.",
       note: "Uses the Presentation page preset.",
       preview: [[7, 24, 86, 68]],
-      portraitPreview: [[8, 18, 84, 74]], presentation: true }
+      portraitPreview: [[8, 18, 84, 74]], presentation: true },
+    // Diagram templates (Sep 2026): arrangements of boxes and arrows,
+    // always on a portrait page. Every part stays an ordinary item.
+    { key: "prisma", name: "PRISMA 2020", slots: 0, diagram: true,
+      portraitOnly: true, build: layBuildPrisma,
+      description: "The flow diagram for a systematic review: identification, " +
+        "screening and inclusion, with every count as a field to fill in.",
+      note: "Boxes and arrows you can edit, move and restyle.",
+      preview: [[6, 6, 8, 20], [20, 6, 36, 12], [62, 6, 34, 12],
+                [6, 30, 8, 40], [20, 30, 36, 10], [62, 30, 34, 10],
+                [20, 44, 36, 10], [62, 44, 34, 10], [20, 58, 36, 10],
+                [62, 58, 34, 12], [6, 78, 8, 14], [20, 78, 36, 14]] }
   ];
   function layoutTemplateByKey(key) {
     for (var i = 0; i < LAYOUT_TEMPLATES.length; i++)
@@ -20007,7 +20121,8 @@
     return PROJECT.charts.filter(function (doc) { return !isLayoutTab(doc); });
   }
   function layoutTemplatePreview(def) {
-    var portrait = LAYOUT_TEMPLATE_ORIENTATION === "portrait";
+    var portrait = LAYOUT_TEMPLATE_ORIENTATION === "portrait" ||
+      !!def.portraitOnly;
     var box = mkEl("span", "ps-layout-template-preview" +
       (portrait ? " ps-layout-template-portrait" : ""));
     var preview = portrait && def.portraitPreview
@@ -20065,7 +20180,15 @@
       orientationButtons[oi].setAttribute("aria-pressed",
         orientationButtons[oi].getAttribute("data-layout-orientation") ===
         LAYOUT_TEMPLATE_ORIENTATION ? "true" : "false");
+    var headed = false;
     for (var i = 0; i < LAYOUT_TEMPLATES.length; i++) {
+      if (LAYOUT_TEMPLATES[i].diagram && !headed) {
+        headed = true;
+        var heading = mkEl("div", "ps-layout-template-heading", "Diagrams");
+        heading.setAttribute("role", "heading");
+        heading.setAttribute("aria-level", "3");
+        root.appendChild(heading);
+      }
       (function (def) {
         var button = mkEl("button", "ps-layout-template-card");
         button.type = "button";
@@ -21037,6 +21160,15 @@
     var def = layoutTemplateByKey(LAYOUT_TEMPLATE_KEY);
     var c = newLayout(), selects = el("ps-layout-template-assignments")
       .querySelectorAll("select[data-layout-slot]");
+    if (def.build) {
+      // A diagram is a fixed form on a portrait page; the orientation
+      // toggle does not apply to it.
+      c.page = { preset: "letterp", w: 816, h: 1056, margin: 40 };
+      def.build(c);
+      hideLayoutGallery();
+      activateNewLayout(c);
+      return;
+    }
     var portrait = LAYOUT_TEMPLATE_ORIENTATION === "portrait";
     if (def.presentation && portrait) {
       c.page = { preset: "letterp", w: 816, h: 1056, margin: 40 };
@@ -21366,8 +21498,11 @@
       name = chart ? ", " + (chart.name || "Untitled chart") : ", missing chart";
     } else if (item.kind === "image") {
       kind = item.srcChart ? "Notebook snapshot" : "Image item";
+    } else if (item.kind === "arrow") {
+      kind = "Arrow";
+      name = layArrowEndsText(item);
     } else {
-      kind = "Text item";
+      kind = item.kind === "box" ? "Box" : "Text item";
       var copy = String(item.text || "Text").replace(/\s+/g, " ").trim();
       if (copy.length > 60) copy = copy.slice(0, 57) + "\u2026";
       name = ', "' + copy + '"';
@@ -21704,7 +21839,7 @@
     var ids = laySelectedIds(), out = [];
     for (var i = 0; i < ids.length; i++) {
       var it = layItemById(ids[i]);
-      if (it && it.kind === "text") out.push(it);
+      if (it && (it.kind === "text" || it.kind === "box")) out.push(it);
     }
     return out;
   }
@@ -21971,6 +22106,688 @@
       layTextToggle("italic", "text italic");
     });
   }
+
+  // ---- Figure parts (Sep 2026, Torry: PRISMA and the basic paper
+  // diagrams belong in Layouts, beside the charts they explain; a
+  // figure, never a record). Two new item kinds:
+  //
+  //   box   the text item with a border, a fill, padding and corners.
+  //         Sized (w/h), so it resizes like a panel; the Text section
+  //         styles its text like any text item; F2 / double-click edits.
+  //   arrow two ends, each FREE (a page point) or ATTACHED to a box.
+  //         x/y/w/h is the bounding box of the drawn arrow and ax/ay/bx/by
+  //         are the ends relative to it, so every generic mover (drag,
+  //         nudge, align, refit, clamp) shifts a free arrow by shifting
+  //         x/y, and an attached end re-reads its box on every sync.
+  //         The side an attached end leaves from is never stored: it is
+  //         the side facing the other end, so a box can go anywhere.
+  //
+  // Refusals, on purpose: one shape (the rounded box), no icon library,
+  // straight or elbow routes only, no dates as data, nothing outside
+  // Layouts. Timelines and the other templates are slice two.
+  var LAY_BOX_FILLS = ["#ffffff", "#f4f7fb", "#eef4fc", "#dbe7f7",
+                       "#fdf6e3", "#e9f4df", "#fdf0f0", "none"];
+  var LAY_ARROW_COLORS = ["#22364d", "#5f6f80", "#94a3b1", "#417499",
+                          "#902634", "#266741"];
+  function layHexOr(v, dflt) {
+    return /^#[0-9a-fA-F]{3,8}$/.test(String(v || "")) ? v : dflt;
+  }
+  function layBoxFill(item) {
+    var f = String(item.fill || "");
+    if (f === "none" || f === "transparent") return "none";
+    return layHexOr(f, "#ffffff");
+  }
+  function layBoxBorder(item) {
+    return item.border === "none" || item.border === "thick"
+      ? item.border : "thin";
+  }
+  function layBoxStyle(item) {
+    var b = layBoxBorder(item);
+    return { fill: layBoxFill(item),
+             // Whole pixels on purpose: Chromium snaps a CSS border to a
+             // whole device pixel, so a 1.25 or 2.5 border drew narrower on
+             // the canvas than the file's stroke. Integers agree everywhere.
+             borderW: b === "none" ? 0 : b === "thick" ? 2 : 1,
+             borderColor: layHexOr(item.borderColor, "#22364d"),
+             corner: layClamp(item.corner == null ? 4 : item.corner, 0, 24),
+             fs: Math.max(8, Math.min(72, Number(item.fontSize) || 13)) };
+  }
+  var LAY_BOX_PAD_X = 8, LAY_BOX_PAD_Y = 4;
+  function layBoxTextRotated(item) {
+    return Math.abs(layTextRotate(item)) >= 45;
+  }
+  function layBoxNode(item) {
+    var st = layBoxStyle(item);
+    var box = mkEl("div", "ps-lbox");
+    box.style.background = st.fill === "none" ? "transparent" : st.fill;
+    box.style.border = st.borderW
+      ? st.borderW + "px solid " + st.borderColor : "0";
+    box.style.borderRadius = st.corner + "px";
+    box.style.fontSize = st.fs + "px";
+    box.style.fontWeight = item.bold ? "700" : "400";
+    box.style.fontStyle = item.italic ? "italic" : "normal";
+    box.style.color = layTextColor(item);
+    var span = mkEl("span", "", exportSafeText(item.text || "Box"));
+    var rot = layTextRotate(item);
+    if (rot) {
+      // Rotation stays on the inner text, as for text items. A side
+      // label (PRISMA's Identification / Screening / Included bars) is a
+      // tall narrow box whose text runs along its height, so the text
+      // lays out at the box's inner HEIGHT before it turns.
+      span.style.transform = "rotate(" + rot + "deg)";
+      span.style.transformOrigin = "center center";
+      if (layBoxTextRotated(item)) {
+        span.style.width = Math.max(8, (Number(item.h) || 44) -
+          LAY_BOX_PAD_Y * 2 - st.borderW * 2) + "px";
+        span.style.maxWidth = "none";
+        span.style.flex = "0 0 auto";
+      }
+    }
+    box.appendChild(span);
+    return box;
+  }
+  function layBoxTargets() {
+    var ids = laySelectedIds(), out = [];
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (it && it.kind === "box") out.push(it);
+    }
+    return out;
+  }
+  function layArrowTargets() {
+    var ids = laySelectedIds(), out = [];
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (it && it.kind === "arrow") out.push(it);
+    }
+    return out;
+  }
+  // layTextApply's shape, for a named set of targets.
+  function layPartApply(targets, label, key, fn, live) {
+    if (!targets.length) return;
+    var ids = [];
+    for (var k = 0; k < targets.length; k++) ids.push(targets[k].id);
+    laySnapshot(label, key ? key + ":" + ids.join(",") : null);
+    for (var i = 0; i < targets.length; i++) fn(targets[i]);
+    layClampAllItems();
+    persist(!live);
+    renderLayout();
+  }
+  function layArrowStyle(item) {
+    return { width: layClamp(item.width == null ? 1.5 : item.width, 0.5, 6),
+             color: layHexOr(item.color, "#22364d"),
+             route: item.route === "straight" ? "straight" : "elbow",
+             heads: item.heads === "none" || item.heads === "both"
+               ? item.heads : "end" };
+  }
+  function layArrowHeadLen(w) { return 7 + w * 2.5; }
+  // Which side of a box an end leaves from: the side facing the other
+  // end, judged in the box's own proportions so a wide box prefers its
+  // long sides. Computed, never stored.
+  function layArrowSideOf(rect, ox, oy) {
+    var cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
+    var dx = ox - cx, dy = oy - cy;
+    var hx = Math.max(1, rect.w / 2), hy = Math.max(1, rect.h / 2);
+    if (Math.abs(dx) / hx >= Math.abs(dy) / hy)
+      return dx >= 0 ? { x: rect.x + rect.w, y: cy, side: "r" }
+                     : { x: rect.x, y: cy, side: "l" };
+    return dy >= 0 ? { x: cx, y: rect.y + rect.h, side: "b" }
+                   : { x: cx, y: rect.y, side: "t" };
+  }
+  function layArrowAnchorBox(ref) {
+    if (!ref || !ref.id) return null;
+    var it = layItemById(ref.id);
+    if (!it || it.kind !== "box") return null;
+    return { x: Number(it.x) || 0, y: Number(it.y) || 0,
+             w: Number(it.w) || 150, h: Number(it.h) || 44 };
+  }
+  // The polyline between two ends. An attached end must LEAVE its box
+  // through the side it sits on, so a horizontal side gets a horizontal
+  // first or last segment; a free end takes whatever the other end needs.
+  function layArrowPoints(A, B, route) {
+    if (route === "straight")
+      return [{ x: A.x, y: A.y }, { x: B.x, y: B.y }];
+    var aH = A.side === "l" || A.side === "r";
+    var aV = A.side === "t" || A.side === "b";
+    var bH = B.side === "l" || B.side === "r";
+    var bV = B.side === "t" || B.side === "b";
+    if (aH && bV) return [{ x: A.x, y: A.y }, { x: B.x, y: A.y }, { x: B.x, y: B.y }];
+    if (aV && bH) return [{ x: A.x, y: A.y }, { x: A.x, y: B.y }, { x: B.x, y: B.y }];
+    var horizontal = aH || (!aV && (bH || (!bV &&
+      Math.abs(B.x - A.x) >= Math.abs(B.y - A.y))));
+    if (horizontal) {
+      var mx = (A.x + B.x) / 2;
+      return [{ x: A.x, y: A.y }, { x: mx, y: A.y }, { x: mx, y: B.y },
+              { x: B.x, y: B.y }];
+    }
+    var my = (A.y + B.y) / 2;
+    return [{ x: A.x, y: A.y }, { x: A.x, y: my }, { x: B.x, y: my },
+            { x: B.x, y: B.y }];
+  }
+  // Resolve both ends to page points and re-express the item as the
+  // box around them. Returns the absolute ends and the polyline.
+  function layArrowSync(item) {
+    var st = layArrowStyle(item);
+    var x0 = Number(item.x) || 0, y0 = Number(item.y) || 0;
+    var A = { x: x0 + (Number(item.ax) || 0), y: y0 + (Number(item.ay) || 0) };
+    var B = { x: x0 + (Number(item.bx) || 0), y: y0 + (Number(item.by) || 0) };
+    var ra = layArrowAnchorBox(item.from), rb = layArrowAnchorBox(item.to);
+    if (ra && rb) {
+      A = layArrowSideOf(ra, rb.x + rb.w / 2, rb.y + rb.h / 2);
+      B = layArrowSideOf(rb, ra.x + ra.w / 2, ra.y + ra.h / 2);
+    } else if (ra) A = layArrowSideOf(ra, B.x, B.y);
+    else if (rb) B = layArrowSideOf(rb, A.x, A.y);
+    // A box that is gone (deleted, or this arrow was pasted into another
+    // figure) leaves the end where it last was, as a free end.
+    if (!ra && item.from) item.from = null;
+    if (!rb && item.to) item.to = null;
+    var pts = layArrowPoints(A, B, st.route);
+    var pad = layArrowHeadLen(st.width) + st.width + 6;
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (var i = 0; i < pts.length; i++) {
+      if (pts[i].x < minX) minX = pts[i].x;
+      if (pts[i].x > maxX) maxX = pts[i].x;
+      if (pts[i].y < minY) minY = pts[i].y;
+      if (pts[i].y > maxY) maxY = pts[i].y;
+    }
+    item.x = minX - pad; item.y = minY - pad;
+    item.w = (maxX - minX) + pad * 2; item.h = (maxY - minY) + pad * 2;
+    item.ax = A.x - item.x; item.ay = A.y - item.y;
+    item.bx = B.x - item.x; item.by = B.y - item.y;
+    return { a: A, b: B, pts: pts };
+  }
+  // The drawn geometry, relative to the item box: the line trimmed back
+  // from each headed end so the stroke never pokes through the head, and
+  // the head triangles.
+  function layArrowRender(item) {
+    var ends = layArrowSync(item), st = layArrowStyle(item), i;
+    var clean = [], p;
+    for (i = 0; i < ends.pts.length; i++) {
+      p = { x: ends.pts[i].x - item.x, y: ends.pts[i].y - item.y };
+      var q = clean[clean.length - 1];
+      if (!q || Math.abs(p.x - q.x) > 0.01 || Math.abs(p.y - q.y) > 0.01)
+        clean.push(p);
+    }
+    if (clean.length === 1) clean.push({ x: clean[0].x + 0.01, y: clean[0].y });
+    var len = layArrowHeadLen(st.width), half = len * 0.42, heads = [];
+    function head(tip, prev) {
+      var dx = tip.x - prev.x, dy = tip.y - prev.y;
+      var L = Math.sqrt(dx * dx + dy * dy) || 1;
+      var ux = dx / L, uy = dy / L;
+      var bx = tip.x - ux * len, by = tip.y - uy * len;
+      heads.push([{ x: tip.x, y: tip.y },
+                  { x: bx - uy * half, y: by + ux * half },
+                  { x: bx + uy * half, y: by - ux * half }]);
+      return { x: bx + ux * 0.5, y: by + uy * 0.5 };
+    }
+    if (st.heads === "end" || st.heads === "both")
+      clean[clean.length - 1] = head(clean[clean.length - 1],
+                                     clean[clean.length - 2]);
+    if (st.heads === "both") clean[0] = head(clean[0], clean[1]);
+    return { line: clean, heads: heads, style: st, ends: ends };
+  }
+  function layNum2(v) { return String(Math.round(v * 100) / 100); }
+  function layArrowD(pts, ox, oy) {
+    var d = "";
+    for (var i = 0; i < pts.length; i++)
+      d += (i ? " L" : "M") + layNum2(pts[i].x + ox) + " " +
+        layNum2(pts[i].y + oy);
+    return d;
+  }
+  function layArrowPoly(tri, ox, oy) {
+    var out = [];
+    for (var i = 0; i < tri.length; i++)
+      out.push(layNum2(tri[i].x + ox) + "," + layNum2(tri[i].y + oy));
+    return out.join(" ");
+  }
+  function layArrowSvg(item, selected) {
+    var r = layArrowRender(item), st = r.style;
+    var ns = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("width", layNum2(item.w));
+    svg.setAttribute("height", layNum2(item.h));
+    svg.setAttribute("viewBox", "0 0 " + layNum2(item.w) + " " + layNum2(item.h));
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    var d = layArrowD(r.line, 0, 0), i;
+    if (selected) {
+      var halo = document.createElementNS(ns, "path");
+      halo.setAttribute("class", "ps-larrow-halo");
+      halo.setAttribute("d", d);
+      halo.setAttribute("fill", "none");
+      halo.setAttribute("stroke-width", String(st.width + 8));
+      halo.setAttribute("stroke-linejoin", "round");
+      halo.setAttribute("stroke-linecap", "round");
+      svg.appendChild(halo);
+    }
+    var hit = document.createElementNS(ns, "path");
+    hit.setAttribute("class", "ps-larrow-hit");
+    hit.setAttribute("d", d);
+    hit.setAttribute("stroke-width", String(Math.max(16, st.width + 12)));
+    svg.appendChild(hit);
+    var line = document.createElementNS(ns, "path");
+    line.setAttribute("d", d);
+    line.setAttribute("fill", "none");
+    line.setAttribute("stroke", st.color);
+    line.setAttribute("stroke-width", String(st.width));
+    line.setAttribute("stroke-linejoin", "round");
+    svg.appendChild(line);
+    for (i = 0; i < r.heads.length; i++) {
+      var poly = document.createElementNS(ns, "polygon");
+      poly.setAttribute("points", layArrowPoly(r.heads[i], 0, 0));
+      poly.setAttribute("fill", st.color);
+      svg.appendChild(poly);
+    }
+    return svg;
+  }
+  function layBoxLabel(id) {
+    var it = layItemById(id);
+    if (!it) return null;
+    var t = String(it.text || "Box").replace(/\s+/g, " ").trim();
+    if (t.length > 40) t = t.slice(0, 37) + "…";
+    return t;
+  }
+  function layArrowEndsText(item) {
+    var f = item.from ? layBoxLabel(item.from.id) : null;
+    var t = item.to ? layBoxLabel(item.to.id) : null;
+    if (f && t) return ' from "' + f + '" to "' + t + '"';
+    if (f) return ' from "' + f + '" to a free end';
+    if (t) return ' from a free end to "' + t + '"';
+    return ", free at both ends";
+  }
+  function layArrowTip(item) {
+    return "Arrow" + layArrowEndsText(item) +
+      ". Drag an end onto a box to attach it.";
+  }
+  function layArrowReverse(item) {
+    var f = item.from, ax = item.ax, ay = item.ay;
+    item.from = item.to; item.to = f;
+    item.ax = item.bx; item.ay = item.by;
+    item.bx = ax; item.by = ay;
+  }
+  function layAttachArrowEnds(node, item) {
+    var ends = layArrowSync(item);
+    var spec = [["a", ends.a, !!item.from], ["b", ends.b, !!item.to]];
+    for (var i = 0; i < spec.length; i++) {
+      var h = mkEl("div", "ps-lhandle-end" +
+        (spec[i][2] ? " ps-lhandle-end-attached" : ""));
+      h.setAttribute("data-role", "lay-arrow-end");
+      h.setAttribute("data-end", spec[i][0]);
+      h.setAttribute("aria-hidden", "true");
+      h.style.left = layNum2(spec[i][1].x - item.x) + "px";
+      h.style.top = layNum2(spec[i][1].y - item.y) + "px";
+      setTip(h, spec[i][2]
+        ? "Attached to a box. Drag it away to free this end, or onto another box."
+        : "Drag onto a box to attach this end.");
+      node.appendChild(h);
+    }
+  }
+  // Rebuild ONE arrow's node in place. During a gesture a full
+  // renderLayout would destroy the element the pointer is holding.
+  function layArrowRefresh(it) {
+    var cv = el("ps-lcanvas");
+    var old = cv && cv.querySelector('.ps-litem[data-item-id="' + it.id + '"]');
+    if (!old) return;
+    var fresh = layBuildItem(it);
+    if (old.classList.contains("ps-litem-dragging"))
+      fresh.classList.add("ps-litem-dragging");
+    old.parentNode.replaceChild(fresh, old);
+  }
+  // Every arrow attached to any of these items follows them.
+  function layArrowsFollow(ids) {
+    var items = layItems();
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      if (it.kind !== "arrow") continue;
+      var f = it.from && it.from.id, t = it.to && it.to.id;
+      if ((f && ids.indexOf(f) !== -1) || (t && ids.indexOf(t) !== -1) ||
+          ids.indexOf(it.id) !== -1) layArrowRefresh(it);
+    }
+  }
+  // A removed box frees the ends that were attached to it; the offsets
+  // written at the last sync keep each end exactly where it was drawn.
+  function layArrowsDetachFrom(ids) {
+    var items = layItems();
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      if (it.kind !== "arrow") continue;
+      if (it.from && ids.indexOf(it.from.id) !== -1) it.from = null;
+      if (it.to && ids.indexOf(it.to.id) !== -1) it.to = null;
+    }
+  }
+  // Copies of arrows point at the COPIES of their boxes when those were
+  // copied too, and at nothing otherwise (a free end where the original
+  // was attached), never at the originals.
+  function layArrowsRemap(ids, idMap) {
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (!it || it.kind !== "arrow") continue;
+      if (it.from) it.from = idMap[it.from.id] ? { id: idMap[it.from.id] } : null;
+      if (it.to) it.to = idMap[it.to.id] ? { id: idMap[it.to.id] } : null;
+    }
+  }
+  function layBoxAt(px, py, except) {
+    var items = layItems();
+    for (var i = items.length - 1; i >= 0; i--) {
+      var it = items[i];
+      if (it.kind !== "box" || it === except) continue;
+      var r = layItemRect(it);
+      if (px >= r.x && px <= r.right && py >= r.y && py <= r.bottom) return it;
+    }
+    return null;
+  }
+  // An end being dragged: over a box it attaches (the box lights up as
+  // the drop target), elsewhere it is a free point on the grid.
+  function layArrowEndDrag(d, e) {
+    var cv = el("ps-lcanvas");
+    if (!cv) return;
+    var box = cv.getBoundingClientRect(), z = d.zoom;
+    var v = layView(), p = layPage();
+    var px = layClamp((e.clientX - box.left) / z, 0, p.w);
+    var py = layClamp((e.clientY - box.top) / z, 0, p.h);
+    var it = d.arrow, key = d.arrowEnd === "a" ? "from" : "to";
+    var target = layBoxAt(px, py, null);
+    if (target) it[key] = { id: target.id };
+    else {
+      it[key] = null;
+      if (v.snap) {
+        px = Math.round(px / v.grid) * v.grid;
+        py = Math.round(py / v.grid) * v.grid;
+      }
+      if (d.arrowEnd === "a") {
+        it.ax = px - (Number(it.x) || 0); it.ay = py - (Number(it.y) || 0);
+      } else {
+        it.bx = px - (Number(it.x) || 0); it.by = py - (Number(it.y) || 0);
+      }
+    }
+    layArrowRefresh(it);
+    var lit = cv.querySelectorAll(".ps-litem-droptarget");
+    for (var i = 0; i < lit.length; i++)
+      lit[i].classList.remove("ps-litem-droptarget");
+    if (target) {
+      var node = cv.querySelector('.ps-litem[data-item-id="' + target.id + '"]');
+      if (node) node.classList.add("ps-litem-droptarget");
+    }
+  }
+  function layAddBox() {
+    var p = layPage(), items = layItems(), w = 150, h = 44;
+    var spot = layPlaceRect(items, p, w, h);
+    var grew = spot.needH > p.h;
+    var id = layAddItem({ id: layNewItemId(), kind: "box", text: "Box",
+      fontSize: 13, x: spot.x, y: spot.y, w: w, h: h, fill: "#ffffff",
+      border: "thin", corner: 4 }, false, spot.needH);
+    layGrewNote(grew, spot.capped);
+    layAnnounce("Added a box. Double-click it to edit the text.");
+    return id;
+  }
+  // With a box selected the new arrow starts attached to it, free end to
+  // the right; otherwise a free arrow lands in clear space.
+  function layAddArrow() {
+    var p = layPage(), items = layItems();
+    var sel = laySelectedIds(), fromBox = null;
+    for (var i = 0; i < sel.length; i++) {
+      var s = layItemById(sel[i]);
+      if (s && s.kind === "box") fromBox = s;
+    }
+    var item = { id: layNewItemId(), kind: "arrow", route: "elbow",
+                 heads: "end", width: 1.5, color: "#22364d",
+                 from: null, to: null, x: 0, y: 0 };
+    if (fromBox) {
+      var r = layItemRect(fromBox);
+      var ey = r.y + r.h / 2;
+      var ex = r.right + 120 <= p.w - 8 ? r.right + 120 : r.x - 120;
+      item.from = { id: fromBox.id };
+      item.ax = r.right; item.ay = ey; item.bx = ex; item.by = ey;
+    } else {
+      var spot = layPlaceRect(items, p, 160, 24);
+      item.ax = spot.x; item.ay = spot.y + 12;
+      item.bx = spot.x + 160; item.by = spot.y + 12;
+    }
+    layArrowSync(item);
+    var id = layAddItem(item, false, p.h);
+    layAnnounce(fromBox
+      ? "Added an arrow from the selected box. Drag its free end onto another box to attach it."
+      : "Added an arrow. Drag either end onto a box to attach it.");
+    return id;
+  }
+  function layBoxSyncControls(items) {
+    var item = items[0];
+    function agree(read) {
+      for (var i = 1; i < items.length; i++)
+        if (read(items[i]) !== read(items[0])) return false;
+      return true;
+    }
+    var fill = layBoxFill(item), fillMixed = !agree(layBoxFill);
+    var chips = el("ps-lbox-fills").querySelectorAll("button[data-fill]");
+    for (var i = 0; i < chips.length; i++)
+      chips[i].setAttribute("aria-pressed",
+        !fillMixed && chips[i].getAttribute("data-fill") === fill ? "true" : "false");
+    var border = layBoxBorder(item), borderMixed = !agree(layBoxBorder);
+    var segs = document.querySelectorAll("[data-lbox-border]");
+    for (i = 0; i < segs.length; i++)
+      segs[i].setAttribute("aria-pressed",
+        !borderMixed && segs[i].getAttribute("data-lbox-border") === border
+          ? "true" : "false");
+    var corner = layBoxStyle(item).corner;
+    var cornerMixed = !agree(function (t) { return layBoxStyle(t).corner; });
+    var rg = el("ps-lbox-corner"), nm = el("ps-lbox-corner-num");
+    if (rg && document.activeElement !== rg) rg.value = String(corner);
+    if (nm && document.activeElement !== nm) {
+      if (cornerMixed) { nm.value = ""; nm.placeholder = "Mixed"; }
+      else { nm.value = String(corner); nm.placeholder = ""; }
+    }
+  }
+  function layArrowSyncControls(items) {
+    var item = items[0], st = layArrowStyle(item);
+    function agree(read) {
+      for (var i = 1; i < items.length; i++)
+        if (read(items[i]) !== read(items[0])) return false;
+      return true;
+    }
+    var routeMixed = !agree(function (t) { return layArrowStyle(t).route; });
+    var headsMixed = !agree(function (t) { return layArrowStyle(t).heads; });
+    var segs = document.querySelectorAll("[data-larrow-route]"), i;
+    for (i = 0; i < segs.length; i++)
+      segs[i].setAttribute("aria-pressed",
+        !routeMixed && segs[i].getAttribute("data-larrow-route") === st.route
+          ? "true" : "false");
+    segs = document.querySelectorAll("[data-larrow-heads]");
+    for (i = 0; i < segs.length; i++)
+      segs[i].setAttribute("aria-pressed",
+        !headsMixed && segs[i].getAttribute("data-larrow-heads") === st.heads
+          ? "true" : "false");
+    var widthMixed = !agree(function (t) { return layArrowStyle(t).width; });
+    var rg = el("ps-larrow-width"), nm = el("ps-larrow-width-num");
+    if (rg && document.activeElement !== rg) rg.value = String(st.width);
+    if (nm && document.activeElement !== nm) {
+      if (widthMixed) { nm.value = ""; nm.placeholder = "Mixed"; }
+      else { nm.value = String(st.width); nm.placeholder = ""; }
+    }
+    var colMixed = !agree(function (t) { return layArrowStyle(t).color.toLowerCase(); });
+    var chips = el("ps-larrow-colors").querySelectorAll("button[data-color]");
+    for (i = 0; i < chips.length; i++)
+      chips[i].setAttribute("aria-pressed",
+        !colMixed && chips[i].getAttribute("data-color") === st.color.toLowerCase()
+          ? "true" : "false");
+    // The attachment selects list every box by its text. Meaningful for
+    // ONE arrow; a set of arrows keeps them disabled with the reason.
+    var sels = [["ps-larrow-from", "from"], ["ps-larrow-to", "to"]];
+    var boxes = layItems().filter(function (b) { return b.kind === "box"; });
+    for (i = 0; i < sels.length; i++) {
+      var sel = el(sels[i][0]);
+      if (!sel) continue;
+      var cur = items.length === 1 && item[sels[i][1]] ? item[sels[i][1]].id : "";
+      sel.innerHTML = "";
+      var free = document.createElement("option");
+      free.value = ""; free.textContent = "Free end";
+      sel.appendChild(free);
+      for (var b = 0; b < boxes.length; b++) {
+        var opt = document.createElement("option");
+        opt.value = boxes[b].id;
+        opt.textContent = layBoxLabel(boxes[b].id) || boxes[b].id;
+        sel.appendChild(opt);
+      }
+      sel.value = cur;
+      sel.disabled = items.length !== 1;
+      setTip(sel, items.length !== 1
+        ? "Attachment applies to one arrow at a time." : "");
+    }
+  }
+  function wireLayoutPartControls() {
+    var fills = el("ps-lbox-fills");
+    if (!fills) return;
+    var fillNames = { "#ffffff": "White", "#f4f7fb": "Paper", "#eef4fc": "Sky",
+      "#dbe7f7": "Blue", "#fdf6e3": "Cream", "#e9f4df": "Green",
+      "#fdf0f0": "Rose", none: "No fill" };
+    var i;
+    for (i = 0; i < LAY_BOX_FILLS.length; i++) (function (c) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("data-fill", c);
+      b.setAttribute("aria-label", (fillNames[c] || c) + " fill");
+      b.setAttribute("aria-pressed", "false");
+      if (c === "none") {
+        b.style.background = "linear-gradient(45deg,#cbd1d8 25%,transparent 25%," +
+          "transparent 75%,#cbd1d8 75%),linear-gradient(45deg,#cbd1d8 25%," +
+          "#fff 25%,#fff 75%,#cbd1d8 75%)";
+        b.style.backgroundSize = "8px 8px";
+        b.style.backgroundPosition = "0 0,4px 4px";
+      } else b.style.background = c;
+      setTip(b, fillNames[c] || c);
+      b.addEventListener("click", function () {
+        layPartApply(layBoxTargets(), "box fill", null,
+          function (it) { it.fill = c; });
+      });
+      fills.appendChild(b);
+    })(LAY_BOX_FILLS[i]);
+    var borders = document.querySelectorAll("[data-lbox-border]");
+    for (i = 0; i < borders.length; i++) (function (btn) {
+      btn.addEventListener("click", function () {
+        var v = btn.getAttribute("data-lbox-border");
+        layPartApply(layBoxTargets(), "box border", null,
+          function (it) { it.border = v; });
+      });
+    })(borders[i]);
+    function wirePair(rangeId, numId, targetsFn, label, key, setter) {
+      var r = el(rangeId), n = el(numId);
+      if (!r || !n) return;
+      r.addEventListener("input", function () {
+        var v = Number(r.value);
+        layPartApply(targetsFn(), label, key,
+          function (it) { setter(it, v); }, true);
+      });
+      r.addEventListener("change", function () { persist(); });
+      n.addEventListener("change", function () {
+        var v = Number(n.value);
+        if (!isFinite(v)) return;
+        layPartApply(targetsFn(), label, null, function (it) { setter(it, v); });
+      });
+    }
+    wirePair("ps-lbox-corner", "ps-lbox-corner-num", layBoxTargets,
+      "box corner", "lbox-corner", function (it, v) {
+        it.corner = layClamp(Math.round(v), 0, 24);
+      });
+    var routes = document.querySelectorAll("[data-larrow-route]");
+    for (i = 0; i < routes.length; i++) (function (btn) {
+      btn.addEventListener("click", function () {
+        var v = btn.getAttribute("data-larrow-route");
+        layPartApply(layArrowTargets(), "arrow route", null,
+          function (it) { it.route = v; });
+      });
+    })(routes[i]);
+    var heads = document.querySelectorAll("[data-larrow-heads]");
+    for (i = 0; i < heads.length; i++) (function (btn) {
+      btn.addEventListener("click", function () {
+        var v = btn.getAttribute("data-larrow-heads");
+        layPartApply(layArrowTargets(), "arrow heads", null,
+          function (it) { it.heads = v; });
+      });
+    })(heads[i]);
+    wirePair("ps-larrow-width", "ps-larrow-width-num", layArrowTargets,
+      "arrow width", "larrow-width", function (it, v) {
+        it.width = layClamp(Math.round(v * 2) / 2, 0.5, 6);
+      });
+    var colors = el("ps-larrow-colors");
+    var colorNames = { "#22364d": "Ink", "#5f6f80": "Muted", "#94a3b1": "Faint",
+      "#417499": "Blue", "#902634": "Red", "#266741": "Green" };
+    for (i = 0; i < LAY_ARROW_COLORS.length; i++) (function (c) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("data-color", c);
+      b.setAttribute("aria-label", (colorNames[c] || c) + " arrow");
+      b.setAttribute("aria-pressed", "false");
+      b.style.background = c;
+      setTip(b, colorNames[c] || c);
+      b.addEventListener("click", function () {
+        layPartApply(layArrowTargets(), "arrow color", null,
+          function (it) { it.color = c; });
+      });
+      colors.appendChild(b);
+    })(LAY_ARROW_COLORS[i]);
+    var sels = [["ps-larrow-from", "from"], ["ps-larrow-to", "to"]];
+    for (i = 0; i < sels.length; i++) (function (id, key) {
+      var sel = el(id);
+      if (!sel) return;
+      sel.addEventListener("change", function () {
+        var v = sel.value;
+        layPartApply(layArrowTargets(), "attach arrow", null,
+          function (it) { it[key] = v ? { id: v } : null; });
+      });
+    })(sels[i][0], sels[i][1]);
+  }
+  // The PRISMA 2020 flow diagram for a new systematic review of
+  // databases and registers (Page et al., 2021): the mandated boxes, the
+  // arrows between them and the three side labels, with every count left
+  // as a field to fill in. Every part is an ordinary item afterward.
+  function layBuildPrisma(c) {
+    var n = 0, ids = {};
+    function box(key, x, y, w, h, text, extra) {
+      var it = { id: "i" + (++n), kind: "box", text: text, fontSize: 11,
+                 x: x, y: y, w: w, h: h, fill: "#ffffff", border: "thin",
+                 corner: 2 };
+      if (extra) for (var k in extra) if (extra.hasOwnProperty(k)) it[k] = extra[k];
+      c.items.push(it);
+      ids[key] = it.id;
+      return it;
+    }
+    function arrow(fromKey, toKey) {
+      var it = { id: "i" + (++n), kind: "arrow",
+                 from: { id: ids[fromKey] }, to: { id: ids[toKey] },
+                 route: "elbow", heads: "end", width: 1.25, color: "#22364d",
+                 x: 0, y: 0, ax: 0, ay: 0, bx: 0, by: 0 };
+      c.items.push(it);
+    }
+    var L = 104, R = 464, W = 300, S = 44, SW = 36;
+    var side = { fill: "#dbe7f7", border: "none", bold: true, rotate: -90,
+                 corner: 2 };
+    c.items.push({ id: "i" + (++n), kind: "text",
+                   text: "PRISMA 2020 flow diagram", fontSize: 14,
+                   bold: true, x: 40, y: 22 });
+    box("side1", S, 64, SW, 104, "Identification", side);
+    box("side2", S, 220, SW, 268, "Screening", side);
+    box("side3", S, 560, SW, 76, "Included", side);
+    box("ident", L, 64, W, 76,
+        "Records identified from:\nDatabases (n = )\nRegisters (n = )");
+    // Right-hand boxes are centred on their left partner so the arrow
+    // between them runs straight, as the published diagram draws it.
+    box("removed", R, 50, W, 104,
+        "Records removed before screening:\nDuplicate records removed (n = )\n" +
+        "Records marked as ineligible by automation tools (n = )\n" +
+        "Records removed for other reasons (n = )");
+    box("screened", L, 220, W, 48, "Records screened\n(n = )");
+    box("excluded", R, 220, W, 48, "Records excluded\n(n = )");
+    box("sought", L, 316, W, 48, "Reports sought for retrieval\n(n = )");
+    box("notret", R, 316, W, 48, "Reports not retrieved\n(n = )");
+    box("assessed", L, 412, W, 48, "Reports assessed for eligibility\n(n = )");
+    box("rexcl", R, 398, W, 76,
+        "Reports excluded:\nReason 1 (n = )\nReason 2 (n = )\nReason 3 (n = )");
+    box("included", L, 560, W, 76,
+        "Studies included in review\n(n = )\nReports of included studies\n(n = )");
+    arrow("ident", "removed"); arrow("ident", "screened");
+    arrow("screened", "excluded"); arrow("screened", "sought");
+    arrow("sought", "notret"); arrow("sought", "assessed");
+    arrow("assessed", "rexcl"); arrow("assessed", "included");
+  }
   var LAY_TEXT_CTX = null;
   function layTextCtx() {
     if (!LAY_TEXT_CTX) {
@@ -22012,10 +22829,12 @@
   // Chart panels and images are both SIZED items (explicit w/h, corner
   // resize, proportional default); text items self-size.
   function laySizedKind(item) {
-    return item && (item.kind === "chart" || item.kind === "image");
+    return item && (item.kind === "chart" || item.kind === "image" ||
+                    item.kind === "box");
   }
   function layMinSize(item) {
     if (item.kind === "image") return { w: 24, h: 24 };
+    if (item.kind === "box") return { w: 36, h: 22 };
     // The minimum keeps the chart's SHAPE. A flat 120 by 80 is 1.5 against
     // the engine's 1.469, so a figure scaled onto a small page hit the floor
     // and came back letterboxed, which is the thing panel-fitting removed.
@@ -22045,6 +22864,11 @@
       var mins = layMinSize(item);
       w = Math.max(mins.w, Number(item.w) || 480);
       h = Math.max(mins.h, Number(item.h) || 320);
+    } else if (item.kind === "arrow") {
+      // The box around the drawn arrow, re-derived from the boxes its
+      // ends are attached to (layArrowSync); never typed.
+      layArrowSync(item);
+      w = item.w; h = item.h;
     } else {
       var node = layItemIsOnScreen(item) ? el("ps-lcanvas") : null;
       node = node && node.querySelector(
@@ -22315,7 +23139,7 @@
     node.setAttribute("aria-hidden", "true");
     node.tabIndex = -1;
     var stale = node.querySelectorAll(
-      ".ps-lhandle,.ps-lbar,.ps-litem-srcbadge");
+      ".ps-lhandle,.ps-lhandle-end,.ps-lbar,.ps-litem-srcbadge");
     for (var si = 0; si < stale.length; si++)
       if (stale[si].parentNode === node) node.removeChild(stale[si]);
     // Live / Snapshot badge (Torry, Aug 5 2026): selection-only chrome
@@ -22373,7 +23197,8 @@
       if (laySizedKind(item)) {
         var hnd = mkEl("div", "ps-lhandle");
         hnd.setAttribute("data-role", "lay-resize");
-        setTip(hnd, multiUnits
+        setTip(hnd, item.kind === "box" ? "Resize the box."
+          : multiUnits
           ? "Resize every selected panel together. Hold Shift for free resize."
           : "Resize proportionally. Hold Shift for free resize.");
         // This is a pointer affordance. The canvas instructions expose the
@@ -22385,6 +23210,7 @@
       // Text items grow the chart-style rotate grip (Torry, Aug 6 2026).
       if (item.kind === "text")
         layAttachRotateHandle(node, item, node.__ltxFrame || null);
+      if (item.kind === "arrow" && primary) layAttachArrowEnds(node, item);
       node.appendChild(layMiniBar(item));
     }
   }
@@ -22442,6 +23268,17 @@
         "pointer-events:none;display:block;";
       elI.appendChild(pic);
       setTip(elI, "Image");
+    } else if (item.kind === "box") {
+      elI.style.width = (Number(item.w) || 150) + "px";
+      elI.style.height = (Number(item.h) || 44) + "px";
+      elI.appendChild(layBoxNode(item));
+      setTip(elI, "Box. Double-click to edit its text.");
+    } else if (item.kind === "arrow") {
+      layArrowSync(item);
+      elI.style.width = layNum2(item.w) + "px";
+      elI.style.height = layNum2(item.h) + "px";
+      elI.appendChild(layArrowSvg(item, selected));
+      setTip(elI, layArrowTip(item));
     } else {
       var txt = mkEl("div", "ps-ltext", exportSafeText(item.text || "Text"));
       txt.style.fontSize = (item.fontSize || 14) + "px";
@@ -22632,7 +23469,7 @@
     bar.style.transform = "";
     bar.style.top = item.kind === "text" ? "calc(100% + 6px)" : "-34px";
     bar.setAttribute("aria-hidden", "true");
-    if (item.kind === "text") {
+    if (item.kind === "text" || item.kind === "box") {
       var minus = mkEl("button", "", "A-");
       minus.type = "button"; minus.tabIndex = -1; setTip(minus, "Smaller text");
       minus.addEventListener("click", function (e) {
@@ -22660,6 +23497,18 @@
         persist(); renderLayout();
       });
       bar.appendChild(minus); bar.appendChild(plus); bar.appendChild(bold);
+    }
+    if (item.kind === "arrow") {
+      var rev = mkEl("button", "", "Reverse");
+      rev.type = "button"; rev.tabIndex = -1;
+      setTip(rev, "Swap the arrow's ends");
+      rev.addEventListener("click", function (e) {
+        e.stopPropagation();
+        laySnapshot("reverse arrow");
+        layArrowReverse(item);
+        persist(); renderLayout();
+      });
+      bar.appendChild(rev);
     }
     var del = mkEl("button", "ps-lbar-del", "\u00d7");
     del.type = "button"; del.tabIndex = -1;
@@ -22786,6 +23635,7 @@
     for (var i = items.length - 1; i >= 0; i--)
       if (ids.indexOf(items[i].id) !== -1) { items.splice(i, 1); removed++; }
     layDropOrphanGroups();
+    layArrowsDetachFrom(ids);
     laySetSelection([]);
     persist(); renderLayout();
     if (returnFocus) layFocusViewport();
@@ -22803,12 +23653,13 @@
   // the announcement, so Alt+drag can make its copies inside a gesture that
   // already owns all three.
   function layDuplicateItems(ids, dx, dy) {
-    var made = [], p = layPage(), dupGroups = {}, i;
+    var made = [], p = layPage(), dupGroups = {}, dupIds = {}, i;
     for (i = 0; i < ids.length; i++) {
       var src = layItemById(ids[i]);
       if (!src) continue;
       var copy = JSON.parse(JSON.stringify(src));
       copy.id = layNewItemId();
+      dupIds[src.id] = copy.id;
       // The copies form their OWN group, so duplicating a grouped panel
       // gives a second panel rather than a four-member group.
       if (copy.group) copy.group = dupGroups[copy.group] ||
@@ -22828,6 +23679,7 @@
       layItems().push(copy);
       made.push(copy.id);
     }
+    layArrowsRemap(made, dupIds);
     return made;
   }
   // One body for the Cmd/Ctrl+A key and the Edit menu row, so the two
@@ -22883,10 +23735,11 @@
     if (!LAY_CLIP || !LAY_CLIP.length) return false;
     if (!isLayoutTab(activeChart())) return false;
     laySnapshot("paste");
-    var made = [], p = layPage(), pasteGroups = {};
+    var made = [], p = layPage(), pasteGroups = {}, pasteIds = {};
     for (var i = 0; i < LAY_CLIP.length; i++) {
       var copy = JSON.parse(JSON.stringify(LAY_CLIP[i]));
       copy.id = layNewItemId();
+      pasteIds[LAY_CLIP[i].id] = copy.id;
       // Fresh group ids, the way duplicate does it. Group ids are only unique
       // within one layout and every layout's templates start at g1, so a
       // paste into another figure collided by construction and merged the
@@ -22901,6 +23754,7 @@
       layItems().push(copy);
       made.push(copy.id);
     }
+    layArrowsRemap(made, pasteIds);
     laySetSelection(made);
     persist(); renderLayout();
     showToast(made.length === 1 ? "Item pasted"
@@ -23345,6 +24199,7 @@
       var c = chartById(item.chartId);
       return c ? (c.name || "that panel") : "that panel";
     }
+    if (item.kind === "box") return "that box";
     return item.srcChart ? "that Notebook page" : "that image";
   }
   function laySameSize(dim) {
@@ -23444,6 +24299,17 @@
       if (!item) return;
       var mins = layMinSize(item);
       laySnapshot("resize", "resize");
+      if (item.kind === "box") {
+        // A box holds text, so each side is its own number: typing a
+        // width must not change the height the way a chart panel keeps
+        // its shape.
+        if (prop === "w")
+          item.w = layClamp(value, mins.w, p.w - (Number(item.x) || 0));
+        else item.h = layClamp(value, mins.h, p.h - (Number(item.y) || 0));
+        persist(); renderLayout();
+        layAnnounce("Resized " + layItemAccessibleLabel(item));
+        return;
+      }
       // The typed fields keep the item's proportions, like the corner drag.
       // Setting one side used to change that side alone, so the rail was
       // the one resize in the app that letterboxed a chart by default. The
@@ -23511,9 +24377,16 @@
       // TEXT scales too. Leaving font sizes alone made panel letters keep
       // their size while everything around them shrank, so on a small page
       // a 20 px letter sat on top of the panel it labels.
-      if (items[i].kind === "text" && k !== 1)
+      if ((items[i].kind === "text" || items[i].kind === "box") && k !== 1)
         items[i].fontSize = layClamp(
           Math.round((Number(items[i].fontSize) || 14) * k), 8, 72);
+      // An arrow's free ends ride its box; their offsets scale with it.
+      if (items[i].kind === "arrow" && k !== 1) {
+        items[i].ax = (Number(items[i].ax) || 0) * k;
+        items[i].ay = (Number(items[i].ay) || 0) * k;
+        items[i].bx = (Number(items[i].bx) || 0) * k;
+        items[i].by = (Number(items[i].by) || 0) * k;
+      }
     }
     return k;
   }
@@ -23661,7 +24534,9 @@
         scale = snappedH / origin.h;
       }
     }
-    var minScale = Math.max(120 / origin.w, 80 / origin.h);
+    var minScale = origin.item && origin.item.kind === "box"
+      ? Math.max(mins.w / origin.w, mins.h / origin.h)
+      : Math.max(120 / origin.w, 80 / origin.h);
     var maxScale = Math.min(maxW / origin.w, maxH / origin.h);
     if (maxScale < minScale) minScale = maxScale;
     scale = layClamp(scale, minScale, maxScale);
@@ -23721,6 +24596,22 @@
       } else if (!layIsSelected(id)) {
         laySetSelection([id]); renderLayout();
       }
+      var endHandle = e.target.closest &&
+        e.target.closest('[data-role="lay-arrow-end"]');
+      if (endHandle && item.kind === "arrow") {
+        // An arrow END in hand: the gesture attaches or frees that end
+        // (layArrowEndDrag); the arrow's own box is never moved.
+        LAY_DRAG = { arrowEnd: endHandle.getAttribute("data-end"), arrow: item,
+                     ids: [id], primary: item, origins: [],
+                     bounds: laySelectionBounds([id]), resizing: false,
+                     collapseTo: null, sx: e.clientX, sy: e.clientY,
+                     altCopy: false, zoom: layZoom(), moved: false,
+                     before: laySnapState(activeChart()) };
+        document.addEventListener("pointermove", layPointerMove);
+        document.addEventListener("pointerup", layPointerUp);
+        e.preventDefault();
+        return;
+      }
       var resizing = !!(e.target.closest && e.target.closest('[data-role="lay-resize"]'));
       // A plain press on an item that is ALREADY selected keeps the whole
       // selection, so dragging any member moves everything selected, the
@@ -23757,7 +24648,8 @@
     });
     canvas.addEventListener("dblclick", function (e) {
       var itemEl = e.target.closest
-        ? e.target.closest('.ps-litem[data-kind="text"]') : null;
+        ? e.target.closest('.ps-litem[data-kind="text"],.ps-litem[data-kind="box"]')
+        : null;
       if (!itemEl) return;
       layEditText(itemEl.getAttribute("data-item-id"));
     });
@@ -23794,7 +24686,8 @@
       if (canvasFocused && e.key === "F2") {
         var editItem = layItemById(layActiveId());
         e.preventDefault(); e.stopImmediatePropagation();
-        if (editItem && editItem.kind === "text") layEditText(editItem.id);
+        if (editItem && (editItem.kind === "text" || editItem.kind === "box"))
+          layEditText(editItem.id);
         else layAnnounce("F2 edits text items. The active item is not text.");
         return;
       }
@@ -24218,6 +25111,13 @@
     }
     d.moved = true;
     var p = layPage(), v = layView();
+    if (d.arrowEnd) {
+      layArrowEndDrag(d, e);
+      layHideGuides();
+      laySyncInspector();
+      e.preventDefault();
+      return;
+    }
     if (d.resizing && laySizedKind(d.primary)) {
       // The grabbed panel follows the pointer exactly, the existing math.
       // Every OTHER selected sized item follows by RATIO, so two same-size
@@ -24228,7 +25128,10 @@
       for (oi = 0; oi < d.origins.length; oi++)
         if (d.origins[oi].item === d.primary) po = d.origins[oi];
       po = po || d.origins[0];
-      var resized = layResizeDimensions(po, dx, dy, p, v, !!e.shiftKey);
+      // A box resizes freely: it holds text, not a picture with a shape
+      // to keep. Panels keep the proportional default.
+      var resized = layResizeDimensions(po, dx, dy, p, v,
+        !!e.shiftKey || (po.item && po.item.kind === "box"));
       var rw = po.w > 0 ? resized.w / po.w : 1;
       var rh = po.h > 0 ? resized.h / po.h : 1;
       var cvR = el("ps-lcanvas");
@@ -24263,6 +25166,7 @@
           '.ps-litem[data-item-id="' + oo.item.id + '"]');
         if (elR) { elR.style.width = nw + "px"; elR.style.height = nh + "px"; }
       }
+      layArrowsFollow(d.ids);
       layHideGuides();
     } else {
       if (v.snap) {
@@ -24284,6 +25188,7 @@
           '.ps-litem[data-item-id="' + it.id + '"]');
         if (live) { live.style.left = it.x + "px"; live.style.top = it.y + "px"; }
       }
+      layArrowsFollow(d.ids);
     }
     laySyncInspector();
     e.preventDefault();
@@ -24303,6 +25208,9 @@
     var cvC = el("ps-lcanvas");
     if (cvC) cvC.classList.remove("ps-lcanvas-dragging", "ps-lcanvas-resizing");
     layHideGuides();
+    // An end drag rewrote attachments, not positions: put the whole
+    // state back from the press-time snapshot.
+    if (d.arrowEnd && d.before) { layRestoreState(d.before); return true; }
     for (var i = 0; i < d.origins.length; i++) {
       var o = d.origins[i];
       o.item.x = o.x; o.item.y = o.y;
@@ -24344,7 +25252,8 @@
     if (d && d.moved) {
       var h = layHist();
       if (h && d.before) {
-        h.undo.push({ label: d.resizing ? "resize" : "move", state: d.before });
+        h.undo.push({ label: d.arrowEnd ? "attach arrow"
+                               : d.resizing ? "resize" : "move", state: d.before });
         if (h.undo.length > LAYOUT_HIST_LIMIT) h.undo.shift();
         h.redo.length = 0;
         LAY_COALESCE = null;
@@ -24384,7 +25293,7 @@
   }
   function layEditText(id) {
     var item = layItemById(id);
-    if (!item || item.kind !== "text") return;
+    if (!item || (item.kind !== "text" && item.kind !== "box")) return;
     laySetSelection([id]);
     var canvas = el("ps-lcanvas");
     var returnFocus = document.activeElement === el("ps-lviewport");
@@ -24399,6 +25308,12 @@
     ta.style.fontWeight = item.bold ? "700" : "400";
     ta.style.fontStyle = item.italic ? "italic" : "normal";
     ta.style.color = layTextColor(item);
+    if (item.kind === "box") {
+      // The editor fills the box and centres like the box does, so the
+      // text does not jump when the field opens.
+      ta.style.width = "100%"; ta.style.height = "100%";
+      ta.style.textAlign = "center"; ta.style.boxSizing = "border-box";
+    }
     itemEl.removeAttribute("aria-hidden");
     itemEl.innerHTML = "";
     itemEl.appendChild(ta);
@@ -26109,11 +27024,33 @@
           ? "Text (" + texts.length + " items)" : "Text";
       if (texts.length) layTextSyncControls(texts);
     }
+    var boxSec = el("ps-layout-box-section");
+    if (boxSec) {
+      var boxTargets = layBoxTargets();
+      boxSec.style.display = boxTargets.length ? "" : "none";
+      var boxTitle = boxSec.querySelector(".ps-inspector-section-title");
+      if (boxTitle)
+        boxTitle.textContent = boxTargets.length > 1
+          ? "Box (" + boxTargets.length + " items)" : "Box";
+      if (boxTargets.length) layBoxSyncControls(boxTargets);
+    }
+    var arrowSec = el("ps-layout-arrow-section");
+    if (arrowSec) {
+      var arrowTargets = layArrowTargets();
+      arrowSec.style.display = arrowTargets.length ? "" : "none";
+      var arrowTitle = arrowSec.querySelector(".ps-inspector-section-title");
+      if (arrowTitle)
+        arrowTitle.textContent = arrowTargets.length > 1
+          ? "Arrow (" + arrowTargets.length + " items)" : "Arrow";
+      if (arrowTargets.length) layArrowSyncControls(arrowTargets);
+    }
     el("ps-layout-selection-title").textContent = one
       ? (one.kind === "chart"
          ? (srcInfo && srcInfo.name ? "Chart panel - live" : "Chart panel")
          : one.kind === "image"
-         ? (srcInfo ? "Notebook snapshot" : "Image item") : "Text item")
+         ? (srcInfo ? "Notebook snapshot" : "Image item")
+         : one.kind === "box" ? "Box"
+         : one.kind === "arrow" ? "Arrow" : "Text item")
       : ids.length + " selected items";
     // The behavioral line (Torry, Aug 5 2026): will this update, or not.
     var srcLine = el("ps-layout-source-line");
@@ -26153,7 +27090,9 @@
       setTip(field, ctxSized ? ""
         : layUnits(ids).length > 1
           ? "Size applies to one panel at a time. Select just the one you want to change."
-          : "Text items size themselves to their content.");
+          : (one && one.kind === "arrow")
+            ? "An arrow sizes itself to its ends. Drag an end, or attach it to a box."
+            : "Text items size themselves to their content.");
     });
     // Progressive disclosure (Torry, Jul 29 2026): the align row is SHOWN
     // only once a second item is selected, instead of six greyed buttons
@@ -31181,7 +32120,9 @@
       { label: "Chart panel", command: "layout-add-chart", layoutOnly: true },
       { label: "Text", command: "insert-text", layoutOnly: true },
       { label: "Panel label", command: "insert-label", layoutOnly: true },
-      { label: "Image\u2026", command: "insert-image", layoutOnly: true }
+      { label: "Image\u2026", command: "insert-image", layoutOnly: true },
+      { label: "Box", command: "insert-box", layoutOnly: true },
+      { label: "Arrow", command: "insert-arrow", layoutOnly: true }
     ],
     // Punch list 3 and 4. Which graph?, Check graph, Glossary and Label parts
     // were reachable only through one unlabelled 29px "?" inside the engine
@@ -32003,6 +32944,8 @@
     else if (command === "insert-text") el("ps-laddtext").click();
     else if (command === "insert-label") el("ps-laddlabel").click();
     else if (command === "insert-image") el("ps-laddimage").click();
+    else if (command === "insert-box") layAddBox();
+    else if (command === "insert-arrow") layAddArrow();
     else if (command === "command-palette") showCommandPalette();
     else if (command === "layout-add-chart") el("ps-laddchart").click();
     else if (command === "layout-add-text") el("ps-laddtext").click();
@@ -33886,6 +34829,7 @@
       });
     })();
     wireLayoutTextControls();
+    wireLayoutPartControls();
     wireAppFrame(); wireContextInspector(); wireCommandPalette();
     wireGuidedDialogs(); wireStandaloneEngineExclusionLabels();
     migrateLegacyChartPointExclusions();
