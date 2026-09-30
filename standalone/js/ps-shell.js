@@ -4689,7 +4689,7 @@
     if (!c || !isLayoutTab(c)) return "";
     var items = c.items || [];
     if (!items.length) return "Figure canvas with no placed items.";
-    var charts = [], text = [], images = 0, boxes = 0, arrows = 0;
+    var charts = [], text = [], images = 0, boxes = 0, arrows = 0, timelines = 0;
     for (var i = 0; i < items.length; i++) {
       var item = items[i] || {};
       if (item.kind === "box") {
@@ -4697,7 +4697,11 @@
         var boxWords = String(item.text || "").replace(/\s+/g, " ").trim();
         if (boxWords) text.push(boxWords.substring(0, 120));
       } else if (item.kind === "arrow") arrows++;
-      else if (item.kind === "chart") {
+      else if (item.kind === "timeline") {
+        timelines++;
+        var tlText = layTimelineLabelsText(item);
+        if (tlText) text.push(tlText.substring(0, 120));
+      } else if (item.kind === "chart") {
         var linked = chartById(item.chartId);
         charts.push(linked && linked.name ? linked.name : "chart panel");
       } else if (item.kind === "text") {
@@ -4715,9 +4719,14 @@
         (text.length > 5 ? "; and more" : ""));
     if (images)
       parts.push(images + (images === 1 ? " added image" : " added images"));
-    if (boxes || arrows)
-      parts.push("Diagram parts: " + boxes + (boxes === 1 ? " box" : " boxes") +
-        " and " + arrows + (arrows === 1 ? " arrow" : " arrows"));
+    if (boxes || arrows || timelines) {
+      var dp = [];
+      if (boxes) dp.push(boxes + (boxes === 1 ? " box" : " boxes"));
+      if (arrows) dp.push(arrows + (arrows === 1 ? " arrow" : " arrows"));
+      if (timelines) dp.push(timelines + (timelines === 1 ? " timeline" : " timelines"));
+      parts.push("Diagram parts: " + (dp.length > 1
+        ? dp.slice(0, -1).join(", ") + " and " + dp[dp.length - 1] : dp[0]));
+    }
     return parts.join(". ") + ".";
   }
   function generatedExportDescription() {
@@ -5715,6 +5724,10 @@
       }
       if (item.kind === "arrow") {
         root.appendChild(layoutArrowNode(doc, item));
+        continue;
+      }
+      if (item.kind === "timeline") {
+        root.appendChild(layoutTimelineNode(doc, item));
         continue;
       }
       if (item.kind === "text") {
@@ -18552,6 +18565,7 @@
       showContextMenu(r.left, r.bottom + 4, [
         { label: "Box", key: "part-box", action: function () { layAddBox(); } },
         { label: "Arrow", key: "part-arrow", action: function () { layAddArrow(); } },
+        { label: "Timeline", key: "part-timeline", action: function () { layAddTimeline(); } },
         "separator",
         { label: "Templates\u2026", key: "part-templates",
           action: function () { showLayoutGallery(); } }
@@ -20110,7 +20124,34 @@
       preview: [[6, 6, 8, 20], [20, 6, 36, 12], [62, 6, 34, 12],
                 [6, 30, 8, 40], [20, 30, 36, 10], [62, 30, 34, 10],
                 [20, 44, 36, 10], [62, 44, 34, 10], [20, 58, 36, 10],
-                [62, 58, 34, 12], [6, 78, 8, 14], [20, 78, 36, 14]] }
+                [62, 58, 34, 12], [6, 78, 8, 14], [20, 78, 36, 14]] },
+    { key: "timeline", name: "Timeline over a chart", slots: 1, diagram: true,
+      build: layBuildProcedureTimeline,
+      description: "A procedure timeline across the top, with named ticks, " +
+        "day labels and a phase band, and your chart beneath it.",
+      note: "Line the ticks up with the chart's occasions by dragging them.",
+      preview: [[7, 8, 86, 14], [7, 28, 86, 64]],
+      portraitPreview: [[8, 6, 84, 11], [8, 22, 84, 70]] },
+    { key: "design", name: "Study design", slots: 0, diagram: true,
+      build: layBuildStudyDesign,
+      description: "Groups down the side, phases across the top, one box " +
+        "per cell and an arrow from phase to phase.",
+      note: "Rename the groups and phases, add or remove rows.",
+      preview: [[22, 14, 20, 16], [40, 14, 20, 16], [58, 14, 20, 16],
+                [22, 40, 20, 16], [40, 40, 20, 16], [58, 40, 20, 16],
+                [22, 66, 20, 16], [40, 66, 20, 16], [58, 66, 20, 16]],
+      portraitPreview: [[18, 16, 22, 12], [40, 16, 22, 12], [62, 16, 22, 12],
+                        [18, 40, 22, 12], [40, 40, 22, 12], [62, 40, 22, 12],
+                        [18, 64, 22, 12], [40, 64, 22, 12], [62, 64, 22, 12]] },
+    { key: "trial", name: "Trial sequence", slots: 0, diagram: true,
+      build: layBuildTrialSequence,
+      description: "Screens in a cascade over a timeline of their " +
+        "durations: fixation, cue, target, response.",
+      note: "Every screen is a box, so an image can replace any of them.",
+      preview: [[6, 6, 24, 30], [22, 22, 24, 30], [38, 38, 24, 30],
+                [54, 54, 24, 30], [6, 90, 80, 4]],
+      portraitPreview: [[6, 6, 30, 20], [24, 22, 30, 20], [42, 38, 30, 20],
+                        [60, 54, 30, 20], [6, 84, 88, 3]] }
   ];
   function layoutTemplateByKey(key) {
     for (var i = 0; i < LAYOUT_TEMPLATES.length; i++)
@@ -21161,10 +21202,20 @@
     var c = newLayout(), selects = el("ps-layout-template-assignments")
       .querySelectorAll("select[data-layout-slot]");
     if (def.build) {
-      // A diagram is a fixed form on a portrait page; the orientation
-      // toggle does not apply to it.
-      c.page = { preset: "letterp", w: 816, h: 1056, margin: 40 };
-      def.build(c);
+      // A diagram template lays its own parts out. PRISMA is a fixed form
+      // on a portrait page; the others follow the orientation toggle and
+      // take the chart chosen for their slot, if they have one.
+      var portraitD = LAYOUT_TEMPLATE_ORIENTATION === "portrait";
+      if (def.portraitOnly)
+        c.page = { preset: "letterp", w: 816, h: 1056, margin: 40 };
+      else if (portraitD)
+        c.page = { preset: "canvasp", w: 672, h: 1008, margin: 32 };
+      var chartIds = [];
+      for (var si = 0; si < selects.length; si++) {
+        var cid = selects[si] && selects[si].value;
+        if (chartById(cid) && !isLayoutTab(chartById(cid))) chartIds.push(cid);
+      }
+      def.build(c, chartIds);
       hideLayoutGallery();
       activateNewLayout(c);
       return;
@@ -21501,6 +21552,10 @@
     } else if (item.kind === "arrow") {
       kind = "Arrow";
       name = layArrowEndsText(item);
+    } else if (item.kind === "timeline") {
+      kind = "Timeline";
+      var tlNames = layTimelineLabelsText(item);
+      name = tlNames ? ', "' + tlNames + '"' : ", no named ticks";
     } else {
       kind = item.kind === "box" ? "Box" : "Text item";
       var copy = String(item.text || "Text").replace(/\s+/g, " ").trim();
@@ -22788,6 +22843,546 @@
     arrow("sought", "notret"); arrow("sought", "assessed");
     arrow("assessed", "rexcl"); arrow("assessed", "included");
   }
+
+  // ---- Timeline (figure parts, slice two): one line with named ticks at
+  // positions along it (0..1), labels above or below, plain or arrowed
+  // ends, and phase bands between two ticks. Labels and positions only,
+  // never a date anything computes from (the figures-not-records line).
+  var LAY_TL_BAND_FILLS = ["#e8f0fb", "#fdf6e3", "#e9f4df", "#fdf0f0",
+                           "#eef4fc", "#f4f7fb"];
+  function layTimelineStyle(item) {
+    return { fs: layClamp(item.fontSize == null ? 11 : item.fontSize, 8, 24),
+             color: layHexOr(item.color, "#22364d"),
+             width: layClamp(item.width == null ? 1.5 : item.width, 0.5, 4),
+             labels: item.labels === "below" ? "below" : "above",
+             ends: item.ends === "arrow" ? "arrow" : "plain" };
+  }
+  function layTimelineTicks(item) {
+    var out = [], src = Array.isArray(item.ticks) ? item.ticks : [];
+    for (var i = 0; i < src.length; i++) {
+      var t = src[i] || {};
+      out.push({ pos: layClamp(t.pos, 0, 1),
+                 label: String(t.label == null ? "" : t.label),
+                 sub: String(t.sub == null ? "" : t.sub) });
+    }
+    return out;
+  }
+  function layTimelineBands(item, nTicks) {
+    var out = [], src = Array.isArray(item.bands) ? item.bands : [];
+    for (var i = 0; i < src.length; i++) {
+      var b = src[i] || {};
+      var a = Math.round(Number(b.a)), z = Math.round(Number(b.b));
+      if (!(a >= 0 && a < nTicks && z >= 0 && z < nTicks) || a === z) continue;
+      out.push({ a: Math.min(a, z), b: Math.max(a, z), i: i,
+                 label: String(b.label == null ? "" : b.label),
+                 fill: layHexOr(b.fill, "#e8f0fb") });
+    }
+    return out;
+  }
+  // Geometry in item coordinates. Main labels sit on the chosen side of
+  // the line; band labels and sub-labels stack on the other side, so the
+  // four rows never collide: label, line (with bands), band label, sub.
+  function layTimelineGeom(item) {
+    var st = layTimelineStyle(item);
+    var w = Math.max(80, Number(item.w) || 360);
+    var h = Math.max(40, Number(item.h) || 84);
+    var pad = 14, x0 = pad, x1 = w - pad, lineY = Math.round(h / 2);
+    var above = st.labels === "above";
+    var g = { st: st, w: w, h: h, x0: x0, x1: x1, lineY: lineY,
+              labelY: above ? lineY - 12 : lineY + 12 + st.fs * 0.8,
+              bandLabelY: above ? lineY + 12 + st.fs * 0.8 : lineY - 12,
+              subY: above ? lineY + 12 + st.fs * 0.8 + st.fs + 4
+                          : lineY - 12 - st.fs - 4,
+              headLen: st.ends === "arrow" ? 8 + st.width * 2 : 0,
+              ticks: [], bands: [] };
+    var ticks = layTimelineTicks(item);
+    for (var i = 0; i < ticks.length; i++)
+      g.ticks.push({ x: x0 + ticks[i].pos * (x1 - x0), pos: ticks[i].pos,
+                     label: ticks[i].label, sub: ticks[i].sub });
+    var bands = layTimelineBands(item, ticks.length);
+    for (var k = 0; k < bands.length; k++)
+      g.bands.push({ x0: g.ticks[bands[k].a].x, x1: g.ticks[bands[k].b].x,
+                     label: bands[k].label, fill: bands[k].fill });
+    return g;
+  }
+  function layTimelineLabelsText(item) {
+    var ticks = layTimelineTicks(item), names = [];
+    for (var i = 0; i < ticks.length; i++) if (ticks[i].label) names.push(ticks[i].label);
+    return names.join(", ");
+  }
+  // One drawing routine for the canvas and the file: the canvas adds hit
+  // areas (a wide rect per tick to drag, a band along the line to
+  // double-click) that never reach the export.
+  function layTimelineDraw(doc, item, opts) {
+    var ns = "http://www.w3.org/2000/svg", g = layTimelineGeom(item), st = g.st;
+    var ox = opts.ox || 0, oy = opts.oy || 0, i;
+    var root = doc.createElementNS(ns, "g");
+    function mk(tag, attrs) {
+      var n = doc.createElementNS(ns, tag);
+      for (var k in attrs) if (attrs.hasOwnProperty(k)) n.setAttribute(k, String(attrs[k]));
+      return n;
+    }
+    function txt(x, y, s, size, fill, weight, extra) {
+      var t = mk("text", { x: layNum2(x + ox), y: layNum2(y + oy),
+        "text-anchor": "middle", fill: fill, "font-size": size,
+        "font-family": "sans-serif", "font-weight": weight || "400" });
+      if (extra) for (var k in extra) if (extra.hasOwnProperty(k)) t.setAttribute(k, extra[k]);
+      t.textContent = s;
+      return t;
+    }
+    for (i = 0; i < g.bands.length; i++) {
+      var b = g.bands[i];
+      root.appendChild(mk("rect", { x: layNum2(b.x0 + ox), y: layNum2(g.lineY - 7 + oy),
+        width: layNum2(Math.max(1, b.x1 - b.x0)), height: 14, fill: b.fill }));
+      if (b.label)
+        root.appendChild(txt((b.x0 + b.x1) / 2, g.bandLabelY, b.label,
+          Math.max(7, st.fs - 1), st.color, "600"));
+    }
+    var lineEnd = g.x1 - g.headLen;
+    root.appendChild(mk("path", { d: "M" + layNum2(g.x0 + ox) + " " + layNum2(g.lineY + oy) +
+      " H" + layNum2(lineEnd + ox), fill: "none", stroke: st.color,
+      "stroke-width": st.width }));
+    if (g.headLen) {
+      var hl = g.headLen, hw = hl * 0.45;
+      root.appendChild(mk("polygon", { points:
+        layNum2(g.x1 + ox) + "," + layNum2(g.lineY + oy) + " " +
+        layNum2(g.x1 - hl + ox) + "," + layNum2(g.lineY - hw + oy) + " " +
+        layNum2(g.x1 - hl + ox) + "," + layNum2(g.lineY + hw + oy), fill: st.color }));
+    }
+    for (i = 0; i < g.ticks.length; i++) {
+      var t = g.ticks[i];
+      root.appendChild(mk("line", { x1: layNum2(t.x + ox), y1: layNum2(g.lineY - 6 + oy),
+        x2: layNum2(t.x + ox), y2: layNum2(g.lineY + 6 + oy), stroke: st.color,
+        "stroke-width": st.width }));
+      if (t.label) root.appendChild(txt(t.x, g.labelY, t.label, st.fs, st.color, "400",
+        opts.canvas ? { "data-role": "lay-tick-label", "data-idx": i } : null));
+      if (t.sub) root.appendChild(txt(t.x, g.subY, t.sub, Math.max(7, st.fs - 1),
+        "#5f6f80", "400", opts.canvas ? { "data-role": "lay-tick-label", "data-idx": i } : null));
+    }
+    if (opts.canvas) {
+      root.appendChild(mk("rect", { x: layNum2(g.x0), y: layNum2(g.lineY - 8),
+        width: layNum2(g.x1 - g.x0), height: 16, fill: "transparent",
+        "class": "ps-ltl-line-hit" }));
+      for (i = 0; i < g.ticks.length; i++)
+        root.appendChild(mk("rect", { x: layNum2(g.ticks[i].x - 6), y: layNum2(g.lineY - 12),
+          width: 12, height: 24, fill: "transparent", "class": "ps-ltl-tick-hit",
+          "data-role": "lay-tick", "data-idx": i }));
+    }
+    return root;
+  }
+  function layTimelineSvg(item, selected) {
+    var ns = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(ns, "svg");
+    var w = Math.max(80, Number(item.w) || 360), h = Math.max(40, Number(item.h) || 84);
+    svg.setAttribute("width", String(w)); svg.setAttribute("height", String(h));
+    svg.setAttribute("viewBox", "0 0 " + w + " " + h);
+    svg.setAttribute("aria-hidden", "true"); svg.setAttribute("focusable", "false");
+    svg.appendChild(layTimelineDraw(document, item, { canvas: true }));
+    return svg;
+  }
+  function layoutTimelineNode(doc, item) {
+    return layTimelineDraw(doc, item, { ox: Number(item.x) || 0, oy: Number(item.y) || 0 });
+  }
+  function layTimelineTargets() {
+    var ids = laySelectedIds(), out = [];
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (it && it.kind === "timeline") out.push(it);
+    }
+    return out;
+  }
+  function layItemRefresh(it) { layArrowRefresh(it); }
+  function layAddTimeline() {
+    var p = layPage(), items = layItems(), w = 360, h = 84;
+    var spot = layPlaceRect(items, p, w, h);
+    var grew = spot.needH > p.h;
+    var id = layAddItem({ id: layNewItemId(), kind: "timeline", x: spot.x, y: spot.y,
+      w: w, h: h, fontSize: 11, color: "#22364d", width: 1.5, labels: "above",
+      ends: "plain", bands: [],
+      ticks: [{ pos: 0, label: "Start", sub: "" }, { pos: 1 / 3, label: "Step 1", sub: "" },
+              { pos: 2 / 3, label: "Step 2", sub: "" }, { pos: 1, label: "End", sub: "" }] },
+      false, spot.needH);
+    layGrewNote(grew, spot.capped);
+    layAnnounce("Added a timeline. Drag a tick along the line; the Timeline section names the ticks.");
+    return id;
+  }
+  // A tick in hand slides along the line, in hundredths.
+  function layTickDrag(d, e) {
+    var cv = el("ps-lcanvas");
+    var node = cv && cv.querySelector('.ps-litem[data-item-id="' + d.timeline.id + '"]');
+    if (!node) return;
+    var r = node.getBoundingClientRect(), g = layTimelineGeom(d.timeline);
+    var px = (e.clientX - r.left) / d.zoom;
+    var pos = layClamp((px - g.x0) / Math.max(1, g.x1 - g.x0), 0, 1);
+    pos = Math.round(pos * 100) / 100;
+    var ticks = d.timeline.ticks;
+    if (!ticks || !ticks[d.tickDrag]) return;
+    ticks[d.tickDrag].pos = pos;
+    layItemRefresh(d.timeline);
+  }
+  function layTimelineDblClick(id, e) {
+    var item = layItemById(id);
+    if (!item || item.kind !== "timeline") return;
+    var label = e.target.closest && e.target.closest('[data-role="lay-tick-label"]');
+    if (label) {
+      laySetSelection([id]); renderLayout();
+      var inp = el("ps-ltl-tick-label-" + label.getAttribute("data-idx"));
+      if (inp) { inp.focus(); inp.select(); }
+      return;
+    }
+    if (!(e.target.closest && e.target.closest(".ps-ltl-line-hit"))) return;
+    var cv = el("ps-lcanvas");
+    var node = cv && cv.querySelector('.ps-litem[data-item-id="' + id + '"]');
+    if (!node) return;
+    var r = node.getBoundingClientRect(), g = layTimelineGeom(item), z = layZoom();
+    var pos = layClamp(((e.clientX - r.left) / z - g.x0) / Math.max(1, g.x1 - g.x0), 0, 1);
+    laySnapshot("add tick");
+    if (!Array.isArray(item.ticks)) item.ticks = [];
+    item.ticks.push({ pos: Math.round(pos * 100) / 100, label: "Tick", sub: "" });
+    laySetSelection([id]);
+    persist(); renderLayout();
+    var inp2 = el("ps-ltl-tick-label-" + (item.ticks.length - 1));
+    if (inp2) { inp2.focus(); inp2.select(); }
+    layAnnounce("Added a tick at " + Math.round(pos * 100) + " percent of the line.");
+  }
+  function layTimelineSyncControls(items) {
+    var item = items[0], st = layTimelineStyle(item), i;
+    function agree(read) {
+      for (var k = 1; k < items.length; k++)
+        if (read(items[k]) !== read(items[0])) return false;
+      return true;
+    }
+    var fsMixed = !agree(function (t) { return layTimelineStyle(t).fs; });
+    var rg = el("ps-ltl-size"), nm = el("ps-ltl-size-num");
+    if (rg && document.activeElement !== rg) rg.value = String(st.fs);
+    if (nm && document.activeElement !== nm) {
+      if (fsMixed) { nm.value = ""; nm.placeholder = "Mixed"; }
+      else { nm.value = String(st.fs); nm.placeholder = ""; }
+    }
+    var segs = document.querySelectorAll("[data-ltl-labels]");
+    var lbMixed = !agree(function (t) { return layTimelineStyle(t).labels; });
+    for (i = 0; i < segs.length; i++)
+      segs[i].setAttribute("aria-pressed", !lbMixed &&
+        segs[i].getAttribute("data-ltl-labels") === st.labels ? "true" : "false");
+    segs = document.querySelectorAll("[data-ltl-ends]");
+    var enMixed = !agree(function (t) { return layTimelineStyle(t).ends; });
+    for (i = 0; i < segs.length; i++)
+      segs[i].setAttribute("aria-pressed", !enMixed &&
+        segs[i].getAttribute("data-ltl-ends") === st.ends ? "true" : "false");
+    var colMixed = !agree(function (t) { return layTimelineStyle(t).color.toLowerCase(); });
+    var chips = el("ps-ltl-colors").querySelectorAll("button[data-color]");
+    for (i = 0; i < chips.length; i++)
+      chips[i].setAttribute("aria-pressed", !colMixed &&
+        chips[i].getAttribute("data-color") === st.color.toLowerCase() ? "true" : "false");
+    // The tick and band lists edit ONE timeline. While a field in them has
+    // focus the list is not rebuilt (typing would lose the field); the
+    // model already holds what was typed.
+    var tl = el("ps-ltl-ticks"), bl = el("ps-ltl-bands");
+    var addT = el("ps-ltl-add-tick"), addB = el("ps-ltl-add-band");
+    var single = items.length === 1;
+    if (addT) { addT.disabled = !single; setTip(addT, single ? "" : "Ticks are edited one timeline at a time."); }
+    if (!tl || !bl) return;
+    if (tl.contains(document.activeElement) || bl.contains(document.activeElement)) return;
+    tl.innerHTML = ""; bl.innerHTML = "";
+    if (!single) {
+      tl.appendChild(mkEl("div", "ps-loader-hint", "Select one timeline to edit its ticks."));
+      if (addB) addB.disabled = true;
+      return;
+    }
+    var ticks = layTimelineTicks(item);
+    for (i = 0; i < ticks.length; i++) {
+      var row = mkEl("div", "ps-ltl-row");
+      row.setAttribute("data-idx", String(i));
+      var lab = document.createElement("input");
+      lab.type = "text"; lab.value = ticks[i].label; lab.placeholder = "Label";
+      lab.id = "ps-ltl-tick-label-" + i;
+      lab.setAttribute("data-ltl-tick", "label");
+      lab.setAttribute("aria-label", "Tick " + (i + 1) + " label");
+      var sub = document.createElement("input");
+      sub.type = "text"; sub.value = ticks[i].sub; sub.placeholder = "Below";
+      sub.setAttribute("data-ltl-tick", "sub");
+      sub.setAttribute("aria-label", "Tick " + (i + 1) + " sub-label");
+      var x = mkEl("button", "ps-ltl-x", "×");
+      x.type = "button"; x.setAttribute("data-ltl-tick", "remove");
+      x.setAttribute("aria-label", "Remove tick " + (i + 1));
+      setTip(x, "Remove this tick");
+      row.appendChild(lab); row.appendChild(sub); row.appendChild(x);
+      tl.appendChild(row);
+    }
+    if (addB) {
+      addB.disabled = ticks.length < 2;
+      setTip(addB, ticks.length < 2 ? "A band runs between two ticks." : "");
+    }
+    var bands = Array.isArray(item.bands) ? item.bands : [];
+    for (i = 0; i < bands.length; i++) {
+      var brow = mkEl("div", "ps-ltl-row");
+      brow.setAttribute("data-idx", String(i));
+      var from = document.createElement("select"), to = document.createElement("select");
+      from.setAttribute("data-ltl-band", "a"); to.setAttribute("data-ltl-band", "b");
+      from.setAttribute("aria-label", "Band " + (i + 1) + " from tick");
+      to.setAttribute("aria-label", "Band " + (i + 1) + " to tick");
+      for (var k = 0; k < ticks.length; k++) {
+        var o1 = document.createElement("option"), o2 = document.createElement("option");
+        o1.value = o2.value = String(k);
+        o1.textContent = o2.textContent = ticks[k].label || ("tick " + (k + 1));
+        from.appendChild(o1); to.appendChild(o2);
+      }
+      from.value = String(Math.round(Number(bands[i].a)) || 0);
+      to.value = String(Math.round(Number(bands[i].b)) || 0);
+      var blab = document.createElement("input");
+      blab.type = "text"; blab.value = String(bands[i].label || ""); blab.placeholder = "Label";
+      blab.setAttribute("data-ltl-band", "label");
+      blab.setAttribute("aria-label", "Band " + (i + 1) + " label");
+      var sw = mkEl("button", "ps-ltl-sw", "");
+      sw.type = "button"; sw.setAttribute("data-ltl-band", "fill");
+      sw.style.background = layHexOr(bands[i].fill, "#e8f0fb");
+      sw.setAttribute("aria-label", "Band " + (i + 1) + " fill: next color");
+      setTip(sw, "Next band color");
+      var bx = mkEl("button", "ps-ltl-x", "×");
+      bx.type = "button"; bx.setAttribute("data-ltl-band", "remove");
+      bx.setAttribute("aria-label", "Remove band " + (i + 1));
+      setTip(bx, "Remove this band");
+      brow.appendChild(from); brow.appendChild(to); brow.appendChild(blab);
+      brow.appendChild(sw); brow.appendChild(bx);
+      bl.appendChild(brow);
+    }
+  }
+  function wireLayoutTimelineControls() {
+    var colors = el("ps-ltl-colors");
+    if (!colors) return;
+    var i;
+    var colorNames = { "#22364d": "Ink", "#5f6f80": "Muted", "#94a3b1": "Faint",
+      "#417499": "Blue", "#902634": "Red", "#266741": "Green" };
+    for (i = 0; i < LAY_ARROW_COLORS.length; i++) (function (c) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("data-color", c);
+      b.setAttribute("aria-label", (colorNames[c] || c) + " timeline");
+      b.setAttribute("aria-pressed", "false");
+      b.style.background = c;
+      setTip(b, colorNames[c] || c);
+      b.addEventListener("click", function () {
+        layPartApply(layTimelineTargets(), "timeline color", null,
+          function (it) { it.color = c; });
+      });
+      colors.appendChild(b);
+    })(LAY_ARROW_COLORS[i]);
+    var rg = el("ps-ltl-size"), nm = el("ps-ltl-size-num");
+    rg.addEventListener("input", function () {
+      var v = Number(rg.value);
+      layPartApply(layTimelineTargets(), "timeline size", "ltl-size",
+        function (it) { it.fontSize = layClamp(Math.round(v), 8, 24); }, true);
+    });
+    rg.addEventListener("change", function () { persist(); });
+    nm.addEventListener("change", function () {
+      var v = Number(nm.value);
+      if (!isFinite(v)) return;
+      layPartApply(layTimelineTargets(), "timeline size", null,
+        function (it) { it.fontSize = layClamp(Math.round(v), 8, 24); });
+    });
+    var segs = document.querySelectorAll("[data-ltl-labels]");
+    for (i = 0; i < segs.length; i++) (function (btn) {
+      btn.addEventListener("click", function () {
+        var v = btn.getAttribute("data-ltl-labels");
+        layPartApply(layTimelineTargets(), "timeline labels", null,
+          function (it) { it.labels = v; });
+      });
+    })(segs[i]);
+    segs = document.querySelectorAll("[data-ltl-ends]");
+    for (i = 0; i < segs.length; i++) (function (btn) {
+      btn.addEventListener("click", function () {
+        var v = btn.getAttribute("data-ltl-ends");
+        layPartApply(layTimelineTargets(), "timeline ends", null,
+          function (it) { it.ends = v; });
+      });
+    })(segs[i]);
+    function one() {
+      var t = layTimelineTargets();
+      return t.length === 1 ? t[0] : null;
+    }
+    el("ps-ltl-add-tick").addEventListener("click", function () {
+      var it = one();
+      if (!it) return;
+      var ticks = layTimelineTicks(it), pos = 0.5;
+      if (ticks.length) {
+        // Halfway into the widest gap, so a new tick lands in clear space.
+        var sorted = ticks.map(function (t) { return t.pos; }).sort(function (a, b) { return a - b; });
+        var best = -1, at = 0.5, prev = 0;
+        for (var k = 0; k <= sorted.length; k++) {
+          var cur = k < sorted.length ? sorted[k] : 1;
+          if (cur - prev > best) { best = cur - prev; at = (cur + prev) / 2; }
+          prev = cur;
+        }
+        pos = Math.round(at * 100) / 100;
+      }
+      layPartApply([it], "add tick", null, function (t) {
+        if (!Array.isArray(t.ticks)) t.ticks = [];
+        t.ticks.push({ pos: pos, label: "Tick", sub: "" });
+      });
+      var inp = el("ps-ltl-tick-label-" + (it.ticks.length - 1));
+      if (inp) { inp.focus(); inp.select(); }
+    });
+    el("ps-ltl-add-band").addEventListener("click", function () {
+      var it = one();
+      if (!it || !Array.isArray(it.ticks) || it.ticks.length < 2) return;
+      layPartApply([it], "add band", null, function (t) {
+        if (!Array.isArray(t.bands)) t.bands = [];
+        t.bands.push({ a: 0, b: 1, label: "Phase",
+          fill: LAY_TL_BAND_FILLS[t.bands.length % LAY_TL_BAND_FILLS.length] });
+      });
+    });
+    // The lists are rebuilt per sync, so their rows are handled by
+    // delegation on the list and identified by row index.
+    function rowIdx(t) {
+      var row = t.closest && t.closest(".ps-ltl-row");
+      return row ? Number(row.getAttribute("data-idx")) : -1;
+    }
+    var tl = el("ps-ltl-ticks");
+    tl.addEventListener("input", function (e) {
+      var it = one(), idx = rowIdx(e.target), what = e.target.getAttribute("data-ltl-tick");
+      if (!it || idx < 0 || (what !== "label" && what !== "sub")) return;
+      var v = e.target.value;
+      layPartApply([it], "tick text", "ltl-tick:" + idx + ":" + what, function (t) {
+        if (t.ticks && t.ticks[idx]) t.ticks[idx][what] = v;
+      }, true);
+    });
+    tl.addEventListener("change", function (e) {
+      if (e.target.getAttribute("data-ltl-tick")) persist();
+    });
+    tl.addEventListener("click", function (e) {
+      var btn = e.target.closest && e.target.closest('[data-ltl-tick="remove"]');
+      var it = one(), idx = rowIdx(e.target);
+      if (!btn || !it || idx < 0) return;
+      layPartApply([it], "remove tick", null, function (t) {
+        t.ticks.splice(idx, 1);
+        // Bands are tick indices: the ones past the removed tick shift,
+        // the ones that touched it are dropped.
+        var kept = [];
+        for (var k = 0; k < (t.bands || []).length; k++) {
+          var b = t.bands[k];
+          if (b.a === idx || b.b === idx) continue;
+          kept.push({ a: b.a > idx ? b.a - 1 : b.a, b: b.b > idx ? b.b - 1 : b.b,
+                      label: b.label, fill: b.fill });
+        }
+        t.bands = kept;
+      });
+    });
+    var bl = el("ps-ltl-bands");
+    bl.addEventListener("input", function (e) {
+      var it = one(), idx = rowIdx(e.target), what = e.target.getAttribute("data-ltl-band");
+      if (!it || idx < 0 || what !== "label") return;
+      var v = e.target.value;
+      layPartApply([it], "band text", "ltl-band:" + idx, function (t) {
+        if (t.bands && t.bands[idx]) t.bands[idx].label = v;
+      }, true);
+    });
+    bl.addEventListener("change", function (e) {
+      var it = one(), idx = rowIdx(e.target), what = e.target.getAttribute("data-ltl-band");
+      if (!it || idx < 0) return;
+      if (what === "label") { persist(); return; }
+      if (what !== "a" && what !== "b") return;
+      var v = Number(e.target.value);
+      layPartApply([it], "band ticks", null, function (t) {
+        if (t.bands && t.bands[idx]) t.bands[idx][what] = v;
+      });
+    });
+    bl.addEventListener("click", function (e) {
+      var it = one(), idx = rowIdx(e.target);
+      if (!it || idx < 0) return;
+      var t2 = e.target.closest && e.target.closest("[data-ltl-band]");
+      if (!t2) return;
+      var what = t2.getAttribute("data-ltl-band");
+      if (what === "remove")
+        layPartApply([it], "remove band", null, function (t) { t.bands.splice(idx, 1); });
+      else if (what === "fill")
+        layPartApply([it], "band color", null, function (t) {
+          var cur = LAY_TL_BAND_FILLS.indexOf(layHexOr(t.bands[idx].fill, "#e8f0fb"));
+          t.bands[idx].fill = LAY_TL_BAND_FILLS[(cur + 1) % LAY_TL_BAND_FILLS.length];
+        });
+    });
+  }
+  // ---- the diagram templates of slice two. Each lays out ordinary parts.
+  function layTplBox(c, n, x, y, w, h, text, extra) {
+    var it = { id: "i" + n, kind: "box", text: text, fontSize: 12, x: x, y: y,
+               w: w, h: h, fill: "#ffffff", border: "thin", corner: 4 };
+    if (extra) for (var k in extra) if (extra.hasOwnProperty(k)) it[k] = extra[k];
+    c.items.push(it);
+    return it;
+  }
+  function layTplArrow(c, n, fromId, toId) {
+    c.items.push({ id: "i" + n, kind: "arrow", from: { id: fromId }, to: { id: toId },
+                   route: "elbow", heads: "end", width: 1.5, color: "#22364d",
+                   x: 0, y: 0, ax: 0, ay: 0, bx: 0, by: 0 });
+  }
+  function layTplText(c, n, x, y, text, size, bold) {
+    c.items.push({ id: "i" + n, kind: "text", text: text, fontSize: size,
+                   bold: !!bold, x: x, y: y });
+  }
+  // A procedure timeline across the top and the chosen chart beneath it,
+  // the timeline as wide as the chart so its ticks can be lined up with
+  // the chart's occasions by hand.
+  function layBuildProcedureTimeline(c, chartIds) {
+    var n = 0, m = c.page.margin, cw = c.page.w - m * 2;
+    var chartId = chartIds && chartIds[0];
+    var tlH = 84;
+    c.items.push({ id: "i" + (++n), kind: "timeline", x: m, y: m, w: cw, h: tlH,
+      fontSize: 11, color: "#22364d", width: 1.5, labels: "above", ends: "plain",
+      ticks: [{ pos: 0, label: "Baseline", sub: "Day 0" },
+              { pos: 1 / 3, label: "Dose 1", sub: "Day 7" },
+              { pos: 2 / 3, label: "Dose 2", sub: "Day 14" },
+              { pos: 1, label: "Test", sub: "Day 21" }],
+      bands: [{ a: 1, b: 3, label: "Daily dosing", fill: "#e8f0fb" }] });
+    if (chartId) {
+      var cell = { x: m, y: m + tlH + 12, w: cw, h: Math.max(120, c.page.h - m * 2 - tlH - 12) };
+      var fit = layFitRectToChart(cell, chartId);
+      c.items.push({ id: "i" + (++n), kind: "chart", chartId: chartId,
+        x: Math.round(fit.x), y: Math.round(fit.y), w: Math.round(fit.w), h: Math.round(fit.h) });
+    }
+  }
+  // Groups down the side, phases across the top, one box per cell and an
+  // arrow from phase to phase in every row.
+  function layBuildStudyDesign(c) {
+    var n = 0, m = c.page.margin;
+    var groups = ["Vehicle", "Drug", "Sham"], phases = ["Baseline", "Treatment", "Follow-up"];
+    var cellW = 150, cellH = 44, gapX = 60, gapY = 40, left = m + 90, top = m + 40;
+    var ids = [];
+    for (var p = 0; p < phases.length; p++) {
+      // Centred over its column by measuring the word, the way text items
+      // measure themselves.
+      var hw = layApproxTextRect({ text: phases[p], fontSize: 12, bold: true }).w;
+      layTplText(c, ++n, Math.round(left + p * (cellW + gapX) + cellW / 2 - hw / 2),
+        top - 30, phases[p], 12, true);
+    }
+    for (var g = 0; g < groups.length; g++) {
+      var y = top + g * (cellH + gapY);
+      layTplText(c, ++n, m, y + 12, groups[g], 12, true);
+      ids[g] = [];
+      for (p = 0; p < phases.length; p++) {
+        var text = p === 0 ? "Baseline test" : p === 1 ? groups[g] + " treatment" : "Follow-up test";
+        var b = layTplBox(c, ++n, left + p * (cellW + gapX), y, cellW, cellH, text,
+          p === 1 ? { fill: "#eef4fc" } : null);
+        ids[g][p] = b.id;
+      }
+      for (p = 1; p < phases.length; p++) layTplArrow(c, ++n, ids[g][p - 1], ids[g][p]);
+    }
+  }
+  // Screens in a cascade over a timeline of their durations.
+  function layBuildTrialSequence(c) {
+    var n = 0, m = c.page.margin;
+    var names = ["+", "Cue", "Target", "Response"];
+    var durs = ["500 ms", "200 ms", "1000 ms", "until response"];
+    var bw = 130, bh = 90, dx = 110, dy = 58, left = m + 20, top = m + 10;
+    for (var i = 0; i < names.length; i++)
+      layTplBox(c, ++n, left + i * dx, top + i * dy, bw, bh, names[i],
+        i === 0 ? { fontSize: 22 } : null);
+    var tlW = Math.min(c.page.w - m * 2 - 20, (names.length - 1) * dx + bw + 60);
+    c.items.push({ id: "i" + (++n), kind: "timeline", x: left, y: top + (names.length - 1) * dy + bh + 24,
+      w: tlW, h: 84, fontSize: 11, color: "#22364d", width: 1.5, labels: "above",
+      ends: "arrow", bands: [],
+      ticks: names.map(function (nm, k) {
+        return { pos: k / names.length, label: k === 0 ? "Fixation" : nm, sub: durs[k] };
+      }) });
+  }
   var LAY_TEXT_CTX = null;
   function layTextCtx() {
     if (!LAY_TEXT_CTX) {
@@ -22830,11 +23425,12 @@
   // resize, proportional default); text items self-size.
   function laySizedKind(item) {
     return item && (item.kind === "chart" || item.kind === "image" ||
-                    item.kind === "box");
+                    item.kind === "box" || item.kind === "timeline");
   }
   function layMinSize(item) {
     if (item.kind === "image") return { w: 24, h: 24 };
     if (item.kind === "box") return { w: 36, h: 22 };
+    if (item.kind === "timeline") return { w: 80, h: 40 };
     // The minimum keeps the chart's SHAPE. A flat 120 by 80 is 1.5 against
     // the engine's 1.469, so a figure scaled onto a small page hit the floor
     // and came back letterboxed, which is the thing panel-fitting removed.
@@ -23198,6 +23794,7 @@
         var hnd = mkEl("div", "ps-lhandle");
         hnd.setAttribute("data-role", "lay-resize");
         setTip(hnd, item.kind === "box" ? "Resize the box."
+          : item.kind === "timeline" ? "Resize the timeline."
           : multiUnits
           ? "Resize every selected panel together. Hold Shift for free resize."
           : "Resize proportionally. Hold Shift for free resize.");
@@ -23273,8 +23870,19 @@
       elI.style.height = (Number(item.h) || 44) + "px";
       elI.appendChild(layBoxNode(item));
       setTip(elI, "Box. Double-click to edit its text.");
+    } else if (item.kind === "timeline") {
+      elI.style.width = (Number(item.w) || 360) + "px";
+      elI.style.height = (Number(item.h) || 84) + "px";
+      elI.appendChild(layTimelineSvg(item, selected));
+      setTip(elI, "Timeline. Drag a tick along the line; double-click the line to add one.");
     } else if (item.kind === "arrow") {
+      // The sync re-derives the box from the attached boxes, so the
+      // position set above (from the stored x/y) is re-read here: a
+      // template's arrows are born at 0,0 and would otherwise draw there
+      // on their first render.
       layArrowSync(item);
+      elI.style.left = layNum2(item.x) + "px";
+      elI.style.top = layNum2(item.y) + "px";
       elI.style.width = layNum2(item.w) + "px";
       elI.style.height = layNum2(item.h) + "px";
       elI.appendChild(layArrowSvg(item, selected));
@@ -24200,6 +24808,7 @@
       return c ? (c.name || "that panel") : "that panel";
     }
     if (item.kind === "box") return "that box";
+    if (item.kind === "timeline") return "that timeline";
     return item.srcChart ? "that Notebook page" : "that image";
   }
   function laySameSize(dim) {
@@ -24299,10 +24908,10 @@
       if (!item) return;
       var mins = layMinSize(item);
       laySnapshot("resize", "resize");
-      if (item.kind === "box") {
-        // A box holds text, so each side is its own number: typing a
-        // width must not change the height the way a chart panel keeps
-        // its shape.
+      if (item.kind === "box" || item.kind === "timeline") {
+        // A box holds text and a timeline is a line: each side is its own
+        // number, so typing a width must not change the height the way a
+        // chart panel keeps its shape.
         if (prop === "w")
           item.w = layClamp(value, mins.w, p.w - (Number(item.x) || 0));
         else item.h = layClamp(value, mins.h, p.h - (Number(item.y) || 0));
@@ -24377,7 +24986,8 @@
       // TEXT scales too. Leaving font sizes alone made panel letters keep
       // their size while everything around them shrank, so on a small page
       // a 20 px letter sat on top of the panel it labels.
-      if ((items[i].kind === "text" || items[i].kind === "box") && k !== 1)
+      if ((items[i].kind === "text" || items[i].kind === "box" ||
+           items[i].kind === "timeline") && k !== 1)
         items[i].fontSize = layClamp(
           Math.round((Number(items[i].fontSize) || 14) * k), 8, 72);
       // An arrow's free ends ride its box; their offsets scale with it.
@@ -24534,7 +25144,8 @@
         scale = snappedH / origin.h;
       }
     }
-    var minScale = origin.item && origin.item.kind === "box"
+    var minScale = origin.item && (origin.item.kind === "box" ||
+                                   origin.item.kind === "timeline")
       ? Math.max(mins.w / origin.w, mins.h / origin.h)
       : Math.max(120 / origin.w, 80 / origin.h);
     var maxScale = Math.min(maxW / origin.w, maxH / origin.h);
@@ -24596,6 +25207,22 @@
       } else if (!layIsSelected(id)) {
         laySetSelection([id]); renderLayout();
       }
+      var tickHandle = e.target.closest &&
+        e.target.closest('[data-role="lay-tick"]');
+      if (tickHandle && item.kind === "timeline") {
+        // A tick in hand slides along its line (layTickDrag); the
+        // timeline itself stays put.
+        LAY_DRAG = { tickDrag: Number(tickHandle.getAttribute("data-idx")),
+                     timeline: item, ids: [id], primary: item, origins: [],
+                     bounds: laySelectionBounds([id]), resizing: false,
+                     collapseTo: null, sx: e.clientX, sy: e.clientY,
+                     altCopy: false, zoom: layZoom(), moved: false,
+                     before: laySnapState(activeChart()) };
+        document.addEventListener("pointermove", layPointerMove);
+        document.addEventListener("pointerup", layPointerUp);
+        e.preventDefault();
+        return;
+      }
       var endHandle = e.target.closest &&
         e.target.closest('[data-role="lay-arrow-end"]');
       if (endHandle && item.kind === "arrow") {
@@ -24647,6 +25274,12 @@
       e.preventDefault();
     });
     canvas.addEventListener("dblclick", function (e) {
+      var tlEl = e.target.closest
+        ? e.target.closest('.ps-litem[data-kind="timeline"]') : null;
+      if (tlEl) {
+        layTimelineDblClick(tlEl.getAttribute("data-item-id"), e);
+        return;
+      }
       var itemEl = e.target.closest
         ? e.target.closest('.ps-litem[data-kind="text"],.ps-litem[data-kind="box"]')
         : null;
@@ -25118,6 +25751,13 @@
       e.preventDefault();
       return;
     }
+    if (d.tickDrag != null) {
+      layTickDrag(d, e);
+      layHideGuides();
+      laySyncInspector();
+      e.preventDefault();
+      return;
+    }
     if (d.resizing && laySizedKind(d.primary)) {
       // The grabbed panel follows the pointer exactly, the existing math.
       // Every OTHER selected sized item follows by RATIO, so two same-size
@@ -25131,7 +25771,8 @@
       // A box resizes freely: it holds text, not a picture with a shape
       // to keep. Panels keep the proportional default.
       var resized = layResizeDimensions(po, dx, dy, p, v,
-        !!e.shiftKey || (po.item && po.item.kind === "box"));
+        !!e.shiftKey || (po.item && (po.item.kind === "box" ||
+                                     po.item.kind === "timeline")));
       var rw = po.w > 0 ? resized.w / po.w : 1;
       var rh = po.h > 0 ? resized.h / po.h : 1;
       var cvR = el("ps-lcanvas");
@@ -25210,7 +25851,10 @@
     layHideGuides();
     // An end drag rewrote attachments, not positions: put the whole
     // state back from the press-time snapshot.
-    if (d.arrowEnd && d.before) { layRestoreState(d.before); return true; }
+    if ((d.arrowEnd || d.tickDrag != null) && d.before) {
+      layRestoreState(d.before);
+      return true;
+    }
     for (var i = 0; i < d.origins.length; i++) {
       var o = d.origins[i];
       o.item.x = o.x; o.item.y = o.y;
@@ -25253,6 +25897,7 @@
       var h = layHist();
       if (h && d.before) {
         h.undo.push({ label: d.arrowEnd ? "attach arrow"
+                               : d.tickDrag != null ? "move tick"
                                : d.resizing ? "resize" : "move", state: d.before });
         if (h.undo.length > LAYOUT_HIST_LIMIT) h.undo.shift();
         h.redo.length = 0;
@@ -27044,12 +27689,23 @@
           ? "Arrow (" + arrowTargets.length + " items)" : "Arrow";
       if (arrowTargets.length) layArrowSyncControls(arrowTargets);
     }
+    var tlSec = el("ps-layout-timeline-section");
+    if (tlSec) {
+      var tlTargets = layTimelineTargets();
+      tlSec.style.display = tlTargets.length ? "" : "none";
+      var tlTitle = tlSec.querySelector(".ps-inspector-section-title");
+      if (tlTitle)
+        tlTitle.textContent = tlTargets.length > 1
+          ? "Timeline (" + tlTargets.length + " items)" : "Timeline";
+      if (tlTargets.length) layTimelineSyncControls(tlTargets);
+    }
     el("ps-layout-selection-title").textContent = one
       ? (one.kind === "chart"
          ? (srcInfo && srcInfo.name ? "Chart panel - live" : "Chart panel")
          : one.kind === "image"
          ? (srcInfo ? "Notebook snapshot" : "Image item")
          : one.kind === "box" ? "Box"
+         : one.kind === "timeline" ? "Timeline"
          : one.kind === "arrow" ? "Arrow" : "Text item")
       : ids.length + " selected items";
     // The behavioral line (Torry, Aug 5 2026): will this update, or not.
@@ -32122,7 +32778,8 @@
       { label: "Panel label", command: "insert-label", layoutOnly: true },
       { label: "Image\u2026", command: "insert-image", layoutOnly: true },
       { label: "Box", command: "insert-box", layoutOnly: true },
-      { label: "Arrow", command: "insert-arrow", layoutOnly: true }
+      { label: "Arrow", command: "insert-arrow", layoutOnly: true },
+      { label: "Timeline", command: "insert-timeline", layoutOnly: true }
     ],
     // Punch list 3 and 4. Which graph?, Check graph, Glossary and Label parts
     // were reachable only through one unlabelled 29px "?" inside the engine
@@ -32946,6 +33603,7 @@
     else if (command === "insert-image") el("ps-laddimage").click();
     else if (command === "insert-box") layAddBox();
     else if (command === "insert-arrow") layAddArrow();
+    else if (command === "insert-timeline") layAddTimeline();
     else if (command === "command-palette") showCommandPalette();
     else if (command === "layout-add-chart") el("ps-laddchart").click();
     else if (command === "layout-add-text") el("ps-laddtext").click();
@@ -34830,6 +35488,7 @@
     })();
     wireLayoutTextControls();
     wireLayoutPartControls();
+    wireLayoutTimelineControls();
     wireAppFrame(); wireContextInspector(); wireCommandPalette();
     wireGuidedDialogs(); wireStandaloneEngineExclusionLabels();
     migrateLegacyChartPointExclusions();

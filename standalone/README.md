@@ -14,9 +14,13 @@ punch lists are maintainer-local and not published with this repo.
   facing the other end), one Add part toolbar menu, Box and Arrow rail
   sections, and a PRISMA 2020 template under a Diagrams heading in the New
   layout gallery. Boxes and arrows ride undo, duplicate, paste, the .pand
-  file and every export. Verified by `layout-parts-check` (12 cases, control
-  red against a tree without the feature). Timelines and the other diagram
-  templates are the next slice.
+  file and every export. Verified by `layout-parts-check` (13 cases, control
+  red against a tree without the feature). Slice two the same day: the
+  Timeline item (named ticks you drag along the line, labels above or
+  below, plain or arrowed ends, phase bands between two ticks, the rail
+  lists ticks and bands) and three more templates under Diagrams: Timeline
+  over a chart, Study design, Trial sequence. Verified by
+  `layout-timeline-check`.
 
 - Final usability follow-up (Sep 9, 2026): bar-style choices expose selected
   states and retain keyboard focus. Help me choose completes the pristine
