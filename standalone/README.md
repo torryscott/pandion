@@ -20,7 +20,11 @@ punch lists are maintainer-local and not published with this repo.
   below, plain or arrowed ends, phase bands between two ticks, the rail
   lists ticks and bands) and three more templates under Diagrams: Timeline
   over a chart, Study design, Trial sequence. Verified by
-  `layout-timeline-check`.
+  `layout-timeline-check`. Slice three (Torry's review): a shared color
+  popover behind every part's custom-color chip, a phase band that opens
+  it when clicked on the page, tick clicks that land in the tick's rail
+  row, and line, tick and per-tick widths plus tick length. Verified by
+  `layout-parts-polish-check`.
 
 - Final usability follow-up (Sep 9, 2026): bar-style choices expose selected
   states and retain keyboard focus. Help me choose completes the pristine

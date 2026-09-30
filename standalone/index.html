@@ -1234,6 +1234,48 @@
     flex: 0 0 auto; width: 20px; height: 20px; padding: 0; border-radius: 3px;
     border: 1px solid var(--ps-l3); cursor: pointer;
   }
+  .ps-inspector-field .ps-ltl-row input[type="number"] {
+    width: 52px; flex: 0 0 auto; height: 26px; padding: 2px 4px; font-size: 11px;
+  }
+  .ps-ltl-band { cursor: pointer; }
+  /* The custom-color chip beside a swatch row and the popover it opens
+     (slice three): the Text section's picker, floating. */
+  .ps-lcp-open {
+    width: 22px; height: 22px; padding: 0; flex: 0 0 auto;
+    border: 1px dashed var(--ps-accent); border-radius: var(--ps-r-sm);
+    background: #ffffff; cursor: pointer;
+  }
+  .ps-lcp-open[aria-pressed="true"] { outline: 2px solid var(--ps-accent); outline-offset: 1px; }
+  #ps-lcolorpop {
+    position: fixed; display: none; z-index: 12600; width: 236px;
+    padding: 10px; background: var(--ps-s0); border: 1px solid var(--ps-l4);
+    border-radius: var(--ps-r-md); box-shadow: var(--ps-e-2);
+  }
+  #ps-lcolorpop .ps-lcp-sv {
+    position: relative; height: 110px; margin-bottom: 8px;
+    border: 1px solid var(--ps-l3); border-radius: var(--ps-r-sm);
+    cursor: crosshair; touch-action: none;
+  }
+  #ps-lcolorpop .ps-lcp-hue {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 12px;
+    margin: 0 0 8px; border-radius: 6px; outline-offset: 3px;
+    background: linear-gradient(to right, #f00 0%, #ff0 17%, #0f0 33%,
+      #0ff 50%, #00f 67%, #f0f 83%, #f00 100%);
+  }
+  #ps-lcolorpop .ps-lcp-hue::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%;
+    background: #ffffff; border: 1px solid #888888;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  }
+  #ps-lcolorpop .ps-lcp-hex {
+    width: 76px; height: 26px; padding: 2px 6px; font-size: 11.5px;
+    border: 1px solid var(--ps-l3); border-radius: var(--ps-r-sm);
+  }
+  #ps-lcolorpop .ps-lcp-cur {
+    display: inline-block; width: 22px; height: 22px;
+    border: 1px solid var(--ps-l3); border-radius: var(--ps-r-sm);
+  }
+  #ps-lcolorpop .ps-lcp-done { margin-left: auto; padding: 3px 9px; font-size: 11.5px; }
   .ps-layout-template-heading {
     grid-column: 1 / -1; margin: 6px 0 -2px; color: var(--ps-muted);
     font-size: 10px; font-weight: 700; letter-spacing: 0.45px;
@@ -5348,6 +5390,9 @@
           <div class="ps-inspector-field ps-ltx-row">
             <span class="ps-layout-field-label">Fill</span>
             <div id="ps-lbox-fills" class="ps-ltx-swatches"></div>
+            <button type="button" class="ps-lcp-open" id="ps-lbox-fillcustom"
+                    aria-pressed="false" aria-label="Choose a fill color"
+                    data-tip="Choose any fill color"></button>
           </div>
           <div class="ps-inspector-field ps-ltx-row">
             <span class="ps-layout-field-label" id="ps-lbox-border-label">Border</span>
@@ -5356,6 +5401,9 @@
               <button type="button" data-lbox-border="thin" aria-pressed="false">Thin</button>
               <button type="button" data-lbox-border="thick" aria-pressed="false">Thick</button>
             </div>
+            <button type="button" class="ps-lcp-open" id="ps-lbox-bordercolor"
+                    aria-pressed="false" aria-label="Choose the border color"
+                    data-tip="Border color"></button>
           </div>
           <div class="ps-inspector-field ps-ltx-row">
             <span class="ps-layout-field-label" id="ps-lbox-corner-label">Corner</span>
@@ -5393,6 +5441,9 @@
           <div class="ps-inspector-field ps-ltx-row">
             <span class="ps-layout-field-label">Color</span>
             <div id="ps-larrow-colors" class="ps-ltx-swatches"></div>
+            <button type="button" class="ps-lcp-open" id="ps-larrow-custom"
+                    aria-pressed="false" aria-label="Choose any arrow color"
+                    data-tip="Choose any color"></button>
           </div>
           <label class="ps-inspector-field">
             From
@@ -5433,6 +5484,30 @@
           <div class="ps-inspector-field ps-ltx-row">
             <span class="ps-layout-field-label">Color</span>
             <div id="ps-ltl-colors" class="ps-ltx-swatches"></div>
+            <button type="button" class="ps-lcp-open" id="ps-ltl-custom"
+                    aria-pressed="false" aria-label="Choose any timeline color"
+                    data-tip="Choose any color"></button>
+          </div>
+          <div class="ps-inspector-field ps-ltx-row">
+            <span class="ps-layout-field-label" id="ps-ltl-width-label">Line</span>
+            <input id="ps-ltl-width" type="range" min="0.5" max="4" step="0.5"
+                   aria-labelledby="ps-ltl-width-label">
+            <input id="ps-ltl-width-num" type="number" min="0.5" max="4"
+                   step="0.5" aria-label="Line width in pixels">
+          </div>
+          <div class="ps-inspector-field ps-ltx-row">
+            <span class="ps-layout-field-label" id="ps-ltl-tickw-label">Ticks</span>
+            <input id="ps-ltl-tickw" type="range" min="0.5" max="6" step="0.5"
+                   aria-labelledby="ps-ltl-tickw-label">
+            <input id="ps-ltl-tickw-num" type="number" min="0.5" max="6"
+                   step="0.5" aria-label="Tick width in pixels, all ticks">
+          </div>
+          <div class="ps-inspector-field ps-ltx-row">
+            <span class="ps-layout-field-label" id="ps-ltl-tickl-label">Length</span>
+            <input id="ps-ltl-tickl" type="range" min="4" max="40" step="1"
+                   aria-labelledby="ps-ltl-tickl-label">
+            <input id="ps-ltl-tickl-num" type="number" min="4" max="40"
+                   step="1" aria-label="Tick length in pixels">
           </div>
           <div class="ps-inspector-field">
             <span class="ps-layout-field-label" id="ps-ltl-ticks-label">Ticks</span>

@@ -22614,9 +22614,16 @@
     }
     var fill = layBoxFill(item), fillMixed = !agree(layBoxFill);
     var chips = el("ps-lbox-fills").querySelectorAll("button[data-fill]");
-    for (var i = 0; i < chips.length; i++)
-      chips[i].setAttribute("aria-pressed",
-        !fillMixed && chips[i].getAttribute("data-fill") === fill ? "true" : "false");
+    var fillHit = false;
+    for (var i = 0; i < chips.length; i++) {
+      var fon = !fillMixed && chips[i].getAttribute("data-fill") === fill;
+      if (fon) fillHit = true;
+      chips[i].setAttribute("aria-pressed", fon ? "true" : "false");
+    }
+    layPaintCustomChip("ps-lbox-fillcustom", fill === "none" ? "#ffffff" : fill,
+      !fillMixed && !fillHit);
+    var bcol = layBoxStyle(item).borderColor;
+    layPaintCustomChip("ps-lbox-bordercolor", bcol, false);
     var border = layBoxBorder(item), borderMixed = !agree(layBoxBorder);
     var segs = document.querySelectorAll("[data-lbox-border]");
     for (i = 0; i < segs.length; i++)
@@ -22660,10 +22667,13 @@
     }
     var colMixed = !agree(function (t) { return layArrowStyle(t).color.toLowerCase(); });
     var chips = el("ps-larrow-colors").querySelectorAll("button[data-color]");
-    for (i = 0; i < chips.length; i++)
-      chips[i].setAttribute("aria-pressed",
-        !colMixed && chips[i].getAttribute("data-color") === st.color.toLowerCase()
-          ? "true" : "false");
+    var colHit = false;
+    for (i = 0; i < chips.length; i++) {
+      var on = !colMixed && chips[i].getAttribute("data-color") === st.color.toLowerCase();
+      if (on) colHit = true;
+      chips[i].setAttribute("aria-pressed", on ? "true" : "false");
+    }
+    layPaintCustomChip("ps-larrow-custom", st.color, !colMixed && !colHit);
     // The attachment selects list every box by its text. Meaningful for
     // ONE arrow; a set of arrows keeps them disabled with the reason.
     var sels = [["ps-larrow-from", "from"], ["ps-larrow-to", "to"]];
@@ -22715,6 +22725,9 @@
       });
       fills.appendChild(b);
     })(LAY_BOX_FILLS[i]);
+    layWireCustomChip("ps-lbox-fillcustom", layBoxTargets, "fill", "box fill", "#ffffff");
+    layWireCustomChip("ps-lbox-bordercolor", layBoxTargets, "borderColor", "box border color", "#22364d");
+    layWireCustomChip("ps-larrow-custom", layArrowTargets, "color", "arrow color", "#22364d");
     var borders = document.querySelectorAll("[data-lbox-border]");
     for (i = 0; i < borders.length; i++) (function (btn) {
       btn.addEventListener("click", function () {
@@ -22854,8 +22867,17 @@
     return { fs: layClamp(item.fontSize == null ? 11 : item.fontSize, 8, 24),
              color: layHexOr(item.color, "#22364d"),
              width: layClamp(item.width == null ? 1.5 : item.width, 0.5, 4),
+             // Tick marks default to the line's own width; each tick may
+             // carry its own (Torry: "individually and as a group").
+             tickWidth: item.tickWidth == null ? null
+               : layClamp(item.tickWidth, 0.5, 6),
+             tickLen: layClamp(item.tickLen == null ? 12 : item.tickLen, 4, 40),
              labels: item.labels === "below" ? "below" : "above",
              ends: item.ends === "arrow" ? "arrow" : "plain" };
+  }
+  function layTickWidth(st, tick) {
+    if (tick && tick.width != null && isFinite(tick.width)) return layClamp(tick.width, 0.5, 6);
+    return st.tickWidth != null ? st.tickWidth : st.width;
   }
   function layTimelineTicks(item) {
     var out = [], src = Array.isArray(item.ticks) ? item.ticks : [];
@@ -22863,7 +22885,8 @@
       var t = src[i] || {};
       out.push({ pos: layClamp(t.pos, 0, 1),
                  label: String(t.label == null ? "" : t.label),
-                 sub: String(t.sub == null ? "" : t.sub) });
+                 sub: String(t.sub == null ? "" : t.sub),
+                 width: t.width == null || !isFinite(Number(t.width)) ? null : Number(t.width) });
     }
     return out;
   }
@@ -22898,6 +22921,7 @@
     var ticks = layTimelineTicks(item);
     for (var i = 0; i < ticks.length; i++)
       g.ticks.push({ x: x0 + ticks[i].pos * (x1 - x0), pos: ticks[i].pos,
+                     width: ticks[i].width,
                      label: ticks[i].label, sub: ticks[i].sub });
     var bands = layTimelineBands(item, ticks.length);
     for (var k = 0; k < bands.length; k++)
@@ -22922,6 +22946,12 @@
       for (var k in attrs) if (attrs.hasOwnProperty(k)) n.setAttribute(k, String(attrs[k]));
       return n;
     }
+    // The line's double-click strip goes UNDER the bands, so a band keeps
+    // its own click (its color) and the bare line keeps add-a-tick.
+    if (opts.canvas)
+      root.appendChild(mk("rect", { x: layNum2(g.x0), y: layNum2(g.lineY - 8),
+        width: layNum2(g.x1 - g.x0), height: 16, fill: "transparent",
+        "class": "ps-ltl-line-hit" }));
     function txt(x, y, s, size, fill, weight, extra) {
       var t = mk("text", { x: layNum2(x + ox), y: layNum2(y + oy),
         "text-anchor": "middle", fill: fill, "font-size": size,
@@ -22932,40 +22962,54 @@
     }
     for (i = 0; i < g.bands.length; i++) {
       var b = g.bands[i];
-      root.appendChild(mk("rect", { x: layNum2(b.x0 + ox), y: layNum2(g.lineY - 7 + oy),
-        width: layNum2(Math.max(1, b.x1 - b.x0)), height: 14, fill: b.fill }));
+      var bandAttrs = { x: layNum2(b.x0 + ox), y: layNum2(g.lineY - 7 + oy),
+        width: layNum2(Math.max(1, b.x1 - b.x0)), height: 14, fill: b.fill };
+      if (opts.canvas) {
+        bandAttrs["data-role"] = "lay-band";
+        bandAttrs["data-idx"] = i;
+        bandAttrs["class"] = "ps-ltl-band";
+      }
+      root.appendChild(mk("rect", bandAttrs));
       if (b.label)
         root.appendChild(txt((b.x0 + b.x1) / 2, g.bandLabelY, b.label,
           Math.max(7, st.fs - 1), st.color, "600"));
     }
     var lineEnd = g.x1 - g.headLen;
-    root.appendChild(mk("path", { d: "M" + layNum2(g.x0 + ox) + " " + layNum2(g.lineY + oy) +
+    // On the canvas the drawn strokes are pointer-inert: the hit strip
+    // under the bands and the tick hit rects own the clicks, so a band's
+    // centre (which the line crosses) still opens the band.
+    var inert = opts.canvas ? { "pointer-events": "none" } : {};
+    function withInert(attrs) {
+      for (var k in inert) if (inert.hasOwnProperty(k)) attrs[k] = inert[k];
+      return attrs;
+    }
+    root.appendChild(mk("path", withInert({ d: "M" + layNum2(g.x0 + ox) + " " + layNum2(g.lineY + oy) +
       " H" + layNum2(lineEnd + ox), fill: "none", stroke: st.color,
-      "stroke-width": st.width }));
+      "stroke-width": st.width })));
     if (g.headLen) {
       var hl = g.headLen, hw = hl * 0.45;
-      root.appendChild(mk("polygon", { points:
+      root.appendChild(mk("polygon", withInert({ points:
         layNum2(g.x1 + ox) + "," + layNum2(g.lineY + oy) + " " +
         layNum2(g.x1 - hl + ox) + "," + layNum2(g.lineY - hw + oy) + " " +
-        layNum2(g.x1 - hl + ox) + "," + layNum2(g.lineY + hw + oy), fill: st.color }));
+        layNum2(g.x1 - hl + ox) + "," + layNum2(g.lineY + hw + oy), fill: st.color })));
     }
     for (i = 0; i < g.ticks.length; i++) {
       var t = g.ticks[i];
-      root.appendChild(mk("line", { x1: layNum2(t.x + ox), y1: layNum2(g.lineY - 6 + oy),
-        x2: layNum2(t.x + ox), y2: layNum2(g.lineY + 6 + oy), stroke: st.color,
-        "stroke-width": st.width }));
+      var half = st.tickLen / 2;
+      root.appendChild(mk("line", withInert({ x1: layNum2(t.x + ox), y1: layNum2(g.lineY - half + oy),
+        x2: layNum2(t.x + ox), y2: layNum2(g.lineY + half + oy), stroke: st.color,
+        "stroke-width": layTickWidth(st, t) })));
       if (t.label) root.appendChild(txt(t.x, g.labelY, t.label, st.fs, st.color, "400",
         opts.canvas ? { "data-role": "lay-tick-label", "data-idx": i } : null));
       if (t.sub) root.appendChild(txt(t.x, g.subY, t.sub, Math.max(7, st.fs - 1),
         "#5f6f80", "400", opts.canvas ? { "data-role": "lay-tick-label", "data-idx": i } : null));
     }
     if (opts.canvas) {
-      root.appendChild(mk("rect", { x: layNum2(g.x0), y: layNum2(g.lineY - 8),
-        width: layNum2(g.x1 - g.x0), height: 16, fill: "transparent",
-        "class": "ps-ltl-line-hit" }));
       for (i = 0; i < g.ticks.length; i++)
-        root.appendChild(mk("rect", { x: layNum2(g.ticks[i].x - 6), y: layNum2(g.lineY - 12),
-          width: 12, height: 24, fill: "transparent", "class": "ps-ltl-tick-hit",
+        root.appendChild(mk("rect", { x: layNum2(g.ticks[i].x - 6),
+          y: layNum2(g.lineY - Math.max(12, st.tickLen / 2 + 4)),
+          width: 12, height: Math.max(24, st.tickLen + 8), fill: "transparent",
+          "class": "ps-ltl-tick-hit",
           "data-role": "lay-tick", "data-idx": i }));
     }
     return root;
@@ -23030,7 +23074,8 @@
       if (inp) { inp.focus(); inp.select(); }
       return;
     }
-    if (!(e.target.closest && e.target.closest(".ps-ltl-line-hit"))) return;
+    if (!(e.target.closest &&
+          e.target.closest('.ps-ltl-line-hit,[data-role="lay-band"]'))) return;
     var cv = el("ps-lcanvas");
     var node = cv && cv.querySelector('.ps-litem[data-item-id="' + id + '"]');
     if (!node) return;
@@ -23059,6 +23104,20 @@
       if (fsMixed) { nm.value = ""; nm.placeholder = "Mixed"; }
       else { nm.value = String(st.fs); nm.placeholder = ""; }
     }
+    function syncPair(rangeId, numId, val, mixed) {
+      var r = el(rangeId), n = el(numId);
+      if (r && document.activeElement !== r) r.value = String(val);
+      if (n && document.activeElement !== n) {
+        if (mixed) { n.value = ""; n.placeholder = "Mixed"; }
+        else { n.value = String(val); n.placeholder = ""; }
+      }
+    }
+    syncPair("ps-ltl-width", "ps-ltl-width-num", st.width,
+      !agree(function (t) { return layTimelineStyle(t).width; }));
+    syncPair("ps-ltl-tickw", "ps-ltl-tickw-num", layTickWidth(st, null),
+      !agree(function (t) { return layTickWidth(layTimelineStyle(t), null); }));
+    syncPair("ps-ltl-tickl", "ps-ltl-tickl-num", st.tickLen,
+      !agree(function (t) { return layTimelineStyle(t).tickLen; }));
     var segs = document.querySelectorAll("[data-ltl-labels]");
     var lbMixed = !agree(function (t) { return layTimelineStyle(t).labels; });
     for (i = 0; i < segs.length; i++)
@@ -23071,9 +23130,13 @@
         segs[i].getAttribute("data-ltl-ends") === st.ends ? "true" : "false");
     var colMixed = !agree(function (t) { return layTimelineStyle(t).color.toLowerCase(); });
     var chips = el("ps-ltl-colors").querySelectorAll("button[data-color]");
-    for (i = 0; i < chips.length; i++)
-      chips[i].setAttribute("aria-pressed", !colMixed &&
-        chips[i].getAttribute("data-color") === st.color.toLowerCase() ? "true" : "false");
+    var colHit = false;
+    for (i = 0; i < chips.length; i++) {
+      var on = !colMixed && chips[i].getAttribute("data-color") === st.color.toLowerCase();
+      if (on) colHit = true;
+      chips[i].setAttribute("aria-pressed", on ? "true" : "false");
+    }
+    layPaintCustomChip("ps-ltl-custom", st.color, !colMixed && !colHit);
     // The tick and band lists edit ONE timeline. While a field in them has
     // focus the list is not rebuilt (typing would lose the field); the
     // model already holds what was typed.
@@ -23102,11 +23165,18 @@
       sub.type = "text"; sub.value = ticks[i].sub; sub.placeholder = "Below";
       sub.setAttribute("data-ltl-tick", "sub");
       sub.setAttribute("aria-label", "Tick " + (i + 1) + " sub-label");
+      var wd = document.createElement("input");
+      wd.type = "number"; wd.min = "0.5"; wd.max = "6"; wd.step = "0.5";
+      wd.value = ticks[i].width == null ? "" : String(ticks[i].width);
+      wd.placeholder = String(layTickWidth(st, null));
+      wd.setAttribute("data-ltl-tick", "width");
+      wd.setAttribute("aria-label", "Tick " + (i + 1) + " width in pixels (blank = all ticks)");
+      setTip(wd, "This tick's width; blank follows the Ticks width above");
       var x = mkEl("button", "ps-ltl-x", "×");
       x.type = "button"; x.setAttribute("data-ltl-tick", "remove");
       x.setAttribute("aria-label", "Remove tick " + (i + 1));
       setTip(x, "Remove this tick");
-      row.appendChild(lab); row.appendChild(sub); row.appendChild(x);
+      row.appendChild(lab); row.appendChild(sub); row.appendChild(wd); row.appendChild(x);
       tl.appendChild(row);
     }
     if (addB) {
@@ -23135,9 +23205,10 @@
       blab.setAttribute("aria-label", "Band " + (i + 1) + " label");
       var sw = mkEl("button", "ps-ltl-sw", "");
       sw.type = "button"; sw.setAttribute("data-ltl-band", "fill");
+      sw.id = "ps-ltl-band-fill-" + i;
       sw.style.background = layHexOr(bands[i].fill, "#e8f0fb");
-      sw.setAttribute("aria-label", "Band " + (i + 1) + " fill: next color");
-      setTip(sw, "Next band color");
+      sw.setAttribute("aria-label", "Band " + (i + 1) + " color");
+      setTip(sw, "Choose this band's color");
       var bx = mkEl("button", "ps-ltl-x", "×");
       bx.type = "button"; bx.setAttribute("data-ltl-band", "remove");
       bx.setAttribute("aria-label", "Remove band " + (i + 1));
@@ -23180,6 +23251,28 @@
       layPartApply(layTimelineTargets(), "timeline size", null,
         function (it) { it.fontSize = layClamp(Math.round(v), 8, 24); });
     });
+    function wireTlPair(rangeId, numId, label, key, setter) {
+      var r2 = el(rangeId), n2 = el(numId);
+      if (!r2 || !n2) return;
+      r2.addEventListener("input", function () {
+        var v = Number(r2.value);
+        layPartApply(layTimelineTargets(), label, key,
+          function (it) { setter(it, v); }, true);
+      });
+      r2.addEventListener("change", function () { persist(); });
+      n2.addEventListener("change", function () {
+        var v = Number(n2.value);
+        if (!isFinite(v)) return;
+        layPartApply(layTimelineTargets(), label, null, function (it) { setter(it, v); });
+      });
+    }
+    wireTlPair("ps-ltl-width", "ps-ltl-width-num", "timeline line width", "ltl-width",
+      function (it, v) { it.width = layClamp(Math.round(v * 2) / 2, 0.5, 4); });
+    wireTlPair("ps-ltl-tickw", "ps-ltl-tickw-num", "tick width", "ltl-tickw",
+      function (it, v) { it.tickWidth = layClamp(Math.round(v * 2) / 2, 0.5, 6); });
+    wireTlPair("ps-ltl-tickl", "ps-ltl-tickl-num", "tick length", "ltl-tickl",
+      function (it, v) { it.tickLen = layClamp(Math.round(v), 4, 40); });
+    layWireCustomChip("ps-ltl-custom", layTimelineTargets, "color", "timeline color", "#22364d");
     var segs = document.querySelectorAll("[data-ltl-labels]");
     for (i = 0; i < segs.length; i++) (function (btn) {
       btn.addEventListener("click", function () {
@@ -23240,8 +23333,19 @@
     var tl = el("ps-ltl-ticks");
     tl.addEventListener("input", function (e) {
       var it = one(), idx = rowIdx(e.target), what = e.target.getAttribute("data-ltl-tick");
-      if (!it || idx < 0 || (what !== "label" && what !== "sub")) return;
+      if (!it || idx < 0 || (what !== "label" && what !== "sub" && what !== "width")) return;
       var v = e.target.value;
+      if (what === "width") {
+        var wv = v === "" ? null : Number(v);
+        if (wv != null && !isFinite(wv)) return;
+        layPartApply([it], "tick width", "ltl-tick:" + idx + ":width", function (t) {
+          if (t.ticks && t.ticks[idx]) {
+            if (wv == null) delete t.ticks[idx].width;
+            else t.ticks[idx].width = layClamp(Math.round(wv * 2) / 2, 0.5, 6);
+          }
+        }, true);
+        return;
+      }
       layPartApply([it], "tick text", "ltl-tick:" + idx + ":" + what, function (t) {
         if (t.ticks && t.ticks[idx]) t.ticks[idx][what] = v;
       }, true);
@@ -23294,11 +23398,7 @@
       var what = t2.getAttribute("data-ltl-band");
       if (what === "remove")
         layPartApply([it], "remove band", null, function (t) { t.bands.splice(idx, 1); });
-      else if (what === "fill")
-        layPartApply([it], "band color", null, function (t) {
-          var cur = LAY_TL_BAND_FILLS.indexOf(layHexOr(t.bands[idx].fill, "#e8f0fb"));
-          t.bands[idx].fill = LAY_TL_BAND_FILLS[(cur + 1) % LAY_TL_BAND_FILLS.length];
-        });
+      else if (what === "fill") layOpenBandColor(it, idx);
     });
   }
   // ---- the diagram templates of slice two. Each lays out ordinary parts.
@@ -23382,6 +23482,185 @@
       ticks: names.map(function (nm, k) {
         return { pos: k / names.length, label: k === 0 ? "Fixation" : nm, sub: durs[k] };
       }) });
+  }
+
+  // ---- a shared color popover for the figure parts (slice three, Torry:
+  // "when you click on the colored band, it brings up an actual color
+  // picker"). The Text section's SV square, hue and hex as a floating
+  // card anchored to whichever chip opened it: live while dragging,
+  // one undo step per open, closed by Done, Escape or a press outside.
+  var LAY_CPOP = null;
+  function layColorPopEl() {
+    var pop = el("ps-lcolorpop");
+    if (pop) return pop;
+    pop = document.createElement("div");
+    pop.id = "ps-lcolorpop";
+    pop.setAttribute("role", "dialog");
+    pop.setAttribute("aria-label", "Color");
+    pop.innerHTML =
+      '<div class="ps-lcp-sv" role="slider" tabindex="0" ' +
+      'aria-label="Saturation and brightness" aria-valuemin="0" ' +
+      'aria-valuemax="100" aria-valuenow="0"><div class="ps-ltx-sv-dot"></div></div>' +
+      '<input class="ps-lcp-hue" type="range" min="0" max="360" step="1" aria-label="Hue">' +
+      '<div class="ps-ltx-hexrow"><span class="ps-layout-field-label">Hex</span>' +
+      '<input class="ps-lcp-hex" type="text" maxlength="7" spellcheck="false" ' +
+      'autocomplete="off" aria-label="Hex color">' +
+      '<span class="ps-lcp-cur" aria-hidden="true"></span>' +
+      '<button type="button" class="ps-btn ps-lcp-done">Done</button></div>';
+    document.body.appendChild(pop);
+    var sv = pop.querySelector(".ps-lcp-sv");
+    function pick(ev) {
+      var r = sv.getBoundingClientRect();
+      LAY_CPOP.hsv.s = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
+      LAY_CPOP.hsv.v = Math.max(0, Math.min(1, 1 - (ev.clientY - r.top) / r.height));
+      layColorPopApply(true);
+    }
+    sv.addEventListener("pointerdown", function (ev) {
+      if (!LAY_CPOP) return;
+      ev.preventDefault();
+      pick(ev);
+      function mv(e2) { pick(e2); }
+      function up() {
+        document.removeEventListener("pointermove", mv);
+        document.removeEventListener("pointerup", up);
+        layColorPopApply(false);
+      }
+      document.addEventListener("pointermove", mv);
+      document.addEventListener("pointerup", up);
+    });
+    sv.addEventListener("keydown", function (ev) {
+      if (!LAY_CPOP) return;
+      var ds = ev.key === "ArrowLeft" ? -0.02 : ev.key === "ArrowRight" ? 0.02 : 0;
+      var dv = ev.key === "ArrowDown" ? -0.02 : ev.key === "ArrowUp" ? 0.02 : 0;
+      if (!ds && !dv) return;
+      ev.preventDefault();
+      LAY_CPOP.hsv.s = Math.max(0, Math.min(1, LAY_CPOP.hsv.s + ds));
+      LAY_CPOP.hsv.v = Math.max(0, Math.min(1, LAY_CPOP.hsv.v + dv));
+      layColorPopApply(false);
+    });
+    var hue = pop.querySelector(".ps-lcp-hue");
+    hue.addEventListener("input", function () {
+      if (!LAY_CPOP) return;
+      LAY_CPOP.hsv.h = Number(hue.value) || 0;
+      layColorPopApply(true);
+    });
+    hue.addEventListener("change", function () { layColorPopApply(false); });
+    var hx = pop.querySelector(".ps-lcp-hex");
+    hx.addEventListener("change", function () {
+      if (!LAY_CPOP) return;
+      var v = String(hx.value || "").trim();
+      if (/^[0-9a-fA-F]{6}$/.test(v)) v = "#" + v;
+      var hsv = ltxHexToHsv(v);
+      if (!hsv) { layColorPopPaint(); return; }
+      LAY_CPOP.hsv = hsv;
+      layColorPopApply(false);
+    });
+    pop.querySelector(".ps-lcp-done").addEventListener("click", function () {
+      layCloseColorPop();
+    });
+    pop.addEventListener("keydown", function (ev) {
+      if (ev.key === "Escape") {
+        ev.preventDefault(); ev.stopPropagation();
+        layCloseColorPop();
+      }
+    });
+    document.addEventListener("pointerdown", function (ev) {
+      if (!LAY_CPOP) return;
+      var t = ev.target;
+      if (pop.contains(t)) return;
+      if (LAY_CPOP.anchor && LAY_CPOP.anchor.isConnected && LAY_CPOP.anchor.contains(t)) return;
+      layCloseColorPop();
+    }, true);
+    return pop;
+  }
+  function layColorPopPaint() {
+    if (!LAY_CPOP) return;
+    var pop = layColorPopEl(), hsv = LAY_CPOP.hsv;
+    var sv = pop.querySelector(".ps-lcp-sv");
+    sv.style.background = "linear-gradient(to top, #000, rgba(0,0,0,0)), " +
+      "linear-gradient(to right, #fff, hsl(" + Math.round(hsv.h) + " 100% 50%))";
+    var dot = sv.querySelector(".ps-ltx-sv-dot");
+    dot.style.left = (hsv.s * 100) + "%";
+    dot.style.top = ((1 - hsv.v) * 100) + "%";
+    sv.setAttribute("aria-valuenow", String(Math.round(hsv.v * 100)));
+    var hue = pop.querySelector(".ps-lcp-hue");
+    if (document.activeElement !== hue) hue.value = String(Math.round(hsv.h));
+    var hex = ltxHsvToHex(hsv.h, hsv.s, hsv.v);
+    var hx = pop.querySelector(".ps-lcp-hex");
+    if (document.activeElement !== hx) hx.value = hex;
+    pop.querySelector(".ps-lcp-cur").style.background = hex;
+  }
+  function layColorPopApply(live) {
+    if (!LAY_CPOP) return;
+    var hex = ltxHsvToHex(LAY_CPOP.hsv.h, LAY_CPOP.hsv.s, LAY_CPOP.hsv.v);
+    layColorPopPaint();
+    LAY_CPOP.onChange(hex, live);
+  }
+  // onChange(hex, live) applies the color; the caller decides which
+  // item field it lands on and coalesces its own undo step.
+  function layOpenColorPop(anchor, hex, onChange) {
+    var pop = layColorPopEl();
+    LAY_CPOP = { anchor: anchor,
+                 hsv: ltxHexToHsv(layHexOr(hex, "#22364d")) || { h: 0, s: 0, v: 0.13 },
+                 onChange: onChange };
+    layColorPopPaint();
+    pop.style.display = "block";
+    var r = anchor.getBoundingClientRect();
+    var left = Math.max(8, Math.min(r.left, window.innerWidth - 250));
+    var top = r.bottom + 6;
+    if (top + 230 > window.innerHeight) top = Math.max(8, r.top - 236);
+    pop.style.left = left + "px";
+    pop.style.top = top + "px";
+    pop.querySelector(".ps-lcp-hex").focus();
+  }
+  function layCloseColorPop() {
+    var pop = el("ps-lcolorpop");
+    if (pop) pop.style.display = "none";
+    if (!LAY_CPOP) return;
+    var a = LAY_CPOP.anchor;
+    LAY_CPOP = null;
+    persist();
+    if (a && a.isConnected && a.focus) a.focus();
+  }
+  function layIsColorPopOpen() { return !!LAY_CPOP; }
+  // A custom-color chip beside a swatch row: shows the current color and
+  // opens the popover on it. targetsFn names the items, field the key.
+  function layWireCustomChip(id, targetsFn, field, label, dflt) {
+    var chip = el(id);
+    if (!chip) return;
+    chip.addEventListener("click", function () {
+      var targets = targetsFn();
+      if (!targets.length) return;
+      var ids = targets.map(function (t) { return t.id; }).join(",");
+      layOpenColorPop(chip, layHexOr(targets[0][field], dflt), function (hex, live) {
+        layPartApply(targetsFn(), label, "cpop:" + field + ":" + ids,
+          function (it) { it[field] = hex; }, live);
+      });
+    });
+  }
+  function layPaintCustomChip(id, hex, pressed) {
+    var chip = el(id);
+    if (!chip) return;
+    chip.style.background = hex;
+    chip.setAttribute("aria-pressed", pressed ? "true" : "false");
+  }
+  // Click-to-edit on the timeline's own parts: a tick click (no drag)
+  // lands in its rail row; a band click opens its color.
+  function layFocusTickRow(item, idx) {
+    laySetSelection([item.id]);
+    renderLayout();
+    var inp = el("ps-ltl-tick-label-" + idx);
+    if (inp) { inp.focus(); inp.select(); }
+  }
+  function layOpenBandColor(item, idx) {
+    laySetSelection([item.id]);
+    renderLayout();
+    var chip = el("ps-ltl-band-fill-" + idx);
+    if (!chip || !item.bands || !item.bands[idx]) return;
+    layOpenColorPop(chip, layHexOr(item.bands[idx].fill, "#e8f0fb"), function (hex, live) {
+      layPartApply([item], "band color", "cpop:band:" + item.id + ":" + idx,
+        function (t) { if (t.bands && t.bands[idx]) t.bands[idx].fill = hex; }, live);
+    });
   }
   var LAY_TEXT_CTX = null;
   function layTextCtx() {
@@ -25263,6 +25542,12 @@
                    // real movement, so an Alt+click that never travels stays
                    // an ordinary selection and leaves nothing behind.
                    altCopy: !!e.altKey && !resizing,
+                   // A press on a phase band that never travels opens that
+                   // band's color (click-to-edit, like the chart's parts).
+                   bandHit: (function () {
+                     var bd = e.target.closest && e.target.closest('[data-role="lay-band"]');
+                     return bd && item.kind === "timeline" ? Number(bd.getAttribute("data-idx")) : null;
+                   })(),
                    zoom: layZoom(), moved: false,
                    // Captured here rather than on first movement because the
                    // move handler mutates items in place; pushed at pointer-up
@@ -25904,6 +26189,10 @@
         LAY_COALESCE = null;
       }
       persist(); renderLayout();
+    } else if (d && d.tickDrag != null && d.timeline) {
+      layFocusTickRow(d.timeline, d.tickDrag);
+    } else if (d && d.bandHit != null && d.primary && d.primary.kind === "timeline") {
+      layOpenBandColor(d.primary, d.bandHit);
     } else if (d && d.collapseTo) {
       // The press kept the multi-selection so a drag could move it; a press
       // that never travelled is a CLICK, and a click on one item means that
