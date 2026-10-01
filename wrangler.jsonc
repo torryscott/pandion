@@ -3,7 +3,7 @@
 	"compatibility_date": "2026-07-25",
 	// The usage counters (worker/README.md). Static files are still served
 	// first, exactly as before; the Worker answers only the paths that are
-	// not files: POST /api/hit/<kind> and GET /api/counts.
+	// not files: POST /api/hit/<kind>, GET /api/counts and GET /api/daily.
 	"main": "worker/index.js",
 	"assets": {
 		"directory": "./website",
@@ -13,6 +13,13 @@
 	// The counter database (worker/README.md): created once with
 	// npx wrangler d1 create pandion-counts; the Worker reads it under
 	// this binding name.
+	// The hourly GitHub download check (snapshotDownloads in worker/index.js):
+	// GitHub keeps only a running total per file, so the Worker notes the
+	// totals each hour and records how much they grew. Minute 59, so each
+	// day's last check lands just before midnight UTC.
+	"triggers": {
+		"crons": ["59 * * * *"]
+	},
 	"d1_databases": [
 		{
 			"binding": "pandion_counts",

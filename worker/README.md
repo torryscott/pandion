@@ -9,7 +9,8 @@ counters on. Read this before touching `worker/` or `wrangler.jsonc`.
 | --- | --- | --- |
 | Browser app launches at pandionplots.com/app | this Worker | the hosted app sends one empty `POST /api/hit/launch` when it boots, plus `launch-day` once per browser per calendar day |
 | Portable HTML file downloads from the site | this Worker | the "Download HTML app" buttons send `POST /api/hit/portable` on click |
-| Desktop installers and every jamovi .jmo | GitHub | `download_count` per release asset, read by about.html straight from the public Releases API |
+| Desktop installers and every jamovi .jmo | GitHub | `download_count` per release asset, read by usage.html straight from the public Releases API |
+| Their daily history (Oct 2026) | this Worker, hourly | the scheduled job reads those same public totals every hour and stores how much each grew; see "Daily history" below |
 | jamovi library installs | nobody | jamovi serves those; the module is not listed there yet |
 
 The app pings only when `psUpdateHosted()` is true (hostname is
@@ -26,9 +27,49 @@ Cloudflare flags as a verified bot (`isCountable` in worker/index.js;
 scraper impersonating a browser still gets through, as everywhere.
 GitHub's download counts cannot be filtered; the table says so.
 
-The footer line on the home page and the "Usage" table on
-About fetch `GET /api/counts` after the page loads and stay hidden (or
-show dashes) when it fails, so the site never depends on the counter.
+The footer line on the home page and the table on usage.html fetch
+`GET /api/counts` after the page loads and stay hidden (or show dashes)
+when it fails, so the site never depends on the counter. Clicking a row
+of that table fetches `GET /api/daily` for its chart; a failure there
+says so in the chart and nothing else changes.
+
+## Daily history (Oct 2026)
+
+`GET /api/daily` answers the same counts day by day:
+
+    {"hitsSince": "2026-09-25",
+     "hits": {"launch": [["2026-09-25", 12], ...], "launch-day": [...], "portable": [...]},
+     "downloadsSince": "2026-10-01", "downloadsChecked": "2026-10-01T14:59:00.000Z",
+     "downloads": {"Pandion-Plots-macOS.dmg": [["2026-10-02", 3], ...], ...}}
+
+A day with no row had zero. The usage page zero-fills from `hitsSince`
+(every counter started together) and bins by day, week (Monday start)
+or month, all in UTC days.
+
+GitHub keeps only a running total per file, so the Worker's scheduled job
+(`wrangler.jsonc` "triggers", minute 59 of every hour; `snapshotDownloads`
+in index.js) reads the releases, compares each installer and .jmo total
+with the last one it saw (`download_totals`), and adds the growth to
+today's row in `downloads`. The first run only records the totals; the
+history starts that day (`meta.downloads_since`). A new release's files
+count from zero; a file that was deleted and uploaded again counts from
+its new total; a failed or rate-limited check changes nothing and the
+next hour catches up. Update feeds, .blockmap files and the macOS update
+.zip are skipped (apps fetch those, not people).
+
+No migration is needed: the job creates its three tables on its first
+run (they are in `schema.sql` too, for a fresh database). The requests
+are unauthenticated and conditional (`If-None-Match`), and an unchanged
+answer does not use up GitHub's rate limit. If Cloudflare's shared
+addresses ever hit that limit, a token raises it:
+`npx wrangler secret put GITHUB_TOKEN` with a fine-grained token that has
+read-only access to public repositories. The Worker sends it when present.
+
+To see that the job is running: `curl -s https://pandionplots.com/api/daily`
+shows `downloadsChecked` within the last hour (it moves only when a check
+succeeds), and the Worker's logs show one `download history:` line per
+run. `worker/verify-worker.mjs` covers the arithmetic and, when sql.js is
+installed beside playwright, the whole job on real SQLite.
 
 ## One-time setup (needs a Cloudflare login)
 

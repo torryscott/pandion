@@ -187,6 +187,95 @@
   .principles ul { margin: 0; padding: 0 0 0 18px; color: var(--muted); }
   .principles li { margin: 7px 0; font-size: 14px; }
 
+  /* ---- the history behind each row (Oct 2026) ---- */
+  .vh {
+    position: absolute !important; width: 1px; height: 1px; overflow: hidden;
+    clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+  }
+  .prose table.usage tr.uc-armed { cursor: pointer; }
+  .prose table.usage tr.uc-armed:hover td { background: var(--wash); }
+  .prose table.usage tr.uc-open td,
+  .prose table.usage tr.uc-open:hover td { background: #eef4fc; }
+  .usage-row-btn {
+    -webkit-appearance: none; appearance: none; display: inline-flex;
+    align-items: flex-start; gap: 8px; margin: 0; padding: 0; border: 0;
+    background: none; color: inherit; font: inherit; text-align: left;
+    cursor: pointer;
+  }
+  .usage-row-btn .uc-ico {
+    flex: 0 0 auto; width: 16px; height: 16px; margin-top: 3px; color: var(--cobalt);
+  }
+  .usage-row-btn:hover .uc-txt {
+    color: var(--navy); text-decoration: underline; text-underline-offset: 3px;
+  }
+  .usage-row-btn:focus-visible {
+    outline: 3px solid rgba(55, 92, 160, 0.3); outline-offset: 3px; border-radius: 4px;
+  }
+  tr.uc-open .usage-row-btn .uc-txt { color: var(--navy); font-weight: 650; }
+  .usage-chart {
+    margin: 4px 0 24px; padding: 18px 20px 14px;
+    border: 1px solid var(--line); border-radius: 12px; background: #fff;
+    box-shadow: 0 8px 26px rgba(25, 46, 73, 0.07);
+  }
+  .usage-chart[hidden] { display: none; }
+  .uc-head { display: flex; align-items: flex-start; gap: 12px; }
+  .prose .usage-chart h2 { margin: 0; font-size: 18px; line-height: 1.35; }
+  .uc-close, .uc-seg button {
+    -webkit-appearance: none; appearance: none; font: inherit;
+    font-size: 13px; font-weight: 650; color: var(--navy); cursor: pointer;
+  }
+  .uc-close {
+    margin-left: auto; flex: 0 0 auto; min-height: 30px; padding: 4px 12px;
+    background: #fff; border: 1px solid #c3d0df; border-radius: 6px;
+  }
+  .uc-close:hover { border-color: var(--cobalt); color: var(--cobalt); }
+  .prose p.uc-total { margin: 4px 0 14px; color: var(--muted); font-size: 14px; }
+  .uc-total b {
+    color: var(--navy); font-size: 24px; font-weight: 800;
+    letter-spacing: -0.01em; font-variant-numeric: tabular-nums;
+  }
+  .uc-controls {
+    display: flex; flex-wrap: wrap; justify-content: space-between;
+    gap: 10px 14px; margin: 0 0 12px;
+  }
+  .uc-seg {
+    display: inline-flex; border: 1px solid #c3d0df; border-radius: 8px;
+    overflow: hidden; background: #fff;
+  }
+  .uc-seg button {
+    min-height: 32px; padding: 5px 12px; border: 0;
+    border-right: 1px solid #c3d0df; background: #fff;
+  }
+  .uc-seg button:last-child { border-right: 0; }
+  .uc-seg button:hover:not(:disabled) { background: var(--wash); }
+  .uc-seg button[aria-pressed="true"],
+  .uc-seg button[aria-pressed="true"]:hover { background: var(--navy); color: #fff; }
+  .uc-seg button:disabled { color: #8a96a3; cursor: default; }
+  .uc-close:focus-visible, .uc-seg button:focus-visible {
+    outline: 3px solid rgba(55, 92, 160, 0.35); outline-offset: -3px;
+  }
+  .uc-plot { position: relative; min-height: 120px; border-radius: 8px; outline: none; }
+  .uc-plot:focus-visible { box-shadow: 0 0 0 3px rgba(55, 92, 160, 0.28); }
+  .uc-plot svg { display: block; width: 100%; height: auto; font-family: inherit; }
+  .prose .uc-plot p.uc-empty {
+    margin: 0; padding: 44px 0; text-align: center; color: var(--muted); font-size: 14px;
+  }
+  .uc-tip {
+    position: absolute; pointer-events: none; transform: translate(-50%, -100%);
+    padding: 6px 10px; background: #fff; border: 1px solid #c9d6e4;
+    border-radius: 8px; box-shadow: 0 6px 18px rgba(25, 46, 73, 0.14);
+    color: var(--ink); font-size: 13px; line-height: 1.4; white-space: nowrap;
+  }
+  .uc-tip.uc-tip-below { transform: translate(-50%, 0); }
+  .uc-tip b { display: block; color: var(--navy); font-size: 15px; }
+  .uc-tip[hidden] { display: none; }
+  .prose p.uc-note { margin: 10px 0 6px; color: #5f6f80; font-size: 13px; }
+  .uc-numbers summary {
+    cursor: pointer; color: var(--cobalt); font-weight: 600; font-size: 14px;
+  }
+  .uc-numbers-scroll { max-height: 280px; overflow: auto; margin-top: 8px; }
+  .uc-numbers-scroll:focus-visible { outline: 3px solid rgba(55, 92, 160, 0.28); }
+
   footer { border-top: 1px solid var(--line); padding: 36px 0 48px; margin-top: 48px; }
   .foot {
     display: flex; flex-wrap: wrap; gap: 18px; align-items: center;
@@ -258,7 +347,7 @@
         and the desktop app and the portable file send nothing at all.
         Download counts for the installers and the jamovi module come
         from GitHub, which serves those files. The table fills in as the
-        page loads.
+        page loads. Click a row to see it over time.
       </p>
       <!-- The four columns do not fit a phone; the table scrolls
            sideways inside its own box rather than the page. -->
@@ -281,6 +370,44 @@
       </table>
       </div>
       <p class="usage-note" data-role="usage-status" hidden>The counts could not be loaded right now.</p>
+      <!-- The history behind a row (Oct 2026): clicking a row opens this
+           panel, and assets/usage.js draws it from GET /api/daily. -->
+      <section class="usage-chart" id="usage-chart" data-role="usage-chart"
+               aria-labelledby="usage-chart-title" hidden>
+        <div class="uc-head">
+          <h2 id="usage-chart-title" data-role="uc-title"></h2>
+          <button type="button" class="uc-close" data-role="uc-close">Close</button>
+        </div>
+        <p class="uc-total" data-role="uc-total"></p>
+        <div class="uc-controls">
+          <div class="uc-seg" role="group" aria-label="Time range">
+            <button type="button" data-range="7" title="The last 7 days">1W<span class="vh"> (the last 7 days)</span></button>
+            <button type="button" data-range="30" title="The last 30 days">1M<span class="vh"> (the last 30 days)</span></button>
+            <button type="button" data-range="90" title="The last 90 days">3M<span class="vh"> (the last 90 days)</span></button>
+            <button type="button" data-range="365" title="The last year">1Y<span class="vh"> (the last year)</span></button>
+            <button type="button" data-range="all" title="Since counting began">All<span class="vh"> (since counting began)</span></button>
+          </div>
+          <div class="uc-seg" role="group" aria-label="Show by">
+            <button type="button" data-bin="day">Day</button>
+            <button type="button" data-bin="week">Week</button>
+            <button type="button" data-bin="month">Month</button>
+          </div>
+        </div>
+        <div class="uc-plot" data-role="uc-plot" role="group" tabindex="0"
+             aria-describedby="uc-keys"></div>
+        <p class="vh" id="uc-keys">Use the left and right arrow keys to read each point.</p>
+        <p class="vh" data-role="uc-live" aria-live="polite"></p>
+        <p class="uc-note" data-role="uc-note"></p>
+        <details class="uc-numbers">
+          <summary>Show the numbers</summary>
+          <div class="uc-numbers-scroll" role="region" aria-label="The numbers" tabindex="0">
+            <table class="usage">
+              <thead><tr><th scope="col" data-role="uc-period-head">Day</th><th scope="col">Count</th></tr></thead>
+              <tbody data-role="uc-rows"></tbody>
+            </table>
+          </div>
+        </details>
+      </section>
       <p class="usage-note">
         What the app does and does not send is on the
         <a href="about.html">About</a> page.
