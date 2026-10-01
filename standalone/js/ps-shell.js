@@ -25348,6 +25348,12 @@
     var items = layItems();
     for (var i = 0; i < items.length; i++) {
       if (excludeIds.indexOf(items[i].id) !== -1) continue;
+      // An arrow is never something to align TO. Its box is padding around
+      // a stroke, and an arrow attached to the item being dragged moves
+      // with it: as a candidate it sat one step behind the drag, so the
+      // box snapped back to its own arrow, jumped, and snapped back again,
+      // with a guide flashing at every step (Torry's recording, Sep 30).
+      if (items[i].kind === "arrow") continue;
       var r = layItemRect(items[i]);
       if (axis === "x") out.push(r.x, r.x + r.w / 2, r.right);
       else out.push(r.y, r.y + r.h / 2, r.bottom);

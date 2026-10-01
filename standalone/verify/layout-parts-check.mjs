@@ -365,6 +365,43 @@ ok(labels.some(l => /^Box, "Records screened/.test(l)) &&
    labels.some(l => /^Arrow from "Records screened[^"]*" to "Records excluded/.test(l)),
    'the accessible list names boxes by their text and arrows by their ends');
 
+console.log('case 14: dragging a box that has arrows moves steadily (no snap-back to its own arrows)');
+// Torry's recording, Sep 30 2026: a dragged box jumped back and forth with
+// guides flashing. The smart guides treated the box's OWN attached arrows
+// as alignment targets, and those sit one step behind the drag. Control:
+// on a tree where arrows are guide candidates this drag steps backward.
+{
+    const dragId = await page.evaluate(() => window.PS_SHELL.chart().items.find(
+        i => i.kind === 'box' && i.text.indexOf('Reports sought') === 0).id);
+    await page.evaluate(id => window.PS_SHELL.selectLayoutItems([id]), dragId);
+    await page.waitForTimeout(200);
+    const dc = await center(itemNode(dragId));
+    await page.mouse.move(dc.x, dc.y);
+    await page.mouse.down();
+    const xs = [];
+    for (let k = 1; k <= 60; k++) {
+        await page.mouse.move(dc.x + k * 1.5, dc.y + k * 0.5);
+        xs.push(await page.evaluate(id => window.PS_SHELL.chart().items.find(i => i.id === id).x, dragId));
+    }
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+    let backward = 0;
+    for (let k = 1; k < xs.length; k++) if (xs[k] < xs[k - 1] - 0.01) backward++;
+    ok(backward === 0 && xs[xs.length - 1] > xs[0] + 40,
+       'sixty small pointer steps move the box forward every time (' + backward +
+       ' backward steps, ' + Math.round(xs[0]) + ' to ' + Math.round(xs[xs.length - 1]) + ')');
+    const follow = await page.evaluate(id => {
+        const c = window.PS_SHELL.chart(), b = c.items.find(i => i.id === id);
+        return c.items.filter(i => i.kind === 'arrow' && ((i.from && i.from.id === id) || (i.to && i.to.id === id)))
+            .every(a => {
+                const ax = a.x + (a.from && a.from.id === id ? a.ax : a.bx);
+                const ay = a.y + (a.from && a.from.id === id ? a.ay : a.by);
+                return ax >= b.x - 0.6 && ax <= b.x + b.w + 0.6 && ay >= b.y - 0.6 && ay <= b.y + b.h + 0.6;
+            });
+    }, dragId);
+    ok(follow, 'and every arrow attached to it still ends on the box where it came to rest');
+}
+
 console.log('case 13: the Insert menu commands and the PDF export');
 const before13 = (await items()).length;
 await page.evaluate(() => window.PS_SHELL.runCommand('insert-box'));
