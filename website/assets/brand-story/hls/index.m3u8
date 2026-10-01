@@ -31,6 +31,8 @@ seg10.m4s
 seg11.m4s
 #EXTINF:4.00000,
 seg12.m4s
-#EXTINF:2.50000,
+#EXTINF:4.00000,
 seg13.m4s
+#EXTINF:0.50000,
+seg14.m4s
 #EXT-X-ENDLIST
