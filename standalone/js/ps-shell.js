@@ -16196,13 +16196,13 @@
   }
   function gridCommitEdit(next) {
     var ge = GRID_EDIT;
-    if (!ge) { if (next) gridOpenEditor(next.col, next.row); return; }
+    if (!ge) { if (next) gridOpenEditor(next.col, next.row, { mode: "enter" }); return; }
     GRID_EDIT = null;
     var t = PROJECT.table;
     var newRaw = String(ge.input.value);
     if (newRaw === String(t.raw[ge.col][ge.row])) {
       gridPaintCell(ge.td, ge.col, ge.row);
-      if (next) gridOpenEditor(next.col, next.row);
+      if (next) gridOpenEditor(next.col, next.row, { mode: "enter" });
       else {
         gridSetSelection(ge.col, ge.row, ge.col, ge.row);      // item 11
         gridFocusSelf();
@@ -16230,7 +16230,7 @@
     persist();
     syncDataRow();
     render();
-    if (next) gridOpenEditor(next.col, next.row);
+    if (next) gridOpenEditor(next.col, next.row, { mode: "enter" });
     else {
       gridSetSelection(ge.col, ge.row, ge.col, ge.row);        // item 11
       gridFocusSelf();
@@ -16308,7 +16308,23 @@
       width: Math.min(cap, Math.max(base, Math.ceil(needed)))
     };
   }
-  function gridOpenEditor(col, row) {
+  // The editor has the two modes a spreadsheet has (Oct 2026, Torry: "It
+  // should mimic Excel"). ENTER mode is an edit begun by typing over a
+  // selected cell, or one the grid opened for you (Enter or Tab moving on,
+  // a new row): the arrow keys save and move to the next cell. EDIT mode is
+  // the deliberate one (double-click, F2, Enter on a selected cell, or a
+  // click in the open editor): the arrow keys move within the text.
+  var GRID_MOVE_FOCUS = null;   // gridMoveFocus, assigned where it is built
+  var GRID_ARROW_STEP = { ArrowLeft: [-1, 0], ArrowRight: [1, 0],
+                          ArrowUp: [0, -1], ArrowDown: [0, 1] };
+  function gridEditorSetMode(ge, mode) {
+    if (!ge || !ge.input) return;
+    ge.mode = mode === "enter" ? "enter" : "edit";
+    ge.input.setAttribute("data-edit-mode", ge.mode);
+    ge.input.setAttribute("aria-describedby", ge.mode === "enter"
+      ? "ps-grid-editor-instructions-enter" : "ps-grid-editor-instructions");
+  }
+  function gridOpenEditor(col, row, opts) {
     if (GRID_EDIT) gridCommitEdit(null);
     var t = PROJECT.table;
     if (!t || !t.raw[col] || row < 0 || row >= nRows(t)) return;
@@ -16361,14 +16377,43 @@
     if (editorSize.width > editorSize.base + 1)
       input.classList.add("ps-grid-cellinput-wide");
     td.appendChild(input);
-    var ge = { col: col, row: row, td: td, input: input, canceling: false };
+    var ge = { col: col, row: row, td: td, input: input, canceling: false,
+               mode: "edit" };
     GRID_EDIT = ge;
+    if (opts && opts.mode === "enter") gridEditorSetMode(ge, "enter");
+    // A click in the open editor is the "click that cell again" that asks
+    // for the caret: from then on the arrows belong to the text.
+    input.addEventListener("pointerdown", function () {
+      if (ge.mode === "enter") gridEditorSetMode(ge, "edit");
+    });
     input.addEventListener("keydown", function (e) {
       // The editor owns the keys it handles. Without this, Escape bubbled to
       // the grid handler, which read GRID_EDIT as already null (cancel clears
       // it synchronously) and cleared the cursor the cancel had just seated.
       if (e.key === "Enter" || e.key === "Tab" || e.key === "Escape")
         e.stopPropagation();
+      if (e.key === "F2") {
+        // The spreadsheet key for "let me move within this text".
+        e.preventDefault();
+        e.stopPropagation();
+        gridEditorSetMode(ge, ge.mode === "enter" ? "edit" : "enter");
+        gridAnnounceEdit(ge.mode === "edit"
+          ? "Arrow keys move within the text."
+          : "Arrow keys save and move to the next cell.");
+        return;
+      }
+      if (ge.mode === "enter" && GRID_ARROW_STEP[e.key] && !e.altKey &&
+          !e.ctrlKey && !e.metaKey && !e.isComposing) {
+        // Save, land on this cell as the cursor, then move the way the
+        // arrow points; with Shift the selection extends, as it does from
+        // a cell that is merely selected.
+        var step = GRID_ARROW_STEP[e.key];
+        e.preventDefault();
+        e.stopPropagation();
+        gridCommitEdit(null);
+        if (GRID_MOVE_FOCUS) GRID_MOVE_FOCUS(step[0], step[1], e.shiftKey, false);
+        return;
+      }
       if (e.key === "Enter") {
         e.preventDefault();
         gridCommitEdit(row + 1 < nRows(t)
@@ -16416,7 +16461,7 @@
     var grid = el("ps-datagrid");
     grid.scrollTop = grid.scrollHeight;
     var newRow = nRows(t) - 1;
-    gridOpenEditor(gridVisibleColumns(t)[0], newRow);
+    gridOpenEditor(gridVisibleColumns(t)[0], newRow, { mode: "enter" });
   }
   function gridRemapValueExclusions(t, row, mode) {
     if (!t.excluded) return;
@@ -16454,7 +16499,7 @@
     grid.scrollTop = Math.max(0, at * GRID_ROW_HEIGHT -
       Math.max(0, grid.clientHeight - GRID_ROW_HEIGHT) / 2);
     syncDataGrid();
-    gridOpenEditor(gridVisibleColumns(t)[0], at);
+    gridOpenEditor(gridVisibleColumns(t)[0], at, { mode: "enter" });
   }
   function gridDuplicateRow(row) {
     var t = PROJECT.table;
@@ -17809,6 +17854,7 @@
         catch (err) { /* older engines: the windowing above is enough */ }
       return true;
     }
+    GRID_MOVE_FOCUS = gridMoveFocus;
     var GRID_ARROWS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0],
                         ArrowUp: [0, -1], ArrowDown: [0, 1] };
     grid.addEventListener("focus", function (e) {
@@ -17865,7 +17911,7 @@
       if (!mod && !e.altKey && e.key && e.key.length === 1) {
         var col = GRID_SELECTION.focusCol, row = Number(GRID_SELECTION.focusRow);
         e.preventDefault();
-        gridOpenEditor(col, row);
+        gridOpenEditor(col, row, { mode: "enter" });
         if (GRID_EDIT && GRID_EDIT.input) {
           GRID_EDIT.input.value = e.key;
           try {
@@ -30507,6 +30553,8 @@
           ["Up or down a screen", "Page Up / Page Down"],
           ["Start editing the selected cell", "Enter, F2, or just type"],
           ["Commit an edit and move down", "Enter"],
+          ["Commit a typed-over cell and move that way", "Arrow keys"],
+          ["Move within the text instead", "F2, or click in the cell"],
           ["Abandon an edit", "Escape"],
           ["Clear the selected cells", "Delete"],
           ["Select the whole table", "Cmd/Ctrl + A"],

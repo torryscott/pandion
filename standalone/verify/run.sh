@@ -27,7 +27,7 @@ data-undo-check dates-check eyedropper-check doclifecycle-check tab-accessibilit
 drag-selection-check outside-canvas-check hmc-list-check hidden-vars-check sigma-freshness-check \
 empty-states-check engine-stamp-check flyout-align-check filter-honesty-check examples-check exclusion-bridge-check \
 find-scope-check findpop-check finish-five-check fitpanes-check formula-unit-check formula-vocab-check formula-recipes-check \
-grid-keys-check help-check hierarchy-check hidden-selection-check \
+grid-keys-check grid-enter-mode-check help-check hierarchy-check hidden-selection-check \
 identifier-advice-check inspector-freshness-check menu-selection-check \
 panel-controls-size-check \
 view-zoom-drag-check inline-editor-zoom-check fit-wobble-check picker-hold-check outlier-picker-check scroll-anchor-check toolbar-redock-check stats-width-check reserve-rearm-check help-dock-route-check aspect-lock-check editor-focus-check category-spacing-check notebook-copy-check axis-role-labels-check open-by-link-check find-open-data-check share-link-check paste-preview-check welcome-recents-check setup-link-check keep-stats-check mode-stat-check tours-check distinguish-live-check launch-ping-check \

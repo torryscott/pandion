@@ -879,6 +879,15 @@ punch lists are maintainer-local and not published with this repo.
   `dist/pandion-plots.html`, runs anywhere) + the read-only data grid
   ("View data": sticky header, type badges, per-analysis role tags,
   missing-cell dashes, 1000-row cap note, open state persisted).
+- The cell editor has a spreadsheet's two modes (Oct 1 2026). ENTER mode is
+  an edit begun by typing over a selected cell, or an editor the grid opened
+  for you (Enter or Tab moving on, a new row): an arrow key saves and moves
+  to the next cell, Shift with an arrow saves and extends the selection.
+  EDIT mode is the deliberate one (double-click, Enter or F2 on a selected
+  cell, or a click in the open editor): the arrows move within the text.
+  F2 in an open editor switches between the two. The mode rides the
+  editor's `data-edit-mode` attribute and picks which hidden instructions
+  paragraph describes it. Probe: `verify/grid-enter-mode-check.mjs`.
 - M2b DONE (Jul 22 2026): grid cell EDITING - click a cell, Enter commits
   and moves down, Tab moves right, Esc cancels, blur commits. Commits
   write the raw string; the column TYPE stays declared, so a non-parsing
