@@ -16729,7 +16729,9 @@
                         // Not getScreenCTM, which omits the host zoom in Safari.
                         var r = svg.getBoundingClientRect(), vs = _gb2ViewScale(svg);
                         if (!r) return null;
-                        return { x: (clientX - r.left) / vs, y: (clientY - r.top) / vs };
+                        // Less _topGrow: with the canvas grown upward the
+                        // chart sits that far down inside the svg.
+                        return { x: (clientX - r.left) / vs, y: (clientY - r.top) / vs - _topGrow };
                     }
                     function onMove(ev) {
                         var p = svgPoint(ev.clientX, ev.clientY);
@@ -18035,7 +18037,7 @@
                         var pxX = (ev.clientX - svgRect.left) / vScale - chartLeft;
                         frac = pxX / Math.max(1, innerW);
                     } else {
-                        var pxY = (ev.clientY - svgRect.top) / vScale - chartTop;
+                        var pxY = (ev.clientY - svgRect.top) / vScale - _topGrow - chartTop;
                         frac = pxY / Math.max(1, innerH);
                     }
                     frac = Math.max(0, Math.min(1, frac));
@@ -38110,8 +38112,11 @@
                         }
                         var scX = L.rect.width > 0 ? (L.w / L.rect.width) : 1;
                         var scY = L.rect.height > 0 ? (L.h / L.rect.height) : 1;
+                        // Less _topGrow: the point grid is in chart
+                        // coordinates, which sit that far down inside
+                        // the svg once the canvas has grown upward.
                         return [(e.clientX - L.rect.left) * scX,
-                                (e.clientY - L.rect.top) * scY];
+                                (e.clientY - L.rect.top) * scY - _topGrow];
                     }
                     function clearCur() {
                         if (L.cur < 0) return;
@@ -42955,7 +42960,7 @@
                         // Not getScreenCTM, which omits the host zoom in Safari.
                         var r = svg.getBoundingClientRect(), vs = _gb2ViewScale(svg);
                         if (!r) return null;
-                        var pp = { x: (ev.clientX - r.left) / vs, y: (ev.clientY - r.top) / vs };
+                        var pp = { x: (ev.clientX - r.left) / vs, y: (ev.clientY - r.top) / vs - _topGrow };
                         return {
                             deg: Math.atan2(pp.y - _cy, pp.x - _cx) * 180 / Math.PI,
                             dist: Math.sqrt((pp.x - _cx) * (pp.x - _cx)
@@ -43294,7 +43299,7 @@
                             _hit5.addEventListener("mousemove", function (ev) {
                                 var best = null, bd = Infinity;
                                 // rect + view scale, not getScreenCTM (Safari omits the host zoom from it)
-                                var pt = (function () { try { var _r = svg.getBoundingClientRect(), _vs = _gb2ViewScale(svg); return { x: (ev.clientX - _r.left) / _vs, y: (ev.clientY - _r.top) / _vs }; } catch (_e) { return null; } })();
+                                var pt = (function () { try { var _r = svg.getBoundingClientRect(), _vs = _gb2ViewScale(svg); return { x: (ev.clientX - _r.left) / _vs, y: (ev.clientY - _r.top) / _vs - _topGrow }; } catch (_e) { return null; } })();
                                 if (pt) { for (var z = 0; z < _pts.length; z++) { var dd = Math.abs((horizontal ? _pts[z][1] : _pts[z][0]) - (horizontal ? pt.y : pt.x)); if (dd < bd) { bd = dd; best = z; } } }
                                 if (best != null) {
                                     _xyTooltipShow("<div style='font-weight:600;margin-bottom:2px;'>" + _fqEsc(displayCategory(visibleXCats[_pts[best][3]])) + "</div><div>cumulative " + (Math.round(_pts[best][2] * 10) / 10) + "%</div>", ev.clientX, ev.clientY);
@@ -43908,7 +43913,7 @@
                                         // rect + view scale, not getScreenCTM (Safari omits the host zoom)
                                         var _r6 = svg.getBoundingClientRect(), _vs6 = _gb2ViewScale(svg);
                                         if (_r6) {
-                                            var _sp6 = { x: (ev.clientX - _r6.left) / _vs6, y: (ev.clientY - _r6.top) / _vs6 };
+                                            var _sp6 = { x: (ev.clientX - _r6.left) / _vs6, y: (ev.clientY - _r6.top) / _vs6 - _topGrow };
                                             for (var _vq = 0; _vq < _vEls.length; _vq++) {
                                                 var _vb6 = _vEls[_vq].getBBox();
                                                 if (_sp6.x >= _vb6.x - 2 && _sp6.x <= _vb6.x + _vb6.width + 2
@@ -45127,7 +45132,7 @@
                                             // rect + view scale, not getScreenCTM (Safari omits the host zoom)
                                             var r7 = svg.getBoundingClientRect(), vs7 = _gb2ViewScale(svg);
                                             if (r7) {
-                                                var sp7 = { x: (ev.clientX - r7.left) / vs7, y: (ev.clientY - r7.top) / vs7 };
+                                                var sp7 = { x: (ev.clientX - r7.left) / vs7, y: (ev.clientY - r7.top) / vs7 - _topGrow };
                                                 var vb7 = lbl.getBBox();
                                                 if (sp7.x >= vb7.x - 2 && sp7.x <= vb7.x + vb7.width + 2
                                                     && sp7.y >= vb7.y - 2 && sp7.y <= vb7.y + vb7.height + 2) {
@@ -49644,6 +49649,9 @@
                        ? "Drag to adjust; all rows move together"
                        : "Drag to adjust; all gaps move together");
             }
+            // Drawn from chart coordinates on the svg itself, so it has to
+            // carry the shift the chart takes once the canvas grows upward.
+            if (_topGrow > 0) g.setAttribute("transform", "translate(0," + _topGrow + ")");
             svg.appendChild(g);
             try {
                 svg.style.cursor = yAxis ? "row-resize" : "col-resize";
@@ -49681,7 +49689,7 @@
             var vw = parseFloat(svg.getAttribute("width")) || r.width;
             var vh = parseFloat(svg.getAttribute("height")) || r.height;
             return { x: (e.clientX - r.left) * (vw / (r.width || 1)),
-                     y: (e.clientY - r.top) * (vh / (r.height || 1)) };
+                     y: (e.clientY - r.top) * (vh / (r.height || 1)) - _topGrow };
         }
         function _gsCrossOf(p) {
             var L = window.__gb2_gapSeamLayout;
@@ -55607,6 +55615,9 @@
                     cx: circles[ci3].cx, cy: circles[ci3].cy, r: circles[ci3].r
                 });
             }
+            // The rings are measured in chart coordinates and drawn on the
+            // svg itself, so they carry the upward-growth shift too.
+            if (_topGrow > 0) g.setAttribute("transform", "translate(0," + _topGrow + ")");
             svg.appendChild(g);
         }
         // Row chrome (Jul 2026 polish per Torry: tints, not boxes).
@@ -107579,7 +107590,10 @@
                 if (st.grid) items.push({ k: "fadeout", el: ghost(st.grid) });
                 if (st.axis) items.push({ k: "fadeout", el: ghost(st.axis) });
                 for (var g3 = 0; g3 < ghosts.length; g3++) {
-                    try { svg.appendChild(ghosts[g3]); } catch (_eAp) {}
+                    // In chart coordinates, so on a canvas that has grown
+                    // upward they go inside the shifted group; otherwise on
+                    // the svg, as before.
+                    try { (_topGrow > 0 ? chartShiftGroup : svg).appendChild(ghosts[g3]); } catch (_eAp) {}
                 }
                 // ---- run ----
                 var indWas = null;
