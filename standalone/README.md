@@ -1169,12 +1169,15 @@ Things worth knowing before changing it:
   labels, so a column reading 100000 sits about 6 to 11 px off one reading
   0.10. `layAlignPlots` moves the panels so the plots coincide, grouping the
   selection by the column or row the panels already sit in.
-- **Arrow keys mean two different things.** Inside `#ps-lviewport` plain
-  arrows NAVIGATE between items and Alt+Arrow nudges, which is the engine's
-  rule and the assistive-technology model. A second handler further down the
-  same keydown function nudges on PLAIN arrows whenever focus is anywhere
-  else in the workspace. A probe that focuses the viewport must press
-  Alt+Arrow. Unifying the two is an open decision.
+- **Arrow keys move what is selected (Oct 2026).** An arrow nudges the
+  selected items by one pixel (Shift for ten) wherever focus is in the
+  workspace: the canvas, the rail, or the page itself. Alt with an arrow
+  steps to another item, Alt+Shift extends the selection, and with nothing
+  selected a plain arrow in the canvas picks an item. `layArrowScopeOk`
+  keeps the rule out of menus, tab strips, dialogs and the data grid. The
+  charts follow the same rule for titles, labels and annotations
+  (`nudgeKeyHandler` in the engine); a part that cannot move, such as a
+  bar, still steps on a plain arrow. Probe: `verify/arrow-nudge-check.mjs`.
 - **The canvas is `aria-hidden` on purpose.** A parallel hidden list of plain
   `role="option"` divs is the assistive-technology model, because a captured
   chart SVG would otherwise become a pile of nested interactive descendants

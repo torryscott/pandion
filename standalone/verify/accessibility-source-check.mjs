@@ -168,7 +168,7 @@ check(
     'the command palette exposes a combobox/listbox active option and an explicit exit',
 );
 check(
-    /id="ps-layout-instructions"[\s\S]*?Up and Down Arrow[\s\S]*?Alt with an arrow moves[\s\S]*?Control plus Alt[\s\S]*?F2 edits selected text[\s\S]*?F1/.test(html) &&
+    /id="ps-layout-instructions"[\s\S]*?An arrow key moves the selected items[\s\S]*?Alt with an arrow moves through layout items[\s\S]*?Control plus Alt[\s\S]*?F2 edits selected text[\s\S]*?F1/.test(html) &&
     /id="ps-layout-live"[\s\S]*?role="status" aria-live="polite" aria-atomic="true"/.test(html) &&
     /id="ps-lviewport" tabindex="0" role="listbox"[\s\S]*?aria-multiselectable="true"[\s\S]*?aria-describedby="ps-layout-instructions"/.test(html),
     'the Layout composite publishes its selection/edit instructions and live status channel',

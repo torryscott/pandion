@@ -106,7 +106,8 @@ await page.waitForTimeout(80);
 const firstActive = await page.evaluate(() =>
     document.getElementById('ps-lviewport').getAttribute(
         'aria-activedescendant'));
-await page.keyboard.press('ArrowDown');
+// Alt+Arrow steps the selection since Oct 2026 (plain arrows nudge).
+await page.keyboard.press('Alt+ArrowDown');
 await page.waitForTimeout(80);
 state = await page.evaluate(() => {
     const root = document.getElementById('ps-lviewport');
@@ -120,8 +121,8 @@ state = await page.evaluate(() => {
 });
 ok(state.active !== firstActive && state.focused === 'ps-lviewport' &&
    state.selected === 1 && /selected/.test(state.live),
-   'Arrow Down moves the active single selection and keeps composite focus');
-await page.keyboard.press('Shift+ArrowDown');
+   'Alt+Arrow Down moves the active single selection and keeps composite focus');
+await page.keyboard.press('Alt+Shift+ArrowDown');
 await page.waitForTimeout(80);
 state = await page.evaluate(() => ({
     selected: document.querySelectorAll(
@@ -155,16 +156,16 @@ const geometry = () => page.evaluate(() => {
              ratio: item.w / item.h };
 });
 const beforeMove = await geometry();
-await page.keyboard.press('Alt+ArrowRight');
+await page.keyboard.press('ArrowRight');
 await page.waitForTimeout(80);
 let after = await geometry();
 ok(after.x === beforeMove.x + 1,
-   `Alt+Arrow nudges by one pixel (${beforeMove.x} -> ${after.x})`);
-await page.keyboard.press('Alt+Shift+ArrowDown');
+   `an arrow key nudges by one pixel (${beforeMove.x} -> ${after.x})`);
+await page.keyboard.press('Shift+ArrowDown');
 await page.waitForTimeout(80);
 const afterTen = await geometry();
 ok(afterTen.y === beforeMove.y + 10,
-   `Alt+Shift+Arrow nudges by ten pixels (${beforeMove.y} -> ${afterTen.y})`);
+   `Shift+Arrow nudges by ten pixels (${beforeMove.y} -> ${afterTen.y})`);
 await page.keyboard.press('Control+Alt+ArrowRight');
 await page.waitForTimeout(80);
 after = await geometry();
@@ -210,7 +211,7 @@ const textIndex = await page.evaluate(() =>
     window.PS_SHELL.chart().items.findIndex(item => item.kind === 'text'));
 await page.keyboard.press('Home');
 for (let index = 0; index < textIndex; index += 1)
-    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('Alt+ArrowDown');
 await page.waitForTimeout(50);
 let activeKind = await page.evaluate(() => {
     const root = document.getElementById('ps-lviewport');

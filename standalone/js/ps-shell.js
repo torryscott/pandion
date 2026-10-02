@@ -11336,7 +11336,29 @@
       echoTimer = window.setTimeout(renderWhenEditorIdle, 120);
       return;
     }
+    // Keyboard focus rides the echo. The engine never refocuses the chart
+    // after a rebuild (in jamovi that scrolls the parent frame), so here,
+    // where there is no parent frame, the shell puts focus back when the
+    // rebuild dropped it to the page body. Without this an arrow-key nudge
+    // worked and, one echo later, Alt+Arrow or a bar step did nothing.
+    var hadChartFocus = chartSvgFocused();
     render();
+    if (hadChartFocus) restoreChartSvgFocus();
+  }
+  function chartSvgFocused() {
+    try {
+      var a = document.activeElement, h = hostEl();
+      return !!(a && h && a.getAttribute && h.contains(a) &&
+                a.getAttribute("data-role") === "gb2-chart-svg");
+    } catch (e) { return false; }
+  }
+  function restoreChartSvgFocus() {
+    try {
+      var a = document.activeElement;
+      if (a && a !== document.body && a !== document.documentElement) return;
+      var svg = hostEl().querySelector('svg[data-role="gb2-chart-svg"]');
+      if (svg && svg.focus) svg.focus({ preventScroll: true });
+    } catch (e) {}
   }
   // Echo delay: this debounce stands in for jamovi's R round trip.
   //
@@ -21613,6 +21635,16 @@
       (extend ? ", added to selection; " + laySelectedIds().length +
         " items selected" : ", selected"));
   }
+  // Where a plain arrow may nudge when focus is NOT on the canvas: on
+  // nothing in particular, or on a plain control of this workspace (its
+  // toolbar, its rail). Anything that runs its own arrow keys keeps them.
+  function layArrowScopeOk(t) {
+    if (!t || t === document.body || t === document.documentElement) return true;
+    if (!t.closest) return false;
+    if (t.closest('[role="menu"],[role="menubar"],[role="tablist"],' +
+                  '[role="dialog"],[role="grid"],.ps-dialog-overlay')) return false;
+    return !!t.closest("#ps-layout, #ps-inspector-layout");
+  }
   function layToggleActiveSelection() {
     var active = layActiveId();
     if (!active) return;
@@ -25658,25 +25690,27 @@
           ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]
             .indexOf(e.key) !== -1) {
         e.preventDefault();
-        if (e.altKey) {
-          var keyStep = e.shiftKey ? 10 : 1;
-          if (e.ctrlKey || e.metaKey) {
-            if (!layResizeSelectedFree(
-                e.key === "ArrowLeft" ? -keyStep :
-                e.key === "ArrowRight" ? keyStep : 0,
-                e.key === "ArrowUp" ? -keyStep :
-                e.key === "ArrowDown" ? keyStep : 0))
-              layAnnounce("Free resize requires one chart or image.");
-          } else {
-            layMoveSelected(e.key === "ArrowLeft" ? -keyStep :
-                            e.key === "ArrowRight" ? keyStep : 0,
-                            e.key === "ArrowUp" ? -keyStep :
-                            e.key === "ArrowDown" ? keyStep : 0);
-          }
-        } else {
-          var direction = (e.key === "ArrowLeft" || e.key === "ArrowUp") ? -1 : 1;
-          layNavigateItem(direction, null, e.shiftKey);
-        }
+        // ARROWS MOVE WHAT IS SELECTED; ALT+ARROW MOVES THE SELECTION
+        // (Torry, Oct 1 2026: "I want the arrows to nudge", in Layouts and
+        // in the charts alike). This reverses the Aug 2026 rule, where
+        // plain arrows stepped between items and Alt nudged. It is still
+        // ONE rule: the same key does the same thing wherever focus is in
+        // this workspace (the tail of this handler covers the rail and the
+        // toolbar). With nothing selected an arrow selects, as it always
+        // did, because there is nothing to move.
+        var keyStep = e.shiftKey ? 10 : 1;
+        var kdx = e.key === "ArrowLeft" ? -keyStep :
+                  e.key === "ArrowRight" ? keyStep : 0;
+        var kdy = e.key === "ArrowUp" ? -keyStep :
+                  e.key === "ArrowDown" ? keyStep : 0;
+        var direction = (e.key === "ArrowLeft" || e.key === "ArrowUp") ? -1 : 1;
+        if (e.altKey && (e.ctrlKey || e.metaKey)) {
+          if (!layResizeSelectedFree(kdx, kdy))
+            layAnnounce("Free resize requires one chart or image.");
+        } else if (e.altKey) layNavigateItem(direction, null, e.shiftKey);
+        else if (e.ctrlKey || e.metaKey) { /* not a layout chord */ }
+        else if (ids.length) layMoveSelected(kdx, kdy);
+        else layNavigateItem(direction, null, false);
         return;
       }
       if ((e.key === "Delete" || e.key === "Backspace") && ids.length) {
@@ -25720,17 +25754,23 @@
           ids.length) {
         e.preventDefault(); layDuplicateSelected(); return;
       }
-      // ONE rule for the arrow keys. Inside the canvas plain arrows navigate
-      // between items and Alt+Arrow nudges, which is the engine's rule and
-      // what the hidden option list exists to serve. A second handler here
-      // used to nudge on PLAIN arrows whenever focus was anywhere else in the
-      // workspace, which in practice is any time the user has just clicked a
-      // rail or toolbar button, so the same key did two opposite things
-      // decided by something invisible. Alt+Arrow nudges everywhere now.
-      if (!ids.length || !e.altKey ||
+      // ONE rule for the arrow keys, outside the canvas as inside it (Oct
+      // 2026): arrows nudge the selection, Alt+Arrow steps it. The Aug 2026
+      // complaint was a key that did two opposite things depending on where
+      // focus happened to be; that still must never happen, so the rail and
+      // the toolbar answer exactly as the canvas does. The scope check keeps
+      // the arrows of anything that owns them (a menu, a tab strip, a dialog)
+      // and of everything outside this workspace.
+      if (!ids.length || e.ctrlKey || e.metaKey ||
           ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]
             .indexOf(e.key) === -1) return;
+      if (!layArrowScopeOk(t)) return;
       e.preventDefault();
+      if (e.altKey) {
+        layNavigateItem((e.key === "ArrowLeft" || e.key === "ArrowUp") ? -1 : 1,
+          null, e.shiftKey);
+        return;
+      }
       var step = e.shiftKey ? 10 : 1;
       layMoveSelected(e.key === "ArrowLeft" ? -step :
                       e.key === "ArrowRight" ? step : 0,
@@ -32441,15 +32481,15 @@
           ["Duplicate it", "Cmd/Ctrl + D"]
         ] },
       { title: "Layouts",
-        note: "Tab to the figure layout items first. Arrow navigation follows " +
-              "the item stack; movement and resizing use Alt so selection " +
-              "never changes accidentally while an item is being positioned.",
+        note: "Tab to the figure layout items first. The arrow keys move " +
+              "what is selected; Alt with an arrow moves the selection " +
+              "to another item instead, following the item stack.",
         rows: [
-          ["Move through items", "Arrow keys / Home / End"],
-          ["Extend or reduce the selection", "Shift + arrows / Space"],
+          ["Nudge the selection", "Arrow keys"],
+          ["Nudge by 10", "Shift + arrows"],
+          ["Move through items", "Alt + arrows / Home / End"],
+          ["Extend or reduce the selection", "Alt + Shift + arrows / Space"],
           ["Group / ungroup", "Cmd/Ctrl + G / Shift + G"],
-          ["Nudge the selection", "Alt + arrows"],
-          ["Nudge by 10", "Alt + Shift + arrows"],
           ["Free resize a chart or image", "Ctrl/Cmd + Alt + arrows"],
           ["Proportional resize", "Alt + Plus / Minus"],
           ["Open exact position and size", "Enter"],

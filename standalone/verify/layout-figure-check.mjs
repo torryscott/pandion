@@ -227,18 +227,17 @@ await page.waitForTimeout(800);
 ok((await axisSpread()).leftCol < 1, 'redo puts the alignment back');
 
 console.log('case 5: a nudge burst does not fold across a selection change');
-// Alt+Arrow, because inside the canvas plain arrows navigate between items
-// and Alt+Arrow nudges - the engine's rule, which the canvas follows.
+// Plain arrows nudge since Oct 2026 (Alt+Arrow steps the selection).
 await page.evaluate(() => document.getElementById('ps-lviewport').focus());
 await page.evaluate(i => window.PS_SHELL.selectLayoutItems([i]), ids[0]);
 await page.waitForTimeout(120);
-await page.keyboard.press('Alt+ArrowRight');
+await page.keyboard.press('ArrowRight');
 await page.waitForTimeout(130);
 const xAfterFirst = await page.evaluate(i =>
     window.PS_SHELL.chart().items.find(t => t.id === i).x, ids[0]);
 await page.evaluate(i => window.PS_SHELL.selectLayoutItems([i]), ids[1]);
 await page.waitForTimeout(80);          // well inside the 1.2 s coalesce window
-await page.keyboard.press('Alt+ArrowRight');
+await page.keyboard.press('ArrowRight');
 await page.waitForTimeout(250);
 await page.evaluate(() => document.getElementById('ps-lviewport').focus());
 await page.keyboard.press('Meta+z');
@@ -1142,10 +1141,10 @@ ok(Math.abs(again.blockW - back.blockW) < 3,
    'the figure a little each time (' + back.blockW + ' then ' + again.blockW + ')');
 
 console.log('case 28: one rule for the arrow keys');
-// Approved decision. Inside the canvas plain arrows navigate and Alt+Arrow
-// nudges, the engine's rule and what the hidden option list serves. A second
-// handler nudged on PLAIN arrows whenever focus was anywhere else in the
-// workspace, so the same key did two opposite things.
+// The Aug 2026 complaint: plain arrows navigated inside the canvas while a
+// second handler nudged on plain arrows anywhere else in the workspace, so
+// the same key did two opposite things. The rule was unified then, and its
+// roles were swapped in Oct 2026 (see below).
 const px = () => page.evaluate(() => {
     const it = window.PS_SHELL.chart().items.find(i => i.kind === 'chart');
     return Math.round(it.x);
@@ -1173,17 +1172,22 @@ const railSel = await page.evaluate(() =>
     window.PS_SHELL.layoutSelection().join(','));
 await page.keyboard.press('ArrowRight');
 await page.waitForTimeout(400);
-ok(await px() === rail0,
-   'a plain arrow with focus on a rail button moves nothing (' + rail0 + ')');
+// CONTRACT CHANGED, deliberately, Oct 2026 (Torry: "I want the arrows to
+// nudge"): an arrow nudges the selection wherever focus is in the workspace,
+// and Alt+Arrow steps the selection. Still ONE rule; the Aug 2026 complaint
+// was a key that did opposite things in the rail and in the canvas.
+ok(await px() === rail0 + 1,
+   'an arrow with focus on a rail button nudges the selection (' + rail0 +
+   ' -> ' + (await px()) + ')');
 ok(await page.evaluate(() => window.PS_SHELL.layoutSelection().join(',')) ===
-   railSel, 'and does not navigate either, because focus is not in the canvas');
+   railSel, 'and the selection itself does not change');
 await page.evaluate(() => document.getElementById('ps-lviewport').focus());
 await page.waitForTimeout(250);
 const canv0 = await px();
-await page.keyboard.press('Alt+ArrowRight');
+await page.keyboard.press('ArrowRight');
 await page.waitForTimeout(400);
 ok(await px() === canv0 + 1,
-   'Alt+Arrow nudges inside the canvas (' + canv0 + ' -> ' + (await px()) + ')');
+   'and nudges it inside the canvas too (' + canv0 + ' -> ' + (await px()) + ')');
 await page.evaluate(() => {
     const b = document.querySelector('[data-ctx-align="left"]') ||
               document.getElementById('ps-laddtext');
@@ -1192,7 +1196,8 @@ await page.evaluate(() => {
 const rail1 = await px();
 await page.keyboard.press('Alt+ArrowRight');
 await page.waitForTimeout(400);
-ok(await px() === rail1 + 1, 'and outside it, so there is one rule');
+ok(await px() === rail1,
+   'Alt+Arrow moves nothing from the rail either: it steps the selection, so there is one rule');
 // The canvas instructions and the shortcuts reference already said Alt with
 // an arrow; only the code disagreed. Pinned so the three cannot drift apart
 // again.
@@ -1202,9 +1207,10 @@ const said = await page.evaluate(() => ({
              .getAttribute ? document.querySelector('[data-tip*="corner resize"]')
              .getAttribute('data-tip') : ''
 }));
-ok(/Alt with an arrow moves selected items/.test(said.instructions),
-   'the canvas instructions say Alt with an arrow');
-ok(/Alt\+arrow nudges/.test(said.tip) && !/^.*[^+]Arrows nudge/.test(said.tip),
+ok(/An arrow key moves the selected items/.test(said.instructions) &&
+   /Alt with an arrow moves through layout items/.test(said.instructions),
+   'the canvas instructions say arrows move and Alt with an arrow steps');
+ok(/nudge with the arrow keys/.test(said.tip) && /Alt\+arrow steps/.test(said.tip),
    'and the Selection tooltip agrees ("' + said.tip.slice(-46) + '")');
 
 console.log('case 29: a panel letter belongs to its panel');
@@ -1368,8 +1374,8 @@ await page.evaluate(() => document.getElementById('ps-lviewport').focus());
 await page.waitForTimeout(400);
 await page.keyboard.press('Space');
 await page.waitForTimeout(400);
-await page.keyboard.press('Alt+ArrowDown');
-await page.keyboard.press('Alt+ArrowDown');
+await page.keyboard.press('ArrowDown');
+await page.keyboard.press('ArrowDown');
 await page.waitForTimeout(500);
 const pairAfter = await pairOf();
 ok(pairAfter.dy === pair.dy && pairAfter.dx === pair.dx,
