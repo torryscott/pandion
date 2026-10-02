@@ -18646,6 +18646,28 @@
                 len: len
             };
         }
+        // Where the curve's reshape handle sits: ON the curve, at its
+        // middle (t = 0.5 of the quadratic, which is halfway between the
+        // chord midpoint and the control point). It used to sit at the
+        // control point itself, twice as far out as the curve's own peak,
+        // so a tall curve put the handle outside the chart where the page
+        // chrome above the svg took the click and it could not be grabbed.
+        function _curveHandlePoint(ann) {
+            var c = _curveControlPoint(+ann.x, +ann.y, +ann.x2, +ann.y2,
+                ann.curvature, ann.curvatureLong);
+            return { x: ((+ann.x + +ann.x2) / 2 + c.x) / 2,
+                     y: ((+ann.y + +ann.y2) / 2 + c.y) / 2 };
+        }
+        // (No clamp to the canvas is needed: the canvas grows to hold a
+        // shape that pokes above or beside it, and a handle that sits ON
+        // the curve is inside whatever holds the curve. The old control-
+        // point handle was chrome, so that growth never counted it.)
+        function _curveHandleDiamondD(x, y, half) {
+            return "M " + x + "," + (y - half) +
+                " L " + (x + half) + "," + y +
+                " L " + x + "," + (y + half) +
+                " L " + (x - half) + "," + y + " Z";
+        }
         function _curvePathD(x1, y1, x2, y2, curvature, curvatureLong) {
             var c = _curveControlPoint(x1, y1, x2, y2, curvature, curvatureLong);
             if (c.len < 1e-6) {
@@ -19990,7 +20012,10 @@
             // 1 off the standalone shell.
             var vScale = _gb2ViewScale(svg);
             var sx = (downEvt.clientX - svgRect.left) / vScale;
-            var sy = (downEvt.clientY - svgRect.top) / vScale;
+            // Less _topGrow: once a shape has made the canvas grow upward
+            // the whole chart sits that far down inside the svg, and a
+            // point measured from the svg's top edge is that far off.
+            var sy = (downEvt.clientY - svgRect.top) / vScale - _topGrow;
             var snap = _gatherSnapTargets();
             var snapped = _snapPoint(sx, sy, snap);
             // Create the annotation in the data model now so live
@@ -20049,7 +20074,7 @@
             var rect = svg.getBoundingClientRect();
             var _vs = _drawDragState.vScale || 1;
             var px = (e.clientX - rect.left) / _vs;
-            var py = (e.clientY - rect.top) / _vs;
+            var py = (e.clientY - rect.top) / _vs - _topGrow;
             var snapped = _snapPoint(px, py, _drawDragState.snap);
             // Shift constrains to a square (rect/ellipse) or an
             // axis-aligned line (line/arrow). The constraint is
@@ -24771,6 +24796,12 @@
             }
             var gap = 22;
             var r = halfHeight + gap;
+            // A curve that bows toward this handle's side would put its
+            // own reshape handle (which rides the curve) under or beside
+            // it, so the rotate handle takes the other side of the chord.
+            // A negative r is that other side; the drag below reads the
+            // sign so the handle still follows the pointer.
+            if (ann.kind === "curve" && (+ann.curvature) < 0) r = -r;
             var rot = +ann.rotation || 0;
             var rad = rot * Math.PI / 180;
             // Local-up direction is (0, -1) "above center"; rotated by
@@ -24821,10 +24852,13 @@
                     if (ev.pointerId !== ptrId) return;
                     var rect = svg.getBoundingClientRect();
                     var px = (ev.clientX - rect.left) / vScale;
-                    var py = (ev.clientY - rect.top) / vScale;
+                    var py = (ev.clientY - rect.top) / vScale - _topGrow;
                     var dx = px - cx;
                     var dy = py - cy;
                     if (dx === 0 && dy === 0) return;
+                    // A handle on the far side (r < 0) points the other
+                    // way from the centre.
+                    if (r < 0) { dx = -dx; dy = -dy; }
                     // Convert cursor direction into the rotation that
                     // puts the handle (which sits "up" relative to
                     // canonical orientation) under the cursor. atan2
@@ -24913,15 +24947,15 @@
                 pts.push({ which: "start", x: +ann.x, y: +ann.y });
                 pts.push({ which: "end",   x: +ann.x2, y: +ann.y2 });
                 if (ann.kind === "curve") {
-                    // Third handle: the bezier control point. Drag
-                    // the diamond to reshape the curve in 2D - both
+                    // Third handle: the diamond on the middle of the
+                    // curve. Drag it to reshape the curve in 2D - both
                     // perpendicular bow (curvature) and along-chord
-                    // skew (curvatureLong) update from the new
-                    // position.
-                    var cp = _curveControlPoint(+ann.x, +ann.y, +ann.x2, +ann.y2,
-                        ann.curvature, ann.curvatureLong);
+                    // skew (curvatureLong) update so the curve passes
+                    // through the pointer.
+                    var cp = _curveHandlePoint(ann);
                     pts.push({ which: "control", x: cp.x, y: cp.y });
                 }
+
             } else {
                 // 8 handles total for bbox-based shapes:
                 //   - 4 corners (resize both X and Y at once)
@@ -25046,7 +25080,10 @@
                 if (!down || e.pointerId !== ptrId) return;
                 var rect = svg.getBoundingClientRect();
                 var px = (e.clientX - rect.left) / vScale;
-                var py = (e.clientY - rect.top) / vScale;
+                // Less _topGrow: with the canvas grown upward the chart
+                // sits that far down inside the svg, and every dragged
+                // handle used to land that far below the pointer.
+                var py = (e.clientY - rect.top) / vScale - _topGrow;
                 // For rotated bbox shapes (rect / ellipse / triangle /
                 // polygon / diamond / star), ann.x / ann.y / ann.x2 /
                 // ann.y2 live in the shape's UNROTATED coord system,
@@ -25085,7 +25122,11 @@
                         var perpX = -alongY, perpY = alongX;
                         var midX = ((+ann.x) + (+ann.x2)) / 2;
                         var midY = ((+ann.y) + (+ann.y2)) / 2;
-                        var dxM = px - midX, dyM = py - midY;
+                        // The pointer is where the MIDDLE OF THE CURVE
+                        // should be, and that middle is halfway from the
+                        // chord midpoint to the control point - so the
+                        // control point is twice as far out.
+                        var dxM = 2 * (px - midX), dyM = 2 * (py - midY);
                         var perpComp = dxM * perpX + dyM * perpY;
                         var alongComp = dxM * alongX + dyM * alongY;
                         // Clamp to the slider range [-1,1] so the docked
@@ -25100,11 +25141,11 @@
                         var el = svg.querySelector('[data-ann-id="' + ann.id + '"]');
                         if (el) _shapeUpdateDom(el, ann, ann.kind);
                     } catch (_e) {}
-                    handle.setAttribute("d",
-                        "M " + px + "," + (py - 5) +
-                        " L " + (px + 5) + "," + py +
-                        " L " + px + "," + (py + 5) +
-                        " L " + (px - 5) + "," + py + " Z");
+                    // The handle rides the curve it just shaped, not the
+                    // raw pointer: past the curvature limits the two part
+                    // company, and a handle off its curve reads as broken.
+                    var _hp = _curveHandlePoint(ann);
+                    handle.setAttribute("d", _curveHandleDiamondD(_hp.x, _hp.y, 5));
                     // Mirror new values into the inspector sliders
                     // if present.
                     try {
