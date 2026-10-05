@@ -3,6 +3,14 @@
 # R-parity battery, run on the dev page AND the built single-file dist.
 #
 # Usage: bash standalone/verify/run.sh
+#
+# The feature probes run several at a time (standalone/verify/run-pool.mjs):
+# the ones that hold a time ceiling or count frames run alone afterwards
+# (serial-probes.txt), and a probe that fails beside others gets one run by
+# itself before it counts, named in the summary either way. PS_JOBS sets how
+# many run at once (default: the machine's performance cores, 2 to 6).
+# PS_JOBS=1 is the plain one-after-another loop, stopping at the first
+# failure, exactly as this script always ran.
 # PDF structure probes require pypdf==6.10.0 in python3 (or PS_PYTHON).
 #
 # The parity step needs R + jmvcore (it drives the real jamovi marshalling
@@ -85,12 +93,27 @@ node standalone/verify/accessibility-source-check.mjs
 echo "== numerical-ledger-check (ledger <-> code table <-> version state)"
 node standalone/verify/numerical-ledger-check.mjs
 
+# The feature probes, on whichever page PS_PAGE names. $1 is the label that
+# prefixes each probe's header ("" for the source page, "dist: " for the
+# built file).
+PS_POOL_NOTES="$(mktemp -t ps-pool-notes.XXXXXX)"
+export PS_POOL_NOTES
+run_feature_probes() {
+    if [ "${PS_JOBS:-auto}" = "1" ]; then
+        for p in $FEATURE_PROBES; do
+            echo "== $1$p"
+            node "standalone/verify/$p.mjs"
+        done
+    else
+        node standalone/verify/run-pool.mjs --label "$1" $FEATURE_PROBES
+    fi
+}
+echo "== run-pool-selftest (the probe runner reports what it should)"
+node standalone/verify/run-pool-selftest.mjs
+
 a11y_evidence_root="${PS_A11Y_OUT:-planning/accessibility-standalone}"
 export PS_A11Y_OUT="$a11y_evidence_root/source"
-for p in $FEATURE_PROBES; do
-    echo "== $p"
-    node "standalone/verify/$p.mjs"
-done
+run_feature_probes ""
 
 echo "== R reference canary (pinned known answers)"
 # Runs BEFORE the fuzzer on purpose: if the installed R's answers have
@@ -191,10 +214,7 @@ fi
 PS_PAGE=standalone/dist/pandion-plots.html node standalone/verify/m0-check.mjs
 PS_PAGE=standalone/dist/pandion-plots.html node standalone/verify/m1-shell-check.mjs
 export PS_A11Y_OUT="$a11y_evidence_root/portable"
-for p in $FEATURE_PROBES; do
-    echo "== dist: $p"
-    PS_PAGE=standalone/dist/pandion-plots.html node "standalone/verify/$p.mjs"
-done
+PS_PAGE=standalone/dist/pandion-plots.html run_feature_probes "dist: "
 
 echo "== m1-parity (R expectations)"
 if Rscript standalone/verify/m1-parity.R; then
@@ -271,4 +291,9 @@ else
     echo "WARN: rm-panels-render.R failed or R/jmvcore unavailable - skipped"
 fi
 
+if [ -s "$PS_POOL_NOTES" ]; then
+    echo "== probes that needed a run by themselves"
+    cat "$PS_POOL_NOTES"
+fi
+rm -f "$PS_POOL_NOTES"
 echo "STANDALONE VERIFY: ALL GREEN"
