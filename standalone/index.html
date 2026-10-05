@@ -410,6 +410,10 @@
     padding: 2px 4px 2px 7px; cursor: grab; max-width: 100%;
   }
   .ps-slot-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* A chip being dragged over a list role shows where it would land: a
+     bar on the side of the chip it would sit beside. */
+  .ps-slot-chip[data-insert="before"] { box-shadow: -3px 0 0 0 var(--ps-accent); }
+  .ps-slot-chip[data-insert="after"] { box-shadow: 3px 0 0 0 var(--ps-accent); }
   .ps-slot-x {
     -webkit-appearance: none; appearance: none; border: none;
     background: none; color: var(--ps-muted); font-weight: 700; font-size: 12px;
