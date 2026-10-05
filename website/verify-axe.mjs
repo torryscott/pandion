@@ -91,6 +91,22 @@ await page.goto(fileUrl('website/index.html'));
 await page.click('.nav-toggle');
 await audit('Home with mobile navigation open');
 
+console.log('case 2b: the homepage tour windows, open');
+for (const width of [1440, 320]) {
+    await page.setViewportSize({ width, height: 800 });
+    await page.goto(fileUrl('website/index.html'));
+    for (const key of ['data', 'notebook', 'layouts']) {
+        const link = page.locator(`a[data-tour="${key}"]`);
+        await link.scrollIntoViewIfNeeded();
+        await link.click();
+        await page.waitForFunction(k => !!document.querySelector(`#tour-${k} canvas`), key, { timeout: 8000 });
+        await audit(`Home ${key} tour window open at ${width}px`);
+        await page.locator(`#tour-${key} details summary`).click();
+        await audit(`Home ${key} tour window transcript open at ${width}px`);
+        await page.keyboard.press('Escape');
+    }
+}
+
 console.log('case 3: guide default, drawer, search, and image dialog states');
 await page.setViewportSize({ width: 1100, height: 800 });
 await page.goto(fileUrl('website/docs/index.html'));

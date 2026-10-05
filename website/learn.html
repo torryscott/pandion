@@ -193,6 +193,41 @@
     cursor: pointer; color: var(--cobalt); font-weight: 600; font-size: 14px;
   }
   .rules-transcript p { margin: 8px 0 0; font-size: 14.5px; }
+
+  /* ---- the four workspaces ---- */
+  .ws-path { list-style: none; margin: 0 0 8px; padding: 0; }
+  .ws-path li { margin: 0 0 14px; }
+  .ws-card {
+    display: grid; grid-template-columns: 200px 1fr; gap: 20px; align-items: center;
+    padding: 14px 20px 14px 14px;
+    border: 1px solid var(--line); border-radius: 12px;
+    text-decoration: none; color: var(--ink); background: #fff;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .ws-card:hover {
+    border-color: var(--cobalt);
+    box-shadow: 0 6px 18px rgba(25, 46, 73, 0.08);
+  }
+  .ws-card img {
+    display: block; width: 100%; height: auto; aspect-ratio: 16 / 10;
+    object-fit: cover; object-position: left top;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--wash);
+  }
+  .ws-head { display: flex; align-items: center; gap: 10px; margin: 0 0 4px; }
+  .ws-n {
+    width: 26px; height: 26px; border-radius: 50%; flex: none;
+    background: var(--navy); color: #fff; font-weight: 700; font-size: 14px;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .ws-head strong { color: var(--navy); font-size: 17px; }
+  .ws-line { display: block; color: var(--muted); font-size: 14.5px; }
+  .ws-tag {
+    display: inline-block; margin-top: 8px; font-size: 13.5px; font-weight: 700;
+    color: var(--cobalt);
+  }
+  @media (max-width: 560px) {
+    .ws-card { grid-template-columns: 1fr; gap: 12px; padding: 12px; }
+  }
 </style>
 <link rel="stylesheet" href="assets/site-nav.css">
 <script src="assets/site-nav.js" defer></script>
@@ -279,7 +314,8 @@
     </p>
     <nav class="learn-jumps" aria-label="Sections on this page">
       <a href="#start-here">Start here</a>
-      <a href="#workshop">Workshops</a>
+      <a href="#workspaces">Workspaces</a>
+      <a href="#workshop">Run a workshop</a>
       <a href="#deeper">Go deeper</a>
       <a href="#guide">User guide</a>
     </nav>
@@ -295,6 +331,53 @@
           with a switch for the app or the jamovi module.</span>
         </a></li>
       </ul>
+    </section>
+
+    <section class="tut" id="workspaces">
+      <h2>The four workspaces</h2>
+      <p class="sec-lede">The app, one room at a time. Take them in the
+        order you work and they walk you from a spreadsheet to a finished figure.</p>
+      <ol class="ws-path">
+        <li><a class="ws-card" href="learn-data.html">
+          <img width="640" height="400" src="assets/workspaces/data.jpg" alt=""
+               data-image-kind="decorative">
+          <span class="ws-text">
+            <span class="ws-head"><span class="ws-n" aria-hidden="true">1</span><strong>Data</strong></span>
+            <span class="ws-line">Inspect every column. Compute new variables. Filter without deleting.</span>
+            <span class="ws-tag">Two-minute tour, then the guide</span>
+          </span>
+        </a></li>
+        <li><a class="ws-card" href="learn-charts.html">
+          <img width="640" height="400" src="assets/workspaces/charts.jpg" alt=""
+               data-image-kind="decorative">
+          <span class="ws-text">
+            <span class="ws-head"><span class="ws-n" aria-hidden="true">2</span><strong>Charts</strong></span>
+            <span class="ws-line">Set it up. Shape it. Share it.</span>
+            <span class="ws-tag">Two-minute tour</span>
+          </span>
+        </a></li>
+        <li><a class="ws-card" href="learn-notebook.html">
+          <img width="640" height="400" src="assets/workspaces/notebook.jpg" alt=""
+               data-image-kind="decorative">
+          <span class="ws-text">
+            <span class="ws-head"><span class="ws-n" aria-hidden="true">3</span><strong>Notebook</strong></span>
+            <span class="ws-line">Keep what you find. Keep both versions. Export the notebook.</span>
+            <span class="ws-tag">Two-minute tour</span>
+          </span>
+        </a></li>
+        <li><a class="ws-card" href="learn-layouts.html">
+          <img width="640" height="400" src="assets/workspaces/layouts.jpg" alt=""
+               data-image-kind="decorative">
+          <span class="ws-text">
+            <span class="ws-head"><span class="ws-n" aria-hidden="true">4</span><strong>Layouts</strong></span>
+            <span class="ws-line">Start from a template. Drag to arrange. Panels stay live.</span>
+            <span class="ws-tag">Two-minute tour</span>
+          </span>
+        </a></li>
+      </ol>
+      <p class="sec-aside">Using the jamovi module? Your data stays in
+        jamovi&rsquo;s own spreadsheet, and the chart editor is the same one, so the three rules
+        above and every guide under Go deeper apply.</p>
     </section>
 
     <section class="tut" id="workshop">
@@ -324,8 +407,7 @@
       <p class="sec-lede">
         In roughly the order the questions come up. Each of these
         carries a platform toggle at the top: pick the browser app or the
-        jamovi module once and it sticks (the data guide is browser and
-        desktop only).
+        jamovi module once and it sticks.
       </p>
       <ul class="guides">
         <li><a href="learn-statistics.html">
@@ -347,11 +429,6 @@
           <strong>Make it publication-ready</strong>
           <span>Labels and notes, the graph checker, the vision check,
           and clean exports.</span>
-        </a></li>
-        <li><a href="learn-data.html">
-          <strong>Get your data ready</strong>
-          <span>Paste from a spreadsheet, fix types, exclude outliers,
-          and filter rows (browser and desktop app).</span>
         </a></li>
       </ul>
     </section>

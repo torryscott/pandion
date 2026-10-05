@@ -1,8 +1,9 @@
 // Rendered keyboard and reflow regression for the public site and user guide.
 //
 // This complements verify-accessibility.mjs's source/contrast contract with
-// browser behavior: skip routes, mobile disclosures, offscreen focus, guide
-// search, image-dialog focus lifecycle, and 320px page reflow.
+// browser behavior: skip routes, mobile disclosures, the homepage tour
+// windows, offscreen focus, guide search, image-dialog focus lifecycle, and
+// 320px page reflow.
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
@@ -98,6 +99,43 @@ menu = await page.evaluate(() => ({
 }));
 ok(menu.expanded === 'false' && menu.focused,
    'Escape closes the marketing menu and returns focus to its trigger');
+
+console.log('case 2b: the homepage opens each workspace tour in a modal window');
+await page.setViewportSize({ width: 1440, height: 900 });
+await page.goto(fileUrl('website/index.html'));
+await page.waitForTimeout(80);
+for (const key of ['data', 'notebook', 'layouts']) {
+    const link = page.locator(`a[data-tour="${key}"]`);
+    await link.scrollIntoViewIfNeeded();
+    await link.focus();
+    const target = await link.evaluate(a => ({ href: a.getAttribute('href'), popup: a.getAttribute('aria-haspopup') }));
+    ok(target.href === `learn-${key}.html` && target.popup === 'dialog',
+       `the ${key} card links to its Learn page and announces a dialog`);
+    await page.keyboard.press('Enter');
+    let tour = { mounted: false };
+    try {
+        await page.waitForFunction(k => !!document.querySelector(`#tour-${k} canvas`), key, { timeout: 8000 });
+        tour = await page.evaluate(k => {
+            const d = document.getElementById('tour-' + k);
+            return { mounted: true, open: d.open, modal: d.matches(':modal'), focusInside: d.contains(document.activeElement),
+                     labelled: (document.getElementById(d.getAttribute('aria-labelledby')) || {}).textContent,
+                     scrollLocked: getComputedStyle(document.documentElement).overflow === 'hidden',
+                     path: location.pathname };
+        }, key);
+    } catch { /* reported below */ }
+    ok(tour.mounted && tour.open && tour.modal && tour.focusInside && tour.labelled &&
+       tour.scrollLocked && /index\.html$/.test(tour.path),
+       `Enter opens the labelled ${key} tour window over the homepage, with focus inside`);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(50);
+    const closed = await page.evaluate(k => ({
+        open: document.getElementById('tour-' + k).open,
+        opener: document.activeElement === document.querySelector(`a[data-tour="${k}"]`),
+        scroll: getComputedStyle(document.documentElement).overflow,
+    }), key);
+    ok(!closed.open && closed.opener && closed.scroll !== 'hidden',
+       `Escape closes the ${key} tour window and restores its opener`);
+}
 
 console.log('case 3: the guide drawer has no offscreen focus stops');
 await page.setViewportSize({ width: 720, height: 800 });
