@@ -3,17 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Get your data ready - Pandion Plots</title>
-<meta name="description" content="The Pandion Plots Data workspace: paste from a spreadsheet, fix measure types, exclude outliers honestly, and filter rows.">
+<title>The Layouts workspace - Pandion Plots</title>
+<meta name="description" content="The Pandion Plots Layouts workspace, in a narrated two-minute tour: start a figure from a template, drag its panels into place, and keep them live.">
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
 <link rel="apple-touch-icon" href="assets/icon-180.png">
 <meta name="theme-color" content="#192E49">
-<link rel="canonical" href="https://pandionplots.com/learn-data.html">
+<link rel="canonical" href="https://pandionplots.com/learn-layouts.html">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Pandion Plots">
-<meta property="og:title" content="Get your data ready - Pandion Plots">
-<meta property="og:description" content="The Pandion Plots Data workspace: paste from a spreadsheet, fix measure types, exclude outliers honestly, and filter rows.">
-<meta property="og:url" content="https://pandionplots.com/learn-data.html">
+<meta property="og:title" content="The Layouts workspace - Pandion Plots">
+<meta property="og:description" content="The Pandion Plots Layouts workspace, in a narrated two-minute tour: start a figure from a template, drag its panels into place, and keep them live.">
+<meta property="og:url" content="https://pandionplots.com/learn-layouts.html">
 <meta property="og:image" content="https://pandionplots.com/assets/share-card-2026-09.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -163,7 +163,7 @@
   .ws-step[aria-current="page"] { background: var(--navy); border-color: var(--navy); color: #fff; }
   .ws-step[aria-current="page"] .ws-n { background: #fff; color: var(--navy); border-color: #fff; }
 
-  /* ---- the Data tour at the top (same frame as the Learn page's) ---- */
+  /* ---- the tour at the top (same frame as the Learn page's) ---- */
   .tour-film { margin: 0 0 8px; }
   .tour-film-frame {
     border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
@@ -171,7 +171,8 @@
   }
   .tour-film-frame img { display: block; width: 100%; height: auto; }
   .tour-film-bar { height: 59px; border-top: 1px solid var(--line); }
-  .tour-film-frame.pdw-host-live {
+  .tour-film-frame.pdw-host-live, .tour-film-frame.pnb-host-live,
+  .tour-film-frame.plw-host-live {
     border: 0; border-radius: 0; box-shadow: none; overflow: visible;
     background: none;
   }
@@ -208,7 +209,7 @@
 </style>
 <link rel="stylesheet" href="assets/site-nav.css">
 <script src="assets/site-nav.js" defer></script>
-<script src="assets/data-workspace/pandion-data-workspace.min.js" defer></script>
+<script src="assets/layouts-workspace/pandion-layouts.min.js" defer></script>
 </head>
 <body>
 <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -242,163 +243,63 @@
     <div class="intro">
       <nav class="ws-steps" aria-label="The four workspaces">
         <span class="ws-steps-label">The four workspaces</span>
-        <a class="ws-step" href="learn-data.html" aria-current="page"><span class="ws-n" aria-hidden="true">1</span>Data</a>
+        <a class="ws-step" href="learn-data.html"><span class="ws-n" aria-hidden="true">1</span>Data</a>
         <a class="ws-step" href="learn-charts.html"><span class="ws-n" aria-hidden="true">2</span>Charts</a>
         <a class="ws-step" href="learn-notebook.html"><span class="ws-n" aria-hidden="true">3</span>Notebook</a>
-        <a class="ws-step" href="learn-layouts.html"><span class="ws-n" aria-hidden="true">4</span>Layouts</a>
+        <a class="ws-step" href="learn-layouts.html" aria-current="page"><span class="ws-n" aria-hidden="true">4</span>Layouts</a>
       </nav>
-      <p class="kicker">Learn &middot; Data</p>
-      <h1>Get your data ready.</h1>
+      <p class="kicker">Learn &middot; Layouts</p>
+      <h1>The Layouts workspace.</h1>
       <p class="lede">
-        The browser and desktop app include a full Data workspace:
-        paste, inspect, fix, exclude, and filter without leaving the
-        chart. This guide is specific to the standalone app; in jamovi
-        you prepare data with jamovi&rsquo;s own spreadsheet, as the
-        <a href="start.html">jamovi guide</a> shows.
+        Many charts, one figure: a layout puts your charts together on one page, at
+        the size you&rsquo;ll publish it. Explore it in under two minutes: try each
+        step yourself, or just watch.
       </p>
     </div>
 
     <figure class="tour-film">
-      <div class="tour-film-frame" data-pandion-data-workspace
-           data-describedby="data-transcript-text"
-           data-label="Interactive tour: the Data workspace">
-        <img width="1280" height="720" src="assets/data-workspace/poster.jpg"
+      <div class="tour-film-frame" data-pandion-layouts
+           data-describedby="layouts-transcript-text"
+           data-label="Interactive tour: the Layouts workspace">
+        <img width="1280" height="720" src="assets/layouts-workspace/poster.jpg"
              data-image-kind="illustrative"
-             alt="The Data workspace's three points beside the osprey mark: inspect every
-                  column, compute new variables, filter without deleting.">
+             alt="The Layouts workspace&rsquo;s three points beside the osprey mark: start from a template, drag to arrange, panels stay live.">
         <div class="tour-film-bar" aria-hidden="true"></div>
       </div>
       <figcaption>
-        Inspect a column, compute a new variable, and filter rows without deleting
-        any. The tour is narrated and stops so you can try each step yourself;
-        Just watch plays it straight through.
+        Start a figure from a template, drag its panels into place, and watch a
+        panel follow its chart. The tour is narrated and stops so you can try each
+        step yourself; Just watch plays it straight through.
       </figcaption>
       <details class="tour-transcript">
         <summary>What the tour shows</summary>
-        <div id="data-transcript-text">
-          <p>The tour stops at nine steps for you to do, and plays the rest on its
-          own. With the sound on it is narrated throughout, with captions, and each
-          stop's card is read aloud. Show me does any step for you, and Just watch
-          plays the whole tour straight through.</p>
-          <p>This chart is drawn from a sheet of data, and the Data workspace is
-          where it lives. To bring your data in, open a file or paste cells
-          straight from a spreadsheet. Each column is a variable; each row is one
-          case.</p>
-          <p>Inspect: click a column's heading and its properties open on the
-          right: its measure type, and a summary of its values. The icon beside
-          the name lists all four measure types, and a variable's type decides
-          where it can go in a chart. Scores are numbers you can average, so that
-          column stays Continuous.</p>
-          <p>Compute: right-click a heading and choose Add computed column. The
-          Functions list has ready-made recipes; pick z-score, choose the column it
-          needs, and the formula is written for you. The preview shows the first
-          few results. Save the variable, and the new column updates itself
-          whenever your data changes.</p>
-          <p>Filter: click Filter and choose a column and a level (here, only the
-          rows where site is East), then apply the filter. The other rows are
-          dimmed, but nothing is deleted: they are simply left out of every chart
-          and statistic, and the chart notes the filter underneath.</p>
-          <p>Inspect every column. Compute new variables. Filter without deleting.</p>
+        <div id="layouts-transcript-text">
+          <p>The tour stops at ten steps for you to do, and plays the rest on its own. With the
+          sound on it is narrated throughout, with captions, and each stop&rsquo;s card is
+          read aloud. Show me does any step for you, and Just watch plays the whole tour
+          straight through.</p>
+          <p>Many charts, one figure. Click Layouts in the sidebar. A layout puts your charts
+          together on one page, at the size you&rsquo;ll publish it.</p>
+          <p>Start from a template: click Create layout. The gallery has eight templates to start
+          from. Pick Four-panel grid; each panel gets a chart, lettered A to D. Then click
+          Create layout. The figure is built on a page at its real size, ten and a half by
+          seven inches. Use the toolbar to add more charts, text, images, or panel labels.</p>
+          <p>Drag to arrange: drag a panel, and its letter comes along. Smart guides line it up
+          with the other panels. Drag it back, and it snaps into place. You can turn guides
+          and snapping on or off.</p>
+          <p>Panels stay live: right-click panel D, and choose Show live chart in Charts. Click
+          Bar to change the chart type, and pick Box. Then click Layouts to go back: panel D
+          has followed, and shows the box plot too. When your figure is ready, click Export
+          layout. Pick PDF, and you get one sharp page, ten and a half by seven inches.</p>
+          <p>Start from a template, drag to arrange, and your panels stay live.</p>
         </div>
       </details>
     </figure>
 
-    <section class="tut" id="paste">
-      <h2>1. Paste straight from a spreadsheet</h2>
-      <p class="sec-lede">
-        <span class="ui">Paste data</span> on the welcome screen (or the
-        <span class="ui">Open</span> button any time) opens the
-        <span class="ui">Load data</span> dialog. Copy rows in Excel or
-        Sheets, paste them in, and <span class="ui">Preview data</span>
-        shows what the app understood before anything is committed.
-      </p>
-      <figure class="fig">
-  <img width="2560" height="1800" src="assets/tutorial/dat-paste.png"
-       data-image-kind="illustrative"
-       alt="The Load data dialog: a paste box holding comma-separated rows of condition and score data, selects for delimiter, first row and file encoding, a Preview pasted rows button, and the preview table beneath with a type selector for each variable">
-  <figcaption>The Load data dialog. The delimiter is detected automatically; the first row becomes your variable names.</figcaption>
-</figure>
-      <p class="note">
-        Nothing is uploaded. Files and pasted rows are read in your
-        browser and stay on your machine.
-      </p>
-    </section>
-
-    <section class="tut" id="types">
-      <h2>2. Check every variable&rsquo;s type</h2>
-      <p class="sec-lede">
-        Click a column heading and the inspector opens:
-        <span class="ui">Measure type</span> plus a live summary (rows,
-        valid, missing, distinct, mean, SD). Chart roles accept variables
-        by type, so a number that imported as text is the single most
-        common reason a variable refuses to land on a value axis; this
-        menu is where you fix it.
-      </p>
-      <figure class="fig">
-  <img width="2560" height="1120" src="assets/tutorial/dat-type.png"
-       data-image-kind="illustrative"
-       alt="The Data workspace with the score column selected: the variable inspector on the right shows the name, a ringed Measure type menu reading Continuous, and a summary card with rows, valid, missing, distinct, mean and SD">
-  <figcaption>The inspector for <span class="ui">score</span>. Continuous means numbers you can measure and average, which is what value axes expect.</figcaption>
-</figure>
-    </section>
-
-    <section class="tut" id="exclude">
-      <h2>3. Exclude a point, honestly</h2>
-      <p class="sec-lede">
-        Sometimes one observation should sit out: a typo, an aborted
-        trial. With <span class="ui">Data points</span> shown on the
-        chart, right-click the point and choose
-        <span class="ui">Exclude this value from the dataset</span>
-        (the same menu&rsquo;s <span class="ui">Reveal in Data</span>
-        jumps to its row).
-      </p>
-      <figure class="fig">
-  <img width="1480" height="1018" src="assets/tutorial/dat-exclude.png"
-       data-image-kind="illustrative"
-       alt="The bar chart with raw data points shown and the right-click menu open on one point, its Exclude this value from the dataset entry ringed">
-  <figcaption>Right-click any raw point. Excluding recomputes the mean, the error bars, and every statistic instantly.</figcaption>
-</figure>
-      <figure class="fig">
-  <img width="1480" height="1018" src="assets/tutorial/dat-ghost.png"
-       data-image-kind="illustrative"
-       alt="The chart after excluding: a slashed ghost marker ringed where the point was, and a pill in the corner reading 1 point hidden">
-  <figcaption>Nothing vanishes silently: the excluded point stays visible as a slashed ghost, a pill counts the exclusions, and the ghost ships in exports. Clicking the ghost offers to include it again.</figcaption>
-</figure>
-      <p class="note">
-        The exclusion is recorded in the data itself (the
-        <span class="ui">Excluded</span> counter in the Data toolbar
-        lists them all), so a saved project remembers exactly what was
-        set aside, and why the numbers are what they are.
-      </p>
-    </section>
-
-    <section class="tut" id="filter">
-      <h2>4. Filter rows</h2>
-      <p class="sec-lede">
-        <span class="ui">Filter</span> in the Data toolbar keeps only the
-        rows matching your conditions (equals, not equal, greater, less,
-        is missing, is not missing). Filtered-out rows dim rather than
-        disappear, and every chart follows the filter.
-      </p>
-      <figure class="fig">
-  <img width="2560" height="1120" src="assets/tutorial/dat-filter.png"
-       data-image-kind="illustrative"
-       alt="The Data workspace with the Filter button ringed, reading Filter 12 of 24: rows where site is West are dimmed, and the variable inspector notes that the chart is showing 12 of 24 rows because a row filter is on">
-  <figcaption>A filter keeping site&nbsp;=&nbsp;East: 12 of 24 rows pass, the rest dim in place, and the inspector says exactly what the chart is currently showing.</figcaption>
-</figure>
-    </section>
-
     <div class="closer">
-      <p class="ws-next-label">Next workspace</p>
-      <a class="ws-next" href="learn-charts.html">
-        <span class="ws-n" aria-hidden="true">2</span>
-        <span><strong>Charts</strong>
-          <span class="ws-line">Set it up. Shape it. Share it.</span></span>
-        <span class="ws-chev" aria-hidden="true">&rsaquo;</span>
-      </a>
-      <p>
-        Back to the
-        <a href="learn.html">Learn page</a> for the full list, or the
+      <p>That completes the four workspaces, from a spreadsheet to a
+        finished figure. Back to the
+        <a href="learn.html">Learn page</a> for the guides, or the
         <a href="docs/">user guide</a> for the reference treatment of
         every control.
       </p>
