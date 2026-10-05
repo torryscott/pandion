@@ -37,3 +37,14 @@
   Cache-Control: public, max-age=0, must-revalidate
 /app/index.html
   Cache-Control: public, max-age=0, must-revalidate
+
+# The experimental copy (a build of an unreleased branch, for checking a
+# change on real data before it ships). Same rules as /app/: hashed
+# scripts for a day, a shell that is never cached hard, so a corrected
+# build shows on the next reload. Remove with the directory.
+/app-experimental/lib/*
+  Cache-Control: public, max-age=86400
+/app-experimental/
+  Cache-Control: public, max-age=0, must-revalidate
+/app-experimental/index.html
+  Cache-Control: public, max-age=0, must-revalidate

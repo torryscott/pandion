@@ -12,10 +12,17 @@ export function websiteInventory(root) {
             if (entry.isDirectory()) visit(path.join(directory, entry.name), prefix + entry.name + '/');
             else if (entry.name.endsWith('.html')) {
                 const file = prefix + entry.name;
-                const application = ['app/index.html', 'pandion-plots.html'].includes(file);
+                // app-experimental/ is a temporary copy of the app built from
+                // an unreleased branch. It is the application, not a website
+                // page, and it takes the application gates when its branch
+                // ships as app/; until then it is listed and not gated.
+                const experimental = file === 'app-experimental/index.html';
+                const application = experimental ||
+                    ['app/index.html', 'pandion-plots.html'].includes(file);
                 entries.push({ file,
                     surface: application ? 'application' : file === 'docs/index.html' ? 'guide' : 'website',
-                    gate: application ? 'standalone/verify/axe-state-check.mjs + chart-accessibility-check.mjs + pdf-accessibility-check.mjs'
+                    gate: experimental ? 'none while experimental: an unreleased copy of app/, gated when it ships'
+                        : application ? 'standalone/verify/axe-state-check.mjs + chart-accessibility-check.mjs + pdf-accessibility-check.mjs'
                         : 'website/verify-axe.mjs' });
             }
         }
