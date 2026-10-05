@@ -3179,14 +3179,29 @@
   function exclCount(t) {
     return rowExclCount(t) + valueExclCount(t);
   }
-  function retype(t, preparingSnapshot) {
+  // onlyCols: a change known to touch only these columns (one edited cell)
+  // retypes just them. Typing a column reads nothing but that column, so the
+  // others' typed values, levels and audits are still true; on a table of a
+  // thousand columns the full pass cost over a second per edited cell.
+  // Anything structural (columns added, removed, renamed, reordered, a
+  // missing-code change) keeps calling this with no list, as before.
+  function retype(t, preparingSnapshot, onlyCols) {
     normalizeTableMaps(t);
     if (!preparingSnapshot) bumpSnapEpoch(); // commit, not candidate preparation
-    retypeColumns(t);
+    var only = null;
+    if (Array.isArray(onlyCols) && onlyCols.length && t.columns && t.typeAudit) {
+      only = onlyCols;
+      for (var oc = 0; oc < onlyCols.length; oc++)
+        if (!t.raw[onlyCols[oc]] || !t.columns[onlyCols[oc]]) { only = null; break; }
+    }
+    retypeColumns(t, only);
     // Computed columns (Tier 1): every stored formula re-evaluates from
     // the freshly typed source values (chains follow dependency order), then
     // ONE more typing pass derives levels/types for the results.
-    if (recomputeFormulas(t)) retypeColumns(t);
+    if (recomputeFormulas(t))
+      retypeColumns(t, only ? t.order.filter(function (c) {
+        return isComputedColumn(t, c) || only.indexOf(c) !== -1;
+      }) : null);
     computeFilterState(t, preparingSnapshot);
   }
   function isComputedColumn(t, col) {
@@ -3267,18 +3282,22 @@
     }
     return wrote;
   }
-  function retypeColumns(t) {
-    t.columns = dataMap(); t.levels = dataMap(); t.numericish = dataMap();
-    // t.typeAudit is what the variable inspector reads to name the values
-    // that decided each type (18b/18c). It is derived state: rebuilt on
-    // every retype and deliberately absent from every serialization list.
-    t.typeAudit = dataMap();
+  function retypeColumns(t, only) {
+    if (!only) {
+      t.columns = dataMap(); t.levels = dataMap(); t.numericish = dataMap();
+      // t.typeAudit is what the variable inspector reads to name the values
+      // that decided each type (18b/18c). It is derived state: rebuilt on
+      // every retype and deliberately absent from every serialization list.
+      t.typeAudit = dataMap();
+    }
+    var typeList = only || t.order;
     // The token map was rebuilt per CELL by isMissingRaw, which is 720k
     // object allocations on a 120k x 6 import. Built once per COLUMN now
     // (t3-58a gave columns their own token lists), which is still O(columns)
     // rather than O(cells) and keeps that fix intact.
-    for (var j = 0; j < t.order.length; j++) {
-      var col = t.order[j], rv = t.raw[col], out = [], lv = [], i;
+    for (var j = 0; j < typeList.length; j++) {
+      var col = typeList[j], rv = t.raw[col], out = [], lv = [], i;
+      if (only) delete t.levels[col];      // a column may stop having levels
       var tokens = tableMissingTokens(t, col);
       var audit = numericAudit(rv, tokens);
       t.typeAudit[col] = audit;
@@ -14985,15 +15004,22 @@
   // than "stretch to fill the pane". The stretch path remains for a grid
   // with no table.
   var GRID_AUTOFIT_SCAN = 20000;
+  // And a budget for the table as a whole. The per-column cap alone let a
+  // table of a thousand columns measure every one of its 12.7 million cells
+  // on first paint (1.8 s). Up to twenty columns nothing changes; past that
+  // each column gets an even share, never fewer than 400 rows.
+  var GRID_AUTOFIT_CELLS = 400000;
   function gridAutoFitDefaults() {
     var t = PROJECT.table;
     if (!t || !Array.isArray(t.order) || !t.order.length) return 0;
     if (PROJECT.ui && PROJECT.ui.columnLayout === "stretch") return 0;
     var widths = gridColumnWidths(true), filled = 0;
+    var scan = Math.min(GRID_AUTOFIT_SCAN,
+      Math.max(400, Math.floor(GRID_AUTOFIT_CELLS / t.order.length)));
     for (var i = 0; i < t.order.length; i++) {
       var col = t.order[i];
       if (!t.raw[col] || isFinite(Number(widths[col]))) continue;
-      widths[col] = gridNaturalColumnWidth(col, GRID_AUTOFIT_SCAN);
+      widths[col] = gridNaturalColumnWidth(col, scan);
       filled++;
     }
     return filled;
@@ -16119,12 +16145,54 @@
                               return { id: c.id, roles: c.roles || {} };
                             }) });
   }
+  function dataHistBytes(entry) { return entry.snap ? entry.snap.length : 96; }
   function dataHistTrim(stack) {
     while (stack.length > DATA_HIST_CAP) stack.shift();
     var bytes = 0, i;
-    for (i = 0; i < stack.length; i++) bytes += stack[i].snap.length;
+    for (i = 0; i < stack.length; i++) bytes += dataHistBytes(stack[i]);
     while (stack.length > DATA_HIST_MIN && bytes > DATA_HIST_BYTES)
-      bytes -= stack.shift().snap.length;
+      bytes -= dataHistBytes(stack.shift());
+  }
+  // One edited cell is remembered as one cell. The whole-table snapshot
+  // every other step takes is the right tool for a reshape or a paste, and
+  // the wrong one here: on a 12,570 by 1,010 table it is 85 million
+  // characters built (0.6 s) and kept (three of them, by DATA_HIST_MIN) for
+  // a change to one value. The roles ride along because an edit can make a
+  // column unfit for the role it holds, and undo has to hand that back.
+  function dataCellPatch(col, row) {
+    var t = PROJECT.table;
+    return { col: col, row: row, raw: String(t.raw[col][row]), edited: !!t.edited,
+             roles: JSON.stringify(PROJECT.charts.map(function (c) {
+               return { id: c.id, roles: c.roles || {} };
+             })) };
+  }
+  function dataMarkCell(col, row, label) {
+    try {
+      DATA_UNDO.push({ patch: dataCellPatch(col, row), label: label || "" });
+      dataHistTrim(DATA_UNDO);
+      DATA_REDO.length = 0;
+      DATA_LAST_AT = Date.now();
+      DATA_ACTION_SEQ++;
+    } catch (e) {}
+    if (document.getElementById("ps-data-undo")) syncDataCommandBar();
+  }
+  function dataApplyPatch(p) {
+    var t = PROJECT.table;
+    if (!t || !t.raw[p.col] || p.row >= nRows(t)) return;
+    t.raw[p.col][p.row] = p.raw;
+    t.edited = p.edited;
+    try {
+      var roles = JSON.parse(p.roles);
+      for (var ri = 0; ri < roles.length; ri++) {
+        var roleChart = chartById(roles[ri].id);
+        if (roleChart) roleChart.roles = roles[ri].roles || {};
+      }
+    } catch (e) {}
+    retype(t, false, [p.col]);
+    validateRoles();
+    persist();
+    syncAll();
+    render();
   }
   // The label is what the menu and the toast say instead of a fixed "data
   // change" and a generic "Previous data state restored". Three destructive
@@ -16195,11 +16263,13 @@
     var entry = DATA_UNDO[DATA_UNDO.length - 1];
     // The step being undone keeps its name on the way to the redo stack, so
     // Redo can say what it will reapply.
-    DATA_REDO.push({ snap: dataSnapshot(), label: entry.label });
+    DATA_REDO.push(entry.patch
+      ? { patch: dataCellPatch(entry.patch.col, entry.patch.row), label: entry.label }
+      : { snap: dataSnapshot(), label: entry.label });
     dataHistTrim(DATA_REDO);
     DATA_ACTION_SEQ++;
     DATA_UNDO.pop();
-    dataApply(entry.snap);
+    if (entry.patch) dataApplyPatch(entry.patch); else dataApply(entry.snap);
     showToast(entry.label
       ? "Undid " + entry.label
       : "Previous data state restored");
@@ -16209,11 +16279,13 @@
     if (!DATA_REDO.length) return false;
     if (GRID_EDIT) gridCancelEdit();
     var entry = DATA_REDO[DATA_REDO.length - 1];
-    DATA_UNDO.push({ snap: dataSnapshot(), label: entry.label });
+    DATA_UNDO.push(entry.patch
+      ? { patch: dataCellPatch(entry.patch.col, entry.patch.row), label: entry.label }
+      : { snap: dataSnapshot(), label: entry.label });
     dataHistTrim(DATA_UNDO);
     DATA_ACTION_SEQ++;
     DATA_REDO.pop();
-    dataApply(entry.snap);
+    if (entry.patch) dataApplyPatch(entry.patch); else dataApply(entry.snap);
     showToast(entry.label
       ? "Redid " + entry.label
       : "Data change reapplied");
@@ -16416,11 +16488,11 @@
         gridNextEditAnnouncement(next));
       return;
     }
-    dataMark("the cell edit");
+    dataMarkCell(ge.col, ge.row, "the cell edit");
     t.raw[ge.col][ge.row] = newRaw;
     t.edited = true;
     var previousFilterMask = t.filterMask;
-    retype(t);
+    retype(t, false, [ge.col]);
     // The typed value is what every chart and statistic downstream will see.
     // When nothing could read the text, the cell is missing, and announcing
     // "Saved score, row 1 as sixty one" tells a screen reader user the value
@@ -35933,7 +36005,7 @@
     dataRedo: dataRedo,
     dataHistory: function () {
       var bytes = 0;
-      for (var i = 0; i < DATA_UNDO.length; i++) bytes += DATA_UNDO[i].snap.length;
+      for (var i = 0; i < DATA_UNDO.length; i++) bytes += dataHistBytes(DATA_UNDO[i]);
       return { undo: DATA_UNDO.length, redo: DATA_REDO.length,
                bytes: bytes, budget: DATA_HIST_BYTES,
                undoLabel: dataStepLabel(DATA_UNDO),
