@@ -683,9 +683,293 @@
   function autosaveTooBigDetail() {
     return "This project is too large for browser autosave: it needs about " +
       formatBytes(AUTOSAVE_TOO_BIG ? AUTOSAVE_TOO_BIG.chars : LAST_PROJECT_BYTES) +
-      " and the browser keeps about 5 MB. Your work is safe in this tab, " +
-      "and a reload would lose whatever is not in a file. Save it to a " +
-      ".pand file as you go.";
+      " and the browser keeps about 5 MB" +
+      (BIG_UNAVAILABLE ? ", and this browser would not open the larger " +
+        "store that a project this size is normally autosaved to" : "") +
+      ". Your work is safe in this tab, and a reload would lose whatever " +
+      "is not in a file. Save it to a .pand file as you go.";
+  }
+  // ---- autosave for a project too large for localStorage ----
+  // (Oct 2026, the same 70 MB survey file.) The browser's larger store,
+  // IndexedDB, holds hundreds of megabytes where localStorage holds five,
+  // so a project that cannot be autosaved the ordinary way is autosaved
+  // there instead. Two things make that workable at 12.7 million cells:
+  //   - the data is stored ONE RECORD PER COLUMN, and a write carries only
+  //     the columns that changed since the last one. Writing the whole
+  //     table freezes the page for about half a second (measured); one
+  //     column takes about a millisecond. The rest of the project (charts,
+  //     layouts, Notebook, settings, the table's shape) is one small record
+  //     written every time, since it is what changes most;
+  //   - writes are coalesced: one write a second at most, trailing, and a
+  //     last one at pagehide.
+  // Which columns changed comes from the data history: dataMark means a
+  // whole-table change is about to happen, dataMarkCell names its column,
+  // undo and redo say which they put back, and a new table object (a load
+  // or an import) means everything. That is the same set of events the Data
+  // workspace's undo depends on, so it is complete for anything a user can
+  // do to the data. A small localStorage marker (PS_BIG_KEY) says which
+  // project lives in the larger store, so a reload knows to look there. The
+  // .pand file remains the copy that does not depend on this browser: the
+  // larger store can still be cleared by the browser under disk pressure.
+  var PS_BIG_KEY = "psstandalone.project.big.v1";
+  var BIG_DB = "ps-autosave", BIG_STORE = "project";
+  var BIG_ACTIVE = false;        // the open project autosaves in the larger store
+  var BIG_UNAVAILABLE = false;   // the browser refused it: back to the warning
+  var BIG_BOOT = null;           // the marker found at boot, until restored
+  var BIG_DIRTY_ALL = true, BIG_DIRTY_COLS = {};
+  var BIG_TABLE_REF = null, BIG_TIMER = null;
+  var BIG_PENDING = false, BIG_INFLIGHT = false, BIG_WARNED = false;
+  var BIG_WRITES = 0, BIG_LAST_ERROR = "";
+  var BIG_WINDOW_MS = 1000;
+  function bigAvailable() { return !BIG_UNAVAILABLE && !!window.indexedDB; }
+  // Certain not to fit localStorage: at four characters a cell ("x", plus
+  // the comma) the smallest possible snapshot is already past the room.
+  // Skipping the attempt saves building an 85-million-character string.
+  function bigCertainlyTooBig() {
+    return tableCellCount() * 4 > AUTOSAVE_ROOM_CHARS;
+  }
+  function bigEstimateChars() {
+    return AUTOSAVE_TOO_BIG ? AUTOSAVE_TOO_BIG.chars : tableCellCount() * 7;
+  }
+  function bigDirtyCol(col) { if (col != null) BIG_DIRTY_COLS[col] = true; }
+  function bigOpen(cb) {
+    var req;
+    try { req = window.indexedDB.open(BIG_DB, 1); }
+    catch (e) { cb(null); return; }
+    req.onupgradeneeded = function () {
+      try { req.result.createObjectStore(BIG_STORE); } catch (e) {}
+    };
+    req.onerror = function () { cb(null); };
+    req.onblocked = function () { cb(null); };
+    req.onsuccess = function () { cb(req.result); };
+  }
+  function bigPersist() {
+    BIG_ACTIVE = true;
+    if (PROJECT.table !== BIG_TABLE_REF) {
+      BIG_TABLE_REF = PROJECT.table;
+      BIG_DIRTY_ALL = true;
+    }
+    BIG_PENDING = true;
+    if (!BIG_TIMER)
+      BIG_TIMER = window.setTimeout(function () {
+        BIG_TIMER = null;
+        bigWrite();
+      }, BIG_WINDOW_MS);
+    updateDocumentState();
+  }
+  function bigFlush() {
+    if (BIG_TIMER) { window.clearTimeout(BIG_TIMER); BIG_TIMER = null; }
+    if (BIG_PENDING) bigWrite();
+  }
+  function bigWrite() {
+    if (BIG_INFLIGHT) { BIG_PENDING = true; return; }   // again when it lands
+    BIG_PENDING = false;
+    BIG_INFLIGHT = true;
+    var snap;
+    var dirtyAll = BIG_DIRTY_ALL, dirtyCols = BIG_DIRTY_COLS;
+    BIG_DIRTY_ALL = false; BIG_DIRTY_COLS = {};
+    try { snap = projectSnapshot(); }
+    catch (e) { BIG_INFLIGHT = false; bigFailed(e, false); return; }
+    // The snapshot's wrappers are fresh objects; the raw columns are the
+    // live arrays, which IndexedDB copies as it stores them.
+    var table = snap.table, raw = table.raw;
+    delete snap.table;
+    delete table.raw;
+    var order = Array.isArray(table.order) ? table.order : [];
+    var cols = dirtyAll ? order.slice()
+      : order.filter(function (c) { return dirtyCols[c]; });
+    var meta = { id: snap.id, name: snap.name, savedAt: snap.savedAt,
+                 cells: tableCellCount(), small: snap, tableMeta: table };
+    var recentSnap = Object.assign({}, snap,
+      { table: Object.assign({}, table, { raw: raw }) });
+    bigOpen(function (db) {
+      if (!db) { BIG_INFLIGHT = false; bigFailed(null, true); return; }
+      var tx, failed = null;
+      try {
+        tx = db.transaction(BIG_STORE, "readwrite");
+        var store = tx.objectStore(BIG_STORE);
+        store.put(meta, "meta");
+        for (var i = 0; i < cols.length; i++)
+          store.put(raw[cols[i]] || [], "col:" + cols[i]);
+        if (dirtyAll) {
+          // Columns that no longer exist (deleted, renamed, another table).
+          var keep = {};
+          for (var k = 0; k < order.length; k++) keep["col:" + order[k]] = true;
+          var keysReq = store.getAllKeys();
+          keysReq.onsuccess = function () {
+            var ks = keysReq.result || [];
+            for (var j = 0; j < ks.length; j++)
+              if (typeof ks[j] === "string" && ks[j].indexOf("col:") === 0 &&
+                  !keep[ks[j]]) store.delete(ks[j]);
+          };
+        }
+      } catch (e) { failed = e; }
+      if (failed) {
+        try { db.close(); } catch (e2) {}
+        BIG_INFLIGHT = false;
+        bigFailed(failed, false);
+        return;
+      }
+      tx.oncomplete = function () {
+        try { db.close(); } catch (e3) {}
+        BIG_INFLIGHT = false;
+        bigLanded(meta, recentSnap);
+      };
+      tx.onerror = tx.onabort = function () {
+        var err = tx.error;
+        try { db.close(); } catch (e4) {}
+        BIG_INFLIGHT = false;
+        bigFailed(err, false);
+      };
+    });
+  }
+  function bigLanded(meta, recentSnap) {
+    if (!BIG_ACTIVE) return;          // retired while this write was in flight
+    BIG_WRITES++;
+    AUTOSAVE_HEALTH = "ok";
+    AUTOSAVE_LAST_OK = Date.now();
+    AUTOSAVE_DETAIL = "Local recovery is current (in the browser's larger store)";
+    LAST_PROJECT_BYTES = bigEstimateChars();
+    try {
+      window.localStorage.setItem(PS_BIG_KEY, JSON.stringify(
+        { id: meta.id, name: meta.name, savedAt: meta.savedAt, cells: meta.cells }));
+    } catch (e0) {}
+    // The autosave slot is the larger store now. A reload must not bring
+    // back whatever small project the ordinary slot still held.
+    try { window.localStorage.removeItem(PS_SAVE_KEY); } catch (e1) {}
+    try { window.localStorage.removeItem(PS_STALE_KEY); } catch (e2) {}
+    try { rememberRecent(recentSnap, { length: LAST_PROJECT_BYTES }); } catch (e3) {}
+    updateDocumentState();
+    if (BIG_PENDING && !BIG_TIMER)       // changes arrived while writing
+      BIG_TIMER = window.setTimeout(function () { BIG_TIMER = null; bigWrite(); },
+                                    BIG_WINDOW_MS);
+  }
+  function bigFailed(err, unavailable) {
+    if (unavailable) BIG_UNAVAILABLE = true;
+    BIG_PENDING = true;                  // the next persist tries again
+    BIG_DIRTY_ALL = true;
+    BIG_LAST_ERROR = String(err && (err.name || err.message) || "unavailable");
+    AUTOSAVE_HEALTH = "error";
+    AUTOSAVE_FAILS++;
+    AUTOSAVE_DETAIL = unavailable ? autosaveTooBigDetail()
+      : "The browser's larger store could not be written (" + BIG_LAST_ERROR +
+        "). Your work is safe in this tab, and a reload would lose whatever " +
+        "is not in a file. Save it to a .pand file as you go.";
+    try { window.localStorage.setItem(PS_STALE_KEY, "1"); } catch (e1) {}
+    updateDocumentState();
+    if (BIG_WARNED) return;
+    BIG_WARNED = true;
+    showActionToast(AUTOSAVE_DETAIL, "Save to a file", function () {
+      try { saveProjectFile(); } catch (eS) {}
+    }, { error: true, sticky: true, dismissLabel: "Not now" });
+  }
+  // The ordinary autosave succeeded again (a smaller project replaced the
+  // large one, or it shrank), so the larger store is no longer the slot.
+  function bigRetire() {
+    BIG_ACTIVE = false;
+    BIG_PENDING = false;
+    if (BIG_TIMER) { window.clearTimeout(BIG_TIMER); BIG_TIMER = null; }
+    BIG_DIRTY_ALL = true; BIG_DIRTY_COLS = {};
+    try { window.localStorage.removeItem(PS_BIG_KEY); } catch (e0) {}
+    bigOpen(function (db) {
+      if (!db) return;
+      try {
+        var tx = db.transaction(BIG_STORE, "readwrite");
+        tx.objectStore(BIG_STORE).clear();
+        tx.oncomplete = tx.onerror = function () { try { db.close(); } catch (e) {} };
+      } catch (e1) { try { db.close(); } catch (e2) {} }
+    });
+  }
+  // At boot: the marker says a large project is autosaved in the larger
+  // store. The sample is on screen under the busy curtain while it loads,
+  // and the start centre waits for the answer.
+  function bigBootRestore() {
+    if (!BIG_BOOT) return;
+    var want = BIG_BOOT;
+    busyShow("Restoring your project");
+    function finish(snap, why) {
+      BIG_BOOT = null;
+      busyHide();
+      if (snap) {
+        var invalid = projectValidationError(snap);
+        if (!invalid && applySnapshot(snap)) {
+          dataHistoryClear();
+          PROJECT_REV = 0;
+          FILE_SAVED_REV = null; FILE_LABEL = null; FILE_HANDLE = null;
+          PROJECT_CHOSEN = true;
+          BIG_ACTIVE = true;
+          BIG_TABLE_REF = PROJECT.table;
+          BIG_DIRTY_ALL = false; BIG_DIRTY_COLS = {};
+          BIG_PENDING = false;
+          AUTOSAVE_HEALTH = "ok";
+          AUTOSAVE_DETAIL = "Local recovery is current (in the browser's larger store)";
+          AUTOSAVE_LAST_OK = snap.savedAt ? Date.parse(snap.savedAt) || Date.now() : Date.now();
+          LAST_PROJECT_BYTES = bigEstimateChars();
+          BOOT_RESTORED = true;
+          BOOT_SAVED_AT = snap.savedAt || null;
+          RECOVERY_NOTE = "";
+          validateRoles();
+          syncAll(); render();
+          updateDocumentState();
+          showWelcome(false);
+          return;
+        }
+        why = invalid || "the contents were not recognized";
+      }
+      RECOVERY_NOTE = "The autosaved project" +
+        (want && want.name ? " (" + want.name + ")" : "") +
+        " could not be read from the browser's larger store" +
+        (why ? ": " + why : "") + ". A fresh sample project was opened.";
+      try { window.localStorage.removeItem(PS_BIG_KEY); } catch (e0) {}
+      BOOT_RESTORED = false;
+      updateDocumentState();
+      showWelcome(false);
+    }
+    bigOpen(function (db) {
+      if (!db) { finish(null, "the store would not open"); return; }
+      var meta = null, raw = {};
+      try {
+        var tx = db.transaction(BIG_STORE, "readonly");
+        var store = tx.objectStore(BIG_STORE);
+        var metaReq = store.get("meta");
+        metaReq.onsuccess = function () {
+          meta = metaReq.result;
+          if (!meta || !meta.small || !meta.tableMeta ||
+              !Array.isArray(meta.tableMeta.order)) return;
+          meta.tableMeta.order.forEach(function (c) {
+            var r = store.get("col:" + c);
+            r.onsuccess = function () {
+              if (Array.isArray(r.result)) raw[c] = r.result;
+            };
+          });
+        };
+        tx.oncomplete = function () {
+          try { db.close(); } catch (e1) {}
+          if (!meta || !meta.small || !meta.tableMeta ||
+              !Array.isArray(meta.tableMeta.order)) {
+            finish(null, "no project record");
+            return;
+          }
+          var missing = meta.tableMeta.order.filter(function (c) {
+            return !Object.prototype.hasOwnProperty.call(raw, c);
+          });
+          if (missing.length) {
+            finish(null, missing.length + " column" +
+              (missing.length === 1 ? " is" : "s are") + " missing");
+            return;
+          }
+          finish(Object.assign({}, meta.small,
+            { table: Object.assign({}, meta.tableMeta, { raw: raw }) }));
+        };
+        tx.onerror = tx.onabort = function () {
+          try { db.close(); } catch (e2) {}
+          finish(null, "the read failed");
+        };
+      } catch (e) {
+        try { db.close(); } catch (e3) {}
+        finish(null, String(e && e.message || e));
+      }
+    });
   }
   var RECOVERY_NOTE = "";
   var LAST_PROJECT_BYTES = 0;
@@ -4120,11 +4404,23 @@
   }
   function persistWrite(housekeeping) {
     var snap, json;
-    // Known not to fit: skip the snapshot entirely (see AUTOSAVE_TOO_BIG).
-    if (autosaveTooBigNow()) {
+    // Known not to fit localStorage: the larger store, or, where the browser
+    // will not open one, the warning (see AUTOSAVE_TOO_BIG).
+    if (autosaveTooBigNow() || bigCertainlyTooBig()) {
+      if (!AUTOSAVE_TOO_BIG)
+        AUTOSAVE_TOO_BIG = { cells: tableCellCount(), chars: tableCellCount() * 7 };
+      if (bigAvailable()) { bigPersist(); return; }
+      // No larger store in this browser: say so once, then keep the state.
       AUTOSAVE_HEALTH = "error";
-      AUTOSAVE_DETAIL = autosaveTooBigDetail();
+      var tooBig = autosaveTooBigDetail();
+      var firstTime = AUTOSAVE_DETAIL !== tooBig;
+      AUTOSAVE_DETAIL = tooBig;
+      try { window.localStorage.setItem(PS_STALE_KEY, "1"); } catch (eS) {}
       updateDocumentState();
+      if (firstTime)
+        showActionToast(tooBig, "Save to a file", function () {
+          try { saveProjectFile(); } catch (eF) {}
+        }, { error: true, sticky: true, dismissLabel: "Not now" });
       return;
     }
     try {
@@ -4153,6 +4449,7 @@
       AUTOSAVE_LAST_OK = Date.now();
       AUTOSAVE_DETAIL = "Local recovery is current";
       try { window.localStorage.removeItem(PS_STALE_KEY); } catch (e0) {}
+      if (BIG_ACTIVE) bigRetire();
       // Recents stay on BOTH edges. They are observable immediately (the
       // start centre lists them, and anything can ask for them straight after
       // an action), and unlike the backup they do not re-parse the previous
@@ -4162,7 +4459,6 @@
       updateDocumentState();
     } catch (e) {
       AUTOSAVE_HEALTH = "error";
-      AUTOSAVE_FAILS++;
       // The 5k to 12k case already says the useful thing, naming .pand as the
       // copy that does not depend on this browser. At the size where the data
       // is ACTUALLY lost the message degraded to one that named no fix and
@@ -4178,6 +4474,10 @@
       var wasTooBig = !!AUTOSAVE_TOO_BIG;
       if ((quota || !json) && chars > AUTOSAVE_ROOM_CHARS && cells)
         AUTOSAVE_TOO_BIG = { cells: cells, chars: chars };
+      // Too large for this store but the browser has a larger one: hand the
+      // project over to it. Not a failure to count or to warn about.
+      if (AUTOSAVE_TOO_BIG && bigAvailable()) { bigPersist(); return; }
+      AUTOSAVE_FAILS++;
       var detail = AUTOSAVE_TOO_BIG ? autosaveTooBigDetail() : (quota
         ? "Browser storage is full, so this project is no longer being " +
           "autosaved. Your work is safe in this tab, and a reload would lose " +
@@ -4471,6 +4771,15 @@
   }
   function restore() {
     var raw = null;
+    // A large project lives in the larger store; it is read after boot
+    // (bigBootRestore), with the sample standing in under the busy curtain.
+    try {
+      var marker = window.localStorage.getItem(PS_BIG_KEY);
+      if (marker && window.indexedDB) {
+        BIG_BOOT = JSON.parse(marker) || {};
+        return false;
+      }
+    } catch (eBig) { BIG_BOOT = null; }
     try {
       raw = window.localStorage.getItem(PS_SAVE_KEY);
       var s = JSON.parse(raw || "null");
@@ -4573,7 +4882,7 @@
       // Too large for browser autosave: the file is the only copy there can
       // be, so the line says where the work stands against the FILE rather
       // than repeating the warning after the user has done what it asked.
-      if (autosaveFailing && AUTOSAVE_TOO_BIG)
+      if (autosaveFailing && AUTOSAVE_TOO_BIG && !BIG_ACTIVE)
         line = FILE_SAVED_REV == null
           ? "Not saved yet \u00b7 too large for browser autosave, so save it to a .pand file"
           : (dirty ? "Changes not in the file yet \u00b7 too large for browser autosave, so save as you go"
@@ -16274,6 +16583,7 @@
              })) };
   }
   function dataMarkCell(col, row, label) {
+    bigDirtyCol(col);                    // one column is about to change
     try {
       DATA_UNDO.push({ patch: dataCellPatch(col, row), label: label || "" });
       dataHistTrim(DATA_UNDO);
@@ -16286,6 +16596,7 @@
   function dataApplyPatch(p) {
     var t = PROJECT.table;
     if (!t || !t.raw[p.col] || p.row >= nRows(t)) return;
+    bigDirtyCol(p.col);
     t.raw[p.col][p.row] = p.raw;
     t.edited = p.edited;
     try {
@@ -16305,6 +16616,7 @@
   // change" and a generic "Previous data state restored". Three destructive
   // paths already named their step; every path can now.
   function dataMark(label) {
+    BIG_DIRTY_ALL = true;                // a whole-table change follows
     try {
       DATA_UNDO.push({ snap: dataSnapshot(), label: label || "" });
       dataHistTrim(DATA_UNDO);
@@ -16322,6 +16634,7 @@
     if (document.getElementById("ps-data-undo")) syncDataCommandBar();
   }
   function dataApply(snapStr) {
+    BIG_DIRTY_ALL = true;
     var t = PROJECT.table, s = JSON.parse(snapStr);
     if (Array.isArray(s.order)) t.order = s.order;
     t.raw = s.raw; t.types = s.types; t.excluded = s.excluded;
@@ -30475,6 +30788,7 @@
   }
   var WELCOME_LAST_FOCUS = null;
   function showWelcome(force) {
+    if (BIG_BOOT && !force) return;      // shown once the large project is in
     // Recovery must never be silent, even if this tab previously dismissed
     // the start center or the preference normally resumes immediately.
     if (!force && !RECOVERY_NOTE) {
@@ -32570,7 +32884,12 @@
       "projects, and your saved palettes and styles. Browsers keep about " +
       "5 MB of this kind of storage for a site, so a project larger than " +
       "that is not autosaved and has to be saved to a .pand file." +
-      (AUTOSAVE_TOO_BIG
+      (BIG_ACTIVE
+        ? " The open project is about " + formatBytes(bigEstimateChars()) +
+          ", so it is autosaved in the browser's larger store instead, " +
+          "which has room for projects this size. A .pand file is still " +
+          "the copy that does not depend on this browser."
+        : AUTOSAVE_TOO_BIG
         ? " The open project is about " + formatBytes(AUTOSAVE_TOO_BIG.chars) +
           ", so it is not being autosaved."
         : "");
@@ -35502,7 +35821,10 @@
     // this fires only when autosave is actually FAILING, which is the case
     // where closing the tab really does lose the work.
     window.addEventListener("beforeunload", function (e) {
-      if (AUTOSAVE_HEALTH !== "error") return;
+      // ...or when a large project's latest change has not reached the
+      // larger store yet (its writes trail by a second).
+      if (AUTOSAVE_HEALTH !== "error" &&
+          !(BIG_ACTIVE && (BIG_PENDING || BIG_INFLIGHT))) return;
       if (FILE_SAVED_REV != null && PROJECT_REV === FILE_SAVED_REV) return;
       e.preventDefault();
       e.returnValue = "";
@@ -35535,6 +35857,8 @@
     }
     window.addEventListener("pagehide", flushPendingEngineOpts);
     window.addEventListener("beforeunload", persistFlush);
+    // After the two above, so the write carries everything they flushed.
+    window.addEventListener("pagehide", bigFlush);
     // Switching documents tears down the engine host, so the same queue has
     // to be drained there too or the edit lands on the WRONG chart.
     PS_FLUSH_PENDING_OPTS = flushPendingEngineOpts;
@@ -35641,7 +35965,8 @@
     // to NOTICE and SAY SO, once, rather than let the loser find out later.
     var OTHER_TAB_WARNED = false;
     window.addEventListener("storage", function (e) {
-      if (!e || e.key !== PS_SAVE_KEY || e.newValue == null) return;
+      if (!e || (e.key !== PS_SAVE_KEY && e.key !== PS_BIG_KEY) ||
+          e.newValue == null) return;
       var mine = null, theirs = null;
       try { mine = PROJECT.id; theirs = JSON.parse(e.newValue).id; }
       catch (err) { return; }
@@ -35930,6 +36255,14 @@
                    valid: !!validSnap(id) } : null;
     },
     switchChart: switchChart,
+    // The large-project autosave, for probes: where it stands, and a flush.
+    bigAutosave: function () {
+      return { active: BIG_ACTIVE, pending: BIG_PENDING || BIG_INFLIGHT,
+               writes: BIG_WRITES, unavailable: BIG_UNAVAILABLE,
+               booting: !!BIG_BOOT, lastError: BIG_LAST_ERROR,
+               health: AUTOSAVE_HEALTH, detail: AUTOSAVE_DETAIL };
+    },
+    bigFlush: bigFlush,
     setWorkspace: setAppWorkspace,
     workspace: appWorkspace,
     workspaceDocument: function () {
@@ -36167,6 +36500,7 @@
     syncAll(); render();
     wireWelcome();
     requestPersistentStorage();
+    bigBootRestore();
     // Item 15. The engine sizes its undo blob as (4.6MB - bundleBytes)/2 per
     // side, and measures bundleBytes by looking for a graphbuilder2.bundle.*
     // key in localStorage. In jamovi that key exists; in the standalone the

@@ -2148,7 +2148,12 @@ every style setting.</li>
 <p>A saved project is the <code>.pand</code> file you chose - it carries the
 data, charts, layouts, and Notebook. Between saves the app keeps a local
 autosave (plus a one-step backup and a recents list) in the browser's own
-storage on this machine, which is what the start screen restores from. Saved
+storage on this machine, which is what the start screen restores from. That
+storage holds about 5 MB; a project larger than that (a very wide survey file,
+for instance) is autosaved in the browser's larger store instead, and comes
+back the same way, though its first write after a load takes a moment. Either
+way the browser may clear its storage under disk pressure, so the
+<code>.pand</code> file is the copy to rely on. Saved
 palettes and chart styles also live in that local storage, so they follow you
 across projects on this machine. A copy of them is also written into each
 saved <code>.pand</code> file, so a shared project brings its look with it;
