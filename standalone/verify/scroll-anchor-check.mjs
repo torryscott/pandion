@@ -134,9 +134,14 @@ async function watch(page, ms) {
     await page.evaluate(([fnSrc, ms]) => {
         const geom = new Function('return (' + fnSrc + ')()');
         const g0 = geom();
-        const w = { g0, ws: 0, col: 0, top: 0, left: 0, h: 0, gapMin: g0.gap, gapMax: g0.gap, rebuilt: false, frames: 0, armed: false };
+        const w = { g0, ws: 0, col: 0, top: 0, left: 0, h: 0, gapMin: g0.gap, gapMax: g0.gap, rebuilt: false, frames: 0, armed: false,
+                    ms, t0: performance.now(), tLast: 0, maxGap: 0 };
         const loop = () => {
             const g = geom(); w.frames++; w.armed = true; w.last = g;
+            // Pacing, so a stalled sampler is told apart from a slower one.
+            const now = performance.now();
+            if (w.tLast) w.maxGap = Math.max(w.maxGap, now - w.tLast);
+            w.tLast = now;
             for (const k of ['ws', 'col', 'top', 'left', 'h'])
                 if (g[k] != null && g0[k] != null) w[k] = Math.max(w[k], Math.abs(g[k] - g0[k]));
             if (g.gap != null) { w.gapMin = Math.min(w.gapMin, g.gap); w.gapMax = Math.max(w.gapMax, g.gap); }
@@ -148,7 +153,8 @@ async function watch(page, ms) {
         return new Promise(r => setTimeout(r, ms));
     }, [geom.toString(), ms]);
     return page.evaluate(() => { const w = window.__sa; cancelAnimationFrame(w.raf);
-        return { ws: w.ws, col: w.col, top: w.top, left: w.left, h: w.h, gapMin: w.gapMin, gapMax: w.gapMax, rebuilt: w.rebuilt, frames: w.frames, g0: w.g0, last: w.last }; });
+        return { ws: w.ws, col: w.col, top: w.top, left: w.left, h: w.h, gapMin: w.gapMin, gapMax: w.gapMax, rebuilt: w.rebuilt, frames: w.frames, g0: w.g0, last: w.last,
+                 ms: w.ms, span: w.tLast - w.t0, maxGap: w.maxGap }; });
 }
 // Start the sampler and click only once its first frame has run, so the
 // click's own frame is inside the window.
@@ -160,7 +166,18 @@ async function watchAround(page, ms, act) {
 }
 const still = (r, tag, opts) => {
     opts = opts || {};
-    ok(r.frames > 60, tag + ': sampled ' + r.frames + ' frames');
+    // The sampler must have RUN across the whole window: that is what the
+    // frame count guards, not a frame rate. A fixed floor of 60 encoded 43
+    // frames per second, and WebKit under Playwright drops to about 30 when
+    // the machine is busy (the full suite runs three engines plus builds), so
+    // the 1.4 s tick-label case sampled 43 frames and went red while every
+    // scroll assertion passed (Craft item f3e7899d, Oct 2026). The contract
+    // now: at least 20 frames a second over the window, the samples span
+    // most of it, and no single gap long enough to hide a scroll (250 ms).
+    ok(r.frames >= Math.max(20, r.ms * 0.02),
+       tag + ': sampled ' + r.frames + ' frames over ' + fmt(r.span) + 'ms');
+    ok(r.span >= r.ms * 0.85 && r.maxGap <= 250,
+       tag + ': the sampler never stalled (longest gap ' + fmt(r.maxGap) + 'ms)');
     if (opts.rebuild !== false)
         ok(r.rebuilt, tag + ': the chart was rebuilt inside the window (a green from a missed click is not a green)');
     ok(r.ws <= 0.5, tag + ': the pane did not scroll (max ' + fmt(r.ws) + 'px from ' + r.g0.ws + ')');
