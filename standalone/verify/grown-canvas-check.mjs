@@ -6,7 +6,8 @@
 // other drags too") after the curve-handle report found a dragged handle
 // landing 68 px below the pointer in that state.
 // Control: on the tree before the sweep every case fails by about the size
-// of the shift (case 1 lands the handle a shift below the pointer).
+// of the shift (case 1 lands the handle a shift below the pointer); case 6
+// fails on the tree before the overlay fix, where the strips stayed put.
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
@@ -258,6 +259,69 @@ const start1 = await page.evaluate(() => {
 let turned = ((start1 - start0) % 360 + 360) % 360;
 if (turned > 180) turned -= 360;
 ok(near(turned, 40, 3), 'a 40 degree drag turned the pie ' + turned.toFixed(1) + ' degrees');
+
+console.log('case 6: the clickable strips over the axes, the corner grip and the title zone move with the chart');
+// Back on a bar chart with the grown canvas from case 3's grower.
+await page.evaluate(async () => {
+    const w = ms => new Promise(r => setTimeout(r, ms));
+    const S = window.PS_SHELL;
+    S.setModule('plotbuilder'); await w(500);
+    S.optionStore().graphType = 'bar';
+    S.setRoles('plotbuilder', { xvar: 'condition', yvar: 'score' }); await w(1400);
+});
+await page.waitForTimeout(1200);
+await inject([grower]);
+ok(await shift() > 20, 'setup: the bar chart sits ' + (await shift()).toFixed(0) + ' px down');
+const axes = await page.evaluate(sel => {
+    const svg = document.querySelector(sel);
+    const sr = svg.getBoundingClientRect();
+    // The two axis lines: the longest vertical and horizontal lines.
+    let yl = null, xl = null;
+    for (const l of svg.querySelectorAll('line')) {
+        const r = l.getBoundingClientRect();
+        if (r.height > 150 && r.width < 2 && (!yl || r.height > yl.height)) yl = r;
+        if (r.width > 250 && r.height < 2 && (!xl || r.width > xl.width)) xl = r;
+    }
+    const at = (x, y) => { const e = document.elementFromPoint(x, y); return e ? (e.getAttribute('data-role') || e.title || e.tagName) : 'none'; };
+    return { y: { x: yl.left, y: yl.top + yl.height / 2, hit: at(yl.left - 3, yl.top + yl.height / 2) },
+             x: { x: xl.left + xl.width / 2, y: xl.top, hit: at(xl.left + xl.width / 2, xl.top + 3) },
+             corner: { x: xl.right - 6, y: xl.top - 6, hit: at(xl.right - 6, xl.top - 6) },
+             title: { x: xl.left + xl.width / 2, y: sr.top + 68 + 12, hit: at(xl.left + xl.width / 2, sr.top + 68 + 12) } };
+}, SVG);
+ok(/axis/i.test(axes.x.hit), 'the strip over the bottom axis is where the axis is (' + axes.x.hit + ')');
+// The left strip carries no role of its own; it is a DIV where the svg
+// would otherwise be hit, and the click below proves which.
+ok(axes.y.hit === 'DIV', 'an overlay sits over the left axis where the axis is (' + axes.y.hit + ')');
+// The add-title zone takes pointer events only while it is armed, so it
+// is checked by position: it sits at the chart's top, not the canvas's.
+const zone = await page.evaluate(sel => {
+    const svg = document.querySelector(sel); const sr = svg.getBoundingClientRect();
+    const z = Array.from(svg.parentNode.children).find(c => /add title/i.test(c.textContent || ''));
+    return z ? { top: z.getBoundingClientRect().top - sr.top } : null;
+}, SVG);
+ok(zone && Math.abs(zone.top - await shift()) < 2,
+   'the add-title zone sits at the top of the chart, ' + (zone && zone.top.toFixed(0)) + ' px into the canvas');
+const crumb = () => page.evaluate(() => (document.querySelector('[data-role="gb2-crumb"]') || {}).textContent || '');
+await page.mouse.click(axes.x.x, axes.x.y + 3);
+await page.waitForTimeout(500);
+ok(/bottom axis|x axis|categories/i.test(await crumb()), 'clicking the bottom axis opens its panel (' + await crumb() + ')');
+await page.keyboard.press('Escape');
+await page.waitForTimeout(300);
+await page.mouse.click(axes.y.x - 3, axes.y.y);
+await page.waitForTimeout(500);
+ok(/left axis|y axis|value/i.test(await crumb()), 'clicking the left axis opens its panel (' + await crumb() + ')');
+await page.keyboard.press('Escape');
+await page.waitForTimeout(300);
+// The corner grip: a drag from the chart's corner resizes the chart.
+const w0 = await page.evaluate(sel => Number(document.querySelector(sel).getAttribute('width')), SVG);
+await page.mouse.move(axes.corner.x, axes.corner.y);
+await page.mouse.down();
+await page.mouse.move(axes.corner.x + 20, axes.corner.y + 10, { steps: 3 });
+await page.mouse.move(axes.corner.x + 40, axes.corner.y + 20, { steps: 4 });
+await page.mouse.up();
+await page.waitForTimeout(800);
+const w1 = await page.evaluate(sel => Number(document.querySelector(sel).getAttribute('width')), SVG);
+ok(w1 > w0 + 20, 'dragging the corner grip resizes the chart (' + w0 + ' -> ' + w1 + ')');
 
 if (errors.length) throw new Error('page errors: ' + errors.join(' | '));
 if (failed) { console.log('GROWN CANVAS CHECK: ' + failed + ' failing'); await browser.close(); process.exit(1); }

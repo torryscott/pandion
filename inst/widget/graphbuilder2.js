@@ -11089,6 +11089,27 @@
         // dragged content above the toolbar's ceiling. SVG height is
         // increased by the same amount so bars/axes still fit.
         var _topGrow = 0;
+        // The clickable overlays that sit over the chart (axis strips,
+        // the corner grip, the size readout, the add-title zone, the
+        // per-panel strips) are HTML positioned from chart coordinates,
+        // so they must move down with the chart when the canvas grows
+        // upward. A CSS transform moves the box while each overlay's
+        // own style.top stays in chart coordinates, which is what their
+        // pointer math (top + offsetY) reads. Registered at creation and
+        // re-applied wherever the chart's own shift is applied.
+        var _gb2ShiftChrome = [];
+        function _gb2ChromeFollowShift() {
+            var t = _topGrow > 0 ? "translateY(" + _topGrow + "px)" : "";
+            for (var ci = 0; ci < _gb2ShiftChrome.length; ci++) {
+                try { _gb2ShiftChrome[ci].style.transform = t; } catch (_eT) {}
+            }
+        }
+        function _gb2ChromeFollowsShift(el) {
+            if (!el) return el;
+            if (_gb2ShiftChrome.indexOf(el) < 0) _gb2ShiftChrome.push(el);
+            try { el.style.transform = _topGrow > 0 ? "translateY(" + _topGrow + "px)" : ""; } catch (_eT2) {}
+            return el;
+        }
         function _updateBgCanvas() {
             try {
                 var W = parseFloat(svg.getAttribute("width")) || 0;
@@ -11111,6 +11132,7 @@
                         _topGrow > 0 ? "translate(0," + _topGrow + ")" : ""
                     );
                 }
+                _gb2ChromeFollowShift();
                 // Push the external toolbar up by _bgPad.top (capped
                 // at MAX_TOP_BG_PAD). Beyond the cap the chart grows
                 // instead, so the toolbar never travels far enough to
@@ -11454,7 +11476,7 @@
         // preserves the grab-time ratio; release keeps the exact dropped
         // size (no jamovi-style 10 px snap - Torry's call, Aug 2026).
         // Single-axis fine-tuning lives in Chart settings -> Sizing.
-        var gripXY = makeGrip("nwse-resize");
+        var gripXY = _gb2ChromeFollowsShift(makeGrip("nwse-resize"));
         // The corner box overlaps the tail of the x-axis click strip (a
         // later sibling at the same z-index, which would steal the
         // pointer). The corner means resize, so it wins the stack; the
@@ -11495,6 +11517,7 @@
             "border:1px solid #c9d4e0;border-radius:3px;padding:2px 7px;" +
             "opacity:0;transition:opacity 150ms ease;white-space:pre;text-align:left;";
         wrap.appendChild(sizeTag);
+        _gb2ChromeFollowsShift(sizeTag);
         var sizeTagHide = null;
 
         var draggingXY = false;
@@ -11510,6 +11533,7 @@
         // intercepted by the SVG's box.
         tickDragHit.style.cssText = "position:absolute;cursor:ns-resize;user-select:none;z-index:2;";
         wrap.appendChild(tickDragHit);
+        _gb2ChromeFollowsShift(tickDragHit);
 
         // --- X-axis hit zone (selects the X axis in the inspector) ----
         var xLayoutHit = document.createElement("div");
@@ -11518,6 +11542,7 @@
         xLayoutHit.style.cssText = "position:absolute;cursor:pointer;user-select:none;z-index:2;";
         xLayoutHit.title = ("Click to open the " + _axisPosLabelLc("x", true) + " settings"); xLayoutHit.setAttribute("data-role", "x-axis-hit");
         wrap.appendChild(xLayoutHit);
+        _gb2ChromeFollowsShift(xLayoutHit);
 
         // --- Export utilities (SVG / PNG / JPG / vector PDF) -------------
         // serializeSvgForExport returns a portable, standalone SVG string:
@@ -19474,7 +19499,7 @@
             return zone;
         }
 
-        var addTitleZone = makeAddZone("Click to add title");
+        var addTitleZone = _gb2ChromeFollowsShift(makeAddZone("Click to add title"));
         addTitleZone._hint.style.fontSize = "14px";
         // Subtitle hover removed - users wanting a second-line caption
         // can use the text annotation feature, which is more flexible
@@ -105378,6 +105403,7 @@
             var set = {};
             set.tickHit = document.createElement("div"); set.tickHit.style.cssText = "position:absolute;cursor:pointer;user-select:none;z-index:2;"; set.tickHit.title = ("Click to open the " + _axisPosLabelLc("y", true) + " settings"); set.tickHit.setAttribute("data-role", "y-axis-hit"); wrap.appendChild(set.tickHit);
             set.xHit = document.createElement("div"); set.xHit.style.cssText = "position:absolute;cursor:pointer;user-select:none;z-index:2;"; set.xHit.title = ("Click to open the " + _axisPosLabelLc("x", true) + " settings"); set.xHit.setAttribute("data-role", "x-axis-hit"); wrap.appendChild(set.xHit);
+            _gb2ChromeFollowsShift(set.tickHit); _gb2ChromeFollowsShift(set.xHit);
             var yTick = null, yLine = false;
             set.tickHit.addEventListener("mousemove", function (e) {
                 if (typeof e.offsetY !== "number" || !set.panel || !set.yLineEl) return;
