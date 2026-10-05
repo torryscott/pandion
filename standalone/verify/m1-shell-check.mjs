@@ -1955,7 +1955,7 @@ await page.waitForTimeout(400);
     await page.waitForTimeout(100);
     await page.evaluate(() =>
         document.getElementById('ps-lviewport').focus());
-    await page.keyboard.press('Alt+Shift+ArrowRight');
+    await page.keyboard.press('Shift+ArrowRight');
     await page.waitForTimeout(100);
     const lExact = await page.evaluate(() => {
         const it = window.PS_SHELL.chart().items.find(i => i.id === 'i1');

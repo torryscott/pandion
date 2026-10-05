@@ -130,12 +130,12 @@ await page.evaluate(() => {
 });
 await page.waitForTimeout(60);
 const beforeNudge = (await items())[0].x;
-// ALT+Arrow. CONTRACT CHANGED, deliberately, Aug 2026 and approved: nudging
-// is Alt+Arrow everywhere now. Plain arrows used to nudge whenever focus was
-// outside the canvas while navigating between items when it was inside, so
-// the same key did two opposite things decided by where focus happened to
-// be. One rule, matching the engine and the canvas keyboard model.
-for (let i = 0; i < 5; i++) await page.keyboard.press('Alt+ArrowRight');
+// Aug 2026 made the arrow keys ONE rule: plain arrows used to nudge when
+// focus was outside the canvas and navigate between items when it was
+// inside, so the same key did two opposite things.
+// Oct 2026: plain arrows nudge again, everywhere in the workspace, and
+// Alt+Arrow steps the selection. One rule still, with the roles swapped.
+for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowRight');
 await page.waitForTimeout(150);
 const nudged = (await items())[0].x;
 if (nudged === beforeNudge)

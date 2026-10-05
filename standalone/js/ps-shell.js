@@ -4689,10 +4689,19 @@
     if (!c || !isLayoutTab(c)) return "";
     var items = c.items || [];
     if (!items.length) return "Figure canvas with no placed items.";
-    var charts = [], text = [], images = 0;
+    var charts = [], text = [], images = 0, boxes = 0, arrows = 0, timelines = 0;
     for (var i = 0; i < items.length; i++) {
       var item = items[i] || {};
-      if (item.kind === "chart") {
+      if (item.kind === "box") {
+        boxes++;
+        var boxWords = String(item.text || "").replace(/\s+/g, " ").trim();
+        if (boxWords) text.push(boxWords.substring(0, 120));
+      } else if (item.kind === "arrow") arrows++;
+      else if (item.kind === "timeline") {
+        timelines++;
+        var tlText = layTimelineLabelsText(item);
+        if (tlText) text.push(tlText.substring(0, 120));
+      } else if (item.kind === "chart") {
         var linked = chartById(item.chartId);
         charts.push(linked && linked.name ? linked.name : "chart panel");
       } else if (item.kind === "text") {
@@ -4710,6 +4719,14 @@
         (text.length > 5 ? "; and more" : ""));
     if (images)
       parts.push(images + (images === 1 ? " added image" : " added images"));
+    if (boxes || arrows || timelines) {
+      var dp = [];
+      if (boxes) dp.push(boxes + (boxes === 1 ? " box" : " boxes"));
+      if (arrows) dp.push(arrows + (arrows === 1 ? " arrow" : " arrows"));
+      if (timelines) dp.push(timelines + (timelines === 1 ? " timeline" : " timelines"));
+      parts.push("Diagram parts: " + (dp.length > 1
+        ? dp.slice(0, -1).join(", ") + " and " + dp[dp.length - 1] : dp[0]));
+    }
     return parts.join(". ") + ".";
   }
   function generatedExportDescription() {
@@ -5596,6 +5613,77 @@
     }
     return t;
   }
+
+  // ---- figure parts in the file (see the Figure parts block). The
+  // box is a rect with its text wrapped and centred, the arrow a path
+  // and its head triangles; both from the item model, like text.
+  function layoutBoxNode(doc, item) {
+    var ns = "http://www.w3.org/2000/svg", st = layBoxStyle(item);
+    var g = doc.createElementNS(ns, "g");
+    var x = Number(item.x) || 0, y = Number(item.y) || 0;
+    var w = Math.max(1, Number(item.w) || 150), h = Math.max(1, Number(item.h) || 44);
+    var bw = st.borderW;
+    var r = doc.createElementNS(ns, "rect");
+    // The canvas border is INSIDE the box (border-box); a stroke sits
+    // centred on the edge, so the rect is inset by half the stroke.
+    r.setAttribute("x", layNum2(x + bw / 2)); r.setAttribute("y", layNum2(y + bw / 2));
+    r.setAttribute("width", layNum2(Math.max(0.5, w - bw)));
+    r.setAttribute("height", layNum2(Math.max(0.5, h - bw)));
+    if (st.corner) r.setAttribute("rx", layNum2(Math.max(0, st.corner - bw / 2)));
+    r.setAttribute("fill", st.fill === "none" ? "none" : st.fill);
+    if (bw) {
+      r.setAttribute("stroke", st.borderColor);
+      r.setAttribute("stroke-width", String(bw));
+    }
+    g.appendChild(r);
+    var fs = st.fs, rot = layTextRotate(item);
+    var font = (item.italic ? "italic " : "") + (item.bold ? "700" : "400") +
+      " " + fs + "px sans-serif";
+    var inner = (layBoxTextRotated(item) ? h : w) - LAY_BOX_PAD_X * 2 - bw * 2;
+    var lines = wrapCaptionLines(String(item.text || "Box"),
+      Math.max(8, inner), fs, font);
+    var t = doc.createElementNS(ns, "text");
+    var cx = x + w / 2, cy = y + h / 2, lineH = fs * LAY_TEXT_LINE;
+    var top = cy - lines.length * lineH / 2;
+    t.setAttribute("x", layNum2(cx));
+    t.setAttribute("y", layNum2(top + fs * 0.9));
+    t.setAttribute("text-anchor", "middle");
+    t.setAttribute("fill", layTextColor(item));
+    t.setAttribute("font-size", String(fs));
+    t.setAttribute("font-family", "sans-serif");
+    t.setAttribute("font-weight", item.bold ? "700" : "400");
+    if (item.italic) t.setAttribute("font-style", "italic");
+    if (rot) t.setAttribute("transform", "rotate(" + rot + " " +
+      layNum2(cx) + " " + layNum2(cy) + ")");
+    for (var i = 0; i < lines.length; i++) {
+      var sp = doc.createElementNS(ns, "tspan");
+      sp.setAttribute("x", layNum2(cx));
+      if (i > 0) sp.setAttribute("dy", LAY_TEXT_LINE + "em");
+      sp.textContent = lines[i] || " ";
+      t.appendChild(sp);
+    }
+    g.appendChild(t);
+    return g;
+  }
+  function layoutArrowNode(doc, item) {
+    var ns = "http://www.w3.org/2000/svg", r = layArrowRender(item), st = r.style;
+    var g = doc.createElementNS(ns, "g");
+    var ox = Number(item.x) || 0, oy = Number(item.y) || 0;
+    var p = doc.createElementNS(ns, "path");
+    p.setAttribute("d", layArrowD(r.line, ox, oy));
+    p.setAttribute("fill", "none");
+    p.setAttribute("stroke", st.color);
+    p.setAttribute("stroke-width", String(st.width));
+    p.setAttribute("stroke-linejoin", "round");
+    g.appendChild(p);
+    for (var i = 0; i < r.heads.length; i++) {
+      var poly = doc.createElementNS(ns, "polygon");
+      poly.setAttribute("points", layArrowPoly(r.heads[i], ox, oy));
+      poly.setAttribute("fill", st.color);
+      g.appendChild(poly);
+    }
+    return g;
+  }
   function layoutExportSource(mode) {
     var ns = "http://www.w3.org/2000/svg";
     var doc = document.implementation.createDocument(ns, "svg", null);
@@ -5630,6 +5718,18 @@
       var item = items[i];
       if (item.kind === "chart" ||
           (item.kind === "image" && item.srcPin)) panelRect(item);
+      if (item.kind === "box") {
+        root.appendChild(layoutBoxNode(doc, item));
+        continue;
+      }
+      if (item.kind === "arrow") {
+        root.appendChild(layoutArrowNode(doc, item));
+        continue;
+      }
+      if (item.kind === "timeline") {
+        root.appendChild(layoutTimelineNode(doc, item));
+        continue;
+      }
       if (item.kind === "text") {
         root.appendChild(layoutTextNode(doc, item));
         continue;
@@ -11236,7 +11336,29 @@
       echoTimer = window.setTimeout(renderWhenEditorIdle, 120);
       return;
     }
+    // Keyboard focus rides the echo. The engine never refocuses the chart
+    // after a rebuild (in jamovi that scrolls the parent frame), so here,
+    // where there is no parent frame, the shell puts focus back when the
+    // rebuild dropped it to the page body. Without this an arrow-key nudge
+    // worked and, one echo later, Alt+Arrow or a bar step did nothing.
+    var hadChartFocus = chartSvgFocused();
     render();
+    if (hadChartFocus) restoreChartSvgFocus();
+  }
+  function chartSvgFocused() {
+    try {
+      var a = document.activeElement, h = hostEl();
+      return !!(a && h && a.getAttribute && h.contains(a) &&
+                a.getAttribute("data-role") === "gb2-chart-svg");
+    } catch (e) { return false; }
+  }
+  function restoreChartSvgFocus() {
+    try {
+      var a = document.activeElement;
+      if (a && a !== document.body && a !== document.documentElement) return;
+      var svg = hostEl().querySelector('svg[data-role="gb2-chart-svg"]');
+      if (svg && svg.focus) svg.focus({ preventScroll: true });
+    } catch (e) {}
   }
   // Echo delay: this debounce stands in for jamovi's R round trip.
   //
@@ -18500,6 +18622,23 @@
       c.nextLabel = n + 1;
       persist();
     });
+    // ONE menu for the figure parts (Sep 2026): three more commands would
+    // wrap the bar onto a second row at 1440 px, which was fixed once
+    // before, so Box, Arrow and the templates share a drop-down beside
+    // Add image.
+    el("ps-laddpart").addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (!isLayoutTab(activeChart())) return;
+      var r = e.currentTarget.getBoundingClientRect();
+      showContextMenu(r.left, r.bottom + 4, [
+        { label: "Box", key: "part-box", action: function () { layAddBox(); } },
+        { label: "Arrow", key: "part-arrow", action: function () { layAddArrow(); } },
+        { label: "Timeline", key: "part-timeline", action: function () { layAddTimeline(); } },
+        "separator",
+        { label: "Templates\u2026", key: "part-templates",
+          action: function () { showLayoutGallery(); } }
+      ], null);
+    });
     document.addEventListener("pointerdown", function (e) {
       // The menus ACT ON the selection, so pressing one is not clicking away.
       // Without the menu bar and the grid's own command bar on this list the
@@ -20042,7 +20181,45 @@
         "A portrait report page with a title area and a large chart.",
       note: "Uses the Presentation page preset.",
       preview: [[7, 24, 86, 68]],
-      portraitPreview: [[8, 18, 84, 74]], presentation: true }
+      portraitPreview: [[8, 18, 84, 74]], presentation: true },
+    // Diagram templates (Sep 2026): arrangements of boxes and arrows,
+    // always on a portrait page. Every part stays an ordinary item.
+    { key: "prisma", name: "PRISMA 2020", slots: 0, diagram: true,
+      portraitOnly: true, build: layBuildPrisma,
+      description: "The flow diagram for a systematic review: identification, " +
+        "screening and inclusion, with every count as a field to fill in.",
+      note: "Boxes and arrows you can edit, move and restyle.",
+      preview: [[6, 6, 8, 20], [20, 6, 36, 12], [62, 6, 34, 12],
+                [6, 30, 8, 40], [20, 30, 36, 10], [62, 30, 34, 10],
+                [20, 44, 36, 10], [62, 44, 34, 10], [20, 58, 36, 10],
+                [62, 58, 34, 12], [6, 78, 8, 14], [20, 78, 36, 14]] },
+    { key: "timeline", name: "Timeline over a chart", slots: 1, diagram: true,
+      build: layBuildProcedureTimeline,
+      description: "A procedure timeline across the top, with named ticks, " +
+        "day labels and a phase band, and your chart beneath it.",
+      note: "Line the ticks up with the chart's occasions by dragging them.",
+      preview: [[7, 8, 86, 14], [7, 28, 86, 64]],
+      portraitPreview: [[8, 6, 84, 11], [8, 22, 84, 70]] },
+    { key: "design", name: "Study design", slots: 0, diagram: true,
+      build: layBuildStudyDesign,
+      description: "Groups down the side, phases across the top, one box " +
+        "per cell and an arrow from phase to phase.",
+      note: "Rename the groups and phases, add or remove rows.",
+      preview: [[22, 14, 20, 16], [40, 14, 20, 16], [58, 14, 20, 16],
+                [22, 40, 20, 16], [40, 40, 20, 16], [58, 40, 20, 16],
+                [22, 66, 20, 16], [40, 66, 20, 16], [58, 66, 20, 16]],
+      portraitPreview: [[18, 16, 22, 12], [40, 16, 22, 12], [62, 16, 22, 12],
+                        [18, 40, 22, 12], [40, 40, 22, 12], [62, 40, 22, 12],
+                        [18, 64, 22, 12], [40, 64, 22, 12], [62, 64, 22, 12]] },
+    { key: "trial", name: "Trial sequence", slots: 0, diagram: true,
+      build: layBuildTrialSequence,
+      description: "Screens in a cascade over a timeline of their " +
+        "durations: fixation, cue, target, response.",
+      note: "Every screen is a box, so an image can replace any of them.",
+      preview: [[6, 6, 24, 30], [22, 22, 24, 30], [38, 38, 24, 30],
+                [54, 54, 24, 30], [6, 90, 80, 4]],
+      portraitPreview: [[6, 6, 30, 20], [24, 22, 30, 20], [42, 38, 30, 20],
+                        [60, 54, 30, 20], [6, 84, 88, 3]] }
   ];
   function layoutTemplateByKey(key) {
     for (var i = 0; i < LAYOUT_TEMPLATES.length; i++)
@@ -20053,7 +20230,8 @@
     return PROJECT.charts.filter(function (doc) { return !isLayoutTab(doc); });
   }
   function layoutTemplatePreview(def) {
-    var portrait = LAYOUT_TEMPLATE_ORIENTATION === "portrait";
+    var portrait = LAYOUT_TEMPLATE_ORIENTATION === "portrait" ||
+      !!def.portraitOnly;
     var box = mkEl("span", "ps-layout-template-preview" +
       (portrait ? " ps-layout-template-portrait" : ""));
     var preview = portrait && def.portraitPreview
@@ -20111,7 +20289,15 @@
       orientationButtons[oi].setAttribute("aria-pressed",
         orientationButtons[oi].getAttribute("data-layout-orientation") ===
         LAYOUT_TEMPLATE_ORIENTATION ? "true" : "false");
+    var headed = false;
     for (var i = 0; i < LAYOUT_TEMPLATES.length; i++) {
+      if (LAYOUT_TEMPLATES[i].diagram && !headed) {
+        headed = true;
+        var heading = mkEl("div", "ps-layout-template-heading", "Diagrams");
+        heading.setAttribute("role", "heading");
+        heading.setAttribute("aria-level", "3");
+        root.appendChild(heading);
+      }
       (function (def) {
         var button = mkEl("button", "ps-layout-template-card");
         button.type = "button";
@@ -21083,6 +21269,25 @@
     var def = layoutTemplateByKey(LAYOUT_TEMPLATE_KEY);
     var c = newLayout(), selects = el("ps-layout-template-assignments")
       .querySelectorAll("select[data-layout-slot]");
+    if (def.build) {
+      // A diagram template lays its own parts out. PRISMA is a fixed form
+      // on a portrait page; the others follow the orientation toggle and
+      // take the chart chosen for their slot, if they have one.
+      var portraitD = LAYOUT_TEMPLATE_ORIENTATION === "portrait";
+      if (def.portraitOnly)
+        c.page = { preset: "letterp", w: 816, h: 1056, margin: 40 };
+      else if (portraitD)
+        c.page = { preset: "canvasp", w: 672, h: 1008, margin: 32 };
+      var chartIds = [];
+      for (var si = 0; si < selects.length; si++) {
+        var cid = selects[si] && selects[si].value;
+        if (chartById(cid) && !isLayoutTab(chartById(cid))) chartIds.push(cid);
+      }
+      def.build(c, chartIds);
+      hideLayoutGallery();
+      activateNewLayout(c);
+      return;
+    }
     var portrait = LAYOUT_TEMPLATE_ORIENTATION === "portrait";
     if (def.presentation && portrait) {
       c.page = { preset: "letterp", w: 816, h: 1056, margin: 40 };
@@ -21412,8 +21617,15 @@
       name = chart ? ", " + (chart.name || "Untitled chart") : ", missing chart";
     } else if (item.kind === "image") {
       kind = item.srcChart ? "Notebook snapshot" : "Image item";
+    } else if (item.kind === "arrow") {
+      kind = "Arrow";
+      name = layArrowEndsText(item);
+    } else if (item.kind === "timeline") {
+      kind = "Timeline";
+      var tlNames = layTimelineLabelsText(item);
+      name = tlNames ? ', "' + tlNames + '"' : ", no named ticks";
     } else {
-      kind = "Text item";
+      kind = item.kind === "box" ? "Box" : "Text item";
       var copy = String(item.text || "Text").replace(/\s+/g, " ").trim();
       if (copy.length > 60) copy = copy.slice(0, 57) + "\u2026";
       name = ', "' + copy + '"';
@@ -21468,6 +21680,16 @@
     layAnnounce(layItemAccessibleLabel(items[next]) +
       (extend ? ", added to selection; " + laySelectedIds().length +
         " items selected" : ", selected"));
+  }
+  // Where a plain arrow may nudge when focus is NOT on the canvas: on
+  // nothing in particular, or on a plain control of this workspace (its
+  // toolbar, its rail). Anything that runs its own arrow keys keeps them.
+  function layArrowScopeOk(t) {
+    if (!t || t === document.body || t === document.documentElement) return true;
+    if (!t.closest) return false;
+    if (t.closest('[role="menu"],[role="menubar"],[role="tablist"],' +
+                  '[role="dialog"],[role="grid"],.ps-dialog-overlay')) return false;
+    return !!t.closest("#ps-layout, #ps-inspector-layout");
   }
   function layToggleActiveSelection() {
     var active = layActiveId();
@@ -21750,7 +21972,7 @@
     var ids = laySelectedIds(), out = [];
     for (var i = 0; i < ids.length; i++) {
       var it = layItemById(ids[i]);
-      if (it && it.kind === "text") out.push(it);
+      if (it && (it.kind === "text" || it.kind === "box")) out.push(it);
     }
     return out;
   }
@@ -22017,6 +22239,1507 @@
       layTextToggle("italic", "text italic");
     });
   }
+
+  // ---- Figure parts (Sep 2026, Torry: PRISMA and the basic paper
+  // diagrams belong in Layouts, beside the charts they explain; a
+  // figure, never a record). Two new item kinds:
+  //
+  //   box   the text item with a border, a fill, padding and corners.
+  //         Sized (w/h), so it resizes like a panel; the Text section
+  //         styles its text like any text item; F2 / double-click edits.
+  //   arrow two ends, each FREE (a page point) or ATTACHED to a box.
+  //         x/y/w/h is the bounding box of the drawn arrow and ax/ay/bx/by
+  //         are the ends relative to it, so every generic mover (drag,
+  //         nudge, align, refit, clamp) shifts a free arrow by shifting
+  //         x/y, and an attached end re-reads its box on every sync.
+  //         The side an attached end leaves from is never stored: it is
+  //         the side facing the other end, so a box can go anywhere.
+  //
+  // Refusals, on purpose: one shape (the rounded box), no icon library,
+  // straight or elbow routes only, no dates as data, nothing outside
+  // Layouts. Timelines and the other templates are slice two.
+  var LAY_BOX_FILLS = ["#ffffff", "#f4f7fb", "#eef4fc", "#dbe7f7",
+                       "#fdf6e3", "#e9f4df", "#fdf0f0", "none"];
+  var LAY_ARROW_COLORS = ["#22364d", "#5f6f80", "#94a3b1", "#417499",
+                          "#902634", "#266741"];
+  function layHexOr(v, dflt) {
+    return /^#[0-9a-fA-F]{3,8}$/.test(String(v || "")) ? v : dflt;
+  }
+  function layBoxFill(item) {
+    var f = String(item.fill || "");
+    if (f === "none" || f === "transparent") return "none";
+    return layHexOr(f, "#ffffff");
+  }
+  function layBoxBorder(item) {
+    return item.border === "none" || item.border === "thick"
+      ? item.border : "thin";
+  }
+  function layBoxStyle(item) {
+    var b = layBoxBorder(item);
+    return { fill: layBoxFill(item),
+             // Whole pixels on purpose: Chromium snaps a CSS border to a
+             // whole device pixel, so a 1.25 or 2.5 border drew narrower on
+             // the canvas than the file's stroke. Integers agree everywhere.
+             borderW: b === "none" ? 0 : b === "thick" ? 2 : 1,
+             borderColor: layHexOr(item.borderColor, "#22364d"),
+             corner: layClamp(item.corner == null ? 4 : item.corner, 0, 24),
+             fs: Math.max(8, Math.min(72, Number(item.fontSize) || 13)) };
+  }
+  var LAY_BOX_PAD_X = 8, LAY_BOX_PAD_Y = 4;
+  function layBoxTextRotated(item) {
+    return Math.abs(layTextRotate(item)) >= 45;
+  }
+  function layBoxNode(item) {
+    var st = layBoxStyle(item);
+    var box = mkEl("div", "ps-lbox");
+    box.style.background = st.fill === "none" ? "transparent" : st.fill;
+    box.style.border = st.borderW
+      ? st.borderW + "px solid " + st.borderColor : "0";
+    box.style.borderRadius = st.corner + "px";
+    box.style.fontSize = st.fs + "px";
+    box.style.fontWeight = item.bold ? "700" : "400";
+    box.style.fontStyle = item.italic ? "italic" : "normal";
+    box.style.color = layTextColor(item);
+    var span = mkEl("span", "", exportSafeText(item.text || "Box"));
+    var rot = layTextRotate(item);
+    if (rot) {
+      // Rotation stays on the inner text, as for text items. A side
+      // label (PRISMA's Identification / Screening / Included bars) is a
+      // tall narrow box whose text runs along its height, so the text
+      // lays out at the box's inner HEIGHT before it turns.
+      span.style.transform = "rotate(" + rot + "deg)";
+      span.style.transformOrigin = "center center";
+      if (layBoxTextRotated(item)) {
+        span.style.width = Math.max(8, (Number(item.h) || 44) -
+          LAY_BOX_PAD_Y * 2 - st.borderW * 2) + "px";
+        span.style.maxWidth = "none";
+        span.style.flex = "0 0 auto";
+      }
+    }
+    box.appendChild(span);
+    return box;
+  }
+  function layBoxTargets() {
+    var ids = laySelectedIds(), out = [];
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (it && it.kind === "box") out.push(it);
+    }
+    return out;
+  }
+  function layArrowTargets() {
+    var ids = laySelectedIds(), out = [];
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (it && it.kind === "arrow") out.push(it);
+    }
+    return out;
+  }
+  // layTextApply's shape, for a named set of targets.
+  function layPartApply(targets, label, key, fn, live) {
+    if (!targets.length) return;
+    var ids = [];
+    for (var k = 0; k < targets.length; k++) ids.push(targets[k].id);
+    laySnapshot(label, key ? key + ":" + ids.join(",") : null);
+    for (var i = 0; i < targets.length; i++) fn(targets[i]);
+    layClampAllItems();
+    persist(!live);
+    renderLayout();
+  }
+  function layArrowStyle(item) {
+    return { width: layClamp(item.width == null ? 1.5 : item.width, 0.5, 6),
+             color: layHexOr(item.color, "#22364d"),
+             route: item.route === "straight" ? "straight" : "elbow",
+             heads: item.heads === "none" || item.heads === "both"
+               ? item.heads : "end" };
+  }
+  function layArrowHeadLen(w) { return 7 + w * 2.5; }
+  // Which side of a box an end leaves from: the side facing the other
+  // end, judged in the box's own proportions so a wide box prefers its
+  // long sides. Computed, never stored.
+  function layArrowSideOf(rect, ox, oy) {
+    var cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
+    var dx = ox - cx, dy = oy - cy;
+    var hx = Math.max(1, rect.w / 2), hy = Math.max(1, rect.h / 2);
+    if (Math.abs(dx) / hx >= Math.abs(dy) / hy)
+      return dx >= 0 ? { x: rect.x + rect.w, y: cy, side: "r" }
+                     : { x: rect.x, y: cy, side: "l" };
+    return dy >= 0 ? { x: cx, y: rect.y + rect.h, side: "b" }
+                   : { x: cx, y: rect.y, side: "t" };
+  }
+  function layArrowAnchorBox(ref) {
+    if (!ref || !ref.id) return null;
+    var it = layItemById(ref.id);
+    if (!it || it.kind !== "box") return null;
+    return { x: Number(it.x) || 0, y: Number(it.y) || 0,
+             w: Number(it.w) || 150, h: Number(it.h) || 44 };
+  }
+  // The polyline between two ends. An attached end must LEAVE its box
+  // through the side it sits on, so a horizontal side gets a horizontal
+  // first or last segment; a free end takes whatever the other end needs.
+  function layArrowPoints(A, B, route) {
+    if (route === "straight")
+      return [{ x: A.x, y: A.y }, { x: B.x, y: B.y }];
+    var aH = A.side === "l" || A.side === "r";
+    var aV = A.side === "t" || A.side === "b";
+    var bH = B.side === "l" || B.side === "r";
+    var bV = B.side === "t" || B.side === "b";
+    if (aH && bV) return [{ x: A.x, y: A.y }, { x: B.x, y: A.y }, { x: B.x, y: B.y }];
+    if (aV && bH) return [{ x: A.x, y: A.y }, { x: A.x, y: B.y }, { x: B.x, y: B.y }];
+    var horizontal = aH || (!aV && (bH || (!bV &&
+      Math.abs(B.x - A.x) >= Math.abs(B.y - A.y))));
+    if (horizontal) {
+      var mx = (A.x + B.x) / 2;
+      return [{ x: A.x, y: A.y }, { x: mx, y: A.y }, { x: mx, y: B.y },
+              { x: B.x, y: B.y }];
+    }
+    var my = (A.y + B.y) / 2;
+    return [{ x: A.x, y: A.y }, { x: A.x, y: my }, { x: B.x, y: my },
+            { x: B.x, y: B.y }];
+  }
+  // Resolve both ends to page points and re-express the item as the
+  // box around them. Returns the absolute ends and the polyline.
+  function layArrowSync(item) {
+    var st = layArrowStyle(item);
+    var x0 = Number(item.x) || 0, y0 = Number(item.y) || 0;
+    var A = { x: x0 + (Number(item.ax) || 0), y: y0 + (Number(item.ay) || 0) };
+    var B = { x: x0 + (Number(item.bx) || 0), y: y0 + (Number(item.by) || 0) };
+    var ra = layArrowAnchorBox(item.from), rb = layArrowAnchorBox(item.to);
+    if (ra && rb) {
+      A = layArrowSideOf(ra, rb.x + rb.w / 2, rb.y + rb.h / 2);
+      B = layArrowSideOf(rb, ra.x + ra.w / 2, ra.y + ra.h / 2);
+    } else if (ra) A = layArrowSideOf(ra, B.x, B.y);
+    else if (rb) B = layArrowSideOf(rb, A.x, A.y);
+    // A box that is gone (deleted, or this arrow was pasted into another
+    // figure) leaves the end where it last was, as a free end.
+    if (!ra && item.from) item.from = null;
+    if (!rb && item.to) item.to = null;
+    var pts = layArrowPoints(A, B, st.route);
+    var pad = layArrowHeadLen(st.width) + st.width + 6;
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (var i = 0; i < pts.length; i++) {
+      if (pts[i].x < minX) minX = pts[i].x;
+      if (pts[i].x > maxX) maxX = pts[i].x;
+      if (pts[i].y < minY) minY = pts[i].y;
+      if (pts[i].y > maxY) maxY = pts[i].y;
+    }
+    item.x = minX - pad; item.y = minY - pad;
+    item.w = (maxX - minX) + pad * 2; item.h = (maxY - minY) + pad * 2;
+    item.ax = A.x - item.x; item.ay = A.y - item.y;
+    item.bx = B.x - item.x; item.by = B.y - item.y;
+    return { a: A, b: B, pts: pts };
+  }
+  // The drawn geometry, relative to the item box: the line trimmed back
+  // from each headed end so the stroke never pokes through the head, and
+  // the head triangles.
+  function layArrowRender(item) {
+    var ends = layArrowSync(item), st = layArrowStyle(item), i;
+    var clean = [], p;
+    for (i = 0; i < ends.pts.length; i++) {
+      p = { x: ends.pts[i].x - item.x, y: ends.pts[i].y - item.y };
+      var q = clean[clean.length - 1];
+      if (!q || Math.abs(p.x - q.x) > 0.01 || Math.abs(p.y - q.y) > 0.01)
+        clean.push(p);
+    }
+    if (clean.length === 1) clean.push({ x: clean[0].x + 0.01, y: clean[0].y });
+    var len = layArrowHeadLen(st.width), half = len * 0.42, heads = [];
+    function head(tip, prev) {
+      var dx = tip.x - prev.x, dy = tip.y - prev.y;
+      var L = Math.sqrt(dx * dx + dy * dy) || 1;
+      var ux = dx / L, uy = dy / L;
+      var bx = tip.x - ux * len, by = tip.y - uy * len;
+      heads.push([{ x: tip.x, y: tip.y },
+                  { x: bx - uy * half, y: by + ux * half },
+                  { x: bx + uy * half, y: by - ux * half }]);
+      return { x: bx + ux * 0.5, y: by + uy * 0.5 };
+    }
+    if (st.heads === "end" || st.heads === "both")
+      clean[clean.length - 1] = head(clean[clean.length - 1],
+                                     clean[clean.length - 2]);
+    if (st.heads === "both") clean[0] = head(clean[0], clean[1]);
+    return { line: clean, heads: heads, style: st, ends: ends };
+  }
+  function layNum2(v) { return String(Math.round(v * 100) / 100); }
+  function layArrowD(pts, ox, oy) {
+    var d = "";
+    for (var i = 0; i < pts.length; i++)
+      d += (i ? " L" : "M") + layNum2(pts[i].x + ox) + " " +
+        layNum2(pts[i].y + oy);
+    return d;
+  }
+  function layArrowPoly(tri, ox, oy) {
+    var out = [];
+    for (var i = 0; i < tri.length; i++)
+      out.push(layNum2(tri[i].x + ox) + "," + layNum2(tri[i].y + oy));
+    return out.join(" ");
+  }
+  function layArrowSvg(item, selected) {
+    var r = layArrowRender(item), st = r.style;
+    var ns = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("width", layNum2(item.w));
+    svg.setAttribute("height", layNum2(item.h));
+    svg.setAttribute("viewBox", "0 0 " + layNum2(item.w) + " " + layNum2(item.h));
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    var d = layArrowD(r.line, 0, 0), i;
+    if (selected) {
+      var halo = document.createElementNS(ns, "path");
+      halo.setAttribute("class", "ps-larrow-halo");
+      halo.setAttribute("d", d);
+      halo.setAttribute("fill", "none");
+      halo.setAttribute("stroke-width", String(st.width + 8));
+      halo.setAttribute("stroke-linejoin", "round");
+      halo.setAttribute("stroke-linecap", "round");
+      svg.appendChild(halo);
+    }
+    var hit = document.createElementNS(ns, "path");
+    hit.setAttribute("class", "ps-larrow-hit");
+    hit.setAttribute("d", d);
+    hit.setAttribute("stroke-width", String(Math.max(16, st.width + 12)));
+    svg.appendChild(hit);
+    var line = document.createElementNS(ns, "path");
+    line.setAttribute("d", d);
+    line.setAttribute("fill", "none");
+    line.setAttribute("stroke", st.color);
+    line.setAttribute("stroke-width", String(st.width));
+    line.setAttribute("stroke-linejoin", "round");
+    svg.appendChild(line);
+    for (i = 0; i < r.heads.length; i++) {
+      var poly = document.createElementNS(ns, "polygon");
+      poly.setAttribute("points", layArrowPoly(r.heads[i], 0, 0));
+      poly.setAttribute("fill", st.color);
+      svg.appendChild(poly);
+    }
+    return svg;
+  }
+  function layBoxLabel(id) {
+    var it = layItemById(id);
+    if (!it) return null;
+    var t = String(it.text || "Box").replace(/\s+/g, " ").trim();
+    if (t.length > 40) t = t.slice(0, 37) + "…";
+    return t;
+  }
+  function layArrowEndsText(item) {
+    var f = item.from ? layBoxLabel(item.from.id) : null;
+    var t = item.to ? layBoxLabel(item.to.id) : null;
+    if (f && t) return ' from "' + f + '" to "' + t + '"';
+    if (f) return ' from "' + f + '" to a free end';
+    if (t) return ' from a free end to "' + t + '"';
+    return ", free at both ends";
+  }
+  function layArrowTip(item) {
+    return "Arrow" + layArrowEndsText(item) +
+      ". Drag an end onto a box to attach it.";
+  }
+  function layArrowReverse(item) {
+    var f = item.from, ax = item.ax, ay = item.ay;
+    item.from = item.to; item.to = f;
+    item.ax = item.bx; item.ay = item.by;
+    item.bx = ax; item.by = ay;
+  }
+  function layAttachArrowEnds(node, item) {
+    var ends = layArrowSync(item);
+    var spec = [["a", ends.a, !!item.from], ["b", ends.b, !!item.to]];
+    for (var i = 0; i < spec.length; i++) {
+      var h = mkEl("div", "ps-lhandle-end" +
+        (spec[i][2] ? " ps-lhandle-end-attached" : ""));
+      h.setAttribute("data-role", "lay-arrow-end");
+      h.setAttribute("data-end", spec[i][0]);
+      h.setAttribute("aria-hidden", "true");
+      h.style.left = layNum2(spec[i][1].x - item.x) + "px";
+      h.style.top = layNum2(spec[i][1].y - item.y) + "px";
+      setTip(h, spec[i][2]
+        ? "Attached to a box. Drag it away to free this end, or onto another box."
+        : "Drag onto a box to attach this end.");
+      node.appendChild(h);
+    }
+  }
+  // Rebuild ONE arrow's node in place. During a gesture a full
+  // renderLayout would destroy the element the pointer is holding.
+  function layArrowRefresh(it) {
+    var cv = el("ps-lcanvas");
+    var old = cv && cv.querySelector('.ps-litem[data-item-id="' + it.id + '"]');
+    if (!old) return;
+    var fresh = layBuildItem(it);
+    if (old.classList.contains("ps-litem-dragging"))
+      fresh.classList.add("ps-litem-dragging");
+    old.parentNode.replaceChild(fresh, old);
+  }
+  // Every arrow attached to any of these items follows them.
+  function layArrowsFollow(ids) {
+    var items = layItems();
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      if (it.kind !== "arrow") continue;
+      var f = it.from && it.from.id, t = it.to && it.to.id;
+      if ((f && ids.indexOf(f) !== -1) || (t && ids.indexOf(t) !== -1) ||
+          ids.indexOf(it.id) !== -1) layArrowRefresh(it);
+    }
+  }
+  // A removed box frees the ends that were attached to it; the offsets
+  // written at the last sync keep each end exactly where it was drawn.
+  function layArrowsDetachFrom(ids) {
+    var items = layItems();
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      if (it.kind !== "arrow") continue;
+      if (it.from && ids.indexOf(it.from.id) !== -1) it.from = null;
+      if (it.to && ids.indexOf(it.to.id) !== -1) it.to = null;
+    }
+  }
+  // Copies of arrows point at the COPIES of their boxes when those were
+  // copied too, and at nothing otherwise (a free end where the original
+  // was attached), never at the originals.
+  function layArrowsRemap(ids, idMap) {
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (!it || it.kind !== "arrow") continue;
+      if (it.from) it.from = idMap[it.from.id] ? { id: idMap[it.from.id] } : null;
+      if (it.to) it.to = idMap[it.to.id] ? { id: idMap[it.to.id] } : null;
+    }
+  }
+  function layBoxAt(px, py, except) {
+    var items = layItems();
+    for (var i = items.length - 1; i >= 0; i--) {
+      var it = items[i];
+      if (it.kind !== "box" || it === except) continue;
+      var r = layItemRect(it);
+      if (px >= r.x && px <= r.right && py >= r.y && py <= r.bottom) return it;
+    }
+    return null;
+  }
+  // An end being dragged: over a box it attaches (the box lights up as
+  // the drop target), elsewhere it is a free point on the grid.
+  function layArrowEndDrag(d, e) {
+    var cv = el("ps-lcanvas");
+    if (!cv) return;
+    var box = cv.getBoundingClientRect(), z = d.zoom;
+    var v = layView(), p = layPage();
+    var px = layClamp((e.clientX - box.left) / z, 0, p.w);
+    var py = layClamp((e.clientY - box.top) / z, 0, p.h);
+    var it = d.arrow, key = d.arrowEnd === "a" ? "from" : "to";
+    var target = layBoxAt(px, py, null);
+    if (target) it[key] = { id: target.id };
+    else {
+      it[key] = null;
+      if (v.snap) {
+        px = Math.round(px / v.grid) * v.grid;
+        py = Math.round(py / v.grid) * v.grid;
+      }
+      if (d.arrowEnd === "a") {
+        it.ax = px - (Number(it.x) || 0); it.ay = py - (Number(it.y) || 0);
+      } else {
+        it.bx = px - (Number(it.x) || 0); it.by = py - (Number(it.y) || 0);
+      }
+    }
+    layArrowRefresh(it);
+    var lit = cv.querySelectorAll(".ps-litem-droptarget");
+    for (var i = 0; i < lit.length; i++)
+      lit[i].classList.remove("ps-litem-droptarget");
+    if (target) {
+      var node = cv.querySelector('.ps-litem[data-item-id="' + target.id + '"]');
+      if (node) node.classList.add("ps-litem-droptarget");
+    }
+  }
+  function layAddBox() {
+    var p = layPage(), items = layItems(), w = 150, h = 44;
+    var spot = layPlaceRect(items, p, w, h);
+    var grew = spot.needH > p.h;
+    var id = layAddItem({ id: layNewItemId(), kind: "box", text: "Box",
+      fontSize: 13, x: spot.x, y: spot.y, w: w, h: h, fill: "#ffffff",
+      border: "thin", corner: 4 }, false, spot.needH);
+    layGrewNote(grew, spot.capped);
+    layAnnounce("Added a box. Double-click it to edit the text.");
+    return id;
+  }
+  // With a box selected the new arrow starts attached to it, free end to
+  // the right; otherwise a free arrow lands in clear space.
+  function layAddArrow() {
+    var p = layPage(), items = layItems();
+    var sel = laySelectedIds(), fromBox = null;
+    for (var i = 0; i < sel.length; i++) {
+      var s = layItemById(sel[i]);
+      if (s && s.kind === "box") fromBox = s;
+    }
+    var item = { id: layNewItemId(), kind: "arrow", route: "elbow",
+                 heads: "end", width: 1.5, color: "#22364d",
+                 from: null, to: null, x: 0, y: 0 };
+    if (fromBox) {
+      var r = layItemRect(fromBox);
+      var ey = r.y + r.h / 2;
+      var ex = r.right + 120 <= p.w - 8 ? r.right + 120 : r.x - 120;
+      item.from = { id: fromBox.id };
+      item.ax = r.right; item.ay = ey; item.bx = ex; item.by = ey;
+    } else {
+      var spot = layPlaceRect(items, p, 160, 24);
+      item.ax = spot.x; item.ay = spot.y + 12;
+      item.bx = spot.x + 160; item.by = spot.y + 12;
+    }
+    layArrowSync(item);
+    var id = layAddItem(item, false, p.h);
+    layAnnounce(fromBox
+      ? "Added an arrow from the selected box. Drag its free end onto another box to attach it."
+      : "Added an arrow. Drag either end onto a box to attach it.");
+    return id;
+  }
+  function layBoxSyncControls(items) {
+    var item = items[0];
+    function agree(read) {
+      for (var i = 1; i < items.length; i++)
+        if (read(items[i]) !== read(items[0])) return false;
+      return true;
+    }
+    var fill = layBoxFill(item), fillMixed = !agree(layBoxFill);
+    var chips = el("ps-lbox-fills").querySelectorAll("button[data-fill]");
+    var fillHit = false;
+    for (var i = 0; i < chips.length; i++) {
+      var fon = !fillMixed && chips[i].getAttribute("data-fill") === fill;
+      if (fon) fillHit = true;
+      chips[i].setAttribute("aria-pressed", fon ? "true" : "false");
+    }
+    layPaintCustomChip("ps-lbox-fillcustom", fill === "none" ? "#ffffff" : fill,
+      !fillMixed && !fillHit);
+    var bcol = layBoxStyle(item).borderColor;
+    layPaintCustomChip("ps-lbox-bordercolor", bcol, false);
+    var border = layBoxBorder(item), borderMixed = !agree(layBoxBorder);
+    var segs = document.querySelectorAll("[data-lbox-border]");
+    for (i = 0; i < segs.length; i++)
+      segs[i].setAttribute("aria-pressed",
+        !borderMixed && segs[i].getAttribute("data-lbox-border") === border
+          ? "true" : "false");
+    var corner = layBoxStyle(item).corner;
+    var cornerMixed = !agree(function (t) { return layBoxStyle(t).corner; });
+    var rg = el("ps-lbox-corner"), nm = el("ps-lbox-corner-num");
+    if (rg && document.activeElement !== rg) rg.value = String(corner);
+    if (nm && document.activeElement !== nm) {
+      if (cornerMixed) { nm.value = ""; nm.placeholder = "Mixed"; }
+      else { nm.value = String(corner); nm.placeholder = ""; }
+    }
+  }
+  function layArrowSyncControls(items) {
+    var item = items[0], st = layArrowStyle(item);
+    function agree(read) {
+      for (var i = 1; i < items.length; i++)
+        if (read(items[i]) !== read(items[0])) return false;
+      return true;
+    }
+    var routeMixed = !agree(function (t) { return layArrowStyle(t).route; });
+    var headsMixed = !agree(function (t) { return layArrowStyle(t).heads; });
+    var segs = document.querySelectorAll("[data-larrow-route]"), i;
+    for (i = 0; i < segs.length; i++)
+      segs[i].setAttribute("aria-pressed",
+        !routeMixed && segs[i].getAttribute("data-larrow-route") === st.route
+          ? "true" : "false");
+    segs = document.querySelectorAll("[data-larrow-heads]");
+    for (i = 0; i < segs.length; i++)
+      segs[i].setAttribute("aria-pressed",
+        !headsMixed && segs[i].getAttribute("data-larrow-heads") === st.heads
+          ? "true" : "false");
+    var widthMixed = !agree(function (t) { return layArrowStyle(t).width; });
+    var rg = el("ps-larrow-width"), nm = el("ps-larrow-width-num");
+    if (rg && document.activeElement !== rg) rg.value = String(st.width);
+    if (nm && document.activeElement !== nm) {
+      if (widthMixed) { nm.value = ""; nm.placeholder = "Mixed"; }
+      else { nm.value = String(st.width); nm.placeholder = ""; }
+    }
+    var colMixed = !agree(function (t) { return layArrowStyle(t).color.toLowerCase(); });
+    var chips = el("ps-larrow-colors").querySelectorAll("button[data-color]");
+    var colHit = false;
+    for (i = 0; i < chips.length; i++) {
+      var on = !colMixed && chips[i].getAttribute("data-color") === st.color.toLowerCase();
+      if (on) colHit = true;
+      chips[i].setAttribute("aria-pressed", on ? "true" : "false");
+    }
+    layPaintCustomChip("ps-larrow-custom", st.color, !colMixed && !colHit);
+    // The attachment selects list every box by its text. Meaningful for
+    // ONE arrow; a set of arrows keeps them disabled with the reason.
+    var sels = [["ps-larrow-from", "from"], ["ps-larrow-to", "to"]];
+    var boxes = layItems().filter(function (b) { return b.kind === "box"; });
+    for (i = 0; i < sels.length; i++) {
+      var sel = el(sels[i][0]);
+      if (!sel) continue;
+      var cur = items.length === 1 && item[sels[i][1]] ? item[sels[i][1]].id : "";
+      sel.innerHTML = "";
+      var free = document.createElement("option");
+      free.value = ""; free.textContent = "Free end";
+      sel.appendChild(free);
+      for (var b = 0; b < boxes.length; b++) {
+        var opt = document.createElement("option");
+        opt.value = boxes[b].id;
+        opt.textContent = layBoxLabel(boxes[b].id) || boxes[b].id;
+        sel.appendChild(opt);
+      }
+      sel.value = cur;
+      sel.disabled = items.length !== 1;
+      setTip(sel, items.length !== 1
+        ? "Attachment applies to one arrow at a time." : "");
+    }
+  }
+  function wireLayoutPartControls() {
+    var fills = el("ps-lbox-fills");
+    if (!fills) return;
+    var fillNames = { "#ffffff": "White", "#f4f7fb": "Paper", "#eef4fc": "Sky",
+      "#dbe7f7": "Blue", "#fdf6e3": "Cream", "#e9f4df": "Green",
+      "#fdf0f0": "Rose", none: "No fill" };
+    var i;
+    for (i = 0; i < LAY_BOX_FILLS.length; i++) (function (c) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("data-fill", c);
+      b.setAttribute("aria-label", (fillNames[c] || c) + " fill");
+      b.setAttribute("aria-pressed", "false");
+      if (c === "none") {
+        b.style.background = "linear-gradient(45deg,#cbd1d8 25%,transparent 25%," +
+          "transparent 75%,#cbd1d8 75%),linear-gradient(45deg,#cbd1d8 25%," +
+          "#fff 25%,#fff 75%,#cbd1d8 75%)";
+        b.style.backgroundSize = "8px 8px";
+        b.style.backgroundPosition = "0 0,4px 4px";
+      } else b.style.background = c;
+      setTip(b, fillNames[c] || c);
+      b.addEventListener("click", function () {
+        layPartApply(layBoxTargets(), "box fill", null,
+          function (it) { it.fill = c; });
+      });
+      fills.appendChild(b);
+    })(LAY_BOX_FILLS[i]);
+    layWireCustomChip("ps-lbox-fillcustom", layBoxTargets, "fill", "box fill", "#ffffff");
+    layWireCustomChip("ps-lbox-bordercolor", layBoxTargets, "borderColor", "box border color", "#22364d");
+    layWireCustomChip("ps-larrow-custom", layArrowTargets, "color", "arrow color", "#22364d");
+    var borders = document.querySelectorAll("[data-lbox-border]");
+    for (i = 0; i < borders.length; i++) (function (btn) {
+      btn.addEventListener("click", function () {
+        var v = btn.getAttribute("data-lbox-border");
+        layPartApply(layBoxTargets(), "box border", null,
+          function (it) { it.border = v; });
+      });
+    })(borders[i]);
+    function wirePair(rangeId, numId, targetsFn, label, key, setter) {
+      var r = el(rangeId), n = el(numId);
+      if (!r || !n) return;
+      r.addEventListener("input", function () {
+        var v = Number(r.value);
+        layPartApply(targetsFn(), label, key,
+          function (it) { setter(it, v); }, true);
+      });
+      r.addEventListener("change", function () { persist(); });
+      n.addEventListener("change", function () {
+        var v = Number(n.value);
+        if (!isFinite(v)) return;
+        layPartApply(targetsFn(), label, null, function (it) { setter(it, v); });
+      });
+    }
+    wirePair("ps-lbox-corner", "ps-lbox-corner-num", layBoxTargets,
+      "box corner", "lbox-corner", function (it, v) {
+        it.corner = layClamp(Math.round(v), 0, 24);
+      });
+    var routes = document.querySelectorAll("[data-larrow-route]");
+    for (i = 0; i < routes.length; i++) (function (btn) {
+      btn.addEventListener("click", function () {
+        var v = btn.getAttribute("data-larrow-route");
+        layPartApply(layArrowTargets(), "arrow route", null,
+          function (it) { it.route = v; });
+      });
+    })(routes[i]);
+    var heads = document.querySelectorAll("[data-larrow-heads]");
+    for (i = 0; i < heads.length; i++) (function (btn) {
+      btn.addEventListener("click", function () {
+        var v = btn.getAttribute("data-larrow-heads");
+        layPartApply(layArrowTargets(), "arrow heads", null,
+          function (it) { it.heads = v; });
+      });
+    })(heads[i]);
+    wirePair("ps-larrow-width", "ps-larrow-width-num", layArrowTargets,
+      "arrow width", "larrow-width", function (it, v) {
+        it.width = layClamp(Math.round(v * 2) / 2, 0.5, 6);
+      });
+    var colors = el("ps-larrow-colors");
+    var colorNames = { "#22364d": "Ink", "#5f6f80": "Muted", "#94a3b1": "Faint",
+      "#417499": "Blue", "#902634": "Red", "#266741": "Green" };
+    for (i = 0; i < LAY_ARROW_COLORS.length; i++) (function (c) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("data-color", c);
+      b.setAttribute("aria-label", (colorNames[c] || c) + " arrow");
+      b.setAttribute("aria-pressed", "false");
+      b.style.background = c;
+      setTip(b, colorNames[c] || c);
+      b.addEventListener("click", function () {
+        layPartApply(layArrowTargets(), "arrow color", null,
+          function (it) { it.color = c; });
+      });
+      colors.appendChild(b);
+    })(LAY_ARROW_COLORS[i]);
+    var sels = [["ps-larrow-from", "from"], ["ps-larrow-to", "to"]];
+    for (i = 0; i < sels.length; i++) (function (id, key) {
+      var sel = el(id);
+      if (!sel) return;
+      sel.addEventListener("change", function () {
+        var v = sel.value;
+        layPartApply(layArrowTargets(), "attach arrow", null,
+          function (it) { it[key] = v ? { id: v } : null; });
+      });
+    })(sels[i][0], sels[i][1]);
+  }
+  // The PRISMA 2020 flow diagram for a new systematic review of
+  // databases and registers (Page et al., 2021): the mandated boxes, the
+  // arrows between them and the three side labels, with every count left
+  // as a field to fill in. Every part is an ordinary item afterward.
+  function layBuildPrisma(c) {
+    var n = 0, ids = {};
+    function box(key, x, y, w, h, text, extra) {
+      var it = { id: "i" + (++n), kind: "box", text: text, fontSize: 11,
+                 x: x, y: y, w: w, h: h, fill: "#ffffff", border: "thin",
+                 corner: 2 };
+      if (extra) for (var k in extra) if (extra.hasOwnProperty(k)) it[k] = extra[k];
+      c.items.push(it);
+      ids[key] = it.id;
+      return it;
+    }
+    function arrow(fromKey, toKey) {
+      var it = { id: "i" + (++n), kind: "arrow",
+                 from: { id: ids[fromKey] }, to: { id: ids[toKey] },
+                 route: "elbow", heads: "end", width: 1.25, color: "#22364d",
+                 x: 0, y: 0, ax: 0, ay: 0, bx: 0, by: 0 };
+      c.items.push(it);
+    }
+    var L = 104, R = 464, W = 300, S = 44, SW = 36;
+    var side = { fill: "#dbe7f7", border: "none", bold: true, rotate: -90,
+                 corner: 2 };
+    c.items.push({ id: "i" + (++n), kind: "text",
+                   text: "PRISMA 2020 flow diagram", fontSize: 14,
+                   bold: true, x: 40, y: 22 });
+    box("side1", S, 64, SW, 104, "Identification", side);
+    box("side2", S, 220, SW, 268, "Screening", side);
+    box("side3", S, 560, SW, 76, "Included", side);
+    box("ident", L, 64, W, 76,
+        "Records identified from:\nDatabases (n = )\nRegisters (n = )");
+    // Right-hand boxes are centred on their left partner so the arrow
+    // between them runs straight, as the published diagram draws it.
+    box("removed", R, 50, W, 104,
+        "Records removed before screening:\nDuplicate records removed (n = )\n" +
+        "Records marked as ineligible by automation tools (n = )\n" +
+        "Records removed for other reasons (n = )");
+    box("screened", L, 220, W, 48, "Records screened\n(n = )");
+    box("excluded", R, 220, W, 48, "Records excluded\n(n = )");
+    box("sought", L, 316, W, 48, "Reports sought for retrieval\n(n = )");
+    box("notret", R, 316, W, 48, "Reports not retrieved\n(n = )");
+    box("assessed", L, 412, W, 48, "Reports assessed for eligibility\n(n = )");
+    box("rexcl", R, 398, W, 76,
+        "Reports excluded:\nReason 1 (n = )\nReason 2 (n = )\nReason 3 (n = )");
+    box("included", L, 560, W, 76,
+        "Studies included in review\n(n = )\nReports of included studies\n(n = )");
+    arrow("ident", "removed"); arrow("ident", "screened");
+    arrow("screened", "excluded"); arrow("screened", "sought");
+    arrow("sought", "notret"); arrow("sought", "assessed");
+    arrow("assessed", "rexcl"); arrow("assessed", "included");
+  }
+
+  // ---- Timeline (figure parts, slice two): one line with named ticks at
+  // positions along it (0..1), labels above or below, plain or arrowed
+  // ends, and phase bands between two ticks. Labels and positions only,
+  // never a date anything computes from (the figures-not-records line).
+  var LAY_TL_BAND_FILLS = ["#e8f0fb", "#fdf6e3", "#e9f4df", "#fdf0f0",
+                           "#eef4fc", "#f4f7fb"];
+  function layTimelineStyle(item) {
+    return { fs: layClamp(item.fontSize == null ? 11 : item.fontSize, 8, 24),
+             color: layHexOr(item.color, "#22364d"),
+             width: layClamp(item.width == null ? 1.5 : item.width, 0.5, 4),
+             // Tick marks default to the line's own width; each tick may
+             // carry its own (Torry: "individually and as a group").
+             tickWidth: item.tickWidth == null ? null
+               : layClamp(item.tickWidth, 0.5, 6),
+             tickLen: layClamp(item.tickLen == null ? 12 : item.tickLen, 4, 40),
+             labels: item.labels === "below" ? "below" : "above",
+             ends: item.ends === "arrow" ? "arrow" : "plain" };
+  }
+  function layTickWidth(st, tick) {
+    if (tick && tick.width != null && isFinite(tick.width)) return layClamp(tick.width, 0.5, 6);
+    return st.tickWidth != null ? st.tickWidth : st.width;
+  }
+  function layTimelineTicks(item) {
+    var out = [], src = Array.isArray(item.ticks) ? item.ticks : [];
+    for (var i = 0; i < src.length; i++) {
+      var t = src[i] || {};
+      out.push({ pos: layClamp(t.pos, 0, 1),
+                 label: String(t.label == null ? "" : t.label),
+                 sub: String(t.sub == null ? "" : t.sub),
+                 width: t.width == null || !isFinite(Number(t.width)) ? null : Number(t.width) });
+    }
+    return out;
+  }
+  function layTimelineBands(item, nTicks) {
+    var out = [], src = Array.isArray(item.bands) ? item.bands : [];
+    for (var i = 0; i < src.length; i++) {
+      var b = src[i] || {};
+      var a = Math.round(Number(b.a)), z = Math.round(Number(b.b));
+      if (!(a >= 0 && a < nTicks && z >= 0 && z < nTicks) || a === z) continue;
+      out.push({ a: Math.min(a, z), b: Math.max(a, z), i: i,
+                 label: String(b.label == null ? "" : b.label),
+                 fill: layHexOr(b.fill, "#e8f0fb") });
+    }
+    return out;
+  }
+  // Geometry in item coordinates. Main labels sit on the chosen side of
+  // the line; band labels and sub-labels stack on the other side, so the
+  // four rows never collide: label, line (with bands), band label, sub.
+  function layTimelineGeom(item) {
+    var st = layTimelineStyle(item);
+    var w = Math.max(80, Number(item.w) || 360);
+    var h = Math.max(40, Number(item.h) || 84);
+    var pad = 14, x0 = pad, x1 = w - pad, lineY = Math.round(h / 2);
+    var above = st.labels === "above";
+    var g = { st: st, w: w, h: h, x0: x0, x1: x1, lineY: lineY,
+              labelY: above ? lineY - 12 : lineY + 12 + st.fs * 0.8,
+              bandLabelY: above ? lineY + 12 + st.fs * 0.8 : lineY - 12,
+              subY: above ? lineY + 12 + st.fs * 0.8 + st.fs + 4
+                          : lineY - 12 - st.fs - 4,
+              headLen: st.ends === "arrow" ? 8 + st.width * 2 : 0,
+              ticks: [], bands: [] };
+    var ticks = layTimelineTicks(item);
+    for (var i = 0; i < ticks.length; i++)
+      g.ticks.push({ x: x0 + ticks[i].pos * (x1 - x0), pos: ticks[i].pos,
+                     width: ticks[i].width,
+                     label: ticks[i].label, sub: ticks[i].sub });
+    var bands = layTimelineBands(item, ticks.length);
+    for (var k = 0; k < bands.length; k++)
+      g.bands.push({ x0: g.ticks[bands[k].a].x, x1: g.ticks[bands[k].b].x,
+                     label: bands[k].label, fill: bands[k].fill });
+    return g;
+  }
+  function layTimelineLabelsText(item) {
+    var ticks = layTimelineTicks(item), names = [];
+    for (var i = 0; i < ticks.length; i++) if (ticks[i].label) names.push(ticks[i].label);
+    return names.join(", ");
+  }
+  // One drawing routine for the canvas and the file: the canvas adds hit
+  // areas (a wide rect per tick to drag, a band along the line to
+  // double-click) that never reach the export.
+  function layTimelineDraw(doc, item, opts) {
+    var ns = "http://www.w3.org/2000/svg", g = layTimelineGeom(item), st = g.st;
+    var ox = opts.ox || 0, oy = opts.oy || 0, i;
+    var root = doc.createElementNS(ns, "g");
+    function mk(tag, attrs) {
+      var n = doc.createElementNS(ns, tag);
+      for (var k in attrs) if (attrs.hasOwnProperty(k)) n.setAttribute(k, String(attrs[k]));
+      return n;
+    }
+    // The line's double-click strip goes UNDER the bands, so a band keeps
+    // its own click (its color) and the bare line keeps add-a-tick.
+    if (opts.canvas)
+      root.appendChild(mk("rect", { x: layNum2(g.x0), y: layNum2(g.lineY - 8),
+        width: layNum2(g.x1 - g.x0), height: 16, fill: "transparent",
+        "class": "ps-ltl-line-hit" }));
+    function txt(x, y, s, size, fill, weight, extra) {
+      var t = mk("text", { x: layNum2(x + ox), y: layNum2(y + oy),
+        "text-anchor": "middle", fill: fill, "font-size": size,
+        "font-family": "sans-serif", "font-weight": weight || "400" });
+      if (extra) for (var k in extra) if (extra.hasOwnProperty(k)) t.setAttribute(k, extra[k]);
+      t.textContent = s;
+      return t;
+    }
+    for (i = 0; i < g.bands.length; i++) {
+      var b = g.bands[i];
+      var bandAttrs = { x: layNum2(b.x0 + ox), y: layNum2(g.lineY - 7 + oy),
+        width: layNum2(Math.max(1, b.x1 - b.x0)), height: 14, fill: b.fill };
+      if (opts.canvas) {
+        bandAttrs["data-role"] = "lay-band";
+        bandAttrs["data-idx"] = i;
+        bandAttrs["class"] = "ps-ltl-band";
+      }
+      root.appendChild(mk("rect", bandAttrs));
+      if (b.label)
+        root.appendChild(txt((b.x0 + b.x1) / 2, g.bandLabelY, b.label,
+          Math.max(7, st.fs - 1), st.color, "600"));
+    }
+    var lineEnd = g.x1 - g.headLen;
+    // On the canvas the drawn strokes are pointer-inert: the hit strip
+    // under the bands and the tick hit rects own the clicks, so a band's
+    // centre (which the line crosses) still opens the band.
+    var inert = opts.canvas ? { "pointer-events": "none" } : {};
+    function withInert(attrs) {
+      for (var k in inert) if (inert.hasOwnProperty(k)) attrs[k] = inert[k];
+      return attrs;
+    }
+    root.appendChild(mk("path", withInert({ d: "M" + layNum2(g.x0 + ox) + " " + layNum2(g.lineY + oy) +
+      " H" + layNum2(lineEnd + ox), fill: "none", stroke: st.color,
+      "stroke-width": st.width })));
+    if (g.headLen) {
+      var hl = g.headLen, hw = hl * 0.45;
+      root.appendChild(mk("polygon", withInert({ points:
+        layNum2(g.x1 + ox) + "," + layNum2(g.lineY + oy) + " " +
+        layNum2(g.x1 - hl + ox) + "," + layNum2(g.lineY - hw + oy) + " " +
+        layNum2(g.x1 - hl + ox) + "," + layNum2(g.lineY + hw + oy), fill: st.color })));
+    }
+    for (i = 0; i < g.ticks.length; i++) {
+      var t = g.ticks[i];
+      var half = st.tickLen / 2;
+      root.appendChild(mk("line", withInert({ x1: layNum2(t.x + ox), y1: layNum2(g.lineY - half + oy),
+        x2: layNum2(t.x + ox), y2: layNum2(g.lineY + half + oy), stroke: st.color,
+        "stroke-width": layTickWidth(st, t) })));
+      if (t.label) root.appendChild(txt(t.x, g.labelY, t.label, st.fs, st.color, "400",
+        opts.canvas ? { "data-role": "lay-tick-label", "data-idx": i } : null));
+      if (t.sub) root.appendChild(txt(t.x, g.subY, t.sub, Math.max(7, st.fs - 1),
+        "#5f6f80", "400", opts.canvas ? { "data-role": "lay-tick-label", "data-idx": i } : null));
+    }
+    if (opts.canvas) {
+      for (i = 0; i < g.ticks.length; i++)
+        root.appendChild(mk("rect", { x: layNum2(g.ticks[i].x - 6),
+          y: layNum2(g.lineY - Math.max(12, st.tickLen / 2 + 4)),
+          width: 12, height: Math.max(24, st.tickLen + 8), fill: "transparent",
+          "class": "ps-ltl-tick-hit",
+          "data-role": "lay-tick", "data-idx": i }));
+    }
+    return root;
+  }
+  function layTimelineSvg(item, selected) {
+    var ns = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(ns, "svg");
+    var w = Math.max(80, Number(item.w) || 360), h = Math.max(40, Number(item.h) || 84);
+    svg.setAttribute("width", String(w)); svg.setAttribute("height", String(h));
+    svg.setAttribute("viewBox", "0 0 " + w + " " + h);
+    svg.setAttribute("aria-hidden", "true"); svg.setAttribute("focusable", "false");
+    svg.appendChild(layTimelineDraw(document, item, { canvas: true }));
+    return svg;
+  }
+  function layoutTimelineNode(doc, item) {
+    return layTimelineDraw(doc, item, { ox: Number(item.x) || 0, oy: Number(item.y) || 0 });
+  }
+  function layTimelineTargets() {
+    var ids = laySelectedIds(), out = [];
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (it && it.kind === "timeline") out.push(it);
+    }
+    return out;
+  }
+  function layItemRefresh(it) { layArrowRefresh(it); }
+  function layAddTimeline() {
+    var p = layPage(), items = layItems(), w = 360, h = 84;
+    var spot = layPlaceRect(items, p, w, h);
+    var grew = spot.needH > p.h;
+    var id = layAddItem({ id: layNewItemId(), kind: "timeline", x: spot.x, y: spot.y,
+      w: w, h: h, fontSize: 11, color: "#22364d", width: 1.5, labels: "above",
+      ends: "plain", bands: [],
+      ticks: [{ pos: 0, label: "Start", sub: "" }, { pos: 1 / 3, label: "Step 1", sub: "" },
+              { pos: 2 / 3, label: "Step 2", sub: "" }, { pos: 1, label: "End", sub: "" }] },
+      false, spot.needH);
+    layGrewNote(grew, spot.capped);
+    layAnnounce("Added a timeline. Drag a tick along the line; the Timeline section names the ticks.");
+    return id;
+  }
+  // A tick in hand slides along the line, in hundredths.
+  function layTickDrag(d, e) {
+    var cv = el("ps-lcanvas");
+    var node = cv && cv.querySelector('.ps-litem[data-item-id="' + d.timeline.id + '"]');
+    if (!node) return;
+    var r = node.getBoundingClientRect(), g = layTimelineGeom(d.timeline);
+    var px = (e.clientX - r.left) / d.zoom;
+    var pos = layClamp((px - g.x0) / Math.max(1, g.x1 - g.x0), 0, 1);
+    pos = Math.round(pos * 100) / 100;
+    var ticks = d.timeline.ticks;
+    if (!ticks || !ticks[d.tickDrag]) return;
+    ticks[d.tickDrag].pos = pos;
+    layItemRefresh(d.timeline);
+  }
+  function layTimelineDblClick(id, e) {
+    var item = layItemById(id);
+    if (!item || item.kind !== "timeline") return;
+    var label = e.target.closest && e.target.closest('[data-role="lay-tick-label"]');
+    if (label) {
+      laySetSelection([id]); renderLayout();
+      var inp = el("ps-ltl-tick-label-" + label.getAttribute("data-idx"));
+      if (inp) { inp.focus(); inp.select(); }
+      return;
+    }
+    if (!(e.target.closest &&
+          e.target.closest('.ps-ltl-line-hit,[data-role="lay-band"]'))) return;
+    var cv = el("ps-lcanvas");
+    var node = cv && cv.querySelector('.ps-litem[data-item-id="' + id + '"]');
+    if (!node) return;
+    var r = node.getBoundingClientRect(), g = layTimelineGeom(item), z = layZoom();
+    var pos = layClamp(((e.clientX - r.left) / z - g.x0) / Math.max(1, g.x1 - g.x0), 0, 1);
+    laySnapshot("add tick");
+    if (!Array.isArray(item.ticks)) item.ticks = [];
+    item.ticks.push({ pos: Math.round(pos * 100) / 100, label: "Tick", sub: "" });
+    laySetSelection([id]);
+    persist(); renderLayout();
+    var inp2 = el("ps-ltl-tick-label-" + (item.ticks.length - 1));
+    if (inp2) { inp2.focus(); inp2.select(); }
+    layAnnounce("Added a tick at " + Math.round(pos * 100) + " percent of the line.");
+  }
+  function layTimelineSyncControls(items) {
+    var item = items[0], st = layTimelineStyle(item), i;
+    function agree(read) {
+      for (var k = 1; k < items.length; k++)
+        if (read(items[k]) !== read(items[0])) return false;
+      return true;
+    }
+    var fsMixed = !agree(function (t) { return layTimelineStyle(t).fs; });
+    var rg = el("ps-ltl-size"), nm = el("ps-ltl-size-num");
+    if (rg && document.activeElement !== rg) rg.value = String(st.fs);
+    if (nm && document.activeElement !== nm) {
+      if (fsMixed) { nm.value = ""; nm.placeholder = "Mixed"; }
+      else { nm.value = String(st.fs); nm.placeholder = ""; }
+    }
+    function syncPair(rangeId, numId, val, mixed) {
+      var r = el(rangeId), n = el(numId);
+      if (r && document.activeElement !== r) r.value = String(val);
+      if (n && document.activeElement !== n) {
+        if (mixed) { n.value = ""; n.placeholder = "Mixed"; }
+        else { n.value = String(val); n.placeholder = ""; }
+      }
+    }
+    syncPair("ps-ltl-width", "ps-ltl-width-num", st.width,
+      !agree(function (t) { return layTimelineStyle(t).width; }));
+    syncPair("ps-ltl-tickw", "ps-ltl-tickw-num", layTickWidth(st, null),
+      !agree(function (t) { return layTickWidth(layTimelineStyle(t), null); }));
+    syncPair("ps-ltl-tickl", "ps-ltl-tickl-num", st.tickLen,
+      !agree(function (t) { return layTimelineStyle(t).tickLen; }));
+    var segs = document.querySelectorAll("[data-ltl-labels]");
+    var lbMixed = !agree(function (t) { return layTimelineStyle(t).labels; });
+    for (i = 0; i < segs.length; i++)
+      segs[i].setAttribute("aria-pressed", !lbMixed &&
+        segs[i].getAttribute("data-ltl-labels") === st.labels ? "true" : "false");
+    segs = document.querySelectorAll("[data-ltl-ends]");
+    var enMixed = !agree(function (t) { return layTimelineStyle(t).ends; });
+    for (i = 0; i < segs.length; i++)
+      segs[i].setAttribute("aria-pressed", !enMixed &&
+        segs[i].getAttribute("data-ltl-ends") === st.ends ? "true" : "false");
+    var colMixed = !agree(function (t) { return layTimelineStyle(t).color.toLowerCase(); });
+    var chips = el("ps-ltl-colors").querySelectorAll("button[data-color]");
+    var colHit = false;
+    for (i = 0; i < chips.length; i++) {
+      var on = !colMixed && chips[i].getAttribute("data-color") === st.color.toLowerCase();
+      if (on) colHit = true;
+      chips[i].setAttribute("aria-pressed", on ? "true" : "false");
+    }
+    layPaintCustomChip("ps-ltl-custom", st.color, !colMixed && !colHit);
+    // The tick and band lists edit ONE timeline. While a field in them has
+    // focus the list is not rebuilt (typing would lose the field); the
+    // model already holds what was typed.
+    var tl = el("ps-ltl-ticks"), bl = el("ps-ltl-bands");
+    var addT = el("ps-ltl-add-tick"), addB = el("ps-ltl-add-band");
+    var single = items.length === 1;
+    if (addT) { addT.disabled = !single; setTip(addT, single ? "" : "Ticks are edited one timeline at a time."); }
+    if (!tl || !bl) return;
+    if (tl.contains(document.activeElement) || bl.contains(document.activeElement)) return;
+    tl.innerHTML = ""; bl.innerHTML = "";
+    if (!single) {
+      tl.appendChild(mkEl("div", "ps-loader-hint", "Select one timeline to edit its ticks."));
+      if (addB) addB.disabled = true;
+      return;
+    }
+    var ticks = layTimelineTicks(item);
+    for (i = 0; i < ticks.length; i++) {
+      var row = mkEl("div", "ps-ltl-row");
+      row.setAttribute("data-idx", String(i));
+      var lab = document.createElement("input");
+      lab.type = "text"; lab.value = ticks[i].label; lab.placeholder = "Label";
+      lab.id = "ps-ltl-tick-label-" + i;
+      lab.setAttribute("data-ltl-tick", "label");
+      lab.setAttribute("aria-label", "Tick " + (i + 1) + " label");
+      var sub = document.createElement("input");
+      sub.type = "text"; sub.value = ticks[i].sub; sub.placeholder = "Below";
+      sub.setAttribute("data-ltl-tick", "sub");
+      sub.setAttribute("aria-label", "Tick " + (i + 1) + " sub-label");
+      var wd = document.createElement("input");
+      wd.type = "number"; wd.min = "0.5"; wd.max = "6"; wd.step = "0.5";
+      wd.value = ticks[i].width == null ? "" : String(ticks[i].width);
+      wd.placeholder = String(layTickWidth(st, null));
+      wd.setAttribute("data-ltl-tick", "width");
+      wd.setAttribute("aria-label", "Tick " + (i + 1) + " width in pixels (blank = all ticks)");
+      setTip(wd, "This tick's width; blank follows the Ticks width above");
+      var x = mkEl("button", "ps-ltl-x", "×");
+      x.type = "button"; x.setAttribute("data-ltl-tick", "remove");
+      x.setAttribute("aria-label", "Remove tick " + (i + 1));
+      setTip(x, "Remove this tick");
+      row.appendChild(lab); row.appendChild(sub); row.appendChild(wd); row.appendChild(x);
+      tl.appendChild(row);
+    }
+    if (addB) {
+      addB.disabled = ticks.length < 2;
+      setTip(addB, ticks.length < 2 ? "A band runs between two ticks." : "");
+    }
+    var bands = Array.isArray(item.bands) ? item.bands : [];
+    for (i = 0; i < bands.length; i++) {
+      var brow = mkEl("div", "ps-ltl-row");
+      brow.setAttribute("data-idx", String(i));
+      var from = document.createElement("select"), to = document.createElement("select");
+      from.setAttribute("data-ltl-band", "a"); to.setAttribute("data-ltl-band", "b");
+      from.setAttribute("aria-label", "Band " + (i + 1) + " from tick");
+      to.setAttribute("aria-label", "Band " + (i + 1) + " to tick");
+      for (var k = 0; k < ticks.length; k++) {
+        var o1 = document.createElement("option"), o2 = document.createElement("option");
+        o1.value = o2.value = String(k);
+        o1.textContent = o2.textContent = ticks[k].label || ("tick " + (k + 1));
+        from.appendChild(o1); to.appendChild(o2);
+      }
+      from.value = String(Math.round(Number(bands[i].a)) || 0);
+      to.value = String(Math.round(Number(bands[i].b)) || 0);
+      var blab = document.createElement("input");
+      blab.type = "text"; blab.value = String(bands[i].label || ""); blab.placeholder = "Label";
+      blab.setAttribute("data-ltl-band", "label");
+      blab.setAttribute("aria-label", "Band " + (i + 1) + " label");
+      var sw = mkEl("button", "ps-ltl-sw", "");
+      sw.type = "button"; sw.setAttribute("data-ltl-band", "fill");
+      sw.id = "ps-ltl-band-fill-" + i;
+      sw.style.background = layHexOr(bands[i].fill, "#e8f0fb");
+      sw.setAttribute("aria-label", "Band " + (i + 1) + " color");
+      setTip(sw, "Choose this band's color");
+      var bx = mkEl("button", "ps-ltl-x", "×");
+      bx.type = "button"; bx.setAttribute("data-ltl-band", "remove");
+      bx.setAttribute("aria-label", "Remove band " + (i + 1));
+      setTip(bx, "Remove this band");
+      brow.appendChild(from); brow.appendChild(to); brow.appendChild(blab);
+      brow.appendChild(sw); brow.appendChild(bx);
+      bl.appendChild(brow);
+    }
+  }
+  function wireLayoutTimelineControls() {
+    var colors = el("ps-ltl-colors");
+    if (!colors) return;
+    var i;
+    var colorNames = { "#22364d": "Ink", "#5f6f80": "Muted", "#94a3b1": "Faint",
+      "#417499": "Blue", "#902634": "Red", "#266741": "Green" };
+    for (i = 0; i < LAY_ARROW_COLORS.length; i++) (function (c) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("data-color", c);
+      b.setAttribute("aria-label", (colorNames[c] || c) + " timeline");
+      b.setAttribute("aria-pressed", "false");
+      b.style.background = c;
+      setTip(b, colorNames[c] || c);
+      b.addEventListener("click", function () {
+        layPartApply(layTimelineTargets(), "timeline color", null,
+          function (it) { it.color = c; });
+      });
+      colors.appendChild(b);
+    })(LAY_ARROW_COLORS[i]);
+    var rg = el("ps-ltl-size"), nm = el("ps-ltl-size-num");
+    rg.addEventListener("input", function () {
+      var v = Number(rg.value);
+      layPartApply(layTimelineTargets(), "timeline size", "ltl-size",
+        function (it) { it.fontSize = layClamp(Math.round(v), 8, 24); }, true);
+    });
+    rg.addEventListener("change", function () { persist(); });
+    nm.addEventListener("change", function () {
+      var v = Number(nm.value);
+      if (!isFinite(v)) return;
+      layPartApply(layTimelineTargets(), "timeline size", null,
+        function (it) { it.fontSize = layClamp(Math.round(v), 8, 24); });
+    });
+    function wireTlPair(rangeId, numId, label, key, setter) {
+      var r2 = el(rangeId), n2 = el(numId);
+      if (!r2 || !n2) return;
+      r2.addEventListener("input", function () {
+        var v = Number(r2.value);
+        layPartApply(layTimelineTargets(), label, key,
+          function (it) { setter(it, v); }, true);
+      });
+      r2.addEventListener("change", function () { persist(); });
+      n2.addEventListener("change", function () {
+        var v = Number(n2.value);
+        if (!isFinite(v)) return;
+        layPartApply(layTimelineTargets(), label, null, function (it) { setter(it, v); });
+      });
+    }
+    wireTlPair("ps-ltl-width", "ps-ltl-width-num", "timeline line width", "ltl-width",
+      function (it, v) { it.width = layClamp(Math.round(v * 2) / 2, 0.5, 4); });
+    wireTlPair("ps-ltl-tickw", "ps-ltl-tickw-num", "tick width", "ltl-tickw",
+      function (it, v) { it.tickWidth = layClamp(Math.round(v * 2) / 2, 0.5, 6); });
+    wireTlPair("ps-ltl-tickl", "ps-ltl-tickl-num", "tick length", "ltl-tickl",
+      function (it, v) { it.tickLen = layClamp(Math.round(v), 4, 40); });
+    layWireCustomChip("ps-ltl-custom", layTimelineTargets, "color", "timeline color", "#22364d");
+    var segs = document.querySelectorAll("[data-ltl-labels]");
+    for (i = 0; i < segs.length; i++) (function (btn) {
+      btn.addEventListener("click", function () {
+        var v = btn.getAttribute("data-ltl-labels");
+        layPartApply(layTimelineTargets(), "timeline labels", null,
+          function (it) { it.labels = v; });
+      });
+    })(segs[i]);
+    segs = document.querySelectorAll("[data-ltl-ends]");
+    for (i = 0; i < segs.length; i++) (function (btn) {
+      btn.addEventListener("click", function () {
+        var v = btn.getAttribute("data-ltl-ends");
+        layPartApply(layTimelineTargets(), "timeline ends", null,
+          function (it) { it.ends = v; });
+      });
+    })(segs[i]);
+    function one() {
+      var t = layTimelineTargets();
+      return t.length === 1 ? t[0] : null;
+    }
+    el("ps-ltl-add-tick").addEventListener("click", function () {
+      var it = one();
+      if (!it) return;
+      var ticks = layTimelineTicks(it), pos = 0.5;
+      if (ticks.length) {
+        // Halfway into the widest gap, so a new tick lands in clear space.
+        var sorted = ticks.map(function (t) { return t.pos; }).sort(function (a, b) { return a - b; });
+        var best = -1, at = 0.5, prev = 0;
+        for (var k = 0; k <= sorted.length; k++) {
+          var cur = k < sorted.length ? sorted[k] : 1;
+          if (cur - prev > best) { best = cur - prev; at = (cur + prev) / 2; }
+          prev = cur;
+        }
+        pos = Math.round(at * 100) / 100;
+      }
+      layPartApply([it], "add tick", null, function (t) {
+        if (!Array.isArray(t.ticks)) t.ticks = [];
+        t.ticks.push({ pos: pos, label: "Tick", sub: "" });
+      });
+      var inp = el("ps-ltl-tick-label-" + (it.ticks.length - 1));
+      if (inp) { inp.focus(); inp.select(); }
+    });
+    el("ps-ltl-add-band").addEventListener("click", function () {
+      var it = one();
+      if (!it || !Array.isArray(it.ticks) || it.ticks.length < 2) return;
+      layPartApply([it], "add band", null, function (t) {
+        if (!Array.isArray(t.bands)) t.bands = [];
+        t.bands.push({ a: 0, b: 1, label: "Phase",
+          fill: LAY_TL_BAND_FILLS[t.bands.length % LAY_TL_BAND_FILLS.length] });
+      });
+    });
+    // The lists are rebuilt per sync, so their rows are handled by
+    // delegation on the list and identified by row index.
+    function rowIdx(t) {
+      var row = t.closest && t.closest(".ps-ltl-row");
+      return row ? Number(row.getAttribute("data-idx")) : -1;
+    }
+    var tl = el("ps-ltl-ticks");
+    tl.addEventListener("input", function (e) {
+      var it = one(), idx = rowIdx(e.target), what = e.target.getAttribute("data-ltl-tick");
+      if (!it || idx < 0 || (what !== "label" && what !== "sub" && what !== "width")) return;
+      var v = e.target.value;
+      if (what === "width") {
+        var wv = v === "" ? null : Number(v);
+        if (wv != null && !isFinite(wv)) return;
+        layPartApply([it], "tick width", "ltl-tick:" + idx + ":width", function (t) {
+          if (t.ticks && t.ticks[idx]) {
+            if (wv == null) delete t.ticks[idx].width;
+            else t.ticks[idx].width = layClamp(Math.round(wv * 2) / 2, 0.5, 6);
+          }
+        }, true);
+        return;
+      }
+      layPartApply([it], "tick text", "ltl-tick:" + idx + ":" + what, function (t) {
+        if (t.ticks && t.ticks[idx]) t.ticks[idx][what] = v;
+      }, true);
+    });
+    tl.addEventListener("change", function (e) {
+      if (e.target.getAttribute("data-ltl-tick")) persist();
+    });
+    tl.addEventListener("click", function (e) {
+      var btn = e.target.closest && e.target.closest('[data-ltl-tick="remove"]');
+      var it = one(), idx = rowIdx(e.target);
+      if (!btn || !it || idx < 0) return;
+      layPartApply([it], "remove tick", null, function (t) {
+        t.ticks.splice(idx, 1);
+        // Bands are tick indices: the ones past the removed tick shift,
+        // the ones that touched it are dropped.
+        var kept = [];
+        for (var k = 0; k < (t.bands || []).length; k++) {
+          var b = t.bands[k];
+          if (b.a === idx || b.b === idx) continue;
+          kept.push({ a: b.a > idx ? b.a - 1 : b.a, b: b.b > idx ? b.b - 1 : b.b,
+                      label: b.label, fill: b.fill });
+        }
+        t.bands = kept;
+      });
+    });
+    var bl = el("ps-ltl-bands");
+    bl.addEventListener("input", function (e) {
+      var it = one(), idx = rowIdx(e.target), what = e.target.getAttribute("data-ltl-band");
+      if (!it || idx < 0 || what !== "label") return;
+      var v = e.target.value;
+      layPartApply([it], "band text", "ltl-band:" + idx, function (t) {
+        if (t.bands && t.bands[idx]) t.bands[idx].label = v;
+      }, true);
+    });
+    bl.addEventListener("change", function (e) {
+      var it = one(), idx = rowIdx(e.target), what = e.target.getAttribute("data-ltl-band");
+      if (!it || idx < 0) return;
+      if (what === "label") { persist(); return; }
+      if (what !== "a" && what !== "b") return;
+      var v = Number(e.target.value);
+      layPartApply([it], "band ticks", null, function (t) {
+        if (t.bands && t.bands[idx]) t.bands[idx][what] = v;
+      });
+    });
+    bl.addEventListener("click", function (e) {
+      var it = one(), idx = rowIdx(e.target);
+      if (!it || idx < 0) return;
+      var t2 = e.target.closest && e.target.closest("[data-ltl-band]");
+      if (!t2) return;
+      var what = t2.getAttribute("data-ltl-band");
+      if (what === "remove")
+        layPartApply([it], "remove band", null, function (t) { t.bands.splice(idx, 1); });
+      else if (what === "fill") layOpenBandColor(it, idx);
+    });
+  }
+  // ---- the diagram templates of slice two. Each lays out ordinary parts.
+  function layTplBox(c, n, x, y, w, h, text, extra) {
+    var it = { id: "i" + n, kind: "box", text: text, fontSize: 12, x: x, y: y,
+               w: w, h: h, fill: "#ffffff", border: "thin", corner: 4 };
+    if (extra) for (var k in extra) if (extra.hasOwnProperty(k)) it[k] = extra[k];
+    c.items.push(it);
+    return it;
+  }
+  function layTplArrow(c, n, fromId, toId) {
+    c.items.push({ id: "i" + n, kind: "arrow", from: { id: fromId }, to: { id: toId },
+                   route: "elbow", heads: "end", width: 1.5, color: "#22364d",
+                   x: 0, y: 0, ax: 0, ay: 0, bx: 0, by: 0 });
+  }
+  function layTplText(c, n, x, y, text, size, bold) {
+    c.items.push({ id: "i" + n, kind: "text", text: text, fontSize: size,
+                   bold: !!bold, x: x, y: y });
+  }
+  // A procedure timeline across the top and the chosen chart beneath it,
+  // the timeline as wide as the chart so its ticks can be lined up with
+  // the chart's occasions by hand.
+  function layBuildProcedureTimeline(c, chartIds) {
+    var n = 0, m = c.page.margin, cw = c.page.w - m * 2;
+    var chartId = chartIds && chartIds[0];
+    var tlH = 84;
+    c.items.push({ id: "i" + (++n), kind: "timeline", x: m, y: m, w: cw, h: tlH,
+      fontSize: 11, color: "#22364d", width: 1.5, labels: "above", ends: "plain",
+      ticks: [{ pos: 0, label: "Baseline", sub: "Day 0" },
+              { pos: 1 / 3, label: "Dose 1", sub: "Day 7" },
+              { pos: 2 / 3, label: "Dose 2", sub: "Day 14" },
+              { pos: 1, label: "Test", sub: "Day 21" }],
+      bands: [{ a: 1, b: 3, label: "Daily dosing", fill: "#e8f0fb" }] });
+    if (chartId) {
+      var cell = { x: m, y: m + tlH + 12, w: cw, h: Math.max(120, c.page.h - m * 2 - tlH - 12) };
+      var fit = layFitRectToChart(cell, chartId);
+      c.items.push({ id: "i" + (++n), kind: "chart", chartId: chartId,
+        x: Math.round(fit.x), y: Math.round(fit.y), w: Math.round(fit.w), h: Math.round(fit.h) });
+    }
+  }
+  // Groups down the side, phases across the top, one box per cell and an
+  // arrow from phase to phase in every row.
+  function layBuildStudyDesign(c) {
+    var n = 0, m = c.page.margin;
+    var groups = ["Vehicle", "Drug", "Sham"], phases = ["Baseline", "Treatment", "Follow-up"];
+    var cellW = 150, cellH = 44, gapX = 60, gapY = 40, left = m + 90, top = m + 40;
+    var ids = [];
+    for (var p = 0; p < phases.length; p++) {
+      // Centred over its column by measuring the word, the way text items
+      // measure themselves.
+      var hw = layApproxTextRect({ text: phases[p], fontSize: 12, bold: true }).w;
+      layTplText(c, ++n, Math.round(left + p * (cellW + gapX) + cellW / 2 - hw / 2),
+        top - 30, phases[p], 12, true);
+    }
+    for (var g = 0; g < groups.length; g++) {
+      var y = top + g * (cellH + gapY);
+      layTplText(c, ++n, m, y + 12, groups[g], 12, true);
+      ids[g] = [];
+      for (p = 0; p < phases.length; p++) {
+        var text = p === 0 ? "Baseline test" : p === 1 ? groups[g] + " treatment" : "Follow-up test";
+        var b = layTplBox(c, ++n, left + p * (cellW + gapX), y, cellW, cellH, text,
+          p === 1 ? { fill: "#eef4fc" } : null);
+        ids[g][p] = b.id;
+      }
+      for (p = 1; p < phases.length; p++) layTplArrow(c, ++n, ids[g][p - 1], ids[g][p]);
+    }
+  }
+  // Screens in a cascade over a timeline of their durations.
+  function layBuildTrialSequence(c) {
+    var n = 0, m = c.page.margin;
+    var names = ["+", "Cue", "Target", "Response"];
+    var durs = ["500 ms", "200 ms", "1000 ms", "until response"];
+    var bw = 130, bh = 90, dx = 110, dy = 58, left = m + 20, top = m + 10;
+    for (var i = 0; i < names.length; i++)
+      layTplBox(c, ++n, left + i * dx, top + i * dy, bw, bh, names[i],
+        i === 0 ? { fontSize: 22 } : null);
+    var tlW = Math.min(c.page.w - m * 2 - 20, (names.length - 1) * dx + bw + 60);
+    c.items.push({ id: "i" + (++n), kind: "timeline", x: left, y: top + (names.length - 1) * dy + bh + 24,
+      w: tlW, h: 84, fontSize: 11, color: "#22364d", width: 1.5, labels: "above",
+      ends: "arrow", bands: [],
+      ticks: names.map(function (nm, k) {
+        return { pos: k / names.length, label: k === 0 ? "Fixation" : nm, sub: durs[k] };
+      }) });
+  }
+
+  // ---- a shared color popover for the figure parts (slice three, Torry:
+  // "when you click on the colored band, it brings up an actual color
+  // picker"). The Text section's SV square, hue and hex as a floating
+  // card anchored to whichever chip opened it: live while dragging,
+  // one undo step per open, closed by Done, Escape or a press outside.
+  var LAY_CPOP = null;
+  function layColorPopEl() {
+    var pop = el("ps-lcolorpop");
+    if (pop) return pop;
+    pop = document.createElement("div");
+    pop.id = "ps-lcolorpop";
+    pop.setAttribute("role", "dialog");
+    pop.setAttribute("aria-label", "Color");
+    pop.innerHTML =
+      '<div class="ps-lcp-sv" role="slider" tabindex="0" ' +
+      'aria-label="Saturation and brightness" aria-valuemin="0" ' +
+      'aria-valuemax="100" aria-valuenow="0"><div class="ps-ltx-sv-dot"></div></div>' +
+      '<input class="ps-lcp-hue" type="range" min="0" max="360" step="1" aria-label="Hue">' +
+      '<div class="ps-ltx-hexrow"><span class="ps-layout-field-label">Hex</span>' +
+      '<input class="ps-lcp-hex" type="text" maxlength="7" spellcheck="false" ' +
+      'autocomplete="off" aria-label="Hex color">' +
+      '<span class="ps-lcp-cur" aria-hidden="true"></span>' +
+      '<button type="button" class="ps-btn ps-lcp-done">Done</button></div>';
+    document.body.appendChild(pop);
+    var sv = pop.querySelector(".ps-lcp-sv");
+    function pick(ev) {
+      var r = sv.getBoundingClientRect();
+      LAY_CPOP.hsv.s = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
+      LAY_CPOP.hsv.v = Math.max(0, Math.min(1, 1 - (ev.clientY - r.top) / r.height));
+      layColorPopApply(true);
+    }
+    sv.addEventListener("pointerdown", function (ev) {
+      if (!LAY_CPOP) return;
+      ev.preventDefault();
+      pick(ev);
+      function mv(e2) { pick(e2); }
+      function up() {
+        document.removeEventListener("pointermove", mv);
+        document.removeEventListener("pointerup", up);
+        layColorPopApply(false);
+      }
+      document.addEventListener("pointermove", mv);
+      document.addEventListener("pointerup", up);
+    });
+    sv.addEventListener("keydown", function (ev) {
+      if (!LAY_CPOP) return;
+      var ds = ev.key === "ArrowLeft" ? -0.02 : ev.key === "ArrowRight" ? 0.02 : 0;
+      var dv = ev.key === "ArrowDown" ? -0.02 : ev.key === "ArrowUp" ? 0.02 : 0;
+      if (!ds && !dv) return;
+      ev.preventDefault();
+      LAY_CPOP.hsv.s = Math.max(0, Math.min(1, LAY_CPOP.hsv.s + ds));
+      LAY_CPOP.hsv.v = Math.max(0, Math.min(1, LAY_CPOP.hsv.v + dv));
+      layColorPopApply(false);
+    });
+    var hue = pop.querySelector(".ps-lcp-hue");
+    hue.addEventListener("input", function () {
+      if (!LAY_CPOP) return;
+      LAY_CPOP.hsv.h = Number(hue.value) || 0;
+      layColorPopApply(true);
+    });
+    hue.addEventListener("change", function () { layColorPopApply(false); });
+    var hx = pop.querySelector(".ps-lcp-hex");
+    hx.addEventListener("change", function () {
+      if (!LAY_CPOP) return;
+      var v = String(hx.value || "").trim();
+      if (/^[0-9a-fA-F]{6}$/.test(v)) v = "#" + v;
+      var hsv = ltxHexToHsv(v);
+      if (!hsv) { layColorPopPaint(); return; }
+      LAY_CPOP.hsv = hsv;
+      layColorPopApply(false);
+    });
+    pop.querySelector(".ps-lcp-done").addEventListener("click", function () {
+      layCloseColorPop();
+    });
+    pop.addEventListener("keydown", function (ev) {
+      if (ev.key === "Escape") {
+        ev.preventDefault(); ev.stopPropagation();
+        layCloseColorPop();
+      }
+    });
+    document.addEventListener("pointerdown", function (ev) {
+      if (!LAY_CPOP) return;
+      var t = ev.target;
+      if (pop.contains(t)) return;
+      if (LAY_CPOP.anchor && LAY_CPOP.anchor.isConnected && LAY_CPOP.anchor.contains(t)) return;
+      layCloseColorPop();
+    }, true);
+    return pop;
+  }
+  function layColorPopPaint() {
+    if (!LAY_CPOP) return;
+    var pop = layColorPopEl(), hsv = LAY_CPOP.hsv;
+    var sv = pop.querySelector(".ps-lcp-sv");
+    sv.style.background = "linear-gradient(to top, #000, rgba(0,0,0,0)), " +
+      "linear-gradient(to right, #fff, hsl(" + Math.round(hsv.h) + " 100% 50%))";
+    var dot = sv.querySelector(".ps-ltx-sv-dot");
+    dot.style.left = (hsv.s * 100) + "%";
+    dot.style.top = ((1 - hsv.v) * 100) + "%";
+    sv.setAttribute("aria-valuenow", String(Math.round(hsv.v * 100)));
+    var hue = pop.querySelector(".ps-lcp-hue");
+    if (document.activeElement !== hue) hue.value = String(Math.round(hsv.h));
+    var hex = ltxHsvToHex(hsv.h, hsv.s, hsv.v);
+    var hx = pop.querySelector(".ps-lcp-hex");
+    if (document.activeElement !== hx) hx.value = hex;
+    pop.querySelector(".ps-lcp-cur").style.background = hex;
+  }
+  function layColorPopApply(live) {
+    if (!LAY_CPOP) return;
+    var hex = ltxHsvToHex(LAY_CPOP.hsv.h, LAY_CPOP.hsv.s, LAY_CPOP.hsv.v);
+    layColorPopPaint();
+    LAY_CPOP.onChange(hex, live);
+  }
+  // onChange(hex, live) applies the color; the caller decides which
+  // item field it lands on and coalesces its own undo step.
+  function layOpenColorPop(anchor, hex, onChange) {
+    var pop = layColorPopEl();
+    LAY_CPOP = { anchor: anchor,
+                 hsv: ltxHexToHsv(layHexOr(hex, "#22364d")) || { h: 0, s: 0, v: 0.13 },
+                 onChange: onChange };
+    layColorPopPaint();
+    pop.style.display = "block";
+    var r = anchor.getBoundingClientRect();
+    var left = Math.max(8, Math.min(r.left, window.innerWidth - 250));
+    var top = r.bottom + 6;
+    if (top + 230 > window.innerHeight) top = Math.max(8, r.top - 236);
+    pop.style.left = left + "px";
+    pop.style.top = top + "px";
+    pop.querySelector(".ps-lcp-hex").focus();
+  }
+  function layCloseColorPop() {
+    var pop = el("ps-lcolorpop");
+    if (pop) pop.style.display = "none";
+    if (!LAY_CPOP) return;
+    var a = LAY_CPOP.anchor;
+    LAY_CPOP = null;
+    persist();
+    if (a && a.isConnected && a.focus) a.focus();
+  }
+  function layIsColorPopOpen() { return !!LAY_CPOP; }
+  // A custom-color chip beside a swatch row: shows the current color and
+  // opens the popover on it. targetsFn names the items, field the key.
+  function layWireCustomChip(id, targetsFn, field, label, dflt) {
+    var chip = el(id);
+    if (!chip) return;
+    chip.addEventListener("click", function () {
+      var targets = targetsFn();
+      if (!targets.length) return;
+      var ids = targets.map(function (t) { return t.id; }).join(",");
+      layOpenColorPop(chip, layHexOr(targets[0][field], dflt), function (hex, live) {
+        layPartApply(targetsFn(), label, "cpop:" + field + ":" + ids,
+          function (it) { it[field] = hex; }, live);
+      });
+    });
+  }
+  function layPaintCustomChip(id, hex, pressed) {
+    var chip = el(id);
+    if (!chip) return;
+    chip.style.background = hex;
+    chip.setAttribute("aria-pressed", pressed ? "true" : "false");
+  }
+  // Click-to-edit on the timeline's own parts: a tick click (no drag)
+  // lands in its rail row; a band click opens its color.
+  function layFocusTickRow(item, idx) {
+    laySetSelection([item.id]);
+    renderLayout();
+    var inp = el("ps-ltl-tick-label-" + idx);
+    if (inp) { inp.focus(); inp.select(); }
+  }
+  function layOpenBandColor(item, idx) {
+    laySetSelection([item.id]);
+    renderLayout();
+    var chip = el("ps-ltl-band-fill-" + idx);
+    if (!chip || !item.bands || !item.bands[idx]) return;
+    layOpenColorPop(chip, layHexOr(item.bands[idx].fill, "#e8f0fb"), function (hex, live) {
+      layPartApply([item], "band color", "cpop:band:" + item.id + ":" + idx,
+        function (t) { if (t.bands && t.bands[idx]) t.bands[idx].fill = hex; }, live);
+    });
+  }
   var LAY_TEXT_CTX = null;
   function layTextCtx() {
     if (!LAY_TEXT_CTX) {
@@ -22058,10 +23781,13 @@
   // Chart panels and images are both SIZED items (explicit w/h, corner
   // resize, proportional default); text items self-size.
   function laySizedKind(item) {
-    return item && (item.kind === "chart" || item.kind === "image");
+    return item && (item.kind === "chart" || item.kind === "image" ||
+                    item.kind === "box" || item.kind === "timeline");
   }
   function layMinSize(item) {
     if (item.kind === "image") return { w: 24, h: 24 };
+    if (item.kind === "box") return { w: 36, h: 22 };
+    if (item.kind === "timeline") return { w: 80, h: 40 };
     // The minimum keeps the chart's SHAPE. A flat 120 by 80 is 1.5 against
     // the engine's 1.469, so a figure scaled onto a small page hit the floor
     // and came back letterboxed, which is the thing panel-fitting removed.
@@ -22091,6 +23817,11 @@
       var mins = layMinSize(item);
       w = Math.max(mins.w, Number(item.w) || 480);
       h = Math.max(mins.h, Number(item.h) || 320);
+    } else if (item.kind === "arrow") {
+      // The box around the drawn arrow, re-derived from the boxes its
+      // ends are attached to (layArrowSync); never typed.
+      layArrowSync(item);
+      w = item.w; h = item.h;
     } else {
       var node = layItemIsOnScreen(item) ? el("ps-lcanvas") : null;
       node = node && node.querySelector(
@@ -22361,7 +24092,7 @@
     node.setAttribute("aria-hidden", "true");
     node.tabIndex = -1;
     var stale = node.querySelectorAll(
-      ".ps-lhandle,.ps-lbar,.ps-litem-srcbadge");
+      ".ps-lhandle,.ps-lhandle-end,.ps-lbar,.ps-litem-srcbadge");
     for (var si = 0; si < stale.length; si++)
       if (stale[si].parentNode === node) node.removeChild(stale[si]);
     // Live / Snapshot badge (Torry, Aug 5 2026): selection-only chrome
@@ -22419,7 +24150,9 @@
       if (laySizedKind(item)) {
         var hnd = mkEl("div", "ps-lhandle");
         hnd.setAttribute("data-role", "lay-resize");
-        setTip(hnd, multiUnits
+        setTip(hnd, item.kind === "box" ? "Resize the box."
+          : item.kind === "timeline" ? "Resize the timeline."
+          : multiUnits
           ? "Resize every selected panel together. Hold Shift for free resize."
           : "Resize proportionally. Hold Shift for free resize.");
         // This is a pointer affordance. The canvas instructions expose the
@@ -22431,6 +24164,7 @@
       // Text items grow the chart-style rotate grip (Torry, Aug 6 2026).
       if (item.kind === "text")
         layAttachRotateHandle(node, item, node.__ltxFrame || null);
+      if (item.kind === "arrow" && primary) layAttachArrowEnds(node, item);
       node.appendChild(layMiniBar(item));
     }
   }
@@ -22488,6 +24222,28 @@
         "pointer-events:none;display:block;";
       elI.appendChild(pic);
       setTip(elI, "Image");
+    } else if (item.kind === "box") {
+      elI.style.width = (Number(item.w) || 150) + "px";
+      elI.style.height = (Number(item.h) || 44) + "px";
+      elI.appendChild(layBoxNode(item));
+      setTip(elI, "Box. Double-click to edit its text.");
+    } else if (item.kind === "timeline") {
+      elI.style.width = (Number(item.w) || 360) + "px";
+      elI.style.height = (Number(item.h) || 84) + "px";
+      elI.appendChild(layTimelineSvg(item, selected));
+      setTip(elI, "Timeline. Drag a tick along the line; double-click the line to add one.");
+    } else if (item.kind === "arrow") {
+      // The sync re-derives the box from the attached boxes, so the
+      // position set above (from the stored x/y) is re-read here: a
+      // template's arrows are born at 0,0 and would otherwise draw there
+      // on their first render.
+      layArrowSync(item);
+      elI.style.left = layNum2(item.x) + "px";
+      elI.style.top = layNum2(item.y) + "px";
+      elI.style.width = layNum2(item.w) + "px";
+      elI.style.height = layNum2(item.h) + "px";
+      elI.appendChild(layArrowSvg(item, selected));
+      setTip(elI, layArrowTip(item));
     } else {
       var txt = mkEl("div", "ps-ltext", exportSafeText(item.text || "Text"));
       txt.style.fontSize = (item.fontSize || 14) + "px";
@@ -22678,7 +24434,7 @@
     bar.style.transform = "";
     bar.style.top = item.kind === "text" ? "calc(100% + 6px)" : "-34px";
     bar.setAttribute("aria-hidden", "true");
-    if (item.kind === "text") {
+    if (item.kind === "text" || item.kind === "box") {
       var minus = mkEl("button", "", "A-");
       minus.type = "button"; minus.tabIndex = -1; setTip(minus, "Smaller text");
       minus.addEventListener("click", function (e) {
@@ -22706,6 +24462,18 @@
         persist(); renderLayout();
       });
       bar.appendChild(minus); bar.appendChild(plus); bar.appendChild(bold);
+    }
+    if (item.kind === "arrow") {
+      var rev = mkEl("button", "", "Reverse");
+      rev.type = "button"; rev.tabIndex = -1;
+      setTip(rev, "Swap the arrow's ends");
+      rev.addEventListener("click", function (e) {
+        e.stopPropagation();
+        laySnapshot("reverse arrow");
+        layArrowReverse(item);
+        persist(); renderLayout();
+      });
+      bar.appendChild(rev);
     }
     var del = mkEl("button", "ps-lbar-del", "\u00d7");
     del.type = "button"; del.tabIndex = -1;
@@ -22832,6 +24600,7 @@
     for (var i = items.length - 1; i >= 0; i--)
       if (ids.indexOf(items[i].id) !== -1) { items.splice(i, 1); removed++; }
     layDropOrphanGroups();
+    layArrowsDetachFrom(ids);
     laySetSelection([]);
     persist(); renderLayout();
     if (returnFocus) layFocusViewport();
@@ -22849,12 +24618,13 @@
   // the announcement, so Alt+drag can make its copies inside a gesture that
   // already owns all three.
   function layDuplicateItems(ids, dx, dy) {
-    var made = [], p = layPage(), dupGroups = {}, i;
+    var made = [], p = layPage(), dupGroups = {}, dupIds = {}, i;
     for (i = 0; i < ids.length; i++) {
       var src = layItemById(ids[i]);
       if (!src) continue;
       var copy = JSON.parse(JSON.stringify(src));
       copy.id = layNewItemId();
+      dupIds[src.id] = copy.id;
       // The copies form their OWN group, so duplicating a grouped panel
       // gives a second panel rather than a four-member group.
       if (copy.group) copy.group = dupGroups[copy.group] ||
@@ -22874,6 +24644,7 @@
       layItems().push(copy);
       made.push(copy.id);
     }
+    layArrowsRemap(made, dupIds);
     return made;
   }
   // One body for the Cmd/Ctrl+A key and the Edit menu row, so the two
@@ -22929,10 +24700,11 @@
     if (!LAY_CLIP || !LAY_CLIP.length) return false;
     if (!isLayoutTab(activeChart())) return false;
     laySnapshot("paste");
-    var made = [], p = layPage(), pasteGroups = {};
+    var made = [], p = layPage(), pasteGroups = {}, pasteIds = {};
     for (var i = 0; i < LAY_CLIP.length; i++) {
       var copy = JSON.parse(JSON.stringify(LAY_CLIP[i]));
       copy.id = layNewItemId();
+      pasteIds[LAY_CLIP[i].id] = copy.id;
       // Fresh group ids, the way duplicate does it. Group ids are only unique
       // within one layout and every layout's templates start at g1, so a
       // paste into another figure collided by construction and merged the
@@ -22947,6 +24719,7 @@
       layItems().push(copy);
       made.push(copy.id);
     }
+    layArrowsRemap(made, pasteIds);
     laySetSelection(made);
     persist(); renderLayout();
     showToast(made.length === 1 ? "Item pasted"
@@ -23391,6 +25164,8 @@
       var c = chartById(item.chartId);
       return c ? (c.name || "that panel") : "that panel";
     }
+    if (item.kind === "box") return "that box";
+    if (item.kind === "timeline") return "that timeline";
     return item.srcChart ? "that Notebook page" : "that image";
   }
   function laySameSize(dim) {
@@ -23490,6 +25265,17 @@
       if (!item) return;
       var mins = layMinSize(item);
       laySnapshot("resize", "resize");
+      if (item.kind === "box" || item.kind === "timeline") {
+        // A box holds text and a timeline is a line: each side is its own
+        // number, so typing a width must not change the height the way a
+        // chart panel keeps its shape.
+        if (prop === "w")
+          item.w = layClamp(value, mins.w, p.w - (Number(item.x) || 0));
+        else item.h = layClamp(value, mins.h, p.h - (Number(item.y) || 0));
+        persist(); renderLayout();
+        layAnnounce("Resized " + layItemAccessibleLabel(item));
+        return;
+      }
       // The typed fields keep the item's proportions, like the corner drag.
       // Setting one side used to change that side alone, so the rail was
       // the one resize in the app that letterboxed a chart by default. The
@@ -23557,9 +25343,17 @@
       // TEXT scales too. Leaving font sizes alone made panel letters keep
       // their size while everything around them shrank, so on a small page
       // a 20 px letter sat on top of the panel it labels.
-      if (items[i].kind === "text" && k !== 1)
+      if ((items[i].kind === "text" || items[i].kind === "box" ||
+           items[i].kind === "timeline") && k !== 1)
         items[i].fontSize = layClamp(
           Math.round((Number(items[i].fontSize) || 14) * k), 8, 72);
+      // An arrow's free ends ride its box; their offsets scale with it.
+      if (items[i].kind === "arrow" && k !== 1) {
+        items[i].ax = (Number(items[i].ax) || 0) * k;
+        items[i].ay = (Number(items[i].ay) || 0) * k;
+        items[i].bx = (Number(items[i].bx) || 0) * k;
+        items[i].by = (Number(items[i].by) || 0) * k;
+      }
     }
     return k;
   }
@@ -23632,6 +25426,12 @@
     var items = layItems();
     for (var i = 0; i < items.length; i++) {
       if (excludeIds.indexOf(items[i].id) !== -1) continue;
+      // An arrow is never something to align TO. Its box is padding around
+      // a stroke, and an arrow attached to the item being dragged moves
+      // with it: as a candidate it sat one step behind the drag, so the
+      // box snapped back to its own arrow, jumped, and snapped back again,
+      // with a guide flashing at every step (Torry's recording, Sep 30).
+      if (items[i].kind === "arrow") continue;
       var r = layItemRect(items[i]);
       if (axis === "x") out.push(r.x, r.x + r.w / 2, r.right);
       else out.push(r.y, r.y + r.h / 2, r.bottom);
@@ -23707,7 +25507,10 @@
         scale = snappedH / origin.h;
       }
     }
-    var minScale = Math.max(120 / origin.w, 80 / origin.h);
+    var minScale = origin.item && (origin.item.kind === "box" ||
+                                   origin.item.kind === "timeline")
+      ? Math.max(mins.w / origin.w, mins.h / origin.h)
+      : Math.max(120 / origin.w, 80 / origin.h);
     var maxScale = Math.min(maxW / origin.w, maxH / origin.h);
     if (maxScale < minScale) minScale = maxScale;
     scale = layClamp(scale, minScale, maxScale);
@@ -23767,6 +25570,38 @@
       } else if (!layIsSelected(id)) {
         laySetSelection([id]); renderLayout();
       }
+      var tickHandle = e.target.closest &&
+        e.target.closest('[data-role="lay-tick"]');
+      if (tickHandle && item.kind === "timeline") {
+        // A tick in hand slides along its line (layTickDrag); the
+        // timeline itself stays put.
+        LAY_DRAG = { tickDrag: Number(tickHandle.getAttribute("data-idx")),
+                     timeline: item, ids: [id], primary: item, origins: [],
+                     bounds: laySelectionBounds([id]), resizing: false,
+                     collapseTo: null, sx: e.clientX, sy: e.clientY,
+                     altCopy: false, zoom: layZoom(), moved: false,
+                     before: laySnapState(activeChart()) };
+        document.addEventListener("pointermove", layPointerMove);
+        document.addEventListener("pointerup", layPointerUp);
+        e.preventDefault();
+        return;
+      }
+      var endHandle = e.target.closest &&
+        e.target.closest('[data-role="lay-arrow-end"]');
+      if (endHandle && item.kind === "arrow") {
+        // An arrow END in hand: the gesture attaches or frees that end
+        // (layArrowEndDrag); the arrow's own box is never moved.
+        LAY_DRAG = { arrowEnd: endHandle.getAttribute("data-end"), arrow: item,
+                     ids: [id], primary: item, origins: [],
+                     bounds: laySelectionBounds([id]), resizing: false,
+                     collapseTo: null, sx: e.clientX, sy: e.clientY,
+                     altCopy: false, zoom: layZoom(), moved: false,
+                     before: laySnapState(activeChart()) };
+        document.addEventListener("pointermove", layPointerMove);
+        document.addEventListener("pointerup", layPointerUp);
+        e.preventDefault();
+        return;
+      }
       var resizing = !!(e.target.closest && e.target.closest('[data-role="lay-resize"]'));
       // A plain press on an item that is ALREADY selected keeps the whole
       // selection, so dragging any member moves everything selected, the
@@ -23791,6 +25626,12 @@
                    // real movement, so an Alt+click that never travels stays
                    // an ordinary selection and leaves nothing behind.
                    altCopy: !!e.altKey && !resizing,
+                   // A press on a phase band that never travels opens that
+                   // band's color (click-to-edit, like the chart's parts).
+                   bandHit: (function () {
+                     var bd = e.target.closest && e.target.closest('[data-role="lay-band"]');
+                     return bd && item.kind === "timeline" ? Number(bd.getAttribute("data-idx")) : null;
+                   })(),
                    zoom: layZoom(), moved: false,
                    // Captured here rather than on first movement because the
                    // move handler mutates items in place; pushed at pointer-up
@@ -23802,8 +25643,15 @@
       e.preventDefault();
     });
     canvas.addEventListener("dblclick", function (e) {
+      var tlEl = e.target.closest
+        ? e.target.closest('.ps-litem[data-kind="timeline"]') : null;
+      if (tlEl) {
+        layTimelineDblClick(tlEl.getAttribute("data-item-id"), e);
+        return;
+      }
       var itemEl = e.target.closest
-        ? e.target.closest('.ps-litem[data-kind="text"]') : null;
+        ? e.target.closest('.ps-litem[data-kind="text"],.ps-litem[data-kind="box"]')
+        : null;
       if (!itemEl) return;
       layEditText(itemEl.getAttribute("data-item-id"));
     });
@@ -23840,7 +25688,8 @@
       if (canvasFocused && e.key === "F2") {
         var editItem = layItemById(layActiveId());
         e.preventDefault(); e.stopImmediatePropagation();
-        if (editItem && editItem.kind === "text") layEditText(editItem.id);
+        if (editItem && (editItem.kind === "text" || editItem.kind === "box"))
+          layEditText(editItem.id);
         else layAnnounce("F2 edits text items. The active item is not text.");
         return;
       }
@@ -23887,25 +25736,27 @@
           ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]
             .indexOf(e.key) !== -1) {
         e.preventDefault();
-        if (e.altKey) {
-          var keyStep = e.shiftKey ? 10 : 1;
-          if (e.ctrlKey || e.metaKey) {
-            if (!layResizeSelectedFree(
-                e.key === "ArrowLeft" ? -keyStep :
-                e.key === "ArrowRight" ? keyStep : 0,
-                e.key === "ArrowUp" ? -keyStep :
-                e.key === "ArrowDown" ? keyStep : 0))
-              layAnnounce("Free resize requires one chart or image.");
-          } else {
-            layMoveSelected(e.key === "ArrowLeft" ? -keyStep :
-                            e.key === "ArrowRight" ? keyStep : 0,
-                            e.key === "ArrowUp" ? -keyStep :
-                            e.key === "ArrowDown" ? keyStep : 0);
-          }
-        } else {
-          var direction = (e.key === "ArrowLeft" || e.key === "ArrowUp") ? -1 : 1;
-          layNavigateItem(direction, null, e.shiftKey);
-        }
+        // ARROWS MOVE WHAT IS SELECTED; ALT+ARROW MOVES THE SELECTION
+        // (Torry, Oct 1 2026: "I want the arrows to nudge", in Layouts and
+        // in the charts alike). This reverses the Aug 2026 rule, where
+        // plain arrows stepped between items and Alt nudged. It is still
+        // ONE rule: the same key does the same thing wherever focus is in
+        // this workspace (the tail of this handler covers the rail and the
+        // toolbar). With nothing selected an arrow selects, as it always
+        // did, because there is nothing to move.
+        var keyStep = e.shiftKey ? 10 : 1;
+        var kdx = e.key === "ArrowLeft" ? -keyStep :
+                  e.key === "ArrowRight" ? keyStep : 0;
+        var kdy = e.key === "ArrowUp" ? -keyStep :
+                  e.key === "ArrowDown" ? keyStep : 0;
+        var direction = (e.key === "ArrowLeft" || e.key === "ArrowUp") ? -1 : 1;
+        if (e.altKey && (e.ctrlKey || e.metaKey)) {
+          if (!layResizeSelectedFree(kdx, kdy))
+            layAnnounce("Free resize requires one chart or image.");
+        } else if (e.altKey) layNavigateItem(direction, null, e.shiftKey);
+        else if (e.ctrlKey || e.metaKey) { /* not a layout chord */ }
+        else if (ids.length) layMoveSelected(kdx, kdy);
+        else layNavigateItem(direction, null, false);
         return;
       }
       if ((e.key === "Delete" || e.key === "Backspace") && ids.length) {
@@ -23949,17 +25800,23 @@
           ids.length) {
         e.preventDefault(); layDuplicateSelected(); return;
       }
-      // ONE rule for the arrow keys. Inside the canvas plain arrows navigate
-      // between items and Alt+Arrow nudges, which is the engine's rule and
-      // what the hidden option list exists to serve. A second handler here
-      // used to nudge on PLAIN arrows whenever focus was anywhere else in the
-      // workspace, which in practice is any time the user has just clicked a
-      // rail or toolbar button, so the same key did two opposite things
-      // decided by something invisible. Alt+Arrow nudges everywhere now.
-      if (!ids.length || !e.altKey ||
+      // ONE rule for the arrow keys, outside the canvas as inside it (Oct
+      // 2026): arrows nudge the selection, Alt+Arrow steps it. The Aug 2026
+      // complaint was a key that did two opposite things depending on where
+      // focus happened to be; that still must never happen, so the rail and
+      // the toolbar answer exactly as the canvas does. The scope check keeps
+      // the arrows of anything that owns them (a menu, a tab strip, a dialog)
+      // and of everything outside this workspace.
+      if (!ids.length || e.ctrlKey || e.metaKey ||
           ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]
             .indexOf(e.key) === -1) return;
+      if (!layArrowScopeOk(t)) return;
       e.preventDefault();
+      if (e.altKey) {
+        layNavigateItem((e.key === "ArrowLeft" || e.key === "ArrowUp") ? -1 : 1,
+          null, e.shiftKey);
+        return;
+      }
       var step = e.shiftKey ? 10 : 1;
       layMoveSelected(e.key === "ArrowLeft" ? -step :
                       e.key === "ArrowRight" ? step : 0,
@@ -24264,6 +26121,20 @@
     }
     d.moved = true;
     var p = layPage(), v = layView();
+    if (d.arrowEnd) {
+      layArrowEndDrag(d, e);
+      layHideGuides();
+      laySyncInspector();
+      e.preventDefault();
+      return;
+    }
+    if (d.tickDrag != null) {
+      layTickDrag(d, e);
+      layHideGuides();
+      laySyncInspector();
+      e.preventDefault();
+      return;
+    }
     if (d.resizing && laySizedKind(d.primary)) {
       // The grabbed panel follows the pointer exactly, the existing math.
       // Every OTHER selected sized item follows by RATIO, so two same-size
@@ -24274,7 +26145,11 @@
       for (oi = 0; oi < d.origins.length; oi++)
         if (d.origins[oi].item === d.primary) po = d.origins[oi];
       po = po || d.origins[0];
-      var resized = layResizeDimensions(po, dx, dy, p, v, !!e.shiftKey);
+      // A box resizes freely: it holds text, not a picture with a shape
+      // to keep. Panels keep the proportional default.
+      var resized = layResizeDimensions(po, dx, dy, p, v,
+        !!e.shiftKey || (po.item && (po.item.kind === "box" ||
+                                     po.item.kind === "timeline")));
       var rw = po.w > 0 ? resized.w / po.w : 1;
       var rh = po.h > 0 ? resized.h / po.h : 1;
       var cvR = el("ps-lcanvas");
@@ -24309,6 +26184,7 @@
           '.ps-litem[data-item-id="' + oo.item.id + '"]');
         if (elR) { elR.style.width = nw + "px"; elR.style.height = nh + "px"; }
       }
+      layArrowsFollow(d.ids);
       layHideGuides();
     } else {
       if (v.snap) {
@@ -24330,6 +26206,7 @@
           '.ps-litem[data-item-id="' + it.id + '"]');
         if (live) { live.style.left = it.x + "px"; live.style.top = it.y + "px"; }
       }
+      layArrowsFollow(d.ids);
     }
     laySyncInspector();
     e.preventDefault();
@@ -24349,6 +26226,12 @@
     var cvC = el("ps-lcanvas");
     if (cvC) cvC.classList.remove("ps-lcanvas-dragging", "ps-lcanvas-resizing");
     layHideGuides();
+    // An end drag rewrote attachments, not positions: put the whole
+    // state back from the press-time snapshot.
+    if ((d.arrowEnd || d.tickDrag != null) && d.before) {
+      layRestoreState(d.before);
+      return true;
+    }
     for (var i = 0; i < d.origins.length; i++) {
       var o = d.origins[i];
       o.item.x = o.x; o.item.y = o.y;
@@ -24390,12 +26273,18 @@
     if (d && d.moved) {
       var h = layHist();
       if (h && d.before) {
-        h.undo.push({ label: d.resizing ? "resize" : "move", state: d.before });
+        h.undo.push({ label: d.arrowEnd ? "attach arrow"
+                               : d.tickDrag != null ? "move tick"
+                               : d.resizing ? "resize" : "move", state: d.before });
         if (h.undo.length > LAYOUT_HIST_LIMIT) h.undo.shift();
         h.redo.length = 0;
         LAY_COALESCE = null;
       }
       persist(); renderLayout();
+    } else if (d && d.tickDrag != null && d.timeline) {
+      layFocusTickRow(d.timeline, d.tickDrag);
+    } else if (d && d.bandHit != null && d.primary && d.primary.kind === "timeline") {
+      layOpenBandColor(d.primary, d.bandHit);
     } else if (d && d.collapseTo) {
       // The press kept the multi-selection so a drag could move it; a press
       // that never travelled is a CLICK, and a click on one item means that
@@ -24430,7 +26319,7 @@
   }
   function layEditText(id) {
     var item = layItemById(id);
-    if (!item || item.kind !== "text") return;
+    if (!item || (item.kind !== "text" && item.kind !== "box")) return;
     laySetSelection([id]);
     var canvas = el("ps-lcanvas");
     var returnFocus = document.activeElement === el("ps-lviewport");
@@ -24445,6 +26334,12 @@
     ta.style.fontWeight = item.bold ? "700" : "400";
     ta.style.fontStyle = item.italic ? "italic" : "normal";
     ta.style.color = layTextColor(item);
+    if (item.kind === "box") {
+      // The editor fills the box and centres like the box does, so the
+      // text does not jump when the field opens.
+      ta.style.width = "100%"; ta.style.height = "100%";
+      ta.style.textAlign = "center"; ta.style.boxSizing = "border-box";
+    }
     itemEl.removeAttribute("aria-hidden");
     itemEl.innerHTML = "";
     itemEl.appendChild(ta);
@@ -26155,11 +28050,44 @@
           ? "Text (" + texts.length + " items)" : "Text";
       if (texts.length) layTextSyncControls(texts);
     }
+    var boxSec = el("ps-layout-box-section");
+    if (boxSec) {
+      var boxTargets = layBoxTargets();
+      boxSec.style.display = boxTargets.length ? "" : "none";
+      var boxTitle = boxSec.querySelector(".ps-inspector-section-title");
+      if (boxTitle)
+        boxTitle.textContent = boxTargets.length > 1
+          ? "Box (" + boxTargets.length + " items)" : "Box";
+      if (boxTargets.length) layBoxSyncControls(boxTargets);
+    }
+    var arrowSec = el("ps-layout-arrow-section");
+    if (arrowSec) {
+      var arrowTargets = layArrowTargets();
+      arrowSec.style.display = arrowTargets.length ? "" : "none";
+      var arrowTitle = arrowSec.querySelector(".ps-inspector-section-title");
+      if (arrowTitle)
+        arrowTitle.textContent = arrowTargets.length > 1
+          ? "Arrow (" + arrowTargets.length + " items)" : "Arrow";
+      if (arrowTargets.length) layArrowSyncControls(arrowTargets);
+    }
+    var tlSec = el("ps-layout-timeline-section");
+    if (tlSec) {
+      var tlTargets = layTimelineTargets();
+      tlSec.style.display = tlTargets.length ? "" : "none";
+      var tlTitle = tlSec.querySelector(".ps-inspector-section-title");
+      if (tlTitle)
+        tlTitle.textContent = tlTargets.length > 1
+          ? "Timeline (" + tlTargets.length + " items)" : "Timeline";
+      if (tlTargets.length) layTimelineSyncControls(tlTargets);
+    }
     el("ps-layout-selection-title").textContent = one
       ? (one.kind === "chart"
          ? (srcInfo && srcInfo.name ? "Chart panel - live" : "Chart panel")
          : one.kind === "image"
-         ? (srcInfo ? "Notebook snapshot" : "Image item") : "Text item")
+         ? (srcInfo ? "Notebook snapshot" : "Image item")
+         : one.kind === "box" ? "Box"
+         : one.kind === "timeline" ? "Timeline"
+         : one.kind === "arrow" ? "Arrow" : "Text item")
       : ids.length + " selected items";
     // The behavioral line (Torry, Aug 5 2026): will this update, or not.
     var srcLine = el("ps-layout-source-line");
@@ -26199,7 +28127,9 @@
       setTip(field, ctxSized ? ""
         : layUnits(ids).length > 1
           ? "Size applies to one panel at a time. Select just the one you want to change."
-          : "Text items size themselves to their content.");
+          : (one && one.kind === "arrow")
+            ? "An arrow sizes itself to its ends. Drag an end, or attach it to a box."
+            : "Text items size themselves to their content.");
     });
     // Progressive disclosure (Torry, Jul 29 2026): the align row is SHOWN
     // only once a second item is selected, instead of six greyed buttons
@@ -30599,15 +32529,15 @@
           ["Duplicate it", "Cmd/Ctrl + D"]
         ] },
       { title: "Layouts",
-        note: "Tab to the figure layout items first. Arrow navigation follows " +
-              "the item stack; movement and resizing use Alt so selection " +
-              "never changes accidentally while an item is being positioned.",
+        note: "Tab to the figure layout items first. The arrow keys move " +
+              "what is selected; Alt with an arrow moves the selection " +
+              "to another item instead, following the item stack.",
         rows: [
-          ["Move through items", "Arrow keys / Home / End"],
-          ["Extend or reduce the selection", "Shift + arrows / Space"],
+          ["Nudge the selection", "Arrow keys"],
+          ["Nudge by 10", "Shift + arrows"],
+          ["Move through items", "Alt + arrows / Home / End"],
+          ["Extend or reduce the selection", "Alt + Shift + arrows / Space"],
           ["Group / ungroup", "Cmd/Ctrl + G / Shift + G"],
-          ["Nudge the selection", "Alt + arrows"],
-          ["Nudge by 10", "Alt + Shift + arrows"],
           ["Free resize a chart or image", "Ctrl/Cmd + Alt + arrows"],
           ["Proportional resize", "Alt + Plus / Minus"],
           ["Open exact position and size", "Enter"],
@@ -31229,7 +33159,10 @@
       { label: "Chart panel", command: "layout-add-chart", layoutOnly: true },
       { label: "Text", command: "insert-text", layoutOnly: true },
       { label: "Panel label", command: "insert-label", layoutOnly: true },
-      { label: "Image\u2026", command: "insert-image", layoutOnly: true }
+      { label: "Image\u2026", command: "insert-image", layoutOnly: true },
+      { label: "Box", command: "insert-box", layoutOnly: true },
+      { label: "Arrow", command: "insert-arrow", layoutOnly: true },
+      { label: "Timeline", command: "insert-timeline", layoutOnly: true }
     ],
     // Punch list 3 and 4. Which graph?, Check graph, Glossary and Label parts
     // were reachable only through one unlabelled 29px "?" inside the engine
@@ -32051,6 +33984,9 @@
     else if (command === "insert-text") el("ps-laddtext").click();
     else if (command === "insert-label") el("ps-laddlabel").click();
     else if (command === "insert-image") el("ps-laddimage").click();
+    else if (command === "insert-box") layAddBox();
+    else if (command === "insert-arrow") layAddArrow();
+    else if (command === "insert-timeline") layAddTimeline();
     else if (command === "command-palette") showCommandPalette();
     else if (command === "layout-add-chart") el("ps-laddchart").click();
     else if (command === "layout-add-text") el("ps-laddtext").click();
@@ -33934,6 +35870,8 @@
       });
     })();
     wireLayoutTextControls();
+    wireLayoutPartControls();
+    wireLayoutTimelineControls();
     wireAppFrame(); wireContextInspector(); wireCommandPalette();
     wireGuidedDialogs(); wireStandaloneEngineExclusionLabels();
     migrateLegacyChartPointExclusions();

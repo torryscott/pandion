@@ -33,7 +33,7 @@ await page.evaluate(() => {
 await page.waitForTimeout(120);
 
 if (await page.locator('[data-layout-orientation]').count() !== 2 ||
-    await page.locator('[data-layout-template]').count() !== 8)
+    await page.locator('[data-layout-template]').count() !== 12)
     throw new Error('orientation duplicated or replaced the template gallery');
 // Aug 1 2026 (Torry): the gallery preselected "single" whenever charts
 // existed, so a fresh layout arrived with a chart nobody placed. BLANK is

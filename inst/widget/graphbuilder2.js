@@ -58538,7 +58538,7 @@
                     dot('The <strong>+</strong> menu adds significance brackets, reference lines, a chart title, a figure note, and drawn shapes.') +
                     dot('<strong>Draw shapes</strong> arms a drawing mode: <strong>drag</strong> on the chart to draw a line, arrow, box, etc.; hold <strong>Shift</strong> for straight / square, or just <strong>click</strong> to drop one. It snaps to bars, axes &amp; ticks; <strong>Esc</strong> or <strong>Done</strong> exits.') +
                     dot('Drag annotations, brackets and reference lines to move them; hold <strong>Alt</strong> (Option on Mac) to drag away a <strong>copy</strong>; hold <strong>Shift</strong> to keep the move perfectly horizontal or vertical.') +
-                    dot(kchip("Alt+&#8592;&#8593;&#8595;&#8594;") + ' nudges the selected annotation 1&nbsp;px (Alt+Shift = 10&nbsp;px); ' + kchip(mod + "+D") + ' duplicates it; ' + kchip(mod + "+C") + ' / ' + kchip(mod + "+V") + ' copy &amp; paste; ' + kchip(mod + "+A") + ' selects every annotation.') +
+                    dot(kchip("&#8592;&#8593;&#8595;&#8594;") + ' nudge the selected text or annotation 1&nbsp;px (Shift = 10&nbsp;px); ' + kchip(mod + "+D") + ' duplicates it; ' + kchip(mod + "+C") + ' / ' + kchip(mod + "+V") + ' copy &amp; paste; ' + kchip(mod + "+A") + ' selects every annotation.') +
                   '</ul>';
                 if (t === "access") {
                     var ahead = 'font-weight:700;color:#444;font-size:11px;text-transform:uppercase;letter-spacing:0.04em;margin:13px 0 4px;';
@@ -58547,7 +58547,7 @@
                         '<div data-role="a11y-wip-note" style="background:#fdf6ec;border:1px solid #f0d9b0;border-left:3px solid #d97706;border-radius:4px;padding:7px 9px;color:#7c4a03;margin:0 0 9px;"><strong>Work in progress:</strong> these accessibility features are still being built out and tested. Some of what is described below may be incomplete or change.</div>' +
                         '<div style="' + ap + '">Everything on the chart can be reached without a mouse, and every chart describes itself to screen readers. This topic collects how.</div>' +
                         '<div style="' + ahead + '">Keyboard</div>' +
-                        '<div style="' + ap + '"><strong>Tab</strong> moves between the toolbar, the chart, and an open editor. With the chart focused, <strong>Left and Right</strong> step between sibling parts (bar to bar, slice to slice), <strong>Up, Down or Tab</strong> step between kinds of part (a dashed outline marks the current one), <strong>Enter</strong> opens that part\'s editor and jumps into it, and <strong>Esc</strong> steps back one layer: color picker, then editor, then the chart. The full shortcut list is under <strong>All shortcuts</strong> above.</div>' +
+                        '<div style="' + ap + '"><strong>Tab</strong> moves between the toolbar, the chart, and an open editor. With the chart focused, <strong>Left and Right</strong> step between sibling parts (bar to bar, slice to slice), <strong>Up, Down or Tab</strong> step between kinds of part (a dashed outline marks the current one). On a part that can move (a title, a label, an annotation) the arrow keys move it instead, and <strong>Alt</strong> with an arrow steps to another part. <strong>Enter</strong> opens that part\'s editor and jumps into it, and <strong>Esc</strong> steps back one layer: color picker, then editor, then the chart. The full shortcut list is under <strong>All shortcuts</strong> above.</div>' +
                         '<div style="' + ahead + '">Screen readers</div>' +
                         '<div style="' + ap + '">Each chart announces what it shows: the chart type, axis titles, categories, and groups. Changes announce themselves as they happen, and stepping through parts with the arrow keys announces each part by name.</div>' +
                         '<div style="' + ahead + '">The numbers behind the chart</div>' +
@@ -58562,7 +58562,8 @@
                     krow(mod + "+C &nbsp;/&nbsp; " + mod + "+V", "Copy &amp; paste annotations.") +
                     krow(mod + "+D", "Duplicate the selected annotation.") +
                     krow(mod + "+Shift+C &nbsp;/&nbsp; " + mod + "+Shift+V", "Copy a bar or slice's <strong>style</strong>, then paste it onto another.") +
-                    krow("Alt+&#8592;&#8593;&#8595;&#8594;", "Nudge the selected annotation 1&nbsp;px (Alt+Shift = 10&nbsp;px).") +
+                    krow("&#8592;&#8593;&#8595;&#8594;", "Nudge the selected text or annotation 1&nbsp;px (Shift = 10&nbsp;px).") +
+                    krow("Alt+&#8592;&#8593;&#8595;&#8594;", "Move the selection to another part of the chart.") +
                     krow(mod + "+&#8592;&#8593;&#8595;&#8594;", "Move the selected bar, slice, item or series one step in its order.") +
                     krow(mod + "+A", "Select every annotation (then nudge, hide or duplicate them together).") +
                     krow(mod + "+F", "Open Find a setting; type a control, concept or statistical term, then use the arrow keys and Enter to open the result.") +
@@ -105742,22 +105743,60 @@
             clearSelection();
         }, true);
 
-        // Alt+Arrow nudges selected text / annotations 1 px (Alt+Shift =
-        // 10 px). Plain arrows NAVIGATE the chart when it has focus (the
-        // keyboard model, Jul 2026) - the old plain-arrow nudge ran at
-        // window capture and stole navigation on any selected text.
+        // ARROW KEYS NUDGE the selected text / annotations 1 px (Shift =
+        // 10 px), and ALT+ARROW MOVES THE SELECTION instead (Torry, Oct 1
+        // 2026: "I want the arrows to nudge", for Layouts and the charts
+        // alike - this reverses the Jul 2026 rule, where plain arrows
+        // navigated and Alt nudged). A selection that cannot move (a bar,
+        // an axis) leaves the plain arrows to the navigation handler, so
+        // stepping bar to bar is unchanged. The old plain-arrow nudge ran
+        // at window capture with no scope and stole arrows from anything
+        // on the page; this one answers only when the keys are plausibly
+        // meant for the chart (_gb2NudgeScopeOk).
         // Skipped while typing in an input or while a popover is open
         // for editing.
         // Listener attached at WINDOW with capture phase + stopImmediatePropagation
         // because jamovi's result panel intercepts up/down arrows for its own
         // navigation between result elements; we need to consume them first.
+        // Focus on the chart itself, on nothing at all, or on a plain
+        // control inside this widget (its panel, wherever the host docks
+        // it). Focus in the HOST's own widgets - a tab strip, a menu, a
+        // list - keeps its arrows.
+        function _gb2NudgeScopeOk() {
+            // A chart that is not on screen takes no arrows. A host page
+            // may park it (display none, visibility hidden, moved off
+            // screen) while it still holds a selection, and an arrow
+            // pressed in some other part of that page moved a title on a
+            // chart nobody could see.
+            try {
+                if (!svg || !svg.isConnected) return false;
+                var _nsR = svg.getBoundingClientRect();
+                if (!(_nsR.width > 0 && _nsR.height > 0)) return false;
+                if (_nsR.bottom <= 0 || _nsR.right <= 0 ||
+                    _nsR.top >= window.innerHeight || _nsR.left >= window.innerWidth) return false;
+                var _nsCs = window.getComputedStyle(svg);
+                if (_nsCs && _nsCs.visibility === "hidden") return false;
+            } catch (_eV) {}
+            var ae = document.activeElement;
+            if (!ae || ae === document.body || ae === document.documentElement) return true;
+            if (ae === svg) return true;
+            try { if (host && host.contains(ae)) return true; } catch (_eH) {}
+            try {
+                if (typeof inspectorPanel !== "undefined" && inspectorPanel &&
+                    inspectorPanel.contains(ae)) return true;
+            } catch (_eP) {}
+            return false;
+        }
         function nudgeKeyHandler(e) {
             if (e.key !== "ArrowUp" && e.key !== "ArrowDown" &&
                 e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-            if (!e.altKey) return;
+            // Alt+Arrow steps the selection (_gb2ChartKeyNav); Cmd/Ctrl+
+            // Arrow reorders (_kbReorderKeyHandler). Plain and Shift nudge.
+            if (e.altKey || e.ctrlKey || e.metaKey) return;
             var t = e.target;
             if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" ||
                       t.tagName === "SELECT" || t.isContentEditable)) return;
+            if (!_gb2NudgeScopeOk()) return;
             // Mark that an arrow key is being held so the textOffsets
             // flush defers until release. Auto-repeat fires only
             // keydown (no intervening keyup), so this sticks across
@@ -106003,10 +106042,11 @@
         // anatomy retarget kinds, deduped by SELECTION key since that
         // is the editable unit); Up/Down and Tab step between KINDS
         // (bars, axes, legend); Tab past either end falls through to
-        // native Tab so the editor and toolbar stay reachable. Plain
-        // arrows here always NAVIGATE - nudging moved to Alt+Arrows
-        // (the old plain-arrow nudge ran at window capture and beat
-        // navigation on any selected text: the y-title wiggle bug).
+        // native Tab so the editor and toolbar stay reachable. Since
+        // Oct 2026 a MOVABLE selection (text, an annotation) takes the
+        // plain arrows as a nudge (nudgeKeyHandler runs first and stops
+        // the event), and Alt+Arrow steps from any part; a selection
+        // that cannot move still steps on the plain arrows.
         function _kbNavModel() {
             var specs;
             try { specs = _anatLabelSpecs(); } catch (_e) { specs = []; }
@@ -106074,8 +106114,18 @@
             if (name.toLowerCase().indexOf(tail.toLowerCase()) >= 0) return "";
             return ": " + tail;
         }
+        // Text and annotations are what the arrow keys can move.
+        function _kbKeyMovable(key) {
+            key = String(key || "");
+            return key.indexOf("text:") === 0 || key.indexOf("annotation:") === 0;
+        }
         function _kbSelect(model, nk, nj, msg) {
             window.__gb2_kbNavKind = nk;
+            if (_kbKeyMovable(model[nk].insts[nj].key)) {
+                msg = msg.replace("Left and Right move between them.",
+                    "Alt with Left or Right moves between them.");
+                msg += " Arrow keys move it; Alt with an arrow steps to another part.";
+            }
             try { _pickerSkipNextFocus = true; } catch (_eS) {}
             try { setInspectorSelection(model[nk].insts[nj].key); } catch (_eSel) {}
             _kbPinFocus();
@@ -106087,8 +106137,14 @@
             try { redrawInspectorIndicator(); } catch (_eR) {}
         }
         function _gb2ChartKeyNav(e) {
-            if (e.ctrlKey || e.metaKey || e.altKey) return;
+            if (e.ctrlKey || e.metaKey) return;
             var k = e.key;
+            // Alt+Arrow is the step-to-another-part chord everywhere (Oct
+            // 2026): a movable selection takes the plain arrows as a
+            // nudge, so Alt carries the step. Alt with any other key is
+            // not ours.
+            if (e.altKey && k !== "ArrowRight" && k !== "ArrowLeft" &&
+                k !== "ArrowUp" && k !== "ArrowDown") return;
             if (k === "Enter") {
                 // Nothing selected: Enter ENTERS the chart - selecting
                 // the first (or remembered) part, exactly like an arrow
@@ -106153,7 +106209,10 @@
                     e.preventDefault();
                     e.stopImmediatePropagation();
                     e.stopPropagation();
-                    _kbAnnounce("Only one " + model[pos.k].name + ". Up, Down or Tab move to the other parts.");
+                    _kbAnnounce("Only one " + model[pos.k].name +
+                        (_kbKeyMovable(model[pos.k].insts[0].key)
+                            ? ". Tab, or Alt with Up or Down, moves to the other parts."
+                            : ". Up, Down or Tab move to the other parts."));
                     return;
                 } else {
                     nk = pos.k;

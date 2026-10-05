@@ -8,6 +8,24 @@ punch lists are maintainer-local and not published with this repo.
 
 ## Status
 
+- Figure parts (Sep 29, 2026): Layouts gains two item kinds, Box (the text
+  item with fill, border and corners) and Arrow (two ends, each free or
+  attached to a box; attached ends follow their box and leave from the side
+  facing the other end), one Add part toolbar menu, Box and Arrow rail
+  sections, and a PRISMA 2020 template under a Diagrams heading in the New
+  layout gallery. Boxes and arrows ride undo, duplicate, paste, the .pand
+  file and every export. Verified by `layout-parts-check` (13 cases, control
+  red against a tree without the feature). Slice two the same day: the
+  Timeline item (named ticks you drag along the line, labels above or
+  below, plain or arrowed ends, phase bands between two ticks, the rail
+  lists ticks and bands) and three more templates under Diagrams: Timeline
+  over a chart, Study design, Trial sequence. Verified by
+  `layout-timeline-check`. Slice three (Torry's review): a shared color
+  popover behind every part's custom-color chip, a phase band that opens
+  it when clicked on the page, tick clicks that land in the tick's rail
+  row, and line, tick and per-tick widths plus tick length. Verified by
+  `layout-parts-polish-check`.
+
 - Final usability follow-up (Sep 9, 2026): bar-style choices expose selected
   states and retain keyboard focus. Help me choose completes the pristine
   chart it was opened from (UX-06); explicit New chart still creates one.
@@ -1160,12 +1178,15 @@ Things worth knowing before changing it:
   labels, so a column reading 100000 sits about 6 to 11 px off one reading
   0.10. `layAlignPlots` moves the panels so the plots coincide, grouping the
   selection by the column or row the panels already sit in.
-- **Arrow keys mean two different things.** Inside `#ps-lviewport` plain
-  arrows NAVIGATE between items and Alt+Arrow nudges, which is the engine's
-  rule and the assistive-technology model. A second handler further down the
-  same keydown function nudges on PLAIN arrows whenever focus is anywhere
-  else in the workspace. A probe that focuses the viewport must press
-  Alt+Arrow. Unifying the two is an open decision.
+- **Arrow keys move what is selected (Oct 2026).** An arrow nudges the
+  selected items by one pixel (Shift for ten) wherever focus is in the
+  workspace: the canvas, the rail, or the page itself. Alt with an arrow
+  steps to another item, Alt+Shift extends the selection, and with nothing
+  selected a plain arrow in the canvas picks an item. `layArrowScopeOk`
+  keeps the rule out of menus, tab strips, dialogs and the data grid. The
+  charts follow the same rule for titles, labels and annotations
+  (`nudgeKeyHandler` in the engine); a part that cannot move, such as a
+  bar, still steps on a plain arrow. Probe: `verify/arrow-nudge-check.mjs`.
 - **The canvas is `aria-hidden` on purpose.** A parallel hidden list of plain
   `role="option"` divs is the assistive-technology model, because a captured
   chart SVG would otherwise become a pile of nested interactive descendants
