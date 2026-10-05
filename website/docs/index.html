@@ -400,6 +400,12 @@ they leave every chart and statistic (with a live count of what each code
 excludes), and search with <kbd>Cmd/Ctrl+F</kbd>. The File menu exports the
 sheet back out as CSV or Excel. Computed variables live here too - see
 <a href="#computed">Computed variables</a> below.</p>
+<p><b>Typing in cells</b> works the way it does in a spreadsheet. Click a
+cell to select it and the arrow keys move between cells. Start typing and
+the cell takes what you type; an arrow key then saves it and moves to the
+next cell, as <kbd>Enter</kbd> saves and moves down and <kbd>Tab</kbd> saves
+and moves across. To move within the text instead, double-click the cell,
+click in it while it is open, or press <kbd>F2</kbd>.</p>
 <p><b>The grid</b> sizes each column to its content by default; double-click
 a column edge to re-fit one, or use <b>Data &gt; Auto-fit all columns</b> and
 <b>Reset all column widths</b>. The same menu holds the column and row
@@ -456,7 +462,47 @@ source chart), kept Notebook pages, images, and text on a page sized for
 slides or paper, then export the whole page. Right-click any placed panel for
 <b>Open source chart</b>. The <b>Insert</b> menu adds a <b>Chart panel</b>,
 <b>Text</b>, a <b>Panel label</b>, or an <b>Image...</b> to the page, and
-<b>Insert &gt; New layout</b> starts another.</p>
+<b>Insert &gt; New layout</b> starts another. With an item selected, the
+arrow keys nudge it 1 px (<kbd>Shift</kbd> for 10 px) and <kbd>Alt</kbd>
+with an arrow steps to the next item.</p>
+<p><b>Figure parts.</b> The <b>Add part</b> button on the layout toolbar adds
+a <b>Box</b> (a text item with a fill, a border, and rounded corners) or an
+<b>Arrow</b>, the pieces of a methods flowchart. Double-click a box to edit
+its text; the rail's <b>Box</b> section sets its fill, border, and corner
+radius, and the <b>Text</b> section sizes, colors, and rotates the text.
+Drag either end of an arrow onto a box to attach it: an attached end follows
+the box wherever it moves, and the arrow leaves from whichever side faces the
+other end. With a box selected, <b>Add part &gt; Arrow</b> starts an arrow
+attached to it. The <b>Arrow</b> section sets the route (straight or elbow),
+the heads, the width and color, and the <b>From</b> and <b>To</b> boxes by
+name. Every color row (box fill, box border, arrow, timeline) ends in a
+dashed chip that opens a color picker for any color the swatches do not
+offer. Deleting a box frees the arrows that were attached to it, and one
+<b>Undo</b> takes back any of this. <b>Add part &gt; Templates...</b> opens
+the New layout gallery, whose <b>Diagrams</b> section holds a
+<b>PRISMA 2020</b> flow diagram on a Letter portrait page with every count
+left as a field to fill in; each of its boxes and arrows is an ordinary part
+afterward. Boxes and arrows export with the page like everything else.</p>
+<p><b>Timelines.</b> <b>Add part &gt; Timeline</b> adds one line with named
+tick marks along it: the procedure of a study, the screens of a trial, the
+phases of a design. Drag a tick along the line to move it, double-click the
+line to add a tick where you clicked, and double-click a label to edit it
+in the rail, where the <b>Timeline</b> section lists every tick with its
+label and an optional second label below the line, sets the text size and
+color, puts the labels above or below the line, gives the line a plain or
+arrowed end, and adds <b>phase bands</b>: a tinted stretch between two ticks
+with its own label, for a dosing period or a treatment phase. Click a band
+on the page, or its color chip in the rail, to open a color picker on it;
+the <b>Line</b>, <b>Ticks</b>, and <b>Length</b> controls set the line's
+width and the width and length of every tick, and a tick's own row can give
+it a width of its own. A timeline holds labels and positions and nothing
+more; it never computes from dates.
+Three more templates sit under <b>Diagrams</b> in the New layout gallery:
+<b>Timeline over a chart</b> (a procedure timeline as wide as the chart
+beneath it, so its ticks can be lined up with the chart's occasions),
+<b>Study design</b> (groups down the side, phases across the top, a box per
+cell with arrows between phases), and <b>Trial sequence</b> (screens in a
+cascade over a timeline of their durations).</p>
 <h3 id="app-saving">Saving and opening</h3>
 <p><b>Save</b> writes a <code>.pand</code> project: the data, every chart and
 its styling, layouts, and the Notebook, all in one file. The app also keeps a
@@ -2017,7 +2063,8 @@ workspaces, the data grid, saving); press <kbd>F1</kbd>, or choose
 <tr><td><kbd>⌘+C</kbd> / <kbd>⌘+V</kbd></td><td>Copy &amp; paste annotations.</td></tr>
 <tr><td><kbd>⌘+D</kbd></td><td>Duplicate the selected annotation.</td></tr>
 <tr><td><kbd>⌘+Shift+C</kbd> / <kbd>⌘+Shift+V</kbd></td><td>Copy a bar or slice's <i>style</i>, then paste it onto another.</td></tr>
-<tr><td><kbd>Alt+←↑↓→</kbd></td><td>Nudge the selected annotation 1 px (<kbd>Alt+Shift</kbd> = 10 px).</td></tr>
+<tr><td><kbd>←↑↓→</kbd></td><td>Nudge the selected text or annotation 1 px (<kbd>Shift</kbd> = 10 px). On a part that cannot move, such as a bar, the arrows step to the next one.</td></tr>
+<tr><td><kbd>Alt+←↑↓→</kbd></td><td>Move the selection to another part of the chart.</td></tr>
 <tr><td><kbd>⌘+←↑↓→</kbd></td><td>Move the selected bar, slice, item, or series one step in its order.</td></tr>
 <tr><td><kbd>⌘+A</kbd></td><td>Select every annotation (then nudge, hide, or duplicate them together).</td></tr>
 <tr><td><kbd>⌘/Ctrl+F</kbd></td><td>Open Find a setting; type a control, concept, or statistical term, then use the arrow keys and <kbd>Enter</kbd> to open the result.</td></tr>
