@@ -10745,7 +10745,8 @@
     // one-shot source emphasis only for this explicit Reveal action.
     LINKED_REVEAL_EMPHASIS = true;
     gridApplySelection();
-    var td = gridFindTd(LINKED_CELL.col, row);
+    var td = gridFindTd(LINKED_CELL.col, row) ||
+             gridBuildCell(LINKED_CELL.col, row);
     if (td && td.scrollIntoView)
       try { td.scrollIntoView({ block: "center", inline: "nearest" }); }
       catch (e) { td.scrollIntoView(); }
@@ -13875,6 +13876,89 @@
     for (i = 0; i < heads.length; i++)
       heads[i].classList.remove("ps-grid-axis-selected");
   }
+  // ---- column windowing for a wide table ----
+  // The grid has always built only a window of ROWS. On a wide table it now
+  // builds only a window of COLUMNS too (Oct 2026, a 1,010-column survey
+  // file: 141,000 cells in the page, nine seconds to open the workspace and
+  // three for every scroll). The header row and the colgroup still carry
+  // EVERY column, so everything that works from a header (resize, drag to
+  // move, column select, the type badge, measured widths) is untouched; only
+  // the body rows are windowed, each with one spacer cell either side whose
+  // colspan covers the columns not built. A fixed-layout table gives those
+  // spacers exactly the width of the columns they stand for. Tables under
+  // GRID_COL_WINDOW_MIN visible columns render whole, exactly as before.
+  var GRID_COL_WINDOW_MIN = 60;
+  var GRID_COL_OVERSCAN_PX = 900;
+  var GRID_COL_EDGE_PX = 260;       // re-window this close to a built edge
+  var GRID_COL_WINDOWED = false;
+  var GRID_COL_START = 0, GRID_COL_END = 0;
+  var GRID_COL_PX0 = 0, GRID_COL_PX1 = 0;   // table px of the built columns
+  var GRID_COL_COUNT = 0;
+  // The width the grid can show. The window's own width is the ceiling, so
+  // a grid measured while its workspace is hidden (clientWidth 0) still
+  // builds enough columns to fill the screen it is about to appear on. Zero
+  // means no layout engine at all (a headless DOM), and nothing windows.
+  function gridColViewWidth(grid) {
+    return Math.max(Number(grid && grid.clientWidth) || 0,
+                    Number(window.innerWidth) || 0);
+  }
+  // True when the viewport has come within reach of an edge of the built
+  // columns, unless that edge is the table's own.
+  function gridColumnWindowStale(grid) {
+    if (!GRID_COL_WINDOWED) return false;
+    var sl = Number(grid.scrollLeft) || 0, cw = gridColViewWidth(grid);
+    return (GRID_COL_START > 0 && sl + 46 < GRID_COL_PX0 + GRID_COL_EDGE_PX) ||
+           (GRID_COL_END < GRID_COL_COUNT &&
+            sl + cw > GRID_COL_PX1 - GRID_COL_EDGE_PX);
+  }
+  function gridColumnWindowFor(cols, widths, scrollLeft, viewW) {
+    var lo = scrollLeft - GRID_COL_OVERSCAN_PX;
+    var hi = scrollLeft + Math.max(0, viewW) + GRID_COL_OVERSCAN_PX;
+    var x = 46, start = -1, end = cols.length, px0 = 46, px1 = 46;
+    for (var j = 0; j < cols.length; j++) {
+      var w = Number(widths[cols[j]]) || 0;
+      if (start < 0 && x + w > lo) { start = j; px0 = x; }
+      if (start >= 0 && x >= hi) { end = j; break; }
+      x += w;
+      px1 = x;
+    }
+    if (start < 0) { start = Math.max(0, cols.length - 1); px0 = x; end = cols.length; }
+    return { start: start, end: Math.max(end, start + 1), px0: px0, px1: px1 };
+  }
+  // Table px of one column's left and right edge, from the stored widths.
+  function gridColumnEdges(cols, index) {
+    var widths = gridColumnWidths(false), x = 46;
+    for (var j = 0; j < index && j < cols.length; j++)
+      x += gridClampColumnWidth(widths[cols[j]] || GRID_NATURAL_WIDTHS[cols[j]] || 160);
+    var w = gridClampColumnWidth(widths[cols[index]] ||
+      GRID_NATURAL_WIDTHS[cols[index]] || 160);
+    return { left: x, right: x + w };
+  }
+  // Make sure one cell exists, scrolling the window to it when the row or
+  // the column is outside what is built. Returns the cell, or null.
+  function gridBuildCell(col, row) {
+    var td = gridFindTd(col, row);
+    if (td) return td;
+    var grid = el("ps-datagrid"), t = PROJECT.table, moved = false;
+    if (!grid || !t) return null;
+    if (row < GRID_WINDOW_START || row >= GRID_WINDOW_END) {
+      grid.scrollTop = Math.max(0, row * GRID_ROW_HEIGHT - GRID_ROW_HEIGHT * 3);
+      moved = true;
+    }
+    if (GRID_COL_WINDOWED) {
+      var cols = gridVisibleColumns(t), ci = cols.indexOf(col);
+      if (ci >= 0 && (ci < GRID_COL_START || ci >= GRID_COL_END)) {
+        var edge = gridColumnEdges(cols, ci);
+        grid.scrollLeft = ci < GRID_COL_START
+          ? Math.max(0, edge.left - 46)
+          : Math.max(0, edge.right - grid.clientWidth);
+        moved = true;
+      }
+    }
+    if (!moved) return null;
+    syncDataGrid();
+    return gridFindTd(col, row);
+  }
   function gridShouldVirtualize(t) {
     if (!t) return false;
     var rows = nRows(t), cols = t.order ? t.order.length : 0;
@@ -15410,7 +15494,8 @@
     // after the selection, because the cell has to be painted before it can
     // be measured, and only when it is actually out of view so an in-view
     // match never jolts sideways.
-    var cell = gridFindTd(result.col, result.row);
+    var cell = gridFindTd(result.col, result.row) ||
+               gridBuildCell(result.col, result.row);
     if (cell && grid.scrollWidth > grid.clientWidth + 1) {
       var cr = cell.getBoundingClientRect(), gr = grid.getBoundingClientRect();
       // The row-number gutter is sticky, so a cell tucked behind it is as
@@ -15708,6 +15793,26 @@
            ' role="columnheader" aria-colindex="1" aria-label="Select all cells"' +
            ' data-grid-all data-tip="Select all cells"></th>');
     var j, col;
+    // Which columns the body builds (see GRID_COL_WINDOW_MIN). Only a sized
+    // table can window, because the spacers take their width from the
+    // colgroup; widths[] was filled and clamped for every column just above.
+    var colViewW = gridColViewWidth(grid);
+    var colWin = (sized && colViewW > 0 &&
+                  visibleCols.length > GRID_COL_WINDOW_MIN)
+      ? gridColumnWindowFor(visibleCols, widths, priorScrollLeft, colViewW)
+      : null;
+    GRID_COL_WINDOWED = !!colWin;
+    GRID_COL_COUNT = visibleCols.length;
+    GRID_COL_START = colWin ? colWin.start : 0;
+    GRID_COL_END = colWin ? colWin.end : visibleCols.length;
+    GRID_COL_PX0 = colWin ? colWin.px0 : 0;
+    GRID_COL_PX1 = colWin ? colWin.px1 : 0;
+    var colLead = colWin && colWin.start > 0
+      ? '<td class="ps-grid-colspacer" aria-hidden="true" colspan="' +
+        colWin.start + '"></td>' : "";
+    var colTail = colWin && colWin.end < visibleCols.length
+      ? '<td class="ps-grid-colspacer" aria-hidden="true" colspan="' +
+        (visibleCols.length - colWin.end) + '"></td>' : "";
     for (j = 0; j < visibleCols.length; j++) {
       col = visibleCols[j];
       var kind = t.types[col];
@@ -15765,7 +15870,8 @@
              '" data-tip="' + (rowExcluded
                ? "Observation excluded from every chart"
                : "Select row " + (i + 1)) + '">' + (i + 1) + "</td>");
-      for (j = 0; j < visibleCols.length; j++) {
+      if (colLead) h.push(colLead);
+      for (j = GRID_COL_START; j < GRID_COL_END; j++) {
         col = visibleCols[j];
         var view = gridCellView(t, col, i);
         h.push('<td id="' + gridCellId(j, i) + '" class="' + view.cls +
@@ -15775,6 +15881,7 @@
                (view.title ? ' data-tip="' + escHtml(view.title) + '"' : "") +
                ">" + escHtml(view.text) + "</td>");
       }
+      if (colTail) h.push(colTail);
       h.push("</tr>");
     }
     if (end < n)
@@ -16626,7 +16733,7 @@
       var grid = el("ps-datagrid");
       grid.scrollTop = Math.max(0, row * GRID_ROW_HEIGHT);
       syncDataGrid();
-      td = gridFindTd(col, row);
+      td = gridFindTd(col, row) || gridBuildCell(col, row);
     }
     if (!td) return;
     gridClearSelection();
@@ -17582,8 +17689,15 @@
       if (GRID_EDIT || GRID_SCROLL_FRAME) return;
       GRID_SCROLL_FRAME = window.requestAnimationFrame(function () {
         GRID_SCROLL_FRAME = null;
-        if (appWorkspace() !== "data" || !PROJECT.table ||
-            !gridShouldVirtualize(PROJECT.table)) return;
+        if (appWorkspace() !== "data" || !PROJECT.table) return;
+        // Columns: rebuild when the viewport nears an edge of what is
+        // built. Never under a header gesture: a column being dragged to a
+        // new place or resized holds on to the cells it started with.
+        if (!COL_MOVE && !GRID_COLUMN_DRAG && gridColumnWindowStale(grid)) {
+          syncDataGrid();
+          return;
+        }
+        if (!gridShouldVirtualize(PROJECT.table)) return;
         var wanted = Math.max(0, Math.floor((Number(grid.scrollTop) || 0) /
           GRID_ROW_HEIGHT) -
           GRID_WINDOW_OVERSCAN);
@@ -17592,7 +17706,15 @@
       });
     });
     window.addEventListener("resize", function () {
-      window.requestAnimationFrame(gridSyncColumnResizers);
+      window.requestAnimationFrame(function () {
+        // A wider window can show columns that were never built.
+        if (appWorkspace() === "data" && PROJECT.table && !GRID_EDIT &&
+            !COL_MOVE && !GRID_COLUMN_DRAG && gridColumnWindowStale(grid)) {
+          syncDataGrid();
+          return;
+        }
+        gridSyncColumnResizers();
+      });
     });
     // t4-35 (Torry's ask): drag a column HEADER to a new position, and the
     // other columns part to show where it will land - the dist stacked-drag
@@ -17890,7 +18012,10 @@
         GRID_COLUMN_DRAG = null;
         document.body.classList.remove("ps-grid-column-resizing");
         persist(false);
-        gridApplyClippedTitles();
+        // The built columns were measured at the old width; rebuild so the
+        // window's edges are true again (cheap: only a window is built).
+        if (GRID_COL_WINDOWED) syncDataGrid();
+        else gridApplyClippedTitles();
         e.preventDefault();
         return;
       }
@@ -17901,7 +18026,8 @@
         GRID_COLUMN_DRAG = null;
         document.body.classList.remove("ps-grid-column-resizing");
         persist(false);
-        gridApplyClippedTitles();
+        if (GRID_COL_WINDOWED) syncDataGrid();
+        else gridApplyClippedTitles();
       }
       gridFinishDrag(e, true);
     });
@@ -18119,12 +18245,10 @@
                        extend ? "cells" : "cells");
       var td = gridFindTd(cols[ci], ri);
       if (!td) {
-        // The grid is windowed, so the target row may not be built yet.
-        el("ps-datagrid").scrollTop =
-          Math.max(0, ri * GRID_ROW_HEIGHT - GRID_ROW_HEIGHT * 3);
-        syncDataGrid();
+        // The grid is windowed, so the target row (or, on a wide table,
+        // the target column) may not be built yet.
+        td = gridBuildCell(cols[ci], ri);
         gridApplySelection();
-        td = gridFindTd(cols[ci], ri);
       }
       if (td && td.scrollIntoView)
         try { td.scrollIntoView({ block: "nearest", inline: "nearest" }); }

@@ -1880,6 +1880,11 @@
   .ps-grid-table .ps-grid-spacer td {
     padding: 0; border: 0; background: transparent; pointer-events: none;
   }
+  /* A wide table builds only the columns near the viewport; this cell
+     stands in for the rest of the row on either side. */
+  .ps-grid-table td.ps-grid-colspacer {
+    padding: 0; border: 0; background: transparent; pointer-events: none;
+  }
   .ps-grid-table td.ps-grid-num { text-align: right; }
   .ps-grid-table td.ps-grid-miss { color: var(--ps-muted); text-align: center; }
   .ps-grid-table .ps-grid-rownum {
