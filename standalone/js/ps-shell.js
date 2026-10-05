@@ -653,6 +653,40 @@
       "copy that does not depend on this browser.", true);
   }
   var AUTOSAVE_LAST_OK = null;     // B14: when work last actually reached storage
+  // A project too large for browser autosave (Oct 2026, a colleague's 70 MB
+  // survey file). Browser autosave is localStorage, which holds about five
+  // million characters for the whole origin, and a table of 12,570 rows by
+  // 1,010 columns serializes to 85 million. Every persist still built that
+  // whole string (0.5 to 1 second of frozen window, measured), failed on the
+  // quota, and raised the same red toast: on every edit, every style change,
+  // every workspace switch. Once a write has failed for SIZE the app now
+  // remembers the size that failed, stops building the snapshot, says so
+  // once, and tries again only when the table has shrunk enough that it
+  // might fit. The chip, the status line and the close-tab guard keep
+  // reporting the true state the whole time.
+  var AUTOSAVE_ROOM_CHARS = 4500000;      // what one project may plausibly use
+  var AUTOSAVE_TOO_BIG = null;            // { cells, chars } of the failed write
+  function tableCellCount() {
+    var t = PROJECT && PROJECT.table;
+    return (t && t.order && t.order.length) ? t.order.length * nRows(t) : 0;
+  }
+  function autosaveTooBigNow() {
+    if (!AUTOSAVE_TOO_BIG) return false;
+    // Proportional: the cell count at which the failed snapshot would have
+    // come down to the room there is. Above it, do not even try.
+    var fits = AUTOSAVE_TOO_BIG.cells *
+      (AUTOSAVE_ROOM_CHARS / Math.max(1, AUTOSAVE_TOO_BIG.chars));
+    if (tableCellCount() > fits) return true;
+    AUTOSAVE_TOO_BIG = null;              // it shrank: the next write is real
+    return false;
+  }
+  function autosaveTooBigDetail() {
+    return "This project is too large for browser autosave: it needs about " +
+      formatBytes(AUTOSAVE_TOO_BIG ? AUTOSAVE_TOO_BIG.chars : LAST_PROJECT_BYTES) +
+      " and the browser keeps about 5 MB. Your work is safe in this tab, " +
+      "and a reload would lose whatever is not in a file. Save it to a " +
+      ".pand file as you go.";
+  }
   var RECOVERY_NOTE = "";
   var LAST_PROJECT_BYTES = 0;
   var LAST_RENDER_MS = 0;
@@ -4067,6 +4101,13 @@
   }
   function persistWrite(housekeeping) {
     var snap, json;
+    // Known not to fit: skip the snapshot entirely (see AUTOSAVE_TOO_BIG).
+    if (autosaveTooBigNow()) {
+      AUTOSAVE_HEALTH = "error";
+      AUTOSAVE_DETAIL = autosaveTooBigDetail();
+      updateDocumentState();
+      return;
+    }
     try {
       snap = projectSnapshot();
       json = JSON.stringify(snap);
@@ -4109,14 +4150,34 @@
       // read as reassurance, so the sentence that would have saved the work
       // only appeared when it was not needed.
       var quota = /quota/i.test(String(e && (e.name || e.message)));
-      AUTOSAVE_DETAIL = quota
+      // A snapshot larger than the room there is can never be written, no
+      // matter what else is cleared: remember it, so the next persist does
+      // not rebuild it. (A failed stringify of a huge table lands here too:
+      // the json never existed, and the cell count stands in for its size.)
+      var cells = tableCellCount();
+      var chars = json ? json.length : cells * 7;
+      var wasTooBig = !!AUTOSAVE_TOO_BIG;
+      if ((quota || !json) && chars > AUTOSAVE_ROOM_CHARS && cells)
+        AUTOSAVE_TOO_BIG = { cells: cells, chars: chars };
+      var detail = AUTOSAVE_TOO_BIG ? autosaveTooBigDetail() : (quota
         ? "Browser storage is full, so this project is no longer being " +
           "autosaved. Your work is safe in this tab, and a reload would lose " +
           "it. Save it to a .pand file now."
-        : "Local recovery could not be updated";
+        : "Local recovery could not be updated");
+      // Say it when it STARTS failing, or when the reason changes. The chip
+      // and the status line carry the state from then on; the same red
+      // toast on every later edit was noise that taught people to ignore it.
+      var news = AUTOSAVE_DETAIL !== detail || (AUTOSAVE_TOO_BIG && !wasTooBig);
+      AUTOSAVE_DETAIL = detail;
       try { window.localStorage.setItem(PS_STALE_KEY, "1"); } catch (e1) {}
       updateDocumentState();
-      showToast(AUTOSAVE_DETAIL, true);
+      if (news) {
+        if (AUTOSAVE_TOO_BIG)
+          showActionToast(detail, "Save to a file", function () {
+            try { saveProjectFile(); } catch (eS) {}
+          }, { error: true, sticky: true, dismissLabel: "Not now" });
+        else showToast(detail, true);
+      }
     }
   }
   function migrateSnapshot(input) {
@@ -4490,6 +4551,14 @@
       // chip says whether the work is safe, this says how recently.
       var line = autosaveFailing ? AUTOSAVE_DETAIL
         : (dirty ? "Unsaved file changes" : savedAgoText());
+      // Too large for browser autosave: the file is the only copy there can
+      // be, so the line says where the work stands against the FILE rather
+      // than repeating the warning after the user has done what it asked.
+      if (autosaveFailing && AUTOSAVE_TOO_BIG)
+        line = FILE_SAVED_REV == null
+          ? "Not saved yet \u00b7 too large for browser autosave, so save it to a .pand file"
+          : (dirty ? "Changes not in the file yet \u00b7 too large for browser autosave, so save as you go"
+                   : "Saved to file \u00b7 too large for browser autosave, so save as you go");
       // B14. One lucky small write used to erase every trace that saves had
       // been failing, including the honest status line. A recovered autosave
       // IS working again, so the chip goes quiet - but the session remembers
@@ -4864,6 +4933,12 @@
           });
           row.appendChild(b);
         }
+        if (entry.sticky) {
+          var no = mkEl("button", "ps-toast-dismiss", entry.dismissLabel || "Dismiss");
+          no.type = "button";
+          no.addEventListener("click", function () { dismissToast(entry.id); });
+          row.appendChild(no);
+        }
         host.appendChild(row);
       })(TOASTS[i]);
     }
@@ -4883,7 +4958,12 @@
     opts = opts || {};
     var entry = { id: ++TOAST_SEQ, text: String(text),
                   error: !!opts.error, undo: opts.undo || null,
-                  actionLabel: opts.actionLabel || null, timer: null };
+                  actionLabel: opts.actionLabel || null, timer: null,
+                  // A QUESTION stays until it is answered. The large-file
+                  // prompt asked "Read it anyway" and then left after six
+                  // seconds, taking the only way forward with it.
+                  sticky: !!opts.sticky,
+                  dismissLabel: opts.dismissLabel || null };
     TOASTS.push(entry);
     // Over the cap, drop the oldest ANNOUNCEMENT; an offer is only dropped
     // when the pile is nothing but offers, which is the same bug in
@@ -4898,8 +4978,9 @@
     // An error gets longer than a confirmation and longer than an offer,
     // because reading it is the whole point; an offer gets its six seconds;
     // a confirmation is the only one that should be quick.
-    entry.timer = window.setTimeout(function () { dismissToast(entry.id); },
-      entry.error ? 8000 : (opts.undo ? 6000 : 2800));
+    if (!entry.sticky)
+      entry.timer = window.setTimeout(function () { dismissToast(entry.id); },
+        entry.error ? 8000 : (opts.undo ? 6000 : 2800));
     renderToasts();
     return entry.id;
   }
@@ -4978,8 +5059,10 @@
   function showUndoToast(msg, undo) { return pushToast(msg, { undo: undo }); }
   // Same pill, a named button. Used where the offer is not "undo that" but
   // "here is the one change that would let this work" (punch list 19).
-  function showActionToast(msg, label, run) {
-    return pushToast(msg, { undo: run, actionLabel: label });
+  function showActionToast(msg, label, run, more) {
+    var opts = { undo: run, actionLabel: label };
+    if (more) for (var k in more) opts[k] = more[k];
+    return pushToast(msg, opts);
   }
   function offerDataUndo(message, actionSeq) {
     showUndoToast(message, function () {
@@ -29476,6 +29559,7 @@
   // crash rather than a sentence. Same shape as the image guard: a disclosure
   // with a choice at the size where it starts to hurt, a refusal only where
   // continuing would take the tab down.
+  var DATA_GATE_TOAST = 0;
   var DATA_WARN_BYTES = 25 * 1024 * 1024;
   var DATA_REFUSE_BYTES = 250 * 1024 * 1024;
   function dataFileSizeGate(f, proceed) {
@@ -29489,12 +29573,19 @@
       return false;
     }
     if (size > DATA_WARN_BYTES) {
-      showActionToast(escFileName(f.name) + " is " +
+      // One question at a time: choosing a second file replaces the first
+      // prompt instead of stacking a second one beside it.
+      if (DATA_GATE_TOAST) dismissToast(DATA_GATE_TOAST);
+      DATA_GATE_TOAST = showActionToast(escFileName(f.name) + " is " +
         (size / 1048576).toFixed(0) + " MB. Reading it will lock the window " +
-        "up for a while, and a table that size is slow to edit.",
-        "Read it anyway", function () { proceed(true); });
+        "up for a while, and a table that size is slow to edit and too " +
+        "large for browser autosave.",
+        "Read it anyway", function () { DATA_GATE_TOAST = 0; proceed(true); },
+        { sticky: true, dismissLabel: "Cancel" });
       return false;
     }
+    // A file small enough to read answers any earlier question by itself.
+    if (DATA_GATE_TOAST) { dismissToast(DATA_GATE_TOAST); DATA_GATE_TOAST = 0; }
     return true;
   }
   function readPickedFile(f, forced) {
@@ -32273,18 +32364,20 @@
         own += (window.localStorage.getItem(k) || "").length;
       }
     } catch (e) {}
+    // The limit that applies is the one for THIS kind of storage. The line
+    // used to quote navigator.storage.estimate(), which is the browser's
+    // budget for every kind put together (10 GB on a typical laptop), and
+    // a user holding a 70 MB file read it as room the autosave had.
     line.textContent = "This app is using about " + formatBytes(own) +
       " across " + keys + " item" + (keys === 1 ? "" : "s") +
       " of browser storage: your autosaved project, its backup, recent " +
-      "projects, and your saved palettes and styles.";
-    try {
-      if (window.navigator.storage && window.navigator.storage.estimate)
-        window.navigator.storage.estimate().then(function (est) {
-          if (!est || !est.quota) return;
-          line.textContent += " The browser allows about " +
-            formatBytes(est.quota) + " in total.";
-        });
-    } catch (e) {}
+      "projects, and your saved palettes and styles. Browsers keep about " +
+      "5 MB of this kind of storage for a site, so a project larger than " +
+      "that is not autosaved and has to be saved to a .pand file." +
+      (AUTOSAVE_TOO_BIG
+        ? " The open project is about " + formatBytes(AUTOSAVE_TOO_BIG.chars) +
+          ", so it is not being autosaved."
+        : "");
   }
   // t3-53. Destructive and NOT undoable, which is exactly why it does not use
   // the app's usual do-it-and-offer-it-back pattern: there would be nothing to

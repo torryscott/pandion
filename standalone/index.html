@@ -4042,6 +4042,10 @@
     border: 1px solid rgba(255,255,255,0.42); border-radius: var(--ps-r-sm);
     font-size: 11px; font-weight: 600;
   }
+  /* A toast that asks a question stays until it is answered, so it carries
+     its own way out: a quieter second button beside the action. */
+  #ps-toast button, #ps-toast .ps-toast-dismiss { white-space: nowrap; flex: 0 0 auto; }
+  #ps-toast .ps-toast-dismiss { background: transparent; border-color: rgba(255,255,255,0.28); font-weight: 500; }
   /* Measure type as a dropdown with the type's icon (round 2, Aug 27:
      keep it a drop down). Opens the same icon menu the grid header
      uses; a native select cannot draw icons in its options. */
