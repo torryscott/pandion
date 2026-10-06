@@ -64,7 +64,11 @@ function run(names, env) {
     for (const stale of fs.readdirSync(active)) fs.unlinkSync(path.join(active, stale));
     const res = spawnSync(process.execPath,
         [pool, '--dir', tmp, '--serial-file', path.join(tmp, 'serial.txt'), '--label', 'test: ', ...names],
-        { encoding: 'utf8', env: { ...process.env, PS_JOBS: '3', ...env } });
+        { encoding: 'utf8', env: { ...process.env, PS_JOBS: '3',
+            // Never inherit the real suite's notes file or report directory:
+            // the fake probes' reruns would be written into the suite's own
+            // end-of-run summary (they were, Oct 5 2026).
+            PS_POOL_NOTES: '', PS_POOL_REPORT_DIR: '', ...env } });
     return { code: res.status, out: (res.stdout || '') + (res.stderr || '') };
 }
 // The lines printed under one probe's header, up to the next header.
