@@ -1320,7 +1320,14 @@ roles UI still render because those files live inside standalone/).
 
 ```
 bash standalone/verify/run.sh          # all probes incl. dist (R parity needs jmvcore + car; Python scipy)
+PS_JOBS=1 bash standalone/verify/run.sh   # the same, one probe at a time, stopping at the first failure
 ```
+
+The feature probes run several at a time (`verify/run-pool.mjs`; `PS_JOBS`
+sets how many, default the machine's performance cores). Probes that hold a
+time ceiling or count frames are listed in `verify/serial-probes.txt` and run
+alone. A probe that fails beside others is run once more by itself before it
+counts, and the run's last lines name every probe that needed that.
 
 Release coverage, independent references, current evidence and remaining
 acceptance work are recorded in [docs/RELEASE-VALIDATION.md](../docs/RELEASE-VALIDATION.md).

@@ -1,0 +1,18 @@
+# Probes that must have the machine to themselves (read by run-pool.mjs).
+#
+# One per line: the probe's name, then why. A probe belongs here when it
+# asserts on elapsed time or on how many animation frames it saw, because a
+# busy machine fails those for no fault of the app. Everything else runs in
+# the pool. If a probe keeps showing up in the suite's "failed in the pool,
+# passed alone" line, find out why before adding it here: a shared file or a
+# real race is a bug to fix, not a reason to slow the suite down.
+
+perf-check             # holds millisecond ceilings on typing, retyping and render
+grid-wide-perf-check   # holds millisecond ceilings on arrow keys and drag-select
+grid-autofit-check     # a 60,000-row load must finish inside a time ceiling
+chrome-check           # a 400 ms ceiling on one interaction
+busy-check             # the busy indicator appears after a delay it times
+scroll-anchor-check    # samples every frame for two seconds, in three browsers
+toolbar-redock-check   # samples every frame across a re-render
+reserve-rearm-check    # samples every frame across a commit
+fit-wobble-check       # counts zoom changes across a settle window
