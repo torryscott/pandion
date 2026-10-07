@@ -1,0 +1,37 @@
+mouse,treatment,sex,weight
+m01,Control,F,22.8
+m02,Control,F,24.2
+m03,Control,F,21.3
+m04,Control,F,23.2
+m05,Control,F,26.5
+m06,Control,F,22.2
+m07,Control,M,23.8
+m08,Control,M,24.1
+m09,Control,M,22.0
+m10,Control,M,28.7
+m11,Control,M,25.7
+m12,Control,M,25.9
+m13,Low dose,F,26.5
+m14,Low dose,F,24.1
+m15,Low dose,F,23.4
+m16,Low dose,F,23.7
+m17,Low dose,F,26.0
+m18,Low dose,F,28.1
+m19,Low dose,M,31.9
+m20,Low dose,M,28.1
+m21,Low dose,M,24.8
+m22,Low dose,M,28.0
+m23,Low dose,M,26.9
+m24,Low dose,M,28.6
+m25,High dose,F,29.0
+m26,High dose,F,33.4
+m27,High dose,F,27.7
+m28,High dose,F,26.5
+m29,High dose,F,23.2
+m30,High dose,F,28.5
+m31,High dose,M,34.9
+m32,High dose,M,31.6
+m33,High dose,M,31.3
+m34,High dose,M,28.7
+m35,High dose,M,30.2
+m36,High dose,M,33.6

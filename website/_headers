@@ -48,3 +48,12 @@
   Cache-Control: public, max-age=0, must-revalidate
 /app-experimental/index.html
   Cache-Control: public, max-age=0, must-revalidate
+
+# The estimation preview (the estimation branch, for colleagues to try).
+# Same rules; remove with the directory.
+/app-estimation/lib/*
+  Cache-Control: public, max-age=86400
+/app-estimation/
+  Cache-Control: public, max-age=0, must-revalidate
+/app-estimation/index.html
+  Cache-Control: public, max-age=0, must-revalidate

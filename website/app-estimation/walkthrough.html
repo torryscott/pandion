@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Estimation Walkthrough</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="A step-by-step check of every estimation feature in Pandion Plots: difference labels, sampling distributions, the Difference plot, its controls, the ROPE, and grouped designs, with what each one means and when to use it.">
+<style>
+  :root {
+    --navy: #192E49;
+    --cobalt: #375CA0;
+    --amber: #E3A12E;
+    --ink: #22364d;
+    --muted: #5f6f80;
+    --line: #dde5ee;
+    --wash: #f4f7fb;
+    --bg: #ffffff;
+    --card: #ffffff;
+    --ok: #2f7d4f;
+    --ok-wash: #e9f4df;
+    --warn-wash: #fff5df;
+    --code: #eef2f7;
+    --link: #375CA0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --navy: #dfe8f5; --cobalt: #8fb0e6; --amber: #f0b955; --ink: #e6ecf4;
+      --muted: #a8b5c5; --line: #2c3a4d; --wash: #17212e; --bg: #0f1621;
+      --card: #141d2a; --ok: #7fcf9a; --ok-wash: #163a26; --warn-wash: #3a2f14;
+      --code: #1d2937; --link: #8fb0e6;
+    }
+  }
+  :root[data-theme="dark"] {
+    --navy: #dfe8f5; --cobalt: #8fb0e6; --amber: #f0b955; --ink: #e6ecf4;
+    --muted: #a8b5c5; --line: #2c3a4d; --wash: #17212e; --bg: #0f1621;
+    --card: #141d2a; --ok: #7fcf9a; --ok-wash: #163a26; --warn-wash: #3a2f14;
+    --code: #1d2937; --link: #8fb0e6;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 84px; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; } }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--link); }
+  code, kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.92em; background: var(--code); padding: 1px 5px; border-radius: 4px; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 0 20px; }
+  header.top {
+    position: sticky; top: 0; z-index: 20; background: var(--bg); border-bottom: 1px solid var(--line);
+  }
+  .topbar { display: flex; align-items: center; gap: 14px; padding: 12px 0; flex-wrap: wrap; }
+  .brand { font-weight: 800; color: var(--navy); letter-spacing: -0.01em; font-size: 17px; }
+  .brand small { font-weight: 500; color: var(--muted); margin-left: 8px; }
+  .progress { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 13.5px; color: var(--muted); }
+  .bar { width: 160px; height: 8px; background: var(--wash); border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--ok); transition: width .25s ease; }
+  .topbar button { font: inherit; font-size: 13px; padding: 5px 10px; border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 6px; cursor: pointer; }
+  .topbar button:hover { background: var(--wash); }
+  main { padding: 28px 0 60px; }
+  h1 { font-size: clamp(28px, 4vw, 36px); color: var(--navy); margin: 0 0 12px; letter-spacing: -0.015em; text-wrap: balance; }
+  .lede { font-size: 17.5px; color: var(--ink); margin: 0 0 14px; }
+  p { margin: 0 0 14px; }
+  .toc { border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; background: var(--wash); margin: 18px 0 26px; }
+  .toc ol { margin: 6px 0 0; padding-left: 22px; columns: 2; column-gap: 28px; }
+  .toc li { break-inside: avoid; margin: 3px 0; }
+  .toc a { text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .link-card { border: 1px solid var(--line); border-left: 4px solid var(--amber); border-radius: 10px; padding: 14px 18px; margin: 0 0 22px; background: var(--card); }
+  .link-card .url { word-break: break-all; font-size: 14px; }
+  section.part { margin: 34px 0 0; padding-top: 22px; border-top: 1px solid var(--line); }
+  section.part > h2 { font-size: 23px; color: var(--navy); margin: 0 0 4px; letter-spacing: -0.01em; }
+  .eyebrow { font-size: 12.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8a6414; margin: 0 0 4px; }
+  :root[data-theme="dark"] .eyebrow, :root:not([data-theme="light"]) .eyebrow { color: var(--amber); }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .eyebrow { color: #8a6414; } }
+  .why { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 14px 0 18px; }
+  @media (max-width: 640px) { .why { grid-template-columns: 1fr; } .toc ol { columns: 1; } }
+  .why > div { border: 1px solid var(--line); border-radius: 10px; padding: 12px 15px; background: var(--wash); font-size: 15px; }
+  .why h3 { margin: 0 0 6px; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .why p:last-child { margin-bottom: 0; }
+  ol.steps { list-style: none; margin: 0; padding: 0; counter-reset: step; }
+  ol.steps > li { counter-increment: step; display: grid; grid-template-columns: 30px 1fr; gap: 12px; padding: 12px 12px; border: 1px solid var(--line); border-radius: 10px; margin: 0 0 8px; background: var(--card); align-items: start; }
+  ol.steps > li.done { background: var(--ok-wash); border-color: transparent; }
+  ol.steps > li.done .do { color: var(--muted); }
+  ol.steps input[type="checkbox"] { width: 22px; height: 22px; margin: 2px 0 0; cursor: pointer; accent-color: var(--ok); }
+  .do { font-size: 15.5px; }
+  .do::before { content: counter(step) ". "; color: var(--muted); font-weight: 600; }
+  .expect { font-size: 14px; color: var(--muted); margin: 4px 0 0; }
+  .expect b { color: var(--ink); font-weight: 600; }
+  .notes { margin: 12px 0 0; }
+  .notes label { display: block; font-size: 13px; color: var(--muted); margin: 0 0 4px; }
+  .notes textarea { width: 100%; min-height: 58px; font: inherit; font-size: 14px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); resize: vertical; }
+  .data { position: relative; background: var(--code); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; white-space: pre; overflow-x: auto; margin: 8px 0 12px; }
+  .data button { position: absolute; top: 8px; right: 8px; font: inherit; font-family: inherit; font-size: 12px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--ink); cursor: pointer; }
+  .tip { border-left: 3px solid var(--amber); background: var(--warn-wash); padding: 10px 14px; border-radius: 0 8px 8px 0; font-size: 14.5px; margin: 10px 0 14px; }
+  footer { border-top: 1px solid var(--line); padding: 22px 0 40px; color: var(--muted); font-size: 13.5px; }
+  .report { display: none; margin: 12px 0 0; }
+  .report.show { display: block; }
+  .report textarea { width: 100%; min-height: 160px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); }
+  :focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
+  .glossary dt { font-weight: 700; color: var(--navy); margin-top: 10px; }
+  .glossary dd { margin: 2px 0 0 0; font-size: 15px; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap topbar">
+    <span class="brand">Estimation walkthrough <small>Pandion Plots, estimation branch, Sep 25 2026</small></span>
+    <span class="progress"><span class="bar"><i id="bar"></i></span><span id="count">0 of 0</span></span>
+    <button type="button" id="report-btn">Copy a report for Claude</button>
+    <button type="button" id="reset-btn">Reset checks</button>
+  </div>
+</header>
+
+<main class="wrap">
+  <h1>Every estimation feature, one check at a time.</h1>
+  <p class="lede">
+    This page walks through everything the estimation work adds to Compare
+    Groups and Repeated Measures. Each step says what to do and what you
+    should see; tick it when it matches. Your ticks and notes are saved in
+    this browser, so you can stop and come back. When you are done (or
+    stuck), the button at the top copies a report of what did not match.
+  </p>
+
+  <div class="link-card">
+    <p style="margin:0 0 6px;"><b>The build to test</b> (local server on this machine, serving the estimation branch with every tier applied):</p>
+    <p class="url" style="margin:0 0 8px;"><a id="demo-link" href="https://pandionplots.com/app-estimation/?config=https://pandionplots.com/app-estimation/demo/mice-est.setup.json&amp;data=https://pandionplots.com/app-estimation/demo/mice.csv">https://pandionplots.com/app-estimation/?config=...mice-est.setup.json&amp;data=...mice.csv</a></p>
+    <p style="margin:0;font-size:14px;color:var(--muted);">It opens a dialog: click <b>Open</b>. The project holds 36 mice (treatment: Control, Low dose, High dose; sex: F, M; weight in grams) and four chart tabs. If the link does not load, the server has stopped; tell me and I will restart it.</p>
+  </div>
+
+  <nav class="toc" aria-label="Sections">
+    <b>What is covered</b>
+    <ol>
+      <li><a href="#s0">Why estimation, in two minutes</a></li>
+      <li><a href="#s1">The difference with its interval (brackets and the Statistics panel)</a></li>
+      <li><a href="#s2">Sampling distributions (the cat's eye)</a></li>
+      <li><a href="#s3">The Difference plot</a></li>
+      <li><a href="#s4">Reading and tuning the Difference plot</a></li>
+      <li><a href="#s5">Dot charts: the axis follows the data, the summary beside the points</a></li>
+      <li><a href="#s6">The ROPE (region of practical equivalence)</a></li>
+      <li><a href="#s7">A Group By variable</a></li>
+      <li><a href="#s8">Repeated Measures (paired data)</a></li>
+      <li><a href="#s9">Help, glossary, export and undo</a></li>
+      <li><a href="#s10">Words to know</a></li>
+    </ol>
+  </nav>
+
+  <section class="part" id="s0">
+    <p class="eyebrow">Background</p>
+    <h2>Why estimation, in two minutes</h2>
+    <p>
+      A significance test answers one narrow question: could a difference
+      this large arise by chance if there were truly no difference? A p
+      value says nothing about how big the difference is or how precisely
+      it is known. Estimation statistics turn the picture around: report
+      the size of the effect, in the units of the outcome, with an interval
+      that shows how precisely the data pin it down. The p value is still
+      there, but it stops being the headline.
+    </p>
+    <p>
+      The tools in this walkthrough follow that stance. The <b>mean
+      difference with its 95% confidence interval</b> is the estimate. The
+      <b>sampling distribution</b> pictures how plausible each value is,
+      not just the two ends of an interval. The <b>Difference plot</b> puts
+      the difference on the same panel as the data so it can be read
+      directly instead of inferred from two error bars. The <b>ROPE</b>
+      asks the question researchers actually care about: is the difference
+      big enough to matter? Every number comes from the same test the
+      chart's brackets already use (Welch's t on Compare Groups, the
+      paired t on Repeated Measures), so the chart, the brackets and the
+      Statistics panel can never disagree.
+    </p>
+    <div class="tip">A convention to keep in mind: a difference is always
+      <b>the named category minus the reference</b>. "Low dose minus
+      Control = +1.5" means Low dose scored 1.5 g higher.</div>
+  </section>
+
+  <section class="part" id="s1" data-section="s1">
+    <p class="eyebrow">Tier 1</p>
+    <h2>The difference with its interval, on brackets and in the Statistics panel</h2>
+    <div class="why">
+      <div><h3>What it means</h3><p>The mean difference is the first mean minus the second, in the data's own units. Its 95% confidence interval is the range of true differences the data are consistent with, from the same t test as the p value. An interval that excludes 0 corresponds to p below .05 for a two-sided test; an interval that includes 0 does not.</p></div>
+      <div><h3>Why use it</h3><p>"p = .003" tells a reader nothing about size. "Low dose raised weight by 1.5 g, 95% CI [-0.8, 3.9]" tells them the size, the direction and the uncertainty in one breath, which is what journals now ask for and what a reader can act on.</p></div>
+    </div>
+    <ol class="steps">
+      <li data-id="s1a"><input type="checkbox" aria-labelledby="l-s1a"><div><div class="do" id="l-s1a">Open the demo link, click <b>Open</b>, and select the chart tab <b>Both on bars, with a ROPE</b>. Click the <b>+</b> button in the chart toolbar (its tooltip says Add to chart) and pick <b>Sig. bracket</b>.</div><p class="expect">Expect: a bracket appears over two bars with an asterisk label, and its panel opens.</p></div></li>
+      <li data-id="s1b"><input type="checkbox" aria-labelledby="l-s1b"><div><div class="do" id="l-s1b">In the bracket panel, open its <b>Stats</b> tab and set <b>Label</b> to <b>Difference with CI</b>.</div><p class="expect">Expect: the bracket label reads like <b>&Delta; = 4.15, 95% CI [1.6, 6.7]</b> (High dose vs Control) or the pair the bracket spans. The readout box below the select shows the test (Welch's t) and the same numbers.</p></div></li>
+      <li data-id="s1c"><input type="checkbox" aria-labelledby="l-s1c"><div><div class="do" id="l-s1c">Click the <b>&Sigma;</b> button in the toolbar (Statistics). On the <b>Compare pairs</b> tab, find the <b>Difference</b> and <b>95% CI</b> columns.</div><p class="expect">Expect: one row per pair (Control vs Low dose, Control vs High dose, Low dose vs High dose). The Difference for a row equals the first category's mean minus the second's, and its interval matches the bracket label for the same pair (sign flipped if the bracket reads the other way round).</p></div></li>
+      <li data-id="s1d"><input type="checkbox" aria-labelledby="l-s1d"><div><div class="do" id="l-s1d">Click the <b>Difference</b> column header, then a value in that column.</div><p class="expect">Expect: a small popover defines the term; the value's popover adds an "In this table" reading with that row's own numbers ("the first group named minus the second").</p></div></li>
+      <li data-id="s1e"><input type="checkbox" aria-labelledby="l-s1e"><div><div class="do" id="l-s1e">Click a row's <b>APA</b> button and paste the result somewhere (a note, a document).</div><p class="expect">Expect: the sentence ends with the estimate, for example <b>..., &Delta; = 4.15, 95% CI [1.6, 6.7]</b>. In Word or Docs the statistics are italicized.</p></div></li>
+      <li data-id="s1f"><input type="checkbox" aria-labelledby="l-s1f"><div><div class="do" id="l-s1f">Still in Compare pairs, open the <b>&#9662;</b> beside <b>Place brackets</b> and choose <b>Difference with CI</b>, tick a pair, and press Place brackets.</div><p class="expect">Expect: the placed bracket carries the difference-with-interval label; brackets placed earlier with this style relabel too.</p></div></li>
+    </ol>
+    <div class="notes"><label for="n-s1">Notes for this section (anything that did not match)</label><textarea id="n-s1" data-notes="s1"></textarea></div>
+  </section>
+
+  <section class="part" id="s2" data-section="s2">
+    <p class="eyebrow">Tier 2</p>
+    <h2>Sampling distributions (the cat's eye)</h2>
+    <div class="why">
+      <div><h3>What it means</h3><p>Beside each mean, the shape is the t sampling distribution of that mean, scaled by its standard error (sd divided by the square root of n). It is widest at the mean and thins away from it: the width at any value says how plausible that value is for the population mean. The 95% CI error bar is cut from this same curve, so the two always agree.</p></div>
+      <div><h3>Why use it</h3><p>An error bar makes the interval look flat, as if every value inside it were equally plausible and every value outside impossible. The shape corrects both misreadings at a glance: the middle is far more plausible than the edges, and plausibility fades rather than stopping. It is the picture Cumming's estimation texts use to teach what a CI is.</p></div>
+    </div>
+    <ol class="steps">
+      <li data-id="s2a"><input type="checkbox" aria-labelledby="l-s2a"><div><div class="do" id="l-s2a">Select the chart tab <b>Sampling distributions</b>.</div><p class="expect">Expect: each of the three bars carries a translucent shape to the right of its error bar, widest at the bar top, sitting on a white base so it reads the same above and below the bar.</p></div></li>
+      <li data-id="s2b"><input type="checkbox" aria-labelledby="l-s2b"><div><div class="do" id="l-s2b">Compare the shape's height with the error bar (95% CI on this chart).</div><p class="expect">Expect: the error bar's ends fall where the shape has already thinned to a sliver; the shape extends a little past them. Hover a shape for its tooltip (the mean, SE, n and df).</p></div></li>
+      <li data-id="s2c"><input type="checkbox" aria-labelledby="l-s2c"><div><div class="do" id="l-s2c">Click a shape. In its panel, open <b>Shape</b> and switch from <b>Half eye</b> to <b>Eye</b>, then back; drag the width slider.</div><p class="expect">Expect: Eye mirrors the shape around the mean (the classic cat's eye); Half eye puts the whole width to one side with its flat edge on the mean. The width follows the slider live.</p></div></li>
+      <li data-id="s2d"><input type="checkbox" aria-labelledby="l-s2d"><div><div class="do" id="l-s2d">Open <b>Color</b>: turn <b>Follow graph colors</b> off and pick a color; then <b>Opacity</b>.</div><p class="expect">Expect: all three shapes take the custom color (one color for the overlay); opacity changes live. Turning Follow graph colors back on returns each shape to its bar's color.</p></div></li>
+      <li data-id="s2e"><input type="checkbox" aria-labelledby="l-s2e"><div><div class="do" id="l-s2e">Use the panel title bar's <b>eye</b> to hide the shapes, then the toolbar <b>eye</b> (Visibility) to bring them back. Use the title bar's <b>trash</b> to remove the overlay and the <b>+</b> menu to add it again.</div><p class="expect">Expect: hide keeps the setting and lists the overlay as hidden in the Visibility panel; trash removes it outright; the + menu's <b>Sampling distribution</b> item turns it back on (and simply opens its panel when it is already on).</p></div></li>
+      <li data-id="s2f"><input type="checkbox" aria-labelledby="l-s2f"><div><div class="do" id="l-s2f">Switch the chart type (toolbar, left) to <b>Dot</b>, then to <b>Line</b>, then back to <b>Bar</b>.</div><p class="expect">Expect: on dot and line charts the shape sits beside the marker with no white base, so the connecting line stays visible through it. Nothing else changes.</p></div></li>
+    </ol>
+    <div class="notes"><label for="n-s2">Notes for this section</label><textarea id="n-s2" data-notes="s2"></textarea></div>
+  </section>
+
+  <section class="part" id="s3" data-section="s3">
+    <p class="eyebrow">Tier 3</p>
+    <h2>The Difference plot</h2>
+    <div class="why">
+      <div><h3>What it means</h3><p>After the last category, one slot per other category shows that category's mean <b>minus a reference category's mean</b>: a triangle at the difference, a heavier line for its 95% CI, and a half eye for its sampling distribution. They read against a difference axis on the right whose zero sits level with the reference mean, so each triangle also sits exactly at its own category's mean. Dotted guides make both facts visible.</p></div>
+      <div><h3>Why use it</h3><p>This is the Gardner-Altman estimation plot: the effect and its uncertainty on the same picture as the data, in the data's units. A reader no longer has to judge whether two error bars "overlap enough"; the difference is drawn, its interval is drawn, and zero is a line they can see. It is also the honest way to show a small effect with a wide interval.</p></div>
+    </div>
+    <ol class="steps">
+      <li data-id="s3a"><input type="checkbox" aria-labelledby="l-s3a"><div><div class="do" id="l-s3a">Select <b>Both on bars, with a ROPE</b> and look right of the High dose bar.</div><p class="expect">Expect: two slots labeled <b>Low dose</b> and <b>High dose</b> on the same category axis (the axis line, ticks and gridlines run on under them), each with a triangle, a heavy interval line and a half eye; a right-hand axis titled <b>Difference from Control</b>; a dotted line from the Control bar's mean across to that axis's <b>0</b>.</p></div></li>
+      <li data-id="s3b"><input type="checkbox" aria-labelledby="l-s3b"><div><div class="do" id="l-s3b">Check the triangles against the bars: trace the dotted guide from the Low dose bar's top to its triangle, and from the High dose bar's top to its triangle.</div><p class="expect">Expect: each triangle sits exactly level with its own bar's mean. On the right axis the Low dose triangle reads about <b>+1.5</b> and the High dose triangle about <b>+4.2</b> (grams above Control).</p></div></li>
+      <li data-id="s3c"><input type="checkbox" aria-labelledby="l-s3c"><div><div class="do" id="l-s3c">Hover each triangle.</div><p class="expect">Expect: a tooltip such as <b>High dose minus Control: difference 4.15, 95% CI [1.6, 6.7] (Welch's t, df = ...)</b>, then the ROPE reading, then "The shape is the sampling distribution of the difference."</p></div></li>
+      <li data-id="s3d"><input type="checkbox" aria-labelledby="l-s3d"><div><div class="do" id="l-s3d">Open the <b>&Sigma;</b> panel and compare the Compare-pairs rows for Control vs Low dose and Control vs High dose with the tooltips.</div><p class="expect">Expect: the same numbers with the sign flipped (the table reads Control minus the other; the plot reads the other minus Control).</p></div></li>
+      <li data-id="s3e"><input type="checkbox" aria-labelledby="l-s3e"><div><div class="do" id="l-s3e">Compare the High dose interval with the sampling distribution beside it.</div><p class="expect">Expect: the interval's ends sit where the shape has thinned, exactly as the cat's eye does on a mean: the interval is cut from that shape.</p></div></li>
+      <li data-id="s3f"><input type="checkbox" aria-labelledby="l-s3f"><div><div class="do" id="l-s3f">Click a slot to open the <b>Difference plot</b> panel. Use its title-bar <b>eye</b> to hide the plot, then restore it from the toolbar Visibility panel; try the <b>trash</b> and re-add it from the <b>+</b> menu (<b>Difference plot</b>).</div><p class="expect">Expect: with the plot hidden or removed the bars widen to take the space back; re-adding draws it again with the settings it had.</p></div></li>
+    </ol>
+    <div class="notes"><label for="n-s3">Notes for this section</label><textarea id="n-s3" data-notes="s3"></textarea></div>
+  </section>
+
+  <section class="part" id="s4" data-section="s4">
+    <p class="eyebrow">Tier 4</p>
+    <h2>Reading and tuning the Difference plot</h2>
+    <div class="why">
+      <div><h3>What it means</h3><p>The panel's first three chips change what the plot <b>reports</b> (they wear the blue "Changes" band): the reference category, the axis's units, and the ROPE. The rest change how it <b>looks</b>: the shape and its width, the marker, the interval's thickness, color and opacity.</p></div>
+      <div><h3>Why use it</h3><p>Units matter most. In raw units the axis speaks the outcome's language (grams). In SD units every difference is divided by the pooled within-group SD, which is Cohen's d: the same scale across studies and measures, at the cost of the concrete units. Both are honest; pick the one the audience needs.</p></div>
+    </div>
+    <ol class="steps">
+      <li data-id="s4a"><input type="checkbox" aria-labelledby="l-s4a"><div><div class="do" id="l-s4a">In the Difference plot panel, set <b>Compare with</b> to <b>High dose</b>.</div><p class="expect">Expect: the slots become <b>Control</b> and <b>Low dose</b>, the axis is retitled <b>Difference from High dose</b>, its zero moves level with the High dose bar, and both triangles now read negative.</p></div></li>
+      <li data-id="s4b"><input type="checkbox" aria-labelledby="l-s4b"><div><div class="do" id="l-s4b">Set it back to <b>Control</b>. Open <b>Units</b> and choose <b>SD units</b>.</div><p class="expect">Expect: the triangles do not move; the axis relabels in steps of the pooled SD (the High dose difference of about 4.2 g reads about <b>1.4</b> SD, a large effect by the usual rough guide) and the title says <b>(SD units)</b>. The tooltip adds the SD-unit value.</p></div></li>
+      <li data-id="s4c"><input type="checkbox" aria-labelledby="l-s4c"><div><div class="do" id="l-s4c">Back to <b>Raw units</b>. Open <b>Shape</b>: try <b>Eye</b>, <b>None</b>, then <b>Half eye</b>; drag the width slider.</div><p class="expect">Expect: Eye mirrors the shape around the interval; None leaves marker and interval alone; the width follows the slider. The value axis makes room for the shapes when they are on.</p></div></li>
+      <li data-id="s4d"><input type="checkbox" aria-labelledby="l-s4d"><div><div class="do" id="l-s4d">Open <b>Marker</b> and cycle triangle, circle, square, diamond; open <b>Interval</b> and change its width.</div><p class="expect">Expect: the marker shape changes on both slots (it keeps its dark outline so it never reads as a fourth mean); the interval line and its caps thicken together.</p></div></li>
+      <li data-id="s4e"><input type="checkbox" aria-labelledby="l-s4e"><div><div class="do" id="l-s4e">Open <b>Color</b>: turn off <b>Follow graph colors</b> and pick one color; then <b>Opacity</b>.</div><p class="expect">Expect: by default each slot wears its category's color; a custom color paints every slot the same; opacity applies to the shapes.</p></div></li>
+      <li data-id="s4f"><input type="checkbox" aria-labelledby="l-s4f"><div><div class="do" id="l-s4f">Use the title bar's <b>reset</b>, then press <b>Undo</b> in the toolbar a few times.</div><p class="expect">Expect: reset returns every chip to its default (Control, raw units, half eye, triangle); each Undo steps back one change, including reference and unit switches.</p></div></li>
+      <li data-id="s4g"><input type="checkbox" aria-labelledby="l-s4g"><div><div class="do" id="l-s4g">Drag the chart wider and narrower with its corner grip; then try the chart with only two categories (click the Low dose bar and hide it with its panel's eye).</div><p class="expect">Expect: the slots keep the category pitch as the chart resizes; with a category hidden its slot disappears and the remaining slot keeps the pitch; unhiding restores it.</p></div></li>
+    </ol>
+    <div class="notes"><label for="n-s4">Notes for this section</label><textarea id="n-s4" data-notes="s4"></textarea></div>
+  </section>
+
+  <section class="part" id="s5" data-section="s5">
+    <p class="eyebrow">Tier 4, dot and line charts</p>
+    <h2>Dot charts: the axis follows the data, the summary beside the points</h2>
+    <div class="why">
+      <div><h3>What it means</h3><p>A bar's length is its value, so a bar chart keeps its zero baseline even with the Difference plot on. A dot or line chart encodes position, not length, so while the Difference plot is on its value axis follows the data (with a little padding) and the differences get the room they deserve. "Summary beside the points" moves each mean, its interval and its shape to the right of the raw points, the layout esci uses, so the shape never hides the data.</p></div>
+      <div><h3>Why use it</h3><p>Small differences on a tall axis anchored at zero shrink to nothing; letting the axis follow the data is what makes an estimation plot readable. Showing the raw points beside the summary is the honest default of the estimation tradition: the reader sees the data the estimate came from.</p></div>
+    </div>
+    <ol class="steps">
+      <li data-id="s5a"><input type="checkbox" aria-labelledby="l-s5a"><div><div class="do" id="l-s5a">Select <b>Difference plot (beside) with a ROPE</b>.</div><p class="expect">Expect: a dot chart with the raw points showing; the value axis starts near the lowest weight (about 18 g), not at 0; each mean marker, its interval and its shape sit to the right of that category's points.</p></div></li>
+      <li data-id="s5b"><input type="checkbox" aria-labelledby="l-s5b"><div><div class="do" id="l-s5b">Trace the dotted guides.</div><p class="expect">Expect: each guide starts at the moved mean marker (not at the points' center) and runs to its triangle in the difference slots.</p></div></li>
+      <li data-id="s5c"><input type="checkbox" aria-labelledby="l-s5c"><div><div class="do" id="l-s5c">Click a raw point to open the <b>Data points</b> panel, open its <b>Jitter</b> strip and untick <b>Summary beside the points</b>; then tick it again.</div><p class="expect">Expect: unticked, the means return to the center of their points; ticked, they move about a third of the slot to the right. Undo covers the switch.</p></div></li>
+      <li data-id="s5d"><input type="checkbox" aria-labelledby="l-s5d"><div><div class="do" id="l-s5d">Switch the chart type to <b>Bar</b> and back to <b>Dot</b>.</div><p class="expect">Expect: as a bar chart the value axis returns to a zero baseline (bars keep their zero); as a dot chart it follows the data again. The Difference plot survives the switch.</p></div></li>
+      <li data-id="s5e"><input type="checkbox" aria-labelledby="l-s5e"><div><div class="do" id="l-s5e">Set a manual axis minimum (click the value axis, Range, Min) below the data and then clear it.</div><p class="expect">Expect: a manual range wins over the follow-the-data rule while it is set; clearing it hands the axis back.</p></div></li>
+    </ol>
+    <div class="notes"><label for="n-s5">Notes for this section</label><textarea id="n-s5" data-notes="s5"></textarea></div>
+  </section>
+
+  <section class="part" id="s6" data-section="s6">
+    <p class="eyebrow">Tier 5</p>
+    <h2>The ROPE (region of practical equivalence)</h2>
+    <div class="why">
+      <div><h3>What it means</h3><p>A ROPE is the band of differences you declare too small to matter, decided <b>before</b> looking at the result and stated in the outcome's units (here, grams). The plot draws it as a gray band across the difference slots and reads every interval against it: wholly <b>inside</b> means the difference is negligible by your definition; wholly <b>outside</b> means it is too large to be negligible; an interval that <b>overlaps</b> the band leaves the question open, usually for want of data.</p></div>
+      <div><h3>Why use it</h3><p>"Different from zero" is rarely the question. "Big enough to matter" is, and a ROPE is how you answer it without hand-waving. It also makes equivalence claims possible: an interval wholly inside the ROPE is positive evidence of no meaningful difference, something a non-significant p value can never give you. The verdict depends on the bounds, so state them with the result.</p></div>
+    </div>
+    <ol class="steps">
+      <li data-id="s6a"><input type="checkbox" aria-labelledby="l-s6a"><div><div class="do" id="l-s6a">On <b>Both on bars, with a ROPE</b>, find the gray band in the difference slots.</div><p class="expect">Expect: a band from 1 g below the Control mean to 1 g above it (the demo's ROPE is -1 to 1), spanning from the first slot to the difference axis, labeled <b>ROPE</b>. The right axis carries a tick beyond each edge of the band, so the axis reads across it.</p></div></li>
+      <li data-id="s6b"><input type="checkbox" aria-labelledby="l-s6b"><div><div class="do" id="l-s6b">Hover both triangles and read the ROPE clause.</div><p class="expect">Expect: Low dose ends with <b>Against the ROPE [-1, 1]: overlaps it.</b> (its interval reaches into and beyond the band) and High dose with <b>outside it.</b> (its whole interval clears the band).</p></div></li>
+      <li data-id="s6c"><input type="checkbox" aria-labelledby="l-s6c"><div><div class="do" id="l-s6c">Click a slot, open the <b>ROPE</b> chip.</div><p class="expect">Expect: <b>From -1 to 1</b>, a <b>Clear</b> button, one verdict line per comparison ("Low dose vs Control: overlaps the ROPE", "High dose vs Control: outside the ROPE") and a short explanation. The strip wears the blue "Changes: what counts as negligible" band.</p></div></li>
+      <li data-id="s6d"><input type="checkbox" aria-labelledby="l-s6d"><div><div class="do" id="l-s6d">Change the bounds to <b>-5</b> and <b>5</b> (press Tab or Enter after each).</div><p class="expect">Expect: the band grows to cover 10 g; the verdict lines and tooltips change (Low dose now reads <b>inside</b> the ROPE, High dose <b>overlaps</b> it); the value axis makes room if a bound reaches past the data.</p></div></li>
+      <li data-id="s6e"><input type="checkbox" aria-labelledby="l-s6e"><div><div class="do" id="l-s6e">Type the bounds the wrong way round (<b>2</b> then <b>-2</b>), then an equal pair (<b>1</b> and <b>1</b>).</div><p class="expect">Expect: a reversed pair is swapped into order and applied; an equal pair is ignored (the previous ROPE stays until the bounds differ). Use <b>Clear</b> to remove a ROPE.</p></div></li>
+      <li data-id="s6f"><input type="checkbox" aria-labelledby="l-s6f"><div><div class="do" id="l-s6f">Open the <b>&Sigma;</b> panel, Compare pairs.</div><p class="expect">Expect: a <b>ROPE</b> column after 95% CI with inside / outside / overlaps per row; the header and each verdict have popovers; each row's <b>APA</b> copy ends with, for example, <b>..., outside the ROPE [-5, 5]</b>.</p></div></li>
+      <li data-id="s6g"><input type="checkbox" aria-labelledby="l-s6g"><div><div class="do" id="l-s6g">Close the Statistics panel, click a slot, press <b>Clear</b> in the ROPE strip and reopen the Statistics panel. Then set the bounds again, remove the Difference plot with its title-bar <b>trash</b>, and look at the Statistics panel once more.</div><p class="expect">Expect: Clear removes the band, the tooltip clause and the ROPE column. With the plot removed the column goes too (the ROPE lives with the plot; hiding the plot with its eye keeps the column, since the setting is still in force). Adding the plot back from the + menu brings the band and the column back with the bounds you set.</p></div></li>
+      <li data-id="s6h"><input type="checkbox" aria-labelledby="l-s6h"><div><div class="do" id="l-s6h">Export the chart (toolbar download button, PNG or SVG) with a ROPE set.</div><p class="expect">Expect: the difference slots, the band and its label are in the exported image exactly as on screen; the panel is not.</p></div></li>
+    </ol>
+    <div class="notes"><label for="n-s6">Notes for this section</label><textarea id="n-s6" data-notes="s6"></textarea></div>
+  </section>
+
+  <section class="part" id="s7" data-section="s7">
+    <p class="eyebrow">Tier 6</p>
+    <h2>A Group By variable</h2>
+    <div class="why">
+      <div><h3>What it means</h3><p>With a Color / group variable, each group is compared <b>within itself</b>: every category minus the reference category, for that group's own cells. The markers dodge inside each slot exactly as the group's bars dodge in their category, and each marker still sits at its group's own category mean. Because each group has its own reference mean, each group gets its own dotted zero guide and its own difference axis, drawn in the group's color and tagged with its name.</p></div>
+      <div><h3>Why use it</h3><p>The two-factor design (treatment by sex, drug by genotype) is the one most experiments hit first. Comparing within each group keeps the question simple ("what did the dose do in females? in males?") and keeps the marker-at-its-own-mean identity intact, which is what lets a reader check the plot against the bars by eye.</p></div>
+    </div>
+    <ol class="steps">
+      <li data-id="s7a"><input type="checkbox" aria-labelledby="l-s7a"><div><div class="do" id="l-s7a">Select <b>Grouped by sex, with a ROPE</b>.</div><p class="expect">Expect: dodged F and M bars per treatment, a legend, and in each of the two difference slots <b>two</b> triangles, F left of M, offset exactly like the bars. Two dotted zero guides in the F and M colors leave the two Control bars. Two right-hand axes, tagged <b>F</b> and <b>M</b> in their colors, and one title <b>Difference from Control</b>.</p></div></li>
+      <li data-id="s7b"><input type="checkbox" aria-labelledby="l-s7b"><div><div class="do" id="l-s7b">Read the F triangles against the F axis and the M triangles against the M axis.</div><p class="expect">Expect: each axis's zero sits level with its own Control bar's mean; each triangle sits level with its own bar (Low dose F triangle = Low dose F bar top, and so on). The two axes have the same tick spacing, offset vertically by the two reference means.</p></div></li>
+      <li data-id="s7c"><input type="checkbox" aria-labelledby="l-s7c"><div><div class="do" id="l-s7c">Hover the four triangles.</div><p class="expect">Expect: tooltips begin with the group, <b>F: Low dose minus Control: ...</b>, <b>M: High dose minus Control: ...</b>, each with its own Welch test, interval and ROPE reading.</p></div></li>
+      <li data-id="s7d"><input type="checkbox" aria-labelledby="l-s7d"><div><div class="do" id="l-s7d">Find the ROPE bands.</div><p class="expect">Expect: one gray band under each triangle (four in all), each as wide as the F-to-M pitch and placed at its own group's reference mean, so the F and M bands sit at different heights. The <b>ROPE</b> label sits under the first slot's bands.</p></div></li>
+      <li data-id="s7e"><input type="checkbox" aria-labelledby="l-s7e"><div><div class="do" id="l-s7e">Click a slot; in the panel set <b>Compare with</b> to <b>High dose</b>, then back; open the ROPE chip.</div><p class="expect">Expect: both groups re-derive against their own High dose cell (both zero guides and both axes move); the reference note mentions that each group is compared within itself; the ROPE verdict lines are prefixed with the group (<b>F: Low dose vs Control: ...</b>).</p></div></li>
+      <li data-id="s7f"><input type="checkbox" aria-labelledby="l-s7f"><div><div class="do" id="l-s7f">Hide one sex (Alt+click the other sex's legend swatch to solo it, or hide the group from the toolbar Visibility panel), then show it again.</div><p class="expect">Expect: with one group hidden the plot falls back to one marker per slot, one zero guide and one axis; restoring the group brings the second set back.</p></div></li>
+      <li data-id="s7g"><input type="checkbox" aria-labelledby="l-s7g"><div><div class="do" id="l-s7g">Open the <b>&Sigma;</b> panel's Compare pairs with <b>Compare</b> set to <b>Both</b> (the default) and find the rows the plot draws.</div><p class="expect">Expect: rows such as <b>F: Control vs Low dose</b> match the F triangles (sign flipped), and the M rows match the M triangles; the ROPE column agrees with the tooltips.</p></div></li>
+      <li data-id="s7h"><input type="checkbox" aria-labelledby="l-s7h"><div><div class="do" id="l-s7h">Switch the chart type to <b>Dot</b> with data points on, and try the Data points panel's <b>Summary beside the points</b>.</div><p class="expect">Expect: the group markers keep their spread inside each slot (the line family's marker spread), the guides start at each group's mean marker, and the beside-the-points nudge applies per cell.</p></div></li>
+    </ol>
+    <div class="notes"><label for="n-s7">Notes for this section</label><textarea id="n-s7" data-notes="s7"></textarea></div>
+  </section>
+
+  <section class="part" id="s8" data-section="s8">
+    <p class="eyebrow">Repeated Measures</p>
+    <h2>Repeated Measures (paired data)</h2>
+    <div class="why">
+      <div><h3>What it means</h3><p>On Repeated Measures the difference is <b>each subject's change</b> averaged, and its interval comes from the paired t test, so it is usually far narrower than the two occasions' error bars suggest. The sampling distributions on the occasions use each occasion's own SE; the Difference plot uses the paired SE. With a between-groups variable, each group gets its own paired comparison, zero guide and axis, exactly as in the previous section.</p></div>
+      <div><h3>Why use it</h3><p>This is where estimation plots shine: two occasions can overlap heavily while every subject improved, and only the paired difference shows it. Drawing that difference with its own interval is the honest picture of a within-subjects effect.</p></div>
+    </div>
+    <p>The demo has no paired data, so load this small set (ten subjects, two occasions, two groups). Copy it, open <b>Load data</b> in the app, and paste it into the box.</p>
+    <div class="data"><button type="button" data-copy="rm">Copy data</button><span id="rm-data">subject,before,after,group
+s01,4.1,5.3,A
+s02,5.3,6.1,A
+s03,6.2,7.7,A
+s04,4.8,5.7,A
+s05,5.9,7.0,A
+s06,6.4,6.9,B
+s07,5.1,5.8,B
+s08,4.6,5.4,B
+s09,5.5,6.2,B
+s10,4.9,5.3,B</span></div>
+    <ol class="steps">
+      <li data-id="s8a"><input type="checkbox" aria-labelledby="l-s8a"><div><div class="do" id="l-s8a">Start a new chart with the <b>Repeated Measures</b> analysis; put <b>before</b> and <b>after</b> in <b>Repeated measures</b>. Add <b>Sampling distribution</b> and <b>Difference plot</b> from the <b>+</b> menu.</div><p class="expect">Expect: two bars (before, after) with shapes; one difference slot, <b>after</b>, whose triangle sits at the after mean, a narrow interval, and a tooltip that names the <b>paired t</b> with df = 9.</p></div></li>
+      <li data-id="s8b"><input type="checkbox" aria-labelledby="l-s8b"><div><div class="do" id="l-s8b">Open the <b>&Sigma;</b> panel and compare the before vs after row with the tooltip.</div><p class="expect">Expect: the same paired difference and interval (sign flipped: the row reads before minus after).</p></div></li>
+      <li data-id="s8c"><input type="checkbox" aria-labelledby="l-s8c"><div><div class="do" id="l-s8c">Put <b>group</b> in <b>Between-groups variable</b>.</div><p class="expect">Expect: two bars per occasion; the difference slot holds an A and a B triangle; two zero guides, two tagged axes; tooltips <b>A: after minus before: ... (paired t, df = 4)</b>.</p></div></li>
+      <li data-id="s8d"><input type="checkbox" aria-labelledby="l-s8d"><div><div class="do" id="l-s8d">Add <b>Panels</b> (any variable) and check the <b>+</b> menu.</div><p class="expect">Expect: the Difference plot is not drawn on a faceted chart and the + menu does not offer it (panels are a follow-up). Remove the Panels variable and the plot returns with its settings.</p></div></li>
+    </ol>
+    <div class="notes"><label for="n-s8">Notes for this section</label><textarea id="n-s8" data-notes="s8"></textarea></div>
+  </section>
+
+  <section class="part" id="s9" data-section="s9">
+    <p class="eyebrow">Around the chart</p>
+    <h2>Help, glossary, export and undo</h2>
+    <div class="why">
+      <div><h3>What it means</h3><p>Every new part is a first-class citizen of the chart: it has a name in Label parts, an entry in the glossary, it rides exports and copies, and every change is one Undo away.</p></div>
+      <div><h3>Why use it</h3><p>A student who meets a cat's eye for the first time can click it and read what it is without leaving the chart.</p></div>
+    </div>
+    <ol class="steps">
+      <li data-id="s9a"><input type="checkbox" aria-labelledby="l-s9a"><div><div class="do" id="l-s9a">On <b>Both on bars, with a ROPE</b>, open <b>?</b> in the toolbar and choose <b>Label parts</b>.</div><p class="expect">Expect: among the chips, one points at a sampling distribution and one at the Difference plot, each with a plain explanation on hover and a click that opens its panel. Esc clears them.</p></div></li>
+      <li data-id="s9b"><input type="checkbox" aria-labelledby="l-s9b"><div><div class="do" id="l-s9b">In the same help panel open <b>Glossary</b> and search <b>ROPE</b>, <b>cat's eye</b>, <b>estimation plot</b> and <b>mean difference</b>.</div><p class="expect">Expect: one entry each (ROPE, Sampling distribution (cat's eye), Difference plot (estimation plot), Mean difference), each with a definition, "How to read it" and "Common misread".</p></div></li>
+      <li data-id="s9c"><input type="checkbox" aria-labelledby="l-s9c"><div><div class="do" id="l-s9c">Open <b>?</b>, <b>Check graph</b>.</div><p class="expect">Expect: no warning about the Difference plot or the ROPE (they are not rule violations); the usual checks run.</p></div></li>
+      <li data-id="s9d"><input type="checkbox" aria-labelledby="l-s9d"><div><div class="do" id="l-s9d">Export the chart as PNG and as SVG (toolbar download button) and open both.</div><p class="expect">Expect: shapes, slots, guides, axes and the ROPE band appear in every export exactly as on screen.</p></div></li>
+      <li data-id="s9e"><input type="checkbox" aria-labelledby="l-s9e"><div><div class="do" id="l-s9e">Save the project (<b>.pand</b>), reload the page, and open it again.</div><p class="expect">Expect: every setting comes back: the overlays, the reference, the units, the ROPE bounds, the marker and shape choices.</p></div></li>
+      <li data-id="s9f"><input type="checkbox" aria-labelledby="l-s9f"><div><div class="do" id="l-s9f">Make five quick changes across these panels and press Undo five times, then Redo.</div><p class="expect">Expect: each press reverts exactly one change, instantly, including turning an overlay on or off.</p></div></li>
+    </ol>
+    <div class="notes"><label for="n-s9">Notes for this section</label><textarea id="n-s9" data-notes="s9"></textarea></div>
+  </section>
+
+  <section class="part" id="s10">
+    <p class="eyebrow">Reference</p>
+    <h2>Words to know</h2>
+    <dl class="glossary">
+      <dt>Mean difference (&Delta;)</dt><dd>The first mean minus the second, in the units of the value axis. The estimate itself, before any standardizing.</dd>
+      <dt>Confidence interval</dt><dd>The range of true differences the data are consistent with. A 95% interval built from the same t test as the p value excludes 0 exactly when that test is significant at .05.</dd>
+      <dt>Sampling distribution of a mean</dt><dd>The t distribution of the sample mean scaled by its standard error: how plausible each value is for the population mean. Drawn as the cat's eye.</dd>
+      <dt>Sampling distribution of a difference</dt><dd>The same idea for a difference between means, with the difference's own SE and degrees of freedom (Welch's for two independent groups, n - 1 for paired data). The shape in each difference slot.</dd>
+      <dt>Difference axis</dt><dd>The right-hand axis of the Difference plot. Its zero sits level with the reference mean, so a marker at a category's own mean reads as that category's difference from the reference.</dd>
+      <dt>Reference category</dt><dd>The category every other category is compared with (Compare with). Changing it changes every difference shown.</dd>
+      <dt>SD units</dt><dd>Differences divided by the pooled within-group standard deviation of the cells shown: Cohen's d. Comparable across measures; abstract in exchange.</dd>
+      <dt>ROPE</dt><dd>Region of practical equivalence: the differences small enough to call negligible, decided in advance, in the outcome's units. Intervals are read as inside, outside or overlapping it.</dd>
+      <dt>Welch's t</dt><dd>The two-group t test that does not assume equal variances; the default behind every Compare Groups difference here (fractional degrees of freedom are normal).</dd>
+      <dt>Paired t</dt><dd>The t test on each subject's own change; behind every Repeated Measures difference here.</dd>
+    </dl>
+  </section>
+
+  <div class="report" id="report">
+    <p><b>Report</b> (copied to the clipboard; paste it to Claude):</p>
+    <textarea id="report-text" readonly></textarea>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">Checks and notes are stored in this browser only (localStorage), nothing is sent anywhere. The steps describe the estimation branch as of Sep 25 2026; the demo server runs on this machine.</div>
+</footer>
+
+<script>
+(function () {
+  var KEY = 'pandion.estimationWalkthrough.v1';
+  var state = {};
+  try { state = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { state = {}; }
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
+  var boxes = Array.prototype.slice.call(document.querySelectorAll('ol.steps > li[data-id] input[type="checkbox"]'));
+  var notes = Array.prototype.slice.call(document.querySelectorAll('textarea[data-notes]'));
+  function paint() {
+    var done = 0;
+    boxes.forEach(function (cb) {
+      var li = cb.closest('li'); var id = li.getAttribute('data-id');
+      var on = !!(state.checks && state.checks[id]);
+      cb.checked = on; li.classList.toggle('done', on); if (on) done++;
+    });
+    document.getElementById('count').textContent = done + ' of ' + boxes.length;
+    document.getElementById('bar').style.width = (boxes.length ? Math.round(100 * done / boxes.length) : 0) + '%';
+  }
+  boxes.forEach(function (cb) {
+    cb.addEventListener('change', function () {
+      state.checks = state.checks || {};
+      var id = cb.closest('li').getAttribute('data-id');
+      if (cb.checked) state.checks[id] = 1; else delete state.checks[id];
+      save(); paint();
+    });
+  });
+  notes.forEach(function (ta) {
+    var k = ta.getAttribute('data-notes');
+    ta.value = (state.notes && state.notes[k]) || '';
+    ta.addEventListener('input', function () { state.notes = state.notes || {}; state.notes[k] = ta.value; save(); });
+  });
+  paint();
+  document.getElementById('reset-btn').addEventListener('click', function () {
+    if (!confirm('Clear every check and note on this page?')) return;
+    state = {}; save(); paint(); notes.forEach(function (ta) { ta.value = ''; });
+  });
+  function report() {
+    var lines = ['Estimation walkthrough report, ' + new Date().toISOString().slice(0, 10)];
+    var secs = Array.prototype.slice.call(document.querySelectorAll('section[data-section]'));
+    var open = 0;
+    secs.forEach(function (sec) {
+      var title = sec.querySelector('h2').textContent.trim();
+      var items = Array.prototype.slice.call(sec.querySelectorAll('ol.steps > li[data-id]'));
+      var missing = items.filter(function (li) { return !(state.checks && state.checks[li.getAttribute('data-id')]); });
+      var note = (state.notes && state.notes[sec.getAttribute('data-section')] || '').trim();
+      if (!missing.length && !note) return;
+      lines.push('', '## ' + title + ' (' + (items.length - missing.length) + ' of ' + items.length + ' checked)');
+      missing.forEach(function (li) { open++; lines.push('- NOT CHECKED: ' + li.querySelector('.do').textContent.replace(/\s+/g, ' ').trim()); });
+      if (note) lines.push('- Note: ' + note.replace(/\s+/g, ' '));
+    });
+    if (lines.length === 1) lines.push('', 'Everything checked, no notes.');
+    return lines.join('\n');
+  }
+  document.getElementById('report-btn').addEventListener('click', function () {
+    var txt = report();
+    var box = document.getElementById('report');
+    box.classList.add('show');
+    var ta = document.getElementById('report-text'); ta.value = txt;
+    var done = function () { document.getElementById('report-btn').textContent = 'Copied'; setTimeout(function () { document.getElementById('report-btn').textContent = 'Copy a report for Claude'; }, 1600); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done, function () { ta.select(); });
+    else { ta.select(); }
+  });
+  Array.prototype.slice.call(document.querySelectorAll('[data-copy]')).forEach(function (b) {
+    b.addEventListener('click', function () {
+      var t = document.getElementById(b.getAttribute('data-copy') + '-data').textContent;
+      var done = function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy data'; }, 1600); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(done, function () {});
+    });
+  });
+})();
+</script>
+</body>
+</html>
