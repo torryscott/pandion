@@ -11089,6 +11089,27 @@
         // dragged content above the toolbar's ceiling. SVG height is
         // increased by the same amount so bars/axes still fit.
         var _topGrow = 0;
+        // The clickable overlays that sit over the chart (axis strips,
+        // the corner grip, the size readout, the add-title zone, the
+        // per-panel strips) are HTML positioned from chart coordinates,
+        // so they must move down with the chart when the canvas grows
+        // upward. A CSS transform moves the box while each overlay's
+        // own style.top stays in chart coordinates, which is what their
+        // pointer math (top + offsetY) reads. Registered at creation and
+        // re-applied wherever the chart's own shift is applied.
+        var _gb2ShiftChrome = [];
+        function _gb2ChromeFollowShift() {
+            var t = _topGrow > 0 ? "translateY(" + _topGrow + "px)" : "";
+            for (var ci = 0; ci < _gb2ShiftChrome.length; ci++) {
+                try { _gb2ShiftChrome[ci].style.transform = t; } catch (_eT) {}
+            }
+        }
+        function _gb2ChromeFollowsShift(el) {
+            if (!el) return el;
+            if (_gb2ShiftChrome.indexOf(el) < 0) _gb2ShiftChrome.push(el);
+            try { el.style.transform = _topGrow > 0 ? "translateY(" + _topGrow + "px)" : ""; } catch (_eT2) {}
+            return el;
+        }
         function _updateBgCanvas() {
             try {
                 var W = parseFloat(svg.getAttribute("width")) || 0;
@@ -11111,6 +11132,7 @@
                         _topGrow > 0 ? "translate(0," + _topGrow + ")" : ""
                     );
                 }
+                _gb2ChromeFollowShift();
                 // Push the external toolbar up by _bgPad.top (capped
                 // at MAX_TOP_BG_PAD). Beyond the cap the chart grows
                 // instead, so the toolbar never travels far enough to
@@ -11454,7 +11476,7 @@
         // preserves the grab-time ratio; release keeps the exact dropped
         // size (no jamovi-style 10 px snap - Torry's call, Aug 2026).
         // Single-axis fine-tuning lives in Chart settings -> Sizing.
-        var gripXY = makeGrip("nwse-resize");
+        var gripXY = _gb2ChromeFollowsShift(makeGrip("nwse-resize"));
         // The corner box overlaps the tail of the x-axis click strip (a
         // later sibling at the same z-index, which would steal the
         // pointer). The corner means resize, so it wins the stack; the
@@ -11495,6 +11517,7 @@
             "border:1px solid #c9d4e0;border-radius:3px;padding:2px 7px;" +
             "opacity:0;transition:opacity 150ms ease;white-space:pre;text-align:left;";
         wrap.appendChild(sizeTag);
+        _gb2ChromeFollowsShift(sizeTag);
         var sizeTagHide = null;
 
         var draggingXY = false;
@@ -11510,6 +11533,7 @@
         // intercepted by the SVG's box.
         tickDragHit.style.cssText = "position:absolute;cursor:ns-resize;user-select:none;z-index:2;";
         wrap.appendChild(tickDragHit);
+        _gb2ChromeFollowsShift(tickDragHit);
 
         // --- X-axis hit zone (selects the X axis in the inspector) ----
         var xLayoutHit = document.createElement("div");
@@ -11518,6 +11542,7 @@
         xLayoutHit.style.cssText = "position:absolute;cursor:pointer;user-select:none;z-index:2;";
         xLayoutHit.title = ("Click to open the " + _axisPosLabelLc("x", true) + " settings"); xLayoutHit.setAttribute("data-role", "x-axis-hit");
         wrap.appendChild(xLayoutHit);
+        _gb2ChromeFollowsShift(xLayoutHit);
 
         // --- Export utilities (SVG / PNG / JPG / vector PDF) -------------
         // serializeSvgForExport returns a portable, standalone SVG string:
@@ -16729,7 +16754,9 @@
                         // Not getScreenCTM, which omits the host zoom in Safari.
                         var r = svg.getBoundingClientRect(), vs = _gb2ViewScale(svg);
                         if (!r) return null;
-                        return { x: (clientX - r.left) / vs, y: (clientY - r.top) / vs };
+                        // Less _topGrow: with the canvas grown upward the
+                        // chart sits that far down inside the svg.
+                        return { x: (clientX - r.left) / vs, y: (clientY - r.top) / vs - _topGrow };
                     }
                     function onMove(ev) {
                         var p = svgPoint(ev.clientX, ev.clientY);
@@ -18035,7 +18062,7 @@
                         var pxX = (ev.clientX - svgRect.left) / vScale - chartLeft;
                         frac = pxX / Math.max(1, innerW);
                     } else {
-                        var pxY = (ev.clientY - svgRect.top) / vScale - chartTop;
+                        var pxY = (ev.clientY - svgRect.top) / vScale - _topGrow - chartTop;
                         frac = pxY / Math.max(1, innerH);
                     }
                     frac = Math.max(0, Math.min(1, frac));
@@ -18645,6 +18672,28 @@
                 y: my + perpY * perpOff + alongY * alongOff,
                 len: len
             };
+        }
+        // Where the curve's reshape handle sits: ON the curve, at its
+        // middle (t = 0.5 of the quadratic, which is halfway between the
+        // chord midpoint and the control point). It used to sit at the
+        // control point itself, twice as far out as the curve's own peak,
+        // so a tall curve put the handle outside the chart where the page
+        // chrome above the svg took the click and it could not be grabbed.
+        function _curveHandlePoint(ann) {
+            var c = _curveControlPoint(+ann.x, +ann.y, +ann.x2, +ann.y2,
+                ann.curvature, ann.curvatureLong);
+            return { x: ((+ann.x + +ann.x2) / 2 + c.x) / 2,
+                     y: ((+ann.y + +ann.y2) / 2 + c.y) / 2 };
+        }
+        // (No clamp to the canvas is needed: the canvas grows to hold a
+        // shape that pokes above or beside it, and a handle that sits ON
+        // the curve is inside whatever holds the curve. The old control-
+        // point handle was chrome, so that growth never counted it.)
+        function _curveHandleDiamondD(x, y, half) {
+            return "M " + x + "," + (y - half) +
+                " L " + (x + half) + "," + y +
+                " L " + x + "," + (y + half) +
+                " L " + (x - half) + "," + y + " Z";
         }
         function _curvePathD(x1, y1, x2, y2, curvature, curvatureLong) {
             var c = _curveControlPoint(x1, y1, x2, y2, curvature, curvatureLong);
@@ -19450,7 +19499,7 @@
             return zone;
         }
 
-        var addTitleZone = makeAddZone("Click to add title");
+        var addTitleZone = _gb2ChromeFollowsShift(makeAddZone("Click to add title"));
         addTitleZone._hint.style.fontSize = "14px";
         // Subtitle hover removed - users wanting a second-line caption
         // can use the text annotation feature, which is more flexible
@@ -19990,7 +20039,10 @@
             // 1 off the standalone shell.
             var vScale = _gb2ViewScale(svg);
             var sx = (downEvt.clientX - svgRect.left) / vScale;
-            var sy = (downEvt.clientY - svgRect.top) / vScale;
+            // Less _topGrow: once a shape has made the canvas grow upward
+            // the whole chart sits that far down inside the svg, and a
+            // point measured from the svg's top edge is that far off.
+            var sy = (downEvt.clientY - svgRect.top) / vScale - _topGrow;
             var snap = _gatherSnapTargets();
             var snapped = _snapPoint(sx, sy, snap);
             // Create the annotation in the data model now so live
@@ -20049,7 +20101,7 @@
             var rect = svg.getBoundingClientRect();
             var _vs = _drawDragState.vScale || 1;
             var px = (e.clientX - rect.left) / _vs;
-            var py = (e.clientY - rect.top) / _vs;
+            var py = (e.clientY - rect.top) / _vs - _topGrow;
             var snapped = _snapPoint(px, py, _drawDragState.snap);
             // Shift constrains to a square (rect/ellipse) or an
             // axis-aligned line (line/arrow). The constraint is
@@ -24771,6 +24823,12 @@
             }
             var gap = 22;
             var r = halfHeight + gap;
+            // A curve that bows toward this handle's side would put its
+            // own reshape handle (which rides the curve) under or beside
+            // it, so the rotate handle takes the other side of the chord.
+            // A negative r is that other side; the drag below reads the
+            // sign so the handle still follows the pointer.
+            if (ann.kind === "curve" && (+ann.curvature) < 0) r = -r;
             var rot = +ann.rotation || 0;
             var rad = rot * Math.PI / 180;
             // Local-up direction is (0, -1) "above center"; rotated by
@@ -24821,10 +24879,13 @@
                     if (ev.pointerId !== ptrId) return;
                     var rect = svg.getBoundingClientRect();
                     var px = (ev.clientX - rect.left) / vScale;
-                    var py = (ev.clientY - rect.top) / vScale;
+                    var py = (ev.clientY - rect.top) / vScale - _topGrow;
                     var dx = px - cx;
                     var dy = py - cy;
                     if (dx === 0 && dy === 0) return;
+                    // A handle on the far side (r < 0) points the other
+                    // way from the centre.
+                    if (r < 0) { dx = -dx; dy = -dy; }
                     // Convert cursor direction into the rotation that
                     // puts the handle (which sits "up" relative to
                     // canonical orientation) under the cursor. atan2
@@ -24913,15 +24974,15 @@
                 pts.push({ which: "start", x: +ann.x, y: +ann.y });
                 pts.push({ which: "end",   x: +ann.x2, y: +ann.y2 });
                 if (ann.kind === "curve") {
-                    // Third handle: the bezier control point. Drag
-                    // the diamond to reshape the curve in 2D - both
+                    // Third handle: the diamond on the middle of the
+                    // curve. Drag it to reshape the curve in 2D - both
                     // perpendicular bow (curvature) and along-chord
-                    // skew (curvatureLong) update from the new
-                    // position.
-                    var cp = _curveControlPoint(+ann.x, +ann.y, +ann.x2, +ann.y2,
-                        ann.curvature, ann.curvatureLong);
+                    // skew (curvatureLong) update so the curve passes
+                    // through the pointer.
+                    var cp = _curveHandlePoint(ann);
                     pts.push({ which: "control", x: cp.x, y: cp.y });
                 }
+
             } else {
                 // 8 handles total for bbox-based shapes:
                 //   - 4 corners (resize both X and Y at once)
@@ -25046,7 +25107,10 @@
                 if (!down || e.pointerId !== ptrId) return;
                 var rect = svg.getBoundingClientRect();
                 var px = (e.clientX - rect.left) / vScale;
-                var py = (e.clientY - rect.top) / vScale;
+                // Less _topGrow: with the canvas grown upward the chart
+                // sits that far down inside the svg, and every dragged
+                // handle used to land that far below the pointer.
+                var py = (e.clientY - rect.top) / vScale - _topGrow;
                 // For rotated bbox shapes (rect / ellipse / triangle /
                 // polygon / diamond / star), ann.x / ann.y / ann.x2 /
                 // ann.y2 live in the shape's UNROTATED coord system,
@@ -25085,7 +25149,11 @@
                         var perpX = -alongY, perpY = alongX;
                         var midX = ((+ann.x) + (+ann.x2)) / 2;
                         var midY = ((+ann.y) + (+ann.y2)) / 2;
-                        var dxM = px - midX, dyM = py - midY;
+                        // The pointer is where the MIDDLE OF THE CURVE
+                        // should be, and that middle is halfway from the
+                        // chord midpoint to the control point - so the
+                        // control point is twice as far out.
+                        var dxM = 2 * (px - midX), dyM = 2 * (py - midY);
                         var perpComp = dxM * perpX + dyM * perpY;
                         var alongComp = dxM * alongX + dyM * alongY;
                         // Clamp to the slider range [-1,1] so the docked
@@ -25100,11 +25168,11 @@
                         var el = svg.querySelector('[data-ann-id="' + ann.id + '"]');
                         if (el) _shapeUpdateDom(el, ann, ann.kind);
                     } catch (_e) {}
-                    handle.setAttribute("d",
-                        "M " + px + "," + (py - 5) +
-                        " L " + (px + 5) + "," + py +
-                        " L " + px + "," + (py + 5) +
-                        " L " + (px - 5) + "," + py + " Z");
+                    // The handle rides the curve it just shaped, not the
+                    // raw pointer: past the curvature limits the two part
+                    // company, and a handle off its curve reads as broken.
+                    var _hp = _curveHandlePoint(ann);
+                    handle.setAttribute("d", _curveHandleDiamondD(_hp.x, _hp.y, 5));
                     // Mirror new values into the inspector sliders
                     // if present.
                     try {
@@ -38069,8 +38137,11 @@
                         }
                         var scX = L.rect.width > 0 ? (L.w / L.rect.width) : 1;
                         var scY = L.rect.height > 0 ? (L.h / L.rect.height) : 1;
+                        // Less _topGrow: the point grid is in chart
+                        // coordinates, which sit that far down inside
+                        // the svg once the canvas has grown upward.
                         return [(e.clientX - L.rect.left) * scX,
-                                (e.clientY - L.rect.top) * scY];
+                                (e.clientY - L.rect.top) * scY - _topGrow];
                     }
                     function clearCur() {
                         if (L.cur < 0) return;
@@ -42914,7 +42985,7 @@
                         // Not getScreenCTM, which omits the host zoom in Safari.
                         var r = svg.getBoundingClientRect(), vs = _gb2ViewScale(svg);
                         if (!r) return null;
-                        var pp = { x: (ev.clientX - r.left) / vs, y: (ev.clientY - r.top) / vs };
+                        var pp = { x: (ev.clientX - r.left) / vs, y: (ev.clientY - r.top) / vs - _topGrow };
                         return {
                             deg: Math.atan2(pp.y - _cy, pp.x - _cx) * 180 / Math.PI,
                             dist: Math.sqrt((pp.x - _cx) * (pp.x - _cx)
@@ -43253,7 +43324,7 @@
                             _hit5.addEventListener("mousemove", function (ev) {
                                 var best = null, bd = Infinity;
                                 // rect + view scale, not getScreenCTM (Safari omits the host zoom from it)
-                                var pt = (function () { try { var _r = svg.getBoundingClientRect(), _vs = _gb2ViewScale(svg); return { x: (ev.clientX - _r.left) / _vs, y: (ev.clientY - _r.top) / _vs }; } catch (_e) { return null; } })();
+                                var pt = (function () { try { var _r = svg.getBoundingClientRect(), _vs = _gb2ViewScale(svg); return { x: (ev.clientX - _r.left) / _vs, y: (ev.clientY - _r.top) / _vs - _topGrow }; } catch (_e) { return null; } })();
                                 if (pt) { for (var z = 0; z < _pts.length; z++) { var dd = Math.abs((horizontal ? _pts[z][1] : _pts[z][0]) - (horizontal ? pt.y : pt.x)); if (dd < bd) { bd = dd; best = z; } } }
                                 if (best != null) {
                                     _xyTooltipShow("<div style='font-weight:600;margin-bottom:2px;'>" + _fqEsc(displayCategory(visibleXCats[_pts[best][3]])) + "</div><div>cumulative " + (Math.round(_pts[best][2] * 10) / 10) + "%</div>", ev.clientX, ev.clientY);
@@ -43867,7 +43938,7 @@
                                         // rect + view scale, not getScreenCTM (Safari omits the host zoom)
                                         var _r6 = svg.getBoundingClientRect(), _vs6 = _gb2ViewScale(svg);
                                         if (_r6) {
-                                            var _sp6 = { x: (ev.clientX - _r6.left) / _vs6, y: (ev.clientY - _r6.top) / _vs6 };
+                                            var _sp6 = { x: (ev.clientX - _r6.left) / _vs6, y: (ev.clientY - _r6.top) / _vs6 - _topGrow };
                                             for (var _vq = 0; _vq < _vEls.length; _vq++) {
                                                 var _vb6 = _vEls[_vq].getBBox();
                                                 if (_sp6.x >= _vb6.x - 2 && _sp6.x <= _vb6.x + _vb6.width + 2
@@ -45086,7 +45157,7 @@
                                             // rect + view scale, not getScreenCTM (Safari omits the host zoom)
                                             var r7 = svg.getBoundingClientRect(), vs7 = _gb2ViewScale(svg);
                                             if (r7) {
-                                                var sp7 = { x: (ev.clientX - r7.left) / vs7, y: (ev.clientY - r7.top) / vs7 };
+                                                var sp7 = { x: (ev.clientX - r7.left) / vs7, y: (ev.clientY - r7.top) / vs7 - _topGrow };
                                                 var vb7 = lbl.getBBox();
                                                 if (sp7.x >= vb7.x - 2 && sp7.x <= vb7.x + vb7.width + 2
                                                     && sp7.y >= vb7.y - 2 && sp7.y <= vb7.y + vb7.height + 2) {
@@ -49603,6 +49674,9 @@
                        ? "Drag to adjust; all rows move together"
                        : "Drag to adjust; all gaps move together");
             }
+            // Drawn from chart coordinates on the svg itself, so it has to
+            // carry the shift the chart takes once the canvas grows upward.
+            if (_topGrow > 0) g.setAttribute("transform", "translate(0," + _topGrow + ")");
             svg.appendChild(g);
             try {
                 svg.style.cursor = yAxis ? "row-resize" : "col-resize";
@@ -49640,7 +49714,7 @@
             var vw = parseFloat(svg.getAttribute("width")) || r.width;
             var vh = parseFloat(svg.getAttribute("height")) || r.height;
             return { x: (e.clientX - r.left) * (vw / (r.width || 1)),
-                     y: (e.clientY - r.top) * (vh / (r.height || 1)) };
+                     y: (e.clientY - r.top) * (vh / (r.height || 1)) - _topGrow };
         }
         function _gsCrossOf(p) {
             var L = window.__gb2_gapSeamLayout;
@@ -55566,6 +55640,9 @@
                     cx: circles[ci3].cx, cy: circles[ci3].cy, r: circles[ci3].r
                 });
             }
+            // The rings are measured in chart coordinates and drawn on the
+            // svg itself, so they carry the upward-growth shift too.
+            if (_topGrow > 0) g.setAttribute("transform", "translate(0," + _topGrow + ")");
             svg.appendChild(g);
         }
         // Row chrome (Jul 2026 polish per Torry: tints, not boxes).
@@ -105326,6 +105403,7 @@
             var set = {};
             set.tickHit = document.createElement("div"); set.tickHit.style.cssText = "position:absolute;cursor:pointer;user-select:none;z-index:2;"; set.tickHit.title = ("Click to open the " + _axisPosLabelLc("y", true) + " settings"); set.tickHit.setAttribute("data-role", "y-axis-hit"); wrap.appendChild(set.tickHit);
             set.xHit = document.createElement("div"); set.xHit.style.cssText = "position:absolute;cursor:pointer;user-select:none;z-index:2;"; set.xHit.title = ("Click to open the " + _axisPosLabelLc("x", true) + " settings"); set.xHit.setAttribute("data-role", "x-axis-hit"); wrap.appendChild(set.xHit);
+            _gb2ChromeFollowsShift(set.tickHit); _gb2ChromeFollowsShift(set.xHit);
             var yTick = null, yLine = false;
             set.tickHit.addEventListener("mousemove", function (e) {
                 if (typeof e.offsetY !== "number" || !set.panel || !set.yLineEl) return;
@@ -107538,7 +107616,10 @@
                 if (st.grid) items.push({ k: "fadeout", el: ghost(st.grid) });
                 if (st.axis) items.push({ k: "fadeout", el: ghost(st.axis) });
                 for (var g3 = 0; g3 < ghosts.length; g3++) {
-                    try { svg.appendChild(ghosts[g3]); } catch (_eAp) {}
+                    // In chart coordinates, so on a canvas that has grown
+                    // upward they go inside the shifted group; otherwise on
+                    // the svg, as before.
+                    try { (_topGrow > 0 ? chartShiftGroup : svg).appendChild(ghosts[g3]); } catch (_eAp) {}
                 }
                 // ---- run ----
                 var indWas = null;
