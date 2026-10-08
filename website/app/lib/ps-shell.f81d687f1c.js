@@ -653,6 +653,324 @@
       "copy that does not depend on this browser.", true);
   }
   var AUTOSAVE_LAST_OK = null;     // B14: when work last actually reached storage
+  // A project too large for browser autosave (Oct 2026, a colleague's 70 MB
+  // survey file). Browser autosave is localStorage, which holds about five
+  // million characters for the whole origin, and a table of 12,570 rows by
+  // 1,010 columns serializes to 85 million. Every persist still built that
+  // whole string (0.5 to 1 second of frozen window, measured), failed on the
+  // quota, and raised the same red toast: on every edit, every style change,
+  // every workspace switch. Once a write has failed for SIZE the app now
+  // remembers the size that failed, stops building the snapshot, says so
+  // once, and tries again only when the table has shrunk enough that it
+  // might fit. The chip, the status line and the close-tab guard keep
+  // reporting the true state the whole time.
+  var AUTOSAVE_ROOM_CHARS = 4500000;      // what one project may plausibly use
+  var AUTOSAVE_TOO_BIG = null;            // { cells, chars } of the failed write
+  function tableCellCount() {
+    var t = PROJECT && PROJECT.table;
+    return (t && t.order && t.order.length) ? t.order.length * nRows(t) : 0;
+  }
+  function autosaveTooBigNow() {
+    if (!AUTOSAVE_TOO_BIG) return false;
+    // Proportional: the cell count at which the failed snapshot would have
+    // come down to the room there is. Above it, do not even try.
+    var fits = AUTOSAVE_TOO_BIG.cells *
+      (AUTOSAVE_ROOM_CHARS / Math.max(1, AUTOSAVE_TOO_BIG.chars));
+    if (tableCellCount() > fits) return true;
+    AUTOSAVE_TOO_BIG = null;              // it shrank: the next write is real
+    return false;
+  }
+  function autosaveTooBigDetail() {
+    return "This project is too large for browser autosave: it needs about " +
+      formatBytes(AUTOSAVE_TOO_BIG ? AUTOSAVE_TOO_BIG.chars : LAST_PROJECT_BYTES) +
+      " and the browser keeps about 5 MB" +
+      (BIG_UNAVAILABLE ? ", and this browser would not open the larger " +
+        "store that a project this size is normally autosaved to" : "") +
+      ". Your work is safe in this tab, and a reload would lose whatever " +
+      "is not in a file. Save it to a .pand file as you go.";
+  }
+  // ---- autosave for a project too large for localStorage ----
+  // (Oct 2026, the same 70 MB survey file.) The browser's larger store,
+  // IndexedDB, holds hundreds of megabytes where localStorage holds five,
+  // so a project that cannot be autosaved the ordinary way is autosaved
+  // there instead. Two things make that workable at 12.7 million cells:
+  //   - the data is stored ONE RECORD PER COLUMN, and a write carries only
+  //     the columns that changed since the last one. Writing the whole
+  //     table freezes the page for about half a second (measured); one
+  //     column takes about a millisecond. The rest of the project (charts,
+  //     layouts, Notebook, settings, the table's shape) is one small record
+  //     written every time, since it is what changes most;
+  //   - writes are coalesced: one write a second at most, trailing, and a
+  //     last one at pagehide.
+  // Which columns changed comes from the data history: dataMark means a
+  // whole-table change is about to happen, dataMarkCell names its column,
+  // undo and redo say which they put back, and a new table object (a load
+  // or an import) means everything. That is the same set of events the Data
+  // workspace's undo depends on, so it is complete for anything a user can
+  // do to the data. A small localStorage marker (PS_BIG_KEY) says which
+  // project lives in the larger store, so a reload knows to look there. The
+  // .pand file remains the copy that does not depend on this browser: the
+  // larger store can still be cleared by the browser under disk pressure.
+  var PS_BIG_KEY = "psstandalone.project.big.v1";
+  var BIG_DB = "ps-autosave", BIG_STORE = "project";
+  var BIG_ACTIVE = false;        // the open project autosaves in the larger store
+  var BIG_UNAVAILABLE = false;   // the browser refused it: back to the warning
+  var BIG_BOOT = null;           // the marker found at boot, until restored
+  var BIG_DIRTY_ALL = true, BIG_DIRTY_COLS = {};
+  var BIG_TABLE_REF = null, BIG_TIMER = null;
+  var BIG_PENDING = false, BIG_INFLIGHT = false, BIG_WARNED = false;
+  var BIG_WRITES = 0, BIG_LAST_ERROR = "";
+  var BIG_WINDOW_MS = 1000;
+  function bigAvailable() { return !BIG_UNAVAILABLE && !!window.indexedDB; }
+  // Certain not to fit localStorage: at four characters a cell ("x", plus
+  // the comma) the smallest possible snapshot is already past the room.
+  // Skipping the attempt saves building an 85-million-character string.
+  function bigCertainlyTooBig() {
+    return tableCellCount() * 4 > AUTOSAVE_ROOM_CHARS;
+  }
+  function bigEstimateChars() {
+    return AUTOSAVE_TOO_BIG ? AUTOSAVE_TOO_BIG.chars : tableCellCount() * 7;
+  }
+  function bigDirtyCol(col) { if (col != null) BIG_DIRTY_COLS[col] = true; }
+  function bigOpen(cb) {
+    var req;
+    try { req = window.indexedDB.open(BIG_DB, 1); }
+    catch (e) { cb(null); return; }
+    req.onupgradeneeded = function () {
+      try { req.result.createObjectStore(BIG_STORE); } catch (e) {}
+    };
+    req.onerror = function () { cb(null); };
+    req.onblocked = function () { cb(null); };
+    req.onsuccess = function () { cb(req.result); };
+  }
+  function bigPersist() {
+    BIG_ACTIVE = true;
+    if (PROJECT.table !== BIG_TABLE_REF) {
+      BIG_TABLE_REF = PROJECT.table;
+      BIG_DIRTY_ALL = true;
+    }
+    BIG_PENDING = true;
+    if (!BIG_TIMER)
+      BIG_TIMER = window.setTimeout(function () {
+        BIG_TIMER = null;
+        bigWrite();
+      }, BIG_WINDOW_MS);
+    updateDocumentState();
+  }
+  function bigFlush() {
+    if (BIG_TIMER) { window.clearTimeout(BIG_TIMER); BIG_TIMER = null; }
+    if (BIG_PENDING) bigWrite();
+  }
+  function bigWrite() {
+    if (BIG_INFLIGHT) { BIG_PENDING = true; return; }   // again when it lands
+    BIG_PENDING = false;
+    BIG_INFLIGHT = true;
+    var snap;
+    var dirtyAll = BIG_DIRTY_ALL, dirtyCols = BIG_DIRTY_COLS;
+    BIG_DIRTY_ALL = false; BIG_DIRTY_COLS = {};
+    try { snap = projectSnapshot(); }
+    catch (e) { BIG_INFLIGHT = false; bigFailed(e, false); return; }
+    // The snapshot's wrappers are fresh objects; the raw columns are the
+    // live arrays, which IndexedDB copies as it stores them.
+    var table = snap.table, raw = table.raw;
+    delete snap.table;
+    delete table.raw;
+    var order = Array.isArray(table.order) ? table.order : [];
+    var cols = dirtyAll ? order.slice()
+      : order.filter(function (c) { return dirtyCols[c]; });
+    var meta = { id: snap.id, name: snap.name, savedAt: snap.savedAt,
+                 cells: tableCellCount(), small: snap, tableMeta: table };
+    var recentSnap = Object.assign({}, snap,
+      { table: Object.assign({}, table, { raw: raw }) });
+    bigOpen(function (db) {
+      if (!db) { BIG_INFLIGHT = false; bigFailed(null, true); return; }
+      var tx, failed = null;
+      try {
+        tx = db.transaction(BIG_STORE, "readwrite");
+        var store = tx.objectStore(BIG_STORE);
+        store.put(meta, "meta");
+        for (var i = 0; i < cols.length; i++)
+          store.put(raw[cols[i]] || [], "col:" + cols[i]);
+        if (dirtyAll) {
+          // Columns that no longer exist (deleted, renamed, another table).
+          var keep = {};
+          for (var k = 0; k < order.length; k++) keep["col:" + order[k]] = true;
+          var keysReq = store.getAllKeys();
+          keysReq.onsuccess = function () {
+            var ks = keysReq.result || [];
+            for (var j = 0; j < ks.length; j++)
+              if (typeof ks[j] === "string" && ks[j].indexOf("col:") === 0 &&
+                  !keep[ks[j]]) store.delete(ks[j]);
+          };
+        }
+      } catch (e) { failed = e; }
+      if (failed) {
+        try { db.close(); } catch (e2) {}
+        BIG_INFLIGHT = false;
+        bigFailed(failed, false);
+        return;
+      }
+      tx.oncomplete = function () {
+        try { db.close(); } catch (e3) {}
+        BIG_INFLIGHT = false;
+        bigLanded(meta, recentSnap);
+      };
+      tx.onerror = tx.onabort = function () {
+        var err = tx.error;
+        try { db.close(); } catch (e4) {}
+        BIG_INFLIGHT = false;
+        bigFailed(err, false);
+      };
+    });
+  }
+  function bigLanded(meta, recentSnap) {
+    if (!BIG_ACTIVE) return;          // retired while this write was in flight
+    BIG_WRITES++;
+    AUTOSAVE_HEALTH = "ok";
+    AUTOSAVE_LAST_OK = Date.now();
+    AUTOSAVE_DETAIL = "Local recovery is current (in the browser's larger store)";
+    LAST_PROJECT_BYTES = bigEstimateChars();
+    try {
+      window.localStorage.setItem(PS_BIG_KEY, JSON.stringify(
+        { id: meta.id, name: meta.name, savedAt: meta.savedAt, cells: meta.cells }));
+    } catch (e0) {}
+    // The autosave slot is the larger store now. A reload must not bring
+    // back whatever small project the ordinary slot still held.
+    try { window.localStorage.removeItem(PS_SAVE_KEY); } catch (e1) {}
+    try { window.localStorage.removeItem(PS_STALE_KEY); } catch (e2) {}
+    try { rememberRecent(recentSnap, { length: LAST_PROJECT_BYTES }); } catch (e3) {}
+    updateDocumentState();
+    if (BIG_PENDING && !BIG_TIMER)       // changes arrived while writing
+      BIG_TIMER = window.setTimeout(function () { BIG_TIMER = null; bigWrite(); },
+                                    BIG_WINDOW_MS);
+  }
+  function bigFailed(err, unavailable) {
+    if (unavailable) BIG_UNAVAILABLE = true;
+    BIG_PENDING = true;                  // the next persist tries again
+    BIG_DIRTY_ALL = true;
+    BIG_LAST_ERROR = String(err && (err.name || err.message) || "unavailable");
+    AUTOSAVE_HEALTH = "error";
+    AUTOSAVE_FAILS++;
+    AUTOSAVE_DETAIL = unavailable ? autosaveTooBigDetail()
+      : "The browser's larger store could not be written (" + BIG_LAST_ERROR +
+        "). Your work is safe in this tab, and a reload would lose whatever " +
+        "is not in a file. Save it to a .pand file as you go.";
+    try { window.localStorage.setItem(PS_STALE_KEY, "1"); } catch (e1) {}
+    updateDocumentState();
+    if (BIG_WARNED) return;
+    BIG_WARNED = true;
+    showActionToast(AUTOSAVE_DETAIL, "Save to a file", function () {
+      try { saveProjectFile(); } catch (eS) {}
+    }, { error: true, sticky: true, dismissLabel: "Not now" });
+  }
+  // The ordinary autosave succeeded again (a smaller project replaced the
+  // large one, or it shrank), so the larger store is no longer the slot.
+  function bigRetire() {
+    BIG_ACTIVE = false;
+    BIG_PENDING = false;
+    if (BIG_TIMER) { window.clearTimeout(BIG_TIMER); BIG_TIMER = null; }
+    BIG_DIRTY_ALL = true; BIG_DIRTY_COLS = {};
+    try { window.localStorage.removeItem(PS_BIG_KEY); } catch (e0) {}
+    bigOpen(function (db) {
+      if (!db) return;
+      try {
+        var tx = db.transaction(BIG_STORE, "readwrite");
+        tx.objectStore(BIG_STORE).clear();
+        tx.oncomplete = tx.onerror = function () { try { db.close(); } catch (e) {} };
+      } catch (e1) { try { db.close(); } catch (e2) {} }
+    });
+  }
+  // At boot: the marker says a large project is autosaved in the larger
+  // store. The sample is on screen under the busy curtain while it loads,
+  // and the start centre waits for the answer.
+  function bigBootRestore() {
+    if (!BIG_BOOT) return;
+    var want = BIG_BOOT;
+    busyShow("Restoring your project");
+    function finish(snap, why) {
+      BIG_BOOT = null;
+      busyHide();
+      if (snap) {
+        var invalid = projectValidationError(snap);
+        if (!invalid && applySnapshot(snap)) {
+          dataHistoryClear();
+          PROJECT_REV = 0;
+          FILE_SAVED_REV = null; FILE_LABEL = null; FILE_HANDLE = null;
+          PROJECT_CHOSEN = true;
+          BIG_ACTIVE = true;
+          BIG_TABLE_REF = PROJECT.table;
+          BIG_DIRTY_ALL = false; BIG_DIRTY_COLS = {};
+          BIG_PENDING = false;
+          AUTOSAVE_HEALTH = "ok";
+          AUTOSAVE_DETAIL = "Local recovery is current (in the browser's larger store)";
+          AUTOSAVE_LAST_OK = snap.savedAt ? Date.parse(snap.savedAt) || Date.now() : Date.now();
+          LAST_PROJECT_BYTES = bigEstimateChars();
+          BOOT_RESTORED = true;
+          BOOT_SAVED_AT = snap.savedAt || null;
+          RECOVERY_NOTE = "";
+          validateRoles();
+          syncAll(); render();
+          updateDocumentState();
+          showWelcome(false);
+          return;
+        }
+        why = invalid || "the contents were not recognized";
+      }
+      RECOVERY_NOTE = "The autosaved project" +
+        (want && want.name ? " (" + want.name + ")" : "") +
+        " could not be read from the browser's larger store" +
+        (why ? ": " + why : "") + ". A fresh sample project was opened.";
+      try { window.localStorage.removeItem(PS_BIG_KEY); } catch (e0) {}
+      BOOT_RESTORED = false;
+      updateDocumentState();
+      showWelcome(false);
+    }
+    bigOpen(function (db) {
+      if (!db) { finish(null, "the store would not open"); return; }
+      var meta = null, raw = {};
+      try {
+        var tx = db.transaction(BIG_STORE, "readonly");
+        var store = tx.objectStore(BIG_STORE);
+        var metaReq = store.get("meta");
+        metaReq.onsuccess = function () {
+          meta = metaReq.result;
+          if (!meta || !meta.small || !meta.tableMeta ||
+              !Array.isArray(meta.tableMeta.order)) return;
+          meta.tableMeta.order.forEach(function (c) {
+            var r = store.get("col:" + c);
+            r.onsuccess = function () {
+              if (Array.isArray(r.result)) raw[c] = r.result;
+            };
+          });
+        };
+        tx.oncomplete = function () {
+          try { db.close(); } catch (e1) {}
+          if (!meta || !meta.small || !meta.tableMeta ||
+              !Array.isArray(meta.tableMeta.order)) {
+            finish(null, "no project record");
+            return;
+          }
+          var missing = meta.tableMeta.order.filter(function (c) {
+            return !Object.prototype.hasOwnProperty.call(raw, c);
+          });
+          if (missing.length) {
+            finish(null, missing.length + " column" +
+              (missing.length === 1 ? " is" : "s are") + " missing");
+            return;
+          }
+          finish(Object.assign({}, meta.small,
+            { table: Object.assign({}, meta.tableMeta, { raw: raw }) }));
+        };
+        tx.onerror = tx.onabort = function () {
+          try { db.close(); } catch (e2) {}
+          finish(null, "the read failed");
+        };
+      } catch (e) {
+        try { db.close(); } catch (e3) {}
+        finish(null, String(e && e.message || e));
+      }
+    });
+  }
   var RECOVERY_NOTE = "";
   var LAST_PROJECT_BYTES = 0;
   var LAST_RENDER_MS = 0;
@@ -3145,14 +3463,29 @@
   function exclCount(t) {
     return rowExclCount(t) + valueExclCount(t);
   }
-  function retype(t, preparingSnapshot) {
+  // onlyCols: a change known to touch only these columns (one edited cell)
+  // retypes just them. Typing a column reads nothing but that column, so the
+  // others' typed values, levels and audits are still true; on a table of a
+  // thousand columns the full pass cost over a second per edited cell.
+  // Anything structural (columns added, removed, renamed, reordered, a
+  // missing-code change) keeps calling this with no list, as before.
+  function retype(t, preparingSnapshot, onlyCols) {
     normalizeTableMaps(t);
     if (!preparingSnapshot) bumpSnapEpoch(); // commit, not candidate preparation
-    retypeColumns(t);
+    var only = null;
+    if (Array.isArray(onlyCols) && onlyCols.length && t.columns && t.typeAudit) {
+      only = onlyCols;
+      for (var oc = 0; oc < onlyCols.length; oc++)
+        if (!t.raw[onlyCols[oc]] || !t.columns[onlyCols[oc]]) { only = null; break; }
+    }
+    retypeColumns(t, only);
     // Computed columns (Tier 1): every stored formula re-evaluates from
     // the freshly typed source values (chains follow dependency order), then
     // ONE more typing pass derives levels/types for the results.
-    if (recomputeFormulas(t)) retypeColumns(t);
+    if (recomputeFormulas(t))
+      retypeColumns(t, only ? t.order.filter(function (c) {
+        return isComputedColumn(t, c) || only.indexOf(c) !== -1;
+      }) : null);
     computeFilterState(t, preparingSnapshot);
   }
   function isComputedColumn(t, col) {
@@ -3233,18 +3566,22 @@
     }
     return wrote;
   }
-  function retypeColumns(t) {
-    t.columns = dataMap(); t.levels = dataMap(); t.numericish = dataMap();
-    // t.typeAudit is what the variable inspector reads to name the values
-    // that decided each type (18b/18c). It is derived state: rebuilt on
-    // every retype and deliberately absent from every serialization list.
-    t.typeAudit = dataMap();
+  function retypeColumns(t, only) {
+    if (!only) {
+      t.columns = dataMap(); t.levels = dataMap(); t.numericish = dataMap();
+      // t.typeAudit is what the variable inspector reads to name the values
+      // that decided each type (18b/18c). It is derived state: rebuilt on
+      // every retype and deliberately absent from every serialization list.
+      t.typeAudit = dataMap();
+    }
+    var typeList = only || t.order;
     // The token map was rebuilt per CELL by isMissingRaw, which is 720k
     // object allocations on a 120k x 6 import. Built once per COLUMN now
     // (t3-58a gave columns their own token lists), which is still O(columns)
     // rather than O(cells) and keeps that fix intact.
-    for (var j = 0; j < t.order.length; j++) {
-      var col = t.order[j], rv = t.raw[col], out = [], lv = [], i;
+    for (var j = 0; j < typeList.length; j++) {
+      var col = typeList[j], rv = t.raw[col], out = [], lv = [], i;
+      if (only) delete t.levels[col];      // a column may stop having levels
       var tokens = tableMissingTokens(t, col);
       var audit = numericAudit(rv, tokens);
       t.typeAudit[col] = audit;
@@ -4067,6 +4404,25 @@
   }
   function persistWrite(housekeeping) {
     var snap, json;
+    // Known not to fit localStorage: the larger store, or, where the browser
+    // will not open one, the warning (see AUTOSAVE_TOO_BIG).
+    if (autosaveTooBigNow() || bigCertainlyTooBig()) {
+      if (!AUTOSAVE_TOO_BIG)
+        AUTOSAVE_TOO_BIG = { cells: tableCellCount(), chars: tableCellCount() * 7 };
+      if (bigAvailable()) { bigPersist(); return; }
+      // No larger store in this browser: say so once, then keep the state.
+      AUTOSAVE_HEALTH = "error";
+      var tooBig = autosaveTooBigDetail();
+      var firstTime = AUTOSAVE_DETAIL !== tooBig;
+      AUTOSAVE_DETAIL = tooBig;
+      try { window.localStorage.setItem(PS_STALE_KEY, "1"); } catch (eS) {}
+      updateDocumentState();
+      if (firstTime)
+        showActionToast(tooBig, "Save to a file", function () {
+          try { saveProjectFile(); } catch (eF) {}
+        }, { error: true, sticky: true, dismissLabel: "Not now" });
+      return;
+    }
     try {
       snap = projectSnapshot();
       json = JSON.stringify(snap);
@@ -4093,6 +4449,7 @@
       AUTOSAVE_LAST_OK = Date.now();
       AUTOSAVE_DETAIL = "Local recovery is current";
       try { window.localStorage.removeItem(PS_STALE_KEY); } catch (e0) {}
+      if (BIG_ACTIVE) bigRetire();
       // Recents stay on BOTH edges. They are observable immediately (the
       // start centre lists them, and anything can ask for them straight after
       // an action), and unlike the backup they do not re-parse the previous
@@ -4102,21 +4459,44 @@
       updateDocumentState();
     } catch (e) {
       AUTOSAVE_HEALTH = "error";
-      AUTOSAVE_FAILS++;
       // The 5k to 12k case already says the useful thing, naming .pand as the
       // copy that does not depend on this browser. At the size where the data
       // is ACTUALLY lost the message degraded to one that named no fix and
       // read as reassurance, so the sentence that would have saved the work
       // only appeared when it was not needed.
       var quota = /quota/i.test(String(e && (e.name || e.message)));
-      AUTOSAVE_DETAIL = quota
+      // A snapshot larger than the room there is can never be written, no
+      // matter what else is cleared: remember it, so the next persist does
+      // not rebuild it. (A failed stringify of a huge table lands here too:
+      // the json never existed, and the cell count stands in for its size.)
+      var cells = tableCellCount();
+      var chars = json ? json.length : cells * 7;
+      var wasTooBig = !!AUTOSAVE_TOO_BIG;
+      if ((quota || !json) && chars > AUTOSAVE_ROOM_CHARS && cells)
+        AUTOSAVE_TOO_BIG = { cells: cells, chars: chars };
+      // Too large for this store but the browser has a larger one: hand the
+      // project over to it. Not a failure to count or to warn about.
+      if (AUTOSAVE_TOO_BIG && bigAvailable()) { bigPersist(); return; }
+      AUTOSAVE_FAILS++;
+      var detail = AUTOSAVE_TOO_BIG ? autosaveTooBigDetail() : (quota
         ? "Browser storage is full, so this project is no longer being " +
           "autosaved. Your work is safe in this tab, and a reload would lose " +
           "it. Save it to a .pand file now."
-        : "Local recovery could not be updated";
+        : "Local recovery could not be updated");
+      // Say it when it STARTS failing, or when the reason changes. The chip
+      // and the status line carry the state from then on; the same red
+      // toast on every later edit was noise that taught people to ignore it.
+      var news = AUTOSAVE_DETAIL !== detail || (AUTOSAVE_TOO_BIG && !wasTooBig);
+      AUTOSAVE_DETAIL = detail;
       try { window.localStorage.setItem(PS_STALE_KEY, "1"); } catch (e1) {}
       updateDocumentState();
-      showToast(AUTOSAVE_DETAIL, true);
+      if (news) {
+        if (AUTOSAVE_TOO_BIG)
+          showActionToast(detail, "Save to a file", function () {
+            try { saveProjectFile(); } catch (eS) {}
+          }, { error: true, sticky: true, dismissLabel: "Not now" });
+        else showToast(detail, true);
+      }
     }
   }
   function migrateSnapshot(input) {
@@ -4391,6 +4771,15 @@
   }
   function restore() {
     var raw = null;
+    // A large project lives in the larger store; it is read after boot
+    // (bigBootRestore), with the sample standing in under the busy curtain.
+    try {
+      var marker = window.localStorage.getItem(PS_BIG_KEY);
+      if (marker && window.indexedDB) {
+        BIG_BOOT = JSON.parse(marker) || {};
+        return false;
+      }
+    } catch (eBig) { BIG_BOOT = null; }
     try {
       raw = window.localStorage.getItem(PS_SAVE_KEY);
       var s = JSON.parse(raw || "null");
@@ -4490,6 +4879,14 @@
       // chip says whether the work is safe, this says how recently.
       var line = autosaveFailing ? AUTOSAVE_DETAIL
         : (dirty ? "Unsaved file changes" : savedAgoText());
+      // Too large for browser autosave: the file is the only copy there can
+      // be, so the line says where the work stands against the FILE rather
+      // than repeating the warning after the user has done what it asked.
+      if (autosaveFailing && AUTOSAVE_TOO_BIG && !BIG_ACTIVE)
+        line = FILE_SAVED_REV == null
+          ? "Not saved yet \u00b7 too large for browser autosave, so save it to a .pand file"
+          : (dirty ? "Changes not in the file yet \u00b7 too large for browser autosave, so save as you go"
+                   : "Saved to file \u00b7 too large for browser autosave, so save as you go");
       // B14. One lucky small write used to erase every trace that saves had
       // been failing, including the honest status line. A recovered autosave
       // IS working again, so the chip goes quiet - but the session remembers
@@ -4864,6 +5261,12 @@
           });
           row.appendChild(b);
         }
+        if (entry.sticky) {
+          var no = mkEl("button", "ps-toast-dismiss", entry.dismissLabel || "Dismiss");
+          no.type = "button";
+          no.addEventListener("click", function () { dismissToast(entry.id); });
+          row.appendChild(no);
+        }
         host.appendChild(row);
       })(TOASTS[i]);
     }
@@ -4883,7 +5286,12 @@
     opts = opts || {};
     var entry = { id: ++TOAST_SEQ, text: String(text),
                   error: !!opts.error, undo: opts.undo || null,
-                  actionLabel: opts.actionLabel || null, timer: null };
+                  actionLabel: opts.actionLabel || null, timer: null,
+                  // A QUESTION stays until it is answered. The large-file
+                  // prompt asked "Read it anyway" and then left after six
+                  // seconds, taking the only way forward with it.
+                  sticky: !!opts.sticky,
+                  dismissLabel: opts.dismissLabel || null };
     TOASTS.push(entry);
     // Over the cap, drop the oldest ANNOUNCEMENT; an offer is only dropped
     // when the pile is nothing but offers, which is the same bug in
@@ -4898,8 +5306,9 @@
     // An error gets longer than a confirmation and longer than an offer,
     // because reading it is the whole point; an offer gets its six seconds;
     // a confirmation is the only one that should be quick.
-    entry.timer = window.setTimeout(function () { dismissToast(entry.id); },
-      entry.error ? 8000 : (opts.undo ? 6000 : 2800));
+    if (!entry.sticky)
+      entry.timer = window.setTimeout(function () { dismissToast(entry.id); },
+        entry.error ? 8000 : (opts.undo ? 6000 : 2800));
     renderToasts();
     return entry.id;
   }
@@ -4978,8 +5387,10 @@
   function showUndoToast(msg, undo) { return pushToast(msg, { undo: undo }); }
   // Same pill, a named button. Used where the offer is not "undo that" but
   // "here is the one change that would let this work" (punch list 19).
-  function showActionToast(msg, label, run) {
-    return pushToast(msg, { undo: run, actionLabel: label });
+  function showActionToast(msg, label, run, more) {
+    var opts = { undo: run, actionLabel: label };
+    if (more) for (var k in more) opts[k] = more[k];
+    return pushToast(msg, opts);
   }
   function offerDataUndo(message, actionSeq) {
     showUndoToast(message, function () {
@@ -10643,7 +11054,8 @@
     // one-shot source emphasis only for this explicit Reveal action.
     LINKED_REVEAL_EMPHASIS = true;
     gridApplySelection();
-    var td = gridFindTd(LINKED_CELL.col, row);
+    var td = gridFindTd(LINKED_CELL.col, row) ||
+             gridBuildCell(LINKED_CELL.col, row);
     if (td && td.scrollIntoView)
       try { td.scrollIntoView({ block: "center", inline: "nearest" }); }
       catch (e) { td.scrollIntoView(); }
@@ -13337,10 +13749,21 @@
             ? (PS_DRAG_FROM ? "move" : "copy") : "copy";
           drop.classList.toggle("ps-droptarget", fits);
           drop.classList.toggle("ps-dropreject", !fits);
+          // In a list role the drop also has a POSITION: mark the chip
+          // the dragged one would land beside, on the side it would land.
+          slotMarkInsert(drop, fits && def.multi ? slotInsertAt(drop, e, PS_DRAG) : null);
         });
-        drop.addEventListener("dragleave", function () {
+        // Crossing from the zone onto one of its own chips fires a
+        // dragleave for the zone, which used to clear the highlight and
+        // the insert mark for a frame and put them back on the next
+        // dragover: a blink on every chip boundary. Leaving for a
+        // descendant is not leaving.
+        drop.addEventListener("dragleave", function (e) {
+          var to = e && e.relatedTarget;
+          if (to && to !== drop && drop.contains(to)) return;
           drop.classList.remove("ps-droptarget");
           drop.classList.remove("ps-dropreject");
+          slotMarkInsert(drop, null);
         });
         drop.addEventListener("drop", function (e) {
           e.preventDefault();
@@ -13355,10 +13778,21 @@
           if (PS_DRAG_FROM && PS_DRAG_FROM !== def.key)
             roleRemoveMember(PS_DRAG_FROM, PS_DRAG);
           if (def.multi) {
-            var arr = Array.isArray(rr[def.key]) ? rr[def.key] : [];
-            if (arr.indexOf(PS_DRAG) === -1) arr.push(PS_DRAG);
+            // A list role keeps the order the chips were dropped in, and
+            // that order is the chart's (Repeated Measures occasions,
+            // Likert items, matrix rows). A drop over a chip lands the
+            // dragged one beside it, before or after by which half of
+            // the chip the pointer is on; a drop on open space appends,
+            // as it always did. A chip already in this list moves.
+            var arr = (Array.isArray(rr[def.key]) ? rr[def.key] : [])
+              .filter(function (c) { return c !== PS_DRAG; });
+            var at = slotInsertAt(drop, e, PS_DRAG);
+            var idx = at ? arr.indexOf(at.col) + (at.before ? 0 : 1) : -1;
+            if (idx < 0 || idx > arr.length) arr.push(PS_DRAG);
+            else arr.splice(idx, 0, PS_DRAG);
             rr[def.key] = arr;
           } else rr[def.key] = PS_DRAG;
+          slotMarkInsert(drop, null);
           clearDragState();
           roleChanged();
         });
@@ -13434,6 +13868,33 @@
       var back = backCard && backCard.querySelector(".ps-slot-drop");
       try { if (back) back.focus({ preventScroll: true }); } catch (e) {}
     }
+  }
+  // Where a drop over a list role would land: the chip nearest the
+  // pointer (the dragged chip itself does not count) and the side of it.
+  // Above a chip's row is before it, below is after, on the row by the
+  // pointer's half. Null when the list has no other chip, which appends.
+  function slotInsertAt(drop, e, dragged) {
+    var chips = Array.prototype.slice.call(drop.querySelectorAll(".ps-slot-chip"))
+      .filter(function (c) { return c.getAttribute("data-col") !== dragged; });
+    if (!chips.length) return null;
+    var px = e.clientX, py = e.clientY, best = null, bestD = Infinity, bestR = null;
+    for (var i = 0; i < chips.length; i++) {
+      var r = chips[i].getBoundingClientRect();
+      var dx = px - (r.left + r.width / 2), dy = py - (r.top + r.height / 2);
+      // Rows first: a chip on the pointer's own row wins over a nearer
+      // chip on the row above or below.
+      var d = dx * dx + dy * dy * 9;
+      if (d < bestD) { bestD = d; best = chips[i]; bestR = r; }
+    }
+    var before = py < bestR.top ? true
+      : py > bestR.bottom ? false
+      : px < bestR.left + bestR.width / 2;
+    return { col: best.getAttribute("data-col"), chip: best, before: before };
+  }
+  function slotMarkInsert(drop, at) {
+    var marked = drop.querySelectorAll("[data-insert]");
+    for (var i = 0; i < marked.length; i++) marked[i].removeAttribute("data-insert");
+    if (at && at.chip) at.chip.setAttribute("data-insert", at.before ? "before" : "after");
   }
   function roleRemoveMember(key, col) {
     var rr = rolesFor(curModule());
@@ -13593,11 +14054,23 @@
   var PS_DRAG_FROM = null;   // role key when the drag started in a slot
   var VAR_FILTER = "";
   var TYPE_MENU = null;   // column name
+  var TYPE_MENU_COLS = null;   // the columns the pick applies to
   function showTypeMenu(x, y, col) {
     closeRolePicker();
     TYPE_MENU = col;
+    // A badge clicked inside a column selection acts on the whole
+    // selection (the column menu's rule, columnMenuTargets): several
+    // columns change type together. The head names them, and the
+    // current type is marked only when they all share it.
+    TYPE_MENU_COLS = columnMenuTargets(col);
     var m = el("ps-typemenu"), cur = PROJECT.table.types[col];
-    var h = ['<div class="ps-tm-head">' + escHtml(col) + "</div>"];
+    for (var ci = 0; ci < TYPE_MENU_COLS.length; ci++)
+      if (PROJECT.table.types[TYPE_MENU_COLS[ci]] !== cur) { cur = null; break; }
+    var head = TYPE_MENU_COLS.length > 1
+      ? TYPE_MENU_COLS.length + " variables: " + TYPE_MENU_COLS.join(", ")
+      : col;
+    var h = ['<div class="ps-tm-head' + (TYPE_MENU_COLS.length > 1 ? " ps-tm-head-many" : "") +
+             '">' + escHtml(head) + "</div>"];
     for (var i = 0; i < VAR_TYPES.length; i++) {
       var ty = VAR_TYPES[i];
       h.push('<button type="button" data-type="' + ty.key + '"' +
@@ -13625,12 +14098,22 @@
   function hideTypeMenu() {
     el("ps-typemenu").style.display = "none";
     TYPE_MENU = null;
+    TYPE_MENU_COLS = null;
   }
-  function setColType(col, type) {
+  function setColType(col, type) { setColTypes([col], type); }
+  // Several columns at once (Oct 2026, a colleague's ask): one undo mark
+  // for the set, one retype, and the lost-values warning summed across
+  // them. Columns already of that type are left out, so the mark is
+  // taken only when something changes.
+  function setColTypes(cols, type) {
     var t = PROJECT.table;
     type = normType(type);
-    if (!type || !t || !t.types || !(col in t.types)) return;
-    if (t.types[col] === type) return;
+    if (!type || !t || !t.types) return;
+    cols = (cols || []).filter(function (c) {
+      return (c in t.types) && t.types[c] !== type;
+    });
+    if (!cols.length) return;
+    var col = cols[0];
     // A type change can empty a column. "$12.50" and "1,234" parse as nothing,
     // so a currency or thousands-separated variable flipped to Continuous
     // loses every value at once, and the only report was Valid 0 in a panel
@@ -13638,22 +14121,28 @@
     // restores the type, so the house answer applies: do it, then say what it
     // did and carry the way back. Counted BEFORE the change so the comparison
     // is against what was actually on screen.
-    var wasValid = countValid(t, col);
-    dataMark("the type change");
-    t.types[col] = type;
+    var wasValid = 0, nowValid = 0, ci;
+    for (ci = 0; ci < cols.length; ci++) wasValid += countValid(t, cols[ci]);
+    dataMark(cols.length > 1 ? "the type change of " + cols.length + " variables"
+                             : "the type change");
+    for (ci = 0; ci < cols.length; ci++) t.types[cols[ci]] = type;
     retype(t);
     validateRoles();
     persist();
     syncAll();
     render();
-    var nowValid = countValid(t, col);
+    for (ci = 0; ci < cols.length; ci++) nowValid += countValid(t, cols[ci]);
     var lost = wasValid - nowValid;
+    var who = cols.length > 1
+      ? cols.slice(0, -1).join(", ") + " and " + cols[cols.length - 1] + " are"
+      : col + " is";
     // A handful is ordinary and saying so every time would be noise. Losing
     // most of a column is the case worth interrupting for.
     if (lost > 0 && wasValid > 0 && lost >= Math.max(3, wasValid * 0.5))
-      showToast(col + " is now " + typeLabel(type) + " \u00b7 " +
+      showToast(who + " now " + typeLabel(type) + " \u00b7 " +
         (lost === wasValid
-          ? "no value could be read that way, so the column is empty"
+          ? (cols.length > 1 ? "no value could be read that way, so the columns are empty"
+                             : "no value could be read that way, so the column is empty")
           : lost + " of " + wasValid + " values could not be read that way, " +
             "so " + (lost === 1 ? "it is" : "they are") + " missing now") +
         " \u00b7 Cmd/Ctrl+Z puts it back");
@@ -13772,6 +14261,89 @@
     }
     for (i = 0; i < heads.length; i++)
       heads[i].classList.remove("ps-grid-axis-selected");
+  }
+  // ---- column windowing for a wide table ----
+  // The grid has always built only a window of ROWS. On a wide table it now
+  // builds only a window of COLUMNS too (Oct 2026, a 1,010-column survey
+  // file: 141,000 cells in the page, nine seconds to open the workspace and
+  // three for every scroll). The header row and the colgroup still carry
+  // EVERY column, so everything that works from a header (resize, drag to
+  // move, column select, the type badge, measured widths) is untouched; only
+  // the body rows are windowed, each with one spacer cell either side whose
+  // colspan covers the columns not built. A fixed-layout table gives those
+  // spacers exactly the width of the columns they stand for. Tables under
+  // GRID_COL_WINDOW_MIN visible columns render whole, exactly as before.
+  var GRID_COL_WINDOW_MIN = 60;
+  var GRID_COL_OVERSCAN_PX = 900;
+  var GRID_COL_EDGE_PX = 260;       // re-window this close to a built edge
+  var GRID_COL_WINDOWED = false;
+  var GRID_COL_START = 0, GRID_COL_END = 0;
+  var GRID_COL_PX0 = 0, GRID_COL_PX1 = 0;   // table px of the built columns
+  var GRID_COL_COUNT = 0;
+  // The width the grid can show. The window's own width is the ceiling, so
+  // a grid measured while its workspace is hidden (clientWidth 0) still
+  // builds enough columns to fill the screen it is about to appear on. Zero
+  // means no layout engine at all (a headless DOM), and nothing windows.
+  function gridColViewWidth(grid) {
+    return Math.max(Number(grid && grid.clientWidth) || 0,
+                    Number(window.innerWidth) || 0);
+  }
+  // True when the viewport has come within reach of an edge of the built
+  // columns, unless that edge is the table's own.
+  function gridColumnWindowStale(grid) {
+    if (!GRID_COL_WINDOWED) return false;
+    var sl = Number(grid.scrollLeft) || 0, cw = gridColViewWidth(grid);
+    return (GRID_COL_START > 0 && sl + 46 < GRID_COL_PX0 + GRID_COL_EDGE_PX) ||
+           (GRID_COL_END < GRID_COL_COUNT &&
+            sl + cw > GRID_COL_PX1 - GRID_COL_EDGE_PX);
+  }
+  function gridColumnWindowFor(cols, widths, scrollLeft, viewW) {
+    var lo = scrollLeft - GRID_COL_OVERSCAN_PX;
+    var hi = scrollLeft + Math.max(0, viewW) + GRID_COL_OVERSCAN_PX;
+    var x = 46, start = -1, end = cols.length, px0 = 46, px1 = 46;
+    for (var j = 0; j < cols.length; j++) {
+      var w = Number(widths[cols[j]]) || 0;
+      if (start < 0 && x + w > lo) { start = j; px0 = x; }
+      if (start >= 0 && x >= hi) { end = j; break; }
+      x += w;
+      px1 = x;
+    }
+    if (start < 0) { start = Math.max(0, cols.length - 1); px0 = x; end = cols.length; }
+    return { start: start, end: Math.max(end, start + 1), px0: px0, px1: px1 };
+  }
+  // Table px of one column's left and right edge, from the stored widths.
+  function gridColumnEdges(cols, index) {
+    var widths = gridColumnWidths(false), x = 46;
+    for (var j = 0; j < index && j < cols.length; j++)
+      x += gridClampColumnWidth(widths[cols[j]] || GRID_NATURAL_WIDTHS[cols[j]] || 160);
+    var w = gridClampColumnWidth(widths[cols[index]] ||
+      GRID_NATURAL_WIDTHS[cols[index]] || 160);
+    return { left: x, right: x + w };
+  }
+  // Make sure one cell exists, scrolling the window to it when the row or
+  // the column is outside what is built. Returns the cell, or null.
+  function gridBuildCell(col, row) {
+    var td = gridFindTd(col, row);
+    if (td) return td;
+    var grid = el("ps-datagrid"), t = PROJECT.table, moved = false;
+    if (!grid || !t) return null;
+    if (row < GRID_WINDOW_START || row >= GRID_WINDOW_END) {
+      grid.scrollTop = Math.max(0, row * GRID_ROW_HEIGHT - GRID_ROW_HEIGHT * 3);
+      moved = true;
+    }
+    if (GRID_COL_WINDOWED) {
+      var cols = gridVisibleColumns(t), ci = cols.indexOf(col);
+      if (ci >= 0 && (ci < GRID_COL_START || ci >= GRID_COL_END)) {
+        var edge = gridColumnEdges(cols, ci);
+        grid.scrollLeft = ci < GRID_COL_START
+          ? Math.max(0, edge.left - 46)
+          : Math.max(0, edge.right - grid.clientWidth);
+        moved = true;
+      }
+    }
+    if (!moved) return null;
+    syncDataGrid();
+    return gridFindTd(col, row);
   }
   function gridShouldVirtualize(t) {
     if (!t) return false;
@@ -14902,15 +15474,22 @@
   // than "stretch to fill the pane". The stretch path remains for a grid
   // with no table.
   var GRID_AUTOFIT_SCAN = 20000;
+  // And a budget for the table as a whole. The per-column cap alone let a
+  // table of a thousand columns measure every one of its 12.7 million cells
+  // on first paint (1.8 s). Up to twenty columns nothing changes; past that
+  // each column gets an even share, never fewer than 400 rows.
+  var GRID_AUTOFIT_CELLS = 400000;
   function gridAutoFitDefaults() {
     var t = PROJECT.table;
     if (!t || !Array.isArray(t.order) || !t.order.length) return 0;
     if (PROJECT.ui && PROJECT.ui.columnLayout === "stretch") return 0;
     var widths = gridColumnWidths(true), filled = 0;
+    var scan = Math.min(GRID_AUTOFIT_SCAN,
+      Math.max(400, Math.floor(GRID_AUTOFIT_CELLS / t.order.length)));
     for (var i = 0; i < t.order.length; i++) {
       var col = t.order[i];
       if (!t.raw[col] || isFinite(Number(widths[col]))) continue;
-      widths[col] = gridNaturalColumnWidth(col, GRID_AUTOFIT_SCAN);
+      widths[col] = gridNaturalColumnWidth(col, scan);
       filled++;
     }
     return filled;
@@ -15301,7 +15880,8 @@
     // after the selection, because the cell has to be painted before it can
     // be measured, and only when it is actually out of view so an in-view
     // match never jolts sideways.
-    var cell = gridFindTd(result.col, result.row);
+    var cell = gridFindTd(result.col, result.row) ||
+               gridBuildCell(result.col, result.row);
     if (cell && grid.scrollWidth > grid.clientWidth + 1) {
       var cr = cell.getBoundingClientRect(), gr = grid.getBoundingClientRect();
       // The row-number gutter is sticky, so a cell tucked behind it is as
@@ -15599,6 +16179,26 @@
            ' role="columnheader" aria-colindex="1" aria-label="Select all cells"' +
            ' data-grid-all data-tip="Select all cells"></th>');
     var j, col;
+    // Which columns the body builds (see GRID_COL_WINDOW_MIN). Only a sized
+    // table can window, because the spacers take their width from the
+    // colgroup; widths[] was filled and clamped for every column just above.
+    var colViewW = gridColViewWidth(grid);
+    var colWin = (sized && colViewW > 0 &&
+                  visibleCols.length > GRID_COL_WINDOW_MIN)
+      ? gridColumnWindowFor(visibleCols, widths, priorScrollLeft, colViewW)
+      : null;
+    GRID_COL_WINDOWED = !!colWin;
+    GRID_COL_COUNT = visibleCols.length;
+    GRID_COL_START = colWin ? colWin.start : 0;
+    GRID_COL_END = colWin ? colWin.end : visibleCols.length;
+    GRID_COL_PX0 = colWin ? colWin.px0 : 0;
+    GRID_COL_PX1 = colWin ? colWin.px1 : 0;
+    var colLead = colWin && colWin.start > 0
+      ? '<td class="ps-grid-colspacer" aria-hidden="true" colspan="' +
+        colWin.start + '"></td>' : "";
+    var colTail = colWin && colWin.end < visibleCols.length
+      ? '<td class="ps-grid-colspacer" aria-hidden="true" colspan="' +
+        (visibleCols.length - colWin.end) + '"></td>' : "";
     for (j = 0; j < visibleCols.length; j++) {
       col = visibleCols[j];
       var kind = t.types[col];
@@ -15656,7 +16256,8 @@
              '" data-tip="' + (rowExcluded
                ? "Observation excluded from every chart"
                : "Select row " + (i + 1)) + '">' + (i + 1) + "</td>");
-      for (j = 0; j < visibleCols.length; j++) {
+      if (colLead) h.push(colLead);
+      for (j = GRID_COL_START; j < GRID_COL_END; j++) {
         col = visibleCols[j];
         var view = gridCellView(t, col, i);
         h.push('<td id="' + gridCellId(j, i) + '" class="' + view.cls +
@@ -15666,6 +16267,7 @@
                (view.title ? ' data-tip="' + escHtml(view.title) + '"' : "") +
                ">" + escHtml(view.text) + "</td>");
       }
+      if (colTail) h.push(colTail);
       h.push("</tr>");
     }
     if (end < n)
@@ -16036,17 +16638,62 @@
                               return { id: c.id, roles: c.roles || {} };
                             }) });
   }
+  function dataHistBytes(entry) { return entry.snap ? entry.snap.length : 96; }
   function dataHistTrim(stack) {
     while (stack.length > DATA_HIST_CAP) stack.shift();
     var bytes = 0, i;
-    for (i = 0; i < stack.length; i++) bytes += stack[i].snap.length;
+    for (i = 0; i < stack.length; i++) bytes += dataHistBytes(stack[i]);
     while (stack.length > DATA_HIST_MIN && bytes > DATA_HIST_BYTES)
-      bytes -= stack.shift().snap.length;
+      bytes -= dataHistBytes(stack.shift());
+  }
+  // One edited cell is remembered as one cell. The whole-table snapshot
+  // every other step takes is the right tool for a reshape or a paste, and
+  // the wrong one here: on a 12,570 by 1,010 table it is 85 million
+  // characters built (0.6 s) and kept (three of them, by DATA_HIST_MIN) for
+  // a change to one value. The roles ride along because an edit can make a
+  // column unfit for the role it holds, and undo has to hand that back.
+  function dataCellPatch(col, row) {
+    var t = PROJECT.table;
+    return { col: col, row: row, raw: String(t.raw[col][row]), edited: !!t.edited,
+             roles: JSON.stringify(PROJECT.charts.map(function (c) {
+               return { id: c.id, roles: c.roles || {} };
+             })) };
+  }
+  function dataMarkCell(col, row, label) {
+    bigDirtyCol(col);                    // one column is about to change
+    try {
+      DATA_UNDO.push({ patch: dataCellPatch(col, row), label: label || "" });
+      dataHistTrim(DATA_UNDO);
+      DATA_REDO.length = 0;
+      DATA_LAST_AT = Date.now();
+      DATA_ACTION_SEQ++;
+    } catch (e) {}
+    if (document.getElementById("ps-data-undo")) syncDataCommandBar();
+  }
+  function dataApplyPatch(p) {
+    var t = PROJECT.table;
+    if (!t || !t.raw[p.col] || p.row >= nRows(t)) return;
+    bigDirtyCol(p.col);
+    t.raw[p.col][p.row] = p.raw;
+    t.edited = p.edited;
+    try {
+      var roles = JSON.parse(p.roles);
+      for (var ri = 0; ri < roles.length; ri++) {
+        var roleChart = chartById(roles[ri].id);
+        if (roleChart) roleChart.roles = roles[ri].roles || {};
+      }
+    } catch (e) {}
+    retype(t, false, [p.col]);
+    validateRoles();
+    persist();
+    syncAll();
+    render();
   }
   // The label is what the menu and the toast say instead of a fixed "data
   // change" and a generic "Previous data state restored". Three destructive
   // paths already named their step; every path can now.
   function dataMark(label) {
+    BIG_DIRTY_ALL = true;                // a whole-table change follows
     try {
       DATA_UNDO.push({ snap: dataSnapshot(), label: label || "" });
       dataHistTrim(DATA_UNDO);
@@ -16064,6 +16711,7 @@
     if (document.getElementById("ps-data-undo")) syncDataCommandBar();
   }
   function dataApply(snapStr) {
+    BIG_DIRTY_ALL = true;
     var t = PROJECT.table, s = JSON.parse(snapStr);
     if (Array.isArray(s.order)) t.order = s.order;
     t.raw = s.raw; t.types = s.types; t.excluded = s.excluded;
@@ -16112,11 +16760,13 @@
     var entry = DATA_UNDO[DATA_UNDO.length - 1];
     // The step being undone keeps its name on the way to the redo stack, so
     // Redo can say what it will reapply.
-    DATA_REDO.push({ snap: dataSnapshot(), label: entry.label });
+    DATA_REDO.push(entry.patch
+      ? { patch: dataCellPatch(entry.patch.col, entry.patch.row), label: entry.label }
+      : { snap: dataSnapshot(), label: entry.label });
     dataHistTrim(DATA_REDO);
     DATA_ACTION_SEQ++;
     DATA_UNDO.pop();
-    dataApply(entry.snap);
+    if (entry.patch) dataApplyPatch(entry.patch); else dataApply(entry.snap);
     showToast(entry.label
       ? "Undid " + entry.label
       : "Previous data state restored");
@@ -16126,11 +16776,13 @@
     if (!DATA_REDO.length) return false;
     if (GRID_EDIT) gridCancelEdit();
     var entry = DATA_REDO[DATA_REDO.length - 1];
-    DATA_UNDO.push({ snap: dataSnapshot(), label: entry.label });
+    DATA_UNDO.push(entry.patch
+      ? { patch: dataCellPatch(entry.patch.col, entry.patch.row), label: entry.label }
+      : { snap: dataSnapshot(), label: entry.label });
     dataHistTrim(DATA_UNDO);
     DATA_ACTION_SEQ++;
     DATA_REDO.pop();
-    dataApply(entry.snap);
+    if (entry.patch) dataApplyPatch(entry.patch); else dataApply(entry.snap);
     showToast(entry.label
       ? "Redid " + entry.label
       : "Data change reapplied");
@@ -16333,11 +16985,11 @@
         gridNextEditAnnouncement(next));
       return;
     }
-    dataMark("the cell edit");
+    dataMarkCell(ge.col, ge.row, "the cell edit");
     t.raw[ge.col][ge.row] = newRaw;
     t.edited = true;
     var previousFilterMask = t.filterMask;
-    retype(t);
+    retype(t, false, [ge.col]);
     // The typed value is what every chart and statistic downstream will see.
     // When nothing could read the text, the cell is missing, and announcing
     // "Saved score, row 1 as sixty one" tells a screen reader user the value
@@ -16471,7 +17123,7 @@
       var grid = el("ps-datagrid");
       grid.scrollTop = Math.max(0, row * GRID_ROW_HEIGHT);
       syncDataGrid();
-      td = gridFindTd(col, row);
+      td = gridFindTd(col, row) || gridBuildCell(col, row);
     }
     if (!td) return;
     gridClearSelection();
@@ -17427,8 +18079,15 @@
       if (GRID_EDIT || GRID_SCROLL_FRAME) return;
       GRID_SCROLL_FRAME = window.requestAnimationFrame(function () {
         GRID_SCROLL_FRAME = null;
-        if (appWorkspace() !== "data" || !PROJECT.table ||
-            !gridShouldVirtualize(PROJECT.table)) return;
+        if (appWorkspace() !== "data" || !PROJECT.table) return;
+        // Columns: rebuild when the viewport nears an edge of what is
+        // built. Never under a header gesture: a column being dragged to a
+        // new place or resized holds on to the cells it started with.
+        if (!COL_MOVE && !GRID_COLUMN_DRAG && gridColumnWindowStale(grid)) {
+          syncDataGrid();
+          return;
+        }
+        if (!gridShouldVirtualize(PROJECT.table)) return;
         var wanted = Math.max(0, Math.floor((Number(grid.scrollTop) || 0) /
           GRID_ROW_HEIGHT) -
           GRID_WINDOW_OVERSCAN);
@@ -17437,7 +18096,15 @@
       });
     });
     window.addEventListener("resize", function () {
-      window.requestAnimationFrame(gridSyncColumnResizers);
+      window.requestAnimationFrame(function () {
+        // A wider window can show columns that were never built.
+        if (appWorkspace() === "data" && PROJECT.table && !GRID_EDIT &&
+            !COL_MOVE && !GRID_COLUMN_DRAG && gridColumnWindowStale(grid)) {
+          syncDataGrid();
+          return;
+        }
+        gridSyncColumnResizers();
+      });
     });
     // t4-35 (Torry's ask): drag a column HEADER to a new position, and the
     // other columns part to show where it will land - the dist stacked-drag
@@ -17735,7 +18402,10 @@
         GRID_COLUMN_DRAG = null;
         document.body.classList.remove("ps-grid-column-resizing");
         persist(false);
-        gridApplyClippedTitles();
+        // The built columns were measured at the old width; rebuild so the
+        // window's edges are true again (cheap: only a window is built).
+        if (GRID_COL_WINDOWED) syncDataGrid();
+        else gridApplyClippedTitles();
         e.preventDefault();
         return;
       }
@@ -17746,7 +18416,8 @@
         GRID_COLUMN_DRAG = null;
         document.body.classList.remove("ps-grid-column-resizing");
         persist(false);
-        gridApplyClippedTitles();
+        if (GRID_COL_WINDOWED) syncDataGrid();
+        else gridApplyClippedTitles();
       }
       gridFinishDrag(e, true);
     });
@@ -17964,12 +18635,10 @@
                        extend ? "cells" : "cells");
       var td = gridFindTd(cols[ci], ri);
       if (!td) {
-        // The grid is windowed, so the target row may not be built yet.
-        el("ps-datagrid").scrollTop =
-          Math.max(0, ri * GRID_ROW_HEIGHT - GRID_ROW_HEIGHT * 3);
-        syncDataGrid();
+        // The grid is windowed, so the target row (or, on a wide table,
+        // the target column) may not be built yet.
+        td = gridBuildCell(cols[ci], ri);
         gridApplySelection();
-        td = gridFindTd(cols[ci], ri);
       }
       if (td && td.scrollIntoView)
         try { td.scrollIntoView({ block: "nearest", inline: "nearest" }); }
@@ -18145,9 +18814,9 @@
     el("ps-typemenu").addEventListener("click", function (e) {
       var btn = e.target.closest ? e.target.closest("button[data-type]") : null;
       if (!btn || TYPE_MENU == null) return;
-      var col = TYPE_MENU;
+      var cols = TYPE_MENU_COLS || [TYPE_MENU];
       hideTypeMenu();
-      setColType(col, btn.getAttribute("data-type"));
+      setColTypes(cols, btn.getAttribute("data-type"));
     });
     grid.addEventListener("contextmenu", function (e) {
       var rowHead = e.target.closest ? e.target.closest("td[data-grid-row]") : null;
@@ -29476,6 +30145,7 @@
   // crash rather than a sentence. Same shape as the image guard: a disclosure
   // with a choice at the size where it starts to hurt, a refusal only where
   // continuing would take the tab down.
+  var DATA_GATE_TOAST = 0;
   var DATA_WARN_BYTES = 25 * 1024 * 1024;
   var DATA_REFUSE_BYTES = 250 * 1024 * 1024;
   function dataFileSizeGate(f, proceed) {
@@ -29489,12 +30159,19 @@
       return false;
     }
     if (size > DATA_WARN_BYTES) {
-      showActionToast(escFileName(f.name) + " is " +
+      // One question at a time: choosing a second file replaces the first
+      // prompt instead of stacking a second one beside it.
+      if (DATA_GATE_TOAST) dismissToast(DATA_GATE_TOAST);
+      DATA_GATE_TOAST = showActionToast(escFileName(f.name) + " is " +
         (size / 1048576).toFixed(0) + " MB. Reading it will lock the window " +
-        "up for a while, and a table that size is slow to edit.",
-        "Read it anyway", function () { proceed(true); });
+        "up for a while, and a table that size is slow to edit and too " +
+        "large for browser autosave.",
+        "Read it anyway", function () { DATA_GATE_TOAST = 0; proceed(true); },
+        { sticky: true, dismissLabel: "Cancel" });
       return false;
     }
+    // A file small enough to read answers any earlier question by itself.
+    if (DATA_GATE_TOAST) { dismissToast(DATA_GATE_TOAST); DATA_GATE_TOAST = 0; }
     return true;
   }
   function readPickedFile(f, forced) {
@@ -30188,6 +30865,7 @@
   }
   var WELCOME_LAST_FOCUS = null;
   function showWelcome(force) {
+    if (BIG_BOOT && !force) return;      // shown once the large project is in
     // Recovery must never be silent, even if this tab previously dismissed
     // the start center or the preference normally resumes immediately.
     if (!force && !RECOVERY_NOTE) {
@@ -32273,18 +32951,25 @@
         own += (window.localStorage.getItem(k) || "").length;
       }
     } catch (e) {}
+    // The limit that applies is the one for THIS kind of storage. The line
+    // used to quote navigator.storage.estimate(), which is the browser's
+    // budget for every kind put together (10 GB on a typical laptop), and
+    // a user holding a 70 MB file read it as room the autosave had.
     line.textContent = "This app is using about " + formatBytes(own) +
       " across " + keys + " item" + (keys === 1 ? "" : "s") +
       " of browser storage: your autosaved project, its backup, recent " +
-      "projects, and your saved palettes and styles.";
-    try {
-      if (window.navigator.storage && window.navigator.storage.estimate)
-        window.navigator.storage.estimate().then(function (est) {
-          if (!est || !est.quota) return;
-          line.textContent += " The browser allows about " +
-            formatBytes(est.quota) + " in total.";
-        });
-    } catch (e) {}
+      "projects, and your saved palettes and styles. Browsers keep about " +
+      "5 MB of this kind of storage for a site, so a project larger than " +
+      "that is not autosaved and has to be saved to a .pand file." +
+      (BIG_ACTIVE
+        ? " The open project is about " + formatBytes(bigEstimateChars()) +
+          ", so it is autosaved in the browser's larger store instead, " +
+          "which has room for projects this size. A .pand file is still " +
+          "the copy that does not depend on this browser."
+        : AUTOSAVE_TOO_BIG
+        ? " The open project is about " + formatBytes(AUTOSAVE_TOO_BIG.chars) +
+          ", so it is not being autosaved."
+        : "");
   }
   // t3-53. Destructive and NOT undoable, which is exactly why it does not use
   // the app's usual do-it-and-offer-it-back pattern: there would be nothing to
@@ -35213,7 +35898,10 @@
     // this fires only when autosave is actually FAILING, which is the case
     // where closing the tab really does lose the work.
     window.addEventListener("beforeunload", function (e) {
-      if (AUTOSAVE_HEALTH !== "error") return;
+      // ...or when a large project's latest change has not reached the
+      // larger store yet (its writes trail by a second).
+      if (AUTOSAVE_HEALTH !== "error" &&
+          !(BIG_ACTIVE && (BIG_PENDING || BIG_INFLIGHT))) return;
       if (FILE_SAVED_REV != null && PROJECT_REV === FILE_SAVED_REV) return;
       e.preventDefault();
       e.returnValue = "";
@@ -35246,6 +35934,8 @@
     }
     window.addEventListener("pagehide", flushPendingEngineOpts);
     window.addEventListener("beforeunload", persistFlush);
+    // After the two above, so the write carries everything they flushed.
+    window.addEventListener("pagehide", bigFlush);
     // Switching documents tears down the engine host, so the same queue has
     // to be drained there too or the edit lands on the WRONG chart.
     PS_FLUSH_PENDING_OPTS = flushPendingEngineOpts;
@@ -35352,7 +36042,8 @@
     // to NOTICE and SAY SO, once, rather than let the loser find out later.
     var OTHER_TAB_WARNED = false;
     window.addEventListener("storage", function (e) {
-      if (!e || e.key !== PS_SAVE_KEY || e.newValue == null) return;
+      if (!e || (e.key !== PS_SAVE_KEY && e.key !== PS_BIG_KEY) ||
+          e.newValue == null) return;
       var mine = null, theirs = null;
       try { mine = PROJECT.id; theirs = JSON.parse(e.newValue).id; }
       catch (err) { return; }
@@ -35641,6 +36332,14 @@
                    valid: !!validSnap(id) } : null;
     },
     switchChart: switchChart,
+    // The large-project autosave, for probes: where it stands, and a flush.
+    bigAutosave: function () {
+      return { active: BIG_ACTIVE, pending: BIG_PENDING || BIG_INFLIGHT,
+               writes: BIG_WRITES, unavailable: BIG_UNAVAILABLE,
+               booting: !!BIG_BOOT, lastError: BIG_LAST_ERROR,
+               health: AUTOSAVE_HEALTH, detail: AUTOSAVE_DETAIL };
+    },
+    bigFlush: bigFlush,
     setWorkspace: setAppWorkspace,
     workspace: appWorkspace,
     workspaceDocument: function () {
@@ -35840,7 +36539,7 @@
     dataRedo: dataRedo,
     dataHistory: function () {
       var bytes = 0;
-      for (var i = 0; i < DATA_UNDO.length; i++) bytes += DATA_UNDO[i].snap.length;
+      for (var i = 0; i < DATA_UNDO.length; i++) bytes += dataHistBytes(DATA_UNDO[i]);
       return { undo: DATA_UNDO.length, redo: DATA_REDO.length,
                bytes: bytes, budget: DATA_HIST_BYTES,
                undoLabel: dataStepLabel(DATA_UNDO),
@@ -35878,6 +36577,7 @@
     syncAll(); render();
     wireWelcome();
     requestPersistentStorage();
+    bigBootRestore();
     // Item 15. The engine sizes its undo blob as (4.6MB - bundleBytes)/2 per
     // side, and measures bundleBytes by looking for a graphbuilder2.bundle.*
     // key in localStorage. In jamovi that key exists; in the standalone the
