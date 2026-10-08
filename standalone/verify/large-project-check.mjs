@@ -1,20 +1,12 @@
-// A project too large for browser autosave (Oct 5 2026, a colleague's 70 MB
-// survey file: 12,570 rows by about 1,000 columns).
-//
-// Browser autosave is localStorage, which keeps about five million characters
-// for the whole origin. His project serializes to about 85 million. Three
-// things went wrong, and he reported all three:
-//   1. Every persist rebuilt the whole snapshot (half a second to a second of
-//      frozen window each time), failed on the quota, and raised the same red
-//      "Browser storage is full" toast: on every edit, style change and
-//      workspace switch, and still after he had saved a .pand file.
-//   2. Preferences said "The browser allows about 10 GB in total", which is
-//      the budget for every kind of storage put together, not the 5 MB that
-//      applies to autosave.
-//   3. The "Read it anyway" prompt for a large file left after six seconds.
-// Control: on main, case 1 fails (a second toast, and a write attempt on
-// every persist), case 3 fails (the 10 GB sentence) and case 4 fails (the
-// prompt times out).
+// A browser with NO larger store (Oct 5 2026, the 12,570 by 1,010 survey
+// file). Since the large-project autosave landed (large-autosave-check.mjs),
+// a project too large for localStorage normally goes to IndexedDB. This
+// probe removes IndexedDB before the page loads and checks the fallback:
+// the project is told so ONCE, in one notice that stays until answered,
+// nothing is rebuilt on later changes, the large-file question waits for
+// an answer, and Preferences names the limit that applies.
+// Control: on main before these changes, case 1 fails (a toast fires on
+// every interaction and the whole project is serialized each time).
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
@@ -44,6 +36,10 @@ const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1500, height: 960 } });
 const errors = [];
 page.on('pageerror', e => errors.push(String(e)));
+// No larger store in this browser: the app must fall back to the warning.
+await page.addInitScript(() => {
+    try { Object.defineProperty(window, 'indexedDB', { value: undefined, configurable: true }); } catch (e) {}
+});
 await page.goto(pageUrl);
 await page.waitForTimeout(700);
 if (await page.locator('#ps-welcome').isVisible()) {
