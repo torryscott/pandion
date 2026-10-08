@@ -54644,7 +54644,14 @@
         // after it (=, <, >, "("), so the p in "eta2p", ordinary words,
         // and any "Group vs Group:" name prefix are never touched.
         // Newlines become <br>.
-        function _gb2ApaHtml(txt) {
+        // A significance level as the panels print it: up to four decimals, the
+    // leading zero dropped, trailing zeros trimmed (.05, .001, .0056).
+    function _corrAlphaLabel(a) {
+        if (!(typeof a === "number" && isFinite(a))) return ".05";
+        var t = a.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+        return t.replace(/^0\./, ".");
+    }
+    function _gb2ApaHtml(txt) {
             if (txt == null) return "";
             var e = String(txt)
                 .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -55342,7 +55349,7 @@
                 var _spP = strongest.p;
                 if (_aM2 && typeof _aM2[strongest.a + "\u0000" + strongest.b] === "number")
                     _spP = _aM2[strongest.a + "\u0000" + strongest.b];
-                var aLbl2 = alpha2.toFixed(alpha2 < 0.01 ? 3 : 2).replace(/^0\./, ".");
+                var aLbl2 = _corrAlphaLabel(alpha2);
                 var dec2 = (typeof data.corrDecimals === "number"
                     && data.corrDecimals >= 1 && data.corrDecimals <= 3)
                     ? Math.round(data.corrDecimals) : 2;
@@ -57934,7 +57941,7 @@
                 var cc = Array.isArray(data.corrCells) ? data.corrCells : [];
                 var alpha = (typeof data.corrSigLevel === "number" && data.corrSigLevel > 0)
                     ? data.corrSigLevel : 0.05;
-                var aLbl = alpha.toFixed(alpha < 0.01 ? 3 : 2).replace(/^0\./, ".");
+                var aLbl = _corrAlphaLabel(alpha);
                 var cDec = (typeof data.corrDecimals === "number"
                     && data.corrDecimals >= 1 && data.corrDecimals <= 3)
                     ? Math.round(data.corrDecimals) : 2;
@@ -58028,7 +58035,12 @@
                     '<span style="' + _cbSp + '"><span style="' + _cbLbl + '">Alpha</span>' +
                     '<select data-st-act="corralpha" aria-label="Significance level" style="' + _cbSel + '">' +
                     _cbOpt("0.1", ".10", alpha) + _cbOpt("0.05", ".05", alpha) +
-                    _cbOpt("0.01", ".01", alpha) + _cbOpt("0.001", ".001", alpha) + '</select></span>' +
+                    _cbOpt("0.01", ".01", alpha) + _cbOpt("0.001", ".001", alpha) +
+                    // A level typed on the Values tab is not one of the four:
+                    // list it so the select names the truth (the likert
+                    // Custom-order idiom). Typing lives on the Values tab.
+                    ([0.1, 0.05, 0.01, 0.001].indexOf(alpha) < 0
+                        ? _cbOpt(String(alpha), aLbl + " (typed)", alpha) : "") + '</select></span>' +
                     '<span style="' + _cbSp + '"><span style="' + _cbLbl + '">Adjust p</span>' +
                     '<select data-st-act="corrpadj" aria-label="Multiple-comparison correction" style="' + _cbSel + '">' +
                     _cbOpt("none", "None", padjCur3) + _cbOpt("bonferroni", "Bonferroni", padjCur3) +
@@ -86700,6 +86712,15 @@
                 _distSegHtml("cr-alpha", "0.05", ".05", aCur) +
                 _distSegHtml("cr-alpha", "0.01", ".01", aCur) +
                 _distSegHtml("cr-alpha", "0.001", ".001", aCur) +
+                // Or type one (a colleague's Bonferroni .0056, Oct 2026). A
+                // typed level drives the fade/blank/cross treatment, the
+                // tooltips, the Check-graph tip and the Statistics panel
+                // exactly as a preset does; the stars keep their fixed
+                // .05 / .01 / .001 ladder (option A, Torry).
+                '<input type="number" data-field="cr-alpha-num" min="0.0001" max="0.5" step="0.0001"' +
+                ' value="' + ([0.1, 0.05, 0.01, 0.001].indexOf(parseFloat(aCur)) < 0 ? _nmEsc(String(parseFloat(aCur))) : "") + '"' +
+                ' placeholder="or type" aria-label="Alpha, typed" title="Type a significance level between 0 and 0.5, for example a Bonferroni-adjusted .0056"' +
+                ' style="width:74px;padding:3px 6px;border:1px solid #cfd6df;border-radius:5px;font:inherit;font-size:12px;">' +
                 '</div>' +
                 '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
                 '<span style="color:#666;" title="Correct the p values for testing many pairs at once. Stars, fades, tooltips and the Statistics panel all follow.">Adjust p</span>' +
@@ -86768,14 +86789,29 @@
             })();
             (function () {
                 var btns = pane.querySelectorAll('[data-field="cr-alpha"]');
+                var typed = pane.querySelector('[data-field="cr-alpha-num"]');
                 for (var i = 0; i < btns.length; i++) {
                     (function (btn) {
                         btn.addEventListener("click", function (e) {
                             e.preventDefault();
                             _distCommit("corrSigLevel", parseFloat(btn.getAttribute("data-val")));
                             for (var k = 0; k < btns.length; k++) btns[k].style.cssText = (btns[k] === btn) ? _DIST_segActiveCss : _DIST_segCss;
+                            if (typed) typed.value = "";
                         });
                     })(btns[i]);
+                }
+                if (typed) {
+                    var commitTyped = function () {
+                        var v = parseFloat(typed.value);
+                        if (!(v > 0 && v < 1)) return;      // blank or out of range: keep the current level
+                        _distCommit("corrSigLevel", v);
+                        for (var k = 0; k < btns.length; k++)
+                            btns[k].style.cssText = (parseFloat(btns[k].getAttribute("data-val")) === v) ? _DIST_segActiveCss : _DIST_segCss;
+                    };
+                    typed.addEventListener("change", commitTyped);
+                    typed.addEventListener("keydown", function (e) {
+                        if (e.key === "Enter") { e.preventDefault(); commitTyped(); typed.blur(); }
+                    });
                 }
             })();
             _distWireSeg(pane, "cr-padj", "corrPAdjust");
