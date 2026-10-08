@@ -13749,10 +13749,21 @@
             ? (PS_DRAG_FROM ? "move" : "copy") : "copy";
           drop.classList.toggle("ps-droptarget", fits);
           drop.classList.toggle("ps-dropreject", !fits);
+          // In a list role the drop also has a POSITION: mark the chip
+          // the dragged one would land beside, on the side it would land.
+          slotMarkInsert(drop, fits && def.multi ? slotInsertAt(drop, e, PS_DRAG) : null);
         });
-        drop.addEventListener("dragleave", function () {
+        // Crossing from the zone onto one of its own chips fires a
+        // dragleave for the zone, which used to clear the highlight and
+        // the insert mark for a frame and put them back on the next
+        // dragover: a blink on every chip boundary. Leaving for a
+        // descendant is not leaving.
+        drop.addEventListener("dragleave", function (e) {
+          var to = e && e.relatedTarget;
+          if (to && to !== drop && drop.contains(to)) return;
           drop.classList.remove("ps-droptarget");
           drop.classList.remove("ps-dropreject");
+          slotMarkInsert(drop, null);
         });
         drop.addEventListener("drop", function (e) {
           e.preventDefault();
@@ -13767,10 +13778,21 @@
           if (PS_DRAG_FROM && PS_DRAG_FROM !== def.key)
             roleRemoveMember(PS_DRAG_FROM, PS_DRAG);
           if (def.multi) {
-            var arr = Array.isArray(rr[def.key]) ? rr[def.key] : [];
-            if (arr.indexOf(PS_DRAG) === -1) arr.push(PS_DRAG);
+            // A list role keeps the order the chips were dropped in, and
+            // that order is the chart's (Repeated Measures occasions,
+            // Likert items, matrix rows). A drop over a chip lands the
+            // dragged one beside it, before or after by which half of
+            // the chip the pointer is on; a drop on open space appends,
+            // as it always did. A chip already in this list moves.
+            var arr = (Array.isArray(rr[def.key]) ? rr[def.key] : [])
+              .filter(function (c) { return c !== PS_DRAG; });
+            var at = slotInsertAt(drop, e, PS_DRAG);
+            var idx = at ? arr.indexOf(at.col) + (at.before ? 0 : 1) : -1;
+            if (idx < 0 || idx > arr.length) arr.push(PS_DRAG);
+            else arr.splice(idx, 0, PS_DRAG);
             rr[def.key] = arr;
           } else rr[def.key] = PS_DRAG;
+          slotMarkInsert(drop, null);
           clearDragState();
           roleChanged();
         });
@@ -13846,6 +13868,33 @@
       var back = backCard && backCard.querySelector(".ps-slot-drop");
       try { if (back) back.focus({ preventScroll: true }); } catch (e) {}
     }
+  }
+  // Where a drop over a list role would land: the chip nearest the
+  // pointer (the dragged chip itself does not count) and the side of it.
+  // Above a chip's row is before it, below is after, on the row by the
+  // pointer's half. Null when the list has no other chip, which appends.
+  function slotInsertAt(drop, e, dragged) {
+    var chips = Array.prototype.slice.call(drop.querySelectorAll(".ps-slot-chip"))
+      .filter(function (c) { return c.getAttribute("data-col") !== dragged; });
+    if (!chips.length) return null;
+    var px = e.clientX, py = e.clientY, best = null, bestD = Infinity, bestR = null;
+    for (var i = 0; i < chips.length; i++) {
+      var r = chips[i].getBoundingClientRect();
+      var dx = px - (r.left + r.width / 2), dy = py - (r.top + r.height / 2);
+      // Rows first: a chip on the pointer's own row wins over a nearer
+      // chip on the row above or below.
+      var d = dx * dx + dy * dy * 9;
+      if (d < bestD) { bestD = d; best = chips[i]; bestR = r; }
+    }
+    var before = py < bestR.top ? true
+      : py > bestR.bottom ? false
+      : px < bestR.left + bestR.width / 2;
+    return { col: best.getAttribute("data-col"), chip: best, before: before };
+  }
+  function slotMarkInsert(drop, at) {
+    var marked = drop.querySelectorAll("[data-insert]");
+    for (var i = 0; i < marked.length; i++) marked[i].removeAttribute("data-insert");
+    if (at && at.chip) at.chip.setAttribute("data-insert", at.before ? "before" : "after");
   }
   function roleRemoveMember(key, col) {
     var rr = rolesFor(curModule());

@@ -410,6 +410,10 @@
     padding: 2px 4px 2px 7px; cursor: grab; max-width: 100%;
   }
   .ps-slot-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* A chip being dragged over a list role shows where it would land: a
+     bar on the side of the chip it would sit beside. */
+  .ps-slot-chip[data-insert="before"] { box-shadow: -3px 0 0 0 var(--ps-accent); }
+  .ps-slot-chip[data-insert="after"] { box-shadow: 3px 0 0 0 var(--ps-accent); }
   .ps-slot-x {
     -webkit-appearance: none; appearance: none; border: none;
     background: none; color: var(--ps-muted); font-weight: 700; font-size: 12px;
@@ -641,12 +645,18 @@
   /* Re-stated at matching specificity AFTER the filled rule, or the
      3-class filled selector would beat the 2-class drag states on a
      filled zone and the drag would lose its live highlight. */
+  /* The card's zone has no border, so giving the drag states a border
+     STYLE put a 3px (medium) border on it mid-drag: the zone grew, every
+     chip shifted under the pointer, and the shift moved the pointer in
+     and out of the zone, which blinked the highlight (Torry, Oct 2026).
+     The highlight is a shadow now and the zone never changes size. */
   .ps-role-card .ps-slot-drop.ps-droptarget {
-    border-color: var(--ps-accent); border-style: solid;
-    box-shadow: 0 0 0 2px rgba(53, 115, 189, 0.25);
+    border: none;
+    box-shadow: 0 0 0 1px var(--ps-accent), 0 0 0 3px rgba(53, 115, 189, 0.25);
   }
   .ps-role-card .ps-slot-drop.ps-dropreject {
-    border-color: var(--ps-warn); border-style: dashed;
+    border: none;
+    box-shadow: 0 0 0 1px var(--ps-warn);
     background: var(--ps-warn-wash);
   }
   .ps-role-card .ps-slot-empty {
