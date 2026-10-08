@@ -795,6 +795,11 @@
     padding: 3px 12px 4px; border-bottom: 1px solid var(--ps-s3); margin-bottom: 3px;
     max-width: 180px; overflow: hidden; text-overflow: ellipsis;
   }
+  /* Several selected columns at once: the head lists them and may wrap. */
+  #ps-typemenu .ps-tm-head.ps-tm-head-many {
+    max-width: 260px; white-space: normal; text-overflow: clip; text-transform: none;
+    letter-spacing: 0; font-size: 11px;
+  }
   #ps-typemenu button {
     -webkit-appearance: none; appearance: none;
     display: flex; align-items: center; gap: 8px; width: 100%;

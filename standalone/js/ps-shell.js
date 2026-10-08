@@ -14005,11 +14005,23 @@
   var PS_DRAG_FROM = null;   // role key when the drag started in a slot
   var VAR_FILTER = "";
   var TYPE_MENU = null;   // column name
+  var TYPE_MENU_COLS = null;   // the columns the pick applies to
   function showTypeMenu(x, y, col) {
     closeRolePicker();
     TYPE_MENU = col;
+    // A badge clicked inside a column selection acts on the whole
+    // selection (the column menu's rule, columnMenuTargets): several
+    // columns change type together. The head names them, and the
+    // current type is marked only when they all share it.
+    TYPE_MENU_COLS = columnMenuTargets(col);
     var m = el("ps-typemenu"), cur = PROJECT.table.types[col];
-    var h = ['<div class="ps-tm-head">' + escHtml(col) + "</div>"];
+    for (var ci = 0; ci < TYPE_MENU_COLS.length; ci++)
+      if (PROJECT.table.types[TYPE_MENU_COLS[ci]] !== cur) { cur = null; break; }
+    var head = TYPE_MENU_COLS.length > 1
+      ? TYPE_MENU_COLS.length + " variables: " + TYPE_MENU_COLS.join(", ")
+      : col;
+    var h = ['<div class="ps-tm-head' + (TYPE_MENU_COLS.length > 1 ? " ps-tm-head-many" : "") +
+             '">' + escHtml(head) + "</div>"];
     for (var i = 0; i < VAR_TYPES.length; i++) {
       var ty = VAR_TYPES[i];
       h.push('<button type="button" data-type="' + ty.key + '"' +
@@ -14037,12 +14049,22 @@
   function hideTypeMenu() {
     el("ps-typemenu").style.display = "none";
     TYPE_MENU = null;
+    TYPE_MENU_COLS = null;
   }
-  function setColType(col, type) {
+  function setColType(col, type) { setColTypes([col], type); }
+  // Several columns at once (Oct 2026, a colleague's ask): one undo mark
+  // for the set, one retype, and the lost-values warning summed across
+  // them. Columns already of that type are left out, so the mark is
+  // taken only when something changes.
+  function setColTypes(cols, type) {
     var t = PROJECT.table;
     type = normType(type);
-    if (!type || !t || !t.types || !(col in t.types)) return;
-    if (t.types[col] === type) return;
+    if (!type || !t || !t.types) return;
+    cols = (cols || []).filter(function (c) {
+      return (c in t.types) && t.types[c] !== type;
+    });
+    if (!cols.length) return;
+    var col = cols[0];
     // A type change can empty a column. "$12.50" and "1,234" parse as nothing,
     // so a currency or thousands-separated variable flipped to Continuous
     // loses every value at once, and the only report was Valid 0 in a panel
@@ -14050,22 +14072,28 @@
     // restores the type, so the house answer applies: do it, then say what it
     // did and carry the way back. Counted BEFORE the change so the comparison
     // is against what was actually on screen.
-    var wasValid = countValid(t, col);
-    dataMark("the type change");
-    t.types[col] = type;
+    var wasValid = 0, nowValid = 0, ci;
+    for (ci = 0; ci < cols.length; ci++) wasValid += countValid(t, cols[ci]);
+    dataMark(cols.length > 1 ? "the type change of " + cols.length + " variables"
+                             : "the type change");
+    for (ci = 0; ci < cols.length; ci++) t.types[cols[ci]] = type;
     retype(t);
     validateRoles();
     persist();
     syncAll();
     render();
-    var nowValid = countValid(t, col);
+    for (ci = 0; ci < cols.length; ci++) nowValid += countValid(t, cols[ci]);
     var lost = wasValid - nowValid;
+    var who = cols.length > 1
+      ? cols.slice(0, -1).join(", ") + " and " + cols[cols.length - 1] + " are"
+      : col + " is";
     // A handful is ordinary and saying so every time would be noise. Losing
     // most of a column is the case worth interrupting for.
     if (lost > 0 && wasValid > 0 && lost >= Math.max(3, wasValid * 0.5))
-      showToast(col + " is now " + typeLabel(type) + " \u00b7 " +
+      showToast(who + " now " + typeLabel(type) + " \u00b7 " +
         (lost === wasValid
-          ? "no value could be read that way, so the column is empty"
+          ? (cols.length > 1 ? "no value could be read that way, so the columns are empty"
+                             : "no value could be read that way, so the column is empty")
           : lost + " of " + wasValid + " values could not be read that way, " +
             "so " + (lost === 1 ? "it is" : "they are") + " missing now") +
         " \u00b7 Cmd/Ctrl+Z puts it back");
@@ -18737,9 +18765,9 @@
     el("ps-typemenu").addEventListener("click", function (e) {
       var btn = e.target.closest ? e.target.closest("button[data-type]") : null;
       if (!btn || TYPE_MENU == null) return;
-      var col = TYPE_MENU;
+      var cols = TYPE_MENU_COLS || [TYPE_MENU];
       hideTypeMenu();
-      setColType(col, btn.getAttribute("data-type"));
+      setColTypes(cols, btn.getAttribute("data-type"));
     });
     grid.addEventListener("contextmenu", function (e) {
       var rowHead = e.target.closest ? e.target.closest("td[data-grid-row]") : null;
