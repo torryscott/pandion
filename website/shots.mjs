@@ -273,7 +273,7 @@ async function shot(page, name) {
     // dispatched clicks rather than the page-level one.
     await page.evaluate(() => {
         const b = document.querySelector(
-            '.graphbuilder2-host button[aria-label="Statistics"]');
+            '.graphbuilder2-host button[title="Statistics"]');
         b.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await page.waitForTimeout(1200);
