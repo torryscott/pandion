@@ -33323,6 +33323,24 @@
     if (bld) bld.textContent = APP_BUILD || "development page (unstamped)";
     var apa = el("ps-about-apa");
     if (apa) apa.textContent = citationAPA();
+    // The desktop app asks GitHub Releases for a newer version at every
+    // packaged launch (electron-updater) and on Help > Check for updates,
+    // which is a request that carries the machine's address and the app
+    // version. The shared sentence promised nothing was sent anywhere, so
+    // on the desktop it says exactly what is (Torry's option b, Sep 19
+    // 2026: word it honestly rather than gate the check).
+    var priv = document.querySelector("#ps-about-dialog .ps-about-privacy");
+    if (priv) {
+      priv.textContent = window.PS_DESKTOP
+        ? ("No accounts and no uploads. Your data stays on this machine and " +
+           "is never sent anywhere. The only thing this app sends out is a " +
+           "version check: when it starts, and when you choose Help > Check " +
+           "for updates, it asks GitHub for the newest release number, which " +
+           "tells GitHub your network address and this app's version and " +
+           "nothing else.")
+        : ("No accounts and no uploads. Your data stays on this machine: " +
+           "everything here runs in the browser, and nothing is sent anywhere.");
+    }
     openShellDialog("ps-about-dialog");
   }
   // Punch list t4-16. Chart settings > Appearance > Diagnostics wrote
