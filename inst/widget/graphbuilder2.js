@@ -39625,7 +39625,14 @@
                         });
                     }
                     if (graphType === "histogram" || graphType === "histdensity") {
-                        var _edges = _distBinEdges(xMin, xMax, data.histBins, data.histBinWidth, bars);
+                        // Edges come from EVERY panel's bars (_preLoopBars; the loop
+                        // rebinds `bars` to this panel's subset), so automatic
+                        // binning gives all panels one shared bin width - the
+                        // same edges _recomputeDistRange sized the value axis
+                        // from and the Sigma frequency table lists. Per-panel
+                        // edges made a small panel's wider bins taller than the
+                        // pooled axis and clamped them flat at the ceiling.
+                        var _edges = _distBinEdges(xMin, xMax, data.histBins, data.histBinWidth, _preLoopBars);
                         var _nb = _edges.length - 1;
                         // The Bins slider shows what is DRAWN while the
                         // count is automatic, so the number under the
@@ -40287,7 +40294,7 @@
                         }
                     }
                     if (data.distNormalCurve && !_isElementHidden("distNormal") && (graphType === "histogram" || graphType === "histdensity" || graphType === "density")) {
-                        var _nEdges = (graphType === "density") ? null : _distBinEdges(xMin, xMax, data.histBins, data.histBinWidth, bars);
+                        var _nEdges = (graphType === "density") ? null : _distBinEdges(xMin, xMax, data.histBins, data.histBinWidth, _preLoopBars);
                         var _nbinw = _nEdges ? (_nEdges[1] - _nEdges[0]) : 0;
                         var _nStat = data.histStat || "count";
                         var _nW2 = (typeof data.distNormalWidth === "number") ? data.distNormalWidth : 2;
