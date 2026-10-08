@@ -142,7 +142,7 @@ ok(selSnap === rest1,
 
 console.log('case 3: the reported repro end to end');
 await page.evaluate(() =>
-    document.querySelector('.graphbuilder2-host button[aria-label="Statistics"]')
+    document.querySelector('.graphbuilder2-host button[title="Statistics"]')
         .dispatchEvent(new MouseEvent('click', { bubbles: true })));
 await page.waitForTimeout(900);
 await page.mouse.move(0, 0);

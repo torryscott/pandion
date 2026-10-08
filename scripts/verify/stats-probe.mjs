@@ -253,7 +253,7 @@ async function openLint(page) {
     check('Add menu has no chi-square plot item',
           await page.locator('[data-role="add-ann-menu"] [data-kind="freqChisq"]').count() === 0);
     await page.keyboard.press('Escape');
-    await page.locator('[aria-label="Statistics"]').click();
+    await page.locator('[title="Statistics"]').click();
     const statState = await page.evaluate(() => ({
         chiTab: !!document.querySelector('[data-st-tab="chisq"]'),
         chiText: document.querySelector('[data-st-pane="chisq"]')?.textContent || '',
@@ -560,7 +560,7 @@ async function openLint(page) {
 // ==== Sigma stats panel — Phase 1 ======================================
 async function openStats(page) {
     const has = await page.evaluate(() => {
-        const b = document.querySelector('[aria-label="Statistics"]');
+        const b = document.querySelector('[title="Statistics"]');
         if (!b) return false;
         b.dispatchEvent(new MouseEvent('click', { bubbles: true }));
         return true;
@@ -1797,7 +1797,7 @@ async function sbClick(page, act) {
             el = el.parentElement;
         }
         const w1 = parseFloat(before.style.width);
-        document.querySelector('[aria-label="Statistics"]')
+        document.querySelector('[title="Statistics"]')
             .dispatchEvent(new MouseEvent('click', { bubbles: true }));   // toggle closed
         requestAnimationFrame(() => requestAnimationFrame(() =>
             res({ w1, w2: parseFloat(before.style.width) })));
@@ -2078,7 +2078,7 @@ async function sbClick(page, act) {
         }
     }, [cellSel(cat, grp), meta]);
     await page.evaluate(() => {
-        document.querySelector('[aria-label="Statistics"]')
+        document.querySelector('[title="Statistics"]')
             .dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await page.waitForTimeout(400);
@@ -2204,7 +2204,7 @@ async function sbClick(page, act) {
           p5b.token && p5b.card && p5b.pinCells === 'B::F', JSON.stringify(p5b));
     // 6. close stats -> plain clicks are classic click-to-edit again
     await page.evaluate(() => {
-        document.querySelector('[aria-label="Statistics"]')
+        document.querySelector('[title="Statistics"]')
             .dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await page.waitForTimeout(500);
@@ -2638,7 +2638,7 @@ async function copyFlips(page, actKey) {
         await page.goto('file://' + path.join(OUT, file));
         await page.waitForTimeout(800);
         await page.evaluate(() => {
-            document.querySelector('[aria-label="Statistics"]')
+            document.querySelector('[title="Statistics"]')
                 .dispatchEvent(new MouseEvent('click', { bubbles: true }));
         });
         await page.waitForTimeout(500);
@@ -2681,7 +2681,7 @@ async function copyFlips(page, actKey) {
         await page.goto('file://' + path.join(OUT, file));
         await page.waitForTimeout(800);
         await page.evaluate(() => {
-            document.querySelector('[aria-label="Statistics"]')
+            document.querySelector('[title="Statistics"]')
                 .dispatchEvent(new MouseEvent('click', { bubbles: true }));
         });
         await page.waitForTimeout(500);
@@ -2719,7 +2719,7 @@ async function copyFlips(page, actKey) {
     await page.goto('file://' + path.join(OUT, 's_xy_stats.html'));
     await page.waitForTimeout(800);
     await page.evaluate(() => {
-        document.querySelector('[aria-label="Statistics"]')
+        document.querySelector('[title="Statistics"]')
             .dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await page.waitForTimeout(500);

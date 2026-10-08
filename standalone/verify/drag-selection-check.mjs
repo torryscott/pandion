@@ -100,7 +100,7 @@ console.log('case 2: the statistics panel numbers stay selectable');
 // behind the chart; Copy buttons are the supported path, but hand-selecting
 // a number must not become impossible.
 {
-    const statsBtn = page.locator('#psroot button[aria-label="Statistics"]')
+    const statsBtn = page.locator('#psroot button[title="Statistics"]')
         .first();
     ok(await statsBtn.count() === 1, 'setup: the Statistics control exists');
     await statsBtn.click();

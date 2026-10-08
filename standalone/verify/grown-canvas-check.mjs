@@ -177,7 +177,7 @@ await page.mouse.move(bars.x - 300, bars.y - 200);
 await page.waitForTimeout(300);
 
 console.log('case 4: the Statistics panel rings the bar its row describes');
-const statsBtn = page.locator('#psroot button[aria-label="Statistics"]');
+const statsBtn = page.locator('#psroot button[title="Statistics"]');
 ok(await statsBtn.count() === 1, 'setup: the Statistics control exists');
 await statsBtn.click();
 await page.waitForTimeout(900);

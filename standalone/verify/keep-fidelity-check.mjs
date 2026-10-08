@@ -43,7 +43,7 @@ if (await page.locator('#ps-welcome').isVisible()) {
 
 console.log('case 1: the Sigma Keep button, pointer parked on a mark');
 await page.evaluate(() =>
-    document.querySelector('.graphbuilder2-host button[aria-label="Statistics"]')
+    document.querySelector('.graphbuilder2-host button[title="Statistics"]')
         .dispatchEvent(new MouseEvent('click', { bubbles: true })));
 await page.waitForTimeout(900);
 await page.evaluate(() =>

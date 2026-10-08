@@ -295,7 +295,7 @@ await withPage('freq_bar_stack', async page => {
     check('Search has no retired chi-square plot destination',
         !chiRoutes.includes('freq.chisq') && !chiRoutes.includes('add.chisq'), JSON.stringify(chiRoutes));
     await page.keyboard.press('Escape');
-    await page.locator('[aria-label="Statistics"]').click();
+    await page.locator('[title="Statistics"]').click();
     check('Statistics retains the Chi-square section',
         await page.locator('[data-st-tab="chisq"]').count() === 1 &&
         await page.locator('[data-st-pane="chisq"]').count() === 1);

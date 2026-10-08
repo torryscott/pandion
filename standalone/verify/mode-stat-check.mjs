@@ -80,7 +80,7 @@ const cg = await page.evaluate(async () => {
     S.setWorkspace('chart'); S.setModule('plotbuilder');
     S.setRoles('plotbuilder', { xvar: 'cond', yvar: 'clear' });
     await s(1800);
-    const btn = document.querySelector('#psroot button[aria-label="Statistics"]'); if (btn) btn.click();
+    const btn = document.querySelector('#psroot button[title="Statistics"]'); if (btn) btn.click();
     await s(900);
     const tab = Array.from(document.querySelectorAll('[data-gb2-inspector] button')).find(b => /^Descriptives$/.test((b.textContent || '').trim())); if (tab) tab.click();
     await s(500);
@@ -108,7 +108,7 @@ const dist = await page.evaluate(async () => {
     S.setModule('distplotbuilder');
     S.setRoles('distplotbuilder', { var: 'distinct' });
     await s(1800);
-    const btn = document.querySelector('#psroot button[aria-label="Statistics"]'); if (btn) btn.click();
+    const btn = document.querySelector('#psroot button[title="Statistics"]'); if (btn) btn.click();
     await s(900);
     const tab = Array.from(document.querySelectorAll('[data-gb2-inspector] button')).find(b => /^Descriptives$/.test((b.textContent || '').trim())); if (tab) tab.click();
     await s(500);

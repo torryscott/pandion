@@ -179,7 +179,7 @@ for (const family of families) {
     await audit(family.label + ' chart');
 
     const statistics = page.locator(
-        '#psroot button[aria-label="Statistics"]').first();
+        '#psroot button[title="Statistics"]').first();
     ok(await statistics.count() === 1,
         family.label + ' exposes the Statistics control');
     await statistics.click();
@@ -232,7 +232,7 @@ await page.evaluate(() => {
     window.PS_SHELL.setModule('plotbuilder');
 });
 await page.waitForTimeout(700);
-await page.locator('#psroot button[aria-label="Statistics"]').first().click();
+await page.locator('#psroot button[title="Statistics"]').first().click();
 await page.waitForTimeout(350);
 const disclosure = await page.evaluate(() => {
     const svg = document.querySelector(

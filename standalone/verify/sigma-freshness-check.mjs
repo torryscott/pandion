@@ -102,7 +102,7 @@ await page.waitForTimeout(500);
 await page.evaluate(() => window.PS_SHELL.setRoles('plotbuilder',
     { xvar: 'condition', yvar: 'score', groupVar: 'site' }));
 await page.waitForTimeout(2600);
-await page.locator('#psroot button[aria-label="Statistics"]').first().click();
+await page.locator('#psroot button[title="Statistics"]').first().click();
 await page.waitForTimeout(900);
 await check('score', 'original (score)');
 await page.evaluate(() => window.PS_SHELL.runCommand('duplicate-document'));

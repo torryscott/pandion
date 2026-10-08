@@ -38,7 +38,7 @@ async function open(file) {
 }
 async function openStats(page) {
     const has = await page.evaluate(() => {
-        const b = document.querySelector('[aria-label="Statistics"]');
+        const b = document.querySelector('[title="Statistics"]');
         if (!b) return false;
         b.dispatchEvent(new MouseEvent('click', { bubbles: true }));
         return true;

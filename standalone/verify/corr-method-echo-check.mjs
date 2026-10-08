@@ -65,7 +65,7 @@ const r = await page.evaluate(async ({ x, y, z }) => {
     try { log.push({ t: Date.now(), method: payload && payload.corrMethod }); } catch (e) {}
     return orig.apply(this, arguments);
   };
-  const btn = document.querySelector('.graphbuilder2-host button[aria-label="Statistics"]');
+  const btn = document.querySelector('.graphbuilder2-host button[title="Statistics"]');
   if (btn) { click(btn); await s(900); }
   // Re-queried per switch: an echo rebuilds the panel, and a select held
   // from before it is detached (its listener still fires, but into the

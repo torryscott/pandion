@@ -60,15 +60,25 @@ ok(await page.evaluate(() =>
 ok(await page.evaluate(() => {
     const b = [...document.querySelectorAll(
         '[data-role="chart-toolbar"] button')]
-        .find(x => x.getAttribute('aria-label') === 'Statistics');
+        .find(x => x.title === 'Statistics');
     return b.getBoundingClientRect().width > 40;
 }), 'and the buttons widened past their 24px icon squares');
+// axe-core 4.14's label-content-name-mismatch: a button's accessible name
+// must begin with its visible text. The Statistics button is the one whose
+// icon is TEXT (the sigma), so with the label on its visible text is
+// "Sigma Stats" and its name must start with exactly that (Oct 2026).
+ok(await page.evaluate(() => {
+    const b = [...document.querySelectorAll('[data-role="chart-toolbar"] button')].find(x => x.title === 'Statistics');
+    const visible = b.textContent.replace(/\s+/g, ' ').trim().toLowerCase();
+    const name = (b.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    return visible === '\u03c3 stats' && name.indexOf(visible) === 0;
+}), 'the Statistics button reads Sigma Stats and its accessible name begins with exactly that');
 
 console.log('case 2: the labeled button still does its job');
 await page.evaluate(() => {
     const b = [...document.querySelectorAll(
         '[data-role="chart-toolbar"] button')]
-        .find(x => x.getAttribute('aria-label') === 'Statistics');
+        .find(x => x.title === 'Statistics');
     b.dispatchEvent(new MouseEvent('click', { bubbles: true,
         cancelable: true }));
 });
@@ -176,7 +186,7 @@ const bare = await page.evaluate(async () => {
         statsW: (() => {
             const b = [...document.querySelectorAll(
                 '[data-role="chart-toolbar"] button')]
-                .find(x => x.getAttribute('aria-label') === 'Statistics');
+                .find(x => x.title === 'Statistics');
             return b ? b.getBoundingClientRect().width : 0;
         })(),
     };

@@ -108,7 +108,7 @@ const encloses = (spot, t, pad = 8) => !!(spot && t && spot.l <= t.l + 1 && spot
     const expect = [
         { title: 'One rule runs this room', sels: ['#psroot svg[data-role="gb2-chart-svg"]'] },
         { title: 'Type and theme', sels: ['[data-role="graphtype-trigger"]', '[data-role="palette-trigger"]'] },
-        { title: 'The numbers', sels: ['button[aria-label="Statistics"]'] },
+        { title: 'The numbers', sels: ['button[title="Statistics"]'] },
         { title: 'Hide, settings, find', sels: ['button[aria-label$="hide elements"]', 'button[aria-label="Chart settings"]', '[data-role="setting-search-trigger"]'] },
         { title: 'Add to the chart', sels: ['button[aria-label="Add to chart"]'] },
         { title: 'Check my chart', sels: ['#ps-status-check'] },
@@ -128,11 +128,11 @@ const encloses = (spot, t, pad = 8) => !!(spot && t && spot.l <= t.l + 1 && spot
     ok(s.title === 'Export' && encloses(s.spot, s.target), '2: Back returns to the previous card with its spotlight');
     // 4: rebuild the toolbar under the Sigma card and watch the spot follow
     for (let i = 0; i < 4; i++) await page.click('#ps-tour-back'); await page.waitForTimeout(320);
-    const before = await page.evaluate(() => { const b = Array.from(document.querySelectorAll('button[aria-label="Statistics"]')).find(x => x.getBoundingClientRect().width > 0); b.__probeMark = 1; return document.getElementById('ps-tour-title').textContent; });
+    const before = await page.evaluate(() => { const b = Array.from(document.querySelectorAll('button[title="Statistics"]')).find(x => x.getBoundingClientRect().width > 0); b.__probeMark = 1; return document.getElementById('ps-tour-title').textContent; });
     ok(before === 'The numbers', '4: on the Sigma card (' + before + ')');
     await page.evaluate(async () => { const s = ms => new Promise(r => setTimeout(r, ms)); window.PS_SHELL.setRoles('plotbuilder', { xvar: 'cond', yvar: 'score', groupVar: 'cond' }); await s(1400); });
-    const after = await page.evaluate(() => { const b = Array.from(document.querySelectorAll('button[aria-label="Statistics"]')).find(x => x.getBoundingClientRect().width > 0); return { fresh: !b.__probeMark }; });
-    s = await page.evaluate(snap, 'button[aria-label="Statistics"]');
+    const after = await page.evaluate(() => { const b = Array.from(document.querySelectorAll('button[title="Statistics"]')).find(x => x.getBoundingClientRect().width > 0); return { fresh: !b.__probeMark }; });
+    s = await page.evaluate(snap, 'button[title="Statistics"]');
     ok(after.fresh && s.open && s.title === 'The numbers' && encloses(s.spot, s.target), '4: after a re-render replaced the Sigma button, the spotlight sits on the new one');
     // 8: nothing of the tour lives inside the chart host
     const inHost = await page.evaluate(() => document.querySelectorAll('#psroot .ps-tour, #psroot .ps-tour-card, #psroot .ps-tour-spot').length);
@@ -142,7 +142,7 @@ const encloses = (spot, t, pad = 8) => !!(spot && t && spot.l <= t.l + 1 && spot
     s = await page.evaluate(snap, 'button[aria-label$="hide elements"]');
     ok(s.title === 'Hide, settings, find', '3: Right arrow advances (' + s.title + ')');
     await page.keyboard.press('ArrowLeft'); await page.waitForTimeout(250);
-    s = await page.evaluate(snap, 'button[aria-label="Statistics"]');
+    s = await page.evaluate(snap, 'button[title="Statistics"]');
     ok(s.title === 'The numbers', '3: Left arrow goes back (' + s.title + ')');
     const tabbed = [];
     for (let i = 0; i < 4; i++) { await page.keyboard.press('Tab'); tabbed.push(await page.evaluate(() => document.activeElement.id)); }

@@ -226,7 +226,7 @@ try {
             // Open the real Sigma panel and verify the actual text reaches
             // the DOM; exact formatting checks below are separate from the
             // high-precision numerical comparisons above.
-            await page.locator('button[aria-label="Statistics"]').click();
+            await page.locator('button[title="Statistics"]').click();
             await page.getByRole('button',{name:'Omnibus',exact:true}).click();
             const shown=await page.locator('[data-st-pane]:visible').innerText();
             const squash=s=>s.replace(/\s/g,'');

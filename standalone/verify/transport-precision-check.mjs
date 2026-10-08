@@ -73,7 +73,7 @@ try {
       }
     }
     if (cs.summaries) {
-      await page.locator('button[aria-label="Statistics"]').click();
+      await page.locator('button[title="Statistics"]').click();
       await page.getByRole('button', { name: 'Descriptives', exact: true }).click();
       const table = await page.evaluate(() => {
         const pane = [...document.querySelectorAll('[data-st-pane]')].find(p => p.offsetParent && /MEAN/i.test(p.innerText));

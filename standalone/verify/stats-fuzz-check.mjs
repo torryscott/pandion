@@ -91,7 +91,7 @@ async function openStats(tabRe) {
       else el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     };
     if (!document.querySelector('[data-st-pane]')) {
-      const btn = document.querySelector('.graphbuilder2-host button[aria-label="Statistics"]');
+      const btn = document.querySelector('.graphbuilder2-host button[title="Statistics"]');
       if (btn) { click(btn); await s(900); }
     }
     const re = new RegExp(tabReSrc, 'i');

@@ -73,7 +73,7 @@ ok(order === 'data,chart,pinboard,layout',
 // Keep two moments from a pinned comparison.
 await page.evaluate(() => {
     const b = document.querySelector(
-        '.graphbuilder2-host button[aria-label="Statistics"]');
+        '.graphbuilder2-host button[title="Statistics"]');
     b.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 });
 await page.waitForTimeout(900);
@@ -404,7 +404,7 @@ await page.evaluate(async () => {
     window.PS_SHELL.setWorkspace('chart');
     await s(500);
     const b = document.querySelector(
-        '.graphbuilder2-host button[aria-label="Statistics"]');
+        '.graphbuilder2-host button[title="Statistics"]');
     b.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await s(900);
     // a DIFFERENT row: re-clicking the pinned one UNPINS (engine rule)
@@ -1238,7 +1238,7 @@ await page.waitForFunction(() => {
 await page.waitForTimeout(500);
 await page.evaluate(() => {
     const b = document.querySelector(
-        '.graphbuilder2-host button[aria-label="Statistics"]');
+        '.graphbuilder2-host button[title="Statistics"]');
     b.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 });
 await page.waitForTimeout(900);

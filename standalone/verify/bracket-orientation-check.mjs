@@ -98,7 +98,7 @@ const placed = await page.evaluate(async () => {
     el.click();
   };
   const host = document.querySelector('.graphbuilder2-host');
-  const stats = host.querySelector('button[aria-label="Statistics"]');
+  const stats = host.querySelector('button[title="Statistics"]');
   if (stats) { click(stats); await s(1000); }
   const rowsSel = [...host.querySelectorAll('[data-st-pane="pairs"] tr[data-link] input[type="checkbox"]')];
   rowsSel.slice(0, 2).forEach(cb => { cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true })); });

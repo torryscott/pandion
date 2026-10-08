@@ -99735,7 +99735,12 @@
         var statsBtn = document.createElement("button");
         _styleUndoBtn(statsBtn);
         statsBtn.title = "Statistics";
-        statsBtn.setAttribute("aria-label", "Statistics");
+        // The accessible name BEGINS with the visible text (the sigma; with
+        // host toolbar labels, "Sigma Stats" - see the label block), which
+        // is what axe-core 4.14's label-content-name-mismatch requires;
+        // 4.13 let an aria-hidden glyph pass and the name was "Statistics"
+        // (Oct 2026).
+        statsBtn.setAttribute("aria-label", "\u03a3 Statistics");
         statsBtn.style.right = "200px";
         statsBtn.innerHTML =
             '<span aria-hidden="true" style="font:600 13px/1 serif;">Σ</span>';
@@ -101347,6 +101352,16 @@
                     lb.style.cssText = "margin-left:5px;" +
                         "font:500 12px/1 var(--gb2-ui-font, sans-serif);" +
                         "letter-spacing:0.2px;";
+                    if (b === statsBtn) {
+                        // The sigma is text, so the button's visible text
+                        // becomes "Sigma Stats" and its accessible name
+                        // must begin with exactly that (axe-core 4.14).
+                        // A real space makes the two words one phrase;
+                        // the margin shrinks so the gap stays as it was.
+                        b.appendChild(document.createTextNode(" "));
+                        lb.style.marginLeft = "1px";
+                        b.setAttribute("aria-label", "\u03a3 " + pair[1] + ", statistics");
+                    }
                     b.appendChild(lb);
                     b.style.width = "auto";
                     b.style.padding = "3px 9px";

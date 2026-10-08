@@ -45,7 +45,7 @@ if (await page.locator('#ps-welcome').isVisible()) {
 console.log('case 1: pinning a comparison surfaces the button');
 await page.evaluate(() => {
     const b = document.querySelector(
-        '.graphbuilder2-host button[aria-label="Statistics"]');
+        '.graphbuilder2-host button[title="Statistics"]');
     b.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 });
 await page.waitForTimeout(900);

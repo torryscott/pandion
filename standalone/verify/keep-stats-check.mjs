@@ -49,7 +49,7 @@ await page.evaluate(async () => {
     const s = ms => new Promise(r => setTimeout(r, ms));
     const S = window.PS_SHELL;
     S.setRoles('plotbuilder', { xvar: 'condition', yvar: 'score', groupVar: 'site' }); await s(1500);
-    document.querySelector('#psroot button[aria-label="Statistics"]').click(); await s(900);
+    document.querySelector('#psroot button[title="Statistics"]').click(); await s(900);
     document.querySelector('[data-gb2-inspector] [data-st-tab="omnibus"]').click(); await s(700);
 });
 const omni = await page.evaluate(() => {
@@ -139,7 +139,7 @@ const rm = await page.evaluate(async () => {
     // why this case runs last.
     S.openExample('practice'); await s(900);
     S.setWorkspace('chart'); S.setModule('rmplotbuilder'); S.setRoles('rmplotbuilder', { measures: ['session1', 'session2', 'session3', 'session4'] }); await s(1800);
-    document.querySelector('#psroot button[aria-label="Statistics"]').click(); await s(900);
+    document.querySelector('#psroot button[title="Statistics"]').click(); await s(900);
     document.querySelector('[data-gb2-inspector] [data-st-tab="omnibus"]').click(); await s(600);
     const before = (S.project.pinboards || []).reduce((n, b) => n + (b.pins || []).length, 0);
     document.querySelector('[data-ps-moment-keep-omni]').click(); await s(500);

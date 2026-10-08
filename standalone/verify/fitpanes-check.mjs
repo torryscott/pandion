@@ -346,7 +346,7 @@ const chrome75 = await page.evaluate(() => {
     // the Statistics button is the same chrome under the same counter-zoom.
     const b = [...document.querySelectorAll(
         '#psroot [data-role="chart-toolbar"] button')]
-        .find(x => x.getAttribute('aria-label') === 'Statistics');
+        .find(x => x.title === 'Statistics');
     return b ? Math.round(b.getBoundingClientRect().height) : 0;
 });
 // the Size & view disclosure must be open for a real click (Aug 2 2026)
@@ -358,7 +358,7 @@ const chrome100 = await page.evaluate(() => {
     // the Statistics button is the same chrome under the same counter-zoom.
     const b = [...document.querySelectorAll(
         '#psroot [data-role="chart-toolbar"] button')]
-        .find(x => x.getAttribute('aria-label') === 'Statistics');
+        .find(x => x.title === 'Statistics');
     return b ? Math.round(b.getBoundingClientRect().height) : 0;
 });
 // the Size & view disclosure must be open for a real click (Aug 2 2026)

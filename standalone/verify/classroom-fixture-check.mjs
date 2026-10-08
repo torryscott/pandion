@@ -98,7 +98,7 @@ try {
         check(bar?.n === 4 && bar.mean === mean && Math.abs(bar.se - Math.sqrt(5 / 3)) < 1e-12,
             group + ' payload has N=4, the correct mean, and SE=sqrt(5/3)');
     }
-    await page.locator('#psroot button[aria-label="Statistics"]').first().click();
+    await page.locator('#psroot button[title="Statistics"]').first().click();
     await page.getByRole('button', { name: 'Descriptives', exact: true }).click();
     report.statisticsTables = await page.locator('#psroot .gb2-panel table').evaluateAll(tables => tables.map(table =>
         [...table.querySelectorAll('tr')].map(row => [...row.querySelectorAll('th,td')].map(cell => cell.textContent.trim()))));

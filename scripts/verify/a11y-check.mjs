@@ -159,7 +159,7 @@ for (const p of PAGES) {
             await page.keyboard.press('Escape');
         }
         if (p.name !== 'wizard_a11y') {
-            await page.locator('button[aria-label="Statistics"]').first().click();
+            await page.locator('button[title="Statistics"]').first().click();
             statisticsNames.push(...await checkStatisticsNames(page, p.name));
             writeFileSync(path.join(path.dirname(evidence.reportPath), 'host-statistics-names.json'),
                 JSON.stringify(statisticsNames, null, 2) + '\n');

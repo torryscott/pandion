@@ -117,7 +117,7 @@ const G = page => page.evaluate('(' + geom.toString() + ')()');
 
 async function clickSigma(page) {
     await page.evaluate(() => {
-        const b = document.querySelector('.graphbuilder2-host button[aria-label="Statistics"]');
+        const b = document.querySelector('.graphbuilder2-host button[title="Statistics"]');
         if (!b) throw new Error('no Sigma button');
         b.click();
     });
