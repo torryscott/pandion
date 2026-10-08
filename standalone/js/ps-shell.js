@@ -13341,7 +13341,14 @@
           // the dragged one would land beside, on the side it would land.
           slotMarkInsert(drop, fits && def.multi ? slotInsertAt(drop, e, PS_DRAG) : null);
         });
-        drop.addEventListener("dragleave", function () {
+        // Crossing from the zone onto one of its own chips fires a
+        // dragleave for the zone, which used to clear the highlight and
+        // the insert mark for a frame and put them back on the next
+        // dragover: a blink on every chip boundary. Leaving for a
+        // descendant is not leaving.
+        drop.addEventListener("dragleave", function (e) {
+          var to = e && e.relatedTarget;
+          if (to && to !== drop && drop.contains(to)) return;
           drop.classList.remove("ps-droptarget");
           drop.classList.remove("ps-dropreject");
           slotMarkInsert(drop, null);

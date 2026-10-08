@@ -122,6 +122,48 @@ await dragChip(C, (r.left + r.right) / 2, (r.top + r.bottom) / 2);
 await page.waitForTimeout(900);
 ok(JSON.stringify(await order()) === JSON.stringify([B, C, A]), 'the order is unchanged (' + (await order()).join(', ') + ')');
 
+console.log('case 4: the list does not move under the pointer, and crossing onto a chip does not blink');
+// Torry's report (Oct 2026): hovering a dragged chip made the zone grow and
+// every chip shift, and the highlight blinked at each chip boundary. The
+// zone's drag highlight must be layout-neutral, and a dragleave whose
+// destination is one of the zone's own chips must change nothing.
+const zoneRect = () => page.evaluate(() => {
+    const r = document.querySelector('[data-role-key="measures"] .ps-slot-drop').getBoundingClientRect();
+    return { w: r.width, h: r.height, top: r.top, left: r.left };
+});
+const before = { zone: await zoneRect(), chip: await chipRect(B) };
+const mid = await page.evaluate(([c, target]) => {
+    const chip = document.querySelector('[data-role-key="measures"] .ps-slot-chip[data-col="' + c + '"]');
+    const over = document.querySelector('[data-role-key="measures"] .ps-slot-chip[data-col="' + target + '"]');
+    const drop = document.querySelector('[data-role-key="measures"] .ps-slot-drop');
+    const dt = new DataTransfer();
+    const r = over.getBoundingClientRect();
+    chip.dispatchEvent(new DragEvent('dragstart', { dataTransfer: dt, bubbles: true, cancelable: true }));
+    drop.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true, clientX: r.left + 4, clientY: (r.top + r.bottom) / 2 }));
+    const lit = drop.classList.contains('ps-droptarget');
+    const z = drop.getBoundingClientRect(), cr = over.getBoundingClientRect();
+    const zone = { w: z.width, h: z.height, top: z.top, left: z.left };
+    const chipNow = { left: cr.left, right: cr.right, top: cr.top, bottom: cr.bottom };
+    // The pointer crosses from the zone's padding onto a chip: the zone
+    // gets a dragleave whose relatedTarget is that chip.
+    drop.dispatchEvent(new DragEvent('dragleave', { dataTransfer: dt, bubbles: true, cancelable: true, relatedTarget: over }));
+    const stillLit = drop.classList.contains('ps-droptarget');
+    const stillMarked = drop.querySelectorAll('[data-insert]').length;
+    // And then really leaves the zone.
+    drop.dispatchEvent(new DragEvent('dragleave', { dataTransfer: dt, bubbles: true, cancelable: true, relatedTarget: document.body }));
+    const cleared = !drop.classList.contains('ps-droptarget') && drop.querySelectorAll('[data-insert]').length === 0;
+    chip.dispatchEvent(new DragEvent('dragend', { dataTransfer: dt, bubbles: true, cancelable: true }));
+    return { lit, zone, chipNow, stillLit, stillMarked, cleared };
+}, [C, B]);
+const same = (a, b) => Math.abs(a - b) < 0.6;
+ok(mid.lit, 'the zone is highlighted while the chip is over it');
+ok(same(mid.zone.w, before.zone.w) && same(mid.zone.h, before.zone.h) && same(mid.zone.top, before.zone.top) && same(mid.zone.left, before.zone.left),
+   'and it keeps its size and place (' + before.zone.w.toFixed(1) + 'x' + before.zone.h.toFixed(1) + ' before, ' + mid.zone.w.toFixed(1) + 'x' + mid.zone.h.toFixed(1) + ' during)');
+ok(same(mid.chipNow.left, before.chip.left) && same(mid.chipNow.top, before.chip.top) && same(mid.chipNow.right, before.chip.right),
+   'the chip under the pointer does not move');
+ok(mid.stillLit && mid.stillMarked === 1, 'crossing onto a chip keeps the highlight and the marker');
+ok(mid.cleared, 'leaving the zone for real clears both');
+
 // No Undo case: role edits (adding, removing, reordering a chip) have never
 // been part of an undo history in this app, so there is nothing to assert.
 
