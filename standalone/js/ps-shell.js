@@ -13733,10 +13733,9 @@
             // picker rows keep the word: that is a choosing surface.
             chip.innerHTML = psTypeIcon(PROJECT.table.types[col]) +
               '<span class="ps-slot-chip-name">' + escHtml(col) + "</span>";
-            // Name and type only: the drag instruction that used to follow
-            // was a pop-up nobody needed (Torry, Oct 8 2026).
-            setTip(chip, col + ": " +
-              typeLabel(PROJECT.table.types[col]).toLowerCase());
+            // No tip on a chip (Torry, Oct 8 2026): the name is printed on
+            // it and the type icon carries the kind; the pop-up that named
+            // them again and told the reader to drag was noise.
             chip.setAttribute("draggable", "true");
             chip.setAttribute("data-col", col);
             chip.addEventListener("dragstart", function (e) {
