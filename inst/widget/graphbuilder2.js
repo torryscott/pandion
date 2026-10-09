@@ -6053,6 +6053,43 @@
             return inOrder.concat(notInOrder);
         }
         xCats = _applyUserOrder(xCats, data.categoryOrder);
+        // Host hooks (Oct 2026, the standalone's Chart setup chips): a host
+        // that reorders a list role from its own controls asks the chart
+        // to apply the order with the glide the Order tab and the chart-
+        // surface drags already play, instead of re-rendering it into
+        // place. Each returns true when it applied the order (or already
+        // held it) and false when this chart has no such order. The
+        // matrix and Likert hooks are assigned by their own draw blocks,
+        // so they are cleared here and stay null on every other chart.
+        window.__gb2_applyCorrVarOrder = null;
+        window.__gb2_applyLikertItemOrder = null;
+        window.__gb2_applyCategoryOrder = function (order) {
+            if (!Array.isArray(order) || !Array.isArray(xCats) || !xCats.length) return false;
+            if (_isScatterGraph || _isContinuousDistGraph || _gbCorrMode || _gbLikertMode) return false;
+            var next = _applyUserOrder(xCats, order);
+            var same = next.length === xCats.length;
+            for (var ni = 0; same && ni < next.length; ni++) if (next[ni] !== xCats[ni]) same = false;
+            if (same) return true;
+            var oldBarRects = _captureBarRects();
+            xCats.splice.apply(xCats, [0, xCats.length].concat(next));
+            // The per-facet buckets are built from xCats at render entry;
+            // rebuild them the way the Order tab's move does, or a faceted
+            // chart snaps back to the entry order on this redraw.
+            if (typeof _facetBuckets !== "undefined" && _facetBuckets) {
+                for (var fk in _facetBuckets)
+                    if (Object.prototype.hasOwnProperty.call(_facetBuckets, fk)) _facetBuckets[fk] = [];
+                for (var oi = 0; oi < xCats.length; oi++) {
+                    var ofc = _facetOf(xCats[oi]);
+                    if (ofc && _facetBuckets[ofc]) _facetBuckets[ofc].push(xCats[oi]);
+                }
+            }
+            data.categoryOrder = xCats.slice();
+            if (hasSetOption) { try { _setOption("categoryOrder", data.categoryOrder); } catch (_eCo) {} }
+            redraw();
+            _playBarFlip(oldBarRects);
+            try { redrawInspectorIndicator(); } catch (_eCi) {}
+            return true;
+        };
         // Faceted INLINE runs are laid out in the order facets appear
         // in xCats (facet-major). So a facet reorder (panel drag, strip
         // drag, or the Order tab) only reflows the runs if we re-sort
@@ -44028,6 +44065,26 @@
                     document.addEventListener("click", fn, true);
                     setTimeout(function () { document.removeEventListener("click", fn, true); }, 400);
                 }
+                // Glide every cell and label from where it was (oldR, keyed by
+                // the pair or the variable and axis) to where it is now. Shared
+                // by the cell drag and the host hook below.
+                function _corrGlideFrom(oldR, cssPx, selr, prefix, a0, a1) {
+                    var news = dataGroup.querySelectorAll(selr);
+                    for (var m = 0; m < news.length; m++) {
+                        var el = news[m];
+                        var o = oldR[prefix + el.getAttribute(a0) + "::" + el.getAttribute(a1)];
+                        if (!o) continue;
+                        var nr; try { nr = el.getBoundingClientRect(); } catch (_ecc) { continue; }
+                        var ddx = (o.left - nr.left) / cssPx, ddy = (o.top - nr.top) / cssPx;
+                        if (Math.abs(ddx) < 0.5 && Math.abs(ddy) < 0.5) continue;
+                        el.style.transition = "none";
+                        el.style.transform = "translate(" + ddx + "px," + ddy + "px)";
+                        el.getBoundingClientRect();
+                        el.style.transition = "transform 240ms ease-out";
+                        el.style.transform = "";
+                        (function (b) { setTimeout(function () { b.style.transition = ""; b.style.transform = ""; }, 260); })(el);
+                    }
+                }
                 function _corrCellDragStart(e, grabRow, grabCol) {
                     if (n < 2) return;
                     e.stopPropagation();
@@ -44157,25 +44214,8 @@
                         redraw();
                         try { inspectorIndicatorGroup.style.display = ""; } catch (_eca) {}
                         try { redrawInspectorIndicator(); } catch (_ecb) {}
-                        function glide(selr, prefix, a0, a1) {
-                            var news = dataGroup.querySelectorAll(selr);
-                            for (var m = 0; m < news.length; m++) {
-                                var el = news[m];
-                                var o = oldR[prefix + el.getAttribute(a0) + "::" + el.getAttribute(a1)];
-                                if (!o) continue;
-                                var nr; try { nr = el.getBoundingClientRect(); } catch (_ecc) { continue; }
-                                var ddx = (o.left - nr.left) / cssPx, ddy = (o.top - nr.top) / cssPx;
-                                if (Math.abs(ddx) < 0.5 && Math.abs(ddy) < 0.5) continue;
-                                el.style.transition = "none";
-                                el.style.transform = "translate(" + ddx + "px," + ddy + "px)";
-                                el.getBoundingClientRect();
-                                el.style.transition = "transform 240ms ease-out";
-                                el.style.transform = "";
-                                (function (b) { setTimeout(function () { b.style.transition = ""; b.style.transform = ""; }, 260); })(el);
-                            }
-                        }
-                        glide('[data-role="corr-cell-g"]', "c:", "data-a", "data-b");
-                        glide('[data-role="corr-var-label-g"]', "l:", "data-var", "data-axis");
+                        _corrGlideFrom(oldR, cssPx, '[data-role="corr-cell-g"]', "c:", "data-a", "data-b");
+                        _corrGlideFrom(oldR, cssPx, '[data-role="corr-var-label-g"]', "l:", "data-var", "data-axis");
                     }
                     document.addEventListener("pointermove", onMove, true);
                     document.addEventListener("pointerup", onUp, true);
@@ -44196,6 +44236,32 @@
                     }
                 }
                 _wireCorrCellDrag();
+                // Host hook: apply a variable order from outside with the cell
+                // drag's glide (see window.__gb2_applyCategoryOrder).
+                window.__gb2_applyCorrVarOrder = function (order) {
+                    if (!Array.isArray(order)) return false;
+                    var next = _applyUserOrder(allVars, order);
+                    var same = next.length === ordered.length;
+                    for (var si = 0; same && si < next.length; si++) if (next[si] !== ordered[si]) same = false;
+                    if (same) return true;
+                    var cssPx = 1; try { cssPx = _gb2CssPxScale(svg); } catch (_eh0) {}
+                    var oldR = {}, i;
+                    var cellGs = dataGroup.querySelectorAll('[data-role="corr-cell-g"]');
+                    var labelGs = dataGroup.querySelectorAll('[data-role="corr-var-label-g"]');
+                    for (i = 0; i < cellGs.length; i++) {
+                        try { oldR["c:" + cellGs[i].getAttribute("data-a") + "::" + cellGs[i].getAttribute("data-b")] = cellGs[i].getBoundingClientRect(); } catch (_eh1) {}
+                    }
+                    for (i = 0; i < labelGs.length; i++) {
+                        try { oldR["l:" + labelGs[i].getAttribute("data-var") + "::" + labelGs[i].getAttribute("data-axis")] = labelGs[i].getBoundingClientRect(); } catch (_eh2) {}
+                    }
+                    data.corrVarOrder = next;
+                    if (hasSetOption) { try { _setOption("corrVarOrder", next); } catch (_eh3) {} }
+                    redraw();
+                    try { redrawInspectorIndicator(); } catch (_eh4) {}
+                    _corrGlideFrom(oldR, cssPx, '[data-role="corr-cell-g"]', "c:", "data-a", "data-b");
+                    _corrGlideFrom(oldR, cssPx, '[data-role="corr-var-label-g"]', "l:", "data-var", "data-axis");
+                    return true;
+                };
                 // ---- diverging color-scale legend. Mirrors the scatter
                 // heatmap legend's affordances (draggable, sizable,
                 // orientable, titled, tick-count, text color, show/hide)
@@ -45408,6 +45474,32 @@
                     }
                     return out;
                 }
+                // Glide every row element from where it was (oldR, by
+                // _lkRectKeys) to where it is now. Shared by the row drag and
+                // the host hook below.
+                function _lkGlideFrom(oldR, cssPx) {
+                    var news = _lkRectKeys(), i;
+                    for (i = 0; i < news.length; i++) {
+                        var o = oldR[news[i].key];
+                        if (!o) continue;
+                        var nr;
+                        try { nr = news[i].el.getBoundingClientRect(); } catch (_e12) { continue; }
+                        var ddy = (o.top - nr.top) / cssPx;
+                        if (Math.abs(ddy) < 0.5) continue;
+                        var nb = news[i].el;
+                        nb.style.transition = "none";
+                        nb.style.transform = "translate(0px," + ddy + "px)";
+                        nb.getBoundingClientRect();
+                        nb.style.transition = "transform 240ms ease-out";
+                        nb.style.transform = "";
+                        (function (b) {
+                            setTimeout(function () {
+                                b.style.transition = "";
+                                b.style.transform = "";
+                            }, 260);
+                        })(nb);
+                    }
+                }
                 function _lkRowDragStart(e, grabbed) {
                     var grabbedIdx = items.indexOf(grabbed);
                     if (grabbedIdx < 0 || items.length < 2) return;
@@ -45535,27 +45627,7 @@
                                 && inspector.selection.indexOf("likertItem:") === 0)
                                 renderInspectorPanel();
                         } catch (_e11) {}
-                        var news = _lkRectKeys();
-                        for (i = 0; i < news.length; i++) {
-                            var o = oldR[news[i].key];
-                            if (!o) continue;
-                            var nr;
-                            try { nr = news[i].el.getBoundingClientRect(); } catch (_e12) { continue; }
-                            var ddy = (o.top - nr.top) / cssPx;
-                            if (Math.abs(ddy) < 0.5) continue;
-                            var nb = news[i].el;
-                            nb.style.transition = "none";
-                            nb.style.transform = "translate(0px," + ddy + "px)";
-                            nb.getBoundingClientRect();
-                            nb.style.transition = "transform 240ms ease-out";
-                            nb.style.transform = "";
-                            (function (b) {
-                                setTimeout(function () {
-                                    b.style.transition = "";
-                                    b.style.transform = "";
-                                }, 260);
-                            })(nb);
-                        }
+                        _lkGlideFrom(oldR, cssPx);
                     }
                     document.addEventListener("pointermove", onMove, true);
                     document.addEventListener("pointerup", onUp, true);
@@ -45569,6 +45641,29 @@
                         _lkRowDragStart(e, itemName);
                     });
                 }
+                // Host hook: apply an item order from outside with the row
+                // drag's glide (see window.__gb2_applyCategoryOrder).
+                window.__gb2_applyLikertItemOrder = function (order) {
+                    if (!Array.isArray(order)) return false;
+                    var next = _applyUserOrder(allItems, order);
+                    var same = next.length === ordered.length;
+                    for (var si = 0; same && si < next.length; si++) if (next[si] !== ordered[si]) same = false;
+                    if (same) return true;
+                    var cssPx = 1; try { cssPx = _gb2CssPxScale(svg); } catch (_eh0) {}
+                    var oldR = {}, keys = _lkRectKeys(), i;
+                    for (i = 0; i < keys.length; i++) {
+                        try { oldR[keys[i].key] = keys[i].el.getBoundingClientRect(); } catch (_eh1) {}
+                    }
+                    data.likertItemOrder = next;
+                    data.likertSort = "custom";
+                    if (hasSetOption) {
+                        try { _setOption("likertItemOrder", next); _setOption("likertSort", "custom"); } catch (_eh2) {}
+                    }
+                    redraw();
+                    try { redrawInspectorIndicator(); } catch (_eh3) {}
+                    _lkGlideFrom(oldR, cssPx);
+                    return true;
+                };
             })();
 
             } // end for (_panelIdx) — panel render loop

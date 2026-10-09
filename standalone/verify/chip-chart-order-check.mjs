@@ -9,6 +9,9 @@
 //   - a chip dropped at a new position reorders the chart, also AFTER a
 //     chart drag has happened (the reported bug)
 //   - the echo re-render keeps the drawn order
+// With the glide hooks (chip-glide-check) the engine commits the chips'
+// order itself on a drop instead of the app releasing it; either state
+// keeps the two sides equal, and this probe accepts both.
 // Control: on main, the chips never follow the chart, and after the chart
 // drag the chip drop changes the list but not the chart.
 import { createRequire } from 'node:module';
@@ -141,7 +144,8 @@ await dropChip('measures', 't2', 't3', true);
 await w(1500);
 ok(same(await chips('rmplotbuilder', 'measures'), ['t2', 't3', 't1']), 'the chips read ' + (await chips('rmplotbuilder', 'measures')).join(', '));
 ok(same(await drawnRM(), ['t2', 't3', 't1']), 'the chart follows the chips: ' + (await drawnRM()).join(', '));
-ok(!(await specOrder('rmplotbuilder', 'categoryOrder')), 'the engine\'s own categoryOrder was released (the chips define the order now)');
+const eo = await specOrder('rmplotbuilder', 'categoryOrder');
+ok(!eo || same(eo, ['t2', 't3', 't1']), 'the engine\'s own categoryOrder was released or set to the chips\' order (' + JSON.stringify(eo) + ')');
 await w(2200);
 ok(same(await drawnRM(), ['t2', 't3', 't1']) && same(await chips('rmplotbuilder', 'measures'), ['t2', 't3', 't1']), 'both sides still agree after the echo');
 
