@@ -13342,6 +13342,38 @@
     named.sort(function (a, b) { return rank[a] - rank[b]; });
     return named.concat(rest);
   }
+  // The engine's host hooks for the same three roles (Oct 8 2026, Torry:
+  // make the swap on the chart as dynamic as the chart's own drags). A
+  // chip drop asks the live chart to apply the new order with the glide
+  // its Order tab and surface drags play; the engine commits the order
+  // itself, so the mirror below sees the chips already agree.
+  var LIST_ORDER_HOOKS = {
+    rmplotbuilder: { measures: "__gb2_applyCategoryOrder" },
+    likertplotbuilder: { items: "__gb2_applyLikertItemOrder" },
+    corrplotbuilder: { vars: "__gb2_applyCorrVarOrder" }
+  };
+  function listOrderGlide(mod, roleKey, order) {
+    var map = LIST_ORDER_HOOKS[mod];
+    var name = map && map[roleKey];
+    if (!name || typeof window[name] !== "function") return false;
+    if (appWorkspace() !== "chart") return false;
+    var host = hostEl();
+    if (!host || !host.querySelector('svg[data-role="gb2-chart-svg"]')) return false;
+    var done = false;
+    try { done = window[name](order.slice()) === true; } catch (eGl) { done = false; }
+    return done;
+  }
+  // A role change the chart has already drawn (through a hook above):
+  // everything roleChanged does except the re-render, which would wipe
+  // the glide mid-flight. The engine's own commit of the order echoes a
+  // render a moment later, by which time the chart is at rest.
+  function roleChangedDrawn() {
+    bumpSnapEpoch();
+    persist();
+    syncRolesRow();
+    syncDataRow();
+    syncDataGrid();
+  }
   function listOrderRelease(mod, roleKey) {
     var map = LIST_ORDER_KEYS[mod];
     var orderKey = map && map[roleKey];
@@ -13848,6 +13880,7 @@
           }
           if (PS_DRAG_FROM && PS_DRAG_FROM !== def.key)
             roleRemoveMember(PS_DRAG_FROM, PS_DRAG);
+          var drawn = false;
           if (def.multi) {
             // A list role keeps the order the chips were dropped in, and
             // that order is the chart's (Repeated Measures occasions,
@@ -13862,11 +13895,12 @@
             if (idx < 0 || idx > arr.length) arr.push(PS_DRAG);
             else arr.splice(idx, 0, PS_DRAG);
             rr[def.key] = arr;
-            listOrderRelease(curModule(), def.key);
+            drawn = listOrderGlide(curModule(), def.key, arr);
+            if (!drawn) listOrderRelease(curModule(), def.key);
           } else rr[def.key] = PS_DRAG;
           slotMarkInsert(drop, null);
           clearDragState();
-          roleChanged();
+          if (drawn) roleChangedDrawn(); else roleChanged();
         });
         // The drop zone rides inside a positioned anchor so the picker
         // can OVERLAY the rail instead of pushing everything below it
