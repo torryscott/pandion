@@ -11857,6 +11857,7 @@
     // compares the incoming size against the standard, never against the
     // stored one, so the order is safe.
     optionsFor(curModule())[key] = value;
+    try { listOrderMirror(key, value); } catch (eLo) {}
     fitNoticeSizeCommit(key, value);   // punch list 27
     bumpSnapEpoch();   // a style edit changes what this chart draws
     persistStyleEdit();
@@ -13313,6 +13314,76 @@
     setTip(help, full);
   }
   // Everything a role mutation must refresh, in one place.
+  // A list role's chip order and the chart's drawn order are the same
+  // fact seen from two sides (Torry, Oct 8 2026: dragging a marker on the
+  // chart broke the cards' ability to reorder the graph). The engine keeps
+  // a drawn order of its own for three list roles: Repeated Measures
+  // occasions (categoryOrder), Likert items (likertItemOrder) and matrix
+  // variables (corrVarOrder), all living in the chartSpec blob. The
+  // engine applies that order OVER the shipped one, so once a chart drag
+  // had committed it, reordering the chips changed nothing. Two mirrors
+  // keep the sides agreeing: a chip reorder RELEASES the engine's order
+  // (the chips now define it, and the next render ships them in that
+  // order), and an engine commit of the order REORDERS the chips.
+  var LIST_ORDER_KEYS = {
+    rmplotbuilder: { measures: "categoryOrder" },
+    likertplotbuilder: { items: "likertItemOrder" },
+    corrplotbuilder: { vars: "corrVarOrder" }
+  };
+  // The engine's own rule (_applyUserOrder): members named in the order
+  // first, in that order; the rest keep their current order after them.
+  function listOrderApply(members, order) {
+    if (!Array.isArray(members) || !Array.isArray(order) || !order.length) return members;
+    var rank = {};
+    for (var i = 0; i < order.length; i++) if (!(order[i] in rank)) rank[order[i]] = i;
+    var named = [], rest = [];
+    for (var j = 0; j < members.length; j++)
+      (typeof rank[members[j]] === "number" ? named : rest).push(members[j]);
+    named.sort(function (a, b) { return rank[a] - rank[b]; });
+    return named.concat(rest);
+  }
+  function listOrderRelease(mod, roleKey) {
+    var map = LIST_ORDER_KEYS[mod];
+    var orderKey = map && map[roleKey];
+    if (!orderKey) return;
+    var o = optionsFor(mod);
+    var changed = false;
+    if (Object.prototype.hasOwnProperty.call(o, orderKey)) { delete o[orderKey]; changed = true; }
+    if (typeof o.chartSpec === "string") {
+      var spec = parseSpec(o.chartSpec);
+      if (Object.prototype.hasOwnProperty.call(spec, orderKey)) {
+        delete spec[orderKey];
+        o.chartSpec = JSON.stringify(spec);
+        changed = true;
+      }
+    }
+    if (changed) { bumpSnapEpoch(); persistStyleEdit(); }
+  }
+  // An engine commit that carries a drawn order (a chart drag, the Order
+  // tab, an undo) moves the chips to match. The cards rebuild; the chart
+  // is already drawn that way, and the echo ships the chips in the order
+  // the engine already holds, so nothing moves twice.
+  function listOrderMirror(key, value) {
+    var mod = curModule();
+    var map = LIST_ORDER_KEYS[mod];
+    if (!map) return;
+    var spec = null;
+    if (key === "chartSpec" && typeof value === "string") spec = parseSpec(value);
+    var rr = rolesFor(mod), moved = false;
+    for (var roleKey in map) {
+      if (!Object.prototype.hasOwnProperty.call(map, roleKey)) continue;
+      var orderKey = map[roleKey];
+      var order = spec ? spec[orderKey] : (key === orderKey ? value : null);
+      if (!Array.isArray(order) || !order.length || !Array.isArray(rr[roleKey])) continue;
+      var next = listOrderApply(rr[roleKey], order);
+      if (next.join("\u001f") === rr[roleKey].join("\u001f")) continue;
+      rr[roleKey] = next;
+      moved = true;
+    }
+    if (!moved) return;
+    persist();
+    syncRolesRow();
+  }
   function roleChanged() {
     // A role change changes what this chart draws, exactly like a style
     // edit (the 6585 bump) - without this, a role edit made anywhere but
@@ -13791,6 +13862,7 @@
             if (idx < 0 || idx > arr.length) arr.push(PS_DRAG);
             else arr.splice(idx, 0, PS_DRAG);
             rr[def.key] = arr;
+            listOrderRelease(curModule(), def.key);
           } else rr[def.key] = PS_DRAG;
           slotMarkInsert(drop, null);
           clearDragState();
