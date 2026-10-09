@@ -66345,14 +66345,22 @@
             });
             _ebWireChoiceSeg("data-eb-method", function (v) {
                 if (String(data.errorBarMethod || "within") === v) return false;
+                try { var _mk1 = _gbModuleKind(); if (_mk1 === "cg" || _mk1 === "rm") _gb2MorphArm(); } catch (_eMo) {}
                 try { _undoTrackKey("errorBarMethod"); } catch (_eU0) {}
                 data.errorBarMethod = v;
                 try { _undoTake(); } catch (_eU1) {}
-                // No client preview: the Cousineau-Morey recompute needs
-                // the subject x measure matrix (deliberately not
-                // whitelisted - convention 11). Commit; the echo lands
-                // the new half-widths under the hard-cut mask.
+                // Client preview (Oct 9 2026): the Cousineau-Morey
+                // recompute runs here from each bar's values + rowIds
+                // (_gb2RmRecomputeErr), so the bars move at the click
+                // and the echo hashes identical. Payloads without the
+                // subject ids (the crossed design) keep the old road:
+                // the fold changes nothing and the echo lands them.
+                try { _gb2StatFold(data, { errorBarMethod: 1 }, String(data.errorBarType || "se")); } catch (_eF) {}
                 if (hasSetOption) { try { _setOption("errorBarMethod", v); } catch (_eO) {} }
+                // Half-widths feed the Y range (render-ENTRY state), so
+                // redraw() alone mis-scales the axis - the Data-points-
+                // toggle rule.
+                try { _gb2RerenderSoon(); } catch (_eR) {}
             });
             var _ebBtnsAll = body.querySelectorAll('[data-eb-btn]');
             for (var _ebbi = 0; _ebbi < _ebBtnsAll.length; _ebbi++) {
@@ -99634,6 +99642,7 @@
                     var _sfDiffs = null;
                     if (_diffed.indexOf("summaryFunc") >= 0) { (_sfDiffs = _sfDiffs || {}).summaryFunc = 1; }
                     if (_diffed.indexOf("errorBarType") >= 0) { (_sfDiffs = _sfDiffs || {}).errorBarType = 1; }
+                    if (_diffed.indexOf("errorBarMethod") >= 0) { (_sfDiffs = _sfDiffs || {}).errorBarMethod = 1; }
                     if (_sfDiffs) _gb2StatFold(data, _sfDiffs, _undoOldEt);
                 } catch (_eSfU) {}
                 // content-changed re-mount.
@@ -108281,6 +108290,87 @@
     // write/restore semantics are what it verifies, not UI routing.
     try { window.__gb2_statFold = function (d, k, o) { return _gb2StatFold(d, k, o); }; }
     catch (_eXsf) {}
+    // Repeated Measures half-widths, recomputed EXACTLY on the client
+    // (Oct 9 2026, Torry: switching the error-bar Method moved nothing
+    // for two seconds, and a quick second click cancelled the first).
+    // Mirrors rmplotbuilder.b.R's stat_for_cell and ps-data's buildRM:
+    // per between-subjects cell (panel x group) the subject x occasion
+    // matrix is rebuilt from each bar's values and rowIds (both hosts
+    // ship them), each subject's mean is removed and the cell's grand
+    // mean put back when the method is within (Cousineau), the sample
+    // SD of those normalised values times Morey's sqrt(k / (k - 1))
+    // gives the SE, and the type multiplier is the same one the other
+    // folds use. Centres are untouched (the correction never moves a
+    // mean). Returns false, changing nothing, when the payload cannot
+    // supply the matrix: the crossed factorial design (pivotFactors;
+    // its cells are factor levels, not measures), hidden points (values
+    // are filtered
+    // but rowIds are not), or an old file without rowIds; the echo then
+    // lands the numbers as before.
+    function _gb2RmRecomputeErr(data) {
+        if (!data || data.isRepeatedMeasures !== true) return false;
+        // The crossed factorial design (jamovi's rm/rmCells path) ships
+        // pivotFactors; its cells are factor-level cells and its Morey
+        // factor is per within factor, so it keeps the echo.
+        if (Array.isArray(data.pivotFactors) && data.pivotFactors.length > 0) return false;
+        var bars = Array.isArray(data.bars) ? data.bars : [];
+        if (!bars.length) return false;
+        var sf = String(data.summaryFunc || "mean");
+        var et = String(data.errorBarType || "se");
+        var within = String(data.errorBarMethod || "within") === "within";
+        var sep = (typeof data.facetSeparator === "string") ? data.facetSeparator : "";
+        var fLevels = Array.isArray(data.facetLevels) ? data.facetLevels : [];
+        var cells = {}, keys = [], i, j, b;
+        for (i = 0; i < bars.length; i++) {
+            b = bars[i];
+            if (!b || !Array.isArray(b.values) || !Array.isArray(b.rowIds)
+                || b.rowIds.length !== b.values.length) return false;
+            var fac = (typeof b.facet === "string" && b.facet.length) ? b.facet
+                    : (sep && typeof b.x === "string") ? _gb2FacetOfKey(b.x, sep, fLevels) : "";
+            var key = String(fac || "") + "\u001F" + (typeof b.group === "string" ? b.group : "");
+            if (!cells[key]) { cells[key] = []; keys.push(key); }
+            cells[key].push(b);
+        }
+        for (var c = 0; c < keys.length; c++) {
+            var cell = cells[keys[c]];
+            var k = cell.length;
+            var useWithin = within && k >= 2;
+            var morey = useWithin ? Math.sqrt(k / (k - 1)) : 1;
+            var subj = {}, gSum = 0, gN = 0;
+            if (useWithin) {
+                for (i = 0; i < cell.length; i++) {
+                    b = cell[i];
+                    for (j = 0; j < b.values.length; j++) {
+                        var v = b.values[j];
+                        if (typeof v !== "number" || !isFinite(v)) continue;
+                        var sid = String(b.rowIds[j]);
+                        var s = subj[sid] || (subj[sid] = { s: 0, c: 0 });
+                        s.s += v; s.c++;
+                        gSum += v; gN++;
+                    }
+                }
+            }
+            var grand = gN > 0 ? gSum / gN : 0;
+            for (i = 0; i < cell.length; i++) {
+                b = cell[i];
+                var norm = [];
+                for (j = 0; j < b.values.length; j++) {
+                    var val = b.values[j];
+                    if (typeof val !== "number" || !isFinite(val)) continue;
+                    if (useWithin) {
+                        var sm = subj[String(b.rowIds[j])];
+                        norm.push(val - (sm.s / sm.c) + grand);
+                    } else norm.push(val);
+                }
+                var n = norm.length;
+                if (n < 2 || et === "none" || sf === "median") { b.se = 0; continue; }
+                var sd = Math.sqrt(_gb2Stats.variance(norm)) * morey;
+                var se = sd / Math.sqrt(n);
+                b.se = _gb2SigR(se * _gb2ErrMult(et, n));
+            }
+        }
+        return true;
+    }
     function _gb2StatFold(data, diffs, oldErrType) {
         try {
             if (!data || data.freqMode === true) return;
@@ -108289,7 +108379,8 @@
             var isRM = data.isRepeatedMeasures === true;
             var sfChanged = Object.prototype.hasOwnProperty.call(diffs, "summaryFunc");
             var etChanged = Object.prototype.hasOwnProperty.call(diffs, "errorBarType");
-            if (!sfChanged && !etChanged) return;
+            var emChanged = Object.prototype.hasOwnProperty.call(diffs, "errorBarMethod");
+            if (!sfChanged && !etChanged && !emChanged) return;
             var sf = String(data.summaryFunc || "mean");
             var et = String(data.errorBarType || "se");
             var oldEt = String(oldErrType || "se");
@@ -108310,6 +108401,7 @@
                     b.mean = _gb2SigR(sf === "median"
                         ? _gb2MedianOf(vals) : _gb2Stats.mean(vals));
                 }
+                if (emChanged && !etChanged && !sfChanged) continue;
                 if (etChanged || sfChanged) {
                     // RM half-width stash (Jul 11 2026, Torry's vanishing
                     // error bars): before a hop ZEROES a positive RM
@@ -108371,6 +108463,13 @@
                     // stash).
                 }
             }
+            // Repeated Measures: when the subject matrix is at hand the
+            // EXACT recompute replaces the rescale above for every hop
+            // (type, summary and method alike; from-"none" and median
+            // hops included), so the picture lands at the click and the
+            // echo hashes identical. Where it is not, the rescale and
+            // the stash above remain the preview.
+            if (isRM) { try { _gb2RmRecomputeErr(data); } catch (_eRm) {} }
         } catch (_eSf) {}
     }
     var _GB2_PANEL_KEYS = ["graphType", "showDataPoints", "connectSubjects",
