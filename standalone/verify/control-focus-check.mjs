@@ -39,9 +39,22 @@ async function selected(page, group, value, stage) {
   const { root } = await page.choiceCDP.send('DOM.getDocument');
   const exposed = [];
   for (const [key, label] of Object.entries(labels)) {
-    const { nodeId } = await page.choiceCDP.send('DOM.querySelector', { nodeId: root.nodeId, selector: `[${attr}="${key}"]` });
-    const { nodes } = await page.choiceCDP.send('Accessibility.getPartialAXTree', { nodeId, fetchRelatives: false });
-    const node = nodes[0];
+    // A choice click re-renders the chart locally (Type always did;
+    // Method too since Oct 2026), which can replace the button between
+    // resolving its node and reading its accessibility tree. Re-resolve
+    // and read again on that one error; anything else still throws.
+    let node = null;
+    for (let attempt = 0; attempt < 6 && !node; attempt++) {
+      const doc = attempt ? (await page.choiceCDP.send('DOM.getDocument')).root : root;
+      const { nodeId } = await page.choiceCDP.send('DOM.querySelector', { nodeId: doc.nodeId, selector: `[${attr}="${key}"]` });
+      try {
+        const { nodes } = await page.choiceCDP.send('Accessibility.getPartialAXTree', { nodeId, fetchRelatives: false });
+        node = nodes[0];
+      } catch (e) {
+        if (!/Could not find node/.test(String(e)) || attempt === 5) throw e;
+        await page.waitForTimeout(60);
+      }
+    }
     const state = { value: key, role: node.role?.value, name: node.name?.value,
       pressed: String(node.properties?.find(p => p.name === 'pressed')?.value.value) };
     assert.deepEqual(state, { value: key, role: 'button', name: label, pressed: String(key === value) },

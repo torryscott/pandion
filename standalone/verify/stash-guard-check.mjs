@@ -93,11 +93,18 @@ const r1 = await page.evaluate((victimKey) => {
   const keyOf = b => (b.x || '') + '\u0001' + (b.group || '');
   const tampered = d.bars.find(b => keyOf(b) === victimKey);
   const others = d.bars.filter(b => keyOf(b) !== victimKey);
+  const stEntry = (window.__gb2_rmSeStash || {})[(victimKey.split('\u0001')[0]) + '\u001F' + (victimKey.split('\u0001')[1] || '')];
+  const stale = stEntry ? stEntry.se : NaN;
   return [
     [others.length >= 2 && others.every(b => b.se > 0),
       'untampered cells restore (' + others.map(b => b.se).join(',') + ')'],
-    [!!tampered && tampered.se === 0,
-      'tampered cell REFUSES the stale restore (se=' + (tampered && tampered.se) + ')']
+    // Since Oct 2026 the fold recomputes Repeated Measures half-widths
+    // EXACTLY from the cell's current values + rowIds, so the tampered
+    // cell gets a FRESH number from its tampered values, never the
+    // stale stashed one (before that it had no basis and stayed at 0;
+    // on the pre-fingerprint tree the stale value came back).
+    [!!tampered && tampered.se > 0 && Math.abs(tampered.se - stale) > 1e-6,
+      'tampered cell never gets the stale restore (se=' + (tampered && tampered.se) + ', stale ' + stale + ')']
   ];
 }, stashInfo.victimKey);
 for (const [cond, label] of r1) ok(cond, label);

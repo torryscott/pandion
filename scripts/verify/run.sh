@@ -397,6 +397,17 @@ if [ "$EXTRAS" = "1" ]; then
             exit "$rc"
         fi
     fi
+    echo "== extras: Repeated Measures error-bar method parity (client recompute vs R)"
+    if GB2_RM_PARITY_OUT="$OUT-rmparity" GB2_BUNDLE="$BUNDLE" Rscript "$HERE/rm-method-parity.R" > /dev/null; then
+        GB2_RM_PARITY_OUT="$OUT-rmparity" node "$HERE/rm-method-parity.mjs"
+    else
+        rc=$?
+        if [ "$rc" -eq 2 ]; then
+            echo "   skipped: jmvcore not available in this R library"
+        else
+            exit "$rc"
+        fi
+    fi
     echo "== extras: glossary accuracy contract"
     node "$HERE/glossary-audit.mjs"
     echo "== extras: chart-styles library probe"
