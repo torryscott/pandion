@@ -464,7 +464,7 @@
       { target: ['[data-role="graphtype-trigger"]', '[data-role="palette-trigger"]'],
         title: "Type and theme",
         body: "The toolbar's left end says what kind of chart this is. Click it to switch types without losing your styling. Theme holds the palettes and any looks you have saved." },
-      { target: 'button[aria-label="Statistics"]',
+      { target: 'button[title="Statistics"]',
         title: "The numbers",
         body: "Stats opens the statistics panel: the numbers behind the chart, comparisons between groups with brackets you can place, and Keep, which sends a result to the Notebook." },
       { target: ['button[aria-label$="hide elements"]', 'button[aria-label="Chart settings"]', '[data-role="setting-search-trigger"]'],

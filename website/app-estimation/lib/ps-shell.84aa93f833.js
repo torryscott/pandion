@@ -653,6 +653,324 @@
       "copy that does not depend on this browser.", true);
   }
   var AUTOSAVE_LAST_OK = null;     // B14: when work last actually reached storage
+  // A project too large for browser autosave (Oct 2026, a colleague's 70 MB
+  // survey file). Browser autosave is localStorage, which holds about five
+  // million characters for the whole origin, and a table of 12,570 rows by
+  // 1,010 columns serializes to 85 million. Every persist still built that
+  // whole string (0.5 to 1 second of frozen window, measured), failed on the
+  // quota, and raised the same red toast: on every edit, every style change,
+  // every workspace switch. Once a write has failed for SIZE the app now
+  // remembers the size that failed, stops building the snapshot, says so
+  // once, and tries again only when the table has shrunk enough that it
+  // might fit. The chip, the status line and the close-tab guard keep
+  // reporting the true state the whole time.
+  var AUTOSAVE_ROOM_CHARS = 4500000;      // what one project may plausibly use
+  var AUTOSAVE_TOO_BIG = null;            // { cells, chars } of the failed write
+  function tableCellCount() {
+    var t = PROJECT && PROJECT.table;
+    return (t && t.order && t.order.length) ? t.order.length * nRows(t) : 0;
+  }
+  function autosaveTooBigNow() {
+    if (!AUTOSAVE_TOO_BIG) return false;
+    // Proportional: the cell count at which the failed snapshot would have
+    // come down to the room there is. Above it, do not even try.
+    var fits = AUTOSAVE_TOO_BIG.cells *
+      (AUTOSAVE_ROOM_CHARS / Math.max(1, AUTOSAVE_TOO_BIG.chars));
+    if (tableCellCount() > fits) return true;
+    AUTOSAVE_TOO_BIG = null;              // it shrank: the next write is real
+    return false;
+  }
+  function autosaveTooBigDetail() {
+    return "This project is too large for browser autosave: it needs about " +
+      formatBytes(AUTOSAVE_TOO_BIG ? AUTOSAVE_TOO_BIG.chars : LAST_PROJECT_BYTES) +
+      " and the browser keeps about 5 MB" +
+      (BIG_UNAVAILABLE ? ", and this browser would not open the larger " +
+        "store that a project this size is normally autosaved to" : "") +
+      ". Your work is safe in this tab, and a reload would lose whatever " +
+      "is not in a file. Save it to a .pand file as you go.";
+  }
+  // ---- autosave for a project too large for localStorage ----
+  // (Oct 2026, the same 70 MB survey file.) The browser's larger store,
+  // IndexedDB, holds hundreds of megabytes where localStorage holds five,
+  // so a project that cannot be autosaved the ordinary way is autosaved
+  // there instead. Two things make that workable at 12.7 million cells:
+  //   - the data is stored ONE RECORD PER COLUMN, and a write carries only
+  //     the columns that changed since the last one. Writing the whole
+  //     table freezes the page for about half a second (measured); one
+  //     column takes about a millisecond. The rest of the project (charts,
+  //     layouts, Notebook, settings, the table's shape) is one small record
+  //     written every time, since it is what changes most;
+  //   - writes are coalesced: one write a second at most, trailing, and a
+  //     last one at pagehide.
+  // Which columns changed comes from the data history: dataMark means a
+  // whole-table change is about to happen, dataMarkCell names its column,
+  // undo and redo say which they put back, and a new table object (a load
+  // or an import) means everything. That is the same set of events the Data
+  // workspace's undo depends on, so it is complete for anything a user can
+  // do to the data. A small localStorage marker (PS_BIG_KEY) says which
+  // project lives in the larger store, so a reload knows to look there. The
+  // .pand file remains the copy that does not depend on this browser: the
+  // larger store can still be cleared by the browser under disk pressure.
+  var PS_BIG_KEY = "psstandalone.project.big.v1";
+  var BIG_DB = "ps-autosave", BIG_STORE = "project";
+  var BIG_ACTIVE = false;        // the open project autosaves in the larger store
+  var BIG_UNAVAILABLE = false;   // the browser refused it: back to the warning
+  var BIG_BOOT = null;           // the marker found at boot, until restored
+  var BIG_DIRTY_ALL = true, BIG_DIRTY_COLS = {};
+  var BIG_TABLE_REF = null, BIG_TIMER = null;
+  var BIG_PENDING = false, BIG_INFLIGHT = false, BIG_WARNED = false;
+  var BIG_WRITES = 0, BIG_LAST_ERROR = "";
+  var BIG_WINDOW_MS = 1000;
+  function bigAvailable() { return !BIG_UNAVAILABLE && !!window.indexedDB; }
+  // Certain not to fit localStorage: at four characters a cell ("x", plus
+  // the comma) the smallest possible snapshot is already past the room.
+  // Skipping the attempt saves building an 85-million-character string.
+  function bigCertainlyTooBig() {
+    return tableCellCount() * 4 > AUTOSAVE_ROOM_CHARS;
+  }
+  function bigEstimateChars() {
+    return AUTOSAVE_TOO_BIG ? AUTOSAVE_TOO_BIG.chars : tableCellCount() * 7;
+  }
+  function bigDirtyCol(col) { if (col != null) BIG_DIRTY_COLS[col] = true; }
+  function bigOpen(cb) {
+    var req;
+    try { req = window.indexedDB.open(BIG_DB, 1); }
+    catch (e) { cb(null); return; }
+    req.onupgradeneeded = function () {
+      try { req.result.createObjectStore(BIG_STORE); } catch (e) {}
+    };
+    req.onerror = function () { cb(null); };
+    req.onblocked = function () { cb(null); };
+    req.onsuccess = function () { cb(req.result); };
+  }
+  function bigPersist() {
+    BIG_ACTIVE = true;
+    if (PROJECT.table !== BIG_TABLE_REF) {
+      BIG_TABLE_REF = PROJECT.table;
+      BIG_DIRTY_ALL = true;
+    }
+    BIG_PENDING = true;
+    if (!BIG_TIMER)
+      BIG_TIMER = window.setTimeout(function () {
+        BIG_TIMER = null;
+        bigWrite();
+      }, BIG_WINDOW_MS);
+    updateDocumentState();
+  }
+  function bigFlush() {
+    if (BIG_TIMER) { window.clearTimeout(BIG_TIMER); BIG_TIMER = null; }
+    if (BIG_PENDING) bigWrite();
+  }
+  function bigWrite() {
+    if (BIG_INFLIGHT) { BIG_PENDING = true; return; }   // again when it lands
+    BIG_PENDING = false;
+    BIG_INFLIGHT = true;
+    var snap;
+    var dirtyAll = BIG_DIRTY_ALL, dirtyCols = BIG_DIRTY_COLS;
+    BIG_DIRTY_ALL = false; BIG_DIRTY_COLS = {};
+    try { snap = projectSnapshot(); }
+    catch (e) { BIG_INFLIGHT = false; bigFailed(e, false); return; }
+    // The snapshot's wrappers are fresh objects; the raw columns are the
+    // live arrays, which IndexedDB copies as it stores them.
+    var table = snap.table, raw = table.raw;
+    delete snap.table;
+    delete table.raw;
+    var order = Array.isArray(table.order) ? table.order : [];
+    var cols = dirtyAll ? order.slice()
+      : order.filter(function (c) { return dirtyCols[c]; });
+    var meta = { id: snap.id, name: snap.name, savedAt: snap.savedAt,
+                 cells: tableCellCount(), small: snap, tableMeta: table };
+    var recentSnap = Object.assign({}, snap,
+      { table: Object.assign({}, table, { raw: raw }) });
+    bigOpen(function (db) {
+      if (!db) { BIG_INFLIGHT = false; bigFailed(null, true); return; }
+      var tx, failed = null;
+      try {
+        tx = db.transaction(BIG_STORE, "readwrite");
+        var store = tx.objectStore(BIG_STORE);
+        store.put(meta, "meta");
+        for (var i = 0; i < cols.length; i++)
+          store.put(raw[cols[i]] || [], "col:" + cols[i]);
+        if (dirtyAll) {
+          // Columns that no longer exist (deleted, renamed, another table).
+          var keep = {};
+          for (var k = 0; k < order.length; k++) keep["col:" + order[k]] = true;
+          var keysReq = store.getAllKeys();
+          keysReq.onsuccess = function () {
+            var ks = keysReq.result || [];
+            for (var j = 0; j < ks.length; j++)
+              if (typeof ks[j] === "string" && ks[j].indexOf("col:") === 0 &&
+                  !keep[ks[j]]) store.delete(ks[j]);
+          };
+        }
+      } catch (e) { failed = e; }
+      if (failed) {
+        try { db.close(); } catch (e2) {}
+        BIG_INFLIGHT = false;
+        bigFailed(failed, false);
+        return;
+      }
+      tx.oncomplete = function () {
+        try { db.close(); } catch (e3) {}
+        BIG_INFLIGHT = false;
+        bigLanded(meta, recentSnap);
+      };
+      tx.onerror = tx.onabort = function () {
+        var err = tx.error;
+        try { db.close(); } catch (e4) {}
+        BIG_INFLIGHT = false;
+        bigFailed(err, false);
+      };
+    });
+  }
+  function bigLanded(meta, recentSnap) {
+    if (!BIG_ACTIVE) return;          // retired while this write was in flight
+    BIG_WRITES++;
+    AUTOSAVE_HEALTH = "ok";
+    AUTOSAVE_LAST_OK = Date.now();
+    AUTOSAVE_DETAIL = "Local recovery is current (in the browser's larger store)";
+    LAST_PROJECT_BYTES = bigEstimateChars();
+    try {
+      window.localStorage.setItem(PS_BIG_KEY, JSON.stringify(
+        { id: meta.id, name: meta.name, savedAt: meta.savedAt, cells: meta.cells }));
+    } catch (e0) {}
+    // The autosave slot is the larger store now. A reload must not bring
+    // back whatever small project the ordinary slot still held.
+    try { window.localStorage.removeItem(PS_SAVE_KEY); } catch (e1) {}
+    try { window.localStorage.removeItem(PS_STALE_KEY); } catch (e2) {}
+    try { rememberRecent(recentSnap, { length: LAST_PROJECT_BYTES }); } catch (e3) {}
+    updateDocumentState();
+    if (BIG_PENDING && !BIG_TIMER)       // changes arrived while writing
+      BIG_TIMER = window.setTimeout(function () { BIG_TIMER = null; bigWrite(); },
+                                    BIG_WINDOW_MS);
+  }
+  function bigFailed(err, unavailable) {
+    if (unavailable) BIG_UNAVAILABLE = true;
+    BIG_PENDING = true;                  // the next persist tries again
+    BIG_DIRTY_ALL = true;
+    BIG_LAST_ERROR = String(err && (err.name || err.message) || "unavailable");
+    AUTOSAVE_HEALTH = "error";
+    AUTOSAVE_FAILS++;
+    AUTOSAVE_DETAIL = unavailable ? autosaveTooBigDetail()
+      : "The browser's larger store could not be written (" + BIG_LAST_ERROR +
+        "). Your work is safe in this tab, and a reload would lose whatever " +
+        "is not in a file. Save it to a .pand file as you go.";
+    try { window.localStorage.setItem(PS_STALE_KEY, "1"); } catch (e1) {}
+    updateDocumentState();
+    if (BIG_WARNED) return;
+    BIG_WARNED = true;
+    showActionToast(AUTOSAVE_DETAIL, "Save to a file", function () {
+      try { saveProjectFile(); } catch (eS) {}
+    }, { error: true, sticky: true, dismissLabel: "Not now" });
+  }
+  // The ordinary autosave succeeded again (a smaller project replaced the
+  // large one, or it shrank), so the larger store is no longer the slot.
+  function bigRetire() {
+    BIG_ACTIVE = false;
+    BIG_PENDING = false;
+    if (BIG_TIMER) { window.clearTimeout(BIG_TIMER); BIG_TIMER = null; }
+    BIG_DIRTY_ALL = true; BIG_DIRTY_COLS = {};
+    try { window.localStorage.removeItem(PS_BIG_KEY); } catch (e0) {}
+    bigOpen(function (db) {
+      if (!db) return;
+      try {
+        var tx = db.transaction(BIG_STORE, "readwrite");
+        tx.objectStore(BIG_STORE).clear();
+        tx.oncomplete = tx.onerror = function () { try { db.close(); } catch (e) {} };
+      } catch (e1) { try { db.close(); } catch (e2) {} }
+    });
+  }
+  // At boot: the marker says a large project is autosaved in the larger
+  // store. The sample is on screen under the busy curtain while it loads,
+  // and the start centre waits for the answer.
+  function bigBootRestore() {
+    if (!BIG_BOOT) return;
+    var want = BIG_BOOT;
+    busyShow("Restoring your project");
+    function finish(snap, why) {
+      BIG_BOOT = null;
+      busyHide();
+      if (snap) {
+        var invalid = projectValidationError(snap);
+        if (!invalid && applySnapshot(snap)) {
+          dataHistoryClear();
+          PROJECT_REV = 0;
+          FILE_SAVED_REV = null; FILE_LABEL = null; FILE_HANDLE = null;
+          PROJECT_CHOSEN = true;
+          BIG_ACTIVE = true;
+          BIG_TABLE_REF = PROJECT.table;
+          BIG_DIRTY_ALL = false; BIG_DIRTY_COLS = {};
+          BIG_PENDING = false;
+          AUTOSAVE_HEALTH = "ok";
+          AUTOSAVE_DETAIL = "Local recovery is current (in the browser's larger store)";
+          AUTOSAVE_LAST_OK = snap.savedAt ? Date.parse(snap.savedAt) || Date.now() : Date.now();
+          LAST_PROJECT_BYTES = bigEstimateChars();
+          BOOT_RESTORED = true;
+          BOOT_SAVED_AT = snap.savedAt || null;
+          RECOVERY_NOTE = "";
+          validateRoles();
+          syncAll(); render();
+          updateDocumentState();
+          showWelcome(false);
+          return;
+        }
+        why = invalid || "the contents were not recognized";
+      }
+      RECOVERY_NOTE = "The autosaved project" +
+        (want && want.name ? " (" + want.name + ")" : "") +
+        " could not be read from the browser's larger store" +
+        (why ? ": " + why : "") + ". A fresh sample project was opened.";
+      try { window.localStorage.removeItem(PS_BIG_KEY); } catch (e0) {}
+      BOOT_RESTORED = false;
+      updateDocumentState();
+      showWelcome(false);
+    }
+    bigOpen(function (db) {
+      if (!db) { finish(null, "the store would not open"); return; }
+      var meta = null, raw = {};
+      try {
+        var tx = db.transaction(BIG_STORE, "readonly");
+        var store = tx.objectStore(BIG_STORE);
+        var metaReq = store.get("meta");
+        metaReq.onsuccess = function () {
+          meta = metaReq.result;
+          if (!meta || !meta.small || !meta.tableMeta ||
+              !Array.isArray(meta.tableMeta.order)) return;
+          meta.tableMeta.order.forEach(function (c) {
+            var r = store.get("col:" + c);
+            r.onsuccess = function () {
+              if (Array.isArray(r.result)) raw[c] = r.result;
+            };
+          });
+        };
+        tx.oncomplete = function () {
+          try { db.close(); } catch (e1) {}
+          if (!meta || !meta.small || !meta.tableMeta ||
+              !Array.isArray(meta.tableMeta.order)) {
+            finish(null, "no project record");
+            return;
+          }
+          var missing = meta.tableMeta.order.filter(function (c) {
+            return !Object.prototype.hasOwnProperty.call(raw, c);
+          });
+          if (missing.length) {
+            finish(null, missing.length + " column" +
+              (missing.length === 1 ? " is" : "s are") + " missing");
+            return;
+          }
+          finish(Object.assign({}, meta.small,
+            { table: Object.assign({}, meta.tableMeta, { raw: raw }) }));
+        };
+        tx.onerror = tx.onabort = function () {
+          try { db.close(); } catch (e2) {}
+          finish(null, "the read failed");
+        };
+      } catch (e) {
+        try { db.close(); } catch (e3) {}
+        finish(null, String(e && e.message || e));
+      }
+    });
+  }
   var RECOVERY_NOTE = "";
   var LAST_PROJECT_BYTES = 0;
   var LAST_RENDER_MS = 0;
@@ -3185,14 +3503,29 @@
   function exclCount(t) {
     return rowExclCount(t) + valueExclCount(t);
   }
-  function retype(t, preparingSnapshot) {
+  // onlyCols: a change known to touch only these columns (one edited cell)
+  // retypes just them. Typing a column reads nothing but that column, so the
+  // others' typed values, levels and audits are still true; on a table of a
+  // thousand columns the full pass cost over a second per edited cell.
+  // Anything structural (columns added, removed, renamed, reordered, a
+  // missing-code change) keeps calling this with no list, as before.
+  function retype(t, preparingSnapshot, onlyCols) {
     normalizeTableMaps(t);
     if (!preparingSnapshot) bumpSnapEpoch(); // commit, not candidate preparation
-    retypeColumns(t);
+    var only = null;
+    if (Array.isArray(onlyCols) && onlyCols.length && t.columns && t.typeAudit) {
+      only = onlyCols;
+      for (var oc = 0; oc < onlyCols.length; oc++)
+        if (!t.raw[onlyCols[oc]] || !t.columns[onlyCols[oc]]) { only = null; break; }
+    }
+    retypeColumns(t, only);
     // Computed columns (Tier 1): every stored formula re-evaluates from
     // the freshly typed source values (chains follow dependency order), then
     // ONE more typing pass derives levels/types for the results.
-    if (recomputeFormulas(t)) retypeColumns(t);
+    if (recomputeFormulas(t))
+      retypeColumns(t, only ? t.order.filter(function (c) {
+        return isComputedColumn(t, c) || only.indexOf(c) !== -1;
+      }) : null);
     computeFilterState(t, preparingSnapshot);
   }
   function isComputedColumn(t, col) {
@@ -3273,18 +3606,22 @@
     }
     return wrote;
   }
-  function retypeColumns(t) {
-    t.columns = dataMap(); t.levels = dataMap(); t.numericish = dataMap();
-    // t.typeAudit is what the variable inspector reads to name the values
-    // that decided each type (18b/18c). It is derived state: rebuilt on
-    // every retype and deliberately absent from every serialization list.
-    t.typeAudit = dataMap();
+  function retypeColumns(t, only) {
+    if (!only) {
+      t.columns = dataMap(); t.levels = dataMap(); t.numericish = dataMap();
+      // t.typeAudit is what the variable inspector reads to name the values
+      // that decided each type (18b/18c). It is derived state: rebuilt on
+      // every retype and deliberately absent from every serialization list.
+      t.typeAudit = dataMap();
+    }
+    var typeList = only || t.order;
     // The token map was rebuilt per CELL by isMissingRaw, which is 720k
     // object allocations on a 120k x 6 import. Built once per COLUMN now
     // (t3-58a gave columns their own token lists), which is still O(columns)
     // rather than O(cells) and keeps that fix intact.
-    for (var j = 0; j < t.order.length; j++) {
-      var col = t.order[j], rv = t.raw[col], out = [], lv = [], i;
+    for (var j = 0; j < typeList.length; j++) {
+      var col = typeList[j], rv = t.raw[col], out = [], lv = [], i;
+      if (only) delete t.levels[col];      // a column may stop having levels
       var tokens = tableMissingTokens(t, col);
       var audit = numericAudit(rv, tokens);
       t.typeAudit[col] = audit;
@@ -4107,6 +4444,25 @@
   }
   function persistWrite(housekeeping) {
     var snap, json;
+    // Known not to fit localStorage: the larger store, or, where the browser
+    // will not open one, the warning (see AUTOSAVE_TOO_BIG).
+    if (autosaveTooBigNow() || bigCertainlyTooBig()) {
+      if (!AUTOSAVE_TOO_BIG)
+        AUTOSAVE_TOO_BIG = { cells: tableCellCount(), chars: tableCellCount() * 7 };
+      if (bigAvailable()) { bigPersist(); return; }
+      // No larger store in this browser: say so once, then keep the state.
+      AUTOSAVE_HEALTH = "error";
+      var tooBig = autosaveTooBigDetail();
+      var firstTime = AUTOSAVE_DETAIL !== tooBig;
+      AUTOSAVE_DETAIL = tooBig;
+      try { window.localStorage.setItem(PS_STALE_KEY, "1"); } catch (eS) {}
+      updateDocumentState();
+      if (firstTime)
+        showActionToast(tooBig, "Save to a file", function () {
+          try { saveProjectFile(); } catch (eF) {}
+        }, { error: true, sticky: true, dismissLabel: "Not now" });
+      return;
+    }
     try {
       snap = projectSnapshot();
       json = JSON.stringify(snap);
@@ -4133,6 +4489,7 @@
       AUTOSAVE_LAST_OK = Date.now();
       AUTOSAVE_DETAIL = "Local recovery is current";
       try { window.localStorage.removeItem(PS_STALE_KEY); } catch (e0) {}
+      if (BIG_ACTIVE) bigRetire();
       // Recents stay on BOTH edges. They are observable immediately (the
       // start centre lists them, and anything can ask for them straight after
       // an action), and unlike the backup they do not re-parse the previous
@@ -4142,21 +4499,44 @@
       updateDocumentState();
     } catch (e) {
       AUTOSAVE_HEALTH = "error";
-      AUTOSAVE_FAILS++;
       // The 5k to 12k case already says the useful thing, naming .pand as the
       // copy that does not depend on this browser. At the size where the data
       // is ACTUALLY lost the message degraded to one that named no fix and
       // read as reassurance, so the sentence that would have saved the work
       // only appeared when it was not needed.
       var quota = /quota/i.test(String(e && (e.name || e.message)));
-      AUTOSAVE_DETAIL = quota
+      // A snapshot larger than the room there is can never be written, no
+      // matter what else is cleared: remember it, so the next persist does
+      // not rebuild it. (A failed stringify of a huge table lands here too:
+      // the json never existed, and the cell count stands in for its size.)
+      var cells = tableCellCount();
+      var chars = json ? json.length : cells * 7;
+      var wasTooBig = !!AUTOSAVE_TOO_BIG;
+      if ((quota || !json) && chars > AUTOSAVE_ROOM_CHARS && cells)
+        AUTOSAVE_TOO_BIG = { cells: cells, chars: chars };
+      // Too large for this store but the browser has a larger one: hand the
+      // project over to it. Not a failure to count or to warn about.
+      if (AUTOSAVE_TOO_BIG && bigAvailable()) { bigPersist(); return; }
+      AUTOSAVE_FAILS++;
+      var detail = AUTOSAVE_TOO_BIG ? autosaveTooBigDetail() : (quota
         ? "Browser storage is full, so this project is no longer being " +
           "autosaved. Your work is safe in this tab, and a reload would lose " +
           "it. Save it to a .pand file now."
-        : "Local recovery could not be updated";
+        : "Local recovery could not be updated");
+      // Say it when it STARTS failing, or when the reason changes. The chip
+      // and the status line carry the state from then on; the same red
+      // toast on every later edit was noise that taught people to ignore it.
+      var news = AUTOSAVE_DETAIL !== detail || (AUTOSAVE_TOO_BIG && !wasTooBig);
+      AUTOSAVE_DETAIL = detail;
       try { window.localStorage.setItem(PS_STALE_KEY, "1"); } catch (e1) {}
       updateDocumentState();
-      showToast(AUTOSAVE_DETAIL, true);
+      if (news) {
+        if (AUTOSAVE_TOO_BIG)
+          showActionToast(detail, "Save to a file", function () {
+            try { saveProjectFile(); } catch (eS) {}
+          }, { error: true, sticky: true, dismissLabel: "Not now" });
+        else showToast(detail, true);
+      }
     }
   }
   function migrateSnapshot(input) {
@@ -4431,6 +4811,15 @@
   }
   function restore() {
     var raw = null;
+    // A large project lives in the larger store; it is read after boot
+    // (bigBootRestore), with the sample standing in under the busy curtain.
+    try {
+      var marker = window.localStorage.getItem(PS_BIG_KEY);
+      if (marker && window.indexedDB) {
+        BIG_BOOT = JSON.parse(marker) || {};
+        return false;
+      }
+    } catch (eBig) { BIG_BOOT = null; }
     try {
       raw = window.localStorage.getItem(PS_SAVE_KEY);
       var s = JSON.parse(raw || "null");
@@ -4530,6 +4919,14 @@
       // chip says whether the work is safe, this says how recently.
       var line = autosaveFailing ? AUTOSAVE_DETAIL
         : (dirty ? "Unsaved file changes" : savedAgoText());
+      // Too large for browser autosave: the file is the only copy there can
+      // be, so the line says where the work stands against the FILE rather
+      // than repeating the warning after the user has done what it asked.
+      if (autosaveFailing && AUTOSAVE_TOO_BIG && !BIG_ACTIVE)
+        line = FILE_SAVED_REV == null
+          ? "Not saved yet \u00b7 too large for browser autosave, so save it to a .pand file"
+          : (dirty ? "Changes not in the file yet \u00b7 too large for browser autosave, so save as you go"
+                   : "Saved to file \u00b7 too large for browser autosave, so save as you go");
       // B14. One lucky small write used to erase every trace that saves had
       // been failing, including the honest status line. A recovered autosave
       // IS working again, so the chip goes quiet - but the session remembers
@@ -4729,10 +5126,19 @@
     if (!c || !isLayoutTab(c)) return "";
     var items = c.items || [];
     if (!items.length) return "Figure canvas with no placed items.";
-    var charts = [], text = [], images = 0;
+    var charts = [], text = [], images = 0, boxes = 0, arrows = 0, timelines = 0;
     for (var i = 0; i < items.length; i++) {
       var item = items[i] || {};
-      if (item.kind === "chart") {
+      if (item.kind === "box") {
+        boxes++;
+        var boxWords = String(item.text || "").replace(/\s+/g, " ").trim();
+        if (boxWords) text.push(boxWords.substring(0, 120));
+      } else if (item.kind === "arrow") arrows++;
+      else if (item.kind === "timeline") {
+        timelines++;
+        var tlText = layTimelineLabelsText(item);
+        if (tlText) text.push(tlText.substring(0, 120));
+      } else if (item.kind === "chart") {
         var linked = chartById(item.chartId);
         charts.push(linked && linked.name ? linked.name : "chart panel");
       } else if (item.kind === "text") {
@@ -4750,6 +5156,14 @@
         (text.length > 5 ? "; and more" : ""));
     if (images)
       parts.push(images + (images === 1 ? " added image" : " added images"));
+    if (boxes || arrows || timelines) {
+      var dp = [];
+      if (boxes) dp.push(boxes + (boxes === 1 ? " box" : " boxes"));
+      if (arrows) dp.push(arrows + (arrows === 1 ? " arrow" : " arrows"));
+      if (timelines) dp.push(timelines + (timelines === 1 ? " timeline" : " timelines"));
+      parts.push("Diagram parts: " + (dp.length > 1
+        ? dp.slice(0, -1).join(", ") + " and " + dp[dp.length - 1] : dp[0]));
+    }
     return parts.join(". ") + ".";
   }
   function generatedExportDescription() {
@@ -4887,6 +5301,12 @@
           });
           row.appendChild(b);
         }
+        if (entry.sticky) {
+          var no = mkEl("button", "ps-toast-dismiss", entry.dismissLabel || "Dismiss");
+          no.type = "button";
+          no.addEventListener("click", function () { dismissToast(entry.id); });
+          row.appendChild(no);
+        }
         host.appendChild(row);
       })(TOASTS[i]);
     }
@@ -4906,7 +5326,12 @@
     opts = opts || {};
     var entry = { id: ++TOAST_SEQ, text: String(text),
                   error: !!opts.error, undo: opts.undo || null,
-                  actionLabel: opts.actionLabel || null, timer: null };
+                  actionLabel: opts.actionLabel || null, timer: null,
+                  // A QUESTION stays until it is answered. The large-file
+                  // prompt asked "Read it anyway" and then left after six
+                  // seconds, taking the only way forward with it.
+                  sticky: !!opts.sticky,
+                  dismissLabel: opts.dismissLabel || null };
     TOASTS.push(entry);
     // Over the cap, drop the oldest ANNOUNCEMENT; an offer is only dropped
     // when the pile is nothing but offers, which is the same bug in
@@ -4921,8 +5346,9 @@
     // An error gets longer than a confirmation and longer than an offer,
     // because reading it is the whole point; an offer gets its six seconds;
     // a confirmation is the only one that should be quick.
-    entry.timer = window.setTimeout(function () { dismissToast(entry.id); },
-      entry.error ? 8000 : (opts.undo ? 6000 : 2800));
+    if (!entry.sticky)
+      entry.timer = window.setTimeout(function () { dismissToast(entry.id); },
+        entry.error ? 8000 : (opts.undo ? 6000 : 2800));
     renderToasts();
     return entry.id;
   }
@@ -5001,8 +5427,10 @@
   function showUndoToast(msg, undo) { return pushToast(msg, { undo: undo }); }
   // Same pill, a named button. Used where the offer is not "undo that" but
   // "here is the one change that would let this work" (punch list 19).
-  function showActionToast(msg, label, run) {
-    return pushToast(msg, { undo: run, actionLabel: label });
+  function showActionToast(msg, label, run, more) {
+    var opts = { undo: run, actionLabel: label };
+    if (more) for (var k in more) opts[k] = more[k];
+    return pushToast(msg, opts);
   }
   function offerDataUndo(message, actionSeq) {
     showUndoToast(message, function () {
@@ -5636,6 +6064,77 @@
     }
     return t;
   }
+
+  // ---- figure parts in the file (see the Figure parts block). The
+  // box is a rect with its text wrapped and centred, the arrow a path
+  // and its head triangles; both from the item model, like text.
+  function layoutBoxNode(doc, item) {
+    var ns = "http://www.w3.org/2000/svg", st = layBoxStyle(item);
+    var g = doc.createElementNS(ns, "g");
+    var x = Number(item.x) || 0, y = Number(item.y) || 0;
+    var w = Math.max(1, Number(item.w) || 150), h = Math.max(1, Number(item.h) || 44);
+    var bw = st.borderW;
+    var r = doc.createElementNS(ns, "rect");
+    // The canvas border is INSIDE the box (border-box); a stroke sits
+    // centred on the edge, so the rect is inset by half the stroke.
+    r.setAttribute("x", layNum2(x + bw / 2)); r.setAttribute("y", layNum2(y + bw / 2));
+    r.setAttribute("width", layNum2(Math.max(0.5, w - bw)));
+    r.setAttribute("height", layNum2(Math.max(0.5, h - bw)));
+    if (st.corner) r.setAttribute("rx", layNum2(Math.max(0, st.corner - bw / 2)));
+    r.setAttribute("fill", st.fill === "none" ? "none" : st.fill);
+    if (bw) {
+      r.setAttribute("stroke", st.borderColor);
+      r.setAttribute("stroke-width", String(bw));
+    }
+    g.appendChild(r);
+    var fs = st.fs, rot = layTextRotate(item);
+    var font = (item.italic ? "italic " : "") + (item.bold ? "700" : "400") +
+      " " + fs + "px sans-serif";
+    var inner = (layBoxTextRotated(item) ? h : w) - LAY_BOX_PAD_X * 2 - bw * 2;
+    var lines = wrapCaptionLines(String(item.text || "Box"),
+      Math.max(8, inner), fs, font);
+    var t = doc.createElementNS(ns, "text");
+    var cx = x + w / 2, cy = y + h / 2, lineH = fs * LAY_TEXT_LINE;
+    var top = cy - lines.length * lineH / 2;
+    t.setAttribute("x", layNum2(cx));
+    t.setAttribute("y", layNum2(top + fs * 0.9));
+    t.setAttribute("text-anchor", "middle");
+    t.setAttribute("fill", layTextColor(item));
+    t.setAttribute("font-size", String(fs));
+    t.setAttribute("font-family", "sans-serif");
+    t.setAttribute("font-weight", item.bold ? "700" : "400");
+    if (item.italic) t.setAttribute("font-style", "italic");
+    if (rot) t.setAttribute("transform", "rotate(" + rot + " " +
+      layNum2(cx) + " " + layNum2(cy) + ")");
+    for (var i = 0; i < lines.length; i++) {
+      var sp = doc.createElementNS(ns, "tspan");
+      sp.setAttribute("x", layNum2(cx));
+      if (i > 0) sp.setAttribute("dy", LAY_TEXT_LINE + "em");
+      sp.textContent = lines[i] || " ";
+      t.appendChild(sp);
+    }
+    g.appendChild(t);
+    return g;
+  }
+  function layoutArrowNode(doc, item) {
+    var ns = "http://www.w3.org/2000/svg", r = layArrowRender(item), st = r.style;
+    var g = doc.createElementNS(ns, "g");
+    var ox = Number(item.x) || 0, oy = Number(item.y) || 0;
+    var p = doc.createElementNS(ns, "path");
+    p.setAttribute("d", layArrowD(r.line, ox, oy));
+    p.setAttribute("fill", "none");
+    p.setAttribute("stroke", st.color);
+    p.setAttribute("stroke-width", String(st.width));
+    p.setAttribute("stroke-linejoin", "round");
+    g.appendChild(p);
+    for (var i = 0; i < r.heads.length; i++) {
+      var poly = doc.createElementNS(ns, "polygon");
+      poly.setAttribute("points", layArrowPoly(r.heads[i], ox, oy));
+      poly.setAttribute("fill", st.color);
+      g.appendChild(poly);
+    }
+    return g;
+  }
   function layoutExportSource(mode) {
     var ns = "http://www.w3.org/2000/svg";
     var doc = document.implementation.createDocument(ns, "svg", null);
@@ -5670,6 +6169,18 @@
       var item = items[i];
       if (item.kind === "chart" ||
           (item.kind === "image" && item.srcPin)) panelRect(item);
+      if (item.kind === "box") {
+        root.appendChild(layoutBoxNode(doc, item));
+        continue;
+      }
+      if (item.kind === "arrow") {
+        root.appendChild(layoutArrowNode(doc, item));
+        continue;
+      }
+      if (item.kind === "timeline") {
+        root.appendChild(layoutTimelineNode(doc, item));
+        continue;
+      }
       if (item.kind === "text") {
         root.appendChild(layoutTextNode(doc, item));
         continue;
@@ -10583,7 +11094,8 @@
     // one-shot source emphasis only for this explicit Reveal action.
     LINKED_REVEAL_EMPHASIS = true;
     gridApplySelection();
-    var td = gridFindTd(LINKED_CELL.col, row);
+    var td = gridFindTd(LINKED_CELL.col, row) ||
+             gridBuildCell(LINKED_CELL.col, row);
     if (td && td.scrollIntoView)
       try { td.scrollIntoView({ block: "center", inline: "nearest" }); }
       catch (e) { td.scrollIntoView(); }
@@ -11276,7 +11788,29 @@
       echoTimer = window.setTimeout(renderWhenEditorIdle, 120);
       return;
     }
+    // Keyboard focus rides the echo. The engine never refocuses the chart
+    // after a rebuild (in jamovi that scrolls the parent frame), so here,
+    // where there is no parent frame, the shell puts focus back when the
+    // rebuild dropped it to the page body. Without this an arrow-key nudge
+    // worked and, one echo later, Alt+Arrow or a bar step did nothing.
+    var hadChartFocus = chartSvgFocused();
     render();
+    if (hadChartFocus) restoreChartSvgFocus();
+  }
+  function chartSvgFocused() {
+    try {
+      var a = document.activeElement, h = hostEl();
+      return !!(a && h && a.getAttribute && h.contains(a) &&
+                a.getAttribute("data-role") === "gb2-chart-svg");
+    } catch (e) { return false; }
+  }
+  function restoreChartSvgFocus() {
+    try {
+      var a = document.activeElement;
+      if (a && a !== document.body && a !== document.documentElement) return;
+      var svg = hostEl().querySelector('svg[data-role="gb2-chart-svg"]');
+      if (svg && svg.focus) svg.focus({ preventScroll: true });
+    } catch (e) {}
   }
   // Echo delay: this debounce stands in for jamovi's R round trip.
   //
@@ -11363,6 +11897,7 @@
     // compares the incoming size against the standard, never against the
     // stored one, so the order is safe.
     optionsFor(curModule())[key] = value;
+    try { listOrderMirror(key, value); } catch (eLo) {}
     fitNoticeSizeCommit(key, value);   // punch list 27
     bumpSnapEpoch();   // a style edit changes what this chart draws
     persistStyleEdit();
@@ -12825,6 +13360,108 @@
     setTip(help, full);
   }
   // Everything a role mutation must refresh, in one place.
+  // A list role's chip order and the chart's drawn order are the same
+  // fact seen from two sides (Torry, Oct 8 2026: dragging a marker on the
+  // chart broke the cards' ability to reorder the graph). The engine keeps
+  // a drawn order of its own for three list roles: Repeated Measures
+  // occasions (categoryOrder), Likert items (likertItemOrder) and matrix
+  // variables (corrVarOrder), all living in the chartSpec blob. The
+  // engine applies that order OVER the shipped one, so once a chart drag
+  // had committed it, reordering the chips changed nothing. Two mirrors
+  // keep the sides agreeing: a chip reorder RELEASES the engine's order
+  // (the chips now define it, and the next render ships them in that
+  // order), and an engine commit of the order REORDERS the chips.
+  var LIST_ORDER_KEYS = {
+    rmplotbuilder: { measures: "categoryOrder" },
+    likertplotbuilder: { items: "likertItemOrder" },
+    corrplotbuilder: { vars: "corrVarOrder" }
+  };
+  // The engine's own rule (_applyUserOrder): members named in the order
+  // first, in that order; the rest keep their current order after them.
+  function listOrderApply(members, order) {
+    if (!Array.isArray(members) || !Array.isArray(order) || !order.length) return members;
+    var rank = {};
+    for (var i = 0; i < order.length; i++) if (!(order[i] in rank)) rank[order[i]] = i;
+    var named = [], rest = [];
+    for (var j = 0; j < members.length; j++)
+      (typeof rank[members[j]] === "number" ? named : rest).push(members[j]);
+    named.sort(function (a, b) { return rank[a] - rank[b]; });
+    return named.concat(rest);
+  }
+  // The engine's host hooks for the same three roles (Oct 8 2026, Torry:
+  // make the swap on the chart as dynamic as the chart's own drags). A
+  // chip drop asks the live chart to apply the new order with the glide
+  // its Order tab and surface drags play; the engine commits the order
+  // itself, so the mirror below sees the chips already agree.
+  var LIST_ORDER_HOOKS = {
+    rmplotbuilder: { measures: "__gb2_applyCategoryOrder" },
+    likertplotbuilder: { items: "__gb2_applyLikertItemOrder" },
+    corrplotbuilder: { vars: "__gb2_applyCorrVarOrder" }
+  };
+  function listOrderGlide(mod, roleKey, order) {
+    var map = LIST_ORDER_HOOKS[mod];
+    var name = map && map[roleKey];
+    if (!name || typeof window[name] !== "function") return false;
+    if (appWorkspace() !== "chart") return false;
+    var host = hostEl();
+    if (!host || !host.querySelector('svg[data-role="gb2-chart-svg"]')) return false;
+    var done = false;
+    try { done = window[name](order.slice()) === true; } catch (eGl) { done = false; }
+    return done;
+  }
+  // A role change the chart has already drawn (through a hook above):
+  // everything roleChanged does except the re-render, which would wipe
+  // the glide mid-flight. The engine's own commit of the order echoes a
+  // render a moment later, by which time the chart is at rest.
+  function roleChangedDrawn() {
+    bumpSnapEpoch();
+    persist();
+    syncRolesRow();
+    syncDataRow();
+    syncDataGrid();
+  }
+  function listOrderRelease(mod, roleKey) {
+    var map = LIST_ORDER_KEYS[mod];
+    var orderKey = map && map[roleKey];
+    if (!orderKey) return;
+    var o = optionsFor(mod);
+    var changed = false;
+    if (Object.prototype.hasOwnProperty.call(o, orderKey)) { delete o[orderKey]; changed = true; }
+    if (typeof o.chartSpec === "string") {
+      var spec = parseSpec(o.chartSpec);
+      if (Object.prototype.hasOwnProperty.call(spec, orderKey)) {
+        delete spec[orderKey];
+        o.chartSpec = JSON.stringify(spec);
+        changed = true;
+      }
+    }
+    if (changed) { bumpSnapEpoch(); persistStyleEdit(); }
+  }
+  // An engine commit that carries a drawn order (a chart drag, the Order
+  // tab, an undo) moves the chips to match. The cards rebuild; the chart
+  // is already drawn that way, and the echo ships the chips in the order
+  // the engine already holds, so nothing moves twice.
+  function listOrderMirror(key, value) {
+    var mod = curModule();
+    var map = LIST_ORDER_KEYS[mod];
+    if (!map) return;
+    var spec = null;
+    if (key === "chartSpec" && typeof value === "string") spec = parseSpec(value);
+    var rr = rolesFor(mod), moved = false;
+    for (var roleKey in map) {
+      if (!Object.prototype.hasOwnProperty.call(map, roleKey)) continue;
+      var orderKey = map[roleKey];
+      var order = spec ? spec[orderKey] : (key === orderKey ? value : null);
+      if (!Array.isArray(order) || !order.length || !Array.isArray(rr[roleKey])) continue;
+      var next = listOrderApply(rr[roleKey], order);
+      if (next.join("\u001f") === rr[roleKey].join("\u001f")) continue;
+      rr[roleKey] = next;
+      moved = true;
+    }
+    if (!moved) return;
+    persist();
+    syncRolesRow();
+  }
   function roleChanged() {
     // A role change changes what this chart draws, exactly like a style
     // edit (the 6585 bump) - without this, a role edit made anywhere but
@@ -13174,9 +13811,9 @@
             // picker rows keep the word: that is a choosing surface.
             chip.innerHTML = psTypeIcon(PROJECT.table.types[col]) +
               '<span class="ps-slot-chip-name">' + escHtml(col) + "</span>";
-            setTip(chip, col + ": " +
-              typeLabel(PROJECT.table.types[col]).toLowerCase() +
-              ". Drag to another role to move it.");
+            // No tip on a chip (Torry, Oct 8 2026): the name is printed on
+            // it and the type icon carries the kind; the pop-up that named
+            // them again and told the reader to drag was noise.
             chip.setAttribute("draggable", "true");
             chip.setAttribute("data-col", col);
             chip.addEventListener("dragstart", function (e) {
@@ -13261,10 +13898,21 @@
             ? (PS_DRAG_FROM ? "move" : "copy") : "copy";
           drop.classList.toggle("ps-droptarget", fits);
           drop.classList.toggle("ps-dropreject", !fits);
+          // In a list role the drop also has a POSITION: mark the chip
+          // the dragged one would land beside, on the side it would land.
+          slotMarkInsert(drop, fits && def.multi ? slotInsertAt(drop, e, PS_DRAG) : null);
         });
-        drop.addEventListener("dragleave", function () {
+        // Crossing from the zone onto one of its own chips fires a
+        // dragleave for the zone, which used to clear the highlight and
+        // the insert mark for a frame and put them back on the next
+        // dragover: a blink on every chip boundary. Leaving for a
+        // descendant is not leaving.
+        drop.addEventListener("dragleave", function (e) {
+          var to = e && e.relatedTarget;
+          if (to && to !== drop && drop.contains(to)) return;
           drop.classList.remove("ps-droptarget");
           drop.classList.remove("ps-dropreject");
+          slotMarkInsert(drop, null);
         });
         drop.addEventListener("drop", function (e) {
           e.preventDefault();
@@ -13278,13 +13926,27 @@
           }
           if (PS_DRAG_FROM && PS_DRAG_FROM !== def.key)
             roleRemoveMember(PS_DRAG_FROM, PS_DRAG);
+          var drawn = false;
           if (def.multi) {
-            var arr = Array.isArray(rr[def.key]) ? rr[def.key] : [];
-            if (arr.indexOf(PS_DRAG) === -1) arr.push(PS_DRAG);
+            // A list role keeps the order the chips were dropped in, and
+            // that order is the chart's (Repeated Measures occasions,
+            // Likert items, matrix rows). A drop over a chip lands the
+            // dragged one beside it, before or after by which half of
+            // the chip the pointer is on; a drop on open space appends,
+            // as it always did. A chip already in this list moves.
+            var arr = (Array.isArray(rr[def.key]) ? rr[def.key] : [])
+              .filter(function (c) { return c !== PS_DRAG; });
+            var at = slotInsertAt(drop, e, PS_DRAG);
+            var idx = at ? arr.indexOf(at.col) + (at.before ? 0 : 1) : -1;
+            if (idx < 0 || idx > arr.length) arr.push(PS_DRAG);
+            else arr.splice(idx, 0, PS_DRAG);
             rr[def.key] = arr;
+            drawn = listOrderGlide(curModule(), def.key, arr);
+            if (!drawn) listOrderRelease(curModule(), def.key);
           } else rr[def.key] = PS_DRAG;
+          slotMarkInsert(drop, null);
           clearDragState();
-          roleChanged();
+          if (drawn) roleChangedDrawn(); else roleChanged();
         });
         // The drop zone rides inside a positioned anchor so the picker
         // can OVERLAY the rail instead of pushing everything below it
@@ -13358,6 +14020,33 @@
       var back = backCard && backCard.querySelector(".ps-slot-drop");
       try { if (back) back.focus({ preventScroll: true }); } catch (e) {}
     }
+  }
+  // Where a drop over a list role would land: the chip nearest the
+  // pointer (the dragged chip itself does not count) and the side of it.
+  // Above a chip's row is before it, below is after, on the row by the
+  // pointer's half. Null when the list has no other chip, which appends.
+  function slotInsertAt(drop, e, dragged) {
+    var chips = Array.prototype.slice.call(drop.querySelectorAll(".ps-slot-chip"))
+      .filter(function (c) { return c.getAttribute("data-col") !== dragged; });
+    if (!chips.length) return null;
+    var px = e.clientX, py = e.clientY, best = null, bestD = Infinity, bestR = null;
+    for (var i = 0; i < chips.length; i++) {
+      var r = chips[i].getBoundingClientRect();
+      var dx = px - (r.left + r.width / 2), dy = py - (r.top + r.height / 2);
+      // Rows first: a chip on the pointer's own row wins over a nearer
+      // chip on the row above or below.
+      var d = dx * dx + dy * dy * 9;
+      if (d < bestD) { bestD = d; best = chips[i]; bestR = r; }
+    }
+    var before = py < bestR.top ? true
+      : py > bestR.bottom ? false
+      : px < bestR.left + bestR.width / 2;
+    return { col: best.getAttribute("data-col"), chip: best, before: before };
+  }
+  function slotMarkInsert(drop, at) {
+    var marked = drop.querySelectorAll("[data-insert]");
+    for (var i = 0; i < marked.length; i++) marked[i].removeAttribute("data-insert");
+    if (at && at.chip) at.chip.setAttribute("data-insert", at.before ? "before" : "after");
   }
   function roleRemoveMember(key, col) {
     var rr = rolesFor(curModule());
@@ -13517,11 +14206,23 @@
   var PS_DRAG_FROM = null;   // role key when the drag started in a slot
   var VAR_FILTER = "";
   var TYPE_MENU = null;   // column name
+  var TYPE_MENU_COLS = null;   // the columns the pick applies to
   function showTypeMenu(x, y, col) {
     closeRolePicker();
     TYPE_MENU = col;
+    // A badge clicked inside a column selection acts on the whole
+    // selection (the column menu's rule, columnMenuTargets): several
+    // columns change type together. The head names them, and the
+    // current type is marked only when they all share it.
+    TYPE_MENU_COLS = columnMenuTargets(col);
     var m = el("ps-typemenu"), cur = PROJECT.table.types[col];
-    var h = ['<div class="ps-tm-head">' + escHtml(col) + "</div>"];
+    for (var ci = 0; ci < TYPE_MENU_COLS.length; ci++)
+      if (PROJECT.table.types[TYPE_MENU_COLS[ci]] !== cur) { cur = null; break; }
+    var head = TYPE_MENU_COLS.length > 1
+      ? TYPE_MENU_COLS.length + " variables: " + TYPE_MENU_COLS.join(", ")
+      : col;
+    var h = ['<div class="ps-tm-head' + (TYPE_MENU_COLS.length > 1 ? " ps-tm-head-many" : "") +
+             '">' + escHtml(head) + "</div>"];
     for (var i = 0; i < VAR_TYPES.length; i++) {
       var ty = VAR_TYPES[i];
       h.push('<button type="button" data-type="' + ty.key + '"' +
@@ -13549,12 +14250,22 @@
   function hideTypeMenu() {
     el("ps-typemenu").style.display = "none";
     TYPE_MENU = null;
+    TYPE_MENU_COLS = null;
   }
-  function setColType(col, type) {
+  function setColType(col, type) { setColTypes([col], type); }
+  // Several columns at once (Oct 2026, a colleague's ask): one undo mark
+  // for the set, one retype, and the lost-values warning summed across
+  // them. Columns already of that type are left out, so the mark is
+  // taken only when something changes.
+  function setColTypes(cols, type) {
     var t = PROJECT.table;
     type = normType(type);
-    if (!type || !t || !t.types || !(col in t.types)) return;
-    if (t.types[col] === type) return;
+    if (!type || !t || !t.types) return;
+    cols = (cols || []).filter(function (c) {
+      return (c in t.types) && t.types[c] !== type;
+    });
+    if (!cols.length) return;
+    var col = cols[0];
     // A type change can empty a column. "$12.50" and "1,234" parse as nothing,
     // so a currency or thousands-separated variable flipped to Continuous
     // loses every value at once, and the only report was Valid 0 in a panel
@@ -13562,22 +14273,28 @@
     // restores the type, so the house answer applies: do it, then say what it
     // did and carry the way back. Counted BEFORE the change so the comparison
     // is against what was actually on screen.
-    var wasValid = countValid(t, col);
-    dataMark("the type change");
-    t.types[col] = type;
+    var wasValid = 0, nowValid = 0, ci;
+    for (ci = 0; ci < cols.length; ci++) wasValid += countValid(t, cols[ci]);
+    dataMark(cols.length > 1 ? "the type change of " + cols.length + " variables"
+                             : "the type change");
+    for (ci = 0; ci < cols.length; ci++) t.types[cols[ci]] = type;
     retype(t);
     validateRoles();
     persist();
     syncAll();
     render();
-    var nowValid = countValid(t, col);
+    for (ci = 0; ci < cols.length; ci++) nowValid += countValid(t, cols[ci]);
     var lost = wasValid - nowValid;
+    var who = cols.length > 1
+      ? cols.slice(0, -1).join(", ") + " and " + cols[cols.length - 1] + " are"
+      : col + " is";
     // A handful is ordinary and saying so every time would be noise. Losing
     // most of a column is the case worth interrupting for.
     if (lost > 0 && wasValid > 0 && lost >= Math.max(3, wasValid * 0.5))
-      showToast(col + " is now " + typeLabel(type) + " \u00b7 " +
+      showToast(who + " now " + typeLabel(type) + " \u00b7 " +
         (lost === wasValid
-          ? "no value could be read that way, so the column is empty"
+          ? (cols.length > 1 ? "no value could be read that way, so the columns are empty"
+                             : "no value could be read that way, so the column is empty")
           : lost + " of " + wasValid + " values could not be read that way, " +
             "so " + (lost === 1 ? "it is" : "they are") + " missing now") +
         " \u00b7 Cmd/Ctrl+Z puts it back");
@@ -13696,6 +14413,89 @@
     }
     for (i = 0; i < heads.length; i++)
       heads[i].classList.remove("ps-grid-axis-selected");
+  }
+  // ---- column windowing for a wide table ----
+  // The grid has always built only a window of ROWS. On a wide table it now
+  // builds only a window of COLUMNS too (Oct 2026, a 1,010-column survey
+  // file: 141,000 cells in the page, nine seconds to open the workspace and
+  // three for every scroll). The header row and the colgroup still carry
+  // EVERY column, so everything that works from a header (resize, drag to
+  // move, column select, the type badge, measured widths) is untouched; only
+  // the body rows are windowed, each with one spacer cell either side whose
+  // colspan covers the columns not built. A fixed-layout table gives those
+  // spacers exactly the width of the columns they stand for. Tables under
+  // GRID_COL_WINDOW_MIN visible columns render whole, exactly as before.
+  var GRID_COL_WINDOW_MIN = 60;
+  var GRID_COL_OVERSCAN_PX = 900;
+  var GRID_COL_EDGE_PX = 260;       // re-window this close to a built edge
+  var GRID_COL_WINDOWED = false;
+  var GRID_COL_START = 0, GRID_COL_END = 0;
+  var GRID_COL_PX0 = 0, GRID_COL_PX1 = 0;   // table px of the built columns
+  var GRID_COL_COUNT = 0;
+  // The width the grid can show. The window's own width is the ceiling, so
+  // a grid measured while its workspace is hidden (clientWidth 0) still
+  // builds enough columns to fill the screen it is about to appear on. Zero
+  // means no layout engine at all (a headless DOM), and nothing windows.
+  function gridColViewWidth(grid) {
+    return Math.max(Number(grid && grid.clientWidth) || 0,
+                    Number(window.innerWidth) || 0);
+  }
+  // True when the viewport has come within reach of an edge of the built
+  // columns, unless that edge is the table's own.
+  function gridColumnWindowStale(grid) {
+    if (!GRID_COL_WINDOWED) return false;
+    var sl = Number(grid.scrollLeft) || 0, cw = gridColViewWidth(grid);
+    return (GRID_COL_START > 0 && sl + 46 < GRID_COL_PX0 + GRID_COL_EDGE_PX) ||
+           (GRID_COL_END < GRID_COL_COUNT &&
+            sl + cw > GRID_COL_PX1 - GRID_COL_EDGE_PX);
+  }
+  function gridColumnWindowFor(cols, widths, scrollLeft, viewW) {
+    var lo = scrollLeft - GRID_COL_OVERSCAN_PX;
+    var hi = scrollLeft + Math.max(0, viewW) + GRID_COL_OVERSCAN_PX;
+    var x = 46, start = -1, end = cols.length, px0 = 46, px1 = 46;
+    for (var j = 0; j < cols.length; j++) {
+      var w = Number(widths[cols[j]]) || 0;
+      if (start < 0 && x + w > lo) { start = j; px0 = x; }
+      if (start >= 0 && x >= hi) { end = j; break; }
+      x += w;
+      px1 = x;
+    }
+    if (start < 0) { start = Math.max(0, cols.length - 1); px0 = x; end = cols.length; }
+    return { start: start, end: Math.max(end, start + 1), px0: px0, px1: px1 };
+  }
+  // Table px of one column's left and right edge, from the stored widths.
+  function gridColumnEdges(cols, index) {
+    var widths = gridColumnWidths(false), x = 46;
+    for (var j = 0; j < index && j < cols.length; j++)
+      x += gridClampColumnWidth(widths[cols[j]] || GRID_NATURAL_WIDTHS[cols[j]] || 160);
+    var w = gridClampColumnWidth(widths[cols[index]] ||
+      GRID_NATURAL_WIDTHS[cols[index]] || 160);
+    return { left: x, right: x + w };
+  }
+  // Make sure one cell exists, scrolling the window to it when the row or
+  // the column is outside what is built. Returns the cell, or null.
+  function gridBuildCell(col, row) {
+    var td = gridFindTd(col, row);
+    if (td) return td;
+    var grid = el("ps-datagrid"), t = PROJECT.table, moved = false;
+    if (!grid || !t) return null;
+    if (row < GRID_WINDOW_START || row >= GRID_WINDOW_END) {
+      grid.scrollTop = Math.max(0, row * GRID_ROW_HEIGHT - GRID_ROW_HEIGHT * 3);
+      moved = true;
+    }
+    if (GRID_COL_WINDOWED) {
+      var cols = gridVisibleColumns(t), ci = cols.indexOf(col);
+      if (ci >= 0 && (ci < GRID_COL_START || ci >= GRID_COL_END)) {
+        var edge = gridColumnEdges(cols, ci);
+        grid.scrollLeft = ci < GRID_COL_START
+          ? Math.max(0, edge.left - 46)
+          : Math.max(0, edge.right - grid.clientWidth);
+        moved = true;
+      }
+    }
+    if (!moved) return null;
+    syncDataGrid();
+    return gridFindTd(col, row);
   }
   function gridShouldVirtualize(t) {
     if (!t) return false;
@@ -14826,15 +15626,22 @@
   // than "stretch to fill the pane". The stretch path remains for a grid
   // with no table.
   var GRID_AUTOFIT_SCAN = 20000;
+  // And a budget for the table as a whole. The per-column cap alone let a
+  // table of a thousand columns measure every one of its 12.7 million cells
+  // on first paint (1.8 s). Up to twenty columns nothing changes; past that
+  // each column gets an even share, never fewer than 400 rows.
+  var GRID_AUTOFIT_CELLS = 400000;
   function gridAutoFitDefaults() {
     var t = PROJECT.table;
     if (!t || !Array.isArray(t.order) || !t.order.length) return 0;
     if (PROJECT.ui && PROJECT.ui.columnLayout === "stretch") return 0;
     var widths = gridColumnWidths(true), filled = 0;
+    var scan = Math.min(GRID_AUTOFIT_SCAN,
+      Math.max(400, Math.floor(GRID_AUTOFIT_CELLS / t.order.length)));
     for (var i = 0; i < t.order.length; i++) {
       var col = t.order[i];
       if (!t.raw[col] || isFinite(Number(widths[col]))) continue;
-      widths[col] = gridNaturalColumnWidth(col, GRID_AUTOFIT_SCAN);
+      widths[col] = gridNaturalColumnWidth(col, scan);
       filled++;
     }
     return filled;
@@ -15225,7 +16032,8 @@
     // after the selection, because the cell has to be painted before it can
     // be measured, and only when it is actually out of view so an in-view
     // match never jolts sideways.
-    var cell = gridFindTd(result.col, result.row);
+    var cell = gridFindTd(result.col, result.row) ||
+               gridBuildCell(result.col, result.row);
     if (cell && grid.scrollWidth > grid.clientWidth + 1) {
       var cr = cell.getBoundingClientRect(), gr = grid.getBoundingClientRect();
       // The row-number gutter is sticky, so a cell tucked behind it is as
@@ -15523,6 +16331,26 @@
            ' role="columnheader" aria-colindex="1" aria-label="Select all cells"' +
            ' data-grid-all data-tip="Select all cells"></th>');
     var j, col;
+    // Which columns the body builds (see GRID_COL_WINDOW_MIN). Only a sized
+    // table can window, because the spacers take their width from the
+    // colgroup; widths[] was filled and clamped for every column just above.
+    var colViewW = gridColViewWidth(grid);
+    var colWin = (sized && colViewW > 0 &&
+                  visibleCols.length > GRID_COL_WINDOW_MIN)
+      ? gridColumnWindowFor(visibleCols, widths, priorScrollLeft, colViewW)
+      : null;
+    GRID_COL_WINDOWED = !!colWin;
+    GRID_COL_COUNT = visibleCols.length;
+    GRID_COL_START = colWin ? colWin.start : 0;
+    GRID_COL_END = colWin ? colWin.end : visibleCols.length;
+    GRID_COL_PX0 = colWin ? colWin.px0 : 0;
+    GRID_COL_PX1 = colWin ? colWin.px1 : 0;
+    var colLead = colWin && colWin.start > 0
+      ? '<td class="ps-grid-colspacer" aria-hidden="true" colspan="' +
+        colWin.start + '"></td>' : "";
+    var colTail = colWin && colWin.end < visibleCols.length
+      ? '<td class="ps-grid-colspacer" aria-hidden="true" colspan="' +
+        (visibleCols.length - colWin.end) + '"></td>' : "";
     for (j = 0; j < visibleCols.length; j++) {
       col = visibleCols[j];
       var kind = t.types[col];
@@ -15580,7 +16408,8 @@
              '" data-tip="' + (rowExcluded
                ? "Observation excluded from every chart"
                : "Select row " + (i + 1)) + '">' + (i + 1) + "</td>");
-      for (j = 0; j < visibleCols.length; j++) {
+      if (colLead) h.push(colLead);
+      for (j = GRID_COL_START; j < GRID_COL_END; j++) {
         col = visibleCols[j];
         var view = gridCellView(t, col, i);
         h.push('<td id="' + gridCellId(j, i) + '" class="' + view.cls +
@@ -15590,6 +16419,7 @@
                (view.title ? ' data-tip="' + escHtml(view.title) + '"' : "") +
                ">" + escHtml(view.text) + "</td>");
       }
+      if (colTail) h.push(colTail);
       h.push("</tr>");
     }
     if (end < n)
@@ -15960,17 +16790,62 @@
                               return { id: c.id, roles: c.roles || {} };
                             }) });
   }
+  function dataHistBytes(entry) { return entry.snap ? entry.snap.length : 96; }
   function dataHistTrim(stack) {
     while (stack.length > DATA_HIST_CAP) stack.shift();
     var bytes = 0, i;
-    for (i = 0; i < stack.length; i++) bytes += stack[i].snap.length;
+    for (i = 0; i < stack.length; i++) bytes += dataHistBytes(stack[i]);
     while (stack.length > DATA_HIST_MIN && bytes > DATA_HIST_BYTES)
-      bytes -= stack.shift().snap.length;
+      bytes -= dataHistBytes(stack.shift());
+  }
+  // One edited cell is remembered as one cell. The whole-table snapshot
+  // every other step takes is the right tool for a reshape or a paste, and
+  // the wrong one here: on a 12,570 by 1,010 table it is 85 million
+  // characters built (0.6 s) and kept (three of them, by DATA_HIST_MIN) for
+  // a change to one value. The roles ride along because an edit can make a
+  // column unfit for the role it holds, and undo has to hand that back.
+  function dataCellPatch(col, row) {
+    var t = PROJECT.table;
+    return { col: col, row: row, raw: String(t.raw[col][row]), edited: !!t.edited,
+             roles: JSON.stringify(PROJECT.charts.map(function (c) {
+               return { id: c.id, roles: c.roles || {} };
+             })) };
+  }
+  function dataMarkCell(col, row, label) {
+    bigDirtyCol(col);                    // one column is about to change
+    try {
+      DATA_UNDO.push({ patch: dataCellPatch(col, row), label: label || "" });
+      dataHistTrim(DATA_UNDO);
+      DATA_REDO.length = 0;
+      DATA_LAST_AT = Date.now();
+      DATA_ACTION_SEQ++;
+    } catch (e) {}
+    if (document.getElementById("ps-data-undo")) syncDataCommandBar();
+  }
+  function dataApplyPatch(p) {
+    var t = PROJECT.table;
+    if (!t || !t.raw[p.col] || p.row >= nRows(t)) return;
+    bigDirtyCol(p.col);
+    t.raw[p.col][p.row] = p.raw;
+    t.edited = p.edited;
+    try {
+      var roles = JSON.parse(p.roles);
+      for (var ri = 0; ri < roles.length; ri++) {
+        var roleChart = chartById(roles[ri].id);
+        if (roleChart) roleChart.roles = roles[ri].roles || {};
+      }
+    } catch (e) {}
+    retype(t, false, [p.col]);
+    validateRoles();
+    persist();
+    syncAll();
+    render();
   }
   // The label is what the menu and the toast say instead of a fixed "data
   // change" and a generic "Previous data state restored". Three destructive
   // paths already named their step; every path can now.
   function dataMark(label) {
+    BIG_DIRTY_ALL = true;                // a whole-table change follows
     try {
       DATA_UNDO.push({ snap: dataSnapshot(), label: label || "" });
       dataHistTrim(DATA_UNDO);
@@ -15988,6 +16863,7 @@
     if (document.getElementById("ps-data-undo")) syncDataCommandBar();
   }
   function dataApply(snapStr) {
+    BIG_DIRTY_ALL = true;
     var t = PROJECT.table, s = JSON.parse(snapStr);
     if (Array.isArray(s.order)) t.order = s.order;
     t.raw = s.raw; t.types = s.types; t.excluded = s.excluded;
@@ -16036,11 +16912,13 @@
     var entry = DATA_UNDO[DATA_UNDO.length - 1];
     // The step being undone keeps its name on the way to the redo stack, so
     // Redo can say what it will reapply.
-    DATA_REDO.push({ snap: dataSnapshot(), label: entry.label });
+    DATA_REDO.push(entry.patch
+      ? { patch: dataCellPatch(entry.patch.col, entry.patch.row), label: entry.label }
+      : { snap: dataSnapshot(), label: entry.label });
     dataHistTrim(DATA_REDO);
     DATA_ACTION_SEQ++;
     DATA_UNDO.pop();
-    dataApply(entry.snap);
+    if (entry.patch) dataApplyPatch(entry.patch); else dataApply(entry.snap);
     showToast(entry.label
       ? "Undid " + entry.label
       : "Previous data state restored");
@@ -16050,11 +16928,13 @@
     if (!DATA_REDO.length) return false;
     if (GRID_EDIT) gridCancelEdit();
     var entry = DATA_REDO[DATA_REDO.length - 1];
-    DATA_UNDO.push({ snap: dataSnapshot(), label: entry.label });
+    DATA_UNDO.push(entry.patch
+      ? { patch: dataCellPatch(entry.patch.col, entry.patch.row), label: entry.label }
+      : { snap: dataSnapshot(), label: entry.label });
     dataHistTrim(DATA_UNDO);
     DATA_ACTION_SEQ++;
     DATA_REDO.pop();
-    dataApply(entry.snap);
+    if (entry.patch) dataApplyPatch(entry.patch); else dataApply(entry.snap);
     showToast(entry.label
       ? "Redid " + entry.label
       : "Data change reapplied");
@@ -16242,13 +17122,13 @@
   }
   function gridCommitEdit(next) {
     var ge = GRID_EDIT;
-    if (!ge) { if (next) gridOpenEditor(next.col, next.row); return; }
+    if (!ge) { if (next) gridOpenEditor(next.col, next.row, { mode: "enter" }); return; }
     GRID_EDIT = null;
     var t = PROJECT.table;
     var newRaw = String(ge.input.value);
     if (newRaw === String(t.raw[ge.col][ge.row])) {
       gridPaintCell(ge.td, ge.col, ge.row);
-      if (next) gridOpenEditor(next.col, next.row);
+      if (next) gridOpenEditor(next.col, next.row, { mode: "enter" });
       else {
         gridSetSelection(ge.col, ge.row, ge.col, ge.row);      // item 11
         gridFocusSelf();
@@ -16257,11 +17137,11 @@
         gridNextEditAnnouncement(next));
       return;
     }
-    dataMark("the cell edit");
+    dataMarkCell(ge.col, ge.row, "the cell edit");
     t.raw[ge.col][ge.row] = newRaw;
     t.edited = true;
     var previousFilterMask = t.filterMask;
-    retype(t);
+    retype(t, false, [ge.col]);
     // The typed value is what every chart and statistic downstream will see.
     // When nothing could read the text, the cell is missing, and announcing
     // "Saved score, row 1 as sixty one" tells a screen reader user the value
@@ -16276,7 +17156,7 @@
     persist();
     syncDataRow();
     render();
-    if (next) gridOpenEditor(next.col, next.row);
+    if (next) gridOpenEditor(next.col, next.row, { mode: "enter" });
     else {
       gridSetSelection(ge.col, ge.row, ge.col, ge.row);        // item 11
       gridFocusSelf();
@@ -16354,7 +17234,23 @@
       width: Math.min(cap, Math.max(base, Math.ceil(needed)))
     };
   }
-  function gridOpenEditor(col, row) {
+  // The editor has the two modes a spreadsheet has (Oct 2026, Torry: "It
+  // should mimic Excel"). ENTER mode is an edit begun by typing over a
+  // selected cell, or one the grid opened for you (Enter or Tab moving on,
+  // a new row): the arrow keys save and move to the next cell. EDIT mode is
+  // the deliberate one (double-click, F2, Enter on a selected cell, or a
+  // click in the open editor): the arrow keys move within the text.
+  var GRID_MOVE_FOCUS = null;   // gridMoveFocus, assigned where it is built
+  var GRID_ARROW_STEP = { ArrowLeft: [-1, 0], ArrowRight: [1, 0],
+                          ArrowUp: [0, -1], ArrowDown: [0, 1] };
+  function gridEditorSetMode(ge, mode) {
+    if (!ge || !ge.input) return;
+    ge.mode = mode === "enter" ? "enter" : "edit";
+    ge.input.setAttribute("data-edit-mode", ge.mode);
+    ge.input.setAttribute("aria-describedby", ge.mode === "enter"
+      ? "ps-grid-editor-instructions-enter" : "ps-grid-editor-instructions");
+  }
+  function gridOpenEditor(col, row, opts) {
     if (GRID_EDIT) gridCommitEdit(null);
     var t = PROJECT.table;
     if (!t || !t.raw[col] || row < 0 || row >= nRows(t)) return;
@@ -16379,7 +17275,7 @@
       var grid = el("ps-datagrid");
       grid.scrollTop = Math.max(0, row * GRID_ROW_HEIGHT);
       syncDataGrid();
-      td = gridFindTd(col, row);
+      td = gridFindTd(col, row) || gridBuildCell(col, row);
     }
     if (!td) return;
     gridClearSelection();
@@ -16407,14 +17303,43 @@
     if (editorSize.width > editorSize.base + 1)
       input.classList.add("ps-grid-cellinput-wide");
     td.appendChild(input);
-    var ge = { col: col, row: row, td: td, input: input, canceling: false };
+    var ge = { col: col, row: row, td: td, input: input, canceling: false,
+               mode: "edit" };
     GRID_EDIT = ge;
+    if (opts && opts.mode === "enter") gridEditorSetMode(ge, "enter");
+    // A click in the open editor is the "click that cell again" that asks
+    // for the caret: from then on the arrows belong to the text.
+    input.addEventListener("pointerdown", function () {
+      if (ge.mode === "enter") gridEditorSetMode(ge, "edit");
+    });
     input.addEventListener("keydown", function (e) {
       // The editor owns the keys it handles. Without this, Escape bubbled to
       // the grid handler, which read GRID_EDIT as already null (cancel clears
       // it synchronously) and cleared the cursor the cancel had just seated.
       if (e.key === "Enter" || e.key === "Tab" || e.key === "Escape")
         e.stopPropagation();
+      if (e.key === "F2") {
+        // The spreadsheet key for "let me move within this text".
+        e.preventDefault();
+        e.stopPropagation();
+        gridEditorSetMode(ge, ge.mode === "enter" ? "edit" : "enter");
+        gridAnnounceEdit(ge.mode === "edit"
+          ? "Arrow keys move within the text."
+          : "Arrow keys save and move to the next cell.");
+        return;
+      }
+      if (ge.mode === "enter" && GRID_ARROW_STEP[e.key] && !e.altKey &&
+          !e.ctrlKey && !e.metaKey && !e.isComposing) {
+        // Save, land on this cell as the cursor, then move the way the
+        // arrow points; with Shift the selection extends, as it does from
+        // a cell that is merely selected.
+        var step = GRID_ARROW_STEP[e.key];
+        e.preventDefault();
+        e.stopPropagation();
+        gridCommitEdit(null);
+        if (GRID_MOVE_FOCUS) GRID_MOVE_FOCUS(step[0], step[1], e.shiftKey, false);
+        return;
+      }
       if (e.key === "Enter") {
         e.preventDefault();
         gridCommitEdit(row + 1 < nRows(t)
@@ -16462,7 +17387,7 @@
     var grid = el("ps-datagrid");
     grid.scrollTop = grid.scrollHeight;
     var newRow = nRows(t) - 1;
-    gridOpenEditor(gridVisibleColumns(t)[0], newRow);
+    gridOpenEditor(gridVisibleColumns(t)[0], newRow, { mode: "enter" });
   }
   function gridRemapValueExclusions(t, row, mode) {
     if (!t.excluded) return;
@@ -16500,7 +17425,7 @@
     grid.scrollTop = Math.max(0, at * GRID_ROW_HEIGHT -
       Math.max(0, grid.clientHeight - GRID_ROW_HEIGHT) / 2);
     syncDataGrid();
-    gridOpenEditor(gridVisibleColumns(t)[0], at);
+    gridOpenEditor(gridVisibleColumns(t)[0], at, { mode: "enter" });
   }
   function gridDuplicateRow(row) {
     var t = PROJECT.table;
@@ -17306,8 +18231,15 @@
       if (GRID_EDIT || GRID_SCROLL_FRAME) return;
       GRID_SCROLL_FRAME = window.requestAnimationFrame(function () {
         GRID_SCROLL_FRAME = null;
-        if (appWorkspace() !== "data" || !PROJECT.table ||
-            !gridShouldVirtualize(PROJECT.table)) return;
+        if (appWorkspace() !== "data" || !PROJECT.table) return;
+        // Columns: rebuild when the viewport nears an edge of what is
+        // built. Never under a header gesture: a column being dragged to a
+        // new place or resized holds on to the cells it started with.
+        if (!COL_MOVE && !GRID_COLUMN_DRAG && gridColumnWindowStale(grid)) {
+          syncDataGrid();
+          return;
+        }
+        if (!gridShouldVirtualize(PROJECT.table)) return;
         var wanted = Math.max(0, Math.floor((Number(grid.scrollTop) || 0) /
           GRID_ROW_HEIGHT) -
           GRID_WINDOW_OVERSCAN);
@@ -17316,7 +18248,15 @@
       });
     });
     window.addEventListener("resize", function () {
-      window.requestAnimationFrame(gridSyncColumnResizers);
+      window.requestAnimationFrame(function () {
+        // A wider window can show columns that were never built.
+        if (appWorkspace() === "data" && PROJECT.table && !GRID_EDIT &&
+            !COL_MOVE && !GRID_COLUMN_DRAG && gridColumnWindowStale(grid)) {
+          syncDataGrid();
+          return;
+        }
+        gridSyncColumnResizers();
+      });
     });
     // t4-35 (Torry's ask): drag a column HEADER to a new position, and the
     // other columns part to show where it will land - the dist stacked-drag
@@ -17614,7 +18554,10 @@
         GRID_COLUMN_DRAG = null;
         document.body.classList.remove("ps-grid-column-resizing");
         persist(false);
-        gridApplyClippedTitles();
+        // The built columns were measured at the old width; rebuild so the
+        // window's edges are true again (cheap: only a window is built).
+        if (GRID_COL_WINDOWED) syncDataGrid();
+        else gridApplyClippedTitles();
         e.preventDefault();
         return;
       }
@@ -17625,7 +18568,8 @@
         GRID_COLUMN_DRAG = null;
         document.body.classList.remove("ps-grid-column-resizing");
         persist(false);
-        gridApplyClippedTitles();
+        if (GRID_COL_WINDOWED) syncDataGrid();
+        else gridApplyClippedTitles();
       }
       gridFinishDrag(e, true);
     });
@@ -17843,18 +18787,17 @@
                        extend ? "cells" : "cells");
       var td = gridFindTd(cols[ci], ri);
       if (!td) {
-        // The grid is windowed, so the target row may not be built yet.
-        el("ps-datagrid").scrollTop =
-          Math.max(0, ri * GRID_ROW_HEIGHT - GRID_ROW_HEIGHT * 3);
-        syncDataGrid();
+        // The grid is windowed, so the target row (or, on a wide table,
+        // the target column) may not be built yet.
+        td = gridBuildCell(cols[ci], ri);
         gridApplySelection();
-        td = gridFindTd(cols[ci], ri);
       }
       if (td && td.scrollIntoView)
         try { td.scrollIntoView({ block: "nearest", inline: "nearest" }); }
         catch (err) { /* older engines: the windowing above is enough */ }
       return true;
     }
+    GRID_MOVE_FOCUS = gridMoveFocus;
     var GRID_ARROWS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0],
                         ArrowUp: [0, -1], ArrowDown: [0, 1] };
     grid.addEventListener("focus", function (e) {
@@ -17911,7 +18854,7 @@
       if (!mod && !e.altKey && e.key && e.key.length === 1) {
         var col = GRID_SELECTION.focusCol, row = Number(GRID_SELECTION.focusRow);
         e.preventDefault();
-        gridOpenEditor(col, row);
+        gridOpenEditor(col, row, { mode: "enter" });
         if (GRID_EDIT && GRID_EDIT.input) {
           GRID_EDIT.input.value = e.key;
           try {
@@ -18023,9 +18966,9 @@
     el("ps-typemenu").addEventListener("click", function (e) {
       var btn = e.target.closest ? e.target.closest("button[data-type]") : null;
       if (!btn || TYPE_MENU == null) return;
-      var col = TYPE_MENU;
+      var cols = TYPE_MENU_COLS || [TYPE_MENU];
       hideTypeMenu();
-      setColType(col, btn.getAttribute("data-type"));
+      setColTypes(cols, btn.getAttribute("data-type"));
     });
     grid.addEventListener("contextmenu", function (e) {
       var rowHead = e.target.closest ? e.target.closest("td[data-grid-row]") : null;
@@ -18499,6 +19442,23 @@
       layAddText(String.fromCharCode(65 + (n % 26)), 20, true);
       c.nextLabel = n + 1;
       persist();
+    });
+    // ONE menu for the figure parts (Sep 2026): three more commands would
+    // wrap the bar onto a second row at 1440 px, which was fixed once
+    // before, so Box, Arrow and the templates share a drop-down beside
+    // Add image.
+    el("ps-laddpart").addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (!isLayoutTab(activeChart())) return;
+      var r = e.currentTarget.getBoundingClientRect();
+      showContextMenu(r.left, r.bottom + 4, [
+        { label: "Box", key: "part-box", action: function () { layAddBox(); } },
+        { label: "Arrow", key: "part-arrow", action: function () { layAddArrow(); } },
+        { label: "Timeline", key: "part-timeline", action: function () { layAddTimeline(); } },
+        "separator",
+        { label: "Templates\u2026", key: "part-templates",
+          action: function () { showLayoutGallery(); } }
+      ], null);
     });
     document.addEventListener("pointerdown", function (e) {
       // The menus ACT ON the selection, so pressing one is not clicking away.
@@ -20042,7 +21002,45 @@
         "A portrait report page with a title area and a large chart.",
       note: "Uses the Presentation page preset.",
       preview: [[7, 24, 86, 68]],
-      portraitPreview: [[8, 18, 84, 74]], presentation: true }
+      portraitPreview: [[8, 18, 84, 74]], presentation: true },
+    // Diagram templates (Sep 2026): arrangements of boxes and arrows,
+    // always on a portrait page. Every part stays an ordinary item.
+    { key: "prisma", name: "PRISMA 2020", slots: 0, diagram: true,
+      portraitOnly: true, build: layBuildPrisma,
+      description: "The flow diagram for a systematic review: identification, " +
+        "screening and inclusion, with every count as a field to fill in.",
+      note: "Boxes and arrows you can edit, move and restyle.",
+      preview: [[6, 6, 8, 20], [20, 6, 36, 12], [62, 6, 34, 12],
+                [6, 30, 8, 40], [20, 30, 36, 10], [62, 30, 34, 10],
+                [20, 44, 36, 10], [62, 44, 34, 10], [20, 58, 36, 10],
+                [62, 58, 34, 12], [6, 78, 8, 14], [20, 78, 36, 14]] },
+    { key: "timeline", name: "Timeline over a chart", slots: 1, diagram: true,
+      build: layBuildProcedureTimeline,
+      description: "A procedure timeline across the top, with named ticks, " +
+        "day labels and a phase band, and your chart beneath it.",
+      note: "Line the ticks up with the chart's occasions by dragging them.",
+      preview: [[7, 8, 86, 14], [7, 28, 86, 64]],
+      portraitPreview: [[8, 6, 84, 11], [8, 22, 84, 70]] },
+    { key: "design", name: "Study design", slots: 0, diagram: true,
+      build: layBuildStudyDesign,
+      description: "Groups down the side, phases across the top, one box " +
+        "per cell and an arrow from phase to phase.",
+      note: "Rename the groups and phases, add or remove rows.",
+      preview: [[22, 14, 20, 16], [40, 14, 20, 16], [58, 14, 20, 16],
+                [22, 40, 20, 16], [40, 40, 20, 16], [58, 40, 20, 16],
+                [22, 66, 20, 16], [40, 66, 20, 16], [58, 66, 20, 16]],
+      portraitPreview: [[18, 16, 22, 12], [40, 16, 22, 12], [62, 16, 22, 12],
+                        [18, 40, 22, 12], [40, 40, 22, 12], [62, 40, 22, 12],
+                        [18, 64, 22, 12], [40, 64, 22, 12], [62, 64, 22, 12]] },
+    { key: "trial", name: "Trial sequence", slots: 0, diagram: true,
+      build: layBuildTrialSequence,
+      description: "Screens in a cascade over a timeline of their " +
+        "durations: fixation, cue, target, response.",
+      note: "Every screen is a box, so an image can replace any of them.",
+      preview: [[6, 6, 24, 30], [22, 22, 24, 30], [38, 38, 24, 30],
+                [54, 54, 24, 30], [6, 90, 80, 4]],
+      portraitPreview: [[6, 6, 30, 20], [24, 22, 30, 20], [42, 38, 30, 20],
+                        [60, 54, 30, 20], [6, 84, 88, 3]] }
   ];
   function layoutTemplateByKey(key) {
     for (var i = 0; i < LAYOUT_TEMPLATES.length; i++)
@@ -20053,7 +21051,8 @@
     return PROJECT.charts.filter(function (doc) { return !isLayoutTab(doc); });
   }
   function layoutTemplatePreview(def) {
-    var portrait = LAYOUT_TEMPLATE_ORIENTATION === "portrait";
+    var portrait = LAYOUT_TEMPLATE_ORIENTATION === "portrait" ||
+      !!def.portraitOnly;
     var box = mkEl("span", "ps-layout-template-preview" +
       (portrait ? " ps-layout-template-portrait" : ""));
     var preview = portrait && def.portraitPreview
@@ -20111,7 +21110,15 @@
       orientationButtons[oi].setAttribute("aria-pressed",
         orientationButtons[oi].getAttribute("data-layout-orientation") ===
         LAYOUT_TEMPLATE_ORIENTATION ? "true" : "false");
+    var headed = false;
     for (var i = 0; i < LAYOUT_TEMPLATES.length; i++) {
+      if (LAYOUT_TEMPLATES[i].diagram && !headed) {
+        headed = true;
+        var heading = mkEl("div", "ps-layout-template-heading", "Diagrams");
+        heading.setAttribute("role", "heading");
+        heading.setAttribute("aria-level", "3");
+        root.appendChild(heading);
+      }
       (function (def) {
         var button = mkEl("button", "ps-layout-template-card");
         button.type = "button";
@@ -21083,6 +22090,25 @@
     var def = layoutTemplateByKey(LAYOUT_TEMPLATE_KEY);
     var c = newLayout(), selects = el("ps-layout-template-assignments")
       .querySelectorAll("select[data-layout-slot]");
+    if (def.build) {
+      // A diagram template lays its own parts out. PRISMA is a fixed form
+      // on a portrait page; the others follow the orientation toggle and
+      // take the chart chosen for their slot, if they have one.
+      var portraitD = LAYOUT_TEMPLATE_ORIENTATION === "portrait";
+      if (def.portraitOnly)
+        c.page = { preset: "letterp", w: 816, h: 1056, margin: 40 };
+      else if (portraitD)
+        c.page = { preset: "canvasp", w: 672, h: 1008, margin: 32 };
+      var chartIds = [];
+      for (var si = 0; si < selects.length; si++) {
+        var cid = selects[si] && selects[si].value;
+        if (chartById(cid) && !isLayoutTab(chartById(cid))) chartIds.push(cid);
+      }
+      def.build(c, chartIds);
+      hideLayoutGallery();
+      activateNewLayout(c);
+      return;
+    }
     var portrait = LAYOUT_TEMPLATE_ORIENTATION === "portrait";
     if (def.presentation && portrait) {
       c.page = { preset: "letterp", w: 816, h: 1056, margin: 40 };
@@ -21412,8 +22438,15 @@
       name = chart ? ", " + (chart.name || "Untitled chart") : ", missing chart";
     } else if (item.kind === "image") {
       kind = item.srcChart ? "Notebook snapshot" : "Image item";
+    } else if (item.kind === "arrow") {
+      kind = "Arrow";
+      name = layArrowEndsText(item);
+    } else if (item.kind === "timeline") {
+      kind = "Timeline";
+      var tlNames = layTimelineLabelsText(item);
+      name = tlNames ? ', "' + tlNames + '"' : ", no named ticks";
     } else {
-      kind = "Text item";
+      kind = item.kind === "box" ? "Box" : "Text item";
       var copy = String(item.text || "Text").replace(/\s+/g, " ").trim();
       if (copy.length > 60) copy = copy.slice(0, 57) + "\u2026";
       name = ', "' + copy + '"';
@@ -21468,6 +22501,16 @@
     layAnnounce(layItemAccessibleLabel(items[next]) +
       (extend ? ", added to selection; " + laySelectedIds().length +
         " items selected" : ", selected"));
+  }
+  // Where a plain arrow may nudge when focus is NOT on the canvas: on
+  // nothing in particular, or on a plain control of this workspace (its
+  // toolbar, its rail). Anything that runs its own arrow keys keeps them.
+  function layArrowScopeOk(t) {
+    if (!t || t === document.body || t === document.documentElement) return true;
+    if (!t.closest) return false;
+    if (t.closest('[role="menu"],[role="menubar"],[role="tablist"],' +
+                  '[role="dialog"],[role="grid"],.ps-dialog-overlay')) return false;
+    return !!t.closest("#ps-layout, #ps-inspector-layout");
   }
   function layToggleActiveSelection() {
     var active = layActiveId();
@@ -21750,7 +22793,7 @@
     var ids = laySelectedIds(), out = [];
     for (var i = 0; i < ids.length; i++) {
       var it = layItemById(ids[i]);
-      if (it && it.kind === "text") out.push(it);
+      if (it && (it.kind === "text" || it.kind === "box")) out.push(it);
     }
     return out;
   }
@@ -22017,6 +23060,1507 @@
       layTextToggle("italic", "text italic");
     });
   }
+
+  // ---- Figure parts (Sep 2026, Torry: PRISMA and the basic paper
+  // diagrams belong in Layouts, beside the charts they explain; a
+  // figure, never a record). Two new item kinds:
+  //
+  //   box   the text item with a border, a fill, padding and corners.
+  //         Sized (w/h), so it resizes like a panel; the Text section
+  //         styles its text like any text item; F2 / double-click edits.
+  //   arrow two ends, each FREE (a page point) or ATTACHED to a box.
+  //         x/y/w/h is the bounding box of the drawn arrow and ax/ay/bx/by
+  //         are the ends relative to it, so every generic mover (drag,
+  //         nudge, align, refit, clamp) shifts a free arrow by shifting
+  //         x/y, and an attached end re-reads its box on every sync.
+  //         The side an attached end leaves from is never stored: it is
+  //         the side facing the other end, so a box can go anywhere.
+  //
+  // Refusals, on purpose: one shape (the rounded box), no icon library,
+  // straight or elbow routes only, no dates as data, nothing outside
+  // Layouts. Timelines and the other templates are slice two.
+  var LAY_BOX_FILLS = ["#ffffff", "#f4f7fb", "#eef4fc", "#dbe7f7",
+                       "#fdf6e3", "#e9f4df", "#fdf0f0", "none"];
+  var LAY_ARROW_COLORS = ["#22364d", "#5f6f80", "#94a3b1", "#417499",
+                          "#902634", "#266741"];
+  function layHexOr(v, dflt) {
+    return /^#[0-9a-fA-F]{3,8}$/.test(String(v || "")) ? v : dflt;
+  }
+  function layBoxFill(item) {
+    var f = String(item.fill || "");
+    if (f === "none" || f === "transparent") return "none";
+    return layHexOr(f, "#ffffff");
+  }
+  function layBoxBorder(item) {
+    return item.border === "none" || item.border === "thick"
+      ? item.border : "thin";
+  }
+  function layBoxStyle(item) {
+    var b = layBoxBorder(item);
+    return { fill: layBoxFill(item),
+             // Whole pixels on purpose: Chromium snaps a CSS border to a
+             // whole device pixel, so a 1.25 or 2.5 border drew narrower on
+             // the canvas than the file's stroke. Integers agree everywhere.
+             borderW: b === "none" ? 0 : b === "thick" ? 2 : 1,
+             borderColor: layHexOr(item.borderColor, "#22364d"),
+             corner: layClamp(item.corner == null ? 4 : item.corner, 0, 24),
+             fs: Math.max(8, Math.min(72, Number(item.fontSize) || 13)) };
+  }
+  var LAY_BOX_PAD_X = 8, LAY_BOX_PAD_Y = 4;
+  function layBoxTextRotated(item) {
+    return Math.abs(layTextRotate(item)) >= 45;
+  }
+  function layBoxNode(item) {
+    var st = layBoxStyle(item);
+    var box = mkEl("div", "ps-lbox");
+    box.style.background = st.fill === "none" ? "transparent" : st.fill;
+    box.style.border = st.borderW
+      ? st.borderW + "px solid " + st.borderColor : "0";
+    box.style.borderRadius = st.corner + "px";
+    box.style.fontSize = st.fs + "px";
+    box.style.fontWeight = item.bold ? "700" : "400";
+    box.style.fontStyle = item.italic ? "italic" : "normal";
+    box.style.color = layTextColor(item);
+    var span = mkEl("span", "", exportSafeText(item.text || "Box"));
+    var rot = layTextRotate(item);
+    if (rot) {
+      // Rotation stays on the inner text, as for text items. A side
+      // label (PRISMA's Identification / Screening / Included bars) is a
+      // tall narrow box whose text runs along its height, so the text
+      // lays out at the box's inner HEIGHT before it turns.
+      span.style.transform = "rotate(" + rot + "deg)";
+      span.style.transformOrigin = "center center";
+      if (layBoxTextRotated(item)) {
+        span.style.width = Math.max(8, (Number(item.h) || 44) -
+          LAY_BOX_PAD_Y * 2 - st.borderW * 2) + "px";
+        span.style.maxWidth = "none";
+        span.style.flex = "0 0 auto";
+      }
+    }
+    box.appendChild(span);
+    return box;
+  }
+  function layBoxTargets() {
+    var ids = laySelectedIds(), out = [];
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (it && it.kind === "box") out.push(it);
+    }
+    return out;
+  }
+  function layArrowTargets() {
+    var ids = laySelectedIds(), out = [];
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (it && it.kind === "arrow") out.push(it);
+    }
+    return out;
+  }
+  // layTextApply's shape, for a named set of targets.
+  function layPartApply(targets, label, key, fn, live) {
+    if (!targets.length) return;
+    var ids = [];
+    for (var k = 0; k < targets.length; k++) ids.push(targets[k].id);
+    laySnapshot(label, key ? key + ":" + ids.join(",") : null);
+    for (var i = 0; i < targets.length; i++) fn(targets[i]);
+    layClampAllItems();
+    persist(!live);
+    renderLayout();
+  }
+  function layArrowStyle(item) {
+    return { width: layClamp(item.width == null ? 1.5 : item.width, 0.5, 6),
+             color: layHexOr(item.color, "#22364d"),
+             route: item.route === "straight" ? "straight" : "elbow",
+             heads: item.heads === "none" || item.heads === "both"
+               ? item.heads : "end" };
+  }
+  function layArrowHeadLen(w) { return 7 + w * 2.5; }
+  // Which side of a box an end leaves from: the side facing the other
+  // end, judged in the box's own proportions so a wide box prefers its
+  // long sides. Computed, never stored.
+  function layArrowSideOf(rect, ox, oy) {
+    var cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
+    var dx = ox - cx, dy = oy - cy;
+    var hx = Math.max(1, rect.w / 2), hy = Math.max(1, rect.h / 2);
+    if (Math.abs(dx) / hx >= Math.abs(dy) / hy)
+      return dx >= 0 ? { x: rect.x + rect.w, y: cy, side: "r" }
+                     : { x: rect.x, y: cy, side: "l" };
+    return dy >= 0 ? { x: cx, y: rect.y + rect.h, side: "b" }
+                   : { x: cx, y: rect.y, side: "t" };
+  }
+  function layArrowAnchorBox(ref) {
+    if (!ref || !ref.id) return null;
+    var it = layItemById(ref.id);
+    if (!it || it.kind !== "box") return null;
+    return { x: Number(it.x) || 0, y: Number(it.y) || 0,
+             w: Number(it.w) || 150, h: Number(it.h) || 44 };
+  }
+  // The polyline between two ends. An attached end must LEAVE its box
+  // through the side it sits on, so a horizontal side gets a horizontal
+  // first or last segment; a free end takes whatever the other end needs.
+  function layArrowPoints(A, B, route) {
+    if (route === "straight")
+      return [{ x: A.x, y: A.y }, { x: B.x, y: B.y }];
+    var aH = A.side === "l" || A.side === "r";
+    var aV = A.side === "t" || A.side === "b";
+    var bH = B.side === "l" || B.side === "r";
+    var bV = B.side === "t" || B.side === "b";
+    if (aH && bV) return [{ x: A.x, y: A.y }, { x: B.x, y: A.y }, { x: B.x, y: B.y }];
+    if (aV && bH) return [{ x: A.x, y: A.y }, { x: A.x, y: B.y }, { x: B.x, y: B.y }];
+    var horizontal = aH || (!aV && (bH || (!bV &&
+      Math.abs(B.x - A.x) >= Math.abs(B.y - A.y))));
+    if (horizontal) {
+      var mx = (A.x + B.x) / 2;
+      return [{ x: A.x, y: A.y }, { x: mx, y: A.y }, { x: mx, y: B.y },
+              { x: B.x, y: B.y }];
+    }
+    var my = (A.y + B.y) / 2;
+    return [{ x: A.x, y: A.y }, { x: A.x, y: my }, { x: B.x, y: my },
+            { x: B.x, y: B.y }];
+  }
+  // Resolve both ends to page points and re-express the item as the
+  // box around them. Returns the absolute ends and the polyline.
+  function layArrowSync(item) {
+    var st = layArrowStyle(item);
+    var x0 = Number(item.x) || 0, y0 = Number(item.y) || 0;
+    var A = { x: x0 + (Number(item.ax) || 0), y: y0 + (Number(item.ay) || 0) };
+    var B = { x: x0 + (Number(item.bx) || 0), y: y0 + (Number(item.by) || 0) };
+    var ra = layArrowAnchorBox(item.from), rb = layArrowAnchorBox(item.to);
+    if (ra && rb) {
+      A = layArrowSideOf(ra, rb.x + rb.w / 2, rb.y + rb.h / 2);
+      B = layArrowSideOf(rb, ra.x + ra.w / 2, ra.y + ra.h / 2);
+    } else if (ra) A = layArrowSideOf(ra, B.x, B.y);
+    else if (rb) B = layArrowSideOf(rb, A.x, A.y);
+    // A box that is gone (deleted, or this arrow was pasted into another
+    // figure) leaves the end where it last was, as a free end.
+    if (!ra && item.from) item.from = null;
+    if (!rb && item.to) item.to = null;
+    var pts = layArrowPoints(A, B, st.route);
+    var pad = layArrowHeadLen(st.width) + st.width + 6;
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (var i = 0; i < pts.length; i++) {
+      if (pts[i].x < minX) minX = pts[i].x;
+      if (pts[i].x > maxX) maxX = pts[i].x;
+      if (pts[i].y < minY) minY = pts[i].y;
+      if (pts[i].y > maxY) maxY = pts[i].y;
+    }
+    item.x = minX - pad; item.y = minY - pad;
+    item.w = (maxX - minX) + pad * 2; item.h = (maxY - minY) + pad * 2;
+    item.ax = A.x - item.x; item.ay = A.y - item.y;
+    item.bx = B.x - item.x; item.by = B.y - item.y;
+    return { a: A, b: B, pts: pts };
+  }
+  // The drawn geometry, relative to the item box: the line trimmed back
+  // from each headed end so the stroke never pokes through the head, and
+  // the head triangles.
+  function layArrowRender(item) {
+    var ends = layArrowSync(item), st = layArrowStyle(item), i;
+    var clean = [], p;
+    for (i = 0; i < ends.pts.length; i++) {
+      p = { x: ends.pts[i].x - item.x, y: ends.pts[i].y - item.y };
+      var q = clean[clean.length - 1];
+      if (!q || Math.abs(p.x - q.x) > 0.01 || Math.abs(p.y - q.y) > 0.01)
+        clean.push(p);
+    }
+    if (clean.length === 1) clean.push({ x: clean[0].x + 0.01, y: clean[0].y });
+    var len = layArrowHeadLen(st.width), half = len * 0.42, heads = [];
+    function head(tip, prev) {
+      var dx = tip.x - prev.x, dy = tip.y - prev.y;
+      var L = Math.sqrt(dx * dx + dy * dy) || 1;
+      var ux = dx / L, uy = dy / L;
+      var bx = tip.x - ux * len, by = tip.y - uy * len;
+      heads.push([{ x: tip.x, y: tip.y },
+                  { x: bx - uy * half, y: by + ux * half },
+                  { x: bx + uy * half, y: by - ux * half }]);
+      return { x: bx + ux * 0.5, y: by + uy * 0.5 };
+    }
+    if (st.heads === "end" || st.heads === "both")
+      clean[clean.length - 1] = head(clean[clean.length - 1],
+                                     clean[clean.length - 2]);
+    if (st.heads === "both") clean[0] = head(clean[0], clean[1]);
+    return { line: clean, heads: heads, style: st, ends: ends };
+  }
+  function layNum2(v) { return String(Math.round(v * 100) / 100); }
+  function layArrowD(pts, ox, oy) {
+    var d = "";
+    for (var i = 0; i < pts.length; i++)
+      d += (i ? " L" : "M") + layNum2(pts[i].x + ox) + " " +
+        layNum2(pts[i].y + oy);
+    return d;
+  }
+  function layArrowPoly(tri, ox, oy) {
+    var out = [];
+    for (var i = 0; i < tri.length; i++)
+      out.push(layNum2(tri[i].x + ox) + "," + layNum2(tri[i].y + oy));
+    return out.join(" ");
+  }
+  function layArrowSvg(item, selected) {
+    var r = layArrowRender(item), st = r.style;
+    var ns = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("width", layNum2(item.w));
+    svg.setAttribute("height", layNum2(item.h));
+    svg.setAttribute("viewBox", "0 0 " + layNum2(item.w) + " " + layNum2(item.h));
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    var d = layArrowD(r.line, 0, 0), i;
+    if (selected) {
+      var halo = document.createElementNS(ns, "path");
+      halo.setAttribute("class", "ps-larrow-halo");
+      halo.setAttribute("d", d);
+      halo.setAttribute("fill", "none");
+      halo.setAttribute("stroke-width", String(st.width + 8));
+      halo.setAttribute("stroke-linejoin", "round");
+      halo.setAttribute("stroke-linecap", "round");
+      svg.appendChild(halo);
+    }
+    var hit = document.createElementNS(ns, "path");
+    hit.setAttribute("class", "ps-larrow-hit");
+    hit.setAttribute("d", d);
+    hit.setAttribute("stroke-width", String(Math.max(16, st.width + 12)));
+    svg.appendChild(hit);
+    var line = document.createElementNS(ns, "path");
+    line.setAttribute("d", d);
+    line.setAttribute("fill", "none");
+    line.setAttribute("stroke", st.color);
+    line.setAttribute("stroke-width", String(st.width));
+    line.setAttribute("stroke-linejoin", "round");
+    svg.appendChild(line);
+    for (i = 0; i < r.heads.length; i++) {
+      var poly = document.createElementNS(ns, "polygon");
+      poly.setAttribute("points", layArrowPoly(r.heads[i], 0, 0));
+      poly.setAttribute("fill", st.color);
+      svg.appendChild(poly);
+    }
+    return svg;
+  }
+  function layBoxLabel(id) {
+    var it = layItemById(id);
+    if (!it) return null;
+    var t = String(it.text || "Box").replace(/\s+/g, " ").trim();
+    if (t.length > 40) t = t.slice(0, 37) + "…";
+    return t;
+  }
+  function layArrowEndsText(item) {
+    var f = item.from ? layBoxLabel(item.from.id) : null;
+    var t = item.to ? layBoxLabel(item.to.id) : null;
+    if (f && t) return ' from "' + f + '" to "' + t + '"';
+    if (f) return ' from "' + f + '" to a free end';
+    if (t) return ' from a free end to "' + t + '"';
+    return ", free at both ends";
+  }
+  function layArrowTip(item) {
+    return "Arrow" + layArrowEndsText(item) +
+      ". Drag an end onto a box to attach it.";
+  }
+  function layArrowReverse(item) {
+    var f = item.from, ax = item.ax, ay = item.ay;
+    item.from = item.to; item.to = f;
+    item.ax = item.bx; item.ay = item.by;
+    item.bx = ax; item.by = ay;
+  }
+  function layAttachArrowEnds(node, item) {
+    var ends = layArrowSync(item);
+    var spec = [["a", ends.a, !!item.from], ["b", ends.b, !!item.to]];
+    for (var i = 0; i < spec.length; i++) {
+      var h = mkEl("div", "ps-lhandle-end" +
+        (spec[i][2] ? " ps-lhandle-end-attached" : ""));
+      h.setAttribute("data-role", "lay-arrow-end");
+      h.setAttribute("data-end", spec[i][0]);
+      h.setAttribute("aria-hidden", "true");
+      h.style.left = layNum2(spec[i][1].x - item.x) + "px";
+      h.style.top = layNum2(spec[i][1].y - item.y) + "px";
+      setTip(h, spec[i][2]
+        ? "Attached to a box. Drag it away to free this end, or onto another box."
+        : "Drag onto a box to attach this end.");
+      node.appendChild(h);
+    }
+  }
+  // Rebuild ONE arrow's node in place. During a gesture a full
+  // renderLayout would destroy the element the pointer is holding.
+  function layArrowRefresh(it) {
+    var cv = el("ps-lcanvas");
+    var old = cv && cv.querySelector('.ps-litem[data-item-id="' + it.id + '"]');
+    if (!old) return;
+    var fresh = layBuildItem(it);
+    if (old.classList.contains("ps-litem-dragging"))
+      fresh.classList.add("ps-litem-dragging");
+    old.parentNode.replaceChild(fresh, old);
+  }
+  // Every arrow attached to any of these items follows them.
+  function layArrowsFollow(ids) {
+    var items = layItems();
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      if (it.kind !== "arrow") continue;
+      var f = it.from && it.from.id, t = it.to && it.to.id;
+      if ((f && ids.indexOf(f) !== -1) || (t && ids.indexOf(t) !== -1) ||
+          ids.indexOf(it.id) !== -1) layArrowRefresh(it);
+    }
+  }
+  // A removed box frees the ends that were attached to it; the offsets
+  // written at the last sync keep each end exactly where it was drawn.
+  function layArrowsDetachFrom(ids) {
+    var items = layItems();
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      if (it.kind !== "arrow") continue;
+      if (it.from && ids.indexOf(it.from.id) !== -1) it.from = null;
+      if (it.to && ids.indexOf(it.to.id) !== -1) it.to = null;
+    }
+  }
+  // Copies of arrows point at the COPIES of their boxes when those were
+  // copied too, and at nothing otherwise (a free end where the original
+  // was attached), never at the originals.
+  function layArrowsRemap(ids, idMap) {
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (!it || it.kind !== "arrow") continue;
+      if (it.from) it.from = idMap[it.from.id] ? { id: idMap[it.from.id] } : null;
+      if (it.to) it.to = idMap[it.to.id] ? { id: idMap[it.to.id] } : null;
+    }
+  }
+  function layBoxAt(px, py, except) {
+    var items = layItems();
+    for (var i = items.length - 1; i >= 0; i--) {
+      var it = items[i];
+      if (it.kind !== "box" || it === except) continue;
+      var r = layItemRect(it);
+      if (px >= r.x && px <= r.right && py >= r.y && py <= r.bottom) return it;
+    }
+    return null;
+  }
+  // An end being dragged: over a box it attaches (the box lights up as
+  // the drop target), elsewhere it is a free point on the grid.
+  function layArrowEndDrag(d, e) {
+    var cv = el("ps-lcanvas");
+    if (!cv) return;
+    var box = cv.getBoundingClientRect(), z = d.zoom;
+    var v = layView(), p = layPage();
+    var px = layClamp((e.clientX - box.left) / z, 0, p.w);
+    var py = layClamp((e.clientY - box.top) / z, 0, p.h);
+    var it = d.arrow, key = d.arrowEnd === "a" ? "from" : "to";
+    var target = layBoxAt(px, py, null);
+    if (target) it[key] = { id: target.id };
+    else {
+      it[key] = null;
+      if (v.snap) {
+        px = Math.round(px / v.grid) * v.grid;
+        py = Math.round(py / v.grid) * v.grid;
+      }
+      if (d.arrowEnd === "a") {
+        it.ax = px - (Number(it.x) || 0); it.ay = py - (Number(it.y) || 0);
+      } else {
+        it.bx = px - (Number(it.x) || 0); it.by = py - (Number(it.y) || 0);
+      }
+    }
+    layArrowRefresh(it);
+    var lit = cv.querySelectorAll(".ps-litem-droptarget");
+    for (var i = 0; i < lit.length; i++)
+      lit[i].classList.remove("ps-litem-droptarget");
+    if (target) {
+      var node = cv.querySelector('.ps-litem[data-item-id="' + target.id + '"]');
+      if (node) node.classList.add("ps-litem-droptarget");
+    }
+  }
+  function layAddBox() {
+    var p = layPage(), items = layItems(), w = 150, h = 44;
+    var spot = layPlaceRect(items, p, w, h);
+    var grew = spot.needH > p.h;
+    var id = layAddItem({ id: layNewItemId(), kind: "box", text: "Box",
+      fontSize: 13, x: spot.x, y: spot.y, w: w, h: h, fill: "#ffffff",
+      border: "thin", corner: 4 }, false, spot.needH);
+    layGrewNote(grew, spot.capped);
+    layAnnounce("Added a box. Double-click it to edit the text.");
+    return id;
+  }
+  // With a box selected the new arrow starts attached to it, free end to
+  // the right; otherwise a free arrow lands in clear space.
+  function layAddArrow() {
+    var p = layPage(), items = layItems();
+    var sel = laySelectedIds(), fromBox = null;
+    for (var i = 0; i < sel.length; i++) {
+      var s = layItemById(sel[i]);
+      if (s && s.kind === "box") fromBox = s;
+    }
+    var item = { id: layNewItemId(), kind: "arrow", route: "elbow",
+                 heads: "end", width: 1.5, color: "#22364d",
+                 from: null, to: null, x: 0, y: 0 };
+    if (fromBox) {
+      var r = layItemRect(fromBox);
+      var ey = r.y + r.h / 2;
+      var ex = r.right + 120 <= p.w - 8 ? r.right + 120 : r.x - 120;
+      item.from = { id: fromBox.id };
+      item.ax = r.right; item.ay = ey; item.bx = ex; item.by = ey;
+    } else {
+      var spot = layPlaceRect(items, p, 160, 24);
+      item.ax = spot.x; item.ay = spot.y + 12;
+      item.bx = spot.x + 160; item.by = spot.y + 12;
+    }
+    layArrowSync(item);
+    var id = layAddItem(item, false, p.h);
+    layAnnounce(fromBox
+      ? "Added an arrow from the selected box. Drag its free end onto another box to attach it."
+      : "Added an arrow. Drag either end onto a box to attach it.");
+    return id;
+  }
+  function layBoxSyncControls(items) {
+    var item = items[0];
+    function agree(read) {
+      for (var i = 1; i < items.length; i++)
+        if (read(items[i]) !== read(items[0])) return false;
+      return true;
+    }
+    var fill = layBoxFill(item), fillMixed = !agree(layBoxFill);
+    var chips = el("ps-lbox-fills").querySelectorAll("button[data-fill]");
+    var fillHit = false;
+    for (var i = 0; i < chips.length; i++) {
+      var fon = !fillMixed && chips[i].getAttribute("data-fill") === fill;
+      if (fon) fillHit = true;
+      chips[i].setAttribute("aria-pressed", fon ? "true" : "false");
+    }
+    layPaintCustomChip("ps-lbox-fillcustom", fill === "none" ? "#ffffff" : fill,
+      !fillMixed && !fillHit);
+    var bcol = layBoxStyle(item).borderColor;
+    layPaintCustomChip("ps-lbox-bordercolor", bcol, false);
+    var border = layBoxBorder(item), borderMixed = !agree(layBoxBorder);
+    var segs = document.querySelectorAll("[data-lbox-border]");
+    for (i = 0; i < segs.length; i++)
+      segs[i].setAttribute("aria-pressed",
+        !borderMixed && segs[i].getAttribute("data-lbox-border") === border
+          ? "true" : "false");
+    var corner = layBoxStyle(item).corner;
+    var cornerMixed = !agree(function (t) { return layBoxStyle(t).corner; });
+    var rg = el("ps-lbox-corner"), nm = el("ps-lbox-corner-num");
+    if (rg && document.activeElement !== rg) rg.value = String(corner);
+    if (nm && document.activeElement !== nm) {
+      if (cornerMixed) { nm.value = ""; nm.placeholder = "Mixed"; }
+      else { nm.value = String(corner); nm.placeholder = ""; }
+    }
+  }
+  function layArrowSyncControls(items) {
+    var item = items[0], st = layArrowStyle(item);
+    function agree(read) {
+      for (var i = 1; i < items.length; i++)
+        if (read(items[i]) !== read(items[0])) return false;
+      return true;
+    }
+    var routeMixed = !agree(function (t) { return layArrowStyle(t).route; });
+    var headsMixed = !agree(function (t) { return layArrowStyle(t).heads; });
+    var segs = document.querySelectorAll("[data-larrow-route]"), i;
+    for (i = 0; i < segs.length; i++)
+      segs[i].setAttribute("aria-pressed",
+        !routeMixed && segs[i].getAttribute("data-larrow-route") === st.route
+          ? "true" : "false");
+    segs = document.querySelectorAll("[data-larrow-heads]");
+    for (i = 0; i < segs.length; i++)
+      segs[i].setAttribute("aria-pressed",
+        !headsMixed && segs[i].getAttribute("data-larrow-heads") === st.heads
+          ? "true" : "false");
+    var widthMixed = !agree(function (t) { return layArrowStyle(t).width; });
+    var rg = el("ps-larrow-width"), nm = el("ps-larrow-width-num");
+    if (rg && document.activeElement !== rg) rg.value = String(st.width);
+    if (nm && document.activeElement !== nm) {
+      if (widthMixed) { nm.value = ""; nm.placeholder = "Mixed"; }
+      else { nm.value = String(st.width); nm.placeholder = ""; }
+    }
+    var colMixed = !agree(function (t) { return layArrowStyle(t).color.toLowerCase(); });
+    var chips = el("ps-larrow-colors").querySelectorAll("button[data-color]");
+    var colHit = false;
+    for (i = 0; i < chips.length; i++) {
+      var on = !colMixed && chips[i].getAttribute("data-color") === st.color.toLowerCase();
+      if (on) colHit = true;
+      chips[i].setAttribute("aria-pressed", on ? "true" : "false");
+    }
+    layPaintCustomChip("ps-larrow-custom", st.color, !colMixed && !colHit);
+    // The attachment selects list every box by its text. Meaningful for
+    // ONE arrow; a set of arrows keeps them disabled with the reason.
+    var sels = [["ps-larrow-from", "from"], ["ps-larrow-to", "to"]];
+    var boxes = layItems().filter(function (b) { return b.kind === "box"; });
+    for (i = 0; i < sels.length; i++) {
+      var sel = el(sels[i][0]);
+      if (!sel) continue;
+      var cur = items.length === 1 && item[sels[i][1]] ? item[sels[i][1]].id : "";
+      sel.innerHTML = "";
+      var free = document.createElement("option");
+      free.value = ""; free.textContent = "Free end";
+      sel.appendChild(free);
+      for (var b = 0; b < boxes.length; b++) {
+        var opt = document.createElement("option");
+        opt.value = boxes[b].id;
+        opt.textContent = layBoxLabel(boxes[b].id) || boxes[b].id;
+        sel.appendChild(opt);
+      }
+      sel.value = cur;
+      sel.disabled = items.length !== 1;
+      setTip(sel, items.length !== 1
+        ? "Attachment applies to one arrow at a time." : "");
+    }
+  }
+  function wireLayoutPartControls() {
+    var fills = el("ps-lbox-fills");
+    if (!fills) return;
+    var fillNames = { "#ffffff": "White", "#f4f7fb": "Paper", "#eef4fc": "Sky",
+      "#dbe7f7": "Blue", "#fdf6e3": "Cream", "#e9f4df": "Green",
+      "#fdf0f0": "Rose", none: "No fill" };
+    var i;
+    for (i = 0; i < LAY_BOX_FILLS.length; i++) (function (c) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("data-fill", c);
+      b.setAttribute("aria-label", (fillNames[c] || c) + " fill");
+      b.setAttribute("aria-pressed", "false");
+      if (c === "none") {
+        b.style.background = "linear-gradient(45deg,#cbd1d8 25%,transparent 25%," +
+          "transparent 75%,#cbd1d8 75%),linear-gradient(45deg,#cbd1d8 25%," +
+          "#fff 25%,#fff 75%,#cbd1d8 75%)";
+        b.style.backgroundSize = "8px 8px";
+        b.style.backgroundPosition = "0 0,4px 4px";
+      } else b.style.background = c;
+      setTip(b, fillNames[c] || c);
+      b.addEventListener("click", function () {
+        layPartApply(layBoxTargets(), "box fill", null,
+          function (it) { it.fill = c; });
+      });
+      fills.appendChild(b);
+    })(LAY_BOX_FILLS[i]);
+    layWireCustomChip("ps-lbox-fillcustom", layBoxTargets, "fill", "box fill", "#ffffff");
+    layWireCustomChip("ps-lbox-bordercolor", layBoxTargets, "borderColor", "box border color", "#22364d");
+    layWireCustomChip("ps-larrow-custom", layArrowTargets, "color", "arrow color", "#22364d");
+    var borders = document.querySelectorAll("[data-lbox-border]");
+    for (i = 0; i < borders.length; i++) (function (btn) {
+      btn.addEventListener("click", function () {
+        var v = btn.getAttribute("data-lbox-border");
+        layPartApply(layBoxTargets(), "box border", null,
+          function (it) { it.border = v; });
+      });
+    })(borders[i]);
+    function wirePair(rangeId, numId, targetsFn, label, key, setter) {
+      var r = el(rangeId), n = el(numId);
+      if (!r || !n) return;
+      r.addEventListener("input", function () {
+        var v = Number(r.value);
+        layPartApply(targetsFn(), label, key,
+          function (it) { setter(it, v); }, true);
+      });
+      r.addEventListener("change", function () { persist(); });
+      n.addEventListener("change", function () {
+        var v = Number(n.value);
+        if (!isFinite(v)) return;
+        layPartApply(targetsFn(), label, null, function (it) { setter(it, v); });
+      });
+    }
+    wirePair("ps-lbox-corner", "ps-lbox-corner-num", layBoxTargets,
+      "box corner", "lbox-corner", function (it, v) {
+        it.corner = layClamp(Math.round(v), 0, 24);
+      });
+    var routes = document.querySelectorAll("[data-larrow-route]");
+    for (i = 0; i < routes.length; i++) (function (btn) {
+      btn.addEventListener("click", function () {
+        var v = btn.getAttribute("data-larrow-route");
+        layPartApply(layArrowTargets(), "arrow route", null,
+          function (it) { it.route = v; });
+      });
+    })(routes[i]);
+    var heads = document.querySelectorAll("[data-larrow-heads]");
+    for (i = 0; i < heads.length; i++) (function (btn) {
+      btn.addEventListener("click", function () {
+        var v = btn.getAttribute("data-larrow-heads");
+        layPartApply(layArrowTargets(), "arrow heads", null,
+          function (it) { it.heads = v; });
+      });
+    })(heads[i]);
+    wirePair("ps-larrow-width", "ps-larrow-width-num", layArrowTargets,
+      "arrow width", "larrow-width", function (it, v) {
+        it.width = layClamp(Math.round(v * 2) / 2, 0.5, 6);
+      });
+    var colors = el("ps-larrow-colors");
+    var colorNames = { "#22364d": "Ink", "#5f6f80": "Muted", "#94a3b1": "Faint",
+      "#417499": "Blue", "#902634": "Red", "#266741": "Green" };
+    for (i = 0; i < LAY_ARROW_COLORS.length; i++) (function (c) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("data-color", c);
+      b.setAttribute("aria-label", (colorNames[c] || c) + " arrow");
+      b.setAttribute("aria-pressed", "false");
+      b.style.background = c;
+      setTip(b, colorNames[c] || c);
+      b.addEventListener("click", function () {
+        layPartApply(layArrowTargets(), "arrow color", null,
+          function (it) { it.color = c; });
+      });
+      colors.appendChild(b);
+    })(LAY_ARROW_COLORS[i]);
+    var sels = [["ps-larrow-from", "from"], ["ps-larrow-to", "to"]];
+    for (i = 0; i < sels.length; i++) (function (id, key) {
+      var sel = el(id);
+      if (!sel) return;
+      sel.addEventListener("change", function () {
+        var v = sel.value;
+        layPartApply(layArrowTargets(), "attach arrow", null,
+          function (it) { it[key] = v ? { id: v } : null; });
+      });
+    })(sels[i][0], sels[i][1]);
+  }
+  // The PRISMA 2020 flow diagram for a new systematic review of
+  // databases and registers (Page et al., 2021): the mandated boxes, the
+  // arrows between them and the three side labels, with every count left
+  // as a field to fill in. Every part is an ordinary item afterward.
+  function layBuildPrisma(c) {
+    var n = 0, ids = {};
+    function box(key, x, y, w, h, text, extra) {
+      var it = { id: "i" + (++n), kind: "box", text: text, fontSize: 11,
+                 x: x, y: y, w: w, h: h, fill: "#ffffff", border: "thin",
+                 corner: 2 };
+      if (extra) for (var k in extra) if (extra.hasOwnProperty(k)) it[k] = extra[k];
+      c.items.push(it);
+      ids[key] = it.id;
+      return it;
+    }
+    function arrow(fromKey, toKey) {
+      var it = { id: "i" + (++n), kind: "arrow",
+                 from: { id: ids[fromKey] }, to: { id: ids[toKey] },
+                 route: "elbow", heads: "end", width: 1.25, color: "#22364d",
+                 x: 0, y: 0, ax: 0, ay: 0, bx: 0, by: 0 };
+      c.items.push(it);
+    }
+    var L = 104, R = 464, W = 300, S = 44, SW = 36;
+    var side = { fill: "#dbe7f7", border: "none", bold: true, rotate: -90,
+                 corner: 2 };
+    c.items.push({ id: "i" + (++n), kind: "text",
+                   text: "PRISMA 2020 flow diagram", fontSize: 14,
+                   bold: true, x: 40, y: 22 });
+    box("side1", S, 64, SW, 104, "Identification", side);
+    box("side2", S, 220, SW, 268, "Screening", side);
+    box("side3", S, 560, SW, 76, "Included", side);
+    box("ident", L, 64, W, 76,
+        "Records identified from:\nDatabases (n = )\nRegisters (n = )");
+    // Right-hand boxes are centred on their left partner so the arrow
+    // between them runs straight, as the published diagram draws it.
+    box("removed", R, 50, W, 104,
+        "Records removed before screening:\nDuplicate records removed (n = )\n" +
+        "Records marked as ineligible by automation tools (n = )\n" +
+        "Records removed for other reasons (n = )");
+    box("screened", L, 220, W, 48, "Records screened\n(n = )");
+    box("excluded", R, 220, W, 48, "Records excluded\n(n = )");
+    box("sought", L, 316, W, 48, "Reports sought for retrieval\n(n = )");
+    box("notret", R, 316, W, 48, "Reports not retrieved\n(n = )");
+    box("assessed", L, 412, W, 48, "Reports assessed for eligibility\n(n = )");
+    box("rexcl", R, 398, W, 76,
+        "Reports excluded:\nReason 1 (n = )\nReason 2 (n = )\nReason 3 (n = )");
+    box("included", L, 560, W, 76,
+        "Studies included in review\n(n = )\nReports of included studies\n(n = )");
+    arrow("ident", "removed"); arrow("ident", "screened");
+    arrow("screened", "excluded"); arrow("screened", "sought");
+    arrow("sought", "notret"); arrow("sought", "assessed");
+    arrow("assessed", "rexcl"); arrow("assessed", "included");
+  }
+
+  // ---- Timeline (figure parts, slice two): one line with named ticks at
+  // positions along it (0..1), labels above or below, plain or arrowed
+  // ends, and phase bands between two ticks. Labels and positions only,
+  // never a date anything computes from (the figures-not-records line).
+  var LAY_TL_BAND_FILLS = ["#e8f0fb", "#fdf6e3", "#e9f4df", "#fdf0f0",
+                           "#eef4fc", "#f4f7fb"];
+  function layTimelineStyle(item) {
+    return { fs: layClamp(item.fontSize == null ? 11 : item.fontSize, 8, 24),
+             color: layHexOr(item.color, "#22364d"),
+             width: layClamp(item.width == null ? 1.5 : item.width, 0.5, 4),
+             // Tick marks default to the line's own width; each tick may
+             // carry its own (Torry: "individually and as a group").
+             tickWidth: item.tickWidth == null ? null
+               : layClamp(item.tickWidth, 0.5, 6),
+             tickLen: layClamp(item.tickLen == null ? 12 : item.tickLen, 4, 40),
+             labels: item.labels === "below" ? "below" : "above",
+             ends: item.ends === "arrow" ? "arrow" : "plain" };
+  }
+  function layTickWidth(st, tick) {
+    if (tick && tick.width != null && isFinite(tick.width)) return layClamp(tick.width, 0.5, 6);
+    return st.tickWidth != null ? st.tickWidth : st.width;
+  }
+  function layTimelineTicks(item) {
+    var out = [], src = Array.isArray(item.ticks) ? item.ticks : [];
+    for (var i = 0; i < src.length; i++) {
+      var t = src[i] || {};
+      out.push({ pos: layClamp(t.pos, 0, 1),
+                 label: String(t.label == null ? "" : t.label),
+                 sub: String(t.sub == null ? "" : t.sub),
+                 width: t.width == null || !isFinite(Number(t.width)) ? null : Number(t.width) });
+    }
+    return out;
+  }
+  function layTimelineBands(item, nTicks) {
+    var out = [], src = Array.isArray(item.bands) ? item.bands : [];
+    for (var i = 0; i < src.length; i++) {
+      var b = src[i] || {};
+      var a = Math.round(Number(b.a)), z = Math.round(Number(b.b));
+      if (!(a >= 0 && a < nTicks && z >= 0 && z < nTicks) || a === z) continue;
+      out.push({ a: Math.min(a, z), b: Math.max(a, z), i: i,
+                 label: String(b.label == null ? "" : b.label),
+                 fill: layHexOr(b.fill, "#e8f0fb") });
+    }
+    return out;
+  }
+  // Geometry in item coordinates. Main labels sit on the chosen side of
+  // the line; band labels and sub-labels stack on the other side, so the
+  // four rows never collide: label, line (with bands), band label, sub.
+  function layTimelineGeom(item) {
+    var st = layTimelineStyle(item);
+    var w = Math.max(80, Number(item.w) || 360);
+    var h = Math.max(40, Number(item.h) || 84);
+    var pad = 14, x0 = pad, x1 = w - pad, lineY = Math.round(h / 2);
+    var above = st.labels === "above";
+    var g = { st: st, w: w, h: h, x0: x0, x1: x1, lineY: lineY,
+              labelY: above ? lineY - 12 : lineY + 12 + st.fs * 0.8,
+              bandLabelY: above ? lineY + 12 + st.fs * 0.8 : lineY - 12,
+              subY: above ? lineY + 12 + st.fs * 0.8 + st.fs + 4
+                          : lineY - 12 - st.fs - 4,
+              headLen: st.ends === "arrow" ? 8 + st.width * 2 : 0,
+              ticks: [], bands: [] };
+    var ticks = layTimelineTicks(item);
+    for (var i = 0; i < ticks.length; i++)
+      g.ticks.push({ x: x0 + ticks[i].pos * (x1 - x0), pos: ticks[i].pos,
+                     width: ticks[i].width,
+                     label: ticks[i].label, sub: ticks[i].sub });
+    var bands = layTimelineBands(item, ticks.length);
+    for (var k = 0; k < bands.length; k++)
+      g.bands.push({ x0: g.ticks[bands[k].a].x, x1: g.ticks[bands[k].b].x,
+                     label: bands[k].label, fill: bands[k].fill });
+    return g;
+  }
+  function layTimelineLabelsText(item) {
+    var ticks = layTimelineTicks(item), names = [];
+    for (var i = 0; i < ticks.length; i++) if (ticks[i].label) names.push(ticks[i].label);
+    return names.join(", ");
+  }
+  // One drawing routine for the canvas and the file: the canvas adds hit
+  // areas (a wide rect per tick to drag, a band along the line to
+  // double-click) that never reach the export.
+  function layTimelineDraw(doc, item, opts) {
+    var ns = "http://www.w3.org/2000/svg", g = layTimelineGeom(item), st = g.st;
+    var ox = opts.ox || 0, oy = opts.oy || 0, i;
+    var root = doc.createElementNS(ns, "g");
+    function mk(tag, attrs) {
+      var n = doc.createElementNS(ns, tag);
+      for (var k in attrs) if (attrs.hasOwnProperty(k)) n.setAttribute(k, String(attrs[k]));
+      return n;
+    }
+    // The line's double-click strip goes UNDER the bands, so a band keeps
+    // its own click (its color) and the bare line keeps add-a-tick.
+    if (opts.canvas)
+      root.appendChild(mk("rect", { x: layNum2(g.x0), y: layNum2(g.lineY - 8),
+        width: layNum2(g.x1 - g.x0), height: 16, fill: "transparent",
+        "class": "ps-ltl-line-hit" }));
+    function txt(x, y, s, size, fill, weight, extra) {
+      var t = mk("text", { x: layNum2(x + ox), y: layNum2(y + oy),
+        "text-anchor": "middle", fill: fill, "font-size": size,
+        "font-family": "sans-serif", "font-weight": weight || "400" });
+      if (extra) for (var k in extra) if (extra.hasOwnProperty(k)) t.setAttribute(k, extra[k]);
+      t.textContent = s;
+      return t;
+    }
+    for (i = 0; i < g.bands.length; i++) {
+      var b = g.bands[i];
+      var bandAttrs = { x: layNum2(b.x0 + ox), y: layNum2(g.lineY - 7 + oy),
+        width: layNum2(Math.max(1, b.x1 - b.x0)), height: 14, fill: b.fill };
+      if (opts.canvas) {
+        bandAttrs["data-role"] = "lay-band";
+        bandAttrs["data-idx"] = i;
+        bandAttrs["class"] = "ps-ltl-band";
+      }
+      root.appendChild(mk("rect", bandAttrs));
+      if (b.label)
+        root.appendChild(txt((b.x0 + b.x1) / 2, g.bandLabelY, b.label,
+          Math.max(7, st.fs - 1), st.color, "600"));
+    }
+    var lineEnd = g.x1 - g.headLen;
+    // On the canvas the drawn strokes are pointer-inert: the hit strip
+    // under the bands and the tick hit rects own the clicks, so a band's
+    // centre (which the line crosses) still opens the band.
+    var inert = opts.canvas ? { "pointer-events": "none" } : {};
+    function withInert(attrs) {
+      for (var k in inert) if (inert.hasOwnProperty(k)) attrs[k] = inert[k];
+      return attrs;
+    }
+    root.appendChild(mk("path", withInert({ d: "M" + layNum2(g.x0 + ox) + " " + layNum2(g.lineY + oy) +
+      " H" + layNum2(lineEnd + ox), fill: "none", stroke: st.color,
+      "stroke-width": st.width })));
+    if (g.headLen) {
+      var hl = g.headLen, hw = hl * 0.45;
+      root.appendChild(mk("polygon", withInert({ points:
+        layNum2(g.x1 + ox) + "," + layNum2(g.lineY + oy) + " " +
+        layNum2(g.x1 - hl + ox) + "," + layNum2(g.lineY - hw + oy) + " " +
+        layNum2(g.x1 - hl + ox) + "," + layNum2(g.lineY + hw + oy), fill: st.color })));
+    }
+    for (i = 0; i < g.ticks.length; i++) {
+      var t = g.ticks[i];
+      var half = st.tickLen / 2;
+      root.appendChild(mk("line", withInert({ x1: layNum2(t.x + ox), y1: layNum2(g.lineY - half + oy),
+        x2: layNum2(t.x + ox), y2: layNum2(g.lineY + half + oy), stroke: st.color,
+        "stroke-width": layTickWidth(st, t) })));
+      if (t.label) root.appendChild(txt(t.x, g.labelY, t.label, st.fs, st.color, "400",
+        opts.canvas ? { "data-role": "lay-tick-label", "data-idx": i } : null));
+      if (t.sub) root.appendChild(txt(t.x, g.subY, t.sub, Math.max(7, st.fs - 1),
+        "#5f6f80", "400", opts.canvas ? { "data-role": "lay-tick-label", "data-idx": i } : null));
+    }
+    if (opts.canvas) {
+      for (i = 0; i < g.ticks.length; i++)
+        root.appendChild(mk("rect", { x: layNum2(g.ticks[i].x - 6),
+          y: layNum2(g.lineY - Math.max(12, st.tickLen / 2 + 4)),
+          width: 12, height: Math.max(24, st.tickLen + 8), fill: "transparent",
+          "class": "ps-ltl-tick-hit",
+          "data-role": "lay-tick", "data-idx": i }));
+    }
+    return root;
+  }
+  function layTimelineSvg(item, selected) {
+    var ns = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(ns, "svg");
+    var w = Math.max(80, Number(item.w) || 360), h = Math.max(40, Number(item.h) || 84);
+    svg.setAttribute("width", String(w)); svg.setAttribute("height", String(h));
+    svg.setAttribute("viewBox", "0 0 " + w + " " + h);
+    svg.setAttribute("aria-hidden", "true"); svg.setAttribute("focusable", "false");
+    svg.appendChild(layTimelineDraw(document, item, { canvas: true }));
+    return svg;
+  }
+  function layoutTimelineNode(doc, item) {
+    return layTimelineDraw(doc, item, { ox: Number(item.x) || 0, oy: Number(item.y) || 0 });
+  }
+  function layTimelineTargets() {
+    var ids = laySelectedIds(), out = [];
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (it && it.kind === "timeline") out.push(it);
+    }
+    return out;
+  }
+  function layItemRefresh(it) { layArrowRefresh(it); }
+  function layAddTimeline() {
+    var p = layPage(), items = layItems(), w = 360, h = 84;
+    var spot = layPlaceRect(items, p, w, h);
+    var grew = spot.needH > p.h;
+    var id = layAddItem({ id: layNewItemId(), kind: "timeline", x: spot.x, y: spot.y,
+      w: w, h: h, fontSize: 11, color: "#22364d", width: 1.5, labels: "above",
+      ends: "plain", bands: [],
+      ticks: [{ pos: 0, label: "Start", sub: "" }, { pos: 1 / 3, label: "Step 1", sub: "" },
+              { pos: 2 / 3, label: "Step 2", sub: "" }, { pos: 1, label: "End", sub: "" }] },
+      false, spot.needH);
+    layGrewNote(grew, spot.capped);
+    layAnnounce("Added a timeline. Drag a tick along the line; the Timeline section names the ticks.");
+    return id;
+  }
+  // A tick in hand slides along the line, in hundredths.
+  function layTickDrag(d, e) {
+    var cv = el("ps-lcanvas");
+    var node = cv && cv.querySelector('.ps-litem[data-item-id="' + d.timeline.id + '"]');
+    if (!node) return;
+    var r = node.getBoundingClientRect(), g = layTimelineGeom(d.timeline);
+    var px = (e.clientX - r.left) / d.zoom;
+    var pos = layClamp((px - g.x0) / Math.max(1, g.x1 - g.x0), 0, 1);
+    pos = Math.round(pos * 100) / 100;
+    var ticks = d.timeline.ticks;
+    if (!ticks || !ticks[d.tickDrag]) return;
+    ticks[d.tickDrag].pos = pos;
+    layItemRefresh(d.timeline);
+  }
+  function layTimelineDblClick(id, e) {
+    var item = layItemById(id);
+    if (!item || item.kind !== "timeline") return;
+    var label = e.target.closest && e.target.closest('[data-role="lay-tick-label"]');
+    if (label) {
+      laySetSelection([id]); renderLayout();
+      var inp = el("ps-ltl-tick-label-" + label.getAttribute("data-idx"));
+      if (inp) { inp.focus(); inp.select(); }
+      return;
+    }
+    if (!(e.target.closest &&
+          e.target.closest('.ps-ltl-line-hit,[data-role="lay-band"]'))) return;
+    var cv = el("ps-lcanvas");
+    var node = cv && cv.querySelector('.ps-litem[data-item-id="' + id + '"]');
+    if (!node) return;
+    var r = node.getBoundingClientRect(), g = layTimelineGeom(item), z = layZoom();
+    var pos = layClamp(((e.clientX - r.left) / z - g.x0) / Math.max(1, g.x1 - g.x0), 0, 1);
+    laySnapshot("add tick");
+    if (!Array.isArray(item.ticks)) item.ticks = [];
+    item.ticks.push({ pos: Math.round(pos * 100) / 100, label: "Tick", sub: "" });
+    laySetSelection([id]);
+    persist(); renderLayout();
+    var inp2 = el("ps-ltl-tick-label-" + (item.ticks.length - 1));
+    if (inp2) { inp2.focus(); inp2.select(); }
+    layAnnounce("Added a tick at " + Math.round(pos * 100) + " percent of the line.");
+  }
+  function layTimelineSyncControls(items) {
+    var item = items[0], st = layTimelineStyle(item), i;
+    function agree(read) {
+      for (var k = 1; k < items.length; k++)
+        if (read(items[k]) !== read(items[0])) return false;
+      return true;
+    }
+    var fsMixed = !agree(function (t) { return layTimelineStyle(t).fs; });
+    var rg = el("ps-ltl-size"), nm = el("ps-ltl-size-num");
+    if (rg && document.activeElement !== rg) rg.value = String(st.fs);
+    if (nm && document.activeElement !== nm) {
+      if (fsMixed) { nm.value = ""; nm.placeholder = "Mixed"; }
+      else { nm.value = String(st.fs); nm.placeholder = ""; }
+    }
+    function syncPair(rangeId, numId, val, mixed) {
+      var r = el(rangeId), n = el(numId);
+      if (r && document.activeElement !== r) r.value = String(val);
+      if (n && document.activeElement !== n) {
+        if (mixed) { n.value = ""; n.placeholder = "Mixed"; }
+        else { n.value = String(val); n.placeholder = ""; }
+      }
+    }
+    syncPair("ps-ltl-width", "ps-ltl-width-num", st.width,
+      !agree(function (t) { return layTimelineStyle(t).width; }));
+    syncPair("ps-ltl-tickw", "ps-ltl-tickw-num", layTickWidth(st, null),
+      !agree(function (t) { return layTickWidth(layTimelineStyle(t), null); }));
+    syncPair("ps-ltl-tickl", "ps-ltl-tickl-num", st.tickLen,
+      !agree(function (t) { return layTimelineStyle(t).tickLen; }));
+    var segs = document.querySelectorAll("[data-ltl-labels]");
+    var lbMixed = !agree(function (t) { return layTimelineStyle(t).labels; });
+    for (i = 0; i < segs.length; i++)
+      segs[i].setAttribute("aria-pressed", !lbMixed &&
+        segs[i].getAttribute("data-ltl-labels") === st.labels ? "true" : "false");
+    segs = document.querySelectorAll("[data-ltl-ends]");
+    var enMixed = !agree(function (t) { return layTimelineStyle(t).ends; });
+    for (i = 0; i < segs.length; i++)
+      segs[i].setAttribute("aria-pressed", !enMixed &&
+        segs[i].getAttribute("data-ltl-ends") === st.ends ? "true" : "false");
+    var colMixed = !agree(function (t) { return layTimelineStyle(t).color.toLowerCase(); });
+    var chips = el("ps-ltl-colors").querySelectorAll("button[data-color]");
+    var colHit = false;
+    for (i = 0; i < chips.length; i++) {
+      var on = !colMixed && chips[i].getAttribute("data-color") === st.color.toLowerCase();
+      if (on) colHit = true;
+      chips[i].setAttribute("aria-pressed", on ? "true" : "false");
+    }
+    layPaintCustomChip("ps-ltl-custom", st.color, !colMixed && !colHit);
+    // The tick and band lists edit ONE timeline. While a field in them has
+    // focus the list is not rebuilt (typing would lose the field); the
+    // model already holds what was typed.
+    var tl = el("ps-ltl-ticks"), bl = el("ps-ltl-bands");
+    var addT = el("ps-ltl-add-tick"), addB = el("ps-ltl-add-band");
+    var single = items.length === 1;
+    if (addT) { addT.disabled = !single; setTip(addT, single ? "" : "Ticks are edited one timeline at a time."); }
+    if (!tl || !bl) return;
+    if (tl.contains(document.activeElement) || bl.contains(document.activeElement)) return;
+    tl.innerHTML = ""; bl.innerHTML = "";
+    if (!single) {
+      tl.appendChild(mkEl("div", "ps-loader-hint", "Select one timeline to edit its ticks."));
+      if (addB) addB.disabled = true;
+      return;
+    }
+    var ticks = layTimelineTicks(item);
+    for (i = 0; i < ticks.length; i++) {
+      var row = mkEl("div", "ps-ltl-row");
+      row.setAttribute("data-idx", String(i));
+      var lab = document.createElement("input");
+      lab.type = "text"; lab.value = ticks[i].label; lab.placeholder = "Label";
+      lab.id = "ps-ltl-tick-label-" + i;
+      lab.setAttribute("data-ltl-tick", "label");
+      lab.setAttribute("aria-label", "Tick " + (i + 1) + " label");
+      var sub = document.createElement("input");
+      sub.type = "text"; sub.value = ticks[i].sub; sub.placeholder = "Below";
+      sub.setAttribute("data-ltl-tick", "sub");
+      sub.setAttribute("aria-label", "Tick " + (i + 1) + " sub-label");
+      var wd = document.createElement("input");
+      wd.type = "number"; wd.min = "0.5"; wd.max = "6"; wd.step = "0.5";
+      wd.value = ticks[i].width == null ? "" : String(ticks[i].width);
+      wd.placeholder = String(layTickWidth(st, null));
+      wd.setAttribute("data-ltl-tick", "width");
+      wd.setAttribute("aria-label", "Tick " + (i + 1) + " width in pixels (blank = all ticks)");
+      setTip(wd, "This tick's width; blank follows the Ticks width above");
+      var x = mkEl("button", "ps-ltl-x", "×");
+      x.type = "button"; x.setAttribute("data-ltl-tick", "remove");
+      x.setAttribute("aria-label", "Remove tick " + (i + 1));
+      setTip(x, "Remove this tick");
+      row.appendChild(lab); row.appendChild(sub); row.appendChild(wd); row.appendChild(x);
+      tl.appendChild(row);
+    }
+    if (addB) {
+      addB.disabled = ticks.length < 2;
+      setTip(addB, ticks.length < 2 ? "A band runs between two ticks." : "");
+    }
+    var bands = Array.isArray(item.bands) ? item.bands : [];
+    for (i = 0; i < bands.length; i++) {
+      var brow = mkEl("div", "ps-ltl-row");
+      brow.setAttribute("data-idx", String(i));
+      var from = document.createElement("select"), to = document.createElement("select");
+      from.setAttribute("data-ltl-band", "a"); to.setAttribute("data-ltl-band", "b");
+      from.setAttribute("aria-label", "Band " + (i + 1) + " from tick");
+      to.setAttribute("aria-label", "Band " + (i + 1) + " to tick");
+      for (var k = 0; k < ticks.length; k++) {
+        var o1 = document.createElement("option"), o2 = document.createElement("option");
+        o1.value = o2.value = String(k);
+        o1.textContent = o2.textContent = ticks[k].label || ("tick " + (k + 1));
+        from.appendChild(o1); to.appendChild(o2);
+      }
+      from.value = String(Math.round(Number(bands[i].a)) || 0);
+      to.value = String(Math.round(Number(bands[i].b)) || 0);
+      var blab = document.createElement("input");
+      blab.type = "text"; blab.value = String(bands[i].label || ""); blab.placeholder = "Label";
+      blab.setAttribute("data-ltl-band", "label");
+      blab.setAttribute("aria-label", "Band " + (i + 1) + " label");
+      var sw = mkEl("button", "ps-ltl-sw", "");
+      sw.type = "button"; sw.setAttribute("data-ltl-band", "fill");
+      sw.id = "ps-ltl-band-fill-" + i;
+      sw.style.background = layHexOr(bands[i].fill, "#e8f0fb");
+      sw.setAttribute("aria-label", "Band " + (i + 1) + " color");
+      setTip(sw, "Choose this band's color");
+      var bx = mkEl("button", "ps-ltl-x", "×");
+      bx.type = "button"; bx.setAttribute("data-ltl-band", "remove");
+      bx.setAttribute("aria-label", "Remove band " + (i + 1));
+      setTip(bx, "Remove this band");
+      brow.appendChild(from); brow.appendChild(to); brow.appendChild(blab);
+      brow.appendChild(sw); brow.appendChild(bx);
+      bl.appendChild(brow);
+    }
+  }
+  function wireLayoutTimelineControls() {
+    var colors = el("ps-ltl-colors");
+    if (!colors) return;
+    var i;
+    var colorNames = { "#22364d": "Ink", "#5f6f80": "Muted", "#94a3b1": "Faint",
+      "#417499": "Blue", "#902634": "Red", "#266741": "Green" };
+    for (i = 0; i < LAY_ARROW_COLORS.length; i++) (function (c) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("data-color", c);
+      b.setAttribute("aria-label", (colorNames[c] || c) + " timeline");
+      b.setAttribute("aria-pressed", "false");
+      b.style.background = c;
+      setTip(b, colorNames[c] || c);
+      b.addEventListener("click", function () {
+        layPartApply(layTimelineTargets(), "timeline color", null,
+          function (it) { it.color = c; });
+      });
+      colors.appendChild(b);
+    })(LAY_ARROW_COLORS[i]);
+    var rg = el("ps-ltl-size"), nm = el("ps-ltl-size-num");
+    rg.addEventListener("input", function () {
+      var v = Number(rg.value);
+      layPartApply(layTimelineTargets(), "timeline size", "ltl-size",
+        function (it) { it.fontSize = layClamp(Math.round(v), 8, 24); }, true);
+    });
+    rg.addEventListener("change", function () { persist(); });
+    nm.addEventListener("change", function () {
+      var v = Number(nm.value);
+      if (!isFinite(v)) return;
+      layPartApply(layTimelineTargets(), "timeline size", null,
+        function (it) { it.fontSize = layClamp(Math.round(v), 8, 24); });
+    });
+    function wireTlPair(rangeId, numId, label, key, setter) {
+      var r2 = el(rangeId), n2 = el(numId);
+      if (!r2 || !n2) return;
+      r2.addEventListener("input", function () {
+        var v = Number(r2.value);
+        layPartApply(layTimelineTargets(), label, key,
+          function (it) { setter(it, v); }, true);
+      });
+      r2.addEventListener("change", function () { persist(); });
+      n2.addEventListener("change", function () {
+        var v = Number(n2.value);
+        if (!isFinite(v)) return;
+        layPartApply(layTimelineTargets(), label, null, function (it) { setter(it, v); });
+      });
+    }
+    wireTlPair("ps-ltl-width", "ps-ltl-width-num", "timeline line width", "ltl-width",
+      function (it, v) { it.width = layClamp(Math.round(v * 2) / 2, 0.5, 4); });
+    wireTlPair("ps-ltl-tickw", "ps-ltl-tickw-num", "tick width", "ltl-tickw",
+      function (it, v) { it.tickWidth = layClamp(Math.round(v * 2) / 2, 0.5, 6); });
+    wireTlPair("ps-ltl-tickl", "ps-ltl-tickl-num", "tick length", "ltl-tickl",
+      function (it, v) { it.tickLen = layClamp(Math.round(v), 4, 40); });
+    layWireCustomChip("ps-ltl-custom", layTimelineTargets, "color", "timeline color", "#22364d");
+    var segs = document.querySelectorAll("[data-ltl-labels]");
+    for (i = 0; i < segs.length; i++) (function (btn) {
+      btn.addEventListener("click", function () {
+        var v = btn.getAttribute("data-ltl-labels");
+        layPartApply(layTimelineTargets(), "timeline labels", null,
+          function (it) { it.labels = v; });
+      });
+    })(segs[i]);
+    segs = document.querySelectorAll("[data-ltl-ends]");
+    for (i = 0; i < segs.length; i++) (function (btn) {
+      btn.addEventListener("click", function () {
+        var v = btn.getAttribute("data-ltl-ends");
+        layPartApply(layTimelineTargets(), "timeline ends", null,
+          function (it) { it.ends = v; });
+      });
+    })(segs[i]);
+    function one() {
+      var t = layTimelineTargets();
+      return t.length === 1 ? t[0] : null;
+    }
+    el("ps-ltl-add-tick").addEventListener("click", function () {
+      var it = one();
+      if (!it) return;
+      var ticks = layTimelineTicks(it), pos = 0.5;
+      if (ticks.length) {
+        // Halfway into the widest gap, so a new tick lands in clear space.
+        var sorted = ticks.map(function (t) { return t.pos; }).sort(function (a, b) { return a - b; });
+        var best = -1, at = 0.5, prev = 0;
+        for (var k = 0; k <= sorted.length; k++) {
+          var cur = k < sorted.length ? sorted[k] : 1;
+          if (cur - prev > best) { best = cur - prev; at = (cur + prev) / 2; }
+          prev = cur;
+        }
+        pos = Math.round(at * 100) / 100;
+      }
+      layPartApply([it], "add tick", null, function (t) {
+        if (!Array.isArray(t.ticks)) t.ticks = [];
+        t.ticks.push({ pos: pos, label: "Tick", sub: "" });
+      });
+      var inp = el("ps-ltl-tick-label-" + (it.ticks.length - 1));
+      if (inp) { inp.focus(); inp.select(); }
+    });
+    el("ps-ltl-add-band").addEventListener("click", function () {
+      var it = one();
+      if (!it || !Array.isArray(it.ticks) || it.ticks.length < 2) return;
+      layPartApply([it], "add band", null, function (t) {
+        if (!Array.isArray(t.bands)) t.bands = [];
+        t.bands.push({ a: 0, b: 1, label: "Phase",
+          fill: LAY_TL_BAND_FILLS[t.bands.length % LAY_TL_BAND_FILLS.length] });
+      });
+    });
+    // The lists are rebuilt per sync, so their rows are handled by
+    // delegation on the list and identified by row index.
+    function rowIdx(t) {
+      var row = t.closest && t.closest(".ps-ltl-row");
+      return row ? Number(row.getAttribute("data-idx")) : -1;
+    }
+    var tl = el("ps-ltl-ticks");
+    tl.addEventListener("input", function (e) {
+      var it = one(), idx = rowIdx(e.target), what = e.target.getAttribute("data-ltl-tick");
+      if (!it || idx < 0 || (what !== "label" && what !== "sub" && what !== "width")) return;
+      var v = e.target.value;
+      if (what === "width") {
+        var wv = v === "" ? null : Number(v);
+        if (wv != null && !isFinite(wv)) return;
+        layPartApply([it], "tick width", "ltl-tick:" + idx + ":width", function (t) {
+          if (t.ticks && t.ticks[idx]) {
+            if (wv == null) delete t.ticks[idx].width;
+            else t.ticks[idx].width = layClamp(Math.round(wv * 2) / 2, 0.5, 6);
+          }
+        }, true);
+        return;
+      }
+      layPartApply([it], "tick text", "ltl-tick:" + idx + ":" + what, function (t) {
+        if (t.ticks && t.ticks[idx]) t.ticks[idx][what] = v;
+      }, true);
+    });
+    tl.addEventListener("change", function (e) {
+      if (e.target.getAttribute("data-ltl-tick")) persist();
+    });
+    tl.addEventListener("click", function (e) {
+      var btn = e.target.closest && e.target.closest('[data-ltl-tick="remove"]');
+      var it = one(), idx = rowIdx(e.target);
+      if (!btn || !it || idx < 0) return;
+      layPartApply([it], "remove tick", null, function (t) {
+        t.ticks.splice(idx, 1);
+        // Bands are tick indices: the ones past the removed tick shift,
+        // the ones that touched it are dropped.
+        var kept = [];
+        for (var k = 0; k < (t.bands || []).length; k++) {
+          var b = t.bands[k];
+          if (b.a === idx || b.b === idx) continue;
+          kept.push({ a: b.a > idx ? b.a - 1 : b.a, b: b.b > idx ? b.b - 1 : b.b,
+                      label: b.label, fill: b.fill });
+        }
+        t.bands = kept;
+      });
+    });
+    var bl = el("ps-ltl-bands");
+    bl.addEventListener("input", function (e) {
+      var it = one(), idx = rowIdx(e.target), what = e.target.getAttribute("data-ltl-band");
+      if (!it || idx < 0 || what !== "label") return;
+      var v = e.target.value;
+      layPartApply([it], "band text", "ltl-band:" + idx, function (t) {
+        if (t.bands && t.bands[idx]) t.bands[idx].label = v;
+      }, true);
+    });
+    bl.addEventListener("change", function (e) {
+      var it = one(), idx = rowIdx(e.target), what = e.target.getAttribute("data-ltl-band");
+      if (!it || idx < 0) return;
+      if (what === "label") { persist(); return; }
+      if (what !== "a" && what !== "b") return;
+      var v = Number(e.target.value);
+      layPartApply([it], "band ticks", null, function (t) {
+        if (t.bands && t.bands[idx]) t.bands[idx][what] = v;
+      });
+    });
+    bl.addEventListener("click", function (e) {
+      var it = one(), idx = rowIdx(e.target);
+      if (!it || idx < 0) return;
+      var t2 = e.target.closest && e.target.closest("[data-ltl-band]");
+      if (!t2) return;
+      var what = t2.getAttribute("data-ltl-band");
+      if (what === "remove")
+        layPartApply([it], "remove band", null, function (t) { t.bands.splice(idx, 1); });
+      else if (what === "fill") layOpenBandColor(it, idx);
+    });
+  }
+  // ---- the diagram templates of slice two. Each lays out ordinary parts.
+  function layTplBox(c, n, x, y, w, h, text, extra) {
+    var it = { id: "i" + n, kind: "box", text: text, fontSize: 12, x: x, y: y,
+               w: w, h: h, fill: "#ffffff", border: "thin", corner: 4 };
+    if (extra) for (var k in extra) if (extra.hasOwnProperty(k)) it[k] = extra[k];
+    c.items.push(it);
+    return it;
+  }
+  function layTplArrow(c, n, fromId, toId) {
+    c.items.push({ id: "i" + n, kind: "arrow", from: { id: fromId }, to: { id: toId },
+                   route: "elbow", heads: "end", width: 1.5, color: "#22364d",
+                   x: 0, y: 0, ax: 0, ay: 0, bx: 0, by: 0 });
+  }
+  function layTplText(c, n, x, y, text, size, bold) {
+    c.items.push({ id: "i" + n, kind: "text", text: text, fontSize: size,
+                   bold: !!bold, x: x, y: y });
+  }
+  // A procedure timeline across the top and the chosen chart beneath it,
+  // the timeline as wide as the chart so its ticks can be lined up with
+  // the chart's occasions by hand.
+  function layBuildProcedureTimeline(c, chartIds) {
+    var n = 0, m = c.page.margin, cw = c.page.w - m * 2;
+    var chartId = chartIds && chartIds[0];
+    var tlH = 84;
+    c.items.push({ id: "i" + (++n), kind: "timeline", x: m, y: m, w: cw, h: tlH,
+      fontSize: 11, color: "#22364d", width: 1.5, labels: "above", ends: "plain",
+      ticks: [{ pos: 0, label: "Baseline", sub: "Day 0" },
+              { pos: 1 / 3, label: "Dose 1", sub: "Day 7" },
+              { pos: 2 / 3, label: "Dose 2", sub: "Day 14" },
+              { pos: 1, label: "Test", sub: "Day 21" }],
+      bands: [{ a: 1, b: 3, label: "Daily dosing", fill: "#e8f0fb" }] });
+    if (chartId) {
+      var cell = { x: m, y: m + tlH + 12, w: cw, h: Math.max(120, c.page.h - m * 2 - tlH - 12) };
+      var fit = layFitRectToChart(cell, chartId);
+      c.items.push({ id: "i" + (++n), kind: "chart", chartId: chartId,
+        x: Math.round(fit.x), y: Math.round(fit.y), w: Math.round(fit.w), h: Math.round(fit.h) });
+    }
+  }
+  // Groups down the side, phases across the top, one box per cell and an
+  // arrow from phase to phase in every row.
+  function layBuildStudyDesign(c) {
+    var n = 0, m = c.page.margin;
+    var groups = ["Vehicle", "Drug", "Sham"], phases = ["Baseline", "Treatment", "Follow-up"];
+    var cellW = 150, cellH = 44, gapX = 60, gapY = 40, left = m + 90, top = m + 40;
+    var ids = [];
+    for (var p = 0; p < phases.length; p++) {
+      // Centred over its column by measuring the word, the way text items
+      // measure themselves.
+      var hw = layApproxTextRect({ text: phases[p], fontSize: 12, bold: true }).w;
+      layTplText(c, ++n, Math.round(left + p * (cellW + gapX) + cellW / 2 - hw / 2),
+        top - 30, phases[p], 12, true);
+    }
+    for (var g = 0; g < groups.length; g++) {
+      var y = top + g * (cellH + gapY);
+      layTplText(c, ++n, m, y + 12, groups[g], 12, true);
+      ids[g] = [];
+      for (p = 0; p < phases.length; p++) {
+        var text = p === 0 ? "Baseline test" : p === 1 ? groups[g] + " treatment" : "Follow-up test";
+        var b = layTplBox(c, ++n, left + p * (cellW + gapX), y, cellW, cellH, text,
+          p === 1 ? { fill: "#eef4fc" } : null);
+        ids[g][p] = b.id;
+      }
+      for (p = 1; p < phases.length; p++) layTplArrow(c, ++n, ids[g][p - 1], ids[g][p]);
+    }
+  }
+  // Screens in a cascade over a timeline of their durations.
+  function layBuildTrialSequence(c) {
+    var n = 0, m = c.page.margin;
+    var names = ["+", "Cue", "Target", "Response"];
+    var durs = ["500 ms", "200 ms", "1000 ms", "until response"];
+    var bw = 130, bh = 90, dx = 110, dy = 58, left = m + 20, top = m + 10;
+    for (var i = 0; i < names.length; i++)
+      layTplBox(c, ++n, left + i * dx, top + i * dy, bw, bh, names[i],
+        i === 0 ? { fontSize: 22 } : null);
+    var tlW = Math.min(c.page.w - m * 2 - 20, (names.length - 1) * dx + bw + 60);
+    c.items.push({ id: "i" + (++n), kind: "timeline", x: left, y: top + (names.length - 1) * dy + bh + 24,
+      w: tlW, h: 84, fontSize: 11, color: "#22364d", width: 1.5, labels: "above",
+      ends: "arrow", bands: [],
+      ticks: names.map(function (nm, k) {
+        return { pos: k / names.length, label: k === 0 ? "Fixation" : nm, sub: durs[k] };
+      }) });
+  }
+
+  // ---- a shared color popover for the figure parts (slice three, Torry:
+  // "when you click on the colored band, it brings up an actual color
+  // picker"). The Text section's SV square, hue and hex as a floating
+  // card anchored to whichever chip opened it: live while dragging,
+  // one undo step per open, closed by Done, Escape or a press outside.
+  var LAY_CPOP = null;
+  function layColorPopEl() {
+    var pop = el("ps-lcolorpop");
+    if (pop) return pop;
+    pop = document.createElement("div");
+    pop.id = "ps-lcolorpop";
+    pop.setAttribute("role", "dialog");
+    pop.setAttribute("aria-label", "Color");
+    pop.innerHTML =
+      '<div class="ps-lcp-sv" role="slider" tabindex="0" ' +
+      'aria-label="Saturation and brightness" aria-valuemin="0" ' +
+      'aria-valuemax="100" aria-valuenow="0"><div class="ps-ltx-sv-dot"></div></div>' +
+      '<input class="ps-lcp-hue" type="range" min="0" max="360" step="1" aria-label="Hue">' +
+      '<div class="ps-ltx-hexrow"><span class="ps-layout-field-label">Hex</span>' +
+      '<input class="ps-lcp-hex" type="text" maxlength="7" spellcheck="false" ' +
+      'autocomplete="off" aria-label="Hex color">' +
+      '<span class="ps-lcp-cur" aria-hidden="true"></span>' +
+      '<button type="button" class="ps-btn ps-lcp-done">Done</button></div>';
+    document.body.appendChild(pop);
+    var sv = pop.querySelector(".ps-lcp-sv");
+    function pick(ev) {
+      var r = sv.getBoundingClientRect();
+      LAY_CPOP.hsv.s = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
+      LAY_CPOP.hsv.v = Math.max(0, Math.min(1, 1 - (ev.clientY - r.top) / r.height));
+      layColorPopApply(true);
+    }
+    sv.addEventListener("pointerdown", function (ev) {
+      if (!LAY_CPOP) return;
+      ev.preventDefault();
+      pick(ev);
+      function mv(e2) { pick(e2); }
+      function up() {
+        document.removeEventListener("pointermove", mv);
+        document.removeEventListener("pointerup", up);
+        layColorPopApply(false);
+      }
+      document.addEventListener("pointermove", mv);
+      document.addEventListener("pointerup", up);
+    });
+    sv.addEventListener("keydown", function (ev) {
+      if (!LAY_CPOP) return;
+      var ds = ev.key === "ArrowLeft" ? -0.02 : ev.key === "ArrowRight" ? 0.02 : 0;
+      var dv = ev.key === "ArrowDown" ? -0.02 : ev.key === "ArrowUp" ? 0.02 : 0;
+      if (!ds && !dv) return;
+      ev.preventDefault();
+      LAY_CPOP.hsv.s = Math.max(0, Math.min(1, LAY_CPOP.hsv.s + ds));
+      LAY_CPOP.hsv.v = Math.max(0, Math.min(1, LAY_CPOP.hsv.v + dv));
+      layColorPopApply(false);
+    });
+    var hue = pop.querySelector(".ps-lcp-hue");
+    hue.addEventListener("input", function () {
+      if (!LAY_CPOP) return;
+      LAY_CPOP.hsv.h = Number(hue.value) || 0;
+      layColorPopApply(true);
+    });
+    hue.addEventListener("change", function () { layColorPopApply(false); });
+    var hx = pop.querySelector(".ps-lcp-hex");
+    hx.addEventListener("change", function () {
+      if (!LAY_CPOP) return;
+      var v = String(hx.value || "").trim();
+      if (/^[0-9a-fA-F]{6}$/.test(v)) v = "#" + v;
+      var hsv = ltxHexToHsv(v);
+      if (!hsv) { layColorPopPaint(); return; }
+      LAY_CPOP.hsv = hsv;
+      layColorPopApply(false);
+    });
+    pop.querySelector(".ps-lcp-done").addEventListener("click", function () {
+      layCloseColorPop();
+    });
+    pop.addEventListener("keydown", function (ev) {
+      if (ev.key === "Escape") {
+        ev.preventDefault(); ev.stopPropagation();
+        layCloseColorPop();
+      }
+    });
+    document.addEventListener("pointerdown", function (ev) {
+      if (!LAY_CPOP) return;
+      var t = ev.target;
+      if (pop.contains(t)) return;
+      if (LAY_CPOP.anchor && LAY_CPOP.anchor.isConnected && LAY_CPOP.anchor.contains(t)) return;
+      layCloseColorPop();
+    }, true);
+    return pop;
+  }
+  function layColorPopPaint() {
+    if (!LAY_CPOP) return;
+    var pop = layColorPopEl(), hsv = LAY_CPOP.hsv;
+    var sv = pop.querySelector(".ps-lcp-sv");
+    sv.style.background = "linear-gradient(to top, #000, rgba(0,0,0,0)), " +
+      "linear-gradient(to right, #fff, hsl(" + Math.round(hsv.h) + " 100% 50%))";
+    var dot = sv.querySelector(".ps-ltx-sv-dot");
+    dot.style.left = (hsv.s * 100) + "%";
+    dot.style.top = ((1 - hsv.v) * 100) + "%";
+    sv.setAttribute("aria-valuenow", String(Math.round(hsv.v * 100)));
+    var hue = pop.querySelector(".ps-lcp-hue");
+    if (document.activeElement !== hue) hue.value = String(Math.round(hsv.h));
+    var hex = ltxHsvToHex(hsv.h, hsv.s, hsv.v);
+    var hx = pop.querySelector(".ps-lcp-hex");
+    if (document.activeElement !== hx) hx.value = hex;
+    pop.querySelector(".ps-lcp-cur").style.background = hex;
+  }
+  function layColorPopApply(live) {
+    if (!LAY_CPOP) return;
+    var hex = ltxHsvToHex(LAY_CPOP.hsv.h, LAY_CPOP.hsv.s, LAY_CPOP.hsv.v);
+    layColorPopPaint();
+    LAY_CPOP.onChange(hex, live);
+  }
+  // onChange(hex, live) applies the color; the caller decides which
+  // item field it lands on and coalesces its own undo step.
+  function layOpenColorPop(anchor, hex, onChange) {
+    var pop = layColorPopEl();
+    LAY_CPOP = { anchor: anchor,
+                 hsv: ltxHexToHsv(layHexOr(hex, "#22364d")) || { h: 0, s: 0, v: 0.13 },
+                 onChange: onChange };
+    layColorPopPaint();
+    pop.style.display = "block";
+    var r = anchor.getBoundingClientRect();
+    var left = Math.max(8, Math.min(r.left, window.innerWidth - 250));
+    var top = r.bottom + 6;
+    if (top + 230 > window.innerHeight) top = Math.max(8, r.top - 236);
+    pop.style.left = left + "px";
+    pop.style.top = top + "px";
+    pop.querySelector(".ps-lcp-hex").focus();
+  }
+  function layCloseColorPop() {
+    var pop = el("ps-lcolorpop");
+    if (pop) pop.style.display = "none";
+    if (!LAY_CPOP) return;
+    var a = LAY_CPOP.anchor;
+    LAY_CPOP = null;
+    persist();
+    if (a && a.isConnected && a.focus) a.focus();
+  }
+  function layIsColorPopOpen() { return !!LAY_CPOP; }
+  // A custom-color chip beside a swatch row: shows the current color and
+  // opens the popover on it. targetsFn names the items, field the key.
+  function layWireCustomChip(id, targetsFn, field, label, dflt) {
+    var chip = el(id);
+    if (!chip) return;
+    chip.addEventListener("click", function () {
+      var targets = targetsFn();
+      if (!targets.length) return;
+      var ids = targets.map(function (t) { return t.id; }).join(",");
+      layOpenColorPop(chip, layHexOr(targets[0][field], dflt), function (hex, live) {
+        layPartApply(targetsFn(), label, "cpop:" + field + ":" + ids,
+          function (it) { it[field] = hex; }, live);
+      });
+    });
+  }
+  function layPaintCustomChip(id, hex, pressed) {
+    var chip = el(id);
+    if (!chip) return;
+    chip.style.background = hex;
+    chip.setAttribute("aria-pressed", pressed ? "true" : "false");
+  }
+  // Click-to-edit on the timeline's own parts: a tick click (no drag)
+  // lands in its rail row; a band click opens its color.
+  function layFocusTickRow(item, idx) {
+    laySetSelection([item.id]);
+    renderLayout();
+    var inp = el("ps-ltl-tick-label-" + idx);
+    if (inp) { inp.focus(); inp.select(); }
+  }
+  function layOpenBandColor(item, idx) {
+    laySetSelection([item.id]);
+    renderLayout();
+    var chip = el("ps-ltl-band-fill-" + idx);
+    if (!chip || !item.bands || !item.bands[idx]) return;
+    layOpenColorPop(chip, layHexOr(item.bands[idx].fill, "#e8f0fb"), function (hex, live) {
+      layPartApply([item], "band color", "cpop:band:" + item.id + ":" + idx,
+        function (t) { if (t.bands && t.bands[idx]) t.bands[idx].fill = hex; }, live);
+    });
+  }
   var LAY_TEXT_CTX = null;
   function layTextCtx() {
     if (!LAY_TEXT_CTX) {
@@ -22058,10 +24602,13 @@
   // Chart panels and images are both SIZED items (explicit w/h, corner
   // resize, proportional default); text items self-size.
   function laySizedKind(item) {
-    return item && (item.kind === "chart" || item.kind === "image");
+    return item && (item.kind === "chart" || item.kind === "image" ||
+                    item.kind === "box" || item.kind === "timeline");
   }
   function layMinSize(item) {
     if (item.kind === "image") return { w: 24, h: 24 };
+    if (item.kind === "box") return { w: 36, h: 22 };
+    if (item.kind === "timeline") return { w: 80, h: 40 };
     // The minimum keeps the chart's SHAPE. A flat 120 by 80 is 1.5 against
     // the engine's 1.469, so a figure scaled onto a small page hit the floor
     // and came back letterboxed, which is the thing panel-fitting removed.
@@ -22091,6 +24638,11 @@
       var mins = layMinSize(item);
       w = Math.max(mins.w, Number(item.w) || 480);
       h = Math.max(mins.h, Number(item.h) || 320);
+    } else if (item.kind === "arrow") {
+      // The box around the drawn arrow, re-derived from the boxes its
+      // ends are attached to (layArrowSync); never typed.
+      layArrowSync(item);
+      w = item.w; h = item.h;
     } else {
       var node = layItemIsOnScreen(item) ? el("ps-lcanvas") : null;
       node = node && node.querySelector(
@@ -22361,7 +24913,7 @@
     node.setAttribute("aria-hidden", "true");
     node.tabIndex = -1;
     var stale = node.querySelectorAll(
-      ".ps-lhandle,.ps-lbar,.ps-litem-srcbadge");
+      ".ps-lhandle,.ps-lhandle-end,.ps-lbar,.ps-litem-srcbadge");
     for (var si = 0; si < stale.length; si++)
       if (stale[si].parentNode === node) node.removeChild(stale[si]);
     // Live / Snapshot badge (Torry, Aug 5 2026): selection-only chrome
@@ -22419,7 +24971,9 @@
       if (laySizedKind(item)) {
         var hnd = mkEl("div", "ps-lhandle");
         hnd.setAttribute("data-role", "lay-resize");
-        setTip(hnd, multiUnits
+        setTip(hnd, item.kind === "box" ? "Resize the box."
+          : item.kind === "timeline" ? "Resize the timeline."
+          : multiUnits
           ? "Resize every selected panel together. Hold Shift for free resize."
           : "Resize proportionally. Hold Shift for free resize.");
         // This is a pointer affordance. The canvas instructions expose the
@@ -22431,6 +24985,7 @@
       // Text items grow the chart-style rotate grip (Torry, Aug 6 2026).
       if (item.kind === "text")
         layAttachRotateHandle(node, item, node.__ltxFrame || null);
+      if (item.kind === "arrow" && primary) layAttachArrowEnds(node, item);
       node.appendChild(layMiniBar(item));
     }
   }
@@ -22488,6 +25043,28 @@
         "pointer-events:none;display:block;";
       elI.appendChild(pic);
       setTip(elI, "Image");
+    } else if (item.kind === "box") {
+      elI.style.width = (Number(item.w) || 150) + "px";
+      elI.style.height = (Number(item.h) || 44) + "px";
+      elI.appendChild(layBoxNode(item));
+      setTip(elI, "Box. Double-click to edit its text.");
+    } else if (item.kind === "timeline") {
+      elI.style.width = (Number(item.w) || 360) + "px";
+      elI.style.height = (Number(item.h) || 84) + "px";
+      elI.appendChild(layTimelineSvg(item, selected));
+      setTip(elI, "Timeline. Drag a tick along the line; double-click the line to add one.");
+    } else if (item.kind === "arrow") {
+      // The sync re-derives the box from the attached boxes, so the
+      // position set above (from the stored x/y) is re-read here: a
+      // template's arrows are born at 0,0 and would otherwise draw there
+      // on their first render.
+      layArrowSync(item);
+      elI.style.left = layNum2(item.x) + "px";
+      elI.style.top = layNum2(item.y) + "px";
+      elI.style.width = layNum2(item.w) + "px";
+      elI.style.height = layNum2(item.h) + "px";
+      elI.appendChild(layArrowSvg(item, selected));
+      setTip(elI, layArrowTip(item));
     } else {
       var txt = mkEl("div", "ps-ltext", exportSafeText(item.text || "Text"));
       txt.style.fontSize = (item.fontSize || 14) + "px";
@@ -22678,7 +25255,7 @@
     bar.style.transform = "";
     bar.style.top = item.kind === "text" ? "calc(100% + 6px)" : "-34px";
     bar.setAttribute("aria-hidden", "true");
-    if (item.kind === "text") {
+    if (item.kind === "text" || item.kind === "box") {
       var minus = mkEl("button", "", "A-");
       minus.type = "button"; minus.tabIndex = -1; setTip(minus, "Smaller text");
       minus.addEventListener("click", function (e) {
@@ -22706,6 +25283,18 @@
         persist(); renderLayout();
       });
       bar.appendChild(minus); bar.appendChild(plus); bar.appendChild(bold);
+    }
+    if (item.kind === "arrow") {
+      var rev = mkEl("button", "", "Reverse");
+      rev.type = "button"; rev.tabIndex = -1;
+      setTip(rev, "Swap the arrow's ends");
+      rev.addEventListener("click", function (e) {
+        e.stopPropagation();
+        laySnapshot("reverse arrow");
+        layArrowReverse(item);
+        persist(); renderLayout();
+      });
+      bar.appendChild(rev);
     }
     var del = mkEl("button", "ps-lbar-del", "\u00d7");
     del.type = "button"; del.tabIndex = -1;
@@ -22832,6 +25421,7 @@
     for (var i = items.length - 1; i >= 0; i--)
       if (ids.indexOf(items[i].id) !== -1) { items.splice(i, 1); removed++; }
     layDropOrphanGroups();
+    layArrowsDetachFrom(ids);
     laySetSelection([]);
     persist(); renderLayout();
     if (returnFocus) layFocusViewport();
@@ -22849,12 +25439,13 @@
   // the announcement, so Alt+drag can make its copies inside a gesture that
   // already owns all three.
   function layDuplicateItems(ids, dx, dy) {
-    var made = [], p = layPage(), dupGroups = {}, i;
+    var made = [], p = layPage(), dupGroups = {}, dupIds = {}, i;
     for (i = 0; i < ids.length; i++) {
       var src = layItemById(ids[i]);
       if (!src) continue;
       var copy = JSON.parse(JSON.stringify(src));
       copy.id = layNewItemId();
+      dupIds[src.id] = copy.id;
       // The copies form their OWN group, so duplicating a grouped panel
       // gives a second panel rather than a four-member group.
       if (copy.group) copy.group = dupGroups[copy.group] ||
@@ -22874,6 +25465,7 @@
       layItems().push(copy);
       made.push(copy.id);
     }
+    layArrowsRemap(made, dupIds);
     return made;
   }
   // One body for the Cmd/Ctrl+A key and the Edit menu row, so the two
@@ -22929,10 +25521,11 @@
     if (!LAY_CLIP || !LAY_CLIP.length) return false;
     if (!isLayoutTab(activeChart())) return false;
     laySnapshot("paste");
-    var made = [], p = layPage(), pasteGroups = {};
+    var made = [], p = layPage(), pasteGroups = {}, pasteIds = {};
     for (var i = 0; i < LAY_CLIP.length; i++) {
       var copy = JSON.parse(JSON.stringify(LAY_CLIP[i]));
       copy.id = layNewItemId();
+      pasteIds[LAY_CLIP[i].id] = copy.id;
       // Fresh group ids, the way duplicate does it. Group ids are only unique
       // within one layout and every layout's templates start at g1, so a
       // paste into another figure collided by construction and merged the
@@ -22947,6 +25540,7 @@
       layItems().push(copy);
       made.push(copy.id);
     }
+    layArrowsRemap(made, pasteIds);
     laySetSelection(made);
     persist(); renderLayout();
     showToast(made.length === 1 ? "Item pasted"
@@ -23391,6 +25985,8 @@
       var c = chartById(item.chartId);
       return c ? (c.name || "that panel") : "that panel";
     }
+    if (item.kind === "box") return "that box";
+    if (item.kind === "timeline") return "that timeline";
     return item.srcChart ? "that Notebook page" : "that image";
   }
   function laySameSize(dim) {
@@ -23490,6 +26086,17 @@
       if (!item) return;
       var mins = layMinSize(item);
       laySnapshot("resize", "resize");
+      if (item.kind === "box" || item.kind === "timeline") {
+        // A box holds text and a timeline is a line: each side is its own
+        // number, so typing a width must not change the height the way a
+        // chart panel keeps its shape.
+        if (prop === "w")
+          item.w = layClamp(value, mins.w, p.w - (Number(item.x) || 0));
+        else item.h = layClamp(value, mins.h, p.h - (Number(item.y) || 0));
+        persist(); renderLayout();
+        layAnnounce("Resized " + layItemAccessibleLabel(item));
+        return;
+      }
       // The typed fields keep the item's proportions, like the corner drag.
       // Setting one side used to change that side alone, so the rail was
       // the one resize in the app that letterboxed a chart by default. The
@@ -23557,9 +26164,17 @@
       // TEXT scales too. Leaving font sizes alone made panel letters keep
       // their size while everything around them shrank, so on a small page
       // a 20 px letter sat on top of the panel it labels.
-      if (items[i].kind === "text" && k !== 1)
+      if ((items[i].kind === "text" || items[i].kind === "box" ||
+           items[i].kind === "timeline") && k !== 1)
         items[i].fontSize = layClamp(
           Math.round((Number(items[i].fontSize) || 14) * k), 8, 72);
+      // An arrow's free ends ride its box; their offsets scale with it.
+      if (items[i].kind === "arrow" && k !== 1) {
+        items[i].ax = (Number(items[i].ax) || 0) * k;
+        items[i].ay = (Number(items[i].ay) || 0) * k;
+        items[i].bx = (Number(items[i].bx) || 0) * k;
+        items[i].by = (Number(items[i].by) || 0) * k;
+      }
     }
     return k;
   }
@@ -23632,6 +26247,12 @@
     var items = layItems();
     for (var i = 0; i < items.length; i++) {
       if (excludeIds.indexOf(items[i].id) !== -1) continue;
+      // An arrow is never something to align TO. Its box is padding around
+      // a stroke, and an arrow attached to the item being dragged moves
+      // with it: as a candidate it sat one step behind the drag, so the
+      // box snapped back to its own arrow, jumped, and snapped back again,
+      // with a guide flashing at every step (Torry's recording, Sep 30).
+      if (items[i].kind === "arrow") continue;
       var r = layItemRect(items[i]);
       if (axis === "x") out.push(r.x, r.x + r.w / 2, r.right);
       else out.push(r.y, r.y + r.h / 2, r.bottom);
@@ -23707,7 +26328,10 @@
         scale = snappedH / origin.h;
       }
     }
-    var minScale = Math.max(120 / origin.w, 80 / origin.h);
+    var minScale = origin.item && (origin.item.kind === "box" ||
+                                   origin.item.kind === "timeline")
+      ? Math.max(mins.w / origin.w, mins.h / origin.h)
+      : Math.max(120 / origin.w, 80 / origin.h);
     var maxScale = Math.min(maxW / origin.w, maxH / origin.h);
     if (maxScale < minScale) minScale = maxScale;
     scale = layClamp(scale, minScale, maxScale);
@@ -23767,6 +26391,38 @@
       } else if (!layIsSelected(id)) {
         laySetSelection([id]); renderLayout();
       }
+      var tickHandle = e.target.closest &&
+        e.target.closest('[data-role="lay-tick"]');
+      if (tickHandle && item.kind === "timeline") {
+        // A tick in hand slides along its line (layTickDrag); the
+        // timeline itself stays put.
+        LAY_DRAG = { tickDrag: Number(tickHandle.getAttribute("data-idx")),
+                     timeline: item, ids: [id], primary: item, origins: [],
+                     bounds: laySelectionBounds([id]), resizing: false,
+                     collapseTo: null, sx: e.clientX, sy: e.clientY,
+                     altCopy: false, zoom: layZoom(), moved: false,
+                     before: laySnapState(activeChart()) };
+        document.addEventListener("pointermove", layPointerMove);
+        document.addEventListener("pointerup", layPointerUp);
+        e.preventDefault();
+        return;
+      }
+      var endHandle = e.target.closest &&
+        e.target.closest('[data-role="lay-arrow-end"]');
+      if (endHandle && item.kind === "arrow") {
+        // An arrow END in hand: the gesture attaches or frees that end
+        // (layArrowEndDrag); the arrow's own box is never moved.
+        LAY_DRAG = { arrowEnd: endHandle.getAttribute("data-end"), arrow: item,
+                     ids: [id], primary: item, origins: [],
+                     bounds: laySelectionBounds([id]), resizing: false,
+                     collapseTo: null, sx: e.clientX, sy: e.clientY,
+                     altCopy: false, zoom: layZoom(), moved: false,
+                     before: laySnapState(activeChart()) };
+        document.addEventListener("pointermove", layPointerMove);
+        document.addEventListener("pointerup", layPointerUp);
+        e.preventDefault();
+        return;
+      }
       var resizing = !!(e.target.closest && e.target.closest('[data-role="lay-resize"]'));
       // A plain press on an item that is ALREADY selected keeps the whole
       // selection, so dragging any member moves everything selected, the
@@ -23791,6 +26447,12 @@
                    // real movement, so an Alt+click that never travels stays
                    // an ordinary selection and leaves nothing behind.
                    altCopy: !!e.altKey && !resizing,
+                   // A press on a phase band that never travels opens that
+                   // band's color (click-to-edit, like the chart's parts).
+                   bandHit: (function () {
+                     var bd = e.target.closest && e.target.closest('[data-role="lay-band"]');
+                     return bd && item.kind === "timeline" ? Number(bd.getAttribute("data-idx")) : null;
+                   })(),
                    zoom: layZoom(), moved: false,
                    // Captured here rather than on first movement because the
                    // move handler mutates items in place; pushed at pointer-up
@@ -23802,8 +26464,15 @@
       e.preventDefault();
     });
     canvas.addEventListener("dblclick", function (e) {
+      var tlEl = e.target.closest
+        ? e.target.closest('.ps-litem[data-kind="timeline"]') : null;
+      if (tlEl) {
+        layTimelineDblClick(tlEl.getAttribute("data-item-id"), e);
+        return;
+      }
       var itemEl = e.target.closest
-        ? e.target.closest('.ps-litem[data-kind="text"]') : null;
+        ? e.target.closest('.ps-litem[data-kind="text"],.ps-litem[data-kind="box"]')
+        : null;
       if (!itemEl) return;
       layEditText(itemEl.getAttribute("data-item-id"));
     });
@@ -23840,7 +26509,8 @@
       if (canvasFocused && e.key === "F2") {
         var editItem = layItemById(layActiveId());
         e.preventDefault(); e.stopImmediatePropagation();
-        if (editItem && editItem.kind === "text") layEditText(editItem.id);
+        if (editItem && (editItem.kind === "text" || editItem.kind === "box"))
+          layEditText(editItem.id);
         else layAnnounce("F2 edits text items. The active item is not text.");
         return;
       }
@@ -23887,25 +26557,27 @@
           ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]
             .indexOf(e.key) !== -1) {
         e.preventDefault();
-        if (e.altKey) {
-          var keyStep = e.shiftKey ? 10 : 1;
-          if (e.ctrlKey || e.metaKey) {
-            if (!layResizeSelectedFree(
-                e.key === "ArrowLeft" ? -keyStep :
-                e.key === "ArrowRight" ? keyStep : 0,
-                e.key === "ArrowUp" ? -keyStep :
-                e.key === "ArrowDown" ? keyStep : 0))
-              layAnnounce("Free resize requires one chart or image.");
-          } else {
-            layMoveSelected(e.key === "ArrowLeft" ? -keyStep :
-                            e.key === "ArrowRight" ? keyStep : 0,
-                            e.key === "ArrowUp" ? -keyStep :
-                            e.key === "ArrowDown" ? keyStep : 0);
-          }
-        } else {
-          var direction = (e.key === "ArrowLeft" || e.key === "ArrowUp") ? -1 : 1;
-          layNavigateItem(direction, null, e.shiftKey);
-        }
+        // ARROWS MOVE WHAT IS SELECTED; ALT+ARROW MOVES THE SELECTION
+        // (Torry, Oct 1 2026: "I want the arrows to nudge", in Layouts and
+        // in the charts alike). This reverses the Aug 2026 rule, where
+        // plain arrows stepped between items and Alt nudged. It is still
+        // ONE rule: the same key does the same thing wherever focus is in
+        // this workspace (the tail of this handler covers the rail and the
+        // toolbar). With nothing selected an arrow selects, as it always
+        // did, because there is nothing to move.
+        var keyStep = e.shiftKey ? 10 : 1;
+        var kdx = e.key === "ArrowLeft" ? -keyStep :
+                  e.key === "ArrowRight" ? keyStep : 0;
+        var kdy = e.key === "ArrowUp" ? -keyStep :
+                  e.key === "ArrowDown" ? keyStep : 0;
+        var direction = (e.key === "ArrowLeft" || e.key === "ArrowUp") ? -1 : 1;
+        if (e.altKey && (e.ctrlKey || e.metaKey)) {
+          if (!layResizeSelectedFree(kdx, kdy))
+            layAnnounce("Free resize requires one chart or image.");
+        } else if (e.altKey) layNavigateItem(direction, null, e.shiftKey);
+        else if (e.ctrlKey || e.metaKey) { /* not a layout chord */ }
+        else if (ids.length) layMoveSelected(kdx, kdy);
+        else layNavigateItem(direction, null, false);
         return;
       }
       if ((e.key === "Delete" || e.key === "Backspace") && ids.length) {
@@ -23949,17 +26621,23 @@
           ids.length) {
         e.preventDefault(); layDuplicateSelected(); return;
       }
-      // ONE rule for the arrow keys. Inside the canvas plain arrows navigate
-      // between items and Alt+Arrow nudges, which is the engine's rule and
-      // what the hidden option list exists to serve. A second handler here
-      // used to nudge on PLAIN arrows whenever focus was anywhere else in the
-      // workspace, which in practice is any time the user has just clicked a
-      // rail or toolbar button, so the same key did two opposite things
-      // decided by something invisible. Alt+Arrow nudges everywhere now.
-      if (!ids.length || !e.altKey ||
+      // ONE rule for the arrow keys, outside the canvas as inside it (Oct
+      // 2026): arrows nudge the selection, Alt+Arrow steps it. The Aug 2026
+      // complaint was a key that did two opposite things depending on where
+      // focus happened to be; that still must never happen, so the rail and
+      // the toolbar answer exactly as the canvas does. The scope check keeps
+      // the arrows of anything that owns them (a menu, a tab strip, a dialog)
+      // and of everything outside this workspace.
+      if (!ids.length || e.ctrlKey || e.metaKey ||
           ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]
             .indexOf(e.key) === -1) return;
+      if (!layArrowScopeOk(t)) return;
       e.preventDefault();
+      if (e.altKey) {
+        layNavigateItem((e.key === "ArrowLeft" || e.key === "ArrowUp") ? -1 : 1,
+          null, e.shiftKey);
+        return;
+      }
       var step = e.shiftKey ? 10 : 1;
       layMoveSelected(e.key === "ArrowLeft" ? -step :
                       e.key === "ArrowRight" ? step : 0,
@@ -24264,6 +26942,20 @@
     }
     d.moved = true;
     var p = layPage(), v = layView();
+    if (d.arrowEnd) {
+      layArrowEndDrag(d, e);
+      layHideGuides();
+      laySyncInspector();
+      e.preventDefault();
+      return;
+    }
+    if (d.tickDrag != null) {
+      layTickDrag(d, e);
+      layHideGuides();
+      laySyncInspector();
+      e.preventDefault();
+      return;
+    }
     if (d.resizing && laySizedKind(d.primary)) {
       // The grabbed panel follows the pointer exactly, the existing math.
       // Every OTHER selected sized item follows by RATIO, so two same-size
@@ -24274,7 +26966,11 @@
       for (oi = 0; oi < d.origins.length; oi++)
         if (d.origins[oi].item === d.primary) po = d.origins[oi];
       po = po || d.origins[0];
-      var resized = layResizeDimensions(po, dx, dy, p, v, !!e.shiftKey);
+      // A box resizes freely: it holds text, not a picture with a shape
+      // to keep. Panels keep the proportional default.
+      var resized = layResizeDimensions(po, dx, dy, p, v,
+        !!e.shiftKey || (po.item && (po.item.kind === "box" ||
+                                     po.item.kind === "timeline")));
       var rw = po.w > 0 ? resized.w / po.w : 1;
       var rh = po.h > 0 ? resized.h / po.h : 1;
       var cvR = el("ps-lcanvas");
@@ -24309,6 +27005,7 @@
           '.ps-litem[data-item-id="' + oo.item.id + '"]');
         if (elR) { elR.style.width = nw + "px"; elR.style.height = nh + "px"; }
       }
+      layArrowsFollow(d.ids);
       layHideGuides();
     } else {
       if (v.snap) {
@@ -24330,6 +27027,7 @@
           '.ps-litem[data-item-id="' + it.id + '"]');
         if (live) { live.style.left = it.x + "px"; live.style.top = it.y + "px"; }
       }
+      layArrowsFollow(d.ids);
     }
     laySyncInspector();
     e.preventDefault();
@@ -24349,6 +27047,12 @@
     var cvC = el("ps-lcanvas");
     if (cvC) cvC.classList.remove("ps-lcanvas-dragging", "ps-lcanvas-resizing");
     layHideGuides();
+    // An end drag rewrote attachments, not positions: put the whole
+    // state back from the press-time snapshot.
+    if ((d.arrowEnd || d.tickDrag != null) && d.before) {
+      layRestoreState(d.before);
+      return true;
+    }
     for (var i = 0; i < d.origins.length; i++) {
       var o = d.origins[i];
       o.item.x = o.x; o.item.y = o.y;
@@ -24390,12 +27094,18 @@
     if (d && d.moved) {
       var h = layHist();
       if (h && d.before) {
-        h.undo.push({ label: d.resizing ? "resize" : "move", state: d.before });
+        h.undo.push({ label: d.arrowEnd ? "attach arrow"
+                               : d.tickDrag != null ? "move tick"
+                               : d.resizing ? "resize" : "move", state: d.before });
         if (h.undo.length > LAYOUT_HIST_LIMIT) h.undo.shift();
         h.redo.length = 0;
         LAY_COALESCE = null;
       }
       persist(); renderLayout();
+    } else if (d && d.tickDrag != null && d.timeline) {
+      layFocusTickRow(d.timeline, d.tickDrag);
+    } else if (d && d.bandHit != null && d.primary && d.primary.kind === "timeline") {
+      layOpenBandColor(d.primary, d.bandHit);
     } else if (d && d.collapseTo) {
       // The press kept the multi-selection so a drag could move it; a press
       // that never travelled is a CLICK, and a click on one item means that
@@ -24430,7 +27140,7 @@
   }
   function layEditText(id) {
     var item = layItemById(id);
-    if (!item || item.kind !== "text") return;
+    if (!item || (item.kind !== "text" && item.kind !== "box")) return;
     laySetSelection([id]);
     var canvas = el("ps-lcanvas");
     var returnFocus = document.activeElement === el("ps-lviewport");
@@ -24445,6 +27155,12 @@
     ta.style.fontWeight = item.bold ? "700" : "400";
     ta.style.fontStyle = item.italic ? "italic" : "normal";
     ta.style.color = layTextColor(item);
+    if (item.kind === "box") {
+      // The editor fills the box and centres like the box does, so the
+      // text does not jump when the field opens.
+      ta.style.width = "100%"; ta.style.height = "100%";
+      ta.style.textAlign = "center"; ta.style.boxSizing = "border-box";
+    }
     itemEl.removeAttribute("aria-hidden");
     itemEl.innerHTML = "";
     itemEl.appendChild(ta);
@@ -26155,11 +28871,44 @@
           ? "Text (" + texts.length + " items)" : "Text";
       if (texts.length) layTextSyncControls(texts);
     }
+    var boxSec = el("ps-layout-box-section");
+    if (boxSec) {
+      var boxTargets = layBoxTargets();
+      boxSec.style.display = boxTargets.length ? "" : "none";
+      var boxTitle = boxSec.querySelector(".ps-inspector-section-title");
+      if (boxTitle)
+        boxTitle.textContent = boxTargets.length > 1
+          ? "Box (" + boxTargets.length + " items)" : "Box";
+      if (boxTargets.length) layBoxSyncControls(boxTargets);
+    }
+    var arrowSec = el("ps-layout-arrow-section");
+    if (arrowSec) {
+      var arrowTargets = layArrowTargets();
+      arrowSec.style.display = arrowTargets.length ? "" : "none";
+      var arrowTitle = arrowSec.querySelector(".ps-inspector-section-title");
+      if (arrowTitle)
+        arrowTitle.textContent = arrowTargets.length > 1
+          ? "Arrow (" + arrowTargets.length + " items)" : "Arrow";
+      if (arrowTargets.length) layArrowSyncControls(arrowTargets);
+    }
+    var tlSec = el("ps-layout-timeline-section");
+    if (tlSec) {
+      var tlTargets = layTimelineTargets();
+      tlSec.style.display = tlTargets.length ? "" : "none";
+      var tlTitle = tlSec.querySelector(".ps-inspector-section-title");
+      if (tlTitle)
+        tlTitle.textContent = tlTargets.length > 1
+          ? "Timeline (" + tlTargets.length + " items)" : "Timeline";
+      if (tlTargets.length) layTimelineSyncControls(tlTargets);
+    }
     el("ps-layout-selection-title").textContent = one
       ? (one.kind === "chart"
          ? (srcInfo && srcInfo.name ? "Chart panel - live" : "Chart panel")
          : one.kind === "image"
-         ? (srcInfo ? "Notebook snapshot" : "Image item") : "Text item")
+         ? (srcInfo ? "Notebook snapshot" : "Image item")
+         : one.kind === "box" ? "Box"
+         : one.kind === "timeline" ? "Timeline"
+         : one.kind === "arrow" ? "Arrow" : "Text item")
       : ids.length + " selected items";
     // The behavioral line (Torry, Aug 5 2026): will this update, or not.
     var srcLine = el("ps-layout-source-line");
@@ -26199,7 +28948,9 @@
       setTip(field, ctxSized ? ""
         : layUnits(ids).length > 1
           ? "Size applies to one panel at a time. Select just the one you want to change."
-          : "Text items size themselves to their content.");
+          : (one && one.kind === "arrow")
+            ? "An arrow sizes itself to its ends. Drag an end, or attach it to a box."
+            : "Text items size themselves to their content.");
     });
     // Progressive disclosure (Torry, Jul 29 2026): the align row is SHOWN
     // only once a second item is selected, instead of six greyed buttons
@@ -27546,6 +30297,7 @@
   // crash rather than a sentence. Same shape as the image guard: a disclosure
   // with a choice at the size where it starts to hurt, a refusal only where
   // continuing would take the tab down.
+  var DATA_GATE_TOAST = 0;
   var DATA_WARN_BYTES = 25 * 1024 * 1024;
   var DATA_REFUSE_BYTES = 250 * 1024 * 1024;
   function dataFileSizeGate(f, proceed) {
@@ -27559,12 +30311,19 @@
       return false;
     }
     if (size > DATA_WARN_BYTES) {
-      showActionToast(escFileName(f.name) + " is " +
+      // One question at a time: choosing a second file replaces the first
+      // prompt instead of stacking a second one beside it.
+      if (DATA_GATE_TOAST) dismissToast(DATA_GATE_TOAST);
+      DATA_GATE_TOAST = showActionToast(escFileName(f.name) + " is " +
         (size / 1048576).toFixed(0) + " MB. Reading it will lock the window " +
-        "up for a while, and a table that size is slow to edit.",
-        "Read it anyway", function () { proceed(true); });
+        "up for a while, and a table that size is slow to edit and too " +
+        "large for browser autosave.",
+        "Read it anyway", function () { DATA_GATE_TOAST = 0; proceed(true); },
+        { sticky: true, dismissLabel: "Cancel" });
       return false;
     }
+    // A file small enough to read answers any earlier question by itself.
+    if (DATA_GATE_TOAST) { dismissToast(DATA_GATE_TOAST); DATA_GATE_TOAST = 0; }
     return true;
   }
   function readPickedFile(f, forced) {
@@ -28258,6 +31017,7 @@
   }
   var WELCOME_LAST_FOCUS = null;
   function showWelcome(force) {
+    if (BIG_BOOT && !force) return;      // shown once the large project is in
     // Recovery must never be silent, even if this tab previously dismissed
     // the start center or the preference normally resumes immediately.
     if (!force && !RECOVERY_NOTE) {
@@ -30343,18 +33103,25 @@
         own += (window.localStorage.getItem(k) || "").length;
       }
     } catch (e) {}
+    // The limit that applies is the one for THIS kind of storage. The line
+    // used to quote navigator.storage.estimate(), which is the browser's
+    // budget for every kind put together (10 GB on a typical laptop), and
+    // a user holding a 70 MB file read it as room the autosave had.
     line.textContent = "This app is using about " + formatBytes(own) +
       " across " + keys + " item" + (keys === 1 ? "" : "s") +
       " of browser storage: your autosaved project, its backup, recent " +
-      "projects, and your saved palettes and styles.";
-    try {
-      if (window.navigator.storage && window.navigator.storage.estimate)
-        window.navigator.storage.estimate().then(function (est) {
-          if (!est || !est.quota) return;
-          line.textContent += " The browser allows about " +
-            formatBytes(est.quota) + " in total.";
-        });
-    } catch (e) {}
+      "projects, and your saved palettes and styles. Browsers keep about " +
+      "5 MB of this kind of storage for a site, so a project larger than " +
+      "that is not autosaved and has to be saved to a .pand file." +
+      (BIG_ACTIVE
+        ? " The open project is about " + formatBytes(bigEstimateChars()) +
+          ", so it is autosaved in the browser's larger store instead, " +
+          "which has room for projects this size. A .pand file is still " +
+          "the copy that does not depend on this browser."
+        : AUTOSAVE_TOO_BIG
+        ? " The open project is about " + formatBytes(AUTOSAVE_TOO_BIG.chars) +
+          ", so it is not being autosaved."
+        : "");
   }
   // t3-53. Destructive and NOT undoable, which is exactly why it does not use
   // the app's usual do-it-and-offer-it-back pattern: there would be nothing to
@@ -30553,6 +33320,8 @@
           ["Up or down a screen", "Page Up / Page Down"],
           ["Start editing the selected cell", "Enter, F2, or just type"],
           ["Commit an edit and move down", "Enter"],
+          ["Commit a typed-over cell and move that way", "Arrow keys"],
+          ["Move within the text instead", "F2, or click in the cell"],
           ["Abandon an edit", "Escape"],
           ["Clear the selected cells", "Delete"],
           ["Select the whole table", "Cmd/Ctrl + A"],
@@ -30597,15 +33366,15 @@
           ["Duplicate it", "Cmd/Ctrl + D"]
         ] },
       { title: "Layouts",
-        note: "Tab to the figure layout items first. Arrow navigation follows " +
-              "the item stack; movement and resizing use Alt so selection " +
-              "never changes accidentally while an item is being positioned.",
+        note: "Tab to the figure layout items first. The arrow keys move " +
+              "what is selected; Alt with an arrow moves the selection " +
+              "to another item instead, following the item stack.",
         rows: [
-          ["Move through items", "Arrow keys / Home / End"],
-          ["Extend or reduce the selection", "Shift + arrows / Space"],
+          ["Nudge the selection", "Arrow keys"],
+          ["Nudge by 10", "Shift + arrows"],
+          ["Move through items", "Alt + arrows / Home / End"],
+          ["Extend or reduce the selection", "Alt + Shift + arrows / Space"],
           ["Group / ungroup", "Cmd/Ctrl + G / Shift + G"],
-          ["Nudge the selection", "Alt + arrows"],
-          ["Nudge by 10", "Alt + Shift + arrows"],
           ["Free resize a chart or image", "Ctrl/Cmd + Alt + arrows"],
           ["Proportional resize", "Alt + Plus / Minus"],
           ["Open exact position and size", "Enter"],
@@ -30706,6 +33475,24 @@
     if (bld) bld.textContent = APP_BUILD || "development page (unstamped)";
     var apa = el("ps-about-apa");
     if (apa) apa.textContent = citationAPA();
+    // The desktop app asks GitHub Releases for a newer version at every
+    // packaged launch (electron-updater) and on Help > Check for updates,
+    // which is a request that carries the machine's address and the app
+    // version. The shared sentence promised nothing was sent anywhere, so
+    // on the desktop it says exactly what is (Torry's option b, Sep 19
+    // 2026: word it honestly rather than gate the check).
+    var priv = document.querySelector("#ps-about-dialog .ps-about-privacy");
+    if (priv) {
+      priv.textContent = window.PS_DESKTOP
+        ? ("No accounts and no uploads. Your data stays on this machine and " +
+           "is never sent anywhere. The only thing this app sends out is a " +
+           "version check: when it starts, and when you choose Help > Check " +
+           "for updates, it asks GitHub for the newest release number, which " +
+           "tells GitHub your network address and this app's version and " +
+           "nothing else.")
+        : ("No accounts and no uploads. Your data stays on this machine: " +
+           "everything here runs in the browser, and nothing is sent anywhere.");
+    }
     openShellDialog("ps-about-dialog");
   }
   // Punch list t4-16. Chart settings > Appearance > Diagnostics wrote
@@ -31227,7 +34014,10 @@
       { label: "Chart panel", command: "layout-add-chart", layoutOnly: true },
       { label: "Text", command: "insert-text", layoutOnly: true },
       { label: "Panel label", command: "insert-label", layoutOnly: true },
-      { label: "Image\u2026", command: "insert-image", layoutOnly: true }
+      { label: "Image\u2026", command: "insert-image", layoutOnly: true },
+      { label: "Box", command: "insert-box", layoutOnly: true },
+      { label: "Arrow", command: "insert-arrow", layoutOnly: true },
+      { label: "Timeline", command: "insert-timeline", layoutOnly: true }
     ],
     // Punch list 3 and 4. Which graph?, Check graph, Glossary and Label parts
     // were reachable only through one unlabelled 29px "?" inside the engine
@@ -32049,6 +34839,9 @@
     else if (command === "insert-text") el("ps-laddtext").click();
     else if (command === "insert-label") el("ps-laddlabel").click();
     else if (command === "insert-image") el("ps-laddimage").click();
+    else if (command === "insert-box") layAddBox();
+    else if (command === "insert-arrow") layAddArrow();
+    else if (command === "insert-timeline") layAddTimeline();
     else if (command === "command-palette") showCommandPalette();
     else if (command === "layout-add-chart") el("ps-laddchart").click();
     else if (command === "layout-add-text") el("ps-laddtext").click();
@@ -33275,7 +36068,10 @@
     // this fires only when autosave is actually FAILING, which is the case
     // where closing the tab really does lose the work.
     window.addEventListener("beforeunload", function (e) {
-      if (AUTOSAVE_HEALTH !== "error") return;
+      // ...or when a large project's latest change has not reached the
+      // larger store yet (its writes trail by a second).
+      if (AUTOSAVE_HEALTH !== "error" &&
+          !(BIG_ACTIVE && (BIG_PENDING || BIG_INFLIGHT))) return;
       if (FILE_SAVED_REV != null && PROJECT_REV === FILE_SAVED_REV) return;
       e.preventDefault();
       e.returnValue = "";
@@ -33308,6 +36104,8 @@
     }
     window.addEventListener("pagehide", flushPendingEngineOpts);
     window.addEventListener("beforeunload", persistFlush);
+    // After the two above, so the write carries everything they flushed.
+    window.addEventListener("pagehide", bigFlush);
     // Switching documents tears down the engine host, so the same queue has
     // to be drained there too or the edit lands on the WRONG chart.
     PS_FLUSH_PENDING_OPTS = flushPendingEngineOpts;
@@ -33414,7 +36212,8 @@
     // to NOTICE and SAY SO, once, rather than let the loser find out later.
     var OTHER_TAB_WARNED = false;
     window.addEventListener("storage", function (e) {
-      if (!e || e.key !== PS_SAVE_KEY || e.newValue == null) return;
+      if (!e || (e.key !== PS_SAVE_KEY && e.key !== PS_BIG_KEY) ||
+          e.newValue == null) return;
       var mine = null, theirs = null;
       try { mine = PROJECT.id; theirs = JSON.parse(e.newValue).id; }
       catch (err) { return; }
@@ -33703,6 +36502,14 @@
                    valid: !!validSnap(id) } : null;
     },
     switchChart: switchChart,
+    // The large-project autosave, for probes: where it stands, and a flush.
+    bigAutosave: function () {
+      return { active: BIG_ACTIVE, pending: BIG_PENDING || BIG_INFLIGHT,
+               writes: BIG_WRITES, unavailable: BIG_UNAVAILABLE,
+               booting: !!BIG_BOOT, lastError: BIG_LAST_ERROR,
+               health: AUTOSAVE_HEALTH, detail: AUTOSAVE_DETAIL };
+    },
+    bigFlush: bigFlush,
     setWorkspace: setAppWorkspace,
     workspace: appWorkspace,
     workspaceDocument: function () {
@@ -33902,7 +36709,7 @@
     dataRedo: dataRedo,
     dataHistory: function () {
       var bytes = 0;
-      for (var i = 0; i < DATA_UNDO.length; i++) bytes += DATA_UNDO[i].snap.length;
+      for (var i = 0; i < DATA_UNDO.length; i++) bytes += dataHistBytes(DATA_UNDO[i]);
       return { undo: DATA_UNDO.length, redo: DATA_REDO.length,
                bytes: bytes, budget: DATA_HIST_BYTES,
                undoLabel: dataStepLabel(DATA_UNDO),
@@ -33932,12 +36739,15 @@
       });
     })();
     wireLayoutTextControls();
+    wireLayoutPartControls();
+    wireLayoutTimelineControls();
     wireAppFrame(); wireContextInspector(); wireCommandPalette();
     wireGuidedDialogs(); wireStandaloneEngineExclusionLabels();
     migrateLegacyChartPointExclusions();
     syncAll(); render();
     wireWelcome();
     requestPersistentStorage();
+    bigBootRestore();
     // Item 15. The engine sizes its undo blob as (4.6MB - bundleBytes)/2 per
     // side, and measures bundleBytes by looking for a graphbuilder2.bundle.*
     // key in localStorage. In jamovi that key exists; in the standalone the
@@ -33949,6 +36759,27 @@
     // recovery ladder. Counter-intuitive direction, deliberately: the number
     // is a budget knob, not a measurement.
     try { window.__gb2_bundleBytes = 3600000; } catch (e) {}
+    // Usage counter (Sep 2026, worker/README.md): the copy served from
+    // pandionplots.com sends one empty ping when it starts so the site can
+    // count launches, and a second one the first time each day, so the
+    // About table can show days as well as starts. No body, no cookie, no
+    // identifier. The desktop app and the portable file never send it
+    // (psUpdateHosted is false there), nor does any headless browser (the
+    // probes and screenshot scripts), and the About dialog says so on the
+    // one copy that does.
+    try {
+      if (psUpdateHosted() && !navigator.webdriver && navigator.sendBeacon) {
+        navigator.sendBeacon("/api/hit/launch");
+        var pingDayKey = "psstandalone.launchDay.v1";
+        var pingToday = new Date().toISOString().slice(0, 10);
+        if (localStorage.getItem(pingDayKey) !== pingToday) {
+          localStorage.setItem(pingDayKey, pingToday);
+          navigator.sendBeacon("/api/hit/launch-day");
+        }
+        var hostedNote = document.getElementById("ps-about-hosted-note");
+        if (hostedNote) hostedNote.hidden = false;
+      }
+    } catch (ePing) {}
     bootDone();          // item 9: the frame is live now, not merely painted
   });
 })();
