@@ -14550,12 +14550,35 @@
         // restore the column-name default the user can re-type it.
         function commitTitle(overrideOpt, valueOpt, value) {
             var trimmed = (value || "").trim();
+            // Undo: register both option keys BEFORE the poke below, so a
+            // first touch backfills the true old value (the edit-time undo
+            // law; both are seeded in TRACKED_OPTIONS today). A title that
+            // was never renamed ships neither option (R folds them into
+            // xLabel), so the pre-edit snapshot holds undefined, which the
+            // stack's localStorage round trip drops, and the undo after the
+            // re-render below then left the rename in place. Record the
+            // options' effective defaults (override off, no text) instead.
+            if (hasSetOption) {
+                try {
+                    _undoTrackKey(overrideOpt);
+                    _undoTrackKey(valueOpt);
+                    if (_undoLastSnapshot) {
+                        if (_undoLastSnapshot[overrideOpt] === undefined) _undoLastSnapshot[overrideOpt] = false;
+                        if (_undoLastSnapshot[valueOpt] === undefined) _undoLastSnapshot[valueOpt] = "";
+                    }
+                } catch (_eUt) {}
+            }
             // Render the new title IMMEDIATELY: write the value into the
             // matching JS data field + redraw, instead of only queuing it
             // for R (which made a freshly-added title appear one round-trip
             // late). Done before the hasSetOption guard so local preview is
             // independent of the option-commit path.
             try {
+                // The option fields too, not only the display fields below:
+                // the undo snapshot reads data[key] for every tracked key, and
+                // the chartSpec route writes only the blob.
+                data[overrideOpt] = true;
+                data[valueOpt] = trimmed;
                 var _tgSet = null;
                 if (valueOpt === "xTitle") { data.xLabel = trimmed; data.xTitleOverride = true; _tgSet = { xLabel: trimmed, xTitleOverride: true }; if (typeof addXTitleZone !== "undefined" && addXTitleZone) addXTitleZone.style.display = "none"; }
                 else if (valueOpt === "yTitle") { data.yLabel = trimmed; data.yTitleOverride = true; _tgSet = { yLabel: trimmed, yTitleOverride: true }; if (typeof addYTitleZone !== "undefined" && addYTitleZone) addYTitleZone.style.display = "none"; }
@@ -14565,10 +14588,17 @@
                 // carries it (no "title vanishes then returns" flash).
                 redraw();
             } catch (_eCt) {}
+            if (hasSetOption) {
+                // Take this rename's undo step NOW, before the commit and the
+                // local re-render: the re-render re-seeds the undo baseline
+                // from data that already holds the new title, which swallowed
+                // the 250 ms snapshot the chartSpec route schedules (one undo
+                // then reverted the rename together with the edit before it).
+                try { if (!_undoApplying) _undoTake(); } catch (_eUk) {}
+                try { _setOption(overrideOpt, true); } catch (e) {}
+                try { _setOption(valueOpt, trimmed); } catch (e) {}
+            }
             _gb2RerenderSoon();
-            if (!hasSetOption) return;
-            try { _setOption(overrideOpt, true); } catch (e) {}
-            try { _setOption(valueOpt, trimmed); } catch (e) {}
         }
 
         // --- Relabel commit helpers (lookups defined above) -------------
