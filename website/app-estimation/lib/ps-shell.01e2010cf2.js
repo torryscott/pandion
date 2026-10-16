@@ -8773,7 +8773,7 @@
     // tour can actually run (no data yet: it opens the example) and has
     // not been taken. Once seen it steps aside; the Help menu keeps it.
     if (assignment && window.PS_TOURS && !window.PS_TOURS.seen("charts") &&
-        chartsTourAvailable())
+        chartsTourAvailable(true))
       acts.push({ id: "ps-empty-tour", link: true,
                   label: "New here? Tour this workspace",
                   run: function () { startWorkspaceTour("charts"); } });
@@ -13692,11 +13692,16 @@
         // place a second categorical variable goes, and the Data points
         // role's description says what it does NOT split (Torry, Sep 24
         // 2026, after a day with the role under its own heading).
-        var nextSection = def.required ? "required" : "optional";
+        // An optional AXIS role (Compare Groups' X since it became
+        // optional, Oct 2026) stays in the axes section: filing it by
+        // required-ness alone put it under "Split the chart" above Axes and
+        // printed that heading twice.
+        var inAxes = def.required || def.axis === true;
+        var nextSection = inAxes ? "required" : "optional";
         if (section !== nextSection) {
           section = nextSection;
           wrap.appendChild(mkEl("div", "ps-role-section-heading",
-            def.required ? requiredRoleSection(defs) : "Split the chart"));
+            inAxes ? requiredRoleSection(defs) : "Split the chart"));
         }
         var presentation = rolePresentation(def);
         var members = Array.isArray(rr[def.key]) ? rr[def.key]
@@ -19788,7 +19793,9 @@
       if (!nums.length) out = no("Your selection has no numeric value variable.");
       else if (nums.length > 1) out = no("Needs exactly one value variable; " +
         "your selection has " + nums.length + ".");
-      else if (!cats.length) out = no("Needs a categorical variable for the groups.");
+      // a lone numeric is a single group (X is optional since Oct 2026)
+      else if (!cats.length) out = { fits: true, roles: { yvar: nums[0] },
+        text: "With your selection: " + nums[0] + " on values, drawn as a single group; add a categorical variable to compare groups." };
       else {
         var roles = { xvar: cats[0], yvar: nums[0] };
         if (cats[1]) roles.groupVar = cats[1];
@@ -34690,9 +34697,13 @@
   // data at all (it opens the built-in example, the same thing the empty
   // state offers). Data with no drawn chart is refused with a reason: the
   // landmarks it points at are not on screen yet.
-  function chartsTourAvailable() {
+  // replacingChart: the caller is about to replace the chart with a
+  // message, so the svg still in the host is the OUTGOING chart and must
+  // not count as drawn (a Y-only Compare Groups chart draws since X became
+  // optional, Oct 2026, which made the stale svg common).
+  function chartsTourAvailable(replacingChart) {
     if (!tableHasData(PROJECT.table)) return true;
-    if (chartHelpState() === "ready") return true;
+    if (!replacingChart && chartHelpState() === "ready") return true;
     // A layout or the Notebook in front, with a chart document elsewhere:
     // the tour switches to it and checks again there.
     return !workspaceDocument("chart") && !!appFirstDocument(false);

@@ -77,7 +77,11 @@ window.PSData = (function () {
 
   // ================================================================ CG
   function buildCG(table, roles, opts) {
-    var xs = table.columns[roles.xvar];
+    // A chart with only a value variable (Oct 2026, esci parity: the
+    // single group): one category named after the variable, and an empty
+    // X title. Mirrors plotbuilder.b.R.
+    var single = !roles.xvar;
+    var xs = single ? null : table.columns[roles.xvar];
     var ys = table.columns[roles.yvar];
     var gs = roles.groupVar ? table.columns[roles.groupVar] : null;
     var fs = roles.facetVar ? table.columns[roles.facetVar] : null;
@@ -90,14 +94,14 @@ window.PSData = (function () {
 
     var nMissing = 0, yFinite = [], i;
     for (i = 0; i < nTotal; i++) {
-      var complete = isFiniteNum(ys[i]) && !isMissing(xs[i]) &&
+      var complete = isFiniteNum(ys[i]) && (single || !isMissing(xs[i])) &&
                      (!gs || !isMissing(gs[i])) &&
                      (!fs || !isMissing(fs[i]));
       if (!complete) nMissing++;
       if (isFiniteNum(ys[i])) yFinite.push(i);
     }
 
-    var xLevels = levelsOf(table, roles.xvar, yFinite);
+    var xLevels = single ? [String(roles.yvar)] : levelsOf(table, roles.xvar, yFinite);
     var gLevels = gs ? levelsOf(table, roles.groupVar, yFinite) : [];
     var fLevels = fs ? levelsOf(table, roles.facetVar, yFinite) : [];
     var hasFacet = !!fs && fLevels.length > 0;
@@ -113,7 +117,7 @@ window.PSData = (function () {
       var out = [], rowIds = [], marks = [];
       for (var r = 0; r < yFinite.length; r++) {
         var idx = yFinite[r];
-        if (isMissing(xs[idx]) || String(xs[idx]) !== xl) continue;
+        if (!single && (isMissing(xs[idx]) || String(xs[idx]) !== xl)) continue;
         if (fs && (isMissing(fs[idx]) || String(fs[idx]) !== fl)) continue;
         if (gs && (isMissing(gs[idx]) || String(gs[idx]) !== gl)) continue;
         out.push(ys[idx]);
@@ -156,19 +160,20 @@ window.PSData = (function () {
       xCategories: synthX,
       groupCategories: gLevels,
       hasGroups: gLevels.length > 0,
-      xLabel: titleFrom(spec, "xTitleOverride", "xTitle", roles.xvar),
+      xLabel: titleFrom(spec, "xTitleOverride", "xTitle", single ? "" : roles.xvar),
       yLabel: titleFrom(spec, "yTitleOverride", "yTitle", roles.yvar),
       groupLabel: gLevels.length
         ? titleFrom(spec, "groupTitleOverride", "groupTitle", roles.groupVar)
         : "",
       facetLabel: hasFacet ? roles.facetVar : "",
-      xLabelDefault: roles.xvar,
+      xLabelDefault: single ? "" : roles.xvar,
       yLabelDefault: roles.yvar,
       groupLabelDefault: roles.groupVar || "",
       facetLevels: fLevels,
       facetSeparator: hasFacet ? FACET_SEP : "",
       missingNote: missingNoteFor(nMissing, nTotal)
     };
+    if (single) channels.singleGroup = true;
     if (ms) {
       // The levels the chart draws, in the column's level order: a level
       // whose every row lacks x, group or panel ships no point (R keeps
@@ -322,10 +327,29 @@ window.PSData = (function () {
     var useGroup = !!gs && !isPie && !isPareto;
     var useFacet = !!fs && !isPie;
     var nTotal = cs.length;
+    // esci's "Missing cases are counted" (Oct 2026, freqplotbuilder.b.R row
+    // for row): a missing value of the counted variable becomes its own
+    // level, Missing, last; a missing group or panel still drops the row.
+    var countMissing = !!(opts && opts.spec && opts.spec.freqCountMissing === true);
 
-    var keep = [], nMissing = 0, i;
+    // An excluded row or cell reads as missing in the typed columns, but
+    // it was taken OUT of the analysis, so it is never counted as Missing.
+    function exclAt(col, idx) {
+      var cid = table.caseIds && table.caseIds[idx];
+      if (cid && table.excludedRows && table.excludedRows[cid]) return true;
+      return !!(col && table.excluded && table.excluded[col] && table.excluded[col][idx]);
+    }
+    // The rows a recount would add (R's freq_var_missing): a missing
+    // counted value whose group and panel are observed.
+    var varMissing = 0, i;
+    for (i = 0; i < nTotal; i++)
+      if (isMissing(cs[i]) && !exclAt(roles.var, i) &&
+          (!useGroup || !isMissing(gs[i])) && (!useFacet || !isMissing(fs[i])))
+        varMissing++;
+    var counting = countMissing && varMissing > 0;
+    var keep = [], nMissing = 0;
     for (i = 0; i < nTotal; i++) {
-      var ok = !isMissing(cs[i]) &&
+      var ok = (!isMissing(cs[i]) || (counting && !exclAt(roles.var, i))) &&
                (!useGroup || !isMissing(gs[i])) &&
                (!useFacet || !isMissing(fs[i]));
       if (ok) keep.push(i); else nMissing++;
@@ -336,6 +360,21 @@ window.PSData = (function () {
                fix: { kind: "nodata", col: roles.var } };
 
     var catLevels = levelsOf(table, roles.var, keep);
+    var missLab = null;
+    if (counting) {
+      // A label no level already uses, R's rule: its factor levels are
+      // every observed value (dropped rows included) plus declared ones,
+      // and a duplicate label is MERGED there (here it was counted twice).
+      var declMiss = (table.levels && table.levels[roles.var]) || [];
+      var seenV = Object.create(null);
+      for (i = 0; i < nTotal; i++) if (!isMissing(cs[i])) seenV[String(cs[i])] = 1;
+      var taken = function (lab) { return seenV[lab] === 1 || declMiss.indexOf(lab) >= 0; };
+      missLab = "Missing";
+      for (var mk = 1; taken(missLab); mk++)
+        missLab = (mk === 1) ? "Missing (NA)" : "Missing (NA " + mk + ")";
+      catLevels.push(missLab);
+    }
+    function catOf(idx) { return isMissing(cs[idx]) ? missLab : String(cs[idx]); }
     var gLevels = useGroup ? levelsOf(table, roles.groupVar, keep) : [];
     var fLevels = useFacet ? levelsOf(table, roles.facetVar, keep) : [];
     var hasFacetUse = useFacet && fLevels.length > 0;
@@ -345,7 +384,7 @@ window.PSData = (function () {
       var n = 0;
       for (var r = 0; r < keep.length; r++) {
         var idx = keep[r];
-        if (String(cs[idx]) !== cl) continue;
+        if (catOf(idx) !== cl) continue;
         if (useFacet && String(fs[idx]) !== fl) continue;
         if (useGroup && String(gs[idx]) !== gl) continue;
         n++;
@@ -452,7 +491,9 @@ window.PSData = (function () {
       groupLabelDefault: isPie ? roles.var : (useGroup ? roles.groupVar : ""),
       facetLevels: fLevels,
       facetSeparator: hasFacetUse ? FACET_SEP : "",
-      missingNote: missingNoteFor(nMissing, nTotal)
+      missingNote: missingNoteFor(nMissing, nTotal),
+      freqVarMissing: varMissing,
+      freqMissingLabel: missLab || ""
     } };
   }
 
@@ -1244,7 +1285,10 @@ window.PSData = (function () {
       label: "Compare Groups",
       build: buildCG,
       roles: [
-        { key: "xvar", label: "X (categories)", accepts: ["nominal", "ordinal"], required: true },
+        // X is optional (Oct 2026, esci parity): Y alone draws the
+        // variable as a single group. axis: it is still listed with the
+        // axes, not under "Split the chart" (the role panel's sections).
+        { key: "xvar", label: "X (categories)", accepts: ["nominal", "ordinal"], required: false, axis: true },
         { key: "yvar", label: "Y (values)", accepts: ["continuous", "ordinal"], required: true },
         { key: "groupVar", label: "Group By", accepts: ["nominal", "ordinal"], required: false },
         { key: "facetVar", label: "Panels", accepts: ["nominal", "ordinal"], required: false },
