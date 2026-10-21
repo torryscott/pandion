@@ -181,6 +181,14 @@ async function openLint(page) {
           p.readout.includes('within-subject error df=7') &&
           !p.readout.includes('wrong model'),
           'readout=' + JSON.stringify(p.readout));
+    // k=2: the pooled statistic IS the paired t, so the readout's extra
+    // "Tukey's statistic" line stays away (one t line, not two).
+    // (count the t lines ABOVE the "Live label" echo, which repeats the
+    // APA label's own t(7) under that format)
+    check('no second t line when the pooled statistic equals the paired t',
+          !!p.readout && ((p.readout.split('Live label')[0]).match(/t\(7\) =/g) || []).length === 1 &&
+          !p.readout.includes("Tukey's statistic"),
+          'readout=' + JSON.stringify(p.readout));
     check('tukey listed on RM', p.corrOptions.includes('tukey'),
           JSON.stringify(p.corrOptions));
     check('gamesHowell hidden on RM', !p.corrOptions.includes('gamesHowell'),
@@ -206,6 +214,11 @@ async function openLint(page) {
     check('readout: raw -> Tukey, k=3 on the within-subject error df',
           !!p.readout && p.readout.includes('(raw)') && p.readout.includes('Tukey, k=3') &&
           p.readout.includes('within-subject error df=' + EXP.rmDfE),
+          'readout=' + JSON.stringify(p.readout));
+    // Option 2 of the readout seam (Oct 2026): the statistic that belongs
+    // to the Tukey p, on its own line, named by its error term.
+    check('readout prints the pooled statistic ' + EXP.rmTkT12 + ' on the within-subject error term',
+          !!p.readout && p.readout.includes(EXP.rmTkT12 + "  (Tukey's statistic, within-subject error term)"),
           'readout=' + JSON.stringify(p.readout));
     check('tukey listed, gamesHowell + dunnett hidden',
           p.corrOptions.includes('tukey') && !p.corrOptions.includes('gamesHowell') &&
@@ -257,6 +270,11 @@ async function openLint(page) {
     const p = await openPanel(page, 0);
     check('readout shows raw -> adjusted family line',
           !!p.readout && p.readout.includes('(raw)') && p.readout.includes('Tukey, k=3'),
+          'readout=' + JSON.stringify(p.readout));
+    // The Compare Groups side of the same seam: Welch's t(18.9) above,
+    // the pooled ANOVA term's t(33) beside the Tukey p.
+    check('readout prints the pooled statistic ' + EXP.tkTAB + ' on the pooled ANOVA error term',
+          !!p.readout && p.readout.includes(EXP.tkTAB + "  (Tukey's statistic, pooled ANOVA error term)"),
           'readout=' + JSON.stringify(p.readout));
     check('anovaX offered with 3 x-levels', p.testOptions.includes('anovaX'),
           JSON.stringify(p.testOptions));

@@ -152,14 +152,22 @@ rmQ <- function(a, b) abs(rmM[a] - rmM[b]) / sqrt(rmMSE / rm3n)
 pRM12 <- ptukey(rmQ("t1", "t2"), 3, rmDfE, lower.tail = FALSE)
 pRM13 <- ptukey(rmQ("t1", "t3"), 3, rmDfE, lower.tail = FALSE)
 pRM12raw <- t.test(rm3$t1, rm3$t2, paired = TRUE)$p.value
+# the statistic that belongs to the pooled p (the readout's extra line,
+# the APA label, the Compare-pairs Statistic column): the same mean
+# difference over the pooled error term's SE, on that term's df
+rmTkT12 <- sprintf("t(%d) = %.2f", as.integer(rmDfE),
+                   (rmM["t1"] - rmM["t2"]) / sqrt(2 * rmMSE / rm3n))
+tkTAB <- sprintf("t(%d) = %.2f", as.integer(dfW),
+                 (m["A"] - m["B"]) / sqrt(MSE * (1 / n["A"] + 1 / n["B"])))
 # the control must be able to fail: the pooled p and the pair's own
 # paired-t p have to differ at label precision
 stopifnot(fmtP(pRM12) != fmtP(pRM12raw))
 exp_json <- sprintf(paste0(
     '{"pairedDf":"t(%d)","pairedT":"%s","pAB":"%s","pAC":"%s",',
-    '"pRM12":"%s","pRM13":"%s","pRM12raw":"%s","rmDfE":%d}'),
+    '"pRM12":"%s","pRM13":"%s","pRM12raw":"%s","rmDfE":%d,"rmTkT12":"%s","tkTAB":"%s"}'),
     pt$parameter, formatC(pt$statistic, format = "f", digits = 2),
-    fmtP(pAB), fmtP(pAC), fmtP(pRM12), fmtP(pRM13), fmtP(pRM12raw), as.integer(rmDfE))
+    fmtP(pAB), fmtP(pAC), fmtP(pRM12), fmtP(pRM13), fmtP(pRM12raw), as.integer(rmDfE),
+    rmTkT12, tkTAB)
 con <- file(file.path(OUT, "expected.json"), open = "wb")
 writeLines(exp_json, con, useBytes = TRUE)
 close(con)

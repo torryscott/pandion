@@ -96085,6 +96085,32 @@
                                 ? _facetDisplayLabel(r.facet) : r.facet);
                     }
                     lines.push(_gb2Stats.formatP(r.adjustedP) + "  (" + _famNote + ")");
+                    // The statistic that BELONGS to the corrected p (Oct
+                    // 2026, Torry's option 2 for the readout seam): a
+                    // pooled correction judges the same mean difference
+                    // on its own error term, so its t and df differ from
+                    // the pair's test printed above - and the APA label
+                    // and the Compare-pairs table already show THIS one.
+                    // Printed only when it differs at display precision
+                    // (Games-Howell under Welch's t repeats the pair's own
+                    // statistic and says nothing; so does Tukey on two
+                    // occasions, where the RM error term IS the paired
+                    // difference variance).
+                    var _cs2 = r.corrStat;
+                    if (_cs2 && isFinite(_cs2.t) && isFinite(_cs2.df)) {
+                        var _dfFmt2 = function (dv) {
+                            return (dv % 1 === 0) ? String(dv) : dv.toFixed(1);
+                        };
+                        var _csLine = "t(" + _dfFmt2(_cs2.df) + ") = " + _cs2.t.toFixed(2);
+                        var _rawLine = (r.res && isFinite(r.res.t) && isFinite(r.res.df))
+                            ? "t(" + _dfFmt2(r.res.df) + ") = " + r.res.t.toFixed(2) : "";
+                        if (_csLine !== _rawLine) {
+                            lines.push(_csLine + "  (" + corrLabel + "'s statistic, " +
+                                (_cs2.basis === "rmPooled" ? "within-subject error term" :
+                                 _cs2.basis === "welch" ? "each pair's own variances" :
+                                 "pooled ANOVA error term") + ")");
+                        }
+                    }
                 } else {
                     lines.push(_gb2Stats.formatP(r.res.p));
                 }
