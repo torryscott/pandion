@@ -86,6 +86,31 @@ wr(rmplotbuilder(data = rmd, measures = c("t1", "t2"), bs = NULL, betweenVar = N
                  annotationsJson = annJson("auto", "apa", "t1", "t2")),
    "c_rm_tukey")
 
+# ---- Case C3: RM, 3 occasions + Tukey -> the RM ANOVA's error term --
+# Oct 2026 (a PSYC 206 instructor's ask): jamovi's RM ANOVA post hoc
+# defaults to Tukey, so pure RM charts now offer it. Pairwise occasion
+# means are judged by the studentized range over the one-way RM
+# ANOVA's within-subject error (df = (n-1)(k-1)), which with three
+# occasions differs from each pair's own paired t.
+rm3n <- 10
+rm3 <- data.frame(t1 = c(9.8, 11.2, 8.7, 10.4, 12.1, 9.3, 10.9, 11.6, 8.9, 10.1))
+# t1-t2 is a modest change (its own paired t lands near .04, the
+# pooled Tukey well above it); t1-t3 is large. A pair that is
+# p < .001 both ways would make the control unable to fail.
+rm3$t2 <- rm3$t1 + c(0.9, 0.1, 0.4, -0.3, 1.2, 0.2, 0.7, 0.0, -0.2, 0.9)
+rm3$t3 <- rm3$t1 + c(2.1, 1.0, 1.4, 0.8, 2.6, 0.9, 1.4, 2.3, 0.2, 1.7)
+ann3 <- paste0(
+    '[{"id":"r1","kind":"bracket","text":"*","x":100,"y":50,"x2":250,',
+    '"autoPValue":true,"autoPTest":"auto","autoPFormat":"p",',
+    '"anchorLeftCat":"t1","anchorLeftGroup":"","anchorRightCat":"t2","anchorRightGroup":""},',
+    '{"id":"r2","kind":"bracket","text":"*","x":100,"y":30,"x2":400,',
+    '"autoPValue":true,"autoPTest":"auto","autoPFormat":"p",',
+    '"anchorLeftCat":"t1","anchorLeftGroup":"","anchorRightCat":"t3","anchorRightGroup":""}]')
+wr(rmplotbuilder(data = rm3, measures = c("t1", "t2", "t3"), bs = NULL, betweenVar = NULL,
+                 graphType = "bar", chartSpec = cspec(autoPCorrection = "tukey"),
+                 annotationsJson = ann3),
+   "c3_rm_tukey3")
+
 # ---- Case D: CG + Tukey on Welch brackets -> still really corrects ---
 set.seed(2)
 cg3 <- data.frame(x = rep(c("A", "B", "C"), each = 12),
@@ -115,10 +140,26 @@ m <- tapply(cg3$y, cg3$x, mean); n <- tapply(cg3$y, cg3$x, length)
 qs <- function(a, b) abs(m[a] - m[b]) / sqrt((MSE / 2) * (1 / n[a] + 1 / n[b]))
 pAB <- ptukey(qs("A", "B"), 3, dfW, lower.tail = FALSE)
 pAC <- ptukey(qs("A", "C"), 3, dfW, lower.tail = FALSE)
+# C3: Tukey over the one-way RM ANOVA's within-subject error stratum
+# (jamovi's RM post hoc; emmeans on the aov Error term gives the same).
+rm3L <- data.frame(subj = factor(rep(seq_len(rm3n), 3)),
+                   occ = factor(rep(c("t1", "t2", "t3"), each = rm3n)),
+                   y = c(rm3$t1, rm3$t2, rm3$t3))
+rmAov <- summary(aov(y ~ occ + Error(subj/occ), data = rm3L))[["Error: subj:occ"]][[1]]
+rmMSE <- rmAov[["Mean Sq"]][2]; rmDfE <- rmAov[["Df"]][2]
+rmM <- tapply(rm3L$y, rm3L$occ, mean)
+rmQ <- function(a, b) abs(rmM[a] - rmM[b]) / sqrt(rmMSE / rm3n)
+pRM12 <- ptukey(rmQ("t1", "t2"), 3, rmDfE, lower.tail = FALSE)
+pRM13 <- ptukey(rmQ("t1", "t3"), 3, rmDfE, lower.tail = FALSE)
+pRM12raw <- t.test(rm3$t1, rm3$t2, paired = TRUE)$p.value
+# the control must be able to fail: the pooled p and the pair's own
+# paired-t p have to differ at label precision
+stopifnot(fmtP(pRM12) != fmtP(pRM12raw))
 exp_json <- sprintf(paste0(
-    '{"pairedDf":"t(%d)","pairedT":"%s","pAB":"%s","pAC":"%s"}'),
+    '{"pairedDf":"t(%d)","pairedT":"%s","pAB":"%s","pAC":"%s",',
+    '"pRM12":"%s","pRM13":"%s","pRM12raw":"%s","rmDfE":%d}'),
     pt$parameter, formatC(pt$statistic, format = "f", digits = 2),
-    fmtP(pAB), fmtP(pAC))
+    fmtP(pAB), fmtP(pAC), fmtP(pRM12), fmtP(pRM13), fmtP(pRM12raw), as.integer(rmDfE))
 con <- file(file.path(OUT, "expected.json"), open = "wb")
 writeLines(exp_json, con, useBytes = TRUE)
 close(con)

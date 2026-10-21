@@ -106,8 +106,11 @@ async function openLint(page) {
           p.testOptions.includes('wilcoxonSignedRank'), JSON.stringify(p.testOptions));
     check('pure RM offers the RM-ANOVA omnibus', p.testOptions.includes('rmAnova'),
           JSON.stringify(p.testOptions));
-    check('RM hides tukey + gamesHowell', !p.corrOptions.includes('tukey') &&
-          !p.corrOptions.includes('gamesHowell'), JSON.stringify(p.corrOptions));
+    // Oct 2026: a PURE RM chart offers Tukey (the RM ANOVA's within-
+    // subject error term); Games-Howell and Dunnett stay Compare Groups only.
+    check('RM offers tukey, hides gamesHowell + dunnett', p.corrOptions.includes('tukey') &&
+          !p.corrOptions.includes('gamesHowell') && !p.corrOptions.includes('dunnett'),
+          JSON.stringify(p.corrOptions));
     check('effect select names the FORCED effect (dz)',
           p.effectDisabled === true && p.effectText === "Cohen's dz (paired)",
           'text=' + JSON.stringify(p.effectText) + ' disabled=' + p.effectDisabled);
@@ -160,22 +163,84 @@ async function openLint(page) {
     await ctx.close();
 }
 
-// ---- Case C: RM + persisted Tukey -> raw p + disclosure -------------
+// ---- Case C: RM (2 occasions) + Tukey -> APPLIED on the RM error term
+// With two occasions the RM ANOVA's error term IS the paired-difference
+// variance (MSE = var(d)/2, df = n-1), so the Tukey p and t equal the
+// paired t's - the label must not move, but the readout now says the
+// correction applied instead of disclosing a fall-through.
 {
     const { ctx, page, errs } = await openPage('c_rm_tukey.html');
-    console.log('case C (RM + tukey -> raw + disclosed):');
+    console.log('case C (RM + tukey, k=2 -> applied, equals the paired t):');
     check('no page errors', errs.length === 0, errs.join(' | '));
     const labels = await bracketLabels(page);
-    check('paired label intact (raw p)', labels.some(l => l.includes(EXP.pairedDf)),
+    check('paired label intact (k=2 Tukey = paired t)', labels.some(l => l.includes(EXP.pairedDf)),
           'labels=' + JSON.stringify(labels));
     const p = await openPanel(page);
-    check('readout discloses wrong-model fallback',
-          !!p.readout && p.readout.includes('wrong model for repeated'),
+    check('readout discloses the applied family + RM error term',
+          !!p.readout && p.readout.includes('Tukey, k=2') &&
+          p.readout.includes('within-subject error df=7') &&
+          !p.readout.includes('wrong model'),
           'readout=' + JSON.stringify(p.readout));
-    check('persisted tukey stays visible', p.corrOptions.includes('tukey'),
+    check('tukey listed on RM', p.corrOptions.includes('tukey'),
           JSON.stringify(p.corrOptions));
     check('gamesHowell hidden on RM', !p.corrOptions.includes('gamesHowell'),
           JSON.stringify(p.corrOptions));
+    await ctx.close();
+}
+
+// ---- Case C3: RM, 3 occasions + Tukey -> R's ptukey on the RM error term
+// CONTROL (the engine before Oct 2026): the labels show each pair's own
+// paired-t p (EXP.pRM12raw), not the pooled Tukey p.
+{
+    const { ctx, page, errs } = await openPage('c3_rm_tukey3.html');
+    console.log('case C3 (RM tukey, k=3, really corrects on the RM error term):');
+    check('no page errors', errs.length === 0, errs.join(' | '));
+    const labels = await bracketLabels(page);
+    check('t1-t2 label = R ptukey over the RM error stratum ' + EXP.pRM12,
+          labels.includes(EXP.pRM12), 'labels=' + JSON.stringify(labels));
+    check('t1-t3 label = R ptukey ' + EXP.pRM13, labels.includes(EXP.pRM13),
+          'labels=' + JSON.stringify(labels));
+    check('no label shows the pair\'s own paired-t p (' + EXP.pRM12raw + ')',
+          !labels.includes(EXP.pRM12raw), 'labels=' + JSON.stringify(labels));
+    const p = await openPanel(page, 0);
+    check('readout: raw -> Tukey, k=3 on the within-subject error df',
+          !!p.readout && p.readout.includes('(raw)') && p.readout.includes('Tukey, k=3') &&
+          p.readout.includes('within-subject error df=' + EXP.rmDfE),
+          'readout=' + JSON.stringify(p.readout));
+    check('tukey listed, gamesHowell + dunnett hidden',
+          p.corrOptions.includes('tukey') && !p.corrOptions.includes('gamesHowell') &&
+          !p.corrOptions.includes('dunnett'), JSON.stringify(p.corrOptions));
+    // The Compare-pairs tab offers Tukey on RM too and its p(adj)
+    // column carries the same pooled values.
+    const st = await openStats(page);
+    check('Sigma panel opens', st.has, 'missing');
+    const corrOpts = await page.evaluate(() => {
+        const sel = document.querySelector('[data-cmp-corr]');
+        return sel ? Array.from(sel.options).map(o => o.value) : [];
+    });
+    check('Compare pairs Correct select lists tukey on RM (no GH/Dunnett)',
+          corrOpts.includes('tukey') && !corrOpts.includes('gamesHowell') &&
+          !corrOpts.includes('dunnett'), JSON.stringify(corrOpts));
+    await page.evaluate(() => {
+        const sel = document.querySelector('[data-cmp-corr]');
+        sel.value = 'tukey';
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await page.waitForTimeout(600);
+    const pairsTxt = await page.evaluate(() =>
+        document.querySelector('[data-st-pane="pairs"]')?.textContent || '');
+    const num = v => v.replace(/^p = /, '').replace(/^p < /, '< ');
+    check('pairs table p(adj) = R ptukey for t1-t2 and t1-t3',
+          pairsTxt.includes(num(EXP.pRM12)) && pairsTxt.includes(num(EXP.pRM13)),
+          'pane=' + JSON.stringify(pairsTxt.slice(0, 600)));
+    // The In-this-table popover text rides each stat cell's data-sthere
+    // attribute (not the pane's textContent).
+    const hereTxt = await page.evaluate(() =>
+        Array.from(document.querySelectorAll('[data-st-pane="pairs"] [data-sthere]'))
+            .map(e => e.getAttribute('data-sthere')).join('\n'));
+    check('pairs popover names the RM error term',
+          hereTxt.includes("within-subject error term"),
+          'here=' + JSON.stringify(hereTxt.slice(0, 300)));
     await ctx.close();
 }
 
@@ -2849,8 +2914,8 @@ async function copyFlips(page, actKey) {
 // Aug 2026 (Torry): a panel that lists every pair with no adjustment is
 // the least defensible default in the app, so Compare Groups now
 // defaults to Tukey - exact for the all-pairs family it enumerates -
-// and the families where Tukey has no pooled basis (repeated measures,
-// proportions) default to Holm, which always applies. Pinned here
+// and the families where Tukey has no pooled basis (proportions; mixed
+// repeated measures) default to Holm, which always applies. Pinned here
 // because every other Compare-pairs case STATES its correction.
 {
     const { ctx, page, errs } = await openPage('v_cmp_default.html');
