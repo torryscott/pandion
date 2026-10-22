@@ -46,8 +46,12 @@ async function selected(page, group, value, stage) {
     let node = null;
     for (let attempt = 0; attempt < 6 && !node; attempt++) {
       const doc = attempt ? (await page.choiceCDP.send('DOM.getDocument')).root : root;
-      const { nodeId } = await page.choiceCDP.send('DOM.querySelector', { nodeId: doc.nodeId, selector: `[${attr}="${key}"]` });
       try {
+        // The document root itself goes stale when a rebuild lands
+        // between getDocument and this query (the delayed-echo window
+        // on the rm_bar fixture, an intermittent seen Oct 2026), so the
+        // querySelector sits inside the same retry as the tree read.
+        const { nodeId } = await page.choiceCDP.send('DOM.querySelector', { nodeId: doc.nodeId, selector: `[${attr}="${key}"]` });
         const { nodes } = await page.choiceCDP.send('Accessibility.getPartialAXTree', { nodeId, fetchRelatives: false });
         node = nodes[0];
       } catch (e) {
