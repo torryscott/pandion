@@ -163,15 +163,23 @@ stopifnot(fmtP(pRM12) != fmtP(pRM12raw), rmN == rm3n - 1)
 # paired t on df n - 1
 rmTkT12 <- sprintf("t(%d) = %.2f", rmN - 1, rmPt12$statistic)
 rmDfE <- rmN - 1
+# the family rule (Oct 22 2026): with a correction on, the row's raw p is
+# the listwise paired t's too, and Holm runs over the listwise family;
+# with Correct = None the pair keeps all ten (pRM12raw above)
+pRM12rawLW <- rmPt12$p.value
+rmPt23 <- t.test(rm3$t2[rmCC], rm3$t3[rmCC], paired = TRUE)
+rmHolm <- p.adjust(c(rmPt12$p.value, rmPt13$p.value, rmPt23$p.value), "holm")
 # D: the same for Compare Groups: the pooled statistic beside the Tukey p
 tkTAB <- sprintf("t(%d) = %.2f", as.integer(dfW),
                  (m["A"] - m["B"]) / sqrt(MSE * (1 / n["A"] + 1 / n["B"])))
 exp_json <- sprintf(paste0(
     '{"pairedDf":"t(%d)","pairedT":"%s","pAB":"%s","pAC":"%s",',
-    '"pRM12":"%s","pRM13":"%s","pRM12raw":"%s","rmDfE":%d,"rmN":%d,"rmTkT12":"%s","tkTAB":"%s"}'),
+    '"pRM12":"%s","pRM13":"%s","pRM12raw":"%s","rmDfE":%d,"rmN":%d,"rmTkT12":"%s","tkTAB":"%s",',
+    '"pRM12rawLW":"%s","pRMholm12":"%s","pRMholm13":"%s","pRMholm23":"%s"}'),
     pt$parameter, formatC(pt$statistic, format = "f", digits = 2),
     fmtP(pAB), fmtP(pAC), fmtP(pRM12), fmtP(pRM13), fmtP(pRM12raw), as.integer(rmDfE),
-    as.integer(rmN), rmTkT12, tkTAB)
+    as.integer(rmN), rmTkT12, tkTAB,
+    fmtP(pRM12rawLW), fmtP(rmHolm[1]), fmtP(rmHolm[2]), fmtP(rmHolm[3]))
 con <- file(file.path(OUT, "expected.json"), open = "wb")
 writeLines(exp_json, con, useBytes = TRUE)
 close(con)

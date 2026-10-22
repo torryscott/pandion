@@ -178,8 +178,8 @@ async function openLint(page) {
     const p = await openPanel(page);
     check('readout discloses the applied family + the complete-subject basis',
           !!p.readout && p.readout.includes('Tukey, k=2') &&
-          p.readout.includes('8 subjects complete across all occasions') &&
-          !p.readout.includes('wrong model'),
+          p.readout.includes('n = 8 subjects complete across all occasions') &&
+          !p.readout.includes('left out') && !p.readout.includes('wrong model'),
           'readout=' + JSON.stringify(p.readout));
     // k=2: the pooled statistic IS the paired t, so the readout's extra
     // "Tukey's statistic" line stays away (one t line, not two).
@@ -211,17 +211,20 @@ async function openLint(page) {
     check('no label shows the pair\'s own paired-t p (' + EXP.pRM12raw + ')',
           !labels.includes(EXP.pRM12raw), 'labels=' + JSON.stringify(labels));
     const p = await openPanel(page, 0);
-    check('readout: raw -> Tukey, k=3 on the ' + EXP.rmN + ' complete subjects',
-          !!p.readout && p.readout.includes('(raw)') && p.readout.includes('Tukey, k=3') &&
-          p.readout.includes(EXP.rmN + ' subjects complete across all occasions'),
-          'readout=' + JSON.stringify(p.readout));
-    // Option 2 of the readout seam (Oct 2026): the statistic that belongs
-    // to the Tukey p, on its own line, named by its basis - here the
-    // listwise paired t, which differs from the pair's own t(9) because
-    // subject 10 lacks t3.
-    check('readout prints the listwise paired statistic ' + EXP.rmTkT12,
-          !!p.readout && p.readout.includes(EXP.rmTkT12 + "  (Tukey's statistic, paired t on the " +
-              EXP.rmN + " subjects complete across all occasions)"),
+    // The family rule (Oct 22 2026): with a correction on, the WHOLE row
+    // runs on the subjects complete across every occasion - the t line,
+    // the raw p and the Tukey p - and the readout discloses the count
+    // and the exclusion. The pair's own ten-subject test (t(9), p = .040)
+    // appears nowhere; the Tukey statistic line stays away because it
+    // equals the listwise t line.
+    check('readout: listwise t line, raw and Tukey p on the ' + EXP.rmN + ' complete subjects',
+          !!p.readout && p.readout.includes(EXP.rmTkT12) &&
+          p.readout.includes(EXP.pRM12rawLW + '  (raw)') &&
+          p.readout.includes('Tukey, k=3') &&
+          p.readout.includes('n = ' + EXP.rmN + ' subjects complete across all occasions') &&
+          p.readout.includes('1 with a missing occasion left out') &&
+          !p.readout.includes("Tukey's statistic") &&
+          !p.readout.includes(EXP.pRM12raw) && !p.readout.includes('t(9) ='),
           'readout=' + JSON.stringify(p.readout));
     check('tukey listed, gamesHowell + dunnett hidden',
           p.corrOptions.includes('tukey') && !p.corrOptions.includes('gamesHowell') &&
@@ -249,6 +252,37 @@ async function openLint(page) {
     check('pairs table p(adj) = R ptukey for t1-t2 and t1-t3',
           pairsTxt.includes(num(EXP.pRM12)) && pairsTxt.includes(num(EXP.pRM13)),
           'pane=' + JSON.stringify(pairsTxt.slice(0, 600)));
+    check('pairs table raw p is the listwise paired p under Tukey, foot names the family',
+          pairsTxt.includes(num(EXP.pRM12rawLW)) && !pairsTxt.includes(num(EXP.pRM12raw)) &&
+          pairsTxt.includes('every pair uses the ' + EXP.rmN + ' subjects complete across all occasions') &&
+          pairsTxt.includes('1 with a missing occasion is left out'),
+          'pane=' + JSON.stringify(pairsTxt.slice(0, 900)));
+    // Holm runs over the same listwise family ...
+    const setCorr = async v => {
+        await page.evaluate(val => {
+            const sel = document.querySelector('[data-cmp-corr]');
+            sel.value = val;
+            sel.dispatchEvent(new Event('change', { bubbles: true }));
+        }, v);
+        await page.waitForTimeout(600);
+        return page.evaluate(() =>
+            document.querySelector('[data-st-pane="pairs"]')?.textContent || '');
+    };
+    const holmTxt = await setCorr('holm');
+    check('Holm: p(adj) = R p.adjust over the listwise paired p values',
+          holmTxt.includes(num(EXP.pRMholm12)) && holmTxt.includes(num(EXP.pRMholm13)) &&
+          holmTxt.includes(num(EXP.pRMholm23)) && holmTxt.includes(num(EXP.pRM12rawLW)) &&
+          !holmTxt.includes(num(EXP.pRM12raw)) &&
+          holmTxt.includes('subjects complete across all occasions'),
+          'pane=' + JSON.stringify(holmTxt.slice(0, 900)));
+    // ... and with Correct set to None the pair keeps everyone who has
+    // both occasions (jamovi's Paired Samples T-Test), foot gone.
+    const noneTxt = await setCorr('none');
+    check('None: the pair keeps all ten subjects (pairwise paired p) and no family foot',
+          noneTxt.includes(num(EXP.pRM12raw)) && !noneTxt.includes(num(EXP.pRM12rawLW)) &&
+          !noneTxt.includes('subjects complete across all occasions'),
+          'pane=' + JSON.stringify(noneTxt.slice(0, 900)));
+    await setCorr('tukey');
     // The In-this-table popover text rides each stat cell's data-sthere
     // attribute (not the pane's textContent).
     const hereTxt = await page.evaluate(() =>

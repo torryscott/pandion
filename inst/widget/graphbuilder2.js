@@ -15678,10 +15678,41 @@
             var _alignById = _pairedTest &&
                 Array.isArray(_lIds) && _lIds.length === lv.length &&
                 Array.isArray(_rIds) && _rIds.length === rv.length;
+            var _listwise = null;
             if (_alignById) {
                 // values[] are finite-only, so rowIds[i] is the subject
                 // of values[i]; joining drops any subject missing or
                 // hidden on either side → true pairwise-complete pairs.
+                //
+                // THE FAMILY RULE (Torry, Oct 22 2026): on a pure
+                // repeated-measures chart with a correction ON, every
+                // paired comparison runs on the subjects complete across
+                // EVERY visible occasion of its panel - jamovi's RM
+                // ANOVA post hoc rule - so a row never mixes two subject
+                // sets (the raw p from everyone with both occasions
+                // beside a Tukey p from the complete subjects was the
+                // last number that disagreed with jamovi's table). With
+                // Correct = None a bracket stays a paired test on
+                // everyone who has both occasions, jamovi's Paired
+                // Samples T-Test. The exclusion count rides the result
+                // (listwise) so the readout and the table can say so.
+                var _famSet = null, _famExcl = 0;
+                if (_isRepeatedMeasuresData() && !(data && data.hasGroups) &&
+                    typeof data.autoPCorrection === "string" &&
+                    data.autoPCorrection !== "none") {
+                    try {
+                        var _famM = _rmTukeyModel(_facetOf(ann.anchorLeftCat || ""));
+                        if (_famM && Array.isArray(_famM.ids) &&
+                            _famM.indexOf(ann.anchorLeftCat, ann.anchorLeftGroup) >= 0 &&
+                            _famM.indexOf(ann.anchorRightCat, ann.anchorRightGroup) >= 0) {
+                            _famSet = {};
+                            for (var _fi = 0; _fi < _famM.ids.length; _fi++) {
+                                _famSet[_famM.ids[_fi]] = true;
+                            }
+                            _famExcl = isFinite(_famM.excluded) ? _famM.excluded : 0;
+                        }
+                    } catch (_eFam) { _famSet = null; }
+                }
                 var _rById = {};
                 for (var _rj = 0; _rj < _rIds.length; _rj++) {
                     if (_rHs && _rHs[_rj]) continue;
@@ -15692,10 +15723,12 @@
                     if (_lHs && _lHs[_lj]) continue;
                     var _rid = _lIds[_lj];
                     if (!Object.prototype.hasOwnProperty.call(_rById, _rid)) continue;
+                    if (_famSet && !Object.prototype.hasOwnProperty.call(_famSet, _rid)) continue;
                     _lvA.push(lv[_lj]);
                     _rvA.push(_rById[_rid]);
                 }
                 lv = _lvA; rv = _rvA;
+                if (_famSet) _listwise = { n: lv.length, excluded: _famExcl };
                 // A cross-group bracket on a mixed design joins two
                 // disjoint subject sets, leaving zero pairs. Give that
                 // its own message instead of the generic small-n one.
@@ -15836,7 +15869,11 @@
                 tail: _tail,
                 ci: ci,
                 effectCi: effectCi,
-                excludedHidden: _exHid
+                excludedHidden: _exHid,
+                // {n, excluded} when the family rule restricted this
+                // paired test to the subjects complete across every
+                // occasion (null otherwise)
+                listwise: _listwise
             };
         }
 
@@ -15886,7 +15923,7 @@
         // subjects survive.
         function _rmTukeyModel(facet) {
             if (!_isRepeatedMeasuresData() || !Array.isArray(bars)) return null;
-            var occ = [], keys = {}, i, j;
+            var occ = [], keys = {}, pool = {}, poolN = 0, i, j;
             for (i = 0; i < bars.length; i++) {
                 var b = bars[i];
                 if (!b) continue;
@@ -15901,7 +15938,10 @@
                 var hs = _hiddenSetForBar(b), mp = {}, any = false;
                 for (var v = 0; v < vals.length; v++) {
                     if (hs && hs[v]) continue;
-                    if (isFinite(vals[v])) { mp[b.rowIds[v]] = vals[v]; any = true; }
+                    if (isFinite(vals[v])) {
+                        mp[b.rowIds[v]] = vals[v]; any = true;
+                        if (!pool[b.rowIds[v]]) { pool[b.rowIds[v]] = true; poolN++; }
+                    }
                 }
                 if (!any) continue;
                 keys[JSON.stringify([cat, grp])] = occ.length;
@@ -15909,7 +15949,7 @@
             }
             var k = occ.length;
             if (k < 2) return null;
-            var rows = [];
+            var rows = [], ids = [];
             for (var id in occ[0]) {
                 var full = true;
                 for (j = 1; j < k; j++) {
@@ -15920,12 +15960,15 @@
                 if (!full) continue;
                 var row = [];
                 for (j = 0; j < k; j++) row.push(occ[j][id]);
-                rows.push(row);
+                rows.push(row); ids.push(id);
             }
             var n = rows.length;
             if (n < 2) return null;
             return {
-                k: k, n: n, rows: rows,
+                // excluded = subjects seen on at least one visible
+                // occasion but not on all of them (the chart's pool minus
+                // the complete subjects) - one number for every pair
+                k: k, n: n, rows: rows, ids: ids, excluded: poolN - n,
                 indexOf: function (c, g) {
                     var key = JSON.stringify([String(c || ""),
                                               (g == null) ? "" : String(g)]);
@@ -16452,6 +16495,7 @@
                 // pooled p (Torry's seam, Aug 2026).
                 corrStat: entry ? entry.corrStat : null,
                 excludedHidden: raw.excludedHidden === true,
+                listwise: raw.listwise || null,
                 correction: family.correction,
                 familySize: family.familySize,
                 tukeyKGroups: family.tukeyKGroups || 0,
@@ -56896,6 +56940,34 @@
                             '<span data-st-act="cmpwire" style="font-size:10.5px;color:#666;">' +
                             (horiz ? "Placing works on vertical charts - rotate back, or add brackets by hand."
                                    : "A green p is significant; ticked rows get placed.") + '</span>') +
+                        // The family rule's foot (Oct 2026): with a
+                        // correction on, every repeated-measures pair ran
+                        // on the subjects complete across all occasions.
+                        ((function () {
+                            if (!cmpIsRM || cmpCorr === "none" || !Array.isArray(cmpPairs)) return "";
+                            var seen = {}, keys = [];
+                            for (var fi = 0; fi < cmpPairs.length; fi++) {
+                                var lw = cmpPairs[fi] && cmpPairs[fi].raw && cmpPairs[fi].raw.listwise;
+                                if (!lw || !isFinite(lw.n)) continue;
+                                var kk = lw.n + "/" + lw.excluded;
+                                if (!seen[kk]) { seen[kk] = lw; keys.push(kk); }
+                            }
+                            if (!keys.length) return "";
+                            var txt;
+                            if (keys.length === 1) {
+                                var one = seen[keys[0]];
+                                txt = "With a correction on, every pair uses the " + one.n +
+                                    " subjects complete across all occasions (the RM ANOVA rule)" +
+                                    (one.excluded > 0
+                                        ? "; " + one.excluded + " with a missing occasion " +
+                                          (one.excluded === 1 ? "is" : "are") + " left out."
+                                        : ".") +
+                                    " With Correct set to None each pair uses everyone who has both occasions.";
+                            } else {
+                                txt = "With a correction on, every pair uses the subjects complete across all occasions of its panel (the RM ANOVA rule); subjects with a missing occasion are left out. With Correct set to None each pair uses everyone who has both occasions.";
+                            }
+                            return _stFoot(txt);
+                        })()) +
                         // Keep ONLY the statistical-honesty warning: the
                         // plotted center and test estimand must be named.
                         (((data.graphType === "box" || data.graphType === "violin" ||
@@ -96074,11 +96146,6 @@
                     // Disclose the family: correction, k, and — when the
                     // chart is faceted — which panel this family covers.
                     var _famNote = corrLabel + ", k=" + displayK;
-                    if (r.correction === "tukey" && r.corrStat &&
-                        r.corrStat.basis === "rmPaired" && isFinite(r.corrStat.n)) {
-                        _famNote += ", " + r.corrStat.n +
-                            " subjects complete across all occasions";
-                    }
                     if (r.facetCount > 1 && r.facet) {
                         _famNote += ", facet " +
                             ((typeof _facetDisplayLabel === "function")
@@ -96152,6 +96219,20 @@
                             lines.push("equal spread; Welch's t (the Auto");
                             lines.push("default) makes no such assumption.");
                         }
+                    }
+                }
+                // The family rule's disclosure (Oct 2026): with a
+                // correction on, this repeated-measures test ran on the
+                // subjects complete across every occasion; say how many
+                // that is and how many a missing occasion left out.
+                if (r.listwise && isFinite(r.listwise.n)) {
+                    lines.push("");
+                    lines.push("n = " + r.listwise.n +
+                               " subjects complete across all occasions");
+                    if (r.listwise.excluded > 0) {
+                        lines.push(r.listwise.excluded +
+                                   " with a missing occasion left out" +
+                                   " (Correct: None keeps them)");
                     }
                 }
                 // Hidden-data rule disclosure (Jul 2026): say which
