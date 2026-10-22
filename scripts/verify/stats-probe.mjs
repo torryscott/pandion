@@ -176,9 +176,9 @@ async function openLint(page) {
     check('paired label intact (k=2 Tukey = paired t)', labels.some(l => l.includes(EXP.pairedDf)),
           'labels=' + JSON.stringify(labels));
     const p = await openPanel(page);
-    check('readout discloses the applied family + RM error term',
+    check('readout discloses the applied family + the complete-subject basis',
           !!p.readout && p.readout.includes('Tukey, k=2') &&
-          p.readout.includes('within-subject error df=7') &&
+          p.readout.includes('8 subjects complete across all occasions') &&
           !p.readout.includes('wrong model'),
           'readout=' + JSON.stringify(p.readout));
     // k=2: the pooled statistic IS the paired t, so the readout's extra
@@ -211,14 +211,17 @@ async function openLint(page) {
     check('no label shows the pair\'s own paired-t p (' + EXP.pRM12raw + ')',
           !labels.includes(EXP.pRM12raw), 'labels=' + JSON.stringify(labels));
     const p = await openPanel(page, 0);
-    check('readout: raw -> Tukey, k=3 on the within-subject error df',
+    check('readout: raw -> Tukey, k=3 on the ' + EXP.rmN + ' complete subjects',
           !!p.readout && p.readout.includes('(raw)') && p.readout.includes('Tukey, k=3') &&
-          p.readout.includes('within-subject error df=' + EXP.rmDfE),
+          p.readout.includes(EXP.rmN + ' subjects complete across all occasions'),
           'readout=' + JSON.stringify(p.readout));
     // Option 2 of the readout seam (Oct 2026): the statistic that belongs
-    // to the Tukey p, on its own line, named by its error term.
-    check('readout prints the pooled statistic ' + EXP.rmTkT12 + ' on the within-subject error term',
-          !!p.readout && p.readout.includes(EXP.rmTkT12 + "  (Tukey's statistic, within-subject error term)"),
+    // to the Tukey p, on its own line, named by its basis - here the
+    // listwise paired t, which differs from the pair's own t(9) because
+    // subject 10 lacks t3.
+    check('readout prints the listwise paired statistic ' + EXP.rmTkT12,
+          !!p.readout && p.readout.includes(EXP.rmTkT12 + "  (Tukey's statistic, paired t on the " +
+              EXP.rmN + " subjects complete across all occasions)"),
           'readout=' + JSON.stringify(p.readout));
     check('tukey listed, gamesHowell + dunnett hidden',
           p.corrOptions.includes('tukey') && !p.corrOptions.includes('gamesHowell') &&
@@ -251,8 +254,8 @@ async function openLint(page) {
     const hereTxt = await page.evaluate(() =>
         Array.from(document.querySelectorAll('[data-st-pane="pairs"] [data-sthere]'))
             .map(e => e.getAttribute('data-sthere')).join('\n'));
-    check('pairs popover names the RM error term',
-          hereTxt.includes("within-subject error term"),
+    check('pairs popover names the complete-subject paired basis',
+          hereTxt.includes("subjects complete across every occasion"),
           'here=' + JSON.stringify(hereTxt.slice(0, 300)));
     await ctx.close();
 }

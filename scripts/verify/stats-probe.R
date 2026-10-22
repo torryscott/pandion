@@ -99,6 +99,10 @@ rm3 <- data.frame(t1 = c(9.8, 11.2, 8.7, 10.4, 12.1, 9.3, 10.9, 11.6, 8.9, 10.1)
 # p < .001 both ways would make the control unable to fail.
 rm3$t2 <- rm3$t1 + c(0.9, 0.1, 0.4, -0.3, 1.2, 0.2, 0.7, 0.0, -0.2, 0.9)
 rm3$t3 <- rm3$t1 + c(2.1, 1.0, 1.4, 0.8, 2.6, 0.9, 1.4, 2.3, 0.2, 1.7)
+# subject 10 lacks t3: jamovi's post hoc (and ours) drops that subject from
+# EVERY pair, while the pair's own raw paired t keeps all ten who have t1
+# and t2, so the Tukey statistic and the raw statistic can be told apart.
+rm3$t3[10] <- NA
 ann3 <- paste0(
     '[{"id":"r1","kind":"bracket","text":"*","x":100,"y":50,"x2":250,',
     '"autoPValue":true,"autoPTest":"auto","autoPFormat":"p",',
@@ -140,34 +144,34 @@ m <- tapply(cg3$y, cg3$x, mean); n <- tapply(cg3$y, cg3$x, length)
 qs <- function(a, b) abs(m[a] - m[b]) / sqrt((MSE / 2) * (1 / n[a] + 1 / n[b]))
 pAB <- ptukey(qs("A", "B"), 3, dfW, lower.tail = FALSE)
 pAC <- ptukey(qs("A", "C"), 3, dfW, lower.tail = FALSE)
-# C3: Tukey over the one-way RM ANOVA's within-subject error stratum
-# (jamovi's RM post hoc; emmeans on the aov Error term gives the same).
-rm3L <- data.frame(subj = factor(rep(seq_len(rm3n), 3)),
-                   occ = factor(rep(c("t1", "t2", "t3"), each = rm3n)),
-                   y = c(rm3$t1, rm3$t2, rm3$t3))
-rmAov <- summary(aov(y ~ occ + Error(subj/occ), data = rm3L))[["Error: subj:occ"]][[1]]
-rmMSE <- rmAov[["Mean Sq"]][2]; rmDfE <- rmAov[["Df"]][2]
-rmM <- tapply(rm3L$y, rm3L$occ, mean)
-rmQ <- function(a, b) abs(rmM[a] - rmM[b]) / sqrt(rmMSE / rm3n)
-pRM12 <- ptukey(rmQ("t1", "t2"), 3, rmDfE, lower.tail = FALSE)
-pRM13 <- ptukey(rmQ("t1", "t3"), 3, rmDfE, lower.tail = FALSE)
+# C3: jamovi's RM post hoc flavor (emmeans on the multivariate model):
+# each pair's paired t over the subjects complete across EVERY occasion
+# (its own SE, df = n - 1), judged by the studentized range with k = 3
+# on that df. Subject 10 lacks t3, so the family runs on 9 subjects
+# while the pair's own raw paired t keeps all 10.
+rmCC <- complete.cases(rm3$t1, rm3$t2, rm3$t3); rmN <- sum(rmCC)
+rmPt12 <- t.test(rm3$t1[rmCC], rm3$t2[rmCC], paired = TRUE)
+rmPt13 <- t.test(rm3$t1[rmCC], rm3$t3[rmCC], paired = TRUE)
+pRM12 <- ptukey(abs(rmPt12$statistic) * sqrt(2), 3, rmN - 1, lower.tail = FALSE)
+pRM13 <- ptukey(abs(rmPt13$statistic) * sqrt(2), 3, rmN - 1, lower.tail = FALSE)
 pRM12raw <- t.test(rm3$t1, rm3$t2, paired = TRUE)$p.value
-# the statistic that belongs to the pooled p (the readout's extra line,
-# the APA label, the Compare-pairs Statistic column): the same mean
-# difference over the pooled error term's SE, on that term's df
-rmTkT12 <- sprintf("t(%d) = %.2f", as.integer(rmDfE),
-                   (rmM["t1"] - rmM["t2"]) / sqrt(2 * rmMSE / rm3n))
+# the control must be able to fail: the Tukey p and the pair's own
+# paired-t p have to differ at label precision
+stopifnot(fmtP(pRM12) != fmtP(pRM12raw), rmN == rm3n - 1)
+# the statistic that belongs to the Tukey p (the readout's extra line,
+# the APA label, the Compare-pairs Statistic column): the listwise
+# paired t on df n - 1
+rmTkT12 <- sprintf("t(%d) = %.2f", rmN - 1, rmPt12$statistic)
+rmDfE <- rmN - 1
+# D: the same for Compare Groups: the pooled statistic beside the Tukey p
 tkTAB <- sprintf("t(%d) = %.2f", as.integer(dfW),
                  (m["A"] - m["B"]) / sqrt(MSE * (1 / n["A"] + 1 / n["B"])))
-# the control must be able to fail: the pooled p and the pair's own
-# paired-t p have to differ at label precision
-stopifnot(fmtP(pRM12) != fmtP(pRM12raw))
 exp_json <- sprintf(paste0(
     '{"pairedDf":"t(%d)","pairedT":"%s","pAB":"%s","pAC":"%s",',
-    '"pRM12":"%s","pRM13":"%s","pRM12raw":"%s","rmDfE":%d,"rmTkT12":"%s","tkTAB":"%s"}'),
+    '"pRM12":"%s","pRM13":"%s","pRM12raw":"%s","rmDfE":%d,"rmN":%d,"rmTkT12":"%s","tkTAB":"%s"}'),
     pt$parameter, formatC(pt$statistic, format = "f", digits = 2),
     fmtP(pAB), fmtP(pAC), fmtP(pRM12), fmtP(pRM13), fmtP(pRM12raw), as.integer(rmDfE),
-    rmTkT12, tkTAB)
+    as.integer(rmN), rmTkT12, tkTAB)
 con <- file(file.path(OUT, "expected.json"), open = "wb")
 writeLines(exp_json, con, useBytes = TRUE)
 close(con)
