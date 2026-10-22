@@ -308,10 +308,17 @@ async function openLint(page) {
     check('readout shows raw -> adjusted family line',
           !!p.readout && p.readout.includes('(raw)') && p.readout.includes('Tukey, k=3'),
           'readout=' + JSON.stringify(p.readout));
-    // The Compare Groups side of the same seam: Welch's t(18.9) above,
-    // the pooled ANOVA term's t(33) beside the Tukey p.
-    check('readout prints the pooled statistic ' + EXP.tkTAB + ' on the pooled ANOVA error term',
-          !!p.readout && p.readout.includes(EXP.tkTAB + "  (Tukey's statistic, pooled ANOVA error term)"),
+    // The family rule, Compare Groups half (Oct 22 2026): with Tukey on
+    // the row's statistic AND unadjusted p sit on the pooled ANOVA error
+    // term (jamovi's ANOVA post hoc "p none"), so the t line is t(33)
+    // itself, the raw p is that statistic's own p, the readout names the
+    // term, and no second statistic line is needed. The Welch p the
+    // bracket would carry on its own (.034) appears nowhere.
+    check('readout: pooled t line ' + EXP.tkTAB + ', its own raw p ' + EXP.pABraw + ', term named, no second line',
+          !!p.readout && p.readout.includes(EXP.tkTAB) &&
+          p.readout.includes(EXP.pABraw + '  (raw)') &&
+          p.readout.includes("pooled t on the one-way ANOVA's error term") &&
+          !p.readout.includes("Tukey's statistic") && !p.readout.includes('t(18.9)'),
           'readout=' + JSON.stringify(p.readout));
     check('anovaX offered with 3 x-levels', p.testOptions.includes('anovaX'),
           JSON.stringify(p.testOptions));
@@ -629,10 +636,15 @@ async function openLint(page) {
     console.log('case O (Dunnett structure violation):');
     check('no page errors', errs.length === 0, errs.join(' | '));
     const labels = await bracketLabels(page);
-    check('A-B label keeps the raw Welch p (' + EXP.rawAB + ')',
-          labels.includes(EXP.rawAB), 'labels=' + JSON.stringify(labels));
-    check('Ctrl-C label keeps the raw Welch p (' + EXP.rawCC + ')',
-          labels.includes(EXP.rawCC), 'labels=' + JSON.stringify(labels));
+    // The family rule (Oct 22 2026): Dunnett is SELECTED, so every row
+    // already sits on the pooled ANOVA term; when Dunnett's structure
+    // fails, the fall-through "uncorrected p" is that pooled statistic's
+    // own p, not the pair's Welch p (the readout names the term).
+    check('A-B label keeps the pooled-term raw p under Dunnett (' + EXP.rawABpool + ')',
+          labels.includes(EXP.rawABpool) && !labels.includes(EXP.rawAB),
+          'labels=' + JSON.stringify(labels));
+    check('Ctrl-C label keeps the pooled-term raw p (' + EXP.rawCCpool + ')',
+          labels.includes(EXP.rawCCpool), 'labels=' + JSON.stringify(labels));
     const p = await openPanel(page, 0);
     check('readout explains the shared-control need',
           !!p.readout && p.readout.includes('ONE shared control'),
@@ -721,6 +733,29 @@ async function checkSignificant(page) {
     const cgFm = EXP.cgF.match(/F\(([^)]+)\) = ([\d.]+)/);
     check('omnibus F matches R aov (' + EXP.cgF + ')',
           st.txt.includes(cgFm[2]) && st.txt.includes(cgFm[1]), 'missing');
+    // The family rule, Compare Groups half: this fixture ships Tukey, so
+    // the Compare pairs rows read "pooled t" with the pooled term's own
+    // raw p and the foot names the term; Correct: None brings the pair's
+    // own Welch p back.
+    const pairsTk = await page.evaluate(() =>
+        document.querySelector('[data-st-pane="pairs"]')?.textContent || '');
+    check('CG Compare pairs under Tukey: pooled t rows, pooled raw p, foot names the ANOVA term',
+          pairsTk.includes('pooled t') && pairsTk.includes(EXP.pABraw.replace('p = ', '')) &&
+          pairsTk.includes('pooled variance of all 3 groups') &&
+          !pairsTk.includes(EXP.cmpRawAB),
+          'pane=' + JSON.stringify(pairsTk.slice(0, 700)));
+    await page.evaluate(() => {
+        const sel = document.querySelector('[data-cmp-corr]');
+        sel.value = 'none';
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await page.waitForTimeout(600);
+    const pairsNone = await page.evaluate(() =>
+        document.querySelector('[data-st-pane="pairs"]')?.textContent || '');
+    check('CG Compare pairs under None: Welch rows and the pair\'s own p are back, no foot',
+          pairsNone.includes('Welch t') && pairsNone.includes(EXP.cmpRawAB) &&
+          !pairsNone.includes('pooled t') && !pairsNone.includes('pooled variance of all'),
+          'pane=' + JSON.stringify(pairsNone.slice(0, 700)));
     await ctx.close();
 }
 {

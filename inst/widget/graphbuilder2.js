@@ -15767,10 +15767,49 @@
             // LEFT anchored cell is predicted above the RIGHT one.
             var _tail = (ann.autoPTail === "greater" || ann.autoPTail === "less")
                 ? ann.autoPTail : "two";
+            // THE FAMILY RULE, Compare Groups half (Torry, Oct 22 2026):
+            // with a POOLED correction on (Tukey, Dunnett), an independent
+            // t bracket's statistic and unadjusted p come from the one-way
+            // ANOVA's pooled error term over every cell of its panel - the
+            // same ruler the adjusted p uses, and what jamovi's ANOVA post
+            // hoc prints as its uncorrected column - so a row never mixes
+            // two error terms. Games-Howell's own model is Welch's t, so
+            // under it a Student's pick runs as Welch. With Correct = None
+            // each pair is its own two-group test. Effect sizes keep the
+            // pair's own spread (_tkEff): they describe the two groups,
+            // not the family.
+            var _tkEff = testKind, _poolModel = null;
+            if (!_isRepeatedMeasuresData() && !(data && data.freqMode === true) &&
+                (testKind === "welch" || testKind === "studentT")) {
+                var _pc = (typeof data.autoPCorrection === "string") ? data.autoPCorrection : "none";
+                if (_pc === "gamesHowell") {
+                    testKind = "welch";
+                } else if (_pc === "tukey" || _pc === "dunnett") {
+                    try {
+                        var _fcP = _facetCells(_facetOf(ann.anchorLeftCat || ""));
+                        var _aovP = (_fcP.k >= 2) ? _gb2Stats.oneWayANOVA(_fcP.levels) : null;
+                        if (_aovP && _aovP.msw > 0 && isFinite(_aovP.df2) && _aovP.df2 >= 1) {
+                            _poolModel = { mse: _aovP.msw, df: _aovP.df2, k: _fcP.k };
+                            testKind = "studentT";
+                        }
+                    } catch (_ePool) { _poolModel = null; }
+                }
+            }
             var res, testFamily;
             if (testKind === "studentT") {
                 res = _gb2Stats.studentT(lv, rv, _tail);
                 testFamily = "t";
+                if (res && _poolModel) {
+                    var _seP = Math.sqrt(_poolModel.mse * (1 / res.n1 + 1 / res.n2));
+                    if (isFinite(_seP) && _seP > 0) {
+                        var _tP = (res.m1 - res.m2) / _seP;
+                        res = { t: _tP, df: _poolModel.df,
+                                p: _gb2Stats._tTailP(_tP, _poolModel.df, _tail),
+                                m1: res.m1, m2: res.m2, sd1: res.sd1, sd2: res.sd2,
+                                n1: res.n1, n2: res.n2,
+                                pooled: { mse: _poolModel.mse, df: _poolModel.df, k: _poolModel.k } };
+                    }
+                }
             } else if (testKind === "pairedT") {
                 res = _gb2Stats.pairedT(lv, rv, _tail);
                 testFamily = "t";
@@ -15804,13 +15843,14 @@
                 effect = _gb2Stats.rankBiserialWilcoxon(lv, rv);
             } else if (effectKind === "hedgesG") {
                 // Welch's row: jamovi divides by sqrt((v1+v2)/2), not
-                // the pooled SD, so the base d switches with the test.
-                effect = (testKind === "welch")
+                // the pooled SD, so the base d switches with the test
+                // (the test as PICKED, not the family rule's override).
+                effect = (_tkEff === "welch")
                     ? _gb2Stats.hedgesGAvg(lv, rv)
                     : _gb2Stats.hedgesG(lv, rv);
             } else {
                 effectKind = "cohensD";
-                effect = (testKind === "welch")
+                effect = (_tkEff === "welch")
                     ? _gb2Stats.cohensDAvg(lv, rv)
                     : _gb2Stats.cohensD(lv, rv);
             }
@@ -15833,6 +15873,9 @@
                     var _pv = ((res.n1 - 1) * res.sd1 * res.sd1 +
                                (res.n2 - 1) * res.sd2 * res.sd2) / (res.n1 + res.n2 - 2);
                     _se = Math.sqrt(_pv * (1 / res.n1 + 1 / res.n2));
+                    // the family rule: the interval sits on the same
+                    // pooled term as the statistic beside it
+                    if (res.pooled) _se = Math.sqrt(res.pooled.mse * (1 / res.n1 + 1 / res.n2));
                 } else {
                     _md = res.m1 - res.m2;
                     _se = Math.sqrt(res.sd1 * res.sd1 / res.n1 +
@@ -56432,7 +56475,8 @@
                         if (an0 && an0.autoGen === true) cmpPlacedN++;
                     }
                 }
-                var cmpTestName = function (tk) {
+                var cmpTestName = function (tk, raw) {
+                    if (raw && raw.res && raw.res.pooled) return "pooled t";
                     return tk === "welch" ? "Welch t" :
                            tk === "studentT" ? "Student t" :
                            tk === "pairedT" ? "paired t" :
@@ -56740,7 +56784,7 @@
                             ';color:#333;">' +
                             rowLbl + '</td>' +
                             '<td style="padding:4px 7px;border-bottom:1px solid #eee;white-space:nowrap;color:#666;">' +
-                            _stCellTerm(_stEsc(cmpTestName(cp2.raw.testKind)), _cmpTestKey(cp2.raw.testKind), "") + '</td>' +
+                            _stCellTerm(_stEsc(cmpTestName(cp2.raw.testKind, cp2.raw)), _cmpTestKey(cp2.raw.testKind), "") + '</td>' +
                             '<td style="padding:4px 7px;border-bottom:1px solid #eee;white-space:nowrap;font-family:var(--gb2-ui-font);">' +
                             _stStatTd + '</td>' +
                             '<td style="padding:4px 7px;border-bottom:1px solid #eee;white-space:nowrap;font-family:var(--gb2-ui-font);">' +
@@ -56944,7 +56988,23 @@
                         // correction on, every repeated-measures pair ran
                         // on the subjects complete across all occasions.
                         ((function () {
-                            if (!cmpIsRM || cmpCorr === "none" || !Array.isArray(cmpPairs)) return "";
+                            if (cmpCorr === "none" || !Array.isArray(cmpPairs)) return "";
+                            if (!cmpIsRM) {
+                                // Compare Groups: a pooled correction ran
+                                // every row on the one-way ANOVA's term.
+                                var pm = null;
+                                for (var pi = 0; pi < cmpPairs.length; pi++) {
+                                    var pr = cmpPairs[pi] && cmpPairs[pi].raw;
+                                    if (pr && pr.res && pr.res.pooled) { pm = pr.res.pooled; break; }
+                                }
+                                if (!pm) return "";
+                                var dfTxt = (pm.df % 1 === 0) ? String(pm.df) : pm.df.toFixed(2);
+                                return _stFoot("With " + (cmpCorr === "dunnett" ? "Dunnett" : "Tukey") +
+                                    " on, every row's statistic and unadjusted p use the pooled variance of all " +
+                                    pm.k + (data.hasGroups ? " cells" : " groups") +
+                                    " in the panel (the one-way ANOVA's error term, df " + dfTxt +
+                                    "), the same term as the adjusted p. With Correct set to None each pair uses its own two groups.");
+                            }
                             var seen = {}, keys = [];
                             for (var fi = 0; fi < cmpPairs.length; fi++) {
                                 var lw = cmpPairs[fi] && cmpPairs[fi].raw && cmpPairs[fi].raw.listwise;
@@ -96027,6 +96087,18 @@
                 lines.push("Test:    " + testName +
                     ((!cur.autoPTest || cur.autoPTest === "auto")
                         ? "  (auto)" : ""));
+                // The family rule's disclosure, Compare Groups half: a
+                // pooled correction runs the statistic and the raw p on
+                // the one-way ANOVA's error term over the whole panel.
+                if (r.res && r.res.pooled && isFinite(r.res.pooled.df)) {
+                    var _pdf = (r.res.pooled.df % 1 === 0)
+                        ? String(r.res.pooled.df) : r.res.pooled.df.toFixed(1);
+                    lines.push("         pooled t on the one-way ANOVA's error term");
+                    lines.push("         over all " + r.res.pooled.k +
+                               ((data && data.hasGroups) ? " cells" : " groups") +
+                               " in this panel, df " + _pdf +
+                               " (Correct: None uses the pair alone)");
+                }
                 if (r.testFamily === "rank") {
                     if (r.testKind === "mannWhitneyU") {
                         lines.push("U = " + (Math.round(r.res.U * 100) / 100));

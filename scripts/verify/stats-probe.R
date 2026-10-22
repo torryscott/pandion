@@ -172,14 +172,17 @@ rmHolm <- p.adjust(c(rmPt12$p.value, rmPt13$p.value, rmPt23$p.value), "holm")
 # D: the same for Compare Groups: the pooled statistic beside the Tukey p
 tkTAB <- sprintf("t(%d) = %.2f", as.integer(dfW),
                  (m["A"] - m["B"]) / sqrt(MSE * (1 / n["A"] + 1 / n["B"])))
+# the family rule, Compare Groups half: under Tukey the row's unadjusted
+# p is that pooled statistic's own p (jamovi's ANOVA post hoc "p none")
+pABraw <- 2 * pt(-abs((m["A"] - m["B"]) / sqrt(MSE * (1 / n["A"] + 1 / n["B"]))), dfW)
 exp_json <- sprintf(paste0(
     '{"pairedDf":"t(%d)","pairedT":"%s","pAB":"%s","pAC":"%s",',
     '"pRM12":"%s","pRM13":"%s","pRM12raw":"%s","rmDfE":%d,"rmN":%d,"rmTkT12":"%s","tkTAB":"%s",',
-    '"pRM12rawLW":"%s","pRMholm12":"%s","pRMholm13":"%s","pRMholm23":"%s"}'),
+    '"pRM12rawLW":"%s","pRMholm12":"%s","pRMholm13":"%s","pRMholm23":"%s","pABraw":"%s"}'),
     pt$parameter, formatC(pt$statistic, format = "f", digits = 2),
     fmtP(pAB), fmtP(pAC), fmtP(pRM12), fmtP(pRM13), fmtP(pRM12raw), as.integer(rmDfE),
     as.integer(rmN), rmTkT12, tkTAB,
-    fmtP(pRM12rawLW), fmtP(rmHolm[1]), fmtP(rmHolm[2]), fmtP(rmHolm[3]))
+    fmtP(pRM12rawLW), fmtP(rmHolm[1]), fmtP(rmHolm[2]), fmtP(rmHolm[3]), fmtP(pABraw))
 con <- file(file.path(OUT, "expected.json"), open = "wb")
 writeLines(exp_json, con, useBytes = TRUE)
 close(con)
@@ -381,11 +384,18 @@ wr(plotbuilder(data = cgn, xvar = "x", yvar = "y", groupVar = NULL,
    "o_dunnett_violation")
 wAB <- t.test(cgn$y[cgn$x == "A"], cgn$y[cgn$x == "B"])
 wCC <- t.test(cgn$y[cgn$x == "Ctrl"], cgn$y[cgn$x == "C"])
+# the family rule, Compare Groups half: with Dunnett SELECTED the row runs
+# on the pooled ANOVA term even when Dunnett's shared-control structure
+# fails, so the fall-through "uncorrected p" is the pooled statistic's own
+# p (the readout and the foot name the term); wAB/wCC stay as the
+# pair's-own Welch references
+pABpool <- 2 * pt(-abs((mN[["A"]] - mN[["B"]]) / sqrt(MSE * (1 / nN[["A"]] + 1 / nN[["B"]]))), dfW)
+pCCpool <- 2 * pt(-abs((mN[["Ctrl"]] - mN[["C"]]) / sqrt(MSE * (1 / nN[["Ctrl"]] + 1 / nN[["C"]]))), dfW)
 
 exp5 <- sub("}$", sprintf(
-    ',"dunA":"%s","dunB":"%s","dunC":"%s","rawAB":"%s","rawCC":"%s"}',
+    ',"dunA":"%s","dunB":"%s","dunC":"%s","rawAB":"%s","rawCC":"%s","rawABpool":"%s","rawCCpool":"%s"}',
     fmtP(pD[1]), fmtP(pD[2]), fmtP(pD[3]),
-    fmtP(wAB$p.value), fmtP(wCC$p.value)), exp4)
+    fmtP(wAB$p.value), fmtP(wCC$p.value), fmtP(pABpool), fmtP(pCCpool)), exp4)
 con <- file(file.path(OUT, "expected.json"), open = "wb")
 writeLines(exp5, con, useBytes = TRUE)
 close(con)
