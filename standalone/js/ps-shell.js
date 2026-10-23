@@ -3440,10 +3440,10 @@
     if (fnRef) {
       var guideT = userGuideTarget();
       fnRef.href = guideT.url + "#formula-reference";
-      fnRef.title = "Every operator and function, with verified " +
-        "examples, in the user guide" +
+      fnRef.setAttribute("data-tip", "Every operator and function, with " +
+        "verified examples, in the user guide" +
         (guideT.online ? " at pandionplots.com" : "") +
-        " (opens in a new tab)";
+        " (opens in a new tab)");
     }
     refreshFormulaPreview();
     openShellDialog("ps-formula-dialog");
