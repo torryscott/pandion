@@ -1810,7 +1810,8 @@
     border-radius: var(--ps-r-sm); padding: 3px 5px; min-width: 0;
   }
   .ps-filter-row select[data-filter-col] { flex: 1.4; }
-  .ps-filter-row select[data-filter-op] { flex: 0 0 58px; }
+  /* wide enough for "between" and "outside" to read in full */
+  .ps-filter-row select[data-filter-op] { flex: 0 0 84px; }
   .ps-filter-row select[data-filter-value],
   .ps-filter-row input[data-filter-value],
   .ps-filter-row input[data-filter-value2] { flex: 1.4; }
