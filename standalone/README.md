@@ -464,6 +464,14 @@ punch lists are maintainer-local and not published with this repo.
   values. Filters ride dataSnapshot/dataApply (undo/redo), autosave,
   and .pand; renaming a variable follows into its conditions; deleting
   one drops them. Probe: row-filters-check (8 cases).
+  Oct 23 2026: two more numeric operators, between and outside (value +
+  value2, one condition per range), and FORMULA conditions - a row
+  {op: "formula", formula} evaluated through PSFormula over the typed
+  columns, kept where true; a formula that does not compile or gives
+  text is pass-through and disclosed (t.filterFormulaProblems, the
+  chart note, the Filter tooltip, the popover's stranded line). The
+  setup file reads/writes {formula} and value: [low, high]. Probe:
+  filter-formula-check.
 - M5f DONE (Jul 23 2026): EXCEL .XLSX IMPORT (Tier 1). js/ps-xlsx.js is a
   dependency-free OOXML reader on PSOmv's ZIP core + DOMParser: shared /
   inline / rich-text strings, formula CACHED values, booleans, error

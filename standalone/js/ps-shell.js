@@ -2220,27 +2220,89 @@
     // question. These two take no value, which is why every value test below
     // has to exempt them.
     nul: { label: "is missing", num: true, cat: true, noValue: true },
-    nnul: { label: "is not missing", num: true, cat: true, noValue: true }
+    nnul: { label: "is not missing", num: true, cat: true, noValue: true },
+    // A range as ONE condition (Oct 2026, a student's "exclude rows outside
+    // a range"): low and high ride value and value2; "outside" is the first
+    // OR a reader meets without writing one.
+    between: { label: "between", num: true, cat: false, two: true },
+    outside: { label: "outside", num: true, cat: false, two: true },
+    // A FORMULA condition (the same Oct 2026 ask, the attention-check
+    // case): one expression in the computed-column language, kept when it
+    // is true, so AND / OR / NOT and several columns fit in one row - the
+    // shape jamovi's own Filters take. Not offered in the operator select;
+    // a row becomes a formula through the column select's "Formula..."
+    // entry, and carries op "formula" + the expression in f.formula.
+    formula: { label: "formula", num: true, cat: true, noValue: true, formula: true }
   };
   function filterNeedsValue(op) {
     return !(FILTER_OPS[op] && FILTER_OPS[op].noValue);
   }
+  function filterTakesTwo(op) {
+    return !!(FILTER_OPS[op] && FILTER_OPS[op].two);
+  }
+  function filterIsFormula(f) {
+    return !!(f && f.op === "formula");
+  }
+  // ONE answer to "is this condition complete enough to apply", shared by
+  // validFilters, the draft preview and Apply (they used to carry three
+  // copies of the test, which is how a new operator could drift).
+  function filterComplete(t, f) {
+    if (!f || !t || !FILTER_OPS[f.op]) return false;
+    if (filterIsFormula(f))
+      return String(f.formula == null ? "" : f.formula).trim() !== "";
+    if (!f.col || !t.raw || !t.raw[f.col]) return false;
+    if (!filterNeedsValue(f.op)) return true;
+    if (String(f.value == null ? "" : f.value) === "") return false;
+    if (filterTakesTwo(f.op) &&
+        String(f.value2 == null ? "" : f.value2) === "") return false;
+    return true;
+  }
   function validFilters(t) {
     if (!t || !Array.isArray(t.filters)) return [];
-    return t.filters.filter(function (f) {
-      return f && f.col && t.raw && t.raw[f.col] && FILTER_OPS[f.op] &&
-        (!filterNeedsValue(f.op) ||
-         String(f.value == null ? "" : f.value) !== "");
-    });
+    return t.filters.filter(function (f) { return filterComplete(t, f); });
   }
   function filterSummaryText(t) {
-    return validFilters(t).map(function (f) {
+    var fs = validFilters(t);
+    return fs.map(function (f) {
+      if (filterIsFormula(f)) {
+        var expr = String(f.formula).trim();
+        return fs.length > 1 ? "(" + expr + ")" : expr;
+      }
       var num = colStoresNumbers(t, f.col);
       if (!filterNeedsValue(f.op))
         return f.col + " " + FILTER_OPS[f.op].label;
+      if (filterTakesTwo(f.op))
+        return f.col + " " + FILTER_OPS[f.op].label + " " + String(f.value) +
+          (f.op === "between" ? " and " : " to ") + String(f.value2);
       return f.col + " " + FILTER_OPS[f.op].label + " " +
         (num ? String(f.value) : '"' + String(f.value) + '"');
     }).join(" and ");
+  }
+  // A formula condition evaluated over the whole table: the column values
+  // the computed columns see, one result per row. A result that is not
+  // true/false (text, say) or a formula that no longer compiles makes the
+  // condition INAPPLICABLE - pass-through and disclosed, the B5 rule - so a
+  // typo can never empty every chart.
+  function evalFilterFormula(t, formula, n) {
+    if (!window.PSFormula) return { error: "the formula engine is not loaded" };
+    var compiled = window.PSFormula.compile(String(formula), t.order.slice());
+    if (!compiled.ok) return { error: compiled.error };
+    var values;
+    try { values = compiled.run(t.columns, n); }
+    catch (e) { return { error: String(e && e.message || e) }; }
+    for (var i = 0; i < n; i++) {
+      var v = values[i];
+      if (v != null && typeof v !== "number" && typeof v !== "boolean")
+        return { error: "gives text, not true or false" };
+    }
+    return { values: values };
+  }
+  function filterFormulaProblemText(t) {
+    var ps = (t && t.filterFormulaProblems) || [];
+    if (!ps.length) return "";
+    return ps.map(function (p) {
+      return "formula not applied: " + p.formula + " (" + p.reason + ")";
+    }).join(" \u00b7 ");
   }
   function isRowFiltered(t, i) {
     return !!(t && t.filterMask && t.filterMask[i]);
@@ -2256,14 +2318,34 @@
     if (!fs.length) {
       t.filterMask = null; t.filteredView = null;
       t.filterMissingDrops = 0; t.filterInapplicable = [];
+      t.filterFormulaProblems = [];
       return;
     }
     var n = nRows(t), mask = new Array(n), i;
-    var missingDrops = 0, inapplicable = {};
+    var missingDrops = 0, inapplicable = {}, formulaProblems = [];
+    // Formula conditions evaluate once over the table, not per row.
+    var fvals = new Array(fs.length);
+    for (var fe = 0; fe < fs.length; fe++) {
+      if (!filterIsFormula(fs[fe])) continue;
+      var ev = evalFilterFormula(t, fs[fe].formula, n);
+      if (ev.error) {
+        fvals[fe] = null;
+        formulaProblems.push({ formula: String(fs[fe].formula).trim(),
+                               reason: ev.error });
+      } else fvals[fe] = ev.values;
+    }
     for (i = 0; i < n; i++) {
       var out = false, droppedForMissing = false;
       for (var f = 0; f < fs.length && !out; f++) {
         var flt = fs[f];
+        if (filterIsFormula(flt)) {
+          var fv = fvals[f];
+          if (fv === null) continue;             // inapplicable: pass-through
+          var r = fv[i];
+          if (r == null) { out = true; droppedForMissing = true; break; }
+          if (!(typeof r === "boolean" ? r : r !== 0)) out = true;
+          continue;
+        }
         var v = t.columns[flt.col] ? t.columns[flt.col][i] : null;
         // Asked BEFORE the rule below, because these two operators exist to
         // talk about exactly the case it discards. A row kept by "is missing"
@@ -2280,7 +2362,13 @@
         if (v == null) { out = true; droppedForMissing = true; break; }
         var num = typeof v === "number";
         var pass;
-        if (num) {
+        if (num && filterTakesTwo(flt.op)) {
+          var lo = Number(flt.value), hi = Number(flt.value2);
+          if (!isFinite(lo) || !isFinite(hi)) { out = true; break; }
+          if (lo > hi) { var sw = lo; lo = hi; hi = sw; }
+          pass = (flt.op === "between") ? (v >= lo && v <= hi)
+                                        : (v < lo || v > hi);
+        } else if (num) {
           var target = Number(flt.value);
           if (!isFinite(target)) { out = true; break; }
           pass = flt.op === "eq" ? v === target
@@ -2313,6 +2401,7 @@
     t.filterMask = mask;
     t.filterMissingDrops = missingDrops;
     t.filterInapplicable = Object.keys(inapplicable);
+    t.filterFormulaProblems = formulaProblems;
     var keep = [];
     for (i = 0; i < n; i++) if (!mask[i]) keep.push(i);
     var view = {};
@@ -3430,9 +3519,13 @@
   function sweepRenamedColumn(oldName, next) {
     var t = PROJECT.table;
     if (Array.isArray(t.filters))
-      for (var fi = 0; fi < t.filters.length; fi++)
-        if (t.filters[fi] && t.filters[fi].col === oldName)
-          t.filters[fi].col = next;
+      for (var fi = 0; fi < t.filters.length; fi++) {
+        if (!t.filters[fi]) continue;
+        if (t.filters[fi].col === oldName) t.filters[fi].col = next;
+        if (filterIsFormula(t.filters[fi]) && window.PSFormula)
+          t.filters[fi].formula = window.PSFormula.renameRef(
+            t.filters[fi].formula, oldName, next);
+      }
     if (t.computed && window.PSFormula) {
       for (var cc in t.computed) {
         if (!Object.prototype.hasOwnProperty.call(t.computed, cc)) continue;
@@ -4614,8 +4707,14 @@
       return !rowIds[id] || (t.excludedRows[id] !== true && t.excludedRows[id] !== 1);
     })) return "The project's excluded-row records are damaged.";
     if (t.filters != null && (!Array.isArray(t.filters) || t.filters.some(function (f) {
-      return !record(f) || !names[f.col] || !own(FILTER_OPS, f.op) ||
-        (filterNeedsValue(f.op) && (!scalar(f.value) || f.value == null || String(f.value) === ""));
+      if (!record(f) || !own(FILTER_OPS, f.op)) return true;
+      if (f.op === "formula")
+        return typeof f.formula !== "string" || f.formula.trim() === "";
+      if (!names[f.col]) return true;
+      if (!filterNeedsValue(f.op)) return false;
+      if (!scalar(f.value) || f.value == null || String(f.value) === "") return true;
+      return filterTakesTwo(f.op) &&
+        (!scalar(f.value2) || f.value2 == null || String(f.value2) === "");
     }))) return "The project's row filters are damaged.";
     if (s.version !== 2) {
       if (!Array.isArray(s.charts)) return "The project's documents are damaged.";
@@ -8572,6 +8671,8 @@
               (ft.filterInapplicable.length === 1
                 ? " (that comparison needs numbers)"
                 : " (those comparisons need numbers)");
+          if (filterFormulaProblemText(ft))
+            fNote += " \u00b7 " + filterFormulaProblemText(ft);
         }
         noteSpec.chartNote = fNote
           ? (userNote ? userNote + " " + fNote : fNote)
@@ -15871,6 +15972,8 @@
     if (fActive && t.filterInapplicable && t.filterInapplicable.length)
       fExtra += ". Not applied: " + t.filterInapplicable.join(", ") +
         " (that comparison needs numbers)";
+    if (fActive && filterFormulaProblemText(t))
+      fExtra += ". " + filterFormulaProblemText(t).replace(/^f/, "F");
     // The imported-filter fact belongs HERE and not only in a toast. This is
     // the control a reader uses to ask "is anything filtered", and on a file
     // that arrived with jamovi filters the honest answer is longer than "no".
@@ -17617,7 +17720,10 @@
     var t = PROJECT.table;
     if (!t) return;
     FILTER_DRAFT = validFilters(t).map(function (f) {
-      return { col: f.col, op: f.op, value: String(f.value) };
+      return { col: f.col || "", op: f.op,
+               value: String(f.value == null ? "" : f.value),
+               value2: String(f.value2 == null ? "" : f.value2),
+               formula: String(f.formula == null ? "" : f.formula) };
     });
     if (!FILTER_DRAFT.length) filterDraftAdd();
     renderFilterMenu();
@@ -17637,20 +17743,18 @@
     el("ps-data-filter-btn").setAttribute("aria-expanded", "false");
     FILTER_DRAFT = null;
   }
-  function filterDraftAdd() {
+  function filterDraftAdd(asFormula) {
     var t = PROJECT.table;
     var cols = filterableColumns(t);
     var col = cols[0] || t.order[0];
+    if (asFormula) { FILTER_DRAFT.push({ col: "", op: "formula", value: "", value2: "", formula: "" }); return; }
     FILTER_DRAFT.push({ col: col,
-      op: "eq", value: "" });
+      op: "eq", value: "", value2: "" });
   }
   function filterDraftPreviewCount() {
     // Evaluate the draft against typed values without touching the table.
     var t = PROJECT.table, n = nRows(t), kept = 0;
-    var fs = FILTER_DRAFT.filter(function (f) {
-      return f.col && t.raw[f.col] && FILTER_OPS[f.op] &&
-        (!filterNeedsValue(f.op) || String(f.value) !== "");
-    });
+    var fs = FILTER_DRAFT.filter(function (f) { return filterComplete(t, f); });
     if (!fs.length) return n;
     var saved = t.filters;
     t.filters = fs;
@@ -17678,7 +17782,7 @@
     // control's role and row before rebuilding, then restore only when
     // focus belonged to this menu. Add/remove supply their next row.
     if (hadFocus && !focusTarget) {
-      ["col", "op", "value"].some(function (field) {
+      ["col", "op", "value", "value2", "formula"].some(function (field) {
         var row = active.getAttribute("data-filter-" + field);
         if (row === null) return false;
         focusTarget = { field: field, row: Number(row) };
@@ -17699,20 +17803,65 @@
         colSel.setAttribute("aria-label",
           "Filter " + (idx + 1) + " variable");
         var cols = filterableColumns(t);
+        var isFormula = filterIsFormula(f);
         for (var c = 0; c < cols.length; c++) {
           var o = document.createElement("option");
           o.value = cols[c]; o.textContent = cols[c];
-          if (cols[c] === f.col) o.selected = true;
+          if (!isFormula && cols[c] === f.col) o.selected = true;
           colSel.appendChild(o);
         }
+        // The formula condition hangs off the column select so it is found
+        // where a reader is already looking, not behind a separate control.
+        var fo = document.createElement("option");
+        fo.value = "__formula__"; fo.textContent = "Formula...";
+        if (isFormula) fo.selected = true;
+        colSel.appendChild(fo);
         colSel.addEventListener("change", function () {
+          if (this.value === "__formula__") {
+            f.col = ""; f.op = "formula"; f.value = ""; f.value2 = "";
+            f.formula = f.formula || "";
+            renderFilterMenu({ field: "formula", row: idx });
+            return;
+          }
+          if (filterIsFormula(f)) { f.op = "eq"; f.formula = ""; }
           f.col = this.value;
           var numNow = colStoresNumbers(t, f.col);
           if (!numNow && f.op !== "eq" && f.op !== "ne") f.op = "eq";
-          f.value = "";
+          f.value = ""; f.value2 = "";
           renderFilterMenu();
         });
         row.appendChild(colSel);
+        if (isFormula) {
+          // One expression in the computed-column language; kept when true.
+          row.classList.add("ps-filter-row-formula");
+          var fx = document.createElement("input");
+          fx.type = "text";
+          fx.className = "ps-filter-formula";
+          fx.setAttribute("data-filter-formula", String(idx));
+          fx.setAttribute("aria-label", "Filter " + (idx + 1) + " formula");
+          fx.placeholder = 'e.g. attention == 4 AND NOT(rt < 200 OR rt > 5000)';
+          fx.spellcheck = false;
+          fx.value = f.formula || "";
+          fx.addEventListener("input", function () {
+            f.formula = this.value;
+            refreshFilterCount();
+            refreshFilterFormulaNote(row, f);
+          });
+          row.appendChild(fx);
+          var rmF = mkEl("button", "ps-filter-remove", "\u00d7");
+          rmF.type = "button";
+          rmF.setAttribute("aria-label", "Remove filter " + (idx + 1));
+          setTip(rmF, "Remove this condition");
+          rmF.addEventListener("click", function () {
+            FILTER_DRAFT.splice(idx, 1);
+            if (!FILTER_DRAFT.length) filterDraftAdd();
+            renderFilterMenu({ field: "col", row: Math.min(idx, FILTER_DRAFT.length - 1) });
+          });
+          row.appendChild(rmF);
+          refreshFilterFormulaNote(row, f);
+          m.appendChild(row);
+          return;
+        }
         var num = colStoresNumbers(t, f.col);
         var opSel = document.createElement("select");
         opSel.setAttribute("data-filter-op", String(idx));
@@ -17726,6 +17875,7 @@
         var opStranded = !num && FILTER_OPS[f.op] && !FILTER_OPS[f.op].cat;
         for (var op in FILTER_OPS) {
           if (!Object.prototype.hasOwnProperty.call(FILTER_OPS, op)) continue;
+          if (FILTER_OPS[op].formula) continue;   // reached via the column select
           if (!num && !FILTER_OPS[op].cat && op !== f.op) continue;
           var oo = document.createElement("option");
           oo.value = op;
@@ -17775,17 +17925,34 @@
           valueEl = document.createElement("input");
           valueEl.type = "text";
           valueEl.setAttribute("data-filter-value", String(idx));
-          valueEl.placeholder = num ? "number" : "value";
+          valueEl.placeholder = num ? (filterTakesTwo(f.op) ? "low" : "number") : "value";
           valueEl.value = f.value;
           valueEl.addEventListener("input", function () {
             f.value = this.value; refreshFilterCount();
           });
         }
         valueEl.setAttribute("aria-label",
-          "Filter " + (idx + 1) + " value");
+          "Filter " + (idx + 1) + (filterTakesTwo(f.op) ? " low value" : " value"));
         // An operator that takes no value must not show a box inviting one.
         if (!filterNeedsValue(f.op)) valueEl.style.display = "none";
         row.appendChild(valueEl);
+        if (filterTakesTwo(f.op)) {
+          // between / outside: the second bound, after a word so the row
+          // reads as a sentence ("score between 60 and 80").
+          var joiner = mkEl("span", "ps-filter-joiner",
+            f.op === "between" ? "and" : "to");
+          row.appendChild(joiner);
+          var hiEl = document.createElement("input");
+          hiEl.type = "text";
+          hiEl.setAttribute("data-filter-value2", String(idx));
+          hiEl.setAttribute("aria-label", "Filter " + (idx + 1) + " high value");
+          hiEl.placeholder = "high";
+          hiEl.value = f.value2 || "";
+          hiEl.addEventListener("input", function () {
+            f.value2 = this.value; refreshFilterCount();
+          });
+          row.appendChild(hiEl);
+        }
         var strayVal = String(f.value) !== "" && !num && lv && lv.length &&
           lv.indexOf(String(f.value)) === -1;
         if (opStranded || strayVal) {
@@ -17817,6 +17984,15 @@
       renderFilterMenu({ field: "col", row: FILTER_DRAFT.length - 1 });
     });
     m.appendChild(add);
+    var addF = mkEl("button", "ps-btn", "+ Add formula");
+    addF.type = "button";
+    addF.setAttribute("data-filter-add-formula", "");
+    setTip(addF, "A condition written as a formula, for AND, OR, NOT and several columns at once");
+    addF.addEventListener("click", function () {
+      filterDraftAdd(true);
+      renderFilterMenu({ field: "formula", row: FILTER_DRAFT.length - 1 });
+    });
+    m.appendChild(addF);
     var actions = mkEl("div", "ps-filter-actions");
     var apply = mkEl("button", "ps-btn ps-primary", "Apply filters");
     apply.type = "button";
@@ -17828,7 +18004,8 @@
     clear.setAttribute("data-filter-clear", "");
     clear.disabled = !validFilters(t).length &&
       !FILTER_DRAFT.some(function (f) {
-        return !filterNeedsValue(f.op) || String(f.value) !== "";
+        return filterIsFormula(f) ? String(f.formula || "") !== ""
+          : (!filterNeedsValue(f.op) || String(f.value) !== "");
       });
     clear.addEventListener("click", function () { applyFilters(true); });
     actions.appendChild(clear);
@@ -17848,6 +18025,20 @@
       m.scrollTop = scrollTop;
     }
   }
+  function refreshFilterFormulaNote(row, f) {
+    var old = row.querySelector(".ps-filter-stranded");
+    if (old) old.parentNode.removeChild(old);
+    var expr = String(f.formula || "").trim();
+    if (!expr) return;
+    var t = PROJECT.table;
+    var ev = evalFilterFormula(t, expr, nRows(t));
+    if (!ev.error) return;
+    var why = mkEl("div", "ps-filter-stranded",
+      "This formula " + (/^gives text/.test(ev.error) ? ev.error
+        : "cannot be used: " + ev.error) +
+      ", so this condition is not being applied.");
+    row.appendChild(why);
+  }
   function refreshFilterCount() {
     var count = el("ps-filtermenu").querySelector("[data-filter-count]");
     if (!count) return;
@@ -17858,21 +18049,30 @@
   function applyFilters(clearAll) {
     var t = PROJECT.table;
     var next = clearAll ? [] : FILTER_DRAFT.filter(function (f) {
-      return f.col && t.raw[f.col] && FILTER_OPS[f.op] &&
-        (!filterNeedsValue(f.op) || String(f.value) !== "");
+      return filterComplete(t, f);
     }).map(function (f) {
+      if (filterIsFormula(f))
+        return { op: "formula", formula: String(f.formula).trim() };
       if (!filterNeedsValue(f.op)) return { col: f.col, op: f.op, value: "" };
-      return { col: f.col, op: f.op,
-               value: colStoresNumbers(t, f.col) ? Number(f.value)
-                                                 : String(f.value) };
+      var numCol = colStoresNumbers(t, f.col);
+      var rec = { col: f.col, op: f.op,
+                  value: numCol ? Number(f.value) : String(f.value) };
+      if (filterTakesTwo(f.op))
+        rec.value2 = numCol ? Number(f.value2) : String(f.value2);
+      return rec;
     });
     var cur = validFilters(t);
     var current = JSON.stringify(cur);
     function sameFilters(a, b) {
       if (a.length !== b.length) return false;
       for (var i = 0; i < a.length; i++)
-        if (a[i].col !== b[i].col || a[i].op !== b[i].op ||
-            String(a[i].value) !== String(b[i].value)) return false;
+        if ((a[i].col || "") !== (b[i].col || "") || a[i].op !== b[i].op ||
+            String(a[i].value == null ? "" : a[i].value) !==
+              String(b[i].value == null ? "" : b[i].value) ||
+            String(a[i].value2 == null ? "" : a[i].value2) !==
+              String(b[i].value2 == null ? "" : b[i].value2) ||
+            String(a[i].formula == null ? "" : a[i].formula) !==
+              String(b[i].formula == null ? "" : b[i].formula)) return false;
       return true;
     }
     if (sameFilters(next, cur) && !(clearAll && current !== "[]")) {
@@ -32283,14 +32483,31 @@
     });
     (Array.isArray(o.filters) ? o.filters : []).forEach(function (f) {
       if (!f || typeof f !== "object") return;
+      // A formula condition: { "formula": "attention == 4 AND rt < 5000" }
+      if (typeof f.formula === "string" && f.formula.trim() &&
+          (f.op == null || f.op === "formula")) {
+        s.filters.push({ op: "formula", formula: f.formula.trim() });
+        return;
+      }
       var col = typeof f.column === "string" ? f.column : (typeof f.col === "string" ? f.col : "");
       var op = Object.prototype.hasOwnProperty.call(FILTER_OPS, f.op) ? f.op
         : SETUP_FILTER_OPS[String(f.op || "").toLowerCase()];
-      if (!col || !op) return;
+      if (!col || !op || op === "formula") return;
       var ff = { col: col, op: op, value: "" };
       if (filterNeedsValue(op)) {
-        if (f.value == null || typeof f.value === "object" || String(f.value) === "") return;
-        ff.value = f.value;
+        if (filterTakesTwo(op)) {
+          // between / outside take two bounds: "value": [low, high], or
+          // "low" and "high" (or value and value2) as separate keys.
+          var pair = Array.isArray(f.value) ? f.value
+            : [f.low != null ? f.low : f.value, f.high != null ? f.high : f.value2];
+          if (pair.length !== 2 || pair[0] == null || pair[1] == null ||
+              typeof pair[0] === "object" || typeof pair[1] === "object" ||
+              String(pair[0]) === "" || String(pair[1]) === "") return;
+          ff.value = pair[0]; ff.value2 = pair[1];
+        } else {
+          if (f.value == null || typeof f.value === "object" || String(f.value) === "") return;
+          ff.value = f.value;
+        }
       }
       s.filters.push(ff);
     });
@@ -32531,6 +32748,7 @@
     });
     var dropped = [];
     var filters = s.filters.filter(function (f) {
+      if (filterIsFormula(f)) return true;   // judged when it runs (disclosed if a column is missing)
       if (taken[f.col]) return true;
       dropped.push(f.col);
       return false;
@@ -32802,8 +33020,10 @@
     if (Array.isArray(t.missingTokens)) out.read.missing = t.missingTokens.map(String);
     out.columns = cols;
     out.filters = validFilters(t).map(function (f) {
+      if (filterIsFormula(f)) return { formula: String(f.formula).trim() };
       var o = { column: f.col, op: f.op };
-      if (filterNeedsValue(f.op)) o.value = f.value;
+      if (filterTakesTwo(f.op)) o.value = [f.value, f.value2];
+      else if (filterNeedsValue(f.op)) o.value = f.value;
       return o;
     });
     out.charts = JSON.parse(JSON.stringify(snap.charts));
@@ -36570,6 +36790,11 @@
     showCommandPalette: showCommandPalette,
     showAnalysisGallery: showAnalysisGallery,
     showHelpMeChoose: showHelpMeChoose,
+    // The chart-setup file as written and as read, for probes: the
+    // filters' two Oct 2026 shapes ({formula} and value: [low, high])
+    // have to survive both directions.
+    setupText: function (chartOnly) { return JSON.stringify(setupForProject(!!chartOnly)); },
+    parseSetupText: function (text) { return parseSetup(JSON.parse(String(text))); },
     showLayoutGallery: showLayoutGallery,
     createLayoutFromTemplate: createLayoutFromTemplate,
     resizeLayoutPanel: layResizeDimensions,

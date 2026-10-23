@@ -287,7 +287,19 @@ toolbar (it shows a row count while a filter is active); several conditions
 all have to pass. A
 row that fails one stays visible in the grid, dimmed, but leaves every chart
 and every statistic, so counts and percentages describe exactly the rows you
-kept. Clear the filter and the rows come straight back.</p>
+kept. Clear the filter and the rows come straight back. A numeric column also
+offers <b>between</b> and <b>outside</b>, so a range is one condition in either
+direction. For anything the rows cannot say, pick <b>Formula...</b> in a
+condition's column list (or <b>+ Add formula</b>) and write the test in the same
+language as a computed column, for example
+<code>attention == 4 AND NOT(rt &lt; 200 OR rt &gt; 5000)</code>: a row is kept
+when the formula is true. A formula that cannot run (an unknown variable, or a
+result that is text rather than true or false) is marked in the popover and
+stated in the chart note as not applied, so a typo never empties a chart.
+Filters can use computed columns, so a flag such as
+<code>IF(check1 != 3 OR check2 != 1, 1, 0)</code> can first mark who failed an
+attention check and then a filter on it, or the same test written straight into
+a formula condition, drops them.</p>
 <p><b>Reshape to wide</b> (Data menu) turns long data into the one-row-per-
 subject shape Repeated Measures expects. It refuses rather than guess when
 your data would lose information, and explains what it found so you can fix
@@ -2093,8 +2105,11 @@ apply (<code>NA</code> to start with). Empty cells always mean "no
 value".</li>
 <li><code>filters</code> each give a <code>column</code>, an <code>op</code>
 (<code>=</code>, <code>!=</code>, <code>&gt;</code>, <code>&gt;=</code>,
-<code>&lt;</code>, <code>&lt;=</code>, <code>is missing</code> or
-<code>is not missing</code>) and a <code>value</code>. Rows that fail a
+<code>&lt;</code>, <code>&lt;=</code>, <code>is missing</code>,
+<code>is not missing</code>, or <code>between</code> and <code>outside</code>,
+whose <code>value</code> is a pair <code>[low, high]</code>) and a
+<code>value</code>; or a single <code>formula</code> string in the computed-column
+language, kept where it is true. Rows that fail a
 filter stay out of every chart.</li>
 <li><code>charts</code> each name an <code>analysis</code> and its
 <code>roles</code>, with an optional <code>type</code> and
