@@ -27,12 +27,22 @@ const guidePath = path.join(root, 'docs', 'user-guide.html');
 
 console.log('case 1: every documented formula runs, with true values');
 const guide = fs.readFileSync(guidePath, 'utf8');
+const unesc = s => s.replace(/&amp;/g, '&').replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>').replace(/&quot;/g, '"').trim();
 const formulas = [...guide.matchAll(
-    /<code data-guide-formula>([^]*?)<\/code>/g)]
-    .map(m => m[1].replace(/&amp;/g, '&').replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>').replace(/&quot;/g, '"').trim());
+    /<code data-guide-formula(?:\s[^>]*)?>([^]*?)<\/code>/g)]
+    .map(m => unesc(m[1]));
 ok(formulas.length >= 10,
    `the guide documents ${formulas.length} formulas (extraction is live)`);
+// The Formula reference (Oct 2026) states the RESULT of every example:
+// the expectation rides data-guide-expect (one value per fixture row,
+// blank = missing, or a single value for a constant), and the prose
+// beside the code must print exactly those values. Both are checked.
+const examples = [...guide.matchAll(
+    /<code data-guide-formula data-guide-expect="([^"]*)">([^]*?)<\/code> gives <span class="fxres">([^<]*)<\/span>/g)]
+    .map(m => ({ expect: unesc(m[1]), formula: unesc(m[2]), shown: unesc(m[3]) }));
+ok(examples.length >= 60,
+   `the Formula reference carries ${examples.length} examples with stated results`);
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
@@ -47,21 +57,23 @@ if (await page.locator('#ps-welcome').isVisible()) {
 const run = await page.evaluate(fl => {
     window.PS_SHELL.loadTable('guidecheck',
         ['paced', 'clear', 'useful', 'supported', 'score', 'pre', 'post',
-         'rt', 'first quiz', 'arm'],
-        [['3', '4', '5', '4', '61', '10', '14', '420', '7', 'Control'],
-         ['4', '5', '5', '5', '75', '12', '11', '380', '8', 'control'],
-         ['2', '3', '4', '3', '58', '9', '16', '1250', '5', 'CONTROL'],
-         ['4', '4', '4', '4', '90', '11', '15', '510', '9', 'Treatment']],
+         'rt', 'first quiz', 'arm', 'late', 'note', 'code'],
+        [['3', '4', '5', '4', '61', '10', '14', '420', '7', 'Control', '', 'Yes really', '10'],
+         ['4', '5', '5', '5', '75', '12', '11', '380', '8', 'control', '3', 'no', '9'],
+         ['2', '3', '4', '3', '58', '9', '16', '1250', '5', 'CONTROL', '', '', '8'],
+         ['4', '4', '4', '4', '90', '11', '15', '510', '9', 'Treatment', '5', 'Maybe', '11']],
         { paced: 'continuous', clear: 'continuous', useful: 'continuous',
           supported: 'continuous', score: 'continuous', pre: 'continuous',
           post: 'continuous', rt: 'continuous',
-          'first quiz': 'continuous', arm: 'nominal' });
+          'first quiz': 'continuous', arm: 'nominal', late: 'continuous',
+          note: 'nominal', code: 'nominal' });
     const out = [];
     for (let i = 0; i < fl.length; i++) {
         const r = window.PS_SHELL.saveComputedColumn('gf' + i, fl[i]);
         const t = window.PS_SHELL.project.table;
         out.push({ formula: fl[i],
                    error: r && r.error ? r.error : null,
+                   type: t.types['gf' + i] || null,
                    values: t.raw['gf' + i] ? t.raw['gf' + i].slice(0, 4)
                                            : null });
     }
@@ -98,6 +110,71 @@ ok(String(vals(
    'the label-tidying recipe folds three spellings into one level');
 ok(String(vals('ISMISSING(post)')) === '0,0,0,0',
    'ISMISSING reports 0 across a column with nothing missing in it');
+
+console.log('case 1b: every Formula reference example gives the result it states');
+// A number is right to the precision the guide prints (half a unit of
+// its last decimal); text and missing must match exactly.
+function valueMatches(actual, token) {
+    if (token === '') return actual === '';
+    if (actual === '') return false;
+    const a = Number(actual), e = Number(token);
+    if (isFinite(a) && isFinite(e) && /^-?\d+(\.\d+)?$/.test(token)) {
+        const dec = (token.split('.')[1] || '').length;
+        const tol = dec ? 0.5 * Math.pow(10, -dec) + 1e-12 : 1e-9;
+        return Math.abs(a - e) <= tol;
+    }
+    return String(actual) === token;
+}
+const wrong = [], prose = [];
+for (const e of examples) {
+    const got = vals(e.formula);
+    const toks = e.expect.split(',');
+    const want = toks.length === 1 ? [toks[0], toks[0], toks[0], toks[0]] : toks;
+    if (!got || want.length !== 4 || !want.every((t, i) => valueMatches(String(got[i]), t)))
+        wrong.push({ formula: e.formula, expect: e.expect, got });
+    const printed = toks.map(t => t === '' ? 'missing' : t).join(', ') +
+        (toks.length === 1 ? ' on every row' : '');
+    if (e.shown !== printed) prose.push({ formula: e.formula, shown: e.shown, printed });
+}
+ok(wrong.length === 0, 'every stated result is what the engine gives' +
+   (wrong.length ? ' - wrong: ' + JSON.stringify(wrong) : ''));
+ok(prose.length === 0, 'the printed result beside each example is its expectation' +
+   (prose.length ? ' - drift: ' + JSON.stringify(prose) : ''));
+function typeOf(f) { const hit = run.find(r => r.formula === f); return hit ? hit.type : null; }
+ok(typeOf('post - pre') === 'continuous' && typeOf('score > 70') === 'continuous',
+   'numeric results, a comparison included, type the column Continuous');
+ok(typeOf('IF(score >= 70, "pass", "fail")') === 'nominal' &&
+   typeOf('IF(ISMISSING(late), "none", late)') === 'nominal',
+   'any text in the results types the column Nominal');
+
+console.log('case 1c: every function has a reference entry, and the dialog links to it');
+const FN_IDS = ['zscore', 'center', 'difference', 'pctchange', 'revscore', 'recode',
+    'mean', 'sum', 'min', 'max', 'vmean', 'vsd', 'vmedian', 'vmin', 'vmax', 'vsum', 'n',
+    'log10', 'ln', 'sqrt', 'abs', 'exp', 'round', 'floor', 'ceiling', 'bin',
+    'if', 'and-or-not', 'comparisons', 'upper', 'lower', 'trim', 'len', 'contains',
+    'ismissing', 'coalesce'];
+const missingIds = FN_IDS.filter(id => !guide.includes(`<tr id="fn-${id}">`));
+ok(missingIds.length === 0 && guide.includes('<h3 id="formula-reference">'),
+   'the reference has its anchor and one entry per function and recipe' +
+   (missingIds.length ? ' - missing: ' + missingIds.join(', ') : ''));
+await page.evaluate(() => window.PS_SHELL.runCommand('data-compute'));
+await page.waitForTimeout(200);
+const refLink = await page.evaluate(() => {
+    const a = document.getElementById('ps-fn-ref');
+    const box = a ? a.getBoundingClientRect() : null;
+    return a ? { href: a.getAttribute('href'), target: a.target, rel: a.rel,
+                 text: a.textContent, h: box.height, visible: box.width > 0 } : null;
+});
+ok(refLink && /#formula-reference$/.test(refLink.href) && refLink.target === '_blank' &&
+   /noopener/.test(refLink.rel) && refLink.visible,
+   `the Functions bar links to the reference (${refLink && refLink.href})`);
+ok(refLink && refLink.h >= 24, `the link is a 24px target (${refLink && refLink.h.toFixed(1)}px)`);
+const resolved = refLink && refLink.href.startsWith('../')
+    ? path.resolve(path.join(root, 'standalone'), refLink.href.replace(/#.*$/, ''))
+    : null;
+ok(resolved ? resolved === guidePath : /^https:\/\/pandionplots\.com\/docs\/#/.test(refLink.href),
+   'the link resolves to this guide (local copy on the dev page, the site otherwise)');
+await page.keyboard.press('Escape');
 
 console.log('case 2: the channel switch filters the guide honestly');
 const gpage = await browser.newPage();

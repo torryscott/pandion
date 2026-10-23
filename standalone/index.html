@@ -1618,6 +1618,12 @@
     border: 1px solid var(--ps-l3); border-radius: var(--ps-r-md);
     padding: 4px 9px;
   }
+  .ps-fn-bar a.ps-fn-ref {
+    flex-shrink: 0; font-size: 11.5px; font-weight: 600;
+    color: var(--ps-accent-press); text-decoration: underline;
+    text-underline-offset: 2px; padding: 4px 4px; line-height: 16px;
+    border-radius: var(--ps-r-md);
+  }
   .ps-fn-nomatch { padding: 10px 12px; font-size: 12px; color: var(--ps-muted); }
   /* The chips: each code with its own live count, the blank chip
      permanent. Chip height 26px keeps the remove targets comfortable. */
@@ -6126,6 +6132,16 @@
         <input type="search" id="ps-fn-search"
                placeholder="Search: average, missing, log, recode..."
                aria-label="Search the recipes and functions">
+        <!-- The browser lists what exists; the guide's Formula reference
+             says exactly how each one behaves (operators, precedence, the
+             missing-value rule, every function with a verified example).
+             The href is re-pointed when the dialog opens, to the local
+             guide on the dev page and the published one everywhere else,
+             the same rule as Help > User guide. -->
+        <a id="ps-fn-ref" class="ps-fn-ref"
+           href="https://pandionplots.com/docs/#formula-reference"
+           target="_blank" rel="noopener"
+           title="Every operator and function, with verified examples, in the user guide (opens in a new tab)">Full reference</a>
       </div>
       <div class="ps-fn-panel" id="ps-fn-panel" hidden></div>
       <label class="ps-inspector-field">Formula

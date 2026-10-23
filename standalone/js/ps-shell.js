@@ -3432,6 +3432,19 @@
       fnSearch.value = "";
       formulaFnFilter("");
     }
+    // The Full reference link follows Help > User guide: the local copy
+    // on the dev page, the published one everywhere else, straight to
+    // the Formula reference section. Re-pointed on every open because
+    // the target depends on where the page runs, not on the markup.
+    var fnRef = el("ps-fn-ref");
+    if (fnRef) {
+      var guideT = userGuideTarget();
+      fnRef.href = guideT.url + "#formula-reference";
+      fnRef.title = "Every operator and function, with verified " +
+        "examples, in the user guide" +
+        (guideT.online ? " at pandionplots.com" : "") +
+        " (opens in a new tab)";
+    }
     refreshFormulaPreview();
     openShellDialog("ps-formula-dialog");
   }
@@ -19226,6 +19239,10 @@
         tog.textContent = "Functions \u25b4";
       }
       formulaFnFilter(this.value);
+    });
+    el("ps-fn-ref").addEventListener("click", function () {
+      if (userGuideTarget().online)
+        showToast("Opening the user guide at pandionplots.com in a new tab");
     });
     el("ps-fn-search").addEventListener("keydown", function (e) {
       if (e.key === "Enter") {

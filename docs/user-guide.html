@@ -430,7 +430,9 @@ the dialog is the guided way in: it opens with a Common recipes group
 (z-score, Center, Difference, Percent change, Reverse-score, Recode), and
 clicking any entry asks for the column or columns it needs, then writes
 the finished formula into the box for you - at the cursor, so clicks and
-typing mix freely.</p>
+typing mix freely. The <a href="#formula-reference">Formula
+reference</a> further down documents every operator and function,
+each with a verified example.</p>
 <p>Recipes worth stealing - every formula below is verified against the app
 by an automated check, so they run as written. The column names are
 illustrative: <code>supported</code>, <code>paced</code>,
@@ -468,9 +470,11 @@ so in your write-up).</td></tr>
 <tr><td>Split at the mean</td>
 <td><code data-guide-formula>IF(score >= VMEAN(score), "high", "low")</code></td>
 <td>Text results make a nominal variable, ready for Group By.</td></tr>
-<tr><td>Equal-count bins</td>
+<tr><td>Equal-width bins</td>
 <td><code data-guide-formula>BIN(score, 4)</code></td>
-<td>Labels the rows "bin 1" through "bin 4" (quartile groups).</td></tr>
+<td>Labels the rows "bin 1" through "bin 4", each bin covering a
+quarter of the range from the smallest value to the largest. Equal
+widths, not equal counts: a bin can be empty.</td></tr>
 <tr><td>Flag extreme values</td>
 <td><code data-guide-formula>IF(ABS(score - VMEAN(score)) / VSD(score) > 3, 1, 0)</code></td>
 <td>1 = more than 3 SDs from the mean. Investigate before excluding.</td></tr>
@@ -502,6 +506,247 @@ the data changes, so a computed column is always current - unlike pasting
 values in. A formula that refers to itself (directly or through another
 computed column) is refused with an error naming both columns, and a broken
 formula flags its column's <b>fx</b> badge with the reason.</div>
+
+<h3 id="formula-reference">Formula reference</h3>
+<p>Everything the formula box accepts, in one place: how a formula is read,
+what every operator and function does, and what happens when a value is
+missing. Every example below is run against the app by the same automated
+check as the recipes above, and the result printed beside it is the result
+the check saw. The examples use the recipe columns plus a few more, four
+rows each (a blank cell is <i>missing</i>; <code>code</code> is a Nominal
+column that happens to hold digits):</p>
+<div class="tablewrap"><table>
+<tr><th>Row</th><th>score</th><th>pre</th><th>post</th><th>rt</th><th>supported</th><th>late</th><th>arm</th><th>note</th><th>code</th></tr>
+<tr><td>1</td><td>61</td><td>10</td><td>14</td><td>420</td><td>4</td><td><i>missing</i></td><td>Control</td><td>Yes really</td><td>10</td></tr>
+<tr><td>2</td><td>75</td><td>12</td><td>11</td><td>380</td><td>5</td><td>3</td><td>control</td><td>no</td><td>9</td></tr>
+<tr><td>3</td><td>58</td><td>9</td><td>16</td><td>1250</td><td>3</td><td><i>missing</i></td><td>CONTROL</td><td><i>missing</i></td><td>8</td></tr>
+<tr><td>4</td><td>90</td><td>11</td><td>15</td><td>510</td><td>4</td><td>5</td><td>Treatment</td><td>Maybe</td><td>11</td></tr>
+</table></div>
+<p>Results are printed to three decimals here; the app keeps full precision
+in the column. A formula whose result is the same on every row (a constant,
+or a whole-column statistic) is shown once.</p>
+
+<h4 id="formula-grammar">How a formula is read</h4>
+<p><b>Names.</b> Type a column name as it appears in the header. A bare name
+may contain letters, digits, underscores and dots and must start with a
+letter or an underscore, so <code>Q8.2_21</code> works as typed. Any other
+name goes in backticks: <code>`first quiz`</code>, <code>`7.1_24`</code>,
+<code>`2024 score`</code>. Names are case-sensitive (<code>score</code> and
+<code>Score</code> are different columns, and the error says so when you mix
+them up). <code>AND</code>, <code>OR</code> and <code>NOT</code> are
+reserved words, so a column named one of those needs backticks too. A name
+followed by <code>(</code> is read as a function, so a column called
+<code>N</code> is fine on its own and <code>N(score)</code> is the function.
+Function names are not case-sensitive: <code>mean(pre, post)</code> is
+<code>MEAN(pre, post)</code>.</p>
+<p><b>Literals.</b> Numbers are written plainly: <code>42</code>,
+<code>3.5</code>, <code>.5</code>, <code>1e3</code>, <code>2.5e-3</code>; no
+thousands separators, no leading plus sign, no units. Text goes in double
+quotes, <code>"Control"</code>, and cannot itself contain a double quote. A
+formula is just the expression: a leading <code>=</code> (the spreadsheet
+habit) is refused with a message that says so.</p>
+<p><b>Operators and precedence.</b> Operators higher in this table bind
+first; parentheses override any of it.</p>
+<div class="tablewrap"><table>
+<tr><th>Binds</th><th>Operators</th><th>Notes and verified examples</th></tr>
+<tr><td>1 (tightest)</td><td><code>^</code></td>
+<td>Power. Right to left, as in mathematics: <code data-guide-formula data-guide-expect="512">2 ^ 3 ^ 2</code> gives <span class="fxres">512 on every row</span>. It also binds before a
+minus sign: <code data-guide-formula data-guide-expect="-4">-2 ^ 2</code> gives <span class="fxres">-4 on every row</span>.</td></tr>
+<tr><td>2</td><td><code>-</code> (in front of a value)</td>
+<td>Negation.</td></tr>
+<tr><td>3</td><td><code>*</code> <code>/</code></td>
+<td>Multiply, divide. Dividing by zero gives missing: <code data-guide-formula data-guide-expect=",-4,4.5,11">pre / (post - 14)</code> gives <span class="fxres">missing, -4, 4.5, 11</span>.</td></tr>
+<tr><td>4</td><td><code>+</code> <code>-</code></td>
+<td><code data-guide-formula data-guide-expect="4,-1,7,4">post - pre</code> gives <span class="fxres">4, -1, 7, 4</span>. <code data-guide-formula data-guide-expect="14">2 + 3 * 4</code> gives <span class="fxres">14 on every row</span>.</td></tr>
+<tr><td>5</td><td><code>==</code> <code>!=</code> <code>&lt;</code>
+<code>&lt;=</code> <code>&gt;</code> <code>&gt;=</code></td>
+<td>Comparisons give <code>1</code> (true) or <code>0</code> (false), so they
+can be counted: <code data-guide-formula data-guide-expect="1,1,1,2">(score &gt; 70) + (post &gt; 12)</code> gives <span class="fxres">1, 1, 1, 2</span>. A single <code>=</code> means the same as
+<code>==</code>. Comparisons do not chain: <code>1 &lt; score &lt; 5</code>
+is read as <code>(1 &lt; score) &lt; 5</code>, which is always true (<code data-guide-formula data-guide-expect="1">1 &lt; score &lt; 5</code> gives <span class="fxres">1 on every row</span>);
+write <code>score &gt; 1 AND score &lt; 5</code>.</td></tr>
+<tr><td>6</td><td><code>NOT</code> (or <code>!</code>)</td>
+<td>Applies to the whole comparison after it: <code data-guide-formula data-guide-expect="1,0,1,0">NOT score &gt; 70</code> gives <span class="fxres">1, 0, 1, 0</span>.</td></tr>
+<tr><td>7</td><td><code>AND</code> (or <code>&amp;&amp;</code>)</td>
+<td><code data-guide-formula data-guide-expect="1,0,0,1">score &gt; 60 AND post &gt; 12</code> gives <span class="fxres">1, 0, 0, 1</span>.</td></tr>
+<tr><td>8 (loosest)</td><td><code>OR</code> (or <code>||</code>)</td>
+<td><code data-guide-formula data-guide-expect="0,1,1,0">score &lt; 60 OR post &lt; 12</code> gives <span class="fxres">0, 1, 1, 0</span>.</td></tr>
+</table></div>
+
+<p><b>Comparing numbers and text.</b> <code>==</code> and
+<code>!=</code> compare as numbers when both sides are numbers; otherwise
+both sides are turned into text and compared exactly, case and all. So
+<code data-guide-formula data-guide-expect="1,0,0,0">score == "61"</code> gives <span class="fxres">1, 0, 0, 0</span>, and <code data-guide-formula data-guide-expect="1,0,0,0">arm == "Control"</code> gives <span class="fxres">1, 0, 0, 0</span> matches only that spelling (fold the case first for a looser
+match: <code data-guide-formula data-guide-expect="1,1,1,0">LOWER(arm) == "control"</code> gives <span class="fxres">1, 1, 1, 0</span>). The ordering comparisons <code>&lt;</code> <code>&lt;=</code>
+<code>&gt;</code> <code>&gt;=</code> also compare as numbers when both
+sides are numbers, and otherwise as text, character by character, where
+<code>"10"</code> sorts before <code>"9"</code>: <code data-guide-formula data-guide-expect="1">"10" &lt; "9"</code> gives <span class="fxres">1 on every row</span>. That is why a column of
+digits typed Nominal compares as text: <code data-guide-formula data-guide-expect="1,0,1,1">code &lt; 9</code> gives <span class="fxres">1, 0, 1, 1</span> (10 and 11 sort before 9). Set
+its measure type to Continuous from the column menu to compare it as a
+number.</p>
+
+<p><b>The missing-value rule.</b> An empty cell, or a value listed as a
+missing code for its column, is missing. Missing flows through everything:
+arithmetic, comparisons, <code>AND</code>, <code>OR</code>, <code>NOT</code>,
+an <code>IF</code> test, and every function with a missing input gives
+missing for that row, even when the other side would decide it: <code data-guide-formula data-guide-expect=",0,,0">late * 0</code> gives <span class="fxres">missing, 0, missing, 0</span>. Only
+<code>ISMISSING</code> and <code>COALESCE</code> look at a missing value
+without passing it on; <code>MEAN</code>, <code>SUM</code>,
+<code>MIN</code> and <code>MAX</code> accept <code>ignore_missing = 1</code>
+to skip missing arguments; and the whole-column functions
+(<code>VMEAN</code> and its family) skip missing cells. A few operations
+also produce missing from values that are present: division by zero, the
+square root of a negative number, the logarithm of zero or a negative
+number, a result too large to store, and <code>BIN</code> with fewer than
+two bins.</p>
+<p><b>What counts as true.</b> Where a formula needs a yes or no (an
+<code>IF</code> test, the sides of <code>AND</code> and <code>OR</code>, the
+value after <code>NOT</code>), <code>0</code> and empty text <code>""</code>
+are false and anything else is true: <code data-guide-formula data-guide-expect=",yes,,yes">IF(late, "yes", "no")</code> gives <span class="fxres">missing, yes, missing, yes</span>. <code>AND</code> stops at a false
+left side and <code>OR</code> at a true one without reading the right side,
+so <code data-guide-formula data-guide-expect="0">0 AND late</code> gives <span class="fxres">0 on every row</span> even where <code>late</code> is missing, while <code data-guide-formula data-guide-expect=",0,,0">late AND 0</code> gives <span class="fxres">missing, 0, missing, 0</span> because the missing
+side is read first.</p>
+<p><b>Result typing.</b> The computed column's measure type is set from its
+results every time the formula runs: all numbers make it Continuous (a
+comparison's <code>1</code> and <code>0</code> included), and any text at
+all makes it Nominal, so <code data-guide-formula data-guide-expect="none,3,none,5">IF(ISMISSING(late), "none", late)</code> gives <span class="fxres">none, 3, none, 5</span> is a text column even where it holds a number.
+Change the type afterwards from the column menu if, say, a <code>0</code> /
+<code>1</code> flag should act as groups.</p>
+
+<p><b>When a formula is refused.</b> The message names the fix where it
+can.</p>
+<div class="tablewrap"><table>
+<tr><th>Message</th><th>What it means</th></tr>
+<tr><td>unknown variable "Score". Did you mean score?</td>
+<td>No column has that exact name. Case matters; a name with a space or a
+leading digit needs backticks.</td></tr>
+<tr><td>unknown function AVERAGE(). Did you mean MEAN(a, b, ...) row by
+row, or VMEAN(column) for the whole column?</td>
+<td>A name from another tool. The same hints cover <code>LOG</code>,
+<code>SD</code>, <code>STDEV</code>, <code>MEDIAN</code>, <code>COUNT</code>,
+<code>TOTAL</code>, <code>LENGTH</code>, <code>ISBLANK</code>,
+<code>ISNA</code>, <code>IFNA</code>, <code>IFNULL</code>,
+<code>POWER</code>, <code>CEIL</code>, <code>SEARCH</code>,
+<code>FIND</code>, <code>UPPERCASE</code> and a few more, and a typo such as
+<code>MAEN</code> is matched to the nearest name.</td></tr>
+<tr><td>MEAN(a, b, ...) works ACROSS columns, row by row, so it needs at
+least two. For the average of the whole column, use VMEAN(score)</td>
+<td>The row-wise statistics take two or more arguments; the whole-column
+version wears a <code>V</code>.</td></tr>
+<tr><td>VMEAN() takes one column name</td>
+<td>The whole-column functions and <code>BIN</code> want a bare column
+name, not an expression. Compute the expression in its own column first.</td></tr>
+<tr><td>ignore_missing only applies to the row-wise statistics MEAN, SUM,
+MIN and MAX</td>
+<td>The named argument has no meaning elsewhere.</td></tr>
+<tr><td>formulas here are just the expression, so remove the leading "="</td>
+<td>The spreadsheet habit.</td></tr>
+<tr><td>unclosed string / unclosed backtick name</td>
+<td>A <code>"</code> or <code>`</code> without its partner.</td></tr>
+<tr><td>A formula that refers to itself</td>
+<td>Directly, or through another computed column; the error names both
+columns.</td></tr>
+</table></div>
+
+<h4 id="fn-recipes">Common recipes</h4>
+<p>The first group in the <b>Functions</b> list is not functions but
+patterns: each asks for its columns and writes a finished formula, which
+you can then edit like any other.</p>
+
+<div class="tablewrap"><table>
+<tr><th>Recipe</th><th>What it writes</th><th>Missing values</th><th>Verified examples</th></tr>
+<tr id="fn-zscore"><td><code>z-score</code></td><td>One numeric column. Writes <code>(x - VMEAN(x)) / VSD(x)</code>: how far each value sits from the column mean, in standard deviations.</td><td>Missing where the value is missing.</td><td><code data-guide-formula data-guide-expect="-0.681,0.273,-0.886,1.295">(score - VMEAN(score)) / VSD(score)</code> gives <span class="fxres">-0.681, 0.273, -0.886, 1.295</span>.</td></tr>
+<tr id="fn-center"><td><code>Center</code></td><td>One numeric column. Writes <code>x - VMEAN(x)</code>: the value minus the column mean.</td><td>Missing where the value is missing.</td><td><code data-guide-formula data-guide-expect="-10,4,-13,19">score - VMEAN(score)</code> gives <span class="fxres">-10, 4, -13, 19</span>.</td></tr>
+<tr id="fn-difference"><td><code>Difference</code></td><td>Two numeric columns, first minus second. Writes <code>a - b</code>; pick after, then before, for a change score.</td><td>Missing where either is missing.</td><td><code data-guide-formula data-guide-expect="4,-1,7,4">post - pre</code> gives <span class="fxres">4, -1, 7, 4</span>.</td></tr>
+<tr id="fn-pctchange"><td><code>Percent change</code></td><td>An earlier and a later column. Writes <code>(later - earlier) / earlier * 100</code>.</td><td>Missing where either is missing, or the earlier value is zero.</td><td><code data-guide-formula data-guide-expect="40,-8.333,77.778,36.364">(post - pre) / pre * 100</code> gives <span class="fxres">40, -8.333, 77.778, 36.364</span>.</td></tr>
+<tr id="fn-revscore"><td><code>Reverse-score</code></td><td>One rating item plus where its scale starts and ends. Writes <code>(start + end) - item</code>, so a 1-5 item becomes <code>6 - item</code>.</td><td>Missing where the item is missing.</td><td><code data-guide-formula data-guide-expect="2,1,3,2">6 - supported</code> gives <span class="fxres">2, 1, 3, 2</span>.</td></tr>
+<tr id="fn-recode"><td><code>Recode</code></td><td>One category column. Writes a nested <code>IF</code> with one branch per level, each mapping the level to itself, ready for you to change the labels on the right; the column itself is the final fallback, so levels you do not mention pass through.</td><td>Missing where the value is missing.</td><td><code data-guide-formula data-guide-expect="Ctl,control,CONTROL,Trt">IF(arm == "Control", "Ctl", IF(arm == "Treatment", "Trt", arm))</code> gives <span class="fxres">Ctl, control, CONTROL, Trt</span>.</td></tr>
+</table></div>
+
+<h4 id="fn-row">Across a row (several columns)</h4>
+<p>These combine two or more columns or expressions <i>within each row</i>.
+Add <code>ignore_missing = 1</code> anywhere in the argument list to score a
+row from the values it has (and say so in your write-up). One argument is
+refused: <code>MEAN(score)</code> is read as a request for the whole-column
+mean, and the error points you to <code>VMEAN(score)</code>.</p>
+
+<div class="tablewrap"><table>
+<tr><th>Function</th><th>Arguments and result</th><th>Missing values</th><th>Verified examples</th></tr>
+<tr id="fn-mean"><td><code>MEAN(a, b, ...)</code></td><td>Two or more numbers. The average of the arguments in this row.</td><td>Missing if any argument is missing, unless <code>ignore_missing = 1</code>; then missing only when every argument is.</td><td><code data-guide-formula data-guide-expect="12,11.5,12.5,13">MEAN(pre, post)</code> gives <span class="fxres">12, 11.5, 12.5, 13</span>. <code data-guide-formula data-guide-expect=",7.5,,8">MEAN(late, pre)</code> gives <span class="fxres">missing, 7.5, missing, 8</span>. <code data-guide-formula data-guide-expect="10,7.5,9,8">MEAN(late, pre, ignore_missing = 1)</code> gives <span class="fxres">10, 7.5, 9, 8</span>.</td></tr>
+<tr id="fn-sum"><td><code>SUM(a, b, ...)</code></td><td>Two or more numbers. Their total in this row.</td><td>As <code>MEAN</code>.</td><td><code data-guide-formula data-guide-expect="24,23,25,26">SUM(pre, post)</code> gives <span class="fxres">24, 23, 25, 26</span>. <code data-guide-formula data-guide-expect="10,15,9,16">SUM(late, pre, ignore_missing = 1)</code> gives <span class="fxres">10, 15, 9, 16</span>.</td></tr>
+<tr id="fn-min"><td><code>MIN(a, b, ...)</code></td><td>Two or more numbers. The smallest in this row.</td><td>As <code>MEAN</code>.</td><td><code data-guide-formula data-guide-expect="10,11,9,11">MIN(pre, post)</code> gives <span class="fxres">10, 11, 9, 11</span>.</td></tr>
+<tr id="fn-max"><td><code>MAX(a, b, ...)</code></td><td>Two or more numbers. The largest in this row.</td><td>As <code>MEAN</code>.</td><td><code data-guide-formula data-guide-expect="14,12,16,15">MAX(pre, post)</code> gives <span class="fxres">14, 12, 16, 15</span>.</td></tr>
+</table></div>
+
+<h4 id="fn-column">Whole column (one number)</h4>
+<p>These take one bare column name, compute one statistic over the whole
+column from the cells that hold a number (blank and non-numeric cells are
+skipped), and repeat it on every row, which is what makes <code>score -
+VMEAN(score)</code> work. They wear the <code>V</code> of jamovi's
+vocabulary; <code>N</code> is the same under both.</p>
+
+<div class="tablewrap"><table>
+<tr><th>Function</th><th>Arguments and result</th><th>Missing values</th><th>Verified examples</th></tr>
+<tr id="fn-vmean"><td><code>VMEAN(column)</code></td><td>The mean of the column's values.</td><td>Skips missing cells; missing when the column has no values.</td><td><code data-guide-formula data-guide-expect="71">VMEAN(score)</code> gives <span class="fxres">71 on every row</span>. <code data-guide-formula data-guide-expect="4">VMEAN(late)</code> gives <span class="fxres">4 on every row</span>. <code data-guide-formula data-guide-expect="-10,4,-13,19">score - VMEAN(score)</code> gives <span class="fxres">-10, 4, -13, 19</span>.</td></tr>
+<tr id="fn-vsd"><td><code>VSD(column)</code></td><td>The sample standard deviation (divisor n - 1, the same as jamovi and R).</td><td>Skips missing cells; missing with fewer than two values.</td><td><code data-guide-formula data-guide-expect="14.674">VSD(score)</code> gives <span class="fxres">14.674 on every row</span>.</td></tr>
+<tr id="fn-vmedian"><td><code>VMEDIAN(column)</code></td><td>The median; with an even count, the mean of the middle two.</td><td>Skips missing cells; missing when the column has no values.</td><td><code data-guide-formula data-guide-expect="68">VMEDIAN(score)</code> gives <span class="fxres">68 on every row</span>.</td></tr>
+<tr id="fn-vmin"><td><code>VMIN(column)</code></td><td>The smallest value.</td><td>Skips missing cells; missing when the column has no values.</td><td><code data-guide-formula data-guide-expect="58">VMIN(score)</code> gives <span class="fxres">58 on every row</span>.</td></tr>
+<tr id="fn-vmax"><td><code>VMAX(column)</code></td><td>The largest value.</td><td>Skips missing cells; missing when the column has no values.</td><td><code data-guide-formula data-guide-expect="90">VMAX(score)</code> gives <span class="fxres">90 on every row</span>.</td></tr>
+<tr id="fn-vsum"><td><code>VSUM(column)</code></td><td>The total of the column's values.</td><td>Skips missing cells; missing when the column has no values.</td><td><code data-guide-formula data-guide-expect="284">VSUM(score)</code> gives <span class="fxres">284 on every row</span>.</td></tr>
+<tr id="fn-n"><td><code>N(column)</code></td><td>How many cells hold a number.</td><td>Never missing: an empty column gives 0.</td><td><code data-guide-formula data-guide-expect="4">N(score)</code> gives <span class="fxres">4 on every row</span>. <code data-guide-formula data-guide-expect="2">N(late)</code> gives <span class="fxres">2 on every row</span>.</td></tr>
+</table></div>
+
+<h4 id="fn-math">Math</h4>
+
+<div class="tablewrap"><table>
+<tr><th>Function</th><th>Arguments and result</th><th>Missing values</th><th>Verified examples</th></tr>
+<tr id="fn-log10"><td><code>LOG10(x)</code></td><td>A number. Its base-10 logarithm; the usual transform for a skewed measurement such as a reaction time.</td><td>Missing for zero or a negative number.</td><td><code data-guide-formula data-guide-expect="2.623,2.580,3.097,2.708">LOG10(rt)</code> gives <span class="fxres">2.623, 2.580, 3.097, 2.708</span>. <code data-guide-formula data-guide-expect="">LOG10(0)</code> gives <span class="fxres">missing on every row</span>.</td></tr>
+<tr id="fn-ln"><td><code>LN(x)</code></td><td>A number. Its natural logarithm.</td><td>Missing for zero or a negative number.</td><td><code data-guide-formula data-guide-expect="6.040,5.940,7.131,6.234">LN(rt)</code> gives <span class="fxres">6.040, 5.940, 7.131, 6.234</span>.</td></tr>
+<tr id="fn-sqrt"><td><code>SQRT(x)</code></td><td>A number. Its square root.</td><td>Missing for a negative number.</td><td><code data-guide-formula data-guide-expect="7.810,8.660,7.616,9.487">SQRT(score)</code> gives <span class="fxres">7.810, 8.660, 7.616, 9.487</span>. <code data-guide-formula data-guide-expect="">SQRT(-1)</code> gives <span class="fxres">missing on every row</span>.</td></tr>
+<tr id="fn-abs"><td><code>ABS(x)</code></td><td>A number. Its absolute value.</td><td>Missing where the input is.</td><td><code data-guide-formula data-guide-expect="4,1,7,4">ABS(post - pre)</code> gives <span class="fxres">4, 1, 7, 4</span>.</td></tr>
+<tr id="fn-exp"><td><code>EXP(x)</code></td><td>A number. e raised to that power; the inverse of <code>LN</code>.</td><td>Missing where the input is, or when the result is too large to store.</td><td><code data-guide-formula data-guide-expect="2.718">EXP(1)</code> gives <span class="fxres">2.718 on every row</span>. <code data-guide-formula data-guide-expect="">EXP(1000)</code> gives <span class="fxres">missing on every row</span>.</td></tr>
+<tr id="fn-round"><td><code>ROUND(x, digits)</code></td><td>A number and, optionally, how many decimal places (default 0; a negative count rounds to tens, hundreds, and so on). Exact halves go to the even neighbor, as in R and jamovi, so the same formula gives the same number in both.</td><td>Missing where either input is.</td><td><code data-guide-formula data-guide-expect="8.7,10.7,8.3,12.9">ROUND(score / 7, 1)</code> gives <span class="fxres">8.7, 10.7, 8.3, 12.9</span>. <code data-guide-formula data-guide-expect="2">ROUND(2.5)</code> gives <span class="fxres">2 on every row</span>. <code data-guide-formula data-guide-expect="4">ROUND(3.5)</code> gives <span class="fxres">4 on every row</span>. <code data-guide-formula data-guide-expect="-2">ROUND(-1.5)</code> gives <span class="fxres">-2 on every row</span>. <code data-guide-formula data-guide-expect="2.67">ROUND(2.675, 2)</code> gives <span class="fxres">2.67 on every row</span>. <code data-guide-formula data-guide-expect="1200">ROUND(1234, -2)</code> gives <span class="fxres">1200 on every row</span>.</td></tr>
+<tr id="fn-floor"><td><code>FLOOR(x)</code></td><td>A number. Rounds down to a whole number (toward minus infinity).</td><td>Missing where the input is.</td><td><code data-guide-formula data-guide-expect="6,7,5,9">FLOOR(score / 10)</code> gives <span class="fxres">6, 7, 5, 9</span>. <code data-guide-formula data-guide-expect="-2">FLOOR(-1.5)</code> gives <span class="fxres">-2 on every row</span>.</td></tr>
+<tr id="fn-ceiling"><td><code>CEILING(x)</code></td><td>A number. Rounds up to a whole number.</td><td>Missing where the input is.</td><td><code data-guide-formula data-guide-expect="7,8,6,9">CEILING(score / 10)</code> gives <span class="fxres">7, 8, 6, 9</span>.</td></tr>
+<tr id="fn-bin"><td><code>BIN(column, k)</code></td><td>A bare column name and a number of bins (rounded to a whole number, at least 2). Cuts the range from the column's smallest value to its largest into <code>k</code> bins of <i>equal width</i> and labels each row <code>bin 1</code> to <code>bin k</code>. Equal width, not equal count: a bin can be empty. The result is text.</td><td>Missing where the value is missing or <code>k</code> is below 2; a column with one distinct value is all <code>bin 1</code>.</td><td><code data-guide-formula data-guide-expect="bin 1,bin 3,bin 1,bin 4">BIN(score, 4)</code> gives <span class="fxres">bin 1, bin 3, bin 1, bin 4</span>. <code data-guide-formula data-guide-expect="bin 1,bin 2,bin 1,bin 2">BIN(score, 2)</code> gives <span class="fxres">bin 1, bin 2, bin 1, bin 2</span>. The range 58 to 90 cut in four has a width of 8 per bin, so bin 2 (66 to 74) holds no row.</td></tr>
+</table></div>
+
+<h4 id="fn-decisions">Decisions</h4>
+
+<div class="tablewrap"><table>
+<tr><th>Function</th><th>Arguments and result</th><th>Missing values</th><th>Verified examples</th></tr>
+<tr id="fn-if"><td><code>IF(test, then, else)</code></td><td>A test and two values. Gives <code>then</code> where the test is true and <code>else</code> where it is false; only the branch taken is evaluated. The values may be numbers or text, and may differ in kind (the column is then text). Nest an <code>IF</code> in the <code>else</code> slot for more than two outcomes.</td><td>Missing where the test is missing: neither branch is taken.</td><td><code data-guide-formula data-guide-expect="fail,pass,fail,pass">IF(score &gt;= 70, "pass", "fail")</code> gives <span class="fxres">fail, pass, fail, pass</span>. <code data-guide-formula data-guide-expect="C,B,C,A">IF(score &gt;= 80, "A", IF(score &gt;= 70, "B", "C"))</code> gives <span class="fxres">C, B, C, A</span>. <code data-guide-formula data-guide-expect=",low,,high">IF(late &gt; 4, "high", "low")</code> gives <span class="fxres">missing, low, missing, high</span>.</td></tr>
+<tr id="fn-and-or-not"><td><code>AND, OR, NOT</code></td><td>Combine tests; <code>&amp;&amp;</code>, <code>||</code> and <code>!</code> are accepted spellings. Give <code>1</code> or <code>0</code>. See the precedence table above for how they bind.</td><td>A missing side gives missing unless the other side already decides it (<code>AND</code> stops at a false left side, <code>OR</code> at a true one).</td><td><code data-guide-formula data-guide-expect="1,0,0,1">score &gt; 60 AND post &gt; 12</code> gives <span class="fxres">1, 0, 0, 1</span>. <code data-guide-formula data-guide-expect="0,1,1,0">score &lt; 60 OR post &lt; 12</code> gives <span class="fxres">0, 1, 1, 0</span>. <code data-guide-formula data-guide-expect="1,0,1,0">NOT score &gt; 70</code> gives <span class="fxres">1, 0, 1, 0</span>. <code data-guide-formula data-guide-expect="0">0 AND late</code> gives <span class="fxres">0 on every row</span>.</td></tr>
+<tr id="fn-comparisons"><td><code>==  !=  &lt;  &lt;=  &gt;  &gt;=</code></td><td>Compare two values; give <code>1</code> or <code>0</code>, so a sum of comparisons counts how many passed. Numbers compare as numbers, anything else as text (see above).</td><td>Missing where either side is.</td><td><code data-guide-formula data-guide-expect="0,1,0,1">score &gt; 70</code> gives <span class="fxres">0, 1, 0, 1</span>. <code data-guide-formula data-guide-expect="1,1,1,2">(score &gt; 70) + (post &gt; 12)</code> gives <span class="fxres">1, 1, 1, 2</span>. <code data-guide-formula data-guide-expect=",0,,1">late &gt; 4</code> gives <span class="fxres">missing, 0, missing, 1</span>.</td></tr>
+</table></div>
+
+<h4 id="fn-text">Text</h4>
+<p>These read their input as text, so a number becomes its digits
+(<code>LEN(1250)</code> is 4). They are the tools for tidying category
+labels before a chart groups by them.</p>
+
+<div class="tablewrap"><table>
+<tr><th>Function</th><th>Arguments and result</th><th>Missing values</th><th>Verified examples</th></tr>
+<tr id="fn-upper"><td><code>UPPER(x)</code></td><td>Text. The same text in upper case.</td><td>Missing where the input is.</td><td><code data-guide-formula data-guide-expect="CONTROL,CONTROL,CONTROL,TREATMENT">UPPER(arm)</code> gives <span class="fxres">CONTROL, CONTROL, CONTROL, TREATMENT</span>.</td></tr>
+<tr id="fn-lower"><td><code>LOWER(x)</code></td><td>Text. The same text in lower case; the usual first step before comparing labels.</td><td>Missing where the input is.</td><td><code data-guide-formula data-guide-expect="control,control,control,treatment">LOWER(arm)</code> gives <span class="fxres">control, control, control, treatment</span>.</td></tr>
+<tr id="fn-trim"><td><code>TRIM(x)</code></td><td>Text. Removes spaces at both ends and squeezes any run of spaces inside to one.</td><td>Missing where the input is.</td><td><code data-guide-formula data-guide-expect="tidy me">TRIM("  tidy   me ")</code> gives <span class="fxres">tidy me on every row</span>.</td></tr>
+<tr id="fn-len"><td><code>LEN(x)</code></td><td>Text. How many characters it has.</td><td>Missing where the input is.</td><td><code data-guide-formula data-guide-expect="10,2,,5">LEN(note)</code> gives <span class="fxres">10, 2, missing, 5</span>. <code data-guide-formula data-guide-expect="3,3,4,3">LEN(rt)</code> gives <span class="fxres">3, 3, 4, 3</span>.</td></tr>
+<tr id="fn-contains"><td><code>CONTAINS(text, part)</code></td><td>Two texts. <code>1</code> when <code>part</code> occurs anywhere in <code>text</code>, else <code>0</code>; case-sensitive, so fold with <code>LOWER</code> for a looser match.</td><td>Missing where either input is.</td><td><code data-guide-formula data-guide-expect="1,0,0,0">CONTAINS(arm, "Control")</code> gives <span class="fxres">1, 0, 0, 0</span>. <code data-guide-formula data-guide-expect="1,1,1,0">CONTAINS(LOWER(arm), "control")</code> gives <span class="fxres">1, 1, 1, 0</span>.</td></tr>
+</table></div>
+
+<h4 id="fn-missing">Missing values</h4>
+<p>The only two functions that look at a missing value without passing it
+on.</p>
+
+<div class="tablewrap"><table>
+<tr><th>Function</th><th>Arguments and result</th><th>Missing values</th><th>Verified examples</th></tr>
+<tr id="fn-ismissing"><td><code>ISMISSING(x)</code></td><td>Any value. <code>1</code> when it is missing, <code>0</code> when it is there.</td><td>Never missing; that is the point.</td><td><code data-guide-formula data-guide-expect="1,0,1,0">ISMISSING(late)</code> gives <span class="fxres">1, 0, 1, 0</span>. <code data-guide-formula data-guide-expect="0,0,1,0">ISMISSING(note)</code> gives <span class="fxres">0, 0, 1, 0</span>.</td></tr>
+<tr id="fn-coalesce"><td><code>COALESCE(a, b, ...)</code></td><td>One or more values. The first one, reading left to right, that is not missing; the rest are not evaluated. Put a plain number or text last for a result that can never be missing.</td><td>Missing only when every argument is.</td><td><code data-guide-formula data-guide-expect="10,3,9,5">COALESCE(late, pre)</code> gives <span class="fxres">10, 3, 9, 5</span>. <code data-guide-formula data-guide-expect="0,3,0,5">COALESCE(late, 0)</code> gives <span class="fxres">0, 3, 0, 5</span>.</td></tr>
+</table></div>
+<div class="callout honest"><b class="tag">Honest</b>Treating an absence as
+a zero, scoring a scale from the items a person answered, or dropping rows a
+formula cannot evaluate are all analysis decisions. The formula makes them
+easy; the write-up still has to say them.</div>
 </section>
 
 <!-- ============================================================ -->

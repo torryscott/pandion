@@ -446,6 +446,15 @@ punch lists are maintainer-local and not published with this repo.
   deleting a computed column deletes its formula, and everything rides
   undo/reload/.pand. Probe: computed-variables-check (12 cases incl.
   the filter seam and R-parity SD (n-1) z-scores).
+  Oct 23 2026: the user guide carries a FORMULA REFERENCE under Computed
+  variables (docs/user-guide.html#formula-reference): the grammar (names,
+  literals, precedence, the missing-value rule, truthiness, result
+  typing, the refusal messages) plus one entry per function in the
+  browser's seven groups, each with examples that state their result;
+  every example rides data-guide-expect and guide-formulas-check runs
+  it against the engine and compares the printed value (a tampered
+  value goes red). The dialog's Functions bar links to it (Full
+  reference), re-pointed on open like Help > User guide.
 - M5g DONE (Jul 23 2026): ROW FILTERS (Tier 1, Torry's ruling: dim but
   show). Dataset-wide AND-combined conditions ({col, op, value}; ops
   = != on any type, > >= < <= numeric-only; missing values fail their
