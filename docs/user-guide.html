@@ -515,7 +515,12 @@ check as the recipes above, and the result printed beside it is the result
 the check saw. The examples use the recipe columns plus a few more, four
 rows each (a blank cell is <i>missing</i>; <code>code</code> is a Nominal
 column that happens to hold digits):</p>
-<div class="tablewrap"><table>
+<!-- Ten narrow columns overflow a phone-width page, and a scroll box
+     with nothing focusable inside cannot be scrolled from the keyboard,
+     so this one wrapper is a named, focusable region (axe
+     scrollable-region-focusable). The other tables wrap instead. -->
+<div class="tablewrap" tabindex="0" role="region"
+     aria-label="Example data for the formula reference"><table>
 <tr><th>Row</th><th>score</th><th>pre</th><th>post</th><th>rt</th><th>supported</th><th>late</th><th>arm</th><th>note</th><th>code</th></tr>
 <tr><td>1</td><td>61</td><td>10</td><td>14</td><td>420</td><td>4</td><td><i>missing</i></td><td>Control</td><td>Yes really</td><td>10</td></tr>
 <tr><td>2</td><td>75</td><td>12</td><td>11</td><td>380</td><td>5</td><td>3</td><td>control</td><td>no</td><td>9</td></tr>
