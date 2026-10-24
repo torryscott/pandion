@@ -3409,6 +3409,7 @@
     var t = PROJECT.table;
     if (!t) return;
     FORMULA_EDIT = { col: editingCol || null, source: source || null };
+    FORMULA_EXPLAIN_ROW = -1;
     el("ps-formula-title").textContent = editingCol
       ? "Edit formula: " + editingCol : "Computed variable";
     el("ps-formula-name").value = editingCol ||
@@ -3448,6 +3449,95 @@
     refreshFormulaPreview();
     openShellDialog("ps-formula-dialog");
   }
+  // The worked-example preview (Oct 2026, Torry: build the layer that
+  // teaches the missing-value rule first). The row the student has
+  // unfolded; -1 = none. Reset when the dialog opens, kept across edits
+  // so the trace follows the formula while it is being written.
+  var FORMULA_EXPLAIN_ROW = -1;
+  function fmtPreviewValue(v) {
+    return v == null ? "missing"
+      : typeof v === "number" ? String(Number(v.toPrecision(6))) : String(v);
+  }
+  // Why a sub-expression came out the way it did, in plain words, from
+  // the facts the engine's explain mode returns. Only the lines that
+  // teach something get a reason; a plain arithmetic step stands alone.
+  function formulaTraceWhy(node, row, t) {
+    var v = node.value;
+    if (node.kind === "col") {
+      if (v != null) return "";
+      var raw = t.raw && t.raw[node.col] ? t.raw[node.col][row] : "";
+      raw = raw == null ? "" : String(raw).trim();
+      return raw ? "\"" + raw + "\" is a missing code for this column"
+                 : "empty cell in row " + (row + 1);
+    }
+    if (node.kind === "agg") {
+      var skipped = node.total - node.n;
+      return "over " + node.n + " value" + (node.n === 1 ? "" : "s") +
+        " in the column" +
+        (skipped > 0 ? " (" + skipped + " missing skipped)" : "") +
+        ", the same on every row";
+    }
+    if (node.kind === "bin") {
+      if (node.missingFrom)
+        return "missing because " + node.missingFrom.join(" and ") +
+          (node.missingFrom.length > 1 ? " are" : " is") + " missing";
+      if (node.divZero) return "missing: division by zero";
+      if (node.op === "and" || node.op === "or") {
+        var word = v === 1 ? "true" : "false";
+        if (node.decided === "left")
+          return word + ": the left side already " +
+            (node.op === "and" ? "fails" : "holds") +
+            ", so the right side is not read";
+        return word;
+      }
+      if (node.op === "=" || node.op === "!=" || node.op === "<" ||
+          node.op === "<=" || node.op === ">" || node.op === ">=")
+        return v === 1 ? "true" : "false";
+      return "";
+    }
+    if (node.kind === "fn") {
+      if (node.fn === "IF") {
+        if (node.taken === 0)
+          return "the test is missing, so neither branch is taken";
+        return "the test is " + (node.taken === 1
+          ? "true, so the then branch" : "false, so the else branch");
+      }
+      if (node.fn === "COALESCE") {
+        if (node.first === -1) return "every argument is missing";
+        return "the first value that is present" +
+          (node.first > 0 ? " (argument " + (node.first + 1) + ")" : "");
+      }
+      if (node.missingFrom)
+        return "missing because " + node.missingFrom.join(" and ") +
+          (node.missingFrom.length > 1 ? " are" : " is") + " missing";
+      if (node.ig && node.skipped > 0)
+        return "ignore_missing = 1: " + node.skipped + " missing argument" +
+          (node.skipped === 1 ? "" : "s") + " skipped";
+      if (v == null) return "no value is defined for this input";
+      return "";
+    }
+    return "";
+  }
+  function renderFormulaTrace(node, row, t) {
+    var li = mkEl("li");
+    li.appendChild(mkEl("code", "ps-fprev-ex", node.text));
+    li.appendChild(mkEl("span", "ps-fprev-arrow", "\u2192"));
+    li.appendChild(mkEl("span", "ps-fprev-val" +
+      (node.value == null ? " ps-fprev-miss" : ""), fmtPreviewValue(node.value)));
+    var why = formulaTraceWhy(node, row, t);
+    if (why) li.appendChild(mkEl("span", "ps-fprev-why", why));
+    // Literals that print as themselves add nothing to the story.
+    var kids = node.kids.filter(function (k) {
+      return !(k.kind === "num" || k.kind === "str");
+    });
+    if (kids.length) {
+      var ul = mkEl("ul");
+      for (var i = 0; i < kids.length; i++)
+        ul.appendChild(renderFormulaTrace(kids[i], row, t));
+      li.appendChild(ul);
+    }
+    return li;
+  }
   function refreshFormulaPreview() {
     var t = PROJECT.table;
     var formula = el("ps-formula-input").value;
@@ -3471,38 +3561,142 @@
     msg.textContent = "";
     var total = nRows(t);
     var values = compiled.run(t.columns, total);
-    var fmtv = function (v) {
-      return v == null ? "\u2014"
-        : typeof v === "number" ? String(Number(v.toPrecision(6))) : String(v);
-    };
+    var fmtv = fmtPreviewValue;
     prev.textContent = "";
+    if (!total) {
+      prev.textContent = "The table has no rows yet.";
+      return;
+    }
     var refs = compiled.refs || [];
-    if (refs.length && refs.length <= 5 && total) {
-      // Inputs BESIDE the result for the first rows, so the row-by-row
-      // idea is visible: a hole in an input visibly becomes a missing
-      // result (or, under ignore_missing, visibly does not). Wide
-      // formulas (6+ columns) fall back to the plain first-values line.
-      var nres = Math.min(3, total);
-      var tab = mkEl("table"), thr = mkEl("tr");
-      for (var ri = 0; ri < refs.length; ri++)
-        thr.appendChild(mkEl("th", "", refs[ri]));
-      thr.appendChild(mkEl("th", "ps-fprev-res",
-        "\u2192 " + (el("ps-formula-name").value || "result")));
-      tab.appendChild(thr);
-      for (var rr = 0; rr < nres; rr++) {
-        var tr = mkEl("tr");
+    // ---- the summary: how many results there are, how many are
+    // missing and which column made them so, and the measure type the
+    // column will get - the SAME inference save uses, so the chip can
+    // never promise a type the column does not get.
+    var missingRows = [], anyText = false, anyNum = false, culprit = {}, ri, rr;
+    var fromInput = [], undefinedRows = [];
+    for (rr = 0; rr < total; rr++) {
+      if (values[rr] == null) {
+        missingRows.push(rr);
+        var hadGap = false;
         for (ri = 0; ri < refs.length; ri++)
-          tr.appendChild(mkEl("td", "",
-            fmtv(t.columns[refs[ri]] ? t.columns[refs[ri]][rr] : null)));
-        tr.appendChild(mkEl("td", "ps-fprev-res", fmtv(values[rr])));
-        tab.appendChild(tr);
+          if (t.columns[refs[ri]] && t.columns[refs[ri]][rr] == null) {
+            culprit[refs[ri]] = 1; hadGap = true;
+          }
+        (hadGap ? fromInput : undefinedRows).push(rr);
+      } else if (typeof values[rr] === "number") anyNum = true;
+      else anyText = true;
+    }
+    // One clause per cause, in row order: "rows 3, 7: age is missing;
+    // row 1: the result is undefined there". Row numbers are buttons
+    // that unfold the row, six per clause at most.
+    function rowList(rows) {
+      var frag = document.createDocumentFragment();
+      frag.appendChild(document.createTextNode(rows.length === 1 ? "row " : "rows "));
+      var shown = rows.slice(0, 6);
+      for (var mi = 0; mi < shown.length; mi++) {
+        if (mi) frag.appendChild(document.createTextNode(", "));
+        var rb = mkEl("button", "ps-fprev-row", String(shown[mi] + 1));
+        rb.type = "button";
+        rb.setAttribute("data-fprev-row", String(shown[mi]));
+        rb.setAttribute("data-tip", "Unfold row " + (shown[mi] + 1));
+        frag.appendChild(rb);
       }
-      prev.appendChild(tab);
-      prev.appendChild(mkEl("div", "ps-fprev-note",
-        "first " + nres + " of " + total + " rows"));
-    } else {
-      prev.textContent = "First values: " +
-        values.slice(0, Math.min(6, total)).map(fmtv).join(", ");
+      if (rows.length > shown.length)
+        frag.appendChild(document.createTextNode(" and " +
+          (rows.length - shown.length) + " more"));
+      return frag;
+    }
+    var typeLabel = inferType(values.map(function (v) {
+      return v == null ? "" : String(v);
+    }), tableMissingTokens(t)) === "continuous" ? "Continuous" : "Nominal";
+    var sum = mkEl("div", "ps-fprev-sum");
+    sum.appendChild(mkEl("b", "", total + " row" + (total === 1 ? "" : "s") + ":"));
+    sum.appendChild(document.createTextNode(" " + (total - missingRows.length) +
+      " value" + (total - missingRows.length === 1 ? "" : "s") + ", " +
+      missingRows.length + " missing"));
+    if (missingRows.length) {
+      sum.appendChild(document.createTextNode(" ("));
+      var cs = Object.keys(culprit);
+      var clauses = [];
+      if (fromInput.length)
+        clauses.push({ at: fromInput[0], rows: fromInput, why: cs.join(" and ") +
+          (cs.length > 1 ? " are" : " is") + " missing" });
+      if (undefinedRows.length)
+        clauses.push({ at: undefinedRows[0], rows: undefinedRows,
+          why: "the result is undefined there" });
+      clauses.sort(function (a, b) { return a.at - b.at; });
+      for (var ci = 0; ci < clauses.length; ci++) {
+        if (ci) sum.appendChild(document.createTextNode("; "));
+        sum.appendChild(rowList(clauses[ci].rows));
+        sum.appendChild(document.createTextNode(": " + clauses[ci].why));
+      }
+      sum.appendChild(document.createTextNode(")"));
+    }
+    sum.appendChild(document.createTextNode("."));
+    sum.appendChild(mkEl("span", "ps-fprev-type", "Becomes a " + typeLabel +
+      " column" + (typeLabel === "Nominal" && anyNum && anyText
+        ? " (text and numbers mixed, so text)" : "")));
+    prev.appendChild(sum);
+    // ---- the worked example: inputs BESIDE the result for the first
+    // rows, so the row-by-row idea is visible: a hole in an input
+    // visibly becomes a missing result (or, under ignore_missing,
+    // visibly does not). Up to five input columns; any beyond that are
+    // counted in the header. The unfolded row rides along when it sits
+    // past the first five.
+    var nres = Math.min(5, total), shownRefs = refs.slice(0, 5);
+    var rowsToShow = [];
+    for (rr = 0; rr < nres; rr++) rowsToShow.push(rr);
+    if (FORMULA_EXPLAIN_ROW >= total) FORMULA_EXPLAIN_ROW = -1;
+    if (FORMULA_EXPLAIN_ROW >= nres) rowsToShow.push(FORMULA_EXPLAIN_ROW);
+    var tab = mkEl("table"), thr = mkEl("tr");
+    thr.appendChild(mkEl("th", "", "Row"));
+    for (ri = 0; ri < shownRefs.length; ri++)
+      thr.appendChild(mkEl("th", "", shownRefs[ri]));
+    if (refs.length > shownRefs.length)
+      thr.appendChild(mkEl("th", "", "+" + (refs.length - shownRefs.length) + " more"));
+    thr.appendChild(mkEl("th", "ps-fprev-res",
+      "\u2192 " + (el("ps-formula-name").value || "result")));
+    tab.appendChild(thr);
+    for (var k = 0; k < rowsToShow.length; k++) {
+      rr = rowsToShow[k];
+      var tr = mkEl("tr", "ps-fprev-r" + (rr === FORMULA_EXPLAIN_ROW ? " ps-fprev-sel" : ""));
+      tr.setAttribute("data-fprev-row", String(rr));
+      var tdRow = mkEl("td", "ps-fprev-rowcell");
+      var pick = mkEl("button", "ps-fprev-pick", String(rr + 1));
+      pick.type = "button";
+      pick.setAttribute("data-fprev-row", String(rr));
+      pick.setAttribute("aria-expanded", rr === FORMULA_EXPLAIN_ROW ? "true" : "false");
+      pick.setAttribute("aria-label", "Row " + (rr + 1) + ": show how its value was worked out");
+      tdRow.appendChild(pick);
+      tr.appendChild(tdRow);
+      for (ri = 0; ri < shownRefs.length; ri++) {
+        var cv = t.columns[shownRefs[ri]] ? t.columns[shownRefs[ri]][rr] : null;
+        tr.appendChild(mkEl("td", cv == null ? "ps-fprev-miss" : "", fmtv(cv)));
+      }
+      if (refs.length > shownRefs.length) tr.appendChild(mkEl("td", "", ""));
+      tr.appendChild(mkEl("td", "ps-fprev-res" +
+        (values[rr] == null ? " ps-fprev-miss" : ""), fmtv(values[rr])));
+      tab.appendChild(tr);
+    }
+    prev.appendChild(tab);
+    prev.appendChild(mkEl("div", "ps-fprev-note",
+      (FORMULA_EXPLAIN_ROW === -1
+        ? "First " + nres + " of " + total + " rows. Click a row to see how its value was worked out."
+        : "First " + nres + " of " + total + " rows.")));
+    // ---- the unfolded row
+    if (FORMULA_EXPLAIN_ROW !== -1) {
+      var node = compiled.explain(t.columns, FORMULA_EXPLAIN_ROW);
+      if (node) {
+        var box = mkEl("div", "ps-fprev-trace");
+        box.setAttribute("role", "region");
+        box.setAttribute("aria-label", "Row " + (FORMULA_EXPLAIN_ROW + 1) + ", step by step");
+        box.appendChild(mkEl("div", "ps-fprev-trace-h",
+          "Row " + (FORMULA_EXPLAIN_ROW + 1) + ", step by step"));
+        var ul = mkEl("ul");
+        ul.appendChild(renderFormulaTrace(node, FORMULA_EXPLAIN_ROW, t));
+        box.appendChild(ul);
+        prev.appendChild(box);
+      }
     }
   }
   function submitFormulaDialog() {
@@ -19223,6 +19417,25 @@
     });
     el("ps-formula-save").addEventListener("click", submitFormulaDialog);
     el("ps-formula-input").addEventListener("input", refreshFormulaPreview);
+    // Any row of the worked example, or a row number in its summary,
+    // unfolds that row; the same row again folds it. The pick buttons
+    // carry the keyboard path, the row itself the mouse convenience.
+    el("ps-formula-preview").addEventListener("click", function (e) {
+      var hit = e.target && e.target.closest
+        ? e.target.closest("[data-fprev-row]") : null;
+      if (!hit) return;
+      var row = Number(hit.getAttribute("data-fprev-row"));
+      if (!isFinite(row)) return;
+      var again = hit.tagName === "BUTTON" && hit.className === "ps-fprev-pick" &&
+        row === FORMULA_EXPLAIN_ROW;
+      FORMULA_EXPLAIN_ROW = again ? -1 : row;
+      refreshFormulaPreview();
+      if (!again) {
+        var picked = el("ps-formula-preview").querySelector(
+          ".ps-fprev-pick[data-fprev-row=\"" + row + "\"]");
+        if (picked && hit.tagName === "BUTTON") picked.focus();
+      }
+    });
     // Hand-editing the formula retires an open argument picker: the
     // box is the truth, and once the text is the user's own typing the
     // picker would be describing someone else's formula. Programmatic

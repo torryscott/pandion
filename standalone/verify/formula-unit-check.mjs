@@ -306,5 +306,70 @@ const varying = [1e10 + 1, 1e10 + 2, 1e10 + 3];
 ok(PSFormula.compile('VSD(x)', ['x']).run({ x: varying }, 3).every(v => v === 1),
    'small real differences at a large offset are retained');
 
+console.log('case E: explain returns the row\'s calculation as facts, in step with run');
+function explain(formula, row) {
+    const c = PSFormula.compile(formula, NAMES);
+    if (!c.ok) return { error: c.error };
+    return c.explain(COLUMNS, row);
+}
+{
+    const t = explain('score + backup', 1);   // score missing in row 2 (index 1)
+    ok(t && t.kind === 'bin' && t.value === null && t.text === 'score + backup' &&
+       JSON.stringify(t.missingFrom) === '["score"]' && t.kids.length === 2 &&
+       t.kids[0].kind === 'col' && t.kids[0].value === null && t.kids[1].value === 2,
+       'a binary with a missing side names that side and carries both kids');
+    const r = explain('score + backup', 0);
+    ok(r.value === 11 && !r.missingFrom && r.kids[0].value === 10,
+       'a present row carries the value and no missing fact');
+    const dz = explain('score / (backup - 1)', 0);
+    ok(dz.value === null && dz.divZero === true && !dz.missingFrom &&
+       dz.text === 'score / (backup - 1)',
+       'division by zero is a fact of its own, and the text keeps the brackets');
+    const i1 = explain('IF(score > 20, "big", "small")', 2);
+    ok(i1.value === 'big' && i1.taken === 1 && i1.kids.length === 2 &&
+       i1.kids[0].text === 'score > 20' && i1.kids[0].value === 1 && i1.kids[1].kind === 'str',
+       'IF reports the branch it took and shows only that branch');
+    const i0 = explain('IF(score > 20, "big", "small")', 1);
+    ok(i0.value === null && i0.taken === 0 && i0.kids.length === 1,
+       'IF with a missing test takes neither branch');
+    const co = explain('COALESCE(score, backup, 0)', 1);
+    ok(co.value === 2 && co.first === 1 && co.kids.length === 2,
+       'COALESCE stops at the first present argument and shows only what it read');
+    const ig = explain('SUM(score, backup, third, ignore_missing = 1)', 4);
+    ok(ig.value === 99 && ig.skipped === 2 && ig.ig === true &&
+       ig.text === 'SUM(score, backup, third, ignore_missing = 1)',
+       'ignore_missing counts the skipped arguments and prints the named argument');
+    const ag = explain('score - VMEAN(score)', 0);
+    ok(ag.kids[1].kind === 'agg' && ag.kids[1].n === 3 && ag.kids[1].total === 5 &&
+       Math.abs(ag.kids[1].value - 80 / 3) < 1e-9,
+       'an aggregate reports how many values it saw out of how many cells');
+    const an = explain('score > 50 AND backup > 0', 0);
+    ok(an.value === 0 && an.decided === 'left' && an.kids.length === 1,
+       'AND decided by a false left side does not read the right side');
+    const an2 = explain('backup > 0 AND score > 5', 1);
+    ok(an2.value === null && JSON.stringify(an2.missingFrom) === '["score > 5"]' && an2.kids.length === 2,
+       'AND with a missing right side names it');
+    const txt = explain('`LEN` ^ 2 ^ -1', 0);
+    ok(txt.text === 'LEN ^ 2 ^ -1' && txt.kids[1].text === '2 ^ -1',
+       'the text re-serializes right-associative powers without stray brackets');
+    const nm = explain('NOT group == "Control" OR score > 5', 0);
+    ok(nm.text === 'NOT group == "Control" OR score > 5' && nm.kids[0].kind === 'not',
+       'NOT and OR print back in the shape the user typed');
+    // Parity: for every fixture formula the trace root equals run() on every row.
+    const forms = ['score + backup', 'IF(score > 20, "big", "small")', 'COALESCE(score, backup, 0)',
+        'SUM(score, backup, third, ignore_missing = 1)', 'score - VMEAN(score)', 'LOWER(group)',
+        'score / (backup - 1)', 'BIN(third, 3)', 'ROUND(third / 7, 1)'];
+    let agree = true;
+    for (const f of forms) {
+        const c = PSFormula.compile(f, NAMES);
+        const vals = c.run(COLUMNS, N);
+        for (let r = 0; r < N; r++) {
+            const t2 = c.explain(COLUMNS, r);
+            if (!t2 || t2.value !== vals[r]) agree = false;
+        }
+    }
+    ok(agree, 'explain and run agree on every row of every fixture formula');
+}
+
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nFORMULA UNIT CHECK PASS');
 process.exit(failures ? 1 : 0);

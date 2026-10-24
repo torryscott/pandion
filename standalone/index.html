@@ -1777,6 +1777,52 @@
   #ps-formula-preview th { color: var(--ps-muted); font-size: 11px; }
   #ps-formula-preview .ps-fprev-res { color: var(--ps-accent-press); font-weight: 700; }
   .ps-fprev-note { color: var(--ps-muted); font-size: 11px; margin-top: 4px; }
+  /* The worked example (Oct 2026): summary, pickable rows, the unfolded row. */
+  .ps-fprev-sum {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      Helvetica, Arial, sans-serif;
+    font-size: 12px; color: var(--ps-ink-2); margin: 0 0 6px; white-space: normal;
+  }
+  .ps-fprev-sum b { color: var(--ps-ink); }
+  .ps-fprev-type {
+    display: inline-block; margin-left: 6px; padding: 0 8px;
+    border: 1px solid var(--ps-tint-line-1); border-radius: 999px;
+    background: var(--ps-tint-3); color: var(--ps-accent-ink); font-size: 11px;
+  }
+  .ps-fprev-row, .ps-fprev-pick {
+    -webkit-appearance: none; appearance: none; font: inherit;
+    border: 1px solid var(--ps-tint-line-1); background: var(--ps-s0);
+    color: var(--ps-accent-press); border-radius: var(--ps-r-sm);
+    padding: 0 6px; min-width: 24px; min-height: 20px; line-height: 18px;
+  }
+  .ps-fprev-pick { font-size: 11px; }
+  .ps-fprev-pick[aria-expanded="true"] { background: var(--ps-accent); color: var(--ps-on-accent); border-color: var(--ps-accent); }
+  #ps-formula-preview tr.ps-fprev-r:hover td { background: var(--ps-tint-1); }
+  #ps-formula-preview tr.ps-fprev-sel td { background: var(--ps-tint-2); }
+  #ps-formula-preview td.ps-fprev-miss { color: var(--ps-muted); }
+  #ps-formula-preview td.ps-fprev-res.ps-fprev-miss { color: var(--ps-muted); font-weight: 500; }
+  .ps-fprev-trace {
+    margin-top: 8px; padding: 6px 10px; background: var(--ps-s0);
+    border: 1px solid var(--ps-l1); border-radius: var(--ps-r-md);
+    white-space: normal;
+  }
+  .ps-fprev-trace-h {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      Helvetica, Arial, sans-serif;
+    font-size: 12px; font-weight: 600; color: var(--ps-ink); margin: 0 0 4px;
+  }
+  .ps-fprev-trace ul { list-style: none; margin: 0; padding: 0 0 0 12px; border-left: 1px solid var(--ps-l3); }
+  .ps-fprev-trace > ul { padding-left: 0; border-left: 0; }
+  .ps-fprev-trace li { margin: 3px 0; }
+  .ps-fprev-ex { font-size: 11.5px; color: var(--ps-ink-2); }
+  .ps-fprev-arrow { color: var(--ps-muted); margin: 0 6px; }
+  .ps-fprev-val { font-weight: 700; color: var(--ps-accent-press); }
+  .ps-fprev-val.ps-fprev-miss { font-weight: 500; color: var(--ps-muted); }
+  .ps-fprev-why {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      Helvetica, Arial, sans-serif;
+    font-size: 11.5px; color: var(--ps-muted); margin-left: 6px;
+  }
   #ps-formula-msg { min-height: 16px; font-size: 12px; color: var(--ps-danger-2); }
   #ps-formula-preview {
     font-family: ui-monospace, Menlo, monospace; font-size: 11.5px;

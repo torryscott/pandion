@@ -455,6 +455,18 @@ punch lists are maintainer-local and not published with this repo.
   it against the engine and compares the printed value (a tampered
   value goes red). The dialog's Functions bar links to it (Full
   reference), re-pointed on open like Help > User guide.
+  Oct 23 2026: the dialog's preview is a WORKED EXAMPLE: a summary
+  (values, missing count with the rows as buttons and the column that
+  made them missing, the measure type save will give - the same
+  inferType call), the first five rows with inputs beside the result
+  (td.ps-fprev-res kept for the older probes), and a click on any row
+  (or a summary row number) unfolds the calculation step by step via
+  the engine's new compiled.explain(columns, row): a trace tree with
+  values from evalNode on the same env as run() plus FACTS
+  (missingFrom, divZero, taken, first, skipped, decided, n/total); the
+  wording lives in the shell (formulaTraceWhy). Probes:
+  formula-unit-check case E (facts + run parity), formula-explain-check
+  (the dialog).
 - M5g DONE (Jul 23 2026): ROW FILTERS (Tier 1, Torry's ruling: dim but
   show). Dataset-wide AND-combined conditions ({col, op, value}; ops
   = != on any type, > >= < <= numeric-only; missing values fail their

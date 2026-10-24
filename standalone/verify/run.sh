@@ -34,7 +34,7 @@ data-integrity-check workspace-sequence-check data-commandbar-check data-menu-ch
 data-undo-check dates-check eyedropper-check doclifecycle-check tab-accessibility-check drag-feel-check \
 drag-selection-check outside-canvas-check hmc-list-check hidden-vars-check sigma-freshness-check \
 empty-states-check engine-stamp-check flyout-align-check filter-honesty-check examples-check exclusion-bridge-check \
-find-scope-check findpop-check finish-five-check fitpanes-check formula-unit-check formula-vocab-check formula-recipes-check \
+find-scope-check findpop-check finish-five-check fitpanes-check formula-unit-check formula-vocab-check formula-recipes-check formula-explain-check \
 grid-keys-check grid-enter-mode-check large-project-check large-autosave-check cell-edit-scope-check grid-column-window-check help-check hierarchy-check hidden-selection-check multi-column-type-check role-chip-order-check typed-alpha-check chip-chart-order-check chip-glide-check hist-facet-bins-check eb-method-preview-check
 identifier-advice-check inspector-freshness-check menu-selection-check \
 panel-controls-size-check \
