@@ -3060,7 +3060,13 @@
     return a;
   }
   function refreshFormulaSignature() {
-    var card = el("ps-fsig"), box = el("ps-formula-input");
+    renderSignatureCard(el("ps-formula-input"), el("ps-fsig"));
+  }
+  // The card for one formula box: the dialog's textarea, or a filter
+  // popover's formula row (Oct 2026, step 4 of the filter follow-ups). A
+  // Use-<fn> rewrite dispatches an input event on the box, so the box's
+  // owner re-evaluates through the listener it already has.
+  function renderSignatureCard(box, card) {
     if (!card || !box) return;
     var src = box.value;
     var pos = box.selectionStart != null ? box.selectionStart : src.length;
@@ -3085,7 +3091,7 @@
             var shift = cand.length - (call.nameEnd - call.nameStart);
             box.focus();
             box.selectionStart = box.selectionEnd = Math.max(at, pos + shift);
-            refreshFormulaPreview();
+            box.dispatchEvent(new Event("input", { bubbles: true }));
           });
           line.appendChild(b);
         })(cands[ci]);
@@ -18535,10 +18541,22 @@
           fx.placeholder = 'e.g. attention == 4 AND NOT(rt < 200 OR rt > 5000)';
           fx.spellcheck = false;
           fx.value = f.formula || "";
-          fx.addEventListener("input", function () {
-            f.formula = this.value;
+          // The same help the Computed variable dialog gives (Oct 2026):
+          // a card that follows the caret into any function, and the
+          // error line's fixes as buttons. The card is a full-width
+          // child of the wrapping row, under the input.
+          var fcard = mkEl("div", "ps-fsig ps-filter-fsig");
+          fcard.hidden = true;
+          fcard.setAttribute("data-filter-fsig", String(idx));
+          var syncRow = function () {
+            f.formula = fx.value;
             refreshFilterCount();
             refreshFilterFormulaNote(row, f);
+          };
+          var syncCard = function () { renderSignatureCard(fx, fcard); };
+          fx.addEventListener("input", function () { syncRow(); syncCard(); });
+          ["keyup", "click", "focus"].forEach(function (ev) {
+            fx.addEventListener(ev, syncCard);
           });
           row.appendChild(fx);
           var rmF = mkEl("button", "ps-filter-remove", "\u00d7");
@@ -18551,6 +18569,7 @@
             renderFilterMenu({ field: "col", row: Math.min(idx, FILTER_DRAFT.length - 1) });
           });
           row.appendChild(rmF);
+          row.appendChild(fcard);
           refreshFilterFormulaNote(row, f);
           m.appendChild(row);
           return;
@@ -18745,6 +18764,21 @@
       "This formula " + (/^gives text/.test(ev.error) ? ev.error
         : "cannot be used: " + ev.error) +
       ", so this condition is not being applied.");
+    // The fixes the engine names, as buttons (the dialog's idiom): the
+    // rewrite lands in the row's input and re-evaluates the draft.
+    var fixes = /^gives text/.test(ev.error) ? [] : formulaErrorFixes(expr, ev.error);
+    var fx = row.querySelector("input[data-filter-formula]");
+    for (var fi = 0; fi < fixes.length && fx; fi++) (function (fix) {
+      var b = mkEl("button", "ps-fmsg-fix", fix.label);
+      b.type = "button";
+      b.addEventListener("click", function () {
+        fx.value = fix.apply(fx.value);
+        fx.focus();
+        fx.selectionStart = fx.selectionEnd = fx.value.length;
+        fx.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      why.appendChild(b);
+    })(fixes[fi]);
     row.appendChild(why);
   }
   // ---- the filter as ONE formula (Oct 2026, "Make this a 0/1 column").
@@ -20107,11 +20141,21 @@
       el("ps-formula-input").addEventListener(ev, refreshFormulaSignature);
     });
     document.addEventListener("selectionchange", function () {
-      if (document.activeElement === el("ps-formula-input"))
-        refreshFormulaSignature();
+      var a = document.activeElement;
+      if (a === el("ps-formula-input")) { refreshFormulaSignature(); return; }
+      if (a && a.classList && a.classList.contains("ps-filter-formula")) {
+        var row = a.closest(".ps-filter-row");
+        var card = row ? row.querySelector("[data-filter-fsig]") : null;
+        if (card) renderSignatureCard(a, card);
+      }
     });
     el("ps-fsig").addEventListener("click", function (e) {
       var a = e.target && e.target.closest ? e.target.closest("a[data-guide-link]") : null;
+      if (a && userGuideTarget().online)
+        showToast("Opening the user guide at pandionplots.com in a new tab");
+    });
+    el("ps-filtermenu").addEventListener("click", function (e) {
+      var a = e.target && e.target.closest ? e.target.closest("[data-filter-fsig] a[data-guide-link]") : null;
       if (a && userGuideTarget().online)
         showToast("Opening the user guide at pandionplots.com in a new tab");
     });

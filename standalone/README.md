@@ -551,6 +551,14 @@ punch lists are maintainer-local and not published with this repo.
   through) disables the conversion with a note, since a formula would
   compare the text. Probe: filter-asformula-check (clipboard stubbed via
   addInitScript: file:// pages have no clipboard permission).
+  Oct 24 2026: HELP INSIDE THE FORMULA ROW (step 4, on the branch that
+  merges the formula-help work). refreshFormulaSignature is now a wrapper
+  over renderSignatureCard(box, card, afterChange); each formula row
+  carries a .ps-fsig.ps-filter-fsig card (flex-basis 100% under the
+  input, data-filter-fsig=idx) refreshed on input/keyup/click/focus and
+  by the document selectionchange listener, and refreshFilterFormulaNote
+  appends formulaErrorFixes buttons to the stranded note (a text-valued
+  formula gets none). Probe: filter-help-check.
 - M5f DONE (Jul 23 2026): EXCEL .XLSX IMPORT (Tier 1). js/ps-xlsx.js is a
   dependency-free OOXML reader on PSOmv's ZIP core + DOMParser: shared /
   inline / rich-text strings, formula CACHED values, booleans, error
