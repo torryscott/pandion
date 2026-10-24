@@ -93,12 +93,13 @@ await page.fill('#ps-formula-input', 'COALESCE(post, pre)');
 await page.waitForTimeout(250);
 const prev = await page.evaluate(() => ({
     msg: document.getElementById('ps-formula-msg').textContent,
-    // The preview is a TABLE now (inputs beside the result, first three
-    // rows); the filled values ride the result column's cells.
+    // The preview is a TABLE now (inputs beside the result; the first
+    // five rows since the worked-example round, Oct 2026); the filled
+    // values ride the result column's cells.
     res: Array.from(document.querySelectorAll(
         '#ps-formula-preview td.ps-fprev-res')).map(n => n.textContent)
 }));
-ok(prev.msg === '' && String(prev.res) === '14,12,16',
+ok(prev.msg === '' && String(prev.res) === '14,12,16,11,18',
    'the live preview shows the filled values beside their inputs: ' +
    prev.res);
 await page.click('#ps-formula-save');

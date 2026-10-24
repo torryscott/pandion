@@ -2942,6 +2942,355 @@
       ["ISMISSING(x)", "1 when the value is missing, 0 when it is there.", "any1"],
       ["COALESCE(a, b, ...)", "The first value that is not missing.", "ordermulti"]]]
   ];
+  // ---- the signature card (Oct 2026, layer 1 of the formula-help
+  // mockup). Each function's missing-value rule, word for word the
+  // guide's Formula reference cell for it (formula-signature-check pins
+  // the two together), so the card can never say something the
+  // reference does not.
+  var FORMULA_FN_MISSING = {
+    MEAN: "Missing if any argument is missing, unless ignore_missing = 1; " +
+      "then missing only when every argument is.",
+    VMEAN: "Skips missing cells; missing when the column has no values.",
+    VSD: "Skips missing cells; missing with fewer than two values.",
+    N: "Never missing: an empty column gives 0.",
+    LOG10: "Missing for zero or a negative number.",
+    SQRT: "Missing for a negative number.",
+    ABS: "Missing where the input is.",
+    EXP: "Missing where the input is, or when the result is too large to store.",
+    ROUND: "Missing where either input is.",
+    BIN: "Missing where the value is missing or k is below 2; a column " +
+      "with one distinct value is all bin 1.",
+    IF: "Missing where the test is missing: neither branch is taken.",
+    CONTAINS: "Missing where either input is.",
+    ISMISSING: "Never missing; that is the point.",
+    COALESCE: "Missing only when every argument is."
+  };
+  FORMULA_FN_MISSING.SUM = FORMULA_FN_MISSING.MIN = FORMULA_FN_MISSING.MAX =
+    FORMULA_FN_MISSING.MEAN;
+  FORMULA_FN_MISSING.VMEDIAN = FORMULA_FN_MISSING.VMIN =
+    FORMULA_FN_MISSING.VMAX = FORMULA_FN_MISSING.VSUM = FORMULA_FN_MISSING.VMEAN;
+  FORMULA_FN_MISSING.LN = FORMULA_FN_MISSING.LOG10;
+  FORMULA_FN_MISSING.FLOOR = FORMULA_FN_MISSING.CEILING = FORMULA_FN_MISSING.UPPER =
+    FORMULA_FN_MISSING.LOWER = FORMULA_FN_MISSING.TRIM = FORMULA_FN_MISSING.LEN =
+    FORMULA_FN_MISSING.ABS;
+  // name -> { label, sentence, parts } from the Functions browser's own
+  // table, so the card and the browser can never describe a function
+  // differently. The recipes group and the operators row are not calls.
+  var FORMULA_FN_INFO = null;
+  function formulaFnInfo(name) {
+    if (!FORMULA_FN_INFO) {
+      FORMULA_FN_INFO = Object.create(null);
+      for (var g = 1; g < FORMULA_FN_GROUPS.length; g++) {
+        var fns = FORMULA_FN_GROUPS[g][1];
+        for (var i = 0; i < fns.length; i++) {
+          var label = fns[i][0], paren = label.indexOf("(");
+          if (paren === -1) continue;
+          var inner = label.slice(paren + 1, label.lastIndexOf(")"));
+          FORMULA_FN_INFO[label.slice(0, paren)] = {
+            label: label, sentence: fns[i][1],
+            parts: inner.split(",").map(function (s) { return s.trim(); })
+          };
+        }
+      }
+    }
+    return FORMULA_FN_INFO[String(name || "").toUpperCase()] || null;
+  }
+  // The functions whose name or search words contain the typed word:
+  // what the search box would have found for it, offered as the fix
+  // for an unknown name (AVERAGE -> MEAN, VMEAN; SD -> VSD).
+  function formulaFnCandidates(typed) {
+    var q = String(typed || "").toLowerCase(), out = [];
+    if (!q) return out;
+    formulaFnInfo("MEAN");
+    for (var name in FORMULA_FN_INFO) {
+      var hay = (name + " " + (FORMULA_FN_SYNONYMS[name] || "")).toLowerCase();
+      if (new RegExp("(^|\\s)" + q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
+          "(\\s|$)").test(hay)) out.push(name);
+    }
+    return out.slice(0, 3);
+  }
+  // The innermost function call the caret sits in: its name as typed,
+  // where the name starts and ends, and which argument the caret is
+  // in (depth-0 commas between the bracket and the caret). Scanned
+  // backwards from the caret, skipping quoted text; a caret inside an
+  // unclosed string finds nothing, which is right - the user is typing
+  // a label, not an argument.
+  function formulaCallAtCaret(src, pos) {
+    // Quote state is settled FORWARD first: scanned backwards, an
+    // unclosed string's bracket is met before its opening quote and
+    // would read as a call.
+    var inStrAt = new Array(pos), q = false, k;
+    for (k = 0; k < pos; k++) {
+      if (src[k] === "\"") { q = !q; inStrAt[k] = true; continue; }
+      inStrAt[k] = q;
+    }
+    if (q) return null;   // the caret is inside a string
+    var depth = 0, i;
+    for (i = pos - 1; i >= 0; i--) {
+      var ch = src[i];
+      if (inStrAt[i]) continue;
+      if (ch === ")") depth++;
+      else if (ch === "(") {
+        if (depth === 0) {
+          var m = /([A-Za-z_][A-Za-z0-9_]*)(\s*)$/.exec(src.slice(0, i));
+          if (!m) return null;
+          var argIdx = 0, d = 0, q = false, j, c;
+          for (j = i + 1; j < pos; j++) {
+            c = src[j];
+            if (c === "\"") { q = !q; continue; }
+            if (q) continue;
+            if (c === "(") d++;
+            else if (c === ")") d--;
+            else if (c === "," && d === 0) argIdx++;
+          }
+          var nameEnd = i - m[2].length;
+          return { typed: m[1], name: m[1].toUpperCase(), argIdx: argIdx,
+                   nameStart: nameEnd - m[1].length, nameEnd: nameEnd };
+        }
+        depth--;
+      }
+    }
+    return null;
+  }
+  function formulaGuideLink(anchor, text) {
+    var a = mkEl("a", "", text);
+    a.href = userGuideTarget().url + "#" + anchor;
+    a.target = "_blank"; a.rel = "noopener";
+    a.setAttribute("data-guide-link", "1");
+    return a;
+  }
+  function refreshFormulaSignature() {
+    var card = el("ps-fsig"), box = el("ps-formula-input");
+    if (!card || !box) return;
+    var src = box.value;
+    var pos = box.selectionStart != null ? box.selectionStart : src.length;
+    var call = formulaCallAtCaret(src, pos);
+    card.textContent = "";
+    if (!call) { card.hidden = true; return; }
+    var info = formulaFnInfo(call.name);
+    if (!info) {
+      // Not a function: say so, and offer what the search would find.
+      var line = mkEl("div", "ps-fsig-what");
+      line.appendChild(mkEl("code", "", call.typed + "()"));
+      line.appendChild(document.createTextNode(" is not a function here."));
+      var cands = formulaFnCandidates(call.typed);
+      if (cands.length) {
+        line.appendChild(document.createTextNode(" Did you mean"));
+        for (var ci = 0; ci < cands.length; ci++) (function (cand) {
+          var b = mkEl("button", "ps-fsig-use", "Use " + cand);
+          b.type = "button";
+          b.addEventListener("click", function () {
+            var at = call.nameStart;
+            box.value = src.slice(0, at) + cand + src.slice(call.nameEnd);
+            var shift = cand.length - (call.nameEnd - call.nameStart);
+            box.focus();
+            box.selectionStart = box.selectionEnd = Math.max(at, pos + shift);
+            refreshFormulaPreview();
+          });
+          line.appendChild(b);
+        })(cands[ci]);
+        line.appendChild(document.createTextNode("?"));
+      }
+      card.appendChild(line);
+      card.hidden = false;
+      return;
+    }
+    var parts = info.parts, last = parts.length - 1;
+    var cur = call.argIdx;
+    if (cur > last) cur = parts[last] === "..." ? last : -1;
+    var sig = mkEl("code", "ps-fsig-sig");
+    sig.appendChild(mkEl("b", "", call.name));
+    sig.appendChild(document.createTextNode("("));
+    for (var p = 0; p < parts.length; p++) {
+      if (p) sig.appendChild(document.createTextNode(", "));
+      sig.appendChild(mkEl("span", "ps-fsig-arg" + (p === cur ? " ps-fsig-cur" : ""), parts[p]));
+    }
+    sig.appendChild(document.createTextNode(")"));
+    var head = mkEl("div", "ps-fsig-head");
+    head.appendChild(sig);
+    if (cur !== -1) {
+      var inArg = mkEl("span", "ps-fsig-in", "you are in ");
+      inArg.appendChild(mkEl("b", "", parts[cur] === "..." ? "another argument" : parts[cur]));
+      head.appendChild(inArg);
+    } else {
+      head.appendChild(mkEl("span", "ps-fsig-in", "this function takes " +
+        parts.length + " argument" + (parts.length === 1 ? "" : "s")));
+    }
+    card.appendChild(head);
+    card.appendChild(mkEl("div", "ps-fsig-what", info.sentence));
+    var miss = mkEl("div", "ps-fsig-miss");
+    miss.appendChild(mkEl("b", "", "Missing values: "));
+    miss.appendChild(document.createTextNode(
+      (FORMULA_FN_MISSING[call.name] || "") + " "));
+    miss.appendChild(formulaGuideLink("fn-" + call.name.toLowerCase(), "Reference"));
+    card.appendChild(miss);
+    card.hidden = false;
+  }
+  // The fixes an error message carries, as buttons. The engine already
+  // names the fix in words (did-you-mean, the V-form, the stray =); a
+  // button saves retyping it and keeps the student in the dialog.
+  function formulaErrorFixes(src, error) {
+    var out = [], m;
+    var known = function (name) { return !!formulaFnInfo(name); };
+    var esc = function (s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); };
+    m = /use (V[A-Z0-9]+)\(([^)]*)\)$/.exec(error);
+    if (m && m[2] !== "column") {
+      var base = m[1].slice(1), rx = new RegExp("\\b" + base + "\\s*\\(\\s*" +
+        esc(m[2]) + "\\s*\\)", "i");
+      if (rx.test(src))
+        out.push({ label: "Use " + m[1] + "(" + m[2] + ")",
+                   apply: function (s) { return s.replace(rx, m[1] + "(" + m[2] + ")"); } });
+      return out;
+    }
+    m = /^unknown function ([A-Za-z0-9_.]+)\(\)/.exec(error);
+    if (m) {
+      var bad = m[1], names = [], tail = error.slice(error.indexOf("Did you mean"));
+      var w, wrx = /\b(V?[A-Z][A-Z0-9]*)\b/g;
+      while ((w = wrx.exec(tail)) !== null)
+        if (known(w[1]) && names.indexOf(w[1]) === -1) names.push(w[1]);
+      if (!names.length) names = formulaFnCandidates(bad);
+      names.slice(0, 3).forEach(function (name) {
+        var rx2 = new RegExp("\\b" + esc(bad) + "\\s*\\(", "gi");
+        out.push({ label: "Use " + name,
+                   apply: function (s) { return s.replace(rx2, name + "("); } });
+      });
+      return out;
+    }
+    m = /^unknown variable "(.+?)"\. Did you mean (.+?)\?/.exec(error);
+    if (m && window.PSFormula && window.PSFormula.renameRef) {
+      out.push({ label: "Use " + m[2],
+                 apply: function (s) { return window.PSFormula.renameRef(s, m[1], m[2]); } });
+      return out;
+    }
+    if (/remove the leading "="/.test(error))
+      out.push({ label: "Remove the =",
+                 apply: function (s) { return s.replace(/^\s*=+\s*/, ""); } });
+    return out;
+  }
+  // ---- tap a term (Oct 2026, layer 3 of the formula-help mockup). Each
+  // function called in the formula is a chip under the preview's
+  // summary; tapping it opens a popover with the definition, the
+  // missing-value rule, the function's VALUE on this table (an
+  // aggregate's constant with the count it saw; a row-wise call in the
+  // unfolded row, or row 1, with the trace's reason), and a link to the
+  // reference entry. The statistics panel's tap-a-term, for formulas.
+  var FORMULA_LAST = null;          // { compiled, formula } of the last good preview
+  var FORMULA_TERM_OPEN = null;     // the chip whose popover is open
+  // Every known function CALLED in the text, first appearance first,
+  // deduped; quoted text is skipped so a label never counts.
+  function formulaFnNamesIn(src) {
+    var out = [], s = String(src || ""), i = 0, q = false;
+    while (i < s.length) {
+      var ch = s[i];
+      if (ch === "\"") { q = !q; i++; continue; }
+      if (q || !/[A-Za-z_]/.test(ch)) { i++; continue; }
+      var m = /^[A-Za-z_][A-Za-z0-9_.]*/.exec(s.slice(i));
+      var word = m[0], j = i + word.length;
+      while (j < s.length && (s[j] === " " || s[j] === "\t")) j++;
+      var up = word.toUpperCase();
+      if (s[j] === "(" && formulaFnInfo(up) && out.indexOf(up) === -1) out.push(up);
+      i = i + word.length;
+    }
+    return out;
+  }
+  function formulaTermPop() {
+    var p = el("ps-fterm-pop");
+    if (p) return p;
+    p = mkEl("div");
+    p.id = "ps-fterm-pop";
+    p.setAttribute("role", "region");
+    p.setAttribute("aria-live", "polite");
+    p.hidden = true;
+    document.body.appendChild(p);
+    return p;
+  }
+  function closeFormulaTerm(refocus) {
+    var p = el("ps-fterm-pop");
+    var chip = FORMULA_TERM_OPEN;
+    FORMULA_TERM_OPEN = null;
+    if (chip) chip.setAttribute("aria-expanded", "false");
+    if (!p || p.hidden) return;
+    p.hidden = true;
+    p.textContent = "";
+    if (refocus && chip && chip.isConnected) chip.focus();
+  }
+  function formulaTermFind(node, name) {
+    if (!node) return null;
+    if ((node.kind === "fn" || node.kind === "agg") && node.fn === name) return node;
+    for (var i = 0; i < node.kids.length; i++) {
+      var hit = formulaTermFind(node.kids[i], name);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  // The function's value on THIS table, in the words the trace uses.
+  function formulaTermOnData(name) {
+    var t = PROJECT.table, last = FORMULA_LAST;
+    if (!t || !last || !nRows(t)) return "Type a formula that uses it to see its value here.";
+    var row = FORMULA_EXPLAIN_ROW !== -1 ? FORMULA_EXPLAIN_ROW : 0;
+    var node = formulaTermFind(last.compiled.explain(t.columns, row), name);
+    if (!node && /^(V[A-Z]+|N)$/.test(name)) {
+      // An aggregate in a branch this row did not take still has its
+      // one value: evaluate the first call of it in the text on its own.
+      var m = new RegExp(name + "\\s*\\(\\s*(`[^`]+`|[A-Za-z_][A-Za-z0-9_.]*)\\s*\\)")
+        .exec(last.formula);
+      if (m) {
+        var editing = FORMULA_EDIT && FORMULA_EDIT.col;
+        var c2 = window.PSFormula.compile(m[0], t.order.filter(function (c) {
+          return c !== editing; }));
+        if (c2.ok) node = formulaTermFind(c2.explain(t.columns, 0), name);
+      }
+    }
+    if (!node)
+      return "Not evaluated in row " + (row + 1) +
+        ": the branch it sits in was not taken there.";
+    var why = formulaTraceWhy(node, row, t);
+    if (node.kind === "agg")
+      return node.text + " = " + fmtPreviewValue(node.value) + (why ? ", " + why : "") + ".";
+    return "In row " + (row + 1) + ", " + node.text + " = " + fmtPreviewValue(node.value) +
+      (why ? " (" + why + ")" : "") + "." +
+      (FORMULA_EXPLAIN_ROW === -1 ? " Unfold another row below to see it there." : "");
+  }
+  function openFormulaTerm(chip) {
+    var name = chip.getAttribute("data-fn"), info = formulaFnInfo(name);
+    if (!info) return;
+    if (FORMULA_TERM_OPEN === chip) { closeFormulaTerm(true); return; }
+    closeFormulaTerm(false);
+    var p = formulaTermPop();
+    p.textContent = "";
+    p.setAttribute("aria-label", name + ": definition and its value on your data");
+    var head = mkEl("div", "ps-fterm-head");
+    head.appendChild(mkEl("code", "", info.label));
+    var close = mkEl("button", "ps-fterm-close", "Close");
+    close.type = "button";
+    close.setAttribute("aria-label", "Close the definition");
+    head.appendChild(close);
+    p.appendChild(head);
+    p.appendChild(mkEl("div", "ps-fterm-what", info.sentence));
+    var miss = mkEl("div", "ps-fterm-miss");
+    miss.appendChild(mkEl("b", "", "Missing values: "));
+    miss.appendChild(document.createTextNode(FORMULA_FN_MISSING[name] || ""));
+    p.appendChild(miss);
+    var box = mkEl("div", "ps-fterm-box");
+    box.appendChild(mkEl("b", "", "On your data"));
+    box.appendChild(document.createTextNode(formulaTermOnData(name)));
+    p.appendChild(box);
+    var ref = mkEl("div", "ps-fterm-ref", "Full entry: ");
+    ref.appendChild(formulaGuideLink("fn-" + name.toLowerCase(),
+      "Formula reference, " + name));
+    p.appendChild(ref);
+    p.hidden = false;
+    // Below the chip, left-aligned, kept inside the viewport; above it
+    // when the space below runs out. Fixed, like the dialog it floats over.
+    var r = chip.getBoundingClientRect();
+    var left = Math.max(8, Math.min(r.left, window.innerWidth - p.offsetWidth - 12));
+    var top = r.bottom + 6;
+    if (top + p.offsetHeight > window.innerHeight - 8) top = Math.max(8, r.top - 6 - p.offsetHeight);
+    p.style.left = left + "px";
+    p.style.top = top + "px";
+    chip.setAttribute("aria-expanded", "true");
+    FORMULA_TERM_OPEN = chip;
+  }
   // Insert-at-cursor is what keeps the browser COMPOSITIONAL: two
   // clicks and a typed minus build a z-score. An insert also releases
   // any active recipe - after it, the box is no longer the recipe's
@@ -3499,6 +3848,8 @@
     var t = PROJECT.table;
     if (!t) return;
     FORMULA_EDIT = { col: editingCol || null, source: source || null };
+    FORMULA_EXPLAIN_ROW = -1;
+    closeFormulaTerm(false);
     el("ps-formula-title").textContent = editingCol
       ? "Edit formula: " + editingCol : "Computed variable";
     el("ps-formula-name").value = editingCol ||
@@ -3538,10 +3889,102 @@
     refreshFormulaPreview();
     openShellDialog("ps-formula-dialog");
   }
+  // The worked-example preview (Oct 2026, Torry: build the layer that
+  // teaches the missing-value rule first). The row the student has
+  // unfolded; -1 = none. Reset when the dialog opens, kept across edits
+  // so the trace follows the formula while it is being written.
+  var FORMULA_EXPLAIN_ROW = -1;
+  function fmtPreviewValue(v) {
+    return v == null ? "missing"
+      : typeof v === "number" ? String(Number(v.toPrecision(6))) : String(v);
+  }
+  // Why a sub-expression came out the way it did, in plain words, from
+  // the facts the engine's explain mode returns. Only the lines that
+  // teach something get a reason; a plain arithmetic step stands alone.
+  function formulaTraceWhy(node, row, t) {
+    var v = node.value;
+    if (node.kind === "col") {
+      if (v != null) return "";
+      var raw = t.raw && t.raw[node.col] ? t.raw[node.col][row] : "";
+      raw = raw == null ? "" : String(raw).trim();
+      return raw ? "\"" + raw + "\" is a missing code for this column"
+                 : "empty cell in row " + (row + 1);
+    }
+    if (node.kind === "agg") {
+      var skipped = node.total - node.n;
+      return "over " + node.n + " value" + (node.n === 1 ? "" : "s") +
+        " in the column" +
+        (skipped > 0 ? " (" + skipped + " missing skipped)" : "") +
+        ", the same on every row";
+    }
+    if (node.kind === "bin") {
+      if (node.missingFrom)
+        return "missing because " + node.missingFrom.join(" and ") +
+          (node.missingFrom.length > 1 ? " are" : " is") + " missing";
+      if (node.divZero) return "missing: division by zero";
+      if (node.op === "and" || node.op === "or") {
+        var word = v === 1 ? "true" : "false";
+        if (node.decided === "left")
+          return word + ": the left side already " +
+            (node.op === "and" ? "fails" : "holds") +
+            ", so the right side is not read";
+        return word;
+      }
+      if (node.op === "=" || node.op === "!=" || node.op === "<" ||
+          node.op === "<=" || node.op === ">" || node.op === ">=")
+        return v === 1 ? "true" : "false";
+      return "";
+    }
+    if (node.kind === "fn") {
+      if (node.fn === "IF") {
+        if (node.taken === 0)
+          return "the test is missing, so neither branch is taken";
+        return "the test is " + (node.taken === 1
+          ? "true, so the then branch" : "false, so the else branch");
+      }
+      if (node.fn === "COALESCE") {
+        if (node.first === -1) return "every argument is missing";
+        return "the first value that is present" +
+          (node.first > 0 ? " (argument " + (node.first + 1) + ")" : "");
+      }
+      if (node.missingFrom)
+        return "missing because " + node.missingFrom.join(" and ") +
+          (node.missingFrom.length > 1 ? " are" : " is") + " missing";
+      if (node.ig && node.skipped > 0)
+        return "ignore_missing = 1: " + node.skipped + " missing argument" +
+          (node.skipped === 1 ? "" : "s") + " skipped";
+      if (v == null) return "no value is defined for this input";
+      return "";
+    }
+    return "";
+  }
+  function renderFormulaTrace(node, row, t) {
+    var li = mkEl("li");
+    li.appendChild(mkEl("code", "ps-fprev-ex", node.text));
+    li.appendChild(mkEl("span", "ps-fprev-arrow", "\u2192"));
+    li.appendChild(mkEl("span", "ps-fprev-val" +
+      (node.value == null ? " ps-fprev-miss" : ""), fmtPreviewValue(node.value)));
+    var why = formulaTraceWhy(node, row, t);
+    if (why) li.appendChild(mkEl("span", "ps-fprev-why", why));
+    // Literals that print as themselves add nothing to the story.
+    var kids = node.kids.filter(function (k) {
+      return !(k.kind === "num" || k.kind === "str");
+    });
+    if (kids.length) {
+      var ul = mkEl("ul");
+      for (var i = 0; i < kids.length; i++)
+        ul.appendChild(renderFormulaTrace(kids[i], row, t));
+      li.appendChild(ul);
+    }
+    return li;
+  }
   function refreshFormulaPreview() {
     var t = PROJECT.table;
     var formula = el("ps-formula-input").value;
     var msg = el("ps-formula-msg"), prev = el("ps-formula-preview");
+    closeFormulaTerm(false);   // its chip is about to be rebuilt
+    FORMULA_LAST = null;
+    refreshFormulaSignature();
     if (!String(formula).trim()) {
       msg.textContent = "";
       // The functions browser is always on screen, so the promise is
@@ -3553,46 +3996,182 @@
     var editing = FORMULA_EDIT && FORMULA_EDIT.col;
     var known = t.order.filter(function (c) { return c !== editing; });
     var compiled = window.PSFormula.compile(formula, known);
+    refreshFormulaSignature();
     if (!compiled.ok) {
       msg.textContent = compiled.error;
+      var fixes = formulaErrorFixes(formula, compiled.error);
+      for (var fi = 0; fi < fixes.length; fi++) (function (fix) {
+        var b = mkEl("button", "ps-fmsg-fix", fix.label);
+        b.type = "button";
+        b.addEventListener("click", function () {
+          var box = el("ps-formula-input");
+          box.value = fix.apply(box.value);
+          box.focus();
+          box.selectionStart = box.selectionEnd = box.value.length;
+          refreshFormulaPreview();
+        });
+        msg.appendChild(b);
+      })(fixes[fi]);
       prev.textContent = "";
       return;
     }
     msg.textContent = "";
+    FORMULA_LAST = { compiled: compiled, formula: formula };
     var total = nRows(t);
     var values = compiled.run(t.columns, total);
-    var fmtv = function (v) {
-      return v == null ? "\u2014"
-        : typeof v === "number" ? String(Number(v.toPrecision(6))) : String(v);
-    };
+    var fmtv = fmtPreviewValue;
     prev.textContent = "";
+    if (!total) {
+      prev.textContent = "The table has no rows yet.";
+      return;
+    }
     var refs = compiled.refs || [];
-    if (refs.length && refs.length <= 5 && total) {
-      // Inputs BESIDE the result for the first rows, so the row-by-row
-      // idea is visible: a hole in an input visibly becomes a missing
-      // result (or, under ignore_missing, visibly does not). Wide
-      // formulas (6+ columns) fall back to the plain first-values line.
-      var nres = Math.min(3, total);
-      var tab = mkEl("table"), thr = mkEl("tr");
-      for (var ri = 0; ri < refs.length; ri++)
-        thr.appendChild(mkEl("th", "", refs[ri]));
-      thr.appendChild(mkEl("th", "ps-fprev-res",
-        "\u2192 " + (el("ps-formula-name").value || "result")));
-      tab.appendChild(thr);
-      for (var rr = 0; rr < nres; rr++) {
-        var tr = mkEl("tr");
+    // ---- the summary: how many results there are, how many are
+    // missing and which column made them so, and the measure type the
+    // column will get - the SAME inference save uses, so the chip can
+    // never promise a type the column does not get.
+    var missingRows = [], anyText = false, anyNum = false, culprit = {}, ri, rr;
+    var fromInput = [], undefinedRows = [];
+    for (rr = 0; rr < total; rr++) {
+      if (values[rr] == null) {
+        missingRows.push(rr);
+        var hadGap = false;
         for (ri = 0; ri < refs.length; ri++)
-          tr.appendChild(mkEl("td", "",
-            fmtv(t.columns[refs[ri]] ? t.columns[refs[ri]][rr] : null)));
-        tr.appendChild(mkEl("td", "ps-fprev-res", fmtv(values[rr])));
-        tab.appendChild(tr);
+          if (t.columns[refs[ri]] && t.columns[refs[ri]][rr] == null) {
+            culprit[refs[ri]] = 1; hadGap = true;
+          }
+        (hadGap ? fromInput : undefinedRows).push(rr);
+      } else if (typeof values[rr] === "number") anyNum = true;
+      else anyText = true;
+    }
+    // One clause per cause, in row order: "rows 3, 7: age is missing;
+    // row 1: the result is undefined there". Row numbers are buttons
+    // that unfold the row, six per clause at most.
+    function rowList(rows) {
+      var frag = document.createDocumentFragment();
+      frag.appendChild(document.createTextNode(rows.length === 1 ? "row " : "rows "));
+      var shown = rows.slice(0, 6);
+      for (var mi = 0; mi < shown.length; mi++) {
+        if (mi) frag.appendChild(document.createTextNode(", "));
+        var rb = mkEl("button", "ps-fprev-row", String(shown[mi] + 1));
+        rb.type = "button";
+        rb.setAttribute("data-fprev-row", String(shown[mi]));
+        rb.setAttribute("data-tip", "Unfold row " + (shown[mi] + 1));
+        frag.appendChild(rb);
       }
-      prev.appendChild(tab);
-      prev.appendChild(mkEl("div", "ps-fprev-note",
-        "first " + nres + " of " + total + " rows"));
-    } else {
-      prev.textContent = "First values: " +
-        values.slice(0, Math.min(6, total)).map(fmtv).join(", ");
+      if (rows.length > shown.length)
+        frag.appendChild(document.createTextNode(" and " +
+          (rows.length - shown.length) + " more"));
+      return frag;
+    }
+    var typeLabel = inferType(values.map(function (v) {
+      return v == null ? "" : String(v);
+    }), tableMissingTokens(t)) === "continuous" ? "Continuous" : "Nominal";
+    var sum = mkEl("div", "ps-fprev-sum");
+    sum.appendChild(mkEl("b", "", total + " row" + (total === 1 ? "" : "s") + ":"));
+    sum.appendChild(document.createTextNode(" " + (total - missingRows.length) +
+      " value" + (total - missingRows.length === 1 ? "" : "s") + ", " +
+      missingRows.length + " missing"));
+    if (missingRows.length) {
+      sum.appendChild(document.createTextNode(" ("));
+      var cs = Object.keys(culprit);
+      var clauses = [];
+      if (fromInput.length)
+        clauses.push({ at: fromInput[0], rows: fromInput, why: cs.join(" and ") +
+          (cs.length > 1 ? " are" : " is") + " missing" });
+      if (undefinedRows.length)
+        clauses.push({ at: undefinedRows[0], rows: undefinedRows,
+          why: "the result is undefined there" });
+      clauses.sort(function (a, b) { return a.at - b.at; });
+      for (var ci = 0; ci < clauses.length; ci++) {
+        if (ci) sum.appendChild(document.createTextNode("; "));
+        sum.appendChild(rowList(clauses[ci].rows));
+        sum.appendChild(document.createTextNode(": " + clauses[ci].why));
+      }
+      sum.appendChild(document.createTextNode(")"));
+    }
+    sum.appendChild(document.createTextNode("."));
+    sum.appendChild(mkEl("span", "ps-fprev-type", "Becomes a " + typeLabel +
+      " column" + (typeLabel === "Nominal" && anyNum && anyText
+        ? " (text and numbers mixed, so text)" : "")));
+    prev.appendChild(sum);
+    // ---- tap a term: one chip per function called in the formula
+    var fnNames = formulaFnNamesIn(formula);
+    if (fnNames.length) {
+      var termRow = mkEl("div", "ps-fterm-row");
+      termRow.appendChild(mkEl("span", "", "Functions here:"));
+      for (var ni = 0; ni < fnNames.length; ni++) {
+        var chip = mkEl("button", "ps-fterm", fnNames[ni]);
+        chip.type = "button";
+        chip.setAttribute("data-fn", fnNames[ni]);
+        chip.setAttribute("aria-expanded", "false");
+        chip.setAttribute("aria-controls", "ps-fterm-pop");
+        chip.setAttribute("data-tip", "What " + fnNames[ni] +
+          " does, and its value on your data");
+        termRow.appendChild(chip);
+      }
+      prev.appendChild(termRow);
+    }
+    // ---- the worked example: inputs BESIDE the result for the first
+    // rows, so the row-by-row idea is visible: a hole in an input
+    // visibly becomes a missing result (or, under ignore_missing,
+    // visibly does not). Up to five input columns; any beyond that are
+    // counted in the header. The unfolded row rides along when it sits
+    // past the first five.
+    var nres = Math.min(5, total), shownRefs = refs.slice(0, 5);
+    var rowsToShow = [];
+    for (rr = 0; rr < nres; rr++) rowsToShow.push(rr);
+    if (FORMULA_EXPLAIN_ROW >= total) FORMULA_EXPLAIN_ROW = -1;
+    if (FORMULA_EXPLAIN_ROW >= nres) rowsToShow.push(FORMULA_EXPLAIN_ROW);
+    var tab = mkEl("table"), thr = mkEl("tr");
+    thr.appendChild(mkEl("th", "", "Row"));
+    for (ri = 0; ri < shownRefs.length; ri++)
+      thr.appendChild(mkEl("th", "", shownRefs[ri]));
+    if (refs.length > shownRefs.length)
+      thr.appendChild(mkEl("th", "", "+" + (refs.length - shownRefs.length) + " more"));
+    thr.appendChild(mkEl("th", "ps-fprev-res",
+      "\u2192 " + (el("ps-formula-name").value || "result")));
+    tab.appendChild(thr);
+    for (var k = 0; k < rowsToShow.length; k++) {
+      rr = rowsToShow[k];
+      var tr = mkEl("tr", "ps-fprev-r" + (rr === FORMULA_EXPLAIN_ROW ? " ps-fprev-sel" : ""));
+      tr.setAttribute("data-fprev-row", String(rr));
+      var tdRow = mkEl("td", "ps-fprev-rowcell");
+      var pick = mkEl("button", "ps-fprev-pick", String(rr + 1));
+      pick.type = "button";
+      pick.setAttribute("data-fprev-row", String(rr));
+      pick.setAttribute("aria-expanded", rr === FORMULA_EXPLAIN_ROW ? "true" : "false");
+      pick.setAttribute("aria-label", "Row " + (rr + 1) + ": show how its value was worked out");
+      tdRow.appendChild(pick);
+      tr.appendChild(tdRow);
+      for (ri = 0; ri < shownRefs.length; ri++) {
+        var cv = t.columns[shownRefs[ri]] ? t.columns[shownRefs[ri]][rr] : null;
+        tr.appendChild(mkEl("td", cv == null ? "ps-fprev-miss" : "", fmtv(cv)));
+      }
+      if (refs.length > shownRefs.length) tr.appendChild(mkEl("td", "", ""));
+      tr.appendChild(mkEl("td", "ps-fprev-res" +
+        (values[rr] == null ? " ps-fprev-miss" : ""), fmtv(values[rr])));
+      tab.appendChild(tr);
+    }
+    prev.appendChild(tab);
+    prev.appendChild(mkEl("div", "ps-fprev-note",
+      (FORMULA_EXPLAIN_ROW === -1
+        ? "First " + nres + " of " + total + " rows. Click a row to see how its value was worked out."
+        : "First " + nres + " of " + total + " rows.")));
+    // ---- the unfolded row
+    if (FORMULA_EXPLAIN_ROW !== -1) {
+      var node = compiled.explain(t.columns, FORMULA_EXPLAIN_ROW);
+      if (node) {
+        var box = mkEl("div", "ps-fprev-trace");
+        box.setAttribute("role", "region");
+        box.setAttribute("aria-label", "Row " + (FORMULA_EXPLAIN_ROW + 1) + ", step by step");
+        box.appendChild(mkEl("div", "ps-fprev-trace-h",
+          "Row " + (FORMULA_EXPLAIN_ROW + 1) + ", step by step"));
+        var ul = mkEl("ul");
+        ul.appendChild(renderFormulaTrace(node, FORMULA_EXPLAIN_ROW, t));
+        box.appendChild(ul);
+        prev.appendChild(box);
+      }
     }
   }
   function submitFormulaDialog() {
@@ -19522,6 +20101,67 @@
     });
     el("ps-formula-save").addEventListener("click", submitFormulaDialog);
     el("ps-formula-input").addEventListener("input", refreshFormulaPreview);
+    // The signature card follows the CARET, not just the text: arrow
+    // keys, clicks and focus move it with no input event.
+    ["keyup", "click", "focus"].forEach(function (ev) {
+      el("ps-formula-input").addEventListener(ev, refreshFormulaSignature);
+    });
+    document.addEventListener("selectionchange", function () {
+      if (document.activeElement === el("ps-formula-input"))
+        refreshFormulaSignature();
+    });
+    el("ps-fsig").addEventListener("click", function (e) {
+      var a = e.target && e.target.closest ? e.target.closest("a[data-guide-link]") : null;
+      if (a && userGuideTarget().online)
+        showToast("Opening the user guide at pandionplots.com in a new tab");
+    });
+    formulaTermPop().addEventListener("click", function (e) {
+      if (e.target && e.target.closest && e.target.closest(".ps-fterm-close")) {
+        closeFormulaTerm(true);
+        return;
+      }
+      var a = e.target && e.target.closest ? e.target.closest("a[data-guide-link]") : null;
+      if (a && userGuideTarget().online)
+        showToast("Opening the user guide at pandionplots.com in a new tab");
+    });
+    // Its own Escape layer: WINDOW capture runs before any document
+    // listener (the color sampler's precedent), so one Escape closes
+    // the popover and the next one closes the dialog.
+    window.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape" || !FORMULA_TERM_OPEN) return;
+      e.preventDefault(); e.stopPropagation();
+      closeFormulaTerm(true);
+    }, true);
+    document.addEventListener("pointerdown", function (e) {
+      if (!FORMULA_TERM_OPEN) return;
+      var pop = el("ps-fterm-pop");
+      if ((pop && pop.contains(e.target)) || FORMULA_TERM_OPEN.contains(e.target)) return;
+      closeFormulaTerm(false);
+    }, true);
+    document.addEventListener("scroll", function () {
+      if (FORMULA_TERM_OPEN) closeFormulaTerm(false);   // fixed position would drift
+    }, true);
+    // Any row of the worked example, or a row number in its summary,
+    // unfolds that row; the same row again folds it. The pick buttons
+    // carry the keyboard path, the row itself the mouse convenience.
+    el("ps-formula-preview").addEventListener("click", function (e) {
+      var term = e.target && e.target.closest ? e.target.closest(".ps-fterm") : null;
+      if (term) { openFormulaTerm(term); return; }
+      var hit = e.target && e.target.closest
+        ? e.target.closest("[data-fprev-row]") : null;
+      if (!hit) return;
+      var row = Number(hit.getAttribute("data-fprev-row"));
+      if (!isFinite(row)) return;
+      var again = hit.tagName === "BUTTON" && hit.className === "ps-fprev-pick" &&
+        row === FORMULA_EXPLAIN_ROW;
+      FORMULA_EXPLAIN_ROW = again ? -1 : row;
+      refreshFormulaPreview();
+      if (!again) {
+        var picked = el("ps-formula-preview").querySelector(
+          ".ps-fprev-pick[data-fprev-row=\"" + row + "\"]");
+        if (picked && hit.tagName === "BUTTON") picked.focus();
+      }
+    });
     // Hand-editing the formula retires an open argument picker: the
     // box is the truth, and once the text is the user's own typing the
     // picker would be describing someone else's formula. Programmatic

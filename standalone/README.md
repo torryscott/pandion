@@ -455,6 +455,40 @@ punch lists are maintainer-local and not published with this repo.
   it against the engine and compares the printed value (a tampered
   value goes red). The dialog's Functions bar links to it (Full
   reference), re-pointed on open like Help > User guide.
+  Oct 23 2026: the dialog's preview is a WORKED EXAMPLE: a summary
+  (values, missing count with the rows as buttons and the column that
+  made them missing, the measure type save will give - the same
+  inferType call), the first five rows with inputs beside the result
+  (td.ps-fprev-res kept for the older probes), and a click on any row
+  (or a summary row number) unfolds the calculation step by step via
+  the engine's new compiled.explain(columns, row): a trace tree with
+  values from evalNode on the same env as run() plus FACTS
+  (missingFrom, divZero, taken, first, skipped, decided, n/total); the
+  wording lives in the shell (formulaTraceWhy). Probes:
+  formula-unit-check case E (facts + run parity), formula-explain-check
+  (the dialog).
+  Oct 23 2026 (same day): the SIGNATURE CARD (#ps-fsig, above the box)
+  follows the caret into any call (formulaCallAtCaret: innermost
+  unclosed bracket scanned backwards, quoted text skipped, depth-0
+  commas = the argument index) and shows the browser label with the
+  argument highlighted, the browser sentence, FORMULA_FN_MISSING (word
+  for word the guide's reference cell; formula-signature-check pins
+  every function) and a Reference link (#fn-<name>). An unknown name
+  gets 'is not a function here' + Use-<fn> buttons from the search
+  synonyms. The error line's fixes are buttons (formulaErrorFixes:
+  the V-form, did-you-mean names, a mis-cased variable via renameRef,
+  the leading =). Not a live region: it changes on every caret move.
+  Oct 23 2026 (same day): TAP A TERM. formulaFnNamesIn (called names in the
+  text, quoted text skipped) draws .ps-fterm chips under the summary;
+  openFormulaTerm fills the body-level #ps-fterm-pop (role region,
+  aria-live polite, created at wiring so aria-controls resolves) with
+  label, sentence, FORMULA_FN_MISSING, an On-your-data box from
+  compiled.explain (aggregates: value + count; row-wise: the unfolded
+  row or row 1 with the trace's reason; an untaken branch says so; an
+  aggregate in an untaken branch is re-evaluated from its own call) and
+  the reference link. Esc = its own layer (window capture, the sampler
+  precedent), outside pointerdown / any scroll / every preview rebuild
+  closes it. Probe: formula-term-check.
 - M5g DONE (Jul 23 2026): ROW FILTERS (Tier 1, Torry's ruling: dim but
   show). Dataset-wide AND-combined conditions ({col, op, value}; ops
   = != on any type, > >= < <= numeric-only; missing values fail their

@@ -446,9 +446,23 @@ the dialog is the guided way in: it opens with a Common recipes group
 (z-score, Center, Difference, Percent change, Reverse-score, Recode), and
 clicking any entry asks for the column or columns it needs, then writes
 the finished formula into the box for you - at the cursor, so clicks and
-typing mix freely. The <a href="#formula-reference">Formula
-reference</a> further down documents every operator and function,
-each with a verified example.</p>
+typing mix freely. As you type, the dialog shows the first rows with
+the result beside the columns it uses, counts the rows that come out
+missing and names the column responsible, says which measure type the
+new column will get, and clicking any row unfolds its calculation step
+by step, so a missing result shows exactly where the gap came in. A
+card above the box follows your cursor into any function, showing its
+shape with the argument you are in, what it does and its missing-value
+rule, and when an error has an obvious fix (a one-column
+<code>MEAN</code>, a mis-cased name, a leading <code>=</code>) the
+error line offers it as a button. Under the preview's summary, each
+function your formula calls is a chip: click it for the definition, the
+missing-value rule, and the function's value on your own data (a
+whole-column function's one number with the count it saw; a row-wise
+function's result in the unfolded row). The
+<a href="#formula-reference">Formula reference</a> further down
+documents every operator and function, each with a verified
+example.</p>
 <p>Recipes worth stealing - every formula below is verified against the app
 by an automated check, so they run as written. The column names are
 illustrative: <code>supported</code>, <code>paced</code>,
