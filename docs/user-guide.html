@@ -304,7 +304,13 @@ rows fail a condition and how many were left out because a value was
 missing, naming the column; <b>Show the rows this leaves out</b> lists
 each row with the condition it fails or the value it was missing, and a
 row number scrolls the grid to that row. The dimmed rows in the grid
-carry the same reason as their tooltip.</p>
+carry the same reason as their tooltip. <b>Make this a 0/1 column</b> turns
+the conditions into a computed variable: it opens the Computed variable
+dialog prefilled with <code>IF(</code>the whole filter<code>, 1, 0)</code> and
+a name like <code>included</code>, so the rule becomes data you can group
+by, count, or export, 1 where a row passes, 0 where it does not, and
+missing where a value the rule needs is missing. The filter itself is
+unchanged.</p>
 <p><b>Reshape to wide</b> (Data menu) turns long data into the one-row-per-
 subject shape Repeated Measures expects. It refuses rather than guess when
 your data would lose information, and explains what it found so you can fix

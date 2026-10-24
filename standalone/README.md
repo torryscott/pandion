@@ -494,6 +494,18 @@ punch lists are maintainer-local and not published with this repo.
   reset on open, kept across edits) lists up to 20 rows with reasons, each
   number calling gridRevealFound; the grid's dimmed cells carry the
   reason in their tip. Probe: filter-reasons-check.
+  Oct 24 2026: MAKE THIS A 0/1 COLUMN (step 2). The actions row's third
+  button (data-filter-flag, enabled once one draft condition is complete,
+  re-checked in refreshFilterCount) runs filterMakeFlagColumn: reads the
+  draft (before hideFilterMenu discards it), opens the Computed variable
+  dialog and prefills uniqueColumnName("included") + IF(<rule>, 1, 0),
+  where filterDraftFormula joins filterCondFormula per complete condition
+  with AND: eq/ne/gt/ge/lt/le -> == != > >= < <= (numeric literal or
+  quoted text), between -> col >= lo AND col <= hi, outside -> (col < lo
+  OR col > hi), nul/nnul -> ISMISSING / NOT ISMISSING, a formula row in
+  brackets when it has company, names with spaces backticked
+  (formulaNameText mirrors the engine's rule). The filter is untouched.
+  Probe: filter-flag-check.
 - M5f DONE (Jul 23 2026): EXCEL .XLSX IMPORT (Tier 1). js/ps-xlsx.js is a
   dependency-free OOXML reader on PSOmv's ZIP core + DOMParser: shared /
   inline / rich-text strings, formula CACHED values, booleans, error

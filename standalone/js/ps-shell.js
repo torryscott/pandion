@@ -18123,6 +18123,15 @@
       });
     clear.addEventListener("click", function () { applyFilters(true); });
     actions.appendChild(clear);
+    var flag = mkEl("button", "ps-btn", "Make this a 0/1 column");
+    flag.type = "button";
+    flag.setAttribute("data-filter-flag", "");
+    flag.disabled = !filterDraftFormula();
+    setTip(flag, "Turns these conditions into a computed variable: 1 where a " +
+      "row passes, 0 where it does not, missing where a value it needs is " +
+      "missing. The filter itself is unchanged.");
+    flag.addEventListener("click", filterMakeFlagColumn);
+    actions.appendChild(flag);
     var count = mkEl("span", "ps-filter-count", "");
     count.setAttribute("data-filter-count", "");
     count.setAttribute("role", "status");
@@ -18156,6 +18165,53 @@
       ", so this condition is not being applied.");
     row.appendChild(why);
   }
+  // ---- the filter as ONE formula (Oct 2026, "Make this a 0/1 column").
+  // Each complete condition becomes the expression the formula language
+  // would write for it, joined with AND, so the rule a student built by
+  // clicking can become a computed variable: 1 where a row passes, 0
+  // where it does not, missing where a value the rule needs is missing.
+  function formulaNameText(name) {
+    var plain = /^[A-Za-z_][A-Za-z0-9_.]*$/.test(name) &&
+      ["AND", "OR", "NOT"].indexOf(String(name).toUpperCase()) === -1;
+    return plain ? name : "`" + name + "`";
+  }
+  var FILTER_OP_FORMULA = { eq: "==", ne: "!=", gt: ">", ge: ">=", lt: "<", le: "<=" };
+  function filterCondFormula(t, f, several) {
+    if (filterIsFormula(f)) {
+      var expr = String(f.formula).trim();
+      return several ? "(" + expr + ")" : expr;
+    }
+    var col = formulaNameText(f.col);
+    if (f.op === "nul") return "ISMISSING(" + col + ")";
+    if (f.op === "nnul") return "NOT ISMISSING(" + col + ")";
+    if (filterTakesTwo(f.op)) {
+      var lo = Number(f.value), hi = Number(f.value2);
+      if (isFinite(lo) && isFinite(hi) && lo > hi) { var sw = lo; lo = hi; hi = sw; }
+      return f.op === "between"
+        ? col + " >= " + lo + " AND " + col + " <= " + hi
+        : "(" + col + " < " + lo + " OR " + col + " > " + hi + ")";
+    }
+    var num = colStoresNumbers(t, f.col);
+    var lit = num && isFinite(Number(f.value)) && String(f.value).trim() !== ""
+      ? String(Number(f.value)) : "\"" + String(f.value) + "\"";
+    return col + " " + FILTER_OP_FORMULA[f.op] + " " + lit;
+  }
+  function filterDraftFormula() {
+    var t = PROJECT.table;
+    var fs = FILTER_DRAFT.filter(function (f) { return filterComplete(t, f); });
+    if (!fs.length) return "";
+    return fs.map(function (f) { return filterCondFormula(t, f, fs.length > 1); })
+      .join(" AND ");
+  }
+  function filterMakeFlagColumn() {
+    var test = filterDraftFormula();
+    if (!test) return;
+    hideFilterMenu();   // reads the draft first: hiding discards it
+    openFormulaDialog(null, null);
+    el("ps-formula-name").value = uniqueColumnName("included");
+    el("ps-formula-input").value = "IF(" + test + ", 1, 0)";
+    refreshFormulaPreview();
+  }
   // Whether the left-out list is unfolded; kept while the popover is open
   // (every edit rebuilds it), reset when it opens.
   var FILTER_OUT_OPEN = false;
@@ -18163,6 +18219,8 @@
   function refreshFilterCount() {
     var count = el("ps-filtermenu").querySelector("[data-filter-count]");
     if (!count) return;
+    var flagBtn = el("ps-filtermenu").querySelector("[data-filter-flag]");
+    if (flagBtn) flagBtn.disabled = !filterDraftFormula();
     var t = PROJECT.table, pv = filterDraftPreview();
     count.textContent = "showing " + pv.kept + " of " + pv.n + " rows" +
       (pv.mask ? filterOutBreakdown(t, pv.fs, pv.why, pv.mask) : "");
