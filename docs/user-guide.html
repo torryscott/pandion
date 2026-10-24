@@ -310,7 +310,12 @@ dialog prefilled with <code>IF(</code>the whole filter<code>, 1, 0)</code> and
 a name like <code>included</code>, so the rule becomes data you can group
 by, count, or export, 1 where a row passes, 0 where it does not, and
 missing where a value the rule needs is missing. The filter itself is
-unchanged.</p>
+unchanged. Under the conditions, <b>As one formula</b> mirrors what you
+built by clicking as the expression the formula language would write,
+<code>age &gt;= 30 AND condition != "Control"</code>, so the syntax can
+be learned from a filter you already understand; <b>Copy</b> takes it to
+the clipboard and <b>Use as a formula row</b> replaces the rows with one
+editable formula row that keeps the same rows.</p>
 <p><b>Reshape to wide</b> (Data menu) turns long data into the one-row-per-
 subject shape Repeated Measures expects. It refuses rather than guess when
 your data would lose information, and explains what it found so you can fix

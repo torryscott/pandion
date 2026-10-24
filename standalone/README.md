@@ -506,6 +506,17 @@ punch lists are maintainer-local and not published with this repo.
   brackets when it has company, names with spaces backticked
   (formulaNameText mirrors the engine's rule). The filter is untouched.
   Probe: filter-flag-check.
+  Oct 24 2026: AS ONE FORMULA (step 3). refreshFilterAsFormula (called from
+  refreshFilterCount, so it follows typing) fills [data-filter-asformula]
+  between the rows and the add buttons, ONLY while a clicked condition is
+  complete: the filterDraftFormula text as read-only code, Copy
+  (navigator.clipboard with an honest failure toast), and Use as a
+  formula row (FILTER_DRAFT := one formula row, focus in it; same rows
+  kept because a missing formula result drops like a missing value).
+  filterDraftInapplicable (order op on a text column, the B5 pass-
+  through) disables the conversion with a note, since a formula would
+  compare the text. Probe: filter-asformula-check (clipboard stubbed via
+  addInitScript: file:// pages have no clipboard permission).
 - M5f DONE (Jul 23 2026): EXCEL .XLSX IMPORT (Tier 1). js/ps-xlsx.js is a
   dependency-free OOXML reader on PSOmv's ZIP core + DOMParser: shared /
   inline / rich-text strings, formula CACHED values, booleans, error

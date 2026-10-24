@@ -55,7 +55,7 @@ notebook-record-check notebook-pages-check notebook-undo-check notebook-drift-ch
 range-badge-drag-check \
 probed-bugs-check provenance-check rail-icons-check punchlist-check swatch-row-check reachability-check recents-check reshape-check \
 reflow-accessibility-check \
-row-filters-check filter-formula-check filter-reasons-check filter-flag-check \
+row-filters-check filter-formula-check filter-reasons-check filter-flag-check filter-asformula-check \
 shape-plural-check statusbar-check stats-prefs-check density-check \
 textscale-check \
 safety-check \

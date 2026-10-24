@@ -18091,6 +18091,9 @@
         m.appendChild(row);
       })(i);
     }
+    var asf = mkEl("div", "ps-filter-asf");
+    asf.setAttribute("data-filter-asformula", "");
+    m.appendChild(asf);
     var add = mkEl("button", "ps-btn", "+ Add condition");
     add.type = "button";
     add.addEventListener("click", function () {
@@ -18203,6 +18206,76 @@
     return fs.map(function (f) { return filterCondFormula(t, f, fs.length > 1); })
       .join(" AND ");
   }
+  // ---- "As one formula" (Oct 2026, step 3): the clicked conditions
+  // mirrored as the expression the formula language would write, read-
+  // only, with Copy and an explicit "Use as a formula row" that replaces
+  // the rows with one formula row (same rows kept: the evaluator treats
+  // a missing result exactly as a missing value). Shown only while a
+  // clicked condition exists to mirror: a formula row is already text.
+  function filterDraftInapplicable() {
+    // An order comparison on a text column: the filter passes it through
+    // (B5) while a formula would compare the text, so the two differ.
+    var t = PROJECT.table, out = [];
+    for (var i = 0; i < FILTER_DRAFT.length; i++) {
+      var f = FILTER_DRAFT[i];
+      if (filterIsFormula(f) || !filterComplete(t, f)) continue;
+      if (FILTER_OPS[f.op] && !FILTER_OPS[f.op].cat && !colStoresNumbers(t, f.col))
+        out.push(filterCondText(t, f));
+    }
+    return out;
+  }
+  function copyFilterFormula(text) {
+    var done = function () { showToast("Copied the filter as a formula"); };
+    var failed = function () {
+      showToast("Could not copy; select the formula and copy it by hand", true);
+    };
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, failed);
+        return;
+      }
+    } catch (e) { /* fall through to the honest failure */ }
+    failed();
+  }
+  function refreshFilterAsFormula() {
+    var wrap = el("ps-filtermenu").querySelector("[data-filter-asformula]");
+    if (!wrap) return;
+    wrap.textContent = "";
+    var t = PROJECT.table;
+    var complete = FILTER_DRAFT.filter(function (f) { return filterComplete(t, f); });
+    var clicked = complete.filter(function (f) { return !filterIsFormula(f); });
+    if (!complete.length || !clicked.length) return;
+    var text = filterDraftFormula();
+    var bad = filterDraftInapplicable();
+    wrap.appendChild(mkEl("span", "ps-filter-asf-lead", "As one formula:"));
+    var code = mkEl("code", "ps-filter-asf-code", text);
+    code.setAttribute("data-filter-asformula-text", "");
+    wrap.appendChild(code);
+    var copy = mkEl("button", "ps-filter-asf-btn", "Copy");
+    copy.type = "button";
+    copy.setAttribute("data-filter-asf-copy", "");
+    setTip(copy, "Copy the formula, to paste into a computed variable or another project");
+    copy.addEventListener("click", function () { copyFilterFormula(text); });
+    wrap.appendChild(copy);
+    var use = mkEl("button", "ps-filter-asf-btn", "Use as a formula row");
+    use.type = "button";
+    use.setAttribute("data-filter-asf-use", "");
+    use.disabled = bad.length > 0;
+    if (!bad.length)
+      setTip(use, "Replaces these conditions with one formula row you can edit. " +
+        "The same rows are kept.");
+    use.addEventListener("click", function () {
+      FILTER_DRAFT = [{ col: "", op: "formula", value: "", value2: "", formula: text }];
+      renderFilterMenu({ field: "formula", row: 0 });
+    });
+    wrap.appendChild(use);
+    if (bad.length)
+      wrap.appendChild(mkEl("div", "ps-filter-asf-note",
+        bad.join(", ") + (bad.length > 1 ? " need" : " needs") +
+        " numbers: the filter is not applying " + (bad.length > 1 ? "them" : "it") +
+        ", and a formula would compare the text instead, so the rows cannot " +
+        "become one formula as they stand."));
+  }
   function filterMakeFlagColumn() {
     var test = filterDraftFormula();
     if (!test) return;
@@ -18221,6 +18294,7 @@
     if (!count) return;
     var flagBtn = el("ps-filtermenu").querySelector("[data-filter-flag]");
     if (flagBtn) flagBtn.disabled = !filterDraftFormula();
+    refreshFilterAsFormula();
     var t = PROJECT.table, pv = filterDraftPreview();
     count.textContent = "showing " + pv.kept + " of " + pv.n + " rows" +
       (pv.mask ? filterOutBreakdown(t, pv.fs, pv.why, pv.mask) : "");
