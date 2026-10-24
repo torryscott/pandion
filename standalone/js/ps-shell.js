@@ -3077,6 +3077,130 @@
                  apply: function (s) { return s.replace(/^\s*=+\s*/, ""); } });
     return out;
   }
+  // ---- tap a term (Oct 2026, layer 3 of the formula-help mockup). Each
+  // function called in the formula is a chip under the preview's
+  // summary; tapping it opens a popover with the definition, the
+  // missing-value rule, the function's VALUE on this table (an
+  // aggregate's constant with the count it saw; a row-wise call in the
+  // unfolded row, or row 1, with the trace's reason), and a link to the
+  // reference entry. The statistics panel's tap-a-term, for formulas.
+  var FORMULA_LAST = null;          // { compiled, formula } of the last good preview
+  var FORMULA_TERM_OPEN = null;     // the chip whose popover is open
+  // Every known function CALLED in the text, first appearance first,
+  // deduped; quoted text is skipped so a label never counts.
+  function formulaFnNamesIn(src) {
+    var out = [], s = String(src || ""), i = 0, q = false;
+    while (i < s.length) {
+      var ch = s[i];
+      if (ch === "\"") { q = !q; i++; continue; }
+      if (q || !/[A-Za-z_]/.test(ch)) { i++; continue; }
+      var m = /^[A-Za-z_][A-Za-z0-9_.]*/.exec(s.slice(i));
+      var word = m[0], j = i + word.length;
+      while (j < s.length && (s[j] === " " || s[j] === "\t")) j++;
+      var up = word.toUpperCase();
+      if (s[j] === "(" && formulaFnInfo(up) && out.indexOf(up) === -1) out.push(up);
+      i = i + word.length;
+    }
+    return out;
+  }
+  function formulaTermPop() {
+    var p = el("ps-fterm-pop");
+    if (p) return p;
+    p = mkEl("div");
+    p.id = "ps-fterm-pop";
+    p.setAttribute("role", "region");
+    p.setAttribute("aria-live", "polite");
+    p.hidden = true;
+    document.body.appendChild(p);
+    return p;
+  }
+  function closeFormulaTerm(refocus) {
+    var p = el("ps-fterm-pop");
+    var chip = FORMULA_TERM_OPEN;
+    FORMULA_TERM_OPEN = null;
+    if (chip) chip.setAttribute("aria-expanded", "false");
+    if (!p || p.hidden) return;
+    p.hidden = true;
+    p.textContent = "";
+    if (refocus && chip && chip.isConnected) chip.focus();
+  }
+  function formulaTermFind(node, name) {
+    if (!node) return null;
+    if ((node.kind === "fn" || node.kind === "agg") && node.fn === name) return node;
+    for (var i = 0; i < node.kids.length; i++) {
+      var hit = formulaTermFind(node.kids[i], name);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  // The function's value on THIS table, in the words the trace uses.
+  function formulaTermOnData(name) {
+    var t = PROJECT.table, last = FORMULA_LAST;
+    if (!t || !last || !nRows(t)) return "Type a formula that uses it to see its value here.";
+    var row = FORMULA_EXPLAIN_ROW !== -1 ? FORMULA_EXPLAIN_ROW : 0;
+    var node = formulaTermFind(last.compiled.explain(t.columns, row), name);
+    if (!node && /^(V[A-Z]+|N)$/.test(name)) {
+      // An aggregate in a branch this row did not take still has its
+      // one value: evaluate the first call of it in the text on its own.
+      var m = new RegExp(name + "\\s*\\(\\s*(`[^`]+`|[A-Za-z_][A-Za-z0-9_.]*)\\s*\\)")
+        .exec(last.formula);
+      if (m) {
+        var editing = FORMULA_EDIT && FORMULA_EDIT.col;
+        var c2 = window.PSFormula.compile(m[0], t.order.filter(function (c) {
+          return c !== editing; }));
+        if (c2.ok) node = formulaTermFind(c2.explain(t.columns, 0), name);
+      }
+    }
+    if (!node)
+      return "Not evaluated in row " + (row + 1) +
+        ": the branch it sits in was not taken there.";
+    var why = formulaTraceWhy(node, row, t);
+    if (node.kind === "agg")
+      return node.text + " = " + fmtPreviewValue(node.value) + (why ? ", " + why : "") + ".";
+    return "In row " + (row + 1) + ", " + node.text + " = " + fmtPreviewValue(node.value) +
+      (why ? " (" + why + ")" : "") + "." +
+      (FORMULA_EXPLAIN_ROW === -1 ? " Unfold another row below to see it there." : "");
+  }
+  function openFormulaTerm(chip) {
+    var name = chip.getAttribute("data-fn"), info = formulaFnInfo(name);
+    if (!info) return;
+    if (FORMULA_TERM_OPEN === chip) { closeFormulaTerm(true); return; }
+    closeFormulaTerm(false);
+    var p = formulaTermPop();
+    p.textContent = "";
+    p.setAttribute("aria-label", name + ": definition and its value on your data");
+    var head = mkEl("div", "ps-fterm-head");
+    head.appendChild(mkEl("code", "", info.label));
+    var close = mkEl("button", "ps-fterm-close", "Close");
+    close.type = "button";
+    close.setAttribute("aria-label", "Close the definition");
+    head.appendChild(close);
+    p.appendChild(head);
+    p.appendChild(mkEl("div", "ps-fterm-what", info.sentence));
+    var miss = mkEl("div", "ps-fterm-miss");
+    miss.appendChild(mkEl("b", "", "Missing values: "));
+    miss.appendChild(document.createTextNode(FORMULA_FN_MISSING[name] || ""));
+    p.appendChild(miss);
+    var box = mkEl("div", "ps-fterm-box");
+    box.appendChild(mkEl("b", "", "On your data"));
+    box.appendChild(document.createTextNode(formulaTermOnData(name)));
+    p.appendChild(box);
+    var ref = mkEl("div", "ps-fterm-ref", "Full entry: ");
+    ref.appendChild(formulaGuideLink("fn-" + name.toLowerCase(),
+      "Formula reference, " + name));
+    p.appendChild(ref);
+    p.hidden = false;
+    // Below the chip, left-aligned, kept inside the viewport; above it
+    // when the space below runs out. Fixed, like the dialog it floats over.
+    var r = chip.getBoundingClientRect();
+    var left = Math.max(8, Math.min(r.left, window.innerWidth - p.offsetWidth - 12));
+    var top = r.bottom + 6;
+    if (top + p.offsetHeight > window.innerHeight - 8) top = Math.max(8, r.top - 6 - p.offsetHeight);
+    p.style.left = left + "px";
+    p.style.top = top + "px";
+    chip.setAttribute("aria-expanded", "true");
+    FORMULA_TERM_OPEN = chip;
+  }
   // Insert-at-cursor is what keeps the browser COMPOSITIONAL: two
   // clicks and a typed minus build a z-score. An insert also releases
   // any active recipe - after it, the box is no longer the recipe's
@@ -3635,6 +3759,7 @@
     if (!t) return;
     FORMULA_EDIT = { col: editingCol || null, source: source || null };
     FORMULA_EXPLAIN_ROW = -1;
+    closeFormulaTerm(false);
     el("ps-formula-title").textContent = editingCol
       ? "Edit formula: " + editingCol : "Computed variable";
     el("ps-formula-name").value = editingCol ||
@@ -3767,6 +3892,8 @@
     var t = PROJECT.table;
     var formula = el("ps-formula-input").value;
     var msg = el("ps-formula-msg"), prev = el("ps-formula-preview");
+    closeFormulaTerm(false);   // its chip is about to be rebuilt
+    FORMULA_LAST = null;
     refreshFormulaSignature();
     if (!String(formula).trim()) {
       msg.textContent = "";
@@ -3799,6 +3926,7 @@
       return;
     }
     msg.textContent = "";
+    FORMULA_LAST = { compiled: compiled, formula: formula };
     var total = nRows(t);
     var values = compiled.run(t.columns, total);
     var fmtv = fmtPreviewValue;
@@ -3877,6 +4005,23 @@
       " column" + (typeLabel === "Nominal" && anyNum && anyText
         ? " (text and numbers mixed, so text)" : "")));
     prev.appendChild(sum);
+    // ---- tap a term: one chip per function called in the formula
+    var fnNames = formulaFnNamesIn(formula);
+    if (fnNames.length) {
+      var termRow = mkEl("div", "ps-fterm-row");
+      termRow.appendChild(mkEl("span", "", "Functions here:"));
+      for (var ni = 0; ni < fnNames.length; ni++) {
+        var chip = mkEl("button", "ps-fterm", fnNames[ni]);
+        chip.type = "button";
+        chip.setAttribute("data-fn", fnNames[ni]);
+        chip.setAttribute("aria-expanded", "false");
+        chip.setAttribute("aria-controls", "ps-fterm-pop");
+        chip.setAttribute("data-tip", "What " + fnNames[ni] +
+          " does, and its value on your data");
+        termRow.appendChild(chip);
+      }
+      prev.appendChild(termRow);
+    }
     // ---- the worked example: inputs BESIDE the result for the first
     // rows, so the row-by-row idea is visible: a hole in an input
     // visibly becomes a missing result (or, under ignore_missing,
@@ -19671,10 +19816,38 @@
       if (a && userGuideTarget().online)
         showToast("Opening the user guide at pandionplots.com in a new tab");
     });
+    formulaTermPop().addEventListener("click", function (e) {
+      if (e.target && e.target.closest && e.target.closest(".ps-fterm-close")) {
+        closeFormulaTerm(true);
+        return;
+      }
+      var a = e.target && e.target.closest ? e.target.closest("a[data-guide-link]") : null;
+      if (a && userGuideTarget().online)
+        showToast("Opening the user guide at pandionplots.com in a new tab");
+    });
+    // Its own Escape layer: WINDOW capture runs before any document
+    // listener (the color sampler's precedent), so one Escape closes
+    // the popover and the next one closes the dialog.
+    window.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape" || !FORMULA_TERM_OPEN) return;
+      e.preventDefault(); e.stopPropagation();
+      closeFormulaTerm(true);
+    }, true);
+    document.addEventListener("pointerdown", function (e) {
+      if (!FORMULA_TERM_OPEN) return;
+      var pop = el("ps-fterm-pop");
+      if ((pop && pop.contains(e.target)) || FORMULA_TERM_OPEN.contains(e.target)) return;
+      closeFormulaTerm(false);
+    }, true);
+    document.addEventListener("scroll", function () {
+      if (FORMULA_TERM_OPEN) closeFormulaTerm(false);   // fixed position would drift
+    }, true);
     // Any row of the worked example, or a row number in its summary,
     // unfolds that row; the same row again folds it. The pick buttons
     // carry the keyboard path, the row itself the mouse convenience.
     el("ps-formula-preview").addEventListener("click", function (e) {
+      var term = e.target && e.target.closest ? e.target.closest(".ps-fterm") : null;
+      if (term) { openFormulaTerm(term); return; }
       var hit = e.target && e.target.closest
         ? e.target.closest("[data-fprev-row]") : null;
       if (!hit) return;

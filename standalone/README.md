@@ -478,6 +478,17 @@ punch lists are maintainer-local and not published with this repo.
   synonyms. The error line's fixes are buttons (formulaErrorFixes:
   the V-form, did-you-mean names, a mis-cased variable via renameRef,
   the leading =). Not a live region: it changes on every caret move.
+  Oct 23 2026 (same day): TAP A TERM. formulaFnNamesIn (called names in the
+  text, quoted text skipped) draws .ps-fterm chips under the summary;
+  openFormulaTerm fills the body-level #ps-fterm-pop (role region,
+  aria-live polite, created at wiring so aria-controls resolves) with
+  label, sentence, FORMULA_FN_MISSING, an On-your-data box from
+  compiled.explain (aggregates: value + count; row-wise: the unfolded
+  row or row 1 with the trace's reason; an untaken branch says so; an
+  aggregate in an untaken branch is re-evaluated from its own call) and
+  the reference link. Esc = its own layer (window capture, the sampler
+  precedent), outside pointerdown / any scroll / every preview rebuild
+  closes it. Probe: formula-term-check.
 - M5g DONE (Jul 23 2026): ROW FILTERS (Tier 1, Torry's ruling: dim but
   show). Dataset-wide AND-combined conditions ({col, op, value}; ops
   = != on any type, > >= < <= numeric-only; missing values fail their
