@@ -17157,7 +17157,7 @@
     if (rowFiltered) cls += " ps-grid-row-filtered";
     var tip = rowFiltered
       ? (t.filterWhy && t.filterWhy[i]
-          ? "Left out by the row filter: " +
+          ? "Left out by the active row filter: " +
             filterReasonText(t, validFilters(t), t.filterWhy[i], i) +
             ". The row stays in the dataset but leaves every chart"
           : "Hidden by the active row filter - the row stays in the dataset but leaves every chart")

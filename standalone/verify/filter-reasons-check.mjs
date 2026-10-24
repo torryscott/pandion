@@ -138,9 +138,9 @@ const grid = await page.evaluate(() => {
     tds.forEach(td => { const m = /ps-grid-cell-(\d+)-/.exec(td.id || ''); if (m) byRow[m[1]] = td.getAttribute('data-tip'); });
     return { n: tds.length, byRow, btn: document.getElementById('ps-data-filter-btn').getAttribute('data-tip') };
 });
-ok(grid.n > 0 && /^Left out by the row filter: score > 60 AND age > 30: age is missing\. The row stays/.test(grid.byRow['2'] || ''),
+ok(grid.n > 0 && /^Left out by the active row filter: score > 60 AND age > 30: age is missing\. The row stays/.test(grid.byRow['2'] || ''),
    `row 3's cells say why (${grid.byRow['2']})`);
-ok(/^Left out by the row filter: score > 60 AND age > 30 is false\./.test(grid.byRow['1'] || ''),
+ok(/^Left out by the active row filter: score > 60 AND age > 30 is false\./.test(grid.byRow['1'] || ''),
    `row 2's cells say the formula is false (${grid.byRow['1']})`);
 // Row 7 has score 59, so the formula's AND stops at the false left side
 // and never reads the missing age: a plain false, not a missing-value drop.
