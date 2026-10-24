@@ -481,6 +481,19 @@ punch lists are maintainer-local and not published with this repo.
   chart note, the Filter tooltip, the popover's stranded line). The
   setup file reads/writes {formula} and value: [low, high]. Probe:
   filter-formula-check.
+  Oct 24 2026: WHY EACH ROW IS OUT. computeFilterState records t.filterWhy
+  [{f, kind: fail|missing|formulaFalse|formulaMissing}] = the FIRST
+  failing condition per dropped row; filterReasonText words it ("age >= 30
+  fails (age = 29)", "age is missing", "<formula>: age is missing",
+  "<formula> is false"; filterCondText is the per-condition text the
+  summary now shares); filterOutBreakdown appends "(2 fail a condition, 2
+  left out because age is missing)" to the popover's live count (built
+  from the DRAFT via filterDraftPreview, which replaced
+  filterDraftPreviewCount's body) and to the Filter button tip; the
+  popover's "Show the N rows this leaves out" disclosure (FILTER_OUT_OPEN,
+  reset on open, kept across edits) lists up to 20 rows with reasons, each
+  number calling gridRevealFound; the grid's dimmed cells carry the
+  reason in their tip. Probe: filter-reasons-check.
 - M5f DONE (Jul 23 2026): EXCEL .XLSX IMPORT (Tier 1). js/ps-xlsx.js is a
   dependency-free OOXML reader on PSOmv's ZIP core + DOMParser: shared /
   inline / rich-text strings, formula CACHED values, booleans, error

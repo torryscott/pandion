@@ -2261,22 +2261,88 @@
     if (!t || !Array.isArray(t.filters)) return [];
     return t.filters.filter(function (f) { return filterComplete(t, f); });
   }
+  function filterCondText(t, f) {
+    if (filterIsFormula(f)) return String(f.formula).trim();
+    var num = colStoresNumbers(t, f.col);
+    if (!filterNeedsValue(f.op))
+      return f.col + " " + FILTER_OPS[f.op].label;
+    if (filterTakesTwo(f.op))
+      return f.col + " " + FILTER_OPS[f.op].label + " " + String(f.value) +
+        (f.op === "between" ? " and " : " to ") + String(f.value2);
+    return f.col + " " + FILTER_OPS[f.op].label + " " +
+      (num ? String(f.value) : '"' + String(f.value) + '"');
+  }
   function filterSummaryText(t) {
     var fs = validFilters(t);
     return fs.map(function (f) {
-      if (filterIsFormula(f)) {
-        var expr = String(f.formula).trim();
-        return fs.length > 1 ? "(" + expr + ")" : expr;
-      }
-      var num = colStoresNumbers(t, f.col);
-      if (!filterNeedsValue(f.op))
-        return f.col + " " + FILTER_OPS[f.op].label;
-      if (filterTakesTwo(f.op))
-        return f.col + " " + FILTER_OPS[f.op].label + " " + String(f.value) +
-          (f.op === "between" ? " and " : " to ") + String(f.value2);
-      return f.col + " " + FILTER_OPS[f.op].label + " " +
-        (num ? String(f.value) : '"' + String(f.value) + '"');
+      var text = filterCondText(t, f);
+      return filterIsFormula(f) && fs.length > 1 ? "(" + text + ")" : text;
     }).join(" and ");
+  }
+  // Which of a formula condition's columns are missing in a row: the
+  // reason a formula could not be evaluated there. The compile is cached
+  // per formula text, since the grid asks once per visible cell.
+  var FILTER_REF_CACHE = Object.create(null);
+  function filterFormulaRefs(t, formula) {
+    var key = String(formula);
+    if (!(key in FILTER_REF_CACHE)) {
+      var c = window.PSFormula ? window.PSFormula.compile(key, t.order.slice()) : null;
+      FILTER_REF_CACHE[key] = c && c.ok ? c.refs.slice() : [];
+    }
+    return FILTER_REF_CACHE[key];
+  }
+  function filterMissingCols(t, f, i) {
+    var refs = filterFormulaRefs(t, f.formula), out = [];
+    for (var r = 0; r < refs.length; r++)
+      if (!t.columns[refs[r]] || t.columns[refs[r]][i] == null) out.push(refs[r]);
+    return out;
+  }
+  // Why row i is out, in words a reader can check against the grid:
+  // "age >= 30 fails (age = 29)", "age is missing", "score > 60 AND age
+  // > 30: age is missing", "score > 60 AND age > 30 is false".
+  function filterReasonText(t, fs, why, i) {
+    if (!why || !fs[why.f]) return "";
+    var f = fs[why.f];
+    if (filterIsFormula(f)) {
+      var expr = String(f.formula).trim();
+      if (why.kind === "formulaMissing") {
+        var cols = filterMissingCols(t, f, i);
+        return expr + ": " + (cols.length
+          ? cols.join(" and ") + (cols.length > 1 ? " are" : " is") + " missing"
+          : "cannot be evaluated for this row");
+      }
+      return expr + " is false";
+    }
+    var v = t.columns[f.col] ? t.columns[f.col][i] : null;
+    var shown = v == null ? "missing"
+      : typeof v === "number" ? String(v) : "\"" + String(v) + "\"";
+    if (why.kind === "missing" || f.op === "nnul") return f.col + " is missing";
+    if (f.op === "nul") return f.col + " is not missing (" + f.col + " = " + shown + ")";
+    return filterCondText(t, f) + " fails (" + f.col + " = " + shown + ")";
+  }
+  // The breakdown behind a count: how many rows fail a condition and how
+  // many are out because a value they needed was missing, naming the
+  // columns. Shared by the popover's live count and the Filter tooltip.
+  function filterOutBreakdown(t, fs, why, mask) {
+    var fails = 0, missing = 0, cols = {}, n = mask ? mask.length : 0;
+    for (var i = 0; i < n; i++) {
+      if (!mask[i] || !why || !why[i]) continue;
+      var w = why[i], f = fs[w.f];
+      if (w.kind === "missing" || w.kind === "formulaMissing") {
+        missing++;
+        if (w.kind === "missing" && f) cols[f.col] = 1;
+        else if (f) filterMissingCols(t, f, i).forEach(function (c) { cols[c] = 1; });
+      } else fails++;
+    }
+    var parts = [];
+    if (fails) parts.push(fails + " fail" + (fails === 1 ? "s" : "") + " a condition");
+    if (missing) {
+      var names = Object.keys(cols);
+      parts.push(missing + " left out because " + (names.length
+        ? names.join(" and ") + (names.length > 1 ? " are" : " is") + " missing"
+        : "a value is missing"));
+    }
+    return parts.length ? " (" + parts.join(", ") + ")" : "";
   }
   // A formula condition evaluated over the whole table: the column values
   // the computed columns see, one result per row. A result that is not
@@ -2316,13 +2382,18 @@
   function computeFilterState(t, preparingSnapshot) {
     var fs = validFilters(t);
     if (!fs.length) {
-      t.filterMask = null; t.filteredView = null;
+      t.filterMask = null; t.filteredView = null; t.filterWhy = null;
       t.filterMissingDrops = 0; t.filterInapplicable = [];
       t.filterFormulaProblems = [];
       return;
     }
     var n = nRows(t), mask = new Array(n), i;
     var missingDrops = 0, inapplicable = {}, formulaProblems = [];
+    // Why each left-out row is out (Oct 2026): the FIRST condition that
+    // fails it, in the order the conditions are listed, and whether it
+    // failed on a missing value. Indexed by row; kept rows stay undefined.
+    // Read by the popover's breakdown and list and by the grid's tooltips.
+    var why = new Array(n), rowWhy;
     // Formula conditions evaluate once over the table, not per row.
     var fvals = new Array(fs.length);
     for (var fe = 0; fe < fs.length; fe++) {
@@ -2336,14 +2407,21 @@
     }
     for (i = 0; i < n; i++) {
       var out = false, droppedForMissing = false;
+      rowWhy = null;
       for (var f = 0; f < fs.length && !out; f++) {
         var flt = fs[f];
         if (filterIsFormula(flt)) {
           var fv = fvals[f];
           if (fv === null) continue;             // inapplicable: pass-through
           var r = fv[i];
-          if (r == null) { out = true; droppedForMissing = true; break; }
-          if (!(typeof r === "boolean" ? r : r !== 0)) out = true;
+          if (r == null) {
+            out = true; droppedForMissing = true;
+            rowWhy = { f: f, kind: "formulaMissing" };
+            break;
+          }
+          if (!(typeof r === "boolean" ? r : r !== 0)) {
+            out = true; rowWhy = { f: f, kind: "formulaFalse" };
+          }
           continue;
         }
         var v = t.columns[flt.col] ? t.columns[flt.col][i] : null;
@@ -2351,7 +2429,9 @@
         // talk about exactly the case it discards. A row kept by "is missing"
         // was not dropped for missingness and must not be counted as such.
         if (!filterNeedsValue(flt.op)) {
-          if ((flt.op === "nul") !== (v == null)) out = true;
+          if ((flt.op === "nul") !== (v == null)) {
+            out = true; rowWhy = { f: f, kind: "fail" };
+          }
           continue;
         }
         // B6. A row whose filter column is MISSING is dropped, and the note
@@ -2359,18 +2439,26 @@
         // dropped row to the stated threshold. The rule is unchanged (a row
         // with no value cannot be shown to satisfy the condition), but the
         // count is now carried out and disclosed separately.
-        if (v == null) { out = true; droppedForMissing = true; break; }
+        if (v == null) {
+          out = true; droppedForMissing = true;
+          rowWhy = { f: f, kind: "missing" };
+          break;
+        }
         var num = typeof v === "number";
         var pass;
         if (num && filterTakesTwo(flt.op)) {
           var lo = Number(flt.value), hi = Number(flt.value2);
-          if (!isFinite(lo) || !isFinite(hi)) { out = true; break; }
+          if (!isFinite(lo) || !isFinite(hi)) {
+            out = true; rowWhy = { f: f, kind: "fail" }; break;
+          }
           if (lo > hi) { var sw = lo; lo = hi; hi = sw; }
           pass = (flt.op === "between") ? (v >= lo && v <= hi)
                                         : (v < lo || v > hi);
         } else if (num) {
           var target = Number(flt.value);
-          if (!isFinite(target)) { out = true; break; }
+          if (!isFinite(target)) {
+            out = true; rowWhy = { f: f, kind: "fail" }; break;
+          }
           pass = flt.op === "eq" ? v === target
             : flt.op === "ne" ? v !== target
             : flt.op === "gt" ? v > target
@@ -2393,12 +2481,14 @@
             pass = true;
           }
         }
-        if (!pass) out = true;
+        if (!pass) { out = true; rowWhy = { f: f, kind: "fail" }; }
       }
       mask[i] = out;
+      if (out) why[i] = rowWhy;
       if (out && droppedForMissing) missingDrops++;
     }
     t.filterMask = mask;
+    t.filterWhy = why;
     t.filterMissingDrops = missingDrops;
     t.filterInapplicable = Object.keys(inapplicable);
     t.filterFormulaProblems = formulaProblems;
@@ -15978,7 +16068,11 @@
         " of " + nRows(t)
       : "Filter";
     var fExtra = "";
-    if (fActive && t.filterMissingDrops)
+    if (fActive && t.filterMask && filteredRowCount(t))
+      fExtra += ". " + filteredRowCount(t) + " row" +
+        (filteredRowCount(t) === 1 ? "" : "s") + " out" +
+        filterOutBreakdown(t, validFilters(t), t.filterWhy, t.filterMask);
+    else if (fActive && t.filterMissingDrops)
       fExtra += ". " + t.filterMissingDrops +
         (t.filterMissingDrops === 1 ? " row is" : " rows are") +
         " left out because the filtered value is missing";
@@ -17062,7 +17156,11 @@
     if (rowExcl) cls += " ps-grid-row-excl";
     if (rowFiltered) cls += " ps-grid-row-filtered";
     var tip = rowFiltered
-      ? "Hidden by the active row filter - the row stays in the dataset but leaves every chart"
+      ? (t.filterWhy && t.filterWhy[i]
+          ? "Left out by the row filter: " +
+            filterReasonText(t, validFilters(t), t.filterWhy[i], i) +
+            ". The row stays in the dataset but leaves every chart"
+          : "Hidden by the active row filter - the row stays in the dataset but leaves every chart")
       : rowExcl
       ? "Observation excluded from every chart - right-click to include the row"
       : (excl ? "Value excluded from charts - right-click to include it" : "");
@@ -17739,6 +17837,7 @@
                formula: String(f.formula == null ? "" : f.formula) };
     });
     if (!FILTER_DRAFT.length) filterDraftAdd();
+    FILTER_OUT_OPEN = false;
     renderFilterMenu();
     var m = el("ps-filtermenu");
     var r = el("ps-data-filter-btn").getBoundingClientRect();
@@ -17764,29 +17863,31 @@
     FILTER_DRAFT.push({ col: col,
       op: "eq", value: "", value2: "" });
   }
-  function filterDraftPreviewCount() {
+  function filterDraftPreview() {
     // Evaluate the draft against typed values without touching the table.
     var t = PROJECT.table, n = nRows(t), kept = 0;
     var fs = FILTER_DRAFT.filter(function (f) { return filterComplete(t, f); });
-    if (!fs.length) return n;
+    if (!fs.length) return { n: n, kept: n, mask: null, why: null, fs: fs };
     var saved = t.filters;
     t.filters = fs;
-    var mask = null;
+    var mask = null, why = null;
     try {
       // Reuse the real evaluator on a scratch copy of the mask fields.
       var scratch = { filters: fs };
       for (var k in t)
         if (Object.prototype.hasOwnProperty.call(t, k) && k !== "filters" &&
-            k !== "filterMask" && k !== "filteredView")
+            k !== "filterMask" && k !== "filteredView" && k !== "filterWhy")
           scratch[k] = t[k];
       computeFilterState(scratch);
       mask = scratch.filterMask;
-    } catch (e) { mask = null; }
+      why = scratch.filterWhy;
+    } catch (e) { mask = null; why = null; }
     t.filters = saved;
-    if (!mask) return n;
+    if (!mask) return { n: n, kept: n, mask: null, why: null, fs: fs };
     for (var i = 0; i < n; i++) if (!mask[i]) kept++;
-    return kept;
+    return { n: n, kept: kept, mask: mask, why: why, fs: fs };
   }
+  function filterDraftPreviewCount() { return filterDraftPreview().kept; }
   function renderFilterMenu(focusTarget) {
     var t = PROJECT.table, m = el("ps-filtermenu");
     var active = document.activeElement, hadFocus = m.contains(active);
@@ -18029,6 +18130,9 @@
     count.setAttribute("aria-atomic", "true");
     actions.appendChild(count);
     m.appendChild(actions);
+    var outWrap = mkEl("div", "ps-filter-out");
+    outWrap.setAttribute("data-filter-out", "");
+    m.appendChild(outWrap);
     refreshFilterCount();
     if (hadFocus && focusTarget) {
       var target = m.querySelector('[data-filter-' + focusTarget.field +
@@ -18052,12 +18156,75 @@
       ", so this condition is not being applied.");
     row.appendChild(why);
   }
+  // Whether the left-out list is unfolded; kept while the popover is open
+  // (every edit rebuilds it), reset when it opens.
+  var FILTER_OUT_OPEN = false;
+  var FILTER_OUT_LIST_MAX = 20;
   function refreshFilterCount() {
     var count = el("ps-filtermenu").querySelector("[data-filter-count]");
     if (!count) return;
+    var t = PROJECT.table, pv = filterDraftPreview();
+    count.textContent = "showing " + pv.kept + " of " + pv.n + " rows" +
+      (pv.mask ? filterOutBreakdown(t, pv.fs, pv.why, pv.mask) : "");
+    refreshFilterOutList(pv);
+  }
+  // "Show the 10 rows this leaves out": each row with the condition it
+  // fails, or the value it was missing, capped; its number scrolls the
+  // grid to the row. Built from the DRAFT, so it follows the edit before
+  // Apply, like the count beside it.
+  function refreshFilterOutList(pv) {
+    var wrap = el("ps-filtermenu").querySelector("[data-filter-out]");
+    if (!wrap) return;
     var t = PROJECT.table;
-    count.textContent = "showing " + filterDraftPreviewCount() +
-      " of " + nRows(t) + " rows";
+    wrap.textContent = "";
+    // Nothing to list while nothing is dropped, but the unfolded state is
+    // kept: clearing a value to retype it makes the draft incomplete for a
+    // moment, and the list must come back open when the value does.
+    if (!pv.mask || pv.kept === pv.n) return;
+    var dropped = pv.n - pv.kept;
+    var btn = mkEl("button", "ps-filter-out-btn", (FILTER_OUT_OPEN ? "Hide" : "Show") +
+      " the " + dropped + " row" + (dropped === 1 ? "" : "s") + " this leaves out");
+    btn.type = "button";
+    btn.setAttribute("data-filter-out-toggle", "");
+    btn.setAttribute("aria-expanded", FILTER_OUT_OPEN ? "true" : "false");
+    btn.setAttribute("aria-controls", "ps-filter-outlist");
+    btn.addEventListener("click", function () {
+      FILTER_OUT_OPEN = !FILTER_OUT_OPEN;
+      refreshFilterOutList(pv);
+      var again = el("ps-filtermenu").querySelector("[data-filter-out-toggle]");
+      if (again) again.focus();
+    });
+    wrap.appendChild(btn);
+    if (!FILTER_OUT_OPEN) return;
+    var list = mkEl("ol", "ps-filter-outlist");
+    list.id = "ps-filter-outlist";
+    var shown = 0;
+    for (var i = 0; i < pv.n && shown < FILTER_OUT_LIST_MAX; i++) {
+      if (!pv.mask[i]) continue;
+      shown++;
+      var li = mkEl("li");
+      var rowBtn = mkEl("button", "ps-filter-outrow", "Row " + (i + 1));
+      rowBtn.type = "button";
+      rowBtn.setAttribute("data-filter-row", String(i));
+      rowBtn.setAttribute("aria-label", "Row " + (i + 1) + ", show it in the grid");
+      rowBtn.setAttribute("data-tip", "Scroll the grid to row " + (i + 1));
+      (function (rowIdx, w) {
+        rowBtn.addEventListener("click", function () {
+          var f = w && pv.fs[w.f];
+          var col = f && !filterIsFormula(f) && t.raw[f.col] ? f.col : t.order[0];
+          gridRevealFound({ row: rowIdx, col: col });
+        });
+      })(i, pv.why ? pv.why[i] : null);
+      li.appendChild(rowBtn);
+      li.appendChild(document.createTextNode(" "));
+      li.appendChild(mkEl("span", "ps-filter-outwhy",
+        filterReasonText(t, pv.fs, pv.why ? pv.why[i] : null, i)));
+      list.appendChild(li);
+    }
+    if (dropped > shown)
+      list.appendChild(mkEl("li", "ps-filter-outmore",
+        "and " + (dropped - shown) + " more"));
+    wrap.appendChild(list);
   }
   function applyFilters(clearAll) {
     var t = PROJECT.table;

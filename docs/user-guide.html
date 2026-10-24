@@ -299,7 +299,12 @@ stated in the chart note as not applied, so a typo never empties a chart.
 Filters can use computed columns, so a flag such as
 <code>IF(check1 != 3 OR check2 != 1, 1, 0)</code> can first mark who failed an
 attention check and then a filter on it, or the same test written straight into
-a formula condition, drops them.</p>
+a formula condition, drops them. The popover's live count says how many
+rows fail a condition and how many were left out because a value was
+missing, naming the column; <b>Show the rows this leaves out</b> lists
+each row with the condition it fails or the value it was missing, and a
+row number scrolls the grid to that row. The dimmed rows in the grid
+carry the same reason as their tooltip.</p>
 <p><b>Reshape to wide</b> (Data menu) turns long data into the one-row-per-
 subject shape Repeated Measures expects. It refuses rather than guess when
 your data would lose information, and explains what it found so you can fix
