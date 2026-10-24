@@ -467,6 +467,17 @@ punch lists are maintainer-local and not published with this repo.
   wording lives in the shell (formulaTraceWhy). Probes:
   formula-unit-check case E (facts + run parity), formula-explain-check
   (the dialog).
+  Oct 23 2026 (same day): the SIGNATURE CARD (#ps-fsig, above the box)
+  follows the caret into any call (formulaCallAtCaret: innermost
+  unclosed bracket scanned backwards, quoted text skipped, depth-0
+  commas = the argument index) and shows the browser label with the
+  argument highlighted, the browser sentence, FORMULA_FN_MISSING (word
+  for word the guide's reference cell; formula-signature-check pins
+  every function) and a Reference link (#fn-<name>). An unknown name
+  gets 'is not a function here' + Use-<fn> buttons from the search
+  synonyms. The error line's fixes are buttons (formulaErrorFixes:
+  the V-form, did-you-mean names, a mis-cased variable via renameRef,
+  the leading =). Not a live region: it changes on every caret move.
 - M5g DONE (Jul 23 2026): ROW FILTERS (Tier 1, Torry's ruling: dim but
   show). Dataset-wide AND-combined conditions ({col, op, value}; ops
   = != on any type, > >= < <= numeric-only; missing values fail their

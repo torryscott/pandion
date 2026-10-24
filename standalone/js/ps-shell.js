@@ -2852,6 +2852,231 @@
       ["ISMISSING(x)", "1 when the value is missing, 0 when it is there.", "any1"],
       ["COALESCE(a, b, ...)", "The first value that is not missing.", "ordermulti"]]]
   ];
+  // ---- the signature card (Oct 2026, layer 1 of the formula-help
+  // mockup). Each function's missing-value rule, word for word the
+  // guide's Formula reference cell for it (formula-signature-check pins
+  // the two together), so the card can never say something the
+  // reference does not.
+  var FORMULA_FN_MISSING = {
+    MEAN: "Missing if any argument is missing, unless ignore_missing = 1; " +
+      "then missing only when every argument is.",
+    VMEAN: "Skips missing cells; missing when the column has no values.",
+    VSD: "Skips missing cells; missing with fewer than two values.",
+    N: "Never missing: an empty column gives 0.",
+    LOG10: "Missing for zero or a negative number.",
+    SQRT: "Missing for a negative number.",
+    ABS: "Missing where the input is.",
+    EXP: "Missing where the input is, or when the result is too large to store.",
+    ROUND: "Missing where either input is.",
+    BIN: "Missing where the value is missing or k is below 2; a column " +
+      "with one distinct value is all bin 1.",
+    IF: "Missing where the test is missing: neither branch is taken.",
+    CONTAINS: "Missing where either input is.",
+    ISMISSING: "Never missing; that is the point.",
+    COALESCE: "Missing only when every argument is."
+  };
+  FORMULA_FN_MISSING.SUM = FORMULA_FN_MISSING.MIN = FORMULA_FN_MISSING.MAX =
+    FORMULA_FN_MISSING.MEAN;
+  FORMULA_FN_MISSING.VMEDIAN = FORMULA_FN_MISSING.VMIN =
+    FORMULA_FN_MISSING.VMAX = FORMULA_FN_MISSING.VSUM = FORMULA_FN_MISSING.VMEAN;
+  FORMULA_FN_MISSING.LN = FORMULA_FN_MISSING.LOG10;
+  FORMULA_FN_MISSING.FLOOR = FORMULA_FN_MISSING.CEILING = FORMULA_FN_MISSING.UPPER =
+    FORMULA_FN_MISSING.LOWER = FORMULA_FN_MISSING.TRIM = FORMULA_FN_MISSING.LEN =
+    FORMULA_FN_MISSING.ABS;
+  // name -> { label, sentence, parts } from the Functions browser's own
+  // table, so the card and the browser can never describe a function
+  // differently. The recipes group and the operators row are not calls.
+  var FORMULA_FN_INFO = null;
+  function formulaFnInfo(name) {
+    if (!FORMULA_FN_INFO) {
+      FORMULA_FN_INFO = Object.create(null);
+      for (var g = 1; g < FORMULA_FN_GROUPS.length; g++) {
+        var fns = FORMULA_FN_GROUPS[g][1];
+        for (var i = 0; i < fns.length; i++) {
+          var label = fns[i][0], paren = label.indexOf("(");
+          if (paren === -1) continue;
+          var inner = label.slice(paren + 1, label.lastIndexOf(")"));
+          FORMULA_FN_INFO[label.slice(0, paren)] = {
+            label: label, sentence: fns[i][1],
+            parts: inner.split(",").map(function (s) { return s.trim(); })
+          };
+        }
+      }
+    }
+    return FORMULA_FN_INFO[String(name || "").toUpperCase()] || null;
+  }
+  // The functions whose name or search words contain the typed word:
+  // what the search box would have found for it, offered as the fix
+  // for an unknown name (AVERAGE -> MEAN, VMEAN; SD -> VSD).
+  function formulaFnCandidates(typed) {
+    var q = String(typed || "").toLowerCase(), out = [];
+    if (!q) return out;
+    formulaFnInfo("MEAN");
+    for (var name in FORMULA_FN_INFO) {
+      var hay = (name + " " + (FORMULA_FN_SYNONYMS[name] || "")).toLowerCase();
+      if (new RegExp("(^|\\s)" + q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
+          "(\\s|$)").test(hay)) out.push(name);
+    }
+    return out.slice(0, 3);
+  }
+  // The innermost function call the caret sits in: its name as typed,
+  // where the name starts and ends, and which argument the caret is
+  // in (depth-0 commas between the bracket and the caret). Scanned
+  // backwards from the caret, skipping quoted text; a caret inside an
+  // unclosed string finds nothing, which is right - the user is typing
+  // a label, not an argument.
+  function formulaCallAtCaret(src, pos) {
+    // Quote state is settled FORWARD first: scanned backwards, an
+    // unclosed string's bracket is met before its opening quote and
+    // would read as a call.
+    var inStrAt = new Array(pos), q = false, k;
+    for (k = 0; k < pos; k++) {
+      if (src[k] === "\"") { q = !q; inStrAt[k] = true; continue; }
+      inStrAt[k] = q;
+    }
+    if (q) return null;   // the caret is inside a string
+    var depth = 0, i;
+    for (i = pos - 1; i >= 0; i--) {
+      var ch = src[i];
+      if (inStrAt[i]) continue;
+      if (ch === ")") depth++;
+      else if (ch === "(") {
+        if (depth === 0) {
+          var m = /([A-Za-z_][A-Za-z0-9_]*)(\s*)$/.exec(src.slice(0, i));
+          if (!m) return null;
+          var argIdx = 0, d = 0, q = false, j, c;
+          for (j = i + 1; j < pos; j++) {
+            c = src[j];
+            if (c === "\"") { q = !q; continue; }
+            if (q) continue;
+            if (c === "(") d++;
+            else if (c === ")") d--;
+            else if (c === "," && d === 0) argIdx++;
+          }
+          var nameEnd = i - m[2].length;
+          return { typed: m[1], name: m[1].toUpperCase(), argIdx: argIdx,
+                   nameStart: nameEnd - m[1].length, nameEnd: nameEnd };
+        }
+        depth--;
+      }
+    }
+    return null;
+  }
+  function formulaGuideLink(anchor, text) {
+    var a = mkEl("a", "", text);
+    a.href = userGuideTarget().url + "#" + anchor;
+    a.target = "_blank"; a.rel = "noopener";
+    a.setAttribute("data-guide-link", "1");
+    return a;
+  }
+  function refreshFormulaSignature() {
+    var card = el("ps-fsig"), box = el("ps-formula-input");
+    if (!card || !box) return;
+    var src = box.value;
+    var pos = box.selectionStart != null ? box.selectionStart : src.length;
+    var call = formulaCallAtCaret(src, pos);
+    card.textContent = "";
+    if (!call) { card.hidden = true; return; }
+    var info = formulaFnInfo(call.name);
+    if (!info) {
+      // Not a function: say so, and offer what the search would find.
+      var line = mkEl("div", "ps-fsig-what");
+      line.appendChild(mkEl("code", "", call.typed + "()"));
+      line.appendChild(document.createTextNode(" is not a function here."));
+      var cands = formulaFnCandidates(call.typed);
+      if (cands.length) {
+        line.appendChild(document.createTextNode(" Did you mean"));
+        for (var ci = 0; ci < cands.length; ci++) (function (cand) {
+          var b = mkEl("button", "ps-fsig-use", "Use " + cand);
+          b.type = "button";
+          b.addEventListener("click", function () {
+            var at = call.nameStart;
+            box.value = src.slice(0, at) + cand + src.slice(call.nameEnd);
+            var shift = cand.length - (call.nameEnd - call.nameStart);
+            box.focus();
+            box.selectionStart = box.selectionEnd = Math.max(at, pos + shift);
+            refreshFormulaPreview();
+          });
+          line.appendChild(b);
+        })(cands[ci]);
+        line.appendChild(document.createTextNode("?"));
+      }
+      card.appendChild(line);
+      card.hidden = false;
+      return;
+    }
+    var parts = info.parts, last = parts.length - 1;
+    var cur = call.argIdx;
+    if (cur > last) cur = parts[last] === "..." ? last : -1;
+    var sig = mkEl("code", "ps-fsig-sig");
+    sig.appendChild(mkEl("b", "", call.name));
+    sig.appendChild(document.createTextNode("("));
+    for (var p = 0; p < parts.length; p++) {
+      if (p) sig.appendChild(document.createTextNode(", "));
+      sig.appendChild(mkEl("span", "ps-fsig-arg" + (p === cur ? " ps-fsig-cur" : ""), parts[p]));
+    }
+    sig.appendChild(document.createTextNode(")"));
+    var head = mkEl("div", "ps-fsig-head");
+    head.appendChild(sig);
+    if (cur !== -1) {
+      var inArg = mkEl("span", "ps-fsig-in", "you are in ");
+      inArg.appendChild(mkEl("b", "", parts[cur] === "..." ? "another argument" : parts[cur]));
+      head.appendChild(inArg);
+    } else {
+      head.appendChild(mkEl("span", "ps-fsig-in", "this function takes " +
+        parts.length + " argument" + (parts.length === 1 ? "" : "s")));
+    }
+    card.appendChild(head);
+    card.appendChild(mkEl("div", "ps-fsig-what", info.sentence));
+    var miss = mkEl("div", "ps-fsig-miss");
+    miss.appendChild(mkEl("b", "", "Missing values: "));
+    miss.appendChild(document.createTextNode(
+      (FORMULA_FN_MISSING[call.name] || "") + " "));
+    miss.appendChild(formulaGuideLink("fn-" + call.name.toLowerCase(), "Reference"));
+    card.appendChild(miss);
+    card.hidden = false;
+  }
+  // The fixes an error message carries, as buttons. The engine already
+  // names the fix in words (did-you-mean, the V-form, the stray =); a
+  // button saves retyping it and keeps the student in the dialog.
+  function formulaErrorFixes(src, error) {
+    var out = [], m;
+    var known = function (name) { return !!formulaFnInfo(name); };
+    var esc = function (s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); };
+    m = /use (V[A-Z0-9]+)\(([^)]*)\)$/.exec(error);
+    if (m && m[2] !== "column") {
+      var base = m[1].slice(1), rx = new RegExp("\\b" + base + "\\s*\\(\\s*" +
+        esc(m[2]) + "\\s*\\)", "i");
+      if (rx.test(src))
+        out.push({ label: "Use " + m[1] + "(" + m[2] + ")",
+                   apply: function (s) { return s.replace(rx, m[1] + "(" + m[2] + ")"); } });
+      return out;
+    }
+    m = /^unknown function ([A-Za-z0-9_.]+)\(\)/.exec(error);
+    if (m) {
+      var bad = m[1], names = [], tail = error.slice(error.indexOf("Did you mean"));
+      var w, wrx = /\b(V?[A-Z][A-Z0-9]*)\b/g;
+      while ((w = wrx.exec(tail)) !== null)
+        if (known(w[1]) && names.indexOf(w[1]) === -1) names.push(w[1]);
+      if (!names.length) names = formulaFnCandidates(bad);
+      names.slice(0, 3).forEach(function (name) {
+        var rx2 = new RegExp("\\b" + esc(bad) + "\\s*\\(", "gi");
+        out.push({ label: "Use " + name,
+                   apply: function (s) { return s.replace(rx2, name + "("); } });
+      });
+      return out;
+    }
+    m = /^unknown variable "(.+?)"\. Did you mean (.+?)\?/.exec(error);
+    if (m && window.PSFormula && window.PSFormula.renameRef) {
+      out.push({ label: "Use " + m[2],
+                 apply: function (s) { return window.PSFormula.renameRef(s, m[1], m[2]); } });
+      return out;
+    }
+    if (/remove the leading "="/.test(error))
+      out.push({ label: "Remove the =",
+                 apply: function (s) { return s.replace(/^\s*=+\s*/, ""); } });
+    return out;
+  }
   // Insert-at-cursor is what keeps the browser COMPOSITIONAL: two
   // clicks and a typed minus build a z-score. An insert also releases
   // any active recipe - after it, the box is no longer the recipe's
@@ -3542,6 +3767,7 @@
     var t = PROJECT.table;
     var formula = el("ps-formula-input").value;
     var msg = el("ps-formula-msg"), prev = el("ps-formula-preview");
+    refreshFormulaSignature();
     if (!String(formula).trim()) {
       msg.textContent = "";
       // The functions browser is always on screen, so the promise is
@@ -3553,8 +3779,22 @@
     var editing = FORMULA_EDIT && FORMULA_EDIT.col;
     var known = t.order.filter(function (c) { return c !== editing; });
     var compiled = window.PSFormula.compile(formula, known);
+    refreshFormulaSignature();
     if (!compiled.ok) {
       msg.textContent = compiled.error;
+      var fixes = formulaErrorFixes(formula, compiled.error);
+      for (var fi = 0; fi < fixes.length; fi++) (function (fix) {
+        var b = mkEl("button", "ps-fmsg-fix", fix.label);
+        b.type = "button";
+        b.addEventListener("click", function () {
+          var box = el("ps-formula-input");
+          box.value = fix.apply(box.value);
+          box.focus();
+          box.selectionStart = box.selectionEnd = box.value.length;
+          refreshFormulaPreview();
+        });
+        msg.appendChild(b);
+      })(fixes[fi]);
       prev.textContent = "";
       return;
     }
@@ -19417,6 +19657,20 @@
     });
     el("ps-formula-save").addEventListener("click", submitFormulaDialog);
     el("ps-formula-input").addEventListener("input", refreshFormulaPreview);
+    // The signature card follows the CARET, not just the text: arrow
+    // keys, clicks and focus move it with no input event.
+    ["keyup", "click", "focus"].forEach(function (ev) {
+      el("ps-formula-input").addEventListener(ev, refreshFormulaSignature);
+    });
+    document.addEventListener("selectionchange", function () {
+      if (document.activeElement === el("ps-formula-input"))
+        refreshFormulaSignature();
+    });
+    el("ps-fsig").addEventListener("click", function (e) {
+      var a = e.target && e.target.closest ? e.target.closest("a[data-guide-link]") : null;
+      if (a && userGuideTarget().online)
+        showToast("Opening the user guide at pandionplots.com in a new tab");
+    });
     // Any row of the worked example, or a row number in its summary,
     // unfolds that row; the same row again folds it. The pick buttons
     // carry the keyboard path, the row itself the mouse convenience.
