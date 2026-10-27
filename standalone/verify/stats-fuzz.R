@@ -11,7 +11,10 @@
 # Reference conventions mirror the widget's documented targets:
 #   welch/student t.test, wilcox.test defaults (exact-vs-approx auto),
 #   U reported both as R's W (= U1) and the displayed min(U1, U2),
-#   one-way aov F, p.adjust holm/bonferroni/BH over the welch family,
+#   one-way aov F, p.adjust holm/bonferroni/BH over the POOLED family
+#   (each pair's t on the one-way fit's MSE and df, the family rule's
+#   Compare Groups half, Oct 26 2026; a degenerate fit falls back to
+#   the pair's own Welch p, as the engine does),
 #   Games-Howell via R's ptukey over per-pair Welch t/df,
 #   cor.test with NO exact= argument (the jamovi-parity rule),
 #   paired t.test + paired wilcox.test per RM occasion pair,
@@ -197,13 +200,46 @@ dataset_refs <- function(groups) {
     names(groups) <- paste0("G", seq_along(groups))
     pairs <- list()
     ks <- names(groups)
+    # The pooled term the widget uses under Holm, Bonferroni and FDR (and
+    # Tukey, Dunnett): the one-way fit's MSE over every group, on its df.
+    # Mirrors the engine's gate exactly - pooled only when MSE > 0 and
+    # df >= 1, otherwise the pair's own Welch p - so a constant-group or
+    # two-row dataset references what the widget actually computes.
+    pool <- NULL
+    {
+        yy <- unlist(groups)
+        gg <- factor(rep(seq_along(groups), vapply(groups, length, 1L)))
+        if (nlevels(droplevels(gg)) >= 2 && isTRUE(sd(yy) > 0)) {
+            aa <- safe(anova(aov(I(yy - yy[[1]]) ~ gg)))
+            if (!is.null(aa)) {
+                mse <- aa[["Mean Sq"]][2]; dfw <- aa[["Df"]][2]
+                if (is.finite(mse) && mse > 0 && is.finite(dfw) && dfw >= 1)
+                    pool <- list(mse = mse, df = dfw)
+            }
+        }
+    }
+    pooled_p <- function(a, b) {
+        if (is.null(pool)) return(NULL)
+        a <- a[is.finite(a)]; b <- b[is.finite(b)]
+        if (length(a) < 1 || length(b) < 1) return(NULL)
+        se <- sqrt(pool$mse * (1 / length(a) + 1 / length(b)))
+        if (!is.finite(se) || se <= 0) return(NULL)
+        tt <- (mean(a) - mean(b)) / se
+        2 * pt(-abs(tt), pool$df)
+    }
     raw_p <- c(); pair_keys <- c()
     for (i in seq_along(ks)) for (j in seq_along(ks)) {
         if (j <= i) next
         key <- paste0(ks[[i]], "|", ks[[j]])
         pr <- pair_refs(groups[[i]], groups[[j]])
         pairs[[key]] <- pr
-        if (!is.null(pr$welch$p)) { raw_p <- c(raw_p, pr$welch$p); pair_keys <- c(pair_keys, key) }
+        # The engine runs the pair's Student t first and pools only when
+        # that exists (a one-observation group has no row at all, pooled
+        # term or not); without a usable fit it keeps the pair's Welch p.
+        fam_p <- NULL
+        if (is.null(pool)) fam_p <- pr$welch$p
+        else if (!is.null(pr$student$p)) fam_p <- pooled_p(groups[[i]], groups[[j]])
+        if (!is.null(fam_p)) { raw_p <- c(raw_p, fam_p); pair_keys <- c(pair_keys, key) }
     }
     adj <- list()
     if (length(raw_p) > 0) {
