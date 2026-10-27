@@ -328,6 +328,60 @@ async function openLint(page) {
     await ctx.close();
 }
 
+// ---- Case D2: CG + Bonferroni runs on the pooled term too (Oct 26 2026) --
+{
+    const { ctx, page, errs } = await openPage('d2_cg_bonf.html');
+    console.log('case D2 (CG Bonferroni on the pooled error term, d on the pooled SD):');
+    check('no page errors', errs.length === 0, errs.join(' | '));
+    const labels = await bracketLabels(page);
+    check('A-B label = 2 x the pooled raw p ' + EXP.pABbonf2, labels.includes(EXP.pABbonf2),
+          'labels=' + JSON.stringify(labels));
+    check('A-C label = 2 x the pooled raw p ' + EXP.pACbonf2, labels.includes(EXP.pACbonf2),
+          'labels=' + JSON.stringify(labels));
+    const p = await openPanel(page, 0);
+    check('readout: pooled t line ' + EXP.tkTAB + ', its own raw p, term named',
+          !!p.readout && p.readout.includes(EXP.tkTAB) &&
+          p.readout.includes(EXP.pABraw + '  (raw)') &&
+          p.readout.includes("pooled t on the one-way ANOVA's error term"),
+          'readout=' + JSON.stringify(p.readout));
+    check('readout: d on the pooled SD ' + EXP.dABpool + ', not the pair\'s ' + EXP.dABpair,
+          !!p.readout && p.readout.includes(EXP.dABpool) && !p.readout.includes(EXP.dABpair),
+          'readout=' + JSON.stringify(p.readout));
+    // The Compare pairs table: Bonferroni over the 3 pairs on the pooled
+    // raw p, pooled t rows, pooled d; Holm and FDR pool too; None brings
+    // the pair's own test and d back.
+    const st = await openStats(page);
+    const pane = () => page.evaluate(() =>
+        document.querySelector('[data-st-pane="pairs"]')?.textContent || '');
+    const setCorr = async v => {
+        await page.evaluate(val => {
+            const sel = document.querySelector('[data-cmp-corr]');
+            sel.value = val; sel.dispatchEvent(new Event('change', { bubbles: true }));
+        }, v);
+        await page.waitForTimeout(600);
+    };
+    let txt = await pane();
+    check('pairs under Bonferroni: pooled t rows, pooled raw p, p(Bonferroni) = 3 x it, pooled d',
+          st.has && txt.includes('pooled t') && txt.includes(EXP.pABraw.replace('p = ', '')) &&
+          txt.includes(EXP.pABbonf3.replace('p = ', '')) && txt.includes(EXP.dABpool) &&
+          !txt.includes(EXP.dABpair),
+          'pane=' + JSON.stringify(txt.slice(0, 900)));
+    await setCorr('holm');
+    txt = await pane();
+    check('pairs under Holm: pooled t rows', txt.includes('pooled t') && txt.includes(EXP.dABpool),
+          'pane=' + JSON.stringify(txt.slice(0, 400)));
+    await setCorr('fdrBH');
+    txt = await pane();
+    check('pairs under FDR: pooled t rows', txt.includes('pooled t') && txt.includes(EXP.dABpool),
+          'pane=' + JSON.stringify(txt.slice(0, 400)));
+    await setCorr('none');
+    txt = await pane();
+    check('pairs under None: the pair\'s own test and d are back',
+          !txt.includes('pooled t') && txt.includes(EXP.dABpair) && !txt.includes(EXP.dABpool),
+          'pane=' + JSON.stringify(txt.slice(0, 600)));
+    await ctx.close();
+}
+
 // ---- Case G: one x-category -> omnibus options hidden ---------------
 {
     const { ctx, page, errs } = await openPage('g_cg_onecat.html');

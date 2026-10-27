@@ -129,6 +129,13 @@ ann2 <- paste0(
 wr(plotbuilder(data = cg3, xvar = "x", yvar = "y", groupVar = NULL, facetVar = NULL, graphType = "bar",
                chartSpec = cspec(autoPCorrection = "tukey"), annotationsJson = ann2),
    "d_cg_tukey")
+# D2 (Oct 26 2026, Torry's class_year screenshot): the family rule's
+# Compare Groups half covers Bonferroni, Holm and FDR too - jamovi's post
+# hoc table runs every correction on the model's error term - and d
+# divides by the model's pooled SD. Same data, Bonferroni persisted.
+wr(plotbuilder(data = cg3, xvar = "x", yvar = "y", groupVar = NULL, facetVar = NULL, graphType = "bar",
+               chartSpec = cspec(autoPCorrection = "bonferroni"), annotationsJson = ann2),
+   "d2_cg_bonf")
 
 # ---- Expected values, computed independently in R --------------------
 fmtP <- function(p) {
@@ -175,14 +182,29 @@ tkTAB <- sprintf("t(%d) = %.2f", as.integer(dfW),
 # the family rule, Compare Groups half: under Tukey the row's unadjusted
 # p is that pooled statistic's own p (jamovi's ANOVA post hoc "p none")
 pABraw <- 2 * pt(-abs((m["A"] - m["B"]) / sqrt(MSE * (1 / n["A"] + 1 / n["B"]))), dfW)
+# D2: Bonferroni over the family of 2 brackets (labels) and of 3 pairs
+# (the Compare pairs table), both on the pooled raw p; d on sqrt(MSE)
+# (jamovi's post hoc Cohen's d) vs the pair's own pooled-SD d (Correct =
+# None). The control must be able to tell them apart at 2 dp.
+pACraw <- 2 * pt(-abs((m["A"] - m["C"]) / sqrt(MSE * (1 / n["A"] + 1 / n["C"]))), dfW)
+pBCraw <- 2 * pt(-abs((m["B"] - m["C"]) / sqrt(MSE * (1 / n["B"] + 1 / n["C"]))), dfW)
+pABbonf2 <- min(1, 2 * pABraw); pACbonf2 <- min(1, 2 * pACraw)
+pABbonf3 <- min(1, 3 * pABraw)
+dABpool <- (m["A"] - m["B"]) / sqrt(MSE)
+vA <- var(cg3$y[cg3$x == "A"]); vB <- var(cg3$y[cg3$x == "B"])
+dABpair <- (m["A"] - m["B"]) / sqrt(((n["A"] - 1) * vA + (n["B"] - 1) * vB) / (n["A"] + n["B"] - 2))
+fmtD <- function(d) sprintf("d = %.2f", d)
+stopifnot(fmtD(dABpool) != fmtD(dABpair))
 exp_json <- sprintf(paste0(
     '{"pairedDf":"t(%d)","pairedT":"%s","pAB":"%s","pAC":"%s",',
     '"pRM12":"%s","pRM13":"%s","pRM12raw":"%s","rmDfE":%d,"rmN":%d,"rmTkT12":"%s","tkTAB":"%s",',
-    '"pRM12rawLW":"%s","pRMholm12":"%s","pRMholm13":"%s","pRMholm23":"%s","pABraw":"%s"}'),
+    '"pRM12rawLW":"%s","pRMholm12":"%s","pRMholm13":"%s","pRMholm23":"%s","pABraw":"%s",',
+    '"pABbonf2":"%s","pACbonf2":"%s","pABbonf3":"%s","dABpool":"%s","dABpair":"%s"}'),
     pt$parameter, formatC(pt$statistic, format = "f", digits = 2),
     fmtP(pAB), fmtP(pAC), fmtP(pRM12), fmtP(pRM13), fmtP(pRM12raw), as.integer(rmDfE),
     as.integer(rmN), rmTkT12, tkTAB,
-    fmtP(pRM12rawLW), fmtP(rmHolm[1]), fmtP(rmHolm[2]), fmtP(rmHolm[3]), fmtP(pABraw))
+    fmtP(pRM12rawLW), fmtP(rmHolm[1]), fmtP(rmHolm[2]), fmtP(rmHolm[3]), fmtP(pABraw),
+    fmtP(pABbonf2), fmtP(pACbonf2), fmtP(pABbonf3), fmtD(dABpool), fmtD(dABpair))
 con <- file(file.path(OUT, "expected.json"), open = "wb")
 writeLines(exp_json, con, useBytes = TRUE)
 close(con)
@@ -517,7 +539,9 @@ wABp <- t.test(yA, yB)$p.value
 wACp <- t.test(yA, yC)$p.value
 wBCp <- t.test(yB, yC)$p.value
 cmpSig <- sum(c(wABp, wACp, wBCp) < 0.05)
-hol <- p.adjust(c(wABp, wACp, wBCp), "holm")
+# Holm on Compare Groups pools too (Oct 26 2026): the adjusted column
+# runs over the pooled term's raw p values, not the pairs' own Welch p.
+hol <- p.adjust(c(pABraw, pACraw, pBCraw), "holm")
 exp8 <- sub("}$", sprintf(paste0(
     ',"cmpRawAB":"%s","cmpRawBC":"%s","cmpSig":%d,"cmpHolmAB":"%s"}'),
     stripP(fmtP(wABp)), stripP(fmtP(wBCp)), cmpSig, stripP(fmtP(hol[1]))), exp7)

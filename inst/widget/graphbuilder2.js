@@ -15767,24 +15767,27 @@
             // LEFT anchored cell is predicted above the RIGHT one.
             var _tail = (ann.autoPTail === "greater" || ann.autoPTail === "less")
                 ? ann.autoPTail : "two";
-            // THE FAMILY RULE, Compare Groups half (Torry, Oct 22 2026):
-            // with a POOLED correction on (Tukey, Dunnett), an independent
-            // t bracket's statistic and unadjusted p come from the one-way
-            // ANOVA's pooled error term over every cell of its panel - the
-            // same ruler the adjusted p uses, and what jamovi's ANOVA post
-            // hoc prints as its uncorrected column - so a row never mixes
-            // two error terms. Games-Howell's own model is Welch's t, so
-            // under it a Student's pick runs as Welch. With Correct = None
-            // each pair is its own two-group test. Effect sizes keep the
-            // pair's own spread (_tkEff): they describe the two groups,
-            // not the family.
+            // THE FAMILY RULE, Compare Groups half (Torry, Oct 22 2026;
+            // widened Oct 26 2026 after his class_year screenshot): with ANY
+            // correction on except Games-Howell (Tukey, Dunnett, Bonferroni,
+            // Holm, FDR), an independent t bracket's statistic and
+            // unadjusted p come from the one-way ANOVA's pooled error term
+            // over every cell of its panel - the same ruler the adjusted p
+            // uses, and what jamovi's ANOVA post hoc prints under every one
+            // of its corrections - so a row never mixes two error terms.
+            // Games-Howell's own model is Welch's t, so under it a Student's
+            // pick runs as Welch. With Correct = None each pair is its own
+            // two-group test. Under a pooled correction Cohen's d (and g)
+            // divide by the model's pooled SD, jamovi's post hoc column;
+            // otherwise effect sizes keep the pair's own spread (_tkEff).
             var _tkEff = testKind, _poolModel = null;
             if (!_isRepeatedMeasuresData() && !(data && data.freqMode === true) &&
                 (testKind === "welch" || testKind === "studentT")) {
                 var _pc = (typeof data.autoPCorrection === "string") ? data.autoPCorrection : "none";
                 if (_pc === "gamesHowell") {
                     testKind = "welch";
-                } else if (_pc === "tukey" || _pc === "dunnett") {
+                } else if (_pc === "tukey" || _pc === "dunnett" ||
+                           _pc === "bonferroni" || _pc === "holm" || _pc === "fdrBH") {
                     try {
                         var _fcP = _facetCells(_facetOf(ann.anchorLeftCat || ""));
                         var _aovP = (_fcP.k >= 2) ? _gb2Stats.oneWayANOVA(_fcP.levels) : null;
@@ -15841,6 +15844,20 @@
             } else if (testKind === "wilcoxonSignedRank") {
                 effectKind = "rankBiserial";
                 effect = _gb2Stats.rankBiserialWilcoxon(lv, rv);
+            } else if (res && res.pooled && res.pooled.mse > 0 &&
+                       (effectKind === "hedgesG" || effectKind === "cohensD" || !effectKind)) {
+                // The pooled row: d is the mean difference over the
+                // model's pooled SD (sqrt MSE over every group of the
+                // panel), jamovi's post hoc Cohen's d, so the family's
+                // effects share one scale; g applies the small-sample
+                // factor on the pooled term's df.
+                var _dPool = (res.m1 - res.m2) / Math.sqrt(res.pooled.mse);
+                if (effectKind === "hedgesG") {
+                    effect = _dPool * (1 - 3 / (4 * res.pooled.df - 1));
+                } else {
+                    effectKind = "cohensD";
+                    effect = _dPool;
+                }
             } else if (effectKind === "hedgesG") {
                 // Welch's row: jamovi divides by sqrt((v1+v2)/2), not
                 // the pooled SD, so the base d switches with the test
