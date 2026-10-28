@@ -86,6 +86,35 @@ wr(rmplotbuilder(data = rmd, measures = c("t1", "t2"), bs = NULL, betweenVar = N
                  annotationsJson = annJson("auto", "apa", "t1", "t2")),
    "c_rm_tukey")
 
+# ---- Case C3: RM, 3 occasions + Tukey -> the RM ANOVA's error term --
+# Oct 2026 (a PSYC 206 instructor's ask): jamovi's RM ANOVA post hoc
+# defaults to Tukey, so pure RM charts now offer it. Pairwise occasion
+# means are judged by the studentized range over the one-way RM
+# ANOVA's within-subject error (df = (n-1)(k-1)), which with three
+# occasions differs from each pair's own paired t.
+rm3n <- 10
+rm3 <- data.frame(t1 = c(9.8, 11.2, 8.7, 10.4, 12.1, 9.3, 10.9, 11.6, 8.9, 10.1))
+# t1-t2 is a modest change (its own paired t lands near .04, the
+# pooled Tukey well above it); t1-t3 is large. A pair that is
+# p < .001 both ways would make the control unable to fail.
+rm3$t2 <- rm3$t1 + c(0.9, 0.1, 0.4, -0.3, 1.2, 0.2, 0.7, 0.0, -0.2, 0.9)
+rm3$t3 <- rm3$t1 + c(2.1, 1.0, 1.4, 0.8, 2.6, 0.9, 1.4, 2.3, 0.2, 1.7)
+# subject 10 lacks t3: jamovi's post hoc (and ours) drops that subject from
+# EVERY pair, while the pair's own raw paired t keeps all ten who have t1
+# and t2, so the Tukey statistic and the raw statistic can be told apart.
+rm3$t3[10] <- NA
+ann3 <- paste0(
+    '[{"id":"r1","kind":"bracket","text":"*","x":100,"y":50,"x2":250,',
+    '"autoPValue":true,"autoPTest":"auto","autoPFormat":"p",',
+    '"anchorLeftCat":"t1","anchorLeftGroup":"","anchorRightCat":"t2","anchorRightGroup":""},',
+    '{"id":"r2","kind":"bracket","text":"*","x":100,"y":30,"x2":400,',
+    '"autoPValue":true,"autoPTest":"auto","autoPFormat":"p",',
+    '"anchorLeftCat":"t1","anchorLeftGroup":"","anchorRightCat":"t3","anchorRightGroup":""}]')
+wr(rmplotbuilder(data = rm3, measures = c("t1", "t2", "t3"), bs = NULL, betweenVar = NULL,
+                 graphType = "bar", chartSpec = cspec(autoPCorrection = "tukey"),
+                 annotationsJson = ann3),
+   "c3_rm_tukey3")
+
 # ---- Case D: CG + Tukey on Welch brackets -> still really corrects ---
 set.seed(2)
 cg3 <- data.frame(x = rep(c("A", "B", "C"), each = 12),
@@ -100,6 +129,13 @@ ann2 <- paste0(
 wr(plotbuilder(data = cg3, xvar = "x", yvar = "y", groupVar = NULL, facetVar = NULL, graphType = "bar",
                chartSpec = cspec(autoPCorrection = "tukey"), annotationsJson = ann2),
    "d_cg_tukey")
+# D2 (Oct 26 2026, Torry's class_year screenshot): the family rule's
+# Compare Groups half covers Bonferroni, Holm and FDR too - jamovi's post
+# hoc table runs every correction on the model's error term - and d
+# divides by the model's pooled SD. Same data, Bonferroni persisted.
+wr(plotbuilder(data = cg3, xvar = "x", yvar = "y", groupVar = NULL, facetVar = NULL, graphType = "bar",
+               chartSpec = cspec(autoPCorrection = "bonferroni"), annotationsJson = ann2),
+   "d2_cg_bonf")
 
 # ---- Expected values, computed independently in R --------------------
 fmtP <- function(p) {
@@ -115,10 +151,60 @@ m <- tapply(cg3$y, cg3$x, mean); n <- tapply(cg3$y, cg3$x, length)
 qs <- function(a, b) abs(m[a] - m[b]) / sqrt((MSE / 2) * (1 / n[a] + 1 / n[b]))
 pAB <- ptukey(qs("A", "B"), 3, dfW, lower.tail = FALSE)
 pAC <- ptukey(qs("A", "C"), 3, dfW, lower.tail = FALSE)
+# C3: jamovi's RM post hoc flavor (emmeans on the multivariate model):
+# each pair's paired t over the subjects complete across EVERY occasion
+# (its own SE, df = n - 1), judged by the studentized range with k = 3
+# on that df. Subject 10 lacks t3, so the family runs on 9 subjects
+# while the pair's own raw paired t keeps all 10.
+rmCC <- complete.cases(rm3$t1, rm3$t2, rm3$t3); rmN <- sum(rmCC)
+rmPt12 <- t.test(rm3$t1[rmCC], rm3$t2[rmCC], paired = TRUE)
+rmPt13 <- t.test(rm3$t1[rmCC], rm3$t3[rmCC], paired = TRUE)
+pRM12 <- ptukey(abs(rmPt12$statistic) * sqrt(2), 3, rmN - 1, lower.tail = FALSE)
+pRM13 <- ptukey(abs(rmPt13$statistic) * sqrt(2), 3, rmN - 1, lower.tail = FALSE)
+pRM12raw <- t.test(rm3$t1, rm3$t2, paired = TRUE)$p.value
+# the control must be able to fail: the Tukey p and the pair's own
+# paired-t p have to differ at label precision
+stopifnot(fmtP(pRM12) != fmtP(pRM12raw), rmN == rm3n - 1)
+# the statistic that belongs to the Tukey p (the readout's extra line,
+# the APA label, the Compare-pairs Statistic column): the listwise
+# paired t on df n - 1
+rmTkT12 <- sprintf("t(%d) = %.2f", rmN - 1, rmPt12$statistic)
+rmDfE <- rmN - 1
+# the family rule (Oct 22 2026): with a correction on, the row's raw p is
+# the listwise paired t's too, and Holm runs over the listwise family;
+# with Correct = None the pair keeps all ten (pRM12raw above)
+pRM12rawLW <- rmPt12$p.value
+rmPt23 <- t.test(rm3$t2[rmCC], rm3$t3[rmCC], paired = TRUE)
+rmHolm <- p.adjust(c(rmPt12$p.value, rmPt13$p.value, rmPt23$p.value), "holm")
+# D: the same for Compare Groups: the pooled statistic beside the Tukey p
+tkTAB <- sprintf("t(%d) = %.2f", as.integer(dfW),
+                 (m["A"] - m["B"]) / sqrt(MSE * (1 / n["A"] + 1 / n["B"])))
+# the family rule, Compare Groups half: under Tukey the row's unadjusted
+# p is that pooled statistic's own p (jamovi's ANOVA post hoc "p none")
+pABraw <- 2 * pt(-abs((m["A"] - m["B"]) / sqrt(MSE * (1 / n["A"] + 1 / n["B"]))), dfW)
+# D2: Bonferroni over the family of 2 brackets (labels) and of 3 pairs
+# (the Compare pairs table), both on the pooled raw p; d on sqrt(MSE)
+# (jamovi's post hoc Cohen's d) vs the pair's own pooled-SD d (Correct =
+# None). The control must be able to tell them apart at 2 dp.
+pACraw <- 2 * pt(-abs((m["A"] - m["C"]) / sqrt(MSE * (1 / n["A"] + 1 / n["C"]))), dfW)
+pBCraw <- 2 * pt(-abs((m["B"] - m["C"]) / sqrt(MSE * (1 / n["B"] + 1 / n["C"]))), dfW)
+pABbonf2 <- min(1, 2 * pABraw); pACbonf2 <- min(1, 2 * pACraw)
+pABbonf3 <- min(1, 3 * pABraw)
+dABpool <- (m["A"] - m["B"]) / sqrt(MSE)
+vA <- var(cg3$y[cg3$x == "A"]); vB <- var(cg3$y[cg3$x == "B"])
+dABpair <- (m["A"] - m["B"]) / sqrt(((n["A"] - 1) * vA + (n["B"] - 1) * vB) / (n["A"] + n["B"] - 2))
+fmtD <- function(d) sprintf("d = %.2f", d)
+stopifnot(fmtD(dABpool) != fmtD(dABpair))
 exp_json <- sprintf(paste0(
-    '{"pairedDf":"t(%d)","pairedT":"%s","pAB":"%s","pAC":"%s"}'),
+    '{"pairedDf":"t(%d)","pairedT":"%s","pAB":"%s","pAC":"%s",',
+    '"pRM12":"%s","pRM13":"%s","pRM12raw":"%s","rmDfE":%d,"rmN":%d,"rmTkT12":"%s","tkTAB":"%s",',
+    '"pRM12rawLW":"%s","pRMholm12":"%s","pRMholm13":"%s","pRMholm23":"%s","pABraw":"%s",',
+    '"pABbonf2":"%s","pACbonf2":"%s","pABbonf3":"%s","dABpool":"%s","dABpair":"%s"}'),
     pt$parameter, formatC(pt$statistic, format = "f", digits = 2),
-    fmtP(pAB), fmtP(pAC))
+    fmtP(pAB), fmtP(pAC), fmtP(pRM12), fmtP(pRM13), fmtP(pRM12raw), as.integer(rmDfE),
+    as.integer(rmN), rmTkT12, tkTAB,
+    fmtP(pRM12rawLW), fmtP(rmHolm[1]), fmtP(rmHolm[2]), fmtP(rmHolm[3]), fmtP(pABraw),
+    fmtP(pABbonf2), fmtP(pACbonf2), fmtP(pABbonf3), fmtD(dABpool), fmtD(dABpair))
 con <- file(file.path(OUT, "expected.json"), open = "wb")
 writeLines(exp_json, con, useBytes = TRUE)
 close(con)
@@ -320,11 +406,18 @@ wr(plotbuilder(data = cgn, xvar = "x", yvar = "y", groupVar = NULL,
    "o_dunnett_violation")
 wAB <- t.test(cgn$y[cgn$x == "A"], cgn$y[cgn$x == "B"])
 wCC <- t.test(cgn$y[cgn$x == "Ctrl"], cgn$y[cgn$x == "C"])
+# the family rule, Compare Groups half: with Dunnett SELECTED the row runs
+# on the pooled ANOVA term even when Dunnett's shared-control structure
+# fails, so the fall-through "uncorrected p" is the pooled statistic's own
+# p (the readout and the foot name the term); wAB/wCC stay as the
+# pair's-own Welch references
+pABpool <- 2 * pt(-abs((mN[["A"]] - mN[["B"]]) / sqrt(MSE * (1 / nN[["A"]] + 1 / nN[["B"]]))), dfW)
+pCCpool <- 2 * pt(-abs((mN[["Ctrl"]] - mN[["C"]]) / sqrt(MSE * (1 / nN[["Ctrl"]] + 1 / nN[["C"]]))), dfW)
 
 exp5 <- sub("}$", sprintf(
-    ',"dunA":"%s","dunB":"%s","dunC":"%s","rawAB":"%s","rawCC":"%s"}',
+    ',"dunA":"%s","dunB":"%s","dunC":"%s","rawAB":"%s","rawCC":"%s","rawABpool":"%s","rawCCpool":"%s"}',
     fmtP(pD[1]), fmtP(pD[2]), fmtP(pD[3]),
-    fmtP(wAB$p.value), fmtP(wCC$p.value)), exp4)
+    fmtP(wAB$p.value), fmtP(wCC$p.value), fmtP(pABpool), fmtP(pCCpool)), exp4)
 con <- file(file.path(OUT, "expected.json"), open = "wb")
 writeLines(exp5, con, useBytes = TRUE)
 close(con)
@@ -446,7 +539,9 @@ wABp <- t.test(yA, yB)$p.value
 wACp <- t.test(yA, yC)$p.value
 wBCp <- t.test(yB, yC)$p.value
 cmpSig <- sum(c(wABp, wACp, wBCp) < 0.05)
-hol <- p.adjust(c(wABp, wACp, wBCp), "holm")
+# Holm on Compare Groups pools too (Oct 26 2026): the adjusted column
+# runs over the pooled term's raw p values, not the pairs' own Welch p.
+hol <- p.adjust(c(pABraw, pACraw, pBCraw), "holm")
 exp8 <- sub("}$", sprintf(paste0(
     ',"cmpRawAB":"%s","cmpRawBC":"%s","cmpSig":%d,"cmpHolmAB":"%s"}'),
     stripP(fmtP(wABp)), stripP(fmtP(wBCp)), cmpSig, stripP(fmtP(hol[1]))), exp7)

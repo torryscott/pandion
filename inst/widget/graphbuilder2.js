@@ -15678,10 +15678,41 @@
             var _alignById = _pairedTest &&
                 Array.isArray(_lIds) && _lIds.length === lv.length &&
                 Array.isArray(_rIds) && _rIds.length === rv.length;
+            var _listwise = null;
             if (_alignById) {
                 // values[] are finite-only, so rowIds[i] is the subject
                 // of values[i]; joining drops any subject missing or
                 // hidden on either side → true pairwise-complete pairs.
+                //
+                // THE FAMILY RULE (Torry, Oct 22 2026): on a pure
+                // repeated-measures chart with a correction ON, every
+                // paired comparison runs on the subjects complete across
+                // EVERY visible occasion of its panel - jamovi's RM
+                // ANOVA post hoc rule - so a row never mixes two subject
+                // sets (the raw p from everyone with both occasions
+                // beside a Tukey p from the complete subjects was the
+                // last number that disagreed with jamovi's table). With
+                // Correct = None a bracket stays a paired test on
+                // everyone who has both occasions, jamovi's Paired
+                // Samples T-Test. The exclusion count rides the result
+                // (listwise) so the readout and the table can say so.
+                var _famSet = null, _famExcl = 0;
+                if (_isRepeatedMeasuresData() && !(data && data.hasGroups) &&
+                    typeof data.autoPCorrection === "string" &&
+                    data.autoPCorrection !== "none") {
+                    try {
+                        var _famM = _rmTukeyModel(_facetOf(ann.anchorLeftCat || ""));
+                        if (_famM && Array.isArray(_famM.ids) &&
+                            _famM.indexOf(ann.anchorLeftCat, ann.anchorLeftGroup) >= 0 &&
+                            _famM.indexOf(ann.anchorRightCat, ann.anchorRightGroup) >= 0) {
+                            _famSet = {};
+                            for (var _fi = 0; _fi < _famM.ids.length; _fi++) {
+                                _famSet[_famM.ids[_fi]] = true;
+                            }
+                            _famExcl = isFinite(_famM.excluded) ? _famM.excluded : 0;
+                        }
+                    } catch (_eFam) { _famSet = null; }
+                }
                 var _rById = {};
                 for (var _rj = 0; _rj < _rIds.length; _rj++) {
                     if (_rHs && _rHs[_rj]) continue;
@@ -15692,10 +15723,12 @@
                     if (_lHs && _lHs[_lj]) continue;
                     var _rid = _lIds[_lj];
                     if (!Object.prototype.hasOwnProperty.call(_rById, _rid)) continue;
+                    if (_famSet && !Object.prototype.hasOwnProperty.call(_famSet, _rid)) continue;
                     _lvA.push(lv[_lj]);
                     _rvA.push(_rById[_rid]);
                 }
                 lv = _lvA; rv = _rvA;
+                if (_famSet) _listwise = { n: lv.length, excluded: _famExcl };
                 // A cross-group bracket on a mixed design joins two
                 // disjoint subject sets, leaving zero pairs. Give that
                 // its own message instead of the generic small-n one.
@@ -15734,10 +15767,52 @@
             // LEFT anchored cell is predicted above the RIGHT one.
             var _tail = (ann.autoPTail === "greater" || ann.autoPTail === "less")
                 ? ann.autoPTail : "two";
+            // THE FAMILY RULE, Compare Groups half (Torry, Oct 22 2026;
+            // widened Oct 26 2026 after his class_year screenshot): with ANY
+            // correction on except Games-Howell (Tukey, Dunnett, Bonferroni,
+            // Holm, FDR), an independent t bracket's statistic and
+            // unadjusted p come from the one-way ANOVA's pooled error term
+            // over every cell of its panel - the same ruler the adjusted p
+            // uses, and what jamovi's ANOVA post hoc prints under every one
+            // of its corrections - so a row never mixes two error terms.
+            // Games-Howell's own model is Welch's t, so under it a Student's
+            // pick runs as Welch. With Correct = None each pair is its own
+            // two-group test. Under a pooled correction Cohen's d (and g)
+            // divide by the model's pooled SD, jamovi's post hoc column;
+            // otherwise effect sizes keep the pair's own spread (_tkEff).
+            var _tkEff = testKind, _poolModel = null;
+            if (!_isRepeatedMeasuresData() && !(data && data.freqMode === true) &&
+                (testKind === "welch" || testKind === "studentT")) {
+                var _pc = (typeof data.autoPCorrection === "string") ? data.autoPCorrection : "none";
+                if (_pc === "gamesHowell") {
+                    testKind = "welch";
+                } else if (_pc === "tukey" || _pc === "dunnett" ||
+                           _pc === "bonferroni" || _pc === "holm" || _pc === "fdrBH") {
+                    try {
+                        var _fcP = _facetCells(_facetOf(ann.anchorLeftCat || ""));
+                        var _aovP = (_fcP.k >= 2) ? _gb2Stats.oneWayANOVA(_fcP.levels) : null;
+                        if (_aovP && _aovP.msw > 0 && isFinite(_aovP.df2) && _aovP.df2 >= 1) {
+                            _poolModel = { mse: _aovP.msw, df: _aovP.df2, k: _fcP.k };
+                            testKind = "studentT";
+                        }
+                    } catch (_ePool) { _poolModel = null; }
+                }
+            }
             var res, testFamily;
             if (testKind === "studentT") {
                 res = _gb2Stats.studentT(lv, rv, _tail);
                 testFamily = "t";
+                if (res && _poolModel) {
+                    var _seP = Math.sqrt(_poolModel.mse * (1 / res.n1 + 1 / res.n2));
+                    if (isFinite(_seP) && _seP > 0) {
+                        var _tP = (res.m1 - res.m2) / _seP;
+                        res = { t: _tP, df: _poolModel.df,
+                                p: _gb2Stats._tTailP(_tP, _poolModel.df, _tail),
+                                m1: res.m1, m2: res.m2, sd1: res.sd1, sd2: res.sd2,
+                                n1: res.n1, n2: res.n2,
+                                pooled: { mse: _poolModel.mse, df: _poolModel.df, k: _poolModel.k } };
+                    }
+                }
             } else if (testKind === "pairedT") {
                 res = _gb2Stats.pairedT(lv, rv, _tail);
                 testFamily = "t";
@@ -15769,15 +15844,30 @@
             } else if (testKind === "wilcoxonSignedRank") {
                 effectKind = "rankBiserial";
                 effect = _gb2Stats.rankBiserialWilcoxon(lv, rv);
+            } else if (res && res.pooled && res.pooled.mse > 0 &&
+                       (effectKind === "hedgesG" || effectKind === "cohensD" || !effectKind)) {
+                // The pooled row: d is the mean difference over the
+                // model's pooled SD (sqrt MSE over every group of the
+                // panel), jamovi's post hoc Cohen's d, so the family's
+                // effects share one scale; g applies the small-sample
+                // factor on the pooled term's df.
+                var _dPool = (res.m1 - res.m2) / Math.sqrt(res.pooled.mse);
+                if (effectKind === "hedgesG") {
+                    effect = _dPool * (1 - 3 / (4 * res.pooled.df - 1));
+                } else {
+                    effectKind = "cohensD";
+                    effect = _dPool;
+                }
             } else if (effectKind === "hedgesG") {
                 // Welch's row: jamovi divides by sqrt((v1+v2)/2), not
-                // the pooled SD, so the base d switches with the test.
-                effect = (testKind === "welch")
+                // the pooled SD, so the base d switches with the test
+                // (the test as PICKED, not the family rule's override).
+                effect = (_tkEff === "welch")
                     ? _gb2Stats.hedgesGAvg(lv, rv)
                     : _gb2Stats.hedgesG(lv, rv);
             } else {
                 effectKind = "cohensD";
-                effect = (testKind === "welch")
+                effect = (_tkEff === "welch")
                     ? _gb2Stats.cohensDAvg(lv, rv)
                     : _gb2Stats.cohensD(lv, rv);
             }
@@ -15800,6 +15890,9 @@
                     var _pv = ((res.n1 - 1) * res.sd1 * res.sd1 +
                                (res.n2 - 1) * res.sd2 * res.sd2) / (res.n1 + res.n2 - 2);
                     _se = Math.sqrt(_pv * (1 / res.n1 + 1 / res.n2));
+                    // the family rule: the interval sits on the same
+                    // pooled term as the statistic beside it
+                    if (res.pooled) _se = Math.sqrt(res.pooled.mse * (1 / res.n1 + 1 / res.n2));
                 } else {
                     _md = res.m1 - res.m2;
                     _se = Math.sqrt(res.sd1 * res.sd1 / res.n1 +
@@ -15836,7 +15929,11 @@
                 tail: _tail,
                 ci: ci,
                 effectCi: effectCi,
-                excludedHidden: _exHid
+                excludedHidden: _exHid,
+                // {n, excluded} when the family rule restricted this
+                // paired test to the subjects complete across every
+                // occasion (null otherwise)
+                listwise: _listwise
             };
         }
 
@@ -15869,6 +15966,78 @@
             return { levels: levels, k: k };
         }
 
+        // The subjects behind Tukey on a repeated-measures chart (Oct
+        // 2026, a PSYC 206 instructor's ask - jamovi's RM ANOVA post hoc
+        // defaults to Tukey). jamovi computes it with emmeans on the
+        // MULTIVARIATE model: each pair's statistic is the paired t of
+        // that pair's differences over the subjects complete across EVERY
+        // occasion (its own SE, df = n - 1), judged by the studentized
+        // range with k = occasions on that df. (The univariate version,
+        // one pooled error term on df (n - 1)(k - 1), was built first and
+        // did not match jamovi's table - Torry's Week 1/6/12 screenshot.)
+        // Same gathering rules as the RM-ANOVA omnibus (_computeRMAnovaRaw):
+        // cells need rowIds, hidden cells and hidden points drop out, a
+        // subject missing any occasion of the facet drops out of every
+        // pair. Returns the listwise rows (one per subject, one column
+        // per occasion) or null when fewer than two occasions or two
+        // subjects survive.
+        function _rmTukeyModel(facet) {
+            if (!_isRepeatedMeasuresData() || !Array.isArray(bars)) return null;
+            var occ = [], keys = {}, pool = {}, poolN = 0, i, j;
+            for (i = 0; i < bars.length; i++) {
+                var b = bars[i];
+                if (!b) continue;
+                var vals = Array.isArray(b._origValues) ? b._origValues
+                         : (Array.isArray(b.values) ? b.values : null);
+                if (!vals || !Array.isArray(b.rowIds) ||
+                    b.rowIds.length !== vals.length) continue;
+                var cat = (typeof b.x === "string") ? b.x : "";
+                var grp = (b.group == null) ? "" : String(b.group);
+                if (_facetOf(cat) !== facet) continue;
+                if (_isBarHidden(cat, grp)) continue;
+                var hs = _hiddenSetForBar(b), mp = {}, any = false;
+                for (var v = 0; v < vals.length; v++) {
+                    if (hs && hs[v]) continue;
+                    if (isFinite(vals[v])) {
+                        mp[b.rowIds[v]] = vals[v]; any = true;
+                        if (!pool[b.rowIds[v]]) { pool[b.rowIds[v]] = true; poolN++; }
+                    }
+                }
+                if (!any) continue;
+                keys[JSON.stringify([cat, grp])] = occ.length;
+                occ.push(mp);
+            }
+            var k = occ.length;
+            if (k < 2) return null;
+            var rows = [], ids = [];
+            for (var id in occ[0]) {
+                var full = true;
+                for (j = 1; j < k; j++) {
+                    if (!Object.prototype.hasOwnProperty.call(occ[j], id)) {
+                        full = false; break;
+                    }
+                }
+                if (!full) continue;
+                var row = [];
+                for (j = 0; j < k; j++) row.push(occ[j][id]);
+                rows.push(row); ids.push(id);
+            }
+            var n = rows.length;
+            if (n < 2) return null;
+            return {
+                // excluded = subjects seen on at least one visible
+                // occasion but not on all of them (the chart's pool minus
+                // the complete subjects) - one number for every pair
+                k: k, n: n, rows: rows, ids: ids, excluded: poolN - n,
+                indexOf: function (c, g) {
+                    var key = JSON.stringify([String(c || ""),
+                                              (g == null) ? "" : String(g)]);
+                    return Object.prototype.hasOwnProperty.call(keys, key)
+                        ? keys[key] : -1;
+                }
+            };
+        }
+
         // Correct ONE facet's brackets. Returns adjusted p's parallel
         // to grpRaw, the count-based family size, and the cell count
         // (the Tukey/GH "k").
@@ -15891,15 +16060,55 @@
                 adj = _gb2Stats.holm(ps);
             } else if (correction === "fdr" || correction === "fdrBH") {
                 adj = _gb2Stats.fdrBH(ps);
+            } else if (correction === "tukey" && _isRepeatedMeasuresData() &&
+                       !(data && data.hasGroups)) {
+                // Tukey on a PURE repeated-measures chart, jamovi's way:
+                // each t-family bracket whose legs sit on two of this
+                // facet's occasions gets the paired t of that pair over
+                // the subjects complete across EVERY occasion (its own
+                // SE, df = n - 1), judged by the studentized range with
+                // k = occasions on that df. The pair's own raw test may
+                // use more subjects (anyone with both occasions), so the
+                // two statistics differ only when data are missing; the
+                // label, readout and Compare-pairs table show THIS one
+                // beside the Tukey p (basis "rmPaired"). Rank brackets,
+                // and brackets whose legs are not two complete occasions,
+                // keep their raw p, disclosed via applied=false.
+                var rmT = _rmTukeyModel(facet);
+                kCells = rmT ? rmT.k : 0;
+                adj = grpRaw.map(function (r, ai) {
+                    if (!r || !r.ok) { applied[ai] = false; return NaN; }
+                    if (!rmT || r.testFamily !== "t") { applied[ai] = false; return r.res.p; }
+                    var an = grpAnns ? grpAnns[ai] : null;
+                    var ia = rmT.indexOf(an ? an.anchorLeftCat : "",
+                                         an ? an.anchorLeftGroup : "");
+                    var ib = rmT.indexOf(an ? an.anchorRightCat : "",
+                                         an ? an.anchorRightGroup : "");
+                    if (ia < 0 || ib < 0 || ia === ib) { applied[ai] = false; return r.res.p; }
+                    var nL = rmT.n, sm = 0, ss = 0, ri, dv;
+                    for (ri = 0; ri < nL; ri++) sm += rmT.rows[ri][ia] - rmT.rows[ri][ib];
+                    var md = sm / nL;
+                    for (ri = 0; ri < nL; ri++) {
+                        dv = (rmT.rows[ri][ia] - rmT.rows[ri][ib]) - md;
+                        ss += dv * dv;
+                    }
+                    var sdL = Math.sqrt(ss / (nL - 1));
+                    if (!(sdL > 0) || !isFinite(sdL)) { applied[ai] = false; return r.res.p; }
+                    var tL = md / (sdL / Math.sqrt(nL)), dfL = nL - 1;
+                    corrStat[ai] = { t: tL, df: dfL, basis: "rmPaired", n: nL };
+                    return 1 - _gb2Stats.ptukey(Math.abs(tL) * Math.SQRT2, rmT.k, dfL);
+                });
             } else if ((correction === "tukey" ||
                         correction === "gamesHowell" ||
                         correction === "dunnett") &&
                        _isRepeatedMeasuresData()) {
-                // Both pool a BETWEEN-subjects error term across cells
-                // that on an RM chart are repeated occasions of the
-                // same subjects — the wrong model. The dropdown hides
-                // them on RM charts; a persisted value falls through
-                // to raw p's, disclosed via applied=false.
+                // Games-Howell and Dunnett pool a BETWEEN-subjects error
+                // term across cells that on an RM chart are repeated
+                // occasions of the same subjects - the wrong model - and
+                // Tukey on a MIXED design (RM + Group By) has no one-way
+                // within-subject error term behind it. The dropdown hides
+                // them; a persisted value falls through to raw p's,
+                // disclosed via applied=false.
                 adj = ps.slice();
                 applied = ps.map(function () { return false; });
             } else if (correction === "tukey") {
@@ -16346,6 +16555,7 @@
                 // pooled p (Torry's seam, Aug 2026).
                 corrStat: entry ? entry.corrStat : null,
                 excludedHidden: raw.excludedHidden === true,
+                listwise: raw.listwise || null,
                 correction: family.correction,
                 familySize: family.familySize,
                 tukeyKGroups: family.tukeyKGroups || 0,
@@ -52594,7 +52804,7 @@
             {g:4,n:"Bonferroni",y:"",m:["Compare","RM","Freq","Corr"],s:["bonferroni","strict correction"],b:"Bonferroni limits the chance of one or more false positives across a chosen family to no more than alpha. It does this by multiplying each p value by the number of tests, up to 1, which is equivalent to dividing alpha by that number. The guarantee does not require independent tests.",r:"Compare the adjusted p values with the original alpha and report what counted as the family.",w:"It controls an error probability; it does not guarantee zero false positives. Its conservatism can reduce power, especially with many dependent tests."},
             {g:4,n:"Holm",y:"",m:["Compare","RM","Freq","Corr"],s:["holm","step down","holm bonferroni"],b:"Holm first orders the p values, then applies a step-down version of Bonferroni. It controls the same family-wise error rate even when tests are dependent and is never less powerful than ordinary Bonferroni.",r:"Compare Holm-adjusted p values directly with alpha and report the family.",w:"Greater power than Bonferroni does not guarantee that every additional rejection is true; the procedure controls a long-run family error rate."},
             {g:4,n:"Benjamini-Hochberg (FDR)",y:"",m:["Compare","RM","Freq","Corr"],s:["fdr","false discovery rate","bh","benjamini hochberg"],b:"Benjamini-Hochberg controls the expected proportion of false positives among the hypotheses it rejects, rather than the chance of any false positive. This guarantee holds for independent tests and for common forms of positive dependence.",r:"Compare BH-adjusted p values with the chosen FDR level, and state which tests formed the family. BH often finds more results than family-wise methods because it controls a different error rate.",w:"It does not promise that this particular finding is true or that the realized false share in this one analysis is below the target. Arbitrary dependence requires additional justification or another procedure."},
-            {g:4,n:"Tukey (studentized range)",y:"",m:["Compare"],s:["tukey","hsd","studentized range","all pairs"],b:"Tukey's method compares every pair of independent-group means while controlling the family-wise false-positive rate for the whole set. It uses the pooled one-way-ANOVA error variance and assumes normal errors with equal population variances.",r:"Compare its family-adjusted p values directly with alpha. Pandion Plots calculates them from the pooled ANOVA error term rather than by multiplying separate Welch p values.",w:"Unequal variances or a family that is not all pairwise means calls for a different procedure; Tukey does not apply to rank or paired tests in Pandion Plots."},
+            {g:4,n:"Tukey (studentized range)",y:"",m:["Compare","RM"],s:["tukey","hsd","studentized range","all pairs"],b:"Tukey's method compares every pair of means while controlling the family-wise false-positive rate for the whole set. On Compare Groups it uses the pooled one-way-ANOVA error variance and assumes normal errors with equal population variances; on Repeated Measures it takes each pair's paired t over the subjects complete across every occasion (df = n - 1) and judges it by the studentized range with k = the number of occasions, the way jamovi's RM ANOVA post hoc does.",r:"Compare its family-adjusted p values directly with alpha. Pandion Plots calculates them from the pooled ANOVA error term (Compare Groups) or from each pair's paired differences over the complete subjects (Repeated Measures), never by multiplying separate pairwise p values.",w:"Unequal variances or a family that is not all pairwise means calls for a different procedure; Tukey does not apply to rank tests, and a Repeated Measures chart with a Group By variable shows the uncorrected p instead."},
             {g:4,n:"Games-Howell",y:"",m:["Compare"],s:["games howell","unequal variance posthoc"],b:"Games-Howell compares every pair of independent-group means while allowing the groups to have different variances and sample sizes. It uses separate variance estimates and adjusts the p values for the full set of pairwise comparisons.",r:"Compare each adjusted p value directly with alpha. The adjustment accounts for both unequal variances and multiple comparisons.",w:"It still assumes independent units and a suitable mean-based sampling model. In Pandion Plots it does not apply to paired or rank-based tests."},
             {g:4,n:"Dunnett (vs control)",y:"",m:["Compare"],s:["dunnett","vs control","against control"],b:"A correction for the specific case where you compare several treatment groups only against one control group, not against each other. Because it tests fewer comparisons, it keeps more sensitivity than comparing every pair.",r:"Each adjusted p value tells you whether that treatment group differs from the control; compare it to your usual cutoff.",w:"It assumes independent units and a defensible common-variance normal linear model. It says nothing about treatment-versus-treatment contrasts and is not an unequal-variance alternative."},
             {g:5,n:"Cell",y:"",m:["Compare","RM","Dist","Freq","Likert"],s:["cell","group","bar"],b:"A cell is one group in the chart: a single bar, box, or point identity, defined by its category (and its panel if the chart is split into panels). All the numbers in a summary row describe that one cell.",r:"Read the row's label to see which group the cell is (for example, the category name, or the panel and category together when the chart is faceted).",w:""},
@@ -56282,7 +56492,8 @@
                         if (an0 && an0.autoGen === true) cmpPlacedN++;
                     }
                 }
-                var cmpTestName = function (tk) {
+                var cmpTestName = function (tk, raw) {
+                    if (raw && raw.res && raw.res.pooled) return "pooled t";
                     return tk === "welch" ? "Welch t" :
                            tk === "studentT" ? "Student t" :
                            tk === "pairedT" ? "paired t" :
@@ -56374,7 +56585,9 @@
                                     ? " - the pooled variance from every " +
                                       (mk === "rm" ? "condition" : "group") +
                                       " in this panel, which is what gives it more degrees of freedom than a two-group test."
-                                    : " - each pair's own variances, unpooled.") +
+                                    : (_cs.basis === "rmPaired"
+                                        ? " - the paired t of this pair over the " + _cs.n + " subjects complete across every occasion in this panel (df = n - 1), the way jamovi's RM ANOVA post hoc computes it; the Tukey p beside it is judged from this statistic."
+                                        : " - each pair's own variances, unpooled.")) +
                                 " The further t is from zero, the more the difference stands out from the noise.";
                         }
                         var dfS = (res.df % 1 === 0) ? String(res.df) : res.df.toFixed(2);
@@ -56588,7 +56801,7 @@
                             ';color:#333;">' +
                             rowLbl + '</td>' +
                             '<td style="padding:4px 7px;border-bottom:1px solid #eee;white-space:nowrap;color:#666;">' +
-                            _stCellTerm(_stEsc(cmpTestName(cp2.raw.testKind)), _cmpTestKey(cp2.raw.testKind), "") + '</td>' +
+                            _stCellTerm(_stEsc(cmpTestName(cp2.raw.testKind, cp2.raw)), _cmpTestKey(cp2.raw.testKind), "") + '</td>' +
                             '<td style="padding:4px 7px;border-bottom:1px solid #eee;white-space:nowrap;font-family:var(--gb2-ui-font);">' +
                             _stStatTd + '</td>' +
                             '<td style="padding:4px 7px;border-bottom:1px solid #eee;white-space:nowrap;font-family:var(--gb2-ui-font);">' +
@@ -56638,21 +56851,26 @@
                     // resolves to Welch on CG, so it stays eligible.
                     var _cmpPooledOK = !cmpIsRM && cmpScope !== "every" &&
                         (cmpTest === "auto" || cmpTest === "welch" || cmpTest === "studentT");
-                    if (!cmpIsRM) {
-                        // Same default-is-not-a-pick rule as the bracket
-                        // panel (see _baPicked).
-                        var _cmpPick = function (o) {
-                            if (cmpCorr !== o) return false;
-                            try {
-                                return !!(window.__gb2_specStated &&
-                                    Object.prototype.hasOwnProperty.call(
-                                        window.__gb2_specStated, "autoPCorrection"));
-                            } catch (_e) { return false; }
-                        };
-                        if (_cmpPooledOK || _cmpPick("tukey")) corrOpts.push(["tukey", "Tukey (studentized range)", cmpCorr === "tukey"]);
-                        if (_cmpPooledOK || _cmpPick("gamesHowell")) corrOpts.push(["gamesHowell", "Games-Howell (unequal var)", cmpCorr === "gamesHowell"]);
-                        if (_cmpPooledOK || _cmpPick("dunnett")) corrOpts.push(["dunnett", "Dunnett (vs control)", cmpCorr === "dunnett"]);
-                    }
+                    // Tukey ALSO applies on a pure repeated-measures chart
+                    // (the one-way RM ANOVA's within-subject error term,
+                    // see _rmTukeyModel): the paired class only - a mixed
+                    // or cross-panel scope has no one-way model behind it.
+                    var _cmpTukeyOK = _cmpPooledOK ||
+                        (cmpIsRM && !data.hasGroups && _cmpRmTestClass === "paired" &&
+                         (cmpTest === "auto" || cmpTest === "pairedT"));
+                    // Same default-is-not-a-pick rule as the bracket
+                    // panel (see _baPicked).
+                    var _cmpPick = function (o) {
+                        if (cmpCorr !== o) return false;
+                        try {
+                            return !!(window.__gb2_specStated &&
+                                Object.prototype.hasOwnProperty.call(
+                                    window.__gb2_specStated, "autoPCorrection"));
+                        } catch (_e) { return false; }
+                    };
+                    if (_cmpTukeyOK || _cmpPick("tukey")) corrOpts.push(["tukey", "Tukey (studentized range)", cmpCorr === "tukey"]);
+                    if (!cmpIsRM && (_cmpPooledOK || _cmpPick("gamesHowell"))) corrOpts.push(["gamesHowell", "Games-Howell (unequal var)", cmpCorr === "gamesHowell"]);
+                    if (!cmpIsRM && (_cmpPooledOK || _cmpPick("dunnett"))) corrOpts.push(["dunnett", "Dunnett (vs control)", cmpCorr === "dunnett"]);
                     var alphaOpts = [["0.1", ".10", stAlpha === 0.1],
                                      ["0.05", ".05", stAlpha === 0.05],
                                      ["0.01", ".01", stAlpha === 0.01],
@@ -56783,6 +57001,50 @@
                             '<span data-st-act="cmpwire" style="font-size:10.5px;color:#666;">' +
                             (horiz ? "Placing works on vertical charts - rotate back, or add brackets by hand."
                                    : "A green p is significant; ticked rows get placed.") + '</span>') +
+                        // The family rule's foot (Oct 2026): with a
+                        // correction on, every repeated-measures pair ran
+                        // on the subjects complete across all occasions.
+                        ((function () {
+                            if (cmpCorr === "none" || !Array.isArray(cmpPairs)) return "";
+                            if (!cmpIsRM) {
+                                // Compare Groups: a pooled correction ran
+                                // every row on the one-way ANOVA's term.
+                                var pm = null;
+                                for (var pi = 0; pi < cmpPairs.length; pi++) {
+                                    var pr = cmpPairs[pi] && cmpPairs[pi].raw;
+                                    if (pr && pr.res && pr.res.pooled) { pm = pr.res.pooled; break; }
+                                }
+                                if (!pm) return "";
+                                var dfTxt = (pm.df % 1 === 0) ? String(pm.df) : pm.df.toFixed(2);
+                                return _stFoot("With " + (cmpCorr === "dunnett" ? "Dunnett" : "Tukey") +
+                                    " on, every row's statistic and unadjusted p use the pooled variance of all " +
+                                    pm.k + (data.hasGroups ? " cells" : " groups") +
+                                    " in the panel (the one-way ANOVA's error term, df " + dfTxt +
+                                    "), the same term as the adjusted p. With Correct set to None each pair uses its own two groups.");
+                            }
+                            var seen = {}, keys = [];
+                            for (var fi = 0; fi < cmpPairs.length; fi++) {
+                                var lw = cmpPairs[fi] && cmpPairs[fi].raw && cmpPairs[fi].raw.listwise;
+                                if (!lw || !isFinite(lw.n)) continue;
+                                var kk = lw.n + "/" + lw.excluded;
+                                if (!seen[kk]) { seen[kk] = lw; keys.push(kk); }
+                            }
+                            if (!keys.length) return "";
+                            var txt;
+                            if (keys.length === 1) {
+                                var one = seen[keys[0]];
+                                txt = "With a correction on, every pair uses the " + one.n +
+                                    " subjects complete across all occasions (the RM ANOVA rule)" +
+                                    (one.excluded > 0
+                                        ? "; " + one.excluded + " with a missing occasion " +
+                                          (one.excluded === 1 ? "is" : "are") + " left out."
+                                        : ".") +
+                                    " With Correct set to None each pair uses everyone who has both occasions.";
+                            } else {
+                                txt = "With a correction on, every pair uses the subjects complete across all occasions of its panel (the RM ANOVA rule); subjects with a missing occasion are left out. With Correct set to None each pair uses everyone who has both occasions.";
+                            }
+                            return _stFoot(txt);
+                        })()) +
                         // Keep ONLY the statistical-honesty warning: the
                         // plotted center and test estimand must be named.
                         (((data.graphType === "box" || data.graphType === "violin" ||
@@ -95185,6 +95447,13 @@
                         };
                         var _corrPooledOK = !(data && (data.isRepeatedMeasures || data.freqMode === true))
                             && (_corrTk === "welch" || _corrTk === "studentT");
+                        // Tukey ALSO applies on a pure repeated-measures
+                        // chart (the RM ANOVA's within-subject error term,
+                        // see _rmTukeyModel): t-family brackets, no Group By.
+                        var _corrTukeyOK = _corrPooledOK ||
+                            (!!(data && data.isRepeatedMeasures && !data.hasGroups &&
+                                data.freqMode !== true) &&
+                             (_corrTk === "pairedT" || _corrTk === "welch" || _corrTk === "studentT"));
                         return '<div style="display:flex;align-items:center;gap:8px;">' +
                           '<label style="width:64px;font-size:11px;color:#555;text-align:right;" title="Applied chart-wide to every auto-p bracket in this chart">Correct:</label>' +
                           '<select data-field="autoPCorrection" style="font-size:11px;padding:3px 6px;border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);">' +
@@ -95197,7 +95466,7 @@
                             // FIRST-RENDER build of the same select, and
                             // patching only one of the two left the gate
                             // disabled on the render that actually shows.
-                            ((_corrPooledOK || _corrPicked("tukey", corrCur))
+                            ((_corrTukeyOK || _corrPicked("tukey", corrCur))
                               ? '<option value="tukey"'      + (corrCur === "tukey"      ? ' selected' : '') + '>Tukey (studentized range)</option>' : '') +
                             ((_corrPooledOK || _corrPicked("gamesHowell", corrCur))
                               ? '<option value="gamesHowell"' + (corrCur === "gamesHowell" ? ' selected' : '') + '>Games-Howell (unequal var)</option>' : '') +
@@ -95835,6 +96104,18 @@
                 lines.push("Test:    " + testName +
                     ((!cur.autoPTest || cur.autoPTest === "auto")
                         ? "  (auto)" : ""));
+                // The family rule's disclosure, Compare Groups half: a
+                // pooled correction runs the statistic and the raw p on
+                // the one-way ANOVA's error term over the whole panel.
+                if (r.res && r.res.pooled && isFinite(r.res.pooled.df)) {
+                    var _pdf = (r.res.pooled.df % 1 === 0)
+                        ? String(r.res.pooled.df) : r.res.pooled.df.toFixed(1);
+                    lines.push("         pooled t on the one-way ANOVA's error term");
+                    lines.push("         over all " + r.res.pooled.k +
+                               ((data && data.hasGroups) ? " cells" : " groups") +
+                               " in this panel, df " + _pdf +
+                               " (Correct: None uses the pair alone)");
+                }
                 if (r.testFamily === "rank") {
                     if (r.testKind === "mannWhitneyU") {
                         lines.push("U = " + (Math.round(r.res.U * 100) / 100));
@@ -95905,8 +96186,14 @@
                     lines.push(_gb2Stats.formatP(r.rawP) + "  (raw)");
                     var _naWhy;
                     if ((data && data.isRepeatedMeasures) &&
-                        (r.correction === "tukey" ||
-                         r.correction === "gamesHowell" ||
+                        r.correction === "tukey" && data.hasGroups) {
+                        _naWhy = "Tukey on repeated measures runs on the\n" +
+                                 "one-way RM ANOVA's error term, which a\n" +
+                                 "Group By variable does not provide.\n" +
+                                 "The uncorrected p is shown. Use\n" +
+                                 "Bonferroni or Holm here.";
+                    } else if ((data && data.isRepeatedMeasures) &&
+                        (r.correction === "gamesHowell" ||
                          r.correction === "dunnett")) {
                         _naWhy = corrLabel + " assumes independent groups,\n" +
                                  "which is the wrong model for repeated\n" +
@@ -95915,6 +96202,14 @@
                     } else if (r.testFamily === "rank") {
                         _naWhy = corrLabel + " has no rank-test form, so\n" +
                                  "this bracket keeps its uncorrected p.";
+                    } else if (r.testKind === "pairedT" &&
+                               r.correction === "tukey" &&
+                               (data && data.isRepeatedMeasures)) {
+                        _naWhy = "Tukey could not be applied to this\n" +
+                                 "bracket: both legs must sit on two of\n" +
+                                 "the chart's occasions, with subjects\n" +
+                                 "complete across every occasion. The\n" +
+                                 "uncorrected p is shown.";
                     } else if (r.testKind === "pairedT") {
                         _naWhy = corrLabel + " compares independent groups,\n" +
                                  "so this paired bracket keeps its\n" +
@@ -95946,6 +96241,33 @@
                                 ? _facetDisplayLabel(r.facet) : r.facet);
                     }
                     lines.push(_gb2Stats.formatP(r.adjustedP) + "  (" + _famNote + ")");
+                    // The statistic that BELONGS to the corrected p (Oct
+                    // 2026, Torry's option 2 for the readout seam): a
+                    // pooled correction judges the same mean difference
+                    // on its own error term, so its t and df differ from
+                    // the pair's test printed above - and the APA label
+                    // and the Compare-pairs table already show THIS one.
+                    // Printed only when it differs at display precision
+                    // (Games-Howell under Welch's t repeats the pair's own
+                    // statistic and says nothing; so does Tukey on two
+                    // occasions, where the RM error term IS the paired
+                    // difference variance).
+                    var _cs2 = r.corrStat;
+                    if (_cs2 && isFinite(_cs2.t) && isFinite(_cs2.df)) {
+                        var _dfFmt2 = function (dv) {
+                            return (dv % 1 === 0) ? String(dv) : dv.toFixed(1);
+                        };
+                        var _csLine = "t(" + _dfFmt2(_cs2.df) + ") = " + _cs2.t.toFixed(2);
+                        var _rawLine = (r.res && isFinite(r.res.t) && isFinite(r.res.df))
+                            ? "t(" + _dfFmt2(r.res.df) + ") = " + r.res.t.toFixed(2) : "";
+                        if (_csLine !== _rawLine) {
+                            lines.push(_csLine + "  (" + corrLabel + "'s statistic, " +
+                                (_cs2.basis === "rmPaired"
+                                    ? "paired t on the " + _cs2.n + " subjects complete across all occasions" :
+                                 _cs2.basis === "welch" ? "each pair's own variances" :
+                                 "pooled ANOVA error term") + ")");
+                        }
+                    }
                 } else {
                     lines.push(_gb2Stats.formatP(r.res.p));
                 }
@@ -95986,6 +96308,20 @@
                             lines.push("equal spread; Welch's t (the Auto");
                             lines.push("default) makes no such assumption.");
                         }
+                    }
+                }
+                // The family rule's disclosure (Oct 2026): with a
+                // correction on, this repeated-measures test ran on the
+                // subjects complete across every occasion; say how many
+                // that is and how many a missing occasion left out.
+                if (r.listwise && isFinite(r.listwise.n)) {
+                    lines.push("");
+                    lines.push("n = " + r.listwise.n +
+                               " subjects complete across all occasions");
+                    if (r.listwise.excluded > 0) {
+                        lines.push(r.listwise.excluded +
+                                   " with a missing occasion left out" +
+                                   " (Correct: None keeps them)");
                     }
                 }
                 // Hidden-data rule disclosure (Jul 2026): say which
@@ -96141,6 +96477,11 @@
                 };
                 var pooledOK = !(data && (data.isRepeatedMeasures || data.freqMode === true))
                     && (tk === "welch" || tk === "studentT");
+                // Same RM exception as the first-render build above.
+                var tukeyOK = pooledOK ||
+                    (!!(data && data.isRepeatedMeasures && !data.hasGroups &&
+                        data.freqMode !== true) &&
+                     (tk === "pairedT" || tk === "welch" || tk === "studentT"));
                 el.innerHTML =
                     '<option value="none">None</option>' +
                     '<option value="bonferroni">Bonferroni</option>' +
@@ -96151,7 +96492,7 @@
                     // misreports) - but not when it is merely this
                     // module's default, or the exemption would fire on
                     // every chart and silently disable the gate.
-                    ((pooledOK || _baPicked("tukey", cur)) ? '<option value="tukey">Tukey (studentized range)</option>' : '') +
+                    ((tukeyOK || _baPicked("tukey", cur)) ? '<option value="tukey">Tukey (studentized range)</option>' : '') +
                     ((pooledOK || _baPicked("gamesHowell", cur)) ? '<option value="gamesHowell">Games-Howell (unequal var)</option>' : '') +
                     ((pooledOK || _baPicked("dunnett", cur)) ? '<option value="dunnett">Dunnett (vs control)</option>' : '');
                 el.value = cur;

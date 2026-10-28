@@ -106,8 +106,11 @@ async function openLint(page) {
           p.testOptions.includes('wilcoxonSignedRank'), JSON.stringify(p.testOptions));
     check('pure RM offers the RM-ANOVA omnibus', p.testOptions.includes('rmAnova'),
           JSON.stringify(p.testOptions));
-    check('RM hides tukey + gamesHowell', !p.corrOptions.includes('tukey') &&
-          !p.corrOptions.includes('gamesHowell'), JSON.stringify(p.corrOptions));
+    // Oct 2026: a PURE RM chart offers Tukey (the RM ANOVA's within-
+    // subject error term); Games-Howell and Dunnett stay Compare Groups only.
+    check('RM offers tukey, hides gamesHowell + dunnett', p.corrOptions.includes('tukey') &&
+          !p.corrOptions.includes('gamesHowell') && !p.corrOptions.includes('dunnett'),
+          JSON.stringify(p.corrOptions));
     check('effect select names the FORCED effect (dz)',
           p.effectDisabled === true && p.effectText === "Cohen's dz (paired)",
           'text=' + JSON.stringify(p.effectText) + ' disabled=' + p.effectDisabled);
@@ -160,22 +163,134 @@ async function openLint(page) {
     await ctx.close();
 }
 
-// ---- Case C: RM + persisted Tukey -> raw p + disclosure -------------
+// ---- Case C: RM (2 occasions) + Tukey -> APPLIED on the RM error term
+// With two occasions the RM ANOVA's error term IS the paired-difference
+// variance (MSE = var(d)/2, df = n-1), so the Tukey p and t equal the
+// paired t's - the label must not move, but the readout now says the
+// correction applied instead of disclosing a fall-through.
 {
     const { ctx, page, errs } = await openPage('c_rm_tukey.html');
-    console.log('case C (RM + tukey -> raw + disclosed):');
+    console.log('case C (RM + tukey, k=2 -> applied, equals the paired t):');
     check('no page errors', errs.length === 0, errs.join(' | '));
     const labels = await bracketLabels(page);
-    check('paired label intact (raw p)', labels.some(l => l.includes(EXP.pairedDf)),
+    check('paired label intact (k=2 Tukey = paired t)', labels.some(l => l.includes(EXP.pairedDf)),
           'labels=' + JSON.stringify(labels));
     const p = await openPanel(page);
-    check('readout discloses wrong-model fallback',
-          !!p.readout && p.readout.includes('wrong model for repeated'),
+    check('readout discloses the applied family + the complete-subject basis',
+          !!p.readout && p.readout.includes('Tukey, k=2') &&
+          p.readout.includes('n = 8 subjects complete across all occasions') &&
+          !p.readout.includes('left out') && !p.readout.includes('wrong model'),
           'readout=' + JSON.stringify(p.readout));
-    check('persisted tukey stays visible', p.corrOptions.includes('tukey'),
+    // k=2: the pooled statistic IS the paired t, so the readout's extra
+    // "Tukey's statistic" line stays away (one t line, not two).
+    // (count the t lines ABOVE the "Live label" echo, which repeats the
+    // APA label's own t(7) under that format)
+    check('no second t line when the pooled statistic equals the paired t',
+          !!p.readout && ((p.readout.split('Live label')[0]).match(/t\(7\) =/g) || []).length === 1 &&
+          !p.readout.includes("Tukey's statistic"),
+          'readout=' + JSON.stringify(p.readout));
+    check('tukey listed on RM', p.corrOptions.includes('tukey'),
           JSON.stringify(p.corrOptions));
     check('gamesHowell hidden on RM', !p.corrOptions.includes('gamesHowell'),
           JSON.stringify(p.corrOptions));
+    await ctx.close();
+}
+
+// ---- Case C3: RM, 3 occasions + Tukey -> R's ptukey on the RM error term
+// CONTROL (the engine before Oct 2026): the labels show each pair's own
+// paired-t p (EXP.pRM12raw), not the pooled Tukey p.
+{
+    const { ctx, page, errs } = await openPage('c3_rm_tukey3.html');
+    console.log('case C3 (RM tukey, k=3, really corrects on the RM error term):');
+    check('no page errors', errs.length === 0, errs.join(' | '));
+    const labels = await bracketLabels(page);
+    check('t1-t2 label = R ptukey over the RM error stratum ' + EXP.pRM12,
+          labels.includes(EXP.pRM12), 'labels=' + JSON.stringify(labels));
+    check('t1-t3 label = R ptukey ' + EXP.pRM13, labels.includes(EXP.pRM13),
+          'labels=' + JSON.stringify(labels));
+    check('no label shows the pair\'s own paired-t p (' + EXP.pRM12raw + ')',
+          !labels.includes(EXP.pRM12raw), 'labels=' + JSON.stringify(labels));
+    const p = await openPanel(page, 0);
+    // The family rule (Oct 22 2026): with a correction on, the WHOLE row
+    // runs on the subjects complete across every occasion - the t line,
+    // the raw p and the Tukey p - and the readout discloses the count
+    // and the exclusion. The pair's own ten-subject test (t(9), p = .040)
+    // appears nowhere; the Tukey statistic line stays away because it
+    // equals the listwise t line.
+    check('readout: listwise t line, raw and Tukey p on the ' + EXP.rmN + ' complete subjects',
+          !!p.readout && p.readout.includes(EXP.rmTkT12) &&
+          p.readout.includes(EXP.pRM12rawLW + '  (raw)') &&
+          p.readout.includes('Tukey, k=3') &&
+          p.readout.includes('n = ' + EXP.rmN + ' subjects complete across all occasions') &&
+          p.readout.includes('1 with a missing occasion left out') &&
+          !p.readout.includes("Tukey's statistic") &&
+          !p.readout.includes(EXP.pRM12raw) && !p.readout.includes('t(9) ='),
+          'readout=' + JSON.stringify(p.readout));
+    check('tukey listed, gamesHowell + dunnett hidden',
+          p.corrOptions.includes('tukey') && !p.corrOptions.includes('gamesHowell') &&
+          !p.corrOptions.includes('dunnett'), JSON.stringify(p.corrOptions));
+    // The Compare-pairs tab offers Tukey on RM too and its p(adj)
+    // column carries the same pooled values.
+    const st = await openStats(page);
+    check('Sigma panel opens', st.has, 'missing');
+    const corrOpts = await page.evaluate(() => {
+        const sel = document.querySelector('[data-cmp-corr]');
+        return sel ? Array.from(sel.options).map(o => o.value) : [];
+    });
+    check('Compare pairs Correct select lists tukey on RM (no GH/Dunnett)',
+          corrOpts.includes('tukey') && !corrOpts.includes('gamesHowell') &&
+          !corrOpts.includes('dunnett'), JSON.stringify(corrOpts));
+    await page.evaluate(() => {
+        const sel = document.querySelector('[data-cmp-corr]');
+        sel.value = 'tukey';
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await page.waitForTimeout(600);
+    const pairsTxt = await page.evaluate(() =>
+        document.querySelector('[data-st-pane="pairs"]')?.textContent || '');
+    const num = v => v.replace(/^p = /, '').replace(/^p < /, '< ');
+    check('pairs table p(adj) = R ptukey for t1-t2 and t1-t3',
+          pairsTxt.includes(num(EXP.pRM12)) && pairsTxt.includes(num(EXP.pRM13)),
+          'pane=' + JSON.stringify(pairsTxt.slice(0, 600)));
+    check('pairs table raw p is the listwise paired p under Tukey, foot names the family',
+          pairsTxt.includes(num(EXP.pRM12rawLW)) && !pairsTxt.includes(num(EXP.pRM12raw)) &&
+          pairsTxt.includes('every pair uses the ' + EXP.rmN + ' subjects complete across all occasions') &&
+          pairsTxt.includes('1 with a missing occasion is left out'),
+          'pane=' + JSON.stringify(pairsTxt.slice(0, 900)));
+    // Holm runs over the same listwise family ...
+    const setCorr = async v => {
+        await page.evaluate(val => {
+            const sel = document.querySelector('[data-cmp-corr]');
+            sel.value = val;
+            sel.dispatchEvent(new Event('change', { bubbles: true }));
+        }, v);
+        await page.waitForTimeout(600);
+        return page.evaluate(() =>
+            document.querySelector('[data-st-pane="pairs"]')?.textContent || '');
+    };
+    const holmTxt = await setCorr('holm');
+    check('Holm: p(adj) = R p.adjust over the listwise paired p values',
+          holmTxt.includes(num(EXP.pRMholm12)) && holmTxt.includes(num(EXP.pRMholm13)) &&
+          holmTxt.includes(num(EXP.pRMholm23)) && holmTxt.includes(num(EXP.pRM12rawLW)) &&
+          !holmTxt.includes(num(EXP.pRM12raw)) &&
+          holmTxt.includes('subjects complete across all occasions'),
+          'pane=' + JSON.stringify(holmTxt.slice(0, 900)));
+    // ... and with Correct set to None the pair keeps everyone who has
+    // both occasions (jamovi's Paired Samples T-Test), foot gone.
+    const noneTxt = await setCorr('none');
+    check('None: the pair keeps all ten subjects (pairwise paired p) and no family foot',
+          noneTxt.includes(num(EXP.pRM12raw)) && !noneTxt.includes(num(EXP.pRM12rawLW)) &&
+          !noneTxt.includes('subjects complete across all occasions'),
+          'pane=' + JSON.stringify(noneTxt.slice(0, 900)));
+    await setCorr('tukey');
+    // The In-this-table popover text rides each stat cell's data-sthere
+    // attribute (not the pane's textContent).
+    const hereTxt = await page.evaluate(() =>
+        Array.from(document.querySelectorAll('[data-st-pane="pairs"] [data-sthere]'))
+            .map(e => e.getAttribute('data-sthere')).join('\n'));
+    check('pairs popover names the complete-subject paired basis',
+          hereTxt.includes("subjects complete across every occasion"),
+          'here=' + JSON.stringify(hereTxt.slice(0, 300)));
     await ctx.close();
 }
 
@@ -193,11 +308,77 @@ async function openLint(page) {
     check('readout shows raw -> adjusted family line',
           !!p.readout && p.readout.includes('(raw)') && p.readout.includes('Tukey, k=3'),
           'readout=' + JSON.stringify(p.readout));
+    // The family rule, Compare Groups half (Oct 22 2026): with Tukey on
+    // the row's statistic AND unadjusted p sit on the pooled ANOVA error
+    // term (jamovi's ANOVA post hoc "p none"), so the t line is t(33)
+    // itself, the raw p is that statistic's own p, the readout names the
+    // term, and no second statistic line is needed. The Welch p the
+    // bracket would carry on its own (.034) appears nowhere.
+    check('readout: pooled t line ' + EXP.tkTAB + ', its own raw p ' + EXP.pABraw + ', term named, no second line',
+          !!p.readout && p.readout.includes(EXP.tkTAB) &&
+          p.readout.includes(EXP.pABraw + '  (raw)') &&
+          p.readout.includes("pooled t on the one-way ANOVA's error term") &&
+          !p.readout.includes("Tukey's statistic") && !p.readout.includes('t(18.9)'),
+          'readout=' + JSON.stringify(p.readout));
     check('anovaX offered with 3 x-levels', p.testOptions.includes('anovaX'),
           JSON.stringify(p.testOptions));
     const dtxt = await openLint(page);
     check('no note -> no pcorrnote nag',
           !dtxt.includes('does not mention the p-value correction'), 'nag fired without a note');
+    await ctx.close();
+}
+
+// ---- Case D2: CG + Bonferroni runs on the pooled term too (Oct 26 2026) --
+{
+    const { ctx, page, errs } = await openPage('d2_cg_bonf.html');
+    console.log('case D2 (CG Bonferroni on the pooled error term, d on the pooled SD):');
+    check('no page errors', errs.length === 0, errs.join(' | '));
+    const labels = await bracketLabels(page);
+    check('A-B label = 2 x the pooled raw p ' + EXP.pABbonf2, labels.includes(EXP.pABbonf2),
+          'labels=' + JSON.stringify(labels));
+    check('A-C label = 2 x the pooled raw p ' + EXP.pACbonf2, labels.includes(EXP.pACbonf2),
+          'labels=' + JSON.stringify(labels));
+    const p = await openPanel(page, 0);
+    check('readout: pooled t line ' + EXP.tkTAB + ', its own raw p, term named',
+          !!p.readout && p.readout.includes(EXP.tkTAB) &&
+          p.readout.includes(EXP.pABraw + '  (raw)') &&
+          p.readout.includes("pooled t on the one-way ANOVA's error term"),
+          'readout=' + JSON.stringify(p.readout));
+    check('readout: d on the pooled SD ' + EXP.dABpool + ', not the pair\'s ' + EXP.dABpair,
+          !!p.readout && p.readout.includes(EXP.dABpool) && !p.readout.includes(EXP.dABpair),
+          'readout=' + JSON.stringify(p.readout));
+    // The Compare pairs table: Bonferroni over the 3 pairs on the pooled
+    // raw p, pooled t rows, pooled d; Holm and FDR pool too; None brings
+    // the pair's own test and d back.
+    const st = await openStats(page);
+    const pane = () => page.evaluate(() =>
+        document.querySelector('[data-st-pane="pairs"]')?.textContent || '');
+    const setCorr = async v => {
+        await page.evaluate(val => {
+            const sel = document.querySelector('[data-cmp-corr]');
+            sel.value = val; sel.dispatchEvent(new Event('change', { bubbles: true }));
+        }, v);
+        await page.waitForTimeout(600);
+    };
+    let txt = await pane();
+    check('pairs under Bonferroni: pooled t rows, pooled raw p, p(Bonferroni) = 3 x it, pooled d',
+          st.has && txt.includes('pooled t') && txt.includes(EXP.pABraw.replace('p = ', '')) &&
+          txt.includes(EXP.pABbonf3.replace('p = ', '')) && txt.includes(EXP.dABpool) &&
+          !txt.includes(EXP.dABpair),
+          'pane=' + JSON.stringify(txt.slice(0, 900)));
+    await setCorr('holm');
+    txt = await pane();
+    check('pairs under Holm: pooled t rows', txt.includes('pooled t') && txt.includes(EXP.dABpool),
+          'pane=' + JSON.stringify(txt.slice(0, 400)));
+    await setCorr('fdrBH');
+    txt = await pane();
+    check('pairs under FDR: pooled t rows', txt.includes('pooled t') && txt.includes(EXP.dABpool),
+          'pane=' + JSON.stringify(txt.slice(0, 400)));
+    await setCorr('none');
+    txt = await pane();
+    check('pairs under None: the pair\'s own test and d are back',
+          !txt.includes('pooled t') && txt.includes(EXP.dABpair) && !txt.includes(EXP.dABpool),
+          'pane=' + JSON.stringify(txt.slice(0, 600)));
     await ctx.close();
 }
 
@@ -509,10 +690,15 @@ async function openLint(page) {
     console.log('case O (Dunnett structure violation):');
     check('no page errors', errs.length === 0, errs.join(' | '));
     const labels = await bracketLabels(page);
-    check('A-B label keeps the raw Welch p (' + EXP.rawAB + ')',
-          labels.includes(EXP.rawAB), 'labels=' + JSON.stringify(labels));
-    check('Ctrl-C label keeps the raw Welch p (' + EXP.rawCC + ')',
-          labels.includes(EXP.rawCC), 'labels=' + JSON.stringify(labels));
+    // The family rule (Oct 22 2026): Dunnett is SELECTED, so every row
+    // already sits on the pooled ANOVA term; when Dunnett's structure
+    // fails, the fall-through "uncorrected p" is that pooled statistic's
+    // own p, not the pair's Welch p (the readout names the term).
+    check('A-B label keeps the pooled-term raw p under Dunnett (' + EXP.rawABpool + ')',
+          labels.includes(EXP.rawABpool) && !labels.includes(EXP.rawAB),
+          'labels=' + JSON.stringify(labels));
+    check('Ctrl-C label keeps the pooled-term raw p (' + EXP.rawCCpool + ')',
+          labels.includes(EXP.rawCCpool), 'labels=' + JSON.stringify(labels));
     const p = await openPanel(page, 0);
     check('readout explains the shared-control need',
           !!p.readout && p.readout.includes('ONE shared control'),
@@ -601,6 +787,29 @@ async function checkSignificant(page) {
     const cgFm = EXP.cgF.match(/F\(([^)]+)\) = ([\d.]+)/);
     check('omnibus F matches R aov (' + EXP.cgF + ')',
           st.txt.includes(cgFm[2]) && st.txt.includes(cgFm[1]), 'missing');
+    // The family rule, Compare Groups half: this fixture ships Tukey, so
+    // the Compare pairs rows read "pooled t" with the pooled term's own
+    // raw p and the foot names the term; Correct: None brings the pair's
+    // own Welch p back.
+    const pairsTk = await page.evaluate(() =>
+        document.querySelector('[data-st-pane="pairs"]')?.textContent || '');
+    check('CG Compare pairs under Tukey: pooled t rows, pooled raw p, foot names the ANOVA term',
+          pairsTk.includes('pooled t') && pairsTk.includes(EXP.pABraw.replace('p = ', '')) &&
+          pairsTk.includes('pooled variance of all 3 groups') &&
+          !pairsTk.includes(EXP.cmpRawAB),
+          'pane=' + JSON.stringify(pairsTk.slice(0, 700)));
+    await page.evaluate(() => {
+        const sel = document.querySelector('[data-cmp-corr]');
+        sel.value = 'none';
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await page.waitForTimeout(600);
+    const pairsNone = await page.evaluate(() =>
+        document.querySelector('[data-st-pane="pairs"]')?.textContent || '');
+    check('CG Compare pairs under None: Welch rows and the pair\'s own p are back, no foot',
+          pairsNone.includes('Welch t') && pairsNone.includes(EXP.cmpRawAB) &&
+          !pairsNone.includes('pooled t') && !pairsNone.includes('pooled variance of all'),
+          'pane=' + JSON.stringify(pairsNone.slice(0, 700)));
     await ctx.close();
 }
 {
@@ -2849,8 +3058,8 @@ async function copyFlips(page, actKey) {
 // Aug 2026 (Torry): a panel that lists every pair with no adjustment is
 // the least defensible default in the app, so Compare Groups now
 // defaults to Tukey - exact for the all-pairs family it enumerates -
-// and the families where Tukey has no pooled basis (repeated measures,
-// proportions) default to Holm, which always applies. Pinned here
+// and the families where Tukey has no pooled basis (proportions; mixed
+// repeated measures) default to Holm, which always applies. Pinned here
 // because every other Compare-pairs case STATES its correction.
 {
     const { ctx, page, errs } = await openPage('v_cmp_default.html');
