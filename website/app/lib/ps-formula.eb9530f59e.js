@@ -605,8 +605,136 @@ window.PSFormula = (function () {
     return out;
   }
 
+  // ---- explain mode (Oct 2026, the worked-example preview). One row,
+  // every sub-expression, each with the value evalNode gives it and the
+  // structural facts a reader needs to see WHY: which side of a binary
+  // was missing, which IF branch ran, where COALESCE stopped, how many
+  // arguments ignore_missing skipped, how many values an aggregate saw.
+  // Values come from evalNode on the SAME env as run(), so the trace
+  // can never disagree with the column. The wording lives in the shell;
+  // this returns facts. Untaken branches are not evaluated, exactly as
+  // the engine does not evaluate them.
+  var EXPR_BP = { "or": 1, "and": 2, "=": 4, "!=": 4, "<": 4, "<=": 4,
+                  ">": 4, ">=": 4, "+": 5, "-": 5, "*": 6, "/": 6, "^": 8 };
+  function nameText(name) {
+    var plain = /^[A-Za-z_][A-Za-z0-9_.]*$/.test(name) &&
+      ["AND", "OR", "NOT"].indexOf(String(name).toUpperCase()) === -1;
+    return plain ? name : "`" + name + "`";
+  }
+  function exprText(n, parentBp, rightSide, parentOp) {
+    switch (n.k) {
+      case "num": return String(n.v);
+      case "str": return "\"" + n.v + "\"";
+      case "col": return nameText(n.name);
+      case "neg": return "-" + exprText(n.a, 7, false, "neg");
+      case "not": return "NOT " + exprText(n.a, 3, false, "not");
+      case "agg": return n.fn + "(" + nameText(n.col) + ")";
+      case "fn": {
+        var parts = [];
+        for (var i = 0; i < n.args.length; i++) parts.push(exprText(n.args[i]));
+        if (n.ig) parts.push("ignore_missing = 1");
+        return n.fn + "(" + parts.join(", ") + ")";
+      }
+      case "bin": {
+        var op = n.op === "=" ? "==" : (n.op === "and" || n.op === "or")
+          ? n.op.toUpperCase() : n.op;
+        var bp = EXPR_BP[n.op];
+        var s = exprText(n.a, bp, false, n.op) + " " + op + " " +
+          exprText(n.b, bp, true, n.op);
+        if (parentBp != null) {
+          // Brackets only where the parse would otherwise change: a
+          // looser child under a tighter parent, or an equal child on
+          // the side the parent does not group toward (^ groups right,
+          // everything else left).
+          var needs = bp < parentBp ||
+            (bp === parentBp && (parentOp === "^" ? !rightSide : rightSide));
+          if (needs) s = "(" + s + ")";
+        }
+        return s;
+      }
+    }
+    return "";
+  }
+  function traceNode(n, row, env) {
+    var out = { kind: n.k, text: exprText(n), kids: [] };
+    out.value = evalNode(n, row, env);
+    var i, k;
+    switch (n.k) {
+      case "col": out.col = n.name; break;
+      case "neg": case "not":
+        out.kids = [traceNode(n.a, row, env)]; break;
+      case "agg": {
+        var colv = env.columns[n.col] || [];
+        out.fn = n.fn; out.col = n.col;
+        out.n = validNumbers(colv).length; out.total = colv.length;
+        break;
+      }
+      case "bin": {
+        out.op = n.op;
+        var a = traceNode(n.a, row, env);
+        if (n.op === "and" || n.op === "or") {
+          var la = a.value, truthyA = la != null && la !== 0 && la !== "";
+          var decided = la != null &&
+            ((n.op === "and" && !truthyA) || (n.op === "or" && truthyA));
+          out.kids = [a];
+          if (la == null) out.missingFrom = [a.text];
+          else if (decided) out.decided = "left";
+          else {
+            var b0 = traceNode(n.b, row, env);
+            out.kids.push(b0);
+            if (b0.value == null) out.missingFrom = [b0.text];
+          }
+          break;
+        }
+        var b = traceNode(n.b, row, env);
+        out.kids = [a, b];
+        if (out.value == null) {
+          var mf = [];
+          if (a.value == null) mf.push(a.text);
+          if (b.value == null) mf.push(b.text);
+          if (mf.length) out.missingFrom = mf;
+          else if (n.op === "/" && toNum(b.value) === 0) out.divZero = true;
+        }
+        break;
+      }
+      case "fn": {
+        out.fn = n.fn; out.ig = !!n.ig;
+        if (n.fn === "IF") {
+          var test = traceNode(n.args[0], row, env);
+          out.kids = [test];
+          if (test.value == null) out.taken = 0;
+          else {
+            out.taken = (test.value !== 0 && test.value !== "") ? 1 : 2;
+            out.kids.push(traceNode(n.args[out.taken], row, env));
+          }
+          break;
+        }
+        if (n.fn === "COALESCE") {
+          out.first = -1;
+          for (i = 0; i < n.args.length; i++) {
+            k = traceNode(n.args[i], row, env);
+            out.kids.push(k);
+            if (k.value != null) { out.first = i; break; }
+          }
+          break;
+        }
+        var missing = [];
+        for (i = 0; i < n.args.length; i++) {
+          k = traceNode(n.args[i], row, env);
+          out.kids.push(k);
+          if (k.value == null) missing.push(k.text);
+        }
+        if (n.ig) out.skipped = missing.length;
+        else if (missing.length && out.value == null) out.missingFrom = missing;
+        break;
+      }
+    }
+    return out;
+  }
+
   // Compile a formula against a set of known column names.
-  // -> { ok:true, refs:[names], run(columns, n) -> values[] }
+  // -> { ok:true, refs:[names], run(columns, n) -> values[],
+  //      explain(columns, row) -> trace tree for one row }
   // or { ok:false, error }
   function compile(formula, knownColumns) {
     var src = String(formula == null ? "" : formula);
@@ -628,16 +756,24 @@ window.PSFormula = (function () {
           didYouMeanVar(refs[i], knownColumns) };
     }
     var aggNeeds = collectAggNeeds(ast, Object.create(null));
+    function buildAgg(columns) {
+      var agg = {};
+      for (var key in aggNeeds) {
+        if (!Object.prototype.hasOwnProperty.call(aggNeeds, key)) continue;
+        var need = aggNeeds[key];
+        agg[key] = aggregate(need.fn, columns[need.col] || []);
+      }
+      return agg;
+    }
     return {
       ok: true,
       refs: refs,
+      explain: function (columns, row) {
+        var env = { columns: columns, agg: buildAgg(columns) };
+        try { return traceNode(ast, row, env); } catch (ex) { return null; }
+      },
       run: function (columns, n) {
-        var agg = {};
-        for (var key in aggNeeds) {
-          if (!Object.prototype.hasOwnProperty.call(aggNeeds, key)) continue;
-          var need = aggNeeds[key];
-          agg[key] = aggregate(need.fn, columns[need.col] || []);
-        }
+        var agg = buildAgg(columns);
         var env = { columns: columns, agg: agg };
         var out = new Array(n);
         for (var r = 0; r < n; r++) {
