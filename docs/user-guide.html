@@ -304,18 +304,17 @@ rows fail a condition and how many were left out because a value was
 missing, naming the column; <b>Show the rows this leaves out</b> lists
 each row with the condition it fails or the value it was missing, and a
 row number scrolls the grid to that row. The dimmed rows in the grid
-carry the same reason as their tooltip. <b>Make this a 0/1 column</b> turns
-the conditions into a computed variable: it opens the Computed variable
-dialog prefilled with <code>IF(</code>the whole filter<code>, 1, 0)</code> and
-a name like <code>included</code>, so the rule becomes data you can group
-by, count, or export, 1 where a row passes, 0 where it does not, and
-missing where a value the rule needs is missing. The filter itself is
-unchanged. Under the conditions, <b>As one formula</b> mirrors what you
+carry the same reason as their tooltip. Under the conditions, <b>As one
+formula</b> mirrors what you
 built by clicking as the expression the formula language would write,
 <code>age &gt;= 30 AND condition != "Control"</code>, so the syntax can
 be learned from a filter you already understand; <b>Copy</b> takes it to
 the clipboard and <b>Use as a formula row</b> replaces the rows with one
-editable formula row that keeps the same rows. A formula condition gets
+editable formula row that keeps the same rows. To keep the rule as data,
+1 where a row passes and 0 where it does not, paste that formula into a
+computed variable: the <a href="#recipe-included">Keep a rule as a 1/0
+column</a> recipe shows the form and what a blank cell does to it. A
+formula condition gets
 the same help as the Computed variable dialog: a card under the row
 follows your cursor into any function, and when the formula cannot run
 and the fix is obvious, the note under it offers the fix as a button.</p>
@@ -533,6 +532,19 @@ Group By. <code>LOWER</code> and <code>UPPER</code> fold the case,
 <tr><td>Names with spaces</td>
 <td><code data-guide-formula>`first quiz` * 2</code></td>
 <td>Backticks around the name, exactly as typed in the header.</td></tr>
+<tr id="recipe-included"><td>Keep a rule as a 1/0 column (who is included)</td>
+<td><code data-guide-formula>score &gt;= 60</code></td>
+<td>A comparison is already a number, 1 where it holds and 0 where it does
+not, so the rule alone is the whole formula:
+<code data-guide-formula data-guide-expect="1,1,0,1">score &gt;= 60</code> gives <span class="fxres">1, 1, 0, 1</span> on the example data below.
+<code>IF(score &gt;= 60, 1, 0)</code> writes the same column with the
+outcome spelled out, and two checks go together with <code>AND</code>. A
+row with a blank cell in a column the rule reads comes out blank, not 0:
+<code data-guide-formula data-guide-expect=",0,,1">late &gt;= 4</code> gives <span class="fxres">missing, 0, missing, 1</span>. When a blank
+should count as not included, wrap the rule:
+<code data-guide-formula data-guide-expect="0,0,0,1">COALESCE(late &gt;= 4, 0)</code> gives <span class="fxres">0, 0, 0, 1</span>. The Row filters popover's
+<b>As one formula</b> writes your current filter in exactly this form,
+ready to paste.</td></tr>
 </table></div>
 <div class="callout tip"><b class="tag">Tip</b>Formulas recompute whenever
 the data changes, so a computed column is always current - unlike pasting

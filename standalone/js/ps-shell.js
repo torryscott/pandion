@@ -18724,15 +18724,6 @@
       });
     clear.addEventListener("click", function () { applyFilters(true); });
     actions.appendChild(clear);
-    var flag = mkEl("button", "ps-btn", "Make this a 0/1 column");
-    flag.type = "button";
-    flag.setAttribute("data-filter-flag", "");
-    flag.disabled = !filterDraftFormula();
-    setTip(flag, "Turns these conditions into a computed variable: 1 where a " +
-      "row passes, 0 where it does not, missing where a value it needs is " +
-      "missing. The filter itself is unchanged.");
-    flag.addEventListener("click", filterMakeFlagColumn);
-    actions.appendChild(flag);
     var count = mkEl("span", "ps-filter-count", "");
     count.setAttribute("data-filter-count", "");
     count.setAttribute("role", "status");
@@ -18781,11 +18772,14 @@
     })(fixes[fi]);
     row.appendChild(why);
   }
-  // ---- the filter as ONE formula (Oct 2026, "Make this a 0/1 column").
-  // Each complete condition becomes the expression the formula language
-  // would write for it, joined with AND, so the rule a student built by
-  // clicking can become a computed variable: 1 where a row passes, 0
-  // where it does not, missing where a value the rule needs is missing.
+  // ---- the filter as ONE formula (Oct 2026). Each complete condition
+  // becomes the expression the formula language would write for it,
+  // joined with AND, so the rule a student built by clicking can be read
+  // as a formula, copied, or pasted into a computed variable, where it
+  // yields 1 where a row passes, 0 where it does not, and missing where
+  // a value the rule needs is missing (the guide's "Keep a rule as a 1/0
+  // column" recipe). A dedicated "Make this a 0/1 column" button did that
+  // paste for one day and was dropped: the formula itself is the lesson.
   function formulaNameText(name) {
     var plain = /^[A-Za-z_][A-Za-z0-9_.]*$/.test(name) &&
       ["AND", "OR", "NOT"].indexOf(String(name).toUpperCase()) === -1;
@@ -18889,15 +18883,6 @@
         ", and a formula would compare the text instead, so the rows cannot " +
         "become one formula as they stand."));
   }
-  function filterMakeFlagColumn() {
-    var test = filterDraftFormula();
-    if (!test) return;
-    hideFilterMenu();   // reads the draft first: hiding discards it
-    openFormulaDialog(null, null);
-    el("ps-formula-name").value = uniqueColumnName("included");
-    el("ps-formula-input").value = "IF(" + test + ", 1, 0)";
-    refreshFormulaPreview();
-  }
   // Whether the left-out list is unfolded; kept while the popover is open
   // (every edit rebuilds it), reset when it opens.
   var FILTER_OUT_OPEN = false;
@@ -18905,8 +18890,6 @@
   function refreshFilterCount() {
     var count = el("ps-filtermenu").querySelector("[data-filter-count]");
     if (!count) return;
-    var flagBtn = el("ps-filtermenu").querySelector("[data-filter-flag]");
-    if (flagBtn) flagBtn.disabled = !filterDraftFormula();
     refreshFilterAsFormula();
     var t = PROJECT.table, pv = filterDraftPreview();
     count.textContent = "showing " + pv.kept + " of " + pv.n + " rows" +
