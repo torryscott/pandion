@@ -455,6 +455,40 @@ punch lists are maintainer-local and not published with this repo.
   it against the engine and compares the printed value (a tampered
   value goes red). The dialog's Functions bar links to it (Full
   reference), re-pointed on open like Help > User guide.
+  Oct 23 2026: the dialog's preview is a WORKED EXAMPLE: a summary
+  (values, missing count with the rows as buttons and the column that
+  made them missing, the measure type save will give - the same
+  inferType call), the first five rows with inputs beside the result
+  (td.ps-fprev-res kept for the older probes), and a click on any row
+  (or a summary row number) unfolds the calculation step by step via
+  the engine's new compiled.explain(columns, row): a trace tree with
+  values from evalNode on the same env as run() plus FACTS
+  (missingFrom, divZero, taken, first, skipped, decided, n/total); the
+  wording lives in the shell (formulaTraceWhy). Probes:
+  formula-unit-check case E (facts + run parity), formula-explain-check
+  (the dialog).
+  Oct 23 2026 (same day): the SIGNATURE CARD (#ps-fsig, above the box)
+  follows the caret into any call (formulaCallAtCaret: innermost
+  unclosed bracket scanned backwards, quoted text skipped, depth-0
+  commas = the argument index) and shows the browser label with the
+  argument highlighted, the browser sentence, FORMULA_FN_MISSING (word
+  for word the guide's reference cell; formula-signature-check pins
+  every function) and a Reference link (#fn-<name>). An unknown name
+  gets 'is not a function here' + Use-<fn> buttons from the search
+  synonyms. The error line's fixes are buttons (formulaErrorFixes:
+  the V-form, did-you-mean names, a mis-cased variable via renameRef,
+  the leading =). Not a live region: it changes on every caret move.
+  Oct 23 2026 (same day): TAP A TERM. formulaFnNamesIn (called names in the
+  text, quoted text skipped) draws .ps-fterm chips under the summary;
+  openFormulaTerm fills the body-level #ps-fterm-pop (role region,
+  aria-live polite, created at wiring so aria-controls resolves) with
+  label, sentence, FORMULA_FN_MISSING, an On-your-data box from
+  compiled.explain (aggregates: value + count; row-wise: the unfolded
+  row or row 1 with the trace's reason; an untaken branch says so; an
+  aggregate in an untaken branch is re-evaluated from its own call) and
+  the reference link. Esc = its own layer (window capture, the sampler
+  precedent), outside pointerdown / any scroll / every preview rebuild
+  closes it. Probe: formula-term-check.
 - M5g DONE (Jul 23 2026): ROW FILTERS (Tier 1, Torry's ruling: dim but
   show). Dataset-wide AND-combined conditions ({col, op, value}; ops
   = != on any type, > >= < <= numeric-only; missing values fail their
@@ -481,6 +515,50 @@ punch lists are maintainer-local and not published with this repo.
   chart note, the Filter tooltip, the popover's stranded line). The
   setup file reads/writes {formula} and value: [low, high]. Probe:
   filter-formula-check.
+  Oct 24 2026: WHY EACH ROW IS OUT. computeFilterState records t.filterWhy
+  [{f, kind: fail|missing|formulaFalse|formulaMissing}] = the FIRST
+  failing condition per dropped row; filterReasonText words it ("age >= 30
+  fails (age = 29)", "age is missing", "<formula>: age is missing",
+  "<formula> is false"; filterCondText is the per-condition text the
+  summary now shares); filterOutBreakdown appends "(2 fail a condition, 2
+  left out because age is missing)" to the popover's live count (built
+  from the DRAFT via filterDraftPreview, which replaced
+  filterDraftPreviewCount's body) and to the Filter button tip; the
+  popover's "Show the N rows this leaves out" disclosure (FILTER_OUT_OPEN,
+  reset on open, kept across edits) lists up to 20 rows with reasons, each
+  number calling gridRevealFound; the grid's dimmed cells carry the
+  reason in their tip. Probe: filter-reasons-check.
+  Oct 24 2026: MAKE THIS A 0/1 COLUMN (step 2). The actions row's third
+  button (data-filter-flag, enabled once one draft condition is complete,
+  re-checked in refreshFilterCount) runs filterMakeFlagColumn: reads the
+  draft (before hideFilterMenu discards it), opens the Computed variable
+  dialog and prefills uniqueColumnName("included") + IF(<rule>, 1, 0),
+  where filterDraftFormula joins filterCondFormula per complete condition
+  with AND: eq/ne/gt/ge/lt/le -> == != > >= < <= (numeric literal or
+  quoted text), between -> col >= lo AND col <= hi, outside -> (col < lo
+  OR col > hi), nul/nnul -> ISMISSING / NOT ISMISSING, a formula row in
+  brackets when it has company, names with spaces backticked
+  (formulaNameText mirrors the engine's rule). The filter is untouched.
+  Probe: filter-flag-check.
+  Oct 24 2026: AS ONE FORMULA (step 3). refreshFilterAsFormula (called from
+  refreshFilterCount, so it follows typing) fills [data-filter-asformula]
+  between the rows and the add buttons, ONLY while a clicked condition is
+  complete: the filterDraftFormula text as read-only code, Copy
+  (navigator.clipboard with an honest failure toast), and Use as a
+  formula row (FILTER_DRAFT := one formula row, focus in it; same rows
+  kept because a missing formula result drops like a missing value).
+  filterDraftInapplicable (order op on a text column, the B5 pass-
+  through) disables the conversion with a note, since a formula would
+  compare the text. Probe: filter-asformula-check (clipboard stubbed via
+  addInitScript: file:// pages have no clipboard permission).
+  Oct 24 2026: HELP INSIDE THE FORMULA ROW (step 4, on the branch that
+  merges the formula-help work). refreshFormulaSignature is now a wrapper
+  over renderSignatureCard(box, card, afterChange); each formula row
+  carries a .ps-fsig.ps-filter-fsig card (flex-basis 100% under the
+  input, data-filter-fsig=idx) refreshed on input/keyup/click/focus and
+  by the document selectionchange listener, and refreshFilterFormulaNote
+  appends formulaErrorFixes buttons to the stranded note (a text-valued
+  formula gets none). Probe: filter-help-check.
 - M5f DONE (Jul 23 2026): EXCEL .XLSX IMPORT (Tier 1). js/ps-xlsx.js is a
   dependency-free OOXML reader on PSOmv's ZIP core + DOMParser: shared /
   inline / rich-text strings, formula CACHED values, booleans, error

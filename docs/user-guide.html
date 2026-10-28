@@ -299,7 +299,25 @@ stated in the chart note as not applied, so a typo never empties a chart.
 Filters can use computed columns, so a flag such as
 <code>IF(check1 != 3 OR check2 != 1, 1, 0)</code> can first mark who failed an
 attention check and then a filter on it, or the same test written straight into
-a formula condition, drops them.</p>
+a formula condition, drops them. The popover's live count says how many
+rows fail a condition and how many were left out because a value was
+missing, naming the column; <b>Show the rows this leaves out</b> lists
+each row with the condition it fails or the value it was missing, and a
+row number scrolls the grid to that row. The dimmed rows in the grid
+carry the same reason as their tooltip. Under the conditions, <b>As one
+formula</b> mirrors what you
+built by clicking as the expression the formula language would write,
+<code>age &gt;= 30 AND condition != "Control"</code>, so the syntax can
+be learned from a filter you already understand; <b>Copy</b> takes it to
+the clipboard and <b>Use as a formula row</b> replaces the rows with one
+editable formula row that keeps the same rows. To keep the rule as data,
+1 where a row passes and 0 where it does not, paste that formula into a
+computed variable: the <a href="#recipe-included">Keep a rule as a 1/0
+column</a> recipe shows the form and what a blank cell does to it. A
+formula condition gets
+the same help as the Computed variable dialog: a card under the row
+follows your cursor into any function, and when the formula cannot run
+and the fix is obvious, the note under it offers the fix as a button.</p>
 <p><b>Reshape to wide</b> (Data menu) turns long data into the one-row-per-
 subject shape Repeated Measures expects. It refuses rather than guess when
 your data would lose information, and explains what it found so you can fix
@@ -430,9 +448,23 @@ the dialog is the guided way in: it opens with a Common recipes group
 (z-score, Center, Difference, Percent change, Reverse-score, Recode), and
 clicking any entry asks for the column or columns it needs, then writes
 the finished formula into the box for you - at the cursor, so clicks and
-typing mix freely. The <a href="#formula-reference">Formula
-reference</a> further down documents every operator and function,
-each with a verified example.</p>
+typing mix freely. As you type, the dialog shows the first rows with
+the result beside the columns it uses, counts the rows that come out
+missing and names the column responsible, says which measure type the
+new column will get, and clicking any row unfolds its calculation step
+by step, so a missing result shows exactly where the gap came in. A
+card above the box follows your cursor into any function, showing its
+shape with the argument you are in, what it does and its missing-value
+rule, and when an error has an obvious fix (a one-column
+<code>MEAN</code>, a mis-cased name, a leading <code>=</code>) the
+error line offers it as a button. Under the preview's summary, each
+function your formula calls is a chip: click it for the definition, the
+missing-value rule, and the function's value on your own data (a
+whole-column function's one number with the count it saw; a row-wise
+function's result in the unfolded row). The
+<a href="#formula-reference">Formula reference</a> further down
+documents every operator and function, each with a verified
+example.</p>
 <p>Recipes worth stealing - every formula below is verified against the app
 by an automated check, so they run as written. The column names are
 illustrative: <code>supported</code>, <code>paced</code>,
@@ -500,6 +532,19 @@ Group By. <code>LOWER</code> and <code>UPPER</code> fold the case,
 <tr><td>Names with spaces</td>
 <td><code data-guide-formula>`first quiz` * 2</code></td>
 <td>Backticks around the name, exactly as typed in the header.</td></tr>
+<tr id="recipe-included"><td>Keep a rule as a 1/0 column (who is included)</td>
+<td><code data-guide-formula>score &gt;= 60</code></td>
+<td>A comparison is already a number, 1 where it holds and 0 where it does
+not, so the rule alone is the whole formula:
+<code data-guide-formula data-guide-expect="1,1,0,1">score &gt;= 60</code> gives <span class="fxres">1, 1, 0, 1</span> on the example data below.
+<code>IF(score &gt;= 60, 1, 0)</code> writes the same column with the
+outcome spelled out, and two checks go together with <code>AND</code>. A
+row with a blank cell in a column the rule reads comes out blank, not 0:
+<code data-guide-formula data-guide-expect=",0,,1">late &gt;= 4</code> gives <span class="fxres">missing, 0, missing, 1</span>. When a blank
+should count as not included, wrap the rule:
+<code data-guide-formula data-guide-expect="0,0,0,1">COALESCE(late &gt;= 4, 0)</code> gives <span class="fxres">0, 0, 0, 1</span>. The Row filters popover's
+<b>As one formula</b> writes your current filter in exactly this form,
+ready to paste.</td></tr>
 </table></div>
 <div class="callout tip"><b class="tag">Tip</b>Formulas recompute whenever
 the data changes, so a computed column is always current - unlike pasting
