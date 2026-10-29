@@ -520,7 +520,7 @@
   function pageSizeText(page) {
     return pxToUnit(page.w) + " \u00d7 " + pxToUnit(page.h) + " " + unitLabel();
   }
-  var APP_VERSION = "3.1.3";
+  var APP_VERSION = "3.2.0";
   // The build stamp. The version alone cannot identify the code that
   // drew a figure: the hosted app deploys from main ahead of tagged
   // releases, so one version number covers weeks of builds, and a

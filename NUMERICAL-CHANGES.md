@@ -28,7 +28,7 @@ in what they computed, and the build stamp and id list are what tell
 them apart. The "live on the web app" date is when the fix reached
 the hosted page.
 
-## v3.2.0 (unreleased; deployment dates noted per change)
+## v3.2.0 (released 2026-10-29; deployment dates noted per change)
 
 **Compare Groups comparisons run on the ANOVA's pooled error term under a correction.** <!-- ledger: cg-posthoc-pooled-error-term -->
 With Tukey, Dunnett, Bonferroni, Holm or FDR selected, every independent-t
