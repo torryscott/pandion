@@ -520,7 +520,7 @@
   function pageSizeText(page) {
     return pxToUnit(page.w) + " \u00d7 " + pxToUnit(page.h) + " " + unitLabel();
   }
-  var APP_VERSION = "3.1.3";
+  var APP_VERSION = "3.2.0";
   // The build stamp. The version alone cannot identify the code that
   // drew a figure: the hosted app deploys from main ahead of tagged
   // releases, so one version number covers weeks of builds, and a
@@ -552,6 +552,14 @@
   // Files from before the id list fall back to the version compare.
   // The check is a pure function so the gate can probe it directly.
   var NUMERICAL_CHANGES = [
+    { id: "cg-posthoc-pooled-error-term", since: "3.2.0",
+      label: "Compare Groups comparisons under a correction run on the ANOVA's pooled error term, with Cohen's d on the model SD" },
+    { id: "rm-posthoc-complete-subjects", since: "3.2.0",
+      label: "corrected repeated-measures comparisons use the subjects complete across every occasion" },
+    { id: "ptukey-extreme-tail", since: "3.2.0",
+      label: "Tukey and Games-Howell adjusted p values are accurate at extreme statistics with tiny degrees of freedom" },
+    { id: "facet-histogram-shared-bins", since: "3.2.0",
+      label: "faceted histograms draw every panel on one set of bin edges" },
     { id: "anova-residual-stability", since: "3.1.2",
       label: "factorial, repeated-measures and mixed ANOVA keep small residual variance instead of erasing it" },
     { id: "rm-crossed-numeric-precision", since: "3.1.2",
@@ -35438,6 +35446,41 @@
   // discipline: the newest entry's version must equal APP_VERSION, so shipping
   // a release without a note here fails the suite.
   var RELEASE_NOTES = [
+    { version: "3.2.0", date: "October 2026", notes: [
+      "Post hoc comparisons match jamovi's tables line for line. With a " +
+        "correction on, Compare Groups brackets and the Compare pairs table " +
+        "run each pair on the one-way ANOVA's pooled error term, with " +
+        "Cohen's d on the model's pooled SD. Repeated Measures gains Tukey, " +
+        "and every corrected paired comparison runs on the subjects " +
+        "complete across all occasions. The readout names the error term, " +
+        "or says how many subjects were complete. The numerical changes " +
+        "ledger lists each change.",
+      "Row filters take a range (between, outside) or a formula, say why " +
+        "each row is out, and show the active conditions as one formula you " +
+        "can copy. The Computed variable dialog explains a formula row by " +
+        "row as a worked example, follows the caret with a signature card " +
+        "and one-click fixes, and defines any function it calls on your own " +
+        "data. The user guide gains a Formula reference.",
+      "Layouts gains figure parts: boxes, arrows, timelines, and templates " +
+        "such as PRISMA 2020. Arrow keys nudge whatever is selected, in " +
+        "Layouts and on charts, and the data grid's cell editor moves like " +
+        "a spreadsheet's.",
+      "Large tables work: a wide sheet builds only the columns in view, a " +
+        "project too big for ordinary autosave is kept in the browser's " +
+        "larger store, and the type badge retypes every selected column at " +
+        "once.",
+      "The Learn page walks through all four workspaces with narrated " +
+        "two-minute tours, and the app offers each tour where its room is " +
+        "empty. Data, a project, a chart setup or an example can open from " +
+        "a link, and the welcome searches public datasets.",
+      "Also: Mode in the summaries, a typed significance level on the " +
+        "correlation matrix, faceted histograms on one set of bins, the " +
+        "Repeated Measures error-bar Method switch previewing at the click, " +
+        "axis panels named by their drawn position, Compare Groups marking " +
+        "each point by a second variable, and the kept ANOVA table joining " +
+        "the Notebook. The jamovi module adds Intel Mac builds for jamovi " +
+        "2.7 and 28."
+    ] },
     { version: "3.1.3", date: "September 2026", notes: [
       "The jamovi module now installs on jamovi 28 as well as jamovi 2.7, " +
         "and the website has a page that walks through installing it step " +
