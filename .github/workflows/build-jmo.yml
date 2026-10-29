@@ -127,14 +127,32 @@ jobs:
           api="$(curl -fsSL --max-time 30 https://formulae.brew.sh/api/cask/jamovi.json | python3 -c 'import json,sys; print(json.load(sys.stdin).get("version",""))' 2>/dev/null || true)"
           case "$api" in "$line".*) ver="$api" ;; esac
           arch="$(uname -m)"; [ "$arch" = "arm64" ] || arch="x64"
+          # get <version> [tries]: the oracle download gets a few attempts
+          # with a pause between them (the Intel jamovi 28 leg of the v3.2.0
+          # tag build lost its single attempt to "Connection reset by peer"
+          # 44 s in, 2026-10-29); the fallback scan keeps one attempt per
+          # name so its 404s stay quick. A reset mid-transfer leaves a
+          # partial file, which curl's exit status refuses before the size
+          # check can see it.
           get() {
-            curl -fsSL --max-time 900 -o jamovi.dmg "https://archives.jamovi.org/jamovi-$1-macos-$arch.dmg" \
-              && [ "$(stat -f %z jamovi.dmg)" -gt 5000000 ]
+            local tries="${2:-1}" n
+            for n in $(seq 1 "$tries"); do
+              [ "$n" = 1 ] || sleep 20
+              curl -fsSL --max-time 900 -o jamovi.dmg "https://archives.jamovi.org/jamovi-$1-macos-$arch.dmg" \
+                && [ "$(stat -f %z jamovi.dmg)" -gt 5000000 ] && return 0
+            done
+            return 1
           }
-          if ! get "$ver"; then
+          if ! get "$ver" 5; then
             ok=0
+            # Every archived name has four components: 2.7.34.0 on the 2.7
+            # line, 28.14.0.0 on the 28 line. The scan used to append ".$p.0"
+            # to either line, so on the 28 line it probed 28.45.0 ... 28.0.0,
+            # names that never existed, and the oracle download's one
+            # transient failure became a hard failure (the same tag build).
             for p in $(seq 45 -1 0); do
-              if get "$line.$p.0"; then ver="$line.$p.0"; ok=1; break; fi
+              case "$line" in *.*) cand="$line.$p.0" ;; *) cand="$line.$p.0.0" ;; esac
+              if get "$cand"; then ver="$cand"; ok=1; break; fi
             done
             [ "$ok" = 1 ] || { echo "ERROR: no hosted jamovi macOS installer on archives.jamovi.org"; exit 1; }
           fi
@@ -164,13 +182,19 @@ jobs:
           # host answers a browser-style user agent sent from a script with
           # a 302 to its 404 page, and serves plain curl the file (the macOS
           # job above, same host, same finding).
-          function Get-Jamovi($v) {
+          # Get-Jamovi <version> [tries]: the oracle download gets a few
+          # attempts with a pause, the fallback scan one attempt per name
+          # (the macOS job above explains the 2026-10-29 reset behind it).
+          function Get-Jamovi($v, $tries = 1) {
             $url = "https://archives.jamovi.org/jamovi-$v-win-x64.exe"
-            Write-Host "Trying $url"
-            Remove-Item jamovi-setup.exe -ErrorAction SilentlyContinue
-            & curl.exe -fsSL --max-time 900 -o jamovi-setup.exe $url
-            if ($LASTEXITCODE -ne 0) { return $false }
-            return ((Get-Item jamovi-setup.exe -ErrorAction SilentlyContinue).Length -gt 5000000)
+            for ($n = 1; $n -le $tries; $n++) {
+              if ($n -gt 1) { Start-Sleep -Seconds 20 }
+              Write-Host "Trying $url (attempt $n of $tries)"
+              Remove-Item jamovi-setup.exe -ErrorAction SilentlyContinue
+              & curl.exe -fsSL --max-time 900 -o jamovi-setup.exe $url
+              if ($LASTEXITCODE -eq 0 -and (Get-Item jamovi-setup.exe -ErrorAction SilentlyContinue).Length -gt 5000000) { return $true }
+            }
+            return $false
           }
           # Build against the jamovi LINE this module targets (minApp in
           # jamovi/0000.yaml), not simply whatever is newest. The Homebrew
@@ -186,9 +210,14 @@ jobs:
             $api = (Invoke-RestMethod -UseBasicParsing "https://formulae.brew.sh/api/cask/jamovi.json").version
             if ($api -like "$line.*") { $ver = $api }
           } catch {}
-          $ok = Get-Jamovi $ver
+          $ok = Get-Jamovi $ver 5
           if (-not $ok) {
-            foreach ($p in 45..0) { if (Get-Jamovi "$line.$p.0") { $ver = "$line.$p.0"; $ok = $true; break } }
+            # Four-component names on both lines (2.7.34.0, 28.14.0.0); the
+            # old "$line.$p.0" probed 28.45.0 ... 28.0.0, which never existed.
+            foreach ($p in 45..0) {
+              $cand = if ($line -match '\.') { "$line.$p.0" } else { "$line.$p.0.0" }
+              if (Get-Jamovi $cand) { $ver = $cand; $ok = $true; break }
+            }
           }
           if (-not $ok) { Write-Error "No hosted jamovi Windows installer found on archives.jamovi.org"; exit 1 }
           Write-Host "Using jamovi $ver ($((Get-Item jamovi-setup.exe).Length) bytes)"
