@@ -86,7 +86,21 @@ jobs:
       # installed into jamovi's own bundled R once jamovi is on the runner.
       - name: Install jamovi-compiler
         if: matrix.line == '2.7'
-        run: npm install -g jamovi/jamovi-compiler
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # GitHub's source tarball through the authenticated API, not
+          # `npm install -g jamovi/jamovi-compiler`: on 2026-10-29 the Intel
+          # macOS runner resolved that shorthand over ssh (publickey refused)
+          # after its https attempt failed, and an anonymous git fetch from a
+          # shared runner is what GitHub rate-limits. The package has no
+          # prepare script, so the tarball installs exactly as the checkout
+          # did (verified locally: 258 packages, the jmc bin runs).
+          curl -fsSL --max-time 300 -H "Authorization: Bearer $GH_TOKEN" \
+            -o jamovi-compiler.tgz \
+            https://api.github.com/repos/jamovi/jamovi-compiler/tarball/master
+          npm install -g ./jamovi-compiler.tgz
 
       # Install the CURRENT jamovi via a package manager that resolves the
       # live version, instead of a hardcoded www.jamovi.org/downloads/ URL.
@@ -103,16 +117,18 @@ jobs:
           # (28.2.0.0 on 2026-09-13) and jmc then refuses the build with
           # "a newer version of the jamovi-compiler is required".
           # archives.jamovi.org keeps every version as
-          # jamovi-<ver>-macos-<arch>.dmg; it is bot-blocked without a
-          # browser user agent, so one is sent.
+          # jamovi-<ver>-macos-<arch>.dmg. Fetch it as plain curl: since
+          # Oct 2026 the host answers a browser-style user agent sent from
+          # curl with a 302 to the 404 page (the reverse of the Sep 2026
+          # bot-block), while curl under its own identity is served the
+          # file directly. Every release-time URL was checked that way.
           line="${{ matrix.line }}"
           case "$line" in 2.7) ver="2.7.34.0" ;; *) ver="28.2.0.0" ;; esac
           api="$(curl -fsSL --max-time 30 https://formulae.brew.sh/api/cask/jamovi.json | python3 -c 'import json,sys; print(json.load(sys.stdin).get("version",""))' 2>/dev/null || true)"
           case "$api" in "$line".*) ver="$api" ;; esac
           arch="$(uname -m)"; [ "$arch" = "arm64" ] || arch="x64"
-          ua='Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36'
           get() {
-            curl -fsSL --max-time 900 -A "$ua" -o jamovi.dmg "https://archives.jamovi.org/jamovi-$1-macos-$arch.dmg" \
+            curl -fsSL --max-time 900 -o jamovi.dmg "https://archives.jamovi.org/jamovi-$1-macos-$arch.dmg" \
               && [ "$(stat -f %z jamovi.dmg)" -gt 5000000 ]
           }
           if ! get "$ver"; then
@@ -143,12 +159,17 @@ jobs:
           #   https://archives.jamovi.org/jamovi-<ver>-win-x64.exe
           # (www.jamovi.org/downloads keeps only ~the latest and bot-blocks
           # direct fetches.) Use the Homebrew oracle version; fall back to a
-          # newest-first scan if that exact build isn't archived.
-          $ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+          # newest-first scan if that exact build isn't archived. The fetch
+          # is curl.exe under its own identity: since Oct 2026 the archive
+          # host answers a browser-style user agent sent from a script with
+          # a 302 to its 404 page, and serves plain curl the file (the macOS
+          # job above, same host, same finding).
           function Get-Jamovi($v) {
             $url = "https://archives.jamovi.org/jamovi-$v-win-x64.exe"
             Write-Host "Trying $url"
-            try { Invoke-WebRequest -UseBasicParsing -UserAgent $ua -Uri $url -OutFile jamovi-setup.exe -ErrorAction Stop } catch { return $false }
+            Remove-Item jamovi-setup.exe -ErrorAction SilentlyContinue
+            & curl.exe -fsSL --max-time 900 -o jamovi-setup.exe $url
+            if ($LASTEXITCODE -ne 0) { return $false }
             return ((Get-Item jamovi-setup.exe -ErrorAction SilentlyContinue).Length -gt 5000000)
           }
           # Build against the jamovi LINE this module targets (minApp in
