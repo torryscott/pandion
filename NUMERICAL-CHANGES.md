@@ -28,6 +28,69 @@ in what they computed, and the build stamp and id list are what tell
 them apart. The "live on the web app" date is when the fix reached
 the hosted page.
 
+## v3.2.0 (unreleased; deployment dates noted per change)
+
+**Compare Groups comparisons run on the ANOVA's pooled error term under a correction.** <!-- ledger: cg-posthoc-pooled-error-term -->
+With Tukey, Dunnett, Bonferroni, Holm or FDR selected, every independent-t
+bracket and every Compare pairs row runs its statistic and unadjusted p
+(and, under Tukey or Dunnett, its confidence interval) on the one-way
+ANOVA's pooled error term over every group in the panel: the same term
+the adjusted p rests on, and what jamovi's ANOVA post hoc table prints in
+its uncorrected column, so a row never mixes two error terms. Under any
+pooled correction Cohen's d and Hedges' g divide by the model's pooled SD.
+Before this a row kept the pair's own Welch or Student t, p and d under
+every correction, and under Tukey or Dunnett that sat beside an adjusted
+p computed on the pooled term. Games-Howell still runs each pair as
+Welch's t, and with Correct set to None each pair stays its own two-group
+test with its own d. Affects: significance brackets and the Statistics
+panel's Compare pairs table on Compare Groups charts in both hosts.
+Checked against R by the stats probe (the Tukey, Dunnett and None
+fixtures) and by the parity fuzzer's pooled family. Implemented
+2026-10-22 and 2026-10-26. Live on the web app 2026-10-27.
+
+**Corrected repeated-measures comparisons use the subjects complete across every occasion.** <!-- ledger: rm-posthoc-complete-subjects -->
+On a Repeated Measures chart without a Group By variable, with a
+correction on (Tukey, Holm, Bonferroni or FDR), every paired comparison
+runs on the subjects complete across every visible occasion of its
+panel, statistic, unadjusted p and adjusted p alike: jamovi's RM ANOVA
+post hoc rule, so a row never mixes two subject sets. Before this each
+pair's test used everyone who had both of its occasions, so the rows of
+one family could rest on different subjects when an occasion was
+missing. With Correct set to None a bracket stays a paired test on
+everyone who has both occasions, jamovi's Paired Samples T-Test. Tukey
+itself is new on these charts: each pair's paired t over the complete
+subjects, judged by the studentized range with k = the number of
+occasions. The readout says how many subjects were complete and how many
+a missing occasion left out. Affects: brackets and Compare pairs on
+Repeated Measures charts in both hosts; a chart with no missing occasion
+is unchanged. Checked against R on a fixture with a missing occasion
+(the listwise raw and Holm values under a correction, the pairwise
+paired p under None). Implemented 2026-10-21. Live on the web app
+2026-10-27.
+
+**Tukey and Games-Howell adjusted p values are accurate at extreme statistics with very small degrees of freedom.** <!-- ledger: ptukey-extreme-tail -->
+The studentized-range integral behind Tukey HSD and Games-Howell
+adjusted p integrated over a fixed 80-node grid. Ordinary inputs matched
+R and SciPy to six or seven figures, but with a very large q at tiny df
+the whole tail fell between a few nodes: 0.8% low at q 24.3, k 4,
+df 3.17; 26% high at q 50, k 6, df 2.5; 14 times low at q 100, k 4,
+df 3, against SciPy's studentized_range. The grid now scales with q,
+and the checked inputs, ordinary ones included, match SciPy to four
+figures. Affects: brackets and Compare pairs under Tukey or Games-Howell
+in both hosts, only where the statistic is extreme and the degrees of
+freedom tiny. Implemented 2026-09-17. Live on the web app 2026-10-04.
+
+**Faceted histograms draw every panel on one set of bin edges.** <!-- ledger: facet-histogram-shared-bins -->
+With automatic bins each panel sized its bins from its own values while
+the value axis was sized from the pooled bins, so a smaller panel's
+wider, taller bars were clamped flat at the axis ceiling when a
+histogram moved into panels. Every panel's bars and normal curve now
+take their edges from the whole chart, the edges the axis and the
+Statistics panel's frequency table already used, so the drawn bars
+agree with that table. Affects: faceted histogram and histogram +
+density charts in both hosts; the frequency table itself is unchanged.
+Implemented 2026-10-08. Live on the web app 2026-10-08.
+
 ## v3.1.2 (released 2026-09-13; deployment dates noted per change)
 
 **Factorial and repeated-measures ANOVA preserve small residual variation.** <!-- ledger: anova-residual-stability -->
