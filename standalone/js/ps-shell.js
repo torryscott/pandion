@@ -3908,9 +3908,23 @@
   // unfolded; -1 = none. Reset when the dialog opens, kept across edits
   // so the trace follows the formula while it is being written.
   var FORMULA_EXPLAIN_ROW = -1;
+  // A computed number as a person reads it: six significant digits, with
+  // the whole-number part and three decimals always kept (3.9333333333333336
+  // reads 3.93333, 1000.495 stays 1000.495), and no more than the 15 digits
+  // a double holds faithfully, so float noise (6.3999999999999995) reads
+  // 6.4. The preview and the grid share it, so a value never reads one way
+  // in the dialog and another in the column. Display only: the stored
+  // double keeps full precision for charts, chained formulas, copy and
+  // saved files (recomputeFormulas).
+  function fmtComputedNumber(v) {
+    var a = Math.abs(v);
+    var whole = a >= 1 ? Math.floor(Math.log10(a)) + 1 : 0;
+    if (!isFinite(v) || whole > 15) return String(v);
+    return String(Number(v.toPrecision(Math.min(15, Math.max(6, whole + 3)))));
+  }
   function fmtPreviewValue(v) {
     return v == null ? "missing"
-      : typeof v === "number" ? String(Number(v.toPrecision(6))) : String(v);
+      : typeof v === "number" ? fmtComputedNumber(v) : String(v);
   }
   // Why a sub-expression came out the way it did, in plain words, from
   // the facts the engine's explain mode returns. Only the lines that
@@ -17763,7 +17777,12 @@
     var note = (v == null && !excl)
       ? unreadReason(t, col, i) : "";
     if (note) note += ", so this cell is missing";
-    return { cls: cls, text: v == null ? "\u2014" : String(v),
+    // A computed column holds full doubles, so 6.4 arrives as
+    // 6.3999999999999995; it reads the way the formula preview showed it.
+    return { cls: cls,
+             text: v == null ? "\u2014"
+               : typeof v === "number" && isComputedColumn(t, col)
+               ? fmtComputedNumber(v) : String(v),
              note: note, tip: tip,
              title: note ? (tip ? note + ". " + tip : note) : tip };
   }
