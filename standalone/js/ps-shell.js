@@ -21449,13 +21449,13 @@
       var altLikert = null;
       if (summary.repeatedTimeNames)
         altLikert = choice("rm",
-          "Choose this instead if those columns are the same rating recorded at different times or sessions.");
+          "those columns are the same rating recorded at different times or sessions.");
       else if (num === 2)
         altLikert = choice("scatter",
-          "Choose this instead if the two numeric columns are different measurements whose relationship matters.");
+          "the two numeric columns are different measurements whose relationship matters.");
       else if (num >= 3)
         altLikert = choice("corr",
-          "Choose this instead if these are different measurements and you want their pairwise relationships.");
+          "these are different measurements and you want their pairwise relationships.");
       return { primary: primaryLikert, alternative: altLikert, warning: warning,
                batteryNames: summary.likertNames.slice() };
     }
@@ -21473,19 +21473,19 @@
       return { primary: choice("compare-all",
         "One numeric outcome plus categorical variables is a group-comparison design."),
         alternative: choice("dist",
-          "Choose this instead if the grouping variables are not part of the question and you only want the outcome's distribution."),
+          "the grouping variables are not part of the question and you only want the outcome's distribution."),
         warning: warning };
     if (num === 2) {
       if (summary.repeatedLikely)
         return { primary: choice("rm",
           "The two numeric columns have sequential names, suggesting the same measure at two occasions."),
           alternative: choice("scatter",
-            "Choose this instead if they are different measurements and the relationship between them is the question."),
+            "they are different measurements and the relationship between them is the question."),
           warning: warning };
       return { primary: choice("scatter",
         "Exactly two numeric variables naturally form the X and Y axes of a scatter plot."),
         alternative: choice("rm",
-          "Choose this instead if they are the same measure recorded at two times or conditions."),
+          "they are the same measure recorded at two times or conditions."),
         warning: warning };
     }
     if (num >= 3) {
@@ -21494,12 +21494,12 @@
           "Several numeric columns appear to be repeated occasions" +
           (cat ? ", with a categorical variable available for between-group comparison." : ".")),
           alternative: choice("corr",
-            "Choose this instead if the numeric columns are different measurements whose pairwise relationships matter."),
+            "the numeric columns are different measurements whose pairwise relationships matter."),
           warning: warning };
       return { primary: choice("corr",
         "Several numeric variables with no grouping variable are naturally summarized in a correlation matrix."),
         alternative: choice("rm",
-          "Choose this instead if the columns are one measure recorded at different times or conditions."),
+          "the columns are one measure recorded at different times or conditions."),
         warning: warning };
     }
     return { primary: null, alternative: null,
