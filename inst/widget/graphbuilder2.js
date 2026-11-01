@@ -71141,10 +71141,19 @@
             //
             // Only shown when the last-clicked bar belongs to the
             // group this panel is displaying (otherwise "this bar"
-            // is ambiguous).
+            // is ambiguous). On an UNGROUPED chart the panel target
+            // is the clicked CATEGORY (category mode, _isCategoryTarget
+            // above), so the match is on the bar's category: the group
+            // comparison can never hold there (the bar's group is
+            // empty, the target is a name), which is why every
+            // ungrouped bar chart - Compare Groups without a Group By,
+            // Frequencies, Pareto - had no eye and a dead Delete key
+            // until Nov 2026.
             if (titleNode &&
                 _lastClickedBar &&
-                _lastClickedBar.group === (groupName || "")) {
+                (_isCategoryTarget
+                    ? String(_lastClickedBar.cat) === String(groupName)
+                    : _lastClickedBar.group === (groupName || ""))) {
                 var hideBtn = document.createElement("button");
                 hideBtn.type = "button";
                 hideBtn.style.cssText =
@@ -107441,7 +107450,15 @@
                     // Only hide when the most recent click matches this
                     // group selection; otherwise we don't know which
                     // category to target (the panel itself is per-group).
-                    if (_lastClickedBar && _lastClickedBar.group === grp) {
+                    // Ungrouped charts key the selection by CATEGORY
+                    // ("bars:<cat>", the bar panel's category mode), so
+                    // there the match is on the clicked bar's category;
+                    // the bare "bars:" key (the Distribution box family's
+                    // single empty category) keeps matching as before.
+                    var _grpMatch = !!_lastClickedBar && (hasGroups
+                        ? _lastClickedBar.group === grp
+                        : (grp === "" || String(_lastClickedBar.cat) === grp));
+                    if (_grpMatch) {
                         hideBars.push({
                             cat: _lastClickedBar.cat,
                             group: _lastClickedBar.group
