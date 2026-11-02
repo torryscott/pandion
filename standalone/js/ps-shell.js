@@ -15248,6 +15248,21 @@
     syncDataGrid();
     return gridFindTd(col, row);
   }
+  // The column half of gridBuildCell, for a header: scroll the column
+  // window to the column when it is outside what is built, touching no
+  // row. The header row is sticky, so a column name is on screen the
+  // moment its column is.
+  function gridBuildColumn(col) {
+    var grid = el("ps-datagrid"), t = PROJECT.table;
+    if (!grid || !t || !GRID_COL_WINDOWED) return;
+    var cols = gridVisibleColumns(t), ci = cols.indexOf(col);
+    if (ci < 0 || (ci >= GRID_COL_START && ci < GRID_COL_END)) return;
+    var edge = gridColumnEdges(cols, ci);
+    grid.scrollLeft = ci < GRID_COL_START
+      ? Math.max(0, edge.left - 46)
+      : Math.max(0, edge.right - grid.clientWidth);
+    syncDataGrid();
+  }
   function gridShouldVirtualize(t) {
     if (!t) return false;
     var rows = nRows(t), cols = t.order ? t.order.length : 0;
@@ -16531,8 +16546,11 @@
     }
   }
   function gridFindResultKey(result) {
-    if (!result || !PROJECT.table || !PROJECT.table.caseIds[result.row])
-      return "";
+    if (!result || !PROJECT.table) return "";
+    // A column-name match (row -1) has no case id; its key is the name, so
+    // the current match survives a refresh the way a cell match does.
+    if (result.row === -1) return result.col + "\u0000#name";
+    if (!PROJECT.table.caseIds[result.row]) return "";
     return result.col + "\u0000" + PROJECT.table.caseIds[result.row];
   }
   // t3-47. Replace runs over GRID_FIND_RESULTS, so it acts on exactly the
@@ -16555,10 +16573,25 @@
     }
     var repl = String(el("ps-data-replace").value == null
       ? "" : el("ps-data-replace").value);
-    var targets = all ? GRID_FIND_RESULTS.slice()
-      : (GRID_FIND_INDEX >= 0 && GRID_FIND_RESULTS[GRID_FIND_INDEX]
-         ? [GRID_FIND_RESULTS[GRID_FIND_INDEX]] : []);
-    if (!targets.length) { showToast("No matches to replace"); return; }
+    // Column names are matches to Find (they lead the list) but never to
+    // Replace (Torry, Nov 2 2026): renaming a column through a bulk
+    // substitution is exactly the silent change the whole-cell default
+    // exists to prevent, and a header has its own rename path. All skips
+    // them; Replace on a name says so instead of silently doing nothing.
+    var current = GRID_FIND_INDEX >= 0 ? GRID_FIND_RESULTS[GRID_FIND_INDEX] : null;
+    if (!all && current && current.row === -1) {
+      showToast("Replace changes cells only. This match is a column name.");
+      return;
+    }
+    var targets = all
+      ? GRID_FIND_RESULTS.filter(function (r) { return r.row >= 0; })
+      : (current ? [current] : []);
+    if (!targets.length) {
+      showToast(GRID_FIND_RESULTS.length
+        ? "Only column names match. Replace changes cells only."
+        : "No matches to replace");
+      return;
+    }
     var needle = GRID_FIND_QUERY, lower = needle.toLocaleLowerCase();
     var wholeBox = el("ps-data-replace-whole");
     var whole = !wholeBox || wholeBox.checked;
@@ -16614,6 +16647,14 @@
     var t = PROJECT.table, needle = GRID_FIND_QUERY.toLocaleLowerCase();
     if (t && needle && GRID_FIND_QUERY.trim()) {
       var visible = gridVisibleColumns(t);
+      // Column NAMES match too (Torry, Nov 2 2026: "it'd be really nice to
+      // be able to search for the names of these different variables").
+      // They lead the list in table order, the way the grid reads: a name
+      // sits above its column's cells. row -1 marks one; the reveal selects
+      // the whole column and Replace leaves it alone.
+      for (var hc = 0; hc < visible.length; hc++)
+        if (String(visible[hc]).toLocaleLowerCase().indexOf(needle) !== -1)
+          GRID_FIND_RESULTS.push({ col: visible[hc], row: -1 });
       for (var row = 0; row < nRows(t); row++)
         for (var ci = 0; ci < visible.length; ci++) {
           var col = visible[ci];
@@ -16641,7 +16682,12 @@
       (GRID_FIND_RESULTS.length
        ? (GRID_FIND_INDEX + 1) + " of " + GRID_FIND_RESULTS.length
        : "No matches");
-    el("ps-data-find-count").textContent = findCountTxt;
+    // The popup's readout says when the current match is a column name,
+    // which is why a whole column lit up; the closed button keeps the bare
+    // count, which is all its width has room for.
+    var findCur = GRID_FIND_INDEX >= 0 ? GRID_FIND_RESULTS[GRID_FIND_INDEX] : null;
+    el("ps-data-find-count").textContent = findCountTxt +
+      (findCountTxt && findCur && findCur.row === -1 ? " \u00b7 column name" : "");
     // The trigger carries the live state so a sticky query is never
     // invisible while the popup is closed (the Filter button's idiom).
     var findBtn = el("ps-data-find-btn");
@@ -16754,43 +16800,59 @@
   }
   function gridRevealFound(result) {
     var t = PROJECT.table;
-    if (!t || !result || !t.raw[result.col] ||
-        result.row < 0 || result.row >= nRows(t)) return;
+    if (!t || !result || !t.raw[result.col]) return;
+    var isName = result.row === -1;
+    if (!isName && (result.row < 0 || result.row >= nRows(t))) return;
     if (GRID_EDIT) gridCommitEdit(null);
     var grid = el("ps-datagrid");
-    var want = Math.max(0, result.row * GRID_ROW_HEIGHT -
-      Math.max(0, grid.clientHeight - GRID_ROW_HEIGHT) / 2);
-    // t2-30. This used to jump: set scrollTop, rebuild, select. A smooth
-    // scroll is what says the row was ALREADY there rather than that the
-    // grid was replaced, which is the same reason the engine scrolls its own
-    // stats rows rather than snapping them. Only for a move worth animating,
-    // and never under the motion preference, where the jump IS the answer.
-    var far = Math.abs(want - (grid.scrollTop || 0)) > GRID_ROW_HEIGHT;
-    var smooth = far && APP_PREFS.motion !== "reduce" &&
+    var motionOk = APP_PREFS.motion !== "reduce" &&
       !(window.matchMedia &&
         window.matchMedia("(prefers-reduced-motion: reduce)").matches);
-    // The window is rendered FROM the scroll position, so the rows have to
-    // exist before an animated scroll can travel across them: set the
-    // position, let syncDataGrid build that window, then animate the last
-    // part. Animating first and syncing after cancels the scroll outright,
-    // which is worse than the jump it was meant to replace.
-    grid.scrollTop = want;
-    syncDataGrid();
-    if (smooth && grid.scrollTo) {
-      grid.scrollTop = Math.max(0, want - GRID_ROW_HEIGHT * 6);
-      try { grid.scrollTo({ top: want, behavior: "smooth" }); }
-      catch (e) { grid.scrollTop = want; }
+    var smooth = false, cell = null;
+    if (isName) {
+      // A column-name match. The header row is sticky, so there is no
+      // vertical travel to make: the column only has to be BUILT (it may
+      // sit outside the column window) and then selected whole, the way a
+      // header click selects it, so the match reads as "this column".
+      gridBuildColumn(result.col);
+      if (nRows(t))
+        gridSetSelection(result.col, 0, result.col, nRows(t) - 1, "column");
+      else selectInspectorVariable(result.col);
+      smooth = motionOk;
+      cell = gridFindTh(result.col);
+    } else {
+      var want = Math.max(0, result.row * GRID_ROW_HEIGHT -
+        Math.max(0, grid.clientHeight - GRID_ROW_HEIGHT) / 2);
+      // t2-30. This used to jump: set scrollTop, rebuild, select. A smooth
+      // scroll is what says the row was ALREADY there rather than that the
+      // grid was replaced, which is the same reason the engine scrolls its own
+      // stats rows rather than snapping them. Only for a move worth animating,
+      // and never under the motion preference, where the jump IS the answer.
+      var far = Math.abs(want - (grid.scrollTop || 0)) > GRID_ROW_HEIGHT;
+      smooth = far && motionOk;
+      // The window is rendered FROM the scroll position, so the rows have to
+      // exist before an animated scroll can travel across them: set the
+      // position, let syncDataGrid build that window, then animate the last
+      // part. Animating first and syncing after cancels the scroll outright,
+      // which is worse than the jump it was meant to replace.
+      grid.scrollTop = want;
+      syncDataGrid();
+      if (smooth && grid.scrollTo) {
+        grid.scrollTop = Math.max(0, want - GRID_ROW_HEIGHT * 6);
+        try { grid.scrollTo({ top: want, behavior: "smooth" }); }
+        catch (e) { grid.scrollTop = want; }
+      }
+      gridSetSelection(result.col, result.row,
+                       result.col, result.row, "cells");
+      // Vertical only was half a reveal. At 40 columns every match Find walked
+      // to was off screen to the RIGHT while the counter cheerfully advanced,
+      // so the one feature for locating a value could not show you one. Done
+      // after the selection, because the cell has to be painted before it can
+      // be measured, and only when it is actually out of view so an in-view
+      // match never jolts sideways.
+      cell = gridFindTd(result.col, result.row) ||
+             gridBuildCell(result.col, result.row);
     }
-    gridSetSelection(result.col, result.row,
-                     result.col, result.row, "cells");
-    // Vertical only was half a reveal. At 40 columns every match Find walked
-    // to was off screen to the RIGHT while the counter cheerfully advanced,
-    // so the one feature for locating a value could not show you one. Done
-    // after the selection, because the cell has to be painted before it can
-    // be measured, and only when it is actually out of view so an in-view
-    // match never jolts sideways.
-    var cell = gridFindTd(result.col, result.row) ||
-               gridBuildCell(result.col, result.row);
     if (cell && grid.scrollWidth > grid.clientWidth + 1) {
       var cr = cell.getBoundingClientRect(), gr = grid.getBoundingClientRect();
       // The row-number gutter is sticky, so a cell tucked behind it is as
@@ -17833,6 +17895,13 @@
     var tds = el("ps-datagrid").querySelectorAll('td[data-gr="' + row + '"]');
     for (var i = 0; i < tds.length; i++)
       if (tds[i].getAttribute("data-gc") === col) return tds[i];
+    return null;
+  }
+  // The header's twin: the built th for a column, by attribute equality.
+  function gridFindTh(col) {
+    var ths = el("ps-datagrid").querySelectorAll("th[data-grid-col]");
+    for (var i = 0; i < ths.length; i++)
+      if (ths[i].getAttribute("data-grid-col") === col) return ths[i];
     return null;
   }
   function gridRefreshComputedCells(previousFilterMask) {
