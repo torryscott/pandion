@@ -5,11 +5,16 @@
 // else falls through to the static assets exactly as before.
 //
 //   POST /api/hit/<kind>   one empty ping; kind is launch, launch-day or
-//                          portable. No body, no cookie, no identifier is
-//                          read or stored. Same-site requests from what
-//                          looks like a person's browser only (crawlers,
-//                          HTTP libraries and Cloudflare's verified bots
-//                          are dropped; see isCountable).
+//                          portable, or one of the site pings (Nov 2026):
+//                          page:<id> when a page of the site is read,
+//                          time:<id>:<band> once per page, how long it
+//                          stayed in front, and tour:<id>:start|done for
+//                          the Learn tours (see kindOk). No body, no
+//                          cookie, no identifier is read or stored.
+//                          Same-site requests from what looks like a
+//                          person's browser only (crawlers, HTTP libraries
+//                          and Cloudflare's verified bots are dropped; see
+//                          isCountable).
 //   GET  /api/counts       {"launch": {"count": n, "since": "YYYY-MM-DD"},
 //                          ...} for the footer line and the usage table.
 //   GET  /api/daily        the same counts day by day, plus the daily
@@ -27,6 +32,18 @@
 // counters; nothing else on the site changes.
 
 const KINDS = new Set(["launch", "launch-day", "portable"]);
+// The site pings (Nov 2026, Torry: where do visitors spend their time).
+// website/assets/site-nav.js derives the page id from its own pathname
+// (gallery.html -> gallery, / -> home, /docs/ -> docs) and the tour id
+// from the film frame it watches, so only the SHAPE is checked here; the
+// usage page shows the rows it has labels for and nothing else. The time
+// bands are coarse on purpose: under 10 seconds, under a minute, under
+// five minutes, five minutes or more.
+const PAGE_ID = "[a-z0-9-]{1,40}";
+const SITE_KIND = new RegExp("^(?:page:" + PAGE_ID +
+  "|time:" + PAGE_ID + ":(?:lt10|lt60|lt300|ge300)" +
+  "|tour:[a-z-]{1,30}:(?:start|done))$");
+export function kindOk(kind) { return KINDS.has(kind) || SITE_KIND.test(kind); }
 const SITE = /(^|\.)pandionplots\.com$/i;
 const LOCAL = /^(localhost|127\.0\.0\.1)$/i;
 
@@ -225,7 +242,7 @@ export default {
     if (url.pathname.startsWith("/api/hit/")) {
       if (req.method !== "POST") return new Response(null, { status: 405, headers: NO_STORE });
       const kind = url.pathname.slice("/api/hit/".length);
-      if (db(env) && KINDS.has(kind) && sameSite(req) && isCountable(req)) {
+      if (db(env) && kindOk(kind) && sameSite(req) && isCountable(req)) {
         try { await bump(env, kind); } catch (e) { /* a full day quota or a hiccup: an undercount, never an error to the visitor */ }
       }
       return new Response(null, { status: 204, headers: NO_STORE });
@@ -276,14 +293,22 @@ export default {
       } catch (e) { dlRows = []; dlMeta = []; }
       const meta = {};
       for (const r of dlMeta) meta[r.key] = r.value;
-      const hits = {}, downloads = {};
-      for (const r of hitRows) (hits[r.kind] = hits[r.kind] || []).push([r.day, Number(r.n) || 0]);
+      const hits = {}, downloads = {}, sinceOf = {};
+      for (const r of hitRows) {
+        (hits[r.kind] = hits[r.kind] || []).push([r.day, Number(r.n) || 0]);
+        // Rows come ordered by day, so the first row of a kind is its
+        // first day. The site pings began later than the launch counters,
+        // and a page's chart zero-filled from the launch counters' first
+        // day would show weeks of nothing before counting began.
+        if (!sinceOf[r.kind]) sinceOf[r.kind] = r.day;
+      }
       for (const r of dlRows) (downloads[r.asset] = downloads[r.asset] || []).push([r.day, Number(r.n) || 0]);
       return Response.json({
         updated: new Date().toISOString(),
         // Every counter started together, so the first day of any of them
         // is when counting began; a kind with no row on a day had zero.
         hitsSince: hitRows.length ? hitRows[0].day : null,
+        hitsSinceOf: sinceOf,
         hits,
         downloadsSince: meta.downloads_since || null,
         downloadsChecked: meta.downloads_checked || null,

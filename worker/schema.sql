@@ -3,7 +3,8 @@
 -- no timestamp finer than the day, no identifier of any kind.
 CREATE TABLE IF NOT EXISTS hits (
   day  TEXT NOT NULL,              -- YYYY-MM-DD, UTC
-  kind TEXT NOT NULL,              -- 'launch' | 'launch-day' | 'portable'
+  kind TEXT NOT NULL,              -- 'launch' | 'launch-day' | 'portable', or a site
+                                   -- ping: 'page:<id>', 'time:<id>:<band>', 'tour:<id>:start|done'
   n    INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (day, kind)
 );

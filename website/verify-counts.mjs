@@ -32,7 +32,20 @@
 //      in and starts on the first hourly check; a row with no history,
 //      and /api/daily failing, both say so; the row and Close both close
 //      it; nothing overflows at 320px; axe finds nothing with it open.
+//   5. The site pings (Nov 2026): a person's browser (webdriver false)
+//      reading the gallery sends page:gallery on load and one time band
+//      when the page is hidden, both empty POSTs and neither twice; the
+//      home page is page:home; a Learn film's play button turning to
+//      Pause then Replay sends tour:<id>:start and :done once each; a
+//      headless browser sends nothing; and the usage page's two new
+//      tables fill from the counts (times read, the minute-or-more sum,
+//      films started and finished), keep dashes for a page never read,
+//      and open a page row's chart from that kind's own first day with
+//      the reading noun.
 // CONTROL (the site before the counters): every case finds no markup.
+// PS_SITE_DIR=<another website dir> runs the cases against that tree
+// (the control for case 5 is the site before the pings: no ping, no
+// tables).
 //
 // Usage: node website/verify-counts.mjs
 import { createRequire } from 'node:module';
@@ -46,7 +59,7 @@ function loadPlaywright() {
     console.error('playwright not found'); process.exit(2);
 }
 const { chromium } = loadPlaywright();
-const websiteDir = path.dirname(fileURLToPath(import.meta.url));
+const websiteDir = process.env.PS_SITE_DIR ? path.resolve(process.env.PS_SITE_DIR) : path.dirname(fileURLToPath(import.meta.url));
 let fails = 0; const ok = (c, m) => { console.log((c ? '  ok  ' : ' FAIL ') + m); if (!c) fails++; };
 
 const COUNTS = { updated: '2026-09-25T10:00:00Z',
@@ -64,8 +77,13 @@ const RELEASES = [
 ];
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2' };
 
-async function open(browser, file, { counts, releases, daily, now, width } = {}) {
+async function open(browser, file, { counts, releases, daily, now, width, human } = {}) {
     const ctx = await browser.newContext({ viewport: { width: width || 1280, height: 900 } });
+    // A person's browser: the site pings (and the app's launch ping) stay
+    // silent under automation, so a case that expects them says so.
+    if (human) await ctx.addInitScript(() => {
+        try { Object.defineProperty(navigator, 'webdriver', { get: () => false }); } catch (e) {}
+    });
     const pings = [];
     await ctx.route('https://pandionplots.com/**', route => {
         const u = new URL(route.request().url());
@@ -81,7 +99,9 @@ async function open(browser, file, { counts, releases, daily, now, width } = {})
             return counts ? route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(counts) })
                           : route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"down"}' });
         }
-        const f = path.join(websiteDir, u.pathname === '/' ? 'index.html' : u.pathname);
+        // A directory serves its index.html, as the host does for /docs/.
+        let f = path.join(websiteDir, u.pathname === '/' ? 'index.html' : u.pathname);
+        if (fs.existsSync(f) && fs.statSync(f).isDirectory()) f = path.join(f, 'index.html');
         if (!fs.existsSync(f) || fs.statSync(f).isDirectory()) return route.fulfill({ status: 404, body: 'not found' });
         return route.fulfill({ status: 200, contentType: TYPES[path.extname(f)] || 'application/octet-stream', body: fs.readFileSync(f) });
     });
@@ -326,6 +346,83 @@ try {
             Math.round(document.querySelector('[data-role="uc-plot"] svg').getBoundingClientRect().right), document.documentElement.clientWidth]);
         ok(over[0] <= 0 && over[1] === 26 && over[2] <= over[3], 'History: at 320px the open chart fits without sideways scrolling (' + JSON.stringify(over) + ')');
         await ph.ctx.close();
+    }
+
+    // Case 5: the site pings and the two new usage tables.
+    {
+        const kinds = pings => pings.map(p => p.kind);
+        // 5a. Reading the gallery, then hiding the page.
+        const g = await open(browser, 'gallery.html', { counts: COUNTS, releases: RELEASES, human: true });
+        await g.page.evaluate(() => {
+            Object.defineProperty(document, 'visibilityState', { get: () => 'hidden', configurable: true });
+            document.dispatchEvent(new Event('visibilitychange'));
+            document.dispatchEvent(new Event('visibilitychange'));
+            window.dispatchEvent(new Event('pagehide'));
+        });
+        await g.page.waitForTimeout(300);
+        ok(kinds(g.pings).join(',') === 'page:gallery,time:gallery:lt10' && g.pings.every(p => p.method === 'POST' && !p.body),
+           'Pings: reading the gallery sends page:gallery on load and one time band on hiding, both empty POSTs, neither twice (' + kinds(g.pings).join(',') + ')');
+        ok(g.errors.length === 0, 'Pings: no page error on the gallery');
+        await g.ctx.close();
+        // 5b. The home page, and a film in one of its tour windows.
+        const h = await open(browser, '', { counts: COUNTS, releases: RELEASES, human: true });
+        ok(kinds(h.pings).join(',') === 'page:home', 'Pings: the home page is page:home, and nothing else on load (' + kinds(h.pings).join(',') + ')');
+        await h.page.evaluate(async () => {
+            const sleep = ms => new Promise(r => setTimeout(r, ms));
+            const frame = document.querySelector('[data-pandion-data-workspace]');
+            const b = document.createElement('button');
+            b.setAttribute('aria-label', 'Play');
+            frame.appendChild(b);
+            await sleep(60);
+            for (const l of ['Pause', 'Play', 'Pause']) b.setAttribute('aria-label', l);
+            await sleep(60);
+            for (const l of ['Replay', 'Play', 'Pause', 'Replay']) b.setAttribute('aria-label', l);
+            await sleep(60);
+        });
+        await h.page.waitForTimeout(300);
+        const tk = kinds(h.pings).filter(k => k.startsWith('tour:'));
+        ok(tk.join(',') === 'tour:data:start,tour:data:done',
+           'Pings: a film\'s play button turning to Pause, then to Replay, sends start and done once each (' + tk.join(',') + ')');
+        await h.ctx.close();
+        // 5c. The guide copy is page:docs; under automation nothing is sent.
+        const d = await open(browser, 'docs/', { counts: COUNTS, releases: RELEASES, human: true });
+        ok(kinds(d.pings).join(',') === 'page:docs', 'Pings: the user guide is page:docs (' + kinds(d.pings).join(',') + ')');
+        await d.ctx.close();
+        const q = await open(browser, 'gallery.html', { counts: COUNTS, releases: RELEASES });
+        ok(q.pings.length === 0, 'Pings: a headless browser sends nothing, so probes never count');
+        await q.ctx.close();
+        // 5d. The usage page's tables and a page row's chart.
+        const NOW5 = '2026-11-10T15:00:00Z';
+        const SITE_COUNTS = Object.assign({}, COUNTS, {
+            'page:gallery': { count: 40, since: '2026-11-03' }, 'time:gallery:lt10': { count: 10, since: '2026-11-03' },
+            'time:gallery:lt60': { count: 20, since: '2026-11-03' }, 'time:gallery:lt300': { count: 7, since: '2026-11-03' },
+            'time:gallery:ge300': { count: 2, since: '2026-11-04' },
+            'tour:data:start': { count: 9, since: '2026-11-03' }, 'tour:data:done': { count: 4, since: '2026-11-03' } });
+        const SITE_DAILY = { updated: NOW5, hitsSince: '2026-09-25', hitsSinceOf: { launch: '2026-09-25', 'page:gallery': '2026-11-03' },
+            hits: { launch: [['2026-09-25', 1]], 'page:gallery': [['2026-11-03', 15], ['2026-11-05', 25]] },
+            downloadsSince: null, downloadsChecked: null, downloads: {} };
+        const u = await open(browser, 'usage.html', { counts: SITE_COUNTS, releases: RELEASES, daily: SITE_DAILY, now: NOW5 });
+        const ut = await u.page.evaluate(() => {
+            const r = k => Array.from(document.querySelector('tr[data-kind="' + k + '"]').querySelectorAll('td')).map(td => td.textContent.trim());
+            return { g: r('page:gallery'), l: r('page:learn'), t: r('tour:data:start'),
+                     pages: document.querySelectorAll('[data-role="usage-pages"] tbody tr').length,
+                     films: document.querySelectorAll('[data-role="usage-tours"] tbody tr').length,
+                     armed: document.querySelectorAll('[data-role="usage-pages"] .usage-row-btn, [data-role="usage-tours"] .usage-row-btn').length };
+        });
+        ok(ut.pages >= 25 && ut.films === 5 && ut.armed === ut.pages + ut.films, 'Usage: every page and film row is there and opens a chart (' + ut.pages + ' pages, ' + ut.films + ' films)');
+        ok(ut.g[1] === '3 Nov 2026' && ut.g[2] === '40' && ut.g[3] === '9', 'Usage: the gallery row shows since, times read and the minute-or-more sum (' + JSON.stringify(ut.g) + ')');
+        ok(ut.l[1] === '-' && ut.l[2] === '-' && ut.l[3] === '-', 'Usage: a page never read keeps its dashes');
+        ok(ut.t[1] === '3 Nov 2026' && ut.t[2] === '9' && ut.t[3] === '4', 'Usage: a film row shows started and played to the end (' + JSON.stringify(ut.t) + ')');
+        await u.page.click('tr[data-kind="page:gallery"] .usage-row-btn'); await u.page.waitForTimeout(250);
+        const uc = await u.page.evaluate(() => ({ title: document.querySelector('[data-role="uc-title"]').textContent.trim(),
+            total: document.querySelector('[data-role="uc-total"]').textContent.trim(),
+            pts: document.querySelectorAll('[data-role="uc-point"]').length }));
+        // The 30-day window reaches back past 3 Nov, so the total says
+        // when counting began, as it does for the launch counters.
+        ok(uc.title === 'Gallery' && uc.total === '40 readings in the last 30 days (counting began 3 Nov 2026)' && uc.pts === 8,
+           'Usage: the gallery chart counts readings from its own first day, 3 Nov, not the launch counters\' (' + JSON.stringify(uc) + ')');
+        ok(u.errors.length === 0, 'Usage: no page error with the new tables');
+        await u.ctx.close();
     }
 } finally {
     await browser.close();
