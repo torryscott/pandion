@@ -33031,7 +33031,22 @@
   var SHARE_FREEZE_SHA = null;    // {url, sha} from the commits API
   var SHARE_LONG_CHARS = 10000;
   var LOCK_MAGIC = "PANDION-LOCKED 1";
-  function appLinkBase() { return String(window.location.href).split(/[?#]/)[0]; }
+  // The address a shared link opens (Torry, Nov 4 2026). The page's own
+  // when this IS the hosted app (a preview copy such as /app-next links to
+  // itself); otherwise the app at pandionplots.com. The desktop app loads a
+  // file from its own disk and the portable file sits wherever it was
+  // saved, and a link to either opens nowhere else. A carried link holds
+  // the whole project, so the hosted app opens it with nothing installed,
+  // which is the point of sharing; a hosted-file link names the file's
+  // address, which any copy of the app can read.
+  var HOSTED_APP = "https://pandionplots.com/app/";
+  function appIsHosted() {
+    try { return /(^|\.)pandionplots\.com$/i.test(window.location.hostname); }
+    catch (e) { return false; }
+  }
+  function appLinkBase() {
+    return appIsHosted() ? String(window.location.href).split(/[?#]/)[0] : HOSTED_APP;
+  }
   function appLinkFor(kind, url) {
     return appLinkBase() + "?" + kind + "=" +
       encodeURIComponent(url).replace(/%2F/gi, "/").replace(/%3A/gi, ":");
@@ -33166,6 +33181,10 @@
         : "This project was opened from " + escHtml(linkHost(src)) +
           '. <button type="button" class="ps-share-inline" id="ps-share-source-copy">Copy a link that opens that file</button>';
     } else { srcLine.hidden = true; srcLine.innerHTML = ""; }
+    // From the desktop app or the portable file the link opens the hosted
+    // app, and the dialog says so; the hosted app's own links need no note.
+    var opens = el("ps-share-opens");
+    if (opens) opens.hidden = appIsHosted();
     shareSetMode(SHARE_MODE);
     openShellDialog("ps-share-dialog");
   }

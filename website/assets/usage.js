@@ -18,6 +18,12 @@
 //      the count under the pointer (or the arrow keys) and the numbers in a
 //      table. The download rows' history starts when the site began noting
 //      GitHub's running totals every hour (worker/index.js).
+//   5. [data-role="usage-pages"] and [data-role="usage-tours"] (Nov 2026):
+//      where visitors go and which Learn films they start and finish, from
+//      the same /api/counts (kinds page:<id>, time:<id>:<band>,
+//      tour:<id>:start|done; the pings themselves are sent by
+//      site-nav.js). A row's data-also names the kinds its last column
+//      sums. The rows open the same history chart as the first table's.
 (function () {
   var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   function fmtDate(iso) {
@@ -129,6 +135,29 @@
     }).catch(fail);
   }
 
+  // 5. Where visitors go, and the Learn films. The rows never wait on the
+  //    first table; a kind the counter has never seen keeps its dashes.
+  var extra = [].slice.call(document.querySelectorAll('[data-role="usage-pages"] tr[data-kind], [data-role="usage-tours"] tr[data-kind]'));
+  if (extra.length) {
+    if (history) extra.forEach(history.arm);
+    counts().then(function (c) {
+      function n(k) { var e = c[k]; return e && Number(e.count) >= 0 ? Number(e.count) : null; }
+      extra.forEach(function (row) {
+        var k = row.getAttribute('data-kind'), tds = row.querySelectorAll('td');
+        var v = n(k);
+        if (v === null) return;
+        tds[1].textContent = fmtDate(c[k].since);
+        tds[2].textContent = fmtN(v);
+        var also = (row.getAttribute('data-also') || '').split(/\s+/).filter(Boolean), sum = 0;
+        also.forEach(function (x) { sum += n(x) || 0; });
+        if (also.length) tds[3].textContent = fmtN(sum);
+      });
+    }).catch(function () {
+      var st = document.querySelector('[data-role="usage-status"]');
+      if (st) st.hidden = false;
+    });
+  }
+
   // 4. The history behind each row. Built once for the table; returns arm()
   //    so the rows the GitHub map adds later get the same button.
   function setupHistory(table, ALIASES) {
@@ -155,6 +184,8 @@
       'portable': { day: ['download click', 'download clicks'], span: ['download click', 'download clicks'] }
     };
     var DOWNLOAD_NOUN = { day: ['download', 'downloads'], span: ['download', 'downloads'] };
+    var PAGE_NOUN = { day: ['reading', 'readings'], span: ['reading', 'readings'] };
+    var TOUR_NOUN = { day: ['start', 'starts'], span: ['start', 'starts'] };
     var ICON = '<svg class="uc-ico" viewBox="0 0 16 16" aria-hidden="true" focusable="false">' +
       '<path d="M1.5 12.5 5.5 8l3 2 6-6.5" fill="none" stroke="currentColor" stroke-width="1.8" ' +
       'stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -257,7 +288,9 @@
       }
       if (kind) {
         add((daily.hits || {})[kind]);
-        start = daily.hitsSince;
+        // A kind's own first day (the site pings began weeks after the
+        // launch counters); older Workers answer without hitsSinceOf.
+        start = (daily.hitsSinceOf || {})[kind] || daily.hitsSince;
       } else {
         var dl = daily.downloads || {};
         Object.keys(dl).forEach(function (name) {
@@ -304,7 +337,9 @@
     function usable(win, bin) { return bin === 'day' || binned(win, bin).length >= 2; }
 
     function noun(row, bin, n) {
-      var set = NOUNS[row.getAttribute('data-kind')] || DOWNLOAD_NOUN;
+      var kind = row.getAttribute('data-kind') || '';
+      var set = NOUNS[kind] || (kind.indexOf('page:') === 0 ? PAGE_NOUN
+        : kind.indexOf('tour:') === 0 ? TOUR_NOUN : DOWNLOAD_NOUN);
       var pair = bin === 'day' ? set.day : set.span;
       return n === 1 ? pair[0] : pair[1];
     }

@@ -22,10 +22,18 @@
 //      missing key each get a plain sentence;
 //   7. Locked by hand: Save the locked copy downloads the locked text, and
 //      Check on its address accepts it and adds the key;
-//   8. Copy link on a Find open data hit and on the project's source line.
+//   8. Copy link on a Find open data hit and on the project's source line;
+//   9. the address a link opens (Nov 4 2026): from a page that is not the
+//      hosted app (this file:// page, the desktop app, the portable file)
+//      every link starts with https://pandionplots.com/app/ and the dialog
+//      says the link opens the app there; the same page served under
+//      pandionplots.com (a preview copy) links to its own address and the
+//      note stays hidden.
 // GitHub is served by Playwright's request interception with the CORS
 // header the real routes send, so the probe needs no network.
-// CONTROL (the find-open-data branch): case 1 fails at its first assertion.
+// CONTROL (the find-open-data branch): case 1 fails at its first assertion;
+// the tree before the base-address rule fails case 1's link assertion
+// (file:// links) and case 9.
 //
 // Usage: node standalone/verify/share-link-check.mjs
 
@@ -47,6 +55,9 @@ function loadPlaywright() {
 const { chromium } = loadPlaywright();
 const HERE = new URL('.', import.meta.url).pathname;
 const PAGE = 'file://' + (process.env.PS_PAGE ? path.resolve(process.env.PS_PAGE) : path.resolve(HERE, '..', 'index.html'));
+// What a link made on this file:// page starts with: not the page's own
+// address, which nobody else could open, but the hosted app's.
+const LINKBASE = 'https://pandionplots.com/app/';
 let failures = 0;
 function ok(cond, label) { if (cond) console.log('  ok  ' + label); else { console.log('  FAIL ' + label); failures++; } }
 
@@ -135,7 +146,7 @@ let carried = '';
     await page.keyboard.press('Escape'); await page.waitForTimeout(200);
     await openShare(page);
     let s = await state(page);
-    ok(s.open && s.carryLink.indexOf('#pand=') > 0 && s.carryLink.indexOf(PAGE) === 0, '1: the dialog opens on Carry it in the link with a #pand= link on this page');
+    ok(s.open && s.carryLink.indexOf('#pand=') > 0 && s.carryLink.indexOf(LINKBASE) === 0, '1: the dialog opens on Carry it in the link with a #pand= link that opens the hosted app');
     ok(/1 document/.test(s.carrySize) && /characters/.test(s.carrySize) && !s.chartOnlyOffered && !s.carryWarn, '1: the size line counts the document and the table, no chart-only choice on a one-chart project, no warning (' + s.carrySize + ')');
     await page.click('#ps-share-carry-copy'); await page.waitForTimeout(200);
     s = await state(page);
@@ -146,7 +157,7 @@ let carried = '';
 }
 // ---- 2. opening a carried link elsewhere
 {
-    const { ctx, page, errors } = await boot(carried.slice(PAGE.length));
+    const { ctx, page, errors } = await boot(carried.slice(LINKBASE.length));
     let s = await state(page);
     ok(s.card && /shared project/.test(s.cardTitle) && /inside it/.test(s.cardSub) && s.cardHost === 'this link itself' && !s.welcome, '2: the card says the project travels in the link (' + s.cardTitle + ')');
     await page.click('#ps-openlink-open'); await page.waitForTimeout(1500);
@@ -177,9 +188,9 @@ let carried = '';
     const one = s.carryLink;
     await page.click('#ps-share-source-copy'); await page.waitForTimeout(150);
     s = await state(page);
-    ok(s.copied === PAGE + '?project=' + RAW + 'week3.pand', '8: the source line copies a link that opens the file the project came from');
+    ok(s.copied === LINKBASE + '?project=' + RAW + 'week3.pand', '8: the source line copies a link that opens the file the project came from');
     await ctx.close();
-    const b = await boot(one.slice(PAGE.length));
+    const b = await boot(one.slice(LINKBASE.length));
     await b.page.click('#ps-openlink-open'); await b.page.waitForTimeout(1500);
     s = await state(b.page);
     ok(!s.card && s.docs === 1 && s.cols && s.cols.length > 0, '3: the chart-only link opens with one document');
@@ -206,19 +217,19 @@ let carried = '';
     await page.fill('#ps-share-addr', 'https://github.com/u/r/blob/main/data/week3.pand'); await page.click('#ps-share-check'); await page.waitForTimeout(900);
     let s = await state(page);
     ok(s.addr === RAW + 'week3.pand', '4: a github.com page address is rewritten to the raw route');
-    ok(/Reachable/.test(s.ghStatus) && /Pandion Plots project/.test(s.ghStatus) && /follows the file/.test(s.ghStatus) && s.ghLink === PAGE + '?project=' + RAW + 'week3.pand' && !s.ghCopyDisabled && s.freezeOffered, '4: Check reports a readable project on a branch and builds a ?project= link (' + s.ghStatus.slice(0, 70) + ')');
+    ok(/Reachable/.test(s.ghStatus) && /Pandion Plots project/.test(s.ghStatus) && /follows the file/.test(s.ghStatus) && s.ghLink === LINKBASE + '?project=' + RAW + 'week3.pand' && !s.ghCopyDisabled && s.freezeOffered, '4: Check reports a readable project on a branch and builds a ?project= link (' + s.ghStatus.slice(0, 70) + ')');
     await page.check('#ps-share-freeze'); await page.waitForTimeout(700);
     s = await state(page);
-    ok(seen.commits.length === 1 && /path=data%2Fweek3\.pand/.test(seen.commits[0]) && s.ghLink === PAGE + '?project=https://raw.githubusercontent.com/u/r/' + SHA + '/data/week3.pand' && /Frozen at 0123456/.test(s.ghStatus), '4: Freeze asks GitHub once and pins the raw route to that commit');
+    ok(seen.commits.length === 1 && /path=data%2Fweek3\.pand/.test(seen.commits[0]) && s.ghLink === LINKBASE + '?project=https://raw.githubusercontent.com/u/r/' + SHA + '/data/week3.pand' && /Frozen at 0123456/.test(s.ghStatus), '4: Freeze asks GitHub once and pins the raw route to that commit');
     await page.uncheck('#ps-share-freeze'); await page.waitForTimeout(200);
     s = await state(page);
-    ok(s.ghLink === PAGE + '?project=' + RAW + 'week3.pand', '4: unfreezing restores the branch link');
+    ok(s.ghLink === LINKBASE + '?project=' + RAW + 'week3.pand', '4: unfreezing restores the branch link');
     await page.click('#ps-share-gh-copy'); await page.waitForTimeout(150);
     s = await state(page);
     ok(s.copied === s.ghLink, '4: Copy writes the link');
     await page.fill('#ps-share-addr', RAW + 'scores.csv'); await page.click('#ps-share-check'); await page.waitForTimeout(800);
     s = await state(page);
-    ok(/a data file/.test(s.ghStatus) && s.ghLink === PAGE + '?data=' + RAW + 'scores.csv', '4: a CSV becomes a ?data= link');
+    ok(/a data file/.test(s.ghStatus) && s.ghLink === LINKBASE + '?data=' + RAW + 'scores.csv', '4: a CSV becomes a ?data= link');
     await page.fill('#ps-share-addr', 'https://blocked.test/file.pand'); await page.click('#ps-share-check'); await page.waitForTimeout(800);
     s = await state(page);
     ok(/CORS/.test(s.ghStatus) && /blocked\.test/.test(s.ghStatus) && s.ghCopyDisabled, '4: a host that refuses browsers is named (' + s.ghStatus.slice(0, 60) + ')');
@@ -246,10 +257,10 @@ let unlistedLink = '';
     const fname = g ? Object.keys(g.body.files)[0] : '';
     let parsed = null; try { parsed = JSON.parse(g.body.files[fname].content); } catch (e) {}
     ok(seen.gists.length === 1 && g.auth === 'Bearer github_pat_test' && g.body.public === false && /\.pand$/.test(fname) && parsed && parsed.kind === 'pandion-plots-project', '5: one POST creates a secret gist holding the project file (' + fname + ')');
-    ok(s.ghLink === PAGE + '?project=https://gist.githubusercontent.com/u/abc/raw/' + fname && /secret gist/.test(s.ghStatus) && !s.ghCopyDisabled, '5: the link points at the gist\'s live raw address (' + s.ghLink.slice(PAGE.length) + ')');
+    ok(s.ghLink === LINKBASE + '?project=https://gist.githubusercontent.com/u/abc/raw/' + fname && /secret gist/.test(s.ghStatus) && !s.ghCopyDisabled, '5: the link points at the gist\'s live raw address (' + s.ghLink.slice(LINKBASE.length) + ')');
     unlistedLink = s.ghLink;
     await ctx.close();
-    const b = await boot(unlistedLink.slice(PAGE.length));
+    const b = await boot(unlistedLink.slice(LINKBASE.length));
     await b.page.click('#ps-openlink-open'); await b.page.waitForTimeout(1500);
     s = await state(b.page);
     ok(!s.card && /dose/i.test(s.name) && /from gist\.githubusercontent\.com/.test(s.detail), '5: opened elsewhere, the project lands with its provenance (' + s.detail + ')');
@@ -266,23 +277,23 @@ let unlistedLink = '';
     const content = g ? g.body.files[fname].content : '';
     ok(g && g.body.public === false && /\.pand\.locked$/.test(fname) && content.indexOf('PANDION-LOCKED 1\n') === 0 && content.indexOf('pandion-plots-project') < 0, '6: the gist holds only the locked text (' + fname + ')');
     const m = s.ghLink.match(/#key=([A-Za-z0-9_-]{22})$/);
-    ok(m && s.ghLink.indexOf(PAGE + '?project=https://gist.githubusercontent.com/u/abc/raw/' + fname + '#key=') === 0 && /key is in the link/.test(s.ghStatus), '6: the link carries the key after the # (' + (m ? m[1].length : 0) + ' characters)');
+    ok(m && s.ghLink.indexOf(LINKBASE + '?project=https://gist.githubusercontent.com/u/abc/raw/' + fname + '#key=') === 0 && /key is in the link/.test(s.ghStatus), '6: the link carries the key after the # (' + (m ? m[1].length : 0) + ' characters)');
     ok(errors.length === 0, '6: no page errors' + (errors.length ? ' (' + errors[0] + ')' : ''));
     const link = s.ghLink;
     await ctx.close();
-    const b = await boot(link.slice(PAGE.length));
+    const b = await boot(link.slice(LINKBASE.length));
     s = await state(b.page);
     ok(s.card && /locked/.test(s.cardSub) && /travels in the link/.test(s.cardSub), '6: the card says the file is locked and the key travels in the link');
     await b.page.click('#ps-openlink-open'); await b.page.waitForTimeout(1500);
     s = await state(b.page);
     ok(!s.card && /wellbeing/i.test(s.name) && s.hash === '' && /from gist\.githubusercontent\.com/.test(s.detail), '6: Open unlocks it into the project and the key is gone from the address (' + s.name + ')');
     await b.ctx.close();
-    const wrong = await boot(link.slice(PAGE.length).replace(/#key=.*$/, '#key=AAAAAAAAAAAAAAAAAAAAAA'));
+    const wrong = await boot(link.slice(LINKBASE.length).replace(/#key=.*$/, '#key=AAAAAAAAAAAAAAAAAAAAAA'));
     await wrong.page.click('#ps-openlink-open'); await wrong.page.waitForTimeout(1200);
     s = await state(wrong.page);
     ok(s.card && /does not fit/.test(s.cardStatus), '6: a wrong key is refused in the card (' + s.cardStatus + ')');
     await wrong.ctx.close();
-    const none = await boot(link.slice(PAGE.length).replace(/#key=.*$/, ''));
+    const none = await boot(link.slice(LINKBASE.length).replace(/#key=.*$/, ''));
     await none.page.click('#ps-openlink-open'); await none.page.waitForTimeout(1200);
     s = await state(none.page);
     ok(s.card && /carries no key/.test(s.cardStatus), '6: a locked file without a key says what is missing (' + s.cardStatus.slice(0, 50) + ')');
@@ -299,10 +310,10 @@ let unlistedLink = '';
     lockedByHand['secret.pand.locked'] = text;
     await page.fill('#ps-share-addr', RAW + 'secret.pand.locked'); await page.click('#ps-share-check'); await page.waitForTimeout(900);
     let s = await state(page);
-    ok(/a locked project/.test(s.ghStatus) && /#key=[A-Za-z0-9_-]{22}$/.test(s.ghLink) && s.ghLink.indexOf(PAGE + '?project=' + RAW + 'secret.pand.locked#key=') === 0, '7: Check accepts the locked file it made and adds the key (' + s.ghStatus.slice(0, 60) + ')');
+    ok(/a locked project/.test(s.ghStatus) && /#key=[A-Za-z0-9_-]{22}$/.test(s.ghLink) && s.ghLink.indexOf(LINKBASE + '?project=' + RAW + 'secret.pand.locked#key=') === 0, '7: Check accepts the locked file it made and adds the key (' + s.ghStatus.slice(0, 60) + ')');
     const link = s.ghLink;
     await ctx.close();
-    const b = await boot(link.slice(PAGE.length));
+    const b = await boot(link.slice(LINKBASE.length));
     await b.page.click('#ps-openlink-open'); await b.page.waitForTimeout(1500);
     s = await state(b.page);
     ok(!s.card && /practice/i.test(s.name) && /from raw\.githubusercontent\.com/.test(s.detail), '7: the hand-hosted locked file opens elsewhere (' + s.name + ')');
@@ -320,9 +331,53 @@ let unlistedLink = '';
     await page.type('#ps-finddata-q', 'tooth'); await page.waitForTimeout(500);
     await page.click('#ps-finddata-results [data-find-copylink]'); await page.waitForTimeout(200);
     const s = await state(page);
-    ok(s.copied === PAGE + '?data=https://vincentarelbundock.github.io/Rdatasets/csv/datasets/ToothGrowth.csv', '8: Copy link on a hit copies a ?data= link that opens it here (' + s.copied.slice(PAGE.length) + ')');
+    ok(s.copied === LINKBASE + '?data=https://vincentarelbundock.github.io/Rdatasets/csv/datasets/ToothGrowth.csv', '8: Copy link on a hit copies a ?data= link that opens it here (' + s.copied.slice(LINKBASE.length) + ')');
     await ctx.close();
 }
+// ---- 9. the address a link opens: the hosted app from anywhere else, itself when hosted
+{
+    // 9a. This file:// page: every link kind starts with the hosted app and
+    //     the dialog says so.
+    const { ctx, page } = await boot('');
+    await page.click('[data-example="dose"]'); await page.waitForTimeout(1000);
+    await openShare(page);
+    let s = await state(page);
+    const opens = await page.evaluate(() => { const n = document.getElementById('ps-share-opens'); return n && !n.hidden && n.getClientRects().length > 0 ? n.textContent : ''; });
+    ok(s.carryLink.indexOf(LINKBASE + '#pand=') === 0, '9: a carried link from this page opens the hosted app (' + s.carryLink.slice(0, 40) + '...)');
+    ok(/opens the app at pandionplots\.com/.test(opens), '9: and the dialog says the link opens the app at pandionplots.com (' + opens.slice(0, 50) + ')');
+    await githubTab(page, 'public');
+    await page.fill('#ps-share-addr', 'https://github.com/u/r/blob/main/data/week3.pand'); await page.click('#ps-share-check'); await page.waitForTimeout(600);
+    s = await state(page);
+    ok(s.ghLink === LINKBASE + '?project=' + RAW + 'week3.pand', '9: a hosted-file link from this page opens the hosted app too (' + s.ghLink.slice(0, 40) + '...)');
+    await ctx.close();
+}
+{
+    // 9b. The same page served under pandionplots.com (as a preview copy
+    //     would be) links to its own address, and the note stays hidden.
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage({ viewport: { width: 1440, height: 1000 } });
+    await page.addInitScript(() => { try { localStorage.clear(); localStorage.setItem('psstandalone.coach.clickToEdit.v1', '1'); } catch (e) {} });
+    const ROOT = path.resolve(HERE, '..', '..');
+    const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.csv': 'text/csv' };
+    await page.route('https://pandionplots.com/**', route => {
+        const u = new URL(route.request().url());
+        const f = u.pathname.startsWith('/app-next/') ? path.join(HERE, '..', u.pathname.slice('/app-next/'.length)) : path.join(ROOT, u.pathname);
+        if (!fs.existsSync(f) || fs.statSync(f).isDirectory()) return route.fulfill({ status: 404, body: 'no' });
+        return route.fulfill({ status: 200, contentType: TYPES[path.extname(f)] || 'application/octet-stream', body: fs.readFileSync(f) });
+    });
+    await page.route(/^https?:\/\/(?!pandionplots\.com)/, route => route.abort());
+    const errors = []; page.on('pageerror', e => errors.push(String(e)));
+    await page.goto('https://pandionplots.com/app-next/index.html'); await page.waitForTimeout(1300);
+    await page.click('[data-example="dose"]'); await page.waitForTimeout(1000);
+    await openShare(page);
+    const s = await state(page);
+    const opensHidden = await page.evaluate(() => { const n = document.getElementById('ps-share-opens'); return !n || n.hidden || n.getClientRects().length === 0; });
+    ok(s.open && s.carryLink.indexOf('https://pandionplots.com/app-next/index.html#pand=') === 0, '9: served under pandionplots.com the link keeps that page\'s own address (' + s.carryLink.slice(0, 52) + '...)');
+    ok(opensHidden, '9: and the note about pandionplots.com stays hidden there');
+    ok(errors.length === 0, '9: no page error on the hosted copy' + (errors.length ? ': ' + errors[0] : ''));
+    await ctx.close();
+}
+
 await browser.close();
 console.log(failures ? 'share-link: FAIL (' + failures + ')' : 'share-link: PASS');
 process.exit(failures ? 1 : 0);

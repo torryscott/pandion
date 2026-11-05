@@ -46,3 +46,10 @@
   Cache-Control: public, max-age=0, must-revalidate
 /app-estimation/index.html
   Cache-Control: public, max-age=0, must-revalidate
+# Same rules; remove with the directory.
+/app-next/lib/*
+  Cache-Control: public, max-age=86400
+/app-next/
+  Cache-Control: public, max-age=0, must-revalidate
+/app-next/index.html
+  Cache-Control: public, max-age=0, must-revalidate

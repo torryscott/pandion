@@ -24,8 +24,15 @@
 //      costs nothing, a new release and a reset, GitHub refusing, the
 //      scheduled() entry point itself, and what /api/daily then reports.
 //
+// The site pings (Nov 2026):
+//  12. page:<id>, time:<id>:<band> and tour:<id>:start|done count; the
+//      same shapes with a wrong case, an empty or over-long id, a path in
+//      the id, an unknown band or verb, or an extra part do not; and
+//      /api/daily gives each kind its own first day (hitsSinceOf) beside
+//      the shared hitsSince.
+//
 // Usage: node worker/verify-worker.mjs
-import worker, { isCountable, totalsFromReleases, downloadIncrements, snapshotDownloads } from './index.js';
+import worker, { isCountable, kindOk, totalsFromReleases, downloadIncrements, snapshotDownloads } from './index.js';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -266,6 +273,41 @@ const human = { 'Origin': 'https://pandionplots.com', 'User-Agent': CHROME, 'Sec
         const j2 = await (await worker.fetch(new Request('https://pandionplots.com/api/daily'), env)).json();
         ok(j2.hitsSince === '2026-09-25' && j2.hits.launch.length === 3, '/api/daily lists the counters\' days from the first (' + JSON.stringify(j2.hits.launch) + ')');
     }
+}
+// 12
+{
+    const { env, bumps } = mockEnv();
+    const good = ['page:gallery', 'page:home', 'page:learn-data', 'page:workshop-7', 'time:gallery:lt10',
+                  'time:learn-data:ge300', 'tour:data:start', 'tour:three-rules:done'];
+    for (const k of good) await worker.fetch(ping(k, human), env);
+    ok(bumps.length === good.length && bumps.join(',') === good.join(','),
+       'the page, time-band and film kinds count, as sent (' + bumps.length + ' of ' + good.length + ')');
+    const bad = ['page:', 'page:Gallery', 'page:../x', 'page:' + 'a'.repeat(41), 'page:gallery.html', 'page:gallery:x',
+                 'time:gallery:lt5', 'time:gallery', 'time::lt10', 'tour:data:open', 'tour:data', 'tour:Data:start',
+                 'pages:gallery', 'PAGE:home', ' page:home'];
+    const before = bumps.length;
+    for (const k of bad) {
+        const res = await worker.fetch(ping(k, human), env);
+        if (res.status !== 204) ok(false, 'a dropped kind still answers 204 (' + k + ' -> ' + res.status + ')');
+    }
+    ok(bumps.length === before, 'and nothing merely shaped like them does (' + bad.length + ' tried, all 204)');
+    ok(kindOk('launch') && kindOk('launch-day') && kindOk('portable') && !kindOk('launch '),
+       'kindOk keeps the three original kinds, exactly');
+    const { env: env2 } = mockEnv([
+        { day: '2026-09-25', kind: 'launch', n: 3 }, { day: '2026-09-26', kind: 'launch', n: 1 },
+        { day: '2026-11-03', kind: 'page:gallery', n: 2 }, { day: '2026-11-04', kind: 'page:gallery', n: 5 },
+        { day: '2026-11-04', kind: 'tour:data:start', n: 1 }]);
+    const j = await (await worker.fetch(new Request('https://pandionplots.com/api/daily'), env2)).json();
+    ok(j.hitsSince === '2026-09-25' && j.hitsSinceOf.launch === '2026-09-25' && j.hitsSinceOf['page:gallery'] === '2026-11-03' &&
+       j.hitsSinceOf['tour:data:start'] === '2026-11-04',
+       '/api/daily keeps the shared first day and gives each kind its own (' + JSON.stringify(j.hitsSinceOf) + ')');
+    ok(JSON.stringify(j.hits['page:gallery']) === '[["2026-11-03",2],["2026-11-04",5]]', 'and lists a page kind day by day');
+    // /api/counts reads rows the database has already summed per kind
+    // (the mock hands back whatever rows it holds), so give it that shape.
+    const { env: env3 } = mockEnv([{ kind: 'page:gallery', n: 7, since: '2026-11-03' }, { kind: 'launch', n: 4, since: '2026-09-25' }]);
+    const c = await (await worker.fetch(new Request('https://pandionplots.com/api/counts'), env3)).json();
+    ok(c['page:gallery'] && c['page:gallery'].count === 7 && c['page:gallery'].since === '2026-11-03',
+       '/api/counts carries a page kind with its first day like any other (' + JSON.stringify(c['page:gallery']) + ')');
 }
 if (fails) { console.log('COUNTER WORKER: ' + fails + ' failure(s)'); process.exit(1); }
 console.log('COUNTER WORKER: ALL GREEN');

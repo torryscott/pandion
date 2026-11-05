@@ -346,8 +346,12 @@
         when it starts; it carries no data, no identifier and no cookie,
         and the desktop app and the portable file send nothing at all.
         Download counts for the installers and the jamovi module come
-        from GitHub, which serves those files. The table fills in as the
-        page loads. Click a row to see it over time.
+        from GitHub, which serves those files. The pages of this site
+        send the same kind of empty ping when they load, once more with
+        how long they stayed in front (in four coarse bands, no finer),
+        and the Learn films when they start and finish; nothing follows a
+        visitor from one page to the next. The tables fill in as the page
+        loads. Click a row to see it over time.
       </p>
       <!-- The four columns do not fit a phone; the table scrolls
            sideways inside its own box rather than the page. -->
@@ -370,6 +374,80 @@
       </table>
       </div>
       <p class="usage-note" data-role="usage-status" hidden>The counts could not be loaded right now.</p>
+
+      <!-- Where visitors go (Nov 2026): one row per page of the site, from
+           the page:<id> pings; the last column sums the two longest time
+           bands (a minute or more in front). A page nobody has read since
+           counting began keeps its dashes. Click a row for its visits over
+           time. -->
+      <h2 id="usage-pages-title">Where visitors go</h2>
+      <p>
+        Every page of this site counts the times it was read, and how
+        many of those readings kept it in front for a minute or more.
+        A reload counts again; a page open in two tabs counts twice.
+      </p>
+      <div class="usage-scroll">
+      <table class="usage" data-role="usage-pages" aria-labelledby="usage-pages-title">
+      <thead>
+      <tr><th scope="col">Page</th><th scope="col">Since</th><th scope="col">Times read</th><th scope="col">A minute or more</th></tr>
+      </thead>
+      <tbody>
+      <tr data-kind="page:home" data-also="time:home:lt300 time:home:ge300"><td>Home page</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="page:gallery" data-also="time:gallery:lt300 time:gallery:ge300"><td>Gallery</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="page:download" data-also="time:download:lt300 time:download:ge300"><td>Download</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="page:download-jamovi" data-also="time:download-jamovi:lt300 time:download-jamovi:ge300"><td>Download: the jamovi module</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="page:start" data-also="time:start:lt300 time:start:ge300"><td>Getting started</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="page:start-jamovi" data-also="time:start-jamovi:lt300 time:start-jamovi:ge300"><td>Getting started in jamovi</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="page:docs" data-also="time:docs:lt300 time:docs:ge300"><td>User guide</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="page:learn" data-also="time:learn:lt300 time:learn:ge300"><td>Learn</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="page:learn-data" data-also="time:learn-data:lt300 time:learn-data:ge300"><td>Learn: the Data workspace</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="page:learn-charts" data-also="time:learn-charts:lt300 time:learn-charts:ge300"><td>Learn: the Charts workspace</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="page:learn-notebook" data-also="time:learn-notebook:lt300 time:learn-notebook:ge300"><td>Learn: the Notebook</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="page:learn-layouts" data-also="time:learn-layouts:lt300 time:learn-layouts:ge300"><td>Learn: Layouts</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="page:learn-choosing" data-also="time:learn-choosing:lt300 time:learn-choosing:ge300"><td>Learn: choosing a graph</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="page:learn-statistics" data-also="time:learn-statistics:lt300 time:learn-statistics:ge300"><td>Learn: the statistics</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="page:learn-repeated-measures" data-also="time:learn-repeated-measures:lt300 time:learn-repeated-measures:ge300"><td>Learn: repeated measures</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="page:learn-publication" data-also="time:learn-publication:lt300 time:learn-publication:ge300"><td>Learn: figures for publication</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="page:workshop" data-also="time:workshop:lt300 time:workshop:ge300"><td>Workshop</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="page:workshop-guide" data-also="time:workshop-guide:lt300 time:workshop-guide:ge300"><td>Workshop: the guide</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="page:workshop-1" data-also="time:workshop-1:lt300 time:workshop-1:ge300"><td>Workshop, part 1</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="page:workshop-2" data-also="time:workshop-2:lt300 time:workshop-2:ge300"><td>Workshop, part 2</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="page:workshop-3" data-also="time:workshop-3:lt300 time:workshop-3:ge300"><td>Workshop, part 3</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="page:workshop-4" data-also="time:workshop-4:lt300 time:workshop-4:ge300"><td>Workshop, part 4</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="page:workshop-5" data-also="time:workshop-5:lt300 time:workshop-5:ge300"><td>Workshop, part 5</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="page:workshop-6" data-also="time:workshop-6:lt300 time:workshop-6:ge300"><td>Workshop, part 6</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="page:workshop-7" data-also="time:workshop-7:lt300 time:workshop-7:ge300"><td>Workshop, part 7</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="page:about" data-also="time:about:lt300 time:about:ge300"><td>About (release notes live here)</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="page:support" data-also="time:support:lt300 time:support:ge300"><td>Contribute</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="page:accessibility" data-also="time:accessibility:lt300 time:accessibility:ge300"><td>Accessibility</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="page:usage" data-also="time:usage:lt300 time:usage:ge300"><td>This page</td><td>-</td><td>-</td><td>-</td></tr>
+      </tbody>
+      </table>
+      </div>
+
+      <!-- The Learn films: started = the play button first turned to
+           Pause, finished = it first turned to Replay; once each per page
+           view, on the Learn pages and in the home page's tour windows. -->
+      <h2 id="usage-tours-title">Learn films</h2>
+      <p>
+        Each film counts the times it was started and the times it played
+        to the end, on its Learn page and in the windows the home page
+        opens.
+      </p>
+      <div class="usage-scroll">
+      <table class="usage" data-role="usage-tours" aria-labelledby="usage-tours-title">
+      <thead>
+      <tr><th scope="col">Film</th><th scope="col">Since</th><th scope="col">Started</th><th scope="col">Played to the end</th></tr>
+      </thead>
+      <tbody>
+      <tr data-kind="tour:three-rules:start" data-also="tour:three-rules:done"><td>Pandion Plots in three rules (on the Learn page)</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="tour:data:start" data-also="tour:data:done"><td>The Data workspace tour</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="tour:charts:start" data-also="tour:charts:done"><td>The Charts workspace tour</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="tour:notebook:start" data-also="tour:notebook:done"><td>The Notebook tour</td><td>-</td><td>-</td><td>-</td></tr>
+      <tr data-kind="tour:layouts:start" data-also="tour:layouts:done"><td>The Layouts tour</td><td>-</td><td>-</td><td>-</td></tr>
+      </tbody>
+      </table>
+      </div>
       <!-- The history behind a row (Oct 2026): clicking a row opens this
            panel, and assets/usage.js draws it from GET /api/daily. -->
       <section class="usage-chart" id="usage-chart" data-role="usage-chart"

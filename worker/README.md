@@ -12,9 +12,14 @@ counters on. Read this before touching `worker/` or `wrangler.jsonc`.
 | Desktop installers and every jamovi .jmo | GitHub | `download_count` per release asset, read by usage.html straight from the public Releases API |
 | Their daily history (Oct 2026) | this Worker, hourly | the scheduled job reads those same public totals every hour and stores how much each grew; see "Daily history" below |
 | jamovi library installs | nobody | jamovi serves those; the module is not listed there yet |
+| Which pages of the site are read (Nov 2026) | this Worker | every page that loads `assets/site-nav.js` sends `POST /api/hit/page:<id>` when it loads (`gallery.html` is `page:gallery`, the home page `page:home`, the guide `page:docs`) |
+| How long a page stayed in front | this Worker | once per page, when it first goes into the background or away: `time:<id>:<band>`, the band being under 10 seconds, under a minute, under five minutes, or five minutes or more; nothing finer |
+| The Learn tours started and finished | this Worker | `tour:<id>:start` the first time a film's play button turns to Pause, `tour:<id>:done` the first time it turns to Replay (three-rules, data, charts, notebook, layouts); once each per page view |
 
 The app pings only when `psUpdateHosted()` is true (hostname is
-pandionplots.com) and `navigator.webdriver` is false. The desktop app,
+pandionplots.com) and `navigator.webdriver` is false; the site pings
+(`website/assets/site-nav.js`) use the same two gates, so the local build,
+a file:// copy and every headless run send nothing. The desktop app,
 the portable file, every file:// probe and every headless run send
 nothing, by construction. A ping carries no body, no cookie and no
 identifier; the Worker stores `(day, kind, count)` and nothing else.
@@ -42,9 +47,11 @@ says so in the chart and nothing else changes.
      "downloadsSince": "2026-10-01", "downloadsChecked": "2026-10-01T14:59:00.000Z",
      "downloads": {"Pandion-Plots-macOS.dmg": [["2026-10-02", 3], ...], ...}}
 
-A day with no row had zero. The usage page zero-fills from `hitsSince`
-(every counter started together) and bins by day, week (Monday start)
-or month, all in UTC days.
+A day with no row had zero. `hitsSinceOf` (Nov 2026) gives each kind its
+own first day, because the site pings began weeks after the launch
+counters: the usage page zero-fills a row from its own kind's first day
+(falling back to `hitsSince`) and bins by day, week (Monday start) or
+month, all in UTC days.
 
 GitHub keeps only a running total per file, so the Worker's scheduled job
 (`wrangler.jsonc` "triggers", minute 59 of every hour; `snapshotDownloads`
@@ -110,7 +117,13 @@ app under a routed pandionplots.com hostname and records the pings.
 ## The privacy promise, kept exactly
 
 Three sentences on the site say what is sent (index.html's "Private by
-design" pillar, about.html's "Free, private, open" paragraph, the About
-table's introduction) and support.html says "no tracking". The app's own
+design" pillar, about.html's "Free, private, open" paragraph, the usage
+page's introduction) and support.html says "no tracking". Since Nov 2026
+they also say that the site counts which of its pages are read and how
+long they stay open, in those four bands: still no data, no identifier,
+no cookie, and nothing that could follow one visitor from page to page.
+A new site page needs a row on usage.html (the Worker accepts any
+well-formed page id); a new tour needs a row there and a film frame
+attribute the script recognises. The app's own
 About dialog says the data is never sent and, only on the hosted copy,
 that one launch ping is. Keep those in step with this file.
