@@ -8,7 +8,8 @@
 //      app used N times since <date>"), filled
 //      from GET /api/counts and shown only once it has a number.
 //   3. [data-role="usage-table"]: the About table, filled from /api/counts
-//      (launches, the portable file) and from GitHub's Releases API (every
+//      (launches, the portable file, scans of the printed cards' QR code)
+//      and from GitHub's Releases API (every
 //      installer and .jmo, summed across releases, earliest asset date as
 //      "since"). Either source failing leaves dashes and shows the status
 //      line; the page never waits on them.
@@ -181,7 +182,8 @@
     var NOUNS = {
       'launch': { day: ['start', 'starts'], span: ['start', 'starts'] },
       'launch-day': { day: ['browser', 'browsers'], span: ['browser-day', 'browser-days'] },
-      'portable': { day: ['download click', 'download clicks'], span: ['download click', 'download clicks'] }
+      'portable': { day: ['download click', 'download clicks'], span: ['download click', 'download clicks'] },
+      'card': { day: ['scan', 'scans'], span: ['scan', 'scans'] }
     };
     var DOWNLOAD_NOUN = { day: ['download', 'downloads'], span: ['download', 'downloads'] };
     var PAGE_NOUN = { day: ['reading', 'readings'], span: ['reading', 'readings'] };

@@ -20,6 +20,10 @@
 //   GET  /api/daily        the same counts day by day, plus the daily
 //                          history of GitHub downloads, for the charts on
 //                          the usage page (Oct 2026).
+//   GET  /card             where the QR code on the printed cards points
+//                          (Nov 2026): one more scan on the "card" count,
+//                          then straight on to the home page. See
+//                          isScanCountable.
 //
 // And one scheduled job (wrangler.jsonc "triggers"): every hour it reads
 // GitHub's running download totals for the installers and the jamovi
@@ -79,6 +83,44 @@ function isCountable(req) {
   if (site && site !== "same-origin") return false;
   const mode = req.headers.get("Sec-Fetch-Mode");
   if (mode && mode !== "no-cors" && mode !== "cors" && mode !== "same-origin") return false;
+  const cf = req.cf || {};
+  if (cf.verifiedBotCategory) return false;
+  if (cf.botManagement && cf.botManagement.verifiedBot) return false;
+  return true;
+}
+
+// The printed cards (Nov 2026, Torry: how many people scan them?). The QR
+// code on the handout cards opens pandionplots.com/card; the Worker adds
+// one to the "card" count and redirects to the home page at once, so the
+// visitor lands where the card promised. "card" is deliberately not in
+// KINDS: no page can ping it, only opening the address counts.
+const CARD_PATH = /^\/card\/?$/i;
+
+// Was this a person opening the address? A scan is a phone handing the
+// address to its browser, not a page sending a ping, so the test differs
+// from isCountable. There is no Origin to check (nothing referred it), so
+// the Sec-Fetch headers are required rather than optional: every current
+// browser sends them on a page load, and scripts, crawlers and
+// address-guessing tools send none. The price is that a phone too old to
+// send them (Safari before 16.4) is redirected but not counted. Not counted
+// either, though each still gets the redirect: crawlers and link previews
+// (the User-Agent list, less the word "scan", which a QR app's own browser
+// may carry), a HEAD or any other method but GET, a browser loading the
+// address ahead of time in case it is opened (prefetch, prerender), the
+// address loaded inside another page or by a script, a click from this
+// site's own pages (not a scan), and Cloudflare's verified bots.
+const SCAN_BOT_UA = new RegExp(BOT_UA.source.replace("|scan|", "|"), "i");
+function isScanCountable(req) {
+  if (req.method !== "GET") return false;
+  if (req.headers.get("Sec-Fetch-Mode") !== "navigate") return false;
+  if (req.headers.get("Sec-Fetch-Dest") !== "document") return false;
+  const site = req.headers.get("Sec-Fetch-Site");
+  if (site === "same-origin" || site === "same-site") return false;
+  const ua = req.headers.get("User-Agent") || "";
+  if (!ua || SCAN_BOT_UA.test(ua)) return false;
+  const purpose = [req.headers.get("Sec-Purpose"), req.headers.get("Purpose"),
+    req.headers.get("X-Purpose"), req.headers.get("X-Moz")].join(" ");
+  if (/prefetch|prerender|preview/i.test(purpose)) return false;
   const cf = req.cf || {};
   if (cf.verifiedBotCategory) return false;
   if (cf.botManagement && cf.botManagement.verifiedBot) return false;
@@ -233,11 +275,24 @@ async function snapshotDownloads(env, scheduledTime, fetchImpl) {
   return { status: "recorded", downloads: added };
 }
 
-export { sameSite, isCountable, totalsFromReleases, downloadIncrements, snapshotDownloads };
+export { sameSite, isCountable, isScanCountable, totalsFromReleases, downloadIncrements, snapshotDownloads };
 
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const url = new URL(req.url);
+
+    if (CARD_PATH.test(url.pathname) && (req.method === "GET" || req.method === "HEAD")) {
+      if (db(env) && isScanCountable(req)) {
+        // The count is written after the redirect has gone out, so the
+        // scan never waits on the database; a failed write is an
+        // undercount, never an error page.
+        const write = bump(env, "card").catch(() => {});
+        if (ctx && ctx.waitUntil) ctx.waitUntil(write); else await write;
+      }
+      // A temporary redirect that nothing may keep: a browser that kept
+      // it would skip the count on the next scan.
+      return new Response(null, { status: 302, headers: Object.assign({ "Location": new URL("/", url).href }, NO_STORE) });
+    }
 
     if (url.pathname.startsWith("/api/hit/")) {
       if (req.method !== "POST") return new Response(null, { status: 405, headers: NO_STORE });
