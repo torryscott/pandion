@@ -74,9 +74,14 @@ addresses ever hit that limit, a token raises it:
 read-only access to public repositories. The Worker sends it when present.
 
 To see that the job is running: `curl -s https://pandionplots.com/api/daily`
-shows `downloadsChecked` within the last hour (it moves only when a check
-succeeds), and the Worker's logs show one `download history:` line per
-run. `worker/verify-worker.mjs` covers the arithmetic and, when sql.js is
+shows `downloadsLastRun`, the note every check leaves (its time, what it
+did, and GitHub's remaining allowance), and `downloadsChecked`, which
+moves only when a check succeeds. A note reading `github-403` with
+`remaining: 0` means GitHub is refusing Cloudflare's shared addresses:
+set the `GITHUB_TOKEN` secret. No note at all, an hour after a deploy,
+means the check never ran: look for the cron under the Worker's Settings,
+Trigger events, in the Cloudflare dashboard. The Worker's logs also show
+one `download history:` line per run. `worker/verify-worker.mjs` covers the arithmetic and, when sql.js is
 installed beside playwright, the whole job on real SQLite.
 
 ## Printed cards (Nov 2026)

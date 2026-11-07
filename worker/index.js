@@ -153,7 +153,9 @@ const NO_STORE = { "Cache-Control": "no-store" };
 //   downloads(day, asset, n)              the daily increases, by file name
 //   download_totals(release, asset, total) the last total seen per file
 //   meta(key, value)                      downloads_since (the baseline day),
-//                                         downloads_checked, downloads_etag
+//                                         downloads_checked, downloads_etag,
+//                                         downloads_last_run (what the last
+//                                         check did, failures included)
 const GH_RELEASES = "https://api.github.com/repos/torryscott/pandion/releases?per_page=100";
 // Installers and jamovi modules only. Update feeds (.yml), differential
 // update files (.blockmap) and the macOS auto-update archive (.zip) are
@@ -222,6 +224,13 @@ async function snapshotDownloads(env, scheduledTime, fetchImpl) {
   const setMeta = (key, value) => d.prepare(
     "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
   ).bind(key, value);
+  // Every run leaves a note of what it did, failures included, and
+  // /api/daily shows it: a check that GitHub refused writes nothing else,
+  // so without the note "refused", "failed" and "never ran" look the same
+  // from outside (the first deploy's first hour, Oct 2026).
+  let rate = null;
+  const lastRun = (status, extra) => setMeta("downloads_last_run",
+    JSON.stringify(Object.assign({ at: stamp, status }, rate || {}, extra || {})));
 
   // GitHub asks every API client to name itself. A conditional request
   // that comes back 304 (nothing changed) does not use up the rate limit,
@@ -235,15 +244,33 @@ async function snapshotDownloads(env, scheduledTime, fetchImpl) {
   if (env.GITHUB_TOKEN) headers["Authorization"] = "Bearer " + env.GITHUB_TOKEN;
   let res;
   try { res = await (fetchImpl || fetch)(GH_RELEASES, { headers }); }
-  catch (e) { return { status: "github-unreachable" }; }
+  catch (e) {
+    await lastRun("github-unreachable").run();
+    return { status: "github-unreachable" };
+  }
+  // GitHub's own account of the allowance this request drew on: the first
+  // thing to look at when checks keep being refused.
+  const remaining = res.headers.get("X-RateLimit-Remaining");
+  if (remaining !== null) {
+    rate = { remaining: Number(remaining), limit: Number(res.headers.get("X-RateLimit-Limit")) };
+    const reset = Number(res.headers.get("X-RateLimit-Reset"));
+    if (reset) rate.reset = new Date(reset * 1000).toISOString();
+  }
   if (res.status === 304) {
-    await setMeta("downloads_checked", stamp).run();
+    await d.batch([setMeta("downloads_checked", stamp), lastRun("unchanged")]);
     return { status: "unchanged" };
   }
-  if (!res.ok) return { status: "github-" + res.status };
+  if (!res.ok) {
+    const status = "github-" + res.status;
+    await lastRun(status, { authenticated: !!env.GITHUB_TOKEN }).run();
+    return { status };
+  }
   let releases;
-  try { releases = await res.json(); } catch (e) { return { status: "github-bad-json" }; }
-  if (!Array.isArray(releases)) return { status: "github-bad-json" };
+  try { releases = await res.json(); } catch (e) { releases = null; }
+  if (!Array.isArray(releases)) {
+    await lastRun("github-bad-json").run();
+    return { status: "github-bad-json" };
+  }
 
   const current = totalsFromReleases(releases);
   const upsertTotal = c => d.prepare(
@@ -257,7 +284,8 @@ async function snapshotDownloads(env, scheduledTime, fetchImpl) {
   // A batch is one transaction: the new totals and the increases they
   // imply are written together or not at all, so nothing is counted twice.
   if (!meta.downloads_since) {
-    await d.batch(current.map(upsertTotal).concat([setMeta("downloads_since", day)], tail));
+    await d.batch(current.map(upsertTotal).concat([setMeta("downloads_since", day)], tail,
+      [lastRun("baseline", { files: current.length })]));
     return { status: "baseline", files: current.length };
   }
   const previous = (await d.prepare("SELECT release, asset, total FROM download_totals").all()).results || [];
@@ -271,7 +299,7 @@ async function snapshotDownloads(env, scheduledTime, fetchImpl) {
       "ON CONFLICT(day, asset) DO UPDATE SET n = n + excluded.n"
     ).bind(day, asset, increments[asset]));
   }
-  await d.batch(writes.concat(tail));
+  await d.batch(writes.concat(tail, [lastRun("recorded", { downloads: added })]));
   return { status: "recorded", downloads: added };
 }
 
@@ -343,7 +371,7 @@ export default {
       try {
         dlRows = (await d.prepare("SELECT day, asset, n FROM downloads ORDER BY day, asset").all()).results || [];
         dlMeta = (await d.prepare(
-          "SELECT key, value FROM meta WHERE key IN ('downloads_since', 'downloads_checked')"
+          "SELECT key, value FROM meta WHERE key IN ('downloads_since', 'downloads_checked', 'downloads_last_run')"
         ).all()).results || [];
       } catch (e) { dlRows = []; dlMeta = []; }
       const meta = {};
@@ -367,6 +395,7 @@ export default {
         hits,
         downloadsSince: meta.downloads_since || null,
         downloadsChecked: meta.downloads_checked || null,
+        downloadsLastRun: (() => { try { return JSON.parse(meta.downloads_last_run); } catch (e) { return null; } })(),
         downloads,
       }, { headers: Object.assign({ "Cache-Control": "public, max-age=300" }, cors) });
     }

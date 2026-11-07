@@ -22,7 +22,9 @@
 //  11. the hourly job end to end on real SQLite (sql.js, when installed
 //      beside playwright; skipped otherwise): baseline, growth, a 304 that
 //      costs nothing, a new release and a reset, GitHub refusing, the
-//      scheduled() entry point itself, and what /api/daily then reports.
+//      scheduled() entry point itself, and what /api/daily then reports,
+//      including the note every run leaves (refusals and GitHub's rate-limit
+//      state too, so a stalled history can be diagnosed from outside).
 //
 // The site pings (Nov 2026):
 //  12. page:<id>, time:<id>:<band> and tour:<id>:start|done count; the
@@ -234,6 +236,8 @@ const human = { 'Origin': 'https://pandionplots.com', 'User-Agent': CHROME, 'Sec
         let r = await snapshotDownloads(env, at('2026-10-01T10:59:00Z'), gh);
         ok(r.status === 'baseline' && r.files === 3 && rows('SELECT COUNT(*) FROM downloads')[0][0] === 0, 'the first check notes the totals and records no downloads (' + JSON.stringify(r) + ')');
         ok(rows("SELECT value FROM meta WHERE key = 'downloads_since'")[0][0] === '2026-10-01', 'and marks the day the history starts');
+        const note = () => JSON.parse(rows("SELECT value FROM meta WHERE key = 'downloads_last_run'")[0][0]);
+        ok(note().status === 'baseline' && note().files === 3 && note().at === '2026-10-01T10:59:00.000Z', 'and leaves a note of what it did (' + JSON.stringify(note()) + ')');
         ok(!sent[0]['If-None-Match'] && /pandionplots/.test(sent[0]['User-Agent']) && !sent[0].Authorization, 'it names itself to GitHub and sends no token it does not have');
 
         reply = json([rel('v3.1.3', { 'Pandion-Plots-macOS.dmg': 103, 'pandion-win-x64.jmo': 31, 'latest.yml': 1500 }), rel('v3.1.0', { 'Pandion-Plots-macOS.dmg': 21 })], 'W/"b"');
@@ -246,17 +250,22 @@ const human = { 'Origin': 'https://pandionplots.com', 'User-Agent': CHROME, 'Sec
         reply = () => new Response(null, { status: 304 });
         r = await snapshotDownloads(env, at('2026-10-01T12:59:00Z'), gh);
         ok(r.status === 'unchanged' && sent[2]['If-None-Match'] === 'W/"b"' && rows('SELECT SUM(n) FROM downloads')[0][0] === 5, 'an unchanged answer (304) records nothing');
+        ok(note().status === 'unchanged', 'but its note says the check ran (' + JSON.stringify(note()) + ')');
 
         reply = json([rel('v3.2.0', { 'Pandion-Plots-macOS.dmg': 2 }), rel('v3.1.3', { 'Pandion-Plots-macOS.dmg': 103, 'pandion-win-x64.jmo': 0 }), rel('v3.1.0', { 'Pandion-Plots-macOS.dmg': 21 })], 'W/"c"');
         r = await snapshotDownloads(env, at('2026-10-02T00:59:00Z'), gh);
         ok(r.status === 'recorded' && r.downloads === 2, 'a new release counts from zero, and a re-uploaded file that reads 0 adds nothing (' + JSON.stringify(r) + ')');
         ok(JSON.stringify(rows("SELECT n FROM downloads WHERE day = '2026-10-02'")) === '[[2]]', 'on the new day');
 
-        reply = () => new Response('{"message":"API rate limit exceeded"}', { status: 403 });
+        reply = () => new Response('{"message":"API rate limit exceeded"}', { status: 403,
+            headers: { 'X-RateLimit-Limit': '60', 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': String(Date.parse('2026-10-02T02:30:00Z') / 1000) } });
         const before = JSON.stringify(rows('SELECT * FROM downloads')) + JSON.stringify(rows('SELECT * FROM download_totals'));
         r = await snapshotDownloads(env, at('2026-10-02T01:59:00Z'), gh);
         ok(r.status === 'github-403' && before === JSON.stringify(rows('SELECT * FROM downloads')) + JSON.stringify(rows('SELECT * FROM download_totals')),
            'GitHub refusing changes nothing; the next hour catches up');
+        const refused = note();
+        ok(refused.status === 'github-403' && refused.remaining === 0 && refused.limit === 60 && refused.reset === '2026-10-02T02:30:00.000Z' && refused.authenticated === false,
+           'a refusal is noted with GitHub\'s allowance and whether a token was sent (' + JSON.stringify(refused) + ')');
 
         // The real entry point, with fetch and a token as Cloudflare would provide them.
         const realFetch = globalThis.fetch;
@@ -274,6 +283,7 @@ const human = { 'Origin': 'https://pandionplots.com', 'User-Agent': CHROME, 'Sec
         const res = await worker.fetch(new Request('https://pandionplots.com/api/daily'), env);
         const j = await res.json();
         ok(j.downloadsSince === '2026-10-01' && j.downloadsChecked === '2026-10-02T02:59:00.000Z', '/api/daily reports when the history starts and the last check (' + j.downloadsSince + ', ' + j.downloadsChecked + ')');
+        ok(j.downloadsLastRun && j.downloadsLastRun.status === 'recorded' && j.downloadsLastRun.downloads === 4, 'and the last run\'s note (' + JSON.stringify(j.downloadsLastRun) + ')');
         ok(JSON.stringify(j.downloads['Pandion-Plots-macOS.dmg']) === '[["2026-10-01",4],["2026-10-02",5]]' && JSON.stringify(j.downloads['pandion-win-x64.jmo']) === '[["2026-10-01",1],["2026-10-02",1]]',
            'and each file day by day (' + JSON.stringify(j.downloads) + ')');
         // the counters' own table, on the same database
