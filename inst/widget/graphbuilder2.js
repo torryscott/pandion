@@ -9180,10 +9180,75 @@
         // widget re-mount: the fresh applySize() resets to
         // inchesW * inchesH, and the dragged element (whose offset is
         // persisted) now sits past the canvas edge.
+        // A significance bracket rides its spanned bars: its spine is
+        // derived from their ceiling on every draw. When those bars sit
+        // OFF the value axis (a Min or Max override, or a keystroke on the
+        // way to one, pushed the data out of range) the bracket is drawn
+        // far outside the plot by the AXIS, not by the user, so it must
+        // not grow the canvas (Nov 7 2026, Torry's standalone report: a
+        // Max typed as 1-6-0 drew the bracket 46,000 px up and the chart
+        // was parked that far down). A bracket the user dragged above the
+        // plot keeps its bars on the axis and still earns its room.
+        function _gb2OffAxisBracket(el) {
+            try {
+                // The element may be the bracket group itself or a part
+                // of it swept on its own: the label text is registered
+                // as an editable text and measured by that loop, so the
+                // owning annotation is resolved through the ancestors.
+                var id = null, n = el, hops = 0;
+                while (n && n.getAttribute && hops < 8) {
+                    id = n.getAttribute("data-ann-id");
+                    if (id) break;
+                    n = n.parentNode; hops++;
+                }
+                if (!id) return false;
+                var ann = findAnnotation(id);
+                if (!ann || ann.kind !== "bracket") return false;
+                var anchored = (ann.anchorLeftCat && ann.anchorRightCat) ||
+                    _isMainEffectAnn(ann);
+                if (!anchored) return false;
+                if (typeof window.__gb2_valAxis !== "function") return false;
+                var va = window.__gb2_valAxis();
+                if (!va || typeof va.toPxVal !== "function") return false;
+                var c = _cmpCeilPx(_cmpVisibleCells(),
+                    Math.min(ann.x, ann.x2), Math.max(ann.x, ann.x2), va);
+                if (!isFinite(c)) return false;
+                var p0 = va.toPxVal(va.yMin), p1 = va.toPxVal(va.yMax);
+                if (!isFinite(p0) || !isFinite(p1)) return false;
+                var lo = Math.min(p0, p1) - 0.5, hi = Math.max(p0, p1) + 0.5;
+                return c < lo || c > hi;
+            } catch (_eOab) { return false; }
+        }
         function _growCanvasForAllElements() {
-            // Editable text (titles, ticks, labels, etc.).
+            // The upward growth is RECOMPUTED from zero on every sweep
+            // (Nov 7 2026). _topGrow used to be grow-only within a mount,
+            // reset only by a full render: once something had pushed the
+            // chart down, a redraw could never bring it back, so the
+            // keystroke case above left the chart 46,000 px down after
+            // the final digit landed. Dropping the shift and re-measuring
+            // from the natural height keeps a real drag above the plot
+            // grown (it measures the same on every sweep) and lets the
+            // canvas come back the moment nothing needs the room. Only
+            // runs when a shift exists, so an ordinary redraw is
+            // byte-identical to before.
+            if (_topGrow > 0) {
+                _topGrow = 0;
+                try {
+                    var _hNat = inchesH * PX_PER_INCH + (M.extraBottomPx || 0);
+                    if (isFinite(_hNat) && _hNat > 0) {
+                        svg.setAttribute("height", _hNat);
+                        svg.__gb2_expectedH = _hNat;
+                        svg.__gb2_sizeWriteAt = Date.now();
+                        _gb2SyncSizeStyle(undefined, _hNat);
+                    }
+                } catch (_eTg) {}
+                _updateBgCanvas();
+            }
+            // Editable text (titles, ticks, labels, etc.). A bracket's
+            // label is one of these, so it takes the off-axis guard too.
             for (var id in editableElsByDragId) {
                 if (Object.prototype.hasOwnProperty.call(editableElsByDragId, id)) {
+                    if (_gb2OffAxisBracket(editableElsByDragId[id])) continue;
                     _ensureChartRoomFor(editableElsByDragId[id]);
                 }
             }
@@ -9192,11 +9257,17 @@
             try {
                 if (typeof annotationsGroup !== "undefined" && annotationsGroup) {
                     var c = annotationsGroup.children;
-                    for (var i = 0; i < c.length; i++) _ensureChartRoomFor(c[i]);
+                    for (var i = 0; i < c.length; i++) {
+                        if (_gb2OffAxisBracket(c[i])) continue;
+                        _ensureChartRoomFor(c[i]);
+                    }
                 }
                 if (typeof annotationsBackGroup !== "undefined" && annotationsBackGroup) {
                     var cb = annotationsBackGroup.children;
-                    for (var j = 0; j < cb.length; j++) _ensureChartRoomFor(cb[j]);
+                    for (var j = 0; j < cb.length; j++) {
+                        if (_gb2OffAxisBracket(cb[j])) continue;
+                        _ensureChartRoomFor(cb[j]);
+                    }
                 }
             } catch (e) {}
             try {
@@ -9305,13 +9376,23 @@
                 var CHART_TOP_PADDING = 8;
                 if (elTop < -MAX_TOP_BG_PAD + CHART_TOP_PADDING) {
                     var deltaGrow = -elTop - MAX_TOP_BG_PAD + CHART_TOP_PADDING;
-                    _topGrow += deltaGrow;
-                    // SVG must grow by the same amount so the shifted
-                    // bars/axes don't get clipped at the bottom.
-                    var grownH = (newH !== H ? newH : H) + deltaGrow;
-                    svg.setAttribute("height", grownH);
-                    try { svg.__gb2_expectedH = grownH; svg.__gb2_sizeWriteAt = Date.now(); _gb2SyncSizeStyle(undefined, grownH); } catch (_eXg) {}
-                    grew = true;
+                    // Capped like the right and bottom edges (Nov 7 2026):
+                    // the canvas never exceeds _AUTO_EXPAND_MAX_H in all,
+                    // so no position can park the chart thousands of px
+                    // down. Past the cap the element draws above the
+                    // canvas, which overflow:visible still shows.
+                    var _hFrom = (newH !== H ? newH : H);
+                    var _topRoom = _AUTO_EXPAND_MAX_H - _hFrom;
+                    if (deltaGrow > _topRoom) deltaGrow = _topRoom;
+                    if (deltaGrow > 0) {
+                        _topGrow += deltaGrow;
+                        // SVG must grow by the same amount so the shifted
+                        // bars/axes don't get clipped at the bottom.
+                        var grownH = _hFrom + deltaGrow;
+                        svg.setAttribute("height", grownH);
+                        try { svg.__gb2_expectedH = grownH; svg.__gb2_sizeWriteAt = Date.now(); _gb2SyncSizeStyle(undefined, grownH); } catch (_eXg) {}
+                        grew = true;
+                    }
                 }
             }
             if (grew) _updateBgCanvas();
