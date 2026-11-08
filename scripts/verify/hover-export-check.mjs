@@ -188,8 +188,14 @@ async function runCase(fixture, sel, label, strategy) {
                 if (b[k] !== a[k]) changed.push([i, k, b[k], a[k]]);
         }
 
-        // 1. nothing the hover did may survive into the clone
-        const norm = v => (v === undefined ? ' ' : String(v).replace(/\s+/g, ''));
+        // 1. nothing the hover did may survive into the clone. The clone is
+        //    compared in its EXPORT form: the harvest rewrites a transparent
+        //    fill or stroke to "none" on purpose (PowerPoint's SVG importer
+        //    paints "transparent" opaque black, see _gb2ExportSafePaints), so
+        //    a hit element that rested at transparent and comes back as none
+        //    is clean, while a hover color that survived is still a leak.
+        const norm = v => (v === undefined ? ' '
+            : String(v).replace(/\s+/g, '').replace(/^transparent$/i, 'none'));
         const leaks = [];
         for (const [i, k, b] of changed) {
             if (!clone[i]) continue;              // element stripped outright, cannot leak

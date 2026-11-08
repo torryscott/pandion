@@ -51,7 +51,7 @@ overlay-reload-check overlay-restore-check pane-debusy-check panel-reveal-check 
 pane-scroll-cue-check perf-check picker-persistence-check pinboard-check polish-check preferences-check \
  title-squeeze-check \
 notebook-record-check notebook-pages-check notebook-undo-check notebook-drift-check \
-  guide-formulas-check keep-fidelity-check copyformat-check \
+  guide-formulas-check keep-fidelity-check copyformat-check export-paint-check \
 range-badge-drag-check \
 probed-bugs-check provenance-check rail-icons-check punchlist-check swatch-row-check reachability-check recents-check reshape-check \
 reflow-accessibility-check \

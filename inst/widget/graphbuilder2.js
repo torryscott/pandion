@@ -1404,6 +1404,65 @@
         el.textContent = safe;
         return safe;
     }
+    // PowerPoint-safe paints (Nov 2026, Torry's deck). "transparent" and
+    // rgba() are CSS colors, not SVG 1.1 paint values. Browsers and librsvg
+    // accept both, so the live chart and the PDF export are right, but
+    // PowerPoint's SVG importer paints each one as OPAQUE BLACK once a saved
+    // deck is reopened: every error bar came back as a solid black box the
+    // size of its invisible click target, and a bracket as a fat black
+    // stroke. A static file has no clicks, so a transparent fill or stroke
+    // becomes "none" (a gradient stop keeps a color and zeroes its opacity
+    // instead), and an rgba() paint becomes its hex color with the alpha
+    // folded into the matching *-opacity attribute (multiplied, should one be
+    // set already). Attributes only: the engine never writes these paints
+    // through inline styles. Runs on EXPORT clones only - the chart export
+    // harvest here, and the standalone's layout export root through
+    // GraphBuilder2.exportSafePaints - never on the standalone's chart
+    // snapshot, whose bytes the Notebook's drift verdict compares. Probe:
+    // standalone/verify/export-paint-check.mjs.
+    function _gb2ExportSafePaints(root) {
+        if (!root || typeof root.getElementsByTagName !== "function") return root;
+        var attrs = ["fill", "stroke", "stop-color"];
+        var opac = { fill: "fill-opacity", stroke: "stroke-opacity",
+                     "stop-color": "stop-opacity" };
+        var rgb = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)$/i;
+        var hex = function (n) {
+            var h = Math.max(0, Math.min(255, Math.round(parseFloat(n)))).toString(16);
+            return h.length < 2 ? "0" + h : h;
+        };
+        var nodes = [root], all = root.getElementsByTagName("*");
+        for (var i = 0; i < all.length; i++) nodes.push(all[i]);
+        for (var j = 0; j < nodes.length; j++) {
+            var el = nodes[j];
+            if (!el || typeof el.getAttribute !== "function") continue;
+            for (var a = 0; a < attrs.length; a++) {
+                var name = attrs[a];
+                var v = el.getAttribute(name);
+                if (v === null) continue;
+                var t = String(v).trim();
+                if (/^transparent$/i.test(t)) {
+                    if (name === "stop-color") {
+                        el.setAttribute(name, "#000000");
+                        el.setAttribute("stop-opacity", "0");
+                    } else {
+                        el.setAttribute(name, "none");
+                    }
+                    continue;
+                }
+                var m = rgb.exec(t);
+                if (!m) continue;
+                el.setAttribute(name, "#" + hex(m[1]) + hex(m[2]) + hex(m[3]));
+                if (m[4] === undefined) continue;
+                var alpha = parseFloat(m[4]);
+                if (!isFinite(alpha) || alpha >= 1) continue;
+                var oName = opac[name];
+                var oVal = parseFloat(el.getAttribute(oName));
+                if (!isFinite(oVal)) oVal = 1;
+                el.setAttribute(oName, String(Math.max(0, Math.min(1, oVal * Math.max(0, alpha)))));
+            }
+        }
+        return root;
+    }
     function _gb2PrepareSvgForExport(copy) {
         // Mutate an export clone only. Live data-* values still identify
         // exact groups/facets for interactions and statistical selection.
@@ -11929,6 +11988,9 @@
                     } catch (_ee) {}
                 }
             } catch (_eEmptyStyle) {}
+            // PowerPoint-safe paints: see _gb2ExportSafePaints (module scope,
+            // shared with the standalone's layout export).
+            try { _gb2ExportSafePaints(copy); } catch (_ePptPaint) {}
             // The large-N scatter fast layer is a canvas in a
             // foreignObject: canvas pixels survive neither cloneNode
             // nor XMLSerializer, so swap it for a high-res raster
@@ -109832,5 +109894,6 @@
 
     root.GraphBuilder2 = { render: render,
         xmlSafeText: _gb2XmlSafeText,
-        prepareSvgForExport: _gb2PrepareSvgForExport };
+        prepareSvgForExport: _gb2PrepareSvgForExport,
+        exportSafePaints: _gb2ExportSafePaints };
 })(typeof window !== "undefined" ? window : this);

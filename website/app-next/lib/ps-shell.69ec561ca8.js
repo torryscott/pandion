@@ -23388,6 +23388,7 @@
   var LAYOUT_SEL = [];
   var LAYOUT_ACTIVE_ID = null;
   var LAY_DRAG = null;
+  var LAY_PAGE_DRAG = null;
   var LAY_RESIZE_TIMER = null;
   var LAY_PRESETS = {
     // Screen-ish presets are defined on ROUND INCHES (Torry's ruling,
@@ -27448,6 +27449,294 @@
     layClampAllItems();
     persist(); renderLayout();
   }
+  // ---- page edges (Nov 2026, Torry's ask: "handles on the very edge of
+  // the layout, to pull it in to the size of your graphs"). The presets,
+  // the typed size and the orientation flip all SCALE the arrangement onto
+  // the new page (layRefitToPage). A page edge in hand does the other
+  // thing: it moves that edge only. Items keep their size and their place
+  // (a left or top edge re-bases every item by the same amount, so nothing
+  // moves on the paper), the edge stops at the outermost item, so nothing
+  // is ever cropped, and it snaps to the item plus the margin, which is
+  // what "the size of your graphs" means on a page with an inset. Fit page
+  // to content is the same operation in one click. The whole gesture lives
+  // in integer pixels, the model's unit, so layNormalizeLayout's rounding
+  // on every layPage() read is a no-op mid-drag.
+  function layContentBounds() {
+    var items = layItems(), p = layPage();
+    var lo = Infinity, ln = Infinity, hi = -Infinity, hn = -Infinity;
+    for (var i = 0; i < items.length; i++) {
+      var r = layItemRect(items[i], p);
+      if (!(r.w > 0) || !(r.h > 0)) continue;
+      if (r.x < lo) lo = r.x;
+      if (r.y < ln) ln = r.y;
+      if (r.right > hi) hi = r.right;
+      if (r.bottom > hn) hn = r.bottom;
+    }
+    if (!isFinite(lo) || !isFinite(ln)) return null;
+    return { x: lo, y: ln, w: hi - lo, h: hn - ln, right: hi, bottom: hn };
+  }
+  function layShiftAllItems(dx, dy) {
+    if (!dx && !dy) return;
+    var items = layItems();
+    for (var i = 0; i < items.length; i++) {
+      items[i].x = (Number(items[i].x) || 0) + dx;
+      items[i].y = (Number(items[i].y) || 0) + dy;
+    }
+  }
+  function layFitPageToContent() {
+    var c = activeChart();
+    if (!isLayoutTab(c)) return false;
+    var p = layPage(), cb = layContentBounds();
+    if (!cb) {
+      layAnnounce("There is nothing on the page to fit it to.");
+      showToast("Add a chart, text, or an image first; the page fits to " +
+        "what is on it.");
+      return false;
+    }
+    var m = p.margin;
+    var w = Math.round(layClamp(cb.w + 2 * m, 320, LAY_PAGE_MAX));
+    var h = Math.round(layClamp(cb.h + 2 * m, 240, LAY_PAGE_MAX));
+    // The content sits inside the margin; when the page minimum leaves
+    // more room than that, it is centred in the room.
+    var ox = Math.max(0, Math.round((w - cb.w) / 2));
+    var oy = Math.max(0, Math.round((h - cb.h) / 2));
+    var shiftX = ox - cb.x, shiftY = oy - cb.y;
+    if (p.w === w && p.h === h &&
+        Math.abs(shiftX) < 0.5 && Math.abs(shiftY) < 0.5) {
+      layAnnounce("The page already fits its content.");
+      showToast("The page already fits its content.");
+      return false;
+    }
+    laySnapshot("page size");
+    p.w = w; p.h = h; p.preset = "custom";
+    layShiftAllItems(shiftX, shiftY);
+    layNormalizeLayout(c);
+    layClampAllItems();
+    persist(); renderLayout();
+    layAnnounce("Page fitted to its content: " + pxToUnit(p.w) + " by " +
+      pxToUnit(p.h) + " " + unitLabel() + ".");
+    return true;
+  }
+  function layPageEdgePointerDown(e) {
+    if (e.button !== 0) return;
+    var grip = e.target && e.target.closest ? e.target.closest("[data-edge]") : null;
+    if (!grip) return;
+    var c = activeChart();
+    if (!isLayoutTab(c) || LAY_DRAG) return;
+    // preventDefault keeps the press from focusing the viewport, whose
+    // focus handler would select the active item; a grip is page chrome.
+    e.preventDefault();
+    e.stopPropagation();
+    if (LAY_PAGE_DRAG) layPageEdgeTeardown();
+    layNormalizeLayout(c);
+    var p = layPage(), items = layItems(), origins = [];
+    for (var i = 0; i < items.length; i++)
+      origins.push({ item: items[i], x: Number(items[i].x) || 0,
+                     y: Number(items[i].y) || 0 });
+    // The stage is centred by margin auto, so a width change on its own
+    // would move BOTH edges by half and the grip would run at half the
+    // pointer's speed. Pinning the stage's used margins keeps the edge
+    // that is not in hand still and the one in hand under the pointer;
+    // release lets the page settle back to centre.
+    var stage = el("ps-lstage"), vp = el("ps-lviewport");
+    var cs = vp ? window.getComputedStyle(vp) : null;
+    var padL = cs ? parseFloat(cs.paddingLeft) || 0 : 0;
+    var padT = cs ? parseFloat(cs.paddingTop) || 0 : 0;
+    LAY_PAGE_DRAG = {
+      edge: grip.getAttribute("data-edge") || "", grip: grip, docId: c.id,
+      sx: e.clientX, sy: e.clientY, zoom: layZoom(),
+      w0: p.w, h0: p.h, origins: origins, content: layContentBounds(),
+      ml0: stage ? stage.offsetLeft - padL : 0,
+      mt0: stage ? stage.offsetTop - padT : 0,
+      cursor0: document.body.style.cursor || "",
+      moved: false, before: laySnapState(c)
+    };
+    document.addEventListener("pointermove", layPageEdgeMove);
+    document.addEventListener("pointerup", layPageEdgeUp);
+    document.addEventListener("pointercancel", layPageEdgeCancelEvent);
+  }
+  function layPageEdgeMove(e) {
+    var d = LAY_PAGE_DRAG;
+    if (!d) return;
+    var live = activeChart();
+    if (appWorkspace() !== "layout" || !isLayoutTab(live) ||
+        live.id !== d.docId) { layCancelPageEdgeDrag(); return; }
+    var z = d.zoom;
+    var dx = (e.clientX - d.sx) / z, dy = (e.clientY - d.sy) / z;
+    if (!d.moved && Math.abs(dx) < 3 / z && Math.abs(dy) < 3 / z) return;
+    if (!d.moved) {
+      d.moved = true;
+      d.grip.classList.add("ps-lpage-edge-active");
+      var st0 = el("ps-lstage");
+      if (st0) st0.classList.add("ps-lstage-resizing");
+      // The pointer leaves the grip at once; the body carries its cursor.
+      try { document.body.style.cursor = window.getComputedStyle(d.grip).cursor || ""; }
+      catch (ignore) {}
+    }
+    var p = layPage(), cb = d.content, m = p.margin, snapT = 8 / z;
+    var ed = d.edge, gx = null, gy = null;
+    var newW = d.w0, newH = d.h0, shiftX = 0, shiftY = 0;
+    if (ed.indexOf("e") !== -1) {
+      newW = d.w0 + dx;
+      var floorW = Math.max(320, cb ? Math.ceil(cb.right) : 0);
+      var wantW = cb ? cb.right + m : null;
+      if (wantW != null && wantW >= floorW && wantW <= LAY_PAGE_MAX &&
+          Math.abs(newW - wantW) <= snapT) { newW = wantW; gx = cb.right; }
+      newW = Math.round(layClamp(newW, floorW, LAY_PAGE_MAX));
+    }
+    if (ed.indexOf("w") !== -1) {
+      // The left edge moves by s (inward when positive); the width loses s
+      // and every item re-bases by -s, so nothing moves on the paper.
+      var s = dx;
+      var maxS = d.w0 - 320;
+      if (cb) maxS = Math.min(maxS, Math.floor(cb.x));
+      var minS = d.w0 - LAY_PAGE_MAX;
+      var wantS = cb ? cb.x - m : null;
+      if (wantS != null && wantS <= maxS && wantS >= minS &&
+          Math.abs(s - wantS) <= snapT) { s = wantS; gx = m; }
+      s = Math.round(layClamp(s, minS, maxS));
+      newW = d.w0 - s; shiftX = -s;
+    }
+    if (ed.indexOf("s") !== -1) {
+      newH = d.h0 + dy;
+      var floorH = Math.max(240, cb ? Math.ceil(cb.bottom) : 0);
+      var wantH = cb ? cb.bottom + m : null;
+      if (wantH != null && wantH >= floorH && wantH <= LAY_PAGE_MAX &&
+          Math.abs(newH - wantH) <= snapT) { newH = wantH; gy = cb.bottom; }
+      newH = Math.round(layClamp(newH, floorH, LAY_PAGE_MAX));
+    }
+    if (ed.indexOf("n") !== -1) {
+      var t = dy;
+      var maxT = d.h0 - 240;
+      if (cb) maxT = Math.min(maxT, Math.floor(cb.y));
+      var minT = d.h0 - LAY_PAGE_MAX;
+      var wantT = cb ? cb.y - m : null;
+      if (wantT != null && wantT <= maxT && wantT >= minT &&
+          Math.abs(t - wantT) <= snapT) { t = wantT; gy = m; }
+      t = Math.round(layClamp(t, minT, maxT));
+      newH = d.h0 - t; shiftY = -t;
+    }
+    p.w = newW; p.h = newH;
+    for (var i = 0; i < d.origins.length; i++) {
+      d.origins[i].item.x = d.origins[i].x + shiftX;
+      d.origins[i].item.y = d.origins[i].y + shiftY;
+    }
+    layPageEdgeApplyLive(d, gx, gy);
+    e.preventDefault();
+  }
+  // The live frame: canvas and stage take the new size, the stage's pinned
+  // margins hold the far edge still, re-based items move with the paper,
+  // the margin guide and the rail's fields follow. No rebuild mid-gesture.
+  function layPageEdgeApplyLive(d, gx, gy) {
+    var canvas = el("ps-lcanvas"), stage = el("ps-lstage");
+    var p = layPage(), z = d.zoom;
+    if (canvas) {
+      canvas.style.width = p.w + "px";
+      canvas.style.height = p.h + "px";
+    }
+    if (stage) {
+      stage.style.width = Math.ceil(p.w * z) + "px";
+      stage.style.height = Math.ceil(p.h * z) + "px";
+      stage.style.marginLeft = (d.ml0 + (d.edge.indexOf("w") !== -1
+        ? (d.w0 - p.w) * z : 0)) + "px";
+      stage.style.marginTop = (d.mt0 + (d.edge.indexOf("n") !== -1
+        ? (d.h0 - p.h) * z : 0)) + "px";
+    }
+    laySyncMarginGuide();
+    for (var i = 0; i < d.origins.length; i++) {
+      var it = d.origins[i].item;
+      var node = canvas && canvas.querySelector(
+        '.ps-litem[data-item-id="' + it.id + '"]');
+      if (node) { node.style.left = it.x + "px"; node.style.top = it.y + "px"; }
+    }
+    layShowGuides(gx, gy);
+    var wf = el("ps-lpage-w"), hf = el("ps-lpage-h");
+    if (wf && document.activeElement !== wf) wf.value = pxToUnit(p.w);
+    if (hf && document.activeElement !== hf) hf.value = pxToUnit(p.h);
+    syncLayoutShellStatus();
+  }
+  // After release the pinned margins come off and the page re-centres; a
+  // short glide covers the move so the settle reads as the page coming to
+  // rest, not a jump. Position only: a fit zoom re-sizes in the same frame.
+  function layPageEdgeSettle(stage) {
+    if (!stage) return;
+    var fromL = stage.offsetLeft, fromT = stage.offsetTop;
+    stage.style.marginLeft = ""; stage.style.marginTop = "";
+    var dx = fromL - stage.offsetLeft, dy = fromT - stage.offsetTop;
+    if (!dx && !dy) return;
+    var reduced = false;
+    try {
+      reduced = !!(window.matchMedia &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    } catch (ignore) {}
+    if (reduced) return;
+    stage.style.transition = "none";
+    stage.style.transform = "translate(" + dx + "px," + dy + "px)";
+    void stage.offsetWidth;
+    stage.style.transition = "transform 0.18s ease-out";
+    stage.style.transform = "";
+    window.setTimeout(function () { stage.style.transition = ""; }, 240);
+  }
+  function layPageEdgeTeardown() {
+    var d = LAY_PAGE_DRAG;
+    LAY_PAGE_DRAG = null;
+    document.removeEventListener("pointermove", layPageEdgeMove);
+    document.removeEventListener("pointerup", layPageEdgeUp);
+    document.removeEventListener("pointercancel", layPageEdgeCancelEvent);
+    if (d) document.body.style.cursor = d.cursor0 || "";
+    layHideGuides();
+    var stage = el("ps-lstage");
+    if (stage) stage.classList.remove("ps-lstage-resizing");
+    if (d && d.grip) d.grip.classList.remove("ps-lpage-edge-active");
+  }
+  function layPageEdgeUp() {
+    var d = LAY_PAGE_DRAG;
+    if (!d) return;
+    layPageEdgeTeardown();
+    var stage = el("ps-lstage"), c = activeChart();
+    if (!d.moved || !isLayoutTab(c) || c.id !== d.docId) {
+      // A press that never travelled is not a resize: nothing changes and
+      // no history entry lands.
+      if (stage) { stage.style.marginLeft = ""; stage.style.marginTop = ""; }
+      return;
+    }
+    var p = layPage();
+    // The floor was computed from the content at the press; after the
+    // re-base the content is where it is, so the page is held at or past
+    // it once more before anything is clamped.
+    var cb = layContentBounds();
+    if (cb) {
+      p.w = Math.max(p.w, Math.min(LAY_PAGE_MAX, Math.ceil(cb.right)));
+      p.h = Math.max(p.h, Math.min(LAY_PAGE_MAX, Math.ceil(cb.bottom)));
+    }
+    p.preset = "custom";
+    layNormalizeLayout(c);
+    var h = layHist();
+    if (h && d.before) {
+      h.undo.push({ label: "page size", state: d.before });
+      if (h.undo.length > LAYOUT_HIST_LIMIT) h.undo.shift();
+      h.redo.length = 0;
+      LAY_COALESCE = null;
+    }
+    layClampAllItems();
+    persist(); renderLayout();
+    layPageEdgeSettle(stage);
+    layAnnounce("Page is now " + pxToUnit(p.w) + " by " + pxToUnit(p.h) +
+      " " + unitLabel() + ".");
+  }
+  function layPageEdgeCancelEvent() { layCancelPageEdgeDrag(); }
+  // Escape, a cancelled pointer, or the layout leaving the screen mid-drag:
+  // the page and every item go back to the press-time state, no history.
+  function layCancelPageEdgeDrag() {
+    var d = LAY_PAGE_DRAG;
+    if (!d) return false;
+    layPageEdgeTeardown();
+    var stage = el("ps-lstage");
+    if (stage) { stage.style.marginLeft = ""; stage.style.marginTop = ""; }
+    var c = activeChart();
+    if (d.moved && isLayoutTab(c) && c.id === d.docId) layRestoreState(d.before);
+    return true;
+  }
   function layToggleView(key) {
     var v = layView();
     v[key] = !v[key];
@@ -27800,6 +28089,7 @@
       if (e.key === "Escape") {
         // A live drag outranks the selection: cancel it and keep the
         // selection, which is what every other cancel in the app does.
+        if (layCancelPageEdgeDrag()) { e.preventDefault(); return; }
         if (layCancelDrag()) { e.preventDefault(); return; }
         if (layMarqueeCancel()) { e.preventDefault(); return; }
         if (ids.length) {
@@ -27876,6 +28166,18 @@
                                      Math.min(p.w, p.h) / 3));
       this.value = pxToUnit(p.margin);
       persist(); laySyncMarginGuide();
+    });
+    var pageEdges = el("ps-lpage-edges");
+    if (pageEdges) {
+      var grips = pageEdges.querySelectorAll("[data-edge]");
+      for (var gi = 0; gi < grips.length; gi++)
+        setTip(grips[gi], "Drag to resize the page from this edge. It stops " +
+          "at the items and snaps to the margin.");
+      pageEdges.addEventListener("pointerdown", layPageEdgePointerDown);
+    }
+    var fitPageBtn = el("ps-lpage-fit");
+    if (fitPageBtn) fitPageBtn.addEventListener("click", function () {
+      layFitPageToContent();
     });
     el("ps-lzoom").addEventListener("change", function () {
       layView().zoom = this.value; persist(); renderLayout();
@@ -38030,6 +38332,8 @@
     resizeLayoutPanel: layResizeDimensions,
     selectLayoutItems: function (ids) { laySetSelection(ids); renderLayout(); },
     layoutSelection: laySelectedIds,
+    layoutContentBounds: layContentBounds,
+    fitLayoutPageToContent: layFitPageToContent,
     // The layoutHistoryDepth idiom: what the Notebook's Cmd+Z would do.
     notebookHistory: function () {
       return { undo: NB_UNDO.map(function (s) { return s.label; }),
