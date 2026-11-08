@@ -7,14 +7,16 @@
      and website/build.sh from scripts/build-stamp.sh (commit date + sha of
      the last commit that touched the shipped sources). ps-shell reads it
      into APP_BUILD for exports, saved projects, and the About dialog. -->
-<meta name="pandion-build" content="2026-11-03T00:28Z ed9f7cb">
+<meta name="pandion-build" content="2026-11-08T00:16Z 467d5c2">
 <title>Pandion Plots (next build)</title>
-<!-- PREVIEW COPY. Built from the release/2026-11-02 integration branch, the
-     work queued for the next release (Find matches column names, the per-bar
-     eye and Delete key on ungrouped bar charts, the Harvard Dataverse source
-     in Open data from the web), so it can be tried before it ships. Not linked
-     from the site, not indexed, refreshed or removed as the queue moves. The
-     app at /app/ is the released one. -->
+<!-- PREVIEW COPY. Built from the release/2026-11-02 integration branch at
+     467d5c2, the work queued for the next release (Find matches column names,
+     the per-bar eye and Delete key on ungrouped bar charts, the Harvard
+     Dataverse source in Open data from the web, shared links that open the app
+     at pandionplots.com, and a significance bracket that no longer grows the
+     canvas while a new axis Max is typed), so it can be tried before it ships.
+     Not linked from the site, not indexed, refreshed or removed as the queue
+     moves. The app at /app/ is the released one. -->
 <meta name="robots" content="noindex, nofollow">
 <style>
   body::after {
@@ -6704,6 +6706,10 @@
         </div>
       </div>
       <p id="ps-share-source" class="ps-finddata-meta" hidden></p>
+      <!-- Shown outside the hosted app (the desktop app, the portable file,
+           a local copy): the link points at pandionplots.com, not at this
+           copy, whose address nobody else can open. -->
+      <p id="ps-share-opens" class="ps-finddata-meta" hidden>The link opens the app at pandionplots.com, so whoever receives it needs nothing installed.</p>
       <p class="ps-share-foot" id="ps-share-foot">Anyone who has the link has the data.</p>
     </div>
   </div>
@@ -7198,8 +7204,8 @@
 <script src="lib/ps-data.c926facca8.js"></script>
 <script src="lib/jspdf.umd.min.979a2ef514.js"></script>
 <script src="lib/svg2pdf.umd.min.4ada250f50.js"></script>
-<script src="lib/graphbuilder2.min.3d0f572ec2.js"></script>
+<script src="lib/graphbuilder2.min.d75b968b5d.js"></script>
 <script src="lib/ps-tours.4e8a43e663.js"></script>
-<script src="lib/ps-shell.bf78b78d8c.js"></script>
+<script src="lib/ps-shell.ef527a8521.js"></script>
 </body>
 </html>
