@@ -2259,7 +2259,7 @@ workspaces, the data grid, saving); press <kbd>F1</kbd>, or choose
   <figcaption>Export plot: format, filename, and destination.</figcaption>
 </figure>
 <ul>
-<li><b>Format:</b> SVG, PDF, PNG, JPG. (SVG and PDF are vector, so they stay sharp at any size; use them for papers. PNG / JPG add a <b>DPI</b> choice: Screen (96) / 150 / Print (300, the default) / 600, plus Hi-res (1200) for JPG only.)</li>
+<li><b>Format:</b> SVG, PDF, PNG, JPG. (SVG and PDF are vector, so they stay sharp at any size; use them for papers. PNG / JPG add a <b>DPI</b> choice: Screen (96) / 150 / Print (300, the default) / 600, plus Hi-res (1200) for JPG only.) An exported SVG is safe to insert into PowerPoint and Word: the chart's invisible click targets are written as no paint and any rgba color as a hex color plus opacity, the two values Office's SVG importer would otherwise paint solid black once the file is saved and reopened.</li>
 <li><b>Filename</b> and <b>Save to</b> (Downloads / Desktop / Documents) are remembered. Files are never overwritten; a duplicate name gets " (2)", " (3)"…</li>
 <li>After <b>Save</b>, the result appears in the small <b>Export Status</b> item under the chart: "Saved &lt;filename&gt; to &lt;folder&gt;".</li>
 </ul>
@@ -2293,7 +2293,11 @@ and PDF, and copyable for PNG and JPG); a <b>Resolution</b> for PNG and JPG
 number, the date it was kept, the analysis it came from, and your notes.
 Preferences sets the default format and raster DPI.</li>
 <li><b>Vector by default.</b> SVG and PDF stay sharp at any size, and kept
-Notebook pages stay vector all the way into the PDF.</li>
+Notebook pages stay vector all the way into the PDF. An exported SVG, chart or
+layout, is safe to insert into PowerPoint and Word: the chart's invisible click
+targets are written as no paint and any rgba color as a hex color plus opacity,
+the two values Office's SVG importer would otherwise paint solid black once the
+file is saved and reopened.</li>
 <li><b>What travels in a .pand project:</b> everything - the data, every
 chart and its styling, layouts, and the Notebook. Your saved palettes and
 chart styles stay in your own library on your machine, so opening someone
