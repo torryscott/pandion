@@ -22,7 +22,9 @@
 //  11. the hourly job end to end on real SQLite (sql.js, when installed
 //      beside playwright; skipped otherwise): baseline, growth, a 304 that
 //      costs nothing, a new release and a reset, GitHub refusing, the
-//      scheduled() entry point itself, and what /api/daily then reports.
+//      scheduled() entry point itself, and what /api/daily then reports,
+//      including the note every run leaves (refusals and GitHub's rate-limit
+//      state too, so a stalled history can be diagnosed from outside).
 //
 // The site pings (Nov 2026):
 //  12. page:<id>, time:<id>:<band> and tour:<id>:start|done count; the
@@ -31,8 +33,22 @@
 //      /api/daily gives each kind its own first day (hitsSinceOf) beside
 //      the shared hitsSince.
 //
+// The printed cards (Nov 2026):
+//  13. a phone opening pandionplots.com/card (the QR code) is redirected to
+//      the home page and counted once as card, the count written after the
+//      redirect goes out; HEAD, prefetch, prerender, a script, a frame, a
+//      click from this site, a phone with no Sec-Fetch headers, link
+//      previews, crawlers, curl and verified bots are redirected but not
+//      counted; a QR app's browser that names itself a scanner counts; no
+//      page can ping "card"; no database or a failing one still redirects;
+//  14. wrangler.jsonc runs the Worker first for /card, /card/ and /api/*:
+//      a phone opening /card is a navigation, which Cloudflare otherwise
+//      answers with the 404 page without running the Worker
+//      look-alike paths are the static site; /api/counts and /api/daily
+//      carry the card kind like any other.
+//
 // Usage: node worker/verify-worker.mjs
-import worker, { isCountable, kindOk, totalsFromReleases, downloadIncrements, snapshotDownloads } from './index.js';
+import worker, { isCountable, isScanCountable, kindOk, totalsFromReleases, downloadIncrements, snapshotDownloads } from './index.js';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -223,6 +239,8 @@ const human = { 'Origin': 'https://pandionplots.com', 'User-Agent': CHROME, 'Sec
         let r = await snapshotDownloads(env, at('2026-10-01T10:59:00Z'), gh);
         ok(r.status === 'baseline' && r.files === 3 && rows('SELECT COUNT(*) FROM downloads')[0][0] === 0, 'the first check notes the totals and records no downloads (' + JSON.stringify(r) + ')');
         ok(rows("SELECT value FROM meta WHERE key = 'downloads_since'")[0][0] === '2026-10-01', 'and marks the day the history starts');
+        const note = () => JSON.parse(rows("SELECT value FROM meta WHERE key = 'downloads_last_run'")[0][0]);
+        ok(note().status === 'baseline' && note().files === 3 && note().at === '2026-10-01T10:59:00.000Z', 'and leaves a note of what it did (' + JSON.stringify(note()) + ')');
         ok(!sent[0]['If-None-Match'] && /pandionplots/.test(sent[0]['User-Agent']) && !sent[0].Authorization, 'it names itself to GitHub and sends no token it does not have');
 
         reply = json([rel('v3.1.3', { 'Pandion-Plots-macOS.dmg': 103, 'pandion-win-x64.jmo': 31, 'latest.yml': 1500 }), rel('v3.1.0', { 'Pandion-Plots-macOS.dmg': 21 })], 'W/"b"');
@@ -235,17 +253,22 @@ const human = { 'Origin': 'https://pandionplots.com', 'User-Agent': CHROME, 'Sec
         reply = () => new Response(null, { status: 304 });
         r = await snapshotDownloads(env, at('2026-10-01T12:59:00Z'), gh);
         ok(r.status === 'unchanged' && sent[2]['If-None-Match'] === 'W/"b"' && rows('SELECT SUM(n) FROM downloads')[0][0] === 5, 'an unchanged answer (304) records nothing');
+        ok(note().status === 'unchanged', 'but its note says the check ran (' + JSON.stringify(note()) + ')');
 
         reply = json([rel('v3.2.0', { 'Pandion-Plots-macOS.dmg': 2 }), rel('v3.1.3', { 'Pandion-Plots-macOS.dmg': 103, 'pandion-win-x64.jmo': 0 }), rel('v3.1.0', { 'Pandion-Plots-macOS.dmg': 21 })], 'W/"c"');
         r = await snapshotDownloads(env, at('2026-10-02T00:59:00Z'), gh);
         ok(r.status === 'recorded' && r.downloads === 2, 'a new release counts from zero, and a re-uploaded file that reads 0 adds nothing (' + JSON.stringify(r) + ')');
         ok(JSON.stringify(rows("SELECT n FROM downloads WHERE day = '2026-10-02'")) === '[[2]]', 'on the new day');
 
-        reply = () => new Response('{"message":"API rate limit exceeded"}', { status: 403 });
+        reply = () => new Response('{"message":"API rate limit exceeded"}', { status: 403,
+            headers: { 'X-RateLimit-Limit': '60', 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': String(Date.parse('2026-10-02T02:30:00Z') / 1000) } });
         const before = JSON.stringify(rows('SELECT * FROM downloads')) + JSON.stringify(rows('SELECT * FROM download_totals'));
         r = await snapshotDownloads(env, at('2026-10-02T01:59:00Z'), gh);
         ok(r.status === 'github-403' && before === JSON.stringify(rows('SELECT * FROM downloads')) + JSON.stringify(rows('SELECT * FROM download_totals')),
            'GitHub refusing changes nothing; the next hour catches up');
+        const refused = note();
+        ok(refused.status === 'github-403' && refused.remaining === 0 && refused.limit === 60 && refused.reset === '2026-10-02T02:30:00.000Z' && refused.authenticated === false,
+           'a refusal is noted with GitHub\'s allowance and whether a token was sent (' + JSON.stringify(refused) + ')');
 
         // The real entry point, with fetch and a token as Cloudflare would provide them.
         const realFetch = globalThis.fetch;
@@ -263,6 +286,7 @@ const human = { 'Origin': 'https://pandionplots.com', 'User-Agent': CHROME, 'Sec
         const res = await worker.fetch(new Request('https://pandionplots.com/api/daily'), env);
         const j = await res.json();
         ok(j.downloadsSince === '2026-10-01' && j.downloadsChecked === '2026-10-02T02:59:00.000Z', '/api/daily reports when the history starts and the last check (' + j.downloadsSince + ', ' + j.downloadsChecked + ')');
+        ok(j.downloadsLastRun && j.downloadsLastRun.status === 'recorded' && j.downloadsLastRun.downloads === 4, 'and the last run\'s note (' + JSON.stringify(j.downloadsLastRun) + ')');
         ok(JSON.stringify(j.downloads['Pandion-Plots-macOS.dmg']) === '[["2026-10-01",4],["2026-10-02",5]]' && JSON.stringify(j.downloads['pandion-win-x64.jmo']) === '[["2026-10-01",1],["2026-10-02",1]]',
            'and each file day by day (' + JSON.stringify(j.downloads) + ')');
         // the counters' own table, on the same database
@@ -308,6 +332,114 @@ const human = { 'Origin': 'https://pandionplots.com', 'User-Agent': CHROME, 'Sec
     const c = await (await worker.fetch(new Request('https://pandionplots.com/api/counts'), env3)).json();
     ok(c['page:gallery'] && c['page:gallery'].count === 7 && c['page:gallery'].since === '2026-11-03',
        '/api/counts carries a page kind with its first day like any other (' + JSON.stringify(c['page:gallery']) + ')');
+}
+// 13
+{
+    const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1';
+    const ANDROID = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36';
+    // What a phone's browser sends when the camera hands it the address.
+    const scan = { 'User-Agent': IPHONE, 'Sec-Fetch-Site': 'none', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document', 'Sec-Fetch-User': '?1' };
+    const visit = (p, headers, { method, cf } = {}) => {
+        const r = new Request('https://pandionplots.com' + p, { method: method || 'GET', headers });
+        if (cf) Object.defineProperty(r, 'cf', { value: cf });
+        return r;
+    };
+    const HOME = 'https://pandionplots.com/';
+    let m = mockEnv();
+    let res = await worker.fetch(visit('/card', scan), m.env);
+    ok(res.status === 302 && res.headers.get('location') === HOME && (await res.text()) === '',
+       'a scan of the card goes straight on to the home page (' + res.status + ' to ' + res.headers.get('location') + ')');
+    ok(/no-store/.test(res.headers.get('cache-control') || ''), 'and nothing may keep the redirect, so the next scan comes back to be counted');
+    ok(m.bumps.length === 1 && m.bumps[0] === 'card', 'and it is counted once as card (' + JSON.stringify(m.bumps) + ')');
+    ok(isScanCountable(visit('/card', scan)) === true, 'isScanCountable says yes to it');
+    m = mockEnv();
+    await worker.fetch(visit('/card', Object.assign({}, scan, { 'User-Agent': ANDROID })), m.env);
+    await worker.fetch(visit('/card', Object.assign({}, scan, { 'Sec-Fetch-Site': 'cross-site' })), m.env);
+    await worker.fetch(visit('/card', Object.assign({}, scan, { 'User-Agent': ANDROID.replace('Pixel 8)', 'Pixel 8; wv)') + ' QRScanner/3.1' })), m.env);
+    ok(m.bumps.length === 3, 'an Android phone, a page opened from another app or site, and a QR app\'s own browser that names itself a scanner all count (' + m.bumps.length + ' of 3)');
+    m = mockEnv();
+    for (const p of ['/card/', '/CARD', '/Card?from=aera']) {
+        res = await worker.fetch(visit(p, scan), m.env);
+        if (res.status !== 302 || res.headers.get('location') !== HOME) ok(false, p + ' redirects home (' + res.status + ')');
+    }
+    ok(m.bumps.length === 3, '/card/, /CARD and /Card?from=... count and redirect the same (' + m.bumps.length + ' of 3)');
+    m = mockEnv(); const waits = [];
+    res = await worker.fetch(visit('/card', scan), m.env, { waitUntil: p => waits.push(p) });
+    const countedBefore = m.bumps.length;
+    await Promise.all(waits);
+    ok(res.status === 302 && waits.length === 1 && m.bumps.length === 1,
+       'on Cloudflare the count rides waitUntil, so the redirect never waits on the database (' + countedBefore + ' then ' + m.bumps.length + ')');
+    const notCounted = [
+        ['a HEAD request', visit('/card', scan, { method: 'HEAD' })],
+        ['a prefetch (Sec-Purpose)', visit('/card', Object.assign({}, scan, { 'Sec-Purpose': 'prefetch' }))],
+        ['a prerender', visit('/card', Object.assign({}, scan, { 'Sec-Purpose': 'prefetch;prerender' }))],
+        ['an old-style prefetch (Purpose)', visit('/card', Object.assign({}, scan, { 'Purpose': 'prefetch' }))],
+        ['a preview (X-Purpose)', visit('/card', Object.assign({}, scan, { 'X-Purpose': 'preview' }))],
+        ['a script fetching it', visit('/card', Object.assign({}, scan, { 'Sec-Fetch-Mode': 'cors', 'Sec-Fetch-Dest': 'empty' }))],
+        ['the address inside another page', visit('/card', Object.assign({}, scan, { 'Sec-Fetch-Dest': 'iframe' }))],
+        ['a click from this site\'s own pages', visit('/card', Object.assign({}, scan, { 'Sec-Fetch-Site': 'same-origin' }))],
+        ['a phone too old to send Sec-Fetch headers', visit('/card', { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.6 Mobile/15E148 Safari/604.1' })],
+        ['an address-guessing tool posing as an old browser', visit('/card', { 'User-Agent': 'Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1)' })],
+        ['a link preview (iMessage, Facebook)', visit('/card', Object.assign({}, scan, { 'User-Agent': 'facebookexternalhit/1.1 Facebot Twitterbot/1.0' }))],
+        ['a WhatsApp preview', visit('/card', { 'User-Agent': 'WhatsApp/2.23.20.0' })],
+        ['Slack unfurling', visit('/card', { 'User-Agent': 'Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)' })],
+        ['Googlebot', visit('/card', Object.assign({}, scan, { 'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)' }))],
+        ['a headless browser', visit('/card', Object.assign({}, scan, { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/129.0.0.0 Safari/537.36' }))],
+        ['curl', visit('/card', { 'User-Agent': 'curl/8.4.0' })],
+        ['no User-Agent', visit('/card', { 'Sec-Fetch-Site': 'none', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document' })],
+        ['a Cloudflare verified bot', visit('/card', scan, { cf: { verifiedBotCategory: 'Monitoring & Analytics' } })],
+    ];
+    let quiet = 0;
+    for (const [name, req] of notCounted) {
+        const mm = mockEnv();
+        const r = await worker.fetch(req, mm.env);
+        if (r.status === 302 && r.headers.get('location') === HOME && mm.bumps.length === 0) quiet++;
+        else ok(false, name + ' should be redirected but not counted (' + r.status + ', ' + mm.bumps.length + ' counted)');
+    }
+    ok(quiet === notCounted.length, 'redirected home but not counted: ' + notCounted.map(x => x[0]).join(', ') + ' (' + quiet + ' of ' + notCounted.length + ')');
+    m = mockEnv();
+    await worker.fetch(ping('card', human), m.env);
+    ok(m.bumps.length === 0 && !kindOk('card'), 'no page can ping the card count: only opening /card counts');
+    res = await worker.fetch(visit('/card', scan), { ASSETS: { fetch: async () => new Response('asset') } });
+    ok(res.status === 302 && res.headers.get('location') === HOME, 'without a database the card still goes home');
+    const refusing = { pandion_counts: { prepare: () => ({ bind: () => ({ run: async () => { throw new Error('D1_ERROR: daily quota'); } }) }) },
+                       ASSETS: { fetch: async () => new Response('asset') } };
+    res = await worker.fetch(visit('/card', scan), refusing);
+    ok(res.status === 302 && res.headers.get('location') === HOME, 'and a database that refuses the write still sends the scan home');
+    let lookalike = 0;
+    const paths = ['/cards', '/card/aera', '/cardx', '/card.html', '/x/card', '/api/card'];
+    for (const p of paths) {
+        const mm = mockEnv();
+        const r = await worker.fetch(visit(p, scan), mm.env);
+        if (r.status === 200 && (await r.text()) === 'asset' && mm.bumps.length === 0) lookalike++;
+        else ok(false, p + ' should be the static site');
+    }
+    ok(lookalike === paths.length, 'look-alike paths are the static site, uncounted: ' + paths.join(', '));
+    m = mockEnv();
+    res = await worker.fetch(visit('/card', scan, { method: 'POST' }), m.env);
+    ok(res.status === 200 && (await res.text()) === 'asset' && m.bumps.length === 0, 'a POST to /card is no scan: the static site answers it');
+    const { env: envC } = mockEnv([{ kind: 'card', n: 12, since: '2026-11-08' }]);
+    const cj = await (await worker.fetch(new Request('https://pandionplots.com/api/counts'), envC)).json();
+    ok(cj.card && cj.card.count === 12 && cj.card.since === '2026-11-08', '/api/counts carries the card kind with its first day (' + JSON.stringify(cj.card) + ')');
+    const { env: envD } = mockEnv([{ day: '2026-09-25', kind: 'launch', n: 3 }, { day: '2026-11-08', kind: 'card', n: 4 }, { day: '2026-11-09', kind: 'card', n: 1 }]);
+    const dj = await (await worker.fetch(new Request('https://pandionplots.com/api/daily'), envD)).json();
+    ok(dj.hitsSinceOf.card === '2026-11-08' && JSON.stringify(dj.hits.card) === '[["2026-11-08",4],["2026-11-09",1]]',
+       '/api/daily lists the scans day by day from their own first day (' + JSON.stringify(dj.hits.card) + ')');
+}
+{
+    // 14. The routing list. With not_found_handling set (and a compatibility
+    // date of 2025-04-01 or later) Cloudflare answers a NAVIGATION to an
+    // address that is not a file with the 404 page and never runs the
+    // Worker; a phone opening the card code is a navigation. Nothing here
+    // can exercise Cloudflare's router, so this pins the configuration.
+    const fsm = await import('node:fs');
+    const raw = fsm.readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
+    const conf = JSON.parse(raw.split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n'));
+    const first = (conf.assets && conf.assets.run_worker_first) || [];
+    const covered = p => Array.isArray(first) && first.some(pat => pat.endsWith('/*') ? p.startsWith(pat.slice(0, -1)) : p === pat);
+    const need = ['/card', '/card/', '/api/hit/page:home', '/api/counts', '/api/daily'];
+    ok(conf.assets && conf.assets.not_found_handling && need.every(covered),
+       'wrangler.jsonc runs the Worker first for every address it answers (' + JSON.stringify(first) + ')');
 }
 if (fails) { console.log('COUNTER WORKER: ' + fails + ' failure(s)'); process.exit(1); }
 console.log('COUNTER WORKER: ALL GREEN');

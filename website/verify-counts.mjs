@@ -63,7 +63,8 @@ const websiteDir = process.env.PS_SITE_DIR ? path.resolve(process.env.PS_SITE_DI
 let fails = 0; const ok = (c, m) => { console.log((c ? '  ok  ' : ' FAIL ') + m); if (!c) fails++; };
 
 const COUNTS = { updated: '2026-09-25T10:00:00Z',
-    launch: { count: 1234, since: '2026-09-25' }, 'launch-day': { count: 321, since: '2026-09-25' }, portable: { count: 45, since: '2026-09-26' } };
+    launch: { count: 1234, since: '2026-09-25' }, 'launch-day': { count: 321, since: '2026-09-25' }, portable: { count: 45, since: '2026-09-26' },
+    card: { count: 12, since: '2026-10-12' } };
 const asset = (name, n, at) => ({ name, download_count: n, created_at: at });
 const RELEASES = [
     { tag_name: 'v3.1.3', assets: [asset('Pandion-Plots-macOS.dmg', 16, '2026-09-14T10:00:00Z'), asset('Pandion-Plots-Windows-x64.exe', 26, '2026-09-14T10:00:00Z'),
@@ -144,6 +145,7 @@ try {
         ok(g('launch').count === '1,234' && g('launch').since === '25 Sep 2026', 'Usage page: the launch row shows the count and its since date (' + JSON.stringify(g('launch')) + ')');
         ok(g('launch-day').count === '321', 'Usage page: the launch-day row fills (' + g('launch-day').count + ')');
         ok(g('portable').count === '45' && g('portable').since === '26 Sep 2026', 'Usage page: the portable row fills from our counter (' + JSON.stringify(g('portable')) + ')');
+        ok(g('card').count === '12' && g('card').since === '12 Oct 2026' && /QR code scans/.test(g('card').item || ''), 'Usage page: the printed cards\' scans fill from our counter (' + JSON.stringify(g('card')) + ')');
         ok(g('Pandion-Plots-macOS.dmg').count === '29' && g('Pandion-Plots-macOS.dmg').since === '23 Aug 2026', 'Usage page: the macOS installer sums across releases with the earliest date (' + JSON.stringify(g('Pandion-Plots-macOS.dmg')) + ')');
         ok(g('Pandion-Plots-Windows-x64.exe').count === '36', 'Usage page: the Windows installer sums (' + g('Pandion-Plots-Windows-x64.exe').count + ')');
         ok(g('pandion-macos-arm64.jmo').count === '49' && g('pandion-macos-arm64.jmo').since === '25 Jul 2026', 'Usage page: the jamovi 2.7 macOS row folds the old plotstudio name in (' + JSON.stringify(g('pandion-macos-arm64.jmo')) + ')');
@@ -199,7 +201,10 @@ try {
         }
         const DAILY = {
             updated: NOW, hitsSince: '2026-09-25',
-            hits: { launch: Object.entries(launch), 'launch-day': Object.entries(launchDay) },
+            hits: { launch: Object.entries(launch), 'launch-day': Object.entries(launchDay), card: [['2026-10-12', 2], ['2026-10-19', 3]] },
+            // Only the cards have their own first day here: every other row
+            // falls back to hitsSince, as with a Worker from before hitsSinceOf.
+            hitsSinceOf: { card: '2026-10-12' },
             downloadsSince: '2026-10-01', downloadsChecked: '2026-10-20T14:59:00.000Z',
             downloads: {
                 'Pandion-Plots-macOS.dmg': [['2026-10-02', 2], ['2026-10-09', 1], ['2026-10-20', 3]],
@@ -233,7 +238,7 @@ try {
 
         const armed = await page.evaluate(() => [document.querySelectorAll('[data-role="usage-table"] tbody tr').length,
             document.querySelectorAll('[data-role="usage-table"] tbody tr .usage-row-btn[aria-controls="usage-chart"]').length]);
-        ok(armed[0] === 10 && armed[1] === 10, 'History: every row, the added Intel one too, becomes a button that controls the chart (' + armed.join(' of ') + ')');
+        ok(armed[0] === 11 && armed[1] === 11, 'History: every row, the added Intel one too, becomes a button that controls the chart (' + armed.join(' of ') + ')');
         let c = await chart();
         ok(c.hidden === true, 'History: the chart stays closed until a row is clicked');
 
@@ -294,6 +299,11 @@ try {
         await clickRow('pandion-win-x64.jmo'); c = await chart();
         ok(c.points === 20 && c.total === '7 downloads in the last 30 days (download history began 1 Oct 2026)', 'History: a download row starts at the first hourly check and folds the old file name in (' + c.points + ', ' + c.total + ')');
         ok(c.numbers.find(r => r[0] === 'Sat 3 Oct 2026')[1] === '3' && /every hour/.test(c.note) && /starts on 1 Oct 2026/.test(c.note), 'History: 1 + 2 on 3 Oct, and the note says how the history is kept (' + c.note + ')');
+
+        // The printed cards: scans, from the cards' own first day.
+        await clickRow('card'); c = await chart();
+        ok(c.points === 9 && c.total === '5 scans in the last 30 days (counting began 12 Oct 2026)' && c.title === 'Printed cards, QR code scans',
+           'History: the cards row counts scans from its own first day (' + c.points + ', ' + c.total + ')');
 
         // A row that has never been clicked: zeros, honestly.
         await clickRow('portable'); c = await chart();

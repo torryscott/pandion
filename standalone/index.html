@@ -1150,6 +1150,39 @@
     display: none; position: absolute; z-index: 1001; pointer-events: none;
     background: #d2267a;
   }
+  /* Page edges (Nov 2026, Torry's ask): grips on the paper itself. Dragging
+     one moves that edge only; items keep their size and place, the edge
+     stops at the outermost item and snaps to the margin. Pointer chrome,
+     like the item resize handle; the rail's Size fields and Fit page to
+     content are the keyboard route. The grips hang ENTIRELY outside the
+     page: every pixel of the page, its corners included, still belongs to
+     the canvas, so a rubber band dragged from the very corner, or an item
+     flush with an edge, is never caught by them. */
+  .ps-lpage-edges { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
+  .ps-lpage-edge { position: absolute; pointer-events: auto; touch-action: none; }
+  .ps-lpage-edge[data-edge="n"] { left: 18px; right: 18px; top: -12px; height: 12px; cursor: ns-resize; }
+  .ps-lpage-edge[data-edge="s"] { left: 18px; right: 18px; bottom: -12px; height: 12px; cursor: ns-resize; }
+  .ps-lpage-edge[data-edge="w"] { top: 18px; bottom: 18px; left: -12px; width: 12px; cursor: ew-resize; }
+  .ps-lpage-edge[data-edge="e"] { top: 18px; bottom: 18px; right: -12px; width: 12px; cursor: ew-resize; }
+  .ps-lpage-edge[data-edge="nw"] { left: -18px; top: -18px; width: 18px; height: 18px; cursor: nwse-resize; }
+  .ps-lpage-edge[data-edge="ne"] { right: -18px; top: -18px; width: 18px; height: 18px; cursor: nesw-resize; }
+  .ps-lpage-edge[data-edge="sw"] { left: -18px; bottom: -18px; width: 18px; height: 18px; cursor: nesw-resize; }
+  .ps-lpage-edge[data-edge="se"] { right: -18px; bottom: -18px; width: 18px; height: 18px; cursor: nwse-resize; }
+  .ps-lpage-edge::before {
+    content: ""; position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%, -50%); border-radius: 3px;
+    background: var(--ps-l4); border: 1px solid var(--ps-s0);
+    box-sizing: border-box; transition: background-color .12s, opacity .12s;
+  }
+  .ps-lpage-edge[data-edge="n"]::before, .ps-lpage-edge[data-edge="s"]::before { width: 36px; height: 7px; }
+  .ps-lpage-edge[data-edge="w"]::before, .ps-lpage-edge[data-edge="e"]::before { width: 7px; height: 36px; }
+  .ps-lpage-edge[data-edge="nw"]::before, .ps-lpage-edge[data-edge="ne"]::before,
+  .ps-lpage-edge[data-edge="sw"]::before, .ps-lpage-edge[data-edge="se"]::before {
+    width: 10px; height: 10px; opacity: 0;
+  }
+  #ps-lstage:hover .ps-lpage-edge::before, .ps-lpage-edge.ps-lpage-edge-active::before { opacity: 1; }
+  .ps-lpage-edge:hover::before, .ps-lpage-edge.ps-lpage-edge-active::before { background: var(--ps-accent); }
+  .ps-lstage-resizing, .ps-lstage-resizing * { user-select: none; }
   /* The selection box. Built from the accent already used for a selected
      item, so a marquee reads as the same act as clicking one. */
   .ps-lmarquee {
@@ -4855,6 +4888,7 @@
     .graphbuilder2-host, #ps-lviewport, #ps-lstage, #ps-lcanvas {
       overflow: visible !important; transform: none !important;
       box-shadow: none !important; }
+    .ps-lpage-edges { display: none !important; }
     .ps-print-note { display: block !important; margin: 12pt 0 0;
       font: 9pt/1.4 system-ui, sans-serif; color: #444; }
     @page { margin: 12mm; }
@@ -5383,6 +5417,18 @@
             <button type="button" id="ps-lunit-cm"
                     aria-pressed="false">cm</button>
           </div>
+        </div>
+        <!-- The page sized to the figure rather than the figure to the page
+             (Torry, Nov 2026). The same operation as dragging a page edge,
+             in one click, and the keyboard's route to it. -->
+        <div class="ps-linsp-row ps-lpage-fitrow">
+          <button type="button" class="ps-btn" id="ps-lpage-fit"
+                  data-tip="Trim the page to the items plus the margin. Items keep their size and place.">Fit page to content</button>
+        </div>
+        <div class="ps-loader-hint">
+          Drag an edge or corner of the page to resize it by hand: it stops at
+          the items and snaps to the margin. A preset or typed size scales the
+          figure to fit instead.
         </div>
         <label class="ps-inspector-field">
           Orientation
@@ -5969,6 +6015,19 @@
         <div class="ps-visually-hidden" id="ps-layout-options"></div>
         <div id="ps-lstage">
           <div id="ps-lcanvas"></div>
+          <!-- Page edges (Nov 2026): grips on the paper itself. Pointer-only
+               chrome, like the item resize handle; the keyboard route is the
+               Size fields and Fit page to content in the rail. -->
+          <div id="ps-lpage-edges" class="ps-lpage-edges" aria-hidden="true">
+            <div class="ps-lpage-edge" data-edge="n"></div>
+            <div class="ps-lpage-edge" data-edge="s"></div>
+            <div class="ps-lpage-edge" data-edge="w"></div>
+            <div class="ps-lpage-edge" data-edge="e"></div>
+            <div class="ps-lpage-edge" data-edge="nw"></div>
+            <div class="ps-lpage-edge" data-edge="ne"></div>
+            <div class="ps-lpage-edge" data-edge="sw"></div>
+            <div class="ps-lpage-edge" data-edge="se"></div>
+          </div>
         </div>
       </div>
     </div>

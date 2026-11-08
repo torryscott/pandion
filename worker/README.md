@@ -15,6 +15,7 @@ counters on. Read this before touching `worker/` or `wrangler.jsonc`.
 | Which pages of the site are read (Nov 2026) | this Worker | every page that loads `assets/site-nav.js` sends `POST /api/hit/page:<id>` when it loads (`gallery.html` is `page:gallery`, the home page `page:home`, the guide `page:docs`) |
 | How long a page stayed in front | this Worker | once per page, when it first goes into the background or away: `time:<id>:<band>`, the band being under 10 seconds, under a minute, under five minutes, or five minutes or more; nothing finer |
 | The Learn tours started and finished | this Worker | `tour:<id>:start` the first time a film's play button turns to Pause, `tour:<id>:done` the first time it turns to Replay (three-rules, data, charts, notebook, layouts); once each per page view |
+| Scans of the QR code on the printed cards (Nov 2026) | this Worker | the code opens `pandionplots.com/card`; the Worker adds one to `card` and redirects to the home page; see "Printed cards" below |
 
 The app pings only when `psUpdateHosted()` is true (hostname is
 pandionplots.com) and `navigator.webdriver` is false; the site pings
@@ -73,10 +74,58 @@ addresses ever hit that limit, a token raises it:
 read-only access to public repositories. The Worker sends it when present.
 
 To see that the job is running: `curl -s https://pandionplots.com/api/daily`
-shows `downloadsChecked` within the last hour (it moves only when a check
-succeeds), and the Worker's logs show one `download history:` line per
-run. `worker/verify-worker.mjs` covers the arithmetic and, when sql.js is
+shows `downloadsLastRun`, the note every check leaves (its time, what it
+did, and GitHub's remaining allowance), and `downloadsChecked`, which
+moves only when a check succeeds. A note reading `github-403` with
+`remaining: 0` means GitHub is refusing Cloudflare's shared addresses:
+set the `GITHUB_TOKEN` secret. No note at all, an hour after a deploy,
+means the check never ran: look for the cron under the Worker's Settings,
+Trigger events, in the Cloudflare dashboard. The Worker's logs also show
+one `download history:` line per run. `worker/verify-worker.mjs` covers the arithmetic and, when sql.js is
 installed beside playwright, the whole job on real SQLite.
+
+## Printed cards (Nov 2026)
+
+The handout cards carry a QR code for `https://pandionplots.com/card`
+(Torry: how many people actually scan them?). `GET /card` (also `/card/`,
+any letter case, any query string) adds one to the `card` kind and answers
+`302` to the home page with `Cache-Control: no-store`, so a phone that
+scans twice comes back and counts twice. The count is written through
+`ctx.waitUntil` after the redirect goes out; without a database, or when
+the write fails, the redirect still goes out and the scan is simply not
+counted. `HEAD` gets the redirect uncounted; any other method, and every
+look-alike path (`/cards`, `/card/aera`, `/card.html`), is the static site.
+
+A phone opens the address as a page (a navigation), and with
+`not_found_handling` set and a compatibility date of 2025-04-01 or later,
+Cloudflare answers a navigation to an address that is not a file with the
+404 page and never runs the Worker. So `wrangler.jsonc` lists `/card`,
+`/card/` and `/api/*` under `assets.run_worker_first`, which runs the
+Worker first for those paths however they are requested. Until Nov 7 2026
+it did not: every real scan got the 404 page while curl, which sends no
+Sec-Fetch headers and so is no navigation, got the redirect. A live check
+has to send `Sec-Fetch-Mode: navigate` (with a bot User-Agent, so it is not
+counted). Case 14 pins the list. The code itself is lowercase; a browser
+opening another letter case, such as `/CARD`, may still get the 404 page.
+
+`card` is not in `KINDS`, so no page can ping it: only opening the address
+counts. What counts is decided by `isScanCountable`, which differs from the
+ping test because a scan has no Origin to check: the Sec-Fetch headers are
+required (`navigate` to a `document`, from anywhere but this site's own
+pages), so scripts, crawlers and address-guessing tools, which send none,
+stay out. The price is that a phone too old to send them (Safari before
+16.4, iPhones stuck on iOS 15) is redirected but not counted. Also not
+counted: prefetch and prerender (`Sec-Purpose`, `Purpose`, `X-Purpose`,
+`X-Moz`), link previews and crawlers (the bot list, less the word "scan",
+which a QR app's own browser may carry), and Cloudflare's verified bots.
+`worker/verify-worker.mjs` case 13 pins every rule. The scan also lands on
+the home page, which sends its own `page:home` ping like any other visit.
+
+The usage page lists the count as "Printed cards, QR code scans" in the
+first table, with the same history chart as every row. The address is
+printed on paper: keep `/card` answering for as long as cards are in
+circulation, even if the counter itself is ever retired (a plain redirect
+then).
 
 ## One-time setup (needs a Cloudflare login)
 
@@ -120,8 +169,9 @@ Three sentences on the site say what is sent (index.html's "Private by
 design" pillar, about.html's "Free, private, open" paragraph, the usage
 page's introduction) and support.html says "no tracking". Since Nov 2026
 they also say that the site counts which of its pages are read and how
-long they stay open, in those four bands: still no data, no identifier,
-no cookie, and nothing that could follow one visitor from page to page.
+long they stay open, in those four bands, and how often the QR code on a
+printed card is scanned: still no data, no identifier, no cookie, and
+nothing that could follow one visitor from page to page.
 A new site page needs a row on usage.html (the Worker accepts any
 well-formed page id); a new tour needs a row there and a film frame
 attribute the script recognises. The app's own

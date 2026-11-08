@@ -20,6 +20,10 @@
 //   GET  /api/daily        the same counts day by day, plus the daily
 //                          history of GitHub downloads, for the charts on
 //                          the usage page (Oct 2026).
+//   GET  /card             where the QR code on the printed cards points
+//                          (Nov 2026): one more scan on the "card" count,
+//                          then straight on to the home page. See
+//                          isScanCountable.
 //
 // And one scheduled job (wrangler.jsonc "triggers"): every hour it reads
 // GitHub's running download totals for the installers and the jamovi
@@ -85,6 +89,44 @@ function isCountable(req) {
   return true;
 }
 
+// The printed cards (Nov 2026, Torry: how many people scan them?). The QR
+// code on the handout cards opens pandionplots.com/card; the Worker adds
+// one to the "card" count and redirects to the home page at once, so the
+// visitor lands where the card promised. "card" is deliberately not in
+// KINDS: no page can ping it, only opening the address counts.
+const CARD_PATH = /^\/card\/?$/i;
+
+// Was this a person opening the address? A scan is a phone handing the
+// address to its browser, not a page sending a ping, so the test differs
+// from isCountable. There is no Origin to check (nothing referred it), so
+// the Sec-Fetch headers are required rather than optional: every current
+// browser sends them on a page load, and scripts, crawlers and
+// address-guessing tools send none. The price is that a phone too old to
+// send them (Safari before 16.4) is redirected but not counted. Not counted
+// either, though each still gets the redirect: crawlers and link previews
+// (the User-Agent list, less the word "scan", which a QR app's own browser
+// may carry), a HEAD or any other method but GET, a browser loading the
+// address ahead of time in case it is opened (prefetch, prerender), the
+// address loaded inside another page or by a script, a click from this
+// site's own pages (not a scan), and Cloudflare's verified bots.
+const SCAN_BOT_UA = new RegExp(BOT_UA.source.replace("|scan|", "|"), "i");
+function isScanCountable(req) {
+  if (req.method !== "GET") return false;
+  if (req.headers.get("Sec-Fetch-Mode") !== "navigate") return false;
+  if (req.headers.get("Sec-Fetch-Dest") !== "document") return false;
+  const site = req.headers.get("Sec-Fetch-Site");
+  if (site === "same-origin" || site === "same-site") return false;
+  const ua = req.headers.get("User-Agent") || "";
+  if (!ua || SCAN_BOT_UA.test(ua)) return false;
+  const purpose = [req.headers.get("Sec-Purpose"), req.headers.get("Purpose"),
+    req.headers.get("X-Purpose"), req.headers.get("X-Moz")].join(" ");
+  if (/prefetch|prerender|preview/i.test(purpose)) return false;
+  const cf = req.cf || {};
+  if (cf.verifiedBotCategory) return false;
+  if (cf.botManagement && cf.botManagement.verifiedBot) return false;
+  return true;
+}
+
 // The D1 binding as wrangler.jsonc names it (pandion_counts; DB is
 // accepted too, the name the README first suggested).
 function db(env) { return env.pandion_counts || env.DB || null; }
@@ -111,7 +153,9 @@ const NO_STORE = { "Cache-Control": "no-store" };
 //   downloads(day, asset, n)              the daily increases, by file name
 //   download_totals(release, asset, total) the last total seen per file
 //   meta(key, value)                      downloads_since (the baseline day),
-//                                         downloads_checked, downloads_etag
+//                                         downloads_checked, downloads_etag,
+//                                         downloads_last_run (what the last
+//                                         check did, failures included)
 const GH_RELEASES = "https://api.github.com/repos/torryscott/pandion/releases?per_page=100";
 // Installers and jamovi modules only. Update feeds (.yml), differential
 // update files (.blockmap) and the macOS auto-update archive (.zip) are
@@ -180,6 +224,13 @@ async function snapshotDownloads(env, scheduledTime, fetchImpl) {
   const setMeta = (key, value) => d.prepare(
     "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
   ).bind(key, value);
+  // Every run leaves a note of what it did, failures included, and
+  // /api/daily shows it: a check that GitHub refused writes nothing else,
+  // so without the note "refused", "failed" and "never ran" look the same
+  // from outside (the first deploy's first hour, Oct 2026).
+  let rate = null;
+  const lastRun = (status, extra) => setMeta("downloads_last_run",
+    JSON.stringify(Object.assign({ at: stamp, status }, rate || {}, extra || {})));
 
   // GitHub asks every API client to name itself. A conditional request
   // that comes back 304 (nothing changed) does not use up the rate limit,
@@ -193,15 +244,33 @@ async function snapshotDownloads(env, scheduledTime, fetchImpl) {
   if (env.GITHUB_TOKEN) headers["Authorization"] = "Bearer " + env.GITHUB_TOKEN;
   let res;
   try { res = await (fetchImpl || fetch)(GH_RELEASES, { headers }); }
-  catch (e) { return { status: "github-unreachable" }; }
+  catch (e) {
+    await lastRun("github-unreachable").run();
+    return { status: "github-unreachable" };
+  }
+  // GitHub's own account of the allowance this request drew on: the first
+  // thing to look at when checks keep being refused.
+  const remaining = res.headers.get("X-RateLimit-Remaining");
+  if (remaining !== null) {
+    rate = { remaining: Number(remaining), limit: Number(res.headers.get("X-RateLimit-Limit")) };
+    const reset = Number(res.headers.get("X-RateLimit-Reset"));
+    if (reset) rate.reset = new Date(reset * 1000).toISOString();
+  }
   if (res.status === 304) {
-    await setMeta("downloads_checked", stamp).run();
+    await d.batch([setMeta("downloads_checked", stamp), lastRun("unchanged")]);
     return { status: "unchanged" };
   }
-  if (!res.ok) return { status: "github-" + res.status };
+  if (!res.ok) {
+    const status = "github-" + res.status;
+    await lastRun(status, { authenticated: !!env.GITHUB_TOKEN }).run();
+    return { status };
+  }
   let releases;
-  try { releases = await res.json(); } catch (e) { return { status: "github-bad-json" }; }
-  if (!Array.isArray(releases)) return { status: "github-bad-json" };
+  try { releases = await res.json(); } catch (e) { releases = null; }
+  if (!Array.isArray(releases)) {
+    await lastRun("github-bad-json").run();
+    return { status: "github-bad-json" };
+  }
 
   const current = totalsFromReleases(releases);
   const upsertTotal = c => d.prepare(
@@ -215,7 +284,8 @@ async function snapshotDownloads(env, scheduledTime, fetchImpl) {
   // A batch is one transaction: the new totals and the increases they
   // imply are written together or not at all, so nothing is counted twice.
   if (!meta.downloads_since) {
-    await d.batch(current.map(upsertTotal).concat([setMeta("downloads_since", day)], tail));
+    await d.batch(current.map(upsertTotal).concat([setMeta("downloads_since", day)], tail,
+      [lastRun("baseline", { files: current.length })]));
     return { status: "baseline", files: current.length };
   }
   const previous = (await d.prepare("SELECT release, asset, total FROM download_totals").all()).results || [];
@@ -229,15 +299,28 @@ async function snapshotDownloads(env, scheduledTime, fetchImpl) {
       "ON CONFLICT(day, asset) DO UPDATE SET n = n + excluded.n"
     ).bind(day, asset, increments[asset]));
   }
-  await d.batch(writes.concat(tail));
+  await d.batch(writes.concat(tail, [lastRun("recorded", { downloads: added })]));
   return { status: "recorded", downloads: added };
 }
 
-export { sameSite, isCountable, totalsFromReleases, downloadIncrements, snapshotDownloads };
+export { sameSite, isCountable, isScanCountable, totalsFromReleases, downloadIncrements, snapshotDownloads };
 
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const url = new URL(req.url);
+
+    if (CARD_PATH.test(url.pathname) && (req.method === "GET" || req.method === "HEAD")) {
+      if (db(env) && isScanCountable(req)) {
+        // The count is written after the redirect has gone out, so the
+        // scan never waits on the database; a failed write is an
+        // undercount, never an error page.
+        const write = bump(env, "card").catch(() => {});
+        if (ctx && ctx.waitUntil) ctx.waitUntil(write); else await write;
+      }
+      // A temporary redirect that nothing may keep: a browser that kept
+      // it would skip the count on the next scan.
+      return new Response(null, { status: 302, headers: Object.assign({ "Location": new URL("/", url).href }, NO_STORE) });
+    }
 
     if (url.pathname.startsWith("/api/hit/")) {
       if (req.method !== "POST") return new Response(null, { status: 405, headers: NO_STORE });
@@ -288,7 +371,7 @@ export default {
       try {
         dlRows = (await d.prepare("SELECT day, asset, n FROM downloads ORDER BY day, asset").all()).results || [];
         dlMeta = (await d.prepare(
-          "SELECT key, value FROM meta WHERE key IN ('downloads_since', 'downloads_checked')"
+          "SELECT key, value FROM meta WHERE key IN ('downloads_since', 'downloads_checked', 'downloads_last_run')"
         ).all()).results || [];
       } catch (e) { dlRows = []; dlMeta = []; }
       const meta = {};
@@ -312,6 +395,7 @@ export default {
         hits,
         downloadsSince: meta.downloads_since || null,
         downloadsChecked: meta.downloads_checked || null,
+        downloadsLastRun: (() => { try { return JSON.parse(meta.downloads_last_run); } catch (e) { return null; } })(),
         downloads,
       }, { headers: Object.assign({ "Cache-Control": "public, max-age=300" }, cors) });
     }

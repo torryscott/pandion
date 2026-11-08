@@ -44,7 +44,7 @@ missing-filter-check omv-missing-rules-check autosave-honesty-check \
 data-papercuts-check dist-dot-allowlist-check stats-alpha-allowlist-check data-disclosure-check grid-wide-perf-check omv-derived-check \
 grid-accessibility-check \
 help-me-choose-check chooser-target-check menu-pointer-check import-errors-check layout-image-check modal-accessibility-check \
-layout-arrange-check layout-clipboard-check layout-orientation-check layout-rail-check layout-selectall-check layout-reuse-check layout-undo-check library-bridge-check \
+layout-arrange-check layout-clipboard-check layout-orientation-check layout-rail-check layout-selectall-check layout-reuse-check layout-undo-check layout-page-edges-check library-bridge-check \
 layout-accessibility-check layout-text-check layout-font-check layout-figure-check layout-parts-check layout-timeline-check layout-parts-polish-check arrow-nudge-check \
 linked-selection-check motion-check narrow-check novice-affordances-check \
 overlay-reload-check overlay-restore-check pane-debusy-check panel-reveal-check panelcap-check panel-dock-check hover-webkit-check gap-seam-check percol-missing-check \
