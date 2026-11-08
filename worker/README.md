@@ -96,6 +96,18 @@ the write fails, the redirect still goes out and the scan is simply not
 counted. `HEAD` gets the redirect uncounted; any other method, and every
 look-alike path (`/cards`, `/card/aera`, `/card.html`), is the static site.
 
+A phone opens the address as a page (a navigation), and with
+`not_found_handling` set and a compatibility date of 2025-04-01 or later,
+Cloudflare answers a navigation to an address that is not a file with the
+404 page and never runs the Worker. So `wrangler.jsonc` lists `/card`,
+`/card/` and `/api/*` under `assets.run_worker_first`, which runs the
+Worker first for those paths however they are requested. Until Nov 7 2026
+it did not: every real scan got the 404 page while curl, which sends no
+Sec-Fetch headers and so is no navigation, got the redirect. A live check
+has to send `Sec-Fetch-Mode: navigate` (with a bot User-Agent, so it is not
+counted). Case 14 pins the list. The code itself is lowercase; a browser
+opening another letter case, such as `/CARD`, may still get the 404 page.
+
 `card` is not in `KINDS`, so no page can ping it: only opening the address
 counts. What counts is decided by `isScanCountable`, which differs from the
 ping test because a scan has no Origin to check: the Sec-Fetch headers are

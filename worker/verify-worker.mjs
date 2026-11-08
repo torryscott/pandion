@@ -41,6 +41,9 @@
 //      previews, crawlers, curl and verified bots are redirected but not
 //      counted; a QR app's browser that names itself a scanner counts; no
 //      page can ping "card"; no database or a failing one still redirects;
+//  14. wrangler.jsonc runs the Worker first for /card, /card/ and /api/*:
+//      a phone opening /card is a navigation, which Cloudflare otherwise
+//      answers with the 404 page without running the Worker
 //      look-alike paths are the static site; /api/counts and /api/daily
 //      carry the card kind like any other.
 //
@@ -422,6 +425,21 @@ const human = { 'Origin': 'https://pandionplots.com', 'User-Agent': CHROME, 'Sec
     const dj = await (await worker.fetch(new Request('https://pandionplots.com/api/daily'), envD)).json();
     ok(dj.hitsSinceOf.card === '2026-11-08' && JSON.stringify(dj.hits.card) === '[["2026-11-08",4],["2026-11-09",1]]',
        '/api/daily lists the scans day by day from their own first day (' + JSON.stringify(dj.hits.card) + ')');
+}
+{
+    // 14. The routing list. With not_found_handling set (and a compatibility
+    // date of 2025-04-01 or later) Cloudflare answers a NAVIGATION to an
+    // address that is not a file with the 404 page and never runs the
+    // Worker; a phone opening the card code is a navigation. Nothing here
+    // can exercise Cloudflare's router, so this pins the configuration.
+    const fsm = await import('node:fs');
+    const raw = fsm.readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
+    const conf = JSON.parse(raw.split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n'));
+    const first = (conf.assets && conf.assets.run_worker_first) || [];
+    const covered = p => Array.isArray(first) && first.some(pat => pat.endsWith('/*') ? p.startsWith(pat.slice(0, -1)) : p === pat);
+    const need = ['/card', '/card/', '/api/hit/page:home', '/api/counts', '/api/daily'];
+    ok(conf.assets && conf.assets.not_found_handling && need.every(covered),
+       'wrangler.jsonc runs the Worker first for every address it answers (' + JSON.stringify(first) + ')');
 }
 if (fails) { console.log('COUNTER WORKER: ' + fails + ' failure(s)'); process.exit(1); }
 console.log('COUNTER WORKER: ALL GREEN');
