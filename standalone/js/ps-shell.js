@@ -37379,8 +37379,8 @@
     wireMenubarEntry();
     wireLayoutImagePaste();
     wireNarrowChrome();
-    wireTouch();
     wireBypassLinks();
+    wireTouch();
     wireCoach();
     wireTooltips();
     wireFitToPane();
