@@ -2266,7 +2266,7 @@ workspaces, the data grid, saving); press <kbd>F1</kbd>, or choose
   <figcaption>Export plot: format, filename, and destination.</figcaption>
 </figure>
 <ul>
-<li><b>Format:</b> SVG, PDF, PNG, JPG. (SVG and PDF are vector, so they stay sharp at any size; use them for papers. PNG / JPG add a <b>DPI</b> choice: Screen (96) / 150 / Print (300, the default) / 600, plus Hi-res (1200) for JPG only.) An exported SVG is safe to insert into PowerPoint and Word: the chart's invisible click targets are written as no paint and any rgba color as a hex color plus opacity, the two values Office's SVG importer would otherwise paint solid black once the file is saved and reopened.</li>
+<li><b>Format:</b> SVG, PDF, PNG, JPG. (SVG and PDF are vector, so they stay sharp at any size; use them for papers. PNG / JPG add a <b>DPI</b> choice: Screen (96) / 150 / Print (300, the default) / 600, plus Hi-res (1200) for JPG only.) An exported SVG is safe to insert into PowerPoint and Word: the chart's invisible click targets are written as no paint and any rgba color as a hex color plus opacity, the two values Office's SVG importer would otherwise paint solid black once the file is saved and reopened. Pattern fills (stripes, dots, hatching) leave as plain shapes rather than as repeating tiles, so every viewer and printer draws them without the hairline seams that tiled patterns can show in a PDF.</li>
 <li><b>Filename</b> and <b>Save to</b> (Downloads / Desktop / Documents) are remembered. Files are never overwritten; a duplicate name gets " (2)", " (3)"…</li>
 <li>After <b>Save</b>, the result appears in the small <b>Export Status</b> item under the chart: "Saved &lt;filename&gt; to &lt;folder&gt;".</li>
 </ul>
@@ -2304,7 +2304,10 @@ Notebook pages stay vector all the way into the PDF. An exported SVG, chart or
 layout, is safe to insert into PowerPoint and Word: the chart's invisible click
 targets are written as no paint and any rgba color as a hex color plus opacity,
 the two values Office's SVG importer would otherwise paint solid black once the
-file is saved and reopened.</li>
+file is saved and reopened. Pattern fills (stripes, dots, hatching) leave as
+plain shapes rather than as repeating tiles, in chart and layout exports
+alike, so every viewer and printer draws them without the hairline seams
+that tiled patterns can show in a PDF.</li>
 <li><b>What travels in a .pand project:</b> everything - the data, every
 chart and its styling, layouts, and the Notebook. Your saved palettes and
 chart styles stay in your own library on your machine, so opening someone

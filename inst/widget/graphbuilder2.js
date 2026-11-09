@@ -1420,6 +1420,272 @@
     // GraphBuilder2.exportSafePaints - never on the standalone's chart
     // snapshot, whose bytes the Notebook's drift verdict compares. Probe:
     // standalone/verify/export-paint-check.mjs.
+    // Flatten pattern fills on EXPORT clones (Nov 2026, Torry's SfN poster).
+    // Every SVG-to-PDF writer a Pandion chart passes through - svg2pdf.js in
+    // the standalone, librsvg in jamovi, Chromium for a browser print - turns
+    // an SVG <pattern> into a PDF tiling pattern, and tiling patterns draw
+    // hairline seams between tiles in some viewers and print RIPs at some
+    // zooms (a Quick Look render of the poster showed a white line across
+    // every striped bar). Plain geometry never does. So each pattern-filled
+    // element becomes: the element itself filled with the tile's base color,
+    // a sibling group clipped to the element's own shape carrying the tile
+    // content unrolled across the element (stripes and hatch lines as long
+    // runs, dots and glyphs once per tile), and the element's outline
+    // re-stroked on top. Geometry is read from the element's own attributes
+    // (absolute path commands, rect, circle, ellipse, polygon, line), never
+    // from layout, so it also works on the standalone's detached layout
+    // export root; an unreadable shape conservatively covers its owner svg's
+    // viewBox, and an element that would need more than 20000 tiles keeps its
+    // pattern. Generated ids are a per-root counter, so the harvest string
+    // stays stable across renders (jamovi's chartSnapshot hashes it). Runs on
+    // export clones only, like _gb2ExportSafePaints: never on the live chart,
+    // never on the standalone's chart snapshot. Probe:
+    // standalone/verify/export-pattern-check.mjs.
+    function _gb2ExportFlattenPatterns(root) {
+        if (!root || typeof root.querySelectorAll !== "function") return root;
+        var NS = "http://www.w3.org/2000/svg";
+        var doc = root.ownerDocument || document;
+        var MAX_TILES = 20000;
+        var fmt = function (n) { return String(Math.round(n * 1000) / 1000); };
+        var num = function (el, name, dflt) {
+            var v = parseFloat(el.getAttribute(name));
+            return isFinite(v) ? v : dflt;
+        };
+        var near = function (a, b) { return Math.abs(a - b) < 1e-6; };
+        var PAIRS = { M: 2, L: 2, T: 2, C: 6, S: 4, Q: 4 };
+        var bboxOf = function (el) {
+            var tag = el.tagName.toLowerCase(), x0, y0, x1, y1;
+            var add = function (x, y) {
+                if (!isFinite(x) || !isFinite(y)) return;
+                if (x0 === undefined || x < x0) x0 = x;
+                if (x1 === undefined || x > x1) x1 = x;
+                if (y0 === undefined || y < y0) y0 = y;
+                if (y1 === undefined || y > y1) y1 = y;
+            };
+            if (tag === "rect") {
+                var rx = num(el, "x", 0), ry = num(el, "y", 0);
+                add(rx, ry); add(rx + num(el, "width", 0), ry + num(el, "height", 0));
+            } else if (tag === "circle") {
+                var cr = num(el, "r", 0);
+                add(num(el, "cx", 0) - cr, num(el, "cy", 0) - cr);
+                add(num(el, "cx", 0) + cr, num(el, "cy", 0) + cr);
+            } else if (tag === "ellipse") {
+                add(num(el, "cx", 0) - num(el, "rx", 0), num(el, "cy", 0) - num(el, "ry", 0));
+                add(num(el, "cx", 0) + num(el, "rx", 0), num(el, "cy", 0) + num(el, "ry", 0));
+            } else if (tag === "line") {
+                add(num(el, "x1", 0), num(el, "y1", 0)); add(num(el, "x2", 0), num(el, "y2", 0));
+            } else if (tag === "polygon" || tag === "polyline") {
+                var pts = (el.getAttribute("points") || "").trim().split(/[\s,]+/).map(parseFloat);
+                for (var pi = 0; pi + 1 < pts.length; pi += 2) add(pts[pi], pts[pi + 1]);
+            } else if (tag === "path") {
+                var d = el.getAttribute("d") || "";
+                if (/[mlhvcsqtaz]/.test(d.replace(/\d[eE][-+]?\d+/g, "0"))) return null;
+                var toks = d.match(/[MLHVCSQTAZ]|[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?/g) || [];
+                var cmd = null, buf = [], cx = 0, cy = 0;
+                for (var ti = 0; ti < toks.length; ti++) {
+                    var tk = toks[ti];
+                    if (/^[A-Z]$/.test(tk)) { cmd = tk; buf = []; continue; }
+                    buf.push(parseFloat(tk));
+                    if (cmd === "H" && buf.length === 1) { cx = buf[0]; add(cx, cy); buf = []; }
+                    else if (cmd === "V" && buf.length === 1) { cy = buf[0]; add(cx, cy); buf = []; }
+                    else if (PAIRS[cmd] && buf.length === PAIRS[cmd]) {
+                        for (var qi = 0; qi < buf.length; qi += 2) add(buf[qi], buf[qi + 1]);
+                        cx = buf[buf.length - 2]; cy = buf[buf.length - 1]; buf = [];
+                    } else if (cmd === "A" && buf.length === 7) {
+                        var rr = Math.max(Math.abs(buf[0]), Math.abs(buf[1]));
+                        add(cx - rr, cy - rr); add(cx + rr, cy + rr);
+                        add(buf[5] - rr, buf[6] - rr); add(buf[5] + rr, buf[6] + rr);
+                        cx = buf[5]; cy = buf[6]; buf = [];
+                    }
+                }
+            } else return null;
+            return (x0 === undefined) ? null : { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+        };
+        var canvasBox = function (el) {
+            var owner = el.ownerSVGElement || null;
+            if (owner) {
+                var vb = (owner.getAttribute("viewBox") || "").trim().split(/[\s,]+/).map(parseFloat);
+                if (vb.length === 4 && vb.every(isFinite) && vb[2] > 0 && vb[3] > 0)
+                    return { x: vb[0], y: vb[1], w: vb[2], h: vb[3] };
+                var ow = num(owner, "width", 0), oh = num(owner, "height", 0);
+                if (ow > 0 && oh > 0) return { x: 0, y: 0, w: ow, h: oh };
+            }
+            return { x: -5000, y: -5000, w: 10000, h: 10000 };
+        };
+        var matrixOf = function (pat) {
+            try {
+                var c = pat.patternTransform && pat.patternTransform.baseVal
+                    && pat.patternTransform.baseVal.consolidate();
+                if (c && c.matrix) return { a: c.matrix.a, b: c.matrix.b, c: c.matrix.c, d: c.matrix.d, e: c.matrix.e, f: c.matrix.f };
+            } catch (_eM) {}
+            var t = (pat.getAttribute("patternTransform") || "").trim();
+            var m = /^matrix\(\s*([-\d.e]+)[\s,]+([-\d.e]+)[\s,]+([-\d.e]+)[\s,]+([-\d.e]+)[\s,]+([-\d.e]+)[\s,]+([-\d.e]+)\s*\)$/i.exec(t);
+            if (m) return { a: +m[1], b: +m[2], c: +m[3], d: +m[4], e: +m[5], f: +m[6] };
+            var r = /^rotate\(\s*([-\d.e]+)\s*\)$/i.exec(t);
+            if (r) { var th = (+r[1]) * Math.PI / 180; return { a: Math.cos(th), b: Math.sin(th), c: -Math.sin(th), d: Math.cos(th), e: 0, f: 0 }; }
+            return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+        };
+        var invert = function (m) {
+            var det = m.a * m.d - m.b * m.c;
+            if (!isFinite(det) || Math.abs(det) < 1e-12) return null;
+            return { a: m.d / det, b: -m.b / det, c: -m.c / det, d: m.a / det,
+                     e: (m.c * m.f - m.d * m.e) / det, f: (m.b * m.e - m.a * m.f) / det };
+        };
+        var apply = function (m, x, y) { return [m.a * x + m.c * y + m.e, m.b * x + m.d * y + m.f]; };
+        var isIdentity = function (m) { return near(m.a, 1) && near(m.b, 0) && near(m.c, 0) && near(m.d, 1) && near(m.e, 0) && near(m.f, 0); };
+        var mk = function (tag, attrs) {
+            var e = doc.createElementNS(NS, tag);
+            for (var k in attrs) if (Object.prototype.hasOwnProperty.call(attrs, k)) e.setAttribute(k, attrs[k]);
+            return e;
+        };
+        var stripDataAttrs = function (el) {
+            for (var i = el.attributes.length - 1; i >= 0; i--) {
+                var an = el.attributes[i].name;
+                if (an.indexOf("data-") === 0 || an === "id" || an === "aria-label" || an === "role") el.removeAttribute(an);
+            }
+        };
+        var defsFor = function (el) {
+            var owner = el.ownerSVGElement || root;
+            for (var c = owner.firstChild; c; c = c.nextSibling)
+                if (c.nodeType === 1 && c.tagName.toLowerCase() === "defs") return c;
+            var d = doc.createElementNS(NS, "defs");
+            owner.insertBefore(d, owner.firstChild);
+            return d;
+        };
+        var counter = 0, touched = {};
+        var all = root.querySelectorAll("[fill]");
+        var targets = [];
+        for (var i = 0; i < all.length; i++) {
+            var fm = /^\s*url\(\s*["']?#([^"')]+)["']?\s*\)\s*$/.exec(all[i].getAttribute("fill") || "");
+            if (fm) targets.push([all[i], fm[1]]);
+        }
+        for (var ti2 = 0; ti2 < targets.length; ti2++) {
+            var el = targets[ti2][0], pid = targets[ti2][1];
+            var pat = null;
+            try { pat = root.querySelector("pattern[id=\"" + pid.replace(/["\\]/g, "\\$&") + "\"]"); } catch (_eQ) { pat = null; }
+            if (!pat) continue;
+            if ((pat.getAttribute("patternUnits") || "") !== "userSpaceOnUse") continue;
+            var tileW = num(pat, "width", 0), tileH = num(pat, "height", 0);
+            if (!(tileW > 0 && tileH > 0)) continue;
+            var kids = [];
+            for (var k2 = pat.firstChild; k2; k2 = k2.nextSibling) if (k2.nodeType === 1) kids.push(k2);
+            if (!kids.length) continue;
+            var base = null, content = kids;
+            var k0 = kids[0];
+            if (k0.tagName.toLowerCase() === "rect" && near(num(k0, "x", 0), 0) && near(num(k0, "y", 0), 0)
+                && near(num(k0, "width", 0), tileW) && near(num(k0, "height", 0), tileH)) {
+                base = k0.getAttribute("fill") || "#000000"; content = kids.slice(1);
+            }
+            var box = bboxOf(el) || canvasBox(el);
+            var m = matrixOf(pat), inv = invert(m);
+            if (!inv) continue;
+            var cs = [apply(inv, box.x, box.y), apply(inv, box.x + box.w, box.y),
+                      apply(inv, box.x, box.y + box.h), apply(inv, box.x + box.w, box.y + box.h)];
+            var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+            for (var ci = 0; ci < 4; ci++) {
+                minX = Math.min(minX, cs[ci][0]); maxX = Math.max(maxX, cs[ci][0]);
+                minY = Math.min(minY, cs[ci][1]); maxY = Math.max(maxY, cs[ci][1]);
+            }
+            var i0 = Math.floor(minX / tileW) - 1, i1 = Math.ceil(maxX / tileW) + 1;
+            var j0 = Math.floor(minY / tileH) - 1, j1 = Math.ceil(maxY / tileH) + 1;
+            var inner = mk("g", {});
+            if (!isIdentity(m)) inner.setAttribute("transform", "matrix(" + [m.a, m.b, m.c, m.d, m.e, m.f].map(fmt).join(" ") + ")");
+            var spanY0 = (j0) * tileH, spanY1 = (j1 + 1) * tileH, spanX0 = i0 * tileW, spanX1 = (i1 + 1) * tileW;
+            var allLines = content.length > 0 && content.every(function (c) {
+                if (c.tagName.toLowerCase() !== "line") return false;
+                var hx = near(num(c, "y1", 0), num(c, "y2", 0)) && near(Math.min(num(c, "x1", 0), num(c, "x2", 0)), 0) && near(Math.max(num(c, "x1", 0), num(c, "x2", 0)), tileW);
+                var vx = near(num(c, "x1", 0), num(c, "x2", 0)) && near(Math.min(num(c, "y1", 0), num(c, "y2", 0)), 0) && near(Math.max(num(c, "y1", 0), num(c, "y2", 0)), tileH);
+                return hx || vx;
+            });
+            var oneStripe = content.length === 1 && content[0].tagName.toLowerCase() === "rect"
+                && near(num(content[0], "y", 0), 0) && near(num(content[0], "height", 0), tileH);
+            var made = 0, ok = true;
+            if (oneStripe) {
+                var sr = content[0];
+                for (var si = i0; si <= i1; si++) {
+                    var r1 = sr.cloneNode(false); stripDataAttrs(r1);
+                    r1.setAttribute("x", fmt(si * tileW + num(sr, "x", 0)));
+                    r1.setAttribute("y", fmt(spanY0)); r1.setAttribute("height", fmt(spanY1 - spanY0));
+                    inner.appendChild(r1); made++;
+                }
+            } else if (allLines) {
+                for (var li = 0; li < content.length; li++) {
+                    var ln = content[li];
+                    if (near(num(ln, "y1", 0), num(ln, "y2", 0))) {
+                        for (var lj = j0; lj <= j1; lj++) {
+                            var h1 = ln.cloneNode(false); stripDataAttrs(h1);
+                            var yy = lj * tileH + num(ln, "y1", 0);
+                            h1.setAttribute("x1", fmt(spanX0)); h1.setAttribute("x2", fmt(spanX1));
+                            h1.setAttribute("y1", fmt(yy)); h1.setAttribute("y2", fmt(yy));
+                            inner.appendChild(h1); made++;
+                        }
+                    } else {
+                        for (var lk = i0; lk <= i1; lk++) {
+                            var v1 = ln.cloneNode(false); stripDataAttrs(v1);
+                            var xx = lk * tileW + num(ln, "x1", 0);
+                            v1.setAttribute("y1", fmt(spanY0)); v1.setAttribute("y2", fmt(spanY1));
+                            v1.setAttribute("x1", fmt(xx)); v1.setAttribute("x2", fmt(xx));
+                            inner.appendChild(v1); made++;
+                        }
+                    }
+                }
+            } else {
+                var tiles = (i1 - i0 + 1) * (j1 - j0 + 1);
+                if (tiles > MAX_TILES || tiles < 1) ok = false;
+                else {
+                    for (var gi = i0; gi <= i1; gi++) {
+                        for (var gj = j0; gj <= j1; gj++) {
+                            var tg = mk("g", { transform: "translate(" + fmt(gi * tileW) + " " + fmt(gj * tileH) + ")" });
+                            for (var ck = 0; ck < content.length; ck++) {
+                                var cc = content[ck].cloneNode(true); stripDataAttrs(cc); tg.appendChild(cc);
+                            }
+                            inner.appendChild(tg); made++;
+                        }
+                    }
+                }
+            }
+            if (!ok) continue;
+            var clipId = "gb2flat-" + (counter++);
+            var cp = mk("clipPath", { id: clipId });
+            var shape = el.cloneNode(false);
+            stripDataAttrs(shape);
+            ["fill", "fill-opacity", "stroke", "stroke-width", "stroke-opacity", "stroke-dasharray",
+             "stroke-linecap", "stroke-linejoin", "transform", "clip-path", "opacity", "style", "filter", "mask",
+             "tabindex", "pointer-events", "cursor"].forEach(function (an) { shape.removeAttribute(an); });
+            cp.appendChild(shape);
+            defsFor(el).appendChild(cp);
+            var clipG = mk("g", { "clip-path": "url(#" + clipId + ")" });
+            clipG.appendChild(inner);
+            var wrap = mk("g", { "data-gb2-flat": "1" });
+            var elT = el.getAttribute("transform");
+            if (elT) wrap.setAttribute("transform", elT);
+            var op = num(el, "opacity", 1) * num(el, "fill-opacity", 1);
+            if (op < 1) wrap.setAttribute("opacity", fmt(Math.max(0, op)));
+            wrap.appendChild(clipG);
+            el.parentNode.insertBefore(wrap, el.nextSibling);
+            var st = el.getAttribute("stroke");
+            if (st && st !== "none" && num(el, "stroke-width", 1) > 0) {
+                var outline = el.cloneNode(false);
+                stripDataAttrs(outline);
+                outline.setAttribute("fill", "none");
+                outline.setAttribute("data-gb2-flat", "outline");
+                wrap.parentNode.insertBefore(outline, wrap.nextSibling);
+                el.setAttribute("stroke", "none");
+            }
+            el.setAttribute("fill", base || "none");
+            touched[pid] = pat;
+        }
+        for (var tid in touched) {
+            if (!Object.prototype.hasOwnProperty.call(touched, tid)) continue;
+            var still = false;
+            try {
+                var esc = tid.replace(/["\\]/g, "\\$&");
+                still = !!root.querySelector("[fill=\"url(#" + esc + ")\"], [stroke=\"url(#" + esc + ")\"]");
+            } catch (_eS) { still = true; }
+            if (!still && touched[tid].parentNode) touched[tid].parentNode.removeChild(touched[tid]);
+        }
+        return root;
+    }
     function _gb2ExportSafePaints(root) {
         if (!root || typeof root.getElementsByTagName !== "function") return root;
         var attrs = ["fill", "stroke", "stop-color"];
@@ -11991,6 +12257,10 @@
             // PowerPoint-safe paints: see _gb2ExportSafePaints (module scope,
             // shared with the standalone's layout export).
             try { _gb2ExportSafePaints(copy); } catch (_ePptPaint) {}
+            // Pattern fills become plain clipped geometry on export: see
+            // _gb2ExportFlattenPatterns (module scope, shared with the
+            // standalone's layout export).
+            try { _gb2ExportFlattenPatterns(copy); } catch (_ePatFlat) {}
             // The large-N scatter fast layer is a canvas in a
             // foreignObject: canvas pixels survive neither cloneNode
             // nor XMLSerializer, so swap it for a high-res raster
@@ -109895,5 +110165,6 @@
     root.GraphBuilder2 = { render: render,
         xmlSafeText: _gb2XmlSafeText,
         prepareSvgForExport: _gb2PrepareSvgForExport,
-        exportSafePaints: _gb2ExportSafePaints };
+        exportSafePaints: _gb2ExportSafePaints,
+        exportFlattenPatterns: _gb2ExportFlattenPatterns };
 })(typeof window !== "undefined" ? window : this);
