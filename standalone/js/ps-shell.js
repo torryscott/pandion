@@ -1364,10 +1364,24 @@
     var want = pref === "beside" ? true
              : pref === "below" ? false
              : (STATS_WIDE != null ? DOCK_BESIDE : dockAutoBeside(DOCK_BESIDE));
+    // The dock's home is the settings column, and below 760px that column
+    // is a drawer: display none until its button is pressed. A panel docked
+    // there opens where nobody can see it. A phone held sideways is both
+    // narrow and short, so the automatic rule chose the column and a tap on
+    // a bar showed nothing at all (found by mobile-check, Nov 2026). The
+    // same media query the stylesheet uses decides it, so the two can never
+    // disagree, and a stored Beside preference waits for a wider window.
+    if (want && dockColumnIsDrawer()) want = false;
     var changed = want !== DOCK_BESIDE;
     DOCK_BESIDE = want;
     try { document.body.classList.toggle("ps-dock-beside", want); } catch (e) {}
     return changed;
+  }
+  function dockColumnIsDrawer() {
+    try {
+      return !!(window.matchMedia &&
+        window.matchMedia("(max-width: 760px)").matches);
+    } catch (e) { return false; }
   }
   function panelDockWanted() { return DOCK_BESIDE; }
   function dockSlot() { return el("ps-engine-dock-slot"); }
