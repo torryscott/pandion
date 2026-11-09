@@ -12,8 +12,8 @@
      "under24": [],
      "under24Spaced": 1,
      "under44": 2,
-     "tinyText": 7,
-     "minText": 10.5,
+     "tinyText": 0,
+     "minText": 13,
      "zoomInputs": [],
      "axe": []
     },
@@ -22,18 +22,18 @@
      "vh": 664,
      "scrollW": 390,
      "overflowX": false,
-     "targets": 18,
+     "targets": 16,
      "under24": [],
-     "under24Spaced": 5,
-     "under44": 18,
-     "tinyText": 10,
-     "minText": 10,
+     "under24Spaced": 0,
+     "under44": 8,
+     "tinyText": 0,
+     "minText": 13,
      "zoomInputs": [],
      "chart": {
       "w": 369,
       "h": 251,
       "scale": 0.51,
-      "visible": 0.58,
+      "visible": 0.86,
       "texts": 11,
       "textMin": 7.7,
       "textUnder9": 11,
@@ -46,18 +46,18 @@
      "vh": 664,
      "scrollW": 390,
      "overflowX": false,
-     "targets": 36,
+     "targets": 34,
      "under24": [],
-     "under24Spaced": 17,
-     "under44": 30,
-     "tinyText": 22,
-     "minText": 9,
+     "under24Spaced": 0,
+     "under44": 22,
+     "tinyText": 0,
+     "minText": 13,
      "zoomInputs": [],
      "chart": {
       "w": 369,
       "h": 251,
       "scale": 0.51,
-      "visible": 0.83,
+      "visible": 0.75,
       "texts": 11,
       "textMin": 7.7,
       "textUnder9": 11,
@@ -69,7 +69,7 @@
       "h": 279,
       "w": 372,
       "tabs": 5,
-      "clippedTabs": 1
+      "clippedTabs": 0
      },
      "axe": []
     },
@@ -81,9 +81,9 @@
      "targets": 15,
      "under24": [],
      "under24Spaced": 3,
-     "under44": 14,
-     "tinyText": 26,
-     "minText": 10,
+     "under44": 3,
+     "tinyText": 0,
+     "minText": 12,
      "zoomInputs": [],
      "axe": []
     },
@@ -94,13 +94,11 @@
      "overflowX": false,
      "targets": 14,
      "under24": [],
-     "under24Spaced": 5,
-     "under44": 13,
-     "tinyText": 10,
-     "minText": 10,
-     "zoomInputs": [
-      "select: Fit page 50% 75% 100% 125% 150% 175% 200 [11.5]"
-     ],
+     "under24Spaced": 0,
+     "under44": 5,
+     "tinyText": 0,
+     "minText": 13,
+     "zoomInputs": [],
      "axe": []
     },
     "layout": {
@@ -108,29 +106,32 @@
      "vh": 664,
      "scrollW": 390,
      "overflowX": false,
-     "targets": 19,
+     "targets": 16,
      "under24": [],
-     "under24Spaced": 3,
-     "under44": 18,
-     "tinyText": 7,
+     "under24Spaced": 1,
+     "under44": 9,
+     "tinyText": 1,
      "minText": 10,
-     "zoomInputs": [
-      "select: Fit page 25% 50% 75% 100% 125% 150% 175% [11.5]"
-     ],
+     "zoomInputs": [],
      "axe": []
     }
    },
    "touch": {
     "coachDismissedByTap": true,
     "barTapOpensEditor": true,
-    "labelDragMoves": true,
-    "labelDragHoldsPage": true,
-    "longPressOpensMenu": false,
+    "swipeLeavesChartAlone": true,
+    "wobblyTapOpensEditor": true,
+    "pickerDragWorks": true,
+    "holdDragMovesLabel": true,
+    "holdShowsCue": true,
+    "holdDragReordersBars": true,
+    "longPressOpensMenu": true,
+    "longPressLiftIsQuiet": true,
     "cellTapSelects": true,
     "notebookTapSelects": true,
     "notebookNoteEdits": true,
-    "layoutItemDragMoves": true,
-    "layoutDragHoldsPage": true
+    "layoutSwipeLeavesItem": true,
+    "layoutItemDragMoves": true
    }
   },
   "phone-landscape": {
@@ -140,12 +141,12 @@
      "vh": 342,
      "scrollW": 750,
      "overflowX": false,
-     "targets": 5,
+     "targets": 4,
      "under24": [],
      "under24Spaced": 1,
      "under44": 2,
-     "tinyText": 3,
-     "minText": 10.5,
+     "tinyText": 0,
+     "minText": 13,
      "zoomInputs": []
     },
     "chart": {
@@ -153,20 +154,18 @@
      "vh": 342,
      "scrollW": 750,
      "overflowX": false,
-     "targets": 21,
+     "targets": 19,
      "under24": [],
-     "under24Spaced": 5,
-     "under44": 21,
-     "tinyText": 8,
-     "minText": 10,
-     "zoomInputs": [
-      "select: Chart view zoom [11.5]"
-     ],
+     "under24Spaced": 0,
+     "under44": 10,
+     "tinyText": 0,
+     "minText": 13,
+     "zoomInputs": [],
      "chart": {
       "w": 720,
       "h": 490,
       "scale": 1,
-      "visible": 0.13,
+      "visible": 0.08,
       "texts": 11,
       "textMin": 15,
       "textUnder9": 0,
@@ -180,16 +179,16 @@
      "overflowX": false,
      "targets": 8,
      "under24": [],
-     "under24Spaced": 1,
-     "under44": 8,
-     "tinyText": 6,
-     "minText": 10,
+     "under24Spaced": 0,
+     "under44": 1,
+     "tinyText": 0,
+     "minText": 13,
      "zoomInputs": [],
      "chart": {
       "w": 720,
       "h": 490,
       "scale": 1,
-      "visible": 0.5,
+      "visible": 0.42,
       "texts": 11,
       "textMin": 15,
       "textUnder9": 0,
@@ -212,9 +211,9 @@
      "targets": 16,
      "under24": [],
      "under24Spaced": 4,
-     "under44": 15,
-     "tinyText": 14,
-     "minText": 10,
+     "under44": 4,
+     "tinyText": 0,
+     "minText": 12,
      "zoomInputs": []
     },
     "notebook": {
@@ -224,13 +223,11 @@
      "overflowX": false,
      "targets": 9,
      "under24": [],
-     "under24Spaced": 1,
-     "under44": 9,
-     "tinyText": 5,
-     "minText": 10,
-     "zoomInputs": [
-      "select: Fit page 50% 75% 100% 125% 150% 175% 200 [11.5]"
-     ]
+     "under24Spaced": 0,
+     "under44": 1,
+     "tinyText": 0,
+     "minText": 13,
+     "zoomInputs": []
     },
     "layout": {
      "vw": 750,
@@ -239,26 +236,29 @@
      "overflowX": false,
      "targets": 18,
      "under24": [],
-     "under24Spaced": 3,
-     "under44": 18,
-     "tinyText": 7,
+     "under24Spaced": 1,
+     "under44": 10,
+     "tinyText": 1,
      "minText": 10,
-     "zoomInputs": [
-      "select: Fit page 25% 50% 75% 100% 125% 150% 175% [11.5]"
-     ]
+     "zoomInputs": []
     }
    },
    "touch": {
     "coachDismissedByTap": true,
     "barTapOpensEditor": true,
-    "labelDragMoves": true,
-    "labelDragHoldsPage": true,
-    "longPressOpensMenu": false,
+    "swipeLeavesChartAlone": true,
+    "wobblyTapOpensEditor": true,
+    "pickerDragWorks": true,
+    "holdDragMovesLabel": true,
+    "holdShowsCue": true,
+    "holdDragReordersBars": true,
+    "longPressOpensMenu": true,
+    "longPressLiftIsQuiet": true,
     "cellTapSelects": true,
     "notebookTapSelects": true,
     "notebookNoteEdits": true,
-    "layoutItemDragMoves": true,
-    "layoutDragHoldsPage": true
+    "layoutSwipeLeavesItem": true,
+    "layoutItemDragMoves": true
    }
   },
   "android": {
@@ -272,8 +272,8 @@
      "under24": [],
      "under24Spaced": 1,
      "under44": 2,
-     "tinyText": 9,
-     "minText": 10.5,
+     "tinyText": 0,
+     "minText": 13,
      "zoomInputs": []
     },
     "chart": {
@@ -281,18 +281,18 @@
      "vh": 839,
      "scrollW": 412,
      "overflowX": false,
-     "targets": 19,
+     "targets": 16,
      "under24": [],
-     "under24Spaced": 5,
-     "under44": 19,
-     "tinyText": 10,
-     "minText": 10,
+     "under24Spaced": 0,
+     "under44": 8,
+     "tinyText": 0,
+     "minText": 13,
      "zoomInputs": [],
      "chart": {
       "w": 390,
       "h": 265,
       "scale": 0.54,
-      "visible": 0.69,
+      "visible": 1,
       "texts": 11,
       "textMin": 8.1,
       "textUnder9": 9,
@@ -304,12 +304,12 @@
      "vh": 839,
      "scrollW": 412,
      "overflowX": false,
-     "targets": 44,
+     "targets": 35,
      "under24": [],
-     "under24Spaced": 19,
-     "under44": 38,
-     "tinyText": 28,
-     "minText": 9,
+     "under24Spaced": 0,
+     "under44": 23,
+     "tinyText": 0,
+     "minText": 13,
      "zoomInputs": [],
      "chart": {
       "w": 390,
@@ -327,7 +327,7 @@
       "h": 352,
       "w": 394,
       "tabs": 5,
-      "clippedTabs": 1
+      "clippedTabs": 0
      }
     },
     "data": {
@@ -338,9 +338,9 @@
      "targets": 15,
      "under24": [],
      "under24Spaced": 3,
-     "under44": 14,
-     "tinyText": 32,
-     "minText": 10,
+     "under44": 3,
+     "tinyText": 0,
+     "minText": 12,
      "zoomInputs": []
     },
     "notebook": {
@@ -350,13 +350,11 @@
      "overflowX": false,
      "targets": 14,
      "under24": [],
-     "under24Spaced": 5,
-     "under44": 13,
-     "tinyText": 10,
-     "minText": 10,
-     "zoomInputs": [
-      "select: Fit page 50% 75% 100% 125% 150% 175% 200 [11.5]"
-     ]
+     "under24Spaced": 0,
+     "under44": 5,
+     "tinyText": 0,
+     "minText": 13,
+     "zoomInputs": []
     },
     "layout": {
      "vw": 412,
@@ -365,26 +363,29 @@
      "overflowX": false,
      "targets": 19,
      "under24": [],
-     "under24Spaced": 3,
-     "under44": 18,
-     "tinyText": 7,
+     "under24Spaced": 1,
+     "under44": 10,
+     "tinyText": 1,
      "minText": 10,
-     "zoomInputs": [
-      "select: Fit page 25% 50% 75% 100% 125% 150% 175% [11.5]"
-     ]
+     "zoomInputs": []
     }
    },
    "touch": {
     "coachDismissedByTap": true,
     "barTapOpensEditor": true,
-    "labelDragMoves": true,
-    "labelDragHoldsPage": true,
-    "longPressOpensMenu": false,
+    "swipeLeavesChartAlone": true,
+    "wobblyTapOpensEditor": true,
+    "pickerDragWorks": true,
+    "holdDragMovesLabel": true,
+    "holdShowsCue": true,
+    "holdDragReordersBars": true,
+    "longPressOpensMenu": true,
+    "longPressLiftIsQuiet": true,
     "cellTapSelects": true,
     "notebookTapSelects": true,
     "notebookNoteEdits": true,
-    "layoutItemDragMoves": true,
-    "layoutDragHoldsPage": true
+    "layoutSwipeLeavesItem": true,
+    "layoutItemDragMoves": true
    }
   },
   "tablet": {
@@ -398,8 +399,8 @@
      "under24": [],
      "under24Spaced": 1,
      "under44": 2,
-     "tinyText": 9,
-     "minText": 10.5,
+     "tinyText": 0,
+     "minText": 13,
      "zoomInputs": [],
      "axe": []
     },
@@ -408,20 +409,18 @@
      "vh": 1024,
      "scrollW": 768,
      "overflowX": false,
-     "targets": 39,
+     "targets": 38,
      "under24": [],
-     "under24Spaced": 12,
-     "under44": 39,
-     "tinyText": 26,
-     "minText": 10,
-     "zoomInputs": [
-      "select: Compare Groups Repeated Measures Scatter [12.5]"
-     ],
+     "under24Spaced": 5,
+     "under44": 21,
+     "tinyText": 0,
+     "minText": 13,
+     "zoomInputs": [],
      "chart": {
       "w": 344,
       "h": 234,
       "scale": 0.48,
-      "visible": 0.54,
+      "visible": 1,
       "texts": 11,
       "textMin": 7.2,
       "textUnder9": 11,
@@ -434,16 +433,13 @@
      "vh": 1024,
      "scrollW": 768,
      "overflowX": false,
-     "targets": 68,
+     "targets": 66,
      "under24": [],
-     "under24Spaced": 30,
-     "under44": 62,
-     "tinyText": 43,
-     "minText": 9,
-     "zoomInputs": [
-      "input: Hex color code [11.0]",
-      "select: Compare Groups Repeated Measures Scatter [12.5]"
-     ],
+     "under24Spaced": 5,
+     "under44": 43,
+     "tinyText": 0,
+     "minText": 13,
+     "zoomInputs": [],
      "chart": {
       "w": 344,
       "h": 234,
@@ -460,7 +456,7 @@
       "h": 430,
       "w": 347,
       "tabs": 5,
-      "clippedTabs": 1
+      "clippedTabs": 0
      },
      "axe": []
     },
@@ -469,15 +465,15 @@
      "vh": 1024,
      "scrollW": 768,
      "overflowX": false,
-     "targets": 27,
+     "targets": 26,
      "under24": [
-      "button: Resize the project rail [5x922]",
-      "button: Resize the settings panel [5x922]"
+      "button: Resize the project rail [5x899]",
+      "button: Resize the settings panel [5x899]"
      ],
      "under24Spaced": 4,
-     "under44": 26,
-     "tinyText": 42,
-     "minText": 10,
+     "under44": 7,
+     "tinyText": 0,
+     "minText": 12,
      "zoomInputs": [],
      "axe": [
       "label-content-name-mismatch (1)"
@@ -490,14 +486,11 @@
      "overflowX": false,
      "targets": 28,
      "under24": [],
-     "under24Spaced": 8,
-     "under44": 26,
-     "tinyText": 22,
-     "minText": 10,
-     "zoomInputs": [
-      "select: Fit page 50% 75% 100% 125% 150% 175% 200 [11.5]",
-      "textarea: #ps-pininsp-bnote [11.5]"
-     ],
+     "under24Spaced": 3,
+     "under44": 9,
+     "tinyText": 0,
+     "minText": 13,
+     "zoomInputs": [],
      "axe": [
       "label-content-name-mismatch (1)"
      ]
@@ -509,23 +502,11 @@
      "overflowX": false,
      "targets": 49,
      "under24": [],
-     "under24Spaced": 10,
-     "under44": 48,
-     "tinyText": 38,
+     "under24Spaced": 6,
+     "under44": 26,
+     "tinyText": 1,
      "minText": 10,
-     "zoomInputs": [
-      "input: #ps-ctx-lh [11.5]",
-      "input: #ps-ctx-lw [11.5]",
-      "input: #ps-ctx-lx [11.5]",
-      "input: #ps-ctx-ly [11.5]",
-      "input: Page height [11.5]",
-      "input: Page margin inset [11.5]",
-      "input: Page width [11.5]",
-      "select: 4 px 8 px 12 px 16 px 24 px [11.5]",
-      "select: Canvas Canvas portrait Presentation 16:9 [11.5]",
-      "select: Fit page 25% 50% 75% 100% 125% 150% 175% [11.5]",
-      "select: Landscape Portrait [11.5]"
-     ],
+     "zoomInputs": [],
      "axe": [
       "label-content-name-mismatch (1)"
      ]
@@ -534,14 +515,19 @@
    "touch": {
     "coachDismissedByTap": true,
     "barTapOpensEditor": true,
-    "labelDragMoves": true,
-    "labelDragHoldsPage": true,
-    "longPressOpensMenu": false,
+    "swipeLeavesChartAlone": true,
+    "wobblyTapOpensEditor": true,
+    "pickerDragWorks": true,
+    "holdDragMovesLabel": true,
+    "holdShowsCue": true,
+    "holdDragReordersBars": true,
+    "longPressOpensMenu": true,
+    "longPressLiftIsQuiet": true,
     "cellTapSelects": true,
     "notebookTapSelects": true,
     "notebookNoteEdits": true,
-    "layoutItemDragMoves": true,
-    "layoutDragHoldsPage": true
+    "layoutSwipeLeavesItem": true,
+    "layoutItemDragMoves": true
    }
   },
   "tablet-landscape": {
@@ -555,8 +541,8 @@
      "under24": [],
      "under24Spaced": 1,
      "under44": 2,
-     "tinyText": 9,
-     "minText": 10.5,
+     "tinyText": 0,
+     "minText": 13,
      "zoomInputs": []
     },
     "chart": {
@@ -564,20 +550,20 @@
      "vh": 768,
      "scrollW": 1024,
      "overflowX": false,
-     "targets": 42,
-     "under24": [],
-     "under24Spaced": 12,
-     "under44": 42,
-     "tinyText": 26,
-     "minText": 10,
-     "zoomInputs": [
-      "select: Compare Groups Repeated Measures Scatter [12.5]"
+     "targets": 40,
+     "under24": [
+      "button: Resize the project rail [5x627]"
      ],
+     "under24Spaced": 4,
+     "under44": 23,
+     "tinyText": 0,
+     "minText": 13,
+     "zoomInputs": [],
      "chart": {
       "w": 456,
       "h": 310,
       "scale": 0.63,
-      "visible": 0.77,
+      "visible": 1,
       "texts": 11,
       "textMin": 9.5,
       "textUnder9": 0,
@@ -589,21 +575,20 @@
      "vh": 768,
      "scrollW": 1024,
      "overflowX": false,
-     "targets": 69,
-     "under24": [],
-     "under24Spaced": 28,
-     "under44": 63,
-     "tinyText": 44,
-     "minText": 9,
-     "zoomInputs": [
-      "input: Hex color code [11.0]",
-      "select: Compare Groups Repeated Measures Scatter [12.5]"
+     "targets": 61,
+     "under24": [
+      "button: Resize the project rail [5x627]"
      ],
+     "under24Spaced": 4,
+     "under44": 40,
+     "tinyText": 0,
+     "minText": 13,
+     "zoomInputs": [],
      "chart": {
       "w": 456,
       "h": 310,
       "scale": 0.63,
-      "visible": 1,
+      "visible": 0.92,
       "texts": 11,
       "textMin": 9.5,
       "textUnder9": 0,
@@ -612,7 +597,7 @@
      "editor": {
       "open": true,
       "visible": 1,
-      "h": 307,
+      "h": 323,
       "w": 461,
       "tabs": 5,
       "clippedTabs": 0
@@ -623,15 +608,15 @@
      "vh": 768,
      "scrollW": 1024,
      "overflowX": false,
-     "targets": 29,
+     "targets": 28,
      "under24": [
-      "button: Resize the project rail [5x666]",
-      "button: Resize the settings panel [5x666]"
+      "button: Resize the project rail [5x643]",
+      "button: Resize the settings panel [5x643]"
      ],
      "under24Spaced": 5,
-     "under44": 28,
-     "tinyText": 42,
-     "minText": 10,
+     "under44": 8,
+     "tinyText": 0,
+     "minText": 12,
      "zoomInputs": []
     },
     "notebook": {
@@ -641,56 +626,46 @@
      "overflowX": false,
      "targets": 28,
      "under24": [
-      "button: Resize the project rail [5x666]"
+      "button: Resize the project rail [5x643]"
      ],
-     "under24Spaced": 7,
-     "under44": 26,
-     "tinyText": 22,
-     "minText": 10,
-     "zoomInputs": [
-      "select: Fit page 50% 75% 100% 125% 150% 175% 200 [11.5]",
-      "textarea: #ps-pininsp-bnote [11.5]"
-     ]
+     "under24Spaced": 2,
+     "under44": 9,
+     "tinyText": 0,
+     "minText": 13,
+     "zoomInputs": []
     },
     "layout": {
      "vw": 1024,
      "vh": 768,
      "scrollW": 1024,
      "overflowX": false,
-     "targets": 49,
+     "targets": 47,
      "under24": [
-      "button: Resize the project rail [5x666]"
+      "button: Resize the project rail [5x643]"
      ],
-     "under24Spaced": 7,
-     "under44": 48,
-     "tinyText": 38,
+     "under24Spaced": 3,
+     "under44": 24,
+     "tinyText": 1,
      "minText": 10,
-     "zoomInputs": [
-      "input: #ps-ctx-lh [11.5]",
-      "input: #ps-ctx-lw [11.5]",
-      "input: #ps-ctx-lx [11.5]",
-      "input: #ps-ctx-ly [11.5]",
-      "input: Page height [11.5]",
-      "input: Page margin inset [11.5]",
-      "input: Page width [11.5]",
-      "select: 4 px 8 px 12 px 16 px 24 px [11.5]",
-      "select: Canvas Canvas portrait Presentation 16:9 [11.5]",
-      "select: Fit page 25% 50% 75% 100% 125% 150% 175% [11.5]",
-      "select: Landscape Portrait [11.5]"
-     ]
+     "zoomInputs": []
     }
    },
    "touch": {
     "coachDismissedByTap": true,
     "barTapOpensEditor": true,
-    "labelDragMoves": true,
-    "labelDragHoldsPage": true,
-    "longPressOpensMenu": false,
+    "swipeLeavesChartAlone": true,
+    "wobblyTapOpensEditor": true,
+    "pickerDragWorks": true,
+    "holdDragMovesLabel": true,
+    "holdShowsCue": true,
+    "holdDragReordersBars": true,
+    "longPressOpensMenu": true,
+    "longPressLiftIsQuiet": true,
     "cellTapSelects": true,
     "notebookTapSelects": true,
     "notebookNoteEdits": true,
-    "layoutItemDragMoves": true,
-    "layoutDragHoldsPage": true
+    "layoutSwipeLeavesItem": true,
+    "layoutItemDragMoves": true
    }
   }
  }

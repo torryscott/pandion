@@ -49092,6 +49092,27 @@
                     return;
                 }
             } catch (_eSS) {}
+            // Touch presses the HOST has already ruled on (data.touchHost,
+            // standalone only; jamovi never ships the key, so every line
+            // here is dead there). The element resolvers run their release
+            // branch on pointercancel exactly as on pointerup, which made
+            // two wrong selections on a touch screen, and they are refused
+            // HERE for the same reason as the stats choke above:
+            //   1. a press the browser CANCELLED because it took the touch
+            //      for a page scroll counted as a click, so swiping the page
+            //      past a bar opened that bar's editor;
+            //   2. a press the host answered with its long-press menu
+            //      selected the part again when the finger lifted.
+            // The host stamps both from its own window-level listeners and
+            // clears them on the next press; this only reads them. Clearing
+            // a selection (null) always passes.
+            try {
+                if (data && data.touchHost === true && typeof sel === "string" &&
+                    (window.__gb2_touchPressConsumed === true ||
+                     (Date.now() - (window.__gb2_touchCancelAt || 0)) < 400)) {
+                    return;
+                }
+            } catch (_eTH) {}
             opts = opts || {};
             // Blur any element currently focused inside the inspector
             // panel before we rebuild its contents. The panel content

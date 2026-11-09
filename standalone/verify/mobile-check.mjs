@@ -43,6 +43,13 @@
 // drawer); PS_MOBILE_DEVICES=phone-landscape with PS_PAGE at a page from
 // before the fix fails "a tap on a bar opens its editor".
 //
+// CONTROL for the engine's part (step 1): PS_EXPECT_BROKEN=touchhost withholds
+// the touchHost payload key at the render boundary, which leaves the engine
+// exactly as it was before its selection guard while the new shell stays in
+// place. It passes only if the two rules that need the guard go red: a swipe
+// on a bar opens that bar's editor again, and the finger lifting off the
+// long-press menu selects the bar again.
+//
 // Chromium only, on purpose: the touch drags ride CDP touch events, which
 // go through the browser's real gesture pipeline (pan detection, pointer
 // cancel), and no other engine exposes them. What Safari does differently
@@ -77,6 +84,7 @@ const pageUrl = 'file://' + (process.env.PS_PAGE ? path.resolve(process.env.PS_P
 const BASELINE_PATH = path.join(here, 'mobile-baseline.json');
 const WRITE = process.env.PS_MOBILE_WRITE_BASELINE === '1';
 const CONTROL = process.env.PS_EXPECT_BROKEN === '1';
+const CONTROL_TH = process.env.PS_EXPECT_BROKEN === 'touchhost';
 const OUT = process.env.PS_MOBILE_OUT || '';
 if (OUT) mkdirSync(OUT, { recursive: true });
 
@@ -92,7 +100,7 @@ const ALL_DEVICES = [
     { id: 'tablet-landscape', profile: 'iPad Mini landscape', axe: false }
 ];
 const want = (process.env.PS_MOBILE_DEVICES || '').split(',').map(s => s.trim()).filter(Boolean);
-const DEVICES = CONTROL ? ALL_DEVICES.slice(0, 1)
+const DEVICES = (CONTROL || CONTROL_TH) ? ALL_DEVICES.slice(0, 1)
     : (want.length ? ALL_DEVICES.filter(d => want.includes(d.id)) : ALL_DEVICES);
 
 // ---------------------------------------------------------------- verdicts
@@ -313,6 +321,20 @@ async function runDevice(browser, dev) {
     const errors = [];
     page.on('pageerror', e => errors.push(String(e).slice(0, 160)));
     page.on('filechooser', () => {});
+    if (CONTROL_TH) await page.addInitScript(() => {
+        // The engine's half of the touch rules is gated on this payload key.
+        // Withheld at the render boundary, the engine is exactly as it was
+        // before the guard, with the new shell still in place.
+        let gb;
+        Object.defineProperty(window, 'GraphBuilder2', { configurable: true, get() { return gb; }, set(v) {
+            gb = v;
+            if (v && typeof v.render === 'function' && !v.__mobNoTouchHost) {
+                const r = v.render;
+                v.render = function (id, payload) { try { if (payload) delete payload.touchHost; } catch (e) {} return r.apply(this, arguments); };
+                v.__mobNoTouchHost = true;
+            }
+        } });
+    });
     const tag = dev.id + ': ';
     const narrow = profile.viewport.width <= 760;
     // A toast is on screen for a few seconds after an action. Measured
@@ -326,7 +348,7 @@ async function runDevice(browser, dev) {
         const m = await page.evaluate(measureScreen, { ...(opts || {}), deviceW: profile.viewport.width });
         if (dev.axe) m.axe = await runAxe(page);
         result.screens[name] = m;
-        if (OUT) await page.screenshot({ path: path.join(OUT, dev.id + '-' + name + '.png') });
+        if (OUT) await page.screenshot({ path: path.join(OUT, dev.id + '-' + name + '.png'), timeout: 8000 }).catch(() => {});
         check(dev.id + '/' + name + '/overflowX', !m.overflowX,
             tag + name + ': nothing is wider than the screen (' + m.scrollW + ' in ' + profile.viewport.width + ')');
         return m;
@@ -351,6 +373,8 @@ async function runDevice(browser, dev) {
 
     // 1. the start centre, as a first visit meets it
     check(dev.id + '/start/welcome', await page.locator('#ps-welcome').isVisible(), tag + 'the start centre opens on a first visit');
+    check(dev.id + '/touchmode', await page.evaluate(() => document.body.classList.contains('ps-touch')),
+        tag + 'the touch density is on (the primary pointer is a finger)');
     if (CONTROL) await page.evaluate(() => { const d = document.createElement('div'); d.id = 'ps-mobile-control-wide'; d.style.cssText = 'position:absolute;left:0;top:0;width:900px;height:1px'; document.body.appendChild(d); });
     await screen('start');
     if (CONTROL) { await unctl(); await page.waitForTimeout(200); }
@@ -380,47 +404,148 @@ async function runDevice(browser, dev) {
     // the squeezed buttons and hidden panel make the later steps untappable.
     if (CONTROL) { await ctx.close(); return result; }
 
-    // 4. touch-drag an axis title: it moves, and the page does not pan away
-    const title = await page.evaluate(() => {
-        const svg = [...document.querySelectorAll('.graphbuilder2-host svg')].sort((a, b) => {
-            const A = a.getBoundingClientRect(), B = b.getBoundingClientRect(); return B.width * B.height - A.width * A.height; })[0];
-        const want = (window.PS_SHELL.buildPayload() || {}).xLabel;
-        const t = [...svg.querySelectorAll('text')].find(n => (n.textContent || '').trim() === String(want || '').trim());
-        if (!t) return null;
-        t.scrollIntoView({ block: 'center' });
-        const r = t.getBoundingClientRect(); window.__mobTitle = t;
-        return { x: r.left + r.width / 2, y: r.top + r.height / 2, text: t.textContent.trim() };
+    // 4. the touch rules on the chart surface (mobile step 1). Each case
+    //    starts from a closed editor, so what it reports is its own doing.
+    await page.evaluate(() => {
+        window.__mobCancel = 0;
+        window.addEventListener('pointercancel', e => { if (e.isTrusted) window.__mobCancel++; }, true);
     });
-    if (title) {
-        await page.waitForTimeout(250);
-        const t0 = await page.evaluate(() => { const r = window.__mobTitle.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
-        const s0 = await scrollState(page);
-        await touchDrag(client, page, t0.x, t0.y, -46, -34);
-        await page.waitForTimeout(700);
-        const after = await page.evaluate((want) => {
+    const closeEditor = async () => {
+        await page.keyboard.press('Escape'); await page.waitForTimeout(200);
+        await page.evaluate(() => { try { if (window.__gb2_inspectorClear) window.__gb2_inspectorClear(); } catch (e) {} });
+        await page.waitForTimeout(300);
+    };
+    const editorOpen = () => page.evaluate(() => { const p = document.querySelector('.gb2-panel'); return !!p && getComputedStyle(p).display !== 'none' && p.getBoundingClientRect().height > 20 && p.querySelectorAll('[data-field]').length > 0; });
+    const menuOpen = () => page.evaluate(() => { const m = document.getElementById('ps-contextmenu'); return !!m && getComputedStyle(m).display !== 'none' && m.getBoundingClientRect().height > 20; });
+    const barOrder = () => page.evaluate(() => [...document.querySelectorAll('.graphbuilder2-host path[data-bar-cat], .graphbuilder2-host rect[data-bar-cat]')]
+        .filter(n => n.getBoundingClientRect().height > 30).sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left)
+        .map(n => n.getAttribute('data-bar-cat')).filter((v, i, a) => a.indexOf(v) === i).join('|'));
+    // the BODY of the last bar (a tap aimed at a bar lands on its fill)
+    const barBody = async () => {
+        const f = () => page.evaluate(() => {
+            const bars = [...document.querySelectorAll('.graphbuilder2-host path[data-bar-cat], .graphbuilder2-host rect[data-bar-cat]')]
+                .filter(n => n.getBoundingClientRect().height > 30).sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
+            if (!bars.length) return null;
+            const el = bars[bars.length - 1]; el.scrollIntoView({ block: 'center' });
+            const r = el.getBoundingClientRect(), first = bars[0].getBoundingClientRect();
+            return { x: r.left + r.width / 2, y: r.top + r.height * 0.6, firstX: first.left + first.width / 2 };
+        });
+        await f(); await page.waitForTimeout(220); return f();
+    };
+    const titleAt = async () => {
+        const f = () => page.evaluate(() => {
             const svg = [...document.querySelectorAll('.graphbuilder2-host svg')].sort((a, b) => {
                 const A = a.getBoundingClientRect(), B = b.getBoundingClientRect(); return B.width * B.height - A.width * A.height; })[0];
+            const want = String((window.PS_SHELL.buildPayload() || {}).yLabel || '').trim();
             const t = [...svg.querySelectorAll('text')].find(n => (n.textContent || '').trim() === want);
-            if (!t) return null; const r = t.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-        }, title.text);
-        const s1 = await scrollState(page);
-        const scrolled = Math.abs(s1.win - s0.win) + Math.abs(s1.pane - s0.pane);
-        // where the label sits relative to the content, so a pan is not read as a move
-        const moved = after ? Math.hypot((after.x - t0.x), (after.y - t0.y) + (s1.win - s0.win) + (s1.pane - s0.pane)) : 0;
-        result.touch.labelDragMoves = moved > 12;
-        result.touch.labelDragHoldsPage = scrolled < 4;
-    } else { result.touch.labelDragMoves = false; result.touch.labelDragHoldsPage = false; }
+            if (!t) return null; t.scrollIntoView({ block: 'center' });
+            const r = t.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        });
+        await f(); await page.waitForTimeout(220); return f();
+    };
+    await closeEditor();
 
-    // 5. long-press on a bar: the context menu
-    await page.keyboard.press('Escape'); await page.waitForTimeout(300);
-    b = await barCentre(page); await page.waitForTimeout(200); b = await barCentre(page);
-    if (b) { await longPress(client, page, b.x, b.y); await page.waitForTimeout(500); }
-    result.touch.longPressOpensMenu = await page.evaluate(() => {
-        const m = document.getElementById('ps-contextmenu'); if (!m) return false;
-        const r = m.getBoundingClientRect(); return getComputedStyle(m).display !== 'none' && r.width > 20 && r.height > 20;
-    });
-    await page.keyboard.press('Escape'); await page.waitForTimeout(300);
-    await page.evaluate(() => { const m = document.getElementById('ps-contextmenu'); if (m && getComputedStyle(m).display !== 'none') document.body.click(); });
+    // 4a. a quick swipe that starts on a bar is a scroll: it opens nothing
+    //     and moves nothing
+    {
+        const o0 = await barOrder();
+        let bb = await barBody();
+        if (bb) { await touchDrag(client, page, bb.x, bb.y, -6, -90); await page.waitForTimeout(700); }
+        const opened1 = await editorOpen();
+        bb = await barBody();
+        if (bb) { await touchDrag(client, page, bb.x, bb.y, -130, 4); await page.waitForTimeout(700); }
+        const opened2 = await editorOpen();
+        result.touch.swipeLeavesChartAlone = !!bb && !opened1 && !opened2 && (await barOrder()) === o0;
+        await closeEditor();
+    }
+    // 4b. a tap whose finger wobbles (8 px across, 6 down) is still a tap
+    {
+        const bb = await barBody();
+        if (bb) { await touchDrag(client, page, bb.x, bb.y, 8, 6, 2); await page.waitForTimeout(1000); }
+        result.touch.wobblyTapOpensEditor = !!bb && await editorOpen();
+    }
+    // 4c. the colour square answers a finger dragged across it
+    {
+        result.touch.pickerDragWorks = false;
+        const sv = await page.evaluate(() => {
+            const el = document.querySelector('[data-role="color-picker"] [data-role="sv"]'); if (!el) return null;
+            el.scrollIntoView({ block: 'center' }); return true;
+        });
+        if (sv) {
+            await page.waitForTimeout(250);
+            const g = await page.evaluate(() => {
+                const el = document.querySelector('[data-role="color-picker"] [data-role="sv"]'); const r = el.getBoundingClientRect();
+                const hex = document.querySelector('[data-role="color-picker"] [data-role="hex"]');
+                return { x: r.left, y: r.top, w: r.width, h: r.height, hex: hex ? hex.value : '', shown: r.width > 20 && r.height > 20 };
+            });
+            if (g.shown) {
+                await page.evaluate(() => { window.__mobCancel = 0; });
+                await touchDrag(client, page, g.x + g.w * 0.25, g.y + g.h * 0.3, g.w * 0.5, g.h * 0.4);
+                await page.waitForTimeout(500);
+                const after = await page.evaluate(() => { const hex = document.querySelector('[data-role="color-picker"] [data-role="hex"]'); return { hex: hex ? hex.value : '', cancel: window.__mobCancel }; });
+                result.touch.pickerDragWorks = !!after.hex && after.hex !== g.hex && after.cancel === 0;
+            }
+        }
+        await closeEditor();
+    }
+    // 4d. touch and hold, then drag: an axis title follows the finger
+    {
+        result.touch.holdDragMovesLabel = false;
+        const t0 = await titleAt();
+        if (t0) {
+            const s0 = await scrollState(page);
+            await page.evaluate(() => { window.__mobCancel = 0; });
+            await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: t0.x, y: t0.y }] });
+            await page.waitForTimeout(420);
+            result.touch.holdShowsCue = await page.evaluate(() => { const c = document.getElementById('ps-touch-cue'); return !!c && !c.hidden; });
+            for (let i = 1; i <= 12; i++) { await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: t0.x + 60 * i / 12, y: t0.y + 40 * i / 12 }] }); await page.waitForTimeout(16); }
+            await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+            await page.waitForTimeout(800);
+            const t1 = await page.evaluate(() => {
+                const svg = [...document.querySelectorAll('.graphbuilder2-host svg')].sort((a, b) => {
+                    const A = a.getBoundingClientRect(), B = b.getBoundingClientRect(); return B.width * B.height - A.width * A.height; })[0];
+                const want = String((window.PS_SHELL.buildPayload() || {}).yLabel || '').trim();
+                const t = [...svg.querySelectorAll('text')].find(n => (n.textContent || '').trim() === want);
+                if (!t) return null; const r = t.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, cancel: window.__mobCancel };
+            });
+            const s1 = await scrollState(page);
+            const pan = (s1.win - s0.win) + (s1.pane - s0.pane);
+            // the label has to come most of the way with the finger, and the
+            // browser must not have taken the touch away mid-drag
+            result.touch.holdDragMovesLabel = !!t1 && t1.cancel === 0 &&
+                Math.hypot(t1.x - t0.x, (t1.y - t0.y) + pan) >= 0.6 * Math.hypot(60, 40);
+        }
+        await closeEditor();
+    }
+    // 4e. touch and hold, then drag: the last bar goes to the front
+    {
+        result.touch.holdDragReordersBars = false;
+        const o0 = await barOrder(); const bb = await barBody();
+        if (bb && o0.split('|').length >= 2) {
+            await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: bb.x, y: bb.y }] });
+            await page.waitForTimeout(420);
+            for (let i = 1; i <= 14; i++) { await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: bb.x + (bb.firstX - 20 - bb.x) * i / 14, y: bb.y }] }); await page.waitForTimeout(16); }
+            await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+            await page.waitForTimeout(900);
+            const o1 = await barOrder();
+            result.touch.holdDragReordersBars = o1 !== o0 && o1.split('|')[0] === o0.split('|').slice(-1)[0];
+        }
+        await closeEditor();
+    }
+    // 5. touch and hold still: the part's menu opens (the app's own
+    //    long-press; iOS never sends the browser's menu event), and the
+    //    finger lifting neither closes it nor selects the part under it
+    {
+        const bb = await barBody();
+        if (bb) { await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: bb.x, y: bb.y }] }); await page.waitForTimeout(950); }
+        result.touch.longPressOpensMenu = !!bb && await menuOpen();
+        await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        await page.waitForTimeout(800);
+        result.touch.longPressLiftIsQuiet = result.touch.longPressOpensMenu && (await menuOpen()) && !(await editorOpen());
+        await page.keyboard.press('Escape'); await page.waitForTimeout(300);
+        await page.evaluate(() => { const m = document.getElementById('ps-contextmenu'); if (m && getComputedStyle(m).display !== 'none') m.style.display = 'none'; });
+        await closeEditor();
+    }
 
     // 6. keep the chart to the Notebook (the app's own keep, as the menu calls it)
     await page.evaluate(() => { window.PS_SHELL.setWorkspace('chart'); }); await page.waitForTimeout(500);
@@ -476,23 +601,71 @@ async function runDevice(browser, dev) {
     check(dev.id + '/layout/placed', items >= 1, tag + 'a chart is placed on the layout page by tap (' + items + ' item' + (items === 1 ? '' : 's') + ')');
     await screen('layout');
     const it = await page.evaluate(() => { const e = document.querySelector('#ps-lcanvas .ps-litem'); if (!e) return null; e.scrollIntoView({ block: 'center' }); const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height }; });
-    result.touch.layoutItemDragMoves = false; result.touch.layoutDragHoldsPage = false;
+    result.touch.layoutSwipeLeavesItem = false; result.touch.layoutItemDragMoves = false;
     if (it) {
         await page.waitForTimeout(250);
-        const i0 = await page.evaluate(() => { const e = document.querySelector('#ps-lcanvas .ps-litem'); const r = e.getBoundingClientRect(); const it = e.getAttribute('data-item-id'); return { x: r.left, y: r.top, id: it }; });
-        const s0 = await scrollState(page);
-        await touchDrag(client, page, i0.x + it.w / 2, i0.y + it.h / 2, 30, 24);
+        const where = () => page.evaluate(() => { const e = document.querySelector('#ps-lcanvas .ps-litem'); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; });
+        // a quick swipe across an item scrolls or does nothing: the item stays put
+        const a0 = await where(); let s0 = await scrollState(page);
+        await touchDrag(client, page, a0.x + a0.w / 2, a0.y + a0.h / 2, 30, 24);
+        await page.waitForTimeout(600);
+        let a1 = await where(), s1 = await scrollState(page);
+        let pan = (s1.win - s0.win) + (s1.pane - s0.pane);
+        result.touch.layoutSwipeLeavesItem = !!a1 && Math.hypot(a1.x - a0.x, (a1.y - a0.y) + pan) < 2;
+        // touch and hold, then drag: the item comes with the finger
+        const b0 = await where(); s0 = await scrollState(page);
+        await page.evaluate(() => { window.__mobCancel = 0; });
+        await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: b0.x + b0.w / 2, y: b0.y + b0.h / 2 }] });
+        await page.waitForTimeout(420);
+        for (let i = 1; i <= 12; i++) { await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: b0.x + b0.w / 2 + 30 * i / 12, y: b0.y + b0.h / 2 + 24 * i / 12 }] }); await page.waitForTimeout(16); }
+        await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
         await page.waitForTimeout(700);
-        const i1 = await page.evaluate((id) => { const e = document.querySelector('#ps-lcanvas .ps-litem[data-item-id="' + id + '"]'); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left, y: r.top }; }, i0.id);
-        const s1 = await scrollState(page);
-        const pan = (s1.win - s0.win) + (s1.pane - s0.pane);
-        result.touch.layoutItemDragMoves = !!i1 && Math.hypot(i1.x - i0.x, (i1.y - i0.y) + pan) > 8;
-        result.touch.layoutDragHoldsPage = Math.abs(pan) < 4;
+        const b1 = await where(); s1 = await scrollState(page);
+        pan = (s1.win - s0.win) + (s1.pane - s0.pane);
+        const cancelled = await page.evaluate(() => window.__mobCancel);
+        result.touch.layoutItemDragMoves = !!b1 && cancelled === 0 &&
+            Math.hypot(b1.x - b0.x, (b1.y - b0.y) + pan) >= 0.6 * Math.hypot(30, 24);
     }
 
     check(dev.id + '/errors', errors.length === 0, tag + 'no page errors ' + errors.slice(0, 2).join(' | '));
     await ctx.close();
     return result;
+}
+
+// ---------------------------------------------------------- a mouse, still
+// None of this may reach a desktop: no touch density, no lifted text, and a
+// mouse drags a bar the instant it moves.
+async function runDesktop(browser) {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const page = await ctx.newPage();
+    const errors = []; page.on('pageerror', e => errors.push(String(e).slice(0, 160)));
+    await page.addInitScript(() => { try { localStorage.setItem('psstandalone.coach.clickToEdit.v1', '1'); } catch (e) {} });
+    await page.goto(pageUrl); await page.waitForTimeout(900);
+    await page.click('#ps-welcome-sample'); await page.waitForTimeout(2400);
+    const st = await page.evaluate(() => ({ touch: document.body.classList.contains('ps-touch'), lifted: document.querySelectorAll('[data-ps-tf]').length,
+        key: (window.PS_SHELL.buildPayload() || {}).touchHost === true }));
+    check('desktop/touchmode', !st.touch, 'desktop: the touch density is off for a mouse');
+    check('desktop/lifted', st.lifted === 0, 'desktop: no text size was lifted (' + st.lifted + ')');
+    check('desktop/key', st.key, 'desktop: the host key rides the payload all the same (gestures are judged per touch, not per device)');
+    const geo = () => page.evaluate(() => {
+        const bars = [...document.querySelectorAll('.graphbuilder2-host path[data-bar-cat], .graphbuilder2-host rect[data-bar-cat]')]
+            .filter(n => n.getBoundingClientRect().height > 30).sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
+        const r = bars[bars.length - 1].getBoundingClientRect(), f = bars[0].getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height * 0.6, firstX: f.left + f.width / 2,
+            order: bars.map(n => n.getAttribute('data-bar-cat')).filter((v, i, a) => a.indexOf(v) === i).join('|') };
+    });
+    const g0 = await geo();
+    await page.mouse.move(g0.x, g0.y); await page.mouse.down();
+    for (let i = 1; i <= 14; i++) { await page.mouse.move(g0.x + (g0.firstX - 30 - g0.x) * i / 14, g0.y); await page.waitForTimeout(12); }
+    await page.mouse.up(); await page.waitForTimeout(900);
+    const g1 = await geo();
+    check('desktop/drag', g1.order !== g0.order && g1.order.split('|')[0] === g0.order.split('|').slice(-1)[0],
+        'desktop: a mouse drag reorders a bar at once, with no hold (' + g0.order + ' -> ' + g1.order + ')');
+    await page.mouse.click(g1.x, g1.y); await page.waitForTimeout(900);
+    check('desktop/click', await page.evaluate(() => { const p = document.querySelector('.gb2-panel'); return !!p && getComputedStyle(p).display !== 'none' && p.querySelectorAll('[data-field]').length > 0; }),
+        'desktop: a mouse click on a bar opens its editor');
+    check('desktop/errors', errors.length === 0, 'desktop: no page errors ' + errors.slice(0, 2).join(' | '));
+    await ctx.close();
 }
 
 // ------------------------------------------------------------ the ratchet
@@ -554,9 +727,39 @@ const browser = await chromium.launch();
 const measured = {};
 for (const dev of DEVICES) {
     if (!CONTROL) console.log('== ' + dev.id + ' (' + dev.profile + ', ' + devices[dev.profile].viewport.width + ' x ' + devices[dev.profile].viewport.height + ')');
-    measured[dev.id] = await runDevice(browser, dev);
+    for (let attempt = 1; ; attempt++) {
+        const mark = { v: verdicts.length, f: fails, n: notes.length };
+        try { measured[dev.id] = await runDevice(browser, dev); break; }
+        catch (e) {
+            const timedOut = /Timeout|Target (page|closed)|browser has been closed/i.test(String(e && e.message || e));
+            if (!timedOut || attempt >= 3) throw e;
+            // forget what the cut-short attempt recorded and start the profile again
+            verdicts.length = mark.v; fails = mark.f; notes.length = mark.n;
+            console.log('  ....  ' + dev.id + ': a step timed out (attempt ' + attempt + ' of 3; the machine slept or was swamped), running this profile again');
+            for (const c of browser.contexts()) await c.close().catch(() => {});
+        }
+    }
+}
+if (!CONTROL && !CONTROL_TH && !want.length) {
+    console.log('== desktop (1280 x 800, a mouse)');
+    await runDesktop(browser);
 }
 await browser.close();
+
+if (CONTROL_TH) {
+    // With the engine key withheld, the two rules that need the engine's
+    // guard have to fail: a swipe opens the bar's editor again, and the
+    // finger lifting off the long-press menu selects the bar again.
+    const t = (measured.phone || {}).touch || {};
+    const expect = [
+        [t.swipeLeavesChartAlone === false, 'without the engine guard a swipe on a bar opens its editor again'],
+        [t.longPressLiftIsQuiet === false, 'without the engine guard the lift off the long-press menu selects the bar again']
+    ];
+    let bad = 0;
+    for (const [red, msg] of expect) { console.log((red ? '  ok  ' : ' FAIL ') + 'control: ' + msg); if (!red) bad++; }
+    console.log(bad ? 'CONTROL FAILED: the engine guard is not what holds these rules' : 'CONTROL: red where it should be');
+    process.exit(bad ? 1 : 0);
+}
 
 if (WRITE && !CONTROL) {
     const prev = existsSync(BASELINE_PATH) ? JSON.parse(readFileSync(BASELINE_PATH, 'utf8')) : { devices: {} };

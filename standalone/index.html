@@ -4844,6 +4844,148 @@
   }
   .ps-guided-empty-actions { display: flex; gap: 8px; justify-content: center; }
   .ps-privacy-line { color: #4a5a6a; }
+  /* ================================================================ touch
+     Phones and tablets (mobile step 1, Nov 2026). body.ps-touch is set by
+     the shell while the PRIMARY pointer is a finger (wireTouch), and this
+     block is the whole of the touch density: controls a finger can hit,
+     and form fields at the 16px that stops iOS zooming the page when one
+     takes focus. The text floor is the shell's touchFloorSweep, because a
+     stylesheet cannot say "at least 13px" about a size it did not set.
+     Nothing here applies to a mouse, and none of it reaches jamovi. */
+  #ps-touch-cue {
+    position: fixed; z-index: 9500; width: 64px; height: 64px;
+    margin: -32px 0 0 -32px; border-radius: 50%; pointer-events: none;
+    border: 2px solid var(--ps-accent); background: rgba(53, 115, 189, 0.14);
+  }
+  #ps-touch-cue[hidden] { display: none; }
+  @keyframes ps-touch-cue-in {
+    from { transform: scale(0.55); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    #ps-touch-cue.ps-touch-cue-in { animation: ps-touch-cue-in 140ms ease-out; }
+  }
+  /* iOS answers a held finger on text or an image with its own callout,
+     and the hold is this app's drag and menu gesture. */
+  .graphbuilder2-host svg[data-role="gb2-chart-svg"] { -webkit-touch-callout: none; }
+  /* Drawing a shape is a drag from the first pixel, and so is dragging in
+     the colour square or along the hue strip: without this the browser
+     took those touches for a page scroll and the colour never moved. */
+  #psroot [data-role="draw-capture"],
+  [data-role="color-picker"] [data-role="sv"],
+  [data-role="color-picker"] [data-role="hue"] { touch-action: none; }
+  body.ps-touch .graphbuilder2-host svg[data-role="gb2-chart-svg"],
+  body.ps-touch #ps-lcanvas, body.ps-touch .ps-pinpage, body.ps-touch .ps-tab,
+  body.ps-touch .ps-statusbar, body.ps-touch .ps-commandbar {
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+  }
+  /* A double tap on a control is two taps, never a page zoom. */
+  body.ps-touch button, body.ps-touch select, body.ps-touch summary,
+  body.ps-touch [role="tab"], body.ps-touch [role="menuitem"],
+  body.ps-touch [role="button"], body.ps-touch label {
+    touch-action: manipulation;
+  }
+  body.ps-touch input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="button"]),
+  body.ps-touch select, body.ps-touch textarea {
+    font-size: 16px !important;
+  }
+  body.ps-touch select, body.ps-touch .ps-lselect { min-height: 40px; }
+  body.ps-touch input[type="checkbox"], body.ps-touch input[type="radio"] {
+    width: 22px; height: 22px;
+  }
+  body.ps-touch input[type="range"] { min-height: 32px; }
+
+  /* ---- the app frame. Its four rows are fixed heights above the drawer
+     breakpoint, and a touch-sized button is taller than the bar it sits
+     in: on a tablet the command bar spilled over the navigator's first
+     button. In touch mode every row takes the height its controls need. */
+  body.ps-touch .ps-page,
+  body.ps-touch.ps-density-compact .ps-page,
+  body.ps-touch.ps-density-spacious .ps-page {
+    grid-template-rows: minmax(34px, auto) minmax(43px, auto) minmax(0, 1fr) minmax(25px, auto);
+  }
+  body.ps-touch .ps-narrow-btn { width: 44px; height: 44px; font-size: 19px; }
+  body.ps-touch .ps-command, body.ps-touch .ps-data-commandbar .ps-command {
+    height: auto; min-height: 44px; padding-left: 12px; padding-right: 12px;
+    font-size: 14.5px;
+  }
+  body.ps-touch .ps-command.ps-command-icon { min-width: 44px; }
+  @media (max-width: 560px) {
+    /* A phone's command bar holds one row: Open, Save, Export. With
+       touch-sized buttons a fourth wrapped Export onto a row of its own
+       and took fifty pixels from the chart. Reset chart styling stays in
+       the application menu, which presses this same button; a destructive
+       action is also better off the bar a thumb rests on. */
+    body.ps-touch #ps-reset { display: none !important; }
+    body.ps-touch .ps-commandbar .ps-command-sep { display: none; }
+  }
+  body.ps-touch .ps-tab { font-size: 15px; padding-top: 0; padding-bottom: 0; }
+  body.ps-touch .ps-tab-select { min-height: 44px; }
+  body.ps-touch .ps-tab-x { min-width: 32px; min-height: 32px; font-size: 15px; }
+  body.ps-touch .ps-tab-add { min-width: 44px; min-height: 44px; font-size: 19px; }
+  body.ps-touch .ps-workspace-switcher button, body.ps-touch .ps-project-item {
+    min-height: 44px; font-size: 15px;
+  }
+  body.ps-touch .ps-btn { min-height: 40px; font-size: 14.5px; padding-left: 14px; padding-right: 14px; }
+  body.ps-touch #ps-contextmenu button, body.ps-touch #ps-appmenu button,
+  body.ps-touch #ps-appsubmenu button, body.ps-touch #ps-cellmenu button,
+  body.ps-touch #ps-columnview-menu button, body.ps-touch .ps-menubar button {
+    min-height: 44px; font-size: 15px;
+  }
+  body.ps-touch .ps-statusbar { font-size: 13px; padding-top: 4px; padding-bottom: 4px; }
+  body.ps-touch .ps-statusbar button { min-height: 32px; font-size: 13px; }
+  body.ps-touch .ps-pinpage-bar button { min-height: 36px; font-size: 14px; padding: 4px 13px; }
+  body.ps-touch .ps-ltools button, body.ps-touch #ps-ltoolbar button,
+  body.ps-touch .ps-ltoolbar button { min-height: 40px; }
+  body.ps-touch #ps-toast button { min-height: 36px; font-size: 14px; }
+  body.ps-touch .ps-slot-change, body.ps-touch .ps-chip { min-height: 36px; }
+  body.ps-touch #ps-datagrid td, body.ps-touch #ps-datagrid th { font-size: 13px; }
+  body.ps-touch #ps-datagrid .ps-grid-role { font-size: 12px; }
+  /* The settings column: a label and its select share a row that no
+     longer fits once the select is 16px text, and the select ran out of
+     the column on a tablet. The row wraps and the select never exceeds it. */
+  body.ps-touch .ps-controls .ps-role { flex-wrap: wrap; }
+  body.ps-touch .ps-controls select { min-width: 0; max-width: 100%; }
+  @media (max-width: 1024px) {
+    /* The data summary in the command bar pushed Export onto a second row
+       at tablet widths; the status bar says the same thing. */
+    body.ps-touch .ps-commandbar #ps-datainfo { display: none; }
+  }
+
+  /* ---- the engine's toolbar and editing panel. Their controls carry
+     inline sizes, so the floor is set with min-width and min-height, which
+     win over a width or height without touching either. */
+  body.ps-touch #psroot [data-role="chart-toolbar"] button,
+  body.ps-touch #psroot [data-role="graphtype-flyout"] button,
+  body.ps-touch #psroot [data-role="palette-flyout"] button,
+  body.ps-touch #psroot [data-role="add-ann-menu"] button {
+    min-width: 40px; min-height: 40px;
+  }
+  body.ps-touch #psroot [data-role="chart-toolbar"].ps-tb-tight [data-role="toolbar-actions"] > button {
+    width: 40px !important; min-width: 40px !important;
+  }
+  body.ps-touch #psroot .gb2-panel button,
+  body.ps-touch #ps-engine-dock-slot .gb2-panel button {
+    min-width: 32px; min-height: 32px;
+  }
+  body.ps-touch .gb2-panel [data-gb2-promoted-tabbar="1"] > button,
+  body.ps-touch .gb2-panel [data-xytab], body.ps-touch .gb2-panel [data-bs-tab],
+  body.ps-touch .gb2-panel [data-gs-tab], body.ps-touch .gb2-panel [data-ya-tab],
+  body.ps-touch .gb2-panel [data-xa-tab], body.ps-touch .gb2-panel [data-dp-tab],
+  body.ps-touch .gb2-panel [data-st-tab], body.ps-touch .gb2-panel [data-ps-tab],
+  body.ps-touch .gb2-panel [data-ls-tab], body.ps-touch .gb2-panel [data-bse-tab],
+  body.ps-touch .gb2-panel [data-theme-tab] {
+    min-height: 40px;
+  }
+  body.ps-touch .gb2-panel input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+  body.ps-touch .gb2-panel select {
+    min-height: 36px;
+  }
+  /* Every tab stays reachable: the row wraps instead of clipping its end. */
+  body.ps-touch #psroot .gb2-panel [data-gb2-promoted-tabbar="1"] {
+    flex-wrap: wrap !important; height: auto !important;
+  }
+
   @media print {
     html, body { overflow: visible; height: auto; background: var(--ps-s0); }
     .ps-appbar, .ps-menubar, .ps-statusbar, .ps-navigator, .ps-sidebar,
@@ -7142,7 +7284,7 @@
   <div class="ps-coach-arrow" aria-hidden="true"></div>
   <div class="ps-coach-body">
     <strong>Every part of this chart is editable.</strong>
-    <span>Click a bar, an axis, a label or the legend to style just that
+    <span id="ps-coach-say">Click a bar, an axis, a label or the legend to style just that
       part. Nothing here is fixed.</span>
     <div class="ps-coach-actions">
       <button type="button" class="ps-btn ps-primary" id="ps-coach-ok">Got it</button>

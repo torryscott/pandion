@@ -9269,6 +9269,11 @@
     // The editing panel may dock beside the chart; the host published in
     // __gb2_inspectorDockHost answers per placement (see applyPanelDock).
     payload.inspectorDock = "host";
+    // Touch presses are arbitrated by this host (wireTouch): the engine
+    // reads __gb2_touchCancelAt and __gb2_touchPressConsumed in its
+    // selection entry point only when this key says a host is writing
+    // them. jamovi never ships it.
+    payload.touchHost = true;
     // Scatter-overlay re-ship: harvested engine-computed arrays return
     // to the payload while the data fingerprint still matches (R
     // parity - jamovi recomputes and ships them every run). A stale
@@ -11119,6 +11124,20 @@
       window.innerWidth - w - 12));
     c.style.left = left + "px";
     c.style.top = Math.min(box.top + 44, window.innerHeight - 150) + "px";
+    // On a phone the note is nearly as wide as the chart, and sitting on
+    // the chart it hid about two fifths of the thing it is describing
+    // (mobile-check, Nov 2026); on a tablet's narrow middle column it hid
+    // more. In touch mode it goes under the chart instead, or as low as
+    // the screen allows.
+    if (touchModeOn()) {
+      var chart = host.querySelector('svg[data-role="gb2-chart-svg"]');
+      if (chart) {
+        var cb = chart.getBoundingClientRect();
+        var h = c.offsetHeight || 150;
+        c.style.top = Math.max(8, Math.min(cb.bottom + 10,
+          window.innerHeight - h - 34)) + "px";
+      }
+    }
   }
   function maybeShowCoach() {
     if (COACH_SHOWN || coachSeen()) return;
@@ -11137,6 +11156,11 @@
     COACH_SHOWN = true;
     var c = document.getElementById("ps-coach");
     if (!c) return;
+    // A finger taps, and moves a part by holding it first.
+    var say = document.getElementById("ps-coach-say");
+    if (say && touchModeOn())
+      say.textContent = "Tap a bar, an axis, a label or the legend to " +
+        "style just that part. To move a part, touch and hold it, then drag.";
     c.hidden = false;
     coachPlace();
   }
@@ -36847,6 +36871,382 @@
   function narrowCloseAfterNavigation() {
     if (NARROW_OPEN === "nav" || NARROW_OPEN === "menu") narrowSet(null, true);
   }
+  // ===================================================================== touch
+  // Phones and tablets (mobile step 1, Nov 2026). Two separate things live
+  // here, on purpose:
+  //
+  //   TOUCH MODE is a layout density, on when the PRIMARY pointer is a
+  //   finger ((pointer: coarse)): body.ps-touch, read by the stylesheet for
+  //   bigger controls and by the text floor below.
+  //
+  //   TOUCH GESTURES are judged per event, by pointerType, on any device,
+  //   so a touchscreen laptop with a mouse gets them for its finger and
+  //   keeps its mouse exactly as it was.
+  //
+  // What a finger did before this (measured by mobile-check): every drag on
+  // the chart died after about three moves, because the browser took the
+  // touch for a page scroll and cancelled it; the parts that had moved
+  // stayed moved; the engine read the cancel as a click, so swiping the
+  // page past a bar opened that bar's editor; and a tap that wobbled more
+  // than five pixels counted as a drag and did nothing. The rule now, on
+  // the chart surface:
+  //
+  //   a quick swipe scrolls the page and touches nothing;
+  //   a tap edits, wobble included;
+  //   touch and hold, then drag, moves a part;
+  //   touch and hold still opens the part's menu (iOS never sends the
+  //   browser's own menu event, so right-click menus were out of reach).
+  //
+  // Mechanics. Until a press has held still for TOUCH_HOLD_MS its
+  // pointermoves are withheld from everything below window, so an unarmed
+  // press can never move a part or trip a drag threshold. Once armed, the
+  // host's non-passive touchmove listener refuses the browser's pan and the
+  // moves flow; the engine's own drag systems do the rest unchanged. The
+  // engine reads two globals this block writes (its only part in this, and
+  // only when the payload carries touchHost): __gb2_touchCancelAt, so a
+  // cancelled press is not a click, and __gb2_touchPressConsumed, so the
+  // finger lifting off an open menu does not select what is under it.
+  var TOUCH_MODE = false;
+  var TOUCH_HOLD_MS = 250, TOUCH_MENU_MS = 650, TOUCH_SLOP = 10;
+  var TP = null;                        // the one tracked touch press
+  var TOUCH_SWALLOW_CLICK_UNTIL = 0;
+  function touchPrimary() {
+    try {
+      return !!(window.matchMedia &&
+        window.matchMedia("(pointer: coarse)").matches);
+    } catch (e) { return false; }
+  }
+  function touchModeOn() { return TOUCH_MODE; }
+  function touchModeSync() {
+    var on = touchPrimary();
+    var had = document.body.classList.contains("ps-touch");
+    TOUCH_MODE = on;
+    if (had === on) return false;
+    document.body.classList.toggle("ps-touch", on);
+    return true;
+  }
+  // The chart SURFACE: the drawing and the engine's handles laid over it.
+  // Its toolbar, panel, menus and form fields are ordinary controls and
+  // keep their immediate response (a slider must not wait for a hold).
+  function touchChartSurface(t) {
+    if (!t || !t.closest) return false;
+    if (!t.closest(".graphbuilder2-host")) return false;
+    if (t.closest('.gb2-panel, [data-role="chart-toolbar"], ' +
+        '[data-role="graphtype-flyout"], [data-role="palette-flyout"], ' +
+        '[data-role="add-ann-menu"], [data-role="setting-search"], ' +
+        '[data-role="inline-text-editor"], [data-role="color-picker"], ' +
+        // Drawing a shape IS a drag from the first pixel (touch-action
+        // none on the sheet, in the stylesheet).
+        '[data-role="draw-capture"], ' +
+        "input, textarea, select, button, a[href]")) return false;
+    return true;
+  }
+  // The layout page is the same kind of surface: before this a finger could
+  // not move a layout item at all (the browser cancelled the drag about
+  // thirteen pixels in, and the item stayed nudged). Same rule there: a
+  // swipe scrolls the page view, a hold then a drag moves the item, drags
+  // a handle, or draws the selection box. Text being edited is left alone.
+  function touchLayoutSurface(t) {
+    if (!t || !t.closest || !t.closest("#ps-lcanvas")) return false;
+    if (t.closest("input, textarea, select, button, [contenteditable]"))
+      return false;
+    return true;
+  }
+  function touchCue(on, x, y) {
+    var c = document.getElementById("ps-touch-cue");
+    if (!on) { if (c) c.hidden = true; return; }
+    if (!c) {
+      c = document.createElement("div");
+      c.id = "ps-touch-cue";
+      c.setAttribute("aria-hidden", "true");
+      document.body.appendChild(c);
+    }
+    c.style.left = x + "px"; c.style.top = y + "px";
+    c.hidden = false;
+    // Restart the arrive animation for this press.
+    c.classList.remove("ps-touch-cue-in");
+    void c.offsetWidth;
+    c.classList.add("ps-touch-cue-in");
+  }
+  function touchClearTimers(tp) {
+    if (!tp) return;
+    if (tp.holdTimer) { clearTimeout(tp.holdTimer); tp.holdTimer = 0; }
+    if (tp.menuTimer) { clearTimeout(tp.menuTimer); tp.menuTimer = 0; }
+  }
+  function touchPressDrop() {
+    touchClearTimers(TP);
+    touchCue(false);
+    TP = null;
+  }
+  // The app's own long-press: the same contextmenu event a right-click
+  // sends, at the same place, so every menu the app already has answers it.
+  function touchMenuFire(tp) {
+    if (TP !== tp || tp.dead || tp.early || tp.dragging) return;
+    var t = null;
+    try { t = document.elementFromPoint(tp.x, tp.y); } catch (e) {}
+    t = t || tp.target;
+    if (!t || !t.dispatchEvent) return;
+    // Form fields keep the system's own long-press (select, paste, look up).
+    if (t.closest && t.closest("input, textarea, select, [contenteditable]"))
+      return;
+    // Only where the app has a menu worth a held finger: the chart, a
+    // layout page, the data grid, a Notebook page, a document tab, the
+    // navigator. A slow, firm press on an ordinary button has to stay a
+    // press of that button; the catch-all menu a right-click gets there
+    // would swallow it.
+    if (!tp.chart && !(t.closest && t.closest("#ps-datagrid, #ps-datacard, " +
+        "#ps-lviewport, #ps-pinpane, .ps-tab, [data-chart-tab], " +
+        ".ps-project-panel"))) return;
+    var ev;
+    try {
+      ev = new MouseEvent("contextmenu", {
+        bubbles: true, cancelable: true, view: window, button: 2,
+        clientX: tp.x, clientY: tp.y, screenX: tp.x, screenY: tp.y });
+    } catch (e2) { return; }
+    var unhandled = t.dispatchEvent(ev);
+    if (unhandled) return;              // nothing here has a menu
+    touchPressConsumed(tp);
+  }
+  function touchPressConsumed(tp) {
+    tp.consumed = true; tp.menuOpen = true;
+    touchCue(false);
+    try { window.__gb2_touchPressConsumed = true; } catch (e) {}
+    try { if (navigator.vibrate) navigator.vibrate(8); } catch (e3) {}
+  }
+  // The text floor. In touch mode no interface text renders under
+  // TOUCH_TEXT_FLOOR pixels. A stylesheet cannot express "at least 13px"
+  // about sizes it did not set, and most of the engine's panel text is
+  // sized inline, so this reads what each text-bearing element really
+  // renders at (its computed size times any CSS zoom above it) and lifts
+  // only the ones below the floor. It runs from a MutationObserver, which
+  // fires before the next paint, so text never shows small and then jumps.
+  // Skipped on purpose: SVG (the chart's text is the figure, not the
+  // interface), the layout canvas and Notebook pages (content at the
+  // document's own scale), and the data grid (thousands of cells, sized
+  // by one stylesheet rule instead).
+  var TOUCH_TEXT_FLOOR = 13;
+  var TOUCH_FLOOR_SKIP = "svg, script, style, #ps-lcanvas, #ps-datagrid, " +
+    ".ps-pinpage-canvas, .ps-visually-hidden, #ps-touch-cue";
+  function touchFloorOne(p) {
+    if (!p || p.nodeType !== 1 || p.hasAttribute("data-ps-tf")) return;
+    var cs;
+    try { cs = window.getComputedStyle(p); } catch (e) { return; }
+    if (!cs) return;
+    var z = (typeof p.currentCSSZoom === "number" && p.currentCSSZoom > 0)
+      ? p.currentCSSZoom : 1;
+    var px = parseFloat(cs.fontSize) * z;
+    if (!(px > 0) || px >= TOUCH_TEXT_FLOOR - 0.25) return;
+    // Remember the inline size it had, so leaving touch mode restores it.
+    p.setAttribute("data-ps-tf", p.style.fontSize || "");
+    p.style.setProperty("font-size",
+      (Math.round(TOUCH_TEXT_FLOOR / z * 100) / 100) + "px", "important");
+  }
+  function touchFloorSweep(root) {
+    if (!root) return;
+    if (!TOUCH_MODE) {
+      // Back to a mouse: put every lifted size back as it was.
+      var lifted = document.querySelectorAll("[data-ps-tf]");
+      for (var i = 0; i < lifted.length; i++) {
+        var was = lifted[i].getAttribute("data-ps-tf");
+        lifted[i].style.removeProperty("font-size");
+        if (was) lifted[i].style.fontSize = was;
+        lifted[i].removeAttribute("data-ps-tf");
+      }
+      return;
+    }
+    if (root.nodeType === 3) root = root.parentNode;
+    if (!root || root.nodeType !== 1) return;
+    if (root.closest && root.closest(TOUCH_FLOOR_SKIP)) return;
+    var walker;
+    try {
+      walker = document.createTreeWalker(root, 5 /* elements + text */, {
+        acceptNode: function (n) {
+          if (n.nodeType === 1)
+            return (n.matches && n.matches(TOUCH_FLOOR_SKIP)) ? 2 : 3;
+          return (n.nodeValue && /\S/.test(n.nodeValue)) ? 1 : 2;
+        }
+      });
+    } catch (eW) { return; }
+    var seen = [];
+    for (var n = walker.nextNode(); n; n = walker.nextNode()) {
+      var par = n.parentNode;
+      if (par && seen.indexOf(par) === -1) seen.push(par);
+    }
+    for (var k = 0; k < seen.length; k++) touchFloorOne(seen[k]);
+  }
+  function wireTouchFloor() {
+    if (!window.MutationObserver) return;
+    var obs = new MutationObserver(function (records) {
+      if (!TOUCH_MODE) return;
+      for (var i = 0; i < records.length; i++) {
+        var added = records[i].addedNodes;
+        for (var j = 0; j < added.length; j++) {
+          var nd = added[j];
+          if (nd.nodeType === 1 || nd.nodeType === 3) touchFloorSweep(nd);
+        }
+      }
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+    touchFloorSweep(document.body);
+  }
+  function wireTouch() {
+    touchModeSync();
+    wireTouchFloor();
+    try {
+      var mq = window.matchMedia("(pointer: coarse)");
+      var onMq = function () {
+        if (!touchModeSync()) return;
+        try { touchFloorSweep(document.body); } catch (e) {}
+        try { render(); } catch (e2) {}
+      };
+      if (mq.addEventListener) mq.addEventListener("change", onMq);
+      else if (mq.addListener) mq.addListener(onMq);
+    } catch (eMq) {}
+
+    window.addEventListener("pointerdown", function (e) {
+      if (e.pointerType !== "touch") return;
+      if (e.isPrimary === false) {
+        // A second finger: this is a pinch, and nothing here is a press.
+        // Judged by isPrimary, not by "a press is already tracked": every
+        // touch gets a new pointer id, so a press whose lift was somehow
+        // never seen would have made every later press look like a pinch.
+        if (TP) { touchClearTimers(TP); touchCue(false); TP.dead = true; }
+        return;
+      }
+      try {
+        window.__gb2_touchPressConsumed = false;
+        window.__gb2_touchCancelAt = 0;
+      } catch (eG) {}
+      // A new press owns its own click: only the lift of the press that
+      // opened a menu (or swiped) is ever swallowed.
+      TOUCH_SWALLOW_CLICK_UNTIL = 0;
+      touchPressDrop();
+      var tp = {
+        id: e.pointerId, x: e.clientX, y: e.clientY, target: e.target,
+        chart: touchChartSurface(e.target) || touchLayoutSurface(e.target),
+        armed: false, early: false, dragging: false, dead: false,
+        consumed: false, menuOpen: false, holdTimer: 0, menuTimer: 0
+      };
+      TP = tp;
+      if (tp.chart) tp.holdTimer = setTimeout(function () {
+        tp.holdTimer = 0;
+        if (TP !== tp || tp.dead || tp.early) return;
+        tp.armed = true;
+        touchCue(true, tp.x, tp.y);
+      }, TOUCH_HOLD_MS);
+      tp.menuTimer = setTimeout(function () {
+        tp.menuTimer = 0;
+        touchMenuFire(tp);
+      }, TOUCH_MENU_MS);
+    }, true);
+
+    window.addEventListener("pointermove", function (e) {
+      var tp = TP;
+      if (e.pointerType !== "touch" || !tp || tp.id !== e.pointerId || tp.dead)
+        return;
+      var far = Math.abs(e.clientX - tp.x) > TOUCH_SLOP ||
+                Math.abs(e.clientY - tp.y) > TOUCH_SLOP;
+      if (!tp.chart) {
+        // Shell surfaces move on their own terms (a layout item drags at
+        // once); here a move only means this press is not a long-press.
+        if (far && !tp.early) { tp.early = true; touchClearTimers(tp); }
+        return;
+      }
+      if (!tp.armed) {
+        if (far && !tp.early) { tp.early = true; touchClearTimers(tp); }
+        e.stopImmediatePropagation();
+        return;
+      }
+      if (!tp.dragging) {
+        if (!far) { e.stopImmediatePropagation(); return; }
+        // Held, then moved: a drag. A menu that opened while the finger
+        // rested gives way to it, the way a held home-screen icon does.
+        tp.dragging = true;
+        touchClearTimers(tp);
+        touchCue(false);
+        if (tp.menuOpen) {
+          tp.menuOpen = false; tp.consumed = false;
+          try { hideContextMenu(); } catch (eH) {}
+          try { window.__gb2_touchPressConsumed = false; } catch (eG2) {}
+        }
+      }
+    }, true);
+
+    // The browser's own long-press menu event (Android sends one): the
+    // app's menus answer it as they answer a right-click, so the timer
+    // above stands down and the lift is told not to select.
+    window.addEventListener("contextmenu", function (e) {
+      var tp = TP;
+      if (!e.isTrusted || !tp || tp.dead) return;
+      if (tp.menuTimer) { clearTimeout(tp.menuTimer); tp.menuTimer = 0; }
+      setTimeout(function () {
+        if (TP === tp && e.defaultPrevented && !tp.dragging)
+          touchPressConsumed(tp);
+      }, 0);
+    }, true);
+
+    window.addEventListener("pointerup", function (e) {
+      var tp = TP;
+      if (e.pointerType !== "touch" || !tp || tp.id !== e.pointerId) return;
+      if (!e.isTrusted) return;
+      touchPressDrop();
+      if (tp.dead) return;
+      var swiped = tp.chart && tp.early && !tp.armed;
+      if (tp.consumed || swiped)
+        TOUCH_SWALLOW_CLICK_UNTIL = Date.now() + 450;
+      if (!swiped) return;
+      // A swipe the browser did not take for a scroll (nothing to scroll
+      // that way). The engine saw a press and no movement, and would read
+      // this lift as a click on the part the swipe STARTED on. Give it the
+      // cancel the browser would have sent.
+      e.stopImmediatePropagation();
+      try { window.__gb2_touchCancelAt = Date.now(); } catch (eG3) {}
+      try {
+        var t = tp.target && tp.target.isConnected ? tp.target : document.body;
+        t.dispatchEvent(new PointerEvent("pointercancel", {
+          bubbles: true, cancelable: false, composed: true,
+          pointerId: tp.id, pointerType: "touch", isPrimary: true,
+          clientX: e.clientX, clientY: e.clientY }));
+      } catch (eS) {}
+    }, true);
+
+    window.addEventListener("pointercancel", function (e) {
+      if (e.pointerType !== "touch") return;
+      try { window.__gb2_touchCancelAt = Date.now(); } catch (eG4) {}
+      if (!e.isTrusted) return;
+      if (TP && TP.id === e.pointerId) touchPressDrop();
+    }, true);
+
+    window.addEventListener("click", function (e) {
+      if (!e.isTrusted || !TOUCH_SWALLOW_CLICK_UNTIL) return;
+      if (Date.now() > TOUCH_SWALLOW_CLICK_UNTIL) {
+        TOUCH_SWALLOW_CLICK_UNTIL = 0; return;
+      }
+      TOUCH_SWALLOW_CLICK_UNTIL = 0;
+      // The lift after a long-press menu, or after a swipe: not a click.
+      // No exception for the menu itself: on a short screen it opens
+      // right under the finger, and lifting would choose whichever item
+      // happened to be there. Choosing an item takes a fresh tap, and a
+      // fresh press clears this window before its own click arrives.
+      e.stopImmediatePropagation(); e.preventDefault();
+    }, true);
+
+    // Refuse the browser's pan for an armed press. Non-passive, and only on
+    // the two drag surfaces (the chart host and the layout page view), so
+    // page scrolling everywhere else never waits on it.
+    var holdPan = function (e) {
+      var tp = TP;
+      if (!tp || !tp.chart || !tp.armed || tp.dead) return;
+      if (e.touches && e.touches.length !== 1) return;
+      if (e.cancelable) e.preventDefault();
+    };
+    var surfaces = [hostEl(), el("ps-lviewport")];
+    for (var si = 0; si < surfaces.length; si++) {
+      if (!surfaces[si]) continue;
+      surfaces[si].addEventListener("touchstart", function () {}, { passive: true });
+      surfaces[si].addEventListener("touchmove", holdPan, { passive: false });
+    }
+  }
   function wireNarrowChrome() {
     var ids = [["ps-narrow-nav", "nav"], ["ps-narrow-inspector", "inspector"],
                ["ps-narrow-menu", "menu"]];
@@ -36979,6 +37379,7 @@
     wireMenubarEntry();
     wireLayoutImagePaste();
     wireNarrowChrome();
+    wireTouch();
     wireBypassLinks();
     wireCoach();
     wireTooltips();
