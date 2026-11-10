@@ -14570,6 +14570,27 @@
             try { _setOption(overrideOpt, true); } catch (e) {}
             try { _setOption(valueOpt, trimmed); } catch (e) {}
         }
+        // The commit hook of an axis or legend title, by text id (null for
+        // any other id). textEditOnCommit holds a title's hook only while
+        // the title is DRAWN (makeEditableText registers it on each redraw)
+        // or after a click on its click-to-add zone, and every redraw
+        // empties the map. A panel opened for a title that is empty at that
+        // moment by any other route (Find a setting, or clearing the text
+        // and typing again in the same open panel) therefore found no hook:
+        // Enter did nothing, the typed title lived only in __gb2_textData,
+        // and it was gone at the next chart switch or reopen. Repeated
+        // Measures met this by default, since its value-axis title starts
+        // empty (a first-use walkthrough, Nov 2026). The text panel and the
+        // inline editor fall back to this, and the add zones register the
+        // same functions, so the routes cannot drift apart. The chart title
+        // needs no entry: redraw() recomputes hasTitle, so its first typed
+        // character draws the element and registers the hook.
+        function _gb2TitleCommitHook(id) {
+            if (id === "xTitle") return function (v) { commitTitle("xTitleOverride", "xTitle", v); };
+            if (id === "yTitle") return function (v) { commitTitle("yTitleOverride", "yTitle", v); };
+            if (id === "groupTitle") return function (v) { commitTitle("groupTitleOverride", "groupTitle", v); };
+            return null;
+        }
 
         // --- Relabel commit helpers (lookups defined above) -------------
         // Build a new relabel array that updates / removes the entry for
@@ -19797,27 +19818,21 @@
 
         addXTitleZone.addEventListener("click", function (e) {
             e.preventDefault(); e.stopPropagation();
-            textEditOnCommit["xTitle"] = function (v) {
-                commitTitle("xTitleOverride", "xTitle", v);
-            };
+            textEditOnCommit["xTitle"] = _gb2TitleCommitHook("xTitle");
             setInspectorSelection("text:xTitle");
             try { showInlineTextEditor("xTitle", addXTitleZone); } catch (_e) {}
         });
 
         addYTitleZone.addEventListener("click", function (e) {
             e.preventDefault(); e.stopPropagation();
-            textEditOnCommit["yTitle"] = function (v) {
-                commitTitle("yTitleOverride", "yTitle", v);
-            };
+            textEditOnCommit["yTitle"] = _gb2TitleCommitHook("yTitle");
             setInspectorSelection("text:yTitle");
             try { showInlineTextEditor("yTitle", addYTitleZone); } catch (_e) {}
         });
 
         addGroupTitleZone.addEventListener("click", function (e) {
             e.preventDefault(); e.stopPropagation();
-            textEditOnCommit["groupTitle"] = function (v) {
-                commitTitle("groupTitleOverride", "groupTitle", v);
-            };
+            textEditOnCommit["groupTitle"] = _gb2TitleCommitHook("groupTitle");
             setInspectorSelection("text:groupTitle");
             try { showInlineTextEditor("groupTitle", addGroupTitleZone); } catch (_e) {}
         });
@@ -49651,7 +49666,7 @@
                     try { _clearTextOverrideForId(dragId); } catch (_e) {}
                 }
                 if (commitVal) {
-                    var fn = textEditOnCommit[dragId];
+                    var fn = textEditOnCommit[dragId] || _gb2TitleCommitHook(dragId);
                     if (typeof fn === "function") {
                         try { fn(v); } catch (_e) {}
                     }
@@ -98769,7 +98784,7 @@
                 }
             });
             function commitTextContent() {
-                var fn = textEditOnCommit[id];
+                var fn = textEditOnCommit[id] || _gb2TitleCommitHook(id);
                 if (typeof fn === "function") {
                     try { fn(iTextContent.value); } catch (_e) {}
                 }
