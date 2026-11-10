@@ -11185,11 +11185,11 @@
     COACH_SHOWN = true;
     var c = document.getElementById("ps-coach");
     if (!c) return;
-    // A finger taps, and moves a part by holding it first.
+    // A finger taps to style a part and drags to move it.
     var say = document.getElementById("ps-coach-say");
     if (say && touchModeOn())
       say.textContent = "Tap a bar, an axis, a label or the legend to " +
-        "style just that part. To move a part, touch and hold it, then drag.";
+        "style just that part. To move a part, drag it.";
     c.hidden = false;
     coachPlace();
   }
@@ -19174,8 +19174,14 @@
       (rowExcluded ? "Include" : "Exclude") + " row " + (row + 1);
     el("ps-cellmenu-fill").disabled = cells.length < 2;
     m.style.display = "block";
-    m.style.left = Math.min(x, window.innerWidth - 170) + "px";
-    m.style.top = Math.min(y, window.innerHeight - 142) + "px";
+    // Kept on screen by its measured size: the 170 by 142 this used to
+    // assume is the mouse-sized menu, and in touch mode, where its rows
+    // are finger-sized, it ran 48 pixels off the right edge of a phone.
+    var mr = m.getBoundingClientRect();
+    var mw = Math.max(170, Math.ceil(mr.width) + 6);
+    var mh = Math.max(142, Math.ceil(mr.height) + 6);
+    m.style.left = Math.max(0, Math.min(x, window.innerWidth - mw)) + "px";
+    m.style.top = Math.max(0, Math.min(y, window.innerHeight - mh)) + "px";
   }
   function hideCellMenu() {
     el("ps-cellmenu").style.display = "none";
@@ -28564,6 +28570,26 @@
     var doc = chartById(PROJECT.activeChart);
     return doc && isLayoutTab(doc) === (mode === "layout") ? doc : null;
   }
+  // A workspace no longer opens wherever the last one was left (Nov 2026).
+  // The scrolling pane is one element shared by all four: on a phone,
+  // where Charts scrolls to show a part's editor, Layouts then opened with
+  // its tab row and its Properties button above the top of the screen.
+  // Each workspace now opens at its own last place when the page is
+  // already that tall (Data and the Notebook usually are), and at its top
+  // otherwise (a chart is drawn after this runs, so Charts comes back at
+  // its top). Called from syncAppShell, the one place every route into a
+  // workspace passes (the switcher, a new layout, a document tab, a link).
+  var WORKSPACE_SCROLL = {}, WORKSPACE_SCROLL_AT = "";
+  function workspaceScrollSync(ws) {
+    var pane = el("ps-main-workspace");
+    if (!pane || !ws) return;
+    if (WORKSPACE_SCROLL_AT && WORKSPACE_SCROLL_AT !== ws) {
+      WORKSPACE_SCROLL[WORKSPACE_SCROLL_AT] = pane.scrollTop;
+      var want = WORKSPACE_SCROLL[ws] || 0;
+      if (pane.scrollTop !== want) pane.scrollTop = want;
+    }
+    WORKSPACE_SCROLL_AT = ws;
+  }
   function setAppWorkspace(mode) {
     if (["data", "chart", "pinboard", "layout"].indexOf(mode) === -1) return;
     hideTip();   // the whole surface changes; no tip may ride across
@@ -30355,6 +30381,7 @@
   }
   function syncAppShell() {
     var ws = appWorkspace(), c = workspaceDocument(ws), t = PROJECT.table;
+    workspaceScrollSync(ws);
     // The coach mark teaches "click the chart"; when the chart leaves the
     // screen, the note goes with it (it lingered over the Layouts toolbar,
     // intercepting clicks at a spot whose chart was parked offscreen).
@@ -36983,16 +37010,22 @@
   // than five pixels counted as a drag and did nothing. The rule now, on
   // the chart surface:
   //
-  //   a quick swipe scrolls the page and touches nothing;
   //   a tap edits, wobble included;
-  //   touch and hold, then drag, moves a part;
+  //   a drag that starts on a part that can move, moves it, at once (see
+  //   GRAB below; the first version of this rule made every drag wait for
+  //   a hold, and on a real phone the wait read as lag);
+  //   a swipe anywhere else scrolls the page and touches nothing;
+  //   touch and hold, then drag, starts a drag from any spot, any way;
   //   touch and hold still opens the part's menu (iOS never sends the
   //   browser's own menu event, so right-click menus were out of reach).
   //
-  // Mechanics. Until a press has held still for TOUCH_HOLD_MS its
-  // pointermoves are withheld from everything below window, so an unarmed
-  // press can never move a part or trip a drag threshold. Once armed, the
-  // host's non-passive touchmove listener refuses the browser's pan and the
+  // Mechanics. A press is ARMED when its moves may reach the engine: at
+  // once on a part that moves any way, once the finger has picked the
+  // part's own line on a part that moves along one, and after
+  // TOUCH_HOLD_MS held still anywhere else. Until then its pointermoves are
+  // withheld from everything below window, so an unarmed press can never
+  // move a part or trip a drag threshold. Once armed, the host's
+  // non-passive touchmove listener refuses the browser's pan and the
   // moves flow; the engine's own drag systems do the rest unchanged. The
   // engine reads two globals this block writes (its only part in this, and
   // only when the payload carries touchHost): __gb2_touchCancelAt, so a
@@ -37043,6 +37076,94 @@
     if (t.closest("input, textarea, select, button, [contenteditable]"))
       return false;
     return true;
+  }
+  // GRAB (Nov 2026). Which parts a finger moves at once, and which way,
+  // is written in one place, the stylesheet, as touch-action: it has to be
+  // in force before the finger lands, and it is the one thing Safari and
+  // Chromium both honor on SVG parts. (Measured in the iPhone simulator:
+  // once a script refuses one touchmove, Safari never scrolls that gesture,
+  // so a script cannot wait ten pixels to see which way the finger went.)
+  // This reads the same values back, from the pressed element up to the
+  // surface, so the script and the browser cannot disagree:
+  //   "any"  the browser pans neither way here: the part moves freely;
+  //   "x"    it pans up and down only: the part moves sideways (bars on
+  //          an upright chart), and an up or down swipe still scrolls;
+  //   "y"    the mirror (bars on a chart lying down);
+  //   ""     an ordinary spot: a swipe scrolls, a hold then a drag moves.
+  function touchGrabAxis(t, root) {
+    var panX = true, panY = true, n = t, hops = 0;
+    while (n && n.nodeType === 1 && hops++ < 48) {
+      var ta = "";
+      try { ta = String(getComputedStyle(n).touchAction || ""); } catch (e) {}
+      if (ta && ta !== "auto" && ta !== "manipulation") {
+        ta = " " + ta + " ";
+        if (ta.indexOf(" pan-x ") < 0) panX = false;
+        if (ta.indexOf(" pan-y ") < 0) panY = false;
+      }
+      if (n === root) break;
+      n = n.parentNode;
+    }
+    if (!panX && !panY) return "any";
+    if (!panX) return "x";
+    if (!panY) return "y";
+    return "";
+  }
+  // Which way this chart's bars reorder, read off the drawing, because the
+  // engine settles orientation itself, per chart type (a raincloud lies
+  // down unasked): the category ticks say which axis the categories are
+  // on, and the category labels say it when the ticks are hidden. The
+  // segments of a stacked bar also restack along the value axis, so those
+  // move both ways. The stylesheet turns the answer into touch-action.
+  var TOUCH_BAR_AXIS_RAF = 0;
+  function touchBarAxis() {
+    var host = hostEl();
+    var svg = host && host.querySelector('svg[data-role="gb2-chart-svg"]');
+    if (!svg || !svg.querySelector("[data-bar-cat]")) return "";
+    var axis = "x", i;
+    if (svg.querySelector('line[data-role="y-tick"][data-bar-cat]')) axis = "y";
+    else if (!svg.querySelector('line[data-role="x-tick"][data-bar-cat]')) {
+      var labs = svg.querySelectorAll("text[data-bar-cat]"), a = null, b = null;
+      for (i = 0; i < labs.length && !b; i++) {
+        var r = labs[i].getBoundingClientRect();
+        if (!r.width && !r.height) continue;
+        if (!a) a = { cat: labs[i].getAttribute("data-bar-cat"), r: r };
+        else if (labs[i].getAttribute("data-bar-cat") !== a.cat) b = { r: r };
+      }
+      if (a && b && Math.abs((a.r.top + a.r.bottom) - (b.r.top + b.r.bottom)) >
+          Math.abs((a.r.left + a.r.right) - (b.r.left + b.r.right))) axis = "y";
+    }
+    var bars = svg.querySelectorAll("path[data-bar-cat][data-bar-group]"), p0 = null;
+    for (i = 0; i < bars.length; i++) {
+      var rb = bars[i].getBoundingClientRect();
+      if (!rb.width || !rb.height) continue;
+      var c = bars[i].getAttribute("data-bar-cat");
+      var g = bars[i].getAttribute("data-bar-group");
+      if (!p0) { p0 = { c: c, g: g, r: rb }; continue; }
+      if (c !== p0.c) break;            // the first category tells it
+      if (g === p0.g) continue;
+      // Two groups of one category: side by side they are dodged, on the
+      // same stretch of the category axis they are stacked.
+      var lo = axis === "x" ? Math.max(p0.r.left, rb.left) : Math.max(p0.r.top, rb.top);
+      var hi = axis === "x" ? Math.min(p0.r.right, rb.right) : Math.min(p0.r.bottom, rb.bottom);
+      var span = axis === "x" ? Math.min(p0.r.width, rb.width) : Math.min(p0.r.height, rb.height);
+      if (span > 0 && hi - lo > span * 0.5) return "any";
+      break;
+    }
+    return axis;
+  }
+  function touchBarAxisSync() {
+    TOUCH_BAR_AXIS_RAF = 0;
+    var host = hostEl(), v = "";
+    if (!host) return;
+    try { v = touchBarAxis(); } catch (e) {}
+    if ((host.getAttribute("data-ps-bar-drag") || "") === v) return;
+    if (v) host.setAttribute("data-ps-bar-drag", v);
+    else host.removeAttribute("data-ps-bar-drag");
+  }
+  function touchBarAxisSoon() {
+    if (TOUCH_BAR_AXIS_RAF) return;
+    try { TOUCH_BAR_AXIS_RAF = requestAnimationFrame(touchBarAxisSync); }
+    catch (e) { TOUCH_BAR_AXIS_RAF = 0; }
   }
   function touchCue(on, x, y) {
     var c = document.getElementById("ps-touch-cue");
@@ -37262,14 +37383,19 @@
       // opened a menu (or swiped) is ever swallowed.
       TOUCH_SWALLOW_CLICK_UNTIL = 0;
       touchPressDrop();
+      var surf = touchChartSurface(e.target)
+        ? e.target.closest(".graphbuilder2-host")
+        : (touchLayoutSurface(e.target) ? el("ps-lcanvas") : null);
+      var grab = surf ? touchGrabAxis(e.target, surf) : "";
       var tp = {
         id: e.pointerId, x: e.clientX, y: e.clientY, target: e.target,
-        chart: touchChartSurface(e.target) || touchLayoutSurface(e.target),
-        armed: false, early: false, dragging: false, dead: false,
+        chart: !!surf, grab: grab,
+        // A part that moves any way is ready the moment it is touched.
+        armed: grab === "any", early: false, dragging: false, dead: false,
         consumed: false, menuOpen: false, holdTimer: 0, menuTimer: 0
       };
       TP = tp;
-      if (tp.chart) tp.holdTimer = setTimeout(function () {
+      if (tp.chart && !tp.armed) tp.holdTimer = setTimeout(function () {
         tp.holdTimer = 0;
         if (TP !== tp || tp.dead || tp.early) return;
         tp.armed = true;
@@ -37294,13 +37420,21 @@
         return;
       }
       if (!tp.armed) {
-        if (far && !tp.early) { tp.early = true; touchClearTimers(tp); }
-        e.stopImmediatePropagation();
-        return;
+        if (far && !tp.early) {
+          // A part that moves along one line: the first ten pixels say
+          // which the finger meant. Along the line it is a drag from here
+          // on; across it, a swipe, and the page scrolls (touch-action
+          // left that pan with the browser).
+          var ax = Math.abs(e.clientX - tp.x), ay = Math.abs(e.clientY - tp.y);
+          if ((tp.grab === "x" && ax >= ay) || (tp.grab === "y" && ay >= ax))
+            tp.armed = true;
+          else { tp.early = true; touchClearTimers(tp); }
+        }
+        if (!tp.armed) { e.stopImmediatePropagation(); return; }
       }
       if (!tp.dragging) {
         if (!far) { e.stopImmediatePropagation(); return; }
-        // Held, then moved: a drag. A menu that opened while the finger
+        // Moved while armed: a drag. A menu that opened while the finger
         // rested gives way to it, the way a held home-screen icon does.
         tp.dragging = true;
         touchClearTimers(tp);
@@ -37387,6 +37521,16 @@
       surfaces[si].addEventListener("touchstart", function () {}, { passive: true });
       surfaces[si].addEventListener("touchmove", holdPan, { passive: false });
     }
+    // Keep the bars' drag direction current: the engine rebuilds the
+    // drawing on every render and redraw, and touch-action has to be
+    // right before the next finger lands, not when it does.
+    try {
+      if (hostEl() && window.MutationObserver) {
+        new MutationObserver(touchBarAxisSoon)
+          .observe(hostEl(), { childList: true, subtree: true });
+        touchBarAxisSoon();
+      }
+    } catch (eMo) {}
   }
   // =============================================================== phone frame
   // The find-your-way pass (Nov 2026). On a phone the three unnamed icons

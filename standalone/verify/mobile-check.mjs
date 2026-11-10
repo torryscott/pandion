@@ -542,6 +542,24 @@ async function runDevice(browser, dev) {
         });
         await f(); await page.waitForTimeout(220); return f();
     };
+    // a spot on the chart with no part under it or near it (the drawing's
+    // own ground). Near matters: Chromium gives a touch to the closest
+    // tappable thing within about sixteen pixels of the finger, so a spot
+    // a few pixels off a bar is, to the browser, the bar.
+    const emptySpot = () => page.evaluate(() => {
+        const svg = document.querySelector('.graphbuilder2-host svg[data-role="gb2-chart-svg"]');
+        if (!svg) return null;
+        svg.scrollIntoView({ block: 'center' });
+        const r = svg.getBoundingClientRect(), D = 26;
+        const bare = (x, y) => x > 2 && y > 2 && x < innerWidth - 2 && y < innerHeight - 2 && document.elementFromPoint(x, y) === svg;
+        for (let fy = 0.08; fy < 0.7; fy += 0.04) for (let fx = 0.2; fx < 0.96; fx += 0.04) {
+            const x = r.left + r.width * fx, y = r.top + r.height * fy;
+            let ok = true;
+            for (const dx of [-D, 0, D]) for (const dy of [-D, 0, D]) if (!bare(x + dx, y + dy)) ok = false;
+            if (ok) return { x, y };
+        }
+        return null;
+    });
     const titleAt = async () => {
         const f = () => page.evaluate(() => {
             const svg = [...document.querySelectorAll('.graphbuilder2-host svg')].sort((a, b) => {
@@ -555,18 +573,74 @@ async function runDevice(browser, dev) {
     };
     await closeEditor();
 
-    // 4a. a quick swipe that starts on a bar is a scroll: it opens nothing
-    //     and moves nothing
+    // 4a. a swipe that is not a drag opens nothing and moves nothing: an
+    //     up-or-down swipe that starts on a bar (bars only move sideways, so
+    //     that one is the page's), and a sideways swipe on empty chart space
     {
         const o0 = await barOrder();
         let bb = await barBody();
         if (bb) { await touchDrag(client, page, bb.x, bb.y, -6, -90); await page.waitForTimeout(700); }
         const opened1 = await editorOpen();
-        bb = await barBody();
-        if (bb) { await touchDrag(client, page, bb.x, bb.y, -130, 4); await page.waitForTimeout(700); }
+        const es = await emptySpot();
+        if (es) { await touchDrag(client, page, es.x, es.y, -110, 4); await page.waitForTimeout(700); }
         const opened2 = await editorOpen();
-        result.touch.swipeLeavesChartAlone = !!bb && !opened1 && !opened2 && (await barOrder()) === o0;
+        result.touch.swipeLeavesChartAlone = !!bb && !!es && !opened1 && !opened2 && (await barOrder()) === o0;
         await closeEditor();
+    }
+    // 4a2. a drag that starts on a bar moves it AT ONCE, with no hold (the
+    //      first touch rule made every drag wait a quarter second, and on a
+    //      real phone the wait read as lag): the last bar goes to the front,
+    //      and the browser never takes the touch away
+    {
+        result.touch.dragReordersBarsAtOnce = false;
+        const o0 = await barOrder(); const bb = await barBody();
+        if (bb && o0.split('|').length >= 2) {
+            await page.evaluate(() => { window.__mobCancel = 0; });
+            await touchDrag(client, page, bb.x, bb.y, bb.firstX - 20 - bb.x, 0, 14);
+            await page.waitForTimeout(900);
+            const o1 = await barOrder();
+            const cancelled = await page.evaluate(() => window.__mobCancel);
+            result.touch.dragReordersBarsAtOnce = cancelled === 0 && o1 !== o0 && o1.split('|')[0] === o0.split('|').slice(-1)[0];
+            // put the order back for the cases below (they aim at the last bar)
+            if (o1 !== o0) {
+                const b2 = await page.evaluate((cat) => {
+                    const el = [...document.querySelectorAll('.graphbuilder2-host path[data-bar-cat], .graphbuilder2-host rect[data-bar-cat]')]
+                        .filter(n => n.getAttribute('data-bar-cat') === cat && n.getBoundingClientRect().height > 30)[0];
+                    const all = [...document.querySelectorAll('.graphbuilder2-host path[data-bar-cat], .graphbuilder2-host rect[data-bar-cat]')]
+                        .filter(n => n.getBoundingClientRect().height > 30).sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
+                    if (!el || !all.length) return null;
+                    const r = el.getBoundingClientRect(), last = all[all.length - 1].getBoundingClientRect();
+                    return { x: r.left + r.width / 2, y: r.top + r.height * 0.6, toX: last.right + 20 };
+                }, o0.split('|').slice(-1)[0]);
+                if (b2) { await touchDrag(client, page, b2.x, b2.y, b2.toX - b2.x, 0, 14); await page.waitForTimeout(900); }
+            }
+        }
+        await closeEditor();
+    }
+    // 4a3. the invisible strips stay out of it. The axis range strips (and
+    //      the marginal and stats-box edges on a scatter) run the length of
+    //      an axis and carry an up-and-down or sideways resize cursor; if
+    //      one answered a drag at once, a swipe begun near the Y axis would
+    //      change the axis range instead of scrolling. They keep the hold.
+    {
+        const strips = await page.evaluate(() => {
+            const host = document.querySelector('.graphbuilder2-host'); let n = 0, bad = 0;
+            host.querySelectorAll('*').forEach(el => {
+                if (el.closest('.gb2-panel, [data-role="color-picker"], [data-role="chart-toolbar"]')) return;
+                if (!/^(ns|ew|row|col)-resize$/.test((el.style && el.style.cursor) || '')) return;
+                n++;
+                let panX = true, panY = true;
+                for (let k = el; k && k.nodeType === 1; k = k.parentNode) {
+                    const ta = ' ' + getComputedStyle(k).touchAction + ' ';
+                    if (ta !== ' auto ' && ta !== ' manipulation ') { if (ta.indexOf(' pan-x ') < 0) panX = false; if (ta.indexOf(' pan-y ') < 0) panY = false; }
+                    if (k === host) break;
+                }
+                if (!panX || !panY) bad++;
+            });
+            return { n, bad };
+        });
+        check(dev.id + '/grab/strips', strips.bad === 0,
+            tag + 'no invisible resize strip answers a drag at once (' + strips.bad + ' of ' + strips.n + ' do)');
     }
     // 4b. a tap whose finger wobbles (8 px across, 6 down) is still a tap
     {
@@ -598,42 +672,54 @@ async function runDevice(browser, dev) {
         }
         await closeEditor();
     }
-    // 4d. touch and hold, then drag: an axis title follows the finger
+    // 4d. an axis title follows the finger: at once (dragMovesLabelAtOnce),
+    //     and after a hold as well (holdDragMovesLabel), since a person who
+    //     learned the hold must not find it broken
     {
-        result.touch.holdDragMovesLabel = false;
-        const t0 = await titleAt();
-        if (t0) {
+        result.touch.dragMovesLabelAtOnce = false; result.touch.holdDragMovesLabel = false;
+        const labelAt = () => page.evaluate(() => {
+            const svg = [...document.querySelectorAll('.graphbuilder2-host svg')].sort((a, b) => {
+                const A = a.getBoundingClientRect(), B = b.getBoundingClientRect(); return B.width * B.height - A.width * A.height; })[0];
+            const want = String((window.PS_SHELL.buildPayload() || {}).yLabel || '').trim();
+            const t = [...svg.querySelectorAll('text')].find(n => (n.textContent || '').trim() === want);
+            if (!t) return null; const r = t.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, cancel: window.__mobCancel };
+        });
+        for (const held of [false, true]) {
+            const t0 = await titleAt();
+            if (!t0) continue;
             const s0 = await scrollState(page);
             await page.evaluate(() => { window.__mobCancel = 0; });
             await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: t0.x, y: t0.y }] });
-            await page.waitForTimeout(420);
-            result.touch.holdShowsCue = await page.evaluate(() => { const c = document.getElementById('ps-touch-cue'); return !!c && !c.hidden; });
-            for (let i = 1; i <= 12; i++) { await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: t0.x + 60 * i / 12, y: t0.y + 40 * i / 12 }] }); await page.waitForTimeout(16); }
+            if (held) await page.waitForTimeout(420);
+            // out, then (held) back the way it came: the second drag also
+            // puts the label home. Mostly downward, so the Y title never
+            // ends beside the Y axis, whose range strip a browser would
+            // hand the next touch to.
+            const sx = held ? -16 : 16, sy = held ? -56 : 56;
+            for (let i = 1; i <= 12; i++) { await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: t0.x + sx * i / 12, y: t0.y + sy * i / 12 }] }); await page.waitForTimeout(16); }
             await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
             await page.waitForTimeout(800);
-            const t1 = await page.evaluate(() => {
-                const svg = [...document.querySelectorAll('.graphbuilder2-host svg')].sort((a, b) => {
-                    const A = a.getBoundingClientRect(), B = b.getBoundingClientRect(); return B.width * B.height - A.width * A.height; })[0];
-                const want = String((window.PS_SHELL.buildPayload() || {}).yLabel || '').trim();
-                const t = [...svg.querySelectorAll('text')].find(n => (n.textContent || '').trim() === want);
-                if (!t) return null; const r = t.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, cancel: window.__mobCancel };
-            });
+            const t1 = await labelAt();
             const s1 = await scrollState(page);
             const pan = (s1.win - s0.win) + (s1.pane - s0.pane);
             // the label has to come most of the way with the finger, and the
             // browser must not have taken the touch away mid-drag
-            result.touch.holdDragMovesLabel = !!t1 && t1.cancel === 0 &&
-                Math.hypot(t1.x - t0.x, (t1.y - t0.y) + pan) >= 0.6 * Math.hypot(60, 40);
+            const moved = !!t1 && t1.cancel === 0 &&
+                Math.hypot(t1.x - t0.x, (t1.y - t0.y) + pan) >= 0.6 * Math.hypot(16, 56);
+            if (held) result.touch.holdDragMovesLabel = moved; else result.touch.dragMovesLabelAtOnce = moved;
+            await closeEditor();
         }
-        await closeEditor();
     }
     // 4e. touch and hold, then drag: the last bar goes to the front
     {
-        result.touch.holdDragReordersBars = false;
+        result.touch.holdDragReordersBars = false; result.touch.holdShowsCue = false;
         const o0 = await barOrder(); const bb = await barBody();
         if (bb && o0.split('|').length >= 2) {
             await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: bb.x, y: bb.y }] });
             await page.waitForTimeout(420);
+            // a part that moves along one line still answers a hold: the ring
+            // says it will now go any way
+            result.touch.holdShowsCue = await page.evaluate(() => { const c = document.getElementById('ps-touch-cue'); return !!c && !c.hidden; });
             for (let i = 1; i <= 14; i++) { await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: bb.x + (bb.firstX - 20 - bb.x) * i / 14, y: bb.y }] }); await page.waitForTimeout(16); }
             await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
             await page.waitForTimeout(900);
@@ -710,8 +796,55 @@ async function runDevice(browser, dev) {
     await page.evaluate(() => { const s = document.getElementById('ps-narrow-scrim'); if (s && !s.hidden) s.click(); });
     await page.waitForTimeout(300);
 
+    // 8b. a data cell's menu stays on the screen. It was placed by a size
+    //     it no longer has in touch mode, and on a phone ran off the right
+    //     edge, cutting its longest items short.
+    {
+        await goWorkspace('data');
+        const cell = await page.evaluate(() => {
+            // in view AND not under another panel (on a tablet held upright the
+            // variable column lies over the grid's right side)
+            const at = t => { const r = t.getBoundingClientRect(); return { x: Math.min(r.left + r.width / 2, innerWidth - 12), y: r.top + r.height / 2 }; };
+            const tds = [...document.querySelectorAll('#ps-datagrid td[data-gc]')].filter(t => { const r = t.getBoundingClientRect(); if (!(r.width > 20 && r.top > 0 && r.bottom < innerHeight - 80)) return false; const p = at(t), e = document.elementFromPoint(p.x, p.y); return !!e && t.contains(e); });
+            if (!tds.length) return null;
+            return at(tds.sort((a, b) => b.getBoundingClientRect().right - a.getBoundingClientRect().right)[0]);
+        });
+        if (cell) {
+            await longPress(client, page, cell.x, cell.y);
+            await page.waitForTimeout(350);
+            const mr = await page.evaluate(() => { const m = document.getElementById('ps-cellmenu'); if (!m || getComputedStyle(m).display === 'none') return null; const r = m.getBoundingClientRect(); return { l: Math.round(r.left), r: Math.round(r.right), b: Math.round(r.bottom), w: innerWidth, h: innerHeight }; });
+            check(dev.id + '/data/cellmenu', !!mr && mr.l >= 0 && mr.r <= mr.w && mr.b <= mr.h,
+                tag + 'the menu of the rightmost cell in view is wholly on the screen (' + (mr ? mr.l + ' to ' + mr.r + ' of ' + mr.w : 'did not open') + ')');
+            await page.evaluate(() => { const m = document.getElementById('ps-cellmenu'); if (m) m.style.display = 'none'; });
+            await page.keyboard.press('Escape'); await page.waitForTimeout(200);
+        } else note(tag + 'no data cell was in view, so the cell menu went unmeasured');
+    }
+
     // 9. Layouts: a new layout, the chart placed by tap, then moved by touch
-    await page.evaluate(() => { window.PS_SHELL.addLayout(); }); await page.waitForTimeout(1200);
+    //    First the gallery a person meets: its Create button has to be on
+    //    the screen without scrolling to the end of the template list.
+    {
+        await page.evaluate(() => { const m = document.getElementById('ps-addmenu'); if (!m) return; m.innerHTML = '<button type="button" data-add="layout">New layout</button>'; m.querySelector('button').click(); });
+        await page.waitForTimeout(500);
+        const g = await page.evaluate(() => { const b = document.getElementById('ps-layout-gallery-create'); if (!b || !b.offsetParent) return null; const r = b.getBoundingClientRect(); return { t: Math.round(r.top), b: Math.round(r.bottom), h: innerHeight }; });
+        check(dev.id + '/layout/create-reach', !!g && g.t >= 0 && g.b <= g.h,
+            tag + 'Create layout is on the screen as soon as the gallery opens (' + (g ? 'at ' + g.t + ' to ' + g.b + ' of ' + g.h : 'gallery did not open') + ')');
+        await page.evaluate(() => { const c = document.getElementById('ps-layout-gallery-cancel'); if (c) c.click(); });
+        await page.waitForTimeout(300);
+    }
+    // A workspace opens at its own top, not wherever the last one was left.
+    {
+        await goWorkspace('chart');
+        // the way a person gets there: a tap on a bar opens its editor and
+        // the pane scrolls to show it
+        const bc = await barCentre(page);
+        if (bc) { await page.touchscreen.tap(bc.x, bc.y); await page.waitForTimeout(1100); }
+        const moved = await page.evaluate(() => { const p = document.getElementById('ps-main-workspace'); if (!p) return -1; if (!p.scrollTop) p.scrollTop = 60; return p.scrollTop; });
+        await page.evaluate(() => { window.PS_SHELL.addLayout(); }); await page.waitForTimeout(1200);
+        const at = await page.evaluate(() => { const p = document.getElementById('ps-main-workspace'); return p ? p.scrollTop : -1; });
+        if (moved > 0) check(dev.id + '/layout/top', at === 0, tag + 'Layouts opens at its top after Charts was left scrolled (' + moved + ' px there, ' + at + ' px here)');
+        else note(tag + 'the Charts pane had nothing to scroll, so the workspace scroll carry-over went unmeasured');
+    }
     const mLay0 = await page.evaluate(() => window.PS_SHELL.workspace());
     check(dev.id + '/layout/reached', mLay0 === 'layout', tag + 'a new layout opens the Layouts workspace');
     await page.locator('#ps-laddchart').tap(); await page.waitForTimeout(500);
@@ -721,17 +854,43 @@ async function runDevice(browser, dev) {
     check(dev.id + '/layout/placed', items >= 1, tag + 'a chart is placed on the layout page by tap (' + items + ' item' + (items === 1 ? '' : 's') + ')');
     await screen('layout');
     const it = await page.evaluate(() => { const e = document.querySelector('#ps-lcanvas .ps-litem'); if (!e) return null; e.scrollIntoView({ block: 'center' }); const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height }; });
-    result.touch.layoutSwipeLeavesItem = false; result.touch.layoutItemDragMoves = false;
+    result.touch.layoutPageSwipeLeavesItems = false; result.touch.layoutItemDragMovesAtOnce = false; result.touch.layoutItemDragMoves = false;
     if (it) {
         await page.waitForTimeout(250);
         const where = () => page.evaluate(() => { const e = document.querySelector('#ps-lcanvas .ps-litem'); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; });
-        // a quick swipe across an item scrolls or does nothing: the item stays put
+        // a swipe on the bare page, beside the item, moves nothing
         const a0 = await where(); let s0 = await scrollState(page);
-        await touchDrag(client, page, a0.x + a0.w / 2, a0.y + a0.h / 2, 30, 24);
-        await page.waitForTimeout(600);
+        // (the page itself or the grey around it: whatever of the page view
+        // is on screen and has no item under the finger or near it)
+        const bare = await page.evaluate(() => {
+            const vp = document.getElementById('ps-lviewport'); if (!vp) return null;
+            const r = vp.getBoundingClientRect(), D = 22;
+            const x0 = Math.max(r.left, 0) + 30, x1 = Math.min(r.right, innerWidth) - 30;
+            const y0 = Math.max(r.top, 0) + 30, y1 = Math.min(r.bottom, innerHeight) - 30;
+            const free = (x, y) => { const e = document.elementFromPoint(x, y); return !!e && vp.contains(e) && !e.closest('.ps-litem, .ps-lhandle, .ps-lhandle-end, .ps-lbar, button, input, select'); };
+            for (let y = y1; y >= y0; y -= 14) for (let x = x0; x <= x1; x += 14) {
+                let ok = true;
+                for (const dx of [-D, 0, D]) for (const dy of [-D, 0, D]) if (!free(x + dx, y + dy)) ok = false;
+                if (ok) return { x, y };
+            }
+            return null;
+        });
+        if (bare) { await touchDrag(client, page, bare.x, bare.y, 30, 24); await page.waitForTimeout(600); }
         let a1 = await where(), s1 = await scrollState(page);
         let pan = (s1.win - s0.win) + (s1.pane - s0.pane);
-        result.touch.layoutSwipeLeavesItem = !!a1 && Math.hypot(a1.x - a0.x, (a1.y - a0.y) + pan) < 2;
+        result.touch.layoutPageSwipeLeavesItems = !!bare && !!a1 && Math.hypot(a1.x - a0.x, (a1.y - a0.y) + pan) < 2;
+        // a drag that starts on the item moves it at once, with no hold
+        {
+            const c0 = await where(); s0 = await scrollState(page);
+            await page.evaluate(() => { window.__mobCancel = 0; });
+            await touchDrag(client, page, c0.x + c0.w / 2, c0.y + c0.h / 2, 30, 24);
+            await page.waitForTimeout(700);
+            const c1 = await where(); s1 = await scrollState(page);
+            pan = (s1.win - s0.win) + (s1.pane - s0.pane);
+            const cancelledNow = await page.evaluate(() => window.__mobCancel);
+            result.touch.layoutItemDragMovesAtOnce = !!c1 && cancelledNow === 0 &&
+                Math.hypot(c1.x - c0.x, (c1.y - c0.y) + pan) >= 0.6 * Math.hypot(30, 24);
+        }
         // touch and hold, then drag: the item comes with the finger
         const b0 = await where(); s0 = await scrollState(page);
         await page.evaluate(() => { window.__mobCancel = 0; });
