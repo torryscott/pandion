@@ -1859,6 +1859,61 @@
   function inferType(rawVals, tokens) {
     return numericAudit(rawVals, tokens).numeric ? "continuous" : "nominal";
   }
+  // An untyped column takes its type from the first data that lands in it
+  // (Nov 2026, a first-use walkthrough: quiz scores typed into a blank sheet
+  // stayed Nominal, and the chart then offered "none eligible" without
+  // naming the column or the cure). Two halves, because the question has to
+  // be asked BEFORE a write and answered AFTER it.
+  //
+  // firstDataWatch: should `col` take its type from what is about to be
+  // written into the cells in `rows`? Yes in exactly two situations, and
+  // never for a type somebody set by hand (setColTypes marks that).
+  //   1. The column is empty and untyped: it holds no readable value, and
+  //      its type is Nominal, which is what inference says of no data.
+  //   2. The column's type CAME from this rule earlier in the session
+  //      (t.typeAuto), and the write replaces every value it holds. That is
+  //      what lets someone type 14, think again, and type a name over it or
+  //      after deleting it, without the name going missing in a column the
+  //      first guess made Continuous. `emptyOnly` switches this half off.
+  // Any other column with data is never re-read: text typed or pasted over
+  // an imported Continuous column still goes missing and says so, which is
+  // the report that catches a misaligned paste. Both marks are session
+  // state on the table object and are never saved.
+  function firstDataWatch(t, col, rows, emptyOnly) {
+    if (!t || !t.types || !(col in t.types) || !t.raw[col]) return false;
+    if (t.typeByHand && t.typeByHand[col]) return false;
+    if (t.computed && t.computed[col] != null) return false;
+    var auto = !emptyOnly && !!(t.typeAuto && t.typeAuto[col]);
+    // The last audit is enough to say no cheaply: more readable values than
+    // cells being written means some of them are outside those cells.
+    var last = t.typeAudit && t.typeAudit[col];
+    if (last && last.seen > (auto ? rows.length : 0)) return false;
+    var tokens = tableMissingTokens(t, col), vals = t.raw[col];
+    var audit = numericAudit(vals, tokens);
+    if (!audit.seen) return t.types[col] === "nominal";
+    if (!auto) return false;
+    var inRows = Object.create(null), i;
+    for (i = 0; i < rows.length; i++) inRows[rows[i]] = 1;
+    for (i = 0; i < vals.length; i++) {
+      if (inRows[i]) continue;
+      if (!tokens[vals[i] == null ? "" : String(vals[i]).trim()]) return false;
+    }
+    return true;
+  }
+  // typeFromFirstData: after the write, give a watched column the type its
+  // values say, and remember that the type came from here. A column left
+  // with no readable value goes back to Nominal, which is what an untyped
+  // empty column is. Returns the new type when it changed, "" otherwise.
+  // The caller retypes.
+  function typeFromFirstData(t, col) {
+    if (!t.typeAuto) t.typeAuto = dataMap();
+    t.typeAuto[col] = 1;
+    var now = numericAudit(t.raw[col], tableMissingTokens(t, col));
+    var next = now.numeric ? "continuous" : "nominal";
+    if (next === t.types[col]) return "";
+    t.types[col] = next;
+    return next;
+  }
   // A numeric missing-value CODE passes every gate the audit above has. It
   // reads as a number, so bad === 0, the column types Continuous, and the
   // value is averaged. The inspector already prints "Min -99" two rows above
@@ -15012,6 +15067,16 @@
     var t = PROJECT.table;
     type = normType(type);
     if (!type || !t || !t.types) return;
+    // Chosen by hand: typing into this column never re-reads its type again
+    // (firstDataWatch). Marked even when the type does not change, because
+    // picking Nominal for an empty column that already says Nominal is still
+    // a choice. Session state on the table object, never saved.
+    if (!t.typeByHand) t.typeByHand = dataMap();
+    (cols || []).forEach(function (c) {
+      if (!(c in t.types)) return;
+      t.typeByHand[c] = 1;
+      if (t.typeAuto) delete t.typeAuto[c];
+    });
     cols = (cols || []).filter(function (c) {
       return (c in t.types) && t.types[c] !== type;
     });
@@ -15460,6 +15525,14 @@
       t.excluded[next] = t.excluded[oldName];
       delete t.excluded[oldName];
     }
+    if (t.typeByHand && t.typeByHand[oldName]) {
+      t.typeByHand[next] = 1;
+      delete t.typeByHand[oldName];
+    }
+    if (t.typeAuto && t.typeAuto[oldName]) {
+      t.typeAuto[next] = 1;
+      delete t.typeAuto[oldName];
+    }
     // The per-column missing labels were the one keyed store this did not
     // carry, and losing them is not cosmetic. The column silently falls back
     // to the dataset labels, so a code that WAS missing comes back as real
@@ -15559,6 +15632,8 @@
       if (t.declaredLevels) delete t.declaredLevels[col];
       if (t.levelOrderDefaults) delete t.levelOrderDefaults[col];
       if (t.excluded) delete t.excluded[col];
+      if (t.typeByHand) delete t.typeByHand[col];
+      if (t.typeAuto) delete t.typeAuto[col];
       if (t.computed) delete t.computed[col];
       if (t.importedFormulas) delete t.importedFormulas[col];
       if (t.sourceNames) delete t.sourceNames[col];
@@ -16172,6 +16247,15 @@
       if (lwBefore > 0 && lwBefore <= 8)
         levelWatch.push({ col: lwCol, before: lwBefore });
     }
+    // Empty, untyped columns among the targets take their type from this
+    // block (firstDataWatch): numbers pasted into an empty column are
+    // numbers. A column that already holds data never does, so text pasted
+    // over a Continuous column is still reported below as values lost.
+    var firstDataCols = [], firstDataRows = [];
+    for (var fdr = 0; fdr < targetRows; fdr++) firstDataRows.push(r.r0 + fdr);
+    for (var fdc = 0; fdc < targetCols && r.c0 + fdc < visCols.length; fdc++)
+      if (firstDataWatch(t, visCols[r.c0 + fdc], firstDataRows, true))
+        firstDataCols.push(visCols[r.c0 + fdc]);
     for (var y = 0; y < targetRows; y++) {
       for (var x = 0; x < targetCols; x++) {
         var srcRow = fillSelection ? 0 : y;
@@ -16182,6 +16266,8 @@
       }
     }
     t.edited = true;
+    for (var fdt = 0; fdt < firstDataCols.length; fdt++)
+      typeFromFirstData(t, firstDataCols[fdt]);
     retype(t); validateRoles();
     persist(); syncAll(); render();
     gridSetSelection(visCols[r.c0], r.r0,
@@ -16238,8 +16324,17 @@
     if (!t || !cells.length) return;
     dataMark("clearing the cells");
     var undoDepth = DATA_ACTION_SEQ;
+    // A column that the first-data rule typed this session goes back to
+    // untyped when its values are all cleared, so the next thing typed is
+    // read afresh. An imported column that is cleared keeps its type.
+    var clearRows = Object.create(null), clearWatch = [], cw;
+    for (cw = 0; cw < cells.length; cw++)
+      (clearRows[cells[cw].col] = clearRows[cells[cw].col] || []).push(cells[cw].row);
+    for (cw in clearRows)
+      if (firstDataWatch(t, cw, clearRows[cw])) clearWatch.push(cw);
     for (var i = 0; i < cells.length; i++) t.raw[cells[i].col][cells[i].row] = "";
     t.edited = true;
+    for (cw = 0; cw < clearWatch.length; cw++) typeFromFirstData(t, clearWatch[cw]);
     retype(t); validateRoles();
     persist(); syncAll(); render();
     offerDataUndo("Cleared " + cells.length +
@@ -17564,6 +17659,7 @@
   function dataCellPatch(col, row) {
     var t = PROJECT.table;
     return { col: col, row: row, raw: String(t.raw[col][row]), edited: !!t.edited,
+             type: t.types[col],
              roles: JSON.stringify(PROJECT.charts.map(function (c) {
                return { id: c.id, roles: c.roles || {} };
              })) };
@@ -17585,6 +17681,11 @@
     bigDirtyCol(p.col);
     t.raw[p.col][p.row] = p.raw;
     t.edited = p.edited;
+    // The column's type as it stood at this point in the history. A first
+    // value typed into an untyped column sets its type (firstDataWatch), so
+    // undoing that value has to take the type back with it, and redo has to
+    // bring it forward again.
+    if (p.type && t.types && (p.col in t.types)) t.types[p.col] = p.type;
     try {
       var roles = JSON.parse(p.roles);
       for (var ri = 0; ri < roles.length; ri++) {
@@ -17898,11 +17999,16 @@
         gridNextEditAnnouncement(next));
       return;
     }
+    // Asked before the mark and the write, answered after them.
+    var firstData = firstDataWatch(t, ge.col, [ge.row]);
     dataMarkCell(ge.col, ge.row, "the cell edit");
     t.raw[ge.col][ge.row] = newRaw;
     t.edited = true;
+    var typedAs = firstData ? typeFromFirstData(t, ge.col) : "";
     var previousFilterMask = t.filterMask;
     retype(t, false, [ge.col]);
+    // A changed type can change which roles the column may hold.
+    if (typedAs) validateRoles();
     // The typed value is what every chart and statistic downstream will see.
     // When nothing could read the text, the cell is missing, and announcing
     // "Saved score, row 1 as sixty one" tells a screen reader user the value
@@ -17915,7 +18021,9 @@
     syncDataCommandBar();
     gridApplySelection();
     persist();
-    syncDataRow();
+    // The header's type mark and the variable panel show the type, so a
+    // column that just took one needs the whole Data row redrawn.
+    if (typedAs) syncAll(); else syncDataRow();
     render();
     if (next) gridOpenEditor(next.col, next.row, { mode: "enter" });
     else {
@@ -17926,6 +18034,7 @@
       ? gridEditTarget(ge.col, ge.row) + " is missing. " + voided + "."
       : "Saved " + gridEditTarget(ge.col, ge.row) +
         " as " + gridEditValue(t, ge.col, newRaw) + ".") +
+      (typedAs ? " " + ge.col + " is now " + typeLabel(typedAs) + "." : "") +
       gridNextEditAnnouncement(next));
     // The sighted half of the same report. This is not a toast on every
     // edit. An ordinary edit lands, and only a value that was destroyed
