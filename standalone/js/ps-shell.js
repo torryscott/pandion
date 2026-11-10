@@ -5823,8 +5823,11 @@
   var EXPORT_PIN_SCOPE = null;
 
   function exportPrefs() {
-    var out = { format: "svg", dpi: 300, background: "shown",
-                pinRecord: true };
+    // A phone's picture format is PNG: Photos cannot hold an SVG and
+    // Messages shows one as a nameless file. Only the DEFAULT moves; a
+    // format the person chose before is still theirs.
+    var out = { format: phoneOn() ? "png" : "svg", dpi: 300,
+                background: "shown", pinRecord: true };
     try {
       var p = JSON.parse(window.localStorage.getItem(PS_EXPORT_PREF_KEY) || "null");
       if (p && /^(svg|pdf|png|jpg)$/.test(p.format)) out.format = p.format;
@@ -6363,7 +6366,9 @@
       // whole record - and every choice lands in the SAME export dialog
       // charts use. Anchored under the Export button - the accelerator
       // and File menu land here too, so every route gets the same choice.
-      var eb = el("ps-export").getBoundingClientRect();
+      var ebEl = (phoneOn() && document.getElementById("ps-phone-export")) ||
+        el("ps-export");
+      var eb = ebEl.getBoundingClientRect();
       var act = activePinBoard();
       var pbs = pinBoards().filter(function (b) { return b.pins.length; });
       var total = allPins().length;
@@ -8653,7 +8658,7 @@
       var exCols = t.excluded ? Object.keys(t.excluded).length : 0;
       if (exCols || rowExclCount(t))
         notes.push("excluded values are included as they appear in the grid");
-      showToast("Exported " + base + ".xlsx" + (notes.length ? " (" + notes.join("; ") + ")" : ""));
+      showToast(exportedNotice(base + ".xlsx", notes.length ? " (" + notes.join("; ") + ")" : ""));
     }, function (e) {
       if (e && e.name === "AbortError") {
         showToast("Export cancelled \u00b7 nothing was written");
@@ -8675,7 +8680,7 @@
       var exCols = t.excluded ? Object.keys(t.excluded).length : 0;
       if (exCols || rowExclCount(t))
         notes.push("excluded values are included as they appear in the grid");
-      showToast("Exported " + base + ".csv" + (notes.length ? " (" + notes.join("; ") + ")" : ""));
+      showToast(exportedNotice(base + ".csv", notes.length ? " (" + notes.join("; ") + ")" : ""));
     }, function (e) {
       // Swallowing a deliberate cancel is right, saying nothing at all is
       // not: a cancelled save and a dead button looked identical.
@@ -8686,9 +8691,23 @@
       showToast("Could not export the data: " + String(e && e.message || e), true);
     });
   }
+  // "Exported" claims the file exists. With the browser's own Save dialog
+  // that is known. With a download link it is known on a computer, where
+  // the browser simply saves. On a phone or tablet the browser asks first
+  // (Safari: "Do you want to download...?"), and the notice was already on
+  // screen saying Exported while that question stood unanswered. There the
+  // app says only what it knows: the file is ready and the browser has it.
+  var EXPORT_LAST_HOW = "";
+  function exportedNotice(filename, tail) {
+    if (EXPORT_LAST_HOW === "downloaded" && touchModeOn())
+      return filename + " is ready. If your browser asks, choose Download." +
+        (tail || "");
+    return "Exported " + filename + (tail || "");
+  }
   function saveExportBlob(blob, filename, ext) {
     var framed = false;
     try { framed = window.top !== window; } catch (e) { framed = true; }
+    EXPORT_LAST_HOW = "";
     if (nativeSaveAvailable()) {
       return window.showSaveFilePicker({
         suggestedName: filename,
@@ -8700,7 +8719,7 @@
         return h.createWritable().then(function (w) {
           return w.write(blob).then(function () { return w.close(); });
         });
-      }).then(function () { return "saved"; });
+      }).then(function () { EXPORT_LAST_HOW = "saved"; return "saved"; });
     }
     return new Promise(function (resolve, reject) {
       try {
@@ -8709,6 +8728,7 @@
         a.href = url; a.download = filename;
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
         window.setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+        EXPORT_LAST_HOW = "downloaded";
         resolve("downloaded");
       } catch (e) { reject(e); }
     });
@@ -8743,7 +8763,7 @@
         EXPORT_BUSY = false;
         el("ps-export-go").textContent = "Export";
         closeExporter();
-        showToast("Exported " + filename, false);
+        showToast(exportedNotice(filename), false);
       })
       .catch(function (e) {
         EXPORT_BUSY = false;
@@ -10668,7 +10688,7 @@
       EXPORT_BUSY = false;
       el("ps-export-go").textContent = "Export";
       closeExporter();
-      showToast("Exported " + filename + (tail || ""));
+      showToast(exportedNotice(filename, tail));
     }
     function fail(e) {
       EXPORT_BUSY = false;
@@ -37494,15 +37514,117 @@
   }
   function phoneSheetClose(restore) {
     var sh = document.getElementById("ps-phone-sheet");
+    var share = document.getElementById("ps-phone-share");
     var sc = document.getElementById("ps-phone-sheet-scrim");
-    if (!sh || !sh.classList.contains("ps-open")) return;
-    sh.classList.remove("ps-open");
+    var wasOpen = (sh && sh.classList.contains("ps-open")) ||
+      (share && share.classList.contains("ps-open"));
+    if (!wasOpen) return;
+    if (sh) sh.classList.remove("ps-open");
+    if (share) share.classList.remove("ps-open");
+    // A picture still being drawn for a sheet that has gone is dropped.
+    PHONE_SHARE_SEQ++; PHONE_SHARE = null;
     if (sc) sc.classList.remove("ps-open");
     if (PHONE_MORE_NODE) PHONE_MORE_NODE.setAttribute("aria-expanded", "false");
     var back = PHONE_SHEET_FOCUS; PHONE_SHEET_FOCUS = null;
     if (restore !== false && back && back.isConnected) {
       try { back.focus({ preventScroll: true }); } catch (e) {}
     }
+  }
+  // ---- Sharing (the sharing pass, Nov 2026). On a phone the way to get a
+  // chart to someone is the share sheet: Messages, Mail, AirDrop, Save
+  // Image. The app only knew how to download a file, which on an iPhone
+  // means a browser prompt, the Files app, and a search for the file. So on
+  // a phone Export offers Share first and Save a file second.
+  //
+  // The picture is drawn when the sheet OPENS, not when Share is tapped:
+  // the share sheet may only be raised from inside a tap, and a browser
+  // gives that permission up if anything slow happens first. By the time
+  // Share can be tapped the file exists, and the tap hands it straight
+  // over. "Shared" is said when the phone reports the hand-over done, and
+  // a share sheet the person dismissed says nothing was shared.
+  var PHONE_SHARE = null, PHONE_SHARE_SEQ = 0;
+  function phoneShareSupported() {
+    try {
+      return PHONE && typeof navigator.share === "function" &&
+        typeof navigator.canShare === "function" && typeof File === "function";
+    } catch (e) { return false; }
+  }
+  function phoneExportTap() {
+    var ws = appWorkspace(), c = workspaceDocument(ws);
+    if ((ws === "chart" || ws === "layout") && c && phoneShareSupported()) {
+      phoneShareOpen();
+      return;
+    }
+    // Data and the Notebook keep their own flows (a sheet of numbers and a
+    // set of pages are not one picture), and so does a phone whose browser
+    // cannot share a file.
+    var b = document.getElementById("ps-export");
+    if (b) b.click();
+  }
+  function phoneShareOpen() {
+    var sh = document.getElementById("ps-phone-share");
+    var sc = document.getElementById("ps-phone-sheet-scrim");
+    var go = document.getElementById("ps-phone-share-go");
+    var sub = document.getElementById("ps-phone-share-sub");
+    var st = document.getElementById("ps-phone-share-status");
+    if (!sh || !sc || !go || !sub) return;
+    var layout = isLayoutTab(activeChart());
+    var what = layout ? "layout" : "chart";
+    document.getElementById("ps-phone-share-title").textContent = "Export " + what;
+    go.disabled = true;
+    sub.textContent = "Preparing the picture";
+    if (st) st.textContent = "";
+    PHONE_SHARE = null;
+    var token = ++PHONE_SHARE_SEQ;
+    PHONE_SHEET_FOCUS = document.activeElement;
+    sh.classList.add("ps-open"); sc.classList.add("ps-open");
+    window.setTimeout(function () {
+      try { document.getElementById("ps-phone-share-save").focus({ preventScroll: true }); } catch (e) {}
+    }, 0);
+    var prefs = exportPrefs();
+    var name = defaultExportBase() + ".png";
+    // A shared picture always has a background, the chart's own or white:
+    // a transparent PNG dropped into a dark message thread is black text
+    // on black.
+    var bg = (prefs.background === "white" ||
+              !effectiveExportBackground("shown", layout)) ? "white" : "shown";
+    collectExportSource(bg)
+      .then(function (source) { return exportBlobFor("png", source, prefs.dpi); })
+      .then(function (blob) {
+        if (token !== PHONE_SHARE_SEQ) return;
+        var file = new File([blob], name, { type: "image/png" });
+        var ok = false;
+        try { ok = navigator.canShare({ files: [file] }); } catch (e) {}
+        if (!ok) throw new Error("This browser cannot share a picture.");
+        PHONE_SHARE = { file: file, name: name };
+        go.disabled = false;
+        sub.textContent = "Send the picture to another app, or save it to your photos";
+      })
+      .catch(function (e) {
+        if (token !== PHONE_SHARE_SEQ) return;
+        go.disabled = true;
+        sub.textContent = "Not available for this " + what + ". Use Save a file.";
+        if (st) st.textContent = String((e && e.message) || "");
+      });
+  }
+  function phoneShareGo() {
+    var s = PHONE_SHARE;
+    var st = document.getElementById("ps-phone-share-status");
+    if (!s) return;
+    var p;
+    // Straight from the tap, with nothing awaited before it.
+    try { p = navigator.share({ files: [s.file] }); }
+    catch (e) { p = Promise.reject(e); }
+    Promise.resolve(p).then(function () {
+      phoneSheetClose(false);
+      showToast("Shared " + s.name);
+    }, function (e) {
+      if (e && e.name === "AbortError") {
+        if (st) st.textContent = "Not shared.";
+        return;
+      }
+      if (st) st.textContent = "Sharing did not work here. Use Save a file.";
+    });
   }
   // A panel opened from the sheet has no tapped part for the reveal to keep
   // in view: bring the panel itself up, as far as its own top allows.
@@ -37579,9 +37701,13 @@
       var r = this.getBoundingClientRect();
       showKeepToNotebookMenu(Math.round(r.left), Math.round(r.bottom + 4));
     });
-    on("ps-phone-export", function () {
-      var b = document.getElementById("ps-export"); if (b) b.click();
+    on("ps-phone-export", function (e) { e.stopPropagation(); phoneExportTap(); });
+    on("ps-phone-share-go", function () { phoneShareGo(); });
+    on("ps-phone-share-save", function () {
+      phoneSheetClose(false);
+      exportCurrentWorkspace();
     });
+    on("ps-phone-share-done", function () { phoneSheetClose(); });
     on("ps-phone-status", function () {
       var b = document.getElementById("ps-status-check");
       if (b && !b.hidden) b.click();
@@ -37594,21 +37720,24 @@
     on("ps-phone-sheet-done", function () { phoneSheetClose(); });
     on("ps-phone-sheet-scrim", function () { phoneSheetClose(); });
     var sheet = document.getElementById("ps-phone-sheet");
+    var sheetKeys = function (e) {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); phoneSheetClose(); return; }
+      if (e.key !== "Tab") return;
+      var list = this.querySelectorAll("button:not([disabled]), select");
+      if (!list.length) return;
+      var first = list[0], last = list[list.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
     if (sheet) {
       sheet.addEventListener("click", function (e) {
         var row = e.target.closest ? e.target.closest("[data-phone-more]") : null;
         if (row) phoneMoreRun(row.getAttribute("data-phone-more"));
       });
-      sheet.addEventListener("keydown", function (e) {
-        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); phoneSheetClose(); return; }
-        if (e.key !== "Tab") return;
-        var list = sheet.querySelectorAll("button, select");
-        if (!list.length) return;
-        var first = list[0], last = list[list.length - 1];
-        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-      });
+      sheet.addEventListener("keydown", sheetKeys);
     }
+    var shareSheet = document.getElementById("ps-phone-share");
+    if (shareSheet) shareSheet.addEventListener("keydown", sheetKeys);
     var zoom = document.getElementById("ps-phone-zoom");
     if (zoom) zoom.addEventListener("change", function () {
       setViewZoom(this.value); phoneSheetClose();

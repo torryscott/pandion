@@ -360,6 +360,25 @@ async function runDevice(browser, dev) {
     const errors = [];
     page.on('pageerror', e => errors.push(String(e).slice(0, 160)));
     page.on('filechooser', () => {});
+    // The system share sheet cannot be driven from here, so the page gets a
+    // stand-in that records what it was handed and can be told to behave as
+    // a sheet the person dismissed. What it proves is the app's half: what
+    // is handed over, when, and what the app says afterwards. The real
+    // sheet is checked in the iPhone simulator. A phone also has no native
+    // Save dialog, so that is taken away and exports use the download link.
+    await page.addInitScript(() => {
+        window.__shareCalls = []; window.__shareMode = 'ok';
+        const types = /^(image\/png|image\/jpeg|application\/pdf|image\/svg\+xml)/;
+        Object.defineProperty(navigator, 'canShare', { configurable: true, value: d => !!(d && d.files && d.files.length && [...d.files].every(f => types.test(f.type))) });
+        Object.defineProperty(navigator, 'share', { configurable: true, value: d => {
+            const f = d && d.files && d.files[0];
+            const rec = { n: d && d.files ? d.files.length : 0, name: f ? f.name : '', type: f ? f.type : '', size: f ? f.size : 0, keys: Object.keys(d || {}).join(',') };
+            window.__shareCalls.push(rec);
+            const sig = f ? f.slice(0, 8).arrayBuffer().then(b => { rec.png = [...new Uint8Array(b)].join(',') === '137,80,78,71,13,10,26,10'; }) : Promise.resolve();
+            return sig.then(() => { if (window.__shareMode === 'cancel') throw new DOMException('dismissed', 'AbortError'); });
+        } });
+        try { Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: undefined }); } catch (e) {}
+    });
     if (CONTROL_TH) await page.addInitScript(() => {
         // The engine's half of the touch rules is gated on this payload key.
         // Withheld at the render boundary, the engine is exactly as it was
@@ -893,7 +912,86 @@ async function runDevice(browser, dev) {
             tag + 'the tours show every step on a phone (app ' + tours.app.shown + ' of 5, Charts ' + tours.charts.shown + ' of 9)');
         check(dev.id + '/frame/tour-words', tours.app.mouse.length + tours.charts.mouse.length === 0,
             tag + 'no tour step tells a finger to click (' + tours.app.mouse.concat(tours.charts.mouse).join(', ') + ')');
+
+        // Sharing (the sharing pass). On a phone Export offers Share first,
+        // a PNG handed to the share sheet from inside the tap, and Save a
+        // file second. "Shared" is said only once the hand-over is reported
+        // done; a sheet the person dismissed says nothing was shared.
+        const toastText = () => page.evaluate(() => { const t = document.getElementById('ps-toast'); if (!t || !t.classList.contains('ps-toast-show')) return ''; const items = t.querySelectorAll('.ps-toast-item'); const last = items.length ? items[items.length - 1] : t; return (last.textContent || '').replace(/\s+/g, ' ').trim(); });
+        const shareReady = () => page.waitForFunction(() => { const g = document.getElementById('ps-phone-share-go'); return !!g && !g.disabled; }, null, { timeout: 20000 }).then(() => true, () => false);
+        await goWorkspace('chart'); await closeEditor(); await settleToasts();
+        await page.locator('#ps-phone-export').tap(); await page.waitForTimeout(300);
+        const ready = await shareReady();
+        const s0 = await page.evaluate(() => { const sh = document.getElementById('ps-phone-share'); const ex = document.getElementById('ps-exporter');
+            return { open: !!sh && sh.classList.contains('ps-open'), dialog: !!ex && getComputedStyle(ex).display !== 'none',
+                rows: sh ? [...sh.querySelectorAll('.ps-phone-row')].map(r => r.id).join(',') : '', title: sh ? (document.getElementById('ps-phone-share-title') || {}).textContent : '' }; });
+        check(dev.id + '/share/first', s0.open && !s0.dialog && ready && s0.rows === 'ps-phone-share-go,ps-phone-share-save' && s0.title === 'Export chart',
+            tag + 'Export offers Share first and Save a file second, with the picture ready to hand over (' + (s0.rows || 'no sheet') + ')');
+        if (s0.open && ready) {
+            await page.evaluate(() => { window.__shareMode = 'cancel'; });
+            await page.locator('#ps-phone-share-go').tap(); await page.waitForTimeout(600);
+            const s1 = await page.evaluate(() => ({ calls: window.__shareCalls.length, open: document.getElementById('ps-phone-share').classList.contains('ps-open'), status: document.getElementById('ps-phone-share-status').textContent }));
+            const t1 = await toastText();
+            check(dev.id + '/share/dismissed', s1.calls === 1 && s1.open && /Not shared/.test(s1.status) && !/Shared/.test(t1),
+                tag + 'a share sheet the person dismisses says "Not shared." and no notice claims otherwise (status "' + s1.status + '", notice "' + t1 + '")');
+            await page.evaluate(() => { window.__shareMode = 'ok'; });
+            await page.locator('#ps-phone-share-go').tap(); await page.waitForTimeout(800);
+            const s2 = await page.evaluate(() => ({ calls: window.__shareCalls.slice(), open: document.getElementById('ps-phone-share').classList.contains('ps-open') }));
+            const t2 = await toastText(); const last = s2.calls[s2.calls.length - 1] || {};
+            check(dev.id + '/share/handed', s2.calls.length === 2 && last.n === 1 && last.keys === 'files' && last.type === 'image/png' && last.png === true && last.size > 2000 && /^.+\.png$/.test(last.name),
+                tag + 'Share hands the share sheet one PNG file and nothing else (' + last.name + ', ' + last.size + ' bytes, ' + (last.png ? 'a real PNG' : 'not a PNG') + ')');
+            check(dev.id + '/share/said', !s2.open && t2 === 'Shared ' + last.name,
+                tag + 'the notice says Shared once the hand-over is done, and the sheet closes ("' + t2 + '")');
+            await settleToasts();
+
+            // Save a file: the full dialog, with PNG chosen on a phone.
+            await page.locator('#ps-phone-export').tap(); await page.waitForTimeout(400);
+            await page.locator('#ps-phone-share-save').tap(); await page.waitForTimeout(700);
+            const d0 = await page.evaluate(() => { const c = document.querySelector('input[name="ps-export-format"]:checked');
+                return { dialog: getComputedStyle(document.getElementById('ps-exporter')).display, format: c ? c.value : '', sheet: document.getElementById('ps-phone-share').classList.contains('ps-open') }; });
+            check(dev.id + '/share/save', d0.dialog === 'flex' && d0.format === 'png' && !d0.sheet,
+                tag + 'Save a file opens the export dialog with PNG chosen (' + d0.format + ')');
+            // A download link is all a phone has, and its browser may ask
+            // before it saves: the app must not say Exported on its behalf.
+            const dl = page.waitForEvent('download', { timeout: 10000 }).then(d => d.suggestedFilename(), () => '');
+            await page.locator('#ps-export-go').tap();
+            const got = await dl; await page.waitForTimeout(600);
+            const t3 = await toastText();
+            check(dev.id + '/share/notice', /\.png$/.test(got) && t3 === got + ' is ready. If your browser asks, choose Download.',
+                tag + 'after a download link the notice says the file is ready, not that it was exported ("' + t3 + '")');
+            await settleToasts();
+
+            // A layout is one picture too.
+            await goWorkspace('layout');
+            const before = await page.evaluate(() => window.__shareCalls.length);
+            await page.locator('#ps-phone-export').tap(); await page.waitForTimeout(300);
+            const lready = await shareReady();
+            const ltitle = await page.evaluate(() => (document.getElementById('ps-phone-share-title') || {}).textContent);
+            if (lready) { await page.locator('#ps-phone-share-go').tap(); await page.waitForTimeout(800); }
+            const lc = await page.evaluate(() => window.__shareCalls.slice());
+            const ll = lc[lc.length - 1] || {};
+            check(dev.id + '/share/layout', lready && ltitle === 'Export layout' && lc.length === before + 1 && ll.png === true && ll.type === 'image/png',
+                tag + 'a layout shares as one PNG the same way (' + (ll.name || 'nothing handed over') + ')');
+            await settleToasts();
+            // Data and the Notebook keep their own export flows.
+            await goWorkspace('data');
+            await page.locator('#ps-phone-export').tap(); await page.waitForTimeout(700);
+            const dOpen = await page.evaluate(() => document.getElementById('ps-phone-share').classList.contains('ps-open'));
+            check(dev.id + '/share/data', !dOpen, tag + 'Export in Data does not offer to share a picture');
+            await page.keyboard.press('Escape'); await page.waitForTimeout(300);
+            await settleToasts();
+            await goWorkspace('chart');
+        } else if (s0.dialog) {
+            await page.locator('#ps-export-close').tap().catch(() => {}); await page.waitForTimeout(300);
+        }
     } else {
+        // A tablet keeps the computer's export: the dialog, at once.
+        await goWorkspace('chart');
+        await page.locator('#ps-export').tap(); await page.waitForTimeout(600);
+        check(dev.id + '/share/tablet', await page.evaluate(() => { const sh = document.getElementById('ps-phone-share'); const c = document.querySelector('input[name="ps-export-format"]:checked');
+                return getComputedStyle(document.getElementById('ps-exporter')).display === 'flex' && !!sh && !sh.classList.contains('ps-open') && !!c && c.value === 'svg'; }),
+            tag + 'Export opens the dialog at once, with SVG as the default and no share sheet');
+        await page.locator('#ps-export-close').tap(); await page.waitForTimeout(300);
         check(dev.id + '/frame/off', await page.evaluate(() => { const n = document.getElementById('ps-phone-nav'); return getComputedStyle(n).display === 'none' && getComputedStyle(document.querySelector('.ps-commandbar')).display !== 'none'; }),
             tag + 'no workspace tabs along the bottom, and the command row is where it was');
     }
@@ -941,6 +1039,12 @@ async function runDesktop(browser) {
     await page.mouse.click(g1.x, g1.y); await page.waitForTimeout(900);
     check('desktop/click', await page.evaluate(() => { const p = document.querySelector('.gb2-panel'); return !!p && getComputedStyle(p).display !== 'none' && p.querySelectorAll('[data-field]').length > 0; }),
         'desktop: a mouse click on a bar opens its editor');
+    await page.keyboard.press('Escape'); await page.waitForTimeout(300);
+    await page.click('#ps-export'); await page.waitForTimeout(500);
+    check('desktop/export', await page.evaluate(() => { const c = document.querySelector('input[name="ps-export-format"]:checked'); const sh = document.getElementById('ps-phone-share');
+            return getComputedStyle(document.getElementById('ps-exporter')).display === 'flex' && !!c && c.value === 'svg' && !!sh && getComputedStyle(sh).display === 'none'; }),
+        'desktop: Export opens the dialog at once with SVG as the default, and no share sheet');
+    await page.click('#ps-export-close'); await page.waitForTimeout(200);
     check('desktop/errors', errors.length === 0, 'desktop: no page errors ' + errors.slice(0, 2).join(' | '));
     await ctx.close();
 }
