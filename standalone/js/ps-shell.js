@@ -9086,6 +9086,31 @@
       }
     return false;
   }
+  // distNormality over each cell's values with the hidden (excluded) points
+  // removed. The entry shape is ps-data's own, which is R's: {group, facet,
+  // n, w, p}, W rounded to 3 dp on the producing side.
+  function normalityWithoutHidden(bars, hidden) {
+    var S = window.PSStat, drop = Object.create(null), out = [], i, v;
+    var keyOf = function (cat, group, idx) {
+      return String(cat == null ? "" : cat) + "\u0000" +
+             String(group == null ? "" : group) + "\u0000" + idx;
+    };
+    for (i = 0; i < hidden.length; i++)
+      drop[keyOf(hidden[i].cat, hidden[i].group, hidden[i].idx)] = 1;
+    for (i = 0; i < bars.length; i++) {
+      var b = bars[i], srcVals = b.values || [], vals = [];
+      for (v = 0; v < srcVals.length; v++)
+        if (!drop[keyOf(b.x, b.group, v)]) vals.push(srcVals[v]);
+      var sw = S && S.shapiroWilk ? S.shapiroWilk(vals) : null;
+      if (!sw) continue;
+      out.push({ group: b.group == null ? "" : String(b.group),
+                 facet: b.facet == null ? "" : String(b.facet),
+                 n: sw.n,
+                 w: Math.round(sw.w * 1000) / 1000,
+                 p: S.sigR(sw.p) });
+    }
+    return out;
+  }
   function dataHiddenPoints(payload) {
     var t = activeDataTable(), out = [];
     if (!t || !payload || !Array.isArray(payload.bars)) return out;
@@ -9191,6 +9216,13 @@
       var renderSpec = parseSpec(payload.chartSpec);
       renderSpec.hiddenPoints = derivedHidden;
       payload.chartSpec = JSON.stringify(renderSpec);
+      // The data layer computed the normality test from the values the
+      // builder was handed, and those still hold the excluded ones (they ride
+      // along so the chart can show where they were). An excluded value is
+      // out of every number, so the test is taken again over what remains.
+      if (derivedHidden.length && Array.isArray(payload.distNormality) &&
+          Array.isArray(payload.bars))
+        payload.distNormality = normalityWithoutHidden(payload.bars, derivedHidden);
     }
     // t4-19. An excluded cell reads as null everywhere downstream, which is
     // the whole point of the feature - but it means the builders count it into
@@ -30568,6 +30600,13 @@
       else if (Array.isArray(p.xyPoints)) { cells = 0; n = p.xyPoints.length; }
       var bits = [];
       var repeated = c.module === "rmplotbuilder";
+      // Values excluded in Data ride the payload as hidden points, so the
+      // chart can show where they were. They are not cases the chart uses:
+      // the status bar said 34 cases over a chart whose bars and tests ran
+      // on 33 (a first-use walkthrough, Nov 2026). Repeated Measures already
+      // leaves them out in repeatedCaseCounts.
+      var excludedPts = Array.isArray(p.hiddenPoints) ? p.hiddenPoints.length : 0;
+      if (excludedPts && cells && !repeated) n = Math.max(0, n - excludedPts);
       var measures = repeated ? (rolesFor(c.module).measures || []) : [];
       var rmCounts = repeated ? repeatedCaseCounts(p, measures) : null;
       if (rmCounts)
@@ -30622,6 +30661,8 @@
             (rmCounts.complete === 1 ? "" : "s"));
       }
       if (p.missingNote) bits.push(p.missingNote);
+      if (excludedPts)
+        bits.push(excludedPts + (excludedPts === 1 ? " value excluded" : " values excluded"));
       return bits.length ? bits.join(" \u00b7 ") : "Ready";
     } catch (e) { return "Ready"; }
   }
