@@ -13044,6 +13044,15 @@
     });
   }
   function applyViewZoom() {
+    var zHost = hostEl();
+    var zWas = zHost ? zHost.style.zoom : "";
+    applyViewZoomCore();
+    // The touch text floor measured its sizes under the old zoom.
+    try {
+      if (zHost && zHost.style.zoom !== zWas) touchFloorRecheck(zHost);
+    } catch (eTf) {}
+  }
+  function applyViewZoomCore() {
     var host = hostEl();
     if (!host) return;
     var doc = activeChartTab();
@@ -14009,8 +14018,15 @@
   // What a press last landed on, so the focus it causes does not re-summon
   // the tip it just dismissed.
   var TIP_PRESSED = null, TIP_PRESSED_AT = 0;
+  // A finger has no hover and never leaves: a tip raised by a tap stays up
+  // until the next tap somewhere else. Tapping a chart tab rebuilt the tab
+  // strip and focused the new tab, and its tip then sat across the chart
+  // toolbar (seen in the iPhone simulator, Nov 2026). So a touch press
+  // raises no tip, by hover or by the focus it causes.
+  var TIP_TOUCH_AT = 0;
   function wireTooltips() {
     document.addEventListener("pointerover", function (e) {
+      if (e.pointerType === "touch") return;
       var target = tipTarget(e.target);
       if (!target) return;
       if (TIP_TIMER) window.clearTimeout(TIP_TIMER);
@@ -14039,6 +14055,7 @@
       var target = tipTarget(e.target);
       if (target && target === TIP_PRESSED &&
           Date.now() - TIP_PRESSED_AT < 400) { hideTip(); return; }
+      if (Date.now() - TIP_TOUCH_AT < 900) { hideTip(); return; }
       if (target) showTipFor(target);
       else hideTip();
     });
@@ -14058,6 +14075,7 @@
     document.addEventListener("pointerdown", function (e) {
       TIP_PRESSED = tipTarget(e.target);
       TIP_PRESSED_AT = Date.now();
+      if (e.pointerType === "touch") TIP_TOUCH_AT = TIP_PRESSED_AT;
       hideTip();
     }, true);
     window.addEventListener("scroll", hideTip, true);
@@ -37048,10 +37066,38 @@
       ? p.currentCSSZoom : 1;
     var px = parseFloat(cs.fontSize) * z;
     if (!(px > 0) || px >= TOUCH_TEXT_FLOOR - 0.25) return;
-    // Remember the inline size it had, so leaving touch mode restores it.
+    // Remember the inline size it had, so leaving touch mode restores it,
+    // and the zoom this was measured under, so a later zoom is noticed.
     p.setAttribute("data-ps-tf", p.style.fontSize || "");
+    p.setAttribute("data-ps-tfz", String(z));
     p.style.setProperty("font-size",
       (Math.round(TOUCH_TEXT_FLOOR / z * 100) / 100) + "px", "important");
+  }
+  // A lifted size is right only at the zoom it was measured under, and the
+  // chart host's zoom moves: Fit follows the window, the chart's own size
+  // and a phone being turned. A size pinned under a 0.53 zoom stood at
+  // 24.6px once the zoom went back to 1, which drew the "This chart needs
+  // variables" card at nearly double size with its buttons off the screen
+  // (seen in the iPhone simulator, Nov 2026). So anything whose zoom has
+  // moved since its lift is put back as it was and measured again, and the
+  // host is swept for text the new zoom has pushed under the floor.
+  function touchFloorRecheck(root) {
+    if (!TOUCH_MODE) return;
+    var lifted = document.querySelectorAll("[data-ps-tf]");
+    for (var i = 0; i < lifted.length; i++) {
+      var p = lifted[i];
+      var z = (typeof p.currentCSSZoom === "number" && p.currentCSSZoom > 0)
+        ? p.currentCSSZoom : 1;
+      var at = parseFloat(p.getAttribute("data-ps-tfz")) || 1;
+      if (Math.abs(z - at) < 0.01) continue;
+      var orig = p.getAttribute("data-ps-tf");
+      p.style.removeProperty("font-size");
+      if (orig) p.style.fontSize = orig;
+      p.removeAttribute("data-ps-tf");
+      p.removeAttribute("data-ps-tfz");
+      touchFloorOne(p);
+    }
+    if (root) touchFloorSweep(root);
   }
   function touchFloorSweep(root) {
     if (!root) return;
@@ -37063,6 +37109,7 @@
         lifted[i].style.removeProperty("font-size");
         if (was) lifted[i].style.fontSize = was;
         lifted[i].removeAttribute("data-ps-tf");
+        lifted[i].removeAttribute("data-ps-tfz");
       }
       return;
     }
