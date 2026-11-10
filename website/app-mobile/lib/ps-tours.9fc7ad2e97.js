@@ -454,7 +454,7 @@
         title: "Add chart, Add text",
         body: "Add chart puts a live chart on the page and From Notebook drops in a kept one. Add text and Panel label give titles and letters." },
       { target: "#ps-lcanvas", optional: true,
-        phone: { body: "Touch and hold an item, then drag to place it. Snap and Smart guides line things up." },
+        phone: { body: "Drag an item to place it. Snap and Smart guides line things up." },
         title: "The page",
         body: "Drag an item to place it, its corners to resize it. Snap and Smart guides in the rail line things up." },
       { target: "#ps-inspector-layout", optional: true,
