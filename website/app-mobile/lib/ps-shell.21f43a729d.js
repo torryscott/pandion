@@ -9697,10 +9697,19 @@
     if (!pins.length) {
       scroll.removeAttribute("role");
       scroll.removeAttribute("aria-label");
-      var empty = mkEl("div", "ps-pinboard-empty",
-        "Nothing kept yet. Right-click a chart, or press Keep on a " +
-        "comparison in the \u03a3 Statistics panel. Each lands here " +
-        "as a page.");
+      // A finger has no right-click. A phone has a Keep button; a tablet
+      // reaches the same menu by touching and holding the chart.
+      var empty = mkEl("div", "ps-pinboard-empty", phoneOn()
+        ? "Nothing kept yet. In Charts, tap Keep, or press Keep on a " +
+          "comparison in the \u03a3 Statistics panel. Each lands here " +
+          "as a page."
+        : touchModeOn()
+        ? "Nothing kept yet. Touch and hold a chart and choose Keep, or " +
+          "press Keep on a comparison in the \u03a3 Statistics panel. " +
+          "Each lands here as a page."
+        : "Nothing kept yet. Right-click a chart, or press Keep on a " +
+          "comparison in the \u03a3 Statistics panel. Each lands here " +
+          "as a page.");
       scroll.appendChild(empty);
       // "New here?" under the empty state, until the tour has been taken.
       if (window.PS_TOURS && !window.PS_TOURS.seen("notebook")) {
@@ -13110,6 +13119,28 @@
     S = Math.max(0.35, Math.min(2, S));
     host.style.zoom = Math.abs(S - 1) < 0.005
       ? "" : String(Math.round(S * 1000) / 1000);
+    if (mode === "fit" && phoneSheetFit()) {
+      // A phone with chart setup open as a sheet: the pane ends where the
+      // sheet begins, and the point of the sheet is to watch the chart
+      // change while variables are chosen. Width alone left the chart's
+      // lower half behind the sheet, so trim until its bottom edge is in
+      // the pane. Measured on the drawing itself, because an editing panel
+      // may be open under it and that panel is not what has to fit.
+      var shPane = document.querySelector(".ps-main-workspace");
+      var shSvg = host.querySelector('svg[data-role="gb2-chart-svg"]');
+      var shH = chartLogicalHeightPx();
+      try { if (shPane) shPane.scrollTop = 0; } catch (eSc) {}
+      for (var sp = 0; shPane && shSvg && shH > 0 && sp < 5 && S > 0.35; sp++) {
+        var shOver = shSvg.getBoundingClientRect().bottom -
+          (shPane.getBoundingClientRect().bottom - 8);
+        if (shOver <= 1) break;
+        var shNext = Math.max(0.35, S - (shOver + 2) / shH);
+        if (shNext >= S) break;
+        S = shNext;
+        host.style.zoom = Math.abs(S - 1) < 0.005
+          ? "" : String(Math.round(S * 1000) / 1000);
+      }
+    }
     if (mode === "fit" && panelDockWanted() && !dockPanelBelow()) {
       // Beside the panel the whole chart has to stay on screen, and the
       // chart's chrome (tab strip, toolbar, note) is not in the logical
@@ -24096,6 +24127,7 @@
     if (!ct || !host) return;
     var bar = host.querySelector('[data-role="chart-toolbar"]');
     if (bar && !bar.contains(ct)) bar.appendChild(ct);
+    try { phoneDockMore(bar); } catch (eMore) {}
     syncToolbarTight();
   }
   // Narrow bars COMPRESS the labels back to icons (Torry, Aug 6 2026):
@@ -30428,6 +30460,7 @@
     syncProjectNavigator();
     updateDocumentState();
     syncChartCheck();
+    try { syncPhoneFrame(); } catch (ePhone) {}
   }
 
   // Punch list 37: real instrumentation for the chart workspace, read from the
@@ -36812,6 +36845,7 @@
     add(document.querySelector(".ps-bypass"));
     add(document.querySelector(".ps-commandbar"));
     add(document.querySelector(".ps-statusbar"));
+    add(document.getElementById("ps-phone-nav"));
     if (which === "menu") {
       add(document.querySelector(".ps-app-body"));
       var appbar = document.querySelector(".ps-appbar");
@@ -36891,6 +36925,14 @@
       narrowReleaseIsolation();
       if (priorOpen && !skipFocus) shellRestoreFocus(NARROW_LAST_FOCUS);
       NARROW_LAST_FOCUS = null;
+    }
+    if (PHONE) {
+      try { syncPhoneFrame(); } catch (ePh) {}
+      // The sheet takes the lower half: the chart is fitted into what is
+      // left above it, and back again when the sheet goes.
+      if (which === "inspector" || priorOpen === "inspector") {
+        try { applyViewZoom(); } catch (eZ) {}
+      }
     }
   }
   function narrowToggle(which) {
@@ -37146,6 +37188,24 @@
       }
     });
     obs.observe(document.body, { childList: true, subtree: true });
+    // The chart host's zoom is also written directly: every engine render
+    // clears and restores it, and leaving the Charts workspace clears it
+    // while the chrome's counter-zoom stays. So the floor follows the
+    // host's style itself, not only the one function that usually sets it.
+    try {
+      var zHostEl = hostEl();
+      if (zHostEl) {
+        var zPending = false;
+        new MutationObserver(function () {
+          if (!TOUCH_MODE || zPending) return;
+          zPending = true;
+          window.setTimeout(function () {
+            zPending = false;
+            try { touchFloorRecheck(hostEl()); } catch (eR) {}
+          }, 0);
+        }).observe(zHostEl, { attributes: true, attributeFilter: ["style"] });
+      }
+    } catch (eZh) {}
     touchFloorSweep(document.body);
   }
   function wireTouch() {
@@ -37155,7 +37215,9 @@
       var mq = window.matchMedia("(pointer: coarse)");
       var onMq = function () {
         if (!touchModeSync()) return;
+        try { phoneSync(); } catch (eP) {}
         try { touchFloorSweep(document.body); } catch (e) {}
+        try { syncAppShell(); } catch (eS) {}
         try { render(); } catch (e2) {}
       };
       if (mq.addEventListener) mq.addEventListener("change", onMq);
@@ -37306,6 +37368,270 @@
       surfaces[si].addEventListener("touchmove", holdPan, { passive: false });
     }
   }
+  // =============================================================== phone frame
+  // The find-your-way pass (Nov 2026). On a phone the three unnamed icons
+  // were the only way to the menu, the other workspaces and chart setup, half
+  // the chart toolbar sat off the right edge, and nothing on screen kept a
+  // chart to the Notebook. PHONE is touch mode AND a window under the 760px
+  // drawer breakpoint: a narrow desktop window and a tablet keep the frame
+  // they had. Everything here is a second handle on something that already
+  // exists (the workspace switch, the drawers, the Export button, the
+  // toolbar's own buttons), so there is one behavior behind each and the
+  // phone frame cannot drift from the desktop one.
+  var PHONE = false;
+  var PHONE_MORE_NODE = null;
+  var PHONE_SHEET_FOCUS = null;
+  function phoneWanted() {
+    try {
+      return TOUCH_MODE && !!window.matchMedia &&
+        window.matchMedia("(max-width: 760px)").matches;
+    } catch (e) { return false; }
+  }
+  function phoneOn() { return PHONE; }
+  function phoneSync() {
+    var on = phoneWanted();
+    if (on === PHONE && document.body.classList.contains("ps-phone") === on)
+      return false;
+    PHONE = on;
+    document.body.classList.toggle("ps-phone", on);
+    return true;
+  }
+  // Chart setup is open as a sheet: the chart is refitted into the room
+  // above it (see applyViewZoomCore).
+  function phoneSheetFit() {
+    // Upright only. Sideways the panel stands beside the chart, and the
+    // width fit already shows what the narrower pane can hold.
+    return PHONE && NARROW_OPEN === "inspector" && appWorkspace() === "chart" &&
+      (window.innerHeight || 0) > 480;
+  }
+  function syncPhoneStatus() {
+    var st = document.getElementById("ps-phone-status");
+    if (!st || !PHONE) return;
+    var save = document.getElementById("ps-save-state");
+    var chk = document.getElementById("ps-status-check");
+    var a = save ? save.textContent : "";
+    var hasCheck = !!chk && !chk.hidden && appWorkspace() === "chart";
+    var b = hasCheck ? chk.textContent : "";
+    var text = a + (b ? " · " + b : "");
+    if (st.textContent !== text) st.textContent = text;
+    st.disabled = !hasCheck;
+    if (hasCheck) st.setAttribute("data-state", chk.getAttribute("data-state") || "ok");
+    else st.removeAttribute("data-state");
+    st.setAttribute("aria-label", text + (hasCheck ? ". Open the chart check" : ""));
+  }
+  function syncPhoneFrame() {
+    if (!PHONE) return;
+    var ws = appWorkspace(), c = workspaceDocument(ws);
+    var keep = document.getElementById("ps-phone-keep");
+    var exp = document.getElementById("ps-phone-export");
+    var real = document.getElementById("ps-export");
+    var setup = document.getElementById("ps-phone-setup");
+    if (keep) keep.style.display =
+      (ws === "chart" && c && !isLayoutTab(c)) ? "" : "none";
+    if (exp && real) {
+      exp.disabled = real.disabled;
+      exp.setAttribute("aria-label", real.textContent || "Export");
+    }
+    // The tabs carry their own attribute, not data-ps-workspace: there is
+    // one of those per workspace in the document, and code that looks one
+    // up by name must keep finding exactly one.
+    var tabs = document.querySelectorAll("#ps-phone-nav [data-ps-phone-ws]");
+    for (var ti = 0; ti < tabs.length; ti++) {
+      if (tabs[ti].getAttribute("data-ps-phone-ws") === ws)
+        tabs[ti].setAttribute("aria-current", "page");
+      else tabs[ti].removeAttribute("aria-current");
+    }
+    if (setup) {
+      setup.textContent = ws === "pinboard" ? "Details"
+        : ws === "layout" ? "Properties" : "Setup";
+      setup.setAttribute("aria-expanded", NARROW_OPEN === "inspector" ? "true" : "false");
+    }
+    syncPhoneStatus();
+  }
+  function phoneMoreNode() {
+    if (!PHONE_MORE_NODE) {
+      var b = document.createElement("button");
+      b.type = "button"; b.id = "ps-phone-more"; b.textContent = "More";
+      b.setAttribute("aria-haspopup", "dialog");
+      b.setAttribute("aria-expanded", "false");
+      b.addEventListener("click", function (e) {
+        e.stopPropagation(); phoneSheetOpen();
+      });
+      PHONE_MORE_NODE = b;
+    }
+    return PHONE_MORE_NODE;
+  }
+  // The engine rebuilds its toolbar on every render; the same hook that
+  // puts the Zoom group back puts More back.
+  function phoneDockMore(bar) {
+    if (PHONE && bar) {
+      var m = phoneMoreNode();
+      if (m.parentNode !== bar) bar.appendChild(m);
+    } else if (PHONE_MORE_NODE && PHONE_MORE_NODE.parentNode) {
+      PHONE_MORE_NODE.parentNode.removeChild(PHONE_MORE_NODE);
+    }
+  }
+  function phoneSheetOpen() {
+    var sh = document.getElementById("ps-phone-sheet");
+    var sc = document.getElementById("ps-phone-sheet-scrim");
+    if (!sh || !sc) return;
+    // The zoom choices are the real control's own, copied at the moment of
+    // opening so the two can never list different sizes.
+    var mine = document.getElementById("ps-phone-zoom");
+    var ct = chartZoomNode();
+    var real = ct && ct.querySelector ? ct.querySelector("select") : null;
+    if (mine && real) {
+      mine.innerHTML = real.innerHTML;
+      mine.value = real.value;
+    }
+    PHONE_SHEET_FOCUS = document.activeElement;
+    sh.classList.add("ps-open"); sc.classList.add("ps-open");
+    if (PHONE_MORE_NODE) PHONE_MORE_NODE.setAttribute("aria-expanded", "true");
+    window.setTimeout(function () {
+      var first = sh.querySelector(".ps-phone-row");
+      try { if (first) first.focus({ preventScroll: true }); } catch (e) {}
+    }, 0);
+  }
+  function phoneSheetClose(restore) {
+    var sh = document.getElementById("ps-phone-sheet");
+    var sc = document.getElementById("ps-phone-sheet-scrim");
+    if (!sh || !sh.classList.contains("ps-open")) return;
+    sh.classList.remove("ps-open");
+    if (sc) sc.classList.remove("ps-open");
+    if (PHONE_MORE_NODE) PHONE_MORE_NODE.setAttribute("aria-expanded", "false");
+    var back = PHONE_SHEET_FOCUS; PHONE_SHEET_FOCUS = null;
+    if (restore !== false && back && back.isConnected) {
+      try { back.focus({ preventScroll: true }); } catch (e) {}
+    }
+  }
+  // A panel opened from the sheet has no tapped part for the reveal to keep
+  // in view: bring the panel itself up, as far as its own top allows.
+  function phoneRevealPanel() {
+    var tries = 0, lastH = -1, still = 0;
+    (function watch() {
+      if (++tries > 40) return;
+      var host = hostEl();
+      var panel = host ? host.querySelector(".gb2-panel") : null;
+      var h = panel ? panel.getBoundingClientRect().height : 0;
+      if (panel && h > 40 && Math.abs(h - lastH) < 1) still++; else still = 0;
+      lastH = h;
+      if (still < 3) { window.setTimeout(watch, 40); return; }
+      var pane = document.getElementById("ps-main-workspace");
+      if (!pane) return;
+      var pr = panel.getBoundingClientRect(), sr = pane.getBoundingClientRect();
+      var bottom = Math.min(sr.bottom, window.innerHeight || sr.bottom);
+      var by = Math.min(Math.ceil(pr.bottom - bottom) + 10,
+                        Math.floor(pr.top - sr.top - 8));
+      if (by > 4) {
+        try { pane.scrollBy({ top: by, behavior: "auto" }); }
+        catch (e) { pane.scrollTop += by; }
+      }
+    })();
+  }
+  var PHONE_MORE_BUTTONS = {
+    hide: 'button[aria-label$="hide elements"]',
+    settings: 'button[aria-label="Chart settings"]',
+    find: '[data-role="setting-search-trigger"]',
+    add: 'button[aria-label="Add to chart"]'
+  };
+  function phoneMoreRun(which) {
+    var host = hostEl();
+    var bar = host ? host.querySelector('[data-role="chart-toolbar"]') : null;
+    var btn = bar && PHONE_MORE_BUTTONS[which]
+      ? bar.querySelector(PHONE_MORE_BUTTONS[which]) : null;
+    phoneSheetClose(false);
+    if (!btn) return;
+    window.setTimeout(function () {
+      try { btn.click(); } catch (e) {}
+      if (which === "hide" || which === "settings") phoneRevealPanel();
+    }, 30);
+  }
+  function phoneRefresh() {
+    if (!phoneSync()) return;
+    try { phoneSheetClose(false); } catch (e) {}
+    try { if (NARROW_OPEN) narrowSet(null, true); } catch (e2) {}
+    try { syncAppShell(); } catch (e3) {}
+    try { render(); } catch (e4) {}
+  }
+  function wirePhoneFrame() {
+    phoneSync();
+    var on = function (id, fn) {
+      var n = document.getElementById(id);
+      if (n) n.addEventListener("click", fn);
+    };
+    on("ps-phone-open", function () {
+      narrowSet(null, true);
+      var b = document.getElementById("ps-load"); if (b) b.click();
+    });
+    on("ps-phone-save", function () {
+      narrowSet(null, true);
+      var b = document.getElementById("ps-save"); if (b) b.click();
+    });
+    on("ps-phone-docs", function (e) { e.stopPropagation(); narrowSet("nav"); });
+    on("ps-phone-setup", function (e) { e.stopPropagation(); narrowToggle("inspector"); });
+    on("ps-phone-setup-data", function (e) { e.stopPropagation(); narrowToggle("inspector"); });
+    on("ps-phone-setup-done", function (e) { e.stopPropagation(); narrowSet(null); });
+    on("ps-phone-keep", function (e) {
+      e.stopPropagation();
+      // One section: keep, as the mockup did. Several: the same list of
+      // sections the chart's own menu offers, under the button.
+      if (pinBoards().length <= 1) { pinChartToPinboard(null); return; }
+      var r = this.getBoundingClientRect();
+      showKeepToNotebookMenu(Math.round(r.left), Math.round(r.bottom + 4));
+    });
+    on("ps-phone-export", function () {
+      var b = document.getElementById("ps-export"); if (b) b.click();
+    });
+    on("ps-phone-status", function () {
+      var b = document.getElementById("ps-status-check");
+      if (b && !b.hidden) b.click();
+    });
+    var nav = document.getElementById("ps-phone-nav");
+    if (nav) nav.addEventListener("click", function (e) {
+      var b = e.target.closest ? e.target.closest("[data-ps-phone-ws]") : null;
+      if (b) setAppWorkspace(b.getAttribute("data-ps-phone-ws"));
+    });
+    on("ps-phone-sheet-done", function () { phoneSheetClose(); });
+    on("ps-phone-sheet-scrim", function () { phoneSheetClose(); });
+    var sheet = document.getElementById("ps-phone-sheet");
+    if (sheet) {
+      sheet.addEventListener("click", function (e) {
+        var row = e.target.closest ? e.target.closest("[data-phone-more]") : null;
+        if (row) phoneMoreRun(row.getAttribute("data-phone-more"));
+      });
+      sheet.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); phoneSheetClose(); return; }
+        if (e.key !== "Tab") return;
+        var list = sheet.querySelectorAll("button, select");
+        if (!list.length) return;
+        var first = list[0], last = list[list.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      });
+    }
+    var zoom = document.getElementById("ps-phone-zoom");
+    if (zoom) zoom.addEventListener("change", function () {
+      setViewZoom(this.value); phoneSheetClose();
+    });
+    // The state line repeats two things written elsewhere, at their own
+    // times (the chart check runs on a timer): follow them.
+    if (typeof MutationObserver === "function") {
+      var mo = new MutationObserver(function () { try { syncPhoneStatus(); } catch (e) {} });
+      ["ps-save-state", "ps-status-check"].forEach(function (id) {
+        var n = document.getElementById(id);
+        if (n) mo.observe(n, { childList: true, characterData: true, subtree: true,
+                               attributes: true, attributeFilter: ["hidden", "data-state"] });
+      });
+    }
+    try {
+      var mq = window.matchMedia("(max-width: 760px)");
+      if (mq.addEventListener) mq.addEventListener("change", phoneRefresh);
+      else if (mq.addListener) mq.addListener(phoneRefresh);
+    } catch (eMq) {}
+    window.addEventListener("orientationchange", function () {
+      window.setTimeout(phoneRefresh, 120);
+    });
+  }
   function wireNarrowChrome() {
     var ids = [["ps-narrow-nav", "nav"], ["ps-narrow-inspector", "inspector"],
                ["ps-narrow-menu", "menu"]];
@@ -37440,6 +37766,7 @@
     wireNarrowChrome();
     wireBypassLinks();
     wireTouch();
+    wirePhoneFrame();
     wireCoach();
     wireTooltips();
     wireFitToPane();

@@ -7,9 +7,9 @@
      and website/build.sh from scripts/build-stamp.sh (commit date + sha of
      the last commit that touched the shipped sources). ps-shell reads it
      into APP_BUILD for exports, saved projects, and the About dialog. -->
-<meta name="pandion-build" content="2026-11-10T02:46Z 0970d93">
+<meta name="pandion-build" content="2026-11-10T04:28Z 405035e">
 <title>Pandion Plots (mobile preview)</title>
-<!-- PREVIEW COPY. Built from the probe/mobile-harness branch at 0970d93: the
+<!-- PREVIEW COPY. Built from the probe/mobile-harness branch at 405035e: the
      released app plus the phone and tablet work (touch gestures on the chart
      and on a layout page: a swipe scrolls, a tap edits, touch and hold then
      drag moves a part, touch and hold still opens its menu; and a touch
@@ -4939,6 +4939,221 @@
   body.ps-touch #psroot [data-role="add-ann-menu"] > div > div {
     width: auto !important; min-width: 0 !important;
   }
+
+  /* ------------------------------------------------------------------
+     The phone frame (the find-your-way pass, Nov 2026). body.ps-phone is
+     set by the shell when the primary pointer is a finger AND the window
+     is under the 760px drawer breakpoint; a narrow desktop window keeps
+     the frame above, and so does a tablet. Seven things, each ruled on
+     from a mockup: the four workspaces as named tabs along the bottom;
+     one top row (Menu, the project and its state, Keep, Export) where
+     there were two, with Open and Save project inside Menu; a Keep
+     button; chart setup as a sheet from below with the chart refitted
+     above it; a More button ending the chart toolbar; phone wording in
+     the tours and empty screens. Measured on a 402 by 714 point iPhone
+     screen, the chart's share goes from 413 to about 514 points.
+     ------------------------------------------------------------------ */
+  .ps-phone-only, .ps-phone-label, .ps-phone-nav, #ps-phone-sheet,
+  #ps-phone-sheet-scrim, #ps-phone-more { display: none; }
+  body.ps-phone { --ps-phone-nav-h: 56px;
+    --ps-phone-sheet-h: min(calc(var(--ps-vh) * 0.47), 440px); }
+  body.ps-phone .ps-phone-only { display: inline-flex; align-items: center; justify-content: center; }
+  body.ps-phone .ps-phone-label { display: inline; font-size: 13.5px; font-weight: 600; }
+  /* Three rows: the top row, the workspace, the tabs. Named twice so it
+     outranks the touch frame's four growing rows wherever that rule sits. */
+  body.ps-phone.ps-touch .ps-page { grid-template-rows: auto minmax(0, 1fr) auto; }
+  body.ps-phone .ps-commandbar { display: none; }
+  /* Out of sight, still spoken: this row is the app's live status region. */
+  body.ps-phone .ps-statusbar {
+    position: absolute; width: 1px; height: 1px; min-height: 0; margin: -1px;
+    padding: 0; border: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+  body.ps-phone #ps-status-check { display: none !important; }
+  body.ps-phone .ps-brand, body.ps-phone #ps-narrow-nav,
+  body.ps-phone #ps-narrow-inspector, body.ps-phone #ps-save-state,
+  body.ps-phone #ps-doc-detail { display: none; }
+  body.ps-phone .ps-appbar {
+    display: flex; align-items: center; gap: 8px; min-height: 52px;
+    box-sizing: border-box; padding: 4px 8px; grid-template-columns: none;
+  }
+  body.ps-phone #ps-narrow-menu { width: auto; padding: 0 10px; gap: 6px; }
+  body.ps-phone .ps-document-title {
+    position: relative; flex: 1 1 0; min-width: 0; min-height: 44px;
+    align-items: flex-start; justify-content: flex-start; padding: 5px 0 0;
+    pointer-events: auto;
+  }
+  body.ps-phone .ps-document-title { box-sizing: border-box; }
+  body.ps-phone .ps-document-title strong { font-size: 14px; pointer-events: none; }
+  /* The card's own top margin and the gap under the tabs are the chart's
+     to have on a screen this short. */
+  body.ps-phone #ps-workcard { padding-top: 4px; }
+  body.ps-phone #ps-tabrow { margin-bottom: 5px; }
+  /* The whole title block is the button: the state line reads under the
+     name, and a tap anywhere on either opens the chart check. */
+  body.ps-phone #ps-phone-status {
+    position: absolute; inset: 0; -webkit-appearance: none; appearance: none;
+    align-items: flex-end; justify-content: flex-start; padding: 0 0 5px;
+    border: 0; background: transparent; color: #a9b9cc; font-size: 12px;
+    text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    min-height: 44px;
+  }
+  body.ps-phone #ps-phone-status[data-state="warn"] { color: #f2c46d; }
+  body.ps-phone #ps-phone-status:disabled { opacity: 1; }
+  body.ps-phone .ps-phone-top {
+    flex: none; min-height: 44px; padding: 0 12px; border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.28); background: rgba(255, 255, 255, 0.10);
+    color: var(--ps-s0); font-size: 13.5px; font-weight: 600;
+  }
+  body.ps-phone .ps-phone-top-primary { background: var(--ps-accent); border-color: var(--ps-accent); }
+  body.ps-phone .ps-phone-top:disabled { opacity: 0.55; }
+  /* Menu: a list under the top row, Open and Save project first. */
+  body.ps-phone .ps-appbar.ps-narrow-menu-open .ps-menubar {
+    flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 0;
+    padding: 4px 8px 10px; max-height: calc(var(--ps-vh) - 64px); overflow: auto;
+  }
+  body.ps-phone .ps-menubar button {
+    display: flex; justify-content: flex-start; min-height: 46px; padding: 0 10px;
+    font-size: 15px; color: var(--ps-s0); text-align: left;
+  }
+  /* A menu's own list opens under the top row and takes the screen. It
+     hung from its button, and Help is low in the list, so its tours and
+     everything after them were below the bottom edge with no way to reach. */
+  body.ps-phone #ps-appmenu {
+    left: 8px !important; right: 8px; top: 58px !important; width: auto;
+    max-height: calc(var(--ps-vh) - 70px); box-sizing: border-box; overflow: auto;
+  }
+  body.ps-phone #ps-appmenu button { min-height: 46px; font-size: 15px; }
+  body.ps-phone #ps-phone-save { border-bottom: 1px solid rgba(255, 255, 255, 0.18); }
+  body.ps-phone #ps-phone-docs { border-top: 1px solid rgba(255, 255, 255, 0.18); }
+  /* The four workspaces, always in view. */
+  body.ps-phone .ps-phone-nav {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    background: var(--ps-s0); border-top: 1px solid var(--ps-l2b);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .ps-phone-nav button {
+    -webkit-appearance: none; appearance: none; display: grid; place-items: center;
+    align-content: center; gap: 3px; height: var(--ps-phone-nav-h, 56px); padding: 0;
+    border: 0; background: transparent; color: var(--ps-muted);
+    font-size: 12px; font-weight: 600; cursor: pointer;
+  }
+  .ps-phone-nav button svg { width: 22px; height: 22px; }
+  .ps-phone-nav button[aria-current="page"] { color: var(--ps-accent-ink); }
+  .ps-phone-nav button[aria-current="page"] svg { stroke-width: 2.2; }
+  /* Notices rise above the workspace tabs, not over them. */
+  body.ps-phone #ps-toast {
+    bottom: calc(var(--ps-phone-nav-h) + 12px + env(safe-area-inset-bottom, 0px));
+  }
+  /* Setup, by name, beside the tabs it belongs to. */
+  body.ps-phone #ps-phone-setup, body.ps-phone #ps-phone-setup-data {
+    flex: none; min-height: 44px; padding: 0 12px; margin-left: auto;
+    border: 1px solid var(--ps-l2b); border-radius: 8px; background: var(--ps-s0);
+    color: var(--ps-ink-2); font-size: 13.5px; font-weight: 600;
+  }
+  body.ps-phone #ps-phone-setup { margin-bottom: 2px; }
+  /* The settings panel as a sheet from below. The chart is not dimmed, and
+     the pane above it ends where the sheet begins, so Fit redraws the
+     whole chart in the room that is left. */
+  body.ps-phone .ps-app-body.ps-narrow-inspector-open .ps-controls {
+    top: auto; left: 0; right: 0; bottom: 0; width: auto; max-width: none;
+    height: var(--ps-phone-sheet-h); border-radius: 16px 16px 0 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  body.ps-phone .ps-page:has(.ps-app-body.ps-narrow-inspector-open) #ps-narrow-scrim {
+    background: transparent;
+  }
+  body.ps-phone .ps-app-body.ps-narrow-inspector-open .ps-main-workspace {
+    align-self: start;
+    height: calc(100% - (var(--ps-phone-sheet-h) - var(--ps-phone-nav-h)));
+  }
+  body.ps-phone .ps-inspector-head { position: relative; padding-right: 76px; }
+  body.ps-phone #ps-phone-setup-done {
+    position: absolute; right: 8px; top: 4px; min-height: 44px; padding: 0 12px;
+    border: 0; background: transparent; color: var(--ps-accent-ink);
+    font-size: 14.5px; font-weight: 700;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    body.ps-phone .ps-app-body.ps-narrow-inspector-open .ps-controls,
+    body.ps-phone #ps-phone-sheet.ps-open { animation: ps-phone-sheet-up 160ms ease-out; }
+    @keyframes ps-phone-sheet-up {
+      from { transform: translateY(28px); opacity: 0.6; } to { transform: none; opacity: 1; }
+    }
+  }
+  /* The chart toolbar ends in More. What it holds is still in the bar, out
+     of sight, because the sheet's rows work by pressing those buttons. */
+  body.ps-phone #psroot [data-role="chart-toolbar"] button[aria-label$="hide elements"],
+  body.ps-phone #psroot [data-role="chart-toolbar"] button[aria-label="Chart settings"],
+  body.ps-phone #psroot [data-role="chart-toolbar"] [data-role="setting-search-trigger"],
+  body.ps-phone #psroot [data-role="chart-toolbar"] button[aria-label="Add to chart"],
+  body.ps-phone #psroot [data-role="chart-toolbar"] #ps-charttools { display: none !important; }
+  /* The chart type and theme buttons drop their words upright. The
+     shell's own rule for this asks the chart host how wide it is, and a
+     zoomed host answers in its own zoomed pixels in Chrome: at Fit 53% a
+     390px phone reported 715, the words stayed, and More was pushed off
+     the right edge on Android. Asked of the screen, the answer is the same
+     in every browser. */
+  @media (max-width: 590px) {
+    body.ps-phone #psroot [data-role="graphtype-trigger"] > span:nth-child(2),
+    body.ps-phone #psroot [data-role="palette-trigger"] > span:nth-child(2) { display: none !important; }
+    body.ps-phone #psroot [data-role="graphtype-trigger"],
+    body.ps-phone #psroot [data-role="palette-trigger"] {
+      padding-left: 6px !important; padding-right: 6px !important;
+    }
+  }
+  body.ps-phone #ps-phone-more {
+    display: inline-flex; align-items: center; flex: none; margin-left: auto;
+    min-height: 40px; min-width: 44px; padding: 0 12px; border: 1px solid var(--ps-l2b);
+    border-radius: 8px; background: var(--ps-s0); color: var(--ps-ink-2);
+    font-size: 13.5px; font-weight: 600; cursor: pointer;
+  }
+  body.ps-phone #ps-phone-sheet-scrim.ps-open {
+    display: block; position: fixed; inset: 0; z-index: 9400; background: var(--ps-scrim);
+  }
+  body.ps-phone #ps-phone-sheet.ps-open {
+    display: block; position: fixed; left: 0; right: 0; bottom: 0; z-index: 9401;
+    max-height: 72%; overflow: auto; background: var(--ps-s0); color: var(--ps-ink-2);
+    border-radius: 16px 16px 0 0; box-shadow: var(--ps-e-3);
+    padding: 8px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+  .ps-phone-sheet-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 4px; }
+  .ps-phone-sheet-head strong { font-size: 15px; }
+  #ps-phone-sheet-done {
+    -webkit-appearance: none; appearance: none; min-height: 44px; padding: 0 8px; border: 0;
+    background: transparent; color: var(--ps-accent-ink); font-size: 14.5px; font-weight: 700;
+  }
+  .ps-phone-row {
+    -webkit-appearance: none; appearance: none; display: flex; align-items: center;
+    justify-content: space-between; gap: 10px; width: 100%; min-height: 52px;
+    padding: 6px 4px; border: 0; border-top: 1px solid var(--ps-l1); background: transparent;
+    color: var(--ps-ink-2); font-size: 15px; font-weight: 600; text-align: left;
+  }
+  .ps-phone-row small { display: block; color: var(--ps-muted); font-size: 13px; font-weight: 400; }
+  .ps-phone-row select { flex: none; max-width: 46%; }
+  /* The Find popup takes its place from the hidden button, which has none. */
+  body.ps-phone #psroot [data-role="setting-search"] {
+    zoom: var(--ps-chrome-zoom, 1); left: 0 !important; right: auto !important;
+    width: min(360px, calc(100vw - 28px)) !important;
+  }
+  /* A phone held sideways has about 290 points of height in Safari. */
+  @media (max-height: 480px) {
+    body.ps-phone { --ps-phone-nav-h: 44px; }
+    body.ps-phone .ps-appbar { min-height: 46px; padding-block: 2px; }
+    body.ps-phone .ps-phone-nav button { display: flex; align-items: center; justify-content: center; gap: 7px; }
+    /* The home bar is a thin line along this edge; half its inset keeps
+       the labels clear of it without spending a fifth of the screen. */
+    body.ps-phone .ps-phone-nav { padding-bottom: min(10px, env(safe-area-inset-bottom, 0px)); }
+    /* Sideways there is width to spare and no height: the same panel
+       stands beside the chart, and the chart keeps the rest. */
+    body.ps-phone { --ps-phone-side-w: min(340px, 46vw); }
+    body.ps-phone .ps-app-body.ps-narrow-inspector-open .ps-controls {
+      top: 0; bottom: 0; left: auto; right: 0; height: auto;
+      width: var(--ps-phone-side-w); border-radius: 16px 0 0 16px;
+    }
+    body.ps-phone .ps-app-body.ps-narrow-inspector-open .ps-main-workspace {
+      height: auto; align-self: stretch; justify-self: start;
+      width: calc(100% - var(--ps-phone-side-w));
+    }
+  }
   /* The start dialog on a phone: 28px of margin outside the card and 28px
      inside it left the cards 288px of a 402px screen. */
   @media (max-width: 560px) {
@@ -5202,19 +5417,24 @@
             aria-controls="ps-menubar"
             data-tip="Application menu">
       <span aria-hidden="true">&#9776;</span>
+      <span class="ps-phone-label" aria-hidden="true">Menu</span>
       <span class="ps-visually-hidden">Application menu</span>
     </button>
     <nav class="ps-menubar" id="ps-menubar" aria-label="Application menu">
+      <button type="button" class="ps-phone-only" id="ps-phone-open">Open</button>
+      <button type="button" class="ps-phone-only" id="ps-phone-save">Save project</button>
       <button type="button" data-ps-menu="file">File</button>
       <button type="button" data-ps-menu="edit">Edit</button>
       <button type="button" data-ps-menu="data">Data</button>
       <button type="button" data-ps-menu="view">View</button>
       <button type="button" data-ps-menu="insert">Insert</button>
       <button type="button" data-ps-menu="help">Help</button>
+      <button type="button" class="ps-phone-only" id="ps-phone-docs">Documents</button>
     </nav>
     <div class="ps-document-title">
       <strong id="ps-doc-name">Untitled project</strong>
       <span id="ps-doc-detail">Local project</span>
+      <button type="button" class="ps-phone-only" id="ps-phone-status"></button>
     </div>
     <button type="button" class="ps-narrow-btn" id="ps-narrow-nav"
             aria-expanded="false" aria-controls="ps-project-panel"
@@ -5228,6 +5448,8 @@
       <span aria-hidden="true">&#9707;</span>
       <span class="ps-visually-hidden">Settings panel</span>
     </button>
+    <button type="button" class="ps-phone-only ps-phone-top" id="ps-phone-keep">Keep</button>
+    <button type="button" class="ps-phone-only ps-phone-top ps-phone-top-primary" id="ps-phone-export">Export</button>
     <div class="ps-appbar-state" id="ps-save-state">Autosaved locally</div>
   </header>
   <div id="ps-narrow-scrim" hidden></div>
@@ -5288,6 +5510,7 @@
     <div class="ps-inspector-head">
       <strong id="ps-inspector-title">Chart setup</strong>
       <span id="ps-inspector-subtitle">Variables and roles</span>
+      <button type="button" class="ps-phone-only" id="ps-phone-setup-done">Done</button>
     </div>
     <!-- The column swaps to the editing panel from a click on the CHART,
          which gives a screen reader nothing to notice; this says so.
@@ -6006,6 +6229,7 @@
                 aria-haspopup="menu" aria-expanded="false"
                 data-tip="Review or restore excluded rows and values"></button>
       </span>
+      <button type="button" class="ps-command ps-phone-only" id="ps-phone-setup-data">Properties</button>
       <button type="button" class="ps-command ps-command-icon" id="ps-data-more"
               aria-label="More data commands" aria-expanded="false"
               data-tip="More data commands">&#8943;</button>
@@ -6041,6 +6265,7 @@
          zoom must survive both. -->
     <div id="ps-tabrow">
       <div id="ps-tabs" role="group" aria-label="Documents and actions"></div>
+      <button type="button" class="ps-phone-only" id="ps-phone-setup">Setup</button>
     <div id="ps-charttools" style="display:none;">
       <label class="ps-ltool-group ps-ltool-push"
              data-tip="How large the chart appears on YOUR screen. Cmd/Ctrl + scroll on the chart zooms smoothly between these steps. Purely a view setting: the figure itself, and every export, keeps its true size and proportions.">
@@ -6192,6 +6417,25 @@
   </main>
   </div>
 
+  <nav class="ps-phone-nav" id="ps-phone-nav" aria-label="Workspaces">
+    <button type="button" data-ps-phone-ws="data"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="1.5"/><path d="M3.5 10h17M3.5 14.5h17M9 5v14M15 5v14"/></svg><span>Data</span></button>
+    <button type="button" data-ps-phone-ws="chart"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4v16h16"/><path d="M8.5 17v-5M13 17V8M17.5 17v-3"/></svg><span>Charts</span></button>
+    <button type="button" data-ps-phone-ws="pinboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="3.5" width="13.5" height="17" rx="2"/><path d="M4 8h4M4 12h4M4 16h4"/></svg><span>Notebook</span></button>
+    <button type="button" data-ps-phone-ws="layout"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="1.5"/><path d="M12 4.5v15M12 12h8.5"/></svg><span>Layouts</span></button>
+  </nav>
+  <div id="ps-phone-sheet-scrim"></div>
+  <div id="ps-phone-sheet" role="dialog" aria-modal="true" aria-labelledby="ps-phone-sheet-title">
+    <div class="ps-phone-sheet-head">
+      <strong id="ps-phone-sheet-title">More for this chart</strong>
+      <button type="button" id="ps-phone-sheet-done">Done</button>
+    </div>
+    <button type="button" class="ps-phone-row" data-phone-more="hide"><span>Show or hide parts<small>Hide a part of the chart, or bring one back</small></span></button>
+    <button type="button" class="ps-phone-row" data-phone-more="settings"><span>Chart settings<small>The whole-chart options</small></span></button>
+    <button type="button" class="ps-phone-row" data-phone-more="find"><span>Find a setting<small>Search every setting by name</small></span></button>
+    <button type="button" class="ps-phone-row" data-phone-more="add"><span>Add to chart<small>Error bars, data points, reference lines, brackets</small></span></button>
+    <label class="ps-phone-row" for="ps-phone-zoom"><span>Zoom<small>How large the chart appears on this screen</small></span>
+      <select id="ps-phone-zoom" aria-label="Chart view zoom"></select></label>
+  </div>
   <div class="ps-statusbar" role="status" aria-live="polite">
     <span id="ps-status-context">Ready</span>
     <span class="ps-status-spacer"></span>
@@ -7391,7 +7635,7 @@
 <script src="lib/jspdf.umd.min.979a2ef514.js"></script>
 <script src="lib/svg2pdf.umd.min.4ada250f50.js"></script>
 <script src="lib/graphbuilder2.min.143e64cad0.js"></script>
-<script src="lib/ps-tours.4e8a43e663.js"></script>
-<script src="lib/ps-shell.7fd150a748.js"></script>
+<script src="lib/ps-tours.19ee33a5bf.js"></script>
+<script src="lib/ps-shell.21f43a729d.js"></script>
 </body>
 </html>
