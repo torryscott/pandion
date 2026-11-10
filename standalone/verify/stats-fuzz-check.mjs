@@ -222,6 +222,10 @@ for (const [name, ds] of Object.entries(refs.datasets)) {
   // Games-Howell adjusted p (test is still Welch here - the pooled trio
   // gates on it). Reference: R's own t.test + ptukey vs the engine's
   // descriptive recompute through its JS ptukey port.
+  // A pair the engine applies Games-Howell to but R could not reference is
+  // a hole in the net, never a silent skip (stats-fuzz.R lists them).
+  for (const pk of [].concat((ds.adjust && ds.adjust.gh_missing) || []))
+    ok(false, name + ' ' + pk + ': games-howell reference missing (R could not integrate it)');
   if (ds.adjust && ds.adjust.gh && Object.keys(ds.adjust.gh).length > 0) {
     await setBand('correct', 'gamesHowell');
     rows = await readPairsRows();

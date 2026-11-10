@@ -175,3 +175,9 @@ jobs:
           node standalone/verify/stats-tail-check.mjs
           node standalone/verify/stats-tail-check.mjs /tmp/pandion-stats-tail.json --min
           python3 standalone/verify/stats-tail-thirdref.py
+      - name: Studentized range for Tukey and Games-Howell, df 1 to 50,000 (R and SciPy)
+        run: |
+          Rscript standalone/verify/stats-range.R
+          node standalone/verify/stats-range-check.mjs
+          node standalone/verify/stats-range-check.mjs /tmp/pandion-stats-range.json --min
+          python3 standalone/verify/stats-range-thirdref.py

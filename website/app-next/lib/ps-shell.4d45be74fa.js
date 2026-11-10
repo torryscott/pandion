@@ -6997,6 +6997,23 @@
     }
     applySvgAccessibility(doc, exportAccessibleTitle(),
       exportAccessibleDescription());
+    // PowerPoint-safe paints at the EXPORT boundary only (Nov 2026, Torry's
+    // deck): PowerPoint's SVG importer paints "transparent" and rgba() as
+    // opaque black once a saved deck is reopened, so every chart's invisible
+    // click targets came back as solid black boxes over the error bars. The
+    // chart export gets this inside the engine's harvest; a layout's panels
+    // come from the chart SNAPSHOTS, whose bytes must not change (the
+    // Notebook's drift verdict compares them), so the rewrite runs here, on
+    // the assembled export root, never on the snapshot.
+    if (window.GraphBuilder2 &&
+        typeof window.GraphBuilder2.exportSafePaints === "function")
+      window.GraphBuilder2.exportSafePaints(root);
+    // Pattern fills become plain clipped geometry at the same boundary:
+    // every SVG-to-PDF writer turns an SVG pattern into a PDF tiling pattern,
+    // and tiling patterns draw hairline seams in some viewers and print RIPs.
+    if (window.GraphBuilder2 &&
+        typeof window.GraphBuilder2.exportFlattenPatterns === "function")
+      window.GraphBuilder2.exportFlattenPatterns(root);
     return {
       svg: serializeExportSvg(root),
       w: page.w, h: page.h

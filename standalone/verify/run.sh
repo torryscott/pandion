@@ -155,7 +155,15 @@ if command -v Rscript >/dev/null 2>&1; then
     Rscript standalone/verify/stats-tail.R
     node standalone/verify/stats-tail-check.mjs
     node standalone/verify/stats-tail-check.mjs /tmp/pandion-stats-tail.json --min
-    if python3 standalone/verify/stats-tail-thirdref.py; then :; else
+    # The studentized range behind Tukey and Games-Howell, from a group of
+    # two (df near 1) to thousands of rows: the rendered fuzzer shows three
+    # decimals and its random groups stop at n = 50, so this is where the
+    # raw probability is held, in the source and the compiled core.
+    Rscript standalone/verify/stats-range.R
+    node standalone/verify/stats-range-check.mjs
+    node standalone/verify/stats-range-check.mjs /tmp/pandion-stats-range.json --min
+    if python3 standalone/verify/stats-tail-thirdref.py &&
+       python3 standalone/verify/stats-range-thirdref.py; then :; else
         st=$?
         if [ "$st" = "2" ] && [ "${PS_REQUIRE_R_PARITY:-0}" != "1" ]; then
             echo "WARN: scipy unavailable - tail third reference skipped"

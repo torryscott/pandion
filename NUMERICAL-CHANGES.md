@@ -28,6 +28,32 @@ in what they computed, and the build stamp and id list are what tell
 them apart. The "live on the web app" date is when the fix reached
 the hosted page.
 
+## v3.2.1 (unreleased; deployment dates noted per change)
+
+**Tukey and Games-Howell adjusted p values are accurate for large samples and for groups of two.** <!-- ledger: ptukey-df-scaled-grid -->
+The studentized-range integral behind Tukey HSD and Games-Howell
+adjusted p averaged over the error-SD estimate on a grid fixed between
+0.001 and 4 times the true SD, whatever the degrees of freedom. From
+about 150 error df up, the weight is a spike narrower than the grid
+spacing and the sum missed it: the adjusted p was off by up to 0.004 at
+df 200, 0.02 at df 300, 0.06 at df 450 and 0.18 at df 1000 (two groups
+of 300: .298 shown where R's TukeyHSD gives .198; three groups of 334:
+.008 shown where R gives .039). Above df 1000 the infinite-df range
+stood in, off by up to 0.0007 just past the switch. Below df 2 (a group
+of two observations) the grid stopped short of the far tail: 0.00006
+high at df 1, enough to show a Games-Howell .106 beside a Welch .105
+for the same two groups, where the two are the same test. Between df 2
+and 100 the old values were within 0.00002 and change at three decimals
+only on a rounding edge. The integral now runs on a grid scaled to the
+degrees of freedom, with a double-precision normal CDF. It is held to
+the exact t probability for two groups within 1e-11, and to references
+checked by both R and SciPy within 1e-9 for three to six groups, from
+df 1 to 50,000 (`stats-range-check`, source and compiled bundle); the
+rendered fuzzer gained three large-sample sets. Affects: brackets and
+Compare pairs under Tukey or Games-Howell on Compare Groups, and Tukey
+on Repeated Measures, in both hosts, wherever the error df is above
+about 150 or below 2. Implemented 2026-11-10. Not yet live on the web app.
+
 ## v3.2.0 (released 2026-10-29; deployment dates noted per change)
 
 **Compare Groups comparisons run on the ANOVA's pooled error term under a correction.** <!-- ledger: cg-posthoc-pooled-error-term -->

@@ -17,6 +17,7 @@ FIXED_DATASETS = {
     "b_offset", "b_offset_neg", "b_offset_scaled", "b_n2", "b_n2_vs_40",
     "b_ties_all", "b_const_a", "b_const_ab", "b_huge", "b_tiny",
     "b_negative", "b_tied_p", "b_k1_family", "b_const_tiny_unequal",
+    "b_big2_n300", "b_big3_n334", "b_big3_n400",
 }
 METHODS = ("welch", "student", "anova", "pearson", "spearman", "kendall")
 

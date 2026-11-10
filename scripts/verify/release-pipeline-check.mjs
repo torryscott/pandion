@@ -161,7 +161,7 @@ ok(validationWorkflow.includes('python3 standalone/verify/stats-thirdref-guard.p
 // dangerous outcome.
 ok((standaloneRun.match(/PS_REQUIRE_R_PARITY/g) || []).length === 9,
     'the optional R/SciPy and DOM dependency checks become mandatory for a release');
-for (const probe of ['fit-boundary-guard.mjs', 'fit-boundary-check.mjs', 'loess-direct-guard.mjs', 'loess-direct-check.mjs', 'fit-export-unit.mjs', 'fit-export-check.mjs', 'facet-fit-check.mjs', 'xml-export-check.mjs', 'stats-tail-check.mjs', 'stats-tail-thirdref.py']) {
+for (const probe of ['fit-boundary-guard.mjs', 'fit-boundary-check.mjs', 'loess-direct-guard.mjs', 'loess-direct-check.mjs', 'fit-export-unit.mjs', 'fit-export-check.mjs', 'facet-fit-check.mjs', 'xml-export-check.mjs', 'stats-tail-check.mjs', 'stats-tail-thirdref.py', 'stats-range-check.mjs', 'stats-range-thirdref.py']) {
     ok(standaloneRun.includes('standalone/verify/' + probe) && validationWorkflow.includes('standalone/verify/' + probe),
         probe + ' is included in local and CI validation');
 }
@@ -177,6 +177,9 @@ for (const required of ['set -euo pipefail', 'anova-reference.R', 'anova-precisi
 ok(standaloneRun.includes('stats-tail-check.mjs /tmp/pandion-stats-tail.json --min') &&
    validationWorkflow.includes('stats-tail-check.mjs /tmp/pandion-stats-tail.json --min'),
     'raw tail probabilities are also checked in the compiled numerical core');
+ok(standaloneRun.includes('stats-range-check.mjs /tmp/pandion-stats-range.json --min') &&
+   validationWorkflow.includes('stats-range-check.mjs /tmp/pandion-stats-range.json --min'),
+    'the studentized range is also checked in the compiled numerical core');
 ok(!read('standalone/verify/polish-check.mjs')
         .includes("about.version === '3.0.0'") &&
    !read('standalone/verify/hardening-dom-check.mjs')
