@@ -263,19 +263,33 @@ dataset_refs <- function(groups) {
     # range CDF with R's adaptive integrate(); this matches SciPy's
     # studentized_range.sf to ten figures at every checked point and
     # ptukey itself wherever ptukey is accurate.
+    #
+    # The weight is written with dchisq (the closed form overflows past
+    # df 1400) and integrated in pieces between quantiles of
+    # S = sqrt(chisq(df)/df): at large df it is a spike near s = 1 that
+    # one adaptive pass over (0, hi) can step over entirely (found
+    # 2026-11-10: 9 of 13 large-sample pairs came back with no reference,
+    # and the replay skipped them without a word). A pair the engine
+    # applies but R cannot reference is now listed in gh_missing, and the
+    # replay fails on it.
     range_tail <- function(q, k, df) {
-        coef <- exp((df / 2) * log(df / 2) - lgamma(df / 2) + log(2))
-        f <- function(s) coef * s^(df - 1) * exp(-df * s * s / 2) *
+        f <- function(s) dchisq(df * s * s, df) * 2 * df * s *
                          ptukey(q * s, nmeans = k, df = Inf, lower.tail = FALSE)
         # rel 1e-8 with abs 1e-15: a tail below 1e-15 is zero for every
         # display (the label floor is < .001), and demanding relative
         # accuracy there made integrate() give up on ~20 of 300 pairs.
         hi <- min(14 / q, 12)
-        integrate(f, 0, hi, rel.tol = 1e-8, abs.tol = 1e-15,
-                  subdivisions = 400L)$value
+        br <- c(sqrt(qchisq(c(1e-12, 1e-6, .01, .5, .99), df) / df),
+                sqrt(qchisq(c(1e-6, 1e-12), df, lower.tail = FALSE) / df))
+        br <- sort(unique(c(0, br[br < hi], hi)))
+        tot <- 0
+        for (i in seq_len(length(br) - 1L))
+            tot <- tot + integrate(f, br[i], br[i + 1L], rel.tol = 1e-8,
+                                   abs.tol = 1e-15, subdivisions = 400L)$value
+        tot
     }
     k_cells <- length(groups)
-    gh <- list()
+    gh <- list(); gh_missing <- character(0)
     if (k_cells >= 2) {
         for (key in names(pairs)) {
             pr <- pairs[[key]]
@@ -289,9 +303,11 @@ dataset_refs <- function(groups) {
                               k_cells, pr$welch$df)))
             if (!is.null(pv) && !is.finite(pv)) pv <- NULL
             if (!is.null(num_or_null(pv))) gh[[key]] <- as.numeric(pv)
+            else gh_missing <- c(gh_missing, key)
         }
     }
     if (length(gh) > 0) adj$gh <- gh
+    if (length(gh_missing) > 0) adj$gh_missing <- as.list(gh_missing)
     # Tukey via R's own TukeyHSD on the one-way fit - fully independent
     # of the engine's ptukey route. Keys are translated to our G|G form;
     # TukeyHSD orders pairs as "later-earlier", matching j>i here.
@@ -495,6 +511,26 @@ fixed <- list(
     b_k1_family = list(round(rnorm(10, 10, 2), 4), round(rnorm(10, 14, 2), 4))
 )
 for (nm in names(fixed)) datasets[[nm]] <- dataset_refs(fixed[[nm]])
+
+# ---- large samples --------------------------------------------------------
+# Error df from about 600 to 1200, on both sides of df 1000. The random
+# groups top out at n = 50, so nothing above reaches past df 150, and the
+# studentized-range integral was wrong by up to 0.18 in p from there up
+# while every replay stayed green (found 2026-11-10; the unit net is
+# stats-range-check.mjs). Drawn on a saved-and-restored generator state,
+# so every draw after this point is what it was before these sets
+# existed and an older seed still replays exactly.
+big <- local({
+    keep <- .Random.seed
+    on.exit(assign(".Random.seed", keep, envir = globalenv()))
+    list(
+        b_big2_n300 = list(round(rnorm(300, 10, 2), 4), round(rnorm(300, 10.25, 2), 4)),
+        b_big3_n334 = list(round(rnorm(334, 10, 2), 4), round(rnorm(334, 10.28, 2), 4),
+                           round(rnorm(334, 10.42, 2), 4)),
+        b_big3_n400 = list(round(rnorm(400, 10, 2), 4), round(rnorm(400, 10.25, 2), 4),
+                           round(rnorm(400, 10.4, 2), 4)))
+})
+for (nm in names(big)) datasets[[nm]] <- dataset_refs(big[[nm]])
 
 # ---- correlation sets ----------------------------------------------------
 corrs <- list()
