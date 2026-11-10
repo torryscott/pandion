@@ -7,10 +7,10 @@
      and website/build.sh from scripts/build-stamp.sh (commit date + sha of
      the last commit that touched the shipped sources). ps-shell reads it
      into APP_BUILD for exports, saved projects, and the About dialog. -->
-<meta name="pandion-build" content="2026-11-09T02:30Z 3432915">
+<meta name="pandion-build" content="2026-11-10T20:42Z cfb38c8">
 <title>Pandion Plots (next build)</title>
 <!-- PREVIEW COPY. Built from the release/2026-11-02 integration branch at
-     3432915, the work queued for the next release (Find matches column names,
+     cfb38c8, the work queued for the next release (Find matches column names,
      the per-bar eye and Delete key on ungrouped bar charts, the Harvard
      Dataverse source in Open data from the web, shared links that open the app
      at pandionplots.com, a significance bracket that no longer grows the
@@ -18,11 +18,14 @@
      edges plus Fit page to content, which size the page to the figure without
      rescaling it, exported SVGs that are safe for PowerPoint, which used
      to paint every error bar's invisible click target solid black once a
-     saved deck was reopened, and pattern fills that leave every export as
+     saved deck was reopened, pattern fills that leave every export as
      plain shapes instead of repeating tiles, which drew hairline seams in
-     some PDF viewers), so it can be tried before it ships. Not linked
-     from the site, not indexed, refreshed or removed as the queue moves. The
-     app at /app/ is the released one. -->
+     some PDF viewers, and Tukey and Games-Howell adjusted p values that are
+     right for large samples and for groups of two, where the old integral
+     was off by as much as 0.18 at 1000 error degrees of freedom), so it can
+     be tried before it ships. Not linked from the site, not indexed,
+     refreshed or removed as the queue moves. The app at /app/ is the
+     released one. -->
 <meta name="robots" content="noindex, nofollow">
 <style>
   body::after {
@@ -7269,8 +7272,8 @@
 <script src="lib/ps-data.c926facca8.js"></script>
 <script src="lib/jspdf.umd.min.979a2ef514.js"></script>
 <script src="lib/svg2pdf.umd.min.4ada250f50.js"></script>
-<script src="lib/graphbuilder2.min.3b03bff3ce.js"></script>
+<script src="lib/graphbuilder2.min.f9110406d5.js"></script>
 <script src="lib/ps-tours.4e8a43e663.js"></script>
-<script src="lib/ps-shell.4d45be74fa.js"></script>
+<script src="lib/ps-shell.3779d323f0.js"></script>
 </body>
 </html>

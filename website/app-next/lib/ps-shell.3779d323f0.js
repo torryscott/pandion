@@ -552,6 +552,8 @@
   // Files from before the id list fall back to the version compare.
   // The check is a pure function so the gate can probe it directly.
   var NUMERICAL_CHANGES = [
+    { id: "ptukey-df-scaled-grid", since: "3.2.1",
+      label: "Tukey and Games-Howell adjusted p values are accurate for large samples (error df above about 150) and for groups of two" },
     { id: "cg-posthoc-pooled-error-term", since: "3.2.0",
       label: "Compare Groups comparisons under a correction run on the ANOVA's pooled error term, with Cohen's d on the model SD" },
     { id: "rm-posthoc-complete-subjects", since: "3.2.0",
