@@ -534,7 +534,7 @@
         body: "The status line at the bottom: every chart is checked for things that mislead, like a cut axis or colors that merge. Click it to read the list." },
       { target: "#ps-export", optional: true,
         phone: { target: "#ps-phone-export",
-                 body: "Export gives PDF, PNG and SVG at the chart's real size. Zoom, under More, only changes how big it looks here; the grip at the chart's corner sets the size that exports." },
+                 body: "Export gives PDF, PNG and SVG at the chart's real size, and Share sends a picture to another app. Zoom, under More, only changes how big it looks here; the grip at the chart's corner sets the size that exports." },
         title: "Export",
         body: "Export gives PDF, PNG and SVG at the chart's real size. Fit window on the toolbar only changes how big it looks here; the grip at the chart's corner sets the size that exports." },
       { target: '[data-ps-menu="help"]', optional: true,
