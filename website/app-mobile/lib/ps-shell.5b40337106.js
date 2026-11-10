@@ -13479,6 +13479,18 @@
       : Math.max(clickY, chartTop + 80);
     var cap = Math.floor(anchorY - (Math.max(sr.top, 0) + 44));
     var by = Math.min(needed, Math.max(0, cap));
+    // A short pane cannot keep the tapped part in view AND show the panel.
+    // A phone held sideways leaves about 150px of pane in Safari, the
+    // anchor bound won every time, and the editor opened entirely below
+    // the fold: a tap on a bar looked like it had done nothing. There the
+    // panel is owed its header and first row: 96px of it, or six tenths
+    // of the pane. Taller panes keep the anchor rule untouched.
+    var paneH = viewBottom - Math.max(sr.top, 0);
+    if (paneH < 320) {
+      var minShow = Math.min(pr.height, Math.max(96, Math.round(paneH * 0.6)));
+      if (viewBottom - (pr.top - by) < minShow)
+        by = Math.min(needed, Math.ceil(pr.top - (viewBottom - minShow)));
+    }
     if (by < 4) return 0;
     var reduce = false;
     try {
